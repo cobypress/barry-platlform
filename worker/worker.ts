@@ -1,6 +1,7 @@
 import "dotenv/config";
-import { Worker } from "bullmq";
+import { Worker, Job } from "bullmq";
 import { URL } from "node:url";
+import { pool } from "./db";
 
 function requireEnv(name: string): string {
   const v = process.env[name];
@@ -10,68 +11,131 @@ function requireEnv(name: string): string {
 
 const redisUrl = requireEnv("REDIS_URL");
 
-// Helpful debug (won't reveal password)
-try {
-  const u = new URL(redisUrl);
-  console.log("Redis:", {
-    protocol: u.protocol,
-    host: u.hostname,
-    port: u.port,
-    hasPassword: Boolean(u.password),
-  });
-} catch {
-  console.log("REDIS_URL is not a valid URL format.");
-}
+// ---- Parse Redis URL safely ----
+const parsed = new URL(redisUrl);
 
-const u = new URL(redisUrl);
-
-// BullMQ/ioredis connection config (more reliable than passing url directly)
 const connection: any = {
-  host: u.hostname,
-  port: u.port ? Number(u.port) : 6379,
-  password: u.password || undefined,
+  host: parsed.hostname,
+  port: parsed.port ? Number(parsed.port) : 6379,
+  password: parsed.password || undefined,
 };
 
-// Upstash usually uses TLS ("rediss://")
-if (u.protocol === "rediss:") {
-  connection.tls = {}; // ioredis uses presence of tls:{} to enable TLS
+if (parsed.protocol === "rediss:") {
+  connection.tls = {};
 }
 
-console.log("Worker starting... listening on queue: barry-jobs");
+console.log("Redis config:", {
+  protocol: parsed.protocol,
+  host: parsed.hostname,
+  port: parsed.port,
+  hasPassword: Boolean(parsed.password),
+});
 
+console.log("🚀 Worker starting... listening on queue: barry-jobs");
+
+// ---- Core Worker ----
 const worker = new Worker(
   "barry-jobs",
-  async (job) => {
+  async (job: Job) => {
+    const correlationId =
+      job.data?.correlation_id || `job-${job.id}-${Date.now()}`;
+
     console.log("---- NEW JOB ----");
     console.log("Job ID:", job.id);
     console.log("Job name:", job.name);
     console.log("Attempts made:", job.attemptsMade);
+    console.log("Correlation ID:", correlationId);
     console.log("Payload:", job.data);
     console.log("-----------------");
 
-    // Put real work here later (Slack/Salesforce calls).
-    // For now, just prove processing works.
-    return { ok: true, processedAt: new Date().toISOString() };
+    // ---- Write "started" audit log ----
+    await pool.query(
+      `
+      INSERT INTO audit_log (source, action, status, correlation_id, payload)
+      VALUES ($1, $2, $3, $4, $5)
+      `,
+      [
+        "queue",
+        job.name,
+        "started",
+        correlationId,
+        job.data || {},
+      ]
+    );
+
+    try {
+      // ======================================
+      // 🔥 REAL WORK GOES HERE LATER
+      // Slack calls
+      // Salesforce calls
+      // Routing logic
+      // ======================================
+
+      // Simulate small processing delay
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      // ---- Write "completed" audit log ----
+      await pool.query(
+        `
+        INSERT INTO audit_log (source, action, status, correlation_id, payload)
+        VALUES ($1, $2, $3, $4, $5)
+        `,
+        [
+          "queue",
+          job.name,
+          "completed",
+          correlationId,
+          job.data || {},
+        ]
+      );
+
+      console.log(`✅ Job ${job.id} completed`);
+
+      return { ok: true, processedAt: new Date().toISOString() };
+    } catch (error: any) {
+      console.error(`❌ Job ${job.id} failed`, error?.message || error);
+
+      // ---- Write "failed" audit log ----
+      await pool.query(
+        `
+        INSERT INTO audit_log (source, action, status, correlation_id, payload)
+        VALUES ($1, $2, $3, $4, $5)
+        `,
+        [
+          "queue",
+          job.name,
+          "failed",
+          correlationId,
+          {
+            error: error?.message || "unknown error",
+            originalPayload: job.data || {},
+          },
+        ]
+      );
+
+      throw error; // important so BullMQ retries
+    }
   },
   {
     connection,
-    // You can tune concurrency later. Keep it low at first.
     concurrency: 5,
   }
 );
 
+// ---- Worker Lifecycle Events ----
 worker.on("ready", () => console.log("✅ Worker ready"));
-worker.on("completed", (job) => console.log(`✅ Job ${job.id} completed`));
+worker.on("error", (err) =>
+  console.error("❌ Worker error:", err?.message || err)
+);
+
 worker.on("failed", (job, err) => {
-  console.error(`❌ Job ${job?.id} failed:`, err?.message || err);
-});
-worker.on("error", (err) => {
-  console.error("❌ Worker error:", err?.message || err);
+  console.error(`❌ Job ${job?.id} permanently failed:`, err?.message || err);
 });
 
-// Keep process alive
+// ---- Graceful shutdown ----
 process.on("SIGINT", async () => {
   console.log("Shutting down worker...");
   await worker.close();
+  await pool.end();
   process.exit(0);
 });
