@@ -72,7 +72,44 @@ const worker = new Worker(
       // ======================================
 
       // Simulate small processing delay
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      if (job.name === "slack-interaction") {
+        const token = process.env.SLACK_BOT_TOKEN;
+        if (!token) throw new Error("Missing SLACK_BOT_TOKEN in worker env");
+
+        const payload = job.data?.payload as {
+          channel?: { id?: string };
+          message?: { ts?: string };
+        };
+
+        const channel = payload?.channel?.id;
+        const ts = payload?.message?.ts;
+
+        if (!channel || !ts) {
+          throw new Error("Missing channel.id or message.ts in interaction payload");
+        }
+
+        const res = await fetch("https://slack.com/api/chat.update", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json; charset=utf-8",
+          },
+          body: JSON.stringify({
+            channel,
+            ts,
+            text: "✅ Barry received your click (via worker)",
+            blocks: [
+              {
+                type: "section",
+                text: { type: "mrkdwn", text: "✅ *Barry received your click (via worker)*" },
+              },
+            ],
+          }),
+        });
+
+        const data = (await res.json()) as { ok: boolean; error?: string };
+        if (!data.ok) throw new Error(`Slack chat.update failed: ${data.error}`);
+      }
 
       // ---- Write "completed" audit log ----
       await pool.query(
