@@ -9,6 +9,11 @@ function requireEnv(name: string): string {
   return v;
 }
 
+function getErrorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  return String(err);
+}
+
 const redisUrl = requireEnv("REDIS_URL");
 
 // ---- Parse Redis URL safely ----
@@ -33,12 +38,167 @@ console.log("Redis config:", {
 
 console.log("🚀 Worker starting... listening on queue: barry-jobs");
 
+// ---- Slack helpers ----
+type SlackResponseUrlBody = {
+  response_type?: "ephemeral" | "in_channel";
+  text?: string;
+  blocks?: unknown[];
+  replace_original?: boolean;
+};
+
+async function replyToResponseUrl(responseUrl: string, body: SlackResponseUrlBody) {
+  const res = await fetch(responseUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json; charset=utf-8" },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const t = await res.text();
+    throw new Error(`Failed to respond via response_url: ${res.status} ${t}`);
+  }
+}
+
+async function slackUpdateMessage(token: string, channel: string, ts: string, text: string) {
+  const res = await fetch("https://slack.com/api/chat.update", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json; charset=utf-8",
+    },
+    body: JSON.stringify({
+      channel,
+      ts,
+      text,
+      blocks: [
+        {
+          type: "section",
+          text: { type: "mrkdwn", text },
+        },
+      ],
+    }),
+  });
+
+  const data = (await res.json()) as { ok: boolean; error?: string };
+  if (!data.ok) throw new Error(`Slack chat.update failed: ${data.error}`);
+}
+
+async function slackGetUserEmail(token: string, userId: string): Promise<string> {
+  const res = await fetch("https://slack.com/api/users.info", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json; charset=utf-8",
+    },
+    body: JSON.stringify({ user: userId }),
+  });
+
+  const data = (await res.json()) as {
+    ok: boolean;
+    error?: string;
+    user?: { profile?: { email?: string } };
+  };
+
+  if (!data.ok) throw new Error(`Slack users.info failed: ${data.error}`);
+  const email = data.user?.profile?.email;
+  if (!email) throw new Error("Slack user profile has no email");
+  return email;
+}
+
+// ---- Salesforce helpers ----
+type SfChannelLookupResponse = {
+  channelLinked: boolean;
+  accountId?: string | null;
+};
+
+async function sfChannelLookup(slackTeamId: string, slackChannelId: string): Promise<SfChannelLookupResponse> {
+  const instanceUrl = requireEnv("SF_INSTANCE_URL");
+  const accessToken = requireEnv("SF_ACCESS_TOKEN");
+
+  const res = await fetch(`${instanceUrl}/services/apexrest/barry/channel`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json; charset=utf-8",
+    },
+    body: JSON.stringify({ slackTeamId, slackChannelId }),
+  });
+
+  const text = await res.text();
+  if (!res.ok) throw new Error(`SF channel lookup failed: ${res.status} ${text}`);
+
+  // Salesforce sometimes returns empty body on some failures; be defensive
+  const data = JSON.parse(text) as SfChannelLookupResponse;
+  return data;
+}
+
+// ---- Slack command payload type (minimal) ----
+type SlackCommandPayload = {
+  team_id?: string;
+  channel_id?: string;
+  user_id?: string;
+  command?: string;
+  text?: string;
+  response_url?: string;
+  trigger_id?: string;
+};
+
+// ---- Create-case flow (Phase 1) ----
+async function handleCreateCaseCommand(job: Job, payload: SlackCommandPayload) {
+  const token = requireEnv("SLACK_BOT_TOKEN");
+
+  const responseUrl = payload.response_url;
+  const teamId = payload.team_id;
+  const channelId = payload.channel_id;
+  const userId = payload.user_id;
+
+  if (!responseUrl) throw new Error("Missing response_url in slack command payload");
+  if (!teamId) throw new Error("Missing team_id in slack command payload");
+  if (!channelId) throw new Error("Missing channel_id in slack command payload");
+  if (!userId) throw new Error("Missing user_id in slack command payload");
+
+  // Tell user we're checking (quick feedback)
+  await replyToResponseUrl(responseUrl, {
+    response_type: "ephemeral",
+    text: "🔍 Checking this channel is linked to your account…",
+  });
+
+  // 1) Channel → Account link
+  const channelRes = await sfChannelLookup(teamId, channelId);
+  if (!channelRes.channelLinked) {
+    await replyToResponseUrl(responseUrl, {
+      response_type: "ephemeral",
+      text:
+        "❌ This Slack channel isn’t linked to a customer account yet.\n" +
+        "Please ask your Account Owner to link it (internal command).",
+    });
+    return;
+  }
+
+  await replyToResponseUrl(responseUrl, {
+    response_type: "ephemeral",
+    text: "✅ Channel linked. Verifying your identity…",
+  });
+
+  // 2) Slack user email
+  const email = await slackGetUserEmail(token, userId);
+
+  // Phase 1 success output (for now)
+  await replyToResponseUrl(responseUrl, {
+    response_type: "ephemeral",
+    text:
+      "✅ Identity found.\n" +
+      `• Email: *${email}*\n` +
+      `• AccountId (from channel link): *${channelRes.accountId}*\n\n` +
+      "Next: I’ll check your Salesforce Contact, approval status, and entitlement, then open the case intake form.",
+  });
+}
+
 // ---- Core Worker ----
 const worker = new Worker(
   "barry-jobs",
   async (job: Job) => {
-    const correlationId =
-      job.data?.correlation_id || `job-${job.id}-${Date.now()}`;
+    const correlationId = job.data?.correlation_id || `job-${job.id}-${Date.now()}`;
 
     console.log("---- NEW JOB ----");
     console.log("Job ID:", job.id);
@@ -54,27 +214,13 @@ const worker = new Worker(
       INSERT INTO audit_log (source, action, status, correlation_id, payload)
       VALUES ($1, $2, $3, $4, $5)
       `,
-      [
-        "queue",
-        job.name,
-        "started",
-        correlationId,
-        job.data || {},
-      ]
+      ["queue", job.name, "started", correlationId, job.data || {}]
     );
 
     try {
-      // ======================================
-      // 🔥 REAL WORK GOES HERE LATER
-      // Slack calls
-      // Salesforce calls
-      // Routing logic
-      // ======================================
-
-      // Simulate small processing delay
+      // 1) Slack interactivity jobs (already working)
       if (job.name === "slack-interaction") {
-        const token = process.env.SLACK_BOT_TOKEN;
-        if (!token) throw new Error("Missing SLACK_BOT_TOKEN in worker env");
+        const token = requireEnv("SLACK_BOT_TOKEN");
 
         const payload = job.data?.payload as {
           channel?: { id?: string };
@@ -88,27 +234,22 @@ const worker = new Worker(
           throw new Error("Missing channel.id or message.ts in interaction payload");
         }
 
-        const res = await fetch("https://slack.com/api/chat.update", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json; charset=utf-8",
-          },
-          body: JSON.stringify({
-            channel,
-            ts,
-            text: "✅ Barry received your click (via worker)",
-            blocks: [
-              {
-                type: "section",
-                text: { type: "mrkdwn", text: "✅ *Barry received your click (via worker)*" },
-              },
-            ],
-          }),
-        });
+        await slackUpdateMessage(token, channel, ts, "✅ *Barry received your click (via worker)*");
+      }
 
-        const data = (await res.json()) as { ok: boolean; error?: string };
-        if (!data.ok) throw new Error(`Slack chat.update failed: ${data.error}`);
+      // 2) Slash command jobs
+      if (job.name === "slack-command") {
+        const payload = job.data?.payload as SlackCommandPayload | undefined;
+        if (!payload) throw new Error("Missing payload on slack-command job");
+
+        const cmd = payload.command || "";
+
+        // Support both names for now:
+        // /create-case is your preferred command
+        // /raise-case can be an alias
+        if (cmd === "/create-case" || cmd === "/raise-case") {
+          await handleCreateCaseCommand(job, payload);
+        }
       }
 
       // ---- Write "completed" audit log ----
@@ -117,20 +258,13 @@ const worker = new Worker(
         INSERT INTO audit_log (source, action, status, correlation_id, payload)
         VALUES ($1, $2, $3, $4, $5)
         `,
-        [
-          "queue",
-          job.name,
-          "completed",
-          correlationId,
-          job.data || {},
-        ]
+        ["queue", job.name, "completed", correlationId, job.data || {}]
       );
 
       console.log(`✅ Job ${job.id} completed`);
-
       return { ok: true, processedAt: new Date().toISOString() };
-    } catch (error: any) {
-      console.error(`❌ Job ${job.id} failed`, error?.message || error);
+    } catch (err: unknown) {
+      console.error(`❌ Job ${job.id} failed`, getErrorMessage(err));
 
       // ---- Write "failed" audit log ----
       await pool.query(
@@ -143,31 +277,20 @@ const worker = new Worker(
           job.name,
           "failed",
           correlationId,
-          {
-            error: error?.message || "unknown error",
-            originalPayload: job.data || {},
-          },
+          { error: getErrorMessage(err), originalPayload: job.data || {} },
         ]
       );
 
-      throw error; // important so BullMQ retries
+      throw err; // important so BullMQ retries
     }
   },
-  {
-    connection,
-    concurrency: 5,
-  }
+  { connection, concurrency: 5 }
 );
 
 // ---- Worker Lifecycle Events ----
 worker.on("ready", () => console.log("✅ Worker ready"));
-worker.on("error", (err) =>
-  console.error("❌ Worker error:", err?.message || err)
-);
-
-worker.on("failed", (job, err) => {
-  console.error(`❌ Job ${job?.id} permanently failed:`, err?.message || err);
-});
+worker.on("error", (err) => console.error("❌ Worker error:", getErrorMessage(err)));
+worker.on("failed", (job, err) => console.error(`❌ Job ${job?.id} permanently failed:`, getErrorMessage(err)));
 
 // ---- Graceful shutdown ----
 process.on("SIGINT", async () => {
