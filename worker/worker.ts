@@ -216,6 +216,17 @@ async function handleCreateCaseCommand(job: Job, payload: SlackCommandPayload) {
   // 2) Slack user email
   const email = await slackTryGetUserEmail(token, userId);
 
+  if (!email) {
+    await replyToResponseUrl(responseUrl, {
+      response_type: "ephemeral",
+      text:
+        "❌ I couldn’t read your email from Slack.\n" +
+        "This usually means the bot token is for a different workspace, or the app is missing the `users:read.email` scope (and needs reinstall).\n\n" +
+        "Check Render logs for `SLACK auth.test` team_id vs the command team_id.",
+    });
+    return;
+  }
+
   // Phase 1 success output (for now)
   await replyToResponseUrl(responseUrl, {
     response_type: "ephemeral",
