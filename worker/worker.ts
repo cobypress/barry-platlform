@@ -83,7 +83,39 @@ async function slackUpdateMessage(token: string, channel: string, ts: string, te
   if (!data.ok) throw new Error(`Slack chat.update failed: ${data.error}`);
 }
 
-async function slackGetUserEmail(token: string, userId: string): Promise<string> {
+
+type SlackAuthTestResponse = {
+  ok: boolean;
+  team_id?: string;
+  user_id?: string;
+  error?: string;
+};
+
+type SlackUsersInfoResponse = {
+  ok: boolean;
+  error?: string;
+  user?: { profile?: { email?: string } };
+};
+
+/**
+ * Tries to retrieve a Slack user's email.
+ * Returns null if Slack won't provide it (common causes: missing scope, external users, user_not_found).
+ */
+async function slackTryGetUserEmail(token: string, userId: string): Promise<string | null> {
+  // Optional debug: verify token belongs to the workspace you expect
+  if (process.env.SLACK_DEBUG_AUTH_TEST === "true") {
+    const authRes = await fetch("https://slack.com/api/auth.test", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json; charset=utf-8",
+      },
+    });
+
+    const authData = (await authRes.json()) as SlackAuthTestResponse;
+    console.log("SLACK auth.test:", authData);
+  }
+
   const res = await fetch("https://slack.com/api/users.info", {
     method: "POST",
     headers: {
@@ -93,24 +125,17 @@ async function slackGetUserEmail(token: string, userId: string): Promise<string>
     body: JSON.stringify({ user: userId }),
   });
 
-  const data = (await res.json()) as {
-    ok: boolean;
-    error?: string;
-    user?: { profile?: { email?: string } };
-  };
-const authRes = await fetch("https://slack.com/api/auth.test", {
-  method: "POST",
-  headers: {
-    Authorization: `Bearer ${token}`,
-    "Content-Type": "application/json; charset=utf-8",
-  },
-});
-const authData = await authRes.json();
-console.log("SLACK auth.test:", authData);
-  if (!data.ok) throw new Error(`Slack users.info failed: ${data.error}`);
-  const email = data.user?.profile?.email;
-  if (!email) throw new Error("Slack user profile has no email");
-  return email;
+  const data = (await res.json()) as SlackUsersInfoResponse;
+
+  if (!data.ok) {
+    // Common non-fatal cases: you can’t read email, token/workspace mismatch, etc.
+    console.warn("Slack users.info failed:", { userId, error: data.error });
+
+    // If you want to be stricter for internal users later, you can throw here instead.
+    return null;
+  }
+
+  return data.user?.profile?.email || null;
 }
 
 // ---- Salesforce helpers ----
@@ -189,7 +214,7 @@ async function handleCreateCaseCommand(job: Job, payload: SlackCommandPayload) {
   });
 
   // 2) Slack user email
-  const email = await slackGetUserEmail(token, userId);
+  const email = await slackTryGetUserEmail(token, userId);
 
   // Phase 1 success output (for now)
   await replyToResponseUrl(responseUrl, {
