@@ -98,7 +98,15 @@ async function slackGetUserEmail(token: string, userId: string): Promise<string>
     error?: string;
     user?: { profile?: { email?: string } };
   };
-
+const authRes = await fetch("https://slack.com/api/auth.test", {
+  method: "POST",
+  headers: {
+    Authorization: `Bearer ${token}`,
+    "Content-Type": "application/json; charset=utf-8",
+  },
+});
+const authData = await authRes.json();
+console.log("SLACK auth.test:", authData);
   if (!data.ok) throw new Error(`Slack users.info failed: ${data.error}`);
   const email = data.user?.profile?.email;
   if (!email) throw new Error("Slack user profile has no email");
