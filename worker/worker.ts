@@ -251,8 +251,6 @@ async function handleCreateCaseCommand(job: Job, payload: SlackCommandPayload) {
         text: "I couldn’t automatically read your email (common in Slack Connect). Opening verification…",
       });
 
-      await slackOpenEmailModal(token, payload.trigger_id);
-      return;
     }
 
   // Phase 1 success output (for now)
