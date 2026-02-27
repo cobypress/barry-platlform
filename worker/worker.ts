@@ -160,6 +160,12 @@ async function sfChannelLookup(slackTeamId: string, slackChannelId: string): Pro
   const text = await res.text();
   if (!res.ok) throw new Error(`SF channel lookup failed: ${res.status} ${text}`);
 
+
+  // Salesforce sometimes returns empty body on some failures; be defensive
+  const data = JSON.parse(text) as SfChannelLookupResponse;
+  return data;
+}
+
 async function slackOpenEmailModal(token: string, triggerId: string) {
   const res = await fetch("https://slack.com/api/views.open", {
     method: "POST",
@@ -194,12 +200,6 @@ async function slackOpenEmailModal(token: string, triggerId: string) {
   const data = (await res.json()) as { ok: boolean; error?: string };
   if (!data.ok) throw new Error(`Slack views.open failed: ${data.error}`);
 }
-
-  // Salesforce sometimes returns empty body on some failures; be defensive
-  const data = JSON.parse(text) as SfChannelLookupResponse;
-  return data;
-}
-
 // ---- Slack command payload type (minimal) ----
 type SlackCommandPayload = {
   team_id?: string;
