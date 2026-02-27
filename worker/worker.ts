@@ -2,6 +2,7 @@ import "dotenv/config";
 import { Worker, Job } from "bullmq";
 import { URL } from "node:url";
 import { pool } from "./db";
+import { salesforce } from "./salesforce";
 
 function requireEnv(name: string): string {
   const v = process.env[name];
@@ -144,26 +145,17 @@ type SfChannelLookupResponse = {
   accountId?: string | null;
 };
 
-async function sfChannelLookup(slackTeamId: string, slackChannelId: string): Promise<SfChannelLookupResponse> {
-  const instanceUrl = requireEnv("SF_INSTANCE_URL");
-  const accessToken = requireEnv("SF_ACCESS_TOKEN");
-
-  const res = await fetch(`${instanceUrl}/services/apexrest/barry/channel`, {
+async function sfChannelLookup(
+  slackTeamId: string,
+  slackChannelId: string
+): Promise<SfChannelLookupResponse> {
+  const res = await salesforce.sfJson<SfChannelLookupResponse>("/services/apexrest/barry/channel", {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json; charset=utf-8",
-    },
     body: JSON.stringify({ slackTeamId, slackChannelId }),
+    headers: { "Content-Type": "application/json; charset=utf-8" },
   });
 
-  const text = await res.text();
-  if (!res.ok) throw new Error(`SF channel lookup failed: ${res.status} ${text}`);
-
-
-  // Salesforce sometimes returns empty body on some failures; be defensive
-  const data = JSON.parse(text) as SfChannelLookupResponse;
-  return data;
+  return res;
 }
 
 async function slackOpenEmailModal(token: string, triggerId: string) {
