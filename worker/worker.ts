@@ -160,6 +160,41 @@ async function sfChannelLookup(slackTeamId: string, slackChannelId: string): Pro
   const text = await res.text();
   if (!res.ok) throw new Error(`SF channel lookup failed: ${res.status} ${text}`);
 
+async function slackOpenEmailModal(token: string, triggerId: string) {
+  const res = await fetch("https://slack.com/api/views.open", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json; charset=utf-8",
+    },
+    body: JSON.stringify({
+      trigger_id: triggerId,
+      view: {
+        type: "modal",
+        callback_id: "barry_email_capture",
+        title: { type: "plain_text", text: "Verify your email" },
+        submit: { type: "plain_text", text: "Verify" },
+        close: { type: "plain_text", text: "Cancel" },
+        blocks: [
+          {
+            type: "input",
+            block_id: "email_block",
+            label: { type: "plain_text", text: "Work email" },
+            element: {
+              type: "plain_text_input",
+              action_id: "email_input",
+              placeholder: { type: "plain_text", text: "name@company.com" },
+            },
+          },
+        ],
+      },
+    }),
+  });
+
+  const data = (await res.json()) as { ok: boolean; error?: string };
+  if (!data.ok) throw new Error(`Slack views.open failed: ${data.error}`);
+}
+
   // Salesforce sometimes returns empty body on some failures; be defensive
   const data = JSON.parse(text) as SfChannelLookupResponse;
   return data;
@@ -216,16 +251,17 @@ async function handleCreateCaseCommand(job: Job, payload: SlackCommandPayload) {
   // 2) Slack user email
   const email = await slackTryGetUserEmail(token, userId);
 
-  if (!email) {
-    await replyToResponseUrl(responseUrl, {
-      response_type: "ephemeral",
-      text:
-        "❌ I couldn’t read your email from Slack.\n" +
-        "This usually means the bot token is for a different workspace, or the app is missing the `users:read.email` scope (and needs reinstall).\n\n" +
-        "Check Render logs for `SLACK auth.test` team_id vs the command team_id.",
-    });
-    return;
-  }
+    if (!email) {
+      if (!payload.trigger_id) throw new Error("Missing trigger_id (needed to open modal)");
+
+      await replyToResponseUrl(responseUrl, {
+        response_type: "ephemeral",
+        text: "I couldn’t automatically read your email (common in Slack Connect). Opening verification…",
+      });
+
+      await slackOpenEmailModal(token, payload.trigger_id);
+      return;
+    }
 
   // Phase 1 success output (for now)
   await replyToResponseUrl(responseUrl, {
