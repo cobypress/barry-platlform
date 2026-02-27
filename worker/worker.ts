@@ -85,60 +85,6 @@ async function slackUpdateMessage(token: string, channel: string, ts: string, te
 }
 
 
-type SlackAuthTestResponse = {
-  ok: boolean;
-  team_id?: string;
-  user_id?: string;
-  error?: string;
-};
-
-type SlackUsersInfoResponse = {
-  ok: boolean;
-  error?: string;
-  user?: { profile?: { email?: string } };
-};
-
-/**
- * Tries to retrieve a Slack user's email.
- * Returns null if Slack won't provide it (common causes: missing scope, external users, user_not_found).
- */
-async function slackTryGetUserEmail(token: string, userId: string): Promise<string | null> {
-  // Optional debug: verify token belongs to the workspace you expect
-  if (process.env.SLACK_DEBUG_AUTH_TEST === "true") {
-    const authRes = await fetch("https://slack.com/api/auth.test", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json; charset=utf-8",
-      },
-    });
-
-    const authData = (await authRes.json()) as SlackAuthTestResponse;
-    console.log("SLACK auth.test:", authData);
-  }
-
-  const res = await fetch("https://slack.com/api/users.info", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json; charset=utf-8",
-    },
-    body: JSON.stringify({ user: userId }),
-  });
-
-  const data = (await res.json()) as SlackUsersInfoResponse;
-
-  if (!data.ok) {
-    // Common non-fatal cases: you can’t read email, token/workspace mismatch, etc.
-    console.warn("Slack users.info failed:", { userId, error: data.error });
-
-    // If you want to be stricter for internal users later, you can throw here instead.
-    return null;
-  }
-
-  return data.user?.profile?.email || null;
-}
-
 // ---- Salesforce helpers ----
 type SfChannelLookupResponse = {
   channelLinked: boolean;
@@ -158,40 +104,6 @@ async function sfChannelLookup(
   return res;
 }
 
-async function slackOpenEmailModal(token: string, triggerId: string) {
-  const res = await fetch("https://slack.com/api/views.open", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json; charset=utf-8",
-    },
-    body: JSON.stringify({
-      trigger_id: triggerId,
-      view: {
-        type: "modal",
-        callback_id: "barry_email_capture",
-        title: { type: "plain_text", text: "Verify your email" },
-        submit: { type: "plain_text", text: "Verify" },
-        close: { type: "plain_text", text: "Cancel" },
-        blocks: [
-          {
-            type: "input",
-            block_id: "email_block",
-            label: { type: "plain_text", text: "Work email" },
-            element: {
-              type: "plain_text_input",
-              action_id: "email_input",
-              placeholder: { type: "plain_text", text: "name@company.com" },
-            },
-          },
-        ],
-      },
-    }),
-  });
-
-  const data = (await res.json()) as { ok: boolean; error?: string };
-  if (!data.ok) throw new Error(`Slack views.open failed: ${data.error}`);
-}
 // ---- Slack command payload type (minimal) ----
 type SlackCommandPayload = {
   team_id?: string;
@@ -203,64 +115,77 @@ type SlackCommandPayload = {
   trigger_id?: string;
 };
 
-// ---- Create-case flow (Phase 1) ----
+// ---- Create-case flow (verified returning user) ----
 async function handleCreateCaseCommand(job: Job, payload: SlackCommandPayload) {
-  const token = requireEnv("SLACK_BOT_TOKEN");
+  const response_url = payload.response_url;
+  const team_id = payload.team_id;
+  const channel_id = payload.channel_id;
+  const user_id = payload.user_id;
 
-  const responseUrl = payload.response_url;
-  const teamId = payload.team_id;
-  const channelId = payload.channel_id;
-  const userId = payload.user_id;
+  if (!response_url) throw new Error("Missing response_url in slack command payload");
+  if (!team_id) throw new Error("Missing team_id in slack command payload");
+  if (!channel_id) throw new Error("Missing channel_id in slack command payload");
+  if (!user_id) throw new Error("Missing user_id in slack command payload");
 
-  if (!responseUrl) throw new Error("Missing response_url in slack command payload");
-  if (!teamId) throw new Error("Missing team_id in slack command payload");
-  if (!channelId) throw new Error("Missing channel_id in slack command payload");
-  if (!userId) throw new Error("Missing user_id in slack command payload");
-
-  // Tell user we're checking (quick feedback)
-  await replyToResponseUrl(responseUrl, {
+  await replyToResponseUrl(response_url, {
     response_type: "ephemeral",
-    text: "🔍 Checking this channel is linked to your account…",
+    text: "🔍 Verifying your access…",
   });
 
-  // 1) Channel → Account link
-  const channelRes = await sfChannelLookup(teamId, channelId);
+  // 1) Get email from DB — user was pre-verified in vercel
+  const { rows } = await pool.query(
+    `SELECT email FROM slack_user_link WHERE slack_team_id = $1 AND slack_user_id = $2 LIMIT 1`,
+    [team_id, user_id]
+  );
+  if (rows.length === 0) {
+    await replyToResponseUrl(response_url, {
+      response_type: "ephemeral",
+      text: "⚠️ Your email isn’t verified yet. Please run `/create-case` again to complete setup.",
+    });
+    return;
+  }
+  const email: string = rows[0].email;
+
+  // 2) Channel → Salesforce Account link
+  const channelRes = await sfChannelLookup(team_id, channel_id);
   if (!channelRes.channelLinked) {
-    await replyToResponseUrl(responseUrl, {
+    await replyToResponseUrl(response_url, {
       response_type: "ephemeral",
       text:
         "❌ This Slack channel isn’t linked to a customer account yet.\n" +
-        "Please ask your Account Owner to link it (internal command).",
+        "Please ask your Account Owner to link it.",
     });
     return;
   }
 
-  await replyToResponseUrl(responseUrl, {
+  // TODO Phase 2: SF Contact lookup (verify email maps to a Contact in this account)
+  // TODO Phase 2: SF Entitlement check (account has an active entitlement)
+
+  // All checks pass — send "Open Case Form" button
+  await replyToResponseUrl(response_url, {
     response_type: "ephemeral",
-    text: "✅ Channel linked. Verifying your identity…",
-  });
-
-  // 2) Slack user email
-  const email = await slackTryGetUserEmail(token, userId);
-
-    if (!email) {
-      if (!payload.trigger_id) throw new Error("Missing trigger_id (needed to open modal)");
-
-      await replyToResponseUrl(responseUrl, {
-        response_type: "ephemeral",
-        text: "I couldn’t automatically read your email (common in Slack Connect). Opening verification…",
-      });
-
-    }
-
-  // Phase 1 success output (for now)
-  await replyToResponseUrl(responseUrl, {
-    response_type: "ephemeral",
-    text:
-      "✅ Identity found.\n" +
-      `• Email: *${email}*\n` +
-      `• AccountId (from channel link): *${channelRes.accountId}*\n\n` +
-      "Next: I’ll check your Salesforce Contact, approval status, and entitlement, then open the case intake form.",
+    text: "✅ All checks passed.",
+    blocks: [
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: "✅ *All checks passed.* Click below to open the case form.",
+        },
+      },
+      {
+        type: "actions",
+        elements: [
+          {
+            type: "button",
+            action_id: "barry_open_case_form",
+            text: { type: "plain_text", text: "Open Case Form" },
+            style: "primary",
+            value: JSON.stringify({ team_id, user_id, email, channel_id }),
+          },
+        ],
+      },
+    ],
   });
 }
 
@@ -319,6 +244,52 @@ const worker = new Worker(
         // /raise-case can be an alias
         if (cmd === "/create-case" || cmd === "/raise-case") {
           await handleCreateCaseCommand(job, payload);
+        }
+      }
+
+      // 3) Case submission jobs (from barry_case_intake modal)
+      if (job.name === "create-case") {
+        const { team_id, channel_id, user_id, email, subject, description, response_url } =
+          job.data as {
+            team_id: string;
+            channel_id: string;
+            user_id: string;
+            email: string;
+            subject: string;
+            description: string;
+            response_url: string;
+          };
+
+        console.log(`[create-case] user=${user_id} email=${email} subject="${subject}"`);
+
+        if (!response_url) {
+          console.warn("[create-case] No response_url — cannot notify user");
+        }
+
+        // Channel → Salesforce Account link
+        const channelRes = await sfChannelLookup(team_id, channel_id);
+        if (!channelRes.channelLinked) {
+          if (response_url) {
+            await replyToResponseUrl(response_url, {
+              response_type: "ephemeral",
+              text: "❌ This Slack channel isn't linked to a customer account. Case not created.",
+            });
+          }
+          return;
+        }
+
+        // TODO Phase 2: SF Contact lookup (email → contactId in account)
+        // TODO Phase 2: SF Entitlement check (active entitlement on account)
+        // TODO Phase 2: create SF Case via sfFetch
+
+        if (response_url) {
+          await replyToResponseUrl(response_url, {
+            response_type: "ephemeral",
+            text:
+              `✅ *Case received* — Salesforce submission coming in Phase 2.\n` +
+              `• Subject: *${subject}*\n` +
+              `• Account: *${channelRes.accountId}*`,
+          });
         }
       }
 
