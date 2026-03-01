@@ -290,20 +290,21 @@ const worker = new Worker(
     try {
       // 1) Slack interactivity jobs (legacy — button clicks that don't have a specific handler)
       if (job.name === "slack-interaction") {
-        const token = requireEnv("SLACK_BOT_TOKEN");
-
         const interactionPayload = job.data?.payload as {
           channel?: { id?: string };
           message?: { ts?: string };
         };
 
         const channel = interactionPayload?.channel?.id;
-        const ts = interactionPayload?.message?.ts;
+        const ts      = interactionPayload?.message?.ts;
 
         if (!channel || !ts) {
-          throw new Error("Missing channel.id or message.ts in interaction payload");
+          // Ephemeral/app-home interactions don't carry channel+ts — nothing to update, skip.
+          console.log("[slack-interaction] no channel/ts in payload — skipping", job.data?.correlation_id);
+          return;
         }
 
+        const token = requireEnv("SLACK_BOT_TOKEN");
         await slackUpdateMessage(token, channel, ts, "✅ *Barry received your click (via worker)*");
       }
 
