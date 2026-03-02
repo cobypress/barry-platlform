@@ -165,7 +165,6 @@ async function handleValidationResult(result: ValidateUserResponse, ctx: UserCon
     case "channel_not_linked":
       await replyToResponseUrl(response_url, {
         replace_original: true,
-        response_type: "ephemeral",
         text: "❌ This Slack channel isn't linked to a customer account yet. Please ask your Account Owner to set it up.",
       });
       break;
@@ -173,7 +172,6 @@ async function handleValidationResult(result: ValidateUserResponse, ctx: UserCon
     case "no_entitlement":
       await replyToResponseUrl(response_url, {
         replace_original: true,
-        response_type: "ephemeral",
         text: "❌ The account linked to this channel doesn't have an active support entitlement. Please contact your account manager.",
       });
       break;
@@ -181,7 +179,6 @@ async function handleValidationResult(result: ValidateUserResponse, ctx: UserCon
     case "contact_not_found":
       await replyToResponseUrl(response_url, {
         replace_original: true,
-        response_type: "ephemeral",
         text: "We couldn't find a Salesforce contact for your email address on this account.",
         blocks: [
           {
@@ -209,7 +206,6 @@ async function handleValidationResult(result: ValidateUserResponse, ctx: UserCon
     case "pending_approval":
       await replyToResponseUrl(response_url, {
         replace_original: true,
-        response_type: "ephemeral",
         text: "⏳ Your access request is pending approval. Barry will send you a direct message once it's approved.",
       });
       break;
@@ -217,7 +213,6 @@ async function handleValidationResult(result: ValidateUserResponse, ctx: UserCon
     case "approved":
       await replyToResponseUrl(response_url, {
         replace_original: true,
-        response_type: "ephemeral",
         text: "✅ All checks passed.",
         blocks: [
           {
@@ -274,7 +269,6 @@ async function handleCreateCaseCommand(job: Job, payload: SlackCommandPayload) {
 
   await replyToResponseUrl(response_url, {
     replace_original: true,
-    response_type: "ephemeral",
     text: "🔍 Verifying your access…",
   });
 
@@ -405,7 +399,6 @@ const worker = new Worker(
           if (response_url) {
             await replyToResponseUrl(response_url, {
               replace_original: true,
-              response_type: "ephemeral",
               text: `❌ We couldn't create your profile: ${sfRes.error ?? "unknown error"}. Please contact your account admin.`,
             });
           }
@@ -456,7 +449,6 @@ const worker = new Worker(
           if (response_url) {
             await replyToResponseUrl(response_url, {
               replace_original: true,
-              response_type: "ephemeral",
               text: `❌ We couldn't create your case: ${sfRes.error ?? "unknown error"}. Please try again or contact your account admin.`,
             });
           }
@@ -465,25 +457,62 @@ const worker = new Worker(
 
         console.log(`[create-case] Case created: #${sfRes.caseNumber} (${sfRes.caseId})`);
 
+        const priorityEmoji = (priority || "Medium") === "High" ? "🔴" : (priority || "Medium") === "Low" ? "🟢" : "🟡";
+
+        // 1) Short private confirmation — replaces the ephemeral "Open Case Form" button
         if (response_url) {
           await replyToResponseUrl(response_url, {
             replace_original: true,
-            response_type: "ephemeral",
-            text: `✅ *Case #${sfRes.caseNumber} created.*`,
-            blocks: [
-              {
-                type: "section",
-                text: {
-                  type: "mrkdwn",
-                  text:
-                    `✅ *Case #${sfRes.caseNumber} created successfully.*\n` +
-                    `*Subject:* ${subject}\n` +
-                    `*Priority:* ${priority || "Medium"} · *Type:* ${type || "Question"}`,
-                },
-              },
-            ],
+            text: `✅ Case *#${sfRes.caseNumber}* raised successfully.`,
           });
         }
+
+        // 2) Public channel announcement — visible to everyone
+        const token = requireEnv("SLACK_BOT_TOKEN");
+        await fetch("https://slack.com/api/chat.postMessage", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json; charset=utf-8",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            channel: channel_id,
+            text: `New support case raised: #${sfRes.caseNumber} — ${subject}`,
+            blocks: [
+              {
+                type: "header",
+                text: { type: "plain_text", text: "🆕 New Support Case Raised" },
+              },
+              {
+                type: "section",
+                fields: [
+                  { type: "mrkdwn", text: `*Case Number*\n\`#${sfRes.caseNumber}\`` },
+                  { type: "mrkdwn", text: `*Priority*\n${priorityEmoji} ${priority || "Medium"}` },
+                  { type: "mrkdwn", text: `*Type*\n${type || "Question"}` },
+                  { type: "mrkdwn", text: `*Raised By*\n<@${user_id}>` },
+                ],
+              },
+              {
+                type: "section",
+                text: { type: "mrkdwn", text: `*Subject*\n${subject}` },
+              },
+              ...(description ? [{
+                type: "section" as const,
+                text: { type: "mrkdwn", text: `*Description*\n${description}` },
+              }] : []),
+              { type: "divider" as const },
+              {
+                type: "context",
+                elements: [
+                  {
+                    type: "mrkdwn",
+                    text: `<!channel> A new case has been raised and logged in Salesforce. Our team will be in touch.`,
+                  },
+                ],
+              },
+            ],
+          }),
+        });
       }
 
       // ---- Write "completed" audit log ----
