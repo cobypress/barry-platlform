@@ -125,6 +125,30 @@ async function sfCreateContact(data: CreateContactRequest): Promise<CreateContac
   });
 }
 
+type CreateCaseRequest = {
+  accountId: string;
+  contactId: string;
+  subject: string;
+  description: string;
+  priority: string;
+  type: string;
+};
+
+type CreateCaseResponse = {
+  success: boolean;
+  caseId?: string;
+  caseNumber?: string;
+  error?: string;
+};
+
+async function sfCreateCase(data: CreateCaseRequest): Promise<CreateCaseResponse> {
+  return salesforce.sfJson<CreateCaseResponse>("/services/apexrest/barry/create-case", {
+    method: "POST",
+    body: JSON.stringify(data),
+    headers: { "Content-Type": "application/json; charset=utf-8" },
+  });
+}
+
 // ---- Shared validation result handler ----
 type UserContext = {
   team_id: string;
@@ -140,6 +164,7 @@ async function handleValidationResult(result: ValidateUserResponse, ctx: UserCon
   switch (result.status) {
     case "channel_not_linked":
       await replyToResponseUrl(response_url, {
+        replace_original: true,
         response_type: "ephemeral",
         text: "❌ This Slack channel isn't linked to a customer account yet. Please ask your Account Owner to set it up.",
       });
@@ -147,6 +172,7 @@ async function handleValidationResult(result: ValidateUserResponse, ctx: UserCon
 
     case "no_entitlement":
       await replyToResponseUrl(response_url, {
+        replace_original: true,
         response_type: "ephemeral",
         text: "❌ The account linked to this channel doesn't have an active support entitlement. Please contact your account manager.",
       });
@@ -154,6 +180,7 @@ async function handleValidationResult(result: ValidateUserResponse, ctx: UserCon
 
     case "contact_not_found":
       await replyToResponseUrl(response_url, {
+        replace_original: true,
         response_type: "ephemeral",
         text: "We couldn't find a Salesforce contact for your email address on this account.",
         blocks: [
@@ -181,6 +208,7 @@ async function handleValidationResult(result: ValidateUserResponse, ctx: UserCon
 
     case "pending_approval":
       await replyToResponseUrl(response_url, {
+        replace_original: true,
         response_type: "ephemeral",
         text: "⏳ Your access request is pending approval. Barry will send you a direct message once it's approved.",
       });
@@ -188,6 +216,7 @@ async function handleValidationResult(result: ValidateUserResponse, ctx: UserCon
 
     case "approved":
       await replyToResponseUrl(response_url, {
+        replace_original: true,
         response_type: "ephemeral",
         text: "✅ All checks passed.",
         blocks: [
@@ -244,6 +273,7 @@ async function handleCreateCaseCommand(job: Job, payload: SlackCommandPayload) {
   if (!user_id) throw new Error("Missing user_id in slack command payload");
 
   await replyToResponseUrl(response_url, {
+    replace_original: true,
     response_type: "ephemeral",
     text: "🔍 Verifying your access…",
   });
@@ -255,6 +285,7 @@ async function handleCreateCaseCommand(job: Job, payload: SlackCommandPayload) {
   );
   if (rows.length === 0) {
     await replyToResponseUrl(response_url, {
+      replace_original: true,
       response_type: "ephemeral",
       text: "⚠️ Your email isn't verified yet. Please run `/create-case` again to complete setup.",
     });
@@ -373,6 +404,7 @@ const worker = new Worker(
           console.error("[create-contact] SF create failed:", sfRes.error);
           if (response_url) {
             await replyToResponseUrl(response_url, {
+              replace_original: true,
               response_type: "ephemeral",
               text: `❌ We couldn't create your profile: ${sfRes.error ?? "unknown error"}. Please contact your account admin.`,
             });
@@ -384,21 +416,24 @@ const worker = new Worker(
 
         if (response_url) {
           await replyToResponseUrl(response_url, {
+            replace_original: true,
             response_type: "ephemeral",
             text: "✅ *Profile submitted for approval.*\nBarry will send you a direct message once your access is approved.",
           });
         }
       }
 
-      // 5) Case submission — creates SF Case (Phase 2)
+      // 5) Case submission — creates SF Case
       if (job.name === "create-case") {
         const {
-          team_id, channel_id, user_id, email, account_id, contact_id,
-          subject, description, response_url,
+          account_id, contact_id, subject, description,
+          priority, type, response_url, user_id, email,
         } = job.data as {
           team_id: string; channel_id: string; user_id: string; email: string;
-          account_id?: string; contact_id?: string;
-          subject: string; description: string; response_url: string;
+          account_id: string; contact_id: string;
+          subject: string; description: string;
+          priority: string; type: string;
+          response_url: string;
         };
 
         console.log(`[create-case] user=${user_id} email=${email} subject="${subject}"`);
@@ -407,14 +442,46 @@ const worker = new Worker(
           console.warn("[create-case] No response_url — cannot notify user");
         }
 
-        // TODO Phase 2: create SF Case via sfFetch using account_id, contact_id, subject, description
+        const sfRes = await sfCreateCase({
+          accountId: account_id,
+          contactId: contact_id,
+          subject,
+          description,
+          priority: priority || "Medium",
+          type: type || "Question",
+        });
+
+        if (!sfRes.success) {
+          console.error("[create-case] SF create failed:", sfRes.error);
+          if (response_url) {
+            await replyToResponseUrl(response_url, {
+              replace_original: true,
+              response_type: "ephemeral",
+              text: `❌ We couldn't create your case: ${sfRes.error ?? "unknown error"}. Please try again or contact your account admin.`,
+            });
+          }
+          return;
+        }
+
+        console.log(`[create-case] Case created: #${sfRes.caseNumber} (${sfRes.caseId})`);
 
         if (response_url) {
           await replyToResponseUrl(response_url, {
+            replace_original: true,
             response_type: "ephemeral",
-            text:
-              `✅ *Case received* — Salesforce submission coming in Phase 2.\n` +
-              `• Subject: *${subject}*`,
+            text: `✅ *Case #${sfRes.caseNumber} created.*`,
+            blocks: [
+              {
+                type: "section",
+                text: {
+                  type: "mrkdwn",
+                  text:
+                    `✅ *Case #${sfRes.caseNumber} created successfully.*\n` +
+                    `*Subject:* ${subject}\n` +
+                    `*Priority:* ${priority || "Medium"} · *Type:* ${type || "Question"}`,
+                },
+              },
+            ],
           });
         }
       }
