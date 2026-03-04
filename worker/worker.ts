@@ -162,12 +162,36 @@ async function handleValidationResult(result: ValidateUserResponse, ctx: UserCon
   const { team_id, user_id, email, channel_id, response_url } = ctx;
 
   switch (result.status) {
-    case "channel_not_linked":
+    case "channel_not_linked": {
+      // Private: replace the ephemeral with a brief note
       await replyToResponseUrl(response_url, {
         replace_original: true,
-        text: "❌ This Slack channel isn't linked to a customer account yet. Please ask your Account Owner to set it up.",
+        text: "❌ This channel isn't connected to a customer account yet.",
+      });
+      // Public: post to the channel so the Account Manager can action it
+      const token = requireEnv("SLACK_BOT_TOKEN");
+      await fetch("https://slack.com/api/chat.postMessage", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json; charset=utf-8",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          channel: channel_id,
+          text: "⚠️ This Slack channel hasn't been linked to a Salesforce account yet. An Account Manager will need to set it up before cases can be raised here.",
+          blocks: [
+            {
+              type: "section",
+              text: {
+                type: "mrkdwn",
+                text: "⚠️ *This channel isn't connected to a Salesforce account.*\n\nBefore support cases can be raised here, an Account Manager needs to link this channel to the relevant customer account in Salesforce.\n\nPlease reach out to your Account Manager to get this set up.",
+              },
+            },
+          ],
+        }),
       });
       break;
+    }
 
     case "no_entitlement":
       await replyToResponseUrl(response_url, {
@@ -280,7 +304,6 @@ async function handleCreateCaseCommand(job: Job, payload: SlackCommandPayload) {
   if (rows.length === 0) {
     await replyToResponseUrl(response_url, {
       replace_original: true,
-      response_type: "ephemeral",
       text: "⚠️ Your email isn't verified yet. Please run `/create-case` again to complete setup.",
     });
     return;
@@ -360,7 +383,7 @@ const worker = new Worker(
         }
 
         await replyToResponseUrl(response_url, {
-          response_type: "ephemeral",
+          replace_original: true,
           text: "🔍 Verifying your access…",
         });
 
@@ -410,7 +433,6 @@ const worker = new Worker(
         if (response_url) {
           await replyToResponseUrl(response_url, {
             replace_original: true,
-            response_type: "ephemeral",
             text: "✅ *Profile submitted for approval.*\nBarry will send you a direct message once your access is approved.",
           });
         }
@@ -420,7 +442,7 @@ const worker = new Worker(
       if (job.name === "create-case") {
         const {
           account_id, contact_id, subject, description,
-          priority, type, response_url, user_id, email,
+          priority, type, response_url, user_id, email, channel_id,
         } = job.data as {
           team_id: string; channel_id: string; user_id: string; email: string;
           account_id: string; contact_id: string;
