@@ -673,7 +673,7 @@ const worker = new Worker(
             [team_id || "", user_id]
           );
           const email = emailRows[0]?.email || "";
-          const validation = await sfValidateUser({ channelId: channel_id, teamId: team_id || "", email });
+          const validation = await sfValidateUser(team_id || "", channel_id, email, user_id);
 
           if (validation.status === "channel_not_linked") {
             await replyToResponseUrl(response_url, {
