@@ -655,10 +655,10 @@ const worker = new Worker(
 
       // 7) Get cases — /view-cases command and pagination buttons
       if (job.name === "get-cases") {
-        const { channel_id, user_id, team_id, response_url, page = 0 } = job.data as {
+        const { channel_id, user_id, team_id, response_url, page = 0, filter = "open" } = job.data as {
           channel_id: string; user_id: string; team_id?: string;
-          response_url: string; page: number;
-          account_id?: string; // present on pagination button clicks
+          response_url: string; page: number; filter?: string;
+          account_id?: string; // present on pagination/filter button clicks
         };
 
         const token = requireEnv("SLACK_BOT_TOKEN");
@@ -697,8 +697,12 @@ const worker = new Worker(
           return;
         }
 
-        // Sort by custom status order, then by createdDate descending within same status
-        const sorted = [...sfRes.cases].sort((a, b) => {
+        // Filter by open/closed, then sort by custom status order
+        const isClosed = filter === "closed";
+        const filtered = sfRes.cases.filter(c =>
+          isClosed ? c.status === "Closed" : c.status !== "Closed"
+        );
+        const sorted = [...filtered].sort((a, b) => {
           const orderA = STATUS_ORDER[a.status] ?? 99;
           const orderB = STATUS_ORDER[b.status] ?? 99;
           if (orderA !== orderB) return orderA - orderB;
@@ -711,18 +715,38 @@ const worker = new Worker(
         const slice = sorted.slice(safePage * CASES_PAGE_SIZE, (safePage + 1) * CASES_PAGE_SIZE);
 
         // Build blocks
+        const filterValue = (f: string) => JSON.stringify({ account_id: accountId, channel_id, filter: f, page: 0, response_url });
         const blocks: unknown[] = [
           {
             type: "header",
             text: { type: "plain_text", text: "📋 Account Cases" },
           },
           {
+            type: "actions",
+            elements: [
+              {
+                type: "button",
+                action_id: "barry_cases_filter_open",
+                text: { type: "plain_text", text: "📂 Open" },
+                ...(isClosed ? {} : { style: "primary" }),
+                value: filterValue("open"),
+              },
+              {
+                type: "button",
+                action_id: "barry_cases_filter_closed",
+                text: { type: "plain_text", text: "🤝 Closed" },
+                ...(isClosed ? { style: "primary" } : {}),
+                value: filterValue("closed"),
+              },
+            ],
+          },
+          {
             type: "context",
             elements: [{
               type: "mrkdwn",
               text: total === 0
-                ? "No cases found for this account."
-                : `Showing *${safePage * CASES_PAGE_SIZE + 1}–${safePage * CASES_PAGE_SIZE + slice.length}* of *${total}* cases · Page ${safePage + 1} of ${totalPages}`,
+                ? `No ${isClosed ? "closed" : "open"} cases found for this account.`
+                : `Showing *${safePage * CASES_PAGE_SIZE + 1}–${safePage * CASES_PAGE_SIZE + slice.length}* of *${total}* ${isClosed ? "closed" : "open"} cases · Page ${safePage + 1} of ${totalPages}`,
             }],
           },
           { type: "divider" },
@@ -749,7 +773,7 @@ const worker = new Worker(
 
         // Pagination nav
         if (totalPages > 1) {
-          const navValue = JSON.stringify({ account_id: accountId, channel_id, page: safePage, response_url });
+          const navValue = JSON.stringify({ account_id: accountId, channel_id, filter, page: safePage, response_url });
           const navElements: unknown[] = [];
           if (safePage > 0) {
             navElements.push({ type: "button", action_id: "barry_cases_prev", text: { type: "plain_text", text: "← Previous" }, value: navValue });
