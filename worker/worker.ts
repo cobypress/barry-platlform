@@ -125,6 +125,37 @@ async function sfCreateContact(data: CreateContactRequest): Promise<CreateContac
   });
 }
 
+// ── Case list constants ───────────────────────────────────────────────────────
+const CASES_PAGE_SIZE = 5;
+
+const STATUS_ORDER: Record<string, number> = {
+  "New": 0, "In Progress": 1, "Waiting on Client": 2, "Client Responded": 3,
+  "On Hold": 4, "Escalated": 5, "Waiting to be Closed": 6, "Re-opened": 7, "Closed": 8,
+};
+
+const STATUS_EMOJI: Record<string, string> = {
+  "New": "👋", "In Progress": "👀", "Waiting on Client": "🫵", "Client Responded": "😨",
+  "On Hold": "🚫", "Escalated": "⬆️", "Waiting to be Closed": "🫡", "Re-opened": "⚠️", "Closed": "🤝",
+};
+
+type SFCase = {
+  id: string; caseNumber: string; subject: string;
+  status: string; priority: string; type: string; createdDate: string;
+  contactName?: string;
+};
+
+type GetCasesResponse = { success: boolean; cases?: SFCase[]; error?: string };
+
+async function sfGetCases(accountId: string): Promise<GetCasesResponse> {
+  return salesforce.sfJson<GetCasesResponse>("/services/apexrest/barry/cases", {
+    method: "POST",
+    body: JSON.stringify({ accountId }),
+    headers: { "Content-Type": "application/json; charset=utf-8" },
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 type CreateCaseRequest = {
   accountId: string;
   contactId: string;
@@ -622,7 +653,123 @@ const worker = new Worker(
         console.log(`[add-case-comment] Comment added to SF case ${case_id}`);
       }
 
-      // 7) Close case — called when user clicks "Mark as Resolved" in Slack
+      // 7) Get cases — /view-cases command and pagination buttons
+      if (job.name === "get-cases") {
+        const { channel_id, user_id, team_id, response_url, page = 0 } = job.data as {
+          channel_id: string; user_id: string; team_id?: string;
+          response_url: string; page: number;
+          account_id?: string; // present on pagination button clicks
+        };
+
+        const token = requireEnv("SLACK_BOT_TOKEN");
+
+        // Pagination buttons already carry account_id — skip SF channel lookup
+        let accountId = job.data.account_id as string | undefined;
+
+        if (!accountId) {
+          // Fresh /view-cases command — need to resolve accountId from channel
+          const { rows: emailRows } = await pool.query<{ email: string }>(
+            "SELECT email FROM slack_user_link WHERE slack_team_id = $1 AND slack_user_id = $2 LIMIT 1",
+            [team_id || "", user_id]
+          );
+          const email = emailRows[0]?.email || "";
+          const validation = await sfValidateUser({ channelId: channel_id, teamId: team_id || "", email });
+
+          if (validation.status === "channel_not_linked") {
+            await replyToResponseUrl(response_url, {
+              replace_original: true,
+              text: "❌ This channel isn't connected to a Salesforce account yet.",
+            });
+            return;
+          }
+          accountId = validation.accountId;
+        }
+
+        if (!accountId) {
+          await replyToResponseUrl(response_url, { replace_original: true, text: "❌ Could not determine account for this channel." });
+          return;
+        }
+
+        const sfRes = await sfGetCases(accountId);
+
+        if (!sfRes.success || !sfRes.cases) {
+          await replyToResponseUrl(response_url, { replace_original: true, text: `❌ Could not fetch cases: ${sfRes.error ?? "unknown error"}` });
+          return;
+        }
+
+        // Sort by custom status order, then by createdDate descending within same status
+        const sorted = [...sfRes.cases].sort((a, b) => {
+          const orderA = STATUS_ORDER[a.status] ?? 99;
+          const orderB = STATUS_ORDER[b.status] ?? 99;
+          if (orderA !== orderB) return orderA - orderB;
+          return new Date(b.createdDate).getTime() - new Date(a.createdDate).getTime();
+        });
+
+        const total = sorted.length;
+        const totalPages = Math.max(1, Math.ceil(total / CASES_PAGE_SIZE));
+        const safePage = Math.min(Math.max(0, page), totalPages - 1);
+        const slice = sorted.slice(safePage * CASES_PAGE_SIZE, (safePage + 1) * CASES_PAGE_SIZE);
+
+        // Build blocks
+        const blocks: unknown[] = [
+          {
+            type: "header",
+            text: { type: "plain_text", text: "📋 Account Cases" },
+          },
+          {
+            type: "context",
+            elements: [{
+              type: "mrkdwn",
+              text: total === 0
+                ? "No cases found for this account."
+                : `Showing *${safePage * CASES_PAGE_SIZE + 1}–${safePage * CASES_PAGE_SIZE + slice.length}* of *${total}* cases · Page ${safePage + 1} of ${totalPages}`,
+            }],
+          },
+          { type: "divider" },
+        ];
+
+        for (const c of slice) {
+          const statusEmoji = STATUS_EMOJI[c.status] ?? "❓";
+          const priorityEmoji = c.priority === "High" ? "🔴" : c.priority === "Low" ? "🟢" : "🟡";
+          const date = new Date(c.createdDate).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+          const raisedBy = c.contactName ? ` · Raised by ${c.contactName}` : "";
+          blocks.push({
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text:
+                `*#${c.caseNumber}* · ${statusEmoji} ${c.status} · ${priorityEmoji} ${c.priority}\n` +
+                `_${c.subject}_` +
+                (c.type ? ` · ${c.type}` : "") +
+                `\n_Opened ${date}${raisedBy}_`,
+            },
+          });
+          blocks.push({ type: "divider" });
+        }
+
+        // Pagination nav
+        if (totalPages > 1) {
+          const navValue = JSON.stringify({ account_id: accountId, channel_id, page: safePage, response_url });
+          const navElements: unknown[] = [];
+          if (safePage > 0) {
+            navElements.push({ type: "button", action_id: "barry_cases_prev", text: { type: "plain_text", text: "← Previous" }, value: navValue });
+          }
+          if (safePage < totalPages - 1) {
+            navElements.push({ type: "button", action_id: "barry_cases_next", style: "primary", text: { type: "plain_text", text: "Next →" }, value: navValue });
+          }
+          if (navElements.length > 0) blocks.push({ type: "actions", elements: navElements });
+        }
+
+        await replyToResponseUrl(response_url, {
+          replace_original: true,
+          text: `Your cases — page ${safePage + 1} of ${totalPages}`,
+          blocks,
+        });
+
+        console.log(`[get-cases] Sent page ${safePage + 1}/${totalPages} (${slice.length} cases) to ${user_id}`);
+      }
+
+      // 8) Close case — called when user clicks "Mark as Resolved" in Slack
       if (job.name === "close-case") {
         const { case_id, case_number, channel_id, user_id } = job.data as {
           case_id: string; case_number: string; channel_id: string; user_id: string;
