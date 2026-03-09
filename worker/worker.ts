@@ -533,6 +533,10 @@ const worker = new Worker(
                 type: "mrkdwn",
                 text: `<!channel> A new case has been raised and logged in Salesforce. Our team will be in touch.`,
               },
+              {
+                type: "mrkdwn",
+                text: `💬 *Reply in this thread* to add information or discuss the case — your replies are automatically logged to Salesforce.`,
+              },
             ],
           },
         ];
