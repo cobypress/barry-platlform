@@ -603,7 +603,22 @@ const worker = new Worker(
         }
       }
 
-      // 6) Close case — called when user clicks "Mark as Resolved" in Slack
+      // 6) Add case comment — Slack thread reply → SF CaseComment
+      if (job.name === "add-case-comment") {
+        const { case_id, comment_body, author_name } = job.data as {
+          case_id: string; case_number: string; comment_body: string; author_name: string;
+        };
+
+        await salesforce.sfJson("/services/apexrest/barry/add-case-comment", {
+          method: "POST",
+          body: JSON.stringify({ caseId: case_id, body: comment_body, authorName: author_name }),
+          headers: { "Content-Type": "application/json; charset=utf-8" },
+        });
+
+        console.log(`[add-case-comment] Comment added to SF case ${case_id}`);
+      }
+
+      // 7) Close case — called when user clicks "Mark as Resolved" in Slack
       if (job.name === "close-case") {
         const { case_id, case_number, channel_id, user_id } = job.data as {
           case_id: string; case_number: string; channel_id: string; user_id: string;
