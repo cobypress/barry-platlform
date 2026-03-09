@@ -15,6 +15,18 @@ async function main() {
   `);
 
   console.log("✅ audit_log table is ready");
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS case_slack_link (
+      case_id     TEXT PRIMARY KEY,
+      case_number TEXT NOT NULL,
+      channel_id  TEXT NOT NULL,
+      message_ts  TEXT NOT NULL,
+      created_at  TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
+
+  console.log("✅ case_slack_link table is ready");
   await pool.end();
 }
 

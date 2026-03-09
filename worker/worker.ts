@@ -149,6 +149,16 @@ async function sfCreateCase(data: CreateCaseRequest): Promise<CreateCaseResponse
   });
 }
 
+type CloseCaseResponse = { success: boolean; error?: string };
+
+async function sfCloseCase(caseId: string): Promise<CloseCaseResponse> {
+  return salesforce.sfJson<CloseCaseResponse>("/services/apexrest/barry/close-case", {
+    method: "POST",
+    body: JSON.stringify({ caseId }),
+    headers: { "Content-Type": "application/json; charset=utf-8" },
+  });
+}
+
 // ---- Shared validation result handler ----
 type UserContext = {
   team_id: string;
@@ -491,7 +501,43 @@ const worker = new Worker(
 
         // 2) Public channel announcement — visible to everyone
         const token = requireEnv("SLACK_BOT_TOKEN");
-        await fetch("https://slack.com/api/chat.postMessage", {
+
+        // Build blocks shared between initial post and the update-with-button
+        const announcementBlocks = [
+          {
+            type: "header",
+            text: { type: "plain_text", text: "🆕 New Support Case Raised" },
+          },
+          {
+            type: "section",
+            fields: [
+              { type: "mrkdwn", text: `*Case Number*\n\`#${sfRes.caseNumber}\`` },
+              { type: "mrkdwn", text: `*Priority*\n${priorityEmoji} ${priority || "Medium"}` },
+              { type: "mrkdwn", text: `*Type*\n${type || "Question"}` },
+              { type: "mrkdwn", text: `*Raised By*\n<@${user_id}>` },
+            ],
+          },
+          {
+            type: "section",
+            text: { type: "mrkdwn", text: `*Subject*\n${subject}` },
+          },
+          ...(description ? [{
+            type: "section" as const,
+            text: { type: "mrkdwn", text: `*Description*\n${description}` },
+          }] : []),
+          { type: "divider" as const },
+          {
+            type: "context",
+            elements: [
+              {
+                type: "mrkdwn",
+                text: `<!channel> A new case has been raised and logged in Salesforce. Our team will be in touch.`,
+              },
+            ],
+          },
+        ];
+
+        const msgRes = await fetch("https://slack.com/api/chat.postMessage", {
           method: "POST",
           headers: {
             "Content-Type": "application/json; charset=utf-8",
@@ -500,41 +546,129 @@ const worker = new Worker(
           body: JSON.stringify({
             channel: channel_id,
             text: `New support case raised: #${sfRes.caseNumber} — ${subject}`,
-            blocks: [
-              {
-                type: "header",
-                text: { type: "plain_text", text: "🆕 New Support Case Raised" },
-              },
-              {
-                type: "section",
-                fields: [
-                  { type: "mrkdwn", text: `*Case Number*\n\`#${sfRes.caseNumber}\`` },
-                  { type: "mrkdwn", text: `*Priority*\n${priorityEmoji} ${priority || "Medium"}` },
-                  { type: "mrkdwn", text: `*Type*\n${type || "Question"}` },
-                  { type: "mrkdwn", text: `*Raised By*\n<@${user_id}>` },
-                ],
-              },
-              {
-                type: "section",
-                text: { type: "mrkdwn", text: `*Subject*\n${subject}` },
-              },
-              ...(description ? [{
-                type: "section" as const,
-                text: { type: "mrkdwn", text: `*Description*\n${description}` },
-              }] : []),
-              { type: "divider" as const },
-              {
-                type: "context",
-                elements: [
-                  {
-                    type: "mrkdwn",
-                    text: `<!channel> A new case has been raised and logged in Salesforce. Our team will be in touch.`,
-                  },
-                ],
-              },
-            ],
+            blocks: announcementBlocks,
           }),
         });
+
+        const msgBody = await msgRes.json() as { ok: boolean; ts?: string };
+
+        if (msgBody.ok && msgBody.ts && sfRes.caseId) {
+          // Save the Case → Slack message mapping for status updates, comments and close
+          await pool.query(
+            `INSERT INTO case_slack_link (case_id, case_number, channel_id, message_ts)
+             VALUES ($1, $2, $3, $4) ON CONFLICT (case_id) DO NOTHING`,
+            [sfRes.caseId, sfRes.caseNumber, channel_id, msgBody.ts]
+          );
+
+          // Add "Mark as Resolved" button via chat.update
+          await fetch("https://slack.com/api/chat.update", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json; charset=utf-8",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              channel: channel_id,
+              ts: msgBody.ts,
+              blocks: [
+                ...announcementBlocks,
+                {
+                  type: "actions",
+                  elements: [
+                    {
+                      type: "button",
+                      action_id: "barry_close_case",
+                      text: { type: "plain_text", text: "Mark as Resolved ✓" },
+                      style: "primary",
+                      confirm: {
+                        title: { type: "plain_text", text: "Close this case?" },
+                        text: {
+                          type: "mrkdwn",
+                          text: `This will mark *Case #${sfRes.caseNumber}* as Closed in Salesforce.`,
+                        },
+                        confirm: { type: "plain_text", text: "Yes, close it" },
+                        deny: { type: "plain_text", text: "Cancel" },
+                      },
+                      value: JSON.stringify({
+                        case_id: sfRes.caseId,
+                        case_number: sfRes.caseNumber,
+                        channel_id,
+                      }),
+                    },
+                  ],
+                },
+              ],
+            }),
+          });
+        }
+      }
+
+      // 6) Close case — called when user clicks "Mark as Resolved" in Slack
+      if (job.name === "close-case") {
+        const { case_id, case_number, channel_id, user_id } = job.data as {
+          case_id: string; case_number: string; channel_id: string; user_id: string;
+        };
+
+        const sfRes = await sfCloseCase(case_id);
+
+        if (!sfRes.success) {
+          console.error("[close-case] SF close failed:", sfRes.error);
+          return;
+        }
+
+        // Look up the original announcement message_ts
+        const { rows } = await pool.query<{ message_ts: string }>(
+          "SELECT message_ts FROM case_slack_link WHERE case_id = $1",
+          [case_id]
+        );
+
+        const token = requireEnv("SLACK_BOT_TOKEN");
+
+        if (rows.length > 0) {
+          const message_ts = rows[0].message_ts;
+
+          // Update announcement: replace "Mark as Resolved" button with a CLOSED badge
+          await fetch("https://slack.com/api/chat.update", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json; charset=utf-8",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              channel: channel_id,
+              ts: message_ts,
+              blocks: [
+                {
+                  type: "header",
+                  text: { type: "plain_text", text: "✅ Support Case Closed" },
+                },
+                {
+                  type: "section",
+                  text: {
+                    type: "mrkdwn",
+                    text: `*Case #${case_number}* has been marked as resolved by <@${user_id}>.`,
+                  },
+                },
+              ],
+            }),
+          });
+
+          // Thread reply confirming closure
+          await fetch("https://slack.com/api/chat.postMessage", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json; charset=utf-8",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              channel: channel_id,
+              thread_ts: message_ts,
+              text: `✅ Case #${case_number} marked as resolved by <@${user_id}>.`,
+            }),
+          });
+        }
+
+        console.log(`[close-case] Case ${case_id} (#${case_number}) closed by ${user_id}`);
       }
 
       // ---- Write "completed" audit log ----
