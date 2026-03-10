@@ -190,6 +190,14 @@ async function sfCloseCase(caseId: string): Promise<CloseCaseResponse> {
   });
 }
 
+async function sfSaveCsat(caseId: string, score: number): Promise<{ success: boolean; error?: string }> {
+  return salesforce.sfJson("/services/apexrest/barry/save-csat", {
+    method: "POST",
+    body: JSON.stringify({ caseId, score }),
+    headers: { "Content-Type": "application/json; charset=utf-8" },
+  });
+}
+
 // ---- Shared validation result handler ----
 type UserContext = {
   team_id: string;
@@ -653,7 +661,42 @@ const worker = new Worker(
         console.log(`[add-case-comment] Comment added to SF case ${case_id}`);
       }
 
-      // 7) Get cases — /view-cases command and pagination buttons
+      // 7) CSAT response — user clicked a rating button on the survey DM
+      if (job.name === "csat-response") {
+        const { case_id, case_number, rating, response_url } = job.data as {
+          case_id: string; case_number: string; rating: number; response_url: string;
+        };
+
+        const sfRes = await sfSaveCsat(case_id, rating);
+
+        if (!sfRes.success) {
+          console.error("[csat-response] SF save failed:", sfRes.error, { case_id, rating });
+        } else {
+          console.log(`[csat-response] CSAT score ${rating}/5 saved for case ${case_id} (#${case_number})`);
+        }
+
+        // Update the DM regardless of SF result — don't leave the user hanging
+        if (response_url) {
+          const stars = "⭐".repeat(rating);
+          await replyToResponseUrl(response_url, {
+            replace_original: true,
+            text: `Thanks for your feedback — ${stars} (${rating}/5). Your response has been recorded.`,
+            blocks: [
+              {
+                type: "section",
+                text: {
+                  type: "mrkdwn",
+                  text:
+                    `${stars} *Thanks for your feedback on Case #${case_number}* (${rating}/5).\n` +
+                    `Your response has been recorded. We appreciate you taking the time.`,
+                },
+              },
+            ],
+          });
+        }
+      }
+
+      // 8) Get cases — /view-cases command and pagination buttons
       if (job.name === "get-cases") {
         const { channel_id, user_id, team_id, response_url, page = 0, filter = "open" } = job.data as {
           channel_id: string; user_id: string; team_id?: string;
