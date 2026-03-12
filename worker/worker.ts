@@ -198,6 +198,14 @@ async function sfSaveCsat(caseId: string, score: number): Promise<{ success: boo
   });
 }
 
+async function sfSaveCsatFeedback(caseId: string, feedback: string): Promise<{ success: boolean; error?: string }> {
+  return salesforce.sfJson("/services/apexrest/barry/save-csat-feedback", {
+    method: "POST",
+    body: JSON.stringify({ caseId, feedback }),
+    headers: { "Content-Type": "application/json; charset=utf-8" },
+  });
+}
+
 // ---- Shared validation result handler ----
 type UserContext = {
   team_id: string;
@@ -675,25 +683,51 @@ const worker = new Worker(
           console.log(`[csat-response] CSAT score ${rating}/5 saved for case ${case_id} (#${case_number})`);
         }
 
-        // Update the DM regardless of SF result — don't leave the user hanging
+        // Update the DM — show thank-you + optional feedback prompt
         if (response_url) {
           const stars = "⭐".repeat(rating);
           await replyToResponseUrl(response_url, {
             replace_original: true,
-            text: `Thanks for your feedback — ${stars} (${rating}/5). Your response has been recorded.`,
+            text: `Thanks for rating Case #${case_number} — ${stars} (${rating}/5).`,
             blocks: [
               {
                 type: "section",
                 text: {
                   type: "mrkdwn",
-                  text:
-                    `${stars} *Thanks for your feedback on Case #${case_number}* (${rating}/5).\n` +
-                    `Your response has been recorded. We appreciate you taking the time.`,
+                  text: `${stars} *Thanks for rating Case #${case_number}* (${rating}/5) — your score has been recorded.`,
                 },
+              },
+              {
+                type: "section",
+                text: {
+                  type: "mrkdwn",
+                  text: "Want to tell us a bit more about your experience? It only takes a moment and really helps us improve.",
+                },
+              },
+              {
+                type: "actions",
+                elements: [
+                  {
+                    type: "button",
+                    action_id: "barry_csat_feedback_open",
+                    style: "primary",
+                    text: { type: "plain_text", text: "Tell us more 💬" },
+                    value: JSON.stringify({ case_id, case_number, rating }),
+                  },
+                ],
               },
             ],
           });
         }
+      }
+
+      // 7b) csat-feedback — save optional written feedback to CSAT_Feedback__c
+      if (job.name === "csat-feedback") {
+        const { case_id, case_number, feedback } = job.data as {
+          case_id: string; case_number: string; feedback: string;
+        };
+        await sfSaveCsatFeedback(case_id, feedback);
+        console.log(`[csat-feedback] Feedback saved for case ${case_id} (#${case_number})`);
       }
 
       // 8) Get cases — /view-cases command and pagination buttons
