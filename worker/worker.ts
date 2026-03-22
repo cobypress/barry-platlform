@@ -613,20 +613,18 @@ const worker = new Worker(
             [sfRes.caseId, sfRes.caseNumber, channel_id, msgBody.ts]
           );
 
-          // Write the Slack thread timestamp — only available after the message posts.
-          // Barry_Enabled__c, Slack_Channel_Id__c and Origin_Channel__c are set
-          // at case creation time in BarryCreateCase.cls.
+          // Write the Slack thread timestamp via Apex — only available after the
+          // message posts. Direct REST PATCH was unreliable; Apex endpoint matches
+          // the proven pattern used by BarryCreateCase.
           try {
-            await salesforce.sfFetch(
-              salesforce.sfRestPath(`/sobjects/Case/${sfRes.caseId}`),
-              {
-                method: "PATCH",
-                body: JSON.stringify({ Slack_Thread_Ts__c: msgBody.ts }),
-              }
-            );
+            await salesforce.sfJson("/services/apexrest/barry/update-case", {
+              method: "POST",
+              body: JSON.stringify({ caseId: sfRes.caseId, slackThreadTs: msgBody.ts }),
+              headers: { "Content-Type": "application/json; charset=utf-8" },
+            });
             console.log(`[create-case] Slack_Thread_Ts__c written to Case ${sfRes.caseId}`);
-          } catch (patchErr) {
-            console.error("[create-case] Failed to patch Slack_Thread_Ts__c:", patchErr);
+          } catch (threadErr) {
+            console.error("[create-case] Failed to write Slack_Thread_Ts__c:", threadErr);
           }
 
           // Add "Mark as Resolved" button via chat.update
