@@ -614,7 +614,7 @@ const worker = new Worker(
           // Write Slack routing fields back to Salesforce so the Conversation Centre
           // knows this case lives in Slack and can route replies correctly.
           try {
-            await salesforce.sfFetch(
+            const patchRes = await salesforce.sfFetch(
               salesforce.sfRestPath(`/sobjects/Case/${sfRes.caseId}`),
               {
                 method: "PATCH",
@@ -626,7 +626,12 @@ const worker = new Worker(
                 }),
               }
             );
-            console.log(`[create-case] Slack routing fields written to Case ${sfRes.caseId}`);
+            if (patchRes.ok) {
+              console.log(`[create-case] Slack routing fields written to Case ${sfRes.caseId}`);
+            } else {
+              const errBody = await patchRes.text().catch(() => "(unreadable)");
+              console.error(`[create-case] PATCH failed (${patchRes.status}) for Case ${sfRes.caseId}:`, errBody);
+            }
           } catch (patchErr) {
             // Non-fatal — case still created and thread mapped; log and continue
             console.error("[create-case] Failed to patch Slack routing fields:", patchErr);
