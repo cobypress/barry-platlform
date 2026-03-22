@@ -163,6 +163,7 @@ type CreateCaseRequest = {
   description: string;
   priority: string;
   type: string;
+  channelId: string;
 };
 
 type CreateCaseResponse = {
@@ -521,6 +522,7 @@ const worker = new Worker(
           description,
           priority: priority || "Medium",
           type: type || "Question",
+          channelId: channel_id,
         });
 
         if (!sfRes.success) {
@@ -611,25 +613,20 @@ const worker = new Worker(
             [sfRes.caseId, sfRes.caseNumber, channel_id, msgBody.ts]
           );
 
-          // Write Slack routing fields back to Salesforce so the Conversation Centre
-          // knows this case lives in Slack and can route replies correctly.
+          // Write the Slack thread timestamp — only available after the message posts.
+          // Barry_Enabled__c, Slack_Channel_Id__c and Origin_Channel__c are set
+          // at case creation time in BarryCreateCase.cls.
           try {
             await salesforce.sfFetch(
               salesforce.sfRestPath(`/sobjects/Case/${sfRes.caseId}`),
               {
                 method: "PATCH",
-                body: JSON.stringify({
-                  Barry_Enabled__c:    true,
-                  Slack_Thread_Ts__c:  msgBody.ts,
-                  Slack_Channel_Id__c: channel_id,
-                  Origin_Channel__c:   "Slack",
-                }),
+                body: JSON.stringify({ Slack_Thread_Ts__c: msgBody.ts }),
               }
             );
-            console.log(`[create-case] Slack routing fields written to Case ${sfRes.caseId}`);
+            console.log(`[create-case] Slack_Thread_Ts__c written to Case ${sfRes.caseId}`);
           } catch (patchErr) {
-            // Non-fatal — case still created and thread mapped; log and continue
-            console.error("[create-case] Failed to patch Slack routing fields:", patchErr);
+            console.error("[create-case] Failed to patch Slack_Thread_Ts__c:", patchErr);
           }
 
           // Add "Mark as Resolved" button via chat.update
