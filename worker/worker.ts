@@ -60,6 +60,80 @@ async function replyToResponseUrl(responseUrl: string, body: SlackResponseUrlBod
   }
 }
 
+// ---- Failure notification ----
+// Every job handler that expects a specific failure (bad input, unlinked channel, etc.)
+// already replies to Slack itself. This is the catch-all for anything that throws
+// unexpectedly (a dead Salesforce token, a DB error, a Slack API hiccup) so the user
+// never just stares at "Verifying your access..." forever with no idea it failed.
+
+function friendlyErrorText(err: unknown): string {
+  const msg = getErrorMessage(err);
+  if (/salesforce token refresh failed|invalid_grant/i.test(msg)) {
+    return "There's a problem connecting to Salesforce right now — an admin has been notified.";
+  }
+  if (/relation .* does not exist/i.test(msg)) {
+    return "Something's misconfigured on our end — an admin has been notified.";
+  }
+  if (/slack (users\.info|views\.open|channel lookup)/i.test(msg)) {
+    return "Slack had a hiccup processing that — please try again in a moment.";
+  }
+  return "Sorry, something went wrong processing that — an admin has been notified.";
+}
+
+async function notifyJobFailure(job: Job, err: unknown) {
+  const token = process.env.SLACK_BOT_TOKEN;
+  if (!token) {
+    console.error("[notifyJobFailure] SLACK_BOT_TOKEN not set — cannot tell the user this failed");
+    return;
+  }
+
+  const data = (job.data || {}) as Record<string, unknown>;
+  const payload = (data.payload || {}) as Record<string, unknown>;
+  const responseUrl = (data.response_url as string | undefined) || (payload.response_url as string | undefined);
+  const userId = (data.user_id as string | undefined) || (payload.user_id as string | undefined);
+  const channelId = (data.channel_id as string | undefined) || (payload.channel_id as string | undefined);
+
+  const text = `⚠️ ${friendlyErrorText(err)}\n_Reference: \`${job.id}\`_`;
+
+  try {
+    if (responseUrl) {
+      await replyToResponseUrl(responseUrl, { replace_original: true, text });
+      return;
+    }
+
+    if (userId) {
+      const openRes = await fetch("https://slack.com/api/conversations.open", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json; charset=utf-8" },
+        body: JSON.stringify({ users: userId }),
+      });
+      const openBody = (await openRes.json()) as { ok?: boolean; channel?: { id?: string } };
+      if (openBody.ok && openBody.channel?.id) {
+        await fetch("https://slack.com/api/chat.postMessage", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json; charset=utf-8" },
+          body: JSON.stringify({ channel: openBody.channel.id, text }),
+        });
+        return;
+      }
+    }
+
+    if (channelId) {
+      await fetch("https://slack.com/api/chat.postEphemeral", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json; charset=utf-8" },
+        body: JSON.stringify({ channel: channelId, user: userId, text }),
+      });
+      return;
+    }
+
+    console.error(`[notifyJobFailure] Job ${job.id} (${job.name}) has no response_url/user/channel — could not notify anyone`);
+  } catch (notifyErr) {
+    // The original job already failed; failing to REPORT that must never crash the worker.
+    console.error(`[notifyJobFailure] Could not notify about job ${job.id}:`, getErrorMessage(notifyErr));
+  }
+}
+
 async function slackUpdateMessage(token: string, channel: string, ts: string, text: string) {
   const res = await fetch("https://slack.com/api/chat.update", {
     method: "POST",
@@ -986,7 +1060,20 @@ const worker = new Worker(
 // ---- Worker Lifecycle Events ----
 worker.on("ready", () => console.log("✅ Worker ready"));
 worker.on("error", (err) => console.error("❌ Worker error:", getErrorMessage(err)));
-worker.on("failed", (job, err) => console.error(`❌ Job ${job?.id} permanently failed:`, getErrorMessage(err)));
+worker.on("failed", (job, err) => {
+  console.error(`❌ Job ${job?.id} failed:`, getErrorMessage(err));
+  if (!job) return;
+
+  // Only tell the user once retries are exhausted — a job that's about to succeed on
+  // attempt 2 shouldn't alarm anyone. Jobs enqueued with no explicit retry config
+  // default to a single attempt, so attemptsMade already equals maxAttempts for those.
+  const maxAttempts = job.opts?.attempts ?? 1;
+  if (job.attemptsMade < maxAttempts) return;
+
+  notifyJobFailure(job, err).catch((e) =>
+    console.error(`[notifyJobFailure] unexpected error notifying about job ${job.id}:`, getErrorMessage(e))
+  );
+});
 
 // ---- Graceful shutdown ----
 process.on("SIGINT", async () => {

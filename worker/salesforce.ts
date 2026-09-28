@@ -16,13 +16,12 @@ type TokenCache = {
 
 const SF_CLIENT_ID = process.env.SF_CLIENT_ID!;
 const SF_CLIENT_SECRET = process.env.SF_CLIENT_SECRET!;
-const SF_REFRESH_TOKEN = process.env.SF_REFRESH_TOKEN!;
 const SF_LOGIN_URL = process.env.SF_LOGIN_URL || "https://login.salesforce.com";
 const SF_API_VERSION = process.env.SF_API_VERSION || "60.0";
 const SKEW_SECONDS = Number(process.env.SF_TOKEN_SKEW_SECONDS || "60");
 
-if (!SF_CLIENT_ID || !SF_CLIENT_SECRET || !SF_REFRESH_TOKEN) {
-  throw new Error("Missing Salesforce env vars (SF_CLIENT_ID/SF_CLIENT_SECRET/SF_REFRESH_TOKEN).");
+if (!SF_CLIENT_ID || !SF_CLIENT_SECRET) {
+  throw new Error("Missing Salesforce env vars (SF_CLIENT_ID/SF_CLIENT_SECRET).");
 }
 
 let tokenCache: TokenCache | null = null;
@@ -36,7 +35,7 @@ function isValid(cache: TokenCache | null) {
   return !!cache && cache.expiresAt > nowMs();
 }
 
-// Salesforce refresh responses often don't include expires_in.
+// Salesforce token responses often don't include expires_in.
 // Use a conservative TTL and rely on retry-once on auth failure.
 function computeExpiresAtConservative(ttlSeconds = 10 * 60) {
   return nowMs() + (ttlSeconds - SKEW_SECONDS) * 1000;
@@ -48,11 +47,14 @@ async function refreshAccessToken(): Promise<TokenCache> {
   refreshing = (async () => {
     const url = `${SF_LOGIN_URL}/services/oauth2/token`;
 
+    // Client Credentials flow — runs as the Connected App's designated Integration
+    // User, no refresh token involved. Nothing here can silently expire the way a
+    // refresh token tied to a personal login can (password reset, revoked session,
+    // an org security policy) — see docs/barry-salesforce-auth.md.
     const body = new URLSearchParams({
-      grant_type: "refresh_token",
+      grant_type: "client_credentials",
       client_id: SF_CLIENT_ID,
       client_secret: SF_CLIENT_SECRET,
-      refresh_token: SF_REFRESH_TOKEN,
     });
 
     const res = await fetch(url, {
@@ -63,7 +65,7 @@ async function refreshAccessToken(): Promise<TokenCache> {
 
     const text = await res.text();
     if (!res.ok) {
-      throw new Error(`Salesforce token refresh failed (${res.status}): ${text}`);
+      throw new Error(`Salesforce token request failed (${res.status}): ${text}`);
     }
 
     const data = JSON.parse(text) as SalesforceTokenResponse;
