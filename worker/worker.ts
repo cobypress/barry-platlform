@@ -60,6 +60,31 @@ async function replyToResponseUrl(responseUrl: string, body: SlackResponseUrlBod
   }
 }
 
+// A real slash command always has a response_url (Slack issues one per invocation); a Workflow
+// Builder button press does not. Everywhere in the create-case flow that would normally edit its
+// ephemeral reply via response_url falls back to posting a fresh chat.postEphemeral instead -
+// same "only this user sees it" visibility, just as a new message rather than an edited one
+// (chat.postEphemeral has no equivalent of replace_original).
+async function respond(
+  ctx: { response_url?: string; channel_id: string; user_id: string },
+  body: SlackResponseUrlBody
+) {
+  if (ctx.response_url) {
+    await replyToResponseUrl(ctx.response_url, body);
+    return;
+  }
+  const token = requireEnv("SLACK_BOT_TOKEN");
+  const res = await fetch("https://slack.com/api/chat.postEphemeral", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json; charset=utf-8" },
+    body: JSON.stringify({ channel: ctx.channel_id, user: ctx.user_id, text: body.text, blocks: body.blocks }),
+  });
+  const data = (await res.json()) as { ok?: boolean; error?: string };
+  if (!data.ok) {
+    throw new Error(`chat.postEphemeral failed: ${data.error}`);
+  }
+}
+
 // ---- Failure notification ----
 // Every job handler that expects a specific failure (bad input, unlinked channel, etc.)
 // already replies to Slack itself. This is the catch-all for anything that throws
@@ -287,7 +312,7 @@ type UserContext = {
   user_id: string;
   email: string;
   channel_id: string;
-  response_url: string;
+  response_url?: string;
 };
 
 async function handleValidationResult(result: ValidateUserResponse, ctx: UserContext): Promise<void> {
@@ -296,7 +321,7 @@ async function handleValidationResult(result: ValidateUserResponse, ctx: UserCon
   switch (result.status) {
     case "channel_not_linked": {
       // Private: replace the ephemeral with a brief note
-      await replyToResponseUrl(response_url, {
+      await respond(ctx, {
         replace_original: true,
         text: "❌ This channel isn't connected to a customer account yet.",
       });
@@ -326,14 +351,14 @@ async function handleValidationResult(result: ValidateUserResponse, ctx: UserCon
     }
 
     case "no_entitlement":
-      await replyToResponseUrl(response_url, {
+      await respond(ctx, {
         replace_original: true,
         text: "❌ The account linked to this channel doesn't have an active support entitlement. Please contact your account manager.",
       });
       break;
 
     case "contact_not_found":
-      await replyToResponseUrl(response_url, {
+      await respond(ctx, {
         replace_original: true,
         text: "We couldn't find a Salesforce contact for your email address on this account.",
         blocks: [
@@ -360,14 +385,14 @@ async function handleValidationResult(result: ValidateUserResponse, ctx: UserCon
       break;
 
     case "pending_approval":
-      await replyToResponseUrl(response_url, {
+      await respond(ctx, {
         replace_original: true,
         text: "⏳ Your access request is pending approval. Barry will send you a direct message once it's approved.",
       });
       break;
 
     case "approved":
-      await replyToResponseUrl(response_url, {
+      await respond(ctx, {
         replace_original: true,
         text: "✅ All checks passed.",
         blocks: [
@@ -418,12 +443,13 @@ type SlackCommandPayload = {
 async function handleCreateCaseCommand(job: Job, payload: SlackCommandPayload) {
   const { response_url, team_id, channel_id, user_id } = payload;
 
-  if (!response_url) throw new Error("Missing response_url in slack command payload");
+  // response_url is only present for a real slash command - a Workflow Builder button press has
+  // no equivalent, and respond() falls back to chat.postEphemeral when it's absent.
   if (!team_id) throw new Error("Missing team_id in slack command payload");
   if (!channel_id) throw new Error("Missing channel_id in slack command payload");
   if (!user_id) throw new Error("Missing user_id in slack command payload");
 
-  await replyToResponseUrl(response_url, {
+  await respond({ response_url, channel_id, user_id }, {
     replace_original: true,
     text: "🔍 Verifying your access…",
   });
@@ -434,7 +460,7 @@ async function handleCreateCaseCommand(job: Job, payload: SlackCommandPayload) {
     [team_id, user_id]
   );
   if (rows.length === 0) {
-    await replyToResponseUrl(response_url, {
+    await respond({ response_url, channel_id, user_id }, {
       replace_original: true,
       text: "⚠️ Your email isn't verified yet. Please run `/create-case` again to complete setup.",
     });
