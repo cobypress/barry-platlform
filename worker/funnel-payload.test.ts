@@ -4,8 +4,10 @@ import {
   buildLeadPayload,
   formatAnswers,
   formatFreeText,
-  kitTags,
   matchBookings,
+  optInsFor,
+  stepUrl,
+  weakestAreaDetails,
   weakestAreas,
   type CandidateSubmission,
   type QuestionDef,
@@ -24,13 +26,20 @@ const snapshot = {
   score: {
     overall: 64,
     band: { key: "leaking", label: "Leaking" },
-    weakest: [{ label: "Pipeline" }, { label: "Data quality" }, { label: "Configuration" }, { label: "Forecasting" }],
+    weakest: [{ key: "pipeline", label: "Pipeline" }, { key: "data", label: "Data quality" }, { key: "config", label: "Configuration" }, { key: "forecast", label: "Forecasting" }],
   },
+  dimensions: [
+    { key: "pipeline", label: "Pipeline", diagnosis: "Deals sit without next steps.", cost: "Stalled deals go unnoticed." },
+    { key: "data", label: "Data quality", diagnosis: "Duplicates and empty key fields.", cost: null },
+    { key: "config", label: "Configuration", diagnosis: "", cost: "" },
+  ],
 };
 
 function submission(over: Partial<SubmissionForSync> = {}): SubmissionForSync {
   return {
     id: "sub1",
+    token: "tok_abc-123",
+    funnelLive: true,
     funnelName: "Pipeline Leak Scorecard (LinkedIn)",
     funnelSlug: "pipeline-leak-scorecard",
     sfCampaignId: "701QH00000AbCdE",
@@ -46,6 +55,11 @@ function submission(over: Partial<SubmissionForSync> = {}): SubmissionForSync {
     role: "Sales Director/Head of Sales",
     phone: null,
     utm: { source: "linkedin", medium: "paid-social", campaign: "", term: null },
+    completedAt: new Date("2026-10-07T09:40:00Z"),
+    optIns: [{ subscriptionId: "0XlQH00000029AT0AY", subscriptionName: "Black Cloud Signal", label: "Send me…", version: "signal-v1" }],
+    routedStep: { pathSegment: "results", cleanPath: null },
+    routedUrl: null,
+    bookingStep: { pathSegment: "book", cleanPath: null },
     ...over,
   };
 }
@@ -129,14 +143,40 @@ describe("matchBookings", () => {
   });
 });
 
-describe("kitTags", () => {
-  test("prefix + completed + band", () => {
-    assert.deepEqual(kitTags("scorecard", "leaking"), ["scorecard-completed", "scorecard-leaking"]);
-    assert.deepEqual(kitTags(" Scorecard ", "Critical"), ["scorecard-completed", "scorecard-critical"]);
+describe("consent + results email fields", () => {
+  test("funnel key, band key, links with the token, weakest-area copy, opt-ins and capture time", () => {
+    const p = buildLeadPayload(submission(), { siteUrl: "https://black-cloud.com/", recordType: null });
+    assert.equal(p.funnelKey, "pipeline-leak-scorecard");
+    assert.equal(p.funnelName, "Pipeline Leak Scorecard (LinkedIn)");
+    assert.equal(p.bandKey, "leaking");
+    assert.equal(p.resultsUrl, "https://black-cloud.com/f/pipeline-leak-scorecard/results?s=tok_abc-123");
+    assert.equal(p.bookingUrl, "https://black-cloud.com/f/pipeline-leak-scorecard/book?s=tok_abc-123");
+    assert.deepEqual(p.weakestAreaDetails, [
+      { label: "Pipeline", diagnosis: "Deals sit without next steps.", cost: "Stalled deals go unnoticed." },
+      { label: "Data quality", diagnosis: "Duplicates and empty key fields.", cost: null },
+      { label: "Configuration", diagnosis: null, cost: null },
+    ]);
+    assert.deepEqual(p.optIns, [{ subscriptionId: "0XlQH00000029AT0AY", textVersion: "signal-v1" }]);
+    assert.equal(p.capturedAt, "2026-10-07T09:40:00.000Z");
   });
-  test("no prefix → no tags; no band → completed only", () => {
-    assert.deepEqual(kitTags("", "leaking"), []);
-    assert.deepEqual(kitTags(null, "leaking"), []);
-    assert.deepEqual(kitTags("scorecard", null), ["scorecard-completed"]);
+
+  test("external routing keeps the URL; no booking step means no booking link", () => {
+    const p = buildLeadPayload(submission({ routedUrl: "https://example.com/thanks", bookingStep: null }), { siteUrl: "https://black-cloud.com", recordType: null });
+    assert.equal(p.resultsUrl, "https://example.com/thanks");
+    assert.equal(p.bookingUrl, null);
+  });
+
+  test("clean paths only when the funnel is live", () => {
+    const step = { pathSegment: "start", cleanPath: "scorecard" };
+    assert.equal(stepUrl("https://black-cloud.com", { funnelSlug: "f", funnelLive: true, token: "t" }, step), "https://black-cloud.com/scorecard?s=t");
+    assert.equal(stepUrl("https://black-cloud.com", { funnelSlug: "f", funnelLive: false, token: "t" }, step), "https://black-cloud.com/f/f/start?s=t");
+  });
+
+  test("malformed opt-ins and snapshots are ignored", () => {
+    assert.deepEqual(optInsFor([{ subscriptionId: "701QH00000AbCdE" }, null, "x", { subscriptionId: "0XlQH00000029AT" }]), [{ subscriptionId: "0XlQH00000029AT", textVersion: null }]);
+    assert.deepEqual(optInsFor(null), []);
+    assert.deepEqual(weakestAreaDetails(null), []);
+    assert.deepEqual(weakestAreaDetails({ score: { weakest: [{ key: "x", label: "X" }] } }), [{ label: "X", diagnosis: null, cost: null }]);
   });
 });
+

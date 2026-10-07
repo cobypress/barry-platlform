@@ -8,10 +8,19 @@ export interface QuestionDef {
   options?: Array<{ label: string; value: string }>;
 }
 
+/** Where a public step lives: its clean path, or /f/<slug>/<segment>. */
+export interface StepPath {
+  pathSegment: string;
+  cleanPath: string | null;
+}
+
 export interface SubmissionForSync {
   id: string;
+  /** The submission's private token: results and booking links carry it as ?s=. */
+  token: string;
   funnelName: string;
   funnelSlug: string;
+  funnelLive: boolean;
   sfCampaignId: string | null;
   sfLeadSource: string;
   questions: QuestionDef[];
@@ -25,6 +34,14 @@ export interface SubmissionForSync {
   role: string | null;
   phone: string | null;
   utm: Record<string, unknown> | null;
+  completedAt: Date | string | null;
+  /** FunnelSubmission.optIns: the boxes ticked, [{ subscriptionId, version, … }]. */
+  optIns: unknown;
+  /** The step the submission was routed to (usually results), or an external URL. */
+  routedStep: StepPath | null;
+  routedUrl: string | null;
+  /** The funnel's booking step, if it has one. */
+  bookingStep: StepPath | null;
 }
 
 /** Body for POST /services/apexrest/barry/funnel-lead (BarryFunnelLead.cls). */
@@ -51,6 +68,25 @@ export interface FunnelLeadPayload {
   answers: string;
   freeText: string | null;
   submissionUrl: string;
+  /** Funnel slug: marks the Campaign as a funnel campaign and drives the results-email Flow. */
+  funnelKey: string;
+  funnelName: string;
+  bandKey: string | null;
+  /** The person's own results page (with their token). A new link = a new results email. */
+  resultsUrl: string | null;
+  /** Booking page for the review call: the results email's one call to action. */
+  bookingUrl: string | null;
+  weakestAreaDetails: WeakestAreaDetail[];
+  /** Ticked opt-in boxes → OptIn CommSubscriptionConsents. */
+  optIns: Array<{ subscriptionId: string; textVersion: string | null }>;
+  /** When they submitted (ISO): the consent capture time. */
+  capturedAt: string | null;
+}
+
+export interface WeakestAreaDetail {
+  label: string;
+  diagnosis: string | null;
+  cost: string | null;
 }
 
 const TEXT_TYPES = new Set(["shortText", "longText"]);
@@ -92,7 +128,42 @@ export function formatFreeText(questions: QuestionDef[], answers: Record<string,
 }
 
 interface SnapshotShape {
-  score?: { band?: { label?: unknown } | null; weakest?: Array<{ label?: unknown }> };
+  score?: { band?: { key?: unknown; label?: unknown } | null; weakest?: Array<{ key?: unknown; label?: unknown }> };
+  dimensions?: Array<{ key?: unknown; label?: unknown; diagnosis?: unknown; cost?: unknown }>;
+}
+
+export function bandKey(snapshot: unknown): string | null {
+  return str((snapshot as SnapshotShape | null)?.score?.band?.key);
+}
+
+/** The weakest areas with the funnel's diagnosis and cost copy (as it was when they submitted). */
+export function weakestAreaDetails(snapshot: unknown, count = 3): WeakestAreaDetail[] {
+  const snap = snapshot as SnapshotShape | null;
+  const weakest = snap?.score?.weakest;
+  if (!Array.isArray(weakest)) return [];
+  const dims = Array.isArray(snap?.dimensions) ? snap!.dimensions! : [];
+  return weakest.slice(0, count).flatMap((w) => {
+    const dim = dims.find((d) => d?.key === w?.key);
+    const label = str(w?.label) ?? str(dim?.label);
+    return label ? [{ label, diagnosis: str(dim?.diagnosis), cost: str(dim?.cost) }] : [];
+  });
+}
+
+/** Public URL of a step for this submission, with its token. */
+export function stepUrl(siteUrl: string, s: Pick<SubmissionForSync, "funnelSlug" | "funnelLive" | "token">, step: StepPath | null): string | null {
+  if (!step) return null;
+  const base = siteUrl.replace(/\/$/, "");
+  const path = s.funnelLive && step.cleanPath ? `/${step.cleanPath}` : `/f/${s.funnelSlug}/${step.pathSegment}`;
+  return `${base}${path}?s=${encodeURIComponent(s.token)}`;
+}
+
+/** FunnelSubmission.optIns → the Apex payload shape, ignoring anything malformed. */
+export function optInsFor(raw: unknown): Array<{ subscriptionId: string; textVersion: string | null }> {
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((o) => {
+    const id = str((o as { subscriptionId?: unknown } | null)?.subscriptionId);
+    return id && /^0Xl[A-Za-z0-9]{12}(?:[A-Za-z0-9]{3})?$/.test(id) ? [{ subscriptionId: id, textVersion: str((o as { version?: unknown }).version) }] : [];
+  });
 }
 
 export function bandLabel(snapshot: unknown): string | null {
@@ -134,6 +205,14 @@ export function buildLeadPayload(
     answers: formatAnswers(s.questions, s.answers),
     freeText: formatFreeText(s.questions, s.answers),
     submissionUrl: `${opts.siteUrl.replace(/\/$/, "")}/internal/funnels/${s.funnelSlug}/submissions/${s.id}`,
+    funnelKey: s.funnelSlug,
+    funnelName: s.funnelName,
+    bandKey: bandKey(s.resultSnapshot),
+    resultsUrl: s.routedUrl ?? stepUrl(opts.siteUrl, s, s.routedStep),
+    bookingUrl: stepUrl(opts.siteUrl, s, s.bookingStep),
+    weakestAreaDetails: weakestAreaDetails(s.resultSnapshot),
+    optIns: optInsFor(s.optIns),
+    capturedAt: s.completedAt ? new Date(s.completedAt).toISOString() : null,
   };
 }
 
@@ -194,17 +273,4 @@ export function matchBookings(events: CalendarEvent[], candidates: CandidateSubm
     }
   }
   return matches;
-}
-
-// ─── Kit ─────────────────────────────────────────────────────────────────────
-
-/**
- * Tags applied in Kit for a completed submission: "<prefix>-completed" and
- * "<prefix>-<band key>" (e.g. scorecard-completed, scorecard-leaking). Kit
- * sequences hang off these. Empty when the funnel has no tag prefix.
- */
-export function kitTags(prefix: string | null, bandKey: string | null): string[] {
-  const p = (prefix ?? "").trim().toLowerCase();
-  if (!p) return [];
-  return [`${p}-completed`, ...(bandKey ? [`${p}-${bandKey.toLowerCase()}`] : [])];
 }

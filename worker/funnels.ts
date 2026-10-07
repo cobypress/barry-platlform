@@ -3,7 +3,9 @@
 //   funnel-submission-sync  { submissionId }  Lead/Contact + Campaign Member via /barry/funnel-lead
 //   funnel-booking-sync     { submissionId }  Campaign Member → "Meeting Booked" via /barry/funnel-booking
 //   funnel-booking-poll     (every 5 min)     match new Google appointment bookings to submissions
-//   funnel-kit-sync         { submissionId }  Kit subscriber + tags (<prefix>-completed, <prefix>-<band>)
+//
+// Consent (opt-ins) is recorded in Salesforce by /barry/funnel-lead; Kit is
+// synced from Salesforce separately, never from here.
 //
 // Only submission ids travel through Redis; everything else is read from
 // Neon here, so no personal data sits in the queue.
@@ -14,7 +16,6 @@ import type { Queue } from "bullmq";
 import { salesforce } from "./salesforce";
 import {
   buildLeadPayload,
-  kitTags,
   matchBookings,
   type CalendarEvent,
   type CandidateSubmission,
@@ -26,7 +27,8 @@ export const FUNNEL_JOBS = {
   submissionSync: "funnel-submission-sync",
   bookingSync: "funnel-booking-sync",
   bookingPoll: "funnel-booking-poll",
-  kitSync: "funnel-kit-sync",
+  /** Removed 2026-10-07 (consent moved to Salesforce). Still accepted, as a no-op, while old jobs drain. */
+  legacyKitSync: "funnel-kit-sync",
 } as const;
 
 export const FUNNEL_JOB_OPTS = {
@@ -61,8 +63,8 @@ export async function handleFunnelJob(name: string, data: unknown, deps: Deps): 
       return syncBooking(submissionIdOf(data), deps);
     case FUNNEL_JOBS.bookingPoll:
       return pollBookings(deps);
-    case FUNNEL_JOBS.kitSync:
-      return syncKit(submissionIdOf(data), deps);
+    case FUNNEL_JOBS.legacyKitSync:
+      return { skipped: "The funnel Kit sync was removed: opt-ins go to Salesforce, and Kit is synced from there." };
     default:
       throw new Error(`Unknown funnel job ${name}`);
   }
@@ -81,13 +83,21 @@ interface FunnelLeadResponse {
 
 async function syncSubmission(submissionId: string, { pool }: Deps) {
   const { rows } = await pool.query(
-    `SELECT s.id, s.status, s."isTest", s.answers, s."scoreOverall", s."resultSnapshot",
+    `SELECT s.id, s.token, s.status, s."isTest", s.answers, s."scoreOverall", s."resultSnapshot",
             s."firstName", s."lastName", s.email, s.company, s.role, s.phone, s.utm,
-            f.name AS "funnelName", f.slug AS "funnelSlug", f."sfCampaignId", f."sfLeadSource",
-            q.questions
+            s."completedAt", s."optIns", s."routedUrl",
+            f.name AS "funnelName", f.slug AS "funnelSlug", f.status AS "funnelStatus", f."sfCampaignId", f."sfLeadSource",
+            q.questions,
+            rs."pathSegment" AS "routedSegment", rs."cleanPath" AS "routedCleanPath",
+            bs."pathSegment" AS "bookingSegment", bs."cleanPath" AS "bookingCleanPath"
        FROM "FunnelSubmission" s
        JOIN "Funnel" f ON f.id = s."funnelId"
        LEFT JOIN "FunnelQuiz" q ON q.id = s."quizId"
+       LEFT JOIN "FunnelStep" rs ON rs.id = s."routedStepId"
+       LEFT JOIN LATERAL (
+         SELECT "pathSegment", "cleanPath" FROM "FunnelStep"
+          WHERE "funnelId" = s."funnelId" AND type = 'booking' ORDER BY "order" LIMIT 1
+       ) bs ON true
       WHERE s.id = $1`,
     [submissionId],
   );
@@ -100,8 +110,10 @@ async function syncSubmission(submissionId: string, { pool }: Deps) {
 
   const submission: SubmissionForSync = {
     id: row.id,
+    token: row.token,
     funnelName: row.funnelName,
     funnelSlug: row.funnelSlug,
+    funnelLive: row.funnelStatus === "live",
     sfCampaignId: row.sfCampaignId,
     sfLeadSource: row.sfLeadSource,
     questions: (Array.isArray(row.questions) ? row.questions : []) as QuestionDef[],
@@ -115,6 +127,11 @@ async function syncSubmission(submissionId: string, { pool }: Deps) {
     role: row.role,
     phone: row.phone,
     utm: row.utm,
+    completedAt: row.completedAt,
+    optIns: row.optIns,
+    routedStep: row.routedSegment ? { pathSegment: row.routedSegment, cleanPath: row.routedCleanPath } : null,
+    routedUrl: row.routedUrl,
+    bookingStep: row.bookingSegment ? { pathSegment: row.bookingSegment, cleanPath: row.bookingCleanPath } : null,
   };
 
   try {
@@ -169,74 +186,6 @@ async function syncBooking(submissionId: string, { pool }: Deps) {
   });
   if (!res.success) throw new Error(res.error || "Salesforce rejected the booking update");
   return { booked: true };
-}
-
-// ─── Kit (email sequences) ───────────────────────────────────────────────────
-
-const KIT_API = "https://api.kit.com/v4";
-
-async function kitRequest<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${KIT_API}${path}`, {
-    method: "POST",
-    headers: { "X-Kit-Api-Key": process.env.KIT_API_KEY ?? "", "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify(body),
-  });
-  const text = await res.text();
-  if (!res.ok) throw new Error(`Kit ${path} failed (${res.status}): ${text.slice(0, 300)}`);
-  return (text ? JSON.parse(text) : {}) as T;
-}
-
-/**
- * Adds or updates the person in Kit and applies the funnel's tags; Kit's own
- * automations start the sequences. Only for people who ticked the consent box.
- * Kit's create-subscriber call is an upsert that never reactivates someone who
- * unsubscribed, so unsubscribes are respected.
- */
-async function syncKit(submissionId: string, { pool }: Deps) {
-  const { rows } = await pool.query(
-    `SELECT s.status, s."isTest", s."consentGiven", s.email, s."firstName", s."bandKey", f."kitTagPrefix"
-       FROM "FunnelSubmission" s JOIN "Funnel" f ON f.id = s."funnelId" WHERE s.id = $1`,
-    [submissionId],
-  );
-  const row = rows[0];
-  const skip = async (reason: string) => {
-    await pool.query(`UPDATE "FunnelSubmission" SET "kitStatus" = 'skipped', "kitError" = $2, "updatedAt" = now() WHERE id = $1`, [submissionId, reason]);
-    return { skipped: reason };
-  };
-  if (!row) return { skipped: "submission not found" };
-  if (row.isTest) return skip("Test submission");
-  if (row.status !== "completed" || !row.email) return skip("Not completed");
-  if (!row.consentGiven) return skip("No consent");
-  const tags = kitTags(row.kitTagPrefix, row.bandKey);
-  if (tags.length === 0) return skip("Funnel has no Kit tag prefix");
-  if (!process.env.KIT_API_KEY) return skip("KIT_API_KEY isn't set on the worker");
-
-  try {
-    const sub = await kitRequest<{ subscriber?: { id?: number } }>("/subscribers", {
-      email_address: row.email,
-      first_name: row.firstName ?? undefined,
-      state: "active",
-    });
-    for (const name of tags) {
-      const tag = await kitRequest<{ tag?: { id?: number } }>("/tags", { name });
-      if (!tag.tag?.id) throw new Error(`Kit didn't return an id for tag "${name}"`);
-      await kitRequest(`/tags/${tag.tag.id}/subscribers`, { email_address: row.email });
-    }
-    await pool.query(
-      `UPDATE "FunnelSubmission"
-          SET "kitStatus" = 'synced', "kitSubscriberId" = $2, "kitError" = NULL, "kitSyncedAt" = now(),
-              "kitAttempts" = "kitAttempts" + 1, "updatedAt" = now()
-        WHERE id = $1`,
-      [submissionId, sub.subscriber?.id != null ? String(sub.subscriber.id) : null],
-    );
-    return { tags };
-  } catch (err) {
-    await pool.query(
-      `UPDATE "FunnelSubmission" SET "kitStatus" = 'failed', "kitError" = $2, "kitAttempts" = "kitAttempts" + 1, "updatedAt" = now() WHERE id = $1`,
-      [submissionId, message(err)],
-    );
-    throw err;
-  }
 }
 
 // ─── Google Calendar booking poll ────────────────────────────────────────────
