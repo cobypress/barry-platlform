@@ -4,6 +4,7 @@ import {
   buildLeadPayload,
   formatAnswers,
   formatFreeText,
+  kitTags,
   matchBookings,
   weakestAreas,
   type CandidateSubmission,
@@ -125,5 +126,17 @@ describe("matchBookings", () => {
     );
     // "a" takes the newest submission; "b" then takes the older one.
     assert.deepEqual(m.map((x) => [x.eventId, x.submissionId]), [["a", "new"], ["b", "old"]]);
+  });
+});
+
+describe("kitTags", () => {
+  test("prefix + completed + band", () => {
+    assert.deepEqual(kitTags("scorecard", "leaking"), ["scorecard-completed", "scorecard-leaking"]);
+    assert.deepEqual(kitTags(" Scorecard ", "Critical"), ["scorecard-completed", "scorecard-critical"]);
+  });
+  test("no prefix → no tags; no band → completed only", () => {
+    assert.deepEqual(kitTags("", "leaking"), []);
+    assert.deepEqual(kitTags(null, "leaking"), []);
+    assert.deepEqual(kitTags("scorecard", null), ["scorecard-completed"]);
   });
 });

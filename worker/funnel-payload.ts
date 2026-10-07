@@ -195,3 +195,16 @@ export function matchBookings(events: CalendarEvent[], candidates: CandidateSubm
   }
   return matches;
 }
+
+// ─── Kit ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Tags applied in Kit for a completed submission: "<prefix>-completed" and
+ * "<prefix>-<band key>" (e.g. scorecard-completed, scorecard-leaking). Kit
+ * sequences hang off these. Empty when the funnel has no tag prefix.
+ */
+export function kitTags(prefix: string | null, bandKey: string | null): string[] {
+  const p = (prefix ?? "").trim().toLowerCase();
+  if (!p) return [];
+  return [`${p}-completed`, ...(bandKey ? [`${p}-${bandKey.toLowerCase()}`] : [])];
+}
