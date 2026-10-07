@@ -1,8 +1,9 @@
 import "dotenv/config";
-import { Worker, Job } from "bullmq";
+import { Worker, Job, Queue } from "bullmq";
 import { URL } from "node:url";
 import { pool } from "./db";
 import { salesforce } from "./salesforce";
+import { handleFunnelJob, scheduleBookingPoll } from "./funnels";
 
 function requireEnv(name: string): string {
   const v = process.env[name];
@@ -473,6 +474,12 @@ async function handleCreateCaseCommand(job: Job, payload: SlackCommandPayload) {
   await handleValidationResult(result, { team_id, user_id, email, channel_id, response_url });
 }
 
+// ---- Funnel Builder: queue handle for follow-up jobs + the 5-minute booking poll ----
+const funnelQueue = new Queue("barry-jobs", { connection });
+scheduleBookingPoll(funnelQueue).catch((err) =>
+  console.error("[funnels] Could not schedule booking poll:", getErrorMessage(err))
+);
+
 // ---- Core Worker ----
 const worker = new Worker(
   "barry-jobs",
@@ -494,6 +501,16 @@ const worker = new Worker(
     );
 
     try {
+      // 0) Funnel Builder jobs (Salesforce sync, Google Calendar booking poll)
+      if (job.name.startsWith("funnel-")) {
+        const result = await handleFunnelJob(job.name, job.data, { pool, queue: funnelQueue });
+        await pool.query(
+          `INSERT INTO audit_log (source, action, status, correlation_id, payload) VALUES ($1, $2, $3, $4, $5)`,
+          ["queue", job.name, "completed", correlationId, { ...(job.data || {}), result }]
+        );
+        return { ok: true, result, processedAt: new Date().toISOString() };
+      }
+
       // 1) Slack interactivity jobs (legacy — button clicks that don't have a specific handler)
       if (job.name === "slack-interaction") {
         const interactionPayload = job.data?.payload as {
@@ -1089,6 +1106,8 @@ worker.on("error", (err) => console.error("❌ Worker error:", getErrorMessage(e
 worker.on("failed", (job, err) => {
   console.error(`❌ Job ${job?.id} failed:`, getErrorMessage(err));
   if (!job) return;
+  // Funnel jobs have no Slack user to tell; their failures show in /internal/funnels.
+  if (job.name.startsWith("funnel-")) return;
 
   // Only tell the user once retries are exhausted — a job that's about to succeed on
   // attempt 2 shouldn't alarm anyone. Jobs enqueued with no explicit retry config
@@ -1105,6 +1124,7 @@ worker.on("failed", (job, err) => {
 process.on("SIGINT", async () => {
   console.log("Shutting down worker...");
   await worker.close();
+  await funnelQueue.close();
   await pool.end();
   process.exit(0);
 });
