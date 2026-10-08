@@ -214,7 +214,8 @@ export function leadSummary(s: SubmissionForSync, answersUrl: string): string {
   const utm = s.utm ?? {};
   const source = str(utm.source);
   const content = str(utm.content);
-  if (source) parts.push(`Source: ${source}${content ? ` (${content})` : ""}`);
+  if (source) parts.push(`Source: ${source}${str(utm.medium) ? ` ${str(utm.medium)}` : ""}${content ? ` (${content})` : ""}`);
+  else parts.push("Source: direct (no tracking link)");
   for (const q of s.questions) {
     if (q.dimensionKey) continue;
     if (q.type !== "single" && q.type !== "dropdown") continue;
@@ -231,9 +232,26 @@ export function leadSummary(s: SubmissionForSync, answersUrl: string): string {
   return `${parts.join(" · ")}\nFull answers: ${answersUrl}`;
 }
 
+/** utm_medium values that mean paid traffic (ads). Anything else, or no UTMs at all, is organic/direct. */
+const PAID_MEDIUMS = new Set(["paid-social", "paid_social", "paidsocial", "paid", "cpc", "ppc", "cpm", "display", "paid-search", "paid_search", "ads", "ad"]);
+
+export function isPaidTraffic(utm: Record<string, unknown> | null): boolean {
+  const medium = str(utm?.medium)?.toLowerCase();
+  return !!medium && PAID_MEDIUMS.has(medium);
+}
+
+/**
+ * Lead Source: the funnel's own value (e.g. "Paid Social") for ad traffic;
+ * the organic value (default "Web") for typed URLs, posts, email and other
+ * untagged or non-paid visits, so organic leads aren't counted as ad leads.
+ */
+export function leadSourceFor(s: Pick<SubmissionForSync, "sfLeadSource" | "utm">, organic: string): string {
+  return isPaidTraffic(s.utm) ? s.sfLeadSource : organic;
+}
+
 export function buildLeadPayload(
   s: SubmissionForSync,
-  opts: { siteUrl: string; recordType: string | null; ownerId?: string | null },
+  opts: { siteUrl: string; recordType: string | null; ownerId?: string | null; organicLeadSource?: string | null },
 ): FunnelLeadPayload {
   if (!s.email) throw new Error(`Submission ${s.id} has no email`);
   const utm = s.utm ?? {};
@@ -244,7 +262,7 @@ export function buildLeadPayload(
     company: s.company,
     phone: s.phone,
     title: s.role,
-    leadSource: s.sfLeadSource,
+    leadSource: leadSourceFor(s, opts.organicLeadSource ?? "Web"),
     recordType: opts.recordType,
     ownerId: opts.ownerId ?? null,
     utmSource: str(utm.source),

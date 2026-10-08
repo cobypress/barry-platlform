@@ -141,6 +141,7 @@ async function syncSubmission(submissionId: string, { pool }: Deps) {
       siteUrl: SITE_URL,
       recordType: process.env.FUNNEL_LEAD_RECORD_TYPE || null,
       ownerId: process.env.FUNNEL_LEAD_OWNER_ID || null,
+      organicLeadSource: process.env.FUNNEL_ORGANIC_LEAD_SOURCE || "Web",
     });
     const res = await salesforce.sfJson<FunnelLeadResponse>("/services/apexrest/barry/funnel-lead", {
       method: "POST",
