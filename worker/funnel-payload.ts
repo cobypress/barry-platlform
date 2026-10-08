@@ -5,6 +5,8 @@ export interface QuestionDef {
   key: string;
   text: string;
   type: string;
+  /** Scoring area; absent/null for qualifiers (CRM, role…). */
+  dimensionKey?: string | null;
   options?: Array<{ label: string; value: string }>;
 }
 
@@ -33,6 +35,8 @@ export interface SubmissionForSync {
   company: string | null;
   role: string | null;
   phone: string | null;
+  companySize?: string | null;
+  isFreeEmail?: boolean;
   utm: Record<string, unknown> | null;
   completedAt: Date | string | null;
   /** FunnelSubmission.optIns: the boxes ticked, [{ subscriptionId, version, … }]. */
@@ -81,6 +85,11 @@ export interface FunnelLeadPayload {
   optIns: Array<{ subscriptionId: string; textVersion: string | null }>;
   /** When they submitted (ISO): the consent capture time. */
   capturedAt: string | null;
+  /**
+   * One-line summary for the Lead's Description (shown as "Subject" in the
+   * new-lead Slack message), plus a link to the full answers.
+   */
+  summary: string;
 }
 
 export interface WeakestAreaDetail {
@@ -177,6 +186,51 @@ export function weakestAreas(snapshot: unknown, count = 3): string | null {
   return labels.length > 0 ? labels.join(", ") : null;
 }
 
+function submissionUrl(siteUrl: string, s: Pick<SubmissionForSync, "funnelSlug" | "id">): string {
+  return `${siteUrl.replace(/\/$/, "")}/internal/funnels/${s.funnelSlug}/submissions/${s.id}`;
+}
+
+/** "crm" → "CRM", "companySize" → "Company size": a short label for an answer, from its question key. */
+function keyLabel(key: string): string {
+  if (key.length <= 4) return key.toUpperCase();
+  const words = key.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/[_-]+/g, " ").toLowerCase();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/**
+ * Who this is, at a glance, for the Lead's Description:
+ *   Pipeline Leak Scorecard · 64/100 Leaking · Weakest: Pipeline, Forecasting, Configuration ·
+ *   Source: linkedin (b1) · CRM: Salesforce · Founder/CEO · 20–50 people · Opted in: Black Cloud Signal
+ *   Full answers: https://…/internal/funnels/…/submissions/…
+ * Unscored single-choice answers (qualifiers such as CRM) are included by
+ * their question key; scored answers are summarised by the score instead.
+ */
+export function leadSummary(s: SubmissionForSync, answersUrl: string): string {
+  const parts: string[] = [s.funnelName];
+  const band = bandLabel(s.resultSnapshot);
+  if (s.scoreOverall !== null) parts.push(`${s.scoreOverall}/100${band ? ` ${band}` : ""}`);
+  const weakest = weakestAreas(s.resultSnapshot);
+  if (weakest) parts.push(`Weakest: ${weakest}`);
+  const utm = s.utm ?? {};
+  const source = str(utm.source);
+  const content = str(utm.content);
+  if (source) parts.push(`Source: ${source}${content ? ` (${content})` : ""}`);
+  for (const q of s.questions) {
+    if (q.dimensionKey) continue;
+    if (q.type !== "single" && q.type !== "dropdown") continue;
+    const a = answerLabel(q, s.answers[q.key]);
+    if (a) parts.push(`${keyLabel(q.key)}: ${a}`);
+  }
+  if (s.role) parts.push(s.role);
+  if (s.companySize) parts.push(`${s.companySize} people`);
+  if (s.isFreeEmail) parts.push("Free email address");
+  const optIns = Array.isArray(s.optIns)
+    ? s.optIns.map((o) => str((o as { subscriptionName?: unknown } | null)?.subscriptionName)).filter((n): n is string => n !== null)
+    : [];
+  if (optIns.length > 0) parts.push(`Opted in: ${optIns.join(", ")}`);
+  return `${parts.join(" · ")}\nFull answers: ${answersUrl}`;
+}
+
 export function buildLeadPayload(
   s: SubmissionForSync,
   opts: { siteUrl: string; recordType: string | null; ownerId?: string | null },
@@ -204,7 +258,7 @@ export function buildLeadPayload(
     weakestAreas: weakestAreas(s.resultSnapshot),
     answers: formatAnswers(s.questions, s.answers),
     freeText: formatFreeText(s.questions, s.answers),
-    submissionUrl: `${opts.siteUrl.replace(/\/$/, "")}/internal/funnels/${s.funnelSlug}/submissions/${s.id}`,
+    submissionUrl: submissionUrl(opts.siteUrl, s),
     funnelKey: s.funnelSlug,
     funnelName: s.funnelName,
     bandKey: bandKey(s.resultSnapshot),
@@ -213,6 +267,7 @@ export function buildLeadPayload(
     weakestAreaDetails: weakestAreaDetails(s.resultSnapshot),
     optIns: optInsFor(s.optIns),
     capturedAt: s.completedAt ? new Date(s.completedAt).toISOString() : null,
+    summary: leadSummary(s, submissionUrl(opts.siteUrl, s)),
   };
 }
 

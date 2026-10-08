@@ -180,3 +180,25 @@ describe("consent + results email fields", () => {
   });
 });
 
+
+describe("lead summary (Lead Description / Slack 'Subject')", () => {
+  test("score, band, weakest areas, source, qualifiers, role, size, opt-ins, then a link to the answers", () => {
+    const s = submission({
+      questions: [...questions, { key: "q9", text: "Forecast within 10%", type: "scale", dimensionKey: "forecast", options: [{ label: "Always", value: "always" }] }],
+      answers: { ...submission().answers, q9: "always" },
+      utm: { source: "linkedin", medium: "paid-social", content: "b1" },
+      companySize: "20–50",
+    });
+    const p = buildLeadPayload(s, { siteUrl: "https://www.black-cloud.com", recordType: null });
+    assert.equal(
+      p.summary,
+      "Pipeline Leak Scorecard (LinkedIn) · 64/100 Leaking · Weakest: Pipeline, Data quality, Configuration · Source: linkedin (b1) · CRM: HubSpot · Sales Director/Head of Sales · 20–50 people · Opted in: Black Cloud Signal\n" +
+        "Full answers: https://www.black-cloud.com/internal/funnels/pipeline-leak-scorecard/submissions/sub1",
+    );
+  });
+
+  test("leaves out what isn't there, and flags free email addresses", () => {
+    const p = buildLeadPayload(submission({ utm: null, role: null, optIns: [], isFreeEmail: true, questions: [], resultSnapshot: null, scoreOverall: null }), { siteUrl: "https://x.example", recordType: null });
+    assert.equal(p.summary, "Pipeline Leak Scorecard (LinkedIn) · Free email address\nFull answers: https://x.example/internal/funnels/pipeline-leak-scorecard/submissions/sub1");
+  });
+});

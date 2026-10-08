@@ -84,7 +84,7 @@ interface FunnelLeadResponse {
 async function syncSubmission(submissionId: string, { pool }: Deps) {
   const { rows } = await pool.query(
     `SELECT s.id, s.token, s.status, s."isTest", s.answers, s."scoreOverall", s."resultSnapshot",
-            s."firstName", s."lastName", s.email, s.company, s.role, s.phone, s.utm,
+            s."firstName", s."lastName", s.email, s.company, s.role, s.phone, s.utm, s."companySize", s."isFreeEmail",
             s."completedAt", s."optIns", s."routedUrl",
             f.name AS "funnelName", f.slug AS "funnelSlug", f.status AS "funnelStatus", f."sfCampaignId", f."sfLeadSource",
             q.questions,
@@ -126,6 +126,8 @@ async function syncSubmission(submissionId: string, { pool }: Deps) {
     company: row.company,
     role: row.role,
     phone: row.phone,
+    companySize: row.companySize,
+    isFreeEmail: row.isFreeEmail === true,
     utm: row.utm,
     completedAt: row.completedAt,
     optIns: row.optIns,
