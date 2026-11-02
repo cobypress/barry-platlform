@@ -100,7 +100,7 @@ export function verdictOf(findings: Finding[]): Verdict {
   return { headline, critical, high, issues: issues.length };
 }
 
-export type ScorecardRow = { domain: string; label: string; score: number | null; note: string; issues: number; high: number };
+export type ScorecardRow = { domain: string; label: string; score: number | null; note: string; assessed: boolean; issues: number; high: number };
 
 /** Never a zero for a gap: a domain with no score says why it hasn't got one. */
 export function scorecard(findings: Finding[], scores: Score[]): ScorecardRow[] {
@@ -108,7 +108,7 @@ export function scorecard(findings: Finding[], scores: Score[]): ScorecardRow[] 
     const own = findings.filter((f) => f.domain === domain);
     const issues = own.filter((f) => f.status === "issue");
     const score = scores.find((s) => s.domain === domain);
-    const base = { domain, label: domainLabel(domain), issues: issues.length, high: issues.filter((f) => f.severity === "critical" || f.severity === "high").length };
+    const base = { domain, label: domainLabel(domain), assessed: own.length > 0, issues: issues.length, high: issues.filter((f) => f.severity === "critical" || f.severity === "high").length };
     if (score?.status === "measured") return { ...base, score: score.score, note: "" };
     if (score) return { ...base, score: null, note: score.reason };
     return { ...base, score: null, note: own.length ? "Not scored in this run" : "Not assessed in this run" };
