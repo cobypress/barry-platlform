@@ -9,8 +9,8 @@ Branch `hc/domains`. Newest status first in each section. Nobody has run any of 
 | 1 | Security and access | Done |
 | 2 | Best practice | Done |
 | 3 | Current pipeline | Done |
-| 4 | Forecast | In progress |
-| 5 | Activity | Not started |
+| 4 | Forecast | Done |
+| 5 | Activity | In progress |
 | 6 | Lead funnel | Not started |
 | 7 | Revenue opportunities | Not started |
 | 8 | Scoring | Not started |
@@ -42,6 +42,11 @@ Branch `hc/domains`. Newest status first in each section. Nobody has run any of 
 - **The synthetic calibration now says `forecasting_quota`,** because the synthetic org now has quotas.
 - **The account token restores to the record id.** We don't read account names, so a consultant looks the id up.
 
+- **Forecast accuracy is deliberately not measurable.** `ForecastingItem` shows the forecast as it stands, and nothing I could find says it keeps snapshots. Comparing today's rows with results would flatter the org. It would need a snapshot taken each period, which is a product decision.
+- **Won and Commit against quota is worked out from deals, not forecast roll-ups,** so it doesn't depend on how categories are rolled up.
+- **"In use" needs an active revenue type and forecast rows for today.** Anything else makes every forecast rule and metric not measurable, and tests prove all four ways of being off give no figure at all.
+- **A renamed Commit category is not measurable.** Admins can rename categories, so finding no Commit deals can't be read as nothing at risk.
+
 ## Unverified Salesforce facts
 
 | Rule | What I couldn't verify | What I did |
@@ -55,3 +60,5 @@ Branch `hc/domains`. Newest status first in each section. Nobody has run any of 
 | `bp.after-save-same-record-updates` | A flow may need after-save for other work, and a lookup with no filters is read as same-record | Severity is low, and the recommendation keeps the rest of the flow in place |
 | `cur.missing-next-steps` | That `NextStep` can be filtered in SOQL. It's a 255-character string, which normally can | If it can't, the read fails and the rule is not measurable |
 | `cur.coverage` | `ForecastingType` and `ForecastingQuota` field names come partly from a Data Cloud mapping page. `OpportunityRevenue` as the standard name is from memory, and is only a tie-break when several revenue types are active | A wrong field fails the read, which is not measurable. Confidence is medium |
+| `fct.*` | `ForecastCategoryName` on `ForecastingItem`, and `Period` field names, are from memory. Whether `ForecastCategoryName` returns the API value or a renamed label | A wrong field fails the read, which is not measurable. A renamed Commit is not measurable |
+| `fct.forecast-accuracy` | That these objects keep no history. Salesforce's own Forecast snapshots may be a separate feature I can't see | Reported as not measurable, which is the safe side |

@@ -389,11 +389,45 @@ const QUARTER_START = "2026-10-01";
 // Trap: each rep's quota is real, and the manager's quota above them would double
 // count if every row were added up. It's held by a user who owns no deals.
 export const QUOTAS = [
-  ...[1, 2, 3, 14].map((n) => ({ QuotaOwnerId: userId(n), QuotaAmount: 400_000, StartDate: QUARTER_START, ForecastingTypeId: sfId("0Db", 1) })),
+  // Trap: rep 14 owns open deals and has no quota at all.
+  ...[1, 2, 3].map((n) => ({ QuotaOwnerId: userId(n), QuotaAmount: 400_000, StartDate: QUARTER_START, ForecastingTypeId: sfId("0Db", 1) })),
   { QuotaOwnerId: userId(12), QuotaAmount: 1_600_000, StartDate: QUARTER_START, ForecastingTypeId: sfId("0Db", 1) },
   // Trap: a quantity quota isn't money.
   { QuotaOwnerId: userId(1), QuotaAmount: 50, StartDate: QUARTER_START, ForecastingTypeId: sfId("0Db", 2) },
 ];
+
+const PERIOD_ID = sfId("026", 2);
+
+export const PERIODS = [{ Id: PERIOD_ID, Type: "Quarter", StartDate: QUARTER_START, EndDate: "2026-12-31" }];
+
+const forecastItem = (n: number, category: string, before: number, after: number) => ({
+  OwnerId: userId(n),
+  PeriodId: PERIOD_ID,
+  ForecastingTypeId: sfId("0Db", 1),
+  ForecastCategoryName: category,
+  ForecastAmount: after,
+  AmountWithoutAdjustments: before,
+  HasAdjustment: before !== after,
+});
+
+export const FORECAST_ITEMS = [
+  forecastItem(1, "Commit", 200_000, 200_000),
+  forecastItem(2, "Commit", 200_000, 200_000),
+  // Trap: most of this forecast is a manager's hand adjustment, with no deal behind it.
+  forecastItem(3, "Commit", 100_000, 400_000),
+  forecastItem(14, "Commit", 100_000, 100_000),
+  forecastItem(1, "Best Case", 300_000, 300_000),
+  { ...forecastItem(2, "Pipeline", 500_000, 500_000), ForecastingTypeId: sfId("0Db", 2) },
+];
+
+// Commit follows the late stages, with a planted handful of early-stage deals.
+export const FORECAST_FACTS = pipeline.opportunities
+  .filter((o) => !o.IsClosed && o.CloseDate >= QUARTER_START && o.CloseDate <= "2026-12-31")
+  .map((o, i) => ({
+    OpportunityId: o.Id,
+    PeriodId: PERIOD_ID,
+    ForecastCategoryName: o.StageName === "Negotiation" || i % 7 === 0 ? "Commit" : o.StageName === "Proposal" ? "Best Case" : "Pipeline",
+  }));
 
 export const LOGIN_HISTORY = [
   ...loginRows(1, 10),

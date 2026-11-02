@@ -169,6 +169,12 @@ export class Simulator implements Transport {
         return page(org.FORECAST_TYPES);
       case "ForecastingQuota":
         return page(org.QUOTAS);
+      case "Period":
+        return page(org.PERIODS);
+      case "ForecastingItem":
+        return page(org.FORECAST_ITEMS);
+      case "ForecastingFact":
+        return page(org.FORECAST_FACTS);
       case "OpportunityHistory":
         return this.#keyset(org.pipeline.history, soql);
       case "Lead":

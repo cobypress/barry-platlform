@@ -36,6 +36,7 @@ Newest thinking is in the rationale, not the order. Change a decision by editing
 | 30 | A month end is judged on its own history gap (20%) and blank amounts (20%) | One old history row made months before a migration look measured |
 | 32 | New reads for security: `SecurityHealthCheck` and `SecurityHealthCheckRisks` (Tooling), `PermissionSet`, `PermissionSetAssignment`, and `ApiType`, `Application` on `LoginHistory`, and sharing defaults on `Organization` | All are SOQL through existing routes, so the allowlist is unchanged. `OauthToken` isn't read, because it holds an authorisation code |
 | 33 | New reads for current pipeline: `AccountId` on Opportunity, ids of open deals with `NextStep` filled, `ForecastingType`, `ForecastingQuota` | Text is read as filled or empty by filtering, so it's never fetched |
+| 34 | New reads for forecast: `Period`, `ForecastingItem`, `ForecastingFact`. Forecast accuracy is not measurable | These rows are today's position, so they can't show what was called at the time |
 | 31 | The instance URL is parsed, and must be a bare https Salesforce host, on connect and refresh | A prefix check passes `https://x.salesforce.com@evil.example`, which sends the token to evil.example |
 
 ## File storage

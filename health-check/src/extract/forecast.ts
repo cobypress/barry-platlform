@@ -27,3 +27,42 @@ export function revenueForecastType(types: ForecastTypeRow[]): { id: string } | 
   const standard = amount.find((t) => t.DeveloperName === "OpportunityRevenue");
   return standard ? { id: standard.Id } : { reason: `${amount.length} revenue forecast types are active, and none is the standard one, so we can't tell which to read.` };
 }
+
+export type PeriodRow = { Id: string; Type: string; StartDate: string; EndDate: string };
+export type ForecastItemRow = {
+  OwnerId: string;
+  PeriodId: string;
+  ForecastingTypeId: string;
+  ForecastCategoryName: string | null;
+  ForecastAmount: number | null;
+  AmountWithoutAdjustments: number | null;
+  HasAdjustment: boolean;
+};
+export type ForecastFactRow = { OpportunityId: string; ForecastCategoryName: string | null; PeriodId: string };
+export type ForecastData = { periods: Sourced<PeriodRow[]>; items: Sourced<ForecastItemRow[]>; facts: Sourced<ForecastFactRow[]> };
+
+const FORECAST_MAX_ROWS = 20_000;
+
+// Only the periods holding today: these objects show the forecast as it stands,
+// so an older period says nothing about what was forecast back then.
+export const forecastExtractor: Extractor<ForecastData> = {
+  id: "forecast",
+  version: 1,
+  async run(ctx) {
+    const today = soqlDate(ctx.now);
+    const periods = await readSoql<PeriodRow>(ctx, `SELECT Id, Type, StartDate, EndDate FROM Period WHERE Type IN ('Month', 'Quarter') AND StartDate <= ${today} AND EndDate >= ${today}`);
+    const ids = periods.status === "ok" ? periods.data.map((p) => `'${p.Id}'`).join(", ") : "";
+    const inPeriods = ids ? `PeriodId IN (${ids})` : "";
+    const itemSoql = `SELECT OwnerId, PeriodId, ForecastingTypeId, ForecastCategoryName, ForecastAmount, AmountWithoutAdjustments, HasAdjustment FROM ForecastingItem`;
+    const factSoql = "SELECT OpportunityId, ForecastCategoryName, PeriodId FROM ForecastingFact";
+    if (!ids) {
+      const reason = periods.status === "ok" ? "Salesforce returned no period holding today." : `Periods couldn't be read: ${periods.reason}`;
+      return { periods, items: { status: "unavailable", reason, source: { kind: "soql", api: "rest", query: itemSoql } }, facts: { status: "unavailable", reason, source: { kind: "soql", api: "rest", query: factSoql } } };
+    }
+    return {
+      periods,
+      items: await readSoql(ctx, `${itemSoql} WHERE ${inPeriods}`, { maxRecords: FORECAST_MAX_ROWS }),
+      facts: await readSoql(ctx, `${factSoql} WHERE ${inPeriods}`, { maxRecords: FORECAST_MAX_ROWS }),
+    };
+  },
+};

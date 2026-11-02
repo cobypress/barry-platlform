@@ -168,7 +168,7 @@ describe("coverage", () => {
   test("uses rep quotas only, so a manager's quota doesn't double the target", () => {
     const f = run(extracts, "cur.coverage");
     assert.equal(f.status, "issue");
-    assert.equal(f.facts.quota, 1_600_000);
+    assert.equal(f.facts.quota, 1_200_000);
     assert.equal(f.confidence, "medium");
     assert.ok(f.value.kind === "revenue" && f.value.assumptions.some((a) => a.includes("working figure")));
   });

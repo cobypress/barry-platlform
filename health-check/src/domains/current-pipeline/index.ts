@@ -40,10 +40,12 @@ const dimensions = (ctx: RuleContext): Record<string, (d: Deal) => string> => ({
   rep: (d) => ctx.userLabel(d.OwnerId),
 });
 
-type Scoped = { deals: Deal[]; isHit: (d: Deal) => boolean; exclusions?: string[]; evidence?: Evidence[] } | { reason: string; evidence?: Evidence[] };
+export type Scoped = { deals: Deal[]; isHit: (d: Deal) => boolean; exclusions?: string[]; evidence?: Evidence[] } | { reason: string; evidence?: Evidence[] };
 
 type ShareRule = {
   id: string;
+  /** Defaults to current pipeline. Forecast rules share this shape. */
+  domain?: string;
   title: string;
   totalLimit: number;
   segmentLimit: number;
@@ -59,11 +61,11 @@ type ShareRule = {
 
 // The shape every share-of-open-deals rule takes: scope, hit test, then the
 // total and each segment against a limit, so a bad rep can't hide in a good total.
-function shareRule(options: ShareRule): Rule {
+export function shareRule(options: ShareRule): Rule {
   return {
     id: options.id,
     version: 1,
-    domain: DOMAIN,
+    domain: options.domain ?? DOMAIN,
     title: options.title,
     evaluate(ctx): RuleResult | RuleResult[] {
       const loaded = openDeals(ctx);
@@ -278,7 +280,7 @@ const repConcentration = concentrationRule({
 type Coverage = { coverage: number; quota: number; won: number; remaining: number; open: number; quarter: DateRange; reps: Array<{ owner: string; quota: number; won: number; open: number }> };
 
 /** Open pipeline closing this fiscal quarter against what's left of quota, for the people who own deals. */
-function coverageOf(ctx: RuleContext | Omit<RuleContext, "metrics">, deals: Deal[]): Coverage | { reason: string; evidence: Evidence[] } {
+export function coverageOf(ctx: RuleContext | Omit<RuleContext, "metrics">, deals: Deal[]): Coverage | { reason: string; evidence: Evidence[] } {
   const { source } = ctx.calibration.targets;
   const { quotas, types } = ctx.data(quotasExtractor);
   const noTarget = [ctx.ev(quotas.source, { count: null })];
