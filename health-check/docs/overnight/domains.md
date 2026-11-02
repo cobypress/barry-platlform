@@ -10,8 +10,8 @@ Branch `hc/domains`. Newest status first in each section. Nobody has run any of 
 | 2 | Best practice | Done |
 | 3 | Current pipeline | Done |
 | 4 | Forecast | Done |
-| 5 | Activity | In progress |
-| 6 | Lead funnel | Not started |
+| 5 | Activity | Done |
+| 6 | Lead funnel | In progress |
 | 7 | Revenue opportunities | Not started |
 | 8 | Scoring | Not started |
 | 9 | Value sizing | Not started |
@@ -47,6 +47,11 @@ Branch `hc/domains`. Newest status first in each section. Nobody has run any of 
 - **"In use" needs an active revenue type and forecast rows for today.** Anything else makes every forecast rule and metric not measurable, and tests prove all four ways of being off give no figure at all.
 - **A renamed Commit category is not measurable.** Admins can rename categories, so finding no Commit deals can't be read as nothing at risk.
 
+- **Activity reads 12 months, on purpose.** A plain query drops activities archived after 365 days, and reaching them needs `queryAll`, which isn't on the allowlist. I didn't widen it. Won and lost comparisons only use deals created inside the readable year, because an older deal has lost its early activity and would read as a deal nobody worked. Worth deciding later whether 12 months is enough.
+- **The unlinked event trap was built first,** as the plan asked. Total events are flat at 60 a month, and the linked share falls from 74% to 6% from July. The rule compares three recent whole months with the six before, overall and by team and rep, and a test asserts the planted total really is flat.
+- **There's no `activity.event_linked_share` metric.** I built one, and it broke the existing test that says every metric is not measurable when Opportunity can't be read. The metric doesn't need Opportunity, so the test's premise no longer holds, but rule 8 says never weaken a test to get a pass. So the test is untouched, and the monthly shares are in the finding's `facts` as `linkedShare 2026-07` and so on. **Coordinator or Coby:** if you'd rather have it as a metric with a series, that test needs a named exception, which is your call rather than mine.
+- **A truncated activity read is not measurable,** not a smaller sample. Keyset order isn't random, so the rows we'd keep would be biased. The cap is 200,000 rows per object, about 100 calls.
+
 ## Unverified Salesforce facts
 
 | Rule | What I couldn't verify | What I did |
@@ -62,3 +67,5 @@ Branch `hc/domains`. Newest status first in each section. Nobody has run any of 
 | `cur.coverage` | `ForecastingType` and `ForecastingQuota` field names come partly from a Data Cloud mapping page. `OpportunityRevenue` as the standard name is from memory, and is only a tie-break when several revenue types are active | A wrong field fails the read, which is not measurable. Confidence is medium |
 | `fct.*` | `ForecastCategoryName` on `ForecastingItem`, and `Period` field names, are from memory. Whether `ForecastCategoryName` returns the API value or a renamed label | A wrong field fails the read, which is not measurable. A renamed Commit is not measurable |
 | `fct.forecast-accuracy` | That these objects keep no history. Salesforce's own Forecast snapshots may be a separate feature I can't see | Reported as not measurable, which is the safe side |
+| `act.*` | That Einstein Activity Capture email isn't in `Task`, `Event` or `EmailMessage`. Sources are vendors selling replacements, and a Summer '25 option may change it | Where capture is in use or unknown, rep-level findings drop to medium confidence and metrics state that counts are a floor |
+| `act.*` | That `IsChild` on `Event` marks invitee copies, and that `StartDateTime` can be filtered | A wrong field fails the read, which is not measurable |

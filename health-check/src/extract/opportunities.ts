@@ -41,8 +41,8 @@ export const HistoryRow = z.object({
 });
 export type HistoryRow = z.infer<typeof HistoryRow>;
 
-/** Reads `ORDER BY Id` a page at a time, checkpointing each page, so a stopped run resumes at the last Id. */
-export async function readKeyset<R extends { Id: string }>(ctx: ExtractContext, key: string, select: string, from: string, where: string): Promise<R[]> {
+/** Reads `ORDER BY Id` a page at a time, checkpointing each page, so a stopped run resumes at the last Id. Stops at `maxRows` if given. */
+export async function readKeyset<R extends { Id: string }>(ctx: ExtractContext, key: string, select: string, from: string, where: string, maxRows = Infinity): Promise<R[]> {
   const rows = ctx.partial.read<R>(key);
   for (;;) {
     const after = rows.at(-1)?.Id;
@@ -51,7 +51,7 @@ export async function readKeyset<R extends { Id: string }>(ctx: ExtractContext, 
     const page = await ctx.client.queryAll<R>(soql);
     rows.push(...page);
     ctx.partial.append(key, page);
-    if (page.length < ctx.pageSize) return rows;
+    if (page.length < ctx.pageSize || rows.length >= maxRows) return rows;
   }
 }
 

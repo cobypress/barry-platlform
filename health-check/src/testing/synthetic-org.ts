@@ -242,6 +242,71 @@ function buildPipeline(): { opportunities: SyntheticOpportunity[]; history: Synt
 
 export const pipeline = buildPipeline();
 
+export type SyntheticTask = { Id: string; OwnerId: string; WhoId: string | null; WhatId: string | null; CreatedDate: string; TaskSubtype: string | null };
+export type SyntheticEvent = { Id: string; OwnerId: string; WhoId: string | null; WhatId: string | null; StartDateTime: string };
+export type SyntheticEmail = { Id: string; RelatedToId: string | null; ActivityId: string | null; MessageDate: string; CreatedById: string };
+
+const stamp = (ms: number): string => new Date(ms).toISOString().replace("Z", "+0000");
+
+function buildActivity(): { tasks: SyntheticTask[]; events: SyntheticEvent[]; emails: SyntheticEmail[] } {
+  const random = seeded(20261102);
+  const between = (low: number, high: number): number => Math.floor(low + random() * (high - low + 1));
+  const reps = [1, 2, 3, 14];
+  const tasks: SyntheticTask[] = [];
+  const events: SyntheticEvent[] = [];
+  const emails: SyntheticEmail[] = [];
+  const oneYearAgo = asOf - 365 * DAY;
+  const addTask = (owner: string, whatId: string | null, at: number, subtype: string | null = "Task"): string => {
+    const Id = sfId("00T", tasks.length + 1);
+    tasks.push({ Id, OwnerId: owner, WhoId: null, WhatId: whatId, CreatedDate: stamp(at), TaskSubtype: subtype });
+    return Id;
+  };
+  const dealIds = pipeline.opportunities.filter((o) => o.OwnerId === userId(1) || o.OwnerId === userId(2)).map((o) => o.Id);
+
+  // Trap, built first: a real check once missed this. Total events are flat all
+  // year. From July, almost none of them are linked to a record, which is what
+  // happens when synced events stop being related. A monthly total shows nothing.
+  const COLLAPSE = Date.UTC(2026, 6, 1);
+  for (let month = 0; month < 12; month++) {
+    const first = Date.UTC(2025, 10 + month, 1);
+    for (let i = 0; i < 60; i++) {
+      const at = first + between(0, 26) * DAY + between(8, 17) * 3_600_000;
+      if (at > asOf) continue;
+      const linked = random() < (at >= COLLAPSE ? 0.05 : 0.75);
+      events.push({ Id: sfId("00U", events.length + 1), OwnerId: userId(reps[i % 3]!), WhoId: null, WhatId: linked ? dealIds[between(0, dealIds.length - 1)]! : null, StartDateTime: stamp(at) });
+    }
+  }
+
+  // Closed deals. Won deals get more touches than lost ones. Trap: most of the EU
+  // team's closed deals have nothing logged at all, inside a total that looks fine.
+  for (const deal of pipeline.opportunities.filter((o) => o.IsClosed && new Date(o.CreatedDate.replace("+0000", "Z")).getTime() >= oneYearAgo)) {
+    const eu = deal.OwnerId === userId(3) || deal.OwnerId === userId(14);
+    const roll = random();
+    const count = eu && roll < 0.7 ? 0 : deal.IsWon ? between(5, 9) : between(1, 4);
+    for (let i = 0; i < count; i++) addTask(deal.OwnerId, deal.Id, new Date(deal.CreatedDate.replace("+0000", "Z")).getTime() + (i + 1) * DAY);
+  }
+
+  // Open deals in the last 90 days. Trap: one rep has logged almost nothing.
+  for (const deal of pipeline.opportunities.filter((o) => !o.IsClosed)) {
+    const count = deal.OwnerId === userId(14) ? (random() < 0.1 ? 1 : 0) : between(3, 6);
+    for (let i = 0; i < count; i++) addTask(deal.OwnerId, deal.Id, asOf - between(1, 85) * DAY);
+  }
+
+  // Trap: one person logs tasks against nothing, so they vanish from every deal.
+  for (let i = 0; i < 40; i++) addTask(userId(15), i % 5 === 0 ? dealIds[0]! : null, asOf - between(1, 200) * DAY);
+
+  // Trap: an enhanced email also makes a task, so counting both would double it.
+  for (let i = 0; i < 30; i++) {
+    const deal = pipeline.opportunities[224 + i]!;
+    const at = asOf - between(1, 60) * DAY;
+    const logged = i % 2 === 0 ? addTask(deal.OwnerId, deal.Id, at, "Email") : null;
+    emails.push({ Id: sfId("02s", i + 1), RelatedToId: deal.Id, ActivityId: logged, MessageDate: stamp(at), CreatedById: deal.OwnerId });
+  }
+  return { tasks, events, emails };
+}
+
+export const activity = buildActivity();
+
 const standardField = (name: string, type = "string", extra: Record<string, unknown> = {}) => ({
   name,
   label: name,
