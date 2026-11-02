@@ -1,5 +1,5 @@
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
-import type { Calibration, Evidence, Finding, ManualStep, Metric, Run } from "../schemas/index.ts";
+import type { Calibration, Evidence, Finding, ManualStep, Metric, Run, Score } from "../schemas/index.ts";
 
 // The Markdown forerunner of the Word raw notes. This is the one place tokens
 // become names, because this document is what the customer's admin reads.
@@ -89,8 +89,10 @@ function manualBlock(s: ManualStep): string {
   ].join("\n");
 }
 
-export function renderRawNotes(input: { run: Run; calibration: Calibration; findings: Finding[]; metrics: Metric[]; manualSteps: ManualStep[]; pseudonyms: Pseudonymiser }): string {
-  const { run, calibration, findings, metrics, manualSteps, pseudonyms } = input;
+const scoreLine = (s: Score): string => `| ${s.domain} | ${s.status === "measured" ? s.score : `Not measurable. ${s.reason}`} |`;
+
+export function renderRawNotes(input: { run: Run; calibration: Calibration; findings: Finding[]; metrics: Metric[]; manualSteps: ManualStep[]; pseudonyms: Pseudonymiser; scores?: Score[] }): string {
+  const { run, calibration, findings, metrics, manualSteps, pseudonyms, scores = [] } = input;
   const issues = findings.filter((f) => f.status === "issue").sort((a, b) => SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity) || a.id.localeCompare(b.id));
   const passed = findings.filter((f) => f.status === "passed");
   const notMeasurable = findings.filter((f) => f.status === "not_measurable");
@@ -111,6 +113,7 @@ export function renderRawNotes(input: { run: Run; calibration: Calibration; find
     `- API calls: ${run.budget.callsMade} used, stopping at ${Math.round(run.budget.stopAtShare * 100)}% of the org's daily limit`,
     ...(stopped ? [`- **This run is incomplete:** ${run.budget.stoppedReason}`] : []),
     "",
+    ...(scores.length ? ["## Scorecard", "", "A domain's score is the share of its weighted checks that came back clean. Checks we couldn't measure don't count either way.", "", "| Domain | Score |", "| --- | --- |", ...scores.map(scoreLine), ""] : []),
     "## Assumptions",
     "",
     `- Analysis window: ${run.analysisWindow.from} to ${run.analysisWindow.to}`,
