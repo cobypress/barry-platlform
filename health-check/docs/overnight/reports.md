@@ -79,7 +79,7 @@ Merged 12 domains in, ran `npm install`, then fixed the following. Worker A is c
 
 - **Deck for an ordinary org.** The sample has 69 issues and was dropping to compact tables. Non-issue slides took about 47 of the 60. It's now 59 slides with every summary and recommendation on an issue card, and no cuts. Dense mode sets cards, roadmap and metric definitions in two columns. A further step swaps the domain openers for one summary slide, which leaves room: an 84-issue org keeps its detail too. Compact tables only appear for a very large org, and say so. 59 is close to the ceiling, but going over moves to the summary step rather than losing detail.
 - **Test assumptions.** Tests that assumed forecast wasn't assessed now remove a domain from their input. The executive test reads its values from the data.
-- **Raw invisible characters** in the `normalise` regex in `extract.ts` are now `\\u` escapes. They worked, but nobody could review them.
+- **Raw invisible characters** in the `normalise` regex in `extract.ts` are now `\u` escapes. They worked, but nobody could review them.
 
 ### Mutation test
 
