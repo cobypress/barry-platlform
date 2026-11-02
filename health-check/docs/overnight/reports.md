@@ -12,9 +12,9 @@ Branch `hc/reports`. Newest status first in each section.
 | 4 | Design tokens | Done |
 | 5 | Charts | Done |
 | 6 | Raw notes in Word | Done |
-| 7 | Executive summary PDF | Not started |
-| 8 | Full health check PDF | Not started |
-| 9 | Layout checks | Not started |
+| 7 | Executive summary PDF | Done |
+| 8 | Full health check PDF | Done |
+| 9 | Layout checks | Done |
 
 ## Log
 
@@ -59,3 +59,16 @@ Known limits, on purpose:
 - Charts are plain SVG strings. A chart with no data returns its reason. Rep segments are left out of charts.
 - Found by looking at a screenshot, not by a test: a value label under the overall line, and "0 issues" on unassessed domains. Both fixed, and now tested.
 - Word notes have every finding, evidence item, guard, metric table and override. Poppins is named but not embedded, so a machine without it shows a fallback font.
+
+### 7 to 9. PDFs and layout checks
+
+`hc render --run <folder>` writes the Word notes and both PDFs into the run folder. `npm run sample` does it for the synthetic org, into `~/.barometer/sample-runs`, outside the repo. On this branch the sample gives 6 pages and 58 slides, with no layout or number check problems. I also looked at the rendered pages myself.
+
+Bugs found while building this, all fixed with tests:
+
+- A finding about one rep reached the top five, because the filter looked for a token that team-level text had already replaced. Seen on a screenshot.
+- `document.fonts.check` returns true for a font that was never registered, so the font check couldn't fail.
+- Flexbox squeezed oversized content rather than overflowing, which hid it from the check.
+- `textContent` ran neighbouring table cells into one "figure". Rendered text is now read node by node.
+- An unscored scorecard counted as a missing chart.
+- A very large org gave 141 slides.

@@ -67,9 +67,12 @@ export function bySeverity(a: Finding, b: Finding): number {
 
 export const issuesOf = (findings: Finding[]): Finding[] => findings.filter((f) => f.status === "issue").sort(bySeverity);
 
+// Team-level findings have already lost their token, so both forms are checked.
+const aboutOnePerson = (f: Finding): boolean => USER_TOKEN.test(f.title) || /\ba single (?:rep|person)\b/i.test(f.title);
+
 /** A finding about one person's results doesn't belong in an executive top list. */
 export function topIssues(findings: Finding[], count: number): Finding[] {
-  return issuesOf(findings).filter((f) => !USER_TOKEN.test(f.title)).slice(0, count);
+  return issuesOf(findings).filter((f) => !aboutOnePerson(f)).slice(0, count);
 }
 
 export type PlanPhase = { key: string; title: string; from: number; to: number; findings: Finding[] };

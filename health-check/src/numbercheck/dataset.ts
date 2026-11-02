@@ -181,7 +181,7 @@ function addRun(set: FigureSet, run: Run): void {
   c.number(run.budget.callsMade);
   c.number(Math.round(run.budget.stopAtShare * 100), "percent");
   c.number(Number(run.apiVersion));
-  set.identifiers.push({ source: SOURCE.run, value: run.id.toLowerCase() });
+  set.identifiers.push({ source: SOURCE.run, value: run.id.toLowerCase() }, { source: SOURCE.run, value: run.ruleSetVersion.toLowerCase() });
 }
 
 /** Counts the engine works out for the summary sections. */

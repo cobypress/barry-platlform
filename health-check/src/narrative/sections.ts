@@ -3,6 +3,7 @@ import type { Calibration, Finding, ManualStep, Metric, NumberOverride, ReportSe
 import { ReportSection as ReportSectionSchema, SectionVersion as SectionVersionSchema } from "../schemas/index.ts";
 import type { SectionBrief } from "./draft.ts";
 import type { Intake } from "./intake.ts";
+import { applyOverrides } from "./overrides.ts";
 import { findingSource, metricSource, type PromptSource } from "./prompt.ts";
 import { buildPlan, bySeverity, domainLabel, domainsInOrder, issuesOf, scorecard, teamLevelFinding, topIssues, verdictOf } from "./select.ts";
 
@@ -29,8 +30,10 @@ export type BuiltOutput = { output: ReportOutputKey; sections: ReportSection[]; 
 export type BuiltReport = {
   input: ReportInput;
   dataset: FigureSet;
-  /** Findings as an executive reader sees them. */
+  /** Findings as an executive reader sees them: overrides applied, at team level. */
   teamFindings: Finding[];
+  /** Metrics with overrides applied. */
+  metrics: Metric[];
   outputs: Record<ReportOutputKey, BuiltOutput>;
   /** What Claude would be asked for, by section id. Sections with no entry stay engine text. */
   briefs: Map<string, SectionBrief>;
@@ -139,26 +142,26 @@ function executiveSpecs(input: ReportInput, team: Finding[]): Spec[] {
       sources: SUMMARY_SOURCES,
       brief: { purpose: "Tell an executive reader, in a few sentences, what state this Salesforce org is in and what matters most.", sources: [summaryCounts(team), ...top.map(findingSource)] },
     },
-    { key: "scorecard", title: "Scorecard", body: "How each domain stands. A domain with no score says why.", findingIds: team.map((f) => f.id), sources: [...SUMMARY_SOURCES, ...scoreSources] },
+    { key: "scorecard", title: "Scorecard", body: "A domain with no score says why. We never show a gap as a zero.", findingIds: team.map((f) => f.id), sources: [...SUMMARY_SOURCES, ...scoreSources] },
     {
       key: "top_issues",
       title: `Top ${TOP_ISSUE_COUNT} issues`,
-      body: top.length ? top.map((f) => f.summary).join("\n\n") : "We found no issues.",
+      body: top.length ? "The issues that matter most, ranked by severity and then by value." : "We found no issues.",
       findingIds: top.map((f) => f.id),
       sources: SUMMARY_SOURCES,
     },
     {
       key: "plan_90_day",
       title: "90-day plan",
-      body: plan.map((p) => `Days ${p.from} to ${p.to}, ${p.title}: ${p.findings.length ? p.findings.slice(0, TOP_ISSUE_COUNT).map((f) => f.recommendation).join(" ") : "Nothing planned for this phase."}`).join("\n\n"),
+      body: "Small fixes come first, so the plan starts with what can be done now.",
       findingIds: plan.flatMap((p) => p.findings.map((f) => f.id)),
       sources: SUMMARY_SOURCES,
     },
   ];
 }
 
-function fullSpecs(input: ReportInput, team: Finding[]): Spec[] {
-  const { metrics, intake } = input;
+function fullSpecs(input: ReportInput, team: Finding[], metrics: Metric[]): Spec[] {
+  const { intake } = input;
   const plan = buildPlan(team);
   const verdict = verdictOf(team);
   const notMeasurable = team.filter((f) => f.status === "not_measurable");
@@ -253,11 +256,12 @@ function record(run: Run, output: ReportOutputKey, specs: Spec[], dataset: Figur
 export function buildReport(input: ReportInput): BuiltReport {
   const { run, calibration, findings, metrics, manualSteps, scores = [], overrides = [], intake = null } = input;
   const now = input.now ?? new Date(run.asOf);
-  const team = findings.map(teamLevelFinding);
+  const effective = applyOverrides(findings, metrics, overrides);
+  const team = effective.findings.map(teamLevelFinding);
   const plan = buildPlan(team);
   const dataset = buildDataset({
     findings: [...findings, ...team],
-    metrics,
+    metrics: effective.metrics,
     manualSteps,
     scores,
     run,
@@ -277,10 +281,11 @@ export function buildReport(input: ReportInput): BuiltReport {
     input,
     dataset,
     teamFindings: team.slice().sort(bySeverity),
+    metrics: effective.metrics,
     outputs: {
       raw_notes: build("raw_notes", rawNotesSpecs(input)),
       executive_summary: build("executive_summary", executiveSpecs(input, team)),
-      full_health_check: build("full_health_check", fullSpecs(input, team)),
+      full_health_check: build("full_health_check", fullSpecs(input, team, effective.metrics)),
     },
     briefs,
   };

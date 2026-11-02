@@ -118,6 +118,27 @@ describe("overrides", () => {
     assert.match(body, /to 12\.5/);
   });
 
+  test("change what reports show, and leave the record alone", () => {
+    const { report } = all({ ...base, overrides: [override] });
+    const shown = report.teamFindings.find((x) => x.id === f.id)!;
+    assert.equal(shown.facts.rate, 12.5);
+    assert.ok(shown.summary.includes("12.5%"));
+    assert.ok(!shown.summary.includes(`${override.previousValue}%`));
+    assert.equal(base.findings.find((x) => x.id === f.id)!.facts.rate, override.previousValue);
+  });
+
+  test("reach a sized value and a metric", () => {
+    const sized = base.findings.find((x) => x.value.kind !== "not_sized")!;
+    const amount = sized.value.kind === "not_sized" ? 0 : sized.value.amount;
+    const onValue: NumberOverride = { ...override, target: { type: "finding", id: sized.id, field: "value.amount" }, previousValue: amount, newValue: 1000 };
+    const onMetric: NumberOverride = { ...override, target: { type: "metric", id: "historic.win_rate", field: "value" }, previousValue: 35, newValue: 33 };
+    const { report } = all({ ...base, overrides: [onValue, onMetric] });
+    const value = report.teamFindings.find((x) => x.id === sized.id)!.value;
+    assert.equal(value.kind !== "not_sized" && value.amount, 1000);
+    const m = report.metrics.find((x) => x.id === "historic.win_rate")!;
+    assert.equal(m.status === "measured" && m.value, 33);
+  });
+
   test("say so when there are none", () => {
     assert.match(currentBody(all().report.outputs.raw_notes, "overrides"), /No figures were overridden/);
   });
@@ -158,8 +179,10 @@ describe("ranking", () => {
     assert.equal(top[0]!.value.kind, "revenue");
   });
 
-  test("a finding about one person isn't a top issue", () => {
+  test("a finding about one person isn't a top issue, before or after team level", () => {
     for (const f of topIssues(base.findings, 50)) assert.doesNotMatch(f.title, /\[\[user:/);
+    assert.ok(team.some((f) => /a single rep/.test(f.title)), "the synthetic run has one");
+    for (const f of topIssues(team, 50)) assert.doesNotMatch(f.title, /a single/i);
   });
 
   test("a plan has three phases, with no repeated action", () => {

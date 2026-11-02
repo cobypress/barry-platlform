@@ -10,7 +10,8 @@
     "hc": "node src/cli/hc.ts",
     "test": "node --test \"src/**/__tests__/*.test.ts\"",
     "typecheck": "tsc --noEmit",
-    "fixtures": "node src/testing/record-fixtures.ts"
+    "fixtures": "node src/testing/record-fixtures.ts",
+    "sample": "node src/render/sample.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.4.0",

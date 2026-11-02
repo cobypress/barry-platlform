@@ -79,4 +79,9 @@ Kept apart from the table above so the overnight branches merge cleanly.
 | R10 | Charts sit on a Carbon panel | Chartreuse is 1.5:1 on Ivory, which fails the chart contrast check. It's about 10:1 on Carbon |
 | R11 | Poppins is embedded in PDFs from `@fontsource/poppins` (OFL), and only named in Word | PDF rendering mustn't need the network. A machine without Poppins shows Word's fallback font |
 | R12 | A domain nobody assessed shows no issue count | "0 issues" would read as a clean result |
+| R13 | Chromium only runs with the network off, and with routes other than `data:` aborted | A report holds customer data, and rendering has no reason to load or send anything |
+| R14 | The number check runs again on printed page text, against the whole run | It catches anything a template adds after section checks, including chart labels. It's unscoped, so it's weaker than the section check |
+| R15 | Deck density flexes in steps, ending in one table per domain | 40 to 60 slides has to hold for a thin org and a huge one. Past that last step, the deck says it's cut short and points to the raw notes |
+| R16 | A deck under 40 slides is flagged, never padded | Filler slides would be worse than a short report. The layout check reports it, and a consultant decides |
+| R17 | Reports show overridden figures. Raw notes show the original with the override beside it | An executive reader shouldn't see a corrected number. The audit trail needs both |
 
