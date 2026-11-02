@@ -162,7 +162,13 @@ export class Simulator implements Transport {
       case "OpportunityStage":
         return page(org.STAGES);
       case "Opportunity":
-        return this.#keyset(org.pipeline.opportunities, soql);
+        if (/NextStep != null/.test(soql)) return this.#keyset(org.pipeline.opportunities.filter((o) => !o.IsClosed && o.NextStep !== null).map((o) => ({ Id: o.Id })), soql);
+        // Free text the query didn't ask for mustn't come back, as on a real org.
+        return this.#keyset(org.pipeline.opportunities.map(({ NextStep, ...o }) => o), soql);
+      case "ForecastingType":
+        return page(org.FORECAST_TYPES);
+      case "ForecastingQuota":
+        return page(org.QUOTAS);
       case "OpportunityHistory":
         return this.#keyset(org.pipeline.history, soql);
       case "Lead":

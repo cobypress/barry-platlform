@@ -106,6 +106,8 @@ export type SyntheticOpportunity = {
   LeadSource: string;
   RecordType: { DeveloperName: string };
   Loss_Reason__c: string | null;
+  AccountId: string;
+  NextStep: string | null;
 };
 
 export type SyntheticHistory = { Id: string; OpportunityId: string; StageName: string; Amount: number | null; CloseDate: string; CreatedDate: string };
@@ -164,6 +166,8 @@ function buildPipeline(): { opportunities: SyntheticOpportunity[]; history: Synt
       LeadSource: SOURCES[between(0, SOURCES.length - 1)]!,
       RecordType: { DeveloperName: random() < 0.2 ? "Renewal" : "New_Business" },
       Loss_Reason__c: final === "Closed Lost" && random() < 0.5 ? "Price" : null,
+      AccountId: sfId("001", (i % 120) + 1),
+      NextStep: null,
     });
   }
 
@@ -183,6 +187,8 @@ function buildPipeline(): { opportunities: SyntheticOpportunity[]; history: Synt
       LeadSource: "Web",
       RecordType: { DeveloperName: "New_Business" },
       Loss_Reason__c: null,
+      AccountId: sfId("001", 1),
+      NextStep: null,
     });
   }
 
@@ -202,6 +208,14 @@ function buildPipeline(): { opportunities: SyntheticOpportunity[]; history: Synt
       addHistory(id, s, amount, close, at);
       at += between(2, 8) * DAY;
     }
+    // Trap: the same close date moved again and again, which only history shows.
+    if (i % 5 === 0) {
+      for (let push = 3; push >= 1; push--) addHistory(id, stage, amount, close - push * 20 * DAY, at + (3 - push) * DAY);
+      addHistory(id, stage, amount, close, at + 3 * DAY);
+    }
+    // Drawn before the trap is applied, so planting it doesn't move the seeded sequence.
+    const touched = random() < 0.2 ? 120 : between(1, 30);
+    // Trap: one rep's deals have gone quiet, under a total that looks fine.
     opportunities.push({
       Id: id,
       OwnerId: userId(owner),
@@ -211,11 +225,15 @@ function buildPipeline(): { opportunities: SyntheticOpportunity[]; history: Synt
       CreatedDate: new Date(created).toISOString().replace("Z", "+0000"),
       IsClosed: false,
       IsWon: false,
-      LastActivityDate: random() < 0.2 ? dateOnly(asOf - 120 * DAY) : dateOnly(asOf - between(1, 30) * DAY),
+      LastActivityDate: dateOnly(asOf - (owner === 3 && i % 8 === 2 ? 120 : owner === 2 ? 10 : touched) * DAY),
       Type: "New Business",
       LeadSource: SOURCES[between(0, SOURCES.length - 1)]!,
       RecordType: { DeveloperName: renewal ? "Renewal" : "New_Business" },
       Loss_Reason__c: null,
+      // Trap: a quarter of open deals sit on one customer, so a loss there hurts.
+      AccountId: sfId("001", i % 4 === 0 ? 900 : (i % 120) + 1),
+      // Trap: the total looks fine, and one rep leaves next steps empty on nearly everything.
+      NextStep: owner === 14 ? (i % 8 === 0 ? "Call the buyer on Friday" : null) : i % 9 === 0 ? null : "Call the buyer on Friday",
     });
   }
   history.sort((a, b) => a.Id.localeCompare(b.Id));
@@ -360,6 +378,22 @@ export const SETUP_AUDIT = [
 
 const loginRows = (user: number, count: number, status = "Success", api: { ApiType: string; Application: string } | null = null) =>
   Array.from({ length: count }, (_, i) => ({ UserId: userId(user), LoginTime: daysAgo(i * 2 + 1), Status: status, ApiType: api?.ApiType ?? null, Application: api?.Application ?? "Browser" }));
+
+export const FORECAST_TYPES = [
+  { Id: sfId("0Db", 1), DeveloperName: "OpportunityRevenue", IsActive: true, IsAmount: true },
+  { Id: sfId("0Db", 2), DeveloperName: "OpportunityQuantity", IsActive: true, IsAmount: false },
+];
+
+const QUARTER_START = "2026-10-01";
+
+// Trap: each rep's quota is real, and the manager's quota above them would double
+// count if every row were added up. It's held by a user who owns no deals.
+export const QUOTAS = [
+  ...[1, 2, 3, 14].map((n) => ({ QuotaOwnerId: userId(n), QuotaAmount: 400_000, StartDate: QUARTER_START, ForecastingTypeId: sfId("0Db", 1) })),
+  { QuotaOwnerId: userId(12), QuotaAmount: 1_600_000, StartDate: QUARTER_START, ForecastingTypeId: sfId("0Db", 1) },
+  // Trap: a quantity quota isn't money.
+  { QuotaOwnerId: userId(1), QuotaAmount: 50, StartDate: QUARTER_START, ForecastingTypeId: sfId("0Db", 2) },
+];
 
 export const LOGIN_HISTORY = [
   ...loginRows(1, 10),

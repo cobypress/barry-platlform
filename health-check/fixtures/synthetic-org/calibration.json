@@ -19,7 +19,7 @@
     { "userId": "005000000000011AAA", "kind": "integration" }
   ],
   "fields": { "lossReason": "Loss_Reason__c" },
-  "targets": { "source": "none", "note": "No targets in the synthetic org" },
+  "targets": { "source": "forecasting_quota", "note": "Collaborative Forecasts quotas" },
   "salesCycleAssumptionDays": 60,
   "fiscalYearStartMonth": 1,
   "analysisWindowMonths": 24,

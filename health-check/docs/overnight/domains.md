@@ -8,8 +8,8 @@ Branch `hc/domains`. Newest status first in each section. Nobody has run any of 
 | --- | --- | --- |
 | 1 | Security and access | Done |
 | 2 | Best practice | Done |
-| 3 | Current pipeline | In progress |
-| 4 | Forecast | Not started |
+| 3 | Current pipeline | Done |
+| 4 | Forecast | In progress |
 | 5 | Activity | Not started |
 | 6 | Lead funnel | Not started |
 | 7 | Revenue opportunities | Not started |
@@ -35,6 +35,13 @@ Branch `hc/domains`. Newest status first in each section. Nobody has run any of 
 
 - **Best practice holds only what the `aut.*` rules don't already say.** Workflow, Process Builder, coverage and trigger counts already have rules and already quote Salesforce, so repeating them would double-count in scoring. Four new rules instead, each with a `Practice` record: position, source, date checked, and whether the source is Salesforce's own. Retired API versions was dropped: the retirement is about API calls, and I couldn't confirm any effect on stored Apex.
 
+- **Next step text is never fetched.** The extractor filters on `NextStep != null` and selects only `Id`. A test greps every checkpoint and output for the planted text.
+- **Age in stage is judged against the org's own won deals** (75th percentile of time in that stage), not a fixed number of days. A stage with fewer won deals than `minSample` has no line, and its deals are excluded and declared.
+- **Coverage only counts quotas held by people who own deals.** A manager's quota repeats the team's. This is simple and could undercount a manager who also sells; the assumption is on the finding.
+- **Coverage targets:** only `forecasting_quota` is read. `custom_object` and `spreadsheet` are not measurable, because the calibration has no amounts and those sources aren't read.
+- **The synthetic calibration now says `forecasting_quota`,** because the synthetic org now has quotas.
+- **The account token restores to the record id.** We don't read account names, so a consultant looks the id up.
+
 ## Unverified Salesforce facts
 
 | Rule | What I couldn't verify | What I did |
@@ -46,3 +53,5 @@ Branch `hc/domains`. Newest status first in each section. Nobody has run any of 
 | `sec.sharing-defaults` | The full value list for `Default*Access` | Only `Edit` and `ReadEditTransfer` count as open. Anything else stays quiet |
 | `bp.jobs-on-inactive-owners` | Only vendor and community sources say a job on a deactivated user fails | Marked secondary, so confidence is medium and the summary says so |
 | `bp.after-save-same-record-updates` | A flow may need after-save for other work, and a lookup with no filters is read as same-record | Severity is low, and the recommendation keeps the rest of the flow in place |
+| `cur.missing-next-steps` | That `NextStep` can be filtered in SOQL. It's a 255-character string, which normally can | If it can't, the read fails and the rule is not measurable |
+| `cur.coverage` | `ForecastingType` and `ForecastingQuota` field names come partly from a Data Cloud mapping page. `OpportunityRevenue` as the standard name is from memory, and is only a tie-break when several revenue types are active | A wrong field fails the read, which is not measurable. Confidence is medium |

@@ -27,6 +27,7 @@ export const OpportunityRow = z.object({
   RecordType: z.string().nullable(),
   CurrencyIsoCode: z.string().nullable(),
   LossReason: z.string().nullable(),
+  AccountId: z.string().nullable().optional(),
 });
 export type OpportunityRow = z.infer<typeof OpportunityRow>;
 
@@ -41,7 +42,7 @@ export const HistoryRow = z.object({
 export type HistoryRow = z.infer<typeof HistoryRow>;
 
 /** Reads `ORDER BY Id` a page at a time, checkpointing each page, so a stopped run resumes at the last Id. */
-async function readKeyset<R extends { Id: string }>(ctx: ExtractContext, key: string, select: string, from: string, where: string): Promise<R[]> {
+export async function readKeyset<R extends { Id: string }>(ctx: ExtractContext, key: string, select: string, from: string, where: string): Promise<R[]> {
   const rows = ctx.partial.read<R>(key);
   for (;;) {
     const after = rows.at(-1)?.Id;
@@ -62,20 +63,23 @@ export type OpportunityExtract = {
   windowFrom: string;
 };
 
+function calibratedOpenStages(ctx: ExtractContext): string {
+  const open = ctx.calibration.stages.filter((s) => s.category === "open").map((s) => `'${s.name.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`);
+  return open.length > 0 ? ` OR StageName IN (${open.join(", ")})` : "";
+}
+
 function scopeClause(ctx: ExtractContext): string {
   const created = soqlDateTime(ctx.windowStart);
   const closed = soqlDate(ctx.windowStart);
   // LastModifiedDate catches a deal closed in the window with an old CloseDate,
   // such as a bulk tidy-up. The stage list keeps "open" in the calibration's
   // hands, because IsClosed is Salesforce's opinion, not the customer's.
-  const open = ctx.calibration.stages.filter((s) => s.category === "open").map((s) => `'${s.name.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`);
-  const stages = open.length > 0 ? ` OR StageName IN (${open.join(", ")})` : "";
-  return `(CreatedDate >= ${created} OR CloseDate >= ${closed} OR LastModifiedDate >= ${created} OR IsClosed = false${stages})`;
+  return `(CreatedDate >= ${created} OR CloseDate >= ${closed} OR LastModifiedDate >= ${created} OR IsClosed = false${calibratedOpenStages(ctx)})`;
 }
 
 export const opportunitiesExtractor: Extractor<OpportunityExtract> = {
   id: "opportunities",
-  version: 2,
+  version: 3,
   partialKeys: ["opportunities", "opportunity-history"],
   async run(ctx) {
     const schema = ctx.get(schemaExtractor).Opportunity!;
@@ -101,7 +105,7 @@ export const opportunitiesExtractor: Extractor<OpportunityExtract> = {
     const lossField = ctx.calibration.fields.lossReason;
     const lossReasonField = lossField && available.has(lossField) ? lossField : null;
     const fields = [
-      "Id, OwnerId, StageName, Amount, CloseDate, CreatedDate, IsClosed, IsWon, LastActivityDate",
+      "Id, AccountId, OwnerId, StageName, Amount, CloseDate, CreatedDate, IsClosed, IsWon, LastActivityDate",
       ...["Type", "LeadSource", "CurrencyIsoCode"].filter((f) => available.has(f)),
       ...(available.has("RecordTypeId") ? ["RecordType.DeveloperName"] : []),
       ...(lossReasonField ? [lossReasonField] : []),
@@ -115,6 +119,7 @@ export const opportunitiesExtractor: Extractor<OpportunityExtract> = {
       opportunities = raw.map((r) =>
         OpportunityRow.parse({
           Id: r.Id,
+          AccountId: r.AccountId ?? null,
           OwnerId: r.OwnerId,
           StageName: r.StageName,
           Amount: r.Amount ?? null,
@@ -147,6 +152,24 @@ export const opportunitiesExtractor: Extractor<OpportunityExtract> = {
       return { ...base, opportunities: ok, history: { status: "ok", data: history.map((h) => HistoryRow.parse(h)), source: historySource, truncated: false } };
     } catch (err) {
       return { ...base, opportunities: ok, history: unavailable(historySource, err) };
+    }
+  },
+};
+
+// NextStep is free text, so the rule only ever needs to know whether it's filled.
+// Filtering means the text is never selected, so it can't reach a checkpoint.
+export const nextStepsExtractor: Extractor<Sourced<string[]>> = {
+  id: "next-steps",
+  version: 1,
+  partialKeys: ["next-steps"],
+  async run(ctx) {
+    const where = `(IsClosed = false${calibratedOpenStages(ctx)}) AND NextStep != null`;
+    const source: SourceInfo = { kind: "soql", api: "rest", query: `SELECT Id FROM Opportunity WHERE ${where}` };
+    try {
+      const rows = await readKeyset<{ Id: string }>(ctx, "next-steps", "Id", "Opportunity", where);
+      return { status: "ok", data: rows.map((r) => r.Id), source, truncated: false };
+    } catch (err) {
+      return unavailable(source, err);
     }
   },
 };

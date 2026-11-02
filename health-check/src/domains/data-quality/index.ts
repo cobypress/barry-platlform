@@ -20,7 +20,7 @@ const dealDimensions = (ctx: RuleContext): Record<string, (d: Deal) => string> =
   rep: (d) => ctx.userLabel(d.OwnerId),
 });
 
-function exposure(ctx: RuleContext, deals: Deal[], multiCurrency: boolean, note: string): Value {
+export function exposure(ctx: RuleContext, deals: Deal[], multiCurrency: boolean, note: string): Value {
   if (multiCurrency) return notSized("The org is multi-currency, so these amounts can't be added.");
   const amount = deals.reduce((sum, d) => sum + (d.Amount ?? 0), 0);
   if (amount === 0) return notSized("These deals have no amounts.");
