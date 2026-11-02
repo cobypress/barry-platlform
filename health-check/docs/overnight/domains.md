@@ -12,8 +12,8 @@ Branch `hc/domains`. Newest status first in each section. Nobody has run any of 
 | 4 | Forecast | Done |
 | 5 | Activity | Done |
 | 6 | Lead funnel | Done |
-| 7 | Revenue opportunities | In progress |
-| 8 | Scoring | Not started |
+| 7 | Revenue opportunities | Done |
+| 8 | Scoring | In progress |
 | 9 | Value sizing | Not started |
 | 10 | Report scanning | Not started |
 | - | Org time zone | Not started |
@@ -55,6 +55,9 @@ Branch `hc/domains`. Newest status first in each section. Nobody has run any of 
 - **First response is the earliest task, event or status change after creation,** on the lead or the contact it converted to. Conversion moves activity to the contact, so a lead id alone would call every converted lead unanswered, and there's a trap for that. Unlogged calls would make this look slower than it is, so confidence is medium.
 - **Leads, status changes and campaign members use `readCapped`,** now shared with activity. Lead text fields, campaign names and status values are never selected.
 - **Campaign return credits a deal in full to every campaign its lead was in,** and only counts leads, not influence on existing contacts. Both are stated as assumptions, and confidence is medium. A campaign with no cost is left out and declared.
+
+- **Revenue figures use one multiplier: the org's own measured win rate.** No recovery rate, typical figure or benchmark, because rule 1 forbids introducing a figure. If the rate isn't measurable, the finding says not sized, and the count stands. Every figure states that it's a ceiling, because stalled and lost deals usually win less often than average. Confidence is medium throughout.
+- **Stalled means 60 days without a stage change or activity,** which is stricter than the 30-day `cur.stale-deals`, so this is the shortlist worth chasing.
 
 ## Unverified Salesforce facts
 

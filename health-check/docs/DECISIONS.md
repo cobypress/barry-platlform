@@ -40,6 +40,7 @@ Newest thinking is in the rationale, not the order. Change a decision by editing
 | 35 | New reads for activity: `Task`, `Event`, `EmailMessage`, ids and dates only, for the last 365 days. `queryAll` stays off the allowlist | Archived activities need `queryAll`. A year of history is enough to start, and text fields are never selected |
 | 36 | New reads for the lead funnel: `Lead`, `LeadHistory` (status changes, no values), `Campaign`, `CampaignMember`. Ids, dates, source and cost only | A funnel is counts and dates. Names, emails, phones, companies and campaign names are never selected |
 | 37 | Every metric is not measurable when Opportunity can't be read, including ones that don't need it | `run.test.ts` pins this, and the rule against weakening tests decides it. It only matters when the pipeline report has already failed. See `docs/overnight/domains.md` |
+| 38 | New read for revenue opportunities: `Account` id, owner and last activity, for accounts with a won deal | The name isn't read. Sized figures use only the org's own win rate, stated as a ceiling |
 | 31 | The instance URL is parsed, and must be a bare https Salesforce host, on connect and refresh | A prefix check passes `https://x.salesforce.com@evil.example`, which sends the token to evil.example |
 
 ## File storage

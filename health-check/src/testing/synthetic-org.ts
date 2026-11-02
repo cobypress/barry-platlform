@@ -360,6 +360,13 @@ function buildLeads() {
 
 export const leadFunnel = buildLeads();
 
+// Past customers. Trap: an account with an open deal, or recent activity, isn't dormant.
+export const WON_ACCOUNTS = [...new Set(pipeline.opportunities.filter((o) => o.IsWon).map((o) => o.AccountId))].sort().map((Id, i) => ({
+  Id,
+  OwnerId: userId([1, 2, 3, 9][i % 4]!),
+  LastActivityDate: i % 3 === 0 ? dateOnly(asOf - 200 * DAY) : i % 3 === 1 ? null : dateOnly(asOf - 20 * DAY),
+}));
+
 export const CAMPAIGNS = [
   { Id: sfId("701", 1), Type: "Webinar", ActualCost: 2_000 },
   // Trap: all the spend, and a return well under it.

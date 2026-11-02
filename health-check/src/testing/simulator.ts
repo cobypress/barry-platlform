@@ -183,6 +183,8 @@ export class Simulator implements Transport {
         return page(org.FORECAST_FACTS);
       case "OpportunityHistory":
         return this.#keyset(org.pipeline.history, soql);
+      case "Account":
+        return this.#keyset(org.WON_ACCOUNTS, soql);
       case "LeadHistory":
         return this.#keyset(org.leadFunnel.statusChanges, soql);
       case "Campaign":
