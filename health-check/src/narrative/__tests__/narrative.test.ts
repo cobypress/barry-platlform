@@ -176,6 +176,12 @@ describe("a real name can't reach the prompt", () => {
     assert.match(client.requests[0]!.prompt, /\[\[user:U\d{4}\]\]/);
   });
 
+  test("the section's own title and purpose go through the guard", async () => {
+    const client = stub(reply([{ text: "We looked at this.", sources: [] }]));
+    await draft(client, brief({ title: "Pipeline for Sam Reed", purpose: "Explain what Dana Cole should do." }));
+    assert.doesNotMatch(client.requests[0]!.prompt, /Sam Reed|Dana Cole/);
+  });
+
   test("feedback goes through the guard too", async () => {
     const client = stub(reply([{ text: "Sam Reed won 97%.", sources: [winRate.id] }]), reply(good));
     await draft(client);

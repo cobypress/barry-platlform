@@ -92,10 +92,19 @@ describe("what the engine can't know", () => {
   });
 
   test("a domain nobody assessed makes no claim", () => {
-    const { report } = all();
+    const { report } = all({ ...base, findings: base.findings.filter((f) => f.domain !== "forecast") });
     const body = currentBody(report.outputs.full_health_check, "domain_forecast");
     assert.match(body, /didn't assess/);
     assert.doesNotMatch(body, /\d/);
+  });
+
+  test("engine text that fails the number check goes to a person", () => {
+    const f = base.findings.find((x) => x.domain === "automation" && x.status === "issue")!;
+    const broken = { ...f, severity: "critical" as const, summary: "The rate is 12,5%." };
+    const { report } = all({ ...base, findings: [broken, ...base.findings.filter((x) => x.id !== f.id)] });
+    const section = report.outputs.full_health_check.sections.find((s) => s.key === "domain_automation")!;
+    assert.equal(section.status, "needs_input");
+    assert.equal(report.outputs.full_health_check.versions.find((v) => v.id === section.currentVersionId)!.numberCheck.passed, false);
   });
 
   test("nothing can be released as built", () => {
@@ -208,7 +217,7 @@ describe("the scorecard", () => {
   const gap: Score = { status: "not_measurable", domain: "forecast", ruleSetVersion: "x", reason: "Forecasting isn't in use." };
 
   test("never turns a gap into a zero", () => {
-    const rows = scorecard(base.findings, [score, gap]);
+    const rows = scorecard(base.findings.filter((f) => f.domain !== "forecast" && f.domain !== "security"), [score, gap]);
     assert.equal(rows.find((r) => r.domain === "automation")!.score, 62);
     assert.equal(rows.find((r) => r.domain === "forecast")!.score, null);
     assert.equal(rows.find((r) => r.domain === "forecast")!.note, "Forecasting isn't in use.");
