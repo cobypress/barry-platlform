@@ -7,7 +7,7 @@ import { notSized, plural, segmentRate, type NotMeasurableResult, type Rule, typ
 import { shareRule } from "../current-pipeline/index.ts";
 import { loadPipeline, type Deal } from "../historic-pipeline/cohort.ts";
 import { closedInWindow, median, segment } from "../historic-pipeline/metrics.ts";
-import type { Evidence, Metric } from "../../schemas/index.ts";
+import type { Evidence, Metric, SeriesPoint } from "../../schemas/index.ts";
 import type { DomainModule } from "../types.ts";
 import { loadActivity, type ActivityData, type Touch } from "./load.ts";
 
@@ -97,7 +97,7 @@ const eventLinkCollapse: Rule = {
       });
     }).sort((a, b) => a.comparison.recent.share - b.comparison.recent.share || a.dimension.localeCompare(b.dimension) || a.key.localeCompare(b.key));
 
-    // Month by month in the facts, so a report can show the fall as well as state it.
+    // Month by month, so a narrative can quote the fall and the number check can trace it.
     const byMonth = Object.fromEntries(months.map((month) => [`linkedShare ${month}`, compare(data.events, new Set([month]), new Set([month])).prior.share]));
     const facts = { priorShare: overall.prior.share, recentShare: overall.recent.share, priorEvents: overall.prior.total, recentEvents: overall.recent.total, ...byMonth };
     if (!overall.collapsed && hotspots.length === 0) {
@@ -288,6 +288,7 @@ const unlinkedTasks: Rule = {
 function activityMetrics(ctx: Ctx): Metric[] {
   const shared = (label: string) => ({ domain: DOMAIN, label, exclusions: [] as string[], assumptions: ["Days and months are in UTC, not the org's time zone"] });
   const definitions = {
+    linked: { ...shared("Events linked to a record"), id: "activity.event_linked_share", unit: "percent" as const, definition: "Events with a related record, as a share of all events, by month. The value is the latest whole month." },
     won: { ...shared("Activities per won deal"), id: "activity.per_won_deal", unit: "count" as const, definition: "Median tasks, events and emails logged on won deals created in the readable year." },
     lost: { ...shared("Activities per lost deal"), id: "activity.per_lost_deal", unit: "count" as const, definition: "Median tasks, events and emails logged on lost deals created in the readable year." },
   };
@@ -296,8 +297,21 @@ function activityMetrics(ctx: Ctx): Metric[] {
   const common = { exclusions: data.exclusions, assumptions: [...definitions.won.assumptions, ...data.assumptions], evidence: data.evidence.slice(0, 2) };
   const { minSample } = ctx.calibration;
   const metrics: Metric[] = [];
+  // No metric is published without the deals it's about, the link share included:
+  // it says deals are going dark, which can't be stood behind with no deals to hand.
   const pipeline = loadPipeline(ctx);
-  if (pipeline.status !== "ok") return [...metrics, { ...definitions.won, ...common, status: "not_measurable", reason: pipeline.reason }, { ...definitions.lost, ...common, status: "not_measurable", reason: pipeline.reason }];
+  if (pipeline.status !== "ok") return Object.values(definitions).map((d) => ({ ...d, ...common, status: "not_measurable", reason: pipeline.reason }));
+  const months = fullMonths(data.from, ctx.window.to);
+  const series: SeriesPoint[] = months.map((month) => {
+    const rows = data.events.filter((e) => e.StartDateTime.slice(0, 7) === month);
+    const thin = rows.length < minSample;
+    const last = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0)).toISOString().slice(0, 10);
+    return { date: last, value: thin ? null : Math.round((rows.filter((e) => e.WhatId !== null).length / rows.length) * 1000) / 10, n: rows.length, notMeasurableReason: thin ? `${rows.length} events is below the calibrated minimum of ${minSample}` : null };
+  });
+  const latest = series.filter((p) => p.value !== null).at(-1);
+  if (!latest) metrics.push({ ...definitions.linked, ...common, status: "not_measurable", reason: `No whole month has ${minSample} events.` });
+  else metrics.push({ ...definitions.linked, ...common, status: "measured", value: latest.value!, n: data.events.length, dateRange: { from: data.from, to: ctx.window.to }, segments: [], segmentExemptReason: "Shown by month. Team and rep cuts are in the event link check.", series, stats: {} });
+
   const touches = touchesByDeal(data);
   const count = (d: Deal): number => touches.get(d.Id)?.length ?? 0;
   const deals = closedThisYear(ctx, pipeline.deals, data.from);

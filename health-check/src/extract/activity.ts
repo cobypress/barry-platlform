@@ -1,5 +1,5 @@
-import { readKeyset } from "./opportunities.ts";
-import { daysBefore, soqlDateTime, unavailable, type ExtractContext, type Extractor, type Sourced, type SourceInfo } from "./types.ts";
+import { readCapped } from "./opportunities.ts";
+import { daysBefore, soqlDateTime, type Extractor, type Sourced } from "./types.ts";
 
 // Ids and dates only. Subject, Description and message bodies are customer
 // conversations, and no rule needs them.
@@ -12,18 +12,6 @@ export type ActivityExtract = { tasks: Sourced<TaskRow[]>; events: Sourced<Event
 // isn't on the allowlist. Reading only what's unarchived means the limit is
 // stated up front, rather than history quietly thinning out.
 export const ACTIVITY_DAYS = 365;
-const MAX_ROWS = 200_000;
-
-async function readCapped<R extends { Id: string }>(ctx: ExtractContext, key: string, select: string, from: string, where: string): Promise<Sourced<R[]>> {
-  const source: SourceInfo = { kind: "soql", api: "rest", query: `SELECT ${select} FROM ${from} WHERE ${where}` };
-  try {
-    const rows = await readKeyset<R>(ctx, key, select, from, where, MAX_ROWS);
-    return { status: "ok", data: rows, source, truncated: rows.length >= MAX_ROWS };
-  } catch (err) {
-    return unavailable(source, err);
-  }
-}
-
 export const activityExtractor: Extractor<ActivityExtract> = {
   id: "activity",
   version: 1,

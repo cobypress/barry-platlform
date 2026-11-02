@@ -183,7 +183,14 @@ export class Simulator implements Transport {
         return page(org.FORECAST_FACTS);
       case "OpportunityHistory":
         return this.#keyset(org.pipeline.history, soql);
+      case "LeadHistory":
+        return this.#keyset(org.leadFunnel.statusChanges, soql);
+      case "Campaign":
+        return page(org.CAMPAIGNS);
+      case "CampaignMember":
+        return this.#keyset(org.leadFunnel.members, soql);
       case "Lead":
+        if (/\bConvertedOpportunityId\b/.test(soql)) return this.#keyset(org.leadFunnel.leads, soql);
         if (/GROUP BY LeadSource/i.test(soql)) return page(/LastActivityDate/i.test(soql) ? org.LEADS.staleBySource : org.LEADS.openBySource);
         if (/^SELECT COUNT\(\)/i.test(soql)) return count(/LastActivityDate/i.test(soql) ? org.LEADS.stale : org.LEADS.open);
         break;

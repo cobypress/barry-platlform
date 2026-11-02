@@ -160,9 +160,17 @@ describe("deals, won against lost", () => {
     assert.ok(metric);
   });
 
-  test("won and lost medians are published as metrics", () => {
+  test("won and lost medians and the linked share are published as metrics", () => {
     const { metrics } = analyseExtracts(extracts);
-    for (const id of ["activity.per_won_deal", "activity.per_lost_deal"]) assert.equal(metrics.find((m) => m.id === id)?.status, "measured", id);
+    for (const id of ["activity.per_won_deal", "activity.per_lost_deal", "activity.event_linked_share"]) assert.equal(metrics.find((m) => m.id === id)?.status, "measured", id);
+  });
+
+  test("the linked share has a monthly series that shows the fall", () => {
+    const metric = analyseExtracts(extracts).metrics.find((m) => m.id === "activity.event_linked_share")!;
+    assert.ok(metric.status === "measured");
+    const at = (date: string): number | null | undefined => metric.series.find((p) => p.date === date)?.value;
+    assert.ok(at("2026-06-30")! > 60);
+    assert.ok(at("2026-07-31")! < 15);
   });
 });
 

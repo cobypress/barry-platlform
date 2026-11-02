@@ -11,8 +11,8 @@ Branch `hc/domains`. Newest status first in each section. Nobody has run any of 
 | 3 | Current pipeline | Done |
 | 4 | Forecast | Done |
 | 5 | Activity | Done |
-| 6 | Lead funnel | In progress |
-| 7 | Revenue opportunities | Not started |
+| 6 | Lead funnel | Done |
+| 7 | Revenue opportunities | In progress |
 | 8 | Scoring | Not started |
 | 9 | Value sizing | Not started |
 | 10 | Report scanning | Not started |
@@ -49,8 +49,12 @@ Branch `hc/domains`. Newest status first in each section. Nobody has run any of 
 
 - **Activity reads 12 months, on purpose.** A plain query drops activities archived after 365 days, and reaching them needs `queryAll`, which isn't on the allowlist. I didn't widen it. Won and lost comparisons only use deals created inside the readable year, because an older deal has lost its early activity and would read as a deal nobody worked. Worth deciding later whether 12 months is enough.
 - **The unlinked event trap was built first,** as the plan asked. Total events are flat at 60 a month, and the linked share falls from 74% to 6% from July. The rule compares three recent whole months with the six before, overall and by team and rep, and a test asserts the planted total really is flat.
-- **There's no `activity.event_linked_share` metric.** I built one, and it broke the existing test that says every metric is not measurable when Opportunity can't be read. The metric doesn't need Opportunity, so the test's premise no longer holds, but rule 8 says never weaken a test to get a pass. So the test is untouched, and the monthly shares are in the finding's `facts` as `linkedShare 2026-07` and so on. **Coordinator or Coby:** if you'd rather have it as a metric with a series, that test needs a named exception, which is your call rather than mine.
+- **Activity and lead funnel metrics are not measurable when Opportunity can't be read, even the ones that don't strictly need it.** This is a deliberate gate, and the reason is a test rather than the data. `run.test.ts` requires every metric to be not measurable in that case, which was true when all metrics were pipeline metrics. `activity.event_linked_share`, `activity.*`, `lead.conversion_rate` and `lead.median_response_hours` could be calculated without deals, but rule 8 says never weaken a test to get a pass, so I treated the test as the spec. It costs nothing in a normal run, and only loses those figures when the pipeline report has already failed. **Coordinator or Coby:** if you'd rather publish them, that test needs a named exception, and the gate is one line in each module. The linked shares are also in the finding's `facts`, so the rule still reports them.
 - **A truncated activity read is not measurable,** not a smaller sample. Keyset order isn't random, so the rows we'd keep would be biased. The cap is 200,000 rows per object, about 100 calls.
+
+- **First response is the earliest task, event or status change after creation,** on the lead or the contact it converted to. Conversion moves activity to the contact, so a lead id alone would call every converted lead unanswered, and there's a trap for that. Unlogged calls would make this look slower than it is, so confidence is medium.
+- **Leads, status changes and campaign members use `readCapped`,** now shared with activity. Lead text fields, campaign names and status values are never selected.
+- **Campaign return credits a deal in full to every campaign its lead was in,** and only counts leads, not influence on existing contacts. Both are stated as assumptions, and confidence is medium. A campaign with no cost is left out and declared.
 
 ## Unverified Salesforce facts
 
@@ -69,3 +73,6 @@ Branch `hc/domains`. Newest status first in each section. Nobody has run any of 
 | `fct.forecast-accuracy` | That these objects keep no history. Salesforce's own Forecast snapshots may be a separate feature I can't see | Reported as not measurable, which is the safe side |
 | `act.*` | That Einstein Activity Capture email isn't in `Task`, `Event` or `EmailMessage`. Sources are vendors selling replacements, and a Summer '25 option may change it | Where capture is in use or unknown, rep-level findings drop to medium confidence and metrics state that counts are a floor |
 | `act.*` | That `IsChild` on `Event` marks invitee copies, and that `StartDateTime` can be filtered | A wrong field fails the read, which is not measurable |
+| `lead.response-time` | That conversion moves a lead's tasks to the contact: the source is a community answer, not Salesforce's docs | We count both ids, so if it's wrong the answer is the same |
+| `lead.*` | That `LeadHistory.Field` can be filtered, and that `Status` is the stored value. If field history isn't on, rows are empty | Empty or unreadable history means tasks and events only, and unreadable is declared in the exclusions |
+| `lead.campaign-return` | `Campaign.ActualCost` and `CampaignMember.LeadId` are from memory plus a partial docs snippet | A wrong field fails the read, which is not measurable |

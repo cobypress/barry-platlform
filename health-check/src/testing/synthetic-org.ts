@@ -307,6 +307,67 @@ function buildActivity(): { tasks: SyntheticTask[]; events: SyntheticEvent[]; em
 
 export const activity = buildActivity();
 
+export type SyntheticLead = { Id: string; OwnerId: string; LeadSource: string | null; CreatedDate: string; IsConverted: boolean; ConvertedDate: string | null; ConvertedOpportunityId: string | null; ConvertedContactId: string | null };
+
+function buildLeads() {
+  const random = seeded(20261103);
+  const between = (low: number, high: number): number => Math.floor(low + random() * (high - low + 1));
+  const leads: SyntheticLead[] = [];
+  const statusChanges: Array<{ Id: string; LeadId: string; CreatedDate: string }> = [];
+  const members: Array<{ Id: string; CampaignId: string; LeadId: string }> = [];
+  const won = pipeline.opportunities.filter((o) => o.IsWon).map((o) => o.Id);
+  const lost = pipeline.opportunities.filter((o) => o.StageName === "Closed Lost").map((o) => o.Id);
+  const sources = ["Web", "Web", "Web", "Event", "Referral", "Partner"];
+  const owners = [1, 2, 3];
+  let tasks = activity.tasks.length;
+  for (let i = 1; i <= 360; i++) {
+    const source = i % 40 === 0 ? null : sources[i % sources.length]!;
+    const partner = source === "Partner";
+    const created = asOf - between(35, 600) * DAY;
+    const convertRoll = random();
+    // Trap: Partner leads barely convert, and what does never wins.
+    const converted = convertRoll < (partner ? 0.04 : 0.3);
+    // Trap: Referral leads are converted to tidy them up, with no deal behind most of them.
+    const noOpportunity = converted && random() < (source === "Referral" ? 0.7 : 0.1);
+    const Id = sfId("00Q", i);
+    const contact = converted ? sfId("003", i) : null;
+    const opportunity = !converted || noOpportunity ? null : partner ? lost[i % lost.length]! : won[i % won.length]!;
+    leads.push({
+      Id,
+      OwnerId: userId(owners[i % owners.length]!),
+      LeadSource: source,
+      CreatedDate: stamp(created),
+      IsConverted: converted,
+      ConvertedDate: converted ? dateOnly(created + 20 * DAY) : null,
+      ConvertedOpportunityId: opportunity,
+      ConvertedContactId: contact,
+    });
+    // Trap: Partner leads sit for days, and Event leads often get no answer at all.
+    const hours = partner ? between(100, 200) : between(1, 20);
+    const touched = random() >= (source === "Event" ? 0.45 : 0.04);
+    const at = created + hours * 3_600_000;
+    if (touched && at >= asOf - 365 * DAY) {
+      // Trap: a converted lead's activity moves to the contact, so a lead id alone would miss it.
+      tasks++;
+      activity.tasks.push({ Id: sfId("00T", tasks), OwnerId: userId(owners[i % owners.length]!), WhoId: contact ?? Id, WhatId: null, CreatedDate: stamp(at), TaskSubtype: "Call" });
+    }
+    // Trap: some first responses show only as a status change, with no task logged.
+    if (!touched && i % 2 === 0) statusChanges.push({ Id: sfId("017", i), LeadId: Id, CreatedDate: stamp(at) });
+    if (i % 3 === 0) members.push({ Id: sfId("00v", i), CampaignId: sfId("701", (i % 2) + 1), LeadId: Id });
+  }
+  return { leads, statusChanges, members };
+}
+
+export const leadFunnel = buildLeads();
+
+export const CAMPAIGNS = [
+  { Id: sfId("701", 1), Type: "Webinar", ActualCost: 2_000 },
+  // Trap: all the spend, and a return well under it.
+  { Id: sfId("701", 2), Type: "Trade Show", ActualCost: 900_000 },
+  // Trap: no cost recorded, so it can't be given a return.
+  { Id: sfId("701", 3), Type: "Email", ActualCost: null },
+];
+
 const standardField = (name: string, type = "string", extra: Record<string, unknown> = {}) => ({
   name,
   label: name,

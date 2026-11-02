@@ -55,6 +55,19 @@ export async function readKeyset<R extends { Id: string }>(ctx: ExtractContext, 
   }
 }
 
+const MAX_ROWS = 200_000;
+
+/** A keyset read with a ceiling on rows. `truncated` means a part, and keyset order means a biased part. */
+export async function readCapped<R extends { Id: string }>(ctx: ExtractContext, key: string, select: string, from: string, where: string): Promise<Sourced<R[]>> {
+  const source: SourceInfo = { kind: "soql", api: "rest", query: `SELECT ${select} FROM ${from} WHERE ${where}` };
+  try {
+    const rows = await readKeyset<R>(ctx, key, select, from, where, MAX_ROWS);
+    return { status: "ok", data: rows, source, truncated: rows.length >= MAX_ROWS };
+  } catch (err) {
+    return unavailable(source, err);
+  }
+}
+
 export type OpportunityExtract = {
   opportunities: Sourced<OpportunityRow[]>;
   history: Sourced<HistoryRow[]>;
