@@ -110,7 +110,7 @@ export class Simulator implements Transport {
 
     switch (object) {
       case "Organization":
-        return page([{ Id: org.ORG_ID, OrganizationType: "Enterprise Edition", IsSandbox: false, TimeZoneSidKey: "Europe/London", FiscalYearStartMonth: 1 }]);
+        return page([{ Id: org.ORG_ID, OrganizationType: "Enterprise Edition", IsSandbox: false, TimeZoneSidKey: "Europe/London", FiscalYearStartMonth: 1, ...org.SHARING_DEFAULTS }]);
       case "User":
         return page(org.usersTable);
       case "UserLicense":
@@ -121,6 +121,14 @@ export class Simulator implements Transport {
         return /\b(Status|Application)\s*(=|!=|IN|LIKE)/i.test(where) ? reject("INVALID_FIELD", "field 'Status' can not be filtered in a query call") : page(org.LOGIN_HISTORY);
       case "SetupAuditTrail":
         return /\b(Section|Display|Action)\s*(=|!=|IN|LIKE)/i.test(where) ? reject("INVALID_FIELD", "field 'Section' can not be filtered in a query call") : page(org.SETUP_AUDIT);
+      case "SecurityHealthCheck":
+        return tooling ? page([{ Score: org.HEALTH_SCORE }]) : unsupported("SecurityHealthCheck");
+      case "SecurityHealthCheckRisks":
+        return tooling ? page(org.HEALTH_RISKS) : unsupported("SecurityHealthCheckRisks");
+      case "PermissionSet":
+        return page(org.PERMISSION_SETS);
+      case "PermissionSetAssignment":
+        return page(org.PERMISSION_ASSIGNMENTS);
       case "Layout":
         return tooling ? page(org.LAYOUTS) : unsupported("Layout");
       case "ProfileLayout":

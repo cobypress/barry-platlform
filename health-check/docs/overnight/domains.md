@@ -1,0 +1,44 @@
+# Worker A: Domains log
+
+Branch `hc/domains`. Newest status first in each section. Nobody has run any of this against a real org.
+
+## Status
+
+| # | Item | State |
+| --- | --- | --- |
+| 1 | Security and access | Done |
+| 2 | Best practice | In progress |
+| 3 | Current pipeline | Not started |
+| 4 | Forecast | Not started |
+| 5 | Activity | Not started |
+| 6 | Lead funnel | Not started |
+| 7 | Revenue opportunities | Not started |
+| 8 | Scoring | Not started |
+| 9 | Value sizing | Not started |
+| 10 | Report scanning | Not started |
+| - | Org time zone | Not started |
+| - | SOAP `INVALID_SESSION_ID` refresh | Not started |
+
+## How facts were checked
+
+`developer.salesforce.com` answers direct fetches with a 403. I didn't try to get around that. Facts come from the snippets WebSearch returns from those pages, which are partial and sometimes from older API versions. So "verified" below means "seen in a Salesforce docs snippet", not "read in full" and not "proven on an org".
+
+## Merges
+
+- Merged `hc/integration` (19dc9ec) before starting, as the coordinator asked. Fast-forward, no conflicts. New pipeline work uses `fiscalStartOf(ctx)` and treats a deal with no recorded open stage as win rate only.
+
+## Decisions
+
+- **Sharing defaults sit on the `org` step**, not a separate read. A second `FROM Organization` query failed a run test that proves the org step isn't repeated on resume. Adding four fields to the existing query also saves a call. `org` is now version 2.
+- **`OauthToken` is not read.** It has `RequestToken`, which holds an authorisation code, and "secrets stay out". Personal integration accounts come from `LoginHistory.ApiType` instead, which we were already paying for.
+- **Holders of Modify All Data are worked out from both the profile and the assignments**, so the rule doesn't depend on whether profile-owned sets appear in `PermissionSetAssignment`.
+
+## Unverified Salesforce facts
+
+| Rule | What I couldn't verify | What I did |
+| --- | --- | --- |
+| `sec.health-check-*` | `RiskType` values beyond HIGH_RISK, MEDIUM_RISK, MEETS_STANDARD. Which permission reads these objects: newer docs say View Setup and Configuration, older ones Modify All Data | Other values are excluded and declared. A failed read is not measurable |
+| `sec.health-check-score` | Salesforce's own score bands | 80 and 60 are stated as our working limits |
+| `sec.personal-integration-accounts` | Whether the Salesforce mobile app or an email add-in sets `ApiType` | Confidence is medium, and the recommendation is investigate |
+| `sec.personal-integration-accounts` | A connected user without Manage Users or Monitor Login History gets only their own rows, and that looks like success | Stated on the evidence. Needs checking at the first live run |
+| `sec.sharing-defaults` | The full value list for `Default*Access` | Only `Edit` and `ReadEditTransfer` count as open. Anything else stays quiet |

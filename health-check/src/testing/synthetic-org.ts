@@ -355,20 +355,63 @@ export const SETUP_AUDIT = [
   ...Array.from({ length: 8 }, (_, i) => ({ Section: "Manage Users", CreatedDate: daysAgo(i * 4 + 1), CreatedById: userId(1) })),
 ];
 
-const loginRows = (user: number, count: number, status = "Success") => Array.from({ length: count }, (_, i) => ({ UserId: userId(user), LoginTime: daysAgo(i * 2 + 1), Status: status }));
+const loginRows = (user: number, count: number, status = "Success", api: { ApiType: string; Application: string } | null = null) =>
+  Array.from({ length: count }, (_, i) => ({ UserId: userId(user), LoginTime: daysAgo(i * 2 + 1), Status: status, ApiType: api?.ApiType ?? null, Application: api?.Application ?? "Browser" }));
 
 export const LOGIN_HISTORY = [
   ...loginRows(1, 10),
   ...loginRows(2, 12),
   ...loginRows(3, 8),
   ...loginRows(4, 15),
-  ...loginRows(11, 30),
+  ...loginRows(11, 30, "Success", { ApiType: "SOAP Enterprise", Application: "Finance Sync" }),
   ...loginRows(14, 7),
   // Trap: disagrees with LastLoginDate.
   ...loginRows(15, 3),
   // Trap: failures aren't logins, and Status can't be filtered in SOQL.
   ...loginRows(5, 4, "Invalid Password"),
+  // Trap: an integration quietly running on a salesperson's own login.
+  ...loginRows(14, 6, "Success", { ApiType: "SOAP Enterprise", Application: "Partner Portal Sync" }),
+  // Trap: one data load by an admin is normal, and shouldn't read as an integration.
+  ...loginRows(4, 1, "Success", { ApiType: "SOAP Partner", Application: "Data Loader" }),
 ];
+
+export const HEALTH_SCORE = "62";
+
+export const HEALTH_RISKS = [
+  { RiskType: "HIGH_RISK", Setting: "Minimum password length", SettingGroup: "Password Policies", OrgValue: "8 characters", StandardValue: "12 characters" },
+  { RiskType: "HIGH_RISK", Setting: "Session timeout", SettingGroup: "Session Settings", OrgValue: "12 hours", StandardValue: "2 hours" },
+  { RiskType: "MEDIUM_RISK", Setting: "Maximum invalid login attempts", SettingGroup: "Password Policies", OrgValue: "10", StandardValue: "5" },
+  { RiskType: "MEETS_STANDARD", Setting: "Enable clickjack protection", SettingGroup: "Session Settings", OrgValue: "Enabled", StandardValue: "Enabled" },
+  { RiskType: "MEETS_STANDARD", Setting: "Password complexity", SettingGroup: "Password Policies", OrgValue: "Alpha and numeric", StandardValue: "Alpha and numeric" },
+];
+
+const permissionSet = (n: number, Label: string, profile: string | null, modify: boolean, view: boolean) => ({
+  Id: sfId("0PS", n),
+  Label,
+  IsOwnedByProfile: profile !== null,
+  Profile: profile ? { Name: profile } : null,
+  PermissionsModifyAllData: modify,
+  PermissionsViewAllData: view,
+});
+
+export const PERMISSION_SETS = [
+  permissionSet(1, "00eSystemAdmin", "System Administrator", true, true),
+  permissionSet(2, "00eApiOnly", "API Only", true, true),
+  // Trap: the profile list looks clean. The grant sits in a permission set on a rep.
+  permissionSet(3, "Data Fix Temporary", null, true, true),
+  permissionSet(4, "Reporting Everything", null, false, true),
+];
+
+export const PERMISSION_ASSIGNMENTS = [
+  { AssigneeId: userId(4), PermissionSetId: sfId("0PS", 1) },
+  { AssigneeId: userId(11), PermissionSetId: sfId("0PS", 2) },
+  { AssigneeId: userId(2), PermissionSetId: sfId("0PS", 3) },
+  // Trap: inactive, so it can't log in and shouldn't count.
+  { AssigneeId: userId(9), PermissionSetId: sfId("0PS", 3) },
+  { AssigneeId: userId(1), PermissionSetId: sfId("0PS", 4) },
+];
+
+export const SHARING_DEFAULTS = { DefaultAccountAccess: "Read", DefaultContactAccess: "ControlledByParent", DefaultOpportunityAccess: "Edit", DefaultLeadAccess: "ReadEditTransfer" };
 
 export const CRON_TRIGGERS = [
   { Id: sfId("08e", 1), OwnerId: userId(13), State: "WAITING", CronJobDetail: { Name: "Nightly Renewal Sync", JobType: "7" } },

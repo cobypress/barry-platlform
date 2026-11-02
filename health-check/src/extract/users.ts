@@ -43,24 +43,31 @@ export const licencesExtractor: Extractor<LicenceData> = {
   },
 };
 
-export type LoginSummary = { from: string; rowsRead: number; failedOrOther: number; byUser: Record<string, { successes: number; lastSuccess: string }> };
+export type LoginSummary = {
+  from: string;
+  rowsRead: number;
+  failedOrOther: number;
+  byUser: Record<string, { successes: number; lastSuccess: string }>;
+  /** Successful logins with an ApiType, by user. How a personal account shows up as an integration. */
+  apiByUser: Record<string, { logins: number; applications: string[] }>;
+};
 
 const LOGIN_DAYS = 90;
 const LOGIN_MAX_ROWS = 20_000;
 
 export const loginsExtractor: Extractor<Sourced<LoginSummary>> = {
   id: "logins",
-  version: 1,
+  version: 2,
   async run(ctx) {
     const from = daysBefore(ctx.now, LOGIN_DAYS);
     // Status can't be filtered in SOQL, so failures are split out here.
-    const rows = await readSoql<{ UserId: string; LoginTime: string; Status: string }>(
+    const rows = await readSoql<{ UserId: string; LoginTime: string; Status: string; ApiType: string | null; Application: string | null }>(
       ctx,
-      `SELECT UserId, LoginTime, Status FROM LoginHistory WHERE LoginTime >= ${soqlDateTime(from)} ORDER BY LoginTime DESC`,
+      `SELECT UserId, LoginTime, Status, ApiType, Application FROM LoginHistory WHERE LoginTime >= ${soqlDateTime(from)} ORDER BY LoginTime DESC`,
       { maxRecords: LOGIN_MAX_ROWS },
     );
     if (rows.status !== "ok") return rows;
-    const summary: LoginSummary = { from: from.toISOString().slice(0, 10), rowsRead: rows.data.length, failedOrOther: 0, byUser: {} };
+    const summary: LoginSummary = { from: from.toISOString().slice(0, 10), rowsRead: rows.data.length, failedOrOther: 0, byUser: {}, apiByUser: {} };
     for (const row of rows.data) {
       if (row.Status !== "Success") {
         summary.failedOrOther++;
@@ -69,6 +76,11 @@ export const loginsExtractor: Extractor<Sourced<LoginSummary>> = {
       const user = (summary.byUser[row.UserId] ??= { successes: 0, lastSuccess: row.LoginTime });
       user.successes++;
       if (row.LoginTime > user.lastSuccess) user.lastSuccess = row.LoginTime;
+      if (row.ApiType) {
+        const api = (summary.apiByUser[row.UserId] ??= { logins: 0, applications: [] });
+        api.logins++;
+        if (row.Application && !api.applications.includes(row.Application)) api.applications.push(row.Application);
+      }
     }
     return { ...rows, data: summary };
   },
