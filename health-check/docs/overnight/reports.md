@@ -9,9 +9,9 @@ Branch `hc/reports`. Newest status first in each section.
 | 1 | Number check | Done |
 | 2 | Narrative | Done |
 | 3 | Section builder | Done |
-| 4 | Design tokens | Not started |
-| 5 | Charts | Not started |
-| 6 | Raw notes in Word | Not started |
+| 4 | Design tokens | Done |
+| 5 | Charts | Done |
+| 6 | Raw notes in Word | Done |
 | 7 | Executive summary PDF | Not started |
 | 8 | Full health check PDF | Not started |
 | 9 | Layout checks | Not started |
@@ -52,3 +52,10 @@ Known limits, on purpose:
 - Executive and full reports stay at team level. People become "a single rep" or "a single person", because the plan says so (QUESTIONS.md, question 7). Raw notes keep names. A finding about one person's results can't be a top issue.
 - Phases in the plan come from effort alone: XS and S in days 1 to 30, M in 31 to 60, L and XL in 61 to 90. That's a judgement a consultant may want to change.
 - Verdict headlines are fixed text chosen by the worst severity.
+
+### 4 to 6. Tokens, charts, Word
+
+- `src/design/tokens.ts` uses the values in OVERNIGHT.md. DECISIONS.md 25 says tokens should come from `colors_and_type.css` in the design system artifact. No link to it was in the brief, so I couldn't compare them. Secondary tints (`muted`, `rule`, `panelMuted`, `panelRule`) are mine, as flat tints of Carbon.
+- Charts are plain SVG strings. A chart with no data returns its reason. Rep segments are left out of charts.
+- Found by looking at a screenshot, not by a test: a value label under the overall line, and "0 issues" on unassessed domains. Both fixed, and now tested.
+- Word notes have every finding, evidence item, guard, metric table and override. Poppins is named but not embedded, so a machine without it shows a fallback font.

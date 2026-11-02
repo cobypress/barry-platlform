@@ -76,3 +76,7 @@ Kept apart from the table above so the overnight branches merge cleanly.
 | R7 | Server-side refusal fallbacks are off | They'd move customer metadata to another model with nobody deciding, while zero data retention is still an open question (QUESTIONS.md). A refused section keeps the engine's text. Worth revisiting once that's answered |
 | R8 | First and last names are masked in prompts as well, apart from a short list of ordinary words | `scrub()` catches full names only, and metadata labels such as "Sam's pipeline" hold first names |
 | R9 | Evidence isn't sent to Claude | It isn't needed for wording, and a query can quote record values |
+| R10 | Charts sit on a Carbon panel | Chartreuse is 1.5:1 on Ivory, which fails the chart contrast check. It's about 10:1 on Carbon |
+| R11 | Poppins is embedded in PDFs from `@fontsource/poppins` (OFL), and only named in Word | PDF rendering mustn't need the network. A machine without Poppins shows Word's fallback font |
+| R12 | A domain nobody assessed shows no issue count | "0 issues" would read as a clean result |
+
