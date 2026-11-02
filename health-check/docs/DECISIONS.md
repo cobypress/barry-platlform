@@ -34,6 +34,13 @@ Newest thinking is in the rationale, not the order. Change a decision by editing
 | 28 | Deals created already closed count in win rate, but not in conversion, sales cycle or slippage | They're real outcomes with no sales process behind them. Counting won ones as passing every stage while dropping lost ones inflated conversion |
 | 29 | The Opportunity extract includes anything modified in the window, or in a calibrated open stage | Otherwise a bulk close of old deals vanishes, inflating win rate and undercounting past pipeline. `IsClosed` alone would let Salesforce decide what's open |
 | 30 | A month end is judged on its own history gap (20%) and blank amounts (20%) | One old history row made months before a migration look measured |
+| 32 | New reads for security: `SecurityHealthCheck` and `SecurityHealthCheckRisks` (Tooling), `PermissionSet`, `PermissionSetAssignment`, and `ApiType`, `Application` on `LoginHistory`, and sharing defaults on `Organization` | All are SOQL through existing routes, so the allowlist is unchanged. `OauthToken` isn't read, because it holds an authorisation code |
+| 33 | New reads for current pipeline: `AccountId` on Opportunity, ids of open deals with `NextStep` filled, `ForecastingType`, `ForecastingQuota` | Text is read as filled or empty by filtering, so it's never fetched |
+| 34 | New reads for forecast: `Period`, `ForecastingItem`, `ForecastingFact`. Forecast accuracy is not measurable | These rows are today's position, so they can't show what was called at the time |
+| 35 | New reads for activity: `Task`, `Event`, `EmailMessage`, ids and dates only, for the last 365 days. `queryAll` stays off the allowlist | Archived activities need `queryAll`. A year of history is enough to start, and text fields are never selected |
+| 36 | New reads for the lead funnel: `Lead`, `LeadHistory` (status changes, no values), `Campaign`, `CampaignMember`. Ids, dates, source and cost only | A funnel is counts and dates. Names, emails, phones, companies and campaign names are never selected |
+| 37 | Every metric is not measurable when Opportunity can't be read, including ones that don't need it | `run.test.ts` pins this, and the rule against weakening tests decides it. It only matters when the pipeline report has already failed. See `docs/overnight/domains.md` |
+| 38 | New read for revenue opportunities: `Account` id, owner and last activity, for accounts with a won deal | The name isn't read. Sized figures use only the org's own win rate, stated as a ceiling |
 | 31 | The instance URL is parsed, and must be a bare https Salesforce host, on connect and refresh | A prefix check passes `https://x.salesforce.com@evil.example`, which sends the token to evil.example |
 
 ## File storage

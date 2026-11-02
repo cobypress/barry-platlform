@@ -16,6 +16,8 @@ export type FlowSummary = {
   hardcodedUserIds: number;
   hardcodedOtherIds: number;
   hardcodedEmails: number;
+  /** Record updates that write back to the record that started the flow. */
+  sameRecordUpdates: number;
   path: string;
 };
 
@@ -73,6 +75,15 @@ function flowObject(flow: Record<string, any>): string | null {
   return values.find((v) => v.name === "ObjectType")?.value?.stringValue ?? null;
 }
 
+// An update targets the triggering record through $Record, or as a lookup on the
+// same object filtered to $Record.Id. A lookup with other filters updates siblings.
+function isSameRecordUpdate(update: Record<string, any>, object: string | null): boolean {
+  if (String(update.inputReference ?? "") === "$Record") return true;
+  if (!object || update.object !== object) return false;
+  const filters = [update.filters ?? []].flat() as Array<{ value?: { elementReference?: string } }>;
+  return filters.length === 0 || filters.some((f) => f.value?.elementReference === "$Record.Id");
+}
+
 function parseFlow(path: string, xml: string): FlowSummary {
   const flow = (parser.parse(xml) as { Flow: Record<string, any> }).Flow;
   const start = flow.start ?? {};
@@ -92,6 +103,7 @@ function parseFlow(path: string, xml: string): FlowSummary {
     hardcodedUserIds: distinct(xml, ELEMENT_USER_ID),
     hardcodedOtherIds: distinct(xml, ELEMENT_OTHER_ID),
     hardcodedEmails: distinct(xml, ELEMENT_EMAIL),
+    sameRecordUpdates: ((flow.recordUpdates ?? []) as Array<Record<string, any>>).filter((u) => isSameRecordUpdate(u, start.object ? String(start.object) : null)).length,
     path,
   };
 }

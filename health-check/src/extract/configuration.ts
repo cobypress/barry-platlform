@@ -24,13 +24,18 @@ export type ObjectSummary = { name: string; fields: FieldSummary[]; recordTypes:
 const NAMESPACED = /^[A-Za-z0-9]+__.+__c$/;
 export const isOwnCustomField = (f: { custom: boolean; name: string }): boolean => f.custom && !NAMESPACED.test(f.name);
 
-export type OrgSummary = { Id: string; OrganizationType: string; IsSandbox: boolean; TimeZoneSidKey: string; FiscalYearStartMonth: number };
+export type SharingDefaults = { DefaultAccountAccess: string | null; DefaultContactAccess: string | null; DefaultOpportunityAccess: string | null; DefaultLeadAccess: string | null };
+export type OrgSummary = { Id: string; OrganizationType: string; IsSandbox: boolean; TimeZoneSidKey: string; FiscalYearStartMonth: number } & SharingDefaults;
 
 export const orgExtractor: Extractor<Sourced<OrgSummary[]>> = {
   id: "org",
-  version: 1,
+  version: 2,
   // The org's Name is the customer's name, and no rule needs it.
-  run: (ctx) => readSoql<OrgSummary>(ctx, "SELECT Id, OrganizationType, IsSandbox, TimeZoneSidKey, FiscalYearStartMonth FROM Organization"),
+  run: (ctx) =>
+    readSoql<OrgSummary>(
+      ctx,
+      "SELECT Id, OrganizationType, IsSandbox, TimeZoneSidKey, FiscalYearStartMonth, DefaultAccountAccess, DefaultContactAccess, DefaultOpportunityAccess, DefaultLeadAccess FROM Organization",
+    ),
 };
 
 export const schemaExtractor: Extractor<Record<string, Sourced<ObjectSummary>>> = {

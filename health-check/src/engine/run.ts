@@ -2,6 +2,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileS
 import { createHash, randomUUID } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { BUDGET_DEFAULTS, RULE_SET_VERSION, SF_DEFAULTS } from "../config.ts";
+import { scoreDomains } from "../domains/scoring.ts";
 import type { DomainModule } from "../domains/types.ts";
 import { orgExtractor } from "../extract/configuration.ts";
 import { monthsBefore, type ExtractContext, type Extractor, type PartialStore } from "../extract/types.ts";
@@ -256,6 +257,8 @@ function renderOutputs(dir: string, run: Run, calibration: Calibration, output: 
   writeJson(join(dir, "findings.json"), output.findings);
   writeJson(join(dir, "metrics.json"), output.metrics);
   writeJson(join(dir, "manual-steps.json"), output.manualSteps);
-  const notes = renderRawNotes({ run, calibration, ...output, pseudonyms: loadPseudonyms(dir) });
+  const scores = scoreDomains(run.modules, output.findings, run.ruleSetVersion);
+  writeJson(join(dir, "scores.json"), scores);
+  const notes = renderRawNotes({ run, calibration, ...output, scores, pseudonyms: loadPseudonyms(dir) });
   writeFileSync(join(dir, "raw-notes.md"), notes, { mode: 0o600 });
 }

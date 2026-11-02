@@ -106,6 +106,8 @@ export type SyntheticOpportunity = {
   LeadSource: string;
   RecordType: { DeveloperName: string };
   Loss_Reason__c: string | null;
+  AccountId: string;
+  NextStep: string | null;
 };
 
 export type SyntheticHistory = { Id: string; OpportunityId: string; StageName: string; Amount: number | null; CloseDate: string; CreatedDate: string };
@@ -164,6 +166,8 @@ function buildPipeline(): { opportunities: SyntheticOpportunity[]; history: Synt
       LeadSource: SOURCES[between(0, SOURCES.length - 1)]!,
       RecordType: { DeveloperName: random() < 0.2 ? "Renewal" : "New_Business" },
       Loss_Reason__c: final === "Closed Lost" && random() < 0.5 ? "Price" : null,
+      AccountId: sfId("001", (i % 120) + 1),
+      NextStep: null,
     });
   }
 
@@ -183,6 +187,8 @@ function buildPipeline(): { opportunities: SyntheticOpportunity[]; history: Synt
       LeadSource: "Web",
       RecordType: { DeveloperName: "New_Business" },
       Loss_Reason__c: null,
+      AccountId: sfId("001", 1),
+      NextStep: null,
     });
   }
 
@@ -202,6 +208,14 @@ function buildPipeline(): { opportunities: SyntheticOpportunity[]; history: Synt
       addHistory(id, s, amount, close, at);
       at += between(2, 8) * DAY;
     }
+    // Trap: the same close date moved again and again, which only history shows.
+    if (i % 5 === 0) {
+      for (let push = 3; push >= 1; push--) addHistory(id, stage, amount, close - push * 20 * DAY, at + (3 - push) * DAY);
+      addHistory(id, stage, amount, close, at + 3 * DAY);
+    }
+    // Drawn before the trap is applied, so planting it doesn't move the seeded sequence.
+    const touched = random() < 0.2 ? 120 : between(1, 30);
+    // Trap: one rep's deals have gone quiet, under a total that looks fine.
     opportunities.push({
       Id: id,
       OwnerId: userId(owner),
@@ -211,11 +225,15 @@ function buildPipeline(): { opportunities: SyntheticOpportunity[]; history: Synt
       CreatedDate: new Date(created).toISOString().replace("Z", "+0000"),
       IsClosed: false,
       IsWon: false,
-      LastActivityDate: random() < 0.2 ? dateOnly(asOf - 120 * DAY) : dateOnly(asOf - between(1, 30) * DAY),
+      LastActivityDate: dateOnly(asOf - (owner === 3 && i % 8 === 2 ? 120 : owner === 2 ? 10 : touched) * DAY),
       Type: "New Business",
       LeadSource: SOURCES[between(0, SOURCES.length - 1)]!,
       RecordType: { DeveloperName: renewal ? "Renewal" : "New_Business" },
       Loss_Reason__c: null,
+      // Trap: a quarter of open deals sit on one customer, so a loss there hurts.
+      AccountId: sfId("001", i % 4 === 0 ? 900 : (i % 120) + 1),
+      // Trap: the total looks fine, and one rep leaves next steps empty on nearly everything.
+      NextStep: owner === 14 ? (i % 8 === 0 ? "Call the buyer on Friday" : null) : i % 9 === 0 ? null : "Call the buyer on Friday",
     });
   }
   history.sort((a, b) => a.Id.localeCompare(b.Id));
@@ -223,6 +241,139 @@ function buildPipeline(): { opportunities: SyntheticOpportunity[]; history: Synt
 }
 
 export const pipeline = buildPipeline();
+
+export type SyntheticTask = { Id: string; OwnerId: string; WhoId: string | null; WhatId: string | null; CreatedDate: string; TaskSubtype: string | null };
+export type SyntheticEvent = { Id: string; OwnerId: string; WhoId: string | null; WhatId: string | null; StartDateTime: string };
+export type SyntheticEmail = { Id: string; RelatedToId: string | null; ActivityId: string | null; MessageDate: string; CreatedById: string };
+
+const stamp = (ms: number): string => new Date(ms).toISOString().replace("Z", "+0000");
+
+function buildActivity(): { tasks: SyntheticTask[]; events: SyntheticEvent[]; emails: SyntheticEmail[] } {
+  const random = seeded(20261102);
+  const between = (low: number, high: number): number => Math.floor(low + random() * (high - low + 1));
+  const reps = [1, 2, 3, 14];
+  const tasks: SyntheticTask[] = [];
+  const events: SyntheticEvent[] = [];
+  const emails: SyntheticEmail[] = [];
+  const oneYearAgo = asOf - 365 * DAY;
+  const addTask = (owner: string, whatId: string | null, at: number, subtype: string | null = "Task"): string => {
+    const Id = sfId("00T", tasks.length + 1);
+    tasks.push({ Id, OwnerId: owner, WhoId: null, WhatId: whatId, CreatedDate: stamp(at), TaskSubtype: subtype });
+    return Id;
+  };
+  const dealIds = pipeline.opportunities.filter((o) => o.OwnerId === userId(1) || o.OwnerId === userId(2)).map((o) => o.Id);
+
+  // Trap, built first: a real check once missed this. Total events are flat all
+  // year. From July, almost none of them are linked to a record, which is what
+  // happens when synced events stop being related. A monthly total shows nothing.
+  const COLLAPSE = Date.UTC(2026, 6, 1);
+  for (let month = 0; month < 12; month++) {
+    const first = Date.UTC(2025, 10 + month, 1);
+    for (let i = 0; i < 60; i++) {
+      const at = first + between(0, 26) * DAY + between(8, 17) * 3_600_000;
+      if (at > asOf) continue;
+      const linked = random() < (at >= COLLAPSE ? 0.05 : 0.75);
+      events.push({ Id: sfId("00U", events.length + 1), OwnerId: userId(reps[i % 3]!), WhoId: null, WhatId: linked ? dealIds[between(0, dealIds.length - 1)]! : null, StartDateTime: stamp(at) });
+    }
+  }
+
+  // Closed deals. Won deals get more touches than lost ones. Trap: most of the EU
+  // team's closed deals have nothing logged at all, inside a total that looks fine.
+  for (const deal of pipeline.opportunities.filter((o) => o.IsClosed && new Date(o.CreatedDate.replace("+0000", "Z")).getTime() >= oneYearAgo)) {
+    const eu = deal.OwnerId === userId(3) || deal.OwnerId === userId(14);
+    const roll = random();
+    const count = eu && roll < 0.7 ? 0 : deal.IsWon ? between(5, 9) : between(1, 4);
+    for (let i = 0; i < count; i++) addTask(deal.OwnerId, deal.Id, new Date(deal.CreatedDate.replace("+0000", "Z")).getTime() + (i + 1) * DAY);
+  }
+
+  // Open deals in the last 90 days. Trap: one rep has logged almost nothing.
+  for (const deal of pipeline.opportunities.filter((o) => !o.IsClosed)) {
+    const count = deal.OwnerId === userId(14) ? (random() < 0.1 ? 1 : 0) : between(3, 6);
+    for (let i = 0; i < count; i++) addTask(deal.OwnerId, deal.Id, asOf - between(1, 85) * DAY);
+  }
+
+  // Trap: one person logs tasks against nothing, so they vanish from every deal.
+  for (let i = 0; i < 40; i++) addTask(userId(15), i % 5 === 0 ? dealIds[0]! : null, asOf - between(1, 200) * DAY);
+
+  // Trap: an enhanced email also makes a task, so counting both would double it.
+  for (let i = 0; i < 30; i++) {
+    const deal = pipeline.opportunities[224 + i]!;
+    const at = asOf - between(1, 60) * DAY;
+    const logged = i % 2 === 0 ? addTask(deal.OwnerId, deal.Id, at, "Email") : null;
+    emails.push({ Id: sfId("02s", i + 1), RelatedToId: deal.Id, ActivityId: logged, MessageDate: stamp(at), CreatedById: deal.OwnerId });
+  }
+  return { tasks, events, emails };
+}
+
+export const activity = buildActivity();
+
+export type SyntheticLead = { Id: string; OwnerId: string; LeadSource: string | null; CreatedDate: string; IsConverted: boolean; ConvertedDate: string | null; ConvertedOpportunityId: string | null; ConvertedContactId: string | null };
+
+function buildLeads() {
+  const random = seeded(20261103);
+  const between = (low: number, high: number): number => Math.floor(low + random() * (high - low + 1));
+  const leads: SyntheticLead[] = [];
+  const statusChanges: Array<{ Id: string; LeadId: string; CreatedDate: string }> = [];
+  const members: Array<{ Id: string; CampaignId: string; LeadId: string }> = [];
+  const won = pipeline.opportunities.filter((o) => o.IsWon).map((o) => o.Id);
+  const lost = pipeline.opportunities.filter((o) => o.StageName === "Closed Lost").map((o) => o.Id);
+  const sources = ["Web", "Web", "Web", "Event", "Referral", "Partner"];
+  const owners = [1, 2, 3];
+  let tasks = activity.tasks.length;
+  for (let i = 1; i <= 360; i++) {
+    const source = i % 40 === 0 ? null : sources[i % sources.length]!;
+    const partner = source === "Partner";
+    const created = asOf - between(35, 600) * DAY;
+    const convertRoll = random();
+    // Trap: Partner leads barely convert, and what does never wins.
+    const converted = convertRoll < (partner ? 0.04 : 0.3);
+    // Trap: Referral leads are converted to tidy them up, with no deal behind most of them.
+    const noOpportunity = converted && random() < (source === "Referral" ? 0.7 : 0.1);
+    const Id = sfId("00Q", i);
+    const contact = converted ? sfId("003", i) : null;
+    const opportunity = !converted || noOpportunity ? null : partner ? lost[i % lost.length]! : won[i % won.length]!;
+    leads.push({
+      Id,
+      OwnerId: userId(owners[i % owners.length]!),
+      LeadSource: source,
+      CreatedDate: stamp(created),
+      IsConverted: converted,
+      ConvertedDate: converted ? dateOnly(created + 20 * DAY) : null,
+      ConvertedOpportunityId: opportunity,
+      ConvertedContactId: contact,
+    });
+    // Trap: Partner leads sit for days, and Event leads often get no answer at all.
+    const hours = partner ? between(100, 200) : between(1, 20);
+    const touched = random() >= (source === "Event" ? 0.45 : 0.04);
+    const at = created + hours * 3_600_000;
+    if (touched && at >= asOf - 365 * DAY) {
+      // Trap: a converted lead's activity moves to the contact, so a lead id alone would miss it.
+      tasks++;
+      activity.tasks.push({ Id: sfId("00T", tasks), OwnerId: userId(owners[i % owners.length]!), WhoId: contact ?? Id, WhatId: null, CreatedDate: stamp(at), TaskSubtype: "Call" });
+    }
+    // Trap: some first responses show only as a status change, with no task logged.
+    if (!touched && i % 2 === 0) statusChanges.push({ Id: sfId("017", i), LeadId: Id, CreatedDate: stamp(at) });
+    if (i % 3 === 0) members.push({ Id: sfId("00v", i), CampaignId: sfId("701", (i % 2) + 1), LeadId: Id });
+  }
+  return { leads, statusChanges, members };
+}
+
+export const leadFunnel = buildLeads();
+
+// Past customers. Trap: an account with an open deal, or recent activity, isn't dormant.
+export const WON_ACCOUNTS = [...new Set(pipeline.opportunities.filter((o) => o.IsWon).map((o) => o.AccountId))].sort().map((Id, i) => ({
+  Id,
+  OwnerId: userId([1, 2, 3, 9][i % 4]!),
+  LastActivityDate: i % 3 === 0 ? dateOnly(asOf - 200 * DAY) : i % 3 === 1 ? null : dateOnly(asOf - 20 * DAY),
+}));
+
+export const CAMPAIGNS = [
+  { Id: sfId("701", 1), Type: "Webinar", ActualCost: 2_000 },
+  // Trap: all the spend, and a return well under it.
+  { Id: sfId("701", 2), Type: "Trade Show", ActualCost: 900_000 },
+  // Trap: no cost recorded, so it can't be given a return.
+  { Id: sfId("701", 3), Type: "Email", ActualCost: null },
+];
 
 const standardField = (name: string, type = "string", extra: Record<string, unknown> = {}) => ({
   name,
@@ -314,11 +465,14 @@ export const OWNERSHIP: Record<string, Array<[number, number]>> = {
   Lead: [[1, 200], [2, 260], [9, 40]],
   Case: [],
   Project__c: [[2, 20]],
+  // Trap: one account over Salesforce's ownership skew line, on a custom object.
+  Invoice__c: [[11, 12_000]],
 };
 
 export const RECORD_COUNTS = [
   { name: "Account", count: 500 },
   { name: "Project__c", count: 20 },
+  { name: "Invoice__c", count: 12_000 },
   // Trap: a detail object has no OwnerId, which isn't a gap in the scan.
   { name: "Project_Line__c", count: 40 },
   { name: "Empty_Object__c", count: 0 },
@@ -355,24 +509,119 @@ export const SETUP_AUDIT = [
   ...Array.from({ length: 8 }, (_, i) => ({ Section: "Manage Users", CreatedDate: daysAgo(i * 4 + 1), CreatedById: userId(1) })),
 ];
 
-const loginRows = (user: number, count: number, status = "Success") => Array.from({ length: count }, (_, i) => ({ UserId: userId(user), LoginTime: daysAgo(i * 2 + 1), Status: status }));
+const loginRows = (user: number, count: number, status = "Success", api: { ApiType: string; Application: string } | null = null) =>
+  Array.from({ length: count }, (_, i) => ({ UserId: userId(user), LoginTime: daysAgo(i * 2 + 1), Status: status, ApiType: api?.ApiType ?? null, Application: api?.Application ?? "Browser" }));
+
+export const FORECAST_TYPES = [
+  { Id: sfId("0Db", 1), DeveloperName: "OpportunityRevenue", IsActive: true, IsAmount: true },
+  { Id: sfId("0Db", 2), DeveloperName: "OpportunityQuantity", IsActive: true, IsAmount: false },
+];
+
+const QUARTER_START = "2026-10-01";
+
+// Trap: each rep's quota is real, and the manager's quota above them would double
+// count if every row were added up. It's held by a user who owns no deals.
+export const QUOTAS = [
+  // Trap: rep 14 owns open deals and has no quota at all.
+  ...[1, 2, 3].map((n) => ({ QuotaOwnerId: userId(n), QuotaAmount: 400_000, StartDate: QUARTER_START, ForecastingTypeId: sfId("0Db", 1) })),
+  { QuotaOwnerId: userId(12), QuotaAmount: 1_600_000, StartDate: QUARTER_START, ForecastingTypeId: sfId("0Db", 1) },
+  // Trap: a quantity quota isn't money.
+  { QuotaOwnerId: userId(1), QuotaAmount: 50, StartDate: QUARTER_START, ForecastingTypeId: sfId("0Db", 2) },
+];
+
+const PERIOD_ID = sfId("026", 2);
+
+export const PERIODS = [{ Id: PERIOD_ID, Type: "Quarter", StartDate: QUARTER_START, EndDate: "2026-12-31" }];
+
+const forecastItem = (n: number, category: string, before: number, after: number) => ({
+  OwnerId: userId(n),
+  PeriodId: PERIOD_ID,
+  ForecastingTypeId: sfId("0Db", 1),
+  ForecastCategoryName: category,
+  ForecastAmount: after,
+  AmountWithoutAdjustments: before,
+  HasAdjustment: before !== after,
+});
+
+export const FORECAST_ITEMS = [
+  forecastItem(1, "Commit", 200_000, 200_000),
+  forecastItem(2, "Commit", 200_000, 200_000),
+  // Trap: most of this forecast is a manager's hand adjustment, with no deal behind it.
+  forecastItem(3, "Commit", 100_000, 400_000),
+  forecastItem(14, "Commit", 100_000, 100_000),
+  forecastItem(1, "Best Case", 300_000, 300_000),
+  { ...forecastItem(2, "Pipeline", 500_000, 500_000), ForecastingTypeId: sfId("0Db", 2) },
+];
+
+// Commit follows the late stages, with a planted handful of early-stage deals.
+export const FORECAST_FACTS = pipeline.opportunities
+  .filter((o) => !o.IsClosed && o.CloseDate >= QUARTER_START && o.CloseDate <= "2026-12-31")
+  .map((o, i) => ({
+    OpportunityId: o.Id,
+    PeriodId: PERIOD_ID,
+    ForecastCategoryName: o.StageName === "Negotiation" || i % 7 === 0 ? "Commit" : o.StageName === "Proposal" ? "Best Case" : "Pipeline",
+  }));
 
 export const LOGIN_HISTORY = [
   ...loginRows(1, 10),
   ...loginRows(2, 12),
   ...loginRows(3, 8),
   ...loginRows(4, 15),
-  ...loginRows(11, 30),
+  ...loginRows(11, 30, "Success", { ApiType: "SOAP Enterprise", Application: "Finance Sync" }),
   ...loginRows(14, 7),
   // Trap: disagrees with LastLoginDate.
   ...loginRows(15, 3),
   // Trap: failures aren't logins, and Status can't be filtered in SOQL.
   ...loginRows(5, 4, "Invalid Password"),
+  // Trap: an integration quietly running on a salesperson's own login.
+  ...loginRows(14, 6, "Success", { ApiType: "SOAP Enterprise", Application: "Partner Portal Sync" }),
+  // Trap: one data load by an admin is normal, and shouldn't read as an integration.
+  ...loginRows(4, 1, "Success", { ApiType: "SOAP Partner", Application: "Data Loader" }),
 ];
+
+export const HEALTH_SCORE = "62";
+
+export const HEALTH_RISKS = [
+  { RiskType: "HIGH_RISK", Setting: "Minimum password length", SettingGroup: "Password Policies", OrgValue: "8 characters", StandardValue: "12 characters" },
+  { RiskType: "HIGH_RISK", Setting: "Session timeout", SettingGroup: "Session Settings", OrgValue: "12 hours", StandardValue: "2 hours" },
+  { RiskType: "MEDIUM_RISK", Setting: "Maximum invalid login attempts", SettingGroup: "Password Policies", OrgValue: "10", StandardValue: "5" },
+  { RiskType: "MEETS_STANDARD", Setting: "Enable clickjack protection", SettingGroup: "Session Settings", OrgValue: "Enabled", StandardValue: "Enabled" },
+  { RiskType: "MEETS_STANDARD", Setting: "Password complexity", SettingGroup: "Password Policies", OrgValue: "Alpha and numeric", StandardValue: "Alpha and numeric" },
+];
+
+const permissionSet = (n: number, Label: string, profile: string | null, modify: boolean, view: boolean) => ({
+  Id: sfId("0PS", n),
+  Label,
+  IsOwnedByProfile: profile !== null,
+  Profile: profile ? { Name: profile } : null,
+  PermissionsModifyAllData: modify,
+  PermissionsViewAllData: view,
+});
+
+export const PERMISSION_SETS = [
+  permissionSet(1, "00eSystemAdmin", "System Administrator", true, true),
+  permissionSet(2, "00eApiOnly", "API Only", true, true),
+  // Trap: the profile list looks clean. The grant sits in a permission set on a rep.
+  permissionSet(3, "Data Fix Temporary", null, true, true),
+  permissionSet(4, "Reporting Everything", null, false, true),
+];
+
+export const PERMISSION_ASSIGNMENTS = [
+  { AssigneeId: userId(4), PermissionSetId: sfId("0PS", 1) },
+  { AssigneeId: userId(11), PermissionSetId: sfId("0PS", 2) },
+  { AssigneeId: userId(2), PermissionSetId: sfId("0PS", 3) },
+  // Trap: inactive, so it can't log in and shouldn't count.
+  { AssigneeId: userId(9), PermissionSetId: sfId("0PS", 3) },
+  { AssigneeId: userId(1), PermissionSetId: sfId("0PS", 4) },
+];
+
+export const SHARING_DEFAULTS = { DefaultAccountAccess: "Read", DefaultContactAccess: "ControlledByParent", DefaultOpportunityAccess: "Edit", DefaultLeadAccess: "ReadEditTransfer" };
 
 export const CRON_TRIGGERS = [
   { Id: sfId("08e", 1), OwnerId: userId(13), State: "WAITING", CronJobDetail: { Name: "Nightly Renewal Sync", JobType: "7" } },
   { Id: sfId("08e", 2), OwnerId: userId(4), State: "WAITING", CronJobDetail: { Name: "Weekly Cleanup", JobType: "7" } },
+  // Trap: still scheduled under someone who's left.
+  { Id: sfId("08e", 3), OwnerId: userId(9), State: "WAITING", CronJobDetail: { Name: "Quarterly Export", JobType: "7" } },
 ];
 
 export const DASHBOARDS = [

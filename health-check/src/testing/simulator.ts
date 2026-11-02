@@ -110,7 +110,7 @@ export class Simulator implements Transport {
 
     switch (object) {
       case "Organization":
-        return page([{ Id: org.ORG_ID, OrganizationType: "Enterprise Edition", IsSandbox: false, TimeZoneSidKey: "Europe/London", FiscalYearStartMonth: 1 }]);
+        return page([{ Id: org.ORG_ID, OrganizationType: "Enterprise Edition", IsSandbox: false, TimeZoneSidKey: "Europe/London", FiscalYearStartMonth: 1, ...org.SHARING_DEFAULTS }]);
       case "User":
         return page(org.usersTable);
       case "UserLicense":
@@ -121,6 +121,14 @@ export class Simulator implements Transport {
         return /\b(Status|Application)\s*(=|!=|IN|LIKE)/i.test(where) ? reject("INVALID_FIELD", "field 'Status' can not be filtered in a query call") : page(org.LOGIN_HISTORY);
       case "SetupAuditTrail":
         return /\b(Section|Display|Action)\s*(=|!=|IN|LIKE)/i.test(where) ? reject("INVALID_FIELD", "field 'Section' can not be filtered in a query call") : page(org.SETUP_AUDIT);
+      case "SecurityHealthCheck":
+        return tooling ? page([{ Score: org.HEALTH_SCORE }]) : unsupported("SecurityHealthCheck");
+      case "SecurityHealthCheckRisks":
+        return tooling ? page(org.HEALTH_RISKS) : unsupported("SecurityHealthCheckRisks");
+      case "PermissionSet":
+        return page(org.PERMISSION_SETS);
+      case "PermissionSetAssignment":
+        return page(org.PERMISSION_ASSIGNMENTS);
       case "Layout":
         return tooling ? page(org.LAYOUTS) : unsupported("Layout");
       case "ProfileLayout":
@@ -154,10 +162,37 @@ export class Simulator implements Transport {
       case "OpportunityStage":
         return page(org.STAGES);
       case "Opportunity":
-        return this.#keyset(org.pipeline.opportunities, soql);
+        if (/NextStep != null/.test(soql)) return this.#keyset(org.pipeline.opportunities.filter((o) => !o.IsClosed && o.NextStep !== null).map((o) => ({ Id: o.Id })), soql);
+        // Free text the query didn't ask for mustn't come back, as on a real org.
+        return this.#keyset(org.pipeline.opportunities.map(({ NextStep, ...o }) => o), soql);
+      case "ForecastingType":
+        return page(org.FORECAST_TYPES);
+      case "ForecastingQuota":
+        return page(org.QUOTAS);
+      case "Task":
+        return this.#keyset(org.activity.tasks, soql);
+      case "Event":
+        return this.#keyset(org.activity.events, soql);
+      case "EmailMessage":
+        return this.#keyset(org.activity.emails, soql);
+      case "Period":
+        return page(org.PERIODS);
+      case "ForecastingItem":
+        return page(org.FORECAST_ITEMS);
+      case "ForecastingFact":
+        return page(org.FORECAST_FACTS);
       case "OpportunityHistory":
         return this.#keyset(org.pipeline.history, soql);
+      case "Account":
+        return this.#keyset(org.WON_ACCOUNTS, soql);
+      case "LeadHistory":
+        return this.#keyset(org.leadFunnel.statusChanges, soql);
+      case "Campaign":
+        return page(org.CAMPAIGNS);
+      case "CampaignMember":
+        return this.#keyset(org.leadFunnel.members, soql);
       case "Lead":
+        if (/\bConvertedOpportunityId\b/.test(soql)) return this.#keyset(org.leadFunnel.leads, soql);
         if (/GROUP BY LeadSource/i.test(soql)) return page(/LastActivityDate/i.test(soql) ? org.LEADS.staleBySource : org.LEADS.openBySource);
         if (/^SELECT COUNT\(\)/i.test(soql)) return count(/LastActivityDate/i.test(soql) ? org.LEADS.stale : org.LEADS.open);
         break;

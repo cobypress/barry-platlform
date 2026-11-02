@@ -1,7 +1,7 @@
 // Service-wide settings. Secrets never live here: the only values read from the
 // environment are the ones below, and docs/DECISIONS.md lists them.
 
-export const RULE_SET_VERSION = "2026.11-m1";
+export const RULE_SET_VERSION = "2026.11-m3";
 
 // Model ids are config so a model change never touches analysis code. Nothing
 // calls Claude in Milestone 1. Checked against the Anthropic docs on 2026-11-02.

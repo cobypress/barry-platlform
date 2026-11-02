@@ -75,7 +75,7 @@ function dimensions(ctx: Ctx): Record<string, (d: Deal) => string> {
   };
 }
 
-function segment(rows: Deal[], dims: Record<string, (d: Deal) => string>, minSample: number, calculate: (group: Deal[]) => number | null): MetricSegment[] {
+export function segment(rows: Deal[], dims: Record<string, (d: Deal) => string>, minSample: number, calculate: (group: Deal[]) => number | null): MetricSegment[] {
   const segments: MetricSegment[] = [];
   for (const [dimension, keyOf] of Object.entries(dims)) {
     for (const [key, group] of [...groupBy(rows, keyOf)].sort(([a], [b]) => a.localeCompare(b))) {
@@ -265,7 +265,7 @@ function salesCycle(ctx: Ctx, data: Ready): Metric[] {
 
 type Push = { days: number; crossedQuarter: boolean };
 
-function pushesOf(deal: Deal, fiscalStart: number | null): Push[] {
+export function pushesOf(deal: Deal, fiscalStart: number | null): Push[] {
   const pushes: Push[] = [];
   for (let i = 1; i < deal.history.length; i++) {
     const before = new Date(`${deal.history[i - 1]!.CloseDate}T00:00:00Z`);

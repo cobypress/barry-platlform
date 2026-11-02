@@ -63,4 +63,14 @@ describe("secrets", () => {
     const b = parseMetadataBundle({ "flows/A.flow": "<Flow><status>Active</status><apiKey>supersecretvalue</apiKey></Flow>" });
     assert.doesNotMatch(JSON.stringify(b), /supersecretvalue/);
   });
+
+  test("same-record updates: $Record, an unfiltered update, and a filter on the triggering record count, siblings don't", () => {
+    const flow = (updates: string): string => `<Flow><apiVersion>62.0</apiVersion><label>F</label><status>Active</status><start><object>Opportunity</object><triggerType>RecordAfterSave</triggerType></start>${updates}</Flow>`;
+    const count = (updates: string): number => parseMetadataBundle({ "flows/F.flow": flow(updates) }).flows[0]!.sameRecordUpdates;
+    assert.equal(count("<recordUpdates><name>A</name><inputReference>$Record</inputReference></recordUpdates>"), 1);
+    assert.equal(count("<recordUpdates><name>A</name><object>Opportunity</object></recordUpdates>"), 1);
+    assert.equal(count("<recordUpdates><name>A</name><object>Opportunity</object><filters><field>Id</field><value><elementReference>$Record.Id</elementReference></value></filters></recordUpdates>"), 1);
+    assert.equal(count("<recordUpdates><name>A</name><object>Opportunity</object><filters><field>AccountId</field><value><elementReference>$Record.AccountId</elementReference></value></filters></recordUpdates>"), 0);
+    assert.equal(count("<recordUpdates><name>A</name><object>Account</object></recordUpdates>"), 0);
+  });
 });
