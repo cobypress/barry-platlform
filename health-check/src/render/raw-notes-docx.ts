@@ -4,7 +4,7 @@ import { currentBody, type BuiltReport } from "../narrative/sections.ts";
 import { issuesOf } from "../narrative/select.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { canRelease, type Evidence, type Finding, type ManualStep, type Metric, type NumberOverride } from "../schemas/index.ts";
-import { longDate, money } from "./format.ts";
+import { longDate, money, ukDates } from "./format.ts";
 
 // The working record behind the reports: every check, what it found, and how to
 // reproduce it. Tokens become names here, at the last moment, because this is
@@ -35,14 +35,17 @@ function evidenceDetail(e: Evidence): string {
 
 class Notes {
   readonly #restore: (text: string) => string;
+  readonly #name: (text: string) => string;
   readonly blocks: Block[] = [];
 
   constructor(pseudonyms: Pseudonymiser) {
-    this.#restore = (text) => pseudonyms.restore(text);
+    this.#name = (text) => pseudonyms.restore(text);
+    this.#restore = (text) => ukDates(pseudonyms.restore(text));
   }
 
   run(text: string, options: { bold?: boolean; code?: boolean; colour?: string } = {}): TextRun {
-    return new TextRun({ text: this.#restore(text), bold: options.bold, font: options.code ? "Courier New" : FONT, size: options.code ? 16 : 20, color: options.colour ?? CARBON });
+    // A query is kept exactly as it ran, so it can be pasted back in.
+    return new TextRun({ text: options.code ? this.#name(text) : this.#restore(text), bold: options.bold, font: options.code ? "Courier New" : FONT, size: options.code ? 16 : 20, color: options.colour ?? CARBON });
   }
 
   heading(text: string, level: 1 | 2 | 3): void {

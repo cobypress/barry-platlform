@@ -15,6 +15,7 @@ import { SALES_CLOUD_DOMAINS, type Finding, type NumberOverride, type ReportSect
 import { runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
 import { executiveHtml } from "../executive.ts";
+import { ukDates } from "../format.ts";
 import { DECK_RANGE, fullReportHtml, slideCounts } from "../full-report.ts";
 import { document } from "../html.ts";
 import { layoutOf, launchBrowser, pdfPageCount, renderPdf } from "../pdf.ts";
@@ -37,6 +38,20 @@ after(async () => {
 
 const execRange = { minPages: EXECUTIVE_PAGES.min, maxPages: EXECUTIVE_PAGES.max };
 const deckRange = { minPages: DECK_RANGE.min, maxPages: DECK_RANGE.max };
+const noFonts = (html: string): string => html.replace(/url\(data:[^)]+\)/g, "");
+const RAW_DATE = /(?<![\w-])\d{4}-\d{2}-\d{2}(?![\w-])/;
+const pageText = (html: string): string => noFonts(html).replace(/<style>[\s\S]*?<\/style>/, "").replace(/<[^>]+>/g, " ");
+
+/** Every two-column slide has cards on both sides. */
+function assertBothColumnsUsed(html: string): void {
+  for (const block of html.split(/class="two-up(?: roomy)?"/).slice(1)) {
+    const body = block.split("</section>")[0]!;
+    const columns = body.split('class="col"').slice(1);
+    assert.equal(columns.length, 2, "two columns");
+    for (const column of columns) assert.match(column, /^><article/, "a column with a card in it");
+  }
+}
+
 const describeProblems = (problems: unknown[]): string => JSON.stringify(problems.slice(0, 8));
 
 describe("the executive summary", () => {
@@ -54,11 +69,17 @@ describe("the executive summary", () => {
     const html = executiveHtml(report, pseudonyms);
     for (const text of ["Verdict", verdictOf(report.teamFindings).headline, "How each area stands", "Top 5 issues", "Days 1 to 30", "Days 31 to 60", "Days 61 to 90", "Synthetic Co"]) assert.ok(html.includes(text), text);
     for (const f of topIssues(report.teamFindings, 5)) {
-      const value = f.value.kind === "not_sized" ? "Not sized" : `£${f.value.amount.toLocaleString("en-GB")} ${f.value.period}`;
+      const value = f.value.kind === "not_sized" ? "Not sized" : ukDates(`£${f.value.amount.toLocaleString("en-GB")} ${f.value.period}`);
       assert.ok(html.includes(value), value);
     }
     assert.match(html, /data-expect-chart="scorecard"/);
     assert.match(html, /data-expect-chart="win-rate-by-segment"/);
+  });
+
+  test("shows UK dates, never an ISO date", () => {
+    const report = buildReport(full);
+    assert.ok(report.teamFindings.some((f) => f.value.kind !== "not_sized" && RAW_DATE.test(f.value.period)), "the sample has a dated period");
+    assert.doesNotMatch(pageText(executiveHtml(report, pseudonyms)), RAW_DATE);
   });
 
   test("names no one", () => {
@@ -85,10 +106,29 @@ describe("the full health check", () => {
     for (const chart of ["scorecard", "win-rate-by-segment", "stage-funnel", "pipeline-over-time"]) assert.match(html, new RegExp(`data-expect-chart="${chart}"`));
   });
 
+  test("shows UK dates, never an ISO date", () => {
+    assert.doesNotMatch(pageText(fullReportHtml(buildReport(full), pseudonyms)), RAW_DATE);
+  });
+
+  test("every card slide uses both columns", () => {
+    const html = fullReportHtml(buildReport(full), pseudonyms);
+    assert.match(html, /class="two-up/, "the sample is dense enough to test this");
+    assert.match(html, /class="two-up roomy"/, "short slides get larger cards");
+    assertBothColumnsUsed(html);
+  });
+
+  test("a lone card on a dense slide takes the full width", () => {
+    const issues = full.findings.filter((f) => f.status === "issue");
+    const one = issues.filter((f) => f.severity === "medium").slice(0, 1).map((f) => ({ ...f, domain: "activity" }));
+    const rest = issues.filter((f) => f.domain !== "activity" && f.id !== one[0]!.id);
+    const html = fullReportHtml(buildReport({ ...full, findings: [...one, ...rest, ...full.findings.filter((f) => f.status !== "issue")] }), pseudonyms);
+    assertBothColumnsUsed(html);
+  });
+
   test("every issue appears somewhere", () => {
     const report = buildReport(full);
     const html = fullReportHtml(report, pseudonyms);
-    const escape = (t: string): string => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+    const escape = (t: string): string => ukDates(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
     assert.doesNotMatch(html, /raw notes have all of it/, "an ordinary org stays out of compact mode");
     // The roadmap repeats recommendations, so count the issues' own lines.
     assert.equal((html.match(/What to do:/g) ?? []).length, report.teamFindings.filter((x) => x.status === "issue" && x.recommendation).length);
@@ -138,6 +178,7 @@ describe("a large, messy org", () => {
     const report = buildReport({ ...input, findings: input.findings.filter((f) => f.status !== "issue" || Number(f.id.slice(-2)) < 7) });
     const html = fullReportHtml(report, pseudonyms);
     assert.doesNotMatch(html, /raw notes have all of it/, String(slideCounts(report, pseudonyms)));
+    assertBothColumnsUsed(html);
     const { layout } = await renderPdf(browser, html, { ...deckRange });
     assert.deepEqual(layout.problems, [], describeProblems(layout.problems));
   });
@@ -221,6 +262,11 @@ describe("the layout checks fire", () => {
 
   test("a page holding only its footer", async () => {
     assert.ok((await checks(doc(page(footer)))).includes("empty section"));
+  });
+
+  test("a raw ISO date", async () => {
+    assert.ok((await checks(doc(page(`${ok}<p>From 2024-10-31 onwards.</p>`)))).includes("raw date"));
+    assert.deepEqual(await checks(doc(page(`${ok}<p>Run hc-2026-10-31-ab1301a5.</p>`))), []);
   });
 
   test("a leftover token, or a template gap", async () => {

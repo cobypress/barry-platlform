@@ -31,6 +31,7 @@ type PageFacts = {
 };
 
 const MIN_TEXT = 40;
+const RAW_DATE = /(?<![\w-])\d{4}-\d{2}-\d{2}(?![\w-])/;
 const LEFTOVERS = /\[\[|\]\]|\bundefined\b|\bNaN\b|\[object Object\]|\bnull\b/;
 
 async function pageFacts(browserPage: Page): Promise<PageFacts[]> {
@@ -113,6 +114,8 @@ export async function checkLayout(browserPage: Page, expectation: LayoutExpectat
     if (!f.cover && !f.hasChart && f.text.length < MIN_TEXT) push(f.page, "empty section", `only "${f.text}"`);
     const leftover = LEFTOVERS.exec(f.text);
     if (leftover) push(f.page, "leftover", leftover[0]);
+    const rawDate = RAW_DATE.exec(f.text);
+    if (rawDate) push(f.page, "raw date", rawDate[0]);
     if (expectation.dataset) {
       for (const miss of checkNumbers(f.text, expectation.dataset).unmatched) push(f.page, "number check", `${miss.raw}: ${miss.reason}`);
     }

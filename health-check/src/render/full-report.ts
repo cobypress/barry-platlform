@@ -37,6 +37,9 @@ h2 { font-size: 36px; font-weight: 600; line-height: 1.2; margin: 4px 0 16px; }
 .two-up .card { font-size: 13.5px; line-height: 1.38; padding: 9px 13px; margin-bottom: 8px; }
 .two-up .card h3 { font-size: 14.5px; margin: 3px 0; }
 .two-up .card .meta { font-size: 11.5px; }
+.two-up.roomy .card { font-size: 16.5px; line-height: 1.42; padding: 12px 16px; margin-bottom: 12px; }
+.two-up.roomy .card h3 { font-size: 18px; margin: 4px 0; }
+.two-up.roomy .card .meta { font-size: 13.5px; }
 .two-text { columns: 2; column-gap: 28px; }
 .two-text li, .two-text tr { break-inside: avoid; }
 .action-list.two-text { font-size: 15px; }
@@ -63,6 +66,7 @@ type Slide = { html: string; classes?: string };
 const ISSUE_SLIDE_BUDGET = 500;
 const CARD_CHARS = 105;
 const SMALL_CARD_CHARS = 70;
+const ROOMY_SCALE = 1.5;
 const LIST_BUDGET = 470;
 
 function issueSlide(r: Render, label: string, f: Finding): Slide {
@@ -91,12 +95,30 @@ function issueCards(r: Render, label: string, findings: Finding[]): Slide {
   return { html: `<div class="eyebrow">${r.t(label)}</div><h2>${groupTitle(findings[0]!)}</h2>${findings.map((f) => card(r, f)).join("")}` };
 }
 
+/** Keeps reading order, and splits where the taller column is as short as it can be. */
+function balance(findings: Finding[]): [Finding[], Finding[]] {
+  const height = (group: Finding[]): number => group.reduce((sum, f) => sum + smallCardHeight(f), 0);
+  let best = 1;
+  for (let i = 1; i < findings.length; i++) {
+    if (Math.max(height(findings.slice(0, i)), height(findings.slice(i))) < Math.max(height(findings.slice(0, best)), height(findings.slice(best)))) best = i;
+  }
+  return [findings.slice(0, best), findings.slice(best)];
+}
+
 function twoColumnSlides(r: Render, label: string, findings: Finding[]): Slide[] {
   const columns = paginate(findings, smallCardHeight, ISSUE_SLIDE_BUDGET);
   const slides: Slide[] = [];
   for (let i = 0; i < columns.length; i += 2) {
-    const pair = columns.slice(i, i + 2);
-    slides.push({ html: `<div class="eyebrow">${r.t(label)}</div><h2>${groupTitle(pair[0]![0]!)}</h2><div class="two-up">${pair.map((column) => `<div>${column.map((f) => card(r, f)).join("")}</div>`).join("")}</div>` });
+    const group = columns.slice(i, i + 2).flat();
+    // A lone card takes the full width. Half an empty slide looks like a mistake.
+    if (group.length === 1) {
+      slides.push(issueCards(r, label, group));
+      continue;
+    }
+    const sides = balance(group);
+    // Few cards get larger type, so a short slide doesn't look unfinished.
+    const roomy = Math.max(...sides.map((side) => side.reduce((sum, f) => sum + smallCardHeight(f), 0))) * ROOMY_SCALE <= ISSUE_SLIDE_BUDGET;
+    slides.push({ html: `<div class="eyebrow">${r.t(label)}</div><h2>${groupTitle(group[0]!)}</h2><div class="two-up${roomy ? " roomy" : ""}">${sides.map((column) => `<div class="col">${column.map((f) => card(r, f)).join("")}</div>`).join("")}</div>` });
   }
   return slides;
 }

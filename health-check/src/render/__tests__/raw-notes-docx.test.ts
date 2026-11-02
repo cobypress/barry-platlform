@@ -9,6 +9,7 @@ import { Pseudonymiser, type PseudonymEntry } from "../../privacy/pseudonymiser.
 import type { NumberOverride } from "../../schemas/index.ts";
 import { runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
+import { ukDates } from "../format.ts";
 import { renderRawNotesDocx } from "../raw-notes-docx.ts";
 
 const { output, run, dir } = await runFromRecording({ answers: loadAnswers() });
@@ -41,15 +42,15 @@ describe("the Word raw notes", () => {
   test("hold every finding, in full", () => {
     for (const f of base.findings) {
       assert.ok(notes.text.includes(f.id), f.id);
-      assert.ok(notes.text.includes(pseudonyms.restore(f.title)), f.title);
-      assert.ok(notes.text.includes(pseudonyms.restore(f.summary)), f.summary);
+      assert.ok(notes.text.includes(ukDates(pseudonyms.restore(f.title))), f.title);
+      assert.ok(notes.text.includes(ukDates(pseudonyms.restore(f.summary))), f.summary);
     }
   });
 
   test("hold the evidence: queries, counts, periods and exclusions", () => {
     assert.match(notes.text, /Query: SELECT/);
     assert.match(notes.text, /Count: \d+/);
-    assert.match(notes.text, /Period: \d{4}-\d{2}-\d{2} to/);
+    assert.match(notes.text, /Period: \d{1,2} [A-Z][a-z]{2} \d{4} to/);
     assert.match(notes.text, /Excludes: /);
     const queries = base.findings.flatMap((f) => f.evidence).flatMap((e) => (e.kind === "soql" ? [e.query] : []));
     for (const query of queries) assert.ok(notes.text.includes(query), query);
@@ -64,7 +65,15 @@ describe("the Word raw notes", () => {
 
   test("say what couldn't be measured and why", () => {
     const gap = base.findings.find((f) => f.status === "not_measurable")!;
-    assert.ok(notes.text.includes(gap.notMeasurableReason!));
+    assert.ok(notes.text.includes(ukDates(gap.notMeasurableReason!)));
+  });
+
+  test("a reader gets UK dates, while queries and the run id stay exact", () => {
+    const withoutQueries = notes.text.replace(/Query: .*?(?=Count: |$)/g, "").replace(/Tooling query: .*?(?=Count: |$)/g, "");
+    const rest = withoutQueries.replace(/SELECT [^|]*/g, "").replaceAll(run.id, "");
+    assert.doesNotMatch(rest.replace(/Query: \S*/g, ""), /(?<![\w:-])\d{4}-\d{2}-\d{2}(?![\w-])/);
+    assert.ok(notes.text.includes(run.id));
+    assert.match(notes.text, /CreatedDate >= 20\d{2}-\d{2}-\d{2}/);
   });
 
   test("names come back here, and no token survives", () => {

@@ -107,3 +107,11 @@ These reach customer documents, and they're rule text, so I left them alone.
 - `Intake` is my own shape, so the console has to match it.
 - Phasing by effort, verdict wording and the top-five order are judgement calls for Coby to review.
 - A deck under 40 slides gets flagged and `hc render` exits non-zero. A very clean org will hit that.
+
+### Coordinator's visual review
+
+- **Dates.** Engine text holds ISO dates, so `ukDates` in `src/render/format.ts` now turns them into UK dates in all three outputs. `findings.json` is unchanged. Queries in the raw notes keep theirs so they can be pasted back in, and run ids are left alone. The layout check now fails on any raw date on a page.
+- **Also found:** `value.period` wasn't in the number check dataset, so a date in a period was never checked. It is now.
+- **Half-empty slides.** A lone column on a two-column slide left the right half empty. Cards are now balanced across both columns, and a single card takes the full width. Tests check this for the sample and for an 84-issue org.
+- Slides with few cards now use larger type, so a short slide doesn't look unfinished.
+- **For Worker A:** a value assumption still prints unformatted money: "with a total Amount of 3730000".

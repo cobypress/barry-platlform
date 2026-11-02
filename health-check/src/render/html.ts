@@ -3,7 +3,7 @@ import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import type { Finding } from "../schemas/index.ts";
 import type { Chart } from "./charts.ts";
 import { fontFaces } from "./fonts.ts";
-import { compactMoney, escapeXml, money } from "./format.ts";
+import { compactMoney, escapeXml, money, ukDates } from "./format.ts";
 
 // Shared by both PDFs. Every page is a fixed box, so a page can be measured and
 // checked rather than left to flow. Names go back in here, then get escaped, so a
@@ -17,14 +17,14 @@ export type Render = {
 };
 
 export function renderContext(pseudonyms: Pseudonymiser, currency: string, draft: boolean): Render {
-  return { t: (text) => escapeXml(pseudonyms.restore(text)), currency, draft };
+  return { t: (text) => escapeXml(ukDates(pseudonyms.restore(text))), currency, draft };
 }
 
 export const paragraphs = (r: Render, text: string): string =>
   text.split(/\n\n+/).filter((p) => p.trim()).map((p) => `<p>${r.t(p).replace(/\n/g, "<br>")}</p>`).join("");
 
 export function chartSlot(chart: Chart): string {
-  const inner = chart.kind === "chart" ? chart.svg : `<div class="chart-gap"><strong>Not measurable.</strong> ${escapeXml(chart.reason)}</div>`;
+  const inner = chart.kind === "chart" ? chart.svg : `<div class="chart-gap"><strong>Not measurable.</strong> ${escapeXml(ukDates(chart.reason))}</div>`;
   return `<figure class="chart-slot" data-expect-chart="${chart.id}">${inner}</figure>`;
 }
 

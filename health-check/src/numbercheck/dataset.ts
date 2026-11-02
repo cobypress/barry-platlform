@@ -104,6 +104,7 @@ function addFinding(set: FigureSet, f: Finding, currency: string | undefined): v
   else {
     if (f.value.kind === "hours") c.number(f.value.amount, "duration", { unit: "hour" });
     else c.number(f.value.amount, "currency", { currency: /^[A-Z]{3}$/.test(f.value.unit) ? f.value.unit : (currency ?? f.value.unit) });
+    c.text(f.value.period);
     for (const assumption of f.value.assumptions) c.text(assumption);
   }
   for (const [name, value] of Object.entries(f.facts)) {

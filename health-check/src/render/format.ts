@@ -31,6 +31,12 @@ export function longDate(iso: string): string {
   return `${Number(day)} ${MONTH_SHORT[Number(month) - 1]} ${year}`;
 }
 
+// The whole token only, so a run id such as hc-2026-10-31-ab12cd34 is left alone.
+const ISO_DATE = /(?<![\w-])(\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01]))(?:T[\d:.]+(?:Z|[+-]\d{2}:?\d{2})?)?(?![\w-])/g;
+
+/** Engine text holds ISO dates. A reader gets a UK date. Queries must keep theirs, so don't pass them here. */
+export const ukDates = (text: string): string => text.replace(ISO_DATE, (_m, iso: string) => longDate(iso));
+
 export function escapeXml(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }

@@ -7,7 +7,7 @@ import type { Metric } from "../../schemas/index.ts";
 import { runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers } from "../../testing/replay.ts";
 import { pipelineOverTime, scorecardChart, stageFunnel, winRateBySegment, type Chart } from "../charts.ts";
-import { compactMoney, money } from "../format.ts";
+import { compactMoney, money, ukDates } from "../format.ts";
 
 const { output } = await runFromRecording({ answers: loadAnswers() });
 const metric = (id: string): Metric => output!.metrics.find((m) => m.id === id)!;
@@ -156,6 +156,18 @@ describe("the scorecard", () => {
 
   test("a real score of zero is drawn as a score", () => {
     assert.match(svg(scorecardChart([row({ score: 0, note: "" })])), />0<\/text>/);
+  });
+});
+
+describe("dates", () => {
+  test("ISO dates become UK dates", () => {
+    assert.equal(ukDates("£880,280 2024-10-31 to 2026-10-31"), "£880,280 31 Oct 2024 to 31 Oct 2026");
+    assert.equal(ukDates("the quarter starting 2026-10-01"), "the quarter starting 1 Oct 2026");
+    assert.equal(ukDates("At 2026-10-31T12:00:00.000Z."), "At 31 Oct 2026.");
+  });
+
+  test("anything that isn't a date is left alone", () => {
+    for (const text of ["hc-2026-10-31-ab1301a5", "2026-13-01", "2026-10-32", "2026-10", "1-2-3", "f-2026-10-31"]) assert.equal(ukDates(text), text);
   });
 });
 
