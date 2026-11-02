@@ -15,7 +15,7 @@ Branch `hc/domains`. Newest status first in each section. Nobody has run any of 
 | 7 | Revenue opportunities | Done |
 | 8 | Scoring | Done |
 | 9 | Value sizing | Done |
-| 10 | Report scanning | In progress |
+| 10 | Report scanning | Done |
 | - | Org time zone | Not started |
 | - | SOAP `INVALID_SESSION_ID` refresh | Not started |
 
@@ -76,6 +76,10 @@ Each in its own commit, additive only.
 - **Value sizing lives in `src/domains/value.ts`.** Revenue uses the org's own win rate or won per lead. Licence cost uses the calibration. Hours use the new `effortMinutes`, so they're only sized if the customer agrees a time: `custom-field-upkeep` and `report-upkeep` so far. Nothing else was a good fit for hours, and I didn't want to invent a saving.
 - **There's no total across findings.** Exposures overlap: one deal can be stale, pushed and in Commit. Adding them would overstate. Worth keeping in mind for the executive summary.
 
+- **Report scanning resolves the field guard, but private reports keep it unknown.** It reads reports and folders, retrieves each report by name, and keeps only field names. Salesforce's `allPrivate` scope counts other people's private reports, which the retrieve can't reach. If any exist, or the count can't be read, the guard is unknown and blocks. **Coby to decide:** most real orgs have private reports, so field removal will usually stay "investigate". The alternative is to treat private reports as an accepted, stated risk, or to add a manual step. I kept the blocking default because rule 3 says unknown blocks, and that isn't mine to relax.
+- **The synthetic org has 4 private reports,** so the existing test that field removal stays "investigate" still passes untouched. New tests cover the zero case, where a clean field is recommended for removal.
+- **A failed report retrieve doesn't fail the run,** unlike the main metadata retrieve, because it only costs one guard. A budget stop still gets through, so the run can resume.
+
 ## Unverified Salesforce facts
 
 | Rule | What I couldn't verify | What I did |
@@ -96,3 +100,5 @@ Each in its own commit, additive only.
 | `lead.response-time` | That conversion moves a lead's tasks to the contact: the source is a community answer, not Salesforce's docs | We count both ids, so if it's wrong the answer is the same |
 | `lead.*` | That `LeadHistory.Field` can be filtered, and that `Status` is the stored value. If field history isn't on, rows are empty | Empty or unreadable history means tasks and events only, and unreadable is declared in the exclusions |
 | `lead.campaign-return` | `Campaign.ActualCost` and `CampaignMember.LeadId` are from memory plus a partial docs snippet | A wrong field fails the read, which is not measurable |
+| `not-used-in-reports` | That a report's `OwnerId` is its folder, and that `Folder.ParentId` chains subfolders. A wrong guess only means the file doesn't come back | Counted as not read, and the guard is unknown |
+| `not-used-in-reports` | Whether the retrieve can reach private reports at all. I assumed not. The `allPrivate` scope needs Manage All Private Reports and Dashboards, and a failed count is unknown | Blocks either way |

@@ -15,6 +15,10 @@ None of these blocked Milestone 1.
 | 7 | Should rep-level segments appear in the raw notes? | The plan keeps executive reports at team level. Raw notes currently show reps | Before the first report |
 | 8 | Has zero data retention been requested from Anthropic? | The plan wants it before the first paying customer | Before any customer run |
 
+| 9 | Should private reports block field removal? | Other people's private reports can't be read, so the report guard stays unknown wherever any exist, which is most orgs. Field removal then stays "investigate". We could accept it as a stated risk, or add a manual step | Before the first report |
+| 10 | Are the scoring weights and working limits acceptable? | A pass or critical issue is worth 8, with high 5, medium 3, low 1, times confidence. Limits such as 3 times coverage and 25% account share are our judgement | Before the first report |
+| 11 | Should accuracy be measured with our own forecast snapshots? | Forecast rows are today's position, so accuracy is not measurable without one | After the first report |
+
 ## To confirm against a real org
 
 Salesforce's docs couldn't all be read in full, so these are unproven until a live run.

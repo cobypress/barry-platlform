@@ -10,6 +10,7 @@ import {
   setupAuditExtractor,
 } from "../../extract/configuration.ts";
 import { opportunitiesExtractor, stagesExtractor } from "../../extract/opportunities.ts";
+import { reportDefinitionsExtractor } from "../../extract/report-definitions.ts";
 import { usersExtractor } from "../../extract/users.ts";
 import { fieldGuards } from "../../guards/field-guards.ts";
 import { notSized, pct, plural, type Rule, type RuleResult } from "../../engine/rule.ts";
@@ -308,6 +309,7 @@ export const configurationModule: DomainModule = {
     stagesExtractor,
     usersExtractor,
     opportunitiesExtractor,
+    reportDefinitionsExtractor,
   ],
   rules: [customFieldSprawl, unusedCustomFields, unassignedLayouts, stageSprawl, picklistSprawl, setupChangeConcentration],
 };

@@ -34,6 +34,7 @@ export class Simulator implements Transport {
   #limit: number;
   #failQuery: SimulatorOptions["failQuery"];
   #retrieveChecks = 0;
+  #retrieving: Record<string, string> = org.METADATA_FILES;
 
   constructor(options: SimulatorOptions = {}) {
     this.#used = options.used ?? 1000;
@@ -89,11 +90,14 @@ export class Simulator implements Transport {
     const respond = (text: string): TransportResponse => ({ status: 200, header: () => null, text });
     const envelope = (operation: string, inner: string): string =>
       `<?xml version="1.0"?><soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"><soapenv:Body><${operation}Response xmlns="http://soap.sforce.com/2006/04/metadata"><result>${inner}</result></${operation}Response></soapenv:Body></soapenv:Envelope>`;
-    if (body.includes("<met:retrieve>")) return respond(envelope("retrieve", `<done>false</done><id>${org.sfId("09S", 1)}</id><state>Queued</state>`));
+    if (body.includes("<met:retrieve>")) {
+      this.#retrieving = body.includes("<met:name>Report</met:name>") ? org.REPORT_FILES : org.METADATA_FILES;
+      return respond(envelope("retrieve", `<done>false</done><id>${org.sfId("09S", 1)}</id><state>Queued</state>`));
+    }
     // The first poll isn't ready, so the polling path is exercised.
     this.#retrieveChecks++;
     if (this.#retrieveChecks % 2 === 1) return respond(envelope("checkRetrieveStatus", `<done>false</done><status>InProgress</status>`));
-    const zip = zipSync(Object.fromEntries(Object.entries(org.METADATA_FILES).map(([path, text]) => [path, [strToU8(text), { mtime: new Date("2026-01-01T00:00:00Z") }]])) as never);
+    const zip = zipSync(Object.fromEntries(Object.entries(this.#retrieving).map(([path, text]) => [path, [strToU8(text), { mtime: new Date("2026-01-01T00:00:00Z") }]])) as never);
     return respond(envelope("checkRetrieveStatus", `<done>true</done><status>Succeeded</status><success>true</success><zipFile>${Buffer.from(zip).toString("base64")}</zipFile>`));
   }
 
@@ -156,7 +160,10 @@ export class Simulator implements Transport {
       case "PlatformEventSubscriberConfig":
         return page([]);
       case "Report":
+        if (/USING SCOPE allPrivate/i.test(soql)) return count(org.PRIVATE_REPORTS);
         return page(org.REPORTS);
+      case "Folder":
+        return page(org.REPORT_FOLDERS);
       case "ActivityUsrConnectionStatus":
         return page(org.ACTIVITY_CONNECTIONS);
       case "OpportunityStage":

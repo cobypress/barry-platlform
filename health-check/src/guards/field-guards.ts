@@ -1,7 +1,25 @@
 import { apexExtractor, metadataExtractor } from "../extract/automation.ts";
 import type { FieldSummary } from "../extract/configuration.ts";
-import type { RuleContext } from "../engine/rule.ts";
-import type { Guard } from "../schemas/index.ts";
+import { reportDefinitionsExtractor } from "../extract/report-definitions.ts";
+import { plural, type RuleContext } from "../engine/rule.ts";
+import type { Guard, GuardStatus } from "../schemas/index.ts";
+
+const MAX_LISTED_REPORTS = 5;
+
+// Rule 3: a clean scan only counts if it's a whole scan. Other people's private
+// reports can't be read, so any that exist leave this unknown, and unknown blocks.
+function reportGuard(ctx: RuleContext, field: string, subject: string): Guard {
+  const scan = ctx.data(reportDefinitionsExtractor);
+  const guard = (status: GuardStatus, detail: string, count: number | null): Guard => ({ guardId: "not-used-in-reports", subject, status, detail, evidence: [ctx.ev(scan.source, { count })] });
+  if (scan.status !== "ok") return guard("unknown", `Report definitions couldn't be read: ${scan.reason}`, null);
+  const { expected, notRead, privateReports, privateReason, fields } = scan.data;
+  const uses = fields[field] ?? [];
+  if (uses.length > 0) return guard("failed", `Used in ${plural(uses.length, "report")}: ${[...uses].sort().slice(0, MAX_LISTED_REPORTS).join(", ")}.`, uses.length);
+  if (notRead > 0) return guard("unknown", `${notRead} of ${expected} reports couldn't be read, so one of them could use this field.`, notRead);
+  if (privateReports === null) return guard("unknown", `We couldn't tell whether other people have private reports: ${privateReason}`, null);
+  if (privateReports > 0) return guard("unknown", `Not used in the ${expected} reports we read, but ${plural(privateReports, "private report")} can't be read.`, privateReports);
+  return guard("passed", `Not used in any of the ${expected} reports, and there are no private reports we can't read.`, expected);
+}
 
 export function fieldGuards(ctx: RuleContext, object: string, field: FieldSummary): Guard[] {
   const subject = `${object}.${field.name}`;
@@ -28,8 +46,6 @@ export function fieldGuards(ctx: RuleContext, object: string, field: FieldSummar
     evidence,
   });
 
-  // Report filters and columns aren't scanned yet, and an unscanned guard must
-  // block. So field removal stays "investigate" until report scanning is built.
-  guards.push({ guardId: "not-used-in-reports", subject, status: "unknown", detail: "We haven't scanned report definitions for this field.", evidence });
+  guards.push(reportGuard(ctx, field.name, subject));
   return guards;
 }
