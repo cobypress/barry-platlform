@@ -1,3 +1,4 @@
+import { money } from "../../render/format.ts";
 import { schemaExtractor } from "../../extract/configuration.ts";
 import { quotasExtractor, revenueForecastType } from "../../extract/forecast.ts";
 import { nextStepsExtractor, opportunitiesExtractor, stagesExtractor } from "../../extract/opportunities.ts";
@@ -345,7 +346,7 @@ const coverage: Rule = {
     return {
       outcome: "issue",
       title: "There isn't enough pipeline to cover this quarter's quota",
-      summary: `Open pipeline closing this quarter is ${result.coverage} times what's left of quota, against our working target of ${COVERAGE_TARGET}. Quota ${result.quota}, won ${result.won}, open ${result.open}.`,
+      summary: `Open pipeline closing this quarter is ${result.coverage} times what's left of quota, against our working target of ${COVERAGE_TARGET}. Quota ${money(result.quota, ctx.calibration.currency)}, won ${money(result.won, ctx.calibration.currency)}, open ${money(result.open, ctx.calibration.currency)}.`,
       recommendation: "Decide now whether to build pipeline or reset the number. Coverage can't be fixed in the last weeks of a quarter.",
       recommendationType: "investigate",
       severity: result.coverage < COVERAGE_TARGET / 2 ? "high" : "medium",

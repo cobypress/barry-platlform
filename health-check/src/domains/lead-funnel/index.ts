@@ -1,3 +1,4 @@
+import { money } from "../../render/format.ts";
 import { activityExtractor } from "../../extract/activity.ts";
 import { schemaExtractor } from "../../extract/configuration.ts";
 import { leadsExtractor } from "../../extract/leads.ts";
@@ -243,7 +244,7 @@ const sourceReturn: Rule = {
     return {
       outcome: "issue",
       title: "Some lead sources have produced no wins",
-      summary: `${dry.map((r) => r.source).join(", ")} brought in ${leads} leads and no won deals, against ${Math.round(total)} ${ctx.calibration.currency} won from other sources.`,
+      summary: `${dry.map((r) => r.source).join(", ")} brought in ${leads} leads and no won deals, against ${money(total, ctx.calibration.currency)} won from other sources.`,
       recommendation: "Check how these leads are handled, then decide whether the source is worth keeping.",
       recommendationType: "investigate",
       severity: "medium",
@@ -292,12 +293,12 @@ const campaignReturn: Rule = {
     const under = rows.filter((r) => r.returned < r.cost).sort((a, b) => a.returned / a.cost - b.returned / b.cost || a.type.localeCompare(b.type));
     const spend = rows.reduce((sum, r) => sum + r.cost, 0);
     const segments = [{ dimension: "campaign type", segments: rows.length }];
-    if (under.length === 0) return { outcome: "pass", summary: `Every campaign type with a recorded cost returned more than it cost, across ${spend} ${ctx.calibration.currency} of spend.`, evidence, segmentsChecked: segments, facts: { spend, types: rows.length } };
+    if (under.length === 0) return { outcome: "pass", summary: `Every campaign type with a recorded cost returned more than it cost, across ${money(spend, ctx.calibration.currency)} of spend.`, evidence, segmentsChecked: segments, facts: { spend, types: rows.length } };
     const gap = Math.round(under.reduce((sum, r) => sum + r.cost - r.returned, 0));
     return {
       outcome: "issue",
       title: "Some campaign spend isn't coming back",
-      summary: `${under.map((r) => r.type).join(", ")} cost ${Math.round(under.reduce((sum, r) => sum + r.cost, 0))} ${ctx.calibration.currency} and returned ${Math.round(under.reduce((sum, r) => sum + r.returned, 0))} in won deals from its leads.`,
+      summary: `${under.map((r) => r.type).join(", ")} cost ${money(under.reduce((sum, r) => sum + r.cost, 0), ctx.calibration.currency)} and returned ${money(under.reduce((sum, r) => sum + r.returned, 0), ctx.calibration.currency)} in won deals from its leads.`,
       recommendation: "Check the attribution first, because deals with contacts on a campaign aren't counted here. Then decide whether to keep this spend.",
       recommendationType: "investigate",
       severity: "medium",

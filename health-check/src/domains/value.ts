@@ -1,3 +1,4 @@
+import { money } from "../render/format.ts";
 import { notSized, type RuleContext } from "../engine/rule.ts";
 import type { Metric, Value } from "../schemas/index.ts";
 
@@ -37,7 +38,7 @@ export function atOwnLeadReturn(ctx: Pick<RuleContext, "metrics" | "calibration"
     amount: Math.round(leads * rate.value),
     unit: ctx.calibration.currency,
     period: options.period,
-    assumptions: [`${leads} leads at your own average of ${rate.value} ${ctx.calibration.currency} won per lead, measured on ${rate.n} leads`, options.caveat],
+    assumptions: [`${leads} leads at your own average of ${money(rate.value, ctx.calibration.currency)} won per lead, measured on ${rate.n} leads`, options.caveat],
   };
 }
 

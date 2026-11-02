@@ -106,7 +106,7 @@ const ownershipSkew: Rule = {
     return {
       outcome: "issue",
       title: "A few owners hold enough records to slow sharing changes",
-      summary: `${plural(skewed.length, "owner and object pair")} above ${OWNER_SKEW_RECORDS} records. The largest is ${skewed[0]!.records} ${skewed[0]!.object} records. ${noted(SKEW_PRACTICE)}`,
+      summary: `${plural(skewed.length, "owner and object pair")} above ${OWNER_SKEW_RECORDS.toLocaleString("en-GB")} records. The largest is ${skewed[0]!.records.toLocaleString("en-GB")} ${skewed[0]!.object} records. ${noted(SKEW_PRACTICE)}`,
       recommendation: "Spread these records across more owners. If one owner has to stay, keep it out of the role hierarchy's lower levels and out of public groups used in sharing rules.",
       recommendationType: "change",
       severity: "medium",
