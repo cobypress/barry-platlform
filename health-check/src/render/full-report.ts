@@ -62,19 +62,20 @@ function issueSlide(r: Render, label: string, f: Finding): Slide {
   };
 }
 
-function cardHeight(f: Finding): number {
-  return 84 + 24 * estimateLines(f.title, CARD_CHARS) + 24 * estimateLines(f.summary, CARD_CHARS) + 24 * estimateLines(`What to do: ${f.recommendation}`, CARD_CHARS);
+function cardHeight(f: Finding, brief: boolean): number {
+  return (brief ? 62 : 84) + 24 * estimateLines(f.title, CARD_CHARS) + 24 * estimateLines(f.summary, CARD_CHARS) + (brief ? 0 : 24 * estimateLines(`What to do: ${f.recommendation}`, CARD_CHARS));
 }
 
-function issueCards(r: Render, label: string, findings: Finding[]): Slide {
+function issueCards(r: Render, label: string, findings: Finding[], brief: boolean): Slide {
   const cards = findings.map((f) => {
     const value = valueText(r, f);
-    return `<article class="card"><div class="meta">${severityChip(f)}<span>Effort ${f.effort.size}</span><span>${value.amount}</span></div><h3>${r.t(f.title)}</h3><p>${r.t(f.summary)}</p><p><strong>What to do:</strong> ${r.t(f.recommendation)}</p></article>`;
+    return `<article class="card"><div class="meta">${severityChip(f)}<span>Effort ${f.effort.size}</span><span>${value.amount}</span></div><h3>${r.t(f.title)}</h3><p>${r.t(f.summary)}</p>${brief ? "" : `<p><strong>What to do:</strong> ${r.t(f.recommendation)}</p>`}</article>`;
   });
   return { html: `<div class="eyebrow">${r.t(label)}</div><h2>${findings[0]!.severity === "low" ? "Smaller issues" : "Other issues"}</h2>${cards.join("")}` };
 }
 
-type Density = Record<Finding["severity"], number>;
+/** `brief` drops the action from each card, because the roadmap holds it, and shortens long lists. */
+type Density = Record<Finding["severity"], number> & { brief?: boolean };
 
 /** How many issues share a slide, by severity. Tried in order until the deck fits. */
 const DENSITIES: Density[] = [
@@ -84,7 +85,9 @@ const DENSITIES: Density[] = [
   { critical: 1, high: 1, medium: 2, low: 3, info: 3 },
   { critical: 1, high: 2, medium: 3, low: 4, info: 4 },
   { critical: 2, high: 3, medium: 4, low: 6, info: 6 },
-  { critical: 3, high: 4, medium: 6, low: 8, info: 8 },
+  { critical: 1, high: 2, medium: 3, low: 3, info: 3, brief: true },
+  { critical: 2, high: 3, medium: 4, low: 4, info: 4, brief: true },
+  { critical: 3, high: 4, medium: 4, low: 4, info: 4, brief: true },
 ];
 
 /** The last resort for a very large org: one table per domain, so the deck has a fixed ceiling. */
@@ -102,7 +105,8 @@ function domainIssueSlides(r: Render, label: string, issues: Finding[], density:
   const slides: Slide[] = [];
   let queue: Finding[] = [];
   const flush = (): void => {
-    for (const group of paginate(queue, cardHeight, ISSUE_SLIDE_BUDGET)) slides.push(issueCards(r, label, group));
+    const brief = density.brief ?? false;
+    for (const group of paginate(queue, (f) => cardHeight(f, brief), ISSUE_SLIDE_BUDGET)) slides.push(issueCards(r, label, group, brief));
     queue = [];
   };
   for (const f of issues) {
@@ -145,7 +149,7 @@ function listSlides(r: Render, eyebrow: string, title: string, items: Array<{ ti
 }
 
 function buildSlides(report: BuiltReport, r: Render, density: Density | null): Slide[] {
-  const compact = density === null;
+  const compact = density === null || density.brief === true;
   const { run, intake, calibration, scores = [], manualSteps } = report.input;
   const built = report.outputs.full_health_check;
   const team = report.teamFindings;

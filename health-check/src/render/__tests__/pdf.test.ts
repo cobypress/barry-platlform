@@ -9,6 +9,7 @@ import type { Browser } from "playwright";
 import type { NarrativeClient } from "../../narrative/client.ts";
 import { Intake } from "../../narrative/intake.ts";
 import { buildReport, currentBody, type BuiltReport, type ReportInput } from "../../narrative/sections.ts";
+import { topIssues, verdictOf } from "../../narrative/select.ts";
 import { Pseudonymiser, type PseudonymEntry } from "../../privacy/pseudonymiser.ts";
 import { SALES_CLOUD_DOMAINS, type Finding, type NumberOverride, type ReportSection } from "../../schemas/index.ts";
 import { runFromRecording } from "../../testing/harness.ts";
@@ -49,8 +50,13 @@ describe("the executive summary", () => {
   });
 
   test("holds a verdict, scorecard, top five with value, and the plan", () => {
-    const html = executiveHtml(buildReport(full), pseudonyms);
-    for (const text of ["Verdict", "Significant issues to fix", "How each area stands", "Top 5 issues", "Days 1 to 30", "Days 31 to 60", "Days 61 to 90", "£652,000 open pipeline today", "Not sized", "Synthetic Co"]) assert.ok(html.includes(text), text);
+    const report = buildReport(full);
+    const html = executiveHtml(report, pseudonyms);
+    for (const text of ["Verdict", verdictOf(report.teamFindings).headline, "How each area stands", "Top 5 issues", "Days 1 to 30", "Days 31 to 60", "Days 61 to 90", "Synthetic Co"]) assert.ok(html.includes(text), text);
+    for (const f of topIssues(report.teamFindings, 5)) {
+      const value = f.value.kind === "not_sized" ? "Not sized" : `£${f.value.amount.toLocaleString("en-GB")} ${f.value.period}`;
+      assert.ok(html.includes(value), value);
+    }
     assert.match(html, /data-expect-chart="scorecard"/);
     assert.match(html, /data-expect-chart="win-rate-by-segment"/);
   });
@@ -119,6 +125,14 @@ describe("a large, messy org", () => {
     const report = buildReport(messy());
     const { layout } = await renderPdf(browser, fullReportHtml(report, pseudonyms), { ...deckRange });
     assert.deepEqual(layout.problems, [], describeProblems(layout.problems));
+  });
+
+  test("a moderately large org keeps its issue detail, rather than dropping to tables", () => {
+    const input = messy();
+    const report = buildReport({ ...input, findings: input.findings.filter((f) => f.status !== "issue" || Number(f.id.slice(-2)) < 7) });
+    const html = fullReportHtml(report, pseudonyms);
+    const sample = report.teamFindings.find((f) => f.status === "issue" && !/['"&<>]/.test(f.summary))!;
+    assert.ok(html.includes(sample.summary));
   });
 
   test("the deck has a ceiling however large the org is", async () => {
@@ -263,9 +277,12 @@ describe("rule 10", () => {
     approveAll(report);
     assert.doesNotMatch(executiveHtml(report, pseudonyms), /Draft, not approved/);
     assert.doesNotMatch(fullReportHtml(report, pseudonyms), /Draft, not approved/);
-    report.outputs.executive_summary.sections[1]!.status = "draft";
-    report.outputs.executive_summary.sections[1]!.approval = null;
-    assert.match(executiveHtml(report, pseudonyms), /Draft, not approved/);
+    for (const [key, html] of [["executive_summary", executiveHtml], ["full_health_check", fullReportHtml]] as const) {
+      const section = report.outputs[key].sections[1]!;
+      section.status = "draft";
+      section.approval = null;
+      assert.match(html(report, pseudonyms), /Draft, not approved/);
+    }
   });
 });
 
