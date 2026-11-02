@@ -3,6 +3,7 @@ import { crmHealthExtractor, opportunitiesExtractor } from "../../extract/opport
 import { daysBefore } from "../../extract/types.ts";
 import { ownershipExtractor, usersExtractor } from "../../extract/users.ts";
 import { notSized, pct, plural, segmentRate, type Rule, type RuleContext, type RuleResult } from "../../engine/rule.ts";
+import { localDay, todayIn, zoneOf } from "../time-zone.ts";
 import { atOwnLeadReturn } from "../value.ts";
 import { loadPipeline, type Deal } from "../historic-pipeline/cohort.ts";
 import type { Value } from "../../schemas/index.ts";
@@ -109,7 +110,7 @@ const pastCloseDate = dealRule({
   severity: "high",
   scope: isOpen,
   scopeLabel: "open deals",
-  isHit: (d, ctx) => d.CloseDate < ctx.window.to,
+  isHit: (d, ctx) => d.CloseDate < todayIn(ctx),
   issueTitle: "Your pipeline includes deals that should already have closed",
   sentence: (hits, n, rate) => `Open deals with a close date in the past: ${hits} of ${n} (${rate}%). The forecast is counting them when it shouldn't.`,
   recommendation: "Have each owner close the deal or give it a real date, then add a weekly check to pipeline reviews.",
@@ -164,7 +165,7 @@ const noRecentActivity = dealRule({
   scope: isOpen,
   scopeLabel: "open deals",
   isHit: (d, ctx) => {
-    const cutoff = daysBefore(ctx.now, STALE_ACTIVITY_DAYS).toISOString().slice(0, 10);
+    const cutoff = localDay(daysBefore(ctx.now, STALE_ACTIVITY_DAYS), zoneOf(ctx));
     return d.LastActivityDate === null || d.LastActivityDate < cutoff;
   },
   issueTitle: "Part of your pipeline has gone quiet",

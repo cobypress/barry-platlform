@@ -2,6 +2,7 @@ import type { RuleContext } from "../../engine/rule.ts";
 import { pct } from "../../engine/rule.ts";
 import { orgExtractor } from "../../extract/configuration.ts";
 import type { DateRange, Evidence, Metric, MetricSegment, SeriesPoint } from "../../schemas/index.ts";
+import { localDay, zoneNote, zoneOf } from "../time-zone.ts";
 import { loadPipeline, type Deal, type PipelineData } from "./cohort.ts";
 
 type Ctx = Omit<RuleContext, "metrics">;
@@ -12,7 +13,6 @@ const DOMAIN = "historic_pipeline";
 const SEGMENT_NOTE = "Sample below the calibrated minimum";
 const MAX_MISSING_AMOUNT_PCT = 20;
 const MAX_MISSING_HISTORY_PCT = 20;
-const UTC_NOTE = "Days, months and quarters are in UTC, not the org's time zone";
 
 export function median(values: number[]): number {
   return quantile(values, 0.5);
@@ -49,10 +49,7 @@ export function fiscalQuarter(date: Date, startMonth: number): string {
   return `FY${year}-Q${quarter}`;
 }
 
-export const closedInWindow = (d: Deal, window: DateRange): boolean => {
-  const day = d.closedAt.toISOString().slice(0, 10);
-  return day >= window.from && day <= window.to;
-};
+export const closedInWindow = (d: Deal, window: DateRange): boolean => d.closedDay >= window.from && d.closedDay <= window.to;
 
 /** The calibration's fiscal year, or the org's own. Null if neither can be read, because a guess moves every quarter. */
 export function fiscalStartOf(ctx: Ctx): number | null {
@@ -71,7 +68,7 @@ export function dimensions(ctx: Ctx): Record<string, (d: Deal) => string> {
     rep: (d) => ctx.userLabel(d.OwnerId),
     "lead source": (d) => d.LeadSource ?? "No lead source",
     type: (d) => d.Type ?? "No type",
-    ...(fiscalStart ? { "closed quarter": (d: Deal) => fiscalQuarter(d.closedAt, fiscalStart) } : {}),
+    ...(fiscalStart ? { "closed quarter": (d: Deal) => fiscalQuarter(new Date(`${d.closedDay}T00:00:00Z`), fiscalStart) } : {}),
   };
 }
 
@@ -112,8 +109,8 @@ function measured(base: Base, fields: { value: number; n: number; dateRange: Dat
   };
 }
 
-function base(data: Ready | Extract<PipelineData, { status: "unavailable" }>, fields: Pick<Base, "id" | "label" | "definition" | "unit"> & { assumptions?: string[] }): Base {
-  return { ...fields, evidence: data.evidence, exclusions: data.status === "ok" ? data.exclusions : [], assumptions: [UTC_NOTE, ...(fields.assumptions ?? [])] };
+function base(ctx: Ctx, data: Ready | Extract<PipelineData, { status: "unavailable" }>, fields: Pick<Base, "id" | "label" | "definition" | "unit"> & { assumptions?: string[] }): Base {
+  return { ...fields, evidence: data.evidence, exclusions: data.status === "ok" ? data.exclusions : [], assumptions: [zoneNote(ctx), ...(fields.assumptions ?? [])] };
 }
 
 const unmappedReason = (kind: string, stages: string[]): string => `The calibration doesn't say what these ${kind} mean: ${stages.join(", ")}.`;
@@ -121,10 +118,10 @@ const unmappedReason = (kind: string, stages: string[]): string => `The calibrat
 function winRate(ctx: Ctx, data: Ready): Metric[] {
   const { minSample } = ctx.calibration;
   const definitions = {
-    count: base(data, { id: "historic.win_rate", label: "Win rate", unit: "percent", definition: "Won deals as a share of won and lost deals that closed in the window. No decision deals are left out, and reported separately." }),
-    value: base(data, { id: "historic.win_rate_by_value", label: "Win rate by value", unit: "percent", definition: "Amount of won deals as a share of the amount of won and lost deals that closed in the window." }),
-    withNoDecision: base(data, { id: "historic.win_rate_including_no_decision", label: "Win rate including no decision", unit: "percent", definition: "Won deals as a share of all deals that closed in the window, counting no decision as a loss." }),
-    noDecision: base(data, { id: "historic.no_decision_rate", label: "No decision rate", unit: "percent", definition: "Deals closed as no decision, as a share of all deals that closed in the window." }),
+    count: base(ctx, data, { id: "historic.win_rate", label: "Win rate", unit: "percent", definition: "Won deals as a share of won and lost deals that closed in the window. No decision deals are left out, and reported separately." }),
+    value: base(ctx, data, { id: "historic.win_rate_by_value", label: "Win rate by value", unit: "percent", definition: "Amount of won deals as a share of the amount of won and lost deals that closed in the window." }),
+    withNoDecision: base(ctx, data, { id: "historic.win_rate_including_no_decision", label: "Win rate including no decision", unit: "percent", definition: "Won deals as a share of all deals that closed in the window, counting no decision as a loss." }),
+    noDecision: base(ctx, data, { id: "historic.no_decision_rate", label: "No decision rate", unit: "percent", definition: "Deals closed as no decision, as a share of all deals that closed in the window." }),
   };
   if (data.unmapped.finalStages.length > 0) {
     const reason = unmappedReason("stages", data.unmapped.finalStages);
@@ -172,7 +169,7 @@ function winRate(ctx: Ctx, data: Ready): Metric[] {
 }
 
 function stageConversion(ctx: Ctx, data: Ready): Metric[] {
-  const definition = base(data, {
+  const definition = base(ctx, data, {
     id: "historic.stage_conversion",
     label: "Stage conversion",
     unit: "percent",
@@ -229,7 +226,7 @@ function stageConversion(ctx: Ctx, data: Ready): Metric[] {
 function salesCycle(ctx: Ctx, data: Ready): Metric[] {
   const { minSample, salesCycleAssumptionDays } = ctx.calibration;
   const make = (outcome: "won" | "lost", id: string, label: string): Metric => {
-    const definition = base(data, {
+    const definition = base(ctx, data, {
       id,
       label,
       unit: "days",
@@ -278,9 +275,9 @@ export function pushesOf(deal: Deal, fiscalStart: number | null): Push[] {
 function slippage(ctx: Ctx, data: Ready): Metric[] {
   const { minSample } = ctx.calibration;
   const fiscalYearStartMonth = fiscalStartOf(ctx);
-  const rateDefinition = base(data, { id: "historic.slippage_rate", label: "Slippage rate", unit: "percent", definition: "Deals closed in the window whose close date was moved later at least once, as a share of those deals." });
-  const quarterDefinition = base(data, { id: "historic.slippage_quarter_cross_rate", label: "Deals pushed across a quarter", unit: "percent", definition: "Deals closed in the window whose close date moved into a later fiscal quarter, as a share of those deals." });
-  const daysDefinition = base(data, { id: "historic.slippage_days", label: "Days pushed per slipped deal", unit: "days", definition: "Median total days of later moves on deals that slipped. Moves to an earlier date aren't netted off." });
+  const rateDefinition = base(ctx, data, { id: "historic.slippage_rate", label: "Slippage rate", unit: "percent", definition: "Deals closed in the window whose close date was moved later at least once, as a share of those deals." });
+  const quarterDefinition = base(ctx, data, { id: "historic.slippage_quarter_cross_rate", label: "Deals pushed across a quarter", unit: "percent", definition: "Deals closed in the window whose close date moved into a later fiscal quarter, as a share of those deals." });
+  const daysDefinition = base(ctx, data, { id: "historic.slippage_days", label: "Days pushed per slipped deal", unit: "days", definition: "Median total days of later moves on deals that slipped. Moves to an earlier date aren't netted off." });
   if (data.unmapped.finalStages.length > 0) {
     const reason = unmappedReason("stages", data.unmapped.finalStages);
     return [rateDefinition, quarterDefinition, daysDefinition].map((d) => notMeasurable(d, reason));
@@ -325,24 +322,23 @@ export function monthEnds(window: DateRange): string[] {
 type Snapshot = { stage: string; amount: number | null };
 
 /** What a deal looked like at the end of `day`, or null if it had no history by then. */
-export function stateAt(deal: Deal, day: string): Snapshot | null {
-  const cutoff = `${day}T23:59:59.999Z`;
+export function stateAt(deal: Deal, day: string, zone: string | null = null): Snapshot | null {
   let latest: { StageName: string; Amount: number | null } | null = null;
   for (const row of deal.history) {
-    if (new Date(row.CreatedDate).toISOString() <= cutoff) latest = row;
+    if (localDay(row.CreatedDate, zone) <= day) latest = row;
     else break;
   }
   return latest ? { stage: latest.StageName, amount: latest.Amount } : null;
 }
 
 function pointInTime(ctx: Ctx, data: Ready): Metric[] {
-  const countDefinition = base(data, {
+  const countDefinition = base(ctx, data, {
     id: "historic.pipeline_point_in_time_count",
     label: "Open deals at each month end",
     unit: "count",
     definition: "Deals whose stage at each month end was open, rebuilt from stage history. The value is the latest month end.",
   });
-  const valueDefinition = base(data, {
+  const valueDefinition = base(ctx, data, {
     id: "historic.pipeline_point_in_time_value",
     label: "Open pipeline at each month end",
     unit: "currency",
@@ -357,6 +353,7 @@ function pointInTime(ctx: Ctx, data: Ready): Metric[] {
   if (!data.historyStart) return [notMeasurable(countDefinition, "OpportunityHistory has no rows."), notMeasurable(valueDefinition, "OpportunityHistory has no rows.")];
 
   const days = monthEnds(ctx.window);
+  const zone = zoneOf(ctx);
   const countSeries: SeriesPoint[] = [];
   const valueSeries: SeriesPoint[] = [];
   let latestOpen: Array<{ deal: Deal; snapshot: Snapshot }> = [];
@@ -374,8 +371,8 @@ function pointInTime(ctx: Ctx, data: Ready): Metric[] {
     let gapped = 0;
     let placed = 0;
     for (const deal of data.deals) {
-      if (deal.CreatedDate.slice(0, 10) > day) continue;
-      const snapshot = stateAt(deal, day);
+      if (localDay(deal.CreatedDate, zone) > day) continue;
+      const snapshot = stateAt(deal, day, zone);
       if (!snapshot) {
         // Created by then, with no history: a migrated or bulk-loaded deal we can't place.
         gapped++;
@@ -438,6 +435,6 @@ const ALL_METRIC_LABELS: Array<Pick<Base, "id" | "label" | "definition" | "unit"
 
 export function pipelineMetrics(ctx: Ctx): Metric[] {
   const data = loadPipeline(ctx);
-  if (data.status !== "ok") return ALL_METRIC_LABELS.map((m) => notMeasurable(base(data, m), data.reason));
+  if (data.status !== "ok") return ALL_METRIC_LABELS.map((m) => notMeasurable(base(ctx, data, m), data.reason));
   return [...winRate(ctx, data), ...stageConversion(ctx, data), ...salesCycle(ctx, data), ...slippage(ctx, data), ...pointInTime(ctx, data)];
 }

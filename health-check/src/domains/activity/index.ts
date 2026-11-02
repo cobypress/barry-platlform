@@ -7,6 +7,7 @@ import { notSized, plural, segmentRate, type NotMeasurableResult, type Rule, typ
 import { shareRule } from "../current-pipeline/index.ts";
 import { loadPipeline, type Deal } from "../historic-pipeline/cohort.ts";
 import { closedInWindow, median, segment } from "../historic-pipeline/metrics.ts";
+import { localDay, todayIn, zoneNote, zoneOf } from "../time-zone.ts";
 import type { Evidence, Metric, SeriesPoint } from "../../schemas/index.ts";
 import type { DomainModule } from "../types.ts";
 import { loadActivity, type ActivityData, type Touch } from "./load.ts";
@@ -51,9 +52,9 @@ function fullMonths(from: string, today: string): string[] {
 type Window = { total: number; linked: number; share: number };
 type Comparison = { prior: Window; recent: Window; collapsed: boolean; volumeFell: boolean };
 
-function compare(events: Array<{ StartDateTime: string; WhatId: string | null }>, prior: Set<string>, recent: Set<string>): Comparison {
+function compare(events: Array<{ month: string; WhatId: string | null }>, prior: Set<string>, recent: Set<string>): Comparison {
   const window = (months: Set<string>): Window => {
-    const rows = events.filter((e) => months.has(e.StartDateTime.slice(0, 7)));
+    const rows = events.filter((e) => months.has(e.month));
     const linked = rows.filter((e) => e.WhatId !== null).length;
     return { total: rows.length, linked, share: rows.length === 0 ? 0 : Math.round((linked / rows.length) * 1000) / 10 };
   };
@@ -76,7 +77,7 @@ const eventLinkCollapse: Rule = {
     const data = activityOr(ctx);
     if ("outcome" in data) return data;
     const users = ctx.data(usersExtractor);
-    const months = fullMonths(data.from, ctx.window.to);
+    const months = fullMonths(data.from, todayIn(ctx));
     if (months.length < RECENT_MONTHS + PRIOR_MONTHS) return { outcome: "not_measurable", reason: `${plural(months.length, "whole month")} of events is too few to compare ${RECENT_MONTHS} recent months with the ${PRIOR_MONTHS} before them.`, evidence: data.evidence };
     const recent = new Set(months.slice(-RECENT_MONTHS));
     const prior = new Set(months.slice(-(RECENT_MONTHS + PRIOR_MONTHS), -RECENT_MONTHS));
@@ -143,7 +144,7 @@ const touchesByDeal = (data: Ready): Map<string, Touch[]> => {
 // Only deals whose whole life is inside the readable year. An older deal has lost
 // its early activity to archiving, which would read as a deal nobody worked.
 const closedThisYear = (ctx: Ctx, deals: Deal[], from: string): Deal[] =>
-  deals.filter((d) => (d.category === "won" || d.category === "lost") && d.CreatedDate.slice(0, 10) >= from && closedInWindow(d, ctx.window));
+  deals.filter((d) => (d.category === "won" || d.category === "lost") && localDay(d.CreatedDate, zoneOf(ctx)) >= from && closedInWindow(d, ctx.window));
 
 const dealsWithoutActivity = shareRule({
   id: "act.deals-without-activity",
@@ -286,7 +287,7 @@ const unlinkedTasks: Rule = {
 };
 
 function activityMetrics(ctx: Ctx): Metric[] {
-  const shared = (label: string) => ({ domain: DOMAIN, label, exclusions: [] as string[], assumptions: ["Days and months are in UTC, not the org's time zone"] });
+  const shared = (label: string) => ({ domain: DOMAIN, label, exclusions: [] as string[], assumptions: [zoneNote(ctx)] });
   const definitions = {
     linked: { ...shared("Events linked to a record"), id: "activity.event_linked_share", unit: "percent" as const, definition: "Events with a related record, as a share of all events, by month. The value is the latest whole month." },
     won: { ...shared("Activities per won deal"), id: "activity.per_won_deal", unit: "count" as const, definition: "Median tasks, events and emails logged on won deals created in the readable year." },
@@ -301,9 +302,9 @@ function activityMetrics(ctx: Ctx): Metric[] {
   // it says deals are going dark, which can't be stood behind with no deals to hand.
   const pipeline = loadPipeline(ctx);
   if (pipeline.status !== "ok") return Object.values(definitions).map((d) => ({ ...d, ...common, status: "not_measurable", reason: pipeline.reason }));
-  const months = fullMonths(data.from, ctx.window.to);
+  const months = fullMonths(data.from, todayIn(ctx));
   const series: SeriesPoint[] = months.map((month) => {
-    const rows = data.events.filter((e) => e.StartDateTime.slice(0, 7) === month);
+    const rows = data.events.filter((e) => e.month === month);
     const thin = rows.length < minSample;
     const last = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0)).toISOString().slice(0, 10);
     return { date: last, value: thin ? null : Math.round((rows.filter((e) => e.WhatId !== null).length / rows.length) * 1000) / 10, n: rows.length, notMeasurableReason: thin ? `${rows.length} events is below the calibrated minimum of ${minSample}` : null };

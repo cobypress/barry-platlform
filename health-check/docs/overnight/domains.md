@@ -16,7 +16,7 @@ Branch `hc/domains`. Newest status first in each section. Nobody has run any of 
 | 8 | Scoring | Done |
 | 9 | Value sizing | Done |
 | 10 | Report scanning | Done |
-| - | Org time zone | Not started |
+| - | Org time zone | Done |
 | - | SOAP `INVALID_SESSION_ID` refresh | Done |
 
 ## How facts were checked
@@ -82,6 +82,8 @@ Each in its own commit, additive only.
 - **The synthetic org has 4 private reports,** so the existing test that field removal stays "investigate" still passes untouched. New tests cover the zero case, where a clean field is recommended for removal.
 - **A failed report retrieve doesn't fail the run,** unlike the main metadata retrieve, because it only costs one guard. A budget stop still gets through, so the run can resume.
 
+- **Time zone:** `src/domains/time-zone.ts` turns instants into calendar days in `Organization.TimeZoneSidKey`, and every metric now states its calendar. `CloseDate` and `LastActivityDate` are date-only, so they're left alone, and `Deal.closedDay` holds that distinction. A zone we can't apply falls back to UTC and says so. **Not changed:** the analysis window is set in UTC in `run.ts`, which is frozen, so the window's edge can differ by a day. Durations such as time in stage were always unaffected.
+
 ## Unverified Salesforce facts
 
 | Rule | What I couldn't verify | What I did |
@@ -104,3 +106,4 @@ Each in its own commit, additive only.
 | `lead.campaign-return` | `Campaign.ActualCost` and `CampaignMember.LeadId` are from memory plus a partial docs snippet | A wrong field fails the read, which is not measurable |
 | `not-used-in-reports` | That a report's `OwnerId` is its folder, and that `Folder.ParentId` chains subfolders. A wrong guess only means the file doesn't come back | Counted as not read, and the guard is unknown |
 | `not-used-in-reports` | Whether the retrieve can reach private reports at all. I assumed not. The `allPrivate` scope needs Manage All Private Reports and Dashboards, and a failed count is unknown | Blocks either way |
+| Time zone | That every `TimeZoneSidKey` is an IANA name. Some may not be | Falls back to UTC, stated on each metric |

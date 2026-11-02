@@ -7,6 +7,7 @@ import { usersExtractor } from "../../extract/users.ts";
 import { notSized, pct, plural, segmentRate, type NotMeasurableResult, type Rule, type RuleContext, type RuleResult } from "../../engine/rule.ts";
 import { loadPipeline } from "../historic-pipeline/cohort.ts";
 import { median } from "../historic-pipeline/metrics.ts";
+import { zoneNote } from "../time-zone.ts";
 import { atOwnLeadReturn } from "../value.ts";
 import type { Metric, MetricSegment } from "../../schemas/index.ts";
 import type { DomainModule } from "../types.ts";
@@ -319,7 +320,7 @@ function groupByType<C extends { Type: string | null }>(campaigns: C[]): Array<[
 }
 
 function funnelMetrics(ctx: Ctx): Metric[] {
-  const shared = { domain: DOMAIN, exclusions: [] as string[], assumptions: ["Days are in UTC, not the org's time zone"] };
+  const shared = { domain: DOMAIN, exclusions: [] as string[], assumptions: [zoneNote(ctx)] };
   const definitions = {
     conversion: { ...shared, id: "lead.conversion_rate", label: "Lead conversion", unit: "percent" as const, definition: `Leads converted, as a share of leads at least ${CONVERSION_AGE_DAYS} days old.` },
     response: { ...shared, id: "lead.median_response_hours", label: "First response time", unit: "count" as const, definition: "Median hours from a lead's creation to its first task, event or status change. The unit is hours." },
