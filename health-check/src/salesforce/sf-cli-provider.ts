@@ -44,14 +44,14 @@ export class SfCliConnectionProvider implements ConnectionProvider {
   }
 
   async connect(): Promise<OrgConnection> {
-    let out: string;
+    let result: Record<string, string> | undefined;
     try {
-      out = await this.#exec(["org", "display", "--target-org", this.#alias, "--json"]);
+      const out = await this.#exec(["org", "display", "--target-org", this.#alias, "--json"]);
+      result = (JSON.parse(out) as { result?: Record<string, string> }).result;
     } catch {
-      // The CLI's own error can quote the org details, so don't pass it on.
+      // The CLI's error, or a parse error quoting its output, can hold the token.
       throw new Error(`Couldn't read the Salesforce CLI login for "${this.#alias}". Is it logged in?`);
     }
-    const result = (JSON.parse(out) as { result?: Record<string, string> }).result;
     if (!result?.accessToken || !result.instanceUrl) throw new Error(`The CLI login for "${this.#alias}" has no active session`);
     return { instanceUrl: result.instanceUrl, accessToken: result.accessToken, orgId: result.id, username: result.username };
   }

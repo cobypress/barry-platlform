@@ -65,12 +65,17 @@ export type OpportunityExtract = {
 function scopeClause(ctx: ExtractContext): string {
   const created = soqlDateTime(ctx.windowStart);
   const closed = soqlDate(ctx.windowStart);
-  return `(CreatedDate >= ${created} OR CloseDate >= ${closed} OR IsClosed = false)`;
+  // LastModifiedDate catches a deal closed in the window with an old CloseDate,
+  // such as a bulk tidy-up. The stage list keeps "open" in the calibration's
+  // hands, because IsClosed is Salesforce's opinion, not the customer's.
+  const open = ctx.calibration.stages.filter((s) => s.category === "open").map((s) => `'${s.name.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`);
+  const stages = open.length > 0 ? ` OR StageName IN (${open.join(", ")})` : "";
+  return `(CreatedDate >= ${created} OR CloseDate >= ${closed} OR LastModifiedDate >= ${created} OR IsClosed = false${stages})`;
 }
 
 export const opportunitiesExtractor: Extractor<OpportunityExtract> = {
   id: "opportunities",
-  version: 1,
+  version: 2,
   partialKeys: ["opportunities", "opportunity-history"],
   async run(ctx) {
     const schema = ctx.get(schemaExtractor).Opportunity!;

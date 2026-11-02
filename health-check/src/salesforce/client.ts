@@ -1,7 +1,7 @@
 import { XMLParser } from "fast-xml-parser";
 import { unzipSync, strFromU8 } from "fflate";
 import { BUDGET_DEFAULTS, SF_DEFAULTS } from "../config.ts";
-import { authorise, type SfRequest } from "./allowlist.ts";
+import { authorise, ForbiddenOperationError, type SfRequest } from "./allowlist.ts";
 import { ApiBudget, BudgetStopError } from "./budget.ts";
 import type { ConnectionProvider, OrgConnection } from "./connection.ts";
 import { fetchTransport, type Transport, type TransportResponse } from "./transport.ts";
@@ -66,6 +66,27 @@ function soapEnvelope(token: string, body: string): string {
   );
 }
 
+const SALESFORCE_HOSTS = [".salesforce.com", ".force.com", ".cloudforce.com", ".salesforce.mil", ".force.mil", ".cloudforce.mil"];
+const QUERY_MORE = /\/query\/[A-Za-z0-9]{15,18}-\d+$/;
+
+/**
+ * The token goes wherever this points, so it's parsed rather than prefix-checked:
+ * "https://x.salesforce.com@evil.example" starts with https and is evil.example.
+ * A test transport never leaves the process, so only the real one checks the host.
+ */
+export function instanceOrigin(instanceUrl: string, checkHost: boolean): string {
+  let url: URL;
+  try {
+    url = new URL(instanceUrl);
+  } catch {
+    throw new Error("The instance URL isn't a valid URL");
+  }
+  if (url.protocol !== "https:") throw new Error("The instance URL must be https");
+  if (url.username || url.password || url.search || url.hash || url.pathname !== "/") throw new Error("The instance URL must be a bare host");
+  if (checkHost && !SALESFORCE_HOSTS.some((suffix) => url.hostname.endsWith(suffix))) throw new Error("The instance URL isn't a Salesforce host");
+  return url.origin;
+}
+
 type SendOptions = { soapOperation?: string; contentType?: string };
 
 // The whole read surface. There's deliberately no generic request method, and a
@@ -104,6 +125,7 @@ export class SalesforceClient {
   readonly #transport: Transport;
   readonly #sleep: (ms: number) => Promise<void>;
   readonly #retrievePollMs: number;
+  readonly #checkHost: boolean;
   #sinceLimitsRead = 0;
 
   private constructor(provider: ConnectionProvider, connection: OrgConnection, options: ClientOptions) {
@@ -112,7 +134,8 @@ export class SalesforceClient {
     this.apiVersion = options.apiVersion ?? "";
     this.orgId = connection.orgId ?? "";
     this.#provider = provider;
-    this.#connection = connection;
+    this.#checkHost = !options.transport;
+    this.#connection = { ...connection, instanceUrl: instanceOrigin(connection.instanceUrl, this.#checkHost) };
     this.#transport = options.transport ?? fetchTransport;
     this.#sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
     this.#retrievePollMs = options.retrievePollMs ?? SF_DEFAULTS.retrievePollMs;
@@ -121,7 +144,6 @@ export class SalesforceClient {
   /** Connects, settles the API version and reads the limits, so the budget is live before any spend. */
   static async connect(provider: ConnectionProvider, options: ClientOptions): Promise<SalesforceClient> {
     const connection = await provider.connect();
-    if (!/^https:\/\//.test(connection.instanceUrl)) throw new Error("The instance URL must be https");
     const client = new SalesforceClient(provider, connection, options);
     if (!client.apiVersion) client.apiVersion = await client.#newestApiVersion();
     await client.refreshLimits();
@@ -181,7 +203,8 @@ export class SalesforceClient {
 
       if (res.status === 401 && !refreshed && !options.soapOperation) {
         refreshed = true;
-        this.#connection = await this.#provider.refresh();
+        const fresh = await this.#provider.refresh();
+        this.#connection = { ...fresh, instanceUrl: instanceOrigin(fresh.instanceUrl, this.#checkHost) };
         continue;
       }
       if ((res.status === 429 || res.status >= 500) && !options.soapOperation && attempt < SF_DEFAULTS.maxRetries) {
@@ -230,6 +253,8 @@ export class SalesforceClient {
       if (options.maxRecords !== undefined && records.length >= options.maxRecords) {
         return { records: records.slice(0, options.maxRecords), totalSize, truncated: Boolean(page.nextRecordsUrl) || records.length > options.maxRecords };
       }
+      // Salesforce supplies this path, so it can only ever be a next page.
+      if (page.nextRecordsUrl && !QUERY_MORE.test(page.nextRecordsUrl)) throw new ForbiddenOperationError("nextRecordsUrl isn't a query page");
       path = page.nextRecordsUrl;
     }
     return { records, totalSize, truncated: false };

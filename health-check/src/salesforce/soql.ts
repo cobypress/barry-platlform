@@ -43,7 +43,8 @@ export function assertSafeSoql(soql: string): void {
   const bare = stripStringLiterals(soql);
   if (!/^\s*SELECT\s/i.test(bare)) throw new UnsafeSoqlError("Only SELECT queries are allowed");
   if (bare.includes(";")) throw new UnsafeSoqlError("Multiple statements are not allowed");
-  const sideEffect = bare.match(/\bFOR\s+(VIEW|REFERENCE|UPDATE)\b|\bUPDATE\s+(TRACKING|VIEWSTAT)\b/i);
+  // A lookbehind, not \b: "LIMIT 1FOR VIEW" has no word boundary before FOR.
+  const sideEffect = bare.match(/(?<![A-Za-z_])FOR\s+(VIEW|REFERENCE|UPDATE)\b|(?<![A-Za-z_])UPDATE\s+(TRACKING|VIEWSTAT)\b/i);
   if (sideEffect) throw new UnsafeSoqlError(`"${sideEffect[0]}" changes data in the org`);
 
   const object = bare.match(/\bFROM\s+([A-Za-z0-9_]+)/i)?.[1]?.toLowerCase();

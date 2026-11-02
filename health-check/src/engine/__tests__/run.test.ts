@@ -96,6 +96,14 @@ describe("a full run", () => {
     assert.doesNotMatch(logins.split("WHERE")[1]!, /Status|Application/);
   });
 
+  test("the extract reaches a deal closed in the window with an old close date", async () => {
+    const transport = new ReplayTransport(loadRecording());
+    await runFromRecording({ transport });
+    const query = transport.requests.map((r) => decodeURIComponent(r.url)).find((q) => q.includes("FROM Opportunity "))!;
+    assert.match(query, /LastModifiedDate >= /);
+    assert.match(query, /StageName IN \('Prospecting', 'Discovery', 'Proposal', 'Negotiation', 'Legal Review'\)/);
+  });
+
   test("run data is written privately", async () => {
     const { dir } = await runFromRecording();
     assert.equal(statSync(join(dir, "pseudonym-map.json")).mode & 0o077, 0);

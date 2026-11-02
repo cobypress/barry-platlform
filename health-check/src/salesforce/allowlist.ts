@@ -52,6 +52,9 @@ const soapParser = new XMLParser({ removeNSPrefix: true, ignoreAttributes: true,
 function assertCleanPath(path: string): void {
   if (!path.startsWith("/")) throw new ForbiddenOperationError("path must be relative to the instance");
   if (path.startsWith("//") || path.includes("\\")) throw new ForbiddenOperationError("malformed path");
+  // URL parsers drop tabs and newlines, so what we checked wouldn't be what's sent.
+  // The client always percent-encodes, so raw whitespace is never legitimate.
+  if (/[\s\u0000-\u001f\u007f]/.test(path)) throw new ForbiddenOperationError("raw whitespace or control characters in the path");
   const pathOnly = path.split("?")[0]!;
   // Encoded slashes and dots could reach a different route than the one matched.
   if (/%2e|%2f|%5c/i.test(pathOnly) || pathOnly.split("/").some((part) => part === ".." || part === ".")) {
@@ -59,10 +62,21 @@ function assertCleanPath(path: string): void {
   }
 }
 
-function assertNoMethodOverride(request: SfRequest, params: URLSearchParams): void {
+function assertNoOverrideParam(params: URLSearchParams): void {
   for (const key of params.keys()) {
     if (key.toLowerCase() === "_httpmethod") throw new ForbiddenOperationError("method override parameter");
   }
+}
+
+/** Exactly one q and nothing else. A second q could be the one Salesforce reads. */
+function soqlFrom(params: URLSearchParams): string {
+  const keys = [...params.keys()];
+  if (keys.length !== 1 || keys[0] !== "q") throw new ForbiddenOperationError("a query takes exactly one q parameter");
+  return params.get("q") ?? "";
+}
+
+function assertNoMethodOverride(request: SfRequest, params: URLSearchParams): void {
+  assertNoOverrideParam(params);
   for (const header of Object.keys(request.headers ?? {})) {
     if (header.toLowerCase() === "x-http-method-override") throw new ForbiddenOperationError("method override header");
   }
@@ -101,9 +115,10 @@ function authoriseComposite(body: string | undefined): string {
     // Tooling is refused here as well as being read-only by route: some Tooling
     // queries come back empty through composite batch, which looks like "no data".
     if (!COMPOSITE_SUBREQUEST.test(sub.url)) throw new ForbiddenOperationError(`composite subrequest not allowed: ${sub.url.split("?")[0]}`);
+    if (/[\s\u0000-\u001f\u007f]/.test(sub.url)) throw new ForbiddenOperationError("raw whitespace or control characters in a subrequest");
     const params = new URLSearchParams(sub.url.split("?").slice(1).join("?"));
-    if (params.has("_HttpMethod")) throw new ForbiddenOperationError("method override parameter");
-    assertSoql(params.get("q") ?? "");
+    assertNoOverrideParam(params);
+    assertSoql(soqlFrom(params));
   }
   return "rest.compositeBatch";
 }
@@ -136,7 +151,8 @@ export function authorise(request: SfRequest): string {
     if (request.body) throw new ForbiddenOperationError("GET with a body");
     const route = GET_ROUTES.find((r) => r.pattern.test(pathOnly!));
     if (!route) throw new ForbiddenOperationError(`GET ${pathOnly}`);
-    if (route.requiresSoql) assertSoql(params.get("q") ?? "");
+    if (route.requiresSoql) assertSoql(soqlFrom(params));
+    else if (params.size > 0) throw new ForbiddenOperationError(`${route.id} takes no parameters`);
     return route.id;
   }
 

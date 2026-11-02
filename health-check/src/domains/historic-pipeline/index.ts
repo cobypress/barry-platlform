@@ -1,6 +1,6 @@
 import { opportunitiesExtractor, stagesExtractor } from "../../extract/opportunities.ts";
 import { usersExtractor } from "../../extract/users.ts";
-import { schemaExtractor } from "../../extract/configuration.ts";
+import { orgExtractor, schemaExtractor } from "../../extract/configuration.ts";
 import { notSized, type Rule, type RuleResult } from "../../engine/rule.ts";
 import type { DomainModule } from "../types.ts";
 import type { Metric } from "../../schemas/index.ts";
@@ -63,6 +63,12 @@ const calibrationContradiction: Rule = {
       if (stage.category === "open" && org.IsClosed) conflicts.push(`${stage.name} is calibrated as open, but Salesforce flags it as closed`);
       if ((stage.category === "lost" || stage.category === "no_decision") && !org.IsClosed) conflicts.push(`${stage.name} is calibrated as ${stage.category}, but Salesforce flags it as open`);
       if ((stage.category === "lost" || stage.category === "no_decision") && org.IsWon) conflicts.push(`${stage.name} is calibrated as ${stage.category}, but Salesforce flags it as won`);
+    }
+    const org = ctx.data(orgExtractor);
+    const orgFiscal = org.status === "ok" ? org.data[0]?.FiscalYearStartMonth : undefined;
+    const calibratedFiscal = ctx.calibration.fiscalYearStartMonth;
+    if (calibratedFiscal && orgFiscal && calibratedFiscal !== orgFiscal) {
+      conflicts.push(`The calibration starts the fiscal year in month ${calibratedFiscal}, but the org starts it in month ${orgFiscal}`);
     }
     const evidence = [ctx.ev(stages.source, { count: stages.data.length })];
     const segments = [{ dimension: "stage", segments: ctx.calibration.stages.length }];

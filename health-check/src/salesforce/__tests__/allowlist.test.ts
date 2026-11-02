@@ -106,6 +106,13 @@ describe("tricks are refused", () => {
   test("a full URL to another host", () => blocked({ method: "GET", path: "https://evil.example.com/services/data/v66.0/limits" }));
   test("a protocol-relative URL", () => blocked({ method: "GET", path: "//evil.example.com/services/data/v66.0/limits" }));
   test("a GET with a body", () => blocked({ method: "GET", path: `${V}/limits`, body: "{}" }));
+  test("a second q, which might be the one Salesforce reads", () => {
+    blocked({ method: "GET", path: `${V}/query${q("SELECT Id FROM Account")}&q=${encodeURIComponent("SELECT Id FROM Account FOR UPDATE")}` });
+  });
+  test("a tab that a URL parser would drop", () => blocked({ method: "GET", path: `${V}/query?q=SELECT%20Id%20FROM%20Account%20FO\tR%20VIEW` }));
+  test("a raw newline", () => blocked({ method: "GET", path: `${V}/query?q=SELECT\nId` }));
+  test("an extra parameter on a query", () => blocked({ method: "GET", path: `${V}/query${q("SELECT Id FROM Account")}&x=1` }));
+  test("a parameter on a route that takes none", () => blocked({ method: "GET", path: `${V}/limits?x=1` }));
   test("a lower-case method isn't assumed to be GET", () => blocked({ method: "get", path: `${V}/limits` }));
 });
 
@@ -132,6 +139,9 @@ describe("composite batch", () => {
   test("unsafe SOQL inside a subrequest", () => blocked(composite([sub(`v66.0/query${q("SELECT Id FROM Account FOR VIEW")}`)])));
   test("a subrequest that smuggles a body", () => blocked(composite([{ ...sub(select), richInput: { Name: "x" } }])));
   test("an override inside a subrequest", () => blocked(composite([sub(`${select}&_HttpMethod=DELETE`)])));
+  test("an override in another case", () => blocked(composite([sub(`${select}&_HTTPMETHOD=DELETE`)])));
+  test("a second q inside a subrequest", () => blocked(composite([sub(`${select}&q=${encodeURIComponent("SELECT Id FROM Account FOR VIEW")}`)])));
+  test("a raw tab inside a subrequest", () => blocked(composite([sub(`v66.0/query?q=SELECT%20Id%20FROM%20Account%20FO\tR%20VIEW`)])));
   test("more than 25 subrequests", () => blocked(composite(Array.from({ length: 26 }, () => sub(select)))));
   test("an empty batch", () => blocked(composite([])));
   test("an unexpected top-level key", () => blocked(composite([sub(select)], { allOrNone: true })));

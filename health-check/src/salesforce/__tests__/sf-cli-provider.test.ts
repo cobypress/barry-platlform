@@ -38,6 +38,11 @@ describe("SfCliConnectionProvider", () => {
     await assert.rejects(provider.connect(), (err: Error) => !err.message.includes("SECRET"));
   });
 
+  test("output that won't parse isn't repeated in the error", async () => {
+    const provider = new SfCliConnectionProvider("dev-org", { env: env("dev-org"), exec: async () => '{"accessToken":"SECRET"' });
+    await assert.rejects(provider.connect(), (err: Error) => !err.message.includes("SECRET"));
+  });
+
   test("no session is an error", async () => {
     const provider = new SfCliConnectionProvider("dev-org", { env: env("dev-org"), exec: async () => JSON.stringify({ result: {} }) });
     await assert.rejects(provider.connect(), /no active session/);

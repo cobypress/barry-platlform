@@ -2,6 +2,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { fiscalQuarter, median, monthEnds, quantile } from "../historic-pipeline/metrics.ts";
 import { opportunitiesExtractor, stagesExtractor, type HistoryRow, type OpportunityRow } from "../../extract/opportunities.ts";
+import { orgExtractor } from "../../extract/configuration.ts";
 import { usersExtractor } from "../../extract/users.ts";
 import { analyse } from "../../engine/evaluate.ts";
 import { Pseudonymiser } from "../../privacy/pseudonymiser.ts";
@@ -100,9 +101,11 @@ const HISTORY: HistoryRow[] = [
   row("D7", "Won", "2026-03-01", "2026-03-01", 200),
 ];
 
-function metrics(options: { calibration?: Calibration; deals?: OpportunityRow[]; history?: HistoryRow[]; multiCurrency?: boolean } = {}): Map<string, Metric> {
+function metrics(options: { calibration?: Calibration; deals?: OpportunityRow[]; history?: HistoryRow[]; multiCurrency?: boolean; orgFiscal?: number | null } = {}): Map<string, Metric> {
   const source = { kind: "soql", api: "rest", query: "SELECT Id FROM Opportunity" } as const;
+  const orgFiscal = options.orgFiscal === undefined ? 1 : options.orgFiscal;
   const extracts = new Map<string, unknown>([
+    [orgExtractor.id, orgFiscal === null ? { status: "unavailable", reason: "no", source } : { status: "ok", source, truncated: false, data: [{ FiscalYearStartMonth: orgFiscal }] }],
     [opportunitiesExtractor.id, {
       opportunities: { status: "ok", data: options.deals ?? DEALS, source, truncated: false },
       history: { status: "ok", data: options.history ?? HISTORY, source, truncated: false },
@@ -308,6 +311,7 @@ describe("not measurable, never estimated", () => {
   test("an unreadable history makes every metric not measurable", () => {
     const source = { kind: "soql", api: "rest", query: "SELECT Id FROM OpportunityHistory" } as const;
     const extracts = new Map<string, unknown>([
+      [orgExtractor.id, { status: "ok", source, truncated: false, data: [{ FiscalYearStartMonth: 1 }] }],
       [opportunitiesExtractor.id, { opportunities: { status: "ok", data: DEALS, source, truncated: false }, history: { status: "unavailable", reason: "INSUFFICIENT_ACCESS: no", source }, multiCurrency: false, lossReasonField: null, windowFrom: WINDOW.from }],
       [usersExtractor.id, { status: "ok", source, truncated: false, data: [] }],
       [stagesExtractor.id, { status: "ok", source, truncated: false, data: [] }],
@@ -315,6 +319,107 @@ describe("not measurable, never estimated", () => {
     const out = analyse({ modules: [{ ...historicPipelineModule, rules: [] }], extracts, calibration: calibration(), now: NOW, window: WINDOW, answers: [], pseudonyms: new Pseudonymiser(), userDirectory: new Map() });
     assert.ok(out.metrics.length > 0);
     assert.ok(out.metrics.every((m) => m.status === "not_measurable"));
+  });
+});
+
+describe("deals created already closed", () => {
+  const createdWon = [deal("W1", "Won", "2026-02-01", "2026-02-01", 100, true), deal("W2", "Won", "2026-02-01", "2026-02-01", 100, true)];
+  const createdLost = [deal("L1", "Lost", "2026-02-01", "2026-02-01", 100)];
+  const loaded = [row("W1", "Won", "2026-02-01", "2026-02-01"), row("W2", "Won", "2026-02-01", "2026-02-01"), row("L1", "Lost", "2026-02-01", "2026-02-01")];
+  const all = metrics({ deals: [...DEALS, ...createdWon, ...createdLost], history: [...HISTORY, ...loaded] });
+
+  test("don't inflate conversion: still 3 of 6", () => {
+    const m = measured(all.get("historic.stage_conversion"));
+    assert.equal(m.value, 50);
+    assert.equal(m.n, 6);
+    assert.ok(m.exclusions.some((e) => e.includes("3 deals with no recorded open stage")));
+  });
+  test("don't pull the sales cycle down with 0-day deals", () => {
+    const m = measured(all.get("historic.sales_cycle_won"));
+    assert.equal(m.value, 59);
+    assert.ok(m.exclusions.some((e) => e.includes("2 deals created already closed")));
+  });
+  test("aren't in the slippage denominator", () => assert.equal(measured(all.get("historic.slippage_rate")).n, 6));
+  test("still count as real outcomes in the win rate", () => assert.equal(value(all, "historic.win_rate"), 62.5));
+});
+
+describe("a deal closed before it was created", () => {
+  test("is excluded from the sales cycle, not clamped to zero", () => {
+    const deals = [...DEALS, deal("B", "Won", "2026-02-20", "2026-01-01", 10, true)];
+    const m = measured(metrics({ deals }).get("historic.sales_cycle_won"));
+    assert.equal(m.value, 59);
+  });
+});
+
+describe("fiscal year comes from the org unless the calibration says otherwise", () => {
+  const quarters = (m: Metric | undefined) => measured(m).segments.filter((s) => s.dimension === "closed quarter").map((s) => s.key);
+  test("an April-start org gets April quarters without being told", () => {
+    assert.deepEqual(quarters(metrics({ orgFiscal: 4 }).get("historic.win_rate")), ["FY2026-Q4"]);
+  });
+  test("the calibration wins if it's set", () => {
+    assert.deepEqual(quarters(metrics({ orgFiscal: 4, calibration: calibration({ fiscalYearStartMonth: 1 }) }).get("historic.win_rate")), ["FY2026-Q1"]);
+  });
+  test("if neither is known, quarters aren't guessed", () => {
+    const all = metrics({ orgFiscal: null });
+    assert.deepEqual(quarters(all.get("historic.win_rate")), []);
+    assert.equal(all.get("historic.slippage_quarter_cross_rate")?.status, "not_measurable");
+    assert.equal(all.get("historic.slippage_rate")?.status, "measured");
+  });
+});
+
+describe("gaps in history, month by month", () => {
+  // Three deals that existed in January have no history until March.
+  const migrated = ["M1", "M2", "M3"].map((id) => deal(id, "Lost", "2026-01-02", "2026-04-20", 100));
+  const late = ["M1", "M2", "M3"].flatMap((id) => [row(id, "A", "2026-03-15", "2026-04-20"), row(id, "Lost", "2026-04-10", "2026-04-20")]);
+  const one = metrics({ deals: [DEALS[1]!, ...migrated], history: [...HISTORY.filter((h) => h.OpportunityId === "D2"), ...late], calibration: calibration({ minSample: 1 }) });
+  const series = measured(one.get("historic.pipeline_point_in_time_count")).series;
+
+  test("a month where most deals have no history yet is not measurable", () => {
+    const feb = series.find((p) => p.date === "2026-02-28")!;
+    assert.equal(feb.value, null);
+    assert.match(feb.notMeasurableReason!, /3 of 4 deals that existed then have no stage history yet/);
+  });
+  test("once history exists, the month is measured", () => assert.equal(series.find((p) => p.date === "2026-03-31")!.value, 3));
+});
+
+describe("blank amounts at a month end", () => {
+  const deals = ["P1", "P2", "P3"].map((id) => deal(id, "A", "2026-06-01", "2026-09-01", null));
+  const history = ["P1", "P2", "P3"].map((id) => row(id, "A", "2026-06-01", "2026-09-01", id === "P1" ? 100 : null));
+  const all = metrics({ deals, history, calibration: calibration({ minSample: 1 }) });
+
+  test("the value isn't reported when too many are blank", () => {
+    const metric = all.get("historic.pipeline_point_in_time_value");
+    assert.equal(metric?.status, "not_measurable");
+    assert.match(metric?.status === "not_measurable" ? metric.reason : "", /2 of 3 open deals had no amount/);
+  });
+  test("the count is still measured", () => assert.equal(value(all, "historic.pipeline_point_in_time_count"), 3));
+});
+
+describe("thin segments", () => {
+  test("a win rate by value segment with mostly blank amounts has no value", () => {
+    // One blank overall (20%, allowed), but half of this segment.
+    const deals = DEALS.map((d) => (d.Id === "D3" ? { ...d, Type: "Blank", Amount: null } : d.Id === "D4" ? { ...d, Type: "Blank" } : d));
+    const m = measured(metrics({ deals, calibration: calibration({ minSample: 2 }) }).get("historic.win_rate_by_value"));
+    assert.equal(m.segments.find((s) => s.dimension === "type" && s.key === "Blank")?.value, null);
+  });
+  test("skipped-stage figures respect the minimum sample", () => {
+    const m = measured(metrics({ calibration: calibration({ minSample: 5 }) }).get("historic.stage_conversion"));
+    const c = m.segments.find((s) => s.dimension === "skipped stage" && s.key === "C")!;
+    assert.equal(c.value, null);
+    assert.match(c.notMeasurableReason!, /Sample below the calibrated minimum/);
+  });
+});
+
+describe("rows written in the same second", () => {
+  test("stay in id order, so a push isn't flipped", () => {
+    const at = "2026-02-02T09:00:00.000+0000";
+    const history: HistoryRow[] = [
+      { Id: "h000Z", OpportunityId: "D", StageName: "A", Amount: 1, CloseDate: "2026-03-01", CreatedDate: at },
+      { Id: "h000a", OpportunityId: "D", StageName: "A", Amount: 1, CloseDate: "2026-04-01", CreatedDate: at },
+      { Id: "h000b", OpportunityId: "D", StageName: "Lost", Amount: 1, CloseDate: "2026-04-01", CreatedDate: "2026-03-20T09:00:00.000+0000" },
+    ];
+    const all = metrics({ deals: [deal("D", "Lost", "2026-02-01", "2026-04-01", 1)], history, calibration: calibration({ minSample: 1 }) });
+    assert.equal(value(all, "historic.slippage_rate"), 100);
   });
 });
 

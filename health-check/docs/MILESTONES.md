@@ -17,12 +17,25 @@
 
 | Check | Result |
 | --- | --- |
-| `npm test` | See the end of this section for the latest count. No org needed |
+| `npm test` | 421 tests, all passing. No org needed |
 | `npm run typecheck` | Clean |
-| Mutation test: 34 deliberate breakages of safety controls and maths | All 34 caught by the tests |
+| Mutation test: 47 deliberate breakages of safety controls and maths | All 47 caught by the tests |
 | Real `hc` command over HTTPS to a local simulator | Finished, with GET and allowed POST requests only, and no token in any output |
 | Pipeline metrics | Checked against a small data set worked out by hand |
-| Independent code review | See "Review fixes" below |
+| Independent code review | Found 13 defects, 4 of them high. 12 fixed with tests, and 1 disclosed. See below |
+
+### Review fixes
+
+A separate agent reviewed the read-only boundary and the pipeline maths without seeing how they were built. It found no way for the code to send a write, but it found real gaps, and passing tests had missed all of them.
+
+- **Token could go to the wrong host:** the instance URL was prefix-checked, so `https://x.salesforce.com@evil.example` passed. It's now parsed, on connect and refresh.
+- **Old deals closed in the window were never extracted**, which inflated win rate and undercounted past pipeline.
+- **Deals created as Closed Won counted as reaching every stage**, which inflated conversion. They also gave 0-day sales cycles.
+- **The fiscal year defaulted to January** and was never compared with the org.
+- **Smaller boundary gaps:** a repeated `q`, raw tabs, `LIMIT 1FOR VIEW`, a case-sensitive override check, `nextRecordsUrl` reaching any allowed route, and a parse error that could quote the token.
+- **Smaller pipeline gaps:** history gaps were judged across all months rather than month by month, blank amounts were unchecked at month ends and in value segments, skipped-stage figures ignored the minimum sample, and same-second rows could reverse.
+
+The one not fixed is the UTC boundary, which is disclosed on every metric. It's on Worker A's list.
 
 ### What hasn't been checked
 

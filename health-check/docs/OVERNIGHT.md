@@ -86,13 +86,12 @@ If a page needs an environment variable to start, add a safe local default for t
 
 Works in `worktrees/hc-integration`, and wakes about every 30 minutes.
 
-1. First, apply any fixes from the independent Milestone 1 review on `hc/integration`, with tests. Workers pick them up at merge.
-2. Read each worker's log and commits.
-3. Review new commits against the rules above, especially anything touching `allowlist.ts`, guards or `Finding`.
-4. Merge `hc/domains` and `hc/reports` into `hc/integration` when their tests pass, and run the full suite there. Never merge into `health-check` or `main`.
-5. If a merge conflicts or a test fails, fix it on `hc/integration`, or write the problem in `docs/overnight/coordinator.md` for the worker.
-6. Re-run the mutation test against safety controls after each large merge.
-7. When workers have finished, write `docs/overnight/MORNING.md`: what was built, real test results, what's risky, what wasn't finished, and what Coby needs to decide. Then stop.
+1. Read each worker's log and commits.
+2. Review new commits against the rules above, especially anything touching `allowlist.ts`, guards or `Finding`.
+3. Merge `hc/domains` and `hc/reports` into `hc/integration` when their tests pass, and run the full suite there. Never merge into `health-check` or `main`.
+4. If a merge conflicts or a test fails, fix it on `hc/integration`, or write the problem in `docs/overnight/coordinator.md` for the worker.
+5. Re-run the mutation test against safety controls after each large merge.
+6. When workers have finished, write `docs/overnight/MORNING.md`: what was built, real test results, what's risky, what wasn't finished, and what Coby needs to decide. Then stop.
 
 ## Morning hand-over
 

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { strToU8, zipSync } from "fflate";
 import { ApiBudget, BudgetStopError } from "../budget.ts";
-import { CLIENT_METHODS, SalesforceClient, SalesforceError, isUnavailable } from "../client.ts";
+import { CLIENT_METHODS, SalesforceClient, SalesforceError, instanceOrigin, isUnavailable } from "../client.ts";
 import { ForbiddenOperationError } from "../allowlist.ts";
 import type { Transport, TransportRequest, TransportResponse } from "../transport.ts";
 import type { ConnectionProvider } from "../connection.ts";
@@ -207,6 +207,36 @@ describe("connection failures", () => {
       assert.doesNotMatch(`${err.message}${err.stack}`, /SECRETTOKEN/);
       return true;
     });
+  });
+
+  test("a nextRecordsUrl can only be a next page, even a read-only looking one", async () => {
+    const transport = stub(() => ({ json: { records: [{ Id: "1" }], totalSize: 2, nextRecordsUrl: `/services/data/v66.0/query?q=${encodeURIComponent("SELECT Id FROM User")}` } }));
+    const client = await connect(transport);
+    await assert.rejects(client.query("SELECT Id FROM Account"), ForbiddenOperationError);
+  });
+
+  test("an instance URL can't smuggle another host", () => {
+    assert.throws(() => instanceOrigin("https://acme.my.salesforce.com@evil.example", true), /bare host/);
+    assert.throws(() => instanceOrigin("https://evil.example/acme.salesforce.com", true), /bare host/);
+    assert.throws(() => instanceOrigin("https://acme.salesforce.com.evil.example", true), /isn't a Salesforce host/);
+    assert.throws(() => instanceOrigin("https://evilsalesforce.com", true), /isn't a Salesforce host/);
+    assert.throws(() => instanceOrigin("not a url", true), /valid URL/);
+  });
+
+  test("real Salesforce hosts are accepted, and normalised", () => {
+    assert.equal(instanceOrigin("https://acme.my.salesforce.com/", true), "https://acme.my.salesforce.com");
+    assert.equal(instanceOrigin("https://acme--dev.sandbox.my.salesforce.com", true), "https://acme--dev.sandbox.my.salesforce.com");
+  });
+
+  test("with the real transport, a host that isn't Salesforce is refused before any request", async () => {
+    await assert.rejects(SalesforceClient.connect(provider(), { budget: new ApiBudget({ stopAtShare: 0.5 }) }), /isn't a Salesforce host/);
+  });
+
+  test("a refresh can't downgrade to http or move the token elsewhere", async () => {
+    const bad: ConnectionProvider = { ...provider(), refresh: async () => ({ instanceUrl: "http://x.example.com", accessToken: "t" }) };
+    const transport = stub(() => ({ status: 401, json: [{ errorCode: "INVALID_SESSION_ID", message: "expired" }] }));
+    const client = await SalesforceClient.connect(bad, { budget: new ApiBudget({ stopAtShare: 0.5 }), transport, sleep: async () => {} });
+    await assert.rejects(client.query("SELECT Id FROM Account"), /must be https/);
   });
 
   test("refuses a plain http instance", async () => {

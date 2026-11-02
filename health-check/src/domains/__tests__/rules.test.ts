@@ -362,6 +362,14 @@ describe("calibration against the org", () => {
   });
 });
 
+describe("fiscal year", () => {
+  test("a calibration that disagrees with the org is called out", () => {
+    const calibration = { ...loadCalibration(), fiscalYearStartMonth: 4 };
+    const f = issue(analyseExtracts(extracts, { calibration }).findings, "pipe.calibration-contradicts-org");
+    assert.match(f.summary, /starts the fiscal year in month 4, but the org starts it in month 1/);
+  });
+});
+
 describe("repeatability", () => {
   test("the same inputs give the same findings", () => {
     const first = JSON.stringify(analyseExtracts(extracts, { answers: loadAnswers() }));

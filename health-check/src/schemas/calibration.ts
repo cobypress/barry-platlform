@@ -35,7 +35,9 @@ export const Calibration = z
       note: z.string().optional(),
     }),
     salesCycleAssumptionDays: z.number().positive().optional(),
-    fiscalYearStartMonth: z.number().int().min(1).max(12).default(1),
+    // Leave out to use the org's own setting. A silent default of January would
+    // give an April-start org the wrong quarters.
+    fiscalYearStartMonth: z.number().int().min(1).max(12).optional(),
     analysisWindowMonths: z.number().int().positive().default(24),
     minSample: z.number().int().positive().default(20),
     dormantDays: z.number().int().positive().default(90),

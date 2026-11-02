@@ -44,6 +44,13 @@ function closedAtFromHistory(history: HistoryRow[], stages: StageMap): Date | nu
   return closed;
 }
 
+// Plain comparison: Salesforce ids are case-sensitive, and localeCompare would
+// reverse two rows written in the same second.
+function byTimeThenId(a: HistoryRow, b: HistoryRow): number {
+  const [x, y] = [`${a.CreatedDate}|${a.Id}`, `${b.CreatedDate}|${b.Id}`];
+  return x < y ? -1 : x > y ? 1 : 0;
+}
+
 export type PipelineData =
   | { status: "unavailable"; reason: string; evidence: Evidence[] }
   | {
@@ -101,7 +108,7 @@ export function loadPipeline(ctx: Omit<RuleContext, "metrics">): PipelineData {
       excludedStage++;
       continue;
     }
-    const rows = (byOpportunity.get(opportunity.Id) ?? []).sort((a, b) => a.CreatedDate.localeCompare(b.CreatedDate) || a.Id.localeCompare(b.Id));
+    const rows = (byOpportunity.get(opportunity.Id) ?? []).sort(byTimeThenId);
     const fromHistory = closedAtFromHistory(rows, stages);
     deals.push({
       ...opportunity,

@@ -26,6 +26,10 @@ describe("side effects and non-queries", () => {
   test("rejects anything that isn't a SELECT", () => {
     for (const soql of ["", "   ", "DELETE FROM Account", "UPDATE Account SET Name = 'x'", "FIND {x}"]) assert.throws(() => assertSafeSoql(soql), UnsafeSoqlError);
   });
+  test("a clause jammed against a number is still a clause", () => {
+    assert.throws(() => assertSafeSoql("SELECT Id FROM Account LIMIT 1FOR VIEW"), UnsafeSoqlError);
+    assert.throws(() => assertSafeSoql("SELECT Id FROM Account LIMIT 1FOR UPDATE"), UnsafeSoqlError);
+  });
   test("rejects two statements", () => assert.throws(() => assertSafeSoql("SELECT Id FROM Account; DELETE FROM Account"), UnsafeSoqlError));
   test("rejects UPDATE TRACKING and UPDATE VIEWSTAT", () => {
     assert.throws(() => assertSafeSoql("SELECT Id FROM FAQ__kav UPDATE TRACKING"), UnsafeSoqlError);

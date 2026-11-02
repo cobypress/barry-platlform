@@ -26,4 +26,6 @@ Salesforce's docs couldn't all be read in full, so these are unproven until a li
 | 3 | Does `Report.LastRunDate` reflect all users' runs? | The unused reports rule would overstate. It's rated medium confidence for this reason |
 | 4 | Which reports can the connected user see? | Private reports are excluded, which is declared on the finding |
 | 5 | Does `sf org display` always return a live token? | The run fails at the start with a clear error |
-| 6 | Does an expired session in a SOAP call need refreshing? | The client only refreshes after a REST 401, so a very long run could fail at retrieve |
+| 6 | Does the org use a custom fiscal year? | We read `Organization.FiscalYearStartMonth`, which assumes standard quarters. Custom fiscal years would need `FiscalYearSettings` |
+| 7 | Does Salesforce read the first or last repeated `q`? | Harmless: repeats are refused |
+| 8 | Does an expired session in a SOAP call need refreshing? | The client only refreshes after a REST 401, so a very long run could fail at retrieve |
