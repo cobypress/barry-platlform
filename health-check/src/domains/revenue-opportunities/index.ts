@@ -6,6 +6,7 @@ import { pct, plural, type NotMeasurableResult, type Rule, type RuleContext, typ
 import { enteredCurrentStage } from "../current-pipeline/stages.ts";
 import { loadPipeline, type Deal } from "../historic-pipeline/cohort.ts";
 import { median } from "../historic-pipeline/metrics.ts";
+import { localDay, zoneOf } from "../time-zone.ts";
 import { atOwnWinRate } from "../value.ts";
 import type { Evidence, Value } from "../../schemas/index.ts";
 import type { DomainModule } from "../types.ts";
@@ -42,7 +43,7 @@ const stalledDeals: Rule = {
     const data = pipelineOr(ctx);
     if ("outcome" in data) return data;
     const cutoff = daysBefore(ctx.now, STALLED_DAYS);
-    const day = cutoff.toISOString().slice(0, 10);
+    const day = localDay(cutoff, zoneOf(ctx));
     const open = data.deals.filter((d) => d.category === "open");
     const stalled = open.filter((d) => (enteredCurrentStage(d) ?? new Date(d.CreatedDate)) < cutoff && (d.LastActivityDate === null || d.LastActivityDate < day));
     const evidence: Evidence[] = [{ ...data.evidence[0]!, count: stalled.length, dateRange: { from: ctx.window.to, to: ctx.window.to }, exclusions: data.exclusions, note: `Open deals with no stage change and no activity in ${STALLED_DAYS} days` }];
@@ -132,7 +133,7 @@ const dormantAccounts: Rule = {
     if (accounts.status !== "ok") return { outcome: "not_measurable", reason: `Accounts couldn't be read: ${accounts.reason}`, evidence: [ctx.ev(accounts.source, { count: null })] };
     if (accounts.truncated) return { outcome: "not_measurable", reason: "There are too many customer accounts to read in full.", evidence: [ctx.ev(accounts.source, { count: accounts.data.length })] };
     const { dormantDays } = ctx.calibration;
-    const cutoff = daysBefore(ctx.now, dormantDays).toISOString().slice(0, 10);
+    const cutoff = localDay(daysBefore(ctx.now, dormantDays), zoneOf(ctx));
     const openAccounts = new Set(data.deals.filter((d) => d.category === "open" && d.AccountId).map((d) => d.AccountId!));
     const wonDeals = data.deals.filter((d) => d.category === "won" && d.AccountId);
     const dormant = accounts.data.filter((a) => !openAccounts.has(a.Id) && (a.LastActivityDate === null || a.LastActivityDate < cutoff));

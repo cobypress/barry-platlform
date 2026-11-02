@@ -328,6 +328,52 @@ describe("metadata retrieve", () => {
     assert.match(body, /a&lt;b/);
   });
 
+  const expired = `<?xml version="1.0"?><soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"><soapenv:Body><soapenv:Fault><faultcode>sf:INVALID_SESSION_ID</faultcode><faultstring>INVALID_SESSION_ID: Invalid Session ID found in SessionHeader</faultstring></soapenv:Fault></soapenv:Body></soapenv:Envelope>`;
+
+  test("an expired session mid-retrieve refreshes once, with the new token in the envelope", async () => {
+    const zip = Buffer.from(zipSync({ "flows/A.flow": strToU8("<Flow/>") })).toString("base64");
+    let faults = 0;
+    const transport = stub((r) => {
+      if (r.body!.includes("<met:retrieve>")) return { text: envelope("retrieve", "<id>09S000000000001AAA</id><done>false</done>") };
+      if (faults === 0) {
+        faults++;
+        return { status: 500, text: expired };
+      }
+      return { text: envelope("checkRetrieveStatus", `<done>true</done><success>true</success><zipFile>${zip}</zipFile>`) };
+    });
+    const client = await connect(transport);
+    assert.deepEqual(await client.retrieveMetadata([{ name: "Flow", members: ["*"] }]), { "flows/A.flow": "<Flow/>" });
+    const checks = transport.requests.filter((r) => r.body?.includes("<met:checkRetrieveStatus>"));
+    assert.equal(checks.length, 2);
+    assert.ok(checks[0]!.body!.includes(TOKEN));
+    assert.ok(checks[1]!.body!.includes("refreshed-token"));
+    assert.ok(!checks[1]!.body!.includes(TOKEN));
+  });
+
+  test("a session that stays expired fails rather than looping", async () => {
+    const transport = stub(() => ({ status: 500, text: expired }));
+    const client = await connect(transport);
+    await assert.rejects(client.retrieveMetadata([{ name: "Flow", members: ["*"] }]), /INVALID_SESSION_ID/);
+    assert.equal(transport.requests.filter((r) => r.body?.includes("<met:retrieve>")).length, 2);
+  });
+
+  test("a SOAP refresh can't move the token elsewhere", async () => {
+    const bad: ConnectionProvider = { ...provider(), refresh: async () => ({ instanceUrl: "http://x.example.com", accessToken: "t" }) };
+    const transport = stub(() => ({ status: 500, text: expired }));
+    const client = await connect(transport, undefined, bad);
+    await assert.rejects(client.retrieveMetadata([{ name: "Flow", members: ["*"] }]), /https/);
+    assert.ok(!transport.requests.some((r) => r.body?.includes(">t<")));
+  });
+
+  test("other SOAP faults don't trigger a refresh", async () => {
+    let refreshes = 0;
+    const counting: ConnectionProvider = { ...provider(), refresh: async () => (refreshes++, provider().refresh()) };
+    const transport = stub(() => ({ status: 500, text: expired.replaceAll("INVALID_SESSION_ID", "INVALID_OPERATION") }));
+    const client = await connect(transport, undefined, counting);
+    await assert.rejects(client.retrieveMetadata([{ name: "Flow", members: ["*"] }]));
+    assert.equal(refreshes, 0);
+  });
+
   test("a failed retrieve is an error", async () => {
     const transport = stub((r) => ({ text: r.body!.includes("<met:retrieve>") ? envelope("retrieve", "<id>09S000000000001AAA</id>") : envelope("checkRetrieveStatus", "<done>true</done><success>false</success><errorMessage>nope</errorMessage>") }));
     const client = await connect(transport);

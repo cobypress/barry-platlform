@@ -9,6 +9,7 @@ import { loadPipeline, type Deal } from "../historic-pipeline/cohort.ts";
 import { fiscalStartOf, median, pushesOf, quantile, segment } from "../historic-pipeline/metrics.ts";
 import type { DateRange, Evidence, Metric } from "../../schemas/index.ts";
 import type { DomainModule } from "../types.ts";
+import { localDay, todayIn, zoneNote, zoneOf } from "../time-zone.ts";
 import { daysSince, enteredCurrentStage, quarterBounds, stageRuns } from "./stages.ts";
 
 const DOMAIN = "current_pipeline";
@@ -147,7 +148,7 @@ const staleDeals = shareRule({
   scopeLabel: "open deals",
   scope(ctx, _data, open) {
     const cutoff = daysBefore(ctx.now, QUIET_DAYS);
-    const day = cutoff.toISOString().slice(0, 10);
+    const day = localDay(cutoff, zoneOf(ctx));
     const moved = (d: Deal): boolean => {
       const entered = enteredCurrentStage(d) ?? new Date(d.CreatedDate);
       return entered >= cutoff;
@@ -293,7 +294,8 @@ export function coverageOf(ctx: RuleContext | Omit<RuleContext, "metrics">, deal
   const fiscal = fiscalStartOf(ctx);
   if (!fiscal) return { reason: "The org's fiscal year couldn't be read, and the calibration doesn't set one.", evidence: noTarget };
 
-  const quarter = quarterBounds(ctx.now, fiscal);
+  const today = todayIn(ctx);
+  const quarter = quarterBounds(new Date(`${today}T00:00:00Z`), fiscal);
   const data = loadPipeline(ctx);
   const everyone = data.status === "ok" ? data.deals : deals;
   const owners = new Set(everyone.filter((d) => d.category === "open" || d.category === "won").map((d) => d.OwnerId));
@@ -306,11 +308,10 @@ export function coverageOf(ctx: RuleContext | Omit<RuleContext, "metrics">, deal
   }
   if (reps.size === 0) return { reason: `No deal owner has a revenue quota for the quarter starting ${quarter.from}.`, evidence: noTarget };
   const inQuarter = (day: string): boolean => day >= quarter.from && day <= quarter.to;
-  const today = ctx.window.to;
   const rows = [...reps].map(([owner, quota]) => ({
     owner,
     quota,
-    won: everyone.filter((d) => d.OwnerId === owner && d.category === "won" && inQuarter(d.closedAt.toISOString().slice(0, 10))).reduce((sum, d) => sum + (d.Amount ?? 0), 0),
+    won: everyone.filter((d) => d.OwnerId === owner && d.category === "won" && inQuarter(d.closedDay)).reduce((sum, d) => sum + (d.Amount ?? 0), 0),
     open: deals.filter((d) => d.OwnerId === owner && d.CloseDate >= today && inQuarter(d.CloseDate)).reduce((sum, d) => sum + (d.Amount ?? 0), 0),
   }));
   const quota = rows.reduce((sum, r) => sum + r.quota, 0);
@@ -369,7 +370,7 @@ function currentMetrics(ctx: Ctx): Metric[] {
     value: { id: "current.open_pipeline", domain: DOMAIN, label: "Open pipeline", unit: "currency" as const, definition: "Total Amount of open deals today. A deal with no amount counts as zero." },
     age: { id: "current.median_days_in_stage", domain: DOMAIN, label: "Days in current stage", unit: "days" as const, definition: "Median days open deals have been in their current stage." },
   };
-  const shared = { exclusions: [] as string[], assumptions: ["Days are in UTC, not the org's time zone"] };
+  const shared = { exclusions: [] as string[], assumptions: [zoneNote(ctx)] };
   if ("outcome" in loaded) return Object.values(definitions).map((d) => ({ ...d, ...shared, evidence: loaded.evidence, status: "not_measurable", reason: loaded.reason }));
   const { data, deals } = loaded;
   const today = { from: ctx.window.to, to: ctx.window.to };

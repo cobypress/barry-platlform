@@ -1,13 +1,14 @@
 import { activityExtractor, ACTIVITY_DAYS, type EventRow, type TaskRow } from "../../extract/activity.ts";
 import { activityCaptureExtractor } from "../../extract/users.ts";
 import type { RuleContext } from "../../engine/rule.ts";
+import { localDay, zoneOf } from "../time-zone.ts";
 import type { Evidence } from "../../schemas/index.ts";
 
 export type Touch = { at: string; ownerId: string; dealId: string | null; kind: "task" | "event" | "email" };
 
 export type ActivityData =
   | { status: "unavailable"; reason: string; evidence: Evidence[] }
-  | { status: "ok"; touches: Touch[]; tasks: TaskRow[]; events: EventRow[]; from: string; evidence: Evidence[]; exclusions: string[]; assumptions: string[]; captureInUse: boolean };
+  | { status: "ok"; touches: Touch[]; tasks: TaskRow[]; events: Array<EventRow & { month: string }>; from: string; evidence: Evidence[]; exclusions: string[]; assumptions: string[]; captureInUse: boolean };
 
 const isOpportunity = (id: string | null): id is string => id !== null && id.startsWith("006");
 
@@ -45,5 +46,7 @@ export function loadActivity(ctx: Omit<RuleContext, "metrics">): ActivityData {
   }
   const capture = ctx.data(activityCaptureExtractor);
   const captureInUse = capture.status !== "ok" || capture.data.length > 0;
-  return { status: "ok", touches, tasks: tasks.data, events: events.data, from, evidence, exclusions, assumptions: captureInUse ? [CAPTURE_NOTE] : [], captureInUse };
+  const zone = zoneOf(ctx);
+  const inMonths = events.data.map((e) => ({ ...e, month: localDay(e.StartDateTime, zone).slice(0, 7) }));
+  return { status: "ok", touches, tasks: tasks.data, events: inMonths, from, evidence, exclusions, assumptions: captureInUse ? [CAPTURE_NOTE] : [], captureInUse };
 }

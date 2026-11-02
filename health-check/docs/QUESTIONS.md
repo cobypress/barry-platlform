@@ -15,6 +15,10 @@ None of these blocked Milestone 1.
 | 7 | Should rep-level segments appear in the raw notes? | The plan keeps executive reports at team level. Raw notes currently show reps | Before the first report |
 | 8 | Has zero data retention been requested from Anthropic? | The plan wants it before the first paying customer | Before any customer run |
 
+| 9 | Should private reports block field removal? | Other people's private reports can't be read, so the report guard stays unknown wherever any exist, which is most orgs. Field removal then stays "investigate". We could accept it as a stated risk, or add a manual step | Before the first report |
+| 10 | Are the scoring weights and working limits acceptable? | A pass or critical issue is worth 8, with high 5, medium 3, low 1, times confidence. Limits such as 3 times coverage and 25% account share are our judgement | Before the first report |
+| 11 | Should accuracy be measured with our own forecast snapshots? | Forecast rows are today's position, so accuracy is not measurable without one | After the first report |
+
 ## To confirm against a real org
 
 Salesforce's docs couldn't all be read in full, so these are unproven until a live run.
@@ -28,4 +32,14 @@ Salesforce's docs couldn't all be read in full, so these are unproven until a li
 | 5 | Does `sf org display` always return a live token? | The run fails at the start with a clear error |
 | 6 | Does the org use a custom fiscal year? | We read `Organization.FiscalYearStartMonth`, which assumes standard quarters. Custom fiscal years would need `FiscalYearSettings` |
 | 7 | Does Salesforce read the first or last repeated `q`? | Harmless: repeats are refused |
-| 8 | Does an expired session in a SOAP call need refreshing? | The client only refreshes after a REST 401, so a very long run could fail at retrieve |
+| 8 | Is an expired session in a SOAP call always a fault with `INVALID_SESSION_ID`? | The client refreshes once on that fault. Salesforce's docs give the code, and the HTTP status is unconfirmed, so any other shape fails the retrieve with a clear error |
+| 9 | Do `SecurityHealthCheck` and `SecurityHealthCheckRisks` read with our connected user, and are high, medium and meets standard the only risk types? | A failed read is not measurable. Other risk types are left out and declared |
+| 10 | Does a connected user without Manage Users or Monitor Login History get only their own `LoginHistory` rows? | It would look like success, and hide other people's API logins. Stated on the evidence |
+| 11 | Does the mobile app or an email add-in set `LoginHistory.ApiType`? | The personal integration rule would over-report. It's medium confidence, and investigate only |
+| 12 | Are `ForecastCategoryName` on `ForecastingItem`, `Period`, and the `ForecastingType` fields as we've assumed? `OpportunityRevenue` is from memory | A wrong field is not measurable, and a renamed Commit category is not measurable |
+| 13 | Do forecast rows really hold no history? | If they do, accuracy could be measured. It's reported as not measurable for now |
+| 14 | Is Einstein Activity Capture email outside `Task`, `Event` and `EmailMessage`? Sources are vendors, and a Summer '25 option may change it | Rep-level activity findings drop to medium confidence where it's in use |
+| 15 | Does conversion move a lead's tasks to the contact? Is `LeadHistory.Field` filterable? | We count both ids, so the first is safe. If the second fails, first response uses tasks and events only |
+| 16 | Is a report's `OwnerId` its folder, and can a retrieve reach private reports? | A report we can't place counts as not read, and the guard blocks |
+| 17 | Is every `TimeZoneSidKey` a name Node understands? | Falls back to UTC, stated on the metric |
+| 18 | Does a job on a deactivated user fail? Only vendor and community sources say so | Medium confidence, and the finding says it rests on secondary sources |

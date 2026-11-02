@@ -1,7 +1,9 @@
 import { RULE_SET_VERSION } from "../config.ts";
 import { Score, type Finding } from "../schemas/index.ts";
 
-// A domain's score is the share of its weighted checks that came back clean.
+// Every rule counted is worth the same maximum. A pass earns all of it, and an
+// issue earns what's left after its weight. So severity still counts when a
+// domain has no passes: only critical issues can take a score to zero.
 //
 // It's counted per rule, not per finding, because some rules raise one finding
 // for each outlier, and ten segments of one problem aren't ten problems. A rule
@@ -11,13 +13,13 @@ import { Score, type Finding } from "../schemas/index.ts";
 
 export const SEVERITY_WEIGHTS = { critical: 8, high: 5, medium: 3, low: 1, info: 0 } as const;
 export const CONFIDENCE_FACTORS = { high: 1, medium: 0.75, low: 0.5 } as const;
-export const PASS_WEIGHT = 3;
+export const RULE_MAXIMUM = SEVERITY_WEIGHTS.critical;
 
 // Gaps in how we set the check up, not faults in the customer's org.
 const SETUP_RULES = new Set(["pipe.unmapped-stages"]);
 
 const WEIGHTS: Record<string, number> = {
-  passed: PASS_WEIGHT,
+  ruleMaximum: RULE_MAXIMUM,
   ...Object.fromEntries(Object.entries(SEVERITY_WEIGHTS).map(([k, v]) => [`severity.${k}`, v])),
   ...Object.fromEntries(Object.entries(CONFIDENCE_FACTORS).map(([k, v]) => [`confidence.${k}`, v])),
 };
@@ -32,23 +34,18 @@ export function scoreDomain(domain: string, findings: Finding[], ruleSetVersion:
   for (const finding of own) rules.set(finding.ruleId, [...(rules.get(finding.ruleId) ?? []), finding]);
 
   let earned = 0;
-  let lost = 0;
+  let rulesCounted = 0;
   const counted: string[] = [];
   for (const group of rules.values()) {
     const issues = group.filter((f) => f.status === "issue");
     const passes = group.filter((f) => f.status === "passed");
-    if (issues.length > 0) {
-      lost += Math.max(...issues.map(issueWeight));
-      counted.push(...issues.map((f) => f.id), ...passes.map((f) => f.id));
-    } else if (passes.length > 0) {
-      earned += PASS_WEIGHT;
-      counted.push(...passes.map((f) => f.id));
-    }
+    if (issues.length === 0 && passes.length === 0) continue;
+    rulesCounted++;
+    earned += issues.length > 0 ? RULE_MAXIMUM - Math.max(...issues.map(issueWeight)) : RULE_MAXIMUM;
+    counted.push(...issues.map((f) => f.id), ...passes.map((f) => f.id));
   }
-  if (counted.length === 0) return notMeasurable(`Every check in this domain was not measurable (${rules.size} rules).`);
-  // Only info-level issues and nothing else leaves nothing to divide by.
-  if (earned + lost === 0) return notMeasurable("The checks in this domain carry no weight.");
-  return Score.parse({ status: "measured", domain, score: Math.round((earned / (earned + lost)) * 100), ruleSetVersion, weights: WEIGHTS, findingIds: counted });
+  if (rulesCounted === 0) return notMeasurable(`Every check in this domain was not measurable (${rules.size} rules).`);
+  return Score.parse({ status: "measured", domain, score: Math.round((earned / (RULE_MAXIMUM * rulesCounted)) * 100), ruleSetVersion, weights: WEIGHTS, findingIds: counted });
 }
 
 /** One score per domain, in the order given. A domain with no findings still gets a row. */

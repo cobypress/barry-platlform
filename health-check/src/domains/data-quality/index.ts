@@ -3,6 +3,8 @@ import { crmHealthExtractor, opportunitiesExtractor } from "../../extract/opport
 import { daysBefore } from "../../extract/types.ts";
 import { ownershipExtractor, usersExtractor } from "../../extract/users.ts";
 import { notSized, pct, plural, segmentRate, type Rule, type RuleContext, type RuleResult } from "../../engine/rule.ts";
+import { localDay, todayIn, zoneOf } from "../time-zone.ts";
+import { atOwnLeadReturn } from "../value.ts";
 import { loadPipeline, type Deal } from "../historic-pipeline/cohort.ts";
 import type { Value } from "../../schemas/index.ts";
 import type { DomainModule } from "../types.ts";
@@ -108,7 +110,7 @@ const pastCloseDate = dealRule({
   severity: "high",
   scope: isOpen,
   scopeLabel: "open deals",
-  isHit: (d, ctx) => d.CloseDate < ctx.window.to,
+  isHit: (d, ctx) => d.CloseDate < todayIn(ctx),
   issueTitle: "Your pipeline includes deals that should already have closed",
   sentence: (hits, n, rate) => `Open deals with a close date in the past: ${hits} of ${n} (${rate}%). The forecast is counting them when it shouldn't.`,
   recommendation: "Have each owner close the deal or give it a real date, then add a weekly check to pipeline reviews.",
@@ -163,7 +165,7 @@ const noRecentActivity = dealRule({
   scope: isOpen,
   scopeLabel: "open deals",
   isHit: (d, ctx) => {
-    const cutoff = daysBefore(ctx.now, STALE_ACTIVITY_DAYS).toISOString().slice(0, 10);
+    const cutoff = localDay(daysBefore(ctx.now, STALE_ACTIVITY_DAYS), zoneOf(ctx));
     return d.LastActivityDate === null || d.LastActivityDate < cutoff;
   },
   issueTitle: "Part of your pipeline has gone quiet",
@@ -293,7 +295,7 @@ const duplicateRulesMissing: Rule = {
 
 const staleLeads: Rule = {
   id: "dq.stale-leads",
-  version: 1,
+  version: 2,
   domain: "data_quality",
   title: "Open leads nobody has touched",
   evaluate(ctx): RuleResult | RuleResult[] {
@@ -327,7 +329,7 @@ const staleLeads: Rule = {
       severity: "medium",
       confidence: "high",
       evidence,
-      value: notSized("Sizing this needs the lead funnel domain's conversion rates."),
+      value: atOwnLeadReturn(ctx, stale.data, { period: "one-off, if these leads are worked", caveat: "Assumes old, untouched leads return what an average lead does. They usually return less, so treat this as a ceiling" }),
       effort: { size: "S" },
       owner: "Head of marketing",
       segmentsChecked: segments,

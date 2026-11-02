@@ -14,10 +14,28 @@ Branch `hc/domains`. Newest status first in each section. Nobody has run any of 
 | 6 | Lead funnel | Done |
 | 7 | Revenue opportunities | Done |
 | 8 | Scoring | Done |
-| 9 | Value sizing | In progress |
-| 10 | Report scanning | Not started |
-| - | Org time zone | Not started |
-| - | SOAP `INVALID_SESSION_ID` refresh | Not started |
+| 9 | Value sizing | Done |
+| 10 | Report scanning | Done |
+| - | Org time zone | Done |
+| - | SOAP `INVALID_SESSION_ID` refresh | Done |
+
+The whole list is finished, including both known gaps. Nothing was pushed.
+
+## Where it ended
+
+- 71 rules across all 12 Sales Cloud domains, with metrics, value sizing and a score per domain.
+- Tests: 913 of 918 pass, and the type check is clean. All 5 failures are Worker B's, in `src/narrative/__tests__/sections.test.ts` (2) and `src/render/__tests__/pdf.test.ts` (3). See Merges.
+- No existing test was skipped, weakened or deleted. Tests I changed were my own, as traps or the coordinator's scoring change moved their expected figures.
+- `allowlist.ts`, `soql.ts`, `evaluate.ts` and `rule.ts` are unchanged. New Salesforce reads are all SOQL or an existing Metadata retrieve.
+- Nothing has run against a real org. Every Salesforce shape here comes from docs snippets or memory, so expect some queries to need adjusting on first contact. `docs/QUESTIONS.md` lists them.
+
+## For Coby to decide
+
+1. Should private reports block field removal? They do now, so removal will rarely be recommended. See `docs/QUESTIONS.md`.
+2. Are the scoring weights and working limits acceptable? They're our judgement.
+3. Is 12 months of activity enough? More needs `queryAll` on the allowlist.
+4. Do you want a forecast snapshot, so accuracy can be measured?
+5. Should metrics that don't need Opportunity be published when it can't be read? They're held back to honour an existing test. See Decisions.
 
 ## How facts were checked
 
@@ -30,9 +48,12 @@ Each in its own commit, additive only.
 | File | Change | Why |
 | --- | --- | --- |
 | `src/engine/run.ts` | Writes `scores.json`, and passes scores to the raw notes | Without it nothing in a run calls scoring |
+| `src/salesforce/client.ts` | Refreshes once on a SOAP `INVALID_SESSION_ID`, through the same host check as REST | Known gap in the plan. No new method, route or operation |
+| `src/schemas/calibration.ts` | Optional `effortMinutes`, default empty | Hours need a time per item, and Salesforce has none. No entry means not sized |
 
 ## Merges
 
+- Merged `hc/integration` (e9077bc, with Reports) after the scoring fix. No conflicts. Ran `npm ci` here for Worker B's dependencies. Type check clean, 893 of 898 tests pass. The 5 failures are in `src/narrative/__tests__/sections.test.ts` (2) and `src/render/__tests__/pdf.test.ts` (3), which the coordinator has already sent to Worker B and told me to leave.
 - Merged `hc/integration` (19dc9ec) before starting, as the coordinator asked. Fast-forward, no conflicts. New pipeline work uses `fiscalStartOf(ctx)` and treats a deal with no recorded open stage as win rate only.
 
 ## Decisions
@@ -67,10 +88,19 @@ Each in its own commit, additive only.
 - **Revenue figures use one multiplier: the org's own measured win rate.** No recovery rate, typical figure or benchmark, because rule 1 forbids introducing a figure. If the rate isn't measurable, the finding says not sized, and the count stands. Every figure states that it's a ceiling, because stalled and lost deals usually win less often than average. Confidence is medium throughout.
 - **Stalled means 60 days without a stage change or activity,** which is stricter than the 30-day `cur.stale-deals`, so this is the shortlist worth chasing.
 
-- **Scoring is per rule, at its worst finding.** Some rules raise a finding per outlier, and ten segments of one problem aren't ten problems. Score is earned over earned plus lost, with a pass worth 3, and an issue worth critical 8, high 5, medium 3, low 1, times confidence (1, 0.75, 0.5). These weights are our judgement, and they're published on every `Score`. **Coby:** worth a look before the first report.
+- **Scoring is per rule, at its worst finding.** Some rules raise a finding per outlier, and ten segments of one problem aren't ten problems. Each rule counted is worth 8, the critical weight. A pass earns 8, and an issue earns 8 minus its weight: critical 8, high 5, medium 3, low 1, times confidence (1, 0.75, 0.5). Score is total earned over 8 times the rules counted. So only high issues score 38, and only critical ones score 0. This replaces my first formula at the coordinator's request, because earned over earned plus lost gave 0 to any domain with no passes, whatever the severity. An info-level issue now costs nothing, and counts as a rule. The weights are our judgement, and they're published on every `Score`.
 - **`pipe.unmapped-stages` doesn't count against the customer,** because it's a gap in our calibration.
 - **Not measurable moves nothing,** so a domain with nothing measurable has no score, never a zero, and a test proves it.
 - **`RULE_SET_VERSION` is now `2026.11-m3`,** because the rule set changed.
+
+- **Value sizing lives in `src/domains/value.ts`.** Revenue uses the org's own win rate or won per lead. Licence cost uses the calibration. Hours use the new `effortMinutes`, so they're only sized if the customer agrees a time: `custom-field-upkeep` and `report-upkeep` so far. Nothing else was a good fit for hours, and I didn't want to invent a saving.
+- **There's no total across findings.** Exposures overlap: one deal can be stale, pushed and in Commit. Adding them would overstate. Worth keeping in mind for the executive summary.
+
+- **Report scanning resolves the field guard, but private reports keep it unknown.** It reads reports and folders, retrieves each report by name, and keeps only field names. Salesforce's `allPrivate` scope counts other people's private reports, which the retrieve can't reach. If any exist, or the count can't be read, the guard is unknown and blocks. **Coby to decide:** most real orgs have private reports, so field removal will usually stay "investigate". The alternative is to treat private reports as an accepted, stated risk, or to add a manual step. I kept the blocking default because rule 3 says unknown blocks, and that isn't mine to relax.
+- **The synthetic org has 4 private reports,** so the existing test that field removal stays "investigate" still passes untouched. New tests cover the zero case, where a clean field is recommended for removal.
+- **A failed report retrieve doesn't fail the run,** unlike the main metadata retrieve, because it only costs one guard. A budget stop still gets through, so the run can resume.
+
+- **Time zone:** `src/domains/time-zone.ts` turns instants into calendar days in `Organization.TimeZoneSidKey`, and every metric now states its calendar. `CloseDate` and `LastActivityDate` are date-only, so they're left alone, and `Deal.closedDay` holds that distinction. A zone we can't apply falls back to UTC and says so. **Not changed:** the analysis window is set in UTC in `run.ts`, which is frozen, so the window's edge can differ by a day. Durations such as time in stage were always unaffected.
 
 ## Unverified Salesforce facts
 
@@ -92,3 +122,6 @@ Each in its own commit, additive only.
 | `lead.response-time` | That conversion moves a lead's tasks to the contact: the source is a community answer, not Salesforce's docs | We count both ids, so if it's wrong the answer is the same |
 | `lead.*` | That `LeadHistory.Field` can be filtered, and that `Status` is the stored value. If field history isn't on, rows are empty | Empty or unreadable history means tasks and events only, and unreadable is declared in the exclusions |
 | `lead.campaign-return` | `Campaign.ActualCost` and `CampaignMember.LeadId` are from memory plus a partial docs snippet | A wrong field fails the read, which is not measurable |
+| `not-used-in-reports` | That a report's `OwnerId` is its folder, and that `Folder.ParentId` chains subfolders. A wrong guess only means the file doesn't come back | Counted as not read, and the guard is unknown |
+| `not-used-in-reports` | Whether the retrieve can reach private reports at all. I assumed not. The `allPrivate` scope needs Manage All Private Reports and Dashboards, and a failed count is unknown | Blocks either way |
+| Time zone | That every `TimeZoneSidKey` is an IANA name. Some may not be | Falls back to UTC, stated on each metric |

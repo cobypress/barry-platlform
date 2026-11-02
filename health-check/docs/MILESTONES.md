@@ -35,7 +35,7 @@ A separate agent reviewed the read-only boundary and the pipeline maths without 
 - **Smaller boundary gaps:** a repeated `q`, raw tabs, `LIMIT 1FOR VIEW`, a case-sensitive override check, `nextRecordsUrl` reaching any allowed route, and a parse error that could quote the token.
 - **Smaller pipeline gaps:** history gaps were judged across all months rather than month by month, blank amounts were unchecked at month ends and in value segments, skipped-stage figures ignored the minimum sample, and same-second rows could reverse.
 
-The one not fixed is the UTC boundary, which is disclosed on every metric. It's on Worker A's list.
+The one not fixed at the time was the UTC boundary. The org's time zone is now applied, and only the analysis window's edge is still set in UTC.
 
 ### What hasn't been checked
 
@@ -49,7 +49,7 @@ The one not fixed is the UTC boundary, which is disclosed on every metric. It's 
 | A rule is confidently wrong | Thresholds are our judgement. Only a real org shows false positives | Review the first live run finding by finding |
 | Large orgs | REST paging only, and `LoginHistory` is capped at 20,000 rows. Ownership scans top out at 40 custom objects, which then blocks removal | Bulk API decision in Milestone 3 |
 | Chat scrubbing misses first names | `scrub()` catches full names, usernames, emails and ids. "Sam said..." gets through | Needs solving before Milestone 5 sends chat to Claude |
-| Time zones | Month ends and day boundaries are UTC, which can move a deal across a month end | Use the org's time zone in Milestone 3 |
+| Time zones | The org's time zone is applied, but the analysis window's edge is set in UTC in `run.ts`, so it can differ by a day | Small, and stated. Change it when `run.ts` is next open |
 | One person can run and approve | Noted in the plan | Sign-off checklist in Milestone 5 |
 | Customer names in the plan document | `blackcloud-next/docs/health-check/Salesforce Health Check Product Plan.md` names a real customer and its figures, and is untracked | Remove them before that file is committed |
 

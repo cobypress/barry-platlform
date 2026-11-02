@@ -1,10 +1,11 @@
 import { opportunitiesExtractor, stagesExtractor } from "../../extract/opportunities.ts";
 import { usersExtractor } from "../../extract/users.ts";
 import { orgExtractor, schemaExtractor } from "../../extract/configuration.ts";
-import { notSized, type Rule, type RuleResult } from "../../engine/rule.ts";
+import { notSized, type Rule, type RuleContext, type RuleResult } from "../../engine/rule.ts";
 import type { DomainModule } from "../types.ts";
-import type { Metric } from "../../schemas/index.ts";
-import { pipelineMetrics } from "./metrics.ts";
+import type { Metric, Value } from "../../schemas/index.ts";
+import { loadPipeline } from "./cohort.ts";
+import { closedInWindow, dimensions, pipelineMetrics } from "./metrics.ts";
 
 const DIVERGENCE_POINTS = 15;
 const WATCHED_METRICS = ["historic.win_rate", "historic.slippage_rate"];
@@ -91,10 +92,30 @@ const calibrationContradiction: Rule = {
   },
 };
 
+function divergenceValue(ctx: RuleContext, metric: Extract<Metric, { status: "measured" }>, segment: { dimension: string; key: string; value: number | null }): Value {
+  if (metric.id !== "historic.win_rate") return notSized("Slipped deals move revenue later rather than losing it, so this has no revenue figure.");
+  const data = loadPipeline(ctx);
+  if (data.status !== "ok") return notSized(data.reason);
+  if (data.multiCurrency) return notSized("The org is multi-currency, so these amounts can't be added.");
+  const keyOf = dimensions(ctx)[segment.dimension];
+  if (!keyOf) return notSized(`We can't rebuild the ${segment.dimension} segment to size it.`);
+  const deals = data.deals.filter((d) => (d.category === "won" || d.category === "lost") && closedInWindow(d, ctx.window) && keyOf(d) === segment.key);
+  const amount = deals.reduce((sum, d) => sum + (d.Amount ?? 0), 0);
+  const points = metric.value - segment.value!;
+  if (amount <= 0) return notSized("These deals have no amounts.");
+  return {
+    kind: "revenue",
+    amount: Math.round((amount * points) / 100),
+    unit: ctx.calibration.currency,
+    period: `${ctx.window.from} to ${ctx.window.to}`,
+    assumptions: [`${deals.length} won and lost deals in this segment, with a total Amount of ${Math.round(amount)}`, `The gap of ${Math.round(points * 10) / 10} points to your overall win rate of ${metric.value}%`, "Assumes these deals could win as often as the rest. Deal mix or territory may explain part of the gap, so treat this as a ceiling"],
+  };
+}
+
 // Rule 4 for pipeline numbers: a healthy total can hide a team that has collapsed.
 const segmentDivergence: Rule = {
   id: "pipe.segment-divergence",
-  version: 1,
+  version: 2,
   domain: "historic_pipeline",
   title: "Segments far from the overall figure",
   evaluate(ctx): RuleResult | RuleResult[] {
@@ -129,7 +150,7 @@ const segmentDivergence: Rule = {
       severity: "high" as const,
       confidence: segment.n >= ctx.calibration.minSample * 2 ? ("high" as const) : ("medium" as const),
       evidence,
-      value: notSized("Sizing this needs the value model, which isn't built yet."),
+      value: divergenceValue(ctx, metric, segment),
       effort: { size: "S" as const },
       owner: "Head of sales",
       segmentsChecked,

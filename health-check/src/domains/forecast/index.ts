@@ -7,6 +7,7 @@ import { notSized, pct, plural, segmentRate, type NotMeasurableResult, type Rule
 import { coverageOf, shareRule, type Scoped } from "../current-pipeline/index.ts";
 import { loadPipeline, type Deal } from "../historic-pipeline/cohort.ts";
 import { fiscalStartOf, pushesOf } from "../historic-pipeline/metrics.ts";
+import { localDay, todayIn, zoneNote, zoneOf } from "../time-zone.ts";
 import type { Evidence, Metric } from "../../schemas/index.ts";
 import type { DomainModule } from "../types.ts";
 
@@ -191,8 +192,8 @@ const commitAtRisk = shareRule({
   severity: "high",
   scopeLabel: "deals in Commit",
   scope(ctx, _data, open) {
-    const today = ctx.window.to;
-    const quietDay = daysBefore(ctx.now, QUIET_DAYS).toISOString().slice(0, 10);
+    const today = todayIn(ctx);
+    const quietDay = localDay(daysBefore(ctx.now, QUIET_DAYS), zoneOf(ctx));
     const fiscal = fiscalStartOf(ctx);
     return commitScope(ctx, open, (d) => d.CloseDate < today || d.LastActivityDate === null || d.LastActivityDate < quietDay || pushesOf(d, fiscal).length >= REPEAT_PUSHES);
   },
@@ -230,7 +231,7 @@ function forecastMetrics(ctx: Ctx): Metric[] {
     unit: "percent" as const,
     definition: "Won this quarter plus open deals in Commit, as a share of quota, for people who own deals. Worked out from deals rather than forecast roll-ups, so it isn't affected by how categories are rolled up.",
     exclusions: ["Quotas held by people who own no deals"],
-    assumptions: ["Days are in UTC, not the org's time zone"],
+    assumptions: [zoneNote(ctx)],
   };
   const notMeasurable = (reason: string, evidence: Evidence[]): Metric => ({ ...definition, status: "not_measurable", reason, evidence });
   const state = forecastInUse(ctx);

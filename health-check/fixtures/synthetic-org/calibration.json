@@ -26,5 +26,6 @@
   "minSample": 20,
   "dormantDays": 90,
   "currency": "GBP",
-  "licenceCosts": { "Salesforce": 1200 }
+  "licenceCosts": { "Salesforce": 1200 },
+  "effortMinutes": { "report-upkeep": 10 }
 }

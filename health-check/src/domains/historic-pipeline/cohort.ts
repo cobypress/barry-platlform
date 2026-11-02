@@ -1,6 +1,7 @@
 import { opportunitiesExtractor, stagesExtractor, type HistoryRow, type OpportunityRow } from "../../extract/opportunities.ts";
 import { usersExtractor } from "../../extract/users.ts";
 import type { RuleContext } from "../../engine/rule.ts";
+import { localDay, zoneOf } from "../time-zone.ts";
 import type { Calibration, Evidence, StageCategory } from "../../schemas/index.ts";
 
 export type Deal = OpportunityRow & {
@@ -9,6 +10,8 @@ export type Deal = OpportunityRow & {
   team: string;
   /** When the deal entered its final closed run of stages. Falls back to CloseDate. */
   closedAt: Date;
+  /** The calendar day of that close in the org's time zone. CloseDate is already a day, so it isn't converted. */
+  closedDay: string;
   closedAtSource: "history" | "close_date";
   ownerKind: string | null;
 };
@@ -76,6 +79,7 @@ export function loadPipeline(ctx: Omit<RuleContext, "metrics">): PipelineData {
   if (history.status !== "ok") return { status: "unavailable", reason: `OpportunityHistory couldn't be read: ${history.reason}`, evidence };
 
   const stages = stageMap(ctx.calibration);
+  const zone = zoneOf(ctx);
   const users = ctx.data(usersExtractor);
   const roles = new Map(users.status === "ok" ? users.data.map((u) => [u.Id, u.UserRole?.Name ?? "No role"]) : []);
   const kinds = new Map(ctx.calibration.users.map((u) => [u.userId.slice(0, 15), u.kind as string]));
@@ -116,6 +120,7 @@ export function loadPipeline(ctx: Omit<RuleContext, "metrics">): PipelineData {
       history: rows,
       team: roles.get(opportunity.OwnerId) ?? "No role",
       closedAt: fromHistory ?? new Date(`${opportunity.CloseDate}T00:00:00Z`),
+      closedDay: fromHistory ? localDay(fromHistory, zone) : opportunity.CloseDate,
       closedAtSource: fromHistory ? "history" : "close_date",
       ownerKind,
     });
@@ -139,7 +144,7 @@ export function loadPipeline(ctx: Omit<RuleContext, "metrics">): PipelineData {
     evidence,
     multiCurrency: extract.multiCurrency,
     exclusions,
-    historyStart: historyStart ? historyStart.slice(0, 10) : null,
+    historyStart: historyStart ? localDay(historyStart, zone) : null,
     unmapped: {
       finalStages: [...new Set(deals.filter((d) => d.category === null).map((d) => d.StageName))].sort(),
       historyStages: [...seenHistoryStages].filter((s) => stages.categoryOf(s) === null).sort(),
