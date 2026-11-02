@@ -113,7 +113,7 @@ export function renderRawNotes(input: { run: Run; calibration: Calibration; find
     `- API calls: ${run.budget.callsMade} used, stopping at ${Math.round(run.budget.stopAtShare * 100)}% of the org's daily limit`,
     ...(stopped ? [`- **This run is incomplete:** ${run.budget.stoppedReason}`] : []),
     "",
-    ...(scores.length ? ["## Scorecard", "", "A domain's score is the share of its weighted checks that came back clean. Checks we couldn't measure don't count either way.", "", "| Domain | Score |", "| --- | --- |", ...scores.map(scoreLine), ""] : []),
+    ...(scores.length ? ["## Scorecard", "", "Every check counted is worth the same maximum. A pass earns all of it, and an issue loses more the more severe it is. Checks we couldn't measure don't count either way.", "", "| Domain | Score |", "| --- | --- |", ...scores.map(scoreLine), ""] : []),
     "## Assumptions",
     "",
     `- Analysis window: ${run.analysisWindow.from} to ${run.analysisWindow.to}`,

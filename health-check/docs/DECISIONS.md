@@ -42,6 +42,7 @@ Newest thinking is in the rationale, not the order. Change a decision by editing
 | 37 | Every metric is not measurable when Opportunity can't be read, including ones that don't need it | `run.test.ts` pins this, and the rule against weakening tests decides it. It only matters when the pipeline report has already failed. See `docs/overnight/domains.md` |
 | 38 | New read for revenue opportunities: `Account` id, owner and last activity, for accounts with a won deal | The name isn't read. Sized figures use only the org's own win rate, stated as a ceiling |
 | 39 | New reads for report scanning: `Report` developer name and owner, `Folder`, a count of `Report USING SCOPE allPrivate`, and a Metadata retrieve of `Report` by name | The retrieve is an existing allowed operation, so the allowlist is unchanged. Only field names are kept: titles and filter values are dropped, because they can hold customer data |
+| 40 | A domain's score is total earned over 8 times the rules counted. A pass earns 8, and an issue earns 8 minus its severity times its confidence factor | Each rule has a fixed maximum, so severity counts even with no passes. Earned over earned plus lost gave 0 to any domain with no passes, so five low issues scored the same as five critical ones |
 | 31 | The instance URL is parsed, and must be a bare https Salesforce host, on connect and refresh | A prefix check passes `https://x.salesforce.com@evil.example`, which sends the token to evil.example |
 
 ## File storage
