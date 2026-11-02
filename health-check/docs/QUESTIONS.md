@@ -33,3 +33,13 @@ Salesforce's docs couldn't all be read in full, so these are unproven until a li
 | 6 | Does the org use a custom fiscal year? | We read `Organization.FiscalYearStartMonth`, which assumes standard quarters. Custom fiscal years would need `FiscalYearSettings` |
 | 7 | Does Salesforce read the first or last repeated `q`? | Harmless: repeats are refused |
 | 8 | Is an expired session in a SOAP call always a fault with `INVALID_SESSION_ID`? | The client refreshes once on that fault. Salesforce's docs give the code, and the HTTP status is unconfirmed, so any other shape fails the retrieve with a clear error |
+| 9 | Do `SecurityHealthCheck` and `SecurityHealthCheckRisks` read with our connected user, and are high, medium and meets standard the only risk types? | A failed read is not measurable. Other risk types are left out and declared |
+| 10 | Does a connected user without Manage Users or Monitor Login History get only their own `LoginHistory` rows? | It would look like success, and hide other people's API logins. Stated on the evidence |
+| 11 | Does the mobile app or an email add-in set `LoginHistory.ApiType`? | The personal integration rule would over-report. It's medium confidence, and investigate only |
+| 12 | Are `ForecastCategoryName` on `ForecastingItem`, `Period`, and the `ForecastingType` fields as we've assumed? `OpportunityRevenue` is from memory | A wrong field is not measurable, and a renamed Commit category is not measurable |
+| 13 | Do forecast rows really hold no history? | If they do, accuracy could be measured. It's reported as not measurable for now |
+| 14 | Is Einstein Activity Capture email outside `Task`, `Event` and `EmailMessage`? Sources are vendors, and a Summer '25 option may change it | Rep-level activity findings drop to medium confidence where it's in use |
+| 15 | Does conversion move a lead's tasks to the contact? Is `LeadHistory.Field` filterable? | We count both ids, so the first is safe. If the second fails, first response uses tasks and events only |
+| 16 | Is a report's `OwnerId` its folder, and can a retrieve reach private reports? | A report we can't place counts as not read, and the guard blocks |
+| 17 | Is every `TimeZoneSidKey` a name Node understands? | Falls back to UTC, stated on the metric |
+| 18 | Does a job on a deactivated user fail? Only vendor and community sources say so | Medium confidence, and the finding says it rests on secondary sources |

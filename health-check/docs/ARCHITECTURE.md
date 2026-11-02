@@ -87,6 +87,13 @@ Filtering by HTTP method wouldn't work in Salesforce. `GET tooling/executeAnonym
 | `LastViewedDate` is per user | Dashboard use is reported as not measurable, because the query would only show the connected user's views |
 | Aggregate queries can't page | A capped ownership result marks the scan incomplete, and the guard reads unknown |
 | A detail object has no `OwnerId` | `INVALID_FIELD` means not applicable, not a gap in the scan |
+| A plain query skips activities archived after 365 days | Activity reads 12 months and declares it. `queryAll` isn't on the allowlist, and won and lost comparisons only use deals created in that year |
+| Conversion moves a lead's activity to its contact | First response looks at both ids |
+| Other people's private reports can't be read | They're counted with `USING SCOPE allPrivate`. If any exist, the report guard is unknown, and field removal stays blocked |
+| Forecast rows show today's position | Forecast accuracy is not measurable without a snapshot |
+| Admins can rename forecast categories | No Commit rows is not measurable, not a clean Commit |
+| `CloseDate` and `LastActivityDate` have no time zone | Instants become days in the org's zone, and date-only fields are left alone |
+| An expired session reaches SOAP as a fault, not a 401 | The client refreshes once, then rebuilds the envelope with the new token |
 
 ## Data handling
 

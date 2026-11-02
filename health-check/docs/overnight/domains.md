@@ -19,6 +19,24 @@ Branch `hc/domains`. Newest status first in each section. Nobody has run any of 
 | - | Org time zone | Done |
 | - | SOAP `INVALID_SESSION_ID` refresh | Done |
 
+The whole list is finished, including both known gaps. Nothing was pushed.
+
+## Where it ended
+
+- 71 rules across all 12 Sales Cloud domains, with metrics, value sizing and a score per domain.
+- Tests: 913 of 918 pass, and the type check is clean. All 5 failures are Worker B's, in `src/narrative/__tests__/sections.test.ts` (2) and `src/render/__tests__/pdf.test.ts` (3). See Merges.
+- No existing test was skipped, weakened or deleted. Tests I changed were my own, as traps or the coordinator's scoring change moved their expected figures.
+- `allowlist.ts`, `soql.ts`, `evaluate.ts` and `rule.ts` are unchanged. New Salesforce reads are all SOQL or an existing Metadata retrieve.
+- Nothing has run against a real org. Every Salesforce shape here comes from docs snippets or memory, so expect some queries to need adjusting on first contact. `docs/QUESTIONS.md` lists them.
+
+## For Coby to decide
+
+1. Should private reports block field removal? They do now, so removal will rarely be recommended. See `docs/QUESTIONS.md`.
+2. Are the scoring weights and working limits acceptable? They're our judgement.
+3. Is 12 months of activity enough? More needs `queryAll` on the allowlist.
+4. Do you want a forecast snapshot, so accuracy can be measured?
+5. Should metrics that don't need Opportunity be published when it can't be read? They're held back to honour an existing test. See Decisions.
+
 ## How facts were checked
 
 `developer.salesforce.com` answers direct fetches with a 403. I didn't try to get around that. Facts come from the snippets WebSearch returns from those pages, which are partial and sometimes from older API versions. So "verified" below means "seen in a Salesforce docs snippet", not "read in full" and not "proven on an org".
