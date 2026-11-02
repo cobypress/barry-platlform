@@ -7,6 +7,7 @@ import { usersExtractor } from "../../extract/users.ts";
 import { notSized, pct, plural, segmentRate, type NotMeasurableResult, type Rule, type RuleContext, type RuleResult } from "../../engine/rule.ts";
 import { loadPipeline } from "../historic-pipeline/cohort.ts";
 import { median } from "../historic-pipeline/metrics.ts";
+import { atOwnLeadReturn } from "../value.ts";
 import type { Metric, MetricSegment } from "../../schemas/index.ts";
 import type { DomainModule } from "../types.ts";
 import { loadLeads, type Lead, type LeadData } from "./load.ts";
@@ -137,7 +138,7 @@ const responseTime: Rule = {
 
 const noResponse: Rule = {
   id: "lead.no-first-response",
-  version: 1,
+  version: 2,
   domain: DOMAIN,
   title: "Leads with no response at all",
   evaluate(ctx): RuleResult | RuleResult[] {
@@ -160,7 +161,7 @@ const noResponse: Rule = {
       severity: "medium",
       confidence: "medium",
       evidence,
-      value: notSized("Sizing this needs a conversion rate for the leads that were answered, which the value model works out."),
+      value: atOwnLeadReturn(ctx, result.hits, { period: "one-off, if these leads are worked", caveat: "Assumes an unanswered lead would return what an average lead does. Some may be poor leads, so treat this as a ceiling" }),
       effort: { size: "S" },
       owner: "Head of marketing",
       segmentsChecked: result.segmentsChecked,

@@ -14,8 +14,8 @@ Branch `hc/domains`. Newest status first in each section. Nobody has run any of 
 | 6 | Lead funnel | Done |
 | 7 | Revenue opportunities | Done |
 | 8 | Scoring | Done |
-| 9 | Value sizing | In progress |
-| 10 | Report scanning | Not started |
+| 9 | Value sizing | Done |
+| 10 | Report scanning | In progress |
 | - | Org time zone | Not started |
 | - | SOAP `INVALID_SESSION_ID` refresh | Not started |
 
@@ -30,6 +30,7 @@ Each in its own commit, additive only.
 | File | Change | Why |
 | --- | --- | --- |
 | `src/engine/run.ts` | Writes `scores.json`, and passes scores to the raw notes | Without it nothing in a run calls scoring |
+| `src/schemas/calibration.ts` | Optional `effortMinutes`, default empty | Hours need a time per item, and Salesforce has none. No entry means not sized |
 
 ## Merges
 
@@ -71,6 +72,9 @@ Each in its own commit, additive only.
 - **`pipe.unmapped-stages` doesn't count against the customer,** because it's a gap in our calibration.
 - **Not measurable moves nothing,** so a domain with nothing measurable has no score, never a zero, and a test proves it.
 - **`RULE_SET_VERSION` is now `2026.11-m3`,** because the rule set changed.
+
+- **Value sizing lives in `src/domains/value.ts`.** Revenue uses the org's own win rate or won per lead. Licence cost uses the calibration. Hours use the new `effortMinutes`, so they're only sized if the customer agrees a time: `custom-field-upkeep` and `report-upkeep` so far. Nothing else was a good fit for hours, and I didn't want to invent a saving.
+- **There's no total across findings.** Exposures overlap: one deal can be stale, pushed and in Commit. Adding them would overstate. Worth keeping in mind for the executive summary.
 
 ## Unverified Salesforce facts
 

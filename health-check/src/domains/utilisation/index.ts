@@ -15,6 +15,7 @@ import { userGuards } from "../../guards/user-guards.ts";
 import { notSized, pct, plural, type Rule, type RuleContext, type RuleResult } from "../../engine/rule.ts";
 import type { Guard, Value } from "../../schemas/index.ts";
 import type { DomainModule } from "../types.ts";
+import { calibratedHours } from "../value.ts";
 
 const MIN_SPARE_SEATS = 2;
 const SPARE_SEAT_SHARE = 10;
@@ -223,7 +224,7 @@ const neverLoggedIn = dormantRule(
 
 const unusedReports: Rule = {
   id: "utl.unused-reports",
-  version: 1,
+  version: 2,
   domain: "utilisation",
   title: "Reports nobody runs",
   evaluate(ctx): RuleResult | RuleResult[] {
@@ -252,7 +253,7 @@ const unusedReports: Rule = {
       severity: "low",
       confidence: "medium",
       evidence,
-      value: notSized("The cost is time lost looking for reports, which we can't measure."),
+      value: calibratedHours(ctx, "report-upkeep", unused.length, "unused report"),
       effort: { size: "S" },
       owner: "Sales operations",
       segmentsChecked: segments,
@@ -338,7 +339,7 @@ const eacConnections: Rule = {
       severity: "high",
       confidence: "high",
       evidence,
-      value: notSized("Lost activity weakens the pipeline view, which we can't size until the activity domain is built."),
+      value: notSized("Lost activity weakens the pipeline view, and we can't tell which deals it belonged to."),
       effort: { size: "XS" },
       owner: "Salesforce admin",
       segmentsChecked: segments,
@@ -377,7 +378,7 @@ const eacAdvancedSync: Rule = {
       severity: "high",
       confidence: "high",
       evidence: [manual.evidence],
-      value: notSized("Lost activity weakens the pipeline view, which we can't size until the activity domain is built."),
+      value: notSized("Lost activity weakens the pipeline view, and we can't tell which deals it belonged to."),
       effort: { size: "XS" },
       owner: "Salesforce admin",
       segmentsChecked: [{ dimension: "configuration", segments: 1, note: "Read by a consultant, for the configuration most sales users are on" }],

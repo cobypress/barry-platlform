@@ -14,6 +14,7 @@ import { usersExtractor } from "../../extract/users.ts";
 import { fieldGuards } from "../../guards/field-guards.ts";
 import { notSized, pct, plural, type Rule, type RuleResult } from "../../engine/rule.ts";
 import type { DomainModule } from "../types.ts";
+import { calibratedHours } from "../value.ts";
 
 const FIELD_SPRAWL_LIMIT = 150;
 const UNUSED_FILL_LIMIT = 1;
@@ -74,7 +75,7 @@ const customFieldSprawl: Rule = {
 
 const unusedCustomFields: Rule = {
   id: "cfg.unused-custom-fields",
-  version: 1,
+  version: 2,
   domain: "configuration",
   title: "Custom fields that are almost never filled in",
   evaluate(ctx): RuleResult | RuleResult[] {
@@ -115,7 +116,7 @@ const unusedCustomFields: Rule = {
         severity: "low",
         confidence: "medium",
         evidence: [ctx.ev(scan.source, { count: unused.length, dateRange: range, exclusions })],
-        value: notSized("Removing fields saves effort rather than licence cost, and we don't have a supportable hours figure."),
+        value: calibratedHours(ctx, "custom-field-upkeep", unused.length, "unused custom field"),
         effort: { size: "M" },
         owner: "Salesforce admin",
         dependencies: ["Archive any data that must be kept before a field is deleted"],

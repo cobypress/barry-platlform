@@ -63,7 +63,7 @@ export function fiscalStartOf(ctx: Ctx): number | null {
 
 const hasOpenStage = (d: Deal, data: Ready): boolean => d.history.some((h) => data.stages.orderOf(h.StageName) !== null);
 
-function dimensions(ctx: Ctx): Record<string, (d: Deal) => string> {
+export function dimensions(ctx: Ctx): Record<string, (d: Deal) => string> {
   const fiscalStart = fiscalStartOf(ctx);
   return {
     "record type": (d) => d.RecordType ?? "No record type",
