@@ -67,3 +67,28 @@ Nothing here is needed to run the tests.
 | `HC_SF_API_VERSION` | Optional | Pins an API version. Default is the org's newest |
 
 Expected later: `ANTHROPIC_API_KEY`, `REDIS_URL`, `DATABASE_URL`, object storage credentials, a token encryption key, and the External Client App's client id and secret.
+
+## Report decisions
+
+Kept apart from the table above so the overnight branches merge cleanly.
+
+| # | Decision | Why |
+| --- | --- | --- |
+| R1 | The number check matches value and unit, and blocks whatever it can't read | An invented figure is the worst failure this product has. A false alarm only costs a redraft |
+| R2 | A rounded figure must round from the real one at its written precision, and stay within 5% | "£2.9m" for 2,892,000 is honest. "£1m" for 1.4m rounds correctly and still misleads |
+| R3 | "half" and "a third" must be within one point of a real percentage, with no allowance for "nearly" | Hedging words are how a loose figure gets through |
+| R4 | The check can't prove a true number sits on the right claim, so each section is checked against its own sources only | It narrows the risk. Consultant approval covers the rest |
+| R5 | A draft paragraph must cite its sources, and its figures are checked against those sources only | A figure from elsewhere in the run is true but unsupported where it's used |
+| R6 | One redraft with the failures listed, then the section keeps the engine's text | Repeated retries cost money and rarely help. A person is better value |
+| R7 | Server-side refusal fallbacks are off | They'd move customer metadata to another model with nobody deciding, while zero data retention is still an open question (QUESTIONS.md). A refused section keeps the engine's text. Worth revisiting once that's answered |
+| R8 | First and last names are masked in prompts as well, apart from a short list of ordinary words | `scrub()` catches full names only, and metadata labels such as "Sam's pipeline" hold first names |
+| R9 | Evidence isn't sent to Claude | It isn't needed for wording, and a query can quote record values |
+| R10 | Charts sit on a Carbon panel | Chartreuse is 1.5:1 on Ivory, which fails the chart contrast check. It's about 10:1 on Carbon |
+| R11 | Poppins is embedded in PDFs from `@fontsource/poppins` (OFL), and only named in Word | PDF rendering mustn't need the network. A machine without Poppins shows Word's fallback font |
+| R12 | A domain nobody assessed shows no issue count | "0 issues" would read as a clean result |
+| R13 | Chromium only runs with the network off, and with routes other than `data:` aborted | A report holds customer data, and rendering has no reason to load or send anything |
+| R14 | The number check runs again on printed page text, against the whole run | It catches anything a template adds after section checks, including chart labels. It's unscoped, so it's weaker than the section check |
+| R15 | Deck density flexes in steps, ending in one table per domain | 40 to 60 slides has to hold for a thin org and a huge one. Past that last step, the deck says it's cut short and points to the raw notes |
+| R16 | A deck under 40 slides is flagged, never padded | Filler slides would be worse than a short report. The layout check reports it, and a consultant decides |
+| R17 | Reports show overridden figures. Raw notes show the original with the override beside it | An executive reader shouldn't see a corrected number. The audit trail needs both |
+

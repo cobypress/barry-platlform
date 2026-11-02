@@ -14,6 +14,7 @@ import { SfCliConnectionProvider } from "../salesforce/sf-cli-provider.ts";
 const USAGE = `Black Cloud Barometer
 
   hc run --org <alias> --calibration <file> [options]
+  hc render --run <run folder> [--narrative]
 
 Options:
   --answers <file>     Manual step answers (JSON array)
@@ -21,6 +22,8 @@ Options:
   --resume <run id>    Carry on a run that stopped at its API budget
   --budget-share <n>   Stop at this share of the org's daily API limit, 0 to 1
   --api-version <v>    Pin a Salesforce API version, such as 66.0
+  --run <folder>       The run folder to render into
+  --narrative          Have Claude draft sections. Needs ANTHROPIC_API_KEY
 
 The org alias must be listed in HC_APPROVED_ORG_ALIASES.
 
@@ -48,9 +51,25 @@ async function main(argv: string[]): Promise<number> {
       resume: { type: "string" },
       "budget-share": { type: "string" },
       "api-version": { type: "string" },
+      run: { type: "string" },
+      narrative: { type: "boolean" },
       help: { type: "boolean", short: "h" },
     },
   });
+
+  if (positionals[0] === "render" && values.run) {
+    // Loaded here so `hc run` never needs Chromium or the Claude SDK.
+    const { renderRun } = await import("../render/render-run.ts");
+    const client = values.narrative ? (await import("../narrative/client.ts")).anthropicClient() : undefined;
+    const result = await renderRun(values.run, { client });
+    for (const [name, layout] of Object.entries(result.layout)) {
+      console.log(`${name}: ${layout.pages} pages`);
+      for (const p of layout.problems) console.log(`  page ${p.page}, ${p.check}: ${p.detail}`);
+    }
+    for (const r of result.rejections) console.log(`Kept the engine's text for ${r.sectionId}: ${r.reasons.join(" ")}`);
+    console.log(`Written to ${values.run}`);
+    return result.passed ? EXIT.ok : EXIT.failed;
+  }
 
   if (values.help || positionals[0] !== "run" || !values.org || !values.calibration) {
     console.log(USAGE);

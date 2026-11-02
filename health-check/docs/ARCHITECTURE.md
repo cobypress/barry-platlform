@@ -37,6 +37,10 @@ src/
   engine/       Run orchestration, rule evaluation, manual steps
   privacy/      Pseudonymiser and secret redaction
   notes/        Markdown raw notes
+  numbercheck/  Reads every figure in text and traces it to the findings dataset
+  narrative/    Section builder, ranking and plan, Claude drafting and its guards
+  design/       Design tokens: the only place colours and type are set
+  render/       Charts, Word and PDF output, and the layout checks
   cli/          hc
   testing/      Synthetic org, simulator, recording and replay
 ```
@@ -94,6 +98,8 @@ Run folders default to `~/.barometer/runs/<run id>`, with files readable only by
 | `pseudonym-map.json` | Names by token | Never |
 | `findings.json`, `metrics.json`, `manual-steps.json` | Aggregates, metadata names and tokens | Yes |
 | `raw-notes.md` | Real names | Never: customer deliverable |
+| `raw-notes.docx`, `executive-summary.pdf`, `full-health-check.pdf` | Real names in the notes, team level in the PDFs | Never: customer deliverables |
+| `report-sections.json`, `layout-report.json`, `narrative-rejections.json` | Section text, tokens and check results | No: review records |
 
 ## Milestone 3 notes on the Claude API
 
@@ -105,6 +111,25 @@ Checked against the current Anthropic docs on 2026-11-02. Model ids live in `src
 - `temperature`, `top_p` and `top_k` return a 400. Assistant prefill also returns a 400.
 - Handle `stop_reason: "refusal"`, and use streaming for long output.
 - The site is on `@anthropic-ai/sdk` 0.87. This service should take the current major when it first needs the SDK.
+
+## From findings to documents
+
+```
+findings, metrics ──> buildReport ──> sections and versions ──> PDF and Word
+                          │                   ^
+                     figure dataset           │ accepted drafts only
+                          │                   │
+                          └──> number check <── draftSection <── Claude (tokens only)
+```
+
+`hc render --run <folder>` does this for a finished run. It writes into the run folder, so it refuses a folder inside a git work tree.
+
+- Every section starts with text the engine wrote, so a report exists without Claude. A draft that fails the number check is dropped, and the section goes to a person.
+- `guardPrompt` runs on everything sent to Claude. Evidence isn't sent.
+- Names return in one place for each document: `pseudonyms.restore` in the Word builder, and `Render.t` in the PDF templates. Executive and full reports describe people as "a single rep", so only the raw notes name anyone.
+- Chromium runs with no network access. It only lays out HTML we built, with fonts embedded.
+- Before a PDF is written, `checkLayout` measures every page in the browser for overflow, missing charts, empty sections and leftover tokens, and runs the number check again on the text as printed. Problems go to `layout-report.json`, and `hc render` exits non-zero.
+- Every unapproved document is marked as a draft on every page. `canRelease` decides that, and the release step itself belongs to the console.
 
 ## Later milestones
 
