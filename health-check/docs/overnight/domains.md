@@ -7,8 +7,8 @@ Branch `hc/domains`. Newest status first in each section. Nobody has run any of 
 | # | Item | State |
 | --- | --- | --- |
 | 1 | Security and access | Done |
-| 2 | Best practice | In progress |
-| 3 | Current pipeline | Not started |
+| 2 | Best practice | Done |
+| 3 | Current pipeline | In progress |
 | 4 | Forecast | Not started |
 | 5 | Activity | Not started |
 | 6 | Lead funnel | Not started |
@@ -33,6 +33,8 @@ Branch `hc/domains`. Newest status first in each section. Nobody has run any of 
 - **`OauthToken` is not read.** It has `RequestToken`, which holds an authorisation code, and "secrets stay out". Personal integration accounts come from `LoginHistory.ApiType` instead, which we were already paying for.
 - **Holders of Modify All Data are worked out from both the profile and the assignments**, so the rule doesn't depend on whether profile-owned sets appear in `PermissionSetAssignment`.
 
+- **Best practice holds only what the `aut.*` rules don't already say.** Workflow, Process Builder, coverage and trigger counts already have rules and already quote Salesforce, so repeating them would double-count in scoring. Four new rules instead, each with a `Practice` record: position, source, date checked, and whether the source is Salesforce's own. Retired API versions was dropped: the retirement is about API calls, and I couldn't confirm any effect on stored Apex.
+
 ## Unverified Salesforce facts
 
 | Rule | What I couldn't verify | What I did |
@@ -42,3 +44,5 @@ Branch `hc/domains`. Newest status first in each section. Nobody has run any of 
 | `sec.personal-integration-accounts` | Whether the Salesforce mobile app or an email add-in sets `ApiType` | Confidence is medium, and the recommendation is investigate |
 | `sec.personal-integration-accounts` | A connected user without Manage Users or Monitor Login History gets only their own rows, and that looks like success | Stated on the evidence. Needs checking at the first live run |
 | `sec.sharing-defaults` | The full value list for `Default*Access` | Only `Edit` and `ReadEditTransfer` count as open. Anything else stays quiet |
+| `bp.jobs-on-inactive-owners` | Only vendor and community sources say a job on a deactivated user fails | Marked secondary, so confidence is medium and the summary says so |
+| `bp.after-save-same-record-updates` | A flow may need after-save for other work, and a lookup with no filters is read as same-record | Severity is low, and the recommendation keeps the rest of the flow in place |

@@ -314,11 +314,14 @@ export const OWNERSHIP: Record<string, Array<[number, number]>> = {
   Lead: [[1, 200], [2, 260], [9, 40]],
   Case: [],
   Project__c: [[2, 20]],
+  // Trap: one account over Salesforce's ownership skew line, on a custom object.
+  Invoice__c: [[11, 12_000]],
 };
 
 export const RECORD_COUNTS = [
   { name: "Account", count: 500 },
   { name: "Project__c", count: 20 },
+  { name: "Invoice__c", count: 12_000 },
   // Trap: a detail object has no OwnerId, which isn't a gap in the scan.
   { name: "Project_Line__c", count: 40 },
   { name: "Empty_Object__c", count: 0 },
@@ -416,6 +419,8 @@ export const SHARING_DEFAULTS = { DefaultAccountAccess: "Read", DefaultContactAc
 export const CRON_TRIGGERS = [
   { Id: sfId("08e", 1), OwnerId: userId(13), State: "WAITING", CronJobDetail: { Name: "Nightly Renewal Sync", JobType: "7" } },
   { Id: sfId("08e", 2), OwnerId: userId(4), State: "WAITING", CronJobDetail: { Name: "Weekly Cleanup", JobType: "7" } },
+  // Trap: still scheduled under someone who's left.
+  { Id: sfId("08e", 3), OwnerId: userId(9), State: "WAITING", CronJobDetail: { Name: "Quarterly Export", JobType: "7" } },
 ];
 
 export const DASHBOARDS = [
