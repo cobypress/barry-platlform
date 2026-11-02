@@ -1,5 +1,7 @@
 import { test, describe, before } from "node:test";
 import assert from "node:assert/strict";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { CONFIDENCE_FACTORS, PASS_WEIGHT, SEVERITY_WEIGHTS, scoreDomain, scoreDomains } from "../scoring.ts";
 import { SALES_CLOUD_MODULES } from "../index.ts";
 import { analyseExtracts, clone, loadExtracts, runFromRecording } from "../../testing/harness.ts";
@@ -101,10 +103,12 @@ describe("what doesn't count against the customer", () => {
 });
 
 describe("the synthetic run", () => {
+  let dir: string;
   let extracts: Map<string, unknown>;
 
   before(async () => {
-    extracts = loadExtracts((await runFromRecording()).dir);
+    dir = (await runFromRecording()).dir;
+    extracts = loadExtracts(dir);
   });
 
   test("every Sales Cloud domain has a module, and every module gets a row", () => {
@@ -132,5 +136,13 @@ describe("the synthetic run", () => {
     (changed.get("forecast") as { items: { data: unknown[] } }).items.data = [];
     const score = scoreDomain("forecast", analyseExtracts(changed).findings);
     assert.equal(score.status, "not_measurable");
+  });
+
+  test("a run writes scores.json, and the raw notes show them", () => {
+    assert.ok(existsSync(join(dir, "scores.json")));
+    const written = JSON.parse(readFileSync(join(dir, "scores.json"), "utf8")) as unknown[];
+    assert.equal(written.length, SALES_CLOUD_MODULES.length);
+    for (const row of written) Score.parse(row);
+    assert.match(readFileSync(join(dir, "raw-notes.md"), "utf8"), /## Scorecard/);
   });
 });

@@ -13,8 +13,8 @@ Branch `hc/domains`. Newest status first in each section. Nobody has run any of 
 | 5 | Activity | Done |
 | 6 | Lead funnel | Done |
 | 7 | Revenue opportunities | Done |
-| 8 | Scoring | In progress |
-| 9 | Value sizing | Not started |
+| 8 | Scoring | Done |
+| 9 | Value sizing | In progress |
 | 10 | Report scanning | Not started |
 | - | Org time zone | Not started |
 | - | SOAP `INVALID_SESSION_ID` refresh | Not started |
@@ -22,6 +22,14 @@ Branch `hc/domains`. Newest status first in each section. Nobody has run any of 
 ## How facts were checked
 
 `developer.salesforce.com` answers direct fetches with a 403. I didn't try to get around that. Facts come from the snippets WebSearch returns from those pages, which are partial and sometimes from older API versions. So "verified" below means "seen in a Salesforce docs snippet", not "read in full" and not "proven on an org".
+
+## Changes to frozen files
+
+Each in its own commit, additive only.
+
+| File | Change | Why |
+| --- | --- | --- |
+| `src/engine/run.ts` | Writes `scores.json`, and passes scores to the raw notes | Without it nothing in a run calls scoring |
 
 ## Merges
 
@@ -58,6 +66,11 @@ Branch `hc/domains`. Newest status first in each section. Nobody has run any of 
 
 - **Revenue figures use one multiplier: the org's own measured win rate.** No recovery rate, typical figure or benchmark, because rule 1 forbids introducing a figure. If the rate isn't measurable, the finding says not sized, and the count stands. Every figure states that it's a ceiling, because stalled and lost deals usually win less often than average. Confidence is medium throughout.
 - **Stalled means 60 days without a stage change or activity,** which is stricter than the 30-day `cur.stale-deals`, so this is the shortlist worth chasing.
+
+- **Scoring is per rule, at its worst finding.** Some rules raise a finding per outlier, and ten segments of one problem aren't ten problems. Score is earned over earned plus lost, with a pass worth 3, and an issue worth critical 8, high 5, medium 3, low 1, times confidence (1, 0.75, 0.5). These weights are our judgement, and they're published on every `Score`. **Coby:** worth a look before the first report.
+- **`pipe.unmapped-stages` doesn't count against the customer,** because it's a gap in our calibration.
+- **Not measurable moves nothing,** so a domain with nothing measurable has no score, never a zero, and a test proves it.
+- **`RULE_SET_VERSION` is now `2026.11-m3`,** because the rule set changed.
 
 ## Unverified Salesforce facts
 
