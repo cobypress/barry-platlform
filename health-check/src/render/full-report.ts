@@ -33,6 +33,16 @@ h2 { font-size: 36px; font-weight: 600; line-height: 1.2; margin: 4px 0 16px; }
 .card { background: var(--snow); border-radius: var(--radius-m); padding: 12px 18px; margin-bottom: 10px; font-size: 16.5px; line-height: 1.4; }
 .card p + p { margin-top: 4px; }
 .card h3 { font-size: 18px; font-weight: 600; margin: 4px 0; }
+.two-up { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+.two-up .card { font-size: 13.5px; line-height: 1.38; padding: 9px 13px; margin-bottom: 8px; }
+.two-up .card h3 { font-size: 14.5px; margin: 3px 0; }
+.two-up .card .meta { font-size: 11.5px; }
+.two-text { columns: 2; column-gap: 28px; }
+.two-text li, .two-text tr { break-inside: avoid; }
+.action-list.two-text { font-size: 15px; }
+.action-list.two-text .owner { font-size: 12.5px; }
+.action-list.two-text li { margin-bottom: 6px; }
+.two-text .definition { break-inside: avoid; margin-bottom: 9px; font-size: 13.5px; line-height: 1.35; }
 .meta { display: flex; gap: 12px; align-items: center; color: var(--muted); font-size: 15px; }
 .card .meta { font-size: 13.5px; }
 .chart-wrap { max-width: 1040px; }
@@ -52,6 +62,7 @@ type Slide = { html: string; classes?: string };
 // cautious: the layout check measures the real thing afterwards.
 const ISSUE_SLIDE_BUDGET = 500;
 const CARD_CHARS = 105;
+const SMALL_CARD_CHARS = 70;
 const LIST_BUDGET = 470;
 
 function issueSlide(r: Render, label: string, f: Finding): Slide {
@@ -62,20 +73,36 @@ function issueSlide(r: Render, label: string, f: Finding): Slide {
   };
 }
 
-function cardHeight(f: Finding, brief: boolean): number {
-  return (brief ? 62 : 84) + 24 * estimateLines(f.title, CARD_CHARS) + 24 * estimateLines(f.summary, CARD_CHARS) + (brief ? 0 : 24 * estimateLines(`What to do: ${f.recommendation}`, CARD_CHARS));
+function cardHeight(f: Finding): number {
+  return 84 + 24 * estimateLines(f.title, CARD_CHARS) + 24 * estimateLines(f.summary, CARD_CHARS) + 24 * estimateLines(`What to do: ${f.recommendation}`, CARD_CHARS);
 }
 
-function issueCards(r: Render, label: string, findings: Finding[], brief: boolean): Slide {
-  const cards = findings.map((f) => {
-    const value = valueText(r, f);
-    return `<article class="card"><div class="meta">${severityChip(f)}<span>Effort ${f.effort.size}</span><span>${value.amount}</span></div><h3>${r.t(f.title)}</h3><p>${r.t(f.summary)}</p>${brief ? "" : `<p><strong>What to do:</strong> ${r.t(f.recommendation)}</p>`}</article>`;
-  });
-  return { html: `<div class="eyebrow">${r.t(label)}</div><h2>${findings[0]!.severity === "low" ? "Smaller issues" : "Other issues"}</h2>${cards.join("")}` };
+function smallCardHeight(f: Finding): number {
+  return 62 + 19 * estimateLines(f.title, SMALL_CARD_CHARS - 8) + 19 * estimateLines(f.summary, SMALL_CARD_CHARS) + 19 * estimateLines(`What to do: ${f.recommendation}`, SMALL_CARD_CHARS);
 }
 
-/** `brief` drops the action from each card, because the roadmap holds it, and shortens long lists. */
-type Density = Record<Finding["severity"], number> & { brief?: boolean };
+function card(r: Render, f: Finding): string {
+  return `<article class="card"><div class="meta">${severityChip(f)}<span>Effort ${f.effort.size}</span><span>${valueText(r, f).amount}</span></div><h3>${r.t(f.title)}</h3><p>${r.t(f.summary)}</p><p><strong>What to do:</strong> ${r.t(f.recommendation)}</p></article>`;
+}
+
+const groupTitle = (f: Finding): string => (f.severity === "low" || f.severity === "info" ? "Smaller issues" : "Other issues");
+
+function issueCards(r: Render, label: string, findings: Finding[]): Slide {
+  return { html: `<div class="eyebrow">${r.t(label)}</div><h2>${groupTitle(findings[0]!)}</h2>${findings.map((f) => card(r, f)).join("")}` };
+}
+
+function twoColumnSlides(r: Render, label: string, findings: Finding[]): Slide[] {
+  const columns = paginate(findings, smallCardHeight, ISSUE_SLIDE_BUDGET);
+  const slides: Slide[] = [];
+  for (let i = 0; i < columns.length; i += 2) {
+    const pair = columns.slice(i, i + 2);
+    slides.push({ html: `<div class="eyebrow">${r.t(label)}</div><h2>${groupTitle(pair[0]![0]!)}</h2><div class="two-up">${pair.map((column) => `<div>${column.map((f) => card(r, f)).join("")}</div>`).join("")}</div>` });
+  }
+  return slides;
+}
+
+/** `columns` sets smaller cards in two columns, so an ordinary org keeps all its detail. */
+type Density = Record<Finding["severity"], number> & { columns?: 2; domainSummary?: boolean };
 
 /** How many issues share a slide, by severity. Tried in order until the deck fits. */
 const DENSITIES: Density[] = [
@@ -85,9 +112,9 @@ const DENSITIES: Density[] = [
   { critical: 1, high: 1, medium: 2, low: 3, info: 3 },
   { critical: 1, high: 2, medium: 3, low: 4, info: 4 },
   { critical: 2, high: 3, medium: 4, low: 6, info: 6 },
-  { critical: 1, high: 2, medium: 3, low: 3, info: 3, brief: true },
-  { critical: 2, high: 3, medium: 4, low: 4, info: 4, brief: true },
-  { critical: 3, high: 4, medium: 4, low: 4, info: 4, brief: true },
+  { critical: 1, high: 1, medium: 6, low: 6, info: 6, columns: 2 },
+  { critical: 1, high: 6, medium: 6, low: 6, info: 6, columns: 2 },
+  { critical: 24, high: 24, medium: 24, low: 24, info: 24, columns: 2, domainSummary: true },
 ];
 
 /** The last resort for a very large org: one table per domain, so the deck has a fixed ceiling. */
@@ -105,8 +132,8 @@ function domainIssueSlides(r: Render, label: string, issues: Finding[], density:
   const slides: Slide[] = [];
   let queue: Finding[] = [];
   const flush = (): void => {
-    const brief = density.brief ?? false;
-    for (const group of paginate(queue, (f) => cardHeight(f, brief), ISSUE_SLIDE_BUDGET)) slides.push(issueCards(r, label, group, brief));
+    if (density.columns) slides.push(...twoColumnSlides(r, label, queue));
+    else for (const group of paginate(queue, cardHeight, ISSUE_SLIDE_BUDGET)) slides.push(issueCards(r, label, group));
     queue = [];
   };
   for (const f of issues) {
@@ -148,8 +175,15 @@ function listSlides(r: Render, eyebrow: string, title: string, items: Array<{ ti
   }));
 }
 
+function twoColumnList(r: Render, eyebrow: string, title: string, items: Array<{ title: string; detail: string }>): Slide[] {
+  const pages = paginate(items, (x) => 28 + 19 * estimateLines(x.detail, 72), 2 * LIST_BUDGET);
+  return pages.map((group, i) => ({
+    html: `<div class="eyebrow">${r.t(eyebrow)}</div><h2>${r.t(title)}${i ? ", continued" : ""}</h2><div class="two-text">${group.map((x) => `<p class="definition"><strong>${r.t(x.title)}</strong><br>${r.t(x.detail)}</p>`).join("")}</div>`,
+  }));
+}
+
 function buildSlides(report: BuiltReport, r: Render, density: Density | null): Slide[] {
-  const compact = density === null || density.brief === true;
+  const compact = density === null;
   const { run, intake, calibration, scores = [], manualSteps } = report.input;
   const built = report.outputs.full_health_check;
   const team = report.teamFindings;
@@ -185,11 +219,18 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
 
   add(`<div class="eyebrow">Top issues</div><h2>The ${TOP_ISSUE_COUNT} that matter most</h2><table class="grid"><thead><tr><th style="width:6%"></th><th>Issue</th><th style="width:12%">Severity</th><th style="width:26%">Value</th><th style="width:20%">Owner</th></tr></thead><tbody>${top.map((f, i) => `<tr><td>${i + 1}</td><td>${r.t(f.title)}</td><td>${severityChip(f)}</td><td>${valueText(r, f).amount}</td><td>${r.t(f.owner)}</td></tr>`).join("")}</tbody></table>`);
 
+  const dense = density?.columns === 2;
+  if (density?.domainSummary) {
+    slides.push(...twoColumnList(r, "Domains", "Each area at a glance", assessed.map((domain) => {
+      const own = team.filter((f) => f.domain === domain);
+      return { title: `${domainLabel(domain)}: ${issuesOf(own).length} issues, ${own.filter((f) => f.status === "passed").length} passed`, detail: currentBody(built, `domain_${domain}`) };
+    })));
+  }
   for (const domain of assessed) {
     const label = domainLabel(domain);
     const own = team.filter((f) => f.domain === domain);
     const issues = issuesOf(own);
-    add(`<div class="eyebrow">Domain</div><h1>${r.t(label)}</h1><div class="body">${sectionBody(r, built, `domain_${domain}`)}</div><div class="stat-row" style="max-width:640px;margin-top:20px;color:var(--carbon)"><div class="stat"><b>${issues.length}</b><span>Issues</span></div><div class="stat"><b>${own.filter((f) => f.status === "passed").length}</b><span>Passed</span></div><div class="stat"><b>${own.filter((f) => f.status === "not_measurable").length}</b><span>Not measurable</span></div></div>`, "dark divider");
+    if (!density?.domainSummary) add(`<div class="eyebrow">Domain</div><h1>${r.t(label)}</h1><div class="body">${sectionBody(r, built, `domain_${domain}`)}</div><div class="stat-row" style="max-width:640px;margin-top:20px;color:var(--carbon)"><div class="stat"><b>${issues.length}</b><span>Issues</span></div><div class="stat"><b>${own.filter((f) => f.status === "passed").length}</b><span>Passed</span></div><div class="stat"><b>${own.filter((f) => f.status === "not_measurable").length}</b><span>Not measurable</span></div></div>`, "dark divider");
     slides.push(...(density ? domainIssueSlides(r, label, issues, density) : issueTable(r, label, issues)));
   }
 
@@ -201,24 +242,31 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   add(`<div class="eyebrow">Pipeline</div><h2>Win rate by segment</h2><div class="chart-wrap">${chartSlot(winRateBySegment(metric("historic.win_rate")))}</div>`);
   add(`<div class="eyebrow">Pipeline</div><h2>Three ways of reading the win rate</h2>${metricRows(r, ["historic.win_rate", "historic.win_rate_by_value", "historic.win_rate_including_no_decision", "historic.no_decision_rate"].flatMap((id) => metric(id) ?? []), r.currency)}`, "tight");
   add(`<div class="eyebrow">Pipeline</div><h2>Stage funnel</h2><div class="chart-wrap">${chartSlot(stageFunnel(metric("historic.stage_conversion")))}</div>`);
-  add(`<div class="eyebrow">Pipeline</div><h2>Sales cycle</h2>${metricRows(r, ["historic.sales_cycle_won", "historic.sales_cycle_lost"].flatMap((id) => metric(id) ?? []), r.currency)}`, "tight");
-  add(`<div class="eyebrow">Pipeline</div><h2>Slippage</h2>${metricRows(r, ["historic.slippage_rate", "historic.slippage_quarter_cross_rate", "historic.slippage_days"].flatMap((id) => metric(id) ?? []), r.currency)}`, "tight");
+  const cycle = ["historic.sales_cycle_won", "historic.sales_cycle_lost"].flatMap((id) => metric(id) ?? []);
+  const slippage = ["historic.slippage_rate", "historic.slippage_quarter_cross_rate", "historic.slippage_days"].flatMap((id) => metric(id) ?? []);
+  if (dense) {
+    add(`<div class="eyebrow">Pipeline</div><h2>Sales cycle and slippage</h2>${metricRows(r, [...cycle, ...slippage], r.currency)}`, "tight");
+  } else {
+    add(`<div class="eyebrow">Pipeline</div><h2>Sales cycle</h2>${metricRows(r, cycle, r.currency)}`, "tight");
+    add(`<div class="eyebrow">Pipeline</div><h2>Slippage</h2>${metricRows(r, slippage, r.currency)}`, "tight");
+  }
   add(`<div class="eyebrow">Pipeline</div><h2>Pipeline over time</h2><div class="chart-wrap" style="max-width:1000px">${chartSlot(pipelineOverTime(metric("historic.pipeline_point_in_time_value"), r.currency))}</div>`);
 
   add(`<div class="eyebrow">Stated vs actual</div><h2>What you told us, against what we found</h2>${needsInput(built, "stated_vs_actual") ? inputChip : ""}${sectionBody(r, built, "stated_vs_actual")}`);
 
-  add(`<div class="eyebrow">Roadmap</div><h2>The first 90 days</h2><div class="stat-row">${plan.map((p) => `<div class="stat"><b>${r.t(p.title)}</b><span>Days ${p.from} to ${p.to}</span><p style="margin-top:8px">${p.findings.length} ${p.findings.length === 1 ? "action" : "actions"}</p></div>`).join("")}</div>`);
+  if (!dense) add(`<div class="eyebrow">Roadmap</div><h2>The first 90 days</h2><div class="stat-row">${plan.map((p) => `<div class="stat"><b>${r.t(p.title)}</b><span>Days ${p.from} to ${p.to}</span><p style="margin-top:8px">${p.findings.length} ${p.findings.length === 1 ? "action" : "actions"}</p></div>`).join("")}</div>`);
   for (const phase of plan) {
-    const all = paginate(phase.findings, (f) => 12 + 28 * estimateLines(`${f.recommendation} ${f.owner}`, 95), LIST_BUDGET);
+    const all = paginate(phase.findings, (f) => (dense ? 10 + 23 * estimateLines(`${f.recommendation} ${f.owner}`, 58) : 12 + 28 * estimateLines(`${f.recommendation} ${f.owner}`, 95)), dense ? 2 * LIST_BUDGET : LIST_BUDGET);
     const cut = compact && all.length > 1;
     const pages = cut ? [all[0]!.slice(0, -1)] : all;
     (pages.length ? pages : [[]]).forEach((group, i) => {
-      add(`<div class="eyebrow">Roadmap</div><h2>Days ${phase.from} to ${phase.to}: ${phase.title}${i ? ", continued" : ""}</h2>${cut ? `<p style="font-size:15px;margin-bottom:6px">${COMPACT_NOTE}</p>` : ""}${group.length ? `<ul class="action-list">${group.map((f) => `<li>${r.t(f.recommendation)} <span class="owner">${r.t(f.owner)}</span></li>`).join("")}</ul>` : "<p>Nothing planned for this phase.</p>"}`);
+      add(`<div class="eyebrow">Roadmap</div><h2>Days ${phase.from} to ${phase.to}: ${phase.title}${i ? ", continued" : ""}</h2>${cut ? `<p style="font-size:15px;margin-bottom:6px">${COMPACT_NOTE}</p>` : ""}${group.length ? `<ul class="action-list${dense ? " two-text" : ""}">${group.map((f) => `<li>${r.t(f.recommendation)} <span class="owner">${r.t(f.owner)}</span></li>`).join("")}</ul>` : "<p>Nothing planned for this phase.</p>"}`);
     });
   }
 
-  add(`<div class="eyebrow">Appendix</div><h1>How we worked</h1><div class="body">${sectionBody(r, built, "appendix")}</div>`, "dark divider");
+  if (!dense) add(`<div class="eyebrow">Appendix</div><h1>How we worked</h1><div class="body">${sectionBody(r, built, "appendix")}</div>`, "dark divider");
   slides.push(...listSlides(r, "Appendix", "Assumptions", [
+    ...(dense ? [{ title: "How we worked", detail: currentBody(built, "appendix").replace(/\n+/g, " ") }] : []),
     { title: "Analysis window", detail: `${longDate(run.analysisWindow.from)} to ${longDate(run.analysisWindow.to)}` },
     { title: "Stage meanings", detail: calibration.stages.map((s) => `${s.name} (${s.category.replace("_", " ")})`).join(", ") },
     { title: "Dormant users", detail: `No login for ${calibration.dormantDays} days` },
@@ -226,11 +274,18 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
     { title: "Currency", detail: calibration.currency },
     { title: "Rule set", detail: run.ruleSetVersion },
   ], compact));
-  slides.push(...listSlides(r, "Appendix", "Metric definitions", metrics.map((m) => ({ title: m.label, detail: m.definition })), compact));
+  const definitions = metrics.map((m) => ({ title: m.label, detail: m.definition }));
+  slides.push(...(dense ? twoColumnList(r, "Appendix", "Metric definitions", definitions) : listSlides(r, "Appendix", "Metric definitions", definitions, compact)));
   slides.push(...listSlides(r, "Appendix", "What we couldn't measure", team.filter((f) => f.status === "not_measurable").map((f) => ({ title: f.title, detail: f.notMeasurableReason ?? f.summary })), compact));
   slides.push(...listSlides(r, "Appendix", "Checks that passed", team.filter((f) => f.status === "passed").map((f) => ({ title: f.title, detail: f.summary })), compact));
   slides.push(...listSlides(r, "Appendix", "Manual steps", manualSteps.map((s) => ({ title: s.title, detail: `${s.status}. ${s.whyItMatters}` })), compact));
   return slides;
+}
+
+/** Slides at each density in turn, so a test can see how close a deck is to its ceiling. */
+export function slideCounts(report: BuiltReport, pseudonyms: Pseudonymiser): number[] {
+  const r = renderContext(pseudonyms, report.input.calibration.currency, true);
+  return [...DENSITIES, null].map((density) => buildSlides(report, r, density).length);
 }
 
 export function fullReportHtml(report: BuiltReport, pseudonyms: Pseudonymiser): string {

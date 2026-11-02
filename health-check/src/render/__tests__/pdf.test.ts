@@ -15,7 +15,7 @@ import { SALES_CLOUD_DOMAINS, type Finding, type NumberOverride, type ReportSect
 import { runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
 import { executiveHtml } from "../executive.ts";
-import { DECK_RANGE, fullReportHtml } from "../full-report.ts";
+import { DECK_RANGE, fullReportHtml, slideCounts } from "../full-report.ts";
 import { document } from "../html.ts";
 import { layoutOf, launchBrowser, pdfPageCount, renderPdf } from "../pdf.ts";
 import { EXECUTIVE_PAGES, OUTPUT_FILES, renderRun } from "../render-run.ts";
@@ -81,7 +81,7 @@ describe("the full health check", () => {
 
   test("covers what the brief lists", () => {
     const html = fullReportHtml(buildReport(full), pseudonyms);
-    for (const text of ["What you told us", "How each area stands", "Configuration", "Automation", "Data quality", "Utilisation", "Historic pipeline", "Win rate by segment", "Stage funnel", "Sales cycle", "Slippage", "Pipeline over time", "What you told us, against what we found", "The first 90 days", "How we worked", "Metric definitions", "Checks that passed", "What we couldn&#39;t measure"]) assert.ok(html.includes(text), text);
+    for (const text of ["What you told us", "How each area stands", "Configuration", "Automation", "Data quality", "Utilisation", "Historic pipeline", "Win rate by segment", "Stage funnel", "Sales cycle", "lippage", "Pipeline over time", "What you told us, against what we found", "Days 1 to 30", "How we worked", "Metric definitions", "Checks that passed", "What we couldn&#39;t measure"]) assert.ok(html.includes(text), text);
     for (const chart of ["scorecard", "win-rate-by-segment", "stage-funnel", "pipeline-over-time"]) assert.match(html, new RegExp(`data-expect-chart="${chart}"`));
   });
 
@@ -89,7 +89,13 @@ describe("the full health check", () => {
     const report = buildReport(full);
     const html = fullReportHtml(report, pseudonyms);
     const escape = (t: string): string => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
-    for (const f of report.teamFindings.filter((x) => x.status === "issue")) assert.ok(html.includes(escape(f.summary)), f.title);
+    assert.doesNotMatch(html, /raw notes have all of it/, "an ordinary org stays out of compact mode");
+    // The roadmap repeats recommendations, so count the issues' own lines.
+    assert.equal((html.match(/What to do:/g) ?? []).length, report.teamFindings.filter((x) => x.status === "issue" && x.recommendation).length);
+    for (const f of report.teamFindings.filter((x) => x.status === "issue")) {
+      assert.ok(html.includes(escape(f.summary)), `summary: ${f.title}`);
+      assert.ok(html.includes(escape(f.recommendation)), `recommendation: ${f.title}`);
+    }
   });
 
   test("says what's missing when there's no intake, rather than making it up", () => {
@@ -99,7 +105,7 @@ describe("the full health check", () => {
   });
 
   test("names no one, and lists domains nobody assessed as making no claim", () => {
-    const html = fullReportHtml(buildReport(full), pseudonyms).replace(/url\(data:[^)]+\)/g, "");
+    const html = fullReportHtml(buildReport({ ...full, findings: full.findings.filter((f) => f.domain !== "forecast") }), pseudonyms).replace(/url\(data:[^)]+\)/g, "");
     for (const entry of pseudonyms.entries()) if (entry.name.includes(" ") && entry.name !== "Unknown user") assert.ok(!html.includes(entry.name), entry.name);
     assert.doesNotMatch(html, /\[\[/);
     assert.match(html, /We make no claim about these areas/);
@@ -127,12 +133,13 @@ describe("a large, messy org", () => {
     assert.deepEqual(layout.problems, [], describeProblems(layout.problems));
   });
 
-  test("a moderately large org keeps its issue detail, rather than dropping to tables", () => {
+  test("a moderately large org keeps its detail, and nothing overflows", async () => {
     const input = messy();
     const report = buildReport({ ...input, findings: input.findings.filter((f) => f.status !== "issue" || Number(f.id.slice(-2)) < 7) });
     const html = fullReportHtml(report, pseudonyms);
-    const sample = report.teamFindings.find((f) => f.status === "issue" && !/['"&<>]/.test(f.summary))!;
-    assert.ok(html.includes(sample.summary));
+    assert.doesNotMatch(html, /raw notes have all of it/, String(slideCounts(report, pseudonyms)));
+    const { layout } = await renderPdf(browser, html, { ...deckRange });
+    assert.deepEqual(layout.problems, [], describeProblems(layout.problems));
   });
 
   test("the deck has a ceiling however large the org is", async () => {

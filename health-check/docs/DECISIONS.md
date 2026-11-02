@@ -28,7 +28,7 @@ Newest thinking is in the rationale, not the order. Change a decision by editing
 | 22 | Ban-list tests aren't used for customer data | A list of customer names would itself put them in the repo. Tests require reserved domains and zero-padded ids instead |
 | 23 | The CLI needs `HC_APPROVED_ORG_ALIASES`, empty by default | This machine has customer orgs logged in. One typo must not reach them |
 | 24 | The CLI refuses to write inside a git work tree | Rule 8. Run folders hold CRM rows |
-| 25 | Black Cloud's design system was readable at the artifact link | Colours and type match the brief. Tokens go in one file in Milestone 4, taken from `colors_and_type.css` in the artifact |
+| 25 | Black Cloud's design system was readable at the artifact link | Colours and type match the brief. Tokens live in `src/design/tokens.ts`, checked against `colors_and_type.css`: brand colours match exactly, and muted text and hairlines use its neutrals. It has nothing for Carbon, so the two chart panel tints are ours |
 | 26 | Recommended file storage: AWS S3 in `eu-west-2` (London) | See below |
 | 27 | The fiscal year comes from the org unless the calibration sets it | A silent January default would give an April-start org the wrong quarters. A mismatch is raised as a finding, and if neither is readable, quarters aren't reported |
 | 28 | Deals created already closed count in win rate, but not in conversion, sales cycle or slippage | They're real outcomes with no sales process behind them. Counting won ones as passing every stage while dropping lost ones inflated conversion |
@@ -88,7 +88,7 @@ Kept apart from the table above so the overnight branches merge cleanly.
 | R12 | A domain nobody assessed shows no issue count | "0 issues" would read as a clean result |
 | R13 | Chromium only runs with the network off, and with routes other than `data:` aborted | A report holds customer data, and rendering has no reason to load or send anything |
 | R14 | The number check runs again on printed page text, against the whole run | It catches anything a template adds after section checks, including chart labels. It's unscoped, so it's weaker than the section check |
-| R15 | Deck density flexes in steps, ending in one table per domain | 40 to 60 slides has to hold for a thin org and a huge one. Past that last step, the deck says it's cut short and points to the raw notes |
+| R15 | Deck density flexes in steps: more cards, then two columns, then one summary slide in place of domain openers. Tables are the last resort | 40 to 60 slides has to hold for a thin org and a huge one. Every step before the last keeps each issue's summary and recommendation. Only the last cuts anything, and it says so |
 | R16 | A deck under 40 slides is flagged, never padded | Filler slides would be worse than a short report. The layout check reports it, and a consultant decides |
 | R17 | Reports show overridden figures. Raw notes show the original with the override beside it | An executive reader shouldn't see a corrected number. The audit trail needs both |
 

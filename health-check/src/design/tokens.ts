@@ -7,17 +7,18 @@ export const colour = {
   ivory: "#FCFFF3",
   snow: "#F7F7F7",
   alert: "#F3261C",
-  // Flat tints of Carbon, for secondary text and hairlines. Not new brand colours.
-  muted: "#5B5C52",
-  rule: "#DFE1D5",
+  // The design system's neutral-600 and neutral-200.
+  muted: "#555555",
+  rule: "#EBEBEB",
   // The same job on a Carbon panel, where charts sit so Chartreuse has contrast.
+  // The design system has no neutrals for Carbon, so these are flat tints of Ivory.
   panelMuted: "#B4B6A8",
   panelRule: "#3B3C33",
 } as const;
 
 export const font = {
   family: "Poppins",
-  stack: "Poppins, Arial, sans-serif",
+  stack: "'Poppins', 'Helvetica Neue', Arial, sans-serif",
   weights: { regular: 400, medium: 500, semibold: 600, bold: 700 },
 } as const;
 

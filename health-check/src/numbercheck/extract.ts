@@ -52,8 +52,8 @@ export function normalise(text: string): string {
   return text
     .replace(/[½¼¾⅓⅔⅕⅖⅗⅘⅙⅛⅒]/g, (c) => VULGAR[c]!)
     .normalize("NFKC")
-    .replace(/[­​-‏‪-‮⁠-⁤﻿]/g, "")
-    .replace(/[−‐-―]/g, "-")
+    .replace(/[\u00AD\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF]/g, "")
+    .replace(/[\u2212\u2010-\u2015]/g, "-")
     .replace(/[*`]/g, "")
     .replace(/\s/g, " ");
 }
