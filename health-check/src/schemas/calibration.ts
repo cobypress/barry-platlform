@@ -44,6 +44,9 @@ export const Calibration = z
     currency: z.string().length(3).default("GBP"),
     // Annual cost per seat by Salesforce licence name. No entry means no sizing, never a guess.
     licenceCosts: z.record(z.string(), z.number().nonnegative()).default({}),
+    // Minutes a year per item, by key, as agreed with the customer. Salesforce has
+    // no such figure, so no entry means an hours value isn't sized, never a guess.
+    effortMinutes: z.record(z.string(), z.number().positive()).default({}),
   })
   .superRefine((c, ctx) => {
     const seen = new Set<string>();
