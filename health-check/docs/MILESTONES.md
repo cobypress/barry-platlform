@@ -1,5 +1,7 @@
 # Milestones
 
+Status after the overnight build: Milestones 3 and 4 are built on `hc/integration`, and the Milestone 5 front end is on `hc/console`, all on synthetic data. See `docs/overnight/MORNING.md`. Milestone 2 hasn't started. Figures in the Milestone 1 section are from when it finished.
+
 ## Milestone 1: done, not yet proven on a live org
 
 ### What's done

@@ -17,3 +17,10 @@ Checked independently, not from the worker's report:
 - `middleware.ts` gained one separate guard for this path. Prisma changes are additive and not applied.
 - `next build` compiled, then stopped at page collection on existing routes that need real credentials (`/api/csat/respond`, `/sitemap.xml`). Not caused by this branch, but a full build is unproven.
 - Not merged anywhere: it's a different repo, and it waits for Coby as planned.
+
+## 21:50 final integration
+
+- Merged final `hc/domains` and `hc/reports`, and formatted money in rule text.
+- 929 of 929 tests. Type check clean. Sample: 6 pages and 59 slides, layout check passing.
+- Final mutation run on a006193: 55 of 55 caught. The later date and layout polish doesn't touch those controls.
+- `hc/console` stays unmerged, for Coby. MORNING.md written.
