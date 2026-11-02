@@ -71,4 +71,8 @@ Kept apart from the table above so the overnight branches merge cleanly.
 | R2 | A rounded figure must round from the real one at its written precision, and stay within 5% | "£2.9m" for 2,892,000 is honest. "£1m" for 1.4m rounds correctly and still misleads |
 | R3 | "half" and "a third" must be within one point of a real percentage, with no allowance for "nearly" | Hedging words are how a loose figure gets through |
 | R4 | The check can't prove a true number sits on the right claim, so each section is checked against its own sources only | It narrows the risk. Consultant approval covers the rest |
-
+| R5 | A draft paragraph must cite its sources, and its figures are checked against those sources only | A figure from elsewhere in the run is true but unsupported where it's used |
+| R6 | One redraft with the failures listed, then the section keeps the engine's text | Repeated retries cost money and rarely help. A person is better value |
+| R7 | Server-side refusal fallbacks are off | They'd move customer metadata to another model with nobody deciding, while zero data retention is still an open question (QUESTIONS.md). A refused section keeps the engine's text. Worth revisiting once that's answered |
+| R8 | First and last names are masked in prompts as well, apart from a short list of ordinary words | `scrub()` catches full names only, and metadata labels such as "Sam's pipeline" hold first names |
+| R9 | Evidence isn't sent to Claude | It isn't needed for wording, and a query can quote record values |

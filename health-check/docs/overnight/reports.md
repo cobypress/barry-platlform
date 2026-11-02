@@ -7,7 +7,7 @@ Branch `hc/reports`. Newest status first in each section.
 | # | Item | State |
 | --- | --- | --- |
 | 1 | Number check | Done |
-| 2 | Narrative | Not started |
+| 2 | Narrative | Done |
 | 3 | Section builder | Not started |
 | 4 | Design tokens | Not started |
 | 5 | Charts | Not started |
@@ -33,3 +33,12 @@ Known limits, on purpose:
 - A bare month ("since December"), "first" and "second" aren't read as figures. Blocking them would reject ordinary sentences.
 - Roman numerals and numbers in other languages aren't read. Non-Latin digits are blocked outright.
 - Engine text adds its own figures to the dataset, so a figure in a reason such as "12 of 20" becomes quotable within that source's scope.
+
+### 2. Narrative
+
+`src/narrative`: `draftSection` takes a brief, an injected `NarrativeClient` and the pseudonymiser. `anthropicClient()` is the only code that touches the SDK, and no test calls it against the network. Reasons are in DECISIONS.md, R5 to R9.
+
+- Found by a test: redacting secrets after JSON encoding misses `apiKey = "..."`, because the quotes are escaped by then. Sources are now guarded field by field first.
+- The skill guidance recommends `fallbacks: "default"` for Opus 5.5. I left it out on purpose (R7). Coby can overturn that.
+- The API request shape comes from the Claude API reference bundled with the tooling and from the SDK's types. It has never been sent to the real API, because there's no key tonight. First real call may need adjusting.
+- Prompt injection: customer metadata goes into the prompt inside a sources block, marked as data. The number check and human review are what protect against it, not the marking.
