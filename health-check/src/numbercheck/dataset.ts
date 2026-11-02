@@ -185,8 +185,10 @@ function addRun(set: FigureSet, run: Run): void {
 }
 
 /** Counts the engine works out for the summary sections. */
-function addSummary(set: FigureSet, findings: Finding[], metrics: Metric[], manualSteps: ManualStep[]): void {
+function addSummary(set: FigureSet, all: Finding[], metrics: Metric[], manualSteps: ManualStep[]): void {
   const c = new Collector(set, SOURCE.summary);
+  // A report passes each finding twice, as written and at team level. Count once.
+  const findings = [...new Map(all.map((f) => [f.id, f])).values()];
   const issues = findings.filter((f) => f.status === "issue");
   c.number(findings.length);
   c.number(issues.length);

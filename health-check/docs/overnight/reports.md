@@ -8,7 +8,7 @@ Branch `hc/reports`. Newest status first in each section.
 | --- | --- | --- |
 | 1 | Number check | Done |
 | 2 | Narrative | Done |
-| 3 | Section builder | Not started |
+| 3 | Section builder | Done |
 | 4 | Design tokens | Not started |
 | 5 | Charts | Not started |
 | 6 | Raw notes in Word | Not started |
@@ -42,3 +42,13 @@ Known limits, on purpose:
 - The skill guidance recommends `fallbacks: "default"` for Opus 5.5. I left it out on purpose (R7). Coby can overturn that.
 - The API request shape comes from the Claude API reference bundled with the tooling and from the SDK's types. It has never been sent to the real API, because there's no key tonight. First real call may need adjusting.
 - Prompt injection: customer metadata goes into the prompt inside a sources block, marked as data. The number check and human review are what protect against it, not the marking.
+
+### 3. Section builder
+
+`buildReport()` in `src/narrative/sections.ts` gives all three outputs as `ReportSection` and `SectionVersion` records, with an engine-written first version for each. `applyNarrative()` adds Claude drafts as later versions. The ranking, plan and verdict in `select.ts` are code.
+
+- **For Worker C and the coordinator:** there's no intake schema anywhere, so I added `Intake` in `src/narrative/intake.ts`. Stated problems, the intake summary and stated vs actual come back `needs_input` until it's supplied. The console's intake page needs to produce this shape, or tell me what it produces.
+- **For Worker A:** the scorecard reads `Score[]`. There's nothing producing it on this branch, so domains say "Not scored in this run". `renderRun` will read a `scores.json` from the run folder if one exists. If scoring lands elsewhere, the coordinator only has to pass the array in.
+- Executive and full reports stay at team level. People become "a single rep" or "a single person", because the plan says so (QUESTIONS.md, question 7). Raw notes keep names. A finding about one person's results can't be a top issue.
+- Phases in the plan come from effort alone: XS and S in days 1 to 30, M in 31 to 60, L and XL in 61 to 90. That's a judgement a consultant may want to change.
+- Verdict headlines are fixed text chosen by the worst severity.
