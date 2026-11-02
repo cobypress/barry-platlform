@@ -1,0 +1,18 @@
+[
+  {
+    "stepKey": "default-workflow-user",
+    "outcome": "answered",
+    "method": "fields",
+    "values": { "username": "lee.park@example.com" },
+    "answeredBy": "Synthetic Consultant",
+    "answeredAt": "2026-10-30T10:00:00.000Z"
+  },
+  {
+    "stepKey": "eac-advanced-sync",
+    "outcome": "answered",
+    "method": "fields",
+    "values": { "relate_synced_events": false, "days_before_connecting": 90 },
+    "answeredBy": "Synthetic Consultant",
+    "answeredAt": "2026-10-30T10:05:00.000Z"
+  }
+]

@@ -1,0 +1,5 @@
+# Run output holds CRM records and the pseudonym map. The CLI refuses to write
+# inside a git work tree; this is the second line of defence.
+runs/
+*.local.json
+/calibration.json

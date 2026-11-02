@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "orgId": "00D000000000001AAA",
+  "confirmedBy": "Synthetic Consultant",
+  "confirmedAt": "2026-10-30T09:00:00.000Z",
+  "stages": [
+    { "name": "Prospecting", "category": "open", "order": 1 },
+    { "name": "Discovery", "category": "open", "order": 2 },
+    { "name": "Proposal", "category": "open", "order": 3 },
+    { "name": "Negotiation", "category": "open", "order": 4 },
+    { "name": "Legal Review", "category": "open", "order": 5 },
+    { "name": "Closed Won", "category": "won" },
+    { "name": "Closed Lost", "category": "lost" },
+    { "name": "Closed No Decision", "category": "no_decision" }
+  ],
+  "scope": { "recordTypes": "all" },
+  "users": [
+    { "userId": "005000000000006AAA", "kind": "shared" },
+    { "userId": "005000000000011AAA", "kind": "integration" }
+  ],
+  "fields": { "lossReason": "Loss_Reason__c" },
+  "targets": { "source": "none", "note": "No targets in the synthetic org" },
+  "salesCycleAssumptionDays": 60,
+  "fiscalYearStartMonth": 1,
+  "analysisWindowMonths": 24,
+  "minSample": 20,
+  "dormantDays": 90,
+  "currency": "GBP",
+  "licenceCosts": { "Salesforce": 1200 }
+}
