@@ -60,3 +60,15 @@ Nothing here is needed to run the tests.
 | `HC_SF_API_VERSION` | Optional | Pins an API version. Default is the org's newest |
 
 Expected later: `ANTHROPIC_API_KEY`, `REDIS_URL`, `DATABASE_URL`, object storage credentials, a token encryption key, and the External Client App's client id and secret.
+
+## Report decisions
+
+Kept apart from the table above so the overnight branches merge cleanly.
+
+| # | Decision | Why |
+| --- | --- | --- |
+| R1 | The number check matches value and unit, and blocks whatever it can't read | An invented figure is the worst failure this product has. A false alarm only costs a redraft |
+| R2 | A rounded figure must round from the real one at its written precision, and stay within 5% | "£2.9m" for 2,892,000 is honest. "£1m" for 1.4m rounds correctly and still misleads |
+| R3 | "half" and "a third" must be within one point of a real percentage, with no allowance for "nearly" | Hedging words are how a loose figure gets through |
+| R4 | The check can't prove a true number sits on the right claim, so each section is checked against its own sources only | It narrows the risk. Consultant approval covers the rest |
+
