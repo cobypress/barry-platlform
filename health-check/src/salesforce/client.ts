@@ -203,8 +203,7 @@ export class SalesforceClient {
 
       if (res.status === 401 && !refreshed && !options.soapOperation) {
         refreshed = true;
-        const fresh = await this.#provider.refresh();
-        this.#connection = { ...fresh, instanceUrl: instanceOrigin(fresh.instanceUrl, this.#checkHost) };
+        await this.#refreshConnection();
         continue;
       }
       if ((res.status === 429 || res.status >= 500) && !options.soapOperation && attempt < SF_DEFAULTS.maxRetries) {
@@ -305,16 +304,32 @@ export class SalesforceClient {
     return (JSON.parse(res.text) as { sObjects: Array<{ name: string; count: number }> }).sObjects;
   }
 
+  async #refreshConnection(): Promise<void> {
+    const fresh = await this.#provider.refresh();
+    this.#connection = { ...fresh, instanceUrl: instanceOrigin(fresh.instanceUrl, this.#checkHost) };
+  }
+
   async #soap(operation: string, body: string): Promise<Record<string, unknown>> {
-    const res = await this.#send(
-      {
-        method: "POST",
-        path: `/services/Soap/m/${this.apiVersion}`,
-        headers: { "Content-Type": "text/xml; charset=UTF-8", SOAPAction: `"${operation}"` },
-        body: soapEnvelope(this.#connection.accessToken, body),
-      },
-      { soapOperation: operation },
-    );
+    // The token is in the body, so a retry has to rebuild the envelope.
+    const send = (): Promise<TransportResponse> =>
+      this.#send(
+        {
+          method: "POST",
+          path: `/services/Soap/m/${this.apiVersion}`,
+          headers: { "Content-Type": "text/xml; charset=UTF-8", SOAPAction: `"${operation}"` },
+          body: soapEnvelope(this.#connection.accessToken, body),
+        },
+        { soapOperation: operation },
+      );
+    let res: TransportResponse;
+    try {
+      res = await send();
+    } catch (err) {
+      // A session can expire during a long retrieve, and SOAP reports that as a fault, not a 401.
+      if (!(err instanceof SalesforceError) || err.code !== "INVALID_SESSION_ID") throw err;
+      await this.#refreshConnection();
+      res = await send();
+    }
     const parsed = xml.parse(res.text) as { Envelope?: { Body?: Record<string, { result?: Record<string, unknown> }> } };
     const result = parsed.Envelope?.Body?.[`${operation}Response`]?.result;
     if (!result) throw new SalesforceError(res.status, "BAD_SOAP_RESPONSE", `No result in the ${operation} response`);

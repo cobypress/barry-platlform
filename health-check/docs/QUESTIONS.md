@@ -32,4 +32,4 @@ Salesforce's docs couldn't all be read in full, so these are unproven until a li
 | 5 | Does `sf org display` always return a live token? | The run fails at the start with a clear error |
 | 6 | Does the org use a custom fiscal year? | We read `Organization.FiscalYearStartMonth`, which assumes standard quarters. Custom fiscal years would need `FiscalYearSettings` |
 | 7 | Does Salesforce read the first or last repeated `q`? | Harmless: repeats are refused |
-| 8 | Does an expired session in a SOAP call need refreshing? | The client only refreshes after a REST 401, so a very long run could fail at retrieve |
+| 8 | Is an expired session in a SOAP call always a fault with `INVALID_SESSION_ID`? | The client refreshes once on that fault. Salesforce's docs give the code, and the HTTP status is unconfirmed, so any other shape fails the retrieve with a clear error |

@@ -17,7 +17,7 @@ Branch `hc/domains`. Newest status first in each section. Nobody has run any of 
 | 9 | Value sizing | Done |
 | 10 | Report scanning | Done |
 | - | Org time zone | Not started |
-| - | SOAP `INVALID_SESSION_ID` refresh | Not started |
+| - | SOAP `INVALID_SESSION_ID` refresh | Done |
 
 ## How facts were checked
 
@@ -30,10 +30,12 @@ Each in its own commit, additive only.
 | File | Change | Why |
 | --- | --- | --- |
 | `src/engine/run.ts` | Writes `scores.json`, and passes scores to the raw notes | Without it nothing in a run calls scoring |
+| `src/salesforce/client.ts` | Refreshes once on a SOAP `INVALID_SESSION_ID`, through the same host check as REST | Known gap in the plan. No new method, route or operation |
 | `src/schemas/calibration.ts` | Optional `effortMinutes`, default empty | Hours need a time per item, and Salesforce has none. No entry means not sized |
 
 ## Merges
 
+- Merged `hc/integration` (e9077bc, with Reports) after the scoring fix. No conflicts. Ran `npm ci` here for Worker B's dependencies. Type check clean, 893 of 898 tests pass. The 5 failures are in `src/narrative/__tests__/sections.test.ts` (2) and `src/render/__tests__/pdf.test.ts` (3), which the coordinator has already sent to Worker B and told me to leave.
 - Merged `hc/integration` (19dc9ec) before starting, as the coordinator asked. Fast-forward, no conflicts. New pipeline work uses `fiscalStartOf(ctx)` and treats a deal with no recorded open stage as win rate only.
 
 ## Decisions
