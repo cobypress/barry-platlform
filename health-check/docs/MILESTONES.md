@@ -154,7 +154,8 @@ If step 3 answers "Cross-org OAuth flows are not supported", the link to the sou
 - **The packaged permission set arrived empty.** Managed packages don't carry user permissions or standard object permissions, and the install drops them without a warning (2GP guide, "Permission Sets and Profile Settings in Packages"). Barometer Read Only is made of nothing else, so `blackcloud__Barometer_Read_Only` grants nothing. The first `connect finish` stored the token, and the check then failed with `API_DISABLED_FOR_ORG`.
 - **The test carried on with an unpackaged copy.** We deployed Barometer Read Only from source as a plain permission set and assigned it, as a customer's admin would. The read-only check then passed.
 - **The run completed** on that connection: run `hc-2026-11-03-1660d472`, with 9 issues and 37 not measurable. The empty scratch org explains the difference from `bc-hc-dev`.
-- **Not done yet:** rotation (step 5). The connection stays in place for that.
+- **The first live refresh worked.** About two hours after the last use, `connect check` found the access token expired. It refreshed through the installed app and stored the new tokens, and the read-only check passed. A check at 17:29 hadn't refreshed: the session timeout counts from the last use, not from sign-in.
+- **Not done yet:** the second refresh, which proves rotation, because it only works with the refresh token the first one stored. The connection stays in place for that.
 
 **One install: version `0.1.0-7` (`04tQH00000NOKy1YAH`), the same day.** The package no longer carries the permission set. Its install script creates Barometer Read Only instead (DECISIONS.md 67).
 
