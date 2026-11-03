@@ -39,6 +39,9 @@ const GET_ROUTES: ReadonlyArray<{ id: string; pattern: RegExp; requiresSoql?: bo
   { id: "rest.describe", pattern: new RegExp(`^/services/data/${VERSION}/sobjects/[A-Za-z0-9_]+/describe/?$`) },
   { id: "tooling.query", pattern: new RegExp(`^/services/data/${VERSION}/tooling/query/?$`), requiresSoql: true },
   { id: "tooling.queryMore", pattern: new RegExp(`^/services/data/${VERSION}/tooling/query/${LOCATOR}$`) },
+  // A report's definition: columns, groupings and filters. Only /describe: a GET on
+  // the report itself runs it and returns rows, and /instances starts a run.
+  { id: "analytics.reportDescribe", pattern: new RegExp(`^/services/data/${VERSION}/analytics/reports/00O[A-Za-z0-9]{12}(?:[A-Za-z0-9]{3})?/describe/?$`) },
 ];
 
 const COMPOSITE_BATCH = new RegExp(`^/services/data/${VERSION}/composite/batch/?$`);

@@ -33,6 +33,10 @@ export function fieldGuards(ctx: RuleContext, object: string, field: FieldSummar
     guards.push({ guardId: "not-referenced-in-automation", subject, status: "failed", detail: `Referenced in ${[...new Set(mentions)].sort().join(", ")}.`, evidence });
   } else if (metadata.status !== "ok" || apex.classes.status !== "ok" || apex.triggers.status !== "ok") {
     guards.push({ guardId: "not-referenced-in-automation", subject, status: "unknown", detail: "Metadata or Apex couldn't be read.", evidence });
+  } else if (metadata.data.unsearched?.length) {
+    // The Tooling route can't read some kinds, such as assignment rules, so not
+    // finding the field isn't proof (rule 3).
+    guards.push({ guardId: "not-referenced-in-automation", subject, status: "unknown", detail: `Not in what we searched, but we couldn't search these: ${metadata.data.unsearched.join(", ")}.`, evidence });
   } else {
     guards.push({ guardId: "not-referenced-in-automation", subject, status: "passed", detail: "Not referenced in the metadata or Apex we searched.", evidence });
   }

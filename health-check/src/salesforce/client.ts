@@ -87,6 +87,7 @@ export const CLIENT_METHODS = [
   "describe",
   "describeGlobal",
   "recordCounts",
+  "describeReport",
   "retrieveMetadata",
 ] as const;
 
@@ -286,6 +287,12 @@ export class SalesforceClient {
   async recordCounts(): Promise<Array<{ name: string; count: number }>> {
     const res = await this.#send({ method: "GET", path: this.#data("/limits/recordCount") });
     return (JSON.parse(res.text) as { sObjects: Array<{ name: string; count: number }> }).sObjects;
+  }
+
+  /** A report's definition through the Analytics API, without running it. */
+  async describeReport<T>(reportId: string): Promise<T> {
+    if (!/^00O[A-Za-z0-9]{12}(?:[A-Za-z0-9]{3})?$/.test(reportId)) throw new ForbiddenOperationError("not a report id");
+    return JSON.parse((await this.#send({ method: "GET", path: this.#data(`/analytics/reports/${reportId}/describe`) })).text) as T;
   }
 
   async #refreshConnection(): Promise<void> {

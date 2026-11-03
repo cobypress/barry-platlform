@@ -162,10 +162,31 @@ export type CustomObjectRow = { Id: string; DeveloperName: string; NamespacePref
 
 // Layout and ApexTrigger can name a custom object by its id rather than its API
 // name. Nothing else we read links the two, so the inventory reads it here.
+//
+// From Tooling's EntityDefinition, not CustomObject: a user with View Setup but
+// not Customize Application gets INVALID_TYPE from CustomObject (DECISIONS.md 68).
+// A custom object's DurableId is its 01I id, in 15 characters, and the same id
+// ValidationRule.EntityDefinitionId holds. Custom metadata types, platform events
+// and external objects have other suffixes, and custom settings are filtered out.
 export const customObjectsExtractor: Extractor<Sourced<CustomObjectRow[]>> = {
   id: "custom-objects",
-  version: 1,
-  run: (ctx) => readSoql<CustomObjectRow>(ctx, "SELECT Id, DeveloperName, NamespacePrefix FROM CustomObject", { api: "tooling" }),
+  version: 2,
+  async run(ctx) {
+    const rows = await readSoql<{ DurableId: string; QualifiedApiName: string; NamespacePrefix: string | null }>(
+      ctx,
+      "SELECT DurableId, QualifiedApiName, NamespacePrefix FROM EntityDefinition WHERE IsCustomizable = true AND IsCustomSetting = false",
+      { api: "tooling" },
+    );
+    if (rows.status !== "ok") return rows;
+    const data = rows.data
+      .filter((r) => /__c$/.test(r.QualifiedApiName) && /^01I/.test(r.DurableId))
+      .map((r) => {
+        const prefix = r.NamespacePrefix ? `${r.NamespacePrefix}__` : "";
+        const bare = r.QualifiedApiName.startsWith(prefix) ? r.QualifiedApiName.slice(prefix.length) : r.QualifiedApiName;
+        return { Id: r.DurableId, DeveloperName: bare.replace(/__c$/, ""), NamespacePrefix: r.NamespacePrefix };
+      });
+    return { ...rows, data };
+  },
 };
 
 export const duplicateRulesExtractor: Extractor<Sourced<Array<{ DeveloperName: string; SobjectType: string; IsActive: boolean }>>> = {
