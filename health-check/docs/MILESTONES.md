@@ -123,7 +123,7 @@ Not yet exercised live: the web server flow's code exchange and its refresh with
 ### What Coby needs to do for the web server flow
 
 1. In `bc-hc-dev`, open Setup, then External Client App Manager, then Black Cloud Barometer. On Settings, under OAuth Settings, click Consumer Key and Secret, and enter the code Salesforce emails. Copy the secret into `~/.barometer/oauth-client.json` as `"clientSecret"`, next to the `clientId` and `redirectUri` already there. Keep the file at mode 600.
-2. Give the read-only user a password: `sf org generate password --on-behalf-of barometer-read-only@black-cloud.com.bc-health-check --target-org bc-hc-dev`.
+2. Give the read-only user a password. Done on 2026-11-03: it's in `~/.barometer/dev/read-only-user-password.txt`, at mode 600. It was set as the admin with anonymous Apex, `System.setPassword`. `sf org generate password --on-behalf-of` doesn't work here, because the sf CLI has no sign-in of its own for this user.
 3. From `health-check`, run `HC_APPROVED_ORG_ALIASES=bc-hc-dev-web npm run hc -- connect start --connection bc-hc-dev-web --login-url https://bc-health-check-dev-ed.develop.my.salesforce.com`.
 4. Open the URL it prints in a private browser window. Sign in as the read-only user, not as yourself. You should see Black Cloud Barometer asking for "Manage user data via APIs" and "Perform requests at any time". Click Allow.
 5. The browser lands on a localhost page that won't load. Copy the whole address from the address bar within 10 minutes and run `HC_APPROVED_ORG_ALIASES=bc-hc-dev-web npm run hc -- connect finish --connection bc-hc-dev-web --callback-url '<the address>'`. It exchanges the code, stores the tokens, and checks the user can't write.
