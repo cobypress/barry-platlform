@@ -1,5 +1,6 @@
 import { duplicateRulesExtractor, recordCountsExtractor } from "../../extract/configuration.ts";
 import { crmHealthExtractor, opportunitiesExtractor } from "../../extract/opportunities.ts";
+import { leadsExtractor } from "../../extract/leads.ts";
 import { daysBefore } from "../../extract/types.ts";
 import { ownershipExtractor, usersExtractor } from "../../extract/users.ts";
 import { notSized, pct, plural, segmentRate, type Rule, type RuleContext, type RuleResult } from "../../engine/rule.ts";
@@ -149,8 +150,9 @@ const missingAmount = dealRule({
   scopeLabel: "open deals",
   isHit: (d) => d.Amount === null || d.Amount === 0,
   issueTitle: "Open deals are missing an amount",
-  sentence: (hits, n, rate) => `Open deals with no amount: ${hits} of ${n} (${rate}%). Pipeline value and coverage are understated.`,
-  recommendation: "Require an amount from the stage where a price is normally known.",
+  sentence: (hits, n, rate) =>
+    `Open deals with no amount: ${hits} of ${n} (${rate}%). These deals count for nothing in your pipeline value, so it looks smaller than it is, and you can't see what work is coming or weigh one deal against another. When enough are blank, nobody can tell how much of the pipeline rests on a few accounts or people.`,
+  recommendation: "Require an amount from the stage where a price is normally known, even an estimate, and fill in the open deals that have none.",
   effort: "S",
   owner: "Sales operations",
   sized: false,
@@ -270,14 +272,23 @@ const duplicateRulesMissing: Rule = {
     const rules = ctx.data(duplicateRulesExtractor);
     if (rules.status !== "ok") return { outcome: "not_measurable", reason: `Duplicate rules couldn't be read: ${rules.reason}`, evidence: [ctx.ev(rules.source, { count: null })] };
     const active = new Set(rules.data.filter((r) => r.IsActive).map((r) => r.SobjectType));
-    const missing = DUPLICATE_OBJECTS.filter((o) => !active.has(o));
-    const evidence = [ctx.ev(rules.source, { count: rules.data.length })];
+    // A customer review: a missing rule on an object nobody uses isn't worth
+    // saying. Lead counts as unused only when we can see no leads were created.
+    const { leads } = ctx.data(leadsExtractor);
+    const unused = new Set(leads.status === "ok" && !leads.truncated && leads.data.length === 0 ? ["Lead"] : []);
+    const missing = DUPLICATE_OBJECTS.filter((o) => !active.has(o) && !unused.has(o));
+    const skipped = DUPLICATE_OBJECTS.filter((o) => !active.has(o) && unused.has(o));
+    const skippedNote = skipped.length ? ` ${skipped.join(", ")} ${skipped.length === 1 ? "has" : "have"} none either, but no leads were created in the window, so it doesn't matter yet.` : "";
+    const evidence = [ctx.ev(rules.source, { count: rules.data.length }), ...(skipped.length ? [ctx.ev(leads.source, { count: 0, dateRange: ctx.window, note: "Leads created in the window" })] : [])];
     const segments = [{ dimension: "object", segments: DUPLICATE_OBJECTS.length }];
-    if (missing.length === 0) return { outcome: "pass", summary: "Account, Contact and Lead all have an active duplicate rule.", evidence, segmentsChecked: segments };
+    if (missing.length === 0) {
+      const summary = skipped.length ? `Every core object in use has an active duplicate rule.${skippedNote}` : "Account, Contact and Lead all have an active duplicate rule.";
+      return { outcome: "pass", summary, evidence, segmentsChecked: segments };
+    }
     return {
       outcome: "issue",
       title: "Nothing stops duplicates on some core objects",
-      summary: `${missing.join(", ")} ${missing.length === 1 ? "has" : "have"} no active duplicate rule, so the same customer can be entered more than once.`,
+      summary: `${missing.join(", ")} ${missing.length === 1 ? "has" : "have"} no active duplicate rule, so the same customer can be entered more than once.${skippedNote}`,
       recommendation: "Turn on matching and duplicate rules, starting in alert mode so you can see the effect.",
       recommendationType: "change",
       severity: "medium",
@@ -383,6 +394,6 @@ export const dataQualityModule: DomainModule = {
   id: "data_quality",
   cloud: "sales",
   label: "Data quality",
-  extractors: [usersExtractor, recordCountsExtractor, ownershipExtractor, duplicateRulesExtractor, opportunitiesExtractor, crmHealthExtractor],
+  extractors: [usersExtractor, recordCountsExtractor, ownershipExtractor, duplicateRulesExtractor, opportunitiesExtractor, crmHealthExtractor, leadsExtractor],
   rules: [pastCloseDate, inactiveOwner, missingAmount, noRecentActivity, lossReasonMissing, inactiveRecordOwners, duplicateRulesMissing, staleLeads, contactGaps],
 };

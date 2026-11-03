@@ -334,11 +334,16 @@ const dashboardUsage: Rule = {
     const { dashboards } = ctx.data(runAsExtractor);
     return {
       outcome: "not_measurable",
-      reason: "Salesforce records LastViewedDate per user, so a query shows only the connected user's own views. Org-wide dashboard use needs the Lightning usage objects, which aren't read yet.",
+      reason: "We can't yet see how often your team opens dashboards. Salesforce only tells us when the person running the check last opened each one, which says nothing about anyone else.",
       evidence: [ctx.ev(dashboards.source, { count: dashboards.status === "ok" ? dashboards.data.length : null })],
     };
   },
 };
+
+// Salesforce only has the connection object where the feature is on. A customer
+// review asked for this to be one plain line rather than the query error.
+const EAC_NOT_ON = "Einstein Activity Capture isn't switched on in this org, or the connected user can't see it, so there's nothing to check.";
+const eacNotOn = (rows: { status: string; reason?: string }): boolean => rows.status === "unavailable" && /isn't available in this org/.test(rows.reason ?? "");
 
 const eacConnections: Rule = {
   id: "utl.eac-connections",
@@ -348,7 +353,8 @@ const eacConnections: Rule = {
   evaluate(ctx): RuleResult | RuleResult[] {
     const rows = ctx.data(activityCaptureExtractor);
     if (rows.status !== "ok") {
-      return { outcome: "not_measurable", reason: `Connection status couldn't be read. Salesforce only offers this object where Einstein Activity Capture is enabled: ${rows.reason}`, evidence: [ctx.ev(rows.source, { count: null })] };
+      const reason = eacNotOn(rows) ? EAC_NOT_ON : `Connection status couldn't be read: ${rows.reason}`;
+      return { outcome: "not_measurable", reason, evidence: [ctx.ev(rows.source, { count: null })] };
     }
     if (rows.data.length === 0) return { outcome: "pass", summary: "No users are connected to Einstein Activity Capture.", evidence: [ctx.ev(rows.source, { count: 0 })], segmentExemptReason: "There are no connections to segment." };
     const broken = rows.data.filter((r) => !HEALTHY_CONNECTIONS.has(r.ConnectivityStatus ?? ""));
@@ -385,6 +391,7 @@ const eacAdvancedSync: Rule = {
     if (rows.status === "ok" && rows.data.length === 0) {
       return { outcome: "pass", summary: "Nobody is connected to Einstein Activity Capture, so these settings don't apply.", evidence: [ctx.ev(rows.source, { count: 0 })], segmentExemptReason: "The feature isn't in use." };
     }
+    if (eacNotOn(rows)) return { outcome: "not_measurable", reason: EAC_NOT_ON, evidence: [ctx.ev(rows.source, { count: null })] };
     const manual = ctx.manual("eac-advanced-sync");
     const manualStepIds = [manual.step.id];
     if (manual.status !== "answered") {

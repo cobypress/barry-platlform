@@ -5,7 +5,9 @@ import { analyseExtracts, clone, loadExtracts, runFromRecording } from "../../te
 import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
 import { userId } from "../../testing/synthetic-org.ts";
 import { apexExtractor, metadataExtractor } from "../../extract/automation.ts";
-import { licencesExtractor, ownershipExtractor, usersExtractor } from "../../extract/users.ts";
+import { activityCaptureExtractor, licencesExtractor, ownershipExtractor, usersExtractor } from "../../extract/users.ts";
+import { duplicateRulesExtractor } from "../../extract/configuration.ts";
+import { leadsExtractor } from "../../extract/leads.ts";
 import { opportunitiesExtractor } from "../../extract/opportunities.ts";
 import { Finding } from "../../schemas/index.ts";
 import { USER_GUARD_IDS } from "../../guards/user-guards.ts";
@@ -279,9 +281,20 @@ describe("utilisation", () => {
   test("dashboard use is honestly not measurable", () => {
     const [f] = byRule(analyseExtracts(extracts).findings, "utl.dashboard-usage");
     assert.equal(f?.status, "not_measurable");
-    assert.match(f?.notMeasurableReason ?? "", /per user/);
+    assert.match(f?.notMeasurableReason ?? "", /person running the check/);
   });
   test("a broken activity connection", () => assert.deepEqual(issue(analyseExtracts(extracts).findings, "utl.eac-connections").subjects.map((s) => s.label), [tokenOf(3)]));
+  test("activity capture that isn't switched on gets one plain line, not a query error", () => {
+    const changed = clone(extracts);
+    const source = (changed.get(activityCaptureExtractor.id) as { source: unknown }).source;
+    changed.set(activityCaptureExtractor.id, { status: "unavailable", reason: "ActivityUsrConnectionStatus isn't available in this org, or to the connected user.", source });
+    const findings = analyseExtracts(changed, { answers: [] }).findings;
+    for (const id of ["utl.eac-connections", "utl.eac-advanced-sync"]) {
+      const [f] = byRule(findings, id);
+      assert.equal(f?.status, "not_measurable");
+      assert.match(f?.notMeasurableReason ?? "", /^Einstein Activity Capture isn't switched on/);
+    }
+  });
 });
 
 describe("segment before concluding (rule 4)", () => {
@@ -333,6 +346,17 @@ describe("data quality", () => {
   });
   test("records with inactive owners", () => assert.equal(issue(analyseExtracts(extracts).findings, "dq.records-inactive-owner").facts.strandedTotal, 190));
   test("duplicate rules only count when active", () => assert.deepEqual(issue(analyseExtracts(extracts).findings, "dq.duplicate-rules-missing").subjects.map((s) => s.label), ["Account", "Contact"]));
+  test("a missing duplicate rule on Lead isn't raised when no leads are created", () => {
+    // As seen on a real org that doesn't use leads.
+    const changed = clone(extracts);
+    const rules = (changed.get(duplicateRulesExtractor.id) as { data: Array<{ SobjectType: string; IsActive: boolean }> }).data;
+    for (const r of rules) if (r.SobjectType === "Lead") r.IsActive = false;
+    assert.deepEqual(issue(analyseExtracts(changed).findings, "dq.duplicate-rules-missing").subjects.map((s) => s.label), ["Account", "Contact", "Lead"]);
+    (changed.get(leadsExtractor.id) as { leads: { data: unknown[] } }).leads.data = [];
+    const f = issue(analyseExtracts(changed).findings, "dq.duplicate-rules-missing");
+    assert.deepEqual(f.subjects.map((s) => s.label), ["Account", "Contact"]);
+    assert.match(f.summary, /no leads were created/);
+  });
   test("contact gaps", () => assert.equal(issue(analyseExtracts(extracts).findings, "dq.contact-completeness").facts.emailRate, 16));
 });
 

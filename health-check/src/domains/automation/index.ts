@@ -115,7 +115,7 @@ const mixedAutomation: Rule = {
       outcome: "issue",
       title: "Automation on some objects is split across several tools",
       summary: `${mixed.map(([o, set]) => `${o} runs ${[...set].sort().join(", ")}`).join("; ")}. Salesforce runs these at different points when a record saves, so the outcome can be hard to predict.`,
-      recommendation: "Consolidate each of these objects on one tool, with a defined order of execution.",
+      recommendation: "For each of these objects, decide what belongs in Apex and what belongs in Flow, then retire the older tools into that split with a defined order of execution. Complex or high-volume logic is often better kept in Apex.",
       recommendationType: "change",
       severity: "medium",
       confidence: "high",

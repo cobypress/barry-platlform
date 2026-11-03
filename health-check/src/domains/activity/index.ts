@@ -165,8 +165,9 @@ const dealsWithoutActivity = shareRule({
     return { deals: closedThisYear(ctx, pipeline.deals, data.from), isHit: (d) => !touches.has(d.Id), exclusions: [...data.exclusions, "Deals created before the readable year"], evidence: data.evidence.slice(0, 1) };
   },
   issueTitle: "Deals are closing with nothing logged against them",
-  sentence: (hits, n, rate) => `Won and lost deals with no task, event or email against them: ${hits} of ${n} (${rate}%). What happened on those deals isn't in Salesforce.`,
-  recommendation: "Find out whether the work isn't happening or isn't being logged, then fix capture before judging anyone on activity.",
+  sentence: (hits, n, rate) =>
+    `Won and lost deals with no task, event or email against them: ${hits} of ${n} (${rate}%). This usually reflects process rather than effort: when logging isn't expected and nothing captures email or meetings automatically, the work happens but Salesforce never sees it. The cost is that nobody can look back at how a deal was won or why it was lost.`,
+  recommendation: "Agree the few moments worth recording on a deal, such as the first meeting and the proposal going out, and make them part of the process. Or turn on automatic capture of email and meetings.",
   owner: "Head of sales",
   sized: false,
 });
