@@ -257,6 +257,19 @@ describe("utilisation", () => {
     const calibration = { ...loadCalibration(), licenceCosts: { ...loadCalibration().licenceCosts, "Salesforce Integration": 120 } };
     assert.match(issue(analyseExtracts(priced, { calibration }).findings, "utl.unassigned-licence-seats").summary, /Salesforce Integration/, "a priced one still counts");
   });
+  test("an integration user who has never logged in isn't a licence to release", () => {
+    // As seen on a real org: the Sales Insights integration user, which is API-only.
+    const changed = clone(extracts);
+    const users = (changed.get(usersExtractor.id) as { data: Array<{ Id: string; IsActive: boolean; LastLoginDate: string | null; CreatedDate: string; Profile: unknown }> }).data;
+    const integration = users.find((u) => u.IsActive && u.LastLoginDate !== null)!;
+    integration.LastLoginDate = null;
+    integration.CreatedDate = "2020-01-01T00:00:00.000Z";
+    integration.Profile = { Name: "Sales Insights Integration User", UserLicense: { Name: "Sales Insights Integration User" } };
+    const subjects = byRule(analyseExtracts(changed, { answers: loadAnswers() }).findings, "utl.never-logged-in").flatMap((f) => f.subjects.map((s) => s.label));
+    integration.Profile = { Name: "Standard User", UserLicense: { Name: "Salesforce" } };
+    const control = byRule(analyseExtracts(changed, { answers: loadAnswers() }).findings, "utl.never-logged-in").flatMap((f) => f.subjects.map((s) => s.label));
+    assert.equal(control.length, subjects.length + 1, "the same user on a Salesforce licence is still checked");
+  });
   test("reports too new to judge are excluded", () => {
     const f = issue(analyseExtracts(extracts).findings, "utl.unused-reports");
     assert.equal(f.facts.reports, 79);

@@ -20,7 +20,20 @@ import { calibratedHours } from "../value.ts";
 
 const MIN_SPARE_SEATS = 2;
 // Salesforce includes these with the edition at no charge. Extra seats can be bought, so a priced calibration still counts them.
-const COMPLIMENTARY_LICENCES = new Set(["Salesforce Integration", "Identity", "Chatter Free", "Chatter External", "Guest User License"]);
+const COMPLIMENTARY_LICENCES = new Set([
+  "Salesforce Integration",
+  "Cloud Integration User",
+  "Analytics Cloud Integration User",
+  "Sales Insights Integration User",
+  "Salesforce Limited Access - Free",
+  "Identity",
+  "Chatter Free",
+  "Chatter External",
+  "Guest User License",
+]);
+// API-only licences. Their users never log in by design, so not logging in says nothing.
+// A real org showed the Sales Insights integration user as a licence to release.
+const isIntegrationLicence = (licence: string): boolean => /\bintegration\b/i.test(licence);
 const SPARE_SEAT_SHARE = 10;
 const UNUSED_REPORT_MONTHS = 12;
 const UNUSED_REPORT_SHARE = 50;
@@ -49,7 +62,7 @@ function seatValue(ctx: RuleContext, users: UserRow[]): Value {
 // anyway, but this way the clean users keep a real recommendation.
 function reclaimFindings(ctx: RuleContext, candidates: UserRow[], describe: { key: string; label: string; basis: string }): RuleResult[] {
   const users = ctx.data(usersExtractor);
-  const usersEvidence = ctx.ev(users.source, { count: candidates.length, exclusions: ["Non-standard user types", "Users created inside the dormant window"] });
+  const usersEvidence = ctx.ev(users.source, { count: candidates.length, exclusions: ["Non-standard user types", "Users created inside the dormant window", "Users on integration licences"] });
   const assessed = candidates.map((user) => ({ user, guards: userGuards(ctx, user) }));
   const clear = assessed.filter((a) => a.guards.every((g) => g.status === "passed"));
   const manual = ctx.manual("default-workflow-user");
@@ -201,7 +214,7 @@ function dormantRule(id: string, title: string, key: string, label: string, basi
       if (users.status !== "ok") return { outcome: "not_measurable", reason: `Users couldn't be read: ${users.reason}`, evidence: [ctx.ev(users.source, { count: null })] };
       const days = ctx.calibration.dormantDays;
       const cutoff = daysBefore(ctx.now, days);
-      const active = users.data.filter((u) => u.IsActive && new Date(u.CreatedDate) < cutoff);
+      const active = users.data.filter((u) => u.IsActive && new Date(u.CreatedDate) < cutoff && !isIntegrationLicence(licenceOf(u)));
       const candidates = active.filter((u) => isCandidate(u, cutoff));
       if (candidates.length > 0) return reclaimFindings(ctx, candidates, { key, label, basis: basisFor(days) });
       return {
