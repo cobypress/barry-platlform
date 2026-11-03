@@ -2,7 +2,7 @@ import { test, describe, before } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { CONFIDENCE_FACTORS, RULE_MAXIMUM, SEVERITY_WEIGHTS, scoreDomain, scoreDomains } from "../scoring.ts";
+import { CONFIDENCE_FACTORS, MIN_RULES_SCORED, RULE_MAXIMUM, SEVERITY_WEIGHTS, scoreDomain, scoreDomains } from "../scoring.ts";
 import { SALES_CLOUD_MODULES } from "../index.ts";
 import { analyseExtracts, clone, loadExtracts, runFromRecording } from "../../testing/harness.ts";
 import { Score, SALES_CLOUD_DOMAINS, type Finding } from "../../schemas/index.ts";
@@ -69,13 +69,14 @@ describe("the arithmetic", () => {
   });
 
   test("a rule with a pass and an issue counts once, as the issue", () => {
-    const score = scoreDomain("d", [finding("a", "passed"), finding("a", "issue", "high")]);
-    assert.ok(score.status === "measured" && score.score === 38);
+    // a earns 3 of 8 as its high issue, z earns 8: 11 of 16.
+    const score = scoreDomain("d", [finding("a", "passed"), finding("a", "issue", "high"), finding("z", "passed")]);
+    assert.ok(score.status === "measured" && score.score === 69);
   });
 
   test("a rule's worst finding sets what it earns", () => {
-    const score = scoreDomain("d", [finding("a", "issue", "low"), finding("a", "issue", "critical")]);
-    assert.ok(score.status === "measured" && score.score === 0);
+    const score = scoreDomain("d", [finding("a", "issue", "low"), finding("a", "issue", "critical"), finding("z", "passed")]);
+    assert.ok(score.status === "measured" && score.score === 50);
   });
 
   test("not measurable doesn't move a score", () => {
@@ -85,7 +86,7 @@ describe("the arithmetic", () => {
   });
 
   test("the weights are published on the score", () => {
-    const score = scoreDomain("d", [finding("a", "passed")]);
+    const score = scoreDomain("d", [finding("a", "passed"), finding("z", "passed")]);
     assert.ok(score.status === "measured");
     assert.equal(score.weights.ruleMaximum, RULE_MAXIMUM);
     assert.equal(RULE_MAXIMUM, SEVERITY_WEIGHTS.critical);
@@ -104,8 +105,21 @@ describe("not measurable, never zero", () => {
   test("no findings at all gives no score", () => assert.equal(scoreDomain("d", []).status, "not_measurable"));
 
   test("an info-level issue costs nothing, because its weight is zero", () => {
-    const score = scoreDomain("d", [finding("a", "issue", "info")]);
+    const score = scoreDomain("d", [finding("a", "issue", "info"), finding("z", "passed")]);
     assert.ok(score.status === "measured" && score.score === 100);
+  });
+
+  test("one measured check is too few to score", () => {
+    const score = scoreDomain("d", [finding("a", "passed"), finding("b", "not_measurable")]);
+    assert.equal(score.status, "not_measurable");
+    assert.ok(score.status === "not_measurable" && /too few checks/i.test(score.reason));
+  });
+
+  test("a score needs at least half the domain's checks measured", () => {
+    const measured = [finding("a", "passed"), finding("b", "passed")];
+    assert.equal(scoreDomain("d", [...measured, finding("c", "not_measurable"), finding("e", "not_measurable"), finding("g", "not_measurable")]).status, "not_measurable");
+    assert.equal(scoreDomain("d", [...measured, finding("c", "not_measurable"), finding("e", "not_measurable")]).status, "measured");
+    assert.equal(MIN_RULES_SCORED, 2);
   });
 
   test("the schema refuses a score with no number, or one out of range", () => {
@@ -115,12 +129,12 @@ describe("not measurable, never zero", () => {
 
 describe("what doesn't count against the customer", () => {
   test("a gap in our calibration doesn't lower their score", () => {
-    const score = scoreDomain("d", [finding("a", "passed"), finding("pipe.unmapped-stages", "issue", "high")]);
+    const score = scoreDomain("d", [finding("a", "passed"), finding("z", "passed"), finding("pipe.unmapped-stages", "issue", "high")]);
     assert.ok(score.status === "measured" && score.score === 100);
   });
 
   test("another domain's findings are ignored", () => {
-    const score = scoreDomain("d", [finding("a", "passed"), finding("b", "issue", "high", "high", "other")]);
+    const score = scoreDomain("d", [finding("a", "passed"), finding("z", "passed"), finding("b", "issue", "high", "high", "other")]);
     assert.ok(score.status === "measured" && score.score === 100);
   });
 });

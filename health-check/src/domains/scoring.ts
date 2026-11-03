@@ -14,6 +14,8 @@ import { Score, type Finding } from "../schemas/index.ts";
 export const SEVERITY_WEIGHTS = { critical: 8, high: 5, medium: 3, low: 1, info: 0 } as const;
 export const CONFIDENCE_FACTORS = { high: 1, medium: 0.75, low: 0.5 } as const;
 export const RULE_MAXIMUM = SEVERITY_WEIGHTS.critical;
+/** A score needs this many measured checks, and at least half the domain's. */
+export const MIN_RULES_SCORED = 2;
 
 // Gaps in how we set the check up, not faults in the customer's org.
 const SETUP_RULES = new Set(["pipe.unmapped-stages"]);
@@ -45,6 +47,9 @@ export function scoreDomain(domain: string, findings: Finding[], ruleSetVersion:
     counted.push(...issues.map((f) => f.id), ...passes.map((f) => f.id));
   }
   if (rulesCounted === 0) return notMeasurable(`Every check in this domain was not measurable (${rules.size} rules).`);
+  // Rule 5 for scores. On a real org, one calibration check scored historic
+  // pipeline 100 while every pipeline metric was not measurable.
+  if (rulesCounted < MIN_RULES_SCORED || rulesCounted * 2 < rules.size) return notMeasurable("Too few checks here could be measured to give a fair score.");
   return Score.parse({ status: "measured", domain, score: Math.round((earned / (RULE_MAXIMUM * rulesCounted)) * 100), ruleSetVersion, weights: WEIGHTS, findingIds: counted });
 }
 
