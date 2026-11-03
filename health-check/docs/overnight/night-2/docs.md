@@ -16,6 +16,7 @@ Documents only. No code changed, no org contacted, no `sf` run.
 - **IP relaxation left at Enforce.** The guide only raises it when the user's profile has login IP ranges, because Salesforce only enforces app IP restrictions then. That is documented for connected apps, and inferred for external client apps.
 - **Step 6 says the approval page "may" appear.** Salesforce says pre-authorised users skip it, and that `prompt=consent` forces it. We've only seen it under self-authorise (QUESTIONS 29).
 - **"Several" free Integration licences, not "five"**, because only secondary sources give the number.
+- **The Bulk note recommends against building Bulk for now.** Every cap but one is our own setting, and REST could read further within the budget. The exception, `GROUP BY` results that can't page, is something Bulk API 2.0 can't do either. The note proposes three REST changes instead: budget-based caps, complete shorter windows, and an ownership scan split by rule. It also sets out the allowlist and tests Bulk would need, in case the decision goes the other way.
 - **Placeholders** for the install link, region, zero data retention and outbound IPs, each marked `[BLACK CLOUD: ...]`.
 
 ## Doubts
