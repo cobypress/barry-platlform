@@ -1,6 +1,6 @@
 # Milestones
 
-Status after the overnight build: Milestones 3 and 4 are built on `hc/integration`, and the Milestone 5 front end is on `hc/console`, all on synthetic data. See `docs/overnight/MORNING.md`. Milestone 2 hasn't started. Figures in the Milestone 1 section are from when it finished.
+Status after the overnight build: Milestones 3 and 4 are built on `hc/integration`, and the Milestone 5 front end is on `hc/console`, all on synthetic data. See `docs/overnight/MORNING.md`. Milestone 2's connection work is on `hc/connection` (below). Figures in the Milestone 1 section are from when it finished.
 
 ## Milestone 1: done, not yet proven on a live org
 
@@ -68,3 +68,68 @@ Prove the connection, because it's the part most likely to change the design. It
 7. Decide on the Bulk API for large orgs.
 
 **Exit test:** a Black Cloud consultant connects a test org through the link, and the run completes on a token that can't write.
+
+## Milestone 2: the connection, as built on 2026-11-03
+
+Built on `hc/connection` against `bc-hc-dev`, a Developer Edition org made for this. No other org was touched.
+
+| Plan item | Status |
+| --- | --- |
+| 1. First live run on the Black Cloud org | Not done: out of scope here. The run below is the first live run, on `bc-hc-dev` |
+| 2. External Client App, and a second test org | App built and deployed. Not tried from a second org (QUESTIONS.md 22) |
+| 3. Managed package needed? | Answered yes, from Salesforce's docs (DECISIONS.md 63) |
+| 4. Web server flow with PKCE and rotation | Built and unit tested. The live consent needs a person (below) |
+| 5. One-time connect link | Link logic built and tested. Console pages are Milestone 5 |
+| 6. Read-only permission set, proven unable to write | Done, proven on `bc-hc-dev` |
+| 7. Bulk API decision | Not started |
+
+### What's in `bc-hc-dev`
+
+- **Black Cloud Barometer** External Client App: web server flow, PKCE and secret required, refresh token rotation, `api` and `refresh_token` only (DECISIONS.md 56). Salesforce accepts its authorisation request: a plain GET of the URL `hc connect start` builds goes to the login page, and a wrong callback or client id gets a 400.
+- **Barometer Dev JWT**, a development-only app for JWT bearer, pre-authorised by the permission set (DECISIONS.md 59).
+- **Barometer Read Only** permission set (DECISIONS.md 57).
+- **Test Barometer Read Only** (`barometer-read-only@black-cloud.com.bc-health-check`, user `005d3000005ZjKLAA0`): Salesforce Integration licence, "Minimum Access - API Only Integrations" profile, the Salesforce API Integration permission set licence, and Barometer Read Only. Nothing else.
+
+### Write test
+
+`node scripts/write-test.ts`, run as the read-only user on a token from the dev JWT app. It's a separate script with its own `fetch`, because the engine has no way to send a write. The admin made one test Account first and deleted it afterwards.
+
+| Attempt | HTTP | Salesforce's answer |
+| --- | --- | --- |
+| Read the test Account (control) | 200 | Visible |
+| Create Account | 400 | CANNOT_INSERT_UPDATE_ACTIVATE_ENTITY: entity type cannot be inserted |
+| Update Account | 400 | CANNOT_INSERT_UPDATE_ACTIVATE_ENTITY: entity type cannot be updated |
+| Update Account with `?_HttpMethod=PATCH` | 400 | The same |
+| Delete Account | 400 | INSUFFICIENT_ACCESS_OR_READONLY |
+| Create Task on the Account | 400 | CANNOT_INSERT_UPDATE_ACTIVATE_ENTITY: entity type cannot be inserted |
+| Create Opportunity | 400 | The same |
+| Composite create Account | 200 | Subrequest refused: entity type cannot be inserted |
+| Anonymous Apex update | 200 | `success: false`: Field is not writeable: Account.Name |
+| Metadata API deploy (check only) | 500 | INSUFFICIENT_ACCESS: needs Modify All Data or Modify Metadata |
+
+**Result: passed.** 9 of 9 writes refused, the Account unchanged, and no stray records. The connect-time check (DECISIONS.md 62) agrees from the org's own records: no create, edit or delete on any object, and no write system permission.
+
+### Exit test, as far as it goes without a person
+
+`hc connect jwt` connected the read-only user, then `HC_APPROVED_ORG_ALIASES=bc-hc-dev-read-only hc run --connection bc-hc-dev-read-only` ran through `OAuthConnectionProvider`, with tokens encrypted at rest and the key in the macOS keychain.
+
+- **The run completed:** 31 steps, 10 issues, 25 passes, 41 not measurable. No token appears in any output.
+- **Refresh works live:** with the stored access token replaced by a dead one, the client got a 401, the provider signed a new assertion, stored the new token and carried on.
+- **What read-only couldn't see:** the Metadata API retrieve (automation and report definitions) and Tooling Apex (DECISIONS.md 58). Forecasting and Einstein Activity Capture aren't enabled in `bc-hc-dev`.
+- **Everything else not measurable is the empty dev org.** It has no Opportunities, Leads or Apex.
+
+Not yet exercised live: the web server flow's code exchange and its refresh with rotation. They need someone to sign in.
+
+### What Coby needs to do for the web server flow
+
+1. In `bc-hc-dev`, open Setup, then External Client App Manager, then Black Cloud Barometer. On Settings, under OAuth Settings, click Consumer Key and Secret, and enter the code Salesforce emails. Copy the secret into `~/.barometer/oauth-client.json` as `"clientSecret"`, next to the `clientId` and `redirectUri` already there. Keep the file at mode 600.
+2. Give the read-only user a password: `sf org generate password --on-behalf-of barometer-read-only@black-cloud.com.bc-health-check --target-org bc-hc-dev`.
+3. From `health-check`, run `HC_APPROVED_ORG_ALIASES=bc-hc-dev-web npm run hc -- connect start --connection bc-hc-dev-web --login-url https://bc-health-check-dev-ed.develop.my.salesforce.com`.
+4. Open the URL it prints in a private browser window. Sign in as the read-only user, not as yourself. You should see Black Cloud Barometer asking for "Manage user data via APIs" and "Perform requests at any time". Click Allow.
+5. The browser lands on a localhost page that won't load. Copy the whole address from the address bar within 10 minutes and run `HC_APPROVED_ORG_ALIASES=bc-hc-dev-web npm run hc -- connect finish --connection bc-hc-dev-web --callback-url '<the address>'`. It exchanges the code, stores the tokens, and checks the user can't write.
+6. Run `HC_APPROVED_ORG_ALIASES=bc-hc-dev-web npm run hc -- run --connection bc-hc-dev-web --calibration ~/.barometer/dev/calibration-bc-hc-dev.json --out ~/.barometer/dev-runs`.
+7. Finish with `HC_APPROVED_ORG_ALIASES=bc-hc-dev-web npm run hc -- connect revoke --connection bc-hc-dev-web`.
+
+If step 4 refuses the sign-in because the user is API-only, that answers QUESTIONS.md 23. Record it there. Then repeat with a second test user on the Salesforce Platform licence (20 are free in `bc-hc-dev`), with the "Minimum Access - Salesforce" profile and only Barometer Read Only.
+
+To exercise rotation live, run `hc connect check --connection bc-hc-dev-web` once the session has timed out (two hours by default), and again after the next timeout. Each check has to refresh, and the second only works if the first stored the rotated refresh token.
