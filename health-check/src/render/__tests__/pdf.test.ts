@@ -9,7 +9,7 @@ import type { Browser } from "playwright";
 import type { NarrativeClient } from "../../narrative/client.ts";
 import { Intake } from "../../narrative/intake.ts";
 import { buildReport, currentBody, type BuiltReport, type ReportInput } from "../../narrative/sections.ts";
-import { topIssues, verdictOf } from "../../narrative/select.ts";
+import { buildPlan, topIssues, verdictOf } from "../../narrative/select.ts";
 import { Pseudonymiser, type PseudonymEntry } from "../../privacy/pseudonymiser.ts";
 import { SALES_CLOUD_DOMAINS, type Finding, type NumberOverride, type ReportSection } from "../../schemas/index.ts";
 import { runFromRecording } from "../../testing/harness.ts";
@@ -80,6 +80,20 @@ describe("the executive summary", () => {
     const report = buildReport(full);
     assert.ok(report.teamFindings.some((f) => f.value.kind !== "not_sized" && RAW_DATE.test(f.value.period)), "the sample has a dated period");
     assert.doesNotMatch(pageText(executiveHtml(report, pseudonyms)), RAW_DATE);
+  });
+
+  test("reads as a customer would: no shorthand, raw amounts or actions without a subject", () => {
+    const report = buildReport(full);
+    const html = executiveHtml(report, pseudonyms);
+    const text = pageText(html) + pageText(fullReportHtml(report, pseudonyms));
+    assert.doesNotMatch(text, /Effort (?:XS|S|M|L|XL)\b/);
+    assert.doesNotMatch(text, /Amount of \d/);
+    assert.doesNotMatch(text, /for team /);
+    const plan = buildPlan(report.teamFindings);
+    const shown = plan.reduce((n, p) => n + Math.min(p.findings.length, 5), 0);
+    assert.equal(html.match(/<li><strong>[^<]+\.<\/strong>/g)?.length, shown, "every plan action leads with its issue");
+    // Urgent wording in a later phase contradicts itself.
+    for (const f of plan.slice(1).flatMap((p) => p.findings)) assert.doesNotMatch(f.recommendation, /\b(?:now|this month)\b/i, f.title);
   });
 
   test("names no one", () => {

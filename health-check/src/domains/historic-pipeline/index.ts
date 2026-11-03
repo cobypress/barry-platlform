@@ -5,6 +5,7 @@ import { notSized, type Rule, type RuleContext, type RuleResult } from "../../en
 import type { DomainModule } from "../types.ts";
 import type { Metric, Value } from "../../schemas/index.ts";
 import { loadPipeline } from "./cohort.ts";
+import { money } from "../../render/format.ts";
 import { closedInWindow, dimensions, pipelineMetrics } from "./metrics.ts";
 
 const DIVERGENCE_POINTS = 15;
@@ -107,9 +108,16 @@ function divergenceValue(ctx: RuleContext, metric: Extract<Metric, { status: "me
     kind: "revenue",
     amount: Math.round((amount * points) / 100),
     unit: ctx.calibration.currency,
-    period: `${ctx.window.from} to ${ctx.window.to}`,
-    assumptions: [`${deals.length} won and lost deals in this segment, with a total Amount of ${Math.round(amount)}`, `The gap of ${Math.round(points * 10) / 10} points to your overall win rate of ${metric.value}%`, "Assumes these deals could win as often as the rest. Deal mix or territory may explain part of the gap, so treat this as a ceiling"],
+    period: `in wins the gap may have cost, ${ctx.window.from} to ${ctx.window.to}`,
+    assumptions: [`${deals.length} won and lost deals in this segment, with a total Amount of ${money(amount, ctx.calibration.currency)}`, `The gap of ${Math.round(points * 10) / 10} points to your overall win rate of ${metric.value}%`, "Assumes these deals could win as often as the rest. Deal mix or territory may explain part of the gap, so treat this as a ceiling"],
   };
+}
+
+/** "the Sales EU team", "the Renewal record type". A rep keeps "rep" so team-level text can say "a single rep", and a default key reads as a group of deals. */
+function segmentPhrase(dimension: string, key: string): string {
+  if (dimension === "rep") return `rep ${key}`;
+  if (/^No /.test(key)) return `deals with ${key.toLowerCase()}`;
+  return `the ${key} ${dimension}`;
 }
 
 // Rule 4 for pipeline numbers: a healthy total can hide a team that has collapsed.
@@ -143,8 +151,8 @@ const segmentDivergence: Rule = {
     return outliers.map(({ metric, segment, gap }) => ({
       outcome: "issue" as const,
       key: `${metric.id}:${segment.dimension}:${segment.key}`,
-      title: `${metric.label} for ${segment.dimension} ${segment.key} is well away from the overall figure`,
-      summary: `${metric.label} is ${segment.value}% for ${segment.dimension} ${segment.key} (${segment.n} deals), against ${metric.value}% overall, a gap of ${gap} points.`,
+      title: `${metric.label} for ${segmentPhrase(segment.dimension, segment.key)} is well away from the overall figure`,
+      summary: `${metric.label} is ${segment.value}% for ${segmentPhrase(segment.dimension, segment.key)} (${segment.n} deals), against ${metric.value}% overall, a gap of ${gap} points.`,
       recommendation: "Look at what's different about these deals before drawing a conclusion: sample size, deal type and who's working them.",
       recommendationType: "investigate" as const,
       severity: "high" as const,

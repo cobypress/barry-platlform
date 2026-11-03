@@ -4,7 +4,7 @@ import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { canRelease, type Finding } from "../schemas/index.ts";
 import { scorecardChart, winRateBySegment } from "./charts.ts";
 import { longDate } from "./format.ts";
-import { chartSlot, document, estimateLines, paginate, paragraphs, renderContext, severityChip, valueText, type Render } from "./html.ts";
+import { chartSlot, document, effortText, estimateLines, paginate, paragraphs, renderContext, severityChip, valueText, type Render } from "./html.ts";
 
 // About 6 pages, A4: verdict, scorecard, top five issues with value, 90-day plan.
 
@@ -44,11 +44,12 @@ function issueHeight(f: Finding): number {
 
 function issueCard(r: Render, f: Finding, rank: number): string {
   const value = valueText(r, f);
-  return `<article class="issue"><div class="meta"><span>${rank}</span>${severityChip(f)}<span>Confidence ${f.confidence}</span><span>Effort ${f.effort.size}</span><span>Owner: ${r.t(f.owner)}</span></div><h3>${r.t(f.title)}</h3><p>${r.t(f.summary)}</p><p class="action"><strong>What to do:</strong> ${r.t(f.recommendation)}</p><p class="value">${value.amount}<small>${value.note}</small></p></article>`;
+  return `<article class="issue"><div class="meta"><span>${rank}</span>${severityChip(f)}<span>Confidence ${f.confidence}</span><span>${effortText(f)}</span><span>Owner: ${r.t(f.owner)}</span></div><h3>${r.t(f.title)}</h3><p>${r.t(f.summary)}</p><p class="action"><strong>What to do:</strong> ${r.t(f.recommendation)}</p><p class="value">${value.amount}<small>${value.note}</small></p></article>`;
 }
 
 function phaseBlock(r: Render, phase: PlanPhase): string {
-  const rows = phase.findings.slice(0, TOP_ISSUE_COUNT).map((f) => `<li>${r.t(f.recommendation)} <span class="owner">${r.t(f.owner)}</span></li>`);
+  // The title says what the action is about. A recommendation on its own often says "these deals".
+  const rows = phase.findings.slice(0, TOP_ISSUE_COUNT).map((f) => `<li><strong>${r.t(f.title)}.</strong> ${r.t(f.recommendation)} <span class="owner">${r.t(f.owner)}</span></li>`);
   const body = rows.length ? `<ul>${rows.join("")}</ul>` : "<p>Nothing planned for this phase.</p>";
   return `<section class="phase"><h3>Days ${phase.from} to ${phase.to}: ${phase.title}</h3>${body}</section>`;
 }

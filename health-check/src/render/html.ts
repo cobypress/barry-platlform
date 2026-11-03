@@ -33,14 +33,24 @@ export function severityChip(f: Finding): string {
   return `<span class="chip${alert ? " alert" : ""}">${f.severity.charAt(0).toUpperCase()}${f.severity.slice(1)}</span>`;
 }
 
+/** The figure alone, for a table where the period sentence would not fit. */
+export function valueFigure(r: Render, f: Finding): string {
+  if (f.value.kind === "not_sized") return "Not sized";
+  const currency = /^[A-Z]{3}$/.test(f.value.unit) ? f.value.unit : r.currency;
+  return f.value.kind === "hours" ? `${f.value.amount} hours` : money(f.value.amount, currency);
+}
+
 export function valueText(r: Render, f: Finding): { amount: string; note: string } {
   if (f.value.kind === "not_sized") return { amount: "Not sized", note: r.t(f.value.reason) };
-  const currency = /^[A-Z]{3}$/.test(f.value.unit) ? f.value.unit : r.currency;
-  const amount = f.value.kind === "hours" ? `${f.value.amount} hours` : money(f.value.amount, currency);
-  return { amount: r.t(`${amount} ${f.value.period}`), note: r.t(f.value.assumptions.join(". ")) };
+  return { amount: r.t(`${valueFigure(r, f)} ${f.value.period}`), note: r.t(f.value.assumptions.join(". ")) };
 }
 
 export { compactMoney };
+
+const EFFORT_WORDS: Record<string, string> = { XS: "very small", S: "small", M: "medium", L: "large", XL: "very large" };
+
+/** T-shirt sizes are our shorthand. A reader gets words. */
+export const effortText = (f: Finding): string => `Effort: ${EFFORT_WORDS[f.effort.size] ?? f.effort.size}`;
 
 /** Lines of wrapped text, near enough to decide what fits on a page. */
 export const estimateLines = (text: string, charsPerLine: number): number => Math.max(1, Math.ceil(text.length / charsPerLine));
