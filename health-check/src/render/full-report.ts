@@ -139,6 +139,8 @@ const DENSITIES: Density[] = [
   { critical: 24, high: 24, medium: 24, low: 24, info: 24, columns: 2, domainSummary: true },
 ];
 
+const MANUAL_STATUS: Record<string, string> = { pending: "Not answered yet", answered: "Answered", skipped: "Skipped" };
+
 /** The last resort for a very large org: one table per domain, so the deck has a fixed ceiling. */
 const TABLE_ROWS = 7;
 const COMPACT_NOTE = "This list is cut short to keep the report readable. The raw notes have all of it.";
@@ -300,7 +302,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   slides.push(...(dense ? twoColumnList(r, "Appendix", "Metric definitions", definitions) : listSlides(r, "Appendix", "Metric definitions", definitions, compact)));
   slides.push(...listSlides(r, "Appendix", "What we couldn't measure", team.filter((f) => f.status === "not_measurable").map((f) => ({ title: f.title, detail: f.notMeasurableReason ?? f.summary })), compact));
   slides.push(...listSlides(r, "Appendix", "Checks that passed", team.filter((f) => f.status === "passed").map((f) => ({ title: f.title, detail: f.summary })), compact));
-  slides.push(...listSlides(r, "Appendix", "Manual steps", manualSteps.map((s) => ({ title: s.title, detail: `${s.status}. ${s.whyItMatters}` })), compact));
+  slides.push(...listSlides(r, "Appendix", "Manual steps", manualSteps.map((s) => ({ title: s.title, detail: `${MANUAL_STATUS[s.status] ?? s.status}. ${s.whyItMatters}` })), compact));
   return slides;
 }
 
