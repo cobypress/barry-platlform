@@ -4,10 +4,13 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { z } from "zod";
+import { CONSENT_FILE, defaultBenchmarkDir, exportBenchmark, Industry } from "../benchmark/export.ts";
+import { formatSummary, summariseBenchmarks } from "../benchmark/summary.ts";
 import { BUDGET_DEFAULTS, envNumber } from "../config.ts";
 import { SALES_CLOUD_MODULES } from "../domains/index.ts";
 import { runHealthCheck } from "../engine/run.ts";
-import { Calibration, ManualAnswer } from "../schemas/index.ts";
+import { defaultRunsDir, purgeRun, sweepRuns } from "../retention/purge.ts";
+import { Calibration, HeadcountBand, ManualAnswer } from "../schemas/index.ts";
 import { BudgetStopError } from "../salesforce/budget.ts";
 import { SfCliConnectionProvider } from "../salesforce/sf-cli-provider.ts";
 
@@ -15,17 +18,35 @@ const USAGE = `Black Cloud Barometer
 
   hc run --org <alias> --calibration <file> [options]
   hc render --run <run folder> [--narrative]
+  hc benchmark --run <run folder> --industry <industry> --headcount <band> --consent "<who agreed and how>" [--out <dir>]
+  hc benchmark --summary [--out <dir>]
+  hc purge --run <run folder>
+  hc purge --older-than <days> [--runs <dir>]
 
 Options:
   --answers <file>     Manual step answers (JSON array)
   --out <dir>          Where runs are written. Default: ~/.barometer/runs
+                       For benchmark, the benchmark set's folder. Default: ~/.barometer/benchmarks
   --resume <run id>    Carry on a run that stopped at its API budget
   --budget-share <n>   Stop at this share of the org's daily API limit, 0 to 1
   --api-version <v>    Pin a Salesforce API version, such as 66.0
-  --run <folder>       The run folder to render into
+  --run <folder>       The run folder to render, export or purge
   --narrative          Have Claude draft sections. Needs ANTHROPIC_API_KEY
+  --industry <name>    ${Industry.options.join(", ")}
+  --headcount <band>   ${HeadcountBand.options.join(", ")}
+  --consent <text>     Who at the customer agreed to share anonymised figures, and how
+  --summary            Count benchmark rows by metric and group. No values are shown
+  --older-than <days>  Purge every run whose run date is more than this many days ago
+  --runs <dir>         The runs folder to sweep. Default: ~/.barometer/runs
 
 The org alias must be listed in HC_APPROVED_ORG_ALIASES.
+
+benchmark adds one run's figures to the benchmark set, once, and only with the
+customer's consent, which is recorded in the run folder. It needs the run's raw
+extracts, so export before the run is purged.
+
+purge deletes a run's raw extracts (checkpoints/) and keeps findings, metrics,
+scores, reports and the pseudonym map, so reports can still be rendered.
 
 Exit codes: 0 finished, 2 refused or failed, 3 stopped at the API budget.`;
 
@@ -53,9 +74,50 @@ async function main(argv: string[]): Promise<number> {
       "api-version": { type: "string" },
       run: { type: "string" },
       narrative: { type: "boolean" },
+      industry: { type: "string" },
+      headcount: { type: "string" },
+      consent: { type: "string" },
+      summary: { type: "boolean" },
+      "older-than": { type: "string" },
+      runs: { type: "string" },
       help: { type: "boolean", short: "h" },
     },
   });
+
+  if (positionals[0] === "benchmark" && !values.help) {
+    if (values.summary) {
+      for (const line of formatSummary(summariseBenchmarks(values.out ?? defaultBenchmarkDir()))) console.log(line);
+      return EXIT.ok;
+    }
+    if (!values.run) {
+      console.log(USAGE);
+      return EXIT.failed;
+    }
+    const result = exportBenchmark({ runDir: values.run, industry: values.industry, headcount: values.headcount, consent: values.consent, storeDir: values.out });
+    const band = result.rows[0]!;
+    console.log(`Added ${result.rows.length} rows to ${result.storePath}: users ${band.userBand}, deal size ${band.dealSizeBand}, ${band.period}.`);
+    for (const s of result.skipped) console.log(`  Left out ${s.metricKey}: ${s.reason}`);
+    console.log(`Consent recorded in ${join(values.run, CONSENT_FILE)}`);
+    return EXIT.ok;
+  }
+
+  if (positionals[0] === "purge" && !values.help) {
+    if (values.run) {
+      const result = purgeRun(values.run);
+      console.log(result.purged ? `Purged ${result.runId}: ${result.filesDeleted} raw extract files deleted.` : `${result.runId} was ${result.note}. Nothing deleted.`);
+      return EXIT.ok;
+    }
+    if (values["older-than"] === undefined) {
+      console.log(USAGE);
+      return EXIT.failed;
+    }
+    const days = Number(values["older-than"]);
+    const sweep = sweepRuns(values.runs ?? defaultRunsDir(), days);
+    for (const p of sweep.purged) console.log(`Purged ${p.runId}: ${p.filesDeleted} raw extract files deleted.`);
+    for (const s of sweep.skipped) console.log(`Skipped ${s.folder}: ${s.reason}`);
+    console.log(`${sweep.purged.length} purged. ${sweep.kept} left alone, being newer than ${days} days or already purged.`);
+    return EXIT.ok;
+  }
 
   if (positionals[0] === "render" && values.run) {
     // Loaded here so `hc run` never needs Chromium or the Claude SDK.
