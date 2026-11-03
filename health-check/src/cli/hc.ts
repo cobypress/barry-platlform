@@ -13,17 +13,23 @@ import { defaultRunsDir, purgeRun, sweepRuns } from "../retention/purge.ts";
 import { Calibration, HeadcountBand, ManualAnswer } from "../schemas/index.ts";
 import { BudgetStopError } from "../salesforce/budget.ts";
 import { SfCliConnectionProvider } from "../salesforce/sf-cli-provider.ts";
+import type { ConnectionProvider } from "../salesforce/connection.ts";
+import { OAuthConnectionProvider } from "../salesforce/oauth-provider.ts";
+import { CONNECT_USAGE, connectCommand, connectionStore, oauthClient } from "./connect.ts";
 
 const USAGE = `Black Cloud Barometer
 
   hc run --org <alias> --calibration <file> [options]
+  hc run --connection <name> --calibration <file> [options]
   hc render --run <run folder> [--narrative]
   hc benchmark --run <run folder> --consent "<who agreed and how>" [--industry <industry>] [--headcount <band>] [--out <dir>]
   hc benchmark --summary [--out <dir>]
   hc purge --run <run folder>
   hc purge --older-than <days> [--runs <dir>]
+${CONNECT_USAGE.trimEnd()}
 
 Options:
+  --connection <name>  Run through a stored OAuth connection instead of a CLI alias
   --answers <file>     Manual step answers (JSON array)
   --out <dir>          Where runs are written. Default: ~/.barometer/runs
                        For benchmark, the benchmark set's folder. Default: ~/.barometer/benchmarks
@@ -39,7 +45,7 @@ Options:
   --older-than <days>  Purge every run whose run date is more than this many days ago
   --runs <dir>         The runs folder to sweep. Default: ~/.barometer/runs
 
-The org alias must be listed in HC_APPROVED_ORG_ALIASES.
+The org alias or connection name must be listed in HC_APPROVED_ORG_ALIASES.
 
 benchmark adds one run's figures to the benchmark set, once, and only with the
 customer's consent, which is recorded in the run folder. It needs the run's raw
@@ -51,6 +57,14 @@ scores, reports and the pseudonym map, so reports can still be rendered.
 Exit codes: 0 finished, 2 refused or failed, 3 stopped at the API budget.`;
 
 export const EXIT = { ok: 0, failed: 2, budget: 3 } as const;
+
+function optionalClient(): ReturnType<typeof oauthClient> | undefined {
+  try {
+    return oauthClient();
+  } catch {
+    return undefined;
+  }
+}
 
 function readJsonFile(path: string): unknown {
   try {
@@ -66,6 +80,10 @@ async function main(argv: string[]): Promise<number> {
     allowPositionals: true,
     options: {
       org: { type: "string" },
+      connection: { type: "string" },
+      "login-url": { type: "string" },
+      "callback-url": { type: "string" },
+      config: { type: "string" },
       calibration: { type: "string" },
       answers: { type: "string" },
       out: { type: "string" },
@@ -119,6 +137,8 @@ async function main(argv: string[]): Promise<number> {
     return EXIT.ok;
   }
 
+  if (positionals[0] === "connect") return connectCommand(values.help ? undefined : positionals[1], values);
+
   if (positionals[0] === "render" && values.run) {
     // Loaded here so `hc run` never needs Chromium or the Claude SDK.
     const { renderRun } = await import("../render/render-run.ts");
@@ -133,7 +153,8 @@ async function main(argv: string[]): Promise<number> {
     return result.passed ? EXIT.ok : EXIT.failed;
   }
 
-  if (values.help || positionals[0] !== "run" || !values.org || !values.calibration) {
+  // Exactly one of --org and --connection.
+  if (values.help || positionals[0] !== "run" || !values.org === !values.connection || !values.calibration) {
     console.log(USAGE);
     return values.help ? EXIT.ok : EXIT.failed;
   }
@@ -142,8 +163,15 @@ async function main(argv: string[]): Promise<number> {
   const answers = values.answers ? z.array(ManualAnswer).parse(readJsonFile(values.answers)) : [];
   const stopAtShare = values["budget-share"] ? Number(values["budget-share"]) : envNumber("HC_API_BUDGET_SHARE", BUDGET_DEFAULTS.stopAtShare);
 
+  // A web server connection refreshes with the app's secret, so the OAuth client
+  // is read if there is one. A JWT bearer connection doesn't need it.
+  const provider: ConnectionProvider = values.connection
+    ? new OAuthConnectionProvider(values.connection, { store: connectionStore(), client: optionalClient() })
+    : new SfCliConnectionProvider(values.org!);
+  const target = values.connection ? `--connection ${values.connection}` : `--org ${values.org}`;
+
   const { run, dir, output } = await runHealthCheck({
-    provider: new SfCliConnectionProvider(values.org),
+    provider,
     calibration,
     modules: SALES_CLOUD_MODULES,
     outDir: values.out ?? join(homedir(), ".barometer", "runs"),
@@ -155,7 +183,7 @@ async function main(argv: string[]): Promise<number> {
   });
 
   if (run.status === "stopped_budget") {
-    console.log(`\nStopped: ${run.budget.stoppedReason}\nResume with: hc run --org ${values.org} --calibration ${values.calibration} --resume ${run.id}`);
+    console.log(`\nStopped: ${run.budget.stoppedReason}\nResume with: hc run ${target} --calibration ${values.calibration} --resume ${run.id}`);
     return EXIT.budget;
   }
   const issues = output!.findings.filter((f) => f.status === "issue").length;

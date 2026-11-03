@@ -4,6 +4,7 @@ import { BUDGET_DEFAULTS, SF_DEFAULTS } from "../config.ts";
 import { authorise, ForbiddenOperationError, type SfRequest } from "./allowlist.ts";
 import { ApiBudget, BudgetStopError } from "./budget.ts";
 import type { ConnectionProvider, OrgConnection } from "./connection.ts";
+import { instanceOrigin } from "./hosts.ts";
 import { fetchTransport, type Transport, type TransportResponse } from "./transport.ts";
 
 export type QueryApi = "rest" | "tooling";
@@ -66,26 +67,9 @@ function soapEnvelope(token: string, body: string): string {
   );
 }
 
-const SALESFORCE_HOSTS = [".salesforce.com", ".force.com", ".cloudforce.com", ".salesforce.mil", ".force.mil", ".cloudforce.mil"];
 const QUERY_MORE = /\/query\/[A-Za-z0-9]{15,18}-\d+$/;
 
-/**
- * The token goes wherever this points, so it's parsed rather than prefix-checked:
- * "https://x.salesforce.com@evil.example" starts with https and is evil.example.
- * A test transport never leaves the process, so only the real one checks the host.
- */
-export function instanceOrigin(instanceUrl: string, checkHost: boolean): string {
-  let url: URL;
-  try {
-    url = new URL(instanceUrl);
-  } catch {
-    throw new Error("The instance URL isn't a valid URL");
-  }
-  if (url.protocol !== "https:") throw new Error("The instance URL must be https");
-  if (url.username || url.password || url.search || url.hash || url.pathname !== "/") throw new Error("The instance URL must be a bare host");
-  if (checkHost && !SALESFORCE_HOSTS.some((suffix) => url.hostname.endsWith(suffix))) throw new Error("The instance URL isn't a Salesforce host");
-  return url.origin;
-}
+export { instanceOrigin };
 
 type SendOptions = { soapOperation?: string; contentType?: string };
 

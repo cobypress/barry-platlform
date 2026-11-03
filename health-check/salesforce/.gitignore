@@ -1,0 +1,3 @@
+# Salesforce CLI state from deploys. It can hold org ids and usernames.
+.sf/
+.sfdx/

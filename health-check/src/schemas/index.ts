@@ -7,3 +7,4 @@ export * from "./manual.ts";
 export * from "./report.ts";
 export * from "./benchmark.ts";
 export * from "./run.ts";
+export * from "./connect.ts";
