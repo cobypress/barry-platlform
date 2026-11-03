@@ -113,7 +113,7 @@ const eventLinkCollapse: Rule = {
       summary: overall.collapsed
         ? `Events linked to a record fell from ${overall.prior.share}% to ${overall.recent.share}% in the last ${RECENT_MONTHS} whole months. ${volume}`
         : `The overall linked share looks fine at ${overall.recent.share}%, but it has fallen by at least half for ${hotspots[0]!.dimension} ${hotspots[0]!.key}, from ${hotspots[0]!.comparison.prior.share}% to ${hotspots[0]!.comparison.recent.share}%.`,
-      recommendation: "Find what changed at the start of the fall. Check Einstein Activity Capture's Relate Synced Events setting, and any change to how calendars sync.",
+      recommendation: "Find what changed when the drop began. Check Einstein Activity Capture's Relate Synced Events setting, and any change to how calendars sync.",
       recommendationType: "investigate",
       severity: "high",
       confidence: "high",

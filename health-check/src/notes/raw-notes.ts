@@ -1,5 +1,6 @@
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import type { Calibration, Evidence, Finding, ManualStep, Metric, Run, Score } from "../schemas/index.ts";
+import { domainLabel } from "../narrative/select.ts";
 
 // The Markdown forerunner of the Word raw notes. This is the one place tokens
 // become names, because this document is what the customer's admin reads.
@@ -89,7 +90,7 @@ function manualBlock(s: ManualStep): string {
   ].join("\n");
 }
 
-const scoreLine = (s: Score): string => `| ${s.domain} | ${s.status === "measured" ? s.score : `Not measurable. ${s.reason}`} |`;
+const scoreLine = (s: Score): string => `| ${domainLabel(s.domain)} | ${s.status === "measured" ? s.score : `Not measurable. ${s.reason}`} |`;
 
 export function renderRawNotes(input: { run: Run; calibration: Calibration; findings: Finding[]; metrics: Metric[]; manualSteps: ManualStep[]; pseudonyms: Pseudonymiser; scores?: Score[] }): string {
   const { run, calibration, findings, metrics, manualSteps, pseudonyms, scores = [] } = input;

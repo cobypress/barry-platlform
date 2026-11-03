@@ -188,7 +188,7 @@ function fullSpecs(input: ReportInput, team: Finding[], metrics: Metric[]): Spec
       return {
         key: `domain_${domain}`,
         title: label,
-        body: issues.length ? `We found ${plural(issues.length, "issue")} here. ${issues[0]!.summary}` : "We found no issues here.",
+        body: issues.length ? `We found ${plural(issues.length, "issue")} here. Start with this: ${issues[0]!.title}.` : "We found no issues here.",
         findingIds: own.map((f) => f.id),
         metricIds: measured.map((m) => m.id),
         sources: [SOURCE.summary],

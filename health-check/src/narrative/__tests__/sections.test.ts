@@ -100,7 +100,7 @@ describe("what the engine can't know", () => {
 
   test("engine text that fails the number check goes to a person", () => {
     const f = base.findings.find((x) => x.domain === "automation" && x.status === "issue")!;
-    const broken = { ...f, severity: "critical" as const, summary: "The rate is 12,5%." };
+    const broken = { ...f, severity: "critical" as const, title: "The rate is 12,5%", summary: "The rate is 12,5%." };
     const { report } = all({ ...base, findings: [broken, ...base.findings.filter((x) => x.id !== f.id)] });
     const section = report.outputs.full_health_check.sections.find((s) => s.key === "domain_automation")!;
     assert.equal(section.status, "needs_input");

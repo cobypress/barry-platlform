@@ -8,6 +8,7 @@ import { apexExtractor, metadataExtractor } from "../../extract/automation.ts";
 import { ownershipExtractor } from "../../extract/users.ts";
 import { opportunitiesExtractor } from "../../extract/opportunities.ts";
 import { Finding } from "../../schemas/index.ts";
+import { USER_GUARD_IDS } from "../../guards/user-guards.ts";
 
 let extracts: Map<string, unknown>;
 let tokenOf: (n: number) => string;
@@ -155,6 +156,19 @@ describe("licence guards (rule 3)", () => {
     const blocked = findings.find((f) => f.ruleId === "utl.dormant-licensed-users")!;
     assert.equal(blocked.recommendationType, "investigate");
     assert.equal(blocked.value.kind, "not_sized");
+  });
+
+  test("blocked licences say what's in the way in plain words, never a guard id", () => {
+    for (const answers of [undefined, loadAnswers()]) {
+      const blocked = analyseExtracts(extracts, { answers }).findings.find((f) => f.ruleId === "utl.dormant-licensed-users" && f.recommendationType === "investigate")!;
+      for (const id of USER_GUARD_IDS) assert.ok(!blocked.summary.includes(id), `${id} in: ${blocked.summary}`);
+    }
+    const blocked = analyseExtracts(extracts, { answers: loadAnswers() }).findings.find((f) => f.ruleId === "utl.dormant-licensed-users" && f.recommendationType === "investigate")!;
+    assert.match(blocked.summary, /still owns records \(\d+\)/);
+    // With no answer, the Default Workflow User check can't finish, which is counted, not named.
+    const unanswered = analyseExtracts(extracts).findings.find((f) => f.ruleId === "utl.dormant-licensed-users" && f.recommendationType === "investigate")!;
+    assert.match(unanswered.summary, /couldn't complete every check/);
+    assert.doesNotMatch(unanswered.summary, /Default Workflow User/);
   });
 
   test("the one clean dormant user is the only recommendation, with a saving", () => {

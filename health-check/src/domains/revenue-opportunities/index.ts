@@ -1,3 +1,4 @@
+import { money } from "../../render/format.ts";
 import { schemaExtractor } from "../../extract/configuration.ts";
 import { opportunitiesExtractor, stagesExtractor, wonAccountsExtractor } from "../../extract/opportunities.ts";
 import { daysBefore, monthsBefore } from "../../extract/types.ts";
@@ -54,7 +55,7 @@ const stalledDeals: Rule = {
     const value = atOwnWinRate(ctx, amount, {
       multiCurrency: data.multiCurrency,
       period: "one-off, if these deals are re-engaged",
-      basis: `${plural(stalled.length, "stalled deal")} with a total Amount of ${Math.round(amount)}`,
+      basis: `${plural(stalled.length, "stalled deal")} with a total Amount of ${money(amount, ctx.calibration.currency)}`,
       caveat: "Assumes a re-engaged deal wins as often as an average deal. Stalled deals usually win less often, so treat this as a ceiling",
     });
     return {
@@ -100,7 +101,7 @@ const winBacks: Rule = {
     const value = atOwnWinRate(ctx, amount, {
       multiCurrency: data.multiCurrency,
       period: "one-off, if these deals are reopened",
-      basis: `${plural(candidates.length, "deal")} with a total Amount of ${Math.round(amount)}, at the amount quoted then`,
+      basis: `${plural(candidates.length, "deal")} with a total Amount of ${money(amount, ctx.calibration.currency)}, at the amount quoted then`,
       caveat: "Assumes a win-back wins as often as a new deal. We don't have your win-back history, so treat this as a ceiling, and the reason each deal was lost may still stand",
     });
     return {
