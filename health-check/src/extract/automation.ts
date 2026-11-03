@@ -14,7 +14,7 @@ const RETRIEVE_TYPES = [
 
 export const metadataExtractor: Extractor<Sourced<MetadataBundle>> = {
   id: "metadata",
-  version: 2,
+  version: 3,
   async run(ctx) {
     const source: SourceInfo = { kind: "metadata", path: RETRIEVE_TYPES.map((t) => t.name).join(", ") };
     try {
@@ -26,8 +26,11 @@ export const metadataExtractor: Extractor<Sourced<MetadataBundle>> = {
   },
 };
 
-export type ApexClassRow = { Id: string; Name: string; ApiVersion: number; Status: string; LengthWithoutComments: number };
-export type ApexTriggerRow = { Id: string; Name: string; TableEnumOrId: string; ApiVersion: number; Status: string };
+// The body isn't kept, so what rules need from it is worked out here: whether it
+// has any comment, and whether it's a test. Null when the body is hidden.
+type CodeFacts = { commented: boolean | null; isTest: boolean };
+export type ApexClassRow = { Id: string; Name: string; ApiVersion: number; Status: string; LengthWithoutComments: number } & CodeFacts;
+export type ApexTriggerRow = { Id: string; Name: string; TableEnumOrId: string; ApiVersion: number; Status: string } & CodeFacts;
 export type ClassCoverage = { name: string; covered: number; uncovered: number };
 
 export type ApexData = {
@@ -40,28 +43,31 @@ export type ApexData = {
 
 // Bodies are scanned for references here and then dropped, so code never sits
 // in a checkpoint.
-function stripBodies<R extends { Name: string; Body?: string }>(rows: Sourced<R[]>, prefix: string, references: ReferenceIndex): Sourced<Array<Omit<R, "Body">>> {
+const COMMENT = /\/\/|\/\*/;
+
+function stripBodies<R extends { Name: string; Body?: string }>(rows: Sourced<R[]>, prefix: string, references: ReferenceIndex): Sourced<Array<Omit<R, "Body"> & CodeFacts>> {
   if (rows.status !== "ok") return rows;
   const data = rows.data.map(({ Body, ...row }) => {
     if (Body) indexReferences(references, redactSecrets(Body), `${prefix}/${row.Name}`);
-    return row;
+    const readable = Boolean(Body) && Body !== "(hidden)";
+    return { ...row, commented: readable ? COMMENT.test(Body!) : null, isTest: readable && /@isTest/i.test(Body!) };
   });
   return { ...rows, data };
 }
 
 export const apexExtractor: Extractor<ApexData> = {
   id: "apex",
-  version: 2,
+  version: 3,
   async run(ctx) {
     const references: ReferenceIndex = { users: {}, fields: {} };
-    const classes = await readSoql<ApexClassRow & { Body?: string }>(
+    const classes = await readSoql<Omit<ApexClassRow, keyof CodeFacts> & { Body?: string }>(
       ctx,
       "SELECT Id, Name, ApiVersion, Status, LengthWithoutComments, Body FROM ApexClass WHERE NamespacePrefix = null",
       { api: "tooling" },
     );
     // Through REST, not Tooling: the Tooling reference doesn't list Name,
     // TableEnumOrId or NamespacePrefix on ApexTrigger, and the Object Reference does.
-    const triggers = await readSoql<ApexTriggerRow & { Body?: string }>(
+    const triggers = await readSoql<Omit<ApexTriggerRow, keyof CodeFacts> & { Body?: string }>(
       ctx,
       "SELECT Id, Name, TableEnumOrId, ApiVersion, Status, Body FROM ApexTrigger WHERE NamespacePrefix = null",
     );

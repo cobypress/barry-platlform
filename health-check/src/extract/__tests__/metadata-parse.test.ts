@@ -31,7 +31,16 @@ describe("workflow rules and objects", () => {
     const opportunity = bundle.workflows.find((w) => w.object === "Opportunity")!;
     assert.deepEqual(opportunity.rules.map((r) => [r.name, r.active]), [["Notify_Large_Deal", true], ["Old_Rule", false]]);
   });
-  test("reads validation rules", () => assert.deepEqual(bundle.validationRules, [{ object: "Opportunity", name: "Needs_Competitor", active: true }]));
+  test("reads validation rules", () => assert.deepEqual(bundle.validationRules, [{ object: "Opportunity", name: "Needs_Competitor", active: true, described: true }]));
+  test("reads which of your own custom fields have help text or a description", () =>
+    assert.deepEqual(
+      bundle.customFields.map((f) => [f.name, f.described, f.helpText]),
+      [["Old_Region__c", false, false], ["Legacy_Code__c", false, false], ["Deal_Score__c", false, false], ["Competitor__c", false, true]],
+    ));
+  test("reads which flows and workflow rules have a description", () => {
+    assert.deepEqual(bundle.flows.filter((f) => f.described).map((f) => f.name), ["Lead_Assign"]);
+    assert.ok(bundle.workflows.flatMap((w) => w.rules).every((r) => !r.described));
+  });
   test("package.xml isn't counted", () => assert.equal(bundle.filesRead, Object.keys(METADATA_FILES).length - 1));
 });
 

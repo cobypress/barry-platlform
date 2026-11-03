@@ -160,7 +160,7 @@ const missingAmount = dealRule({
   issueTitle: "Open deals are missing an amount",
   sentence: (hits, n, rate) =>
     `Open deals with no amount: ${hits} of ${n} (${rate}%). These deals count for nothing in your pipeline value, so it looks smaller than it is, and you can't see what work is coming or weigh one deal against another. When enough are blank, nobody can tell how much of the pipeline rests on a few accounts or people.`,
-  recommendation: "Require an amount from the stage where a price is normally known, even an estimate, and fill in the open deals that have none.",
+  recommendation: "Require an amount, even an estimate, once a price is known, and fill in the gaps.",
   effort: "S",
   owner: "Sales operations",
   sized: false,

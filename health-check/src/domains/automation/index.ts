@@ -9,6 +9,8 @@ const CLASS_COVERAGE_FLOOR = 50;
 const MIN_CLASS_LINES = 20;
 const API_VERSIONS_BEHIND = 15;
 const MIXED_AUTOMATION_LIMIT = 3;
+// Our judgement: past this, nobody new can tell what the automation does or why.
+const UNDOCUMENTED_LIMIT = 50;
 
 function metadataOr(ctx: RuleContext): { bundle: MetadataBundle } | NotMeasurableResult {
   const metadata = ctx.data(metadataExtractor);
@@ -115,7 +117,7 @@ const mixedAutomation: Rule = {
       outcome: "issue",
       title: "Automation on some objects is split across several tools",
       summary: `${mixed.map(([o, set]) => `${o} runs ${[...set].sort().join(", ")}`).join("; ")}. Salesforce runs these at different points when a record saves, so the outcome can be hard to predict.`,
-      recommendation: "For each of these objects, decide what belongs in Apex and what belongs in Flow, then retire the older tools into that split with a defined order of execution. Complex or high-volume logic is often better kept in Apex.",
+      recommendation: "Decide for each object what belongs in Apex and what in Flow, then retire the older tools into that split.",
       recommendationType: "change",
       severity: "medium",
       confidence: "high",
@@ -191,6 +193,64 @@ const missingFaultPaths: Rule = {
       segmentsChecked: segments,
       subjects: affected.map((f) => ({ type: "flow", label: f.name })),
       facts: { affected: affected.length, flowsWritingData: active.length, missingFaultPaths: missing },
+    };
+  },
+};
+
+// A real customer's main complaint was an org nobody could pick up: a lot of
+// automation and no record of what it does. Salesforce keeps a description on
+// flows and rules, and code keeps comments, so their absence is measurable.
+const undocumentedAutomation: Rule = {
+  id: "aut.undocumented-automation",
+  version: 1,
+  domain: "automation",
+  title: "Automation with no description of what it does",
+  evaluate(ctx): RuleResult | RuleResult[] {
+    const result = metadataOr(ctx);
+    if ("outcome" in result) return result;
+    const { classes, triggers } = ctx.data(apexExtractor);
+    if (classes.status !== "ok") return { outcome: "not_measurable", reason: `Apex classes couldn't be read: ${classes.reason}`, evidence: [ctx.ev(classes.source, { count: null })] };
+    if (triggers.status !== "ok") return { outcome: "not_measurable", reason: `Apex triggers couldn't be read: ${triggers.reason}`, evidence: [ctx.ev(triggers.source, { count: null })] };
+    const { flows, workflows, validationRules } = result.bundle;
+    // Test classes document nothing a maintainer needs.
+    const code = [...classes.data, ...triggers.data].filter((c) => c.Status === "Active" && !c.isTest && c.commented !== null);
+    const groups = [
+      { kind: "Flows", items: flows.filter((f) => f.status === "Active" && f.processType !== "Workflow"), undocumented: (f: { described: boolean }) => !f.described },
+      { kind: "Process Builders", items: flows.filter((f) => f.status === "Active" && f.processType === "Workflow"), undocumented: (f: { described: boolean }) => !f.described },
+      { kind: "Workflow Rules", items: workflows.flatMap((w) => w.rules.filter((r) => r.active)), undocumented: (r: { described: boolean }) => !r.described },
+      { kind: "Validation rules", items: validationRules.filter((v) => v.active), undocumented: (v: { described: boolean }) => !v.described },
+      { kind: "Apex classes and triggers", items: code, undocumented: (c: { commented: boolean | null }) => !c.commented },
+    ].map((g) => ({ kind: g.kind, total: g.items.length, missing: (g.items as Array<never>).filter(g.undocumented).length }));
+    const present = groups.filter((g) => g.total > 0);
+    const total = present.reduce((sum, g) => sum + g.total, 0);
+    const missing = present.reduce((sum, g) => sum + g.missing, 0);
+    const evidence = [
+      ctx.ev({ kind: "metadata", path: "flows, workflows, objects" }, { count: total - code.length, exclusions: ["Inactive flows and rules"], note: "Description element" }),
+      ctx.ev(classes.source, { count: code.length, exclusions: ["Test classes", "Inactive or hidden code"], note: "Any comment in the code" }),
+    ];
+    const segments = [{ dimension: "component type", segments: present.length }];
+    if (total === 0) return { outcome: "pass", summary: "There's no active automation to document.", evidence, segmentExemptReason: "Nothing to segment." };
+    const rate = Math.round((missing / total) * 1000) / 10;
+    const worst = [...present].sort((a, b) => b.missing / b.total - a.missing / a.total)[0]!;
+    const facts = { total, missing, rate };
+    const breakdown = present.map((g) => `${g.kind}: ${g.missing} of ${g.total}`).join(", ");
+    if (rate <= UNDOCUMENTED_LIMIT && worst.missing / worst.total <= 0.8) {
+      return { outcome: "pass", summary: `Automation with no description or comment: ${missing} of ${total} (${rate}%). ${breakdown}.`, evidence, segmentsChecked: segments, facts };
+    }
+    return {
+      outcome: "issue",
+      title: "Most automation has no description of what it does",
+      summary: `Active automation with no description or comment: ${missing} of ${total} (${rate}%). ${breakdown}. Without one, anyone new has to read each component to learn what it does and why, and changing it safely depends on whoever built it.`,
+      recommendation: "Describe what each flow, rule and class does and why, starting with your busiest objects, and require it for anything new.",
+      recommendationType: "change",
+      severity: "medium",
+      confidence: "high",
+      evidence,
+      value: notSized("The cost is the time it takes to understand, change and hand over the org, which we can't measure from metadata."),
+      effort: { size: "L" },
+      owner: "Salesforce admin",
+      segmentsChecked: segments,
+      facts,
     };
   },
 };
@@ -334,5 +394,5 @@ export const automationModule: DomainModule = {
   cloud: "sales",
   label: "Automation and code",
   extractors: [metadataExtractor, apexExtractor, scheduledJobsExtractor],
-  rules: [legacyWorkflowRules, legacyProcessBuilder, mixedAutomation, hardcodedIds, missingFaultPaths, oldApiVersions, apexCoverage, multipleTriggers],
+  rules: [legacyWorkflowRules, legacyProcessBuilder, mixedAutomation, hardcodedIds, missingFaultPaths, undocumentedAutomation, oldApiVersions, apexCoverage, multipleTriggers],
 };

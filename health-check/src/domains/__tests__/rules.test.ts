@@ -346,6 +346,27 @@ describe("data quality", () => {
     assert.equal(byRule(analyseExtracts(changed).findings, "dq.loss-reason-missing")[0]?.status, "not_measurable");
   });
   test("records with inactive owners", () => assert.equal(issue(analyseExtracts(extracts).findings, "dq.records-inactive-owner").facts.strandedTotal, 190));
+  test("undocumented automation is counted by type, with tests and hidden code left out", () => {
+    const f = issue(analyseExtracts(extracts).findings, "aut.undocumented-automation");
+    // Flows 2 of 3, Process Builders 1 of 1, Workflow Rules 2 of 2, validation rules 0 of 1,
+    // code 5 of 6: the commented class counts, the test class doesn't.
+    assert.deepEqual(f.facts, { total: 13, missing: 10, rate: 76.9 });
+    assert.match(f.summary, /Validation rules: 0 of 1/);
+  });
+  test("documented automation passes", () => {
+    const changed = clone(extracts);
+    const metadata = changed.get(metadataExtractor.id) as { data: { flows: Array<{ described: boolean }>; workflows: Array<{ rules: Array<{ described: boolean }> }> } };
+    for (const f of metadata.data.flows) f.described = true;
+    for (const r of metadata.data.workflows.flatMap((w) => w.rules)) r.described = true;
+    const apex = changed.get(apexExtractor.id) as { classes: { data: Array<{ commented: boolean | null }> }; triggers: { data: Array<{ commented: boolean | null }> } };
+    for (const c of [...apex.classes.data, ...apex.triggers.data]) c.commented = true;
+    assert.equal(byRule(analyseExtracts(changed).findings, "aut.undocumented-automation")[0]?.status, "passed");
+  });
+  test("custom fields with no help text or description", () => {
+    const f = issue(analyseExtracts(extracts).findings, "cfg.undocumented-fields");
+    assert.deepEqual(f.facts, { fields: 4, bare: 3, rate: 75, noHelpText: 3 });
+    assert.deepEqual(f.subjects.map((s) => s.label), ["Opportunity"]);
+  });
   test("duplicate rules only count when active", () => assert.deepEqual(issue(analyseExtracts(extracts).findings, "dq.duplicate-rules-missing").subjects.map((s) => s.label), ["Account", "Contact"]));
   test("a missing duplicate rule on Lead isn't raised when no leads are created", () => {
     // As seen on a real org that doesn't use leads.
