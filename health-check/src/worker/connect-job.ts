@@ -1,3 +1,5 @@
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { checkReadOnlyUser, type ReadOnlyCheck } from "../connect/read-only-check.ts";
 import { ApiBudget } from "../salesforce/budget.ts";
 import { SalesforceClient } from "../salesforce/client.ts";
@@ -56,19 +58,40 @@ export async function processConnectJob(linkId: string, deps: WorkerDeps, attemp
   return withJobLock(deps.locksDir, `connect-${linkId.toLowerCase()}`, () => connectLocked(linkId, deps, attempt));
 }
 
+/** A refusal decided but not yet recorded, kept on the worker's disk so a retry records the same one without a second exchange. */
+const journalPath = (deps: WorkerDeps, linkId: string): string => join(deps.locksDir, `connect-${linkId.toLowerCase()}.refusal.json`);
+
+function readJournal(path: string): string | null {
+  try {
+    const reason = (JSON.parse(readFileSync(path, "utf8")) as { reason?: unknown }).reason;
+    return typeof reason === "string" && reason ? reason : null;
+  } catch {
+    return null;
+  }
+}
+
 async function connectLocked(linkId: string, deps: WorkerDeps, attempt: Attempt): Promise<JobOutcome> {
   const log = deps.log ?? (() => {});
   const at = () => (deps.now ?? (() => new Date()))().toISOString();
   const job = await deps.store.loadConnectJob(linkId);
   if (!job) return { outcome: "skipped", detail: `No link ${linkId}` };
-  // Settled already, by an earlier delivery of this job or by the console.
-  if (job.state !== "pending") return { outcome: "skipped", detail: `The link is ${job.state}, so there's nothing to do` };
   const { link } = job;
   const name = link.connectionName;
+  const journal = journalPath(deps, linkId);
   const secrets: Array<string | undefined> = [];
   // Set once tokens from this sign-in are in the store, so any failure after that forgets them.
   let holding = false;
   let previous: StoredConnection | undefined;
+
+  /** Revokes and forgets whatever the store holds from this link, whichever sign-in it came from. */
+  const releaseBound = async (): Promise<boolean> => {
+    if (!deps.tokens.has(name)) return false;
+    const held = await deps.tokens.load(name).catch(() => undefined);
+    if (held?.fromLink?.linkId !== link.id) return false;
+    secrets.push(held.accessToken, held.refreshToken);
+    await disconnect(name, deps, log);
+    return true;
+  };
 
   /** Forgets this sign-in's tokens, revoking them at Salesforce, and puts back any older connection. */
   const letGo = async (): Promise<boolean> => {
@@ -79,11 +102,34 @@ async function connectLocked(linkId: string, deps: WorkerDeps, attempt: Attempt)
     return revoked;
   };
 
+  /**
+   * Written down first, then the tokens go, then the console is told. If the
+   * console can't be told, the next delivery finds the note and tells it the
+   * same thing, rather than spending the code again and losing the reason.
+   */
   const refuse = async (reason: string): Promise<JobOutcome> => {
     const text = safeReason(new Error(reason), secrets);
+    if (readJournal(journal) !== text) {
+      mkdirSync(deps.locksDir, { recursive: true, mode: 0o700 });
+      writeFileSync(journal, JSON.stringify({ reason: text, at: at() }), { mode: 0o600 });
+    }
+    await letGo();
+    await releaseBound();
     await deps.store.refuseLink(linkId, text, at());
+    rmSync(journal, { force: true });
     return { outcome: "refused", detail: text };
   };
+
+  // Settled already, by an earlier delivery of this job or by the console. A
+  // link that never connected keeps no tokens: an earlier delivery may have
+  // stored some before the console withdrew it.
+  if (job.state !== "pending") {
+    rmSync(journal, { force: true });
+    const released = job.state !== "used" && !link.usedAt && (await releaseBound());
+    return { outcome: "skipped", detail: `The link is ${job.state}, so there's nothing to do${released ? ". We disconnected the tokens an earlier attempt had stored" : ""}` };
+  }
+  const decided = readJournal(journal);
+  if (decided) return refuse(decided);
 
   try {
     if (link.revokedAt) throw new Refusal("This link was withdrawn. Ask your Black Cloud consultant for a new one.");
@@ -102,13 +148,18 @@ async function connectLocked(linkId: string, deps: WorkerDeps, attempt: Attempt)
     }
     if (pending.linkId !== link.id) throw new Refusal(`The saved sign-in belongs to a different link. ${START_AGAIN}`);
 
-    // A connection under this name already? If it was made after this sign-in
-    // began, it's ours from an earlier delivery that stopped after storing it:
-    // the code is spent, so carry on to the check. Otherwise it's an older one,
-    // kept aside in case the new user turns out able to write.
-    const existing = deps.tokens.has(name) ? await deps.tokens.load(name) : undefined;
+    // A connection under this name already? If it's bound to this link and this
+    // sign-in, it's ours from an earlier delivery that stopped after storing it:
+    // the code is spent, so carry on to the check. Bound to this link but an
+    // earlier sign-in, it was abandoned, so it goes. Anything else is an older
+    // connection, kept aside in case the new user turns out able to write.
+    let existing = deps.tokens.has(name) ? await deps.tokens.load(name) : undefined;
     if (existing) secrets.push(existing.accessToken, existing.refreshToken);
-    const ours = existing !== undefined && existing.grant === "web-server" && Date.parse(existing.connectedAt) >= Date.parse(pending.createdAt);
+    const ours = existing?.fromLink?.linkId === link.id && existing.fromLink.stateHash === pending.stateHash;
+    if (existing && !ours && existing.fromLink?.linkId === link.id) {
+      await releaseBound();
+      existing = undefined;
+    }
     previous = ours ? undefined : existing;
     holding = ours;
 
@@ -137,6 +188,7 @@ async function connectLocked(linkId: string, deps: WorkerDeps, attempt: Attempt)
           refreshToken: tokens.refreshToken,
           issuedAt: tokens.issuedAt,
           connectedAt: at(),
+          fromLink: { linkId: link.id, stateHash: pending.stateHash },
         }),
       );
       holding = true;
@@ -153,11 +205,11 @@ async function connectLocked(linkId: string, deps: WorkerDeps, attempt: Attempt)
       // A retry finds the stored connection and checks again. On the last try,
       // a connection nobody could check isn't kept.
       if (!attempt.final) throw err;
-      await letGo();
       throw new Refusal(`We couldn't check the user's permissions (${safeReason(err, secrets)}), so we disconnected. ${START_AGAIN}`);
     }
 
     if (check.status === "can_write") {
+      // Revoked here, before the refusal is written, so the reason can say whether Salesforce confirmed it.
       const revoked = await letGo();
       const reason = canWriteReason(check);
       throw new Refusal(revoked ? reason : `${reason} Salesforce didn't confirm the disconnection, so also remove Barometer's access under Connected Apps OAuth Usage in Setup.`);
@@ -167,7 +219,18 @@ async function connectLocked(linkId: string, deps: WorkerDeps, attempt: Attempt)
       check.status === "unknown"
         ? `Connected, but we couldn't prove the user is read only: ${check.reason}. Check the user holds only Barometer Read Only before running.`
         : null;
-    await deps.store.markLinkUsed(linkId, { at: at(), orgId: stored.orgId, userId: stored.userId, note });
+    try {
+      await deps.store.markLinkUsed(linkId, { at: at(), orgId: stored.orgId, userId: stored.userId, note });
+    } catch {
+      // Tokens for a link that isn't marked used must not stay usable, so they
+      // go first, before anything that could fail or be retried.
+      await letGo();
+      const now = await deps.store.loadConnectJob(linkId).catch(() => null);
+      if (now && now.state !== "pending") {
+        return { outcome: "skipped", detail: `The link became ${now.state} while we were connecting, so we disconnected and kept nothing` };
+      }
+      throw new Refusal(`We connected, but couldn't record it, so we disconnected to be safe. ${START_AGAIN}`);
+    }
     // The older connection's refresh token is left to lapse (30 days unused,
     // DECISIONS 58) rather than revoked: revoking it might reach the new grant.
     if (previous) log(`Replaced the connection "${name}". The old refresh token wasn't revoked.`);
@@ -175,7 +238,6 @@ async function connectLocked(linkId: string, deps: WorkerDeps, attempt: Attempt)
   } catch (err) {
     if (err instanceof Refusal) return refuse(err.message);
     if (!attempt.final && transient(err)) throw new Error(safeReason(err, secrets));
-    if (holding) await letGo();
     if (err instanceof OAuthError) return refuse(exchangeReason(err));
     return refuse(`Something went wrong connecting: ${safeReason(err, secrets)}. ${START_AGAIN}`);
   }
