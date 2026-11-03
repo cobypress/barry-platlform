@@ -22,6 +22,7 @@
   "sfdcLoginUrl": "https://login.salesforce.com",
   "sourceApiVersion": "68.0",
   "packageAliases": {
-    "Black Cloud Barometer": "0HoQH0000000rkH0AQ"
+    "Black Cloud Barometer": "0HoQH0000000rkH0AQ",
+    "Black Cloud Barometer@0.1.0-1": "04tQH00000NOKUzYAP"
   }
 }

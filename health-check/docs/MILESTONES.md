@@ -129,6 +129,25 @@ On 2026-11-03 Coby followed the steps below, through to revoking the connection.
 
 **Not exercised live:** refresh with rotation. That needs the session to time out twice before revoking, so it can only be done on a later connection. The unit tests cover it, and the JWT connection's refresh works live.
 
+### The package, from a second org
+
+Built on 2026-11-03 (DECISIONS.md 66):
+
+- **The app is defined in BlackCloudProd.** Nobody there can use it.
+- **Package version `0.1.0-1` (`04tQH00000NOKUzYAP`) is a beta.** Betas install only in scratch orgs and sandboxes.
+- **`bc-hc-scratch` is a 7-day scratch org from the BlackCloudProd Dev Hub.** It has the package installed and a test user on the Integration licence, `barometer-read-only@black-cloud.com.bc-hc-scratch`. That user holds the Salesforce API Integration permission set licence and `blackcloud__Barometer_Read_Only`, and nothing else. The password is in `~/.barometer/dev/scratch-read-only-user-password.txt`.
+- **The installed app has Salesforce's default policies.** They let any user self-authorise, with refresh tokens that last 365 days. Our install steps for customers will change both.
+
+To connect from the scratch org:
+
+1. In BlackCloudProd, open Setup, then External Client App Manager, then Black Cloud Barometer. On Settings, under OAuth Settings, click Consumer Key and Secret, and enter the code Salesforce emails. In `~/.barometer/oauth-client.json`, replace `clientId` and `clientSecret` with these. Leave `redirectUri` as it is. The `bc-hc-dev` app's values are kept in `oauth-client.bc-hc-dev.json`.
+2. `HC_APPROVED_ORG_ALIASES=bc-hc-scratch-web npm run hc -- connect start --connection bc-hc-scratch-web --login-url https://page-momentum-12712-dev-ed.scratch.my.salesforce.com`
+3. Sign in as the scratch user in a private window, click Allow, and then run `connect finish` as before, with `--connection bc-hc-scratch-web`.
+4. `HC_APPROVED_ORG_ALIASES=bc-hc-scratch-web npm run hc -- run --connection bc-hc-scratch-web --calibration ~/.barometer/dev/calibration-bc-hc-dev.json --out ~/.barometer/dev-runs`
+5. Leave the connection in place for at least four hours, then run `hc connect check --connection bc-hc-scratch-web` twice, two hours apart. That tests rotation live. Then revoke it.
+
+If step 3 answers "Cross-org OAuth flows are not supported", the link to the source org isn't working. One Trailblazer Community post reports that error for a packaged app.
+
 ### What Coby needs to do for the web server flow
 
 1. In `bc-hc-dev`, open Setup, then External Client App Manager, then Black Cloud Barometer. On Settings, under OAuth Settings, click Consumer Key and Secret, and enter the code Salesforce emails. Copy the secret into `~/.barometer/oauth-client.json` as `"clientSecret"`, next to the `clientId` and `redirectUri` already there. Keep the file at mode 600.
