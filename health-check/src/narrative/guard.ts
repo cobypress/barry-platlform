@@ -1,33 +1,20 @@
+import { findNames, maskNames } from "../privacy/names.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { redactSecrets } from "../privacy/secrets.ts";
+import type { NarrativeClient, NarrativeReply, NarrativeRequest } from "./client.ts";
+import { SYSTEM_PROMPT } from "./prompt.ts";
 
 // Rule 7: nothing that leaves for Claude may hold a real name. Findings already
 // hold tokens, so this is the backstop, and every prompt passes through it.
 //
-// scrub() only catches full names, usernames, emails and ids. A first name on its
-// own ("Sam's pipeline") gets through it, and metadata labels can hold exactly
-// that, so name parts are masked here as well.
-
-// Parts of shared-user names that are ordinary words. Masking "Sales" would turn
-// "Sales Cloud" into a token.
-const ORDINARY = new Set(["sales", "shared", "desk", "integration", "user", "users", "admin", "system", "service", "support", "marketing", "automated", "process", "platform", "unknown", "team", "ops", "account", "lead", "data", "test", "api", "default", "workflow", "site", "guest", "the", "and", "chatter", "expert"]);
-
-const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-function maskNameParts(text: string, pseudonyms: Pseudonymiser): string {
-  let out = text;
-  for (const entry of pseudonyms.entries()) {
-    for (const part of entry.name.split(/\s+/)) {
-      if (part.length < 2 || !/^\p{Lu}/u.test(part) || ORDINARY.has(part.toLowerCase())) continue;
-      out = out.replace(new RegExp(`(?<![\\p{L}\\p{N}_-])${escapeRegex(part)}(?![\\p{L}\\p{N}_]|-\\p{L})`, "gu"), entry.token);
-    }
-  }
-  return out;
-}
+// scrub() only catches full names, usernames, emails and ids. People write first
+// names, surnames and possessives ("Sam's pipeline"), and metadata labels can
+// hold exactly that, so maskNames() replaces the parts of every known name too
+// (see src/privacy/names.ts for what it covers and what it doesn't).
 
 /** Everything that goes to Claude goes through here. */
 export function guardPrompt(text: string, pseudonyms: Pseudonymiser): string {
-  return redactSecrets(maskNameParts(pseudonyms.scrub(text), pseudonyms));
+  return redactSecrets(maskNames(pseudonyms.scrub(text), pseudonyms));
 }
 
 /**
@@ -39,4 +26,50 @@ export function guardDeep<T>(value: T, pseudonyms: Pseudonymiser): T {
   if (Array.isArray(value)) return value.map((v) => guardDeep(v, pseudonyms)) as T;
   if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, guardDeep(v, pseudonyms)])) as T;
   return value;
+}
+
+/** True when text would change on its way to Claude, or still holds a name part. For checking Claude's own replies. */
+export function holdsNameOrSecret(text: string, pseudonyms: Pseudonymiser): boolean {
+  return guardPrompt(text, pseudonyms) !== text || findNames(text, pseudonyms).length > 0;
+}
+
+// System prompts are our own constants. Customer text goes in the prompt, where
+// it's guarded; a system prompt built from anything else is refused, so nobody
+// can route around the guard by putting text there.
+export const SYSTEM_PROMPTS: ReadonlySet<string> = new Set([SYSTEM_PROMPT]);
+
+/** A prompt the last check wouldn't send. The message names tokens, never the text it found. */
+export class PromptRefused extends Error {
+  readonly reasons: string[];
+  constructor(reasons: string[]) {
+    super(reasons.join(" "));
+    this.name = "PromptRefused";
+    this.reasons = reasons;
+  }
+}
+
+/** Why a guarded prompt still can't go. Empty means it can. Fails closed. */
+export function promptProblems(request: Pick<NarrativeRequest, "system" | "prompt">, pseudonyms: Pseudonymiser): string[] {
+  const problems: string[] = [];
+  if (!SYSTEM_PROMPTS.has(request.system)) problems.push("The system prompt isn't one of ours, so it wasn't sent.");
+  try {
+    for (const leak of findNames(request.prompt, pseudonyms)) {
+      problems.push(leak.what === "email" ? "The prompt still held an email address after scrubbing, so it wasn't sent." : `The prompt still held part of the ${leak.what === "id" ? "id" : "name"} behind ${leak.token} after scrubbing, so it wasn't sent.`);
+    }
+  } catch (err) {
+    problems.push(`The name check failed, so the prompt wasn't sent: ${err instanceof Error ? err.name : "unknown error"}.`);
+  }
+  return problems;
+}
+
+/**
+ * The only way a prompt reaches Claude. It guards the prompt, then checks the
+ * result independently, the way the number check treats a draft: anything left
+ * of a known name stops the send, and the caller records it as a rejection.
+ */
+export async function sendPrompt(client: NarrativeClient, request: NarrativeRequest, pseudonyms: Pseudonymiser): Promise<NarrativeReply> {
+  const guarded = { ...request, prompt: guardPrompt(request.prompt, pseudonyms) };
+  const problems = promptProblems(guarded, pseudonyms);
+  if (problems.length) throw new PromptRefused(problems);
+  return client.complete(guarded);
 }

@@ -3,7 +3,7 @@ import { MODELS } from "../config.ts";
 import { checkNumbers, scopeDataset, type FigureSet } from "../numbercheck/index.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import type { NarrativeClient } from "./client.ts";
-import { guardDeep, guardPrompt } from "./guard.ts";
+import { guardDeep, holdsNameOrSecret, PromptRefused, sendPrompt } from "./guard.ts";
 import { buildPrompt, DRAFT_SCHEMA, SYSTEM_PROMPT, type PromptSource } from "./prompt.ts";
 
 // Claude explains and code calculates. A draft is only accepted if every
@@ -51,7 +51,7 @@ function review(text: string, set: FigureSet, allowed: Set<string>, pseudonyms: 
     const outcome = checkNumbers(paragraph.text, scopeDataset(set, scope));
     for (const miss of outcome.unmatched) problems.push(`"${miss.raw}": ${miss.reason}.`);
     problems.push(...styleProblems(paragraph.text));
-    if (guardPrompt(paragraph.text, pseudonyms) !== paragraph.text) problems.push("A paragraph holds a person's name or a secret.");
+    if (holdsNameOrSecret(paragraph.text, pseudonyms)) problems.push("A paragraph holds a person's name or a secret.");
   }
   return { paragraphs: parsed.paragraphs.map((p) => p.text), problems };
 }
@@ -64,18 +64,20 @@ export async function draftSection(input: { brief: SectionBrief; dataset: Figure
   let reasons: string[] = [];
 
   for (let attempt = 1; attempt <= DRAFT_DEFAULTS.maxAttempts; attempt++) {
-    const prompt = guardPrompt(buildPrompt({ ...brief, sources, feedback }), pseudonyms);
+    const prompt = buildPrompt({ ...brief, sources, feedback });
     let reply;
     try {
-      reply = await client.complete({
+      // sendPrompt guards the whole prompt again and refuses it if a name survives.
+      reply = await sendPrompt(client, {
         model: brief.model ?? MODELS.synthesis,
         system: SYSTEM_PROMPT,
         prompt,
         schema: DRAFT_SCHEMA,
         effort: DRAFT_DEFAULTS.effort,
         maxTokens: DRAFT_DEFAULTS.maxTokens,
-      });
+      }, pseudonyms);
     } catch (err) {
+      if (err instanceof PromptRefused) return { status: "rejected", reasons: err.reasons, attempts: attempt };
       return { status: "rejected", reasons: [`The call to Claude failed: ${err instanceof Error ? err.message : String(err)}`], attempts: attempt };
     }
     // Neither of these gets better by asking again with the same input.
