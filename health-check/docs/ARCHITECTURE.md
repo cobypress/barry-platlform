@@ -41,6 +41,8 @@ src/
   narrative/    Section builder, ranking and plan, Claude drafting and its guards
   design/       Design tokens: the only place colours and type are set
   render/       Charts, Word and PDF output, and the layout checks
+  benchmark/    Anonymised rows for the benchmark set, with consent, and their summary
+  retention/    Purging raw extracts from finished runs
   cli/          hc
   testing/      Synthetic org, simulator, recording and replay
 ```
@@ -63,7 +65,7 @@ A domain is a `DomainModule` (`src/domains/types.ts`): extractors, metric builde
 | 8. No customer data in repos | The CLI refuses to write inside a git work tree. Fixture tests require reserved domains and zero-padded ids |
 | 9. API budget and resume | `ApiBudget` stops before the call that crosses the share. Steps and Opportunity pages are checkpointed |
 | 10. Approval before release | `ReportSection` schema and `canRelease()`, used in Milestone 5 |
-| 11. Benchmarks separate | `BenchmarkRow` is strict: no extra fields, whole units, bands and quarters only |
+| 11. Benchmarks separate | `BenchmarkRow` is strict: no extra fields, whole units, bands and quarters only. `hc benchmark` builds rows from an allowlist, needs consent, and records it in the run folder |
 
 ## The read-only boundary
 
@@ -100,9 +102,13 @@ Filtering by HTTP method wouldn't work in Salesforce. `GET tooling/executeAnonym
 
 Run folders default to `~/.barometer/runs/<run id>`, with files readable only by the owner.
 
+The benchmark set is kept apart, in `~/.barometer/benchmarks/rows.jsonl` (folder 700, file 600). It holds `BenchmarkRow` lines only, with nothing that links a row to a run.
+
 | File | Holds | Goes to Claude later? |
 | --- | --- | --- |
-| `checkpoints/` | CRM rows | Never |
+| `checkpoints/` | CRM rows. Deleted by `hc purge` 30 days after delivery | Never |
+| `purged.json` | When the checkpoints were deleted, and how many files | No |
+| `benchmark-consent.json` | Who agreed to the benchmark export, how, when, and which metric keys went | No |
 | `pseudonym-map.json` | Names by token | Never |
 | `findings.json`, `metrics.json`, `manual-steps.json` | Aggregates, metadata names and tokens | Yes |
 | `raw-notes.md` | Real names | Never: customer deliverable |
