@@ -49,6 +49,15 @@ describe("the client's surface", () => {
     assert.deepEqual([...onPrototype, ...instance].sort(), [...CLIENT_METHODS].sort());
   });
 
+  test("a report describe only takes a report id", async () => {
+    const transport = stub(() => ({ json: { reportMetadata: {} } }));
+    const client = await connect(transport);
+    await assert.rejects(client.describeReport("001000000000001AAA"), ForbiddenOperationError);
+    await assert.rejects(client.describeReport("00O000000000001AAA/../../sobjects/Account"), ForbiddenOperationError);
+    await client.describeReport("00O000000000001AAA");
+    assert.match(transport.requests.at(-1)!.url, /\/analytics\/reports\/00O000000000001AAA\/describe$/);
+  });
+
   test("there's no generic request, write or delete method", async () => {
     const client = await connect(stub(() => ({})));
     for (const name of ["request", "send", "create", "update", "upsert", "delete", "insert", "post", "patch", "put", "executeAnonymous"]) {

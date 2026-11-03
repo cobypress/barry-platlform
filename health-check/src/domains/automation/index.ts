@@ -324,7 +324,7 @@ const oldApiVersions: Rule = {
 
 const apexCoverage: Rule = {
   id: "aut.apex-coverage",
-  version: 1,
+  version: 2,
   domain: "automation",
   title: "Apex test coverage",
   evaluate(ctx): RuleResult | RuleResult[] {
@@ -333,7 +333,10 @@ const apexCoverage: Rule = {
     if (classes.data.length === 0) {
       return { outcome: "pass", summary: "This org has no Apex of its own.", evidence: [ctx.ev(classes.source, { count: 0 })], segmentExemptReason: "There's no code to segment." };
     }
-    const percent = orgCoverage.status === "ok" ? orgCoverage.data[0]?.PercentCovered : null;
+    // A coverage read that failed isn't an org with no figure. A read-only
+    // connection reads the classes but not their coverage (DECISIONS.md 73).
+    if (orgCoverage.status !== "ok") return { outcome: "not_measurable", reason: apexGap("coverage", orgCoverage.reason), evidence: [ctx.ev(orgCoverage.source, { count: null })] };
+    const percent = orgCoverage.data[0]?.PercentCovered;
     if (percent === null || percent === undefined) {
       return { outcome: "not_measurable", reason: "The org holds no coverage figure, which usually means tests haven't been run recently. We don't run tests, because that would change the org.", evidence: [ctx.ev(orgCoverage.source, { count: null })] };
     }

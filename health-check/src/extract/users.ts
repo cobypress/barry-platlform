@@ -145,7 +145,15 @@ export type RunAsData = {
   dashboards: Sourced<Array<{ Id: string; Title: string; Type: string; RunningUserId: string | null; FolderName: string | null }>>;
 };
 
-async function collectRunAs<R>(ctx: ExtractContext, data: RunAsData, label: string, soql: string, toLinks: (row: R) => RunAsLink[], api: "rest" | "tooling" = "rest"): Promise<void> {
+async function collectRunAs<R>(
+  ctx: ExtractContext,
+  data: RunAsData,
+  label: string,
+  soql: string,
+  toLinks: (row: R) => RunAsLink[],
+  options: { api?: "rest" | "tooling"; inEveryOrg?: boolean } = {},
+): Promise<void> {
+  const api = options.api ?? "rest";
   const source: SourceInfo = { kind: "soql", api, query: soql };
   data.sources.push(source);
   try {
@@ -154,14 +162,16 @@ async function collectRunAs<R>(ctx: ExtractContext, data: RunAsData, label: stri
   } catch (err) {
     if (!isUnavailable(err)) throw err;
     // INVALID_TYPE: the feature isn't in this org, so nothing can run through it.
-    if (err.code !== "INVALID_TYPE") data.incomplete.push(label);
+    // Unless the object is in every org: then it's the connected user who can't
+    // see it, as Barometer Read Only can't see AuthProvider (DECISIONS.md 73).
+    if (err.code !== "INVALID_TYPE" || options.inEveryOrg) data.incomplete.push(label);
   }
 }
 
 // Things that keep working as a user after they've stopped logging in.
 export const runAsExtractor: Extractor<RunAsData> = {
   id: "run-as",
-  version: 1,
+  version: 2,
   async run(ctx) {
     const data: RunAsData = {
       links: [],
@@ -180,8 +190,13 @@ export const runAsExtractor: Extractor<RunAsData> = {
     await collectRunAs<{ LocalPart: string; RunAsUserId: string | null }>(ctx, data, "email services", "SELECT LocalPart, RunAsUserId FROM EmailServicesAddress", (r) =>
       r.RunAsUserId ? [{ userId: r.RunAsUserId, kind: "email service", name: r.LocalPart }] : [],
     );
-    await collectRunAs<{ DeveloperName: string; ExecutionUserId: string | null }>(ctx, data, "auth providers", "SELECT DeveloperName, ExecutionUserId FROM AuthProvider", (r) =>
-      r.ExecutionUserId ? [{ userId: r.ExecutionUserId, kind: "auth provider", name: r.DeveloperName }] : [],
+    await collectRunAs<{ DeveloperName: string; ExecutionUserId: string | null }>(
+      ctx,
+      data,
+      "auth providers",
+      "SELECT DeveloperName, ExecutionUserId FROM AuthProvider",
+      (r) => (r.ExecutionUserId ? [{ userId: r.ExecutionUserId, kind: "auth provider", name: r.DeveloperName }] : []),
+      { inEveryOrg: true },
     );
     await collectRunAs<{ Name: string; AdminId: string | null }>(ctx, data, "sites", "SELECT Name, AdminId FROM Site", (r) =>
       r.AdminId ? [{ userId: r.AdminId, kind: "site administrator", name: r.Name }] : [],
@@ -192,7 +207,7 @@ export const runAsExtractor: Extractor<RunAsData> = {
       "platform event subscribers",
       "SELECT DeveloperName, UserId FROM PlatformEventSubscriberConfig",
       (r) => (r.UserId ? [{ userId: r.UserId, kind: "platform event subscriber", name: r.DeveloperName }] : []),
-      "tooling",
+      { api: "tooling" },
     );
     return data;
   },

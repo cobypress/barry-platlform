@@ -1,7 +1,9 @@
+import { isUnavailable } from "../salesforce/client.ts";
 import { redactSecrets } from "../privacy/secrets.ts";
 import { orgExtractor } from "./configuration.ts";
 import { indexReferences, parseMetadataBundle, type MetadataBundle, type ReferenceIndex } from "./metadata-parse.ts";
-import { readSoql, unavailable, type Extractor, type Sourced, type SourceInfo } from "./types.ts";
+import { readBundleThroughTooling, ToolingGapError, TOOLING_PARTIAL_KEYS } from "./metadata-tooling.ts";
+import { readableReason, readSoql, unavailable, type Extractor, type Sourced, type SourceInfo } from "./types.ts";
 
 // One retrieve costs a few calls however many flows there are. The Tooling route
 // is one call per flow, because a query can only return Metadata one row at a time.
@@ -13,16 +15,33 @@ const RETRIEVE_TYPES = [
   { name: "AssignmentRules", members: ["Lead", "Case"] },
 ];
 
+export const TOOLING_SOURCE: SourceInfo = { kind: "metadata", path: "Tooling API: FlowDefinition, Flow, WorkflowRule and its actions, ValidationRule, FieldDefinition, EntityParticle, RecordType" };
+
+// A connection holding only Barometer Read Only can't use the Metadata API at
+// all, so it reads the same bundle through Tooling instead (DECISIONS.md 73).
+const needsWritePermission = (err: unknown): boolean => isUnavailable(err) && err.code === "INSUFFICIENT_ACCESS";
+
 export const metadataExtractor: Extractor<Sourced<MetadataBundle>> = {
   id: "metadata",
-  version: 4,
+  version: 5,
+  partialKeys: TOOLING_PARTIAL_KEYS,
   async run(ctx) {
     const source: SourceInfo = { kind: "metadata", path: RETRIEVE_TYPES.map((t) => t.name).join(", ") };
+    let retrieveError: unknown;
     try {
       const files = await ctx.client.retrieveMetadata(RETRIEVE_TYPES);
       return { status: "ok", data: parseMetadataBundle(files), source, truncated: false };
     } catch (err) {
-      return unavailable(source, err);
+      if (!needsWritePermission(err)) return unavailable(source, err);
+      retrieveError = err;
+    }
+    try {
+      return { status: "ok", data: await readBundleThroughTooling(ctx), source: TOOLING_SOURCE, truncated: false };
+    } catch (err) {
+      const why = err instanceof ToolingGapError ? err.message : isUnavailable(err) ? readableReason(err.message) : null;
+      if (why === null) throw err;
+      const first = readableReason((retrieveError as Error).message);
+      return { status: "unavailable", reason: `The Metadata API refused this connection (${first}), and reading the same through the Tooling API didn't work either: ${why}`, source: TOOLING_SOURCE };
     }
   },
 };
@@ -58,13 +77,15 @@ function stripBodies<R extends { Name: string; Body?: string }>(rows: Sourced<R[
 
 export const apexExtractor: Extractor<ApexData> = {
   id: "apex",
-  version: 3,
+  version: 4,
   async run(ctx) {
     const references: ReferenceIndex = { users: {}, fields: {} };
+    // Through REST, not Tooling: a user with View Setup but not Author Apex gets
+    // INVALID_TYPE from Tooling's ApexClass, and reads REST's with the same
+    // fields, body included (DECISIONS.md 73).
     const classes = await readSoql<Omit<ApexClassRow, keyof CodeFacts> & { Body?: string }>(
       ctx,
       "SELECT Id, Name, ApiVersion, Status, LengthWithoutComments, Body FROM ApexClass WHERE NamespacePrefix = null",
-      { api: "tooling" },
     );
     // Through REST, not Tooling: the Tooling reference doesn't list Name,
     // TableEnumOrId or NamespacePrefix on ApexTrigger, and the Object Reference does.

@@ -73,7 +73,7 @@ A domain is a `DomainModule` (`src/domains/types.ts`): extractors, metric builde
 
 Filtering by HTTP method wouldn't work in Salesforce. `GET tooling/executeAnonymous` runs Apex, a GET on an Apex REST class can do anything, and `POST ?_HttpMethod=PATCH` is an update. So `allowlist.ts` lists exact routes.
 
-- GET is allowed for: versions, limits, record counts, query and query paging (REST and Tooling), describe.
+- GET is allowed for: versions, limits, record counts, query and query paging (REST and Tooling), describe, and a report's describe in the Analytics API (`analytics/reports/<00O id>/describe`, nothing else under `analytics`: a GET on the report runs it).
 - POST is allowed for two endpoints, each with its body inspected:
   - Composite batch: every subrequest must be a GET to the REST query route with safe SOQL.
   - Metadata SOAP: exactly one operation, either `retrieve` or `checkRetrieveStatus`, matching the `SOAPAction`.
@@ -123,6 +123,9 @@ The link can also be withdrawn. A link that's expired, used or withdrawn tells t
 | A plain query skips activities archived after 365 days | Activity reads 12 months and declares it. `queryAll` isn't on the allowlist, and won and lost comparisons only use deals created in that year |
 | Conversion moves a lead's activity to its contact | First response looks at both ids |
 | Other people's private reports can't be read | They're counted with `USING SCOPE allPrivate`. If any exist, the report guard is unknown, and field removal stays blocked |
+| Without Manage All Private Reports, `USING SCOPE allPrivate` counts every visible report and refuses rows | One row is asked for first. If that fails, the count is unknown, and so is the report guard |
+| A read-only connection can't use the Metadata API | Automation metadata falls back to Tooling, one `Metadata` read per item, and report definitions to the Analytics API's report describe, one call per report. Both checkpoint each item. Approval processes and assignment rules can't be read that way, so reference guards stay unknown when any exist (DECISIONS.md 73) |
+| Tooling `ApexClass` and `CustomObject` need more than View Setup | Classes are read through REST, and custom objects through Tooling `EntityDefinition` |
 | Forecast rows show today's position | Forecast accuracy is not measurable without a snapshot |
 | Admins can rename forecast categories | No Commit rows is not measurable, not a clean Commit |
 | `CloseDate` and `LastActivityDate` have no time zone | Instants become days in the org's zone, and date-only fields are left alone |
