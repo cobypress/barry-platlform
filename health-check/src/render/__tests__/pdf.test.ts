@@ -103,7 +103,8 @@ describe("the executive summary", () => {
 
   test("names no one", () => {
     const html = executiveHtml(buildReport(full), pseudonyms).replace(/url\(data:[^)]+\)/g, "");
-    for (const entry of pseudonyms.entries()) if (entry.name.includes(" ") && entry.name !== "Unknown user") assert.ok(!html.includes(entry.name), entry.name);
+    // The customer's own name belongs on the cover. People never appear.
+    for (const entry of pseudonyms.entries()) if (entry.token.startsWith("[[user:") && entry.name.includes(" ") && entry.name !== "Unknown user") assert.ok(!html.includes(entry.name), entry.name);
     assert.doesNotMatch(html, /\[\[/);
   });
 });
@@ -165,7 +166,8 @@ describe("the full health check", () => {
 
   test("names no one, and lists domains nobody assessed as making no claim", () => {
     const html = fullReportHtml(buildReport({ ...full, findings: full.findings.filter((f) => f.domain !== "forecast") }), pseudonyms).replace(/url\(data:[^)]+\)/g, "");
-    for (const entry of pseudonyms.entries()) if (entry.name.includes(" ") && entry.name !== "Unknown user") assert.ok(!html.includes(entry.name), entry.name);
+    // The customer's own name belongs on the cover. People never appear.
+    for (const entry of pseudonyms.entries()) if (entry.token.startsWith("[[user:") && entry.name.includes(" ") && entry.name !== "Unknown user") assert.ok(!html.includes(entry.name), entry.name);
     assert.doesNotMatch(html, /\[\[/);
     assert.match(html, /We make no claim about these areas/);
   });

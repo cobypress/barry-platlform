@@ -26,6 +26,13 @@ describe("a full run", () => {
     assert.ok(existsSync(join(dir, "raw-notes.md")));
   });
 
+  test("names the customer from the org's company information, and masks it like a person", async () => {
+    const { dir, run } = await runFromRecording();
+    assert.equal(run.customerRef, "Synthetic Co");
+    const map = read(dir, "pseudonym-map.json") as Array<{ token: string; name: string }>;
+    assert.ok(map.some((e) => e.token.startsWith("[[customer:") && e.name === "Synthetic Co"));
+  });
+
   test("waits on manual steps when any are outstanding", async () => {
     assert.equal((await runFromRecording()).run.status, "awaiting_manual");
     assert.equal((await runFromRecording({ answers: loadAnswers() })).run.status, "in_review");

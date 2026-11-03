@@ -5,11 +5,12 @@ import { z } from "zod";
 import { loadPipeline } from "../domains/historic-pipeline/cohort.ts";
 import { closedInWindow } from "../domains/historic-pipeline/metrics.ts";
 import { assertOutsideGit } from "../engine/run.ts";
+import { Intake } from "../narrative/intake.ts";
 import type { RuleContext } from "../engine/rule.ts";
 import type { Extractor } from "../extract/types.ts";
 import { usersExtractor } from "../extract/users.ts";
 import { Pseudonymiser } from "../privacy/pseudonymiser.ts";
-import { BenchmarkRow, Calibration, Finding, HeadcountBand, Metric, Run, SALES_CLOUD_DOMAINS, Score } from "../schemas/index.ts";
+import { BenchmarkRow, Calibration, Finding, HeadcountBand, Industry, Metric, Run, SALES_CLOUD_DOMAINS, Score } from "../schemas/index.ts";
 
 // Rule 11. One org's figures go into the benchmark set only with the customer's
 // consent, and nothing written there leads back to them: no run id, org id, name,
@@ -20,10 +21,7 @@ export const BENCHMARK_FILE = "rows.jsonl";
 export const CONSENT_FILE = "benchmark-consent.json";
 export const defaultBenchmarkDir = (): string => join(homedir(), ".barometer", "benchmarks");
 
-// Broad on purpose. Free text such as "insurance broker in Leeds" could pick out
-// a customer on its own.
-export const Industry = z.enum(["professional-services", "technology", "manufacturing", "financial-services", "healthcare", "retail", "education", "public-sector", "other"]);
-export type Industry = z.infer<typeof Industry>;
+export { Industry };
 
 type Unit = BenchmarkRow["unit"];
 type Source =
@@ -267,13 +265,14 @@ export type ConsentRecord = z.infer<typeof ConsentRecord>;
 export function exportBenchmark(options: BenchmarkOptions): BenchmarkResult {
   const consent = options.consent?.trim() ?? "";
   if (!consent) throw new Error('Refusing to export without --consent "<who agreed and how>". Figures only go into the benchmark set when the customer has opted in.');
-  const industry = Industry.safeParse(options.industry);
-  if (!industry.success) throw new Error(`--industry must be one of: ${Industry.options.join(", ")}.`);
-  const headcount = HeadcountBand.safeParse(options.headcount);
-  if (!headcount.success) throw new Error(`--headcount must be one of: ${HeadcountBand.options.join(", ")}.`);
-
   const dir = resolve(options.runDir);
   if (!existsSync(join(dir, "run.json"))) throw new Error(`${dir} isn't a run folder: it has no run.json.`);
+  // The intake records both, so the flags are only needed to override it.
+  const intake = existsSync(join(dir, "intake.json")) ? Intake.safeParse(readJson(join(dir, "intake.json"))) : null;
+  const industry = Industry.safeParse(options.industry ?? (intake?.success ? intake.data.industry : undefined));
+  if (!industry.success) throw new Error(`Give --industry, or record it in the intake. One of: ${Industry.options.join(", ")}.`);
+  const headcount = HeadcountBand.safeParse(options.headcount ?? (intake?.success ? intake.data.headcountBand : undefined));
+  if (!headcount.success) throw new Error(`Give --headcount, or record it in the intake. One of: ${HeadcountBand.options.join(", ")}.`);
   const consentPath = join(dir, CONSENT_FILE);
   if (existsSync(consentPath)) {
     const previous = ConsentRecord.safeParse(readJson(consentPath));

@@ -1,6 +1,11 @@
 import { z } from "zod";
 
-export const HeadcountBand = z.enum(["1-49", "50-249", "250-999", "1000+"]);
+// LinkedIn's company size bands, because that's where a consultant reads headcount.
+export const HeadcountBand = z.enum(["1-10", "11-50", "51-200", "201-500", "501-1000", "1001-5000", "5001+"]);
+// Broad on purpose. Free text such as "insurance broker in Leeds" could pick out
+// a customer on its own.
+export const Industry = z.enum(["professional-services", "technology", "manufacturing", "financial-services", "healthcare", "retail", "education", "public-sector", "other"]);
+export type Industry = z.infer<typeof Industry>;
 export const UserBand = z.enum(["1-50", "51-200", "201+"]);
 export const DealSizeBand = z.enum(["under-5k", "5k-25k", "25k-100k", "100k+"]);
 

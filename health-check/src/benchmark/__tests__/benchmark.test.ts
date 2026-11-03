@@ -40,7 +40,7 @@ const options = (runDir: string, storeDir: string, extra: Partial<Parameters<typ
   runDir,
   storeDir,
   industry: "technology",
-  headcount: "50-249",
+  headcount: "51-200",
   consent: CONSENT,
   now: new Date("2026-11-03T10:00:00.000Z"),
   ...extra,
@@ -64,7 +64,7 @@ describe("hc benchmark", () => {
       assert.ok(allowed.has(row.metricKey), row.metricKey);
       assert.ok(Number.isInteger(row.value));
       assert.equal(row.industry, "technology");
-      assert.equal(row.headcountBand, "50-249");
+      assert.equal(row.headcountBand, "51-200");
       // The synthetic org has 14 active people and a median won deal of tens of thousands.
       assert.equal(row.userBand, "1-50");
       assert.equal(row.dealSizeBand, "25k-100k");
@@ -164,11 +164,18 @@ describe("hc benchmark", () => {
   test("takes industry and headcount only from the fixed lists", () => {
     const run = freshRun();
     const store = tempDir();
-    assert.throws(() => exportBenchmark(options(run, store, { industry: "Insurance brokers in Leeds" })), /--industry must be one of/);
-    assert.throws(() => exportBenchmark(options(run, store, { industry: undefined })), /--industry must be one of/);
-    assert.throws(() => exportBenchmark(options(run, store, { headcount: "about 120" })), /--headcount must be one of/);
+    assert.throws(() => exportBenchmark(options(run, store, { industry: "Insurance brokers in Leeds" })), /Give --industry/);
+    assert.throws(() => exportBenchmark(options(run, store, { industry: undefined })), /Give --industry/);
+    assert.throws(() => exportBenchmark(options(run, store, { headcount: "about 120" })), /Give --headcount/);
     assert.ok(!existsSync(join(store, BENCHMARK_FILE)));
     assert.ok(!existsSync(join(run, CONSENT_FILE)));
+  });
+
+  test("takes industry and headcount from the intake when the flags are left out", () => {
+    const run = freshRun();
+    write(run, "intake.json", { summary: "Synthetic intake.", statedProblems: [], capturedBy: "Synthetic Consultant", capturedAt: "2026-11-03T10:00:00.000Z", industry: "manufacturing", headcountBand: "11-50", linkedinUrl: "https://www.linkedin.com/company/example/" });
+    const result = exportBenchmark(options(run, tempDir(), { industry: undefined, headcount: undefined }));
+    assert.ok(result.rows.every((r) => r.industry === "manufacturing" && r.headcountBand === "11-50"));
   });
 
   test("refuses a folder that isn't a run", () => {
@@ -184,7 +191,7 @@ describe("hc benchmark", () => {
 });
 
 describe("the row format", () => {
-  const good = { metricKey: "historic.win_rate", ruleSetVersion: "2026.11-m3", value: 35, unit: "percent", industry: "technology", headcountBand: "50-249", userBand: "1-50", dealSizeBand: "5k-25k", period: "2026-Q4" };
+  const good = { metricKey: "historic.win_rate", ruleSetVersion: "2026.11-m3", value: 35, unit: "percent", industry: "technology", headcountBand: "51-200", userBand: "1-50", dealSizeBand: "5k-25k", period: "2026-Q4" };
 
   test("rejects a row carrying anything extra, and writes none of the batch", () => {
     const path = join(tempDir(), "store", BENCHMARK_FILE);
@@ -305,7 +312,7 @@ describe("bands", () => {
 });
 
 describe("hc benchmark --summary", () => {
-  const row = (metricKey: string, industry: string) => ({ metricKey, ruleSetVersion: "2026.11-m3", value: 35, unit: "percent", industry, headcountBand: "50-249", userBand: "1-50", dealSizeBand: "5k-25k", period: "2026-Q4" });
+  const row = (metricKey: string, industry: string) => ({ metricKey, ruleSetVersion: "2026.11-m3", value: 35, unit: "percent", industry, headcountBand: "51-200", userBand: "1-50", dealSizeBand: "5k-25k", period: "2026-Q4" });
 
   test("counts rows by metric and group, says which reach the minimum, and shows no values", () => {
     const store = tempDir();
@@ -323,7 +330,7 @@ describe("hc benchmark --summary", () => {
     ]);
     const text = formatSummary(summary).join("\n");
     assert.match(text, /historic\.win_rate: 11 rows/);
-    assert.match(text, /technology, headcount 50-249, users 1-50, deal size 5k-25k: 10 rows, enough to compare/);
+    assert.match(text, /technology, headcount 51-200, users 1-50, deal size 5k-25k: 10 rows, enough to compare/);
     assert.match(text, /retail, .*: 1 row, below 10/);
     assert.match(text, /2 lines don't match the row format/);
     assert.doesNotMatch(text, /\b35\b/, "no value is printed");
@@ -351,7 +358,7 @@ describe("the command line", () => {
   test("hc benchmark refuses without --consent", () => {
     const run = freshRun();
     const store = tempDir();
-    const result = hc(["benchmark", "--run", run, "--industry", "technology", "--headcount", "50-249", "--out", store]);
+    const result = hc(["benchmark", "--run", run, "--industry", "technology", "--headcount", "51-200", "--out", store]);
     assert.equal(result.status, 2);
     assert.match(result.stderr, /Refusing to export without --consent/);
     assert.ok(!existsSync(join(store, BENCHMARK_FILE)));
@@ -360,17 +367,17 @@ describe("the command line", () => {
   test("hc benchmark exports, then the summary counts it", () => {
     const run = freshRun();
     const store = tempDir();
-    const result = hc(["benchmark", "--run", run, "--industry", "retail", "--headcount", "1-49", "--consent", CONSENT, "--out", store]);
+    const result = hc(["benchmark", "--run", run, "--industry", "retail", "--headcount", "11-50", "--consent", CONSENT, "--out", store]);
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stdout, /Added \d+ rows to .*rows\.jsonl: users 1-50, deal size 25k-100k, 2026-Q4\./);
     const summary = hc(["benchmark", "--summary", "--out", store]);
     assert.equal(summary.status, 0);
-    assert.match(summary.stdout, /score\.security: 1 row\n {2}retail, headcount 1-49, users 1-50, deal size 25k-100k: 1 row, below 10/);
+    assert.match(summary.stdout, /score\.security: 1 row\n {2}retail, headcount 11-50, users 1-50, deal size 25k-100k: 1 row, below 10/);
   });
 
   test("the help lists both new commands", () => {
     const result = hc(["--help"]);
-    assert.match(result.stdout, /hc benchmark --run <run folder> --industry <industry> --headcount <band> --consent/);
+    assert.match(result.stdout, /hc benchmark --run <run folder> --consent "<who agreed and how>" \[--industry <industry>\] \[--headcount <band>\]/);
     assert.match(result.stdout, /hc purge --older-than <days>/);
   });
 });

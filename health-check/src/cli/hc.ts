@@ -18,7 +18,7 @@ const USAGE = `Black Cloud Barometer
 
   hc run --org <alias> --calibration <file> [options]
   hc render --run <run folder> [--narrative]
-  hc benchmark --run <run folder> --industry <industry> --headcount <band> --consent "<who agreed and how>" [--out <dir>]
+  hc benchmark --run <run folder> --consent "<who agreed and how>" [--industry <industry>] [--headcount <band>] [--out <dir>]
   hc benchmark --summary [--out <dir>]
   hc purge --run <run folder>
   hc purge --older-than <days> [--runs <dir>]
@@ -32,8 +32,8 @@ Options:
   --api-version <v>    Pin a Salesforce API version, such as 66.0
   --run <folder>       The run folder to render, export or purge
   --narrative          Have Claude draft sections. Needs ANTHROPIC_API_KEY
-  --industry <name>    ${Industry.options.join(", ")}
-  --headcount <band>   ${HeadcountBand.options.join(", ")}
+  --industry <name>    Overrides the intake. ${Industry.options.join(", ")}
+  --headcount <band>   Overrides the intake. LinkedIn company size: ${HeadcountBand.options.join(", ")}
   --consent <text>     Who at the customer agreed to share anonymised figures, and how
   --summary            Count benchmark rows by metric and group. No values are shown
   --older-than <days>  Purge every run whose run date is more than this many days ago

@@ -195,7 +195,7 @@ describe("review console", () => {
 });
 
 describe("BenchmarkRow (rule 11)", () => {
-  const row = { metricKey: "historic.win_rate", ruleSetVersion: "2026.11", value: 35, unit: "percent", industry: "Manufacturing", headcountBand: "50-249", userBand: "51-200", dealSizeBand: "5k-25k", period: "2026-Q4" };
+  const row = { metricKey: "historic.win_rate", ruleSetVersion: "2026.11", value: 35, unit: "percent", industry: "Manufacturing", headcountBand: "51-200", userBand: "51-200", dealSizeBand: "5k-25k", period: "2026-Q4" };
   test("a clean row parses", () => assert.ok(BenchmarkRow.parse(row)));
   test("no extra field can link back to a customer", () => {
     for (const extra of [{ orgId: "00D000000000001" }, { customerName: "Acme" }, { runId: "r1" }, { consultant: "A Person" }]) {

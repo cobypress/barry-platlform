@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { HeadcountBand, Industry } from "../schemas/index.ts";
 
 // What the customer told us before the run. There's no shared schema for this
 // yet, so it lives here until the console's intake page settles it. It's
@@ -14,7 +15,12 @@ export const StatedProblem = z.object({
 export type StatedProblem = z.infer<typeof StatedProblem>;
 
 export const Intake = z.object({
-  customerName: z.string().min(1),
+  // Leave out to use the company name from the org's company information.
+  customerName: z.string().min(1).optional(),
+  // Where the consultant read headcount and industry. Neither is guessed from it.
+  linkedinUrl: z.url().optional(),
+  industry: Industry.optional(),
+  headcountBand: HeadcountBand.optional(),
   summary: z.string().min(1),
   statedProblems: z.array(StatedProblem),
   capturedBy: z.string().min(1),

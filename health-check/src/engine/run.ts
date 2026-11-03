@@ -217,8 +217,10 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
     }
   }
 
-  const org = extracts.get(orgExtractor.id) as { status: string; data?: Array<{ IsSandbox: boolean }> };
+  const org = extracts.get(orgExtractor.id) as { status: string; data?: Array<{ IsSandbox: boolean; Name?: string }> };
   run.isSandbox = org.data?.[0]?.IsSandbox ?? false;
+  // The company information in Setup is the name the customer goes by, unless one was given.
+  run.customerRef ??= org.data?.[0]?.Name?.trim() || null;
   run.status = "analysing";
   saveRun();
   const output = analyseRun(dir, run, calibration, modules, extracts, options.answers ?? []);
@@ -237,6 +239,7 @@ function analyseRun(dir: string, run: Run, calibration: Calibration, modules: Do
   // Registering everyone up front, in id order, keeps tokens stable and scrubs
   // a name even if no finding set out to mention that user.
   for (const [id, entry] of [...directory].sort(([a], [b]) => a.localeCompare(b))) pseudonyms.label("user", id, entry.name, entry.aliases);
+  if (run.customerRef) pseudonyms.label("customer", run.orgId, run.customerRef);
 
   const output = analyse({
     modules,

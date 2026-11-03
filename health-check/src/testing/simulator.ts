@@ -131,7 +131,7 @@ export class Simulator implements Transport {
 
     switch (object) {
       case "Organization":
-        return page([{ Id: org.ORG_ID, OrganizationType: "Enterprise Edition", IsSandbox: false, TimeZoneSidKey: "Europe/London", FiscalYearStartMonth: 1, ...org.SHARING_DEFAULTS }]);
+        return page([{ Id: org.ORG_ID, Name: "Synthetic Co", OrganizationType: "Enterprise Edition", IsSandbox: false, TimeZoneSidKey: "Europe/London", FiscalYearStartMonth: 1, ...org.SHARING_DEFAULTS }]);
       case "User":
         return page(org.usersTable);
       case "UserLicense":

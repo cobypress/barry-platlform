@@ -14,10 +14,10 @@
    "text": "{\"DailyApiRequests\":{\"Max\":100000,\"Remaining\":99000}}"
   },
   {
-   "key": "GET /services/data/v66.0/query?q=SELECT%20Id%2C%20OrganizationType%2C%20IsSandbox%2C%20TimeZoneSidKey%2C%20FiscalYearStartMonth%2C%20DefaultAccountAccess%2C%20DefaultContactAccess%2C%20DefaultOpportunityAccess%2C%20DefaultLeadAccess%20FROM%20Organization",
+   "key": "GET /services/data/v66.0/query?q=SELECT%20Id%2C%20Name%2C%20OrganizationType%2C%20IsSandbox%2C%20TimeZoneSidKey%2C%20FiscalYearStartMonth%2C%20DefaultAccountAccess%2C%20DefaultContactAccess%2C%20DefaultOpportunityAccess%2C%20DefaultLeadAccess%20FROM%20Organization",
    "status": 200,
    "limitInfo": "api-usage=1001/100000",
-   "text": "{\"totalSize\":1,\"done\":true,\"records\":[{\"Id\":\"00D000000000001AAA\",\"OrganizationType\":\"Enterprise Edition\",\"IsSandbox\":false,\"TimeZoneSidKey\":\"Europe/London\",\"FiscalYearStartMonth\":1,\"DefaultAccountAccess\":\"Read\",\"DefaultContactAccess\":\"ControlledByParent\",\"DefaultOpportunityAccess\":\"Edit\",\"DefaultLeadAccess\":\"ReadEditTransfer\"}]}"
+   "text": "{\"totalSize\":1,\"done\":true,\"records\":[{\"Id\":\"00D000000000001AAA\",\"Name\":\"Synthetic Co\",\"OrganizationType\":\"Enterprise Edition\",\"IsSandbox\":false,\"TimeZoneSidKey\":\"Europe/London\",\"FiscalYearStartMonth\":1,\"DefaultAccountAccess\":\"Read\",\"DefaultContactAccess\":\"ControlledByParent\",\"DefaultOpportunityAccess\":\"Edit\",\"DefaultLeadAccess\":\"ReadEditTransfer\"}]}"
   },
   {
    "key": "GET /services/data/v66.0/sobjects/Account/describe",

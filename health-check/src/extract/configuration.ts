@@ -25,16 +25,17 @@ const NAMESPACED = /^[A-Za-z0-9]+__.+__c$/;
 export const isOwnCustomField = (f: { custom: boolean; name: string }): boolean => f.custom && !NAMESPACED.test(f.name);
 
 export type SharingDefaults = { DefaultAccountAccess: string | null; DefaultContactAccess: string | null; DefaultOpportunityAccess: string | null; DefaultLeadAccess: string | null };
-export type OrgSummary = { Id: string; OrganizationType: string; IsSandbox: boolean; TimeZoneSidKey: string; FiscalYearStartMonth: number } & SharingDefaults;
+export type OrgSummary = { Id: string; Name: string; OrganizationType: string; IsSandbox: boolean; TimeZoneSidKey: string; FiscalYearStartMonth: number } & SharingDefaults;
 
 export const orgExtractor: Extractor<Sourced<OrgSummary[]>> = {
   id: "org",
-  version: 2,
-  // The org's Name is the customer's name, and no rule needs it.
+  version: 3,
+  // The org's Name is the customer's name. No rule uses it: it goes on the report
+  // cover, and is masked like a person's name before anything reaches Claude.
   run: (ctx) =>
     readSoql<OrgSummary>(
       ctx,
-      "SELECT Id, OrganizationType, IsSandbox, TimeZoneSidKey, FiscalYearStartMonth, DefaultAccountAccess, DefaultContactAccess, DefaultOpportunityAccess, DefaultLeadAccess FROM Organization",
+      "SELECT Id, Name, OrganizationType, IsSandbox, TimeZoneSidKey, FiscalYearStartMonth, DefaultAccountAccess, DefaultContactAccess, DefaultOpportunityAccess, DefaultLeadAccess FROM Organization",
     ),
 };
 
