@@ -1,3 +1,4 @@
+import { fieldDescribeExtractor } from "../../extract/fields.ts";
 import { apexExtractor, metadataExtractor, scheduledJobsExtractor } from "../../extract/automation.ts";
 import { recordCountsExtractor } from "../../extract/configuration.ts";
 import { daysBefore, monthsBefore } from "../../extract/types.ts";
@@ -394,6 +395,7 @@ export const utilisationModule: DomainModule = {
   extractors: [
     usersExtractor,
     licencesExtractor,
+    fieldDescribeExtractor,
     loginsExtractor,
     recordCountsExtractor,
     ownershipExtractor,

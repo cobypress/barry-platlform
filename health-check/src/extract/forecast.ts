@@ -1,3 +1,4 @@
+import { FIELD_SPECS, planFields } from "./fields.ts";
 import { monthsBefore, readSoql, soqlDate, type Extractor, type Sourced } from "./types.ts";
 
 export type ForecastTypeRow = { Id: string; DeveloperName: string; IsActive: boolean; IsAmount: boolean };
@@ -35,8 +36,9 @@ export type ForecastItemRow = {
   ForecastingTypeId: string;
   ForecastCategoryName: string | null;
   ForecastAmount: number | null;
-  AmountWithoutAdjustments: number | null;
-  HasAdjustment: boolean;
+  /** Absent when the org doesn't have the field: see `missingFields` on the source. */
+  AmountWithoutAdjustments?: number | null;
+  HasAdjustment?: boolean;
 };
 export type ForecastFactRow = { OpportunityId: string; ForecastCategoryName: string | null; PeriodId: string };
 export type ForecastData = { periods: Sourced<PeriodRow[]>; items: Sourced<ForecastItemRow[]>; facts: Sourced<ForecastFactRow[]> };
@@ -47,13 +49,14 @@ const FORECAST_MAX_ROWS = 20_000;
 // so an older period says nothing about what was forecast back then.
 export const forecastExtractor: Extractor<ForecastData> = {
   id: "forecast",
-  version: 1,
+  version: 2,
   async run(ctx) {
     const today = soqlDate(ctx.now);
     const periods = await readSoql<PeriodRow>(ctx, `SELECT Id, Type, StartDate, EndDate FROM Period WHERE Type IN ('Month', 'Quarter') AND StartDate <= ${today} AND EndDate >= ${today}`);
     const ids = periods.status === "ok" ? periods.data.map((p) => `'${p.Id}'`).join(", ") : "";
     const inPeriods = ids ? `PeriodId IN (${ids})` : "";
-    const itemSoql = `SELECT OwnerId, PeriodId, ForecastingTypeId, ForecastCategoryName, ForecastAmount, AmountWithoutAdjustments, HasAdjustment FROM ForecastingItem`;
+    const plan = planFields(ctx, FIELD_SPECS.forecastingItem);
+    const itemSoql = `SELECT ${plan.ok ? plan.select : FIELD_SPECS.forecastingItem.required.join(", ")} FROM ForecastingItem`;
     const factSoql = "SELECT OpportunityId, ForecastCategoryName, PeriodId FROM ForecastingFact";
     if (!ids) {
       const reason = periods.status === "ok" ? "Salesforce returned no period holding today." : `Periods couldn't be read: ${periods.reason}`;
@@ -61,7 +64,9 @@ export const forecastExtractor: Extractor<ForecastData> = {
     }
     return {
       periods,
-      items: await readSoql(ctx, `${itemSoql} WHERE ${inPeriods}`, { maxRecords: FORECAST_MAX_ROWS }),
+      items: plan.ok
+        ? await readSoql(ctx, `${itemSoql} WHERE ${inPeriods}`, { maxRecords: FORECAST_MAX_ROWS, missingFields: plan.missing })
+        : { status: "unavailable", reason: plan.reason, source: { kind: "soql", api: "rest", query: `${itemSoql} WHERE ${inPeriods}` } },
       facts: await readSoql(ctx, `${factSoql} WHERE ${inPeriods}`, { maxRecords: FORECAST_MAX_ROWS }),
     };
   },

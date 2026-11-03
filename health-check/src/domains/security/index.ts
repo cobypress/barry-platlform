@@ -1,3 +1,4 @@
+import { fieldDescribeExtractor, missingFieldReason } from "../../extract/fields.ts";
 import { loginsExtractor, usersExtractor, type UserRow } from "../../extract/users.ts";
 import { orgExtractor, type SharingDefaults } from "../../extract/configuration.ts";
 import { privilegedPermissionsExtractor, securityHealthExtractor, type HealthRiskRow } from "../../extract/security.ts";
@@ -215,6 +216,8 @@ const personalIntegrations: Rule = {
     const logins = ctx.data(loginsExtractor);
     if (users.status !== "ok") return { outcome: "not_measurable", reason: `Users couldn't be read: ${users.reason}`, evidence: [ctx.ev(users.source, { count: null })] };
     if (logins.status !== "ok") return { outcome: "not_measurable", reason: `LoginHistory couldn't be read: ${logins.reason}`, evidence: [ctx.ev(logins.source, { count: null })] };
+    const gap = missingFieldReason(logins, "LoginHistory.ApiType");
+    if (gap) return { outcome: "not_measurable", reason: gap, evidence: [ctx.ev(logins.source, { count: null })] };
     const isPerson = (u: UserRow): boolean => {
       const kind = kindOf(ctx, u.Id);
       return kind ? !NON_PERSON_KINDS.has(kind) : !looksShared(u);
@@ -258,6 +261,6 @@ export const securityModule: DomainModule = {
   id: "security",
   cloud: "sales",
   label: "Security and access",
-  extractors: [usersExtractor, loginsExtractor, securityHealthExtractor, privilegedPermissionsExtractor],
+  extractors: [usersExtractor, fieldDescribeExtractor, loginsExtractor, securityHealthExtractor, privilegedPermissionsExtractor],
   rules: [healthScore, healthRisks, modifyAllData, viewAllData, sharingDefaults, personalIntegrations],
 };

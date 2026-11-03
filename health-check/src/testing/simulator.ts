@@ -13,6 +13,8 @@ export type SimulatorOptions = {
   used?: number;
   /** Fail a query whose text matches, to imitate a permission or feature gap. */
   failQuery?: (soql: string) => { errorCode: string; message: string } | null;
+  /** Fields this org doesn't have, by object. Describe leaves them out, and a query that names one fails as a real org would. */
+  dropFields?: Record<string, string[]>;
 };
 
 type Json = Record<string, unknown>;
@@ -33,6 +35,7 @@ export class Simulator implements Transport {
   #used: number;
   #limit: number;
   #failQuery: SimulatorOptions["failQuery"];
+  #dropFields: Record<string, string[]>;
   #retrieveChecks = 0;
   #retrieving: Record<string, string> = org.METADATA_FILES;
 
@@ -40,6 +43,7 @@ export class Simulator implements Transport {
     this.#used = options.used ?? 1000;
     this.#limit = options.dailyLimit ?? 100_000;
     this.#failQuery = options.failQuery;
+    this.#dropFields = options.dropFields ?? {};
   }
 
   get #limitInfo(): string {
@@ -61,8 +65,11 @@ export class Simulator implements Transport {
 
     const describe = path.match(/\/sobjects\/([A-Za-z0-9_]+)\/describe$/);
     if (describe) {
-      const d = org.DESCRIBES[describe[1]!];
-      return d ? jsonResponse(200, { name: describe[1], ...d }, this.#limitInfo) : jsonResponse(404, [{ errorCode: "NOT_FOUND", message: "Not found" }], this.#limitInfo);
+      const name = describe[1]!;
+      const d = org.DESCRIBES[name] ?? org.FIELD_DESCRIBES[name];
+      if (!d) return jsonResponse(404, [{ errorCode: "NOT_FOUND", message: "The requested resource does not exist" }], this.#limitInfo);
+      const dropped = new Set(this.#dropFields[name] ?? []);
+      return jsonResponse(200, { name, ...d, fields: d.fields.filter((f) => !dropped.has((f as { name: string }).name)) }, this.#limitInfo);
     }
     if (path.endsWith("/query") || path.endsWith("/query/")) {
       const soql = url.searchParams.get("q") ?? "";
@@ -106,6 +113,16 @@ export class Simulator implements Transport {
     if (failure) return { error: failure };
 
     const object = soql.match(/\bFROM\s+([A-Za-z0-9_]+)/i)?.[1] ?? "";
+    const dropped = this.#dropFields[object] ?? [];
+    const named = dropped.find((f) => new RegExp(`\\b${f}\\b`).test(soql));
+    if (named) return reject("INVALID_FIELD", `No such column '${named}' on entity '${object}'.`);
+    const result = this.#answerKnown(soql, tooling, object);
+    // Rows only carry fields the org has, as on a real org.
+    if (dropped.length === 0 || "error" in result || !Array.isArray(result.records)) return result;
+    return { ...result, records: (result.records as Json[]).map((r) => Object.fromEntries(Object.entries(r).filter(([k]) => !dropped.includes(k)))) };
+  }
+
+  #answerKnown(soql: string, tooling: boolean, object: string): Json | { error: { errorCode: string; message: string } } {
     const count = (n: number): Json => ({ totalSize: n, done: true, records: [] });
     const where = soql.match(/\bWHERE\b(.*)$/is)?.[1] ?? "";
 

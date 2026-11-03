@@ -1,3 +1,4 @@
+import { fieldDescribeExtractor, missingFieldReason } from "../../extract/fields.ts";
 import { money } from "../../render/format.ts";
 import { activityExtractor } from "../../extract/activity.ts";
 import { schemaExtractor } from "../../extract/configuration.ts";
@@ -272,7 +273,9 @@ const campaignReturn: Rule = {
     if (campaigns.status !== "ok") return { outcome: "not_measurable", reason: `Campaigns couldn't be read: ${campaigns.reason}`, evidence: [ctx.ev(campaigns.source, { count: null })] };
     if (members.status !== "ok") return { outcome: "not_measurable", reason: `Campaign members couldn't be read: ${members.reason}`, evidence: [ctx.ev(members.source, { count: null })] };
     if (members.truncated) return { outcome: "not_measurable", reason: "There are too many campaign members to read in full.", evidence: [ctx.ev(members.source, { count: members.data.length })] };
-    const costed = campaigns.data.filter((c) => c.ActualCost !== null && c.ActualCost > 0);
+    const missingCost = missingFieldReason(campaigns, "Campaign.ActualCost");
+    if (missingCost) return { outcome: "not_measurable", reason: missingCost, evidence: [ctx.ev(campaigns.source, { count: null })] };
+    const costed = campaigns.data.filter((c) => c.ActualCost != null && c.ActualCost > 0);
     const unpriced = campaigns.data.length - costed.length;
     const exclusions = unpriced ? [`${plural(unpriced, "campaign")} with no actual cost recorded`] : [];
     const evidence = [ctx.ev(campaigns.source, { count: campaigns.data.length, exclusions }), ctx.ev(members.source, { count: members.data.length, note: "A deal is credited to every campaign its lead was in, so returns overlap" })];
@@ -373,7 +376,7 @@ export const leadFunnelModule: DomainModule = {
   id: DOMAIN,
   cloud: "sales",
   label: "Lead funnel",
-  extractors: [schemaExtractor, usersExtractor, stagesExtractor, opportunitiesExtractor, activityExtractor, leadsExtractor],
+  extractors: [schemaExtractor, usersExtractor, stagesExtractor, opportunitiesExtractor, activityExtractor, fieldDescribeExtractor, leadsExtractor],
   metrics: [funnelMetrics],
   rules: [conversionBySource, responseTime, noResponse, convertedWithoutOpportunity, sourceReturn, campaignReturn],
 };

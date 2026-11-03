@@ -1,5 +1,6 @@
 import { isUnavailable } from "../salesforce/client.ts";
 import { isNoOwnerField, recordCountsExtractor } from "./configuration.ts";
+import { FIELD_SPECS, planFields } from "./fields.ts";
 import { daysBefore, readSoql, soqlDateTime, type ExtractContext, type Extractor, type Sourced, type SourceInfo } from "./types.ts";
 
 export type UserRow = {
@@ -57,14 +58,17 @@ const LOGIN_MAX_ROWS = 20_000;
 
 export const loginsExtractor: Extractor<Sourced<LoginSummary>> = {
   id: "logins",
-  version: 2,
+  version: 3,
   async run(ctx) {
     const from = daysBefore(ctx.now, LOGIN_DAYS);
+    const plan = planFields(ctx, FIELD_SPECS.loginHistory);
+    const where = `WHERE LoginTime >= ${soqlDateTime(from)} ORDER BY LoginTime DESC`;
+    if (!plan.ok) return { status: "unavailable", reason: plan.reason, source: { kind: "soql", api: "rest", query: `SELECT ${FIELD_SPECS.loginHistory.required.join(", ")} FROM LoginHistory ${where}` } };
     // Status can't be filtered in SOQL, so failures are split out here.
-    const rows = await readSoql<{ UserId: string; LoginTime: string; Status: string; ApiType: string | null; Application: string | null }>(
+    const rows = await readSoql<{ UserId: string; LoginTime: string; Status: string; ApiType?: string | null; Application?: string | null }>(
       ctx,
-      `SELECT UserId, LoginTime, Status, ApiType, Application FROM LoginHistory WHERE LoginTime >= ${soqlDateTime(from)} ORDER BY LoginTime DESC`,
-      { maxRecords: LOGIN_MAX_ROWS },
+      `SELECT ${plan.select} FROM LoginHistory ${where}`,
+      { maxRecords: LOGIN_MAX_ROWS, missingFields: plan.missing },
     );
     if (rows.status !== "ok") return rows;
     const summary: LoginSummary = { from: from.toISOString().slice(0, 10), rowsRead: rows.data.length, failedOrOther: 0, byUser: {}, apiByUser: {} };

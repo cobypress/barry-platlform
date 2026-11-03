@@ -431,6 +431,19 @@ export const DESCRIBES: Record<string, { fields: unknown[]; recordTypeInfos: unk
   },
 };
 
+// Objects the field-describe step reads before querying them. Kept apart from
+// DESCRIBES, which the field sprawl and usage rules scan.
+const lookup = (name: string, relationshipName: string) => standardField(name, "reference", { relationshipName });
+export const FIELD_DESCRIBES: Record<string, { fields: unknown[] }> = {
+  LoginHistory: { fields: ["Id", "LoginTime", "Status", "ApiType", "ApiVersion", "Application", "LoginType", "SourceIp"].map((f) => standardField(f)).concat(lookup("UserId", "User")) },
+  ForecastingItem: {
+    fields: ["Id", "ForecastCategoryName", "ForecastAmount", "AmountWithoutAdjustments", "AmountWithoutManagerAdjustment", "HasAdjustment", "OwnerOnlyAmount"]
+      .map((f) => standardField(f))
+      .concat(lookup("OwnerId", "Owner"), lookup("PeriodId", "Period"), lookup("ForecastingTypeId", "ForecastingType")),
+  },
+  Campaign: { fields: ["Id", "Name", "Type", "Status", "ActualCost", "BudgetedCost", "IsActive"].map((f) => standardField(f)) },
+};
+
 // Total and recent counts for custom field usage, as COUNT(field) would give them.
 export const RECORD_TOTALS: Record<string, { total: number; recent: number }> = {
   Account: { total: 500, recent: 120 },

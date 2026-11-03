@@ -1,3 +1,4 @@
+import { fieldDescribeExtractor, missingFieldReason } from "../../extract/fields.ts";
 import { schemaExtractor } from "../../extract/configuration.ts";
 import { forecastExtractor, quotasExtractor, revenueForecastType, type ForecastItemRow } from "../../extract/forecast.ts";
 import { opportunitiesExtractor, stagesExtractor } from "../../extract/opportunities.ts";
@@ -89,7 +90,9 @@ const adjustmentsRule: Rule = {
     const state = forecastInUse(ctx);
     if (!state.inUse) return { outcome: "not_measurable", reason: state.reason, evidence: state.evidence };
     const { items } = ctx.data(forecastExtractor);
-    const rows = state.items.filter((r) => r.ForecastCategoryName === COMMIT && r.AmountWithoutAdjustments !== null && r.ForecastAmount !== null);
+    const gap = missingFieldReason(items, "ForecastingItem.AmountWithoutAdjustments", "ForecastingItem.HasAdjustment");
+    if (gap) return { outcome: "not_measurable", reason: gap, evidence: [ctx.ev(items.source, { count: null })] };
+    const rows = state.items.filter((r) => r.ForecastCategoryName === COMMIT && r.AmountWithoutAdjustments != null && r.ForecastAmount !== null);
     const evidence = [ctx.ev(items.source, { count: rows.length, exclusions: ["Forecast categories other than Commit", "Rows with no amount"] })];
     if (rows.length === 0) return { outcome: "not_measurable", reason: "There are no Commit forecast rows with amounts to compare.", evidence };
     const before = rows.reduce((sum, r) => sum + r.AmountWithoutAdjustments!, 0);
@@ -271,7 +274,7 @@ export const forecastModule: DomainModule = {
   id: DOMAIN,
   cloud: "sales",
   label: "Forecast",
-  extractors: [schemaExtractor, usersExtractor, stagesExtractor, opportunitiesExtractor, quotasExtractor, forecastExtractor],
+  extractors: [schemaExtractor, usersExtractor, stagesExtractor, opportunitiesExtractor, quotasExtractor, fieldDescribeExtractor, forecastExtractor],
   metrics: [forecastMetrics],
   rules: [inUseRule, accuracyRule, adjustmentsRule, quotaGaps, commitAtRisk, earlyStageCommits],
 };

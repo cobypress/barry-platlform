@@ -8,8 +8,10 @@ export type SourceInfo =
 
 // A read either worked or says why not. "We couldn't read it" and "there's
 // nothing there" must never look alike, because the first means not measurable.
+// `missingFields` names optional fields the org doesn't have, which were left
+// out of the query. Rules that need one are not measurable, and name it.
 export type Sourced<T> =
-  | { status: "ok"; data: T; source: SourceInfo; truncated: boolean }
+  | { status: "ok"; data: T; source: SourceInfo; truncated: boolean; missingFields?: string[] }
   | { status: "unavailable"; reason: string; source: SourceInfo };
 
 /** Page-level checkpoint, so a big extract interrupted part-way doesn't start again. */
@@ -45,11 +47,12 @@ export function unavailable<T>(source: SourceInfo, err: unknown): Sourced<T> {
   throw err;
 }
 
-export async function readSoql<R>(ctx: ExtractContext, soql: string, options: QueryOptions = {}): Promise<Sourced<R[]>> {
+export async function readSoql<R>(ctx: ExtractContext, soql: string, options: QueryOptions & { missingFields?: string[] } = {}): Promise<Sourced<R[]>> {
   const source: SourceInfo = { kind: "soql", api: options.api ?? "rest", query: soql };
   try {
     const result = await ctx.client.query<R>(soql, options);
-    return { status: "ok", data: result.records, source, truncated: result.truncated };
+    const missing = options.missingFields?.length ? { missingFields: options.missingFields } : {};
+    return { status: "ok", data: result.records, source, truncated: result.truncated, ...missing };
   } catch (err) {
     return unavailable(source, err);
   }
