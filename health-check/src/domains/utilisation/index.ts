@@ -11,7 +11,7 @@ import {
   usersExtractor,
   type UserRow,
 } from "../../extract/users.ts";
-import { userGuards } from "../../guards/user-guards.ts";
+import { USER_GUARD_BLOCKERS, userGuards } from "../../guards/user-guards.ts";
 import { notSized, pct, plural, type Rule, type RuleContext, type RuleResult } from "../../engine/rule.ts";
 import type { Guard, Value } from "../../schemas/index.ts";
 import type { DomainModule } from "../types.ts";
@@ -100,13 +100,16 @@ function reclaimFindings(ctx: RuleContext, candidates: UserRow[], describe: { ke
 
   if (blocked.length > 0) {
     const failed = blocked.filter((a) => a.guards.some((g) => g.status === "failed"));
+    const incomplete = blocked.length - failed.length;
+    // Only failed checks are named. A check we couldn't finish says nothing about the user, so it's counted instead.
     const blockers = new Map<string, number>();
-    for (const a of blocked) for (const id of new Set(a.guards.filter((g) => g.status !== "passed").map((g) => g.guardId))) blockers.set(id, (blockers.get(id) ?? 0) + 1);
+    for (const a of failed) for (const id of new Set(a.guards.filter((g) => g.status === "failed").map((g) => g.guardId))) blockers.set(id, (blockers.get(id) ?? 0) + 1);
+    const named = [...blockers].sort(([a, x], [b, y]) => y - x || a.localeCompare(b)).map(([id, n]) => `${USER_GUARD_BLOCKERS[id as keyof typeof USER_GUARD_BLOCKERS] ?? id} (${n})`);
     results.push({
       outcome: "issue",
       key: `${describe.key}-blocked`,
       title: `Licences that look unused but can't be released yet: ${describe.label}`,
-      summary: `Active users who ${describe.basis}: ${blocked.length}. We aren't recommending removal. Failed a guard: ${failed.length}.${failed.length < blocked.length ? ` Couldn't complete a guard: ${blocked.length - failed.length}.` : ""} Blockers: ${[...blockers].sort().map(([id, n]) => `${id} (${n})`).join(", ")}.`,
+      summary: `Active users who ${describe.basis}: ${blocked.length}. We aren't recommending removal yet.${named.length ? ` What's in the way: ${named.join(", ")}.` : ""}${incomplete ? ` For ${plural(incomplete, "user")}, we couldn't complete every check.` : ""}`,
       recommendation: "Work through each user's blockers. Reassign what they own and finish any open manual step before changing the account.",
       recommendationType: "investigate",
       severity: "low",
@@ -118,7 +121,7 @@ function reclaimFindings(ctx: RuleContext, candidates: UserRow[], describe: { ke
       guards: blocked.flatMap((a) => a.guards),
       segmentsChecked: segments,
       subjects: blocked.map(label),
-      facts: { users: blocked.length, failed: failed.length },
+      facts: { users: blocked.length, failed: failed.length, incomplete },
       manualStepIds,
     });
   }

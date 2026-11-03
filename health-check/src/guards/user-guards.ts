@@ -19,6 +19,17 @@ export const USER_GUARD_IDS = [
   "no-recent-login",
 ] as const;
 
+/** What stops a release, in the reader's words. A guard id is ours, not theirs. */
+export const USER_GUARD_BLOCKERS: Record<(typeof USER_GUARD_IDS)[number], string> = {
+  "not-shared-or-system": "may be a shared or system account",
+  "owns-no-records": "still owns records",
+  "not-referenced-in-automation": "is named in automation",
+  "runs-no-automation": "automation runs as them",
+  "not-default-workflow-user": "may be the Default Workflow User",
+  "not-in-user-hierarchy": "other users report to them",
+  "no-recent-login": "has logged in recently",
+};
+
 const SHARED_USERNAME = /^(sales|support|service|info|admin|demo|test|team|shared|integration|api|system|noreply|no-reply|marketing|accounts|hello|office)[.+_-]?\d*@/i;
 const NON_PERSON_KINDS = new Set(["shared", "system", "integration", "test"]);
 
