@@ -93,6 +93,7 @@ Filtering by HTTP method wouldn't work in Salesforce. `GET tooling/executeAnonym
 | Forecast rows show today's position | Forecast accuracy is not measurable without a snapshot |
 | Admins can rename forecast categories | No Commit rows is not measurable, not a clean Commit |
 | `CloseDate` and `LastActivityDate` have no time zone | Instants become days in the org's zone, and date-only fields are left alone |
+| A field the org doesn't have fails the whole query | `field-describe` checks feature-dependent objects first. A missing optional field is dropped and named in `missingFields`, and only rules that need it are not measurable |
 | An expired session reaches SOAP as a fault, not a 401 | The client refreshes once, then rebuilds the envelope with the new token |
 
 ## Data handling
