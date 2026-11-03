@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { SALES_CLOUD_MODULES } from "../index.ts";
 import { analyseExtracts, clone, loadExtracts, runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
-import { userId } from "../../testing/synthetic-org.ts";
+import { sfId, userId } from "../../testing/synthetic-org.ts";
 import { apexExtractor, metadataExtractor } from "../../extract/automation.ts";
 import { activityCaptureExtractor, licencesExtractor, ownershipExtractor, usersExtractor } from "../../extract/users.ts";
 import { duplicateRulesExtractor } from "../../extract/configuration.ts";
@@ -105,7 +105,7 @@ describe("configuration", () => {
 });
 
 describe("automation", () => {
-  test("workflow rules count active rules only", () => assert.equal(issue(analyseExtracts(extracts).findings, "aut.legacy-workflow-rules").facts.activeRules, 2));
+  test("workflow rules count active rules only", () => assert.equal(issue(analyseExtracts(extracts).findings, "aut.legacy-workflow-rules").facts.activeRules, 3));
   test("process builders", () => assert.equal(issue(analyseExtracts(extracts).findings, "aut.legacy-process-builder").facts.activeProcesses, 1));
   test("mixed automation sees Process Builder through processMetadataValues", () => {
     const f = issue(analyseExtracts(extracts).findings, "aut.mixed-automation-on-object");
@@ -146,7 +146,59 @@ describe("automation", () => {
     assert.equal(f?.status, "not_measurable");
     assert.match(f?.notMeasurableReason ?? "", /cleared or only some tests have run/);
   });
-  test("two triggers on one object", () => assert.deepEqual(issue(analyseExtracts(extracts).findings, "aut.multiple-triggers").subjects.map((s) => s.label), ["Opportunity"]));
+  test("two triggers on one object", () => assert.deepEqual(issue(analyseExtracts(extracts).findings, "aut.multiple-triggers").subjects.map((s) => s.label), ["Invoice__c", "Opportunity"]));
+
+  // Invoice__c's triggers name it by id, one in 15 characters and one in 18. Its
+  // flow and Workflow Rule name it by API name. All four are one object.
+  const unresolvable = (changed: Map<string, unknown>): void => {
+    const triggers = (changed.get(apexExtractor.id) as { triggers: { data: Array<{ TableEnumOrId: string }> } }).triggers.data;
+    for (const t of triggers) if (t.TableEnumOrId.startsWith("01I")) t.TableEnumOrId = sfId("01I", 9);
+  };
+  test("a custom object's triggers and flows are one object, by name", () => {
+    const mixed = issue(analyseExtracts(extracts).findings, "aut.mixed-automation-on-object");
+    assert.match(mixed.summary, /Invoice__c runs Apex trigger, Record-triggered flow, Workflow Rule/);
+    assert.deepEqual(mixed.subjects.map((s) => s.label), ["Invoice__c", "Opportunity"]);
+    const multiple = issue(analyseExtracts(extracts).findings, "aut.multiple-triggers");
+    assert.match(multiple.summary, /^Invoice__c has 2; Opportunity has 2\./);
+    for (const f of [mixed, multiple]) {
+      assert.doesNotMatch(`${f.summary} ${f.subjects.map((s) => s.label).join(" ")}`, /01I/);
+      assert.equal(f.facts.unnamedTriggers, 0);
+    }
+  });
+  test("a trigger on an object we can't name is reported as such, never as its id", () => {
+    const changed = clone(extracts);
+    unresolvable(changed);
+    const findings = analyseExtracts(changed).findings;
+    // The triggers can't join the flow and rule, so Invoice__c is no longer mixed.
+    const mixed = issue(findings, "aut.mixed-automation-on-object");
+    assert.deepEqual(mixed.subjects.map((s) => s.label), ["Opportunity"]);
+    assert.match(mixed.summary, /2 active Apex triggers are on custom objects we couldn't name, so they aren't counted against any object\./);
+    assert.equal(mixed.facts.unnamedTriggers, 2);
+    // Both share one id, so they're still two triggers on one object.
+    const multiple = issue(findings, "aut.multiple-triggers");
+    assert.match(multiple.summary, /^Opportunity has 2; a custom object we couldn't name has 2\./);
+    assert.match(multiple.summary, /so they're grouped by the object's id instead\./);
+    assert.deepEqual(multiple.subjects.map((s) => s.label), ["Opportunity", "Custom object we couldn't name"]);
+    for (const f of [mixed, multiple]) assert.doesNotMatch(`${f.summary} ${f.subjects.map((s) => s.label).join(" ")}`, /01I/);
+  });
+  test("an unreadable list of custom objects says why the triggers couldn't be placed", () => {
+    const changed = clone(extracts);
+    changed.set("custom-objects", { status: "unavailable", reason: "no access", source: { kind: "soql", api: "tooling", query: "x" } });
+    const findings = analyseExtracts(changed).findings;
+    const mixed = issue(findings, "aut.mixed-automation-on-object");
+    assert.match(mixed.summary, /2 active Apex triggers are on custom objects we couldn't name, because the list of custom objects couldn't be read, so they aren't counted against any object\./);
+    // The 15 and 18-character ids are still the same object.
+    assert.match(issue(findings, "aut.multiple-triggers").summary, /a custom object we couldn't name has 2/);
+  });
+  test("a single unnamed trigger reads in the singular, on a pass", () => {
+    const changed = clone(extracts);
+    const triggers = (changed.get(apexExtractor.id) as { triggers: { data: Array<{ TableEnumOrId: string; Status: string; Name: string }> } }).triggers.data;
+    for (const t of triggers) if (t.Name !== "InvoiceTrigger") t.Status = "Inactive";
+    triggers.find((t) => t.Name === "InvoiceTrigger")!.TableEnumOrId = sfId("01I", 9);
+    const [f] = byRule(analyseExtracts(changed).findings, "aut.multiple-triggers");
+    assert.equal(f?.status, "passed");
+    assert.match(f?.summary ?? "", /1 active Apex trigger is on a custom object we couldn't name, so it's grouped by the object's id instead\./);
+  });
   test("unreadable metadata is not measurable, not a clean pass", () => {
     const changed = clone(extracts);
     const source = (changed.get(metadataExtractor.id) as { source: unknown }).source;
@@ -348,12 +400,12 @@ describe("data quality", () => {
   test("records with inactive owners", () => assert.equal(issue(analyseExtracts(extracts).findings, "dq.records-inactive-owner").facts.strandedTotal, 190));
   test("undocumented automation is counted by type, with tests and hidden code left out", () => {
     const f = issue(analyseExtracts(extracts).findings, "aut.undocumented-automation");
-    // Flows 3 of 4, Process Builders 1 of 1, Workflow Rules 2 of 2, validation rules 0 of 2,
-    // code 5 of 7: the commented class and trigger count, the test class doesn't.
+    // Flows 3 of 4, Process Builders 1 of 1, Workflow Rules 2 of 3, validation rules 0 of 2,
+    // code 5 of 8: the commented class and triggers count, the test class doesn't.
     // The inactive validation rule on Invoice__c isn't counted.
-    assert.deepEqual(f.facts, { total: 16, missing: 11, rate: 68.8 });
+    assert.deepEqual(f.facts, { total: 18, missing: 11, rate: 61.1 });
     assert.match(f.summary, /Validation rules: 0 of 2/);
-    assert.match(f.summary, /Apex classes and triggers: 5 of 7/);
+    assert.match(f.summary, /Apex classes and triggers: 5 of 8/);
   });
   test("an edition with no Apex says so, rather than that the read failed", () => {
     const changed = clone(extracts);

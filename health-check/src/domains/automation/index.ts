@@ -1,8 +1,10 @@
 import { apexExtractor, metadataExtractor, scheduledJobsExtractor } from "../../extract/automation.ts";
+import { customObjectsExtractor } from "../../extract/configuration.ts";
 import type { MetadataBundle } from "../../extract/metadata-parse.ts";
 import { notSized, plural, type NotMeasurableResult, type Rule, type RuleContext, type RuleResult } from "../../engine/rule.ts";
 import { MIGRATE_TO_FLOW_NOTE, END_OF_SUPPORT } from "./notes.ts";
 import type { DomainModule } from "../types.ts";
+import { isObjectId, objectResolver } from "../object-names.ts";
 
 const COVERAGE_MINIMUM = 75;
 const CLASS_COVERAGE_FLOOR = 50;
@@ -22,6 +24,14 @@ function metadataOr(ctx: RuleContext): { bundle: MetadataBundle } | NotMeasurabl
 }
 
 const groupCount = (values: string[]): number => new Set(values).size;
+
+const UNNAMED = "a custom object we couldn't name";
+
+/** Says which triggers sit on custom objects we couldn't name, and why, or nothing. */
+function unnamedNote(count: number, idsRead: boolean, consequence: string): string {
+  if (count === 0) return "";
+  return ` ${plural(count, "active Apex trigger")} ${count === 1 ? "is" : "are"} on ${count === 1 ? UNNAMED : "custom objects we couldn't name"}${idsRead ? "" : ", because the list of custom objects couldn't be read"}, so ${consequence}.`;
+}
 
 const legacyWorkflowRules: Rule = {
   id: "aut.legacy-workflow-rules",
@@ -90,7 +100,7 @@ const legacyProcessBuilder: Rule = {
 
 const mixedAutomation: Rule = {
   id: "aut.mixed-automation-on-object",
-  version: 1,
+  version: 2,
   domain: "automation",
   title: "Several automation tools acting on the same object",
   evaluate(ctx): RuleResult | RuleResult[] {
@@ -98,13 +108,18 @@ const mixedAutomation: Rule = {
     if ("outcome" in result) return result;
     const { triggers } = ctx.data(apexExtractor);
     if (triggers.status !== "ok") return { outcome: "not_measurable", reason: apexGap("triggers", triggers.reason), evidence: [ctx.ev(triggers.source, { count: null })] };
+    // A trigger on a custom object can name it by id, and a flow names it by API name.
+    const ids = ctx.data(customObjectsExtractor);
+    const objectOf = objectResolver(ids);
     const tools = new Map<string, Set<string>>();
     const add = (object: string | null, tool: string): void => {
       if (!object) return;
       if (!tools.has(object)) tools.set(object, new Set());
       tools.get(object)!.add(tool);
     };
-    for (const t of triggers.data) if (t.Status === "Active") add(t.TableEnumOrId, "Apex trigger");
+    const active = triggers.data.filter((t) => t.Status === "Active");
+    const unnamed = active.filter((t) => objectOf(t.TableEnumOrId) === null).length;
+    for (const t of active) add(objectOf(t.TableEnumOrId), "Apex trigger");
     for (const f of result.bundle.flows) {
       if (f.status !== "Active") continue;
       if (f.processType === "Workflow") add(f.object, "Process Builder");
@@ -113,13 +128,18 @@ const mixedAutomation: Rule = {
     for (const w of result.bundle.workflows) if (w.rules.some((r) => r.active)) add(w.object, "Workflow Rule");
 
     const mixed = [...tools].filter(([, set]) => set.size >= MIXED_AUTOMATION_LIMIT).sort(([a], [b]) => a.localeCompare(b));
-    const evidence = [ctx.ev({ kind: "metadata", path: "flows/*.flow, workflows/*.workflow" }, { count: mixed.length }), ctx.ev(triggers.source, { count: triggers.data.length })];
+    const note = unnamedNote(unnamed, ids.status === "ok", unnamed === 1 ? "it isn't counted against any object" : "they aren't counted against any object");
+    const evidence = [
+      ctx.ev({ kind: "metadata", path: "flows/*.flow, workflows/*.workflow" }, { count: mixed.length }),
+      ctx.ev(triggers.source, { count: triggers.data.length, exclusions: unnamed ? [`Active triggers on custom objects we couldn't name: ${unnamed}`] : [] }),
+      ctx.ev(ids.source, { count: ids.status === "ok" ? ids.data.length : null, note: "Names the custom objects triggers refer to by id" }),
+    ];
     const segments = [{ dimension: "object", segments: tools.size }];
-    if (mixed.length === 0) return { outcome: "pass", summary: `No object runs ${MIXED_AUTOMATION_LIMIT} or more automation tools.`, evidence, segmentsChecked: segments };
+    if (mixed.length === 0) return { outcome: "pass", summary: `No object runs ${MIXED_AUTOMATION_LIMIT} or more automation tools.${note}`, evidence, segmentsChecked: segments, facts: { unnamedTriggers: unnamed } };
     return {
       outcome: "issue",
       title: "Automation on some objects is split across several tools",
-      summary: `${mixed.map(([o, set]) => `${o} runs ${[...set].sort().join(", ")}`).join("; ")}. Salesforce runs these at different points when a record saves, so the outcome can be hard to predict.`,
+      summary: `${mixed.map(([o, set]) => `${o} runs ${[...set].sort().join(", ")}`).join("; ")}. Salesforce runs these at different points when a record saves, so the outcome can be hard to predict.${note}`,
       recommendation: "Decide for each object what belongs in Apex and what in Flow, then retire the older tools into that split.",
       recommendationType: "change",
       severity: "medium",
@@ -130,7 +150,7 @@ const mixedAutomation: Rule = {
       owner: "Salesforce developer",
       segmentsChecked: segments,
       subjects: mixed.map(([o]) => ({ type: "object", label: o })),
-      facts: { objects: mixed.length },
+      facts: { objects: mixed.length, unnamedTriggers: unnamed },
     };
   },
 };
@@ -357,26 +377,44 @@ const apexCoverage: Rule = {
 
 const multipleTriggers: Rule = {
   id: "aut.multiple-triggers",
-  version: 1,
+  version: 2,
   domain: "automation",
   title: "More than one trigger on an object",
   evaluate(ctx): RuleResult | RuleResult[] {
     const { triggers } = ctx.data(apexExtractor);
     if (triggers.status !== "ok") return { outcome: "not_measurable", reason: apexGap("triggers", triggers.reason), evidence: [ctx.ev(triggers.source, { count: null })] };
-    const byObject = new Map<string, number>();
-    for (const t of triggers.data) if (t.Status === "Active") byObject.set(t.TableEnumOrId, (byObject.get(t.TableEnumOrId) ?? 0) + 1);
-    const multiple = [...byObject].filter(([, n]) => n > 1).sort(([a], [b]) => a.localeCompare(b));
-    const evidence = [ctx.ev(triggers.source, { count: triggers.data.length, exclusions: ["Inactive triggers", "Packaged triggers"] })];
+    const ids = ctx.data(customObjectsExtractor);
+    const objectOf = objectResolver(ids);
+    // Grouped by name where we have one. An id we can't name still says which
+    // triggers share an object, in either length, so it's grouped by id and never shown.
+    const keyOf = (value: string): { key: string; label: string | null } => {
+      const name = objectOf(value);
+      if (name) return { key: name, label: name };
+      return { key: isObjectId(value) ? value.slice(0, 15) : value, label: null };
+    };
+    const byObject = new Map<string, { label: string | null; n: number }>();
+    for (const t of triggers.data) {
+      if (t.Status !== "Active") continue;
+      const { key, label } = keyOf(t.TableEnumOrId);
+      byObject.set(key, { label, n: (byObject.get(key)?.n ?? 0) + 1 });
+    }
+    const unnamed = [...byObject.values()].filter((o) => o.label === null).reduce((sum, o) => sum + o.n, 0);
+    const multiple = [...byObject.values()].filter((o) => o.n > 1).sort((a, b) => (a.label === null ? 1 : 0) - (b.label === null ? 1 : 0) || (a.label ?? "").localeCompare(b.label ?? ""));
+    const note = unnamedNote(unnamed, ids.status === "ok", unnamed === 1 ? "it's grouped by the object's id instead" : "they're grouped by the object's id instead");
+    const evidence = [
+      ctx.ev(triggers.source, { count: triggers.data.length, exclusions: ["Inactive triggers", "Packaged triggers"] }),
+      ctx.ev(ids.source, { count: ids.status === "ok" ? ids.data.length : null, note: "Names the custom objects triggers refer to by id" }),
+    ];
     const segments = [{ dimension: "object", segments: byObject.size }];
     if (multiple.length === 0) {
       return byObject.size === 0
         ? { outcome: "pass", summary: "This org has no active triggers of its own.", evidence, segmentExemptReason: "There are no triggers to segment." }
-        : { outcome: "pass", summary: `No object has more than one active trigger, across ${byObject.size} objects.`, evidence, segmentsChecked: segments };
+        : { outcome: "pass", summary: `No object has more than one active trigger, across ${byObject.size} objects.${note}`, evidence, segmentsChecked: segments, facts: { unnamedTriggers: unnamed } };
     }
     return {
       outcome: "issue",
       title: "Some objects have several triggers",
-      summary: `${multiple.map(([o, n]) => `${o} has ${n}`).join("; ")}. Salesforce doesn't guarantee the order they run in.`,
+      summary: `${multiple.map((o) => `${o.label ?? UNNAMED} has ${o.n}`).join("; ")}. Salesforce doesn't guarantee the order they run in.${note}`,
       recommendation: "Move to one trigger per object, calling a handler class.",
       recommendationType: "change",
       severity: "medium",
@@ -386,8 +424,8 @@ const multipleTriggers: Rule = {
       effort: { size: "M" },
       owner: "Salesforce developer",
       segmentsChecked: segments,
-      subjects: multiple.map(([o]) => ({ type: "object", label: o })),
-      facts: { objects: multiple.length },
+      subjects: multiple.map((o) => ({ type: "object", label: o.label ?? "Custom object we couldn't name" })),
+      facts: { objects: multiple.length, unnamedTriggers: unnamed },
     };
   },
 };
@@ -396,6 +434,6 @@ export const automationModule: DomainModule = {
   id: "automation",
   cloud: "sales",
   label: "Automation and code",
-  extractors: [metadataExtractor, apexExtractor, scheduledJobsExtractor],
+  extractors: [metadataExtractor, apexExtractor, scheduledJobsExtractor, customObjectsExtractor],
   rules: [legacyWorkflowRules, legacyProcessBuilder, mixedAutomation, hardcodedIds, missingFaultPaths, undocumentedAutomation, oldApiVersions, apexCoverage, multipleTriggers],
 };

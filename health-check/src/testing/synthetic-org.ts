@@ -848,6 +848,10 @@ export const APEX_TRIGGERS = [
   { Id: sfId("01q", 3), Name: "AccountTrigger", TableEnumOrId: "Account", ApiVersion: 60, Status: "Active", Body: "trigger AccountTrigger on Account (before update) { }" },
   // Trap: a trigger on a custom object names it by id, not by name.
   { Id: sfId("01q", 4), Name: "InvoiceTrigger", TableEnumOrId: sfId("01I", 1), ApiVersion: 62, Status: "Active", Body: "// Totals each invoice from its lines.\ntrigger InvoiceTrigger on Invoice__c (before insert, before update) { }" },
+  // Trap: a second trigger on the same custom object, by its 15-character id. With
+  // the flow and Workflow Rule on Invoice__c, that's three tools and two triggers
+  // on one object, which raw ids would split across three objects.
+  { Id: sfId("01q", 5), Name: "InvoiceAudit", TableEnumOrId: sfId("01I", 1).slice(0, 15), ApiVersion: 62, Status: "Active", Body: "// Records who changed an invoice's total.\ntrigger InvoiceAudit on Invoice__c (after update) { }" },
 ];
 
 export const ORG_COVERAGE = [{ PercentCovered: 82 }];
@@ -931,6 +935,9 @@ export const METADATA_FILES: Record<string, string> = {
   <validationRules><fullName>Due_Date_Required</fullName><description>Finance can't chase an invoice with no due date.</description><active>true</active><errorConditionFormula>ISBLANK(Due_Date__c)</errorConditionFormula></validationRules>
   <validationRules><fullName>Old_Check</fullName><active>false</active><errorConditionFormula>Paid__c</errorConditionFormula></validationRules>
 </CustomObject>`,
+  "workflows/Invoice__c.workflow": `<?xml version="1.0"?><Workflow ${METADATA_NS}>
+  <rules><fullName>Notify_Overdue</fullName><active>true</active><description>Tells finance when an invoice passes its due date.</description><actions><name>Alert</name><type>Alert</type></actions></rules>
+</Workflow>`,
   "objects/Project__c.object": `<?xml version="1.0"?><CustomObject ${METADATA_NS}>
   <fields><fullName>Project_Code__c</fullName><type>Text</type></fields>
 </CustomObject>`,

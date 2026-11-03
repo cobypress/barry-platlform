@@ -97,7 +97,7 @@ Filtering by HTTP method wouldn't work in Salesforce. `GET tooling/executeAnonym
 | `CloseDate` and `LastActivityDate` have no time zone | Instants become days in the org's zone, and date-only fields are left alone |
 | A field the org doesn't have fails the whole query | `field-describe` checks feature-dependent objects first. A missing optional field is dropped and named in `missingFields`, and only rules that need it are not measurable |
 | An expired session reaches SOAP as a fault, not a 401 | The client refreshes once, then rebuilds the envelope with the new token |
-| `Layout` and `ApexTrigger` can name a custom object by its id, in 15 or 18 characters | Tooling `CustomObject` maps the first 15 characters to a name. Two ids that would make the same name are both left unnamed, and the inventory says how many layouts and triggers it couldn't place |
+| `Layout` and `ApexTrigger` can name a custom object by its id, in 15 or 18 characters | Tooling `CustomObject` maps the first 15 characters to a name. Two ids that would make the same name are both left unnamed. The inventory and the trigger rules share this, and each says how many it couldn't place |
 
 ## Data handling
 

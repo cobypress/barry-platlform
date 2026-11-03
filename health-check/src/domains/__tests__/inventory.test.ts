@@ -35,7 +35,7 @@ describe("the object inventory", () => {
     assert.equal(m.value, 7);
     // Ranked by automation, then custom fields. Empty_Object__c has no records.
     assert.deepEqual(inventoryRows(m).map((r) => r.object), ["Opportunity", "Invoice__c", "Lead", "Account", "Project__c", "Contact", "Project_Line__c"]);
-    assert.deepEqual(m.stats, { coreObjects: 4, customObjects: 3, customFields: 167, automation: 12, undocumented: 8, objectsWithAutomation: 4 });
+    assert.deepEqual(m.stats, { coreObjects: 4, customObjects: 3, customFields: 167, automation: 14, undocumented: 8, objectsWithAutomation: 4 });
     assert.ok(Metric.safeParse(m).success);
   });
 
@@ -49,9 +49,10 @@ describe("the object inventory", () => {
       validationRules: 1,
       flows: 1,
       processBuilders: 0,
-      workflowRules: 0,
-      triggers: 1,
-      // The flow has no description. The rule has one, and the trigger has a comment.
+      workflowRules: 1,
+      // One trigger by its 18-character id, one by its 15.
+      triggers: 2,
+      // The flow has no description. The rules have one, and the triggers have comments.
       undocumented: 1,
     });
   });
@@ -80,7 +81,7 @@ describe("the object inventory", () => {
     changed.set("custom-objects", unavailable);
     const m = measured(inventory(changed));
     assert.deepEqual([row(m, "Invoice__c")?.counts.layouts, row(m, "Invoice__c")?.counts.triggers, row(m, "Project__c")?.counts.layouts], [0, 0, 0]);
-    assert.ok(m.exclusions.some((e) => e.startsWith("Page layouts (3) and Apex triggers (1) on custom objects we couldn't name") && e.includes("no access")), m.exclusions.join(" | "));
+    assert.ok(m.exclusions.some((e) => e.startsWith("Page layouts (3) and Apex triggers (2) on custom objects we couldn't name") && e.includes("no access")), m.exclusions.join(" | "));
   });
 
   test("two objects that would share a name are both left unnamed, not guessed", () => {
@@ -88,7 +89,7 @@ describe("the object inventory", () => {
     (changed.get("custom-objects") as { data: unknown[] }).data.push({ Id: sfId("01I", 5), DeveloperName: "Invoice", NamespacePrefix: null });
     const m = measured(inventory(changed));
     assert.deepEqual([row(m, "Invoice__c")?.counts.layouts, row(m, "Invoice__c")?.counts.triggers], [0, 0]);
-    assert.ok(m.exclusions.some((e) => e.startsWith("Page layouts (2) and Apex triggers (1)")));
+    assert.ok(m.exclusions.some((e) => e.startsWith("Page layouts (2) and Apex triggers (2)")));
   });
 
   test("unreadable layouts are not read, never zero", () => {
@@ -133,12 +134,12 @@ describe("the object inventory", () => {
 
 describe("the object inventory in the raw notes", () => {
   test("a line in the summary says where the complexity is", () => {
-    assert.match(notes, /^- Object inventory: 7 objects counted, carrying 12 rules, flows and triggers, of which 8 have no description\. The busiest is Opportunity, with 6 rules, flows and triggers\.$/m);
+    assert.match(notes, /^- Object inventory: 7 objects counted, carrying 14 rules, flows and triggers, of which 8 have no description\. The busiest is Opportunity, with 6 rules, flows and triggers\.$/m);
   });
 
   test("every object is listed, with what couldn't be read and why", () => {
     for (const object of ["Opportunity", "Invoice__c", "Lead", "Account", "Project__c", "Contact", "Project_Line__c"]) assert.match(notes, new RegExp(`^\\| ${object} \\|`, "m"), object);
-    assert.match(notes, /^\| Invoice__c \| 12000 \| 3 \| 2 \| 2 \| 1 \| 1 \| 0 \| 0 \| 1 \| 1 \|$/m);
+    assert.match(notes, /^\| Invoice__c \| 12000 \| 3 \| 2 \| 2 \| 1 \| 1 \| 0 \| 1 \| 2 \| 1 \|$/m);
     assert.match(notes, /\| Opportunity \| Not read \(Salesforce keeps no count for this object\) \|/);
     assert.match(notes, /\*\*Sample:\*\* 7 objects/);
   });

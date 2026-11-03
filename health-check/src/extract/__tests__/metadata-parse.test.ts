@@ -52,7 +52,7 @@ describe("workflow rules and objects", () => {
     ));
   test("reads which flows and workflow rules have a description", () => {
     assert.deepEqual(bundle.flows.filter((f) => f.described).map((f) => f.name), ["Lead_Assign"]);
-    assert.ok(bundle.workflows.flatMap((w) => w.rules).every((r) => !r.described));
+    assert.deepEqual(bundle.workflows.flatMap((w) => w.rules).filter((r) => r.described).map((r) => r.name), ["Notify_Overdue"]);
   });
   test("package.xml isn't counted", () => assert.equal(bundle.filesRead, Object.keys(METADATA_FILES).length - 1));
 });
