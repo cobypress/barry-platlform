@@ -40,7 +40,7 @@ The script gives it these permissions and nothing else.
 
 **Objects:** Read, View All Records and View All Fields on Account, Campaign, Case, Contact, Lead and Opportunity.
 
-**Fields:** Read on the task's Related To (`WhatId`) and Name (`WhoId`) fields.
+**Fields:** Read on the task's Related To (`WhatId`) and Name (`WhoId`) fields. Salesforce applies these to events too.
 
 **What it doesn't grant:**
 
@@ -56,7 +56,7 @@ Because this is a managed package, Salesforce hides the script's code from you. 
 
 Barometer reads:
 
-- **Setup and configuration:** company settings, users (name, username, email, profile, role, last login and whether they're active), licences, profiles and permission sets, login history for the last 90 days, the setup audit trail for the last 180 days, Security Health Check results, report and dashboard names and folders, scheduled jobs, duplicate rules, and the code of your own Apex classes and triggers.
+- **Setup and configuration:** company settings, users (name, username, email, profile, role, last login and whether they're active), licences, profiles and permission sets, login history for the last 90 days, the setup audit trail for the last 180 days, Security Health Check results, report and dashboard names and folders, report definitions (columns, groupings and filters, without running the report), the definitions of flows, workflow rules and validation rules, scheduled jobs, duplicate rules, and the code of your own Apex classes and triggers.
 - **Sales records, as figures and dates:** opportunities (owner, account, stage, amount, close date, type, lead source and key dates) and their stage history, leads (owner, source, dates and conversion), campaign members, forecasts, and the dates and links of tasks, events and emails.
 - **Counts only:** how full each custom field is, contacts without an account or email address, and record counts by owner.
 
