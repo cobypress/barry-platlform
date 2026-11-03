@@ -714,6 +714,8 @@ export const REPORT_FILES: Record<string, string> = Object.fromEntries(
 
 const METADATA_NS = 'xmlns="http://soap.sforce.com/2006/04/metadata"';
 
+// Trap: most automation has no description or comment, and most custom fields
+// have no help text. One flow, one validation rule and one field are documented.
 export const METADATA_FILES: Record<string, string> = {
   "package.xml": `<?xml version="1.0"?><Package ${METADATA_NS}><version>${API_VERSION}</version></Package>`,
   "flows/Opportunity_Route_Deal.flow": `<?xml version="1.0"?><Flow ${METADATA_NS}>
@@ -723,7 +725,7 @@ export const METADATA_FILES: Record<string, string> = {
   <recordUpdates><name>Update_Owner</name><object>Opportunity</object><inputAssignments><field>Legacy_Code__c</field></inputAssignments></recordUpdates>
 </Flow>`,
   "flows/Lead_Assign.flow": `<?xml version="1.0"?><Flow ${METADATA_NS}>
-  <apiVersion>62.0</apiVersion><label>Assign Lead</label><processType>AutoLaunchedFlow</processType><status>Active</status>
+  <apiVersion>62.0</apiVersion><label>Assign Lead</label><description>Sets the region on new leads so routing can pick an owner.</description><processType>AutoLaunchedFlow</processType><status>Active</status>
   <start><object>Lead</object><triggerType>RecordBeforeSave</triggerType></start>
   <recordUpdates><name>Set_Region</name><object>Lead</object><faultConnector><targetReference>Log</targetReference></faultConnector></recordUpdates>
 </Flow>`,
@@ -750,7 +752,11 @@ export const METADATA_FILES: Record<string, string> = {
 </Workflow>`,
   "objects/Opportunity.object": `<?xml version="1.0"?><CustomObject ${METADATA_NS}>
   <fields><fullName>Old_Region__c</fullName><type>Text</type></fields>
-  <validationRules><fullName>Needs_Competitor</fullName><active>true</active><errorConditionFormula>ISBLANK(Competitor__c)</errorConditionFormula></validationRules>
+  <fields><fullName>Legacy_Code__c</fullName><type>Text</type></fields>
+  <fields><fullName>Deal_Score__c</fullName><type>Number</type></fields>
+  <fields><fullName>Competitor__c</fullName><inlineHelpText>Who else the customer is talking to.</inlineHelpText><type>Text</type></fields>
+  <fields><fullName>Amount</fullName><type>Currency</type></fields>
+  <validationRules><fullName>Needs_Competitor</fullName><description>A competitor is needed to report on losses.</description><active>true</active><errorConditionFormula>ISBLANK(Competitor__c)</errorConditionFormula></validationRules>
 </CustomObject>`,
   "approvalProcesses/Opportunity.Discount_Approval.approvalProcess": `<?xml version="1.0"?><ApprovalProcess ${METADATA_NS}><active>true</active></ApprovalProcess>`,
 };

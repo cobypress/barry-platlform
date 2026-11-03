@@ -18,16 +18,20 @@ export type FlowSummary = {
   hardcodedEmails: number;
   /** Record updates that write back to the record that started the flow. */
   sameRecordUpdates: number;
+  /** Has a description, the only place Salesforce keeps why a flow exists. */
+  described: boolean;
   path: string;
 };
 
 export type WorkflowSummary = {
   object: string;
   path: string;
-  rules: Array<{ name: string; active: boolean; timeTriggers: number; actions: number }>;
+  rules: Array<{ name: string; active: boolean; timeTriggers: number; actions: number; described: boolean }>;
 };
 
-export type ValidationRuleSummary = { object: string; name: string; active: boolean };
+export type ValidationRuleSummary = { object: string; name: string; active: boolean; described: boolean };
+// Own custom fields only. Help text is what a user sees, a description is for whoever maintains the field.
+export type CustomFieldSummary = { object: string; name: string; described: boolean; helpText: boolean };
 
 // Where a user or field is mentioned. Values are metadata paths. Raw XML isn't
 // kept: what the rules and guards need is here, and less kept is less to leak.
@@ -37,12 +41,13 @@ export type MetadataBundle = {
   flows: FlowSummary[];
   workflows: WorkflowSummary[];
   validationRules: ValidationRuleSummary[];
+  customFields: CustomFieldSummary[];
   references: ReferenceIndex;
   filesRead: number;
 };
 
 // Arrays are forced so one child element parses the same as many.
-const ARRAY_TAGS = new Set(["rules", "actions", "workflowTimeTriggers", "validationRules", "recordCreates", "recordUpdates", "recordDeletes", "actionCalls", "loops"]);
+const ARRAY_TAGS = new Set(["rules", "actions", "workflowTimeTriggers", "validationRules", "fields", "recordCreates", "recordUpdates", "recordDeletes", "actionCalls", "loops"]);
 const parser = new XMLParser({ ignoreAttributes: true, parseTagValue: false, isArray: (name) => ARRAY_TAGS.has(name) });
 
 const USER_ID = /\b005[A-Za-z0-9]{12}(?:[A-Za-z0-9]{3})?\b/g;
@@ -65,6 +70,8 @@ export function indexReferences(index: ReferenceIndex, text: string, path: strin
   addRefs(index.users, users, path);
   addRefs(index.fields, text.match(CUSTOM_FIELD) ?? [], path);
 }
+
+const hasText = (value: unknown): boolean => typeof value === "string" ? value.trim().length > 0 : value !== undefined && value !== null && String(value).trim().length > 0;
 
 const distinct = (text: string, re: RegExp): number => new Set(text.match(re) ?? []).size;
 
@@ -103,6 +110,7 @@ function parseFlow(path: string, xml: string): FlowSummary {
     hardcodedUserIds: distinct(xml, ELEMENT_USER_ID),
     hardcodedOtherIds: distinct(xml, ELEMENT_OTHER_ID),
     hardcodedEmails: distinct(xml, ELEMENT_EMAIL),
+    described: hasText(flow.description),
     sameRecordUpdates: ((flow.recordUpdates ?? []) as Array<Record<string, any>>).filter((u) => isSameRecordUpdate(u, start.object ? String(start.object) : null)).length,
     path,
   };
@@ -118,25 +126,30 @@ function parseWorkflow(path: string, xml: string): WorkflowSummary {
       active: String(r.active) === "true",
       timeTriggers: (r.workflowTimeTriggers ?? []).length,
       actions: (r.actions ?? []).length,
+      described: hasText(r.description),
     })),
   };
 }
 
-function parseObject(path: string, xml: string, index: ReferenceIndex): ValidationRuleSummary[] {
+function parseObject(path: string, xml: string, index: ReferenceIndex): { validationRules: ValidationRuleSummary[]; customFields: CustomFieldSummary[] } {
   const object = path.replace(/^objects\//, "").replace(/\.object(-meta\.xml)?$/, "");
   const parsed = (parser.parse(xml) as { CustomObject?: Record<string, any> }).CustomObject ?? {};
-  return ((parsed.validationRules ?? []) as Array<Record<string, any>>).map((rule) => {
+  const customFields = ((parsed.fields ?? []) as Array<Record<string, any>>)
+    .map((f) => ({ object, name: String(f.fullName ?? ""), described: hasText(f.description), helpText: hasText(f.inlineHelpText) }))
+    .filter((f) => /^[A-Za-z][A-Za-z0-9_]*__c$/.test(f.name) && !/__.*__c$/.test(f.name));
+  const validationRules = ((parsed.validationRules ?? []) as Array<Record<string, any>>).map((rule) => {
     const name = String(rule.fullName ?? "");
     // Only the formula: the whole file also defines every field on the object,
     // and a field defining itself isn't a reference to it.
     indexReferences(index, String(rule.errorConditionFormula ?? ""), `${path}#validationRules.${name}`);
-    return { object, name, active: String(rule.active) === "true" };
+    return { object, name, active: String(rule.active) === "true", described: hasText(rule.description) };
   });
+  return { validationRules, customFields };
 }
 
 /** Turns the unzipped retrieve into summaries. A file that can't be parsed fails the extractor. */
 export function parseMetadataBundle(files: Record<string, string>): MetadataBundle {
-  const bundle: MetadataBundle = { flows: [], workflows: [], validationRules: [], references: { users: {}, fields: {} }, filesRead: 0 };
+  const bundle: MetadataBundle = { flows: [], workflows: [], validationRules: [], customFields: [], references: { users: {}, fields: {} }, filesRead: 0 };
   for (const [path, raw] of Object.entries(files).sort(([a], [b]) => a.localeCompare(b))) {
     if (path === "package.xml") continue;
     const xml = redactSecrets(raw);
@@ -148,7 +161,9 @@ export function parseMetadataBundle(files: Record<string, string>): MetadataBund
       bundle.workflows.push(parseWorkflow(path, xml));
       indexReferences(bundle.references, xml, path);
     } else if (path.startsWith("objects/")) {
-      bundle.validationRules.push(...parseObject(path, xml, bundle.references));
+      const parsed = parseObject(path, xml, bundle.references);
+      bundle.validationRules.push(...parsed.validationRules);
+      bundle.customFields.push(...parsed.customFields);
     } else {
       indexReferences(bundle.references, xml, path);
     }

@@ -24,6 +24,8 @@ const STAGE_LIMIT = 10;
 const PICKLIST_LIMIT = 25;
 const PICKLISTS: Array<[string, string]> = [["Lead", "LeadSource"], ["Account", "Industry"], ["Opportunity", "Type"]];
 const CONCENTRATION_SHARE = 80;
+// Our judgement, as for automation: past half, a newcomer is guessing at most fields.
+const UNDOCUMENTED_FIELD_LIMIT = 50;
 const MIN_CHANGES_FOR_CONCENTRATION = 20;
 
 const customFieldSprawl: Rule = {
@@ -160,6 +162,45 @@ const unassignedLayouts: Rule = {
       segmentsChecked: [{ dimension: "object", segments: objects.size }],
       subjects: unused.map((l) => ({ type: "layout", label: l.Name })),
       facts: { unassigned: unused.length, layouts: layouts.data.length },
+    };
+  },
+};
+
+const undocumentedFields: Rule = {
+  id: "cfg.undocumented-fields",
+  version: 1,
+  domain: "configuration",
+  title: "Custom fields with no help text or description",
+  evaluate(ctx): RuleResult | RuleResult[] {
+    const metadata = ctx.data(metadataExtractor);
+    const source = { kind: "metadata", path: "objects/*.object" } as const;
+    if (metadata.status !== "ok") return { outcome: "not_measurable", reason: `Object metadata couldn't be read: ${metadata.reason}`, evidence: [ctx.ev(source, { count: null })] };
+    const fields = metadata.data.customFields;
+    const objects = new Set(fields.map((f) => f.object));
+    const evidence = [ctx.ev(source, { count: fields.length, exclusions: ["Standard fields", "Fields from installed packages"] })];
+    const segments = [{ dimension: "object", segments: objects.size }];
+    if (fields.length === 0) return { outcome: "pass", summary: "There are no custom fields of your own to document.", evidence, segmentExemptReason: "Nothing to segment." };
+    const bare = fields.filter((f) => !f.described && !f.helpText);
+    const rate = pct(bare.length, fields.length);
+    const noHelp = fields.filter((f) => !f.helpText).length;
+    const facts = { fields: fields.length, bare: bare.length, rate, noHelpText: noHelp };
+    if (rate <= UNDOCUMENTED_FIELD_LIMIT) return { outcome: "pass", summary: `Custom fields with neither help text nor a description: ${bare.length} of ${fields.length} (${rate}%).`, evidence, segmentsChecked: segments, facts };
+    const byObject = [...objects].map((o) => ({ o, n: bare.filter((f) => f.object === o).length })).filter((x) => x.n > 0).sort((a, b) => b.n - a.n || a.o.localeCompare(b.o));
+    return {
+      outcome: "issue",
+      title: "Most custom fields don't say what they're for",
+      summary: `Custom fields with neither help text nor a description: ${bare.length} of ${fields.length} (${rate}%), most on ${byObject.slice(0, 3).map((x) => `${x.o} (${x.n})`).join(", ")}. Users see no explanation when they fill these in, and whoever maintains the org can't tell what each one is for.`,
+      recommendation: "Add help text to the fields people fill in and a description to every field you keep, and retire the ones nobody can explain.",
+      recommendationType: "change",
+      severity: "low",
+      confidence: "high",
+      evidence,
+      value: notSized("The cost is mistakes and time spent working out what a field means, which we can't measure."),
+      effort: { size: "M" },
+      owner: "Salesforce admin",
+      segmentsChecked: segments,
+      subjects: byObject.slice(0, 10).map((x) => ({ type: "object", label: x.o })),
+      facts,
     };
   },
 };
@@ -311,5 +352,5 @@ export const configurationModule: DomainModule = {
     opportunitiesExtractor,
     reportDefinitionsExtractor,
   ],
-  rules: [customFieldSprawl, unusedCustomFields, unassignedLayouts, stageSprawl, picklistSprawl, setupChangeConcentration],
+  rules: [customFieldSprawl, unusedCustomFields, unassignedLayouts, undocumentedFields, stageSprawl, picklistSprawl, setupChangeConcentration],
 };

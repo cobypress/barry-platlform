@@ -167,7 +167,7 @@ const dealsWithoutActivity = shareRule({
   issueTitle: "Deals are closing with nothing logged against them",
   sentence: (hits, n, rate) =>
     `Won and lost deals with no task, event or email against them: ${hits} of ${n} (${rate}%). This usually reflects process rather than effort: when logging isn't expected and nothing captures email or meetings automatically, the work happens but Salesforce never sees it. The cost is that nobody can look back at how a deal was won or why it was lost.`,
-  recommendation: "Agree the few moments worth recording on a deal, such as the first meeting and the proposal going out, and make them part of the process. Or turn on automatic capture of email and meetings.",
+  recommendation: "Agree the few moments worth recording on a deal, such as the first meeting and the proposal going out, or turn on automatic capture.",
   owner: "Head of sales",
   sized: false,
 });
