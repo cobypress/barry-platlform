@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ExternalClientApplication xmlns="http://soap.sforce.com/2006/04/metadata">
+    <contactEmail>coby@black-cloud.com</contactEmail>
+    <description>Development only, for bc-hc-dev. JWT bearer flow for the read-only integration user, so the exit test can run without a browser. Never packaged or sent to a customer.</description>
+    <distributionState>Local</distributionState>
+    <isProtected>false</isProtected>
+    <label>Barometer Dev JWT</label>
+</ExternalClientApplication>

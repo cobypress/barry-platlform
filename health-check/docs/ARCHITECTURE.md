@@ -7,6 +7,7 @@ Barometer is a premium Salesforce health check, run by Black Cloud consultants. 
 | Part | Location | Status |
 | --- | --- | --- |
 | Engine (this service) | `barry-platlform/health-check` | Milestone 1 |
+| External Client App and permission set | `barry-platlform/health-check/salesforce` | Milestone 2 |
 | Console pages | `blackcloud-next/app/internal/health-check` | Milestone 5 |
 | Queue | BullMQ `health-check-jobs`, separate from `barry-jobs` | Milestone 5 |
 | Database | Neon through Prisma, with SQL files in `blackcloud-next/migrations` | Milestone 5 |
@@ -30,7 +31,8 @@ Extraction talks to Salesforce and costs API calls. Analysis is a pure function 
 ```
 src/
   schemas/      Zod schemas, including the ones the console will need
-  salesforce/   Read-only client, allowlist, API budget, connection providers
+  salesforce/   Read-only client, allowlist, API budget, connection providers, OAuth and token storage
+  connect/      Connect links for customer admins, and the check that a connection can't write
   extract/      One extractor per step. Each output is a checkpoint
   guards/       Checks a destructive recommendation has to pass
   domains/      Plug-in modules: extractors, metrics, rules
@@ -78,6 +80,35 @@ Filtering by HTTP method wouldn't work in Salesforce. `GET tooling/executeAnonym
 - SOQL must be a single SELECT. `FOR VIEW`, `FOR REFERENCE`, `FOR UPDATE`, `UPDATE TRACKING` and `UPDATE VIEWSTAT` are refused because they change data.
 
 `client.ts` has one send path, and the client has no generic request method. Tests pin the list of client methods, try each allowed path with every other method, and scan the source for any other route to the network.
+
+The OAuth token and revoke endpoints are the only other way out. They sit in `transport.ts` too, held to those two paths on a Salesforce host (DECISIONS.md 57).
+
+## Connecting an org
+
+```
+consultant ──> connect link ──> customer admin opens it ──> Salesforce sign-in as the read-only user
+                                                                     │  (PKCE, state, prompt=login consent)
+hc run <── OAuthConnectionProvider <── TokenStore <── code exchange ─┘
+              │  refresh with rotation,       (AES-256-GCM,      └──> read-only check: revoke if it can write
+              │  same org and user only        key from HC_TOKEN_KEY or the keychain)
+              v
+       SalesforceClient (unchanged)
+```
+
+- **Two providers.** `SfCliConnectionProvider` borrows a consultant's CLI login, for development. `OAuthConnectionProvider` uses tokens a customer's admin granted to Barometer's External Client App, as a user who holds only Barometer Read Only. Both need the name in `HC_APPROVED_ORG_ALIASES`.
+- **Two layers of read-only.** The allowlist stops the engine sending a write. The permission set stops Salesforce accepting one, and `checkReadOnlyUser` reads the user's permissions at connect time to prove it.
+- **The app** is source metadata in `salesforce/force-app`, with the permission set. Customer orgs need it from a managed package (DECISIONS.md 65). `salesforce/dev-only` holds a JWT bearer app for `bc-hc-dev` only.
+
+### The connect link, and what the console adds in Milestone 5
+
+`src/connect/link.ts` has the logic. The console adds storage and four pages.
+
+1. **The consultant makes a link** in the console for a customer: it stores the `ConnectLink` (the secret's hash, 72-hour expiry) and shows the URL once, to send by email.
+2. **The admin opens it.** The page says who's asking and why, that Barometer only reads, and what to set up first: a user holding only Barometer Read Only, the package installed, and the app's permitted users set to admins' approval with Barometer Read Only. It names the two permissions they'll be asked for: "Manage user data via APIs" (`api`) and "Perform requests at any time" (`refresh_token`).
+3. **They click Continue.** The console runs `beginAuthorisation`, keeps the `PendingAuthorisation` encrypted (it holds the PKCE verifier), and redirects to Salesforce, which asks them to sign in afresh.
+4. **Salesforce sends them back** to the console's callback. `completeAuthorisation` checks the state and timing, the worker exchanges the code, stores the tokens and runs the read-only check. Only then is the link marked used. The page says whether it worked, and if the user could write, that the connection was refused and why.
+
+The link can also be withdrawn. A link that's expired, used or withdrawn tells the admin to ask their consultant for a new one.
 
 ## Platform behaviours handled
 
@@ -148,7 +179,7 @@ findings, metrics ──> buildReport ──> sections and versions ──> PDF 
 
 ## Later milestones
 
-- **OAuth:** a new `ConnectionProvider`. Nothing else changes.
+- **OAuth:** built as a new `ConnectionProvider` (above). The console pages and the managed package remain.
 - **Jobs:** each extractor step is already a unit of work. A BullMQ job carries only a run id and step id, as `lib/funnels/sync.ts` does.
 - **Run state:** `run.json` and the output files become Neon rows and object storage keys, using the same schemas.
 - **Review console:** `ReportSection`, `SectionVersion`, `WordingProposal`, `NumberOverride` and `Release` are already defined.

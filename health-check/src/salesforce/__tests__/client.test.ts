@@ -110,9 +110,23 @@ describe("source scan", () => {
 
   test("nothing else builds a write", () => {
     for (const file of files(src)) {
-      if (file.endsWith("allowlist.ts") || file.endsWith("client.ts")) continue;
+      if (file.endsWith("allowlist.ts") || file.endsWith("client.ts") || file.endsWith("salesforce/transport.ts")) continue;
       assert.doesNotMatch(readFileSync(file, "utf8"), /method:\s*"(POST|PATCH|PUT|DELETE)"/, file);
     }
+  });
+
+  // The OAuth token and revoke endpoints are POSTs outside the data API. They're
+  // the one other way out, and only behind the endpoint check (DECISIONS.md 57).
+  test("transport.ts has one POST, for the OAuth endpoints only, behind the endpoint check", () => {
+    const transport = readFileSync(join(src, "salesforce/transport.ts"), "utf8");
+    assert.equal(transport.match(/method:\s*"(POST|PATCH|PUT|DELETE)"/g)?.length, 1);
+    assert.equal(transport.match(/\bfetch\(/g)?.length, 2, "the data transport and the OAuth transport");
+    const oauth = transport.slice(transport.indexOf("export const fetchOAuthTransport"));
+    assert.match(oauth, /^export const fetchOAuthTransport: OAuthTransport = checkedOAuthTransport\(\{/);
+    assert.match(oauth, /method:\s*"POST"/);
+    const oauthModule = readFileSync(join(src, "salesforce/oauth.ts"), "utf8");
+    assert.equal(oauthModule.match(/\.postForm\(/g)?.length, 2, "token and revoke");
+    assert.equal(oauthModule.match(/assertOAuthEndpoint\(endpoint\)/g)?.length, 2, "each checked first");
   });
 });
 

@@ -18,6 +18,9 @@ None of these blocked Milestone 1.
 | 9 | Should private reports block field removal? | Other people's private reports can't be read, so the report guard stays unknown wherever any exist, which is most orgs. Field removal then stays "investigate". We could accept it as a stated risk, or add a manual step | Before the first report |
 | 10 | Are the scoring weights and working limits acceptable? | A pass or critical issue is worth 8, with high 5, medium 3, low 1, times confidence. Limits such as 3 times coverage and 25% account share are our judgement | Before the first report |
 | 11 | Should accuracy be measured with our own forecast snapshots? | Forecast rows are today's position, so accuracy is not measurable without one | After the first report |
+| 12 | Which org should be the Dev Hub for the Barometer connector package, and what namespace? | Customer orgs need the app from a managed 2GP package (DECISIONS.md 65). A Developer Edition Dev Hub risks the package becoming un-updatable when the org expires, so `BlackCloudProd` or a partner business org is safer. The namespace can't be changed later | Before the first customer connects |
+| 13 | Is a read-only connection enough, given what it can't see? | Metadata retrieve needs Modify Metadata or Modify All Data, so automation metadata and report definitions are not measurable on a read-only token (DECISIONS.md 60). The fix is to read them through Tooling and REST instead, which is engine work. The alternative, a second write-capable permission, would undo the point of the connection | Before the first customer run on OAuth |
+| 14 | Which user should customers connect as: an API-only Salesforce Integration user (free, 5 in Enterprise and up) or a full-licence user holding only Barometer Read Only? | An API-only user may not be able to complete the browser consent (below). If it can't, the integration user needs JWT bearer, which needs our certificate in the packaged app and the customer to pre-authorise Barometer Read Only | Before the connect link pages are built |
 
 ## To confirm against a real org
 
@@ -47,6 +50,19 @@ Salesforce's docs couldn't all be read in full, so these are unproven until a li
 | 20 | Is a history row written for every change to Amount and CloseDate, as well as stage, on every edition? | The "no change of any kind" cohort for quiet deals would be too large, so its win rate would read too high. Stated as a proxy on the finding |
 | 21 | Does `IsWon = true OR StageName IN (...)` filter on Opportunity everywhere, and does the prior wins read stay small? | A failed read makes new and repeat customers not measurable, never all new |
 | 22 | Does Tooling `CustomObject` also list custom metadata types, platform events or external objects, and is its `Id` the same id that `Layout.EntityDefinitionId` and `ApexTrigger.TableEnumOrId` hold for a custom object? The Tooling guide (API 68.0) documents `DeveloperName` without the suffix, and `EntityDefinitionId` as the EntityDefinition's id, but doesn't say either outright | If another kind shares a custom object's name, both are left unnamed and the inventory says how many layouts and triggers it couldn't place. If the ids differ, every custom object's layouts and triggers go unplaced, which the same note shows |
+
+## The connection (Milestone 2)
+
+Answered: **customer orgs need a managed 2GP package** for the External Client App. The evidence and sources are in DECISIONS.md, "Connecting customer orgs". These are still open.
+
+| # | Question | If we're wrong |
+| --- | --- | --- |
+| 22 | Can a user of another org authorise our local app at all? Salesforce's docs say no (local apps work only in their own org), and one vendor's notes say they're "authorized by other orgs as an uninstalled app". Not tried: this work could only touch `bc-hc-dev` | If it can, a pilot could run before the package exists. The package is still needed, because the uninstalled app restriction blocks new users who aren't administrators |
+| 23 | Can an API-only user (Salesforce Integration licence) complete the web server flow's browser sign-in? No Salesforce source says; vendors disagree | If not, customers connect a full-licence read-only user, or use JWT bearer. See question 14 above |
+| 24 | Is there a grace period after refresh token rotation? None is documented | Two workers refreshing at once would kill the connection. One worker per connection, and the new token is stored before use (DECISIONS.md 62) |
+| 25 | What exactly is the token response `signature` computed over? The docs say it "can include the concatenated ID and issued_at value" | Nothing: we don't check it, and rely on TLS to a checked Salesforce host (DECISIONS.md 62) |
+| 26 | Is View All Forecasts allowed on the integration licence? `bc-hc-dev` has no Collaborative Forecasts, so the permission doesn't exist there to test | Forecast rules are not measurable on a read-only connection until it's added to Barometer Read Only |
+| 27 | Does the app's "admin approved users are pre-authorised" policy, set by a customer's admin on the installed package, also gate the web server flow, so an administrator can't authorise as themselves? Salesforce documents it for pre-authorisation generally | If it doesn't, the connect-time read-only check (DECISIONS.md 64) still revokes a token that can write |
 
 ## Field names checked against Salesforce's docs
 
