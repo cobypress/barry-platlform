@@ -63,7 +63,7 @@ A domain is a `DomainModule` (`src/domains/types.ts`): extractors, metric builde
 | 4. Segment before concluding | `runRule` turns an unsegmented pass into not measurable. `Metric` has the same rule |
 | 5. Not measurable, never estimated | `Sourced` keeps "couldn't read" apart from "nothing there". `Metric` has no value field when not measurable |
 | 6. Read-only | `authorise()` runs on every request immediately before it's sent |
-| 7. CRM stays in the worker | Findings hold tokens. `scrubDeep` is a backstop on everything the engine writes |
+| 7. CRM stays in the worker | Findings hold tokens. `scrubDeep` is a backstop on everything the engine writes. Everything sent to Claude goes through `sendPrompt`, which masks names and their parts, then refuses the send if any part is left (see "Free text and names") |
 | 8. No customer data in repos | The CLI refuses to write inside a git work tree. Fixture tests require reserved domains and zero-padded ids |
 | 9. API budget and resume | `ApiBudget` stops before the call that crosses the share. Steps and Opportunity pages are checkpointed |
 | 10. Approval before release | `ReportSection` schema and `canRelease()`, used in Milestone 5 |
@@ -141,7 +141,7 @@ The benchmark set is kept apart, in `~/.barometer/benchmarks/rows.jsonl` (folder
 | `checkpoints/` | CRM rows. Deleted by `hc purge` 30 days after delivery | Never |
 | `purged.json` | When the checkpoints were deleted, and how many files | No |
 | `benchmark-consent.json` | Who agreed to the benchmark export, how, when, and which metric keys went | No |
-| `pseudonym-map.json` | Names by token | Never |
+| `pseudonym-map.json` | Names by token, and a token for each first name two people share | Never |
 | `findings.json`, `metrics.json`, `manual-steps.json` | Aggregates, metadata names and tokens | Yes |
 | `raw-notes.md` | Real names | Never: customer deliverable |
 | `raw-notes.docx`, `executive-summary.pdf`, `full-health-check.pdf` | Real names in the notes, team level in the PDFs | Never: customer deliverables |
@@ -171,11 +171,29 @@ findings, metrics ──> buildReport ──> sections and versions ──> PDF 
 `hc render --run <folder>` does this for a finished run. It writes into the run folder, so it refuses a folder inside a git work tree.
 
 - Every section starts with text the engine wrote, so a report exists without Claude. A draft that fails the number check is dropped, and the section goes to a person.
-- `guardPrompt` runs on everything sent to Claude. Evidence isn't sent.
+- `sendPrompt` is the only way to Claude. It runs `guardPrompt` on the prompt, then `findNames` checks the result, and evidence isn't sent. See "Free text and names".
 - Names return in one place for each document: `pseudonyms.restore` in the Word builder, and `Render.t` in the PDF templates. Executive and full reports describe people as "a single rep", so only the raw notes name anyone.
 - Chromium runs with no network access. It only lays out HTML we built, with fonts embedded.
 - Before a PDF is written, `checkLayout` measures every page in the browser for overflow, missing charts, empty sections and leftover tokens, and runs the number check again on the text as printed. Problems go to `layout-report.json`, and `hc render` exits non-zero.
 - Every unapproved document is marked as a draft on every page. `canRelease` decides that, and the release step itself belongs to the console.
+
+## Free text and names
+
+Free text that people write can reach Claude. Today that's metadata labels and picklist values inside findings and metrics, and a consultant's reason for skipping a manual step, which becomes a finding's `notMeasurableReason`. Intake, overrides and calibration text are kept out of every brief. Consultant chat and call notes arrive in Milestone 5, and must use `sendPrompt` like everything else. `docs/overnight/night-2/scrub.md` maps every route.
+
+```
+text ──> scrub() ──> maskNames() ──> redactSecrets() ──> findNames() ──> client
+         whole       parts of        keys and            anything left?
+         names, ids, every known     tokens              refuse, and record
+         emails      name                                a rejection
+```
+
+- `scrub()` replaces whole names, usernames, ids and any email, in any case.
+- `maskNames()` (`src/privacy/names.ts`) replaces parts of every person's name: first names, surnames, runs such as "Mary Ann" or "van der Berg", the pieces of hyphenated and apostrophe names, the 15-character form of an id, and a short list of English diminutives (Sam, Samuel). Each part gets its owner's token, so a restored report says "Sam Reed said". It matches after folding: accents, full-width letters and invisible characters don't hide a name, and possessives, quotes and API names (`Sam_Reed_Approval`) are handled. The customer's company name is masked the same way, with a capital only.
+- A part two or more people share (two Sams, or one person's first name and another's surname) gets a token of its own. It restores to the part as written ("Sam"), so the report reads exactly as the writer put it and Claude is never told the wrong person. It's a user token, so executive text still says "a single person". `hc run` saves these tokens in the pseudonym map.
+- Parts that are also words (Will, May, Mark, Rose, Price, Cross and about 200 more, in `COMMON_WORDS`) are masked only with a capital. A capital at the start of a sentence, a month ("in May") or a product ("Price Book") is masked too: we chose over-scrubbing. Inside a hyphenated word such a part is left, so "Cross-sell" survives. Shared-user words (Sales, Integration) and lone particles (van, de) are never masked.
+- `findNames()` looks at every run of letters on its own, not words and phrases, and refuses the send if any part of a known name, a 15-character id or an email is left. It names tokens, never what it found. Claude's replies go through the same two checks before they're accepted. Only our own constant system prompts may be sent.
+- Not covered: nicknames outside the short list, initials, misspellings, names run together in camel case (`SamReedApproval`), lookalike letters from other alphabets, and people the run doesn't know. A run knows its org's users and the customer's company name; contacts and leads aren't read, so their names in free text get through. Images, such as manual-step screenshots, can't be scrubbed as text.
 
 ## Later milestones
 
