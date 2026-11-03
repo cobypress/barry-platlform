@@ -53,12 +53,15 @@ Salesforce's docs couldn't all be read in full, so these are unproven until a li
 
 ## The connection (Milestone 2)
 
-Answered: **customer orgs need a managed 2GP package** for the External Client App. The evidence and sources are in DECISIONS.md, "Connecting customer orgs". These are still open.
+Answered: **customer orgs need a managed 2GP package** for the External Client App. The evidence and sources are in DECISIONS.md, "Connecting customer orgs".
+
+Answered on 2026-11-03: **an API-only user can complete the web server flow's browser sign-in.** Coby signed in to `bc-hc-dev` as the Salesforce Integration licence user and allowed the app, and the run completed on that token (MILESTONES.md). So customers can connect an integration user and don't need a full-licence user.
+
+These are still open.
 
 | # | Question | If we're wrong |
 | --- | --- | --- |
 | 22 | Can a user of another org authorise our local app at all? Salesforce's docs say no (local apps work only in their own org), and one vendor's notes say they're "authorized by other orgs as an uninstalled app". Not tried: this work could only touch `bc-hc-dev` | If it can, a pilot could run before the package exists. The package is still needed, because the uninstalled app restriction blocks new users who aren't administrators |
-| 23 | Can an API-only user (Salesforce Integration licence) complete the web server flow's browser sign-in? No Salesforce source says; vendors disagree | If not, customers connect a full-licence read-only user, or use JWT bearer. See question 14 above |
 | 24 | Is there a grace period after refresh token rotation? None is documented | Two workers refreshing at once would kill the connection. One worker per connection, and the new token is stored before use (DECISIONS.md 62) |
 | 25 | What exactly is the token response `signature` computed over? The docs say it "can include the concatenated ID and issued_at value" | Nothing: we don't check it, and rely on TLS to a checked Salesforce host (DECISIONS.md 62) |
 | 26 | Is View All Forecasts allowed on the integration licence? `bc-hc-dev` has no Collaborative Forecasts, so the permission doesn't exist there to test | Forecast rules are not measurable on a read-only connection until it's added to Barometer Read Only |

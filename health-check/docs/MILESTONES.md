@@ -78,7 +78,7 @@ Built on `hc/connection` against `bc-hc-dev`, a Developer Edition org made for t
 | 1. First live run on the Black Cloud org | Not done: out of scope here. The run below is the first live run, on `bc-hc-dev` |
 | 2. External Client App, and a second test org | App built and deployed. Not tried from a second org (QUESTIONS.md 22) |
 | 3. Managed package needed? | Answered yes, from Salesforce's docs (DECISIONS.md 65) |
-| 4. Web server flow with PKCE and rotation | Built and unit tested. The live consent needs a person (below) |
+| 4. Web server flow with PKCE and rotation | Done live on `bc-hc-dev` on 2026-11-03, apart from rotation (below) |
 | 5. One-time connect link | Link logic built and tested. Console pages are Milestone 5 |
 | 6. Read-only permission set, proven unable to write | Done, proven on `bc-hc-dev` |
 | 7. Bulk API decision | Not started |
@@ -118,7 +118,16 @@ Built on `hc/connection` against `bc-hc-dev`, a Developer Edition org made for t
 - **What read-only couldn't see:** the Metadata API retrieve (automation and report definitions) and Tooling Apex (DECISIONS.md 60). Forecasting and Einstein Activity Capture aren't enabled in `bc-hc-dev`.
 - **Everything else not measurable is the empty dev org.** It has no Opportunities, Leads or Apex.
 
-Not yet exercised live: the web server flow's code exchange and its refresh with rotation. They need someone to sign in.
+### Web server flow, live
+
+On 2026-11-03 Coby followed the steps below, through to revoking the connection.
+
+- **The sign-in worked for the API-only user.** It used a private browser window, the Integration licence user, and the consent screen. That answers the old QUESTIONS.md 23.
+- **`connect finish` exchanged the code with PKCE**, stored the tokens encrypted, and the read-only check passed.
+- **The run completed** on that connection: run `hc-2026-11-03-cb98209a`, 32 steps, 10 issues, 25 passes and 41 not measurable. That's the same as the JWT run.
+- **`connect revoke`** revoked the token at Salesforce and deleted the stored copy.
+
+**Not exercised live:** refresh with rotation. That needs the session to time out twice before revoking, so it can only be done on a later connection. The unit tests cover it, and the JWT connection's refresh works live.
 
 ### What Coby needs to do for the web server flow
 
