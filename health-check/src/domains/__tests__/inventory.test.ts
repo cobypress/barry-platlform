@@ -1,15 +1,20 @@
 import { test, describe, before } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { inventoryLine } from "../../notes/raw-notes.ts";
 import { analyseExtracts, clone, loadExtracts, runFromRecording } from "../../testing/harness.ts";
 import { sfId } from "../../testing/synthetic-org.ts";
 import { automationOf, INVENTORY_COLUMNS, inventoryRows, OBJECT_INVENTORY } from "../configuration/inventory.ts";
 import { Metric } from "../../schemas/index.ts";
 
 let extracts: Map<string, unknown>;
+let notes: string;
 
 before(async () => {
   const { dir } = await runFromRecording();
   extracts = loadExtracts(dir);
+  notes = readFileSync(join(dir, "raw-notes.md"), "utf8");
 });
 
 const inventory = (changed = extracts): Metric => {
@@ -123,5 +128,24 @@ describe("the object inventory", () => {
     const changed = clone(extracts);
     (changed.get("opportunities") as { opportunities: unknown }).opportunities = unavailable;
     assert.equal(inventory(changed).status, "not_measurable");
+  });
+});
+
+describe("the object inventory in the raw notes", () => {
+  test("a line in the summary says where the complexity is", () => {
+    assert.match(notes, /^- Object inventory: 7 objects counted, carrying 12 rules, flows and triggers, of which 8 have no description\. The busiest is Opportunity, with 6 rules, flows and triggers\.$/m);
+  });
+
+  test("every object is listed, with what couldn't be read and why", () => {
+    for (const object of ["Opportunity", "Invoice__c", "Lead", "Account", "Project__c", "Contact", "Project_Line__c"]) assert.match(notes, new RegExp(`^\\| ${object} \\|`, "m"), object);
+    assert.match(notes, /^\| Invoice__c \| 12000 \| 3 \| 2 \| 2 \| 1 \| 1 \| 0 \| 0 \| 1 \| 1 \|$/m);
+    assert.match(notes, /\| Opportunity \| Not read \(Salesforce keeps no count for this object\) \|/);
+    assert.match(notes, /\*\*Sample:\*\* 7 objects/);
+  });
+
+  test("a not measurable inventory says so in its line", () => {
+    const changed = clone(extracts);
+    changed.set("metadata", unavailable);
+    assert.match(inventoryLine(inventory(changed)) ?? "", /^Object inventory: not measurable\. Object metadata couldn't be retrieved/);
   });
 });
