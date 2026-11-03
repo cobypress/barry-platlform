@@ -115,7 +115,7 @@ describe("the worker's environment", () => {
   test("a complete one is read", () => {
     const read = readWorkerEnv(goodEnv());
     assert.ok(read.ok);
-    assert.equal(read.ok && read.config.concurrency, 1);
+    assert.equal(read.ok && read.config.concurrency, 2);
     assert.equal(read.ok && read.config.connectKey.length, 32);
   });
 
@@ -176,7 +176,7 @@ describe("hc worker", () => {
     assert.equal(code, 0);
     assert.equal(FakeWorker.made.length, 1);
     assert.equal(FakeWorker.made[0]!.closed, true);
-    assert.deepEqual(pools[0]!.options, { connectionString: env.HC_WORKER_DATABASE_URL, max: 3 });
+    assert.deepEqual(pools[0]!.options, { connectionString: env.HC_WORKER_DATABASE_URL, max: 4 });
     assert.equal(pools[0]!.ended, true);
     assert.ok(!lines.join("\n").includes(env.HC_CONNECT_KEY!) && !lines.join("\n").includes("pw@"));
   });

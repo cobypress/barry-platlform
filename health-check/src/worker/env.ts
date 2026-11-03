@@ -19,7 +19,7 @@ export const WORKER_ENV = {
     HC_SF_REDIRECT_URI: "The console's OAuth callback, exactly as registered on the app",
   },
   optional: {
-    HC_WORKER_CONCURRENCY: "Jobs at once, 1 to 8. Default 1",
+    HC_WORKER_CONCURRENCY: "Jobs at once, 1 to 8. Default 2, so a connect job never waits behind a long run",
     HC_API_BUDGET_SHARE: `Share of an org's daily API limit a run may use. Default ${BUDGET_DEFAULTS.stopAtShare}`,
     HC_SF_API_VERSION: "Pin a Salesforce API version",
   },
@@ -60,7 +60,7 @@ export function readWorkerEnv(env: NodeJS.ProcessEnv): { ok: true; config: Worke
   if (!/^https:\/\//.test(get("HC_SF_REDIRECT_URI")) && !/^http:\/\/(localhost|127\.0\.0\.1)[:/]/.test(get("HC_SF_REDIRECT_URI"))) {
     problems.push("HC_SF_REDIRECT_URI must be https, or http on localhost");
   }
-  const concurrency = get("HC_WORKER_CONCURRENCY") ? Number(get("HC_WORKER_CONCURRENCY")) : 1;
+  const concurrency = get("HC_WORKER_CONCURRENCY") ? Number(get("HC_WORKER_CONCURRENCY")) : 2;
   if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 8) problems.push("HC_WORKER_CONCURRENCY must be a whole number from 1 to 8");
   const stopAtShare = get("HC_API_BUDGET_SHARE") ? Number(get("HC_API_BUDGET_SHARE")) : BUDGET_DEFAULTS.stopAtShare;
   if (!(stopAtShare > 0 && stopAtShare <= 1)) problems.push("HC_API_BUDGET_SHARE must be more than 0 and at most 1");
