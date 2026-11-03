@@ -1,0 +1,242 @@
+{
+  "about": "Shared golden cases for the number check. The same file must sit in the engine (health-check) and the console (blackcloud-next), and both test suites run every case through checkNumbers(text, dataset). A dataset is a FigureSet: any list left out is empty. expected is pass or fail. unmatched, when given, lists the raw figures that must be reported, in order. Synthetic figures only.",
+  "source": "health-check/src/numbercheck at engine commit 1973ae2",
+  "cases": [
+    {
+      "name": "exact figures from one finding pass",
+      "text": "Win rate fell to 18% from 31% across 420 closed deals.",
+      "dataset": { "figures": [{ "source": "f1", "kind": "percent", "value": 18 }, { "source": "f1", "kind": "percent", "value": 31 }, { "source": "f1", "kind": "number", "value": 420 }] },
+      "expected": "pass"
+    },
+    {
+      "name": "a changed figure fails",
+      "text": "Win rate fell to 19% from 31% across 420 closed deals.",
+      "dataset": { "figures": [{ "source": "f1", "kind": "percent", "value": 18 }, { "source": "f1", "kind": "percent", "value": 31 }, { "source": "f1", "kind": "number", "value": 420 }] },
+      "expected": "fail",
+      "unmatched": ["19%"]
+    },
+    {
+      "name": "an invented figure in a consultant edit fails",
+      "text": "We estimate 25% of open deals are at risk.",
+      "dataset": { "figures": [{ "source": "f1", "kind": "percent", "value": 18 }, { "source": "f1", "kind": "percent", "value": 31 }] },
+      "expected": "fail",
+      "unmatched": ["25%"]
+    },
+    {
+      "name": "swapped figures within one finding pass: a known limit, so a person checks meaning",
+      "text": "Win rate rose to 31% from 18%.",
+      "dataset": { "figures": [{ "source": "f1", "kind": "percent", "value": 18 }, { "source": "f1", "kind": "percent", "value": 31 }] },
+      "expected": "pass"
+    },
+    {
+      "name": "swapped units fail: a percentage written as days",
+      "text": "Deals stall for 18 days.",
+      "dataset": { "figures": [{ "source": "f1", "kind": "percent", "value": 18 }] },
+      "expected": "fail",
+      "unmatched": ["18 days"]
+    },
+    {
+      "name": "swapped units fail: percentages written as plain counts",
+      "text": "Win rate fell to 18 from 31.",
+      "dataset": { "figures": [{ "source": "f1", "kind": "percent", "value": 18 }, { "source": "f1", "kind": "percent", "value": 31 }, { "source": "f1", "kind": "number", "value": 420 }] },
+      "expected": "fail",
+      "unmatched": ["18", "31"]
+    },
+    {
+      "name": "swapped part and whole fail",
+      "text": "70 of 15 flows haven't run.",
+      "dataset": { "figures": [{ "source": "f1", "kind": "number", "value": 15 }, { "source": "f1", "kind": "number", "value": 70 }] },
+      "expected": "fail",
+      "unmatched": ["70"]
+    },
+    {
+      "name": "part and whole from the same finding pass",
+      "text": "15 of 70 flows haven't run.",
+      "dataset": { "figures": [{ "source": "f1", "kind": "number", "value": 15 }, { "source": "f1", "kind": "number", "value": 70 }] },
+      "expected": "pass"
+    },
+    {
+      "name": "part and whole swapped in from different findings fail",
+      "text": "15 of 70 flows haven't run.",
+      "dataset": { "figures": [{ "source": "f1", "kind": "number", "value": 15 }, { "source": "f2", "kind": "number", "value": 70 }] },
+      "expected": "fail",
+      "unmatched": ["15"]
+    },
+    {
+      "name": "percent written as words passes",
+      "text": "Win rate fell to 18 per cent.",
+      "dataset": { "figures": [{ "source": "f1", "kind": "percent", "value": 18 }] },
+      "expected": "pass"
+    },
+    {
+      "name": "rounding to the precision shown passes",
+      "text": "About 21% of deals end with no decision.",
+      "dataset": { "figures": [{ "source": "f1", "kind": "percent", "value": 20.6 }] },
+      "expected": "pass"
+    },
+    {
+      "name": "the exact decimal passes",
+      "text": "20.6% of deals end with no decision.",
+      "dataset": { "figures": [{ "source": "f1", "kind": "percent", "value": 20.6 }] },
+      "expected": "pass"
+    },
+    {
+      "name": "rounding the wrong way fails",
+      "text": "20% of deals end with no decision.",
+      "dataset": { "figures": [{ "source": "f1", "kind": "percent", "value": 20.6 }] },
+      "expected": "fail",
+      "unmatched": ["20%"]
+    },
+    {
+      "name": "false precision fails",
+      "text": "20.58% of deals end with no decision.",
+      "dataset": { "figures": [{ "source": "f1", "kind": "percent", "value": 20.6 }] },
+      "expected": "fail",
+      "unmatched": ["20.58%"]
+    },
+    {
+      "name": "a fraction near the percentage passes",
+      "text": "Half of lost deals have no loss reason.",
+      "dataset": { "figures": [{ "source": "f1", "kind": "percent", "value": 50.4 }] },
+      "expected": "pass"
+    },
+    {
+      "name": "a fraction that stretches the percentage fails",
+      "text": "Nearly half of lost deals have no loss reason.",
+      "dataset": { "figures": [{ "source": "f1", "kind": "percent", "value": 44 }] },
+      "expected": "fail",
+      "unmatched": ["half"]
+    },
+    {
+      "name": "one in five reads as twenty per cent, but the whole must also be in the data",
+      "text": "1 in 5 deals is pushed at least once.",
+      "dataset": { "figures": [{ "source": "f1", "kind": "percent", "value": 20 }] },
+      "expected": "fail",
+      "unmatched": ["5"]
+    },
+    {
+      "name": "one in five passes when the whole is in the data",
+      "text": "1 in 5 deals is pushed at least once.",
+      "dataset": { "figures": [{ "source": "f1", "kind": "percent", "value": 20 }, { "source": "f1", "kind": "number", "value": 5 }] },
+      "expected": "pass"
+    },
+    {
+      "name": "money in full passes",
+      "text": "Around £240,000 a year is at stake.",
+      "dataset": { "figures": [{ "source": "f1", "kind": "currency", "currency": "GBP", "value": 240000 }] },
+      "expected": "pass"
+    },
+    {
+      "name": "money with a scale passes",
+      "text": "Around £240k a year, or £0.24m, is at stake.",
+      "dataset": { "figures": [{ "source": "f1", "kind": "currency", "currency": "GBP", "value": 240000 }] },
+      "expected": "pass"
+    },
+    {
+      "name": "money as a currency word passes",
+      "text": "Around 240,000 pounds a year is at stake.",
+      "dataset": { "figures": [{ "source": "f1", "kind": "currency", "currency": "GBP", "value": 240000 }] },
+      "expected": "pass"
+    },
+    {
+      "name": "money in the wrong currency fails",
+      "text": "Around $240,000 a year is at stake.",
+      "dataset": { "figures": [{ "source": "f1", "kind": "currency", "currency": "GBP", "value": 240000 }] },
+      "expected": "fail",
+      "unmatched": ["$240,000"]
+    },
+    {
+      "name": "money rounded too far fails",
+      "text": "Around £0.2m a year is at stake.",
+      "dataset": { "figures": [{ "source": "f1", "kind": "currency", "currency": "GBP", "value": 240000 }] },
+      "expected": "fail",
+      "unmatched": ["£0.2m"]
+    },
+    {
+      "name": "money with a slipped decimal fails",
+      "text": "Around £2.4m a year is at stake.",
+      "dataset": { "figures": [{ "source": "f1", "kind": "currency", "currency": "GBP", "value": 240000 }] },
+      "expected": "fail",
+      "unmatched": ["£2.4m"]
+    },
+    {
+      "name": "money written as a plain count fails",
+      "text": "Around 240,000 a year is at stake.",
+      "dataset": { "figures": [{ "source": "f1", "kind": "currency", "currency": "GBP", "value": 240000 }] },
+      "expected": "fail",
+      "unmatched": ["240,000"]
+    },
+    {
+      "name": "a number word from the data passes",
+      "text": "Three flows look unused.",
+      "dataset": { "figures": [{ "source": "f1", "kind": "number", "value": 3 }] },
+      "expected": "pass"
+    },
+    {
+      "name": "a number word not in the data fails",
+      "text": "Four flows look unused.",
+      "dataset": { "figures": [{ "source": "f1", "kind": "number", "value": 3 }] },
+      "expected": "fail",
+      "unmatched": ["Four"]
+    },
+    {
+      "name": "full-width digits are still read",
+      "text": "Win rate fell to １９%.",
+      "dataset": { "figures": [{ "source": "f1", "kind": "percent", "value": 18 }] },
+      "expected": "fail",
+      "unmatched": ["19%"]
+    },
+    {
+      "name": "a zero-width space can't hide a figure",
+      "text": "Win rate fell to 1​9%.",
+      "dataset": { "figures": [{ "source": "f1", "kind": "percent", "value": 18 }] },
+      "expected": "fail",
+      "unmatched": ["19%"]
+    },
+    {
+      "name": "a vague scale fails",
+      "text": "Thousands of records have no owner.",
+      "dataset": { "figures": [{ "source": "f1", "kind": "number", "value": 1200 }] },
+      "expected": "fail",
+      "unmatched": ["Thousands"]
+    },
+    {
+      "name": "a European decimal is blocked rather than guessed",
+      "text": "Win rate is 12,5%.",
+      "dataset": { "figures": [{ "source": "f1", "kind": "percent", "value": 12.5 }] },
+      "expected": "fail"
+    },
+    {
+      "name": "a date from the data passes",
+      "text": "The analysis ran to 20 October 2026.",
+      "dataset": { "dates": [{ "source": "run", "y": 2026, "m": 10, "d": 20 }] },
+      "expected": "pass"
+    },
+    {
+      "name": "a date not in the data fails",
+      "text": "The analysis ran to 21 October 2026.",
+      "dataset": { "dates": [{ "source": "run", "y": 2026, "m": 10, "d": 20 }] },
+      "expected": "fail",
+      "unmatched": ["21 October 2026"]
+    },
+    {
+      "name": "a known name token passes and an unknown one fails",
+      "text": "[[USER_01]] and [[USER_09]] own most stale deals.",
+      "dataset": { "tokens": [{ "source": "f1", "value": "[[USER_01]]" }] },
+      "expected": "fail",
+      "unmatched": ["[[USER_09]]"]
+    },
+    {
+      "name": "a label with digits is not read as a figure",
+      "text": "The Q3 Pipeline 2 dashboard hasn't been opened.",
+      "dataset": { "labels": [{ "source": "f1", "value": "Q3 Pipeline 2" }] },
+      "expected": "pass"
+    },
+    {
+      "name": "text with no figures passes",
+      "text": "Qualification needs work at the Propose stage.",
+      "dataset": {},
+      "expected": "pass"
+    }
+  ]
+}
