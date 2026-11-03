@@ -229,7 +229,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   add(`<div class="eyebrow">How to read this report</div><h2>What the ratings mean</h2><table class="grid"><tbody>
     <tr><td style="width:24%"><strong>Severity</strong></td><td>How much damage this does if it's left alone.</td></tr>
     <tr><td><strong>Confidence</strong></td><td>How sure we are, given what we could read from your org.</td></tr>
-    <tr><td><strong>Effort</strong></td><td>Our sizing of the fix, from XS to XL.</td></tr>
+    <tr><td><strong>Effort</strong></td><td>Our sizing of the fix, from very small to very large.</td></tr>
     <tr><td><strong>Value</strong></td><td>Revenue, licence cost or hours, with its assumptions. If we can't size something, we say so.</td></tr>
     <tr><td><strong>Not measurable</strong></td><td>The data can't support the figure, so we report that rather than estimate it.</td></tr></tbody></table>`);
 
