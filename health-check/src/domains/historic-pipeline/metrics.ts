@@ -10,8 +10,8 @@ type Ready = Extract<PipelineData, { status: "ok" }>;
 
 const DAY = 86_400_000;
 const DOMAIN = "historic_pipeline";
-const SEGMENT_NOTE = "Sample below the calibrated minimum";
-const MAX_MISSING_AMOUNT_PCT = 20;
+export const SEGMENT_NOTE = "Sample below the calibrated minimum";
+export const MAX_MISSING_AMOUNT_PCT = 20;
 const MAX_MISSING_HISTORY_PCT = 20;
 
 export function median(values: number[]): number {
@@ -28,9 +28,9 @@ export function quantile(values: number[], q: number): number {
   return sorted[low]! + (sorted[high]! - sorted[low]!) * (position - low);
 }
 
-const round1 = (n: number): number => Math.round(n * 10) / 10;
+export const round1 = (n: number): number => Math.round(n * 10) / 10;
 
-function groupBy<R>(rows: R[], keyOf: (row: R) => string): Map<string, R[]> {
+export function groupBy<R>(rows: R[], keyOf: (row: R) => string): Map<string, R[]> {
   const groups = new Map<string, R[]>();
   for (const row of rows) {
     const key = keyOf(row);
@@ -58,7 +58,7 @@ export function fiscalStartOf(ctx: Ctx): number | null {
   return org.status === "ok" ? (org.data[0]?.FiscalYearStartMonth ?? null) : null;
 }
 
-const hasOpenStage = (d: Deal, data: Ready): boolean => d.history.some((h) => data.stages.orderOf(h.StageName) !== null);
+export const hasOpenStage = (d: Deal, data: Ready): boolean => d.history.some((h) => data.stages.orderOf(h.StageName) !== null);
 
 export function dimensions(ctx: Ctx): Record<string, (d: Deal) => string> {
   const fiscalStart = fiscalStartOf(ctx);
@@ -90,11 +90,11 @@ export function segment(rows: Deal[], dims: Record<string, (d: Deal) => string>,
   return segments;
 }
 
-type Base = { id: string; label: string; definition: string; unit: Metric["unit"]; evidence: Evidence[]; exclusions: string[]; assumptions: string[] };
+export type Base = { id: string; label: string; definition: string; unit: Metric["unit"]; evidence: Evidence[]; exclusions: string[]; assumptions: string[] };
 
-const notMeasurable = (base: Base, reason: string): Metric => ({ status: "not_measurable", domain: DOMAIN, ...base, reason });
+export const notMeasurable = (base: Base, reason: string): Metric => ({ status: "not_measurable", domain: DOMAIN, ...base, reason });
 
-function measured(base: Base, fields: { value: number; n: number; dateRange: DateRange | null; segments?: MetricSegment[]; series?: SeriesPoint[]; stats?: Record<string, number>; segmentExemptReason?: string }): Metric {
+export function measured(base: Base, fields: { value: number; n: number; dateRange: DateRange | null; segments?: MetricSegment[]; series?: SeriesPoint[]; stats?: Record<string, number>; segmentExemptReason?: string }): Metric {
   return {
     status: "measured",
     domain: DOMAIN,
@@ -109,11 +109,11 @@ function measured(base: Base, fields: { value: number; n: number; dateRange: Dat
   };
 }
 
-function base(ctx: Ctx, data: Ready | Extract<PipelineData, { status: "unavailable" }>, fields: Pick<Base, "id" | "label" | "definition" | "unit"> & { assumptions?: string[] }): Base {
+export function base(ctx: Ctx, data: Ready | Extract<PipelineData, { status: "unavailable" }>, fields: Pick<Base, "id" | "label" | "definition" | "unit"> & { assumptions?: string[] }): Base {
   return { ...fields, evidence: data.evidence, exclusions: data.status === "ok" ? data.exclusions : [], assumptions: [zoneNote(ctx), ...(fields.assumptions ?? [])] };
 }
 
-const unmappedReason = (kind: string, stages: string[]): string => `The calibration doesn't say what these ${kind} mean: ${stages.join(", ")}.`;
+export const unmappedReason = (kind: string, stages: string[]): string => `The calibration doesn't say what these ${kind} mean: ${stages.join(", ")}.`;
 
 function winRate(ctx: Ctx, data: Ready): Metric[] {
   const { minSample } = ctx.calibration;

@@ -361,10 +361,10 @@ describe("rule 10", () => {
 describe("overrides", () => {
   test("a report shows the corrected figure", () => {
     const f = output!.findings.find((x) => /should already have closed/.test(x.title))!;
-    const override: NumberOverride = { id: "o1", runId: run.id, target: { type: "finding", id: f.id, field: "facts.rate" }, previousValue: 21.4, newValue: 19.5, reason: "Two were test records.", overriddenBy: "Synthetic Consultant", overriddenAt: "2026-10-31T13:00:00.000Z" };
+    const override: NumberOverride = { id: "o1", runId: run.id, target: { type: "finding", id: f.id, field: "facts.rate" }, previousValue: 27.6, newValue: 19.5, reason: "Two were test records.", overriddenBy: "Synthetic Consultant", overriddenAt: "2026-10-31T13:00:00.000Z" };
     const html = executiveHtml(buildReport({ ...full, overrides: [override] }), pseudonyms);
     assert.match(html, /19\.5%/);
-    assert.doesNotMatch(html, /21\.4%/);
+    assert.doesNotMatch(html, /27\.6%/);
   });
 });
 

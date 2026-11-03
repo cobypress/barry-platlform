@@ -87,6 +87,11 @@ export const STAGES = [
   { ApiName: "Closed Lost", MasterLabel: "Closed Lost", IsActive: true, IsClosed: true, IsWon: false, SortOrder: 7 },
   // Trap: looks like a loss in Salesforce, and shouldn't count as one.
   { ApiName: "Closed No Decision", MasterLabel: "Closed No Decision", IsActive: true, IsClosed: true, IsWon: false, SortOrder: 8 },
+  // A second way to lose, so lost deals can be split by how they closed.
+  { ApiName: "Closed Lost - No Budget", MasterLabel: "Closed Lost - No Budget", IsActive: true, IsClosed: true, IsWon: false, SortOrder: 9 },
+  // Trap: retired when the process was renamed, and still holding open deals with
+  // too little history to weight them by.
+  { ApiName: "Qualified", MasterLabel: "Qualified", IsActive: false, IsClosed: false, IsWon: false, SortOrder: 10 },
 ];
 
 const OPEN_PATH = ["Prospecting", "Discovery", "Proposal", "Negotiation"];
@@ -102,8 +107,8 @@ export type SyntheticOpportunity = {
   IsClosed: boolean;
   IsWon: boolean;
   LastActivityDate: string | null;
-  Type: string;
-  LeadSource: string;
+  Type: string | null;
+  LeadSource: string | null;
   RecordType: { DeveloperName: string };
   Loss_Reason__c: string | null;
   AccountId: string;
@@ -240,7 +245,143 @@ function buildPipeline(): { opportunities: SyntheticOpportunity[]; history: Synt
   return { opportunities, history };
 }
 
-export const pipeline = buildPipeline();
+const SERVICES_SEED = 20261104;
+const CLIENTS = 30;
+const client = (k: number): string => sfId("001", 300 + k);
+const stampOf = (ms: number): string => new Date(ms).toISOString().replace("Z", "+0000");
+const dayMs = (day: string): number => new Date(`${day}T12:00:00Z`).getTime();
+
+type PriorWin = { Id: string; AccountId: string; CloseDate: string; IsWon: boolean; StageName: string };
+
+/**
+ * A services side to the business: account managers selling to retained
+ * clients, mostly by word of mouth, with no lead source and a lot of repeat work.
+ * It's added after the original deals so their seeded data doesn't move, and
+ * every deal here was created over a year ago, so the activity checks, which
+ * only read the last year, see exactly what they did before.
+ */
+function buildServices(firstId: number): { opportunities: SyntheticOpportunity[]; history: SyntheticHistory[]; priorWins: PriorWin[] } {
+  const random = seeded(SERVICES_SEED);
+  const between = (low: number, high: number): number => Math.floor(low + random() * (high - low + 1));
+  const opportunities: SyntheticOpportunity[] = [];
+  const history: SyntheticHistory[] = [];
+  let next = firstId;
+  const addHistory = (oppId: string, stage: string, amount: number | null, close: string, at: number): void => {
+    history.push({ Id: sfId("008", 500_000 + history.length), OpportunityId: oppId, StageName: stage, Amount: amount, CloseDate: close, CreatedDate: stampOf(at) });
+  };
+  const earliest = asOf - 725 * DAY;
+  const latest = asOf - 366 * DAY;
+
+  /** One closed deal along `path`, with its time split across the stages. */
+  const closedDeal = (path: string[], final: string, created: number, closed: number): void => {
+    const id = sfId("006", next++);
+    const amount = random() < 0.07 ? null : between(5, 60) * 1000;
+    const closeDay = dateOnly(closed);
+    // Trap: the first close date is often too early, so won deals land late against it.
+    const first = dateOnly(closed - between(-15, 75) * DAY);
+    const weights = path.map(() => between(5, 25));
+    const span = closed - created;
+    // A long deal spends most of its time in one stage, so no stage's usual pace moves.
+    const long = span > 150 * DAY ? between(0, path.length - 1) : -1;
+    const share = weights.reduce((a, b) => a + b, 0);
+    const others = weights.reduce((sum, w, i) => sum + (i === long ? 0 : w), 0) * DAY;
+    let at = created;
+    path.forEach((stage, s) => {
+      addHistory(id, stage, amount, first, at);
+      at += long === -1 ? (span * weights[s]!) / share : s === long ? span - others : weights[s]! * DAY;
+    });
+    if (first !== closeDay) addHistory(id, path.at(-1)!, amount, closeDay, closed - DAY);
+    addHistory(id, final, amount, closeDay, closed);
+    opportunities.push({
+      Id: id,
+      OwnerId: userId(next % 2 === 0 ? 1 : 2),
+      StageName: final,
+      Amount: amount,
+      CloseDate: closeDay,
+      CreatedDate: stampOf(created),
+      IsClosed: true,
+      IsWon: final === "Closed Won",
+      LastActivityDate: closeDay,
+      Type: random() < 0.7 ? "Existing Business" : "New Business",
+      LeadSource: random() < 0.35 ? null : SOURCES[between(0, SOURCES.length - 1)]!,
+      RecordType: { DeveloperName: random() < 0.2 ? "Renewal" : "New_Business" },
+      Loss_Reason__c: final.startsWith("Closed Lost") && random() < 0.5 ? "Price" : null,
+      AccountId: client(between(1, CLIENTS)),
+      NextStep: null,
+    });
+  };
+
+  // Enough wins in each quarter for quarterly medians, at a win rate not far from the rest of the org's.
+  const quarters: Array<[string, string, number, number, number]> = [
+    ["2025-01-01", "2025-03-31", 22, 9, 3],
+    ["2025-04-01", "2025-06-30", 11, 10, 3],
+    ["2025-07-01", "2025-09-30", 12, 10, 3],
+    ["2025-10-01", "2025-12-31", 19, 10, 3],
+    ["2026-01-01", "2026-03-31", 10, 9, 3],
+    ["2026-04-01", "2026-06-30", 12, 10, 3],
+    ["2026-07-01", "2026-09-30", 14, 10, 3],
+  ];
+  for (const [from, to, won, lost, noDecision] of quarters) {
+    const outcomes = [...Array<string>(won).fill("Closed Won"), ...Array<string>(lost).fill("lost"), ...Array<string>(noDecision).fill("Closed No Decision")];
+    for (const outcome of outcomes) {
+      const closed = dayMs(from) + between(0, Math.round((dayMs(to) - dayMs(from)) / DAY)) * DAY;
+      const usual = closed - between(40, 120) * DAY;
+      // A deal closing within the year was created before it, at some point over the months before.
+      const created = Math.max(earliest, usual <= latest ? usual : latest - between(0, 300) * DAY);
+      const final = outcome === "lost" ? (random() < 0.4 ? "Closed Lost - No Budget" : "Closed Lost") : outcome;
+      const depth = final === "Closed Won" ? OPEN_PATH.length : between(1, OPEN_PATH.length);
+      closedDeal(OPEN_PATH.slice(0, depth), final, created, closed);
+    }
+  }
+
+  // Trap: the old process had a Qualified stage. Too few deals went through it
+  // for it to have a win rate of its own.
+  const OLD_PATH = ["Prospecting", "Qualified", "Discovery", "Proposal", "Negotiation"];
+  const oldOutcomes = ["Closed Won", "Closed Lost", "Closed Won", "Closed No Decision", "Closed Lost", "Closed Won", "Closed Lost", "Closed Won", "Closed Lost", "Closed No Decision", "Closed Won", "Closed Lost"];
+  oldOutcomes.forEach((final, i) => {
+    const created = asOf - between(700, 720) * DAY;
+    closedDeal(OLD_PATH.slice(0, final === "Closed Won" ? OLD_PATH.length : 2 + (i % 3)), final, created, created + between(70, 130) * DAY);
+  });
+
+  // Trap: open deals left in the retired stage, past their date, owned by
+  // someone who has left. Two have no amount. Someone in delivery still logs
+  // activity on them, so they aren't stale.
+  [30_000, null, 45_000, 20_000, null, 60_000].forEach((amount, i) => {
+    const id = sfId("006", next++);
+    const created = asOf - between(600, 700) * DAY;
+    const close = dateOnly(created + 90 * DAY);
+    addHistory(id, "Prospecting", amount, close, created);
+    addHistory(id, "Qualified", amount, close, created + between(10, 20) * DAY);
+    opportunities.push({
+      Id: id,
+      OwnerId: userId(9),
+      StageName: "Qualified",
+      Amount: amount,
+      CloseDate: close,
+      CreatedDate: stampOf(created),
+      IsClosed: false,
+      IsWon: false,
+      LastActivityDate: dateOnly(asOf - between(3, 20) * DAY),
+      Type: "Existing Business",
+      LeadSource: null,
+      RecordType: { DeveloperName: "New_Business" },
+      Loss_Reason__c: null,
+      AccountId: client(i + 1),
+      NextStep: "Call the buyer on Friday",
+    });
+  });
+
+  // Half the retained clients had already bought before the analysis window.
+  const priorWins = Array.from({ length: CLIENTS / 2 }, (_, k) => ({ Id: sfId("006", 900_000 + k), AccountId: client(k + 1), CloseDate: dateOnly(asOf - between(760, 1100) * DAY), IsWon: true, StageName: "Closed Won" }));
+  return { opportunities, history, priorWins };
+}
+
+/** The original deals. Activity, leads and record totals are built from these alone, so other domains' data doesn't move. */
+export const basePipeline = buildPipeline();
+const services = buildServices(basePipeline.opportunities.length + 1);
+export const pipeline = { opportunities: [...basePipeline.opportunities, ...services.opportunities], history: [...basePipeline.history, ...services.history].sort((a, b) => a.Id.localeCompare(b.Id)) };
+/** Wins before the analysis window, which only the prior wins read returns. */
+export const PRIOR_WINS = services.priorWins;
 
 export type SyntheticTask = { Id: string; OwnerId: string; WhoId: string | null; WhatId: string | null; CreatedDate: string; TaskSubtype: string | null };
 export type SyntheticEvent = { Id: string; OwnerId: string; WhoId: string | null; WhatId: string | null; StartDateTime: string };
@@ -261,7 +402,7 @@ function buildActivity(): { tasks: SyntheticTask[]; events: SyntheticEvent[]; em
     tasks.push({ Id, OwnerId: owner, WhoId: null, WhatId: whatId, CreatedDate: stamp(at), TaskSubtype: subtype });
     return Id;
   };
-  const dealIds = pipeline.opportunities.filter((o) => o.OwnerId === userId(1) || o.OwnerId === userId(2)).map((o) => o.Id);
+  const dealIds = basePipeline.opportunities.filter((o) => o.OwnerId === userId(1) || o.OwnerId === userId(2)).map((o) => o.Id);
 
   // Trap, built first: a real check once missed this. Total events are flat all
   // year. From July, almost none of them are linked to a record, which is what
@@ -279,7 +420,7 @@ function buildActivity(): { tasks: SyntheticTask[]; events: SyntheticEvent[]; em
 
   // Closed deals. Won deals get more touches than lost ones. Trap: most of the EU
   // team's closed deals have nothing logged at all, inside a total that looks fine.
-  for (const deal of pipeline.opportunities.filter((o) => o.IsClosed && new Date(o.CreatedDate.replace("+0000", "Z")).getTime() >= oneYearAgo)) {
+  for (const deal of basePipeline.opportunities.filter((o) => o.IsClosed && new Date(o.CreatedDate.replace("+0000", "Z")).getTime() >= oneYearAgo)) {
     const eu = deal.OwnerId === userId(3) || deal.OwnerId === userId(14);
     const roll = random();
     const count = eu && roll < 0.7 ? 0 : deal.IsWon ? between(5, 9) : between(1, 4);
@@ -287,7 +428,7 @@ function buildActivity(): { tasks: SyntheticTask[]; events: SyntheticEvent[]; em
   }
 
   // Open deals in the last 90 days. Trap: one rep has logged almost nothing.
-  for (const deal of pipeline.opportunities.filter((o) => !o.IsClosed)) {
+  for (const deal of basePipeline.opportunities.filter((o) => !o.IsClosed)) {
     const count = deal.OwnerId === userId(14) ? (random() < 0.1 ? 1 : 0) : between(3, 6);
     for (let i = 0; i < count; i++) addTask(deal.OwnerId, deal.Id, asOf - between(1, 85) * DAY);
   }
@@ -297,7 +438,7 @@ function buildActivity(): { tasks: SyntheticTask[]; events: SyntheticEvent[]; em
 
   // Trap: an enhanced email also makes a task, so counting both would double it.
   for (let i = 0; i < 30; i++) {
-    const deal = pipeline.opportunities[224 + i]!;
+    const deal = basePipeline.opportunities[224 + i]!;
     const at = asOf - between(1, 60) * DAY;
     const logged = i % 2 === 0 ? addTask(deal.OwnerId, deal.Id, at, "Email") : null;
     emails.push({ Id: sfId("02s", i + 1), RelatedToId: deal.Id, ActivityId: logged, MessageDate: stamp(at), CreatedById: deal.OwnerId });
@@ -315,8 +456,8 @@ function buildLeads() {
   const leads: SyntheticLead[] = [];
   const statusChanges: Array<{ Id: string; LeadId: string; CreatedDate: string }> = [];
   const members: Array<{ Id: string; CampaignId: string; LeadId: string }> = [];
-  const won = pipeline.opportunities.filter((o) => o.IsWon).map((o) => o.Id);
-  const lost = pipeline.opportunities.filter((o) => o.StageName === "Closed Lost").map((o) => o.Id);
+  const won = basePipeline.opportunities.filter((o) => o.IsWon).map((o) => o.Id);
+  const lost = basePipeline.opportunities.filter((o) => o.StageName === "Closed Lost").map((o) => o.Id);
   const sources = ["Web", "Web", "Web", "Event", "Referral", "Partner"];
   const owners = [1, 2, 3];
   let tasks = activity.tasks.length;
@@ -449,7 +590,8 @@ export const RECORD_TOTALS: Record<string, { total: number; recent: number }> = 
   Account: { total: 500, recent: 120 },
   Contact: { total: 500, recent: 90 },
   Lead: { total: 500, recent: 300 },
-  Opportunity: { total: pipeline.opportunities.length, recent: 150 },
+  // The original deals only, so field fill rates don't move with the services block.
+  Opportunity: { total: basePipeline.opportunities.length, recent: 150 },
 };
 
 export const FILLED: Record<string, number | [number, number]> = {

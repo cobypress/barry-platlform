@@ -5,12 +5,14 @@
   "confirmedAt": "2026-10-30T09:00:00.000Z",
   "stages": [
     { "name": "Prospecting", "category": "open", "order": 1 },
-    { "name": "Discovery", "category": "open", "order": 2 },
-    { "name": "Proposal", "category": "open", "order": 3 },
-    { "name": "Negotiation", "category": "open", "order": 4 },
-    { "name": "Legal Review", "category": "open", "order": 5 },
+    { "name": "Qualified", "category": "open", "order": 2 },
+    { "name": "Discovery", "category": "open", "order": 3 },
+    { "name": "Proposal", "category": "open", "order": 4 },
+    { "name": "Negotiation", "category": "open", "order": 5 },
+    { "name": "Legal Review", "category": "open", "order": 6 },
     { "name": "Closed Won", "category": "won" },
     { "name": "Closed Lost", "category": "lost" },
+    { "name": "Closed Lost - No Budget", "category": "lost" },
     { "name": "Closed No Decision", "category": "no_decision" }
   ],
   "scope": { "recordTypes": "all" },

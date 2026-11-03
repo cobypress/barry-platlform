@@ -186,6 +186,11 @@ export class Simulator implements Transport {
       case "OpportunityStage":
         return page(org.STAGES);
       case "Opportunity":
+        if (/IsWon = true/.test(soql) && /CloseDate < /.test(soql)) {
+          const before = soql.match(/CloseDate < (\d{4}-\d{2}-\d{2})/)?.[1] ?? "";
+          const earlier = [...org.PRIOR_WINS, ...org.pipeline.opportunities.filter((o) => o.IsWon && o.CloseDate < before)];
+          return this.#keyset(earlier.map(({ Id, AccountId, CloseDate }) => ({ Id, AccountId, CloseDate })), soql);
+        }
         if (/NextStep != null/.test(soql)) return this.#keyset(org.pipeline.opportunities.filter((o) => !o.IsClosed && o.NextStep !== null).map((o) => ({ Id: o.Id })), soql);
         // Free text the query didn't ask for mustn't come back, as on a real org.
         return this.#keyset(org.pipeline.opportunities.map(({ NextStep, ...o }) => o), soql);

@@ -224,7 +224,7 @@ describe("metrics", () => {
   test("open deals and pipeline are measured and segmented", () => {
     const metrics = analyseExtracts(extracts).metrics;
     const count = metrics.find((m) => m.id === "current.open_deals")!;
-    assert.ok(count.status === "measured" && count.value === 70 && count.segments.length > 0);
+    assert.ok(count.status === "measured" && count.value === 76 && count.segments.length > 0);
     const age = metrics.find((m) => m.id === "current.median_days_in_stage")!;
     assert.ok(age.status === "measured" && age.value > 0);
   });

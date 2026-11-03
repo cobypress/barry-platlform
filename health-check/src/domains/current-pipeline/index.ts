@@ -7,11 +7,13 @@ import { usersExtractor } from "../../extract/users.ts";
 import { notSized, pct, plural, segmentRate, type NotMeasurableResult, type Rule, type RuleContext, type RuleResult } from "../../engine/rule.ts";
 import { exposure } from "../data-quality/index.ts";
 import { loadPipeline, type Deal } from "../historic-pipeline/cohort.ts";
+import { potentialRevenue, SITUATIONS, type Situation } from "../historic-pipeline/potential.ts";
 import { fiscalStartOf, median, pushesOf, quantile, segment } from "../historic-pipeline/metrics.ts";
 import type { DateRange, Evidence, Metric } from "../../schemas/index.ts";
 import type { DomainModule } from "../types.ts";
 import { localDay, todayIn, zoneNote, zoneOf } from "../time-zone.ts";
 import { daysSince, enteredCurrentStage, quarterBounds, stageRuns } from "./stages.ts";
+import { deliveryOutlook, openStageMetrics, OUTLOOK_LABELS, retiredStages } from "./outlook.ts";
 
 const DOMAIN = "current_pipeline";
 const MIN_SEGMENT = 10;
@@ -58,7 +60,8 @@ type ShareRule = {
   sentence: (hits: number, n: number, rate: number) => string;
   recommendation: string;
   owner: string;
-  sized: boolean;
+  /** True sizes the raw exposure. A situation sizes potential revenue at how often comparable deals still won. */
+  sized: boolean | ((ctx: RuleContext, data: Ready) => Situation);
 };
 
 // The shape every share-of-open-deals rule takes: scope, hit test, then the
@@ -94,7 +97,12 @@ export function shareRule(options: ShareRule): Rule {
         severity: options.severity,
         confidence: "high",
         evidence,
-        value: options.sized ? exposure(ctx, scoped.deals.filter(scoped.isHit), data.multiCurrency, `${result.hits} deals affected`) : notSized("This affects how far the pipeline can be trusted, which has no direct figure."),
+        value:
+          typeof options.sized === "function"
+            ? potentialRevenue(ctx, data, scoped.deals.filter(scoped.isHit), () => (options.sized as (c: RuleContext, d: Ready) => Situation)(ctx, data))
+            : options.sized
+              ? exposure(ctx, scoped.deals.filter(scoped.isHit), data.multiCurrency, `${result.hits} deals affected`)
+              : notSized("This affects how far the pipeline can be trusted, which has no direct figure."),
         effort: { size: "S" },
         owner: options.owner,
         segmentsChecked: result.segmentsChecked,
@@ -160,7 +168,7 @@ const staleDeals = shareRule({
   sentence: (hits, n, rate) => `Open deals with no stage change and no logged activity in ${QUIET_DAYS} days: ${hits} of ${n} (${rate}%).`,
   recommendation: "Check that activity is being captured, then re-engage these deals or close them.",
   owner: "Head of sales",
-  sized: true,
+  sized: (_ctx, data) => SITUATIONS.inStageFor(QUIET_DAYS, data),
 });
 
 const repeatedPushes = shareRule({
@@ -374,7 +382,7 @@ function currentMetrics(ctx: Ctx): Metric[] {
     age: { id: "current.median_days_in_stage", domain: DOMAIN, label: "Days in current stage", unit: "days" as const, definition: "Median days open deals have been in their current stage." },
   };
   const shared = { exclusions: [] as string[], assumptions: [zoneNote(ctx)] };
-  if ("outcome" in loaded) return Object.values(definitions).map((d) => ({ ...d, ...shared, evidence: loaded.evidence, status: "not_measurable", reason: loaded.reason }));
+  if ("outcome" in loaded) return [...Object.values(definitions), ...OUTLOOK_LABELS.map((m) => ({ ...m, domain: DOMAIN }))].map((d) => ({ ...d, ...shared, evidence: loaded.evidence, status: "not_measurable", reason: loaded.reason }));
   const { data, deals } = loaded;
   const today = { from: ctx.window.to, to: ctx.window.to };
   const evidence = [{ ...data.evidence[0]!, count: deals.length, dateRange: today }];
@@ -382,7 +390,7 @@ function currentMetrics(ctx: Ctx): Metric[] {
   const { minSample } = ctx.calibration;
   const dims: Record<string, (d: Deal) => string> = { stage: (d) => d.StageName, "record type": (d) => d.RecordType ?? "No record type", team: (d) => d.team, rep: (d) => ctx.userLabel(d.OwnerId) };
   const rest = { dateRange: today, series: [], stats: {}, segmentExemptReason: deals.length === 0 ? "There are no open deals." : null };
-  const metrics: Metric[] = [{ ...definitions.count, ...common, status: "measured", value: deals.length, n: deals.length, segments: segment(deals, dims, 1, (group) => group.length), ...rest }];
+  const metrics: Metric[] = [{ ...definitions.count, ...common, status: "measured", value: deals.length, n: deals.length, segments: [...segment(deals, dims, 1, (group) => group.length), ...retiredStages(ctx, deals)], ...rest }];
   if (data.multiCurrency) metrics.push({ ...definitions.value, ...common, status: "not_measurable", reason: "The org is multi-currency, and amounts can't be added until historic rates are supplied." });
   else {
     const total = (group: Deal[]): number => Math.round(group.reduce((sum, d) => sum + (d.Amount ?? 0), 0));
@@ -393,6 +401,7 @@ function currentMetrics(ctx: Ctx): Metric[] {
   const round = (n: number): number => Math.round(n * 10) / 10;
   if (placed.length < minSample) metrics.push({ ...definitions.age, ...common, status: "not_measurable", reason: `${placed.length} open deals with stage history is below the calibrated minimum of ${minSample}.` });
   else metrics.push({ ...definitions.age, ...common, status: "measured", value: round(median(placed.map(days))), n: placed.length, segments: segment(placed, dims, minSample, (group) => round(median(group.map(days)))), ...rest });
+  metrics.push(...openStageMetrics(ctx, data, deals, evidence), ...deliveryOutlook(ctx, data, deals, evidence));
   return metrics;
 }
 

@@ -7,6 +7,8 @@ import type { Metric, Value } from "../../schemas/index.ts";
 import { loadPipeline } from "./cohort.ts";
 import { money } from "../../render/format.ts";
 import { closedInWindow, dimensions, pipelineMetrics } from "./metrics.ts";
+import { deepDiveMetrics } from "./deep-dive.ts";
+import { priorWinsExtractor } from "../../extract/prior-wins.ts";
 
 const DIVERGENCE_POINTS = 15;
 const WATCHED_METRICS = ["historic.win_rate", "historic.slippage_rate"];
@@ -172,7 +174,7 @@ export const historicPipelineModule: DomainModule = {
   id: "historic_pipeline",
   cloud: "sales",
   label: "Historic pipeline",
-  extractors: [schemaExtractor, usersExtractor, stagesExtractor, opportunitiesExtractor],
-  metrics: [pipelineMetrics],
+  extractors: [schemaExtractor, usersExtractor, stagesExtractor, opportunitiesExtractor, priorWinsExtractor],
+  metrics: [pipelineMetrics, deepDiveMetrics],
   rules: [unmappedStages, calibrationContradiction, segmentDivergence],
 };

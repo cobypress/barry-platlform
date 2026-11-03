@@ -8,6 +8,7 @@ import { enteredCurrentStage } from "../current-pipeline/stages.ts";
 import { loadPipeline, type Deal } from "../historic-pipeline/cohort.ts";
 import { median } from "../historic-pipeline/metrics.ts";
 import { localDay, zoneOf } from "../time-zone.ts";
+import { potentialRevenue, SITUATIONS } from "../historic-pipeline/potential.ts";
 import { atOwnWinRate } from "../value.ts";
 import type { Evidence, Value } from "../../schemas/index.ts";
 import type { DomainModule } from "../types.ts";
@@ -37,7 +38,7 @@ const dealSegments = (ctx: RuleContext, deals: Deal[]) => [
 
 const stalledDeals: Rule = {
   id: "rev.stalled-deals",
-  version: 1,
+  version: 2,
   domain: DOMAIN,
   title: "Stalled deals worth reviving",
   evaluate(ctx): RuleResult | RuleResult[] {
@@ -52,12 +53,8 @@ const stalledDeals: Rule = {
     const segmentsChecked = dealSegments(ctx, open);
     if (stalled.length < MIN_DEALS) return { outcome: "pass", summary: `${plural(stalled.length, "open deal")} of ${open.length} ${stalled.length === 1 ? "has" : "have"} stalled for ${STALLED_DAYS} days, under the ${MIN_DEALS} we'd call a pattern.`, evidence, segmentsChecked, facts: { stalled: stalled.length, open: open.length } };
     const amount = total(stalled);
-    const value = atOwnWinRate(ctx, amount, {
-      multiCurrency: data.multiCurrency,
-      period: "one-off, if these deals are re-engaged",
-      basis: `${plural(stalled.length, "stalled deal")} with a total Amount of ${money(amount, ctx.calibration.currency)}`,
-      caveat: "Assumes a re-engaged deal wins as often as an average deal. Stalled deals usually win less often, so treat this as a ceiling",
-    });
+    const situation = SITUATIONS.inStageFor(STALLED_DAYS, data);
+    const value = potentialRevenue(ctx, data, stalled, () => situation);
     return {
       outcome: "issue",
       title: "Stalled deals are still sitting in your pipeline",

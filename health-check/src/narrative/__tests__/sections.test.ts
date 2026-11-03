@@ -140,12 +140,12 @@ describe("overrides", () => {
     const sized = base.findings.find((x) => x.value.kind !== "not_sized")!;
     const amount = sized.value.kind === "not_sized" ? 0 : sized.value.amount;
     const onValue: NumberOverride = { ...override, target: { type: "finding", id: sized.id, field: "value.amount" }, previousValue: amount, newValue: 1000 };
-    const onMetric: NumberOverride = { ...override, target: { type: "metric", id: "historic.win_rate", field: "value" }, previousValue: 35, newValue: 33 };
+    const onMetric: NumberOverride = { ...override, target: { type: "metric", id: "historic.win_rate", field: "value" }, previousValue: 47, newValue: 45 };
     const { report } = all({ ...base, overrides: [onValue, onMetric] });
     const value = report.teamFindings.find((x) => x.id === sized.id)!.value;
     assert.equal(value.kind !== "not_sized" && value.amount, 1000);
     const m = report.metrics.find((x) => x.id === "historic.win_rate")!;
-    assert.equal(m.status === "measured" && m.value, 33);
+    assert.equal(m.status === "measured" && m.value, 45);
   });
 
   test("say so when there are none", () => {
