@@ -47,10 +47,14 @@ function issueCard(r: Render, f: Finding, rank: number): string {
   return `<article class="issue"><div class="meta"><span>${rank}</span>${severityChip(f)}<span>Confidence ${f.confidence}</span><span>${effortText(f)}</span><span>Owner: ${r.t(f.owner)}</span></div><h3>${r.t(f.title)}</h3><p>${r.t(f.summary)}</p><p class="action"><strong>What to do:</strong> ${r.t(f.recommendation)}</p><p class="value">${value.amount}<small>${value.note}</small></p></article>`;
 }
 
+/** A summary page holds about a dozen actions. The full report has each phase in full. */
+export const EXECUTIVE_PLAN_ITEMS = 4;
+
 function phaseBlock(r: Render, phase: PlanPhase): string {
   // The title says what the action is about. A recommendation on its own often says "these deals".
-  const rows = phase.findings.slice(0, TOP_ISSUE_COUNT).map((f) => `<li><strong>${r.t(f.title)}.</strong> ${r.t(f.recommendation)} <span class="owner">${r.t(f.owner)}</span></li>`);
-  const body = rows.length ? `<ul>${rows.join("")}</ul>` : "<p>Nothing planned for this phase.</p>";
+  const rows = phase.findings.slice(0, EXECUTIVE_PLAN_ITEMS).map((f) => `<li><strong>${r.t(f.title)}.</strong> ${r.t(f.recommendation)} <span class="owner">${r.t(f.owner)}</span></li>`);
+  const more = phase.findings.length > EXECUTIVE_PLAN_ITEMS ? `<p class="owner">The full report lists the rest of this phase.</p>` : "";
+  const body = rows.length ? `<ul>${rows.join("")}</ul>${more}` : "<p>Nothing planned for this phase.</p>";
   return `<section class="phase"><h3>Days ${phase.from} to ${phase.to}: ${phase.title}</h3>${body}</section>`;
 }
 
@@ -63,7 +67,7 @@ export function executiveHtml(report: BuiltReport, pseudonyms: Pseudonymiser): s
   const team = report.teamFindings;
   const verdict = verdictOf(team);
   const top = topIssues(team, TOP_ISSUE_COUNT);
-  const plan = buildPlan(team);
+  const plan = buildPlan(team).phases;
   const customer = intake?.customerName ?? run.customerRef ?? "Customer";
   const notMeasurable = team.filter((f) => f.status === "not_measurable").length;
 

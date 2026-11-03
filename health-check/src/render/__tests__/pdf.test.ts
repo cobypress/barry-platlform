@@ -14,7 +14,7 @@ import { Pseudonymiser, type PseudonymEntry } from "../../privacy/pseudonymiser.
 import { SALES_CLOUD_DOMAINS, type Finding, type NumberOverride, type ReportSection } from "../../schemas/index.ts";
 import { runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
-import { executiveHtml } from "../executive.ts";
+import { EXECUTIVE_PLAN_ITEMS, executiveHtml } from "../executive.ts";
 import { ukDates } from "../format.ts";
 import { DECK_RANGE, fullReportHtml, slideCounts } from "../full-report.ts";
 import { document } from "../html.ts";
@@ -89,14 +89,16 @@ describe("the executive summary", () => {
     assert.doesNotMatch(text, /Effort (?:XS|S|M|L|XL)\b/);
     assert.doesNotMatch(text, /Amount of \d/);
     assert.doesNotMatch(text, /for team /);
-    const plan = buildPlan(report.teamFindings);
-    const shown = plan.reduce((n, p) => n + Math.min(p.findings.length, 5), 0);
+    const { phases: plan, later } = buildPlan(report.teamFindings);
+    const shown = plan.reduce((n, p) => n + Math.min(p.findings.length, EXECUTIVE_PLAN_ITEMS), 0);
     assert.equal(html.match(/<li><strong>[^<]+\.<\/strong>/g)?.length, shown, "every plan action leads with its issue");
     const deckActions = [...fullReportHtml(report, pseudonyms).matchAll(/<ul class="action-list[^"]*">([\s\S]*?)<\/ul>/g)].flatMap((m) => m[1]!.split("<li>").slice(1));
     assert.ok(deckActions.length > 0);
     for (const item of deckActions) assert.match(item, /^<strong>/, "every roadmap action in the deck leads with its issue");
     // Urgent wording in a later phase contradicts itself.
-    for (const f of plan.slice(1).flatMap((p) => p.findings)) assert.doesNotMatch(f.recommendation, /\b(?:now|this month)\b/i, f.title);
+    for (const f of [...plan.slice(1).flatMap((p) => p.findings), ...later]) assert.doesNotMatch(f.recommendation, /\b(?:now|this month)\b/i, f.title);
+    assert.ok(later.length > 0);
+    assert.match(fullReportHtml(report, pseudonyms), /<h2>After 90 days<\/h2>/, "actions after 90 days are listed in the deck");
   });
 
   test("names no one", () => {

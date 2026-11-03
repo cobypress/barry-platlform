@@ -76,21 +76,46 @@ export function topIssues(findings: Finding[], count: number): Finding[] {
 }
 
 export type PlanPhase = { key: string; title: string; from: number; to: number; findings: Finding[] };
+export type Plan = { phases: PlanPhase[]; later: Finding[] };
 
-/** Effort decides the phase: small fixes first, so the plan starts with what can be done now. */
-export function buildPlan(findings: Finding[]): PlanPhase[] {
+// What one team can take on in each 30 days, as our working figure. A plan that
+// puts most of a report in its first month is a list, not a plan.
+export const PLAN_CAPACITY = [8, 10, 10] as const;
+
+const SMALL = new Set(["XS", "S", "M"]);
+
+/** The index of the first phase an action may go in. Urgent work that can be done soon goes first, and large builds and low-severity tidying go last. */
+function earliestPhase(f: Finding): number {
+  const urgent = f.severity === "critical" || f.severity === "high";
+  if (!SMALL.has(f.effort.size)) return f.severity === "critical" ? 1 : 2;
+  if (urgent || (f.severity === "medium" && f.effort.size === "XS")) return 0;
+  return f.severity === "medium" ? 1 : 2;
+}
+
+/**
+ * Severity and effort decide the phase, and each phase has a capacity. Actions
+ * go in ranked order, each into the earliest phase it's allowed in that has
+ * room, so urgent work overflows into the next month rather than off the plan.
+ * What doesn't fit comes after 90 days.
+ */
+export function buildPlan(findings: Finding[]): Plan {
   const seen = new Set<string>();
   const actions = issuesOf(findings).filter((f) => {
-    if (!f.recommendation || f.recommendationType === "none" || seen.has(f.recommendation)) return false;
+    if (!f.recommendation || f.recommendationType === "none" || f.severity === "info" || seen.has(f.recommendation)) return false;
     seen.add(f.recommendation);
     return true;
   });
-  const phase = (sizes: string[]): Finding[] => actions.filter((f) => sizes.includes(f.effort.size));
-  return [
-    { key: "stabilise", title: "Stabilise", from: 1, to: 30, findings: phase(["XS", "S"]) },
-    { key: "fix", title: "Fix", from: 31, to: 60, findings: phase(["M"]) },
-    { key: "build", title: "Build", from: 61, to: 90, findings: phase(["L", "XL"]) },
+  const phases: PlanPhase[] = [
+    { key: "stabilise", title: "Stabilise", from: 1, to: 30, findings: [] },
+    { key: "fix", title: "Fix", from: 31, to: 60, findings: [] },
+    { key: "build", title: "Build", from: 61, to: 90, findings: [] },
   ];
+  const later: Finding[] = [];
+  for (const f of actions) {
+    const index = [0, 1, 2].slice(earliestPhase(f)).find((i) => phases[i]!.findings.length < PLAN_CAPACITY[i]!);
+    (index === undefined ? later : phases[index]!.findings).push(f);
+  }
+  return { phases, later };
 }
 
 export type Verdict = { headline: string; critical: number; high: number; issues: number };

@@ -139,6 +139,8 @@ const DENSITIES: Density[] = [
   { critical: 24, high: 24, medium: 24, low: 24, info: 24, columns: 2, domainSummary: true },
 ];
 
+const severityWord = (severity: string): string => `${severity.charAt(0).toUpperCase()}${severity.slice(1)} severity`;
+
 const MANUAL_STATUS: Record<string, string> = { pending: "Not answered yet", answered: "Answered", skipped: "Skipped" };
 
 /** The last resort for a very large org: one table per domain, so the deck has a fixed ceiling. */
@@ -215,7 +217,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   const metric = (id: string): Metric | undefined => metrics.find((m) => m.id === id);
   const verdict = verdictOf(team);
   const top = topIssues(team, TOP_ISSUE_COUNT);
-  const plan = buildPlan(team);
+  const { phases: plan, later } = buildPlan(team);
   const domains = domainsInOrder(team);
   const assessed = domains.filter((d) => team.some((f) => f.domain === d));
   const unassessed = domains.filter((d) => !assessed.includes(d));
@@ -287,6 +289,9 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
       add(`<div class="eyebrow">Roadmap</div><h2>Days ${phase.from} to ${phase.to}: ${phase.title}${i ? ", continued" : ""}</h2>${cut ? `<p style="font-size:15px;margin-bottom:6px">${COMPACT_NOTE}</p>` : ""}${group.length ? `<ul class="action-list${dense ? " two-text" : ""}">${group.map((f) => `<li><strong>${r.t(f.title)}.</strong> ${r.t(f.recommendation)} <span class="owner">${r.t(f.owner)}</span></li>`).join("")}</ul>` : "<p>Nothing planned for this phase.</p>"}`);
     });
   }
+
+  // Titles only: each of these already has its card in its domain's section.
+  if (later.length) slides.push(...listSlides(r, "Roadmap", "After 90 days", later.map((f) => ({ title: f.title, detail: `${severityWord(f.severity)}. ${effortText(f)}. ${f.owner}` })), compact));
 
   if (!dense) add(`<div class="eyebrow">Appendix</div><h1>How we worked</h1><div class="body">${sectionBody(r, built, "appendix")}</div>`, "dark divider");
   slides.push(...listSlides(r, "Appendix", "Assumptions", [

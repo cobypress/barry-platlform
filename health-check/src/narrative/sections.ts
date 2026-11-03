@@ -126,7 +126,7 @@ function summaryCounts(findings: Finding[]): PromptSource {
 function executiveSpecs(input: ReportInput, team: Finding[]): Spec[] {
   const verdict = verdictOf(team);
   const top = topIssues(team, TOP_ISSUE_COUNT);
-  const plan = buildPlan(team);
+  const { phases: plan, later } = buildPlan(team);
   const rows = scorecard(team, input.scores ?? []);
   const scoreSources = rows.filter((r) => r.score !== null).map((r) => `score:${r.domain}`);
   const assessed = rows.filter((r) => r.issues > 0 || team.some((f) => f.domain === r.domain)).length;
@@ -153,7 +153,9 @@ function executiveSpecs(input: ReportInput, team: Finding[]): Spec[] {
     {
       key: "plan_90_day",
       title: "90-day plan",
-      body: "Small fixes come first, so the plan starts with what can be done now.",
+      body: later.length
+        ? "Urgent fixes come first, and each month holds only what a team can take on. The full report has every action, and what comes after 90 days."
+        : "Urgent fixes come first, and each month holds only what a team can take on. The full report has every action.",
       findingIds: plan.flatMap((p) => p.findings.map((f) => f.id)),
       sources: SUMMARY_SOURCES,
     },
@@ -162,7 +164,7 @@ function executiveSpecs(input: ReportInput, team: Finding[]): Spec[] {
 
 function fullSpecs(input: ReportInput, team: Finding[], metrics: Metric[]): Spec[] {
   const { intake } = input;
-  const plan = buildPlan(team);
+  const { phases: plan, later } = buildPlan(team);
   const verdict = verdictOf(team);
   const notMeasurable = team.filter((f) => f.status === "not_measurable");
   const passed = team.filter((f) => f.status === "passed");
@@ -208,8 +210,8 @@ function fullSpecs(input: ReportInput, team: Finding[], metrics: Metric[]): Spec
     {
       key: "roadmap",
       title: "Roadmap",
-      body: plan.map((p) => `Days ${p.from} to ${p.to}, ${p.title}: ${plural(p.findings.length, "action")}.`).join("\n"),
-      findingIds: plan.flatMap((p) => p.findings.map((f) => f.id)),
+      body: [...plan.map((p) => `Days ${p.from} to ${p.to}, ${p.title}: ${plural(p.findings.length, "action")}.`), ...(later.length ? [`After 90 days: ${plural(later.length, "action")}.`] : [])].join("\n"),
+      findingIds: [...plan.flatMap((p) => p.findings.map((f) => f.id)), ...later.map((f) => f.id)],
       sources: [...SUMMARY_SOURCES, "plan"],
     },
     {
@@ -258,7 +260,7 @@ export function buildReport(input: ReportInput): BuiltReport {
   const now = input.now ?? new Date(run.asOf);
   const effective = applyOverrides(findings, metrics, overrides);
   const team = effective.findings.map(teamLevelFinding);
-  const plan = buildPlan(team);
+  const { phases: plan, later } = buildPlan(team);
   const dataset = buildDataset({
     findings: [...findings, ...team],
     metrics: effective.metrics,
@@ -274,7 +276,7 @@ export function buildReport(input: ReportInput): BuiltReport {
       ...(overrides.length ? [{ source: OVERRIDES, text: overrideText(overrides) }] : []),
     ],
   });
-  dataset.figures.push(...plan.map((p) => ({ source: "plan", kind: "number" as const, value: p.findings.length })));
+  dataset.figures.push(...[...plan.map((p) => p.findings.length), later.length].map((value) => ({ source: "plan", kind: "number" as const, value })));
   const briefs = new Map<string, SectionBrief>();
   const build = (output: ReportOutputKey, specs: Spec[]): BuiltOutput => record(run, output, specs, dataset, now, briefs);
   return {

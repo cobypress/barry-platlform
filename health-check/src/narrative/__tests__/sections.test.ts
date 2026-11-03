@@ -4,7 +4,7 @@ import { z } from "zod";
 import { applyNarrative } from "../apply.ts";
 import type { NarrativeClient } from "../client.ts";
 import { Intake } from "../intake.ts";
-import { buildPlan, domainLabel, scorecard, teamLevelFinding, teamLevelText, topIssues, verdictOf } from "../select.ts";
+import { buildPlan, domainLabel, PLAN_CAPACITY, scorecard, teamLevelFinding, teamLevelText, topIssues, verdictOf } from "../select.ts";
 import { buildReport, currentBody, TOP_ISSUE_COUNT, type ReportInput } from "../sections.ts";
 import { Pseudonymiser, type PseudonymEntry } from "../../privacy/pseudonymiser.ts";
 import { canRelease, ReportSection, SALES_CLOUD_DOMAINS, SectionVersion, type Finding, type NumberOverride, type Score } from "../../schemas/index.ts";
@@ -195,11 +195,28 @@ describe("ranking", () => {
   });
 
   test("a plan has three phases, with no repeated action", () => {
-    const plan = buildPlan(team);
+    const { phases: plan, later } = buildPlan(team);
     assert.deepEqual(plan.map((p) => [p.from, p.to]), [[1, 30], [31, 60], [61, 90]]);
-    const actions = plan.flatMap((p) => p.findings.map((f) => f.recommendation));
+    const actions = [...plan.flatMap((p) => p.findings), ...later].map((f) => f.recommendation);
     assert.equal(new Set(actions).size, actions.length);
     assert.ok(actions.length > 10);
+  });
+
+  test("each phase holds what a team can take on, with urgent work first", () => {
+    const { phases, later } = buildPlan(team);
+    phases.forEach((p, i) => assert.ok(p.findings.length <= PLAN_CAPACITY[i]!, `${p.title}: ${p.findings.length}`));
+    assert.ok(later.length > 0, "the synthetic run has more actions than a 90-day plan holds");
+    const urgent = (f: Finding): boolean => f.severity === "critical" || f.severity === "high";
+    assert.ok(phases[0]!.findings.every((f) => urgent(f) || (f.severity === "medium" && f.effort.size === "XS")), "the first month is urgent work or the quickest medium fixes");
+    assert.ok(phases[0]!.findings.length === PLAN_CAPACITY[0], "the first month is used");
+    // An urgent action only misses the plan when the plan is full of urgent work.
+    for (const f of later.filter(urgent)) assert.ok(phases.every((p, i) => p.findings.length === PLAN_CAPACITY[i] && p.findings.every(urgent)), f.title);
+    assert.ok(later.every((f) => f.severity !== "info"));
+  });
+
+  test("large work and low-severity tidying never take the first month", () => {
+    const { phases } = buildPlan(team);
+    for (const f of phases[0]!.findings) assert.ok(["XS", "S", "M"].includes(f.effort.size) && f.severity !== "low", f.title);
   });
 
   test("the verdict follows the worst severity", () => {
