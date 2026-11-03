@@ -176,7 +176,14 @@ export async function connectCommand(sub: string | undefined, values: Record<str
     return finishWithCheck(name, store, env);
   }
 
-  if (sub === "check") return finishWithCheck(name, store, env);
+  if (sub === "check") {
+    // Says whether the check had to refresh, which is how rotation is tested live.
+    const before = (await store.load(name)).issuedAt;
+    const code = await finishWithCheck(name, store, env);
+    const after = await store.load(name).then((c) => c.issuedAt, () => before);
+    console.log(after === before ? "The stored access token was still valid, so nothing was refreshed." : "The access token had expired: it was refreshed and the new tokens stored.");
+    return code;
+  }
 
   if (sub === "show") {
     for (const [key, value] of Object.entries(describeConnection(await store.load(name)))) console.log(`${key.padEnd(13)} ${value}`);
