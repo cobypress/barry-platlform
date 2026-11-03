@@ -55,10 +55,30 @@ The whole product has only ever seen invented data.
 ## Decisions for you
 
 1. **First live run:** is `BlackCloudProd` the right alias? It's the next step, and it matters more than any further building. Set `HC_APPROVED_ORG_ALIASES=BlackCloudProd`, and we'll go through the findings together.
-2. **Customer names in your plan:** `blackcloud-next/docs/health-check/Salesforce Health Check Product Plan.md` still names a real customer and its figures. Remove them before committing that file.
+2. **Customer names:** done on 3 Nov. The plan document and both deal-to-cash docs are clean but uncommitted. The name is still in `blackcloud-next` history at `02e9c83`, which only a history rewrite would remove.
 3. **Scoring and thresholds** are our judgement: the formula, verdict wording, top-five order, the 90-day phasing by effort, and limits such as 150 custom fields. Read one sample report as a customer would.
 4. **Second approver:** should one person be able to run and approve a report? The console allows it, as the plan says.
 5. The earlier questions in `docs/QUESTIONS.md`: hosting, regions, Neon branch, S3, zero data retention.
+
+## Update, 3 Nov
+
+Committed locally only. Nothing was pushed, and no org or live Claude API was contacted.
+
+- **Report wording**, after reading the sample as a customer would:
+  - Plan actions now name their issue.
+  - The "decide now" coverage action has moved into days 1 to 30.
+  - Effort reads in words.
+  - Amounts are formatted.
+  - Divider slides name the first issue.
+  - Licence blockers no longer show internal guard ids.
+- **Salesforce field names** were checked against Salesforce's own reference PDFs. 4 were wrong and are fixed. `PermissionSet.PermissionsViewAllData` is the only name still unconfirmed. LoginHistory, ForecastingItem and Campaign now drop a missing optional field instead of failing the whole read. The details are in `docs/QUESTIONS.md`.
+- **Console** (`hc/console`) uses a copy of the engine's number check. It maps intake to the engine's shape, and in development it can open real engine run folders through `HC_DEV_RUN_DIR`. Both repos run the same 36 golden number-check cases.
+- **Tests:** engine 974 of 974, console 455 of 455 unit and 156 of 156 Playwright. The sample gives 6 pages and 60 slides, and the layout check passes.
+
+New decisions for you:
+
+- **Swapped figures pass.** The number check can't tell "fell to 18% from 31%" from "rose to 31% from 18%" when both figures are in the same finding. Rule 1 doesn't require catching this, but a check on direction would be new work.
+- **Days 1 to 30 holds 47 of 66 actions**, because phasing is by effort alone. Capping that phase, or phasing by severity too, is your call.
 
 ## How to take it or leave it
 
