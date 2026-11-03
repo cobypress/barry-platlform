@@ -6,7 +6,8 @@
       "path": "force-app",
       "default": true,
       "package": "Black Cloud Barometer",
-      "versionDescription": "Black Cloud Barometer: the External Client App and a read-only permission set for the health check."
+      "versionDescription": "The Barometer External Client App, and an install script that creates the Barometer Read Only permission set.",
+      "postInstallScript": "BarometerInstall"
     },
     {
       "path": "source-org",
@@ -23,6 +24,7 @@
   "sourceApiVersion": "68.0",
   "packageAliases": {
     "Black Cloud Barometer": "0HoQH0000000rkH0AQ",
-    "Black Cloud Barometer@0.1.0-1": "04tQH00000NOKUzYAP"
+    "Black Cloud Barometer@0.1.0-1": "04tQH00000NOKUzYAP",
+    "Black Cloud Barometer@0.1.0-7": "04tQH00000NOKy1YAH"
   }
 }

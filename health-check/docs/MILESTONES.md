@@ -156,6 +156,22 @@ If step 3 answers "Cross-org OAuth flows are not supported", the link to the sou
 - **The run completed** on that connection: run `hc-2026-11-03-1660d472`, with 9 issues and 37 not measurable. The empty scratch org explains the difference from `bc-hc-dev`.
 - **Not done yet:** rotation (step 5). The connection stays in place for that.
 
+**One install: version `0.1.0-7` (`04tQH00000NOKy1YAH`), the same day.** The package no longer carries the permission set. Its install script creates Barometer Read Only instead (DECISIONS.md 67).
+
+- **Tested by installing in a fresh scratch org, `bc-hc-scratch-5`, which lasts 3 days.** The install created `Barometer_Read_Only` as an ordinary permission set, with the ten permissions and read, View All Records and View All Fields on the six objects. It has no create, edit or delete, and no Modify All Data or View All Data.
+- **The version passed full validation**, with 92% code coverage.
+- **Versions 2 to 6 were failed or diagnostic betas and are deleted from the Dev Hub.**
+- **Not yet done on `0.1.0-7`:** a sign-in by a user who holds only the created set. The set is the same one `bc-hc-scratch` used for its run, but this exact install hasn't had a sign-in.
+
+**Before a customer can install:**
+
+1. A version has to be promoted (released), because betas only install in scratch orgs and sandboxes. Once released, the app can't be taken out of the package.
+2. Customer install steps:
+   - Install the package.
+   - Create the integration user and assign it Barometer Read Only.
+   - In the app's policies, choose "admin approved users are pre-authorised" with Barometer Read Only, and expire refresh tokens after 30 days of inactivity.
+3. The console callback URL replaces `localhost` in BlackCloudProd's global OAuth settings (Milestone 5).
+
 ### What Coby needs to do for the web server flow
 
 1. In `bc-hc-dev`, open Setup, then External Client App Manager, then Black Cloud Barometer. On Settings, under OAuth Settings, click Consumer Key and Secret, and enter the code Salesforce emails. Copy the secret into `~/.barometer/oauth-client.json` as `"clientSecret"`, next to the `clientId` and `redirectUri` already there. Keep the file at mode 600.

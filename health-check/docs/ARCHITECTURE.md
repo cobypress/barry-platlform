@@ -97,7 +97,7 @@ hc run <── OAuthConnectionProvider <── TokenStore <── code exchange 
 
 - **Two providers.** `SfCliConnectionProvider` borrows a consultant's CLI login, for development. `OAuthConnectionProvider` uses tokens a customer's admin granted to Barometer's External Client App, as a user who holds only Barometer Read Only. Both need the name in `HC_APPROVED_ORG_ALIASES`.
 - **Two layers of read-only.** The allowlist stops the engine sending a write. The permission set stops Salesforce accepting one, and `checkReadOnlyUser` reads the user's permissions at connect time to prove it.
-- **The app** is source metadata in `salesforce/force-app`, with the permission set. Customer orgs need it from a managed package (DECISIONS.md 65). `salesforce/dev-only` holds a JWT bearer app for `bc-hc-dev` only.
+- **The app** ships to customers in the Black Cloud Barometer managed package, built from `salesforce/force-app` (DECISIONS.md 65 and 66). The package's install script creates Barometer Read Only (67). `salesforce/source-org` is what stays in BlackCloudProd, the app's source org. `salesforce/dev-only` holds the reference permission set and a JWT bearer app for `bc-hc-dev` only.
 
 ### The connect link, and what the console adds in Milestone 5
 
