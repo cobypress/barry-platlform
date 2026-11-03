@@ -141,6 +141,21 @@ describe("a chart with nothing to draw gives its reason", () => {
   });
 });
 
+describe("won value by a dimension", () => {
+  test("shows the largest few and points to the raw notes, so a long list can't overflow", () => {
+    // As seen on a real org: nine lead sources in a half-width chart.
+    const base = metric("historic.won_value_by_source");
+    assert.equal(base.status, "measured");
+    if (base.status !== "measured") return;
+    const sources = Array.from({ length: 9 }, (_, i) => ({ dimension: "lead source", key: `Source ${i + 1}`, n: i + 1, value: (i + 1) * 1000 }));
+    const chart = wonValueByChart({ ...base, segments: sources } as Metric, "lead source", "won-by-source", "Won value by lead source", "GBP");
+    assert.equal(chart.kind, "chart");
+    if (chart.kind !== "chart") return;
+    assert.ok(chart.svg.includes("Source 9") && chart.svg.includes("Source 5") && !chart.svg.includes("Source 4<"), "the largest five, largest first");
+    assert.match(chart.svg, /The raw notes list the rest/);
+  });
+});
+
 describe("pipeline over time", () => {
   test("a month with no value breaks the line, rather than dropping to zero", () => {
     const m = structuredClone(metric("historic.pipeline_point_in_time_value")) as Extract<Metric, { status: "measured" }>;

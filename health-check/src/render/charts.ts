@@ -335,11 +335,17 @@ export function topAccountsChart(metric: Metric | undefined): Chart {
 }
 
 /** Won value by one of the deal's own fields, largest first. */
+const WON_VALUE_ROWS = 5;
+
 export function wonValueByChart(metric: Metric | undefined, dimension: string, id: string, title: string, currency: string): Chart {
   const m = measuredOr(id, title, metric);
   if (isChart(m)) return m;
-  const rows = segmentsOf(m, dimension).map((s) => ({ label: s.key, value: s.value, text: `${compactMoney(s.value ?? 0, currency)}, ${s.n} wins` }));
-  return barChart(id, title, rows, { alt: `Won value by ${dimension}.`, width: HALF_WIDTH, labelWidth: 150, textWidth: 130, caption: `Won value by ${dimension}` });
+  // A real org had more lead sources than a half-width chart can hold. The rest
+  // are in the raw notes, and summing them here would be a figure we didn't compute.
+  const all = segmentsOf(m, dimension).sort((a, b) => (b.value ?? 0) - (a.value ?? 0));
+  const rows = all.slice(0, WON_VALUE_ROWS).map((s) => ({ label: s.key, value: s.value, text: `${compactMoney(s.value ?? 0, currency)}, ${s.n} wins` }));
+  const caption = all.length > WON_VALUE_ROWS ? `Won value by ${dimension}, largest first. The raw notes list the rest.` : `Won value by ${dimension}`;
+  return barChart(id, title, rows, { alt: `Won value by ${dimension}.`, width: HALF_WIDTH, labelWidth: 150, textWidth: 130, caption });
 }
 
 /** Lost and no decision deals by the stage they left from, with the value that went with them. */
