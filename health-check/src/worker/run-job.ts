@@ -103,6 +103,8 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
         // console never shows a run in review with nothing to review.
         const progress = progressOf(run);
         if (progress.status === "awaiting_manual" || progress.status === "in_review") progress.status = "analysing";
+        // The engine only learns whether the org is a sandbox at the end, so until then the console's word stands.
+        progress.isSandbox = input.run.isSandbox;
         try {
           await deps.store.saveRunProgress(runId, progress, dir);
         } catch (err) {

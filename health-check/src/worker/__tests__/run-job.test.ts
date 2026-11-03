@@ -204,3 +204,19 @@ describe("progress and the finished status", () => {
     assert.equal(deps.store.writes.at(-1)!.detail, "in_review");
   });
 });
+
+describe("the sandbox flag", () => {
+  test("progress keeps the console's value; the results carry what the org says", async () => {
+    const { deps, handle } = await setup({}, runInput({ run: consoleRun({ isSandbox: true }) }));
+    let duringRun: boolean[] = [];
+    const save = deps.store.saveRunProgress.bind(deps.store);
+    deps.store.saveRunProgress = async (runId, progress, runDir) => {
+      duringRun.push(progress.isSandbox);
+      return save(runId, progress, runDir);
+    };
+    await handle(job, once);
+    assert.ok(duringRun.length > 0 && duringRun.every(Boolean));
+    assert.equal(stored(deps).run.isSandbox, false, "the synthetic org is production");
+    duringRun = [];
+  });
+});

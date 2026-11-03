@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { tokenKeySource, TokenStore } from "../salesforce/token-store.ts";
 import { startQueueWorker, type BullModule } from "../worker/bullmq.ts";
 import { readWorkerEnv, WORKER_ENV } from "../worker/env.ts";
@@ -59,7 +59,8 @@ export async function workerCommand(
     store: new PostgresWorkerStore(pool),
     tokens: new TokenStore({ dir: config.connectionsDir, key: tokenKeySource({ env: { HC_TOKEN_KEY: env.HC_TOKEN_KEY } as NodeJS.ProcessEnv, platform: "linux" }) }),
     runsDir: config.runsDir,
-    locksDir: join(config.runsDir, ".locks"),
+    // Beside the runs folder, not in it, so `hc purge --older-than` doesn't trip over it.
+    locksDir: join(dirname(config.runsDir), `${basename(config.runsDir)}-locks`),
     oauthClient: config.oauthClient,
     connectKey: config.connectKey,
     stopAtShare: config.stopAtShare,
