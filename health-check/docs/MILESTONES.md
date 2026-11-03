@@ -148,6 +148,14 @@ To connect from the scratch org:
 
 If step 3 answers "Cross-org OAuth flows are not supported", the link to the source org isn't working. One Trailblazer Community post reports that error for a packaged app.
 
+**Result, 2026-11-03:**
+
+- **The cross-org sign-in worked.** The test user signed in to `bc-hc-scratch` through the installed app, and the token came from BlackCloudProd's global OAuth settings. The packaged route works, so QUESTIONS.md 22, about the local app, no longer matters.
+- **The packaged permission set arrived empty.** Managed packages don't carry user permissions or standard object permissions, and the install drops them without a warning (2GP guide, "Permission Sets and Profile Settings in Packages"). Barometer Read Only is made of nothing else, so `blackcloud__Barometer_Read_Only` grants nothing. The first `connect finish` stored the token, and the check then failed with `API_DISABLED_FOR_ORG`.
+- **The test carried on with an unpackaged copy.** We deployed Barometer Read Only from source as a plain permission set and assigned it, as a customer's admin would. The read-only check then passed.
+- **The run completed** on that connection: run `hc-2026-11-03-1660d472`, with 9 issues and 37 not measurable. The empty scratch org explains the difference from `bc-hc-dev`.
+- **Not done yet:** rotation (step 5). The connection stays in place for that.
+
 ### What Coby needs to do for the web server flow
 
 1. In `bc-hc-dev`, open Setup, then External Client App Manager, then Black Cloud Barometer. On Settings, under OAuth Settings, click Consumer Key and Secret, and enter the code Salesforce emails. Copy the secret into `~/.barometer/oauth-client.json` as `"clientSecret"`, next to the `clientId` and `redirectUri` already there. Keep the file at mode 600.
