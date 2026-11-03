@@ -57,6 +57,8 @@ Answered: **customer orgs need a managed 2GP package** for the External Client A
 
 Answered on 2026-11-03: **an API-only user can complete the web server flow's browser sign-in.** Coby signed in to `bc-hc-dev` as the Salesforce Integration licence user and allowed the app, and the run completed on that token (MILESTONES.md). So customers can connect an integration user and don't need a full-licence user.
 
+Answered on 2026-11-03: **Event needs no grants of its own** (32). After installing `0.1.0-7` in `bc-hc-scratch-5`, the created set's FieldPermissions held `Event.WhatId` and `Event.WhoId` as readable as well as the Task fields. Salesforce applies the Task grants to Event, because both share the Activity fields.
+
 These are still open.
 
 | # | Question | If we're wrong |
@@ -70,7 +72,6 @@ These are still open.
 | 29 | Does a pre-authorised user see the approval page when we send `prompt=login consent`? Help says pre-authorised users "bypass the Allow or Deny permission window", and that `consent` makes the server "prompt the user for reapproval". Every live sign-in so far used "All users may self-authorize" | Harmless either way. The guide says the page "may" appear. Settle it on the first install of a released version |
 | 30 | Does uninstalling the package leave Barometer Read Only behind, and does it revoke tokens already issued? The 2GP guide says only package components are deleted, and the set the script creates isn't one. Nobody has uninstalled it yet | The guide tells admins to revoke first and delete the set themselves. If uninstall does delete the set, that step is just unnecessary |
 | 31 | For a new Salesforce Integration user: how many licences each edition includes (only secondary sources say five for Enterprise and above), whether the Salesforce API Integration permission set licence is needed when Barometer Read Only has no licence, and whether the user can follow Salesforce's welcome or password reset email in a browser. `bc-hc-dev`'s password was set with anonymous Apex | A customer could be stuck at "set a password" in step 3. Try it with the first install of a released version |
-| 32 | The package grants read on `Task.WhatId` and `Task.WhoId` only, but DECISIONS.md 59 says Task and Event. Does Event need its own field grants for `WhoId` and `WhatId` to be visible? | Event-based activity rules would see events without their links, and say less than they should |
 | 33 | Bulk API 2.0: does an `api` scope token for a user holding only Barometer Read Only (no Manage Data Integrations) create, poll and read its own query jobs? Do results pages count against `DailyApiRequests` one call each? Do Bulk queries apply sharing and field-level security as REST does? Can `LoginHistory` and `SetupAuditTrail` be read through Bulk? See `docs/BULK-API.md` | Only matters if Bulk is built. A test on `bc-hc-dev` answers all four |
 
 ## Field names checked against Salesforce's docs
