@@ -1,4 +1,5 @@
 import { redactSecrets } from "../privacy/secrets.ts";
+import { orgExtractor } from "./configuration.ts";
 import { indexReferences, parseMetadataBundle, type MetadataBundle, type ReferenceIndex } from "./metadata-parse.ts";
 import { readSoql, unavailable, type Extractor, type Sourced, type SourceInfo } from "./types.ts";
 
@@ -84,9 +85,15 @@ export const apexExtractor: Extractor<ApexData> = {
             data: rawCoverage.data.map((r) => ({ name: r.ApexClassOrTrigger?.Name ?? "Unknown", covered: r.NumLinesCovered ?? 0, uncovered: r.NumLinesUncovered ?? 0 })),
           }
         : rawCoverage;
+    // Professional Edition has no Apex, so "isn't available" is the answer, not a
+    // gap. A real one read as if the check had failed.
+    const org = ctx.get(orgExtractor);
+    const edition = org?.status === "ok" ? org.data[0]?.OrganizationType : undefined;
+    const noApex = <T>(rows: Sourced<T>): Sourced<T> =>
+      rows.status === "unavailable" && edition === "Professional Edition" && /isn't available in this org/.test(rows.reason) ? { ...rows, reason: "Professional Edition has no Apex, so there's no code to check." } : rows;
     return {
-      classes: stripBodies(classes, "ApexClass", references) as Sourced<ApexClassRow[]>,
-      triggers: stripBodies(triggers, "ApexTrigger", references) as Sourced<ApexTriggerRow[]>,
+      classes: noApex(stripBodies(classes, "ApexClass", references)) as Sourced<ApexClassRow[]>,
+      triggers: noApex(stripBodies(triggers, "ApexTrigger", references)) as Sourced<ApexTriggerRow[]>,
       orgCoverage,
       classCoverage,
       references,

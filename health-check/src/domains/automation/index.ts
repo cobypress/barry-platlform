@@ -12,6 +12,9 @@ const MIXED_AUTOMATION_LIMIT = 3;
 // Our judgement: past this, nobody new can tell what the automation does or why.
 const UNDOCUMENTED_LIMIT = 50;
 
+// An edition with no Apex says so plainly, rather than as a failed read.
+const apexGap = (what: string, reason: string): string => (reason.startsWith("Professional Edition has no Apex") ? reason : `Apex ${what} couldn't be read: ${reason}`);
+
 function metadataOr(ctx: RuleContext): { bundle: MetadataBundle } | NotMeasurableResult {
   const metadata = ctx.data(metadataExtractor);
   if (metadata.status === "ok") return { bundle: metadata.data };
@@ -94,7 +97,7 @@ const mixedAutomation: Rule = {
     const result = metadataOr(ctx);
     if ("outcome" in result) return result;
     const { triggers } = ctx.data(apexExtractor);
-    if (triggers.status !== "ok") return { outcome: "not_measurable", reason: `Apex triggers couldn't be read: ${triggers.reason}`, evidence: [ctx.ev(triggers.source, { count: null })] };
+    if (triggers.status !== "ok") return { outcome: "not_measurable", reason: apexGap("triggers", triggers.reason), evidence: [ctx.ev(triggers.source, { count: null })] };
     const tools = new Map<string, Set<string>>();
     const add = (object: string | null, tool: string): void => {
       if (!object) return;
@@ -209,8 +212,8 @@ const undocumentedAutomation: Rule = {
     const result = metadataOr(ctx);
     if ("outcome" in result) return result;
     const { classes, triggers } = ctx.data(apexExtractor);
-    if (classes.status !== "ok") return { outcome: "not_measurable", reason: `Apex classes couldn't be read: ${classes.reason}`, evidence: [ctx.ev(classes.source, { count: null })] };
-    if (triggers.status !== "ok") return { outcome: "not_measurable", reason: `Apex triggers couldn't be read: ${triggers.reason}`, evidence: [ctx.ev(triggers.source, { count: null })] };
+    if (classes.status !== "ok") return { outcome: "not_measurable", reason: apexGap("classes", classes.reason), evidence: [ctx.ev(classes.source, { count: null })] };
+    if (triggers.status !== "ok") return { outcome: "not_measurable", reason: apexGap("triggers", triggers.reason), evidence: [ctx.ev(triggers.source, { count: null })] };
     const { flows, workflows, validationRules } = result.bundle;
     // Test classes document nothing a maintainer needs.
     const code = [...classes.data, ...triggers.data].filter((c) => c.Status === "Active" && !c.isTest && c.commented !== null);
@@ -264,8 +267,8 @@ const oldApiVersions: Rule = {
     const result = metadataOr(ctx);
     if ("outcome" in result) return result;
     const { classes, triggers } = ctx.data(apexExtractor);
-    if (classes.status !== "ok") return { outcome: "not_measurable", reason: `Apex classes couldn't be read: ${classes.reason}`, evidence: [ctx.ev(classes.source, { count: null })] };
-    if (triggers.status !== "ok") return { outcome: "not_measurable", reason: `Apex triggers couldn't be read: ${triggers.reason}`, evidence: [ctx.ev(triggers.source, { count: null })] };
+    if (classes.status !== "ok") return { outcome: "not_measurable", reason: apexGap("classes", classes.reason), evidence: [ctx.ev(classes.source, { count: null })] };
+    if (triggers.status !== "ok") return { outcome: "not_measurable", reason: apexGap("triggers", triggers.reason), evidence: [ctx.ev(triggers.source, { count: null })] };
     const newest = Math.max(0, ...classes.data.map((c) => c.ApiVersion), ...triggers.data.map((t) => t.ApiVersion), ...result.bundle.flows.map((f) => f.apiVersion));
     const floor = newest - API_VERSIONS_BEHIND;
     const old = {
@@ -306,7 +309,7 @@ const apexCoverage: Rule = {
   title: "Apex test coverage",
   evaluate(ctx): RuleResult | RuleResult[] {
     const { classes, orgCoverage, classCoverage } = ctx.data(apexExtractor);
-    if (classes.status !== "ok") return { outcome: "not_measurable", reason: `Apex classes couldn't be read: ${classes.reason}`, evidence: [ctx.ev(classes.source, { count: null })] };
+    if (classes.status !== "ok") return { outcome: "not_measurable", reason: apexGap("classes", classes.reason), evidence: [ctx.ev(classes.source, { count: null })] };
     if (classes.data.length === 0) {
       return { outcome: "pass", summary: "This org has no Apex of its own.", evidence: [ctx.ev(classes.source, { count: 0 })], segmentExemptReason: "There's no code to segment." };
     }
@@ -359,7 +362,7 @@ const multipleTriggers: Rule = {
   title: "More than one trigger on an object",
   evaluate(ctx): RuleResult | RuleResult[] {
     const { triggers } = ctx.data(apexExtractor);
-    if (triggers.status !== "ok") return { outcome: "not_measurable", reason: `Apex triggers couldn't be read: ${triggers.reason}`, evidence: [ctx.ev(triggers.source, { count: null })] };
+    if (triggers.status !== "ok") return { outcome: "not_measurable", reason: apexGap("triggers", triggers.reason), evidence: [ctx.ev(triggers.source, { count: null })] };
     const byObject = new Map<string, number>();
     for (const t of triggers.data) if (t.Status === "Active") byObject.set(t.TableEnumOrId, (byObject.get(t.TableEnumOrId) ?? 0) + 1);
     const multiple = [...byObject].filter(([, n]) => n > 1).sort(([a], [b]) => a.localeCompare(b));

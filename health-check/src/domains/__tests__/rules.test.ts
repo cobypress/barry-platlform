@@ -353,6 +353,13 @@ describe("data quality", () => {
     assert.deepEqual(f.facts, { total: 13, missing: 10, rate: 76.9 });
     assert.match(f.summary, /Validation rules: 0 of 1/);
   });
+  test("an edition with no Apex says so, rather than that the read failed", () => {
+    const changed = clone(extracts);
+    const apex = changed.get(apexExtractor.id) as { triggers: Record<string, unknown> & { source: unknown } };
+    apex.triggers = { status: "unavailable", reason: "Professional Edition has no Apex, so there's no code to check.", source: apex.triggers.source };
+    const [f] = byRule(analyseExtracts(changed).findings, "aut.multiple-triggers");
+    assert.equal(f?.notMeasurableReason, "Professional Edition has no Apex, so there's no code to check.");
+  });
   test("documented automation passes", () => {
     const changed = clone(extracts);
     const metadata = changed.get(metadataExtractor.id) as { data: { flows: Array<{ described: boolean }>; workflows: Array<{ rules: Array<{ described: boolean }> }> } };
