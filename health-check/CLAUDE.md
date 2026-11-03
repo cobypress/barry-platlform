@@ -20,7 +20,7 @@ Node 24 runs the TypeScript directly, so there's no build. Use `.ts` extensions 
 3. Remove, deactivate and merge recommendations pass guards first. Unknown blocks.
 4. Segment before concluding. Use `segmentRate` in `src/engine/rule.ts`.
 5. If data can't support a metric, return not measurable with the reason. Never estimate.
-6. Salesforce access is read-only. Don't widen `src/salesforce/allowlist.ts` without a test for what you added and a line in DECISIONS.md. Don't add a generic request method to the client.
+6. Salesforce access is read-only. The engine never changes an org, not even to fix what it finds: every fix is a recommendation a person carries out, and anything that can't be read becomes a manual step for a person. Don't widen `src/salesforce/allowlist.ts` without a test for what you added and a line in DECISIONS.md. Don't add a generic request method to the client.
 7. CRM records stay in the worker. Use `ctx.userLabel()` and never put a name in a finding.
 8. No customer data in this repo, including fixtures. Nothing from a real org, ever. Fixture ids are zero-padded and emails use example.com.
 9. Respect the API budget. Add new extracts as resumable steps.
