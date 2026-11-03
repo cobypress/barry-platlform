@@ -1,0 +1,76 @@
+import { join } from "node:path";
+import { tokenKeySource, TokenStore } from "../salesforce/token-store.ts";
+import { startQueueWorker, type BullModule } from "../worker/bullmq.ts";
+import { readWorkerEnv, WORKER_ENV } from "../worker/env.ts";
+import { PostgresWorkerStore, type SqlPool } from "../worker/postgres-store.ts";
+import { createJobHandler } from "../worker/worker.ts";
+
+// `hc worker`: takes run and connect jobs from the console's queue until told
+// to stop. It refuses to start without every variable in WORKER_ENV. BullMQ
+// and pg aren't engine dependencies (see DECISIONS), so they're loaded here,
+// and only once the environment is complete.
+
+export const WORKER_USAGE = `
+  hc worker                                          Take jobs from the console's health-check-jobs queue
+
+The worker needs:
+${Object.entries(WORKER_ENV.required).map(([name, why]) => `  ${name.padEnd(24)} ${why}`).join("\n")}
+and may take:
+${Object.entries(WORKER_ENV.optional).map(([name, why]) => `  ${name.padEnd(24)} ${why}`).join("\n")}
+It also needs bullmq and pg installed beside the engine.`;
+
+export type PgModule = { Pool: new (options: { connectionString: string; max?: number }) => SqlPool & { end(): Promise<void> } };
+export type WorkerModules = { bull: BullModule; pg: PgModule };
+
+export async function loadWorkerModules(): Promise<WorkerModules> {
+  // Held in variables so the type checker doesn't look for packages the engine doesn't install.
+  const [bullName, pgName] = ["bullmq", "pg"];
+  try {
+    const bull = (await import(bullName!)) as BullModule;
+    const pg = (await import(pgName!)) as PgModule & { default?: PgModule };
+    return { bull, pg: pg.default ?? pg };
+  } catch {
+    throw new Error("hc worker needs bullmq and pg: npm install bullmq@^5.70 pg@^8.19, the majors blackcloud-next uses");
+  }
+}
+
+function untilSignalled(): Promise<void> {
+  return new Promise((resolve) => {
+    process.once("SIGINT", () => resolve());
+    process.once("SIGTERM", () => resolve());
+  });
+}
+
+export async function workerCommand(
+  env: NodeJS.ProcessEnv = process.env,
+  options: { load?: () => Promise<WorkerModules>; until?: Promise<void>; log?: (line: string) => void } = {},
+): Promise<number> {
+  const log = options.log ?? ((line: string) => console.log(`${new Date().toISOString()} ${line}`));
+  const read = readWorkerEnv(env);
+  if (!read.ok) {
+    console.error(`hc worker won't start:\n${read.problems.map((p) => `  ${p}`).join("\n")}`);
+    return 2;
+  }
+  const { config } = read;
+  const { bull, pg } = await (options.load ?? loadWorkerModules)();
+
+  const pool = new pg.Pool({ connectionString: config.databaseUrl, max: config.concurrency + 2 });
+  const handler = createJobHandler({
+    store: new PostgresWorkerStore(pool),
+    tokens: new TokenStore({ dir: config.connectionsDir, key: tokenKeySource({ env: { HC_TOKEN_KEY: env.HC_TOKEN_KEY } as NodeJS.ProcessEnv, platform: "linux" }) }),
+    runsDir: config.runsDir,
+    locksDir: join(config.runsDir, ".locks"),
+    oauthClient: config.oauthClient,
+    connectKey: config.connectKey,
+    stopAtShare: config.stopAtShare,
+    apiVersion: config.apiVersion,
+    log,
+  });
+  const worker = startQueueWorker(bull, handler, { redisUrl: config.redisUrl, concurrency: config.concurrency, log });
+  log(`Taking jobs from health-check-jobs, ${config.concurrency} at a time.`);
+  await (options.until ?? untilSignalled());
+  log("Stopping: finishing the jobs in hand.");
+  await worker.close();
+  await pool.end();
+  return 0;
+}
