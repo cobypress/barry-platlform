@@ -152,6 +152,8 @@ export class Simulator implements Transport {
         return page(org.PERMISSION_ASSIGNMENTS);
       case "Layout":
         return tooling ? page(org.LAYOUTS) : unsupported("Layout");
+      case "CustomObject":
+        return tooling ? page(org.CUSTOM_OBJECTS) : unsupported("CustomObject");
       case "ProfileLayout":
         return tooling ? page(org.PROFILE_LAYOUTS) : unsupported("ProfileLayout");
       case "DuplicateRule":

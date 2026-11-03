@@ -14,7 +14,7 @@ const RETRIEVE_TYPES = [
 
 export const metadataExtractor: Extractor<Sourced<MetadataBundle>> = {
   id: "metadata",
-  version: 3,
+  version: 4,
   async run(ctx) {
     const source: SourceInfo = { kind: "metadata", path: RETRIEVE_TYPES.map((t) => t.name).join(", ") };
     try {

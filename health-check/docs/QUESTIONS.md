@@ -46,6 +46,7 @@ Salesforce's docs couldn't all be read in full, so these are unproven until a li
 | 19 | When a stage picklist value is renamed, do old `OpportunityHistory.StageName` rows keep the old name, or change with it? | We assume they keep it, so the calibration must list old names. If they change, an old stage simply never appears, and stage win rates are unaffected |
 | 20 | Is a history row written for every change to Amount and CloseDate, as well as stage, on every edition? | The "no change of any kind" cohort for quiet deals would be too large, so its win rate would read too high. Stated as a proxy on the finding |
 | 21 | Does `IsWon = true OR StageName IN (...)` filter on Opportunity everywhere, and does the prior wins read stay small? | A failed read makes new and repeat customers not measurable, never all new |
+| 22 | Does Tooling `CustomObject` also list custom metadata types, platform events or external objects, and is its `Id` the same id that `Layout.EntityDefinitionId` and `ApexTrigger.TableEnumOrId` hold for a custom object? The Tooling guide (API 68.0) documents `DeveloperName` without the suffix, and `EntityDefinitionId` as the EntityDefinition's id, but doesn't say either outright | If another kind shares a custom object's name, both are left unnamed and the inventory says how many layouts and triggers it couldn't place. If the ids differ, every custom object's layouts and triggers go unplaced, which the same note shows |
 
 ## Field names checked against Salesforce's docs
 

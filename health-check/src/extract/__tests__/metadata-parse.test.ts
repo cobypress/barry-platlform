@@ -31,11 +31,24 @@ describe("workflow rules and objects", () => {
     const opportunity = bundle.workflows.find((w) => w.object === "Opportunity")!;
     assert.deepEqual(opportunity.rules.map((r) => [r.name, r.active]), [["Notify_Large_Deal", true], ["Old_Rule", false]]);
   });
-  test("reads validation rules", () => assert.deepEqual(bundle.validationRules, [{ object: "Opportunity", name: "Needs_Competitor", active: true, described: true }]));
+  test("reads validation rules", () =>
+    assert.deepEqual(bundle.validationRules, [
+      { object: "Invoice__c", name: "Due_Date_Required", active: true, described: true },
+      { object: "Invoice__c", name: "Old_Check", active: false, described: false },
+      { object: "Opportunity", name: "Needs_Competitor", active: true, described: true },
+    ]));
+  test("reads record types, and which are active", () =>
+    assert.deepEqual(bundle.recordTypes.map((r) => [r.object, r.name, r.active]), [["Empty_Object__c", "Default", true], ["Invoice__c", "Standard", true], ["Invoice__c", "Credit_Note", true], ["Invoice__c", "Old_Format", false]]));
+  test("lists every object defined, including one with nothing in it", () =>
+    assert.deepEqual(bundle.objects, ["Empty_Object__c", "Invoice__c", "Opportunity", "Project__c", "Project_Line__c"]));
+  test("a single record type parses the same as many", () => {
+    const one = parseMetadataBundle({ "objects/A__c.object": "<CustomObject><recordTypes><fullName>Only</fullName><active>true</active></recordTypes></CustomObject>" });
+    assert.deepEqual(one.recordTypes, [{ object: "A__c", name: "Only", active: true }]);
+  });
   test("reads which of your own custom fields have help text or a description", () =>
     assert.deepEqual(
       bundle.customFields.map((f) => [f.name, f.described, f.helpText]),
-      [["Old_Region__c", false, false], ["Legacy_Code__c", false, false], ["Deal_Score__c", false, false], ["Competitor__c", false, true]],
+      [["Invoice_Total__c", true, false], ["Due_Date__c", false, false], ["Paid__c", false, false], ["Old_Region__c", false, false], ["Legacy_Code__c", false, false], ["Deal_Score__c", false, false], ["Competitor__c", false, true], ["Project_Code__c", false, false]],
     ));
   test("reads which flows and workflow rules have a description", () => {
     assert.deepEqual(bundle.flows.filter((f) => f.described).map((f) => f.name), ["Lead_Assign"]);
