@@ -9,7 +9,7 @@ import { MemoryWorkerStore } from "../memory-store.ts";
 import { SECTIONS_FILE } from "../run-job.ts";
 import { RunClosedError, type RunProgress } from "../types.ts";
 import { createJobHandler } from "../worker.ts";
-import { ACCESS, baseDeps, CONNECTION, consoleRun, FlakyTransport, REFRESH, RUN_ID, runInput, syntheticConnection } from "./helpers.ts";
+import { ACCESS, baseDeps, CONNECTION, consoleRun, FlakyTransport, INTAKE, REFRESH, RUN_ID, runInput, syntheticConnection } from "./helpers.ts";
 
 const job = { kind: "run", runId: RUN_ID };
 const once = { final: false };
@@ -218,5 +218,36 @@ describe("the sandbox flag", () => {
     assert.ok(duringRun.length > 0 && duringRun.every(Boolean));
     assert.equal(stored(deps).run.isSandbox, false, "the synthetic org is production");
     duringRun = [];
+  });
+});
+
+describe("review fixes: failures after the engine finishes", () => {
+  const badIntake = () => runInput({ intake: { ...INTAKE, summary: "" } });
+
+  test("on the last delivery, the run is marked failed with the reason, not left analysing", async () => {
+    const { deps, handle } = await setup({}, badIntake());
+    const outcome = await handle(job, last);
+    assert.equal(outcome.outcome, "failed");
+    assert.equal(stored(deps).run.status, "failed");
+    assert.match(stored(deps).run.steps.find((s) => s.id === "worker")!.error!, /The run finished, but its results couldn't be saved/);
+  });
+
+  test("before the last delivery, it's thrown for a retry, which reads no data again", async () => {
+    const transport = new ReplayTransport(loadRecording());
+    const { deps, handle } = await setup({ dataTransport: transport }, badIntake());
+    await assert.rejects(handle(job, once));
+    assert.equal(stored(deps).run.status, "analysing");
+    const before = transport.requests.length;
+    deps.store.runs.get(RUN_ID)!.intake = INTAKE;
+    assert.equal((await handle(job, once)).outcome, "done");
+    assert.ok(transport.requests.slice(before).every((r) => !new URL(r.url).searchParams.has("q")));
+  });
+
+  test("a results write the store refuses for another reason is recorded on the last delivery", async () => {
+    const { deps, handle } = await setup();
+    deps.store.saveRunOutput = async () => Promise.reject(new Error("deadlock detected"));
+    const outcome = await handle(job, last);
+    assert.equal(outcome.outcome, "failed");
+    assert.match(stored(deps).run.steps.find((s) => s.id === "worker")!.error!, /deadlock detected/);
   });
 });

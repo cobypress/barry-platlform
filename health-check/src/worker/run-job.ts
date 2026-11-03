@@ -123,16 +123,15 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
     return { outcome: "stopped_budget", detail: result.run.budget.stoppedReason ?? "Stopped at the API budget" };
   }
 
-  // The engine's intake and the sections the console reviews. Building sections
-  // needs no browser and no Claude: it's the engine's own text, as `hc render`
-  // writes it before any narrative.
-  if (input.intake) writeFileSync(join(dir, "intake.json"), `${JSON.stringify(input.intake, null, 2)}\n`, { mode: 0o600 });
-  const { input: reportInput } = loadRun(dir);
-  const report = buildReport(reportInput);
-  const outputs = Object.values(report.outputs);
-  writeFileSync(join(dir, SECTIONS_FILE), `${JSON.stringify(outputs, null, 2)}\n`, { mode: 0o600 });
-
   try {
+    // The engine's intake and the sections the console reviews. Building sections
+    // needs no browser and no Claude: it's the engine's own text, as `hc render`
+    // writes it before any narrative.
+    if (input.intake) writeFileSync(join(dir, "intake.json"), `${JSON.stringify(input.intake, null, 2)}\n`, { mode: 0o600 });
+    const { input: reportInput } = loadRun(dir);
+    const report = buildReport(reportInput);
+    const outputs = Object.values(report.outputs);
+    writeFileSync(join(dir, SECTIONS_FILE), `${JSON.stringify(outputs, null, 2)}\n`, { mode: 0o600 });
     await deps.store.saveRunOutput(runId, {
       progress: progressOf(result.run),
       runDir: dir,
@@ -145,7 +144,11 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
     });
   } catch (err) {
     if (err instanceof RunClosedError) return { outcome: "skipped", detail: err.message };
-    throw err;
+    // Another delivery reuses every checkpoint, so it costs no data reads. On
+    // the last one, the run mustn't be left at "analysing" with no reason given.
+    const reason = safeReason(err, secrets);
+    if (!attempt.final) throw new Error(reason);
+    return fail(`The run finished, but its results couldn't be saved: ${reason}`);
   }
   return { outcome: "done", detail: `Run ${runId} is ${result.run.status.replace("_", " ")}` };
 }
