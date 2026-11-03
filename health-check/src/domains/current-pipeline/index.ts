@@ -227,7 +227,7 @@ function concentrationRule(options: { id: string; title: string; limit: number; 
       const exclusions = [...data.exclusions, ...(blank ? [`${plural(blank, "deal")} with no amount`] : []), ...(unkeyed ? [`${plural(unkeyed, "deal")} with no ${options.subject}`] : [])];
       const evidence = [{ ...data.evidence[0]!, count: deals.length, dateRange: { from: ctx.window.to, to: ctx.window.to }, exclusions, note: "Open deals" }];
       if (total === 0) return { outcome: "not_measurable", reason: "Open deals have no amounts to compare.", evidence };
-      if (byKey.size < options.minKeys) return { outcome: "not_measurable", reason: `Only ${plural(byKey.size, options.subject)} hold open pipeline, so a share means little.`, evidence };
+      if (byKey.size < options.minKeys) return { outcome: "not_measurable", reason: `Only ${plural(byKey.size, options.subject)} ${byKey.size === 1 ? "holds" : "hold"} open pipeline, so a share means little.`, evidence };
       const [top, amount] = [...byKey].sort(([ka, a], [kb, b]) => b - a || ka.localeCompare(kb))[0]!;
       const share = pct(amount, total);
       const segments = [{ dimension: options.subject, segments: byKey.size }];

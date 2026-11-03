@@ -19,6 +19,8 @@ import type { DomainModule } from "../types.ts";
 import { calibratedHours } from "../value.ts";
 
 const MIN_SPARE_SEATS = 2;
+// Salesforce includes these with the edition at no charge. Extra seats can be bought, so a priced calibration still counts them.
+const COMPLIMENTARY_LICENCES = new Set(["Salesforce Integration", "Identity", "Chatter Free", "Chatter External", "Guest User License"]);
 const SPARE_SEAT_SHARE = 10;
 const UNUSED_REPORT_MONTHS = 12;
 const UNUSED_REPORT_SHARE = 50;
@@ -140,7 +142,14 @@ const unassignedSeats: Rule = {
     const users = ctx.data(usersExtractor);
     const held = new Set(users.status === "ok" ? users.data.filter((u) => u.IsActive).map(licenceOf) : []);
     // Orgs list many free licence types. Only look at ones in use or given a price.
-    const relevant = userLicenses.data.filter((l) => l.Status === "Active" && l.TotalLicenses > 0 && (held.has(l.Name) || ctx.calibration.licenceCosts[l.Name] !== undefined));
+    // Some come free with the edition, so spare seats of those cost nothing unless
+    // the calibration prices them. A real org showed 4 spare Salesforce Integration seats.
+    const relevant = userLicenses.data.filter(
+      (l) =>
+        l.Status === "Active" &&
+        l.TotalLicenses > 0 &&
+        (ctx.calibration.licenceCosts[l.Name] !== undefined || (held.has(l.Name) && !COMPLIMENTARY_LICENCES.has(l.Name))),
+    );
     const spare = relevant.filter((l) => {
       const free = l.TotalLicenses - l.UsedLicenses;
       return free >= MIN_SPARE_SEATS && pct(free, l.TotalLicenses) >= SPARE_SEAT_SHARE;

@@ -16,6 +16,9 @@ export class OrgNotApprovedError extends Error {
   }
 }
 
+// sf 2.150 puts "[REDACTED] Use 'sf org auth show-access-token' to view" where the token was.
+const REDACTED = /redacted/i;
+
 const runSf: SfExec = async (args) => {
   const { stdout } = await execFileAsync("sf", args, { maxBuffer: 1024 * 1024 });
   return stdout;
@@ -44,16 +47,24 @@ export class SfCliConnectionProvider implements ConnectionProvider {
   }
 
   async connect(): Promise<OrgConnection> {
-    let result: Record<string, string> | undefined;
+    const result = await this.#read(["org", "display", "--target-org", this.#alias, "--json"]);
+    // Newer CLIs redact the token in `org display` and give it its own command.
+    // Older ones don't have that command, so their display token is used.
+    let accessToken = result?.accessToken && !REDACTED.test(result.accessToken) ? result.accessToken : undefined;
+    if (result?.instanceUrl && !accessToken) {
+      accessToken = (await this.#read(["org", "auth", "show-access-token", "--target-org", this.#alias, "--json"]))?.accessToken;
+    }
+    if (!accessToken || !result?.instanceUrl || REDACTED.test(accessToken)) throw new Error(`The CLI login for "${this.#alias}" has no active session`);
+    return { instanceUrl: result.instanceUrl, accessToken, orgId: result.id, username: result.username };
+  }
+
+  async #read(args: string[]): Promise<Record<string, string> | undefined> {
     try {
-      const out = await this.#exec(["org", "display", "--target-org", this.#alias, "--json"]);
-      result = (JSON.parse(out) as { result?: Record<string, string> }).result;
+      return (JSON.parse(await this.#exec(args)) as { result?: Record<string, string> }).result;
     } catch {
       // The CLI's error, or a parse error quoting its output, can hold the token.
       throw new Error(`Couldn't read the Salesforce CLI login for "${this.#alias}". Is it logged in?`);
     }
-    if (!result?.accessToken || !result.instanceUrl) throw new Error(`The CLI login for "${this.#alias}" has no active session`);
-    return { instanceUrl: result.instanceUrl, accessToken: result.accessToken, orgId: result.id, username: result.username };
   }
 
   refresh(): Promise<OrgConnection> {

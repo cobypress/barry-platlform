@@ -85,6 +85,10 @@ const eventLinkCollapse: Rule = {
     const { minSample } = ctx.calibration;
     const evidence = [stamped(ctx, data, overall.prior.total + overall.recent.total, `Linked means the event has a related record. Compares ${[...prior][0]} to ${[...prior].at(-1)} with ${[...recent][0]} to ${[...recent].at(-1)}`)];
     if (overall.prior.total < minSample) return { outcome: "not_measurable", reason: `${overall.prior.total} events in the comparison months is below the calibrated minimum of ${minSample}.`, evidence };
+    // A real org went from 3 linked events to 1, which halves the share and means nothing.
+    if (overall.prior.linked < MIN_GROUP_EVENTS) {
+      return { outcome: "not_measurable", reason: `Only ${plural(overall.prior.linked, "event")} in the earlier months ${overall.prior.linked === 1 ? "was" : "were"} linked to a record, too few to call a fall.`, evidence };
+    }
 
     const roles = new Map(users.status === "ok" ? users.data.map((u) => [u.Id, u.UserRole?.Name ?? "No role"]) : []);
     const dimensions: Record<string, (e: { OwnerId: string }) => string> = { team: (e) => roles.get(e.OwnerId) ?? "No role", rep: (e) => ctx.userLabel(e.OwnerId) };

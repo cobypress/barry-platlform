@@ -5,7 +5,7 @@ import { analyseExtracts, clone, loadExtracts, runFromRecording } from "../../te
 import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
 import { userId } from "../../testing/synthetic-org.ts";
 import { apexExtractor, metadataExtractor } from "../../extract/automation.ts";
-import { ownershipExtractor } from "../../extract/users.ts";
+import { licencesExtractor, ownershipExtractor, usersExtractor } from "../../extract/users.ts";
 import { opportunitiesExtractor } from "../../extract/opportunities.ts";
 import { Finding } from "../../schemas/index.ts";
 import { USER_GUARD_IDS } from "../../guards/user-guards.ts";
@@ -134,6 +134,15 @@ describe("automation", () => {
     assert.equal(f?.status, "not_measurable");
     assert.match(f?.notMeasurableReason ?? "", /don't run tests/);
   });
+  test("a stored 0% everywhere is missing figures, not untested code", () => {
+    const changed = clone(extracts);
+    const apex = changed.get(apexExtractor.id) as { orgCoverage: { data: unknown[] }; classCoverage: { data: Array<{ covered: number }> } };
+    apex.orgCoverage.data = [{ PercentCovered: 0 }];
+    for (const c of apex.classCoverage.data) c.covered = 0;
+    const [f] = byRule(analyseExtracts(changed).findings, "aut.apex-coverage");
+    assert.equal(f?.status, "not_measurable");
+    assert.match(f?.notMeasurableReason ?? "", /cleared or tests haven't been run/);
+  });
   test("two triggers on one object", () => assert.deepEqual(issue(analyseExtracts(extracts).findings, "aut.multiple-triggers").subjects.map((s) => s.label), ["Opportunity"]));
   test("unreadable metadata is not measurable, not a clean pass", () => {
     const changed = clone(extracts);
@@ -234,6 +243,18 @@ describe("utilisation", () => {
     assert.equal(f.facts.seats, 15);
     assert.ok(f.value.kind === "licence_cost" && f.value.amount === 18_000);
     assert.ok(!f.summary.includes("Chatter"));
+  });
+  test("spare seats of a licence that comes free with the edition aren't a cost", () => {
+    // As seen on a real org: 4 of 5 Salesforce Integration seats spare, which costs nothing.
+    const changed = clone(extracts);
+    (changed.get(licencesExtractor.id) as { userLicenses: { data: unknown[] } }).userLicenses.data.push({ Name: "Salesforce Integration", TotalLicenses: 5, UsedLicenses: 1, Status: "Active" });
+    const users = (changed.get(usersExtractor.id) as { data: Array<{ IsActive: boolean; Profile: unknown }> }).data;
+    users.find((u) => u.IsActive)!.Profile = { Name: "Minimum Access - API Only Integrations", UserLicense: { Name: "Salesforce Integration" } };
+    const f = issue(analyseExtracts(changed).findings, "utl.unassigned-licence-seats");
+    assert.ok(!f.summary.includes("Salesforce Integration"), f.summary);
+    const priced = clone(changed);
+    const calibration = { ...loadCalibration(), licenceCosts: { ...loadCalibration().licenceCosts, "Salesforce Integration": 120 } };
+    assert.match(issue(analyseExtracts(priced, { calibration }).findings, "utl.unassigned-licence-seats").summary, /Salesforce Integration/, "a priced one still counts");
   });
   test("reports too new to judge are excluded", () => {
     const f = issue(analyseExtracts(extracts).findings, "utl.unused-reports");

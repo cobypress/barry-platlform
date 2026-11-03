@@ -33,6 +33,22 @@ describe("SfCliConnectionProvider", () => {
     assert.equal(connection.orgId, "00D000000000001AAA");
   });
 
+  test("a redacted display token is fetched with its own command", async () => {
+    const calls: string[][] = [];
+    const redacted = JSON.stringify({ status: 0, result: { accessToken: "[REDACTED] Use 'sf org auth show-access-token' to view", instanceUrl: "https://x.example.com", id: "00D000000000001AAA" } });
+    const token = JSON.stringify({ status: 0, result: { accessToken: "00D000000000001!real" } });
+    const provider = new SfCliConnectionProvider("dev-org", { env: env("dev-org"), exec: async (a) => (calls.push(a), a[1] === "display" ? redacted : token) });
+    const connection = await provider.connect();
+    assert.equal(connection.accessToken, "00D000000000001!real");
+    assert.deepEqual(calls[1], ["org", "auth", "show-access-token", "--target-org", "dev-org", "--json"]);
+  });
+
+  test("a token that stays redacted is no session, never sent", async () => {
+    const redacted = JSON.stringify({ status: 0, result: { accessToken: "[REDACTED]", instanceUrl: "https://x.example.com" } });
+    const provider = new SfCliConnectionProvider("dev-org", { env: env("dev-org"), exec: async () => redacted });
+    await assert.rejects(provider.connect(), /no active session/);
+  });
+
   test("a CLI failure doesn't repeat what the CLI said", async () => {
     const provider = new SfCliConnectionProvider("dev-org", { env: env("dev-org"), exec: async () => { throw new Error("token=SECRET"); } });
     await assert.rejects(provider.connect(), (err: Error) => !err.message.includes("SECRET"));

@@ -254,6 +254,11 @@ const apexCoverage: Rule = {
     if (percent === null || percent === undefined) {
       return { outcome: "not_measurable", reason: "The org holds no coverage figure, which usually means tests haven't been run recently. We don't run tests, because that would change the org.", evidence: [ctx.ev(orgCoverage.source, { count: null })] };
     }
+    // Production refuses Apex below 75% at deploy, so a stored 0% means the figures
+    // were cleared or never stored, not that the code is untested. Seen on a real org.
+    if (percent === 0 && (classCoverage.status !== "ok" || classCoverage.data.every((c) => c.covered === 0))) {
+      return { outcome: "not_measurable", reason: "The org stores 0% coverage for every class, which means the figures were cleared or tests haven't been run since, rather than untested code. We don't run tests, because that would change the org.", evidence: [ctx.ev(orgCoverage.source, { count: 1 })] };
+    }
     if (classCoverage.status !== "ok") {
       return { outcome: "not_measurable", reason: `The org-wide figure is ${percent}%, but coverage by class couldn't be read, so we can't say the whole is healthy: ${classCoverage.reason}`, evidence: [ctx.ev(classCoverage.source, { count: null })] };
     }

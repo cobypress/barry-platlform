@@ -88,6 +88,17 @@ describe("unlinked events: the collapse a total hides", () => {
     assert.match(run(changed, "act.event-link-collapse").summary, /Total events fell as well/);
   });
 
+  test("a handful of linked events can't make a collapse", () => {
+    // As seen on a real org: 3 linked before, 1 after, which halves the share and means nothing.
+    const changed = activity((a) => {
+      let kept = 0;
+      for (const e of a.events.data) e.WhatId = monthOf(e) < "2026-07" && monthOf(e) >= "2026-01" && kept++ < 3 ? "006000000000001AAA" : null;
+    });
+    const f = run(changed, "act.event-link-collapse");
+    assert.equal(f.status, "not_measurable");
+    assert.match(f.notMeasurableReason ?? "", /too few to call a fall/);
+  });
+
   test("too little history is not measurable", () => {
     const changed = activity((a) => (a.from = "2026-06-15"));
     assert.equal(run(changed, "act.event-link-collapse").status, "not_measurable");

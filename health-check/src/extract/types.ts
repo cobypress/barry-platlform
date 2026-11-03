@@ -43,8 +43,24 @@ export type Extractor<T = unknown> = {
 };
 
 export function unavailable<T>(source: SourceInfo, err: unknown): Sourced<T> {
-  if (isUnavailable(err)) return { status: "unavailable", reason: err.message, source };
+  if (isUnavailable(err)) return { status: "unavailable", reason: readableReason(err.message), source };
   throw err;
+}
+
+/**
+ * Salesforce's query errors quote the query with a caret under the problem, and
+ * reasons end up in report text. The query is already on the evidence, so a
+ * reason keeps only what went wrong.
+ */
+export function readableReason(message: string): string {
+  const type = /sObject type '([^']+)' is not supported/.exec(message);
+  if (type) return `${type[1]} isn't available in this org, or to the connected user.`;
+  const column = /No such column '([^']+)' on (?:entity|sobject of type) '?([A-Za-z0-9_]+)'?/.exec(message);
+  if (column) return `${column[2]}.${column[1]} isn't in this org.`;
+  if (!/\nERROR at Row/.test(message)) return message;
+  const last = message.trim().split("\n").at(-1)!.trim();
+  const code = /^[A-Z_]+(?=:)/.exec(message)?.[0];
+  return code && !last.startsWith(code) ? `${code}: ${last}` : last;
 }
 
 export async function readSoql<R>(ctx: ExtractContext, soql: string, options: QueryOptions & { missingFields?: string[] } = {}): Promise<Sourced<R[]>> {
