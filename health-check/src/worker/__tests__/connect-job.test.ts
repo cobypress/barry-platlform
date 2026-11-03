@@ -6,6 +6,7 @@ import type { ConnectLink } from "../../schemas/connect.ts";
 import { FAKE, FakeTokenEndpoint } from "../../testing/fake-oauth.ts";
 import { sealConnectSecret } from "../connect-crypto.ts";
 import type { LinkState } from "../types.ts";
+import { MemoryWorkerStore } from "../memory-store.ts";
 import { createJobHandler } from "../worker.ts";
 import { baseDeps, oauthClient, syntheticConnection } from "./helpers.ts";
 
@@ -53,13 +54,13 @@ class PermissionsOrg implements Transport {
 type Flow = Awaited<ReturnType<typeof flow>>;
 
 /** The console's half: a link, the admin's trip to Salesforce, and the sealed code and pending authorisation. */
-async function flow(options: { state?: LinkState; link?: (l: ConnectLink) => ConnectLink; sealFor?: string; key?: Buffer } = {}) {
+async function flow(options: { state?: LinkState; link?: (l: ConnectLink) => ConnectLink; sealFor?: string; key?: Buffer; consoleNow?: Date } = {}) {
   const fake = new FakeTokenEndpoint();
   const org = new PermissionsOrg();
   const deps = baseDeps({ oauthTransport: fake, dataTransport: org, now: () => new Date() });
-  const created = createConnectLink({ baseUrl: "https://console.example.com", customerRef: "SYN-0001", connectionName: NAME, createdBy: "consultant@example.com" });
+  const created = createConnectLink({ baseUrl: "https://console.example.com", customerRef: "SYN-0001", connectionName: NAME, createdBy: "consultant@example.com", now: options.consoleNow });
   const link = options.link ? options.link(created.link) : created.link;
-  const begun = beginAuthorisation(link, oauthClient);
+  const begun = beginAuthorisation(link, oauthClient, options.consoleNow);
   const code = fake.issueCode(begun.authorisationUrl);
   const sealKey = options.key ?? deps.connectKey;
   const sealFor = options.sealFor ?? link.id;
@@ -246,5 +247,131 @@ describe("a connect job over an existing connection", () => {
     assert.match(stored(f).reason!, /different Salesforce org/);
     assert.equal((await f.deps.tokens.load(NAME)).orgId, "00D000000000099AAA");
     assert.equal(f.fake.liveRefreshTokens(), 0);
+  });
+});
+
+describe("review fixes: tokens never outlive a link that didn't connect", () => {
+  test("the console withdraws the link during the check: the tokens are revoked and forgotten at once", async () => {
+    const f = await flow();
+    const store = f.deps.store;
+    const mark = store.markLinkUsed.bind(store);
+    store.markLinkUsed = async (id, connected) => {
+      store.links.get(id)!.state = "withdrawn";
+      return mark(id, connected);
+    };
+    const outcome = await f.handle(f.job, once);
+    assert.equal(outcome.outcome, "skipped");
+    assert.match(outcome.detail, /became withdrawn while we were connecting/);
+    assert.equal(f.deps.tokens.has(NAME), false);
+    assert.equal(f.fake.liveRefreshTokens(), 0);
+  });
+
+  test("marking used fails with the link still pending: the tokens go, and the link is refused", async () => {
+    const f = await flow();
+    f.deps.store.markLinkUsed = async () => Promise.reject(new Error("connection terminated"));
+    const outcome = await f.handle(f.job, once);
+    assert.equal(outcome.outcome, "refused");
+    assert.match(stored(f).reason!, /couldn't record it, so we disconnected/);
+    assert.equal(f.deps.tokens.has(NAME), false);
+    assert.equal(f.fake.liveRefreshTokens(), 0);
+  });
+
+  test("tokens an earlier delivery stored are revoked when a later one finds the link withdrawn", async () => {
+    const f = await flow();
+    f.org.failNext = 1;
+    await f.handle(f.job, once).catch(() => {});
+    assert.ok(f.deps.tokens.has(NAME));
+    const link = stored(f);
+    link.state = "withdrawn";
+    link.link.revokedAt = new Date().toISOString();
+    const outcome = await f.handle(f.job, once);
+    assert.equal(outcome.outcome, "skipped");
+    assert.equal(f.deps.tokens.has(NAME), false);
+    assert.equal(f.fake.liveRefreshTokens(), 0);
+  });
+
+  test("a used link's connection is left alone on a later delivery", async () => {
+    const f = await flow();
+    await f.handle(f.job, once);
+    assert.equal((await f.handle(f.job, once)).outcome, "skipped");
+    assert.ok(f.deps.tokens.has(NAME));
+  });
+});
+
+describe("review fixes: a delivery knows its own tokens by the link, not the clock", () => {
+  test("with the console's clock five minutes ahead, a retry still checks without exchanging again", async () => {
+    const f = await flow({ consoleNow: new Date(Date.now() + 5 * 60_000) });
+    f.org.failNext = 1;
+    await assert.rejects(f.handle(f.job, once), /ETIMEDOUT/);
+    assert.equal((await f.handle(f.job, once)).outcome, "connected");
+    assert.equal(exchanges(f), 1);
+  });
+
+  test("a later connection from another link under the same name isn't taken for this sign-in", async () => {
+    const f = await flow();
+    await f.deps.tokens.save(
+      syntheticConnection({ name: NAME, orgId: FAKE.orgId, connectedAt: "2099-01-01T00:00:00.000Z", fromLink: { linkId: "00000000-0000-4000-8000-000000000099", stateHash: "B".repeat(43) } }),
+    );
+    assert.equal((await f.handle(f.job, once)).outcome, "connected");
+    assert.equal(exchanges(f), 1, "this sign-in's own code was exchanged");
+    assert.equal((await f.deps.tokens.load(NAME)).fromLink?.linkId, f.link.id);
+  });
+
+  test("the stored connection names its link and sign-in", async () => {
+    const f = await flow();
+    await f.handle(f.job, once);
+    const connection = await f.deps.tokens.load(NAME);
+    assert.equal(connection.fromLink?.linkId, f.link.id);
+    assert.match(connection.fromLink!.stateHash, /^[A-Za-z0-9_-]{43}$/);
+  });
+});
+
+describe("review fixes: a refusal survives a retry", () => {
+  const canWrite = (f: Flow) => (f.org.sets = [permissionSet("System Administrator", { PermissionsModifyAllData: true })]);
+
+  test("the store fails to record a can-write refusal: tokens are gone, and the retry records the same reason without a second exchange", async () => {
+    const f = await flow();
+    canWrite(f);
+    const store = f.deps.store;
+    const refuseLink = store.refuseLink.bind(store);
+    let failures = 1;
+    store.refuseLink = async (...args: Parameters<MemoryWorkerStore["refuseLink"]>) => (failures-- > 0 ? Promise.reject(new Error("connection terminated")) : refuseLink(...args));
+    await assert.rejects(f.handle(f.job, once), /connection terminated/);
+    assert.equal(f.deps.tokens.has(NAME), false, "revoked before the store was asked");
+    assert.equal(f.fake.liveRefreshTokens(), 0);
+    assert.equal(stored(f).state, "pending");
+
+    const outcome = await f.handle(f.job, once);
+    assert.equal(outcome.outcome, "refused");
+    assert.match(stored(f).reason!, /can change data in Salesforce \(Modify All Data\)/);
+    assert.equal(exchanges(f), 1);
+    assertNoSecrets(f);
+  });
+
+  test("on the last delivery too, the reason waits for whichever delivery can record it", async () => {
+    const f = await flow();
+    canWrite(f);
+    const store = f.deps.store;
+    const refuseLink = store.refuseLink.bind(store);
+    store.refuseLink = async () => Promise.reject(new Error("connection terminated"));
+    await assert.rejects(f.handle(f.job, last), /connection terminated/);
+    store.refuseLink = refuseLink;
+    assert.equal((await f.handle(f.job, last)).outcome, "refused");
+    assert.match(stored(f).reason!, /Modify All Data/);
+    assert.equal(stored(f).sealedCode, null);
+    assert.equal(exchanges(f), 1);
+  });
+
+  test("once the console has settled the link, the waiting reason is dropped", async () => {
+    const f = await flow();
+    canWrite(f);
+    f.deps.store.refuseLink = async () => Promise.reject(new Error("connection terminated"));
+    await assert.rejects(f.handle(f.job, once));
+    stored(f).state = "expired";
+    assert.equal((await f.handle(f.job, once)).outcome, "skipped");
+    stored(f).state = "pending";
+    f.deps.store.refuseLink = MemoryWorkerStore.prototype.refuseLink.bind(f.deps.store);
+    // With the note gone, a fresh look at the same (spent) code is refused on its own terms.
+    assert.match((await f.handle(f.job, once)).detail, /didn't accept the sign-in/);
   });
 });

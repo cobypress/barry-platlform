@@ -5,7 +5,7 @@ Branch `hc/worker`, tree `worktrees/hc-worker`. Nothing pushed, deployed or appl
 ## Results
 
 - Baseline: 1184 of 1184 tests, typecheck clean.
-- Final: 1265 of 1265 tests, none skipped. Typecheck clean.
+- Final: 1282 of 1282 tests, none skipped. Typecheck clean.
 
 ## Done
 
@@ -61,3 +61,18 @@ Required: `REDIS_URL`, `HC_WORKER_DATABASE_URL`, `HC_CONNECT_KEY`, `HC_TOKEN_KEY
 
 - Associated data of `<linkId>:code` and `<linkId>:pending` instead of the bare link id, so the two sealed values can't be swapped. Harmless today: a swapped value fails to parse.
 - Job payloads: drop `stepId` from the console's queue helper. The engine resumes its own steps, so one run job is enough.
+
+## Review fixes (coordinator, after hand-over)
+
+An independent review found five problems. Each has tests that fail on the old code (14 failed when I put the old files back) and pass now.
+
+1. **The console withdraws the link during the check.** `markLinkUsed` threw, the job retried while still holding the tokens, and the next delivery skipped them. Now a failed `markLinkUsed` revokes and deletes the tokens before anything else. Then it either skips (the link was settled meanwhile) or refuses (the store failed). Also, any delivery that finds a link settled but never used revokes tokens still bound to it.
+2. **Own tokens judged by clock.** The stored connection now carries `fromLink: { linkId, stateHash }` (optional, in `StoredConnection`). A retry treats tokens as its own only if both match. Clock skew no longer matters, and another link with the same connection name never matches. A connection from an earlier sign-in on the same link is released.
+3. **A refusal lost to a store error.** The reason is written to `<locks>/connect-<linkId>.refusal.json` before the tokens go and before the console is told. Any later delivery with the link still pending records that reason without a second exchange. The note is deleted once the console has it, or once the link is settled.
+4. **Lock ownership.** Locks hold a random token for each process. A lock with this pid but another token belongs to an earlier process (a restarted container), so it's stale. A stale lock is taken over only while holding a breaker file, and only if it's still the one first seen. A breaker over a minute old is cleared. Finishing never removes a lock someone else holds.
+5. **Failures after the engine** (intake write, loading the run, building sections, writing results) are thrown for a retry, which reads no data again. On the last delivery they're recorded on the `worker` step.
+
+Doubts from these fixes:
+
+- If the worker crashes between noting a refusal and revoking, a retry still revokes any tokens bound to the link. But an older connection kept aside in memory can't be put back.
+- The breaker's one-minute rule is itself a small race, but only when a process crashed within milliseconds of breaking a lock.

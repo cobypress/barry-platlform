@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { JobBusyError, withJobLock } from "../lock.ts";
 import { BadJobError, parseJob } from "../types.ts";
@@ -77,5 +77,54 @@ describe("withJobLock", () => {
 
   test("keys are plain names", async () => {
     await assert.rejects(withJobLock(temp(), "../x", async () => {}), /plain|letters/);
+  });
+});
+
+describe("withJobLock after review", () => {
+  test("a lock left by an earlier process with this pid (a restarted container) is stale, not held", async () => {
+    const dir = temp();
+    writeFileSync(join(dir, "run-a.lock"), JSON.stringify({ pid: process.pid, token: "an-earlier-process", at: "2026-11-03T00:00:00.000Z" }));
+    assert.equal(await withJobLock(dir, "run-a", async () => "took over"), "took over");
+    assert.equal(existsSync(join(dir, "run-a.lock")), false);
+  });
+
+  test("two processes that both find a lock stale can't both take it", async () => {
+    const dir = temp();
+    writeFileSync(join(dir, "run-a.lock"), JSON.stringify({ pid: 999_999, token: "dead", at: "2026-11-03T00:00:00.000Z" }));
+    const isAlive = (pid: number) => pid !== 999_999;
+    let releaseB!: () => void;
+    let b: Promise<void> | undefined;
+    const a = withJobLock(dir, "run-a", async () => "a", {
+      pid: 111,
+      token: "process-a",
+      isAlive,
+      // B finds the same stale lock while A is deciding, and takes it first.
+      onStale: () => {
+        b = withJobLock(dir, "run-a", () => new Promise<void>((r) => (releaseB = r)), { pid: 222, token: "process-b", isAlive });
+      },
+    });
+    await assert.rejects(a, JobBusyError);
+    assert.match(readFileSync(join(dir, "run-a.lock"), "utf8"), /process-b/);
+    releaseB();
+    await b;
+  });
+
+  test("a breaker left by a crash is cleared after a minute, and a fresh one means wait", async () => {
+    const dir = temp();
+    const stale = () => writeFileSync(join(dir, "run-a.lock"), JSON.stringify({ pid: 999_999, token: "dead" }));
+    stale();
+    writeFileSync(join(dir, "run-a.lock.breaker"), "{}");
+    await assert.rejects(withJobLock(dir, "run-a", async () => {}, { isAlive: () => false }), JobBusyError);
+    const old = new Date(Date.now() - 120_000);
+    utimesSync(join(dir, "run-a.lock.breaker"), old, old);
+    assert.equal(await withJobLock(dir, "run-a", async () => "ok", { isAlive: () => false }), "ok");
+  });
+
+  test("finishing never removes a lock someone else now holds", async () => {
+    const dir = temp();
+    await withJobLock(dir, "run-a", async () => {
+      writeFileSync(join(dir, "run-a.lock"), JSON.stringify({ pid: 1, token: "someone-else" }));
+    });
+    assert.ok(existsSync(join(dir, "run-a.lock")));
   });
 });
