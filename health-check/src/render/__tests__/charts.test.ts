@@ -6,7 +6,7 @@ import { buildDataset, checkNumbers } from "../../numbercheck/index.ts";
 import type { Metric } from "../../schemas/index.ts";
 import { runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers } from "../../testing/replay.ts";
-import { pipelineOverTime, scorecardChart, stageFunnel, winRateBySegment, type Chart } from "../charts.ts";
+import { closedAsChart, deliveryOutlookChart, HALF_WIDTH, lostByStageChart, pipelineOverTime, scorecardChart, stageFunnel, stageVelocityChart, topAccountsChart, winRateBySegment, winsByCustomerChart, wonValueByChart, type Chart } from "../charts.ts";
 import { compactMoney, money, ukDates } from "../format.ts";
 
 const { output } = await runFromRecording({ answers: loadAnswers() });
@@ -14,7 +14,20 @@ const metric = (id: string): Metric => output!.metrics.find((m) => m.id === id)!
 const dataset = buildDataset({ findings: output!.findings, metrics: output!.metrics, currency: "GBP" });
 
 const rows = scorecard(output!.findings, []);
-const charts = (): Chart[] => [winRateBySegment(metric("historic.win_rate")), stageFunnel(metric("historic.stage_conversion")), pipelineOverTime(metric("historic.pipeline_point_in_time_value"), "GBP"), scorecardChart(rows)];
+const ORDER = ["Prospecting", "Qualified", "Discovery", "Proposal", "Negotiation", "Legal Review"];
+const pipelineCharts = (): Chart[] => [
+  deliveryOutlookChart(metric("current.delivery_outlook_value"), metric("current.delivery_outlook_deals"), "GBP"),
+  winsByCustomerChart(metric("historic.won_value_by_customer"), "GBP"),
+  topAccountsChart(metric("historic.top_account_share")),
+  wonValueByChart(metric("historic.won_value_by_type"), "type", "won-by-type", "Won value by type", "GBP"),
+  wonValueByChart(metric("historic.won_value_by_source"), "lead source", "won-by-source", "Won value by lead source", "GBP"),
+  lostByStageChart(metric("historic.lost_by_stage"), metric("historic.lost_value_by_stage"), "GBP"),
+  closedAsChart(metric("historic.lost_by_stage")),
+  stageVelocityChart(metric("historic.stage_velocity_won"), metric("historic.stage_velocity_lost"), ORDER),
+  winRateBySegment(metric("historic.win_rate"), undefined, HALF_WIDTH),
+  stageFunnel(metric("historic.stage_conversion"), HALF_WIDTH),
+];
+const charts = (): Chart[] => [winRateBySegment(metric("historic.win_rate")), stageFunnel(metric("historic.stage_conversion")), pipelineOverTime(metric("historic.pipeline_point_in_time_value"), "GBP"), scorecardChart(rows), ...pipelineCharts()];
 const svg = (chart: Chart): string => (chart.kind === "chart" ? chart.svg : assert.fail(`${chart.id} is a gap`));
 const texts = (markup: string): string[] => [...markup.matchAll(/<text [^>]*?(class="tick")?[^>]*>([^<]*)<\/text>/g)].filter((m) => !m[0].includes('class="tick"')).map((m) => m[2]!.replace(/&#39;/g, "'").replace(/&amp;/g, "&"));
 
@@ -23,7 +36,7 @@ describe("every chart", () => {
     for (const chart of charts()) {
       assert.equal(chart.kind, "chart");
       const markup = svg(chart);
-      assert.match(markup, /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" viewBox="0 0 800 \d+"/);
+      assert.match(markup, /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" viewBox="0 0 (800|560) \d+"/);
       assert.match(markup, /role="img" aria-label="[^"]+"/);
       assert.ok(markup.endsWith("</svg>"));
       assert.equal((markup.match(/<text/g) ?? []).length, (markup.match(/<\/text>/g) ?? []).length);
@@ -178,5 +191,49 @@ describe("number formats", () => {
     assert.equal(compactMoney(2892000, "GBP"), "£2.89m");
     assert.equal(compactMoney(652000, "GBP"), "£652k");
     assert.equal(compactMoney(950, "GBP"), "£950");
+  });
+
+  test("round half up, as the number check does, even where the binary value falls short", () => {
+    assert.equal(compactMoney(3_255_000, "GBP"), "£3.26m");
+    assert.equal(compactMoney(1_005_000, "GBP"), "£1.01m");
+    assert.equal(compactMoney(40_500, "GBP"), "£40.5k");
+    assert.equal(checkNumbers(compactMoney(3_255_000, "GBP"), buildDataset({ findings: [], metrics: [], extraText: [{ source: "x", text: "£3,255,000" }] })).passed, true);
+  });
+});
+
+describe("the pipeline deep dive", () => {
+  const measured = (id: string): Extract<Metric, { status: "measured" }> => metric(id) as Extract<Metric, { status: "measured" }>;
+
+  test("the outlook shows each month, with expected deals under it", () => {
+    const markup = svg(pipelineCharts()[0]!);
+    for (const point of measured("current.delivery_outlook_value").series) assert.match(markup, new RegExp(compactMoney(point.value!, "GBP").replace(/[£.]/g, "\\$&")));
+    assert.match(markup, /Nov 2026/);
+    assert.match(markup, /\d+(\.\d)? deals/);
+  });
+
+  test("top accounts are counted, never named or shown by id", () => {
+    const markup = svg(pipelineCharts()[2]!);
+    assert.match(markup, /Top 10 accounts/);
+    assert.doesNotMatch(markup, /\[\[account|001\d{12}/);
+  });
+
+  test("time in each stage writes the series name on every bar, and says when a stage is too thin", () => {
+    const markup = svg(pipelineCharts()[7]!);
+    assert.match(markup, /Won: [\d.]+ days/);
+    assert.match(markup, /Lost or no decision: [\d.]+ days/);
+    assert.match(markup, /too few to measure \(\d+\)/);
+  });
+
+  test("lost deals say how they closed, where there's more than one way", () => assert.match(svg(pipelineCharts()[6]!), /Closed Lost - No Budget/));
+
+  test("a metric we couldn't measure gives its reason", () => {
+    const gone = { ...metric("historic.top_account_share"), status: "not_measurable", reason: "Won deals on accounts have no amounts." } as Metric;
+    const chart = topAccountsChart(gone);
+    assert.equal(chart.kind, "gap");
+    assert.equal(chart.kind === "gap" && chart.reason, "Won deals on accounts have no amounts.");
+  });
+
+  test("half-width charts are drawn for half a slide", () => {
+    for (const chart of pipelineCharts().slice(1)) assert.match(svg(chart), new RegExp(`viewBox="0 0 ${HALF_WIDTH} `), chart.id);
   });
 });

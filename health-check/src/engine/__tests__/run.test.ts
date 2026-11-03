@@ -108,7 +108,7 @@ describe("a full run", () => {
     await runFromRecording({ transport });
     const query = transport.requests.map((r) => decodeURIComponent(r.url)).find((q) => q.includes("FROM Opportunity "))!;
     assert.match(query, /LastModifiedDate >= /);
-    assert.match(query, /StageName IN \('Prospecting', 'Discovery', 'Proposal', 'Negotiation', 'Legal Review'\)/);
+    assert.match(query, /StageName IN \('Prospecting', 'Qualified', 'Discovery', 'Proposal', 'Negotiation', 'Legal Review'\)/);
   });
 
   test("run data is written privately", async () => {

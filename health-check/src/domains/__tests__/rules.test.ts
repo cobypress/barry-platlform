@@ -333,10 +333,11 @@ describe("segment before concluding (rule 4)", () => {
 });
 
 describe("data quality", () => {
-  test("past close counts deals and sizes the exposure", () => {
+  test("past close counts deals and sizes the potential revenue in them", () => {
     const f = issue(analyseExtracts(extracts).findings, "dq.open-opps-past-close");
     assert.ok(f.value.kind === "revenue" && f.value.amount > 0);
-    assert.ok(f.value.kind === "revenue" && f.value.assumptions.some((a) => a.includes("exposure, not expected loss")));
+    assert.ok(f.value.kind === "revenue" && f.value.assumptions.some((a) => a.startsWith("Raw exposure: ")));
+    assert.ok(f.value.kind === "revenue" && f.value.assumptions.some((a) => /that were open past their close date at some point, \d+ went on to win/.test(a)));
   });
   test("any open deal with an inactive owner is an issue", () => assert.ok(issue(analyseExtracts(extracts).findings, "dq.opps-inactive-owner").facts.hits! > 0));
   test("loss reasons need a calibrated field, not a guess", () => {

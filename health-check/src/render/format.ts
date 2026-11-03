@@ -12,9 +12,16 @@ export function money(amount: number, currency: string): string {
 /** Keeps three significant figures, so the rounding stays within what the number check allows. */
 export function compactMoney(amount: number, currency: string): string {
   const symbol = moneySymbol(currency);
-  if (amount >= 1e6) return `${symbol}${Number((amount / 1e6).toPrecision(3))}m`;
-  if (amount >= 1e3) return `${symbol}${Number((amount / 1e3).toPrecision(3))}k`;
+  if (amount >= 1e6) return `${symbol}${threeFigures(amount / 1e6)}m`;
+  if (amount >= 1e3) return `${symbol}${threeFigures(amount / 1e3)}k`;
   return `${symbol}${Math.round(amount)}`;
+}
+
+/** Half up, as the number check rounds. toPrecision works on the binary value, so 3.255 became 3.25. */
+function threeFigures(value: number): number {
+  const decimals = Math.max(0, 3 - (Math.floor(Math.log10(value)) + 1));
+  const scale = 10 ** decimals;
+  return Math.round(value * scale + 1e-9) / scale;
 }
 
 export const percent = (value: number): string => `${value}%`;

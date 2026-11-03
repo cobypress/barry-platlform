@@ -67,7 +67,7 @@ describe("the executive summary", () => {
   test("holds a verdict, scorecard, top five with value, and the plan", () => {
     const report = buildReport(full);
     const html = executiveHtml(report, pseudonyms);
-    for (const text of ["Verdict", verdictOf(report.teamFindings).headline, "How each area stands", "Top 5 issues", "Days 1 to 30", "Days 31 to 60", "Days 61 to 90", "Synthetic Co"]) assert.ok(html.includes(text), text);
+    for (const text of ["Verdict", verdictOf(report.teamFindings).headline, "How each area stands", "Your pipeline today", "Potential revenue in open deals", "Top 5 issues", "Days 1 to 30", "Days 31 to 60", "Days 61 to 90", "Synthetic Co"]) assert.ok(html.includes(text), text);
     for (const f of topIssues(report.teamFindings, 5)) {
       const value = f.value.kind === "not_sized" ? "Not sized" : ukDates(`£${f.value.amount.toLocaleString("en-GB")} ${f.value.period}`);
       assert.ok(html.includes(value), value);
@@ -123,7 +123,8 @@ describe("the full health check", () => {
   test("covers what the brief lists", () => {
     const html = fullReportHtml(buildReport(full), pseudonyms);
     for (const text of ["What you told us", "How each area stands", "Configuration", "Automation", "Data quality", "Utilisation", "Historic pipeline", "Win rate by segment", "Stage funnel", "Sales cycle", "lippage", "Pipeline over time", "What you told us, against what we found", "Days 1 to 30", "How we worked", "Metric definitions", "Checks that passed", "What we couldn&#39;t measure"]) assert.ok(html.includes(text), text);
-    for (const chart of ["scorecard", "win-rate-by-segment", "stage-funnel", "pipeline-over-time"]) assert.match(html, new RegExp(`data-expect-chart="${chart}"`));
+    for (const chart of ["scorecard", "win-rate-by-segment", "stage-funnel", "pipeline-over-time", "delivery-outlook", "wins-by-customer", "top-accounts", "won-by-type", "won-by-source", "lost-by-stage", "stage-velocity"]) assert.match(html, new RegExp(`data-expect-chart="${chart}"`));
+    for (const text of ["Open pipeline by stage", "Qualified (retired)", "Quarter by quarter", "Delivery outlook", "Where deals drop out", "closed in the quarter first forecast"]) assert.ok(html.includes(text), text);
   });
 
   test("shows UK dates, never an ISO date", () => {
@@ -218,6 +219,22 @@ describe("a large, messy org", () => {
     const report = buildReport(messy());
     const { layout } = await renderPdf(browser, executiveHtml(report, pseudonyms), { ...execRange });
     assert.deepEqual(layout.problems, [], describeProblems(layout.problems));
+  });
+
+  test("the 90-day plan stays on its pages however long the recommendations get", async () => {
+    const input = messy();
+    const LONGER = " Agree an owner and a date for each part, and check on it at the next review.";
+    for (const times of [1, 2, 4]) {
+      const findings = input.findings.map((f) => (f.status === "issue" ? { ...f, recommendation: f.recommendation + LONGER.repeat(times) } : f));
+      const report = buildReport({ ...input, findings });
+      const html = executiveHtml(report, pseudonyms);
+      const { layout } = await renderPdf(browser, html, { ...execRange, dataset: report.dataset });
+      assert.deepEqual(layout.problems, [], `${times}: ${describeProblems(layout.problems)}`);
+      const items = [...html.matchAll(/<section class="phase">[\s\S]*?<\/section>/g)].flatMap((m) => m[0].split("<li>").slice(1));
+      assert.ok(items.length >= 3, `${times}: every phase keeps at least one action`);
+      for (const item of items) assert.match(item, /^<strong>/, "every plan action leads with its issue");
+      assert.match(html, /The full report lists the rest of this phase\./);
+    }
   });
 });
 
@@ -363,10 +380,10 @@ describe("rule 10", () => {
 describe("overrides", () => {
   test("a report shows the corrected figure", () => {
     const f = output!.findings.find((x) => /should already have closed/.test(x.title))!;
-    const override: NumberOverride = { id: "o1", runId: run.id, target: { type: "finding", id: f.id, field: "facts.rate" }, previousValue: 21.4, newValue: 19.5, reason: "Two were test records.", overriddenBy: "Synthetic Consultant", overriddenAt: "2026-10-31T13:00:00.000Z" };
+    const override: NumberOverride = { id: "o1", runId: run.id, target: { type: "finding", id: f.id, field: "facts.rate" }, previousValue: 27.6, newValue: 19.5, reason: "Two were test records.", overriddenBy: "Synthetic Consultant", overriddenAt: "2026-10-31T13:00:00.000Z" };
     const html = executiveHtml(buildReport({ ...full, overrides: [override] }), pseudonyms);
     assert.match(html, /19\.5%/);
-    assert.doesNotMatch(html, /21\.4%/);
+    assert.doesNotMatch(html, /27\.6%/);
   });
 });
 

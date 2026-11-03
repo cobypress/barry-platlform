@@ -7,6 +7,7 @@ import { notSized, pct, plural, segmentRate, type Rule, type RuleContext, type R
 import { localDay, todayIn, zoneOf } from "../time-zone.ts";
 import { atOwnLeadReturn } from "../value.ts";
 import { loadPipeline, type Deal } from "../historic-pipeline/cohort.ts";
+import { potentialRevenue, SITUATIONS, type Situation } from "../historic-pipeline/potential.ts";
 import type { Value } from "../../schemas/index.ts";
 import type { DomainModule } from "../types.ts";
 
@@ -46,7 +47,8 @@ type DealRuleOptions = {
   recommendation: string;
   effort: "XS" | "S" | "M";
   owner: string;
-  sized: boolean;
+  /** True sizes the raw exposure. A situation sizes potential revenue at how often comparable deals still won. */
+  sized: boolean | ((ctx: RuleContext, data: Extract<ReturnType<typeof loadPipeline>, { status: "ok" }>, deal: Deal) => Situation);
 };
 
 function dealRule(options: DealRuleOptions): Rule {
@@ -90,7 +92,12 @@ function dealRule(options: DealRuleOptions): Rule {
         severity: options.severity,
         confidence: "high",
         evidence,
-        value: options.sized ? exposure(ctx, deals.filter(hit), data.multiCurrency, `${result.hits} deals affected`) : notSized("This affects how far the pipeline can be trusted, which has no direct figure."),
+        value:
+          typeof options.sized === "function"
+            ? potentialRevenue(ctx, data, deals.filter(hit), (d) => (options.sized as Exclude<DealRuleOptions["sized"], boolean>)(ctx, data, d))
+            : options.sized
+              ? exposure(ctx, deals.filter(hit), data.multiCurrency, `${result.hits} deals affected`)
+              : notSized("This affects how far the pipeline can be trusted, which has no direct figure."),
         effort: { size: options.effort },
         owner: options.owner,
         segmentsChecked: result.segmentsChecked,
@@ -117,7 +124,7 @@ const pastCloseDate = dealRule({
   recommendation: "Have each owner close the deal or give it a real date, then add a weekly check to pipeline reviews.",
   effort: "S",
   owner: "Head of sales",
-  sized: true,
+  sized: (ctx, data) => SITUATIONS.pastClose(ctx, data),
 });
 
 const inactiveOwner = dealRule({
@@ -137,7 +144,8 @@ const inactiveOwner = dealRule({
   recommendation: "Reassign these deals now, and add reassignment to your leaver process.",
   effort: "XS",
   owner: "Sales operations",
-  sized: true,
+  // When an owner left isn't in stage history, so the comparison is deals that reached the same stage.
+  sized: (_ctx, _data, d) => SITUATIONS.inStage(d.StageName),
 });
 
 const missingAmount = dealRule({
@@ -175,7 +183,8 @@ const noRecentActivity = dealRule({
   recommendation: "Review each quiet deal: either re-engage it or close it. Check that activity is being captured before treating this as a rep problem.",
   effort: "S",
   owner: "Head of sales",
-  sized: true,
+  // Past activity isn't in stage history. The nearest it holds is a deal nobody changed in as long.
+  sized: (_ctx, data) => SITUATIONS.unchangedFor(STALE_ACTIVITY_DAYS, data),
 });
 
 const lossReasonMissing: Rule = {

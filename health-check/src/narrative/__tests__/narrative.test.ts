@@ -49,7 +49,7 @@ function stub(...replies: Array<NarrativeReply | Error>): NarrativeClient & { re
   };
 }
 
-const good = [{ text: "Your win rate is 35%, and 15 of 70 open deals are past their close date.", sources: [stale.id, winRate.id] }];
+const good = [{ text: "Your win rate is 47%, and 21 of 76 open deals are past their close date.", sources: [stale.id, winRate.id] }];
 const draft = (client: NarrativeClient, b = brief()) => draftSection({ brief: b, dataset, client, pseudonyms: pseudonyms() });
 
 describe("a draft", () => {
@@ -57,7 +57,7 @@ describe("a draft", () => {
     const result = await draft(stub(reply(good)));
     assert.equal(result.status, "accepted");
     assert.equal(result.status === "accepted" && result.attempts, 1);
-    assert.match(result.status === "accepted" ? result.body : "", /35%/);
+    assert.match(result.status === "accepted" ? result.body : "", /47%/);
   });
 
   test("is rejected when a figure is invented, and never reaches the body", async () => {
@@ -79,12 +79,12 @@ describe("a draft", () => {
   });
 
   test("a figure must come from a source its own paragraph cites", async () => {
-    const wrongCitation = [{ text: "Your win rate is 35%.", sources: [stale.id] }];
+    const wrongCitation = [{ text: "Your win rate is 47%.", sources: [stale.id] }];
     assert.equal((await draft(stub(reply(wrongCitation), reply(wrongCitation)))).status, "rejected");
   });
 
   test("a paragraph with no sources can't hold a figure", async () => {
-    const noSources = [{ text: "Your win rate is 35%.", sources: [] }];
+    const noSources = [{ text: "Your win rate is 47%.", sources: [] }];
     assert.equal((await draft(stub(reply(noSources), reply(noSources)))).status, "rejected");
     assert.equal((await draft(stub(reply([{ text: "We looked closely at your pipeline.", sources: [] }])))).status, "accepted");
   });

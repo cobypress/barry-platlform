@@ -1,4 +1,5 @@
 import { buildDataset, checkNumbers, scopeDataset, SOURCE, toNumberCheckResult, type FigureSet, type StructuralFigure } from "../numbercheck/index.ts";
+import { compactMoney, monthYear } from "../render/format.ts";
 import type { Calibration, Finding, ManualStep, Metric, NumberOverride, ReportSection, Run, Score, SectionVersion } from "../schemas/index.ts";
 import { ReportSection as ReportSectionSchema, SectionVersion as SectionVersionSchema } from "../schemas/index.ts";
 import type { SectionBrief } from "./draft.ts";
@@ -118,9 +119,77 @@ function rawNotesSpecs(input: ReportInput): Spec[] {
   ];
 }
 
+// Rules whose value is potential revenue in open deals. The executive pipeline
+// page lists them together, and they overlap, so they're never added up.
+export const POTENTIAL_REVENUE_RULES = ["dq.open-opps-past-close", "dq.opps-inactive-owner", "dq.open-opps-no-activity", "cur.stale-deals", "rev.stalled-deals"];
+
+/** The metrics the pipeline pages quote, in the order they're read. */
+export const PIPELINE_TODAY_METRICS = ["current.open_deals", "current.open_pipeline", "current.open_no_amount", "current.weighted_pipeline", "current.delivery_outlook_value", "current.delivery_outlook_deals", "historic.stage_win_rate"];
+
+type MeasuredMetric = Extract<Metric, { status: "measured" }>;
+
+const measuredIn = (metrics: Metric[], id: string): MeasuredMetric | null => {
+  const m = metrics.find((x) => x.id === id);
+  return m?.status === "measured" ? m : null;
+};
+
+/** Today's pipeline in a few sentences, from metric figures only. Empty when open deals couldn't be read. */
+export function pipelineTodayText(metrics: Metric[], currency: string): string[] {
+  const open = measuredIn(metrics, "current.open_deals");
+  if (!open) return [];
+  const value = measuredIn(metrics, "current.open_pipeline");
+  const blank = measuredIn(metrics, "current.open_no_amount");
+  const weighted = measuredIn(metrics, "current.weighted_pipeline");
+  const outlook = measuredIn(metrics, "current.delivery_outlook_value");
+  const deals = measuredIn(metrics, "current.delivery_outlook_deals");
+  const parts = [
+    `You have ${plural(open.value, "open deal")}${value ? ` worth ${compactMoney(value.value, currency)}` : ""}.${blank && blank.value > 0 ? ` ${blank.value} of them have no amount, so they add nothing to that figure.` : ""}${weighted ? ` Weighted by how often deals at each stage have gone on to win, it's worth ${compactMoney(weighted.value, currency)}.` : ""}`,
+  ];
+  if (outlook) {
+    const first = monthYear(outlook.series[0]!.date);
+    const last = monthYear(outlook.series.at(-1)!.date);
+    parts.push(`From ${first} to ${last}, we expect about ${compactMoney(outlook.value, currency)} of it to be won${deals ? `, across about ${deals.value} deals` : ""}. That's the figure to plan delivery capacity against, not the full pipeline.`);
+  }
+  return parts;
+}
+
+function deepDiveText(metrics: Metric[], currency: string): string {
+  const repeat = measuredIn(metrics, "historic.repeat_win_share");
+  const top = measuredIn(metrics, "historic.top_account_share");
+  const reliable = measuredIn(metrics, "historic.close_date_reliability");
+  const late = measuredIn(metrics, "historic.close_days_late");
+  return lines(
+    "How deals have really moved through your pipeline, measured from stage history rather than current field values.",
+    ...pipelineTodayText(metrics, currency),
+    repeat ? `${repeat.value}% of won value came from customers who had bought before.${top ? ` Your top ${top.stats.top} accounts brought in ${top.value}% of it.` : ""}` : null,
+    reliable && late ? `${reliable.value}% of won deals closed in the quarter they were first forecast for, and the median won deal closed ${late.value} days after its first close date.` : null,
+  );
+}
+
 function summaryCounts(findings: Finding[]): PromptSource {
   const issues = issuesOf(findings);
   return { id: SOURCE.summary, kind: "summary", checks: findings.length, issues: issues.length, critical: issues.filter((f) => f.severity === "critical").length, high: issues.filter((f) => f.severity === "high").length };
+}
+
+/** The executive pipeline page: what's open, what it's likely to be worth, and the potential revenue in deals that have stalled. */
+function pipelineSpec(input: ReportInput, team: Finding[]): Spec {
+  const metrics = input.metrics.filter((m) => PIPELINE_TODAY_METRICS.includes(m.id));
+  const potential = POTENTIAL_REVENUE_RULES.flatMap((id) => team.find((f) => f.ruleId === id && f.status === "issue") ?? []);
+  const today = pipelineTodayText(input.metrics, input.calibration.currency);
+  const sized = potential.filter((f) => f.value.kind === "revenue");
+  return {
+    key: "pipeline",
+    title: "Pipeline",
+    body: lines(
+      ...(today.length ? today : ["Open deals couldn't be measured in this run, so we can't say what the pipeline holds."]),
+      sized.length
+        ? "Old deals are still potential deals. Each line below sizes one kind of stalled or neglected deal at how often deals like them have still gone on to win here. The lines overlap, so they shouldn't be added together."
+        : null,
+    ),
+    findingIds: potential.map((f) => f.id),
+    metricIds: metrics.map((m) => m.id),
+    brief: { purpose: "Tell an executive reader what the open pipeline holds today, what it's likely to be worth and when, and the potential revenue in deals that have stalled.", sources: [...metrics.map(metricSource), ...potential.map(findingSource)] },
+  };
 }
 
 function executiveSpecs(input: ReportInput, team: Finding[]): Spec[] {
@@ -143,6 +212,7 @@ function executiveSpecs(input: ReportInput, team: Finding[]): Spec[] {
       brief: { purpose: "Tell an executive reader, in a few sentences, what state this Salesforce org is in and what matters most.", sources: [summaryCounts(team), ...top.map(findingSource)] },
     },
     { key: "scorecard", title: "Scorecard", body: "A domain with no score says why. We never show a gap as a zero.", findingIds: team.map((f) => f.id), sources: [...SUMMARY_SOURCES, ...scoreSources] },
+    pipelineSpec(input, team),
     {
       key: "top_issues",
       title: `Top ${TOP_ISSUE_COUNT} issues`,
@@ -200,9 +270,12 @@ function fullSpecs(input: ReportInput, team: Finding[], metrics: Metric[]): Spec
     {
       key: "pipeline_deep_dive",
       title: "Pipeline deep dive",
-      body: pipelineMetrics.some((m) => m.status === "measured") ? "How deals have really moved through your pipeline, measured from stage history rather than current field values." : "Pipeline metrics couldn't be measured in this run.",
+      body: pipelineMetrics.some((m) => m.status === "measured") ? deepDiveText(pipelineMetrics, input.calibration.currency) : "Pipeline metrics couldn't be measured in this run.",
       metricIds: pipelineMetrics.map((m) => m.id),
-      brief: { purpose: "Explain how deals have really moved through this pipeline: win rate, conversion, cycle time and slippage.", sources: pipelineMetrics.map(metricSource) },
+      brief: {
+        purpose: "Explain the pipeline for someone planning delivery as well as someone selling: what's open today and what it's likely to be worth, when it's likely to land, where wins come from, where deals are lost, and how far close dates hold.",
+        sources: pipelineMetrics.map(metricSource),
+      },
     },
     linked.length
       ? { key: "stated_vs_actual", title: "Stated vs actual", body: linked.map((p) => `${p.statement}${p.assessment ? ` ${p.assessment}` : ""}`).join("\n\n"), findingIds: linked.flatMap((p) => p.findingIds), sources: [INTAKE] }

@@ -58,7 +58,7 @@ describe("the Word raw notes", () => {
 
   test("hold guards and metric tables", () => {
     assert.match(notes.text, /owns-no-records/);
-    assert.match(notes.text, /Win rate: 35%/);
+    assert.match(notes.text, /Win rate: 47%/);
     assert.match(notes.text, /Month end/);
     for (const m of base.metrics) assert.ok(notes.text.includes(m.label), m.id);
   });

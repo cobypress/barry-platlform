@@ -27,8 +27,8 @@ function bar(x: number, y: number, width: number, height: number, fill: string):
   return `<path d="M${x} ${y}h${w - r}a${r} ${r} 0 0 1 ${r} ${r}v${height - 2 * r}a${r} ${r} 0 0 1 ${-r} ${r}h${-(w - r)}z" fill="${fill}"/>`;
 }
 
-function frame(id: string, title: string, alt: string, height: number, body: string): Chart {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${WIDTH} ${height}" role="img" aria-label="${escapeXml(alt)}" font-family="${escapeXml(font.stack)}" data-chart="${id}"><rect width="${WIDTH}" height="${height}" rx="${radius.medium}" fill="${colour.carbon}"/>${body}</svg>`;
+function frame(id: string, title: string, alt: string, height: number, body: string, width = WIDTH): Chart {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeXml(alt)}" font-family="${escapeXml(font.stack)}" data-chart="${id}"><rect width="${width}" height="${height}" rx="${radius.medium}" fill="${colour.carbon}"/>${body}</svg>`;
   return { kind: "chart", id, title, alt, svg };
 }
 
@@ -42,7 +42,7 @@ const gap = (id: string, title: string, reason: string): Chart => ({ kind: "gap"
 const missing = (metric: Metric | undefined): string | null => (!metric ? "This metric wasn't part of the run." : metric.status === "not_measurable" ? metric.reason : null);
 
 /** Team and record type only: executive reports stay at team level. Rep segments stay in the raw notes. */
-export function winRateBySegment(metric: Metric | undefined, dimensions: string[] = ["team", "record type"]): Chart {
+export function winRateBySegment(metric: Metric | undefined, dimensions: string[] = ["team", "record type"], width = WIDTH): Chart {
   const id = "win-rate-by-segment";
   const title = "Win rate by segment";
   const reason = missing(metric);
@@ -55,9 +55,9 @@ export function winRateBySegment(metric: Metric | undefined, dimensions: string[
   });
   if (rows.length === 0) return gap(id, title, m.segmentExemptReason ?? "This metric has no segments to show.");
 
-  const labelWidth = 200;
+  const labelWidth = width < WIDTH ? 150 : 200;
   const left = PAD + labelWidth;
-  const trackWidth = WIDTH - left - PAD - 90;
+  const trackWidth = width - left - PAD - 90;
   const scale = (value: number): number => (value / 100) * trackWidth;
   const rowHeight = 30;
   const top = 44;
@@ -84,11 +84,11 @@ export function winRateBySegment(metric: Metric | undefined, dimensions: string[
   }
   body.push(`<line x1="${overall}" x2="${overall}" y1="${top}" y2="${y - 6}" stroke="${colour.ivory}" stroke-width="1"/>`);
   const alt = `Win rate by segment against ${percent(m.value)} overall.`;
-  return frame(id, title, alt, y + 14, body.join(""));
+  return frame(id, title, alt, y + 14, body.join(""), width);
 }
 
 /** Bars show deals reaching each stage. The label says what share went on to the next. */
-export function stageFunnel(metric: Metric | undefined): Chart {
+export function stageFunnel(metric: Metric | undefined, width = WIDTH): Chart {
   const id = "stage-funnel";
   const title = "Stage funnel";
   const reason = missing(metric);
@@ -97,23 +97,23 @@ export function stageFunnel(metric: Metric | undefined): Chart {
   const steps = metric!.segments.filter((s) => s.dimension === "step");
   if (steps.length === 0) return gap(id, title, "No stage steps were measured.");
 
-  const labelWidth = 170;
+  const labelWidth = width < WIDTH ? 120 : 170;
   const left = PAD + labelWidth;
-  const trackWidth = WIDTH - left - PAD - 220;
+  const trackWidth = width - left - PAD - (width < WIDTH ? 175 : 220);
   const largest = Math.max(...steps.map((s) => s.n), 1);
   const rowHeight = 36;
   const body: string[] = [];
   steps.forEach((step, i) => {
     const y = 20 + i * rowHeight;
     const [from, to] = step.key.split(" to ");
-    const width = (step.n / largest) * trackWidth;
+    const length = (step.n / largest) * trackWidth;
     body.push(text(PAD, y + 15, clip(from ?? step.key, labelWidth - 12, 13), { size: 13 }));
-    body.push(bar(left, y + 2, width, BAR, colour.chartreuse));
-    body.push(text(left + width + 8, y + 15, `${step.n}`, { size: 13, weight: font.weights.medium }));
-    if (step.value !== null) body.push(text(WIDTH - PAD, y + 15, `${percent(step.value)} to ${clip(to ?? "next", 120, 12)}`, { size: 12, fill: colour.panelMuted, anchor: "end" }));
-    else body.push(text(WIDTH - PAD, y + 15, "Too few to measure", { size: 12, fill: colour.panelMuted, anchor: "end" }));
+    body.push(bar(left, y + 2, length, BAR, colour.chartreuse));
+    body.push(text(left + length + 8, y + 15, `${step.n}`, { size: 13, weight: font.weights.medium }));
+    if (step.value !== null) body.push(text(width - PAD, y + 15, `${percent(step.value)} to ${clip(to ?? "next", width < WIDTH ? 90 : 120, 12)}`, { size: 12, fill: colour.panelMuted, anchor: "end" }));
+    else body.push(text(width - PAD, y + 15, "Too few to measure", { size: 12, fill: colour.panelMuted, anchor: "end" }));
   });
-  return frame(id, title, "Deals reaching each stage, and the share that reached the next stage.", 20 + steps.length * rowHeight + 10, body.join(""));
+  return frame(id, title, "Deals reaching each stage, and the share that reached the next stage.", 20 + steps.length * rowHeight + 10, body.join(""), width);
 }
 
 /** A gap in the line is a month we couldn't measure, never a zero. */
@@ -191,4 +191,192 @@ export function scorecardChart(rows: ScorecardRow[]): Chart {
     }
   });
   return frame(id, title, "Score and issue count for each domain.", 18 + rows.length * rowHeight + 8, body.join(""));
+}
+
+// The pipeline deep dive. Each chart reads one or two metrics, and every figure
+// it prints is a value, count or date those metrics hold.
+
+/** Half a slide, so two charts can sit side by side at a readable size. */
+export const HALF_WIDTH = 560;
+
+type Measured = Extract<Metric, { status: "measured" }>;
+type BarRow = { label: string; value: number | null; text: string };
+
+const measuredOr = (id: string, title: string, metric: Metric | undefined): Measured | Chart => {
+  const reason = missing(metric);
+  return reason ? gap(id, title, reason) : (metric as Measured);
+};
+const isChart = (x: Measured | Chart): x is Chart => "kind" in x;
+const segmentsOf = (metric: Measured, dimension: string): MetricSegment[] => metric.segments.filter((s) => s.dimension === dimension);
+
+/** Horizontal bars with the figure written at the end of each. A row with no value says why instead. */
+export function barChart(id: string, title: string, rows: BarRow[], options: { alt: string; width?: number; caption?: string; labelWidth?: number; textWidth?: number }): Chart {
+  if (rows.length === 0) return gap(id, title, "There's nothing to show.");
+  const width = options.width ?? WIDTH;
+  const labelWidth = options.labelWidth ?? 170;
+  const left = PAD + labelWidth;
+  const trackWidth = width - left - PAD - (options.textWidth ?? 150);
+  const largest = Math.max(...rows.map((r) => r.value ?? 0), 0);
+  const top = options.caption ? 40 : 18;
+  const rowHeight = 32;
+  const body: string[] = options.caption ? [text(PAD, 26, options.caption, { size: 13, fill: colour.panelMuted })] : [];
+  rows.forEach((row, i) => {
+    const y = top + i * rowHeight;
+    body.push(text(PAD, y + 15, clip(row.label, labelWidth - 12, 13), { size: 13 }));
+    if (row.value === null) {
+      body.push(text(left, y + 15, row.text, { size: 12, fill: colour.panelMuted }));
+      return;
+    }
+    const length = largest > 0 ? (Math.max(row.value, 0) / largest) * trackWidth : 0;
+    body.push(bar(left, y + 2, length, BAR, colour.chartreuse));
+    body.push(text(left + length + 8, y + 15, row.text, { size: 13, weight: font.weights.medium }));
+  });
+  return frame(id, title, options.alt, top + rows.length * rowHeight + 8, body.join(""), width);
+}
+
+type Column = { label: string; value: number | null; text: string; sub?: string };
+
+/** Vertical bars along time. A gap is a period we couldn't measure, never a zero. */
+export function columnChart(id: string, title: string, columns: Column[], options: { alt: string; width?: number; height?: number; caption?: string }): Chart {
+  if (columns.length === 0) return gap(id, title, "There's nothing to show.");
+  const width = options.width ?? WIDTH;
+  const height = options.height ?? 280;
+  const top = options.caption ? 58 : 36;
+  const bottom = height - (columns.some((c) => c.sub) ? 52 : 34);
+  const slot = (width - 2 * PAD) / columns.length;
+  const barWidth = Math.min(64, slot * 0.6);
+  const largest = Math.max(...columns.map((c) => c.value ?? 0), 0);
+  const body: string[] = options.caption ? [text(PAD, 26, options.caption, { size: 13, fill: colour.panelMuted })] : [];
+  body.push(`<line x1="${PAD}" x2="${width - PAD}" y1="${bottom}" y2="${bottom}" stroke="${colour.panelRule}" stroke-width="1"/>`);
+  columns.forEach((column, i) => {
+    const centre = PAD + slot * i + slot / 2;
+    body.push(text(centre, bottom + 18, column.label, { size: 12, fill: colour.panelMuted, anchor: "middle" }));
+    if (column.sub) body.push(text(centre, bottom + 36, column.sub, { size: 12, fill: colour.panelMuted, anchor: "middle" }));
+    if (column.value === null) {
+      body.push(text(centre, bottom - 8, column.text, { size: 11, fill: colour.panelMuted, anchor: "middle" }));
+      return;
+    }
+    const h = Math.max(largest > 0 ? (Math.max(column.value, 0) / largest) * (bottom - top) : 0, 1);
+    const r = Math.min(radius.small, barWidth / 2, h);
+    const x = centre - barWidth / 2;
+    body.push(`<path d="M${x} ${bottom}v${-(h - r)}a${r} ${r} 0 0 1 ${r} ${-r}h${barWidth - 2 * r}a${r} ${r} 0 0 1 ${r} ${r}v${h - r}z" fill="${colour.chartreuse}"/>`);
+    body.push(text(centre, bottom - h - 8, column.text, { size: 13, weight: font.weights.medium, anchor: "middle" }));
+  });
+  return frame(id, title, options.alt, height, body.join(""), width);
+}
+
+type Side = { value: number | null; text: string };
+type PairedRow = { label: string; a: Side; b: Side };
+
+/** Two bars per row, each written with its series name, so colour is never the only key. */
+export function pairedBarChart(id: string, title: string, rows: PairedRow[], legend: [string, string], options: { alt: string; width?: number }): Chart {
+  if (rows.length === 0) return gap(id, title, "There's nothing to show.");
+  const width = options.width ?? WIDTH;
+  const labelWidth = 130;
+  const left = PAD + labelWidth;
+  const trackWidth = width - left - PAD - 190;
+  const largest = Math.max(...rows.flatMap((r) => [r.a.value ?? 0, r.b.value ?? 0]), 0);
+  const top = 40;
+  const thin = 12;
+  const rowHeight = 2 * thin + 18;
+  const second = PAD + 34 + legend[0].length * 8;
+  const body: string[] = [bar(PAD, 16, 14, 12, colour.chartreuse), text(PAD + 20, 27, legend[0], { size: 12 }), bar(second, 16, 14, 12, colour.panelMuted), text(second + 20, 27, legend[1], { size: 12 })];
+  rows.forEach((row, i) => {
+    const y = top + i * rowHeight;
+    body.push(text(PAD, y + thin + 5, clip(row.label, labelWidth - 12, 13), { size: 13 }));
+    const sides: Array<[Side, string, string, number]> = [[row.a, colour.chartreuse, legend[0], 0], [row.b, colour.panelMuted, legend[1], thin + 2]];
+    for (const [side, fill, name, offset] of sides) {
+      if (side.value === null) {
+        body.push(text(left, y + offset + 10, `${name}: ${side.text}`, { size: 11, fill: colour.panelMuted }));
+        continue;
+      }
+      const length = largest > 0 ? (Math.max(side.value, 0) / largest) * trackWidth : 0;
+      body.push(bar(left, y + offset, length, thin, fill));
+      body.push(text(left + length + 6, y + offset + 10, `${name}: ${side.text}`, { size: 11 }));
+    }
+  });
+  return frame(id, title, options.alt, top + rows.length * rowHeight + 4, body.join(""), width);
+}
+
+const dealCount = (n: number): string => `${n} ${n === 1 ? "deal" : "deals"}`;
+
+/** Expected won value by month, with the expected number of deals under each month. */
+export function deliveryOutlookChart(value: Metric | undefined, count: Metric | undefined, currency: string, width = WIDTH): Chart {
+  const id = "delivery-outlook";
+  const title = "Delivery outlook";
+  const m = measuredOr(id, title, value);
+  if (isChart(m)) return m;
+  const expected = new Map(count?.status === "measured" ? count.series.map((p) => [p.date, p.value]) : []);
+  const columns = m.series.map((p) => {
+    const n = expected.get(p.date);
+    return { label: monthYear(p.date), value: p.value, text: p.value === null ? "Not measured" : compactMoney(p.value, currency), ...(typeof n === "number" ? { sub: dealCount(n) } : {}) };
+  });
+  return columnChart(id, title, columns, { alt: `Expected won value by month, ${compactMoney(m.value, currency)} in all.`, width });
+}
+
+/** New and repeat customers' part of what was won. */
+export function winsByCustomerChart(metric: Metric | undefined, currency: string): Chart {
+  const id = "wins-by-customer";
+  const title = "New and repeat customers";
+  const m = measuredOr(id, title, metric);
+  if (isChart(m)) return m;
+  const rows = segmentsOf(m, "customer").map((s) => ({ label: s.key, value: s.value, text: `${compactMoney(s.value ?? 0, currency)} from ${s.n} wins` }));
+  return barChart(id, title, rows, { alt: "Won value from new and repeat customers.", width: HALF_WIDTH, labelWidth: 150, textWidth: 160, caption: "Won value" });
+}
+
+/** How much of won value the largest accounts hold. Accounts are counted, never named. */
+export function topAccountsChart(metric: Metric | undefined): Chart {
+  const id = "top-accounts";
+  const title = "Top accounts";
+  const m = measuredOr(id, title, metric);
+  if (isChart(m)) return m;
+  const rows = segmentsOf(m, "accounts").map((s) => ({ label: s.key, value: s.value, text: s.value === null ? "Not measured" : percent(s.value) }));
+  return barChart(id, title, rows, { alt: "The largest accounts' share of won value.", width: HALF_WIDTH, labelWidth: 150, textWidth: 70, caption: "Share of won value" });
+}
+
+/** Won value by one of the deal's own fields, largest first. */
+export function wonValueByChart(metric: Metric | undefined, dimension: string, id: string, title: string, currency: string): Chart {
+  const m = measuredOr(id, title, metric);
+  if (isChart(m)) return m;
+  const rows = segmentsOf(m, dimension).map((s) => ({ label: s.key, value: s.value, text: `${compactMoney(s.value ?? 0, currency)}, ${s.n} wins` }));
+  return barChart(id, title, rows, { alt: `Won value by ${dimension}.`, width: HALF_WIDTH, labelWidth: 150, textWidth: 130, caption: `Won value by ${dimension}` });
+}
+
+/** Lost and no decision deals by the stage they left from, with the value that went with them. */
+export function lostByStageChart(count: Metric | undefined, value: Metric | undefined, currency: string): Chart {
+  const id = "lost-by-stage";
+  const title = "Where deals are lost";
+  const m = measuredOr(id, title, count);
+  if (isChart(m)) return m;
+  const amounts = new Map(value?.status === "measured" ? segmentsOf(value, "stage left").map((s) => [s.key, s.value]) : []);
+  const rows = segmentsOf(m, "stage left").map((s) => {
+    const amount = amounts.get(s.key);
+    return { label: s.key, value: s.value, text: typeof amount === "number" ? `${dealCount(s.n)}, ${compactMoney(amount, currency)}` : dealCount(s.n) };
+  });
+  return barChart(id, title, rows, { alt: "Lost and no decision deals by the last open stage they were in.", width: HALF_WIDTH, labelWidth: 130, textWidth: 140, caption: "Last open stage before closing" });
+}
+
+/** How deals were closed when they didn't win: by closing stage where there's more than one, otherwise by outcome. */
+export function closedAsChart(count: Metric | undefined): Chart {
+  const id = "closed-as";
+  const title = "How they were closed";
+  const m = measuredOr(id, title, count);
+  if (isChart(m)) return m;
+  const byStage = segmentsOf(m, "closed as");
+  const rows = (byStage.length ? byStage : segmentsOf(m, "outcome")).map((s) => ({ label: s.key, value: s.value, text: dealCount(s.n) }));
+  return barChart(id, title, rows, { alt: "Lost and no decision deals by how they were closed.", width: HALF_WIDTH, labelWidth: 190, textWidth: 80, caption: byStage.length ? "Closing stage" : "Outcome" });
+}
+
+/** Median days in each open stage, won against lost, in sales order. */
+export function stageVelocityChart(won: Metric | undefined, lost: Metric | undefined, order: string[]): Chart {
+  const id = "stage-velocity";
+  const title = "Time in each stage";
+  const w = measuredOr(id, title, won);
+  if (isChart(w)) return w;
+  const l = lost?.status === "measured" ? lost : null;
+  const find = (m: Measured | null, stage: string): MetricSegment | undefined => (m ? segmentsOf(m, "stage").find((s) => s.key === stage) : undefined);
+  const side = (s: MetricSegment | undefined): Side => (s && s.value !== null ? { value: s.value, text: `${s.value} days` } : { value: null, text: s ? `too few to measure (${s.n})` : "none" });
+  const stages = order.filter((stage) => (find(w, stage)?.n ?? 0) > 0 || (find(l, stage)?.n ?? 0) > 0);
+  const rows = stages.map((stage) => ({ label: stage, a: side(find(w, stage)), b: side(find(l, stage)) }));
+  return pairedBarChart(id, title, rows, ["Won", "Lost or no decision"], { alt: "Median days in each open stage for won deals against lost and no decision deals.", width: HALF_WIDTH });
 }

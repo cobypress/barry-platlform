@@ -43,6 +43,9 @@ Salesforce's docs couldn't all be read in full, so these are unproven until a li
 | 16 | Can a retrieve reach private reports? (`Report.OwnerId` is documented as the folder id: a user id for a private folder, the org id for public) | A report we can't place counts as not read, and the guard blocks |
 | 17 | Is every `TimeZoneSidKey` a name Node understands? | Falls back to UTC, stated on the metric |
 | 18 | Does a job on a deactivated user fail? Only vendor and community sources say so | Medium confidence, and the finding says it rests on secondary sources |
+| 19 | When a stage picklist value is renamed, do old `OpportunityHistory.StageName` rows keep the old name, or change with it? | We assume they keep it, so the calibration must list old names. If they change, an old stage simply never appears, and stage win rates are unaffected |
+| 20 | Is a history row written for every change to Amount and CloseDate, as well as stage, on every edition? | The "no change of any kind" cohort for quiet deals would be too large, so its win rate would read too high. Stated as a proxy on the finding |
+| 21 | Does `IsWon = true OR StageName IN (...)` filter on Opportunity everywhere, and does the prior wins read stay small? | A failed read makes new and repeat customers not measurable, never all new |
 
 ## Field names checked against Salesforce's docs
 

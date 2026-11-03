@@ -42,7 +42,7 @@ describe("the three outputs", () => {
     const { report } = all();
     const keys = (o: keyof typeof report.outputs): string[] => report.outputs[o].sections.map((s) => s.key);
     for (const key of ["intake_summary", "assumptions", "queries", "exclusions_limits", "overrides"]) assert.ok(keys("raw_notes").includes(key), key);
-    assert.deepEqual(keys("executive_summary"), ["verdict", "scorecard", "top_issues", "plan_90_day"]);
+    assert.deepEqual(keys("executive_summary"), ["verdict", "scorecard", "pipeline", "top_issues", "plan_90_day"]);
     for (const key of ["stated_problems", "pipeline_deep_dive", "stated_vs_actual", "roadmap", "appendix"]) assert.ok(keys("full_health_check").includes(key), key);
     for (const domain of SALES_CLOUD_DOMAINS) assert.ok(keys("full_health_check").includes(`domain_${domain}`), domain);
   });
@@ -140,12 +140,12 @@ describe("overrides", () => {
     const sized = base.findings.find((x) => x.value.kind !== "not_sized")!;
     const amount = sized.value.kind === "not_sized" ? 0 : sized.value.amount;
     const onValue: NumberOverride = { ...override, target: { type: "finding", id: sized.id, field: "value.amount" }, previousValue: amount, newValue: 1000 };
-    const onMetric: NumberOverride = { ...override, target: { type: "metric", id: "historic.win_rate", field: "value" }, previousValue: 35, newValue: 33 };
+    const onMetric: NumberOverride = { ...override, target: { type: "metric", id: "historic.win_rate", field: "value" }, previousValue: 47, newValue: 45 };
     const { report } = all({ ...base, overrides: [onValue, onMetric] });
     const value = report.teamFindings.find((x) => x.id === sized.id)!.value;
     assert.equal(value.kind !== "not_sized" && value.amount, 1000);
     const m = report.metrics.find((x) => x.id === "historic.win_rate")!;
-    assert.equal(m.status === "measured" && m.value, 33);
+    assert.equal(m.status === "measured" && m.value, 45);
   });
 
   test("say so when there are none", () => {

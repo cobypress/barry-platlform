@@ -32,10 +32,16 @@ describe("every revenue figure carries its assumptions", () => {
       assert.equal(f.status, "issue", id);
       assert.ok(f.value.kind === "revenue", `${id} is sized`);
       assert.ok(f.value.assumptions.length >= 3, id);
-      assert.ok(f.value.assumptions.some((a) => /ceiling/.test(a)), `${id} says it's a ceiling`);
-      assert.ok(f.value.assumptions.some((a) => /win rate of [\d.]+%, measured on \d+ closed deals/.test(a)), `${id} names the rate and its sample`);
       assert.equal(f.value.amount, f.facts.sized, id);
       assert.equal(f.confidence, "medium", id);
+      if (id === "rev.stalled-deals") {
+        // Sized from deals that stalled as long, not from the average deal.
+        assert.ok(f.value.assumptions.some((a) => /that were in one stage for 60 days or more at some point, \d+ went on to win/.test(a)), id);
+        assert.ok(f.value.assumptions.some((a) => a.startsWith("Raw exposure: ")), id);
+        continue;
+      }
+      assert.ok(f.value.assumptions.some((a) => /ceiling/.test(a)), `${id} says it's a ceiling`);
+      assert.ok(f.value.assumptions.some((a) => /win rate of [\d.]+%, measured on \d+ closed deals/.test(a)), `${id} names the rate and its sample`);
     }
   });
 
