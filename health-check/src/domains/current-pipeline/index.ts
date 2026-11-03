@@ -84,7 +84,7 @@ export function shareRule(options: ShareRule): Rule {
         return { outcome: "pass", summary: `Affected: ${result.hits} of ${result.n} ${options.scopeLabel} (${result.rate}%), with no segment above ${options.segmentLimit}%.`, evidence, segmentsChecked: result.segmentsChecked, facts: { hits: result.hits, n: result.n, rate: result.rate } };
       }
       const worst = result.hotspots[0];
-      const hidden = !overLimit ? ` The total looks acceptable, but ${worst!.dimension} ${worst!.key} is at ${worst!.rate}% (${worst!.hits} of ${worst!.n}).` : worst ? ` The worst segment is ${worst.dimension} ${worst.key} at ${worst.rate}%.` : "";
+      const hidden = !overLimit ? ` The total looks acceptable, but by ${worst!.dimension}, ${worst!.key} is at ${worst!.rate}% (${worst!.hits} of ${worst!.n}).` : worst ? ` Worst by ${worst.dimension}: ${worst.key}, at ${worst.rate}%.` : "";
       return {
         outcome: "issue",
         title: options.issueTitle,

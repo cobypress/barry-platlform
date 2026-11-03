@@ -274,7 +274,7 @@ const unlinkedTasks: Rule = {
     return {
       outcome: "issue",
       title: "Tasks are being logged against nothing",
-      summary: `Tasks linked to no record: ${result.hits} of ${result.n} (${result.rate}%).${worst ? ` The worst segment is ${worst.dimension} ${worst.key} at ${worst.rate}%.` : ""} This work won't show on any deal, contact or account.`,
+      summary: `Tasks linked to no record: ${result.hits} of ${result.n} (${result.rate}%).${worst ? ` Worst by ${worst.dimension}: ${worst.key}, at ${worst.rate}%.` : ""} This work won't show on any deal, contact or account.`,
       recommendation: "Show these people how to log against the deal, and check any tool that's creating tasks automatically.",
       recommendationType: "change",
       severity: "low",

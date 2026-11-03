@@ -158,7 +158,7 @@ const noResponse: Rule = {
     return {
       outcome: "issue",
       title: "Leads are going unanswered",
-      summary: `Leads with no logged response after ${RESPONSE_GRACE_DAYS} days: ${result.hits} of ${result.n} (${result.rate}%).${worst ? ` The worst segment is ${worst.dimension} ${worst.key} at ${worst.rate}%.` : ""}`,
+      summary: `Leads with no logged response after ${RESPONSE_GRACE_DAYS} days: ${result.hits} of ${result.n} (${result.rate}%).${worst ? ` Worst by ${worst.dimension}: ${worst.key}, at ${worst.rate}%.` : ""}`,
       recommendation: "Check routing first: unassigned or queue-held leads are the usual cause.",
       recommendationType: "change",
       severity: "medium",
@@ -192,7 +192,7 @@ const convertedWithoutOpportunity: Rule = {
     return {
       outcome: "issue",
       title: "Converted leads aren't becoming opportunities",
-      summary: `Converted with no opportunity: ${result.hits} of ${result.n} (${result.rate}%).${worst ? ` The worst segment is ${worst.dimension} ${worst.key} at ${worst.rate}%.` : ""} Conversion looks better than the pipeline it produced.`,
+      summary: `Converted with no opportunity: ${result.hits} of ${result.n} (${result.rate}%).${worst ? ` Worst by ${worst.dimension}: ${worst.key}, at ${worst.rate}%.` : ""} Conversion looks better than the pipeline it produced.`,
       recommendation: "Agree when a lead should be converted. If it's only to tidy up, take these out of your conversion figures.",
       recommendationType: "investigate",
       severity: "low",

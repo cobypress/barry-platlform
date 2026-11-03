@@ -289,7 +289,7 @@ describe("segment before concluding (rule 4)", () => {
     const f = issue(analyseExtracts(extracts).findings, "dq.open-opps-missing-amount");
     assert.ok(f.facts.rate! <= 10, `total is ${f.facts.rate}%`);
     assert.ok(f.facts.worstSegmentRate! > 30);
-    assert.match(f.summary, /The total looks acceptable, but record type Renewal/);
+    assert.match(f.summary, /The total looks acceptable, but by record type, Renewal/);
   });
 
   test("stale leads: the total looks fine, one source doesn't", () => {
