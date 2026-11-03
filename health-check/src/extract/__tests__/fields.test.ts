@@ -63,6 +63,20 @@ describe("a field the org doesn't have", () => {
     assert.ok(healthy.output!.findings.some((f) => f.ruleId === "fct.forecasting-in-use" && f.status !== "not_measurable"), "forecast rows were still usable");
   });
 
+  test("an org with no delegated approvers still has its users read", async () => {
+    // As seen on a real Professional Edition org: the whole user read failed on this field.
+    const sim = new Simulator({ dropFields: { User: ["DelegatedApproverId"] } });
+    const result = await run(sim);
+    const [users] = queries(sim, "User");
+    assert.ok(users, "User was read");
+    assert.doesNotMatch(users, /DelegatedApproverId/);
+    assert.match(users, /Profile\.UserLicense\.Name/);
+    const checkpointed = checkpoint<Sourced<unknown>>(result.dir, "users");
+    assert.equal(checkpointed.status, "ok");
+    assert.deepEqual(checkpointed.status === "ok" && checkpointed.missingFields, ["User.DelegatedApproverId"]);
+    assert.ok(!result.output!.findings.some((f) => (f.notMeasurableReason ?? "").startsWith("Users couldn't be read")));
+  });
+
   test("an absent required field makes the source unavailable, names the field, and spends no query", async () => {
     const sim = new Simulator({ dropFields: { LoginHistory: ["LoginTime"], ForecastingItem: ["ForecastCategoryName"] } });
     const result = await run(sim);
@@ -112,7 +126,7 @@ describe("the describe step", () => {
     const out = await fieldDescribeExtractor.run({ client, partial } as unknown as ExtractContext);
 
     const described = sim.requests.map((r) => new URL(r.url).pathname.match(/sobjects\/(\w+)\/describe/)?.[1]).filter(Boolean);
-    assert.deepEqual(described.sort(), ["ForecastingItem", "LoginHistory"]);
+    assert.deepEqual(described.sort(), ["ForecastingItem", "LoginHistory", "User"]);
     assert.deepEqual(out.Campaign, { status: "ok", fields: ["id", "type"], relationships: [] });
     assert.equal(out.LoginHistory?.status, "ok");
   });

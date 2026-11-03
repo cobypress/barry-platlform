@@ -196,12 +196,19 @@ function stageConversion(ctx: Ctx, data: Ready): Metric[] {
   const { minSample } = ctx.calibration;
   if (withStages.length < minSample) return [notMeasurable({ ...definition, exclusions }, `${withStages.length} closed deals with stage history is below the calibrated minimum of ${minSample}.`)];
 
-  const reaching = (index: number): Deal[] => withStages.filter((d) => furthest(d)! >= index);
+  // Only stages a deal in the window actually sat in. A retired stage earlier in
+  // the order would otherwise show every deal passing through it: on a real org,
+  // eleven retired stages read as 100% steps nobody took.
+  const used = openStages.filter((stage) => withStages.some((d) => d.history.some((h) => h.StageName === stage)));
+  const unused = openStages.filter((stage) => !used.includes(stage));
+  if (unused.length > 0) exclusions.push(`Stages no closed deal in the window was in: ${unused.join(", ")}`);
+  const steps = used.map((stage) => orderOf(stage)!);
+  const reaching = (step: number): Deal[] => (step >= steps.length ? withStages.filter((d) => d.category === "won") : withStages.filter((d) => furthest(d)! >= steps[step]!));
   const segments: MetricSegment[] = [];
-  for (let i = 0; i < openStages.length; i++) {
+  for (let i = 0; i < used.length; i++) {
     const entered = reaching(i);
     const next = reaching(i + 1);
-    const label = i + 1 < openStages.length ? `${openStages[i]} to ${openStages[i + 1]}` : `${openStages[i]} to won`;
+    const label = i + 1 < used.length ? `${used[i]} to ${used[i + 1]}` : `${used[i]} to won`;
     const thin = entered.length < minSample;
     segments.push({
       dimension: "step",
@@ -210,10 +217,10 @@ function stageConversion(ctx: Ctx, data: Ready): Metric[] {
       value: thin ? null : pct(next.length, entered.length),
       notMeasurableReason: thin ? `${SEGMENT_NOTE} (${entered.length} of ${minSample})` : null,
     });
-    const skipped = entered.filter((d) => !d.history.some((h) => h.StageName === openStages[i])).length;
+    const skipped = entered.filter((d) => !d.history.some((h) => h.StageName === used[i])).length;
     segments.push({
       dimension: "skipped stage",
-      key: openStages[i]!,
+      key: used[i]!,
       n: entered.length,
       value: thin ? null : pct(skipped, entered.length),
       notMeasurableReason: thin ? `${SEGMENT_NOTE} (${entered.length} of ${minSample})` : null,

@@ -5,6 +5,7 @@ import { BUDGET_DEFAULTS, RULE_SET_VERSION, SF_DEFAULTS } from "../config.ts";
 import { scoreDomains } from "../domains/scoring.ts";
 import type { DomainModule } from "../domains/types.ts";
 import { orgExtractor } from "../extract/configuration.ts";
+import { fieldDescribeExtractor } from "../extract/fields.ts";
 import { monthsBefore, type ExtractContext, type Extractor, type PartialStore } from "../extract/types.ts";
 import type { UserRow } from "../extract/users.ts";
 import { usersExtractor } from "../extract/users.ts";
@@ -79,7 +80,11 @@ class FilePartialStore implements PartialStore {
 }
 
 export function collectExtractors(modules: DomainModule[]): Extractor[] {
-  const seen = new Map<string, Extractor>([[orgExtractor.id, orgExtractor]]);
+  // Field describes go first, because other reads plan their SELECT from them.
+  const seen = new Map<string, Extractor>([
+    [orgExtractor.id, orgExtractor],
+    [fieldDescribeExtractor.id, fieldDescribeExtractor],
+  ]);
   for (const module of modules) for (const extractor of module.extractors) if (!seen.has(extractor.id)) seen.set(extractor.id, extractor);
   return [...seen.values()];
 }

@@ -583,6 +583,11 @@ export const FIELD_DESCRIBES: Record<string, { fields: unknown[] }> = {
       .concat(lookup("OwnerId", "Owner"), lookup("PeriodId", "Period"), lookup("ForecastingTypeId", "ForecastingType")),
   },
   Campaign: { fields: ["Id", "Name", "Type", "Status", "ActualCost", "BudgetedCost", "IsActive"].map((f) => standardField(f)) },
+  User: {
+    fields: ["Id", "Name", "Username", "Email", "IsActive", "UserType", "LastLoginDate", "CreatedDate"]
+      .map((f) => standardField(f))
+      .concat(lookup("ProfileId", "Profile"), lookup("UserRoleId", "UserRole"), lookup("ManagerId", "Manager"), lookup("DelegatedApproverId", "DelegatedApprover")),
+  },
 };
 
 // Total and recent counts for custom field usage, as COUNT(field) would give them.

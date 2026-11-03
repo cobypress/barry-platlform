@@ -14,19 +14,21 @@ export type UserRow = {
   UserRole: { Name: string } | null;
   LastLoginDate: string | null;
   CreatedDate: string;
-  ManagerId: string | null;
-  DelegatedApproverId: string | null;
+  /** Undefined when the org has no such field, as in Professional Edition. */
+  ManagerId?: string | null;
+  DelegatedApproverId?: string | null;
 };
 
 export const usersExtractor: Extractor<Sourced<UserRow[]>> = {
   id: "users",
-  version: 1,
-  run: (ctx) =>
-    readSoql<UserRow>(
-      ctx,
-      "SELECT Id, Name, Username, Email, IsActive, UserType, Profile.Name, Profile.UserLicense.Name, UserRole.Name, " +
-        "LastLoginDate, CreatedDate, ManagerId, DelegatedApproverId FROM User WHERE UserType = 'Standard'",
-    ),
+  version: 2,
+  run(ctx) {
+    const plan = planFields(ctx, FIELD_SPECS.user);
+    // The licence is a second hop on Profile, which the plan can't check, so it's added here.
+    const select = (fields: string) => `SELECT ${fields.replace("Profile.Name", "Profile.Name, Profile.UserLicense.Name")} FROM User WHERE UserType = 'Standard'`;
+    if (!plan.ok) return Promise.resolve({ status: "unavailable", reason: plan.reason, source: { kind: "soql", api: "rest", query: select(FIELD_SPECS.user.required.join(", ")) } });
+    return readSoql<UserRow>(ctx, select(plan.select), { missingFields: plan.missing });
+  },
 };
 
 export type UserLicenseRow = { Name: string; TotalLicenses: number; UsedLicenses: number; Status: string };

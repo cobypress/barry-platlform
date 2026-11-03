@@ -120,7 +120,8 @@ export function userGuards(ctx: RuleContext, user: UserRow): Guard[] {
     guards.push(guard("not-default-workflow-user", subject, "unknown", `The manual step is ${manual.status}, so we can't rule this user out.`, [manual.evidence]));
   }
 
-  // Someone's manager or delegated approver.
+  // Someone's manager or delegated approver. Where the org has no such field,
+  // nobody can hold that role, so its absence passes rather than blocks.
   if (users.status === "ok") {
     const dependants = users.data.filter((u) => u.IsActive && u.Id !== user.Id && (u.ManagerId === user.Id || u.DelegatedApproverId === user.Id));
     if (dependants.length > 0) {

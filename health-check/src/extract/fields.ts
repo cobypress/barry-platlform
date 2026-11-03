@@ -26,6 +26,13 @@ export const FIELD_SPECS = {
     optional: ["AmountWithoutAdjustments", "HasAdjustment"],
   },
   campaign: { object: "Campaign", required: ["Id", "Type"], optional: ["ActualCost"] },
+  // Professional Edition has no delegated approvers, and a real one failed the
+  // whole user read on that field.
+  user: {
+    object: "User",
+    required: ["Id", "Name", "Username", "Email", "IsActive", "UserType", "Profile.Name", "UserRole.Name", "LastLoginDate", "CreatedDate"],
+    optional: ["ManagerId", "DelegatedApproverId"],
+  },
 } as const satisfies Record<string, FieldSpec>;
 
 export type DescribedObject =

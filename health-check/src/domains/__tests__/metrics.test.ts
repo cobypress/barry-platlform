@@ -208,6 +208,17 @@ describe("stage conversion", () => {
   });
 });
 
+describe("a retired stage nobody used in the window", () => {
+  test("isn't shown as a step every deal passed through", () => {
+    // As seen on a real org: retired stages early in the order read as 100% steps.
+    const stages = [{ name: "Old", category: "open", order: 0 }, ...calibration().stages];
+    const m = measured(metrics({ calibration: calibration({ stages }) }).get("historic.stage_conversion"));
+    assert.ok(!m.segments.some((s) => s.key.startsWith("Old")), "no step from the retired stage");
+    assert.equal(m.segments.find((s) => s.dimension === "step" && s.key === "A to B")?.value, 66.7);
+    assert.ok(m.exclusions.some((e) => e === "Stages no closed deal in the window was in: Old"));
+  });
+});
+
 describe("slippage", () => {
   const all = metrics();
   test("1 of 6 closed deals moved later", () => assert.equal(value(all, "historic.slippage_rate"), 16.7));
