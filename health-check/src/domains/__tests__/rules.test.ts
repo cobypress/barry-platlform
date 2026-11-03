@@ -138,10 +138,11 @@ describe("automation", () => {
     const changed = clone(extracts);
     const apex = changed.get(apexExtractor.id) as { orgCoverage: { data: unknown[] }; classCoverage: { data: Array<{ covered: number }> } };
     apex.orgCoverage.data = [{ PercentCovered: 0 }];
-    for (const c of apex.classCoverage.data) c.covered = 0;
+    // One class keeps its figure, as on the real org where this was seen.
+    apex.classCoverage.data.forEach((c, i) => (c.covered = i === 0 ? c.covered : 0));
     const [f] = byRule(analyseExtracts(changed).findings, "aut.apex-coverage");
     assert.equal(f?.status, "not_measurable");
-    assert.match(f?.notMeasurableReason ?? "", /cleared or tests haven't been run/);
+    assert.match(f?.notMeasurableReason ?? "", /cleared or only some tests have run/);
   });
   test("two triggers on one object", () => assert.deepEqual(issue(analyseExtracts(extracts).findings, "aut.multiple-triggers").subjects.map((s) => s.label), ["Opportunity"]));
   test("unreadable metadata is not measurable, not a clean pass", () => {
