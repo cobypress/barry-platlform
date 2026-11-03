@@ -86,10 +86,10 @@
    "text": "{\"sObjects\":[{\"name\":\"Account\",\"count\":500},{\"name\":\"Project__c\",\"count\":20},{\"name\":\"Invoice__c\",\"count\":12000},{\"name\":\"Project_Line__c\",\"count\":40},{\"name\":\"Empty_Object__c\",\"count\":0}]}"
   },
   {
-   "key": "GET /services/data/v66.0/tooling/query?q=SELECT%20Id%2C%20Name%2C%20TableEnumOrId%20FROM%20Layout",
+   "key": "GET /services/data/v66.0/tooling/query?q=SELECT%20Id%2C%20Name%2C%20EntityDefinitionId%20FROM%20Layout",
    "status": 200,
    "limitInfo": "api-usage=1013/100000",
-   "text": "{\"totalSize\":6,\"done\":true,\"records\":[{\"Id\":\"00h000000000001AAA\",\"Name\":\"Account Layout\",\"TableEnumOrId\":\"Account\"},{\"Id\":\"00h000000000002AAA\",\"Name\":\"Opportunity Layout\",\"TableEnumOrId\":\"Opportunity\"},{\"Id\":\"00h000000000003AAA\",\"Name\":\"Lead Layout\",\"TableEnumOrId\":\"Lead\"},{\"Id\":\"00h000000000004AAA\",\"Name\":\"Old Opportunity Layout\",\"TableEnumOrId\":\"Opportunity\"},{\"Id\":\"00h000000000005AAA\",\"Name\":\"Contact Layout\",\"TableEnumOrId\":\"Contact\"},{\"Id\":\"00h000000000006AAA\",\"Name\":\"Partner Lead Layout\",\"TableEnumOrId\":\"Lead\"}]}"
+   "text": "{\"totalSize\":6,\"done\":true,\"records\":[{\"Id\":\"00h000000000001AAA\",\"Name\":\"Account Layout\",\"EntityDefinitionId\":\"Account\"},{\"Id\":\"00h000000000002AAA\",\"Name\":\"Opportunity Layout\",\"EntityDefinitionId\":\"Opportunity\"},{\"Id\":\"00h000000000003AAA\",\"Name\":\"Lead Layout\",\"EntityDefinitionId\":\"Lead\"},{\"Id\":\"00h000000000004AAA\",\"Name\":\"Old Opportunity Layout\",\"EntityDefinitionId\":\"Opportunity\"},{\"Id\":\"00h000000000005AAA\",\"Name\":\"Contact Layout\",\"EntityDefinitionId\":\"Contact\"},{\"Id\":\"00h000000000006AAA\",\"Name\":\"Partner Lead Layout\",\"EntityDefinitionId\":\"Lead\"}]}"
   },
   {
    "key": "GET /services/data/v66.0/tooling/query?q=SELECT%20LayoutId%20FROM%20ProfileLayout",
@@ -134,7 +134,7 @@
    "text": "{\"totalSize\":4,\"done\":true,\"records\":[{\"Id\":\"01p000000000001AAA\",\"Name\":\"OpportunityHandler\",\"ApiVersion\":60,\"Status\":\"Active\",\"LengthWithoutComments\":1200,\"Body\":\"public class OpportunityHandler { /* uses Competitor__c */ }\"},{\"Id\":\"01p000000000002AAA\",\"Name\":\"LeadRouter\",\"ApiVersion\":62,\"Status\":\"Active\",\"LengthWithoutComments\":800,\"Body\":\"public class LeadRouter { }\"},{\"Id\":\"01p000000000003AAA\",\"Name\":\"LegacySync\",\"ApiVersion\":38,\"Status\":\"Active\",\"LengthWithoutComments\":400,\"Body\":\"public class LegacySync { }\"},{\"Id\":\"01p000000000004AAA\",\"Name\":\"OpportunityHandlerTest\",\"ApiVersion\":60,\"Status\":\"Active\",\"LengthWithoutComments\":300,\"Body\":\"@isTest class OpportunityHandlerTest { }\"}]}"
   },
   {
-   "key": "GET /services/data/v66.0/tooling/query?q=SELECT%20Id%2C%20Name%2C%20TableEnumOrId%2C%20ApiVersion%2C%20Status%2C%20Body%20FROM%20ApexTrigger%20WHERE%20NamespacePrefix%20%3D%20null",
+   "key": "GET /services/data/v66.0/query?q=SELECT%20Id%2C%20Name%2C%20TableEnumOrId%2C%20ApiVersion%2C%20Status%2C%20Body%20FROM%20ApexTrigger%20WHERE%20NamespacePrefix%20%3D%20null",
    "status": 200,
    "limitInfo": "api-usage=1021/100000",
    "text": "{\"totalSize\":3,\"done\":true,\"records\":[{\"Id\":\"01q000000000001AAA\",\"Name\":\"OpportunityTrigger\",\"TableEnumOrId\":\"Opportunity\",\"ApiVersion\":60,\"Status\":\"Active\",\"Body\":\"trigger OpportunityTrigger on Opportunity (before insert) { }\"},{\"Id\":\"01q000000000002AAA\",\"Name\":\"OpportunitySplitTrigger\",\"TableEnumOrId\":\"Opportunity\",\"ApiVersion\":60,\"Status\":\"Active\",\"Body\":\"trigger OpportunitySplitTrigger on Opportunity (after update) { }\"},{\"Id\":\"01q000000000003AAA\",\"Name\":\"AccountTrigger\",\"TableEnumOrId\":\"Account\",\"ApiVersion\":60,\"Status\":\"Active\",\"Body\":\"trigger AccountTrigger on Account (before update) { }\"}]}"

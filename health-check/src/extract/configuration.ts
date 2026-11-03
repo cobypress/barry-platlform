@@ -140,16 +140,18 @@ export const recordCountsExtractor: Extractor<Sourced<Array<{ name: string; coun
 };
 
 export type LayoutData = {
-  layouts: Sourced<Array<{ Id: string; Name: string; TableEnumOrId: string }>>;
+  layouts: Sourced<Array<{ Id: string; Name: string; EntityDefinitionId: string }>>;
   assignments: Sourced<Array<{ LayoutId: string }>>;
 };
 
+// The Tooling API reference lists EntityDefinitionId on Layout, not TableEnumOrId,
+// which is ProfileLayout's field. Both hold the object's name, or its id if custom.
 export const layoutsExtractor: Extractor<LayoutData> = {
   id: "layouts",
-  version: 1,
+  version: 2,
   async run(ctx) {
     return {
-      layouts: await readSoql(ctx, "SELECT Id, Name, TableEnumOrId FROM Layout", { api: "tooling" }),
+      layouts: await readSoql(ctx, "SELECT Id, Name, EntityDefinitionId FROM Layout", { api: "tooling" }),
       assignments: await readSoql(ctx, "SELECT LayoutId FROM ProfileLayout", { api: "tooling" }),
     };
   },

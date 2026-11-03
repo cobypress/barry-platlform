@@ -51,7 +51,7 @@ function stripBodies<R extends { Name: string; Body?: string }>(rows: Sourced<R[
 
 export const apexExtractor: Extractor<ApexData> = {
   id: "apex",
-  version: 1,
+  version: 2,
   async run(ctx) {
     const references: ReferenceIndex = { users: {}, fields: {} };
     const classes = await readSoql<ApexClassRow & { Body?: string }>(
@@ -59,10 +59,11 @@ export const apexExtractor: Extractor<ApexData> = {
       "SELECT Id, Name, ApiVersion, Status, LengthWithoutComments, Body FROM ApexClass WHERE NamespacePrefix = null",
       { api: "tooling" },
     );
+    // Through REST, not Tooling: the Tooling reference doesn't list Name,
+    // TableEnumOrId or NamespacePrefix on ApexTrigger, and the Object Reference does.
     const triggers = await readSoql<ApexTriggerRow & { Body?: string }>(
       ctx,
       "SELECT Id, Name, TableEnumOrId, ApiVersion, Status, Body FROM ApexTrigger WHERE NamespacePrefix = null",
-      { api: "tooling" },
     );
     const orgCoverage = await readSoql<{ PercentCovered: number | null }>(ctx, "SELECT PercentCovered FROM ApexOrgWideCoverage", { api: "tooling" });
     const rawCoverage = await readSoql<{ ApexClassOrTrigger: { Name: string } | null; NumLinesCovered: number; NumLinesUncovered: number }>(

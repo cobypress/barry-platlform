@@ -142,7 +142,7 @@ const unassignedLayouts: Rule = {
     if (assignments.status !== "ok") return { outcome: "not_measurable", reason: `Layout assignments couldn't be read: ${assignments.reason}`, evidence: [ctx.ev(assignments.source, { count: null })] };
     const assigned = new Set(assignments.data.map((a) => a.LayoutId));
     const unused = layouts.data.filter((l) => !assigned.has(l.Id));
-    const objects = new Set(layouts.data.map((l) => l.TableEnumOrId));
+    const objects = new Set(layouts.data.map((l) => l.EntityDefinitionId));
     const evidence = [ctx.ev(layouts.source, { count: layouts.data.length }), ctx.ev(assignments.source, { count: assigned.size })];
     if (unused.length === 0) return { outcome: "pass", summary: `All ${layouts.data.length} page layouts are assigned to a profile.`, evidence, segmentsChecked: [{ dimension: "object", segments: objects.size }] };
     return {

@@ -487,12 +487,12 @@ export const USER_LICENSES = [
 export const PERMISSION_SET_LICENSES = [{ MasterLabel: "Sales Console", TotalLicenses: 15, UsedLicenses: 3, Status: "Active", ExpirationDate: null }];
 
 export const LAYOUTS = [
-  { Id: sfId("00h", 1), Name: "Account Layout", TableEnumOrId: "Account" },
-  { Id: sfId("00h", 2), Name: "Opportunity Layout", TableEnumOrId: "Opportunity" },
-  { Id: sfId("00h", 3), Name: "Lead Layout", TableEnumOrId: "Lead" },
-  { Id: sfId("00h", 4), Name: "Old Opportunity Layout", TableEnumOrId: "Opportunity" },
-  { Id: sfId("00h", 5), Name: "Contact Layout", TableEnumOrId: "Contact" },
-  { Id: sfId("00h", 6), Name: "Partner Lead Layout", TableEnumOrId: "Lead" },
+  { Id: sfId("00h", 1), Name: "Account Layout", EntityDefinitionId: "Account" },
+  { Id: sfId("00h", 2), Name: "Opportunity Layout", EntityDefinitionId: "Opportunity" },
+  { Id: sfId("00h", 3), Name: "Lead Layout", EntityDefinitionId: "Lead" },
+  { Id: sfId("00h", 4), Name: "Old Opportunity Layout", EntityDefinitionId: "Opportunity" },
+  { Id: sfId("00h", 5), Name: "Contact Layout", EntityDefinitionId: "Contact" },
+  { Id: sfId("00h", 6), Name: "Partner Lead Layout", EntityDefinitionId: "Lead" },
 ];
 
 export const PROFILE_LAYOUTS = [1, 2, 3, 5].map((n) => ({ LayoutId: sfId("00h", n) }));
