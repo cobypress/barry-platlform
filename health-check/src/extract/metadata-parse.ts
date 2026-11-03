@@ -32,6 +32,7 @@ export type WorkflowSummary = {
 export type ValidationRuleSummary = { object: string; name: string; active: boolean; described: boolean };
 // Own custom fields only. Help text is what a user sees, a description is for whoever maintains the field.
 export type CustomFieldSummary = { object: string; name: string; described: boolean; helpText: boolean };
+export type RecordTypeSummary = { object: string; name: string; active: boolean };
 
 // Where a user or field is mentioned. Values are metadata paths. Raw XML isn't
 // kept: what the rules and guards need is here, and less kept is less to leak.
@@ -42,12 +43,15 @@ export type MetadataBundle = {
   workflows: WorkflowSummary[];
   validationRules: ValidationRuleSummary[];
   customFields: CustomFieldSummary[];
+  recordTypes: RecordTypeSummary[];
+  /** Every object with a definition in the retrieve, whatever it holds. */
+  objects: string[];
   references: ReferenceIndex;
   filesRead: number;
 };
 
 // Arrays are forced so one child element parses the same as many.
-const ARRAY_TAGS = new Set(["rules", "actions", "workflowTimeTriggers", "validationRules", "fields", "recordCreates", "recordUpdates", "recordDeletes", "actionCalls", "loops"]);
+const ARRAY_TAGS = new Set(["rules", "actions", "workflowTimeTriggers", "validationRules", "fields", "recordCreates", "recordUpdates", "recordDeletes", "actionCalls", "loops", "recordTypes"]);
 const parser = new XMLParser({ ignoreAttributes: true, parseTagValue: false, isArray: (name) => ARRAY_TAGS.has(name) });
 
 const USER_ID = /\b005[A-Za-z0-9]{12}(?:[A-Za-z0-9]{3})?\b/g;
@@ -131,7 +135,7 @@ function parseWorkflow(path: string, xml: string): WorkflowSummary {
   };
 }
 
-function parseObject(path: string, xml: string, index: ReferenceIndex): { validationRules: ValidationRuleSummary[]; customFields: CustomFieldSummary[] } {
+function parseObject(path: string, xml: string, index: ReferenceIndex): { object: string; validationRules: ValidationRuleSummary[]; customFields: CustomFieldSummary[]; recordTypes: RecordTypeSummary[] } {
   const object = path.replace(/^objects\//, "").replace(/\.object(-meta\.xml)?$/, "");
   const parsed = (parser.parse(xml) as { CustomObject?: Record<string, any> }).CustomObject ?? {};
   const customFields = ((parsed.fields ?? []) as Array<Record<string, any>>)
@@ -144,12 +148,13 @@ function parseObject(path: string, xml: string, index: ReferenceIndex): { valida
     indexReferences(index, String(rule.errorConditionFormula ?? ""), `${path}#validationRules.${name}`);
     return { object, name, active: String(rule.active) === "true", described: hasText(rule.description) };
   });
-  return { validationRules, customFields };
+  const recordTypes = ((parsed.recordTypes ?? []) as Array<Record<string, any>>).map((r) => ({ object, name: String(r.fullName ?? ""), active: String(r.active) === "true" }));
+  return { object, validationRules, customFields, recordTypes };
 }
 
 /** Turns the unzipped retrieve into summaries. A file that can't be parsed fails the extractor. */
 export function parseMetadataBundle(files: Record<string, string>): MetadataBundle {
-  const bundle: MetadataBundle = { flows: [], workflows: [], validationRules: [], customFields: [], references: { users: {}, fields: {} }, filesRead: 0 };
+  const bundle: MetadataBundle = { flows: [], workflows: [], validationRules: [], customFields: [], recordTypes: [], objects: [], references: { users: {}, fields: {} }, filesRead: 0 };
   for (const [path, raw] of Object.entries(files).sort(([a], [b]) => a.localeCompare(b))) {
     if (path === "package.xml") continue;
     const xml = redactSecrets(raw);
@@ -164,6 +169,8 @@ export function parseMetadataBundle(files: Record<string, string>): MetadataBund
       const parsed = parseObject(path, xml, bundle.references);
       bundle.validationRules.push(...parsed.validationRules);
       bundle.customFields.push(...parsed.customFields);
+      bundle.recordTypes.push(...parsed.recordTypes);
+      bundle.objects.push(parsed.object);
     } else {
       indexReferences(bundle.references, xml, path);
     }

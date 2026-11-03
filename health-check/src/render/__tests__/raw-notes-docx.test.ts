@@ -63,6 +63,12 @@ describe("the Word raw notes", () => {
     for (const m of base.metrics) assert.ok(notes.text.includes(m.label), m.id);
   });
 
+  test("hold the object inventory, every object in its own row", () => {
+    assert.match(notes.text, /In short: +Object inventory: 7 objects counted/);
+    for (const object of ["Opportunity", "Invoice__c", "Lead", "Account", "Project__c", "Contact", "Project_Line__c"]) assert.ok(notes.text.includes(object), object);
+    assert.match(notes.text, /Not read: +Opportunity, records: Salesforce keeps no count for this object/);
+  });
+
   test("say what couldn't be measured and why", () => {
     const gap = base.findings.find((f) => f.status === "not_measurable")!;
     assert.ok(notes.text.includes(ukDates(gap.notMeasurableReason!)));

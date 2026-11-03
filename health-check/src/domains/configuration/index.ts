@@ -1,6 +1,7 @@
 import { metadataExtractor, apexExtractor } from "../../extract/automation.ts";
 import {
   CORE_OBJECTS,
+  customObjectsExtractor,
   duplicateRulesExtractor,
   fieldUsageExtractor,
   isOwnCustomField,
@@ -16,6 +17,7 @@ import { fieldGuards } from "../../guards/field-guards.ts";
 import { notSized, pct, plural, type Rule, type RuleResult } from "../../engine/rule.ts";
 import type { DomainModule } from "../types.ts";
 import { calibratedHours } from "../value.ts";
+import { objectInventoryMetric } from "./inventory.ts";
 
 const FIELD_SPRAWL_LIMIT = 150;
 const UNUSED_FILL_LIMIT = 1;
@@ -343,6 +345,7 @@ export const configurationModule: DomainModule = {
     fieldUsageExtractor,
     recordCountsExtractor,
     layoutsExtractor,
+    customObjectsExtractor,
     duplicateRulesExtractor,
     setupAuditExtractor,
     metadataExtractor,
@@ -352,5 +355,6 @@ export const configurationModule: DomainModule = {
     opportunitiesExtractor,
     reportDefinitionsExtractor,
   ],
+  metrics: [objectInventoryMetric],
   rules: [customFieldSprawl, unusedCustomFields, unassignedLayouts, undocumentedFields, stageSprawl, picklistSprawl, setupChangeConcentration],
 };

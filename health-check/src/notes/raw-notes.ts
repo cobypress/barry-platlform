@@ -1,6 +1,7 @@
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import type { Calibration, Evidence, Finding, ManualStep, Metric, Run, Score } from "../schemas/index.ts";
 import { domainLabel } from "../narrative/select.ts";
+import { automationOf, INVENTORY_COLUMNS, inventoryRows, OBJECT_INVENTORY } from "../domains/configuration/inventory.ts";
 
 // The Markdown forerunner of the Word raw notes. This is the one place tokens
 // become names, because this document is what the customer's admin reads.
@@ -53,16 +54,39 @@ function findingBlock(f: Finding): string {
   return lines.join("\n");
 }
 
+/** Every object, where the full report shows only the busiest. */
+function inventoryTable(m: Metric): string[] {
+  const rows = inventoryRows(m);
+  if (rows.length === 0) return [];
+  return [
+    `| Object | ${INVENTORY_COLUMNS.map((c) => c.heading).join(" | ")} |`,
+    `| --- | ${INVENTORY_COLUMNS.map(() => "---").join(" | ")} |`,
+    ...rows.map((row) => `| ${row.object} | ${INVENTORY_COLUMNS.map((c) => row.counts[c.key] ?? `Not read (${row.reasons[c.key] ?? "unknown"})`).join(" | ")} |`),
+    "",
+  ];
+}
+
+/** One line for the summary: where the complexity is, in a sentence. */
+export function inventoryLine(m: Metric | undefined): string | null {
+  if (!m) return null;
+  if (m.status === "not_measurable") return `Object inventory: not measurable. ${m.reason}`;
+  const [busiest] = inventoryRows(m);
+  const top = busiest && automationOf(busiest) > 0 ? ` The busiest is ${busiest.object}, with ${automationOf(busiest)} rules, flows and triggers.` : "";
+  return `Object inventory: ${m.value} objects counted, carrying ${m.stats.automation} rules, flows and triggers, of which ${m.stats.undocumented} have no description.${top}`;
+}
+
 function metricBlock(m: Metric): string {
   if (m.status === "not_measurable") {
     return [`### ${m.label}`, "", `**Not measurable.** ${m.reason}`, "", `*Definition:* ${m.definition}`, ""].join("\n");
   }
   const unit = m.unit === "percent" ? "%" : m.unit === "days" ? " days" : "";
-  const lines = [`### ${m.label}: ${m.value}${unit}`, "", `*Definition:* ${m.definition}`, "", `**Sample:** ${m.n} deals${m.dateRange ? `, ${m.dateRange.from} to ${m.dateRange.to}` : ""}`, ""];
+  const sample = m.id === OBJECT_INVENTORY ? `${m.n} objects` : `${m.n} deals`;
+  const lines = [`### ${m.label}: ${m.value}${unit}`, "", `*Definition:* ${m.definition}`, "", `**Sample:** ${sample}${m.dateRange ? `, ${m.dateRange.from} to ${m.dateRange.to}` : ""}`, ""];
   if (Object.keys(m.stats).length) lines.push(`**Detail:** ${Object.entries(m.stats).map(([k, v]) => `${k} ${v}`).join(", ")}`, "");
   if (m.exclusions.length) lines.push(`**Excludes:** ${m.exclusions.join("; ")}`, "");
   if (m.assumptions.length) lines.push(`**Assumptions:** ${m.assumptions.join("; ")}`, "");
-  if (m.segments.length) {
+  if (m.id === OBJECT_INVENTORY) lines.push(...inventoryTable(m));
+  else if (m.segments.length) {
     lines.push("| Segment | Key | Deals | Value |", "| --- | --- | --- | --- |");
     for (const s of m.segments) lines.push(`| ${s.dimension} | ${s.key} | ${s.n} | ${s.value ?? s.notMeasurableReason ?? "not measurable"} |`);
     lines.push("");
@@ -111,6 +135,7 @@ export function renderRawNotes(input: { run: Run; calibration: Calibration; find
     `- ${issues.length} issues, ${passed.length} checks passed, ${notMeasurable.length} not measurable`,
     `- ${manualSteps.filter((s) => s.status === "pending").length} manual steps outstanding`,
     `- ${metrics.filter((m) => m.status === "measured").length} of ${metrics.length} pipeline metrics measured`,
+    ...[inventoryLine(metrics.find((m) => m.id === OBJECT_INVENTORY))].flatMap((line) => (line ? [`- ${line}`] : [])),
     `- API calls: ${run.budget.callsMade} used, stopping at ${Math.round(run.budget.stopAtShare * 100)}% of the org's daily limit`,
     ...(stopped ? [`- **This run is incomplete:** ${run.budget.stoppedReason}`] : []),
     "",

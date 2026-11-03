@@ -348,10 +348,12 @@ describe("data quality", () => {
   test("records with inactive owners", () => assert.equal(issue(analyseExtracts(extracts).findings, "dq.records-inactive-owner").facts.strandedTotal, 190));
   test("undocumented automation is counted by type, with tests and hidden code left out", () => {
     const f = issue(analyseExtracts(extracts).findings, "aut.undocumented-automation");
-    // Flows 2 of 3, Process Builders 1 of 1, Workflow Rules 2 of 2, validation rules 0 of 1,
-    // code 5 of 6: the commented class counts, the test class doesn't.
-    assert.deepEqual(f.facts, { total: 13, missing: 10, rate: 76.9 });
-    assert.match(f.summary, /Validation rules: 0 of 1/);
+    // Flows 3 of 4, Process Builders 1 of 1, Workflow Rules 2 of 2, validation rules 0 of 2,
+    // code 5 of 7: the commented class and trigger count, the test class doesn't.
+    // The inactive validation rule on Invoice__c isn't counted.
+    assert.deepEqual(f.facts, { total: 16, missing: 11, rate: 68.8 });
+    assert.match(f.summary, /Validation rules: 0 of 2/);
+    assert.match(f.summary, /Apex classes and triggers: 5 of 7/);
   });
   test("an edition with no Apex says so, rather than that the read failed", () => {
     const changed = clone(extracts);
@@ -371,8 +373,9 @@ describe("data quality", () => {
   });
   test("custom fields with no help text or description", () => {
     const f = issue(analyseExtracts(extracts).findings, "cfg.undocumented-fields");
-    assert.deepEqual(f.facts, { fields: 4, bare: 3, rate: 75, noHelpText: 3 });
-    assert.deepEqual(f.subjects.map((s) => s.label), ["Opportunity"]);
+    // Opportunity 3 of 4 bare, Invoice__c 2 of 3, Project__c 1 of 1.
+    assert.deepEqual(f.facts, { fields: 8, bare: 6, rate: 75, noHelpText: 7 });
+    assert.deepEqual(f.subjects.map((s) => s.label), ["Opportunity", "Invoice__c", "Project__c"]);
   });
   test("duplicate rules only count when active", () => assert.deepEqual(issue(analyseExtracts(extracts).findings, "dq.duplicate-rules-missing").subjects.map((s) => s.label), ["Account", "Contact"]));
   test("a missing duplicate rule on Lead isn't raised when no leads are created", () => {

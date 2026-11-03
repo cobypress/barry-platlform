@@ -2,6 +2,7 @@ import { currentBody, TOP_ISSUE_COUNT, type BuiltOutput, type BuiltReport } from
 import { buildPlan, domainLabel, domainsInOrder, issuesOf, scorecard, topIssues, verdictOf } from "../narrative/select.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { canRelease, type Finding, type Metric } from "../schemas/index.ts";
+import { INVENTORY_COLUMNS, inventoryRows, OBJECT_INVENTORY } from "../domains/configuration/inventory.ts";
 import { closedAsChart, deliveryOutlookChart, HALF_WIDTH, lostByStageChart, pipelineOverTime, scorecardChart, stageFunnel, stageVelocityChart, topAccountsChart, winRateBySegment, winsByCustomerChart, wonValueByChart } from "./charts.ts";
 import { compactMoney, longDate, monthYear, percent } from "./format.ts";
 import type { Calibration } from "../schemas/index.ts";
@@ -71,6 +72,7 @@ h3.cap { font-size: 15px; font-weight: 600; color: var(--muted); margin: 0 0 6px
 .three-text .definition { break-inside: avoid; margin-bottom: 8px; font-size: 12px; line-height: 1.32; }
 .compact-rows table.grid { font-size: 13px; line-height: 1.3; }
 .compact-rows table.grid td, .compact-rows table.grid th { padding: 4px 7px; }
+table.inventory th { white-space: normal; vertical-align: bottom; font-size: 13.5px; line-height: 1.25; }
 `;
 
 type Slide = { html: string; classes?: string };
@@ -317,6 +319,30 @@ function closeDatesSlide(r: Render, metric: (id: string) => Metric | undefined, 
   return { html: `<div class="eyebrow">Close dates and stage speed</div><h2>How far close dates hold, and where time goes</h2><div class="columns" style="grid-template-columns: 1fr 1.5fr"><div class="panel">${panel}</div>${chartSlot(stageVelocityChart(metric("historic.stage_velocity_won"), metric("historic.stage_velocity_lost"), order))}</div>` };
 }
 
+/** Rows on the slide. The raw notes list every object, so this can't overflow. */
+export const INVENTORY_SLIDE_ROWS = 10;
+
+function inventorySlide(r: Render, label: string, metric: Metric | undefined): Slide {
+  const head = `<div class="eyebrow">${r.t(label)}</div><h2>Where the complexity lives</h2>`;
+  const m = asMeasured(metric);
+  if (!m) return { html: `${head}${notMeasured(r, metric)}` };
+  const all = inventoryRows(m);
+  const shown = all.slice(0, INVENTORY_SLIDE_ROWS);
+  // Records stay in the raw notes: this table is about what a newcomer has to learn.
+  const columns = INVENTORY_COLUMNS.filter((c) => c.key !== "records");
+  const cell = (v: number | null): string => `<td class="num">${v === null ? "Not read" : v}</td>`;
+  const rows = shown.map((row) => `<tr><td>${r.t(row.object)}</td>${columns.map((c) => cell(row.counts[c.key])).join("")}</tr>`);
+  const lede = `We counted ${m.value} objects: your ${m.stats.coreObjects} core objects and ${m.stats.customObjects} custom objects of your own with records. Of the ${m.stats.automation} rules, flows and triggers on them, ${m.stats.undocumented} have no description.`;
+  const notes = [
+    `Ranked by how much automation runs on each object, then by custom fields.${all.length > shown.length ? " Only the busiest are shown here. The raw notes list every object." : ""} No description means no description field, or for an Apex trigger, no comment in the code.`,
+    ...m.exclusions.filter((e) => /couldn't/.test(e)).map((e) => `Not counted: ${e}.`),
+  ];
+  return {
+    classes: "tight",
+    html: `${head}<p class="lede">${r.t(lede)}</p><table class="grid data inventory"><thead><tr><th>Object</th>${columns.map((c) => `<th class="num">${c.heading}</th>`).join("")}</tr></thead><tbody>${rows.join("")}</tbody></table>${notes.map((n) => `<p class="small-note">${r.t(n)}</p>`).join("")}`,
+  };
+}
+
 // A dense deck keeps every chart that answers a question, on fewer slides.
 
 function winsSlideDense(r: Render, metric: (id: string) => Metric | undefined): Slide {
@@ -419,12 +445,15 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
       return { title: `${domainLabel(domain)}: ${issuesOf(own).length} issues, ${own.filter((f) => f.status === "passed").length} passed`, detail: currentBody(built, `domain_${domain}`) };
     })));
   }
+  // The inventory sits with configuration, or with automation when configuration wasn't assessed.
+  const inventoryHome = assessed.includes("configuration") ? "configuration" : "automation";
   for (const domain of assessed) {
     const label = domainLabel(domain);
     const own = team.filter((f) => f.domain === domain);
     const issues = issuesOf(own);
     if (!density?.domainSummary) add(`<div class="eyebrow">Domain</div><h1>${r.t(label)}</h1><div class="body">${sectionBody(r, built, `domain_${domain}`)}</div><div class="stat-row" style="max-width:640px;margin-top:20px;color:var(--carbon)"><div class="stat"><b>${issues.length}</b><span>Issues</span></div><div class="stat"><b>${own.filter((f) => f.status === "passed").length}</b><span>Passed</span></div><div class="stat"><b>${own.filter((f) => f.status === "not_measurable").length}</b><span>Not measurable</span></div></div>`, "dark divider");
     slides.push(...(density ? domainIssueSlides(r, label, issues, density) : issueTable(r, label, issues)));
+    if (domain === inventoryHome && metric(OBJECT_INVENTORY)) slides.push(inventorySlide(r, label, metric(OBJECT_INVENTORY)));
   }
 
   if (unassessed.length) {

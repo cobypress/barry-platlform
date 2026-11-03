@@ -653,9 +653,21 @@ export const LAYOUTS = [
   { Id: sfId("00h", 4), Name: "Old Opportunity Layout", EntityDefinitionId: "Opportunity" },
   { Id: sfId("00h", 5), Name: "Contact Layout", EntityDefinitionId: "Contact" },
   { Id: sfId("00h", 6), Name: "Partner Lead Layout", EntityDefinitionId: "Lead" },
+  // Trap: a custom object's layouts name it by id, once in the 15-character form.
+  { Id: sfId("00h", 7), Name: "Invoice Layout", EntityDefinitionId: sfId("01I", 1).slice(0, 15) },
+  { Id: sfId("00h", 8), Name: "Credit Note Layout", EntityDefinitionId: sfId("01I", 1) },
+  { Id: sfId("00h", 9), Name: "Project Layout", EntityDefinitionId: sfId("01I", 2) },
 ];
 
-export const PROFILE_LAYOUTS = [1, 2, 3, 5].map((n) => ({ LayoutId: sfId("00h", n) }));
+export const PROFILE_LAYOUTS = [1, 2, 3, 5, 7, 8, 9].map((n) => ({ LayoutId: sfId("00h", n) }));
+
+// Tooling's CustomObject, which links those ids back to an API name.
+export const CUSTOM_OBJECTS = [
+  { Id: sfId("01I", 1), DeveloperName: "Invoice", NamespacePrefix: null },
+  { Id: sfId("01I", 2), DeveloperName: "Project", NamespacePrefix: null },
+  { Id: sfId("01I", 3), DeveloperName: "Project_Line", NamespacePrefix: null },
+  { Id: sfId("01I", 4), DeveloperName: "Empty_Object", NamespacePrefix: null },
+];
 
 export const DUPLICATE_RULES = [
   { DeveloperName: "Lead_Rule", SobjectType: "Lead", IsActive: true },
@@ -834,6 +846,8 @@ export const APEX_TRIGGERS = [
   { Id: sfId("01q", 1), Name: "OpportunityTrigger", TableEnumOrId: "Opportunity", ApiVersion: 60, Status: "Active", Body: "trigger OpportunityTrigger on Opportunity (before insert) { }" },
   { Id: sfId("01q", 2), Name: "OpportunitySplitTrigger", TableEnumOrId: "Opportunity", ApiVersion: 60, Status: "Active", Body: "trigger OpportunitySplitTrigger on Opportunity (after update) { }" },
   { Id: sfId("01q", 3), Name: "AccountTrigger", TableEnumOrId: "Account", ApiVersion: 60, Status: "Active", Body: "trigger AccountTrigger on Account (before update) { }" },
+  // Trap: a trigger on a custom object names it by id, not by name.
+  { Id: sfId("01q", 4), Name: "InvoiceTrigger", TableEnumOrId: sfId("01I", 1), ApiVersion: 62, Status: "Active", Body: "// Totals each invoice from its lines.\ntrigger InvoiceTrigger on Invoice__c (before insert, before update) { }" },
 ];
 
 export const ORG_COVERAGE = [{ PercentCovered: 82 }];
@@ -905,5 +919,30 @@ export const METADATA_FILES: Record<string, string> = {
   <fields><fullName>Amount</fullName><type>Currency</type></fields>
   <validationRules><fullName>Needs_Competitor</fullName><description>A competitor is needed to report on losses.</description><active>true</active><errorConditionFormula>ISBLANK(Competitor__c)</errorConditionFormula></validationRules>
 </CustomObject>`,
+  // Trap for the inventory: a busy custom object, with automation on it and an
+  // inactive record type and rule that mustn't be counted.
+  "objects/Invoice__c.object": `<?xml version="1.0"?><CustomObject ${METADATA_NS}>
+  <fields><fullName>Invoice_Total__c</fullName><description>Sum of the invoice lines, set by InvoiceTrigger.</description><type>Currency</type></fields>
+  <fields><fullName>Due_Date__c</fullName><type>Date</type></fields>
+  <fields><fullName>Paid__c</fullName><type>Checkbox</type></fields>
+  <recordTypes><fullName>Standard</fullName><active>true</active><label>Standard</label></recordTypes>
+  <recordTypes><fullName>Credit_Note</fullName><active>true</active><label>Credit Note</label></recordTypes>
+  <recordTypes><fullName>Old_Format</fullName><active>false</active><label>Old Format</label></recordTypes>
+  <validationRules><fullName>Due_Date_Required</fullName><description>Finance can't chase an invoice with no due date.</description><active>true</active><errorConditionFormula>ISBLANK(Due_Date__c)</errorConditionFormula></validationRules>
+  <validationRules><fullName>Old_Check</fullName><active>false</active><errorConditionFormula>Paid__c</errorConditionFormula></validationRules>
+</CustomObject>`,
+  "objects/Project__c.object": `<?xml version="1.0"?><CustomObject ${METADATA_NS}>
+  <fields><fullName>Project_Code__c</fullName><type>Text</type></fields>
+</CustomObject>`,
+  "objects/Project_Line__c.object": `<?xml version="1.0"?><CustomObject ${METADATA_NS}></CustomObject>`,
+  // Trap: an object with no records stays out of the inventory, however much it holds.
+  "objects/Empty_Object__c.object": `<?xml version="1.0"?><CustomObject ${METADATA_NS}>
+  <recordTypes><fullName>Default</fullName><active>true</active><label>Default</label></recordTypes>
+</CustomObject>`,
+  "flows/Invoice_Set_Status.flow": `<?xml version="1.0"?><Flow ${METADATA_NS}>
+  <apiVersion>62.0</apiVersion><label>Set Invoice Status</label><processType>AutoLaunchedFlow</processType><status>Active</status>
+  <start><object>Invoice__c</object><triggerType>RecordBeforeSave</triggerType></start>
+  <assignments><name>Mark_Paid</name></assignments>
+</Flow>`,
   "approvalProcesses/Opportunity.Discount_Approval.approvalProcess": `<?xml version="1.0"?><ApprovalProcess ${METADATA_NS}><active>true</active></ApprovalProcess>`,
 };

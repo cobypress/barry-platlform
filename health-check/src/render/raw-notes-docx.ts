@@ -5,6 +5,8 @@ import { issuesOf } from "../narrative/select.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { canRelease, type Evidence, type Finding, type ManualStep, type Metric, type NumberOverride } from "../schemas/index.ts";
 import { longDate, money, ukDates } from "./format.ts";
+import { INVENTORY_COLUMNS, inventoryRows, OBJECT_INVENTORY } from "../domains/configuration/inventory.ts";
+import { inventoryLine } from "../notes/raw-notes.ts";
 
 // The working record behind the reports: every check, what it found, and how to
 // reproduce it. Tokens become names here, at the last moment, because this is
@@ -124,10 +126,17 @@ function addMetric(notes: Notes, m: Metric): void {
   notes.heading(`${m.label}: ${m.value}${m.unit === "percent" ? "%" : m.unit === "days" ? " days" : ""}`, 3);
   notes.labelled("Definition", m.definition);
   notes.labelled("Sample", `${m.n}${m.dateRange ? `, ${m.dateRange.from} to ${m.dateRange.to}` : ""}`);
+  if (m.id === OBJECT_INVENTORY) notes.labelled("In short", inventoryLine(m) ?? "");
   if (Object.keys(m.stats).length) notes.labelled("Detail", Object.entries(m.stats).map(([k, v]) => `${k} ${v}`).join(", "));
   if (m.exclusions.length) notes.labelled("Excludes", m.exclusions.join("; "));
   if (m.assumptions.length) notes.labelled("Assumptions", m.assumptions.join("; "));
-  if (m.segments.length) notes.table(["Segment", "Key", "Sample", "Value"], m.segments.map((s) => [s.dimension, s.key, String(s.n), s.value === null ? (s.notMeasurableReason ?? "Not measurable") : String(s.value)]), [2300, 3200, 1000, 2800]);
+  if (m.id === OBJECT_INVENTORY) {
+    // Every object, with its own columns: the full report shows only the busiest.
+    const headings = ["Records", "Fields", "Record types", "Layouts", "Validation rules", "Flows", "Process Builders", "Workflow Rules", "Triggers", "No description"];
+    notes.table(["Object", ...headings], inventoryRows(m).map((row) => [row.object, ...INVENTORY_COLUMNS.map((c) => (row.counts[c.key] === null ? "Not read" : String(row.counts[c.key])))]), [1606, 900, 700, 700, 700, 700, 600, 700, 700, 700, 800]);
+    const unread = inventoryRows(m).flatMap((row) => INVENTORY_COLUMNS.filter((c) => row.counts[c.key] === null).map((c) => `${row.object}, ${c.dimension}: ${row.reasons[c.key] ?? "not read"}`));
+    if (unread.length) notes.labelled("Not read", unread.join("; "));
+  } else if (m.segments.length) notes.table(["Segment", "Key", "Sample", "Value"], m.segments.map((s) => [s.dimension, s.key, String(s.n), s.value === null ? (s.notMeasurableReason ?? "Not measurable") : String(s.value)]), [2300, 3200, 1000, 2800]);
   if (m.series.length) notes.table(["Month end", "Value", "Sample"], m.series.map((p) => [p.date, p.value === null ? (p.notMeasurableReason ?? "Not measurable") : String(p.value), String(p.n)]), [2300, 5000, 2000]);
 }
 

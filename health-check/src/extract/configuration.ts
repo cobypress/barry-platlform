@@ -158,6 +158,16 @@ export const layoutsExtractor: Extractor<LayoutData> = {
   },
 };
 
+export type CustomObjectRow = { Id: string; DeveloperName: string; NamespacePrefix: string | null };
+
+// Layout and ApexTrigger can name a custom object by its id rather than its API
+// name. Nothing else we read links the two, so the inventory reads it here.
+export const customObjectsExtractor: Extractor<Sourced<CustomObjectRow[]>> = {
+  id: "custom-objects",
+  version: 1,
+  run: (ctx) => readSoql<CustomObjectRow>(ctx, "SELECT Id, DeveloperName, NamespacePrefix FROM CustomObject", { api: "tooling" }),
+};
+
 export const duplicateRulesExtractor: Extractor<Sourced<Array<{ DeveloperName: string; SobjectType: string; IsActive: boolean }>>> = {
   id: "duplicate-rules",
   version: 1,

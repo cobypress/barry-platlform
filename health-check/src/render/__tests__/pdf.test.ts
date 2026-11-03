@@ -11,12 +11,13 @@ import { Intake } from "../../narrative/intake.ts";
 import { buildReport, currentBody, type BuiltReport, type ReportInput } from "../../narrative/sections.ts";
 import { buildPlan, topIssues, verdictOf } from "../../narrative/select.ts";
 import { Pseudonymiser, type PseudonymEntry } from "../../privacy/pseudonymiser.ts";
-import { SALES_CLOUD_DOMAINS, type Finding, type NumberOverride, type ReportSection } from "../../schemas/index.ts";
+import { SALES_CLOUD_DOMAINS, type Finding, type Metric, type NumberOverride, type ReportSection } from "../../schemas/index.ts";
 import { runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
 import { EXECUTIVE_PLAN_ITEMS, executiveHtml } from "../executive.ts";
 import { ukDates } from "../format.ts";
-import { DECK_RANGE, fullReportHtml, slideCounts } from "../full-report.ts";
+import { DECK_RANGE, fullReportHtml, INVENTORY_SLIDE_ROWS, slideCounts } from "../full-report.ts";
+import { INVENTORY_COLUMNS, OBJECT_INVENTORY } from "../../domains/configuration/inventory.ts";
 import { document } from "../html.ts";
 import { layoutOf, launchBrowser, pdfPageCount, renderPdf } from "../pdf.ts";
 import { EXECUTIVE_PAGES, OUTPUT_FILES, renderRun } from "../render-run.ts";
@@ -174,6 +175,55 @@ describe("the full health check", () => {
   });
 });
 
+describe("where the complexity lives", () => {
+  const slideOf = (html: string): string => html.split('<section class="page').find((page) => page.includes("Where the complexity lives"))!;
+
+  /** The sample's inventory, with more custom objects than the slide can hold. */
+  function crowded(extra: number): ReportInput {
+    const metrics = full.metrics.map((m): Metric => {
+      if (m.id !== OBJECT_INVENTORY || m.status !== "measured") return m;
+      const names = Array.from({ length: extra }, (_, i) => `Customer_Onboarding_Checklist_Item_${String(i + 1).padStart(2, "0")}__c`);
+      const added = names.flatMap((key, i) => INVENTORY_COLUMNS.map((c) => ({ dimension: c.dimension, key, n: i, value: i, notMeasurableReason: null })));
+      return { ...m, value: m.value + extra, n: m.n + extra, segments: [...m.segments, ...added] };
+    });
+    return { ...full, metrics };
+  }
+
+  test("sits after configuration's issues, busiest object first", () => {
+    const html = fullReportHtml(buildReport(full), pseudonyms);
+    const slide = slideOf(html);
+    assert.ok(slide, "the slide is there");
+    assert.match(slide, /<div class="eyebrow">Configuration<\/div>/);
+    assert.match(slide, /We counted 7 objects: your 4 core objects and 3 custom objects of your own with records\. Of the 12 rules, flows and triggers on them, 8 have no description\./);
+    const rows = [...slide.matchAll(/<tr><td>([^<]+)<\/td>/g)].map((m) => m[1]);
+    assert.deepEqual(rows, ["Opportunity", "Invoice__c", "Lead", "Account", "Project__c", "Contact", "Project_Line__c"]);
+    assert.doesNotMatch(slide, /Only the busiest are shown/);
+  });
+
+  test("moves to automation when configuration wasn't assessed", () => {
+    const html = fullReportHtml(buildReport({ ...full, findings: full.findings.filter((f) => f.domain !== "configuration") }), pseudonyms);
+    assert.match(slideOf(html), /<div class="eyebrow">Automation<\/div>/);
+  });
+
+  test("a long list is cut to the busiest, says so, and nothing overflows", async () => {
+    const input = crowded(20);
+    const report = buildReport(input);
+    const html = fullReportHtml(report, pseudonyms);
+    const slide = slideOf(html);
+    assert.equal([...slide.matchAll(/<tr><td>/g)].length, INVENTORY_SLIDE_ROWS);
+    assert.match(slide, /Only the busiest are shown here\. The raw notes list every object\./);
+    const { layout } = await renderPdf(browser, html, { ...deckRange, dataset: report.dataset });
+    assert.deepEqual(layout.problems, [], describeProblems(layout.problems));
+  });
+
+  test("a not measurable inventory says why, rather than showing an empty table", () => {
+    const metrics = full.metrics.map((m): Metric => (m.id === OBJECT_INVENTORY ? { id: m.id, domain: m.domain, label: m.label, definition: m.definition, unit: m.unit, evidence: m.evidence, exclusions: m.exclusions, assumptions: m.assumptions, status: "not_measurable", reason: "Object metadata couldn't be retrieved: timed out" } : m));
+    const slide = slideOf(fullReportHtml(buildReport({ ...full, metrics }), pseudonyms));
+    assert.match(slide, /Not measurable\.<\/strong> Object metadata couldn&#39;t be retrieved: timed out/);
+    assert.doesNotMatch(slide, /<table/);
+  });
+});
+
 describe("a large, messy org", () => {
   const LONG = " This sentence is here to make the summary as long as a real one can get, with a good deal of explanation about what we saw.";
 
@@ -240,7 +290,8 @@ describe("a large, messy org", () => {
 
 describe("a thin org", () => {
   test("gets a shorter deck flagged for review, never padding", async () => {
-    const few = output!.findings.filter((f) => f.status === "issue").slice(0, 3);
+    // Two issues: with three, the object inventory slide brings the deck to exactly 40.
+    const few = output!.findings.filter((f) => f.status === "issue").slice(0, 2);
     const report = buildReport({ ...full, findings: few });
     const { layout } = await renderPdf(browser, fullReportHtml(report, pseudonyms), { ...deckRange });
     assert.ok(layout.pages < DECK_RANGE.min);
