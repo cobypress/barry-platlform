@@ -2,8 +2,9 @@ import { currentBody, TOP_ISSUE_COUNT, type BuiltOutput, type BuiltReport } from
 import { buildPlan, domainLabel, domainsInOrder, issuesOf, scorecard, topIssues, verdictOf } from "../narrative/select.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { canRelease, type Finding, type Metric } from "../schemas/index.ts";
-import { pipelineOverTime, scorecardChart, stageFunnel, winRateBySegment } from "./charts.ts";
-import { compactMoney, longDate, percent } from "./format.ts";
+import { closedAsChart, deliveryOutlookChart, HALF_WIDTH, lostByStageChart, pipelineOverTime, scorecardChart, stageFunnel, stageVelocityChart, topAccountsChart, winRateBySegment, winsByCustomerChart, wonValueByChart } from "./charts.ts";
+import { compactMoney, longDate, monthYear, percent } from "./format.ts";
+import type { Calibration } from "../schemas/index.ts";
 import { chartSlot, document, effortText, estimateLines, paginate, paragraphs, renderContext, severityChip, valueFigure, valueText, type Render } from "./html.ts";
 
 // The full deck: 16:9, 40 to 60 slides. Issue slides flex to keep it in range,
@@ -57,6 +58,19 @@ ol.contents li { margin-bottom: 8px; }
 .action-list { margin: 0; padding-left: 22px; font-size: 18px; }
 .action-list li { margin-bottom: 8px; }
 .action-list .owner { color: var(--muted); font-size: 14.5px; }
+.chart-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
+.lede { font-size: 17px; margin-bottom: 14px; }
+.small-note { font-size: 13.5px; color: var(--muted); margin-top: 10px; }
+.data td.num, .data th.num { text-align: right; }
+.tight table.data { font-size: 15px; }
+.tight table.data td, .tight table.data th { padding: 5px 7px; }
+table.data tr.total td { font-weight: 600; border-top: 1px solid var(--carbon); }
+.panel .big { font-size: 26px; font-weight: 600; line-height: 1.2; }
+h3.cap { font-size: 15px; font-weight: 600; color: var(--muted); margin: 0 0 6px; }
+.three-text { columns: 3; column-gap: 24px; }
+.three-text .definition { break-inside: avoid; margin-bottom: 8px; font-size: 12px; line-height: 1.32; }
+.compact-rows table.grid { font-size: 13px; line-height: 1.3; }
+.compact-rows table.grid td, .compact-rows table.grid th { padding: 4px 7px; }
 `;
 
 type Slide = { html: string; classes?: string };
@@ -185,6 +199,159 @@ function metricRows(r: Render, metrics: Metric[], currency: string): string {
   return `<table class="grid"><thead><tr><th>Measure</th><th class="num">Result</th><th>What it means</th></tr></thead><tbody>${rows.join("")}</tbody></table>`;
 }
 
+// The pipeline deep dive. Every figure on these slides is a metric's value,
+// segment, series point or stat, so the number check can trace each one.
+
+type Measured = Extract<Metric, { status: "measured" }>;
+const asMeasured = (m: Metric | undefined): Measured | null => (m?.status === "measured" ? m : null);
+const segmentValue = (m: Measured | null, dimension: string, key: string): MetricSegmentLike | undefined => m?.segments.find((s) => s.dimension === dimension && s.key === key);
+type MetricSegmentLike = Measured["segments"][number];
+const notMeasured = (r: Render, m: Metric | undefined): string => `<p class="chart-gap"><strong>Not measurable.</strong> ${r.t(m?.status === "not_measurable" ? m.reason : "This metric wasn't part of the run.")}</p>`;
+
+/** Open stages in the calibration's sales order, then anything else in name order. */
+function stageOrder(calibration: Calibration): (a: string, b: string) => number {
+  const order = new Map(calibration.stages.filter((s) => s.category === "open").map((s) => [s.name, s.order ?? 0]));
+  return (a, b) => (order.get(a) ?? Number.MAX_SAFE_INTEGER) - (order.get(b) ?? Number.MAX_SAFE_INTEGER) || a.localeCompare(b);
+}
+
+function pipelineTodaySlide(r: Render, metric: (id: string) => Metric | undefined, calibration: Calibration): Slide {
+  const head = `<div class="eyebrow">Pipeline today</div><h2>Open pipeline by stage</h2>`;
+  const count = asMeasured(metric("current.open_deals"));
+  if (!count) return { html: `${head}${notMeasured(r, metric("current.open_deals"))}` };
+  const [amount, blank, age, late, weighted, rates] = ["current.open_pipeline", "current.open_no_amount", "current.open_median_age", "current.open_past_close", "current.weighted_pipeline", "historic.stage_win_rate"].map((id) => asMeasured(metric(id)));
+  const retired = new Set(count.segments.filter((s) => s.dimension === "retired stage").map((s) => s.key));
+  const stages = count.segments.filter((s) => s.dimension === "stage").map((s) => s.key).sort(stageOrder(calibration));
+  const money = (v: number | null | undefined): string => (typeof v === "number" ? compactMoney(v, r.currency) : "Not measured");
+  const plain = (v: number | null | undefined, fallback = "Not measured"): string => (typeof v === "number" ? String(v) : fallback);
+  const rate = (stage: string): string => {
+    const s = segmentValue(rates, "stage", stage);
+    return s?.value != null ? percent(s.value) : s ? "Too few" : "Not measured";
+  };
+  const rows = stages.map((stage) => {
+    const cell = (m: Measured | null): MetricSegmentLike | undefined => segmentValue(m, "stage", stage);
+    const ageCell = cell(age);
+    return `<tr><td>${r.t(stage)}${retired.has(stage) ? " (retired)" : ""}</td><td class="num">${cell(count)!.value}</td><td class="num">${money(cell(amount)?.value)}</td><td class="num">${plain(cell(blank)?.value)}</td><td class="num">${ageCell ? plain(ageCell.value, "Too few") : "Not measured"}</td><td class="num">${plain(cell(late)?.value)}</td><td class="num">${rate(stage)}</td><td class="num">${cell(weighted) ? (cell(weighted)!.value === null ? "Not weighted" : money(cell(weighted)!.value)) : "Not measured"}</td></tr>`;
+  });
+  rows.push(`<tr class="total"><td>All open deals</td><td class="num">${count.value}</td><td class="num">${money(amount?.value)}</td><td class="num">${plain(blank?.value)}</td><td class="num">${plain(age?.value)}</td><td class="num">${plain(late?.value)}</td><td class="num">${rates ? percent(rates.value) : "Not measured"}</td><td class="num">${money(weighted?.value)}</td></tr>`);
+  const notes = [
+    "Weighted value is each deal's amount at the share of closed deals from that stage that went on to win. Median age is days since the deal was created.",
+    ...(weighted?.exclusions.filter((e) => /too few closed deals/.test(e)) ?? []).map((e) => `Not weighted: ${e}.`),
+    ...(retired.size ? [`A retired stage is no longer active in Salesforce but still holds open deals.`] : []),
+  ];
+  const table = `<table class="grid data"><thead><tr><th>Stage</th><th class="num">Open deals</th><th class="num">Amount</th><th class="num">No amount</th><th class="num">Median age, days</th><th class="num">Past close date</th><th class="num">Won from here</th><th class="num">Weighted value</th></tr></thead><tbody>${rows.join("")}</tbody></table>`;
+  return { classes: "tight", html: `${head}${table}${notes.map((n) => `<p class="small-note">${r.t(n)}</p>`).join("")}` };
+}
+
+function outlookSlide(r: Render, metric: (id: string) => Metric | undefined): Slide {
+  const value = metric("current.delivery_outlook_value");
+  const count = asMeasured(metric("current.delivery_outlook_deals"));
+  const m = asMeasured(value);
+  const head = `<div class="eyebrow">Pipeline today</div><h2>Delivery outlook: what's likely to be won, month by month</h2>`;
+  if (!m) return { html: `${head}${chartSlot(deliveryOutlookChart(value, count ?? undefined, r.currency))}` };
+  const first = m.series[0]!.date;
+  const last = m.series.at(-1)!.date;
+  const timing = (key: string): MetricSegmentLike | undefined => segmentValue(m, "timing", key);
+  const passed = timing("Expected date already passed");
+  const later = timing("Expected after the outlook");
+  const panel = [
+    `<h3>Expected from ${monthYear(first)} to ${monthYear(last)}</h3><p class="big">${compactMoney(m.value, r.currency)}</p>${count ? `<p class="note">About ${count.value} deals</p>` : ""}`,
+    passed && passed.n > 0 ? `<h3>Expected date already passed</h3><p><strong>${compactMoney(passed.value ?? 0, r.currency)}</strong> from ${passed.n} deals with no month</p>` : "",
+    later && later.n > 0 ? `<h3>Expected after ${monthYear(last)}</h3><p><strong>${compactMoney(later.value ?? 0, r.currency)}</strong> from ${later.n} deals</p>` : "",
+    `<h3>How we work it out</h3><p class="note">${m.assumptions.slice(1).map((a) => r.t(a)).join(". ")}.</p>`,
+    m.exclusions.length ? `<p class="note">Left out: ${m.exclusions.map((e) => r.t(e)).join("; ")}.</p>` : "",
+  ].join("");
+  return {
+    html: `${head}<p class="lede">For planning delivery capacity: the work you can expect to win, by when it's likely to close.</p><div class="columns"><div class="chart-wrap">${chartSlot(deliveryOutlookChart(value, count ?? undefined, r.currency))}</div><div class="panel">${panel}</div></div>`,
+  };
+}
+
+function quarterlySlide(r: Render, metric: (id: string) => Metric | undefined): Slide {
+  const head = `<div class="eyebrow">Pipeline over time</div><h2>Quarter by quarter</h2>`;
+  const ids = ["historic.quarterly_created", "historic.quarterly_won", "historic.quarterly_won_value", "historic.quarterly_win_rate", "historic.quarterly_median_won_size", "historic.quarterly_median_cycle"];
+  const all = ids.map((id) => asMeasured(metric(id)));
+  const spine = all.find((m) => m !== null);
+  if (!spine) return { html: `${head}${notMeasured(r, metric(ids[0]!))}` };
+  const format = [(v: number) => String(v), (v: number) => String(v), (v: number) => compactMoney(v, r.currency), (v: number) => percent(v), (v: number) => compactMoney(v, r.currency), (v: number) => String(v)];
+  const rows = spine.series.map((point, i) => {
+    const cells = all.map((m, k) => {
+      if (!m) return "Not measured";
+      const p = m.series.find((x) => x.date === point.date);
+      return p?.value != null ? format[k]!(p.value) : p?.notMeasurableReason?.startsWith("Starts before") ? "Before the window" : "Too few";
+    });
+    const label = `${monthYear(point.date)}${i === spine.series.length - 1 ? ", to date" : ""}`;
+    return `<tr><td>${label}</td>${cells.map((c) => `<td class="num">${c}</td>`).join("")}</tr>`;
+  });
+  const missing = ids.filter((_, k) => !all[k]).map((id) => metric(id)).filter((m): m is Extract<Metric, { status: "not_measurable" }> => m?.status === "not_measurable");
+  const notes = ["Too few means fewer closed deals than the calibrated minimum. The last quarter is still running.", ...missing.map((m) => `${m.label}: ${m.reason}`)];
+  return { classes: "tight", html: `${head}<table class="grid data"><thead><tr><th>Quarter starting</th><th class="num">Deals created</th><th class="num">Deals won</th><th class="num">Won value</th><th class="num">Win rate</th><th class="num">Median won deal</th><th class="num">Median cycle, days</th></tr></thead><tbody>${rows.join("")}</tbody></table>${notes.map((n) => `<p class="small-note">${r.t(n)}</p>`).join("")}` };
+}
+
+function winsSlides(r: Render, metric: (id: string) => Metric | undefined): Slide[] {
+  const repeat = asMeasured(metric("historic.repeat_win_share"));
+  const top = asMeasured(metric("historic.top_account_share"));
+  const lines = [
+    repeat ? `${percent(repeat.value)} of won value came from repeat customers: accounts that had already won a deal with you.` : "",
+    top ? `Your top ${top.stats.top} accounts brought in ${percent(top.value)} of won value. Accounts are counted here, not named.` : "",
+  ].filter(Boolean);
+  return [
+    { html: `<div class="eyebrow">Where wins come from</div><h2>New and repeat customers</h2>${lines.map((l) => `<p class="lede">${r.t(l)}</p>`).join("")}<div class="chart-pair">${chartSlot(winsByCustomerChart(metric("historic.won_value_by_customer"), r.currency))}${chartSlot(topAccountsChart(metric("historic.top_account_share")))}</div>` },
+    { html: `<div class="eyebrow">Where wins come from</div><h2>Wins by type and lead source</h2><div class="chart-pair">${chartSlot(wonValueByChart(metric("historic.won_value_by_type"), "type", "won-by-type", "Won value by type", r.currency))}${chartSlot(wonValueByChart(metric("historic.won_value_by_source"), "lead source", "won-by-source", "Won value by lead source", r.currency))}</div>` },
+  ];
+}
+
+function lostSlide(r: Render, metric: (id: string) => Metric | undefined): Slide {
+  const count = asMeasured(metric("historic.lost_by_stage"));
+  const lede = count ? `<p class="lede">${count.value} lost and no decision deals closed in the window. This is the last open stage each was in.</p>` : "";
+  return { html: `<div class="eyebrow">Where deals are lost</div><h2>Where deals drop out</h2>${lede}<div class="chart-pair">${chartSlot(lostByStageChart(metric("historic.lost_by_stage"), metric("historic.lost_value_by_stage"), r.currency))}${chartSlot(closedAsChart(metric("historic.lost_by_stage")))}</div>` };
+}
+
+function closeDatesSlide(r: Render, metric: (id: string) => Metric | undefined, calibration: Calibration): Slide {
+  const share = metric("historic.close_date_reliability");
+  const late = metric("historic.close_days_late");
+  const block = (m: Metric | undefined, body: (x: Measured) => string): string => (m?.status === "measured" ? body(m) : `<h3>${r.t(m?.label ?? "Not measured")}</h3><p class="note">${r.t(m?.status === "not_measurable" ? m.reason : "This metric wasn't part of the run.")}</p>`);
+  const panel = [
+    block(share, (m) => `<h3>Won in the quarter first forecast</h3><p class="big">${percent(m.value)}</p><p class="note">of ${m.n} won deals</p>`),
+    block(late, (m) => `<h3>Days late against the first close date</h3><p class="big">${m.value} days</p><p class="note">For the median won deal. The typical range is ${m.stats.p25} to ${m.stats.p75} days.</p>`),
+  ].join("");
+  const order = calibration.stages.filter((s) => s.category === "open").sort((a, b) => (a.order ?? 0) - (b.order ?? 0)).map((s) => s.name);
+  return { html: `<div class="eyebrow">Close dates and stage speed</div><h2>How far close dates hold, and where time goes</h2><div class="columns" style="grid-template-columns: 1fr 1.5fr"><div class="panel">${panel}</div>${chartSlot(stageVelocityChart(metric("historic.stage_velocity_won"), metric("historic.stage_velocity_lost"), order))}</div>` };
+}
+
+// A dense deck keeps every chart that answers a question, on fewer slides.
+
+function winsSlideDense(r: Render, metric: (id: string) => Metric | undefined): Slide {
+  const [first] = winsSlides(r, metric);
+  const lede = /<\/h2>((?:<p class="lede">[\s\S]*?<\/p>)*)/.exec(first!.html)?.[1] ?? "";
+  const grid = [
+    winsByCustomerChart(metric("historic.won_value_by_customer"), r.currency),
+    topAccountsChart(metric("historic.top_account_share")),
+    wonValueByChart(metric("historic.won_value_by_type"), "type", "won-by-type", "Won value by type", r.currency),
+    wonValueByChart(metric("historic.won_value_by_source"), "lead source", "won-by-source", "Won value by lead source", r.currency),
+  ].map(chartSlot);
+  return { html: `<div class="eyebrow">Where wins come from</div><h2>New and repeat customers, type and lead source</h2>${lede.replace(/class="lede"/g, 'class="lede" style="font-size:15px;margin-bottom:8px"')}<div class="chart-pair" style="row-gap:12px">${grid.join("")}</div>` };
+}
+
+function lostAndSpeedSlideDense(r: Render, metric: (id: string) => Metric | undefined, calibration: Calibration): Slide {
+  const count = asMeasured(metric("historic.lost_by_stage"));
+  const share = asMeasured(metric("historic.close_date_reliability"));
+  const late = asMeasured(metric("historic.close_days_late"));
+  const closedAs = count ? count.segments.filter((s) => s.dimension === "closed as") : [];
+  const lines = [
+    count ? `${count.value} lost and no decision deals closed in the window, shown by the last open stage each was in.${closedAs.length ? ` By how they closed: ${closedAs.map((s) => `${s.key} ${s.value}`).join(", ")}.` : ""}` : "",
+    share && late ? `${percent(share.value)} of ${share.n} won deals closed in the quarter first forecast, and the median won deal closed ${late.value} days after its first close date.` : "",
+  ].filter(Boolean);
+  const order = calibration.stages.filter((s) => s.category === "open").sort((a, b) => (a.order ?? 0) - (b.order ?? 0)).map((s) => s.name);
+  return { html: `<div class="eyebrow">Where deals are lost</div><h2>Where deals drop out, and where time goes</h2>${lines.map((l) => `<p class="lede" style="font-size:15px;margin-bottom:8px">${r.t(l)}</p>`).join("")}<div class="chart-pair">${chartSlot(lostByStageChart(metric("historic.lost_by_stage"), metric("historic.lost_value_by_stage"), r.currency))}${chartSlot(stageVelocityChart(metric("historic.stage_velocity_won"), metric("historic.stage_velocity_lost"), order))}</div>` };
+}
+
+/** Definitions are reference, so a dense deck sets them small, in three columns. */
+function threeColumnList(r: Render, eyebrow: string, title: string, items: Array<{ title: string; detail: string }>): Slide[] {
+  const pages = paginate(items, (x) => 26 + 17 * estimateLines(x.detail, 56), 3 * 490);
+  return pages.map((group, i) => ({
+    html: `<div class="eyebrow">${r.t(eyebrow)}</div><h2>${r.t(title)}${i ? ", continued" : ""}</h2><div class="three-text">${group.map((x) => `<p class="definition"><strong>${r.t(x.title)}</strong><br>${r.t(x.detail)}</p>`).join("")}</div>`,
+  }));
+}
+
 const sectionBody = (r: Render, built: BuiltOutput, key: string): string => paragraphs(r, currentBody(built, key));
 
 const needsInput = (built: BuiltOutput, key: string): boolean => built.sections.find((s) => s.key === key)?.status === "needs_input";
@@ -265,16 +432,20 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   }
 
   add(`<div class="eyebrow">Deep dive</div><h1>Pipeline</h1><div class="body">${sectionBody(r, built, "pipeline_deep_dive")}</div>`, "dark divider");
-  add(`<div class="eyebrow">Pipeline</div><h2>Win rate by segment</h2><div class="chart-wrap">${chartSlot(winRateBySegment(metric("historic.win_rate")))}</div>`);
-  add(`<div class="eyebrow">Pipeline</div><h2>Three ways of reading the win rate</h2>${metricRows(r, ["historic.win_rate", "historic.win_rate_by_value", "historic.win_rate_including_no_decision", "historic.no_decision_rate"].flatMap((id) => metric(id) ?? []), r.currency)}`, "tight");
-  add(`<div class="eyebrow">Pipeline</div><h2>Stage funnel</h2><div class="chart-wrap">${chartSlot(stageFunnel(metric("historic.stage_conversion")))}</div>`);
+  slides.push(pipelineTodaySlide(r, metric, calibration), outlookSlide(r, metric));
+  if (dense) add(`<div class="eyebrow">Pipeline</div><h2>How deals convert</h2><div class="chart-pair"><div><h3 class="cap">Win rate by segment</h3>${chartSlot(winRateBySegment(metric("historic.win_rate"), undefined, HALF_WIDTH))}</div><div><h3 class="cap">Stage funnel</h3>${chartSlot(stageFunnel(metric("historic.stage_conversion"), HALF_WIDTH))}</div></div>`);
+  else add(`<div class="eyebrow">Pipeline</div><h2>Win rate by segment</h2><div class="chart-wrap">${chartSlot(winRateBySegment(metric("historic.win_rate")))}</div>`);
+  const readings = ["historic.win_rate", "historic.win_rate_by_value", "historic.win_rate_including_no_decision", "historic.no_decision_rate"].flatMap((id) => metric(id) ?? []);
   const cycle = ["historic.sales_cycle_won", "historic.sales_cycle_lost"].flatMap((id) => metric(id) ?? []);
   const slippage = ["historic.slippage_rate", "historic.slippage_quarter_cross_rate", "historic.slippage_days"].flatMap((id) => metric(id) ?? []);
+  if (!dense) add(`<div class="eyebrow">Pipeline</div><h2>Three ways of reading the win rate</h2>${metricRows(r, readings, r.currency)}`, "tight");
+  if (!dense) add(`<div class="eyebrow">Pipeline</div><h2>Stage funnel</h2><div class="chart-wrap">${chartSlot(stageFunnel(metric("historic.stage_conversion")))}</div>`);
+  slides.push(quarterlySlide(r, metric), ...(dense ? [winsSlideDense(r, metric), lostAndSpeedSlideDense(r, metric, calibration)] : [...winsSlides(r, metric), lostSlide(r, metric), closeDatesSlide(r, metric, calibration)]));
   if (dense) {
-    add(`<div class="eyebrow">Pipeline</div><h2>Sales cycle and slippage</h2>${metricRows(r, [...cycle, ...slippage], r.currency)}`, "tight");
+    // One table, so the deep dive keeps its new slides in a dense deck.
+    add(`<div class="eyebrow">Pipeline</div><h2>Win rate, sales cycle and slippage</h2>${metricRows(r, [...readings, ...cycle, ...slippage], r.currency)}`, "tight compact-rows");
   } else {
-    add(`<div class="eyebrow">Pipeline</div><h2>Sales cycle</h2>${metricRows(r, cycle, r.currency)}`, "tight");
-    add(`<div class="eyebrow">Pipeline</div><h2>Slippage</h2>${metricRows(r, slippage, r.currency)}`, "tight");
+    add(`<div class="eyebrow">Pipeline</div><h2>Sales cycle and slippage</h2>${metricRows(r, [...cycle, ...slippage], r.currency)}`, "tight");
   }
   add(`<div class="eyebrow">Pipeline</div><h2>Pipeline over time</h2><div class="chart-wrap" style="max-width:1000px">${chartSlot(pipelineOverTime(metric("historic.pipeline_point_in_time_value"), r.currency))}</div>`);
 
@@ -291,7 +462,8 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   }
 
   // Titles only: each of these already has its card in its domain's section.
-  if (later.length) slides.push(...listSlides(r, "Roadmap", "After 90 days", later.map((f) => ({ title: f.title, detail: `${severityWord(f.severity)}. ${effortText(f)}. ${f.owner}` })), compact));
+  const afterPlan = later.map((f) => ({ title: f.title, detail: `${severityWord(f.severity)}. ${effortText(f)}. ${f.owner}` }));
+  if (later.length) slides.push(...(dense ? twoColumnList(r, "Roadmap", "After 90 days", afterPlan) : listSlides(r, "Roadmap", "After 90 days", afterPlan, compact)));
 
   if (!dense) add(`<div class="eyebrow">Appendix</div><h1>How we worked</h1><div class="body">${sectionBody(r, built, "appendix")}</div>`, "dark divider");
   slides.push(...listSlides(r, "Appendix", "Assumptions", [
@@ -304,7 +476,9 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
     { title: "Rule set", detail: run.ruleSetVersion },
   ], compact));
   const definitions = metrics.map((m) => ({ title: m.label, detail: m.definition }));
-  slides.push(...(dense ? twoColumnList(r, "Appendix", "Metric definitions", definitions) : listSlides(r, "Appendix", "Metric definitions", definitions, compact)));
+  // Two columns at every density but the last: definitions are reference, and
+  // one to a line took a slide for every few metrics.
+  slides.push(...(compact ? listSlides(r, "Appendix", "Metric definitions", definitions, compact) : dense ? threeColumnList(r, "Appendix", "Metric definitions", definitions) : twoColumnList(r, "Appendix", "Metric definitions", definitions)));
   slides.push(...listSlides(r, "Appendix", "What we couldn't measure", team.filter((f) => f.status === "not_measurable").map((f) => ({ title: f.title, detail: f.notMeasurableReason ?? f.summary })), compact));
   slides.push(...listSlides(r, "Appendix", "Checks that passed", team.filter((f) => f.status === "passed").map((f) => ({ title: f.title, detail: f.summary })), compact));
   slides.push(...listSlides(r, "Appendix", "Manual steps", manualSteps.map((s) => ({ title: s.title, detail: `${MANUAL_STATUS[s.status] ?? s.status}. ${s.whyItMatters}` })), compact));

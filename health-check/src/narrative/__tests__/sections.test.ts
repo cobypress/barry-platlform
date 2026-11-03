@@ -42,7 +42,7 @@ describe("the three outputs", () => {
     const { report } = all();
     const keys = (o: keyof typeof report.outputs): string[] => report.outputs[o].sections.map((s) => s.key);
     for (const key of ["intake_summary", "assumptions", "queries", "exclusions_limits", "overrides"]) assert.ok(keys("raw_notes").includes(key), key);
-    assert.deepEqual(keys("executive_summary"), ["verdict", "scorecard", "top_issues", "plan_90_day"]);
+    assert.deepEqual(keys("executive_summary"), ["verdict", "scorecard", "pipeline", "top_issues", "plan_90_day"]);
     for (const key of ["stated_problems", "pipeline_deep_dive", "stated_vs_actual", "roadmap", "appendix"]) assert.ok(keys("full_health_check").includes(key), key);
     for (const domain of SALES_CLOUD_DOMAINS) assert.ok(keys("full_health_check").includes(`domain_${domain}`), domain);
   });

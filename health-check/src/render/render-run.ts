@@ -8,7 +8,7 @@ import { Intake } from "../narrative/intake.ts";
 import { buildReport, type BuiltReport, type ReportInput } from "../narrative/sections.ts";
 import { Pseudonymiser, type PseudonymEntry } from "../privacy/pseudonymiser.ts";
 import { Calibration, Finding, ManualStep, Metric, NumberOverride, Run, Score } from "../schemas/index.ts";
-import { executiveHtml } from "./executive.ts";
+import { EXECUTIVE_MAX_PAGES, executiveHtml } from "./executive.ts";
 import { DECK_RANGE, fullReportHtml } from "./full-report.ts";
 import { launchBrowser, pdfPageCount, renderPdf } from "./pdf.ts";
 import type { LayoutProblem, LayoutReport } from "./layout.ts";
@@ -17,7 +17,7 @@ import { renderRawNotesDocx } from "./raw-notes-docx.ts";
 // Turns a finished run folder into its three documents. Everything is written to
 // that folder, outside the repo, because this is where names exist in the clear.
 
-export const EXECUTIVE_PAGES = { min: 5, max: 8 } as const;
+export const EXECUTIVE_PAGES = { min: 5, max: EXECUTIVE_MAX_PAGES } as const;
 
 export const OUTPUT_FILES = {
   rawNotes: "raw-notes.docx",

@@ -173,7 +173,7 @@ function stageConversion(ctx: Ctx, data: Ready): Metric[] {
     id: "historic.stage_conversion",
     label: "Stage conversion",
     unit: "percent",
-    definition: "Of deals closed in the window that reached the first stage, the share won. Segments show each step: of deals that reached a stage, the share that reached the next one.",
+    definition: "Of closed deals that reached the first stage, the share won. Each step shows the share of deals reaching a stage that reached the next.",
     assumptions: ["A deal that skipped a stage counts as having passed through it, and skips are shown separately"],
   });
   const gaps = [...data.unmapped.finalStages, ...data.unmapped.historyStages];
@@ -230,7 +230,7 @@ function salesCycle(ctx: Ctx, data: Ready): Metric[] {
       id,
       label,
       unit: "days",
-      definition: `Median days from creation to the deal's final close, for ${outcome} deals closed in the window. The close comes from stage history, with CloseDate used where history has none.`,
+      definition: `Median days from creation to final close, for ${outcome} deals closed in the window. The close comes from stage history, or CloseDate where there is none.`,
       assumptions: salesCycleAssumptionDays ? [`The calibration assumes a sales cycle of ${salesCycleAssumptionDays} days`] : [],
     });
     if (data.unmapped.finalStages.length > 0) return notMeasurable(definition, unmappedReason("stages", data.unmapped.finalStages));

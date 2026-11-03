@@ -57,14 +57,14 @@ export function openStageMetrics(ctx: Ctx, data: Ready, deals: Deal[], evidence:
   const rest = { dateRange: day, series: [] as SeriesPoint[], stats: {} as Record<string, number>, segmentExemptReason: deals.length === 0 ? "There are no open deals." : null };
   const count = (group: Deal[]): number => group.length;
   const definitions = {
-    noAmount: { id: "current.open_no_amount", label: "Open deals with no amount", unit: "count" as const, definition: "Open deals today with no Amount, or an Amount of zero. They add nothing to pipeline value, and we don't impute one." },
+    noAmount: { id: "current.open_no_amount", label: "Open deals with no amount", unit: "count" as const, definition: "Open deals today with no Amount, or zero. We never impute one." },
     pastClose: { id: "current.open_past_close", label: "Open deals past their close date", unit: "count" as const, definition: "Open deals today whose close date has passed." },
     age: { id: "current.open_median_age", label: "Age of open deals", unit: "days" as const, definition: `Median days since open deals were created. A stage needs ${MIN_STAGE_DEALS} open deals for its own median.` },
     weighted: {
       id: "current.weighted_pipeline",
       label: "Weighted open pipeline",
       unit: "currency" as const,
-      definition: "Amount of each open deal times the win rate from its stage: the share of deals closed in the window that were in that stage and won. Stages without enough closed deals aren't weighted.",
+      definition: "Each open deal's Amount times the win rate from its stage. Stages with too few closed deals aren't weighted.",
     },
   };
   const metrics: Metric[] = [
@@ -120,8 +120,8 @@ export function deliveryOutlook(ctx: Ctx, data: Ready, deals: Deal[], evidence: 
   const method = "Each open deal counts at the win rate from its stage. It lands no earlier than its close date, and no earlier than its first close date moved by your median days late on won deals. A deal whose expected date has already passed has no month";
   const shared = { domain: DOMAIN, evidence, exclusions: data.exclusions, assumptions: [zoneNote(ctx), method] };
   const definitions = {
-    value: { id: "current.delivery_outlook_value", label: "Expected won value by month", unit: "currency" as const, definition: `Open pipeline weighted by stage win rates, placed in the month each deal is expected to close, from this month onwards. The value is the total for the months shown.` },
-    deals: { id: "current.delivery_outlook_deals", label: "Expected won deals by month", unit: "count" as const, definition: "The same outlook as a number of deals. Each deal counts as the share of comparable deals that won, so the figure can be a fraction. Deals with no amount count here." },
+    value: { id: "current.delivery_outlook_value", label: "Expected won value by month", unit: "currency" as const, definition: `Open pipeline weighted by stage win rates, in the month each deal is expected to close. The value is the total for the months shown.` },
+    deals: { id: "current.delivery_outlook_deals", label: "Expected won deals by month", unit: "count" as const, definition: "The same outlook in deals. Each counts as its stage win rate, so the figure can be a fraction." },
   };
   const won = wonFromOpen(ctx, data);
   const gate = data.unmapped.finalStages.length > 0 ? `The calibration doesn't say what these stages mean: ${data.unmapped.finalStages.join(", ")}.` : won.length < minSample ? `${won.length} won deals with stage history is below the calibrated minimum of ${minSample}, so we can't say how late close dates run.` : null;
