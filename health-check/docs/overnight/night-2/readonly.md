@@ -74,6 +74,13 @@ No change. Nothing found would open coverage, private reports or auth providers 
 - Approval processes and assignment rules can't be read through Tooling, so their existence makes reference guards unknown. Most orgs have assignment rules, so on a read-only connection field removal and user deactivation stay blocked (they already were, by private reports).
 - `MetadataComponentDependency` isn't used, because it missed report and workflow field update references on `bc-hc-dev`.
 
+## Review fixes
+
+The coordinator's review found two gaps, both fixed with tests that failed first:
+
+- Workflow Rules or validation rules the Tooling route couldn't read whole only went into `unsearched`, which only guards read, so `aut.legacy-workflow-rules` could pass on nothing. The bundle now has `unread`, and the rules and the inventory metric that count those kinds are not measurable while it's set.
+- A workflow action or validation formula whose `Metadata` came back null counted as searched. It now goes to `unsearched`, so reference guards read unknown.
+
 ## Left, and doubts
 
 - QUESTIONS.md 34 to 38 (28 to 32 on `hc/readonly`): paging of `EntityDefinition` and friends at scale, alert and task `Metadata`, `AuthProvider` in every org, report describe on hidden report types, and the allPrivate behaviour elsewhere.

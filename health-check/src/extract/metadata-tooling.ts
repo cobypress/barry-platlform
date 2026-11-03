@@ -1,6 +1,7 @@
 import { isUnavailable } from "../salesforce/client.ts";
 import { redactSecrets } from "../privacy/secrets.ts";
-import { hasText, indexReferences, summariseFlowMetadata, summariseWorkflowRule, type MetadataBundle, type WorkflowSummary } from "./metadata-parse.ts";
+import { hasText, indexReferences, summariseFlowMetadata, summariseWorkflowRule, type MetadataBundle, type UnreadKind, type WorkflowSummary } from "./metadata-parse.ts";
+import { readableReason } from "./types.ts";
 import type { ExtractContext } from "./types.ts";
 
 // The same bundle as the retrieve, read through Tooling for a connection that
@@ -68,15 +69,24 @@ async function tooling(ctx: ExtractContext, soql: string): Promise<Row[]> {
   return ctx.client.queryAll<Row>(soql, { api: "tooling" });
 }
 
-/** Optional reads: a failure leaves the kind unsearched rather than failing the bundle. */
-async function optional<T>(bundle: MetadataBundle, kind: string, read: () => Promise<T>): Promise<T | null> {
+/**
+ * Optional reads: a failure leaves the kind unsearched rather than failing the
+ * bundle. When rules count the kind too, it's also marked unread, with why.
+ */
+async function optional<T>(bundle: MetadataBundle, kind: string, read: () => Promise<T>, unread?: UnreadKind): Promise<T | null> {
   try {
     return await read();
   } catch (err) {
     if (!isUnavailable(err)) throw err;
     bundle.unsearched!.push(kind);
+    if (unread) markUnread(bundle, unread, readableReason(err.message));
     return null;
   }
+}
+
+function markUnread(bundle: MetadataBundle, kind: UnreadKind, reason: string): void {
+  bundle.unread ??= {};
+  bundle.unread[kind] ??= reason;
 }
 
 export async function readBundleThroughTooling(ctx: ExtractContext): Promise<MetadataBundle> {
@@ -109,15 +119,18 @@ export async function readBundleThroughTooling(ctx: ExtractContext): Promise<Met
   }
 
   // Workflow Rules, grouped by object as the retrieve's files are.
-  const rules = await optional(bundle, "Workflow Rules", async () => (await tooling(ctx, "SELECT Id, Name, TableEnumOrId, NamespacePrefix FROM WorkflowRule")).filter(own));
-  if (rules && rules.length + versions.length > MAX_ITEM_READS) bundle.unsearched!.push("Workflow Rules");
-  else if (rules) {
+  const rules = await optional(bundle, "Workflow Rules", async () => (await tooling(ctx, "SELECT Id, Name, TableEnumOrId, NamespacePrefix FROM WorkflowRule")).filter(own), "workflowRules");
+  if (rules && rules.length + versions.length > MAX_ITEM_READS) {
+    bundle.unsearched!.push("Workflow Rules");
+    markUnread(bundle, "workflowRules", `There are ${rules.length} Workflow Rules and ${versions.length} flows, more than the ${MAX_ITEM_READS} we read one at a time.`);
+  } else if (rules) {
     const byObject = new Map<string, WorkflowSummary>();
     for (const rule of [...rules].sort((a, b) => String(a.Name).localeCompare(String(b.Name)))) {
       const object = objectName(String(rule.TableEnumOrId));
       const { metadata } = await reader.read("WorkflowRule", rule.Id);
       if (!metadata) {
-        if (!bundle.unsearched!.includes("Workflow Rules")) bundle.unsearched!.push("Workflow Rules");
+        bundle.unsearched!.push("Workflow Rules");
+        markUnread(bundle, "workflowRules", `Workflow Rule ${String(rule.Name)} came back without its definition.`);
         continue;
       }
       const summary = byObject.get(object) ?? { object, path: `workflows/${object}.workflow`, rules: [] };
@@ -146,6 +159,12 @@ export async function readBundleThroughTooling(ctx: ExtractContext): Promise<Met
     for (const action of actions) {
       const item = await optional(bundle, kind, () => reader.read(type, action.Id));
       if (!item) break;
+      // A definition we didn't get can't count as searched: an alert's recipients
+      // could name the very user a guard is about (rule 3).
+      if (!item.metadata) {
+        bundle.unsearched!.push(kind);
+        continue;
+      }
       const [object, name] = String(item.fullName ?? `Unknown.${action.Id}`).split(".");
       index(item.metadata, `workflows/${object}.workflow#${type}.${name ?? action.Id}`);
     }
@@ -154,7 +173,7 @@ export async function readBundleThroughTooling(ctx: ExtractContext): Promise<Met
   // Validation rules. The list has what the rules need, and the formula, for
   // what it mentions, is one more read each.
   const validation = await optional(bundle, "validation rules", async () =>
-    (await tooling(ctx, "SELECT Id, ValidationName, Active, Description, EntityDefinitionId, NamespacePrefix FROM ValidationRule")).filter(own),
+    (await tooling(ctx, "SELECT Id, ValidationName, Active, Description, EntityDefinitionId, NamespacePrefix FROM ValidationRule")).filter(own), "validationRules",
   );
   if (validation) {
     const search = reader.reads + validation.length <= MAX_ITEM_READS;
@@ -166,6 +185,7 @@ export async function readBundleThroughTooling(ctx: ExtractContext): Promise<Met
       if (!search) continue;
       const item = await optional(bundle, "validation rule formulas", () => reader.read("ValidationRule", rule.Id));
       if (item?.metadata) indexReferences(bundle.references, String(item.metadata.errorConditionFormula ?? ""), `objects/${object}.object#validationRules.${name}`);
+      else if (item) bundle.unsearched!.push("validation rule formulas");
     }
   }
 

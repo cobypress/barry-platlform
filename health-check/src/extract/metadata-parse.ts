@@ -38,6 +38,15 @@ export type RecordTypeSummary = { object: string; name: string; active: boolean 
 // kept: what the rules and guards need is here, and less kept is less to leak.
 export type ReferenceIndex = { users: Record<string, string[]>; fields: Record<string, string[]> };
 
+export type UnreadKind = "workflowRules" | "validationRules";
+export const UNREAD_LABELS: Record<UnreadKind, string> = { workflowRules: "Workflow Rules", validationRules: "Validation rules" };
+
+/** Why a kind the caller needs wasn't read whole, or null when everything it needs was. */
+export function unreadReason(bundle: MetadataBundle, needs: UnreadKind[]): string | null {
+  const kind = needs.find((k) => bundle.unread?.[k]);
+  return kind ? `${UNREAD_LABELS[kind]} couldn't be read: ${bundle.unread![kind]}` : null;
+}
+
 export type MetadataBundle = {
   /** How it was read: one Metadata API retrieve, or Tooling item by item for a connection that can't use the Metadata API. */
   route?: "retrieve" | "tooling";
@@ -47,6 +56,13 @@ export type MetadataBundle = {
    * while this has anything in it.
    */
   unsearched?: string[];
+  /**
+   * Kinds the Tooling route couldn't read whole, with why. Unlike `unsearched`,
+   * which only affects reference guards, any rule or metric that counts one of
+   * these is not measurable while it's here (rule 5). Flows have no entry: if
+   * they can't be read whole, the bundle is unavailable.
+   */
+  unread?: Partial<Record<UnreadKind, string>>;
   flows: FlowSummary[];
   workflows: WorkflowSummary[];
   validationRules: ValidationRuleSummary[];

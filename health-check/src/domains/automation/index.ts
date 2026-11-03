@@ -1,6 +1,6 @@
 import { apexExtractor, metadataExtractor, scheduledJobsExtractor } from "../../extract/automation.ts";
 import { customObjectsExtractor } from "../../extract/configuration.ts";
-import type { MetadataBundle } from "../../extract/metadata-parse.ts";
+import { unreadReason, type MetadataBundle, type UnreadKind } from "../../extract/metadata-parse.ts";
 import { notSized, plural, type NotMeasurableResult, type Rule, type RuleContext, type RuleResult } from "../../engine/rule.ts";
 import { MIGRATE_TO_FLOW_NOTE, END_OF_SUPPORT } from "./notes.ts";
 import type { DomainModule } from "../types.ts";
@@ -17,10 +17,14 @@ const UNDOCUMENTED_LIMIT = 50;
 // An edition with no Apex says so plainly, rather than as a failed read.
 const apexGap = (what: string, reason: string): string => (reason.startsWith("Professional Edition has no Apex") ? reason : `Apex ${what} couldn't be read: ${reason}`);
 
-function metadataOr(ctx: RuleContext): { bundle: MetadataBundle } | NotMeasurableResult {
+// `needs` names the kinds a rule counts. If the Tooling route couldn't read one
+// whole, the rule is not measurable rather than a pass on part of it (rule 5).
+function metadataOr(ctx: RuleContext, needs: UnreadKind[] = []): { bundle: MetadataBundle } | NotMeasurableResult {
   const metadata = ctx.data(metadataExtractor);
-  if (metadata.status === "ok") return { bundle: metadata.data };
-  return { outcome: "not_measurable", reason: `Metadata couldn't be retrieved: ${metadata.reason}`, evidence: [ctx.ev(metadata.source, { count: null })] };
+  if (metadata.status !== "ok") return { outcome: "not_measurable", reason: `Metadata couldn't be retrieved: ${metadata.reason}`, evidence: [ctx.ev(metadata.source, { count: null })] };
+  const unread = unreadReason(metadata.data, needs);
+  if (unread) return { outcome: "not_measurable", reason: unread, evidence: [ctx.ev(metadata.source, { count: null })] };
+  return { bundle: metadata.data };
 }
 
 const groupCount = (values: string[]): number => new Set(values).size;
@@ -35,11 +39,11 @@ function unnamedNote(count: number, idsRead: boolean, consequence: string): stri
 
 const legacyWorkflowRules: Rule = {
   id: "aut.legacy-workflow-rules",
-  version: 1,
+  version: 2,
   domain: "automation",
   title: "Workflow Rules still active",
   evaluate(ctx): RuleResult | RuleResult[] {
-    const result = metadataOr(ctx);
+    const result = metadataOr(ctx, ["workflowRules"]);
     if ("outcome" in result) return result;
     const active = result.bundle.workflows.flatMap((w) => w.rules.filter((r) => r.active).map((r) => ({ object: w.object, ...r })));
     const evidence = [ctx.ev({ kind: "metadata", path: "workflows/*.workflow" }, { count: active.length, exclusions: ["Inactive rules"] })];
@@ -100,11 +104,11 @@ const legacyProcessBuilder: Rule = {
 
 const mixedAutomation: Rule = {
   id: "aut.mixed-automation-on-object",
-  version: 2,
+  version: 3,
   domain: "automation",
   title: "Several automation tools acting on the same object",
   evaluate(ctx): RuleResult | RuleResult[] {
-    const result = metadataOr(ctx);
+    const result = metadataOr(ctx, ["workflowRules"]);
     if ("outcome" in result) return result;
     const { triggers } = ctx.data(apexExtractor);
     if (triggers.status !== "ok") return { outcome: "not_measurable", reason: apexGap("triggers", triggers.reason), evidence: [ctx.ev(triggers.source, { count: null })] };
@@ -225,11 +229,11 @@ const missingFaultPaths: Rule = {
 // flows and rules, and code keeps comments, so their absence is measurable.
 const undocumentedAutomation: Rule = {
   id: "aut.undocumented-automation",
-  version: 1,
+  version: 2,
   domain: "automation",
   title: "Automation with no description of what it does",
   evaluate(ctx): RuleResult | RuleResult[] {
-    const result = metadataOr(ctx);
+    const result = metadataOr(ctx, ["workflowRules", "validationRules"]);
     if ("outcome" in result) return result;
     const { classes, triggers } = ctx.data(apexExtractor);
     if (classes.status !== "ok") return { outcome: "not_measurable", reason: apexGap("classes", classes.reason), evidence: [ctx.ev(classes.source, { count: null })] };

@@ -24,6 +24,8 @@ export type SimulatorOptions = {
    * to custom objects' records.
    */
   readOnly?: boolean;
+  /** Return a Tooling item with a null Metadata, for the single-row query that matches. */
+  withholdMetadata?: (soql: string) => boolean;
 };
 
 type Json = Record<string, unknown>;
@@ -132,6 +134,7 @@ export class Simulator implements Transport {
   #failQuery: SimulatorOptions["failQuery"];
   #dropFields: Record<string, string[]>;
   #readOnly: boolean;
+  #withholdMetadata: SimulatorOptions["withholdMetadata"];
   #retrieveChecks = 0;
   #retrieving: Record<string, string> = org.METADATA_FILES;
 
@@ -141,6 +144,7 @@ export class Simulator implements Transport {
     this.#failQuery = options.failQuery;
     this.#dropFields = options.dropFields ?? {};
     this.#readOnly = options.readOnly ?? false;
+    this.#withholdMetadata = options.withholdMetadata;
   }
 
   get #limitInfo(): string {
@@ -244,7 +248,7 @@ export class Simulator implements Transport {
     if (single) {
       const item = tooling ? this.#toolingItem(soql) : null;
       if (!item) return reject("MALFORMED_QUERY", "When retrieving results with Metadata or FullName fields, the query qualifications must specify no more than one row for retrieval.");
-      return page([item]);
+      return page([this.#withholdMetadata?.(soql) ? { ...item, Metadata: null } : item]);
     }
 
     switch (object) {

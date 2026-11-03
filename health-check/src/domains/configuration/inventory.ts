@@ -1,4 +1,5 @@
 import { apexExtractor, metadataExtractor } from "../../extract/automation.ts";
+import { unreadReason } from "../../extract/metadata-parse.ts";
 import { CORE_OBJECTS, customObjectsExtractor, isOwnCustomField, layoutsExtractor, recordCountsExtractor, schemaExtractor } from "../../extract/configuration.ts";
 import { objectResolver } from "../object-names.ts";
 import { opportunitiesExtractor } from "../../extract/opportunities.ts";
@@ -69,6 +70,10 @@ export function objectInventoryMetric(ctx: Ctx): Metric[] {
   const exclusions = ["Objects from installed packages", "Custom objects with no records", "Inactive validation rules, flows, Workflow Rules, triggers and record types", "Flows that aren't record-triggered, and Apex classes, because they don't belong to one object"];
   const assumptions = ["Record counts are the approximate figures Salesforce keeps for each object", "Ranked by how much automation runs on each object, then by custom fields"];
   if (metadata.status !== "ok") return [{ ...base, status: "not_measurable", reason: `Object metadata couldn't be retrieved: ${metadata.reason}`, evidence, exclusions, assumptions }];
+  // Every object's row counts Workflow Rules and validation rules, so one read
+  // only in part would undercount them all (rule 5).
+  const unread = unreadReason(metadata.data, ["workflowRules", "validationRules"]);
+  if (unread) return [{ ...base, status: "not_measurable", reason: unread, evidence, exclusions, assumptions }];
   // DECISIONS 37: no metric is published when Opportunity can't be read.
   const { opportunities } = ctx.data(opportunitiesExtractor);
   if (opportunities.status !== "ok") return [{ ...base, status: "not_measurable", reason: `Opportunities couldn't be read, and no metric is published without them: ${opportunities.reason}`, evidence, exclusions, assumptions }];

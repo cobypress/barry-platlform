@@ -13,7 +13,8 @@ import type { ReportScan } from "../report-definitions.ts";
 import type { CustomObjectRow } from "../configuration.ts";
 import type { RunAsData } from "../users.ts";
 import type { ApexData } from "../automation.ts";
-import type { Sourced } from "../types.ts";
+import type { ExtractContext, Sourced } from "../types.ts";
+import { readBundleThroughTooling } from "../metadata-tooling.ts";
 
 // DECISIONS.md 73: a connection holding only Barometer Read Only can't use the
 // Metadata API, so it reads the same things through Tooling and the Analytics
@@ -189,5 +190,73 @@ describe("when the Tooling route fails too", () => {
     assert.equal(metadata.status, "unavailable");
     if (metadata.status !== "unavailable") return;
     assert.match(metadata.reason, /^The Metadata API refused this connection \(.*ModifyMetadata.*\), and reading the same through the Tooling API didn't work either: FlowDefinition isn't available/);
+  });
+});
+
+// Rule 5: a rule that needs a kind of metadata the Tooling route couldn't read
+// whole is not measurable, never a pass on what was read.
+describe("a kind the Tooling route couldn't read whole", () => {
+  type Metric = { id: string; status: string; reason?: string };
+  async function runWith(options: ConstructorParameters<typeof Simulator>[0]): Promise<{ findings: Finding[]; metrics: Metric[]; dir: string }> {
+    const transport = new Simulator({ readOnly: true, ...options });
+    const result = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: new Date(AS_OF), transport, log: () => {} });
+    const metrics = JSON.parse(readFileSync(join(result.dir, "metrics.json"), "utf8")) as Metric[];
+    return { findings: JSON.parse(readFileSync(join(result.dir, "findings.json"), "utf8")) as Finding[], metrics, dir: result.dir };
+  }
+  const status = (findings: Finding[], ruleId: string): Finding => findings.find((f) => f.ruleId === ruleId)!;
+  const invalidType = (object: string) => (soql: string) => (new RegExp(`FROM ${object}\\b`).test(soql) ? { errorCode: "INVALID_TYPE", message: `sObject type '${object}' is not supported.` } : null);
+
+  test("Workflow Rules that can't be listed make every rule that counts them not measurable", async () => {
+    const { findings, metrics } = await runWith({ failQuery: invalidType("WorkflowRule") });
+    for (const ruleId of ["aut.legacy-workflow-rules", "aut.mixed-automation-on-object", "aut.undocumented-automation"]) {
+      const f = status(findings, ruleId);
+      assert.equal(f.status, "not_measurable", ruleId);
+      assert.match(f.notMeasurableReason!, /Workflow Rules couldn't be read/, ruleId);
+    }
+    // Rules that only need flows still answer.
+    assert.notEqual(status(findings, "aut.hardcoded-ids-in-flows").status, "not_measurable");
+    assert.equal(metrics.find((m) => m.id === "configuration.object_inventory")!.status, "not_measurable");
+  });
+
+  test("a Workflow Rule that comes back without its definition does the same", async () => {
+    const { findings } = await runWith({ withholdMetadata: (soql) => /FROM WorkflowRule\b/.test(soql) });
+    assert.equal(status(findings, "aut.legacy-workflow-rules").status, "not_measurable");
+  });
+
+  test("validation rules that can't be listed make the undocumented count not measurable", async () => {
+    const { findings, metrics } = await runWith({ failQuery: invalidType("ValidationRule") });
+    const f = status(findings, "aut.undocumented-automation");
+    assert.equal(f.status, "not_measurable");
+    assert.match(f.notMeasurableReason!, /Validation rules couldn't be read/);
+    assert.equal(metrics.find((m) => m.id === "configuration.object_inventory")!.status, "not_measurable");
+    assert.equal(status(findings, "aut.legacy-workflow-rules").status, "issue");
+  });
+
+  test("a validation rule formula that comes back empty leaves formulas unsearched", async () => {
+    const { dir } = await runWith({ withholdMetadata: (soql) => /FROM ValidationRule\b/.test(soql) });
+    const metadata = JSON.parse(readFileSync(join(dir, "checkpoints", "metadata.json"), "utf8")) as Sourced<MetadataBundle>;
+    assert.ok(metadata.status === "ok");
+    assert.ok(metadata.data.unsearched!.includes("validation rule formulas"));
+  });
+});
+
+// Rule 3: an action whose definition wasn't read can't count as searched, or a
+// user named only in an alert's recipients would pass the deactivation guard.
+describe("a workflow action that comes back without its definition", () => {
+  test("its kind is unsearched", async () => {
+    const answers: Record<string, Array<Record<string, unknown>>> = {
+      WorkflowAlert: [{ Id: "01W000000000001AAA", NamespacePrefix: null }],
+    };
+    const client = {
+      queryAll: async (soql: string) => {
+        if (/^SELECT Id, FullName, Metadata FROM WorkflowAlert/.test(soql)) return [{ Id: "01W000000000001AAA", FullName: "Opportunity.Big_Deal", Metadata: null }];
+        if (/FROM (EntityDefinition|FlowDefinition|WorkflowRule|WorkflowFieldUpdate|WorkflowTask|WorkflowOutboundMessage|ValidationRule|FieldDefinition|EntityParticle|RecordType|ProcessDefinition|AssignmentRule)\b/.test(soql)) return [];
+        const object = /FROM (\w+)/.exec(soql)?.[1] ?? "";
+        return answers[object] ?? [];
+      },
+    };
+    const partial = { read: () => [], append: () => {}, clear: () => {} };
+    const bundle = await readBundleThroughTooling({ client, partial } as unknown as ExtractContext);
+    assert.deepEqual(bundle.unsearched, ["workflow email alerts"]);
   });
 });
