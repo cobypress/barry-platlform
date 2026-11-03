@@ -2,8 +2,10 @@
 // map from token to name stays in the worker's run folder and is used in one
 // place: when a report is rendered.
 //
-// scrub() is the same path consultant chat will go through in Milestone 5, and
-// also a backstop over everything the engine writes.
+// scrub() is a backstop over everything the engine writes. It only knows whole
+// names, so free text on its way to Claude (consultant chat in Milestone 5
+// included) goes through guardPrompt() and sendPrompt() in src/narrative/guard.ts,
+// which also mask first names, surnames and other parts (src/privacy/names.ts).
 
 export type PseudonymEntry = { token: string; id: string; name: string; aliases: string[] };
 

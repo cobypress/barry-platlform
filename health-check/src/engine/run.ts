@@ -11,6 +11,7 @@ import type { UserRow } from "../extract/users.ts";
 import { usersExtractor } from "../extract/users.ts";
 import { renderRawNotes } from "../notes/raw-notes.ts";
 import { Pseudonymiser, type PseudonymEntry } from "../privacy/pseudonymiser.ts";
+import { registerSharedNames } from "../privacy/names.ts";
 import { Run, type Calibration, type ManualAnswer, type RunStep } from "../schemas/index.ts";
 import { ApiBudget, BudgetStopError } from "../salesforce/budget.ts";
 import { SalesforceClient } from "../salesforce/client.ts";
@@ -245,6 +246,9 @@ function analyseRun(dir: string, run: Run, calibration: Calibration, modules: Do
   // a name even if no finding set out to mention that user.
   for (const [id, entry] of [...directory].sort(([a], [b]) => a.localeCompare(b))) pseudonyms.label("user", id, entry.name, entry.aliases);
   if (run.customerRef) pseudonyms.label("customer", run.orgId, run.customerRef);
+  // A first name two people share gets its own token, saved with the map so a
+  // report rendered later can restore it.
+  registerSharedNames(pseudonyms);
 
   const output = analyse({
     modules,
