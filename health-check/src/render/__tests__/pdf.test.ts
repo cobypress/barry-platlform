@@ -92,6 +92,9 @@ describe("the executive summary", () => {
     const plan = buildPlan(report.teamFindings);
     const shown = plan.reduce((n, p) => n + Math.min(p.findings.length, 5), 0);
     assert.equal(html.match(/<li><strong>[^<]+\.<\/strong>/g)?.length, shown, "every plan action leads with its issue");
+    const deckActions = [...fullReportHtml(report, pseudonyms).matchAll(/<ul class="action-list[^"]*">([\s\S]*?)<\/ul>/g)].flatMap((m) => m[1]!.split("<li>").slice(1));
+    assert.ok(deckActions.length > 0);
+    for (const item of deckActions) assert.match(item, /^<strong>/, "every roadmap action in the deck leads with its issue");
     // Urgent wording in a later phase contradicts itself.
     for (const f of plan.slice(1).flatMap((p) => p.findings)) assert.doesNotMatch(f.recommendation, /\b(?:now|this month)\b/i, f.title);
   });
