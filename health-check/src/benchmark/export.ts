@@ -1,4 +1,4 @@
-import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { z } from "zod";
@@ -149,6 +149,31 @@ export function quarterOf(day: string): string {
   return `${year}-Q${Math.floor((month - 1) / 3) + 1}`;
 }
 
+// The minimum group counts orgs, but the store can't tell orgs apart. So an org
+// goes in at most once in any window of this many quarters, and the summary only
+// counts rows inside the latest window. Together, no org counts twice.
+export const BENCHMARK_WINDOW_QUARTERS = 4;
+
+/** Quarters since year 0, so two periods can be compared. */
+export function quarterIndex(period: string): number {
+  const [year, quarter] = period.split("-Q").map(Number) as [number, number];
+  return year * 4 + quarter - 1;
+}
+
+/** Another run of the same org, in the same runs folder, already exported within the window. */
+function earlierExport(dir: string, orgId: string, period: string): { runId: string; period: string } | null {
+  const parent = dirname(dir);
+  for (const name of readdirSync(parent)) {
+    const other = join(parent, name);
+    if (other === dir || !existsSync(join(other, CONSENT_FILE)) || !existsSync(join(other, "run.json"))) continue;
+    const run = Run.safeParse(JSON.parse(readFileSync(join(other, "run.json"), "utf8")));
+    if (!run.success || run.data.orgId.slice(0, 15) !== orgId.slice(0, 15)) continue;
+    const otherPeriod = quarterOf(run.data.analysisWindow.to);
+    if (Math.abs(quarterIndex(otherPeriod) - quarterIndex(period)) < BENCHMARK_WINDOW_QUARTERS) return { runId: run.data.id, period: otherPeriod };
+  }
+  return null;
+}
+
 const median = (values: number[]): number => {
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
@@ -261,6 +286,10 @@ export function exportBenchmark(options: BenchmarkOptions): BenchmarkResult {
   assertOutsideGit(storeDir);
 
   const run = Run.parse(readJson(join(dir, "run.json")));
+  const earlier = earlierExport(dir, run.orgId, quarterOf(run.analysisWindow.to));
+  if (earlier) {
+    throw new Error(`This org is already in the benchmark set from run ${earlier.runId} (${earlier.period}). An org goes in once in any ${BENCHMARK_WINDOW_QUARTERS} quarters, so it can't count twice towards a group.`);
+  }
   const calibration = Calibration.parse(readJson(join(dir, "calibration.json")));
   const { figures, skipped } = benchmarkFigures({
     metrics: z.array(Metric).parse(readJson(join(dir, "metrics.json"))),

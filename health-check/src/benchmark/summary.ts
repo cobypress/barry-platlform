@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { BENCHMARK_MIN_GROUP, BenchmarkRow } from "../schemas/index.ts";
-import { BENCHMARK_FILE, defaultBenchmarkDir } from "./export.ts";
+import { BENCHMARK_FILE, BENCHMARK_WINDOW_QUARTERS, defaultBenchmarkDir, quarterIndex } from "./export.ts";
 
 // Counts only. The summary says whether a comparison could be shown, and never
 // prints a row or a value, so it's safe to paste anywhere.
@@ -16,13 +16,13 @@ export type BenchmarkGroup = {
   enough: boolean;
 };
 
-export type BenchmarkSummary = { path: string; exists: boolean; rows: number; invalidLines: number; groups: BenchmarkGroup[] };
+export type BenchmarkSummary = { path: string; exists: boolean; rows: number; olderRows: number; invalidLines: number; groups: BenchmarkGroup[] };
 
 export function summariseBenchmarks(storeDir: string = defaultBenchmarkDir()): BenchmarkSummary {
   const path = join(resolve(storeDir), BENCHMARK_FILE);
-  if (!existsSync(path)) return { path, exists: false, rows: 0, invalidLines: 0, groups: [] };
+  if (!existsSync(path)) return { path, exists: false, rows: 0, olderRows: 0, invalidLines: 0, groups: [] };
   const groups = new Map<string, BenchmarkGroup>();
-  let rows = 0;
+  const valid: BenchmarkRow[] = [];
   let invalidLines = 0;
   for (const line of readFileSync(path, "utf8").split("\n")) {
     if (!line.trim()) continue;
@@ -38,9 +38,16 @@ export function summariseBenchmarks(storeDir: string = defaultBenchmarkDir()): B
       invalidLines++;
       continue;
     }
-    const row = parsed.data;
-    rows++;
-    // Periods are pooled: a comparison group is like orgs, whatever the quarter.
+    valid.push(parsed.data);
+  }
+  // Only the latest window counts. An org goes in once per window, so a repeat
+  // check a year on replaces its old figures rather than adding a second org.
+  const latest = Math.max(...valid.map((r) => quarterIndex(r.period)));
+  const current = valid.filter((r) => latest - quarterIndex(r.period) < BENCHMARK_WINDOW_QUARTERS);
+  const rows = current.length;
+  const olderRows = valid.length - rows;
+  for (const row of current) {
+    // Periods inside the window are pooled: a comparison group is like orgs, whatever the quarter.
     const key = [row.metricKey, row.industry, row.headcountBand, row.userBand, row.dealSizeBand].join("|");
     const group = groups.get(key) ?? { metricKey: row.metricKey, industry: row.industry, headcountBand: row.headcountBand, userBand: row.userBand, dealSizeBand: row.dealSizeBand, rows: 0, enough: false };
     group.rows++;
@@ -53,13 +60,14 @@ export function summariseBenchmarks(storeDir: string = defaultBenchmarkDir()): B
     const i = x.findIndex((v, n) => v !== y[n]);
     return i === -1 ? 0 : x[i]! < y[i]! ? -1 : 1;
   });
-  return { path, exists: true, rows, invalidLines, groups: sorted };
+  return { path, exists: true, rows, olderRows, invalidLines, groups: sorted };
 }
 
 /** The summary as plain lines for the command line. */
 export function formatSummary(summary: BenchmarkSummary): string[] {
   if (!summary.exists) return [`No benchmark rows yet at ${summary.path}.`];
-  const lines = [`Benchmark set at ${summary.path}: ${summary.rows} rows. A group needs ${BENCHMARK_MIN_GROUP} before a comparison is shown.`];
+  const lines = [`Benchmark set at ${summary.path}: ${summary.rows} rows in the latest ${BENCHMARK_WINDOW_QUARTERS} quarters. A group needs ${BENCHMARK_MIN_GROUP} before a comparison is shown.`];
+  if (summary.olderRows > 0) lines.push(`${summary.olderRows} older rows aren't counted.`);
   if (summary.invalidLines > 0) lines.push(`${summary.invalidLines} lines don't match the row format and weren't counted.`);
   const count = (n: number): string => `${n} ${n === 1 ? "row" : "rows"}`;
   let metric = "";

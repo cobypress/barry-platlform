@@ -142,6 +142,25 @@ describe("hc benchmark", () => {
     assert.equal(ConsentRecord.parse(read(run, CONSENT_FILE)).consent, CONSENT);
   });
 
+  test("an org goes in once in any four quarters, so a repeat check can't count it twice", () => {
+    const runs = tempDir();
+    const first = join(runs, "first");
+    const second = join(runs, "second");
+    cpSync(source, first, { recursive: true });
+    cpSync(source, second, { recursive: true });
+    const store = tempDir();
+    exportBenchmark(options(first, store));
+    const before = readFileSync(join(store, BENCHMARK_FILE), "utf8");
+    assert.throws(() => exportBenchmark(options(second, store)), /already in the benchmark set/);
+    assert.equal(readFileSync(join(store, BENCHMARK_FILE), "utf8"), before);
+    assert.ok(!existsSync(join(second, CONSENT_FILE)));
+
+    // A year on, the repeat check can go in.
+    const runJson = read<{ analysisWindow: { from: string; to: string } }>(second, "run.json");
+    write(second, "run.json", { ...runJson, analysisWindow: { from: "2025-11-03", to: "2027-11-03" } });
+    exportBenchmark(options(second, store));
+  });
+
   test("takes industry and headcount only from the fixed lists", () => {
     const run = freshRun();
     const store = tempDir();
@@ -308,6 +327,16 @@ describe("hc benchmark --summary", () => {
     assert.match(text, /retail, .*: 1 row, below 10/);
     assert.match(text, /2 lines don't match the row format/);
     assert.doesNotMatch(text, /\b35\b/, "no value is printed");
+  });
+
+  test("counts only the latest four quarters, so a repeat check doesn't add a second org", () => {
+    const store = tempDir();
+    const path = join(store, BENCHMARK_FILE);
+    appendRows(path, [{ ...row("historic.win_rate", "technology"), period: "2025-Q4" }, { ...row("historic.win_rate", "technology"), period: "2026-Q1" }, row("historic.win_rate", "technology")]);
+    const summary = summariseBenchmarks(store);
+    assert.equal(summary.rows, 2);
+    assert.equal(summary.olderRows, 1);
+    assert.match(formatSummary(summary).join("\n"), /1 older rows aren't counted/);
   });
 
   test("says so when there are no rows yet", () => {
