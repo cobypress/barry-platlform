@@ -1,8 +1,27 @@
 {
   "packageDirectories": [
-    { "path": "force-app", "default": true },
-    { "path": "dev-only", "default": false }
+    {
+      "versionName": "ver 0.1",
+      "versionNumber": "0.1.0.NEXT",
+      "path": "force-app",
+      "default": true,
+      "package": "Black Cloud Barometer",
+      "versionDescription": "Black Cloud Barometer: the External Client App and a read-only permission set for the health check."
+    },
+    {
+      "path": "source-org",
+      "default": false
+    },
+    {
+      "path": "dev-only",
+      "default": false
+    }
   ],
   "name": "barometer-connection",
-  "sourceApiVersion": "68.0"
+  "namespace": "blackcloud",
+  "sfdcLoginUrl": "https://login.salesforce.com",
+  "sourceApiVersion": "68.0",
+  "packageAliases": {
+    "Black Cloud Barometer": "0HoQH0000000rkH0AQ"
+  }
 }

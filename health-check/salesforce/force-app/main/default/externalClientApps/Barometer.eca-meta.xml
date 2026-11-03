@@ -2,7 +2,8 @@
 <ExternalClientApplication xmlns="http://soap.sforce.com/2006/04/metadata">
     <contactEmail>coby@black-cloud.com</contactEmail>
     <description>Black Cloud Barometer health check. Reads configuration and CRM data to assess the org. It never changes anything.</description>
-    <distributionState>Local</distributionState>
+    <distributionState>Packaged</distributionState>
     <isProtected>false</isProtected>
     <label>Black Cloud Barometer</label>
+    <orgScopedExternalApp>00DQH00000EBynB:Barometer</orgScopedExternalApp>
 </ExternalClientApplication>

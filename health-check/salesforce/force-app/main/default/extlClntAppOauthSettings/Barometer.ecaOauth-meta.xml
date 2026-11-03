@@ -2,5 +2,7 @@
 <ExtlClntAppOauthSettings xmlns="http://soap.sforce.com/2006/04/metadata">
     <commaSeparatedOauthScopes>Api, RefreshToken</commaSeparatedOauthScopes>
     <externalClientApplication>Barometer</externalClientApplication>
+    <isFirstPartyAppEnabled>false</isFirstPartyAppEnabled>
     <label>Barometer OAuth settings</label>
+    <oauthLink>00DQH00000EBynB:888QH000000QOuj</oauthLink>
 </ExtlClntAppOauthSettings>
