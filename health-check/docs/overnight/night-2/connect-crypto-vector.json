@@ -1,0 +1,33 @@
+{
+  "description": "Fixed test vector for the connect-link secrets the console seals and the worker opens. Synthetic values only. Both lanes test against this file.",
+  "algorithm": "AES-256-GCM",
+  "format": "v1.<iv base64url>.<tag base64url>.<ciphertext base64url>",
+  "ivBytes": 12,
+  "tagBytes": 16,
+  "aad": "the link id, UTF-8",
+  "plaintextEncoding": "UTF-8. The pending authorisation is its JSON; the code is the code string as Salesforce sent it",
+  "keyBase64": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+  "cases": [
+    {
+      "name": "pending authorisation",
+      "linkId": "00000000-0000-4000-8000-000000000001",
+      "ivBase64url": "AAECAwQFBgcICQoL",
+      "plaintext": "{\"linkId\":\"00000000-0000-4000-8000-000000000001\",\"stateHash\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"codeVerifier\":\"vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\",\"createdAt\":\"2026-11-03T22:00:00.000Z\",\"expiresAt\":\"2026-11-03T22:10:00.000Z\"}",
+      "sealed": "v1.AAECAwQFBgcICQoL.tCYCnwgGg7znC-Oj76_j3A.PCC6cquOi3-ve7W7gdlIXbPmtxnAS29MFVPVtS1EOIIxIIPMn_EiqESUT924txkawnsT-TuixpJe5EI7IsG0r7F9hzuSkGcgXRXrL67OT6l5y4gjNyISKby83405sfjMirkYp-UAiVvfPhKQKxpFGuwCEMKFrEDob8V1u_SQGHjNJHawwqG9JX6XPtdLrDq0QIKVQ0Nn5Tz6KZ4BjKSfmOXh6GOfie5ShQCvn77049_cuugYqZlDjlPy8fZc9YSnIX6wyj3n5vkZZuPW4GP1poQGiB9PZcmwBbOg5XN4vcxuEuWC1hNXF2B9iTiPIUx_mKOJL79N"
+    },
+    {
+      "name": "authorisation code",
+      "linkId": "00000000-0000-4000-8000-000000000001",
+      "ivBase64url": "__79_Pv6-fj39vX0",
+      "plaintext": "aPrx000000000000000000000001",
+      "sealed": "v1.__79_Pv6-fj39vX0.C4-wW5GW7YGSUYEoItbHig.F7599dgGW7dX-d6JmvGl66lPdx1Gx0wkLoLAzA"
+    }
+  ],
+  "mustFail": [
+    {
+      "name": "sealed for a different link",
+      "linkId": "00000000-0000-4000-8000-000000000002",
+      "sealed": "v1.__79_Pv6-fj39vX0.C4-wW5GW7YGSUYEoItbHig.F7599dgGW7dX-d6JmvGl66lPdx1Gx0wkLoLAzA"
+    }
+  ]
+}
