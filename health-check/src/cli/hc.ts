@@ -16,6 +16,7 @@ import { SfCliConnectionProvider } from "../salesforce/sf-cli-provider.ts";
 import type { ConnectionProvider } from "../salesforce/connection.ts";
 import { OAuthConnectionProvider } from "../salesforce/oauth-provider.ts";
 import { CONNECT_USAGE, connectCommand, connectionStore, oauthClient } from "./connect.ts";
+import { WORKER_USAGE, workerCommand } from "./worker.ts";
 
 const USAGE = `Black Cloud Barometer
 
@@ -27,6 +28,7 @@ const USAGE = `Black Cloud Barometer
   hc purge --run <run folder>
   hc purge --older-than <days> [--runs <dir>]
 ${CONNECT_USAGE.trimEnd()}
+${WORKER_USAGE.trimEnd()}
 
 Options:
   --connection <name>  Run through a stored OAuth connection instead of a CLI alias
@@ -136,6 +138,8 @@ async function main(argv: string[]): Promise<number> {
     console.log(`${sweep.purged.length} purged. ${sweep.kept} left alone, being newer than ${days} days or already purged.`);
     return EXIT.ok;
   }
+
+  if (positionals[0] === "worker" && !values.help) return workerCommand();
 
   if (positionals[0] === "connect") return connectCommand(values.help ? undefined : positionals[1], values);
 
