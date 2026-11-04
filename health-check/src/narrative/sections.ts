@@ -67,6 +67,7 @@ const SUMMARY_SOURCES = [SOURCE.run, SOURCE.summary, SOURCE.structure];
 const INTAKE = "intake";
 const CALIBRATION = "calibration";
 const OVERRIDES = "overrides";
+const COVER = "cover";
 
 const lines = (...parts: Array<string | null | undefined | false>): string => parts.filter(Boolean).join("\n\n");
 const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
@@ -346,6 +347,8 @@ export function buildReport(input: ReportInput): BuiltReport {
     extraText: [
       { source: CALIBRATION, text: calibrationText(run, calibration) },
       ...(intake ? [{ source: INTAKE, text: intakeText(intake) }] : []),
+      // The cover's customer name, which can be a reference such as "ACME-02". No section's scope includes it.
+      { source: COVER, text: [intake?.customerName, run.customerRef].filter(Boolean).join("\n") },
       ...(overrides.length ? [{ source: OVERRIDES, text: overrideText(overrides) }] : []),
     ],
   });

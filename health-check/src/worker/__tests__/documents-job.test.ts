@@ -287,3 +287,17 @@ describe("GoogleDrive", () => {
     await assert.rejects(new GoogleDrive(config, impl).folders("x' or name contains 'a"), /isn't a Drive folder id/);
   });
 });
+
+describe("the cover", () => {
+  test("a customer reference with digits on the cover isn't a figure the number check refuses", async () => {
+    const { checkNumbers } = await import("../../numbercheck/index.ts");
+    const { input } = loadRun(recorded);
+    const report = buildReport({ ...input, run: { ...input.run, customerRef: "BT-E2E-SCRATCH5" }, intake: null });
+    assert.deepEqual(checkNumbers("BT-E2E-SCRATCH5", report.dataset).unmatched, []);
+    // A section still can't quote it: no section's scope takes the cover.
+    const verdict = report.outputs.executive_summary.sections.find((s) => s.key === "verdict")!;
+    const { scopeDataset } = await import("../../numbercheck/index.ts");
+    const scoped = scopeDataset(report.dataset, [...verdict.findingIds, ...verdict.metricIds]);
+    assert.notDeepEqual(checkNumbers("BT-E2E-SCRATCH5", scoped).unmatched, []);
+  });
+});
