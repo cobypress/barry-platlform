@@ -14,6 +14,7 @@ const CSS = `
 .cover { justify-content: space-between; padding-bottom: 30mm; }
 .cover h1 { font-size: 44px; line-height: 1.15; font-weight: 700; margin-top: 12px; }
 .cover .sub { font-size: 18px; color: var(--panelMuted); }
+.cover .for { font-size: 12px; color: var(--panelMuted); margin-bottom: 2px; }
 h2 { font-size: 30px; line-height: 1.2; font-weight: 600; margin: 6px 0 18px; }
 .lead p { font-size: 16px; line-height: 1.55; margin-bottom: 10px; }
 .headline { font-size: 34px; font-weight: 700; line-height: 1.15; margin: 8px 0 18px; }
@@ -147,12 +148,12 @@ export function executiveHtml(report: BuiltReport, pseudonyms: Pseudonymiser): s
     pages.push(`<section class="page ${classes}" data-page="${pages.length + 1}">${html}${classes.includes("cover") ? "" : footer(r, pages.length + 1)}</section>`);
   };
 
-  add(`<div><div class="eyebrow">Black Cloud Barometer</div><h1>Salesforce health check</h1><div class="sub">Executive summary</div></div><div>${r.draft ? '<p><span class="mark">Draft, not approved for release</span></p>' : ""}<p>${r.t(customer)}</p><p>As of ${longDate(run.asOf)}</p></div>`, "dark cover");
+  add(`<div><div class="eyebrow">Black Cloud Barometer</div><h1>Salesforce health check</h1><div class="sub">Executive summary</div></div><div>${r.draft ? '<p><span class="mark">Draft, not approved for release</span></p>' : ""}<p class="for">Prepared for</p><p>${r.t(customer)}</p><p>${longDate(run.asOf)}</p></div>`, "dark cover");
 
   add(`<div class="eyebrow">Verdict</div><div class="headline">${r.t(verdict.headline)}</div><div class="lead">${paragraphs(r, currentBody(built, "verdict").replace(`${verdict.headline}.\n\n`, ""))}</div>
     <div class="stat-row" style="margin-top:18px"><div class="stat"><b>${verdict.issues}</b><span>Issues</span></div><div class="stat"><b>${verdict.critical}</b><span>Critical</span></div><div class="stat"><b>${verdict.high}</b><span>High</span></div><div class="stat"><b>${notMeasurable}</b><span>Not measurable</span></div></div>
     <h3 class="sub">What matters most</h3>
-    <table class="grid"><thead><tr><th>Issue</th><th style="width:34%">Value</th></tr></thead><tbody>${top.map((f) => `<tr><td>${r.t(f.title)}</td><td>${valueText(r, f).amount}</td></tr>`).join("")}</tbody></table>
+    <table class="grid"><thead><tr><th>Issue</th><th style="width:34%">Impact</th></tr></thead><tbody>${top.map((f) => `<tr><td>${r.t(f.title)}</td><td>${valueText(r, f).amount}</td></tr>`).join("")}</tbody></table>
     <p style="margin-top:18px">Every figure here comes from your Salesforce org. Where we couldn't measure something, we say so rather than estimate it.</p>`);
 
   add(`<div class="eyebrow">Scorecard</div><h2>How each area stands</h2><p style="margin-bottom:14px">${r.t(currentBody(built, "scorecard"))}</p>${chartSlot(scorecardChart(scorecard(team, scores)))}<h3 class="sub">Win rate by segment</h3><div style="margin-top:8px">${chartSlot(winRateBySegment(report.metrics.find((m) => m.id === "historic.win_rate")))}</div>`);

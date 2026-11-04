@@ -11,7 +11,7 @@ import { chartSlot, document, effortText, estimateLines, paginate, paragraphs, r
 // The full deck: 16:9, 40 to 60 slides. Issue slides flex to keep it in range,
 // because a thin org and a messy one have very different numbers of findings.
 
-export const DECK_RANGE = { min: 40, max: 60 } as const;
+export const DECK_RANGE = { min: 20, max: 60 } as const;
 
 const CSS = `
 .page { font-size: 20px; line-height: 1.45; }
@@ -20,6 +20,7 @@ const CSS = `
 .cover { justify-content: space-between; }
 .cover h1 { font-size: 68px; font-weight: 700; line-height: 1.1; margin-top: 14px; }
 .cover .sub { font-size: 26px; color: var(--panelMuted); }
+.cover .for { font-size: 15px; color: var(--panelMuted); margin-bottom: 2px; }
 .divider { justify-content: center; }
 .divider h1 { font-size: 56px; font-weight: 700; line-height: 1.1; margin: 10px 0 18px; }
 .divider .body { max-width: 1000px; font-size: 22px; }
@@ -318,6 +319,22 @@ function closeDatesSlide(r: Render, metric: (id: string) => Metric | undefined, 
   return { html: `<div class="eyebrow">Close dates and stage speed</div><h2>How far close dates hold, and where time goes</h2><div class="columns" style="grid-template-columns: 1fr 1.5fr"><div class="panel">${panel}</div>${chartSlot(stageVelocityChart(metric("historic.stage_velocity_won"), metric("historic.stage_velocity_lost"), order))}</div>` };
 }
 
+/** The close: what we'd do next, together. Its only figures are the plan's own. */
+function nextStepsSlide(r: Render, plan: ReturnType<typeof buildPlan>["phases"]): Slide {
+  const first = plan.find((p) => p.findings.length > 0);
+  const opening = first
+    ? `Name an owner for each of the ${first.findings.length} ${first.findings.length === 1 ? "action" : "actions"} in days ${first.from} to ${first.to}, starting with this: ${first.findings[0]!.title}.`
+    : "Agree who owns each action on the roadmap, and when it's due.";
+  const steps = [
+    { title: "Walk through it together", text: "We'll take your team through what we found, answer their questions, and agree what matters most to you." },
+    { title: "Start the first month", text: opening },
+    { title: "Measure the change", text: "We'll look at your Salesforce again after 90 days, so you can see what has improved and what still needs work." },
+  ];
+  return {
+    html: `<div class="eyebrow">Next steps</div><h2>What happens next</h2><div class="stat-row" style="margin-top:18px">${steps.map((s) => `<div class="stat"><h3 style="font-size:22px;margin:0 0 8px">${r.t(s.title)}</h3><p>${r.t(s.text)}</p></div>`).join("")}</div><p class="lede" style="margin-top:28px">Black Cloud can deliver this plan alongside your team. Your consultant will talk you through what that would look like.</p>`,
+  };
+}
+
 /** Rows on the slide. The raw notes list every object, so this can't overflow. */
 export const INVENTORY_SLIDE_ROWS = 10;
 
@@ -386,7 +403,8 @@ const needsInput = (built: BuiltOutput, key: string): boolean => built.sections.
 const inputChip = '<p style="margin-bottom:10px"><span class="chip input">Needs input from a consultant</span></p>';
 
 function listSlides(r: Render, eyebrow: string, title: string, items: Array<{ title: string; detail: string }>, compact: boolean): Slide[] {
-  if (items.length === 0) return [{ html: `<div class="eyebrow">${r.t(eyebrow)}</div><h2>${r.t(title)}</h2><p>Nothing to list.</p>` }];
+  // An empty list is left out rather than given a page that says so.
+  if (items.length === 0) return [];
   const pages = paginate(items, (x) => 16 + 24 * Math.max(estimateLines(x.detail, 85), estimateLines(x.title, 34)), LIST_BUDGET);
   const cut = compact && pages.length > 1;
   return (cut ? pages.slice(0, 1) : pages).map((group, i) => ({
@@ -404,6 +422,7 @@ function twoColumnList(r: Render, eyebrow: string, title: string, items: Array<{
 
 function buildSlides(report: BuiltReport, r: Render, density: Density | null): Slide[] {
   const compact = density === null;
+  const dense = density?.columns === 2;
   const { run, intake, calibration, scores = [] } = report.input;
   const built = report.outputs.full_health_check;
   const team = report.teamFindings;
@@ -419,81 +438,149 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   const slides: Slide[] = [];
   const add = (html: string, classes?: string): void => void slides.push({ html, ...(classes ? { classes } : {}) });
 
-  add(`<div><div class="eyebrow">Black Cloud Barometer</div><h1>Salesforce health check</h1><div class="sub">Full report</div></div><div>${r.draft ? '<p><span class="mark">Draft, not approved for release</span></p>' : ""}<p>${r.t(customer)}</p><p>As of ${longDate(run.asOf)}</p></div>`, "dark cover");
+  add(`<div><div class="eyebrow">Black Cloud Barometer</div><h1>Salesforce health check</h1><div class="sub">Full report</div></div><div>${r.draft ? '<p><span class="mark">Draft, not approved for release</span></p>' : ""}<p class="for">Prepared for</p><p>${r.t(customer)}</p><p>${longDate(run.asOf)}</p></div>`, "dark cover");
 
-  const contents = ["Stated problems", "Overview and scorecard", ...assessed.map(domainLabel), "Pipeline deep dive", "Stated vs actual", "Roadmap", "Appendix"];
+  // Areas with issues get their own pages. The rest are summed up together, so
+  // the deck spends its pages on what needs doing.
+  const withIssues = assessed.filter((d) => issuesOf(team.filter((f) => f.domain === d)).length > 0);
+  const quiet = assessed.filter((d) => !withIssues.includes(d));
+  const working = quiet.filter((d) => team.some((f) => f.domain === d && f.status === "passed"));
+  const unclear = [...quiet.filter((d) => !working.includes(d)), ...unassessed];
+  const sized = (ids: string[]): boolean => ids.some((id) => metric(id)?.status === "measured");
+
+  // Each deep-dive page shows only if one of its figures could be measured. The
+  // others are listed together, with why, rather than as pages that say nothing.
+  const pipelinePages: Slide[] = [];
+  const gaps: Array<{ title: string; detail: string }> = [];
+  const page = (title: string, ids: string[], make: () => Slide | Slide[]): void => {
+    if (sized(ids)) {
+      pipelinePages.push(...[make()].flat());
+      return;
+    }
+    const reason = ids.map(metric).find((m): m is Extract<Metric, { status: "not_measurable" }> => m?.status === "not_measurable");
+    gaps.push({ title, detail: reason?.reason ?? "This wasn't part of the health check." });
+  };
+  const readings = ["historic.win_rate", "historic.win_rate_by_value", "historic.win_rate_including_no_decision", "historic.no_decision_rate"];
+  const cycle = ["historic.sales_cycle_won", "historic.sales_cycle_lost"];
+  const slippage = ["historic.slippage_rate", "historic.slippage_quarter_cross_rate", "historic.slippage_days"];
+  const rowsOf = (ids: string[]): Metric[] => ids.flatMap((id) => metric(id) ?? []);
+  const quarterly = ["historic.quarterly_created", "historic.quarterly_won", "historic.quarterly_won_value", "historic.quarterly_win_rate", "historic.quarterly_median_won_size", "historic.quarterly_median_cycle"];
+  const wins = ["historic.repeat_win_share", "historic.top_account_share", "historic.won_value_by_customer"];
+  const sources = ["historic.won_value_by_type", "historic.won_value_by_source"];
+  const lost = ["historic.lost_by_stage", "historic.lost_value_by_stage"];
+  const speed = ["historic.close_date_reliability", "historic.close_days_late", "historic.stage_velocity_won", "historic.stage_velocity_lost"];
+  page("Open pipeline by stage", ["current.open_deals"], () => pipelineTodaySlide(r, metric, calibration));
+  page("Delivery outlook", ["current.delivery_outlook_value"], () => outlookSlide(r, metric));
+  if (dense) {
+    page("How deals convert", ["historic.win_rate", "historic.stage_conversion"], () => ({ html: `<div class="eyebrow">Pipeline</div><h2>How deals convert</h2><div class="chart-pair"><div><h3 class="cap">Win rate by segment</h3>${chartSlot(winRateBySegment(metric("historic.win_rate"), undefined, HALF_WIDTH))}</div><div><h3 class="cap">Stage funnel</h3>${chartSlot(stageFunnel(metric("historic.stage_conversion"), HALF_WIDTH))}</div></div>` }));
+  } else {
+    page("Win rate by segment", ["historic.win_rate"], () => ({ html: `<div class="eyebrow">Pipeline</div><h2>Win rate by segment</h2><div class="chart-wrap">${chartSlot(winRateBySegment(metric("historic.win_rate")))}</div>` }));
+    page("Three ways of reading the win rate", readings, () => ({ classes: "tight", html: `<div class="eyebrow">Pipeline</div><h2>Three ways of reading the win rate</h2>${metricRows(r, rowsOf(readings), r.currency)}` }));
+    page("Stage funnel", ["historic.stage_conversion"], () => ({ html: `<div class="eyebrow">Pipeline</div><h2>Stage funnel</h2><div class="chart-wrap">${chartSlot(stageFunnel(metric("historic.stage_conversion")))}</div>` }));
+  }
+  page("Quarter by quarter", quarterly, () => quarterlySlide(r, metric));
+  if (dense) {
+    page("Where wins come from", [...wins, ...sources], () => winsSlideDense(r, metric));
+    page("Where deals are lost, and how fast they move", [...lost, ...speed], () => lostAndSpeedSlideDense(r, metric, calibration));
+    page("Win rate, sales cycle and slippage", [...readings, ...cycle, ...slippage], () => ({ classes: "tight compact-rows", html: `<div class="eyebrow">Pipeline</div><h2>Win rate, sales cycle and slippage</h2>${metricRows(r, rowsOf([...readings, ...cycle, ...slippage]), r.currency)}` }));
+  } else {
+    const [repeatSlide, sourceSlide] = winsSlides(r, metric);
+    page("New and repeat customers", wins, () => repeatSlide!);
+    page("Wins by type and lead source", sources, () => sourceSlide!);
+    page("Where deals drop out", lost, () => lostSlide(r, metric));
+    page("Close dates and stage speed", speed, () => closeDatesSlide(r, metric, calibration));
+    page("Sales cycle and slippage", [...cycle, ...slippage], () => ({ classes: "tight", html: `<div class="eyebrow">Pipeline</div><h2>Sales cycle and slippage</h2>${metricRows(r, rowsOf([...cycle, ...slippage]), r.currency)}` }));
+  }
+  page("Pipeline over time", ["historic.pipeline_point_in_time_value"], () => ({ html: `<div class="eyebrow">Pipeline</div><h2>Pipeline over time</h2><div class="chart-wrap" style="max-width:1000px">${chartSlot(pipelineOverTime(metric("historic.pipeline_point_in_time_value"), r.currency))}</div>` }));
+
+  const contents = [
+    "What you told us",
+    "What we found against it",
+    "Overview and scorecard",
+    ...withIssues.map(domainLabel),
+    ...(working.length ? ["What's working well"] : []),
+    ...(pipelinePages.length || gaps.length ? ["Pipeline"] : []),
+    ...(plan.some((p) => p.findings.length > 0) ? ["Roadmap"] : []),
+    "What happens next",
+    "Appendix",
+  ];
   add(`<div class="eyebrow">Contents</div><h2>What's in this report</h2><ol class="contents">${contents.map((c) => `<li>${r.t(c)}</li>`).join("")}</ol>`);
 
   add(`<div class="eyebrow">How to read this report</div><h2>What the ratings mean</h2><table class="grid"><tbody>
     <tr><td style="width:24%"><strong>Severity</strong></td><td>How much damage this does if it's left alone.</td></tr>
     <tr><td><strong>Confidence</strong></td><td>How sure we are, given what we could read from your org.</td></tr>
     <tr><td><strong>Effort</strong></td><td>Our sizing of the fix, from very small to very large.</td></tr>
-    <tr><td><strong>Value</strong></td><td>Revenue, licence cost or hours, with its assumptions. If we can't size something, we say so.</td></tr>
+    <tr><td><strong>Impact</strong></td><td>Revenue, licence cost or hours, with its assumptions. Where there's no honest figure to put on it, the risk it carries.</td></tr>
     <tr><td><strong>Not measurable</strong></td><td>The data can't support the figure, so we report that rather than estimate it.</td></tr></tbody></table>`);
 
-  add(`<div class="eyebrow">Stated problems</div><h2>What you told us</h2>${needsInput(built, "stated_problems") ? inputChip : ""}${sectionBody(r, built, "stated_problems")}`);
+  // What the customer said comes first, and our answer to it straight after: it's what they'll read first.
+  add(`<div class="eyebrow">What you told us</div><h2>In your words</h2>${needsInput(built, "stated_problems") ? inputChip : ""}${sectionBody(r, built, "stated_problems")}`);
+  add(`<div class="eyebrow">What we found against it</div><h2>What you told us, against what we found</h2>${needsInput(built, "stated_vs_actual") ? inputChip : ""}${sectionBody(r, built, "stated_vs_actual")}`);
 
   add(`<div class="eyebrow">Overview</div><h2>${r.t(verdict.headline)}</h2><div>${sectionBody(r, built, "overview").replace(`<p>${r.t(verdict.headline)}.</p>`, "")}</div><div class="stat-row" style="margin-top:18px"><div class="stat"><b>${verdict.issues}</b><span>Issues</span></div><div class="stat"><b>${verdict.critical}</b><span>Critical</span></div><div class="stat"><b>${verdict.high}</b><span>High</span></div><div class="stat"><b>${team.filter((f) => f.status === "not_measurable").length}</b><span>Not measurable</span></div><div class="stat"><b>${team.filter((f) => f.status === "passed").length}</b><span>Passed</span></div></div>`);
 
   add(`<div class="eyebrow">Scorecard</div><h2>How each area stands</h2><div class="chart-wrap" style="max-width:880px">${chartSlot(scorecardChart(scorecard(team, scores)))}</div>`);
 
-  add(`<div class="eyebrow">Top issues</div><h2>The ${TOP_ISSUE_COUNT} that matter most</h2><table class="grid"><thead><tr><th style="width:6%"></th><th>Issue</th><th style="width:12%">Severity</th><th style="width:26%">Value</th><th style="width:20%">Owner</th></tr></thead><tbody>${top.map((f, i) => `<tr><td>${i + 1}</td><td>${r.t(f.title)}</td><td>${severityChip(f)}</td><td>${valueText(r, f).amount}</td><td>${r.t(f.owner)}</td></tr>`).join("")}</tbody></table>`);
+  if (top.length) add(`<div class="eyebrow">Top issues</div><h2>${top.length === TOP_ISSUE_COUNT ? `The ${TOP_ISSUE_COUNT} that matter most` : "The issues that matter most"}</h2><table class="grid"><thead><tr><th style="width:6%"></th><th>Issue</th><th style="width:12%">Severity</th><th style="width:26%">Impact</th><th style="width:20%">Owner</th></tr></thead><tbody>${top.map((f, i) => `<tr><td>${i + 1}</td><td>${r.t(f.title)}</td><td>${severityChip(f)}</td><td>${valueText(r, f).amount}</td><td>${r.t(f.owner)}</td></tr>`).join("")}</tbody></table>`);
 
-  const dense = density?.columns === 2;
   if (density?.domainSummary) {
     slides.push(...twoColumnList(r, "Areas", "Each area at a glance", assessed.map((domain) => {
       const own = team.filter((f) => f.domain === domain);
       return { title: `${domainLabel(domain)}: ${issuesOf(own).length} issues, ${own.filter((f) => f.status === "passed").length} passed`, detail: currentBody(built, `domain_${domain}`) };
     })));
   }
-  // The inventory sits with configuration, or with automation when configuration wasn't assessed.
-  const inventoryHome = assessed.includes("configuration") ? "configuration" : "automation";
-  for (const domain of assessed) {
+  // The inventory sits with configuration, or with automation when configuration
+  // has no issues. An org with nothing of its own to count doesn't need the table.
+  const inventory = asMeasured(metric(OBJECT_INVENTORY));
+  const inventoryHome = withIssues.includes("configuration") ? "configuration" : "automation";
+  const inventoryWorthShowing = metric(OBJECT_INVENTORY) !== undefined && (!inventory || inventory.stats.customObjects > 0 || inventory.stats.automation > 0);
+  for (const domain of withIssues) {
     const label = domainLabel(domain);
     const own = team.filter((f) => f.domain === domain);
     const issues = issuesOf(own);
     if (!density?.domainSummary) add(`<div class="eyebrow">Area</div><h1>${r.t(label)}</h1><div class="body">${sectionBody(r, built, `domain_${domain}`)}</div><div class="stat-row" style="max-width:640px;margin-top:20px;color:var(--carbon)"><div class="stat"><b>${issues.length}</b><span>Issues</span></div><div class="stat"><b>${own.filter((f) => f.status === "passed").length}</b><span>Passed</span></div><div class="stat"><b>${own.filter((f) => f.status === "not_measurable").length}</b><span>Not measurable</span></div></div>`, "dark divider");
     slides.push(...(density ? domainIssueSlides(r, label, issues, density) : issueTable(r, label, issues)));
-    if (domain === inventoryHome && metric(OBJECT_INVENTORY)) slides.push(inventorySlide(r, label, metric(OBJECT_INVENTORY)));
+    if (domain === inventoryHome && inventoryWorthShowing) slides.push(inventorySlide(r, label, metric(OBJECT_INVENTORY)));
   }
 
-  if (unassessed.length) {
-    add(`<div class="eyebrow">Areas</div><h2>Not assessed this time</h2><p style="margin-bottom:12px">We make no claim about these areas, good or bad.</p><ul>${unassessed.map((d) => `<li>${r.t(domainLabel(d))}</li>`).join("")}</ul>`);
+  if (working.length && !density?.domainSummary) {
+    slides.push(...listSlides(r, "Areas", "What's working well", working.map((d) => {
+      const own = team.filter((f) => f.domain === d);
+      const passed = own.filter((f) => f.status === "passed").length;
+      const open = own.filter((f) => f.status === "not_measurable").length;
+      return { title: domainLabel(d), detail: `No issues ${passed === 1 ? "in the one check" : `across the ${passed} checks`} we could make here.${open ? ` ${open} more couldn't be measured, and the appendix lists them.` : ""}` };
+    }), compact));
+  }
+  if (unclear.length) {
+    const why = (d: string): string => {
+      const score = scores.find((s) => s.domain === d);
+      return score?.status === "not_measurable" ? score.reason : unassessed.includes(d) ? "Not part of this health check." : "We couldn't measure this area.";
+    };
+    slides.push(...listSlides(r, "Areas", "Where we can't give a view yet", unclear.map((d) => ({ title: domainLabel(d), detail: why(d) })), compact));
   }
 
-  add(`<div class="eyebrow">Deep dive</div><h1>Pipeline</h1><div class="body">${sectionBody(r, built, "pipeline_deep_dive")}</div>`, "dark divider");
-  slides.push(pipelineTodaySlide(r, metric, calibration), outlookSlide(r, metric));
-  if (dense) add(`<div class="eyebrow">Pipeline</div><h2>How deals convert</h2><div class="chart-pair"><div><h3 class="cap">Win rate by segment</h3>${chartSlot(winRateBySegment(metric("historic.win_rate"), undefined, HALF_WIDTH))}</div><div><h3 class="cap">Stage funnel</h3>${chartSlot(stageFunnel(metric("historic.stage_conversion"), HALF_WIDTH))}</div></div>`);
-  else add(`<div class="eyebrow">Pipeline</div><h2>Win rate by segment</h2><div class="chart-wrap">${chartSlot(winRateBySegment(metric("historic.win_rate")))}</div>`);
-  const readings = ["historic.win_rate", "historic.win_rate_by_value", "historic.win_rate_including_no_decision", "historic.no_decision_rate"].flatMap((id) => metric(id) ?? []);
-  const cycle = ["historic.sales_cycle_won", "historic.sales_cycle_lost"].flatMap((id) => metric(id) ?? []);
-  const slippage = ["historic.slippage_rate", "historic.slippage_quarter_cross_rate", "historic.slippage_days"].flatMap((id) => metric(id) ?? []);
-  if (!dense) add(`<div class="eyebrow">Pipeline</div><h2>Three ways of reading the win rate</h2>${metricRows(r, readings, r.currency)}`, "tight");
-  if (!dense) add(`<div class="eyebrow">Pipeline</div><h2>Stage funnel</h2><div class="chart-wrap">${chartSlot(stageFunnel(metric("historic.stage_conversion")))}</div>`);
-  slides.push(quarterlySlide(r, metric), ...(dense ? [winsSlideDense(r, metric), lostAndSpeedSlideDense(r, metric, calibration)] : [...winsSlides(r, metric), lostSlide(r, metric), closeDatesSlide(r, metric, calibration)]));
-  if (dense) {
-    // One table, so the deep dive keeps its new slides in a dense deck.
-    add(`<div class="eyebrow">Pipeline</div><h2>Win rate, sales cycle and slippage</h2>${metricRows(r, [...readings, ...cycle, ...slippage], r.currency)}`, "tight compact-rows");
-  } else {
-    add(`<div class="eyebrow">Pipeline</div><h2>Sales cycle and slippage</h2>${metricRows(r, [...cycle, ...slippage], r.currency)}`, "tight");
+  if (pipelinePages.length) {
+    add(`<div class="eyebrow">Deep dive</div><h1>Pipeline</h1><div class="body">${sectionBody(r, built, "pipeline_deep_dive")}</div>`, "dark divider");
+    slides.push(...pipelinePages);
   }
-  add(`<div class="eyebrow">Pipeline</div><h2>Pipeline over time</h2><div class="chart-wrap" style="max-width:1000px">${chartSlot(pipelineOverTime(metric("historic.pipeline_point_in_time_value"), r.currency))}</div>`);
+  if (gaps.length) slides.push(...listSlides(r, "Pipeline", "What your data can't tell us yet", gaps, compact));
 
-  add(`<div class="eyebrow">Stated vs actual</div><h2>What you told us, against what we found</h2>${needsInput(built, "stated_vs_actual") ? inputChip : ""}${sectionBody(r, built, "stated_vs_actual")}`);
-
-  if (!dense) add(`<div class="eyebrow">Roadmap</div><h2>The first 90 days</h2><div class="stat-row">${plan.map((p) => `<div class="stat"><b>${r.t(p.title)}</b><span>Days ${p.from} to ${p.to}</span><p style="margin-top:8px">${p.findings.length} ${p.findings.length === 1 ? "action" : "actions"}</p></div>`).join("")}</div>`);
-  for (const phase of plan) {
+  const planned = plan.some((p) => p.findings.length > 0);
+  if (!dense && planned) add(`<div class="eyebrow">Roadmap</div><h2>The first 90 days</h2><div class="stat-row">${plan.map((p) => `<div class="stat"><b>${r.t(p.title)}</b><span>Days ${p.from} to ${p.to}</span><p style="margin-top:8px">${p.findings.length} ${p.findings.length === 1 ? "action" : "actions"}</p></div>`).join("")}</div>`);
+  for (const phase of plan.filter((p) => p.findings.length > 0)) {
     const all = paginate(phase.findings, (f) => (dense ? 10 + 23 * estimateLines(`${f.title}. ${f.recommendation} ${f.owner}`, 58) : 12 + 28 * estimateLines(`${f.title}. ${f.recommendation} ${f.owner}`, 95)), dense ? 2 * LIST_BUDGET : LIST_BUDGET);
     const cut = compact && all.length > 1;
     const pages = cut ? [all[0]!.slice(0, -1)] : all;
-    (pages.length ? pages : [[]]).forEach((group, i) => {
-      add(`<div class="eyebrow">Roadmap</div><h2>Days ${phase.from} to ${phase.to}: ${phase.title}${i ? ", continued" : ""}</h2>${cut ? `<p style="font-size:15px;margin-bottom:6px">${COMPACT_NOTE}</p>` : ""}${group.length ? `<ul class="action-list${dense ? " two-text" : ""}">${group.map((f) => `<li><strong>${r.t(f.title)}.</strong> ${r.t(f.recommendation)} <span class="owner">${r.t(f.owner)}</span></li>`).join("")}</ul>` : "<p>Nothing planned for this phase.</p>"}`);
+    pages.forEach((group, i) => {
+      add(`<div class="eyebrow">Roadmap</div><h2>Days ${phase.from} to ${phase.to}: ${phase.title}${i ? ", continued" : ""}</h2>${cut ? `<p style="font-size:15px;margin-bottom:6px">${COMPACT_NOTE}</p>` : ""}<ul class="action-list${dense ? " two-text" : ""}">${group.map((f) => `<li><strong>${r.t(f.title)}.</strong> ${r.t(f.recommendation)} <span class="owner">${r.t(f.owner)}</span></li>`).join("")}</ul>`);
     });
   }
 
   // Titles only: each of these already has its card in its domain's section.
   const afterPlan = later.map((f) => ({ title: f.title, detail: `${severityWord(f.severity)}. ${effortText(f)}. ${f.owner}` }));
   if (later.length) slides.push(...(dense ? twoColumnList(r, "Roadmap", "After 90 days", afterPlan) : listSlides(r, "Roadmap", "After 90 days", afterPlan, compact)));
+
+  slides.push(nextStepsSlide(r, plan));
 
   if (!dense) add(`<div class="eyebrow">Appendix</div><h1>How we worked</h1><div class="body">${sectionBody(r, built, "appendix")}</div>`, "dark divider");
   slides.push(...listSlides(r, "Appendix", "Assumptions", [
@@ -504,12 +591,15 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
     { title: "Smallest sample", detail: `At least ${calibration.minSample} deals behind a figure` },
     { title: "Currency", detail: calibration.currency },
   ], compact));
-  const definitions = metrics.map((m) => ({ title: m.label, detail: m.definition }));
+  // Only what the report shows a figure for needs defining.
+  const definitions = metrics.filter((m) => m.status === "measured").map((m) => ({ title: m.label, detail: m.definition }));
   // Two columns at every density but the last: definitions are reference, and
   // one to a line took a slide for every few metrics.
   slides.push(...(compact ? listSlides(r, "Appendix", "Metric definitions", definitions, compact) : dense ? threeColumnList(r, "Appendix", "Metric definitions", definitions) : twoColumnList(r, "Appendix", "Metric definitions", definitions)));
-  slides.push(...listSlides(r, "Appendix", "What we couldn't measure", team.filter((f) => f.status === "not_measurable").map((f) => ({ title: f.title, detail: f.notMeasurableReason ?? f.summary })), compact));
-  slides.push(...listSlides(r, "Appendix", "Checks that passed", team.filter((f) => f.status === "passed").map((f) => ({ title: f.title, detail: f.summary })), compact));
+  // Reference, so two to a line like the definitions.
+  const reference = (title: string, items: Array<{ title: string; detail: string }>): Slide[] => (compact || items.length === 0 ? listSlides(r, "Appendix", title, items, compact) : twoColumnList(r, "Appendix", title, items));
+  slides.push(...reference("What we couldn't measure", team.filter((f) => f.status === "not_measurable").map((f) => ({ title: f.title, detail: f.notMeasurableReason ?? f.summary }))));
+  slides.push(...reference("Checks that passed", team.filter((f) => f.status === "passed").map((f) => ({ title: f.title, detail: f.summary }))));
   return slides;
 }
 

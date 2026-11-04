@@ -310,7 +310,8 @@ describe("the cover", () => {
 describe("what a customer reads", () => {
   test("the checks' working terms come out in plain words, with the figures kept", async () => {
     const { plainWords } = await import("../../render/format.ts");
-    assert.equal(plainWords("0 closed deals is below the calibrated minimum of 20."), "0 closed deals is fewer than the 20 we need for a reliable figure.");
+    assert.equal(plainWords("0 closed deals is below the calibrated minimum of 20."), "There are no closed deals yet, and we need at least 20 for a reliable figure.");
+    assert.equal(plainWords("12 closed deals is below the calibrated minimum of 20."), "12 closed deals is fewer than the 20 we need for a reliable figure.");
     assert.equal(plainWords("ForecastingType isn't available in this org, or to the connected user."), "Forecasting isn't switched on in this org.");
     assert.equal(plainWords("None of the 0 dashboards run as an inactive user."), "There are no dashboards.");
     assert.equal(plainWords("All 0 active flows that write data have fault paths."), "There are no active flows that write data.");

@@ -171,7 +171,8 @@ describe("the full health check", () => {
     // The customer's own name belongs on the cover. People never appear.
     for (const entry of pseudonyms.entries()) if (entry.token.startsWith("[[user:") && entry.name.includes(" ") && entry.name !== "Unknown user") assert.ok(!html.includes(entry.name), entry.name);
     assert.doesNotMatch(html, /\[\[/);
-    assert.match(html, /We make no claim about these areas/);
+    assert.match(html, /Where we can&#39;t give a view yet/);
+    assert.match(html, /Not part of this health check\./);
   });
 });
 
@@ -290,9 +291,8 @@ describe("a large, messy org", () => {
 
 describe("a thin org", () => {
   test("gets a shorter deck flagged for review, never padding", async () => {
-    // Two issues: with three, the object inventory slide brings the deck to exactly 40.
-    const few = output!.findings.filter((f) => f.status === "issue").slice(0, 2);
-    const report = buildReport({ ...full, findings: few });
+    // Nothing found and nothing measured: pages that say nothing are left out, so the deck is short.
+    const report = buildReport({ ...full, findings: [], metrics: [] });
     const { layout } = await renderPdf(browser, fullReportHtml(report, pseudonyms), { ...deckRange });
     assert.ok(layout.pages < DECK_RANGE.min);
     assert.deepEqual([...new Set(layout.problems.map((p) => p.check))], ["page count"], describeProblems(layout.problems));

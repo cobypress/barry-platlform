@@ -41,7 +41,8 @@ export function valueFigure(r: Render, f: Finding): string {
 }
 
 export function valueText(r: Render, f: Finding): { amount: string; note: string } {
-  if (f.value.kind === "not_sized") return { amount: "Not sized", note: r.t(f.value.reason) };
+  // Not every issue has a cost we can put a figure on. Its weight is still worth saying.
+  if (f.value.kind === "not_sized") return { amount: `${f.severity.charAt(0).toUpperCase()}${f.severity.slice(1)} risk`, note: r.t(f.value.reason) };
   return { amount: r.t(`${valueFigure(r, f)} ${f.value.period}`), note: r.t(f.value.assumptions.join(". ")) };
 }
 

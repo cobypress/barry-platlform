@@ -53,6 +53,7 @@ export function escapeXml(text: string): string {
 // name. A customer reads a consultant's report, so what's printed says the same
 // things the way we'd say them to the customer. The figures are untouched.
 const PLAIN: Array<[RegExp, string | ((...groups: string[]) => string)]> = [
+  [/\b0 ([^.]+?) is below the calibrated minimum of (\d+)/g, "There are no $1 yet, and we need at least $2 for a reliable figure"],
   [/ is below the calibrated minimum of (\d+)/g, " is fewer than the $1 we need for a reliable figure"],
   [/,? under the calibrated minimum of (\d+)/g, ", fewer than the $1 we need"],
   [/Sample below the calibrated minimum(?: \((\d+) of (\d+)\))?/g, "Too few to measure reliably"],
