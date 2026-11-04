@@ -17,10 +17,13 @@ A **Background Worker**, not a web service: it listens to Redis and serves nothi
 | Build command | `npm ci && npm install --no-save bullmq@^5.70 pg@^8.19` |
 | Start command | `node src/cli/hc.ts worker` |
 | Instances | One. The token store is on its disk, so a second copy wouldn't see it |
+| Compute | 1 CPU and 2 GB. A run holds the org's data in memory, and 512 MB is enough only for test orgs |
 | Region | Frankfurt, the EU region nearest Neon's London (QUESTIONS.md 2) |
 | Disk | Mounted at `/var/data`, 1 GB to start. Run folders hold CRM records, and nothing deletes them yet: the plan's retention periods aren't built (QUESTIONS.md 41) |
 
-A persistent disk needs a paid instance type, so check the cost when you choose one. Set `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` too: the worker doesn't render, so it needs no browser.
+Set `NODE_VERSION=24` as well as the repo's pin, and `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`: the worker doesn't render, so it needs no browser. The Barry worker is in Oregon, but that doesn't matter: this worker reaches Redis by the same public `REDIS_URL` Vercel uses, not Render's private network.
+
+Set up this way on 2026-11-04 as `barometer-worker`.
 
 ## 2. Its environment variables
 
