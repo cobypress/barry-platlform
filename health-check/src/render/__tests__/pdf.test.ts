@@ -15,7 +15,7 @@ import { SALES_CLOUD_DOMAINS, type Finding, type Metric, type NumberOverride, ty
 import { runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
 import { EXECUTIVE_PLAN_ITEMS, executiveHtml } from "../executive.ts";
-import { ukDates } from "../format.ts";
+import { plainWords, ukDates } from "../format.ts";
 import { DECK_RANGE, fullReportHtml, INVENTORY_SLIDE_ROWS, slideCounts } from "../full-report.ts";
 import { INVENTORY_COLUMNS, OBJECT_INVENTORY } from "../../domains/configuration/inventory.ts";
 import { document } from "../html.ts";
@@ -150,7 +150,7 @@ describe("the full health check", () => {
   test("every issue appears somewhere", () => {
     const report = buildReport(full);
     const html = fullReportHtml(report, pseudonyms);
-    const escape = (t: string): string => ukDates(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+    const escape = (t: string): string => plainWords(ukDates(t)).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
     assert.doesNotMatch(html, /raw notes have all of it/, "an ordinary org stays out of compact mode");
     // The roadmap repeats recommendations, so count the issues' own lines.
     assert.equal((html.match(/What to do:/g) ?? []).length, report.teamFindings.filter((x) => x.status === "issue" && x.recommendation).length);

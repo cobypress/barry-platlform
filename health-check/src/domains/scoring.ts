@@ -31,7 +31,7 @@ const issueWeight = (f: Finding): number => SEVERITY_WEIGHTS[f.severity] * CONFI
 export function scoreDomain(domain: string, findings: Finding[], ruleSetVersion: string = RULE_SET_VERSION): Score {
   const notMeasurable = (reason: string): Score => Score.parse({ status: "not_measurable", domain, ruleSetVersion, reason });
   const own = findings.filter((f) => f.domain === domain && !SETUP_RULES.has(f.ruleId));
-  if (own.length === 0) return notMeasurable("No check in this domain produced a result.");
+  if (own.length === 0) return notMeasurable("We couldn't assess this area.");
   const rules = new Map<string, Finding[]>();
   for (const finding of own) rules.set(finding.ruleId, [...(rules.get(finding.ruleId) ?? []), finding]);
 
@@ -46,10 +46,10 @@ export function scoreDomain(domain: string, findings: Finding[], ruleSetVersion:
     earned += issues.length > 0 ? RULE_MAXIMUM - Math.max(...issues.map(issueWeight)) : RULE_MAXIMUM;
     counted.push(...issues.map((f) => f.id), ...passes.map((f) => f.id));
   }
-  if (rulesCounted === 0) return notMeasurable(`Every check in this domain was not measurable (${rules.size} rules).`);
+  if (rulesCounted === 0) return notMeasurable("We couldn't measure this area.");
   // Rule 5 for scores. On a real org, one calibration check scored historic
   // pipeline 100 while every pipeline metric was not measurable.
-  if (rulesCounted < MIN_RULES_SCORED || rulesCounted * 2 < rules.size) return notMeasurable("Too few checks here could be measured to give a fair score.");
+  if (rulesCounted < MIN_RULES_SCORED || rulesCounted * 2 < rules.size) return notMeasurable("Too little of this area could be measured to score it fairly.");
   return Score.parse({ status: "measured", domain, score: Math.round((earned / (RULE_MAXIMUM * rulesCounted)) * 100), ruleSetVersion, weights: WEIGHTS, findingIds: counted });
 }
 

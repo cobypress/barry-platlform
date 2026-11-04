@@ -3,28 +3,28 @@ import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import type { Finding } from "../schemas/index.ts";
 import type { Chart } from "./charts.ts";
 import { fontFaces } from "./fonts.ts";
-import { compactMoney, escapeXml, money, ukDates } from "./format.ts";
+import { compactMoney, escapeXml, money, plainWords, ukDates } from "./format.ts";
 
 // Shared by both PDFs. Every page is a fixed box, so a page can be measured and
 // checked rather than left to flow. Names go back in here, then get escaped, so a
 // name holding markup can't break out of the page.
 
 export type Render = {
-  /** Restores names, then escapes. Use for every piece of report text. */
+  /** Restores names, puts it in plain words, then escapes. Use for every piece of report text. */
   t(text: string): string;
   currency: string;
   draft: boolean;
 };
 
 export function renderContext(pseudonyms: Pseudonymiser, currency: string, draft: boolean): Render {
-  return { t: (text) => escapeXml(ukDates(pseudonyms.restore(text))), currency, draft };
+  return { t: (text) => escapeXml(plainWords(ukDates(pseudonyms.restore(text)))), currency, draft };
 }
 
 export const paragraphs = (r: Render, text: string): string =>
   text.split(/\n\n+/).filter((p) => p.trim()).map((p) => `<p>${r.t(p).replace(/\n/g, "<br>")}</p>`).join("");
 
 export function chartSlot(chart: Chart): string {
-  const inner = chart.kind === "chart" ? chart.svg : `<div class="chart-gap"><strong>Not measurable.</strong> ${escapeXml(ukDates(chart.reason))}</div>`;
+  const inner = chart.kind === "chart" ? chart.svg : `<div class="chart-gap"><strong>Not measurable.</strong> ${escapeXml(plainWords(ukDates(chart.reason)))}</div>`;
   return `<figure class="chart-slot" data-expect-chart="${chart.id}">${inner}</figure>`;
 }
 

@@ -112,7 +112,7 @@ describe("not measurable, never zero", () => {
   test("one measured check is too few to score", () => {
     const score = scoreDomain("d", [finding("a", "passed"), finding("b", "not_measurable")]);
     assert.equal(score.status, "not_measurable");
-    assert.ok(score.status === "not_measurable" && /too few checks/i.test(score.reason));
+    assert.ok(score.status === "not_measurable" && /too little of this area could be measured/i.test(score.reason));
   });
 
   test("a score needs at least half the domain's checks measured", () => {

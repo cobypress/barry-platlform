@@ -1,7 +1,7 @@
 import { colour, font, radius } from "../design/tokens.ts";
 import type { ScorecardRow } from "../narrative/select.ts";
 import type { Metric, MetricSegment } from "../schemas/index.ts";
-import { compactMoney, escapeXml, monthYear, percent, ukDates } from "./format.ts";
+import { compactMoney, escapeXml, monthYear, percent, plainWords, ukDates } from "./format.ts";
 
 // Server-rendered SVG, with no browser and no chart library. Every chart sits on
 // a Carbon panel, because Chartreuse only reaches 1.5:1 on Ivory. Values are
@@ -17,7 +17,7 @@ const CHAR_WIDTH = 0.58;
 
 const text = (x: number, y: number, value: string, options: { size?: number; fill?: string; anchor?: "start" | "middle" | "end"; weight?: number; cls?: string } = {}): string => {
   const { size = 13, fill = colour.ivory, anchor = "start", weight = font.weights.regular, cls = "" } = options;
-  return `<text x="${x}" y="${y}" font-size="${size}" font-weight="${weight}" fill="${fill}" text-anchor="${anchor}"${cls ? ` class="${cls}"` : ""}>${escapeXml(ukDates(value))}</text>`;
+  return `<text x="${x}" y="${y}" font-size="${size}" font-weight="${weight}" fill="${fill}" text-anchor="${anchor}"${cls ? ` class="${cls}"` : ""}>${escapeXml(plainWords(ukDates(value)))}</text>`;
 };
 
 /** A bar with a rounded data end and a square baseline. */

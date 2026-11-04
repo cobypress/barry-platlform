@@ -4,7 +4,7 @@ import { currentBody, type BuiltReport } from "../narrative/sections.ts";
 import { issuesOf } from "../narrative/select.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { canRelease, type Evidence, type Finding, type ManualStep, type Metric, type NumberOverride } from "../schemas/index.ts";
-import { longDate, money, ukDates } from "./format.ts";
+import { longDate, money, plainWords, ukDates } from "./format.ts";
 import { INVENTORY_COLUMNS, inventoryRows, OBJECT_INVENTORY } from "../domains/configuration/inventory.ts";
 import { inventoryLine } from "../notes/raw-notes.ts";
 
@@ -42,7 +42,7 @@ class Notes {
 
   constructor(pseudonyms: Pseudonymiser) {
     this.#name = (text) => pseudonyms.restore(text);
-    this.#restore = (text) => ukDates(pseudonyms.restore(text));
+    this.#restore = (text) => plainWords(ukDates(pseudonyms.restore(text)));
   }
 
   run(text: string, options: { bold?: boolean; code?: boolean; colour?: string } = {}): TextRun {

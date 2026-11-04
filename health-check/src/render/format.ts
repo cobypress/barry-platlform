@@ -47,3 +47,50 @@ export const ukDates = (text: string): string => text.replace(ISO_DATE, (_m, iso
 export function escapeXml(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
+
+// The checks explain themselves in the words we use to build and test them:
+// "the calibrated minimum", "the connected user", "rules", an object's API
+// name. A customer reads a consultant's report, so what's printed says the same
+// things the way we'd say them to the customer. The figures are untouched.
+const PLAIN: Array<[RegExp, string | ((...groups: string[]) => string)]> = [
+  [/ is below the calibrated minimum of (\d+)/g, " is fewer than the $1 we need for a reliable figure"],
+  [/,? under the calibrated minimum of (\d+)/g, ", fewer than the $1 we need"],
+  [/Sample below the calibrated minimum(?: \((\d+) of (\d+)\))?/g, "Too few to measure reliably"],
+  [/the calibrated minimum of (\d+)/g, "the $1 we need"],
+  [/the calibrated minimum/g, "the minimum we need for a reliable figure"],
+  [/calibrated as/g, "you told us are"],
+  [/the calibration calls/g, "you told us is"],
+  [/Stages the calibration doesn't cover/g, "Stages we haven't agreed with you"],
+  [/The calibration covers all (\d+) stages seen in the org\./g, "We've agreed with you what all $1 stages in your org mean."],
+  [/The calibration (disagrees|agrees) with/g, "Your stage meanings $1 with"],
+  [/The calibration doesn't say what these stages mean/g, "We haven't yet agreed with you what these stages mean"],
+  [/The calibration doesn't say whether these stages are open/g, "We haven't yet agreed with you whether these stages are open"],
+  [/The calibration doesn't name a loss reason field that exists on Opportunity/g, "We haven't yet agreed with you which field holds the loss reason"],
+  [/and the calibration doesn't set one/g, "and we haven't yet agreed one with you"],
+  // Anything about the calibration not caught above: it's what we agreed with the customer.
+  [/\bThe calibration\b/g, "What we agreed with you"],
+  [/\bthe calibration\b/g, "what we agreed with you"],
+  [/\bcalibrated /g, ""],
+  [/,? or (?:to )?the connected user(?: can't see it)?/g, ""],
+  [/(Private reports) the connected user can't see/g, "$1 kept by individual users"],
+  [/ForecastingType isn't available in this org\./g, "Forecasting isn't switched on in this org."],
+  [/OpportunityHistory has no rows\./g, "There's no stage history for your deals yet."],
+  [/Every check in this domain was not measurable \(\d+ rules\)\./g, "We couldn't measure this area."],
+  [/No check in this domain produced a result\./g, "We couldn't assess this area."],
+  // Wording approved before these were reworded at the source (narrative/sections.ts, domains/scoring.ts).
+  [/A domain with no score says why\. We never show a gap as a zero\./g, "Each area of your Salesforce, scored out of 100. Where an area can't be scored fairly, we say why rather than guess."],
+  [/across (\d+) domains?\b/g, "across $1 areas of your Salesforce"],
+  [/: 0 critical and 0 high\./g, ", none of them critical or high."],
+  [/: 0 critical and (\d+) high\./g, ": $1 high, none critical."],
+  [/: (\d+) critical and 0 high\./g, ": $1 critical, none high."],
+  [/, of which (\d+) (?:are|is) critical and (\d+) (?:are|is) high\./g, (_m, c, h) => (c === "0" && h === "0" ? ", none of them critical or high." : c === "0" ? `: ${h} high, none critical.` : h === "0" ? `: ${c} critical, none high.` : `: ${c} critical and ${h} high.`)],
+  [/We didn't assess this domain in this run/g, "We didn't assess this area"],
+  [/Too few checks here could be measured to give a fair score\./g, "Too little of this area could be measured to score it fairly."],
+  [/admins or calibrated system accounts/g, "admins or system accounts you told us about"],
+  // A count of nothing reads as a template filled in. Say there are none instead.
+  [/None of the 0 ([^.]+?) (?:is|are|was|were|has|have|hasn't|haven't|run|runs|made|use|uses|contain|contains|updates|update)\b[^.]*\./g, "There are no $1."],
+  [/All 0 ([^.]+?) (?:is|are|have|has)\b[^.]*\./g, "There are no $1."],
+];
+
+/** Report text as a customer should read it. */
+export const plainWords = (text: string): string => PLAIN.reduce((t, [pattern, plain]) => t.replace(pattern, plain as (...groups: string[]) => string), text);

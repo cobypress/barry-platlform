@@ -72,6 +72,14 @@ const COVER = "cover";
 const lines = (...parts: Array<string | null | undefined | false>): string => parts.filter(Boolean).join("\n\n");
 const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
 
+/** "1 high, none critical": a count of nothing is said in words. */
+function severityCounts({ critical, high }: { critical: number; high: number }): string {
+  if (critical === 0 && high === 0) return "none of them critical or high";
+  if (critical === 0) return `${high} high, none critical`;
+  if (high === 0) return `${critical} critical, none high`;
+  return `${critical} critical and ${high} high`;
+}
+
 function calibrationText(run: Run, c: Calibration): string {
   return [
     `Analysis window: ${run.analysisWindow.from} to ${run.analysisWindow.to}.`,
@@ -206,13 +214,13 @@ function executiveSpecs(input: ReportInput, team: Finding[]): Spec[] {
       title: "Verdict",
       body: lines(
         `${verdict.headline}.`,
-        `We ran ${plural(team.length, "check")} across ${plural(assessed, "domain")} and found ${plural(verdict.issues, "issue")}: ${verdict.critical} critical and ${verdict.high} high.`,
+        `We ran ${plural(team.length, "check")} across ${plural(assessed, "area")} of your Salesforce and ${verdict.issues ? `found ${plural(verdict.issues, "issue")}: ${severityCounts(verdict)}` : "found no issues"}.`,
       ),
       findingIds: top.map((f) => f.id),
       sources: SUMMARY_SOURCES,
       brief: { purpose: "Tell an executive reader, in a few sentences, what state this Salesforce org is in and what matters most.", sources: [summaryCounts(team), ...top.map(findingSource)] },
     },
-    { key: "scorecard", title: "Scorecard", body: "A domain with no score says why. We never show a gap as a zero.", findingIds: team.map((f) => f.id), sources: [...SUMMARY_SOURCES, ...scoreSources] },
+    { key: "scorecard", title: "Scorecard", body: "Each area of your Salesforce, scored out of 100. Where an area can't be scored fairly, we say why rather than guess.", findingIds: team.map((f) => f.id), sources: [...SUMMARY_SOURCES, ...scoreSources] },
     pipelineSpec(input, team),
     {
       key: "top_issues",
@@ -248,7 +256,7 @@ function fullSpecs(input: ReportInput, team: Finding[], metrics: Metric[]): Spec
     {
       key: "overview",
       title: "Overview",
-      body: lines(`${verdict.headline}.`, `We found ${plural(verdict.issues, "issue")}, of which ${verdict.critical} are critical and ${verdict.high} are high.`),
+      body: lines(`${verdict.headline}.`, verdict.issues ? `We found ${plural(verdict.issues, "issue")}: ${severityCounts(verdict)}.` : "We found no issues."),
       findingIds: issuesOf(team).map((f) => f.id),
       sources: SUMMARY_SOURCES,
     },
@@ -256,7 +264,7 @@ function fullSpecs(input: ReportInput, team: Finding[], metrics: Metric[]): Spec
       const own = team.filter((f) => f.domain === domain);
       const issues = issuesOf(own);
       const label = domainLabel(domain);
-      if (own.length === 0) return { key: `domain_${domain}`, title: label, body: "We didn't assess this domain in this run, so we make no claim about it." };
+      if (own.length === 0) return { key: `domain_${domain}`, title: label, body: "We didn't assess this area, so we make no claim about it." };
       const measured = metrics.filter((m) => m.domain === domain);
       return {
         key: `domain_${domain}`,

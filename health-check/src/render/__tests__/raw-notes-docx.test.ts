@@ -9,7 +9,7 @@ import { Pseudonymiser, type PseudonymEntry } from "../../privacy/pseudonymiser.
 import type { NumberOverride } from "../../schemas/index.ts";
 import { runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
-import { ukDates } from "../format.ts";
+import { plainWords, ukDates } from "../format.ts";
 import { renderRawNotesDocx } from "../raw-notes-docx.ts";
 
 const { output, run, dir } = await runFromRecording({ answers: loadAnswers() });
@@ -42,8 +42,8 @@ describe("the Word raw notes", () => {
   test("hold every finding, in full", () => {
     for (const f of base.findings) {
       assert.ok(notes.text.includes(f.id), f.id);
-      assert.ok(notes.text.includes(ukDates(pseudonyms.restore(f.title))), f.title);
-      assert.ok(notes.text.includes(ukDates(pseudonyms.restore(f.summary))), f.summary);
+      assert.ok(notes.text.includes(plainWords(ukDates(pseudonyms.restore(f.title)))), f.title);
+      assert.ok(notes.text.includes(plainWords(ukDates(pseudonyms.restore(f.summary)))), f.summary);
     }
   });
 

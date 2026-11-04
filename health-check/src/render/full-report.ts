@@ -157,7 +157,6 @@ const DENSITIES: Density[] = [
 
 const severityWord = (severity: string): string => `${severity.charAt(0).toUpperCase()}${severity.slice(1)} severity`;
 
-const MANUAL_STATUS: Record<string, string> = { pending: "Not answered yet", answered: "Answered", skipped: "Skipped" };
 
 /** The last resort for a very large org: one table per domain, so the deck has a fixed ceiling. */
 const TABLE_ROWS = 7;
@@ -332,7 +331,9 @@ function inventorySlide(r: Render, label: string, metric: Metric | undefined): S
   const columns = INVENTORY_COLUMNS.filter((c) => c.key !== "records");
   const cell = (v: number | null): string => `<td class="num">${v === null ? "Not read" : v}</td>`;
   const rows = shown.map((row) => `<tr><td>${r.t(row.object)}</td>${columns.map((c) => cell(row.counts[c.key])).join("")}</tr>`);
-  const lede = `We counted ${m.value} objects: your ${m.stats.coreObjects} core objects and ${m.stats.customObjects} custom objects of your own with records. Of the ${m.stats.automation} rules, flows and triggers on them, ${m.stats.undocumented} have no description.`;
+  const own = m.stats.customObjects ? `your ${m.stats.coreObjects} core objects and ${m.stats.customObjects} custom objects of your own with records` : `your ${m.stats.coreObjects} core objects, and no custom objects of your own with records`;
+  const automation = m.stats.automation ? ` Of the ${m.stats.automation} rules, flows and triggers on them, ${m.stats.undocumented ? `${m.stats.undocumented} have no description` : "every one has a description"}.` : " There's no automation on them.";
+  const lede = `We counted ${m.value} objects: ${own}.${automation}`;
   const notes = [
     `Ranked by how much automation runs on each object, then by custom fields.${all.length > shown.length ? " Only the busiest are shown here. The raw notes list every object." : ""} No description means no description field, or for an Apex trigger, no comment in the code.`,
     ...m.exclusions.filter((e) => /couldn't/.test(e)).map((e) => `Not counted: ${e}.`),
@@ -403,7 +404,7 @@ function twoColumnList(r: Render, eyebrow: string, title: string, items: Array<{
 
 function buildSlides(report: BuiltReport, r: Render, density: Density | null): Slide[] {
   const compact = density === null;
-  const { run, intake, calibration, scores = [], manualSteps } = report.input;
+  const { run, intake, calibration, scores = [] } = report.input;
   const built = report.outputs.full_health_check;
   const team = report.teamFindings;
   const metrics = report.metrics;
@@ -440,7 +441,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
 
   const dense = density?.columns === 2;
   if (density?.domainSummary) {
-    slides.push(...twoColumnList(r, "Domains", "Each area at a glance", assessed.map((domain) => {
+    slides.push(...twoColumnList(r, "Areas", "Each area at a glance", assessed.map((domain) => {
       const own = team.filter((f) => f.domain === domain);
       return { title: `${domainLabel(domain)}: ${issuesOf(own).length} issues, ${own.filter((f) => f.status === "passed").length} passed`, detail: currentBody(built, `domain_${domain}`) };
     })));
@@ -451,13 +452,13 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
     const label = domainLabel(domain);
     const own = team.filter((f) => f.domain === domain);
     const issues = issuesOf(own);
-    if (!density?.domainSummary) add(`<div class="eyebrow">Domain</div><h1>${r.t(label)}</h1><div class="body">${sectionBody(r, built, `domain_${domain}`)}</div><div class="stat-row" style="max-width:640px;margin-top:20px;color:var(--carbon)"><div class="stat"><b>${issues.length}</b><span>Issues</span></div><div class="stat"><b>${own.filter((f) => f.status === "passed").length}</b><span>Passed</span></div><div class="stat"><b>${own.filter((f) => f.status === "not_measurable").length}</b><span>Not measurable</span></div></div>`, "dark divider");
+    if (!density?.domainSummary) add(`<div class="eyebrow">Area</div><h1>${r.t(label)}</h1><div class="body">${sectionBody(r, built, `domain_${domain}`)}</div><div class="stat-row" style="max-width:640px;margin-top:20px;color:var(--carbon)"><div class="stat"><b>${issues.length}</b><span>Issues</span></div><div class="stat"><b>${own.filter((f) => f.status === "passed").length}</b><span>Passed</span></div><div class="stat"><b>${own.filter((f) => f.status === "not_measurable").length}</b><span>Not measurable</span></div></div>`, "dark divider");
     slides.push(...(density ? domainIssueSlides(r, label, issues, density) : issueTable(r, label, issues)));
     if (domain === inventoryHome && metric(OBJECT_INVENTORY)) slides.push(inventorySlide(r, label, metric(OBJECT_INVENTORY)));
   }
 
   if (unassessed.length) {
-    add(`<div class="eyebrow">Domains</div><h2>Not assessed in this run</h2><p style="margin-bottom:12px">We make no claim about these areas, good or bad.</p><ul>${unassessed.map((d) => `<li>${r.t(domainLabel(d))}</li>`).join("")}</ul>`);
+    add(`<div class="eyebrow">Areas</div><h2>Not assessed this time</h2><p style="margin-bottom:12px">We make no claim about these areas, good or bad.</p><ul>${unassessed.map((d) => `<li>${r.t(domainLabel(d))}</li>`).join("")}</ul>`);
   }
 
   add(`<div class="eyebrow">Deep dive</div><h1>Pipeline</h1><div class="body">${sectionBody(r, built, "pipeline_deep_dive")}</div>`, "dark divider");
@@ -502,7 +503,6 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
     { title: "Dormant users", detail: `No login for ${calibration.dormantDays} days` },
     { title: "Smallest sample", detail: `At least ${calibration.minSample} deals behind a figure` },
     { title: "Currency", detail: calibration.currency },
-    { title: "Rule set", detail: run.ruleSetVersion },
   ], compact));
   const definitions = metrics.map((m) => ({ title: m.label, detail: m.definition }));
   // Two columns at every density but the last: definitions are reference, and
@@ -510,7 +510,6 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   slides.push(...(compact ? listSlides(r, "Appendix", "Metric definitions", definitions, compact) : dense ? threeColumnList(r, "Appendix", "Metric definitions", definitions) : twoColumnList(r, "Appendix", "Metric definitions", definitions)));
   slides.push(...listSlides(r, "Appendix", "What we couldn't measure", team.filter((f) => f.status === "not_measurable").map((f) => ({ title: f.title, detail: f.notMeasurableReason ?? f.summary })), compact));
   slides.push(...listSlides(r, "Appendix", "Checks that passed", team.filter((f) => f.status === "passed").map((f) => ({ title: f.title, detail: f.summary })), compact));
-  slides.push(...listSlides(r, "Appendix", "Manual steps", manualSteps.map((s) => ({ title: s.title, detail: `${MANUAL_STATUS[s.status] ?? s.status}. ${s.whyItMatters}` })), compact));
   return slides;
 }
 
