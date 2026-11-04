@@ -187,3 +187,23 @@ If step 3 answers "Cross-org OAuth flows are not supported", the link to the sou
 If step 4 refuses the sign-in because the user is API-only, that answers QUESTIONS.md 23. Record it there. Then repeat with a second test user on the Salesforce Platform licence (20 are free in `bc-hc-dev`), with the "Minimum Access - Salesforce" profile and only Barometer Read Only.
 
 To exercise rotation live, run `hc connect check --connection bc-hc-dev-web` once the session has timed out (two hours by default), and again after the next timeout. Each check has to refresh, and the second only works if the first stored the rotated refresh token.
+
+## End to end, on a developer's machine, 2026-11-04
+
+The whole path ran once, with the console and the worker on Coby's Mac, a local Redis, and the Neon development branch:
+
+1. The consultant created an OAuth run and a connect link in the console.
+2. Coby, as the customer's admin, opened the link in a private window and signed in to `bc-hc-scratch-5` as `barometer-read-only@black-cloud.com.bc-hc-scratch-5`, a new user holding only its profile and the Barometer Read Only permission set that version `0.1.0-7` created on install. That is the sign-in "One install" above was waiting for.
+3. The worker exchanged the code, stored the tokens encrypted, proved the user can't write, and checked the org matched the run.
+4. The consultant confirmed the calibration and started the run. The worker ran all 32 steps through the connection and saved 76 findings, 47 metrics, 12 scores and 42 sections.
+5. The consultant approved all 42 sections, writing one by hand, and released the run. The database holds three releases, each with Coby's name and the time, and every section has its approver and time.
+
+**It found three faults, all fixed with tests:**
+
+- **Starting a run before calibration was confirmed failed it, and a failed run was stuck.** Its calibration was locked and it couldn't be queued, so the only way on was a new run and a second sign-in by the customer's admin. Start run now waits for the calibration, and a failed run can be fixed and queued again (blackcloud-next 1f8030e).
+- **Nothing the worker finished could be released.** It saved every section as a draft, and the console approves only sections in review. The worker now hands over a run in review with its sections in review, as the console's own import already did (b69a1b3). The console does the same when a run waiting on manual steps goes into review (blackcloud-next d8cb628).
+- **No full health check could be released.** "Stated vs actual" waits for stated problems to be linked to findings, which the console can't do, and editing it didn't clear that. Writing the section now puts it in review, unless a manual step is still pending for it (blackcloud-next 79cb138).
+
+**Set up for it:** the local console callback `http://localhost:3000/internal/health-check/connect/callback` is registered in BlackCloudProd. The test keys and the stored token were deleted afterwards. The run is still in the dev branch as `hc-2026-11-04-095e7fda`, customer reference `BT-E2E-SCRATCH5`.
+
+**Not covered:** the worker on a real host, Claude drafting (the stub was on), the rendered PDF and Word outputs, and the production console, which still uses its sample data (QUESTIONS.md 40).
