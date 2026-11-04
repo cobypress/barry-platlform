@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <ExtlClntAppGlobalOauthSettings xmlns="http://soap.sforce.com/2006/04/metadata">
     <callbackUrl>http://localhost:8787/oauth/callback
+http://localhost:3000/internal/health-check/connect/callback
 https://www.black-cloud.com/internal/health-check/connect/callback
 https://black-cloud.com/internal/health-check/connect/callback</callbackUrl>
     <externalClientApplication>Barometer</externalClientApplication>
