@@ -10,6 +10,7 @@ import {
   CONNECT_LINK,
   FINDING,
   insertSql,
+  intakeFromRow,
   METRIC,
   PostgresWorkerStore,
   RUN,
@@ -57,6 +58,54 @@ const RUN_ROW = {
 };
 delete (RUN_ROW as Record<string, unknown>).analysisWindow;
 delete (RUN_ROW as Record<string, unknown>).steps;
+
+describe("the intake the worker gives the engine", () => {
+  const run = consoleRun();
+  const consultant = { statedProblems: "Forecast calls feel unreliable.\nDeals stall late.", customerName: null, linkedinUrl: null, industry: "retail", headcountBand: null };
+  // Made up, as every fixture is: the shape the console's connect page stores.
+  const answers = {
+    respondentName: "Sam Admin",
+    companyName: "Synthetic Co Ltd",
+    industry: "technology",
+    headcountBand: "51-200",
+    currency: "GBP",
+    fiscalYearStartMonth: 4,
+    goals: "Grow new business by a fifth.",
+    whyNow: "A new sales director starts in January.",
+    problems: "- Pipeline reports don't match the spreadsheet.\n- Reps don't log calls.",
+    targetSource: "spreadsheet",
+  };
+
+  test("without the customer's answers, is the consultant's, one problem per line", () => {
+    const intake = intakeFromRow({ ...consultant, customerAnswers: null }, run);
+    assert.deepEqual(intake.statedProblems.map((p) => [p.id, p.statement, p.raisedBy]), [["p1", "Forecast calls feel unreliable.", undefined], ["p2", "Deals stall late.", undefined]]);
+    assert.equal(intake.summary, consultant.statedProblems);
+  });
+
+  test("adds the customer's problems after the consultant's, marked as theirs, and their goals to the summary", () => {
+    const intake = intakeFromRow({ ...consultant, customerAnswers: answers }, run);
+    assert.deepEqual(intake.statedProblems.map((p) => [p.id, p.statement, p.raisedBy]), [
+      ["p1", "Forecast calls feel unreliable.", undefined],
+      ["p2", "Deals stall late.", undefined],
+      ["p3", "Pipeline reports don't match the spreadsheet.", "customer"],
+      ["p4", "Reps don't log calls.", "customer"],
+    ]);
+    assert.match(intake.summary, /^Forecast calls feel unreliable\.\nDeals stall late\.\n\nThe customer's goals for the next 12 months:\nGrow new business by a fifth\.\n\nWhy now: A new sales director starts in January\.$/);
+  });
+
+  test("the customer's company details fill only what the consultant left blank", () => {
+    const intake = intakeFromRow({ ...consultant, customerAnswers: answers }, run);
+    assert.equal(intake.customerName, "Synthetic Co Ltd");
+    assert.equal(intake.headcountBand, "51-200");
+    assert.equal(intake.industry, "retail", "the consultant's industry stands");
+  });
+
+  test("answers it can't read are left out, rather than stopping the run", () => {
+    const intake = intakeFromRow({ ...consultant, customerAnswers: { goals: "" } }, run);
+    assert.equal(intake.statedProblems.length, 2);
+    assert.equal(intake.customerName, undefined);
+  });
+});
 
 describe("SQL building", () => {
   test("reads timestamps as ISO UTC text and dates as text, whatever the process's time zone", () => {

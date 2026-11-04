@@ -1,4 +1,6 @@
+import { z } from "zod";
 import { Intake } from "../narrative/intake.ts";
+import { HeadcountBand, Industry } from "../schemas/benchmark.ts";
 import { Calibration, ConnectLink, ManualAnswer, Run, type Finding, type ManualStep, type Metric, type ReportSection, type Score, type SectionVersion } from "../schemas/index.ts";
 import { LinkState, ORG_AWAITING_CONNECT, RunClosedError, type ConnectJobInput, type LinkConnected, type RunJobInput, type RunOutputRecord, type RunProgress, type WorkerStore } from "./types.ts";
 
@@ -62,7 +64,7 @@ export const RUN: Columns = {
   connectionName: "text",
 };
 export const RUN_STEP: Columns = { runId: "text", id: "text", version: "num", status: "text", calls: "num", finishedAt: "ts", error: "text" };
-export const INTAKE: Columns = { statedProblems: "text", customerName: "text", linkedinUrl: "text", industry: "text", headcountBand: "text" };
+export const INTAKE: Columns = { statedProblems: "text", customerName: "text", linkedinUrl: "text", industry: "text", headcountBand: "text", customerAnswers: "json" };
 export const CALIBRATION: Columns = {
   version: "num", orgId: "text", confirmedBy: "text", confirmedAt: "ts", stages: "json", scope: "json", users: "json", fields: "json", targets: "json",
   salesCycleAssumptionDays: "num", fiscalYearStartMonth: "num", analysisWindowMonths: "num", minSample: "num", dormantDays: "num", currency: "text",
@@ -108,15 +110,48 @@ export function runFromRows(row: Record<string, unknown>, steps: Array<Record<st
   return Run.parse({ ...rest, analysisWindow: { from: analysisFrom, to: analysisTo }, steps });
 }
 
-/** The console's free-text problems as the engine's intake: one stated problem per line, as the console's toEngineIntake does. */
+/**
+ * The parts of what the customer's admin answered on the connect page that the
+ * engine's intake uses (blackcloud-next lib/health-check/customer-answers.ts
+ * has the whole form). The rest is for the consultant.
+ */
+const CustomerAnswersForIntake = z.object({
+  companyName: z.string().min(1),
+  industry: Industry,
+  headcountBand: HeadcountBand,
+  goals: z.string().min(1),
+  whyNow: z.string().min(1).optional(),
+  problems: z.string().min(1),
+});
+
+const statements = (text: string) => text.split(/\r?\n/).map((l) => l.replace(/^\s*(?:[-*•]|\d+[.)])\s+/, "").trim()).filter(Boolean);
+
+/**
+ * The console's free-text problems as the engine's intake: one stated problem
+ * per line, as the console's toEngineIntake does. The customer's own problems
+ * follow, marked as raised by the customer, and their goals join the summary.
+ * Their company details fill only what the consultant left blank.
+ */
 export function intakeFromRow(row: Record<string, unknown>, run: Run): Intake {
-  const text = String(row.statedProblems ?? "");
-  const lines = text.split(/\r?\n/).map((l) => l.replace(/^\s*(?:[-*•]|\d+[.)])\s+/, "").trim()).filter(Boolean);
-  const extra = withoutNulls({ customerName: row.customerName, linkedinUrl: row.linkedinUrl, industry: row.industry, headcountBand: row.headcountBand });
+  const text = String(row.statedProblems ?? "").trim();
+  const customer = CustomerAnswersForIntake.safeParse(row.customerAnswers ?? undefined);
+  const answers = customer.success ? customer.data : null;
+  const extra = withoutNulls({
+    customerName: row.customerName ?? answers?.companyName ?? null,
+    linkedinUrl: row.linkedinUrl,
+    industry: row.industry ?? answers?.industry ?? null,
+    headcountBand: row.headcountBand ?? answers?.headcountBand ?? null,
+  });
+  const ours = statements(text);
+  const theirs = answers ? statements(answers.problems) : [];
+  const goals = answers ? [`The customer's goals for the next 12 months:\n${answers.goals.trim()}`, ...(answers.whyNow ? [`Why now: ${answers.whyNow.trim()}`] : [])] : [];
   return Intake.parse({
     ...extra,
-    summary: text.trim(),
-    statedProblems: lines.map((statement, i) => ({ id: `p${i + 1}`, statement, findingIds: [] })),
+    summary: [text, ...goals].filter(Boolean).join("\n\n"),
+    statedProblems: [
+      ...ours.map((statement, i) => ({ id: `p${i + 1}`, statement, findingIds: [] })),
+      ...theirs.map((statement, i) => ({ id: `p${ours.length + i + 1}`, statement, raisedBy: "customer", findingIds: [] })),
+    ],
     capturedBy: run.createdBy,
     capturedAt: run.startedAt,
   });
