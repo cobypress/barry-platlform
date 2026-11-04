@@ -1,8 +1,22 @@
 import { z } from "zod";
 import { Intake } from "../narrative/intake.ts";
 import { HeadcountBand, Industry } from "../schemas/benchmark.ts";
-import { Calibration, ConnectLink, ManualAnswer, Run, type Finding, type ManualStep, type Metric, type ReportSection, type Score, type SectionVersion } from "../schemas/index.ts";
-import { LinkState, ORG_AWAITING_CONNECT, RunClosedError, type ConnectJobInput, type LinkConnected, type RunJobInput, type RunOutputRecord, type RunProgress, type WorkerStore } from "./types.ts";
+import { Calibration, ConnectLink, ManualAnswer, NumberOverride, ReportSection, Run, SectionVersion, type Finding, type ManualStep, type Metric, type Score } from "../schemas/index.ts";
+import {
+  LinkState,
+  ORG_AWAITING_CONNECT,
+  RunClosedError,
+  type ConnectJobInput,
+  type DocumentFile,
+  type DocumentsJobInput,
+  type DocumentsMade,
+  type DocumentsState,
+  type LinkConnected,
+  type RunJobInput,
+  type RunOutputRecord,
+  type RunProgress,
+  type WorkerStore,
+} from "./types.ts";
 
 // UNVERIFIED: written against the console's migrations (blackcloud-next
 // migrations/20261103_health_check*.sql) and the columns this lane asked lane
@@ -95,6 +109,14 @@ export const SECTION: Columns = {
 export const VERSION: Columns = {
   id: "text", sectionId: "text", version: "num", body: "text", source: "text", changedBy: "text", changedAt: "ts", changeSummary: "text", numberCheck: "json",
 };
+export const OVERRIDE: Columns = {
+  id: "text", runId: "text", targetType: "text", targetId: "text", targetField: "text", previousValue: "num", newValue: "num", reason: "text", overriddenBy: "text", overriddenAt: "ts",
+};
+/** blackcloud-next migrations/20261105_health_check_documents.sql. */
+export const DOCUMENTS: Columns = {
+  runId: "text", status: "text", requestedBy: "text", requestedAt: "ts", startedAt: "ts", finishedAt: "ts", error: "text", warnings: "json", clientName: "text",
+  folderName: "text", driveFolderId: "text", driveFolderUrl: "text", files: "json",
+};
 /** New, from C2: see the log. The first ten columns are ConnectLink in src/schemas/connect.ts. */
 export const CONNECT_LINK: Columns = {
   id: "text", tokenHash: "text", customerRef: "text", connectionName: "text", loginUrl: "text", createdBy: "text", createdAt: "ts", expiresAt: "ts",
@@ -163,6 +185,20 @@ export function calibrationFromRow(row: Record<string, unknown>): Calibration {
 
 export function answerFromRow(row: Record<string, unknown>): ManualAnswer {
   return ManualAnswer.parse(withoutNulls(row));
+}
+
+export function sectionFromRow(row: Record<string, unknown>): ReportSection {
+  const { approvedBy, approvedAt, ...rest } = row;
+  return ReportSection.parse({ ...rest, approval: approvedBy && approvedAt ? { approvedBy, approvedAt } : null });
+}
+
+export function versionFromRow(row: Record<string, unknown>): SectionVersion {
+  return SectionVersion.parse(row);
+}
+
+export function overrideFromRow(row: Record<string, unknown>): NumberOverride {
+  const { targetType, targetId, targetField, ...rest } = row;
+  return NumberOverride.parse({ ...rest, target: { type: targetType, id: targetId, field: targetField } });
 }
 
 export function linkFromRow(row: Record<string, unknown>, runOrgId: string): ConnectJobInput {
@@ -336,7 +372,51 @@ export class PostgresWorkerStore implements WorkerStore {
     );
     if (result.rowCount !== 1) throw new Error(`Link ${linkId} wasn't pending, so it wasn't refused`);
   }
+
+  async loadDocumentsJob(runId: string): Promise<DocumentsJobInput | null> {
+    const row = one(await this.#pool.query(selectSql("HealthCheckRun", RUN, `"id" = $1`), [runId]));
+    if (!row) return null;
+    const [steps, intake, sections, versions, overrides, documents] = await Promise.all([
+      this.#pool.query(selectSql("HealthCheckRunStep", RUN_STEP, `"runId" = $1`, `"seq"`), [runId]),
+      this.#pool.query(selectSql("HealthCheckIntake", INTAKE, `"runId" = $1`), [runId]),
+      this.#pool.query(selectSql("HealthCheckSection", SECTION, `"runId" = $1`, `"output", "order"`), [runId]),
+      this.#pool.query(selectSql("HealthCheckSectionVersion", VERSION, `"id" IN (SELECT "currentVersionId" FROM "HealthCheckSection" WHERE "runId" = $1)`), [runId]),
+      this.#pool.query(selectSql("HealthCheckNumberOverride", OVERRIDE, `"runId" = $1`, `"seq"`), [runId]),
+      this.#pool.query(selectSql("HealthCheckDocuments", DOCUMENTS, `"runId" = $1`), [runId]),
+    ]);
+    const run = runFromRows(row, steps.rows.map(({ runId: _r, ...s }) => s));
+    const doc = one(documents);
+    return {
+      run,
+      intake: one(intake) ? intakeFromRow(one(intake)!, run) : null,
+      sections: sections.rows.map(sectionFromRow),
+      versions: versions.rows.map(versionFromRow),
+      overrides: overrides.rows.map(overrideFromRow),
+      state: (doc?.status as DocumentsState | undefined) ?? null,
+      driveFolderId: (doc?.driveFolderId as string | null | undefined) ?? null,
+      files: (doc?.files as DocumentFile[] | null | undefined) ?? [],
+    };
+  }
+
+  async startDocuments(runId: string, at: string): Promise<boolean> {
+    const result = await this.#pool.query(
+      `UPDATE "HealthCheckDocuments" SET "status" = 'making', "startedAt" = $2::timestamp(3), "error" = NULL WHERE "runId" = $1 AND "status" IN ('queued', 'making')`,
+      [runId, at],
+    );
+    return result.rowCount === 1;
+  }
+
+  async saveDocuments(runId: string, made: DocumentsMade): Promise<void> {
+    await this.#pool.query(
+      `UPDATE "HealthCheckDocuments" SET "status" = 'done', "finishedAt" = $2::timestamp(3), "error" = NULL, "warnings" = $3::jsonb, "clientName" = $4, "folderName" = $5, "driveFolderId" = $6, "driveFolderUrl" = $7, "files" = $8::jsonb WHERE "runId" = $1 AND "status" = 'making'`,
+      [runId, made.at, JSON.stringify(made.warnings), made.clientName, made.folderName, made.driveFolderId, made.driveFolderUrl, JSON.stringify(made.files)],
+    );
+  }
+
+  async failDocuments(runId: string, reason: string, at: string): Promise<void> {
+    await this.#pool.query(`UPDATE "HealthCheckDocuments" SET "status" = 'failed', "finishedAt" = $2::timestamp(3), "error" = $3 WHERE "runId" = $1 AND "status" IN ('queued', 'making')`, [runId, at, reason]);
+  }
 }
 
 /** Only for the column check in the tests. */
-export const ALL_TABLES = { RUN, RUN_STEP, INTAKE, CALIBRATION, MANUAL_ANSWER, FINDING, METRIC, SCORE, MANUAL_STEP, SECTION, VERSION, CONNECT_LINK } as const;
+export const ALL_TABLES = { RUN, RUN_STEP, INTAKE, CALIBRATION, MANUAL_ANSWER, FINDING, METRIC, SCORE, MANUAL_STEP, SECTION, VERSION, CONNECT_LINK, OVERRIDE, DOCUMENTS } as const;

@@ -1,9 +1,10 @@
 import { isAbsolute } from "node:path";
 import { BUDGET_DEFAULTS } from "../config.ts";
 import type { OAuthClient } from "../salesforce/oauth.ts";
+import type { DriveConfig } from "./drive.ts";
 
 // What `hc worker` needs before it starts. Every variable is required except
-// the last three, and the worker refuses to start with any missing or wrong,
+// the optional ones, and the worker refuses to start with any missing or wrong,
 // naming each one and never its value.
 
 export const WORKER_ENV = {
@@ -22,8 +23,14 @@ export const WORKER_ENV = {
     HC_WORKER_CONCURRENCY: "Jobs at once, 1 to 8. Default 2, so a connect job never waits behind a long run",
     HC_API_BUDGET_SHARE: `Share of an org's daily API limit a run may use. Default ${BUDGET_DEFAULTS.stopAtShare}`,
     HC_SF_API_VERSION: "Pin a Salesforce API version",
+    HC_DRIVE_SA_EMAIL: "Released documents: the Google service account's email. Set all three HC_DRIVE_ variables or none",
+    HC_DRIVE_SA_KEY: "Its private key, PEM, with \\n for line breaks",
+    HC_DRIVE_FOLDER_ID: "The top Health checks folder in Google Drive, shared with the service account",
+    HC_DRIVE_IMPERSONATE: "A user the service account acts as, if the folder isn't in a shared drive (domain-wide delegation)",
   },
 } as const;
+
+const DRIVE_VARS = ["HC_DRIVE_SA_EMAIL", "HC_DRIVE_SA_KEY", "HC_DRIVE_FOLDER_ID"] as const;
 
 export type WorkerConfig = {
   redisUrl: string;
@@ -35,6 +42,8 @@ export type WorkerConfig = {
   concurrency: number;
   stopAtShare: number;
   apiVersion?: string;
+  /** Null when Drive isn't set up. The worker still starts: only documents jobs need it. */
+  drive: DriveConfig | null;
 };
 
 const key32 = (raw: string): Buffer | null => {
@@ -64,7 +73,21 @@ export function readWorkerEnv(env: NodeJS.ProcessEnv): { ok: true; config: Worke
   if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 8) problems.push("HC_WORKER_CONCURRENCY must be a whole number from 1 to 8");
   const stopAtShare = get("HC_API_BUDGET_SHARE") ? Number(get("HC_API_BUDGET_SHARE")) : BUDGET_DEFAULTS.stopAtShare;
   if (!(stopAtShare > 0 && stopAtShare <= 1)) problems.push("HC_API_BUDGET_SHARE must be more than 0 and at most 1");
+  const driveSet = DRIVE_VARS.filter((name) => get(name));
+  if (driveSet.length > 0 && driveSet.length < DRIVE_VARS.length) problems.push(`Set all of ${DRIVE_VARS.join(", ")} or none: ${DRIVE_VARS.filter((n) => !get(n)).join(", ")} missing`);
+  if (get("HC_DRIVE_SA_KEY") && !get("HC_DRIVE_SA_KEY").includes("PRIVATE KEY")) problems.push("HC_DRIVE_SA_KEY must be the service account's PEM private key");
+  if (get("HC_DRIVE_FOLDER_ID") && !/^[A-Za-z0-9_-]{10,200}$/.test(get("HC_DRIVE_FOLDER_ID"))) problems.push("HC_DRIVE_FOLDER_ID must be a Drive folder id, the last part of the folder's address");
   if (problems.length) return { ok: false, problems };
+  const drive: DriveConfig | null =
+    driveSet.length === DRIVE_VARS.length
+      ? {
+          clientEmail: get("HC_DRIVE_SA_EMAIL"),
+          // Hosts usually hold the key on one line with literal "\n"s.
+          privateKey: get("HC_DRIVE_SA_KEY").replace(/\\n/g, "\n"),
+          rootFolderId: get("HC_DRIVE_FOLDER_ID"),
+          subject: get("HC_DRIVE_IMPERSONATE") || null,
+        }
+      : null;
 
   return {
     ok: true,
@@ -78,6 +101,7 @@ export function readWorkerEnv(env: NodeJS.ProcessEnv): { ok: true; config: Worke
       concurrency,
       stopAtShare,
       apiVersion: get("HC_SF_API_VERSION") || undefined,
+      drive,
     },
   };
 }

@@ -1,5 +1,5 @@
 import { Run, type ConnectLink } from "../schemas/index.ts";
-import { ORG_AWAITING_CONNECT, RunClosedError, type ConnectJobInput, type LinkConnected, type LinkState, type RunJobInput, type RunOutputRecord, type RunProgress, type WorkerStore } from "./types.ts";
+import { ORG_AWAITING_CONNECT, RunClosedError, type ConnectJobInput, type DocumentsJobInput, type DocumentsMade, type LinkConnected, type LinkState, type RunJobInput, type RunOutputRecord, type RunProgress, type WorkerStore } from "./types.ts";
 
 // The WorkerStore for tests: the console's tables as plain maps, with the same
 // rules a database store must keep. Writes replace; a run in review or
@@ -95,5 +95,41 @@ export class MemoryWorkerStore implements WorkerStore {
     const link = this.#pending(linkId);
     Object.assign(link, { state: "refused", sealedPending: null, sealedCode: null, reason, refusedAt: at });
     this.writes.push({ method: "refuseLink", id: linkId, detail: reason });
+  }
+
+  /** The released runs' documents, keyed by run id: what the job reads, and its row as it now stands. */
+  readonly documents = new Map<string, { input: DocumentsJobInput; made: DocumentsMade | null; error: string | null }>();
+
+  addDocumentsJob(input: DocumentsJobInput): void {
+    this.documents.set(input.run.id, { input: structuredClone(input), made: null, error: null });
+  }
+
+  async loadDocumentsJob(runId: string): Promise<DocumentsJobInput | null> {
+    const doc = this.documents.get(runId);
+    return doc ? structuredClone(doc.input) : null;
+  }
+
+  async startDocuments(runId: string, _at: string): Promise<boolean> {
+    const doc = this.documents.get(runId);
+    if (!doc || (doc.input.state !== "queued" && doc.input.state !== "making")) return false;
+    doc.input.state = "making";
+    this.writes.push({ method: "startDocuments", id: runId });
+    return true;
+  }
+
+  async saveDocuments(runId: string, made: DocumentsMade): Promise<void> {
+    const doc = this.documents.get(runId);
+    if (doc?.input.state !== "making") return;
+    Object.assign(doc, { made: structuredClone(made), error: null });
+    Object.assign(doc.input, { state: "done", driveFolderId: made.driveFolderId, files: structuredClone(made.files) });
+    this.writes.push({ method: "saveDocuments", id: runId, detail: made.folderName });
+  }
+
+  async failDocuments(runId: string, reason: string, _at: string): Promise<void> {
+    const doc = this.documents.get(runId);
+    if (!doc || (doc.input.state !== "queued" && doc.input.state !== "making")) return;
+    doc.input.state = "failed";
+    doc.error = reason;
+    this.writes.push({ method: "failDocuments", id: runId, detail: reason });
   }
 }

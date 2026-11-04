@@ -16,6 +16,11 @@ describe("parseJob", () => {
     assert.deepEqual(parseJob({ kind: "run", runId: "r1", correlation_id: "health-check-run-r1" }), { kind: "run", runId: "r1" });
   });
 
+  test("takes a documents job for a released run, by its id only", () => {
+    assert.deepEqual(parseJob({ kind: "documents", runId: "hc-2026-11-04-00000001" }), { kind: "documents", runId: "hc-2026-11-04-00000001" });
+    assert.throws(() => parseJob({ kind: "documents", runId: "r1", client: "Synthetic Co" }), BadJobError);
+  });
+
   test("reads the console's current step payload as a run job for that run", () => {
     assert.deepEqual(parseJob({ runId: "r1", stepId: "extract", correlation_id: "health-check-step-r1-extract" }), { kind: "run", runId: "r1" });
   });

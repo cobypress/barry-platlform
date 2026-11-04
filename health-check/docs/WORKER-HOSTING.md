@@ -1,6 +1,6 @@
 # Hosting the worker
 
-The worker takes run and connect jobs from the console's queue. Until it's hosted, the live console can make connect links and queue runs, but nothing picks them up. It ran end to end on a developer's machine on 2026-11-04 (MILESTONES.md).
+The worker takes run, connect and documents jobs from the console's queue. Until it's hosted, the live console can make connect links and queue runs, but nothing picks them up. It ran end to end on a developer's machine on 2026-11-04 (MILESTONES.md).
 
 This sets it up on Render, next to the Barry worker, as the product plan's "existing Vercel, Neon, Redis and worker setup". Turn things on in the order below: each step is safe on its own.
 
@@ -14,14 +14,14 @@ A **Background Worker**, not a web service: it listens to Redis and serves nothi
 | Branch | `health-check` for now, `main` once the engine is merged |
 | Root directory | `health-check` |
 | Runtime | Node. `health-check/.node-version` asks for 24 |
-| Build command | `npm ci && npm install --no-save bullmq@^5.70 pg@^8.19` |
+| Build command | `npm ci && npm install --no-save bullmq@^5.70 pg@^8.19 && npx playwright install --only-shell chromium` |
 | Start command | `node src/cli/hc.ts worker` |
 | Instances | One. The token store is on its disk, so a second copy wouldn't see it |
 | Compute | 1 CPU and 2 GB. A run holds the org's data in memory, and 512 MB is enough only for test orgs |
 | Region | Frankfurt, the EU region nearest Neon's London (QUESTIONS.md 2) |
 | Disk | Mounted at `/var/data`, 1 GB to start. Run folders hold CRM records, and nothing deletes them yet: the plan's retention periods aren't built (QUESTIONS.md 41) |
 
-Set `NODE_VERSION=24` as well as the repo's pin, and `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`: the worker doesn't render, so it needs no browser. The Barry worker is in Oregon, but that doesn't matter: this worker reaches Redis by the same public `REDIS_URL` Vercel uses, not Render's private network.
+Set `NODE_VERSION=24` as well as the repo's pin, and `PLAYWRIGHT_BROWSERS_PATH=0`, so the build puts Chromium inside `node_modules`, where the running service can find it. Chromium prints the released documents. Don't set `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD`, which stops that install (it was set until 2026-11-05, when the worker didn't render). The Barry worker is in Oregon, but that doesn't matter: this worker reaches Redis by the same public `REDIS_URL` Vercel uses, not Render's private network.
 
 Set up this way on 2026-11-04 as `barometer-worker`.
 
@@ -38,6 +38,15 @@ Set up this way on 2026-11-04 as `barometer-worker`.
 | `HC_SF_CLIENT_ID` | The Barometer app's consumer key from BlackCloudProd: External Client App Manager, Black Cloud Barometer, Settings, OAuth Settings, Consumer Key and Secret |
 | `HC_SF_CLIENT_SECRET` | Its secret, from the same place |
 | `HC_SF_REDIRECT_URI` | `https://www.black-cloud.com/internal/health-check/connect/callback`, already registered on the app |
+
+For released documents (DECISIONS.md 75), set all three of these or none. Without them the worker still runs, and a documents job fails saying what to set.
+
+| Variable | Value |
+| --- | --- |
+| `HC_DRIVE_SA_EMAIL` | The Google service account's email. It needs the Google Drive API enabled in its Cloud project |
+| `HC_DRIVE_SA_KEY` | Its private key: the `private_key` from the account's JSON key file, with `\n` for line breaks |
+| `HC_DRIVE_FOLDER_ID` | The top "Health checks" folder: the last part of its address in Drive. It must be in a shared drive the service account is a Content manager of, because a service account has no Drive storage of its own |
+| `HC_DRIVE_IMPERSONATE` | Optional. Only if the folder is in someone's My Drive instead: the user the account acts as, which needs domain-wide delegation with the `https://www.googleapis.com/auth/drive` scope |
 
 Keep `HC_TOKEN_KEY` somewhere safe as well. Without it the stored tokens can't be opened, and every customer would have to connect again.
 
@@ -65,6 +74,7 @@ Redeploy after setting them. The sample runs disappear from the live console, wh
 2. Open it in a private window and sign in as that org's read-only user.
 3. The worker's log shows `connected: Connected "<name>" read only`.
 4. Confirm the calibration and press Start run. The progress bar moves as each step finishes.
+5. Approve every section and release. The Release tab shows the documents being made, then links to the folder and the three files in Drive. If Chromium can't start on Render's native runtime (the error names a missing library), the worker has to move to a Docker image with Playwright's system dependencies.
 
 ## Turning it off
 

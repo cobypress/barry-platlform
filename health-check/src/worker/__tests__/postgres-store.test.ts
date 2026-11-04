@@ -248,3 +248,47 @@ describe("PostgresWorkerStore", () => {
     await assert.rejects(store.refuseLink("l3", "x", "2026-11-03T20:00:00.000Z"), /wasn't pending/);
   });
 });
+
+describe("PostgresWorkerStore, for documents", () => {
+  test("loads a released run's approved sections, their current text, overrides and the folder it had", async () => {
+    const pool = new FakePool();
+    pool.handlers.push((text) => {
+      if (text.includes(`FROM "HealthCheckRun" WHERE`)) return { rows: [{ ...RUN_ROW, status: "released" }], rowCount: 1 };
+      if (text.includes(`FROM "HealthCheckRunStep"`)) return { rows: [], rowCount: 0 };
+      if (text.includes(`FROM "HealthCheckIntake"`)) return { rows: [{ statedProblems: "Forecasts are unreliable.", customerName: "Synthetic Co", linkedinUrl: null, industry: null, headcountBand: null, customerAnswers: null }], rowCount: 1 };
+      if (text.startsWith("SELECT") && text.includes(`FROM "HealthCheckSection" WHERE "runId"`) && !text.includes("HealthCheckSectionVersion")) {
+        return { rows: [{ id: "s1", runId: RUN_ROW.id, output: "executive_summary", key: "verdict", title: "Verdict", order: 0, status: "approved", currentVersionId: "v2", findingIds: [], metricIds: [], manualStepIds: [], approvedBy: "consultant@example.com", approvedAt: "2026-11-04T18:00:00.000Z" }], rowCount: 1 };
+      }
+      if (text.includes(`FROM "HealthCheckSectionVersion"`)) {
+        return { rows: [{ id: "v2", sectionId: "s1", version: 2, body: "Reworded.", source: "consultant_edit", changedBy: "consultant@example.com", changedAt: "2026-11-04T17:00:00.000Z", changeSummary: "Shorter", numberCheck: { passed: true, checkedAt: "2026-11-04T17:00:00.000Z", unmatched: [] } }], rowCount: 1 };
+      }
+      if (text.includes(`FROM "HealthCheckNumberOverride"`)) {
+        return { rows: [{ id: "o1", runId: RUN_ROW.id, targetType: "finding", targetId: "f1", targetField: "n", previousValue: 76, newValue: 70, reason: "Six are test deals", overriddenBy: "consultant@example.com", overriddenAt: "2026-11-04T16:00:00.000Z" }], rowCount: 1 };
+      }
+      if (text.includes(`FROM "HealthCheckDocuments"`)) return { rows: [{ runId: RUN_ROW.id, status: "queued", driveFolderId: "folder-0000000001", files: [] }], rowCount: 1 };
+      return undefined;
+    });
+    const job = (await new PostgresWorkerStore(pool).loadDocumentsJob(RUN_ROW.id))!;
+    assert.equal(job.run.status, "released");
+    assert.equal(job.intake!.customerName, "Synthetic Co");
+    assert.deepEqual(job.sections[0]!.approval, { approvedBy: "consultant@example.com", approvedAt: "2026-11-04T18:00:00.000Z" });
+    assert.equal(job.versions[0]!.body, "Reworded.");
+    assert.deepEqual(job.overrides[0]!.target, { type: "finding", id: "f1", field: "n" });
+    assert.equal(job.state, "queued");
+    assert.equal(job.driveFolderId, "folder-0000000001");
+    assert.match(pool.texts().find((t) => t.includes("HealthCheckSectionVersion"))!, /"currentVersionId"/);
+  });
+
+  test("moves only a requested row to making, and writes results only to a row it's making", async () => {
+    const pool = new FakePool();
+    const store = new PostgresWorkerStore(pool);
+    pool.handlers.push(() => ({ rows: [], rowCount: 0 }));
+    assert.equal(await store.startDocuments(RUN_ROW.id, "2026-11-04T19:00:00.000Z"), false);
+    await store.saveDocuments(RUN_ROW.id, { at: "2026-11-04T19:01:00.000Z", clientName: "Synthetic Co", folderName: "Health check 1", driveFolderId: "f", driveFolderUrl: "https://drive.google.com/f", files: [], warnings: [] });
+    await store.failDocuments(RUN_ROW.id, "x", "2026-11-04T19:01:00.000Z");
+    const [start, save, fail] = pool.texts();
+    assert.match(start!, /"status" IN \('queued', 'making'\)/);
+    assert.match(save!, /AND "status" = 'making'/);
+    assert.match(fail!, /AND "status" IN \('queued', 'making'\)/);
+  });
+});

@@ -1,11 +1,12 @@
 import { basename, dirname, join } from "node:path";
 import { tokenKeySource, TokenStore } from "../salesforce/token-store.ts";
 import { startQueueWorker, type BullModule } from "../worker/bullmq.ts";
+import { GoogleDrive } from "../worker/drive.ts";
 import { readWorkerEnv, WORKER_ENV } from "../worker/env.ts";
 import { PostgresWorkerStore, type SqlPool } from "../worker/postgres-store.ts";
 import { createJobHandler } from "../worker/worker.ts";
 
-// `hc worker`: takes run and connect jobs from the console's queue until told
+// `hc worker`: takes run, connect and documents jobs from the console's queue until told
 // to stop. It refuses to start without every variable in WORKER_ENV. BullMQ
 // and pg aren't engine dependencies (see DECISIONS), so they're loaded here,
 // and only once the environment is complete.
@@ -65,10 +66,12 @@ export async function workerCommand(
     connectKey: config.connectKey,
     stopAtShare: config.stopAtShare,
     apiVersion: config.apiVersion,
+    drive: config.drive ? new GoogleDrive(config.drive) : null,
     log,
   });
   const worker = startQueueWorker(bull, handler, { redisUrl: config.redisUrl, concurrency: config.concurrency, log });
   log(`Taking jobs from health-check-jobs, ${config.concurrency} at a time.`);
+  if (!config.drive) log("Google Drive isn't set up, so released runs' documents can't be made.");
   await (options.until ?? untilSignalled());
   log("Stopping: finishing the jobs in hand.");
   await worker.close();

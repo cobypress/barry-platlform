@@ -2,6 +2,8 @@ import type { DomainModule } from "../domains/types.ts";
 import type { OAuthClient } from "../salesforce/oauth.ts";
 import type { TokenStore } from "../salesforce/token-store.ts";
 import type { OAuthTransport, Transport } from "../salesforce/transport.ts";
+import type { renderReleased } from "../render/render-released.ts";
+import type { DocumentDrive } from "./drive.ts";
 import type { WorkerStore } from "./types.ts";
 
 export type WorkerDeps = {
@@ -17,6 +19,10 @@ export type WorkerDeps = {
   modules?: DomainModule[];
   stopAtShare?: number;
   apiVersion?: string;
+  /** Where released documents go. Null when Drive isn't set up: a documents job then fails with what to set. */
+  drive?: DocumentDrive | null;
+  /** Tests only: prints without a browser. */
+  renderReleased?: typeof renderReleased;
   /** Tests only: fakes for Salesforce's data API and its token endpoint. */
   dataTransport?: Transport;
   oauthTransport?: OAuthTransport;

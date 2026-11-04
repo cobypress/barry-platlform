@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { Intake } from "../narrative/intake.ts";
-import type { Calibration, ConnectLink, Finding, ManualAnswer, ManualStep, Metric, ReportSection, Run, Score, SectionVersion } from "../schemas/index.ts";
+import type { Calibration, ConnectLink, Finding, ManualAnswer, ManualStep, Metric, NumberOverride, ReportSection, Run, Score, SectionVersion } from "../schemas/index.ts";
 
 // What the worker takes from the queue, and what it needs from the console's
 // database. Jobs carry ids only (the contract with the console, lane C2), so
@@ -8,6 +8,7 @@ import type { Calibration, ConnectLink, Finding, ManualAnswer, ManualStep, Metri
 
 const RunJobPayload = z.object({ kind: z.literal("run"), runId: z.string().min(1).max(100), correlation_id: z.string().max(300).optional() }).strict();
 const ConnectJobPayload = z.object({ kind: z.literal("connect"), linkId: z.string().uuid(), correlation_id: z.string().max(300).optional() }).strict();
+const DocumentsJobPayload = z.object({ kind: z.literal("documents"), runId: z.string().min(1).max(100), correlation_id: z.string().max(300).optional() }).strict();
 /**
  * What lib/health-check/jobs.ts in the console sends today, before C2 moves it
  * to the contract. One step per job isn't needed: the engine's steps resume
@@ -15,7 +16,7 @@ const ConnectJobPayload = z.object({ kind: z.literal("connect"), linkId: z.strin
  */
 const LegacyStepPayload = z.object({ runId: z.string().min(1).max(100), stepId: z.string().min(1).max(100), correlation_id: z.string().max(300) }).strict();
 
-export type WorkerJob = { kind: "run"; runId: string } | { kind: "connect"; linkId: string };
+export type WorkerJob = { kind: "run"; runId: string } | { kind: "connect"; linkId: string } | { kind: "documents"; runId: string };
 
 export class BadJobError extends Error {
   constructor(message: string) {
@@ -30,9 +31,11 @@ export function parseJob(data: unknown): WorkerJob {
   if (run.success) return { kind: "run", runId: run.data.runId };
   const connect = ConnectJobPayload.safeParse(data);
   if (connect.success) return { kind: "connect", linkId: connect.data.linkId };
+  const documents = DocumentsJobPayload.safeParse(data);
+  if (documents.success) return { kind: "documents", runId: documents.data.runId };
   const legacy = LegacyStepPayload.safeParse(data);
   if (legacy.success) return { kind: "run", runId: legacy.data.runId };
-  throw new BadJobError("The job isn't a run or connect job with ids only");
+  throw new BadJobError("The job isn't a run, connect or documents job with ids only");
 }
 
 /** The console's link states (contract with C2). */
@@ -99,6 +102,39 @@ export type LinkConnected = {
   note: string | null;
 };
 
+/**
+ * The documents of a released run (the console's HealthCheckDocuments row).
+ * The console asks for them by setting the row to queued; the worker moves it
+ * to making, then done or failed.
+ */
+export type DocumentsState = "queued" | "making" | "done" | "failed";
+
+export type DocumentFile = { output: ReportSection["output"]; name: string; driveFileId: string; url: string };
+
+export type DocumentsJobInput = {
+  run: Run;
+  /** The intake as it stands now, with the customer's answers. */
+  intake: Intake | null;
+  sections: ReportSection[];
+  /** The current version of each section. */
+  versions: SectionVersion[];
+  overrides: NumberOverride[];
+  state: DocumentsState | null;
+  /** From an earlier make, so the documents go back to the same Drive folder. */
+  driveFolderId: string | null;
+  files: DocumentFile[];
+};
+
+export type DocumentsMade = {
+  at: string;
+  clientName: string;
+  folderName: string;
+  driveFolderId: string;
+  driveFolderUrl: string;
+  files: DocumentFile[];
+  warnings: string[];
+};
+
 /** Raised by a store when the console has moved a run on, so the worker mustn't write to it. */
 export class RunClosedError extends Error {
   constructor(runId: string, status: string) {
@@ -126,4 +162,11 @@ export interface WorkerStore {
   markLinkUsed(linkId: string, connected: LinkConnected): Promise<void>;
   /** Moves a pending link to refused with a reason the console can show, and clears its sealed secrets. Never a token. */
   refuseLink(linkId: string, reason: string, at: string): Promise<void>;
+
+  loadDocumentsJob(runId: string): Promise<DocumentsJobInput | null>;
+  /** Moves queued (or making, on a second delivery) to making. False if the console hasn't asked, so there's nothing to do. */
+  startDocuments(runId: string, at: string): Promise<boolean>;
+  saveDocuments(runId: string, made: DocumentsMade): Promise<void>;
+  /** A reason the console can show. Never a token or a name. */
+  failDocuments(runId: string, reason: string, at: string): Promise<void>;
 }

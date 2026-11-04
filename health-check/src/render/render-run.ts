@@ -57,8 +57,28 @@ export async function renderRun(dir: string, options: { client?: NarrativeClient
   const { input, pseudonyms } = loadRun(folder);
   const report = buildReport(input);
   const rejections = options.client ? await applyNarrative(report, options.client, pseudonyms) : [];
-  const scope = report.dataset;
 
+  const paths = {
+    rawNotes: join(folder, OUTPUT_FILES.rawNotes),
+    executive: join(folder, OUTPUT_FILES.executive),
+    full: join(folder, OUTPUT_FILES.full),
+    sections: join(folder, OUTPUT_FILES.sections),
+    layout: join(folder, OUTPUT_FILES.layout),
+    rejections: join(folder, OUTPUT_FILES.rejections),
+  };
+  const layout = await printDocuments(report, pseudonyms, paths);
+  write(paths.sections, `${JSON.stringify(Object.values(report.outputs), null, 2)}\n`);
+  write(paths.rejections, `${JSON.stringify(rejections, null, 2)}\n`);
+  return { report, layout, rejections, passed: layout.executive.passed && layout.full.passed, files: Object.values(paths) };
+}
+
+/** Prints the two PDFs and the Word notes from a built report, and writes what the layout checks found. */
+export async function printDocuments(
+  report: BuiltReport,
+  pseudonyms: Pseudonymiser,
+  paths: { rawNotes: string; executive: string; full: string; layout: string },
+): Promise<{ executive: LayoutReport; full: LayoutReport }> {
+  const scope = report.dataset;
   const browser = await launchBrowser();
   try {
     const executive = await renderPdf(browser, executiveHtml(report, pseudonyms), { minPages: EXECUTIVE_PAGES.min, maxPages: EXECUTIVE_PAGES.max, dataset: scope });
@@ -72,21 +92,11 @@ export async function renderRun(dir: string, options: { client?: NarrativeClient
     executive.layout.passed = executive.layout.problems.length === 0;
     full.layout.passed = full.layout.problems.length === 0;
 
-    const paths = {
-      rawNotes: join(folder, OUTPUT_FILES.rawNotes),
-      executive: join(folder, OUTPUT_FILES.executive),
-      full: join(folder, OUTPUT_FILES.full),
-      sections: join(folder, OUTPUT_FILES.sections),
-      layout: join(folder, OUTPUT_FILES.layout),
-      rejections: join(folder, OUTPUT_FILES.rejections),
-    };
     write(paths.rawNotes, await renderRawNotesDocx(report, pseudonyms));
     write(paths.executive, executive.pdf);
     write(paths.full, full.pdf);
-    write(paths.sections, `${JSON.stringify(Object.values(report.outputs), null, 2)}\n`);
     write(paths.layout, `${JSON.stringify({ executive: executive.layout, full: full.layout }, null, 2)}\n`);
-    write(paths.rejections, `${JSON.stringify(rejections, null, 2)}\n`);
-    return { report, layout: { executive: executive.layout, full: full.layout }, rejections, passed: executive.layout.passed && full.layout.passed, files: Object.values(paths) };
+    return { executive: executive.layout, full: full.layout };
   } finally {
     await browser.close();
   }

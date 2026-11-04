@@ -102,6 +102,13 @@ describe("source scan", () => {
     for (const file of files(src)) {
       const text = readFileSync(file, "utf8");
       if (file.endsWith("salesforce/transport.ts")) continue;
+      // The Drive client for released documents reaches Google only (DECISIONS 75), through one guarded send.
+      if (file.endsWith("worker/drive.ts")) {
+        assert.equal(text.match(/\bfetch\(/g)?.length, 1, "drive.ts calls fetch once");
+        assert.match(text, /#send\(url: string, init: RequestInit\): Promise<Response> \{\n    if \(!GOOGLE_HOSTS\.has\(new URL\(url\)\.host\) \|\| !url\.startsWith\("https:\/\/"\)\) throw [^\n]+\n    return this\.#fetch\(url, init\);/, "behind the Google host check");
+        assert.match(text, /const GOOGLE_HOSTS: ReadonlySet<string> = new Set\(\["www\.googleapis\.com", "oauth2\.googleapis\.com"\]\);/);
+        continue;
+      }
       assert.doesNotMatch(text, /\bfetch\(/, `${file} calls fetch`);
       assert.doesNotMatch(text, /from "(node:)?https?"|from "undici"|from "jsforce"|from "axios"/, `${file} imports an HTTP library`);
     }
@@ -120,6 +127,8 @@ describe("source scan", () => {
   test("nothing else builds a write", () => {
     for (const file of files(src)) {
       if (file.endsWith("allowlist.ts") || file.endsWith("client.ts") || file.endsWith("salesforce/transport.ts")) continue;
+      // Drive uploads, to Google only: see "only transport.ts touches the network".
+      if (file.endsWith("worker/drive.ts")) continue;
       assert.doesNotMatch(readFileSync(file, "utf8"), /method:\s*"(POST|PATCH|PUT|DELETE)"/, file);
     }
   });
