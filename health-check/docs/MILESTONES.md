@@ -78,7 +78,7 @@ Built on `hc/connection` against `bc-hc-dev`, a Developer Edition org made for t
 | 1. First live run on the Black Cloud org | Not done: out of scope here. The run below is the first live run, on `bc-hc-dev` |
 | 2. External Client App, and a second test org | App built and deployed. Not tried from a second org (QUESTIONS.md 22) |
 | 3. Managed package needed? | Answered yes, from Salesforce's docs (DECISIONS.md 65) |
-| 4. Web server flow with PKCE and rotation | Done live on `bc-hc-dev` on 2026-11-03, apart from rotation (below) |
+| 4. Web server flow with PKCE and rotation | Done live on `bc-hc-dev` on 2026-11-03. Rotation proven on `bc-hc-scratch-web` on 2026-11-04 (below) |
 | 5. One-time connect link | Link logic built and tested. Console pages are Milestone 5 |
 | 6. Read-only permission set, proven unable to write | Done, proven on `bc-hc-dev` |
 | 7. Bulk API decision | Not started |
@@ -155,7 +155,8 @@ If step 3 answers "Cross-org OAuth flows are not supported", the link to the sou
 - **The test carried on with an unpackaged copy.** We deployed Barometer Read Only from source as a plain permission set and assigned it, as a customer's admin would. The read-only check then passed.
 - **The run completed** on that connection: run `hc-2026-11-03-1660d472`, with 9 issues and 37 not measurable. The empty scratch org explains the difference from `bc-hc-dev`.
 - **The first live refresh worked.** About two hours after the last use, `connect check` found the access token expired. It refreshed through the installed app and stored the new tokens, and the read-only check passed. A check at 17:29 hadn't refreshed: the session timeout counts from the last use, not from sign-in.
-- **Not done yet:** the second refresh, which proves rotation, because it only works with the refresh token the first one stored. The connection stays in place for that.
+- **The second refresh worked, on 2026-11-04.** It could only succeed with the refresh token the first refresh stored, so rotation works live. Not tested: that Salesforce refuses the old refresh token afterwards, because our store had already replaced it.
+- **The connection is no longer needed.** Revoke it with `hc connect revoke --connection bc-hc-scratch-web`.
 
 **One install: version `0.1.0-7` (`04tQH00000NOKy1YAH`), the same day.** The package no longer carries the permission set. Its install script creates Barometer Read Only instead (DECISIONS.md 67).
 
