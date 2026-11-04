@@ -5,8 +5,8 @@ import { ReportSection as ReportSectionSchema, SectionVersion as SectionVersionS
 import type { SectionBrief } from "./draft.ts";
 import type { Intake } from "./intake.ts";
 import { applyOverrides } from "./overrides.ts";
-import { findingSource, metricSource, type PromptSource } from "./prompt.ts";
-import { buildPlan, bySeverity, domainLabel, domainsInOrder, issuesOf, scorecard, teamLevelFinding, topIssues, verdictOf } from "./select.ts";
+import { assumptionsSource, findingSource, metricSource, planSource, statedProblemsSource, type PromptSource } from "./prompt.ts";
+import { buildPlan, bySeverity, domainLabel, domainsInOrder, issuesOf, scorecard, teamLevelFinding, topIssues, verdictOf, type Plan } from "./select.ts";
 
 // The three outputs, built from one findings dataset. Each section gets a first
 // version written by the engine, so a report always exists even if Claude never
@@ -38,6 +38,8 @@ export type BuiltReport = {
   outputs: Record<ReportOutputKey, BuiltOutput>;
   /** What Claude would be asked for, by section id. Sections with no entry stay engine text. */
   briefs: Map<string, SectionBrief>;
+  /** The dataset sources each section's number check reads, by section id. A brief's sources are always among them. */
+  scopes: Map<string, string[]>;
 };
 
 export const TOP_ISSUE_COUNT = 5;
@@ -60,7 +62,7 @@ type Spec = {
   /** Other dataset sources this section's text may quote. */
   sources?: string[];
   needsInput?: boolean;
-  brief?: { purpose: string; sources: PromptSource[] };
+  brief?: { purpose: string; sources: PromptSource[]; fillsPlaceholder?: boolean };
 };
 
 const SUMMARY_SOURCES = [SOURCE.run, SOURCE.summary, SOURCE.structure];
@@ -68,6 +70,7 @@ const INTAKE = "intake";
 const CALIBRATION = "calibration";
 const OVERRIDES = "overrides";
 const COVER = "cover";
+const PLAN = "plan";
 
 const lines = (...parts: Array<string | null | undefined | false>): string => parts.filter(Boolean).join("\n\n");
 const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
@@ -177,7 +180,59 @@ function deepDiveText(metrics: Metric[], currency: string): string {
 
 function summaryCounts(findings: Finding[]): PromptSource {
   const issues = issuesOf(findings);
-  return { id: SOURCE.summary, kind: "summary", checks: findings.length, issues: issues.length, critical: issues.filter((f) => f.severity === "critical").length, high: issues.filter((f) => f.severity === "high").length };
+  return {
+    id: SOURCE.summary,
+    kind: "summary",
+    checks: findings.length,
+    issues: issues.length,
+    critical: issues.filter((f) => f.severity === "critical").length,
+    high: issues.filter((f) => f.severity === "high").length,
+    passed: findings.filter((f) => f.status === "passed").length,
+    notMeasurable: findings.filter((f) => f.status === "not_measurable").length,
+  };
+}
+
+/** The plan's shape as figures, under the id planSource uses, so a draft of a plan section can say "the first 30 days". */
+function planFigures({ phases, later }: Plan): FigureSet["figures"] {
+  const number = (value: number) => ({ source: PLAN, kind: "number" as const, value });
+  const days = (value: number) => ({ source: PLAN, kind: "duration" as const, value, unit: "day" });
+  return [
+    ...phases.flatMap((p) => [number(p.findings.length), number(p.from), number(p.to), days(p.to), days(p.to - p.from + 1)]),
+    number(later.length),
+    number(phases.length),
+    // Each phase is a month, as the engine's own text says.
+    { source: PLAN, kind: "duration" as const, value: phases.length, unit: "month" },
+  ];
+}
+
+const planFindings = ({ phases }: Plan): Finding[] => phases.flatMap((p) => p.findings);
+
+/** Stated vs actual. Claude may draft it from the stated problems and the issues; a consultant's own links and assessment come first. */
+function statedVsActualSpec(intake: Intake | null | undefined, team: Finding[]): Spec {
+  const key = "stated_vs_actual";
+  const title = "Stated vs actual";
+  const stated = intake?.statedProblems ?? [];
+  const placeholder = "A consultant hasn't yet linked the stated problems to findings.";
+  if (stated.length === 0) return { key, title, body: placeholder, needsInput: true };
+  const linked = stated.filter((p) => p.findingIds.length > 0);
+  const linkedIds = [...new Set(linked.flatMap((p) => p.findingIds))];
+  // The linked findings, whatever their status, then every issue, so Claude can say what matters more.
+  const shown = [...team.filter((f) => linkedIds.includes(f.id) && f.status !== "issue"), ...issuesOf(team)];
+  return {
+    key,
+    title,
+    body: linked.length ? linked.map((p) => `${p.statement}${p.assessment ? ` ${p.assessment}` : ""}`).join("\n\n") : placeholder,
+    findingIds: linkedIds,
+    // The issues are in scope without being the consultant's links.
+    sources: [INTAKE, ...shown.map((f) => f.id)],
+    needsInput: linked.length === 0,
+    brief: {
+      purpose:
+        "Set what you told us against what we found. For each stated problem, say whether our findings support it, partly support it or don't support it, naming the issues that bear on it. Where a problem has our own assessment, follow it. Then say what we found that matters more than the problems you raised, if anything does.",
+      sources: [statedProblemsSource(INTAKE, stated), ...shown.map(findingSource)],
+      fillsPlaceholder: linked.length === 0,
+    },
+  };
 }
 
 /** The executive pipeline page: what's open, what it's likely to be worth, and the potential revenue in deals that have stalled. */
@@ -204,7 +259,8 @@ function pipelineSpec(input: ReportInput, team: Finding[]): Spec {
 function executiveSpecs(input: ReportInput, team: Finding[]): Spec[] {
   const verdict = verdictOf(team);
   const top = topIssues(team, TOP_ISSUE_COUNT);
-  const { phases: plan, later } = buildPlan(team);
+  const plan = buildPlan(team);
+  const planned = planFindings(plan);
   const rows = scorecard(team, input.scores ?? []);
   const scoreSources = rows.filter((r) => r.score !== null).map((r) => `score:${r.domain}`);
   const assessed = rows.filter((r) => r.issues > 0 || team.some((f) => f.domain === r.domain)).length;
@@ -228,26 +284,45 @@ function executiveSpecs(input: ReportInput, team: Finding[]): Spec[] {
       body: top.length ? "The issues that matter most, ranked by severity and then by value." : "We found no issues.",
       findingIds: top.map((f) => f.id),
       sources: SUMMARY_SOURCES,
+      ...(top.length
+        ? {
+            brief: {
+              purpose: "Introduce the top issues to an executive reader in two or three sentences: what they have in common, and why they come before everything else. Each issue is set out in full straight after this text, so don't go through them one by one.",
+              sources: [summaryCounts(team), ...top.map(findingSource)],
+            },
+          }
+        : {}),
     },
     {
       key: "plan_90_day",
       title: "90-day plan",
-      body: later.length
+      body: plan.later.length
         ? "Urgent fixes come first, and each month holds only what a team can take on. The full report has every action, and what comes after 90 days."
         : "Urgent fixes come first, and each month holds only what a team can take on. The full report has every action.",
-      findingIds: plan.flatMap((p) => p.findings.map((f) => f.id)),
-      sources: SUMMARY_SOURCES,
+      findingIds: planned.map((f) => f.id),
+      sources: [...SUMMARY_SOURCES, PLAN],
+      ...(planned.length
+        ? {
+            brief: {
+              purpose:
+                "Introduce the 90-day plan to an executive reader in two or three sentences: what each phase is for, and why the work comes in that order. Each phase's actions are listed straight after this text, so don't go through them one by one. If some actions come after the 90 days, say that the full report has them.",
+              sources: [planSource(PLAN, plan), ...planned.map(findingSource)],
+            },
+          }
+        : {}),
     },
   ];
 }
 
 function fullSpecs(input: ReportInput, team: Finding[], metrics: Metric[]): Spec[] {
   const { intake } = input;
-  const { phases: plan, later } = buildPlan(team);
+  const built = buildPlan(team);
+  const { phases: plan, later } = built;
+  const roadmapFindings = [...planFindings(built), ...later];
   const verdict = verdictOf(team);
+  const issues = issuesOf(team);
   const notMeasurable = team.filter((f) => f.status === "not_measurable");
   const passed = team.filter((f) => f.status === "passed");
-  const linked = intake?.statedProblems.filter((p) => p.findingIds.length > 0) ?? [];
   const pipelineMetrics = metrics.filter((m) => m.domain === "historic_pipeline" || m.domain === "current_pipeline");
   return [
     intake && intake.statedProblems.length
@@ -257,8 +332,13 @@ function fullSpecs(input: ReportInput, team: Finding[], metrics: Metric[]): Spec
       key: "overview",
       title: "Overview",
       body: lines(`${verdict.headline}.`, verdict.issues ? `We found ${plural(verdict.issues, "issue")}: ${severityCounts(verdict)}.` : "We found no issues."),
-      findingIds: issuesOf(team).map((f) => f.id),
+      findingIds: issues.map((f) => f.id),
       sources: SUMMARY_SOURCES,
+      brief: {
+        purpose:
+          "Open the full report. In two or three short paragraphs, tell the reader what state their Salesforce is in, the few themes that run through the issues and why they matter to the business, and where to start. The verdict and the counts of issues are shown beside this text, so don't open by repeating them.",
+        sources: [summaryCounts(team), ...issues.map(findingSource)],
+      },
     },
     ...domainsInOrder(team).map((domain): Spec => {
       const own = team.filter((f) => f.domain === domain);
@@ -286,32 +366,46 @@ function fullSpecs(input: ReportInput, team: Finding[], metrics: Metric[]): Spec
         sources: pipelineMetrics.map(metricSource),
       },
     },
-    linked.length
-      ? { key: "stated_vs_actual", title: "Stated vs actual", body: linked.map((p) => `${p.statement}${p.assessment ? ` ${p.assessment}` : ""}`).join("\n\n"), findingIds: linked.flatMap((p) => p.findingIds), sources: [INTAKE] }
-      : { key: "stated_vs_actual", title: "Stated vs actual", body: "A consultant hasn't yet linked the stated problems to findings.", needsInput: true },
+    statedVsActualSpec(intake, team),
     {
       key: "roadmap",
       title: "Roadmap",
       body: [...plan.map((p) => `Days ${p.from} to ${p.to}, ${p.title}: ${plural(p.findings.length, "action")}.`), ...(later.length ? [`After 90 days: ${plural(later.length, "action")}.`] : [])].join("\n"),
-      findingIds: [...plan.flatMap((p) => p.findings.map((f) => f.id)), ...later.map((f) => f.id)],
-      sources: [...SUMMARY_SOURCES, "plan"],
+      findingIds: roadmapFindings.map((f) => f.id),
+      sources: [...SUMMARY_SOURCES, PLAN],
+      ...(roadmapFindings.length
+        ? {
+            brief: {
+              purpose:
+                "Walk the reader through the roadmap: what each phase is for, why the work comes in that order, and what's left for after the 90 days. Every action is listed in full after this text, so describe the shape of the plan and its priorities rather than each action.",
+              sources: [planSource(PLAN, built), ...roadmapFindings.map(findingSource)],
+            },
+          }
+        : {}),
     },
     {
       key: "appendix",
       title: "Appendix",
       body: lines("How we worked, what we couldn't measure, and what passed.", notMeasurable.length ? `We couldn't measure ${plural(notMeasurable.length, "check")}. We report these rather than estimate them.` : null, passed.length ? `${plural(passed.length, "check")} passed.` : null),
       findingIds: [...notMeasurable, ...passed].map((f) => f.id),
-      sources: SUMMARY_SOURCES,
+      sources: [...SUMMARY_SOURCES, CALIBRATION],
+      brief: {
+        purpose:
+          "Explain how we carried out this health check: the period of data we looked at, the working assumptions behind the figures, what we couldn't measure and why, and how many checks passed. Where something couldn't be measured, say that we report it rather than estimate it.",
+        sources: [summaryCounts(team), assumptionsSource(CALIBRATION, input.run, input.calibration), ...notMeasurable.map(findingSource)],
+      },
     },
   ];
 }
 
-function record(run: Run, output: ReportOutputKey, specs: Spec[], dataset: FigureSet, now: Date, briefs: Map<string, SectionBrief>): BuiltOutput {
+function record(run: Run, output: ReportOutputKey, specs: Spec[], dataset: FigureSet, now: Date, briefs: Map<string, SectionBrief>, scopes: Map<string, string[]>): BuiltOutput {
   const sections: ReportSection[] = [];
   const versions: SectionVersion[] = [];
   specs.forEach((spec, order) => {
     const id = `${run.id}:${output}:${spec.key}`;
-    const scope = scopeDataset(dataset, [...(spec.findingIds ?? []), ...(spec.metricIds ?? []), ...(spec.manualStepIds ?? []), ...(spec.sources ?? [])]);
+    const ids = [...new Set([...(spec.findingIds ?? []), ...(spec.metricIds ?? []), ...(spec.manualStepIds ?? []), ...(spec.sources ?? [])])];
+    scopes.set(id, ids);
+    const scope = scopeDataset(dataset, ids);
     const numberCheck = toNumberCheckResult(checkNumbers(spec.body, scope), now);
     const version = SectionVersionSchema.parse({ id: `${id}:v1`, sectionId: id, version: 1, body: spec.body, source: "engine", changedBy: "engine", changedAt: now.toISOString(), changeSummary: "Engine draft", numberCheck });
     versions.push(version);
@@ -342,7 +436,6 @@ export function buildReport(input: ReportInput): BuiltReport {
   const now = input.now ?? new Date(run.asOf);
   const effective = applyOverrides(findings, metrics, overrides);
   const team = effective.findings.map(teamLevelFinding);
-  const { phases: plan, later } = buildPlan(team);
   const dataset = buildDataset({
     findings: [...findings, ...team],
     metrics: effective.metrics,
@@ -360,9 +453,10 @@ export function buildReport(input: ReportInput): BuiltReport {
       ...(overrides.length ? [{ source: OVERRIDES, text: overrideText(overrides) }] : []),
     ],
   });
-  dataset.figures.push(...[...plan.map((p) => p.findings.length), later.length].map((value) => ({ source: "plan", kind: "number" as const, value })));
+  dataset.figures.push(...planFigures(buildPlan(team)));
   const briefs = new Map<string, SectionBrief>();
-  const build = (output: ReportOutputKey, specs: Spec[]): BuiltOutput => record(run, output, specs, dataset, now, briefs);
+  const scopes = new Map<string, string[]>();
+  const build = (output: ReportOutputKey, specs: Spec[]): BuiltOutput => record(run, output, specs, dataset, now, briefs, scopes);
   return {
     input,
     dataset,
@@ -374,6 +468,7 @@ export function buildReport(input: ReportInput): BuiltReport {
       full_health_check: build("full_health_check", fullSpecs(input, team, effective.metrics)),
     },
     briefs,
+    scopes,
   };
 }
 

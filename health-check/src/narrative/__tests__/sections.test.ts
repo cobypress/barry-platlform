@@ -7,6 +7,7 @@ import { Intake } from "../intake.ts";
 import { buildPlan, domainLabel, PLAN_CAPACITY, scorecard, teamLevelFinding, teamLevelText, topIssues, verdictOf } from "../select.ts";
 import { buildReport, currentBody, TOP_ISSUE_COUNT, type ReportInput } from "../sections.ts";
 import { Pseudonymiser, type PseudonymEntry } from "../../privacy/pseudonymiser.ts";
+import { compactMoney } from "../../render/format.ts";
 import { canRelease, ReportSection, SALES_CLOUD_DOMAINS, SectionVersion, type Finding, type NumberOverride, type Score } from "../../schemas/index.ts";
 import { runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
@@ -275,11 +276,130 @@ describe("applying narrative", () => {
     assert.match(rejections[0]!.reasons.join(), /9,999,999/);
   });
 
+  test("a failed call keeps the engine's text and status, and stops further calls", async () => {
+    const report = buildReport(base);
+    const before = Object.values(report.outputs).flatMap((o) => o.sections.map((s) => ({ ...s })));
+    let calls = 0;
+    const rejections = await applyNarrative(report, { complete: async () => (calls++, Promise.reject(new Error("529 overloaded"))) }, pseudonyms);
+    assert.equal(calls, 1, "one failed call is enough to know");
+    assert.equal(rejections.length, 1);
+    assert.equal(rejections[0]!.unavailable, true);
+    assert.match(rejections[0]!.reasons.join(), /overloaded/);
+    assert.deepEqual(Object.values(report.outputs).flatMap((o) => o.sections), before);
+    assert.ok(Object.values(report.outputs).flatMap((o) => o.versions).every((v) => v.source === "engine"));
+  });
+
   test("sections with no brief are never sent", async () => {
     const report = buildReport(base);
     const titles: string[] = [];
     await applyNarrative(report, { complete: async ({ prompt, model }) => (titles.push(prompt.split("\n")[0]!), { stopReason: "end_turn", text: '{"paragraphs":[{"text":"Fine.","sources":[]}]}', model }) }, pseudonyms);
     assert.ok(titles.includes("Section: Verdict"));
     assert.ok(!titles.some((t) => /Assumptions|Queries|Overrides|Intake/.test(t)), "raw notes stay engine text");
+  });
+});
+
+describe("what Claude is asked to draft", () => {
+  const keysWithBriefs = (report: ReturnType<typeof buildReport>): string[] => [...report.briefs.keys()].map((id) => id.split(":").at(-1)!);
+  const unlinked = Intake.parse({ ...intake, statedProblems: [{ id: "p1", statement: "We don't trust the forecast.", raisedBy: "Synthetic Director" }] });
+
+  test("every customer-facing section that reads as a template has a brief, and the raw notes have none", () => {
+    const report = buildReport(base);
+    const keys = keysWithBriefs(report);
+    for (const key of ["verdict", "pipeline", "top_issues", "plan_90_day", "overview", "pipeline_deep_dive", "roadmap", "appendix"]) assert.ok(keys.includes(key), key);
+    assert.ok(keys.some((k) => k.startsWith("domain_")));
+    assert.ok(![...report.briefs.keys()].some((id) => id.includes(":raw_notes:")));
+  });
+
+  test("stated vs actual has a brief only when the customer stated problems", () => {
+    assert.ok(!keysWithBriefs(buildReport(base)).includes("stated_vs_actual"), "no intake");
+    assert.ok(!keysWithBriefs(buildReport({ ...base, intake: { ...intake, statedProblems: [] } })).includes("stated_vs_actual"), "an intake with no problems");
+    for (const withProblems of [intake, unlinked]) assert.ok(keysWithBriefs(buildReport({ ...base, intake: withProblems })).includes("stated_vs_actual"));
+  });
+
+  test("the stated problems go as statements, without the summary or who raised them", () => {
+    const report = buildReport({ ...base, intake: unlinked });
+    const brief = report.briefs.get(`${run.id}:full_health_check:stated_vs_actual`)!;
+    const sent = JSON.stringify(brief.sources.find((s) => s.kind === "stated_problems"));
+    assert.match(sent, /We don't trust the forecast/);
+    assert.doesNotMatch(sent, /Synthetic Director|sales director|Synthetic Consultant/);
+    assert.ok(brief.sources.filter((s) => s.kind === "finding").length >= report.teamFindings.filter((f) => f.status === "issue").length, "every issue, so Claude can say what matters more");
+  });
+
+  test("every brief's sources are inside its section's number-check scope", () => {
+    const report = buildReport({ ...base, intake });
+    for (const [id, brief] of report.briefs) {
+      const scope = new Set(report.scopes.get(id));
+      for (const source of brief.sources) assert.ok(scope.has(source.id), `${id} gives Claude ${source.id}, which its check doesn't read`);
+    }
+  });
+
+  // A stand-in for Claude that quotes every figure its sources give it, and
+  // nothing else, citing each source. If a brief shows Claude a figure its
+  // number check can't trace, this is where it shows.
+  const currency = loadCalibration().currency;
+  type Sent = { id: string; kind: string; [key: string]: unknown };
+  function quote(s: Sent): string | null {
+    switch (s.kind) {
+      case "finding":
+        return `${s.title}. ${s.summary}`;
+      case "metric": {
+        if (s.status !== "measured") return null;
+        const value = s.value as number;
+        const text: Record<string, string | null> = { percent: `${value}%`, days: `${value} days`, count: `${value}`, currency: compactMoney(value, currency), ratio: null };
+        return text[s.unit as string] ? `${s.label}: ${text[s.unit as string]}.` : null;
+      }
+      case "summary":
+        return `We ran ${s.checks} checks and found ${s.issues} issues, ${s.critical} critical and ${s.high} high. ${s.passed} passed, and we couldn't measure ${s.notMeasurable}.`;
+      case "plan": {
+        const phases = s.phases as Array<{ title: string; fromDay: number; toDay: number; actions: number }>;
+        return [`In the first ${phases[0]!.toDay} days, over ${phases.length} months:`, ...phases.map((p) => `days ${p.fromDay} to ${p.toDay}, ${p.title}, hold ${p.actions} actions.`), `After 90 days, ${s.actionsAfterDay90} more.`].join(" ");
+      }
+      case "stated_problems":
+        return (s.problems as Array<{ statement: string; ourAssessment?: string }>).map((p) => `${p.statement} ${p.ourAssessment ?? ""}`).join(" ");
+      case "assumptions": {
+        const window = s.analysisWindow as { from: string; to: string };
+        return `We looked at your data from ${window.from} to ${window.to}. A user counts as inactive after ${s.inactiveUserAfterDays} days, and a figure needs at least ${s.minimumDealsBehindAFigure} deals behind it.`;
+      }
+      default:
+        throw new Error(`No quote for a ${s.kind} source`);
+    }
+  }
+  const quoting: NarrativeClient = {
+    complete: async ({ prompt, model }) => {
+      const sources = JSON.parse(prompt.slice(prompt.indexOf("<sources>") + 9, prompt.indexOf("</sources>"))) as Sent[];
+      const paragraphs = sources.flatMap((s) => {
+        const text = quote(s);
+        return text ? [{ text, sources: [s.id] }] : [];
+      });
+      return { stopReason: "end_turn", text: JSON.stringify({ paragraphs }), model };
+    },
+  };
+
+  test("a draft that quotes only figures from its brief's sources passes, for every brief", async () => {
+    const withFigure = Intake.parse({ ...intake, statedProblems: [{ id: "p1", statement: "We lose 3 in 10 deals to no decision." }] });
+    for (const withIntake of [intake, withFigure]) {
+      const report = buildReport({ ...base, intake: withIntake });
+      const rejections = await applyNarrative(report, quoting, pseudonyms);
+      assert.deepEqual(rejections, []);
+      for (const id of report.briefs.keys()) {
+        const built = Object.values(report.outputs).find((o) => o.sections.some((s) => s.id === id))!;
+        const current = built.versions.find((v) => v.id === built.sections.find((s) => s.id === id)!.currentVersionId)!;
+        assert.equal(current.source, "claude_draft", id);
+        assert.equal(current.numberCheck.passed, true, `${id}: ${current.numberCheck.unmatched.join("; ")}`);
+      }
+    }
+  });
+
+  test("an accepted draft of stated vs actual no longer needs input; a rejected one still does", async () => {
+    const section = (r: ReturnType<typeof buildReport>) => r.outputs.full_health_check.sections.find((s) => s.key === "stated_vs_actual")!;
+    const accepted = buildReport({ ...base, intake: unlinked });
+    assert.equal(section(accepted).status, "needs_input", "the engine has only a placeholder");
+    await applyNarrative(accepted, quoting, pseudonyms);
+    assert.equal(section(accepted).status, "draft");
+    assert.match(currentBody(accepted.outputs.full_health_check, "stated_vs_actual"), /We don't trust the forecast/);
+
+    const rejected = buildReport({ ...base, intake: unlinked });
+    await applyNarrative(rejected, { complete: async ({ model }) => ({ stopReason: "end_turn", model, text: JSON.stringify({ paragraphs: [{ text: "You lose £9,999,999.", sources: [] }] }) }) }, pseudonyms);
+    assert.equal(section(rejected).status, "needs_input");
   });
 });

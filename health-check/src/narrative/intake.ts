@@ -3,7 +3,9 @@ import { HeadcountBand, Industry } from "../schemas/index.ts";
 
 // What the customer told us before the run. There's no shared schema for this
 // yet, so it lives here until the console's intake page settles it. It's
-// consultant-entered text, so it can hold names and never goes to Claude.
+// consultant-entered text, so it can hold names. Only the stated problems'
+// statements and assessments go to Claude, guarded like any other source
+// (statedProblemsSource in prompt.ts); the summary and who raised what never do.
 export const StatedProblem = z.object({
   id: z.string().min(1),
   statement: z.string().min(1),
