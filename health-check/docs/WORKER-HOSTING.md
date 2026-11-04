@@ -55,7 +55,7 @@ Production environment only:
 | `HC_SF_CLIENT_ID` | The same as the worker's |
 | `HC_SF_REDIRECT_URI` | The same as the worker's, so the two always agree |
 
-The console's sign-in needs `HEALTH_CHECK_SESSION_SECRET`, `HEALTH_CHECK_ALLOWED_EMAILS` and the Google client, with `<SCRAPE_BASE_URL>/api/auth/health-check/callback` as an authorised redirect URI on the Google OAuth client. If you've signed in to the live console, that's done.
+The console uses the internal tools' Google sign-in at `/internal/login` (blackcloud-next `lib/internal-login.ts`), so it needs nothing of its own. `SCRAPE_ALLOWED_EMAILS` must list everyone who may sign in with Google: an empty list now refuses everyone. `HEALTH_CHECK_ALLOWED_EMAILS` is optional, to narrow the console to some of them.
 
 Redeploy after setting them. The sample runs disappear from the live console, which then shows only real runs.
 
