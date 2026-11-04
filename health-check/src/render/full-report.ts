@@ -566,7 +566,10 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   if (gaps.length) slides.push(...listSlides(r, "Pipeline", "What your data can't tell us yet", gaps, compact));
 
   const planned = plan.some((p) => p.findings.length > 0);
-  if (!dense && planned) add(`<div class="eyebrow">Roadmap</div><h2>The first 90 days</h2><div class="stat-row">${plan.map((p) => `<div class="stat"><b>${r.t(p.title)}</b><span>Days ${p.from} to ${p.to}</span><p style="margin-top:8px">${p.findings.length} ${p.findings.length === 1 ? "action" : "actions"}</p></div>`).join("")}</div>`);
+  // The engine's roadmap text only counts actions, which the boxes already show. Written text goes above them.
+  const roadmap = built.versions.find((v) => v.id === built.sections.find((x) => x.key === "roadmap")?.currentVersionId);
+  const roadmapText = roadmap && roadmap.source !== "engine" ? `<div style="margin-bottom:18px">${sectionBody(r, built, "roadmap")}</div>` : "";
+  if (!dense && planned) add(`<div class="eyebrow">Roadmap</div><h2>The first 90 days</h2>${roadmapText}<div class="stat-row">${plan.map((p) => `<div class="stat"><b>${r.t(p.title)}</b><span>Days ${p.from} to ${p.to}</span><p style="margin-top:8px">${p.findings.length} ${p.findings.length === 1 ? "action" : "actions"}</p></div>`).join("")}</div>`);
   for (const phase of plan.filter((p) => p.findings.length > 0)) {
     const all = paginate(phase.findings, (f) => (dense ? 10 + 23 * estimateLines(`${f.title}. ${f.recommendation} ${f.owner}`, 58) : 12 + 28 * estimateLines(`${f.title}. ${f.recommendation} ${f.owner}`, 95)), dense ? 2 * LIST_BUDGET : LIST_BUDGET);
     const cut = compact && all.length > 1;
