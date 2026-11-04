@@ -12,6 +12,7 @@ import { openConnectSecret } from "./connect-crypto.ts";
 import { safeReason, type Attempt, type JobOutcome, type WorkerDeps } from "./deps.ts";
 import { withJobLock } from "./lock.ts";
 import { approvedFromConsole } from "./run-job.ts";
+import { ORG_AWAITING_CONNECT } from "./types.ts";
 
 // A connect job: the admin came back from Salesforce, the console checked the
 // state and timing (completeAuthorisation), sealed the code and the pending
@@ -165,6 +166,11 @@ async function connectLocked(linkId: string, deps: WorkerDeps, attempt: Attempt)
 
     if (!ours) {
       const tokens = await exchange(link, code, pending.codeVerifier, deps, secrets);
+      // Caught here, before anything is read, rather than when the run starts.
+      if (job.runOrgId !== ORG_AWAITING_CONNECT && job.runOrgId.slice(0, 15) !== tokens.orgId.slice(0, 15)) {
+        await revokeQuietly(tokens, deps, log);
+        throw new Refusal(`You signed in to a different Salesforce org (${tokens.orgId.slice(0, 15)}) from the one this health check is for (${job.runOrgId.slice(0, 15)}), so we disconnected it and read nothing. Sign in to the right org, or ask your Black Cloud consultant.`);
+      }
       if (previous && previous.orgId.slice(0, 15) !== tokens.orgId.slice(0, 15)) {
         await revokeQuietly(tokens, deps, log);
         throw new Refusal(`You signed in to a different Salesforce org from the one Barometer already holds for this customer, so we disconnected it. Ask your Black Cloud consultant.`);

@@ -173,9 +173,10 @@ describe("PostgresWorkerStore", () => {
       usedAt: null,
       revokedAt: null,
     };
+    pool.handlers.push((text) => (text.startsWith(`SELECT "orgId" FROM "HealthCheckRun"`) ? { rows: [{ orgId: "awaiting-connect" }], rowCount: 1 } : undefined));
     pool.handlers.push((text) => (text.includes(`FROM "HealthCheckConnectLink"`) ? { rows: [{ ...link, state: "pending", sealedPending: "v1.a.b.c", sealedCode: "v1.d.e.f" }], rowCount: 1 } : undefined));
     const job = await new PostgresWorkerStore(pool).loadConnectJob(link.id);
-    assert.deepEqual(job, { link, state: "pending", sealedPending: "v1.a.b.c", sealedCode: "v1.d.e.f" });
+    assert.deepEqual(job, { link, state: "pending", runOrgId: "awaiting-connect", sealedPending: "v1.a.b.c", sealedCode: "v1.d.e.f" });
     assert.deepEqual(Object.keys(CONNECT_LINK).slice(0, 10), Object.keys(link));
   });
 
@@ -183,8 +184,13 @@ describe("PostgresWorkerStore", () => {
     const pool = new FakePool();
     const store = new PostgresWorkerStore(pool);
     await store.markLinkUsed("l1", { at: "2026-11-03T20:00:00.000Z", orgId: "00D000000000001AAA", userId: "005000000000001AAA", note: null });
+    // In the same transaction, a run still awaiting its org takes the connected one, and no other run changes.
+    const run = pool.statements.find((s) => s.text.startsWith(`UPDATE "HealthCheckRun"`))!;
+    assert.match(run.text, /WHERE "id" = \(SELECT "runId" FROM "HealthCheckConnectLink" WHERE "id" = \$1\) AND "orgId" = \$3$/);
+    assert.deepEqual(run.values, ["l1", "00D000000000001AAA", "awaiting-connect"]);
+    assert.deepEqual(pool.texts().filter((t) => t === "BEGIN" || t === "COMMIT"), ["BEGIN", "COMMIT"]);
     await store.refuseLink("l2", "The user can write", "2026-11-03T20:00:00.000Z");
-    for (const s of pool.statements) {
+    for (const s of pool.statements.filter((s) => s.text.startsWith(`UPDATE "HealthCheckConnectLink"`))) {
       assert.match(s.text, /WHERE "id" = \$1 AND "state" = 'pending'$/);
       assert.match(s.text, /"sealedPending" = NULL, "sealedCode" = NULL/);
     }

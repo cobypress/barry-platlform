@@ -1,6 +1,6 @@
 import { Intake } from "../narrative/intake.ts";
 import { Calibration, ConnectLink, ManualAnswer, Run, type Finding, type ManualStep, type Metric, type ReportSection, type Score, type SectionVersion } from "../schemas/index.ts";
-import { LinkState, RunClosedError, type ConnectJobInput, type LinkConnected, type RunJobInput, type RunOutputRecord, type RunProgress, type WorkerStore } from "./types.ts";
+import { LinkState, ORG_AWAITING_CONNECT, RunClosedError, type ConnectJobInput, type LinkConnected, type RunJobInput, type RunOutputRecord, type RunProgress, type WorkerStore } from "./types.ts";
 
 // UNVERIFIED: written against the console's migrations (blackcloud-next
 // migrations/20261103_health_check*.sql) and the columns this lane asked lane
@@ -130,9 +130,9 @@ export function answerFromRow(row: Record<string, unknown>): ManualAnswer {
   return ManualAnswer.parse(withoutNulls(row));
 }
 
-export function linkFromRow(row: Record<string, unknown>): ConnectJobInput {
+export function linkFromRow(row: Record<string, unknown>, runOrgId: string): ConnectJobInput {
   const { state, sealedPending, sealedCode, ...link } = row;
-  return { link: ConnectLink.parse(link), state: LinkState.parse(state), sealedPending: (sealedPending as string | null) ?? null, sealedCode: (sealedCode as string | null) ?? null };
+  return { link: ConnectLink.parse(link), state: LinkState.parse(state), runOrgId, sealedPending: (sealedPending as string | null) ?? null, sealedCode: (sealedCode as string | null) ?? null };
 }
 
 // ─── Records to rows ──────────────────────────────────────────────────────────
@@ -273,15 +273,25 @@ export class PostgresWorkerStore implements WorkerStore {
 
   async loadConnectJob(linkId: string): Promise<ConnectJobInput | null> {
     const row = one(await this.#pool.query(selectSql("HealthCheckConnectLink", CONNECT_LINK, `"id" = $1`), [linkId]));
-    return row ? linkFromRow(row) : null;
+    if (!row) return null;
+    const run = one(await this.#pool.query(`SELECT "orgId" FROM "HealthCheckRun" WHERE "id" = (SELECT "runId" FROM "HealthCheckConnectLink" WHERE "id" = $1)`, [linkId]));
+    if (typeof run?.orgId !== "string") return null;
+    return linkFromRow(row, run.orgId);
   }
 
-  async markLinkUsed(linkId: string, c: LinkConnected): Promise<void> {
-    const result = await this.#pool.query(
-      `UPDATE "HealthCheckConnectLink" SET "state" = 'used', "usedAt" = $2::timestamp(3), "connectedOrgId" = $3, "connectedUserId" = $4, "checkNote" = $5, "sealedPending" = NULL, "sealedCode" = NULL WHERE "id" = $1 AND "state" = 'pending'`,
-      [linkId, c.at, c.orgId, c.userId, c.note],
-    );
-    if (result.rowCount !== 1) throw new Error(`Link ${linkId} wasn't pending, so it wasn't marked used`);
+  markLinkUsed(linkId: string, c: LinkConnected): Promise<void> {
+    return this.#transaction(async (client) => {
+      const result = await client.query(
+        `UPDATE "HealthCheckConnectLink" SET "state" = 'used', "usedAt" = $2::timestamp(3), "connectedOrgId" = $3, "connectedUserId" = $4, "checkNote" = $5, "sealedPending" = NULL, "sealedCode" = NULL WHERE "id" = $1 AND "state" = 'pending'`,
+        [linkId, c.at, c.orgId, c.userId, c.note],
+      );
+      if (result.rowCount !== 1) throw new Error(`Link ${linkId} wasn't pending, so it wasn't marked used`);
+      // A run that didn't know its org yet takes the one the customer connected.
+      await client.query(
+        `UPDATE "HealthCheckRun" SET "orgId" = $2 WHERE "id" = (SELECT "runId" FROM "HealthCheckConnectLink" WHERE "id" = $1) AND "orgId" = $3`,
+        [linkId, c.orgId, ORG_AWAITING_CONNECT],
+      );
+    });
   }
 
   async refuseLink(linkId: string, reason: string, at: string): Promise<void> {

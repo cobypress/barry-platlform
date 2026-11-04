@@ -1,12 +1,12 @@
 import { Run, type ConnectLink } from "../schemas/index.ts";
-import { RunClosedError, type ConnectJobInput, type LinkConnected, type LinkState, type RunJobInput, type RunOutputRecord, type RunProgress, type WorkerStore } from "./types.ts";
+import { ORG_AWAITING_CONNECT, RunClosedError, type ConnectJobInput, type LinkConnected, type LinkState, type RunJobInput, type RunOutputRecord, type RunProgress, type WorkerStore } from "./types.ts";
 
 // The WorkerStore for tests: the console's tables as plain maps, with the same
 // rules a database store must keep. Writes replace; a run in review or
 // released refuses the worker; only a pending link can be settled.
 
 export type StoredRun = RunJobInput & { runDir: string | null; output: Omit<RunOutputRecord, "progress" | "runDir"> | null };
-export type StoredLink = ConnectJobInput & { reason: string | null; connected: LinkConnected | null; refusedAt: string | null };
+export type StoredLink = Omit<ConnectJobInput, "runOrgId"> & { runId: string | null; reason: string | null; connected: LinkConnected | null; refusedAt: string | null };
 
 const CLOSED = new Set(["in_review", "released"]);
 
@@ -20,8 +20,9 @@ export class MemoryWorkerStore implements WorkerStore {
     this.runs.set(input.run.id, { ...structuredClone(input), runDir: null, output: null });
   }
 
-  addLink(link: ConnectLink, state: LinkState, sealed: { pending: string | null; code: string | null } = { pending: null, code: null }): void {
-    this.links.set(link.id, { link: structuredClone(link), state, sealedPending: sealed.pending, sealedCode: sealed.code, reason: null, connected: null, refusedAt: null });
+  /** A link for a run, which needn't be added: without one the link takes whichever org connects. */
+  addLink(link: ConnectLink, state: LinkState, sealed: { pending: string | null; code: string | null } = { pending: null, code: null }, runId?: string): void {
+    this.links.set(link.id, { link: structuredClone(link), runId: runId ?? null, state, sealedPending: sealed.pending, sealedCode: sealed.code, reason: null, connected: null, refusedAt: null });
   }
 
   #run(runId: string): StoredRun {
@@ -70,7 +71,8 @@ export class MemoryWorkerStore implements WorkerStore {
   async loadConnectJob(linkId: string): Promise<ConnectJobInput | null> {
     const link = this.links.get(linkId);
     if (!link) return null;
-    return structuredClone({ link: link.link, state: link.state, sealedPending: link.sealedPending, sealedCode: link.sealedCode });
+    const runOrgId = (link.runId && this.runs.get(link.runId)?.run.orgId) || ORG_AWAITING_CONNECT;
+    return structuredClone({ link: link.link, state: link.state, runOrgId, sealedPending: link.sealedPending, sealedCode: link.sealedCode });
   }
 
   #pending(linkId: string): StoredLink {
@@ -84,6 +86,8 @@ export class MemoryWorkerStore implements WorkerStore {
     const link = this.#pending(linkId);
     Object.assign(link, { state: "used", sealedPending: null, sealedCode: null, connected: structuredClone(connected), reason: connected.note });
     link.link.usedAt = connected.at;
+    const run = link.runId ? this.runs.get(link.runId) : undefined;
+    if (run?.run.orgId === ORG_AWAITING_CONNECT) run.run.orgId = connected.orgId;
     this.writes.push({ method: "markLinkUsed", id: linkId, detail: connected });
   }
 

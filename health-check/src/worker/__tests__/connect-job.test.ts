@@ -5,10 +5,10 @@ import type { Transport, TransportRequest, TransportResponse } from "../../sales
 import type { ConnectLink } from "../../schemas/connect.ts";
 import { FAKE, FakeTokenEndpoint } from "../../testing/fake-oauth.ts";
 import { sealConnectSecret } from "../connect-crypto.ts";
-import type { LinkState } from "../types.ts";
+import { ORG_AWAITING_CONNECT, type LinkState } from "../types.ts";
 import { MemoryWorkerStore } from "../memory-store.ts";
 import { createJobHandler } from "../worker.ts";
-import { baseDeps, oauthClient, syntheticConnection } from "./helpers.ts";
+import { baseDeps, consoleRun, oauthClient, RUN_ID, runInput, syntheticConnection } from "./helpers.ts";
 
 const NAME = "acme";
 const once = { final: false };
@@ -54,7 +54,7 @@ class PermissionsOrg implements Transport {
 type Flow = Awaited<ReturnType<typeof flow>>;
 
 /** The console's half: a link, the admin's trip to Salesforce, and the sealed code and pending authorisation. */
-async function flow(options: { state?: LinkState; link?: (l: ConnectLink) => ConnectLink; sealFor?: string; key?: Buffer; consoleNow?: Date } = {}) {
+async function flow(options: { state?: LinkState; link?: (l: ConnectLink) => ConnectLink; sealFor?: string; key?: Buffer; consoleNow?: Date; runOrgId?: string } = {}) {
   const fake = new FakeTokenEndpoint();
   const org = new PermissionsOrg();
   const deps = baseDeps({ oauthTransport: fake, dataTransport: org, now: () => new Date() });
@@ -64,10 +64,17 @@ async function flow(options: { state?: LinkState; link?: (l: ConnectLink) => Con
   const code = fake.issueCode(begun.authorisationUrl);
   const sealKey = options.key ?? deps.connectKey;
   const sealFor = options.sealFor ?? link.id;
-  deps.store.addLink(link, options.state ?? "pending", {
-    pending: sealConnectSecret(JSON.stringify(begun.pending), sealKey, sealFor),
-    code: sealConnectSecret(code, sealKey, sealFor),
-  });
+  // The console's run behind the link, when a test cares which org it expects.
+  if (options.runOrgId) deps.store.addRun(runInput({ run: consoleRun({ orgId: options.runOrgId }) }));
+  deps.store.addLink(
+    link,
+    options.state ?? "pending",
+    {
+      pending: sealConnectSecret(JSON.stringify(begun.pending), sealKey, sealFor),
+      code: sealConnectSecret(code, sealKey, sealFor),
+    },
+    options.runOrgId ? RUN_ID : undefined,
+  );
   const handle = createJobHandler(deps);
   return { fake, org, deps, link, code, verifier: begun.pending.codeVerifier, handle, job: { kind: "connect", linkId: link.id } };
 }
@@ -99,6 +106,30 @@ describe("a connect job", () => {
     assert.equal(connection.clientId, FAKE.clientId);
     assert.ok(connection.refreshToken);
     assert.ok(f.org.requests.some((r) => /FROM PermissionSet/.test(new URL(r.url).searchParams.get("q") ?? "")), "the check read the org's permissions");
+    assertNoSecrets(f);
+  });
+
+  test("a run that didn't know its org takes the one the customer connected", async () => {
+    const f = await flow({ runOrgId: ORG_AWAITING_CONNECT });
+    assert.equal((await f.handle(f.job, once)).outcome, "connected");
+    assert.equal(f.deps.store.runs.get(RUN_ID)!.run.orgId, FAKE.orgId);
+  });
+
+  test("a run that expects its org connects to it, and keeps the id as the consultant typed it", async () => {
+    const f = await flow({ runOrgId: FAKE.orgId.slice(0, 15) });
+    assert.equal((await f.handle(f.job, once)).outcome, "connected");
+    assert.equal(f.deps.store.runs.get(RUN_ID)!.run.orgId, FAKE.orgId.slice(0, 15));
+  });
+
+  test("signing in to a different org is refused before anything is read, and the tokens revoked", async () => {
+    const f = await flow({ runOrgId: "00D000000000999" });
+    const outcome = await f.handle(f.job, once);
+    assert.equal(outcome.outcome, "refused");
+    assert.match(stored(f).reason!, /different Salesforce org \(00D000000000001\) from the one this health check is for \(00D000000000999\)/);
+    assert.equal(f.org.requests.length, 0, "nothing read from the org");
+    assert.equal(f.deps.tokens.has(NAME), false);
+    assert.equal(f.fake.liveRefreshTokens(), 0, "revoked at Salesforce");
+    assert.equal(f.deps.store.runs.get(RUN_ID)!.run.orgId, "00D000000000999");
     assertNoSecrets(f);
   });
 

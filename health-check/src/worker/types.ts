@@ -74,9 +74,18 @@ export type RunOutputRecord = {
   versions: SectionVersion[];
 };
 
+/**
+ * The org id the console gives a run before its customer connects. The worker
+ * fills in the org the customer signs in to. The console has the same value
+ * (blackcloud-next lib/health-check/schemas.ts, ORG_AWAITING_CONNECT).
+ */
+export const ORG_AWAITING_CONNECT = "awaiting-connect";
+
 export type ConnectJobInput = {
   link: ConnectLink;
   state: LinkState;
+  /** The org the console's run expects, or ORG_AWAITING_CONNECT when it'll take whichever the customer connects. */
+  runOrgId: string;
   /** Sealed by the console with HC_CONNECT_KEY (connect-crypto.ts). Null once settled. */
   sealedPending: string | null;
   sealedCode: string | null;
@@ -113,7 +122,7 @@ export interface WorkerStore {
   recordRunFailure(runId: string, reason: string, at: string): Promise<void>;
 
   loadConnectJob(linkId: string): Promise<ConnectJobInput | null>;
-  /** Moves a pending link to used, records who connected, and clears its sealed secrets. */
+  /** Moves a pending link to used, records who connected, and clears its sealed secrets. A run still awaiting its org takes the connected one. */
   markLinkUsed(linkId: string, connected: LinkConnected): Promise<void>;
   /** Moves a pending link to refused with a reason the console can show, and clears its sealed secrets. Never a token. */
   refuseLink(linkId: string, reason: string, at: string): Promise<void>;
