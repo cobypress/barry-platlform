@@ -67,6 +67,20 @@ describe("a run job", () => {
     assert.ok(stored(deps).output!.manualSteps.every((s) => s.status !== "pending"));
   });
 
+  test("a run that goes to review hands over its drafts in review, so the consultant can approve them", async () => {
+    const { deps, handle } = await setup({}, runInput({ answers: loadAnswers() }));
+    await handle(job, once);
+    const statuses = new Set(stored(deps).output!.sections.map((s) => s.status));
+    assert.ok(!statuses.has("draft"), [...statuses].join(", "));
+    assert.ok(statuses.has("in_review"));
+  });
+
+  test("a run waiting on manual steps keeps its drafts as drafts", async () => {
+    const { deps, handle } = await setup();
+    await handle(job, once);
+    assert.ok(stored(deps).output!.sections.some((s) => s.status === "draft"));
+  });
+
   test("puts no token in anything the console sees", async () => {
     const { deps, handle } = await setup();
     await handle(job, once);

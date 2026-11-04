@@ -139,7 +139,10 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
       metrics: result.output!.metrics,
       scores: reportInput.scores ?? [],
       manualSteps: result.output!.manualSteps,
-      sections: outputs.flatMap((o) => o.sections),
+      // The engine leaves its sections as drafts, and the console approves only
+      // sections in review. It has no step that starts review, so a run that's
+      // in review hands over its drafts in review, as the console's own import does.
+      sections: outputs.flatMap((o) => o.sections).map((s) => (result.run.status === "in_review" && s.status === "draft" ? { ...s, status: "in_review" as const } : s)),
       versions: outputs.flatMap((o) => o.versions),
     });
   } catch (err) {
