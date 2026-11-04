@@ -38,7 +38,31 @@ export type RecordTypeSummary = { object: string; name: string; active: boolean 
 // kept: what the rules and guards need is here, and less kept is less to leak.
 export type ReferenceIndex = { users: Record<string, string[]>; fields: Record<string, string[]> };
 
+export type UnreadKind = "workflowRules" | "validationRules";
+export const UNREAD_LABELS: Record<UnreadKind, string> = { workflowRules: "Workflow Rules", validationRules: "Validation rules" };
+
+/** Why a kind the caller needs wasn't read whole, or null when everything it needs was. */
+export function unreadReason(bundle: MetadataBundle, needs: UnreadKind[]): string | null {
+  const kind = needs.find((k) => bundle.unread?.[k]);
+  return kind ? `${UNREAD_LABELS[kind]} couldn't be read: ${bundle.unread![kind]}` : null;
+}
+
 export type MetadataBundle = {
+  /** How it was read: one Metadata API retrieve, or Tooling item by item for a connection that can't use the Metadata API. */
+  route?: "retrieve" | "tooling";
+  /**
+   * Kinds of metadata that exist but whose contents couldn't be searched, such as
+   * assignment rules on the Tooling route. A clean reference search isn't proof
+   * while this has anything in it.
+   */
+  unsearched?: string[];
+  /**
+   * Kinds the Tooling route couldn't read whole, with why. Unlike `unsearched`,
+   * which only affects reference guards, any rule or metric that counts one of
+   * these is not measurable while it's here (rule 5). Flows have no entry: if
+   * they can't be read whole, the bundle is unavailable.
+   */
+  unread?: Partial<Record<UnreadKind, string>>;
   flows: FlowSummary[];
   workflows: WorkflowSummary[];
   validationRules: ValidationRuleSummary[];
@@ -95,12 +119,17 @@ function isSameRecordUpdate(update: Record<string, any>, object: string | null):
   return filters.length === 0 || filters.some((f) => f.value?.elementReference === "$Record.Id");
 }
 
-function parseFlow(path: string, xml: string): FlowSummary {
-  const flow = (parser.parse(xml) as { Flow: Record<string, any> }).Flow;
+type IdCounts = Pick<FlowSummary, "hardcodedUserIds" | "hardcodedOtherIds" | "hardcodedEmails">;
+
+// The retrieve gives XML and Tooling gives JSON with the same element names, so
+// both go through one summary. Tooling sends null for an absent element, and
+// typed values where the XML parser gives strings, hence the != null checks.
+function summariseFlow(name: string, path: string, flow: Record<string, any>, ids: IdCounts): FlowSummary {
   const start = flow.start ?? {};
-  const risky = [...(flow.recordCreates ?? []), ...(flow.recordUpdates ?? []), ...(flow.recordDeletes ?? []), ...(flow.actionCalls ?? [])] as Array<Record<string, unknown>>;
+  const list = (value: unknown): Array<Record<string, any>> => (value == null ? [] : [value].flat());
+  const risky = [...list(flow.recordCreates), ...list(flow.recordUpdates), ...list(flow.recordDeletes), ...list(flow.actionCalls)];
   return {
-    name: path.replace(/^flows\//, "").replace(/\.flow(-meta\.xml)?$/, ""),
+    name,
     label: String(flow.label ?? ""),
     status: String(flow.status ?? "Unknown"),
     processType: String(flow.processType ?? "Flow"),
@@ -109,16 +138,55 @@ function parseFlow(path: string, xml: string): FlowSummary {
     triggerType: start.triggerType ? String(start.triggerType) : null,
     scheduled: Boolean(start.schedule),
     dmlOrActions: risky.length,
-    withFault: risky.filter((e) => e.faultConnector !== undefined).length,
-    loops: (flow.loops ?? []).length,
-    hardcodedUserIds: distinct(xml, ELEMENT_USER_ID),
-    hardcodedOtherIds: distinct(xml, ELEMENT_OTHER_ID),
-    hardcodedEmails: distinct(xml, ELEMENT_EMAIL),
+    withFault: risky.filter((e) => e.faultConnector != null).length,
+    loops: list(flow.loops).length,
+    ...ids,
     described: hasText(flow.description),
-    sameRecordUpdates: ((flow.recordUpdates ?? []) as Array<Record<string, any>>).filter((u) => isSameRecordUpdate(u, start.object ? String(start.object) : null)).length,
+    sameRecordUpdates: list(flow.recordUpdates).filter((u) => isSameRecordUpdate(u, start.object ? String(start.object) : null)).length,
     path,
   };
 }
+
+function parseFlow(path: string, xml: string): FlowSummary {
+  const flow = (parser.parse(xml) as { Flow: Record<string, any> }).Flow;
+  const name = path.replace(/^flows\//, "").replace(/\.flow(-meta\.xml)?$/, "");
+  return summariseFlow(name, path, flow, {
+    hardcodedUserIds: distinct(xml, ELEMENT_USER_ID),
+    hardcodedOtherIds: distinct(xml, ELEMENT_OTHER_ID),
+    hardcodedEmails: distinct(xml, ELEMENT_EMAIL),
+  });
+}
+
+/** Every string and number in a parsed document, which is what an XML element's text would be. */
+function leafValues(value: unknown, out: string[] = []): string[] {
+  if (value === null || value === undefined) return out;
+  if (typeof value === "object") for (const child of Object.values(value)) leafValues(child, out);
+  else out.push(String(value));
+  return out;
+}
+
+const whole = (re: RegExp): RegExp => new RegExp(`^${re.source.slice(1, -1)}$`);
+const LEAF_USER_ID = whole(ELEMENT_USER_ID);
+const LEAF_OTHER_ID = whole(ELEMENT_OTHER_ID);
+const LEAF_EMAIL = whole(ELEMENT_EMAIL);
+
+/**
+ * A flow from Tooling's `Flow.Metadata`, already redacted. Ids and emails are
+ * counted over whole values, as the XML route counts whole elements.
+ */
+export function summariseFlowMetadata(name: string, metadata: Record<string, any>): FlowSummary {
+  const values = leafValues(metadata);
+  const count = (re: RegExp): number => new Set(values.filter((v) => re.test(v))).size;
+  return summariseFlow(name, `flows/${name}.flow`, metadata, { hardcodedUserIds: count(LEAF_USER_ID), hardcodedOtherIds: count(LEAF_OTHER_ID), hardcodedEmails: count(LEAF_EMAIL) });
+}
+
+/** A Workflow Rule from Tooling's `WorkflowRule.Metadata`. */
+export function summariseWorkflowRule(name: string, metadata: Record<string, any>): WorkflowSummary["rules"][number] {
+  const count = (value: unknown): number => (value == null ? 0 : [value].flat().length);
+  return { name, active: String(metadata.active) === "true", timeTriggers: count(metadata.workflowTimeTriggers), actions: count(metadata.actions), described: hasText(metadata.description) };
+}
+
+export { hasText };
 
 function parseWorkflow(path: string, xml: string): WorkflowSummary {
   const workflow = (parser.parse(xml) as { Workflow?: Record<string, any> }).Workflow ?? {};
@@ -154,7 +222,7 @@ function parseObject(path: string, xml: string, index: ReferenceIndex): { object
 
 /** Turns the unzipped retrieve into summaries. A file that can't be parsed fails the extractor. */
 export function parseMetadataBundle(files: Record<string, string>): MetadataBundle {
-  const bundle: MetadataBundle = { flows: [], workflows: [], validationRules: [], customFields: [], recordTypes: [], objects: [], references: { users: {}, fields: {} }, filesRead: 0 };
+  const bundle: MetadataBundle = { route: "retrieve", unsearched: [], flows: [], workflows: [], validationRules: [], customFields: [], recordTypes: [], objects: [], references: { users: {}, fields: {} }, filesRead: 0 };
   for (const [path, raw] of Object.entries(files).sort(([a], [b]) => a.localeCompare(b))) {
     if (path === "package.xml") continue;
     const xml = redactSecrets(raw);

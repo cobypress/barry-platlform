@@ -33,6 +33,12 @@ export const StoredConnection = z.object({
   refreshToken: z.string().min(1).optional(),
   issuedAt: z.number().int(),
   connectedAt: z.string(),
+  /**
+   * Set by the worker for a connection made through a connect link: which link,
+   * and which sign-in on it (the hash of its OAuth state). A delivery of the
+   * same connect job knows its own tokens by this, never by comparing clocks.
+   */
+  fromLink: z.object({ linkId: z.string().uuid(), stateHash: z.string().regex(/^[A-Za-z0-9_-]{43}$/) }).optional(),
   /** JWT bearer only. The private key stays in its own file, owner-only. */
   jwt: z.object({ username: z.string().min(1), audience: z.string().url(), privateKeyPath: z.string().min(1) }).optional(),
 });

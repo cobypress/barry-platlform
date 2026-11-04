@@ -11,6 +11,7 @@ import type { UserRow } from "../extract/users.ts";
 import { usersExtractor } from "../extract/users.ts";
 import { renderRawNotes } from "../notes/raw-notes.ts";
 import { Pseudonymiser, type PseudonymEntry } from "../privacy/pseudonymiser.ts";
+import { registerSharedNames } from "../privacy/names.ts";
 import { Run, type Calibration, type ManualAnswer, type RunStep } from "../schemas/index.ts";
 import { ApiBudget, BudgetStopError } from "../salesforce/budget.ts";
 import { SalesforceClient } from "../salesforce/client.ts";
@@ -27,6 +28,13 @@ export type RunOptions = {
   now?: Date;
   /** An existing run id to continue. */
   resume?: string;
+  /**
+   * The id for a new run, when someone else chose it: the worker uses the
+   * console's run id, so the folder and the database row share one name.
+   */
+  runId?: string;
+  /** Called, and awaited, each time run.json is saved. Gets a copy. */
+  onProgress?: (run: Run) => void | Promise<void>;
   stopAtShare?: number;
   answers?: ManualAnswer[];
   createdBy?: string;
@@ -50,6 +58,8 @@ export function assertOutsideGit(path: string): void {
     dir = parent;
   }
 }
+
+const RUN_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/;
 
 const writeJson = (path: string, value: unknown): void => writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
 const readJson = <T>(path: string): T => JSON.parse(readFileSync(path, "utf8")) as T;
@@ -112,7 +122,10 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
     throw new Error("This calibration was written for a different org.");
   }
 
-  const runId = options.resume ?? `hc-${now.toISOString().slice(0, 10)}-${randomUUID().slice(0, 8)}`;
+  if (options.resume && options.runId && options.resume !== options.runId) throw new Error("resume and runId name different runs");
+  const runId = options.resume ?? options.runId ?? `hc-${now.toISOString().slice(0, 10)}-${randomUUID().slice(0, 8)}`;
+  // The id becomes a folder name, and a worker's ids come from a database.
+  if (!RUN_ID.test(runId)) throw new Error("A run id is letters, digits, hyphens and underscores only");
   const dir = join(options.outDir, runId);
   mkdirSync(join(dir, "checkpoints"), { recursive: true, mode: 0o700 });
 
@@ -129,6 +142,7 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
     if (run.orgId.slice(0, 15) !== client.orgId.slice(0, 15)) throw new Error("This run belongs to a different org.");
     if (run.calibrationHash !== hash) throw new Error("The calibration has changed since this run started. Start a new run so its numbers stay consistent.");
   } else {
+    if (existsSync(runPath)) throw new Error(`A run "${runId}" already exists in ${options.outDir}. Resume it instead`);
     run = Run.parse({
       id: runId,
       product: "barometer",
@@ -172,10 +186,11 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
   };
 
   let callsCounted = 0;
-  const saveRun = (): void => {
+  const saveRun = async (): Promise<void> => {
     run.budget = { ...budget.snapshot(), callsMade: run.budget.callsMade + budget.callsMade - callsCounted, stoppedReason: run.budget.stoppedReason };
     callsCounted = budget.callsMade;
     writeJson(runPath, Run.parse(run));
+    await options.onProgress?.(structuredClone(run));
   };
   run.status = "extracting";
   run.budget.stoppedReason = null;
@@ -204,20 +219,20 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
       step.finishedAt = new Date().toISOString();
       step.error = null;
       log(`  ${extractor.id}: done (${budget.callsMade - before} calls)`);
-      saveRun();
+      await saveRun();
     } catch (err) {
       step.calls += budget.callsMade - before;
       if (err instanceof BudgetStopError) {
         run.status = "stopped_budget";
         run.budget.stoppedReason = err.message;
-        saveRun();
+        await saveRun();
         log(`Stopped at the API budget: ${err.message}`);
         return { run, dir, output: null };
       }
       step.status = "failed";
       step.error = err instanceof Error ? err.message : String(err);
       run.status = "failed";
-      saveRun();
+      await saveRun();
       throw err;
     }
   }
@@ -227,11 +242,11 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
   // The company information in Setup is the name the customer goes by, unless one was given.
   run.customerRef ??= org.data?.[0]?.Name?.trim() || null;
   run.status = "analysing";
-  saveRun();
+  await saveRun();
   const output = analyseRun(dir, run, calibration, modules, extracts, options.answers ?? []);
   run.status = output.manualSteps.some((s) => s.status === "pending") ? "awaiting_manual" : "in_review";
   run.finishedAt = new Date().toISOString();
-  saveRun();
+  await saveRun();
   // Re-render so the notes show the final status and call count.
   renderOutputs(dir, run, calibration, output);
   return { run, dir, output };
@@ -245,6 +260,9 @@ function analyseRun(dir: string, run: Run, calibration: Calibration, modules: Do
   // a name even if no finding set out to mention that user.
   for (const [id, entry] of [...directory].sort(([a], [b]) => a.localeCompare(b))) pseudonyms.label("user", id, entry.name, entry.aliases);
   if (run.customerRef) pseudonyms.label("customer", run.orgId, run.customerRef);
+  // A first name two people share gets its own token, saved with the map so a
+  // report rendered later can restore it.
+  registerSharedNames(pseudonyms);
 
   const output = analyse({
     modules,

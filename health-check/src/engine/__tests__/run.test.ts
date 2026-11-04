@@ -286,3 +286,35 @@ describe("the hc command", () => {
     for (const file of files(src)) assert.doesNotMatch(readFileSync(file, "utf8"), /dotenv\/config/, file);
   });
 });
+
+describe("a run started by someone else (the worker)", () => {
+  test("takes the run id it's given, and refuses one that isn't a plain name", async () => {
+    const { run, dir } = await runFromRecording({ runId: "hc-2026-11-03-00000001" });
+    assert.equal(run.id, "hc-2026-11-03-00000001");
+    assert.match(dir, /hc-2026-11-03-00000001$/);
+    await assert.rejects(runFromRecording({ runId: "../escape" }), /letters, digits, hyphens and underscores/);
+    await assert.rejects(runFromRecording({ resume: "a", runId: "b" }), /different runs/);
+  });
+
+  test("won't start a second run over a folder that already holds one", async () => {
+    const outDir = tempDir();
+    await runFromRecording({ outDir, runId: "hc-2026-11-03-00000002" });
+    await assert.rejects(runFromRecording({ outDir, runId: "hc-2026-11-03-00000002" }), /already exists.*Resume it/);
+    const resumed = await runFromRecording({ outDir, runId: "hc-2026-11-03-00000002", resume: "hc-2026-11-03-00000002" });
+    assert.equal(resumed.run.id, "hc-2026-11-03-00000002");
+  });
+
+  test("reports each save of run.json, in order, as a copy", async () => {
+    const seen: Run[] = [];
+    const { run } = await runFromRecording({
+      onProgress: async (r) => {
+        r.status = "failed";
+        seen.push(structuredClone(r));
+      },
+    });
+    assert.notEqual(run.status, "failed", "changing the copy changes nothing");
+    assert.ok(seen.length >= run.steps.length);
+    const doneCounts = seen.map((r) => r.steps.filter((s) => s.status === "done").length);
+    assert.deepEqual(doneCounts, [...doneCounts].sort((a, b) => a - b), "steps only ever finish");
+  });
+});

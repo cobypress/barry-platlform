@@ -1,0 +1,312 @@
+{
+  "about": "Shared golden cases for name scrubbing before text goes to Claude. The same file is meant to sit in the engine (health-check) and the console (blackcloud-next). Build a Pseudonymiser by labelling each of people in order with label(kind, id, name, aliases), then for each case: guardPrompt(text) must equal guarded exactly; findNames(guarded) must be empty; findNames(text) must be non-empty exactly when flaggedBefore is true; and restore(guarded) on that same pseudonymiser must equal restored. Shared-name tokens are labelled in key order the first time a guard runs, which is why each case starts from a fresh pseudonymiser. Synthetic people only: ids zero-padded, emails at example.com.",
+  "source": "health-check/src/privacy/names.ts and src/narrative/guard.ts, branch hc/scrub",
+  "people": [
+    {
+      "kind": "user",
+      "id": "005000000000001AAA",
+      "name": "Sam Reed",
+      "aliases": [
+        "sam.reed@example.com"
+      ]
+    },
+    {
+      "kind": "user",
+      "id": "005000000000002AAA",
+      "name": "Sam Patel",
+      "aliases": [
+        "spatel@example.com"
+      ]
+    },
+    {
+      "kind": "user",
+      "id": "005000000000003AAA",
+      "name": "Mary-Jane O'Brien",
+      "aliases": [
+        "mj.obrien@example.com"
+      ]
+    },
+    {
+      "kind": "user",
+      "id": "005000000000004AAA",
+      "name": "José García",
+      "aliases": [
+        "jgarcia@example.com"
+      ]
+    },
+    {
+      "kind": "user",
+      "id": "005000000000005AAA",
+      "name": "Will Price",
+      "aliases": [
+        "wprice@example.com"
+      ]
+    },
+    {
+      "kind": "user",
+      "id": "005000000000006AAA",
+      "name": "Anna van der Berg",
+      "aliases": [
+        "anna.vandenberg@example.com"
+      ]
+    },
+    {
+      "kind": "user",
+      "id": "005000000000007AAA",
+      "name": "Ben Cross",
+      "aliases": [
+        "ben.cross@example.com"
+      ]
+    },
+    {
+      "kind": "user",
+      "id": "005000000000008AAA",
+      "name": "Rose May",
+      "aliases": [
+        "rmay@example.com"
+      ]
+    },
+    {
+      "kind": "user",
+      "id": "005000000000009AAA",
+      "name": "Zoë Lindqvist-Ahn",
+      "aliases": [
+        "zla@example.com"
+      ]
+    },
+    {
+      "kind": "user",
+      "id": "005000000000010AAA",
+      "name": "Samuel Okafor",
+      "aliases": [
+        "sokafor@example.com"
+      ]
+    },
+    {
+      "kind": "user",
+      "id": "005000000000011AAA",
+      "name": "Shared Sales Desk",
+      "aliases": [
+        "sales@example.com"
+      ]
+    },
+    {
+      "kind": "customer",
+      "id": "00D000000000001AAA",
+      "name": "Acme Holdings",
+      "aliases": []
+    }
+  ],
+  "cases": [
+    {
+      "name": "a first name on its own",
+      "text": "Anna said the forecast is a guess.",
+      "guarded": "[[user:U0006]] said the forecast is a guess.",
+      "restored": "Anna van der Berg said the forecast is a guess.",
+      "flaggedBefore": true
+    },
+    {
+      "name": "a first name two people share gets its own token",
+      "text": "Sam said the forecast is a guess.",
+      "guarded": "[[user:U0012]] said the forecast is a guess.",
+      "restored": "Sam said the forecast is a guess.",
+      "flaggedBefore": true
+    },
+    {
+      "name": "a full name still gets its owner's token",
+      "text": "Sam Reed and Sam Patel both said so.",
+      "guarded": "[[user:U0001]] and [[user:U0002]] both said so.",
+      "restored": "Sam Reed and Sam Patel both said so.",
+      "flaggedBefore": true
+    },
+    {
+      "name": "a possessive keeps its 's",
+      "text": "Patel's pipeline is thin.",
+      "guarded": "[[user:U0002]]'s pipeline is thin.",
+      "restored": "Sam Patel's pipeline is thin.",
+      "flaggedBefore": true
+    },
+    {
+      "name": "a curly possessive",
+      "text": "Patel’s pipeline is thin.",
+      "guarded": "[[user:U0002]]’s pipeline is thin.",
+      "restored": "Sam Patel’s pipeline is thin.",
+      "flaggedBefore": true
+    },
+    {
+      "name": "lower case and capitals at the start of a sentence",
+      "text": "patel thinks so. PATEL agrees. Patel signed.",
+      "guarded": "[[user:U0002]] thinks so. [[user:U0002]] agrees. [[user:U0002]] signed.",
+      "restored": "Sam Patel thinks so. Sam Patel agrees. Sam Patel signed.",
+      "flaggedBefore": true
+    },
+    {
+      "name": "a surname on its own",
+      "text": "Reed owns the renewal.",
+      "guarded": "[[user:U0001]] owns the renewal.",
+      "restored": "Sam Reed owns the renewal.",
+      "flaggedBefore": true
+    },
+    {
+      "name": "a hyphenated first name, whole and in parts",
+      "text": "Mary-Jane approved it; Jane disagreed; Mary was out.",
+      "guarded": "[[user:U0003]] approved it; [[user:U0003]] disagreed; [[user:U0003]] was out.",
+      "restored": "Mary-Jane O'Brien approved it; Mary-Jane O'Brien disagreed; Mary-Jane O'Brien was out.",
+      "flaggedBefore": true
+    },
+    {
+      "name": "an apostrophe surname, with and without the apostrophe",
+      "text": "O'Brien, OBrien and O’Brien's team.",
+      "guarded": "[[user:U0003]], [[user:U0003]] and [[user:U0003]]'s team.",
+      "restored": "Mary-Jane O'Brien, Mary-Jane O'Brien and Mary-Jane O'Brien's team.",
+      "flaggedBefore": true
+    },
+    {
+      "name": "accents written or left off",
+      "text": "Jose Garcia, garcía and GARCÍA.",
+      "guarded": "[[user:U0004]], [[user:U0004]] and [[user:U0004]].",
+      "restored": "José García, José García and José García.",
+      "flaggedBefore": true
+    },
+    {
+      "name": "an accented first name and a hyphenated surname's parts",
+      "text": "Zoe, Lindqvist and Ahn met Lindqvist-Ahn.",
+      "guarded": "[[user:U0009]], [[user:U0009]] and [[user:U0009]] met [[user:U0009]].",
+      "restored": "Zoë Lindqvist-Ahn, Zoë Lindqvist-Ahn and Zoë Lindqvist-Ahn met Zoë Lindqvist-Ahn.",
+      "flaggedBefore": true
+    },
+    {
+      "name": "a surname with particles is masked as a run, and a lone particle is left",
+      "text": "Anna van der Berg said van der Berg would hire a van.",
+      "guarded": "[[user:U0006]] said [[user:U0006]] would hire a van.",
+      "restored": "Anna van der Berg said Anna van der Berg would hire a van.",
+      "flaggedBefore": true
+    },
+    {
+      "name": "a common-word name is masked only with a capital",
+      "text": "Will said you will review it.",
+      "guarded": "[[user:U0005]] said you will review it.",
+      "restored": "Will Price said you will review it.",
+      "flaggedBefore": true
+    },
+    {
+      "name": "a full name is matched in any case, even where it reads as words",
+      "text": "Then you will price it.",
+      "guarded": "Then you [[user:U0005]] it.",
+      "restored": "Then you Will Price it.",
+      "flaggedBefore": false
+    },
+    {
+      "name": "a common-word surname is masked with a capital, even in a product name",
+      "text": "Price agreed, but the price book and Price Book need work.",
+      "guarded": "[[user:U0005]] agreed, but the price book and [[user:U0005]] Book need work.",
+      "restored": "Will Price agreed, but the price book and Will Price Book need work.",
+      "flaggedBefore": true
+    },
+    {
+      "name": "a month that is also a surname is over-scrubbed",
+      "text": "Rose May said the rose report is due in May.",
+      "guarded": "[[user:U0008]] said the rose report is due in [[user:U0008]].",
+      "restored": "Rose May said the rose report is due in Rose May.",
+      "flaggedBefore": true
+    },
+    {
+      "name": "a common word inside a hyphenated word is left",
+      "text": "Cross-sell is up, and Cross said so.",
+      "guarded": "Cross-sell is up, and [[user:U0007]] said so.",
+      "restored": "Cross-sell is up, and Ben Cross said so.",
+      "flaggedBefore": true
+    },
+    {
+      "name": "an uncommon name inside a hyphenated word is masked",
+      "text": "Reed-approved discounts and Patel-led deals.",
+      "guarded": "[[user:U0001]]-approved discounts and [[user:U0002]]-led deals.",
+      "restored": "Sam Reed-approved discounts and Sam Patel-led deals.",
+      "flaggedBefore": true
+    },
+    {
+      "name": "a formal name beats a nickname",
+      "text": "Samuel said the call went well.",
+      "guarded": "[[user:U0010]] said the call went well.",
+      "restored": "Samuel Okafor said the call went well.",
+      "flaggedBefore": true
+    },
+    {
+      "name": "a nickname of a formal first name",
+      "text": "Sammy said the call went well.",
+      "guarded": "[[user:U0010]] said the call went well.",
+      "restored": "Samuel Okafor said the call went well.",
+      "flaggedBefore": true
+    },
+    {
+      "name": "a mailbox name that isn't part of the name",
+      "text": "spatel and sokafor replied.",
+      "guarded": "[[user:U0002]] and [[user:U0010]] replied.",
+      "restored": "Sam Patel and Samuel Okafor replied.",
+      "flaggedBefore": true
+    },
+    {
+      "name": "names inside an API name",
+      "text": "Sam_Reed_Approval and Acme_Lead_Routing.",
+      "guarded": "[[user:U0001]]_Approval and [[customer:C0001]]_Lead_Routing.",
+      "restored": "Sam Reed_Approval and Acme Holdings_Lead_Routing.",
+      "flaggedBefore": true
+    },
+    {
+      "name": "an invisible character inside a name",
+      "text": "S​am Re​ed called.",
+      "guarded": "[[user:U0001]] called.",
+      "restored": "Sam Reed called.",
+      "flaggedBefore": true
+    },
+    {
+      "name": "full-width letters",
+      "text": "Ｒｅｅｄ called.",
+      "guarded": "[[user:U0001]] called.",
+      "restored": "Sam Reed called.",
+      "flaggedBefore": true
+    },
+    {
+      "name": "a name in quotes",
+      "text": "'Reed' said 'no'.",
+      "guarded": "'[[user:U0001]]' said 'no'.",
+      "restored": "'Sam Reed' said 'no'.",
+      "flaggedBefore": true
+    },
+    {
+      "name": "a company name needs a capital",
+      "text": "Acme said acme pricing is fine.",
+      "guarded": "[[customer:C0001]] said acme pricing is fine.",
+      "restored": "Acme Holdings said acme pricing is fine.",
+      "flaggedBefore": true
+    },
+    {
+      "name": "any email address, known or not",
+      "text": "Write to someone@elsewhere.example or spatel@example.com.",
+      "guarded": "Write to [[email]] or [[user:U0002]].",
+      "restored": "Write to [[email]] or Sam Patel.",
+      "flaggedBefore": true
+    },
+    {
+      "name": "a record id",
+      "text": "Owner 005000000000001AAA.",
+      "guarded": "Owner [[user:U0001]].",
+      "restored": "Owner Sam Reed.",
+      "flaggedBefore": true
+    },
+    {
+      "name": "ordinary words that share a name part survive",
+      "text": "Sales Cloud integration, the Default Workflow User and a will to close.",
+      "guarded": "Sales Cloud integration, the Default Workflow User and a will to close.",
+      "restored": "Sales Cloud integration, the Default Workflow User and a will to close.",
+      "flaggedBefore": false
+    },
+    {
+      "name": "existing tokens are left alone",
+      "text": "[[user:U0001]] and [[user:U0002]] own it.",
+      "guarded": "[[user:U0001]] and [[user:U0002]] own it.",
+      "restored": "Sam Reed and Sam Patel own it.",
+      "flaggedBefore": false
+    }
+  ]
+}

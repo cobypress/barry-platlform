@@ -34,6 +34,7 @@ const ALLOWED: Array<[string, SfRequest]> = [
   ["rest.describe", { method: "GET", path: `${V}/sobjects/Account/describe` }],
   ["tooling.query", { method: "GET", path: `${V}/tooling/query${q("SELECT Id FROM ApexClass")}` }],
   ["tooling.queryMore", { method: "GET", path: `${V}/tooling/query/01g000000000001AAA-200` }],
+  ["analytics.reportDescribe", { method: "GET", path: `${V}/analytics/reports/00O000000000001AAA/describe` }],
   ["rest.compositeBatch", composite([{ method: "GET", url: `v66.0/query${q("SELECT Id FROM Account")}` }])],
   ["metadata.retrieve", soap("retrieve")],
   ["metadata.checkRetrieveStatus", soap("checkRetrieveStatus")],
@@ -94,6 +95,30 @@ describe("GET is not automatically safe", () => {
     ["a page", "/apex/SomePage"],
   ];
   for (const [name, path] of cases) test(name, () => blocked({ method: "GET", path }));
+});
+
+// DECISIONS.md 73: report definitions through the Analytics API, for a
+// connection that can't use the Metadata API. Only a report's describe.
+describe("the Analytics API", () => {
+  const report = `${V}/analytics/reports/00O000000000001AAA`;
+  test("a 15-character report id", () => assert.equal(authorise({ method: "GET", path: `${V}/analytics/reports/00O000000000001/describe` }), "analytics.reportDescribe"));
+  test("running a report, which returns its rows", () => blocked({ method: "GET", path: report }));
+  test("running a report asynchronously", () => blocked({ method: "POST", path: `${report}/instances`, body: "{}" }));
+  test("a report run's results", () => blocked({ method: "GET", path: `${report}/instances/0LG000000000001AAA` }));
+  test("saving or deleting a report", () => {
+    blocked({ method: "PATCH", path: report, body: "{}" });
+    blocked({ method: "DELETE", path: report });
+    blocked({ method: "POST", path: `${V}/analytics/reports`, body: "{}" });
+  });
+  test("the report list and dashboards", () => {
+    blocked({ method: "GET", path: `${V}/analytics/reports` });
+    blocked({ method: "GET", path: `${V}/analytics/dashboards/01Z000000000001AAA/describe` });
+  });
+  test("a describe with parameters, or of something that isn't a report", () => {
+    blocked({ method: "GET", path: `${report}/describe?includeDetails=true` });
+    blocked({ method: "GET", path: `${V}/analytics/reports/001000000000001AAA/describe` });
+    blocked({ method: "GET", path: `${V}/analytics/reports/00O000000000001AAA/describe/x` });
+  });
 });
 
 describe("tricks are refused", () => {

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Flow xmlns="http://soap.sforce.com/2006/04/metadata">
+    <apiVersion>68.0</apiVersion>
+    <assignments>
+        <name>Set_Notes</name>
+        <label>Set Notes</label>
+        <locationX>176</locationX>
+        <locationY>287</locationY>
+        <assignmentItems>
+            <assignToReference>$Record.BT_Notes__c</assignToReference>
+            <operator>Assign</operator>
+            <value><stringValue>New</stringValue></value>
+        </assignmentItems>
+    </assignments>
+    <description>Gives a new widget a starting note. Barometer test metadata.</description>
+    <interviewLabel>BT Widget Defaults {!$Flow.CurrentDateTime}</interviewLabel>
+    <label>BT Widget Defaults</label>
+    <processMetadataValues><name>BuilderType</name><value><stringValue>LightningFlowBuilder</stringValue></value></processMetadataValues>
+    <processMetadataValues><name>CanvasMode</name><value><stringValue>AUTO_LAYOUT_CANVAS</stringValue></value></processMetadataValues>
+    <processType>AutoLaunchedFlow</processType>
+    <start>
+        <locationX>50</locationX>
+        <locationY>0</locationY>
+        <connector><targetReference>Set_Notes</targetReference></connector>
+        <object>BT_Widget__c</object>
+        <recordTriggerType>Create</recordTriggerType>
+        <triggerType>RecordBeforeSave</triggerType>
+    </start>
+    <status>Active</status>
+</Flow>

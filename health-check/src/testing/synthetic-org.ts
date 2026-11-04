@@ -802,6 +802,9 @@ export const DASHBOARDS = [
   { Id: sfId("01Z", 3), Title: "My Deals", Type: "LoggedInUser", RunningUserId: null, FolderName: "Sales" },
 ];
 
+// Lead and Case assignment rules. None in the retrieve, so none here.
+export const ASSIGNMENT_RULES: Array<{ Id: string }> = [];
+
 export const EMAIL_SERVICES = [{ LocalPart: "cases", RunAsUserId: userId(4) }];
 export const AUTH_PROVIDERS = [{ DeveloperName: "Google_SSO", ExecutionUserId: userId(4) }];
 
