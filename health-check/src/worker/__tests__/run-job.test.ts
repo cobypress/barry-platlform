@@ -2,6 +2,9 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import type { Rejection } from "../../narrative/apply.ts";
+import type { NarrativeClient, NarrativeRequest } from "../../narrative/client.ts";
+import { OUTPUT_FILES } from "../../render/render-run.ts";
 import { loadAnswers, loadRecording, ReplayTransport } from "../../testing/replay.ts";
 import { Simulator } from "../../testing/simulator.ts";
 import { JobBusyError } from "../lock.ts";
@@ -232,6 +235,84 @@ describe("the sandbox flag", () => {
     assert.ok(duringRun.length > 0 && duringRun.every(Boolean));
     assert.equal(stored(deps).run.isSandbox, false, "the synthetic org is production");
     duringRun = [];
+  });
+});
+
+describe("Claude's drafts", () => {
+  const rejectionsIn = (deps: { runsDir: string }): Rejection[] => JSON.parse(readFileSync(join(deps.runsDir, RUN_ID, OUTPUT_FILES.rejections), "utf8")) as Rejection[];
+  const writing = (text: (prompt: string) => string): NarrativeClient & { calls: number } => {
+    const client = {
+      calls: 0,
+      complete: async ({ prompt, model }: NarrativeRequest) => {
+        client.calls++;
+        return { stopReason: "end_turn", model, text: JSON.stringify({ paragraphs: [{ text: text(prompt), sources: [] }] }) };
+      },
+    };
+    return client;
+  };
+
+  test("with a client, each briefed section gets a claude_draft version, saved with the results", async () => {
+    const client = writing(() => "We looked closely at this area.");
+    const { deps, handle } = await setup({ narrative: client });
+    assert.equal((await handle(job, once)).outcome, "done");
+    const output = stored(deps).output!;
+    const drafts = output.versions.filter((v) => v.source === "claude_draft");
+    assert.ok(drafts.length > 10 && drafts.length === client.calls, `${drafts.length} drafts from ${client.calls} calls`);
+    for (const draft of drafts) {
+      const section = output.sections.find((s) => s.id === draft.sectionId)!;
+      assert.equal(section.currentVersionId, draft.id);
+      assert.equal(draft.body, "We looked closely at this area.");
+    }
+    assert.ok(output.versions.filter((v) => v.source === "engine").length === output.sections.length, "the engine's versions stay");
+    assert.deepEqual(rejectionsIn(deps), []);
+    assert.ok(deps.lines.some((l) => /Claude drafted \d+ of \d+ sections/.test(l)));
+    // The run folder's copy matches what the console got.
+    const saved = JSON.parse(readFileSync(join(deps.runsDir, RUN_ID, SECTIONS_FILE), "utf8")) as Array<{ versions: Array<{ source: string }> }>;
+    assert.equal(saved.flatMap((o) => o.versions).filter((v) => v.source === "claude_draft").length, drafts.length);
+  });
+
+  test("a run in review hands over its drafts in review, and a rejected section stays needs input", async () => {
+    const client = writing((prompt) => (prompt.startsWith("Section: Verdict") ? "You could save £9,999,999." : "We looked closely at this area."));
+    const { deps, handle } = await setup({ narrative: client }, runInput({ answers: loadAnswers() }));
+    await handle(job, once);
+    const sections = stored(deps).output!.sections;
+    assert.equal(sections.find((s) => s.key === "verdict")!.status, "needs_input");
+    assert.equal(sections.find((s) => s.key === "overview")!.status, "in_review");
+    assert.ok(!sections.some((s) => s.status === "draft"));
+    assert.deepEqual(rejectionsIn(deps).map((r) => r.sectionId.split(":").at(-1)), ["verdict"]);
+  });
+
+  test("when Claude can't be reached, the run still finishes with the engine's text", async () => {
+    let calls = 0;
+    const down: NarrativeClient = { complete: async () => (calls++, Promise.reject(new Error("Connection error."))) };
+    const { deps, handle } = await setup({ narrative: down });
+    const plain = await setup();
+    assert.equal((await handle(job, once)).outcome, "done");
+    await plain.handle(job, once);
+    assert.equal(calls, 1, "it stops asking after the first failure");
+    assert.deepEqual(stored(deps).output, stored(plain.deps).output, "the same results as a worker with no key");
+    const rejections = rejectionsIn(deps);
+    assert.equal(rejections.length, 1);
+    assert.equal(rejections[0]!.unavailable, true);
+    assert.ok(deps.lines.some((l) => /couldn't be reached.*Connection error/.test(l)));
+  });
+
+  test("if drafting breaks in a way nobody expected, the run still finishes with the engine's text", async () => {
+    const broken = { complete: async () => undefined } as unknown as NarrativeClient;
+    const { deps, handle } = await setup({ narrative: broken });
+    const plain = await setup();
+    assert.equal((await handle(job, once)).outcome, "done");
+    await plain.handle(job, once);
+    assert.deepEqual(stored(deps).output, stored(plain.deps).output);
+    assert.match(rejectionsIn(deps)[0]!.reasons[0]!, /Drafting stopped/);
+    assert.ok(deps.lines.some((l) => /Drafting stopped for/.test(l)));
+  });
+
+  test("without a client, nothing is drafted and no rejections file is written", async () => {
+    const { deps, handle } = await setup();
+    await handle(job, once);
+    assert.ok(stored(deps).output!.versions.every((v) => v.source === "engine"));
+    assert.equal(existsSync(join(deps.runsDir, RUN_ID, OUTPUT_FILES.rejections)), false);
   });
 });
 

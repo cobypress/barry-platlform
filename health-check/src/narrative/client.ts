@@ -59,3 +59,8 @@ export function anthropicClient(sdk: MessagesApi = new Anthropic()): NarrativeCl
     },
   };
 }
+
+/** For the worker, which reads its key with the rest of its environment rather than leaving the SDK to find it. */
+export function anthropicClientWithKey(apiKey: string): NarrativeClient {
+  return anthropicClient(new Anthropic({ apiKey }));
+}

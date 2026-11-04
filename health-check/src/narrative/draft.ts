@@ -19,11 +19,13 @@ export type SectionBrief = {
   purpose: string;
   sources: PromptSource[];
   model?: string;
+  /** The engine has only a placeholder for this section, so an accepted draft means it no longer needs a person's input. */
+  fillsPlaceholder?: boolean;
 };
 
 export type DraftResult =
   | { status: "accepted"; body: string; model: string; attempts: number }
-  | { status: "rejected"; reasons: string[]; attempts: number };
+  | { status: "rejected"; reasons: string[]; attempts: number; unavailable?: true };
 
 export const DRAFT_DEFAULTS = {
   effort: "high",
@@ -78,7 +80,8 @@ export async function draftSection(input: { brief: SectionBrief; dataset: Figure
       }, pseudonyms);
     } catch (err) {
       if (err instanceof PromptRefused) return { status: "rejected", reasons: err.reasons, attempts: attempt };
-      return { status: "rejected", reasons: [`The call to Claude failed: ${err instanceof Error ? err.message : String(err)}`], attempts: attempt };
+      // Nothing is wrong with the section: Claude couldn't be reached.
+      return { status: "rejected", reasons: [`The call to Claude failed: ${err instanceof Error ? err.message : String(err)}`], attempts: attempt, unavailable: true };
     }
     // Neither of these gets better by asking again with the same input.
     if (reply.stopReason === "refusal") return { status: "rejected", reasons: ["Claude declined to write this section."], attempts: attempt };

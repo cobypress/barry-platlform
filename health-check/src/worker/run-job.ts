@@ -2,8 +2,11 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { SALES_CLOUD_MODULES } from "../domains/index.ts";
 import { runHealthCheck } from "../engine/run.ts";
-import { buildReport } from "../narrative/sections.ts";
-import { loadRun } from "../render/render-run.ts";
+import { applyNarrative, type Rejection } from "../narrative/apply.ts";
+import type { NarrativeClient } from "../narrative/client.ts";
+import { buildReport, type BuiltReport, type ReportInput } from "../narrative/sections.ts";
+import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
+import { loadRun, OUTPUT_FILES } from "../render/render-run.ts";
 import { OAuthConnectionProvider } from "../salesforce/oauth-provider.ts";
 import type { StoredConnection } from "../salesforce/token-store.ts";
 import { safeReason, type Attempt, type JobOutcome, type WorkerDeps } from "./deps.ts";
@@ -40,6 +43,35 @@ function problemWith(input: RunJobInput, deps: WorkerDeps): string | null {
   const unknown = input.run.modules.filter((m) => !known.has(m));
   if (unknown.length) return `The worker doesn't know these modules: ${unknown.join(", ")}.`;
   return null;
+}
+
+/**
+ * Claude drafts each section that has a brief, so the console gets prose a
+ * consultant would write rather than the engine's fill-in text. The findings
+ * matter more than the prose, so nothing here fails the run: if drafting breaks,
+ * the sections are the engine's own text, as they are without a key. Why any
+ * section kept the engine's text goes in the run folder, for a person to read.
+ */
+async function draftSections(runId: string, dir: string, input: ReportInput, client: NarrativeClient, pseudonyms: Pseudonymiser, now: Date, log: (line: string) => void): Promise<BuiltReport> {
+  const write = (rejections: Rejection[]): void => writeFileSync(join(dir, OUTPUT_FILES.rejections), `${JSON.stringify(rejections, null, 2)}\n`, { mode: 0o600 });
+  const report = buildReport(input);
+  let rejections: Rejection[];
+  try {
+    rejections = await applyNarrative(report, client, pseudonyms, now);
+  } catch (err) {
+    // Part-way through, some sections may hold drafts and others not. Start again from the engine's text.
+    const reason = safeReason(err);
+    log(`Drafting stopped for ${runId}, so its sections are the engine's own text: ${reason}`);
+    write([{ sectionId: runId, reasons: [`Drafting stopped, so every section is the engine's own text: ${reason}`], unavailable: true }]);
+    return buildReport(input);
+  }
+  write(rejections);
+  const drafted = Object.values(report.outputs).flatMap((o) => o.versions).filter((v) => v.source === "claude_draft").length;
+  const rejected = rejections.filter((r) => !r.unavailable).length;
+  log(`Claude drafted ${drafted} of ${report.briefs.size} sections for ${runId}.${rejected ? ` ${rejected} kept the engine's text and need a person (${OUTPUT_FILES.rejections}).` : ""}`);
+  const outage = rejections.find((r) => r.unavailable);
+  if (outage) log(`Claude couldn't be reached while drafting ${runId}, so the sections not yet drafted are the engine's own text: ${outage.reasons.join(" ")}`);
+  return report;
 }
 
 export async function processRunJob(runId: string, deps: WorkerDeps, attempt: Attempt): Promise<JobOutcome> {
@@ -125,11 +157,11 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
 
   try {
     // The engine's intake and the sections the console reviews. Building sections
-    // needs no browser and no Claude: it's the engine's own text, as `hc render`
-    // writes it before any narrative.
+    // needs no browser. They start as the engine's own text, as `hc render`
+    // writes it, and with a key Claude then drafts the ones that have a brief.
     if (input.intake) writeFileSync(join(dir, "intake.json"), `${JSON.stringify(input.intake, null, 2)}\n`, { mode: 0o600 });
-    const { input: reportInput } = loadRun(dir);
-    const report = buildReport(reportInput);
+    const { input: reportInput, pseudonyms } = loadRun(dir);
+    const report = deps.narrative ? await draftSections(runId, dir, reportInput, deps.narrative, pseudonyms, now(), log) : buildReport(reportInput);
     const outputs = Object.values(report.outputs);
     writeFileSync(join(dir, SECTIONS_FILE), `${JSON.stringify(outputs, null, 2)}\n`, { mode: 0o600 });
     await deps.store.saveRunOutput(runId, {
@@ -142,6 +174,7 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
       // The engine leaves its sections as drafts, and the console approves only
       // sections in review. It has no step that starts review, so a run that's
       // in review hands over its drafts in review, as the console's own import does.
+      // A section Claude's draft couldn't settle stays needs_input.
       sections: outputs.flatMap((o) => o.sections).map((s) => (result.run.status === "in_review" && s.status === "draft" ? { ...s, status: "in_review" as const } : s)),
       versions: outputs.flatMap((o) => o.versions),
     });

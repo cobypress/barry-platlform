@@ -48,9 +48,15 @@ For released documents (DECISIONS.md 75), set all three of these or none. Withou
 | `HC_DRIVE_FOLDER_ID` | The top "Health checks" folder: the last part of its address in Drive. It must be in a shared drive the service account is a Content manager of, because a service account has no Drive storage of its own |
 | `HC_DRIVE_IMPERSONATE` | Optional. Only if the folder is in someone's My Drive instead: the user the account acts as, which needs domain-wide delegation with the `https://www.googleapis.com/auth/drive` scope |
 
+For Claude's drafts of the report sections (DECISIONS.md 76). Without it the worker still runs, and the sections are the engine's own text.
+
+| Variable | Value |
+| --- | --- |
+| `ANTHROPIC_API_KEY` | Optional. An Anthropic API key. The same key as Vercel's `ANTHROPIC_API_KEY` can be used |
+
 Keep `HC_TOKEN_KEY` somewhere safe as well. Without it the stored tokens can't be opened, and every customer would have to connect again.
 
-When it starts, the log says `Taking jobs from health-check-jobs, 2 at a time.` If a variable is missing it stops and names it.
+When it starts, the log says `Taking jobs from health-check-jobs, 2 at a time.`, then whether Claude drafts the sections. If a variable is missing it stops and names it.
 
 ## 3. Turn the console on, in Vercel
 

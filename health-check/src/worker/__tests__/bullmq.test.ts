@@ -119,6 +119,14 @@ describe("the worker's environment", () => {
     assert.equal(read.ok && read.config.connectKey.length, 32);
   });
 
+  test("ANTHROPIC_API_KEY is optional, and read when it's set", () => {
+    const without = readWorkerEnv(goodEnv());
+    assert.equal(without.ok && without.config.anthropicApiKey, null);
+    const read = readWorkerEnv({ ...goodEnv(), ANTHROPIC_API_KEY: " sk-ant-fake-key-for-tests \n" });
+    assert.equal(read.ok && read.config.anthropicApiKey, "sk-ant-fake-key-for-tests");
+    assert.ok("ANTHROPIC_API_KEY" in WORKER_ENV.optional);
+  });
+
   test("names every missing variable", () => {
     const read = readWorkerEnv({});
     assert.ok(!read.ok);
@@ -179,5 +187,25 @@ describe("hc worker", () => {
     assert.deepEqual(pools[0]!.options, { connectionString: env.HC_WORKER_DATABASE_URL, max: 4 });
     assert.equal(pools[0]!.ended, true);
     assert.ok(!lines.join("\n").includes(env.HC_CONNECT_KEY!) && !lines.join("\n").includes("pw@"));
+    assert.ok(lines.some((l) => /ANTHROPIC_API_KEY isn't set, so report sections are the engine's own text/.test(l)));
+  });
+
+  test("with ANTHROPIC_API_KEY, says Claude drafts the sections, and never prints the key", async () => {
+    FakeWorker.made = [];
+    class FakePool {
+      async query(): Promise<never> {
+        throw new Error("no database in tests");
+      }
+      async connect(): Promise<never> {
+        throw new Error("no database in tests");
+      }
+      async end(): Promise<void> {}
+    }
+    const modules: WorkerModules = { bull, pg: { Pool: FakePool as unknown as WorkerModules["pg"]["Pool"] } };
+    const env = { ...goodEnv(), ANTHROPIC_API_KEY: "sk-ant-fake-key-for-tests" };
+    const lines: string[] = [];
+    assert.equal(await workerCommand(env, { load: async () => modules, until: Promise.resolve(), log: (l) => lines.push(l) }), 0);
+    assert.ok(lines.some((l) => /Claude drafts each run's report sections/.test(l)));
+    assert.ok(!lines.join("\n").includes("sk-ant-fake-key-for-tests"));
   });
 });

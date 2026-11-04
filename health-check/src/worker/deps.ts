@@ -1,4 +1,5 @@
 import type { DomainModule } from "../domains/types.ts";
+import type { NarrativeClient } from "../narrative/client.ts";
 import type { OAuthClient } from "../salesforce/oauth.ts";
 import type { TokenStore } from "../salesforce/token-store.ts";
 import type { OAuthTransport, Transport } from "../salesforce/transport.ts";
@@ -19,6 +20,8 @@ export type WorkerDeps = {
   modules?: DomainModule[];
   stopAtShare?: number;
   apiVersion?: string;
+  /** Claude, for drafting report sections. Absent when ANTHROPIC_API_KEY isn't set: sections are then the engine's own text. */
+  narrative?: NarrativeClient;
   /** Where released documents go. Null when Drive isn't set up: a documents job then fails with what to set. */
   drive?: DocumentDrive | null;
   /** Tests only: prints without a browser. */

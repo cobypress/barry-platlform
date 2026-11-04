@@ -27,6 +27,7 @@ export const WORKER_ENV = {
     HC_DRIVE_SA_KEY: "Its private key, PEM, with \\n for line breaks",
     HC_DRIVE_FOLDER_ID: "The top Health checks folder in Google Drive, shared with the service account",
     HC_DRIVE_IMPERSONATE: "A user the service account acts as, if the folder isn't in a shared drive (domain-wide delegation)",
+    ANTHROPIC_API_KEY: "Claude drafts each report section. Without it, sections are the engine's own text",
   },
 } as const;
 
@@ -44,6 +45,8 @@ export type WorkerConfig = {
   apiVersion?: string;
   /** Null when Drive isn't set up. The worker still starts: only documents jobs need it. */
   drive: DriveConfig | null;
+  /** Null when unset. The worker still starts, and sections stay the engine's own text. */
+  anthropicApiKey: string | null;
 };
 
 const key32 = (raw: string): Buffer | null => {
@@ -102,6 +105,7 @@ export function readWorkerEnv(env: NodeJS.ProcessEnv): { ok: true; config: Worke
       stopAtShare,
       apiVersion: get("HC_SF_API_VERSION") || undefined,
       drive,
+      anthropicApiKey: get("ANTHROPIC_API_KEY") || null,
     },
   };
 }
