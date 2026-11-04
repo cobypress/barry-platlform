@@ -281,6 +281,11 @@ describe("GoogleDrive", () => {
     assert.ok(!calls.some((c) => c.url.startsWith("https://elsewhere.example.com")));
   });
 
+  test("a top folder it can't see says which account to share it with", async () => {
+    const { impl } = fakeFetch([() => Response.json({ error: { message: "File not found" } }, { status: 404 })]);
+    await assert.rejects(new GoogleDrive(config, impl).folders("root-folder-0001"), /can't see the Health checks folder \(HC_DRIVE_FOLDER_ID\)\. Add documents@example\.iam\.gserviceaccount\.com to its shared drive as a Content manager/);
+  });
+
   test("says what Google refused, and refuses an id that could change a query", async () => {
     const { impl } = fakeFetch([() => Response.json({ error: { message: "File not shared with the service account" } }, { status: 403 })]);
     await assert.rejects(new GoogleDrive(config, impl).folders("root-folder-0001"), /\(403\): File not shared with the service account/);

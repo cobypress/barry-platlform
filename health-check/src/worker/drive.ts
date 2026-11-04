@@ -112,9 +112,15 @@ export class GoogleDrive implements DocumentDrive {
     return res;
   }
 
-  async #json<T>(url: string, init?: RequestInit): Promise<T> {
+  async #json<T>(url: string, init?: RequestInit, parentId?: string): Promise<T> {
     const res = await this.#call(url, init);
-    if (res.status === 404) throw new DriveError("Google Drive couldn't find a folder the worker needed. Check the service account can see it");
+    if (res.status === 404) {
+      // Google answers "not found" for a folder that exists but wasn't shared, so say how to share it.
+      if (parentId === this.rootFolderId) {
+        throw new DriveError(`The service account can't see the Health checks folder (HC_DRIVE_FOLDER_ID). Add ${this.#config.clientEmail} to its shared drive as a Content manager`);
+      }
+      throw new DriveError(`Google Drive couldn't find a folder the worker needed. Check ${this.#config.clientEmail} can see it`);
+    }
     return (await res.json()) as T;
   }
 
@@ -140,7 +146,7 @@ export class GoogleDrive implements DocumentDrive {
         supportsAllDrives: "true",
         ...(page ? { pageToken: page } : {}),
       });
-      const body = await this.#json<{ files: Array<{ id: string; name: string; webViewLink: string }>; nextPageToken?: string }>(`${API}?${params}`);
+      const body = await this.#json<{ files: Array<{ id: string; name: string; webViewLink: string }>; nextPageToken?: string }>(`${API}?${params}`, undefined, parentId);
       items.push(...body.files.map((f) => ({ id: f.id, name: f.name, url: f.webViewLink })));
       page = body.nextPageToken;
     } while (page);
