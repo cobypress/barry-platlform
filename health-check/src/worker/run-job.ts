@@ -7,7 +7,9 @@ import type { NarrativeClient } from "../narrative/client.ts";
 import { buildReport, type BuiltReport, type ReportInput } from "../narrative/sections.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { loadRun, OUTPUT_FILES } from "../render/render-run.ts";
-import { OAuthConnectionProvider } from "../salesforce/oauth-provider.ts";
+import { OAuthConnectionProvider, revokeConnection } from "../salesforce/oauth-provider.ts";
+import { OAuthError } from "../salesforce/oauth.ts";
+import { buildScanResult } from "../scan/result.ts";
 import type { StoredConnection } from "../salesforce/token-store.ts";
 import { safeReason, type Attempt, type JobOutcome, type WorkerDeps } from "./deps.ts";
 import { withJobLock } from "./lock.ts";
@@ -125,6 +127,7 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
       createdBy: input.run.createdBy,
       customerRef: input.run.customerRef,
       scope: input.run.scope,
+      product: input.run.product,
       baselineRunId: input.run.baselineRunId,
       stopAtShare: deps.stopAtShare,
       transport: deps.dataTransport,
@@ -163,7 +166,9 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
     // writes it, and with a key Claude then drafts the ones that have a brief.
     if (input.intake) writeFileSync(join(dir, "intake.json"), `${JSON.stringify(input.intake, null, 2)}\n`, { mode: 0o600 });
     const { input: reportInput, pseudonyms } = loadRun(dir);
-    const report = deps.narrative ? await draftSections(runId, dir, reportInput, deps.narrative, pseudonyms, now(), log) : buildReport(reportInput);
+    const scan = input.run.product === "scan";
+    // A scan is never reviewed, so Claude has nothing to draft for it.
+    const report = deps.narrative && !scan ? await draftSections(runId, dir, reportInput, deps.narrative, pseudonyms, now(), log) : buildReport(reportInput);
     const outputs = Object.values(report.outputs);
     writeFileSync(join(dir, SECTIONS_FILE), `${JSON.stringify(outputs, null, 2)}\n`, { mode: 0o600 });
     await deps.store.saveRunOutput(runId, {
@@ -188,5 +193,28 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
     if (!attempt.final) throw new Error(reason);
     return fail(`The run finished, but its results couldn't be saved: ${reason}`);
   }
+  if (input.run.product === "scan") await finishScan(runId, dir, name, deps, now().toISOString(), log);
   return { outcome: "done", detail: `Run ${runId} is ${result.run.status.replace("_", " ")}` };
+}
+
+/**
+ * A free scan, once its findings are saved: the teaser for the prospect, then
+ * the connection given back, because a scan never reads the org again. A
+ * failure here is logged; the console shows "working on it" until the row exists.
+ */
+async function finishScan(runId: string, dir: string, name: string, deps: WorkerDeps, at: string, log: (line: string) => void): Promise<void> {
+  try {
+    const { input } = loadRun(dir);
+    await deps.store.saveScanResult(runId, buildScanResult(buildReport(input)), at);
+    log(`Scan ${runId}'s result is ready.`);
+  } catch (err) {
+    log(`Scan ${runId}'s result couldn't be saved: ${safeReason(err)}`);
+  }
+  try {
+    await revokeConnection({ name, store: deps.tokens, transport: deps.oauthTransport });
+    log(`Scan ${runId}'s connection is revoked.`);
+  } catch (err) {
+    deps.tokens.delete(name);
+    log(`Salesforce didn't confirm revoking scan ${runId}'s connection, so the worker deleted its copy: ${err instanceof OAuthError ? err.code : "error"}.`);
+  }
 }

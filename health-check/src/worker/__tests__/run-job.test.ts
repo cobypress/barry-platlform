@@ -359,3 +359,28 @@ describe("review fixes: failures after the engine finishes", () => {
     assert.match(stored(deps).run.steps.find((s) => s.id === "worker")!.error!, /deadlock detected/);
   });
 });
+
+describe("a free scan's run job", () => {
+  test("writes the teaser, gives the connection back, and asks Claude for nothing", async () => {
+    const asked: NarrativeRequest[] = [];
+    const narrative = { complete: async (request: NarrativeRequest) => (asked.push(request), Promise.reject(new Error("a scan never drafts"))) } as unknown as NarrativeClient;
+    const { deps, handle } = await setup({ narrative }, runInput({ run: consoleRun({ scope: "essentials", product: "scan" }) }));
+    await handle(job, last);
+    const saved = deps.store.scanResults.get(RUN_ID);
+    assert.ok(saved, "the teaser is saved");
+    const { result } = saved;
+    assert.ok(result.shown.length > 0 && result.shown.length <= 4);
+    assert.equal(result.lockedIssues, stored(deps).output!.findings.filter((f) => f.status === "issue").length - result.shown.length);
+    assert.ok(result.areas.length > 0 && result.areas.every((a) => ["adoption", "automation", "best_practice", "configuration", "security", "utilisation"].includes(a.domain)));
+    assert.doesNotMatch(JSON.stringify(result), /\[\[[a-z]+:|@example\.com/);
+    assert.equal(asked.length, 0);
+    assert.equal(deps.tokens.has(CONNECTION), false, "the scan's connection is gone");
+  });
+
+  test("an ordinary run keeps its connection and writes no teaser", async () => {
+    const { deps, handle } = await setup();
+    await handle(job, last);
+    assert.equal(deps.store.scanResults.size, 0);
+    assert.equal(deps.tokens.has(CONNECTION), true);
+  });
+});

@@ -46,6 +46,8 @@ export type RunOptions = {
   log?: (message: string) => void;
   /** Complete by default. Essentials reads set-up only, and never CRM records. */
   scope?: RunScope;
+  /** "scan" for the free set-up teaser. */
+  product?: "barometer" | "scan";
   /** The run this one re-checks: its first health check, whose findings the report compares against. */
   baselineRunId?: string | null;
 };
@@ -154,7 +156,7 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
     if (existsSync(runPath)) throw new Error(`A run "${runId}" already exists in ${options.outDir}. Resume it instead`);
     run = Run.parse({
       id: runId,
-      product: "barometer",
+      product: options.product ?? "barometer",
       customerRef: options.customerRef ?? null,
       orgId: client.orgId,
       isSandbox: false,

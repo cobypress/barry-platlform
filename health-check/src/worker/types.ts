@@ -1,3 +1,4 @@
+import type { ScanResult } from "../scan/result.ts";
 import { z } from "zod";
 import type { Intake } from "../narrative/intake.ts";
 import type { BenchmarkRow, Calibration, ConnectLink, Finding, ManualAnswer, ManualStep, Metric, NumberOverride, ReportSection, Run, Score, SectionVersion } from "../schemas/index.ts";
@@ -176,6 +177,9 @@ export interface WorkerStore {
   addBenchmarkRows(rows: BenchmarkRow[]): Promise<void>;
   /** Every benchmark row, for comparing a run with other customers. They name no one, so reading them all is safe. */
   loadBenchmarkRows(): Promise<BenchmarkRow[]>;
+
+  /** A free scan's teaser, for the console to show the prospect. One row a run. */
+  saveScanResult(runId: string, result: ScanResult, madeAt: string): Promise<void>;
 
   /** The run's customer microsite, sealed: one row a run, its version moving on with each make. */
   saveMicrosite(runId: string, sealedPages: string, madeAt: string, expiresAt: string): Promise<void>;

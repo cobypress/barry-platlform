@@ -1,3 +1,4 @@
+import type { ScanResult } from "../scan/result.ts";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { Intake } from "../narrative/intake.ts";
@@ -475,6 +476,13 @@ export class PostgresWorkerStore implements WorkerStore {
       `SELECT r."id" AS "runId", to_char(MAX(rel."releasedAt"), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "releasedAt" FROM "HealthCheckRun" r LEFT JOIN "HealthCheckRelease" rel ON rel."runId" = r."id" WHERE r."status" = 'released' GROUP BY r."id" ORDER BY r."id"`,
     );
     return rows.map((row: Record<string, unknown>) => ({ runId: String(row.runId), releasedAt: typeof row.releasedAt === "string" ? row.releasedAt : null }));
+  }
+
+  async saveScanResult(runId: string, result: ScanResult, madeAt: string): Promise<void> {
+    await this.#pool.query(
+      `INSERT INTO "HealthCheckScanResult" ("runId", "madeAt", "result") VALUES ($1, $2::timestamp(3), $3::jsonb) ON CONFLICT ("runId") DO UPDATE SET "madeAt" = EXCLUDED."madeAt", "result" = EXCLUDED."result"`,
+      [runId, madeAt, JSON.stringify(result)],
+    );
   }
 
   async saveMicrosite(runId: string, sealedPages: string, madeAt: string, expiresAt: string): Promise<void> {

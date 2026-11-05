@@ -1,3 +1,4 @@
+import type { ScanResult } from "../scan/result.ts";
 import { Run, type BenchmarkRow, type ConnectLink } from "../schemas/index.ts";
 import { ORG_AWAITING_CONNECT, RunClosedError, type ConnectJobInput, type DocumentsJobInput, type DocumentsMade, type LinkConnected, type LinkState, type ReleasedRun, type RunJobInput, type RunOutputRecord, type RunProgress, type WorkerStore } from "./types.ts";
 
@@ -131,6 +132,14 @@ export class MemoryWorkerStore implements WorkerStore {
   async addBenchmarkRows(rows: BenchmarkRow[]): Promise<void> {
     this.benchmarkRows.push(...structuredClone(rows));
     this.writes.push({ method: "addBenchmarkRows", id: "benchmark", detail: rows.length });
+  }
+
+  /** The free scans' teasers, keyed by run id. */
+  readonly scanResults = new Map<string, { result: ScanResult; madeAt: string }>();
+
+  async saveScanResult(runId: string, result: ScanResult, madeAt: string): Promise<void> {
+    this.scanResults.set(runId, { result: structuredClone(result), madeAt });
+    this.writes.push({ method: "saveScanResult", id: runId });
   }
 
   /** The microsites, keyed by run id. */
