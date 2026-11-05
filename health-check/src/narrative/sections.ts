@@ -16,6 +16,7 @@ import type { Intake } from "./intake.ts";
 import { applyOverrides } from "./overrides.ts";
 import { assumptionsSource, findingSource, metricSource, planSource, statedProblemsSource, type PromptSource } from "./prompt.ts";
 import { areasOf, buildPlan, bySeverity, domainLabel, domainsInOrder, isSetupReview, issuesOf, scorecard, teamLevelFinding, topIssues, verdictOf, type Plan } from "./select.ts";
+import { chapterFigures } from "../render/chapter.ts";
 
 // The three outputs, built from one findings dataset. Each section gets a first
 // version written by the engine, so a report always exists even if Claude never
@@ -99,6 +100,7 @@ const PLAN = "plan";
 export const OVERALL = "score:overall";
 export const VALUE_TOTAL = "value:total";
 export const PROGRESS = "progress";
+const CHAPTER = "chapter";
 export const valueSource = (group: string): string => `value:${group}`;
 /** The investment section's own figures: what the customer told us they spend. */
 export const INVESTMENT_SOURCE = "investment";
@@ -642,8 +644,9 @@ export function buildReport(input: ReportInput): BuiltReport {
     dataset.figures.push(...progressFigures(progress).map((value) => ({ source: PROGRESS, kind: "number" as const, value })));
     dataset.figures.push(...worthFigures(progress).map((value) => ({ source: PROGRESS, kind: "currency" as const, value, currency: calibration.currency })));
   }
-  // What each area is worth, as its chapter in the full report says it.
+  // What each area is worth, as its chapter in the full report says it, and the chapter's counts.
   for (const domain of new Set(team.map((f) => f.domain))) {
+    dataset.figures.push(...chapterFigures(team.filter((f) => f.domain === domain)).map((value) => ({ source: CHAPTER, kind: "number" as const, value })));
     const worth = worthOf(value, new Set(team.filter((f) => f.domain === domain).map((f) => f.id)));
     if (worth > 0) dataset.figures.push({ source: VALUE_TOTAL, kind: "currency", value: worth, currency: calibration.currency });
   }

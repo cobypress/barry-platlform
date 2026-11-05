@@ -27,15 +27,30 @@ const FIRST_STEPS = 3;
 const list = (r: Render, items: Finding[], more: number, line: (f: Finding) => string): string =>
   `<ul>${items.map((f) => `<li>${line(f)}${r.ref(f.id)}</li>`).join("")}${more > 0 ? `<li>${r.t(`And ${more} more in the raw notes.`)}</li>` : ""}</ul>`;
 
+function groups(own: Finding[]) {
+  const issues = issuesOf(own).slice().sort(bySeverity);
+  return {
+    issues,
+    broken: issues.filter((f) => f.severity === "critical" || f.severity === "high"),
+    belowPar: issues.filter((f) => f.severity !== "critical" && f.severity !== "high"),
+    passed: own.filter((f) => f.status === "passed"),
+    open: own.filter((f) => f.status === "not_measurable"),
+  };
+}
+
+/** Every count an area's chapter slide shows, for the number check. */
+export function chapterFigures(own: Finding[]): number[] {
+  if (own.length === 0) return [];
+  const { issues, broken, belowPar, passed, open } = groups(own);
+  const overflow = [passed, broken, belowPar].filter((l) => l.length > LIST_ITEMS).map((l) => l.length - LIST_ITEMS);
+  return [own.length, passed.length, issues.length, open.length, ...overflow];
+}
+
 /** The chapter's opening slide for one area. Empty for an area with nothing assessed. */
 export function chapterSlide(r: Render, report: BuiltReport, domain: string): string {
   const own = report.teamFindings.filter((f) => f.domain === domain);
   if (own.length === 0) return "";
-  const issues = issuesOf(own).slice().sort(bySeverity);
-  const broken = issues.filter((f) => f.severity === "critical" || f.severity === "high");
-  const belowPar = issues.filter((f) => f.severity !== "critical" && f.severity !== "high");
-  const passed = own.filter((f) => f.status === "passed");
-  const open = own.filter((f) => f.status === "not_measurable");
+  const { issues, broken, belowPar, passed, open } = groups(own);
   const worth = worthOf(report.value, new Set(own.map((f) => f.id)));
   const score = report.input.scores?.find((s) => s.domain === domain);
 

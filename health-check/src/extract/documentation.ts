@@ -12,7 +12,8 @@ export type RoleRow = { Id: string; Name: string; ParentRoleId: string | null };
 export type PermissionSetSummary = { Id: string; Name: string; Label: string; IsCustom: boolean; NamespacePrefix: string | null; assignees: number };
 export type ConnectedAppRow = { Name: string; OptionsAllowAdminApprovedUsersOnly: boolean | null };
 export type NamedCredentialRow = { DeveloperName: string; MasterLabel: string; NamespacePrefix: string | null };
-export type RemoteSiteRow = { host: string; IsActive: boolean; NamespacePrefix: string | null };
+/** `secure` is whether the URL is https. ProtocolMismatch lets code there pass data between HTTPS and HTTP (Tooling API guide, API 68.0). */
+export type RemoteSiteRow = { host: string; secure: boolean; IsActive: boolean; ProtocolMismatch: boolean; NamespacePrefix: string | null };
 
 export type OrgDocumentation = {
   /** The objects documented: the core four, then custom objects of our own with records. */
@@ -74,7 +75,7 @@ const hostOf = (url: string): string => {
 
 export const orgDocumentationExtractor: Extractor<OrgDocumentation> = {
   id: "org-documentation",
-  version: 1,
+  version: 2,
   async run(ctx) {
     const objects = documentedObjects(ctx);
     const relationships = await chunked<{ EntityDefinition: { QualifiedApiName: string }; QualifiedApiName: string; DataType: string; ReferenceTo: unknown }, RelationshipRow>(
@@ -104,8 +105,11 @@ export const orgDocumentationExtractor: Extractor<OrgDocumentation> = {
           : { ...sets, data: sets.data.map((s) => ({ Id: s.Id, Name: s.Name, Label: s.Label, IsCustom: s.IsCustom, NamespacePrefix: s.NamespacePrefix ?? null, assignees: counts.get(s.Id) ?? 0 })) };
     const connectedApps = await readSoql<ConnectedAppRow>(ctx, "SELECT Name, OptionsAllowAdminApprovedUsersOnly FROM ConnectedApplication");
     const namedCredentials = await readSoql<NamedCredentialRow>(ctx, "SELECT DeveloperName, MasterLabel, NamespacePrefix FROM NamedCredential");
-    const sites = await readSoql<{ EndpointUrl: string; IsActive: boolean; NamespacePrefix: string | null }>(ctx, "SELECT EndpointUrl, IsActive, NamespacePrefix FROM RemoteProxy", { api: "tooling" });
-    const remoteSites: Sourced<RemoteSiteRow[]> = sites.status === "ok" ? { ...sites, data: sites.data.map((s) => ({ host: hostOf(s.EndpointUrl), IsActive: s.IsActive, NamespacePrefix: s.NamespacePrefix ?? null })) } : sites;
+    const sites = await readSoql<{ EndpointUrl: string; IsActive: boolean; ProtocolMismatch: boolean | null; NamespacePrefix: string | null }>(ctx, "SELECT EndpointUrl, IsActive, ProtocolMismatch, NamespacePrefix FROM RemoteProxy", { api: "tooling" });
+    const remoteSites: Sourced<RemoteSiteRow[]> =
+      sites.status === "ok"
+        ? { ...sites, data: sites.data.map((s) => ({ host: hostOf(s.EndpointUrl), secure: /^https:/i.test(s.EndpointUrl.trim()), IsActive: s.IsActive, ProtocolMismatch: s.ProtocolMismatch === true, NamespacePrefix: s.NamespacePrefix ?? null })) }
+        : sites;
     return { objects, relationships, sharing, roles, permissionSets, connectedApps, namedCredentials, remoteSites };
   },
 };

@@ -1,5 +1,6 @@
 import type { BuiltReport } from "../narrative/sections.ts";
 import { domainLabel } from "../narrative/select.ts";
+import { PROGRESS_LISTED } from "../progress/compare.ts";
 import { compactMoney } from "./format.ts";
 import type { Render } from "./html.ts";
 
@@ -17,7 +18,7 @@ export const PROGRESS_CSS = `
 .progress .note { color: var(--muted); font-size: 0.75em; margin-top: 12px; }
 `;
 
-const LIST_ITEMS = 5;
+const LIST_ITEMS = PROGRESS_LISTED;
 
 /** Empty unless the run re-checks an earlier one. */
 export function progressPage(r: Render, report: BuiltReport): string {

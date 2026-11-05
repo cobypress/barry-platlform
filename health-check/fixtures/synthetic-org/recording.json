@@ -308,10 +308,10 @@
    "text": "{\"totalSize\":1,\"done\":true,\"records\":[{\"DeveloperName\":\"Finance_API\",\"MasterLabel\":\"Finance API\",\"NamespacePrefix\":null}]}"
   },
   {
-   "key": "GET /services/data/v66.0/tooling/query?q=SELECT%20EndpointUrl%2C%20IsActive%2C%20NamespacePrefix%20FROM%20RemoteProxy",
+   "key": "GET /services/data/v66.0/tooling/query?q=SELECT%20EndpointUrl%2C%20IsActive%2C%20ProtocolMismatch%2C%20NamespacePrefix%20FROM%20RemoteProxy",
    "status": 200,
    "limitInfo": "api-usage=1050/100000",
-   "text": "{\"totalSize\":2,\"done\":true,\"records\":[{\"EndpointUrl\":\"https://api.finance.example.com/v2?key=not-a-real-key\",\"IsActive\":true,\"NamespacePrefix\":null},{\"EndpointUrl\":\"http://legacy.example.com\",\"IsActive\":false,\"NamespacePrefix\":null}]}"
+   "text": "{\"totalSize\":2,\"done\":true,\"records\":[{\"EndpointUrl\":\"https://api.finance.example.com/v2?key=not-a-real-key\",\"IsActive\":true,\"ProtocolMismatch\":true,\"NamespacePrefix\":null},{\"EndpointUrl\":\"http://legacy.example.com\",\"IsActive\":false,\"ProtocolMismatch\":false,\"NamespacePrefix\":null}]}"
   },
   {
    "key": "GET /services/data/v66.0/limits",
