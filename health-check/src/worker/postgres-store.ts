@@ -129,6 +129,13 @@ export const CALIBRATION: Columns = {
   salesCycleAssumptionDays: "num", fiscalYearStartMonth: "num", analysisWindowMonths: "num", minSample: "num", dormantDays: "num", currency: "text",
   licenceCosts: "json", effortMinutes: "json",
 };
+// Service Cloud's limits, in a "service" JSONB column the console may add. Read
+// through the row as JSON, as the survey version is, so the query works with
+// the column and without it: missing reads as null, and the defaults apply (DECISIONS.md 165).
+export const CALIBRATION_SQL = selectSql("HealthCheckCalibration", CALIBRATION, `"runId" = $1`).replace(
+  ` FROM "HealthCheckCalibration"`,
+  `, to_jsonb("HealthCheckCalibration") -> 'service' AS "service" FROM "HealthCheckCalibration"`,
+);
 export const MANUAL_ANSWER: Columns = {
   stepKey: "text", outcome: "text", method: "text", values: "json", pastedText: "text", screenshotRef: "text", prefill: "json", skipReason: "text",
   answeredBy: "text", answeredAt: "ts",
@@ -372,7 +379,7 @@ export class PostgresWorkerStore implements WorkerStore {
     const [steps, intake, calibration, answers, survey] = await Promise.all([
       this.#pool.query(selectSql("HealthCheckRunStep", RUN_STEP, `"runId" = $1`, `"seq"`), [runId]),
       this.#pool.query(selectSql("HealthCheckIntake", INTAKE, `"runId" = $1`), [runId]),
-      this.#pool.query(selectSql("HealthCheckCalibration", CALIBRATION, `"runId" = $1`), [runId]),
+      this.#pool.query(CALIBRATION_SQL, [runId]),
       this.#pool.query(selectSql("HealthCheckManualAnswer", MANUAL_ANSWER, `"runId" = $1`, `"answeredAt", "stepKey"`), [runId]),
       this.#survey(runId),
     ]);

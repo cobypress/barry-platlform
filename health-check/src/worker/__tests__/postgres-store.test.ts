@@ -23,6 +23,8 @@ import {
 import { progressOf, RunClosedError } from "../types.ts";
 import { consoleRun, INTAKE } from "./helpers.ts";
 import { SURVEY_VERSION } from "../../survey/questions.ts";
+import { limitsOf, SERVICE_DEFAULTS } from "../../domains/service/shared.ts";
+import type { Calibration } from "../../schemas/index.ts";
 import { syntheticSurvey } from "../../testing/survey.ts";
 
 // The Postgres store has never met a database (it's marked unverified). These
@@ -185,6 +187,33 @@ describe("PostgresWorkerStore", () => {
     assert.deepEqual(job.calibration, calibration);
     assert.equal(job.answers[0]!.stepKey, answer.stepKey);
     assert.match(pool.texts().find((t) => t.includes("HealthCheckRunStep"))!, /ORDER BY "seq"/);
+  });
+
+  test("reads Service Cloud's limits from the calibration when the console has the column, and defaults without it", async () => {
+    const calibration = loadCalibration();
+    const load = async (service: unknown): Promise<Calibration> => {
+      const pool = new FakePool();
+      pool.handlers.push((text) => {
+        if (text.includes(`FROM "HealthCheckRun" WHERE`)) return { rows: [RUN_ROW], rowCount: 1 };
+        if (text.includes(`FROM "HealthCheckCalibration"`)) return { rows: [{ orgId: null, salesCycleAssumptionDays: null, fiscalYearStartMonth: null, ...calibration, ...(service === undefined ? {} : { service }) }], rowCount: 1 };
+        return undefined;
+      });
+      const job = (await new PostgresWorkerStore(pool).loadRunJob(RUN_ROW.id))!;
+      assert.match(pool.texts().find((t) => t.includes("HealthCheckCalibration"))!, /, to_jsonb\("HealthCheckCalibration"\) -> 'service' AS "service" FROM "HealthCheckCalibration" WHERE "runId" = \$1$/);
+      return job.calibration!;
+    };
+    const set = await load({ backlogAgeDays: 14, originBlankShare: 5, stalenessMonths: 6, firstResponseMilestones: ["First Response"] });
+    assert.deepEqual(set.service, { backlogAgeDays: 14, originBlankShare: 5, stalenessMonths: 6, firstResponseMilestones: ["First Response"] });
+    assert.deepEqual(limitsOf(set), { backlogAgeDays: 14, originBlankShare: 5, stalenessMonths: 6, firstResponse: ["First Response"], resolution: [] });
+    // No column (the query reads null), nothing in it, or a row without the key: the calibration is as it was, and the defaults apply.
+    for (const absent of [null, undefined]) {
+      const none = await load(absent);
+      assert.deepEqual(none, calibration);
+      assert.deepEqual(limitsOf(none), { ...SERVICE_DEFAULTS, firstResponse: [], resolution: [] });
+    }
+    // A partial set fills the rest from the defaults.
+    assert.equal(limitsOf(await load({ backlogAgeDays: 7 })).stalenessMonths, SERVICE_DEFAULTS.stalenessMonths);
+    await assert.rejects(load({ backlogAgeDays: -1 }));
   });
 
   test("reads the run's scope, and a run with none is complete", async () => {
