@@ -148,3 +148,7 @@ About 200 field references on 46 objects, and 6 Metadata types, were checked. Ev
 
 The forecast items, login history and campaign reads are now described first, so a missing optional field there costs one rule, not the source. See DECISIONS.md 41.
 
+
+## The team survey and the run (DECISIONS.md 147)
+
+The survey's sections are built when the run job runs. Answers that come in afterwards are logged by the documents job and left out of the documents, because nobody approved their figures. Which does the console want: close the survey before the run starts, or a step that rebuilds the `team_survey` sections when the survey closes and sends them back to review? The engine can do the second (`buildReport` with the new answers), but the console would need to ask for it. Also: should a survey that was sent but that nobody answered say "fewer than 5 answered"? Today the worker can't tell it from no survey, because it only sees answer rows.

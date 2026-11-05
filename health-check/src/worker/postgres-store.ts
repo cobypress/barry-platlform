@@ -3,6 +3,7 @@ import type { PulseResult } from "../pulse/result.ts";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { Intake } from "../narrative/intake.ts";
+import { SURVEY_VERSION, type Survey } from "../survey/questions.ts";
 import { BenchmarkRow, HeadcountBand, Industry } from "../schemas/benchmark.ts";
 import { Calibration, ConnectLink, ManualAnswer, NumberOverride, ReportSection, Run, SectionVersion, type Finding, type ManualStep, type Metric, type Score } from "../schemas/index.ts";
 import {
@@ -95,6 +96,15 @@ export const INTAKE: Columns = {
   statedProblems: "text", customerName: "text", linkedinUrl: "text", industry: "text", headcountBand: "text", customerAnswers: "json",
   salesforceSpendAnnual: "num", hourlyCost: "num", namedRepConsent: "bool", caseStudyConsent: "bool", callAnswers: "json",
 };
+// The console's survey answers (contract with the console: DECISIONS.md 147).
+export const SURVEY_RESPONSE: Columns = { id: "text", submittedAt: "ts", answers: "json" };
+
+/** A run's survey answers in the order they came in. Null when nobody has answered. */
+export function surveyFromRows(rows: Array<Record<string, unknown>>): Survey | null {
+  if (rows.length === 0) return null;
+  return { version: SURVEY_VERSION, responses: rows.map((r) => ({ id: String(r.id), submittedAt: String(r.submittedAt), answers: r.answers })) };
+}
+
 export const CALIBRATION: Columns = {
   version: "num", orgId: "text", confirmedBy: "text", confirmedAt: "ts", stages: "json", scope: "json", users: "json", fields: "json", targets: "json",
   salesCycleAssumptionDays: "num", fiscalYearStartMonth: "num", analysisWindowMonths: "num", minSample: "num", dormantDays: "num", currency: "text",
@@ -320,11 +330,12 @@ export class PostgresWorkerStore implements WorkerStore {
   async loadRunJob(runId: string): Promise<RunJobInput | null> {
     const row = one(await this.#pool.query(selectSql("HealthCheckRun", RUN, `"id" = $1`), [runId]));
     if (!row) return null;
-    const [steps, intake, calibration, answers] = await Promise.all([
+    const [steps, intake, calibration, answers, survey] = await Promise.all([
       this.#pool.query(selectSql("HealthCheckRunStep", RUN_STEP, `"runId" = $1`, `"seq"`), [runId]),
       this.#pool.query(selectSql("HealthCheckIntake", INTAKE, `"runId" = $1`), [runId]),
       this.#pool.query(selectSql("HealthCheckCalibration", CALIBRATION, `"runId" = $1`), [runId]),
       this.#pool.query(selectSql("HealthCheckManualAnswer", MANUAL_ANSWER, `"runId" = $1`, `"answeredAt", "stepKey"`), [runId]),
+      this.#pool.query(selectSql("HealthCheckSurveyResponse", SURVEY_RESPONSE, `"runId" = $1`, `"submittedAt", "id"`), [runId]),
     ]);
     const run = runFromRows(row, steps.rows.map(({ runId: _r, ...s }) => s));
     return {
@@ -333,6 +344,7 @@ export class PostgresWorkerStore implements WorkerStore {
       calibration: one(calibration) ? calibrationFromRow(one(calibration)!) : null,
       connectionName: (row.connectionName as string | null) ?? null,
       answers: answers.rows.map(answerFromRow),
+      survey: surveyFromRows(survey.rows),
     };
   }
 
@@ -426,19 +438,21 @@ export class PostgresWorkerStore implements WorkerStore {
   async loadDocumentsJob(runId: string): Promise<DocumentsJobInput | null> {
     const row = one(await this.#pool.query(selectSql("HealthCheckRun", RUN_DOCUMENTS, `"id" = $1`), [runId]));
     if (!row) return null;
-    const [steps, intake, sections, versions, overrides, documents] = await Promise.all([
+    const [steps, intake, sections, versions, overrides, documents, survey] = await Promise.all([
       this.#pool.query(selectSql("HealthCheckRunStep", RUN_STEP, `"runId" = $1`, `"seq"`), [runId]),
       this.#pool.query(selectSql("HealthCheckIntake", INTAKE, `"runId" = $1`), [runId]),
       this.#pool.query(selectSql("HealthCheckSection", SECTION, `"runId" = $1`, `"output", "order"`), [runId]),
       this.#pool.query(selectSql("HealthCheckSectionVersion", VERSION, `"id" IN (SELECT "currentVersionId" FROM "HealthCheckSection" WHERE "runId" = $1)`), [runId]),
       this.#pool.query(selectSql("HealthCheckNumberOverride", OVERRIDE, `"runId" = $1`, `"seq"`), [runId]),
       this.#pool.query(selectSql("HealthCheckDocuments", DOCUMENTS, `"runId" = $1`), [runId]),
+      this.#pool.query(selectSql("HealthCheckSurveyResponse", SURVEY_RESPONSE, `"runId" = $1`, `"submittedAt", "id"`), [runId]),
     ]);
     const run = runFromRows(row, steps.rows.map(({ runId: _r, ...s }) => s));
     const doc = one(documents);
     return {
       run,
       intake: one(intake) ? intakeFromRow(one(intake)!, run) : null,
+      survey: surveyFromRows(survey.rows),
       sections: sections.rows.map(sectionFromRow),
       versions: versions.rows.map(versionFromRow),
       overrides: overrides.rows.map(overrideFromRow),

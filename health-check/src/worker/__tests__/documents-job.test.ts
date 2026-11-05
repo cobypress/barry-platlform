@@ -5,11 +5,13 @@ import { cpSync, existsSync, mkdirSync, statSync, writeFileSync } from "node:fs"
 import { join } from "node:path";
 import { buildReport, currentBody, type ReportOutputKey } from "../../narrative/sections.ts";
 import { approvedReport, layoutWarnings, renderReleased, type ApprovedRun, type DocumentKey } from "../../render/render-released.ts";
-import { loadRun } from "../../render/render-run.ts";
+import { loadRun, SURVEY_FILE } from "../../render/render-run.ts";
+import { withoutComments } from "../../survey/questions.ts";
+import { syntheticSurvey } from "../../testing/survey.ts";
 import type { ReportSection, SectionVersion } from "../../schemas/index.ts";
 import { runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers } from "../../testing/replay.ts";
-import { clientNameOf, folderFor, INTERNAL_FOLDER, processDocumentsJob } from "../documents-job.ts";
+import { clientNameOf, folderFor, INTERNAL_FOLDER, laterSurveyAnswers, processDocumentsJob } from "../documents-job.ts";
 import { DriveError, GoogleDrive, type DocumentDrive, type DriveItem } from "../drive.ts";
 import type { DocumentsJobInput } from "../types.ts";
 import { baseDeps, consoleRun, INTAKE, RUN_ID, temp } from "./helpers.ts";
@@ -541,6 +543,18 @@ describe("the documents compare the run with the benchmark set", () => {
     deps.store.loadBenchmarkRows = async () => Promise.reject(new Error("connection reset"));
     assert.equal((await processDocumentsJob(RUN_ID, deps, { final: true })).outcome, "done");
     assert.equal(seen[0], null);
+  });
+});
+
+describe("the survey the documents print", () => {
+  test("is the one the sections were reviewed from, and later answers are only counted", () => {
+    const dir = temp();
+    cpSync(recorded, dir, { recursive: true });
+    assert.equal(laterSurveyAnswers(dir, syntheticSurvey(3)), 3, "with no survey kept, every answer is later");
+    writeFileSync(join(dir, SURVEY_FILE), JSON.stringify(withoutComments(syntheticSurvey(6))));
+    assert.equal(loadRun(dir).input.survey!.responses.length, 6);
+    assert.equal(laterSurveyAnswers(dir, syntheticSurvey(8)), 2);
+    assert.equal(laterSurveyAnswers(dir, null), 0);
   });
 });
 

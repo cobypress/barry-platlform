@@ -6,7 +6,7 @@ import { applyNarrative, type Rejection } from "../narrative/apply.ts";
 import type { NarrativeClient } from "../narrative/client.ts";
 import { buildReport, type BuiltReport, type ReportInput } from "../narrative/sections.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
-import { loadRun, OUTPUT_FILES } from "../render/render-run.ts";
+import { loadRun, OUTPUT_FILES, SURVEY_FILE } from "../render/render-run.ts";
 import { OAuthConnectionProvider, revokeConnection } from "../salesforce/oauth-provider.ts";
 import { OAuthError } from "../salesforce/oauth.ts";
 import { buildScanResult } from "../scan/result.ts";
@@ -16,6 +16,7 @@ import type { StoredConnection } from "../salesforce/token-store.ts";
 import { safeReason, type Attempt, type JobOutcome, type WorkerDeps } from "./deps.ts";
 import { withJobLock } from "./lock.ts";
 import { progressOf, RunClosedError, type RunJobInput } from "./types.ts";
+import { withoutComments } from "../survey/questions.ts";
 
 // A run job: the engine's extract and analysis for one console run, through
 // the customer's stored OAuth connection. The run folder is named after the
@@ -167,6 +168,9 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
     // needs no browser. They start as the engine's own text, as `hc render`
     // writes it, and with a key Claude then drafts the ones that have a brief.
     if (input.intake) writeFileSync(join(dir, "intake.json"), `${JSON.stringify(input.intake, null, 2)}\n`, { mode: 0o600 });
+    // The survey as it stands now is the one the sections are built and reviewed
+    // from, so the documents print what was approved. Comments never reach the folder.
+    if (input.survey) writeFileSync(join(dir, SURVEY_FILE), `${JSON.stringify(withoutComments(input.survey), null, 2)}\n`, { mode: 0o600 });
     const { input: reportInput, pseudonyms } = loadRun(dir);
     // A scan and a pulse are never reviewed, so Claude has nothing to draft for either.
     const unreviewed = input.run.product === "scan" || input.run.product === "pulse";

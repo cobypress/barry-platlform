@@ -15,12 +15,15 @@ import {
   PostgresWorkerStore,
   RUN,
   selectSql,
+  surveyFromRows,
   type SqlClient,
   type SqlPool,
   type SqlResult,
 } from "../postgres-store.ts";
 import { progressOf, RunClosedError } from "../types.ts";
 import { consoleRun, INTAKE } from "./helpers.ts";
+import { SURVEY_VERSION } from "../../survey/questions.ts";
+import { syntheticSurvey } from "../../testing/survey.ts";
 
 // The Postgres store has never met a database (it's marked unverified). These
 // tests hold its SQL to the console's columns and its transactions to their
@@ -197,6 +200,25 @@ describe("PostgresWorkerStore", () => {
     assert.match(selectSql("HealthCheckRun", RUN, `"id" = $1`), /"scope"/);
   });
 
+  test("reads the team survey's answers in the order they came in, and none is no survey", async () => {
+    const pool = new FakePool();
+    const answers = syntheticSurvey(2).responses.map((r) => r.answers);
+    pool.handlers.push((text) => {
+      if (text.includes(`FROM "HealthCheckRun" WHERE`)) return { rows: [RUN_ROW], rowCount: 1 };
+      if (text.includes(`FROM "HealthCheckSurveyResponse"`)) return { rows: [{ id: "sr-0000000001", submittedAt: "2026-11-01T09:00:00.000Z", answers: answers[0] }, { id: "sr-0000000002", submittedAt: "2026-11-02T09:00:00.000Z", answers: answers[1] }], rowCount: 2 };
+      return undefined;
+    });
+    const job = (await new PostgresWorkerStore(pool).loadRunJob(RUN_ROW.id))!;
+    assert.deepEqual(job.survey, { version: SURVEY_VERSION, responses: [{ id: "sr-0000000001", submittedAt: "2026-11-01T09:00:00.000Z", answers: answers[0] }, { id: "sr-0000000002", submittedAt: "2026-11-02T09:00:00.000Z", answers: answers[1] }] });
+    const sql = pool.statements.find((s) => s.text.includes("HealthCheckSurveyResponse"))!;
+    assert.equal(sql.text, `SELECT "id", to_char("submittedAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "submittedAt", "answers" FROM "HealthCheckSurveyResponse" WHERE "runId" = $1 ORDER BY "submittedAt", "id"`);
+    assert.deepEqual(sql.values, [RUN_ROW.id]);
+    assert.equal(surveyFromRows([]), null);
+    const none = new FakePool();
+    none.handlers.push((text) => (text.includes(`FROM "HealthCheckRun" WHERE`) ? { rows: [RUN_ROW], rowCount: 1 } : undefined));
+    assert.equal((await new PostgresWorkerStore(none).loadRunJob(RUN_ROW.id))!.survey, null);
+  });
+
   test("an unknown run is null", async () => {
     assert.equal(await new PostgresWorkerStore(new FakePool()).loadRunJob("nope"), null);
   });
@@ -322,6 +344,8 @@ describe("PostgresWorkerStore, for documents", () => {
     assert.equal(job.driveFolderId, "folder-0000000001");
     assert.equal(job.preparedBy, "Synthetic Consultant");
     assert.match(pool.texts().find((t) => t.includes("HealthCheckSectionVersion"))!, /"currentVersionId"/);
+    assert.equal(job.survey, null);
+    assert.match(pool.texts().find((t) => t.includes("HealthCheckSurveyResponse"))!, /WHERE "runId" = \$1 ORDER BY "submittedAt", "id"$/);
   });
 
   test("reads who prepared the report for the cover, and only the documents job does", async () => {

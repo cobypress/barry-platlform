@@ -46,6 +46,7 @@ export const GROUPS: Record<string, GroupSpec> = {
   "segment-gaps": { kind: "conversion_uplift", label: "Teams and segments winning less often than the rest", realisation: LONG_SHOTS },
   "unused-seats": { kind: "licence_waste", label: "Seats held by people who don't log in", realisation: SEATS },
   "unassigned-seats": { kind: "licence_waste", label: "Seats nobody is assigned to", realisation: SEATS },
+  "team-time": { kind: "time_cost", label: "Time your team says it loses", realisation: HOURS },
 };
 
 /** Which group each rule's figure belongs to. A rule not listed gets a group of its own, by the kind of its figure. */
@@ -65,6 +66,18 @@ export const RULE_GROUPS: Record<string, string> = {
   "utl.never-logged-in": "unused-seats",
   "utl.unassigned-licence-seats": "unassigned-seats",
 };
+
+/**
+ * What the team survey says time costs: the median hours a week each person
+ * loses to admin and re-typing, for every active user, over a working year. It
+ * shares a group with the time the findings put a figure on, because they can
+ * be the same hours, and only the largest counts (DECISIONS.md 143).
+ */
+export const TEAM_TIME_GROUP = "team-time";
+export const TEAM_TIME_LINE = "survey:team-time";
+/** A working year: 52 weeks less the 5.6 weeks of UK statutory annual leave, bank holidays included, rounded down. */
+export const WORKING_WEEKS = 46;
+export type TeamTime = { hoursPerWeek: number; users: number; usersFrom: string };
 
 /** Exposure: real money, but not money found. */
 export const EXPOSURE_RULES = new Set(["cur.coverage", "cur.stuck-in-stage", "cur.close-date-pushes", "cur.account-concentration", "fct.commit-at-risk", "fct.early-stage-commits", "lead.campaign-return"]);
@@ -151,9 +164,10 @@ function yearsIn(run: Run): number {
 
 const zero = (): Range => ({ low: 0, expected: 0, high: 0 });
 
-export function buildValueModel(findings: Finding[], run: Run, currency: string, customerHourly?: number | null): ValueModel {
+export function buildValueModel(findings: Finding[], run: Run, currency: string, customerHourly?: number | null, teamTime?: TeamTime | null): ValueModel {
   const hourly = hourlyCost(customerHourly);
   const lines: ValueLine[] = [];
+  const team = teamTime && teamTime.hoursPerWeek > 0 && teamTime.users > 0 ? teamTime : null;
   const left: ValueModel["left"] = [];
   for (const f of findings) {
     if (f.status !== "issue" || f.value.kind === "not_sized") continue;
@@ -186,9 +200,26 @@ export function buildValueModel(findings: Finding[], run: Run, currency: string,
     }
     const known = RULE_GROUPS[f.ruleId];
     const kind: ValueKind = EXPOSURE_RULES.has(f.ruleId) ? "exposure" : known ? GROUPS[known]!.kind : v.kind === "licence_cost" ? "licence_waste" : v.kind === "hours" ? "time_cost" : "exposure";
-    const group = EXPOSURE_RULES.has(f.ruleId) ? f.ruleId : (known ?? f.ruleId);
+    // With the survey's figure, every time line joins it, so the same hours aren't counted twice.
+    const group = EXPOSURE_RULES.has(f.ruleId) ? f.ruleId : (known ?? (team && kind === "time_cost" ? TEAM_TIME_GROUP : f.ruleId));
     const realisation = known ? GROUPS[known]!.realisation : kind === "licence_waste" ? SEATS : kind === "time_cost" ? HOURS : EXPOSED;
     lines.push({ findingId: f.id, ruleId: f.ruleId, title: f.title, kind, group, annual, low: round2(annual * realisation.low), expected: round2(annual * realisation.expected), high: round2(annual * realisation.high), basis });
+  }
+
+  if (team) {
+    const annual = round2(team.hoursPerWeek * team.users * hourly.rate * WORKING_WEEKS);
+    lines.push({
+      findingId: TEAM_TIME_LINE,
+      ruleId: "survey.hours_lost",
+      title: "Time your team says it loses",
+      kind: "time_cost",
+      group: TEAM_TIME_GROUP,
+      annual,
+      low: round2(annual * HOURS.low),
+      expected: round2(annual * HOURS.expected),
+      high: round2(annual * HOURS.high),
+      basis: `${team.hoursPerWeek} hours a week, the median your team gives, for ${team.users} active users (${team.usersFrom}), at £${hourly.rate} an hour over ${WORKING_WEEKS} working weeks`,
+    });
   }
 
   const groups: ValueGroup[] = [];

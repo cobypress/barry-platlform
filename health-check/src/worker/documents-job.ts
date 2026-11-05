@@ -11,6 +11,8 @@ import { withJobLock } from "./lock.ts";
 import { sealPages } from "../microsite/seal.ts";
 import { addMonths } from "./retention.ts";
 import type { DocumentFile, DocumentsJobInput } from "./types.ts";
+import { SURVEY_FILE } from "../render/render-run.ts";
+import { Survey } from "../survey/questions.ts";
 
 // A documents job: once the console has released a run, print its three
 // documents in the approved wording and put them in Google Drive, as
@@ -52,6 +54,17 @@ const LISTED_TO_CONSOLE: ReadonlySet<DocumentKey> = new Set<DocumentKey>(["execu
 export const INTERNAL_FOLDER = "Black Cloud only (not for clients)";
 
 /** The client's folder name: the company the customer gave, else the consultant's reference. */
+/**
+ * Survey answers the console holds that the reviewed sections weren't built
+ * from. The documents print what was approved, so these are only counted.
+ */
+export function laterSurveyAnswers(dir: string, current: Survey | null | undefined): number {
+  if (!current) return 0;
+  const path = join(dir, SURVEY_FILE);
+  const seen = new Set(existsSync(path) ? Survey.parse(JSON.parse(readFileSync(path, "utf8"))).responses.map((r) => r.id) : []);
+  return current.responses.filter((r) => !seen.has(r.id)).length;
+}
+
 export function clientNameOf(input: Pick<DocumentsJobInput, "intake" | "run">): string {
   const name = (input.intake?.customerName ?? input.run.customerRef ?? "").replace(/\s+/g, " ").trim().slice(0, 120);
   return name || "Unnamed client";
@@ -197,6 +210,8 @@ async function documentsLocked(runId: string, deps: WorkerDeps, attempt: Attempt
   try {
     const clientName = clientNameOf(input);
     const benchmark = await benchmarkFor(dir, deps, log);
+    const later = laterSurveyAnswers(dir, input.survey);
+    if (later) log(`${later} survey answers came in after the sections were built, so the documents leave them out, as approved`);
     const printed = await (deps.renderReleased ?? renderReleased)(dir, { ...input, benchmark }, join(dir, "documents"));
     const folder = await folderFor(deps.drive, clientName, input.driveFolderId);
     const nameOf = (output: keyof typeof FILES): string => `${clientName} - ${FILES[output].title}.${FILES[output].ext}`;

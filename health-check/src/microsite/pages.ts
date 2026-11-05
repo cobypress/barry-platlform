@@ -3,7 +3,9 @@ import { checkNumbers } from "../numbercheck/index.ts";
 import type { BuiltReport } from "../narrative/sections.ts";
 import { buildPlan, bySeverity, domainLabel, domainsInOrder, issuesOf, scorecard, verdictOf } from "../narrative/select.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
-import { compactMoney, longDate } from "../render/format.ts";
+import { compactMoney, longDate, percent } from "../render/format.ts";
+import { currentBody } from "../narrative/sections.ts";
+import { SURVEY } from "../survey/summary.ts";
 import { effortText, renderContext, valueText, type Render } from "../render/html.ts";
 import { noteSections, referenceMap } from "../render/references.ts";
 import { HEADLINE_KINDS, KIND_LABELS } from "../value/model.ts";
@@ -79,8 +81,25 @@ function overview(r: Render, report: BuiltReport): string {
     .map((row) => `<tr><td>${r.t(row.label)}</td><td class="num">${row.score ?? r.t("Not scored")}</td><td class="num">${row.issues}</td></tr>`)
     .join("")}</tbody></table>`;
   return page(
-    `<h1>${r.t(`${customer}: your Salesforce health check`)}</h1><p class="muted">${longDate(run.asOf)}</p><h2>${r.t(verdict.headline)}</h2><div class="stats">${score}<div class="stat"><b>${verdict.issues}</b><span>Issues</span></div><div class="stat"><b>${verdict.critical}</b><span>Critical</span></div><div class="stat"><b>${verdict.high}</b><span>High</span></div></div>${worth}${investment}${areas}`,
+    `<h1>${r.t(`${customer}: your Salesforce health check`)}</h1><p class="muted">${longDate(run.asOf)}</p><h2>${r.t(verdict.headline)}</h2><div class="stats">${score}<div class="stat"><b>${verdict.issues}</b><span>Issues</span></div><div class="stat"><b>${verdict.critical}</b><span>Critical</span></div><div class="stat"><b>${verdict.high}</b><span>High</span></div></div>${worth}${investment}${areas}${teamSays(r, report)}`,
   );
+}
+
+/** What the team survey says, as the executive summary has it, and the pairings. Only the line saying why under five answers. */
+function teamSays(r: Render, report: BuiltReport): string {
+  const view = report.survey;
+  if (!view) return "";
+  const text = `<h2>What your team says</h2><p>${r.t(currentBody(report.outputs.executive_summary, "team_survey"))}</p>`;
+  if (!view.shown) return text;
+  const stat = (id: string, label: string, show: (value: number) => string = String): string => {
+    const m = view.metrics.find((x) => x.id === id);
+    return m?.status === "measured" ? `<div class="stat"><b>${show(m.value)}</b><span>${r.t(label)}</span></div>` : "";
+  };
+  const stats = `<div class="stats">${stat(SURVEY.ease, "Ease of use, out of 5")}${stat(SURVEY.trust, "Trust in the figures, out of 5")}${stat(SURVEY.lost, "Hours lost a week, median")}${stat(SURVEY.recommend, "Would recommend it", percent)}</div>`;
+  const pairs = view.pairings.length
+    ? `<table><thead><tr><th>Your team says</th><th>We found</th><th>Together</th></tr></thead><tbody>${view.pairings.map((p) => `<tr><td>${r.t(p.said)}</td><td>${r.t(p.found)}</td><td>${r.t(p.reading)}</td></tr>`).join("")}</tbody></table>`
+    : "";
+  return `${text}${stats}${pairs}`;
 }
 
 /** Adoption's charts, inline: they load nothing. Only the ones that could be drawn. */

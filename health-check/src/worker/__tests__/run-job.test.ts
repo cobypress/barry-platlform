@@ -4,7 +4,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Rejection } from "../../narrative/apply.ts";
 import type { NarrativeClient, NarrativeRequest } from "../../narrative/client.ts";
-import { OUTPUT_FILES } from "../../render/render-run.ts";
+import { OUTPUT_FILES, SURVEY_FILE } from "../../render/render-run.ts";
+import { SYNTHETIC_COMMENT, syntheticSurvey } from "../../testing/survey.ts";
 import { loadAnswers, loadRecording, ReplayTransport } from "../../testing/replay.ts";
 import { Simulator } from "../../testing/simulator.ts";
 import { JobBusyError } from "../lock.ts";
@@ -42,6 +43,20 @@ describe("a run job", () => {
     assert.ok(run.output!.sections.every((s) => s.runId === RUN_ID));
     assert.equal(run.runDir, join(deps.runsDir, RUN_ID));
     for (const file of ["run.json", "findings.json", "intake.json", SECTIONS_FILE]) assert.ok(existsSync(join(run.runDir!, file)), file);
+  });
+
+  test("keeps the survey it built the sections from in the run's folder, without a word of any comment", async () => {
+    const { deps, handle } = await setup({}, { ...runInput(), survey: syntheticSurvey(12) });
+    await handle(job, once);
+    const run = stored(deps);
+    const kept = readFileSync(join(run.runDir!, SURVEY_FILE), "utf8");
+    assert.ok(!kept.includes(SYNTHETIC_COMMENT));
+    assert.equal(JSON.parse(kept).responses.length, 12);
+    const sections = run.output!.sections.filter((s) => s.key === "team_survey");
+    assert.deepEqual(sections.map((s) => s.output).sort(), ["executive_summary", "full_health_check", "raw_notes"]);
+    const texts = run.output!.versions.filter((v) => sections.some((s) => s.currentVersionId === v.id)).map((v) => v.body);
+    assert.ok(texts.every((t) => t.length > 0 && !t.includes(SYNTHETIC_COMMENT)));
+    assert.ok(!readFileSync(join(run.runDir!, SECTIONS_FILE), "utf8").includes(SYNTHETIC_COMMENT));
   });
 
   test("never writes the console's own fields", async () => {

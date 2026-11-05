@@ -3,6 +3,7 @@ import type { PulseResult } from "../pulse/result.ts";
 import { z } from "zod";
 import type { Intake } from "../narrative/intake.ts";
 import type { BenchmarkRow, Calibration, ConnectLink, Finding, ManualAnswer, ManualStep, Metric, NumberOverride, ReportSection, Run, Score, SectionVersion } from "../schemas/index.ts";
+import type { Survey } from "../survey/questions.ts";
 
 // What the worker takes from the queue, and what it needs from the console's
 // database. Jobs carry ids only (the contract with the console, lane C2), so
@@ -53,6 +54,8 @@ export type RunJobInput = {
   /** The stored OAuth connection this run reads through. */
   connectionName: string | null;
   answers: ManualAnswer[];
+  /** The team survey's answers so far. Null or missing when nobody has answered. */
+  survey?: Survey | null;
 };
 
 /**
@@ -120,6 +123,8 @@ export type DocumentsJobInput = {
   run: Run;
   /** The intake as it stands now, with the customer's answers. */
   intake: Intake | null;
+  /** The team survey as it stands now. The documents print the one the sections were reviewed from. */
+  survey?: Survey | null;
   sections: ReportSection[];
   /** The current version of each section. */
   versions: SectionVersion[];

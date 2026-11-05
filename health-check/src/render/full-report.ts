@@ -15,6 +15,7 @@ import { CHAPTER_CSS, chapterSlide } from "./chapter.ts";
 import { PROGRESS_CSS, progressPage } from "./progress.ts";
 import { DOCUMENTED, DOCUMENTED_METRIC_IDS, readDocument } from "../domains/configuration/documented.ts";
 import { accessBlock, automationTable, dataModelDiagram, DIAGRAM_KEY, hasDocument, integrationsBlock, objectsTable, SLIDE_ROWS, sharingTable } from "./documented.ts";
+import { surveySlides } from "./survey.ts";
 
 // The full deck: 16:9, 40 to 60 slides. Issue slides flex to keep it in range,
 // because a thin org and a messy one have very different numbers of findings.
@@ -596,6 +597,9 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   // Only figures with something to stand against: the raw notes say why the rest have nothing yet.
   const compared = report.comparisons.filter((c) => c.value !== null && (c.published.length > 0 || c.own.status === "measured"));
   const comparable = !setupReview && compared.length > 0;
+  // The team survey follows adoption, the chapter it speaks to most, or the last area chapter.
+  const teamSays = surveySlides(r, report, sectionBody(r, built, "team_survey"));
+  const surveyAfter = withIssues.includes("adoption") ? "adoption" : withIssues.at(-1);
   const contents = [
     "What you told us",
     "What we found against it",
@@ -604,6 +608,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
     ...(report.value.total.expected > 0 ? ["What fixing this is worth"] : []),
     ...(comparable ? ["How you compare"] : []),
     ...withIssues.map(domainLabel),
+    ...(teamSays.length ? ["What your team says"] : []),
     ...(working.length ? ["What's working well"] : []),
     ...(pipelinePages.length || gaps.length ? ["Pipeline"] : []),
     ...(plan.some((p) => p.findings.length > 0) ? ["Roadmap"] : []),
@@ -667,7 +672,9 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
     if (usage) add(usage, "tight");
     slides.push(...(density ? domainIssueSlides(r, label, issues, density) : issueTable(r, label, issues)));
     if (domain === inventoryHome && inventoryWorthShowing) slides.push(inventorySlide(r, label, metric(OBJECT_INVENTORY)));
+    if (domain === surveyAfter) slides.push(...teamSays);
   }
+  if (surveyAfter === undefined) slides.push(...teamSays);
 
   if (working.length && !density?.domainSummary) {
     slides.push(...listSlides(r, "Areas", "What's working well", working.map((d) => {
