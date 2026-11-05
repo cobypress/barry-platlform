@@ -195,3 +195,15 @@ Service Cloud, CPQ and Revenue Cloud, Marketing Cloud and Account Engagement, Ex
 22. **The order of the stages:** as written above.
 23. **Published research:** Ebsta and Pavilion's 2025 GTM Benchmarks as the only source for now, with how each figure differs from ours in the raw notes.
 24. **Our own customers' range:** shown from 8 orgs, not 5.
+
+### 5 November 2026, decided under Coby's standing go-ahead
+
+25. **The discovery call canvas** (console, hc/canvas):
+    - The consultant links the account's internal and Slack Connect channels on the run. A run has no Salesforce Account link yet, so we don't guess from `Slack_Channel_Link__c`.
+    - One canvas per run. It goes in the internal channel as a tab, or else to the consultant by direct message.
+    - "Share with the customer" is a separate, confirmed step, and gives the Slack Connect channel edit access.
+    - Answers read back from the canvas go through the call-notes review, and nothing is saved until the consultant confirms it.
+    - The run stores only ids, names, the link and who did what and when; the text stays in Slack.
+26. **The microsite** (Stage 4) is built in two halves:
+    - The worker renders the named pages and seals them, because names exist only on the worker (rule 7).
+    - The console serves them to signed-in customers and deletes them after 12 months (decision 21).
