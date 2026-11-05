@@ -14,10 +14,23 @@ export type Render = {
   t(text: string): string;
   currency: string;
   draft: boolean;
+  /** Where in the raw notes a finding or metric's working is, as a small tag. Empty when it has none. */
+  ref(id: string): string;
 };
 
-export function renderContext(pseudonyms: Pseudonymiser, currency: string, draft: boolean): Render {
-  return { t: (text) => escapeXml(plainWords(ukDates(pseudonyms.restore(text)))), currency, draft };
+/** A reference is a place in the raw notes, not a figure, so the number check passes over it. */
+export const refTag = (ref: string): string => `<span class="ref" data-ref>${ref}</span>`;
+
+export function renderContext(pseudonyms: Pseudonymiser, currency: string, draft: boolean, refs: Map<string, string> = new Map()): Render {
+  return {
+    t: (text) => escapeXml(plainWords(ukDates(pseudonyms.restore(text)))),
+    currency,
+    draft,
+    ref: (id) => {
+      const ref = refs.get(id);
+      return ref ? refTag(ref) : "";
+    },
+  };
 }
 
 export const paragraphs = (r: Render, text: string): string =>
@@ -101,6 +114,8 @@ table.grid { width: 100%; border-collapse: collapse; }
 table.grid th { text-align: left; font-weight: 600; border-bottom: 1px solid var(--carbon); padding: 6px 8px; }
 table.grid td { border-bottom: 1px solid var(--rule); padding: 6px 8px; vertical-align: top; }
 td.num, th.num { text-align: right; white-space: nowrap; }
+.ref { color: var(--muted); font-size: 0.72em; font-weight: 400; letter-spacing: 0.02em; margin-left: 6px; white-space: nowrap; }
+.dark .ref { color: var(--panelMuted); }
 `;
 
 export function document(title: string, size: "a4" | "slide", css: string, pages: string[]): string {

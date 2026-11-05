@@ -115,7 +115,6 @@ function rawNotesSpecs(input: ReportInput): Spec[] {
       ? { key: "intake_summary", title: "Intake summary", body: intakeText(intake), sources: [INTAKE] }
       : { key: "intake_summary", title: "Intake summary", body: "No intake has been recorded for this run.", needsInput: true },
     { key: "assumptions", title: "Assumptions", body: calibrationText(run, calibration), sources: [SOURCE.run, CALIBRATION] },
-    { key: "manual_steps", title: "Manual steps", body: manualSteps.length ? manualSteps.map((s) => `${s.title}: ${s.status}.`).join("\n") : "None raised.", manualStepIds: manualSteps.map((s) => s.id) },
     ...domains.map((domain): Spec => {
       const own = findings.filter((f) => f.domain === domain);
       return { key: `findings_${domain}`, title: `Findings: ${domainLabel(domain)}`, body: `Every check we ran for ${domainLabel(domain).toLowerCase()}, with what it found and how to reproduce it.`, findingIds: own.map((f) => f.id) };
@@ -130,6 +129,8 @@ function rawNotesSpecs(input: ReportInput): Spec[] {
       metricIds: metrics.map((m) => m.id),
     },
     { key: "overrides", title: "Overrides", body: overrides.length ? overrideText(overrides) : "No figures were overridden.", sources: [OVERRIDES] },
+    // Last, so the sections the decks point to are numbered without a gap.
+    { key: "manual_steps", title: "Manual steps", body: manualSteps.length ? manualSteps.map((s) => `${s.title}: ${s.status}.`).join("\n") : "None raised.", manualStepIds: manualSteps.map((s) => s.id) },
   ];
 }
 

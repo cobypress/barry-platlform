@@ -115,3 +115,34 @@ describe("the Word raw notes", () => {
     assert.match(notes.xml, /w:fill="21221C"/);
   });
 });
+
+describe("references between the decks and the raw notes", async () => {
+  const { executiveHtml } = await import("../executive.ts");
+  const { fullReportHtml } = await import("../full-report.ts");
+  const { noteSections, referenceMap } = await import("../references.ts");
+  const report = buildReport(base);
+  const sections = noteSections(report);
+  const refs = referenceMap(sections);
+  const tags = (html: string): string[] => [...html.matchAll(/<span class="ref" data-ref>(R\d+\.\d+)<\/span>/g)].map((m) => m[1]!);
+
+  test("number every section and item of the notes, in the order they're printed", () => {
+    sections.forEach((s) => assert.ok(notes.text.includes(`${s.ref} ${plainWords(s.title)}`), s.ref));
+    assert.equal(sections[0]!.ref, "R1");
+    for (const f of base.findings) assert.ok(notes.text.includes(`${refs.get(f.id)} ${plainWords(ukDates(pseudonyms.restore(f.title)))}`), f.id);
+    for (const m of base.metrics) assert.ok(notes.text.includes(`${refs.get(m.id)} ${m.label}`), m.id);
+  });
+
+  test("every reference a deck prints leads to an item in the notes", () => {
+    const printed = [...tags(executiveHtml(report, pseudonyms)), ...tags(fullReportHtml(report, pseudonyms))];
+    assert.ok(printed.length > 20);
+    const known = new Set(refs.values());
+    for (const ref of printed) assert.ok(known.has(ref), ref);
+  });
+
+  test("the executive summary lists the references it used, and only those", () => {
+    const html = executiveHtml(report, pseudonyms);
+    const page = html.slice(html.indexOf("Where to find the detail"));
+    const listed = [...page.matchAll(/<td data-ref>(R\d+\.\d+)<\/td>/g)].map((m) => m[1]!);
+    assert.deepEqual(new Set(listed), new Set(tags(html.slice(0, html.indexOf("Where to find the detail")))));
+  });
+});

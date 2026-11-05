@@ -56,13 +56,13 @@ function assertBothColumnsUsed(html: string): void {
 const describeProblems = (problems: unknown[]): string => JSON.stringify(problems.slice(0, 8));
 
 describe("the executive summary", () => {
-  test("comes to about 6 pages, with every layout check and number check passing", async () => {
+  test("comes to about 7 pages, with every layout check and number check passing", async () => {
     const report = buildReport(full);
     const { pdf, layout } = await renderPdf(browser, executiveHtml(report, pseudonyms), { ...execRange, dataset: report.dataset });
     assert.deepEqual(layout.problems, [], describeProblems(layout.problems));
     assert.equal(pdfPageCount(pdf), layout.pages);
     assert.equal(pdf.subarray(0, 5).toString(), "%PDF-");
-    assert.ok(layout.pages >= 5 && layout.pages <= 7, `${layout.pages} pages`);
+    assert.ok(layout.pages >= 5 && layout.pages <= 8, `${layout.pages} pages`);
   });
 
   test("holds a verdict, scorecard, top five with value, and the plan", () => {

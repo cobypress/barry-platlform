@@ -7,6 +7,7 @@ import { closedAsChart, deliveryOutlookChart, HALF_WIDTH, lostByStageChart, pipe
 import { compactMoney, longDate, monthYear, percent } from "./format.ts";
 import type { Calibration } from "../schemas/index.ts";
 import { chartSlot, document, effortText, estimateLines, paginate, paragraphs, renderContext, severityChip, valueFigure, valueText, type Render } from "./html.ts";
+import { noteSections, referenceMap } from "./references.ts";
 
 // The full deck: 16:9, 40 to 60 slides. Issue slides flex to keep it in range,
 // because a thin org and a messy one have very different numbers of findings.
@@ -70,6 +71,8 @@ table.data tr.total td { font-weight: 600; border-top: 1px solid var(--carbon); 
 .panel .big { font-size: 26px; font-weight: 600; line-height: 1.2; }
 h3.cap { font-size: 15px; font-weight: 600; color: var(--muted); margin: 0 0 6px; }
 .three-text { columns: 3; column-gap: 24px; }
+.two-text.refs { margin-top: 10px; }
+.two-text.refs .definition { font-size: 17px; margin-bottom: 11px; }
 .three-text .definition { break-inside: avoid; margin-bottom: 8px; font-size: 12px; line-height: 1.32; }
 .compact-rows table.grid { font-size: 13px; line-height: 1.3; }
 .compact-rows table.grid td, .compact-rows table.grid th { padding: 4px 7px; }
@@ -90,7 +93,7 @@ function issueSlide(r: Render, label: string, f: Finding): Slide {
   const value = valueText(r, f);
   const meta = `<div class="meta">${severityChip(f)}<span>Confidence ${f.confidence}</span><span>${effortText(f)}</span></div>`;
   return {
-    html: `<div class="eyebrow">${r.t(label)}</div><h2>${r.t(f.title)}</h2>${meta}<div class="columns" style="margin-top:14px"><div><p>${r.t(f.summary)}</p>${f.recommendation ? `<p style="margin-top:12px"><strong>What to do:</strong> ${r.t(f.recommendation)}</p>` : ""}</div><div class="panel"><h3>Value</h3><p><strong>${value.amount}</strong></p><p class="note">${value.note}</p><h3>Owner</h3><p>${r.t(f.owner)}</p>${f.dependencies.length ? `<h3>Depends on</h3><p class="note">${r.t(f.dependencies.join("; "))}</p>` : ""}</div></div>`,
+    html: `<div class="eyebrow">${r.t(label)}</div><h2>${r.t(f.title)}</h2>${meta}<div class="columns" style="margin-top:14px"><div><p>${r.t(f.summary)}</p>${f.recommendation ? `<p style="margin-top:12px"><strong>What to do:</strong> ${r.t(f.recommendation)}</p>` : ""}</div><div class="panel"><h3>Value</h3><p><strong>${value.amount}</strong>${r.ref(f.id)}</p><p class="note">${value.note}</p><h3>Owner</h3><p>${r.t(f.owner)}</p>${f.dependencies.length ? `<h3>Depends on</h3><p class="note">${r.t(f.dependencies.join("; "))}</p>` : ""}</div></div>`,
   };
 }
 
@@ -103,7 +106,7 @@ function smallCardHeight(f: Finding): number {
 }
 
 function card(r: Render, f: Finding): string {
-  return `<article class="card"><div class="meta">${severityChip(f)}<span>${effortText(f)}</span><span>${valueText(r, f).amount}</span></div><h3>${r.t(f.title)}</h3><p>${r.t(f.summary)}</p><p><strong>What to do:</strong> ${r.t(f.recommendation)}</p></article>`;
+  return `<article class="card"><div class="meta">${severityChip(f)}<span>${effortText(f)}</span><span>${valueText(r, f).amount}</span>${r.ref(f.id)}</div><h3>${r.t(f.title)}</h3><p>${r.t(f.summary)}</p><p><strong>What to do:</strong> ${r.t(f.recommendation)}</p></article>`;
 }
 
 const groupTitle = (f: Finding): string => (f.severity === "low" || f.severity === "info" ? "Smaller issues" : "Other issues");
@@ -165,7 +168,7 @@ const COMPACT_NOTE = "This list is cut short to keep the report readable. The ra
 
 function issueTable(r: Render, label: string, issues: Finding[]): Slide[] {
   if (issues.length === 0) return [];
-  const rows = issues.slice(0, TABLE_ROWS).map((f) => `<tr><td>${r.t(f.title)}</td><td>${severityChip(f)}</td><td>${valueFigure(r, f)}</td><td>${r.t(f.owner)}</td></tr>`);
+  const rows = issues.slice(0, TABLE_ROWS).map((f) => `<tr><td>${r.t(f.title)}${r.ref(f.id)}</td><td>${severityChip(f)}</td><td>${valueFigure(r, f)}</td><td>${r.t(f.owner)}</td></tr>`);
   const note = issues.length > TABLE_ROWS ? `<p style="font-size:15px;margin-bottom:6px">${COMPACT_NOTE}</p>` : "";
   return [{ classes: "tight", html: `<div class="eyebrow">${r.t(label)}</div><h2>Issues</h2>${note}<table class="grid"><thead><tr><th>Issue</th><th style="width:10%">Severity</th><th style="width:24%">Value</th><th style="width:18%">Owner</th></tr></thead><tbody>${rows.join("")}</tbody></table>` }];
 }
@@ -194,9 +197,9 @@ function domainIssueSlides(r: Render, label: string, issues: Finding[], density:
 
 function metricRows(r: Render, metrics: Metric[], currency: string): string {
   const rows = metrics.map((m) => {
-    if (m.status === "not_measurable") return `<tr><td>${r.t(m.label)}</td><td class="num">Not measurable</td><td>${r.t(m.reason)}</td></tr>`;
+    if (m.status === "not_measurable") return `<tr><td>${r.t(m.label)}${r.ref(m.id)}</td><td class="num">Not measurable</td><td>${r.t(m.reason)}</td></tr>`;
     const value = m.unit === "percent" ? percent(m.value) : m.unit === "days" ? `${m.value} days` : m.unit === "currency" ? compactMoney(m.value, currency) : String(m.value);
-    return `<tr><td>${r.t(m.label)}</td><td class="num">${value}</td><td>${r.t(m.definition)}</td></tr>`;
+    return `<tr><td>${r.t(m.label)}${r.ref(m.id)}</td><td class="num">${value}</td><td>${r.t(m.definition)}</td></tr>`;
   });
   return `<table class="grid"><thead><tr><th>Measure</th><th class="num">Result</th><th>What it means</th></tr></thead><tbody>${rows.join("")}</tbody></table>`;
 }
@@ -420,6 +423,14 @@ function twoColumnList(r: Render, eyebrow: string, title: string, items: Array<{
   }));
 }
 
+/** The last page: how a reference leads to the working, and what each section of the raw notes holds. */
+function detailSlide(r: Render, notes: ReturnType<typeof noteSections>): Slide {
+  const lede = "Every issue and measure in this report carries a reference to the raw notes, the Word document that comes with it. Each one sets out the working behind the figure: what we read from your Salesforce, the sample, the calculation and the assumptions.";
+  return {
+    html: `<div class="eyebrow">Appendix</div><h2>Where to find the detail</h2><p class="lede">${r.t(lede)} <span data-ref>R4.3</span> is the third item in section <span data-ref>R4</span>.</p><div class="two-text refs">${notes.map((s) => `<p class="definition"><strong data-ref>${s.ref}</strong> ${r.t(s.title)}</p>`).join("")}</div>`,
+  };
+}
+
 function buildSlides(report: BuiltReport, r: Render, density: Density | null): Slide[] {
   const compact = density === null;
   const dense = density?.columns === 2;
@@ -435,6 +446,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   const assessed = domains.filter((d) => team.some((f) => f.domain === d));
   const unassessed = domains.filter((d) => !assessed.includes(d));
   const customer = intake?.customerName ?? run.customerRef ?? "Customer";
+  const notes = noteSections(report);
   const slides: Slide[] = [];
   const add = (html: string, classes?: string): void => void slides.push({ html, ...(classes ? { classes } : {}) });
 
@@ -511,7 +523,8 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
     <tr><td><strong>Confidence</strong></td><td>How sure we are, given what we could read from your org.</td></tr>
     <tr><td><strong>Effort</strong></td><td>Our sizing of the fix, from very small to very large.</td></tr>
     <tr><td><strong>Impact</strong></td><td>Revenue, licence cost or hours, with its assumptions. Where there's no honest figure to put on it, the risk it carries.</td></tr>
-    <tr><td><strong>Not measurable</strong></td><td>The data can't support the figure, so we report that rather than estimate it.</td></tr></tbody></table>`);
+    <tr><td><strong>Not measurable</strong></td><td>The data can't support the figure, so we report that rather than estimate it.</td></tr>
+    <tr><td><strong>Reference</strong></td><td>Where the working is in the raw notes that come with this report. <span data-ref>R4.3</span> is the third item in section <span data-ref>R4</span>.</td></tr></tbody></table>`);
 
   // What the customer said comes first, and our answer to it straight after: it's what they'll read first.
   add(`<div class="eyebrow">What you told us</div><h2>In your words</h2>${needsInput(built, "stated_problems") ? inputChip : ""}${sectionBody(r, built, "stated_problems")}`);
@@ -521,7 +534,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
 
   add(`<div class="eyebrow">Scorecard</div><h2>How each area stands</h2><div class="chart-wrap" style="max-width:880px">${chartSlot(scorecardChart(scorecard(team, scores)))}</div>`);
 
-  if (top.length) add(`<div class="eyebrow">Top issues</div><h2>${top.length === TOP_ISSUE_COUNT ? `The ${TOP_ISSUE_COUNT} that matter most` : "The issues that matter most"}</h2><table class="grid"><thead><tr><th style="width:6%"></th><th>Issue</th><th style="width:12%">Severity</th><th style="width:26%">Impact</th><th style="width:20%">Owner</th></tr></thead><tbody>${top.map((f, i) => `<tr><td>${i + 1}</td><td>${r.t(f.title)}</td><td>${severityChip(f)}</td><td>${valueText(r, f).amount}</td><td>${r.t(f.owner)}</td></tr>`).join("")}</tbody></table>`);
+  if (top.length) add(`<div class="eyebrow">Top issues</div><h2>${top.length === TOP_ISSUE_COUNT ? `The ${TOP_ISSUE_COUNT} that matter most` : "The issues that matter most"}</h2><table class="grid"><thead><tr><th style="width:6%"></th><th>Issue</th><th style="width:12%">Severity</th><th style="width:26%">Impact</th><th style="width:20%">Owner</th></tr></thead><tbody>${top.map((f, i) => `<tr><td>${i + 1}</td><td>${r.t(f.title)}${r.ref(f.id)}</td><td>${severityChip(f)}</td><td>${valueText(r, f).amount}</td><td>${r.t(f.owner)}</td></tr>`).join("")}</tbody></table>`);
 
   if (density?.domainSummary) {
     slides.push(...twoColumnList(r, "Areas", "Each area at a glance", assessed.map((domain) => {
@@ -560,7 +573,8 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   }
 
   if (pipelinePages.length) {
-    add(`<div class="eyebrow">Deep dive</div><h1>Pipeline</h1><div class="body">${sectionBody(r, built, "pipeline_deep_dive")}</div>`, "dark divider");
+    const pipelineNotes = notes.find((s) => s.key === "pipeline_metrics");
+    add(`<div class="eyebrow">Deep dive</div><h1>Pipeline</h1><div class="body">${sectionBody(r, built, "pipeline_deep_dive")}${pipelineNotes ? `<p class="small-note">The working for every figure in this part is in section <span data-ref>${pipelineNotes.ref}</span> of the raw notes.</p>` : ""}</div>`, "dark divider");
     slides.push(...pipelinePages);
   }
   if (gaps.length) slides.push(...listSlides(r, "Pipeline", "What your data can't tell us yet", gaps, compact));
@@ -575,7 +589,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
     const cut = compact && all.length > 1;
     const pages = cut ? [all[0]!.slice(0, -1)] : all;
     pages.forEach((group, i) => {
-      add(`<div class="eyebrow">Roadmap</div><h2>Days ${phase.from} to ${phase.to}: ${phase.title}${i ? ", continued" : ""}</h2>${cut ? `<p style="font-size:15px;margin-bottom:6px">${COMPACT_NOTE}</p>` : ""}<ul class="action-list${dense ? " two-text" : ""}">${group.map((f) => `<li><strong>${r.t(f.title)}.</strong> ${r.t(f.recommendation)} <span class="owner">${r.t(f.owner)}</span></li>`).join("")}</ul>`);
+      add(`<div class="eyebrow">Roadmap</div><h2>Days ${phase.from} to ${phase.to}: ${phase.title}${i ? ", continued" : ""}</h2>${cut ? `<p style="font-size:15px;margin-bottom:6px">${COMPACT_NOTE}</p>` : ""}<ul class="action-list${dense ? " two-text" : ""}">${group.map((f) => `<li><strong>${r.t(f.title)}.</strong>${r.ref(f.id)} ${r.t(f.recommendation)} <span class="owner">${r.t(f.owner)}</span></li>`).join("")}</ul>`);
     });
   }
 
@@ -603,18 +617,20 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   const reference = (title: string, items: Array<{ title: string; detail: string }>): Slide[] => (compact || items.length === 0 ? listSlides(r, "Appendix", title, items, compact) : twoColumnList(r, "Appendix", title, items));
   slides.push(...reference("What we couldn't measure", team.filter((f) => f.status === "not_measurable").map((f) => ({ title: f.title, detail: f.notMeasurableReason ?? f.summary }))));
   slides.push(...reference("Checks that passed", team.filter((f) => f.status === "passed").map((f) => ({ title: f.title, detail: f.summary }))));
+  // Manual steps are working notes for us, not something the deck refers to.
+  slides.push(detailSlide(r, notes.filter((s) => s.key !== "manual_steps")));
   return slides;
 }
 
 /** Slides at each density in turn, so a test can see how close a deck is to its ceiling. */
 export function slideCounts(report: BuiltReport, pseudonyms: Pseudonymiser): number[] {
-  const r = renderContext(pseudonyms, report.input.calibration.currency, true);
+  const r = renderContext(pseudonyms, report.input.calibration.currency, true, referenceMap(noteSections(report)));
   return [...DENSITIES, null].map((density) => buildSlides(report, r, density).length);
 }
 
 export function fullReportHtml(report: BuiltReport, pseudonyms: Pseudonymiser): string {
   const built = report.outputs.full_health_check;
-  const r = renderContext(pseudonyms, report.input.calibration.currency, !canRelease(built.sections).ok);
+  const r = renderContext(pseudonyms, report.input.calibration.currency, !canRelease(built.sections).ok, referenceMap(noteSections(report)));
   let slides: Slide[] = [];
   for (const density of [...DENSITIES, null]) {
     slides = buildSlides(report, r, density);

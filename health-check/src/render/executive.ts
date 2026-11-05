@@ -5,6 +5,7 @@ import { canRelease, type Finding, type Metric } from "../schemas/index.ts";
 import { deliveryOutlookChart, scorecardChart, winRateBySegment } from "./charts.ts";
 import { compactMoney, longDate, monthYear } from "./format.ts";
 import { chartSlot, document, effortText, estimateLines, paginate, paragraphs, renderContext, severityChip, valueFigure, valueText, type Render } from "./html.ts";
+import { noteSections, referenceMap } from "./references.ts";
 
 // About 7 pages, A4: verdict, scorecard, pipeline, top five issues with value, 90-day plan.
 
@@ -45,7 +46,7 @@ function issueHeight(f: Finding): number {
 
 function issueCard(r: Render, f: Finding, rank: number): string {
   const value = valueText(r, f);
-  return `<article class="issue"><div class="meta"><span>${rank}</span>${severityChip(f)}<span>Confidence ${f.confidence}</span><span>${effortText(f)}</span><span>Owner: ${r.t(f.owner)}</span></div><h3>${r.t(f.title)}</h3><p>${r.t(f.summary)}</p><p class="action"><strong>What to do:</strong> ${r.t(f.recommendation)}</p><p class="value">${value.amount}<small>${value.note}</small></p></article>`;
+  return `<article class="issue"><div class="meta"><span>${rank}</span>${severityChip(f)}<span>Confidence ${f.confidence}</span><span>${effortText(f)}</span><span>Owner: ${r.t(f.owner)}</span>${r.ref(f.id)}</div><h3>${r.t(f.title)}</h3><p>${r.t(f.summary)}</p><p class="action"><strong>What to do:</strong> ${r.t(f.recommendation)}</p><p class="value">${value.amount}<small>${value.note}</small></p></article>`;
 }
 
 /** A summary page holds about a dozen actions. The full report has each phase in full. */
@@ -64,8 +65,8 @@ const phaseHeight = (r: Render, items: Finding[], more: boolean): number => 44 +
 
 type PlanBlock = { phase: PlanPhase; items: Finding[] };
 
-/** The most pages the summary may take. The layout check holds it to this. */
-export const EXECUTIVE_MAX_PAGES = 8;
+/** The most pages the summary may take, the references page included. The layout check holds it to this. */
+export const EXECUTIVE_MAX_PAGES = 9;
 
 type PlanPage = Array<PlanBlock | { intro: true }>;
 
@@ -94,7 +95,7 @@ function planLayout(r: Render, phases: PlanPhase[], introHeight: number, pagesLe
 
 function phaseBlock(r: Render, { phase, items }: PlanBlock): string {
   // The title says what the action is about. A recommendation on its own often says "these deals".
-  const rows = items.map((f) => `<li><strong>${r.t(f.title)}.</strong> ${r.t(f.recommendation)} <span class="owner">${r.t(f.owner)}</span></li>`);
+  const rows = items.map((f) => `<li><strong>${r.t(f.title)}.</strong>${r.ref(f.id)} ${r.t(f.recommendation)} <span class="owner">${r.t(f.owner)}</span></li>`);
   const more = phase.findings.length > items.length ? `<p class="owner">The full report lists the rest of this phase.</p>` : "";
   const body = rows.length ? `<ul>${rows.join("")}</ul>${more}` : "<p>Nothing planned for this phase.</p>";
   return `<section class="phase"><h3>Days ${phase.from} to ${phase.to}: ${phase.title}</h3>${body}</section>`;
@@ -122,7 +123,7 @@ function pipelinePage(r: Render, report: BuiltReport, body: string): string {
   // One line per rule, in the order the rules are listed, so the page has a fixed ceiling.
   const potential = POTENTIAL_REVENUE_RULES.flatMap((id) => teamFindings.find((f) => f.ruleId === id && f.status === "issue") ?? []);
   const table = potential.length
-    ? `<h3 class="sub">Potential revenue in open deals</h3><table class="grid"><thead><tr><th>Deals</th><th style="width:30%">Potential revenue</th></tr></thead><tbody>${potential.map((f) => `<tr><td>${r.t(f.title)}</td><td>${valueFigure(r, f)}</td></tr>`).join("")}</tbody></table>`
+    ? `<h3 class="sub">Potential revenue in open deals</h3><table class="grid"><thead><tr><th>Deals</th><th style="width:30%">Potential revenue</th></tr></thead><tbody>${potential.map((f) => `<tr><td>${r.t(f.title)}${r.ref(f.id)}</td><td>${valueFigure(r, f)}</td></tr>`).join("")}</tbody></table>`
     : "";
   const chart = metrics.some((m) => m.id === "current.delivery_outlook_value")
     ? `<h3 class="sub">Expected won value by month</h3><div style="margin-top:8px">${chartSlot(deliveryOutlookChart(metrics.find((m) => m.id === "current.delivery_outlook_value"), metrics.find((m) => m.id === "current.delivery_outlook_deals"), r.currency))}</div>`
@@ -132,10 +133,21 @@ function pipelinePage(r: Render, report: BuiltReport, body: string): string {
 
 const footer = (r: Render, n: number): string => `<div class="footer" data-chrome><span>Black Cloud Barometer${r.draft ? " | Draft, not approved for release" : ""}</span><span>${n}</span></div>`;
 
+/** How a reference leads to the working, and every reference this summary used, in the order the notes hold them. */
+function detailPage(r: Render, items: Array<{ ref: string; title: string }>): string {
+  const lede = "Each issue in this summary carries a reference to the raw notes, the Word document that comes with it. There you'll find the working behind every figure: what we read from your Salesforce, the sample, the calculation and the assumptions. The full report has the same references for everything else.";
+  const rows = items.sort((a, b) => a.ref.localeCompare(b.ref, "en", { numeric: true })).map((x) => `<tr><td data-ref>${x.ref}</td><td>${r.t(x.title)}</td></tr>`);
+  return `<div class="eyebrow">Where to find the detail</div><h2>How we worked it out</h2><p style="margin-bottom:14px">${r.t(lede)}</p><table class="grid"><thead><tr><th style="width:14%">Reference</th><th>What it covers</th></tr></thead><tbody>${rows.join("")}</tbody></table>`;
+}
+
 export function executiveHtml(report: BuiltReport, pseudonyms: Pseudonymiser): string {
   const { run, intake, calibration, scores = [], preparedBy } = report.input;
   const built = report.outputs.executive_summary;
-  const r = renderContext(pseudonyms, calibration.currency, !canRelease(built.sections).ok);
+  const refs = referenceMap(noteSections(report));
+  const base = renderContext(pseudonyms, calibration.currency, !canRelease(built.sections).ok, refs);
+  // The last page lists every reference the summary used, so each tag is noted as it's printed.
+  const used = new Set<string>();
+  const r: Render = { ...base, ref: (id) => (used.add(id), base.ref(id)) };
   const team = report.teamFindings;
   const verdict = verdictOf(team);
   const top = topIssues(team, TOP_ISSUE_COUNT);
@@ -153,7 +165,7 @@ export function executiveHtml(report: BuiltReport, pseudonyms: Pseudonymiser): s
   add(`<div class="eyebrow">Verdict</div><div class="headline">${r.t(verdict.headline)}</div><div class="lead">${paragraphs(r, currentBody(built, "verdict").replace(`${verdict.headline}.\n\n`, ""))}</div>
     <div class="stat-row" style="margin-top:18px"><div class="stat"><b>${verdict.issues}</b><span>Issues</span></div><div class="stat"><b>${verdict.critical}</b><span>Critical</span></div><div class="stat"><b>${verdict.high}</b><span>High</span></div><div class="stat"><b>${notMeasurable}</b><span>Not measurable</span></div></div>
     <h3 class="sub">What matters most</h3>
-    <table class="grid"><thead><tr><th>Issue</th><th style="width:34%">Impact</th></tr></thead><tbody>${top.map((f) => `<tr><td>${r.t(f.title)}</td><td>${valueText(r, f).amount}</td></tr>`).join("")}</tbody></table>
+    <table class="grid"><thead><tr><th>Issue</th><th style="width:34%">Impact</th></tr></thead><tbody>${top.map((f) => `<tr><td>${r.t(f.title)}${r.ref(f.id)}</td><td>${valueText(r, f).amount}</td></tr>`).join("")}</tbody></table>
     <p style="margin-top:18px">Every figure here comes from your Salesforce org. Where we couldn't measure something, we say so rather than estimate it.</p>`);
 
   add(`<div class="eyebrow">Scorecard</div><h2>How each area stands</h2><p style="margin-bottom:14px">${r.t(currentBody(built, "scorecard"))}</p>${chartSlot(scorecardChart(scorecard(team, scores)))}<h3 class="sub">Win rate by segment</h3><div style="margin-top:8px">${chartSlot(winRateBySegment(report.metrics.find((m) => m.id === "historic.win_rate")))}</div>`);
@@ -170,10 +182,18 @@ export function executiveHtml(report: BuiltReport, pseudonyms: Pseudonymiser): s
   const intro = currentBody(built, "plan_90_day");
   // The first page also carries the introduction, so it has less room.
   const introHeight = 14 + 20.5 * estimateLines(intro, INTRO_CHARS);
-  planLayout(r, plan, introHeight, EXECUTIVE_MAX_PAGES - pages.length).forEach((group, i) => {
+  // One page is kept back for the references.
+  planLayout(r, plan, introHeight, EXECUTIVE_MAX_PAGES - pages.length - 1).forEach((group, i) => {
     const phases = group.filter((b): b is PlanBlock => !("intro" in b));
     add(`<div class="eyebrow">90-day plan</div><h2>${i === 0 ? "What we'd do first" : "What we'd do first, continued"}</h2>${i === 0 ? `<p style="margin-bottom:14px">${r.t(intro)}</p>` : ""}${phases.map((b) => phaseBlock(r, b)).join("")}`);
   });
+
+  const referenced = [...used].flatMap((id) => {
+    const ref = refs.get(id);
+    const f = team.find((x) => x.id === id);
+    return ref && f ? [{ ref, title: f.title }] : [];
+  });
+  if (referenced.length) add(detailPage(r, referenced));
 
   return document("Executive summary", "a4", CSS, pages);
 }

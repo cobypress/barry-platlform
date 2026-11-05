@@ -1,12 +1,12 @@
 import { AlignmentType, BorderStyle, Document, Footer, HeadingLevel, Packer, PageNumber, Paragraph, ShadingType, Table, TableCell, TableRow, TextRun, WidthType } from "docx";
 import { colour, font } from "../design/tokens.ts";
 import { currentBody, type BuiltReport } from "../narrative/sections.ts";
-import { issuesOf } from "../narrative/select.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { canRelease, type Evidence, type Finding, type ManualStep, type Metric, type NumberOverride } from "../schemas/index.ts";
 import { longDate, money, plainWords, ukDates } from "./format.ts";
 import { INVENTORY_COLUMNS, inventoryRows, OBJECT_INVENTORY } from "../domains/configuration/inventory.ts";
 import { inventoryLine } from "../notes/raw-notes.ts";
+import { noteSections, rawNotesOrder } from "./references.ts";
 
 // The working record behind the reports: every check, what it found, and how to
 // reproduce it. Tokens become names here, at the last moment, because this is
@@ -96,8 +96,8 @@ function valueLine(f: Finding, currency: string): string {
   return `${amount} ${f.value.period}. Assumptions: ${f.value.assumptions.join("; ")}.`;
 }
 
-function addFinding(notes: Notes, f: Finding, currency: string): void {
-  notes.heading(f.title, 3);
+function addFinding(notes: Notes, f: Finding, currency: string, ref: string): void {
+  notes.heading(`${ref} ${f.title}`, 3);
   notes.para(`${f.ruleId}, version ${f.ruleVersion}. Finding ${f.id}.`);
   if (f.status === "issue") notes.labelled("Rating", `Severity ${f.severity}, confidence ${f.confidence}, effort ${f.effort.size}, owner ${f.owner}`);
   else notes.labelled("Result", f.status === "passed" ? "Passed" : "Not measurable");
@@ -116,14 +116,14 @@ function addFinding(notes: Notes, f: Finding, currency: string): void {
   if (f.guards.length) notes.table(["Subject", "Guard", "Result", "Detail"], f.guards.map((g) => [g.subject, g.guardId, g.status, g.detail]), [2000, 2400, 900, 4000]);
 }
 
-function addMetric(notes: Notes, m: Metric): void {
+function addMetric(notes: Notes, m: Metric, ref: string): void {
   if (m.status === "not_measurable") {
-    notes.heading(m.label, 3);
+    notes.heading(`${ref} ${m.label}`, 3);
     notes.labelled("Not measurable", m.reason);
     notes.labelled("Definition", m.definition);
     return;
   }
-  notes.heading(`${m.label}: ${m.value}${m.unit === "percent" ? "%" : m.unit === "days" ? " days" : ""}`, 3);
+  notes.heading(`${ref} ${m.label}: ${m.value}${m.unit === "percent" ? "%" : m.unit === "days" ? " days" : ""}`, 3);
   notes.labelled("Definition", m.definition);
   notes.labelled("Sample", `${m.n}${m.dateRange ? `, ${m.dateRange.from} to ${m.dateRange.to}` : ""}`);
   if (m.id === OBJECT_INVENTORY) notes.labelled("In short", inventoryLine(m) ?? "");
@@ -140,8 +140,8 @@ function addMetric(notes: Notes, m: Metric): void {
   if (m.series.length) notes.table(["Month end", "Value", "Sample"], m.series.map((p) => [p.date, p.value === null ? (p.notMeasurableReason ?? "Not measurable") : String(p.value), String(p.n)]), [2300, 5000, 2000]);
 }
 
-function addManualStep(notes: Notes, s: ManualStep): void {
-  notes.heading(`${s.title} (${s.status})`, 3);
+function addManualStep(notes: Notes, s: ManualStep, ref: string): void {
+  notes.heading(`${ref} ${s.title} (${s.status})`, 3);
   notes.labelled("Why it matters", s.whyItMatters);
   notes.labelled("Where to go", s.whereToGo);
   notes.labelled("What to capture", s.whatToCapture);
@@ -173,19 +173,21 @@ export function buildRawNotes(report: BuiltReport, pseudonyms: Pseudonymiser): N
   notes.para(`Run ${run.id}. As of ${run.asOf.slice(0, 10)}. Rule set ${run.ruleSetVersion}. API version ${run.apiVersion}.`);
   if (!release.ok) notes.blocks.push(new Paragraph({ spacing: { after: 160 }, children: [notes.run("Draft: not every section has been approved, so this document can't be released.", { bold: true, colour: hex(colour.alert) })] }));
   notes.para("These notes are the working record behind the reports: every check we ran, what it found and how to reproduce it.");
+  notes.para("Every figure in the executive summary and the full report carries a reference such as R4.3. R4 is section 4 of these notes, and R4.3 is the third item in it.");
 
-  for (const section of built.sections) {
-    notes.heading(section.title, 2);
-    notes.para(currentBody(built, section.key));
-    if (section.key === "manual_steps") manualSteps.forEach((s) => addManualStep(notes, s));
-    if (section.key.startsWith("findings_")) {
-      const own = findings.filter((f) => section.findingIds.includes(f.id));
-      const order = [...issuesOf(own), ...own.filter((f) => f.status === "not_measurable"), ...own.filter((f) => f.status === "passed")];
-      order.forEach((f) => addFinding(notes, f, calibration.currency));
-    }
-    if (section.key === "pipeline_metrics") metrics.forEach((m) => addMetric(notes, m));
-    if (section.key === "queries") addQueries(notes, findings, metrics);
-    if (section.key === "overrides") addOverrides(notes, overrides);
+  const sections = noteSections(report);
+  notes.labelled("Contents", "");
+  for (const s of sections) notes.bullet(`${s.ref} ${s.title}`);
+
+  for (const s of sections) {
+    const ref = (id: string): string => s.items.find((item) => item.id === id)?.ref ?? s.ref;
+    notes.heading(`${s.ref} ${s.title}`, 2);
+    notes.para(currentBody(built, s.key));
+    if (s.key === "manual_steps") manualSteps.forEach((step) => addManualStep(notes, step, ref(step.id)));
+    if (s.key.startsWith("findings_")) rawNotesOrder(findings.filter((f) => s.items.some((item) => item.id === f.id))).forEach((f) => addFinding(notes, f, calibration.currency, ref(f.id)));
+    if (s.key === "pipeline_metrics") metrics.forEach((m) => addMetric(notes, m, ref(m.id)));
+    if (s.key === "queries") addQueries(notes, findings, metrics);
+    if (s.key === "overrides") addOverrides(notes, overrides);
   }
   return notes;
 }

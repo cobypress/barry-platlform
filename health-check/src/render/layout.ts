@@ -62,7 +62,7 @@ async function pageFacts(browserPage: Page): Promise<PageFacts[]> {
       const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
       for (let node = walker.nextNode(); node; node = walker.nextNode()) {
         const parent = node.parentElement;
-        if (!parent || parent.closest("[data-chrome], .tick")) continue;
+        if (!parent || parent.closest("[data-chrome], [data-ref], .tick")) continue;
         const value = (node.textContent ?? "").trim();
         if (value) parts.push(value);
       }

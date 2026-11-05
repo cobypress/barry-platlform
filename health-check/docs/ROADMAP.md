@@ -47,7 +47,7 @@ UK companies with 20 to 500 Salesforce users: big enough to have invested in the
 
 The single biggest jump. A CEO reads numbers, so the executive deck becomes a money document.
 
-### 1.1 References and numbered raw notes (first, because everything else points at them)
+### 1.1 References and numbered raw notes (done, 5 November 2026)
 
 - The raw notes are laid out as numbered sections and items: `R3` is the third area, and `R3.4` is the fourth item in it. Each item holds the inputs, the formula, the sample, the assumptions and, where useful, the named records.
 - Every figure in the decks carries its reference in small type. The last page of each deck, "Where to find the detail", lists the references with their page in the raw notes.
@@ -184,3 +184,12 @@ Service Cloud, CPQ and Revenue Cloud, Marketing Cloud and Account Engagement, Ex
 14. **Who runs checks:** Black Cloud consultants signed in with Google.
 15. **The first three orgs:** paying Black Cloud customers, given the check at no charge, and likely to agree to be case studies.
 16. **Retention:** raw extracts deleted 30 days after release, findings and documents kept 12 months, benchmark rows kept.
+
+### 5 November 2026, later (Coby)
+
+17. **Prices:** Essentials about £7,500, Complete £18,000 to £22,000, Ongoing £1,500 to £2,000 a month, as proposed. The fee credit against fix work is still open.
+18. **Free scan:** each scan waits for a one-tap approval from a Black Cloud consultant in Slack before it runs.
+19. **Call notes to Claude:** names we know (the customer's contacts, Salesforce users and the company) are swapped for labels before the notes go to Claude, and put back in the answers, as the pseudonymiser does for everything else. The consultant is asked to write roles, not names.
+20. **The intake canvas:** shared with the customer through Slack Connect, so they can answer some questions themselves. It reads as Black Cloud's, under the consultant's name, with nothing saying it was generated.
+21. **The microsite:** named content is stored on our side, encrypted and deleted after 12 months, and customers sign in through a link emailed to approved addresses.
+22. **The order of the stages:** as written above.
