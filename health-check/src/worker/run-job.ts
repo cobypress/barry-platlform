@@ -124,6 +124,7 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
       answers: input.answers,
       createdBy: input.run.createdBy,
       customerRef: input.run.customerRef,
+      scope: input.run.scope,
       stopAtShare: deps.stopAtShare,
       transport: deps.dataTransport,
       apiVersion: deps.apiVersion,

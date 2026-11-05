@@ -11,7 +11,7 @@ import type { SectionBrief } from "./draft.ts";
 import type { Intake } from "./intake.ts";
 import { applyOverrides } from "./overrides.ts";
 import { assumptionsSource, findingSource, metricSource, planSource, statedProblemsSource, type PromptSource } from "./prompt.ts";
-import { buildPlan, bySeverity, domainLabel, domainsInOrder, issuesOf, scorecard, teamLevelFinding, topIssues, verdictOf, type Plan } from "./select.ts";
+import { areasOf, buildPlan, bySeverity, domainLabel, domainsInOrder, isSetupReview, issuesOf, scorecard, teamLevelFinding, topIssues, verdictOf, type Plan } from "./select.ts";
 
 // The three outputs, built from one findings dataset. Each section gets a first
 // version written by the engine, so a report always exists even if Claude never
@@ -209,8 +209,12 @@ function rawNotesSpecs(input: ReportInput, overall: OverallScore, comparisons: C
       return { key: `findings_${domain}`, title: `Findings: ${domainLabel(domain)}`, body: `Every check we ran for ${domainLabel(domain).toLowerCase()}, with what it found and how to reproduce it.`, findingIds: own.map((f) => f.id) };
     }),
     // The investment figures have their own section above.
-    { key: "pipeline_metrics", title: "Pipeline metrics", body: "How each pipeline figure was calculated, with its sample, exclusions and assumptions.", metricIds: metrics.filter((m) => !INVESTMENT_METRIC_IDS.includes(m.id)).map((m) => m.id) },
-    {
+    // A set-up review has no pipeline figures, so the section holds the set-up ones.
+    isSetupReview(run)
+      ? { key: "pipeline_metrics", title: "Set-up metrics", body: "How each figure was calculated, with its sample, exclusions and assumptions.", metricIds: metrics.filter((m) => !INVESTMENT_METRIC_IDS.includes(m.id)).map((m) => m.id) }
+      : { key: "pipeline_metrics", title: "Pipeline metrics", body: "How each pipeline figure was calculated, with its sample, exclusions and assumptions.", metricIds: metrics.filter((m) => !INVESTMENT_METRIC_IDS.includes(m.id)).map((m) => m.id) },
+    // Every compared figure is a pipeline figure, which a set-up review never reads.
+    ...(isSetupReview(run) ? [] : [{
       key: "comparisons",
       title: "How you compare",
       body: lines(
@@ -218,7 +222,7 @@ function rawNotesSpecs(input: ReportInput, overall: OverallScore, comparisons: C
         `Our own customers' range is shown from ${OWN_RANGE_MIN} orgs, and groups by industry and size from ${BENCHMARK_MIN_GROUP}. Where your group is too small, we widen it: industry and size, then industry, then size, then every customer.`,
       ),
       sources: [COMPARISONS, ...comparisons.map((c) => comparisonId(c.metric.key))],
-    },
+    }]),
     { key: "queries", title: "Queries", body: "The queries and metadata reads behind these notes, so each finding can be reproduced.", findingIds: findings.map((f) => f.id), metricIds: metrics.map((m) => m.id) },
     {
       key: "exclusions_limits",
@@ -363,7 +367,7 @@ function executiveSpecs(input: ReportInput, team: Finding[]): Spec[] {
   const top = topIssues(team, TOP_ISSUE_COUNT);
   const plan = buildPlan(team);
   const planned = planFindings(plan);
-  const rows = scorecard(team, input.scores ?? []);
+  const rows = scorecard(team, input.scores ?? [], areasOf(input.run, team));
   const scoreSources = rows.filter((r) => r.score !== null).map((r) => `score:${r.domain}`);
   const assessed = rows.filter((r) => r.issues > 0 || team.some((f) => f.domain === r.domain)).length;
   return [
@@ -379,7 +383,8 @@ function executiveSpecs(input: ReportInput, team: Finding[]): Spec[] {
       brief: { purpose: "Tell an executive reader, in a few sentences, what state this Salesforce org is in and what matters most.", sources: [summaryCounts(team), ...top.map(findingSource)] },
     },
     { key: "scorecard", title: "Scorecard", body: "Each area of your Salesforce, scored out of 100. Where an area can't be scored fairly, we say why rather than guess.", findingIds: team.map((f) => f.id), sources: [...SUMMARY_SOURCES, ...scoreSources] },
-    pipelineSpec(input, team),
+    // A set-up review reads no deals, so there's no pipeline to describe.
+    ...(isSetupReview(input.run) ? [] : [pipelineSpec(input, team)]),
     {
       key: "top_issues",
       title: `Top ${TOP_ISSUE_COUNT} issues`,
@@ -426,6 +431,7 @@ function fullSpecs(input: ReportInput, team: Finding[], metrics: Metric[]): Spec
   const notMeasurable = team.filter((f) => f.status === "not_measurable");
   const passed = team.filter((f) => f.status === "passed");
   const pipelineMetrics = metrics.filter((m) => m.domain === "historic_pipeline" || m.domain === "current_pipeline");
+  const setupReview = isSetupReview(input.run);
   return [
     intake && intake.statedProblems.length
       ? { key: "stated_problems", title: "Stated problems", body: lines(intake.summary, ...intake.statedProblems.map((p) => p.statement)), sources: [INTAKE] }
@@ -442,7 +448,7 @@ function fullSpecs(input: ReportInput, team: Finding[], metrics: Metric[]): Spec
         sources: [summaryCounts(team), ...issues.map(findingSource)],
       },
     },
-    ...domainsInOrder(team).map((domain): Spec => {
+    ...areasOf(input.run, team).map((domain): Spec => {
       const own = team.filter((f) => f.domain === domain);
       const issues = issuesOf(own);
       const label = domainLabel(domain);
@@ -458,7 +464,7 @@ function fullSpecs(input: ReportInput, team: Finding[], metrics: Metric[]): Spec
         brief: { purpose: `Explain what we found in ${label.toLowerCase()}, what it means for the customer, and what to do first.`, sources: [...own.map(findingSource), ...measured.map(metricSource)] },
       };
     }),
-    {
+    ...(setupReview ? [] : [{
       key: "pipeline_deep_dive",
       title: "Pipeline deep dive",
       body: pipelineMetrics.some((m) => m.status === "measured") ? deepDiveText(pipelineMetrics, input.calibration.currency) : "Pipeline metrics couldn't be measured in this run.",
@@ -467,7 +473,7 @@ function fullSpecs(input: ReportInput, team: Finding[], metrics: Metric[]): Spec
         purpose: "Explain the pipeline for someone planning delivery as well as someone selling: what's open today and what it's likely to be worth, when it's likely to land, where wins come from, where deals are lost, and how far close dates hold.",
         sources: pipelineMetrics.map(metricSource),
       },
-    },
+    }]),
     statedVsActualSpec(intake, team),
     {
       key: "roadmap",
@@ -540,7 +546,8 @@ export function buildReport(input: ReportInput): BuiltReport {
   const team = effective.findings.map(teamLevelFinding);
   const overall = overallScore(scores, effective.findings);
   const value = buildValueModel(effective.findings, run, calibration.currency, intake?.hourlyCost);
-  const comparisons = compareRun({
+  // Every compared figure comes from deals, which a set-up review never reads.
+  const comparisons = isSetupReview(run) ? [] : compareRun({
     metrics: effective.metrics,
     scores,
     findings: effective.findings,

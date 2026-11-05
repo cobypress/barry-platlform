@@ -1,4 +1,4 @@
-import { SALES_CLOUD_DOMAINS, type Finding, type Score } from "../schemas/index.ts";
+import { SALES_CLOUD_DOMAINS, type Finding, type Run, type Score } from "../schemas/index.ts";
 
 // The choices a report makes about its findings: what's top, what goes when, and
 // what an executive reader sees. All of it is code, so it's repeatable and Claude
@@ -130,9 +130,31 @@ export function verdictOf(findings: Finding[]): Verdict {
 
 export type ScorecardRow = { domain: string; label: string; score: number | null; note: string; assessed: boolean; issues: number; high: number };
 
+/** A set-up review (roadmap 2.2): set-up only, and no CRM records. */
+export const isSetupReview = (run: Pick<Run, "scope">): boolean => run.scope === "essentials";
+
+/** The areas a run covers, in order. A set-up review covers only its own, so the record areas are never shown as gaps. */
+export function areasOf(run: Pick<Run, "scope" | "modules">, findings: Finding[]): string[] {
+  const all = domainsInOrder(findings);
+  return isSetupReview(run) ? all.filter((d) => run.modules.includes(d)) : all;
+}
+
+/** The areas a set-up review leaves to the full check, because they're measured from records. None for a complete run. */
+export function recordAreas(run: Pick<Run, "scope" | "modules">): string[] {
+  return isSetupReview(run) ? SALES_CLOUD_DOMAINS.filter((d) => !run.modules.includes(d)) : [];
+}
+
+/** One line, as a fact, for where a set-up review would otherwise list the record areas as gaps. */
+export function recordAreasLine(run: Pick<Run, "scope" | "modules">): string | null {
+  const areas = recordAreas(run).map((d) => domainLabel(d).toLowerCase());
+  if (!areas.length) return null;
+  const list = areas.length === 1 ? areas[0]! : `${areas.slice(0, -1).join(", ")} and ${areas.at(-1)}`;
+  return `${list.charAt(0).toUpperCase()}${list.slice(1)} are measured from your CRM records, which a set-up review doesn't read. They're part of the full Barometer check.`;
+}
+
 /** Never a zero for a gap: a domain with no score says why it hasn't got one. */
-export function scorecard(findings: Finding[], scores: Score[]): ScorecardRow[] {
-  return domainsInOrder(findings).map((domain) => {
+export function scorecard(findings: Finding[], scores: Score[], areas: string[] = domainsInOrder(findings)): ScorecardRow[] {
+  return areas.map((domain) => {
     const own = findings.filter((f) => f.domain === domain);
     const issues = own.filter((f) => f.status === "issue");
     const score = scores.find((s) => s.domain === domain);

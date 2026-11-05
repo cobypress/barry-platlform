@@ -81,6 +81,7 @@ const customFieldSprawl: Rule = {
 const unusedCustomFields: Rule = {
   id: "cfg.unused-custom-fields",
   version: 2,
+  records: true,
   domain: "configuration",
   title: "Custom fields that are almost never filled in",
   evaluate(ctx): RuleResult | RuleResult[] {
@@ -210,6 +211,7 @@ const undocumentedFields: Rule = {
 const stageSprawl: Rule = {
   id: "cfg.stage-sprawl",
   version: 1,
+  records: true,
   domain: "configuration",
   title: "Too many opportunity stages, or stages nobody uses",
   evaluate(ctx): RuleResult | RuleResult[] {

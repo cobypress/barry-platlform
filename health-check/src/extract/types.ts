@@ -39,6 +39,8 @@ export type Extractor<T = unknown> = {
   version: number;
   /** PartialStore keys to clear once this extractor's output is saved. */
   partialKeys?: string[];
+  /** Reads CRM records, even as counts, so a set-up review never runs it. */
+  records?: true;
   run(ctx: ExtractContext): Promise<T>;
 };
 

@@ -1,12 +1,12 @@
 import { currentBody, TOP_ISSUE_COUNT, type BuiltOutput, type BuiltReport } from "../narrative/sections.ts";
-import { buildPlan, domainLabel, domainsInOrder, issuesOf, scorecard, topIssues, verdictOf } from "../narrative/select.ts";
+import { areasOf, buildPlan, domainLabel, isSetupReview, issuesOf, recordAreasLine, scorecard, topIssues, verdictOf } from "../narrative/select.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
-import { canRelease, type Finding, type Metric } from "../schemas/index.ts";
+import { canRelease, type Finding, type Metric, type Run } from "../schemas/index.ts";
 import { INVENTORY_COLUMNS, inventoryRows, OBJECT_INVENTORY } from "../domains/configuration/inventory.ts";
 import { closedAsChart, deliveryOutlookChart, HALF_WIDTH, lostByStageChart, pipelineOverTime, scorecardChart, stageFunnel, stageVelocityChart, topAccountsChart, winRateBySegment, winsByCustomerChart, wonValueByChart } from "./charts.ts";
 import { compactMoney, longDate, monthYear, percent } from "./format.ts";
 import type { Calibration } from "../schemas/index.ts";
-import { chartSlot, coverScore, document, effortText, estimateLines, paginate, paragraphs, renderContext, severityChip, valueFigure, valueText, type Render } from "./html.ts";
+import { chartSlot, coverScore, document, documentTitle, effortText, estimateLines, paginate, paragraphs, renderContext, severityChip, valueFigure, valueText, type Render } from "./html.ts";
 import { noteSections, referenceMap } from "./references.ts";
 import { scoreLine } from "./executive.ts";
 import { COMPARE_CSS, compareSlide } from "./compare.ts";
@@ -16,6 +16,11 @@ import { MONEY_CSS, moneyPage } from "./money.ts";
 // because a thin org and a messy one have very different numbers of findings.
 
 export const DECK_RANGE = { min: 20, max: 60 } as const;
+// A set-up review has no pipeline part, and a tidy org has few issues to show, so
+// its floor is lower. The ceiling is the same: the deck still has to be read.
+export const SETUP_REVIEW_DECK_RANGE = { min: 12, max: 60 } as const;
+
+export const deckRangeFor = (run: Pick<Run, "scope">): { min: number; max: number } => (isSetupReview(run) ? SETUP_REVIEW_DECK_RANGE : DECK_RANGE);
 
 const CSS = `
 .page { font-size: 20px; line-height: 1.45; }
@@ -445,7 +450,9 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   const verdict = verdictOf(team);
   const top = topIssues(team, TOP_ISSUE_COUNT);
   const { phases: plan, later } = buildPlan(team);
-  const domains = domainsInOrder(team);
+  const setupReview = isSetupReview(run);
+  // A set-up review shows only its own areas: the record areas get one line, below.
+  const domains = areasOf(run, team);
   const assessed = domains.filter((d) => team.some((f) => f.domain === d));
   const unassessed = domains.filter((d) => !assessed.includes(d));
   const customer = intake?.customerName ?? run.customerRef ?? "Customer";
@@ -453,7 +460,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   const slides: Slide[] = [];
   const add = (html: string, classes?: string): void => void slides.push({ html, ...(classes ? { classes } : {}) });
 
-  add(`<div><div class="eyebrow">Black Cloud Barometer</div><h1>Salesforce health check</h1><div class="sub">Full report</div></div>${coverScore(report.overall)}<div>${r.draft ? '<p><span class="mark">Draft, not approved for release</span></p>' : ""}<p class="for">Prepared for</p><p>${r.t(customer)}</p>${preparedBy ? `<p>by ${r.t(preparedBy)}, Black Cloud</p>` : ""}<p>${longDate(run.asOf)}</p></div>`, "dark cover");
+  add(`<div><div class="eyebrow">Black Cloud Barometer</div><h1>${documentTitle(run)}</h1><div class="sub">Full report</div></div>${coverScore(report.overall)}<div>${r.draft ? '<p><span class="mark">Draft, not approved for release</span></p>' : ""}<p class="for">Prepared for</p><p>${r.t(customer)}</p>${preparedBy ? `<p>by ${r.t(preparedBy)}, Black Cloud</p>` : ""}<p>${longDate(run.asOf)}</p></div>`, "dark cover");
 
   // Areas with issues get their own pages. The rest are summed up together, so
   // the deck spends its pages on what needs doing.
@@ -468,6 +475,8 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   const pipelinePages: Slide[] = [];
   const gaps: Array<{ title: string; detail: string }> = [];
   const page = (title: string, ids: string[], make: () => Slide | Slide[]): void => {
+    // A set-up review reads no deals, so the pipeline isn't a gap in it.
+    if (setupReview) return;
     if (sized(ids)) {
       pipelinePages.push(...[make()].flat());
       return;
@@ -510,7 +519,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
 
   // Only figures with something to stand against: the raw notes say why the rest have nothing yet.
   const compared = report.comparisons.filter((c) => c.value !== null && (c.published.length > 0 || c.own.status === "measured"));
-  const comparable = compared.length > 0;
+  const comparable = !setupReview && compared.length > 0;
   const contents = [
     "What you told us",
     "What we found against it",
@@ -544,7 +553,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   const worth = moneyPage(r, report, "slide");
   if (worth) add(worth, "tight");
 
-  add(`<div class="eyebrow">Scorecard</div><h2>How each area stands</h2>${scoreLine(report) ? `<p class="lede">${r.t(scoreLine(report, true))}</p>` : ""}<div class="chart-wrap" style="max-width:${scoreLine(report) ? 760 : 880}px">${chartSlot(scorecardChart(scorecard(team, scores)))}</div>`);
+  add(`<div class="eyebrow">Scorecard</div><h2>How each area stands</h2>${scoreLine(report) ? `<p class="lede">${r.t(scoreLine(report, true))}</p>` : ""}<div class="chart-wrap" style="max-width:${scoreLine(report) ? 760 : 880}px">${chartSlot(scorecardChart(scorecard(team, scores, domains)))}</div>`);
 
   if (comparable) slides.push(compareSlide(r, compared));
 
@@ -578,12 +587,14 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
       return { title: domainLabel(d), detail: `No issues ${passed === 1 ? "in the one check" : `across the ${passed} checks`} we could make here.${open ? ` ${open} more couldn't be measured, and the appendix lists them.` : ""}` };
     }), compact));
   }
-  if (unclear.length) {
+  const recordLine = recordAreasLine(run);
+  if (unclear.length || recordLine) {
     const why = (d: string): string => {
       const score = scores.find((s) => s.domain === d);
       return score?.status === "not_measurable" ? score.reason : unassessed.includes(d) ? "Not part of this health check." : "We couldn't measure this area.";
     };
-    slides.push(...listSlides(r, "Areas", "Where we can't give a view yet", unclear.map((d) => ({ title: domainLabel(d), detail: why(d) })), compact));
+    const items = unclear.map((d) => ({ title: domainLabel(d), detail: why(d) }));
+    slides.push(...listSlides(r, "Areas", "Where we can't give a view yet", recordLine ? [...items, { title: "Areas measured from records", detail: recordLine }] : items, compact));
   }
 
   if (pipelinePages.length) {
@@ -617,9 +628,10 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   slides.push(...listSlides(r, "Appendix", "Assumptions", [
     ...(dense ? [{ title: "How we worked", detail: currentBody(built, "appendix").replace(/\n+/g, " ") }] : []),
     { title: "Analysis window", detail: `${longDate(run.analysisWindow.from)} to ${longDate(run.analysisWindow.to)}` },
-    { title: "Stage meanings", detail: calibration.stages.map((s) => `${s.name} (${s.category.replace("_", " ")})`).join(", ") },
+    // Stages and deal samples only matter where deals are read.
+    ...(setupReview ? [] : [{ title: "Stage meanings", detail: calibration.stages.map((s) => `${s.name} (${s.category.replace("_", " ")})`).join(", ") }]),
     { title: "Dormant users", detail: `No login for ${calibration.dormantDays} days` },
-    { title: "Smallest sample", detail: `At least ${calibration.minSample} deals behind a figure` },
+    ...(setupReview ? [] : [{ title: "Smallest sample", detail: `At least ${calibration.minSample} deals behind a figure` }]),
     { title: "Currency", detail: calibration.currency },
   ], compact));
   // Only what the report shows a figure for needs defining.
@@ -648,7 +660,7 @@ export function fullReportHtml(report: BuiltReport, pseudonyms: Pseudonymiser): 
   let slides: Slide[] = [];
   for (const density of [...DENSITIES, null]) {
     slides = buildSlides(report, r, density);
-    if (slides.length <= DECK_RANGE.max) break;
+    if (slides.length <= deckRangeFor(report.input.run).max) break;
   }
   const pages = slides.map((slide, i) => {
     const chrome = slide.classes?.includes("cover") ? "" : `<div class="footer" data-chrome><span>Black Cloud Barometer${r.draft ? " | Draft, not approved for release" : ""}</span><span>${i + 1}</span></div>`;

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { DomainModule } from "../domains/types.ts";
 import type { Extractor } from "../extract/types.ts";
 import { Pseudonymiser } from "../privacy/pseudonymiser.ts";
-import { DESTRUCTIVE_RECOMMENDATIONS, Finding, Metric, type Calibration, type DateRange, type Evidence, type ManualAnswer, type ManualStep } from "../schemas/index.ts";
+import { DESTRUCTIVE_RECOMMENDATIONS, Finding, Metric, type Calibration, type DateRange, type Evidence, type ManualAnswer, type ManualStep, type RunScope } from "../schemas/index.ts";
 import { MANUAL_STEPS } from "./manual-steps.ts";
 import type { IssueResult, ManualState, Rule, RuleContext, RuleResult } from "./rule.ts";
 
@@ -16,6 +16,8 @@ export type AnalysisInput = {
   pseudonyms: Pseudonymiser;
   /** Real names by user id. Only ever reaches the pseudonymiser. */
   userDirectory: Map<string, { name: string; aliases: string[] }>;
+  /** Complete unless said otherwise. */
+  scope?: RunScope;
 };
 
 export type AnalysisOutput = { findings: Finding[]; metrics: Metric[]; manualSteps: ManualStep[] };
@@ -134,7 +136,7 @@ function runRule(rule: Rule, ctx: RuleContext, pseudonyms: Pseudonymiser): Findi
 }
 
 export function analyse(input: AnalysisInput): AnalysisOutput {
-  const { modules, extracts, calibration, now, window, answers, pseudonyms, userDirectory } = input;
+  const { modules, extracts, calibration, now, window, answers, pseudonyms, userDirectory, scope = "complete" } = input;
   const raised = new Map<string, ManualStep>();
   let currentRule: string | null = null;
 
@@ -168,6 +170,7 @@ export function analyse(input: AnalysisInput): AnalysisOutput {
   };
 
   const base: Omit<RuleContext, "metrics"> = {
+    scope,
     calibration,
     now,
     window,

@@ -111,6 +111,8 @@ const OWNER_QUERY = (object: string): string => `SELECT OwnerId, COUNT(Id) c FRO
 export const ownershipExtractor: Extractor<OwnershipScan> = {
   id: "ownership",
   version: 1,
+  // Counts the records each user owns, object by object.
+  records: true,
   async run(ctx) {
     const counts = ctx.get(recordCountsExtractor);
     const incomplete: string[] = [];

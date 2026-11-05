@@ -184,6 +184,19 @@ describe("PostgresWorkerStore", () => {
     assert.match(pool.texts().find((t) => t.includes("HealthCheckRunStep"))!, /ORDER BY "seq"/);
   });
 
+  test("reads the run's scope, and a run with none is complete", async () => {
+    const scopeOf = async (scope: string | null): Promise<string> => {
+      const pool = new FakePool();
+      pool.handlers.push((text) => (text.includes(`FROM "HealthCheckRun" WHERE`) ? { rows: [{ ...RUN_ROW, scope }], rowCount: 1 } : undefined));
+      return (await new PostgresWorkerStore(pool).loadRunJob(RUN_ROW.id))!.run.scope;
+    };
+    assert.equal(await scopeOf("essentials"), "essentials");
+    assert.equal(await scopeOf("complete"), "complete");
+    assert.equal(await scopeOf(null), "complete");
+    await assert.rejects(scopeOf("everything"));
+    assert.match(selectSql("HealthCheckRun", RUN, `"id" = $1`), /"scope"/);
+  });
+
   test("an unknown run is null", async () => {
     assert.equal(await new PostgresWorkerStore(new FakePool()).loadRunJob("nope"), null);
   });

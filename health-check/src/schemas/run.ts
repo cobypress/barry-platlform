@@ -33,6 +33,10 @@ export const RunBudget = z.object({
 });
 export type RunBudget = z.infer<typeof RunBudget>;
 
+/** Complete reads set-up, records and usage. Essentials, the set-up review, never reads CRM records (roadmap 2.2). */
+export const RunScope = z.enum(["complete", "essentials"]);
+export type RunScope = z.infer<typeof RunScope>;
+
 export const Run = z.object({
   id: z.string().min(1),
   product: z.literal("barometer"),
@@ -42,6 +46,8 @@ export const Run = z.object({
   connectionKind: z.enum(["sf-cli", "oauth"]),
   status: RunStatus,
   modules: z.array(z.string()).min(1),
+  // Runs from before scopes existed were all complete.
+  scope: RunScope.default("complete"),
   ruleSetVersion: z.string().min(1),
   calibrationHash: z.string().min(1),
   baselineRunId: z.string().nullable(),

@@ -1,10 +1,10 @@
 import { currentBody, POTENTIAL_REVENUE_RULES, TOP_ISSUE_COUNT, type BuiltReport } from "../narrative/sections.ts";
-import { buildPlan, scorecard, topIssues, verdictOf, type PlanPhase } from "../narrative/select.ts";
+import { areasOf, buildPlan, isSetupReview, scorecard, topIssues, verdictOf, type PlanPhase } from "../narrative/select.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { canRelease, type Finding, type Metric } from "../schemas/index.ts";
 import { deliveryOutlookChart, scorecardChart, winRateBySegment } from "./charts.ts";
 import { compactMoney, longDate, monthYear } from "./format.ts";
-import { chartSlot, coverScore, document, effortText, estimateLines, paginate, paragraphs, renderContext, severityChip, valueFigure, valueText, type Render } from "./html.ts";
+import { chartSlot, coverScore, document, documentTitle, effortText, estimateLines, paginate, paragraphs, renderContext, severityChip, valueFigure, valueText, type Render } from "./html.ts";
 import { noteSections, referenceMap, valueItemId } from "./references.ts";
 import { investmentPage, MONEY_CSS, moneyPage } from "./money.ts";
 import { nextStepsPage, riskPage } from "./exec-pages.ts";
@@ -171,13 +171,14 @@ export function executiveHtml(report: BuiltReport, pseudonyms: Pseudonymiser): s
   const plan = buildPlan(team).phases;
   const customer = intake?.customerName ?? run.customerRef ?? "Customer";
   const notMeasurable = team.filter((f) => f.status === "not_measurable").length;
+  const setupReview = isSetupReview(run);
 
   const pages: string[] = [];
   const add = (html: string, classes = ""): void => {
     pages.push(`<section class="page ${classes}" data-page="${pages.length + 1}">${html}${classes.includes("cover") ? "" : footer(r, pages.length + 1)}</section>`);
   };
 
-  add(`<div><div class="eyebrow">Black Cloud Barometer</div><h1>Salesforce health check</h1><div class="sub">Executive summary</div></div>${coverScore(report.overall)}<div>${r.draft ? '<p><span class="mark">Draft, not approved for release</span></p>' : ""}<p class="for">Prepared for</p><p>${r.t(customer)}</p>${preparedBy ? `<p>by ${r.t(preparedBy)}, Black Cloud</p>` : ""}<p>${longDate(run.asOf)}</p></div>`, "dark cover");
+  add(`<div><div class="eyebrow">Black Cloud Barometer</div><h1>${documentTitle(run)}</h1><div class="sub">Executive summary</div></div>${coverScore(report.overall)}<div>${r.draft ? '<p><span class="mark">Draft, not approved for release</span></p>' : ""}<p class="for">Prepared for</p><p>${r.t(customer)}</p>${preparedBy ? `<p>by ${r.t(preparedBy)}, Black Cloud</p>` : ""}<p>${longDate(run.asOf)}</p></div>`, "dark cover");
 
   add(`<div class="eyebrow">Verdict</div><div class="headline">${r.t(verdict.headline)}</div><div class="lead">${paragraphs(r, currentBody(built, "verdict").replace(`${verdict.headline}.\n\n`, ""))}</div>
     <div class="stat-row" style="margin-top:18px">${report.overall.status === "measured" ? `<div class="stat"><b>${report.overall.score}</b><span>Barometer score</span></div>` : ""}<div class="stat"><b>${verdict.issues}</b><span>Issues</span></div><div class="stat"><b>${verdict.critical}</b><span>Critical</span></div><div class="stat"><b>${verdict.high}</b><span>High</span></div><div class="stat"><b>${notMeasurable}</b><span>Not measurable</span></div></div>
@@ -190,16 +191,17 @@ export function executiveHtml(report: BuiltReport, pseudonyms: Pseudonymiser): s
   const invested = investmentPage(r, report);
   if (invested) add(invested);
 
-  add(`<div class="eyebrow">Scorecard</div><h2>How each area stands</h2><p style="margin-bottom:14px">${r.t(currentBody(built, "scorecard") + scoreLine(report))}</p>${chartSlot(scorecardChart(scorecard(team, scores)))}<h3 class="sub">Win rate by segment</h3><div style="margin-top:8px">${chartSlot(winRateBySegment(report.metrics.find((m) => m.id === "historic.win_rate")))}</div>`);
+  add(`<div class="eyebrow">Scorecard</div><h2>How each area stands</h2><p style="margin-bottom:14px">${r.t(currentBody(built, "scorecard") + scoreLine(report))}</p>${chartSlot(scorecardChart(scorecard(team, scores, areasOf(run, team))))}${setupReview ? "" : `<h3 class="sub">Win rate by segment</h3><div style="margin-top:8px">${chartSlot(winRateBySegment(report.metrics.find((m) => m.id === "historic.win_rate")))}</div>`}`);
 
   // Only figures with something to stand against, as in the full report.
   const compared = report.comparisons.filter((c) => c.value !== null && (c.published.length > 0 || c.own.status === "measured"));
-  if (compared.length) {
+  if (compared.length && !setupReview) {
     const page = compareSlide(r, compared);
     add(page.html, page.classes ?? "");
   }
 
-  add(pipelinePage(r, report, currentBody(built, "pipeline")));
+  // A set-up review reads no deals, so it has no pipeline page.
+  if (!setupReview) add(pipelinePage(r, report, currentBody(built, "pipeline")));
 
   const ranked = top.map((f, i) => ({ f, rank: i + 1 }));
   const issuePages = paginate(ranked, (x) => issueHeight(x.f), ISSUE_PAGE_BUDGET);
