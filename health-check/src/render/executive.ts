@@ -11,6 +11,7 @@ import { PROGRESS_CSS, progressPage } from "./progress.ts";
 import { nextStepsPage, riskPage } from "./exec-pages.ts";
 import { COMPARE_CSS, compareSlide } from "./compare.ts";
 import { comparisonId } from "../benchmark/compare.ts";
+import { SURVEY } from "../survey/summary.ts";
 
 // About 7 pages, A4: verdict, scorecard, pipeline, top five issues with value, 90-day plan.
 
@@ -185,7 +186,8 @@ export function executiveHtml(report: BuiltReport, pseudonyms: Pseudonymiser): s
     <div class="stat-row" style="margin-top:18px">${report.overall.status === "measured" ? `<div class="stat"><b>${report.overall.score}</b><span>Barometer score</span></div>` : ""}<div class="stat"><b>${verdict.issues}</b><span>Issues</span></div><div class="stat"><b>${verdict.critical}</b><span>Critical</span></div><div class="stat"><b>${verdict.high}</b><span>High</span></div><div class="stat"><b>${notMeasurable}</b><span>Not measurable</span></div></div>
     <h3 class="sub">What matters most</h3>
     <table class="grid"><thead><tr><th>Issue</th><th style="width:34%">Impact</th></tr></thead><tbody>${top.map((f) => `<tr><td>${r.t(f.title)}${r.ref(f.id)}</td><td>${valueText(r, f).amount}</td></tr>`).join("")}</tbody></table>
-    <p style="margin-top:18px">Every figure here comes from your Salesforce org. Where we couldn't measure something, we say so rather than estimate it.</p>`);
+    ${report.survey ? `<h3 class="sub">What your team says${report.survey.shown ? r.ref(SURVEY.responses) : ""}</h3>${paragraphs(r, currentBody(built, "team_survey"))}` : ""}
+    <p style="margin-top:18px">${report.survey?.shown ? "Every figure here comes from your Salesforce org, or from your team's answers to our survey." : "Every figure here comes from your Salesforce org."} Where we couldn't measure something, we say so rather than estimate it.</p>`);
 
   const progressed = progressPage(r, report);
   if (progressed) add(progressed);

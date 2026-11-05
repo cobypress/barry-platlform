@@ -15,6 +15,10 @@ import type { LayoutProblem, LayoutReport } from "./layout.ts";
 import { renderRawNotesDocx } from "./raw-notes-docx.ts";
 import { ONE_PAGER_PAGES, onePagerHtml } from "./one-pager.ts";
 import { renderReadoutKitDocx } from "./readout-kit.ts";
+import { Survey } from "../survey/questions.ts";
+
+/** The team survey as it stood when the sections were built, comments left out (DECISIONS.md 147). */
+export const SURVEY_FILE = "survey.json";
 
 // Turns a finished run folder into its three documents. Everything is written to
 // that folder, outside the repo, because this is where names exist in the clear.
@@ -57,6 +61,7 @@ function loadBaseline(dir: string, run: Run): ReportInput | null {
 /** Loads a run folder. Everything is validated, so a damaged file stops here. */
 export function loadRun(dir: string, options: { baseline?: boolean } = {}): { input: ReportInput; pseudonyms: Pseudonymiser } {
   const intake = readOptional<unknown>(join(dir, "intake.json"));
+  const survey = readOptional<unknown>(join(dir, SURVEY_FILE));
   const input: ReportInput = {
     run: Run.parse(read(join(dir, "run.json"))),
     calibration: Calibration.parse(read(join(dir, "calibration.json"))),
@@ -66,6 +71,7 @@ export function loadRun(dir: string, options: { baseline?: boolean } = {}): { in
     scores: z.array(Score).parse(readOptional(join(dir, "scores.json")) ?? []),
     overrides: z.array(NumberOverride).parse(readOptional(join(dir, "overrides.json")) ?? []),
     intake: intake ? Intake.parse(intake) : null,
+    survey: survey ? Survey.parse(survey) : null,
   };
   if (options.baseline !== false) input.baseline = loadBaseline(dir, input.run);
   return { input, pseudonyms: new Pseudonymiser(read<PseudonymEntry[]>(join(dir, "pseudonym-map.json"))) };

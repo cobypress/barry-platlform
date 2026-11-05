@@ -1,5 +1,5 @@
 import { compareWithBaseline, progressFigures, worthFigures, type Progress } from "../progress/compare.ts";
-import { buildValueModel, worthOf, HEADLINE_KINDS, KIND_LABELS, UK_HOURLY_BENCHMARK, type ValueModel } from "../value/model.ts";
+import { buildValueModel, worthOf, HEADLINE_KINDS, KIND_LABELS, TEAM_TIME_GROUP, UK_HOURLY_BENCHMARK, WORKING_WEEKS, type TeamTime, type ValueModel } from "../value/model.ts";
 import { AREA_WEIGHTS, CRITICAL_CAP, GRADES, overallScore, type OverallScore } from "../domains/scoring.ts";
 import { comparisonId, comparisonNotes, compareRun, OWN_RANGE_MIN, type BenchmarkInput, type Comparison } from "../benchmark/compare.ts";
 import { quarterOf } from "../benchmark/export.ts";
@@ -17,6 +17,10 @@ import { applyOverrides } from "./overrides.ts";
 import { assumptionsSource, findingSource, metricSource, planSource, statedProblemsSource, type PromptSource } from "./prompt.ts";
 import { areasOf, buildPlan, bySeverity, domainLabel, domainsInOrder, isSetupReview, issuesOf, scorecard, teamLevelFinding, topIssues, verdictOf, type Plan } from "./select.ts";
 import { chapterFigures } from "../render/chapter.ts";
+import { MIN_RESPONSES, SURVEY, SURVEY_METRIC_IDS, surveyHours, surveyMetrics } from "../survey/summary.ts";
+import type { Survey } from "../survey/questions.ts";
+import { buildSurveyView, surveyViewFigures, type SurveyView } from "../survey/view.ts";
+import { CONCERN_AT, REKEYING_AT } from "../survey/pairings.ts";
 
 // The three outputs, built from one findings dataset. Each section gets a first
 // version written by the engine, so a report always exists even if Claude never
@@ -35,6 +39,8 @@ export type ReportInput = {
   baseline?: ReportInput | null;
   /** The consultant the documents' cover names. Only the documents job sets it, and it never calls Claude. */
   preparedBy?: string | null;
+  /** The team survey's anonymous answers, as the console stores them (DECISIONS.md 140). */
+  survey?: Survey | null;
   /** Our own customers' benchmark rows. Without them, only published research is compared. */
   benchmark?: BenchmarkInput | null;
   now?: Date;
@@ -66,6 +72,8 @@ export type BuiltReport = {
   briefs: Map<string, SectionBrief>;
   /** The dataset sources each section's number check reads, by section id. A brief's sources are always among them. */
   scopes: Map<string, string[]>;
+  /** What the team survey says, and against what we found. Null when the run has no survey. */
+  survey: SurveyView | null;
 };
 
 export const TOP_ISSUE_COUNT = 5;
@@ -100,13 +108,23 @@ const PLAN = "plan";
 export const OVERALL = "score:overall";
 export const VALUE_TOTAL = "value:total";
 export const PROGRESS = "progress";
+export const SURVEY_SOURCE = "survey";
+
+/** The survey's hours lost for every active user, for the value model. Null without both. */
+function teamTimeOf(metrics: Metric[]): TeamTime | null {
+  const lost = metrics.find((m) => m.id === SURVEY.lost);
+  if (lost?.status !== "measured") return null;
+  const active = metrics.find((m) => m.id === "adoption.monthly_active_users");
+  if (active?.status === "measured" && active.value > 0) return { hoursPerWeek: lost.value, users: active.value, usersFrom: "people who logged in last month" };
+  return null;
+}
 const CHAPTER = "chapter";
 export const valueSource = (group: string): string => `value:${group}`;
 /** The investment section's own figures: what the customer told us they spend. */
 export const INVESTMENT_SOURCE = "investment";
 const COMPARISONS = "comparisons";
 // Metrics with a raw notes section of their own, kept out of the pipeline metrics.
-const OWN_SECTION = new Set([...INVESTMENT_METRIC_IDS, ...ADOPTION_METRIC_IDS, ...PROCESS_METRIC_IDS, ...DOCUMENTED_METRIC_IDS]);
+const OWN_SECTION = new Set([...INVESTMENT_METRIC_IDS, ...ADOPTION_METRIC_IDS, ...PROCESS_METRIC_IDS, ...DOCUMENTED_METRIC_IDS, ...SURVEY_METRIC_IDS]);
 
 const lines = (...parts: Array<string | null | undefined | false>): string => parts.filter(Boolean).join("\n\n");
 const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
@@ -211,7 +229,7 @@ function progressText(p: Progress, currency: string): string {
   );
 }
 
-function rawNotesSpecs(input: ReportInput, overall: OverallScore, comparisons: Comparison[], value: ValueModel, investment: Investment, effectiveMetrics: Metric[], progress: Progress | null): Spec[] {
+function rawNotesSpecs(input: ReportInput, overall: OverallScore, comparisons: Comparison[], value: ValueModel, investment: Investment, effectiveMetrics: Metric[], progress: Progress | null, survey: SurveyView | null): Spec[] {
   const { run, calibration, findings, metrics, manualSteps, intake, overrides = [] } = input;
   const exclusions = [...new Set([...findings.flatMap((f) => f.evidence.flatMap((e) => e.exclusions)), ...metrics.flatMap((m) => m.exclusions)])];
   const notMeasurable = findings.filter((f) => f.status === "not_measurable");
@@ -238,6 +256,7 @@ function rawNotesSpecs(input: ReportInput, overall: OverallScore, comparisons: C
       body: "Who uses Salesforce, how often and how: active users by day, week and month, the monthly trend, how people sign in, Lightning, and report use. Each figure says what it leaves out and how far back the login history goes.",
       metricIds: metrics.filter((m) => ADOPTION_METRIC_IDS.includes(m.id)).map((m) => m.id),
     },
+    ...(survey ? [{ ...surveySpec(survey), body: lines(survey.paragraph, ...surveyMethod(survey)) }] : []),
     ...domains.map((domain): Spec => {
       const own = findings.filter((f) => f.domain === domain);
       return { key: `findings_${domain}`, title: `Findings: ${domainLabel(domain)}`, body: `Every check we ran for ${domainLabel(domain).toLowerCase()}, with what it found and how to reproduce it.`, findingIds: own.map((f) => f.id) };
@@ -415,7 +434,35 @@ function pipelineSpec(input: ReportInput, team: Finding[]): Spec {
   };
 }
 
-function executiveSpecs(input: ReportInput, team: Finding[]): Spec[] {
+/** How the survey was read, for the raw notes. Under five answers, nothing that counts anyone. */
+function surveyMethod(view: SurveyView): string[] {
+  const comments = view.metrics.find((m) => m.id === SURVEY.responses);
+  const left = comments?.status === "measured" ? (comments.stats.comments ?? 0) : null;
+  return [
+    "The survey is anonymous: it never asks for a name, and a role is shown on its own only where 5 or more people gave it.",
+    left === null ? "We don't put the survey's comments in any document." : `${left === 1 ? "1 person" : `${left} people`} left a comment. We don't put comments in any document, so none is quoted here.`,
+    ...(view.shown
+      ? [
+          `We set each answer against what we found by rule, not judgement. A median of ${CONCERN_AT} or less out of 5, or ${REKEYING_AT} hour or more a week typing data in again, is a problem your team feels. An issue in the checks it's set against is a problem we found.`,
+          ...view.pairings.map((p) => `${p.title}: ${p.said} ${p.found} ${p.reading}`),
+        ]
+      : []),
+  ];
+}
+
+/** The team survey's section, the same in every output that has one. */
+function surveySpec(view: SurveyView): Spec {
+  return {
+    key: "team_survey",
+    title: "What your team says",
+    body: view.paragraph,
+    findingIds: [...new Set(view.pairings.flatMap((p) => p.issues.map((f) => f.id)))],
+    metricIds: view.metrics.map((m) => m.id),
+    sources: [SURVEY_SOURCE],
+  };
+}
+
+function executiveSpecs(input: ReportInput, team: Finding[], survey: SurveyView | null): Spec[] {
   const verdict = verdictOf(team);
   const top = topIssues(team, TOP_ISSUE_COUNT);
   const plan = buildPlan(team);
@@ -435,6 +482,7 @@ function executiveSpecs(input: ReportInput, team: Finding[]): Spec[] {
       sources: SUMMARY_SOURCES,
       brief: { purpose: "Tell an executive reader, in a few sentences, what state this Salesforce org is in and what matters most.", sources: [summaryCounts(team), ...top.map(findingSource)] },
     },
+    ...(survey ? [surveySpec(survey)] : []),
     { key: "scorecard", title: "Scorecard", body: "Each area of your Salesforce, scored out of 100. Where an area can't be scored fairly, we say why rather than guess.", findingIds: team.map((f) => f.id), sources: [...SUMMARY_SOURCES, ...scoreSources] },
     // A set-up review reads no deals, so there's no pipeline to describe.
     ...(isSetupReview(input.run) ? [] : [pipelineSpec(input, team)]),
@@ -474,7 +522,7 @@ function executiveSpecs(input: ReportInput, team: Finding[]): Spec[] {
   ];
 }
 
-function fullSpecs(input: ReportInput, team: Finding[], metrics: Metric[]): Spec[] {
+function fullSpecs(input: ReportInput, team: Finding[], metrics: Metric[], survey: SurveyView | null): Spec[] {
   const { intake } = input;
   const built = buildPlan(team);
   const { phases: plan, later } = built;
@@ -527,6 +575,7 @@ function fullSpecs(input: ReportInput, team: Finding[], metrics: Metric[]): Spec
         sources: pipelineMetrics.map(metricSource),
       },
     }]),
+    ...(survey ? [surveySpec(survey)] : []),
     statedVsActualSpec(intake, team),
     {
       key: "roadmap",
@@ -592,13 +641,18 @@ function record(run: Run, output: ReportOutputKey, specs: Spec[], dataset: Figur
   return { output, sections, versions };
 }
 
-export function buildReport(input: ReportInput): BuiltReport {
+export function buildReport(given: ReportInput): BuiltReport {
+  // The team survey's figures sit with the org's. They're built here, not when the
+  // org is read, because answers keep arriving after that (DECISIONS.md 141).
+  const input: ReportInput = { ...given, metrics: [...given.metrics.filter((m) => !SURVEY_METRIC_IDS.includes(m.id)), ...surveyMetrics(given.survey, given.run.asOf)] };
   const { run, calibration, findings, metrics, manualSteps, scores = [], overrides = [], intake = null } = input;
   const now = input.now ?? new Date(run.asOf);
   const effective = applyOverrides(findings, metrics, overrides);
   const team = effective.findings.map(teamLevelFinding);
   const overall = overallScore(scores, effective.findings);
-  const value = buildValueModel(effective.findings, run, calibration.currency, intake?.hourlyCost);
+  const teamTime = teamTimeOf(effective.metrics);
+  const value = buildValueModel(effective.findings, run, calibration.currency, intake?.hourlyCost, teamTime);
+  const survey = buildSurveyView(effective.metrics, team);
   // A re-check compares with its first health check, built the same way, overrides and all.
   let progress: Progress | null = null;
   if (input.baseline) {
@@ -655,6 +709,15 @@ export function buildReport(input: ReportInput): BuiltReport {
     const worth = worthOf(value, new Set(team.filter((f) => f.domain === domain).map((f) => f.id)));
     if (worth > 0) dataset.figures.push({ source: VALUE_TOTAL, kind: "currency", value: worth, currency: calibration.currency });
   }
+  // The survey's hours read as hours, and the working year and scales they're set against.
+  if (teamTime) {
+    const source = valueSource(TEAM_TIME_GROUP);
+    dataset.figures.push(...[teamTime.hoursPerWeek, teamTime.users, WORKING_WEEKS].map((value) => ({ source, kind: "number" as const, value })), { source, kind: "duration", value: teamTime.hoursPerWeek, unit: "hour" }, { source, kind: "duration", value: WORKING_WEEKS, unit: "week" });
+  }
+  if (input.survey) {
+    dataset.figures.push(...surveyHours(effective.metrics).map((value) => ({ source: SURVEY_SOURCE, kind: "duration" as const, value, unit: "hour" })));
+    dataset.figures.push(...[MIN_RESPONSES, 5, 10, WORKING_WEEKS, ...surveyViewFigures(survey)].map((value) => ({ source: SURVEY_SOURCE, kind: "number" as const, value })), { source: SURVEY_SOURCE, kind: "duration", value: WORKING_WEEKS, unit: "week" }, { source: SURVEY_SOURCE, kind: "duration", value: REKEYING_AT, unit: "hour" });
+  }
   // What fixing it is worth against what they pay, as the investment page says it.
   if (investment.annualCost.status === "measured" && investment.annualCost.value > 0 && value.total.expected > 0) {
     dataset.figures.push({ source: VALUE_TOTAL, kind: "ratio", value: Math.round((value.total.expected / investment.annualCost.value) * 10) / 10 });
@@ -676,10 +739,11 @@ export function buildReport(input: ReportInput): BuiltReport {
     progress,
     comparisons,
     investment,
+    survey,
     outputs: {
-      raw_notes: build("raw_notes", rawNotesSpecs(input, overall, comparisons, value, investment, effective.metrics, progress)),
-      executive_summary: build("executive_summary", executiveSpecs(input, team)),
-      full_health_check: build("full_health_check", fullSpecs(input, team, effective.metrics)),
+      raw_notes: build("raw_notes", rawNotesSpecs(input, overall, comparisons, value, investment, effective.metrics, progress, survey)),
+      executive_summary: build("executive_summary", executiveSpecs(input, team, survey)),
+      full_health_check: build("full_health_check", fullSpecs(input, team, effective.metrics, survey)),
     },
     briefs,
     scopes,
