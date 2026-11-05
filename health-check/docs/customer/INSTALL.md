@@ -91,9 +91,9 @@ The connection also lapses by itself if it isn't used for 30 days, once you've s
 
 ### 1. Install the package
 
-<!-- BLACK CLOUD: replace the link below once a version is promoted. Version 0.1.0-7 (04tQH00000NOKy1YAH) is a beta, and betas only install in scratch orgs and sandboxes. If the released version has an installation key, send it to the customer separately. -->
+<!-- BLACK CLOUD: version 0.1.0-7 (04tQH00000NOKy1YAH), released on 5 November 2026. For a sandbox, use test.salesforce.com in place of login.salesforce.com. -->
 
-1. Open this link while signed in to Salesforce as an administrator: `https://login.salesforce.com/packaging/installPackage.apexp?p0=[BLACK CLOUD: package version id]`
+1. Open this link while signed in to Salesforce as an administrator: `https://login.salesforce.com/packaging/installPackage.apexp?p0=04tQH00000NOKy1YAH`
 2. If Salesforce asks for an installation key, enter the one your consultant sent you.
 3. Choose **Install for Admins Only**. The package contains no objects or pages for your users, so the choice makes no practical difference.
 4. Salesforce may warn that the package hasn't been through Salesforce's security review. That's expected for a private package that isn't listed on AppExchange. Tick the box to say you understand, and click **Install**.
