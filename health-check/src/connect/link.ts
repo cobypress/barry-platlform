@@ -4,8 +4,8 @@ import { ConnectLink, PendingAuthorisation } from "../schemas/connect.ts";
 
 // The one-time connect link. A consultant makes one for a customer and sends it
 // to their Salesforce admin. The admin opens it, reads what Barometer will and
-// won't do, and goes to Salesforce to sign in as the read-only integration user
-// and approve the app. Nobody shares a password, and nobody at Black Cloud ever
+// won't do, and goes to Salesforce to sign in as themselves, an admin ideally,
+// and approve the app. Barometer only reads, whoever signs in (DECISIONS 151). Nobody shares a password, and nobody at Black Cloud ever
 // sees one.
 //
 // Everything here is pure, so the console (Milestone 5) only adds storage and
@@ -116,7 +116,7 @@ export function beginAuthorisation(link: ConnectLink, client: OAuthClient, now: 
 /**
  * Salesforce sent the admin back. Checks the state and timing, then returns the
  * code and verifier to exchange. The caller marks the link used only once the
- * exchange and the read-only check have both succeeded, so a refusal can be retried.
+ * exchange and the permission check have both run, so a refusal can be retried.
  */
 export function completeAuthorisation(pending: PendingAuthorisation, link: ConnectLink, callbackUrl: string, now: Date = new Date()): { code: string; codeVerifier: string } {
   const { code, state } = readCallback(callbackUrl);
