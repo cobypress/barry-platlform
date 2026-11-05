@@ -4,7 +4,7 @@
     <ipRelaxationPolicyType>Enforce</ipRelaxationPolicyType>
     <isClientCredentialsFlowEnabled>false</isClientCredentialsFlowEnabled>
     <label>Barometer OAuth policies</label>
-    <permittedUsersPolicyType>AdminApprovedPreAuthorized</permittedUsersPolicyType>
+    <permittedUsersPolicyType>AllSelfAuthorized</permittedUsersPolicyType>
     <refreshTokenPolicyType>SpecificInactivity</refreshTokenPolicyType>
     <refreshTokenValidityPeriod>30</refreshTokenValidityPeriod>
     <refreshTokenValidityUnit>Days</refreshTokenValidityUnit>
