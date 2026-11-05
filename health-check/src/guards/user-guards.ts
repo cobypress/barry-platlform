@@ -40,10 +40,25 @@ export function looksShared(user: Pick<UserRow, "Name" | "Username">): boolean {
 
 const guard = (guardId: string, subject: string, status: GuardStatus, detail: string, evidence: Guard["evidence"]): Guard => ({ guardId, subject, status, detail, evidence });
 
+/** Whether the user owns records, from the ownership scan. Every run but a set-up review reads it. */
+function ownershipGuard(ctx: RuleContext, user: UserRow, subject: string): Guard {
+  const ownership = ctx.data(ownershipExtractor);
+  const owned = ownership.byOwner[user.Id] ?? {};
+  const ownedTotal = Object.values(owned).reduce((a, b) => a + b, 0);
+  const ownershipEvidence = [
+    ctx.ev({ kind: "soql", api: "rest", query: ownership.query }, { count: ownedTotal, note: `Objects scanned: ${ownership.scanned.join(", ")}` }),
+  ];
+  if (ownedTotal > 0) {
+    const list = Object.entries(owned).map(([object, count]) => `${count} ${object}`).join(", ");
+    return guard("owns-no-records", subject, "failed", `Owns ${ownedTotal} records: ${list}.`, ownershipEvidence);
+  }
+  if (ownership.incomplete.length > 0) return guard("owns-no-records", subject, "unknown", `The ownership scan couldn't read: ${ownership.incomplete.join(", ")}.`, ownershipEvidence);
+  return guard("owns-no-records", subject, "passed", `Owns no records across ${ownership.scanned.length} objects.`, ownershipEvidence);
+}
+
 export function userGuards(ctx: RuleContext, user: UserRow): Guard[] {
   const subject = ctx.userLabel(user.Id);
   const users = ctx.data(usersExtractor);
-  const ownership = ctx.data(ownershipExtractor);
   const metadata = ctx.data(metadataExtractor);
   const apex = ctx.data(apexExtractor);
   const runAs = ctx.data(runAsExtractor);
@@ -62,20 +77,12 @@ export function userGuards(ctx: RuleContext, user: UserRow): Guard[] {
     guards.push(guard("not-shared-or-system", subject, "passed", "This looks like one person's account.", usersEvidence));
   }
 
-  // Record ownership, across the core objects and populated custom objects.
-  const owned = ownership.byOwner[user.Id] ?? {};
-  const ownedTotal = Object.values(owned).reduce((a, b) => a + b, 0);
-  const ownershipEvidence = [
-    ctx.ev({ kind: "soql", api: "rest", query: ownership.query }, { count: ownedTotal, note: `Objects scanned: ${ownership.scanned.join(", ")}` }),
-  ];
-  if (ownedTotal > 0) {
-    const list = Object.entries(owned).map(([object, count]) => `${count} ${object}`).join(", ");
-    guards.push(guard("owns-no-records", subject, "failed", `Owns ${ownedTotal} records: ${list}.`, ownershipEvidence));
-  } else if (ownership.incomplete.length > 0) {
-    guards.push(guard("owns-no-records", subject, "unknown", `The ownership scan couldn't read: ${ownership.incomplete.join(", ")}.`, ownershipEvidence));
-  } else {
-    guards.push(guard("owns-no-records", subject, "passed", `Owns no records across ${ownership.scanned.length} objects.`, ownershipEvidence));
-  }
+  // Record ownership, across the core objects and populated custom objects. A
+  // set-up review never reads records, so there the guard stays unread, and
+  // unread blocks (DECISIONS 97).
+  if (ctx.scope === "essentials") {
+    guards.push(guard("owns-no-records", subject, "unknown", "A set-up review doesn't read who owns which records, so check by hand that this user owns none.", [{ kind: "engine", path: "owns-no-records", count: null, dateRange: null, exclusions: [], capturedAt: ctx.now.toISOString(), note: "Not read in a set-up review" }]));
+  } else guards.push(ownershipGuard(ctx, user, subject));
 
   // Named in flows, workflow, approvals, assignment rules or Apex.
   const keys = [user.Id, user.Username, user.Email].map(normaliseUserKey);

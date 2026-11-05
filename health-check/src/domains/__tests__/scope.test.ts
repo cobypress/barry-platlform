@@ -77,8 +77,10 @@ describe("which modules, extracts and rules a scope runs", () => {
 
 describe("an essentials run", async () => {
   const objects = new Set<string>();
+  const queries: string[] = [];
   const transport = new Simulator({
     failQuery: (soql) => {
+      queries.push(soql);
       const object = /\bFROM\s+(\w+)/i.exec(soql)?.[1] ?? "";
       objects.add(object);
       // Fails loudly if it ever happens, so the run can't quietly succeed without it.
@@ -106,6 +108,30 @@ describe("an essentials run", async () => {
   test("its metrics are measured without Opportunity, which it never reads", () => {
     assert.equal(output!.metrics.find((m) => m.id === "configuration.object_inventory")?.status, "measured");
     assert.equal(output!.metrics.find((m) => m.id === "investment.seats_paid")?.status, "measured");
+  });
+
+  test("never runs the ownership scan: no step for it, and no per-owner count of any object", () => {
+    assert.ok(!run.steps.some((s) => s.id === "ownership"));
+    assert.ok(!queries.some((q) => /\bOwnerId\b/.test(q) && /GROUP BY/i.test(q)), "an ownership count was queried");
+  });
+
+  test("keeps the dormant licence checks, held for a check by hand, with the seats' cost (DECISIONS 97)", () => {
+    const dormant = output!.findings.filter((f) => f.ruleId === "utl.dormant-licensed-users" || f.ruleId === "utl.never-logged-in");
+    const toCheck = dormant.filter((f) => f.id.endsWith("check-by-hand") || f.title.startsWith("Licences to check by hand"));
+    assert.ok(toCheck.length > 0, dormant.map((f) => f.title).join("; "));
+    for (const f of toCheck) {
+      assert.equal(f.recommendationType, "investigate");
+      assert.match(f.recommendation, /^Check by hand that each of these users owns no records/);
+      const ownership = f.guards.filter((g) => g.guardId === "owns-no-records");
+      assert.ok(ownership.length > 0 && ownership.every((g) => g.status === "unknown" && /check by hand/.test(g.detail)));
+      assert.ok(f.guards.every((g) => g.guardId === "owns-no-records" || g.status === "passed"));
+      // The cost is shown, never counted as a saving while a guard is unread.
+      assert.equal(f.value.kind, "not_sized");
+      assert.match(f.summary, /Their seats cost £[\d,]+ a year\./);
+      assert.ok(f.facts.seatCost! > 0);
+    }
+    // No essentials finding ever recommends deactivating anyone.
+    assert.ok(!output!.findings.some((f) => f.recommendationType === "deactivate"));
   });
 
   test("a run from before scopes existed reads as complete", () => {

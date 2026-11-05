@@ -1,3 +1,4 @@
+import { money } from "../../render/format.ts";
 import { fieldDescribeExtractor } from "../../extract/fields.ts";
 import { apexExtractor, metadataExtractor, scheduledJobsExtractor } from "../../extract/automation.ts";
 import { orgExtractor, recordCountsExtractor } from "../../extract/configuration.ts";
@@ -60,7 +61,11 @@ function reclaimFindings(ctx: RuleContext, candidates: UserRow[], describe: { ke
   // are still worth reporting, but one held up only by the skip has no answer.
   const heldBySkip = (a: { guards: Guard[] }): boolean => manual.status === "skipped" && a.guards.filter((g) => g.status !== "passed").every((g) => g.guardId === "not-default-workflow-user");
   const unanswered = assessed.filter((a) => !clear.includes(a) && heldBySkip(a));
-  const blocked = assessed.filter((a) => !clear.includes(a) && !heldBySkip(a));
+  // A set-up review never reads ownership. A user held up by nothing else is one
+  // to check by hand, and still worth showing with what the seat costs.
+  const unreadOwnership = (g: Guard): boolean => ctx.scope === "essentials" && g.guardId === "owns-no-records" && g.status === "unknown";
+  const toCheck = assessed.filter((a) => !clear.includes(a) && !heldBySkip(a) && a.guards.every((g) => g.status === "passed" || unreadOwnership(g)));
+  const blocked = assessed.filter((a) => !clear.includes(a) && !heldBySkip(a) && !toCheck.includes(a));
   const segments = [
     { dimension: "licence", segments: new Set(candidates.map(licenceOf)).size },
     { dimension: "role", segments: new Set(candidates.map((u) => u.UserRole?.Name ?? "No role")).size },
@@ -100,6 +105,32 @@ function reclaimFindings(ctx: RuleContext, candidates: UserRow[], describe: { ke
       segmentsChecked: segments,
       subjects: clear.map(label),
       facts: { users: clear.length, ...(value.kind === "licence_cost" ? { annualSaving: value.amount } : {}) },
+      manualStepIds,
+    });
+  }
+
+  if (toCheck.length > 0) {
+    const cost = seatValue(ctx, toCheck.map((a) => a.user));
+    const priced = cost.kind === "licence_cost" ? ` Their seats cost ${money(cost.amount, ctx.calibration.currency)} a year.` : "";
+    results.push({
+      outcome: "issue",
+      key: `${describe.key}-check-by-hand`,
+      title: `Licences to check by hand: ${describe.label}`,
+      summary: `Active users who ${describe.basis}: ${toCheck.length}. Every check we could make passed, but a set-up review doesn't read who owns which records.${priced}`,
+      recommendation: "Check by hand that each of these users owns no records, then deactivate them and release the licences.",
+      recommendationType: "investigate",
+      severity: "low",
+      confidence: "medium",
+      evidence: [usersEvidence],
+      // Not a saving until the check is done: an unread guard never counts as passed (rule 3).
+      value: notSized(`Not counted as a saving until someone has checked by hand that these users own no records.${priced}`),
+      effort: { size: "S" },
+      owner: "Salesforce admin",
+      dependencies: ["Confirm with each line manager that the person has left or moved role"],
+      guards: toCheck.flatMap((a) => a.guards),
+      segmentsChecked: segments,
+      subjects: toCheck.map(label),
+      facts: { users: toCheck.length, ...(cost.kind === "licence_cost" ? { seatCost: cost.amount } : {}) },
       manualStepIds,
     });
   }
@@ -199,8 +230,6 @@ function dormantRule(id: string, title: string, key: string, label: string, basi
     version: 1,
     domain: "utilisation",
     title,
-    // The guards check what each user owns, which reads records.
-    records: true,
     evaluate(ctx): RuleResult | RuleResult[] {
       const users = ctx.data(usersExtractor);
       if (users.status !== "ok") return { outcome: "not_measurable", reason: `Users couldn't be read: ${users.reason}`, evidence: [ctx.ev(users.source, { count: null })] };
