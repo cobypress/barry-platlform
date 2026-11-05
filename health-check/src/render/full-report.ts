@@ -14,6 +14,8 @@ import { MONEY_CSS, moneyPage } from "./money.ts";
 import { CHAPTER_CSS, chapterSlide } from "./chapter.ts";
 import { PROGRESS_CSS, progressPage } from "./progress.ts";
 import { transitionMatrix } from "../domains/historic-pipeline/process.ts";
+import { DOCUMENTED, DOCUMENTED_METRIC_IDS, readDocument } from "../domains/configuration/documented.ts";
+import { accessBlock, automationTable, dataModelDiagram, DIAGRAM_KEY, hasDocument, integrationsBlock, objectsTable, SLIDE_ROWS, sharingTable } from "./documented.ts";
 
 // The full deck: 16:9, 40 to 60 slides. Issue slides flex to keep it in range,
 // because a thin org and a messy one have very different numbers of findings.
@@ -82,11 +84,21 @@ table.data tr.total td { font-weight: 600; border-top: 1px solid var(--carbon); 
 .panel .big { font-size: 26px; font-weight: 600; line-height: 1.2; }
 h3.cap { font-size: 15px; font-weight: 600; color: var(--muted); margin: 0 0 6px; }
 .three-text { columns: 3; column-gap: 24px; }
-.two-text.refs { margin-top: 10px; columns: 3; }
-.two-text.refs .definition { font-size: 16px; margin-bottom: 9px; }
+.two-text.refs { margin-top: 10px; }
+.two-text.refs .definition { font-size: 17px; margin-bottom: 11px; }
+.three-text.refs { margin-top: 10px; }
+.three-text.refs .definition { font-size: 15.5px; margin-bottom: 10px; line-height: 1.3; }
 .three-text .definition { break-inside: avoid; margin-bottom: 8px; font-size: 12px; line-height: 1.32; }
 .compact-rows table.grid { font-size: 13px; line-height: 1.3; }
 .compact-rows table.grid td, .compact-rows table.grid th { padding: 4px 7px; }
+.doc-cols { display: grid; gap: 24px; align-items: start; font-size: 12.5px; line-height: 1.35; }
+.doc-cols h3 { font-size: 15px; font-weight: 600; margin: 0 0 6px; }
+.doc-cols h3.cap { font-size: 12.5px; margin: 8px 0 2px; }
+.doc-cols p { margin: 0 0 4px; }
+.doc-cols table.grid { font-size: 12px; }
+.doc-cols table.grid td, .doc-cols table.grid th { padding: 3px 6px; }
+.doc-list { margin: 0; padding-left: 16px; }
+.doc-list li { margin-bottom: 1px; }
 table.inventory th { white-space: normal; vertical-align: bottom; font-size: 13.5px; line-height: 1.25; }
 `;
 
@@ -452,11 +464,39 @@ function twoColumnList(r: Render, eyebrow: string, title: string, items: Array<{
   }));
 }
 
+const DOCUMENTED_INTRO = "A reference for whoever looks after Salesforce: what the org holds, what runs when a record is saved, what connects to it, who uses it and who can see what. It describes rather than judges, and the full lists are in the raw notes.";
+
+/** The reference part: the data model, automation in the order it runs, then integrations, users and sharing together. A part with nothing measured is left out. */
+function documentedSlides(r: Render, metrics: Metric[], dense: boolean): Slide[] {
+  const doc = readDocument(metrics);
+  if (!hasDocument(doc)) return [];
+  const eyebrow = `<div class="eyebrow">Your org, documented</div>`;
+  const slides: Slide[] = [];
+  if (!dense) slides.push({ classes: "dark divider", html: `<div class="eyebrow">Reference</div><h1>Your org, documented</h1><div class="body">${paragraphs(r, DOCUMENTED_INTRO)}</div>` });
+  if (doc.model) {
+    const diagram = doc.relationships ? `${chartSlot(dataModelDiagram(doc))}<p class="small-note">${r.t(DIAGRAM_KEY)}${r.ref(DOCUMENTED.relationships)}</p>` : chartSlot(dataModelDiagram(doc));
+    slides.push({ classes: "tight compact-rows", html: `${eyebrow}<h2>The data model${r.ref(DOCUMENTED.model)}</h2><div class="chart-pair"><div>${diagram}</div><div>${objectsTable(r, doc, SLIDE_ROWS)}</div></div>` });
+  }
+  if (doc.automation && doc.automation.objects.length) {
+    slides.push({ classes: "tight compact-rows", html: `${eyebrow}<h2>What runs when a record is saved${r.ref(DOCUMENTED.automation)}</h2><p class="lede">${r.t("By object, in the order Salesforce runs each kind. Where some are inactive, a cell shows the active ones out of all.")}</p>${automationTable(r, doc, SLIDE_ROWS)}` });
+  }
+  const columns = [
+    doc.integrations ? `<div><h3>${r.t("Integrations")}${r.ref(DOCUMENTED.integrations)}</h3>${integrationsBlock(r, doc, 6)}</div>` : "",
+    doc.access ? `<div><h3>${r.t("Users and access")}${r.ref(DOCUMENTED.access)}</h3>${accessBlock(r, doc, 6)}</div>` : "",
+    doc.sharing ? `<div><h3>${r.t("Who can see what")}${r.ref(DOCUMENTED.sharing)}</h3>${sharingTable(r, doc)}<p class="small-note">${r.t("The organisation-wide default for each object.")}</p></div>` : "",
+  ].filter(Boolean);
+  if (columns.length) slides.push({ html: `${eyebrow}<h2>Integrations, users and security</h2><div class="doc-cols" style="grid-template-columns:repeat(${columns.length},1fr)">${columns.join("")}</div>` });
+  return slides;
+}
+
 /** The last page: how a reference leads to the working, and what each section of the raw notes holds. */
+// Past this many sections, two columns run off the page.
+const REFS_IN_TWO_COLUMNS = 22;
+
 function detailSlide(r: Render, notes: ReturnType<typeof noteSections>): Slide {
   const lede = "Every issue and measure in this report carries a reference to the raw notes, the Word document that comes with it. Each one sets out the working behind the figure: what we read from your Salesforce, the sample, the calculation and the assumptions.";
   return {
-    html: `<div class="eyebrow">Appendix</div><h2>Where to find the detail</h2><p class="lede">${r.t(lede)} <span data-ref>R4.3</span> is the third item in section <span data-ref>R4</span>.</p><div class="two-text refs">${notes.map((s) => `<p class="definition"><strong data-ref>${s.ref}</strong> ${r.t(s.title)}</p>`).join("")}</div>`,
+    html: `<div class="eyebrow">Appendix</div><h2>Where to find the detail</h2><p class="lede">${r.t(lede)} <span data-ref>R4.3</span> is the third item in section <span data-ref>R4</span>.</p><div class="${notes.length > REFS_IN_TWO_COLUMNS ? "three-text" : "two-text"} refs">${notes.map((s) => `<p class="definition"><strong data-ref>${s.ref}</strong> ${r.t(s.title)}</p>`).join("")}</div>`,
   };
 }
 
@@ -556,6 +596,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
     ...(pipelinePages.length || gaps.length ? ["Pipeline"] : []),
     ...(plan.some((p) => p.findings.length > 0) ? ["Roadmap"] : []),
     "What happens next",
+    ...(hasDocument(readDocument(metrics)) ? ["Your org, documented"] : []),
     "Appendix",
   ];
   add(`<div class="eyebrow">Contents</div><h2>What's in this report</h2><ol class="contents">${contents.map((c) => `<li>${r.t(c)}</li>`).join("")}</ol>`);
@@ -659,6 +700,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   if (later.length) slides.push(...(density?.domainSummary ? threeColumnList(r, "Roadmap", "After 90 days", afterPlan) : dense ? twoColumnList(r, "Roadmap", "After 90 days", afterPlan) : listSlides(r, "Roadmap", "After 90 days", afterPlan, compact)));
 
   slides.push(nextStepsSlide(r, plan));
+  slides.push(...documentedSlides(r, metrics, dense));
 
   if (!dense) add(`<div class="eyebrow">Appendix</div><h1>How we worked</h1><div class="body">${sectionBody(r, built, "appendix")}</div>`, "dark divider");
   slides.push(...listSlides(r, "Appendix", "Assumptions", [
@@ -670,8 +712,9 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
     ...(setupReview ? [] : [{ title: "Smallest sample", detail: `At least ${calibration.minSample} deals behind a figure` }]),
     { title: "Currency", detail: calibration.currency },
   ], compact));
-  // Only what the report shows a figure for needs defining.
-  const definitions = metrics.filter((m) => m.status === "measured").map((m) => ({ title: m.label, detail: m.definition }));
+  // Only what the report shows a figure for needs defining. The documented org
+  // is described on its own pages, and its definitions are in the raw notes.
+  const definitions = metrics.filter((m) => m.status === "measured" && !DOCUMENTED_METRIC_IDS.includes(m.id)).map((m) => ({ title: m.label, detail: m.definition }));
   // Two columns at every density but the last: definitions are reference, and
   // one to a line took a slide for every few metrics.
   slides.push(...(compact ? listSlides(r, "Appendix", "Metric definitions", definitions, compact) : dense ? threeColumnList(r, "Appendix", "Metric definitions", definitions) : twoColumnList(r, "Appendix", "Metric definitions", definitions)));

@@ -10,6 +10,7 @@ import { noteSections, rawNotesOrder, valueItemId } from "./references.ts";
 import { KIND_LABELS, type ValueGroup } from "../value/model.ts";
 import { comparisonId, comparisonNotes, formatFigure, type Comparison } from "../benchmark/compare.ts";
 import { TRANSITIONS, transitionMatrix } from "../domains/historic-pipeline/process.ts";
+import { DOCUMENTED, readDocument, sharingLabel } from "../domains/configuration/documented.ts";
 
 // The working record behind the reports: every check, what it found, and how to
 // reproduce it. Tokens become names here, at the last moment, because this is
@@ -162,6 +163,52 @@ function addMetric(notes: Notes, m: Metric, ref: string, calibration: Calibratio
   if (m.series.length) notes.table(["Month end", "Value", "Sample"], m.series.map((p) => [p.date, p.value === null ? (p.notMeasurableReason ?? "Not measurable") : String(p.value), String(p.n)]), [2300, 5000, 2000]);
 }
 
+/** The documented org, every list in full. A part that couldn't be measured says why, as any metric does. */
+function addDocumented(notes: Notes, metrics: Metric[], ids: string[], ref: (id: string) => string, calibration: Calibration): void {
+  const doc = readDocument(metrics);
+  const yes = (b: boolean): string => (b ? "Yes" : "No");
+  for (const id of ids) {
+    const m = metrics.find((x) => x.id === id);
+    if (!m) continue;
+    if (m.status !== "measured") {
+      addMetric(notes, m, ref(id), calibration);
+      continue;
+    }
+    notes.heading(`${ref(id)} ${m.label}: ${m.value}`, 3);
+    notes.labelled("Definition", m.definition);
+    if (m.exclusions.length) notes.labelled("Excludes", m.exclusions.join("; "));
+    if (m.assumptions.length) notes.labelled("Assumptions", m.assumptions.join("; "));
+    if (id === DOCUMENTED.model && doc.model) {
+      notes.table(["Object", "Records", "Custom fields", "Record types"], doc.model.objects.map((o) => [o.name, o.records === null ? "No count kept" : String(o.records), o.customFields === null ? "Not read" : String(o.customFields), o.recordTypes.map((t) => `${t.name}${t.active ? "" : " (inactive)"}`).join(", ") || "None"]), [2400, 1300, 1300, 4300]);
+      const filled = doc.model.objects.filter((o) => o.mostFilled.length);
+      if (filled.length) notes.table(["Object", "Most-filled custom field", "Filled", "Records"], filled.flatMap((o) => o.mostFilled.map((f) => [o.name, f.field, `${f.filledPct}%`, String(f.total)])), [2000, 4300, 1300, 1700]);
+    }
+    if (id === DOCUMENTED.relationships && doc.relationships) notes.table(["From", "Field", "To", "Kind"], doc.relationships.links.map((l) => [l.from, l.field, l.to, l.kind === "master-detail" ? "Master-detail" : "Lookup"]), [2300, 2800, 2300, 1900]);
+    if (id === DOCUMENTED.automation && doc.automation) {
+      for (const o of doc.automation.objects) {
+        notes.labelled(o.object, `${o.steps.reduce((sum, s) => sum + s.items.length, 0)} items`);
+        notes.table(["When it runs", "Name", "Active", "Description"], o.steps.flatMap((s) => s.items.map((i) => [`${s.label}${s.step === null ? "" : ` (step ${s.step})`}`, i.name, yes(i.active), i.described === null ? "Not read" : yes(i.described)])), [2800, 3700, 1200, 1600]);
+      }
+    }
+    if (id === DOCUMENTED.integrations && doc.integrations) {
+      const i = doc.integrations;
+      if (i.connectedApps.length) notes.table(["Connected app", "Who can use it"], i.connectedApps.map((a) => [a.name, a.adminApprovedOnly ? "Admin-approved users only" : "Users can authorise it themselves"]), [4600, 4700]);
+      if (i.namedCredentials.length) notes.table(["Named credential"], i.namedCredentials.map((c) => [c]), [9300]);
+      if (i.remoteSites.length) notes.table(["Remote site", "Active"], i.remoteSites.map((r) => [r.host, yes(r.active)]), [7000, 2300]);
+      if (i.integrationUsers.length) notes.table(["Integration users", "Active users"], i.integrationUsers.map((u) => [u.group, String(u.users)]), [7000, 2300]);
+      if (i.apiLogins.length) notes.table(["API logins in the last 90 days, by application", "Logins", "Users"], i.apiLogins.map((a) => [a.application, String(a.logins), String(a.users)]), [5500, 1900, 1900]);
+    }
+    if (id === DOCUMENTED.access && doc.access) {
+      const a = doc.access;
+      if (a.roleCount !== null && a.roleDepth !== null) notes.labelled("Role hierarchy", `${a.roleCount} roles, ${a.roleDepth} levels deep`);
+      notes.table(["Profile", "Active users"], a.profiles.map((p) => [p.name, String(p.users)]), [7000, 2300]);
+      notes.table(["Role", "Active users"], a.roles.map((p) => [p.name, String(p.users)]), [7000, 2300]);
+      if (a.permissionSets.length) notes.table(["Permission set", "Active users holding it"], a.permissionSets.map((p) => [p.name, String(p.users)]), [7000, 2300]);
+    }
+    if (id === DOCUMENTED.sharing && doc.sharing) notes.table(["Object", "Internal default", "External default"], doc.sharing.objects.map((o) => [o.object, o.internal ? sharingLabel(o.internal) : "Not set", o.external ? sharingLabel(o.external) : "Not set"]), [3100, 3100, 3100]);
+  }
+}
+
 function addComparison(notes: Notes, c: Comparison, ref: string): void {
   notes.heading(`${ref} ${c.metric.label}${c.value === null ? "" : `: ${formatFigure(c.value, c.metric.unit)}`}`, 3);
   for (const line of comparisonNotes(c)) notes.labelled(line.label, line.text);
@@ -213,6 +260,7 @@ export function buildRawNotes(report: BuiltReport, pseudonyms: Pseudonymiser): N
     if (s.key === "manual_steps") manualSteps.forEach((step) => addManualStep(notes, step, ref(step.id)));
     if (s.key.startsWith("findings_")) rawNotesOrder(findings.filter((f) => s.items.some((item) => item.id === f.id))).forEach((f) => addFinding(notes, f, calibration.currency, ref(f.id)));
     if (s.key === "pipeline_metrics" || s.key === "investment" || s.key === "adoption" || s.key === "sales_process") metrics.filter((m) => s.items.some((item) => item.id === m.id)).forEach((m) => addMetric(notes, m, ref(m.id), calibration));
+    if (s.key === "org_documented") addDocumented(notes, metrics, s.items.map((item) => item.id), ref, calibration);
     if (s.key === "value_model") report.value.groups.forEach((g) => addValueGroup(notes, g, calibration.currency, ref(valueItemId(g.id))));
     if (s.key === "comparisons") report.comparisons.forEach((c) => addComparison(notes, c, ref(comparisonId(c.metric.key))));
     if (s.key === "queries") addQueries(notes, findings, metrics);

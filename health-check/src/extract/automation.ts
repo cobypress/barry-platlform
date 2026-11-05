@@ -50,7 +50,9 @@ export const metadataExtractor: Extractor<Sourced<MetadataBundle>> = {
 // has any comment, and whether it's a test. Null when the body is hidden.
 type CodeFacts = { commented: boolean | null; isTest: boolean };
 export type ApexClassRow = { Id: string; Name: string; ApiVersion: number; Status: string; LengthWithoutComments: number } & CodeFacts;
-export type ApexTriggerRow = { Id: string; Name: string; TableEnumOrId: string; ApiVersion: number; Status: string } & CodeFacts;
+/** When a trigger runs (Object Reference, API 68.0). Undefined in a checkpoint from before they were read. */
+export type TriggerUsage = { UsageBeforeInsert?: boolean; UsageBeforeUpdate?: boolean; UsageBeforeDelete?: boolean; UsageAfterInsert?: boolean; UsageAfterUpdate?: boolean; UsageAfterDelete?: boolean; UsageAfterUndelete?: boolean };
+export type ApexTriggerRow = { Id: string; Name: string; TableEnumOrId: string; ApiVersion: number; Status: string } & TriggerUsage & CodeFacts;
 export type ClassCoverage = { name: string; covered: number; uncovered: number };
 
 export type ApexData = {
@@ -77,7 +79,7 @@ function stripBodies<R extends { Name: string; Body?: string }>(rows: Sourced<R[
 
 export const apexExtractor: Extractor<ApexData> = {
   id: "apex",
-  version: 4,
+  version: 5,
   async run(ctx) {
     const references: ReferenceIndex = { users: {}, fields: {} };
     // Through REST, not Tooling: a user with View Setup but not Author Apex gets
@@ -91,7 +93,7 @@ export const apexExtractor: Extractor<ApexData> = {
     // TableEnumOrId or NamespacePrefix on ApexTrigger, and the Object Reference does.
     const triggers = await readSoql<Omit<ApexTriggerRow, keyof CodeFacts> & { Body?: string }>(
       ctx,
-      "SELECT Id, Name, TableEnumOrId, ApiVersion, Status, Body FROM ApexTrigger WHERE NamespacePrefix = null",
+      "SELECT Id, Name, TableEnumOrId, ApiVersion, Status, UsageBeforeInsert, UsageBeforeUpdate, UsageBeforeDelete, UsageAfterInsert, UsageAfterUpdate, UsageAfterDelete, UsageAfterUndelete, Body FROM ApexTrigger WHERE NamespacePrefix = null",
     );
     const orgCoverage = await readSoql<{ PercentCovered: number | null }>(ctx, "SELECT PercentCovered FROM ApexOrgWideCoverage", { api: "tooling" });
     const rawCoverage = await readSoql<{ ApexClassOrTrigger: { Name: string } | null; NumLinesCovered: number; NumLinesUncovered: number }>(

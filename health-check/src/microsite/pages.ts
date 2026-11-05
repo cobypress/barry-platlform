@@ -7,6 +7,8 @@ import { compactMoney, longDate } from "../render/format.ts";
 import { effortText, renderContext, valueText, type Render } from "../render/html.ts";
 import { noteSections, referenceMap } from "../render/references.ts";
 import { HEADLINE_KINDS, KIND_LABELS } from "../value/model.ts";
+import { DOCUMENTED, readDocument } from "../domains/configuration/documented.ts";
+import { accessBlock, automationLists, automationTable, dataModelDiagram, DIAGRAM_KEY, hasDocument, integrationsBlock, objectsTable, relationshipsTable, sharingTable } from "../render/documented.ts";
 
 // The customer microsite's pages (roadmap Stage 4). Built for a browser, not
 // cut from the print decks: the console puts each page inside Black Cloud's
@@ -37,6 +39,13 @@ const STYLE = `<style>
 .bcr .chip.alert { background: #e5484d; border-color: #e5484d; color: #fff; }
 .bcr .ref { font-size: 12px; color: rgba(255,255,255,.45); }
 .bcr ul { padding-left: 20px; }
+.bcr .doc-figure { margin: 8px 0 4px; max-width: 720px; }
+.bcr .doc-figure svg { display: block; width: 100%; height: auto; }
+.bcr .doc-cols { display: flex; flex-wrap: wrap; gap: 24px; }
+.bcr .doc-cols > div { flex: 1 1 260px; }
+.bcr h3.cap { font-size: 14px; color: rgba(255,255,255,.6); margin: 12px 0 4px; }
+.bcr .small-note { font-size: 13px; color: rgba(255,255,255,.6); }
+.bcr .wide { overflow-x: auto; }
 .bcr li { margin-bottom: 6px; }
 </style>`;
 
@@ -121,6 +130,25 @@ function progress(r: Render, report: BuiltReport): string {
   );
 }
 
+/** The documented org as a browser page: every row, the diagram inline (it loads nothing), and nothing at all when no part was measured. */
+function org(r: Render, report: BuiltReport): string {
+  const doc = readDocument(report.metrics);
+  if (!hasDocument(doc)) return "";
+  const diagram = dataModelDiagram(doc, 4);
+  const parts = [
+    doc.model
+      ? `<h2>${r.t("The data model")}${r.ref(DOCUMENTED.model)}</h2>${diagram.kind === "chart" ? `<div class="doc-figure">${diagram.svg}</div><p class="small-note">${r.t(`${doc.relationships ? DIAGRAM_KEY : ""} The busiest objects are drawn, and every one is in the table.`)}</p>` : ""}${objectsTable(r, doc)}`
+      : "",
+    doc.relationships && doc.relationships.links.length ? `<h2>${r.t("How the objects relate")}${r.ref(DOCUMENTED.relationships)}</h2>${relationshipsTable(r, doc)}` : "",
+    doc.automation && doc.automation.objects.length ? `<h2>${r.t("What runs when a record is saved")}${r.ref(DOCUMENTED.automation)}</h2><p class="muted">${r.t("By object, in the order Salesforce runs each kind. Within one kind, Salesforce doesn't guarantee which runs first.")}</p><div class="wide">${automationTable(r, doc)}</div>${automationLists(r, doc)}` : "",
+    doc.integrations || doc.access
+      ? `<div class="doc-cols">${doc.integrations ? `<div><h2>${r.t("Integrations")}${r.ref(DOCUMENTED.integrations)}</h2>${integrationsBlock(r, doc)}</div>` : ""}${doc.access ? `<div><h2>${r.t("Users and access")}${r.ref(DOCUMENTED.access)}</h2>${accessBlock(r, doc)}</div>` : ""}</div>`
+      : "",
+    doc.sharing ? `<h2>${r.t("Who can see what")}${r.ref(DOCUMENTED.sharing)}</h2>${sharingTable(r, doc)}` : "",
+  ];
+  return page(`<h1>${r.t("Your org, documented")}</h1><p class="muted">${r.t("A reference for whoever looks after Salesforce. It describes rather than judges.")}</p>${parts.join("")}`);
+}
+
 /** The pages, each checked against the report's figures. Throws if any figure on a page can't be traced. */
 export function buildMicrositePages(report: BuiltReport, pseudonyms: Pseudonymiser): MicrositePages {
   const r = renderContext(pseudonyms, report.input.calibration.currency, false, referenceMap(noteSections(report)));
@@ -133,6 +161,8 @@ export function buildMicrositePages(report: BuiltReport, pseudonyms: Pseudonymis
   ];
   const compared = compare(r, report);
   if (compared) pages.push({ slug: "compare", title: "How you compare", html: compared });
+  const documented = org(r, report);
+  if (documented) pages.push({ slug: "org", title: "Your org, documented", html: documented });
   for (const p of pages) {
     const misses = checkNumbers(pageText(p.html), report.dataset).unmatched;
     if (misses.length) throw new Error(`The ${p.title.toLowerCase()} page has ${misses.length} figure${misses.length === 1 ? "" : "s"} the number check can't trace, so the microsite wasn't made`);

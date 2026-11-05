@@ -6,6 +6,7 @@ import { quarterOf } from "../benchmark/export.ts";
 import { buildInvestment, investmentText, INVESTMENT_METRIC_IDS, type Investment } from "../money/investment.ts";
 import { ADOPTION_METRIC_IDS } from "../domains/adoption/index.ts";
 import { PROCESS_METRIC_IDS } from "../domains/historic-pipeline/process.ts";
+import { DOCUMENTED_METRIC_IDS } from "../domains/configuration/documented.ts";
 import { buildDataset, checkNumbers, scopeDataset, SOURCE, toNumberCheckResult, type FigureSet, type StructuralFigure } from "../numbercheck/index.ts";
 import { compactMoney, money, monthYear } from "../render/format.ts";
 import { BENCHMARK_MIN_GROUP, type Calibration, type Finding, type ManualStep, type Metric, type NumberOverride, type ReportSection, type Run, type Score, type SectionVersion } from "../schemas/index.ts";
@@ -103,7 +104,7 @@ export const valueSource = (group: string): string => `value:${group}`;
 export const INVESTMENT_SOURCE = "investment";
 const COMPARISONS = "comparisons";
 // Metrics with a raw notes section of their own, kept out of the pipeline metrics.
-const OWN_SECTION = new Set([...INVESTMENT_METRIC_IDS, ...ADOPTION_METRIC_IDS, ...PROCESS_METRIC_IDS]);
+const OWN_SECTION = new Set([...INVESTMENT_METRIC_IDS, ...ADOPTION_METRIC_IDS, ...PROCESS_METRIC_IDS, ...DOCUMENTED_METRIC_IDS]);
 
 const lines = (...parts: Array<string | null | undefined | false>): string => parts.filter(Boolean).join("\n\n");
 const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
@@ -251,6 +252,13 @@ function rawNotesSpecs(input: ReportInput, overall: OverallScore, comparisons: C
       body: "How deals moved through your stages, from the stage history of every deal that closed in the window after being open: each move from one stage to the next, the stages won deals skipped, the deals that went back a stage, and the paths won and lost deals most often took.",
       metricIds: metrics.filter((m) => PROCESS_METRIC_IDS.includes(m.id)).map((m) => m.id),
     }]),
+    // Set-up only, so a set-up review has it too.
+    {
+      key: "org_documented",
+      title: "Your org, documented",
+      body: "A reference for whoever looks after Salesforce, with every list in full: the objects and how they relate, what runs when a record is saved and in what order, what connects to the org, who uses it, and who can see what. It describes the org rather than judging it.",
+      metricIds: metrics.filter((m) => DOCUMENTED_METRIC_IDS.includes(m.id)).map((m) => m.id),
+    },
     // Every compared figure is a pipeline figure, which a set-up review never reads.
     ...(isSetupReview(run) ? [] : [{
       key: "comparisons",
