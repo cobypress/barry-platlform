@@ -480,3 +480,32 @@ describe("a consenting run adds to the benchmark set when its documents are made
     assert.ok(deps.lines.some((l) => /didn't add to the benchmark set: Give --industry/.test(l)), deps.lines.join("\n"));
   });
 });
+
+describe("the documents compare the run with the benchmark set", () => {
+  test("they're given every row, and told whether this run's own figures are among them", async () => {
+    const seen: Array<ApprovedRun["benchmark"]> = [];
+    const render = async (dir: string, approved: ApprovedRun, out: string) => (seen.push(approved.benchmark), fakeRender(dir, approved, out));
+    const deps = baseDeps({ drive: new MemoryDrive(), renderReleased: render });
+    const input = jobInput({ intake: { ...INTAKE, customerName: "Synthetic Co", industry: "technology", headcountBand: "51-200" } });
+    cpSync(recorded, join(deps.runsDir, input.run.id), { recursive: true });
+    deps.store.addDocumentsJob(input);
+    await processDocumentsJob(input.run.id, deps, { final: true });
+    assert.equal(seen[0]?.rows.length, 0);
+    assert.equal(seen[0]?.includesThisRun, false);
+    // Made again: its figures went in the first time.
+    deps.store.documents.get(input.run.id)!.input.state = "queued";
+    await processDocumentsJob(input.run.id, deps, { final: true });
+    assert.equal(seen[1]?.rows.length, deps.store.benchmarkRows.length);
+    assert.ok(seen[1]!.rows.length > 0);
+    assert.equal(seen[1]?.includesThisRun, true);
+  });
+
+  test("a set that can't be read leaves published research only, and the documents are still made", async () => {
+    const seen: Array<ApprovedRun["benchmark"]> = [];
+    const deps = setup();
+    deps.renderReleased = async (dir, approved, out) => (seen.push(approved.benchmark), fakeRender(dir, approved, out));
+    deps.store.loadBenchmarkRows = async () => Promise.reject(new Error("connection reset"));
+    assert.equal((await processDocumentsJob(RUN_ID, deps, { final: true })).outcome, "done");
+    assert.equal(seen[0], null);
+  });
+});

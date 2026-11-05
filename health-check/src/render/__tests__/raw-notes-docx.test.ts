@@ -172,3 +172,16 @@ describe("the Barometer score in the documents", async () => {
     assert.doesNotMatch(fullReportHtml(report, pseudonyms), /<div class="cover-score">|Barometer score is/);
   });
 });
+
+describe("how you compare, in the full report", async () => {
+  const { fullReportHtml } = await import("../full-report.ts");
+
+  test("has its own slide and a place in the contents when a figure has something to stand against", () => {
+    const report = buildReport(base);
+    const comparable = report.comparisons.some((c) => c.value !== null && c.published.length > 0);
+    assert.ok(comparable, "the synthetic org has a figure with published research");
+    const html = fullReportHtml(report, pseudonyms);
+    assert.match(html, /<h2>How you compare<\/h2>/);
+    assert.match(html, /<li>How you compare<\/li>/);
+  });
+});

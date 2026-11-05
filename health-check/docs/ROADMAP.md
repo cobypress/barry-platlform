@@ -80,7 +80,7 @@ The headline is one annual expected figure, with the low-to-high range beneath i
 
 About 12 pages: the cover with the score; the number, as a waterfall by kind; their investment; the five biggest leaks; how they compare; adoption; risk; what fixing it is worth over 12 months; the 90-day plan; the return on fixing it; what happens next; and where to find the detail.
 
-### 1.6 How they compare (first version)
+### 1.6 How they compare (first version, done 5 November 2026)
 
 Published research for the headline figures, labelled with its source, combined with our own figures as they arrive (decision 2). The comparison page shows where they sit: bottom quarter, middle half or top quarter, with the median and the group used.
 

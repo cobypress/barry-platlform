@@ -1,7 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ReportOutputKey } from "../narrative/sections.ts";
-import { AlreadyContributed, contributeBenchmark } from "../benchmark/export.ts";
+import type { BenchmarkInput } from "../benchmark/compare.ts";
+import { AlreadyContributed, CONSENT_FILE, contributeBenchmark } from "../benchmark/export.ts";
 import { longDate } from "../render/format.ts";
 import { renderReleased } from "../render/render-released.ts";
 import { safeReason, type Attempt, type JobOutcome, type WorkerDeps } from "./deps.ts";
@@ -108,6 +109,21 @@ export async function processDocumentsJob(runId: string, deps: WorkerDeps, attem
   return withJobLock(deps.locksDir, `run-${runId}`, () => documentsLocked(runId, deps, attempt));
 }
 
+/**
+ * Other customers' figures to compare with. A run that has already added its
+ * own (a consent record in its folder) is in the set, and the comparison takes
+ * it out. If the table can't be read, the documents compare with published
+ * research only rather than not being made.
+ */
+async function benchmarkFor(dir: string, deps: WorkerDeps, log: (line: string) => void): Promise<BenchmarkInput | null> {
+  try {
+    return { rows: await deps.store.loadBenchmarkRows(), includesThisRun: existsSync(join(dir, CONSENT_FILE)) };
+  } catch (err) {
+    log(`The benchmark set couldn't be read, so the documents compare with published research only: ${safeReason(err)}`);
+    return null;
+  }
+}
+
 async function documentsLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Promise<JobOutcome> {
   const log = deps.log ?? (() => {});
   const now = () => (deps.now ?? (() => new Date()))().toISOString();
@@ -128,7 +144,8 @@ async function documentsLocked(runId: string, deps: WorkerDeps, attempt: Attempt
 
   try {
     const clientName = clientNameOf(input);
-    const printed = await (deps.renderReleased ?? renderReleased)(dir, input, join(dir, "documents"));
+    const benchmark = await benchmarkFor(dir, deps, log);
+    const printed = await (deps.renderReleased ?? renderReleased)(dir, { ...input, benchmark }, join(dir, "documents"));
     const folder = await folderFor(deps.drive, clientName, input.driveFolderId);
     const target = await versionFolderFor(deps.drive, folder, input.files, now());
     const existing = await deps.drive.files(target.id);

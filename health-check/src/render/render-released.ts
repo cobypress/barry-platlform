@@ -1,6 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { assertOutsideGit } from "../engine/run.ts";
+import type { BenchmarkInput } from "../benchmark/compare.ts";
 import type { Intake } from "../narrative/intake.ts";
 import { buildReport, type BuiltReport, type ReportOutputKey } from "../narrative/sections.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
@@ -23,6 +24,8 @@ export type ApprovedRun = {
   overrides: NumberOverride[];
   /** The consultant the cover names. Left out or null, the cover names only the client. */
   preparedBy?: string | null;
+  /** Other customers' benchmark rows. Without them, the run is compared with published research only. */
+  benchmark?: BenchmarkInput | null;
 };
 
 export type ReleasedDocuments = {
@@ -47,7 +50,7 @@ export function layoutWarnings(layout: { executive: LayoutReport; full: LayoutRe
 /** The run's report with the console's approved sections in place of the engine's drafts. */
 export function approvedReport(dir: string, approved: ApprovedRun): { report: BuiltReport; pseudonyms: Pseudonymiser } {
   const { input, pseudonyms } = loadRun(dir);
-  const report = buildReport({ ...input, overrides: approved.overrides, intake: approved.intake ?? input.intake, preparedBy: approved.preparedBy ?? null });
+  const report = buildReport({ ...input, overrides: approved.overrides, intake: approved.intake ?? input.intake, preparedBy: approved.preparedBy ?? null, benchmark: approved.benchmark ?? null });
   for (const built of Object.values(report.outputs)) {
     const sections = approved.sections.filter((s) => s.output === built.output).sort((a, b) => a.order - b.order);
     if (!canRelease(sections).ok) throw new Error(`Not every section of the ${built.output.replace(/_/g, " ")} is approved, so no documents were made`);

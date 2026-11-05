@@ -174,4 +174,6 @@ export interface WorkerStore {
 
   /** A consenting run's benchmark figures, all or none. The rows carry nothing that leads back to the run (rule 11). */
   addBenchmarkRows(rows: BenchmarkRow[]): Promise<void>;
+  /** Every benchmark row, for comparing a run with other customers. They name no one, so reading them all is safe. */
+  loadBenchmarkRows(): Promise<BenchmarkRow[]>;
 }

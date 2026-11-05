@@ -9,6 +9,7 @@ import type { Calibration } from "../schemas/index.ts";
 import { chartSlot, coverScore, document, effortText, estimateLines, paginate, paragraphs, renderContext, severityChip, valueFigure, valueText, type Render } from "./html.ts";
 import { noteSections, referenceMap } from "./references.ts";
 import { scoreLine } from "./executive.ts";
+import { COMPARE_CSS, compareSlide } from "./compare.ts";
 
 // The full deck: 16:9, 40 to 60 slides. Issue slides flex to keep it in range,
 // because a thin org and a messy one have very different numbers of findings.
@@ -506,10 +507,14 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   }
   page("Pipeline over time", ["historic.pipeline_point_in_time_value"], () => ({ html: `<div class="eyebrow">Pipeline</div><h2>Pipeline over time</h2><div class="chart-wrap" style="max-width:1000px">${chartSlot(pipelineOverTime(metric("historic.pipeline_point_in_time_value"), r.currency))}</div>` }));
 
+  // Only figures with something to stand against: the raw notes say why the rest have nothing yet.
+  const compared = report.comparisons.filter((c) => c.value !== null && (c.published.length > 0 || c.own.status === "measured"));
+  const comparable = compared.length > 0;
   const contents = [
     "What you told us",
     "What we found against it",
     "Overview and scorecard",
+    ...(comparable ? ["How you compare"] : []),
     ...withIssues.map(domainLabel),
     ...(working.length ? ["What's working well"] : []),
     ...(pipelinePages.length || gaps.length ? ["Pipeline"] : []),
@@ -535,6 +540,8 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   add(`<div class="eyebrow">Overview</div><h2>${r.t(verdict.headline)}</h2><div>${sectionBody(r, built, "overview").replace(`<p>${r.t(verdict.headline)}.</p>`, "")}</div><div class="stat-row" style="margin-top:18px">${report.overall.status === "measured" ? `<div class="stat"><b>${report.overall.score}</b><span>Barometer score</span></div>` : ""}<div class="stat"><b>${verdict.issues}</b><span>Issues</span></div><div class="stat"><b>${verdict.critical}</b><span>Critical</span></div><div class="stat"><b>${verdict.high}</b><span>High</span></div><div class="stat"><b>${team.filter((f) => f.status === "not_measurable").length}</b><span>Not measurable</span></div><div class="stat"><b>${team.filter((f) => f.status === "passed").length}</b><span>Passed</span></div></div>`);
 
   add(`<div class="eyebrow">Scorecard</div><h2>How each area stands</h2>${scoreLine(report) ? `<p class="lede">${r.t(scoreLine(report, true))}</p>` : ""}<div class="chart-wrap" style="max-width:${scoreLine(report) ? 760 : 880}px">${chartSlot(scorecardChart(scorecard(team, scores)))}</div>`);
+
+  if (comparable) slides.push(compareSlide(r, compared));
 
   if (top.length) add(`<div class="eyebrow">Top issues</div><h2>${top.length === TOP_ISSUE_COUNT ? `The ${TOP_ISSUE_COUNT} that matter most` : "The issues that matter most"}</h2><table class="grid"><thead><tr><th style="width:6%"></th><th>Issue</th><th style="width:12%">Severity</th><th style="width:26%">Impact</th><th style="width:20%">Owner</th></tr></thead><tbody>${top.map((f, i) => `<tr><td>${i + 1}</td><td>${r.t(f.title)}${r.ref(f.id)}</td><td>${severityChip(f)}</td><td>${valueText(r, f).amount}</td><td>${r.t(f.owner)}</td></tr>`).join("")}</tbody></table>`);
 
@@ -642,5 +649,5 @@ export function fullReportHtml(report: BuiltReport, pseudonyms: Pseudonymiser): 
     const chrome = slide.classes?.includes("cover") ? "" : `<div class="footer" data-chrome><span>Black Cloud Barometer${r.draft ? " | Draft, not approved for release" : ""}</span><span>${i + 1}</span></div>`;
     return `<section class="page ${slide.classes ?? ""}" data-page="${i + 1}">${slide.html}${chrome}</section>`;
   });
-  return document("Full health check", "slide", CSS, pages);
+  return document("Full health check", "slide", `${CSS}\n${COMPARE_CSS}`, pages);
 }

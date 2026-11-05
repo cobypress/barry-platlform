@@ -432,6 +432,13 @@ export class PostgresWorkerStore implements WorkerStore {
     });
   }
 
+  async loadBenchmarkRows(): Promise<BenchmarkRow[]> {
+    const columns = Object.keys(BENCHMARK_ROW).filter((c) => c !== "id");
+    const { rows } = await this.#pool.query(`SELECT ${columns.map((c) => `"${c}"`).join(", ")} FROM "HealthCheckBenchmarkRow"`);
+    // numeric comes back from pg as a string.
+    return rows.map((row: Record<string, unknown>) => BenchmarkRow.parse({ ...row, value: Number(row.value) }));
+  }
+
   async failDocuments(runId: string, reason: string, at: string): Promise<void> {
     await this.#pool.query(`UPDATE "HealthCheckDocuments" SET "status" = 'failed', "finishedAt" = $2::timestamp(3), "error" = $3 WHERE "runId" = $1 AND "status" IN ('queued', 'making')`, [runId, at, reason]);
   }

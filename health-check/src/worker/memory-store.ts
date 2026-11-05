@@ -133,6 +133,10 @@ export class MemoryWorkerStore implements WorkerStore {
     this.writes.push({ method: "addBenchmarkRows", id: "benchmark", detail: rows.length });
   }
 
+  async loadBenchmarkRows(): Promise<BenchmarkRow[]> {
+    return structuredClone(this.benchmarkRows);
+  }
+
   async failDocuments(runId: string, reason: string, _at: string): Promise<void> {
     const doc = this.documents.get(runId);
     if (!doc || (doc.input.state !== "queued" && doc.input.state !== "making")) return;
