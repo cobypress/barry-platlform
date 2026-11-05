@@ -1,7 +1,9 @@
 import { AREA_WEIGHTS, CRITICAL_CAP, GRADES, overallScore, type OverallScore } from "../domains/scoring.ts";
+import { comparisonId, comparisonNotes, compareRun, OWN_RANGE_MIN, type BenchmarkInput, type Comparison } from "../benchmark/compare.ts";
+import { quarterOf } from "../benchmark/export.ts";
 import { buildDataset, checkNumbers, scopeDataset, SOURCE, toNumberCheckResult, type FigureSet, type StructuralFigure } from "../numbercheck/index.ts";
 import { compactMoney, monthYear } from "../render/format.ts";
-import type { Calibration, Finding, ManualStep, Metric, NumberOverride, ReportSection, Run, Score, SectionVersion } from "../schemas/index.ts";
+import { BENCHMARK_MIN_GROUP, type Calibration, type Finding, type ManualStep, type Metric, type NumberOverride, type ReportSection, type Run, type Score, type SectionVersion } from "../schemas/index.ts";
 import { ReportSection as ReportSectionSchema, SectionVersion as SectionVersionSchema } from "../schemas/index.ts";
 import type { SectionBrief } from "./draft.ts";
 import type { Intake } from "./intake.ts";
@@ -24,6 +26,8 @@ export type ReportInput = {
   intake?: Intake | null;
   /** The consultant the documents' cover names. Only the documents job sets it, and it never calls Claude. */
   preparedBy?: string | null;
+  /** Our own customers' benchmark rows. Without them, only published research is compared. */
+  benchmark?: BenchmarkInput | null;
   now?: Date;
 };
 
@@ -40,6 +44,8 @@ export type BuiltReport = {
   metrics: Metric[];
   /** The Barometer score: one figure for the org, from the area scores. */
   overall: OverallScore;
+  /** Where the headline figures sit against published research and our own customers. */
+  comparisons: Comparison[];
   outputs: Record<ReportOutputKey, BuiltOutput>;
   /** What Claude would be asked for, by section id. Sections with no entry stay engine text. */
   briefs: Map<string, SectionBrief>;
@@ -77,6 +83,7 @@ const OVERRIDES = "overrides";
 const COVER = "cover";
 const PLAN = "plan";
 export const OVERALL = "score:overall";
+const COMPARISONS = "comparisons";
 
 const lines = (...parts: Array<string | null | undefined | false>): string => parts.filter(Boolean).join("\n\n");
 const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
@@ -129,7 +136,7 @@ function overallFigures(overall: OverallScore): FigureSet["figures"] {
   return [...fixed, number(overall.score), { ...number(overall.score), unit: "points" }, number(overall.uncapped), ...overall.areas.flatMap((a) => [number(a.score), number(a.weight)])];
 }
 
-function rawNotesSpecs(input: ReportInput, overall: OverallScore): Spec[] {
+function rawNotesSpecs(input: ReportInput, overall: OverallScore, comparisons: Comparison[]): Spec[] {
   const { run, calibration, findings, metrics, manualSteps, intake, overrides = [] } = input;
   const exclusions = [...new Set([...findings.flatMap((f) => f.evidence.flatMap((e) => e.exclusions)), ...metrics.flatMap((m) => m.exclusions)])];
   const notMeasurable = findings.filter((f) => f.status === "not_measurable");
@@ -145,6 +152,15 @@ function rawNotesSpecs(input: ReportInput, overall: OverallScore): Spec[] {
       return { key: `findings_${domain}`, title: `Findings: ${domainLabel(domain)}`, body: `Every check we ran for ${domainLabel(domain).toLowerCase()}, with what it found and how to reproduce it.`, findingIds: own.map((f) => f.id) };
     }),
     { key: "pipeline_metrics", title: "Pipeline metrics", body: "How each pipeline figure was calculated, with its sample, exclusions and assumptions.", metricIds: metrics.map((m) => m.id) },
+    {
+      key: "comparisons",
+      title: "How you compare",
+      body: lines(
+        "Where your headline figures sit against published research and against other Black Cloud customers. We never combine them: published research measures other companies in its own way, so each published figure says what it measures and how that differs from ours.",
+        `Our own customers' range is shown from ${OWN_RANGE_MIN} orgs, and groups by industry and size from ${BENCHMARK_MIN_GROUP}. Where your group is too small, we widen it: industry and size, then industry, then size, then every customer.`,
+      ),
+      sources: [COMPARISONS, ...comparisons.map((c) => comparisonId(c.metric.key))],
+    },
     { key: "queries", title: "Queries", body: "The queries and metadata reads behind these notes, so each finding can be reproduced.", findingIds: findings.map((f) => f.id), metricIds: metrics.map((m) => m.id) },
     {
       key: "exclusions_limits",
@@ -465,6 +481,15 @@ export function buildReport(input: ReportInput): BuiltReport {
   const effective = applyOverrides(findings, metrics, overrides);
   const team = effective.findings.map(teamLevelFinding);
   const overall = overallScore(scores, effective.findings);
+  const comparisons = compareRun({
+    metrics: effective.metrics,
+    scores,
+    findings: effective.findings,
+    industry: intake?.industry ?? null,
+    headcountBand: intake?.headcountBand ?? null,
+    period: quarterOf(run.analysisWindow.to),
+    benchmark: input.benchmark ?? null,
+  });
   const dataset = buildDataset({
     findings: [...findings, ...team],
     metrics: effective.metrics,
@@ -481,8 +506,15 @@ export function buildReport(input: ReportInput): BuiltReport {
       // the consultant's, which can read as a number ("Ten Eyck"). No section's scope includes it.
       { source: COVER, text: [intake?.customerName, run.customerRef, input.preparedBy].filter(Boolean).join("\n") },
       ...(overrides.length ? [{ source: OVERRIDES, text: overrideText(overrides) }] : []),
+      // The working the raw notes print, so every figure a comparison shows traces to it.
+      ...comparisons.map((c) => ({ source: comparisonId(c.metric.key), text: comparisonNotes(c).map((l) => l.text).join("\n") })),
     ],
   });
+  // The floors, and the half of a group a quartile range holds ("the middle half").
+  dataset.figures.push(
+    ...[OWN_RANGE_MIN, BENCHMARK_MIN_GROUP].map((value) => ({ source: COMPARISONS, kind: "number" as const, value })),
+    ...[COMPARISONS, ...comparisons.map((c) => comparisonId(c.metric.key))].map((source) => ({ source, kind: "percent" as const, value: 50 })),
+  );
   dataset.figures.push(...planFigures(buildPlan(team)), ...overallFigures(overall));
   const briefs = new Map<string, SectionBrief>();
   const scopes = new Map<string, string[]>();
@@ -493,8 +525,9 @@ export function buildReport(input: ReportInput): BuiltReport {
     teamFindings: team.slice().sort(bySeverity),
     metrics: effective.metrics,
     overall,
+    comparisons,
     outputs: {
-      raw_notes: build("raw_notes", rawNotesSpecs(input, overall)),
+      raw_notes: build("raw_notes", rawNotesSpecs(input, overall, comparisons)),
       executive_summary: build("executive_summary", executiveSpecs(input, team)),
       full_health_check: build("full_health_check", fullSpecs(input, team, effective.metrics)),
     },

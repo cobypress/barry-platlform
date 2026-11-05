@@ -18,12 +18,11 @@ export type BenchmarkGroup = {
 
 export type BenchmarkSummary = { path: string; exists: boolean; rows: number; olderRows: number; invalidLines: number; groups: BenchmarkGroup[] };
 
-export function summariseBenchmarks(storeDir: string = defaultBenchmarkDir()): BenchmarkSummary {
-  const path = join(resolve(storeDir), BENCHMARK_FILE);
-  if (!existsSync(path)) return { path, exists: false, rows: 0, olderRows: 0, invalidLines: 0, groups: [] };
-  const groups = new Map<string, BenchmarkGroup>();
-  const valid: BenchmarkRow[] = [];
+/** Every row in a store file that matches the strict format, and how many lines didn't. */
+export function readBenchmarkRows(path: string): { rows: BenchmarkRow[]; invalidLines: number } {
+  const rows: BenchmarkRow[] = [];
   let invalidLines = 0;
+  if (!existsSync(path)) return { rows, invalidLines };
   for (const line of readFileSync(path, "utf8").split("\n")) {
     if (!line.trim()) continue;
     let parsed;
@@ -38,12 +37,27 @@ export function summariseBenchmarks(storeDir: string = defaultBenchmarkDir()): B
       invalidLines++;
       continue;
     }
-    valid.push(parsed.data);
+    rows.push(parsed.data);
   }
-  // Only the latest window counts. An org goes in once per window, so a repeat
-  // check a year on replaces its old figures rather than adding a second org.
-  const latest = Math.max(...valid.map((r) => quarterIndex(r.period)));
-  const current = valid.filter((r) => latest - quarterIndex(r.period) < BENCHMARK_WINDOW_QUARTERS);
+  return { rows, invalidLines };
+}
+
+/**
+ * Only the latest window counts. An org goes in once per window, so a repeat
+ * check a year on replaces its old figures rather than adding a second org.
+ */
+export function latestWindow(rows: BenchmarkRow[]): BenchmarkRow[] {
+  if (rows.length === 0) return [];
+  const latest = Math.max(...rows.map((r) => quarterIndex(r.period)));
+  return rows.filter((r) => latest - quarterIndex(r.period) < BENCHMARK_WINDOW_QUARTERS);
+}
+
+export function summariseBenchmarks(storeDir: string = defaultBenchmarkDir()): BenchmarkSummary {
+  const path = join(resolve(storeDir), BENCHMARK_FILE);
+  if (!existsSync(path)) return { path, exists: false, rows: 0, olderRows: 0, invalidLines: 0, groups: [] };
+  const groups = new Map<string, BenchmarkGroup>();
+  const { rows: valid, invalidLines } = readBenchmarkRows(path);
+  const current = latestWindow(valid);
   const rows = current.length;
   const olderRows = valid.length - rows;
   for (const row of current) {
