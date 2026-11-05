@@ -2,7 +2,8 @@ import type { BuiltReport } from "../narrative/sections.ts";
 import { INVESTMENT } from "../money/investment.ts";
 import { HEADLINE_KINDS, KIND_LABELS } from "../value/model.ts";
 import { compactMoney } from "./format.ts";
-import type { Render } from "./html.ts";
+import { chartSlot, type Render } from "./html.ts";
+import { HALF_WIDTH, waterfallChart } from "./charts.ts";
 import { valueItemId } from "./references.ts";
 
 // "What it's worth": the value model's total, by kind, and the groups behind it.
@@ -19,6 +20,7 @@ export const MONEY_CSS = `
 .money .note { color: var(--muted); font-size: 0.85em; margin-top: 10px; }
 .money .split { display: grid; grid-template-columns: 1fr 1.15fr; gap: 32px; align-items: start; }
 .money .split .kind { grid-template-columns: 44% 1fr 20%; }
+.money .waterfall { margin: 0 0 14px; }
 `;
 
 const TOP_GROUPS = 5;
@@ -42,7 +44,10 @@ export function moneyPage(r: Render, report: BuiltReport, format: "page" | "slid
     ? `<p class="note">${r.t(`Kept apart from this total: ${exposure.counted.title.replace(/\.$/, "")} (${m(exposure.counted.annual)}). That's exposure, not money found, so it's never added.`)}${r.ref(valueItemId(exposure.id))}</p>`
     : "";
   const how = "Where several issues describe the same money, only the largest counts. Each figure is what's there if every case were won back, so we count a share of it, and the expected case is the conservative one.";
-  const figure = `<p class="headline-figure">${m(total.expected)}</p><p class="range">${r.t(`Over the next 12 months, expected. Between ${m(total.low)} and ${m(total.high)}.`)}</p><div class="kinds">${bars}</div>`;
+  // Each kind building to the total, exposure apart. The bars stay only where the waterfall can't be drawn.
+  const waterfall = waterfallChart(value, format === "slide" ? HALF_WIDTH : undefined);
+  const build = waterfall.kind === "chart" ? `<div class="waterfall">${chartSlot(waterfall)}</div>` : `<div class="kinds">${bars}</div>`;
+  const figure = `<p class="headline-figure">${m(total.expected)}</p><p class="range">${r.t(`Over the next 12 months, expected. Between ${m(total.low)} and ${m(total.high)}.`)}</p>${build}`;
   const table = `<table class="grid"><thead><tr><th>Where it comes from</th><th class="num">Expected</th><th class="num">Range</th></tr></thead><tbody>${rows}</tbody></table>`;
   const notes = `${exposureNote}<p class="note">${r.t(how)}</p>`;
   const head = `<div class="eyebrow">${r.t(eyebrow)}</div><h2>What fixing this is worth</h2>`;

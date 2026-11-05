@@ -9,6 +9,7 @@ import { noteSections, referenceMap } from "../render/references.ts";
 import { HEADLINE_KINDS, KIND_LABELS } from "../value/model.ts";
 import { DOCUMENTED, readDocument } from "../domains/configuration/documented.ts";
 import { practiceFor, practiceId, sourceLabel } from "../practice/index.ts";
+import { activeUsersChart, lightningChart, loginChannelsChart } from "../render/charts.ts";
 import { accessBlock, automationLists, automationTable, dataModelDiagram, DIAGRAM_KEY, hasDocument, integrationsBlock, objectsTable, relationshipsTable, sharingTable } from "../render/documented.ts";
 
 // The customer microsite's pages (roadmap Stage 4). Built for a browser, not
@@ -82,6 +83,13 @@ function overview(r: Render, report: BuiltReport): string {
   );
 }
 
+/** Adoption's charts, inline: they load nothing. Only the ones that could be drawn. */
+function adoptionCharts(report: BuiltReport): string {
+  const metric = (id: string) => report.metrics.find((m) => m.id === id);
+  const charts = [activeUsersChart(metric("adoption.monthly_active_users")), loginChannelsChart(metric("adoption.mobile_login_share")), lightningChart(metric("adoption.lightning_share"))].filter((c) => c.kind === "chart");
+  return charts.length ? `<div class="doc-cols">${charts.map((c) => `<div class="doc-figure">${c.kind === "chart" ? c.svg : ""}</div>`).join("")}</div>` : "";
+}
+
 function issues(r: Render, report: BuiltReport): string {
   const team = report.teamFindings;
   const sections = domainsInOrder(team)
@@ -96,7 +104,7 @@ function issues(r: Render, report: BuiltReport): string {
         .join("");
       const good = practiceFor(domain);
       const practice = good.length ? `<div class="good"><h3 class="cap">${r.t("What good looks like")}</h3><ul>${good.map((p, i) => `<li>${r.t(p.text)} <span class="muted">${r.t(sourceLabel(p))}</span>${r.ref(practiceId(domain, i))}</li>`).join("")}</ul></div>` : "";
-      return `<h2>${r.t(domainLabel(domain))}</h2>${practice}${cards}`;
+      return `<h2>${r.t(domainLabel(domain))}</h2>${domain === "adoption" ? adoptionCharts(report) : ""}${practice}${cards}`;
     })
     .join("");
   return page(`<h1>Every issue we found</h1><p class="muted">${r.t("Grouped by area, most serious first. Each reference points to the raw notes, where the working is.")}</p>${sections}`);
