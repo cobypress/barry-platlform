@@ -12,6 +12,7 @@ export const SALES_CLOUD_DOMAINS = [
   "best_practice",
   "data_quality",
   "utilisation",
+  "adoption",
   "current_pipeline",
   "historic_pipeline",
   "forecast",

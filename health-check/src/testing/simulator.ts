@@ -262,8 +262,12 @@ export class Simulator implements Transport {
         return page(org.PERMISSION_SET_LICENSES);
       case "PackageLicense":
         return page(org.PACKAGE_LICENSES);
-      case "LoginHistory":
-        return /\b(Status|Application)\s*(=|!=|IN|LIKE)/i.test(where) ? reject("INVALID_FIELD", "field 'Status' can not be filtered in a query call") : page(org.LOGIN_HISTORY);
+      case "LoginHistory": {
+        if (/\b(Status|Application)\s*(=|!=|IN|LIKE)/i.test(where)) return reject("INVALID_FIELD", "field 'Status' can not be filtered in a query call");
+        // LoginTime is filterable, and every read of it gives a start.
+        const since = /\bLoginTime\s*>=\s*(\S+)/i.exec(where)?.[1];
+        return page(since ? org.LOGIN_HISTORY.filter((r) => new Date(r.LoginTime.replace("+0000", "Z")) >= new Date(since)) : org.LOGIN_HISTORY);
+      }
       case "SetupAuditTrail":
         return /\b(Section|Display|Action)\s*(=|!=|IN|LIKE)/i.test(where) ? reject("INVALID_FIELD", "field 'Section' can not be filtered in a query call") : page(org.SETUP_AUDIT);
       case "SecurityHealthCheck":

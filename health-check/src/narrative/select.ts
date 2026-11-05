@@ -14,6 +14,7 @@ export const DOMAIN_LABELS: Record<string, string> = {
   best_practice: "Best practice",
   data_quality: "Data quality",
   utilisation: "Utilisation",
+  adoption: "Adoption and usage",
   current_pipeline: "Current pipeline",
   historic_pipeline: "Historic pipeline",
   forecast: "Forecast",

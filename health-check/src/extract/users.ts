@@ -17,11 +17,13 @@ export type UserRow = {
   /** Undefined when the org has no such field, as in Professional Edition. */
   ManagerId?: string | null;
   DelegatedApproverId?: string | null;
+  /** "Switch to Lightning Experience" (Object Reference, API 68.0). Undefined when the field can't be read. */
+  UserPreferencesLightningExperiencePreferred?: boolean;
 };
 
 export const usersExtractor: Extractor<Sourced<UserRow[]>> = {
   id: "users",
-  version: 2,
+  version: 3,
   run(ctx) {
     const plan = planFields(ctx, FIELD_SPECS.user);
     // The licence is a second hop on Profile, which the plan can't check, so it's added here.

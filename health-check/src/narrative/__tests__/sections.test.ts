@@ -70,13 +70,14 @@ describe("the three outputs", () => {
     const raw = sections.filter((s) => s.output === "raw_notes");
     const found = new Set(raw.filter((s) => s.key.startsWith("findings_")).flatMap((s) => s.findingIds));
     assert.equal(found.size, base.findings.length);
-    // Investment figures have their own section. Between them, every metric once, in order.
+    // Investment and adoption figures have their own sections. Between them, every metric once, in order.
     const metricIds = (key: string) => raw.find((s) => s.key === key)!.metricIds;
-    const covered = [...metricIds("investment"), ...metricIds("pipeline_metrics")];
+    const covered = [...metricIds("investment"), ...metricIds("adoption"), ...metricIds("pipeline_metrics")];
     assert.equal(new Set(covered).size, covered.length);
     assert.deepEqual(new Set(covered), new Set(base.metrics.map((m) => m.id)));
-    assert.deepEqual(metricIds("pipeline_metrics"), base.metrics.map((m) => m.id).filter((id) => !id.startsWith("investment.")));
+    assert.deepEqual(metricIds("pipeline_metrics"), base.metrics.map((m) => m.id).filter((id) => !id.startsWith("investment.") && !id.startsWith("adoption.")));
     assert.ok(metricIds("investment").length > 0);
+    assert.ok(metricIds("adoption").length > 0);
   });
 });
 
