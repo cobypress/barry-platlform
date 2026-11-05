@@ -244,7 +244,27 @@ function buildPipeline(): { opportunities: SyntheticOpportunity[]; history: Synt
       NextStep: owner === 14 ? (i % 8 === 0 ? "Call the buyer on Friday" : null) : i % 9 === 0 ? null : "Call the buyer on Friday",
     });
   }
-  history.sort((a, b) => a.Id.localeCompare(b.Id));
+
+  // Trap: the EU team moves deals it goes on to lose back a stage, and forward
+  // again an hour later. Planted after the seeded draws, so nothing else in the
+  // data moves.
+  const eu = new Set([userId(3), userId(14)]);
+  for (const o of opportunities.filter((x) => x.IsClosed && !x.IsWon && eu.has(x.OwnerId))) {
+    const rows = history.filter((h) => h.OpportunityId === o.Id && OPEN_PATH.includes(h.StageName));
+    const next = rows.find((h) => h.StageName !== rows[0]!.StageName);
+    if (!next) continue;
+    const at = new Date(next.CreatedDate.replace("+0000", "Z")).getTime();
+    for (const [hours, stage] of [[1, rows[0]!.StageName], [2, next.StageName]] as const) {
+      history.push({ Id: "", OpportunityId: o.Id, StageName: stage, Amount: next.Amount, CloseDate: next.CloseDate, CreatedDate: new Date(at + hours * 3_600_000).toISOString().replace("Z", "+0000") });
+    }
+  }
+  // Ids follow each deal's rows in time order, as Salesforce's do, so rows
+  // written in the same second still sort the way they happened.
+  const first = new Map<string, number>();
+  history.forEach((h, i) => first.has(h.OpportunityId) || first.set(h.OpportunityId, i));
+  const position = new Map(history.map((h, i) => [h, i]));
+  history.sort((a, b) => first.get(a.OpportunityId)! - first.get(b.OpportunityId)! || a.CreatedDate.localeCompare(b.CreatedDate) || position.get(a)! - position.get(b)!);
+  history.forEach((h, i) => (h.Id = sfId("008", i + 1)));
   return { opportunities, history };
 }
 
@@ -373,6 +393,25 @@ function buildServices(firstId: number): { opportunities: SyntheticOpportunity[]
       NextStep: "Call the buyer on Friday",
     });
   });
+
+  // Trap: from the last quarter of 2025, deals that were going to be lost went
+  // through their stages in a day, then back to Prospecting, where they sat
+  // until someone closed them. Every deal is still in the same stages, so no
+  // stage's win rate moves, and it's done after the seeded draws.
+  const deadEnds = opportunities.filter((o) => !o.IsWon && o.IsClosed && o.CloseDate >= "2025-10-01");
+  for (const o of deadEnds) {
+    const rows = history.filter((h) => h.OpportunityId === o.Id && OPEN_PATH.includes(h.StageName)).sort((a, b) => a.CreatedDate.localeCompare(b.CreatedDate));
+    if (new Set(rows.map((h) => h.StageName)).size < 2) continue;
+    const start = new Date(rows[0]!.CreatedDate.replace("+0000", "Z")).getTime();
+    rows.forEach((h, k) => (h.CreatedDate = stampOf(start + k * 3_600_000)));
+    addHistory(o.Id, "Prospecting", o.Amount, rows.at(-1)!.CloseDate, start + rows.length * 3_600_000);
+  }
+  // Ids follow each deal's rows in time order, as Salesforce's do.
+  const first = new Map<string, number>();
+  history.forEach((h, i) => first.has(h.OpportunityId) || first.set(h.OpportunityId, i));
+  const position = new Map(history.map((h, i) => [h, i]));
+  history.sort((a, b) => first.get(a.OpportunityId)! - first.get(b.OpportunityId)! || a.CreatedDate.localeCompare(b.CreatedDate) || position.get(a)! - position.get(b)!);
+  history.forEach((h, i) => (h.Id = sfId("008", 500_000 + i)));
 
   // Half the retained clients had already bought before the analysis window.
   const priorWins = Array.from({ length: CLIENTS / 2 }, (_, k) => ({ Id: sfId("006", 900_000 + k), AccountId: client(k + 1), CloseDate: dateOnly(asOf - between(760, 1100) * DAY), IsWon: true, StageName: "Closed Won" }));

@@ -13,6 +13,7 @@ import { runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { PROCESS_METRIC_IDS } from "../../domains/historic-pipeline/process.ts";
 
 const { output, run, dir } = await runFromRecording({ answers: loadAnswers() });
 const pseudonyms = new Pseudonymiser(JSON.parse(readFileSync(join(dir, "pseudonym-map.json"), "utf8")) as PseudonymEntry[]);
@@ -70,14 +71,15 @@ describe("the three outputs", () => {
     const raw = sections.filter((s) => s.output === "raw_notes");
     const found = new Set(raw.filter((s) => s.key.startsWith("findings_")).flatMap((s) => s.findingIds));
     assert.equal(found.size, base.findings.length);
-    // Investment and adoption figures have their own sections. Between them, every metric once, in order.
+    // Investment, adoption and sales process figures have their own sections. Between them, every metric once, in order.
     const metricIds = (key: string) => raw.find((s) => s.key === key)!.metricIds;
-    const covered = [...metricIds("investment"), ...metricIds("adoption"), ...metricIds("pipeline_metrics")];
+    const covered = [...metricIds("investment"), ...metricIds("adoption"), ...metricIds("pipeline_metrics"), ...metricIds("sales_process")];
     assert.equal(new Set(covered).size, covered.length);
     assert.deepEqual(new Set(covered), new Set(base.metrics.map((m) => m.id)));
-    assert.deepEqual(metricIds("pipeline_metrics"), base.metrics.map((m) => m.id).filter((id) => !id.startsWith("investment.") && !id.startsWith("adoption.")));
+    assert.deepEqual(metricIds("pipeline_metrics"), base.metrics.map((m) => m.id).filter((id) => !id.startsWith("investment.") && !id.startsWith("adoption.") && !PROCESS_METRIC_IDS.includes(id)));
     assert.ok(metricIds("investment").length > 0);
     assert.ok(metricIds("adoption").length > 0);
+    assert.deepEqual(metricIds("sales_process"), PROCESS_METRIC_IDS);
   });
 });
 

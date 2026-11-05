@@ -12,6 +12,7 @@ import { scoreLine } from "./executive.ts";
 import { COMPARE_CSS, compareSlide } from "./compare.ts";
 import { MONEY_CSS, moneyPage } from "./money.ts";
 import { CHAPTER_CSS, chapterSlide } from "./chapter.ts";
+import { transitionMatrix } from "../domains/historic-pipeline/process.ts";
 
 // The full deck: 16:9, 40 to 60 slides. Issue slides flex to keep it in range,
 // because a thin org and a messy one have very different numbers of findings.
@@ -332,6 +333,24 @@ function closeDatesSlide(r: Render, metric: (id: string) => Metric | undefined, 
 }
 
 /** The close: what we'd do next, together. Its only figures are the plan's own. */
+/** The paths deals most often take, and every move between stages as a table. */
+function processSlide(r: Render, metric: (id: string) => Metric | undefined, calibration: Calibration): Slide {
+  const head = `<div class="eyebrow">Pipeline</div><h2>How your sales process really runs</h2>`;
+  const path = (id: string, noun: string): string => {
+    const m = asMeasured(metric(id));
+    if (!m) return `<div class="stat"><h3 class="cap">${r.t(metric(id)?.label ?? id)}</h3>${notMeasured(r, metric(id))}</div>`;
+    return `<div class="stat"><h3 class="cap">${r.t(m.label)}${r.ref(m.id)}</h3><p style="font-size:20px;margin:6px 0">${r.t(m.segments[0]!.key)}</p><span>${percent(m.value)} of ${m.n} ${noun}</span></div>`;
+  };
+  const moves = asMeasured(metric("historic.stage_transitions"));
+  let table = notMeasured(r, metric("historic.stage_transitions"));
+  if (moves) {
+    const { from, to, count } = transitionMatrix(moves, calibration);
+    const rows = from.map((f) => `<tr><td>${r.t(f)}</td>${to.map((t) => `<td class="num">${count(f, t) ?? ""}</td>`).join("")}</tr>`);
+    table = `<h3 class="cap" style="margin-top:14px">Moves from each stage to the next${r.ref(moves.id)}</h3><table class="grid data"><thead><tr><th>From</th>${to.map((t) => `<th class="num">${r.t(t)}</th>`).join("")}</tr></thead><tbody>${rows.join("")}</tbody></table>`;
+  }
+  return { classes: "tight compact-rows", html: `${head}<div class="stat-row">${path("historic.path_to_won", "won deals")}${path("historic.path_to_lost", "lost and no decision deals")}</div>${table}` };
+}
+
 function nextStepsSlide(r: Render, plan: ReturnType<typeof buildPlan>["phases"]): Slide {
   const first = plan.find((p) => p.findings.length > 0);
   const opening = first
@@ -518,6 +537,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
     page("Close dates and stage speed", speed, () => closeDatesSlide(r, metric, calibration));
     page("Sales cycle and slippage", [...cycle, ...slippage], () => ({ classes: "tight", html: `<div class="eyebrow">Pipeline</div><h2>Sales cycle and slippage</h2>${metricRows(r, rowsOf([...cycle, ...slippage]), r.currency)}` }));
   }
+  page("How your sales process really runs", ["historic.path_to_won", "historic.path_to_lost", "historic.stage_transitions"], () => processSlide(r, metric, calibration));
   page("Pipeline over time", ["historic.pipeline_point_in_time_value"], () => ({ html: `<div class="eyebrow">Pipeline</div><h2>Pipeline over time</h2><div class="chart-wrap" style="max-width:1000px">${chartSlot(pipelineOverTime(metric("historic.pipeline_point_in_time_value"), r.currency))}</div>` }));
 
   // Only figures with something to stand against: the raw notes say why the rest have nothing yet.
