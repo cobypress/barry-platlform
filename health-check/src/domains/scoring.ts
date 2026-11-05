@@ -66,6 +66,8 @@ export const AREA_WEIGHTS: Record<string, number> = {
   forecast: 1.25,
   data_quality: 1.25,
   security: 1.25,
+  // Whether people use Salesforce decides whether every other figure means anything (DECISIONS 99).
+  adoption: 1.25,
   historic_pipeline: 1,
   activity: 1,
   utilisation: 1,

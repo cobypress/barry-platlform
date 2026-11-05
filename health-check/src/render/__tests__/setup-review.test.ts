@@ -79,7 +79,8 @@ describe("a complete run's documents", () => {
     const built = buildReport(loaded.input);
     const html = fullReportHtml(built, loaded.pseudonyms);
     assert.match(html, /<h1>Salesforce health check<\/h1>/);
-    assert.match(html, /Deep dive/);
+    // Its pipeline pages, whether behind their own opener or, in the densest deck, introduced on the areas page.
+    assert.match(html, /Open pipeline by stage/);
     assert.equal(recordAreasLine(loaded.input.run), null);
     assert.ok(built.outputs.full_health_check.sections.some((s) => s.key === "pipeline_deep_dive"));
     assert.equal(DECK_RANGE.min, 20);

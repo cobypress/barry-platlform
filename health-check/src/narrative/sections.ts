@@ -3,6 +3,7 @@ import { AREA_WEIGHTS, CRITICAL_CAP, GRADES, overallScore, type OverallScore } f
 import { comparisonId, comparisonNotes, compareRun, OWN_RANGE_MIN, type BenchmarkInput, type Comparison } from "../benchmark/compare.ts";
 import { quarterOf } from "../benchmark/export.ts";
 import { buildInvestment, investmentText, INVESTMENT_METRIC_IDS, type Investment } from "../money/investment.ts";
+import { ADOPTION_METRIC_IDS } from "../domains/adoption/index.ts";
 import { buildDataset, checkNumbers, scopeDataset, SOURCE, toNumberCheckResult, type FigureSet, type StructuralFigure } from "../numbercheck/index.ts";
 import { compactMoney, money, monthYear } from "../render/format.ts";
 import { BENCHMARK_MIN_GROUP, type Calibration, type Finding, type ManualStep, type Metric, type NumberOverride, type ReportSection, type Run, type Score, type SectionVersion } from "../schemas/index.ts";
@@ -94,6 +95,8 @@ export const valueSource = (group: string): string => `value:${group}`;
 /** The investment section's own figures: what the customer told us they spend. */
 export const INVESTMENT_SOURCE = "investment";
 const COMPARISONS = "comparisons";
+// Metrics with a raw notes section of their own, kept out of the pipeline metrics.
+const OWN_SECTION = new Set([...INVESTMENT_METRIC_IDS, ...ADOPTION_METRIC_IDS]);
 
 const lines = (...parts: Array<string | null | undefined | false>): string => parts.filter(Boolean).join("\n\n");
 const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
@@ -204,15 +207,21 @@ function rawNotesSpecs(input: ReportInput, overall: OverallScore, comparisons: C
       sources: [INVESTMENT_SOURCE],
     },
     { key: "value_model", title: "The money", body: valueText(value), sources: [VALUE_TOTAL, ...value.groups.map((g) => valueSource(g.id))] },
+    {
+      key: "adoption",
+      title: "Adoption",
+      body: "Who uses Salesforce, how often and how: active users by day, week and month, the monthly trend, how people sign in, Lightning, and report use. Each figure says what it leaves out and how far back the login history goes.",
+      metricIds: metrics.filter((m) => ADOPTION_METRIC_IDS.includes(m.id)).map((m) => m.id),
+    },
     ...domains.map((domain): Spec => {
       const own = findings.filter((f) => f.domain === domain);
       return { key: `findings_${domain}`, title: `Findings: ${domainLabel(domain)}`, body: `Every check we ran for ${domainLabel(domain).toLowerCase()}, with what it found and how to reproduce it.`, findingIds: own.map((f) => f.id) };
     }),
-    // The investment figures have their own section above.
+    // The investment and adoption figures have their own sections above.
     // A set-up review has no pipeline figures, so the section holds the set-up ones.
     isSetupReview(run)
-      ? { key: "pipeline_metrics", title: "Set-up metrics", body: "How each figure was calculated, with its sample, exclusions and assumptions.", metricIds: metrics.filter((m) => !INVESTMENT_METRIC_IDS.includes(m.id)).map((m) => m.id) }
-      : { key: "pipeline_metrics", title: "Pipeline metrics", body: "How each pipeline figure was calculated, with its sample, exclusions and assumptions.", metricIds: metrics.filter((m) => !INVESTMENT_METRIC_IDS.includes(m.id)).map((m) => m.id) },
+      ? { key: "pipeline_metrics", title: "Set-up metrics", body: "How each figure was calculated, with its sample, exclusions and assumptions.", metricIds: metrics.filter((m) => !OWN_SECTION.has(m.id)).map((m) => m.id) }
+      : { key: "pipeline_metrics", title: "Pipeline metrics", body: "How each pipeline figure was calculated, with its sample, exclusions and assumptions.", metricIds: metrics.filter((m) => !OWN_SECTION.has(m.id)).map((m) => m.id) },
     // Every compared figure is a pipeline figure, which a set-up review never reads.
     ...(isSetupReview(run) ? [] : [{
       key: "comparisons",

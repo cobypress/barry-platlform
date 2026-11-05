@@ -52,7 +52,7 @@ src/
 
 ### Adding a domain
 
-A domain is a `DomainModule` (`src/domains/types.ts`): extractors, metric builders and rules. Add it to the list in `src/domains/index.ts`. Nothing in `src/engine` changes, and a test proves this with a stand-in Service Cloud module.
+A domain is a `DomainModule` (`src/domains/types.ts`): extractors, metric builders and rules. Add it to the list in `src/domains/index.ts`. Nothing in `src/engine` changes, and a test proves this with a stand-in Service Cloud module. A Sales Cloud area also needs its place in `SALES_CLOUD_DOMAINS`, a label in `DOMAIN_LABELS` and a weight in `AREA_WEIGHTS`, and goes in `ESSENTIALS_DOMAINS` when it reads no CRM records, as adoption does (DECISIONS.md 99).
 
 ## The rules, and where each is enforced
 

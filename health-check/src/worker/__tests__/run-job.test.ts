@@ -99,7 +99,7 @@ describe("a set-up review run job", () => {
     const run = stored(deps);
     const onDisk = JSON.parse(readFileSync(join(run.runDir!, "run.json"), "utf8")) as { scope: string; modules: string[] };
     assert.equal(onDisk.scope, "essentials");
-    assert.deepEqual(onDisk.modules.sort(), ["automation", "best_practice", "configuration", "security", "utilisation"]);
+    assert.deepEqual(onDisk.modules.sort(), ["adoption", "automation", "best_practice", "configuration", "security", "utilisation"]);
     assert.ok(run.output!.findings.every((f) => onDisk.modules.includes(f.domain)));
     assert.ok(!run.output!.sections.some((s) => ["pipeline", "pipeline_deep_dive", "comparisons"].includes(s.key)));
   });

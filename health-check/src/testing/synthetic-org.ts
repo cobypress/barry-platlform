@@ -29,12 +29,13 @@ function seeded(seed: number): () => number {
   };
 }
 
-type UserSeed = { n: number; name: string; login?: string; lastLogin: number | null; active?: boolean; role?: string; created?: number; manager?: number; licence?: string; profile?: string };
+type UserSeed = { n: number; name: string; login?: string; lastLogin: number | null; active?: boolean; role?: string; created?: number; manager?: number; licence?: string; profile?: string; classic?: boolean };
 
 export const USERS: UserSeed[] = [
   { n: 1, name: "Alex Morgan", lastLogin: 2, role: "Sales UK" },
   { n: 2, name: "Priya Shah", lastLogin: 1, role: "Sales UK" },
-  { n: 3, name: "Tom Baker", lastLogin: 3, role: "Sales EU", manager: 12 },
+  // Trap: still on Classic.
+  { n: 3, name: "Tom Baker", lastLogin: 3, role: "Sales EU", manager: 12, classic: true },
   { n: 4, name: "Jo Ellis", lastLogin: 1, profile: "System Administrator" },
   // Trap: the one clean dormant user. Every guard should pass once the manual step is answered.
   { n: 5, name: "Sam Reed", lastLogin: 200, role: "Sales UK" },
@@ -53,7 +54,8 @@ export const USERS: UserSeed[] = [
   { n: 12, name: "Max Stone", lastLogin: 400, role: "Sales EU" },
   // Trap: dormant, and the owner of a scheduled job.
   { n: 13, name: "Ola Nowak", lastLogin: 220 },
-  { n: 14, name: "Ren Ito", lastLogin: 4, role: "Sales EU" },
+  // Trap: still on Classic.
+  { n: 14, name: "Ren Ito", lastLogin: 4, role: "Sales EU", classic: true },
   // Trap: LastLoginDate says dormant, but LoginHistory shows recent logins.
   { n: 15, name: "Ben Cross", lastLogin: 150, role: "Sales UK" },
 ];
@@ -73,6 +75,7 @@ export const usersTable = USERS.map((u) => {
     CreatedDate: daysAgo(u.created ?? 900),
     ManagerId: u.manager ? userId(u.manager) : null,
     DelegatedApproverId: null,
+    UserPreferencesLightningExperiencePreferred: !u.classic,
   };
 });
 
@@ -576,7 +579,7 @@ export const DESCRIBES: Record<string, { fields: unknown[]; recordTypeInfos: unk
 // DESCRIBES, which the field sprawl and usage rules scan.
 const lookup = (name: string, relationshipName: string) => standardField(name, "reference", { relationshipName });
 export const FIELD_DESCRIBES: Record<string, { fields: unknown[] }> = {
-  LoginHistory: { fields: ["Id", "LoginTime", "Status", "ApiType", "ApiVersion", "Application", "LoginType", "SourceIp"].map((f) => standardField(f)).concat(lookup("UserId", "User")) },
+  LoginHistory: { fields: ["Id", "LoginTime", "Status", "ApiType", "ApiVersion", "Application", "LoginType", "Platform", "SourceIp"].map((f) => standardField(f)).concat(lookup("UserId", "User"), lookup("AuthenticationServiceId", "AuthenticationService")) },
   ForecastingItem: {
     fields: ["Id", "ForecastCategoryName", "ForecastAmount", "AmountWithoutAdjustments", "AmountWithoutManagerAdjustment", "HasAdjustment", "OwnerOnlyAmount"]
       .map((f) => standardField(f))
@@ -584,7 +587,7 @@ export const FIELD_DESCRIBES: Record<string, { fields: unknown[] }> = {
   },
   Campaign: { fields: ["Id", "Name", "Type", "Status", "ActualCost", "BudgetedCost", "IsActive"].map((f) => standardField(f)) },
   User: {
-    fields: ["Id", "Name", "Username", "Email", "IsActive", "UserType", "LastLoginDate", "CreatedDate"]
+    fields: ["Id", "Name", "Username", "Email", "IsActive", "UserType", "LastLoginDate", "CreatedDate", "UserPreferencesLightningExperiencePreferred"]
       .map((f) => standardField(f))
       .concat(lookup("ProfileId", "Profile"), lookup("UserRoleId", "UserRole"), lookup("ManagerId", "Manager"), lookup("DelegatedApproverId", "DelegatedApprover")),
   },
@@ -743,6 +746,25 @@ export const FORECAST_FACTS = pipeline.opportunities
     ForecastCategoryName: o.StageName === "Negotiation" || i % 7 === 0 ? "Commit" : o.StageName === "Proposal" ? "Best Case" : "Pipeline",
   }));
 
+/** Weekly browser logins for one user, every `step` days from `from` to `to` days ago. */
+const loginsBetween = (user: number, from: number, to: number, step = 7) =>
+  Array.from({ length: Math.floor((to - from) / step) + 1 }, (_, i) => ({ UserId: userId(user), LoginTime: daysAgo(from + i * step), Status: "Success", ApiType: null, Application: "Browser", LoginType: "Application", Platform: "Mac OSX" }));
+
+// Months of history for adoption. Each user's logins stop before their LastLoginDate.
+function ADOPTION_HISTORY() {
+  return [
+    // The steady core, logging in through every month of the window.
+    ...[1, 2, 3, 4, 14].flatMap((user) => loginsBetween(user, 35, 245)),
+    // Trap: falling adoption. Four people who used Salesforce in the spring have stopped.
+    ...loginsBetween(5, 200, 260, 6),
+    ...loginsBetween(7, 250, 300, 6),
+    ...loginsBetween(8, 180, 230, 6),
+    ...loginsBetween(13, 220, 270, 6),
+    // Trap: mobile use, through the Salesforce app.
+    ...[1, 2].flatMap((user) => [2, 6, 10].map((d) => ({ UserId: userId(user), LoginTime: daysAgo(d), Status: "Success", ApiType: null, Application: "Salesforce for iOS", LoginType: "Remote Access 2.0", Platform: "iPhone" }))),
+  ];
+}
+
 export const LOGIN_HISTORY = [
   ...loginRows(1, 10),
   ...loginRows(2, 12),
@@ -758,6 +780,7 @@ export const LOGIN_HISTORY = [
   ...loginRows(14, 6, "Success", { ApiType: "SOAP Enterprise", Application: "Partner Portal Sync" }),
   // Trap: one data load by an admin is normal, and shouldn't read as an integration.
   ...loginRows(4, 1, "Success", { ApiType: "SOAP Partner", Application: "Data Loader" }),
+  ...ADOPTION_HISTORY(),
 ];
 
 export const HEALTH_SCORE = "62";

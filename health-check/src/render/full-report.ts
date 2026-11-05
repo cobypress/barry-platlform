@@ -496,7 +496,9 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   const speed = ["historic.close_date_reliability", "historic.close_days_late", "historic.stage_velocity_won", "historic.stage_velocity_lost"];
   page("Open pipeline by stage", ["current.open_deals"], () => pipelineTodaySlide(r, metric, calibration));
   page("Delivery outlook", ["current.delivery_outlook_value"], () => outlookSlide(r, metric));
-  if (dense) {
+  // The last resort pairs pipeline charts as the dense decks do: it's there to keep the deck short.
+  const densePipeline = dense || compact;
+  if (densePipeline) {
     page("How deals convert", ["historic.win_rate", "historic.stage_conversion"], () => ({ html: `<div class="eyebrow">Pipeline</div><h2>How deals convert</h2><div class="chart-pair"><div><h3 class="cap">Win rate by segment</h3>${chartSlot(winRateBySegment(metric("historic.win_rate"), undefined, HALF_WIDTH))}</div><div><h3 class="cap">Stage funnel</h3>${chartSlot(stageFunnel(metric("historic.stage_conversion"), HALF_WIDTH))}</div></div>` }));
   } else {
     page("Win rate by segment", ["historic.win_rate"], () => ({ html: `<div class="eyebrow">Pipeline</div><h2>Win rate by segment</h2><div class="chart-wrap">${chartSlot(winRateBySegment(metric("historic.win_rate")))}</div>` }));
@@ -504,7 +506,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
     page("Stage funnel", ["historic.stage_conversion"], () => ({ html: `<div class="eyebrow">Pipeline</div><h2>Stage funnel</h2><div class="chart-wrap">${chartSlot(stageFunnel(metric("historic.stage_conversion")))}</div>` }));
   }
   page("Quarter by quarter", quarterly, () => quarterlySlide(r, metric));
-  if (dense) {
+  if (densePipeline) {
     page("Where wins come from", [...wins, ...sources], () => winsSlideDense(r, metric));
     page("Where deals are lost, and how fast they move", [...lost, ...speed], () => lostAndSpeedSlideDense(r, metric, calibration));
     page("Win rate, sales cycle and slippage", [...readings, ...cycle, ...slippage], () => ({ classes: "tight compact-rows", html: `<div class="eyebrow">Pipeline</div><h2>Win rate, sales cycle and slippage</h2>${metricRows(r, rowsOf([...readings, ...cycle, ...slippage]), r.currency)}` }));
@@ -561,10 +563,15 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   if (top.length) add(`<div class="eyebrow">Top issues</div><h2>${top.length === TOP_ISSUE_COUNT ? `The ${TOP_ISSUE_COUNT} that matter most` : "The issues that matter most"}</h2><table class="grid"><thead><tr><th style="width:6%"></th><th>Issue</th><th style="width:12%">Severity</th><th style="width:26%">Impact</th><th style="width:20%">Owner</th></tr></thead><tbody>${top.map((f, i) => `<tr><td>${i + 1}</td><td>${r.t(f.title)}${r.ref(f.id)}</td><td>${severityChip(f)}</td><td>${valueText(r, f).amount}</td><td>${r.t(f.owner)}</td></tr>`).join("")}</tbody></table>`);
 
   if (density?.domainSummary) {
-    slides.push(...twoColumnList(r, "Areas", "Each area at a glance", assessed.map((domain) => {
-      const own = team.filter((f) => f.domain === domain);
-      return { title: `${domainLabel(domain)}: ${issuesOf(own).length} issues, ${own.filter((f) => f.status === "passed").length} passed`, detail: currentBody(built, `domain_${domain}`) };
-    })));
+    // The pipeline's opener goes too, so its text joins the areas here.
+    const pipelineGlance = pipelinePages.length ? [{ title: "Pipeline", detail: currentBody(built, "pipeline_deep_dive").replace(/\n+/g, " ") }] : [];
+    slides.push(...threeColumnList(r, "Areas", "Each area at a glance", [
+      ...assessed.map((domain) => {
+        const own = team.filter((f) => f.domain === domain);
+        return { title: `${domainLabel(domain)}: ${issuesOf(own).length} issues, ${own.filter((f) => f.status === "passed").length} passed`, detail: currentBody(built, `domain_${domain}`) };
+      }),
+      ...pipelineGlance,
+    ]));
   }
   // The inventory sits with configuration, or with automation when configuration
   // has no issues. An org with nothing of its own to count doesn't need the table.
@@ -603,7 +610,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
 
   if (pipelinePages.length) {
     const pipelineNotes = notes.find((s) => s.key === "pipeline_metrics");
-    add(`<div class="eyebrow">Deep dive</div><h1>Pipeline</h1><div class="body">${sectionBody(r, built, "pipeline_deep_dive")}${pipelineNotes ? `<p class="small-note">The working for every figure in this part is in section <span data-ref>${pipelineNotes.ref}</span> of the raw notes.</p>` : ""}</div>`, "dark divider");
+    if (!density?.domainSummary) add(`<div class="eyebrow">Deep dive</div><h1>Pipeline</h1><div class="body">${sectionBody(r, built, "pipeline_deep_dive")}${pipelineNotes ? `<p class="small-note">The working for every figure in this part is in section <span data-ref>${pipelineNotes.ref}</span> of the raw notes.</p>` : ""}</div>`, "dark divider");
     slides.push(...pipelinePages);
   }
   if (gaps.length) slides.push(...listSlides(r, "Pipeline", "What your data can't tell us yet", gaps, compact));
@@ -624,7 +631,8 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
 
   // Titles only: each of these already has its card in its domain's section.
   const afterPlan = later.map((f) => ({ title: f.title, detail: `${severityWord(f.severity)}. ${effortText(f)}. ${f.owner}` }));
-  if (later.length) slides.push(...(dense ? twoColumnList(r, "Roadmap", "After 90 days", afterPlan) : listSlides(r, "Roadmap", "After 90 days", afterPlan, compact)));
+  // Titles only, so at the densest they take three columns, as the metric definitions do.
+  if (later.length) slides.push(...(density?.domainSummary ? threeColumnList(r, "Roadmap", "After 90 days", afterPlan) : dense ? twoColumnList(r, "Roadmap", "After 90 days", afterPlan) : listSlides(r, "Roadmap", "After 90 days", afterPlan, compact)));
 
   slides.push(nextStepsSlide(r, plan));
 

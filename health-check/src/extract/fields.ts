@@ -20,6 +20,8 @@ export type FieldSpec = {
 
 export const FIELD_SPECS = {
   loginHistory: { object: "LoginHistory", required: ["UserId", "LoginTime", "Status"], optional: ["ApiType", "Application"] },
+  // The same object over the whole window, for adoption: how people sign in, as well as when.
+  loginActivity: { object: "LoginHistory", required: ["UserId", "LoginTime", "Status"], optional: ["ApiType", "Application", "LoginType", "Platform", "AuthenticationServiceId"] },
   forecastingItem: {
     object: "ForecastingItem",
     required: ["OwnerId", "PeriodId", "ForecastingTypeId", "ForecastCategoryName", "ForecastAmount"],
@@ -31,7 +33,7 @@ export const FIELD_SPECS = {
   user: {
     object: "User",
     required: ["Id", "Name", "Username", "Email", "IsActive", "UserType", "Profile.Name", "UserRole.Name", "LastLoginDate", "CreatedDate"],
-    optional: ["ManagerId", "DelegatedApproverId"],
+    optional: ["ManagerId", "DelegatedApproverId", "UserPreferencesLightningExperiencePreferred"],
   },
 } as const satisfies Record<string, FieldSpec>;
 
