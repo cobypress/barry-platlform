@@ -9,6 +9,7 @@ import { money } from "../../render/format.ts";
 import { closedInWindow, dimensions, pipelineMetrics } from "./metrics.ts";
 import { deepDiveMetrics } from "./deep-dive.ts";
 import { PROCESS_RULES, processMetrics } from "./process.ts";
+import { driverMetrics } from "./drivers.ts";
 import { priorWinsExtractor } from "../../extract/prior-wins.ts";
 
 const DIVERGENCE_POINTS = 15;
@@ -176,6 +177,6 @@ export const historicPipelineModule: DomainModule = {
   cloud: "sales",
   label: "Historic pipeline",
   extractors: [schemaExtractor, usersExtractor, stagesExtractor, opportunitiesExtractor, priorWinsExtractor],
-  metrics: [pipelineMetrics, deepDiveMetrics, processMetrics],
+  metrics: [pipelineMetrics, deepDiveMetrics, processMetrics, driverMetrics],
   rules: [unmappedStages, calibrationContradiction, segmentDivergence, ...PROCESS_RULES],
 };

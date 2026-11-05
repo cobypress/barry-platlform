@@ -31,7 +31,7 @@ We keep the human layer (interviews, judgement, the live readout) and put machin
 | --- | --- | --- |
 | 1. Money, score, references | All six parts (decisions 82 to 93, 120, 129) | List prices for licences beyond the core editions (QUESTIONS 51) |
 | 2. Intake, Essentials, housekeeping | Call-notes intake, the Slack discovery canvas, Essentials, the retention sweep | Testing the canvas read-back on a real workspace |
-| 3. Depth | Chapters with "What good looks like" (sourced), adoption, the real sales process, your org documented, two security checks, visuals, the 110-slide report | Root causes (3.3); integrations and technical health as their own areas |
+| 3. Depth | Chapters with "What good looks like" (sourced), adoption, the real sales process, root causes (what separates wins from losses, decisions 160 to 164 and 166), your org documented, two security checks, visuals, the 110-slide report | Integrations and technical health as their own areas |
 | 4. The experience | The customer microsite, the CEO one-pager, the readout kit, the team survey (engine; console in progress) | A designer's pass; stakeholder interview notes |
 | 5. Proof and growth | The 90-day re-check, Barometer Ongoing with the monthly pulse, the free scan with Slack approval | Case studies, "State of Salesforce", partners, the AppExchange decision |
 | 6. Beyond Sales Cloud | Service Cloud scoped (15 checks) | Building it (in progress), then CPQ, Marketing, Experience Cloud, Data Cloud |
@@ -139,6 +139,8 @@ Rep-level insights are team-level by default, with named reps only when the cust
 ### 3.3 Root causes
 
 Findings are linked into causes, not just listed as symptoms: for example, "your win rate is low because deals without a next step lose three times as often".
+
+Built first from what the engine already reads for each closed deal: logged activity, a close date pushed twice or more, a skipped stage, going back a stage, and a long cycle, each as the win rate with it and without it. A gap of 10 points or more that holds within segments is a driver, linked to the issue about the same thing, and always worded as things that went together rather than proof of cause (decisions 160 to 164 and 166). A next step isn't among them yet: it's only read for open deals.
 
 ### 3.4 Your org, documented
 

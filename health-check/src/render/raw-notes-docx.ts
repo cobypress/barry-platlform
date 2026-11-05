@@ -12,6 +12,7 @@ import { comparisonId, comparisonNotes, formatFigure, type Comparison } from "..
 import { domainLabel, domainsInOrder } from "../narrative/select.ts";
 import { OURS, practiceFor, practiceId } from "../practice/index.ts";
 import { TRANSITIONS, transitionMatrix } from "../domains/historic-pipeline/process.ts";
+import { readDrivers } from "../domains/historic-pipeline/drivers.ts";
 import { DOCUMENTED, readDocument, sharingLabel } from "../domains/configuration/documented.ts";
 
 // The working record behind the reports: every check, what it found, and how to
@@ -165,6 +166,28 @@ function addMetric(notes: Notes, m: Metric, ref: string, calibration: Calibratio
   if (m.series.length) notes.table(["Month end", "Value", "Sample"], m.series.map((p) => [p.date, p.value === null ? (p.notMeasurableReason ?? "Not measurable") : String(p.value), String(p.n)]), [2300, 5000, 2000]);
 }
 
+/** The working behind "what separates your wins from your losses": every factor, both sides, and what each driver is linked to. */
+function addDrivers(notes: Notes, m: Metric, ref: string, report: BuiltReport): void {
+  if (m.status !== "measured") return addMetric(notes, m, ref, report.input.calibration);
+  notes.heading(`${ref} ${m.label}: ${m.value}%`, 3);
+  notes.labelled("Definition", m.definition);
+  notes.labelled("Sample", `${m.n} won and lost deals, ${m.stats.won} won and ${m.stats.lost} lost${m.dateRange ? `, ${m.dateRange.from} to ${m.dateRange.to}` : ""}`);
+  if (m.exclusions.length) notes.labelled("Excludes", m.exclusions.join("; "));
+  if (m.assumptions.length) notes.labelled("Assumptions", m.assumptions.join("; "));
+  const drivers = readDrivers(m);
+  const rate = (s: { rate: number | null }): string => (s.rate === null ? "" : `${s.rate}%`);
+  notes.table(
+    ["Factor", "Deals with it", "Won", "Win rate", "Deals without it", "Won", "Win rate", "Gap, points", "Same way in segments", "Driver"],
+    drivers.filter((d) => d.gap !== null).map((d) => [d.label, String(d.with.n), String(d.with.won), rate(d.with), String(d.without.n), String(d.without.won), rate(d.without), String(d.gap), d.compared ? `${d.held} of ${d.compared}` : "None to compare", d.isDriver ? "Yes" : "No"]),
+    [2000, 750, 650, 800, 850, 650, 800, 850, 1100, 850],
+  );
+  for (const d of drivers.filter((x) => x.gap === null)) notes.labelled(d.label, `Not measurable. ${d.reason ?? ""}`);
+  for (const cause of report.causes) {
+    const linked = report.teamFindings.filter((f) => cause.findingIds.includes(f.id)).map((f) => `${f.title} (${f.id})`);
+    notes.labelled(`Linked to ${linked.join("; ")}`, cause.sentence);
+  }
+}
+
 /** The documented org, every list in full. A part that couldn't be measured says why, as any metric does. */
 function addDocumented(notes: Notes, metrics: Metric[], ids: string[], ref: (id: string) => string, calibration: Calibration): void {
   const doc = readDocument(metrics);
@@ -279,6 +302,7 @@ export function buildRawNotes(report: BuiltReport, pseudonyms: Pseudonymiser): N
     if (s.key.startsWith("findings_")) rawNotesOrder(findings.filter((f) => s.items.some((item) => item.id === f.id))).forEach((f) => addFinding(notes, f, calibration.currency, ref(f.id)));
     if (s.key === "pipeline_metrics" || s.key === "investment" || s.key === "adoption" || s.key === "sales_process" || s.key === "team_survey" || s.key === "service_cases") metrics.filter((m) => s.items.some((item) => item.id === m.id)).forEach((m) => addMetric(notes, m, ref(m.id), calibration));
     if (s.key === "practice") addPractice(notes, domainsInOrder(report.teamFindings), ref);
+    if (s.key === "win_drivers") metrics.filter((m) => s.items.some((item) => item.id === m.id)).forEach((m) => addDrivers(notes, m, ref(m.id), report));
     if (s.key === "org_documented") addDocumented(notes, metrics, s.items.map((item) => item.id), ref, calibration);
     if (s.key === "value_model") report.value.groups.forEach((g) => addValueGroup(notes, g, calibration.currency, ref(valueItemId(g.id))));
     if (s.key === "comparisons") report.comparisons.forEach((c) => addComparison(notes, c, ref(comparisonId(c.metric.key))));

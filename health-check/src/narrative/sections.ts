@@ -7,6 +7,7 @@ import { buildInvestment, investmentText, INVESTMENT_METRIC_IDS, type Investment
 import { ADOPTION_METRIC_IDS } from "../domains/adoption/index.ts";
 import { SERVICE_OPERATIONS_METRIC_IDS } from "../domains/service/index.ts";
 import { PROCESS_METRIC_IDS } from "../domains/historic-pipeline/process.ts";
+import { causesOf, DRIVER_GAP, WIN_DRIVERS, type Cause } from "../domains/historic-pipeline/drivers.ts";
 import { DOCUMENTED_METRIC_IDS } from "../domains/configuration/documented.ts";
 import { buildDataset, checkNumbers, scopeDataset, SOURCE, toNumberCheckResult, type FigureSet, type StructuralFigure } from "../numbercheck/index.ts";
 import { compactMoney, money, monthYear } from "../render/format.ts";
@@ -75,6 +76,12 @@ export type BuiltReport = {
   scopes: Map<string, string[]>;
   /** What the team survey says, and against what we found. Null when the run has no survey. */
   survey: SurveyView | null;
+  /**
+   * What separates wins from losses, linked to the issues about the same thing
+   * (roadmap 3.3). Kept beside the findings rather than written into them, so a
+   * rule's output stays as the rule made it.
+   */
+  causes: Cause[];
 };
 
 export const TOP_ISSUE_COUNT = 5;
@@ -125,7 +132,7 @@ export const valueSource = (group: string): string => `value:${group}`;
 export const INVESTMENT_SOURCE = "investment";
 const COMPARISONS = "comparisons";
 // Metrics with a raw notes section of their own, kept out of the pipeline metrics.
-const OWN_SECTION = new Set([...INVESTMENT_METRIC_IDS, ...ADOPTION_METRIC_IDS, ...PROCESS_METRIC_IDS, ...DOCUMENTED_METRIC_IDS, ...SURVEY_METRIC_IDS, ...SERVICE_OPERATIONS_METRIC_IDS]);
+const OWN_SECTION = new Set([...INVESTMENT_METRIC_IDS, ...ADOPTION_METRIC_IDS, ...PROCESS_METRIC_IDS, WIN_DRIVERS, ...DOCUMENTED_METRIC_IDS, ...SURVEY_METRIC_IDS, ...SERVICE_OPERATIONS_METRIC_IDS]);
 
 const lines = (...parts: Array<string | null | undefined | false>): string => parts.filter(Boolean).join("\n\n");
 const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
@@ -230,7 +237,7 @@ function progressText(p: Progress, currency: string): string {
   );
 }
 
-function rawNotesSpecs(input: ReportInput, overall: OverallScore, comparisons: Comparison[], value: ValueModel, investment: Investment, effectiveMetrics: Metric[], progress: Progress | null, survey: SurveyView | null): Spec[] {
+function rawNotesSpecs(input: ReportInput, overall: OverallScore, comparisons: Comparison[], value: ValueModel, investment: Investment, effectiveMetrics: Metric[], progress: Progress | null, survey: SurveyView | null, causes: Cause[]): Spec[] {
   const { run, calibration, findings, metrics, manualSteps, intake, overrides = [] } = input;
   const exclusions = [...new Set([...findings.flatMap((f) => f.evidence.flatMap((e) => e.exclusions)), ...metrics.flatMap((m) => m.exclusions)])];
   const notMeasurable = findings.filter((f) => f.status === "not_measurable");
@@ -282,6 +289,17 @@ function rawNotesSpecs(input: ReportInput, overall: OverallScore, comparisons: C
       title: "How your sales process really runs",
       body: "How deals moved through your stages, from the stage history of every deal that closed in the window after being open: each move from one stage to the next, the stages won deals skipped, the deals that went back a stage, and the paths won and lost deals most often took.",
       metricIds: metrics.filter((m) => PROCESS_METRIC_IDS.includes(m.id)).map((m) => m.id),
+    }]),
+    // Also from deal records. Each driver linked to an issue is set out with it.
+    ...(isSetupReview(run) ? [] : [{
+      key: "win_drivers",
+      title: "What separates your wins from your losses",
+      body: lines(
+        `From your own deals that closed in the window after being open: for each thing we can read for every deal, the win rate of deals with it and without it, and the gap between them. A gap of ${DRIVER_GAP} points or more is a driver. It shows how often things went together, not proof that one caused the other.`,
+        ...causes.map((c) => `${findings.filter((f) => c.findingIds.includes(f.id)).map((f) => f.title).join("; ")}: ${c.sentence}`),
+      ),
+      metricIds: metrics.filter((m) => m.id === WIN_DRIVERS).map((m) => m.id),
+      sources: causes.flatMap((c) => c.findingIds),
     }]),
     // Set-up only, so a set-up review has it too.
     {
@@ -663,6 +681,7 @@ export function buildReport(given: ReportInput): BuiltReport {
   const teamTime = teamTimeOf(effective.metrics);
   const value = buildValueModel(effective.findings, run, calibration.currency, intake?.hourlyCost, teamTime);
   const survey = buildSurveyView(effective.metrics, team);
+  const causes = causesOf(effective.metrics, team);
   // A re-check compares with its first health check, built the same way, overrides and all.
   let progress: Progress | null = null;
   if (input.baseline) {
@@ -732,6 +751,11 @@ export function buildReport(given: ReportInput): BuiltReport {
   if (investment.annualCost.status === "measured" && investment.annualCost.value > 0 && value.total.expected > 0) {
     dataset.figures.push({ source: VALUE_TOTAL, kind: "ratio", value: Math.round((value.total.expected / investment.annualCost.value) * 10) / 10 });
   }
+  // A gap is printed in points. The metric holds it as a plain stat, which can't back that unit.
+  const drivers = effective.metrics.find((m) => m.id === WIN_DRIVERS);
+  if (drivers?.status === "measured") {
+    for (const [name, gap] of Object.entries(drivers.stats)) if (/Gap$/.test(name)) dataset.figures.push({ source: WIN_DRIVERS, kind: "points", value: gap });
+  }
   // The customer's own total is the one investment figure no metric holds.
   if (investment.annualCost.status === "measured" && investment.annualCost.basis === "customer") {
     dataset.figures.push({ source: INVESTMENT_SOURCE, kind: "currency", value: investment.annualCost.value, currency: calibration.currency });
@@ -750,8 +774,9 @@ export function buildReport(given: ReportInput): BuiltReport {
     comparisons,
     investment,
     survey,
+    causes,
     outputs: {
-      raw_notes: build("raw_notes", rawNotesSpecs(input, overall, comparisons, value, investment, effective.metrics, progress, survey)),
+      raw_notes: build("raw_notes", rawNotesSpecs(input, overall, comparisons, value, investment, effective.metrics, progress, survey, causes)),
       executive_summary: build("executive_summary", executiveSpecs(input, team, survey)),
       full_health_check: build("full_health_check", fullSpecs(input, team, effective.metrics, survey)),
     },
