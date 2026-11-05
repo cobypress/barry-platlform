@@ -206,7 +206,7 @@ export function buildRawNotes(report: BuiltReport, pseudonyms: Pseudonymiser): N
     notes.para(currentBody(built, s.key));
     if (s.key === "manual_steps") manualSteps.forEach((step) => addManualStep(notes, step, ref(step.id)));
     if (s.key.startsWith("findings_")) rawNotesOrder(findings.filter((f) => s.items.some((item) => item.id === f.id))).forEach((f) => addFinding(notes, f, calibration.currency, ref(f.id)));
-    if (s.key === "pipeline_metrics") metrics.forEach((m) => addMetric(notes, m, ref(m.id)));
+    if (s.key === "pipeline_metrics" || s.key === "investment") metrics.filter((m) => s.items.some((item) => item.id === m.id)).forEach((m) => addMetric(notes, m, ref(m.id)));
     if (s.key === "value_model") report.value.groups.forEach((g) => addValueGroup(notes, g, calibration.currency, ref(valueItemId(g.id))));
     if (s.key === "comparisons") report.comparisons.forEach((c) => addComparison(notes, c, ref(comparisonId(c.metric.key))));
     if (s.key === "queries") addQueries(notes, findings, metrics);

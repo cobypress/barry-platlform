@@ -33,15 +33,18 @@ export const usersExtractor: Extractor<Sourced<UserRow[]>> = {
 
 export type UserLicenseRow = { Name: string; TotalLicenses: number; UsedLicenses: number; Status: string };
 export type PermissionSetLicenseRow = { MasterLabel: string; TotalLicenses: number; UsedLicenses: number; Status: string; ExpirationDate: string | null };
-export type LicenceData = { userLicenses: Sourced<UserLicenseRow[]>; permissionSetLicenses: Sourced<PermissionSetLicenseRow[]> };
+/** An installed managed package's seats (Object Reference, API 68.0). Status is Active, Expired, Free or Trial. */
+export type PackageLicenseRow = { NamespacePrefix: string | null; AllowedLicenses: number; UsedLicenses: number; Status: string; ExpirationDate: string | null };
+export type LicenceData = { userLicenses: Sourced<UserLicenseRow[]>; permissionSetLicenses: Sourced<PermissionSetLicenseRow[]>; packageLicenses: Sourced<PackageLicenseRow[]> };
 
 export const licencesExtractor: Extractor<LicenceData> = {
   id: "licences",
-  version: 1,
+  version: 2,
   async run(ctx) {
     return {
       userLicenses: await readSoql(ctx, "SELECT Name, TotalLicenses, UsedLicenses, Status FROM UserLicense"),
       permissionSetLicenses: await readSoql(ctx, "SELECT MasterLabel, TotalLicenses, UsedLicenses, Status, ExpirationDate FROM PermissionSetLicense"),
+      packageLicenses: await readSoql(ctx, "SELECT NamespacePrefix, AllowedLicenses, UsedLicenses, Status, ExpirationDate FROM PackageLicense"),
     };
   },
 };

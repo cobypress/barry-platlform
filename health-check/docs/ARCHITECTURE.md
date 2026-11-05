@@ -43,6 +43,7 @@ src/
   narrative/    Section builder, ranking and plan, Claude drafting and its guards
   design/       Design tokens: the only place colours and type are set
   render/       Charts, Word and PDF output, and the layout checks
+  money/        What a seat costs (calibration, then list price), list prices with their sources, and the annual cost a report states
   benchmark/    Anonymised rows for the benchmark set, with consent, and their summary; published research and the comparison a report shows
   retention/    Purging raw extracts from finished runs
   cli/          hc
