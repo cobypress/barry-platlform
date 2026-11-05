@@ -10,6 +10,7 @@ import { chartSlot, coverScore, document, effortText, estimateLines, paginate, p
 import { noteSections, referenceMap } from "./references.ts";
 import { scoreLine } from "./executive.ts";
 import { COMPARE_CSS, compareSlide } from "./compare.ts";
+import { MONEY_CSS, moneyPage } from "./money.ts";
 
 // The full deck: 16:9, 40 to 60 slides. Issue slides flex to keep it in range,
 // because a thin org and a messy one have very different numbers of findings.
@@ -514,6 +515,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
     "What you told us",
     "What we found against it",
     "Overview and scorecard",
+    ...(report.value.total.expected > 0 ? ["What fixing this is worth"] : []),
     ...(comparable ? ["How you compare"] : []),
     ...withIssues.map(domainLabel),
     ...(working.length ? ["What's working well"] : []),
@@ -538,6 +540,9 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   add(`<div class="eyebrow">What we found against it</div><h2>What you told us, against what we found</h2>${needsInput(built, "stated_vs_actual") ? inputChip : ""}${sectionBody(r, built, "stated_vs_actual")}`);
 
   add(`<div class="eyebrow">Overview</div><h2>${r.t(verdict.headline)}</h2><div>${sectionBody(r, built, "overview").replace(`<p>${r.t(verdict.headline)}.</p>`, "")}</div><div class="stat-row" style="margin-top:18px">${report.overall.status === "measured" ? `<div class="stat"><b>${report.overall.score}</b><span>Barometer score</span></div>` : ""}<div class="stat"><b>${verdict.issues}</b><span>Issues</span></div><div class="stat"><b>${verdict.critical}</b><span>Critical</span></div><div class="stat"><b>${verdict.high}</b><span>High</span></div><div class="stat"><b>${team.filter((f) => f.status === "not_measurable").length}</b><span>Not measurable</span></div><div class="stat"><b>${team.filter((f) => f.status === "passed").length}</b><span>Passed</span></div></div>`);
+
+  const worth = moneyPage(r, report, "slide");
+  if (worth) add(worth, "tight");
 
   add(`<div class="eyebrow">Scorecard</div><h2>How each area stands</h2>${scoreLine(report) ? `<p class="lede">${r.t(scoreLine(report, true))}</p>` : ""}<div class="chart-wrap" style="max-width:${scoreLine(report) ? 760 : 880}px">${chartSlot(scorecardChart(scorecard(team, scores)))}</div>`);
 
@@ -649,5 +654,5 @@ export function fullReportHtml(report: BuiltReport, pseudonyms: Pseudonymiser): 
     const chrome = slide.classes?.includes("cover") ? "" : `<div class="footer" data-chrome><span>Black Cloud Barometer${r.draft ? " | Draft, not approved for release" : ""}</span><span>${i + 1}</span></div>`;
     return `<section class="page ${slide.classes ?? ""}" data-page="${i + 1}">${slide.html}${chrome}</section>`;
   });
-  return document("Full health check", "slide", `${CSS}\n${COMPARE_CSS}`, pages);
+  return document("Full health check", "slide", `${CSS}\n${COMPARE_CSS}\n${MONEY_CSS}\n.money .headline-figure { font-size: 2.6em; } .money .range { margin: 4px 0 10px; } .money .kind { margin-bottom: 5px; } .money table.grid { font-size: 16px; } .money .split .kinds { font-size: 16px; } .money .split .note { font-size: 14px; }`, pages);
 }

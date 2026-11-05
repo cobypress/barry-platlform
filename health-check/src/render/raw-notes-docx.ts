@@ -6,7 +6,8 @@ import { canRelease, type Evidence, type Finding, type ManualStep, type Metric, 
 import { longDate, money, plainWords, ukDates } from "./format.ts";
 import { INVENTORY_COLUMNS, inventoryRows, OBJECT_INVENTORY } from "../domains/configuration/inventory.ts";
 import { inventoryLine } from "../notes/raw-notes.ts";
-import { noteSections, rawNotesOrder } from "./references.ts";
+import { noteSections, rawNotesOrder, valueItemId } from "./references.ts";
+import { KIND_LABELS, type ValueGroup } from "../value/model.ts";
 import { comparisonId, comparisonNotes, formatFigure, type Comparison } from "../benchmark/compare.ts";
 
 // The working record behind the reports: every check, what it found, and how to
@@ -117,6 +118,20 @@ function addFinding(notes: Notes, f: Finding, currency: string, ref: string): vo
   if (f.guards.length) notes.table(["Subject", "Guard", "Result", "Detail"], f.guards.map((g) => [g.subject, g.guardId, g.status, g.detail]), [2000, 2400, 900, 4000]);
 }
 
+function addValueGroup(notes: Notes, g: ValueGroup, currency: string, ref: string): void {
+  const m = (n: number) => money(n, currency);
+  const pct = (n: number) => `${Math.round(n * 100)}%`;
+  notes.heading(`${ref} ${g.label}`, 3);
+  notes.labelled("Kind", g.kind === "exposure" ? "Exposure, shown beside the total and never added to it" : KIND_LABELS[g.kind]);
+  if (g.kind !== "exposure") notes.labelled("Share we count", `${pct(g.realisation.low)} in the low case, ${pct(g.realisation.expected)} expected, ${pct(g.realisation.high)} in the high case`);
+  if (g.lines.length > 1) notes.labelled("Counted once", "These figures describe the same money, so only the largest counts.");
+  notes.table(
+    ["Finding", "Figure over 12 months", "How", "Low", "Expected", "High", "Counted"],
+    g.lines.map((l) => [`${l.title} (${l.findingId})`, m(l.annual), l.basis, m(l.low), m(l.expected), m(l.high), l === g.counted ? "Yes" : "No, overlaps"]),
+    [2500, 1200, 2000, 900, 900, 900, 900],
+  );
+}
+
 function addMetric(notes: Notes, m: Metric, ref: string): void {
   if (m.status === "not_measurable") {
     notes.heading(`${ref} ${m.label}`, 3);
@@ -192,6 +207,7 @@ export function buildRawNotes(report: BuiltReport, pseudonyms: Pseudonymiser): N
     if (s.key === "manual_steps") manualSteps.forEach((step) => addManualStep(notes, step, ref(step.id)));
     if (s.key.startsWith("findings_")) rawNotesOrder(findings.filter((f) => s.items.some((item) => item.id === f.id))).forEach((f) => addFinding(notes, f, calibration.currency, ref(f.id)));
     if (s.key === "pipeline_metrics") metrics.forEach((m) => addMetric(notes, m, ref(m.id)));
+    if (s.key === "value_model") report.value.groups.forEach((g) => addValueGroup(notes, g, calibration.currency, ref(valueItemId(g.id))));
     if (s.key === "comparisons") report.comparisons.forEach((c) => addComparison(notes, c, ref(comparisonId(c.metric.key))));
     if (s.key === "queries") addQueries(notes, findings, metrics);
     if (s.key === "overrides") addOverrides(notes, overrides);

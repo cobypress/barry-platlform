@@ -5,7 +5,8 @@ import { canRelease, type Finding, type Metric } from "../schemas/index.ts";
 import { deliveryOutlookChart, scorecardChart, winRateBySegment } from "./charts.ts";
 import { compactMoney, longDate, monthYear } from "./format.ts";
 import { chartSlot, coverScore, document, effortText, estimateLines, paginate, paragraphs, renderContext, severityChip, valueFigure, valueText, type Render } from "./html.ts";
-import { noteSections, referenceMap } from "./references.ts";
+import { noteSections, referenceMap, valueItemId } from "./references.ts";
+import { MONEY_CSS, moneyPage } from "./money.ts";
 
 // About 7 pages, A4: verdict, scorecard, pipeline, top five issues with value, 90-day plan.
 
@@ -67,8 +68,8 @@ const phaseHeight = (r: Render, items: Finding[], more: boolean): number => 44 +
 
 type PlanBlock = { phase: PlanPhase; items: Finding[] };
 
-/** The most pages the summary may take, the references page included. The layout check holds it to this. */
-export const EXECUTIVE_MAX_PAGES = 9;
+/** The most pages the summary may take, the money and references pages included. The layout check holds it to this. */
+export const EXECUTIVE_MAX_PAGES = 10;
 
 type PlanPage = Array<PlanBlock | { intro: true }>;
 
@@ -178,6 +179,9 @@ export function executiveHtml(report: BuiltReport, pseudonyms: Pseudonymiser): s
     <table class="grid"><thead><tr><th>Issue</th><th style="width:34%">Impact</th></tr></thead><tbody>${top.map((f) => `<tr><td>${r.t(f.title)}${r.ref(f.id)}</td><td>${valueText(r, f).amount}</td></tr>`).join("")}</tbody></table>
     <p style="margin-top:18px">Every figure here comes from your Salesforce org. Where we couldn't measure something, we say so rather than estimate it.</p>`);
 
+  const worth = moneyPage(r, report);
+  if (worth) add(worth);
+
   add(`<div class="eyebrow">Scorecard</div><h2>How each area stands</h2><p style="margin-bottom:14px">${r.t(currentBody(built, "scorecard") + scoreLine(report))}</p>${chartSlot(scorecardChart(scorecard(team, scores)))}<h3 class="sub">Win rate by segment</h3><div style="margin-top:8px">${chartSlot(winRateBySegment(report.metrics.find((m) => m.id === "historic.win_rate")))}</div>`);
 
   add(pipelinePage(r, report, currentBody(built, "pipeline")));
@@ -200,10 +204,10 @@ export function executiveHtml(report: BuiltReport, pseudonyms: Pseudonymiser): s
 
   const referenced = [...used].flatMap((id) => {
     const ref = refs.get(id);
-    const f = team.find((x) => x.id === id);
-    return ref && f ? [{ ref, title: f.title }] : [];
+    const title = team.find((x) => x.id === id)?.title ?? report.value.groups.find((g) => valueItemId(g.id) === id)?.label;
+    return ref && title ? [{ ref, title }] : [];
   });
   if (referenced.length) add(detailPage(r, referenced));
 
-  return document("Executive summary", "a4", CSS, pages);
+  return document("Executive summary", "a4", `${CSS}\n${MONEY_CSS}`, pages);
 }

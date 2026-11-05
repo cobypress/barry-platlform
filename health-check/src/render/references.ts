@@ -24,6 +24,8 @@ export function noteSections(report: BuiltReport): NoteSection[] {
       ? rawNotesOrder(findings.filter((f) => section.findingIds.includes(f.id))).map((f) => f.id)
       : section.key === "pipeline_metrics"
         ? metrics.map((m) => m.id)
+        : section.key === "value_model"
+          ? report.value.groups.map((g) => valueItemId(g.id))
         : section.key === "comparisons"
           ? report.comparisons.map((c) => comparisonId(c.metric.key))
           : section.key === "manual_steps"
@@ -32,6 +34,9 @@ export function noteSections(report: BuiltReport): NoteSection[] {
     return { ref, key: section.key, title: section.title, items: ids.map((id, k) => ({ ref: `${ref}.${k + 1}`, id })) };
   });
 }
+
+/** A value group's id among the notes' items. */
+export const valueItemId = (group: string): string => `value:${group}`;
 
 /** Each finding, metric and manual step's reference, by its id. */
 export function referenceMap(sections: NoteSection[]): Map<string, string> {

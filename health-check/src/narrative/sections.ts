@@ -1,8 +1,9 @@
+import { buildValueModel, HEADLINE_KINDS, KIND_LABELS, UK_HOURLY_BENCHMARK, type ValueModel } from "../value/model.ts";
 import { AREA_WEIGHTS, CRITICAL_CAP, GRADES, overallScore, type OverallScore } from "../domains/scoring.ts";
 import { comparisonId, comparisonNotes, compareRun, OWN_RANGE_MIN, type BenchmarkInput, type Comparison } from "../benchmark/compare.ts";
 import { quarterOf } from "../benchmark/export.ts";
 import { buildDataset, checkNumbers, scopeDataset, SOURCE, toNumberCheckResult, type FigureSet, type StructuralFigure } from "../numbercheck/index.ts";
-import { compactMoney, monthYear } from "../render/format.ts";
+import { compactMoney, money, monthYear } from "../render/format.ts";
 import { BENCHMARK_MIN_GROUP, type Calibration, type Finding, type ManualStep, type Metric, type NumberOverride, type ReportSection, type Run, type Score, type SectionVersion } from "../schemas/index.ts";
 import { ReportSection as ReportSectionSchema, SectionVersion as SectionVersionSchema } from "../schemas/index.ts";
 import type { SectionBrief } from "./draft.ts";
@@ -44,6 +45,8 @@ export type BuiltReport = {
   metrics: Metric[];
   /** The Barometer score: one figure for the org, from the area scores. */
   overall: OverallScore;
+  /** What the issues are worth over the next 12 months (roadmap 1.4). */
+  value: ValueModel;
   /** Where the headline figures sit against published research and our own customers. */
   comparisons: Comparison[];
   outputs: Record<ReportOutputKey, BuiltOutput>;
@@ -83,6 +86,8 @@ const OVERRIDES = "overrides";
 const COVER = "cover";
 const PLAN = "plan";
 export const OVERALL = "score:overall";
+export const VALUE_TOTAL = "value:total";
+export const valueSource = (group: string): string => `value:${group}`;
 const COMPARISONS = "comparisons";
 
 const lines = (...parts: Array<string | null | undefined | false>): string => parts.filter(Boolean).join("\n\n");
@@ -136,7 +141,45 @@ function overallFigures(overall: OverallScore): FigureSet["figures"] {
   return [...fixed, number(overall.score), { ...number(overall.score), unit: "points" }, number(overall.uncapped), ...overall.areas.flatMap((a) => [number(a.score), number(a.weight)])];
 }
 
-function rawNotesSpecs(input: ReportInput, overall: OverallScore, comparisons: Comparison[]): Spec[] {
+/** The money in a few sentences: the total, each kind, and how it was counted. */
+function valueText(value: ValueModel): string {
+  const m = (n: number) => money(n, value.currency);
+  const { total, byKind } = value;
+  const exposure = value.groups.filter((g) => g.kind === "exposure").sort((x, y) => y.counted.annual - x.counted.annual)[0];
+  if (total.expected === 0) return "None of the issues we found could be given a figure in money, so there's no total. Each one is rated by the risk it carries instead.";
+  const kinds = HEADLINE_KINDS.filter((k) => byKind[k].expected > 0).map((k) => `${KIND_LABELS[k]}: ${m(byKind[k].expected)}, between ${m(byKind[k].low)} and ${m(byKind[k].high)}`);
+  return lines(
+    `Over the next 12 months, the issues we found are worth about ${m(total.expected)} to you, and between ${m(total.low)} and ${m(total.high)}.`,
+    kinds.join("\n"),
+    "Figures that describe the same money are counted once: in each group below, only the largest counts. Each issue's figure is what's there if every case were won back, so we count a share of it, and the expected case is the conservative one. The items below show each figure, its share and why.",
+    byKind.time_cost.expected > 0
+      ? value.hourly.source === "customer"
+        ? `Time is costed at the hourly figure you gave us, £${value.hourly.rate}.`
+        : `Time is costed at £${value.hourly.rate} an hour: ${value.hourly.working.join(" ")}`
+      : null,
+    exposure ? `Separately, the largest exposure we found is this: ${exposure.counted.title.replace(/\.$/, "")} (${m(exposure.counted.annual)}). Pipeline at risk, a gap in coverage or spend that isn't coming back is exposure, not money found, so it's never added to the total.` : null,
+  );
+}
+
+/** Every figure the money's working quotes: each group under its own source, and the totals. */
+function valueFigures(value: ValueModel): FigureSet["figures"] {
+  const cash = (source: string, amount: number) => ({ source, kind: "currency" as const, value: amount, currency: value.currency });
+  const number = (source: string, n: number) => ({ source, kind: "number" as const, value: n });
+  const percent = (source: string, n: number) => ({ source, kind: "percent" as const, value: n });
+  const b = UK_HOURLY_BENCHMARK;
+  const totals = [value.total, ...Object.values(value.byKind)].flatMap((r) => [r.low, r.expected, r.high]).map((n) => cash(VALUE_TOTAL, n));
+  const duration = (n: number, unit: string) => ({ source: VALUE_TOTAL, kind: "duration" as const, value: n, unit });
+  const worked = value.hourly.figures ? [value.hourly.figures.ni, value.hourly.figures.pension, value.hourly.figures.loaded].map((n) => cash(VALUE_TOTAL, n)) : [];
+  const rate = [...worked, duration(12, "month"), duration(b.hoursPerWeek * b.weeksPerYear, "hour"), duration(b.hoursPerWeek, "hour"), number(VALUE_TOTAL, 1), cash(VALUE_TOTAL, value.hourly.rate), ...[b.salary, b.niThreshold, b.pensionFrom, b.pensionTo].map((n) => cash(VALUE_TOTAL, n)), ...[b.hoursPerWeek, b.hoursPerWeek * b.weeksPerYear, 12, 2025].map((n) => number(VALUE_TOTAL, n)), ...[b.employerNiRate, b.pensionRate].map((n) => percent(VALUE_TOTAL, n * 100))];
+  const groups = value.groups.flatMap((g) => {
+    const source = valueSource(g.id);
+    const shares = [g.realisation.low, g.realisation.expected, g.realisation.high].map((n) => percent(source, n * 100));
+    return [...shares, ...g.lines.flatMap((l) => [cash(source, l.annual), cash(source, l.low), cash(source, l.expected), cash(source, l.high)])];
+  });
+  return [...totals, ...rate, ...groups];
+}
+
+function rawNotesSpecs(input: ReportInput, overall: OverallScore, comparisons: Comparison[], value: ValueModel): Spec[] {
   const { run, calibration, findings, metrics, manualSteps, intake, overrides = [] } = input;
   const exclusions = [...new Set([...findings.flatMap((f) => f.evidence.flatMap((e) => e.exclusions)), ...metrics.flatMap((m) => m.exclusions)])];
   const notMeasurable = findings.filter((f) => f.status === "not_measurable");
@@ -147,6 +190,7 @@ function rawNotesSpecs(input: ReportInput, overall: OverallScore, comparisons: C
       : { key: "intake_summary", title: "Intake summary", body: "No intake has been recorded for this run.", needsInput: true },
     { key: "assumptions", title: "Assumptions", body: calibrationText(run, calibration), sources: [SOURCE.run, CALIBRATION] },
     { key: "barometer_score", title: "Barometer score", body: overallText(overall), sources: [OVERALL] },
+    { key: "value_model", title: "The money", body: valueText(value), sources: [VALUE_TOTAL, ...value.groups.map((g) => valueSource(g.id))] },
     ...domains.map((domain): Spec => {
       const own = findings.filter((f) => f.domain === domain);
       return { key: `findings_${domain}`, title: `Findings: ${domainLabel(domain)}`, body: `Every check we ran for ${domainLabel(domain).toLowerCase()}, with what it found and how to reproduce it.`, findingIds: own.map((f) => f.id) };
@@ -481,6 +525,7 @@ export function buildReport(input: ReportInput): BuiltReport {
   const effective = applyOverrides(findings, metrics, overrides);
   const team = effective.findings.map(teamLevelFinding);
   const overall = overallScore(scores, effective.findings);
+  const value = buildValueModel(effective.findings, run, calibration.currency, intake?.hourlyCost);
   const comparisons = compareRun({
     metrics: effective.metrics,
     scores,
@@ -515,7 +560,7 @@ export function buildReport(input: ReportInput): BuiltReport {
     ...[OWN_RANGE_MIN, BENCHMARK_MIN_GROUP].map((value) => ({ source: COMPARISONS, kind: "number" as const, value })),
     ...[COMPARISONS, ...comparisons.map((c) => comparisonId(c.metric.key))].map((source) => ({ source, kind: "percent" as const, value: 50 })),
   );
-  dataset.figures.push(...planFigures(buildPlan(team)), ...overallFigures(overall));
+  dataset.figures.push(...planFigures(buildPlan(team)), ...overallFigures(overall), ...valueFigures(value));
   const briefs = new Map<string, SectionBrief>();
   const scopes = new Map<string, string[]>();
   const build = (output: ReportOutputKey, specs: Spec[]): BuiltOutput => record(run, output, specs, dataset, now, briefs, scopes);
@@ -525,9 +570,10 @@ export function buildReport(input: ReportInput): BuiltReport {
     teamFindings: team.slice().sort(bySeverity),
     metrics: effective.metrics,
     overall,
+    value,
     comparisons,
     outputs: {
-      raw_notes: build("raw_notes", rawNotesSpecs(input, overall, comparisons)),
+      raw_notes: build("raw_notes", rawNotesSpecs(input, overall, comparisons, value)),
       executive_summary: build("executive_summary", executiveSpecs(input, team)),
       full_health_check: build("full_health_check", fullSpecs(input, team, effective.metrics)),
     },

@@ -63,7 +63,7 @@ One number out of 100 with a grade, built from the area scores the engine alread
 - Price them from a list-price table we keep, overridden by what the customer tells us they pay (decision 4).
 - Show what they pay, what they use, and what they pay for and don't use.
 
-### 1.4 The value model: every issue gets a figure
+### 1.4 The value model: every issue gets a figure (first version done, 5 November 2026)
 
 | Kind | Example | Method |
 | --- | --- | --- |
