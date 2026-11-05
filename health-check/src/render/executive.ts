@@ -4,7 +4,7 @@ import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { canRelease, type Finding, type Metric } from "../schemas/index.ts";
 import { deliveryOutlookChart, scorecardChart, winRateBySegment } from "./charts.ts";
 import { compactMoney, longDate, monthYear } from "./format.ts";
-import { chartSlot, document, effortText, estimateLines, paginate, paragraphs, renderContext, severityChip, valueFigure, valueText, type Render } from "./html.ts";
+import { chartSlot, coverScore, document, effortText, estimateLines, paginate, paragraphs, renderContext, severityChip, valueFigure, valueText, type Render } from "./html.ts";
 import { noteSections, referenceMap } from "./references.ts";
 
 // About 7 pages, A4: verdict, scorecard, pipeline, top five issues with value, 90-day plan.
@@ -15,6 +15,8 @@ const CSS = `
 .cover { justify-content: space-between; padding-bottom: 30mm; }
 .cover h1 { font-size: 44px; line-height: 1.15; font-weight: 700; margin-top: 12px; }
 .cover .sub { font-size: 18px; color: var(--panelMuted); }
+.cover .cover-score { font-size: 20px; }
+.cover .cover-score .for { font-size: 14px; }
 .cover .for { font-size: 12px; color: var(--panelMuted); margin-bottom: 2px; }
 h2 { font-size: 30px; line-height: 1.2; font-weight: 600; margin: 6px 0 18px; }
 .lead p { font-size: 16px; line-height: 1.55; margin-bottom: 10px; }
@@ -131,6 +133,14 @@ function pipelinePage(r: Render, report: BuiltReport, body: string): string {
   return `<div class="eyebrow">Pipeline</div><h2>Your pipeline today</h2><div class="lead">${paragraphs(r, body)}</div>${stats ? `<div class="stat-row" style="margin-top:6px">${stats}</div>` : ""}${chart}${table}`;
 }
 
+/** How the one score comes from the area scores, for the scorecard pages. */
+export function scoreLine(report: BuiltReport, standalone = false): string {
+  const o = report.overall;
+  if (o.status !== "measured") return "";
+  const opening = standalone ? `Your Barometer score is ${o.score} out of 100, grade ${o.grade}` : ` Together they give a Barometer score of ${o.score} out of 100, grade ${o.grade}`;
+  return `${opening}: the average of the area scores, weighted by how directly each area affects revenue.${o.capped ? " A critical issue holds it there, however well the rest does." : ""}`;
+}
+
 const footer = (r: Render, n: number): string => `<div class="footer" data-chrome><span>Black Cloud Barometer${r.draft ? " | Draft, not approved for release" : ""}</span><span>${n}</span></div>`;
 
 /** How a reference leads to the working, and every reference this summary used, in the order the notes hold them. */
@@ -160,15 +170,15 @@ export function executiveHtml(report: BuiltReport, pseudonyms: Pseudonymiser): s
     pages.push(`<section class="page ${classes}" data-page="${pages.length + 1}">${html}${classes.includes("cover") ? "" : footer(r, pages.length + 1)}</section>`);
   };
 
-  add(`<div><div class="eyebrow">Black Cloud Barometer</div><h1>Salesforce health check</h1><div class="sub">Executive summary</div></div><div>${r.draft ? '<p><span class="mark">Draft, not approved for release</span></p>' : ""}<p class="for">Prepared for</p><p>${r.t(customer)}</p>${preparedBy ? `<p>by ${r.t(preparedBy)}, Black Cloud</p>` : ""}<p>${longDate(run.asOf)}</p></div>`, "dark cover");
+  add(`<div><div class="eyebrow">Black Cloud Barometer</div><h1>Salesforce health check</h1><div class="sub">Executive summary</div></div>${coverScore(report.overall)}<div>${r.draft ? '<p><span class="mark">Draft, not approved for release</span></p>' : ""}<p class="for">Prepared for</p><p>${r.t(customer)}</p>${preparedBy ? `<p>by ${r.t(preparedBy)}, Black Cloud</p>` : ""}<p>${longDate(run.asOf)}</p></div>`, "dark cover");
 
   add(`<div class="eyebrow">Verdict</div><div class="headline">${r.t(verdict.headline)}</div><div class="lead">${paragraphs(r, currentBody(built, "verdict").replace(`${verdict.headline}.\n\n`, ""))}</div>
-    <div class="stat-row" style="margin-top:18px"><div class="stat"><b>${verdict.issues}</b><span>Issues</span></div><div class="stat"><b>${verdict.critical}</b><span>Critical</span></div><div class="stat"><b>${verdict.high}</b><span>High</span></div><div class="stat"><b>${notMeasurable}</b><span>Not measurable</span></div></div>
+    <div class="stat-row" style="margin-top:18px">${report.overall.status === "measured" ? `<div class="stat"><b>${report.overall.score}</b><span>Barometer score</span></div>` : ""}<div class="stat"><b>${verdict.issues}</b><span>Issues</span></div><div class="stat"><b>${verdict.critical}</b><span>Critical</span></div><div class="stat"><b>${verdict.high}</b><span>High</span></div><div class="stat"><b>${notMeasurable}</b><span>Not measurable</span></div></div>
     <h3 class="sub">What matters most</h3>
     <table class="grid"><thead><tr><th>Issue</th><th style="width:34%">Impact</th></tr></thead><tbody>${top.map((f) => `<tr><td>${r.t(f.title)}${r.ref(f.id)}</td><td>${valueText(r, f).amount}</td></tr>`).join("")}</tbody></table>
     <p style="margin-top:18px">Every figure here comes from your Salesforce org. Where we couldn't measure something, we say so rather than estimate it.</p>`);
 
-  add(`<div class="eyebrow">Scorecard</div><h2>How each area stands</h2><p style="margin-bottom:14px">${r.t(currentBody(built, "scorecard"))}</p>${chartSlot(scorecardChart(scorecard(team, scores)))}<h3 class="sub">Win rate by segment</h3><div style="margin-top:8px">${chartSlot(winRateBySegment(report.metrics.find((m) => m.id === "historic.win_rate")))}</div>`);
+  add(`<div class="eyebrow">Scorecard</div><h2>How each area stands</h2><p style="margin-bottom:14px">${r.t(currentBody(built, "scorecard") + scoreLine(report))}</p>${chartSlot(scorecardChart(scorecard(team, scores)))}<h3 class="sub">Win rate by segment</h3><div style="margin-top:8px">${chartSlot(winRateBySegment(report.metrics.find((m) => m.id === "historic.win_rate")))}</div>`);
 
   add(pipelinePage(r, report, currentBody(built, "pipeline")));
 

@@ -183,3 +183,46 @@ describe("the synthetic run", () => {
     assert.match(readFileSync(join(dir, "raw-notes.md"), "utf8"), /## Scorecard/);
   });
 });
+
+describe("the Barometer score", async () => {
+  const { AREA_WEIGHTS, CRITICAL_CAP, GRADES, MIN_AREAS_SCORED, gradeOf, overallScore } = await import("../scoring.ts");
+  const measured = (domain: string, score: number): Score => Score.parse({ status: "measured", domain, score, ruleSetVersion: "t", weights: {}, findingIds: [] });
+  const unscored = (domain: string): Score => Score.parse({ status: "not_measurable", domain, ruleSetVersion: "t", reason: "Too little." });
+
+  test("weights each area by how directly it touches revenue", () => {
+    const o = overallScore([measured("current_pipeline", 40), measured("configuration", 80), measured("activity", 60), measured("forecast", 50)], []);
+    const expected = Math.round((40 * 1.5 + 80 * 0.75 + 60 * 1 + 50 * 1.25) / (1.5 + 0.75 + 1 + 1.25));
+    assert.ok(o.status === "measured");
+    assert.equal(o.score, expected);
+    assert.ok(AREA_WEIGHTS.current_pipeline! > AREA_WEIGHTS.configuration!);
+  });
+
+  test("leaves unscored areas out rather than counting them as zero", () => {
+    const four = [measured("current_pipeline", 70), measured("forecast", 70), measured("data_quality", 70), measured("security", 70)];
+    const o = overallScore([...four, unscored("lead_funnel")], []);
+    assert.ok(o.status === "measured" && o.score === 70);
+  });
+
+  test("gives no score from too few areas, or from less than half the weight", () => {
+    const few = Array.from({ length: MIN_AREAS_SCORED - 1 }, (_, i) => measured(["forecast", "security", "activity"][i]!, 80));
+    assert.equal(overallScore(few, []).status, "not_measurable");
+    const thin = [measured("configuration", 80), measured("best_practice", 80), measured("activity", 80), measured("automation", 80), ...["current_pipeline", "forecast", "data_quality", "security", "historic_pipeline", "utilisation"].map(unscored)];
+    assert.equal(overallScore(thin, []).status, "not_measurable");
+  });
+
+  test("a critical issue holds the score at the cap, and says what it would have been", () => {
+    const four = ["current_pipeline", "forecast", "data_quality", "security"].map((d) => measured(d, 90));
+    const o = overallScore(four, [finding("x", "issue", "critical", "high", "security")]);
+    assert.ok(o.status === "measured" && o.capped && o.score === CRITICAL_CAP && o.uncapped === 90);
+    const quiet = overallScore(four, [finding("x", "issue", "high", "high", "security")]);
+    assert.ok(quiet.status === "measured" && !quiet.capped && quiet.score === 90);
+  });
+
+  test("grades run from A to E at fixed points", () => {
+    assert.deepEqual(GRADES.map((g) => g.grade), ["A", "B", "C", "D", "E"]);
+    assert.equal(gradeOf(85).grade, "A");
+    assert.equal(gradeOf(84).grade, "B");
+    assert.equal(gradeOf(55).grade, "C");
+    assert.equal(gradeOf(39).grade, "E");
+  });
+});

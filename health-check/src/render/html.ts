@@ -1,4 +1,5 @@
 import { colour, page, tokensCss } from "../design/tokens.ts";
+import type { OverallScore } from "../domains/scoring.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import type { Finding } from "../schemas/index.ts";
 import type { Chart } from "./charts.ts";
@@ -61,6 +62,12 @@ export function valueText(r: Render, f: Finding): { amount: string; note: string
 
 export { compactMoney };
 
+/** The Barometer score as the cover shows it. Nothing when the org couldn't be given one. */
+export function coverScore(overall: OverallScore): string {
+  if (overall.status !== "measured") return "";
+  return `<div class="cover-score"><p class="for">Barometer score</p><p><b>${overall.score}</b><span>out of 100</span></p><p class="grade">Grade ${overall.grade}, ${overall.word.toLowerCase()}</p></div>`;
+}
+
 const EFFORT_WORDS: Record<string, string> = { XS: "very small", S: "small", M: "medium", L: "large", XL: "very large" };
 
 /** T-shirt sizes are our shorthand. A reader gets words. */
@@ -114,6 +121,9 @@ table.grid { width: 100%; border-collapse: collapse; }
 table.grid th { text-align: left; font-weight: 600; border-bottom: 1px solid var(--carbon); padding: 6px 8px; }
 table.grid td { border-bottom: 1px solid var(--rule); padding: 6px 8px; vertical-align: top; }
 td.num, th.num { text-align: right; white-space: nowrap; }
+.cover-score b { font-size: 3.2em; font-weight: 700; line-height: 1; color: var(--chartreuse); margin-right: 10px; }
+.cover-score span { color: var(--panelMuted); }
+.cover-score .grade { font-weight: 600; margin-top: 4px; }
 .ref { color: var(--muted); font-size: 0.72em; font-weight: 400; letter-spacing: 0.02em; margin-left: 6px; white-space: nowrap; }
 .dark .ref { color: var(--panelMuted); }
 `;

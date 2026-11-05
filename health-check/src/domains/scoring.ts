@@ -57,3 +57,56 @@ export function scoreDomain(domain: string, findings: Finding[], ruleSetVersion:
 export function scoreDomains(domains: string[], findings: Finding[], ruleSetVersion: string = RULE_SET_VERSION): Score[] {
   return domains.map((domain) => scoreDomain(domain, findings, ruleSetVersion));
 }
+
+// The Barometer score: one figure for the whole org, from the area scores,
+// weighted by how directly each area touches revenue. The weights are our
+// judgement, so they're written down here and in the raw notes, never hidden.
+export const AREA_WEIGHTS: Record<string, number> = {
+  current_pipeline: 1.5,
+  forecast: 1.25,
+  data_quality: 1.25,
+  security: 1.25,
+  historic_pipeline: 1,
+  activity: 1,
+  utilisation: 1,
+  lead_funnel: 1,
+  revenue_opportunities: 1,
+  automation: 1,
+  configuration: 0.75,
+  best_practice: 0.75,
+};
+const DEFAULT_AREA_WEIGHT = 1;
+/** An org with a critical issue can't score above this, however well the rest does. */
+export const CRITICAL_CAP = 49;
+/** Fewer areas scored than this, or less than half the weight, and there's no overall score. */
+export const MIN_AREAS_SCORED = 4;
+
+export const GRADES = [
+  { min: 85, grade: "A", word: "Strong" },
+  { min: 70, grade: "B", word: "Good" },
+  { min: 55, grade: "C", word: "Fair" },
+  { min: 40, grade: "D", word: "Weak" },
+  { min: 0, grade: "E", word: "Poor" },
+] as const;
+
+export type OverallScore =
+  | { status: "measured"; score: number; grade: string; word: string; uncapped: number; capped: boolean; areas: Array<{ domain: string; score: number; weight: number }> }
+  | { status: "not_measurable"; reason: string };
+
+export const areaWeight = (domain: string): number => AREA_WEIGHTS[domain] ?? DEFAULT_AREA_WEIGHT;
+
+export function gradeOf(score: number): (typeof GRADES)[number] {
+  return GRADES.find((g) => score >= g.min) ?? GRADES[GRADES.length - 1]!;
+}
+
+export function overallScore(scores: Score[], findings: Finding[]): OverallScore {
+  const areas = scores.flatMap((s) => (s.status === "measured" ? [{ domain: s.domain, score: s.score, weight: areaWeight(s.domain) }] : []));
+  const totalWeight = scores.reduce((sum, s) => sum + areaWeight(s.domain), 0);
+  const scoredWeight = areas.reduce((sum, a) => sum + a.weight, 0);
+  if (areas.length < MIN_AREAS_SCORED || scoredWeight * 2 < totalWeight) return { status: "not_measurable", reason: "Too few areas could be scored to give the org one score fairly." };
+  const uncapped = Math.round(areas.reduce((sum, a) => sum + a.score * a.weight, 0) / scoredWeight);
+  const capped = findings.some((f) => f.status === "issue" && f.severity === "critical" && !SETUP_RULES.has(f.ruleId)) && uncapped > CRITICAL_CAP;
+  const score = capped ? CRITICAL_CAP : uncapped;
+  const { grade, word } = gradeOf(score);
+  return { status: "measured", score, grade, word, uncapped, capped, areas };
+}

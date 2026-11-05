@@ -1,3 +1,4 @@
+import { AREA_WEIGHTS, CRITICAL_CAP, GRADES, overallScore, type OverallScore } from "../domains/scoring.ts";
 import { buildDataset, checkNumbers, scopeDataset, SOURCE, toNumberCheckResult, type FigureSet, type StructuralFigure } from "../numbercheck/index.ts";
 import { compactMoney, monthYear } from "../render/format.ts";
 import type { Calibration, Finding, ManualStep, Metric, NumberOverride, ReportSection, Run, Score, SectionVersion } from "../schemas/index.ts";
@@ -37,6 +38,8 @@ export type BuiltReport = {
   teamFindings: Finding[];
   /** Metrics with overrides applied. */
   metrics: Metric[];
+  /** The Barometer score: one figure for the org, from the area scores. */
+  overall: OverallScore;
   outputs: Record<ReportOutputKey, BuiltOutput>;
   /** What Claude would be asked for, by section id. Sections with no entry stay engine text. */
   briefs: Map<string, SectionBrief>;
@@ -73,6 +76,7 @@ const CALIBRATION = "calibration";
 const OVERRIDES = "overrides";
 const COVER = "cover";
 const PLAN = "plan";
+export const OVERALL = "score:overall";
 
 const lines = (...parts: Array<string | null | undefined | false>): string => parts.filter(Boolean).join("\n\n");
 const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
@@ -105,7 +109,27 @@ function intakeText(intake: Intake): string {
   return lines(intake.summary, ...intake.statedProblems.map((p) => `${p.statement}${p.assessment ? ` ${p.assessment}` : ""}`));
 }
 
-function rawNotesSpecs(input: ReportInput): Spec[] {
+/** The score's working, figure by figure, for the raw notes. */
+function overallText(overall: OverallScore): string {
+  if (overall.status === "not_measurable") return `We couldn't give the org one score. ${overall.reason}`;
+  return lines(
+    `Your Barometer score is ${overall.score} out of 100: grade ${overall.grade}, ${overall.word.toLowerCase()}.`,
+    `It's the average of the area scores, each weighted by how directly the area affects revenue:\n${overall.areas.map((a) => `${domainLabel(a.domain)}: ${a.score}, weighted ${a.weight}`).join("\n")}`,
+    "Areas we couldn't score are left out, rather than counted as zero.",
+    overall.capped ? `A critical issue holds the score at ${CRITICAL_CAP}, however well the rest does. Without it, the score would be ${overall.uncapped}.` : null,
+    `Grades: ${GRADES.map((g, i) => (i === GRADES.length - 1 ? `${g.grade} below ${GRADES[i - 1]!.min}` : `${g.grade} from ${g.min}`)).join(", ")}.`,
+  );
+}
+
+/** Every figure the score's working quotes, under one source. */
+function overallFigures(overall: OverallScore): FigureSet["figures"] {
+  const number = (value: number) => ({ source: OVERALL, kind: "number" as const, value });
+  const fixed = [100, CRITICAL_CAP, ...GRADES.map((g) => g.min), ...Object.values(AREA_WEIGHTS)].map(number);
+  if (overall.status === "not_measurable") return fixed;
+  return [...fixed, number(overall.score), { ...number(overall.score), unit: "points" }, number(overall.uncapped), ...overall.areas.flatMap((a) => [number(a.score), number(a.weight)])];
+}
+
+function rawNotesSpecs(input: ReportInput, overall: OverallScore): Spec[] {
   const { run, calibration, findings, metrics, manualSteps, intake, overrides = [] } = input;
   const exclusions = [...new Set([...findings.flatMap((f) => f.evidence.flatMap((e) => e.exclusions)), ...metrics.flatMap((m) => m.exclusions)])];
   const notMeasurable = findings.filter((f) => f.status === "not_measurable");
@@ -115,6 +139,7 @@ function rawNotesSpecs(input: ReportInput): Spec[] {
       ? { key: "intake_summary", title: "Intake summary", body: intakeText(intake), sources: [INTAKE] }
       : { key: "intake_summary", title: "Intake summary", body: "No intake has been recorded for this run.", needsInput: true },
     { key: "assumptions", title: "Assumptions", body: calibrationText(run, calibration), sources: [SOURCE.run, CALIBRATION] },
+    { key: "barometer_score", title: "Barometer score", body: overallText(overall), sources: [OVERALL] },
     ...domains.map((domain): Spec => {
       const own = findings.filter((f) => f.domain === domain);
       return { key: `findings_${domain}`, title: `Findings: ${domainLabel(domain)}`, body: `Every check we ran for ${domainLabel(domain).toLowerCase()}, with what it found and how to reproduce it.`, findingIds: own.map((f) => f.id) };
@@ -439,6 +464,7 @@ export function buildReport(input: ReportInput): BuiltReport {
   const now = input.now ?? new Date(run.asOf);
   const effective = applyOverrides(findings, metrics, overrides);
   const team = effective.findings.map(teamLevelFinding);
+  const overall = overallScore(scores, effective.findings);
   const dataset = buildDataset({
     findings: [...findings, ...team],
     metrics: effective.metrics,
@@ -457,7 +483,7 @@ export function buildReport(input: ReportInput): BuiltReport {
       ...(overrides.length ? [{ source: OVERRIDES, text: overrideText(overrides) }] : []),
     ],
   });
-  dataset.figures.push(...planFigures(buildPlan(team)));
+  dataset.figures.push(...planFigures(buildPlan(team)), ...overallFigures(overall));
   const briefs = new Map<string, SectionBrief>();
   const scopes = new Map<string, string[]>();
   const build = (output: ReportOutputKey, specs: Spec[]): BuiltOutput => record(run, output, specs, dataset, now, briefs, scopes);
@@ -466,8 +492,9 @@ export function buildReport(input: ReportInput): BuiltReport {
     dataset,
     teamFindings: team.slice().sort(bySeverity),
     metrics: effective.metrics,
+    overall,
     outputs: {
-      raw_notes: build("raw_notes", rawNotesSpecs(input)),
+      raw_notes: build("raw_notes", rawNotesSpecs(input, overall)),
       executive_summary: build("executive_summary", executiveSpecs(input, team)),
       full_health_check: build("full_health_check", fullSpecs(input, team, effective.metrics)),
     },

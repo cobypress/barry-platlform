@@ -146,3 +146,29 @@ describe("references between the decks and the raw notes", async () => {
     assert.deepEqual(new Set(listed), new Set(tags(html.slice(0, html.indexOf("Where to find the detail")))));
   });
 });
+
+describe("the Barometer score in the documents", async () => {
+  const { scoreDomains } = await import("../../domains/scoring.ts");
+  const { executiveHtml } = await import("../executive.ts");
+  const { fullReportHtml } = await import("../full-report.ts");
+  const scored = buildReport({ ...base, scores: scoreDomains(run.modules, base.findings) });
+
+  test("the covers, verdict and scorecard show it, and the raw notes show its working", async () => {
+    assert.ok(scored.overall.status === "measured");
+    const { score, grade } = scored.overall;
+    for (const html of [executiveHtml(scored, pseudonyms), fullReportHtml(scored, pseudonyms)]) {
+      assert.match(html, new RegExp(`<div class="cover-score">[\\s\\S]*?<b>${score}</b>`));
+      assert.ok(html.includes(`Barometer score of ${score} out of 100, grade ${grade}`) || html.includes(`Barometer score is ${score} out of 100, grade ${grade}`));
+    }
+    const bytes = await renderRawNotesDocx(scored, pseudonyms);
+    const xml = strFromU8(unzipSync(new Uint8Array(bytes))["word/document.xml"]!);
+    assert.match(xml, new RegExp(`Your Barometer score is ${score} out of 100`));
+    assert.match(xml, /weighted 1\.5/);
+  });
+
+  test("an org with no scores gets no score anywhere, rather than a zero", () => {
+    const report = buildReport(base);
+    assert.equal(report.overall.status, "not_measurable");
+    assert.doesNotMatch(fullReportHtml(report, pseudonyms), /<div class="cover-score">|Barometer score is/);
+  });
+});

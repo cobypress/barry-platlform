@@ -53,7 +53,7 @@ The single biggest jump. A CEO reads numbers, so the executive deck becomes a mo
 - Every figure in the decks carries its reference in small type. The last page of each deck, "Where to find the detail", lists the references with their page in the raw notes.
 - Named records (the actual deals, accounts and users) appear in the raw notes and in exports, never in the decks.
 
-### 1.2 The Barometer score
+### 1.2 The Barometer score (done, 5 November 2026)
 
 One number out of 100 with a grade, built from the area scores the engine already calculates, weighted by business impact. Shown on the cover, with the area breakdown inside, and later against benchmarks.
 
