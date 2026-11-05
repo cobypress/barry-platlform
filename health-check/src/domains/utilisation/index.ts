@@ -1,6 +1,6 @@
 import { fieldDescribeExtractor } from "../../extract/fields.ts";
 import { apexExtractor, metadataExtractor, scheduledJobsExtractor } from "../../extract/automation.ts";
-import { recordCountsExtractor } from "../../extract/configuration.ts";
+import { orgExtractor, recordCountsExtractor } from "../../extract/configuration.ts";
 import { daysBefore, monthsBefore } from "../../extract/types.ts";
 import {
   activityCaptureExtractor,
@@ -17,20 +17,10 @@ import { notSized, pct, plural, type Rule, type RuleContext, type RuleResult } f
 import type { Guard, Value } from "../../schemas/index.ts";
 import type { DomainModule } from "../types.ts";
 import { calibratedHours } from "../value.ts";
+import { COMPLIMENTARY_LICENCES } from "../../money/licences.ts";
+import { investmentMetrics } from "./investment.ts";
 
 const MIN_SPARE_SEATS = 2;
-// Salesforce includes these with the edition at no charge. Extra seats can be bought, so a priced calibration still counts them.
-const COMPLIMENTARY_LICENCES = new Set([
-  "Salesforce Integration",
-  "Cloud Integration User",
-  "Analytics Cloud Integration User",
-  "Sales Insights Integration User",
-  "Salesforce Limited Access - Free",
-  "Identity",
-  "Chatter Free",
-  "Chatter External",
-  "Guest User License",
-]);
 // API-only licences. Their users never log in by design, so not logging in says nothing.
 // A real org showed the Sales Insights integration user as a licence to release.
 const isIntegrationLicence = (licence: string): boolean => /\bintegration\b/i.test(licence);
@@ -437,6 +427,8 @@ export const utilisationModule: DomainModule = {
     runAsExtractor,
     reportsExtractor,
     activityCaptureExtractor,
+    orgExtractor,
   ],
+  metrics: [investmentMetrics],
   rules: [unassignedSeats, dormantUsers, neverLoggedIn, unusedReports, dashboardsOnInactiveUsers, dashboardUsage, eacConnections, eacAdvancedSync],
 };

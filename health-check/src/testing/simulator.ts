@@ -260,6 +260,8 @@ export class Simulator implements Transport {
         return page(org.USER_LICENSES);
       case "PermissionSetLicense":
         return page(org.PERMISSION_SET_LICENSES);
+      case "PackageLicense":
+        return page(org.PACKAGE_LICENSES);
       case "LoginHistory":
         return /\b(Status|Application)\s*(=|!=|IN|LIKE)/i.test(where) ? reject("INVALID_FIELD", "field 'Status' can not be filtered in a query call") : page(org.LOGIN_HISTORY);
       case "SetupAuditTrail":

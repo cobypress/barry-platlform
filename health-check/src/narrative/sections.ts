@@ -1,6 +1,7 @@
 import { AREA_WEIGHTS, CRITICAL_CAP, GRADES, overallScore, type OverallScore } from "../domains/scoring.ts";
 import { comparisonId, comparisonNotes, compareRun, OWN_RANGE_MIN, type BenchmarkInput, type Comparison } from "../benchmark/compare.ts";
 import { quarterOf } from "../benchmark/export.ts";
+import { buildInvestment, investmentText, INVESTMENT_METRIC_IDS, type Investment } from "../money/investment.ts";
 import { buildDataset, checkNumbers, scopeDataset, SOURCE, toNumberCheckResult, type FigureSet, type StructuralFigure } from "../numbercheck/index.ts";
 import { compactMoney, monthYear } from "../render/format.ts";
 import { BENCHMARK_MIN_GROUP, type Calibration, type Finding, type ManualStep, type Metric, type NumberOverride, type ReportSection, type Run, type Score, type SectionVersion } from "../schemas/index.ts";
@@ -46,6 +47,8 @@ export type BuiltReport = {
   overall: OverallScore;
   /** Where the headline figures sit against published research and our own customers. */
   comparisons: Comparison[];
+  /** What the customer pays a year, by precedence, with list price for context. */
+  investment: Investment;
   outputs: Record<ReportOutputKey, BuiltOutput>;
   /** What Claude would be asked for, by section id. Sections with no entry stay engine text. */
   briefs: Map<string, SectionBrief>;
@@ -83,6 +86,8 @@ const OVERRIDES = "overrides";
 const COVER = "cover";
 const PLAN = "plan";
 export const OVERALL = "score:overall";
+/** The investment section's own figures: what the customer told us they spend. */
+export const INVESTMENT_SOURCE = "investment";
 const COMPARISONS = "comparisons";
 
 const lines = (...parts: Array<string | null | undefined | false>): string => parts.filter(Boolean).join("\n\n");
@@ -136,7 +141,7 @@ function overallFigures(overall: OverallScore): FigureSet["figures"] {
   return [...fixed, number(overall.score), { ...number(overall.score), unit: "points" }, number(overall.uncapped), ...overall.areas.flatMap((a) => [number(a.score), number(a.weight)])];
 }
 
-function rawNotesSpecs(input: ReportInput, overall: OverallScore, comparisons: Comparison[]): Spec[] {
+function rawNotesSpecs(input: ReportInput, overall: OverallScore, comparisons: Comparison[], investment: Investment, effectiveMetrics: Metric[]): Spec[] {
   const { run, calibration, findings, metrics, manualSteps, intake, overrides = [] } = input;
   const exclusions = [...new Set([...findings.flatMap((f) => f.evidence.flatMap((e) => e.exclusions)), ...metrics.flatMap((m) => m.exclusions)])];
   const notMeasurable = findings.filter((f) => f.status === "not_measurable");
@@ -147,11 +152,20 @@ function rawNotesSpecs(input: ReportInput, overall: OverallScore, comparisons: C
       : { key: "intake_summary", title: "Intake summary", body: "No intake has been recorded for this run.", needsInput: true },
     { key: "assumptions", title: "Assumptions", body: calibrationText(run, calibration), sources: [SOURCE.run, CALIBRATION] },
     { key: "barometer_score", title: "Barometer score", body: overallText(overall), sources: [OVERALL] },
+    {
+      key: "investment",
+      title: "Investment",
+      // With overrides applied, as the dataset has them: this text quotes the figures.
+      body: investmentText(investment, effectiveMetrics).join("\n\n"),
+      metricIds: metrics.filter((m) => INVESTMENT_METRIC_IDS.includes(m.id)).map((m) => m.id),
+      sources: [INVESTMENT_SOURCE],
+    },
     ...domains.map((domain): Spec => {
       const own = findings.filter((f) => f.domain === domain);
       return { key: `findings_${domain}`, title: `Findings: ${domainLabel(domain)}`, body: `Every check we ran for ${domainLabel(domain).toLowerCase()}, with what it found and how to reproduce it.`, findingIds: own.map((f) => f.id) };
     }),
-    { key: "pipeline_metrics", title: "Pipeline metrics", body: "How each pipeline figure was calculated, with its sample, exclusions and assumptions.", metricIds: metrics.map((m) => m.id) },
+    // The investment figures have their own section above.
+    { key: "pipeline_metrics", title: "Pipeline metrics", body: "How each pipeline figure was calculated, with its sample, exclusions and assumptions.", metricIds: metrics.filter((m) => !INVESTMENT_METRIC_IDS.includes(m.id)).map((m) => m.id) },
     {
       key: "comparisons",
       title: "How you compare",
@@ -490,6 +504,7 @@ export function buildReport(input: ReportInput): BuiltReport {
     period: quarterOf(run.analysisWindow.to),
     benchmark: input.benchmark ?? null,
   });
+  const investment = buildInvestment(effective.metrics, intake, calibration.currency);
   const dataset = buildDataset({
     findings: [...findings, ...team],
     metrics: effective.metrics,
@@ -516,6 +531,10 @@ export function buildReport(input: ReportInput): BuiltReport {
     ...[COMPARISONS, ...comparisons.map((c) => comparisonId(c.metric.key))].map((source) => ({ source, kind: "percent" as const, value: 50 })),
   );
   dataset.figures.push(...planFigures(buildPlan(team)), ...overallFigures(overall));
+  // The customer's own total is the one investment figure no metric holds.
+  if (investment.annualCost.status === "measured" && investment.annualCost.basis === "customer") {
+    dataset.figures.push({ source: INVESTMENT_SOURCE, kind: "currency", value: investment.annualCost.value, currency: calibration.currency });
+  }
   const briefs = new Map<string, SectionBrief>();
   const scopes = new Map<string, string[]>();
   const build = (output: ReportOutputKey, specs: Spec[]): BuiltOutput => record(run, output, specs, dataset, now, briefs, scopes);
@@ -526,8 +545,9 @@ export function buildReport(input: ReportInput): BuiltReport {
     metrics: effective.metrics,
     overall,
     comparisons,
+    investment,
     outputs: {
-      raw_notes: build("raw_notes", rawNotesSpecs(input, overall, comparisons)),
+      raw_notes: build("raw_notes", rawNotesSpecs(input, overall, comparisons, investment, effective.metrics)),
       executive_summary: build("executive_summary", executiveSpecs(input, team)),
       full_health_check: build("full_health_check", fullSpecs(input, team, effective.metrics)),
     },

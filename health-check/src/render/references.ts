@@ -22,8 +22,8 @@ export function noteSections(report: BuiltReport): NoteSection[] {
     const ref = `R${i + 1}`;
     const ids = section.key.startsWith("findings_")
       ? rawNotesOrder(findings.filter((f) => section.findingIds.includes(f.id))).map((f) => f.id)
-      : section.key === "pipeline_metrics"
-        ? metrics.map((m) => m.id)
+      : section.key === "pipeline_metrics" || section.key === "investment"
+        ? section.metricIds
         : section.key === "comparisons"
           ? report.comparisons.map((c) => comparisonId(c.metric.key))
           : section.key === "manual_steps"

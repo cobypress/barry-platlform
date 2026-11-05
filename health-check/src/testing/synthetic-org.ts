@@ -644,6 +644,15 @@ export const USER_LICENSES = [
   { Name: "Chatter Free", TotalLicenses: 5000, UsedLicenses: 0, Status: "Active" },
 ];
 
+// Traps: a seat-limited package with spare seats; a site licence, a free and an
+// expired package, none of which are seats anyone pays for.
+export const PACKAGE_LICENSES = [
+  { NamespacePrefix: "acmecpq", AllowedLicenses: 20, UsedLicenses: 12, Status: "Active", ExpirationDate: null },
+  { NamespacePrefix: "sitewide", AllowedLicenses: -1, UsedLicenses: 40, Status: "Active", ExpirationDate: null },
+  { NamespacePrefix: "freebie", AllowedLicenses: 100, UsedLicenses: 3, Status: "Free", ExpirationDate: null },
+  { NamespacePrefix: "oldapp", AllowedLicenses: 10, UsedLicenses: 0, Status: "Expired", ExpirationDate: "2025-01-31T00:00:00.000Z" },
+];
+
 export const PERMISSION_SET_LICENSES = [{ MasterLabel: "Sales Console", TotalLicenses: 15, UsedLicenses: 3, Status: "Active", ExpirationDate: null }];
 
 export const LAYOUTS = [
