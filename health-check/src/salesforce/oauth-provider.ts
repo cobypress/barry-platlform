@@ -6,8 +6,9 @@ import type { StoredConnection, TokenStore } from "./token-store.ts";
 import { fetchOAuthTransport, type OAuthTransport } from "./transport.ts";
 
 // A connection made through Barometer's External Client App: the customer's
-// admin authorised it, so nobody shared a login, and the token belongs to a user
-// who holds only Barometer Read Only. Tokens live encrypted in a TokenStore.
+// admin authorised it, so nobody shared a login. The token is the user's, who
+// may be able to write: every request is held to the allowlist (DECISIONS 151).
+// Tokens live encrypted in a TokenStore.
 //
 // The name must still be in HC_APPROVED_ORG_ALIASES, as for the CLI provider:
 // this machine can hold connections to customer orgs, and a typo mustn't reach one.

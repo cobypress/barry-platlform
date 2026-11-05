@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { authorise, ForbiddenOperationError, type SfRequest } from "../allowlist.ts";
+import { ALLOWED_OPERATIONS, ALLOWED_SOAP_OPERATIONS, authorise, ForbiddenOperationError, type SfRequest } from "../allowlist.ts";
 import { UnfilterableFieldError } from "../soql.ts";
 
 const V = "/services/data/v66.0";
@@ -41,6 +41,13 @@ const ALLOWED: Array<[string, SfRequest]> = [
 ];
 
 describe("what the allowlist permits", () => {
+  // The guarantee rests on this list alone, whoever signs in (DECISIONS 151), so
+  // a route can't be added without joining the method checks below.
+  test("every operation it can return is listed here, and nothing else", () => {
+    assert.deepEqual(ALLOWED.map(([id]) => id).sort(), [...ALLOWED_OPERATIONS].sort());
+    assert.deepEqual(ALLOWED_OPERATIONS.filter((id) => id.startsWith("metadata.")).sort(), [...ALLOWED_SOAP_OPERATIONS].map((o) => `metadata.${o}`).sort());
+  });
+
   for (const [id, request] of ALLOWED) {
     test(id, () => assert.equal(authorise(request), id));
   }
@@ -74,6 +81,13 @@ describe("writes are refused", () => {
     ["REST deploy", { method: "POST", path: `${V}/metadata/deployRequest`, body: "" }],
     ["invocable action", { method: "POST", path: `${V}/actions/standard/emailSimple`, body: "{}" }],
     ["flow interview", { method: "POST", path: `${V}/actions/custom/flow/Do_Thing`, body: "{}" }],
+    ["Tooling update", { method: "PATCH", path: `${V}/tooling/sobjects/ApexClass/01p000000000001AAA`, body: "{}" }],
+    ["Tooling delete", { method: "DELETE", path: `${V}/tooling/sobjects/ApexClass/01p000000000001AAA` }],
+    ["Tooling run tests", { method: "POST", path: `${V}/tooling/runTestsAsynchronous`, body: "{}" }],
+    ["Tooling query by POST", { method: "POST", path: `${V}/tooling/query`, body: "{}" }],
+    ["REST metadata retrieve", { method: "POST", path: `${V}/metadata/retrieveRequest`, body: "{}" }],
+    ["dashboard refresh", { method: "PUT", path: `${V}/analytics/dashboards/01Z000000000001AAA`, body: "" }],
+    ["report create", { method: "POST", path: `${V}/analytics/reports`, body: "{}" }],
   ];
   for (const [name, request] of cases) test(name, () => blocked(request));
 });
@@ -93,6 +107,10 @@ describe("GET is not automatically safe", () => {
     ["describe layouts", `${V}/sobjects/Account/describe/layouts`],
     ["OAuth endpoint", "/services/oauth2/userinfo"],
     ["a page", "/apex/SomePage"],
+    ["a Tooling record", `${V}/tooling/sobjects/ApexClass/01p000000000001AAA`],
+    ["a Tooling describe", `${V}/tooling/sobjects/ApexClass/describe`],
+    ["Tooling completions", `${V}/tooling/completions?type=apex`],
+    ["a Tooling queryAll", `${V}/tooling/queryAll${q("SELECT Id FROM ApexClass")}`],
   ];
   for (const [name, path] of cases) test(name, () => blocked({ method: "GET", path }));
 });
