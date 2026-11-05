@@ -11,19 +11,20 @@ import { runFromRecording, tempDir } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration, syntheticProvider } from "../../testing/replay.ts";
 import { Simulator } from "../../testing/simulator.ts";
 import { AS_OF } from "../../testing/synthetic-org.ts";
-import { SALES_CLOUD_MODULES } from "../index.ts";
+import { ALL_MODULES } from "../index.ts";
 import { ESSENTIALS_DOMAINS, modulesFor } from "../scope.ts";
 
 // Objects that hold CRM records. A set-up review reads none of them, not even as a count.
-const CRM_OBJECTS = new Set(["Account", "Contact", "Lead", "Opportunity", "OpportunityHistory", "OpportunityFieldHistory", "OpportunityLineItem", "LeadHistory", "Task", "Event", "EmailMessage", "Case", "Campaign", "CampaignMember", "ForecastingItem", "ForecastingQuota", "ForecastingAdjustment"]);
+// Service Cloud's case records, and the work and conversations about them, count too.
+const CRM_OBJECTS = new Set(["Account", "Contact", "Lead", "Opportunity", "OpportunityHistory", "OpportunityFieldHistory", "OpportunityLineItem", "LeadHistory", "Task", "Event", "EmailMessage", "Case", "Campaign", "CampaignMember", "ForecastingItem", "ForecastingQuota", "ForecastingAdjustment", "CaseMilestone", "CaseArticle", "CaseComment", "AgentWork", "MessagingSession", "LiveChatTranscript", "VoiceCall"]);
 const isCrmObject = (object: string): boolean => CRM_OBJECTS.has(object) || /__c$/.test(object) || (/History$/.test(object) && object !== "LoginHistory");
 
-const essentials = modulesFor("essentials", SALES_CLOUD_MODULES);
-const recordExtractors = new Set(collectExtractors(SALES_CLOUD_MODULES).filter((e) => e.records).map((e) => e.id));
+const essentials = modulesFor("essentials", ALL_MODULES);
+const recordExtractors = new Set(collectExtractors(ALL_MODULES).filter((e) => e.records).map((e) => e.id));
 
 describe("which modules, extracts and rules a scope runs", () => {
   test("complete runs everything, unchanged", () => {
-    assert.equal(modulesFor("complete", SALES_CLOUD_MODULES), SALES_CLOUD_MODULES);
+    assert.equal(modulesFor("complete", ALL_MODULES), ALL_MODULES);
   });
 
   test("essentials runs the set-up areas, with no record extract and no rule that needs one", () => {
@@ -33,13 +34,13 @@ describe("which modules, extracts and rules a scope runs", () => {
       assert.deepEqual(m.rules.filter((r) => r.records).map((r) => r.id), [], m.id);
     }
     // The record extracts the set-up areas list. The trace below catches any new one left unflagged.
-    for (const id of ["field-usage", "opportunities", "ownership"]) assert.ok(recordExtractors.has(id), id);
+    for (const id of ["field-usage", "opportunities", "ownership", "service-cases", "service-activity"]) assert.ok(recordExtractors.has(id), id);
   });
 
   test("no essentials rule or metric reads a record extract, on the full synthetic data", async () => {
     // Every extract a complete run makes is there, so a rule that reaches for a
     // record extract would get it, and is caught here rather than in a customer's run.
-    const { dir, run } = await runFromRecording({ answers: loadAnswers() });
+    const { dir, run } = await runFromRecording({ answers: loadAnswers(), modules: ALL_MODULES });
     const extracts = new Map(readdirSync(join(dir, "checkpoints")).filter((f) => f.endsWith(".json")).map((f) => [f.slice(0, -5), JSON.parse(readFileSync(join(dir, "checkpoints", f), "utf8")) as unknown]));
     const touched = new Set<string>();
     const now = new Date(run.asOf);
@@ -87,7 +88,7 @@ describe("an essentials run", async () => {
       return isCrmObject(object) ? { errorCode: "INSUFFICIENT_ACCESS", message: `A set-up review read ${object}` } : null;
     },
   });
-  const { run, output } = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: new Date(AS_OF), answers: loadAnswers(), scope: "essentials", transport });
+  const { run, output } = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: ALL_MODULES, outDir: tempDir(), now: new Date(AS_OF), answers: loadAnswers(), scope: "essentials", transport });
 
   test("never queries an object that holds CRM records", () => {
     assert.ok(objects.size > 10);

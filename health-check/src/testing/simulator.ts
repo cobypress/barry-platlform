@@ -41,6 +41,19 @@ function page(records: unknown[]): Json {
 const reject = (errorCode: string, message: string) => ({ error: { errorCode, message } });
 const unsupported = (object: string) => reject("INVALID_TYPE", `sObject type '${object}' is not supported.`);
 
+/** The instant a query's `field >= ...` asks from, as the "+0000" text the synthetic org stores. Empty when it asks from nothing. */
+function since(soql: string, field: string): string {
+  const value = new RegExp(`\\b${field}\\s*>=\\s*(\\S+?)\\)?(?:\\s|$)`).exec(soql)?.[1];
+  return value ? new Date(value).toISOString().replace("Z", "+0000") : "";
+}
+
+const LONDON = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", year: "numeric", month: "numeric" });
+/** Year and month in the synthetic org's zone, as CALENDAR_MONTH(convertTimezone(...)) gives them. */
+function londonMonth(value: string): [number, number] {
+  const parts = Object.fromEntries(LONDON.formatToParts(new Date(value.replace("+0000", "Z"))).map((p) => [p.type, p.value]));
+  return [Number(parts.year), Number(parts.month)];
+}
+
 // The Tooling view of the synthetic org's metadata, built from the same files the
 // retrieve returns, so the two routes can be compared. Values stay strings, as
 // the XML parser gives them; real Tooling sends booleans and numbers, and the
@@ -211,7 +224,7 @@ export class Simulator implements Transport {
     const envelope = (operation: string, inner: string): string =>
       `<?xml version="1.0"?><soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"><soapenv:Body><${operation}Response xmlns="http://soap.sforce.com/2006/04/metadata"><result>${inner}</result></${operation}Response></soapenv:Body></soapenv:Envelope>`;
     if (body.includes("<met:retrieve>")) {
-      this.#retrieving = body.includes("<met:name>Report</met:name>") ? org.REPORT_FILES : org.METADATA_FILES;
+      this.#retrieving = body.includes("<met:name>Report</met:name>") ? org.REPORT_FILES : body.includes("<met:name>EscalationRules</met:name>") ? org.ESCALATION_FILES : org.METADATA_FILES;
       return respond(envelope("retrieve", `<done>false</done><id>${org.sfId("09S", 1)}</id><state>Queued</state>`));
     }
     // The first poll isn't ready, so the polling path is exercised.
@@ -255,7 +268,7 @@ export class Simulator implements Transport {
       case "Organization":
         return page([{ Id: org.ORG_ID, Name: "Synthetic Co", OrganizationType: "Enterprise Edition", IsSandbox: false, TimeZoneSidKey: "Europe/London", FiscalYearStartMonth: 1, ...org.SHARING_DEFAULTS }]);
       case "User":
-        return page(org.usersTable);
+        return page(/UserPermissionsSupportUser/.test(soql) ? org.supportUsers : org.usersTable);
       case "UserLicense":
         return page(org.USER_LICENSES);
       case "PermissionSetLicense":
@@ -316,7 +329,7 @@ export class Simulator implements Transport {
       case "ProcessDefinition":
         return page(TOOLING.approvals);
       case "AssignmentRule":
-        return page(org.ASSIGNMENT_RULES);
+        return page(/SobjectType = 'Case'/.test(soql) ? org.CASE_ASSIGNMENT_RULES : org.ASSIGNMENT_RULES);
       case "ProfileLayout":
         return tooling ? page(org.PROFILE_LAYOUTS) : unsupported("ProfileLayout");
       case "DuplicateRule":
@@ -374,6 +387,7 @@ export class Simulator implements Transport {
       case "Event":
         return this.#keyset(org.activity.events, soql);
       case "EmailMessage":
+        if (/\bParentId\b/.test(soql)) return this.#caseEmails(soql);
         return this.#keyset(org.activity.emails, soql);
       case "Period":
         return page(org.PERIODS);
@@ -399,8 +413,97 @@ export class Simulator implements Transport {
       case "Contact":
         if (/^SELECT COUNT\(\)/i.test(soql)) return count(/AccountId = null/.test(soql) ? org.CONTACTS.noAccount : /Email = null/.test(soql) ? org.CONTACTS.noEmail : org.CONTACTS.total);
         break;
+      case "Case":
+        return this.#cases(soql);
+      case "CaseHistory":
+        return page(org.supportCases.history.filter((h) => h.CreatedDate >= since(soql, "CreatedDate")).map(({ Id: _id, Field: _f, ...h }) => h));
+      case "CaseMilestone":
+        return page(org.supportCases.milestones.filter((m) => m.StartDate >= since(soql, "StartDate")));
+      case "CaseStatus":
+        return page(org.CASE_STATUSES);
+      case "CaseArticle": {
+        const closed = new Set(org.supportCases.cases.filter((c) => c.IsClosed && c.ClosedDate! >= since(soql, "ClosedDate")).map((c) => c.Id));
+        return page(org.supportCases.articles.filter((a) => closed.has(a.CaseId)).map(({ CaseId }) => ({ CaseId })));
+      }
+      case "Group":
+        if (!/Type = 'Queue'/.test(soql)) break;
+        return page([...org.CASE_QUEUES, ...org.OTHER_QUEUES]);
+      case "QueueSobject":
+        return page(org.QUEUE_SOBJECTS.filter((q) => !/SobjectType = 'Case'/.test(soql) || q.SobjectType === "Case"));
+      case "GroupMember":
+        return page(org.QUEUE_MEMBERS);
+      case "BusinessHours":
+        return page(org.BUSINESS_HOURS);
+      case "SlaProcess":
+        return page(org.SLA_PROCESSES);
+      case "MilestoneType":
+        return page(org.MILESTONE_TYPES);
+      case "ServiceChannel":
+        return page(org.SERVICE_CHANNELS);
+      case "QueueRoutingConfig":
+        return page(org.ROUTING_CONFIGS);
+      case "AgentWork":
+        return page(org.supportCases.work.filter((w) => w.RequestDateTime >= since(soql, "RequestDateTime")).map(({ Id: _id, ...w }) => w));
+      case "Macro":
+        return page(org.MACROS);
+      case "MacroUsage":
+        return page(org.MACRO_USAGE);
+      case "QuickText":
+        return page(org.QUICK_TEXT);
+      case "QuickTextUsage":
+        return page(org.QUICK_TEXT_USAGE);
+      case "KnowledgeArticleVersion":
+        return /PublishStatus = 'Online'/.test(soql) ? page(org.ARTICLES) : reject("MALFORMED_QUERY", "Implementation restriction: KnowledgeArticleVersion query must filter on PublishStatus or Id");
+      case "KnowledgeArticleViewStat":
+        return page(org.ARTICLE_VIEWS);
+      // Messaging, chat and voice aren't set up in the synthetic org.
+      case "MessagingSession":
+      case "LiveChatTranscript":
+      case "VoiceCall":
+        return unsupported(object);
     }
     return reject("MALFORMED_QUERY", `The synthetic org doesn't answer this query: ${soql.slice(0, 120)}`);
+  }
+
+  /** Case reads: monthly and origin counts, open cases, and cases closed in the year. */
+  #cases(soql: string): Json | { error: { errorCode: string; message: string } } {
+    const all = org.supportCases.cases;
+    const month = (field: "CreatedDate" | "ClosedDate") => {
+      const after = since(soql, field);
+      const groups = new Map<string, { y: number; m: number; Priority: string | null; n: number }>();
+      for (const c of all) {
+        const value = c[field];
+        if (!value || value < after || (field === "ClosedDate" && !c.IsClosed)) continue;
+        const [y, m] = londonMonth(value);
+        const key = `${y}-${m}-${c.Priority}`;
+        const g = groups.get(key) ?? { y, m, Priority: c.Priority, n: 0 };
+        g.n++;
+        groups.set(key, g);
+      }
+      return page([...groups.values()]);
+    };
+    if (/CALENDAR_YEAR\(convertTimezone\(CreatedDate\)\)/.test(soql)) return month("CreatedDate");
+    if (/CALENDAR_YEAR\(convertTimezone\(ClosedDate\)\)/.test(soql)) return month("ClosedDate");
+    if (/GROUP BY Origin/.test(soql)) {
+      const counts = new Map<string | null, number>();
+      for (const c of all.filter((x) => x.CreatedDate >= since(soql, "CreatedDate"))) counts.set(c.Origin, (counts.get(c.Origin) ?? 0) + 1);
+      return page([...counts].map(([Origin, n]) => ({ Origin, n })));
+    }
+    if (/WHERE IsClosed = false/.test(soql)) return page(all.filter((c) => !c.IsClosed).map(({ Id, Status, Priority, Origin, OwnerId, CreatedDate, ContactId, AccountId }) => ({ Id, Status, Priority, Origin, OwnerId, CreatedDate, ContactId, AccountId })));
+    if (/WHERE IsClosed = true AND ClosedDate >=/.test(soql)) {
+      return page(all.filter((c) => c.IsClosed && c.ClosedDate! >= since(soql, "ClosedDate")).map(({ Id, CreatedDate, ClosedDate, Priority, Origin, OwnerId, Type, Reason }) => ({ Id, CreatedDate, ClosedDate, Priority, Origin, OwnerId, Type, Reason })));
+    }
+    return reject("MALFORMED_QUERY", `The synthetic org doesn't answer this case query: ${soql.slice(0, 120)}`);
+  }
+
+  /** Emails on cases: the first replies, or a count of those coming in. */
+  #caseEmails(soql: string): Json {
+    const after = since(soql, "CreatedDate");
+    const recent = new Set(org.supportCases.cases.filter((c) => c.CreatedDate >= after).map((c) => c.Id));
+    const incoming = /Incoming = true/.test(soql);
+    const rows = org.supportCases.replies.filter((r) => r.Incoming === incoming && recent.has(r.ParentId));
+    if (/^SELECT COUNT\(\)/i.test(soql)) return { totalSize: rows.length, done: true, records: [] };
+    return page(rows.map(({ ParentId, MessageDate }) => ({ ParentId, MessageDate })));
   }
 
   #toolingItem(soql: string): ToolingItem | null {

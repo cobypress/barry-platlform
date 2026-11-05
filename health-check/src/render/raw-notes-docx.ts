@@ -277,7 +277,7 @@ export function buildRawNotes(report: BuiltReport, pseudonyms: Pseudonymiser): N
     notes.para(currentBody(built, s.key));
     if (s.key === "manual_steps") manualSteps.forEach((step) => addManualStep(notes, step, ref(step.id)));
     if (s.key.startsWith("findings_")) rawNotesOrder(findings.filter((f) => s.items.some((item) => item.id === f.id))).forEach((f) => addFinding(notes, f, calibration.currency, ref(f.id)));
-    if (s.key === "pipeline_metrics" || s.key === "investment" || s.key === "adoption" || s.key === "sales_process" || s.key === "team_survey") metrics.filter((m) => s.items.some((item) => item.id === m.id)).forEach((m) => addMetric(notes, m, ref(m.id), calibration));
+    if (s.key === "pipeline_metrics" || s.key === "investment" || s.key === "adoption" || s.key === "sales_process" || s.key === "team_survey" || s.key === "service_cases") metrics.filter((m) => s.items.some((item) => item.id === m.id)).forEach((m) => addMetric(notes, m, ref(m.id), calibration));
     if (s.key === "practice") addPractice(notes, domainsInOrder(report.teamFindings), ref);
     if (s.key === "org_documented") addDocumented(notes, metrics, s.items.map((item) => item.id), ref, calibration);
     if (s.key === "value_model") report.value.groups.forEach((g) => addValueGroup(notes, g, calibration.currency, ref(valueItemId(g.id))));

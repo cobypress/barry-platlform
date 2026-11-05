@@ -21,6 +21,9 @@ const FORECASTING = (says: string) => page("Trailhead", "Configure Forecasting i
 const FORECAST_SETUP = (says: string) => page("Trailhead", "Review Your Pipeline Forecasts Setup", "https://trailhead.salesforce.com/content/learn/modules/revenue-intelligence-setup/review-your-collaborative-forecasts-setup", says);
 const EMAIL_TOOLS = (says: string) => page("Trailhead", "Learn About Email and Calendar Integration Tools", "https://trailhead.salesforce.com/content/learn/modules/email-and-calendar-integrations-quick-look/learn-about-email-and-calendar-integration-tools", says);
 const LEADS = (says: string) => page("Trailhead", "Track Prospects with Salesforce Leads", "https://trailhead.salesforce.com/content/learn/modules/prospect-tracking-with-salesforce-leads-quick-look/track-prospects-with-salesforce-leads", says);
+const CASE_QUEUES = (says: string) => page("Trailhead", "Create Case Queues and Assignment Rules", "https://trailhead.salesforce.com/content/learn/projects/set-up-case-escalation-entitlements/create-case-queues-assignment-rule", says);
+const ESCALATION = (says: string) => page("Trailhead", "Create Case Escalation Rules for Efficient Support", "https://trailhead.salesforce.com/content/learn/projects/set-up-case-escalation-entitlements/create-case-escalation-rule", says);
+const ENTITLEMENTS = (says: string) => page("Trailhead", "Create an Entitlement Process", "https://trailhead.salesforce.com/content/learn/projects/set-up-case-escalation-entitlements/create-entitlement-process", says);
 const STALLED = (says: string) => page("Trailhead", "Empower Your Sales Team to Get Stalled Deals Back on Track", "https://trailhead.salesforce.com/content/learn/modules/sales-deal-acceleration/get-deals-back-on-track", says);
 
 export const PRACTICE: Record<string, Practice[]> = {
@@ -112,5 +115,19 @@ export const PRACTICE: Record<string, Practice[]> = {
     { text: "Keep stalled deals on a dashboard that managers and reps both see.", source: STALLED("A dashboard is the best way to keep track of idle opportunities.") },
     { text: "Keep account plans for key accounts, with clear objectives, and track progress against them.", source: page("Trailhead", "Explore and Create Account Plans", "https://trailhead.salesforce.com/content/learn/modules/account-based-selling/explore-and-create-account-plans", "Account plans set clear objectives backed by measures, and progress against them is monitored over time.") },
     { text: "Review lost deals and lapsed customers regularly, and agree specific steps to win them back.", source: null },
+  ],
+  service_operations: [
+    { text: "Route every case to a team's queue with assignment rules, so none waits for someone to notice it.", source: CASE_QUEUES("Queues hold a support team's cases, and case assignment rules decide which queue each new case goes to, for example by its record type.") },
+    { text: "Escalate cases that stay open too long to a team that can close them.", source: ESCALATION("An escalation rule moves a case that has stayed open past a set time to another queue and can notify people, so stalled cases don't get forgotten.") },
+    { text: "Set first response and resolution targets as milestones, so agents see each deadline coming.", source: ENTITLEMENTS("An entitlement process is a timeline of the steps to resolve a case, and its milestones are the deadlines in it, such as how soon to reply first and how soon to resolve.") },
+    { text: "Record where every case came from and why the customer got in touch.", source: null },
+    { text: "Review the backlog every week by age and priority, and work the oldest high-priority cases first.", source: null },
+  ],
+  service_setup: [
+    { text: "Give each case queue a routing configuration, so work is pushed to agents with room for it.", source: page("Trailhead", "Optimize Workflows with Enhanced Omni-Channel Routing", "https://trailhead.salesforce.com/content/learn/modules/enhanced-omni-channel/improve-work-distribution-with-enhanced-omni-channel", "Work lands in a queue, and the routing engine passes it to an available member of that queue by remaining capacity, following the queue's routing configuration.") },
+    { text: "Attach the article that solved a case, so the next agent can see what the customer already tried.", source: page("Trailhead", "Close Cases with Articles", "https://trailhead.salesforce.com/content/learn/modules/lightning-knowledge-setup-and-customization/close-cases-with-articles", "Agents should attach knowledge articles to cases, so the case shows what helped and a new agent on a reopened case can see what was tried.") },
+    { text: "Keep common replies and repeated steps as macros, so agents don't write each answer again.", source: page("Trailhead", "Learn Macros, Service Console, and Case Feed", "https://trailhead.salesforce.com/content/learn/modules/service-cloud-essentials-features/learn-about-macros-service-console-and-case-feed", "Macros let agents save common responses and reuse them, rather than writing a new answer to every repeated problem.") },
+    { text: "Give every case queue members, and keep each agent to the few queues they really work.", source: null },
+    { text: "Give Service Cloud licences to people who work cases, and review them when someone moves on.", source: null },
   ],
 };

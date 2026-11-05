@@ -630,6 +630,11 @@ export const FIELD_DESCRIBES: Record<string, { fields: unknown[] }> = {
       .map((f) => standardField(f))
       .concat(lookup("ProfileId", "Profile"), lookup("UserRoleId", "UserRole"), lookup("ManagerId", "Manager"), lookup("DelegatedApproverId", "DelegatedApprover")),
   },
+  // Service Cloud's, described before they're read.
+  Case: {
+    fields: ["Id", "Status", "IsClosed", "Priority", "Origin", "CreatedDate", "ClosedDate", "Type", "Reason"].map((f) => standardField(f)).concat(lookup("OwnerId", "Owner"), lookup("ContactId", "Contact"), lookup("AccountId", "Account")),
+  },
+  Group: { fields: ["Id", "Name", "DeveloperName", "Type"].map((f) => standardField(f)).concat(lookup("QueueRoutingConfigId", "QueueRoutingConfig")) },
 };
 
 // Total and recent counts for custom field usage, as COUNT(field) would give them.
@@ -1093,3 +1098,180 @@ export const METADATA_FILES: Record<string, string> = {
 </Flow>`,
   "approvalProcesses/Opportunity.Discount_Approval.approvalProcess": `<?xml version="1.0"?><ApprovalProcess ${METADATA_NS}><active>true</active></ApprovalProcess>`,
 };
+
+// ---------------------------------------------------------------------------
+// Service Cloud (roadmap Stage 6). A support team of four, a year of cases and
+// the set-up around them. Each trap is named where it's planted.
+
+const queueId = (n: number): string => sfId("00G", 100 + n);
+const routingId = (n: number): string => sfId("0K3", n);
+
+export const CASE_QUEUES = [
+  { Id: queueId(1), Name: "Support Tier 1", DeveloperName: "Support_Tier_1", QueueRoutingConfigId: routingId(1) },
+  // Trap: Omni-Channel routes Tier 1 but not Tier 2, so Tier 2's cases wait to be picked by hand.
+  { Id: queueId(2), Name: "Support Tier 2", DeveloperName: "Support_Tier_2", QueueRoutingConfigId: null },
+  // Trap: a case queue with no members, and the target of an escalation rule.
+  { Id: queueId(3), Name: "Old Returns", DeveloperName: "Old_Returns", QueueRoutingConfigId: null },
+];
+// A lead queue isn't a case queue, and must be left out of every case check.
+export const OTHER_QUEUES = [{ Id: queueId(9), Name: "Inbound Leads", DeveloperName: "Inbound_Leads", QueueRoutingConfigId: null }];
+export const QUEUE_SOBJECTS = [...CASE_QUEUES.map((q) => ({ QueueId: q.Id, SobjectType: "Case" })), { QueueId: queueId(9), SobjectType: "Lead" }];
+export const QUEUE_MEMBERS = [
+  { GroupId: queueId(1), UserOrGroupId: userId(1) },
+  { GroupId: queueId(1), UserOrGroupId: userId(2) },
+  { GroupId: queueId(2), UserOrGroupId: userId(2) },
+  { GroupId: queueId(2), UserOrGroupId: userId(4) },
+  { GroupId: queueId(9), UserOrGroupId: userId(3) },
+];
+
+export const CASE_STATUSES = [
+  { ApiName: "New", MasterLabel: "New", IsClosed: false },
+  { ApiName: "Working", MasterLabel: "Working", IsClosed: false },
+  { ApiName: "Escalated", MasterLabel: "Escalated", IsClosed: false },
+  { ApiName: "Closed", MasterLabel: "Closed", IsClosed: true },
+];
+export const BUSINESS_HOURS = [{ Id: sfId("01m", 1), Name: "Default", IsActive: true, IsDefault: true }];
+export const SLA_PROCESSES = [{ Id: sfId("552", 1), Name: "Standard Support", IsActive: true, SObjectType: "Case" }];
+export const MILESTONE_TYPES = [
+  { Id: sfId("557", 1), Name: "First Response" },
+  { Id: sfId("557", 2), Name: "Resolution" },
+];
+// Trap: an active case assignment rule, while Omni-Channel routes the same queues.
+export const CASE_ASSIGNMENT_RULES = [{ Id: sfId("01Q", 1), Name: "Standard Case Assignment", Active: true }];
+export const SERVICE_CHANNELS = [{ Id: sfId("0N9", 1), DeveloperName: "Cases", RelatedEntity: "Case" }];
+export const ROUTING_CONFIGS = [
+  { Id: routingId(1), DeveloperName: "Tier_1", RoutingModel: "MostAvailable", PushTimeout: 30 },
+  // Trap: a routing configuration no queue uses.
+  { Id: routingId(2), DeveloperName: "Old_Pilot", RoutingModel: "LeastActive", PushTimeout: 0 },
+];
+
+// Service Cloud users: the four agents, plus the traps among the Sales users.
+// Trap: Sam Reed (5) hasn't logged in for 200 days. Trap: Nina Hart (10) never has.
+export const SUPPORT_USER_IDS = [1, 2, 4, 5, 10];
+export const supportUsers = SUPPORT_USER_IDS.map((n) => {
+  const u = usersTable.find((x) => x.Id === userId(n))!;
+  return { Id: u.Id, LastLoginDate: u.LastLoginDate, Profile: { UserLicense: { Name: u.Profile.UserLicense.Name } } };
+});
+
+// Trap: most macros are unused, and one still works only in Classic.
+export const MACROS = Array.from({ length: 8 }, (_, i) => ({ Id: sfId("0JZ", i + 1), Name: `Macro ${String(i + 1).padStart(2, "0")}`, IsLightningSupported: i !== 7 }));
+export const MACRO_USAGE = [
+  { MacroID: sfId("0JZ", 1), n: 140 },
+  { MacroID: sfId("0JZ", 2), n: 35 },
+];
+export const QUICK_TEXT = Array.from({ length: 4 }, (_, i) => ({ Id: sfId("574", i + 1), Name: `Greeting ${i + 1}` }));
+export const QUICK_TEXT_USAGE = [1, 2, 3].map((i) => ({ QuickTextID: sfId("574", i), n: 20 * i }));
+
+// Trap: most articles haven't been republished in a year, and many were never read.
+export const ARTICLES = Array.from({ length: 30 }, (_, i) => ({ Id: sfId("ka0", i + 1), KnowledgeArticleId: sfId("kA0", i + 1), LastPublishedDate: daysAgo(i < 20 ? 400 + i * 10 : 30 + i) }));
+export const ARTICLE_VIEWS = ARTICLES.slice(0, 10).map((a, i) => ({ ParentId: a.KnowledgeArticleId, ViewCount: 50 - i * 3, Channel: "AllChannels" }));
+
+// Trap: escalations to a queue with no members, and to a user who's left (Kim Fox, 9).
+export const ESCALATION_FILES: Record<string, string> = {
+  "package.xml": `<?xml version="1.0"?><Package ${'xmlns="http://soap.sforce.com/2006/04/metadata"'}><version>${API_VERSION}</version></Package>`,
+  "escalationRules/Case.escalationRules": `<?xml version="1.0"?><EscalationRules xmlns="http://soap.sforce.com/2006/04/metadata">
+  <escalationRule><fullName>Standard</fullName><active>true</active>
+    <ruleEntry><escalationAction><assignedTo>Old_Returns</assignedTo><assignedToType>Queue</assignedToType><minutesToEscalation>1440</minutesToEscalation><notifyCaseOwner>false</notifyCaseOwner></escalationAction>
+      <escalationAction><assignedTo>kim.fox@example.com</assignedTo><assignedToType>User</assignedToType><minutesToEscalation>2880</minutesToEscalation><notifyCaseOwner>true</notifyCaseOwner></escalationAction>
+      <escalationStartTime>CaseCreation</escalationStartTime></ruleEntry>
+  </escalationRule>
+  <escalationRule><fullName>Old_Rule</fullName><active>false</active></escalationRule>
+</EscalationRules>`,
+};
+
+export type SyntheticCase = {
+  Id: string;
+  Status: string;
+  IsClosed: boolean;
+  Priority: string;
+  Origin: string | null;
+  OwnerId: string;
+  CreatedDate: string;
+  ClosedDate: string | null;
+  Type: string | null;
+  Reason: string | null;
+  ContactId: string | null;
+  AccountId: string | null;
+};
+
+const SERVICE_SEED = 20261105;
+const CASE_AGENTS = [1, 2, 4];
+
+function buildCases() {
+  const random = seeded(SERVICE_SEED);
+  const pick = <T>(items: readonly T[]): T => items[Math.floor(random() * items.length)]!;
+  const cases: SyntheticCase[] = [];
+  const history: Array<{ Id: string; CaseId: string; Field: string; OldValue: string | null; NewValue: string | null; CreatedDate: string }> = [];
+  const milestones: Array<{ CaseId: string; MilestoneTypeId: string; IsCompleted: boolean; IsViolated: boolean; StartDate: string; TargetDate: string; CompletionDate: string | null }> = [];
+  const replies: Array<{ Id: string; ParentId: string; MessageDate: string; Incoming: boolean }> = [];
+  const work: Array<{ Id: string; UserId: string; Status: string; RequestDateTime: string; AcceptDateTime: string | null; DeclineDateTime: string | null; SpeedToAnswer: number | null }> = [];
+  const articles: Array<{ Id: string; CaseId: string }> = [];
+  let n = 0;
+  // A year of cases, more arriving in recent months. Trap: from the sixth month
+  // back, more cases come in each month than are closed.
+  for (let daysBack = 364; daysBack >= 0; daysBack--) {
+    const perDay = daysBack < 180 ? 3 : 2;
+    for (let k = 0; k < perDay; k++) {
+      n++;
+      const created = asOf - daysBack * DAY - Math.floor(random() * 8) * 3_600_000;
+      const priority = random() < 0.2 ? "High" : random() < 0.6 ? "Medium" : "Low";
+      // Trap: about one in seven has no origin, above the agreed one in ten.
+      const origin = random() < 0.14 ? null : pick(["Email", "Email", "Web", "Phone"] as const);
+      // Trap: high-priority cases take longer than the rest.
+      const hours = (priority === "High" ? 60 : 30) + random() * (priority === "High" ? 140 : 90);
+      const closedAt = created + hours * 3_600_000;
+      // Recent cases stay open more often, so the backlog grows; a few old ones are left open too.
+      const stillOpen = daysBack < 180 ? random() < 0.35 * (1 - daysBack / 180) + (daysBack > 30 ? 0.05 : 0) : random() < 0.02;
+      const open = stillOpen || closedAt > asOf;
+      const id = sfId("500", n);
+      // Trap: some open cases sit in a queue long after they came in.
+      const ownerId = open && random() < 0.3 ? queueId(random() < 0.5 ? 1 : 2) : userId(pick(CASE_AGENTS));
+      cases.push({
+        Id: id,
+        Status: open ? pick(["New", "Working", "Escalated"] as const) : "Closed",
+        IsClosed: !open,
+        Priority: priority,
+        Origin: origin,
+        OwnerId: ownerId,
+        CreatedDate: new Date(created).toISOString().replace("Z", "+0000"),
+        ClosedDate: open ? null : new Date(closedAt).toISOString().replace("Z", "+0000"),
+        Type: random() < 0.08 ? null : pick(["Problem", "Question", "Feature Request"] as const),
+        Reason: random() < 0.5 ? null : pick(["Installation", "Performance", "Breakdown"] as const),
+        ContactId: random() < 0.04 ? null : sfId("003", 1 + (n % 400)),
+        AccountId: random() < 0.5 ? null : sfId("001", 1 + (n % 200)),
+      });
+      const iso = (ms: number): string => new Date(ms).toISOString().replace("Z", "+0000");
+      if (!open) {
+        history.push({ Id: sfId("017", history.length + 1), CaseId: id, Field: "Status", OldValue: "Working", NewValue: "Closed", CreatedDate: iso(closedAt) });
+        // Trap: about one closed case in six was reopened, above the one in ten allowed.
+        if (random() < 0.16) {
+          const span = closedAt - created;
+          history.push({ Id: sfId("017", history.length + 1), CaseId: id, Field: "Status", OldValue: "Working", NewValue: "Closed", CreatedDate: iso(created + span * 0.3) });
+          history.push({ Id: sfId("017", history.length + 1), CaseId: id, Field: "Status", OldValue: "Closed", NewValue: "Working", CreatedDate: iso(created + span * 0.5) });
+        }
+        // Trap: few closed cases have an article attached.
+        if (random() < 0.03) articles.push({ Id: sfId("0Ar", articles.length + 1), CaseId: id });
+      }
+      // Entitlements: a first response and a resolution milestone on each case. Trap: one in five resolutions is missed.
+      milestones.push({ CaseId: id, MilestoneTypeId: sfId("557", 1), IsCompleted: true, IsViolated: random() < 0.04, StartDate: iso(created), TargetDate: iso(created + 8 * 3_600_000), CompletionDate: iso(created + 4 * 3_600_000) });
+      if (!open) milestones.push({ CaseId: id, MilestoneTypeId: sfId("557", 2), IsCompleted: true, IsViolated: random() < 0.2, StartDate: iso(created), TargetDate: iso(created + 5 * DAY), CompletionDate: iso(closedAt) });
+      // A first reply on email cases, mostly within a working day.
+      if (origin === "Email") {
+        replies.push({ Id: sfId("02s", replies.length + 1), ParentId: id, MessageDate: iso(created), Incoming: true });
+        if (random() < 0.92) replies.push({ Id: sfId("02s", replies.length + 1), ParentId: id, MessageDate: iso(created + (2 + random() * 26) * 3_600_000), Incoming: false });
+      }
+      if (ownerId.startsWith("005") || !open) {
+        const declined = random() < 0.08;
+        work.push({ Id: sfId("0Bz", work.length + 1), UserId: userId(pick(CASE_AGENTS)), Status: declined ? "Declined" : "Closed", RequestDateTime: iso(created), AcceptDateTime: declined ? null : iso(created + 60_000), DeclineDateTime: declined ? iso(created + 30_000) : null, SpeedToAnswer: declined ? null : 30 + Math.floor(random() * 90) });
+      }
+    }
+  }
+  // Older cases still open, from before the year.
+  for (let i = 0; i < 12; i++) {
+    n++;
+    cases.push({ Id: sfId("500", n), Status: "Working", IsClosed: false, Priority: "Low", Origin: "Web", OwnerId: userId(CASE_AGENTS[i % 3]!), CreatedDate: daysAgo(400 + i * 20), ClosedDate: null, Type: "Question", Reason: null, ContactId: sfId("003", 1 + i), AccountId: null });
+  }
+  return { cases, history, milestones, replies, work, articles };
+}
+
+export const supportCases = buildCases();

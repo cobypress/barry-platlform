@@ -21,6 +21,8 @@ export const DOMAIN_LABELS: Record<string, string> = {
   activity: "Activity",
   lead_funnel: "Lead funnel",
   revenue_opportunities: "Revenue opportunities",
+  service_operations: "Service operations",
+  service_setup: "Service set-up",
 };
 
 export const domainLabel = (domain: string): string => DOMAIN_LABELS[domain] ?? domain.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
@@ -142,7 +144,9 @@ export function areasOf(run: Pick<Run, "scope" | "modules">, findings: Finding[]
 
 /** The areas a set-up review leaves to the full check, because they're measured from records. None for a complete run. */
 export function recordAreas(run: Pick<Run, "scope" | "modules">): string[] {
-  return isSetupReview(run) ? SALES_CLOUD_DOMAINS.filter((d) => !run.modules.includes(d)) : [];
+  // Service Cloud's case area is a record area too, in a review that has Service Cloud.
+  const record: string[] = [...SALES_CLOUD_DOMAINS, ...(run.modules.includes("service_setup") ? ["service_operations"] : [])];
+  return isSetupReview(run) ? record.filter((d) => !run.modules.includes(d)) : [];
 }
 
 /** One line, as a fact, for where a set-up review would otherwise list the record areas as gaps. */

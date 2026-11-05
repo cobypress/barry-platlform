@@ -49,6 +49,18 @@ export const Calibration = z
     // Minutes a year per item, by key, as agreed with the customer. Salesforce has
     // no such figure, so no entry means an hours value isn't sized, never a guess.
     effortMinutes: z.record(z.string(), z.number().positive()).default({}),
+    // Service Cloud's limits. Left out, the defaults in SERVICE_DEFAULTS apply,
+    // and a Sales Cloud calibration stays as it was (DECISIONS.md 154).
+    service: z
+      .object({
+        backlogAgeDays: z.number().int().positive().optional(),
+        originBlankShare: z.number().min(0).max(100).optional(),
+        stalenessMonths: z.number().int().positive().optional(),
+        // Milestone type names, as the org has them. Their names are the org's own, so we can't tell otherwise.
+        firstResponseMilestones: z.array(z.string().min(1)).optional(),
+        resolutionMilestones: z.array(z.string().min(1)).optional(),
+      })
+      .optional(),
   })
   .superRefine((c, ctx) => {
     const seen = new Set<string>();

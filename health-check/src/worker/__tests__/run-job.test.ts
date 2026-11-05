@@ -69,6 +69,25 @@ describe("a run job", () => {
     for (const s of sections) assert.match(run.output!.versions.find((v) => v.id === s.currentVersionId)!.body, /^Fewer than 5 people answered the team survey/);
   });
 
+  test("runs Service Cloud's two areas when the console's modules include service", async () => {
+    const base = runInput();
+    const { deps, handle } = await setup({}, { ...base, run: { ...base.run, modules: [...base.run.modules, "service"] } });
+    const outcome = await handle(job, once);
+    assert.equal(outcome.outcome, "done");
+    const run = stored(deps);
+    assert.ok(run.output!.findings.some((f) => f.domain === "service_operations") && run.output!.findings.some((f) => f.domain === "service_setup"));
+    assert.ok(run.output!.scores.some((s) => s.domain === "service_operations"));
+    assert.ok(run.output!.sections.some((s) => s.key === "domain_service_operations"));
+  });
+
+  test("refuses a module it doesn't know", async () => {
+    const base = runInput();
+    const { deps, handle } = await setup({}, { ...base, run: { ...base.run, modules: [...base.run.modules, "marketing"] } });
+    const outcome = await handle(job, once);
+    assert.equal(outcome.outcome, "failed");
+    assert.match(stored(deps).run.steps.at(-1)!.error ?? "", /doesn't know these modules: marketing/);
+  });
+
   test("never writes the console's own fields", async () => {
     const { deps, handle } = await setup();
     await handle(job, once);

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { SALES_CLOUD_MODULES } from "../domains/index.ts";
 import { usersExtractor, type UserRow } from "../extract/users.ts";
 import { analyse, type AnalysisOutput } from "../engine/evaluate.ts";
+import type { DomainModule } from "../domains/types.ts";
 import { runHealthCheck, type RunOptions, type RunResult } from "../engine/run.ts";
 import { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import type { Calibration, DateRange, ManualAnswer } from "../schemas/index.ts";
@@ -34,13 +35,13 @@ export function loadExtracts(dir: string): Map<string, unknown> {
   return new Map(entries);
 }
 
-export function analyseExtracts(extracts: Map<string, unknown>, options: { answers?: ManualAnswer[]; calibration?: Calibration; now?: Date; window?: DateRange } = {}): AnalysisOutput {
+export function analyseExtracts(extracts: Map<string, unknown>, options: { answers?: ManualAnswer[]; calibration?: Calibration; now?: Date; window?: DateRange; modules?: DomainModule[] } = {}): AnalysisOutput {
   const users = extracts.get(usersExtractor.id) as { status: string; data?: UserRow[] } | undefined;
   const directory = new Map((users?.data ?? []).map((u) => [u.Id, { name: u.Name, aliases: [u.Username, u.Email] }]));
   const pseudonyms = new Pseudonymiser();
   for (const [id, entry] of [...directory].sort(([a], [b]) => a.localeCompare(b))) pseudonyms.label("user", id, entry.name, entry.aliases);
   return analyse({
-    modules: SALES_CLOUD_MODULES,
+    modules: options.modules ?? SALES_CLOUD_MODULES,
     extracts,
     calibration: options.calibration ?? loadCalibration(),
     now: options.now ?? new Date(AS_OF),
