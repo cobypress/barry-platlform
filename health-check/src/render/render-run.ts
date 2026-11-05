@@ -13,6 +13,8 @@ import { deckRangeFor, fullReportHtml } from "./full-report.ts";
 import { launchBrowser, pdfPageCount, renderPdf } from "./pdf.ts";
 import type { LayoutProblem, LayoutReport } from "./layout.ts";
 import { renderRawNotesDocx } from "./raw-notes-docx.ts";
+import { ONE_PAGER_PAGES, onePagerHtml } from "./one-pager.ts";
+import { renderReadoutKitDocx } from "./readout-kit.ts";
 
 // Turns a finished run folder into its three documents. Everything is written to
 // that folder, outside the repo, because this is where names exist in the clear.
@@ -23,6 +25,10 @@ export const OUTPUT_FILES = {
   rawNotes: "raw-notes.docx",
   executive: "executive-summary.pdf",
   full: "full-health-check.pdf",
+  /** The CEO one-pager, built to be forwarded (DECISIONS.md 137). */
+  ceo: "ceo-one-pager.pdf",
+  /** The consultant's talking points. Black Cloud only, never the customer's (DECISIONS.md 138). */
+  kit: "readout-kit.docx",
   sections: "report-sections.json",
   layout: "layout-report.json",
   rejections: "narrative-rejections.json",
@@ -65,7 +71,8 @@ export function loadRun(dir: string, options: { baseline?: boolean } = {}): { in
   return { input, pseudonyms: new Pseudonymiser(read<PseudonymEntry[]>(join(dir, "pseudonym-map.json"))) };
 }
 
-export type RenderResult = { report: BuiltReport; layout: { executive: LayoutReport; full: LayoutReport }; rejections: Rejection[]; passed: boolean; files: string[] };
+export type PrintedLayout = { executive: LayoutReport; full: LayoutReport; ceo: LayoutReport };
+export type RenderResult = { report: BuiltReport; layout: PrintedLayout; rejections: Rejection[]; passed: boolean; files: string[] };
 
 /** With a client, sections are drafted by Claude first. Without one, they're the engine's own text. */
 export async function renderRun(dir: string, options: { client?: NarrativeClient } = {}): Promise<RenderResult> {
@@ -79,6 +86,8 @@ export async function renderRun(dir: string, options: { client?: NarrativeClient
     rawNotes: join(folder, OUTPUT_FILES.rawNotes),
     executive: join(folder, OUTPUT_FILES.executive),
     full: join(folder, OUTPUT_FILES.full),
+    ceo: join(folder, OUTPUT_FILES.ceo),
+    kit: join(folder, OUTPUT_FILES.kit),
     sections: join(folder, OUTPUT_FILES.sections),
     layout: join(folder, OUTPUT_FILES.layout),
     rejections: join(folder, OUTPUT_FILES.rejections),
@@ -86,34 +95,40 @@ export async function renderRun(dir: string, options: { client?: NarrativeClient
   const layout = await printDocuments(report, pseudonyms, paths);
   write(paths.sections, `${JSON.stringify(Object.values(report.outputs), null, 2)}\n`);
   write(paths.rejections, `${JSON.stringify(rejections, null, 2)}\n`);
-  return { report, layout, rejections, passed: layout.executive.passed && layout.full.passed, files: Object.values(paths) };
+  return { report, layout, rejections, passed: layout.executive.passed && layout.full.passed && layout.ceo.passed, files: Object.values(paths) };
 }
 
-/** Prints the two PDFs and the Word notes from a built report, and writes what the layout checks found. */
+/** Prints the three PDFs, the Word notes and the readout kit from a built report, and writes what the layout checks found. */
 export async function printDocuments(
   report: BuiltReport,
   pseudonyms: Pseudonymiser,
-  paths: { rawNotes: string; executive: string; full: string; layout: string },
-): Promise<{ executive: LayoutReport; full: LayoutReport }> {
+  paths: { rawNotes: string; executive: string; full: string; ceo: string; kit: string; layout: string },
+): Promise<PrintedLayout> {
   const scope = report.dataset;
   const browser = await launchBrowser();
   try {
     const executive = await renderPdf(browser, executiveHtml(report, pseudonyms), { minPages: EXECUTIVE_PAGES.min, maxPages: EXECUTIVE_PAGES.max, dataset: scope });
     const full = await renderPdf(browser, fullReportHtml(report, pseudonyms), { minPages: deckRangeFor(report.input.run).min, maxPages: deckRangeFor(report.input.run).max, dataset: scope });
+    // Exactly one page, or it isn't a one-pager.
+    const ceo = await renderPdf(browser, onePagerHtml(report, pseudonyms), { minPages: ONE_PAGER_PAGES.min, maxPages: ONE_PAGER_PAGES.max, dataset: scope });
     const pagesMatch = (result: typeof executive, name: string): LayoutProblem[] => {
       const printed = pdfPageCount(result.pdf);
       return printed === result.layout.pages ? [] : [{ page: 0, check: "page count", detail: `${name} printed ${printed} pages from ${result.layout.pages}` }];
     };
     executive.layout.problems.push(...pagesMatch(executive, "The executive summary"));
     full.layout.problems.push(...pagesMatch(full, "The full report"));
+    ceo.layout.problems.push(...pagesMatch(ceo, "The one page summary"));
     executive.layout.passed = executive.layout.problems.length === 0;
     full.layout.passed = full.layout.problems.length === 0;
+    ceo.layout.passed = ceo.layout.problems.length === 0;
 
     write(paths.rawNotes, await renderRawNotesDocx(report, pseudonyms));
     write(paths.executive, executive.pdf);
     write(paths.full, full.pdf);
-    write(paths.layout, `${JSON.stringify({ executive: executive.layout, full: full.layout }, null, 2)}\n`);
-    return { executive: executive.layout, full: full.layout };
+    write(paths.ceo, ceo.pdf);
+    write(paths.kit, await renderReadoutKitDocx(report, pseudonyms));
+    write(paths.layout, `${JSON.stringify({ executive: executive.layout, full: full.layout, ceo: ceo.layout }, null, 2)}\n`);
+    return { executive: executive.layout, full: full.layout, ceo: ceo.layout };
   } finally {
     await browser.close();
   }

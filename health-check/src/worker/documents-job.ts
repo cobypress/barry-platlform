@@ -4,7 +4,7 @@ import type { ReportOutputKey } from "../narrative/sections.ts";
 import type { BenchmarkInput } from "../benchmark/compare.ts";
 import { AlreadyContributed, CONSENT_FILE, contributeBenchmark } from "../benchmark/export.ts";
 import { longDate } from "../render/format.ts";
-import { renderReleased, type ReleasedDocuments } from "../render/render-released.ts";
+import { renderReleased, type DocumentKey, type ReleasedDocuments } from "../render/render-released.ts";
 import { safeReason, type Attempt, type JobOutcome, type WorkerDeps } from "./deps.ts";
 import type { DocumentDrive, DriveItem } from "./drive.ts";
 import { withJobLock } from "./lock.ts";
@@ -26,11 +26,31 @@ import type { DocumentFile, DocumentsJobInput } from "./types.ts";
 const RUN_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/;
 const NUMBERED = /^Health check (\d+)$/;
 
-const FILES: Record<ReportOutputKey, { title: string; ext: string; mime: string }> = {
+const DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+/** What goes in the client's folder, shared with the customer. */
+const FILES: Record<Exclude<DocumentKey, "readout_kit">, { title: string; ext: string; mime: string }> = {
   executive_summary: { title: "Executive summary", ext: "pdf", mime: "application/pdf" },
   full_health_check: { title: "Full health check", ext: "pdf", mime: "application/pdf" },
-  raw_notes: { title: "Raw notes", ext: "docx", mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" },
+  raw_notes: { title: "Raw notes", ext: "docx", mime: DOCX },
+  ceo_one_pager: { title: "One page summary", ext: "pdf", mime: "application/pdf" },
 };
+
+/**
+ * The files the console's documents card can take today: its DocumentFile
+ * accepts the report's three outputs only, and a fourth key would make it
+ * refuse the whole row. The one-pager is in Drive either way. Add it here once
+ * the console accepts "ceo_one_pager" (DECISIONS.md 139).
+ */
+const LISTED_TO_CONSOLE: ReadonlySet<DocumentKey> = new Set<DocumentKey>(["executive_summary", "full_health_check", "raw_notes"]);
+
+/**
+ * Black Cloud's own folder for readout kits, beside the clients' folders, never
+ * inside one. Drive gives a subfolder everyone its parent is shared with, so a
+ * kit inside a client's folder would reach the customer the day that folder is
+ * shared (DECISIONS.md 138).
+ */
+export const INTERNAL_FOLDER = "Black Cloud only (not for clients)";
 
 /** The client's folder name: the company the customer gave, else the consultant's reference. */
 export function clientNameOf(input: Pick<DocumentsJobInput, "intake" | "run">): string {
@@ -61,9 +81,11 @@ const VERSION = /^Version (\d+)\b/;
  * is one a failed attempt started, so a retry finishes it rather than starting
  * another.
  */
-export async function versionFolderFor(drive: DocumentDrive, folder: DriveItem, previous: DocumentFile[], now: string): Promise<DriveItem> {
+export async function versionFolderFor(drive: DocumentDrive, folder: DriveItem, previous: DocumentFile[], now: string, alsoOurs: string[] = []): Promise<DriveItem> {
   if (previous.length === 0) return folder;
   const ids = new Set(previous.map((f) => f.driveFileId));
+  // Ours too, though the console isn't told of them: the one-pager, by its name.
+  for (const f of await drive.files(folder.id)) if (alsoOurs.includes(f.name)) ids.add(f.id);
   const versions = (await drive.folders(folder.id))
     .map((f) => ({ folder: f, n: Number(VERSION.exec(f.name.trim())?.[1] ?? 0) }))
     .filter((v) => v.n > 0)
@@ -83,6 +105,16 @@ export async function versionFolderFor(drive: DocumentDrive, folder: DriveItem, 
   if (!last) return folder;
   if (!(await drive.files(last.folder.id)).some((f) => ids.has(f.id))) return last.folder;
   return drive.createFolder(folder.id, `Version ${last.n + 1}, ${longDate(now.slice(0, 10))}`);
+}
+
+/** The readout kit, in Black Cloud's own folder: one per client and health check, replaced on each make. */
+async function putReadoutKit(drive: DocumentDrive, clientName: string, folderName: string, path: string): Promise<DriveItem> {
+  const internal = (await drive.folders(drive.rootFolderId)).find((f) => same(f.name, INTERNAL_FOLDER)) ?? (await drive.createFolder(drive.rootFolderId, INTERNAL_FOLDER));
+  const name = `${clientName} - ${folderName}`;
+  const own = (await drive.folders(internal.id)).find((f) => same(f.name, name)) ?? (await drive.createFolder(internal.id, name));
+  const file = `${clientName} - Readout kit.docx`;
+  const replaceId = (await drive.files(own.id)).find((f) => f.name === file)?.id;
+  return drive.putFile(own.id, file, DOCX, readFileSync(path), replaceId);
 }
 
 /**
@@ -168,23 +200,25 @@ async function documentsLocked(runId: string, deps: WorkerDeps, attempt: Attempt
     const benchmark = await benchmarkFor(dir, deps, log);
     const printed = await (deps.renderReleased ?? renderReleased)(dir, { ...input, benchmark }, join(dir, "documents"));
     const folder = await folderFor(deps.drive, clientName, input.driveFolderId);
-    const target = await versionFolderFor(deps.drive, folder, input.files, now());
+    const nameOf = (output: keyof typeof FILES): string => `${clientName} - ${FILES[output].title}.${FILES[output].ext}`;
+    const target = await versionFolderFor(deps.drive, folder, input.files, now(), [nameOf("ceo_one_pager")]);
     const existing = await deps.drive.files(target.id);
     const files: DocumentFile[] = [];
-    for (const output of Object.keys(FILES) as ReportOutputKey[]) {
-      const { title, ext, mime } = FILES[output];
-      const name = `${clientName} - ${title}.${ext}`;
+    for (const output of Object.keys(FILES) as Array<keyof typeof FILES>) {
+      const { mime } = FILES[output];
+      const name = nameOf(output);
       // Ours from last time, or one of the same name someone put there.
       const ours = input.files.find((f) => f.output === output)?.driveFileId;
       const replaceId = existing.find((e) => e.id === ours)?.id ?? existing.find((e) => e.name === name)?.id;
       const item = await deps.drive.putFile(target.id, name, mime, readFileSync(printed.files[output]), replaceId);
-      files.push({ output, name: item.name, driveFileId: item.id, url: item.url });
+      if (LISTED_TO_CONSOLE.has(output)) files.push({ output: output as ReportOutputKey, name: item.name, driveFileId: item.id, url: item.url });
     }
+    await putReadoutKit(deps.drive, clientName, folder.name, printed.files.readout_kit);
     await deps.store.saveDocuments(runId, { at: now(), clientName, folderName: folder.name, driveFolderId: folder.id, driveFolderUrl: folder.url, files, warnings: printed.warnings });
     log(`Documents for ${runId} are in Drive${printed.warnings.length ? `, with ${printed.warnings.length} layout warnings` : ""}.`);
     await publishMicrosite(runId, printed.microsite, deps, now(), log);
     if (input.run.benchmarkOptIn) await contribute(runId, dir, input, deps, log);
-    return { outcome: "done", detail: `${files.length} documents in ${folder.name}${target.id === folder.id ? "" : ` / ${target.name}`}` };
+    return { outcome: "done", detail: `${Object.keys(FILES).length} documents in ${folder.name}${target.id === folder.id ? "" : ` / ${target.name}`}, and the readout kit in ${INTERNAL_FOLDER}` };
   } catch (err) {
     const reason = safeReason(err);
     // Printing and uploading again is safe: the folders and files are reused.

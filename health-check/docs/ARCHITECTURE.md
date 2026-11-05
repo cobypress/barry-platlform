@@ -179,6 +179,7 @@ findings, metrics ──> buildReport ──> sections and versions ──> PDF 
 - Every section starts with text the engine wrote, so a report exists without Claude. A draft that fails the number check is dropped, and the section goes to a person.
 - `sendPrompt` is the only way to Claude. It runs `guardPrompt` on the prompt, then `findNames` checks the result, and evidence isn't sent. See "Free text and names".
 - Names return in one place for each document: `pseudonyms.restore` in the Word builder, and `Render.t` in the PDF templates. Executive and full reports describe people as "a single rep", so only the raw notes name anyone.
+- The CEO one-pager and the readout kit come from the same built report: the one-pager through `Render.t`, the kit through `pseudonyms.restore`, as the raw notes are. The kit is Black Cloud's only, and goes to its own Drive folder, never a client's (DECISIONS.md 138).
 - Chromium runs with no network access. It only lays out HTML we built, with fonts embedded.
 - Before a PDF is written, `checkLayout` measures every page in the browser for overflow, missing charts, empty sections and leftover tokens, and runs the number check again on the text as printed. Problems go to `layout-report.json`, and `hc render` exits non-zero.
 - Every unapproved document is marked as a draft on every page. `canRelease` decides that, and the release step itself belongs to the console.

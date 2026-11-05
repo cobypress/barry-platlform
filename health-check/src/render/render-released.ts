@@ -29,24 +29,27 @@ export type ApprovedRun = {
   benchmark?: BenchmarkInput | null;
 };
 
+/** The report's three outputs, then the one-pager for the customer and the kit for Black Cloud only. */
+export type DocumentKey = ReportOutputKey | "ceo_one_pager" | "readout_kit";
+
 export type ReleasedDocuments = {
-  files: Record<ReportOutputKey, string>;
+  files: Record<DocumentKey, string>;
   /** What the layout checks found. The files are still written, for a person to look over. */
   warnings: string[];
   /** The customer microsite's pages, or why they couldn't be made. Left out by renderers that don't make them. */
   microsite?: { ok: true; pages: MicrositePages } | { ok: false; reason: string };
 };
 
-const DOCUMENT_NAMES = { executive: "The executive summary", full: "The full health check" } as const;
+const DOCUMENT_NAMES = { executive: "The executive summary", full: "The full health check", ceo: "The one page summary" } as const;
 
 /**
  * One line per layout problem, without the check's detail: an empty-page
  * detail quotes the page's text, which has names in it by now, and these lines
  * go to the console. The full report stays in the run folder.
  */
-export function layoutWarnings(layout: { executive: LayoutReport; full: LayoutReport }): string[] {
+export function layoutWarnings(layout: { executive: LayoutReport; full: LayoutReport; ceo?: LayoutReport }): string[] {
   return (Object.keys(DOCUMENT_NAMES) as Array<keyof typeof DOCUMENT_NAMES>).flatMap((doc) =>
-    layout[doc].problems.map((p) => (p.page === 0 ? `${DOCUMENT_NAMES[doc]}: ${p.check}` : `${DOCUMENT_NAMES[doc]}, page ${p.page}: ${p.check}`)),
+    (layout[doc]?.problems ?? []).map((p) => (p.page === 0 ? `${DOCUMENT_NAMES[doc]}: ${p.check}` : `${DOCUMENT_NAMES[doc]}, page ${p.page}: ${p.check}`)),
   );
 }
 
@@ -77,11 +80,15 @@ export async function renderReleased(dir: string, approved: ApprovedRun, outDir:
     raw_notes: join(out, OUTPUT_FILES.rawNotes),
     executive_summary: join(out, OUTPUT_FILES.executive),
     full_health_check: join(out, OUTPUT_FILES.full),
+    ceo_one_pager: join(out, OUTPUT_FILES.ceo),
+    readout_kit: join(out, OUTPUT_FILES.kit),
   };
   const layout = await printDocuments(report, pseudonyms, {
     rawNotes: files.raw_notes,
     executive: files.executive_summary,
     full: files.full_health_check,
+    ceo: files.ceo_one_pager,
+    kit: files.readout_kit,
     layout: join(out, OUTPUT_FILES.layout),
   });
   let microsite: ReleasedDocuments["microsite"];
