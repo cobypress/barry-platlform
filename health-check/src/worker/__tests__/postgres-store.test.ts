@@ -105,6 +105,37 @@ describe("the intake the worker gives the engine", () => {
     assert.equal(intake.statedProblems.length, 2);
     assert.equal(intake.customerName, undefined);
   });
+
+  test("what Salesforce costs them, and the consents, come from the consultant's columns first, then the customer's answers", () => {
+    const intake = intakeFromRow({ ...consultant, customerAnswers: { ...answers, salesforceSpendAnnual: 90000, hourlyCost: 40 }, salesforceSpendAnnual: 120000, hourlyCost: null, namedRepConsent: true, caseStudyConsent: false }, run);
+    assert.equal(intake.salesforceSpendAnnual, 120000);
+    assert.equal(intake.hourlyCost, 40);
+    assert.equal(intake.namedRepConsent, true);
+    assert.equal(intake.caseStudyConsent, false);
+    const blank = intakeFromRow({ ...consultant, customerAnswers: null }, run);
+    assert.equal(blank.salesforceSpendAnnual, undefined);
+    assert.equal(blank.namedRepConsent, undefined);
+  });
+
+  test("when the customer never replied, the answers confirmed from the call fill in, each read on its own", () => {
+    const callAnswers = {
+      answers: { goals: "Halve the time reps spend on admin.", problems: "Nobody trusts the forecast.", headcountBand: "51-200", industry: "not an industry", hourlyCost: 35 },
+      lines: {},
+      confirmed: {},
+    };
+    const intake = intakeFromRow({ ...consultant, industry: null, customerAnswers: null, callAnswers }, run);
+    assert.match(intake.summary, /The customer's goals for the next 12 months:\nHalve the time reps spend on admin\./);
+    assert.deepEqual(intake.statedProblems.at(-1), { id: "p3", statement: "Nobody trusts the forecast.", raisedBy: "customer", findingIds: [] });
+    assert.equal(intake.headcountBand, "51-200");
+    assert.equal(intake.industry, undefined, "an answer that doesn't read is left out, and the rest still count");
+    assert.equal(intake.hourlyCost, 35);
+  });
+
+  test("once the customer has replied, the call's answers aren't read again, because the console folded them in", () => {
+    const callAnswers = { answers: { problems: "Said on the call." }, lines: {}, confirmed: {} };
+    const intake = intakeFromRow({ ...consultant, customerAnswers: answers, callAnswers }, run);
+    assert.ok(!intake.statedProblems.some((p) => p.statement === "Said on the call."));
+  });
 });
 
 describe("SQL building", () => {

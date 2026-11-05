@@ -85,7 +85,10 @@ export const RUN: Columns = {
  */
 export const RUN_DOCUMENTS: Columns = { ...RUN, preparedBy: "text" };
 export const RUN_STEP: Columns = { runId: "text", id: "text", version: "num", status: "text", calls: "num", finishedAt: "ts", error: "text" };
-export const INTAKE: Columns = { statedProblems: "text", customerName: "text", linkedinUrl: "text", industry: "text", headcountBand: "text", customerAnswers: "json" };
+export const INTAKE: Columns = {
+  statedProblems: "text", customerName: "text", linkedinUrl: "text", industry: "text", headcountBand: "text", customerAnswers: "json",
+  salesforceSpendAnnual: "num", hourlyCost: "num", namedRepConsent: "bool", caseStudyConsent: "bool", callAnswers: "json",
+};
 export const CALIBRATION: Columns = {
   version: "num", orgId: "text", confirmedBy: "text", confirmedAt: "ts", stages: "json", scope: "json", users: "json", fields: "json", targets: "json",
   salesCycleAssumptionDays: "num", fiscalYearStartMonth: "num", analysisWindowMonths: "num", minSample: "num", dormantDays: "num", currency: "text",
@@ -156,6 +159,25 @@ const CustomerAnswersForIntake = z.object({
   problems: z.string().min(1),
 });
 
+/**
+ * Answers the consultant confirmed from the discovery call, each taken on its
+ * own: one that doesn't read is left out rather than losing the rest.
+ */
+const CallAnswersForIntake = z.object({
+  answers: z.object({
+    companyName: z.string().min(1).optional().catch(undefined),
+    industry: Industry.optional().catch(undefined),
+    headcountBand: HeadcountBand.optional().catch(undefined),
+    goals: z.string().min(1).optional().catch(undefined),
+    whyNow: z.string().min(1).optional().catch(undefined),
+    problems: z.string().min(1).optional().catch(undefined),
+    salesforceSpendAnnual: z.number().positive().optional().catch(undefined),
+    hourlyCost: z.number().positive().optional().catch(undefined),
+  }),
+});
+
+const positive = (value: unknown): number | null => (typeof value === "number" && value > 0 ? value : null);
+
 const statements = (text: string) => text.split(/\r?\n/).map((l) => l.replace(/^\s*(?:[-*•]|\d+[.)])\s+/, "").trim()).filter(Boolean);
 
 /**
@@ -168,15 +190,26 @@ export function intakeFromRow(row: Record<string, unknown>, run: Run): Intake {
   const text = String(row.statedProblems ?? "").trim();
   const customer = CustomerAnswersForIntake.safeParse(row.customerAnswers ?? undefined);
   const answers = customer.success ? customer.data : null;
+  // When the customer replied, the console has already folded the call's answers into theirs. The call only counts when they didn't.
+  const call = answers ? null : CallAnswersForIntake.safeParse(row.callAnswers ?? undefined);
+  const fromCall = call?.success ? call.data.answers : {};
+  const raw = (row.customerAnswers ?? {}) as Record<string, unknown>;
   const extra = withoutNulls({
-    customerName: row.customerName ?? answers?.companyName ?? null,
+    customerName: row.customerName ?? answers?.companyName ?? fromCall.companyName ?? null,
     linkedinUrl: row.linkedinUrl,
-    industry: row.industry ?? answers?.industry ?? null,
-    headcountBand: row.headcountBand ?? answers?.headcountBand ?? null,
+    industry: row.industry ?? answers?.industry ?? fromCall.industry ?? null,
+    headcountBand: row.headcountBand ?? answers?.headcountBand ?? fromCall.headcountBand ?? null,
+    salesforceSpendAnnual: positive(row.salesforceSpendAnnual) ?? positive(raw.salesforceSpendAnnual) ?? fromCall.salesforceSpendAnnual ?? null,
+    hourlyCost: positive(row.hourlyCost) ?? positive(raw.hourlyCost) ?? fromCall.hourlyCost ?? null,
+    namedRepConsent: typeof row.namedRepConsent === "boolean" ? row.namedRepConsent : null,
+    caseStudyConsent: typeof row.caseStudyConsent === "boolean" ? row.caseStudyConsent : null,
   });
   const ours = statements(text);
-  const theirs = answers ? statements(answers.problems) : [];
-  const goals = answers ? [`The customer's goals for the next 12 months:\n${answers.goals.trim()}`, ...(answers.whyNow ? [`Why now: ${answers.whyNow.trim()}`] : [])] : [];
+  const theirProblems = answers?.problems ?? fromCall.problems;
+  const theirs = theirProblems ? statements(theirProblems) : [];
+  const goalsText = answers?.goals ?? fromCall.goals;
+  const whyNow = answers ? answers.whyNow : fromCall.whyNow;
+  const goals = goalsText ? [`The customer's goals for the next 12 months:\n${goalsText.trim()}`, ...(whyNow ? [`Why now: ${whyNow.trim()}`] : [])] : [];
   return Intake.parse({
     ...extra,
     summary: [text, ...goals].filter(Boolean).join("\n\n"),

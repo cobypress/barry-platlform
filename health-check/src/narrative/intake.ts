@@ -25,6 +25,13 @@ export const Intake = z.object({
   headcountBand: HeadcountBand.optional(),
   summary: z.string().min(1),
   statedProblems: z.array(StatedProblem),
+  // What the customer told us Salesforce costs them a year, in the calibration currency. Beats list price.
+  salesforceSpendAnnual: z.number().positive().optional(),
+  // The loaded hourly cost of a Salesforce user, in the calibration currency. Beats the UK salary benchmark.
+  hourlyCost: z.number().positive().optional(),
+  // Named rep-level insights only with this. Without it, reps are shown at team level.
+  namedRepConsent: z.boolean().optional(),
+  caseStudyConsent: z.boolean().optional(),
   capturedBy: z.string().min(1),
   capturedAt: z.iso.datetime(),
 });
