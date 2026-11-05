@@ -89,17 +89,17 @@ describe("our own customers: widening the group", () => {
   test("then size, then every customer", () => {
     const bySize = compare({ benchmark: benchmark([...count(4), ...count(6, 20, { industry: "retail" })]) });
     assert.equal(own(bySize).group.kind, "size");
-    const everyone = compare({ benchmark: benchmark([...count(2), ...count(3, 20, { industry: "retail", headcountBand: "11-50" })]) });
+    const everyone = compare({ benchmark: benchmark([...count(2), ...count(6, 20, { industry: "retail", headcountBand: "11-50" })]) });
     assert.equal(own(everyone).group.kind, "all");
     assert.equal(own(everyone).group.label, "Black Cloud customers");
-    assert.deepEqual(everyone.own.tried.map((g) => g.orgs), [2, 2, 2, 5]);
+    assert.deepEqual(everyone.own.tried.map((g) => g.orgs), [2, 2, 2, 8]);
   });
 
-  test("every customer is shown from 5 orgs, and never below", () => {
+  test("every customer is shown from 8 orgs, and never below", () => {
     assert.equal(own(compare({ benchmark: benchmark(count(OWN_RANGE_MIN)) })).group.orgs, OWN_RANGE_MIN);
     const four = compare({ benchmark: benchmark(count(OWN_RANGE_MIN - 1)) });
     assert.equal(four.own.status, "not_measurable");
-    assert.match(four.own.status === "not_measurable" ? four.own.reason : "", /from 4 Black Cloud customers\. We show a range from 5/);
+    assert.match(four.own.status === "not_measurable" ? four.own.reason : "", new RegExp(`from ${OWN_RANGE_MIN - 1} Black Cloud customers\\. We show a range from ${OWN_RANGE_MIN}`));
   });
 
   test("industry and size groups need 10, not 5", () => {
@@ -130,11 +130,11 @@ describe("our own customers: widening the group", () => {
   });
 
   test("a run whose own rows are in the set isn't compared with itself", () => {
-    const set = [...rows([10, 15, 25, 35]), row(30)];
-    assert.equal(own(compare({ value: 30, benchmark: { rows: set, includesThisRun: false } })).group.orgs, 5);
+    const set = [...rows([10, 15, 20, 25, 35, 40, 45]), row(30)];
+    assert.equal(own(compare({ value: 30, benchmark: { rows: set, includesThisRun: false } })).group.orgs, 8);
     const without = compare({ value: 30, benchmark: { rows: set, includesThisRun: true } });
     assert.equal(without.own.status, "not_measurable");
-    assert.deepEqual(without.own.tried.at(-1)!.orgs, 4);
+    assert.deepEqual(without.own.tried.at(-1)!.orgs, 7);
     // Its row can't be found, so it can't be left out, and nothing is shown.
     const missing = compare({ value: 31, benchmark: { rows: count(12), includesThisRun: true } });
     assert.equal(missing.own.status, "not_measurable");
@@ -143,9 +143,9 @@ describe("our own customers: widening the group", () => {
 
 describe("positions", () => {
   test("quartiles between neighbours, in whole units", () => {
-    // 10, 20, 30, 40, 50, 60: p25 at 22.5, median 35, p75 at 47.5.
-    const c = compare({ value: 50, benchmark: { rows: rows([60, 10, 40, 20, 50, 30]), includesThisRun: false } });
-    assert.deepEqual([own(c).p25, own(c).median, own(c).p75], [23, 35, 48]);
+    // 10 to 80 in tens: p25 at 27.5, median 45, p75 at 62.5.
+    const c = compare({ value: 70, benchmark: { rows: rows([60, 10, 40, 20, 80, 50, 70, 30]), includesThisRun: false } });
+    assert.deepEqual([own(c).p25, own(c).median, own(c).p75], [28, 45, 63]);
     assert.equal(own(c).position, "top quarter");
   });
 
@@ -164,8 +164,8 @@ describe("positions", () => {
   });
 
   test("against the figures as shown, so a tie with a quartile is the middle half", () => {
-    // 10, 20, 25, 29, 30, 40: p75 is 29.75, shown as 30. Against 29.75, 30 would be the top quarter.
-    const tie = compare({ value: 30, benchmark: { rows: rows([10, 20, 25, 29, 30, 40]), includesThisRun: false } });
+    // 10, 15, 20, 22, 25, 29, 32, 40: p75 is 29.75, shown as 30. Against 29.75, 30 would be the top quarter.
+    const tie = compare({ value: 30, benchmark: { rows: rows([10, 15, 20, 22, 25, 29, 32, 40]), includesThisRun: false } });
     assert.equal(own(tie).p75, 30);
     assert.equal(own(tie).position, "middle half");
   });

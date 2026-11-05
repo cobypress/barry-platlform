@@ -9,7 +9,7 @@ import { latestWindow } from "./summary.ts";
 // own way, and our set measures Black Cloud customers in ours.
 
 /** Our own customers' range is shown from this many orgs (roadmap decision 2), and never below. */
-export const OWN_RANGE_MIN = 5;
+export const OWN_RANGE_MIN = 8;
 
 export type Better = "higher" | "lower";
 

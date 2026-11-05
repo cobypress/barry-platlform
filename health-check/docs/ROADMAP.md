@@ -169,7 +169,7 @@ Service Cloud, CPQ and Revenue Cloud, Marketing Cloud and Account Engagement, Ex
 ### 5 November 2026 (Coby)
 
 1. **Seeding benchmarks:** ask past and current customers to consent to contributing their anonymised, banded figures, with one read-only run each. Three orgs are expected within days.
-2. **Published research:** combined with our own figures as they arrive, always labelled with its source. Our own figures appear as a "Black Cloud customers" range from 5 orgs, with the count shown, and never below: at 3 orgs the middle value is one company's real figure, which another customer could read as theirs (rule 11). Industry and size groups appear from 10 orgs (`BENCHMARK_MIN_GROUP`).
+2. **Published research:** combined with our own figures as they arrive, always labelled with its source. Our own figures appear as a "Black Cloud customers" range from 8 orgs (raised from 5 on 5 November, decision 86), with the count shown, and never below: in a very small set the middle value is one company's real figure, which another customer could read as theirs (rule 11). Industry and size groups appear from 10 orgs (`BENCHMARK_MIN_GROUP`).
 3. **Hourly cost:** asked on the connect page, with a cited UK salary benchmark by role as the fallback. Their figure wins.
 4. **Salesforce spend:** an optional connect-page question, with list price for their seats and edition as the fallback, labelled as list price.
 5. **Customers:** UK, 20 to 500 Salesforce users.
@@ -193,3 +193,5 @@ Service Cloud, CPQ and Revenue Cloud, Marketing Cloud and Account Engagement, Ex
 20. **The intake canvas:** shared with the customer through Slack Connect, so they can answer some questions themselves. It reads as Black Cloud's, under the consultant's name, with nothing saying it was generated.
 21. **The microsite:** named content is stored on our side, encrypted and deleted after 12 months, and customers sign in through a link emailed to approved addresses.
 22. **The order of the stages:** as written above.
+23. **Published research:** Ebsta and Pavilion's 2025 GTM Benchmarks as the only source for now, with how each figure differs from ours in the raw notes.
+24. **Our own customers' range:** shown from 8 orgs, not 5.
