@@ -505,6 +505,22 @@ const worker = new Worker(
         console.log("[slack-interaction] received, no handler — ignoring", job.data?.correlation_id);
       }
 
+      // 1b) Someone joined an account's internal Slack channel — mirror them onto the
+      // Account Team in Salesforce (BarrySyncAccountTeamMember itself re-checks that the
+      // channel is actually a tracked internal channel and skips otherwise).
+      if (job.name === "sync-account-team-member") {
+        const { channel_id, email } = job.data as { channel_id: string; email: string };
+        try {
+          await salesforce.sfJson("/services/apexrest/barry/sync-account-team-member", {
+            method: "POST",
+            body: JSON.stringify({ channelId: channel_id, email }),
+            headers: { "Content-Type": "application/json; charset=utf-8" },
+          });
+        } catch (err) {
+          console.error("[sync-account-team-member] Failed:", getErrorMessage(err));
+        }
+      }
+
       // 2) Slash command jobs — /create-case for already-verified users
       if (job.name === "slack-command") {
         const cmdPayload = job.data?.payload as SlackCommandPayload | undefined;
