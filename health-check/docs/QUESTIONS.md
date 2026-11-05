@@ -113,6 +113,15 @@ The figures we compare with are in `src/benchmark/published.ts`, each with its s
 | 54 | How far back does `LoginHistory` go in a real org? The Object Reference doesn't say | We never assume: the months are worked out from the oldest login read, and falling adoption is not measurable with fewer than 4 whole months |
 | 56 | Is `UserPreferencesLightningExperiencePreferred` readable for other users through the API? The Object Reference lists it on User as "Switch to Lightning Experience" | Handled either way (DECISIONS.md 112): a missing field, or a setting empty for every user, makes the Lightning share and the Classic check not measurable, and a user whose setting is empty is left out rather than counted as Classic |
 
+## Your org, documented (roadmap 3.4)
+
+| # | Question | If we're wrong |
+| --- | --- | --- |
+| 57 | Does `FieldDefinition.DataType` read "Master-Detail(...)" for a master-detail field? The Tooling API guide says only that it's the type as the user interface shows it, for example Text(80) | A master-detail relationship would show as a lookup. Nothing else depends on it |
+| 58 | The Tooling API guide lists the sharing models as None, Read, Edit, ControlledByLeadOrContact and ControlledByCampaign. Is None the private default, and what do ReadEditTransfer, ControlledByParent and full access read as? | We show None as Private and the others in plain words. A value we don't know is shown as Salesforce gives it |
+| 59 | Can the read-only user query `ConnectedApplication`, `NamedCredential` (View Setup and Configuration, per the Object Reference), Tooling's `RemoteProxy`, and `PermissionSetAssignment` filtered on `Assignee.IsActive`? | Each one that can't be read is left out of the part, and the part says why |
+| 60 | Is there a read-only way to count sharing rules? They're only in the Metadata API, which a Barometer Read Only connection can't use | The security part shows each object's default and says sharing rules aren't counted |
+
 ## Field names checked against Salesforce's docs
 
 Checked on 2026-11-03 against the API 68.0 (Winter '27) Object Reference, Tooling API and Metadata API guides. developer.salesforce.com answers automated fetches with a 403, so we read Salesforce's own PDF editions of the same guides, from `resources.docs.salesforce.com/latest/latest/en-us/sfdc/pdf/` (`object_reference.pdf`, `api_tooling.pdf`, `api_meta.pdf`). The web page for an object is at `developer.salesforce.com/docs/atlas.en-us.object_reference.meta/object_reference/sforce_api_objects_<object>.htm`, or `atlas.en-us.api_tooling.meta/api_tooling/tooling_api_objects_<object>.htm` for Tooling.

@@ -60,8 +60,8 @@ describe("the microsite's pages", async () => {
   const report = buildReport(input);
   const { pages } = buildMicrositePages(report, pseudonyms);
 
-  test("an overview, every issue, the plan, and the comparison when there's one", () => {
-    assert.deepEqual(pages.map((p) => p.slug), ["overview", "issues", "plan", "compare"]);
+  test("an overview, every issue, the plan, the comparison when there's one, and the org documented", () => {
+    assert.deepEqual(pages.map((p) => p.slug), ["overview", "issues", "plan", "compare", "org"]);
     for (const p of pages) assert.match(p.slug, /^[a-z0-9][a-z0-9-]{0,79}$/);
     const issues = pages.find((p) => p.slug === "issues")!.html;
     for (const f of report.teamFindings.filter((x) => x.status === "issue")) assert.ok(issues.includes(f.id) || issues.includes(f.title.replace(/'/g, "&#39;")), f.title);

@@ -275,15 +275,26 @@ export class Simulator implements Transport {
       case "SecurityHealthCheckRisks":
         return tooling ? page(org.HEALTH_RISKS) : unsupported("SecurityHealthCheckRisks");
       case "PermissionSet":
-        return page(org.PERMISSION_SETS);
+        return page(/IsOwnedByProfile = false/.test(where) ? org.DOCUMENTED_PERMISSION_SETS : org.PERMISSION_SETS);
       case "PermissionSetAssignment":
-        return page(org.PERMISSION_ASSIGNMENTS);
+        return page(/IsOwnedByProfile = false/.test(where) ? org.DOCUMENTED_ASSIGNMENTS : org.PERMISSION_ASSIGNMENTS);
+      case "UserRole":
+        return page(org.ROLES);
+      case "ConnectedApplication":
+        return page(org.CONNECTED_APPS);
+      case "NamedCredential":
+        return page(org.NAMED_CREDENTIALS);
+      case "RemoteProxy":
+        return tooling ? page(org.REMOTE_SITES) : unsupported("RemoteProxy");
       case "Layout":
         return tooling ? page(org.LAYOUTS) : unsupported("Layout");
       case "CustomObject":
         return tooling ? page(org.CUSTOM_OBJECTS) : unsupported("CustomObject");
-      case "EntityDefinition":
-        return page(TOOLING.entities);
+      case "EntityDefinition": {
+        if (!/SharingModel/.test(soql)) return page(TOOLING.entities);
+        const wanted = new Set([...(soql.match(/QualifiedApiName IN \(([^)]*)\)/)?.[1] ?? "").matchAll(/'([^']+)'/g)].map((m) => m[1]));
+        return page(Object.entries(org.SHARING_MODELS).filter(([name]) => wanted.has(name)).map(([QualifiedApiName, [InternalSharingModel, ExternalSharingModel]]) => ({ QualifiedApiName, InternalSharingModel, ExternalSharingModel })));
+      }
       case "FlowDefinition":
         return tooling ? page(TOOLING.flowDefinitions) : unsupported("FlowDefinition");
       case "WorkflowRule":
@@ -296,6 +307,7 @@ export class Simulator implements Transport {
       case "ValidationRule":
         return tooling ? page(TOOLING.validationRules) : unsupported("ValidationRule");
       case "FieldDefinition":
+        if (/\bReferenceTo\b/.test(soql)) return page(inObjects(org.RELATIONSHIP_FIELDS, soql));
         return page(inObjects(TOOLING.fields, soql).map(({ InlineHelpText, ...f }) => f));
       case "EntityParticle":
         return page(inObjects(TOOLING.fields, soql).map(({ Description, ...f }) => f));

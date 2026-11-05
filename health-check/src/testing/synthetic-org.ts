@@ -858,6 +858,68 @@ export const PERMISSION_ASSIGNMENTS = [
   { AssigneeId: userId(1), PermissionSetId: sfId("0PS", 4) },
 ];
 
+// "Your org, documented": the set-up only that part reads.
+
+// Lookups and a master-detail between the documented objects, as Tooling's
+// FieldDefinition gives them. Traps: a lookup to User, which isn't a documented
+// object, and a field that isn't a relationship at all.
+const relationship = (object: string, field: string, dataType: string, to: string[] | null) => ({ EntityDefinition: { QualifiedApiName: object }, QualifiedApiName: field, DataType: dataType, ReferenceTo: to ? { referenceTo: to } : null });
+export const RELATIONSHIP_FIELDS = [
+  relationship("Account", "ParentId", "Hierarchy", ["Account"]),
+  relationship("Account", "OwnerId", "Lookup(User)", ["User"]),
+  relationship("Account", "Name", "Name", null),
+  relationship("Contact", "AccountId", "Lookup(Account)", ["Account"]),
+  relationship("Opportunity", "AccountId", "Lookup(Account)", ["Account"]),
+  relationship("Lead", "ConvertedAccountId", "Lookup(Account)", ["Account"]),
+  relationship("Lead", "ConvertedContactId", "Lookup(Contact)", ["Contact"]),
+  relationship("Lead", "ConvertedOpportunityId", "Lookup(Opportunity)", ["Opportunity"]),
+  relationship("Invoice__c", "Account__c", "Lookup(Account)", ["Account"]),
+  relationship("Invoice__c", "Opportunity__c", "Lookup(Opportunity)", ["Opportunity"]),
+  relationship("Project__c", "Account__c", "Lookup(Account)", ["Account"]),
+  relationship("Project_Line__c", "Project__c", "Master-Detail(Project)", ["Project__c"]),
+];
+
+export const SHARING_MODELS: Record<string, [string, string]> = {
+  Account: ["Read", "None"],
+  Contact: ["ControlledByParent", "ControlledByParent"],
+  Opportunity: ["Edit", "None"],
+  Lead: ["ReadEditTransfer", "None"],
+  Invoice__c: ["None", "None"],
+  Project__c: ["Read", "None"],
+  Project_Line__c: ["ControlledByParent", "ControlledByParent"],
+};
+
+// Three levels: the users' two teams report to a director, who reports to the top.
+export const ROLES = [
+  { Id: sfId("00E", 1), Name: "Managing Director", ParentRoleId: null },
+  { Id: sfId("00E", 2), Name: "Sales Director", ParentRoleId: sfId("00E", 1) },
+  { Id: sfId("00E", 3), Name: "Sales UK", ParentRoleId: sfId("00E", 2) },
+  { Id: sfId("00E", 4), Name: "Sales EU", ParentRoleId: sfId("00E", 2) },
+];
+
+// Every permission set nobody's profile owns. Trap: one from a package.
+export const DOCUMENTED_PERMISSION_SETS = [
+  { Id: sfId("0PS", 3), Name: "Data_Fix_Temporary", Label: "Data Fix Temporary", IsCustom: true, NamespacePrefix: null },
+  { Id: sfId("0PS", 4), Name: "Reporting_Everything", Label: "Reporting Everything", IsCustom: true, NamespacePrefix: null },
+  { Id: sfId("0PS", 5), Name: "Sales_Console_User", Label: "Sales Console User", IsCustom: true, NamespacePrefix: null },
+  { Id: sfId("0PS", 6), Name: "CPQ_User", Label: "CPQ User", IsCustom: false, NamespacePrefix: "acmecpq" },
+];
+// Who holds them, active users only, as the query asks. User 9 is inactive.
+export const DOCUMENTED_ASSIGNMENTS = ([[3, 2], [3, 9], [4, 1], [5, 1], [5, 2], [5, 3], [5, 5], [5, 7], [6, 1], [6, 2]] as const)
+  .filter(([, user]) => USERS.find((u) => u.n === user)?.active !== false)
+  .map(([set]) => ({ PermissionSetId: sfId("0PS", set) }));
+
+export const CONNECTED_APPS = [
+  { Name: "Data Loader", OptionsAllowAdminApprovedUsersOnly: false },
+  { Name: "Finance Sync", OptionsAllowAdminApprovedUsersOnly: true },
+];
+export const NAMED_CREDENTIALS = [{ DeveloperName: "Finance_API", MasterLabel: "Finance API", NamespacePrefix: null }];
+// Trap: a key in the query string, which must never be kept.
+export const REMOTE_SITES = [
+  { EndpointUrl: "https://api.finance.example.com/v2?key=not-a-real-key", IsActive: true, NamespacePrefix: null },
+  { EndpointUrl: "http://legacy.example.com", IsActive: false, NamespacePrefix: null },
+];
+
 export const SHARING_DEFAULTS = { DefaultAccountAccess: "Read", DefaultContactAccess: "ControlledByParent", DefaultOpportunityAccess: "Edit", DefaultLeadAccess: "ReadEditTransfer" };
 
 export const CRON_TRIGGERS = [
@@ -916,16 +978,19 @@ export const APEX_CLASSES = [
   { Id: sfId("01p", 4), Name: "OpportunityHandlerTest", ApiVersion: 60, Status: "Active", LengthWithoutComments: 300, Body: "@isTest class OpportunityHandlerTest { }" },
 ];
 
+const TRIGGER_EVENTS = ["BeforeInsert", "BeforeUpdate", "BeforeDelete", "AfterInsert", "AfterUpdate", "AfterDelete", "AfterUndelete"] as const;
+const usage = (...on: Array<(typeof TRIGGER_EVENTS)[number]>): Record<string, boolean> => Object.fromEntries(TRIGGER_EVENTS.map((e) => [`Usage${e}`, on.includes(e)]));
+
 export const APEX_TRIGGERS = [
-  { Id: sfId("01q", 1), Name: "OpportunityTrigger", TableEnumOrId: "Opportunity", ApiVersion: 60, Status: "Active", Body: "trigger OpportunityTrigger on Opportunity (before insert) { }" },
-  { Id: sfId("01q", 2), Name: "OpportunitySplitTrigger", TableEnumOrId: "Opportunity", ApiVersion: 60, Status: "Active", Body: "trigger OpportunitySplitTrigger on Opportunity (after update) { }" },
-  { Id: sfId("01q", 3), Name: "AccountTrigger", TableEnumOrId: "Account", ApiVersion: 60, Status: "Active", Body: "trigger AccountTrigger on Account (before update) { }" },
+  { Id: sfId("01q", 1), Name: "OpportunityTrigger", TableEnumOrId: "Opportunity", ApiVersion: 60, Status: "Active", ...usage("BeforeInsert"), Body: "trigger OpportunityTrigger on Opportunity (before insert) { }" },
+  { Id: sfId("01q", 2), Name: "OpportunitySplitTrigger", TableEnumOrId: "Opportunity", ApiVersion: 60, Status: "Active", ...usage("AfterUpdate"), Body: "trigger OpportunitySplitTrigger on Opportunity (after update) { }" },
+  { Id: sfId("01q", 3), Name: "AccountTrigger", TableEnumOrId: "Account", ApiVersion: 60, Status: "Active", ...usage("BeforeUpdate"), Body: "trigger AccountTrigger on Account (before update) { }" },
   // Trap: a trigger on a custom object names it by id, not by name.
-  { Id: sfId("01q", 4), Name: "InvoiceTrigger", TableEnumOrId: sfId("01I", 1), ApiVersion: 62, Status: "Active", Body: "// Totals each invoice from its lines.\ntrigger InvoiceTrigger on Invoice__c (before insert, before update) { }" },
+  { Id: sfId("01q", 4), Name: "InvoiceTrigger", TableEnumOrId: sfId("01I", 1), ApiVersion: 62, Status: "Active", ...usage("BeforeInsert", "BeforeUpdate"), Body: "// Totals each invoice from its lines.\ntrigger InvoiceTrigger on Invoice__c (before insert, before update) { }" },
   // Trap: a second trigger on the same custom object, by its 15-character id. With
   // the flow and Workflow Rule on Invoice__c, that's three tools and two triggers
   // on one object, which raw ids would split across three objects.
-  { Id: sfId("01q", 5), Name: "InvoiceAudit", TableEnumOrId: sfId("01I", 1).slice(0, 15), ApiVersion: 62, Status: "Active", Body: "// Records who changed an invoice's total.\ntrigger InvoiceAudit on Invoice__c (after update) { }" },
+  { Id: sfId("01q", 5), Name: "InvoiceAudit", TableEnumOrId: sfId("01I", 1).slice(0, 15), ApiVersion: 62, Status: "Active", ...usage("AfterUpdate"), Body: "// Records who changed an invoice's total.\ntrigger InvoiceAudit on Invoice__c (after update) { }" },
 ];
 
 export const ORG_COVERAGE = [{ PercentCovered: 82 }];
