@@ -19,7 +19,7 @@ export type DriveConfig = {
   subject: string | null;
 };
 
-export type DriveItem = { id: string; name: string; url: string };
+export type DriveItem = { id: string; name: string; url: string; /** When Drive says it was created, if it said. */ createdAt?: string };
 
 /** What the documents job needs from Drive, so tests can stand in for it. */
 export interface DocumentDrive {
@@ -31,6 +31,8 @@ export interface DocumentDrive {
   createFolder(parentId: string, name: string): Promise<DriveItem>;
   /** Uploads a file, or new contents for `replaceId`. */
   putFile(parentId: string, name: string, mimeType: string, body: Buffer, replaceId?: string): Promise<DriveItem>;
+  /** Moves a file to another folder. Its id, and so any link to it, stays the same. */
+  moveFile(id: string, fromParentId: string, toParentId: string): Promise<void>;
 }
 
 export class DriveError extends Error {
@@ -44,11 +46,14 @@ const API = "https://www.googleapis.com/drive/v3/files";
 const UPLOAD = "https://www.googleapis.com/upload/drive/v3/files";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const FOLDER = "application/vnd.google-apps.folder";
-const FIELDS = "id,name,webViewLink";
+const FIELDS = "id,name,webViewLink,createdTime";
 // Shared drives need these on every call; they do nothing elsewhere.
 const ALL_DRIVES = "supportsAllDrives=true";
 // Drive ids are letters, digits, - and _. Checked before one goes into a query.
 const DRIVE_ID = /^[A-Za-z0-9_-]{10,200}$/;
+
+type DriveFile = { id: string; name: string; webViewLink: string; createdTime?: string };
+const item = (f: DriveFile): DriveItem => ({ id: f.id, name: f.name, url: f.webViewLink, ...(f.createdTime ? { createdAt: f.createdTime } : {}) });
 
 const base64url = (input: string | Buffer): string => Buffer.from(input).toString("base64url");
 
@@ -146,8 +151,8 @@ export class GoogleDrive implements DocumentDrive {
         supportsAllDrives: "true",
         ...(page ? { pageToken: page } : {}),
       });
-      const body = await this.#json<{ files: Array<{ id: string; name: string; webViewLink: string }>; nextPageToken?: string }>(`${API}?${params}`, undefined, parentId);
-      items.push(...body.files.map((f) => ({ id: f.id, name: f.name, url: f.webViewLink })));
+      const body = await this.#json<{ files: DriveFile[]; nextPageToken?: string }>(`${API}?${params}`, undefined, parentId);
+      items.push(...body.files.map(item));
       page = body.nextPageToken;
     } while (page);
     return items;
@@ -162,12 +167,12 @@ export class GoogleDrive implements DocumentDrive {
   }
 
   async createFolder(parentId: string, name: string): Promise<DriveItem> {
-    const f = await this.#json<{ id: string; name: string; webViewLink: string }>(`${API}?${ALL_DRIVES}&fields=${FIELDS}`, {
+    const f = await this.#json<DriveFile>(`${API}?${ALL_DRIVES}&fields=${FIELDS}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, mimeType: FOLDER, parents: [parentId] }),
     });
-    return { id: f.id, name: f.name, url: f.webViewLink };
+    return item(f);
   }
 
   async putFile(parentId: string, name: string, mimeType: string, body: Buffer, replaceId?: string): Promise<DriveItem> {
@@ -186,7 +191,11 @@ export class GoogleDrive implements DocumentDrive {
     if (!session.startsWith(`${UPLOAD}?`) && !session.startsWith(`${UPLOAD}/`)) throw new DriveError(`Google Drive gave an upload address the worker doesn't trust, for ${name}`);
     const done = await this.#call(session, { method: "PUT", headers: { "Content-Type": mimeType }, body: new Uint8Array(body) });
     if (done.status === 404) throw new DriveError(`Google Drive lost the upload of ${name}`);
-    const f = (await done.json()) as { id: string; name: string; webViewLink: string };
-    return { id: f.id, name: f.name, url: f.webViewLink };
+    return item((await done.json()) as DriveFile);
+  }
+
+  async moveFile(id: string, fromParentId: string, toParentId: string): Promise<void> {
+    if (![id, fromParentId, toParentId].every((x) => DRIVE_ID.test(x))) throw new DriveError("That isn't a Drive file id");
+    await this.#json(`${API}/${id}?${ALL_DRIVES}&addParents=${toParentId}&removeParents=${fromParentId}&fields=id`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: "{}" });
   }
 }

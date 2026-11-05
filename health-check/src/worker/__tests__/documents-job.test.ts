@@ -39,7 +39,7 @@ class MemoryDrive implements DocumentDrive {
   #next = 1;
   #add(parent: string, name: string, folder: boolean): DriveItem {
     const id = `drive-item-${String(this.#next++).padStart(4, "0")}`;
-    const item = { id, name, url: `https://drive.example.com/${id}`, parent, folder, uploads: 0 };
+    const item = { id, name, url: `https://drive.example.com/${id}`, parent, folder, uploads: 0, createdAt: "2026-11-04T18:00:00.000Z" };
     this.items.set(id, item);
     return item;
   }
@@ -60,6 +60,11 @@ class MemoryDrive implements DocumentDrive {
     const item = replaceId ? this.items.get(replaceId)! : (this.#add(parentId, name, false) as DriveItem & { uploads: number; bytes?: number });
     Object.assign(item, { name, bytes: body.length, uploads: (item as { uploads: number }).uploads + 1 });
     return item;
+  }
+  async moveFile(id: string, from: string, to: string) {
+    const item = this.items.get(id)!;
+    assert.equal(item.parent, from);
+    item.parent = to;
   }
   path(id: string): string {
     const parts: string[] = [];
@@ -129,17 +134,47 @@ describe("a documents job", () => {
     assert.equal((await drive.folders(drive.rootFolderId)).length, 1);
   });
 
-  test("made again, the run keeps its folder and each file keeps its id", async () => {
+  test("made again, the first make moves into Version 1, keeping its links, and the new one goes into Version 2", async () => {
     const drive = new MemoryDrive();
     const deps = setup(jobInput(), drive);
+    const doc = deps.store.documents.get(RUN_ID)!;
     await processDocumentsJob(RUN_ID, deps, { final: true });
-    const first = deps.store.documents.get(RUN_ID)!.made!;
-    deps.store.documents.get(RUN_ID)!.input.state = "queued";
-    assert.equal((await processDocumentsJob(RUN_ID, deps, { final: true })).outcome, "done");
-    const again = deps.store.documents.get(RUN_ID)!.made!;
+    const first = doc.made!;
+    doc.input.state = "queued";
+    const result = await processDocumentsJob(RUN_ID, deps, { final: true });
+    assert.equal(result.outcome, "done", result.detail);
+    const again = doc.made!;
+    // The run's folder and its link stay the same; the record points at the newest files.
     assert.equal(again.driveFolderId, first.driveFolderId);
-    assert.deepEqual(again.files.map((f) => f.driveFileId).sort(), first.files.map((f) => f.driveFileId).sort());
-    assert.ok(again.files.every((f) => (drive.items.get(f.driveFileId) as { uploads: number }).uploads === 2));
+    assert.equal(again.folderName, "Health check 1");
+    for (const f of first.files) assert.equal(drive.path(f.driveFileId), `Synthetic Co / Health check 1 / Version 1, 4 Nov 2026 / ${f.name}`);
+    for (const f of again.files) assert.match(drive.path(f.driveFileId), /^Synthetic Co \/ Health check 1 \/ Version 2, \d{1,2} [A-Z][a-z]{2} \d{4} \/ Synthetic Co - /);
+    assert.equal((await drive.files(first.driveFolderId)).length, 0, "nothing left loose in the run's folder");
+    // A third make adds Version 3 and leaves the others alone.
+    doc.input.state = "queued";
+    await processDocumentsJob(RUN_ID, deps, { final: true });
+    assert.deepEqual((await drive.folders(first.driveFolderId)).map((f) => f.name.split(",")[0]).sort(), ["Version 1", "Version 2", "Version 3"]);
+  });
+
+  test("a make that failed half way is finished by the retry, not started again in a new version", async () => {
+    const drive = new MemoryDrive();
+    const deps = setup(jobInput(), drive);
+    const doc = deps.store.documents.get(RUN_ID)!;
+    await processDocumentsJob(RUN_ID, deps, { final: true });
+    doc.input.state = "queued";
+    const put = drive.putFile.bind(drive);
+    let calls = 0;
+    drive.putFile = async (...args) => {
+      if (++calls === 2) throw new Error("Google Drive refused a request (503): backend error");
+      return put(...args);
+    };
+    await assert.rejects(processDocumentsJob(RUN_ID, deps, { final: false }), /503/);
+    drive.putFile = put;
+    assert.equal((await processDocumentsJob(RUN_ID, deps, { final: true })).outcome, "done");
+    const folders = (await drive.folders(doc.made!.driveFolderId)).map((f) => f.name.split(",")[0]).sort();
+    assert.deepEqual(folders, ["Version 1", "Version 2"]);
+    const v2 = (await drive.folders(doc.made!.driveFolderId)).find((f) => f.name.startsWith("Version 2"))!;
+    assert.equal((await drive.files(v2.id)).length, 3, "three files, none twice");
   });
 
   test("with its folder gone from Drive, the run gets the client's next number", async () => {
@@ -284,6 +319,15 @@ describe("GoogleDrive", () => {
     assert.equal(item.id, "file-0000000001");
     assert.match(calls[1]!.url, /fields=id%2Cname%2CwebViewLink|fields=id,name,webViewLink/);
     assert.equal((calls[1]!.init.headers as Record<string, string>)["X-Upload-Content-Length"], "5");
+  });
+
+  test("moves a file between folders in one request, keeping its id", async () => {
+    const { impl, calls } = fakeFetch([(url, init) => (url.startsWith("https://www.googleapis.com/drive/v3/files/file-0000000001?") && init.method === "PATCH" ? Response.json({ id: "file-0000000001" }) : undefined)]);
+    await new GoogleDrive(config, impl).moveFile("file-0000000001", "folder-0000000001", "folder-0000000002");
+    const move = new URL(calls[1]!.url);
+    assert.equal(move.searchParams.get("addParents"), "folder-0000000002");
+    assert.equal(move.searchParams.get("removeParents"), "folder-0000000001");
+    assert.equal(move.searchParams.get("supportsAllDrives"), "true");
   });
 
   test("won't send the token to an upload address that isn't Google's", async () => {

@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ReportOutputKey } from "../narrative/sections.ts";
+import { longDate } from "../render/format.ts";
 import { renderReleased } from "../render/render-released.ts";
 import { safeReason, type Attempt, type JobOutcome, type WorkerDeps } from "./deps.ts";
 import type { DocumentDrive, DriveItem } from "./drive.ts";
@@ -13,8 +14,8 @@ import type { DocumentFile, DocumentsJobInput } from "./types.ts";
 //   Health checks / <client> / Health check <n> / <client> - Executive summary.pdf
 //
 // The number counts that client's health checks. A run made again goes back to
-// the folder it had, and each file is replaced in place, so a link someone
-// already has keeps working. The documents hold real names, so they're printed
+// the folder it had, with each make in its own numbered version folder inside it
+// (versionFolderFor). The documents hold real names, so they're printed
 // in the run folder on the worker's disk and go only to Drive. What the console
 // is told holds no names beyond the client's, which it already has.
 
@@ -46,6 +47,40 @@ export async function folderFor(drive: DocumentDrive, clientName: string, earlie
   return drive.createFolder(client.id, `Health check ${Math.max(0, ...taken) + 1}`);
 }
 
+const VERSION = /^Version (\d+)\b/;
+
+/**
+ * Where this make's files go. The first time, straight into the run's folder.
+ * Made again, the earlier files move into "Version 1, <date>" (a move keeps a
+ * file's id, so links already sent still work) and the new ones go into the
+ * next numbered version. A version folder holding none of the last make's files
+ * is one a failed attempt started, so a retry finishes it rather than starting
+ * another.
+ */
+export async function versionFolderFor(drive: DocumentDrive, folder: DriveItem, previous: DocumentFile[], now: string): Promise<DriveItem> {
+  if (previous.length === 0) return folder;
+  const ids = new Set(previous.map((f) => f.driveFileId));
+  const versions = (await drive.folders(folder.id))
+    .map((f) => ({ folder: f, n: Number(VERSION.exec(f.name.trim())?.[1] ?? 0) }))
+    .filter((v) => v.n > 0)
+    .sort((a, b) => a.n - b.n);
+  const loose = (await drive.files(folder.id)).filter((f) => ids.has(f.id));
+  if (loose.length > 0) {
+    const made = loose.map((f) => f.createdAt).filter((d): d is string => Boolean(d)).sort()[0];
+    let first = versions.find((v) => v.n === 1)?.folder;
+    if (!first) {
+      first = await drive.createFolder(folder.id, made ? `Version 1, ${longDate(made.slice(0, 10))}` : "Version 1");
+      versions.unshift({ folder: first, n: 1 });
+    }
+    for (const f of loose) await drive.moveFile(f.id, folder.id, first.id);
+  }
+  const last = versions.at(-1);
+  // The last make's files have gone from Drive altogether: start again in the run's folder.
+  if (!last) return folder;
+  if (!(await drive.files(last.folder.id)).some((f) => ids.has(f.id))) return last.folder;
+  return drive.createFolder(folder.id, `Version ${last.n + 1}, ${longDate(now.slice(0, 10))}`);
+}
+
 export async function processDocumentsJob(runId: string, deps: WorkerDeps, attempt: Attempt): Promise<JobOutcome> {
   if (!RUN_ID.test(runId)) return { outcome: "failed", detail: "The run id isn't one the worker can use as a folder name" };
   // The run's own lock: a run job for it can't be writing its folder meanwhile.
@@ -74,7 +109,8 @@ async function documentsLocked(runId: string, deps: WorkerDeps, attempt: Attempt
     const clientName = clientNameOf(input);
     const printed = await (deps.renderReleased ?? renderReleased)(dir, input, join(dir, "documents"));
     const folder = await folderFor(deps.drive, clientName, input.driveFolderId);
-    const existing = await deps.drive.files(folder.id);
+    const target = await versionFolderFor(deps.drive, folder, input.files, now());
+    const existing = await deps.drive.files(target.id);
     const files: DocumentFile[] = [];
     for (const output of Object.keys(FILES) as ReportOutputKey[]) {
       const { title, ext, mime } = FILES[output];
@@ -82,15 +118,15 @@ async function documentsLocked(runId: string, deps: WorkerDeps, attempt: Attempt
       // Ours from last time, or one of the same name someone put there.
       const ours = input.files.find((f) => f.output === output)?.driveFileId;
       const replaceId = existing.find((e) => e.id === ours)?.id ?? existing.find((e) => e.name === name)?.id;
-      const item = await deps.drive.putFile(folder.id, name, mime, readFileSync(printed.files[output]), replaceId);
+      const item = await deps.drive.putFile(target.id, name, mime, readFileSync(printed.files[output]), replaceId);
       files.push({ output, name: item.name, driveFileId: item.id, url: item.url });
     }
     await deps.store.saveDocuments(runId, { at: now(), clientName, folderName: folder.name, driveFolderId: folder.id, driveFolderUrl: folder.url, files, warnings: printed.warnings });
     log(`Documents for ${runId} are in Drive${printed.warnings.length ? `, with ${printed.warnings.length} layout warnings` : ""}.`);
-    return { outcome: "done", detail: `${files.length} documents in ${folder.name}` };
+    return { outcome: "done", detail: `${files.length} documents in ${folder.name}${target.id === folder.id ? "" : ` / ${target.name}`}` };
   } catch (err) {
     const reason = safeReason(err);
-    // Printing and uploading again is safe: the folder and files are reused.
+    // Printing and uploading again is safe: the folders and files are reused.
     if (!attempt.final) throw new Error(reason);
     return fail(`The documents couldn't be made: ${reason}`);
   }
