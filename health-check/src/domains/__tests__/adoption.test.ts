@@ -10,7 +10,7 @@ import { Pseudonymiser, type PseudonymEntry } from "../../privacy/pseudonymiser.
 import { renderRawNotesDocx } from "../../render/raw-notes-docx.ts";
 import { noteSections } from "../../render/references.ts";
 import type { Finding, Metric } from "../../schemas/index.ts";
-import { analyseExtracts, clone, loadExtracts, runFromRecording } from "../../testing/harness.ts";
+import { analyseExtracts, clone, loadExtracts, runFromRecording, WINDOW } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
 import { AS_OF, userId } from "../../testing/synthetic-org.ts";
 import { ADOPTION_METRIC_IDS, coveredMonths } from "../adoption/index.ts";
@@ -121,6 +121,47 @@ describe("adoption stays quiet on clean data", () => {
 });
 
 describe("adoption is not measurable when the data can't support it", () => {
+  test("login history holding one person's logins is not the whole org's (QUESTIONS.md 55)", () => {
+    const changed = change<Sourced<LoginActivity>>(LOGINS, (l) => (l.data.days = { [userId(1)]: l.data.days[userId(1)]! }));
+    const { findings, metrics } = analyseExtracts(changed);
+    for (const id of ["adp.falling-adoption", "adp.low-engagement-group"]) {
+      const f = one(findings, id);
+      assert.equal(f.status, "not_measurable", id);
+      assert.match(f.summary, /logins for 1 of the \d+ people .*can probably see only its own logins.*Monitor Login History/);
+    }
+    for (const id of ["adoption.daily_active_users", "adoption.weekly_active_users", "adoption.monthly_active_users", "adoption.monthly_active_share", "adoption.mobile_login_share"]) {
+      const m = metric(metrics, id);
+      assert.equal(m.status, "not_measurable", id);
+      assert.match(m.status === "not_measurable" ? m.reason : "", /Monitor Login History/);
+    }
+    // The Lightning setting and reports don't come from the login history.
+    valueOf(metric(metrics, "adoption.lightning_share"));
+  });
+
+  test("history covering half the people who logged in is enough", () => {
+    const users = (extracts.get(usersExtractor.id) as Sourced<UserRow[]>).data;
+    const from = new Date(WINDOW.from);
+    const loggedIn = users.filter((u) => u.IsActive && u.LastLoginDate && new Date(u.LastLoginDate.replace(/\+0000$/, "Z")) >= from);
+    const days = (extracts.get(LOGINS) as Sourced<LoginActivity>).data.days;
+    assert.ok(loggedIn.filter((u) => days[u.Id]).length * 2 >= loggedIn.length);
+    assert.equal(one(output!.findings, "adp.falling-adoption").status, "issue");
+  });
+
+  test("a Lightning setting empty for everyone is not measurable, never 0% (QUESTIONS.md 56)", () => {
+    const changed = change<Sourced<UserRow[]>>(usersExtractor.id, (u) => u.data.forEach((row) => ((row as { UserPreferencesLightningExperiencePreferred?: boolean | null }).UserPreferencesLightningExperiencePreferred = null)));
+    const { findings, metrics } = analyseExtracts(changed);
+    assert.equal(metric(metrics, "adoption.lightning_share").status, "not_measurable");
+    assert.equal(one(findings, "adp.classic-users").status, "not_measurable");
+  });
+
+  test("users whose setting is empty are left out, not counted as Classic", () => {
+    const changed = change<Sourced<UserRow[]>>(usersExtractor.id, (u) => u.data.filter((row) => row.UserPreferencesLightningExperiencePreferred === true).slice(0, 2).forEach((row) => ((row as { UserPreferencesLightningExperiencePreferred?: boolean | null }).UserPreferencesLightningExperiencePreferred = null)));
+    const m = metric(analyseExtracts(changed).metrics, "adoption.lightning_share") as Extract<Metric, { status: "measured" }>;
+    assert.equal(m.n, 10);
+    assert.equal(m.value, 80);
+    assert.ok(m.exclusions.some((e) => /2 users whose setting couldn't be read/.test(e)));
+  });
+
   test("no login history: the login rules and metrics say why", () => {
     const changed = clone(extracts);
     changed.set(LOGINS, gone);

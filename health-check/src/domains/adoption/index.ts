@@ -81,6 +81,20 @@ function groupsOf(users: UserRow[]): Group[] {
 /** Distinct people with a login on any of these days. */
 const activeOn = (activity: LoginActivity, users: UserRow[], days: (day: string) => boolean): number => users.filter((u) => (activity.days[u.Id] ?? []).some(days)).length;
 
+/**
+ * QUESTIONS.md 55: without Monitor Login History, the connection sees only its
+ * own logins, and everyone else would look inactive. When fewer than half the
+ * people Salesforce says logged in during the window have a login in the
+ * history, it isn't the whole org's, and nothing is built from it.
+ */
+export function partialHistory(users: UserRow[], activity: LoginActivity): string | null {
+  const from = new Date(`${activity.from}T00:00:00Z`);
+  const expected = users.filter((u) => u.LastLoginDate && new Date(u.LastLoginDate.replace(/\+0000$/, "Z")) >= from).length;
+  const seen = users.filter((u) => activity.days[u.Id]).length;
+  if (expected === 0 || seen * 2 >= expected) return null;
+  return `The login history shows logins for ${seen} of the ${expected} people who logged in during the window, so the connection can probably see only its own logins. Give the connected user the Monitor Login History permission, then run the check again.`;
+}
+
 type Loaded = { status: "ok"; users: UserRow[]; activity: LoginActivity; evidence: Evidence[] } | { status: "not_measurable"; reason: string; evidence: Evidence[] };
 
 function load(ctx: Ctx): Loaded {
@@ -89,8 +103,13 @@ function load(ctx: Ctx): Loaded {
   const evidence = [ctx.ev(users.source, { count: users.status === "ok" ? users.data.length : null }), ctx.ev(logins.source, { count: logins.status === "ok" ? logins.data.rowsRead : null, ...(logins.status === "ok" ? { dateRange: { from: logins.data.from, to: ctx.window.to } } : {}) })];
   if (users.status !== "ok") return { status: "not_measurable", reason: `Users couldn't be read: ${users.reason}`, evidence };
   if (logins.status !== "ok") return { status: "not_measurable", reason: `Login history couldn't be read: ${logins.reason}`, evidence };
-  return { status: "ok", users: people(ctx, users.data), activity: logins.data, evidence };
+  const who = people(ctx, users.data);
+  const partial = partialHistory(who, logins.data);
+  if (partial) return { status: "not_measurable", reason: partial, evidence };
+  return { status: "ok", users: who, activity: logins.data, evidence };
 }
+
+const knowsLightning = (u: UserRow): boolean => typeof u.UserPreferencesLightningExperiencePreferred === "boolean";
 
 // ─── Metrics ─────────────────────────────────────────────────────────────────
 
@@ -171,11 +190,11 @@ function activeMetrics(ctx: Ctx, data: Extract<Loaded, { status: "ok" }>): Metri
   return out;
 }
 
-function channelMetric(ctx: Ctx): Metric {
-  const logins = ctx.data(loginActivityExtractor);
-  const evidence = [ctx.ev(logins.source, { count: logins.status === "ok" ? logins.data.rowsRead : null })];
-  if (logins.status !== "ok") return notMeasurable(DEF.channels, evidence, `Login history couldn't be read: ${logins.reason}`);
-  const { channels, channelFields } = logins.data;
+function channelMetric(data: Loaded): Metric {
+  const { evidence } = data;
+  // Someone else's logins only would make the split theirs, not the org's.
+  if (data.status !== "ok") return notMeasurable(DEF.channels, evidence, data.reason);
+  const { channels, channelFields } = data.activity;
   const total = Object.values(channels).reduce((a, b) => a + b, 0);
   if (total === 0) return notMeasurable(DEF.channels, evidence, "There are no successful logins in the login history.");
   // Without these, a mobile login would read as "other", so the share would look smaller than it is.
@@ -204,11 +223,15 @@ function lightningMetric(ctx: Ctx): Metric {
   const evidence = [ctx.ev(users.source, { count: users.status === "ok" ? users.data.length : null })];
   if (users.status !== "ok") return notMeasurable(DEF.lightning, evidence, `Users couldn't be read: ${users.reason}`);
   if (users.missingFields?.includes("UserPreferencesLightningExperiencePreferred")) return notMeasurable(DEF.lightning, evidence, "The user's Lightning Experience setting couldn't be read in this org.");
-  const who = people(ctx, users.data);
-  if (who.length === 0) return notMeasurable(DEF.lightning, evidence, "There are no active users to count.");
+  const everyone = people(ctx, users.data);
+  if (everyone.length === 0) return notMeasurable(DEF.lightning, evidence, "There are no active users to count.");
+  // QUESTIONS.md 56: a setting we can't read is left out, never counted as Classic.
+  const who = everyone.filter(knowsLightning);
+  if (who.length === 0) return notMeasurable(DEF.lightning, evidence, "The Lightning Experience setting came back empty for every user, so it can't be read for other users with this connection.");
   const on = (list: UserRow[]): number => list.filter((u) => u.UserPreferencesLightningExperiencePreferred === true).length;
   const profiles = groupsOf(who).filter((g) => g.dimension === "profile");
-  return measured(DEF.lightning, evidence, pct(on(who), who.length), who.length, profiles.map((g) => groupSegment(g, pct(on(g.users), g.users.length))));
+  const unread = everyone.length - who.length;
+  return measured(DEF.lightning, evidence, pct(on(who), who.length), who.length, profiles.map((g) => groupSegment(g, pct(on(g.users), g.users.length))), unread ? { exclusions: [...EXCLUSIONS, `${plural(unread, "user")} whose setting couldn't be read`] } : {});
 }
 
 function reportsMetric(ctx: Ctx): Metric {
@@ -235,7 +258,7 @@ export function adoptionMetrics(ctx: Ctx): Metric[] {
   if (gate) return Object.values(DEF).map((d) => notMeasurable(d, [ctx.ev(ctx.data(usersExtractor).source, { count: null })], gate));
   const data = load(ctx);
   const active = data.status === "ok" ? activeMetrics(ctx, data) : [DEF.daily, DEF.weekly, DEF.monthly, DEF.share].map((d) => notMeasurable(d, data.evidence, data.reason));
-  return [...active, channelMetric(ctx), lightningMetric(ctx), reportsMetric(ctx)];
+  return [...active, channelMetric(data), lightningMetric(ctx), reportsMetric(ctx)];
 }
 
 // ─── Rules ───────────────────────────────────────────────────────────────────
@@ -348,11 +371,14 @@ const classicUsers: Rule = {
     const evidence = [ctx.ev(users.source, { count: users.status === "ok" ? users.data.length : null })];
     if (users.status !== "ok") return { outcome: "not_measurable", reason: `Users couldn't be read: ${users.reason}`, evidence };
     if (users.missingFields?.includes("UserPreferencesLightningExperiencePreferred")) return { outcome: "not_measurable", reason: "The user's Lightning Experience setting couldn't be read in this org.", evidence };
-    const who = people(ctx, users.data);
+    const everyone = people(ctx, users.data);
+    const who = everyone.filter(knowsLightning);
+    if (who.length === 0) return { outcome: "not_measurable", reason: "The Lightning Experience setting came back empty for every user, so it can't be read for other users with this connection.", evidence };
     const classic = who.filter((u) => u.UserPreferencesLightningExperiencePreferred === false);
     const profiles = new Set(who.map(profileOf)).size;
     const segments = [{ dimension: "profile", segments: profiles }];
-    if (classic.length === 0) return { outcome: "pass", summary: `All ${plural(who.length, "active user")} are set to use Lightning Experience.`, evidence, segmentsChecked: segments };
+    const unread = everyone.length - who.length;
+    if (classic.length === 0) return { outcome: "pass", summary: `All ${plural(who.length, "active user")}${unread ? ` whose setting we could read` : ""} are set to use Lightning Experience.${unread ? ` The setting couldn't be read for ${plural(unread, "user")}.` : ""}`, evidence, segmentsChecked: segments };
     const share = pct(classic.length, who.length);
     const byProfile = [...new Set(classic.map(profileOf))].sort().map((p) => `${p} (${classic.filter((u) => profileOf(u) === p).length})`);
     return {
