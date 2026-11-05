@@ -124,6 +124,9 @@ const DEF = {
   reports: { id: "adoption.reports_run_recently", label: "Reports run recently", unit: "percent", definition: `Reports run in the last ${REPORT_RECENT_DAYS} days, as a share of all reports we can see.` },
 } satisfies Record<string, Definition>;
 
+/** Segments of the monthly metric holding the group that fell most, one per month, filed under this and the group's name. */
+export const FELL_MOST = "fell most: ";
+
 export const ADOPTION_METRIC_IDS = Object.values(DEF).map((d) => d.id);
 
 const EXCLUSIONS = ["Inactive users", "Shared, system, integration and test accounts, as the calibration marks them", "Users on integration licences", "API sessions", "Failed logins"];
@@ -183,8 +186,19 @@ function activeMetrics(ctx: Ctx, data: Extract<Loaded, { status: "ok" }>): Metri
   const series: SeriesPoint[] = months.map((month) => ({ date: `${month}-01`, value: activeOn(activity, users, inMonth(month)), n: users.length, notMeasurableReason: null }));
   const mau = activeOn(activity, users, inMonth(last));
   const coverage = [`The login history covers ${plural(months.length, "whole month")}, from ${months[0]}-01${activity.truncated ? ". The read reached its cap, so older months were left out" : ""}`];
+  // The group that fell furthest from its peak, month by month, so a chart can set it beside the org's line.
+  const steepest = groups
+    .filter((g) => g.users.length >= MIN_GROUP && months.length > 1)
+    .map((g) => {
+      const counts = months.map((month) => activeOn(activity, g.users, inMonth(month)));
+      const peak = Math.max(...counts.slice(0, -1));
+      return { g, counts, drop: peak >= MIN_GROUP ? pct(peak - counts.at(-1)!, peak) : 0 };
+    })
+    .filter((x) => x.drop > 0)
+    .sort((a, b) => b.drop - a.drop || a.g.dimension.localeCompare(b.g.dimension) || a.g.key.localeCompare(b.g.key))[0];
+  const fell = steepest ? months.map((month, i) => ({ dimension: `${FELL_MOST}${steepest.g.dimension} ${steepest.g.key}`, key: month, n: steepest.g.users.length, value: steepest.counts[i]!, notMeasurableReason: null })) : [];
   out.push(
-    measured(DEF.monthly, evidence, mau, users.length, groups.map((g) => groupSegment(g, activeOn(activity, g.users, inMonth(last)))), { series, assumptions: [...coverage, "Months are calendar months in UTC"], stats: { months: months.length } }),
+    measured(DEF.monthly, evidence, mau, users.length, [...groups.map((g) => groupSegment(g, activeOn(activity, g.users, inMonth(last)))), ...fell], { series, assumptions: [...coverage, "Months are calendar months in UTC"], stats: { months: months.length, ...(steepest ? { steepestDrop: steepest.drop } : {}) } }),
     measured(DEF.share, evidence, pct(mau, users.length), users.length, groups.map((g) => groupSegment(g, pct(activeOn(activity, g.users, inMonth(last)), g.users.length))), { assumptions: coverage, stats: { activeUsers: users.length } }),
   );
   return out;
@@ -231,7 +245,9 @@ function lightningMetric(ctx: Ctx): Metric {
   const on = (list: UserRow[]): number => list.filter((u) => u.UserPreferencesLightningExperiencePreferred === true).length;
   const profiles = groupsOf(who).filter((g) => g.dimension === "profile");
   const unread = everyone.length - who.length;
-  return measured(DEF.lightning, evidence, pct(on(who), who.length), who.length, profiles.map((g) => groupSegment(g, pct(on(g.users), g.users.length))), unread ? { exclusions: [...EXCLUSIONS, `${plural(unread, "user")} whose setting couldn't be read`] } : {});
+  const classic = who.length - on(who);
+  const stats = { lightning: on(who), classic, classicShare: pct(classic, who.length) };
+  return measured(DEF.lightning, evidence, pct(on(who), who.length), who.length, profiles.map((g) => groupSegment(g, pct(on(g.users), g.users.length))), unread ? { stats, exclusions: [...EXCLUSIONS, `${plural(unread, "user")} whose setting couldn't be read`] } : { stats });
 }
 
 function reportsMetric(ctx: Ctx): Metric {

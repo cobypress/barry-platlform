@@ -213,10 +213,11 @@ describe("in the reports", () => {
     assert.match(text, / From +Prospecting +Qualified +Discovery +Proposal +Negotiation +Closed Won/);
   });
 
-  test("the full report has a slide with both paths and the moves", () => {
+  test("the full report has a slide with both paths and the moves as a flow", () => {
     const html = fullReportHtml(report, pseudonyms);
     assert.match(html, /How your sales process really runs/);
-    assert.match(html, /Moves from each stage to the next/);
+    assert.match(html, /Moves between stages/);
+    assert.match(html, /data-chart="process-flow"/);
     assert.match(html, /Prospecting &gt; Discovery &gt; Proposal &gt; Negotiation &gt; Closed Won|Prospecting > Discovery > Proposal > Negotiation > Closed Won/);
   });
 
@@ -226,7 +227,7 @@ describe("in the reports", () => {
     e.history = { status: "unavailable", reason: "INSUFFICIENT_ACCESS: no", source: e.history.source };
     const out = analyseExtracts(changed);
     const html = fullReportHtml(buildReport({ run, calibration, findings: out.findings, metrics: out.metrics, manualSteps: out.manualSteps, intake: null }), pseudonyms);
-    assert.doesNotMatch(html, /Moves from each stage to the next/);
+    assert.doesNotMatch(html, /data-chart="process-flow"/);
     assert.match(html, /How your sales process really runs/);
   });
 });

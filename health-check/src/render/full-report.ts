@@ -3,7 +3,7 @@ import { areasOf, buildPlan, domainLabel, isSetupReview, issuesOf, recordAreasLi
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { canRelease, type Finding, type Metric, type Run } from "../schemas/index.ts";
 import { INVENTORY_COLUMNS, inventoryRows, OBJECT_INVENTORY } from "../domains/configuration/inventory.ts";
-import { closedAsChart, deliveryOutlookChart, HALF_WIDTH, lostByStageChart, pipelineOverTime, scorecardChart, stageFunnel, stageVelocityChart, topAccountsChart, winRateBySegment, winsByCustomerChart, wonValueByChart } from "./charts.ts";
+import { activeUsersChart, lightningChart, loginChannelsChart, processFlowChart, scorecardOptions, type Chart, closedAsChart, deliveryOutlookChart, HALF_WIDTH, lostByStageChart, pipelineOverTime, scorecardChart, stageFunnel, stageVelocityChart, topAccountsChart, winRateBySegment, winsByCustomerChart, wonValueByChart } from "./charts.ts";
 import { compactMoney, longDate, monthYear, percent } from "./format.ts";
 import type { Calibration } from "../schemas/index.ts";
 import { chartSlot, coverScore, document, documentTitle, effortText, estimateLines, paginate, paragraphs, renderContext, severityChip, valueFigure, valueText, type Render } from "./html.ts";
@@ -13,7 +13,6 @@ import { COMPARE_CSS, compareSlide } from "./compare.ts";
 import { MONEY_CSS, moneyPage } from "./money.ts";
 import { CHAPTER_CSS, chapterSlide } from "./chapter.ts";
 import { PROGRESS_CSS, progressPage } from "./progress.ts";
-import { transitionMatrix } from "../domains/historic-pipeline/process.ts";
 import { DOCUMENTED, DOCUMENTED_METRIC_IDS, readDocument } from "../domains/configuration/documented.ts";
 import { accessBlock, automationTable, dataModelDiagram, DIAGRAM_KEY, hasDocument, integrationsBlock, objectsTable, SLIDE_ROWS, sharingTable } from "./documented.ts";
 
@@ -91,6 +90,9 @@ h3.cap { font-size: 15px; font-weight: 600; color: var(--muted); margin: 0 0 6px
 .three-text .definition { break-inside: avoid; margin-bottom: 8px; font-size: 12px; line-height: 1.32; }
 .compact-rows table.grid { font-size: 13px; line-height: 1.3; }
 .compact-rows table.grid td, .compact-rows table.grid th { padding: 4px 7px; }
+.process { display: grid; grid-template-columns: 300px 1fr; gap: 22px; align-items: start; }
+.process .paths .stat { margin-bottom: 12px; }
+.chart-pair .stack figure + figure { margin-top: 14px; }
 .doc-cols { display: grid; gap: 24px; align-items: start; font-size: 12.5px; line-height: 1.35; }
 .doc-cols h3 { font-size: 15px; font-weight: 600; margin: 0 0 6px; }
 .doc-cols h3.cap { font-size: 12.5px; margin: 8px 0 2px; }
@@ -347,6 +349,15 @@ function closeDatesSlide(r: Render, metric: (id: string) => Metric | undefined, 
 
 /** The close: what we'd do next, together. Its only figures are the plan's own. */
 /** The paths deals most often take, and every move between stages as a table. */
+/** Adoption's charts, after its "At a glance" slide. Empty when none could be drawn. */
+function adoptionSlide(r: Render, metric: (id: string) => Metric | undefined): string {
+  const charts = [activeUsersChart(metric("adoption.monthly_active_users")), loginChannelsChart(metric("adoption.mobile_login_share")), lightningChart(metric("adoption.lightning_share"))];
+  if (charts.every((c) => c.kind === "gap")) return "";
+  const [active, channels, lightning] = charts as [Chart, Chart, Chart];
+  const refs = `${r.ref("adoption.monthly_active_users")}`;
+  return `<div class="eyebrow">Adoption and usage</div><h2>Who uses Salesforce, and how${refs}</h2><div class="chart-pair"><div>${chartSlot(active)}</div><div class="stack">${chartSlot(channels)}${chartSlot(lightning)}</div></div>`;
+}
+
 function processSlide(r: Render, metric: (id: string) => Metric | undefined, calibration: Calibration): Slide {
   const head = `<div class="eyebrow">Pipeline</div><h2>How your sales process really runs</h2>`;
   const path = (id: string, noun: string): string => {
@@ -354,14 +365,14 @@ function processSlide(r: Render, metric: (id: string) => Metric | undefined, cal
     if (!m) return `<div class="stat"><h3 class="cap">${r.t(metric(id)?.label ?? id)}</h3>${notMeasured(r, metric(id))}</div>`;
     return `<div class="stat"><h3 class="cap">${r.t(m.label)}${r.ref(m.id)}</h3><p style="font-size:20px;margin:6px 0">${r.t(m.segments[0]!.key)}</p><span>${percent(m.value)} of ${m.n} ${noun}</span></div>`;
   };
-  const moves = asMeasured(metric("historic.stage_transitions"));
-  let table = notMeasured(r, metric("historic.stage_transitions"));
-  if (moves) {
-    const { from, to, count } = transitionMatrix(moves, calibration);
-    const rows = from.map((f) => `<tr><td>${r.t(f)}</td>${to.map((t) => `<td class="num">${count(f, t) ?? ""}</td>`).join("")}</tr>`);
-    table = `<h3 class="cap" style="margin-top:14px">Moves from each stage to the next${r.ref(moves.id)}</h3><table class="grid data"><thead><tr><th>From</th>${to.map((t) => `<th class="num">${r.t(t)}</th>`).join("")}</tr></thead><tbody>${rows.join("")}</tbody></table>`;
-  }
-  return { classes: "tight compact-rows", html: `${head}<div class="stat-row">${path("historic.path_to_won", "won deals")}${path("historic.path_to_lost", "lost and no decision deals")}</div>${table}` };
+  // The flow takes the room. The table of every move is in the raw notes.
+  const moves = metric("historic.stage_transitions");
+  const stages = calibration.stages
+    .filter((s) => s.category !== "excluded")
+    .sort((a, b) => (a.order ?? 99) - (b.order ?? 99))
+    .map((s) => ({ name: s.name, category: s.category === "open" ? ("open" as const) : s.category === "won" ? ("won" as const) : ("lost" as const) }));
+  const flow = `<h3 class="cap">Moves between stages${r.ref("historic.stage_transitions")}</h3>${chartSlot(processFlowChart(moves, stages))}`;
+  return { classes: "tight compact-rows", html: `${head}<div class="process"><div class="paths">${path("historic.path_to_won", "won deals")}${path("historic.path_to_lost", "lost and no decision deals")}</div><div>${flow}</div></div>` };
 }
 
 function nextStepsSlide(r: Render, plan: ReturnType<typeof buildPlan>["phases"]): Slide {
@@ -621,7 +632,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   const worth = moneyPage(r, report, "slide");
   if (worth) add(worth, "tight");
 
-  add(`<div class="eyebrow">Scorecard</div><h2>How each area stands</h2>${scoreLine(report) ? `<p class="lede">${r.t(scoreLine(report, true))}</p>` : ""}<div class="chart-wrap" style="max-width:${scoreLine(report) ? 760 : 880}px">${chartSlot(scorecardChart(scorecard(team, scores, domains)))}</div>`);
+  add(`<div class="eyebrow">Scorecard</div><h2>How each area stands</h2>${scoreLine(report) ? `<p class="lede">${r.t(scoreLine(report, true))}</p>` : ""}<div class="chart-wrap" style="max-width:${scoreLine(report) ? 760 : 880}px">${chartSlot(scorecardChart(scorecard(team, scores, domains), scorecardOptions(report)))}</div>`);
 
   if (comparable) slides.push(compareSlide(r, compared));
 
@@ -651,6 +662,8 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
     // Each area opens the same way. The tightest densities drop it to keep the deck in range.
     const glance = density && !density.domainSummary ? chapterSlide(r, report, domain) : "";
     if (glance) add(glance, "tight");
+    const usage = glance && domain === "adoption" ? adoptionSlide(r, metric) : "";
+    if (usage) add(usage, "tight");
     slides.push(...(density ? domainIssueSlides(r, label, issues, density) : issueTable(r, label, issues)));
     if (domain === inventoryHome && inventoryWorthShowing) slides.push(inventorySlide(r, label, metric(OBJECT_INVENTORY)));
   }
