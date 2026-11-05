@@ -37,12 +37,11 @@ const FILES: Record<Exclude<DocumentKey, "readout_kit">, { title: string; ext: s
 };
 
 /**
- * The files the console's documents card can take today: its DocumentFile
- * accepts the report's three outputs only, and a fourth key would make it
- * refuse the whole row. The one-pager is in Drive either way. Add it here once
- * the console accepts "ceo_one_pager" (DECISIONS.md 139).
+ * The files the console's documents card lists: the three reviewed outputs and
+ * the one page summary, which its DocumentOutput accepts (blackcloud-next 52efbf6,
+ * DECISIONS.md 139). The readout kit is never listed: it's for Black Cloud only.
  */
-const LISTED_TO_CONSOLE: ReadonlySet<DocumentKey> = new Set<DocumentKey>(["executive_summary", "full_health_check", "raw_notes"]);
+const LISTED_TO_CONSOLE: ReadonlySet<DocumentKey> = new Set<DocumentKey>(["executive_summary", "full_health_check", "raw_notes", "ceo_one_pager"]);
 
 /**
  * Black Cloud's own folder for readout kits, beside the clients' folders, never
@@ -211,7 +210,7 @@ async function documentsLocked(runId: string, deps: WorkerDeps, attempt: Attempt
       const ours = input.files.find((f) => f.output === output)?.driveFileId;
       const replaceId = existing.find((e) => e.id === ours)?.id ?? existing.find((e) => e.name === name)?.id;
       const item = await deps.drive.putFile(target.id, name, mime, readFileSync(printed.files[output]), replaceId);
-      if (LISTED_TO_CONSOLE.has(output)) files.push({ output: output as ReportOutputKey, name: item.name, driveFileId: item.id, url: item.url });
+      if (LISTED_TO_CONSOLE.has(output)) files.push({ output: output as DocumentFile["output"], name: item.name, driveFileId: item.id, url: item.url });
     }
     await putReadoutKit(deps.drive, clientName, folder.name, printed.files.readout_kit);
     await deps.store.saveDocuments(runId, { at: now(), clientName, folderName: folder.name, driveFolderId: folder.id, driveFolderUrl: folder.url, files, warnings: printed.warnings });

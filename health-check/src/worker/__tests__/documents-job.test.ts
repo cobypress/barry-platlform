@@ -110,7 +110,7 @@ function setup(input: DocumentsJobInput = jobInput(), drive: DocumentDrive | nul
 }
 
 describe("a documents job", () => {
-  test("puts the three documents in Health checks / client / Health check 1, and tells the console", async () => {
+  test("puts the documents in Health checks / client / Health check 1, and tells the console", async () => {
     const drive = new MemoryDrive();
     const deps = setup(jobInput(), drive);
     const result = await processDocumentsJob(RUN_ID, deps, { final: true });
@@ -119,7 +119,7 @@ describe("a documents job", () => {
     assert.equal(made.clientName, "Synthetic Co");
     assert.equal(made.folderName, "Health check 1");
     assert.equal(drive.path(made.driveFolderId), "Synthetic Co / Health check 1");
-    assert.deepEqual(made.files.map((f) => f.name).sort(), ["Synthetic Co - Executive summary.pdf", "Synthetic Co - Full health check.pdf", "Synthetic Co - Raw notes.docx"]);
+    assert.deepEqual(made.files.map((f) => f.name).sort(), ["Synthetic Co - Executive summary.pdf", "Synthetic Co - Full health check.pdf", "Synthetic Co - One page summary.pdf", "Synthetic Co - Raw notes.docx"]);
     assert.deepEqual(made.warnings, ["The full health check, page 4: overflow"]);
     assert.equal(deps.store.documents.get(RUN_ID)!.input.state, "done");
   });
@@ -281,7 +281,7 @@ describe("the released documents", () => {
 });
 
 describe("the one-pager and the readout kit", () => {
-  test("the one-pager goes in the customer's folder, the kit only in Black Cloud's own, and the console hears of the three it takes", async () => {
+  test("the one-pager goes in the customer's folder, the kit only in Black Cloud's own, and the console hears of all four, never the kit", async () => {
     const drive = new MemoryDrive();
     const deps = setup(jobInput(), drive);
     assert.equal((await processDocumentsJob(RUN_ID, deps, { final: true })).outcome, "done");
@@ -294,7 +294,7 @@ describe("the one-pager and the readout kit", () => {
     assert.equal(drive.path(kits[0]!.id), `${INTERNAL_FOLDER} / Synthetic Co - Health check 1 / Synthetic Co - Readout kit.docx`);
     // Nowhere under the client's folder, so sharing that folder can never share the kit.
     assert.ok(!drive.path(kits[0]!.id).startsWith("Synthetic Co /"));
-    assert.deepEqual(made.files.map((f) => f.output).sort(), ["executive_summary", "full_health_check", "raw_notes"]);
+    assert.deepEqual(made.files.map((f) => f.output).sort(), ["ceo_one_pager", "executive_summary", "full_health_check", "raw_notes"]);
   });
 
   test("made again, the one-pager moves into Version 1 with the rest, and the kit is replaced, not copied", async () => {
