@@ -46,6 +46,8 @@ export type RunOptions = {
   log?: (message: string) => void;
   /** Complete by default. Essentials reads set-up only, and never CRM records. */
   scope?: RunScope;
+  /** The run this one re-checks: its first health check, whose findings the report compares against. */
+  baselineRunId?: string | null;
 };
 
 export type RunResult = { run: Run; dir: string; output: AnalysisOutput | null };
@@ -162,7 +164,7 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
       scope,
       ruleSetVersion: RULE_SET_VERSION,
       calibrationHash: hash,
-      baselineRunId: null,
+      baselineRunId: options.baselineRunId ?? null,
       asOf: now.toISOString(),
       analysisWindow: { from: windowStart.toISOString().slice(0, 10), to: windowEnd.toISOString().slice(0, 10) },
       apiVersion: client.apiVersion,

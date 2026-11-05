@@ -32,8 +32,24 @@ const read = <T>(path: string): T => JSON.parse(readFileSync(path, "utf8")) as T
 const readOptional = <T>(path: string): T | null => (existsSync(path) ? read<T>(path) : null);
 const write = (path: string, data: string | Buffer): void => writeFileSync(path, data, { mode: 0o600 });
 
+/**
+ * A re-check's first health check, from the folder beside it, as the report
+ * compares against it. Null if it's gone (retention), unreadable, or another org's.
+ */
+function loadBaseline(dir: string, run: Run): ReportInput | null {
+  if (!run.baselineRunId || !/^[A-Za-z0-9_-]+$/.test(run.baselineRunId)) return null;
+  const other = join(dir, "..", run.baselineRunId);
+  if (!existsSync(join(other, "run.json")) || !existsSync(join(other, "findings.json"))) return null;
+  try {
+    const { input } = loadRun(other, { baseline: false });
+    return input.run.orgId.slice(0, 15) === run.orgId.slice(0, 15) ? input : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Loads a run folder. Everything is validated, so a damaged file stops here. */
-export function loadRun(dir: string): { input: ReportInput; pseudonyms: Pseudonymiser } {
+export function loadRun(dir: string, options: { baseline?: boolean } = {}): { input: ReportInput; pseudonyms: Pseudonymiser } {
   const intake = readOptional<unknown>(join(dir, "intake.json"));
   const input: ReportInput = {
     run: Run.parse(read(join(dir, "run.json"))),
@@ -45,6 +61,7 @@ export function loadRun(dir: string): { input: ReportInput; pseudonyms: Pseudony
     overrides: z.array(NumberOverride).parse(readOptional(join(dir, "overrides.json")) ?? []),
     intake: intake ? Intake.parse(intake) : null,
   };
+  if (options.baseline !== false) input.baseline = loadBaseline(dir, input.run);
   return { input, pseudonyms: new Pseudonymiser(read<PseudonymEntry[]>(join(dir, "pseudonym-map.json"))) };
 }
 

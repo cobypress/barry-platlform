@@ -1,3 +1,4 @@
+import { compareWithBaseline, progressFigures, worthFigures, type Progress } from "../progress/compare.ts";
 import { buildValueModel, worthOf, HEADLINE_KINDS, KIND_LABELS, UK_HOURLY_BENCHMARK, type ValueModel } from "../value/model.ts";
 import { AREA_WEIGHTS, CRITICAL_CAP, GRADES, overallScore, type OverallScore } from "../domains/scoring.ts";
 import { comparisonId, comparisonNotes, compareRun, OWN_RANGE_MIN, type BenchmarkInput, type Comparison } from "../benchmark/compare.ts";
@@ -28,6 +29,8 @@ export type ReportInput = {
   scores?: Score[];
   overrides?: NumberOverride[];
   intake?: Intake | null;
+  /** A re-check's first health check, which the report compares against. */
+  baseline?: ReportInput | null;
   /** The consultant the documents' cover names. Only the documents job sets it, and it never calls Claude. */
   preparedBy?: string | null;
   /** Our own customers' benchmark rows. Without them, only published research is compared. */
@@ -50,6 +53,8 @@ export type BuiltReport = {
   overall: OverallScore;
   /** What the issues are worth over the next 12 months (roadmap 1.4). */
   value: ValueModel;
+  /** For a re-check: what changed since the first health check. Null otherwise. */
+  progress: Progress | null;
   /** Where the headline figures sit against published research and our own customers. */
   comparisons: Comparison[];
   /** What the customer pays a year, by precedence, with list price for context. */
@@ -92,6 +97,7 @@ const COVER = "cover";
 const PLAN = "plan";
 export const OVERALL = "score:overall";
 export const VALUE_TOTAL = "value:total";
+export const PROGRESS = "progress";
 export const valueSource = (group: string): string => `value:${group}`;
 /** The investment section's own figures: what the customer told us they spend. */
 export const INVESTMENT_SOURCE = "investment";
@@ -188,7 +194,21 @@ function valueFigures(value: ValueModel): FigureSet["figures"] {
   return [...totals, ...rate, ...groups];
 }
 
-function rawNotesSpecs(input: ReportInput, overall: OverallScore, comparisons: Comparison[], value: ValueModel, investment: Investment, effectiveMetrics: Metric[]): Spec[] {
+/** A re-check's progress in words, every rule named, for the raw notes. */
+function progressText(p: Progress, currency: string): string {
+  const m = (n: number) => money(n, currency);
+  const list = (title: string, items: Progress["fixed"], why = "") => (items.length ? `${title} (${items.length})${why}:\n${items.map((c) => c.title).join("\n")}` : null);
+  return lines(
+    p.score.before !== null && p.score.after !== null ? `Your Barometer score has gone from ${p.score.before} to ${p.score.after} since your first health check.` : null,
+    `What fixing the issues is worth has gone from ${m(p.worth.before)} to ${m(p.worth.after)}. Some of that change can come from the business itself, not only from fixes.`,
+    list("Fixed since then", p.fixed),
+    list("Still open", p.remaining),
+    list("New since then", p.added),
+    list("Can't tell yet", p.unknown, ", because these couldn't be measured this time"),
+  );
+}
+
+function rawNotesSpecs(input: ReportInput, overall: OverallScore, comparisons: Comparison[], value: ValueModel, investment: Investment, effectiveMetrics: Metric[], progress: Progress | null): Spec[] {
   const { run, calibration, findings, metrics, manualSteps, intake, overrides = [] } = input;
   const exclusions = [...new Set([...findings.flatMap((f) => f.evidence.flatMap((e) => e.exclusions)), ...metrics.flatMap((m) => m.exclusions)])];
   const notMeasurable = findings.filter((f) => f.status === "not_measurable");
@@ -198,6 +218,7 @@ function rawNotesSpecs(input: ReportInput, overall: OverallScore, comparisons: C
       ? { key: "intake_summary", title: "Intake summary", body: intakeText(intake), sources: [INTAKE] }
       : { key: "intake_summary", title: "Intake summary", body: "No intake has been recorded for this run.", needsInput: true },
     { key: "assumptions", title: "Assumptions", body: calibrationText(run, calibration), sources: [SOURCE.run, CALIBRATION] },
+    ...(progress ? [{ key: "progress", title: "Since your last health check", body: progressText(progress, calibration.currency), sources: [PROGRESS] }] : []),
     { key: "barometer_score", title: "Barometer score", body: overallText(overall), sources: [OVERALL] },
     {
       key: "investment",
@@ -563,6 +584,15 @@ export function buildReport(input: ReportInput): BuiltReport {
   const team = effective.findings.map(teamLevelFinding);
   const overall = overallScore(scores, effective.findings);
   const value = buildValueModel(effective.findings, run, calibration.currency, intake?.hourlyCost);
+  // A re-check compares with its first health check, built the same way, overrides and all.
+  let progress: Progress | null = null;
+  if (input.baseline) {
+    const first = buildReport({ ...input.baseline, baseline: null });
+    progress = compareWithBaseline(
+      { runId: first.input.run.id, asOf: first.input.run.asOf, findings: first.teamFindings, scores: first.input.scores ?? [], overall: first.overall, value: first.value },
+      { runId: run.id, asOf: run.asOf, findings: team, scores, overall, value },
+    );
+  }
   // Every compared figure comes from deals, which a set-up review never reads.
   const comparisons = isSetupReview(run) ? [] : compareRun({
     metrics: effective.metrics,
@@ -600,6 +630,10 @@ export function buildReport(input: ReportInput): BuiltReport {
     ...[COMPARISONS, ...comparisons.map((c) => comparisonId(c.metric.key))].map((source) => ({ source, kind: "percent" as const, value: 50 })),
   );
   dataset.figures.push(...planFigures(buildPlan(team)), ...overallFigures(overall), ...valueFigures(value));
+  if (progress) {
+    dataset.figures.push(...progressFigures(progress).map((value) => ({ source: PROGRESS, kind: "number" as const, value })));
+    dataset.figures.push(...worthFigures(progress).map((value) => ({ source: PROGRESS, kind: "currency" as const, value, currency: calibration.currency })));
+  }
   // What each area is worth, as its chapter in the full report says it.
   for (const domain of new Set(team.map((f) => f.domain))) {
     const worth = worthOf(value, new Set(team.filter((f) => f.domain === domain).map((f) => f.id)));
@@ -623,10 +657,11 @@ export function buildReport(input: ReportInput): BuiltReport {
     metrics: effective.metrics,
     overall,
     value,
+    progress,
     comparisons,
     investment,
     outputs: {
-      raw_notes: build("raw_notes", rawNotesSpecs(input, overall, comparisons, value, investment, effective.metrics)),
+      raw_notes: build("raw_notes", rawNotesSpecs(input, overall, comparisons, value, investment, effective.metrics, progress)),
       executive_summary: build("executive_summary", executiveSpecs(input, team)),
       full_health_check: build("full_health_check", fullSpecs(input, team, effective.metrics)),
     },

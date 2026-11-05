@@ -7,6 +7,7 @@ import { compactMoney, longDate, monthYear } from "./format.ts";
 import { chartSlot, coverScore, document, documentTitle, effortText, estimateLines, paginate, paragraphs, renderContext, severityChip, valueFigure, valueText, type Render } from "./html.ts";
 import { noteSections, referenceMap, valueItemId } from "./references.ts";
 import { investmentPage, MONEY_CSS, moneyPage } from "./money.ts";
+import { PROGRESS_CSS, progressPage } from "./progress.ts";
 import { nextStepsPage, riskPage } from "./exec-pages.ts";
 import { COMPARE_CSS, compareSlide } from "./compare.ts";
 import { comparisonId } from "../benchmark/compare.ts";
@@ -186,6 +187,8 @@ export function executiveHtml(report: BuiltReport, pseudonyms: Pseudonymiser): s
     <table class="grid"><thead><tr><th>Issue</th><th style="width:34%">Impact</th></tr></thead><tbody>${top.map((f) => `<tr><td>${r.t(f.title)}${r.ref(f.id)}</td><td>${valueText(r, f).amount}</td></tr>`).join("")}</tbody></table>
     <p style="margin-top:18px">Every figure here comes from your Salesforce org. Where we couldn't measure something, we say so rather than estimate it.</p>`);
 
+  const progressed = progressPage(r, report);
+  if (progressed) add(progressed);
   const worth = moneyPage(r, report);
   if (worth) add(worth);
   const invested = investmentPage(r, report);
@@ -236,5 +239,5 @@ export function executiveHtml(report: BuiltReport, pseudonyms: Pseudonymiser): s
   });
   if (referenced.length) add(detailPage(r, referenced));
 
-  return document("Executive summary", "a4", `${CSS}\n${MONEY_CSS}\n${COMPARE_CSS}`, pages);
+  return document("Executive summary", "a4", `${CSS}\n${MONEY_CSS}\n${COMPARE_CSS}\n${PROGRESS_CSS}`, pages);
 }

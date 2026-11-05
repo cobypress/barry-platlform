@@ -12,6 +12,7 @@ import { scoreLine } from "./executive.ts";
 import { COMPARE_CSS, compareSlide } from "./compare.ts";
 import { MONEY_CSS, moneyPage } from "./money.ts";
 import { CHAPTER_CSS, chapterSlide } from "./chapter.ts";
+import { PROGRESS_CSS, progressPage } from "./progress.ts";
 import { transitionMatrix } from "../domains/historic-pipeline/process.ts";
 
 // The full deck: 16:9, 40 to 60 slides. Issue slides flex to keep it in range,
@@ -81,8 +82,8 @@ table.data tr.total td { font-weight: 600; border-top: 1px solid var(--carbon); 
 .panel .big { font-size: 26px; font-weight: 600; line-height: 1.2; }
 h3.cap { font-size: 15px; font-weight: 600; color: var(--muted); margin: 0 0 6px; }
 .three-text { columns: 3; column-gap: 24px; }
-.two-text.refs { margin-top: 10px; }
-.two-text.refs .definition { font-size: 17px; margin-bottom: 11px; }
+.two-text.refs { margin-top: 10px; columns: 3; }
+.two-text.refs .definition { font-size: 16px; margin-bottom: 9px; }
 .three-text .definition { break-inside: avoid; margin-bottom: 8px; font-size: 12px; line-height: 1.32; }
 .compact-rows table.grid { font-size: 13px; line-height: 1.3; }
 .compact-rows table.grid td, .compact-rows table.grid th { padding: 4px 7px; }
@@ -546,6 +547,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   const contents = [
     "What you told us",
     "What we found against it",
+    ...(report.progress ? ["Since your last health check"] : []),
     "Overview and scorecard",
     ...(report.value.total.expected > 0 ? ["What fixing this is worth"] : []),
     ...(comparable ? ["How you compare"] : []),
@@ -573,6 +575,8 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
 
   add(`<div class="eyebrow">Overview</div><h2>${r.t(verdict.headline)}</h2><div>${sectionBody(r, built, "overview").replace(`<p>${r.t(verdict.headline)}.</p>`, "")}</div><div class="stat-row" style="margin-top:18px">${report.overall.status === "measured" ? `<div class="stat"><b>${report.overall.score}</b><span>Barometer score</span></div>` : ""}<div class="stat"><b>${verdict.issues}</b><span>Issues</span></div><div class="stat"><b>${verdict.critical}</b><span>Critical</span></div><div class="stat"><b>${verdict.high}</b><span>High</span></div><div class="stat"><b>${team.filter((f) => f.status === "not_measurable").length}</b><span>Not measurable</span></div><div class="stat"><b>${team.filter((f) => f.status === "passed").length}</b><span>Passed</span></div></div>`);
 
+  const progressed = progressPage(r, report);
+  if (progressed) add(progressed, "tight");
   const worth = moneyPage(r, report, "slide");
   if (worth) add(worth, "tight");
 
@@ -698,5 +702,5 @@ export function fullReportHtml(report: BuiltReport, pseudonyms: Pseudonymiser): 
     const chrome = slide.classes?.includes("cover") ? "" : `<div class="footer" data-chrome><span>Black Cloud Barometer${r.draft ? " | Draft, not approved for release" : ""}</span><span>${i + 1}</span></div>`;
     return `<section class="page ${slide.classes ?? ""}" data-page="${i + 1}">${slide.html}${chrome}</section>`;
   });
-  return document("Full health check", "slide", `${CSS}\n${COMPARE_CSS}\n${MONEY_CSS}\n${CHAPTER_CSS}\n.money .headline-figure { font-size: 2.6em; } .money .range { margin: 4px 0 10px; } .money .kind { margin-bottom: 5px; } .money table.grid { font-size: 16px; } .money .split .kinds { font-size: 16px; } .money .split .note { font-size: 14px; }`, pages);
+  return document("Full health check", "slide", `${CSS}\n${COMPARE_CSS}\n${MONEY_CSS}\n${CHAPTER_CSS}\n${PROGRESS_CSS}\n.money .headline-figure { font-size: 2.6em; } .money .range { margin: 4px 0 10px; } .money .kind { margin-bottom: 5px; } .money table.grid { font-size: 16px; } .money .split .kinds { font-size: 16px; } .money .split .note { font-size: 14px; }`, pages);
 }

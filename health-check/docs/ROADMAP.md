@@ -145,7 +145,7 @@ Industry and size groups as the set reaches 10 orgs per group, and new figures a
 
 ## Stage 5: Proof and growth
 
-- **The 90-day re-check.** Run again and show the change in money, adoption and the score. Needed by early February 2027 for the first three customers.
+- **The 90-day re-check.** Run again and show the change in money, adoption and the score. Needed by early February 2027 for the first three customers. (Engine half done 5 November 2026: decision 120. Console half in progress.)
 - **Barometer Ongoing.** Quarterly re-checks and the monthly pulse.
 - **Case studies.** "£X recovered, adoption up Y%", with consent recorded at intake.
 - **The free scan.** A page on the Black Cloud site: connect read-only, a set-up scan, a results page showing the score and a few real findings with the other areas locked, and a lead alert to Slack.
