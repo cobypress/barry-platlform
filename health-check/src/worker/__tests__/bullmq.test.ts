@@ -119,6 +119,17 @@ describe("the worker's environment", () => {
     assert.equal(read.ok && read.config.connectKey.length, 32);
   });
 
+  test("the retention sweep deletes unless HC_CLEANUP_DRY_RUN is 1, and refuses anything else", () => {
+    const dry = (value?: string) => {
+      const read = readWorkerEnv({ ...goodEnv(), ...(value === undefined ? {} : { HC_CLEANUP_DRY_RUN: value }) });
+      return read.ok ? read.config.cleanupDryRun : read.problems.join("; ");
+    };
+    assert.equal(dry(), false);
+    assert.equal(dry("0"), false);
+    assert.equal(dry("1"), true);
+    assert.match(String(dry("yes")), /HC_CLEANUP_DRY_RUN must be 1, 0 or unset/);
+  });
+
   test("Claude is optional: a key, or OIDC federation with an identity token", () => {
     const FEDERATION = { ANTHROPIC_FEDERATION_RULE_ID: "fdrl_synthetic", ANTHROPIC_ORGANIZATION_ID: "00000000-0000-4000-8000-000000000001", ANTHROPIC_SERVICE_ACCOUNT_ID: "svac_synthetic" };
     const claude = (extra: Record<string, string>) => {
@@ -212,6 +223,30 @@ describe("hc worker", () => {
     assert.equal(pools[0]!.ended, true);
     assert.ok(!lines.join("\n").includes(env.HC_CONNECT_KEY!) && !lines.join("\n").includes("pw@"));
     assert.ok(lines.some((l) => /Neither ANTHROPIC_API_KEY nor the ANTHROPIC_ federation variables are set, so report sections are the engine's own text/.test(l)));
+  });
+
+  test("runs the retention sweep at start, in the runs folder, with the dry-run setting", async () => {
+    class FakePool {
+      async query(): Promise<never> {
+        throw new Error("no database in tests");
+      }
+      async connect(): Promise<never> {
+        throw new Error("no database in tests");
+      }
+      async end(): Promise<void> {}
+    }
+    const modules: WorkerModules = { bull, pg: { Pool: FakePool as unknown as WorkerModules["pg"]["Pool"] } };
+    const env: NodeJS.ProcessEnv = { ...goodEnv(), HC_CLEANUP_DRY_RUN: "1" };
+    const calls: Array<{ runsDir: string; dryRun: boolean; locksDir?: string }> = [];
+    const lines: string[] = [];
+    const sweep = async (deps: { runsDir: string; dryRun: boolean; locksDir?: string }) => {
+      calls.push({ runsDir: deps.runsDir, dryRun: deps.dryRun, locksDir: deps.locksDir });
+      throw new Error("the database is down");
+    };
+    assert.equal(await workerCommand(env, { load: async () => modules, until: new Promise((r) => setTimeout(r, 10)), log: (l) => lines.push(l), sweep: sweep as never }), 0);
+    assert.deepEqual(calls, [{ runsDir: env.HC_RUNS_DIR!, dryRun: true, locksDir: `${env.HC_RUNS_DIR}-locks` }]);
+    // A failed sweep is logged, and the worker carries on.
+    assert.ok(lines.some((l) => /Retention sweep failed, and will run again in a day: the database is down/.test(l)), lines.join("\n"));
   });
 
   test("with ANTHROPIC_API_KEY, says Claude drafts the sections, and never prints the key", async () => {

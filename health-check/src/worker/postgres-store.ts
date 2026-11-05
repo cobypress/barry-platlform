@@ -16,6 +16,7 @@ import {
   type RunJobInput,
   type RunOutputRecord,
   type RunProgress,
+  type ReleasedRun,
   type WorkerStore,
 } from "./types.ts";
 
@@ -465,6 +466,15 @@ export class PostgresWorkerStore implements WorkerStore {
       // The id is a fresh random one: Prisma's cuid default lives in the client, not the database.
       for (const row of rows) await this.#insert(client, "HealthCheckBenchmarkRow", BENCHMARK_ROW, { id: randomUUID(), ...BenchmarkRow.parse(row) });
     });
+  }
+
+  async listReleasedRuns(): Promise<ReleasedRun[]> {
+    // The last output's release date, so retention never starts early. A
+    // released run with no release record has a null date, and is left alone.
+    const { rows } = await this.#pool.query(
+      `SELECT r."id" AS "runId", to_char(MAX(rel."releasedAt"), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "releasedAt" FROM "HealthCheckRun" r LEFT JOIN "HealthCheckRelease" rel ON rel."runId" = r."id" WHERE r."status" = 'released' GROUP BY r."id" ORDER BY r."id"`,
+    );
+    return rows.map((row: Record<string, unknown>) => ({ runId: String(row.runId), releasedAt: typeof row.releasedAt === "string" ? row.releasedAt : null }));
   }
 
   async loadBenchmarkRows(): Promise<BenchmarkRow[]> {

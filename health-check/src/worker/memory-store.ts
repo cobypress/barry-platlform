@@ -1,5 +1,5 @@
 import { Run, type BenchmarkRow, type ConnectLink } from "../schemas/index.ts";
-import { ORG_AWAITING_CONNECT, RunClosedError, type ConnectJobInput, type DocumentsJobInput, type DocumentsMade, type LinkConnected, type LinkState, type RunJobInput, type RunOutputRecord, type RunProgress, type WorkerStore } from "./types.ts";
+import { ORG_AWAITING_CONNECT, RunClosedError, type ConnectJobInput, type DocumentsJobInput, type DocumentsMade, type LinkConnected, type LinkState, type ReleasedRun, type RunJobInput, type RunOutputRecord, type RunProgress, type WorkerStore } from "./types.ts";
 
 // The WorkerStore for tests: the console's tables as plain maps, with the same
 // rules a database store must keep. Writes replace; a run in review or
@@ -135,6 +135,13 @@ export class MemoryWorkerStore implements WorkerStore {
 
   async loadBenchmarkRows(): Promise<BenchmarkRow[]> {
     return structuredClone(this.benchmarkRows);
+  }
+
+  /** When each run's last output was released, as the console's release records hold it. */
+  readonly releasedAt = new Map<string, string>();
+
+  async listReleasedRuns(): Promise<ReleasedRun[]> {
+    return [...this.runs.values()].filter((r) => r.run.status === "released").map((r) => ({ runId: r.run.id, releasedAt: this.releasedAt.get(r.run.id) ?? null }));
   }
 
   async failDocuments(runId: string, reason: string, _at: string): Promise<void> {
