@@ -77,6 +77,8 @@ export const RUN: Columns = {
   budget: "json", benchmarkOptIn: "bool", createdBy: "text", startedAt: "ts", finishedAt: "ts",
   // New, from C2: see the log.
   connectionName: "text",
+  // "complete" or "essentials" (DECISIONS 94). Null is a run from before scopes, which was complete.
+  scope: "text",
 };
 /**
  * The run as the documents job reads it: the cover's name too. blackcloud-next
@@ -141,8 +143,8 @@ export const CONNECT_LINK: Columns = {
 const withoutNulls = (o: Record<string, unknown>): Record<string, unknown> => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== null));
 
 export function runFromRows(row: Record<string, unknown>, steps: Array<Record<string, unknown>>): Run {
-  const { analysisFrom, analysisTo, connectionName: _name, preparedBy: _by, ...rest } = row;
-  return Run.parse({ ...rest, analysisWindow: { from: analysisFrom, to: analysisTo }, steps });
+  const { analysisFrom, analysisTo, connectionName: _name, preparedBy: _by, scope, ...rest } = row;
+  return Run.parse({ ...rest, ...(scope === null || scope === undefined ? {} : { scope }), analysisWindow: { from: analysisFrom, to: analysisTo }, steps });
 }
 
 /**

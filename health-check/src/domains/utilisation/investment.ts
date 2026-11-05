@@ -1,5 +1,5 @@
 import { orgExtractor } from "../../extract/configuration.ts";
-import { opportunitiesExtractor } from "../../extract/opportunities.ts";
+import { opportunitiesGate } from "../gate.ts";
 import { daysBefore } from "../../extract/types.ts";
 import { licencesExtractor, usersExtractor, type UserLicenseRow } from "../../extract/users.ts";
 import { pct, plural, type RuleContext } from "../../engine/rule.ts";
@@ -98,9 +98,8 @@ export function investmentMetrics(ctx: Ctx): Metric[] {
   const licenceEvidence = [ctx.ev(userLicenses.source, { count: userLicenses.status === "ok" ? userLicenses.data.length : null })];
   const packageEvidence = [ctx.ev(packageLicenses.source, { count: packageLicenses.status === "ok" ? packageLicenses.data.length : null })];
   const all = Object.values(DEFINITIONS);
-  // DECISIONS 37: no metric is published when Opportunity can't be read.
-  const { opportunities } = ctx.data(opportunitiesExtractor);
-  if (opportunities.status !== "ok") return all.map((d) => notMeasurable(d, d.id.startsWith("investment.package") ? packageEvidence : licenceEvidence, `Opportunities couldn't be read, and no metric is published without them: ${opportunities.reason}`));
+  const gate = opportunitiesGate(ctx);
+  if (gate) return all.map((d) => notMeasurable(d, d.id.startsWith("investment.package") ? packageEvidence : licenceEvidence, gate));
 
   const metrics: Metric[] = [];
   if (userLicenses.status !== "ok") {

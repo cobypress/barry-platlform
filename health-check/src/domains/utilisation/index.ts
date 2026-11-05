@@ -199,6 +199,8 @@ function dormantRule(id: string, title: string, key: string, label: string, basi
     version: 1,
     domain: "utilisation",
     title,
+    // The guards check what each user owns, which reads records.
+    records: true,
     evaluate(ctx): RuleResult | RuleResult[] {
       const users = ctx.data(usersExtractor);
       if (users.status !== "ok") return { outcome: "not_measurable", reason: `Users couldn't be read: ${users.reason}`, evidence: [ctx.ev(users.source, { count: null })] };

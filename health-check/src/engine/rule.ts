@@ -1,5 +1,5 @@
 import type { Extractor, SourceInfo } from "../extract/types.ts";
-import type { Calibration, DateRange, Effort, Evidence, Guard, ManualAnswer, ManualStep, Metric, RecommendationType, SegmentCheck, Subject, Value } from "../schemas/index.ts";
+import type { Calibration, DateRange, RunScope, Effort, Evidence, Guard, ManualAnswer, ManualStep, Metric, RecommendationType, SegmentCheck, Subject, Value } from "../schemas/index.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 
 type Severity = "critical" | "high" | "medium" | "low" | "info";
@@ -68,6 +68,8 @@ export type RuleContext = {
   pseudonyms: Pseudonymiser;
   /** The output of an extractor. */
   data<T>(extractor: Extractor<T>): T;
+  /** Complete unless the run is a set-up review, which reads no CRM records. */
+  scope?: RunScope;
   /** Turns a source into evidence, stamped with this run's time. */
   ev(source: SourceInfo, input?: EvidenceInput): Evidence;
   /** Raises a manual step (once) and returns where it stands. */
@@ -81,6 +83,8 @@ export type Rule = {
   version: number;
   domain: string;
   title: string;
+  /** Needs an extract that reads CRM records, so a set-up review leaves the rule out rather than report it not measurable. */
+  records?: true;
   evaluate(ctx: RuleContext): RuleResult | RuleResult[];
 };
 

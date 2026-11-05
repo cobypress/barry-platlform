@@ -78,6 +78,8 @@ const usageTypes = (f: FieldSummary): boolean => f.aggregatable && !f.calculated
 export const fieldUsageExtractor: Extractor<Record<string, Sourced<ObjectFieldUsage>>> = {
   id: "field-usage",
   version: 1,
+  // Counts how many records fill each field.
+  records: true,
   async run(ctx) {
     const recentFrom = monthsBefore(ctx.now, 12);
     const schema = ctx.get(schemaExtractor);

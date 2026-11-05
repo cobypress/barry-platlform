@@ -1,7 +1,7 @@
 import { colour, page, tokensCss } from "../design/tokens.ts";
 import type { OverallScore } from "../domains/scoring.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
-import type { Finding } from "../schemas/index.ts";
+import type { Finding, Run } from "../schemas/index.ts";
 import type { Chart } from "./charts.ts";
 import { fontFaces } from "./fonts.ts";
 import { compactMoney, escapeXml, money, plainWords, ukDates } from "./format.ts";
@@ -33,6 +33,9 @@ export function renderContext(pseudonyms: Pseudonymiser, currency: string, draft
     },
   };
 }
+
+/** The documents' title: a set-up review is a different product, and its cover says so. */
+export const documentTitle = (run: Pick<Run, "scope">): string => (run.scope === "essentials" ? "Set-up review" : "Salesforce health check");
 
 export const paragraphs = (r: Render, text: string): string =>
   text.split(/\n\n+/).filter((p) => p.trim()).map((p) => `<p>${r.t(p).replace(/\n/g, "<br>")}</p>`).join("");

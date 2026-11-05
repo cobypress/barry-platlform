@@ -86,6 +86,7 @@ export const SKEW_PRACTICE: Practice = {
 const ownershipSkew: Rule = {
   id: "bp.ownership-skew",
   version: 1,
+  records: true,
   domain: "best_practice",
   title: "One owner holding too many records",
   evaluate(ctx): RuleResult | RuleResult[] {

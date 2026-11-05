@@ -93,6 +93,7 @@ function scopeClause(ctx: ExtractContext): string {
 export const opportunitiesExtractor: Extractor<OpportunityExtract> = {
   id: "opportunities",
   version: 3,
+  records: true,
   partialKeys: ["opportunities", "opportunity-history"],
   async run(ctx) {
     const schema = ctx.get(schemaExtractor).Opportunity!;

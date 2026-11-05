@@ -2,7 +2,7 @@ import { apexExtractor, metadataExtractor } from "../../extract/automation.ts";
 import { unreadReason } from "../../extract/metadata-parse.ts";
 import { CORE_OBJECTS, customObjectsExtractor, isOwnCustomField, layoutsExtractor, recordCountsExtractor, schemaExtractor } from "../../extract/configuration.ts";
 import { objectResolver } from "../object-names.ts";
-import { opportunitiesExtractor } from "../../extract/opportunities.ts";
+import { opportunitiesGate } from "../gate.ts";
 import type { RuleContext } from "../../engine/rule.ts";
 import type { Evidence, Metric, MetricSegment } from "../../schemas/index.ts";
 
@@ -74,9 +74,8 @@ export function objectInventoryMetric(ctx: Ctx): Metric[] {
   // only in part would undercount them all (rule 5).
   const unread = unreadReason(metadata.data, ["workflowRules", "validationRules"]);
   if (unread) return [{ ...base, status: "not_measurable", reason: unread, evidence, exclusions, assumptions }];
-  // DECISIONS 37: no metric is published when Opportunity can't be read.
-  const { opportunities } = ctx.data(opportunitiesExtractor);
-  if (opportunities.status !== "ok") return [{ ...base, status: "not_measurable", reason: `Opportunities couldn't be read, and no metric is published without them: ${opportunities.reason}`, evidence, exclusions, assumptions }];
+  const gate = opportunitiesGate(ctx);
+  if (gate) return [{ ...base, status: "not_measurable", reason: gate, evidence, exclusions, assumptions }];
 
   const bundle = metadata.data;
   const records = new Map(counts.status === "ok" ? counts.data.map((c) => [c.name, c.count]) : []);

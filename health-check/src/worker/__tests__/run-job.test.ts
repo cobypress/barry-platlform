@@ -92,6 +92,19 @@ describe("a run job", () => {
   });
 });
 
+describe("a set-up review run job", () => {
+  test("runs with the console's scope, only the set-up areas, and no pipeline section", async () => {
+    const { deps, handle } = await setup({}, runInput({ run: consoleRun({ scope: "essentials" }) }));
+    await handle(job, once);
+    const run = stored(deps);
+    const onDisk = JSON.parse(readFileSync(join(run.runDir!, "run.json"), "utf8")) as { scope: string; modules: string[] };
+    assert.equal(onDisk.scope, "essentials");
+    assert.deepEqual(onDisk.modules.sort(), ["automation", "best_practice", "configuration", "security", "utilisation"]);
+    assert.ok(run.output!.findings.every((f) => onDisk.modules.includes(f.domain)));
+    assert.ok(!run.output!.sections.some((s) => ["pipeline", "pipeline_deep_dive", "comparisons"].includes(s.key)));
+  });
+});
+
 describe("a run job delivered again", () => {
   test("in review or released, it does nothing", async () => {
     for (const status of ["in_review", "released"] as const) {

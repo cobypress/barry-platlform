@@ -2,6 +2,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileS
 import { createHash, randomUUID } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { BUDGET_DEFAULTS, RULE_SET_VERSION, SF_DEFAULTS } from "../config.ts";
+import { modulesFor } from "../domains/scope.ts";
 import { scoreDomains } from "../domains/scoring.ts";
 import type { DomainModule } from "../domains/types.ts";
 import { orgExtractor } from "../extract/configuration.ts";
@@ -12,7 +13,7 @@ import { usersExtractor } from "../extract/users.ts";
 import { renderRawNotes } from "../notes/raw-notes.ts";
 import { Pseudonymiser, type PseudonymEntry } from "../privacy/pseudonymiser.ts";
 import { registerSharedNames } from "../privacy/names.ts";
-import { Run, type Calibration, type ManualAnswer, type RunStep } from "../schemas/index.ts";
+import { Run, type Calibration, type ManualAnswer, type RunScope, type RunStep } from "../schemas/index.ts";
 import { ApiBudget, BudgetStopError } from "../salesforce/budget.ts";
 import { SalesforceClient } from "../salesforce/client.ts";
 import type { ConnectionProvider } from "../salesforce/connection.ts";
@@ -43,6 +44,8 @@ export type RunOptions = {
   apiVersion?: string;
   pageSize?: number;
   log?: (message: string) => void;
+  /** Complete by default. Essentials reads set-up only, and never CRM records. */
+  scope?: RunScope;
 };
 
 export type RunResult = { run: Run; dir: string; output: AnalysisOutput | null };
@@ -110,7 +113,7 @@ function loadPseudonyms(dir: string): Pseudonymiser {
 
 /** Extract, then analyse. Stops cleanly at the API budget. Call again with `resume` to carry on. */
 export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
-  const { calibration, modules, provider } = options;
+  const { calibration, provider } = options;
   const log = options.log ?? (() => {});
   const now = options.now ?? new Date();
   assertOutsideGit(options.outDir);
@@ -129,9 +132,13 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
   const dir = join(options.outDir, runId);
   mkdirSync(join(dir, "checkpoints"), { recursive: true, mode: 0o700 });
 
+  const runPath = join(dir, "run.json");
+  // A resumed run keeps the scope it started with.
+  const scope: RunScope = options.resume && existsSync(runPath) ? Run.parse(readJson(runPath)).scope : (options.scope ?? "complete");
+  if (options.resume && options.scope && options.scope !== scope) throw new Error(`This run is ${scope}, so it can't be resumed as ${options.scope}.`);
+  const modules = modulesFor(scope, options.modules);
   const extractors = collectExtractors(modules);
   const hash = calibrationHash(calibration);
-  const runPath = join(dir, "run.json");
   const windowEnd = now;
   const windowStart = monthsBefore(windowEnd, calibration.analysisWindowMonths);
 
@@ -152,6 +159,7 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
       connectionKind: client.connectionKind,
       status: "extracting",
       modules: modules.map((m) => m.id),
+      scope,
       ruleSetVersion: RULE_SET_VERSION,
       calibrationHash: hash,
       baselineRunId: null,
@@ -273,6 +281,7 @@ function analyseRun(dir: string, run: Run, calibration: Calibration, modules: Do
     answers,
     pseudonyms,
     userDirectory: directory,
+    scope: run.scope,
   });
   writeJson(join(dir, "pseudonym-map.json"), pseudonyms.entries());
   renderOutputs(dir, run, calibration, output);
