@@ -7,6 +7,7 @@ import { startQueueWorker, type BullModule } from "../worker/bullmq.ts";
 import { GoogleDrive } from "../worker/drive.ts";
 import { readWorkerEnv, WORKER_ENV } from "../worker/env.ts";
 import { PostgresWorkerStore, type SqlPool } from "../worker/postgres-store.ts";
+import { retentionSweep, SWEEP_INTERVAL_MS } from "../worker/retention.ts";
 import { createJobHandler } from "../worker/worker.ts";
 
 // `hc worker`: takes run, connect and documents jobs from the console's queue until told
@@ -53,6 +54,8 @@ export async function workerCommand(
     log?: (line: string) => void;
     /** Tests only: stands in for the startup call to Claude. */
     claudeCheck?: (client: NarrativeClient) => Promise<{ ok: boolean; detail: string }>;
+    /** Tests only: stands in for the retention sweep. */
+    sweep?: typeof retentionSweep;
   } = {},
 ): Promise<number> {
   const log = options.log ?? ((line: string) => console.log(`${new Date().toISOString()} ${line}`));
@@ -67,12 +70,14 @@ export async function workerCommand(
   // With no key, the SDK finds the federation variables and the identity token itself, and refreshes its own access token.
   const narrative = config.claude.kind === "key" ? anthropicClientWithKey(config.claude.apiKey) : config.claude.kind === "federation" ? anthropicClient() : undefined;
   const pool = new pg.Pool({ connectionString: config.databaseUrl, max: config.concurrency + 2 });
+  const store = new PostgresWorkerStore(pool);
+  const locksDir = join(dirname(config.runsDir), `${basename(config.runsDir)}-locks`);
   const handler = createJobHandler({
-    store: new PostgresWorkerStore(pool),
+    store,
     tokens: new TokenStore({ dir: config.connectionsDir, key: tokenKeySource({ env: { HC_TOKEN_KEY: env.HC_TOKEN_KEY } as NodeJS.ProcessEnv, platform: "linux" }) }),
     runsDir: config.runsDir,
     // Beside the runs folder, not in it, so `hc purge --older-than` doesn't trip over it.
-    locksDir: join(dirname(config.runsDir), `${basename(config.runsDir)}-locks`),
+    locksDir,
     oauthClient: config.oauthClient,
     connectKey: config.connectKey,
     stopAtShare: config.stopAtShare,
@@ -97,7 +102,16 @@ export async function workerCommand(
       log(check.ok ? `Claude sign-in works: ${check.detail}.` : `Claude sign-in failed, so runs will use the engine's own text until it's fixed. ${check.detail}`),
     );
   }
+  // Retention (decision 16): once now, then daily. A failed sweep is logged and tried again tomorrow.
+  const sweep = (): void =>
+    void (options.sweep ?? retentionSweep)({ store, runsDir: config.runsDir, locksDir, dryRun: config.cleanupDryRun, log }).catch((err: unknown) =>
+      log(`Retention sweep failed, and will run again in a day: ${err instanceof Error ? err.message.slice(0, 200) : "unknown error"}`),
+    );
+  sweep();
+  const sweeping = setInterval(sweep, SWEEP_INTERVAL_MS);
+  sweeping.unref();
   await (options.until ?? untilSignalled());
+  clearInterval(sweeping);
   log("Stopping: finishing the jobs in hand.");
   await worker.close();
   await pool.end();

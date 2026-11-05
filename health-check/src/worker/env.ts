@@ -32,6 +32,7 @@ export const WORKER_ENV = {
     ANTHROPIC_ORGANIZATION_ID: "The Anthropic organization's id",
     ANTHROPIC_SERVICE_ACCOUNT_ID: "The service account the rule acts as (svac_...)",
     ANTHROPIC_WORKSPACE_ID: "The workspace Claude's usage is billed to (wrkspc_...)",
+    HC_CLEANUP_DRY_RUN: "1 to log what the daily retention sweep would delete, and delete nothing. 0 or unset: it deletes",
   },
 } as const;
 
@@ -60,6 +61,8 @@ export type WorkerConfig = {
   drive: DriveConfig | null;
   /** "none" when neither is set up. The worker still starts, and sections stay the engine's own text. */
   claude: ClaudeAccess;
+  /** HC_CLEANUP_DRY_RUN=1: the retention sweep logs what it would delete, and deletes nothing. */
+  cleanupDryRun: boolean;
 };
 
 const key32 = (raw: string): Buffer | null => {
@@ -95,6 +98,7 @@ export function readWorkerEnv(env: NodeJS.ProcessEnv): { ok: true; config: Worke
   if (get("HC_DRIVE_FOLDER_ID") && !/^[A-Za-z0-9_-]{10,200}$/.test(get("HC_DRIVE_FOLDER_ID"))) problems.push("HC_DRIVE_FOLDER_ID must be a Drive folder id, the last part of the folder's address");
   const federationSet = FEDERATION_VARS.filter((name) => get(name));
   if (federationSet.length > 0 && federationSet.length < FEDERATION_VARS.length) problems.push(`Set all of ${FEDERATION_VARS.join(", ")} or none: ${FEDERATION_VARS.filter((n) => !get(n)).join(", ")} missing`);
+  if (!["", "0", "1"].includes(get("HC_CLEANUP_DRY_RUN"))) problems.push("HC_CLEANUP_DRY_RUN must be 1, 0 or unset");
   if (problems.length) return { ok: false, problems };
   const identityToken = Boolean(get("ANTHROPIC_IDENTITY_TOKEN_FILE") || get("ANTHROPIC_IDENTITY_TOKEN"));
   const claude: ClaudeAccess = get("ANTHROPIC_API_KEY")
@@ -130,6 +134,7 @@ export function readWorkerEnv(env: NodeJS.ProcessEnv): { ok: true; config: Worke
       apiVersion: get("HC_SF_API_VERSION") || undefined,
       drive,
       claude,
+      cleanupDryRun: get("HC_CLEANUP_DRY_RUN") === "1",
     },
   };
 }

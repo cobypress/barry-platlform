@@ -176,4 +176,10 @@ export interface WorkerStore {
   addBenchmarkRows(rows: BenchmarkRow[]): Promise<void>;
   /** Every benchmark row, for comparing a run with other customers. They name no one, so reading them all is safe. */
   loadBenchmarkRows(): Promise<BenchmarkRow[]>;
+
+  /** Every run the console has released, with when its last output was released. Null when no release date can be read. */
+  listReleasedRuns(): Promise<ReleasedRun[]>;
 }
+
+/** A released run, for the retention sweep. The date is ISO UTC. */
+export type ReleasedRun = { runId: string; releasedAt: string | null };

@@ -4,13 +4,15 @@ import { join, resolve } from "node:path";
 import { z } from "zod";
 import { Run } from "../schemas/index.ts";
 
-// Raw extracts are deleted 30 days after delivery. They're the run's
+// Raw extracts are deleted 30 days after release. They're the run's
 // checkpoints/ folder, which holds CRM rows. Everything else stays: findings,
 // metrics, scores, calibration and reports are aggregates, and the pseudonym map
-// is needed to render the reports again with names in them.
+// is needed to render the reports again with names in them. Twelve months after
+// release, the whole folder goes (decision 16; the worker's sweep decides when).
 //
-// Nothing outside checkpoints/ is ever deleted, and only in a folder that has a
-// valid run.json, so a mistyped path can't empty the wrong folder.
+// Nothing is ever deleted except in a folder that has a valid run.json, and a
+// whole folder only when that run.json names the run, so a mistyped path can't
+// empty the wrong folder.
 
 export const PURGE_FILE = "purged.json";
 export const defaultRunsDir = (): string => join(homedir(), ".barometer", "runs");
@@ -66,6 +68,25 @@ export function purgeRun(dir: string, now: Date = new Date()): PurgeResult {
   const record = PurgeRecord.parse({ purgedAt: now.toISOString(), deleted: "checkpoints/", filesDeleted });
   writeFileSync(join(folder, PURGE_FILE), `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 });
   return { runId: run.id, purged: true, filesDeleted, note: filesDeleted === 0 ? "no raw extracts were left" : null };
+}
+
+/** The whole run folder is gone: what a run keeps for 12 months after release (decision 16). */
+export type FolderDeletion = { runId: string; filesDeleted: number };
+
+/**
+ * Deletes a whole run folder, and only when its run.json names this run. A link,
+ * or a folder holding another run, is refused with nothing deleted.
+ */
+export function deleteRunFolder(dir: string, runId: string): FolderDeletion {
+  const folder = resolve(dir);
+  if (!existsSync(folder)) throw new Error(`${folder} doesn't exist.`);
+  const stat = lstatSync(folder);
+  if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error(`${folder} isn't a plain folder, so nothing was deleted.`);
+  const run = readRun(folder);
+  if (run.id !== runId) throw new Error(`${folder} holds run ${run.id}, not ${runId}, so nothing was deleted.`);
+  const filesDeleted = readdirSync(folder, { recursive: true, withFileTypes: true }).filter((e) => !e.isDirectory()).length;
+  rmSync(folder, { recursive: true });
+  return { runId, filesDeleted };
 }
 
 export type SweepResult = { purged: PurgeResult[]; skipped: Array<{ folder: string; reason: string }>; kept: number };
