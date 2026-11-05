@@ -105,6 +105,15 @@ The figures we compare with are in `src/benchmark/published.ts`, each with its s
 | 50 | Is `AllowedLicenses` -1 for a package licensed to the whole org? The Object Reference only calls it "the number of users allowed to use the package". We count only positive values as seats | A site licence would be left out of package seats, which is what we want either way |
 | 51 | List prices for other paid licences (Salesforce Platform, the Experience Cloud and partner licences, and permission set licences) aren't in the table. Their UK pricing pages either don't exist at the address we tried or weren't read | Those seats are priced only from the calibration, and a total with one of them unpriced is not measurable |
 
+## Adoption (roadmap 3.2)
+
+| # | Question | If we're wrong |
+| --- | --- | --- |
+| 53 | What does `LoginHistory.Application` say for the Salesforce mobile app on iOS and Android, and what does `Platform` say? The Object Reference lists neither field's values. We match "Salesforce for iOS", "Salesforce for Android", "Salesforce Mobile", "SalesforceA" and Chatter's apps, or an iPhone, iPad, iOS or Android platform with a Remote Access or OAuth login (DECISIONS.md 101) | Mobile logins would be counted as other, and the mobile share would read low. It never makes anyone inactive, because every channel but API counts as a login |
+| 54 | How far back does `LoginHistory` go in a real org? The Object Reference doesn't say | We never assume: the months are worked out from the oldest login read, and falling adoption is not measurable with fewer than 4 whole months |
+| 55 | Item 10 above matters more here: if the connected user saw only their own `LoginHistory` rows, nearly everyone would look inactive. Barometer Read Only grants Monitor Login History (DECISIONS.md 59), so a live run should show logins for many users. Should adoption refuse to measure when only one user has logins? | Falling adoption and the teams that barely log in would fire on every org connected without that permission |
+| 56 | Is `UserPreferencesLightningExperiencePreferred` readable for other users through the API? The Object Reference lists it on User as "Switch to Lightning Experience" | If it can't be read, the field is reported missing, and the Lightning share and the Classic check are not measurable |
+
 ## Field names checked against Salesforce's docs
 
 Checked on 2026-11-03 against the API 68.0 (Winter '27) Object Reference, Tooling API and Metadata API guides. developer.salesforce.com answers automated fetches with a 403, so we read Salesforce's own PDF editions of the same guides, from `resources.docs.salesforce.com/latest/latest/en-us/sfdc/pdf/` (`object_reference.pdf`, `api_tooling.pdf`, `api_meta.pdf`). The web page for an object is at `developer.salesforce.com/docs/atlas.en-us.object_reference.meta/object_reference/sforce_api_objects_<object>.htm`, or `atlas.en-us.api_tooling.meta/api_tooling/tooling_api_objects_<object>.htm` for Tooling.
