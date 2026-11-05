@@ -41,7 +41,7 @@ const PUBLISHED: PublishedFigure = {
   metricKey: WIN,
   value: 21,
   unit: "percent",
-  statistic: "average",
+  statistic: "on average",
   population: "synthetic companies in a test",
   measures: "Won deals as a share of closed deals.",
   differences: ["It counts no decision deals as lost."],
@@ -198,11 +198,12 @@ describe("published research", () => {
     const c = compare({ value: 25, published: [PUBLISHED] });
     const notes = comparisonNotes(c);
     const at = notes.findIndex((l) => l.label === "Published research");
-    assert.match(notes[at]!.text, /^Example Research, Synthetic Benchmarks \(2025\): 21%, the average for synthetic companies/);
+    assert.equal(notes[at]!.text, "Example Research, Synthetic Benchmarks (2025): 21%, on average.");
+    assert.ok(notes.some((l) => l.label === "Who it describes" && l.text.startsWith("synthetic companies")));
     assert.ok(notes.some((l) => l.label === "Source" && l.text.includes("https://example.com/report") && l.text.includes("2026-11-05")));
     assert.ok(notes.some((l) => l.label === "How it differs from ours" && l.text.includes("no decision")));
     const slide = compareSlide(renderContext(pseudonyms, "GBP", false), [c]).html;
-    const cell = /<td>21% average[^]*?<\/td>/.exec(slide)?.[0] ?? "";
+    const cell = /<td>21% on average[^]*?<\/td>/.exec(slide)?.[0] ?? "";
     assert.match(cell, /Example Research, 2025/);
   });
 

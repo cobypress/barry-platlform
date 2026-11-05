@@ -255,8 +255,9 @@ export function comparisonNotes(c: Comparison): Array<{ label: string; text: str
   if (c.published.length === 0) lines.push({ label: "Published research", text: c.publishedReason ?? "None." });
   for (const p of c.published) {
     const f = p.figure;
-    lines.push({ label: "Published research", text: `${f.source.publisher}, ${f.source.title} (${f.source.year}): ${fmt(f.value)}, the ${f.statistic} for ${f.population}.` });
+    lines.push({ label: "Published research", text: `${f.source.publisher}, ${f.source.title} (${f.source.year}): ${fmt(f.value)}, ${f.statistic}.` });
     lines.push({ label: "What it measures", text: f.measures });
+    lines.push({ label: "Who it describes", text: `${f.population}.` });
     lines.push({ label: "How it differs from ours", text: f.differences.length ? f.differences.join(" ") : "It measures the same thing." });
     lines.push({ label: "Basis", text: f.basis === "records" ? "Measured from deal records." : "Answered in a survey." });
     lines.push({ label: "Source", text: `${f.source.url}, read on ${f.source.checked}.` });
