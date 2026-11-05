@@ -27,9 +27,22 @@ export const WORKER_ENV = {
     HC_DRIVE_SA_KEY: "Its private key, PEM, with \\n for line breaks",
     HC_DRIVE_FOLDER_ID: "The top Health checks folder in Google Drive, shared with the service account",
     HC_DRIVE_IMPERSONATE: "A user the service account acts as, if the folder isn't in a shared drive (domain-wide delegation)",
-    ANTHROPIC_API_KEY: "Claude drafts each report section. Without it, sections are the engine's own text",
+    ANTHROPIC_API_KEY: "Claude drafts each report section. Without it or the federation variables below, sections are the engine's own text",
+    ANTHROPIC_FEDERATION_RULE_ID: "Claude through OIDC instead of a key: the federation rule (fdrl_...). Set it, ANTHROPIC_ORGANIZATION_ID and ANTHROPIC_SERVICE_ACCOUNT_ID together, or none",
+    ANTHROPIC_ORGANIZATION_ID: "The Anthropic organization's id",
+    ANTHROPIC_SERVICE_ACCOUNT_ID: "The service account the rule acts as (svac_...)",
+    ANTHROPIC_WORKSPACE_ID: "The workspace Claude's usage is billed to (wrkspc_...)",
   },
 } as const;
+
+const FEDERATION_VARS = ["ANTHROPIC_FEDERATION_RULE_ID", "ANTHROPIC_ORGANIZATION_ID", "ANTHROPIC_SERVICE_ACCOUNT_ID"] as const;
+
+/**
+ * How the worker signs in to Claude. A key wins if both are set, as it does in
+ * the SDK. Federation needs an identity token too: Render writes one and points
+ * ANTHROPIC_IDENTITY_TOKEN_FILE at it once its OIDC is set up for the service.
+ */
+export type ClaudeAccess = { kind: "key"; apiKey: string } | { kind: "federation" } | { kind: "none"; reason: string };
 
 const DRIVE_VARS = ["HC_DRIVE_SA_EMAIL", "HC_DRIVE_SA_KEY", "HC_DRIVE_FOLDER_ID"] as const;
 
@@ -45,8 +58,8 @@ export type WorkerConfig = {
   apiVersion?: string;
   /** Null when Drive isn't set up. The worker still starts: only documents jobs need it. */
   drive: DriveConfig | null;
-  /** Null when unset. The worker still starts, and sections stay the engine's own text. */
-  anthropicApiKey: string | null;
+  /** "none" when neither is set up. The worker still starts, and sections stay the engine's own text. */
+  claude: ClaudeAccess;
 };
 
 const key32 = (raw: string): Buffer | null => {
@@ -80,7 +93,18 @@ export function readWorkerEnv(env: NodeJS.ProcessEnv): { ok: true; config: Worke
   if (driveSet.length > 0 && driveSet.length < DRIVE_VARS.length) problems.push(`Set all of ${DRIVE_VARS.join(", ")} or none: ${DRIVE_VARS.filter((n) => !get(n)).join(", ")} missing`);
   if (get("HC_DRIVE_SA_KEY") && !get("HC_DRIVE_SA_KEY").includes("PRIVATE KEY")) problems.push("HC_DRIVE_SA_KEY must be the service account's PEM private key");
   if (get("HC_DRIVE_FOLDER_ID") && !/^[A-Za-z0-9_-]{10,200}$/.test(get("HC_DRIVE_FOLDER_ID"))) problems.push("HC_DRIVE_FOLDER_ID must be a Drive folder id, the last part of the folder's address");
+  const federationSet = FEDERATION_VARS.filter((name) => get(name));
+  if (federationSet.length > 0 && federationSet.length < FEDERATION_VARS.length) problems.push(`Set all of ${FEDERATION_VARS.join(", ")} or none: ${FEDERATION_VARS.filter((n) => !get(n)).join(", ")} missing`);
   if (problems.length) return { ok: false, problems };
+  const identityToken = Boolean(get("ANTHROPIC_IDENTITY_TOKEN_FILE") || get("ANTHROPIC_IDENTITY_TOKEN"));
+  const claude: ClaudeAccess = get("ANTHROPIC_API_KEY")
+    ? { kind: "key", apiKey: get("ANTHROPIC_API_KEY") }
+    : federationSet.length === 0
+      ? { kind: "none", reason: "Neither ANTHROPIC_API_KEY nor the ANTHROPIC_ federation variables are set" }
+      : identityToken
+        ? { kind: "federation" }
+        : // The worker still runs: the checks matter more than the prose.
+          { kind: "none", reason: "The federation variables are set, but there's no identity token: ANTHROPIC_IDENTITY_TOKEN_FILE isn't set. On Render, it appears once the service's OIDC is set up and it's redeployed" };
   const drive: DriveConfig | null =
     driveSet.length === DRIVE_VARS.length
       ? {
@@ -105,7 +129,7 @@ export function readWorkerEnv(env: NodeJS.ProcessEnv): { ok: true; config: Worke
       stopAtShare,
       apiVersion: get("HC_SF_API_VERSION") || undefined,
       drive,
-      anthropicApiKey: get("ANTHROPIC_API_KEY") || null,
+      claude,
     },
   };
 }

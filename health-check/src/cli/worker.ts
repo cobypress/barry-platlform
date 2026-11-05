@@ -1,5 +1,5 @@
 import { basename, dirname, join } from "node:path";
-import { anthropicClientWithKey } from "../narrative/client.ts";
+import { anthropicClient, anthropicClientWithKey } from "../narrative/client.ts";
 import { tokenKeySource, TokenStore } from "../salesforce/token-store.ts";
 import { startQueueWorker, type BullModule } from "../worker/bullmq.ts";
 import { GoogleDrive } from "../worker/drive.ts";
@@ -68,13 +68,20 @@ export async function workerCommand(
     stopAtShare: config.stopAtShare,
     apiVersion: config.apiVersion,
     drive: config.drive ? new GoogleDrive(config.drive) : null,
-    narrative: config.anthropicApiKey ? anthropicClientWithKey(config.anthropicApiKey) : undefined,
+    // With no key, the SDK finds the federation variables and the identity token itself, and refreshes its own access token.
+    narrative: config.claude.kind === "key" ? anthropicClientWithKey(config.claude.apiKey) : config.claude.kind === "federation" ? anthropicClient() : undefined,
     log,
   });
   const worker = startQueueWorker(bull, handler, { redisUrl: config.redisUrl, concurrency: config.concurrency, log });
   log(`Taking jobs from health-check-jobs, ${config.concurrency} at a time.`);
   if (!config.drive) log("Google Drive isn't set up, so released runs' documents can't be made.");
-  log(config.anthropicApiKey ? "Claude drafts each run's report sections." : "ANTHROPIC_API_KEY isn't set, so report sections are the engine's own text.");
+  log(
+    config.claude.kind === "key"
+      ? "Claude drafts each run's report sections, signed in with ANTHROPIC_API_KEY."
+      : config.claude.kind === "federation"
+        ? "Claude drafts each run's report sections, signed in through OIDC federation."
+        : `${config.claude.reason}, so report sections are the engine's own text.`,
+  );
   await (options.until ?? untilSignalled());
   log("Stopping: finishing the jobs in hand.");
   await worker.close();

@@ -119,12 +119,24 @@ describe("the worker's environment", () => {
     assert.equal(read.ok && read.config.connectKey.length, 32);
   });
 
-  test("ANTHROPIC_API_KEY is optional, and read when it's set", () => {
-    const without = readWorkerEnv(goodEnv());
-    assert.equal(without.ok && without.config.anthropicApiKey, null);
-    const read = readWorkerEnv({ ...goodEnv(), ANTHROPIC_API_KEY: " sk-ant-fake-key-for-tests \n" });
-    assert.equal(read.ok && read.config.anthropicApiKey, "sk-ant-fake-key-for-tests");
-    assert.ok("ANTHROPIC_API_KEY" in WORKER_ENV.optional);
+  test("Claude is optional: a key, or OIDC federation with an identity token", () => {
+    const FEDERATION = { ANTHROPIC_FEDERATION_RULE_ID: "fdrl_synthetic", ANTHROPIC_ORGANIZATION_ID: "00000000-0000-4000-8000-000000000001", ANTHROPIC_SERVICE_ACCOUNT_ID: "svac_synthetic" };
+    const claude = (extra: Record<string, string>) => {
+      const read = readWorkerEnv({ ...goodEnv(), ...extra });
+      assert.ok(read.ok, !read.ok ? read.problems.join("; ") : "");
+      return read.config.claude;
+    };
+    assert.equal(claude({}).kind, "none");
+    assert.deepEqual(claude({ ANTHROPIC_API_KEY: " sk-ant-fake-key-for-tests \n" }), { kind: "key", apiKey: "sk-ant-fake-key-for-tests" });
+    assert.deepEqual(claude({ ...FEDERATION, ANTHROPIC_IDENTITY_TOKEN_FILE: "/etc/render/oidc/anthropic" }), { kind: "federation" });
+    // Render writes the token file once OIDC is set up. Without it, drafting is off and the worker says why.
+    const noToken = claude(FEDERATION);
+    assert.ok(noToken.kind === "none" && /ANTHROPIC_IDENTITY_TOKEN_FILE isn't set/.test(noToken.reason));
+    // A key wins, as it does in the SDK.
+    assert.equal(claude({ ...FEDERATION, ANTHROPIC_IDENTITY_TOKEN_FILE: "/x", ANTHROPIC_API_KEY: "sk-ant-fake" }).kind, "key");
+    const half = readWorkerEnv({ ...goodEnv(), ANTHROPIC_FEDERATION_RULE_ID: "fdrl_synthetic" });
+    assert.ok(!half.ok && half.problems.some((p) => /ANTHROPIC_ORGANIZATION_ID, ANTHROPIC_SERVICE_ACCOUNT_ID missing/.test(p)));
+    for (const name of ["ANTHROPIC_API_KEY", "ANTHROPIC_FEDERATION_RULE_ID", "ANTHROPIC_ORGANIZATION_ID", "ANTHROPIC_SERVICE_ACCOUNT_ID", "ANTHROPIC_WORKSPACE_ID"]) assert.ok(name in WORKER_ENV.optional, name);
   });
 
   test("names every missing variable", () => {
@@ -187,7 +199,7 @@ describe("hc worker", () => {
     assert.deepEqual(pools[0]!.options, { connectionString: env.HC_WORKER_DATABASE_URL, max: 4 });
     assert.equal(pools[0]!.ended, true);
     assert.ok(!lines.join("\n").includes(env.HC_CONNECT_KEY!) && !lines.join("\n").includes("pw@"));
-    assert.ok(lines.some((l) => /ANTHROPIC_API_KEY isn't set, so report sections are the engine's own text/.test(l)));
+    assert.ok(lines.some((l) => /Neither ANTHROPIC_API_KEY nor the ANTHROPIC_ federation variables are set, so report sections are the engine's own text/.test(l)));
   });
 
   test("with ANTHROPIC_API_KEY, says Claude drafts the sections, and never prints the key", async () => {
@@ -205,7 +217,25 @@ describe("hc worker", () => {
     const env = { ...goodEnv(), ANTHROPIC_API_KEY: "sk-ant-fake-key-for-tests" };
     const lines: string[] = [];
     assert.equal(await workerCommand(env, { load: async () => modules, until: Promise.resolve(), log: (l) => lines.push(l) }), 0);
-    assert.ok(lines.some((l) => /Claude drafts each run's report sections/.test(l)));
+    assert.ok(lines.some((l) => /Claude drafts each run's report sections, signed in with ANTHROPIC_API_KEY/.test(l)));
     assert.ok(!lines.join("\n").includes("sk-ant-fake-key-for-tests"));
+  });
+
+  test("with OIDC federation, says Claude drafts the sections through it", async () => {
+    FakeWorker.made = [];
+    class FakePool {
+      async query(): Promise<never> {
+        throw new Error("no database in tests");
+      }
+      async connect(): Promise<never> {
+        throw new Error("no database in tests");
+      }
+      async end(): Promise<void> {}
+    }
+    const modules: WorkerModules = { bull, pg: { Pool: FakePool as unknown as WorkerModules["pg"]["Pool"] } };
+    const env = { ...goodEnv(), ANTHROPIC_FEDERATION_RULE_ID: "fdrl_synthetic", ANTHROPIC_ORGANIZATION_ID: "00000000-0000-4000-8000-000000000001", ANTHROPIC_SERVICE_ACCOUNT_ID: "svac_synthetic", ANTHROPIC_IDENTITY_TOKEN_FILE: "/nonexistent/token" };
+    const lines: string[] = [];
+    assert.equal(await workerCommand(env, { load: async () => modules, until: Promise.resolve(), log: (l) => lines.push(l) }), 0);
+    assert.ok(lines.some((l) => /signed in through OIDC federation/.test(l)), lines.join("\n"));
   });
 });
