@@ -354,8 +354,9 @@ function adoptionSlide(r: Render, metric: (id: string) => Metric | undefined): s
   const charts = [activeUsersChart(metric("adoption.monthly_active_users")), loginChannelsChart(metric("adoption.mobile_login_share")), lightningChart(metric("adoption.lightning_share"))];
   if (charts.every((c) => c.kind === "gap")) return "";
   const [active, channels, lightning] = charts as [Chart, Chart, Chart];
-  const refs = `${r.ref("adoption.monthly_active_users")}`;
-  return `<div class="eyebrow">Adoption and usage</div><h2>Who uses Salesforce, and how${refs}</h2><div class="chart-pair"><div>${chartSlot(active)}</div><div class="stack">${chartSlot(channels)}${chartSlot(lightning)}</div></div>`;
+  // References in small type beside the eyebrow, not at heading size.
+  const refs = ["adoption.monthly_active_users", "adoption.mobile_login_share", "adoption.lightning_share"].map((id) => r.ref(id)).join("");
+  return `<div class="eyebrow">Adoption and usage${refs}</div><h2>Who uses Salesforce, and how</h2><div class="chart-pair"><div>${chartSlot(active)}</div><div class="stack">${chartSlot(channels)}${chartSlot(lightning)}</div></div>`;
 }
 
 function processSlide(r: Render, metric: (id: string) => Metric | undefined, calibration: Calibration): Slide {

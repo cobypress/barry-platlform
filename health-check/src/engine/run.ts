@@ -47,7 +47,7 @@ export type RunOptions = {
   /** Complete by default. Essentials reads set-up only, and never CRM records. */
   scope?: RunScope;
   /** "scan" for the free set-up teaser. */
-  product?: "barometer" | "scan";
+  product?: "barometer" | "scan" | "pulse";
   /** The run this one re-checks: its first health check, whose findings the report compares against. */
   baselineRunId?: string | null;
 };

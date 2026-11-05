@@ -425,6 +425,12 @@ export function stageVelocityChart(won: Metric | undefined, lost: Metric | undef
 // Adoption (roadmap 3.4). Every figure is the adoption metrics' own: a month's
 // count, a channel's share, or the Lightning metric's stats.
 
+/** "profile Standard User" as a reader would say it: "Standard User profile". */
+const groupName = (group: string): string => {
+  const [kind, ...rest] = group.split(" ");
+  return kind === "profile" || kind === "role" ? `${rest.join(" ")} ${kind}` : group;
+};
+
 /** Monthly active users, with the group that fell furthest from its peak as a second, named line. */
 export function activeUsersChart(metric: Metric | undefined, width = HALF_WIDTH): Chart {
   const id = "active-users";
@@ -456,13 +462,14 @@ export function activeUsersChart(metric: Metric | undefined, width = HALF_WIDTH)
     const peak = Math.max(...values.slice(0, -1));
     body.push(line(values, colour.ivory, true));
     const labelY = Math.abs(y(values.at(-1)!) - y(all.at(-1)!)) < 16 ? y(values.at(-1)!) + 18 : y(values.at(-1)!) + 4;
-    body.push(text(right + 10, labelY, clip(group, 140, 12), { size: 12 }));
-    body.push(text(right + 10, labelY + 15, `${peak} at its peak, ${values.at(-1)} now`, { size: 11, fill: colour.panelMuted }));
+    const name = wrap(groupName(group), 20).slice(0, 3);
+    name.forEach((part, i) => body.push(text(right + 10, labelY + i * 15, part, { size: 12 })));
+    body.push(text(right + 10, labelY + name.length * 15, `${peak} at its peak, ${values.at(-1)} now`, { size: 11, fill: colour.panelMuted }));
   }
   body.push(text(x(0), bottom + 22, monthYear(series[0]!.date), { size: 11, fill: colour.panelMuted, cls: "tick" }));
   body.push(text(x(series.length - 1), bottom + 22, monthYear(series.at(-1)!.date), { size: 11, fill: colour.panelMuted, anchor: "end", cls: "tick" }));
   if (group) body.push(text(PAD, height - 8, "The dashed line is the group that fell furthest from its peak.", { size: 11, fill: colour.panelMuted, cls: "tick" }));
-  return frame(id, title, `People who logged in each month, ${all.at(-1)} in the latest.${group ? ` ${group} fell furthest.` : ""}`, height, body.join(""), width);
+  return frame(id, title, `People who logged in each month, ${all.at(-1)} in the latest.${group ? ` The ${groupName(group)} fell furthest.` : ""}`, height, body.join(""), width);
 }
 
 const SHARE_FILLS = [colour.chartreuse, colour.ivory, colour.panelMuted, colour.snow, colour.panelRule];
@@ -635,6 +642,26 @@ export function processFlowChart(metric: Metric | undefined, stages: FlowStage[]
   body.push(`<rect x="${PAD}" y="${lostY}" width="${width - 2 * PAD - slot}" height="8" rx="4" fill="${colour.panelRule}"/>`);
   body.push(text(PAD, lostY + 26, "Lost or no decision", { size: 11.5, fill: colour.panelMuted }));
   for (const [from, n] of drops) if (open.includes(from)) body.push(`<line x1="${cx(from)}" x2="${cx(from)}" y1="${row + boxH / 2}" y2="${lostY}" stroke="${colour.panelMuted}" stroke-width="${thickness(n).toFixed(1)}" stroke-opacity="0.55"/>`);
+  // Each move back leaves and arrives at its own point along the box, wider
+  // arcs outside narrower ones, so none share a start or lie on another.
+  const backs = cells
+    .map((c) => ({ c, to: nodeOf(c.to) }))
+    .filter((x): x is { c: (typeof cells)[number]; to: string } => x.to !== null && open.includes(x.c.from) && nodes.indexOf(x.to) < nodes.indexOf(x.c.from));
+  const ends = new Map<string, Array<{ key: string; order: number }>>();
+  for (const { c, to } of backs) {
+    const span = nodes.indexOf(c.from) - nodes.indexOf(to);
+    const key = `${c.from}>${c.to}`;
+    // Where an arc arrives (its left end), the widest sits furthest left; where it leaves, furthest right.
+    ends.set(to, [...(ends.get(to) ?? []), { key: `${key}:in`, order: -span }]);
+    ends.set(c.from, [...(ends.get(c.from) ?? []), { key: `${key}:out`, order: span }]);
+  }
+  const offset = new Map<string, number>();
+  for (const list of ends.values()) {
+    list.sort((p, q) => p.order - q.order || p.key.localeCompare(q.key));
+    const usable = boxW - 24;
+    list.forEach((e, i) => offset.set(e.key, list.length === 1 ? 0 : -usable / 2 + (usable * i) / (list.length - 1)));
+  }
+  const pills: string[] = [];
   for (const c of cells) {
     const to = nodeOf(c.to);
     if (!to || to === c.from || !open.includes(c.from)) continue;
@@ -647,16 +674,29 @@ export function processFlowChart(metric: Metric | undefined, stages: FlowStage[]
       body.push(text((x1 + x2) / 2, row - Number(w) / 2 - 7, String(c.n), { size: 11.5, anchor: "middle", weight: font.weights.medium }));
       continue;
     }
-    // Skips arc above, moves back arc below, each as high as the stages it spans.
+    // Skips arc above, moves back arc below, each as deep as the stages it spans.
     const back = b < a;
     const span = Math.abs(b - a);
-    const lift = Math.min(28 + span * 18, 100) * (back ? 1 : -1);
-    const [x1, x2] = [cx(c.from), cx(to)];
     const yEdge = row + (back ? boxH / 2 : -boxH / 2);
-    body.push(`<path d="M${x1} ${yEdge}Q${(x1 + x2) / 2} ${yEdge + lift * 2} ${x2} ${yEdge}" fill="none" stroke="${colour.ivory}" stroke-width="${w}"${back ? ' stroke-dasharray="6 4"' : ""}/>`);
-    // At the curve's apex, clear of its own stroke.
-    body.push(text((x1 + x2) / 2, yEdge + lift + (back ? Number(w) / 2 + 13 : -(Number(w) / 2 + 5)), String(c.n), { size: 11.5, anchor: "middle" }));
+    if (!back) {
+      const lift = -Math.min(28 + span * 18, 100);
+      const [x1, x2] = [cx(c.from), cx(to)];
+      body.push(`<path d="M${x1} ${yEdge}Q${(x1 + x2) / 2} ${yEdge + lift * 2} ${x2} ${yEdge}" fill="none" stroke="${colour.ivory}" stroke-width="${w}"/>`);
+      body.push(text((x1 + x2) / 2, yEdge + lift - (Number(w) / 2 + 5), String(c.n), { size: 11.5, anchor: "middle" }));
+      continue;
+    }
+    // Deep enough to clear the arcs it spans, and never as low as the lost bar.
+    const lift = Math.min(22 + span * 26, lostY - 20 - yEdge);
+    const key = `${c.from}>${c.to}`;
+    const x1 = cx(c.from) + (offset.get(`${key}:out`) ?? 0);
+    const x2 = cx(to) + (offset.get(`${key}:in`) ?? 0);
+    body.push(`<path d="M${x1.toFixed(1)} ${yEdge}Q${((x1 + x2) / 2).toFixed(1)} ${yEdge + lift * 2} ${x2.toFixed(1)} ${yEdge}" fill="none" stroke="${colour.ivory}" stroke-width="${w}" stroke-dasharray="6 4"/>`);
+    // The count on a pill at the arc's lowest point, drawn over every line, so it never sits on one.
+    const label = String(c.n);
+    const pw = 12 + label.length * 7;
+    pills.push(`<rect x="${((x1 + x2) / 2 - pw / 2).toFixed(1)}" y="${(yEdge + lift - 9).toFixed(1)}" width="${pw}" height="18" rx="9" fill="${colour.carbon}" stroke="${colour.panelMuted}" stroke-width="1"/>`, text((x1 + x2) / 2, yEdge + lift + 4, label, { size: 11.5, anchor: "middle" }));
   }
+  body.push(...pills);
   for (const name of nodes) {
     const x = cx(name) - boxW / 2;
     const won = name === "Won";

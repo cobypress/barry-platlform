@@ -127,7 +127,7 @@ describe("the retention sweep, on a fake clock", () => {
     await sweep(at(45));
     const log = lines.join("\n");
     assert.ok(!log.includes(runs) && !log.includes("/"), log);
-    assert.match(log, /Retention sweep: 2 released runs\. Raw extracts deleted: 1\. Run folders deleted: 0\. Kept: 0\. No release date we can read: 1\. Busy: 0\. Refused: 0\./);
+    assert.match(log, /Retention sweep: 2 released runs and 0 pulses\. Raw extracts deleted: 1\. Run folders deleted: 0\. Kept: 0\. No release date we can read: 1\. Busy: 0\. Refused: 0\./);
   });
 
   test("leaves a run a job is working on, for the next sweep", async () => {
@@ -167,6 +167,60 @@ describe("dates", () => {
     assert.equal(dueFor(released, at(30)), "extracts");
     assert.equal(dueFor(released, at(364)), "extracts");
     assert.equal(dueFor(released, at(365)), "folder");
+  });
+});
+
+describe("a monthly pulse, which is never released", () => {
+  function pulseSetup() {
+    const base = setup();
+    const pulse = (id: string, finishedAt: string | null = RELEASED): string => {
+      base.store.addRun(runInput({ run: consoleRun({ id, product: "pulse", status: "in_review", finishedAt }) }));
+      return runFolder(base.runs, id);
+    };
+    return { ...base, pulse };
+  }
+
+  test("loses its raw extracts 30 days after it finished, and keeps what the next pulse compares against", async () => {
+    const { pulse, sweep } = pulseSetup();
+    const dir = pulse("hc-2026-01-01-00000101");
+    assert.equal(action(await sweep(at(29.9)), "hc-2026-01-01-00000101"), "kept");
+    assert.equal(action(await sweep(at(30)), "hc-2026-01-01-00000101"), "extracts_deleted");
+    assert.ok(!existsSync(join(dir, "checkpoints")));
+    for (const kept of ["run.json", "findings.json", "pseudonym-map.json"]) assert.ok(existsSync(join(dir, kept)), kept);
+  });
+
+  test("and its whole folder 12 months after it finished, not a day before", async () => {
+    const { pulse, sweep } = pulseSetup();
+    const dir = pulse("hc-2026-01-01-00000102");
+    const year = (addMonths(new Date(RELEASED), 12).getTime() - new Date(RELEASED).getTime()) / DAY;
+    assert.notEqual(action(await sweep(at(year - 1)), "hc-2026-01-01-00000102"), "folder_deleted");
+    assert.ok(existsSync(dir));
+    assert.equal(action(await sweep(at(year)), "hc-2026-01-01-00000102"), "folder_deleted");
+    assert.ok(!existsSync(dir));
+  });
+
+  test("a pulse that hasn't finished is never touched", async () => {
+    const { pulse, sweep, lines } = pulseSetup();
+    const dir = pulse("hc-2026-01-01-00000103", null);
+    assert.equal(action(await sweep(at(800)), "hc-2026-01-01-00000103"), "no_release_date");
+    assert.ok(existsSync(join(dir, "checkpoints", "opportunities.json")));
+    assert.match(lines.join("\n"), /0 released runs and 1 pulses/);
+  });
+
+  test("the console's pulses, with when each finished, or null", async () => {
+    const statements: string[] = [];
+    const pool = {
+      async query(text: string): Promise<SqlResult> {
+        statements.push(text);
+        return { rows: [{ runId: "hc-p", finishedAt: "2026-01-31T10:00:00.000Z" }, { runId: "hc-q", finishedAt: null }], rowCount: 2 };
+      },
+    } as unknown as SqlPool;
+    assert.deepEqual(await new PostgresWorkerStore(pool).listPulseRuns(), [
+      { runId: "hc-p", finishedAt: "2026-01-31T10:00:00.000Z" },
+      { runId: "hc-q", finishedAt: null },
+    ]);
+    assert.match(statements[0]!, /WHERE "product" = 'pulse'/);
+    assert.match(statements[0]!, /to_char\("finishedAt"/);
   });
 });
 

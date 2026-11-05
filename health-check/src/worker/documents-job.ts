@@ -149,6 +149,7 @@ async function documentsLocked(runId: string, deps: WorkerDeps, attempt: Attempt
   const now = () => (deps.now ?? (() => new Date()))().toISOString();
   const input = await deps.store.loadDocumentsJob(runId);
   if (!input) return { outcome: "skipped", detail: `No run ${runId}` };
+  if (input.run.product === "pulse") return { outcome: "skipped", detail: `Run ${runId} is a pulse, which never has documents` };
   if (input.run.status !== "released") return { outcome: "skipped", detail: `Run ${runId} isn't released, so it has no documents yet` };
   if (input.state !== "queued" && input.state !== "making") return { outcome: "skipped", detail: `The documents for ${runId} weren't asked for` };
 

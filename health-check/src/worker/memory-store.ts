@@ -1,6 +1,7 @@
 import type { ScanResult } from "../scan/result.ts";
+import type { PulseResult } from "../pulse/result.ts";
 import { Run, type BenchmarkRow, type ConnectLink } from "../schemas/index.ts";
-import { ORG_AWAITING_CONNECT, RunClosedError, type ConnectJobInput, type DocumentsJobInput, type DocumentsMade, type LinkConnected, type LinkState, type ReleasedRun, type RunJobInput, type RunOutputRecord, type RunProgress, type WorkerStore } from "./types.ts";
+import { ORG_AWAITING_CONNECT, RunClosedError, type ConnectJobInput, type DocumentsJobInput, type DocumentsMade, type LinkConnected, type LinkState, type PulseRun, type ReleasedRun, type RunJobInput, type RunOutputRecord, type RunProgress, type WorkerStore } from "./types.ts";
 
 // The WorkerStore for tests: the console's tables as plain maps, with the same
 // rules a database store must keep. Writes replace; a run in review or
@@ -150,6 +151,18 @@ export class MemoryWorkerStore implements WorkerStore {
   async saveScanResult(runId: string, result: ScanResult, madeAt: string): Promise<void> {
     this.scanResults.set(runId, { result: structuredClone(result), madeAt });
     this.writes.push({ method: "saveScanResult", id: runId });
+  }
+
+  /** The pulses' results, keyed by run id. */
+  readonly pulseResults = new Map<string, { result: PulseResult; madeAt: string }>();
+
+  async savePulseResult(runId: string, result: PulseResult, madeAt: string): Promise<void> {
+    this.pulseResults.set(runId, { result: structuredClone(result), madeAt });
+    this.writes.push({ method: "savePulseResult", id: runId });
+  }
+
+  async listPulseRuns(): Promise<PulseRun[]> {
+    return [...this.runs.values()].filter((r) => r.run.product === "pulse").map((r) => ({ runId: r.run.id, finishedAt: r.run.finishedAt ?? null }));
   }
 
   /** The microsites, keyed by run id. */

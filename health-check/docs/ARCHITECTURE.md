@@ -44,6 +44,7 @@ src/
   design/       Design tokens: the only place colours and type are set
   render/       Charts, Word and PDF output, and the layout checks
   money/        What a seat costs (calibration, then list price), list prices with their sources, and the annual cost a report states
+  pulse/        The monthly pulse's result: what changed since its baseline, for the console to show
   practice/     What good looks like: each area's statements, with their public sources, as data
   benchmark/    Anonymised rows for the benchmark set, with consent, and their summary; published research and the comparison a report shows
   retention/    Purging raw extracts, and whole run folders, from released runs (the worker's daily sweep is worker/retention.ts)

@@ -1,4 +1,5 @@
 import type { ScanResult } from "../scan/result.ts";
+import type { PulseResult } from "../pulse/result.ts";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { Intake } from "../narrative/intake.ts";
@@ -17,6 +18,7 @@ import {
   type RunJobInput,
   type RunOutputRecord,
   type RunProgress,
+  type PulseRun,
   type ReleasedRun,
   type WorkerStore,
 } from "./types.ts";
@@ -488,6 +490,19 @@ export class PostgresWorkerStore implements WorkerStore {
       `INSERT INTO "HealthCheckScanResult" ("runId", "madeAt", "result") VALUES ($1, $2::timestamp(3), $3::jsonb) ON CONFLICT ("runId") DO UPDATE SET "madeAt" = EXCLUDED."madeAt", "result" = EXCLUDED."result"`,
       [runId, madeAt, JSON.stringify(result)],
     );
+  }
+
+  async savePulseResult(runId: string, result: PulseResult, madeAt: string): Promise<void> {
+    // blackcloud-next's HealthCheckPulseResult ("runId" PK, "madeAt", "result" JSONB), as its scan result is.
+    await this.#pool.query(
+      `INSERT INTO "HealthCheckPulseResult" ("runId", "madeAt", "result") VALUES ($1, $2::timestamp(3), $3::jsonb) ON CONFLICT ("runId") DO UPDATE SET "madeAt" = EXCLUDED."madeAt", "result" = EXCLUDED."result"`,
+      [runId, madeAt, JSON.stringify(result)],
+    );
+  }
+
+  async listPulseRuns(): Promise<PulseRun[]> {
+    const { rows } = await this.#pool.query(`SELECT "id" AS "runId", to_char("finishedAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "finishedAt" FROM "HealthCheckRun" WHERE "product" = 'pulse' ORDER BY "id"`);
+    return rows.map((row: Record<string, unknown>) => ({ runId: String(row.runId), finishedAt: typeof row.finishedAt === "string" ? row.finishedAt : null }));
   }
 
   async saveMicrosite(runId: string, sealedPages: string, madeAt: string, expiresAt: string): Promise<void> {
