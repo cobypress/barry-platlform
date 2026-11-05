@@ -20,7 +20,7 @@ import { accessBlock, automationTable, dataModelDiagram, DIAGRAM_KEY, hasDocumen
 // The full deck: 16:9, 40 to 60 slides. Issue slides flex to keep it in range,
 // because a thin org and a messy one have very different numbers of findings.
 
-export const DECK_RANGE = { min: 20, max: 100 } as const;
+export const DECK_RANGE = { min: 20, max: 110 } as const;
 // A set-up review has no pipeline part, and a tidy org has few issues to show, so
 // its floor is lower. The ceiling is the same: the deck still has to be read.
 export const SETUP_REVIEW_DECK_RANGE = { min: 12, max: 60 } as const;
