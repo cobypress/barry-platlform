@@ -43,7 +43,7 @@ src/
   narrative/    Section builder, ranking and plan, Claude drafting and its guards
   design/       Design tokens: the only place colours and type are set
   render/       Charts, Word and PDF output, and the layout checks
-  benchmark/    Anonymised rows for the benchmark set, with consent, and their summary
+  benchmark/    Anonymised rows for the benchmark set, with consent, and their summary; published research and the comparison a report shows
   retention/    Purging raw extracts from finished runs
   cli/          hc
   testing/      Synthetic org, simulator, recording and replay
@@ -67,7 +67,7 @@ A domain is a `DomainModule` (`src/domains/types.ts`): extractors, metric builde
 | 8. No customer data in repos | The CLI refuses to write inside a git work tree. Fixture tests require reserved domains and zero-padded ids |
 | 9. API budget and resume | `ApiBudget` stops before the call that crosses the share. Steps and Opportunity pages are checkpointed |
 | 10. Approval before release | `ReportSection` schema and `canRelease()`, used in Milestone 5 |
-| 11. Benchmarks separate | `BenchmarkRow` is strict: no extra fields, whole units, bands and quarters only. `hc benchmark` builds rows from an allowlist, needs consent, and records it in the run folder |
+| 11. Benchmarks separate | `BenchmarkRow` is strict: no extra fields, whole units, bands and quarters only. `hc benchmark` builds rows from an allowlist, needs consent, and records it in the run folder. A report shows our own customers only as a range from 5 orgs, and groups by industry and size from 10 (`src/benchmark/compare.ts`) |
 
 ## The read-only boundary
 

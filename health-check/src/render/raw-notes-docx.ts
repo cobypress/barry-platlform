@@ -7,6 +7,7 @@ import { longDate, money, plainWords, ukDates } from "./format.ts";
 import { INVENTORY_COLUMNS, inventoryRows, OBJECT_INVENTORY } from "../domains/configuration/inventory.ts";
 import { inventoryLine } from "../notes/raw-notes.ts";
 import { noteSections, rawNotesOrder } from "./references.ts";
+import { comparisonId, comparisonNotes, formatFigure, type Comparison } from "../benchmark/compare.ts";
 
 // The working record behind the reports: every check, what it found, and how to
 // reproduce it. Tokens become names here, at the last moment, because this is
@@ -140,6 +141,11 @@ function addMetric(notes: Notes, m: Metric, ref: string): void {
   if (m.series.length) notes.table(["Month end", "Value", "Sample"], m.series.map((p) => [p.date, p.value === null ? (p.notMeasurableReason ?? "Not measurable") : String(p.value), String(p.n)]), [2300, 5000, 2000]);
 }
 
+function addComparison(notes: Notes, c: Comparison, ref: string): void {
+  notes.heading(`${ref} ${c.metric.label}${c.value === null ? "" : `: ${formatFigure(c.value, c.metric.unit)}`}`, 3);
+  for (const line of comparisonNotes(c)) notes.labelled(line.label, line.text);
+}
+
 function addManualStep(notes: Notes, s: ManualStep, ref: string): void {
   notes.heading(`${ref} ${s.title} (${s.status})`, 3);
   notes.labelled("Why it matters", s.whyItMatters);
@@ -186,6 +192,7 @@ export function buildRawNotes(report: BuiltReport, pseudonyms: Pseudonymiser): N
     if (s.key === "manual_steps") manualSteps.forEach((step) => addManualStep(notes, step, ref(step.id)));
     if (s.key.startsWith("findings_")) rawNotesOrder(findings.filter((f) => s.items.some((item) => item.id === f.id))).forEach((f) => addFinding(notes, f, calibration.currency, ref(f.id)));
     if (s.key === "pipeline_metrics") metrics.forEach((m) => addMetric(notes, m, ref(m.id)));
+    if (s.key === "comparisons") report.comparisons.forEach((c) => addComparison(notes, c, ref(comparisonId(c.metric.key))));
     if (s.key === "queries") addQueries(notes, findings, metrics);
     if (s.key === "overrides") addOverrides(notes, overrides);
   }

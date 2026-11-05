@@ -1,3 +1,4 @@
+import { comparisonId } from "../benchmark/compare.ts";
 import type { BuiltReport } from "../narrative/sections.ts";
 import { issuesOf } from "../narrative/select.ts";
 import type { Finding } from "../schemas/index.ts";
@@ -23,9 +24,11 @@ export function noteSections(report: BuiltReport): NoteSection[] {
       ? rawNotesOrder(findings.filter((f) => section.findingIds.includes(f.id))).map((f) => f.id)
       : section.key === "pipeline_metrics"
         ? metrics.map((m) => m.id)
-        : section.key === "manual_steps"
-          ? manualSteps.map((s) => s.id)
-          : [];
+        : section.key === "comparisons"
+          ? report.comparisons.map((c) => comparisonId(c.metric.key))
+          : section.key === "manual_steps"
+            ? manualSteps.map((s) => s.id)
+            : [];
     return { ref, key: section.key, title: section.title, items: ids.map((id, k) => ({ ref: `${ref}.${k + 1}`, id })) };
   });
 }
