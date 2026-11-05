@@ -10,6 +10,7 @@ import { loadRun, OUTPUT_FILES } from "../render/render-run.ts";
 import { OAuthConnectionProvider, revokeConnection } from "../salesforce/oauth-provider.ts";
 import { OAuthError } from "../salesforce/oauth.ts";
 import { buildScanResult } from "../scan/result.ts";
+import { buildPulseResult } from "../pulse/result.ts";
 import { deleteRunFolder } from "../retention/purge.ts";
 import type { StoredConnection } from "../salesforce/token-store.ts";
 import { safeReason, type Attempt, type JobOutcome, type WorkerDeps } from "./deps.ts";
@@ -167,9 +168,9 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
     // writes it, and with a key Claude then drafts the ones that have a brief.
     if (input.intake) writeFileSync(join(dir, "intake.json"), `${JSON.stringify(input.intake, null, 2)}\n`, { mode: 0o600 });
     const { input: reportInput, pseudonyms } = loadRun(dir);
-    const scan = input.run.product === "scan";
-    // A scan is never reviewed, so Claude has nothing to draft for it.
-    const report = deps.narrative && !scan ? await draftSections(runId, dir, reportInput, deps.narrative, pseudonyms, now(), log) : buildReport(reportInput);
+    // A scan and a pulse are never reviewed, so Claude has nothing to draft for either.
+    const unreviewed = input.run.product === "scan" || input.run.product === "pulse";
+    const report = deps.narrative && !unreviewed ? await draftSections(runId, dir, reportInput, deps.narrative, pseudonyms, now(), log) : buildReport(reportInput);
     const outputs = Object.values(report.outputs);
     writeFileSync(join(dir, SECTIONS_FILE), `${JSON.stringify(outputs, null, 2)}\n`, { mode: 0o600 });
     await deps.store.saveRunOutput(runId, {
@@ -195,7 +196,27 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
     return fail(`The run finished, but its results couldn't be saved: ${reason}`);
   }
   if (input.run.product === "scan") await finishScan(runId, dir, name, deps, now().toISOString(), log);
+  if (input.run.product === "pulse") await finishPulse(runId, dir, deps, now().toISOString(), log);
   return { outcome: "done", detail: `Run ${runId} is ${result.run.status.replace("_", " ")}` };
+}
+
+/**
+ * A monthly pulse, once its findings are saved: what changed since its baseline,
+ * for the console to show. Unlike a scan, it keeps its run folder, because the
+ * next pulse compares against it, and its connection, because an Ongoing
+ * customer stays connected. Retention deletes the folder in time (DECISIONS.md
+ * 136). A failure here is logged, as a scan's is.
+ */
+async function finishPulse(runId: string, dir: string, deps: WorkerDeps, at: string, log: (line: string) => void): Promise<void> {
+  try {
+    // loadRun reads the baseline from the folder beside this one, if it's there and readable.
+    const { input } = loadRun(dir);
+    const result = buildPulseResult(buildReport(input));
+    await deps.store.savePulseResult(runId, result, at);
+    log(`Pulse ${runId}'s result is ready${result.baselineRunId ? `, against ${result.baselineRunId}` : ", with no baseline we could read"}.`);
+  } catch (err) {
+    log(`Pulse ${runId}'s result couldn't be saved: ${safeReason(err)}`);
+  }
 }
 
 /**

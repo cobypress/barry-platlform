@@ -40,7 +40,8 @@ export type RunScope = z.infer<typeof RunScope>;
 export const Run = z.object({
   id: z.string().min(1),
   // A scan is the free set-up teaser (roadmap Stage 5): never reviewed, released or made into documents.
-  product: z.enum(["barometer", "scan"]).default("barometer"),
+  // A pulse is Barometer Ongoing's monthly re-check against its baseline: never reviewed, drafted or made into documents (DECISIONS.md 135).
+  product: z.enum(["barometer", "scan", "pulse"]).default("barometer"),
   customerRef: z.string().nullable(),
   orgId: z.string().min(15).max(18),
   isSandbox: z.boolean(),

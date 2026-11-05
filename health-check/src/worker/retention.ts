@@ -5,7 +5,10 @@ import { JobBusyError, withJobLock } from "./lock.ts";
 import type { ReleasedRun, WorkerStore } from "./types.ts";
 
 // Roadmap 2.3 and decision 16: a released run's raw extracts go 30 days after
-// release, and the whole run folder 12 months after. Benchmark rows live in the
+// release, and the whole run folder 12 months after. A monthly pulse is never
+// released, so its clock starts when it finished (DECISIONS.md 136): its raw
+// extracts go after 30 days too, because the next pulse compares only against
+// what it found, and its folder after 12 months. Benchmark rows live in the
 // console's database and are never touched here.
 //
 // Only runs the console says are released, with a release date we can read, are
@@ -25,7 +28,7 @@ export type RetentionAction = "extracts_deleted" | "folder_deleted" | "kept" | "
 export type RetentionOutcome = { runId: string; action: RetentionAction; files: number; dryRun: boolean; reason?: string };
 
 export type RetentionDeps = {
-  store: Pick<WorkerStore, "listReleasedRuns">;
+  store: Pick<WorkerStore, "listReleasedRuns" | "listPulseRuns">;
   runsDir: string;
   /** The jobs' lock folder, so a documents job and the sweep never work on one run at once. */
   locksDir?: string;
@@ -72,15 +75,18 @@ function sweepOne(run: ReleasedRun, root: string, now: Date, dryRun: boolean): R
 }
 
 const WHY: Partial<Record<RetentionAction, string>> = {
-  extracts_deleted: `raw extracts, ${EXTRACT_RETENTION_DAYS} days after release`,
-  folder_deleted: `the whole run folder, ${FOLDER_RETENTION_MONTHS} months after release`,
+  extracts_deleted: `raw extracts, ${EXTRACT_RETENTION_DAYS} days after release, or after a pulse finished`,
+  folder_deleted: `the whole run folder, ${FOLDER_RETENTION_MONTHS} months after release, or after a pulse finished`,
 };
 
 /** One pass over every released run. Logs counts and run ids only, never a path or a name. */
 export async function retentionSweep(deps: RetentionDeps): Promise<RetentionOutcome[]> {
   const now = deps.now ?? new Date();
   const root = resolve(deps.runsDir);
-  const runs = await deps.store.listReleasedRuns();
+  // A pulse's date is when it finished. One the console lists both ways is swept once, by its release.
+  const released = await deps.store.listReleasedRuns();
+  const pulses = (await deps.store.listPulseRuns()).filter((p) => !released.some((r) => r.runId === p.runId));
+  const runs: ReleasedRun[] = [...released, ...pulses.map((p) => ({ runId: p.runId, releasedAt: p.finishedAt }))];
   const outcomes: RetentionOutcome[] = [];
   for (const run of runs) {
     let result: RetentionOutcome;
@@ -100,7 +106,7 @@ export async function retentionSweep(deps: RetentionDeps): Promise<RetentionOutc
   }
   const count = (action: RetentionAction): number => outcomes.filter((o) => o.action === action).length;
   deps.log(
-    `Retention sweep${deps.dryRun ? " (dry run, nothing deleted)" : ""}: ${runs.length} released runs. Raw extracts ${deps.dryRun ? "due" : "deleted"}: ${count("extracts_deleted")}. Run folders ${deps.dryRun ? "due" : "deleted"}: ${count("folder_deleted")}. Kept: ${count("kept") + count("already_purged") + count("no_folder")}. No release date we can read: ${count("no_release_date")}. Busy: ${count("busy")}. Refused: ${count("refused")}.`,
+    `Retention sweep${deps.dryRun ? " (dry run, nothing deleted)" : ""}: ${released.length} released runs and ${pulses.length} pulses. Raw extracts ${deps.dryRun ? "due" : "deleted"}: ${count("extracts_deleted")}. Run folders ${deps.dryRun ? "due" : "deleted"}: ${count("folder_deleted")}. Kept: ${count("kept") + count("already_purged") + count("no_folder")}. No release date we can read: ${count("no_release_date")}. Busy: ${count("busy")}. Refused: ${count("refused")}.`,
   );
   return outcomes;
 }

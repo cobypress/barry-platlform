@@ -1,4 +1,5 @@
 import type { ScanResult } from "../scan/result.ts";
+import type { PulseResult } from "../pulse/result.ts";
 import { z } from "zod";
 import type { Intake } from "../narrative/intake.ts";
 import type { BenchmarkRow, Calibration, ConnectLink, Finding, ManualAnswer, ManualStep, Metric, NumberOverride, ReportSection, Run, Score, SectionVersion } from "../schemas/index.ts";
@@ -186,12 +187,20 @@ export interface WorkerStore {
   /** A free scan's teaser, for the console to show the prospect. One row a run. */
   saveScanResult(runId: string, result: ScanResult, madeAt: string): Promise<void>;
 
+  /** A monthly pulse's result (the console's HealthCheckPulseResult): one row a run, replaced on a second delivery. */
+  savePulseResult(runId: string, result: PulseResult, madeAt: string): Promise<void>;
+  /** Every pulse run, with when it finished. A pulse is never released, so retention counts from this. */
+  listPulseRuns(): Promise<PulseRun[]>;
+
   /** The run's customer microsite, sealed: one row a run, its version moving on with each make. */
   saveMicrosite(runId: string, sealedPages: string, madeAt: string, expiresAt: string): Promise<void>;
 
   /** Every run the console has released, with when its last output was released. Null when no release date can be read. */
   listReleasedRuns(): Promise<ReleasedRun[]>;
 }
+
+/** A pulse run, for the retention sweep. Null when it hasn't finished, or the date can't be read. ISO UTC. */
+export type PulseRun = { runId: string; finishedAt: string | null };
 
 /** A released run, for the retention sweep. The date is ISO UTC. */
 export type ReleasedRun = { runId: string; releasedAt: string | null };

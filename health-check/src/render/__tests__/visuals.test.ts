@@ -82,7 +82,9 @@ describe("adoption", () => {
   test("the line picks out the group that fell furthest, with its peak and where it is now", () => {
     const markup = svg(activeUsersChart(metric("adoption.monthly_active_users")));
     assert.match(markup, /Everyone: 5/);
-    assert.match(markup, /profile Standard Us/);
+    assert.match(markup, />Standard User<\/text>/);
+    assert.match(markup, />profile<\/text>/);
+    assert.doesNotMatch(markup, /…/, "wrapped, not cut");
     assert.match(markup, /7 at its peak, 4 now/);
     assert.match(markup, /stroke-dasharray="6 4"/);
   });
@@ -133,6 +135,25 @@ describe("the sales process", () => {
     assert.match(markup, />395</, "Prospecting to Discovery is the main flow, not a skip");
     assert.match(markup, /<path d="M[^"]+Q[^"]+" fill="none" stroke="#FCFFF3" stroke-width="[\d.]+" stroke-dasharray="6 4"\/>/, "a move back");
     assert.match(markup, /<path d="M[^"]+Q[^"]+" fill="none" stroke="#FCFFF3" stroke-width="[\d.]+"\/>/, "a skip");
+  });
+
+  test("moves back fan out: no two leave from the same point, and every count sits on its own pill", () => {
+    const markup = svg(processFlowChart(metric("historic.stage_transitions"), STAGES));
+    const backs = [...markup.matchAll(/<path d="M([\d.]+) ([\d.]+)Q[^ ]+ [\d.]+ ([\d.]+) [\d.]+" fill="none" stroke="#FCFFF3" stroke-width="[\d.]+" stroke-dasharray="6 4"\/>/g)];
+    assert.ok(backs.length >= 2);
+    const points = backs.flatMap((m) => [m[1], m[3]]);
+    assert.equal(new Set(points).size, points.length, "every arc starts and ends at its own point");
+    const pills = [...markup.matchAll(/<rect [^>]*rx="9" fill="#21221C"/g)];
+    assert.equal(pills.length, backs.length);
+    // Pills come after every line, so they're drawn on top.
+    assert.ok(markup.lastIndexOf('stroke-dasharray="6 4"/>') < markup.indexOf('rx="9" fill="#21221C"'));
+  });
+
+  test("the adoption slide keeps its references out of the heading", () => {
+    const html = fullReportHtml(report, pseudonyms);
+    const slide = html.slice(html.indexOf("Who uses Salesforce, and how") - 300, html.indexOf("Who uses Salesforce, and how") + 40);
+    assert.match(slide, /<div class="eyebrow">Adoption and usage<span class="ref" data-ref>/);
+    assert.match(slide, /<h2>Who uses Salesforce, and how<\/h2>/);
   });
 });
 
