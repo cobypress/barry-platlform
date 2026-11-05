@@ -25,6 +25,19 @@ The rules that make it trustworthy don't change: code calculates and Claude expl
 
 We keep the human layer (interviews, judgement, the live readout) and put machine depth underneath it.
 
+## Where we are (end of 5 November 2026)
+
+| Stage | Built | Still to do |
+| --- | --- | --- |
+| 1. Money, score, references | All six parts (decisions 82 to 93, 120, 129) | List prices for licences beyond the core editions (QUESTIONS 51) |
+| 2. Intake, Essentials, housekeeping | Call-notes intake, the Slack discovery canvas, Essentials, the retention sweep | Testing the canvas read-back on a real workspace |
+| 3. Depth | Chapters with "What good looks like" (sourced), adoption, the real sales process, your org documented, two security checks, visuals, the 110-slide report | Root causes (3.3); integrations and technical health as their own areas |
+| 4. The experience | The customer microsite, the CEO one-pager, the readout kit, the team survey (engine; console in progress) | A designer's pass; stakeholder interview notes |
+| 5. Proof and growth | The 90-day re-check, Barometer Ongoing with the monthly pulse, the free scan with Slack approval | Case studies, "State of Salesforce", partners, the AppExchange decision |
+| 6. Beyond Sales Cloud | Service Cloud scoped (15 checks) | Building it (in progress), then CPQ, Marketing, Experience Cloud, Data Cloud |
+
+Connecting is "sign in and go" (decision 151): any user connects, and the request list keeps Barometer read only. The package is released (decision 153) for orgs that need it installed first.
+
 ## Who it's for
 
 UK companies with 20 to 500 Salesforce users: big enough to have invested in the platform, and to invest in getting it right. Global later.
