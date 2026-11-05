@@ -11,6 +11,8 @@ export const CalibratedStage = z.object({
   category: StageCategory,
   // Sales order of open stages. Conversion can't be measured without it.
   order: z.number().int().nonnegative().optional(),
+  // The customer says every won deal passes through this open stage (DECISIONS.md 113).
+  required: z.boolean().optional(),
 });
 
 export const UserKind = z.enum(["sales_rep", "manager", "admin", "shared", "system", "integration", "test", "other"]);

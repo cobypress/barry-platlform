@@ -22,7 +22,7 @@ export function noteSections(report: BuiltReport): NoteSection[] {
     const ref = `R${i + 1}`;
     const ids = section.key.startsWith("findings_")
       ? rawNotesOrder(findings.filter((f) => section.findingIds.includes(f.id))).map((f) => f.id)
-      : section.key === "pipeline_metrics" || section.key === "investment" || section.key === "adoption"
+      : section.key === "pipeline_metrics" || section.key === "investment" || section.key === "adoption" || section.key === "sales_process"
         ? section.metricIds
         : section.key === "value_model"
           ? report.value.groups.map((g) => valueItemId(g.id))

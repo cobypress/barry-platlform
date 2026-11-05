@@ -2,13 +2,14 @@ import { AlignmentType, BorderStyle, Document, Footer, HeadingLevel, Packer, Pag
 import { colour, font } from "../design/tokens.ts";
 import { currentBody, type BuiltReport } from "../narrative/sections.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
-import { canRelease, type Evidence, type Finding, type ManualStep, type Metric, type NumberOverride } from "../schemas/index.ts";
+import { canRelease, type Calibration, type Evidence, type Finding, type ManualStep, type Metric, type NumberOverride } from "../schemas/index.ts";
 import { longDate, money, plainWords, ukDates } from "./format.ts";
 import { INVENTORY_COLUMNS, inventoryRows, OBJECT_INVENTORY } from "../domains/configuration/inventory.ts";
 import { inventoryLine } from "../notes/raw-notes.ts";
 import { noteSections, rawNotesOrder, valueItemId } from "./references.ts";
 import { KIND_LABELS, type ValueGroup } from "../value/model.ts";
 import { comparisonId, comparisonNotes, formatFigure, type Comparison } from "../benchmark/compare.ts";
+import { TRANSITIONS, transitionMatrix } from "../domains/historic-pipeline/process.ts";
 
 // The working record behind the reports: every check, what it found, and how to
 // reproduce it. Tokens become names here, at the last moment, because this is
@@ -132,7 +133,7 @@ function addValueGroup(notes: Notes, g: ValueGroup, currency: string, ref: strin
   );
 }
 
-function addMetric(notes: Notes, m: Metric, ref: string): void {
+function addMetric(notes: Notes, m: Metric, ref: string, calibration: Calibration): void {
   if (m.status === "not_measurable") {
     notes.heading(`${ref} ${m.label}`, 3);
     notes.labelled("Not measurable", m.reason);
@@ -152,6 +153,11 @@ function addMetric(notes: Notes, m: Metric, ref: string): void {
     notes.table(["Object", ...headings], inventoryRows(m).map((row) => [row.object, ...INVENTORY_COLUMNS.map((c) => (row.counts[c.key] === null ? "Not read" : String(row.counts[c.key])))]), [1606, 900, 700, 700, 700, 700, 600, 700, 700, 700, 800]);
     const unread = inventoryRows(m).flatMap((row) => INVENTORY_COLUMNS.filter((c) => row.counts[c.key] === null).map((c) => `${row.object}, ${c.dimension}: ${row.reasons[c.key] ?? "not read"}`));
     if (unread.length) notes.labelled("Not read", unread.join("; "));
+  } else if (m.id === TRANSITIONS) {
+    // From stage to stage, as a table: a list of every pair is hard to read.
+    const { from, to, count } = transitionMatrix(m, calibration);
+    const width = Math.floor(7300 / to.length);
+    notes.table(["From", ...to], from.map((f) => [f, ...to.map((t) => String(count(f, t) ?? ""))]), [2000, ...to.map(() => width)]);
   } else if (m.segments.length) notes.table(["Segment", "Key", "Sample", "Value"], m.segments.map((s) => [s.dimension, s.key, String(s.n), s.value === null ? (s.notMeasurableReason ?? "Not measurable") : String(s.value)]), [2300, 3200, 1000, 2800]);
   if (m.series.length) notes.table(["Month end", "Value", "Sample"], m.series.map((p) => [p.date, p.value === null ? (p.notMeasurableReason ?? "Not measurable") : String(p.value), String(p.n)]), [2300, 5000, 2000]);
 }
@@ -206,7 +212,7 @@ export function buildRawNotes(report: BuiltReport, pseudonyms: Pseudonymiser): N
     notes.para(currentBody(built, s.key));
     if (s.key === "manual_steps") manualSteps.forEach((step) => addManualStep(notes, step, ref(step.id)));
     if (s.key.startsWith("findings_")) rawNotesOrder(findings.filter((f) => s.items.some((item) => item.id === f.id))).forEach((f) => addFinding(notes, f, calibration.currency, ref(f.id)));
-    if (s.key === "pipeline_metrics" || s.key === "investment" || s.key === "adoption") metrics.filter((m) => s.items.some((item) => item.id === m.id)).forEach((m) => addMetric(notes, m, ref(m.id)));
+    if (s.key === "pipeline_metrics" || s.key === "investment" || s.key === "adoption" || s.key === "sales_process") metrics.filter((m) => s.items.some((item) => item.id === m.id)).forEach((m) => addMetric(notes, m, ref(m.id), calibration));
     if (s.key === "value_model") report.value.groups.forEach((g) => addValueGroup(notes, g, calibration.currency, ref(valueItemId(g.id))));
     if (s.key === "comparisons") report.comparisons.forEach((c) => addComparison(notes, c, ref(comparisonId(c.metric.key))));
     if (s.key === "queries") addQueries(notes, findings, metrics);
