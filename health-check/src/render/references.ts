@@ -1,6 +1,7 @@
 import { comparisonId } from "../benchmark/compare.ts";
 import type { BuiltReport } from "../narrative/sections.ts";
-import { issuesOf } from "../narrative/select.ts";
+import { domainsInOrder, issuesOf } from "../narrative/select.ts";
+import { practiceItems } from "../practice/index.ts";
 import type { Finding } from "../schemas/index.ts";
 
 // Every figure in the decks points at the raw notes, where the working is: R4 is
@@ -26,6 +27,8 @@ export function noteSections(report: BuiltReport): NoteSection[] {
         ? section.metricIds
         : section.key === "value_model"
           ? report.value.groups.map((g) => valueItemId(g.id))
+        : section.key === "practice"
+          ? practiceItems(domainsInOrder(report.teamFindings))
         : section.key === "comparisons"
           ? report.comparisons.map((c) => comparisonId(c.metric.key))
           : section.key === "manual_steps"

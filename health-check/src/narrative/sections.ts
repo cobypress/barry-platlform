@@ -261,6 +261,11 @@ function rawNotesSpecs(input: ReportInput, overall: OverallScore, comparisons: C
       body: "A reference for whoever looks after Salesforce, with every list in full: the objects and how they relate, what runs when a record is saved and in what order, what connects to the org, who uses it, and who can see what. It describes the org rather than judging it.",
       metricIds: metrics.filter((m) => DOCUMENTED_METRIC_IDS.includes(m.id)).map((m) => m.id),
     },
+    {
+      key: "practice",
+      title: "What good looks like",
+      body: "For each area we checked, what good looks like, and where each statement comes from: a public Salesforce page, with the date we read it and what it says in our words, or Black Cloud's own practice, which we label as ours.",
+    },
     // Every compared figure is a pipeline figure, which a set-up review never reads.
     ...(isSetupReview(run) ? [] : [{
       key: "comparisons",
