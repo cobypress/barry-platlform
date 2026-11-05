@@ -200,7 +200,7 @@ describe("PostgresWorkerStore", () => {
     assert.match(selectSql("HealthCheckRun", RUN, `"id" = $1`), /"scope"/);
   });
 
-  test("reads the team survey's answers in the order they came in, and none is no survey", async () => {
+  test("reads the team survey's answers in the order they came in, and none, unsent, is no survey", async () => {
     const pool = new FakePool();
     const answers = syntheticSurvey(2).responses.map((r) => r.answers);
     pool.handlers.push((text) => {
@@ -209,9 +209,10 @@ describe("PostgresWorkerStore", () => {
       return undefined;
     });
     const job = (await new PostgresWorkerStore(pool).loadRunJob(RUN_ROW.id))!;
-    assert.deepEqual(job.survey, { version: SURVEY_VERSION, responses: [{ id: "sr-0000000001", submittedAt: "2026-11-01T09:00:00.000Z", answers: answers[0] }, { id: "sr-0000000002", submittedAt: "2026-11-02T09:00:00.000Z", answers: answers[1] }] });
+    // No version column yet: each answer is to version 1.
+    assert.deepEqual(job.survey, { version: SURVEY_VERSION, responses: [{ id: "sr-0000000001", submittedAt: "2026-11-01T09:00:00.000Z", version: 1, answers: answers[0] }, { id: "sr-0000000002", submittedAt: "2026-11-02T09:00:00.000Z", version: 1, answers: answers[1] }] });
     const sql = pool.statements.find((s) => s.text.includes("HealthCheckSurveyResponse"))!;
-    assert.equal(sql.text, `SELECT "id", to_char("submittedAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "submittedAt", "answers" FROM "HealthCheckSurveyResponse" WHERE "runId" = $1 ORDER BY "submittedAt", "id"`);
+    assert.equal(sql.text, `SELECT "id", to_char("submittedAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "submittedAt", "answers", to_jsonb("HealthCheckSurveyResponse") ->> 'version' AS "version" FROM "HealthCheckSurveyResponse" WHERE "runId" = $1 ORDER BY "submittedAt", "id"`);
     assert.deepEqual(sql.values, [RUN_ROW.id]);
     assert.equal(surveyFromRows([]), null);
     const none = new FakePool();
@@ -388,6 +389,48 @@ describe("a database without the survey table yet", () => {
     const job = await new PostgresWorkerStore(pool).loadRunJob(RUN_ROW.id as string);
     assert.ok(job, "the run still loads");
     assert.ok(!job.survey || job.survey.responses.length === 0);
+  });
+
+  test("a survey that was sent and has no answers is a survey with none", async () => {
+    const pool = new FakePool();
+    pool.handlers.push((text) => {
+      if (text.includes(`FROM "HealthCheckRun" WHERE`)) return { rows: [RUN_ROW], rowCount: 1 };
+      if (text.includes(`FROM "HealthCheckSurvey" WHERE`)) return { rows: [{ runId: RUN_ROW.id, openedAt: "2026-11-01T09:00:00.000Z", closedAt: null }], rowCount: 1 };
+      return undefined;
+    });
+    const store = new PostgresWorkerStore(pool);
+    assert.deepEqual((await store.loadRunJob(RUN_ROW.id))!.survey, { version: SURVEY_VERSION, responses: [] });
+    assert.ok(pool.texts().some((t) => t === `SELECT "runId", to_char("openedAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "openedAt", to_char("closedAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "closedAt" FROM "HealthCheckSurvey" WHERE "runId" = $1`));
+    pool.handlers.unshift((text) => (text.includes(`FROM "HealthCheckRun" WHERE`) ? { rows: [{ ...RUN_ROW, status: "released" }], rowCount: 1 } : undefined));
+    assert.deepEqual((await store.loadDocumentsJob(RUN_ROW.id))!.survey, { version: SURVEY_VERSION, responses: [] });
+  });
+
+  test("without either survey table, the survey wasn't sent; without the sent table, answers still count", async () => {
+    const missing = (table: string) => Object.assign(new Error(`relation "${table}" does not exist`), { code: "42P01" });
+    const neither = new FakePool();
+    neither.handlers.push((text) => {
+      if (text.includes(`FROM "HealthCheckRun" WHERE`)) return { rows: [RUN_ROW], rowCount: 1 };
+      if (text.includes(`FROM "HealthCheckSurvey" WHERE`)) throw missing("HealthCheckSurvey");
+      if (text.includes(`FROM "HealthCheckSurveyResponse"`)) throw missing("HealthCheckSurveyResponse");
+      return undefined;
+    });
+    assert.equal((await new PostgresWorkerStore(neither).loadRunJob(RUN_ROW.id))!.survey, null);
+    const answersOnly = new FakePool();
+    const answers = syntheticSurvey(1).responses[0]!.answers;
+    answersOnly.handlers.push((text) => {
+      if (text.includes(`FROM "HealthCheckRun" WHERE`)) return { rows: [RUN_ROW], rowCount: 1 };
+      if (text.includes(`FROM "HealthCheckSurvey" WHERE`)) throw missing("HealthCheckSurvey");
+      if (text.includes(`FROM "HealthCheckSurveyResponse"`)) return { rows: [{ id: "sr-0000000001", submittedAt: "2026-11-01T09:00:00.000Z", version: null, answers }], rowCount: 1 };
+      return undefined;
+    });
+    assert.equal((await new PostgresWorkerStore(answersOnly).loadRunJob(RUN_ROW.id))!.survey!.responses.length, 1);
+  });
+
+  test("reads each answer's version when the console has the column, and 1 when it hasn't", () => {
+    const row = (version: unknown) => ({ id: "sr-0000000001", submittedAt: "2026-11-01T09:00:00.000Z", version, answers: {} });
+    assert.deepEqual([null, undefined, "", "1", "2", 3, "two"].map((v) => surveyFromRows([row(v)])!.responses[0]!.version), [1, 1, 1, 1, 2, 3, 0]);
+    assert.equal(surveyFromRows([], true)!.responses.length, 0);
+    assert.equal(surveyFromRows([], false), null);
   });
 
   test("any other database error still stops the load", async () => {

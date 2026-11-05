@@ -71,10 +71,20 @@ export const SurveyAnswers = z.object({
 export type SurveyAnswers = z.infer<typeof SurveyAnswers>;
 
 /** One stored response, as the console's HealthCheckSurveyResponse row holds it. */
-export const SurveyResponse = z.object({ id: z.string().min(1), submittedAt: z.string().min(1), answers: z.unknown() });
+export const SurveyResponse = z.object({
+  id: z.string().min(1),
+  submittedAt: z.string().min(1),
+  /** The version this person answered. Missing is the survey's own (DECISIONS.md 150). */
+  version: z.number().int().optional(),
+  answers: z.unknown(),
+});
 export type SurveyResponse = z.infer<typeof SurveyResponse>;
 
-/** A run's survey: the question set's version and every response. Answers that don't fit the version are dropped and counted. */
+/**
+ * A run's survey: the question set's version and every response. Answers that
+ * don't fit the version are dropped and counted. A survey is one that was sent,
+ * so one with no responses still says fewer than five answered (DECISIONS.md 149).
+ */
 export const Survey = z.object({ version: z.number().int().positive(), responses: z.array(SurveyResponse) });
 export type Survey = z.infer<typeof Survey>;
 
@@ -89,9 +99,10 @@ export function withoutComments(survey: Survey): Survey {
   return {
     version: survey.version,
     responses: survey.responses.map((r) => {
-      if (typeof r.answers !== "object" || r.answers === null || !("comment" in r.answers)) return { id: r.id, submittedAt: r.submittedAt, answers: r.answers };
+      const kept = { id: r.id, submittedAt: r.submittedAt, ...(r.version === undefined ? {} : { version: r.version }) };
+      if (typeof r.answers !== "object" || r.answers === null || !("comment" in r.answers)) return { ...kept, answers: r.answers };
       const { comment, ...rest } = r.answers as Record<string, unknown>;
-      return { id: r.id, submittedAt: r.submittedAt, answers: typeof comment === "string" && comment.trim() ? { ...rest, comment: COMMENT_LEFT_OUT } : rest };
+      return { ...kept, answers: typeof comment === "string" && comment.trim() ? { ...rest, comment: COMMENT_LEFT_OUT } : rest };
     }),
   };
 }
@@ -106,7 +117,8 @@ export function readAnswers(survey: Survey): { answers: Array<Omit<SurveyAnswers
   const answers: Array<Omit<SurveyAnswers, "comment"> & { commented: boolean }> = [];
   let dropped = 0;
   for (const r of survey.responses) {
-    const parsed = SurveyAnswers.safeParse(r.answers);
+    // Answers to another version are to other questions, so they can't be counted with these.
+    const parsed = (r.version ?? survey.version) === SURVEY_VERSION ? SurveyAnswers.safeParse(r.answers) : { success: false as const };
     if (!parsed.success) {
       dropped++;
       continue;
