@@ -11,7 +11,8 @@ import { loadRun, OUTPUT_FILES, printDocuments } from "./render-run.ts";
 // The documents for a released run, in the wording the console approved. The
 // run folder supplies the findings, metrics and pseudonym map, as for `hc
 // render`; the console supplies each section's approved text, the figures a
-// consultant overrode, and the intake as it stands now. Nothing unapproved is
+// consultant overrode, the intake as it stands now and who prepared the report
+// (for the cover; the documents job never calls Claude). Nothing unapproved is
 // printed: a section that isn't approved stops the whole set.
 
 export type ApprovedRun = {
@@ -20,6 +21,8 @@ export type ApprovedRun = {
   /** The current version of each section. */
   versions: SectionVersion[];
   overrides: NumberOverride[];
+  /** The consultant the cover names. Left out or null, the cover names only the client. */
+  preparedBy?: string | null;
 };
 
 export type ReleasedDocuments = {
@@ -44,7 +47,7 @@ export function layoutWarnings(layout: { executive: LayoutReport; full: LayoutRe
 /** The run's report with the console's approved sections in place of the engine's drafts. */
 export function approvedReport(dir: string, approved: ApprovedRun): { report: BuiltReport; pseudonyms: Pseudonymiser } {
   const { input, pseudonyms } = loadRun(dir);
-  const report = buildReport({ ...input, overrides: approved.overrides, intake: approved.intake ?? input.intake });
+  const report = buildReport({ ...input, overrides: approved.overrides, intake: approved.intake ?? input.intake, preparedBy: approved.preparedBy ?? null });
   for (const built of Object.values(report.outputs)) {
     const sections = approved.sections.filter((s) => s.output === built.output).sort((a, b) => a.order - b.order);
     if (!canRelease(sections).ok) throw new Error(`Not every section of the ${built.output.replace(/_/g, " ")} is approved, so no documents were made`);

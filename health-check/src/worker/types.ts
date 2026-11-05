@@ -119,6 +119,8 @@ export type DocumentsJobInput = {
   /** The current version of each section. */
   versions: SectionVersion[];
   overrides: NumberOverride[];
+  /** The consultant the cover names, as the console holds it now. Null leaves the cover without a name. */
+  preparedBy: string | null;
   state: DocumentsState | null;
   /** From an earlier make, so the documents go back to the same Drive folder. */
   driveFolderId: string | null;

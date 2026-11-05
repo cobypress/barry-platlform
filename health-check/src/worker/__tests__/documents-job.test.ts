@@ -87,6 +87,7 @@ function jobInput(overrides: Partial<DocumentsJobInput> = {}): DocumentsJobInput
     sections,
     versions,
     overrides: [],
+    preparedBy: null,
     state: "queued",
     driveFolderId: null,
     files: [],
@@ -189,6 +190,14 @@ describe("a documents job", () => {
     assert.match(deps.store.documents.get(RUN_ID)!.error!, /^The documents couldn't be made: .*sufficient permissions/);
   });
 
+  test("hands the renderer the consultant the cover names, as the console holds it", async () => {
+    const seen: ApprovedRun[] = [];
+    const deps = setup(jobInput({ preparedBy: "Synthetic Consultant" }));
+    deps.renderReleased = async (dir, approved, out) => (seen.push(approved), fakeRender(dir, approved, out));
+    assert.equal((await processDocumentsJob(RUN_ID, deps, { final: true })).outcome, "done");
+    assert.equal(seen[0]!.preparedBy, "Synthetic Consultant");
+  });
+
   test("the client's folder is the company's name, else the reference", () => {
     assert.equal(clientNameOf({ intake: { ...INTAKE, customerName: "  Synthetic   Co " }, run: consoleRun() }), "Synthetic Co");
     assert.equal(clientNameOf({ intake: INTAKE, run: consoleRun({ customerRef: "SYN-0001" }) }), "SYN-0001");
@@ -219,9 +228,11 @@ describe("the released documents", () => {
   test("print as two PDFs and a Word file, and say what the layout checks found without quoting the pages", async () => {
     const dir = join(temp(), RUN_ID);
     cpSync(recorded, dir, { recursive: true });
-    const result = await renderReleased(dir, approvedRun(), join(dir, "documents"));
+    const result = await renderReleased(dir, { ...approvedRun(), preparedBy: "Synthetic Consultant" }, join(dir, "documents"));
     for (const file of Object.values(result.files)) assert.ok(existsSync(file) && statSync(file).size > 1000, file);
     assert.ok(result.warnings.every((w) => /^The (executive summary|full health check)(, page \d+)?: [a-z ]+$/.test(w)), JSON.stringify(result.warnings));
+    // The cover has room for the consultant's line.
+    assert.deepEqual(result.warnings.filter((w) => /, page 1:/.test(w)), []);
   });
 
   test("layout warnings leave the detail out", () => {
@@ -294,6 +305,53 @@ describe("GoogleDrive", () => {
 });
 
 describe("the cover", () => {
+  const coverOf = (html: string): string => html.match(/<section class="page dark cover"[\s\S]*?<\/section>|<section[^>]*class="[^"]*cover[^"]*"[\s\S]*?<\/section>/)![0];
+
+  test("says who prepared it, by name and Black Cloud, when the console names someone", async () => {
+    const { executiveHtml } = await import("../../render/executive.ts");
+    const { fullReportHtml } = await import("../../render/full-report.ts");
+    const { report, pseudonyms } = approvedReport(recorded, { ...approvedRun(), preparedBy: "Synthetic Consultant" });
+    for (const html of [executiveHtml(report, pseudonyms), fullReportHtml(report, pseudonyms)]) {
+      assert.match(coverOf(html), /<p class="for">Prepared for<\/p><p>Synthetic Co<\/p><p>by Synthetic Consultant, Black Cloud<\/p><p>\d{1,2} \w+ \d{4}<\/p>/);
+    }
+  });
+
+  test("is as it was when nobody is named", async () => {
+    const { executiveHtml } = await import("../../render/executive.ts");
+    const { fullReportHtml } = await import("../../render/full-report.ts");
+    for (const preparedBy of [undefined, null]) {
+      const { report, pseudonyms } = approvedReport(recorded, { ...approvedRun(), preparedBy });
+      for (const html of [executiveHtml(report, pseudonyms), fullReportHtml(report, pseudonyms)]) {
+        assert.match(coverOf(html), /<p class="for">Prepared for<\/p><p>Synthetic Co<\/p><p>\d{1,2} \w+ \d{4}<\/p>/);
+        assert.doesNotMatch(html, /Black Cloud<\/p>|by .*, Black Cloud/);
+      }
+    }
+  });
+
+  test("a name is escaped like any other text", async () => {
+    const { executiveHtml } = await import("../../render/executive.ts");
+    const { report, pseudonyms } = approvedReport(recorded, { ...approvedRun(), preparedBy: "Sam <b>O'Neil</b>" });
+    assert.match(coverOf(executiveHtml(report, pseudonyms)), /by Sam &lt;b&gt;O(&apos;|&#39;|')Neil&lt;\/b&gt;, Black Cloud/);
+  });
+
+  test("a name that reads as a number isn't a figure the number check refuses, and no section can quote it", async () => {
+    const { checkNumbers, scopeDataset } = await import("../../numbercheck/index.ts");
+    const { input } = loadRun(recorded);
+    const report = buildReport({ ...input, preparedBy: "Ten Eyck" });
+    assert.deepEqual(checkNumbers("by Ten Eyck, Black Cloud", report.dataset).unmatched, []);
+    const verdict = report.outputs.executive_summary.sections.find((s) => s.key === "verdict")!;
+    assert.notDeepEqual(checkNumbers("Ten Eyck", scopeDataset(report.dataset, [...verdict.findingIds, ...verdict.metricIds])).unmatched, []);
+  });
+
+  test("the name is in nothing Claude would be sent", () => {
+    const { input } = loadRun(recorded);
+    // Not the recorded intake's "Synthetic Consultant", who captured it.
+    const report = buildReport({ ...input, preparedBy: "Robin Example" });
+    assert.ok(report.briefs.size > 0);
+    assert.doesNotMatch(JSON.stringify([...report.briefs.values()]), /Robin Example/);
+    assert.doesNotMatch(JSON.stringify(Object.values(report.outputs)), /Robin Example/);
+  });
+
   test("a customer reference with digits on the cover isn't a figure the number check refuses", async () => {
     const { checkNumbers } = await import("../../numbercheck/index.ts");
     const { input } = loadRun(recorded);

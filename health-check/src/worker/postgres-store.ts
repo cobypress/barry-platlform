@@ -77,6 +77,12 @@ export const RUN: Columns = {
   // New, from C2: see the log.
   connectionName: "text",
 };
+/**
+ * The run as the documents job reads it: the cover's name too. blackcloud-next
+ * migrations/20261106_health_check_prepared_by.sql. Kept out of RUN so a run
+ * job never reads it, and never needs the column.
+ */
+export const RUN_DOCUMENTS: Columns = { ...RUN, preparedBy: "text" };
 export const RUN_STEP: Columns = { runId: "text", id: "text", version: "num", status: "text", calls: "num", finishedAt: "ts", error: "text" };
 export const INTAKE: Columns = { statedProblems: "text", customerName: "text", linkedinUrl: "text", industry: "text", headcountBand: "text", customerAnswers: "json" };
 export const CALIBRATION: Columns = {
@@ -128,7 +134,7 @@ export const CONNECT_LINK: Columns = {
 const withoutNulls = (o: Record<string, unknown>): Record<string, unknown> => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== null));
 
 export function runFromRows(row: Record<string, unknown>, steps: Array<Record<string, unknown>>): Run {
-  const { analysisFrom, analysisTo, connectionName: _name, ...rest } = row;
+  const { analysisFrom, analysisTo, connectionName: _name, preparedBy: _by, ...rest } = row;
   return Run.parse({ ...rest, analysisWindow: { from: analysisFrom, to: analysisTo }, steps });
 }
 
@@ -374,7 +380,7 @@ export class PostgresWorkerStore implements WorkerStore {
   }
 
   async loadDocumentsJob(runId: string): Promise<DocumentsJobInput | null> {
-    const row = one(await this.#pool.query(selectSql("HealthCheckRun", RUN, `"id" = $1`), [runId]));
+    const row = one(await this.#pool.query(selectSql("HealthCheckRun", RUN_DOCUMENTS, `"id" = $1`), [runId]));
     if (!row) return null;
     const [steps, intake, sections, versions, overrides, documents] = await Promise.all([
       this.#pool.query(selectSql("HealthCheckRunStep", RUN_STEP, `"runId" = $1`, `"seq"`), [runId]),
@@ -392,6 +398,8 @@ export class PostgresWorkerStore implements WorkerStore {
       sections: sections.rows.map(sectionFromRow),
       versions: versions.rows.map(versionFromRow),
       overrides: overrides.rows.map(overrideFromRow),
+      // The console trims it, but a blank one mustn't print "by , Black Cloud".
+      preparedBy: (row.preparedBy as string | null | undefined)?.trim() || null,
       state: (doc?.status as DocumentsState | undefined) ?? null,
       driveFolderId: (doc?.driveFolderId as string | null | undefined) ?? null,
       files: (doc?.files as DocumentFile[] | null | undefined) ?? [],

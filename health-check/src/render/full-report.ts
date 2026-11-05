@@ -423,7 +423,7 @@ function twoColumnList(r: Render, eyebrow: string, title: string, items: Array<{
 function buildSlides(report: BuiltReport, r: Render, density: Density | null): Slide[] {
   const compact = density === null;
   const dense = density?.columns === 2;
-  const { run, intake, calibration, scores = [] } = report.input;
+  const { run, intake, calibration, scores = [], preparedBy } = report.input;
   const built = report.outputs.full_health_check;
   const team = report.teamFindings;
   const metrics = report.metrics;
@@ -438,7 +438,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   const slides: Slide[] = [];
   const add = (html: string, classes?: string): void => void slides.push({ html, ...(classes ? { classes } : {}) });
 
-  add(`<div><div class="eyebrow">Black Cloud Barometer</div><h1>Salesforce health check</h1><div class="sub">Full report</div></div><div>${r.draft ? '<p><span class="mark">Draft, not approved for release</span></p>' : ""}<p class="for">Prepared for</p><p>${r.t(customer)}</p><p>${longDate(run.asOf)}</p></div>`, "dark cover");
+  add(`<div><div class="eyebrow">Black Cloud Barometer</div><h1>Salesforce health check</h1><div class="sub">Full report</div></div><div>${r.draft ? '<p><span class="mark">Draft, not approved for release</span></p>' : ""}<p class="for">Prepared for</p><p>${r.t(customer)}</p>${preparedBy ? `<p>by ${r.t(preparedBy)}, Black Cloud</p>` : ""}<p>${longDate(run.asOf)}</p></div>`, "dark cover");
 
   // Areas with issues get their own pages. The rest are summed up together, so
   // the deck spends its pages on what needs doing.

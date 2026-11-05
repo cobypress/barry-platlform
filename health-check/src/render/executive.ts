@@ -133,7 +133,7 @@ function pipelinePage(r: Render, report: BuiltReport, body: string): string {
 const footer = (r: Render, n: number): string => `<div class="footer" data-chrome><span>Black Cloud Barometer${r.draft ? " | Draft, not approved for release" : ""}</span><span>${n}</span></div>`;
 
 export function executiveHtml(report: BuiltReport, pseudonyms: Pseudonymiser): string {
-  const { run, intake, calibration, scores = [] } = report.input;
+  const { run, intake, calibration, scores = [], preparedBy } = report.input;
   const built = report.outputs.executive_summary;
   const r = renderContext(pseudonyms, calibration.currency, !canRelease(built.sections).ok);
   const team = report.teamFindings;
@@ -148,7 +148,7 @@ export function executiveHtml(report: BuiltReport, pseudonyms: Pseudonymiser): s
     pages.push(`<section class="page ${classes}" data-page="${pages.length + 1}">${html}${classes.includes("cover") ? "" : footer(r, pages.length + 1)}</section>`);
   };
 
-  add(`<div><div class="eyebrow">Black Cloud Barometer</div><h1>Salesforce health check</h1><div class="sub">Executive summary</div></div><div>${r.draft ? '<p><span class="mark">Draft, not approved for release</span></p>' : ""}<p class="for">Prepared for</p><p>${r.t(customer)}</p><p>${longDate(run.asOf)}</p></div>`, "dark cover");
+  add(`<div><div class="eyebrow">Black Cloud Barometer</div><h1>Salesforce health check</h1><div class="sub">Executive summary</div></div><div>${r.draft ? '<p><span class="mark">Draft, not approved for release</span></p>' : ""}<p class="for">Prepared for</p><p>${r.t(customer)}</p>${preparedBy ? `<p>by ${r.t(preparedBy)}, Black Cloud</p>` : ""}<p>${longDate(run.asOf)}</p></div>`, "dark cover");
 
   add(`<div class="eyebrow">Verdict</div><div class="headline">${r.t(verdict.headline)}</div><div class="lead">${paragraphs(r, currentBody(built, "verdict").replace(`${verdict.headline}.\n\n`, ""))}</div>
     <div class="stat-row" style="margin-top:18px"><div class="stat"><b>${verdict.issues}</b><span>Issues</span></div><div class="stat"><b>${verdict.critical}</b><span>Critical</span></div><div class="stat"><b>${verdict.high}</b><span>High</span></div><div class="stat"><b>${notMeasurable}</b><span>Not measurable</span></div></div>

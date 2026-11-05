@@ -253,7 +253,7 @@ describe("PostgresWorkerStore, for documents", () => {
   test("loads a released run's approved sections, their current text, overrides and the folder it had", async () => {
     const pool = new FakePool();
     pool.handlers.push((text) => {
-      if (text.includes(`FROM "HealthCheckRun" WHERE`)) return { rows: [{ ...RUN_ROW, status: "released" }], rowCount: 1 };
+      if (text.includes(`FROM "HealthCheckRun" WHERE`)) return { rows: [{ ...RUN_ROW, status: "released", preparedBy: "Synthetic Consultant" }], rowCount: 1 };
       if (text.includes(`FROM "HealthCheckRunStep"`)) return { rows: [], rowCount: 0 };
       if (text.includes(`FROM "HealthCheckIntake"`)) return { rows: [{ statedProblems: "Forecasts are unreliable.", customerName: "Synthetic Co", linkedinUrl: null, industry: null, headcountBand: null, customerAnswers: null }], rowCount: 1 };
       if (text.startsWith("SELECT") && text.includes(`FROM "HealthCheckSection" WHERE "runId"`) && !text.includes("HealthCheckSectionVersion")) {
@@ -276,7 +276,23 @@ describe("PostgresWorkerStore, for documents", () => {
     assert.deepEqual(job.overrides[0]!.target, { type: "finding", id: "f1", field: "n" });
     assert.equal(job.state, "queued");
     assert.equal(job.driveFolderId, "folder-0000000001");
+    assert.equal(job.preparedBy, "Synthetic Consultant");
     assert.match(pool.texts().find((t) => t.includes("HealthCheckSectionVersion"))!, /"currentVersionId"/);
+  });
+
+  test("reads who prepared the report for the cover, and only the documents job does", async () => {
+    const preparedBy = async (value: unknown) => {
+      const pool = new FakePool();
+      pool.handlers.push((text) => (text.includes(`FROM "HealthCheckRun" WHERE`) ? { rows: [{ ...RUN_ROW, status: "released", preparedBy: value }], rowCount: 1 } : { rows: [], rowCount: 0 }));
+      const job = (await new PostgresWorkerStore(pool).loadDocumentsJob(RUN_ROW.id))!;
+      assert.match(pool.texts()[0]!, /"preparedBy"/);
+      return job.preparedBy;
+    };
+    assert.equal(await preparedBy(null), null);
+    assert.equal(await preparedBy("  "), null);
+    assert.equal(await preparedBy(" Synthetic Consultant "), "Synthetic Consultant");
+    // The run job reads the run without it, so a run never waits on the cover's column.
+    assert.doesNotMatch(selectSql("HealthCheckRun", RUN, `"id" = $1`), /preparedBy/);
   });
 
   test("moves only a requested row to making, and writes results only to a row it's making", async () => {

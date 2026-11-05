@@ -21,6 +21,8 @@ export type ReportInput = {
   scores?: Score[];
   overrides?: NumberOverride[];
   intake?: Intake | null;
+  /** The consultant the documents' cover names. Only the documents job sets it, and it never calls Claude. */
+  preparedBy?: string | null;
   now?: Date;
 };
 
@@ -448,8 +450,9 @@ export function buildReport(input: ReportInput): BuiltReport {
     extraText: [
       { source: CALIBRATION, text: calibrationText(run, calibration) },
       ...(intake ? [{ source: INTAKE, text: intakeText(intake) }] : []),
-      // The cover's customer name, which can be a reference such as "ACME-02". No section's scope includes it.
-      { source: COVER, text: [intake?.customerName, run.customerRef].filter(Boolean).join("\n") },
+      // The cover's customer name, which can be a reference such as "ACME-02", and
+      // the consultant's, which can read as a number ("Ten Eyck"). No section's scope includes it.
+      { source: COVER, text: [intake?.customerName, run.customerRef, input.preparedBy].filter(Boolean).join("\n") },
       ...(overrides.length ? [{ source: OVERRIDES, text: overrideText(overrides) }] : []),
     ],
   });
