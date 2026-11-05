@@ -35,7 +35,19 @@ class FakeWorker implements QueueWorker {
   }
 }
 
-const bull: BullModule = { Worker: FakeWorker as unknown as BullModule["Worker"], UnrecoverableError: Unrecoverable };
+/** Jobs the worker put on the queue itself. */
+const added: Array<{ name: string; data: unknown; opts: Record<string, unknown> }> = [];
+class FakeQueue {
+  readonly name: string;
+  constructor(name: string) {
+    this.name = name;
+  }
+  async add(name: string, data: unknown, opts: Record<string, unknown>) {
+    added.push({ name, data, opts });
+  }
+  async close() {}
+}
+const bull: BullModule = { Worker: FakeWorker as unknown as BullModule["Worker"], Queue: FakeQueue as unknown as BullModule["Queue"], UnrecoverableError: Unrecoverable };
 
 /** What the console's lib/health-check/jobs.ts sends: three attempts. */
 const job = (data: unknown, attemptsMade = 0): QueueJob => ({ id: "j1", name: "health-check-step", data, attemptsMade, opts: { attempts: 3 } });
@@ -290,5 +302,20 @@ describe("hc worker", () => {
     await new Promise((resolve) => setImmediate(resolve));
     assert.ok(lines.some((l) => /signed in through OIDC federation/.test(l)), lines.join("\n"));
     assert.ok(lines.some((l) => /Claude sign-in works: claude-opus-5-5 answered\./.test(l)), lines.join("\n"));
+  });
+});
+
+describe("a scan the worker queues itself", async () => {
+  const { runQueuer } = await import("../bullmq.ts");
+  test("goes on as a run job with the console's own name and options", async () => {
+    added.length = 0;
+    await runQueuer(new FakeQueue("health-check-jobs"), () => 1_700_000_000_000)("hc-2026-11-06-00000001");
+    assert.deepEqual(added, [
+      {
+        name: "health-check-run",
+        data: { kind: "run", runId: "hc-2026-11-06-00000001" },
+        opts: { attempts: 3, backoff: { type: "exponential", delay: 30_000 }, removeOnComplete: true, removeOnFail: 200, priority: 10, jobId: "run-hc-2026-11-06-00000001-1700000000000" },
+      },
+    ]);
   });
 });

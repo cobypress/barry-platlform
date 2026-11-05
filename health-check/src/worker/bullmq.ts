@@ -28,7 +28,10 @@ export interface QueueWorker {
   close(): Promise<void>;
 }
 
+export type QueueSender = { add(name: string, data: unknown, opts: Record<string, unknown>): Promise<unknown>; close(): Promise<void> };
+
 export type BullModule = {
+  Queue: new (name: string, options: { connection: RedisConnection }) => QueueSender;
   Worker: new (name: string, processor: (job: QueueJob) => Promise<unknown>, options: { connection: RedisConnection; concurrency: number }) => QueueWorker;
   /** Thrown to tell BullMQ not to retry. */
   UnrecoverableError: new (message?: string) => Error;
@@ -80,4 +83,14 @@ export function startQueueWorker(bull: BullModule, handler: JobHandler, options:
   worker.on("failed", (job, err) => options.log(`${job?.id ?? "?"} failed (attempt ${(job?.attemptsMade ?? 0)} of ${job?.opts.attempts ?? 1}): ${err.message}`));
   worker.on("error", (err) => options.log(`Queue error: ${err.message}`));
   return worker;
+}
+
+/**
+ * A run job on the queue, with the console's own name and options (blackcloud-next
+ * lib/health-check/jobs.ts), so the worker treats it like any run the console sends.
+ */
+export function runQueuer(queue: Pick<QueueSender, "add">, now: () => number = Date.now): (runId: string) => Promise<void> {
+  return async (runId) => {
+    await queue.add("health-check-run", { kind: "run", runId }, { attempts: 3, backoff: { type: "exponential", delay: 30_000 }, removeOnComplete: true, removeOnFail: 200, priority: 10, jobId: `run-${runId}-${now()}` });
+  };
 }

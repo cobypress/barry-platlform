@@ -72,8 +72,10 @@ export class MemoryWorkerStore implements WorkerStore {
   async loadConnectJob(linkId: string): Promise<ConnectJobInput | null> {
     const link = this.links.get(linkId);
     if (!link) return null;
-    const runOrgId = (link.runId && this.runs.get(link.runId)?.run.orgId) || ORG_AWAITING_CONNECT;
-    return structuredClone({ link: link.link, state: link.state, runOrgId, sealedPending: link.sealedPending, sealedCode: link.sealedCode });
+    const run = link.runId ? this.runs.get(link.runId) : undefined;
+    const runOrgId = run?.run.orgId || ORG_AWAITING_CONNECT;
+    const job: ConnectJobInput = { link: link.link, state: link.state, runOrgId, sealedPending: link.sealedPending, sealedCode: link.sealedCode };
+    return structuredClone(run?.run.product === "scan" ? { ...job, scanRunId: run.run.id } : job);
   }
 
   #pending(linkId: string): StoredLink {
@@ -132,6 +134,14 @@ export class MemoryWorkerStore implements WorkerStore {
   async addBenchmarkRows(rows: BenchmarkRow[]): Promise<void> {
     this.benchmarkRows.push(...structuredClone(rows));
     this.writes.push({ method: "addBenchmarkRows", id: "benchmark", detail: rows.length });
+  }
+
+  /** Runs the worker queued itself, in order. */
+  readonly queued: string[] = [];
+
+  async recordRunQueued(runId: string, _at: string): Promise<void> {
+    this.queued.push(runId);
+    this.writes.push({ method: "recordRunQueued", id: runId });
   }
 
   /** The free scans' teasers, keyed by run id. */

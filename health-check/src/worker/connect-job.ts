@@ -240,6 +240,16 @@ async function connectLocked(linkId: string, deps: WorkerDeps, attempt: Attempt)
     // The older connection's refresh token is left to lapse (30 days unused,
     // DECISIONS 58) rather than revoked: revoking it might reach the new grant.
     if (previous) log(`Replaced the connection "${name}". The old refresh token wasn't revoked.`);
+    // A free scan needs no consultant from here: it runs as soon as the prospect has connected.
+    if (job.scanRunId && deps.queueRun) {
+      try {
+        await deps.queueRun(job.scanRunId);
+        await deps.store.recordRunQueued(job.scanRunId, at());
+        log(`Scan ${job.scanRunId} is queued.`);
+      } catch (err) {
+        log(`Scan ${job.scanRunId} couldn't be queued, so it waits for "Start the scan": ${safeReason(err)}`);
+      }
+    }
     return { outcome: "connected", detail: note ?? `Connected "${name}" read only, to org ${stored.orgId}` };
   } catch (err) {
     if (err instanceof Refusal) return refuse(err.message);

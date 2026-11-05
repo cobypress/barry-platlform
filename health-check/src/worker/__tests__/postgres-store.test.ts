@@ -266,7 +266,7 @@ describe("PostgresWorkerStore", () => {
       usedAt: null,
       revokedAt: null,
     };
-    pool.handlers.push((text) => (text.startsWith(`SELECT "orgId" FROM "HealthCheckRun"`) ? { rows: [{ orgId: "awaiting-connect" }], rowCount: 1 } : undefined));
+    pool.handlers.push((text) => (text.startsWith(`SELECT "orgId", "id", "product" FROM "HealthCheckRun"`) ? { rows: [{ orgId: "awaiting-connect" }], rowCount: 1 } : undefined));
     pool.handlers.push((text) => (text.includes(`FROM "HealthCheckConnectLink"`) ? { rows: [{ ...link, state: "pending", sealedPending: "v1.a.b.c", sealedCode: "v1.d.e.f" }], rowCount: 1 } : undefined));
     const job = await new PostgresWorkerStore(pool).loadConnectJob(link.id);
     assert.deepEqual(job, { link, state: "pending", runOrgId: "awaiting-connect", sealedPending: "v1.a.b.c", sealedCode: "v1.d.e.f" });

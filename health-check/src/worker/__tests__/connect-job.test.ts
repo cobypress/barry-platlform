@@ -54,7 +54,7 @@ class PermissionsOrg implements Transport {
 type Flow = Awaited<ReturnType<typeof flow>>;
 
 /** The console's half: a link, the admin's trip to Salesforce, and the sealed code and pending authorisation. */
-async function flow(options: { state?: LinkState; link?: (l: ConnectLink) => ConnectLink; sealFor?: string; key?: Buffer; consoleNow?: Date; runOrgId?: string } = {}) {
+async function flow(options: { state?: LinkState; link?: (l: ConnectLink) => ConnectLink; sealFor?: string; key?: Buffer; consoleNow?: Date; runOrgId?: string; product?: "barometer" | "scan" } = {}) {
   const fake = new FakeTokenEndpoint();
   const org = new PermissionsOrg();
   const deps = baseDeps({ oauthTransport: fake, dataTransport: org, now: () => new Date() });
@@ -65,7 +65,7 @@ async function flow(options: { state?: LinkState; link?: (l: ConnectLink) => Con
   const sealKey = options.key ?? deps.connectKey;
   const sealFor = options.sealFor ?? link.id;
   // The console's run behind the link, when a test cares which org it expects.
-  if (options.runOrgId) deps.store.addRun(runInput({ run: consoleRun({ orgId: options.runOrgId }) }));
+  if (options.runOrgId) deps.store.addRun(runInput({ run: consoleRun({ orgId: options.runOrgId, ...(options.product ? { product: options.product } : {}) }) }));
   deps.store.addLink(
     link,
     options.state ?? "pending",
@@ -404,5 +404,28 @@ describe("review fixes: a refusal survives a retry", () => {
     f.deps.store.refuseLink = MemoryWorkerStore.prototype.refuseLink.bind(f.deps.store);
     // With the note gone, a fresh look at the same (spent) code is refused on its own terms.
     assert.match((await f.handle(f.job, once)).detail, /didn't accept the sign-in/);
+  });
+});
+
+describe("a free scan's connect job", () => {
+  test("queues the scan the moment the prospect has connected", async () => {
+    const f = await flow({ runOrgId: ORG_AWAITING_CONNECT, product: "scan" });
+    const queued: string[] = [];
+    f.deps.queueRun = async (runId) => void queued.push(runId);
+    assert.equal((await f.handle(f.job, once)).outcome, "connected");
+    assert.deepEqual(queued, [RUN_ID]);
+    assert.deepEqual(f.deps.store.queued, [RUN_ID]);
+  });
+
+  test("an ordinary run waits for the consultant, and a queue that fails still leaves the link connected", async () => {
+    const plain = await flow({ runOrgId: ORG_AWAITING_CONNECT });
+    const queued: string[] = [];
+    plain.deps.queueRun = async (runId) => void queued.push(runId);
+    await plain.handle(plain.job, once);
+    assert.deepEqual(queued, []);
+    const down = await flow({ runOrgId: ORG_AWAITING_CONNECT, product: "scan" });
+    down.deps.queueRun = async () => Promise.reject(new Error("redis is down"));
+    assert.equal((await down.handle(down.job, once)).outcome, "connected");
+    assert.ok(down.deps.lines.some((l) => /waits for "Start the scan"/.test(l)));
   });
 });

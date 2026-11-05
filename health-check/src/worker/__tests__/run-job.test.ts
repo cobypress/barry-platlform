@@ -375,6 +375,7 @@ describe("a free scan's run job", () => {
     assert.doesNotMatch(JSON.stringify(result), /\[\[[a-z]+:|@example\.com/);
     assert.equal(asked.length, 0);
     assert.equal(deps.tokens.has(CONNECTION), false, "the scan's connection is gone");
+    assert.equal(existsSync(join(deps.runsDir, RUN_ID)), false, "nothing of the org stays on the worker");
   });
 
   test("an ordinary run keeps its connection and writes no teaser", async () => {

@@ -392,9 +392,10 @@ export class PostgresWorkerStore implements WorkerStore {
   async loadConnectJob(linkId: string): Promise<ConnectJobInput | null> {
     const row = one(await this.#pool.query(selectSql("HealthCheckConnectLink", CONNECT_LINK, `"id" = $1`), [linkId]));
     if (!row) return null;
-    const run = one(await this.#pool.query(`SELECT "orgId" FROM "HealthCheckRun" WHERE "id" = (SELECT "runId" FROM "HealthCheckConnectLink" WHERE "id" = $1)`, [linkId]));
+    const run = one(await this.#pool.query(`SELECT "orgId", "id", "product" FROM "HealthCheckRun" WHERE "id" = (SELECT "runId" FROM "HealthCheckConnectLink" WHERE "id" = $1)`, [linkId]));
     if (typeof run?.orgId !== "string") return null;
-    return linkFromRow(row, run.orgId);
+    const job = linkFromRow(row, run.orgId);
+    return run.product === "scan" && typeof run.id === "string" ? { ...job, scanRunId: run.id } : job;
   }
 
   markLinkUsed(linkId: string, c: LinkConnected): Promise<void> {
@@ -476,6 +477,10 @@ export class PostgresWorkerStore implements WorkerStore {
       `SELECT r."id" AS "runId", to_char(MAX(rel."releasedAt"), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "releasedAt" FROM "HealthCheckRun" r LEFT JOIN "HealthCheckRelease" rel ON rel."runId" = r."id" WHERE r."status" = 'released' GROUP BY r."id" ORDER BY r."id"`,
     );
     return rows.map((row: Record<string, unknown>) => ({ runId: String(row.runId), releasedAt: typeof row.releasedAt === "string" ? row.releasedAt : null }));
+  }
+
+  async recordRunQueued(runId: string, at: string): Promise<void> {
+    await this.#pool.query(`UPDATE "HealthCheckRun" SET "queuedAt" = $2::timestamp(3), "queueError" = NULL WHERE "id" = $1`, [runId, at]);
   }
 
   async saveScanResult(runId: string, result: ScanResult, madeAt: string): Promise<void> {

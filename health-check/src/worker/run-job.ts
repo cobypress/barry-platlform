@@ -10,6 +10,7 @@ import { loadRun, OUTPUT_FILES } from "../render/render-run.ts";
 import { OAuthConnectionProvider, revokeConnection } from "../salesforce/oauth-provider.ts";
 import { OAuthError } from "../salesforce/oauth.ts";
 import { buildScanResult } from "../scan/result.ts";
+import { deleteRunFolder } from "../retention/purge.ts";
 import type { StoredConnection } from "../salesforce/token-store.ts";
 import { safeReason, type Attempt, type JobOutcome, type WorkerDeps } from "./deps.ts";
 import { withJobLock } from "./lock.ts";
@@ -209,6 +210,14 @@ async function finishScan(runId: string, dir: string, name: string, deps: Worker
     log(`Scan ${runId}'s result is ready.`);
   } catch (err) {
     log(`Scan ${runId}'s result couldn't be saved: ${safeReason(err)}`);
+  }
+  // Nothing of a prospect's org stays on the worker: the teaser is all a scan keeps,
+  // and the privacy notice promises it. A failed teaser leaves "the scan failed" to show.
+  try {
+    deleteRunFolder(dir, runId);
+    log(`Scan ${runId}'s run folder is deleted.`);
+  } catch (err) {
+    log(`Scan ${runId}'s run folder couldn't be deleted: ${safeReason(err)}`);
   }
   try {
     await revokeConnection({ name, store: deps.tokens, transport: deps.oauthTransport });

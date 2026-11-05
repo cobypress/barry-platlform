@@ -3,7 +3,7 @@ import { MODELS } from "../config.ts";
 import { anthropicClient, anthropicClientWithKey, type NarrativeClient } from "../narrative/client.ts";
 import { checkClaude } from "../narrative/guard.ts";
 import { tokenKeySource, TokenStore } from "../salesforce/token-store.ts";
-import { startQueueWorker, type BullModule } from "../worker/bullmq.ts";
+import { HEALTH_CHECK_QUEUE, redisConnection, runQueuer, startQueueWorker, type BullModule } from "../worker/bullmq.ts";
 import { GoogleDrive } from "../worker/drive.ts";
 import { readWorkerEnv, WORKER_ENV } from "../worker/env.ts";
 import { PostgresWorkerStore, type SqlPool } from "../worker/postgres-store.ts";
@@ -72,6 +72,8 @@ export async function workerCommand(
   const pool = new pg.Pool({ connectionString: config.databaseUrl, max: config.concurrency + 2 });
   const store = new PostgresWorkerStore(pool);
   const locksDir = join(dirname(config.runsDir), `${basename(config.runsDir)}-locks`);
+  // Only for a free scan, queued the moment its prospect connects.
+  const queue = new bull.Queue(HEALTH_CHECK_QUEUE, { connection: redisConnection(config.redisUrl) });
   const handler = createJobHandler({
     store,
     tokens: new TokenStore({ dir: config.connectionsDir, key: tokenKeySource({ env: { HC_TOKEN_KEY: env.HC_TOKEN_KEY } as NodeJS.ProcessEnv, platform: "linux" }) }),
@@ -84,6 +86,7 @@ export async function workerCommand(
     apiVersion: config.apiVersion,
     drive: config.drive ? new GoogleDrive(config.drive) : null,
     micrositeKey: config.micrositeKey,
+    queueRun: runQueuer(queue),
     narrative,
     log,
   });
@@ -116,6 +119,7 @@ export async function workerCommand(
   clearInterval(sweeping);
   log("Stopping: finishing the jobs in hand.");
   await worker.close();
+  await queue.close();
   await pool.end();
   return 0;
 }

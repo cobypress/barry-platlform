@@ -93,6 +93,8 @@ export type ConnectJobInput = {
   /** Sealed by the console with HC_CONNECT_KEY (connect-crypto.ts). Null once settled. */
   sealedPending: string | null;
   sealedCode: string | null;
+  /** Set when the link's run is a free scan: once connected, the worker queues it itself. */
+  scanRunId?: string;
 };
 
 export type LinkConnected = {
@@ -177,6 +179,9 @@ export interface WorkerStore {
   addBenchmarkRows(rows: BenchmarkRow[]): Promise<void>;
   /** Every benchmark row, for comparing a run with other customers. They name no one, so reading them all is safe. */
   loadBenchmarkRows(): Promise<BenchmarkRow[]>;
+
+  /** Records that the worker put a run on the queue itself, as the console does when it queues one. */
+  recordRunQueued(runId: string, at: string): Promise<void>;
 
   /** A free scan's teaser, for the console to show the prospect. One row a run. */
   saveScanResult(runId: string, result: ScanResult, madeAt: string): Promise<void>;
