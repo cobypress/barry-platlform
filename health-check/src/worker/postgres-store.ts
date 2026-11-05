@@ -327,6 +327,20 @@ export class PostgresWorkerStore implements WorkerStore {
     }
   }
 
+  /**
+   * A run's survey answers. A database without the console's survey table yet
+   * (Postgres 42P01) has no answers, so a worker deployed before that migration
+   * still runs every check rather than failing them.
+   */
+  async #surveyRows(runId: string): Promise<SqlResult> {
+    try {
+      return await this.#pool.query(selectSql("HealthCheckSurveyResponse", SURVEY_RESPONSE, `"runId" = $1`, `"submittedAt", "id"`), [runId]);
+    } catch (err) {
+      if ((err as { code?: string }).code === "42P01") return { rows: [], rowCount: 0 };
+      throw err;
+    }
+  }
+
   async loadRunJob(runId: string): Promise<RunJobInput | null> {
     const row = one(await this.#pool.query(selectSql("HealthCheckRun", RUN, `"id" = $1`), [runId]));
     if (!row) return null;
@@ -335,7 +349,7 @@ export class PostgresWorkerStore implements WorkerStore {
       this.#pool.query(selectSql("HealthCheckIntake", INTAKE, `"runId" = $1`), [runId]),
       this.#pool.query(selectSql("HealthCheckCalibration", CALIBRATION, `"runId" = $1`), [runId]),
       this.#pool.query(selectSql("HealthCheckManualAnswer", MANUAL_ANSWER, `"runId" = $1`, `"answeredAt", "stepKey"`), [runId]),
-      this.#pool.query(selectSql("HealthCheckSurveyResponse", SURVEY_RESPONSE, `"runId" = $1`, `"submittedAt", "id"`), [runId]),
+      this.#surveyRows(runId),
     ]);
     const run = runFromRows(row, steps.rows.map(({ runId: _r, ...s }) => s));
     return {
@@ -445,7 +459,7 @@ export class PostgresWorkerStore implements WorkerStore {
       this.#pool.query(selectSql("HealthCheckSectionVersion", VERSION, `"id" IN (SELECT "currentVersionId" FROM "HealthCheckSection" WHERE "runId" = $1)`), [runId]),
       this.#pool.query(selectSql("HealthCheckNumberOverride", OVERRIDE, `"runId" = $1`, `"seq"`), [runId]),
       this.#pool.query(selectSql("HealthCheckDocuments", DOCUMENTS, `"runId" = $1`), [runId]),
-      this.#pool.query(selectSql("HealthCheckSurveyResponse", SURVEY_RESPONSE, `"runId" = $1`, `"submittedAt", "id"`), [runId]),
+      this.#surveyRows(runId),
     ]);
     const run = runFromRows(row, steps.rows.map(({ runId: _r, ...s }) => s));
     const doc = one(documents);

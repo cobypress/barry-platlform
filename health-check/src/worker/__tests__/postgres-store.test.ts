@@ -376,3 +376,27 @@ describe("PostgresWorkerStore, for documents", () => {
     assert.match(fail!, /AND "status" IN \('queued', 'making'\)/);
   });
 });
+
+describe("a database without the survey table yet", () => {
+  test("loads a run job with no survey, rather than failing it", async () => {
+    const pool = new FakePool();
+    pool.handlers.push((text) => {
+      if (text.includes(`FROM "HealthCheckSurveyResponse"`)) throw Object.assign(new Error(`relation "HealthCheckSurveyResponse" does not exist`), { code: "42P01" });
+      return undefined;
+    });
+    pool.handlers.push((text) => (text.includes(`FROM "HealthCheckRun" WHERE "id"`) ? { rows: [RUN_ROW as Record<string, unknown>], rowCount: 1 } : undefined));
+    const job = await new PostgresWorkerStore(pool).loadRunJob(RUN_ROW.id as string);
+    assert.ok(job, "the run still loads");
+    assert.ok(!job.survey || job.survey.responses.length === 0);
+  });
+
+  test("any other database error still stops the load", async () => {
+    const pool = new FakePool();
+    pool.handlers.push((text) => {
+      if (text.includes(`FROM "HealthCheckSurveyResponse"`)) throw Object.assign(new Error("connection reset"), { code: "08006" });
+      return undefined;
+    });
+    pool.handlers.push((text) => (text.includes(`FROM "HealthCheckRun" WHERE "id"`) ? { rows: [RUN_ROW as Record<string, unknown>], rowCount: 1 } : undefined));
+    await assert.rejects(new PostgresWorkerStore(pool).loadRunJob(RUN_ROW.id as string), /connection reset/);
+  });
+});
