@@ -82,3 +82,14 @@ describe("checkReadOnlyUser", () => {
     await assert.rejects(checkReadOnlyUser(sf, "005' OR Id != '"), /user id/);
   });
 });
+
+describe("the connection note for an admin", async () => {
+  const { permissionNote, NOTE_LISTED, NOTE_MAX } = await import("../read-only-check.ts");
+  test("names a few things the user can change, says how many more, and stays short", () => {
+    const many = Array.from({ length: 300 }, (_, i) => `Permission${i}`);
+    const note = permissionNote({ status: "can_write", systemPermissions: many, objects: ["Account", "Contact"] } as never);
+    assert.ok(note.length <= NOTE_MAX, String(note.length));
+    assert.match(note, new RegExp(`and ${300 + 2 - NOTE_LISTED} more`));
+    assert.match(note, /Barometer only reads, as its request list enforces\.$/);
+  });
+});

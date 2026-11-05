@@ -51,9 +51,16 @@ export async function checkReadOnlyUser(client: SalesforceClient, userId: string
 const readable = (permission: string): string => permission.replace(/^Permissions/, "").replace(/([a-z])([A-Z])/g, "$1 $2");
 
 /** What the consultant is told about the user, whatever they can do. Never a reason to refuse (DECISIONS 151). */
+/** The note names a few of what the user can change, never all: an admin holds hundreds, and the console keeps notes short. */
+export const NOTE_LISTED = 3;
+export const NOTE_MAX = 500;
+
 export function permissionNote(check: ReadOnlyCheck): string {
+  const fit = (note: string): string => (note.length <= NOTE_MAX ? note : `${note.slice(0, NOTE_MAX - 1)}…`);
   if (check.status === "read_only") return "Connected as a user who can only read.";
-  if (check.status === "unknown") return `Connected. We couldn't read what the user can change: ${check.reason}. Barometer only reads, as its request list enforces.`;
+  if (check.status === "unknown") return fit(`Connected. We couldn't read what the user can change: ${check.reason}. Barometer only reads, as its request list enforces.`);
   const what = [...check.systemPermissions.map(readable), ...check.objects.map((o) => `create, edit or delete on ${o}`)];
-  return `Connected as a user who can change data (${what.join("; ")}). Barometer only reads, as its request list enforces.`;
+  const listed = what.slice(0, NOTE_LISTED).join("; ");
+  const more = what.length > NOTE_LISTED ? `, and ${what.length - NOTE_LISTED} more` : "";
+  return fit(`Connected as a user who can change data (${listed}${more}). Barometer only reads, as its request list enforces.`);
 }

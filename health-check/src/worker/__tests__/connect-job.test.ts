@@ -144,7 +144,7 @@ describe("a connect job", () => {
     assert.ok(link.link.usedAt);
     assert.equal(
       link.connected!.note,
-      "Connected as a user who can change data (Author Apex; Customize Application; Manage Users; Modify All Data; Modify Metadata; create, edit or delete on Account). Barometer only reads, as its request list enforces.",
+      "Connected as a user who can change data (Author Apex; Customize Application; Manage Users, and 3 more). Barometer only reads, as its request list enforces.",
     );
     assert.match(outcome.detail, /Barometer only reads/);
     assert.ok(f.deps.tokens.has(NAME), "the connection is kept");
