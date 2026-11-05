@@ -9,6 +9,8 @@ import { inventoryLine } from "../notes/raw-notes.ts";
 import { noteSections, rawNotesOrder, valueItemId } from "./references.ts";
 import { KIND_LABELS, type ValueGroup } from "../value/model.ts";
 import { comparisonId, comparisonNotes, formatFigure, type Comparison } from "../benchmark/compare.ts";
+import { domainLabel, domainsInOrder } from "../narrative/select.ts";
+import { OURS, practiceFor, practiceId } from "../practice/index.ts";
 import { TRANSITIONS, transitionMatrix } from "../domains/historic-pipeline/process.ts";
 import { DOCUMENTED, readDocument, sharingLabel } from "../domains/configuration/documented.ts";
 
@@ -209,6 +211,22 @@ function addDocumented(notes: Notes, metrics: Metric[], ids: string[], ref: (id:
   }
 }
 
+/** Each area's statements, with where each comes from. Black Cloud's own practice says so. */
+function addPractice(notes: Notes, domains: string[], ref: (id: string) => string): void {
+  for (const domain of domains) {
+    const items = practiceFor(domain);
+    if (items.length === 0) continue;
+    notes.heading(domainLabel(domain), 3);
+    items.forEach((p, i) => {
+      notes.labelled(ref(practiceId(domain, i)), p.text);
+      if (!p.source) return notes.labelled("Source", `${OURS}, not a Salesforce source`);
+      notes.labelled("Source", `${p.source.name}: ${p.source.title}. Read on ${p.source.checked}`);
+      notes.labelled("What it says", p.source.says);
+      notes.bullet(p.source.url, true);
+    });
+  }
+}
+
 function addComparison(notes: Notes, c: Comparison, ref: string): void {
   notes.heading(`${ref} ${c.metric.label}${c.value === null ? "" : `: ${formatFigure(c.value, c.metric.unit)}`}`, 3);
   for (const line of comparisonNotes(c)) notes.labelled(line.label, line.text);
@@ -260,6 +278,7 @@ export function buildRawNotes(report: BuiltReport, pseudonyms: Pseudonymiser): N
     if (s.key === "manual_steps") manualSteps.forEach((step) => addManualStep(notes, step, ref(step.id)));
     if (s.key.startsWith("findings_")) rawNotesOrder(findings.filter((f) => s.items.some((item) => item.id === f.id))).forEach((f) => addFinding(notes, f, calibration.currency, ref(f.id)));
     if (s.key === "pipeline_metrics" || s.key === "investment" || s.key === "adoption" || s.key === "sales_process") metrics.filter((m) => s.items.some((item) => item.id === m.id)).forEach((m) => addMetric(notes, m, ref(m.id), calibration));
+    if (s.key === "practice") addPractice(notes, domainsInOrder(report.teamFindings), ref);
     if (s.key === "org_documented") addDocumented(notes, metrics, s.items.map((item) => item.id), ref, calibration);
     if (s.key === "value_model") report.value.groups.forEach((g) => addValueGroup(notes, g, calibration.currency, ref(valueItemId(g.id))));
     if (s.key === "comparisons") report.comparisons.forEach((c) => addComparison(notes, c, ref(comparisonId(c.metric.key))));

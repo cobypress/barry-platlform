@@ -914,10 +914,11 @@ export const CONNECTED_APPS = [
   { Name: "Finance Sync", OptionsAllowAdminApprovedUsersOnly: true },
 ];
 export const NAMED_CREDENTIALS = [{ DeveloperName: "Finance_API", MasterLabel: "Finance API", NamespacePrefix: null }];
-// Trap: a key in the query string, which must never be kept.
+// Traps: a key in the query string, which must never be kept; an https site
+// that lets code mix in HTTP; and a plain http site, inactive, so it's no risk.
 export const REMOTE_SITES = [
-  { EndpointUrl: "https://api.finance.example.com/v2?key=not-a-real-key", IsActive: true, NamespacePrefix: null },
-  { EndpointUrl: "http://legacy.example.com", IsActive: false, NamespacePrefix: null },
+  { EndpointUrl: "https://api.finance.example.com/v2?key=not-a-real-key", IsActive: true, ProtocolMismatch: true, NamespacePrefix: null },
+  { EndpointUrl: "http://legacy.example.com", IsActive: false, ProtocolMismatch: false, NamespacePrefix: null },
 ];
 
 export const SHARING_DEFAULTS = { DefaultAccountAccess: "Read", DefaultContactAccess: "ControlledByParent", DefaultOpportunityAccess: "Edit", DefaultLeadAccess: "ReadEditTransfer" };

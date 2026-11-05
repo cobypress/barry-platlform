@@ -16,6 +16,7 @@ import type { Intake } from "./intake.ts";
 import { applyOverrides } from "./overrides.ts";
 import { assumptionsSource, findingSource, metricSource, planSource, statedProblemsSource, type PromptSource } from "./prompt.ts";
 import { areasOf, buildPlan, bySeverity, domainLabel, domainsInOrder, isSetupReview, issuesOf, scorecard, teamLevelFinding, topIssues, verdictOf, type Plan } from "./select.ts";
+import { chapterFigures } from "../render/chapter.ts";
 
 // The three outputs, built from one findings dataset. Each section gets a first
 // version written by the engine, so a report always exists even if Claude never
@@ -99,6 +100,7 @@ const PLAN = "plan";
 export const OVERALL = "score:overall";
 export const VALUE_TOTAL = "value:total";
 export const PROGRESS = "progress";
+const CHAPTER = "chapter";
 export const valueSource = (group: string): string => `value:${group}`;
 /** The investment section's own figures: what the customer told us they spend. */
 export const INVESTMENT_SOURCE = "investment";
@@ -258,6 +260,11 @@ function rawNotesSpecs(input: ReportInput, overall: OverallScore, comparisons: C
       title: "Your org, documented",
       body: "A reference for whoever looks after Salesforce, with every list in full: the objects and how they relate, what runs when a record is saved and in what order, what connects to the org, who uses it, and who can see what. It describes the org rather than judging it.",
       metricIds: metrics.filter((m) => DOCUMENTED_METRIC_IDS.includes(m.id)).map((m) => m.id),
+    },
+    {
+      key: "practice",
+      title: "What good looks like",
+      body: "For each area we checked, what good looks like, and where each statement comes from: a public Salesforce page, with the date we read it and what it says in our words, or Black Cloud's own practice, which we label as ours.",
     },
     // Every compared figure is a pipeline figure, which a set-up review never reads.
     ...(isSetupReview(run) ? [] : [{
@@ -642,8 +649,9 @@ export function buildReport(input: ReportInput): BuiltReport {
     dataset.figures.push(...progressFigures(progress).map((value) => ({ source: PROGRESS, kind: "number" as const, value })));
     dataset.figures.push(...worthFigures(progress).map((value) => ({ source: PROGRESS, kind: "currency" as const, value, currency: calibration.currency })));
   }
-  // What each area is worth, as its chapter in the full report says it.
+  // What each area is worth, as its chapter in the full report says it, and the chapter's counts.
   for (const domain of new Set(team.map((f) => f.domain))) {
+    dataset.figures.push(...chapterFigures(team.filter((f) => f.domain === domain)).map((value) => ({ source: CHAPTER, kind: "number" as const, value })));
     const worth = worthOf(value, new Set(team.filter((f) => f.domain === domain).map((f) => f.id)));
     if (worth > 0) dataset.figures.push({ source: VALUE_TOTAL, kind: "currency", value: worth, currency: calibration.currency });
   }

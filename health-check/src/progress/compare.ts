@@ -72,13 +72,17 @@ export function compareWithBaseline(baseline: ProgressSide, current: ProgressSid
 }
 
 /** Every figure a page about progress quotes, for the number check. */
+/** How many of each list the progress page names. The rest are counted, so the count is a figure too. */
+export const PROGRESS_LISTED = 5;
+
 export function progressFigures(p: Progress): number[] {
   const pairs = [p.score.before, p.score.after, ...p.areas.flatMap((a) => [a.before, a.after])].filter((n): n is number => n !== null);
   const changes = [
     p.score.before !== null && p.score.after !== null ? Math.abs(p.score.after - p.score.before) : null,
     ...p.areas.map((a) => (a.before !== null && a.after !== null ? Math.abs(a.after - a.before) : null)),
   ].filter((n): n is number => n !== null);
-  return [...pairs, ...changes, p.fixed.length, p.remaining.length, p.added.length, p.unknown.length];
+  const overflow = [p.fixed, p.remaining, p.added].filter((l) => l.length > PROGRESS_LISTED).map((l) => l.length - PROGRESS_LISTED);
+  return [...pairs, ...changes, p.fixed.length, p.remaining.length, p.added.length, p.unknown.length, ...overflow];
 }
 
 export const worthFigures = (p: Progress): number[] => [p.worth.before, p.worth.after, Math.abs(p.worth.before - p.worth.after)];

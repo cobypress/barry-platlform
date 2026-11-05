@@ -121,6 +121,7 @@ The figures we compare with are in `src/benchmark/published.ts`, each with its s
 | 58 | The Tooling API guide lists the sharing models as None, Read, Edit, ControlledByLeadOrContact and ControlledByCampaign. Is None the private default, and what do ReadEditTransfer, ControlledByParent and full access read as? | We show None as Private and the others in plain words. A value we don't know is shown as Salesforce gives it |
 | 59 | Can the read-only user query `ConnectedApplication`, `NamedCredential` (View Setup and Configuration, per the Object Reference), Tooling's `RemoteProxy`, and `PermissionSetAssignment` filtered on `Assignee.IsActive`? | Each one that can't be read is left out of the part, and the part says why |
 | 60 | Is there a read-only way to count sharing rules? They're only in the Metadata API, which a Barometer Read Only connection can't use | The security part shows each object's default and says sharing rules aren't counted |
+| 61 | Does `LoginHistory.Application` hold a connected app's name, as Setup shows it, for logins through that app? We match the two by name to find which self-authorised apps carry API logins | An app in use would be rated medium rather than high. It's still raised |
 
 ## Field names checked against Salesforce's docs
 

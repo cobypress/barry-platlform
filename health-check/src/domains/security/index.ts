@@ -1,6 +1,7 @@
 import { fieldDescribeExtractor, missingFieldReason } from "../../extract/fields.ts";
 import { loginsExtractor, usersExtractor, type UserRow } from "../../extract/users.ts";
-import { orgExtractor, type SharingDefaults } from "../../extract/configuration.ts";
+import { customObjectsExtractor, orgExtractor, recordCountsExtractor, type SharingDefaults } from "../../extract/configuration.ts";
+import { orgDocumentationExtractor } from "../../extract/documentation.ts";
 import { privilegedPermissionsExtractor, securityHealthExtractor, type HealthRiskRow } from "../../extract/security.ts";
 import { looksShared } from "../../guards/user-guards.ts";
 import { notSized, pct, plural, segmentRate, type Rule, type RuleContext, type RuleResult } from "../../engine/rule.ts";
@@ -257,10 +258,95 @@ const personalIntegrations: Rule = {
   },
 };
 
+// Connected apps and remote sites are read for "Your org, documented"
+// (DECISIONS.md 118). These two rules judge what that part only describes.
+
+const selfAuthorisedApps: Rule = {
+  id: "sec.self-authorised-connected-apps",
+  version: 1,
+  domain: "security",
+  title: "Connected apps anyone can authorise",
+  evaluate(ctx): RuleResult {
+    const { connectedApps } = ctx.data(orgDocumentationExtractor);
+    const logins = ctx.data(loginsExtractor);
+    const evidence = [ctx.ev(connectedApps.source, { count: connectedApps.status === "ok" ? connectedApps.data.length : null })];
+    if (connectedApps.status !== "ok") return { outcome: "not_measurable", reason: `Connected apps couldn't be read: ${connectedApps.reason}`, evidence };
+    // A null setting isn't a yes: only a definite false counts.
+    const open = connectedApps.data.filter((a) => a.OptionsAllowAdminApprovedUsersOnly === false).sort((a, b) => a.Name.localeCompare(b.Name));
+    const unread = connectedApps.data.filter((a) => typeof a.OptionsAllowAdminApprovedUsersOnly !== "boolean").length;
+    const segments = [{ dimension: "connected app", segments: connectedApps.data.length }];
+    if (open.length === 0) {
+      if (unread) return { outcome: "not_measurable", reason: `Who can authorise ${plural(unread, "connected app")} couldn't be read.`, evidence };
+      return { outcome: "pass", summary: `All ${plural(connectedApps.data.length, "connected app")} let only users an admin has approved use them.`, evidence, segmentsChecked: segments, segmentExemptReason: connectedApps.data.length ? undefined : "There are no connected apps." };
+    }
+    // An app with API logins is carrying data now, so opening it to anyone matters more.
+    const inUse = new Map<string, number>();
+    if (logins.status === "ok") for (const api of Object.values(logins.data.apiByUser)) for (const app of api.applications) inUse.set(app, (inUse.get(app) ?? 0) + api.logins);
+    const busy = open.filter((a) => inUse.has(a.Name));
+    if (logins.status === "ok") evidence.push(ctx.ev(logins.source, { count: logins.data.rowsRead, dateRange: { from: logins.data.from, to: ctx.window.to }, note: "API logins by application, matched to connected apps by name" }));
+    return {
+      outcome: "issue",
+      title: "Any user can authorise some connected apps",
+      summary: `${open.length} of ${connectedApps.data.length} connected apps let users authorise them for themselves, without an admin approving who can: ${open.map((a) => a.Name).join(", ")}.${busy.length ? ` ${busy.map((a) => a.Name).join(", ")} ${busy.length === 1 ? "has" : "have"} had API logins since ${logins.status === "ok" ? logins.data.from : ""}, so ${busy.length === 1 ? "it carries" : "they carry"} data now.` : ""}${logins.status !== "ok" ? " We couldn't read the login history, so we can't say which are in use." : ""}`,
+      recommendation: "Set each app to admin-approved users only, then give access through a permission set to the people and integration users who need it.",
+      recommendationType: "change",
+      severity: busy.length ? "high" : "medium",
+      confidence: "high",
+      evidence,
+      value: notSized("A security gap is a risk to manage, not a figure we can put in revenue or hours."),
+      effort: { size: "S" },
+      owner: "Salesforce admin",
+      dependencies: ["Find out who uses each app before changing it, and grant them access first"],
+      // Not a block on a change, but the thing to check before making it.
+      guards: open.map((a) => ({ guardId: "business-relies-on-app", subject: a.Name, status: "unknown" as const, detail: "This may be an app the business relies on. Check who uses it before restricting it, or their access stops.", evidence })),
+      segmentsChecked: segments,
+      subjects: open.map((a) => ({ type: "connected app", label: a.Name })),
+      facts: { open: open.length, apps: connectedApps.data.length, withApiLogins: busy.length },
+    };
+  },
+};
+
+const insecureRemoteSites: Rule = {
+  id: "sec.insecure-remote-sites",
+  version: 1,
+  domain: "security",
+  title: "Remote sites that allow plain HTTP",
+  evaluate(ctx): RuleResult {
+    const { remoteSites } = ctx.data(orgDocumentationExtractor);
+    const evidence = [ctx.ev(remoteSites.source, { count: remoteSites.status === "ok" ? remoteSites.data.length : null, exclusions: ["Inactive remote sites", "Installed packages' remote sites"], note: "Shown by host only" })];
+    if (remoteSites.status !== "ok") return { outcome: "not_measurable", reason: `Remote site settings couldn't be read: ${remoteSites.reason}`, evidence };
+    const active = remoteSites.data.filter((r) => r.IsActive && !r.NamespacePrefix);
+    const plain = active.filter((r) => !r.secure);
+    const mixed = active.filter((r) => r.secure && r.ProtocolMismatch);
+    const segments = [{ dimension: "remote site", segments: active.length }];
+    if (plain.length + mixed.length === 0) {
+      return { outcome: "pass", summary: `All ${plural(active.length, "active remote site")} use HTTPS and keep to it.`, evidence, segmentsChecked: segments, segmentExemptReason: active.length ? undefined : "There are no active remote sites." };
+    }
+    const hosts = (rows: typeof active): string => [...new Set(rows.map((r) => r.host))].sort().join(", ");
+    return {
+      outcome: "issue",
+      title: "Some remote sites can send data over plain HTTP",
+      summary: [plain.length ? `${plural(plain.length, "active remote site")} ${plain.length === 1 ? "uses" : "use"} plain HTTP: ${hosts(plain)}.` : "", mixed.length ? `${plural(mixed.length, "active remote site")} ${mixed.length === 1 ? "is" : "are"} set to let code pass data between HTTPS and HTTP: ${hosts(mixed)}.` : "", "Data sent over HTTP isn't encrypted on the way."].filter(Boolean).join(" "),
+      recommendation: "Move each site to HTTPS and turn off the setting that lets code mix HTTPS and HTTP. If a site can't do HTTPS, ask whether Salesforce should be calling it at all.",
+      recommendationType: "change",
+      severity: "medium",
+      confidence: "high",
+      evidence,
+      value: notSized("A security gap is a risk to manage, not a figure we can put in revenue or hours."),
+      effort: { size: "S" },
+      owner: "Salesforce admin",
+      dependencies: ["Check that the other end accepts HTTPS before changing the address"],
+      segmentsChecked: segments,
+      subjects: [...plain, ...mixed].map((r) => ({ type: "remote site", label: r.host })),
+      facts: { plain: plain.length, mixed: mixed.length, active: active.length },
+    };
+  },
+};
+
 export const securityModule: DomainModule = {
   id: "security",
   cloud: "sales",
   label: "Security and access",
-  extractors: [usersExtractor, fieldDescribeExtractor, loginsExtractor, securityHealthExtractor, privilegedPermissionsExtractor],
-  rules: [healthScore, healthRisks, modifyAllData, viewAllData, sharingDefaults, personalIntegrations],
+  extractors: [usersExtractor, fieldDescribeExtractor, loginsExtractor, securityHealthExtractor, privilegedPermissionsExtractor, recordCountsExtractor, customObjectsExtractor, orgDocumentationExtractor],
+  rules: [healthScore, healthRisks, modifyAllData, viewAllData, sharingDefaults, personalIntegrations, selfAuthorisedApps, insecureRemoteSites],
 };

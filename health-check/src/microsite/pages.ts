@@ -8,6 +8,7 @@ import { effortText, renderContext, valueText, type Render } from "../render/htm
 import { noteSections, referenceMap } from "../render/references.ts";
 import { HEADLINE_KINDS, KIND_LABELS } from "../value/model.ts";
 import { DOCUMENTED, readDocument } from "../domains/configuration/documented.ts";
+import { practiceFor, practiceId, sourceLabel } from "../practice/index.ts";
 import { accessBlock, automationLists, automationTable, dataModelDiagram, DIAGRAM_KEY, hasDocument, integrationsBlock, objectsTable, relationshipsTable, sharingTable } from "../render/documented.ts";
 
 // The customer microsite's pages (roadmap Stage 4). Built for a browser, not
@@ -46,6 +47,9 @@ const STYLE = `<style>
 .bcr h3.cap { font-size: 14px; color: rgba(255,255,255,.6); margin: 12px 0 4px; }
 .bcr .small-note { font-size: 13px; color: rgba(255,255,255,.6); }
 .bcr .wide { overflow-x: auto; }
+.bcr .good { margin: 0 0 14px; padding: 10px 14px; border-left: 3px solid #bfff00; background: rgba(255,255,255,.03); }
+.bcr .good ul { margin: 4px 0 0; }
+.bcr .good li { font-size: 14px; }
 .bcr li { margin-bottom: 6px; }
 </style>`;
 
@@ -90,7 +94,9 @@ function issues(r: Render, report: BuiltReport): string {
           return `<div class="issue"><div class="meta">${chip(f.severity)}<span>${r.t(effortText(f))}</span><span>${r.t(`Owner: ${f.owner}`)}</span>${r.ref(f.id)}</div><h3>${r.t(f.title)}</h3><p>${r.t(f.summary)}</p>${f.recommendation ? `<p><strong>What to do:</strong> ${r.t(f.recommendation)}</p>` : ""}<p class="muted"><strong>${value.amount}</strong> ${value.note}</p></div>`;
         })
         .join("");
-      return `<h2>${r.t(domainLabel(domain))}</h2>${cards}`;
+      const good = practiceFor(domain);
+      const practice = good.length ? `<div class="good"><h3 class="cap">${r.t("What good looks like")}</h3><ul>${good.map((p, i) => `<li>${r.t(p.text)} <span class="muted">${r.t(sourceLabel(p))}</span>${r.ref(practiceId(domain, i))}</li>`).join("")}</ul></div>` : "";
+      return `<h2>${r.t(domainLabel(domain))}</h2>${practice}${cards}`;
     })
     .join("");
   return page(`<h1>Every issue we found</h1><p class="muted">${r.t("Grouped by area, most serious first. Each reference points to the raw notes, where the working is.")}</p>${sections}`);
