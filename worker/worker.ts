@@ -761,17 +761,24 @@ const worker = new Worker(
 
       // 6) Add case comment — Slack thread reply → SF CaseComment
       if (job.name === "add-case-comment") {
-        const { case_id, comment_body, author_name } = job.data as {
+        const { case_id, comment_body, author_name, author_email, source } = job.data as {
           case_id: string; case_number: string; comment_body: string; author_name: string;
+          author_email?: string; source?: "Internal" | "External";
         };
 
         await salesforce.sfJson("/services/apexrest/barry/add-case-comment", {
           method: "POST",
-          body: JSON.stringify({ caseId: case_id, body: comment_body, authorName: author_name }),
+          body: JSON.stringify({
+            caseId: case_id,
+            body: comment_body,
+            authorName: author_name,
+            authorEmail: author_email,
+            source,
+          }),
           headers: { "Content-Type": "application/json; charset=utf-8" },
         });
 
-        console.log(`[add-case-comment] Comment added to SF case ${case_id}`);
+        console.log(`[add-case-comment] Comment added to SF case ${case_id} (source=${source ?? "Internal"})`);
       }
 
       // 7) CSAT response — user clicked a rating button on the survey DM
