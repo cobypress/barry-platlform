@@ -153,9 +153,9 @@ Service Cloud, CPQ and Revenue Cloud, Marketing Cloud and Account Engagement, Ex
 - **Design.** A designer's pass once Phase 1 sets the shape: a consistent page system, charts that read at a glance.
 - **Speed.** From connect link to documents in under a week, with the run itself under a day.
 
-## Decisions waiting on Coby
+## Decisions (Coby, 5 November 2026)
 
-1. Seeding benchmarks: ask past and current customers to consent to contributing their anonymised figures?
-2. Published research for headline figures until our own set is big enough: yes, labelled and cited?
-3. Hourly cost for time-based value: ask the customer, use a cited UK benchmark by role, or both (customer's figure wins)?
-4. Salesforce spend: ask the customer on the connect page, with list price as the fallback?
+1. **Seeding benchmarks:** yes. Ask past and current customers to consent to contributing their anonymised, banded figures, with one read-only run each. Three orgs are expected within days of this decision.
+2. **Published research:** yes, combined with our own figures as they arrive. Published figures are always labelled with their source. Our own figures appear as a "Black Cloud customers" range from 5 orgs, with the count shown, and never below: at 3 orgs the middle value is one company's real figure, which another customer could read as theirs (rule 11). Industry and size groups appear from 10 orgs (`BENCHMARK_MIN_GROUP`).
+3. **Hourly cost:** ask the customer on the connect page, with a cited UK salary benchmark by role as the fallback. Their figure wins.
+4. **Salesforce spend:** an optional connect-page question, with list price for their seats and edition as the fallback, labelled as list price.
