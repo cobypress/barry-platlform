@@ -4,12 +4,12 @@ import { generateKeyPairSync } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { buildReport, currentBody, type ReportOutputKey } from "../../narrative/sections.ts";
-import { approvedReport, layoutWarnings, renderReleased, type ApprovedRun } from "../../render/render-released.ts";
+import { approvedReport, layoutWarnings, renderReleased, type ApprovedRun, type DocumentKey } from "../../render/render-released.ts";
 import { loadRun } from "../../render/render-run.ts";
 import type { ReportSection, SectionVersion } from "../../schemas/index.ts";
 import { runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers } from "../../testing/replay.ts";
-import { clientNameOf, folderFor, processDocumentsJob } from "../documents-job.ts";
+import { clientNameOf, folderFor, INTERNAL_FOLDER, processDocumentsJob } from "../documents-job.ts";
 import { DriveError, GoogleDrive, type DocumentDrive, type DriveItem } from "../drive.ts";
 import type { DocumentsJobInput } from "../types.ts";
 import { baseDeps, consoleRun, INTAKE, RUN_ID, temp } from "./helpers.ts";
@@ -76,8 +76,8 @@ class MemoryDrive implements DocumentDrive {
 /** Prints placeholder files, so the job's tests need no browser. */
 async function fakeRender(_dir: string, _approved: ApprovedRun, out: string) {
   mkdirSync(out, { recursive: true });
-  const files = {} as Record<ReportOutputKey, string>;
-  for (const output of ["raw_notes", "executive_summary", "full_health_check"] as ReportOutputKey[]) {
+  const files = {} as Record<DocumentKey, string>;
+  for (const output of ["raw_notes", "executive_summary", "full_health_check", "ceo_one_pager", "readout_kit"] as DocumentKey[]) {
     files[output] = join(out, `${output}.bin`);
     writeFileSync(files[output], `synthetic ${output}`);
   }
@@ -131,7 +131,8 @@ describe("a documents job", () => {
     const deps = setup(second, drive);
     assert.equal((await processDocumentsJob(second.run.id, deps, { final: true })).outcome, "done");
     assert.equal(deps.store.documents.get(second.run.id)!.made!.folderName, "Health check 2");
-    assert.equal((await drive.folders(drive.rootFolderId)).length, 1);
+    // One client folder, beside Black Cloud's own.
+    assert.deepEqual((await drive.folders(drive.rootFolderId)).map((f) => f.name).sort(), [INTERNAL_FOLDER, "Synthetic Co"]);
   });
 
   test("made again, the first make moves into Version 1, keeping its links, and the new one goes into Version 2", async () => {
@@ -174,7 +175,7 @@ describe("a documents job", () => {
     const folders = (await drive.folders(doc.made!.driveFolderId)).map((f) => f.name.split(",")[0]).sort();
     assert.deepEqual(folders, ["Version 1", "Version 2"]);
     const v2 = (await drive.folders(doc.made!.driveFolderId)).find((f) => f.name.startsWith("Version 2"))!;
-    assert.equal((await drive.files(v2.id)).length, 3, "three files, none twice");
+    assert.equal((await drive.files(v2.id)).length, 4, "the three documents and the one-pager, none twice");
   });
 
   test("with its folder gone from Drive, the run gets the client's next number", async () => {
@@ -276,6 +277,39 @@ describe("the released documents", () => {
       full: { pages: 40, passed: false, problems: [{ page: 0, check: "page count", detail: "61 pages" }] },
     });
     assert.deepEqual(warnings, ["The executive summary, page 2: empty section", "The full health check: page count"]);
+  });
+});
+
+describe("the one-pager and the readout kit", () => {
+  test("the one-pager goes in the customer's folder, the kit only in Black Cloud's own, and the console hears of the three it takes", async () => {
+    const drive = new MemoryDrive();
+    const deps = setup(jobInput(), drive);
+    assert.equal((await processDocumentsJob(RUN_ID, deps, { final: true })).outcome, "done");
+    const made = deps.store.documents.get(RUN_ID)!.made!;
+    const customer = (await drive.files(made.driveFolderId)).map((f) => f.name).sort();
+    assert.deepEqual(customer, ["Synthetic Co - Executive summary.pdf", "Synthetic Co - Full health check.pdf", "Synthetic Co - One page summary.pdf", "Synthetic Co - Raw notes.docx"]);
+    const all = [...drive.items.values()];
+    const kits = all.filter((i) => !i.folder && /Readout kit/.test(i.name));
+    assert.equal(kits.length, 1);
+    assert.equal(drive.path(kits[0]!.id), `${INTERNAL_FOLDER} / Synthetic Co - Health check 1 / Synthetic Co - Readout kit.docx`);
+    // Nowhere under the client's folder, so sharing that folder can never share the kit.
+    assert.ok(!drive.path(kits[0]!.id).startsWith("Synthetic Co /"));
+    assert.deepEqual(made.files.map((f) => f.output).sort(), ["executive_summary", "full_health_check", "raw_notes"]);
+  });
+
+  test("made again, the one-pager moves into Version 1 with the rest, and the kit is replaced, not copied", async () => {
+    const drive = new MemoryDrive();
+    const deps = setup(jobInput(), drive);
+    await processDocumentsJob(RUN_ID, deps, { final: true });
+    const doc = deps.store.documents.get(RUN_ID)!;
+    doc.input = { ...doc.input, state: "queued", driveFolderId: doc.made!.driveFolderId, files: doc.made!.files };
+    await processDocumentsJob(RUN_ID, deps, { final: true });
+    const v1 = (await drive.folders(doc.made!.driveFolderId)).find((f) => f.name.startsWith("Version 1"))!;
+    assert.ok((await drive.files(v1.id)).some((f) => f.name === "Synthetic Co - One page summary.pdf"));
+    assert.deepEqual((await drive.files(doc.made!.driveFolderId)).map((f) => f.name), [], "nothing left loose in the run's folder");
+    const kits = [...drive.items.values()].filter((i) => !i.folder && /Readout kit/.test(i.name));
+    assert.equal(kits.length, 1);
+    assert.equal((kits[0] as { uploads: number }).uploads, 2);
   });
 });
 

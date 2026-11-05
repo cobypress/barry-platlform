@@ -28,6 +28,6 @@ writeFileSync(join(dir, "intake.json"), JSON.stringify(INTAKE, null, 2), { mode:
 
 const result = await renderRun(dir);
 console.log(`Written to ${dir}`);
-console.log(`Executive summary: ${result.layout.executive.pages} pages. Full report: ${result.layout.full.pages} slides.`);
+console.log(`Executive summary: ${result.layout.executive.pages} pages. Full report: ${result.layout.full.pages} slides. One page summary: ${result.layout.ceo.pages} ${result.layout.ceo.pages === 1 ? "page" : "pages"}.`);
 for (const [name, layout] of Object.entries(result.layout)) for (const p of layout.problems) console.log(`${name}, page ${p.page}: ${p.check}: ${p.detail}`);
 process.exitCode = result.passed ? 0 : 1;
