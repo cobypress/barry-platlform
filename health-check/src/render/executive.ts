@@ -6,7 +6,10 @@ import { deliveryOutlookChart, scorecardChart, winRateBySegment } from "./charts
 import { compactMoney, longDate, monthYear } from "./format.ts";
 import { chartSlot, coverScore, document, effortText, estimateLines, paginate, paragraphs, renderContext, severityChip, valueFigure, valueText, type Render } from "./html.ts";
 import { noteSections, referenceMap, valueItemId } from "./references.ts";
-import { MONEY_CSS, moneyPage } from "./money.ts";
+import { investmentPage, MONEY_CSS, moneyPage } from "./money.ts";
+import { nextStepsPage, riskPage } from "./exec-pages.ts";
+import { COMPARE_CSS, compareSlide } from "./compare.ts";
+import { comparisonId } from "../benchmark/compare.ts";
 
 // About 7 pages, A4: verdict, scorecard, pipeline, top five issues with value, 90-day plan.
 
@@ -36,6 +39,8 @@ h3.sub { font-size: 15px; font-weight: 600; margin: 22px 0 4px; }
 .phase li { margin-bottom: 4px; line-height: 1.45; }
 .phase ul { margin: 0; padding-left: 18px; }
 .phase .owner { color: var(--muted); font-size: 12px; }
+.ref-list { columns: 2; column-gap: 24px; font-size: 11.5px; line-height: 1.35; }
+.ref-row { break-inside: avoid; margin-bottom: 5px; display: grid; grid-template-columns: 44px 1fr; }
 `;
 
 // A4 at 96dpi, less margins, heading and footer.
@@ -69,7 +74,7 @@ const phaseHeight = (r: Render, items: Finding[], more: boolean): number => 44 +
 type PlanBlock = { phase: PlanPhase; items: Finding[] };
 
 /** The most pages the summary may take, the money and references pages included. The layout check holds it to this. */
-export const EXECUTIVE_MAX_PAGES = 10;
+export const EXECUTIVE_MAX_PAGES = 14;
 
 type PlanPage = Array<PlanBlock | { intro: true }>;
 
@@ -147,8 +152,9 @@ const footer = (r: Render, n: number): string => `<div class="footer" data-chrom
 /** How a reference leads to the working, and every reference this summary used, in the order the notes hold them. */
 function detailPage(r: Render, items: Array<{ ref: string; title: string }>): string {
   const lede = "Each issue in this summary carries a reference to the raw notes, the Word document that comes with it. There you'll find the working behind every figure: what we read from your Salesforce, the sample, the calculation and the assumptions. The full report has the same references for everything else.";
-  const rows = items.sort((a, b) => a.ref.localeCompare(b.ref, "en", { numeric: true })).map((x) => `<tr><td data-ref>${x.ref}</td><td>${r.t(x.title)}</td></tr>`);
-  return `<div class="eyebrow">Where to find the detail</div><h2>How we worked it out</h2><p style="margin-bottom:14px">${r.t(lede)}</p><table class="grid"><thead><tr><th style="width:14%">Reference</th><th>What it covers</th></tr></thead><tbody>${rows.join("")}</tbody></table>`;
+  // Two narrow columns, so a summary that leans on many references still fits one page.
+  const rows = items.sort((a, b) => a.ref.localeCompare(b.ref, "en", { numeric: true })).map((x) => `<p class="ref-row"><b data-ref>${x.ref}</b><span>${r.t(x.title)}</span></p>`);
+  return `<div class="eyebrow">Where to find the detail</div><h2>How we worked it out</h2><p style="margin-bottom:14px">${r.t(lede)}</p><div class="ref-list">${rows.join("")}</div>`;
 }
 
 export function executiveHtml(report: BuiltReport, pseudonyms: Pseudonymiser): string {
@@ -181,8 +187,17 @@ export function executiveHtml(report: BuiltReport, pseudonyms: Pseudonymiser): s
 
   const worth = moneyPage(r, report);
   if (worth) add(worth);
+  const invested = investmentPage(r, report);
+  if (invested) add(invested);
 
   add(`<div class="eyebrow">Scorecard</div><h2>How each area stands</h2><p style="margin-bottom:14px">${r.t(currentBody(built, "scorecard") + scoreLine(report))}</p>${chartSlot(scorecardChart(scorecard(team, scores)))}<h3 class="sub">Win rate by segment</h3><div style="margin-top:8px">${chartSlot(winRateBySegment(report.metrics.find((m) => m.id === "historic.win_rate")))}</div>`);
+
+  // Only figures with something to stand against, as in the full report.
+  const compared = report.comparisons.filter((c) => c.value !== null && (c.published.length > 0 || c.own.status === "measured"));
+  if (compared.length) {
+    const page = compareSlide(r, compared);
+    add(page.html, page.classes ?? "");
+  }
 
   add(pipelinePage(r, report, currentBody(built, "pipeline")));
 
@@ -197,17 +212,27 @@ export function executiveHtml(report: BuiltReport, pseudonyms: Pseudonymiser): s
   // The first page also carries the introduction, so it has less room.
   const introHeight = 14 + 20.5 * estimateLines(intro, INTRO_CHARS);
   // One page is kept back for the references.
-  planLayout(r, plan, introHeight, EXECUTIVE_MAX_PAGES - pages.length - 1).forEach((group, i) => {
+  const risk = riskPage(r, report);
+  if (risk) add(risk);
+
+  // Two pages are kept back: what happens next, and the references.
+  planLayout(r, plan, introHeight, EXECUTIVE_MAX_PAGES - pages.length - 2).forEach((group, i) => {
     const phases = group.filter((b): b is PlanBlock => !("intro" in b));
     add(`<div class="eyebrow">90-day plan</div><h2>${i === 0 ? "What we'd do first" : "What we'd do first, continued"}</h2>${i === 0 ? `<p style="margin-bottom:14px">${r.t(intro)}</p>` : ""}${phases.map((b) => phaseBlock(r, b)).join("")}`);
   });
 
+  add(nextStepsPage(r, report));
+
   const referenced = [...used].flatMap((id) => {
     const ref = refs.get(id);
-    const title = team.find((x) => x.id === id)?.title ?? report.value.groups.find((g) => valueItemId(g.id) === id)?.label;
+    const title =
+      team.find((x) => x.id === id)?.title ??
+      report.value.groups.find((g) => valueItemId(g.id) === id)?.label ??
+      report.metrics.find((x) => x.id === id)?.label ??
+      report.comparisons.find((c) => comparisonId(c.metric.key) === id)?.metric.label;
     return ref && title ? [{ ref, title }] : [];
   });
   if (referenced.length) add(detailPage(r, referenced));
 
-  return document("Executive summary", "a4", `${CSS}\n${MONEY_CSS}`, pages);
+  return document("Executive summary", "a4", `${CSS}\n${MONEY_CSS}\n${COMPARE_CSS}`, pages);
 }

@@ -1,4 +1,5 @@
 import type { BuiltReport } from "../narrative/sections.ts";
+import { INVESTMENT } from "../money/investment.ts";
 import { HEADLINE_KINDS, KIND_LABELS } from "../value/model.ts";
 import { compactMoney } from "./format.ts";
 import type { Render } from "./html.ts";
@@ -47,4 +48,46 @@ export function moneyPage(r: Render, report: BuiltReport, format: "page" | "slid
   const head = `<div class="eyebrow">${r.t(eyebrow)}</div><h2>What fixing this is worth</h2>`;
   if (format === "slide") return `<div class="money">${head}<div class="split"><div>${figure}</div><div>${table}${notes}</div></div></div>`;
   return `<div class="money">${head}${figure}${table}${notes}</div>`;
+}
+
+/** What fixing it is worth against what they pay a year, to one decimal place. Null without both. */
+export function returnOnSpend(report: BuiltReport): number | null {
+  const cost = report.investment.annualCost;
+  if (cost.status !== "measured" || cost.value <= 0 || report.value.total.expected <= 0) return null;
+  return Math.round((report.value.total.expected / cost.value) * 10) / 10;
+}
+
+/** "Your investment": what they pay, what they use, and what they pay for and don't use. Empty when no seat could be read. */
+export function investmentPage(r: Render, report: BuiltReport): string {
+  const { investment, metrics } = report;
+  const measured = (id: string) => {
+    const m = metrics.find((x) => x.id === id);
+    return m?.status === "measured" ? m : null;
+  };
+  const paid = measured(INVESTMENT.seatsPaid);
+  if (!paid) return "";
+  const used = measured(INVESTMENT.seatsUsed);
+  const unused = measured(INVESTMENT.seatsUnused);
+  const active = measured(INVESTMENT.activeUserShare);
+  const unusedCost = measured(INVESTMENT.unusedSeatCost);
+  const m = (n: number) => compactMoney(n, investment.currency);
+  const cost = investment.annualCost;
+  const stat = (figure: string, label: string, id: string) => `<div class="stat"><b>${figure}</b><span>${r.t(label)}</span>${r.ref(id)}</div>`;
+  const stats = [
+    stat(String(paid.value), "Seats you pay for", INVESTMENT.seatsPaid),
+    used ? stat(String(used.value), "Seats in use", INVESTMENT.seatsUsed) : "",
+    unused ? stat(String(unused.value), "Seats nobody uses", INVESTMENT.seatsUnused) : "",
+    active ? stat(`${active.value}%`, "Of users active", INVESTMENT.activeUserShare) : "",
+  ].join("");
+  const headline =
+    cost.status === "measured"
+      ? `<p class="headline-figure">${m(cost.value)}</p><p class="range">${r.t(`A year. ${cost.label}.`)}</p>`
+      : // Why it isn't priced is for the raw notes. Here it's enough to say what the page shows instead.
+        `<p class="range">${r.t("We don't have a figure for what you pay a year, so this page shows your seats rather than their cost.")}</p>`;
+  const ratio = returnOnSpend(report);
+  const lines = [
+    unusedCost ? `Seats nobody uses cost ${m(unusedCost.value)} a year.` : "",
+    ratio !== null ? `What fixing the issues is worth, ${m(report.value.total.expected)} over 12 months, is ${ratio} times what you pay for Salesforce a year.` : "",
+  ].filter(Boolean);
+  return `<div class="money"><div class="eyebrow">Your investment</div><h2>What you pay, and what you use</h2>${headline}<div class="stat-row" style="margin:6px 0 16px">${stats}</div>${lines.map((l) => `<p style="margin-bottom:8px">${r.t(l)}</p>`).join("")}</div>`;
 }

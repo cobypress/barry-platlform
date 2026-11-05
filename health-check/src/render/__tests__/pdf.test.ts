@@ -56,13 +56,13 @@ function assertBothColumnsUsed(html: string): void {
 const describeProblems = (problems: unknown[]): string => JSON.stringify(problems.slice(0, 8));
 
 describe("the executive summary", () => {
-  test("comes to about 8 pages, with every layout check and number check passing", async () => {
+  test("comes to about 12 pages, with every layout check and number check passing", async () => {
     const report = buildReport(full);
     const { pdf, layout } = await renderPdf(browser, executiveHtml(report, pseudonyms), { ...execRange, dataset: report.dataset });
     assert.deepEqual(layout.problems, [], describeProblems(layout.problems));
     assert.equal(pdfPageCount(pdf), layout.pages);
     assert.equal(pdf.subarray(0, 5).toString(), "%PDF-");
-    assert.ok(layout.pages >= 5 && layout.pages <= 9, `${layout.pages} pages`);
+    assert.ok(layout.pages >= 8 && layout.pages <= 13, `${layout.pages} pages`);
   });
 
   test("holds a verdict, scorecard, top five with value, and the plan", () => {
@@ -300,7 +300,7 @@ describe("a thin org", () => {
 
   test("a clean org's executive summary still renders", async () => {
     const report = buildReport({ ...base, findings: output!.findings.filter((f) => f.status === "passed") });
-    const { layout } = await renderPdf(browser, executiveHtml(report, pseudonyms), { minPages: 4, maxPages: 6 });
+    const { layout } = await renderPdf(browser, executiveHtml(report, pseudonyms), { minPages: 4, maxPages: 10 });
     assert.deepEqual(layout.problems, [], describeProblems(layout.problems));
   });
 });

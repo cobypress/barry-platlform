@@ -76,7 +76,7 @@ One number out of 100 with a grade, built from the area scores the engine alread
 
 The headline is one annual expected figure, with the low-to-high range beneath it, over 12 months (decision 9). The expected case is the conservative one, and overlapping figures are never added together.
 
-### 1.5 The executive deck, rebuilt around money
+### 1.5 The executive deck, rebuilt around money (first version done, 5 November 2026)
 
 About 12 pages: the cover with the score; the number, as a waterfall by kind; their investment; the five biggest leaks; how they compare; adoption; risk; what fixing it is worth over 12 months; the 90-day plan; the return on fixing it; what happens next; and where to find the detail.
 

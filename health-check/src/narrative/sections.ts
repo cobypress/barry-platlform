@@ -576,6 +576,10 @@ export function buildReport(input: ReportInput): BuiltReport {
     ...[COMPARISONS, ...comparisons.map((c) => comparisonId(c.metric.key))].map((source) => ({ source, kind: "percent" as const, value: 50 })),
   );
   dataset.figures.push(...planFigures(buildPlan(team)), ...overallFigures(overall), ...valueFigures(value));
+  // What fixing it is worth against what they pay, as the investment page says it.
+  if (investment.annualCost.status === "measured" && investment.annualCost.value > 0 && value.total.expected > 0) {
+    dataset.figures.push({ source: VALUE_TOTAL, kind: "ratio", value: Math.round((value.total.expected / investment.annualCost.value) * 10) / 10 });
+  }
   // The customer's own total is the one investment figure no metric holds.
   if (investment.annualCost.status === "measured" && investment.annualCost.basis === "customer") {
     dataset.figures.push({ source: INVESTMENT_SOURCE, kind: "currency", value: investment.annualCost.value, currency: calibration.currency });

@@ -142,7 +142,7 @@ describe("references between the decks and the raw notes", async () => {
   test("the executive summary lists the references it used, and only those", () => {
     const html = executiveHtml(report, pseudonyms);
     const page = html.slice(html.indexOf("Where to find the detail"));
-    const listed = [...page.matchAll(/<td data-ref>(R\d+\.\d+)<\/td>/g)].map((m) => m[1]!);
+    const listed = [...page.matchAll(/<b data-ref>(R\d+\.\d+)<\/b>/g)].map((m) => m[1]!);
     assert.deepEqual(new Set(listed), new Set(tags(html.slice(0, html.indexOf("Where to find the detail")))));
   });
 });
