@@ -2,7 +2,7 @@
 
 Barometer is Black Cloud's health check for Salesforce. Your consultant runs it, and it needs to read your org to do that. This guide is for the Salesforce administrator who sets up that access. It takes about 20 minutes.
 
-You'll install a small package from us, create a user that can only read, tell Salesforce that only that user may use our app, and then sign in once as that user. The rest of this page explains each step and what you're agreeing to.
+You'll install a small package from us and sign in once, as yourself or as any user of your org. If you'd like Salesforce itself to hold Barometer to reading as well, you can also set up a user that can only read, and connect as that user instead (steps 2 to 5, which are optional). The rest of this page explains each step and what you're agreeing to.
 
 ## What Barometer does and doesn't do
 
@@ -10,12 +10,11 @@ You'll install a small package from us, create a user that can only read, tell S
 
 Barometer looks at how your org is set up and how it's used, and writes a report. Every fix in that report is a recommendation for a person to carry out. Barometer never creates, edits or deletes a record or a setting, not even to fix something it found.
 
-Two separate locks keep it that way:
+**Our service can't ask.** The Barometer service only sends a fixed list of read requests, such as queries, object descriptions and report definitions. Anything else is stopped before it leaves our service, whoever you sign in as, an administrator included. We test this by running a whole health check as a user who could change anything, and checking that every request it sent was on the list.
 
-1. **Salesforce itself refuses.** The user you connect holds only the Barometer Read Only permission set, which gives no create, edit or delete access to anything. We tested this by trying nine kinds of write as that user, including creating and deleting records, anonymous Apex and a metadata deployment. Salesforce refused all nine.
-2. **Our service can't ask.** The Barometer service only sends a fixed list of read requests, such as queries and object descriptions. Anything else is stopped before it leaves our service.
+**Optionally, Salesforce can refuse too.** If you connect as a user who holds only the Barometer Read Only permission set, Salesforce itself refuses any write from that user. We tested this by trying nine kinds of write as that user, including creating and deleting records, anonymous Apex and a metadata deployment. Salesforce refused all nine. Steps 2 to 5 set this up.
 
-When you connect, we also check the user's permissions from your org's own records. If the user can create, edit or delete anything, or holds a permission such as Modify All Data or Customize Application, we revoke the connection at once and tell you why.
+When you connect, we read the user's permissions from your org's own records and tell your consultant what that user could change. It doesn't stop the connection.
 
 ### What the permission set grants
 
@@ -65,7 +64,7 @@ It doesn't read the subject or body of any email, task or event, or the names of
 That data goes to the Barometer service that Black Cloud runs, in [BLACK CLOUD: region and provider]. There:
 
 - the raw records are deleted 30 days after we deliver your report. The findings, figures and the report itself are kept;
-- the sign-in token for your Barometer user is stored encrypted, and is only used for reads;
+- the sign-in token for the user you connected is stored encrypted, and is only used for reads;
 - to help write the report's wording, we send summaries to Anthropic's Claude model. Before anything is sent, every person's name and your company's name are replaced with codes, and no records are sent. [BLACK CLOUD: confirm zero data retention with Anthropic before this ships.]
 
 Each run uses part of your org's daily API allowance. It stops before your org's use for the day passes half the allowance, and never makes more than 5,000 calls, so your own integrations keep the larger share.
@@ -75,7 +74,7 @@ Each run uses part of your org's daily API allowance. It stops before your org's
 You can stop Barometer at any time, without asking us:
 
 - **Revoke the connection** in Setup (see "Revoke the connection" below). This takes effect at once.
-- **Remove Barometer Read Only from the user.** Without API Enabled, Salesforce refuses every request from that user.
+- **If you connected a Barometer user, remove Barometer Read Only from it.** Without API Enabled, Salesforce refuses every request from that user.
 - **Uninstall the package.** This removes our app from your org.
 
 The connection also lapses by itself if it isn't used for 30 days, once you've set the policy in step 5.
@@ -100,6 +99,10 @@ The connection also lapses by itself if it isn't used for 30 days, once you've s
 4. Salesforce may warn that the package hasn't been through Salesforce's security review. That's expected for a private package that isn't listed on AppExchange. Tick the box to say you understand, and click **Install**.
 
 Salesforce shows a message when the install is complete. The install options and the security review notice are described in Salesforce's [Second-Generation Managed Packaging Developer Guide](https://resources.docs.salesforce.com/latest/latest/en-us/sfdc/pdf/pkg2_dev.pdf) ("Permission Sets and Profile Settings in Packages", "Use a URL to Install a Second-Generation Managed Package" and "Install Notifications for Unauthorized Managed Packages").
+
+### Optional: a user that can only read (steps 2 to 5)
+
+Skip to step 6 if you're signing in as yourself or another existing user. These steps are for orgs that want Salesforce, as well as our service, to keep Barometer to reading.
 
 ### 2. Check that Barometer Read Only exists
 
@@ -138,7 +141,7 @@ If you'd rather use a full-licence user, give it the most restricted profile you
 1. On the user's record, go to **Permission Set Assignments** and click **Edit Assignments**.
 2. Add **Barometer Read Only**, and save.
 
-Don't add any other permission set or permission set group. If the user can write anything, the connection will be refused.
+Don't add any other permission set or permission set group, or the user will be able to write, and only our service will be keeping Barometer to reading.
 
 **Optional: custom objects.** Barometer Read Only doesn't include your custom objects, so we can't tell who owns records on them. If you'd like that included, add Read access on those objects to Barometer Read Only. Don't add Create, Edit or Delete.
 
@@ -153,9 +156,9 @@ When the package is installed, Salesforce gives our app its default policies: an
 5. Leave **IP Relaxation** as it is (**Enforce IP restrictions**). See below.
 6. Save.
 
-Sources: [Preauthorize User App Access Through External Client App Policies](https://help.salesforce.com/s/articleView?id=xcloud.preauth_user_app_access_through_eca.htm&language=en_US&type=5) (steps 1 to 3) and [Limit the Idle Refresh Token TTL in External Client Apps](https://help.salesforce.com/s/articleView?id=xcloud.eca_limit_idle_refresh_token_ttl.htm&language=en_US&type=5) (step 4). With step 3, only users who hold Barometer Read Only can use our app, so nobody else in your org, administrators included, can connect it by mistake.
+Sources: [Preauthorize User App Access Through External Client App Policies](https://help.salesforce.com/s/articleView?id=xcloud.preauth_user_app_access_through_eca.htm&language=en_US&type=5) (steps 1 to 3) and [Limit the Idle Refresh Token TTL in External Client Apps](https://help.salesforce.com/s/articleView?id=xcloud.eca_limit_idle_refresh_token_ttl.htm&language=en_US&type=5) (step 4). With step 3, only users who hold Barometer Read Only can use our app, so nobody else in your org, administrators included, can connect it by mistake. If you set this, connect as the Barometer user in step 6: you won't be able to connect as yourself.
 
-**IP restrictions.** Salesforce only enforces IP restrictions for the app if the user's profile has login IP ranges ([Manage OAuth Access Policies for a Connected App](https://help.salesforce.com/s/articleView?id=xcloud.connected_app_manage_oauth.htm&language=en_US&type=5)). If the Barometer user's profile has none, which is usual, this setting makes no difference. If it does have them, talk to your consultant before connecting: our service connects from [BLACK CLOUD: outbound IP addresses], and those would need to be in the range.
+**IP restrictions.** Salesforce only enforces IP restrictions for the app if the user's profile has login IP ranges ([Manage OAuth Access Policies for a Connected App](https://help.salesforce.com/s/articleView?id=xcloud.connected_app_manage_oauth.htm&language=en_US&type=5)). If the connected user's profile has none, which is usual, this setting makes no difference. If it does have them, talk to your consultant before connecting: our service connects from [BLACK CLOUD: outbound IP addresses], and those would need to be in the range.
 
 ### 6. Connect
 
@@ -163,13 +166,13 @@ Your consultant will email you a connection link. It works once, and lasts 72 ho
 
 1. Open the link in a private or incognito browser window, so that you aren't already signed in to Salesforce as yourself.
 2. The page says who's asking and what Barometer will read. Click **Continue**.
-3. Salesforce asks you to sign in. Sign in as the **Barometer user**, not as yourself.
+3. Salesforce asks you to sign in. Sign in as the user you've chosen: yourself, or the Barometer user if you followed steps 2 to 5.
 4. Salesforce may show a page asking you to allow Black Cloud Barometer access. It lists two permissions:
    - **Manage user data via APIs**: reading your data through Salesforce's API.
    - **Perform requests at any time**: lets Barometer keep the connection without you signing in again each time.
 
-   Click **Allow**. These are Salesforce's own names for the two OAuth scopes we request, `api` and `refresh_token` ([OAuth Tokens and Scopes](https://help.salesforce.com/s/articleView?id=xcloud.remoteaccess_oauth_tokens_scopes.htm&language=en_US&type=5)). Despite the wording, what the user can do is still limited to Barometer Read Only.
-5. You're returned to our page. It tells you whether the connection worked. If it was refused because the user can write, it says why.
+   Click **Allow**. These are Salesforce's own names for the two OAuth scopes we request, `api` and `refresh_token` ([OAuth Tokens and Scopes](https://help.salesforce.com/s/articleView?id=xcloud.remoteaccess_oauth_tokens_scopes.htm&language=en_US&type=5)). Despite the wording, our service only ever sends reads.
+5. You're returned to our page. It tells you whether the connection worked.
 
 You need to finish within 10 minutes of clicking Continue. If you take longer, open the link again.
 
@@ -184,7 +187,7 @@ Source: [Manage External Client App OAuth Usage](https://help.salesforce.com/s/a
 
 ### Revoke the connection
 
-On the same page, click **Revoke** next to the Barometer user. The connection stops at once, and we'd need a new link and a new sign-in to connect again. Please tell your consultant, so that they don't start a run that will fail.
+On the same page, click **Revoke** next to the user you connected. The connection stops at once, and we'd need a new link and a new sign-in to connect again. Please tell your consultant, so that they don't start a run that will fail.
 
 ### Uninstall
 
@@ -199,7 +202,7 @@ Source: [Second-Generation Managed Packaging Developer Guide](https://resources.
 Uninstalling removes everything in the package: our app and the install script. It doesn't remove:
 
 - **Barometer Read Only.** The script created it as an ordinary permission set, so it isn't part of the package. Unassign it, then delete it.
-- **The Barometer user.** Deactivate it, and free the licence.
+- **The Barometer user, if you made one.** Deactivate it, and free the licence.
 
 ## Troubleshooting
 
@@ -209,9 +212,9 @@ Uninstalling removes everything in the package: our app and the install script. 
 | The permission set's description says "Not granted: ..." | Your edition or org doesn't offer one of the permissions | Tell your consultant which ones. Some checks will be reported as not measurable |
 | The install fails with "The post install script failed" | Our install script hit an error. It's written so this shouldn't happen | Send your consultant a screenshot. Nothing was changed in your org |
 | The connection page says the link has expired, been used, or been withdrawn | Each link works once and lasts 72 hours | Ask your consultant for a new link |
-| Our page says the connection was refused because the user can write | The user has something beyond Barometer Read Only, such as another permission set or a profile with edit rights | Remove it, and ask for a new link |
 | `API_DISABLED_FOR_ORG` | Either the user doesn't have API Enabled, because Barometer Read Only isn't assigned or is empty, or your org has no API access ([REST API Developer Guide](https://resources.docs.salesforce.com/latest/latest/en-us/sfdc/pdf/api_rest.pdf)) | Check step 4, and that the permission set includes API Enabled. On Professional Edition, ask Salesforce about the API add-on |
-| Salesforce signs you in as yourself, not the Barometer user | The browser was already signed in to Salesforce | Close the window, and open the link in a new private window |
+| Salesforce signs you in as yourself, when you meant to use the Barometer user | The browser was already signed in to Salesforce | Close the window, and open the link in a new private window |
+| Salesforce says you aren't allowed to use the app | You set Permitted Users in step 5, and the user you signed in as doesn't hold Barometer Read Only | Sign in as the Barometer user, or undo step 5 |
 | It took more than 10 minutes, and the page says to start again | The sign-in has to finish within 10 minutes | Open the link again. It still works if it hasn't been used |
 
 ---
@@ -237,6 +240,10 @@ Not for the customer. Remove this section before sending the guide.
 - Refresh token option "Expire refresh token if not used for specific time", in the Policies tab under App Authorization: help article "Limit the Idle Refresh Token TTL".
 - OAuth Usage page, usage by user, Revoke and Bulk Revoke: help article "Manage External Client App OAuth Usage".
 - IP relaxation behaviour: help article for **connected apps**, not external client apps. The external client app metadata has the same four values (`Enforce`, `Bypass`, `Bypass_2factor`, `Enforce_RelaxRefresh`), so it's probably the same, but that's an inference.
+
+**Sign in and go (DECISIONS.md 151 and 152)**
+
+- Any user of the org may now connect. Whether customers still need the package for a sign-in by any user (rather than only for the install script that creates Barometer Read Only) depends on how the External Client App reaches their org, and wasn't decided in that change. If the package is still needed, step 1 stays as it is.
 
 **Not verified (also in QUESTIONS.md 28 to 33)**
 

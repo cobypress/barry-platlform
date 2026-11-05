@@ -1,9 +1,9 @@
 import { isUnavailable, type SalesforceClient } from "../salesforce/client.ts";
 
-// After an admin connects, we check the user they authorised as can't write,
-// from the org's own permission records. The allowlist already stops the engine
-// sending a write, but a token for an admin would still be one bug away from
-// changing the org. This makes "the token can't write" a fact we've read.
+// After an admin connects, we read what the user they authorised can change,
+// from the org's own permission records, and tell the consultant. It refuses no
+// one: Barometer's reads are held to the request list in
+// src/salesforce/allowlist.ts, whoever signs in (DECISIONS 151).
 //
 // Profiles count too: each has its own permission set, which shows up in
 // PermissionSetAssignment, and so do permission set groups.
@@ -45,4 +45,15 @@ export async function checkReadOnlyUser(client: SalesforceClient, userId: string
     if (isUnavailable(err)) return { status: "unknown", reason: `The permission records couldn't be read (${err.code})` };
     throw err;
   }
+}
+
+/** Turns PermissionsModifyAllData into "Modify All Data". */
+const readable = (permission: string): string => permission.replace(/^Permissions/, "").replace(/([a-z])([A-Z])/g, "$1 $2");
+
+/** What the consultant is told about the user, whatever they can do. Never a reason to refuse (DECISIONS 151). */
+export function permissionNote(check: ReadOnlyCheck): string {
+  if (check.status === "read_only") return "Connected as a user who can only read.";
+  if (check.status === "unknown") return `Connected. We couldn't read what the user can change: ${check.reason}. Barometer only reads, as its request list enforces.`;
+  const what = [...check.systemPermissions.map(readable), ...check.objects.map((o) => `create, edit or delete on ${o}`)];
+  return `Connected as a user who can change data (${what.join("; ")}). Barometer only reads, as its request list enforces.`;
 }

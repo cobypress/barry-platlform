@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { checkReadOnlyUser, type ReadOnlyCheck } from "../connect/read-only-check.ts";
+import { checkReadOnlyUser, permissionNote, type ReadOnlyCheck } from "../connect/read-only-check.ts";
 import { ApiBudget } from "../salesforce/budget.ts";
 import { SalesforceClient } from "../salesforce/client.ts";
 import { exchangeCode, OAuthError, revokeToken, type TokenSet } from "../salesforce/oauth.ts";
@@ -17,8 +17,10 @@ import { ORG_AWAITING_CONNECT } from "./types.ts";
 // A connect job: the admin came back from Salesforce, the console checked the
 // state and timing (completeAuthorisation), sealed the code and the pending
 // authorisation, set the link to pending and queued this. The worker opens
-// them, exchanges the code, stores the tokens encrypted, and proves the user
-// can't write (DECISIONS 63 and 64). Only then is the link used.
+// them, exchanges the code, stores the tokens encrypted, reads what the user
+// can do and marks the link used. Any user of the right org is accepted: what
+// they can do is a note for the consultant, because Barometer's reads are held
+// to its request list, not to the user (DECISIONS 151).
 //
 // Every outcome the console shows is plain text from this file. A token, code
 // or verifier never reaches the store, the log or a thrown error.
@@ -26,14 +28,6 @@ import { ORG_AWAITING_CONNECT } from "./types.ts";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export const START_AGAIN = "Start again from the link.";
-
-/** Turns PermissionsModifyAllData into "Modify All Data". */
-const readable = (permission: string): string => permission.replace(/^Permissions/, "").replace(/([a-z])([A-Z])/g, "$1 $2");
-
-export function canWriteReason(check: Extract<ReadOnlyCheck, { status: "can_write" }>): string {
-  const what = [...check.systemPermissions.map(readable), ...check.objects.map((o) => `create, edit or delete on ${o}`)];
-  return `The user you signed in as can change data in Salesforce (${what.join("; ")}), so we disconnected straight away and kept nothing. Sign in as a user who holds only Barometer Read Only.`;
-}
 
 /** What an OAuth error from the code exchange means to the admin. Only the code is used, never Salesforce's description. */
 function exchangeReason(err: OAuthError): string {
@@ -153,7 +147,7 @@ async function connectLocked(linkId: string, deps: WorkerDeps, attempt: Attempt)
     // sign-in, it's ours from an earlier delivery that stopped after storing it:
     // the code is spent, so carry on to the check. Bound to this link but an
     // earlier sign-in, it was abandoned, so it goes. Anything else is an older
-    // connection, kept aside in case the new user turns out able to write.
+    // connection, kept aside in case the new sign-in is refused.
     let existing = deps.tokens.has(name) ? await deps.tokens.load(name) : undefined;
     if (existing) secrets.push(existing.accessToken, existing.refreshToken);
     const ours = existing?.fromLink?.linkId === link.id && existing.fromLink.stateHash === pending.stateHash;
@@ -202,29 +196,19 @@ async function connectLocked(linkId: string, deps: WorkerDeps, attempt: Attempt)
 
     const stored = await deps.tokens.load(name);
     secrets.push(stored.accessToken, stored.refreshToken);
+    // What the user can do is read for the consultant, and never refuses them.
     let check: ReadOnlyCheck;
     try {
       const provider = new OAuthConnectionProvider(name, { store: deps.tokens, client: deps.oauthClient, transport: deps.oauthTransport, env: approvedFromConsole(name) });
       const client = await SalesforceClient.connect(provider, { budget: new ApiBudget({ stopAtShare: 0.5 }), transport: deps.dataTransport, sleep: deps.dataTransport ? async () => {} : undefined });
       check = await checkReadOnlyUser(client, stored.userId);
     } catch (err) {
-      // A retry finds the stored connection and checks again. On the last try,
-      // a connection nobody could check isn't kept.
+      // A retry finds the stored connection and reads again. On the last try,
+      // the connection is kept and the note says what couldn't be read.
       if (!attempt.final) throw err;
-      throw new Refusal(`We couldn't check the user's permissions (${safeReason(err, secrets)}), so we disconnected. ${START_AGAIN}`);
+      check = { status: "unknown", reason: `the check failed (${safeReason(err, secrets)})` };
     }
-
-    if (check.status === "can_write") {
-      // Revoked here, before the refusal is written, so the reason can say whether Salesforce confirmed it.
-      const revoked = await letGo();
-      const reason = canWriteReason(check);
-      throw new Refusal(revoked ? reason : `${reason} Salesforce didn't confirm the disconnection, so also remove Barometer's access under Connected Apps OAuth Usage in Setup.`);
-    }
-
-    const note =
-      check.status === "unknown"
-        ? `Connected, but we couldn't prove the user is read only: ${check.reason}. Check the user holds only Barometer Read Only before running.`
-        : null;
+    const note = permissionNote(check);
     try {
       await deps.store.markLinkUsed(linkId, { at: at(), orgId: stored.orgId, userId: stored.userId, note });
     } catch {
@@ -250,7 +234,7 @@ async function connectLocked(linkId: string, deps: WorkerDeps, attempt: Attempt)
         log(`Scan ${job.scanRunId} couldn't be queued, so it waits for "Start the scan": ${safeReason(err)}`);
       }
     }
-    return { outcome: "connected", detail: note ?? `Connected "${name}" read only, to org ${stored.orgId}` };
+    return { outcome: "connected", detail: `Connected "${name}" to org ${stored.orgId}. ${note}` };
   } catch (err) {
     if (err instanceof Refusal) return refuse(err.message);
     if (!attempt.final && transient(err)) throw new Error(safeReason(err, secrets));

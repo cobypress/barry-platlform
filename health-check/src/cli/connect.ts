@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 import { beginAuthorisation, completeAuthorisation, createConnectLink } from "../connect/link.ts";
-import { checkReadOnlyUser, type ReadOnlyCheck } from "../connect/read-only-check.ts";
+import { checkReadOnlyUser, permissionNote, type ReadOnlyCheck } from "../connect/read-only-check.ts";
 import { assertOutsideGit } from "../engine/run.ts";
 import { ApiBudget } from "../salesforce/budget.ts";
 import { SalesforceClient } from "../salesforce/client.ts";
@@ -23,7 +23,7 @@ export const CONNECT_USAGE = `
   hc connect start --connection <name> [--login-url <url>]
   hc connect finish --connection <name> --callback-url <url>
   hc connect jwt --connection <name> --config <file> Development only: JWT bearer for a pre-authorised user
-  hc connect check --connection <name>               Prove the connected user can't write
+  hc connect check --connection <name>               Say what the connected user can change
   hc connect show --connection <name>
   hc connect revoke --connection <name>
 
@@ -74,12 +74,6 @@ function tryClient(env: NodeJS.ProcessEnv): OAuthClient | undefined {
   }
 }
 
-function report(check: ReadOnlyCheck): string {
-  if (check.status === "read_only") return `Read only: the user holds ${check.permissionSets.join(", ")}, with no create, edit or delete on any object and no write system permission.`;
-  if (check.status === "unknown") return `Not proven read only: ${check.reason}.`;
-  return `CAN WRITE: ${[...check.systemPermissions, ...check.objects.map((o) => `edit ${o}`)].join(", ")} (from ${check.permissionSets.join(", ")}).`;
-}
-
 export async function connectCommand(sub: string | undefined, values: Record<string, string | boolean | undefined>, env: NodeJS.ProcessEnv = process.env): Promise<number> {
   if (sub === "key") {
     console.log((await createKeychainKey()) === "created" ? "Created the token key in the login keychain." : "The keychain already has a token key.");
@@ -105,7 +99,7 @@ export async function connectCommand(sub: string | undefined, values: Record<str
     });
     const { authorisationUrl, pending } = beginAuthorisation(link, client);
     await store.savePending(name, { link, pending });
-    console.log(`Open this in a browser within 10 minutes, sign in as the read-only user and click Allow:\n\n${authorisationUrl}\n`);
+    console.log(`Open this in a browser within 10 minutes, sign in to the org and click Allow:\n\n${authorisationUrl}\n`);
     console.log(`Salesforce then sends the browser to ${client.redirectUri}. Nothing listens there, so copy the whole address from the browser's address bar and run:\n`);
     console.log(`  hc connect finish --connection ${name} --callback-url '<the address>'`);
     return 0;
@@ -200,12 +194,8 @@ export async function connectCommand(sub: string | undefined, values: Record<str
   return 2;
 }
 
-/** A connection that can write is revoked and forgotten. One we couldn't check is kept, with a warning. */
+/** Says what the user can change, and keeps the connection whatever it is: reads are held to the allowlist (DECISIONS 151). */
 async function finishWithCheck(name: string, store: TokenStore, env: NodeJS.ProcessEnv): Promise<number> {
-  const check = await readOnlyCheck(name, store, env);
-  console.log(report(check));
-  if (check.status !== "can_write") return check.status === "read_only" ? 0 : 2;
-  await revokeConnection({ name, store });
-  console.log(`Revoked "${name}" and deleted its tokens. Connect again as a user who holds only Barometer Read Only.`);
-  return 2;
+  console.log(permissionNote(await readOnlyCheck(name, store, env)));
+  return 0;
 }

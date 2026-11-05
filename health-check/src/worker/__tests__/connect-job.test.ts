@@ -91,14 +91,14 @@ function assertNoSecrets(f: Flow, extra: string[] = []): void {
 }
 
 describe("a connect job", () => {
-  test("exchanges the code, stores the tokens encrypted, proves read only, then marks the link used", async () => {
+  test("exchanges the code, stores the tokens encrypted, reads what the user can do, then marks the link used", async () => {
     const f = await flow();
     const outcome = await f.handle(f.job, once);
     assert.equal(outcome.outcome, "connected");
     const link = stored(f);
     assert.equal(link.state, "used");
     assert.ok(link.link.usedAt);
-    assert.deepEqual({ orgId: link.connected!.orgId, userId: link.connected!.userId, note: link.connected!.note }, { orgId: FAKE.orgId, userId: FAKE.userId, note: null });
+    assert.deepEqual({ orgId: link.connected!.orgId, userId: link.connected!.userId, note: link.connected!.note }, { orgId: FAKE.orgId, userId: FAKE.userId, note: "Connected as a user who can only read." });
     assert.equal(link.sealedCode, null, "spent secrets are cleared");
     assert.equal(link.sealedPending, null);
     const connection = await f.deps.tokens.load(NAME);
@@ -133,29 +133,32 @@ describe("a connect job", () => {
     assertNoSecrets(f);
   });
 
-  test("a user who can write is refused, revoked at Salesforce and forgotten", async () => {
+  test("a full admin is accepted, kept, and the consultant told what they can change (DECISIONS 151)", async () => {
     const f = await flow();
-    f.org.sets = [permissionSet("Barometer_Read_Only"), permissionSet("X00e000000000001", { PermissionsModifyAllData: true })];
+    f.org.sets = [permissionSet("X00e000000000001", { PermissionsModifyAllData: true, PermissionsModifyMetadata: true, PermissionsCustomizeApplication: true, PermissionsAuthorApex: true, PermissionsManageUsers: true })];
     f.org.objects = [{ SobjectType: "Account" }];
     const outcome = await f.handle(f.job, once);
-    assert.equal(outcome.outcome, "refused");
+    assert.equal(outcome.outcome, "connected");
     const link = stored(f);
-    assert.equal(link.state, "refused");
-    assert.match(link.reason!, /can change data in Salesforce \(Modify All Data; create, edit or delete on Account\)/);
-    assert.match(link.reason!, /Barometer Read Only/);
-    assert.equal(f.deps.tokens.has(NAME), false);
-    assert.equal(f.fake.liveRefreshTokens(), 0, "revoked at Salesforce");
-    assert.equal(link.link.usedAt, null, "a refusal leaves the link usable until it expires (DECISIONS 63)");
+    assert.equal(link.state, "used");
+    assert.ok(link.link.usedAt);
+    assert.equal(
+      link.connected!.note,
+      "Connected as a user who can change data (Author Apex; Customize Application; Manage Users; Modify All Data; Modify Metadata; create, edit or delete on Account). Barometer only reads, as its request list enforces.",
+    );
+    assert.match(outcome.detail, /Barometer only reads/);
+    assert.ok(f.deps.tokens.has(NAME), "the connection is kept");
+    assert.equal(f.fake.liveRefreshTokens(), 1, "and not revoked");
     assertNoSecrets(f);
   });
 
-  test("a user whose permissions can't be read is kept, with a note for the consultant (DECISIONS 64)", async () => {
+  test("a user whose permissions can't be read is kept, with a note for the consultant", async () => {
     const f = await flow();
     f.org.sets = "unreadable";
     const outcome = await f.handle(f.job, once);
     assert.equal(outcome.outcome, "connected");
     assert.equal(stored(f).state, "used");
-    assert.match(stored(f).connected!.note!, /couldn't prove the user is read only: The permission records couldn't be read \(INSUFFICIENT_ACCESS\)/);
+    assert.match(stored(f).connected!.note!, /^Connected\. We couldn't read what the user can change: The permission records couldn't be read \(INSUFFICIENT_ACCESS\)\. Barometer only reads/);
     assert.ok(f.deps.tokens.has(NAME));
   });
 
@@ -216,14 +219,14 @@ describe("a connect job delivered again", () => {
     assertNoSecrets(f, [thrown]);
   });
 
-  test("if the check still can't run on the last delivery, the connection isn't kept", async () => {
+  test("if the check still can't run on the last delivery, the connection is kept with a note saying so", async () => {
     const f = await flow();
     f.org.failNext = 10;
     const outcome = await f.handle(f.job, last);
-    assert.equal(outcome.outcome, "refused");
-    assert.match(stored(f).reason!, /couldn't check the user's permissions/);
-    assert.equal(f.deps.tokens.has(NAME), false);
-    assert.equal(f.fake.liveRefreshTokens(), 0);
+    assert.equal(outcome.outcome, "connected");
+    assert.match(stored(f).connected!.note!, /^Connected\. We couldn't read what the user can change: the check failed \(.*ETIMEDOUT.*\)\. Barometer only reads, as its request list enforces\.$/);
+    assert.ok(f.deps.tokens.has(NAME));
+    assertNoSecrets(f);
   });
 
   test("a network failure at the exchange is retried, and the error carries no code", async () => {
@@ -262,12 +265,23 @@ describe("a connect job over an existing connection", () => {
     assert.ok(f.deps.lines.some((l) => /Replaced the connection "acme"/.test(l)));
   });
 
-  test("a reconnect as a user who can write puts the old connection back", async () => {
+  test("a reconnect as a user who can write replaces the old connection, with the note", async () => {
     const f = await flow();
     const old = syntheticConnection({ name: NAME, orgId: FAKE.orgId, connectedAt: "2026-01-01T00:00:00.000Z" });
     await f.deps.tokens.save(old);
     f.org.sets = [permissionSet("System Administrator", { PermissionsModifyAllData: true })];
-    assert.equal((await f.handle(f.job, once)).outcome, "refused");
+    assert.equal((await f.handle(f.job, once)).outcome, "connected");
+    assert.notDeepEqual(await f.deps.tokens.load(NAME), old);
+    assert.match(stored(f).connected!.note!, /can change data \(Modify All Data\)/);
+  });
+
+  test("a reconnect that's refused after the exchange puts the old connection back", async () => {
+    const f = await flow();
+    const old = syntheticConnection({ name: NAME, orgId: FAKE.orgId, connectedAt: "2026-01-01T00:00:00.000Z" });
+    await f.deps.tokens.save(old);
+    f.deps.store.markLinkUsed = async () => Promise.reject(new Error("connection terminated"));
+    assert.equal((await f.handle(f.job, last)).outcome, "refused");
+    assert.match(stored(f).reason!, /couldn't record it/);
     assert.deepEqual(await f.deps.tokens.load(NAME), old);
   });
 
@@ -358,11 +372,11 @@ describe("review fixes: a delivery knows its own tokens by the link, not the clo
 });
 
 describe("review fixes: a refusal survives a retry", () => {
-  const canWrite = (f: Flow) => (f.org.sets = [permissionSet("System Administrator", { PermissionsModifyAllData: true })]);
+  // A different org is the refusal left once any user is accepted (DECISIONS 151).
+  const wrongOrg = () => flow({ runOrgId: "00D000000000999" });
 
-  test("the store fails to record a can-write refusal: tokens are gone, and the retry records the same reason without a second exchange", async () => {
-    const f = await flow();
-    canWrite(f);
+  test("the store fails to record a wrong-org refusal: tokens are gone, and the retry records the same reason without a second exchange", async () => {
+    const f = await wrongOrg();
     const store = f.deps.store;
     const refuseLink = store.refuseLink.bind(store);
     let failures = 1;
@@ -374,28 +388,26 @@ describe("review fixes: a refusal survives a retry", () => {
 
     const outcome = await f.handle(f.job, once);
     assert.equal(outcome.outcome, "refused");
-    assert.match(stored(f).reason!, /can change data in Salesforce \(Modify All Data\)/);
+    assert.match(stored(f).reason!, /different Salesforce org \(00D000000000001\)/);
     assert.equal(exchanges(f), 1);
     assertNoSecrets(f);
   });
 
   test("on the last delivery too, the reason waits for whichever delivery can record it", async () => {
-    const f = await flow();
-    canWrite(f);
+    const f = await wrongOrg();
     const store = f.deps.store;
     const refuseLink = store.refuseLink.bind(store);
     store.refuseLink = async () => Promise.reject(new Error("connection terminated"));
     await assert.rejects(f.handle(f.job, last), /connection terminated/);
     store.refuseLink = refuseLink;
     assert.equal((await f.handle(f.job, last)).outcome, "refused");
-    assert.match(stored(f).reason!, /Modify All Data/);
+    assert.match(stored(f).reason!, /different Salesforce org/);
     assert.equal(stored(f).sealedCode, null);
     assert.equal(exchanges(f), 1);
   });
 
   test("once the console has settled the link, the waiting reason is dropped", async () => {
-    const f = await flow();
-    canWrite(f);
+    const f = await wrongOrg();
     f.deps.store.refuseLink = async () => Promise.reject(new Error("connection terminated"));
     await assert.rejects(f.handle(f.job, once));
     stored(f).state = "expired";

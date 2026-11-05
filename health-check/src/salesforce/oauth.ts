@@ -77,8 +77,8 @@ function assertRedirectUri(redirectUri: string): void {
 
 /**
  * `prompt=login consent` makes the admin sign in afresh and see the consent
- * screen, so a browser already signed in as an administrator doesn't silently
- * authorise as that administrator instead of the read-only user.
+ * screen, so a browser already signed in to Salesforce doesn't silently
+ * authorise as whoever that is: the admin chooses who connects.
  */
 export function authorisationUrl(options: { loginUrl: string; client: OAuthClient; state: string; codeChallenge: string }): string {
   assertRedirectUri(options.client.redirectUri);

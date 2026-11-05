@@ -44,6 +44,12 @@ const GET_ROUTES: ReadonlyArray<{ id: string; pattern: RegExp; requiresSoql?: bo
   { id: "analytics.reportDescribe", pattern: new RegExp(`^/services/data/${VERSION}/analytics/reports/00O[A-Za-z0-9]{12}(?:[A-Za-z0-9]{3})?/describe/?$`) },
 ];
 
+/**
+ * Every operation `authorise` can return, so a test can hold each one to the
+ * method and body checks. Adding a route here without a test fails the suite.
+ */
+export const ALLOWED_OPERATIONS: readonly string[] = [...GET_ROUTES.map((r) => r.id), "rest.compositeBatch", "metadata.retrieve", "metadata.checkRetrieveStatus"];
+
 const COMPOSITE_BATCH = new RegExp(`^/services/data/${VERSION}/composite/batch/?$`);
 const COMPOSITE_SUBREQUEST = new RegExp(`^(?:/services/data/)?${VERSION}/query/?\\?`);
 const METADATA_SOAP = /^\/services\/Soap\/m\/\d{2,3}\.\d$/;
