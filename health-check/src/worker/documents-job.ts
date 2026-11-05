@@ -121,10 +121,14 @@ export async function versionFolderFor(drive: DocumentDrive, folder: DriveItem, 
 
 /** The readout kit, in Black Cloud's own folder: one per client and health check, replaced on each make. */
 async function putReadoutKit(drive: DocumentDrive, clientName: string, folderName: string, path: string): Promise<DriveItem> {
+  return putInternal(drive, clientName, folderName, `${clientName} - Readout kit.docx`, path);
+}
+
+/** A file for Black Cloud only, beside the clients' folders and never inside one, replaced on each make. */
+async function putInternal(drive: DocumentDrive, clientName: string, folderName: string, file: string, path: string): Promise<DriveItem> {
   const internal = (await drive.folders(drive.rootFolderId)).find((f) => same(f.name, INTERNAL_FOLDER)) ?? (await drive.createFolder(drive.rootFolderId, INTERNAL_FOLDER));
   const name = `${clientName} - ${folderName}`;
   const own = (await drive.folders(internal.id)).find((f) => same(f.name, name)) ?? (await drive.createFolder(internal.id, name));
-  const file = `${clientName} - Readout kit.docx`;
   const replaceId = (await drive.files(own.id)).find((f) => f.name === file)?.id;
   return drive.putFile(own.id, file, DOCX, readFileSync(path), replaceId);
 }
@@ -228,6 +232,8 @@ async function documentsLocked(runId: string, deps: WorkerDeps, attempt: Attempt
       if (LISTED_TO_CONSOLE.has(output)) files.push({ output: output as DocumentFile["output"], name: item.name, driveFileId: item.id, url: item.url });
     }
     await putReadoutKit(deps.drive, clientName, folder.name, printed.files.readout_kit);
+    // Only a re-check whose customer agreed to be a case study has one, and it's a draft for us to finish with them.
+    if (printed.caseStudy) await putInternal(deps.drive, clientName, folder.name, `${clientName} - Case study draft.docx`, printed.caseStudy);
     await deps.store.saveDocuments(runId, { at: now(), clientName, folderName: folder.name, driveFolderId: folder.id, driveFolderUrl: folder.url, files, warnings: printed.warnings });
     log(`Documents for ${runId} are in Drive${printed.warnings.length ? `, with ${printed.warnings.length} layout warnings` : ""}.`);
     await publishMicrosite(runId, printed.microsite, deps, now(), log);

@@ -8,6 +8,8 @@ import { buildReport, type BuiltReport, type ReportOutputKey } from "../narrativ
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { canRelease, type NumberOverride, type ReportSection, type SectionVersion } from "../schemas/index.ts";
 import type { LayoutReport } from "./layout.ts";
+import { renderCaseStudyDocx } from "./case-study.ts";
+import { writeFileSync } from "node:fs";
 import { loadRun, OUTPUT_FILES, printDocuments } from "./render-run.ts";
 
 // The documents for a released run, in the wording the console approved. The
@@ -38,6 +40,8 @@ export type ReleasedDocuments = {
   warnings: string[];
   /** The customer microsite's pages, or why they couldn't be made. Left out by renderers that don't make them. */
   microsite?: { ok: true; pages: MicrositePages } | { ok: false; reason: string };
+  /** A case study draft, only for a re-check whose customer agreed to be one. For Black Cloud's own folder. */
+  caseStudy?: string;
 };
 
 const DOCUMENT_NAMES = { executive: "The executive summary", full: "The full health check", ceo: "The one page summary" } as const;
@@ -97,5 +101,8 @@ export async function renderReleased(dir: string, approved: ApprovedRun, outDir:
   } catch (err) {
     microsite = { ok: false, reason: err instanceof Error ? err.message : "The pages couldn't be built" };
   }
-  return { files, warnings: layoutWarnings(layout), microsite };
+  const study = await renderCaseStudyDocx(report, pseudonyms);
+  const caseStudy = study ? join(out, "case-study-draft.docx") : undefined;
+  if (study && caseStudy) writeFileSync(caseStudy, study, { mode: 0o600 });
+  return { files, warnings: layoutWarnings(layout), microsite, ...(caseStudy ? { caseStudy } : {}) };
 }

@@ -597,3 +597,25 @@ describe("the customer microsite is made with the documents", () => {
     assert.ok(lines.some((l) => /number check/.test(l)));
   });
 });
+
+describe("a case study draft", () => {
+  test("goes only to Black Cloud's own folder, never the client's, and only when there is one", async () => {
+    const drive = new MemoryDrive();
+    const deps = setup(jobInput(), drive);
+    deps.renderReleased = async (d, approved, out) => {
+      const made = await fakeRender(d, approved, out);
+      const caseStudy = join(out, "case-study-draft.docx");
+      writeFileSync(caseStudy, "synthetic case study");
+      return { ...made, caseStudy };
+    };
+    assert.equal((await processDocumentsJob(RUN_ID, deps, { final: true })).outcome, "done");
+    const studies = [...drive.items.values()].filter((i) => !i.folder && /Case study draft/.test(i.name));
+    assert.equal(studies.length, 1);
+    assert.equal(drive.path(studies[0]!.id), `${INTERNAL_FOLDER} / Synthetic Co - Health check 1 / Synthetic Co - Case study draft.docx`);
+    assert.ok(!deps.store.documents.get(RUN_ID)!.made!.files.some((f) => /Case study/.test(f.name)), "never listed to the console");
+
+    const plain = new MemoryDrive();
+    await processDocumentsJob(RUN_ID, setup(jobInput(), plain), { final: true });
+    assert.ok(![...plain.items.values()].some((i) => /Case study/.test(i.name)));
+  });
+});
