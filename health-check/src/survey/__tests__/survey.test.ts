@@ -29,6 +29,18 @@ describe("the survey's questions", () => {
     assert.deepEqual(readAnswers({ ...survey, version: 2 }), { answers: [], dropped: 6 });
   });
 
+  test("drop and count answers given to another version of the questions", () => {
+    const survey = syntheticSurvey(7);
+    survey.responses[0]!.version = 2;
+    survey.responses[1]!.version = 0;
+    survey.responses[2]!.version = SURVEY_VERSION;
+    assert.deepEqual([readAnswers(survey).answers.length, readAnswers(survey).dropped], [5, 2]);
+    assert.equal(surveyMetrics(survey, AS_OF).find((m) => m.id === SURVEY.responses)!.status, "measured");
+    survey.responses[3]!.version = 2;
+    assert.equal(surveyMetrics(survey, AS_OF)[0]!.status, "not_measurable", "four left is under five");
+    assert.equal(withoutComments(survey).responses[0]!.version, 2, "the run's copy keeps each version");
+  });
+
   test("keep only whether someone commented, never what they wrote", () => {
     const { answers } = readAnswers(syntheticSurvey(6));
     assert.deepEqual(answers.map((a) => a.commented), [true, false, false, true, false, false]);

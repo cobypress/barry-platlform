@@ -59,6 +59,16 @@ describe("a run job", () => {
     assert.ok(!readFileSync(join(run.runDir!, SECTIONS_FILE), "utf8").includes(SYNTHETIC_COMMENT));
   });
 
+  test("a survey that was sent and nobody answered says so in the sections it hands over", async () => {
+    const { deps, handle } = await setup({}, { ...runInput(), survey: syntheticSurvey(0) });
+    await handle(job, once);
+    const run = stored(deps);
+    assert.ok(existsSync(join(run.runDir!, SURVEY_FILE)));
+    const sections = run.output!.sections.filter((s) => s.key === "team_survey");
+    assert.equal(sections.length, 3);
+    for (const s of sections) assert.match(run.output!.versions.find((v) => v.id === s.currentVersionId)!.body, /^Fewer than 5 people answered the team survey/);
+  });
+
   test("never writes the console's own fields", async () => {
     const { deps, handle } = await setup();
     await handle(job, once);

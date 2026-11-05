@@ -51,6 +51,22 @@ describe("a run without a survey", () => {
   });
 });
 
+describe("a survey that was sent and nobody answered", () => {
+  test("says fewer than 5 answered, in every output, and nothing more", async () => {
+    const report = buildReport(withSurvey(0));
+    assert.equal(report.survey?.shown, false);
+    const line = "Fewer than 5 people answered the team survey, so we don't show its results.";
+    for (const output of ["executive_summary", "full_health_check", "raw_notes"] as const) assert.ok(currentBody(report.outputs[output], "team_survey").startsWith(line), output);
+    // The pages escape the apostrophe, so they're read up to it.
+    const start = "Fewer than 5 people answered the team survey, so we don";
+    assert.ok(executiveHtml(report, pseudonyms).includes(start));
+    assert.ok(!fullReportHtml(report, pseudonyms).includes("What your team says, against"));
+    assert.ok((await notesText(report)).includes(line));
+    assert.ok(buildMicrositePages(report, pseudonyms).pages[0]!.html.includes(start));
+    assert.ok(!report.value.groups.some((g) => g.id === TEAM_TIME_GROUP));
+  });
+});
+
 describe("a survey with fewer than 5 answers", () => {
   const report = buildReport(withSurvey(4));
 
