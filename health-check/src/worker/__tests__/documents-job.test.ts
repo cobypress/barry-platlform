@@ -440,3 +440,43 @@ describe("wording approved before the change", () => {
     assert.equal(plainWords("None of the 0 active users have never logged in."), "There are no active users.");
   });
 });
+
+describe("a consenting run adds to the benchmark set when its documents are made", () => {
+  /** The recorded synthetic run, as the run job left it on the worker's disk. */
+  function benchmarkSetup(overrides: Partial<DocumentsJobInput> = {}) {
+    const deps = baseDeps({ drive: new MemoryDrive(), renderReleased: fakeRender });
+    const input = jobInput({ intake: { ...INTAKE, customerName: "Synthetic Co", industry: "technology", headcountBand: "51-200" }, ...overrides });
+    cpSync(recorded, join(deps.runsDir, input.run.id), { recursive: true });
+    deps.store.addDocumentsJob(input);
+    return { deps, input };
+  }
+
+  test("adds banded, anonymous figures once, and a re-make adds nothing more", async () => {
+    const { deps, input } = benchmarkSetup();
+    assert.equal((await processDocumentsJob(input.run.id, deps, { final: true })).outcome, "done");
+    const rows = deps.store.benchmarkRows;
+    assert.ok(rows.length > 10, `${rows.length} rows`);
+    for (const row of rows) {
+      assert.deepEqual(Object.keys(row).sort(), ["dealSizeBand", "headcountBand", "industry", "metricKey", "period", "ruleSetVersion", "unit", "userBand", "value"]);
+      assert.equal(row.industry, "technology");
+      assert.ok(!JSON.stringify(row).includes(input.run.id) && !JSON.stringify(row).includes(input.run.orgId.slice(0, 15)));
+    }
+    assert.ok(existsSync(join(deps.runsDir, input.run.id, "benchmark-consent.json")));
+    deps.store.documents.get(input.run.id)!.input.state = "queued";
+    await processDocumentsJob(input.run.id, deps, { final: true });
+    assert.equal(deps.store.benchmarkRows.length, rows.length, "counted once");
+  });
+
+  test("a run that didn't opt in adds nothing", async () => {
+    const { deps, input } = benchmarkSetup({ run: consoleRun({ status: "released", benchmarkOptIn: false }) });
+    await processDocumentsJob(input.run.id, deps, { final: true });
+    assert.equal(deps.store.benchmarkRows.length, 0);
+  });
+
+  test("a run that can't be banded says why, and its documents are still made", async () => {
+    const { deps, input } = benchmarkSetup({ intake: { ...INTAKE, customerName: "Synthetic Co" } });
+    assert.equal((await processDocumentsJob(input.run.id, deps, { final: true })).outcome, "done");
+    assert.equal(deps.store.benchmarkRows.length, 0);
+    assert.ok(deps.lines.some((l) => /didn't add to the benchmark set: Give --industry/.test(l)), deps.lines.join("\n"));
+  });
+});

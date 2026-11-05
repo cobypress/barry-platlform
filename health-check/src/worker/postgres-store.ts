@@ -1,6 +1,7 @@
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { Intake } from "../narrative/intake.ts";
-import { HeadcountBand, Industry } from "../schemas/benchmark.ts";
+import { BenchmarkRow, HeadcountBand, Industry } from "../schemas/benchmark.ts";
 import { Calibration, ConnectLink, ManualAnswer, NumberOverride, ReportSection, Run, SectionVersion, type Finding, type ManualStep, type Metric, type Score } from "../schemas/index.ts";
 import {
   LinkState,
@@ -122,6 +123,9 @@ export const OVERRIDE: Columns = {
 export const DOCUMENTS: Columns = {
   runId: "text", status: "text", requestedBy: "text", requestedAt: "ts", startedAt: "ts", finishedAt: "ts", error: "text", warnings: "json", clientName: "text",
   folderName: "text", driveFolderId: "text", driveFolderUrl: "text", files: "json",
+};
+export const BENCHMARK_ROW: Columns = {
+  id: "text", metricKey: "text", ruleSetVersion: "text", value: "num", unit: "text", industry: "text", headcountBand: "text", userBand: "text", dealSizeBand: "text", period: "text",
 };
 /** New, from C2: see the log. The first ten columns are ConnectLink in src/schemas/connect.ts. */
 export const CONNECT_LINK: Columns = {
@@ -421,10 +425,17 @@ export class PostgresWorkerStore implements WorkerStore {
     );
   }
 
+  addBenchmarkRows(rows: BenchmarkRow[]): Promise<void> {
+    return this.#transaction(async (client) => {
+      // The id is a fresh random one: Prisma's cuid default lives in the client, not the database.
+      for (const row of rows) await this.#insert(client, "HealthCheckBenchmarkRow", BENCHMARK_ROW, { id: randomUUID(), ...BenchmarkRow.parse(row) });
+    });
+  }
+
   async failDocuments(runId: string, reason: string, at: string): Promise<void> {
     await this.#pool.query(`UPDATE "HealthCheckDocuments" SET "status" = 'failed', "finishedAt" = $2::timestamp(3), "error" = $3 WHERE "runId" = $1 AND "status" IN ('queued', 'making')`, [runId, at, reason]);
   }
 }
 
 /** Only for the column check in the tests. */
-export const ALL_TABLES = { RUN, RUN_STEP, INTAKE, CALIBRATION, MANUAL_ANSWER, FINDING, METRIC, SCORE, MANUAL_STEP, SECTION, VERSION, CONNECT_LINK, OVERRIDE, DOCUMENTS } as const;
+export const ALL_TABLES = { RUN, RUN_STEP, INTAKE, CALIBRATION, MANUAL_ANSWER, FINDING, METRIC, SCORE, MANUAL_STEP, SECTION, VERSION, CONNECT_LINK, OVERRIDE, DOCUMENTS, BENCHMARK_ROW } as const;

@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ReportOutputKey } from "../narrative/sections.ts";
+import { AlreadyContributed, contributeBenchmark } from "../benchmark/export.ts";
 import { longDate } from "../render/format.ts";
 import { renderReleased } from "../render/render-released.ts";
 import { safeReason, type Attempt, type JobOutcome, type WorkerDeps } from "./deps.ts";
@@ -81,6 +82,26 @@ export async function versionFolderFor(drive: DocumentDrive, folder: DriveItem, 
   return drive.createFolder(folder.id, `Version ${last.n + 1}, ${longDate(now.slice(0, 10))}`);
 }
 
+/**
+ * A run whose customer opted in at intake adds its figures to the benchmark set
+ * once it's released: the figures are final then, and nothing about them leads
+ * back to the run. Once per run and once per org in any year, which the consent
+ * record in the run folder enforces. Never fails the documents: a run that can't
+ * contribute (too few won deals to band, no industry recorded) just says why.
+ */
+async function contribute(runId: string, dir: string, input: DocumentsJobInput, deps: WorkerDeps, log: (line: string) => void): Promise<void> {
+  try {
+    const { rows } = await contributeBenchmark(
+      { runDir: dir, industry: input.intake?.industry, headcount: input.intake?.headcountBand, consent: `Opted in at intake by ${input.run.createdBy}; added when the run was released`, now: (deps.now ?? (() => new Date()))() },
+      (rows) => deps.store.addBenchmarkRows(rows),
+    );
+    log(`Run ${runId} added ${rows.length} figures to the benchmark set.`);
+  } catch (err) {
+    if (err instanceof AlreadyContributed) return;
+    log(`Run ${runId} didn't add to the benchmark set: ${safeReason(err)}`);
+  }
+}
+
 export async function processDocumentsJob(runId: string, deps: WorkerDeps, attempt: Attempt): Promise<JobOutcome> {
   if (!RUN_ID.test(runId)) return { outcome: "failed", detail: "The run id isn't one the worker can use as a folder name" };
   // The run's own lock: a run job for it can't be writing its folder meanwhile.
@@ -123,6 +144,7 @@ async function documentsLocked(runId: string, deps: WorkerDeps, attempt: Attempt
     }
     await deps.store.saveDocuments(runId, { at: now(), clientName, folderName: folder.name, driveFolderId: folder.id, driveFolderUrl: folder.url, files, warnings: printed.warnings });
     log(`Documents for ${runId} are in Drive${printed.warnings.length ? `, with ${printed.warnings.length} layout warnings` : ""}.`);
+    if (input.run.benchmarkOptIn) await contribute(runId, dir, input, deps, log);
     return { outcome: "done", detail: `${files.length} documents in ${folder.name}${target.id === folder.id ? "" : ` / ${target.name}`}` };
   } catch (err) {
     const reason = safeReason(err);

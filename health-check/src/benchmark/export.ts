@@ -262,7 +262,10 @@ export const ConsentRecord = z.strictObject({
 });
 export type ConsentRecord = z.infer<typeof ConsentRecord>;
 
-export function exportBenchmark(options: BenchmarkOptions): BenchmarkResult {
+type Prepared = { dir: string; rows: BenchmarkRow[]; skipped: Skipped[]; profile: OrgProfile; consentPath: string; record: ConsentRecord };
+
+/** Everything up to writing: the checks, the figures and the bands. Throws with the reason when the run can't contribute. */
+function prepareBenchmark(options: Omit<BenchmarkOptions, "storeDir">): Prepared {
   const consent = options.consent?.trim() ?? "";
   if (!consent) throw new Error('Refusing to export without --consent "<who agreed and how>". Figures only go into the benchmark set when the customer has opted in.');
   const dir = resolve(options.runDir);
@@ -276,18 +279,15 @@ export function exportBenchmark(options: BenchmarkOptions): BenchmarkResult {
   const consentPath = join(dir, CONSENT_FILE);
   if (existsSync(consentPath)) {
     const previous = ConsentRecord.safeParse(readJson(consentPath));
-    throw new Error(`This run has already been exported to the benchmark set${previous.success ? ` (${previous.data.recordedAt})` : ""}. A second export would count the org twice.`);
+    throw new AlreadyContributed(`This run has already been exported to the benchmark set${previous.success ? ` (${previous.data.recordedAt})` : ""}. A second export would count the org twice.`);
   }
-  const storeDir = resolve(options.storeDir ?? defaultBenchmarkDir());
-  // The consent record is written into the run folder, and the store holds
-  // customer-derived figures, so neither belongs in a repository.
+  // The consent record is written into the run folder, so it never belongs in a repository.
   assertOutsideGit(dir);
-  assertOutsideGit(storeDir);
 
   const run = Run.parse(readJson(join(dir, "run.json")));
   const earlier = earlierExport(dir, run.orgId, quarterOf(run.analysisWindow.to));
   if (earlier) {
-    throw new Error(`This org is already in the benchmark set from run ${earlier.runId} (${earlier.period}). An org goes in once in any ${BENCHMARK_WINDOW_QUARTERS} quarters, so it can't count twice towards a group.`);
+    throw new AlreadyContributed(`This org is already in the benchmark set from run ${earlier.runId} (${earlier.period}). An org goes in once in any ${BENCHMARK_WINDOW_QUARTERS} quarters, so it can't count twice towards a group.`);
   }
   const calibration = Calibration.parse(readJson(join(dir, "calibration.json")));
   const { figures, skipped } = benchmarkFigures({
@@ -310,17 +310,56 @@ export function exportBenchmark(options: BenchmarkOptions): BenchmarkResult {
   };
   // Built field by field, so nothing from the run can ride along.
   const rows = figures.map((f) => BenchmarkRow.parse({ metricKey: f.metricKey, value: f.value, unit: f.unit, ...shared }));
-
-  // Consent first, created exclusively, so two exports racing can't both write.
-  // If the rows then fail to write, the record is taken back so a retry works.
   const record = ConsentRecord.parse({ consent, recordedAt: (options.now ?? new Date()).toISOString(), rowsWritten: rows.length, metricKeys: rows.map((r) => r.metricKey) });
-  writeFileSync(consentPath, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600, flag: "wx" });
-  const storePath = join(storeDir, BENCHMARK_FILE);
+  return { dir, rows, skipped, profile, consentPath, record };
+}
+
+/** The run, or its org within the window, is already in the set. Not a fault: there's nothing more to add. */
+export class AlreadyContributed extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AlreadyContributed";
+  }
+}
+
+/**
+ * Consent first, created exclusively, so two exports racing can't both write.
+ * If the rows then fail to write, the record is taken back so a retry works.
+ */
+async function writeWithConsent(prepared: Prepared, write: (rows: BenchmarkRow[]) => void | Promise<void>): Promise<void> {
+  writeFileSync(prepared.consentPath, `${JSON.stringify(prepared.record, null, 2)}\n`, { mode: 0o600, flag: "wx" });
   try {
-    appendRows(storePath, rows);
+    await write(prepared.rows);
   } catch (err) {
-    rmSync(consentPath, { force: true });
+    rmSync(prepared.consentPath, { force: true });
     throw err;
   }
-  return { rows, skipped, storePath, profile };
+}
+
+/** `hc benchmark`: into the local store, a JSON lines file outside any repository. */
+export function exportBenchmark(options: BenchmarkOptions): BenchmarkResult {
+  const prepared = prepareBenchmark(options);
+  const storeDir = resolve(options.storeDir ?? defaultBenchmarkDir());
+  // The store holds customer-derived figures, so it never belongs in a repository.
+  assertOutsideGit(storeDir);
+  const storePath = join(storeDir, BENCHMARK_FILE);
+  // Synchronous here: appendRows is, so the promise has settled by the time this returns.
+  writeFileSync(prepared.consentPath, `${JSON.stringify(prepared.record, null, 2)}\n`, { mode: 0o600, flag: "wx" });
+  try {
+    appendRows(storePath, prepared.rows);
+  } catch (err) {
+    rmSync(prepared.consentPath, { force: true });
+    throw err;
+  }
+  return { rows: prepared.rows, skipped: prepared.skipped, storePath, profile: prepared.profile };
+}
+
+/** The worker: into the console's benchmark table, through whatever writes it. */
+export async function contributeBenchmark(
+  options: Omit<BenchmarkOptions, "storeDir">,
+  write: (rows: BenchmarkRow[]) => Promise<void>,
+): Promise<{ rows: BenchmarkRow[]; skipped: Skipped[] }> {
+  const prepared = prepareBenchmark(options);
+  await writeWithConsent(prepared, write);
+  return { rows: prepared.rows, skipped: prepared.skipped };
 }

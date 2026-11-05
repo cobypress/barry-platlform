@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { Intake } from "../narrative/intake.ts";
-import type { Calibration, ConnectLink, Finding, ManualAnswer, ManualStep, Metric, NumberOverride, ReportSection, Run, Score, SectionVersion } from "../schemas/index.ts";
+import type { BenchmarkRow, Calibration, ConnectLink, Finding, ManualAnswer, ManualStep, Metric, NumberOverride, ReportSection, Run, Score, SectionVersion } from "../schemas/index.ts";
 
 // What the worker takes from the queue, and what it needs from the console's
 // database. Jobs carry ids only (the contract with the console, lane C2), so
@@ -171,4 +171,7 @@ export interface WorkerStore {
   saveDocuments(runId: string, made: DocumentsMade): Promise<void>;
   /** A reason the console can show. Never a token or a name. */
   failDocuments(runId: string, reason: string, at: string): Promise<void>;
+
+  /** A consenting run's benchmark figures, all or none. The rows carry nothing that leads back to the run (rule 11). */
+  addBenchmarkRows(rows: BenchmarkRow[]): Promise<void>;
 }

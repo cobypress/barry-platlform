@@ -1,4 +1,4 @@
-import { Run, type ConnectLink } from "../schemas/index.ts";
+import { Run, type BenchmarkRow, type ConnectLink } from "../schemas/index.ts";
 import { ORG_AWAITING_CONNECT, RunClosedError, type ConnectJobInput, type DocumentsJobInput, type DocumentsMade, type LinkConnected, type LinkState, type RunJobInput, type RunOutputRecord, type RunProgress, type WorkerStore } from "./types.ts";
 
 // The WorkerStore for tests: the console's tables as plain maps, with the same
@@ -123,6 +123,14 @@ export class MemoryWorkerStore implements WorkerStore {
     Object.assign(doc, { made: structuredClone(made), error: null });
     Object.assign(doc.input, { state: "done", driveFolderId: made.driveFolderId, files: structuredClone(made.files) });
     this.writes.push({ method: "saveDocuments", id: runId, detail: made.folderName });
+  }
+
+  /** The benchmark table. */
+  readonly benchmarkRows: BenchmarkRow[] = [];
+
+  async addBenchmarkRows(rows: BenchmarkRow[]): Promise<void> {
+    this.benchmarkRows.push(...structuredClone(rows));
+    this.writes.push({ method: "addBenchmarkRows", id: "benchmark", detail: rows.length });
   }
 
   async failDocuments(runId: string, reason: string, _at: string): Promise<void> {
