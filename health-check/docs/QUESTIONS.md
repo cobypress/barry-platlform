@@ -152,3 +152,15 @@ The forecast items, login history and campaign reads are now described first, so
 ## The team survey and the run (DECISIONS.md 147)
 
 The survey's sections are built when the run job runs. Answers that come in afterwards are logged by the documents job and left out of the documents, because nobody approved their figures. Which does the console want: close the survey before the run starts, or a step that rebuilds the `team_survey` sections when the survey closes and sends them back to review? The engine can do the second (`buildReport` with the new answers), but the console would need to ask for it. Also: should a survey that was sent but that nobody answered say "fewer than 5 answered"? Today the worker can't tell it from no survey, because it only sees answer rows.
+
+## Service Cloud (DECISIONS.md 155 to 158)
+
+Facts the Object Reference didn't settle. Each check that depends on one is not measurable, with the reason, when the fact turns out otherwise.
+
+a) `Case.EntitlementId`, `SlaExitDate` and `MilestoneStatus` aren't on the Case page of the reference: they come with Entitlement Management. We read milestones from `CaseMilestone` instead, and don't read those fields.
+b) Whether `CaseHistory` records Status changes without field history tracking turned on for Status, and whether `OldValue` and `NewValue` hold the label or the API name. We match both. With no Status rows while cases were closed, `svc.reopened-cases` is not measurable.
+c) The reference describes `User.UserPermissionsSupportUser` as "the user can use the Salesforce console". We treat it as the Service Cloud User feature licence, and price it under that name.
+d) The `KnowledgeArticleVersion` page says Manage Articles is needed to use PublishStatus 'Online'. If the read fails for that reason, both knowledge checks are not measurable.
+e) Whether Barometer Read Only, or the connected user, needs more than View Setup and Configuration for `MilestoneType`, `SlaProcess`, the Omni-Channel objects, `MacroUsage` and `QuickTextUsage`.
+f) Escalation rules come only from the Metadata API. We know of no Tooling route, so a connection that can't use the Metadata API leaves `svc.escalation-targets` not measurable, and `svc.escalation-rules` passes only on an active entitlement process.
+g) `KnowledgeArticleViewStat.Channel` values: we assume an "AllChannels" row, when present, totals the others. `MacroUsage.ExecutionState` and `AgentWork.Status` values aren't listed, so failed macros aren't checked and declined work is read from `DeclineDateTime`.

@@ -21,6 +21,9 @@ export const SALES_CLOUD_DOMAINS = [
   "revenue_opportunities",
 ] as const;
 
+/** Service Cloud's areas (roadmap Stage 6). A run has them only when its modules include "service". */
+export const SERVICE_CLOUD_DOMAINS = ["service_operations", "service_setup"] as const;
+
 export const Timestamp = z.iso.datetime();
 export const CalendarDate = z.iso.date();
 

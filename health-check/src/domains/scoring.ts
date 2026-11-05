@@ -76,6 +76,10 @@ export const AREA_WEIGHTS: Record<string, number> = {
   automation: 1,
   configuration: 0.75,
   best_practice: 0.75,
+  // Service Cloud (DECISIONS.md 156): how cases are handled touches customers
+  // directly; how the set-up is built is a step further back.
+  service_operations: 1.25,
+  service_setup: 0.75,
 };
 const DEFAULT_AREA_WEIGHT = 1;
 /** An org with a critical issue can't score above this, however well the rest does. */

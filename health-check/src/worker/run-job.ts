@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { SALES_CLOUD_MODULES } from "../domains/index.ts";
+import { ALL_MODULES, knownModuleIds, modulesForRun } from "../domains/index.ts";
 import { runHealthCheck } from "../engine/run.ts";
 import { applyNarrative, type Rejection } from "../narrative/apply.ts";
 import type { NarrativeClient } from "../narrative/client.ts";
@@ -44,7 +44,7 @@ function problemWith(input: RunJobInput, deps: WorkerDeps): string | null {
   if (!input.calibration) return "The calibration hasn't been confirmed, so the run can't start.";
   if (input.run.connectionKind !== "oauth") return "This run is set to use a CLI login. The worker only reads through a connection a customer's admin authorised.";
   if (!input.connectionName) return "No connection is named for this run. Send the customer a connect link first.";
-  const known = new Set((deps.modules ?? SALES_CLOUD_MODULES).map((m) => m.id));
+  const known = knownModuleIds(deps.modules ?? ALL_MODULES);
   const unknown = input.run.modules.filter((m) => !known.has(m));
   if (unknown.length) return `The worker doesn't know these modules: ${unknown.join(", ")}.`;
   return null;
@@ -112,7 +112,7 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
 
   const dir = join(deps.runsDir, runId);
   const resume = existsSync(join(dir, "run.json")) ? runId : undefined;
-  const modules = (deps.modules ?? SALES_CLOUD_MODULES).filter((m) => input.run.modules.includes(m.id));
+  const modules = modulesForRun(input.run.modules, deps.modules ?? ALL_MODULES);
   const provider = new OAuthConnectionProvider(name, { store: deps.tokens, client: deps.oauthClient, transport: deps.oauthTransport, env: approvedFromConsole(name) });
   const secrets = [stored.accessToken, stored.refreshToken];
 

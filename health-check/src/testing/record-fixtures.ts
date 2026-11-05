@@ -1,18 +1,22 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SALES_CLOUD_MODULES } from "../domains/index.ts";
+import { ALL_MODULES } from "../domains/index.ts";
 import { runHealthCheck } from "../engine/run.ts";
 import { FIXTURE_DIR, loadCalibration, RecordingTransport, syntheticProvider, type Recording } from "./replay.ts";
 import { Simulator } from "./simulator.ts";
 import { AS_OF } from "./synthetic-org.ts";
 
-/** Runs the real engine against the simulator and captures every exchange. */
+/**
+ * Runs the real engine against the simulator and captures every exchange. Every
+ * module runs, Service Cloud after Sales Cloud, so a Sales Cloud run replays the
+ * same exchanges it always did and a run with Service Cloud finds its own after them.
+ */
 export async function recordFixtures(): Promise<Recording> {
   const out = mkdtempSync(join(tmpdir(), "hc-record-"));
   const transport = new RecordingTransport(new Simulator());
   try {
-    await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: out, now: new Date(AS_OF), transport });
+    await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: ALL_MODULES, outDir: out, now: new Date(AS_OF), transport });
   } finally {
     rmSync(out, { recursive: true, force: true });
   }

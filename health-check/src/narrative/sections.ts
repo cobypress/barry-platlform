@@ -5,6 +5,7 @@ import { comparisonId, comparisonNotes, compareRun, OWN_RANGE_MIN, type Benchmar
 import { quarterOf } from "../benchmark/export.ts";
 import { buildInvestment, investmentText, INVESTMENT_METRIC_IDS, type Investment } from "../money/investment.ts";
 import { ADOPTION_METRIC_IDS } from "../domains/adoption/index.ts";
+import { SERVICE_OPERATIONS_METRIC_IDS } from "../domains/service/index.ts";
 import { PROCESS_METRIC_IDS } from "../domains/historic-pipeline/process.ts";
 import { DOCUMENTED_METRIC_IDS } from "../domains/configuration/documented.ts";
 import { buildDataset, checkNumbers, scopeDataset, SOURCE, toNumberCheckResult, type FigureSet, type StructuralFigure } from "../numbercheck/index.ts";
@@ -124,7 +125,7 @@ export const valueSource = (group: string): string => `value:${group}`;
 export const INVESTMENT_SOURCE = "investment";
 const COMPARISONS = "comparisons";
 // Metrics with a raw notes section of their own, kept out of the pipeline metrics.
-const OWN_SECTION = new Set([...INVESTMENT_METRIC_IDS, ...ADOPTION_METRIC_IDS, ...PROCESS_METRIC_IDS, ...DOCUMENTED_METRIC_IDS, ...SURVEY_METRIC_IDS]);
+const OWN_SECTION = new Set([...INVESTMENT_METRIC_IDS, ...ADOPTION_METRIC_IDS, ...PROCESS_METRIC_IDS, ...DOCUMENTED_METRIC_IDS, ...SURVEY_METRIC_IDS, ...SERVICE_OPERATIONS_METRIC_IDS]);
 
 const lines = (...parts: Array<string | null | undefined | false>): string => parts.filter(Boolean).join("\n\n");
 const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
@@ -256,6 +257,15 @@ function rawNotesSpecs(input: ReportInput, overall: OverallScore, comparisons: C
       body: "Who uses Salesforce, how often and how: active users by day, week and month, the monthly trend, how people sign in, Lightning, and report use. Each figure says what it leaves out and how far back the login history goes.",
       metricIds: metrics.filter((m) => ADOPTION_METRIC_IDS.includes(m.id)).map((m) => m.id),
     },
+    // Only a run with Service Cloud has these.
+    ...(metrics.some((m) => SERVICE_OPERATIONS_METRIC_IDS.includes(m.id))
+      ? [{
+          key: "service_cases",
+          title: "Cases",
+          body: "How cases come in and are handled: open cases and their age, cases created each month, how long cases take to resolve, the channels they come from, and how much routed work agents decline. Each figure covers the last year unless it says otherwise.",
+          metricIds: metrics.filter((m) => SERVICE_OPERATIONS_METRIC_IDS.includes(m.id)).map((m) => m.id),
+        }]
+      : []),
     ...(survey ? [{ ...surveySpec(survey), body: lines(survey.paragraph, ...surveyMethod(survey)) }] : []),
     ...domains.map((domain): Spec => {
       const own = findings.filter((f) => f.domain === domain);

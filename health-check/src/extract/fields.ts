@@ -80,6 +80,17 @@ export const fieldDescribeExtractor: Extractor<Record<string, DescribedObject>> 
   },
 };
 
+/** One object's fields, as `fieldDescribeExtractor` records them. A budget stop or fault is thrown, not recorded. */
+export async function describeObject(ctx: ExtractContext, object: string): Promise<DescribedObject> {
+  try {
+    const d = await ctx.client.describe<Describe>(object);
+    return { status: "ok", fields: d.fields.map((f) => f.name.toLowerCase()), relationships: d.fields.flatMap((f) => (f.relationshipName ? [f.relationshipName.toLowerCase()] : [])) };
+  } catch (err) {
+    if (!isUnavailable(err)) throw err;
+    return ABSENT_CODES.has(err.code) ? { status: "absent", reason: err.message } : { status: "unknown", reason: err.message };
+  }
+}
+
 export type FieldPlan = { ok: true; select: string; missing: string[] } | { ok: false; reason: string };
 
 const listOf = (names: string[]): string => (names.length === 1 ? names[0]! : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`);
@@ -91,9 +102,13 @@ function has(described: Extract<DescribedObject, { status: "ok" }>, field: strin
 
 /** The SELECT list to send, given what the org has. Never queries anything itself. */
 export function planFields(ctx: ExtractContext, spec: FieldSpec): FieldPlan {
+  return planFrom(ctx.get(fieldDescribeExtractor)[spec.object], spec);
+}
+
+/** The same, from a describe the caller made itself. */
+export function planFrom(described: DescribedObject | undefined, spec: FieldSpec): FieldPlan {
   const optional = spec.optional ?? [];
   const everything = { ok: true as const, select: [...spec.required, ...optional].join(", "), missing: [] };
-  const described = ctx.get(fieldDescribeExtractor)[spec.object];
   if (!described || described.status === "unknown") return everything;
   if (described.status === "absent") return { ok: false, reason: `${spec.object} isn't available in this org, or to the connected user: ${described.reason}` };
   const missingRequired = spec.required.filter((f) => !has(described, f));

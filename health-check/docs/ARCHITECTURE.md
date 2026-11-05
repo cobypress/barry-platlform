@@ -56,6 +56,8 @@ src/
 
 A domain is a `DomainModule` (`src/domains/types.ts`): extractors, metric builders and rules. Add it to the list in `src/domains/index.ts`. Nothing in `src/engine` changes, and a test proves this with a stand-in Service Cloud module. A Sales Cloud area also needs its place in `SALES_CLOUD_DOMAINS`, a label in `DOMAIN_LABELS` and a weight in `AREA_WEIGHTS`, and goes in `ESSENTIALS_DOMAINS` when it reads no CRM records, as adoption does (DECISIONS.md 99).
 
+Service Cloud is the first module beyond Sales Cloud (`src/domains/service/`, DECISIONS.md 155 to 158): two areas in `SERVICE_CLOUD_DOMAINS`, `SERVICE_CLOUD_MODULES` alongside `SALES_CLOUD_MODULES`, and `modulesForRun`, which turns a run's `service` module into both. Its synthetic data and traps are at the end of `src/testing/synthetic-org.ts`.
+
 ## The rules, and where each is enforced
 
 | Rule | Enforced by |

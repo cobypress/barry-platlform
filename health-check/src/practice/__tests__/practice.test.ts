@@ -1,7 +1,7 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { DOMAIN_LABELS } from "../../narrative/select.ts";
-import { SALES_CLOUD_DOMAINS } from "../../schemas/common.ts";
+import { SALES_CLOUD_DOMAINS, SERVICE_CLOUD_DOMAINS } from "../../schemas/common.ts";
 import { OURS, PRACTICE, practiceFor, practiceItems, sourceLabel } from "../index.ts";
 
 const ALLOWED_HOSTS = ["architect.salesforce.com", "trailhead.salesforce.com", "help.salesforce.com"];
@@ -9,12 +9,13 @@ const DIGIT = /\d/;
 
 describe("what good looks like", () => {
   test("every area has three to five statements, and nothing else has any", () => {
-    for (const domain of SALES_CLOUD_DOMAINS) {
+    const all = [...SALES_CLOUD_DOMAINS, ...SERVICE_CLOUD_DOMAINS];
+    for (const domain of all) {
       const n = practiceFor(domain).length;
       assert.ok(n >= 3 && n <= 5, `${domain}: ${n}`);
     }
-    assert.deepEqual(Object.keys(PRACTICE).sort(), [...SALES_CLOUD_DOMAINS].sort());
-    assert.deepEqual(Object.keys(DOMAIN_LABELS).sort(), [...SALES_CLOUD_DOMAINS].sort());
+    assert.deepEqual(Object.keys(PRACTICE).sort(), [...all].sort());
+    assert.deepEqual(Object.keys(DOMAIN_LABELS).sort(), [...all].sort());
   });
 
   test("every sourced statement has a public Salesforce URL, the date we read it, and what it says", () => {

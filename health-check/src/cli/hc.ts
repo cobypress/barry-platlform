@@ -7,7 +7,7 @@ import { z } from "zod";
 import { CONSENT_FILE, defaultBenchmarkDir, exportBenchmark, Industry } from "../benchmark/export.ts";
 import { formatSummary, summariseBenchmarks } from "../benchmark/summary.ts";
 import { BUDGET_DEFAULTS, envNumber } from "../config.ts";
-import { SALES_CLOUD_MODULES } from "../domains/index.ts";
+import { SALES_CLOUD_MODULES, SERVICE_CLOUD_MODULES } from "../domains/index.ts";
 import { runHealthCheck } from "../engine/run.ts";
 import { defaultRunsDir, purgeRun, sweepRuns } from "../retention/purge.ts";
 import { Calibration, HeadcountBand, ManualAnswer } from "../schemas/index.ts";
@@ -22,6 +22,7 @@ const USAGE = `Black Cloud Barometer
 
   hc run --org <alias> --calibration <file> [options]
   hc run --connection <name> --calibration <file> [options]
+      --service adds Service Cloud's two areas to the Sales Cloud ones
   hc render --run <run folder> [--narrative]
   hc benchmark --run <run folder> --consent "<who agreed and how>" [--industry <industry>] [--headcount <band>] [--out <dir>]
   hc benchmark --summary [--out <dir>]
@@ -91,6 +92,7 @@ async function main(argv: string[]): Promise<number> {
       out: { type: "string" },
       resume: { type: "string" },
       "budget-share": { type: "string" },
+      service: { type: "boolean" },
       "api-version": { type: "string" },
       run: { type: "string" },
       narrative: { type: "boolean" },
@@ -177,7 +179,7 @@ async function main(argv: string[]): Promise<number> {
   const { run, dir, output } = await runHealthCheck({
     provider,
     calibration,
-    modules: SALES_CLOUD_MODULES,
+    modules: values.service ? [...SALES_CLOUD_MODULES, ...SERVICE_CLOUD_MODULES] : SALES_CLOUD_MODULES,
     outDir: values.out ?? join(homedir(), ".barometer", "runs"),
     answers,
     resume: values.resume,
