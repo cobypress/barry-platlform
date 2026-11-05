@@ -160,25 +160,6 @@ async function notifyJobFailure(job: Job, err: unknown) {
   }
 }
 
-async function slackUpdateMessage(token: string, channel: string, ts: string, text: string) {
-  const res = await fetch("https://slack.com/api/chat.update", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json; charset=utf-8",
-    },
-    body: JSON.stringify({
-      channel,
-      ts,
-      text,
-      blocks: [{ type: "section", text: { type: "mrkdwn", text } }],
-    }),
-  });
-
-  const data = (await res.json()) as { ok: boolean; error?: string };
-  if (!data.ok) throw new Error(`Slack chat.update failed: ${data.error}`);
-}
-
 // ---- Salesforce helpers ----
 
 type ValidateUserResponse = {
@@ -511,24 +492,17 @@ const worker = new Worker(
         return { ok: true, result, processedAt: new Date().toISOString() };
       }
 
-      // 1) Slack interactivity jobs (legacy — button clicks that don't have a specific handler)
+      // 1) Slack interactivity jobs (legacy — button clicks that don't have a specific handler).
+      // Deliberately a no-op: this used to chat.update the original message with a generic
+      // "received your click" line, which replaced the message's real blocks (header, fields,
+      // buttons — everything) with that one sentence. Any button without its own explicit
+      // action_id handling in interactions/route.ts ends up here, so that destructive update
+      // made unrelated messages (case announcements, etc.) look like they'd vanished the moment
+      // anyone clicked a link button on them. interactions/route.ts already acks Slack's
+      // 3-second requirement by returning {ok:true} before this job even runs, so there's
+      // nothing left to do here beyond logging that it happened.
       if (job.name === "slack-interaction") {
-        const interactionPayload = job.data?.payload as {
-          channel?: { id?: string };
-          message?: { ts?: string };
-        };
-
-        const channel = interactionPayload?.channel?.id;
-        const ts      = interactionPayload?.message?.ts;
-
-        if (!channel || !ts) {
-          // Ephemeral/app-home interactions don't carry channel+ts — nothing to update, skip.
-          console.log("[slack-interaction] no channel/ts in payload — skipping", job.data?.correlation_id);
-          return;
-        }
-
-        const token = requireEnv("SLACK_BOT_TOKEN");
-        await slackUpdateMessage(token, channel, ts, "✅ *Barry received your click (via worker)*");
+        console.log("[slack-interaction] received, no handler — ignoring", job.data?.correlation_id);
       }
 
       // 2) Slash command jobs — /create-case for already-verified users
@@ -665,10 +639,12 @@ const worker = new Worker(
           });
         }
 
-        // 2) Public channel announcement — visible to everyone
+        // 2) Public channel announcement — visible to everyone. Same block shape
+        // blackcloud-next's notify-case-created route builds for the Salesforce-raised
+        // path (lib/case-created-slack-blocks.ts) — kept in sync by hand since the two
+        // repos don't share code, so a case looks the same in Slack either way.
         const token = requireEnv("SLACK_BOT_TOKEN");
 
-        // Build blocks shared between initial post and the update-with-button
         const announcementBlocks = [
           {
             type: "header",
@@ -705,6 +681,33 @@ const worker = new Worker(
               },
             ],
           },
+          {
+            type: "actions",
+            elements: [
+              {
+                type: "button",
+                action_id: "barry_close_case",
+                text: { type: "plain_text", text: "Mark as Resolved ✓" },
+                style: "primary",
+                confirm: {
+                  title: { type: "plain_text", text: "Close this case?" },
+                  text: {
+                    type: "mrkdwn",
+                    text: `This will mark *Case #${sfRes.caseNumber}* as Closed in Salesforce.`,
+                  },
+                  confirm: { type: "plain_text", text: "Yes, close it" },
+                  deny: { type: "plain_text", text: "Cancel" },
+                },
+                value: JSON.stringify({ case_id: sfRes.caseId, case_number: sfRes.caseNumber }),
+              },
+              {
+                type: "button",
+                action_id: "barry_view_record",
+                text: { type: "plain_text", text: "View in Salesforce" },
+                url: `${process.env.SF_INSTANCE_URL ?? ""}/lightning/r/Case/${sfRes.caseId}/view`,
+              },
+            ],
+          },
         ];
 
         const msgRes = await fetch("https://slack.com/api/chat.postMessage", {
@@ -723,67 +726,20 @@ const worker = new Worker(
         const msgBody = await msgRes.json() as { ok: boolean; ts?: string };
 
         if (msgBody.ok && msgBody.ts && sfRes.caseId) {
-          // Save the Case → Slack message mapping for status updates, comments and close
-          await pool.query(
-            `INSERT INTO case_slack_link (case_id, case_number, channel_id, message_ts)
-             VALUES ($1, $2, $3, $4) ON CONFLICT (case_id) DO NOTHING`,
-            [sfRes.caseId, sfRes.caseNumber, channel_id, msgBody.ts]
-          );
-
-          // Write the Slack thread timestamp via Apex — only available after the
-          // message posts. Direct REST PATCH was unreliable; Apex endpoint matches
-          // the proven pattern used by BarryCreateCase.
+          // Write the Slack channel/thread back onto the Case — only available after the
+          // message posts (channel was already set at insert by BarryCreateCase, but is
+          // sent again here so Case.Slack_Channel_Id__c/Slack_Thread_Ts__c stay the single
+          // source of truth status/assignment/comment notifications thread onto).
           try {
             await salesforce.sfJson("/services/apexrest/barry/update-case", {
               method: "POST",
-              body: JSON.stringify({ caseId: sfRes.caseId, slackThreadTs: msgBody.ts }),
+              body: JSON.stringify({ caseId: sfRes.caseId, slackChannelId: channel_id, slackThreadTs: msgBody.ts }),
               headers: { "Content-Type": "application/json; charset=utf-8" },
             });
             console.log(`[create-case] Slack_Thread_Ts__c written to Case ${sfRes.caseId}`);
           } catch (threadErr) {
             console.error("[create-case] Failed to write Slack_Thread_Ts__c:", threadErr);
           }
-
-          // Add "Mark as Resolved" button via chat.update
-          await fetch("https://slack.com/api/chat.update", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json; charset=utf-8",
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify({
-              channel: channel_id,
-              ts: msgBody.ts,
-              blocks: [
-                ...announcementBlocks,
-                {
-                  type: "actions",
-                  elements: [
-                    {
-                      type: "button",
-                      action_id: "barry_close_case",
-                      text: { type: "plain_text", text: "Mark as Resolved ✓" },
-                      style: "primary",
-                      confirm: {
-                        title: { type: "plain_text", text: "Close this case?" },
-                        text: {
-                          type: "mrkdwn",
-                          text: `This will mark *Case #${sfRes.caseNumber}* as Closed in Salesforce.`,
-                        },
-                        confirm: { type: "plain_text", text: "Yes, close it" },
-                        deny: { type: "plain_text", text: "Cancel" },
-                      },
-                      value: JSON.stringify({
-                        case_id: sfRes.caseId,
-                        case_number: sfRes.caseNumber,
-                        channel_id,
-                      }),
-                    },
-                  ],
-                },
-              ],
-            }),
-          });
         }
       }
 
@@ -1005,8 +961,8 @@ const worker = new Worker(
 
       // 8) Close case — called when user clicks "Mark as Resolved" in Slack
       if (job.name === "close-case") {
-        const { case_id, case_number, channel_id, user_id } = job.data as {
-          case_id: string; case_number: string; channel_id: string; user_id: string;
+        const { case_id, case_number, channel_id, user_id, message_ts } = job.data as {
+          case_id: string; case_number: string; channel_id: string; user_id: string; message_ts?: string;
         };
 
         const sfRes = await sfCloseCase(case_id);
@@ -1016,17 +972,9 @@ const worker = new Worker(
           return;
         }
 
-        // Look up the original announcement message_ts
-        const { rows } = await pool.query<{ message_ts: string }>(
-          "SELECT message_ts FROM case_slack_link WHERE case_id = $1",
-          [case_id]
-        );
-
         const token = requireEnv("SLACK_BOT_TOKEN");
 
-        if (rows.length > 0) {
-          const message_ts = rows[0].message_ts;
-
+        if (message_ts) {
           // Update announcement: replace "Mark as Resolved" button with a CLOSED badge
           await fetch("https://slack.com/api/chat.update", {
             method: "POST",
