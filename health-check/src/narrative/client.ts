@@ -64,3 +64,4 @@ export function anthropicClient(sdk: MessagesApi = new Anthropic()): NarrativeCl
 export function anthropicClientWithKey(apiKey: string): NarrativeClient {
   return anthropicClient(new Anthropic({ apiKey }));
 }
+

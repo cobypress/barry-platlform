@@ -162,6 +162,18 @@ describe("the worker's environment", () => {
   });
 });
 
+describe("the startup check on Claude", () => {
+  test("says which model answered, or why the call failed, never a key", async () => {
+    const { checkClaude } = await import("../../narrative/guard.ts");
+    const ok = await checkClaude({ complete: async (r) => ({ stopReason: "end_turn", text: '{"ok":true}', model: r.model }) }, "claude-opus-5-5");
+    assert.deepEqual(ok, { ok: true, detail: "claude-opus-5-5 answered" });
+    const failing = { complete: async () => { throw Object.assign(new Error("401 invalid key sk-ant-api03-abcdef123456"), { name: "AuthenticationError", status: 401 }); } };
+    const bad = await checkClaude(failing, "claude-opus-5-5");
+    assert.equal(bad.ok, false);
+    assert.match(bad.detail, /^AuthenticationError \(401\): 401 invalid key \[removed\]$/);
+  });
+});
+
 describe("hc worker", () => {
   test("refuses to start with nothing set, before loading BullMQ or Postgres", () => {
     const hc = fileURLToPath(new URL("../../cli/hc.ts", import.meta.url));
@@ -216,7 +228,10 @@ describe("hc worker", () => {
     const modules: WorkerModules = { bull, pg: { Pool: FakePool as unknown as WorkerModules["pg"]["Pool"] } };
     const env = { ...goodEnv(), ANTHROPIC_API_KEY: "sk-ant-fake-key-for-tests" };
     const lines: string[] = [];
-    assert.equal(await workerCommand(env, { load: async () => modules, until: Promise.resolve(), log: (l) => lines.push(l) }), 0);
+    const claudeCheck = async () => ({ ok: false, detail: "AuthenticationError (401): invalid x-api-key" });
+    assert.equal(await workerCommand(env, { load: async () => modules, until: Promise.resolve(), log: (l) => lines.push(l), claudeCheck }), 0);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.ok(lines.some((l) => /Claude sign-in failed, so runs will use the engine's own text until it's fixed\. AuthenticationError \(401\)/.test(l)), lines.join("\n"));
     assert.ok(lines.some((l) => /Claude drafts each run's report sections, signed in with ANTHROPIC_API_KEY/.test(l)));
     assert.ok(!lines.join("\n").includes("sk-ant-fake-key-for-tests"));
   });
@@ -235,7 +250,10 @@ describe("hc worker", () => {
     const modules: WorkerModules = { bull, pg: { Pool: FakePool as unknown as WorkerModules["pg"]["Pool"] } };
     const env = { ...goodEnv(), ANTHROPIC_FEDERATION_RULE_ID: "fdrl_synthetic", ANTHROPIC_ORGANIZATION_ID: "00000000-0000-4000-8000-000000000001", ANTHROPIC_SERVICE_ACCOUNT_ID: "svac_synthetic", ANTHROPIC_IDENTITY_TOKEN_FILE: "/nonexistent/token" };
     const lines: string[] = [];
-    assert.equal(await workerCommand(env, { load: async () => modules, until: Promise.resolve(), log: (l) => lines.push(l) }), 0);
+    const claudeCheck = async () => ({ ok: true, detail: "claude-opus-5-5 answered" });
+    assert.equal(await workerCommand(env, { load: async () => modules, until: Promise.resolve(), log: (l) => lines.push(l), claudeCheck }), 0);
+    await new Promise((resolve) => setImmediate(resolve));
     assert.ok(lines.some((l) => /signed in through OIDC federation/.test(l)), lines.join("\n"));
+    assert.ok(lines.some((l) => /Claude sign-in works: claude-opus-5-5 answered\./.test(l)), lines.join("\n"));
   });
 });
