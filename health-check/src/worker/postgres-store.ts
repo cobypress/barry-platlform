@@ -477,6 +477,14 @@ export class PostgresWorkerStore implements WorkerStore {
     return rows.map((row: Record<string, unknown>) => ({ runId: String(row.runId), releasedAt: typeof row.releasedAt === "string" ? row.releasedAt : null }));
   }
 
+  async saveMicrosite(runId: string, sealedPages: string, madeAt: string, expiresAt: string): Promise<void> {
+    await this.#pool.query(
+      `INSERT INTO "HealthCheckMicrosite" ("id", "runId", "version", "sealedPages", "madeAt", "expiresAt") VALUES ($1, $2, 1, $3, $4::timestamp(3), $5::timestamp(3))
+       ON CONFLICT ("runId") DO UPDATE SET "version" = "HealthCheckMicrosite"."version" + 1, "sealedPages" = EXCLUDED."sealedPages", "madeAt" = EXCLUDED."madeAt", "expiresAt" = EXCLUDED."expiresAt"`,
+      [randomUUID(), runId, sealedPages, madeAt, expiresAt],
+    );
+  }
+
   async loadBenchmarkRows(): Promise<BenchmarkRow[]> {
     const columns = Object.keys(BENCHMARK_ROW).filter((c) => c !== "id");
     const { rows } = await this.#pool.query(`SELECT ${columns.map((c) => `"${c}"`).join(", ")} FROM "HealthCheckBenchmarkRow"`);

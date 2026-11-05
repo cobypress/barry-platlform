@@ -177,6 +177,9 @@ export interface WorkerStore {
   /** Every benchmark row, for comparing a run with other customers. They name no one, so reading them all is safe. */
   loadBenchmarkRows(): Promise<BenchmarkRow[]>;
 
+  /** The run's customer microsite, sealed: one row a run, its version moving on with each make. */
+  saveMicrosite(runId: string, sealedPages: string, madeAt: string, expiresAt: string): Promise<void>;
+
   /** Every run the console has released, with when its last output was released. Null when no release date can be read. */
   listReleasedRuns(): Promise<ReleasedRun[]>;
 }

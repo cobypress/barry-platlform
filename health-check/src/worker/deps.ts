@@ -24,6 +24,8 @@ export type WorkerDeps = {
   narrative?: NarrativeClient;
   /** Where released documents go. Null when Drive isn't set up: a documents job then fails with what to set. */
   drive?: DocumentDrive | null;
+  /** Seals the customer microsite. Without it, released runs get documents and no microsite. */
+  micrositeKey?: Buffer | null;
   /** Tests only: prints without a browser. */
   renderReleased?: typeof renderReleased;
   /** Tests only: fakes for Salesforce's data API and its token endpoint. */

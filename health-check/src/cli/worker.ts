@@ -83,12 +83,14 @@ export async function workerCommand(
     stopAtShare: config.stopAtShare,
     apiVersion: config.apiVersion,
     drive: config.drive ? new GoogleDrive(config.drive) : null,
+    micrositeKey: config.micrositeKey,
     narrative,
     log,
   });
   const worker = startQueueWorker(bull, handler, { redisUrl: config.redisUrl, concurrency: config.concurrency, log });
   log(`Taking jobs from health-check-jobs, ${config.concurrency} at a time.`);
   if (!config.drive) log("Google Drive isn't set up, so released runs' documents can't be made.");
+  if (!config.micrositeKey) log("HC_MICROSITE_KEY isn't set, so released runs get documents but no customer microsite.");
   log(
     config.claude.kind === "key"
       ? "Claude drafts each run's report sections, signed in with ANTHROPIC_API_KEY."

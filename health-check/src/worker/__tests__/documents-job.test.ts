@@ -509,3 +509,43 @@ describe("the documents compare the run with the benchmark set", () => {
     assert.equal(seen[0], null);
   });
 });
+
+describe("the customer microsite is made with the documents", () => {
+  const KEY = Buffer.alloc(32, 9);
+  const pages = { pages: [{ slug: "overview", title: "Overview", html: "<p>Synthetic.</p>" }] };
+  const withSite = async (dir: string, approved: ApprovedRun, out: string) => ({ ...(await fakeRender(dir, approved, out)), microsite: { ok: true as const, pages } });
+
+  test("sealed for this run, kept 12 months, and its version moves on when it's made again", async () => {
+    const deps = setup();
+    deps.renderReleased = withSite;
+    deps.micrositeKey = KEY;
+    deps.now = () => new Date("2026-11-05T12:00:00.000Z");
+    await processDocumentsJob(RUN_ID, deps, { final: true });
+    const site = deps.store.microsites.get(RUN_ID)!;
+    assert.equal(site.version, 1);
+    assert.match(site.sealedPages, /^v1\.[\w-]+\.[\w-]+\.[\w-]+$/);
+    assert.ok(!site.sealedPages.includes("Synthetic"), "sealed, not in the clear");
+    assert.equal(site.expiresAt, "2027-11-05T12:00:00.000Z");
+    deps.store.documents.get(RUN_ID)!.input.state = "queued";
+    await processDocumentsJob(RUN_ID, deps, { final: true });
+    assert.equal(deps.store.microsites.get(RUN_ID)!.version, 2);
+  });
+
+  test("without a key, or with pages that failed their check, the documents are still made and the log says why", async () => {
+    const lines: string[] = [];
+    const deps = setup();
+    deps.renderReleased = withSite;
+    deps.log = (l) => lines.push(l);
+    assert.equal((await processDocumentsJob(RUN_ID, deps, { final: true })).outcome, "done");
+    assert.equal(deps.store.microsites.size, 0);
+    assert.ok(lines.some((l) => /HC_MICROSITE_KEY isn't set/.test(l)));
+
+    const failed = setup();
+    failed.renderReleased = async (dir, approved, out) => ({ ...(await fakeRender(dir, approved, out)), microsite: { ok: false as const, reason: "The overview page has 1 figure the number check can't trace, so the microsite wasn't made" } });
+    failed.micrositeKey = KEY;
+    failed.log = (l) => lines.push(l);
+    assert.equal((await processDocumentsJob(RUN_ID, failed, { final: true })).outcome, "done");
+    assert.equal(failed.store.microsites.size, 0);
+    assert.ok(lines.some((l) => /number check/.test(l)));
+  });
+});

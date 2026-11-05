@@ -2,6 +2,7 @@ import { mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { assertOutsideGit } from "../engine/run.ts";
 import type { BenchmarkInput } from "../benchmark/compare.ts";
+import { buildMicrositePages, type MicrositePages } from "../microsite/pages.ts";
 import type { Intake } from "../narrative/intake.ts";
 import { buildReport, type BuiltReport, type ReportOutputKey } from "../narrative/sections.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
@@ -32,6 +33,8 @@ export type ReleasedDocuments = {
   files: Record<ReportOutputKey, string>;
   /** What the layout checks found. The files are still written, for a person to look over. */
   warnings: string[];
+  /** The customer microsite's pages, or why they couldn't be made. Left out by renderers that don't make them. */
+  microsite?: { ok: true; pages: MicrositePages } | { ok: false; reason: string };
 };
 
 const DOCUMENT_NAMES = { executive: "The executive summary", full: "The full health check" } as const;
@@ -81,5 +84,11 @@ export async function renderReleased(dir: string, approved: ApprovedRun, outDir:
     full: files.full_health_check,
     layout: join(out, OUTPUT_FILES.layout),
   });
-  return { files, warnings: layoutWarnings(layout) };
+  let microsite: ReleasedDocuments["microsite"];
+  try {
+    microsite = { ok: true, pages: buildMicrositePages(report, pseudonyms) };
+  } catch (err) {
+    microsite = { ok: false, reason: err instanceof Error ? err.message : "The pages couldn't be built" };
+  }
+  return { files, warnings: layoutWarnings(layout), microsite };
 }

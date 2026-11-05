@@ -133,6 +133,15 @@ export class MemoryWorkerStore implements WorkerStore {
     this.writes.push({ method: "addBenchmarkRows", id: "benchmark", detail: rows.length });
   }
 
+  /** The microsites, keyed by run id. */
+  readonly microsites = new Map<string, { version: number; sealedPages: string; madeAt: string; expiresAt: string }>();
+
+  async saveMicrosite(runId: string, sealedPages: string, madeAt: string, expiresAt: string): Promise<void> {
+    const version = (this.microsites.get(runId)?.version ?? 0) + 1;
+    this.microsites.set(runId, { version, sealedPages, madeAt, expiresAt });
+    this.writes.push({ method: "saveMicrosite", id: runId, detail: version });
+  }
+
   async loadBenchmarkRows(): Promise<BenchmarkRow[]> {
     return structuredClone(this.benchmarkRows);
   }

@@ -4,10 +4,12 @@ import type { ReportOutputKey } from "../narrative/sections.ts";
 import type { BenchmarkInput } from "../benchmark/compare.ts";
 import { AlreadyContributed, CONSENT_FILE, contributeBenchmark } from "../benchmark/export.ts";
 import { longDate } from "../render/format.ts";
-import { renderReleased } from "../render/render-released.ts";
+import { renderReleased, type ReleasedDocuments } from "../render/render-released.ts";
 import { safeReason, type Attempt, type JobOutcome, type WorkerDeps } from "./deps.ts";
 import type { DocumentDrive, DriveItem } from "./drive.ts";
 import { withJobLock } from "./lock.ts";
+import { sealPages } from "../microsite/seal.ts";
+import { addMonths } from "./retention.ts";
 import type { DocumentFile, DocumentsJobInput } from "./types.ts";
 
 // A documents job: once the console has released a run, print its three
@@ -124,6 +126,24 @@ async function benchmarkFor(dir: string, deps: WorkerDeps, log: (line: string) =
   }
 }
 
+/**
+ * The customer microsite: its pages, sealed for the console to open, kept for 12
+ * months (decision 21). Never a reason to fail the documents, which are already
+ * in Drive: a missing key or a page that fails the number check is logged.
+ */
+async function publishMicrosite(runId: string, microsite: ReleasedDocuments["microsite"], deps: WorkerDeps, at: string, log: (line: string) => void): Promise<void> {
+  if (!microsite) return;
+  if (!deps.micrositeKey) return log(`Run ${runId} has no microsite: HC_MICROSITE_KEY isn't set on the worker.`);
+  if (!microsite.ok) return log(`Run ${runId} has no microsite: ${microsite.reason}.`);
+  try {
+    const sealed = sealPages(JSON.stringify(microsite.pages), runId, deps.micrositeKey);
+    await deps.store.saveMicrosite(runId, sealed, at, addMonths(new Date(at), 12).toISOString());
+    log(`Run ${runId}'s microsite is ready, with ${microsite.pages.pages.length} pages.`);
+  } catch (err) {
+    log(`Run ${runId}'s microsite couldn't be saved: ${safeReason(err)}`);
+  }
+}
+
 async function documentsLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Promise<JobOutcome> {
   const log = deps.log ?? (() => {});
   const now = () => (deps.now ?? (() => new Date()))().toISOString();
@@ -161,6 +181,7 @@ async function documentsLocked(runId: string, deps: WorkerDeps, attempt: Attempt
     }
     await deps.store.saveDocuments(runId, { at: now(), clientName, folderName: folder.name, driveFolderId: folder.id, driveFolderUrl: folder.url, files, warnings: printed.warnings });
     log(`Documents for ${runId} are in Drive${printed.warnings.length ? `, with ${printed.warnings.length} layout warnings` : ""}.`);
+    await publishMicrosite(runId, printed.microsite, deps, now(), log);
     if (input.run.benchmarkOptIn) await contribute(runId, dir, input, deps, log);
     return { outcome: "done", detail: `${files.length} documents in ${folder.name}${target.id === folder.id ? "" : ` / ${target.name}`}` };
   } catch (err) {
