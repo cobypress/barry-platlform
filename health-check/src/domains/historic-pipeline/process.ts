@@ -59,10 +59,10 @@ export function backwardMoves(path: string[], orderOf: (stage: string) => number
 const isWon = (d: Deal): boolean => d.category === "won";
 const isLost = (d: Deal): boolean => d.category === "lost" || d.category === "no_decision";
 
-type Process = { closed: Deal[]; won: Deal[]; lost: Deal[]; expected: string[]; expectedFrom: "calibration" | "won deals"; paths: Map<string, string[]> };
+export type Process = { closed: Deal[]; won: Deal[]; lost: Deal[]; expected: string[]; expectedFrom: "calibration" | "won deals"; paths: Map<string, string[]> };
 
-/** Null with the reason when the history can't support any of this. */
-function load(ctx: Ctx): { status: "ok"; data: Ready; process: Process } | { status: "not_measurable"; reason: string; data: PipelineData } {
+/** Null with the reason when the history can't support any of this. What separates wins from losses (drivers.ts) reads the same deals. */
+export function load(ctx: Ctx): { status: "ok"; data: Ready; process: Process } | { status: "not_measurable"; reason: string; data: PipelineData } {
   const data = loadPipeline(ctx);
   if (data.status !== "ok") return { status: "not_measurable", reason: data.reason, data };
   const gaps = [...new Set([...data.unmapped.finalStages, ...data.unmapped.historyStages])].sort();
@@ -80,7 +80,7 @@ function load(ctx: Ctx): { status: "ok"; data: Ready; process: Process } | { sta
 }
 
 const skippedOf = (p: Process, d: Deal): string[] => p.expected.filter((stage) => !p.paths.get(d.Id)!.includes(stage));
-const expectedNote = (p: Process): string =>
+export const expectedNote = (p: Process): string =>
   p.expectedFrom === "calibration" ? `The expected stages are the ones the calibration marks as required: ${p.expected.join(", ")}` : `The expected stages are those more than ${USUAL_SHARE}% of won deals passed through: ${p.expected.join(", ")}`;
 
 // ─── Metrics ─────────────────────────────────────────────────────────────────

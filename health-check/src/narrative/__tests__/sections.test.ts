@@ -14,6 +14,7 @@ import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PROCESS_METRIC_IDS } from "../../domains/historic-pipeline/process.ts";
+import { WIN_DRIVERS } from "../../domains/historic-pipeline/drivers.ts";
 import { DOCUMENTED_METRIC_IDS } from "../../domains/configuration/documented.ts";
 
 const { output, run, dir } = await runFromRecording({ answers: loadAnswers() });
@@ -72,15 +73,16 @@ describe("the three outputs", () => {
     const raw = sections.filter((s) => s.output === "raw_notes");
     const found = new Set(raw.filter((s) => s.key.startsWith("findings_")).flatMap((s) => s.findingIds));
     assert.equal(found.size, base.findings.length);
-    // Investment, adoption, sales process and org documentation figures have their own sections. Between them, every metric once, in order.
+    // Investment, adoption, sales process, win drivers and org documentation figures have their own sections. Between them, every metric once, in order.
     const metricIds = (key: string) => raw.find((s) => s.key === key)!.metricIds;
-    const covered = [...metricIds("investment"), ...metricIds("adoption"), ...metricIds("pipeline_metrics"), ...metricIds("sales_process"), ...metricIds("org_documented")];
+    const covered = [...metricIds("investment"), ...metricIds("adoption"), ...metricIds("pipeline_metrics"), ...metricIds("sales_process"), ...metricIds("win_drivers"), ...metricIds("org_documented")];
     assert.equal(new Set(covered).size, covered.length);
     assert.deepEqual(new Set(covered), new Set(base.metrics.map((m) => m.id)));
-    assert.deepEqual(metricIds("pipeline_metrics"), base.metrics.map((m) => m.id).filter((id) => !id.startsWith("investment.") && !id.startsWith("adoption.") && !PROCESS_METRIC_IDS.includes(id) && !id.startsWith("documented.")));
+    assert.deepEqual(metricIds("pipeline_metrics"), base.metrics.map((m) => m.id).filter((id) => !id.startsWith("investment.") && !id.startsWith("adoption.") && !PROCESS_METRIC_IDS.includes(id) && id !== WIN_DRIVERS && !id.startsWith("documented.")));
     assert.ok(metricIds("investment").length > 0);
     assert.ok(metricIds("adoption").length > 0);
     assert.deepEqual(metricIds("sales_process"), PROCESS_METRIC_IDS);
+    assert.deepEqual(metricIds("win_drivers"), [WIN_DRIVERS]);
     assert.deepEqual(metricIds("org_documented"), DOCUMENTED_METRIC_IDS);
   });
 });

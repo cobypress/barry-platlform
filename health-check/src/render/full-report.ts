@@ -16,6 +16,7 @@ import { PROGRESS_CSS, progressPage } from "./progress.ts";
 import { DOCUMENTED, DOCUMENTED_METRIC_IDS, readDocument } from "../domains/configuration/documented.ts";
 import { accessBlock, automationTable, dataModelDiagram, DIAGRAM_KEY, hasDocument, integrationsBlock, objectsTable, SLIDE_ROWS, sharingTable } from "./documented.ts";
 import { surveySlides } from "./survey.ts";
+import { DRIVER_GAP, readDrivers, WIN_DRIVERS, type Side } from "../domains/historic-pipeline/drivers.ts";
 
 // The full deck: 16:9, 40 to 60 slides. Issue slides flex to keep it in range,
 // because a thin org and a messy one have very different numbers of findings.
@@ -103,6 +104,16 @@ h3.cap { font-size: 15px; font-weight: 600; color: var(--muted); margin: 0 0 6px
 .doc-list { margin: 0; padding-left: 16px; }
 .doc-list li { margin-bottom: 1px; }
 table.inventory th { white-space: normal; vertical-align: bottom; font-size: 13.5px; line-height: 1.25; }
+.cause { font-size: 14px; line-height: 1.38; color: var(--muted); margin-top: 12px; }
+.card p.cause { font-size: 12.5px; margin-top: 6px; }
+.two-up .card p.cause { font-size: 11px; line-height: 1.32; margin-top: 4px; }
+.two-up.roomy .card p.cause { font-size: 13px; }
+table.drivers th { white-space: normal; vertical-align: bottom; line-height: 1.25; }
+table.drivers td.gap { white-space: nowrap; }
+table.drivers .gap-bar { display: inline-block; height: 10px; margin-right: 8px; vertical-align: middle; background: var(--panelMuted); border-radius: 2px; }
+table.drivers .gap-bar.driver { background: var(--carbon); }
+table.drivers tr.unmeasured td { color: var(--muted); }
+table.drivers .chip { font-size: 11.5px; margin-left: 6px; }
 `;
 
 type Slide = { html: string; classes?: string };
@@ -112,38 +123,50 @@ type Slide = { html: string; classes?: string };
 const ISSUE_SLIDE_BUDGET = 500;
 const CARD_CHARS = 105;
 const SMALL_CARD_CHARS = 70;
+// The cause line is set smaller than the card's text, so more of it fits a line.
+const CAUSE_CHARS = 130;
+const SMALL_CAUSE_CHARS = 85;
 const ROOMY_SCALE = 1.5;
 const LIST_BUDGET = 470;
 
-function issueSlide(r: Render, label: string, f: Finding): Slide {
+/** What separates wins from losses, for an issue linked to a driver (roadmap 3.3). Null for the rest. */
+type CauseOf = (f: Finding) => string | null;
+const noCause: CauseOf = () => null;
+
+/** The driver's sentence in small type, pointing to its working. */
+const causeLine = (r: Render, cause: string | null): string => (cause ? `<p class="cause">${r.t(cause)}${r.ref(WIN_DRIVERS)}</p>` : "");
+
+function issueSlide(r: Render, label: string, f: Finding, causeOf: CauseOf = noCause): Slide {
   const value = valueText(r, f);
   const meta = `<div class="meta">${severityChip(f)}<span>Confidence ${f.confidence}</span><span>${effortText(f)}</span></div>`;
   return {
-    html: `<div class="eyebrow">${r.t(label)}</div><h2>${r.t(f.title)}</h2>${meta}<div class="columns" style="margin-top:14px"><div><p>${r.t(f.summary)}</p>${f.recommendation ? `<p style="margin-top:12px"><strong>What to do:</strong> ${r.t(f.recommendation)}</p>` : ""}</div><div class="panel"><h3>Value</h3><p><strong>${value.amount}</strong>${r.ref(f.id)}</p><p class="note">${value.note}</p><h3>Owner</h3><p>${r.t(f.owner)}</p>${f.dependencies.length ? `<h3>Depends on</h3><p class="note">${r.t(f.dependencies.join("; "))}</p>` : ""}</div></div>`,
+    html: `<div class="eyebrow">${r.t(label)}</div><h2>${r.t(f.title)}</h2>${meta}<div class="columns" style="margin-top:14px"><div><p>${r.t(f.summary)}</p>${f.recommendation ? `<p style="margin-top:12px"><strong>What to do:</strong> ${r.t(f.recommendation)}</p>` : ""}${causeLine(r, causeOf(f))}</div><div class="panel"><h3>Value</h3><p><strong>${value.amount}</strong>${r.ref(f.id)}</p><p class="note">${value.note}</p><h3>Owner</h3><p>${r.t(f.owner)}</p>${f.dependencies.length ? `<h3>Depends on</h3><p class="note">${r.t(f.dependencies.join("; "))}</p>` : ""}</div></div>`,
   };
 }
 
-function cardHeight(f: Finding): number {
-  return 84 + 24 * estimateLines(f.title, CARD_CHARS) + 24 * estimateLines(f.summary, CARD_CHARS) + 24 * estimateLines(`What to do: ${f.recommendation}`, CARD_CHARS);
+function cardHeight(f: Finding, causeOf: CauseOf = noCause): number {
+  const cause = causeOf(f);
+  return 84 + 24 * estimateLines(f.title, CARD_CHARS) + 24 * estimateLines(f.summary, CARD_CHARS) + 24 * estimateLines(`What to do: ${f.recommendation}`, CARD_CHARS) + (cause ? 8 + 18 * estimateLines(cause, CAUSE_CHARS) : 0);
 }
 
-function smallCardHeight(f: Finding): number {
-  return 62 + 19 * estimateLines(f.title, SMALL_CARD_CHARS - 8) + 19 * estimateLines(f.summary, SMALL_CARD_CHARS) + 19 * estimateLines(`What to do: ${f.recommendation}`, SMALL_CARD_CHARS);
+function smallCardHeight(f: Finding, causeOf: CauseOf = noCause): number {
+  const cause = causeOf(f);
+  return 62 + 19 * estimateLines(f.title, SMALL_CARD_CHARS - 8) + 19 * estimateLines(f.summary, SMALL_CARD_CHARS) + 19 * estimateLines(`What to do: ${f.recommendation}`, SMALL_CARD_CHARS) + (cause ? 6 + 15 * estimateLines(cause, SMALL_CAUSE_CHARS) : 0);
 }
 
-function card(r: Render, f: Finding): string {
-  return `<article class="card"><div class="meta">${severityChip(f)}<span>${effortText(f)}</span><span>${valueText(r, f).amount}</span>${r.ref(f.id)}</div><h3>${r.t(f.title)}</h3><p>${r.t(f.summary)}</p><p><strong>What to do:</strong> ${r.t(f.recommendation)}</p></article>`;
+function card(r: Render, f: Finding, causeOf: CauseOf = noCause): string {
+  return `<article class="card"><div class="meta">${severityChip(f)}<span>${effortText(f)}</span><span>${valueText(r, f).amount}</span>${r.ref(f.id)}</div><h3>${r.t(f.title)}</h3><p>${r.t(f.summary)}</p><p><strong>What to do:</strong> ${r.t(f.recommendation)}</p>${causeLine(r, causeOf(f))}</article>`;
 }
 
 const groupTitle = (f: Finding): string => (f.severity === "low" || f.severity === "info" ? "Smaller issues" : "Other issues");
 
-function issueCards(r: Render, label: string, findings: Finding[]): Slide {
-  return { html: `<div class="eyebrow">${r.t(label)}</div><h2>${groupTitle(findings[0]!)}</h2>${findings.map((f) => card(r, f)).join("")}` };
+function issueCards(r: Render, label: string, findings: Finding[], causeOf: CauseOf = noCause): Slide {
+  return { html: `<div class="eyebrow">${r.t(label)}</div><h2>${groupTitle(findings[0]!)}</h2>${findings.map((f) => card(r, f, causeOf)).join("")}` };
 }
 
 /** Keeps reading order, and splits where the taller column is as short as it can be. */
-function balance(findings: Finding[]): [Finding[], Finding[]] {
-  const height = (group: Finding[]): number => group.reduce((sum, f) => sum + smallCardHeight(f), 0);
+function balance(findings: Finding[], causeOf: CauseOf): [Finding[], Finding[]] {
+  const height = (group: Finding[]): number => group.reduce((sum, f) => sum + smallCardHeight(f, causeOf), 0);
   let best = 1;
   for (let i = 1; i < findings.length; i++) {
     if (Math.max(height(findings.slice(0, i)), height(findings.slice(i))) < Math.max(height(findings.slice(0, best)), height(findings.slice(best)))) best = i;
@@ -151,20 +174,20 @@ function balance(findings: Finding[]): [Finding[], Finding[]] {
   return [findings.slice(0, best), findings.slice(best)];
 }
 
-function twoColumnSlides(r: Render, label: string, findings: Finding[]): Slide[] {
-  const columns = paginate(findings, smallCardHeight, ISSUE_SLIDE_BUDGET);
+function twoColumnSlides(r: Render, label: string, findings: Finding[], causeOf: CauseOf): Slide[] {
+  const columns = paginate(findings, (f) => smallCardHeight(f, causeOf), ISSUE_SLIDE_BUDGET);
   const slides: Slide[] = [];
   for (let i = 0; i < columns.length; i += 2) {
     const group = columns.slice(i, i + 2).flat();
     // A lone card takes the full width. Half an empty slide looks like a mistake.
     if (group.length === 1) {
-      slides.push(issueCards(r, label, group));
+      slides.push(issueCards(r, label, group, causeOf));
       continue;
     }
-    const sides = balance(group);
+    const sides = balance(group, causeOf);
     // Few cards get larger type, so a short slide doesn't look unfinished.
-    const roomy = Math.max(...sides.map((side) => side.reduce((sum, f) => sum + smallCardHeight(f), 0))) * ROOMY_SCALE <= ISSUE_SLIDE_BUDGET;
-    slides.push({ html: `<div class="eyebrow">${r.t(label)}</div><h2>${groupTitle(group[0]!)}</h2><div class="two-up${roomy ? " roomy" : ""}">${sides.map((column) => `<div class="col">${column.map((f) => card(r, f)).join("")}</div>`).join("")}</div>` });
+    const roomy = Math.max(...sides.map((side) => side.reduce((sum, f) => sum + smallCardHeight(f, causeOf), 0))) * ROOMY_SCALE <= ISSUE_SLIDE_BUDGET;
+    slides.push({ html: `<div class="eyebrow">${r.t(label)}</div><h2>${groupTitle(group[0]!)}</h2><div class="two-up${roomy ? " roomy" : ""}">${sides.map((column) => `<div class="col">${column.map((f) => card(r, f, causeOf)).join("")}</div>`).join("")}</div>` });
   }
   return slides;
 }
@@ -199,19 +222,19 @@ function issueTable(r: Render, label: string, issues: Finding[]): Slide[] {
   return [{ classes: "tight", html: `<div class="eyebrow">${r.t(label)}</div><h2>Issues</h2>${note}<table class="grid"><thead><tr><th>Issue</th><th style="width:10%">Severity</th><th style="width:24%">Value</th><th style="width:18%">Owner</th></tr></thead><tbody>${rows.join("")}</tbody></table>` }];
 }
 
-function domainIssueSlides(r: Render, label: string, issues: Finding[], density: Density): Slide[] {
+function domainIssueSlides(r: Render, label: string, issues: Finding[], density: Density, causeOf: CauseOf): Slide[] {
   const slides: Slide[] = [];
   let queue: Finding[] = [];
   const flush = (): void => {
-    if (density.columns) slides.push(...twoColumnSlides(r, label, queue));
-    else for (const group of paginate(queue, cardHeight, ISSUE_SLIDE_BUDGET)) slides.push(issueCards(r, label, group));
+    if (density.columns) slides.push(...twoColumnSlides(r, label, queue, causeOf));
+    else for (const group of paginate(queue, (f) => cardHeight(f, causeOf), ISSUE_SLIDE_BUDGET)) slides.push(issueCards(r, label, group, causeOf));
     queue = [];
   };
   for (const f of issues) {
     const perSlide = density[f.severity];
     if (perSlide === 1) {
       flush();
-      slides.push(issueSlide(r, label, f));
+      slides.push(issueSlide(r, label, f, causeOf));
     } else {
       queue.push(f);
       if (queue.length >= perSlide) flush();
@@ -377,6 +400,30 @@ function processSlide(r: Render, metric: (id: string) => Metric | undefined, cal
   return { classes: "tight compact-rows", html: `${head}<div class="process"><div class="paths">${path("historic.path_to_won", "won deals")}${path("historic.path_to_lost", "lost and no decision deals")}</div><div>${flow}</div></div>` };
 }
 
+/** Each factor's win rate with it and without it, ranked by the gap. A factor that couldn't be compared says why. */
+function driversSlide(r: Render, metric: (id: string) => Metric | undefined): Slide {
+  const m = asMeasured(metric(WIN_DRIVERS))!;
+  const drivers = readDrivers(m);
+  const widest = Math.max(DRIVER_GAP, ...drivers.map((d) => d.gap ?? 0));
+  const rate = (s: Side): string => (s.rate === null ? "" : percent(s.rate));
+  const rows = drivers.map((d) => {
+    const label = `<td>${r.t(d.label)}${d.isDriver ? ' <span class="chip">Driver</span>' : ""}</td>`;
+    if (d.gap === null) return `<tr class="unmeasured">${label}<td colspan="6">Not measurable. ${r.t(d.reason ?? "")}</td></tr>`;
+    // The bar is drawn, not written, so it carries no figure of its own.
+    const bar = `<span class="gap-bar${d.isDriver ? " driver" : ""}" style="width:${Math.max(2, Math.round((90 * d.gap) / widest))}px"></span>`;
+    return `<tr>${label}<td class="num">${d.with.n}</td><td class="num">${rate(d.with)}</td><td class="num">${d.without.n}</td><td class="num">${rate(d.without)}</td><td class="num gap">${bar}${d.gap} points</td><td class="num">${d.compared ? `${d.held} of ${d.compared}` : "None"}</td></tr>`;
+  });
+  const lede = `Measured from your own ${m.n} won and lost deals that closed in the window after being open. For each thing we can read for every deal, the win rate of deals with it and without it. A gap of ${DRIVER_GAP} points or more is a driver. It shows how often things went together, not proof that one caused the other.`;
+  const notes = [
+    "Win rate is won deals as a share of won and lost deals, as in your headline win rate.",
+    ...(m.stats.noDecision ? [`${m.stats.noDecision} no decision deals are left out of it.`] : []),
+    ...(m.stats.cycleLineDays !== undefined ? [`A long cycle is over ${m.stats.cycleLineDays} days from creation to close.`] : []),
+    "The last column is how many teams, record types and other segments with enough deals on both sides show the gap the same way.",
+  ];
+  const table = `<table class="grid data drivers"><thead><tr><th>Factor</th><th class="num">Deals with it</th><th class="num">Win rate</th><th class="num">Deals without it</th><th class="num">Win rate</th><th class="num">Gap</th><th class="num">Same way in segments</th></tr></thead><tbody>${rows.join("")}</tbody></table>`;
+  return { classes: "tight", html: `<div class="eyebrow">Pipeline${r.ref(WIN_DRIVERS)}</div><h2>What separates your wins from your losses</h2><p class="lede">${r.t(lede)}</p>${table}<p class="small-note">${r.t(notes.join(" "))}</p>` };
+}
+
 function nextStepsSlide(r: Render, plan: ReturnType<typeof buildPlan>["phases"]): Slide {
   const first = plan.find((p) => p.findings.length > 0);
   const opening = first
@@ -531,6 +578,8 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   const unassessed = domains.filter((d) => !assessed.includes(d));
   const customer = intake?.customerName ?? run.customerRef ?? "Customer";
   const notes = noteSections(report);
+  const causes = new Map(report.causes.flatMap((c) => c.findingIds.map((id): [string, string] => [id, c.sentence])));
+  const causeOf: CauseOf = (f) => causes.get(f.id) ?? null;
   const slides: Slide[] = [];
   const add = (html: string, classes?: string): void => void slides.push({ html, ...(classes ? { classes } : {}) });
 
@@ -592,6 +641,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
     page("Sales cycle and slippage", [...cycle, ...slippage], () => ({ classes: "tight", html: `<div class="eyebrow">Pipeline</div><h2>Sales cycle and slippage</h2>${metricRows(r, rowsOf([...cycle, ...slippage]), r.currency)}` }));
   }
   page("How your sales process really runs", ["historic.path_to_won", "historic.path_to_lost", "historic.stage_transitions"], () => processSlide(r, metric, calibration));
+  page("What separates your wins from your losses", [WIN_DRIVERS], () => driversSlide(r, metric));
   page("Pipeline over time", ["historic.pipeline_point_in_time_value"], () => ({ html: `<div class="eyebrow">Pipeline</div><h2>Pipeline over time</h2><div class="chart-wrap" style="max-width:1000px">${chartSlot(pipelineOverTime(metric("historic.pipeline_point_in_time_value"), r.currency))}</div>` }));
 
   // Only figures with something to stand against: the raw notes say why the rest have nothing yet.
@@ -670,7 +720,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
     if (glance) add(glance, "tight");
     const usage = glance && domain === "adoption" ? adoptionSlide(r, metric) : "";
     if (usage) add(usage, "tight");
-    slides.push(...(density ? domainIssueSlides(r, label, issues, density) : issueTable(r, label, issues)));
+    slides.push(...(density ? domainIssueSlides(r, label, issues, density, causeOf) : issueTable(r, label, issues)));
     if (domain === inventoryHome && inventoryWorthShowing) slides.push(inventorySlide(r, label, metric(OBJECT_INVENTORY)));
     if (domain === surveyAfter) slides.push(...teamSays);
   }
