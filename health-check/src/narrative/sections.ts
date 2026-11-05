@@ -1,4 +1,4 @@
-import { buildValueModel, HEADLINE_KINDS, KIND_LABELS, UK_HOURLY_BENCHMARK, type ValueModel } from "../value/model.ts";
+import { buildValueModel, worthOf, HEADLINE_KINDS, KIND_LABELS, UK_HOURLY_BENCHMARK, type ValueModel } from "../value/model.ts";
 import { AREA_WEIGHTS, CRITICAL_CAP, GRADES, overallScore, type OverallScore } from "../domains/scoring.ts";
 import { comparisonId, comparisonNotes, compareRun, OWN_RANGE_MIN, type BenchmarkInput, type Comparison } from "../benchmark/compare.ts";
 import { quarterOf } from "../benchmark/export.ts";
@@ -583,6 +583,11 @@ export function buildReport(input: ReportInput): BuiltReport {
     ...[COMPARISONS, ...comparisons.map((c) => comparisonId(c.metric.key))].map((source) => ({ source, kind: "percent" as const, value: 50 })),
   );
   dataset.figures.push(...planFigures(buildPlan(team)), ...overallFigures(overall), ...valueFigures(value));
+  // What each area is worth, as its chapter in the full report says it.
+  for (const domain of new Set(team.map((f) => f.domain))) {
+    const worth = worthOf(value, new Set(team.filter((f) => f.domain === domain).map((f) => f.id)));
+    if (worth > 0) dataset.figures.push({ source: VALUE_TOTAL, kind: "currency", value: worth, currency: calibration.currency });
+  }
   // What fixing it is worth against what they pay, as the investment page says it.
   if (investment.annualCost.status === "measured" && investment.annualCost.value > 0 && value.total.expected > 0) {
     dataset.figures.push({ source: VALUE_TOTAL, kind: "ratio", value: Math.round((value.total.expected / investment.annualCost.value) * 10) / 10 });

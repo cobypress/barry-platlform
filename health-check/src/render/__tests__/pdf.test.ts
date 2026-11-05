@@ -111,7 +111,7 @@ describe("the executive summary", () => {
 });
 
 describe("the full health check", () => {
-  test("is 16:9, 40 to 60 slides, with every check passing", async () => {
+  test("is 16:9, within its slide range, with every check passing", async () => {
     const report = buildReport(full);
     const { pdf, layout } = await renderPdf(browser, fullReportHtml(report, pseudonyms), { ...deckRange, dataset: report.dataset });
     assert.deepEqual(layout.problems, [], describeProblems(layout.problems));
@@ -240,7 +240,7 @@ describe("a large, messy org", () => {
     return { ...full, findings: [...findings, ...output!.findings.filter((f) => f.status !== "issue")] };
   }
 
-  test("still fits 60 slides, and nothing overflows", async () => {
+  test("still fits its slide ceiling, and nothing overflows", async () => {
     const report = buildReport(messy());
     const { layout } = await renderPdf(browser, fullReportHtml(report, pseudonyms), { ...deckRange });
     assert.deepEqual(layout.problems, [], describeProblems(layout.problems));

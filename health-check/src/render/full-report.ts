@@ -11,11 +11,12 @@ import { noteSections, referenceMap } from "./references.ts";
 import { scoreLine } from "./executive.ts";
 import { COMPARE_CSS, compareSlide } from "./compare.ts";
 import { MONEY_CSS, moneyPage } from "./money.ts";
+import { CHAPTER_CSS, chapterSlide } from "./chapter.ts";
 
 // The full deck: 16:9, 40 to 60 slides. Issue slides flex to keep it in range,
 // because a thin org and a messy one have very different numbers of findings.
 
-export const DECK_RANGE = { min: 20, max: 60 } as const;
+export const DECK_RANGE = { min: 20, max: 100 } as const;
 // A set-up review has no pipeline part, and a tidy org has few issues to show, so
 // its floor is lower. The ceiling is the same: the deck still has to be read.
 export const SETUP_REVIEW_DECK_RANGE = { min: 12, max: 60 } as const;
@@ -575,6 +576,9 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
     const own = team.filter((f) => f.domain === domain);
     const issues = issuesOf(own);
     if (!density?.domainSummary) add(`<div class="eyebrow">Area</div><h1>${r.t(label)}</h1><div class="body">${sectionBody(r, built, `domain_${domain}`)}</div><div class="stat-row" style="max-width:640px;margin-top:20px;color:var(--carbon)"><div class="stat"><b>${issues.length}</b><span>Issues</span></div><div class="stat"><b>${own.filter((f) => f.status === "passed").length}</b><span>Passed</span></div><div class="stat"><b>${own.filter((f) => f.status === "not_measurable").length}</b><span>Not measurable</span></div></div>`, "dark divider");
+    // Each area opens the same way. The tightest densities drop it to keep the deck in range.
+    const glance = density && !density.domainSummary ? chapterSlide(r, report, domain) : "";
+    if (glance) add(glance, "tight");
     slides.push(...(density ? domainIssueSlides(r, label, issues, density) : issueTable(r, label, issues)));
     if (domain === inventoryHome && inventoryWorthShowing) slides.push(inventorySlide(r, label, metric(OBJECT_INVENTORY)));
   }
@@ -666,5 +670,5 @@ export function fullReportHtml(report: BuiltReport, pseudonyms: Pseudonymiser): 
     const chrome = slide.classes?.includes("cover") ? "" : `<div class="footer" data-chrome><span>Black Cloud Barometer${r.draft ? " | Draft, not approved for release" : ""}</span><span>${i + 1}</span></div>`;
     return `<section class="page ${slide.classes ?? ""}" data-page="${i + 1}">${slide.html}${chrome}</section>`;
   });
-  return document("Full health check", "slide", `${CSS}\n${COMPARE_CSS}\n${MONEY_CSS}\n.money .headline-figure { font-size: 2.6em; } .money .range { margin: 4px 0 10px; } .money .kind { margin-bottom: 5px; } .money table.grid { font-size: 16px; } .money .split .kinds { font-size: 16px; } .money .split .note { font-size: 14px; }`, pages);
+  return document("Full health check", "slide", `${CSS}\n${COMPARE_CSS}\n${MONEY_CSS}\n${CHAPTER_CSS}\n.money .headline-figure { font-size: 2.6em; } .money .range { margin: 4px 0 10px; } .money .kind { margin-bottom: 5px; } .money table.grid { font-size: 16px; } .money .split .kinds { font-size: 16px; } .money .split .note { font-size: 14px; }`, pages);
 }

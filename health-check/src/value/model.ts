@@ -221,3 +221,14 @@ export function buildValueModel(findings: Finding[], run: Run, currency: string,
   const total = HEADLINE_KINDS.reduce((sum, k) => ({ low: round2(sum.low + byKind[k].low), expected: round2(sum.expected + byKind[k].expected), high: round2(sum.high + byKind[k].high) }), zero());
   return { currency, hourly, groups, total, byKind, left };
 }
+
+/** What a set of findings is worth: within each group, the largest of their figures, added across groups. Exposure is left out, as in the total. */
+export function worthOf(model: ValueModel, findingIds: Set<string>): number {
+  let sum = 0;
+  for (const g of model.groups) {
+    if (g.kind === "exposure") continue;
+    const own = g.lines.filter((l) => findingIds.has(l.findingId));
+    if (own.length) sum += Math.max(...own.map((l) => l.expected));
+  }
+  return round2(sum);
+}
