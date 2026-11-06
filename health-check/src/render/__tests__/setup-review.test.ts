@@ -11,7 +11,7 @@ import { loadAnswers, loadCalibration, syntheticProvider } from "../../testing/r
 import { Simulator } from "../../testing/simulator.ts";
 import { AS_OF } from "../../testing/synthetic-org.ts";
 import { executiveHtml } from "../executive.ts";
-import { DECK_RANGE, fullReportHtml, SETUP_REVIEW_DECK_RANGE } from "../full-report.ts";
+import { DECK_RANGE, deckRangeFor, fullReportHtml, SETUP_REVIEW_DECK_RANGE } from "../full-report.ts";
 import { plainWords } from "../format.ts";
 import { loadRun, renderRun } from "../render-run.ts";
 
@@ -84,5 +84,23 @@ describe("a complete run's documents", () => {
     assert.equal(recordAreasLine(loaded.input.run), null);
     assert.ok(built.outputs.full_health_check.sections.some((s) => s.key === "pipeline_deep_dive"));
     assert.equal(DECK_RANGE.min, 20);
+  });
+});
+
+describe("the deck's ceiling (DECISIONS.md 281)", () => {
+  const max = (scope: "complete" | "essentials", modules: string[]): number => deckRangeFor({ scope, modules: ["configuration", ...modules] }).max;
+
+  test("is 110 for Sales Cloud, and 10 more for each optional module, up to 140", () => {
+    assert.deepEqual(deckRangeFor({ scope: "complete", modules: ["configuration"] }), { min: 20, max: 110 });
+    assert.equal(max("complete", ["service_operations", "service_setup"]), 120);
+    assert.equal(max("complete", ["cpq_quoting", "cpq_setup", "account_engagement"]), 130);
+    assert.equal(max("complete", ["service_operations", "service_setup", "cpq_quoting", "cpq_setup", "account_engagement"]), 140);
+  });
+
+  test("is 60 for a set-up review, and 6 more a module, up to 75, counting a module whichever of its areas runs", () => {
+    assert.deepEqual(deckRangeFor({ scope: "essentials", modules: ["configuration"] }), { min: 12, max: 60 });
+    assert.equal(max("essentials", ["cpq_setup"]), 66);
+    assert.equal(max("essentials", ["cpq_setup", "account_engagement"]), 72);
+    assert.equal(max("essentials", ["service_setup", "cpq_setup", "account_engagement"]), 75);
   });
 });

@@ -13,7 +13,7 @@ import { Score } from "../../schemas/index.ts";
 import { runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
 import { executiveHtml } from "../executive.ts";
-import { DECK_RANGE, fullReportHtml } from "../full-report.ts";
+import { deckRangeFor, fullReportHtml } from "../full-report.ts";
 import { onePagerHtml, ONE_PAGER_PAGES } from "../one-pager.ts";
 import { launchBrowser, renderPdf } from "../pdf.ts";
 import { renderRawNotesDocx } from "../raw-notes-docx.ts";
@@ -54,7 +54,9 @@ describe("a health check with Service Cloud", () => {
 
   test("the full report passes the layout and number checks, with a chapter for each area", async () => {
     const html = fullReportHtml(report, pseudonyms);
-    const { layout } = await renderPdf(browser, html, { minPages: DECK_RANGE.min, maxPages: DECK_RANGE.max, dataset: report.dataset });
+    const range = deckRangeFor(report.input.run);
+    assert.equal(range.max, 120, "Sales Cloud's 110, and 10 for Service Cloud");
+    const { layout } = await renderPdf(browser, html, { minPages: range.min, maxPages: range.max, dataset: report.dataset });
     assert.deepEqual(layout.problems, [], JSON.stringify(layout.problems.slice(0, 6)));
     for (const label of ["Service operations", "Service set-up"]) assert.ok(html.includes(`<h1>${label}</h1>`), label);
     for (const p of [...practiceFor("service_operations").slice(0, 3), ...practiceFor("service_setup").slice(0, 3)]) assert.ok(html.includes(p.text.replace(/'/g, "&#39;")), p.text);

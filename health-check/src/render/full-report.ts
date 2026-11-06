@@ -2,7 +2,7 @@ import { currentBody, TOP_ISSUE_COUNT, type BuiltOutput, type BuiltReport } from
 import { VERDICT_WORDS, type ReadinessVerdict } from "../narrative/readiness.ts";
 import { areasOf, buildPlan, domainLabel, isSetupReview, issuesOf, recordAreasLine, scorecard, topIssues, verdictOf } from "../narrative/select.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
-import { canRelease, type Finding, type Metric, type Run } from "../schemas/index.ts";
+import { ACCOUNT_ENGAGEMENT_DOMAINS, canRelease, CPQ_DOMAINS, SERVICE_CLOUD_DOMAINS, type Finding, type Metric, type Run } from "../schemas/index.ts";
 import { INVENTORY_COLUMNS, inventoryRows, OBJECT_INVENTORY } from "../domains/configuration/inventory.ts";
 import { activeUsersChart, lightningChart, loginChannelsChart, processFlowChart, scorecardOptions, type Chart, closedAsChart, deliveryOutlookChart, HALF_WIDTH, lostByStageChart, pipelineOverTime, scorecardChart, stageFunnel, stageVelocityChart, topAccountsChart, winRateBySegment, winsByCustomerChart, wonValueByChart } from "./charts.ts";
 import { compactMoney, longDate, monthYear, percent } from "./format.ts";
@@ -20,15 +20,27 @@ import { surveySlides } from "./survey.ts";
 import { interviewSlides } from "./interviews.ts";
 import { DRIVER_GAP, readDrivers, WIN_DRIVERS, type Side } from "../domains/historic-pipeline/drivers.ts";
 
-// The full deck: 16:9, 40 to 60 slides. Issue slides flex to keep it in range,
+// The full deck: 16:9, 20 to 110 slides for Sales Cloud. Issue slides flex to keep it in range,
 // because a thin org and a messy one have very different numbers of findings.
 
+/** Sales Cloud's range. Each optional module switched on raises the ceiling (DECISIONS.md 281). */
 export const DECK_RANGE = { min: 20, max: 110 } as const;
 // A set-up review has no pipeline part, and a tidy org has few issues to show, so
 // its floor is lower. The ceiling is the same: the deck still has to be read.
 export const SETUP_REVIEW_DECK_RANGE = { min: 12, max: 60 } as const;
+// A customer with more Salesforce is paying for a check of more of it, so a
+// module gets room of its own rather than squeezing the core report. Essentials
+// gets 6, not 5: with 5, Service Cloud's set-up review fell to one table per area.
+export const MODULE_ROOM = { complete: { perModule: 10, cap: 140 }, essentials: { perModule: 6, cap: 75 } } as const;
+/** The optional modules, each by its areas: a run has one on when it includes any of them. */
+const OPTIONAL_MODULES: ReadonlyArray<readonly string[]> = [SERVICE_CLOUD_DOMAINS, CPQ_DOMAINS, ACCOUNT_ENGAGEMENT_DOMAINS];
 
-export const deckRangeFor = (run: Pick<Run, "scope">): { min: number; max: number } => (isSetupReview(run) ? SETUP_REVIEW_DECK_RANGE : DECK_RANGE);
+export const optionalModulesOn = (run: Pick<Run, "modules">): number => OPTIONAL_MODULES.filter((areas) => areas.some((a) => run.modules.includes(a))).length;
+
+export function deckRangeFor(run: Pick<Run, "scope" | "modules">): { min: number; max: number } {
+  const [base, room] = isSetupReview(run) ? [SETUP_REVIEW_DECK_RANGE, MODULE_ROOM.essentials] : [DECK_RANGE, MODULE_ROOM.complete];
+  return { min: base.min, max: Math.min(room.cap, base.max + room.perModule * optionalModulesOn(run)) };
+}
 
 const CSS = `
 .page { font-size: 20px; line-height: 1.45; }
