@@ -274,7 +274,7 @@ function progressText(p: Progress, currency: string): string {
   const list = (title: string, items: Progress["fixed"], why = "") => (items.length ? `${title} (${items.length})${why}:\n${items.map((c) => c.title).join("\n")}` : null);
   return lines(
     p.score.before !== null && p.score.after !== null ? `Your Barometer score has gone from ${p.score.before} to ${p.score.after} since your first health check.` : null,
-    `What fixing the issues is worth has gone from ${m(p.worth.before)} to ${m(p.worth.after)}. Some of that change can come from the business itself, not only from fixes.`,
+    `What the open issues are worth has gone from ${m(p.worth.before)} to ${m(p.worth.after)}. Some of that change can come from the business itself, not only from fixes.`,
     list("Fixed since then", p.fixed),
     list("Still open", p.remaining),
     list("New since then", p.added),
@@ -728,7 +728,7 @@ function fullSpecs(input: ReportInput, team: Finding[], metrics: Metric[], surve
     {
       key: "appendix",
       title: "Appendix",
-      body: lines("How we worked, what we couldn't measure, and what passed.", notMeasurable.length ? `We couldn't measure ${plural(notMeasurable.length, "check")}. We report these rather than estimate them.` : null, passed.length ? `${plural(passed.length, "check")} passed.` : null),
+      body: lines("This part sets out how we worked, what we couldn't measure, and what passed.", notMeasurable.length ? `We couldn't measure ${plural(notMeasurable.length, "check")}. We report these rather than estimate them.` : null, passed.length ? `${plural(passed.length, "check")} passed.` : null),
       findingIds: [...notMeasurable, ...passed].map((f) => f.id),
       sources: [...SUMMARY_SOURCES, CALIBRATION],
       brief: {

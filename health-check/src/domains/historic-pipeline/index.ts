@@ -155,7 +155,7 @@ const segmentDivergence: Rule = {
     return outliers.map(({ metric, segment, gap }) => ({
       outcome: "issue" as const,
       key: `${metric.id}:${segment.dimension}:${segment.key}`,
-      title: `${metric.label} for ${segmentPhrase(segment.dimension, segment.key)} is well away from the overall figure`,
+      title: `${metric.label} for ${segmentPhrase(segment.dimension, segment.key)} is well ${(segment.value ?? 0) < (metric.value ?? 0) ? "below" : "above"} the overall figure`,
       summary: `${metric.label} is ${segment.value}% for ${segmentPhrase(segment.dimension, segment.key)} (${segment.n} deals), against ${metric.value}% overall, a gap of ${gap} points.`,
       recommendation: "Look at what's different about these deals before drawing a conclusion: sample size, deal type and who's working them.",
       recommendationType: "investigate" as const,

@@ -150,7 +150,7 @@ const dormantAccounts: Rule = {
         : atOwnWinRate(ctx, typical * dormant.length, {
             multiCurrency: data.multiCurrency,
             period: "one-off, if each account buys once more",
-            basis: `${plural(dormant.length, "dormant account")} at your median won deal of ${Math.round(typical)}`,
+            basis: `${plural(dormant.length, "dormant account")} at your median won deal of ${money(Math.round(typical), ctx.calibration.currency)}`,
             caveat: "Assumes each account has one more deal in it, and buys as often as an average deal wins. Some will have closed or moved on, so treat this as a ceiling",
           });
     const stranded = dormant.filter((a) => inactive.has(a.OwnerId)).length;

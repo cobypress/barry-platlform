@@ -10,6 +10,7 @@ import { runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
 import { checkNumbers } from "../../numbercheck/index.ts";
 import { buildMicrositePages, pageText } from "../pages.ts";
+import { syntheticInterviews } from "../../testing/interviews.ts";
 import { micrositeKey, MicrositeKeyError, sealPages } from "../seal.ts";
 
 // The console's fixed vector (blackcloud-next docs/health-check/microsite-crypto-vector.json). Synthetic.
@@ -59,6 +60,24 @@ describe("the microsite's pages", async () => {
   const input: ReportInput = { run, calibration: loadCalibration(), findings: output!.findings, metrics: output!.metrics, manualSteps: output!.manualSteps, scores: scoreDomains(run.modules, output!.findings) };
   const report = buildReport(input);
   const { pages } = buildMicrositePages(report, pseudonyms);
+
+  test("the overview lists every line behind the total, with its range, adding up to it (DECISIONS.md 326)", () => {
+    const overview = pages.find((p) => p.slug === "overview")!.html;
+    for (const g of report.value.groups.filter((x) => x.kind !== "exposure")) assert.ok(overview.includes(g.label.replace(/'/g, "&#39;")), g.label);
+    assert.match(overview, /Total, each counted once/);
+    assert.match(overview, /Kept apart from this total/);
+  });
+
+  test("references sit apart from their words, charts say what they show, and the interview table stacks on a phone (DECISIONS.md 329)", () => {
+    const withInterviews = buildMicrositePages(buildReport({ ...input, interviews: syntheticInterviews() }), pseudonyms).pages;
+    const overview = withInterviews.find((p) => p.slug === "overview")!.html;
+    assert.match(overview, /\.bcr \.ref \{[^}]*margin-left: 4px/);
+    assert.match(overview, /<table class="stack">/);
+    assert.match(overview, /<td data-label="Role">/);
+    assert.match(overview, /@media \(max-width: 600px\)/);
+    const all = pages.map((p) => p.html).join("");
+    if (all.includes("doc-cols charts")) assert.match(all, /<h3 class="cap">Monthly active users<\/h3>/);
+  });
 
   test("an overview, every issue, the plan, the comparison when there's one, and the org documented", () => {
     assert.deepEqual(pages.map((p) => p.slug), ["overview", "issues", "plan", "compare", "org"]);

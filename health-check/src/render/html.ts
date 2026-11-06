@@ -58,12 +58,15 @@ export function valueFigure(r: Render, f: Finding): string {
 }
 
 export function valueText(r: Render, f: Finding): { amount: string; note: string } {
-  // Not every issue has a cost we can put a figure on. Its weight is still worth saying.
-  if (f.value.kind === "not_sized") return { amount: `${f.severity.charAt(0).toUpperCase()}${f.severity.slice(1)} risk`, note: r.t(f.value.reason) };
-  return { amount: r.t(`${valueFigure(r, f)} ${f.value.period}`), note: r.t(f.value.assumptions.join(". ")) };
+  // Not every issue has a cost we can put a figure on. Its severity is already beside it, so this says only that.
+  if (f.value.kind === "not_sized") return { amount: "Not costed", note: r.t(sentence(f.value.reason)) };
+  return { amount: r.t(`${valueFigure(r, f)} ${f.value.period}`), note: r.t(sentence(f.value.assumptions.join(". "))) };
 }
 
 export { compactMoney };
+
+/** Ends with a full stop, as a sentence the reader sees should. */
+const sentence = (text: string): string => (text === "" || /[.!?:)]$/.test(text.trim()) ? text : `${text.trim()}.`);
 
 /** The Barometer score as the cover shows it. Nothing when the org couldn't be given one. */
 export function coverScore(overall: OverallScore): string {

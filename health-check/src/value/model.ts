@@ -43,7 +43,7 @@ export const GROUPS: Record<string, GroupSpec> = {
   "stalled-deals": { kind: "revenue_recoverable", label: "Stalled and neglected open deals", realisation: OPEN_DEALS },
   "unworked-leads": { kind: "revenue_recoverable", label: "Leads nobody worked", realisation: LONG_SHOTS },
   "past-customers": { kind: "revenue_recoverable", label: "Past customers and lost deals worth another look", realisation: LONG_SHOTS },
-  "segment-gaps": { kind: "conversion_uplift", label: "Teams and segments winning less often than the rest", realisation: LONG_SHOTS },
+  "segment-gaps": { kind: "conversion_uplift", label: "Teams, reps and kinds of deal winning less often than the rest", realisation: LONG_SHOTS },
   // Money given away on deals already won, so it doesn't overlap the segment gaps, which value wins not made (DECISIONS.md 322).
   "discount-leakage": { kind: "revenue_recoverable", label: "Potential: discount given beyond what peers gave", realisation: LONG_SHOTS },
   "unused-seats": { kind: "licence_waste", label: "Seats held by people who don't log in", realisation: SEATS },

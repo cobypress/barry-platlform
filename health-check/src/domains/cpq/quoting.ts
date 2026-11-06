@@ -116,7 +116,8 @@ const discountLeakage: Rule = {
             kind: "revenue",
             amount,
             unit: ctx.calibration.currency,
-            period: "in discount beyond what peers gave, over the analysis window",
+            // The value model reads the start of this to put it over 12 months (value/model.ts, OVER_WINDOW).
+            period: `in discount beyond what peers gave, ${ctx.window.from} to ${ctx.window.to}, a potential figure`,
             assumptions: [
               `${plural(excess.size, "won deal")} in the teams and reps named, each counted once, at the most it went past its peers' median`,
               "Each deal's discount beyond its peers' median, applied to its quote's list amount",

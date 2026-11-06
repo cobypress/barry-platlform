@@ -73,6 +73,8 @@ h2 { font-size: 36px; font-weight: 600; line-height: 1.2; margin: 4px 0 16px; }
 .two-up.roomy .card { font-size: 16.5px; line-height: 1.42; padding: 12px 16px; margin-bottom: 12px; }
 .two-up.roomy .card h3 { font-size: 18px; margin: 4px 0; }
 .two-up.roomy .card .meta { font-size: 13.5px; }
+.meta > span { white-space: nowrap; flex-shrink: 0; }
+.meta > span.amount { white-space: normal; flex-shrink: 1; }
 .two-text { columns: 2; column-gap: 28px; }
 .two-text li, .two-text tr { break-inside: avoid; }
 .action-list.two-text { font-size: 15px; }
@@ -184,10 +186,11 @@ function smallCardHeight(f: Finding, causeOf: CauseOf = noCause): number {
 }
 
 function card(r: Render, f: Finding, causeOf: CauseOf = noCause): string {
-  return `<article class="card"><div class="meta">${severityChip(f)}<span>${effortText(f)}</span><span>${valueText(r, f).amount}</span>${r.ref(f.id)}</div><h3>${r.t(f.title)}</h3><p>${r.t(f.summary)}</p><p><strong>What to do:</strong> ${r.t(f.recommendation)}</p>${causeLine(r, causeOf(f))}</article>`;
+  return `<article class="card"><div class="meta">${severityChip(f)}<span>${effortText(f)}</span><span class="amount">${valueText(r, f).amount}</span>${r.ref(f.id)}</div><h3>${r.t(f.title)}</h3><p>${r.t(f.summary)}</p><p><strong>What to do:</strong> ${r.t(f.recommendation)}</p>${causeLine(r, causeOf(f))}</article>`;
 }
 
-const groupTitle = (f: Finding): string => (f.severity === "low" || f.severity === "info" ? "Smaller issues" : "Other issues");
+// Nothing comes before an area's first issue page, so its title isn't "Other issues".
+const groupTitle = (f: Finding): string => (f.severity === "low" || f.severity === "info" ? "Smaller issues" : "The issues in detail");
 
 function issueCards(r: Render, label: string, findings: Finding[], causeOf: CauseOf = noCause): Slide {
   return { html: `<div class="eyebrow">${r.t(label)}</div><h2>${groupTitle(findings[0]!)}</h2>${findings.map((f) => card(r, f, causeOf)).join("")}` };
@@ -531,10 +534,10 @@ function lostAndSpeedSlideDense(r: Render, metric: (id: string) => Metric | unde
 }
 
 /** Definitions are reference, so a dense deck sets them small, in three columns. */
-function threeColumnList(r: Render, eyebrow: string, title: string, items: Array<{ title: string; detail: string }>): Slide[] {
+function threeColumnList(r: Render, eyebrow: string, title: string, items: Array<{ title: string; detail: string; ref?: string }>): Slide[] {
   const pages = paginate(items, (x) => 26 + 17 * estimateLines(x.detail, 56), 3 * 490);
   return pages.map((group, i) => ({
-    html: `<div class="eyebrow">${r.t(eyebrow)}</div><h2>${r.t(title)}${i ? ", continued" : ""}</h2><div class="three-text">${group.map((x) => `<p class="definition"><strong>${r.t(x.title)}</strong><br>${r.t(x.detail)}</p>`).join("")}</div>`,
+    html: `<div class="eyebrow">${r.t(eyebrow)}</div><h2>${r.t(title)}${i ? ", continued" : ""}</h2><div class="three-text">${group.map((x) => `<p class="definition"><strong>${r.t(x.title)}</strong>${x.ref ? r.ref(x.ref) : ""}<br>${r.t(x.detail)}</p>`).join("")}</div>`,
   }));
 }
 
@@ -561,21 +564,21 @@ const needsInput = (built: BuiltOutput, key: string): boolean => built.sections.
 
 const inputChip = '<p style="margin-bottom:10px"><span class="chip input">Needs input from a consultant</span></p>';
 
-function listSlides(r: Render, eyebrow: string, title: string, items: Array<{ title: string; detail: string }>, compact: boolean): Slide[] {
+function listSlides(r: Render, eyebrow: string, title: string, items: Array<{ title: string; detail: string; ref?: string }>, compact: boolean): Slide[] {
   // An empty list is left out rather than given a page that says so.
   if (items.length === 0) return [];
   const pages = paginate(items, (x) => 16 + 24 * Math.max(estimateLines(x.detail, 85), estimateLines(x.title, 34)), LIST_BUDGET);
   const cut = compact && pages.length > 1;
   return (cut ? pages.slice(0, 1) : pages).map((group, i) => ({
     classes: "tight",
-    html: `<div class="eyebrow">${r.t(eyebrow)}</div><h2>${r.t(title)}${i ? ", continued" : ""}</h2>${cut ? `<p style="font-size:15px;margin-bottom:6px">${COMPACT_NOTE}</p>` : ""}<table class="grid"><tbody>${(cut ? group.slice(0, -1) : group).map((x) => `<tr><td style="width:30%"><strong>${r.t(x.title)}</strong></td><td>${r.t(x.detail)}</td></tr>`).join("")}</tbody></table>`,
+    html: `<div class="eyebrow">${r.t(eyebrow)}</div><h2>${r.t(title)}${i ? ", continued" : ""}</h2>${cut ? `<p style="font-size:15px;margin-bottom:6px">${COMPACT_NOTE}</p>` : ""}<table class="grid"><tbody>${(cut ? group.slice(0, -1) : group).map((x) => `<tr><td style="width:30%"><strong>${r.t(x.title)}</strong>${x.ref ? r.ref(x.ref) : ""}</td><td>${r.t(x.detail)}</td></tr>`).join("")}</tbody></table>`,
   }));
 }
 
-function twoColumnList(r: Render, eyebrow: string, title: string, items: Array<{ title: string; detail: string }>): Slide[] {
+function twoColumnList(r: Render, eyebrow: string, title: string, items: Array<{ title: string; detail: string; ref?: string }>): Slide[] {
   const pages = paginate(items, (x) => 28 + 19 * estimateLines(x.detail, 72), 2 * LIST_BUDGET);
   return pages.map((group, i) => ({
-    html: `<div class="eyebrow">${r.t(eyebrow)}</div><h2>${r.t(title)}${i ? ", continued" : ""}</h2><div class="two-text">${group.map((x) => `<p class="definition"><strong>${r.t(x.title)}</strong><br>${r.t(x.detail)}</p>`).join("")}</div>`,
+    html: `<div class="eyebrow">${r.t(eyebrow)}</div><h2>${r.t(title)}${i ? ", continued" : ""}</h2><div class="two-text">${group.map((x) => `<p class="definition"><strong>${r.t(x.title)}</strong>${x.ref ? r.ref(x.ref) : ""}<br>${r.t(x.detail)}</p>`).join("")}</div>`,
   }));
 }
 
@@ -609,7 +612,7 @@ function documentedSlides(r: Render, metrics: Metric[], dense: boolean): Slide[]
 const REFS_IN_TWO_COLUMNS = 22;
 
 function detailSlide(r: Render, notes: ReturnType<typeof noteSections>): Slide {
-  const lede = "Every issue and measure in this report carries a reference to the raw notes, the Word document that comes with it. Each one sets out the working behind the figure: what we read from your Salesforce, the sample, the calculation and the assumptions. The action lists, a spreadsheet and a ticket file, list each record to fix with a link to it, and give each issue a ticket.";
+  const lede = "Every issue and measure in this report carries a reference to the raw notes, the Word document that comes with it. Each one sets out the working behind the figure: what we read from your Salesforce, the sample, the calculation and the assumptions. The action lists (a spreadsheet and a ticket file) name each record to fix, with a link to it, and give each issue a ticket.";
   return {
     html: `<div class="eyebrow">Appendix</div><h2>Where to find the detail</h2><p class="lede">${r.t(lede)} <span data-ref>R4.3</span> is the third item in section <span data-ref>R4</span>.</p><div class="${notes.length > REFS_IN_TWO_COLUMNS ? "three-text" : "two-text"} refs">${notes.map((s) => `<p class="definition"><strong data-ref>${s.ref}</strong> ${r.t(s.title)}</p>`).join("")}</div>`,
   };
@@ -829,7 +832,8 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   }
 
   // Titles only: each of these already has its card in its domain's section.
-  const afterPlan = later.map((f) => ({ title: f.title, detail: `${severityWord(f.severity)}. ${effortText(f)}. ${f.owner}` }));
+  // Each with its reference, so a reader can find the issue it comes from (night 3 reading pass).
+  const afterPlan = later.map((f) => ({ title: f.title, detail: `${severityWord(f.severity)}. ${effortText(f)}. ${f.owner}`, ref: f.id }));
   // Titles only, so at the densest they take three columns, as the metric definitions do.
   if (later.length) slides.push(...(density?.domainSummary || density?.threeColumnLists ? threeColumnList(r, "Roadmap", "After 90 days", afterPlan) : dense ? twoColumnList(r, "Roadmap", "After 90 days", afterPlan) : listSlides(r, "Roadmap", "After 90 days", afterPlan, compact)));
 
@@ -853,7 +857,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   // one to a line took a slide for every few metrics.
   slides.push(...(compact ? listSlides(r, "Appendix", "Metric definitions", definitions, compact) : dense ? threeColumnList(r, "Appendix", "Metric definitions", definitions) : twoColumnList(r, "Appendix", "Metric definitions", definitions)));
   // Reference, so two to a line like the definitions.
-  const reference = (title: string, items: Array<{ title: string; detail: string }>): Slide[] => (compact || items.length === 0 ? listSlides(r, "Appendix", title, items, compact) : twoColumnList(r, "Appendix", title, items));
+  const reference = (title: string, items: Array<{ title: string; detail: string; ref?: string }>): Slide[] => (compact || items.length === 0 ? listSlides(r, "Appendix", title, items, compact) : twoColumnList(r, "Appendix", title, items));
   const unmeasured = team.filter((f) => f.status === "not_measurable").map((f) => ({ title: f.title, detail: f.notMeasurableReason ?? f.summary }));
   const passing = team.filter((f) => f.status === "passed").map((f) => ({ title: f.title, detail: f.summary }));
   // At the three-column step the two lists share three columns, each item saying which it is (DECISIONS.md 244).
