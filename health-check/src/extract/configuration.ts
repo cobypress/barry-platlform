@@ -19,7 +19,8 @@ type DescribeField = {
 type Describe = { fields: DescribeField[]; recordTypeInfos: Array<{ developerName: string; name: string; active: boolean; master: boolean }> };
 
 export type FieldSummary = Omit<DescribeField, "picklistValues"> & { activePicklistValues: string[] };
-export type ObjectSummary = { name: string; fields: FieldSummary[]; recordTypes: Array<{ developerName: string; active: boolean }> };
+/** A record type by its developer name and its label, which customer text uses (DECISIONS.md 412). */
+export type ObjectSummary = { name: string; fields: FieldSummary[]; recordTypes: Array<{ developerName: string; label: string; active: boolean }> };
 
 const NAMESPACED = /^[A-Za-z0-9]+__.+__c$/;
 export const isOwnCustomField = (f: { custom: boolean; name: string }): boolean => f.custom && !NAMESPACED.test(f.name);
@@ -41,7 +42,7 @@ export const orgExtractor: Extractor<Sourced<OrgSummary[]>> = {
 
 export const schemaExtractor: Extractor<Record<string, Sourced<ObjectSummary>>> = {
   id: "schema",
-  version: 1,
+  version: 2,
   async run(ctx) {
     const out: Record<string, Sourced<ObjectSummary>> = {};
     for (const name of CORE_OBJECTS) {
@@ -58,7 +59,7 @@ export const schemaExtractor: Extractor<Record<string, Sourced<ObjectSummary>>> 
               ...f,
               activePicklistValues: (picklistValues ?? []).filter((v) => v.active).map((v) => v.value),
             })),
-            recordTypes: d.recordTypeInfos.filter((r) => !r.master).map((r) => ({ developerName: r.developerName, active: r.active })),
+            recordTypes: d.recordTypeInfos.filter((r) => !r.master).map((r) => ({ developerName: r.developerName, label: r.name, active: r.active })),
           },
         };
       } catch (err) {

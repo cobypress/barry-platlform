@@ -32,7 +32,8 @@ export type WorkflowSummary = {
 export type ValidationRuleSummary = { object: string; name: string; active: boolean; described: boolean };
 // Own custom fields only. Help text is what a user sees, a description is for whoever maintains the field.
 export type CustomFieldSummary = { object: string; name: string; described: boolean; helpText: boolean };
-export type RecordTypeSummary = { object: string; name: string; active: boolean };
+/** `name` is the developer name, `label` what Setup shows (DECISIONS.md 412). */
+export type RecordTypeSummary = { object: string; name: string; label: string; active: boolean };
 
 // Where a user or field is mentioned. Values are metadata paths. Raw XML isn't
 // kept: what the rules and guards need is here, and less kept is less to leak.
@@ -216,7 +217,7 @@ function parseObject(path: string, xml: string, index: ReferenceIndex): { object
     indexReferences(index, String(rule.errorConditionFormula ?? ""), `${path}#validationRules.${name}`);
     return { object, name, active: String(rule.active) === "true", described: hasText(rule.description) };
   });
-  const recordTypes = ((parsed.recordTypes ?? []) as Array<Record<string, any>>).map((r) => ({ object, name: String(r.fullName ?? ""), active: String(r.active) === "true" }));
+  const recordTypes = ((parsed.recordTypes ?? []) as Array<Record<string, any>>).map((r) => ({ object, name: String(r.fullName ?? ""), label: String(r.label ?? r.fullName ?? ""), active: String(r.active) === "true" }));
   return { object, validationRules, customFields, recordTypes };
 }
 

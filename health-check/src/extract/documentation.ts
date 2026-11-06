@@ -6,7 +6,7 @@ import { readSoql, type ExtractContext, type Extractor, type Sourced } from "./t
 // it too. Every field here is in the Object Reference or the Tooling API guide,
 // API 68.0 (QUESTIONS.md has what they leave open).
 
-export type RelationshipRow = { object: string; field: string; dataType: string; referenceTo: string[] };
+export type RelationshipRow = { object: string; field: string; label: string; dataType: string; referenceTo: string[] };
 export type SharingRow = { object: string; internal: string | null; external: string | null };
 export type RoleRow = { Id: string; Name: string; ParentRoleId: string | null };
 export type PermissionSetSummary = { Id: string; Name: string; Label: string; IsCustom: boolean; NamespacePrefix: string | null; assignees: number };
@@ -75,14 +75,15 @@ const hostOf = (url: string): string => {
 
 export const orgDocumentationExtractor: Extractor<OrgDocumentation> = {
   id: "org-documentation",
-  version: 2,
+  version: 3,
   async run(ctx) {
     const objects = documentedObjects(ctx);
-    const relationships = await chunked<{ EntityDefinition: { QualifiedApiName: string }; QualifiedApiName: string; DataType: string; ReferenceTo: unknown }, RelationshipRow>(
+    const relationships = await chunked<{ EntityDefinition: { QualifiedApiName: string }; QualifiedApiName: string; Label?: string | null; DataType: string; ReferenceTo: unknown }, RelationshipRow>(
       ctx,
       objects,
-      (names) => `SELECT EntityDefinition.QualifiedApiName, QualifiedApiName, DataType, ReferenceTo FROM FieldDefinition WHERE EntityDefinition.QualifiedApiName IN (${names})`,
-      (r) => (targets(r.ReferenceTo).length ? [{ object: r.EntityDefinition.QualifiedApiName, field: r.QualifiedApiName, dataType: r.DataType, referenceTo: targets(r.ReferenceTo) }] : []),
+      // The field's label too, for customer text (DECISIONS.md 412).
+      (names) => `SELECT EntityDefinition.QualifiedApiName, QualifiedApiName, Label, DataType, ReferenceTo FROM FieldDefinition WHERE EntityDefinition.QualifiedApiName IN (${names})`,
+      (r) => (targets(r.ReferenceTo).length ? [{ object: r.EntityDefinition.QualifiedApiName, field: r.QualifiedApiName, label: r.Label || r.QualifiedApiName, dataType: r.DataType, referenceTo: targets(r.ReferenceTo) }] : []),
     );
     const sharing = await chunked<{ QualifiedApiName: string; InternalSharingModel: string | null; ExternalSharingModel: string | null }, SharingRow>(
       ctx,

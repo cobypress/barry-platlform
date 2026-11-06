@@ -918,7 +918,7 @@ export const PERMISSION_ASSIGNMENTS = [
 // Lookups and a master-detail between the documented objects, as Tooling's
 // FieldDefinition gives them. Traps: a lookup to User, which isn't a documented
 // object, and a field that isn't a relationship at all.
-const relationship = (object: string, field: string, dataType: string, to: string[] | null) => ({ EntityDefinition: { QualifiedApiName: object }, QualifiedApiName: field, DataType: dataType, ReferenceTo: to ? { referenceTo: to } : null });
+const relationship = (object: string, field: string, dataType: string, to: string[] | null) => ({ EntityDefinition: { QualifiedApiName: object }, QualifiedApiName: field, Label: apiLabel(field), DataType: dataType, ReferenceTo: to ? { referenceTo: to } : null });
 export const RELATIONSHIP_FIELDS = [
   relationship("Account", "ParentId", "Hierarchy", ["Account"]),
   relationship("Account", "OwnerId", "Lookup(User)", ["User"]),

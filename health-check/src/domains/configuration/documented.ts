@@ -11,6 +11,7 @@ import type { Evidence, Metric, MetricSegment } from "../../schemas/index.ts";
 import { partialHistory } from "../adoption/index.ts";
 import { opportunitiesGate } from "../gate.ts";
 import { objectResolver } from "../object-names.ts";
+import { labelsOf } from "../labels.ts";
 
 // Roadmap 3.4, "Your org, documented": a description, not a judgement, so it
 // raises no findings. It travels as metrics, the one shape every output and the
@@ -70,6 +71,11 @@ export const sharingLabel = (model: string): string => SHARING_LABELS[model] ?? 
 const MOST_FILLED = 10;
 const COUNT_ON_SAVE = "count on save";
 const SEP = " | ";
+/**
+ * A segment that gives an object's or a field's label against its API name, so
+ * customer pages can say "Invoice" while the raw notes keep "Invoice__c" (DECISIONS.md 412).
+ */
+const LABEL = "label";
 const OWN_CUSTOM_OBJECT = /^[A-Za-z][A-Za-z0-9_]*__c$/;
 const NAMESPACED = /__.+__c$/;
 
@@ -92,6 +98,9 @@ function measured(d: (typeof DEFINITIONS)[keyof typeof DEFINITIONS], evidence: E
 }
 const notMeasurable = (d: (typeof DEFINITIONS)[keyof typeof DEFINITIONS], evidence: Evidence[], reason: string): Metric => ({ ...d, status: "not_measurable", evidence, exclusions: [], assumptions: [], reason });
 const cantRead = (what: string, s: Sourced<unknown>): string | null => (s.status === "ok" ? null : `${what} couldn't be read: ${s.reason}`);
+/** Label segments for these API names, where the label differs: an object's name alone, a field's as Object.Field. */
+const labelSegments = (pairs: Array<[api: string, label: string]>): MetricSegment[] =>
+  [...new Map(pairs.filter(([api, label]) => label && label !== api)).entries()].sort(([a], [b]) => a.localeCompare(b)).map(([api, label]) => seg(LABEL, `${api}${SEP}${label}`, 1));
 
 function dataModel(ctx: Ctx): Metric[] {
   const doc = ctx.data(orgDocumentationExtractor);
@@ -110,22 +119,29 @@ function dataModel(ctx: Ctx): Metric[] {
   const usage = ctx.scope === "essentials" ? null : ctx.data(fieldUsageExtractor);
   if (!usage) exclusions.push("The most-filled custom fields, because a set-up review doesn't read records");
   const segments: MetricSegment[] = [];
+  const labels = labelsOf(ctx);
+  const named: Array<[string, string]> = [];
   for (const object of doc.objects) {
+    named.push([object, labels.object(object)]);
     const describe = schema[object]?.status === "ok" ? schema[object].data : null;
     const count = records.get(object) ?? null;
     segments.push(seg("records", object, count, count ?? 0, count === null ? "Salesforce keeps no count for this object" : null));
     const fields = describe ? describe.fields.filter(isOwnCustomField).length : bundle?.objects.includes(object) ? bundle.customFields.filter((f) => f.object === object).length : null;
     segments.push(seg("custom fields", object, fields, fields ?? 0, fields === null ? "Not in the metadata read" : null));
-    const types = describe ? describe.recordTypes.map((r) => ({ name: r.developerName, active: r.active })) : (bundle?.recordTypes.filter((r) => r.object === object).map((r) => ({ name: r.name, active: r.active })) ?? []);
+    // By label, as Setup shows them (DECISIONS.md 412).
+    const types = describe ? describe.recordTypes.map((r) => ({ name: r.label, active: r.active })) : (bundle?.recordTypes.filter((r) => r.object === object).map((r) => ({ name: r.label, active: r.active })) ?? []);
     segments.push(seg("record types", object, types.filter((t) => t.active).length));
     for (const t of types.sort((a, b) => a.name.localeCompare(b.name))) segments.push(seg(`record type on ${object}`, t.name, t.active ? 1 : 0, 1));
     const used = usage?.[object];
     if (used?.status === "ok") {
       const ranked = used.data.fields.filter((f) => f.total > 0).sort((a, b) => b.filled / b.total - a.filled / a.total || a.field.localeCompare(b.field)).slice(0, MOST_FILLED);
-      for (const f of ranked) segments.push(seg(`most filled on ${object}`, f.field, pct(f.filled, f.total), f.total));
+      for (const f of ranked) {
+        segments.push(seg(`most filled on ${object}`, f.field, pct(f.filled, f.total), f.total));
+        named.push([`${object}.${f.field}`, labels.field(object, f.field)]);
+      }
     }
   }
-  const out: Metric[] = [measured(DEFINITIONS.model, evidence, doc.objects.length, segments, { exclusions, assumptions })];
+  const out: Metric[] = [measured(DEFINITIONS.model, evidence, doc.objects.length, [...segments, ...labelSegments(named)], { exclusions, assumptions })];
 
   const rel = doc.relationships;
   const relEvidence = [ctx.ev(rel.source, { count: rel.status === "ok" ? rel.data.length : null })];
@@ -135,7 +151,9 @@ function dataModel(ctx: Ctx): Metric[] {
     const links = rel.data
       .flatMap((r) => r.referenceTo.filter((to) => documented.has(to)).map((to) => ({ kind: /^Master-Detail/i.test(r.dataType) ? "master-detail" : "lookup", key: `${r.object}.${r.field} to ${to}` })))
       .sort((a, b) => a.key.localeCompare(b.key));
-    out.push(measured(DEFINITIONS.relationships, relEvidence, links.length, links.map((l) => seg(l.kind, l.key, 1)), { exclusions: ["Lookups to objects outside the ones documented, such as users and queues"], assumptions: ["A field whose type starts Master-Detail is a master-detail relationship, and any other field that refers to an object is a lookup"] }));
+    const linked = rel.data.filter((r) => r.referenceTo.some((to) => documented.has(to)));
+    const linkNames: Array<[string, string]> = [...linked.map((r): [string, string] => [`${r.object}.${r.field}`, r.label]), ...[...new Set(linked.flatMap((r) => [r.object, ...r.referenceTo.filter((to) => documented.has(to))]))].map((o): [string, string] => [o, labels.object(o)])];
+    out.push(measured(DEFINITIONS.relationships, relEvidence, links.length, [...links.map((l) => seg(l.kind, l.key, 1)), ...labelSegments(linkNames)], { exclusions: ["Lookups to objects outside the ones documented, such as users and queues"], assumptions: ["A field whose type starts Master-Detail is a master-detail relationship, and any other field that refers to an object is a lookup"] }));
   }
   return out;
 }
@@ -207,7 +225,7 @@ function automation(ctx: Ctx): Metric {
     DEFINITIONS.automation,
     evidence,
     own.length,
-    [...own.map((i) => seg([i.object, i.step, state(i.described)].join(SEP), i.name, i.active ? 1 : 0, 1)), ...[...cells].map(([key, c]) => seg(COUNT_ON_SAVE, key, c.active, c.all))],
+    [...own.map((i) => seg([i.object, i.step, state(i.described)].join(SEP), i.name, i.active ? 1 : 0, 1)), ...[...cells].map(([key, c]) => seg(COUNT_ON_SAVE, key, c.active, c.all)), ...labelSegments([...new Set(own.map((i) => i.object))].map((o) => [o, labelsOf(ctx).object(o)]))],
     {
       exclusions,
       assumptions: ["The order is Salesforce's for a record saved by insert, update or upsert. Within one step, Salesforce doesn't guarantee which runs first", "For an Apex trigger, a description means a comment in its code", "Duplicate rules are listed without a description, which we don't read"],
@@ -335,7 +353,7 @@ function sharing(ctx: Ctx): Metric {
   } else return notMeasurable(DEFINITIONS.sharing, evidence, `Sharing models couldn't be read: ${doc.sharing.reason}`);
   const order = new Map(doc.objects.map((o, i) => [o, i]));
   rows = rows.filter((r) => r.internal || r.external).sort((a, b) => (order.get(a.object) ?? 99) - (order.get(b.object) ?? 99) || a.object.localeCompare(b.object));
-  const segments = rows.flatMap((r) => [...(r.internal ? [seg("internal", `${r.object}${SEP}${r.internal}`, 1)] : []), ...(r.external ? [seg("external", `${r.object}${SEP}${r.external}`, 1)] : [])]);
+  const segments = [...rows.flatMap((r) => [...(r.internal ? [seg("internal", `${r.object}${SEP}${r.internal}`, 1)] : []), ...(r.external ? [seg("external", `${r.object}${SEP}${r.external}`, 1)] : [])]), ...labelSegments(rows.map((r) => [r.object, labelsOf(ctx).object(r.object)]))];
   return measured(DEFINITIONS.sharing, evidence, rows.length, segments, { exclusions, assumptions: ["Salesforce reports a private default as None, which we show as Private (QUESTIONS.md)"] });
 }
 
@@ -352,6 +370,8 @@ export type Relationship = { from: string; field: string; to: string; kind: "loo
 export type AutomationItem = { name: string; active: boolean; described: boolean | null };
 export type ObjectAutomation = { object: string; steps: Array<{ key: StepKey; label: string; step: number | null; active: number; all: number; items: AutomationItem[] }> };
 export type OrgDocument = {
+  /** Labels by API name, an object's alone and a field's as Object.Field. A name with none is its own label. */
+  labels: Record<string, string>;
   model: { metric: Measured; objects: DocumentedObject[] } | null;
   relationships: { metric: Measured; links: Relationship[] } | null;
   automation: { metric: Measured; objects: ObjectAutomation[] } | null;
@@ -396,7 +416,7 @@ export function readDocument(metrics: Metric[]): OrgDocument {
   if (auto) {
     const counts = new Map(of(auto, COUNT_ON_SAVE).map((s) => [s.key, { active: s.value ?? 0, all: s.n }]));
     for (const s of auto.segments) {
-      if (s.dimension === COUNT_ON_SAVE) continue;
+      if (s.dimension === COUNT_ON_SAVE || s.dimension === LABEL) continue;
       const [object, key, state] = s.dimension.split(SEP) as [string, StepKey, string];
       let entry = automationObjects.find((o) => o.object === object);
       if (!entry) automationObjects.push((entry = { object, steps: [] }));
@@ -407,7 +427,16 @@ export function readDocument(metrics: Metric[]): OrgDocument {
     }
   }
 
+  const labels: Record<string, string> = {};
+  for (const m of [model, rel, auto, integ, acc, shr]) {
+    for (const s of m?.segments.filter((x) => x.dimension === LABEL) ?? []) {
+      const [api, label] = s.key.split(SEP) as [string, string];
+      labels[api] = label;
+    }
+  }
+
   return {
+    labels,
     model: model ? { metric: model, objects } : null,
     relationships: rel ? { metric: rel, links } : null,
     automation: auto ? { metric: auto, objects: automationObjects } : null,

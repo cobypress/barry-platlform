@@ -73,6 +73,9 @@ export function placeObjects(names: string[], links: Array<{ from: string; to: s
  * same document always draws the same picture. A master-detail line is solid
  * and heavier, a lookup dashed, so the two don't rely on colour.
  */
+/** What a customer reads for an API name: its label, or the name where there's none (DECISIONS.md 412). */
+const named = (doc: OrgDocument, api: string): string => doc.labels[api] ?? api;
+
 export function dataModelDiagram(doc: OrgDocument, columns = 3): Chart {
   const id = "data-model";
   const title = "The data model";
@@ -102,7 +105,8 @@ export function dataModelDiagram(doc: OrgDocument, columns = 3): Chart {
   const boxes = objects
     .map((o) => {
       const { x, y } = at.get(o.name)!;
-      const name = o.name.length > 20 ? `${o.name.slice(0, 19)}…` : o.name;
+      const label = named(doc, o.name);
+      const name = label.length > 20 ? `${label.slice(0, 19)}…` : label;
       const records = o.records === null ? "Not counted here" : `${count(o.records)} records`;
       return `<rect x="${x}" y="${y}" width="${BOX_W}" height="${BOX_H}" rx="${radius.small}" fill="${colour.carbon}" stroke="${colour.ivory}" stroke-width="1.2"/><text x="${x + BOX_W / 2}" y="${y + 22}" font-size="13" font-weight="${font.weights.semibold}" fill="${colour.ivory}" text-anchor="middle">${escapeXml(name)}</text><text x="${x + BOX_W / 2}" y="${y + 40}" font-size="11" fill="${colour.panelMuted}" text-anchor="middle">${escapeXml(records)}</text>`;
     })
@@ -125,7 +129,7 @@ export function objectsTable(r: Render, doc: OrgDocument, limit = Infinity): str
   if (!doc.model) return "";
   const objects = doc.model.objects.slice(0, limit);
   const rows = objects.map((o) => [
-    `${r.t(o.name)}`,
+    `${r.t(named(doc, o.name))}`,
     o.records === null ? r.t("Not counted here") : count(o.records),
     o.customFields === null ? r.t("Not read") : count(o.customFields),
     o.recordTypes.filter((t) => t.active).map((t) => r.t(t.name)).join(", ") || r.t("None"),
@@ -135,7 +139,7 @@ export function objectsTable(r: Render, doc: OrgDocument, limit = Infinity): str
 
 export function relationshipsTable(r: Render, doc: OrgDocument): string {
   if (!doc.relationships || doc.relationships.links.length === 0) return "";
-  return table([r.t("From"), r.t("Field"), r.t("To"), r.t("Kind")], doc.relationships.links.map((l) => [r.t(l.from), r.t(l.field), r.t(l.to), r.t(l.kind === "master-detail" ? "Master-detail" : "Lookup")]));
+  return table([r.t("From"), r.t("Field"), r.t("To"), r.t("Kind")], doc.relationships.links.map((l) => [r.t(named(doc, l.from)), r.t(named(doc, `${l.from}.${l.field}`)), r.t(named(doc, l.to)), r.t(l.kind === "master-detail" ? "Master-detail" : "Lookup")]));
 }
 
 /** Objects down the side, the steps across in the order they run, each cell active out of all. */
@@ -144,7 +148,7 @@ export function automationTable(r: Render, doc: OrgDocument, limit = Infinity): 
   const objects = doc.automation.objects.slice(0, limit);
   const steps = [...new Map(doc.automation.objects.flatMap((o) => o.steps).map((s) => [s.key, s])).values()].sort((a, b) => (a.step ?? 99) - (b.step ?? 99) || a.label.localeCompare(b.label));
   const rows = objects.map((o) => [
-    r.t(o.object),
+    r.t(named(doc, o.object)),
     ...steps.map((s) => {
       const cell = o.steps.find((x) => x.key === s.key);
       return !cell ? "" : cell.active === cell.all ? count(cell.active) : `${count(cell.active)} of ${count(cell.all)}`;
@@ -157,7 +161,7 @@ export function automationTable(r: Render, doc: OrgDocument, limit = Infinity): 
 export function automationLists(r: Render, doc: OrgDocument): string {
   if (!doc.automation) return "";
   return doc.automation.objects
-    .map((o) => `<h3>${r.t(o.object)}</h3>${table([r.t("When it runs"), r.t("Name"), r.t("Active"), r.t("Description")], o.steps.flatMap((s) => s.items.map((i) => [r.t(s.label), r.t(i.name), r.t(i.active ? "Yes" : "No"), r.t(i.described === null ? "Not read" : i.described ? "Yes" : "None")])))}`)
+    .map((o) => `<h3>${r.t(named(doc, o.object))}</h3>${table([r.t("When it runs"), r.t("Name"), r.t("Active"), r.t("Description")], o.steps.flatMap((s) => s.items.map((i) => [r.t(s.label), r.t(i.name), r.t(i.active ? "Yes" : "No"), r.t(i.described === null ? "Not read" : i.described ? "Yes" : "None")])))}`)
     .join("");
 }
 
@@ -191,7 +195,7 @@ export function accessBlock(r: Render, doc: OrgDocument, limit = Infinity): stri
 
 export function sharingTable(r: Render, doc: OrgDocument): string {
   if (!doc.sharing || doc.sharing.objects.length === 0) return "";
-  return table([r.t("Object"), r.t("Internal"), r.t("External")], doc.sharing.objects.map((s) => [r.t(s.object), r.t(s.internal ? sharingLabel(s.internal) : "Not set"), r.t(s.external ? sharingLabel(s.external) : "Not set")]));
+  return table([r.t("Object"), r.t("Internal"), r.t("External")], doc.sharing.objects.map((s) => [r.t(named(doc, s.object)), r.t(s.internal ? sharingLabel(s.internal) : "Not set"), r.t(s.external ? sharingLabel(s.external) : "Not set")]));
 }
 
 /** Whether any part has something to show. With none, the part is left out everywhere. */

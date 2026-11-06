@@ -2,6 +2,7 @@ import { apexExtractor, metadataExtractor } from "../../extract/automation.ts";
 import { unreadReason } from "../../extract/metadata-parse.ts";
 import { CORE_OBJECTS, customObjectsExtractor, isOwnCustomField, layoutsExtractor, recordCountsExtractor, schemaExtractor } from "../../extract/configuration.ts";
 import { objectResolver } from "../object-names.ts";
+import { labelsOf } from "../labels.ts";
 import { opportunitiesGate } from "../gate.ts";
 import type { RuleContext } from "../../engine/rule.ts";
 import type { Evidence, Metric, MetricSegment } from "../../schemas/index.ts";
@@ -29,7 +30,11 @@ export const INVENTORY_COLUMNS = [
 ] as const;
 
 export type InventoryColumn = (typeof INVENTORY_COLUMNS)[number]["key"];
-export type InventoryRow = { object: string; counts: Record<InventoryColumn, number | null>; reasons: Partial<Record<InventoryColumn, string>> };
+/** `object` is the API name; `label` what a customer reads (DECISIONS.md 412). */
+export type InventoryRow = { object: string; label: string; counts: Record<InventoryColumn, number | null>; reasons: Partial<Record<InventoryColumn, string>> };
+/** A segment giving an object's label against its API name, as `Api | Label`. */
+const LABEL = "label";
+const SEP = " | ";
 
 const AUTOMATION: InventoryColumn[] = ["validationRules", "flows", "processBuilders", "workflowRules", "triggers"];
 export const automationOf = (row: InventoryRow): number => AUTOMATION.reduce((sum, key) => sum + (row.counts[key] ?? 0), 0);
@@ -112,6 +117,7 @@ export function objectInventoryMetric(ctx: Ctx): Metric[] {
   const rules = bundle.workflows.flatMap((w) => w.rules.filter((r) => r.active).map((r) => ({ ...r, object: w.object })));
   const validation = bundle.validationRules.filter((v) => v.active);
 
+  const labels = labelsOf(ctx);
   const rows: InventoryRow[] = objects.map((object) => {
     const reasons: InventoryRow["reasons"] = {};
     const describe = described(object);
@@ -129,6 +135,7 @@ export function objectInventoryMetric(ctx: Ctx): Metric[] {
     if (!records.has(object)) reasons.records = "Salesforce keeps no count for this object";
     return {
       object,
+      label: labels.object(object),
       reasons,
       counts: {
         records: records.get(object) ?? null,
@@ -146,12 +153,15 @@ export function objectInventoryMetric(ctx: Ctx): Metric[] {
   });
   rows.sort((a, b) => automationOf(b) - automationOf(a) || (b.counts.fields ?? 0) - (a.counts.fields ?? 0) || a.object.localeCompare(b.object));
 
-  const segments: MetricSegment[] = rows.flatMap((row) =>
-    INVENTORY_COLUMNS.map((c) => {
-      const value = row.counts[c.key];
-      return { dimension: c.dimension, key: row.object, n: value ?? 0, value, notMeasurableReason: value === null ? (row.reasons[c.key] ?? "Not read") : null };
-    }),
-  );
+  const segments: MetricSegment[] = [
+    ...rows.flatMap((row) =>
+      INVENTORY_COLUMNS.map((c) => {
+        const value = row.counts[c.key];
+        return { dimension: c.dimension, key: row.object, n: value ?? 0, value, notMeasurableReason: value === null ? (row.reasons[c.key] ?? "Not read") : null };
+      }),
+    ),
+    ...rows.flatMap((row) => (row.label === row.object ? [] : [{ dimension: LABEL, key: `${row.object}${SEP}${row.label}`, n: 1, value: 1, notMeasurableReason: null }])),
+  ];
   const sum = (key: InventoryColumn): number => rows.reduce((total, row) => total + (row.counts[key] ?? 0), 0);
   const automation = rows.reduce((total, row) => total + automationOf(row), 0);
   return [
@@ -183,10 +193,11 @@ export function objectInventoryMetric(ctx: Ctx): Metric[] {
 export function inventoryRows(metric: Metric | undefined): InventoryRow[] {
   if (metric?.status !== "measured") return [];
   const rows = new Map<string, InventoryRow>();
+  const labels = new Map(metric.segments.filter((s) => s.dimension === LABEL).map((s) => s.key.split(SEP) as [string, string]));
   for (const s of metric.segments) {
     const column = INVENTORY_COLUMNS.find((c) => c.dimension === s.dimension);
     if (!column) continue;
-    const row = rows.get(s.key) ?? { object: s.key, counts: Object.fromEntries(INVENTORY_COLUMNS.map((c) => [c.key, null])) as InventoryRow["counts"], reasons: {} };
+    const row = rows.get(s.key) ?? { object: s.key, label: labels.get(s.key) ?? s.key, counts: Object.fromEntries(INVENTORY_COLUMNS.map((c) => [c.key, null])) as InventoryRow["counts"], reasons: {} };
     row.counts[column.key] = s.value;
     if (s.notMeasurableReason) row.reasons[column.key] = s.notMeasurableReason;
     rows.set(s.key, row);
