@@ -213,6 +213,6 @@ describe("without consent, a person's token anywhere in the files' text becomes 
       assert.ok(!text.includes(entry.name), `${name} names ${entry.name}`);
       assert.ok(!text.includes(entry.token), `${name} keeps the token`);
     }
-    assert.ok(xml.includes("a single person") || csv.includes("a single person"), "the token became a role-free phrase");
+    assert.ok(/\b(one|another) person\b/i.test(xml) || /\b(one|another) person\b/i.test(csv), "the token became a role-free phrase");
   });
 });

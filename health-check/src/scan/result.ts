@@ -1,3 +1,4 @@
+import { plainWords, ukDates } from "../render/format.ts";
 import type { BuiltReport } from "../narrative/sections.ts";
 import { areasOf, bySeverity, domainLabel, issuesOf, scorecard } from "../narrative/select.ts";
 
@@ -36,7 +37,8 @@ export function buildScanResult(report: BuiltReport): ScanResult {
     score: o.status === "measured" ? o.score : null,
     grade: o.status === "measured" ? o.grade : null,
     areas: rows.map((r) => ({ domain: r.domain, label: r.label, score: r.score, issues: r.issues, high: r.high })),
-    shown: shown.map((f) => ({ title: f.title, summary: f.summary, severity: f.severity, area: domainLabel(f.domain) })),
+    // In the reports' words: UK dates and plain terms, as every other page has them (night 3 reading pass).
+    shown: shown.map((f) => ({ title: plainWords(ukDates(f.title)), summary: plainWords(ukDates(f.summary)), severity: f.severity, area: domainLabel(f.domain) })),
     lockedIssues: issues.length - shown.length,
   };
 }

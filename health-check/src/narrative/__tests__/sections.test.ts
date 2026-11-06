@@ -182,10 +182,15 @@ describe("team level", () => {
   });
 
   test("reads as a sentence", () => {
-    assert.equal(teamLevelText("[[user:U0004]] made 90% of changes."), "A single person made 90% of changes.");
-    assert.equal(teamLevelText("Win rate for rep [[user:U0014]] is low."), "Win rate for a single rep is low.");
-    assert.equal(teamLevelText("Rep [[user:U0014]] is low."), "A single rep is low.");
-    assert.equal(teamLevelText("Done. [[user:U0014]] made it."), "Done. A single person made it.");
+    assert.equal(teamLevelText("[[user:U0004]] made 90% of changes."), "One person made 90% of changes.");
+    assert.equal(teamLevelText("Win rate for rep [[user:U0014]] is low."), "Win rate for one rep is low.");
+    assert.equal(teamLevelText("Rep [[user:U0014]] is low."), "One rep is low.");
+    assert.equal(teamLevelText("Done. [[user:U0014]] made it."), "Done. One person made it.");
+    // Two people in one sentence can be told apart, and the worst rep reads as a sentence (night 3 reading pass).
+    assert.equal(teamLevelText("Highest: rep [[user:U0014]], 29 of 38; rep [[user:U0003]], 29 of 39."), "Highest: one rep, 29 of 38; another rep, 29 of 39.");
+    assert.equal(teamLevelText("Worst by rep: [[user:U0014]], at 93.3%."), "The worst rep is at 93.3%.");
+    // A title keeps the phrase the ranking reads.
+    assert.equal(teamLevelText("Win rate for rep [[user:U0014]] is low", "title"), "Win rate for a single rep is low");
   });
 
   test("raw notes keep the token, because they're the customer admin's working record", () => {
