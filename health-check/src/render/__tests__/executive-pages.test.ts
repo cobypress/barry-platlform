@@ -147,6 +147,19 @@ describe("the executive summary, rebuilt around money", () => {
     assert.deepEqual(shown.map((f) => f.id), [...shown].sort((a, b) => counted(a) - counted(b) || 0).map((f) => f.id));
   });
 
+  test("the deck's contents give each entry's page, in page order, and each lands on its section (DECISIONS.md 407)", () => {
+    const deck = fullReportHtml(buildReport(base), pseudonyms);
+    const pages = new Map([...deck.matchAll(/<section class="page[^"]*" data-page="(\d+)">([\s\S]*?)<\/section>/g)].map((m) => [Number(m[1]), m[2]!.replace(/<[^>]+>/g, " ").replace(/&#39;/g, "'").replace(/\s+/g, " ")]));
+    const contents = [...pages.values()].find((t) => t.includes("What's in this report"))!;
+    const at = deck.indexOf("<ol class=\"contents");
+    const html = deck.slice(at, deck.indexOf("</ol>", at));
+    const entries = [...html.matchAll(/<li>(.*?)<span class="pg" data-ref>(\d+)<\/span><\/li>/g)].map((m) => ({ label: m[1]!.replace(/&#39;/g, "'"), page: Number(m[2]) }));
+    assert.ok(contents && entries.length >= 20, `${entries.length} entries with a page`);
+    assert.equal(entries.length, [...html.matchAll(/<li>/g)].length, "every entry has a page on this sample");
+    assert.deepEqual(entries.map((e) => e.page), [...entries.map((e) => e.page)].sort((a, b) => a - b), "in page order");
+    for (const e of entries) assert.ok(pages.get(e.page)!.includes(e.label.split(/,| and /)[0]!), `${e.label} on page ${e.page}: ${pages.get(e.page)!.slice(0, 80)}`);
+  });
+
   test("a segment's gap reads as the value model's year, not the window's total (DECISIONS.md 405)", () => {
     const report = buildReport(base);
     const html = fullReportHtml(report, pseudonyms);

@@ -90,6 +90,10 @@ table.grid { font-size: 18px; }
 .tight table.grid td, .tight table.grid th { padding: 5px 8px; }
 ol.contents { columns: 2; margin: 0; padding-left: 26px; }
 ol.contents li { margin-bottom: 8px; }
+/* The next column's item numbers hang into the gap, so a page number keeps clear of the column's edge. */
+ol.contents { column-gap: 40px; }
+ol.contents li { padding-right: 36px; }
+ol.contents .pg { float: right; margin-left: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 ol.contents.long { columns: 3; font-size: 0.92em; }
 ol.contents.long li { margin-bottom: 4px; }
 .action-list { margin: 0; padding-left: 22px; font-size: 18px; }
@@ -659,6 +663,9 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   const causeOf: CauseOf = (f) => causes.get(f.id) ?? null;
   const slides: Slide[] = [];
   const add = (html: string, classes?: string): void => void slides.push({ html, ...(classes ? { classes } : {}) });
+  // Where each contents entry starts, as a page number, noted as its first slide goes in (DECISIONS.md 407).
+  const starts = new Map<string, number>();
+  const mark = (label: string, ahead = 0): void => void (starts.has(label) || starts.set(label, slides.length + 1 + ahead));
 
   add(`<div><div class="eyebrow">Black Cloud Barometer</div><h1>${documentTitle(run)}</h1><div class="sub">Full report</div></div>${coverScore(report.overall)}<div>${r.draft ? '<p><span class="mark">Draft, not approved for release</span></p>' : ""}<p class="for">Prepared for</p><p>${r.t(customer)}</p>${preparedBy ? `<p>by ${r.t(preparedBy)}, Black Cloud</p>` : ""}<p>${longDate(run.asOf)}</p></div>`, "dark cover");
 
@@ -748,7 +755,16 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
     "Appendix",
   ];
   // With Service Cloud and CPQ both on there can be 19 area chapters, more than two columns hold.
-  add(`<div class="eyebrow">Contents</div><h2>What's in this report</h2><ol class="contents${contents.length > CONTENTS_IN_TWO_COLUMNS ? " long" : ""}">${contents.map((c) => `<li>${r.t(c)}</li>`).join("")}</ol>`);
+  // Its page numbers are filled in once every slide is in (DECISIONS.md 407).
+  const contentsAt = slides.length;
+  // In page order: what the team and your people said sits beside the area it speaks to. An entry with no page of its own keeps its place.
+  const inPageOrder = (): string[] => {
+    let last = 0;
+    const keyed = contents.map((c, i) => ({ c, i, at: (last = starts.get(c) ?? last) }));
+    return keyed.sort((a, b) => a.at - b.at || a.i - b.i).map((x) => x.c);
+  };
+  const contentsSlide = (): string => `<div class="eyebrow">Contents</div><h2>What's in this report</h2><ol class="contents${contents.length > CONTENTS_IN_TWO_COLUMNS ? " long" : ""}">${inPageOrder().map((c) => `<li>${r.t(c)}${starts.has(c) ? `<span class="pg" data-ref>${starts.get(c)}</span>` : ""}</li>`).join("")}</ol>`;
+  add(contentsSlide());
 
   add(`<div class="eyebrow">How to read this report</div><h2>What the ratings mean</h2><table class="grid"><tbody>
     <tr><td style="width:24%"><strong>Barometer score</strong></td><td>One score out of 100 for your whole Salesforce, from the area scores, with a grade from A to E.</td></tr>
@@ -760,18 +776,24 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
     <tr><td><strong>Reference</strong></td><td>Where the working is in the raw notes that come with this report. <span data-ref>R4.3</span> is the third item in section <span data-ref>R4</span>.</td></tr></tbody></table>`);
 
   // What the customer said comes first, and our answer to it straight after: it's what they'll read first.
+  mark("What you told us");
   add(`<div class="eyebrow">What you told us</div><h2>In your words</h2>${needsInput(built, "stated_problems") ? inputChip : ""}${sectionBody(r, built, "stated_problems")}`);
+  mark("What we found against it");
   add(`<div class="eyebrow">What we found against it</div><h2>What you told us, against what we found</h2>${needsInput(built, "stated_vs_actual") ? inputChip : ""}${sectionBody(r, built, "stated_vs_actual")}`);
 
+  mark("Overview and scorecard");
   add(`<div class="eyebrow">Overview</div><h2>${r.t(verdict.headline)}</h2><div>${sectionBody(r, built, "overview").replace(`<p>${r.t(verdict.headline)}.</p>`, "")}</div><div class="stat-row" style="margin-top:18px">${report.overall.status === "measured" ? `<div class="stat"><b>${report.overall.score}</b><span>Barometer score</span></div>` : ""}<div class="stat"><b>${verdict.issues}</b><span>Issues</span></div><div class="stat"><b>${verdict.critical}</b><span>Critical</span></div><div class="stat"><b>${verdict.high}</b><span>High</span></div><div class="stat"><b>${team.filter((f) => f.status === "not_measurable").length}</b><span>Not measurable</span></div><div class="stat"><b>${team.filter((f) => f.status === "passed").length}</b><span>Passed</span></div></div>`);
 
   const progressed = progressPage(r, report);
+  if (progressed) mark("Since your last health check");
   if (progressed) add(progressed, "tight");
   const worth = moneyPage(r, report, "slide");
+  if (worth) mark("What fixing this is worth");
   if (worth) add(worth, "tight");
 
   add(`<div class="eyebrow">Scorecard</div><h2>How each area stands</h2>${scoreLine(report) ? `<p class="lede">${r.t(scoreLine(report, true))}</p>` : ""}<div class="chart-wrap" style="max-width:${scoreLine(report) ? 760 : 880}px">${chartSlot(scorecardChart(scorecard(team, scores, domains), scorecardOptions(report)))}</div>`);
 
+  if (comparable) mark("How you compare");
   if (comparable) slides.push(compareSlide(r, compared));
 
   if (top.length) add(`<div class="eyebrow">Top issues</div><h2>${top.length === TOP_ISSUE_COUNT ? `The ${TOP_ISSUE_COUNT} that matter most` : "The issues that matter most"}</h2><table class="grid"><thead><tr><th style="width:6%"></th><th>Issue</th><th style="width:12%">Severity</th><th style="width:26%">Impact</th><th style="width:20%">Owner</th></tr></thead><tbody>${top.map((f, i) => `<tr><td>${i + 1}</td><td>${r.t(f.title)}${r.ref(f.id)}</td><td>${severityChip(f)}</td><td>${valueText(r, f).amount}</td><td>${r.t(f.owner)}</td></tr>`).join("")}</tbody></table>`);
@@ -796,6 +818,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
     const label = domainLabel(domain);
     const own = team.filter((f) => f.domain === domain);
     const issues = issuesOf(own, report.added);
+    mark(label);
     if (!density?.domainSummary) add(`<div class="eyebrow">Area</div><h1>${r.t(label)}</h1><div class="body">${sectionBody(r, built, `domain_${domain}`)}</div>`, "dark divider");
     // Each area opens the same way. The tightest densities drop it to keep the deck in range.
     const glance = density && !density.domainSummary ? chapterSlide(r, report, domain) : "";
@@ -804,11 +827,20 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
     if (usage) add(usage, "tight");
     slides.push(...(density ? domainIssueSlides(r, label, issues, density, causeOf) : issueTable(r, label, issues)));
     if (domain === inventoryHome && inventoryWorthShowing) slides.push(inventorySlide(r, label, metric(OBJECT_INVENTORY)));
-    if (domain === surveyAfter) slides.push(...teamSays, ...peopleSaid);
+    if (domain === surveyAfter) {
+      if (teamSays.length) mark("What your team says");
+      if (peopleSaid.length) mark("What your people told us", teamSays.length);
+      slides.push(...teamSays, ...peopleSaid);
+    }
   }
-  if (surveyAfter === undefined) slides.push(...teamSays, ...peopleSaid);
+  if (surveyAfter === undefined) {
+    if (teamSays.length) mark("What your team says");
+    if (peopleSaid.length) mark("What your people told us", teamSays.length);
+    slides.push(...teamSays, ...peopleSaid);
+  }
 
   if (working.length && !density?.domainSummary) {
+    mark("What's working well");
     slides.push(...listSlides(r, "Areas", "What's working well", working.map((d) => {
       const own = team.filter((f) => f.domain === d);
       const passed = own.filter((f) => f.status === "passed").length;
@@ -826,6 +858,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
     slides.push(...listSlides(r, "Areas", "Where we can't give a view yet", recordLine ? [...items, { title: "Areas measured from records", detail: recordLine }] : items, compact));
   }
 
+  if (pipelinePages.length || gaps.length) mark("Pipeline");
   if (pipelinePages.length) {
     const pipelineNotes = notes.find((s) => s.key === "pipeline_metrics");
     if (!density?.domainSummary) add(`<div class="eyebrow">Deep dive</div><h1>Pipeline</h1><div class="body">${sectionBody(r, built, "pipeline_deep_dive")}${pipelineNotes ? `<p class="small-note">The working for every figure in this part is in section <span data-ref>${pipelineNotes.ref}</span> of the raw notes.</p>` : ""}</div>`, "dark divider");
@@ -834,9 +867,11 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   if (gaps.length) slides.push(...listSlides(r, "Pipeline", "What your data can't tell us yet", gaps, compact));
 
   // Before the roadmap, so what to fix for an agent reads straight into when to fix it.
+  mark("AI readiness");
   add(readinessSlide(r, report, built), "tight");
 
   const planned = plan.some((p) => p.findings.length > 0);
+  if (planned) mark("Roadmap");
   // The engine's roadmap text only counts actions, which the boxes already show. Written text goes above them.
   const roadmap = built.versions.find((v) => v.id === built.sections.find((x) => x.key === "roadmap")?.currentVersionId);
   const roadmapText = roadmap && roadmap.source !== "engine" ? `<div style="margin-bottom:18px">${sectionBody(r, built, "roadmap")}</div>` : "";
@@ -874,9 +909,13 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   // Titles only, so at the densest they take three columns, as the metric definitions do.
   if (later.length) slides.push(...(density?.domainSummary || density?.threeColumnLists ? threeColumnList(r, "Roadmap", "After 90 days", afterPlan) : dense ? twoColumnList(r, "Roadmap", "After 90 days", afterPlan) : listSlides(r, "Roadmap", "After 90 days", afterPlan, compact)));
 
+  mark("What happens next");
   slides.push(nextStepsSlide(r, plan));
-  slides.push(...documentedSlides(r, metrics, dense));
+  const documented = documentedSlides(r, metrics, dense);
+  if (documented.length) mark("Your org, documented");
+  slides.push(...documented);
 
+  mark("Appendix");
   if (!dense) add(`<div class="eyebrow">Appendix</div><h1>How we worked</h1><div class="body">${sectionBody(r, built, "appendix")}</div>`, "dark divider");
   slides.push(...listSlides(r, "Appendix", "Assumptions", [
     ...(dense ? [{ title: "How we worked", detail: currentBody(built, "appendix").replace(/\n+/g, " ") }] : []),
@@ -906,6 +945,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   }
   // Manual steps are working notes for us, not something the deck refers to.
   slides.push(detailSlide(r, notes.filter((s) => s.key !== "manual_steps")));
+  slides[contentsAt] = { html: contentsSlide() };
   return slides;
 }
 

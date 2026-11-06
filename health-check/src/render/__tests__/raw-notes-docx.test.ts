@@ -182,6 +182,6 @@ describe("how you compare, in the full report", async () => {
     assert.ok(comparable, "the synthetic org has a figure with published research");
     const html = fullReportHtml(report, pseudonyms);
     assert.match(html, /<h2>How you compare<\/h2>/);
-    assert.match(html, /<li>How you compare<\/li>/);
+    assert.match(html, /<li>How you compare<span class="pg" data-ref>\d+<\/span><\/li>/);
   });
 });
