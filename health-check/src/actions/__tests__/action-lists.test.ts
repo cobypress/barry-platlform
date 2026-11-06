@@ -192,3 +192,20 @@ describe("a list that's only part of the whole (night 3 review)", () => {
     assert.match(list.part!.label ?? "", /^No account: the first [\d,]+ of 12,000, in order of Salesforce id\. No email address: all [\d,]+\.$/);
   });
 });
+
+describe("without consent, a person's token anywhere in the files' text becomes a role (night 3 review)", () => {
+  test("in a finding's owner, effort note and fix, and in a list's fix and problems", () => {
+    const entry = pseudonyms.entries().find((e) => e.token.startsWith("[[user:") && PEOPLE.includes(e.name))!;
+    const f = finding("dq.open-opps-past-close");
+    const findings = input.findings.map((x) => (x.id === f.id ? { ...x, owner: `Sales ops, with ${entry.token}`, effort: { ...x.effort, note: `${entry.token} knows these deals` }, recommendation: `Ask ${entry.token} to close them` } : x));
+    const tokenised = { ...lists, lists: lists.lists.map((l) => (l.findingId === f.id ? { ...l, fix: `Ask ${entry.token}`, rows: l.rows.map((r) => ({ ...r, problem: `${r.problem}; ${entry.token} was told` })) } : l)) };
+    const report = buildReport({ ...input, findings, intake: null });
+    const csv = buildTickets(report, pseudonyms, tokenised);
+    const xml = sheetsOf(buildWorkbook(report, pseudonyms, tokenised).bytes);
+    for (const [name, text] of [["tickets", csv], ["workbook", xml]] as const) {
+      assert.ok(!text.includes(entry.name), `${name} names ${entry.name}`);
+      assert.ok(!text.includes(entry.token), `${name} keeps the token`);
+    }
+    assert.ok(xml.includes("a single person") || csv.includes("a single person"), "the token became a role-free phrase");
+  });
+});
