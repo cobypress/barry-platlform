@@ -2,6 +2,8 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileS
 import { createHash, randomUUID } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { BUDGET_DEFAULTS, RULE_SET_VERSION, SF_DEFAULTS } from "../config.ts";
+import { fileLines, readCheckpoint, writeCheckpoint } from "./checkpoint.ts";
+import { shareRepeatedValues } from "./share-values.ts";
 import { modulesFor } from "../domains/scope.ts";
 import { scoreDomains } from "../domains/scoring.ts";
 import type { DomainModule } from "../domains/types.ts";
@@ -87,7 +89,10 @@ class FilePartialStore implements PartialStore {
 
   read<R>(key: string): R[] {
     if (!existsSync(this.#path(key))) return [];
-    return readFileSync(this.#path(key), "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line) as R);
+    // A line at a time: a big org's partial read can be hundreds of megabytes.
+    const rows: R[] = [];
+    for (const line of fileLines(this.#path(key))) if (line) rows.push(JSON.parse(line) as R);
+    return rows;
   }
 
   append<R>(key: string, rows: R[]): void {
@@ -220,15 +225,16 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
     }
     const path = checkpointPath(dir, extractor.id);
     if (step.status === "done" && step.version === extractor.version && existsSync(path)) {
-      extracts.set(extractor.id, readJson(path));
+      extracts.set(extractor.id, shareRepeatedValues(readCheckpoint(path)));
       log(`  ${extractor.id}: reused from checkpoint`);
       continue;
     }
     const before = budget.callsMade;
     try {
-      const output = await extractor.run(ctx);
+      // Held for the whole analysis, so each repeated value is held once (DECISIONS.md 346).
+      const output = shareRepeatedValues(await extractor.run(ctx));
       extracts.set(extractor.id, output);
-      writeJson(path, output);
+      writeCheckpoint(path, output);
       for (const key of extractor.partialKeys ?? []) partial.clear(key);
       step.status = "done";
       step.version = extractor.version;

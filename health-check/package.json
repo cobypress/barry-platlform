@@ -13,7 +13,7 @@
     "fixtures": "node src/testing/record-fixtures.ts",
     "sample": "node src/render/sample.ts",
     "questions": "node src/facts/questions-report.ts",
-    "scale": "node --max-old-space-size=12288 --expose-gc src/testing/scale-run.ts"
+    "scale": "node --max-old-space-size=1536 src/testing/scale-run.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.4.0",

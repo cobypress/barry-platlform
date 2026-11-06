@@ -1,4 +1,5 @@
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { readCheckpoint } from "../engine/checkpoint.ts";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { z } from "zod";
@@ -193,7 +194,7 @@ export function orgProfile(dir: string, run: Run, calibration: Calibration): Org
   const data = <T>(extractor: Extractor<T>): T => {
     const path = join(folder, `${extractor.id}.json`);
     if (!existsSync(path)) throw new Error(`The run has no "${extractor.id}" extract, so its bands can't be worked out.`);
-    return JSON.parse(readFileSync(path, "utf8")) as T;
+    return readCheckpoint<T>(path);
   };
   const now = new Date(run.asOf);
   const ctx: Omit<RuleContext, "metrics"> = {
