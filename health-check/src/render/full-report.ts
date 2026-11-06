@@ -73,6 +73,8 @@ table.grid { font-size: 18px; }
 .tight table.grid td, .tight table.grid th { padding: 5px 8px; }
 ol.contents { columns: 2; margin: 0; padding-left: 26px; }
 ol.contents li { margin-bottom: 8px; }
+ol.contents.long { columns: 3; font-size: 0.92em; }
+ol.contents.long li { margin-bottom: 4px; }
 .action-list { margin: 0; padding-left: 22px; font-size: 18px; }
 .action-list li { margin-bottom: 8px; }
 .action-list .owner { color: var(--muted); font-size: 14.5px; }
@@ -194,7 +196,11 @@ function twoColumnSlides(r: Render, label: string, findings: Finding[], causeOf:
 }
 
 /** `columns` sets smaller cards in two columns, so an ordinary org keeps all its detail. */
-type Density = Record<Finding["severity"], number> & { columns?: 2; domainSummary?: boolean };
+/** `threeColumnLists` sets the titles-only roadmap list in three columns, as the last step does, before giving up the chapters. */
+type Density = Record<Finding["severity"], number> & { columns?: 2; threeColumnLists?: boolean; domainSummary?: boolean };
+
+/** Past this many entries, the contents page goes to three columns. */
+const CONTENTS_IN_TWO_COLUMNS = 24;
 
 /** How many issues share a slide, by severity. Tried in order until the deck fits. */
 const DENSITIES: Density[] = [
@@ -209,6 +215,8 @@ const DENSITIES: Density[] = [
   // Up to eight cards a slide, still paginated by height, before the last step
   // gives up the area chapters (DECISIONS.md 208).
   { critical: 1, high: 8, medium: 8, low: 8, info: 8, columns: 2 },
+  // The same, with "After 90 days" in three columns: smaller type on a titles-only list, every chapter kept (DECISIONS.md 224).
+  { critical: 1, high: 8, medium: 8, low: 8, info: 8, columns: 2, threeColumnLists: true },
   { critical: 24, high: 24, medium: 24, low: 24, info: 24, columns: 2, domainSummary: true },
 ];
 
@@ -673,7 +681,8 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
     ...(hasDocument(readDocument(metrics)) ? ["Your org, documented"] : []),
     "Appendix",
   ];
-  add(`<div class="eyebrow">Contents</div><h2>What's in this report</h2><ol class="contents">${contents.map((c) => `<li>${r.t(c)}</li>`).join("")}</ol>`);
+  // With Service Cloud and CPQ both on there can be 19 area chapters, more than two columns hold.
+  add(`<div class="eyebrow">Contents</div><h2>What's in this report</h2><ol class="contents${contents.length > CONTENTS_IN_TWO_COLUMNS ? " long" : ""}">${contents.map((c) => `<li>${r.t(c)}</li>`).join("")}</ol>`);
 
   add(`<div class="eyebrow">How to read this report</div><h2>What the ratings mean</h2><table class="grid"><tbody>
     <tr><td style="width:24%"><strong>Barometer score</strong></td><td>One score out of 100 for your whole Salesforce, from the area scores, with a grade from A to E.</td></tr>
@@ -775,7 +784,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   // Titles only: each of these already has its card in its domain's section.
   const afterPlan = later.map((f) => ({ title: f.title, detail: `${severityWord(f.severity)}. ${effortText(f)}. ${f.owner}` }));
   // Titles only, so at the densest they take three columns, as the metric definitions do.
-  if (later.length) slides.push(...(density?.domainSummary ? threeColumnList(r, "Roadmap", "After 90 days", afterPlan) : dense ? twoColumnList(r, "Roadmap", "After 90 days", afterPlan) : listSlides(r, "Roadmap", "After 90 days", afterPlan, compact)));
+  if (later.length) slides.push(...(density?.domainSummary || density?.threeColumnLists ? threeColumnList(r, "Roadmap", "After 90 days", afterPlan) : dense ? twoColumnList(r, "Roadmap", "After 90 days", afterPlan) : listSlides(r, "Roadmap", "After 90 days", afterPlan, compact)));
 
   slides.push(nextStepsSlide(r, plan));
   slides.push(...documentedSlides(r, metrics, dense));

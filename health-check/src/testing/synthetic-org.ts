@@ -701,6 +701,8 @@ export const PACKAGE_LICENSES = [
   { NamespacePrefix: "sitewide", AllowedLicenses: -1, UsedLicenses: 40, Status: "Active", ExpirationDate: null },
   { NamespacePrefix: "freebie", AllowedLicenses: 100, UsedLicenses: 3, Status: "Free", ExpirationDate: null },
   { NamespacePrefix: "oldapp", AllowedLicenses: 10, UsedLicenses: 0, Status: "Expired", ExpirationDate: "2025-01-31T00:00:00.000Z" },
+  // Salesforce CPQ, on a site licence, so it's no seat count (DECISIONS.md 216).
+  { NamespacePrefix: "SBQQ", AllowedLicenses: -1, UsedLicenses: 30, Status: "Active", ExpirationDate: null },
 ];
 
 export const PERMISSION_SET_LICENSES = [{ MasterLabel: "Sales Console", TotalLicenses: 15, UsedLicenses: 3, Status: "Active", ExpirationDate: null }];
@@ -1374,3 +1376,69 @@ function buildCases() {
 }
 
 export const supportCases = buildCases();
+
+// Salesforce CPQ (DECISIONS.md 216 to 225). Read only when a run includes the
+// "cpq" module.
+
+// Traps: two active price rules set the same field at the same event and order;
+// a third sets it later, so it's no conflict. Four of eleven rules are inactive.
+const priceRule = (n: number, Name: string, active: boolean, order: number, event: string) => ({ Id: sfId("a0R", n), Name, SBQQ__Active__c: active, SBQQ__EvaluationEvent__c: event, SBQQ__EvaluationOrder__c: order, SBQQ__TargetObject__c: "Calculator" });
+export const CPQ_PRICE_RULES = [
+  priceRule(1, "Volume Discount", true, 10, "On Calculate"),
+  priceRule(2, "Partner Discount", true, 10, "On Calculate;After Calculate"),
+  priceRule(3, "Bundle Floor Price", true, 20, "On Calculate"),
+  priceRule(4, "Old Promo 2024", false, 10, "On Calculate"),
+  priceRule(5, "Old Promo 2025", false, 10, "On Calculate"),
+  priceRule(6, "Legacy Uplift", false, 30, "Before Calculate"),
+];
+export const CPQ_PRICE_ACTIONS = [
+  { Id: sfId("a0P", 1), SBQQ__Rule__c: sfId("a0R", 1), SBQQ__Field__c: "SBQQ__Discount__c", SBQQ__TargetObject__c: "Quote Line" },
+  { Id: sfId("a0P", 2), SBQQ__Rule__c: sfId("a0R", 2), SBQQ__Field__c: "SBQQ__Discount__c", SBQQ__TargetObject__c: "Quote Line" },
+  { Id: sfId("a0P", 3), SBQQ__Rule__c: sfId("a0R", 3), SBQQ__Field__c: "SBQQ__Discount__c", SBQQ__TargetObject__c: "Quote Line" },
+];
+export const CPQ_PRODUCT_RULES = [
+  { Id: sfId("a0S", 1), Name: "Support Needs Hardware", SBQQ__Active__c: true, SBQQ__Type__c: "Validation" },
+  { Id: sfId("a0S", 2), Name: "Suggest Training", SBQQ__Active__c: true, SBQQ__Type__c: "Alert" },
+  { Id: sfId("a0S", 3), Name: "Bundle Selection", SBQQ__Active__c: true, SBQQ__Type__c: "Selection" },
+  { Id: sfId("a0S", 4), Name: "Region Filter", SBQQ__Active__c: true, SBQQ__Type__c: "Filter" },
+  { Id: sfId("a0S", 5), Name: "Old Bundle Check", SBQQ__Active__c: false, SBQQ__Type__c: "Validation" },
+];
+
+const describedField = (name: string, type: string, custom = true) => ({ name, label: name, type, custom });
+// Trap: Warranty_Term__c is a number on the quote line and text on the opportunity product, so it won't copy.
+export const CPQ_DESCRIBES: Record<string, { fields: unknown[] }> = {
+  SBQQ__Quote__c: { fields: ["Id", "Name", "OwnerId", "SBQQ__Primary__c", "SBQQ__Opportunity2__c", "SBQQ__ListAmount__c", "SBQQ__NetAmount__c", "SBQQ__Ordered__c", "CreatedDate"].map((n) => describedField(n, "string", n.endsWith("__c"))) },
+  SBQQ__PriceRule__c: { fields: ["Id", "Name", "SBQQ__Active__c", "SBQQ__EvaluationEvent__c", "SBQQ__EvaluationOrder__c", "SBQQ__TargetObject__c"].map((n) => describedField(n, "string", n.endsWith("__c"))) },
+  SBQQ__PriceAction__c: { fields: ["Id", "SBQQ__Rule__c", "SBQQ__Field__c", "SBQQ__TargetObject__c"].map((n) => describedField(n, "string", n.endsWith("__c"))) },
+  SBQQ__ProductRule__c: { fields: ["Id", "Name", "SBQQ__Active__c", "SBQQ__Type__c"].map((n) => describedField(n, "string", n.endsWith("__c"))) },
+  SBQQ__QuoteLine__c: { fields: [describedField("Id", "id", false), describedField("SBQQ__Discount__c", "percent"), describedField("Warranty_Term__c", "double"), describedField("Region__c", "string")] },
+  OpportunityLineItem: { fields: [describedField("Id", "id", false), describedField("Warranty_Term__c", "string"), describedField("Region__c", "string")] },
+  OrderItem: { fields: [describedField("Id", "id", false), describedField("Region__c", "string")] },
+  Contract: { fields: ["Id", "ContractNumber", "OwnerId", "EndDate", "Status", "SBQQ__RenewalOpportunity__c"].map((n) => describedField(n, "string", n.endsWith("__c"))) },
+};
+
+// A primary quote on each closed deal with an amount. Trap: user 1 discounts
+// about 30% where their team-mate gives about 9%, and wins less often.
+// Most of user 1's deep discounts had no approval, and one won quote in seven
+// was never ordered.
+export const CPQ_QUOTES = pipeline.opportunities
+  .filter((o) => o.IsClosed && o.Amount !== null && o.Amount > 0)
+  .map((o, i) => {
+    const discount = o.OwnerId === userId(1) ? 26 + (i % 9) : 6 + (i % 7);
+    return {
+      Id: sfId("a1Q", i + 1),
+      Name: `Q-${String(i + 1).padStart(5, "0")}`,
+      OwnerId: o.OwnerId,
+      SBQQ__Primary__c: true,
+      SBQQ__Opportunity2__c: o.Id,
+      SBQQ__ListAmount__c: Math.round((o.Amount! / (1 - discount / 100)) * 100) / 100,
+      SBQQ__NetAmount__c: o.Amount,
+      SBQQ__Ordered__c: o.IsWon && i % 7 !== 3,
+      CreatedDate: new Date(Date.parse(`${o.CloseDate}T12:00:00Z`) - 10 * DAY).toISOString().replace("Z", "+0000"),
+    };
+  });
+export const CPQ_APPROVALS = CPQ_QUOTES.filter((q, i) => q.OwnerId === userId(1) && i % 4 === 0).map((q, i) => ({ Id: sfId("04g", i + 1), TargetObjectId: q.Id, Status: "Approved", CreatedDate: q.CreatedDate }));
+
+// Traps: two contracts ending soon with no renewal; one ending soon has one; one ends too late to count.
+const contract = (n: number, days: number, renewal: string | null) => ({ Id: sfId("800", n), ContractNumber: String(n).padStart(8, "0"), OwnerId: userId(n % 2 ? 1 : 2), EndDate: dateOnly(asOf + days * DAY), Status: "Activated", SBQQ__RenewalOpportunity__c: renewal });
+export const CPQ_CONTRACTS = [contract(101, 30, null), contract(102, 75, sfId("006", 1)), contract(103, 100, null), contract(104, 200, null)];

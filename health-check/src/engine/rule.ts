@@ -6,7 +6,7 @@ type Severity = "critical" | "high" | "medium" | "low" | "info";
 type Confidence = "high" | "medium" | "low";
 
 /** The objects an action list can hold records of. */
-export type ActionObject = "Opportunity" | "Lead" | "Contact" | "Account" | "User";
+export type ActionObject = "Opportunity" | "Lead" | "Contact" | "Account" | "SBQQ__Quote__c" | "Contract" | "User";
 
 /**
  * The records an issue is about, for the action lists (roadmap Stage 4). Ids

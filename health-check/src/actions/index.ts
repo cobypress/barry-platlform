@@ -5,7 +5,7 @@ import { domainLabel, issuesOf, teamLevelFinding, teamLevelText } from "../narra
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { noteSections, referenceMap } from "../render/references.ts";
 import type { Finding } from "../schemas/index.ts";
-import { ACTION_LISTS_FILE, ActionLists, type ActionList } from "./lists.ts";
+import { ACTION_LISTS_FILE, ActionLists, OBJECT_LABELS, type ActionList } from "./lists.ts";
 import { writeXlsx, type Cell, type Sheet } from "./xlsx.ts";
 
 // The action lists (roadmap Stage 4): a workbook with every record to fix, one
@@ -92,7 +92,7 @@ function listSheet(c: Context, f: Finding, list: ActionList, name: string): Shee
     columns: [
       { header: "Salesforce id", width: 21 },
       { header: "Link", width: 20 },
-      { header: `${list.object} name`, width: 36 },
+      { header: `${OBJECT_LABELS[list.object]} name`, width: 36 },
       { header: c.consent ? "Owner" : "Owner's role", width: 24 },
       { header: "What's wrong", width: 60 },
       { header: "Fix", width: 50 },

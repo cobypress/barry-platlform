@@ -194,3 +194,15 @@ c) Person accounts: an org that uses them has people's names as account names, a
 d) Storage: we say that past the allowance Salesforce "can stop new records or files being saved". We haven't confirmed how strictly each edition enforces it.
 e) `PackageLicense.Status` values beyond Active, Expired, Free and Trial, and whether `NamespacePrefix` is ever empty for an app sold by the seat.
 f) Territories, if a customer uses them: `Territory2Model` (State 'Active'), `Territory2` and `UserTerritory2Association` would show territories with nobody assigned. Fair balance would need the customer's own rules.
+
+## Salesforce CPQ (DECISIONS.md 216 to 226)
+
+CPQ's objects belong to a managed package and aren't in the Object Reference. Each is described before it's queried, so a wrong name makes the checks that need it not measurable rather than wrong. To confirm on a real CPQ org:
+
+a) `SBQQ__Quote__c`: `SBQQ__Primary__c`, `SBQQ__Opportunity2__c`, `SBQQ__ListAmount__c`, `SBQQ__NetAmount__c` and `SBQQ__Ordered__c`. Also whether the list amount already includes contracted prices and partner discounts, which would put them in "discount off list".
+b) `SBQQ__PriceRule__c` (`SBQQ__Active__c`, `SBQQ__EvaluationEvent__c`, `SBQQ__EvaluationOrder__c`, `SBQQ__TargetObject__c`), `SBQQ__PriceAction__c` (`SBQQ__Rule__c`, `SBQQ__Field__c`, `SBQQ__TargetObject__c`), `SBQQ__ProductRule__c` (`SBQQ__Active__c`, `SBQQ__Type__c`), and `Contract.SBQQ__RenewalOpportunity__c`.
+c) Two active price rules with the same evaluation event and order: Trailhead says the larger order wins, and doesn't say what happens on a tie.
+d) Whether CPQ always has a `PackageLicense` row with namespace SBQQ. If it doesn't, the describe finds it, at one extra call.
+e) Advanced Approvals: how its approval records point to a quote, so `cpq.discount-approvals` could read them rather than going not measurable.
+f) Revenue Cloud Advanced (Agentforce Revenue Management): its quote, pricing procedure and order objects, before we build for it.
+g) Twin fields: whether CPQ treats any differing types as compatible, such as text and text area, which we'd report as a mismatch today.

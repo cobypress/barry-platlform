@@ -8,7 +8,7 @@ import type { RuleContext } from "../engine/rule.ts";
 // changes nothing in src/engine.
 export type DomainModule = {
   id: string;
-  cloud: "sales" | "service";
+  cloud: "sales" | "service" | "cpq";
   label: string;
   /** In dependency order. Shared extractors are listed by every module that reads them; the run dedupes. */
   extractors: Extractor<any>[];

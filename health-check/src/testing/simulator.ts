@@ -30,6 +30,8 @@ export type SimulatorOptions = {
   asyncApex?: { Max: number; Remaining: number };
   /** Data and file storage, as /limits reports them. The synthetic org's own by default. */
   storage?: typeof org.STORAGE_LIMITS;
+  /** False for an org without Salesforce CPQ: no SBQQ licence, and its objects can't be described. */
+  cpq?: boolean;
 };
 
 type Json = Record<string, unknown>;
@@ -154,6 +156,7 @@ export class Simulator implements Transport {
   #withholdMetadata: SimulatorOptions["withholdMetadata"];
   #asyncApex: { Max: number; Remaining: number };
   #storage: typeof org.STORAGE_LIMITS;
+  #cpq: boolean;
   #retrieveChecks = 0;
   #retrieving: Record<string, string> = org.METADATA_FILES;
 
@@ -166,6 +169,7 @@ export class Simulator implements Transport {
     this.#withholdMetadata = options.withholdMetadata;
     this.#asyncApex = options.asyncApex ?? org.ASYNC_APEX_LIMIT;
     this.#storage = options.storage ?? org.STORAGE_LIMITS;
+    this.#cpq = options.cpq ?? true;
   }
 
   get #limitInfo(): string {
@@ -193,7 +197,7 @@ export class Simulator implements Transport {
     const describe = path.match(/\/sobjects\/([A-Za-z0-9_]+)\/describe$/);
     if (describe) {
       const name = describe[1]!;
-      const d = org.DESCRIBES[name] ?? org.FIELD_DESCRIBES[name];
+      const d = org.DESCRIBES[name] ?? org.FIELD_DESCRIBES[name] ?? (this.#cpq ? org.CPQ_DESCRIBES[name] : undefined);
       if (!d) return jsonResponse(404, [{ errorCode: "NOT_FOUND", message: "The requested resource does not exist" }], this.#limitInfo);
       const dropped = new Set(this.#dropFields[name] ?? []);
       return jsonResponse(200, { name, ...d, fields: d.fields.filter((f) => !dropped.has((f as { name: string }).name)) }, this.#limitInfo);
@@ -282,7 +286,27 @@ export class Simulator implements Transport {
       case "PermissionSetLicense":
         return page(org.PERMISSION_SET_LICENSES);
       case "PackageLicense":
-        return page(org.PACKAGE_LICENSES);
+        return page(this.#cpq ? org.PACKAGE_LICENSES : org.PACKAGE_LICENSES.filter((p) => p.NamespacePrefix !== "SBQQ"));
+      case "SBQQ__PriceRule__c":
+        return this.#cpq ? page(org.CPQ_PRICE_RULES) : unsupported(object);
+      case "SBQQ__PriceAction__c":
+        return this.#cpq ? page(org.CPQ_PRICE_ACTIONS) : unsupported(object);
+      case "SBQQ__ProductRule__c":
+        return this.#cpq ? page(org.CPQ_PRODUCT_RULES) : unsupported(object);
+      case "SBQQ__Quote__c": {
+        if (!this.#cpq) return unsupported(object);
+        const after = /\bCreatedDate\s*>=\s*(\S+)/i.exec(where)?.[1];
+        return this.#keyset(org.CPQ_QUOTES.filter((q) => !after || new Date(q.CreatedDate.replace("+0000", "Z")) >= new Date(after)), soql);
+      }
+      case "ProcessInstance": {
+        const after = /\bCreatedDate\s*>=\s*(\S+)/i.exec(where)?.[1];
+        return page(org.CPQ_APPROVALS.filter((a) => !after || new Date(a.CreatedDate.replace("+0000", "Z")) >= new Date(after)).map(({ CreatedDate: _c, ...a }) => a));
+      }
+      case "Contract": {
+        const from = /\bEndDate >= (\d{4}-\d{2}-\d{2})/.exec(where)?.[1] ?? "0000";
+        const to = /\bEndDate <= (\d{4}-\d{2}-\d{2})/.exec(where)?.[1] ?? "9999";
+        return page(org.CPQ_CONTRACTS.filter((c) => c.EndDate >= from && c.EndDate <= to && /Status = 'Activated'/.test(where) === (c.Status === "Activated")));
+      }
       case "LoginHistory": {
         if (/\b(Status|Application)\s*(=|!=|IN|LIKE)/i.test(where)) return reject("INVALID_FIELD", "field 'Status' can not be filtered in a query call");
         // LoginTime is filterable, and every read of it gives a start.

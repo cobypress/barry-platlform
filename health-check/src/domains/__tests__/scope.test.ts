@@ -17,7 +17,10 @@ import { ESSENTIALS_DOMAINS, modulesFor } from "../scope.ts";
 // Objects that hold CRM records. A set-up review reads none of them, not even as a count.
 // Service Cloud's case records, and the work and conversations about them, count too.
 const CRM_OBJECTS = new Set(["Account", "Contact", "Lead", "Opportunity", "OpportunityHistory", "OpportunityFieldHistory", "OpportunityLineItem", "LeadHistory", "Task", "Event", "EmailMessage", "Case", "Campaign", "CampaignMember", "ForecastingItem", "ForecastingQuota", "ForecastingAdjustment", "CaseMilestone", "CaseArticle", "CaseComment", "AgentWork", "MessagingSession", "LiveChatTranscript", "VoiceCall"]);
-const isCrmObject = (object: string): boolean => CRM_OBJECTS.has(object) || /__c$/.test(object) || (/History$/.test(object) && object !== "LoginHistory");
+// CPQ keeps its set-up as records of its own objects (DECISIONS.md 217): price
+// and product rules are configuration, not customer data. Its quotes are records.
+const SETUP_STORED_AS_RECORDS = new Set(["SBQQ__PriceRule__c", "SBQQ__PriceAction__c", "SBQQ__ProductRule__c"]);
+const isCrmObject = (object: string): boolean => !SETUP_STORED_AS_RECORDS.has(object) && (CRM_OBJECTS.has(object) || /__c$/.test(object) || (/History$/.test(object) && object !== "LoginHistory"));
 
 const essentials = modulesFor("essentials", ALL_MODULES);
 const recordExtractors = new Set(collectExtractors(ALL_MODULES).filter((e) => e.records).map((e) => e.id));
@@ -93,6 +96,9 @@ describe("an essentials run", async () => {
   test("never queries an object that holds CRM records", () => {
     assert.ok(objects.size > 10);
     assert.deepEqual([...objects].filter(isCrmObject), []);
+    // CPQ's set-up is read, and never its quotes or contracts.
+    assert.ok(objects.has("SBQQ__PriceRule__c"));
+    for (const records of ["SBQQ__Quote__c", "ProcessInstance", "Contract"]) assert.ok(!objects.has(records), records);
   });
 
   test("records its scope and its areas", () => {
