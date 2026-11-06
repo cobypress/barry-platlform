@@ -20,13 +20,21 @@ class FakeSharing implements FolderSharing {
   readonly permissions = new Map<string, { folderId: string; email: string }>();
   readonly calls: string[] = [];
   readonly fail = new Set<string>();
+  /** Drive makes the share, and its answer is lost on the way back. */
+  readonly lose = new Set<string>();
   #next = 1;
   async share(folderId: string, email: string): Promise<string> {
     this.calls.push(`share ${folderId} ${email}`);
     if (this.fail.has(email)) throw new Error("Google Drive refused a request (403): Sharing outside the organisation is off");
     const id = `perm-${String(this.#next++).padStart(4, "0")}`;
     this.permissions.set(id, { folderId, email });
+    if (this.lose.has(email)) throw new Error("fetch failed: socket hang up");
     return id;
+  }
+  async findReader(folderId: string, email: string): Promise<string | null> {
+    this.calls.push(`find ${folderId} ${email}`);
+    if (this.fail.has(email)) throw new Error("Google Drive refused a request (500): backend error");
+    return [...this.permissions.entries()].find(([, p]) => p.folderId === folderId && p.email === email)?.[0] ?? null;
   }
   async unshare(folderId: string, permissionId: string): Promise<void> {
     this.calls.push(`unshare ${folderId} ${permissionId}`);
@@ -117,6 +125,31 @@ describe("sharing a run's folder with its readers", () => {
     assert.match(store.shares[0]!.error!, /^Couldn't take access away/);
   });
 
+  test("a share Drive made but whose answer was lost is found and taken away when the reader is removed", async () => {
+    const { store, sharing, deps } = setup({ readers: ["ceo@customer.example.com"] });
+    sharing.lose.add("ceo@customer.example.com");
+    assert.equal((await syncShares(RUN, deps)).failed, 1);
+    assert.deepEqual([store.shares[0]!.state, store.shares[0]!.permissionId, sharing.who()], ["failed", null, ["ceo@customer.example.com"]], "recorded as failed, but Drive has it");
+    store.readers.set(RUN, []);
+    assert.equal((await syncShares(RUN, deps)).removed, 1);
+    assert.deepEqual(sharing.who(), []);
+    assert.deepEqual([store.shares[0]!.state, store.shares[0]!.removedWhy], ["removed", "reader_removed"]);
+  });
+
+  test("a failed share Drive never made is closed without taking anything, and one that can't be checked stays, with why", async () => {
+    const { store, sharing, deps } = setup({ readers: ["ceo@customer.example.com", "ops@customer.example.com"] });
+    sharing.fail.add("ceo@customer.example.com");
+    sharing.fail.add("ops@customer.example.com");
+    await syncShares(RUN, deps);
+    store.readers.set(RUN, []);
+    sharing.fail.delete("ceo@customer.example.com");
+    const result = await syncShares(RUN, deps);
+    assert.deepEqual([result.removed, result.failed], [1, 1]);
+    const by = (email: string) => store.shares.find((s) => s.email === email)!;
+    assert.equal(by("ceo@customer.example.com").state, "removed");
+    assert.deepEqual([by("ops@customer.example.com").state, /^Couldn't check whether Drive shared it/.test(by("ops@customer.example.com").error!)], ["failed", true]);
+  });
+
   test("everyone's access goes when asked, whatever the list says", async () => {
     const { store, sharing, deps } = setup();
     await syncShares(RUN, deps);
@@ -198,6 +231,22 @@ describe("Google Drive's sharing", () => {
     assert.equal(calls.at(-1)!.init.method, "DELETE");
     assert.equal(new URL(calls.at(-1)!.url).pathname, `/drive/v3/files/${FOLDER}/permissions/08123456789012345678`);
     await assert.rejects(client.unshare(FOLDER, "../files"));
+  });
+
+  test("finds a person's reader permission on the folder, page by page, reading only", async () => {
+    const pages: Record<string, unknown> = {
+      first: { nextPageToken: "page-2", permissions: [{ id: "01111", type: "user", role: "writer", emailAddress: "ceo@customer.example.com" }, { id: "02222", type: "user", role: "reader", emailAddress: "ops@customer.example.com" }] },
+      second: { permissions: [{ id: "03333", type: "domain", role: "reader" }, { id: "04444", type: "user", role: "reader", emailAddress: "CEO@Customer.example.com" }] },
+    };
+    const { client, calls } = drive((url) => Response.json(new URL(url).searchParams.get("pageToken") === "page-2" ? pages.second : pages.first));
+    assert.equal(await client.findReader(FOLDER, "ceo@customer.example.com"), "04444", "the reader one, not the writer one");
+    const lists = calls.filter((c) => c.url.includes("/permissions"));
+    assert.ok(lists.every((c) => (c.init.method ?? "GET") === "GET"));
+    assert.equal(new URL(lists[0]!.url).searchParams.get("supportsAllDrives"), "true");
+    assert.equal(await client.findReader(FOLDER, "nobody@customer.example.com"), null);
+    const gone = drive(() => new Response("{}", { status: 404 }));
+    assert.equal(await gone.client.findReader(FOLDER, "ceo@customer.example.com"), null, "a folder that's gone holds nobody's access");
+    await assert.rejects(client.findReader("../x", "ceo@customer.example.com"));
   });
 
   test("a permission already gone is fine", async () => {

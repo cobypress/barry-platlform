@@ -254,7 +254,7 @@ describe("the retention sweep and the customer's Drive access", () => {
     runFolder(runs, id);
     store.shares = [share(id, "ceo@customer.example.com"), share(id, "ops@customer.example.com")];
     const taken: string[] = [];
-    const sharing = { share: async () => "x", unshare: async (_f: string, p: string) => void taken.push(p) };
+    const sharing = { share: async () => "x", findReader: async () => null, unshare: async (_f: string, p: string) => void taken.push(p) };
     assert.equal(action(await retentionSweep({ store, runsDir: runs, now: at(364), dryRun: false, log: (l) => lines.push(l), sharing }), id), "extracts_deleted");
     assert.deepEqual(taken, [], "not a day before");
     const outcomes = await retentionSweep({ store, runsDir: runs, now: addMonths(new Date(RELEASED), 12), dryRun: false, log: (l) => lines.push(l), sharing });
@@ -262,6 +262,21 @@ describe("the retention sweep and the customer's Drive access", () => {
     assert.deepEqual(taken.sort(), ["perm-ceo", "perm-ops"]);
     assert.ok(store.shares.every((x) => x.state === "removed" && x.removedWhy === "retention"));
     assert.ok(lines.every((l) => !l.includes("@")), "no address is logged");
+  });
+
+  test("a share recorded as failed is looked for too, since Drive may have made it and lost the answer", async () => {
+    const { runs, store, lines } = setup();
+    const id = "hc-2026-01-01-0000000b";
+    store.addRun(runInput({ run: consoleRun({ id, status: "released" }) }));
+    store.releasedAt.set(id, RELEASED);
+    runFolder(runs, id);
+    store.shares = [{ ...share(id, "ceo@customer.example.com"), state: "failed", permissionId: null, sharedAt: null, error: "fetch failed: socket hang up" }];
+    const taken: string[] = [];
+    const sharing = { share: async () => "x", findReader: async (_f: string, email: string) => (email === "ceo@customer.example.com" ? "perm-lost" : null), unshare: async (_f: string, p: string) => void taken.push(p) };
+    const outcomes = await retentionSweep({ store, runsDir: runs, now: addMonths(new Date(RELEASED), 12), dryRun: false, log: (l) => lines.push(l), sharing });
+    assert.equal(action(outcomes, id), "folder_deleted");
+    assert.deepEqual(taken, ["perm-lost"]);
+    assert.equal(store.shares[0]!.state, "removed");
   });
 
   test("access that can't be taken away keeps the folder until the next sweep, and a dry run takes nothing", async () => {
@@ -272,7 +287,7 @@ describe("the retention sweep and the customer's Drive access", () => {
     const dir = runFolder(runs, id);
     store.shares = [share(id, "ceo@customer.example.com")];
     const now = addMonths(new Date(RELEASED), 12);
-    const failing = { share: async () => "x", unshare: async () => { throw new Error("Google Drive refused a request (500): backend error"); } };
+    const failing = { share: async () => "x", findReader: async () => null, unshare: async () => { throw new Error("Google Drive refused a request (500): backend error"); } };
     const dry = await retentionSweep({ store, runsDir: runs, now, dryRun: true, log: (l) => lines.push(l), sharing: failing });
     assert.equal(action(dry, id), "folder_deleted");
     assert.equal(store.shares[0]!.state, "shared", "a dry run takes nothing away");

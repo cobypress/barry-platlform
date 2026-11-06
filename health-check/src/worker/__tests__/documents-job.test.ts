@@ -325,7 +325,7 @@ describe("sharing, after the documents are made", () => {
     const deps = setup(jobInput(), drive);
     deps.store.readers.set(RUN_ID, ["ceo@customer.example.com"]);
     const shared: Array<[string, string]> = [];
-    deps.sharing = { share: async (folderId, email) => (shared.push([folderId, email]), "perm-0001"), unshare: async () => {} };
+    deps.sharing = { share: async (folderId, email) => (shared.push([folderId, email]), "perm-0001"), findReader: async () => null, unshare: async () => {} };
     assert.equal((await processDocumentsJob(RUN_ID, deps, { final: true })).outcome, "done");
     const made = deps.store.documents.get(RUN_ID)!.made!;
     assert.deepEqual(shared, [[made.driveFolderId, "ceo@customer.example.com"]], "the Health check folder, not the client's, and never Black Cloud's own");
@@ -333,7 +333,7 @@ describe("sharing, after the documents are made", () => {
 
     const failing = setup(jobInput({ run: consoleRun({ id: "hc-2026-11-01-0000000b", status: "released", customerRef: "SYN-0002" }) }), new MemoryDrive());
     failing.store.readers.set("hc-2026-11-01-0000000b", ["ceo@customer.example.com"]);
-    failing.sharing = { share: async () => { throw new Error("Google Drive refused a request (403): no"); }, unshare: async () => {} };
+    failing.sharing = { share: async () => { throw new Error("Google Drive refused a request (403): no"); }, findReader: async () => null, unshare: async () => {} };
     assert.equal((await processDocumentsJob("hc-2026-11-01-0000000b", failing, { final: true })).outcome, "done");
     assert.equal(failing.store.shares[0]!.state, "failed");
   });

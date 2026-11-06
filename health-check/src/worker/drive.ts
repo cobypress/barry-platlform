@@ -44,6 +44,12 @@ export interface DocumentDrive {
 export interface FolderSharing {
   /** Gives one person read access to a folder, and returns the permission's id. */
   share(folderId: string, email: string): Promise<string>;
+  /**
+   * The id of the reader permission this person has on the folder, or null.
+   * Read only: it's how a share Drive made, but whose answer was lost, is
+   * still found and taken away.
+   */
+  findReader(folderId: string, email: string): Promise<string | null>;
   /** Takes a permission away. One already gone is fine. */
   unshare(folderId: string, permissionId: string): Promise<void>;
 }
@@ -237,6 +243,24 @@ export class GoogleDrive implements DocumentDrive, FolderSharing {
     });
     if (!created.id || !PERMISSION_ID.test(created.id)) throw new DriveError("Google Drive shared the folder without saying how, so it can't be taken back");
     return created.id;
+  }
+
+  async findReader(folderId: string, email: string): Promise<string | null> {
+    if (!DRIVE_ID.test(folderId)) throw new DriveError("That isn't a Drive folder id");
+    const who = email.trim().toLowerCase();
+    let page: string | undefined;
+    do {
+      const params = new URLSearchParams({ fields: "nextPageToken,permissions(id,type,role,emailAddress)", pageSize: "100" });
+      if (page) params.set("pageToken", page);
+      const res = await this.#call(`${API}/${folderId}/permissions?${ALL_DRIVES}&${params}`);
+      // A folder that's gone holds nobody's access.
+      if (res.status === 404) return null;
+      const list = (await res.json()) as { nextPageToken?: string; permissions?: Array<{ id?: string; type?: string; role?: string; emailAddress?: string }> };
+      const found = (list.permissions ?? []).find((p) => p.type === READER_PERMISSION.type && p.role === READER_PERMISSION.role && p.emailAddress?.toLowerCase() === who);
+      if (found?.id && PERMISSION_ID.test(found.id)) return found.id;
+      page = list.nextPageToken;
+    } while (page);
+    return null;
   }
 
   async unshare(folderId: string, permissionId: string): Promise<void> {
