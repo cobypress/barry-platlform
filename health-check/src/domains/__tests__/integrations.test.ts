@@ -152,6 +152,14 @@ describe("background jobs that failed", () => {
     assert.match(none.summary, /No asynchronous Apex ran/);
   });
 
+  test("from a log too long to read whole, failures are a floor, not the week's totals (rule 5, night 3 review)", () => {
+    const f = one(edited<{ data: AsyncJobRow[]; truncated: boolean }>("async-jobs", (j) => void (j.truncated = true)), "int.failed-async-jobs");
+    assert.equal(f.status, "issue");
+    assert.match(f.summary, /^At least 3 asynchronous Apex jobs failed in the last 7 days/);
+    assert.doesNotMatch(f.summary, /3 of 7 asynchronous Apex jobs/);
+    assert.ok(f.evidence.some((e) => e.exclusions.some((x) => /too long to read in full/.test(x))));
+  });
+
   test("a log too long to read whole is never a pass", () => {
     const f = one(edited<{ data: AsyncJobRow[]; truncated: boolean }>("async-jobs", (j) => ((j.truncated = true), j.data.forEach((x) => ((x.Status = "Completed"), (x.NumberOfErrors = 0))))), "int.failed-async-jobs");
     assert.equal(f.status, "not_measurable");
@@ -168,6 +176,15 @@ describe("callouts to addresses written into code", () => {
 
   test("passes when every callout uses a named credential", () => {
     const findings = edited<ApexData>("apex", (a) => (a.classes as { data: Array<{ scan: { literalEndpoints: number } | null }> }).data.forEach((c) => c.scan && (c.scan.literalEndpoints = 0)));
+    assert.equal(one(findings, "int.hardcoded-endpoints").status, "passed");
+  });
+
+  test("a literal address in a test class doesn't count (night 3 review: none had one before)", () => {
+    const findings = edited<ApexData>("apex", (a) => {
+      const classes = (a.classes as { data: Array<{ isTest: boolean; scan: { literalEndpoints: number } | null }> }).data;
+      classes.forEach((c) => c.scan && (c.scan.literalEndpoints = 0));
+      classes.find((c) => c.isTest && c.scan)!.scan!.literalEndpoints = 2;
+    });
     assert.equal(one(findings, "int.hardcoded-endpoints").status, "passed");
   });
 });

@@ -348,7 +348,7 @@ const apiUsage: Rule = {
 
 const failedJobs: Rule = {
   id: "int.failed-async-jobs",
-  version: 1,
+  version: 2,
   domain: DOMAIN,
   title: "Background jobs that failed",
   evaluate(ctx): RuleResult | RuleResult[] {
@@ -361,7 +361,9 @@ const failedJobs: Rule = {
     for (const j of [...failed, ...withErrors]) byClass.set(j.ApexClass?.Name ?? "a class we couldn't name", (byClass.get(j.ApexClass?.Name ?? "a class we couldn't name") ?? 0) + 1);
     const classes = [...byClass].sort(([a, x], [b, y]) => y - x || a.localeCompare(b));
     const range = { from: new Date(ctx.now.getTime() - ASYNC_JOB_DAYS * 86_400_000).toISOString().slice(0, 10), to: ctx.now.toISOString().slice(0, 10) };
-    const evidence = [ctx.ev(jobs.source, { count: started.length, dateRange: range, exclusions: ["A batch's own chunks, counted through the batch", "Sharing recalculations and other jobs Salesforce starts itself"], note: "Error messages aren't read, because they can quote a record" })];
+    // A cut-off log is a sample of the week, in no order: what it holds is a floor, never the week's totals (rule 5).
+    const cutOff = jobs.truncated ? [`The rest of the job log, which was too long to read in full: we read ${jobs.data.length.toLocaleString("en-GB")} rows`] : [];
+    const evidence = [ctx.ev(jobs.source, { count: started.length, dateRange: range, exclusions: ["A batch's own chunks, counted through the batch", "Sharing recalculations and other jobs Salesforce starts itself", ...cutOff], note: "Error messages aren't read, because they can quote a record" })];
     const segments = [{ dimension: "job type", segments: new Set(started.map((j) => j.JobType)).size }, { dimension: "class", segments: new Set(started.map((j) => j.ApexClass?.Name ?? "")).size }];
     const facts = { jobs: started.length, failed: failed.length, withErrors: withErrors.length, classes: classes.length, days: ASYNC_JOB_DAYS };
     if (failed.length + withErrors.length === 0) {
@@ -372,7 +374,7 @@ const failedJobs: Rule = {
     return {
       outcome: "issue",
       title: "Background jobs are failing",
-      summary: `${failed.length} of ${plural(started.length, "asynchronous Apex job")} failed in the last ${ASYNC_JOB_DAYS} days${withErrors.length ? `, and ${plural(withErrors.length, "batch job")} finished with errors in some of ${withErrors.length === 1 ? "its" : "their"} records` : ""}: ${classes.map(([name, n]) => `${name} ${n}`).join(", ")}. The work these jobs should have done didn't happen, and failures like these often go unnoticed until someone finds the data wrong.`,
+      summary: `${jobs.truncated ? `At least ${plural(failed.length, "asynchronous Apex job")}` : `${failed.length} of ${plural(started.length, "asynchronous Apex job")}`} failed in the last ${ASYNC_JOB_DAYS} days${withErrors.length ? `, and ${plural(withErrors.length, "batch job")} finished with errors in some of ${withErrors.length === 1 ? "its" : "their"} records` : ""}: ${classes.map(([name, n]) => `${name} ${n}`).join(", ")}. The work these jobs should have done didn't happen, and failures like these often go unnoticed until someone finds the data wrong.`,
       recommendation: "Find out why each job failed and fix the cause, then send failures to someone who will act on them.",
       recommendationType: "change",
       severity: failed.length + withErrors.length >= FAILURES_MEDIUM ? "medium" : "low",

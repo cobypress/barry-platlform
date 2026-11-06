@@ -1,3 +1,4 @@
+import { applyOverrides } from "../narrative/overrides.ts";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { BuiltReport } from "../narrative/sections.ts";
@@ -42,8 +43,10 @@ function context(report: BuiltReport, pseudonyms: Pseudonymiser, lists: ActionLi
   const consent = report.input.intake?.namedRepConsent === true;
   const refs = referenceMap(noteSections(report));
   const refOf = (f: Finding): string => refs.get(f.id) ?? "";
+  // With the consultant's approved overrides, as the decks have them: a customer never sees a corrected figure.
+  const { findings } = applyOverrides(report.input.findings, report.input.metrics, report.input.overrides ?? []);
   // In reference order, so the front sheet and the tickets read as the raw notes do.
-  const issues = issuesOf(report.input.findings)
+  const issues = issuesOf(findings)
     .map((f) => (consent ? f : teamLevelFinding(f)))
     .sort((a, b) => refOf(a).localeCompare(refOf(b), "en", { numeric: true }) || SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity));
   // Every other token, such as an account's, is a named record, which an export may hold.
@@ -54,7 +57,7 @@ const sentence = (text: string): string => (/[.!?]$/.test(text.trim()) ? text.tr
 
 function partNote(list: ActionList): string | null {
   if (!list.part) return null;
-  return `The first ${list.rows.length.toLocaleString("en-GB")} of ${list.part.total.toLocaleString("en-GB")}, in order of Salesforce id. ${list.part.rest}`;
+  return `${list.part.label ?? `The first ${list.rows.length.toLocaleString("en-GB")} of ${list.part.total.toLocaleString("en-GB")}, in order of Salesforce id.`} ${list.part.rest}`;
 }
 
 function listSheet(c: Context, f: Finding, list: ActionList, name: string): Sheet {

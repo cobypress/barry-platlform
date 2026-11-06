@@ -67,3 +67,19 @@ describe("reading Apex as text", () => {
     assert.equal(scan.namedCredentialEndpoints, 1);
   });
 });
+
+describe("a test class with another annotation beside @isTest (night 3 review)", () => {
+  test("is still a test class, with no test methods of its own", () => {
+    for (const body of [
+      "@isTest\n@SuppressWarnings('PMD.ExcessivePublicCount')\npublic class TestDataFactory { public static Lead lead() { return new Lead(); } }",
+      "@SuppressWarnings('PMD')\n@isTest\npublic class TestDataFactory { public static Lead lead() { return new Lead(); } }",
+      "@isTest(SeeAllData=false) @SuppressWarnings('PMD') private class Factory { }",
+    ]) {
+      const scan = scanApex(body);
+      assert.equal(scan.testClass, true, body);
+      assert.equal(scan.testMethods, 0, body);
+    }
+    // A class that isn't a test, with an annotation, stays one that isn't.
+    assert.equal(scanApex("@SuppressWarnings('PMD')\npublic class Real { @isTest static void t() { } }").testClass, false);
+  });
+});

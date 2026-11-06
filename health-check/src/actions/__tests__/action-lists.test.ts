@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { strFromU8, unzipSync } from "fflate";
 import { buildTickets, buildWorkbook, loadActionLists, PRIORITY, TICKET_COLUMNS } from "../index.ts";
 import { ACTION_LISTS_FILE, type ActionLists } from "../lists.ts";
-import { ACTION_ROWS, actionRecordsExtractor } from "../../extract/action-records.ts";
+import { ACTION_ROWS, actionRecordsExtractor, type ActionRecords } from "../../extract/action-records.ts";
 import { runHealthCheck } from "../../engine/run.ts";
 import { SALES_CLOUD_MODULES } from "../../domains/index.ts";
 import { buildReport } from "../../narrative/sections.ts";
@@ -14,7 +14,7 @@ import { fullReportHtml } from "../../render/full-report.ts";
 import { executiveHtml } from "../../render/executive.ts";
 import { loadRun } from "../../render/render-run.ts";
 import type { Finding } from "../../schemas/index.ts";
-import { runFromRecording, tempDir } from "../../testing/harness.ts";
+import { analyseExtracts, clone, loadExtracts, runFromRecording, tempDir } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration, syntheticProvider } from "../../testing/replay.ts";
 import { Simulator } from "../../testing/simulator.ts";
 import { AS_OF, LEADS, CONTACTS, USERS } from "../../testing/synthetic-org.ts";
@@ -147,5 +147,65 @@ describe("in a set-up review", async () => {
     assert.ok(own.lists.length > 0);
     assert.ok(own.lists.every((l) => l.object === "User"));
     assert.ok(!run.steps.some((s) => s.id === actionRecordsExtractor.id));
+  });
+});
+
+describe("approved number overrides (night 3 review)", () => {
+  test("the tickets and the workbook carry the corrected figure, as the decks do", () => {
+    const f = finding("dq.open-opps-past-close");
+    const hits = f.facts.hits!;
+    const override = { id: "ov-0001", runId: input.run.id, target: { type: "finding" as const, id: f.id, field: "facts.hits" }, previousValue: hits, newValue: hits - 2, reason: "Two were test deals", overriddenBy: "Synthetic Consultant", overriddenAt: "2026-11-01T09:00:00.000Z" };
+    const report = buildReport({ ...input, intake: null, overrides: [override] });
+    const corrected = report.teamFindings.find((x) => x.id === f.id)!;
+    assert.match(corrected.summary, new RegExp(`\\b${hits - 2} of\\b`), "the decks' wording has the corrected figure");
+    // This issue's own ticket: another issue can quote the same figure for its own reasons.
+    const row = buildTickets(report, pseudonyms, lists).split("\r\n").find((line) => line.startsWith(`"${corrected.title}",`))!;
+    assert.ok(row, "the issue has a ticket");
+    assert.ok(row.includes(`${hits - 2} of`), "the ticket has the corrected figure");
+    assert.ok(!row.includes(`${hits} of`), "the ticket still has the figure the consultant corrected");
+  });
+});
+
+describe("a list that's only part of the whole (night 3 review)", () => {
+  const extracts = loadExtracts(dir);
+  const records = (edit: (actions: ActionRecords, health: { counts: Record<string, { data: number }> }) => void) => {
+    const changed = clone(extracts);
+    edit(changed.get("action-records") as ActionRecords, changed.get("crm-health") as { counts: Record<string, { data: number }> });
+    return analyseExtracts(changed).records;
+  };
+
+  test("is one only when the read stopped at its ceiling, not because the count moved between the two reads", () => {
+    const list = records((a) => {
+      const leads = a.staleLeads as { data: unknown[]; truncated?: boolean };
+      leads.data = leads.data.slice(0, leads.data.length - 3);
+      leads.truncated = false;
+    }).find((r) => r.ruleId === "dq.stale-leads")!;
+    assert.equal(list.part, undefined, "three leads worked between the count and the list don't make it a part");
+  });
+
+  test("a contact list cut off in one gap only says so gap by gap, not as one first N in order of id", () => {
+    const list = records((a, health) => {
+      (a.contactsNoAccount as { truncated?: boolean }).truncated = true;
+      health.counts.contactsNoAccount!.data = 12_000;
+    }).find((r) => r.ruleId === "dq.contact-completeness")!;
+    assert.ok(list.part, "it's a part");
+    assert.match(list.part!.label ?? "", /^No account: the first [\d,]+ of 12,000, in order of Salesforce id\. No email address: all [\d,]+\.$/);
+  });
+});
+
+describe("without consent, a person's token anywhere in the files' text becomes a role (night 3 review)", () => {
+  test("in a finding's owner, effort note and fix, and in a list's fix and problems", () => {
+    const entry = pseudonyms.entries().find((e) => e.token.startsWith("[[user:") && PEOPLE.includes(e.name))!;
+    const f = finding("dq.open-opps-past-close");
+    const findings = input.findings.map((x) => (x.id === f.id ? { ...x, owner: `Sales ops, with ${entry.token}`, effort: { ...x.effort, note: `${entry.token} knows these deals` }, recommendation: `Ask ${entry.token} to close them` } : x));
+    const tokenised = { ...lists, lists: lists.lists.map((l) => (l.findingId === f.id ? { ...l, fix: `Ask ${entry.token}`, rows: l.rows.map((r) => ({ ...r, problem: `${r.problem}; ${entry.token} was told` })) } : l)) };
+    const report = buildReport({ ...input, findings, intake: null });
+    const csv = buildTickets(report, pseudonyms, tokenised);
+    const xml = sheetsOf(buildWorkbook(report, pseudonyms, tokenised).bytes);
+    for (const [name, text] of [["tickets", csv], ["workbook", xml]] as const) {
+      assert.ok(!text.includes(entry.name), `${name} names ${entry.name}`);
+      assert.ok(!text.includes(entry.token), `${name} keeps the token`);
+    }
+    assert.ok(xml.includes("a single person") || csv.includes("a single person"), "the token became a role-free phrase");
   });
 });

@@ -90,6 +90,14 @@ describe("queries and saves inside loops", () => {
   test("passes on clean code, and test classes never count", () => {
     const findings = withApex((apex) => rows(apex).forEach((r) => r.scan && !r.isTest && ((r.scan.queriesInLoops = 0), (r.scan.dmlInLoops = 0))));
     assert.equal(one(findings, "tech.governor-limit-risk").status, "passed");
+    // A test class that queries and saves in a loop, on otherwise clean code, still passes (night 3 review: none did before).
+    const inTests = withApex((apex) => {
+      rows(apex).forEach((r) => r.scan && !r.isTest && ((r.scan.queriesInLoops = 0), (r.scan.dmlInLoops = 0)));
+      const test = rows(apex).find((r) => r.isTest && r.scan)!;
+      test.scan!.queriesInLoops = 3;
+      test.scan!.dmlInLoops = 2;
+    });
+    assert.equal(one(inTests, "tech.governor-limit-risk").status, "passed");
   });
 
   test("not measurable when triggers can't be read", () => {

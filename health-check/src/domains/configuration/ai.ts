@@ -1,5 +1,6 @@
 import { aiSignalsExtractor, ARTICLE_CAP, SETTINGS, type SettingKey } from "../../extract/ai.ts";
 import { apexExtractor, metadataExtractor } from "../../extract/automation.ts";
+import { unreadReason } from "../../extract/metadata-parse.ts";
 import { pct, type RuleContext } from "../../engine/rule.ts";
 import type { Metric, MetricSegment } from "../../schemas/index.ts";
 
@@ -66,18 +67,23 @@ function actionsMetric(ctx: Ctx): Metric {
     id: AI_ACTIONS,
     domain: DOMAIN,
     label: "Automation an agent could call",
-    definition: "Active autolaunched flows and invocable Apex methods, which Salesforce lets an agent call as actions, and the share of active automation still in Workflow Rules and Process Builder, which it can't.",
+    definition: "Active autolaunched flows with no trigger and invocable Apex methods, which Salesforce lets an agent call as actions, and the share of active automation still in Workflow Rules and Process Builder, which it can't.",
     unit: "count" as const,
     evidence: [ctx.ev(metadata.source, { count: metadata.status === "ok" ? metadata.data.flows.length : null }), ctx.ev(classes.source, { count: classes.status === "ok" ? classes.data.length : null, note: "Read from the code: @InvocableMethod" })],
-    exclusions: ["Inactive flows and code", "Test classes", "Installed packages' flows and code"],
+    exclusions: ["Inactive flows and code", "Test classes", "Installed packages' flows and code", "Record-triggered, scheduled and platform event flows, which run on their trigger"],
     assumptions: ["A flow or method is something an agent could call, not one it can use well: that also needs a clear description"],
   };
   if (metadata.status !== "ok") return { ...head, status: "not_measurable", reason: `Metadata couldn't be retrieved: ${metadata.reason}` };
   if (classes.status !== "ok") return { ...head, status: "not_measurable", reason: `Apex classes couldn't be read: ${classes.reason}` };
   const active = metadata.data.flows.filter((f) => f.status === "Active");
-  const autolaunched = active.filter((f) => f.processType === "AutoLaunchedFlow");
+  // Record-triggered, scheduled and platform event flows are AutoLaunchedFlow too,
+  // but they run on their trigger: only one with no trigger can be an agent's action.
+  const autolaunched = active.filter((f) => f.processType === "AutoLaunchedFlow" && !f.triggerType && !f.scheduled);
   const described = autolaunched.filter((f) => f.described).length;
   const invocable = classes.data.filter((c) => c.Status === "Active" && !c.isTest).reduce((sum, c) => sum + (c.scan?.invocable ?? 0), 0);
+  // The share needs every kind of automation read: a kind that couldn't be read
+  // isn't none, and counting it as none would move the share (rule 5).
+  const legacyUnread = legacyUnreadReason(ctx);
   const legacy = metadata.data.workflows.reduce((sum, w) => sum + w.rules.filter((r) => r.active).length, 0) + active.filter((f) => f.processType === "Workflow").length;
   const modern = active.filter((f) => f.processType !== "Workflow").length + (triggers.status === "ok" ? triggers.data.filter((t) => t.Status === "Active").length : 0);
   const segments: MetricSegment[] = [
@@ -93,12 +99,24 @@ function actionsMetric(ctx: Ctx): Metric {
     segments,
     segmentExemptReason: null,
     series: [],
-    stats: { autolaunched: autolaunched.length, described, invocable, legacy, automation: legacy + modern },
+    stats: { autolaunched: autolaunched.length, described, invocable, ...(legacyUnread ? {} : { legacy, automation: legacy + modern }) },
   };
+}
+
+/** Why the share of old automation can't be worked out, or null when it can. */
+function legacyUnreadReason(ctx: Ctx): string | null {
+  const metadata = ctx.data(metadataExtractor);
+  const { triggers } = ctx.data(apexExtractor);
+  if (metadata.status === "ok") {
+    const unread = unreadReason(metadata.data, ["workflowRules"]);
+    if (unread) return unread;
+  }
+  return triggers.status === "ok" ? null : `Apex triggers couldn't be read: ${triggers.reason}`;
 }
 
 // Its own metric, so the share and the lines read as percents in the number check.
 function legacyMetric(ctx: Ctx, actions: Metric): Metric {
+  const unread = legacyUnreadReason(ctx);
   const head = {
     id: AI_LEGACY_SHARE,
     domain: DOMAIN,
@@ -106,10 +124,12 @@ function legacyMetric(ctx: Ctx, actions: Metric): Metric {
     definition: "Active Workflow Rules and Process Builders as a share of all active automation: those, flows of every kind and Apex triggers. Salesforce is retiring the old tools, and an agent can't call them.",
     unit: "percent" as const,
     evidence: actions.evidence,
-    exclusions: actions.exclusions,
+    // Every kind of flow counts here, triggered or not: only inactive and packaged automation is left out.
+    exclusions: ["Inactive flows and code", "Test classes", "Installed packages' flows and code"],
     assumptions: [`Up to ${LEGACY_READY}% is ready, and past ${LEGACY_NOT_YET}% is not yet: our working lines`],
   };
   if (actions.status !== "measured") return { ...head, status: "not_measurable", reason: actions.reason };
+  if (unread) return { ...head, status: "not_measurable", reason: unread };
   const legacy = actions.stats.legacy!;
   const automation = actions.stats.automation!;
   return {

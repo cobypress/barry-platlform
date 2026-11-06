@@ -46,6 +46,13 @@ describe("the value model", () => {
     assert.match(model.left[0]!.reason, /over 12 months/);
   });
 
+  test("an integration account's full seat and the same seat as an unused one count once (night 3 review, DECISIONS.md 303)", () => {
+    // An API-only account that's never logged in is both a seat to release and a seat to move to an integration licence.
+    const seat = (ruleId: string) => issue(ruleId, { kind: "licence_cost", amount: 1_200, unit: "GBP", period: "per year", assumptions: ["Synthetic."] });
+    const model = buildValueModel([seat("utl.never-logged-in"), seat("int.integration-user-licences")], run, "GBP");
+    assert.equal(model.byKind.licence_waste.high, 1_200, "the same seat isn't released and moved at once");
+  });
+
   test("passes and unsized issues add nothing", () => {
     const passed = { ...issue("dq.open-opps-past-close", gbp(1, "potential revenue in deals open today")), status: "passed" } as Finding;
     const unsized = issue("sec.modify-all-data", { kind: "not_sized", reason: "A risk." });

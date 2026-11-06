@@ -108,7 +108,9 @@ export function scanApex(body: string): ApexScan {
     const start = m.index + m[0].length;
     return body.slice(start, code.indexOf("'", start));
   });
-  const annotatedClass = /^\s*@isTest\b(?:\s*\([^)]*\))?\s+(?:\w+\s+)*?class\b/i.test(code);
+  // @isTest on the class itself, among any other annotations it carries, such as @SuppressWarnings.
+  const annotation = String.raw`@\w+(?:\s*\([^)]*\))?\s+`;
+  const annotatedClass = new RegExp(String.raw`^\s*(?:${annotation})*?@isTest\b(?:\s*\([^)]*\))?\s+(?:${annotation})*(?:\w+\s+)*?class\b`, "i").test(code);
   return {
     commented: comments > 0,
     testClass: annotatedClass,
