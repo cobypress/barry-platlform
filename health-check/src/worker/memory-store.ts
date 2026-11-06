@@ -198,6 +198,7 @@ export class MemoryWorkerStore implements WorkerStore {
     return {
       runId,
       released: run.status === "released",
+      releasedAt: this.releasedAt.get(runId) ?? null,
       folderId: this.documents.get(runId)?.input.driveFolderId ?? null,
       readers: [...(this.readers.get(runId) ?? [])],
       shares: structuredClone(this.shares.filter((s) => s.runId === runId)),

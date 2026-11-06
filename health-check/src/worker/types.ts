@@ -180,6 +180,8 @@ export type ShareJobInput = {
   runId: string;
   /** Rule 10: only a released run's folder is ever shared. */
   released: boolean;
+  /** Its last release, ISO UTC, or null when there's none we can read. Twelve months on, nobody has the folder (DECISIONS.md 254). */
+  releasedAt: string | null;
   /** The run's "Health check n" folder, from its last documents make. Null until there's one. */
   folderId: string | null;
   /** The microsite's readers, lower-cased. */

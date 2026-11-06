@@ -125,6 +125,19 @@ describe("sharing a run's folder with its readers", () => {
     assert.ok(store.shares.every((s) => s.state === "removed" && s.removedWhy === "retention"));
   });
 
+  test("12 months after release nobody gets the folder again: a later reader change or documents make takes access away instead", async () => {
+    const { store, sharing, deps } = setup();
+    store.releasedAt.set(RUN, "2025-10-06T09:00:00.000Z");
+    assert.deepEqual([(await syncShares(RUN, deps)).shared, sharing.who()], [0, []]);
+    // Shared before the 12 months were up, and not yet swept: the next change takes it away, as retention would.
+    store.releasedAt.set(RUN, "2025-12-01T09:00:00.000Z");
+    await syncShares(RUN, deps);
+    assert.equal(sharing.who().length, 2);
+    await syncShares(RUN, { ...deps, now: () => new Date("2026-12-01T09:00:00.000Z") });
+    assert.deepEqual(sharing.who(), []);
+    assert.ok(store.shares.every((s) => s.state === "removed" && s.removedWhy === "retention"));
+  });
+
   test("without the console's share table, or without Drive, nothing is shared", async () => {
     const one = setup();
     one.store.sharesRecordable = false;
@@ -227,10 +240,11 @@ describe("the Postgres store, on shares", () => {
       if (text.includes(`"HealthCheckDocuments"`)) return { rows: [{ driveFolderId: FOLDER }], rowCount: 1 };
       if (text.includes(`"HealthCheckMicrositeAccess"`)) return { rows: [{ readers: [{ email: "CEO@customer.example.com", addedBy: "x", addedAt: "y" }, { nope: 1 }] }], rowCount: 1 };
       if (text.includes(`"HealthCheckDriveShare"`)) return { rows: [row, { ...row, state: "odd" }], rowCount: 2 };
+      if (text.includes(`MAX("releasedAt")`) && text.includes(`"HealthCheckRelease"`)) return { rows: [{ releasedAt: "2026-11-01T09:00:00.000Z" }], rowCount: 1 };
       return { rows: [], rowCount: 0 };
     });
     const input = (await new PostgresWorkerStore(pool).loadShareJob(RUN))!;
-    assert.deepEqual([input.released, input.folderId, input.readers, input.shares.length, input.recordable], [true, FOLDER, ["ceo@customer.example.com"], 1, true]);
+    assert.deepEqual([input.released, input.releasedAt, input.folderId, input.readers, input.shares.length, input.recordable], [true, "2026-11-01T09:00:00.000Z", FOLDER, ["ceo@customer.example.com"], 1, true]);
     assert.deepEqual(readersFromRow(undefined), []);
     assert.equal(shareFromRow({ ...row, state: "shared", removedWhy: "whatever" })!.removedWhy, null);
   });

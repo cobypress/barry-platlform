@@ -1,6 +1,7 @@
 import { safeReason, type Attempt, type JobOutcome, type WorkerDeps } from "./deps.ts";
 import type { FolderSharing } from "./drive.ts";
 import { withJobLock } from "./lock.ts";
+import { dueFor } from "./retention.ts";
 import type { DriveShare, DriveShareRemoved, WorkerStore } from "./types.ts";
 
 // Sharing a released run's Drive folder with the customer (roadmap decisions 9
@@ -36,15 +37,19 @@ export async function syncShares(runId: string, deps: ShareDeps, options: { revo
   if (!input.recordable) return { shared: 0, removed: 0, failed: 0, detail: "The console can't record shares yet, so nothing was shared" };
   const at = () => deps.now().toISOString();
   const active = input.shares.filter((s) => s.state === "shared");
+  // Twelve months after release nobody has the folder (DECISIONS.md 254), so a reader added or a documents make after the sweep can't hand it out again.
+  const released = input.releasedAt ? new Date(input.releasedAt) : null;
+  const pastRetention = released !== null && !Number.isNaN(released.getTime()) && dueFor(released, deps.now()) === "folder";
+  const revokeAll = options.revokeAll ?? (pastRetention ? "retention" : undefined);
   // Rule 10: before release there's nothing anyone may have. With no folder there's nothing to share.
-  const wanted = new Set(options.revokeAll || !input.released || !input.folderId ? [] : input.readers.map((r) => r.trim().toLowerCase()));
+  const wanted = new Set(revokeAll || !input.released || !input.folderId ? [] : input.readers.map((r) => r.trim().toLowerCase()));
   const summary = { shared: 0, removed: 0, failed: 0 };
   const needsDrive = active.some((s) => !wanted.has(s.email) || s.folderId !== input.folderId) || [...wanted].some((e) => !active.some((s) => s.email === e && s.folderId === input.folderId));
   if (needsDrive && !deps.sharing) return { ...summary, failed: 1, detail: "Google Drive isn't set up here, so the folder's sharing can't change" };
 
   for (const share of active) {
     if (wanted.has(share.email) && share.folderId === input.folderId) continue;
-    const why: DriveShareRemoved = options.revokeAll ?? (share.folderId !== input.folderId ? "folder_changed" : "reader_removed");
+    const why: DriveShareRemoved = revokeAll ?? (share.folderId !== input.folderId ? "folder_changed" : "reader_removed");
     try {
       if (share.permissionId) await deps.sharing!.unshare(share.folderId, share.permissionId);
       await deps.store.saveShare({ ...share, state: "removed", removedAt: at(), removedWhy: why, error: null, updatedAt: at() });
