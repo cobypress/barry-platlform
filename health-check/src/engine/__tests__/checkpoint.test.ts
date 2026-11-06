@@ -1,8 +1,10 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileLines, readCheckpoint, SPILL_AT, writeCheckpoint } from "../checkpoint.ts";
+import { FilePartialStore } from "../run.ts";
 import { runFromRecording, tempDir } from "../../testing/harness.ts";
 import { loadAnswers } from "../../testing/replay.ts";
 import { ALL_MODULES } from "../../domains/index.ts";
@@ -60,5 +62,41 @@ describe("a checkpoint", () => {
     let i = 0;
     for (const line of fileLines(path)) if (line) assert.equal(line, lines[i++]);
     assert.equal(i, lines.length);
+  });
+});
+
+describe("a checkpoint cut short never reads as complete (DECISIONS.md 397)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "hc-checkpoint-cut-"));
+
+  test("a top-level array cut at a line end is refused, not read as a shorter one", () => {
+    const path = join(dir, "array.json");
+    writeCheckpoint(path, Array.from({ length: 1500 }, (_, i) => ({ Id: String(i) })));
+    const text = readFileSync(path, "utf8");
+    writeFileSync(path, text.slice(0, [...text.matchAll(/\n/g)][700]!.index + 1));
+    assert.throws(() => readCheckpoint(path), /cut short|complete/);
+  });
+
+  test("a write that stops part-way leaves the last good checkpoint as it was, and no half-written file", () => {
+    const path = join(dir, "atomic.json");
+    writeCheckpoint(path, { rows: Array.from({ length: 1200 }, (_, i) => ({ Id: String(i) })) });
+    class Breaks {
+      toJSON(): never {
+        throw new Error("the process died here");
+      }
+    }
+    assert.throws(() => writeCheckpoint(path, { rows: Array.from({ length: 1200 }, (_, i) => (i === 900 ? new Breaks() : { Id: `new-${i}` })) }));
+    const kept = readCheckpoint<{ rows: Array<{ Id: string }> }>(path);
+    assert.equal(kept.rows.length, 1200);
+    assert.equal(kept.rows[0]!.Id, "0");
+    assert.deepEqual(readdirSync(dir).filter((f) => f.startsWith("atomic.json") && f !== "atomic.json"), []);
+  });
+
+  test("a page log with half a line, from a crash mid-append, resumes from its last whole line and appends cleanly after it", () => {
+    const store = new FilePartialStore(dir);
+    store.append("tasks", [{ Id: "1" }, { Id: "2" }]);
+    appendFileSync(join(dir, "tasks.partial.jsonl"), '{"Id":"3","Owne');
+    assert.deepEqual(store.read("tasks"), [{ Id: "1" }, { Id: "2" }]);
+    store.append("tasks", [{ Id: "3" }]);
+    assert.deepEqual(store.read("tasks"), [{ Id: "1" }, { Id: "2" }, { Id: "3" }]);
   });
 });

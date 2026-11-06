@@ -1,4 +1,4 @@
-import { closeSync, openSync, readFileSync, readSync, writeSync } from "node:fs";
+import { closeSync, openSync, readFileSync, readSync, renameSync, rmSync, statSync, truncateSync, writeSync } from "node:fs";
 
 // Checkpoints, written and read without ever holding one as a single string
 // (DECISIONS.md 345). A big org's opportunities checkpoint was 242 million
@@ -31,8 +31,23 @@ const plain = (value: object): boolean => {
   return proto === Object.prototype || proto === null;
 };
 
-/** Writes `value` as JSON.stringify would, but in pieces, with long arrays an item to a line. */
+/**
+ * Writes `value` as JSON.stringify would, but in pieces, with long arrays an item
+ * to a line. It's written beside the checkpoint and renamed over it once whole,
+ * so a write that stops part-way leaves the last good one (DECISIONS.md 397).
+ */
 export function writeCheckpoint(path: string, value: unknown): void {
+  const temp = `${path}.${process.pid}.writing`;
+  try {
+    writeWhole(temp, value);
+    renameSync(temp, path);
+  } catch (err) {
+    rmSync(temp, { force: true });
+    throw err;
+  }
+}
+
+function writeWhole(path: string, value: unknown): void {
   const fd = openSync(path, "w", 0o600);
   let buffer = "";
   const put = (text: string): void => {
@@ -128,5 +143,34 @@ export function readCheckpoint<T>(path: string): T {
   take(first.value);
   if (!second.done) take(second.value);
   for (const line of lines) take(line);
+  // A list still open at the end was cut short: a top-level list's skeleton would otherwise parse (DECISIONS.md 397).
+  if ((open as unknown[] | null) !== null) throw new Error(`${path} was cut short: it ends inside a list, so it isn't complete`);
   return JSON.parse(skeleton.join(""), (_key, value) => (value && typeof value === "object" && !Array.isArray(value) && SPILL_KEY in value ? spills[(value as Record<string, number>)[SPILL_KEY]!] : value)) as T;
+}
+
+/**
+ * Cuts a line-a-record file back to its last whole line. A crash in the middle of
+ * an append leaves half a line, which every later read would trip on, and which
+ * the next append would run on from (DECISIONS.md 397).
+ */
+export function trimToLastLine(path: string): void {
+  const size = statSync(path).size;
+  if (size === 0) return;
+  const fd = openSync(path, "r");
+  let keep = 0;
+  try {
+    const block = Buffer.alloc(64 * 1024);
+    for (let end = size; end > 0; end -= block.length) {
+      const start = Math.max(0, end - block.length);
+      const n = readSync(fd, block, 0, end - start, start);
+      const at = block.subarray(0, n).lastIndexOf(0x0a);
+      if (at !== -1) {
+        keep = start + at + 1;
+        break;
+      }
+    }
+  } finally {
+    closeSync(fd);
+  }
+  if (keep !== size) truncateSync(path, keep);
 }
