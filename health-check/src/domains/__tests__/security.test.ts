@@ -226,7 +226,8 @@ describe("personal accounts used for integrations", () => {
     const { loginsExtractor } = await import("../../extract/users.ts");
     const row = { UserId: userId(1), LoginTime: "2026-10-30T00:00:00.000+0000", Status: "Invalid Password", ApiType: "SOAP Enterprise", Application: "X" };
     // No describe result means the query asks for every field, as before describes.
-    const ctx = { now: new Date("2026-10-31T00:00:00Z"), get: () => ({}), client: { query: async () => ({ records: [row], totalSize: 1, truncated: false }) } } as never;
+    // The run's calibration, whose dormant period sets how far back the log is read (DECISIONS.md 393).
+    const ctx = { now: new Date("2026-10-31T00:00:00Z"), calibration: { dormantDays: 90 }, get: () => ({}), client: { query: async () => ({ records: [row], totalSize: 1, truncated: false }) } } as never;
     const out = await loginsExtractor.run(ctx);
     assert.ok(out.status === "ok");
     assert.deepEqual(out.data.apiByUser, {});

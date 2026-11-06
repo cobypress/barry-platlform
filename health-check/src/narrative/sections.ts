@@ -22,6 +22,7 @@ import { applyOverrides } from "./overrides.ts";
 import { assumptionsSource, findingSource, metricSource, planSource, statedProblemsSource, type PromptSource } from "./prompt.ts";
 import { areasOf, buildPlan, bySeverity, domainLabel, domainsInOrder, isSetupReview, issuesOf, rankBy, scorecard, teamLevelFinding, topIssues, verdictOf, type Added, type Plan } from "./select.ts";
 import { chapterFigures } from "../render/chapter.ts";
+import { restOf } from "../render/money.ts";
 import { MIN_RESPONSES, SURVEY, SURVEY_METRIC_IDS, surveyHours, surveyMetrics } from "../survey/summary.ts";
 import type { Survey } from "../survey/questions.ts";
 import { buildSurveyView, surveyViewFigures, type SurveyView } from "../survey/view.ts";
@@ -269,7 +270,10 @@ function valueFigures(value: ValueModel): FigureSet["figures"] {
     const shares = [g.realisation.low, g.realisation.expected, g.realisation.high].map((n) => percent(source, n * 100));
     return [...shares, ...g.lines.flatMap((l) => [cash(source, l.annual), cash(source, l.low), cash(source, l.expected), cash(source, l.high)])];
   });
-  return [...totals, ...rate, ...groups];
+  // The money table's last row, when there are more lines than it has room for: the rest, added up (night 3 review).
+  const money = value.groups.filter((g) => g.kind !== "exposure").sort((a, b) => b.counted.expected - a.counted.expected);
+  const rests = money.slice(1).flatMap((_, i) => (["low", "expected", "high"] as const).map((k) => cash(VALUE_TOTAL, restOf(money, i + 1, k))));
+  return [...totals, ...rate, ...groups, ...rests];
 }
 
 /** A re-check's progress in words, every rule named, for the raw notes. */
@@ -470,7 +474,9 @@ function planFigures({ phases, later, quickWins }: Plan): FigureSet["figures"] {
   ];
 }
 
-const planFindings = ({ phases, quickWins }: Plan): Finding[] => [...phases.flatMap((p) => p.findings), ...quickWins];
+/** Each action's issue, and the issues from the same rule its action also covers (night 3 review). */
+const withMerged = (f: Finding, plan: Plan): Finding[] => [f, ...(plan.alsoFor[f.id] ?? [])];
+const planFindings = (plan: Plan): Finding[] => [...plan.phases, { findings: plan.quickWins }].flatMap((p) => p.findings.flatMap((f) => withMerged(f, plan)));
 
 /** Stated vs actual. Claude may draft it from the stated problems and the issues; a consultant's own links and assessment come first. */
 function statedVsActualSpec(intake: Intake | null | undefined, team: Finding[]): Spec {
@@ -649,7 +655,7 @@ function fullSpecs(input: ReportInput, team: Finding[], metrics: Metric[], surve
   const { intake } = input;
   const built = buildPlan(team, added);
   const { phases: plan, later, quickWins } = built;
-  const roadmapFindings = [...planFindings(built), ...later];
+  const roadmapFindings = [...planFindings(built), ...later.flatMap((f) => withMerged(f, built))];
   const verdict = verdictOf(team);
   const issues = issuesOf(team, added);
   const notMeasurable = team.filter((f) => f.status === "not_measurable");

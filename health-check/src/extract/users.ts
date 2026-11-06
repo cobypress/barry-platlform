@@ -65,9 +65,11 @@ const LOGIN_MAX_ROWS = 20_000;
 
 export const loginsExtractor: Extractor<Sourced<LoginSummary>> = {
   id: "logins",
-  version: 3,
+  version: 4,
   async run(ctx) {
-    const from = daysBefore(ctx.now, LOGIN_DAYS);
+    // As far back as the dormant period, when the calibration sets it longer, so a
+    // login inside it is seen and its user isn't counted as dormant (DECISIONS.md 361, 393).
+    const from = daysBefore(ctx.now, Math.max(LOGIN_DAYS, ctx.calibration.dormantDays));
     const plan = planFields(ctx, FIELD_SPECS.loginHistory);
     const where = `WHERE LoginTime >= ${soqlDateTime(from)} ORDER BY LoginTime DESC`;
     if (!plan.ok) return { status: "unavailable", reason: plan.reason, source: { kind: "soql", api: "rest", query: `SELECT ${FIELD_SPECS.loginHistory.required.join(", ")} FROM LoginHistory ${where}` } };
