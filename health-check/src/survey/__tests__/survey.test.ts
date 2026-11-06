@@ -132,6 +132,12 @@ describe("what the team says, against what we found", () => {
     assert.equal(felt[0]!.reading, "We didn't find a cause in what we read, so it's worth asking your team what's behind it.");
   });
 
+  test("re-typing is set against the duplicate and integration checks, not a connected-apps setting (DECISIONS.md 406)", () => {
+    const found = [issue("dq.duplicate-accounts", "data_quality"), issue("int.failed-async-jobs", "integrations"), issue("sec.personal-integration-accounts", "integrations"), issue("sec.self-authorised-connected-apps", "integrations"), issue("sec.insecure-remote-sites", "integrations"), issue("dq.stale-leads", "data_quality")];
+    const rekeying = buildPairings([metric(SURVEY.rekeying, 2)], found).find((p) => p.key === "rekeying")!;
+    assert.deepEqual(rekeying.issues.map((f) => f.ruleId).sort(), ["dq.duplicate-accounts", "int.failed-async-jobs", "sec.personal-integration-accounts"]);
+  });
+
   test("names the org measures it sets against ease and re-typing, when they're measured", () => {
     const pairs = buildPairings([metric(SURVEY.ease, 3), metric(SURVEY.rekeying, 1), metric("adoption.monthly_active_share", 60), metric("documented.integrations", 7)], []);
     assert.equal(pairs[0]!.found, "We found no issues with adoption, and 60% of users logged in last month.");

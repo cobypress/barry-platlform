@@ -1,3 +1,4 @@
+import { yearlyByFinding } from "../value/model.ts";
 import { currentBody, TOP_ISSUE_COUNT, type BuiltOutput, type BuiltReport } from "../narrative/sections.ts";
 import { VERDICT_WORDS, type ReadinessVerdict } from "../narrative/readiness.ts";
 import { areasOf, buildPlan, domainLabel, isSetupReview, issuesOf, isUnpricedSaving, QUICK_WINS_HEADING, recordAreasLine, scorecard, topIssues, UNPRICED, verdictOf } from "../narrative/select.ts";
@@ -89,6 +90,10 @@ table.grid { font-size: 18px; }
 .tight table.grid td, .tight table.grid th { padding: 5px 8px; }
 ol.contents { columns: 2; margin: 0; padding-left: 26px; }
 ol.contents li { margin-bottom: 8px; }
+/* The next column's item numbers hang into the gap, so a page number keeps clear of the column's edge. */
+ol.contents { column-gap: 40px; }
+ol.contents li { padding-right: 36px; }
+ol.contents .pg { float: right; margin-left: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 ol.contents.long { columns: 3; font-size: 0.92em; }
 ol.contents.long li { margin-bottom: 4px; }
 .action-list { margin: 0; padding-left: 22px; font-size: 18px; }
@@ -124,7 +129,8 @@ h3.cap { font-size: 15px; font-weight: 600; color: var(--muted); margin: 0 0 6px
 .two-text.refs .definition { font-size: 17px; margin-bottom: 11px; }
 .three-text.refs { margin-top: 10px; }
 .three-text.refs .definition { font-size: 15.5px; margin-bottom: 10px; line-height: 1.3; }
-.three-text .definition { break-inside: avoid; margin-bottom: 8px; font-size: 12px; line-height: 1.32; }
+/* 13px, about 7pt printed: the smallest the deck sets reading text (DECISIONS.md 408). */
+.three-text .definition { break-inside: avoid; margin-bottom: 8px; font-size: 13px; line-height: 1.32; }
 .compact-rows table.grid { font-size: 13px; line-height: 1.3; }
 .compact-rows table.grid td, .compact-rows table.grid th { padding: 4px 7px; }
 .process { display: grid; grid-template-columns: 300px 1fr; gap: 22px; align-items: start; }
@@ -210,22 +216,30 @@ function balance(findings: Finding[], causeOf: CauseOf): [Finding[], Finding[]] 
   return [findings.slice(0, best), findings.slice(best)];
 }
 
-function twoColumnSlides(r: Render, label: string, findings: Finding[], causeOf: CauseOf): Slide[] {
+/** Cards in two columns, a slide's worth to a group, by height. */
+function twoColumnGroups(findings: Finding[], causeOf: CauseOf): Finding[][] {
   const columns = paginate(findings, (f) => smallCardHeight(f, causeOf), ISSUE_SLIDE_BUDGET);
-  const slides: Slide[] = [];
-  for (let i = 0; i < columns.length; i += 2) {
-    const group = columns.slice(i, i + 2).flat();
-    // A lone card takes the full width. Half an empty slide looks like a mistake.
-    if (group.length === 1) {
-      slides.push(issueCards(r, label, group, causeOf));
-      continue;
-    }
-    const sides = balance(group, causeOf);
-    // Few cards get larger type, so a short slide doesn't look unfinished.
-    const roomy = Math.max(...sides.map((side) => side.reduce((sum, f) => sum + smallCardHeight(f, causeOf), 0))) * ROOMY_SCALE <= ISSUE_SLIDE_BUDGET;
-    slides.push({ html: `<div class="eyebrow">${r.t(label)}</div><h2>${groupTitle(group[0]!)}</h2><div class="two-up${roomy ? " roomy" : ""}">${sides.map((column) => `<div class="col">${column.map((f) => card(r, f, causeOf)).join("")}</div>`).join("")}</div>` });
-  }
-  return slides;
+  const groups: Finding[][] = [];
+  for (let i = 0; i < columns.length; i += 2) groups.push(columns.slice(i, i + 2).flat());
+  return groups;
+}
+
+function twoColumnSlide(r: Render, label: string, group: Finding[], causeOf: CauseOf): Slide {
+  // A lone card takes the full width. Half an empty slide looks like a mistake.
+  if (group.length === 1) return issueCards(r, label, group, causeOf);
+  const sides = balance(group, causeOf);
+  // Few cards get larger type, so a short slide doesn't look unfinished.
+  const roomy = Math.max(...sides.map((side) => side.reduce((sum, f) => sum + smallCardHeight(f, causeOf), 0))) * ROOMY_SCALE <= ISSUE_SLIDE_BUDGET;
+  return { html: `<div class="eyebrow">${r.t(label)}</div><h2>${groupTitle(group[0]!)}</h2><div class="two-up${roomy ? " roomy" : ""}">${sides.map((column) => `<div class="col">${column.map((f) => card(r, f, causeOf)).join("")}</div>`).join("")}</div>` };
+}
+
+/**
+ * Whether a slide's worth of cards fits one slide by height: in two balanced
+ * columns, or one under another.
+ */
+function cardsFit(group: Finding[], density: Density, causeOf: CauseOf): boolean {
+  if (density.columns) return Math.max(...balance(group, causeOf).map((side) => side.reduce((sum, f) => sum + smallCardHeight(f, causeOf), 0))) <= ISSUE_SLIDE_BUDGET;
+  return group.reduce((sum, f) => sum + cardHeight(f, causeOf), 0) <= ISSUE_SLIDE_BUDGET;
 }
 
 /** `columns` sets smaller cards in two columns, so an ordinary org keeps all its detail. */
@@ -267,26 +281,44 @@ function issueTable(r: Render, label: string, issues: Finding[]): Slide[] {
   return [{ classes: "tight", html: `<div class="eyebrow">${r.t(label)}</div><h2>Issues</h2>${note}<table class="grid"><thead><tr><th>Issue</th><th style="width:10%">Severity</th><th style="width:24%">Value</th><th style="width:18%">Owner</th></tr></thead><tbody>${rows.join("")}</tbody></table>` }];
 }
 
+/** An issue on its own slide, or a slide's worth of cards. */
+export type CardPiece<T> = { one: T } | { cards: T[] };
+
+/**
+ * A single card left over by the count goes back onto the slide of cards just
+ * before it, where the two fit one slide (DECISIONS.md 409). Never across an
+ * issue that has its own slide, so reading order holds.
+ */
+export function foldLoneCards<T>(pieces: Array<CardPiece<T>>, fits: (cards: T[]) => boolean): Array<CardPiece<T>> {
+  return pieces.reduce<Array<CardPiece<T>>>((out, piece) => {
+    const before = out.at(-1);
+    if ("cards" in piece && piece.cards.length === 1 && before && "cards" in before && fits([...before.cards, ...piece.cards])) out[out.length - 1] = { cards: [...before.cards, ...piece.cards] };
+    else out.push(piece);
+    return out;
+  }, []);
+}
+
 function domainIssueSlides(r: Render, label: string, issues: Finding[], density: Density, causeOf: CauseOf): Slide[] {
-  const slides: Slide[] = [];
+  const pieces: Array<CardPiece<Finding>> = [];
   let queue: Finding[] = [];
   const flush = (): void => {
-    if (density.columns) slides.push(...twoColumnSlides(r, label, queue, causeOf));
-    else for (const group of paginate(queue, (f) => cardHeight(f, causeOf), ISSUE_SLIDE_BUDGET)) slides.push(issueCards(r, label, group, causeOf));
+    const groups = density.columns ? twoColumnGroups(queue, causeOf) : paginate(queue, (f) => cardHeight(f, causeOf), ISSUE_SLIDE_BUDGET);
+    pieces.push(...groups.map((cards) => ({ cards })));
     queue = [];
   };
   for (const f of issues) {
     const perSlide = density[f.severity];
     if (perSlide === 1) {
       flush();
-      slides.push(issueSlide(r, label, f, causeOf));
+      pieces.push({ one: f });
     } else {
       queue.push(f);
       if (queue.length >= perSlide) flush();
     }
   }
   flush();
-  return slides;
+  const folded = foldLoneCards(pieces, (cards) => cardsFit(cards, density, causeOf));
+  return folded.map((piece) => ("one" in piece ? issueSlide(r, label, piece.one, causeOf) : density.columns ? twoColumnSlide(r, label, piece.cards, causeOf) : issueCards(r, label, piece.cards, causeOf)));
 }
 
 function metricRows(r: Render, metrics: Metric[], currency: string): string {
@@ -550,10 +582,13 @@ function lostAndSpeedSlideDense(r: Render, metric: (id: string) => Metric | unde
 /** A line of a list slide. `ref` is its reference, or several, as for an action that covers more than one issue. */
 type ListItem = { title: string; detail: string; ref?: string | string[] };
 const refsOf = (r: Render, ref: ListItem["ref"]): string => (ref === undefined ? "" : [ref].flat().map((id) => r.ref(id)).join(""));
+/** A list item's title with its references, as characters: a reference is about six (DECISIONS.md 408). */
+const titleText = (x: ListItem): string => `${x.title}${"\u00a0".repeat(6 * (x.ref === undefined ? 0 : [x.ref].flat().length))}`;
 
 /** Definitions are reference, so a dense deck sets them small, in three columns. */
 function threeColumnList(r: Render, eyebrow: string, title: string, items: ListItem[]): Slide[] {
-  const pages = paginate(items, (x) => 26 + 17 * estimateLines(x.detail, 56), 3 * 490);
+  // The title can wrap too, once its references are beside it.
+  const pages = paginate(items, (x) => 10 + 17.2 * (estimateLines(titleText(x), 46) + estimateLines(x.detail, 52)), 3 * 490);
   return pages.map((group, i) => ({
     html: `<div class="eyebrow">${r.t(eyebrow)}</div><h2>${r.t(title)}${i ? ", continued" : ""}</h2><div class="three-text">${group.map((x) => `<p class="definition"><strong>${r.t(x.title)}</strong>${refsOf(r, x.ref)}<br>${r.t(x.detail)}</p>`).join("")}</div>`,
   }));
@@ -594,7 +629,7 @@ function listSlides(r: Render, eyebrow: string, title: string, items: ListItem[]
 }
 
 function twoColumnList(r: Render, eyebrow: string, title: string, items: ListItem[]): Slide[] {
-  const pages = paginate(items, (x) => 28 + 19 * estimateLines(x.detail, 72), 2 * LIST_BUDGET);
+  const pages = paginate(items, (x) => 9 + 19 * (estimateLines(titleText(x), 64) + estimateLines(x.detail, 72)), 2 * LIST_BUDGET);
   return pages.map((group, i) => ({
     html: `<div class="eyebrow">${r.t(eyebrow)}</div><h2>${r.t(title)}${i ? ", continued" : ""}</h2><div class="two-text">${group.map((x) => `<p class="definition"><strong>${r.t(x.title)}</strong>${refsOf(r, x.ref)}<br>${r.t(x.detail)}</p>`).join("")}</div>`,
   }));
@@ -658,6 +693,9 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   const causeOf: CauseOf = (f) => causes.get(f.id) ?? null;
   const slides: Slide[] = [];
   const add = (html: string, classes?: string): void => void slides.push({ html, ...(classes ? { classes } : {}) });
+  // Where each contents entry starts, as a page number, noted as its first slide goes in (DECISIONS.md 407).
+  const starts = new Map<string, number>();
+  const mark = (label: string, ahead = 0): void => void (starts.has(label) || starts.set(label, slides.length + 1 + ahead));
 
   add(`<div><div class="eyebrow">Black Cloud Barometer</div><h1>${documentTitle(run)}</h1><div class="sub">Full report</div></div>${coverScore(report.overall)}<div>${r.draft ? '<p><span class="mark">Draft, not approved for release</span></p>' : ""}<p class="for">Prepared for</p><p>${r.t(customer)}</p>${preparedBy ? `<p>by ${r.t(preparedBy)}, Black Cloud</p>` : ""}<p>${longDate(run.asOf)}</p></div>`, "dark cover");
 
@@ -747,7 +785,16 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
     "Appendix",
   ];
   // With Service Cloud and CPQ both on there can be 19 area chapters, more than two columns hold.
-  add(`<div class="eyebrow">Contents</div><h2>What's in this report</h2><ol class="contents${contents.length > CONTENTS_IN_TWO_COLUMNS ? " long" : ""}">${contents.map((c) => `<li>${r.t(c)}</li>`).join("")}</ol>`);
+  // Its page numbers are filled in once every slide is in (DECISIONS.md 407).
+  const contentsAt = slides.length;
+  // In page order: what the team and your people said sits beside the area it speaks to. An entry with no page of its own keeps its place.
+  const inPageOrder = (): string[] => {
+    let last = 0;
+    const keyed = contents.map((c, i) => ({ c, i, at: (last = starts.get(c) ?? last) }));
+    return keyed.sort((a, b) => a.at - b.at || a.i - b.i).map((x) => x.c);
+  };
+  const contentsSlide = (): string => `<div class="eyebrow">Contents</div><h2>What's in this report</h2><ol class="contents${contents.length > CONTENTS_IN_TWO_COLUMNS ? " long" : ""}">${inPageOrder().map((c) => `<li>${r.t(c)}${starts.has(c) ? `<span class="pg" data-ref>${starts.get(c)}</span>` : ""}</li>`).join("")}</ol>`;
+  add(contentsSlide());
 
   add(`<div class="eyebrow">How to read this report</div><h2>What the ratings mean</h2><table class="grid"><tbody>
     <tr><td style="width:24%"><strong>Barometer score</strong></td><td>One score out of 100 for your whole Salesforce, from the area scores, with a grade from A to E.</td></tr>
@@ -759,18 +806,24 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
     <tr><td><strong>Reference</strong></td><td>Where the working is in the raw notes that come with this report. <span data-ref>R4.3</span> is the third item in section <span data-ref>R4</span>.</td></tr></tbody></table>`);
 
   // What the customer said comes first, and our answer to it straight after: it's what they'll read first.
+  mark("What you told us");
   add(`<div class="eyebrow">What you told us</div><h2>In your words</h2>${needsInput(built, "stated_problems") ? inputChip : ""}${sectionBody(r, built, "stated_problems")}`);
+  mark("What we found against it");
   add(`<div class="eyebrow">What we found against it</div><h2>What you told us, against what we found</h2>${needsInput(built, "stated_vs_actual") ? inputChip : ""}${sectionBody(r, built, "stated_vs_actual")}`);
 
+  mark("Overview and scorecard");
   add(`<div class="eyebrow">Overview</div><h2>${r.t(verdict.headline)}</h2><div>${sectionBody(r, built, "overview").replace(`<p>${r.t(verdict.headline)}.</p>`, "")}</div><div class="stat-row" style="margin-top:18px">${report.overall.status === "measured" ? `<div class="stat"><b>${report.overall.score}</b><span>Barometer score</span></div>` : ""}<div class="stat"><b>${verdict.issues}</b><span>Issues</span></div><div class="stat"><b>${verdict.critical}</b><span>Critical</span></div><div class="stat"><b>${verdict.high}</b><span>High</span></div><div class="stat"><b>${team.filter((f) => f.status === "not_measurable").length}</b><span>Not measurable</span></div><div class="stat"><b>${team.filter((f) => f.status === "passed").length}</b><span>Passed</span></div></div>`);
 
   const progressed = progressPage(r, report);
+  if (progressed) mark("Since your last health check");
   if (progressed) add(progressed, "tight");
   const worth = moneyPage(r, report, "slide");
+  if (worth) mark("What fixing this is worth");
   if (worth) add(worth, "tight");
 
   add(`<div class="eyebrow">Scorecard</div><h2>How each area stands</h2>${scoreLine(report) ? `<p class="lede">${r.t(scoreLine(report, true))}</p>` : ""}<div class="chart-wrap" style="max-width:${scoreLine(report) ? 760 : 880}px">${chartSlot(scorecardChart(scorecard(team, scores, domains), scorecardOptions(report)))}</div>`);
 
+  if (comparable) mark("How you compare");
   if (comparable) slides.push(compareSlide(r, compared));
 
   if (top.length) add(`<div class="eyebrow">Top issues</div><h2>${top.length === TOP_ISSUE_COUNT ? `The ${TOP_ISSUE_COUNT} that matter most` : "The issues that matter most"}</h2><table class="grid"><thead><tr><th style="width:6%"></th><th>Issue</th><th style="width:12%">Severity</th><th style="width:26%">Impact</th><th style="width:20%">Owner</th></tr></thead><tbody>${top.map((f, i) => `<tr><td>${i + 1}</td><td>${r.t(f.title)}${r.ref(f.id)}</td><td>${severityChip(f)}</td><td>${valueText(r, f).amount}</td><td>${r.t(f.owner)}</td></tr>`).join("")}</tbody></table>`);
@@ -795,6 +848,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
     const label = domainLabel(domain);
     const own = team.filter((f) => f.domain === domain);
     const issues = issuesOf(own, report.added);
+    mark(label);
     if (!density?.domainSummary) add(`<div class="eyebrow">Area</div><h1>${r.t(label)}</h1><div class="body">${sectionBody(r, built, `domain_${domain}`)}</div>`, "dark divider");
     // Each area opens the same way. The tightest densities drop it to keep the deck in range.
     const glance = density && !density.domainSummary ? chapterSlide(r, report, domain) : "";
@@ -803,11 +857,20 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
     if (usage) add(usage, "tight");
     slides.push(...(density ? domainIssueSlides(r, label, issues, density, causeOf) : issueTable(r, label, issues)));
     if (domain === inventoryHome && inventoryWorthShowing) slides.push(inventorySlide(r, label, metric(OBJECT_INVENTORY)));
-    if (domain === surveyAfter) slides.push(...teamSays, ...peopleSaid);
+    if (domain === surveyAfter) {
+      if (teamSays.length) mark("What your team says");
+      if (peopleSaid.length) mark("What your people told us", teamSays.length);
+      slides.push(...teamSays, ...peopleSaid);
+    }
   }
-  if (surveyAfter === undefined) slides.push(...teamSays, ...peopleSaid);
+  if (surveyAfter === undefined) {
+    if (teamSays.length) mark("What your team says");
+    if (peopleSaid.length) mark("What your people told us", teamSays.length);
+    slides.push(...teamSays, ...peopleSaid);
+  }
 
   if (working.length && !density?.domainSummary) {
+    mark("What's working well");
     slides.push(...listSlides(r, "Areas", "What's working well", working.map((d) => {
       const own = team.filter((f) => f.domain === d);
       const passed = own.filter((f) => f.status === "passed").length;
@@ -825,6 +888,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
     slides.push(...listSlides(r, "Areas", "Where we can't give a view yet", recordLine ? [...items, { title: "Areas measured from records", detail: recordLine }] : items, compact));
   }
 
+  if (pipelinePages.length || gaps.length) mark("Pipeline");
   if (pipelinePages.length) {
     const pipelineNotes = notes.find((s) => s.key === "pipeline_metrics");
     if (!density?.domainSummary) add(`<div class="eyebrow">Deep dive</div><h1>Pipeline</h1><div class="body">${sectionBody(r, built, "pipeline_deep_dive")}${pipelineNotes ? `<p class="small-note">The working for every figure in this part is in section <span data-ref>${pipelineNotes.ref}</span> of the raw notes.</p>` : ""}</div>`, "dark divider");
@@ -833,9 +897,11 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   if (gaps.length) slides.push(...listSlides(r, "Pipeline", "What your data can't tell us yet", gaps, compact));
 
   // Before the roadmap, so what to fix for an agent reads straight into when to fix it.
+  mark("AI readiness");
   add(readinessSlide(r, report, built), "tight");
 
   const planned = plan.some((p) => p.findings.length > 0);
+  if (planned) mark("Roadmap");
   // The engine's roadmap text only counts actions, which the boxes already show. Written text goes above them.
   const roadmap = built.versions.find((v) => v.id === built.sections.find((x) => x.key === "roadmap")?.currentVersionId);
   const roadmapText = roadmap && roadmap.source !== "engine" ? `<div style="margin-bottom:18px">${sectionBody(r, built, "roadmap")}</div>` : "";
@@ -873,9 +939,13 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   // Titles only, so at the densest they take three columns, as the metric definitions do.
   if (later.length) slides.push(...(density?.domainSummary || density?.threeColumnLists ? threeColumnList(r, "Roadmap", "After 90 days", afterPlan) : dense ? twoColumnList(r, "Roadmap", "After 90 days", afterPlan) : listSlides(r, "Roadmap", "After 90 days", afterPlan, compact)));
 
+  mark("What happens next");
   slides.push(nextStepsSlide(r, plan));
-  slides.push(...documentedSlides(r, metrics, dense));
+  const documented = documentedSlides(r, metrics, dense);
+  if (documented.length) mark("Your org, documented");
+  slides.push(...documented);
 
+  mark("Appendix");
   if (!dense) add(`<div class="eyebrow">Appendix</div><h1>How we worked</h1><div class="body">${sectionBody(r, built, "appendix")}</div>`, "dark divider");
   slides.push(...listSlides(r, "Appendix", "Assumptions", [
     ...(dense ? [{ title: "How we worked", detail: currentBody(built, "appendix").replace(/\n+/g, " ") }] : []),
@@ -905,23 +975,36 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   }
   // Manual steps are working notes for us, not something the deck refers to.
   slides.push(detailSlide(r, notes.filter((s) => s.key !== "manual_steps")));
+  slides[contentsAt] = { html: contentsSlide() };
   return slides;
 }
 
 /** Slides at each density in turn, so a test can see how close a deck is to its ceiling. */
 export function slideCounts(report: BuiltReport, pseudonyms: Pseudonymiser): number[] {
-  const r = renderContext(pseudonyms, report.input.calibration.currency, true, referenceMap(noteSections(report)));
+  const r = renderContext(pseudonyms, report.input.calibration.currency, true, referenceMap(noteSections(report)), yearlyByFinding(report.value));
   return [...DENSITIES, null].map((density) => buildSlides(report, r, density).length);
 }
 
 export function fullReportHtml(report: BuiltReport, pseudonyms: Pseudonymiser): string {
+  return fullReportHtmlAt(report, pseudonyms, null);
+}
+
+/**
+ * The deck at one density step, by its place in the ladder (the last is the
+ * densest), so every step can be put through the layout check. With null, the
+ * roomiest step that fits the deck's range, as the deck is made.
+ */
+export function fullReportHtmlAt(report: BuiltReport, pseudonyms: Pseudonymiser, step: number | null): string {
   const built = report.outputs.full_health_check;
-  const r = renderContext(pseudonyms, report.input.calibration.currency, !canRelease(built.sections).ok, referenceMap(noteSections(report)));
+  const r = renderContext(pseudonyms, report.input.calibration.currency, !canRelease(built.sections).ok, referenceMap(noteSections(report)), yearlyByFinding(report.value));
+  const ladder = [...DENSITIES, null];
   let slides: Slide[] = [];
-  for (const density of [...DENSITIES, null]) {
-    slides = buildSlides(report, r, density);
-    if (slides.length <= deckRangeFor(report.input.run).max) break;
-  }
+  if (step !== null) slides = buildSlides(report, r, ladder[step] ?? null);
+  else
+    for (const density of ladder) {
+      slides = buildSlides(report, r, density);
+      if (slides.length <= deckRangeFor(report.input.run).max) break;
+    }
   const pages = slides.map((slide, i) => {
     const chrome = slide.classes?.includes("cover") ? "" : `<div class="footer" data-chrome><span>Black Cloud Barometer${r.draft ? " | Draft, not approved for release" : ""}</span><span>${i + 1}</span></div>`;
     return `<section class="page ${slide.classes ?? ""}" data-page="${i + 1}">${slide.html}${chrome}</section>`;

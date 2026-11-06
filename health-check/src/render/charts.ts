@@ -180,6 +180,11 @@ export type ScorecardOptions = {
   before?: Map<string, number | null>;
 };
 
+/** The scorecard's order: the area that holds the overall score back most first, its weight times its shortfall from 100, and areas with no score last. */
+export function rankScorecard<T extends { domain: string; score: number | null }>(rows: T[], weightOf: (domain: string) => number): T[] {
+  return [...rows].sort((a, b) => (a.score === null ? 1 : 0) - (b.score === null ? 1 : 0) || (b.score === null || a.score === null ? 0 : weightOf(b.domain) * (100 - b.score) - weightOf(a.domain) * (100 - a.score)));
+}
+
 /**
  * One bar per area. With weights, the area that holds the overall score back
  * most comes first: its weight times its shortfall from 100. A domain with no
@@ -190,9 +195,7 @@ export function scorecardChart(rows: ScorecardRow[], options: ScorecardOptions =
   const title = "Scorecard";
   if (rows.length === 0) return gap(id, title, "No domains were assessed.");
   const { weightOf, before } = options;
-  const ranked = weightOf
-    ? [...rows].sort((a, b) => (a.score === null ? 1 : 0) - (b.score === null ? 1 : 0) || (b.score === null || a.score === null ? 0 : weightOf(b.domain) * (100 - b.score) - weightOf(a.domain) * (100 - a.score)))
-    : rows;
+  const ranked = weightOf ? rankScorecard(rows, weightOf) : rows;
   // The weight sits in its own column between the name and the bar.
   const weightColumn = weightOf ? 54 : 0;
   const labelWidth = 200;
@@ -347,7 +350,9 @@ export function deliveryOutlookChart(value: Metric | undefined, count: Metric | 
   const expected = new Map(count?.status === "measured" ? count.series.map((p) => [p.date, p.value]) : []);
   const columns = m.series.map((p) => {
     const n = expected.get(p.date);
-    return { label: monthYear(p.date), value: p.value, text: p.value === null ? "Not measured" : compactMoney(p.value, currency), ...(typeof n === "number" ? { sub: dealCount(n) } : {}) };
+    // Deals are whole (DECISIONS.md 404), so a month with some value can round to none.
+    const sub = typeof n !== "number" ? null : n === 0 && (p.value ?? 0) > 0 ? "under 1 deal" : dealCount(n);
+    return { label: monthYear(p.date), value: p.value, text: p.value === null ? "Not measured" : compactMoney(p.value, currency), ...(sub ? { sub } : {}) };
   });
   return columnChart(id, title, columns, { alt: `Expected won value by month, ${compactMoney(m.value, currency)} in all.`, width });
 }
@@ -541,15 +546,17 @@ const SHORT_KIND_LABELS: Partial<Record<keyof typeof KIND_LABELS, string>> = {
 };
 
 /** A waterfall of the expected value by kind, then the total, with the largest exposure beside it and never stacked. */
-export function waterfallChart(value: ValueModel, width = WIDTH): Chart {
+/** Kinds smaller than this stay in the money table but get no bar: a sliver beside six figures is noise (DECISIONS.md 402). */
+export const WATERFALL_MIN = 1000;
+
+export function waterfallChart(value: ValueModel, width = WIDTH, height = 320): Chart {
   const id = "value-waterfall";
   const title = "What fixing this is worth";
-  const kinds = HEADLINE_KINDS.filter((k) => value.byKind[k].expected > 0);
+  const kinds = HEADLINE_KINDS.filter((k) => value.byKind[k].expected >= WATERFALL_MIN);
   if (value.total.expected <= 0 || kinds.length === 0) return gap(id, title, "Nothing could be given a figure in money.");
   const m = (n: number) => compactMoney(n, value.currency);
   const exposure = value.byKind.exposure.expected > 0 ? value.byKind.exposure.expected : null;
   const box = width < WIDTH ? 140 : 170;
-  const height = 320;
   const plotRight = exposure ? width - PAD - box - 20 : width - PAD;
   // Room under the bars for a kind's name over four short lines.
   const [top, bottom] = [36, height - 78];

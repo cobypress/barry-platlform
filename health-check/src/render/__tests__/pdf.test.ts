@@ -15,7 +15,8 @@ import { SALES_CLOUD_DOMAINS, type Finding, type Metric, type NumberOverride, ty
 import { runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
 import { EXECUTIVE_PLAN_ITEMS, executiveHtml } from "../executive.ts";
-import { plainWords, ukDates } from "../format.ts";
+import { compactMoney, plainWords, ukDates } from "../format.ts";
+import { yearlyByFinding } from "../../value/model.ts";
 import { DECK_RANGE, fullReportHtml, INVENTORY_SLIDE_ROWS, slideCounts } from "../full-report.ts";
 import { INVENTORY_COLUMNS, OBJECT_INVENTORY } from "../../domains/configuration/inventory.ts";
 import { document } from "../html.ts";
@@ -69,8 +70,10 @@ describe("the executive summary", () => {
     const report = buildReport(full);
     const html = executiveHtml(report, pseudonyms);
     for (const text of ["Verdict", verdictOf(report.teamFindings).headline, "How each area stands", "Your pipeline today", "Potential revenue in open deals", "Top 5 issues", "Days 1 to 30", "Days 31 to 60", "Days 61 to 90", "Synthetic Co"]) assert.ok(html.includes(text), text);
+    const yearly = yearlyByFinding(report.value);
     for (const f of topIssues(report.teamFindings, 5)) {
-      const value = f.value.kind === "not_sized" ? "Not sized" : ukDates(`£${f.value.amount.toLocaleString("en-GB")} ${f.value.period}`);
+      // A segment's gap is shown as the value model's year (DECISIONS.md 405).
+      const value = f.value.kind === "not_sized" ? "Not sized" : f.ruleId === "pipe.segment-divergence" ? `About ${compactMoney(yearly.get(f.id)!, "GBP")} a year ${f.value.period.split(",")[0]}` : ukDates(`£${f.value.amount.toLocaleString("en-GB")} ${f.value.period}`);
       assert.ok(html.includes(value), value);
     }
     assert.match(html, /data-expect-chart="scorecard"/);

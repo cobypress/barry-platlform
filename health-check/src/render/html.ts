@@ -18,13 +18,16 @@ export type Render = {
   draft: boolean;
   /** Where in the raw notes a finding or metric's working is, as a small tag. Empty when it has none. */
   ref(id: string): string;
+  /** A counted finding's own figure over 12 months, from the value model. */
+  yearly(findingId: string): number | undefined;
 };
 
 /** A reference is a place in the raw notes, not a figure, so the number check passes over it. */
 export const refTag = (ref: string): string => `<span class="ref" data-ref>${ref}</span>`;
 
-export function renderContext(pseudonyms: Pseudonymiser, currency: string, draft: boolean, refs: Map<string, string> = new Map()): Render {
+export function renderContext(pseudonyms: Pseudonymiser, currency: string, draft: boolean, refs: Map<string, string> = new Map(), yearly: Map<string, number> = new Map()): Render {
   return {
+    yearly: (findingId) => yearly.get(findingId),
     t: (text) => escapeXml(plainWords(ukDates(pseudonyms.restore(text)))),
     currency,
     draft,
@@ -64,6 +67,9 @@ export function valueText(r: Render, f: Finding): { amount: string; note: string
   const target = targetText(r, f);
   if (target) return { amount: r.t(target), note: r.t(sentence(f.value.assumptions.join(". "))) };
   // Pipeline at risk, or spend not coming back, isn't money to win: it says so beside the figure (night 3 reading pass).
+  // A segment's gap is over the whole window and may overlap another's: the card gives the value model's year (DECISIONS.md 405).
+  const year = f.ruleId === "pipe.segment-divergence" ? r.yearly(f.id) : undefined;
+  if (year !== undefined) return { amount: r.t(`About ${compactMoney(year, /^[A-Z]{3}$/.test(f.value.unit) ? f.value.unit : r.currency)} a year in wins the gap may have cost`), note: r.t(sentence(f.value.assumptions.join(". "))) };
   if (EXPOSURE_RULES.has(f.ruleId) && f.ruleId !== "lead.campaign-return") return { amount: r.t(`At risk: ${valueFigure(r, f)} ${f.value.period}`), note: r.t(sentence(f.value.assumptions.join(". "))) };
   return { amount: r.t(`${valueFigure(r, f)} ${f.value.period}`), note: r.t(sentence(f.value.assumptions.join(". "))) };
 }
@@ -151,7 +157,7 @@ td.num, th.num { text-align: right; white-space: nowrap; }
 .cover-score b { font-size: 3.2em; font-weight: 700; line-height: 1; color: var(--chartreuse); margin-right: 10px; }
 .cover-score span { color: var(--panelMuted); }
 .cover-score .grade { font-weight: 600; margin-top: 4px; }
-.ref { color: var(--muted); font-size: 0.72em; font-weight: 400; letter-spacing: 0.02em; margin-left: 6px; white-space: nowrap; }
+.ref { color: var(--muted); font-size: 0.85em; font-weight: 400; letter-spacing: 0.02em; margin-left: 6px; white-space: nowrap; }
 .dark .ref { color: var(--panelMuted); }
 `;
 

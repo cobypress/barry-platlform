@@ -1,3 +1,4 @@
+import { yearlyByFinding } from "../value/model.ts";
 import { differenceWords, formatFigure, comparisonId } from "../benchmark/compare.ts";
 import type { BuiltReport } from "../narrative/sections.ts";
 import { buildPlan, isSetupReview, verdictOf } from "../narrative/select.ts";
@@ -8,6 +9,7 @@ import { scoreLine } from "./executive.ts";
 import { compactMoney, longDate } from "./format.ts";
 import { document, documentTitle, renderContext, type Render } from "./html.ts";
 import { returnOnSpend } from "./money.ts";
+import { INVESTMENT } from "../money/investment.ts";
 import { noteSections, referenceMap } from "./references.ts";
 
 // The CEO one-pager (roadmap Stage 4): one A4 page, built to be forwarded. It
@@ -84,10 +86,24 @@ function comparisons(r: Render, report: BuiltReport): string {
 }
 
 /** The one-pager's HTML: one A4 page. */
+/** With no figure for what they pay, the seats take the box, as they take the money page (DECISIONS.md 401). */
+function seatsBox(r: Render, report: BuiltReport): string {
+  const metric = (id: string) => {
+    const m = report.metrics.find((x) => x.id === id);
+    return m?.status === "measured" ? m : null;
+  };
+  const paid = metric(INVESTMENT.seatsPaid);
+  const unused = metric(INVESTMENT.seatsUnused);
+  const cost = metric(INVESTMENT.unusedSeatCost);
+  if (!paid || !unused) return `<div class="box"><div class="label">What you pay</div><p>${r.t("We don't have a figure for what you pay a year.")}</p></div>`;
+  const m = (n: number) => compactMoney(n, report.investment.currency);
+  return `<div class="box"><div class="label">Seats nobody is assigned to</div><div class="big">${unused.value}</div><p>${r.t(`Of ${paid.value} you pay for${cost ? `, costing ${m(cost.value)} a year` : ""}. We don't have a figure for your whole Salesforce bill.`)}</p></div>`;
+}
+
 export function onePagerHtml(report: BuiltReport, pseudonyms: Pseudonymiser): string {
   const { run, intake, calibration, preparedBy } = report.input;
   const built = report.outputs.executive_summary;
-  const r = renderContext(pseudonyms, calibration.currency, !canRelease(built.sections).ok, referenceMap(noteSections(report)));
+  const r = renderContext(pseudonyms, calibration.currency, !canRelease(built.sections).ok, referenceMap(noteSections(report)), yearlyByFinding(report.value));
   const m = (n: number): string => compactMoney(n, report.value.currency);
   const customer = intake?.customerName ?? run.customerRef ?? "Customer";
   const o = report.overall;
@@ -106,7 +122,7 @@ export function onePagerHtml(report: BuiltReport, pseudonyms: Pseudonymiser): st
   const pay =
     cost.status === "measured"
       ? `<div class="box"><div class="label">What you pay</div><div class="big">${m(cost.value)}</div><p>${r.t(`A year. ${ratio !== null ? `What fixing the issues is worth is ${ratio} times what you pay for Salesforce a year.` : cost.label + "."}`)}</p></div>`
-      : `<div class="box"><div class="label">What you pay</div><p>${r.t("We don't have a figure for what you pay a year.")}</p></div>`;
+      : seatsBox(r, report);
 
   const actions = buildPlan(report.teamFindings, report.added).phases.flatMap((phase) => phase.findings.map((f) => ({ f, phase }))).slice(0, ONE_PAGER_ACTIONS);
   const todo = actions.length

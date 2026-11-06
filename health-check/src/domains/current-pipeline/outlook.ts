@@ -119,7 +119,7 @@ export function deliveryOutlook(ctx: Ctx, data: Ready, deals: Deal[], evidence: 
   const shared = { domain: DOMAIN, evidence, exclusions: data.exclusions, assumptions: [zoneNote(ctx), method] };
   const definitions = {
     value: { id: "current.delivery_outlook_value", label: "Expected won value by month", unit: "currency" as const, definition: `Open pipeline weighted by stage win rates, in the month each deal is expected to close. The value is the total for the months shown.` },
-    deals: { id: "current.delivery_outlook_deals", label: "Expected won deals by month", unit: "count" as const, definition: "The same outlook in deals. Each counts as its stage win rate, so the figure can be a fraction." },
+    deals: { id: "current.delivery_outlook_deals", label: "Expected won deals by month", unit: "count" as const, definition: "The same outlook in deals. Each counts as its stage win rate, and each month and the total are rounded to whole deals." },
   };
   const won = wonFromOpen(ctx, data);
   const gate = data.unmapped.finalStages.length > 0 ? `The calibration doesn't say what these stages mean: ${data.unmapped.finalStages.join(", ")}.` : won.length < minSample ? `${won.length} won deals with stage history is below the calibrated minimum of ${minSample}, so we can't say how late close dates run.` : null;
@@ -138,7 +138,8 @@ export function deliveryOutlook(ctx: Ctx, data: Ready, deals: Deal[], evidence: 
   };
   const placed = groupBy(weighted, timing);
   const valueOf = (group: Deal[]): number => Math.round(group.reduce((sum, d) => sum + chance(d) * (d.Amount ?? 0), 0));
-  const dealsOf = (group: Deal[]): number => round1(group.reduce((sum, d) => sum + chance(d), 0));
+  // Whole deals: nobody plans for 0.4 of a deal (DECISIONS.md 404).
+  const dealsOf = (group: Deal[]): number => Math.round(group.reduce((sum, d) => sum + chance(d), 0));
   const timingKeys: Array<[string, string]> = [["past", "Expected date already passed"], ["later", "Expected after the outlook"]];
   const assumptions = [...shared.assumptions, `Your won deals closed a median of ${late} days after their first close date`];
   const stats = { lateDays: late, months: OUTLOOK_MONTHS };
@@ -150,7 +151,8 @@ export function deliveryOutlook(ctx: Ctx, data: Ready, deals: Deal[], evidence: 
   const build = (calculate: (group: Deal[]) => number) => ({
     value: calculate(within),
     n: within.length,
-    dateRange: { from: months[0]!, to: endOfOutlook },
+    // From the report date: the first month holds only what's left of it (DECISIONS.md 404).
+    dateRange: { from: today, to: endOfOutlook },
     series: months.map((m) => ({ date: m, value: calculate(placed.get(m) ?? []), n: (placed.get(m) ?? []).length, notMeasurableReason: null })),
     segments: [
       ...timingKeys.map(([key, label]) => ({ dimension: "timing", key: label, n: (placed.get(key) ?? []).length, value: calculate(placed.get(key) ?? []), notMeasurableReason: null })),

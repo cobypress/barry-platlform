@@ -21,6 +21,7 @@ export const MONEY_CSS = `
 .money .split { display: grid; grid-template-columns: 1fr 1.15fr; gap: 32px; align-items: start; }
 .money .split .kind { grid-template-columns: 44% 1fr 20%; }
 .money .waterfall { margin: 0 0 14px; }
+.money .note.seats { color: var(--carbon); }
 .money .basis { display: block; color: var(--muted); font-size: 0.78em; line-height: 1.3; margin-top: 1px; }
 .money tr.total td { font-weight: 700; border-bottom: none; border-top: 1px solid var(--carbon); }
 `;
@@ -84,14 +85,15 @@ export function moneyPage(r: Render, report: BuiltReport, format: "page" | "slid
       ? "Not every case will come back, so we count a share of each figure: the expected share, with a cautious one and all of it either side. Where several issues describe the same money, only the largest counts."
       : "Not every case will come back, so we count a share of each figure, with a cautious share and all of it either side. Where several issues describe the same money, only the largest counts. The executive summary shows how each line was reached.";
   // Each kind building to the total, exposure apart. The bars stay only where the waterfall can't be drawn.
-  const waterfall = waterfallChart(value, format === "slide" ? HALF_WIDTH : undefined);
+  // With the seats on this page, the chart is shorter to make room for them.
+  const waterfall = waterfallChart(value, format === "slide" ? HALF_WIDTH : undefined, format === "page" && !investmentHasPage(report) ? 250 : 320);
   const build = waterfall.kind === "chart" ? `<div class="waterfall">${chartSlot(waterfall)}</div>` : `<div class="kinds">${bars}</div>`;
   const figure = `<p class="headline-figure">${m(total.expected)}</p><p class="range">${r.t(`Over the next 12 months, expected. Between ${m(total.low)} and ${m(total.high)}.`)}</p>${build}`;
   const table = `<table class="grid"><thead><tr><th>Where it comes from</th><th class="num">Expected</th><th class="num">Range</th></tr></thead><tbody>${rows}</tbody></table>`;
   const notes = `${exposureNote}<p class="note">${r.t(how)}</p>`;
   const head = `<div class="eyebrow">${r.t(eyebrow)}</div><h2>What fixing this is worth</h2>`;
   if (format === "slide") return `<div class="money">${head}<div class="split"><div>${figure}</div><div>${table}${notes}</div></div></div>`;
-  return `<div class="money">${head}${figure}${table}${notes}</div>`;
+  return `<div class="money">${head}${figure}${table}${notes}${seatsOnMoneyPage(r, report)}</div>`;
 }
 
 /** What fixing it is worth against what they pay a year, to one decimal place. Null without both. */
@@ -101,22 +103,21 @@ export function returnOnSpend(report: BuiltReport): number | null {
   return Math.round((report.value.total.expected / cost.value) * 10) / 10;
 }
 
-/** "Your investment": what they pay, what they use, and what they pay for and don't use. Empty when no seat could be read. */
-export function investmentPage(r: Render, report: BuiltReport): string {
+/** The seats, as tiles and a line: what's paid for, held and unassigned, and what the unassigned cost. Null when no seat could be read. */
+export function seatsSummary(r: Render, report: BuiltReport): { stats: string; line: string | null } | null {
   const { investment, metrics } = report;
   const measured = (id: string) => {
     const m = metrics.find((x) => x.id === id);
     return m?.status === "measured" ? m : null;
   };
   const paid = measured(INVESTMENT.seatsPaid);
-  if (!paid) return "";
+  if (!paid) return null;
   const used = measured(INVESTMENT.seatsUsed);
   const unused = measured(INVESTMENT.seatsUnused);
   const active = measured(INVESTMENT.activeUserShare);
   const unusedCost = measured(INVESTMENT.unusedSeatCost);
   const m = (n: number) => compactMoney(n, investment.currency);
-  const cost = investment.annualCost;
-  // The value model's line for the same seats, so the two pages can be read together.
+  // The value model's line for the same seats, so the two can be read together.
   const seatShare = report.value.groups.find((g) => g.id === "unassigned-seats")?.counted ?? null;
   const stat = (figure: string, label: string, id: string) => `<div class="stat"><b>${figure}</b><span>${r.t(label)}</span>${r.ref(id)}</div>`;
   const stats = [
@@ -125,15 +126,48 @@ export function investmentPage(r: Render, report: BuiltReport): string {
     unused ? stat(String(unused.value), "Seats nobody is assigned to", INVESTMENT.seatsUnused) : "",
     active ? stat(`${active.value}%`, "Of users active", INVESTMENT.activeUserShare) : "",
   ].join("");
+  const line = unusedCost ? `${unused ? `The ${unused.value} seats nobody is assigned to` : "Seats nobody is assigned to"} cost ${m(unusedCost.value)} a year.${seatShare ? ` We count a share of it, ${m(seatShare.expected)}, in what fixing this is worth.` : ""}` : null;
+  return { stats, line };
+}
+
+/** Whether the investment has a page of its own: only with a figure for what they pay. Without one, its seats go on the money page (DECISIONS.md 401). */
+export const investmentHasPage = (report: BuiltReport): boolean => report.investment.annualCost.status === "measured" || report.value.total.expected <= 0;
+
+/** The seats on the money page, when there's no figure for what they pay: a paragraph, as the page has no room for tiles. */
+export function seatsOnMoneyPage(r: Render, report: BuiltReport): string {
+  if (investmentHasPage(report)) return "";
+  const metric = (id: string) => {
+    const m = report.metrics.find((x) => x.id === id);
+    return m?.status === "measured" ? m : null;
+  };
+  const paid = metric(INVESTMENT.seatsPaid);
+  if (!paid) return "";
+  const used = metric(INVESTMENT.seatsUsed);
+  const unused = metric(INVESTMENT.seatsUnused);
+  const active = metric(INVESTMENT.activeUserShare);
+  // The unassigned seats' cost is already a line of the table above, so it isn't said again.
+  const parts = [
+    `${r.t(`${paid.value} paid for, all licence types`)}${r.ref(INVESTMENT.seatsPaid)}`,
+    used ? `${r.t(`${used.value} in use`)}${r.ref(INVESTMENT.seatsUsed)}` : "",
+    unused ? `${r.t(`${unused.value} nobody is assigned to`)}${r.ref(INVESTMENT.seatsUnused)}` : "",
+    active ? `${r.t(`${active.value}% of users active`)}${r.ref(INVESTMENT.activeUserShare)}` : "",
+  ].filter(Boolean);
+  return `<p class="note seats"><strong>${r.t("Your seats.")}</strong> ${parts.join("; ")}. ${r.t("We don't have a figure for your whole Salesforce bill.")}</p>`;
+}
+
+export function investmentPage(r: Render, report: BuiltReport): string {
+  if (!investmentHasPage(report)) return "";
+  const seats = seatsSummary(r, report);
+  if (!seats) return "";
+  const { investment } = report;
+  const m = (n: number) => compactMoney(n, investment.currency);
+  const cost = investment.annualCost;
   const headline =
     cost.status === "measured"
       ? `<p class="headline-figure">${m(cost.value)}</p><p class="range">${r.t(`A year. ${cost.label}.`)}</p>`
       : // Why it isn't priced is for the raw notes. Here it's enough to say what the page shows instead.
         `<p class="range">${r.t("We don't have a figure for your whole Salesforce bill, so this page shows your seats rather than what they all cost.")}</p>`;
   const ratio = returnOnSpend(report);
-  const lines = [
-    unusedCost ? `${unused ? `The ${unused.value} seats nobody is assigned to` : "Seats nobody is assigned to"} cost ${m(unusedCost.value)} a year.${seatShare ? ` We count a share of it, ${m(seatShare.expected)}, in what fixing this is worth.` : ""}` : "",
-    ratio !== null ? `What fixing the issues is worth, ${m(report.value.total.expected)} over 12 months, is ${ratio} times what you pay for Salesforce a year.` : "",
-  ].filter(Boolean);
-  return `<div class="money"><div class="eyebrow">Your investment</div><h2>What you pay, and what you use</h2>${headline}<div class="stat-row" style="margin:6px 0 16px">${stats}</div>${lines.map((l) => `<p style="margin-bottom:8px">${r.t(l)}</p>`).join("")}</div>`;
+  const lines = [seats.line ?? "", ratio !== null ? `What fixing the issues is worth, ${m(report.value.total.expected)} over 12 months, is ${ratio} times what you pay for Salesforce a year.` : ""].filter(Boolean);
+  return `<div class="money"><div class="eyebrow">Your investment</div><h2>What you pay, and what you use</h2>${headline}<div class="stat-row" style="margin:6px 0 16px">${seats.stats}</div>${lines.map((l) => `<p style="margin-bottom:8px">${r.t(l)}</p>`).join("")}</div>`;
 }

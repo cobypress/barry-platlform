@@ -50,8 +50,16 @@ const valueOf = (metrics: Metric[], id: string): number | null => {
   return m?.status === "measured" ? m.value : null;
 };
 
-/** The checks that bear on typing data in again. Interviews read them too. */
-export const REKEYING_RULES = new Set(["dq.duplicate-rules-missing", "sec.personal-integration-accounts", "sec.self-authorised-connected-apps"]);
+/** The duplicate checks, which bear on typing data in again. */
+const DUPLICATE_RULES = new Set(["dq.duplicate-accounts", "dq.duplicate-rules-missing"]);
+/**
+ * The checks that bear on typing data in again: the duplicate checks and the
+ * integration checks (`int.`), an integration run on a person's login among
+ * them. The integrations area's access settings, connected apps anyone can
+ * authorise and remote sites, aren't about re-keying (DECISIONS.md 406).
+ * Interviews read them too.
+ */
+export const isRekeyingCheck = (f: Pick<Finding, "ruleId">): boolean => DUPLICATE_RULES.has(f.ruleId) || f.ruleId.startsWith("int.") || f.ruleId === "sec.personal-integration-accounts";
 
 const SPECS: Spec[] = [
   {
@@ -84,7 +92,7 @@ const SPECS: Spec[] = [
     metric: SURVEY.rekeying,
     felt: (v) => v >= REKEYING_AT,
     said: (v) => `The median person in your team spends ${hours(v)} a week typing data in again or keeping a spreadsheet alongside Salesforce.`,
-    issues: (f) => REKEYING_RULES.has(f.ruleId),
+    issues: isRekeyingCheck,
     topic: "duplicates and integrations",
     context: (metrics) => {
       const points = valueOf(metrics, "documented.integrations");

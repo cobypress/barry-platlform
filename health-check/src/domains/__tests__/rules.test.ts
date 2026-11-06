@@ -396,6 +396,15 @@ describe("segment before concluding (rule 4)", () => {
     assert.ok(eu.facts.gap! >= 15);
   });
 
+  test("pipeline: a rep inside a team that's also listed says so, and the team doesn't (DECISIONS.md 405)", () => {
+    const findings = analyseExtracts(extracts).findings.filter((f) => f.ruleId === "pipe.segment-divergence" && f.status === "issue" && f.title.startsWith("Win rate"));
+    const reps = findings.filter((f) => f.subjects[0]?.type === "rep");
+    assert.ok(reps.length > 0, "the synthetic org flags reps in Sales EU");
+    for (const f of reps) assert.match(f.summary, /This rep sells in the Sales EU team, which is also listed, so the two figures share deals\.$/);
+    const team = findings.find((f) => f.subjects[0]?.label === "Sales EU")!;
+    assert.doesNotMatch(team.summary, /also listed/);
+  });
+
   test("every pass shows what it segmented, or says why it couldn't", () => {
     for (const f of analyseExtracts(extracts, { answers: loadAnswers() }).findings.filter((x) => x.status === "passed")) {
       assert.ok(f.segmentsChecked.length > 0 || f.segmentExemptReason, f.ruleId);

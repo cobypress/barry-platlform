@@ -117,6 +117,21 @@ function divergenceValue(ctx: RuleContext, metric: Extract<Metric, { status: "me
   };
 }
 
+const listed = (items: string[]): string => (items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`);
+
+/**
+ * For a rep, the listed teams their closed deals were sold in: the two figures
+ * then share deals (DECISIONS.md 405). Empty for anything but a rep.
+ */
+function teamsAlsoListed(ctx: RuleContext, segment: { dimension: string; key: string }, listedTeams: string[]): string[] {
+  if (segment.dimension !== "rep" || listedTeams.length === 0) return [];
+  const data = loadPipeline(ctx);
+  if (data.status !== "ok") return [];
+  const rep = dimensions(ctx).rep!;
+  const teams = new Set(data.deals.filter((d) => (d.category === "won" || d.category === "lost") && closedInWindow(d, ctx.window) && rep(d) === segment.key).map((d) => d.team));
+  return listedTeams.filter((t) => teams.has(t));
+}
+
 /** "the Sales EU team", "the Renewal record type". A rep keeps "rep" so team-level text can say "a single rep", and a default key reads as a group of deals. */
 function segmentPhrase(dimension: string, key: string): string {
   if (dimension === "rep") return `rep ${key}`;
@@ -152,23 +167,28 @@ const segmentDivergence: Rule = {
       return { outcome: "pass", summary: `No segment is ${DIVERGENCE_POINTS} points worse than the overall figure.`, evidence, segmentsChecked };
     }
     outliers.sort((a, b) => b.gap - a.gap);
-    return outliers.map(({ metric, segment, gap }) => ({
-      outcome: "issue" as const,
-      key: `${metric.id}:${segment.dimension}:${segment.key}`,
-      title: `${metric.label} for ${segmentPhrase(segment.dimension, segment.key)} is well ${(segment.value ?? 0) < (metric.value ?? 0) ? "below" : "above"} the overall figure`,
-      summary: `${metric.label} is ${segment.value}% for ${segmentPhrase(segment.dimension, segment.key)} (${segment.n} deals), against ${metric.value}% overall, a gap of ${gap} points.`,
-      recommendation: "Look at what's different about these deals before drawing a conclusion: sample size, deal type and who's working them.",
-      recommendationType: "investigate" as const,
-      severity: "high" as const,
-      confidence: segment.n >= ctx.calibration.minSample * 2 ? ("high" as const) : ("medium" as const),
-      evidence,
-      value: divergenceValue(ctx, metric, segment),
-      effort: { size: "S" as const },
-      owner: "Head of sales",
-      segmentsChecked,
-      subjects: [{ type: segment.dimension, label: segment.key }],
-      facts: { segmentValue: segment.value!, overallValue: metric.value, gap, deals: segment.n },
-    }));
+    const teamsListed = (metricId: string): string[] => outliers.filter((o) => o.metric.id === metricId && o.segment.dimension === "team").map((o) => o.segment.key);
+    return outliers.map(({ metric, segment, gap }) => {
+      const within = teamsAlsoListed(ctx, segment, teamsListed(metric.id));
+      const overlap = within.length ? ` This rep sells in ${listed(within.map((t) => `the ${t} team`))}, which ${within.length === 1 ? "is" : "are"} also listed, so the two figures share deals.` : "";
+      return {
+        outcome: "issue" as const,
+        key: `${metric.id}:${segment.dimension}:${segment.key}`,
+        title: `${metric.label} for ${segmentPhrase(segment.dimension, segment.key)} is well ${(segment.value ?? 0) < (metric.value ?? 0) ? "below" : "above"} the overall figure`,
+        summary: `${metric.label} is ${segment.value}% for ${segmentPhrase(segment.dimension, segment.key)} (${segment.n} deals), against ${metric.value}% overall, a gap of ${gap} points.${overlap}`,
+        recommendation: "Look at what's different about these deals before drawing a conclusion: sample size, deal type and who's working them.",
+        recommendationType: "investigate" as const,
+        severity: "high" as const,
+        confidence: segment.n >= ctx.calibration.minSample * 2 ? ("high" as const) : ("medium" as const),
+        evidence,
+        value: divergenceValue(ctx, metric, segment),
+        effort: { size: "S" as const },
+        owner: "Head of sales",
+        segmentsChecked,
+        subjects: [{ type: segment.dimension, label: segment.key }],
+        facts: { segmentValue: segment.value!, overallValue: metric.value, gap, deals: segment.n },
+      };
+    });
   },
 };
 

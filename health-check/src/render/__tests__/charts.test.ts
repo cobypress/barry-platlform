@@ -73,6 +73,22 @@ describe("every chart", () => {
   });
 });
 
+describe("delivery outlook", () => {
+  test("counts whole deals, and a month with value that rounds to none says so (DECISIONS.md 404)", () => {
+    const deals = metric("current.delivery_outlook_deals");
+    assert.equal(deals.status, "measured");
+    if (deals.status !== "measured") return;
+    assert.ok(Number.isInteger(deals.value) && deals.series.every((p) => Number.isInteger(p.value)), "whole deals");
+    const value = metric("current.delivery_outlook_value");
+    if (value.status !== "measured") return assert.fail("the outlook is measured");
+    const none = deals.series.find((p, i) => p.value === 0 && (value.series[i]!.value ?? 0) > 0);
+    assert.ok(none, "the recording has a month whose value rounds to under one deal");
+    const shown = texts(svg(deliveryOutlookChart(value, deals, "GBP")));
+    assert.ok(shown.includes("under 1 deal"));
+    assert.ok(!shown.some((t) => /\d\.\d deals?/.test(t)));
+  });
+});
+
 describe("win rate by segment", () => {
   const chart = (): string => svg(winRateBySegment(metric("historic.win_rate")));
 

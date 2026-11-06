@@ -124,6 +124,14 @@ describe("discount leakage", () => {
     assert.equal(f.title, "One rep discounts deeper than peers without winning more");
   });
 
+  test("the org-wide comparison isn't in the summary, where it undercut the named one, but stays in the working (DECISIONS.md 403)", () => {
+    assert.ok(f.facts.deeperWinRate !== undefined, "the sample has enough deals on each side to compare");
+    assert.doesNotMatch(f.summary, /Across all/);
+    const closed = f.evidence[1]!;
+    assert.match(closed.note ?? "", new RegExp(`those discounted more than the median won ${f.facts.deeperWinRate}% of the time and those discounted less ${f.facts.shallowerWinRate}%`));
+    assert.match(closed.note ?? "", /mixes teams selling into different markets\.$/);
+  });
+
   test("its figure is the discount past the peers' median on won deals, potential, and yearly in the value model", () => {
     assert.equal(f.value.kind, "revenue");
     assert.match(f.value.kind === "revenue" ? f.value.period : "", /^in discount beyond what peers gave/);

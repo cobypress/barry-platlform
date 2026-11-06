@@ -1,7 +1,7 @@
 import { comparisonId, formatFigure } from "../benchmark/compare.ts";
 import { checkNumbers } from "../numbercheck/index.ts";
 import type { BuiltReport } from "../narrative/sections.ts";
-import { buildPlan, bySeverity, domainLabel, domainsInOrder, issuesOf, isUnpricedSaving, QUICK_WINS_HEADING, scorecard, UNPRICED, verdictOf } from "../narrative/select.ts";
+import { buildPlan, bySeverity, domainLabel, issuesOf, isUnpricedSaving, QUICK_WINS_HEADING, scorecard, UNPRICED, verdictOf } from "../narrative/select.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { compactMoney, longDate, percent } from "../render/format.ts";
 import { currentBody } from "../narrative/sections.ts";
@@ -10,10 +10,11 @@ import { READING_LABELS } from "../interviews/readings.ts";
 import { byRole } from "../render/interviews.ts";
 import { effortText, renderContext, valueText, type Render } from "../render/html.ts";
 import { noteSections, referenceMap } from "../render/references.ts";
-import { HEADLINE_KINDS, KIND_LABELS } from "../value/model.ts";
+import { HEADLINE_KINDS, KIND_LABELS, yearlyByFinding } from "../value/model.ts";
 import { DOCUMENTED, readDocument } from "../domains/configuration/documented.ts";
 import { practiceFor, practiceId, sourceLabel } from "../practice/index.ts";
-import { activeUsersChart, lightningChart, loginChannelsChart } from "../render/charts.ts";
+import { activeUsersChart, lightningChart, loginChannelsChart, rankScorecard } from "../render/charts.ts";
+import { areaWeight } from "../domains/scoring.ts";
 import { accessBlock, automationLists, automationTable, dataModelDiagram, DIAGRAM_KEY, hasDocument, integrationsBlock, objectsTable, relationshipsTable, sharingTable } from "../render/documented.ts";
 
 // The customer microsite's pages (roadmap Stage 4). Built for a browser, not
@@ -63,6 +64,8 @@ const STYLE = `<style>
 .bcr .good ul { margin: 4px 0 0; }
 .bcr .good li { font-size: 14px; }
 .bcr li { margin-bottom: 6px; }
+.bcr nav.jump ul { padding-left: 0; }
+.bcr nav.jump li { margin-bottom: 0; }
 </style>`;
 
 const chip = (severity: string): string => `<span class="chip${severity === "critical" || severity === "high" ? " alert" : ""}">${severity.charAt(0).toUpperCase()}${severity.slice(1)}</span>`;
@@ -85,7 +88,8 @@ function overview(r: Render, report: BuiltReport): string {
       : "";
   const cost = report.investment.annualCost;
   const investment = cost.status === "measured" ? `<h2>Your investment</h2><p>${r.t(`${compactMoney(cost.value, v.currency)} a year. ${cost.label}.`)}</p>` : "";
-  const rows = scorecard(team, report.input.scores ?? []).filter((row) => row.assessed);
+  // In the documents' scorecard order, so this table and the issues page agree with them (DECISIONS.md 410).
+  const rows = rankScorecard(scorecard(team, report.input.scores ?? []).filter((row) => row.assessed), areaWeight);
   const areas = `<h2>How each area stands</h2><table><thead><tr><th>Area</th><th class="num">Score</th><th class="num">Issues</th></tr></thead><tbody>${rows
     .map((row) => `<tr><td>${r.t(row.label)}</td><td class="num">${row.score ?? r.t("Not scored")}</td><td class="num">${row.issues}</td></tr>`)
     .join("")}</tbody></table>`;
@@ -149,12 +153,19 @@ function adoptionCharts(report: BuiltReport): string {
   return charts.length ? `<div class="doc-cols charts">${charts.map(([title, c]) => `<div><h3 class="cap">${title}</h3><div class="doc-figure">${c.kind === "chart" ? c.svg : ""}</div></div>`).join("")}</div>` : "";
 }
 
+/**
+ * Every issue, by area in the scorecard's order, with links to each area at
+ * the top. What good looks like follows an area's issues (DECISIONS.md 410).
+ */
 function issues(r: Render, report: BuiltReport): string {
   const team = report.teamFindings;
-  const sections = domainsInOrder(team)
-    .map((domain) => {
-      const own = issuesOf(team.filter((f) => f.domain === domain), report.added);
-      if (own.length === 0) return "";
+  const areas = rankScorecard(scorecard(team, report.input.scores ?? []), areaWeight)
+    .map((row) => ({ domain: row.domain, own: issuesOf(team.filter((f) => f.domain === row.domain), report.added) }))
+    .filter((area) => area.own.length > 0);
+  const anchor = (domain: string): string => `area-${domain.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`;
+  const jump = areas.length > 1 ? `<nav class="jump" id="areas" aria-label="${r.t("Areas on this page")}"><ul>${areas.map(({ domain }) => `<li><a href="#${anchor(domain)}">${r.t(domainLabel(domain))}</a></li>`).join("")}</ul></nav>` : "";
+  const sections = areas
+    .map(({ domain, own }) => {
       const cards = own
         .map((f) => {
           const value = valueText(r, f);
@@ -163,10 +174,11 @@ function issues(r: Render, report: BuiltReport): string {
         .join("");
       const good = practiceFor(domain);
       const practice = good.length ? `<div class="good"><h3 class="cap">${r.t("What good looks like")}</h3><ul>${good.map((p, i) => `<li>${r.t(p.text)} <span class="muted">${r.t(sourceLabel(p))}</span>${r.ref(practiceId(domain, i))}</li>`).join("")}</ul></div>` : "";
-      return `<h2>${r.t(domainLabel(domain))}</h2>${domain === "adoption" ? adoptionCharts(report) : ""}${practice}${cards}`;
+      const back = jump ? `<p class="muted"><a href="#areas">${r.t("Back to the list of areas")}</a></p>` : "";
+      return `<section id="${anchor(domain)}"><h2>${r.t(domainLabel(domain))}</h2>${domain === "adoption" ? adoptionCharts(report) : ""}${cards}${practice}${back}</section>`;
     })
     .join("");
-  return page(`<h1>Every issue we found</h1><p class="muted">${r.t("Grouped by area, most serious first. Each reference points to the raw notes, where the working is.")}</p>${sections}`);
+  return page(`<h1>Every issue we found</h1><p class="muted">${r.t("By area, the area holding your score back most first, and most serious first within each. Each reference points to the raw notes, where the working is.")}</p>${jump}${sections}`);
 }
 
 function plan(r: Render, report: BuiltReport): string {
@@ -227,7 +239,7 @@ function org(r: Render, report: BuiltReport): string {
 
 /** The pages, each checked against the report's figures. Throws if any figure on a page can't be traced. */
 export function buildMicrositePages(report: BuiltReport, pseudonyms: Pseudonymiser): MicrositePages {
-  const r = renderContext(pseudonyms, report.input.calibration.currency, false, referenceMap(noteSections(report)));
+  const r = renderContext(pseudonyms, report.input.calibration.currency, false, referenceMap(noteSections(report)), yearlyByFinding(report.value));
   const changed = progress(r, report);
   const pages: MicrositePage[] = [
     { slug: "overview", title: "Overview", html: overview(r, report) },
