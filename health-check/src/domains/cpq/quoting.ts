@@ -139,13 +139,16 @@ const discountLeakage: Rule = {
       outcome: "issue",
       // Singular when one is named, so the title matches the summary (night 3 reading pass).
       title: flagged.length === 1 ? `${flagged[0]!.dimension === "rep" ? "One rep discounts" : "One team discounts"} deeper than peers without winning more` : "Some teams and reps discount deeper without winning more",
-      summary: `${opening} ${listed(flagged.slice(0, MAX_LISTED).map((f) => `${f.key} discounts ${f.median}% against ${f.peerMedian}% for ${f.against}, and wins ${f.rate}% of closed deals against ${f.peerRate}%`))}${flagged.length > MAX_LISTED ? `, and ${flagged.length - MAX_LISTED} more` : ""}. That's at least ${DISCOUNT_GAP} points deeper, without winning more often.${depth}`,
+      summary: `${opening} ${listed(flagged.slice(0, MAX_LISTED).map((f) => `${f.key} discounts ${f.median}% against ${f.peerMedian}% for ${f.against}, and wins ${f.rate}% of closed deals against ${f.peerRate}%`))}${flagged.length > MAX_LISTED ? `, and ${flagged.length - MAX_LISTED} more` : ""}. That's at least ${DISCOUNT_GAP} points deeper, without winning more often.`,
       recommendation: "Agree a discount policy with limits by deal size, send anything deeper through approval, and review these deals against it in pipeline meetings.",
       recommendationType: "change",
       severity: "high",
       // Discount can follow deal size or product mix, which the quote total doesn't show.
       confidence: "medium",
-      evidence,
+      // The org-wide comparison mixes teams selling into different markets, so it
+      // would undercut the named comparison in the summary. It stays in the working
+      // (DECISIONS.md 403).
+      evidence: depth ? evidence.map((e, i) => (i === 1 ? { ...e, note: [e.note, depth.trim()].filter(Boolean).join(". ") } : e)) : evidence,
       value,
       effort: { size: "M" },
       owner: "Head of sales",
