@@ -27,6 +27,9 @@ type Ctx = Omit<RuleContext, "metrics">;
 
 type InUse = NotMeasurableResult & { inUse: false };
 
+/** Why a figure can't come from a forecast read cut off at its row limit. */
+const cutOff = (read: number): string => `The forecast read stopped at its row limit after ${read.toLocaleString("en-GB")} rows, so the rest of this period's forecast wasn't read.`;
+
 /** Forecasting counts as in use only if the org has an active revenue type and forecast rows for today. */
 function forecastInUse(ctx: Ctx): { inUse: true; typeId: string; items: ForecastItemRow[] } | InUse {
   const { types } = ctx.data(quotasExtractor);
@@ -51,9 +54,11 @@ const inUseRule: Rule = {
     if (!state.inUse) return { outcome: "not_measurable", reason: state.reason, evidence: state.evidence };
     const { items } = ctx.data(forecastExtractor);
     const rows = state.items;
+    // In use is true of any rows at all, so a read cut off at its limit still shows it; the counts then say "at least".
+    const atLeast = items.status === "ok" && items.truncated ? "at least " : "";
     return {
       outcome: "pass",
-      summary: `Collaborative Forecasts is in use: ${rows.length} forecast rows for ${plural(new Set(rows.map((r) => r.OwnerId)).size, "person", "people")} in the current period.`,
+      summary: `Collaborative Forecasts is in use: ${atLeast}${rows.length} forecast rows for ${atLeast}${plural(new Set(rows.map((r) => r.OwnerId)).size, "person", "people")} in the current period.${atLeast ? " The read stopped at its row limit." : ""}`,
       evidence: [ctx.ev(items.source, { count: rows.length })],
       segmentsChecked: [{ dimension: "forecast owner", segments: new Set(rows.map((r) => r.OwnerId)).size }, { dimension: "forecast category", segments: new Set(rows.map((r) => r.ForecastCategoryName ?? "None")).size }],
       facts: { rows: rows.length },
@@ -92,6 +97,8 @@ const adjustmentsRule: Rule = {
     const { items } = ctx.data(forecastExtractor);
     const gap = missingFieldReason(items, "ForecastingItem.AmountWithoutAdjustments", "ForecastingItem.HasAdjustment");
     if (gap) return { outcome: "not_measurable", reason: gap, evidence: [ctx.ev(items.source, { count: null })] };
+    // A share of the Commit forecast needs all of it (rule 5).
+    if (items.status === "ok" && items.truncated) return { outcome: "not_measurable", reason: cutOff(items.data.length), evidence: [ctx.ev(items.source, { count: items.data.length })] };
     const rows = state.items.filter((r) => r.ForecastCategoryName === COMMIT && r.AmountWithoutAdjustments != null && r.ForecastAmount !== null);
     const evidence = [ctx.ev(items.source, { count: rows.length, exclusions: ["Forecast categories other than Commit", "Rows with no amount"] })];
     if (rows.length === 0) return { outcome: "not_measurable", reason: "There are no Commit forecast rows with amounts to compare.", evidence };
@@ -173,6 +180,8 @@ function commitDeals(ctx: RuleContext, open: Deal[]): { commit: Deal[]; evidence
   if (!state.inUse) return { reason: state.reason, evidence: state.evidence };
   const { facts } = ctx.data(forecastExtractor);
   if (facts.status !== "ok") return { reason: `Forecast facts couldn't be read: ${facts.reason}`, evidence: [ctx.ev(facts.source, { count: null })] };
+  // Which deals are in Commit needs every fact: a deal past the cut-off would look uncommitted.
+  if (facts.truncated) return { reason: cutOff(facts.data.length), evidence: [ctx.ev(facts.source, { count: facts.data.length })] };
   const committed = new Set(facts.data.filter((f) => f.ForecastCategoryName === COMMIT).map((f) => f.OpportunityId));
   const evidence = [ctx.ev(facts.source, { count: committed.size, note: "Deals in the Commit forecast category this period" })];
   // Admins can rename forecast categories, so finding none can't be read as "nothing at risk".
@@ -247,6 +256,7 @@ function forecastMetrics(ctx: Ctx): Metric[] {
   if ("reason" in covered) return [notMeasurable(covered.reason, covered.evidence)];
   const { facts } = ctx.data(forecastExtractor);
   if (facts.status !== "ok") return [notMeasurable(`Forecast facts couldn't be read: ${facts.reason}`, [ctx.ev(facts.source, { count: null })])];
+  if (facts.truncated) return [notMeasurable(cutOff(facts.data.length), [ctx.ev(facts.source, { count: facts.data.length })])];
   const committed = new Set(facts.data.filter((f) => f.ForecastCategoryName === COMMIT).map((f) => f.OpportunityId));
   const commitOf = (owner: string): number => open.filter((d) => d.OwnerId === owner && committed.has(d.Id)).reduce((sum, d) => sum + (d.Amount ?? 0), 0);
   const round = (n: number): number => Math.round(n * 10) / 10;
