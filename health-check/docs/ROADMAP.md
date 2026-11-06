@@ -25,16 +25,16 @@ The rules that make it trustworthy don't change: code calculates and Claude expl
 
 We keep the human layer (interviews, judgement, the live readout) and put machine depth underneath it.
 
-## Where we are (end of 5 November 2026)
+## Where we are (6 November 2026)
 
 | Stage | Built | Still to do |
 | --- | --- | --- |
 | 1. Money, score, references | All six parts (decisions 82 to 93, 120, 129) | List prices for licences beyond the core editions (QUESTIONS 51) |
 | 2. Intake, Essentials, housekeeping | Call-notes intake, the Slack discovery canvas, Essentials, the retention sweep | Testing the canvas read-back on a real workspace |
 | 3. Depth | Chapters with "What good looks like" (sourced), adoption, the real sales process, root causes (what separates wins from losses, decisions 160 to 164 and 166), your org documented, two security checks, visuals, the 110-slide report, integrations and technical health as their own areas (decisions 169 to 178) | Permissions, packages, storage, and territory and quotas (3.2) |
-| 4. The experience | The customer microsite, the CEO one-pager, the readout kit, the team survey (engine; console in progress) | A designer's pass; stakeholder interview notes |
-| 5. Proof and growth | The 90-day re-check, Barometer Ongoing with the monthly pulse, the free scan with Slack approval | Case studies, "State of Salesforce", partners, the AppExchange decision |
-| 6. Beyond Sales Cloud | Service Cloud scoped (15 checks) | Building it (in progress), then CPQ, Marketing, Experience Cloud, Data Cloud |
+| 4. The experience | The customer microsite, the CEO one-pager, the readout kit, the team survey | Stakeholder interviews and action lists (both in progress); a designer's pass |
+| 5. Proof and growth | The 90-day re-check, Barometer Ongoing with the monthly pulse, the free scan with Slack approval, case study drafts from a re-check (decision 154) | Publishing the first case studies, "State of Salesforce", partners, the AppExchange decision |
+| 6. Beyond Sales Cloud | Service Cloud (decisions 155 to 158) | CPQ, Marketing, Experience Cloud, Data Cloud |
 
 Connecting is "sign in and go" (decision 151): any user connects, and the request list keeps Barometer read only. Each org installs the released package once first (decisions 153 and 189), because Salesforce only signs people in to an external client app the org has installed; the connect page offers the install link before sign-in.
 
