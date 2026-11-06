@@ -103,6 +103,8 @@ export const HEAVY_LOCK_MS = 10 * 60_000;
  * run shouldn't lose it (DECISIONS.md 396). BullMQ's default is 1.
  */
 export const HEAVY_MAX_STALLS = 2;
+/** How long a finished heavy job, and so its id, is kept: a day, in seconds, as BullMQ's KeepJobs takes it. */
+export const HEAVY_KEEP_DONE = { age: 86_400 };
 /** BullMQ 5's reason for a job put back more than maxStalledCount times. It fails the job without running its handler. */
 const STALLED_TOO_OFTEN = /stalled more than allowable limit/;
 /** What the console shows for such a job. */
@@ -120,8 +122,11 @@ export function gatedProcessor(handler: JobHandler, bull: Pick<BullModule, "Unre
   const direct = processorFor(handler, bull, log);
   return async (job) => {
     if (!isHeavy(job.data)) return direct(job);
-    const { attempts, backoff, priority, removeOnComplete, removeOnFail } = job.opts;
-    const opts = Object.fromEntries(Object.entries({ attempts, backoff, priority, removeOnComplete, removeOnFail, jobId: job.id }).filter(([, v]) => v !== undefined));
+    const { attempts, backoff, priority, removeOnFail } = job.opts;
+    // A finished heavy job is kept for a day, not removed at once as the console asks of its own jobs, so a
+    // second delivery of the console's job after a crash in the hand-off finds it and adds nothing (DECISIONS.md 398).
+    // A failed one is kept as the console asks, the last 200, which holds its id too.
+    const opts = Object.fromEntries(Object.entries({ attempts, backoff, priority, removeOnComplete: HEAVY_KEEP_DONE, removeOnFail, jobId: job.id }).filter(([, v]) => v !== undefined));
     await heavy.add(job.name, job.data, opts);
     log(`${job.id ?? "?"} is waiting for the heavy slot`);
     return { outcome: "queued_heavy" };
