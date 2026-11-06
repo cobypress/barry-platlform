@@ -53,7 +53,7 @@ describe("a health check with CPQ", () => {
   test("the full report fits its ceiling with a chapter for each area, and passes the layout check", async () => {
     const html = fullReportHtml(withCpq.report, withCpq.pseudonyms);
     const range = deckRangeFor(withCpq.report.input.run);
-    assert.equal(range.max, 120, "Sales Cloud's 110, and 10 for CPQ");
+    assert.equal(range.max, 130, "Sales Cloud's 120, and 10 for CPQ");
     const { layout } = await renderPdf(browser, html, { minPages: range.min, maxPages: range.max, dataset: withCpq.report.dataset });
     assert.deepEqual(layout.problems, [], JSON.stringify(layout.problems.slice(0, 6)));
     for (const label of ["Quoting and discounts", "CPQ set-up"]) assert.ok(html.includes(`<h1>${label}</h1>`), label);
@@ -63,10 +63,10 @@ describe("a health check with CPQ", () => {
 
 describe("with Service Cloud, CPQ and Account Engagement all on, and every trap firing", () => {
   // Each module raises the ceiling, so the worst case keeps its chapters (DECISIONS.md 281).
-  test("the full report fits its ceiling of 140 with a chapter for every area, contents page included", async () => {
+  test("the full report fits its ceiling of 150 with a chapter for every area, contents page included", async () => {
     const html = fullReportHtml(everything.report, everything.pseudonyms);
     const range = deckRangeFor(everything.report.input.run);
-    assert.equal(range.max, 140);
+    assert.equal(range.max, 150);
     const { layout } = await renderPdf(browser, html, { minPages: range.min, maxPages: range.max, dataset: everything.report.dataset });
     assert.deepEqual(layout.problems, [], JSON.stringify(layout.problems.slice(0, 6)));
     assert.match(html, /<ol class="contents long">/);

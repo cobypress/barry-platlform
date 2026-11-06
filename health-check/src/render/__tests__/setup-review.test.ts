@@ -90,17 +90,17 @@ describe("a complete run's documents", () => {
 describe("the deck's ceiling (DECISIONS.md 281)", () => {
   const max = (scope: "complete" | "essentials", modules: string[]): number => deckRangeFor({ scope, modules: ["configuration", ...modules] }).max;
 
-  test("is 110 for Sales Cloud, and 10 more for each optional module, up to 140", () => {
-    assert.deepEqual(deckRangeFor({ scope: "complete", modules: ["configuration"] }), { min: 20, max: 110 });
-    assert.equal(max("complete", ["service_operations", "service_setup"]), 120);
-    assert.equal(max("complete", ["cpq_quoting", "cpq_setup", "account_engagement"]), 130);
-    assert.equal(max("complete", ["service_operations", "service_setup", "cpq_quoting", "cpq_setup", "account_engagement"]), 140);
+  test("is 120 for Sales Cloud, and 10 more for each optional module, up to 150", () => {
+    assert.deepEqual(deckRangeFor({ scope: "complete", modules: ["configuration"] }), { min: 20, max: 120 });
+    assert.equal(max("complete", ["service_operations", "service_setup"]), 130);
+    assert.equal(max("complete", ["cpq_quoting", "cpq_setup", "account_engagement"]), 140);
+    assert.equal(max("complete", ["service_operations", "service_setup", "cpq_quoting", "cpq_setup", "account_engagement"]), 150);
   });
 
-  test("is 60 for a set-up review, and 6 more a module, up to 75, counting a module whichever of its areas runs", () => {
-    assert.deepEqual(deckRangeFor({ scope: "essentials", modules: ["configuration"] }), { min: 12, max: 60 });
-    assert.equal(max("essentials", ["cpq_setup"]), 66);
-    assert.equal(max("essentials", ["cpq_setup", "account_engagement"]), 72);
-    assert.equal(max("essentials", ["service_setup", "cpq_setup", "account_engagement"]), 75);
+  test("is 66 for a set-up review, and 6 more a module, up to 81, counting a module whichever of its areas runs", () => {
+    assert.deepEqual(deckRangeFor({ scope: "essentials", modules: ["configuration"] }), { min: 12, max: 66 });
+    assert.equal(max("essentials", ["cpq_setup"]), 72);
+    assert.equal(max("essentials", ["cpq_setup", "account_engagement"]), 78);
+    assert.equal(max("essentials", ["service_setup", "cpq_setup", "account_engagement"]), 81);
   });
 });

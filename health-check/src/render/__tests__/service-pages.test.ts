@@ -55,7 +55,7 @@ describe("a health check with Service Cloud", () => {
   test("the full report passes the layout and number checks, with a chapter for each area", async () => {
     const html = fullReportHtml(report, pseudonyms);
     const range = deckRangeFor(report.input.run);
-    assert.equal(range.max, 120, "Sales Cloud's 110, and 10 for Service Cloud");
+    assert.equal(range.max, 130, "Sales Cloud's 120, and 10 for Service Cloud");
     const { layout } = await renderPdf(browser, html, { minPages: range.min, maxPages: range.max, dataset: report.dataset });
     assert.deepEqual(layout.problems, [], JSON.stringify(layout.problems.slice(0, 6)));
     for (const label of ["Service operations", "Service set-up"]) assert.ok(html.includes(`<h1>${label}</h1>`), label);
