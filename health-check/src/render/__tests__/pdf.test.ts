@@ -14,7 +14,9 @@ import { Pseudonymiser, type PseudonymEntry } from "../../privacy/pseudonymiser.
 import { SALES_CLOUD_DOMAINS, type Finding, type Metric, type NumberOverride, type ReportSection } from "../../schemas/index.ts";
 import { runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
-import { EXECUTIVE_PLAN_ITEMS, executiveHtml } from "../executive.ts";
+import { EXECUTIVE_PLAN_ITEMS, executiveHtml, executiveMaxPages } from "../executive.ts";
+import { scoreDomains } from "../../domains/scoring.ts";
+import { syntheticInterviews } from "../../testing/interviews.ts";
 import { compactMoney, plainWords, ukDates } from "../format.ts";
 import { yearlyByFinding } from "../../value/model.ts";
 import { DECK_RANGE, fullReportHtml, fullReportHtmlAt, INVENTORY_SLIDE_ROWS, slideCounts } from "../full-report.ts";
@@ -337,6 +339,32 @@ describe("an issue with a long money working, alone on its slide (DECISIONS.md 4
     const slide = html.split("<section ").find((x) => x.includes(`<h2>${finding.title.replace(/'/g, "&#39;")}</h2>`))!;
     assert.doesNotMatch(slide, /The full working is at/);
     assert.ok(slide.includes("Lost and no decision deals") === false && slide.includes("Raw exposure"), "its three lines, all of them");
+  });
+});
+
+describe("a re-check with an intake and interviews (DECISIONS.md 418)", () => {
+  // As the sample's re-check: the first check's intake and interviews, and three issues fixed since.
+  function recheck(): BuiltReport {
+    const input: ReportInput = { ...full, interviews: syntheticInterviews() };
+    const first = buildReport(input);
+    const fixed = new Set(first.teamFindings.filter((f) => f.status === "issue").map((f) => f.ruleId).slice(0, 3));
+    const later = output!.findings.map((f): Finding => (fixed.has(f.ruleId) && f.status === "issue" ? { ...f, status: "passed", value: { kind: "not_sized", reason: "Passed." } } : f));
+    return buildReport({ ...input, run: { ...run, id: `${run.id}-recheck`, baselineRunId: run.id }, findings: later, scores: scoreDomains(run.modules, later), baseline: input });
+  }
+
+  test("the executive summary fits its pages, the plan's included, with every check passing", async () => {
+    const report = recheck();
+    assert.ok(report.progress, "a re-check");
+    const html = executiveHtml(report, pseudonyms);
+    assert.match(html, /What we&#39;d do first|What we'd do first/);
+    const { layout } = await renderPdf(browser, html, { minPages: EXECUTIVE_PAGES.min, maxPages: executiveMaxPages(report), dataset: report.dataset });
+    assert.deepEqual(layout.problems, [], describeProblems(layout.problems));
+  });
+
+  test("so does the full report", async () => {
+    const report = recheck();
+    const { layout } = await renderPdf(browser, fullReportHtml(report, pseudonyms), { ...deckRange, dataset: report.dataset });
+    assert.deepEqual(layout.problems, [], describeProblems(layout.problems));
   });
 });
 

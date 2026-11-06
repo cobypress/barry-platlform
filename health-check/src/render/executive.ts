@@ -67,15 +67,30 @@ export const EXECUTIVE_PLAN_ITEMS = 4;
 
 // Measured in Chromium: about 95 characters and 19.6px a line in a phase, 40px
 // for a phase heading and its gap, 18px for the note, and 925px between the page
-// heading and the bottom padding. Each figure here errs high, and the layout
+// heading and the bottom padding. Lines are counted at 90 characters with each
+// action's references in them, which never counted too few across 135 actions
+// on the samples' plans and re-checks (DECISIONS.md 418), so the heights sit
+// just above what was measured, and the page has its full 925px. The layout
 // check measures the real thing.
 const PLAN_CHARS = 90;
 const INTRO_CHARS = 100;
-const PLAN_LINE = 20;
-const PLAN_PAGE_BUDGET = 915;
+const PLAN_LINE = 19.8;
+const PHASE_HEAD = 41;
+const PLAN_PAGE_BUDGET = 925;
+/** About the characters a reference tag takes beside an action, at 0.85em with its margin (DECISIONS.md 418). */
+const REF_CHARS = 5;
+/** An action's height on the page, from its words and its references. */
+type ItemHeight = (f: Finding, quick: boolean) => number;
 // A quick win is a line here: its title says what to do, and the full report has the rest. The box's padding is the 20.
-const planItemHeight = (r: Render, f: Finding, quick = false): number => 4 + PLAN_LINE * estimateLines(quick ? `${r.t(f.title)}. ${isUnpricedSaving(f) ? UNPRICED : ""} ${r.t(f.owner)}` : `${r.t(f.title)}. ${r.t(f.recommendation)} ${r.t(f.owner)}`, PLAN_CHARS);
-const phaseHeight = (r: Render, items: Finding[], more: boolean, quick = false): number => 44 + (quick ? 20 : 0) + (items.length ? items.reduce((sum, f) => sum + planItemHeight(r, f, quick), 0) : 22) + (more ? 18 : 0);
+// Each action carries its reference, and those of the issues it also covers: at the edge of a line, they can wrap it (DECISIONS.md 418).
+const planItemHeight =
+  (r: Render, alsoFor: Record<string, Finding[]>): ItemHeight =>
+  (f, quick) => {
+    const refs = " ".repeat(REF_CHARS * (1 + (alsoFor[f.id]?.length ?? 0)));
+    const unpriced = isUnpricedSaving(f) ? ` ${r.t(UNPRICED)}` : "";
+    return 4 + PLAN_LINE * estimateLines(quick ? `${r.t(f.title)}.${refs}${unpriced} ${r.t(f.owner)}` : `${r.t(f.title)}.${refs} ${r.t(f.recommendation)}${unpriced} ${r.t(f.owner)}`, PLAN_CHARS);
+  };
+const phaseHeight = (itemHeight: ItemHeight, items: Finding[], more: boolean, quick = false): number => PHASE_HEAD + (quick ? 20 : 0) + (items.length ? items.reduce((sum, f) => sum + itemHeight(f, quick), 0) : 22) + (more ? 18 : 0);
 
 type PlanBlock = { phase: PlanPhase; items: Finding[] };
 
@@ -89,8 +104,8 @@ export const executiveMaxPages = (report: Pick<BuiltReport, "progress">): number
 
 type PlanPage = Array<PlanBlock | { intro: true }>;
 
-function planPages(r: Render, blocks: PlanBlock[], introHeight: number): PlanPage[] {
-  return paginate<PlanBlock | { intro: true }>([{ intro: true }, ...blocks], (b) => ("intro" in b ? introHeight : phaseHeight(r, b.items, b.phase.findings.length > b.items.length, b.phase.key === "quick")), PLAN_PAGE_BUDGET);
+function planPages(itemHeight: ItemHeight, blocks: PlanBlock[], introHeight: number): PlanPage[] {
+  return paginate<PlanBlock | { intro: true }>([{ intro: true }, ...blocks], (b) => ("intro" in b ? introHeight : phaseHeight(itemHeight, b.items, b.phase.findings.length > b.items.length, b.phase.key === "quick")), PLAN_PAGE_BUDGET);
 }
 
 /**
@@ -99,11 +114,11 @@ function planPages(r: Render, blocks: PlanBlock[], introHeight: number): PlanPag
  * it lose actions, from the longest phase first, so it never runs into the
  * footer or past the page limit, whatever the text length.
  */
-function planLayout(r: Render, phases: PlanPhase[], introHeight: number, pagesLeft: number, quickItems = EXECUTIVE_PLAN_ITEMS): PlanPage[] {
+function planLayout(itemHeight: ItemHeight, phases: PlanPhase[], introHeight: number, pagesLeft: number, quickItems = EXECUTIVE_PLAN_ITEMS): PlanPage[] {
   const blocks: PlanBlock[] = phases.map((phase) => ({ phase, items: phase.findings.slice(0, phase.key === "quick" ? quickItems : EXECUTIVE_PLAN_ITEMS) }));
-  const height = (b: PlanBlock): number => phaseHeight(r, b.items, true, b.phase.key === "quick");
+  const height = (b: PlanBlock): number => phaseHeight(itemHeight, b.items, true, b.phase.key === "quick");
   for (;;) {
-    const pages = planPages(r, blocks, introHeight);
+    const pages = planPages(itemHeight, blocks, introHeight);
     const tooLong = blocks.some((b) => b.items.length > 1 && height(b) > PLAN_PAGE_BUDGET);
     if (!tooLong && pages.length <= Math.max(1, pagesLeft)) return pages;
     const longest = blocks.filter((b) => b.items.length > 1).sort((a, b) => height(b) - height(a))[0];
@@ -258,10 +273,11 @@ export function executiveHtml(report: BuiltReport, pseudonyms: Pseudonymiser): s
   // The quick wins' box mustn't cost the summary a page: it shows as many as fit
   // in the pages the plan takes without it, down to one (DECISIONS.md 366).
   const left = executiveMaxPages(report) - pages.length - 2;
-  const without = planLayout(r, urgent, introHeight, left).length;
+  const itemHeight = planItemHeight(r, alsoFor);
+  const without = planLayout(itemHeight, urgent, introHeight, left).length;
   // Failing that, the plan keeps its pages and a box of two, and its longest phases give up an action each until it fits.
-  const fits = [EXECUTIVE_PLAN_ITEMS, 3, 2, 1].map((n) => planLayout(r, plan, introHeight, left, n)).find((layout) => layout.length <= without);
-  (fits ?? planLayout(r, plan, introHeight, without, 2)).forEach((group, i) => {
+  const fits = [EXECUTIVE_PLAN_ITEMS, 3, 2, 1].map((n) => planLayout(itemHeight, plan, introHeight, left, n)).find((layout) => layout.length <= without);
+  (fits ?? planLayout(itemHeight, plan, introHeight, without, 2)).forEach((group, i) => {
     const phases = group.filter((b): b is PlanBlock => !("intro" in b));
     add(`<div class="eyebrow">90-day plan</div><h2>${i === 0 ? "What we'd do first" : "What we'd do first, continued"}</h2>${i === 0 ? `<p style="margin-bottom:14px">${r.t(intro)}</p>` : ""}${phases.map((b) => phaseBlock(r, b, alsoFor)).join("")}`);
   });
