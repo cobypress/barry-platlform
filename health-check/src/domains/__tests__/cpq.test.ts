@@ -131,6 +131,18 @@ describe("discount leakage", () => {
     assert.match(line.basis, /divided by/);
   });
 
+  test("its figure is money to recover, in its own group with a range, so it reaches the headline (DECISIONS.md 322)", () => {
+    const report = buildReport({ run, calibration: loadCalibration(), findings: output!.findings, metrics: output!.metrics, manualSteps: output!.manualSteps });
+    const group = report.value.groups.find((g) => g.lines.some((l) => l.ruleId === "cpq.discount-leakage"));
+    assert.ok(group, "the value model groups it");
+    assert.equal(group.id, "discount-leakage");
+    assert.equal(group.kind, "revenue_recoverable");
+    assert.match(group.label, /^Potential/);
+    assert.deepEqual(group.lines.map((l) => l.ruleId), ["cpq.discount-leakage"], "nothing else shares its group");
+    assert.ok(group.counted.low < group.counted.expected && group.counted.expected < group.counted.high);
+    assert.ok(report.value.byKind.revenue_recoverable.expected >= group.counted.expected, "it's in the headline's recoverable revenue");
+  });
+
   test("not measurable on too few won quotes, and quiet when the rep discounts like their team-mate", () => {
     const few = edited<CpqQuotes>("cpq-quotes", (q) => void ((q.quotes as { data: unknown[] }).data = (q.quotes as { data: unknown[] }).data.slice(0, 10)));
     assert.equal(one(few, "cpq.discount-leakage").status, "not_measurable");

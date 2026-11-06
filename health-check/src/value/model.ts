@@ -44,6 +44,8 @@ export const GROUPS: Record<string, GroupSpec> = {
   "unworked-leads": { kind: "revenue_recoverable", label: "Leads nobody worked", realisation: LONG_SHOTS },
   "past-customers": { kind: "revenue_recoverable", label: "Past customers and lost deals worth another look", realisation: LONG_SHOTS },
   "segment-gaps": { kind: "conversion_uplift", label: "Teams and segments winning less often than the rest", realisation: LONG_SHOTS },
+  // Money given away on deals already won, so it doesn't overlap the segment gaps, which value wins not made (DECISIONS.md 322).
+  "discount-leakage": { kind: "revenue_recoverable", label: "Potential: discount given beyond what peers gave", realisation: LONG_SHOTS },
   "unused-seats": { kind: "licence_waste", label: "Seats held by people who don't log in", realisation: SEATS },
   "unassigned-seats": { kind: "licence_waste", label: "Seats nobody is assigned to", realisation: SEATS },
   "team-time": { kind: "time_cost", label: "Time your team says it loses", realisation: HOURS },
@@ -64,6 +66,7 @@ export const RULE_GROUPS: Record<string, string> = {
   "rev.dormant-accounts": "past-customers",
   "rev.win-backs": "past-customers",
   "pipe.segment-divergence": "segment-gaps",
+  "cpq.discount-leakage": "discount-leakage",
   "utl.dormant-licensed-users": "unused-seats",
   "utl.never-logged-in": "unused-seats",
   // An API-only account on a full seat can also be a dormant or never-used one: the same seat (DECISIONS.md 303).
