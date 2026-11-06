@@ -837,16 +837,17 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   const roadmapText = roadmap && roadmap.source !== "engine" ? `<div style="margin-bottom:18px">${sectionBody(r, built, "roadmap")}</div>` : "";
   // Quick wins are their own box beside "Stabilise" (DECISIONS.md 366). In a roomy deck it sits on this
   // overview, so it costs no slide; a dense deck has no overview, so they get a slide after "Stabilise".
+  // A line each: what to do for each is on its card in its area, and the box says so.
   const quickItem = (f: Finding): string => `<li><strong>${r.t(f.title)}.</strong>${r.ref(f.id)}${(alsoFor[f.id] ?? []).map((x) => r.ref(x.id)).join("")}${isUnpricedSaving(f) ? ` ${r.t(UNPRICED)}` : ""} <span class="owner">${r.t(f.owner)}</span></li>`;
   const quickOnOverview = !dense && planned && quickWins.length > 0;
-  const quickPanel = `<div class="quick-panel"><h3>${r.t(QUICK_WINS_HEADING)}</h3><ul class="action-list">${quickWins.map(quickItem).join("")}</ul></div>`;
+  const quickPanel = `<div class="quick-panel"><h3>${r.t(QUICK_WINS_HEADING)}</h3><ul class="action-list">${quickWins.map(quickItem).join("")}</ul><p class="small-note">${r.t("What to do for each is on its card in its area.")}</p></div>`;
   const quickBox = quickOnOverview ? quickPanel : "";
   if (!dense && planned) add(`<div class="eyebrow">Roadmap</div><h2>The first 90 days</h2>${roadmapText}<div class="stat-row">${plan.map((p) => `<div class="stat"><b>${r.t(p.title)}</b><span>Days ${p.from} to ${p.to}</span><p style="margin-top:8px">${p.findings.length} ${p.findings.length === 1 ? "action" : "actions"}</p></div>`).join("")}${quickWins.length ? `<div class="stat"><b>${r.t("Quick wins")}</b><span>Also days 1 to 30</span><p style="margin-top:8px">${quickWins.length} ${quickWins.length === 1 ? "action" : "actions"}</p></div>` : ""}</div>${quickBox}`);
   // Quick wins are their own box beside "Stabilise", not part of it (DECISIONS.md 366).
   // Without the overview, the box follows "Stabilise" on its pages, so it takes a slide only when those are full.
   const quickInline = quickWins.length > 0 && !quickOnOverview;
   const itemHeight = (f: Finding): number => (dense ? 10 + 23 * estimateLines(`${f.title}. ${f.recommendation} ${f.owner}`, 58) : 12 + 28 * estimateLines(`${f.title}. ${f.recommendation} ${f.owner}`, 95));
-  const quickHeight = 56 + quickWins.reduce((sum, f) => sum + 6 + 22 * estimateLines(`${f.title}. ${f.owner}`, dense ? 70 : 110), 0);
+  const quickHeight = 84 + quickWins.reduce((sum, f) => sum + 6 + 22 * estimateLines(`${f.title}. ${f.owner}`, dense ? 70 : 110), 0);
   type Row = { f: Finding } | { quickBox: true };
   plan.forEach((phase, k) => {
     const rows: Row[] = [...phase.findings.map((f) => ({ f })), ...(k === 0 && quickInline ? [{ quickBox: true as const }] : [])];
