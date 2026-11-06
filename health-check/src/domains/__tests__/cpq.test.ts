@@ -162,6 +162,15 @@ describe("approvals, orders and renewals", () => {
     assert.ok(list.rows.every((r) => /^Q-\d{5}$/.test(r.name ?? "")));
   });
 
+  test("a cut-off approvals read can't call a quote unapproved: the missing approval may be in the rows not read (DECISIONS.md 325)", () => {
+    const base = one(output!.findings, "cpq.discount-approvals");
+    assert.equal(base.status, "issue");
+    const cut = edited<CpqQuotes>("cpq-quotes", (q) => void ((q.approvals as { truncated?: boolean }).truncated = true));
+    const f = one(cut, "cpq.discount-approvals");
+    assert.equal(f.status, "not_measurable");
+    assert.match(f.notMeasurableReason ?? "", /approvals/i);
+  });
+
   test("a draft quote on a deal still open isn't an unapproved discount: its approval may simply not have happened yet (night 3 review)", () => {
     const changed = clone(extracts);
     const cpq = changed.get("cpq-quotes") as CpqQuotes;

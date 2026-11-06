@@ -39,7 +39,7 @@ const listed = (items: string[]): string => (items.length <= 1 ? (items[0] ?? ""
 
 const personalIntegrations: Rule = {
   id: "sec.personal-integration-accounts",
-  version: 3,
+  version: 4,
   domain: DOMAIN,
   title: "Personal accounts used for integrations",
   evaluate(ctx): RuleResult | RuleResult[] {
@@ -81,7 +81,8 @@ const personalIntegrations: Rule = {
     return {
       outcome: "issue",
       title: "Integrations look to be running on personal logins",
-      summary: `${plural(hits.length, "personal account")} made ${total} API logins since ${logins.data.from}, through ${applications.join(", ") || "an unnamed application"}. If that person leaves and the account is deactivated, the integration stops.`,
+      // A cut-off log holds only some of the logins, so its counts are floors (DECISIONS.md 325).
+      summary: `${logins.truncated ? "At least " : ""}${plural(hits.length, "personal account")} made ${logins.truncated ? "at least " : ""}${total} API logins since ${logins.data.from}, through ${applications.join(", ") || "an unnamed application"}.${logins.truncated ? " The login log was too long to read in full, so there may be more." : ""} If that person leaves and the account is deactivated, the integration stops.`,
       recommendation: "Move each integration to its own integration account, with an API-only profile and only the access it needs.",
       recommendationType: "investigate",
       severity: "medium",

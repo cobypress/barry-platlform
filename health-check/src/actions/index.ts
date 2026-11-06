@@ -176,7 +176,7 @@ export function buildTickets(report: BuiltReport, pseudonyms: Pseudonymiser, lis
       `Effort: ${EFFORT[f.effort.size].toLowerCase()}.${f.effort.note ? ` ${sentence(c.words(f.effort.note))}` : ""} Owner: ${c.words(f.owner)}.`,
       ref ? `The working is at ${ref} in the raw notes.` : "",
     ].filter(Boolean);
-    return [c.words(f.title), "Task", PRIORITY[f.severity], description.join("\n\n"), "barometer", f.domain, f.ruleId, f.effort.size, c.words(f.owner), ref, list ? String(list.rows.length) : ""];
+    return [c.words(f.title), "Task", PRIORITY[f.severity], description.join("\n\n"), "barometer", f.domain, f.ruleId, f.effort.size, c.words(f.owner), ref, list ? String(list.part?.total ?? list.rows.length) : ""];
   });
   return [TICKET_COLUMNS as readonly string[], ...rows].map((row) => row.map(csvCell).join(",")).join("\r\n") + "\r\n";
 }

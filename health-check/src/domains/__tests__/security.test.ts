@@ -205,6 +205,15 @@ describe("personal accounts used for integrations", () => {
     for (const f of [personal, licences]) assert.match(notes(f), new RegExp(API_ONLY_ACCOUNT.replace(/[()]/g, "\\$&")), f.ruleId);
   });
 
+  test("a truncated login log gives its counts as a floor, not a total (DECISIONS.md 325)", () => {
+    const changed = clone(extracts);
+    (changed.get("logins") as { truncated: boolean }).truncated = true;
+    const f = one(analyseExtracts(changed).findings, "sec.personal-integration-accounts");
+    assert.equal(f.status, "issue");
+    assert.match(f.summary, /^At least 1 personal account made at least 6 API logins since /);
+    assert.match(f.summary, /too long to read in full/);
+  });
+
   test("a truncated login log can't give a clean pass", () => {
     const changed = clone(extracts);
     const logins = changed.get("logins") as { truncated: boolean; data: { apiByUser: Record<string, unknown> } };

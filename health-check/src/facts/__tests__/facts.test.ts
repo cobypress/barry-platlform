@@ -84,7 +84,8 @@ const wrong = await run({
 const STATES_THE_GAP: Record<string, (f: Finding) => boolean> = {
   "tech.classic-leftovers": (f) => /S-controls couldn't be read/.test(f.summary) && !("scontrols" in (f.facts ?? {})),
   // The run-as scan is incomplete, so nobody is recommended for release (hard rule 3).
-  "utl.dormant-licensed-users": (f) => f.recommendationType !== "deactivate",
+  // And says so, so the raw notes' "the check that rests on it says so" is true (night 3 review).
+  "utl.dormant-licensed-users": (f) => f.recommendationType !== "deactivate" && (f.status === "not_measurable" || /couldn't complete every check/.test(f.summary)),
 };
 
 describe("where a fact contradicts what we assume", () => {
