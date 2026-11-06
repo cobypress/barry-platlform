@@ -143,7 +143,7 @@ describe("a set-up review run job", () => {
     const run = stored(deps);
     const onDisk = JSON.parse(readFileSync(join(run.runDir!, "run.json"), "utf8")) as { scope: string; modules: string[] };
     assert.equal(onDisk.scope, "essentials");
-    assert.deepEqual(onDisk.modules.sort(), ["adoption", "automation", "best_practice", "configuration", "security", "utilisation"]);
+    assert.deepEqual(onDisk.modules.sort(), ["adoption", "automation", "best_practice", "configuration", "integrations", "security", "technical_health", "utilisation"]);
     assert.ok(run.output!.findings.every((f) => onDisk.modules.includes(f.domain)));
     assert.ok(!run.output!.sections.some((s) => ["pipeline", "pipeline_deep_dive", "comparisons"].includes(s.key)));
   });
@@ -415,7 +415,9 @@ describe("a free scan's run job", () => {
     const { result } = saved;
     assert.ok(result.shown.length > 0 && result.shown.length <= 4);
     assert.equal(result.lockedIssues, stored(deps).output!.findings.filter((f) => f.status === "issue").length - result.shown.length);
-    assert.ok(result.areas.length > 0 && result.areas.every((a) => ["adoption", "automation", "best_practice", "configuration", "security", "utilisation"].includes(a.domain)));
+    assert.ok(result.areas.length > 0 && result.areas.every((a) => ["adoption", "automation", "best_practice", "configuration", "integrations", "security", "technical_health", "utilisation"].includes(a.domain)));
+    // Both set-up areas are in the scan, so their issues count among the locked ones.
+    for (const domain of ["integrations", "technical_health"]) assert.ok(result.areas.some((a) => a.domain === domain && a.issues > 0), domain);
     assert.doesNotMatch(JSON.stringify(result), /\[\[[a-z]+:|@example\.com/);
     assert.equal(asked.length, 0);
     assert.equal(deps.tokens.has(CONNECTION), false, "the scan's connection is gone");

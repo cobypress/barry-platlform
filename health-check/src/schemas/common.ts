@@ -8,7 +8,9 @@ export type DomainId = z.infer<typeof DomainId>;
 export const SALES_CLOUD_DOMAINS = [
   "configuration",
   "automation",
+  "technical_health",
   "security",
+  "integrations",
   "best_practice",
   "data_quality",
   "utilisation",

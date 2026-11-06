@@ -689,6 +689,8 @@ export const USER_LICENSES = [
   { Name: "Salesforce", TotalLicenses: 30, UsedLicenses: 15, Status: "Active" },
   { Name: "Salesforce Platform", TotalLicenses: 10, UsedLicenses: 10, Status: "Active" },
   { Name: "Chatter Free", TotalLicenses: 5000, UsedLicenses: 0, Status: "Active" },
+  // Trap: free integration seats nobody holds, while the integration account takes a full one.
+  { Name: "Salesforce Integration", TotalLicenses: 5, UsedLicenses: 0, Status: "Active" },
 ];
 
 // Traps: a seat-limited package with spare seats; a site licence, a free and an
@@ -837,17 +839,19 @@ export const HEALTH_RISKS = [
   { RiskType: "MEETS_STANDARD", Setting: "Password complexity", SettingGroup: "Password Policies", OrgValue: "Alpha and numeric", StandardValue: "Alpha and numeric" },
 ];
 
-const permissionSet = (n: number, Label: string, profile: string | null, modify: boolean, view: boolean) => ({
+const permissionSet = (n: number, Label: string, profile: string | null, modify: boolean, view: boolean, apiOnly = false) => ({
   Id: sfId("0PS", n),
   Label,
   IsOwnedByProfile: profile !== null,
   Profile: profile ? { Name: profile } : null,
   PermissionsModifyAllData: modify,
   PermissionsViewAllData: view,
+  PermissionsApiUserOnly: apiOnly,
 });
 
 export const PERMISSION_SETS = [
   permissionSet(1, "00eSystemAdmin", "System Administrator", true, true),
+  // Trap: the profile is called API Only, and doesn't have the API Only User permission.
   permissionSet(2, "00eApiOnly", "API Only", true, true),
   // Trap: the profile list looks clean. The grant sits in a permission set on a rep.
   permissionSet(3, "Data Fix Temporary", null, true, true),
@@ -926,6 +930,39 @@ export const REMOTE_SITES = [
   { EndpointUrl: "http://legacy.example.com", IsActive: false, ProtocolMismatch: false, NamespacePrefix: null },
 ];
 
+// Technical health: what Lightning Experience left behind. Traps: a JavaScript
+// button, and a Visualforce page not marked for Lightning. A package's own
+// JavaScript button is left out by the query, and a URL link is fine.
+export const WEB_LINKS = [
+  { Name: "Send_To_ERP", PageOrSobjectType: "Opportunity", LinkType: "javascript", NamespacePrefix: null },
+  { Name: "Company_Website", PageOrSobjectType: "Account", LinkType: "url", NamespacePrefix: null },
+  { Name: "Quote_Wizard", PageOrSobjectType: "Opportunity", LinkType: "javascript", NamespacePrefix: "acmecpq" },
+];
+export const SCONTROLS: Array<{ Name: string; NamespacePrefix: string | null }> = [];
+export const APEX_PAGES = [
+  { Name: "InvoicePrint", ApiVersion: 45, IsAvailableInTouch: false, NamespacePrefix: null },
+  { Name: "AccountMap", ApiVersion: 62, IsAvailableInTouch: true, NamespacePrefix: null },
+];
+
+// Integrations: the async Apex that ran this week. Traps: LegacySync failing
+// three times, and a batch that finished with errors. A batch's chunks and a
+// failure from before the week are left out.
+const asyncJob = (n: number, JobType: string, Status: string, className: string, days: number, NumberOfErrors = 0) => ({ Id: sfId("707", n), JobType, Status, NumberOfErrors, ApexClass: { Name: className }, CreatedDate: daysAgo(days) });
+export const ASYNC_JOBS = [
+  asyncJob(1, "Queueable", "Failed", "LegacySync", 1),
+  asyncJob(2, "Queueable", "Failed", "LegacySync", 2),
+  asyncJob(3, "Queueable", "Failed", "LegacySync", 4),
+  asyncJob(4, "Queueable", "Completed", "LegacySync", 3),
+  asyncJob(5, "BatchApex", "Completed", "FinanceSync", 2, 4),
+  asyncJob(6, "BatchApexWorker", "Failed", "FinanceSync", 2, 4),
+  asyncJob(7, "BatchApex", "Completed", "FinanceSync", 5),
+  asyncJob(8, "ScheduledApex", "Completed", "FinanceSync", 1),
+  asyncJob(9, "Queueable", "Failed", "LeadRouter", 20),
+];
+
+// Trap: async Apex nearly used up for the day, while API requests are fine.
+export const ASYNC_APEX_LIMIT = { Max: 250_000, Remaining: 30_000 };
+
 export const SHARING_DEFAULTS = { DefaultAccountAccess: "Read", DefaultContactAccess: "ControlledByParent", DefaultOpportunityAccess: "Edit", DefaultLeadAccess: "ReadEditTransfer" };
 
 export const CRON_TRIGGERS = [
@@ -978,25 +1015,35 @@ export const LEADS = {
 export const CONTACTS = { total: 500, noAccount: 20, noEmail: 80 };
 
 export const APEX_CLASSES = [
-  { Id: sfId("01p", 1), Name: "OpportunityHandler", ApiVersion: 60, Status: "Active", LengthWithoutComments: 1200, Body: "public class OpportunityHandler { /* uses Competitor__c */ }" },
-  { Id: sfId("01p", 2), Name: "LeadRouter", ApiVersion: 62, Status: "Active", LengthWithoutComments: 800, Body: "public class LeadRouter { }" },
-  { Id: sfId("01p", 3), Name: "LegacySync", ApiVersion: 38, Status: "Active", LengthWithoutComments: 400, Body: "public class LegacySync { }" },
-  { Id: sfId("01p", 4), Name: "OpportunityHandlerTest", ApiVersion: 60, Status: "Active", LengthWithoutComments: 300, Body: "@isTest class OpportunityHandlerTest { }" },
+  // Trap: a SOQL for loop queries once, so it isn't a query in a loop.
+  { Id: sfId("01p", 1), Name: "OpportunityHandler", ApiVersion: 60, Status: "Active", LengthWithoutComments: 1200, Body: "public class OpportunityHandler { /* uses Competitor__c */ public void close() { List<Opportunity> opps = new List<Opportunity>(); for (Opportunity o : [SELECT Id FROM Opportunity WHERE IsClosed = false]) { opps.add(o); } update opps; } }" },
+  // Trap: a query and a save inside a loop.
+  { Id: sfId("01p", 2), Name: "LeadRouter", ApiVersion: 62, Status: "Active", LengthWithoutComments: 800, Body: "public class LeadRouter { public void route(List<Lead> leads) { for (Lead l : leads) { Account a = [SELECT Id FROM Account WHERE Name = :l.Company LIMIT 1]; l.Description = a.Id; update l; } } }" },
+  // Trap: a callout address written into the code.
+  { Id: sfId("01p", 3), Name: "LegacySync", ApiVersion: 38, Status: "Active", LengthWithoutComments: 400, Body: "public class LegacySync { public void send() { HttpRequest req = new HttpRequest(); req.setEndpoint('https://legacy.example.com/api'); req.setMethod('POST'); new Http().send(req); } }" },
+  // Trap: a test that runs the code and checks nothing.
+  { Id: sfId("01p", 4), Name: "OpportunityHandlerTest", ApiVersion: 60, Status: "Active", LengthWithoutComments: 300, Body: "@isTest class OpportunityHandlerTest { @isTest static void closes() { new OpportunityHandler().close(); } }" },
+  // Clean: a callout through a named credential. The old address is in a comment, so it doesn't count.
+  { Id: sfId("01p", 5), Name: "FinanceSync", ApiVersion: 62, Status: "Active", LengthWithoutComments: 350, Body: "// Sends invoices to the finance system. Was req.setEndpoint('https://old.example.com').\npublic class FinanceSync { public void send() { HttpRequest req = new HttpRequest(); req.setEndpoint('callout:Finance_API/invoices'); new Http().send(req); } }" },
+  // Trap: reads the org's live data, and does check its result.
+  { Id: sfId("01p", 6), Name: "LeadRouterTest", ApiVersion: 62, Status: "Active", LengthWithoutComments: 250, Body: "@isTest(SeeAllData=true) private class LeadRouterTest { @isTest static void routes() { new LeadRouter().route(new List<Lead>()); System.assertEquals(0, Limits.getDmlStatements()); } }" },
+  // Trap: a test data factory has no test methods, so it has nothing to assert.
+  { Id: sfId("01p", 7), Name: "TestDataFactory", ApiVersion: 62, Status: "Active", LengthWithoutComments: 150, Body: "@isTest public class TestDataFactory { public static Lead lead() { return new Lead(LastName = 'Test', Company = 'Test'); } }" },
 ];
 
 const TRIGGER_EVENTS = ["BeforeInsert", "BeforeUpdate", "BeforeDelete", "AfterInsert", "AfterUpdate", "AfterDelete", "AfterUndelete"] as const;
 const usage = (...on: Array<(typeof TRIGGER_EVENTS)[number]>): Record<string, boolean> => Object.fromEntries(TRIGGER_EVENTS.map((e) => [`Usage${e}`, on.includes(e)]));
 
 export const APEX_TRIGGERS = [
-  { Id: sfId("01q", 1), Name: "OpportunityTrigger", TableEnumOrId: "Opportunity", ApiVersion: 60, Status: "Active", ...usage("BeforeInsert"), Body: "trigger OpportunityTrigger on Opportunity (before insert) { }" },
-  { Id: sfId("01q", 2), Name: "OpportunitySplitTrigger", TableEnumOrId: "Opportunity", ApiVersion: 60, Status: "Active", ...usage("AfterUpdate"), Body: "trigger OpportunitySplitTrigger on Opportunity (after update) { }" },
-  { Id: sfId("01q", 3), Name: "AccountTrigger", TableEnumOrId: "Account", ApiVersion: 60, Status: "Active", ...usage("BeforeUpdate"), Body: "trigger AccountTrigger on Account (before update) { }" },
+  { Id: sfId("01q", 1), Name: "OpportunityTrigger", TableEnumOrId: "Opportunity", ApiVersion: 60, LengthWithoutComments: 180, Status: "Active", ...usage("BeforeInsert"), Body: "trigger OpportunityTrigger on Opportunity (before insert) { }" },
+  { Id: sfId("01q", 2), Name: "OpportunitySplitTrigger", TableEnumOrId: "Opportunity", ApiVersion: 60, LengthWithoutComments: 220, Status: "Active", ...usage("AfterUpdate"), Body: "trigger OpportunitySplitTrigger on Opportunity (after update) { }" },
+  { Id: sfId("01q", 3), Name: "AccountTrigger", TableEnumOrId: "Account", ApiVersion: 60, LengthWithoutComments: 150, Status: "Active", ...usage("BeforeUpdate"), Body: "trigger AccountTrigger on Account (before update) { }" },
   // Trap: a trigger on a custom object names it by id, not by name.
-  { Id: sfId("01q", 4), Name: "InvoiceTrigger", TableEnumOrId: sfId("01I", 1), ApiVersion: 62, Status: "Active", ...usage("BeforeInsert", "BeforeUpdate"), Body: "// Totals each invoice from its lines.\ntrigger InvoiceTrigger on Invoice__c (before insert, before update) { }" },
+  { Id: sfId("01q", 4), Name: "InvoiceTrigger", TableEnumOrId: sfId("01I", 1), ApiVersion: 62, LengthWithoutComments: 260, Status: "Active", ...usage("BeforeInsert", "BeforeUpdate"), Body: "// Totals each invoice from its lines.\ntrigger InvoiceTrigger on Invoice__c (before insert, before update) { }" },
   // Trap: a second trigger on the same custom object, by its 15-character id. With
   // the flow and Workflow Rule on Invoice__c, that's three tools and two triggers
   // on one object, which raw ids would split across three objects.
-  { Id: sfId("01q", 5), Name: "InvoiceAudit", TableEnumOrId: sfId("01I", 1).slice(0, 15), ApiVersion: 62, Status: "Active", ...usage("AfterUpdate"), Body: "// Records who changed an invoice's total.\ntrigger InvoiceAudit on Invoice__c (after update) { }" },
+  { Id: sfId("01q", 5), Name: "InvoiceAudit", TableEnumOrId: sfId("01I", 1).slice(0, 15), ApiVersion: 62, LengthWithoutComments: 140, Status: "Active", ...usage("AfterUpdate"), Body: "// Records who changed an invoice's total.\ntrigger InvoiceAudit on Invoice__c (after update) { }" },
 ];
 
 export const ORG_COVERAGE = [{ PercentCovered: 82 }];

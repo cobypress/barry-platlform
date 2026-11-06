@@ -26,6 +26,8 @@ export type SimulatorOptions = {
   readOnly?: boolean;
   /** Return a Tooling item with a null Metadata, for the single-row query that matches. */
   withholdMetadata?: (soql: string) => boolean;
+  /** The day's async Apex allowance, as /limits reports it. The synthetic org's own by default. */
+  asyncApex?: { Max: number; Remaining: number };
 };
 
 type Json = Record<string, unknown>;
@@ -148,6 +150,7 @@ export class Simulator implements Transport {
   #dropFields: Record<string, string[]>;
   #readOnly: boolean;
   #withholdMetadata: SimulatorOptions["withholdMetadata"];
+  #asyncApex: { Max: number; Remaining: number };
   #retrieveChecks = 0;
   #retrieving: Record<string, string> = org.METADATA_FILES;
 
@@ -158,6 +161,7 @@ export class Simulator implements Transport {
     this.#dropFields = options.dropFields ?? {};
     this.#readOnly = options.readOnly ?? false;
     this.#withholdMetadata = options.withholdMetadata;
+    this.#asyncApex = options.asyncApex ?? org.ASYNC_APEX_LIMIT;
   }
 
   get #limitInfo(): string {
@@ -170,7 +174,7 @@ export class Simulator implements Transport {
     const path = url.pathname;
 
     if (path === "/services/data/") return jsonResponse(200, [{ version: "60.0" }, { version: org.API_VERSION }], this.#limitInfo);
-    if (path.endsWith("/limits")) return jsonResponse(200, { DailyApiRequests: { Max: this.#limit, Remaining: this.#limit - this.#used } }, this.#limitInfo);
+    if (path.endsWith("/limits")) return jsonResponse(200, { DailyApiRequests: { Max: this.#limit, Remaining: this.#limit - this.#used }, DailyAsyncApexExecutions: this.#asyncApex }, this.#limitInfo);
 
     this.#used++;
     if (path.endsWith("/limits/recordCount")) return jsonResponse(200, { sObjects: org.RECORD_COUNTS }, this.#limitInfo);
@@ -288,9 +292,26 @@ export class Simulator implements Transport {
       case "SecurityHealthCheckRisks":
         return tooling ? page(org.HEALTH_RISKS) : unsupported("SecurityHealthCheckRisks");
       case "PermissionSet":
+        if (/PermissionsApiUserOnly = true/.test(where)) return page(org.PERMISSION_SETS.filter((s) => s.PermissionsApiUserOnly));
         return page(/IsOwnedByProfile = false/.test(where) ? org.DOCUMENTED_PERMISSION_SETS : org.PERMISSION_SETS);
-      case "PermissionSetAssignment":
+      case "PermissionSetAssignment": {
+        if (/PermissionsApiUserOnly = true/.test(where)) {
+          const sets = new Set(org.PERMISSION_SETS.filter((s) => s.PermissionsApiUserOnly && !s.IsOwnedByProfile).map((s) => s.Id));
+          const inactive = new Set(org.usersTable.filter((u) => !u.IsActive).map((u) => u.Id));
+          return page(org.PERMISSION_ASSIGNMENTS.filter((a) => sets.has(a.PermissionSetId) && !inactive.has(a.AssigneeId)));
+        }
         return page(/IsOwnedByProfile = false/.test(where) ? org.DOCUMENTED_ASSIGNMENTS : org.PERMISSION_ASSIGNMENTS);
+      }
+      case "WebLink":
+        return page(org.WEB_LINKS.filter((l) => !/NamespacePrefix = null/.test(where) || l.NamespacePrefix === null));
+      case "Scontrol":
+        return page(org.SCONTROLS.filter((c) => !/NamespacePrefix = null/.test(where) || c.NamespacePrefix === null));
+      case "ApexPage":
+        return page(org.APEX_PAGES.filter((p) => !/NamespacePrefix = null/.test(where) || p.NamespacePrefix === null));
+      case "AsyncApexJob": {
+        const since = /\bCreatedDate\s*>=\s*(\S+)/i.exec(where)?.[1];
+        return page(since ? org.ASYNC_JOBS.filter((j) => new Date(j.CreatedDate.replace("+0000", "Z")) >= new Date(since)) : org.ASYNC_JOBS);
+      }
       case "UserRole":
         return page(org.ROLES);
       case "ConnectedApplication":

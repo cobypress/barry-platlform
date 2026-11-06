@@ -199,8 +199,10 @@ export function scorecardChart(rows: ScorecardRow[], options: ScorecardOptions =
   const left = PAD + labelWidth + weightColumn;
   const trackWidth = WIDTH - left - PAD - 170;
   // With the caption row, rows tighten so the chart is no taller than it was without it.
-  // Service Cloud adds two areas. Past the thirteen of Sales Cloud, rows tighten so the chart keeps its height.
-  const rowHeight = (weightOf ? 32 : 34) - (ranked.length > 13 ? 4 : 0);
+  // Past thirteen areas (integrations, technical health, Service Cloud), rows
+  // tighten so the chart is never taller than thirteen rows were.
+  const fullRow = weightOf ? 32 : 34;
+  const rowHeight = Math.min(fullRow, Math.floor((fullRow * 13) / ranked.length));
   const top = weightOf ? 36 : 18;
   const body: string[] = weightOf
     ? [text(PAD, 22, before ? "Weakest for its weight first. A white mark is the score last time." : "Weakest for its weight first.", { size: 12, fill: colour.panelMuted }), text(PAD + labelWidth + weightColumn - 14, 22, "Weight", { size: 11, fill: colour.panelMuted, anchor: "end" })]

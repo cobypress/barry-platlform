@@ -164,3 +164,18 @@ d) The `KnowledgeArticleVersion` page says Manage Articles is needed to use Publ
 e) Whether Barometer Read Only, or the connected user, needs more than View Setup and Configuration for `MilestoneType`, `SlaProcess`, the Omni-Channel objects, `MacroUsage` and `QuickTextUsage`.
 f) Escalation rules come only from the Metadata API. We know of no Tooling route, so a connection that can't use the Metadata API leaves `svc.escalation-targets` not measurable, and `svc.escalation-rules` passes only on an active entitlement process.
 g) `KnowledgeArticleViewStat.Channel` values: we assume an "AllChannels" row, when present, totals the others. `MacroUsage.ExecutionState` and `AgentWork.Status` values aren't listed, so failed macros aren't checked and declined work is read from `DeclineDateTime`.
+
+## Integrations and technical health (DECISIONS.md 169 to 178)
+
+Facts we couldn't settle from the references we hold. Where a check depends on one, it's not measurable with the reason if the fact turns out otherwise, or the doubt is stated here.
+
+a) How long Salesforce keeps `AsyncApexJob` rows. We read the last 7 days, which we believe is safely inside it. If rows are kept longer, a longer window would catch failures that recur weekly.
+b) `PermissionSet.PermissionsApiUserOnly`: the Object Reference lists permission fields generically, and the Metadata API names the permission `ApiUserOnly`. If the field name is wrong, both API-only reads fail, `int.integration-users-interactive` is not measurable, and `int.integration-user-licences` relies on the calibration alone.
+c) Whether the Salesforce Integration licence makes its users API only by itself. We assume it does, and leave those users out of `int.integration-users-interactive`.
+d) The licence's name in `UserLicense` is "Salesforce Integration" (seen in a real org, and in `COMPLIMENTARY_LICENCES`). How many come free by edition, and the price of more, we don't hold, so a move with no spare seat isn't sized.
+e) `WebLink.LinkType` values in SOQL. The Metadata API lists url, sControl, javascript, page and flow. We compare without regard to case.
+f) `ApexPage.IsAvailableInTouch` is the "Available for Lightning Experience, Experience Builder sites, and the mobile app" box. We report a page without it as "not marked available in Lightning Experience", not as broken.
+g) The Apex size limit. The Apex Developer Guide says 6 MB, with `@isTest` classes left out. We read it as Setup's 6,000,000 characters without comments, and sum `LengthWithoutComments` of active code. Whether inactive code counts, we don't know.
+h) `/limits`: whether `DailyAsyncApexExecutions` is the async Apex allowance under that name in every edition, and whether going past `DailyApiRequests` refuses calls or is allowed for a while. Our text says Salesforce "can refuse" them.
+i) `Scontrol` in an org that never had s-controls: if the query fails as an unknown object, `tech.classic-leftovers` is not measurable on an org with nothing else to report. A real org's first run will tell us. If so, the answer is to read that failure as "no s-controls", as the Apex read already treats Professional Edition, which has no Apex.
+j) For the privacy owner: the scrub turns the words "integration user" into a user's token when an org has a user named "Integration User", which real orgs often do. Our integration text avoids the words (DECISIONS.md 175). Other text, and Claude's drafts, could still hit it.

@@ -1,5 +1,6 @@
 import { isUnavailable } from "../salesforce/client.ts";
 import { redactSecrets } from "../privacy/secrets.ts";
+import { scanApex, type ApexScan } from "./apex-scan.ts";
 import { orgExtractor } from "./configuration.ts";
 import { indexReferences, parseMetadataBundle, type MetadataBundle, type ReferenceIndex } from "./metadata-parse.ts";
 import { readBundleThroughTooling, ToolingGapError, TOOLING_PARTIAL_KEYS } from "./metadata-tooling.ts";
@@ -47,12 +48,13 @@ export const metadataExtractor: Extractor<Sourced<MetadataBundle>> = {
 };
 
 // The body isn't kept, so what rules need from it is worked out here: whether it
-// has any comment, and whether it's a test. Null when the body is hidden.
-type CodeFacts = { commented: boolean | null; isTest: boolean };
+// has any comment, whether it's a test, and what the scan finds. Null when the
+// body is hidden.
+type CodeFacts = { commented: boolean | null; isTest: boolean; scan: ApexScan | null };
 export type ApexClassRow = { Id: string; Name: string; ApiVersion: number; Status: string; LengthWithoutComments: number } & CodeFacts;
 /** When a trigger runs (Object Reference, API 68.0). Undefined in a checkpoint from before they were read. */
 export type TriggerUsage = { UsageBeforeInsert?: boolean; UsageBeforeUpdate?: boolean; UsageBeforeDelete?: boolean; UsageAfterInsert?: boolean; UsageAfterUpdate?: boolean; UsageAfterDelete?: boolean; UsageAfterUndelete?: boolean };
-export type ApexTriggerRow = { Id: string; Name: string; TableEnumOrId: string; ApiVersion: number; Status: string } & TriggerUsage & CodeFacts;
+export type ApexTriggerRow = { Id: string; Name: string; TableEnumOrId: string; ApiVersion: number; Status: string; LengthWithoutComments?: number } & TriggerUsage & CodeFacts;
 export type ClassCoverage = { name: string; covered: number; uncovered: number };
 
 export type ApexData = {
@@ -64,22 +66,22 @@ export type ApexData = {
 };
 
 // Bodies are scanned for references here and then dropped, so code never sits
-// in a checkpoint.
-const COMMENT = /\/\/|\/\*/;
+// in a checkpoint. A comment is one outside a string, so a URL isn't one (DECISIONS.md 174).
 
 function stripBodies<R extends { Name: string; Body?: string }>(rows: Sourced<R[]>, prefix: string, references: ReferenceIndex): Sourced<Array<Omit<R, "Body"> & CodeFacts>> {
   if (rows.status !== "ok") return rows;
   const data = rows.data.map(({ Body, ...row }) => {
     if (Body) indexReferences(references, redactSecrets(Body), `${prefix}/${row.Name}`);
     const readable = Boolean(Body) && Body !== "(hidden)";
-    return { ...row, commented: readable ? COMMENT.test(Body!) : null, isTest: readable && /@isTest/i.test(Body!) };
+    const scan = readable ? scanApex(Body!) : null;
+    return { ...row, commented: scan ? scan.commented : null, isTest: readable && /@isTest/i.test(Body!), scan };
   });
   return { ...rows, data };
 }
 
 export const apexExtractor: Extractor<ApexData> = {
   id: "apex",
-  version: 5,
+  version: 6,
   async run(ctx) {
     const references: ReferenceIndex = { users: {}, fields: {} };
     // Through REST, not Tooling: a user with View Setup but not Author Apex gets
@@ -93,7 +95,7 @@ export const apexExtractor: Extractor<ApexData> = {
     // TableEnumOrId or NamespacePrefix on ApexTrigger, and the Object Reference does.
     const triggers = await readSoql<Omit<ApexTriggerRow, keyof CodeFacts> & { Body?: string }>(
       ctx,
-      "SELECT Id, Name, TableEnumOrId, ApiVersion, Status, UsageBeforeInsert, UsageBeforeUpdate, UsageBeforeDelete, UsageAfterInsert, UsageAfterUpdate, UsageAfterDelete, UsageAfterUndelete, Body FROM ApexTrigger WHERE NamespacePrefix = null",
+      "SELECT Id, Name, TableEnumOrId, ApiVersion, Status, LengthWithoutComments, UsageBeforeInsert, UsageBeforeUpdate, UsageBeforeDelete, UsageAfterInsert, UsageAfterUpdate, UsageAfterDelete, UsageAfterUndelete, Body FROM ApexTrigger WHERE NamespacePrefix = null",
     );
     const orgCoverage = await readSoql<{ PercentCovered: number | null }>(ctx, "SELECT PercentCovered FROM ApexOrgWideCoverage", { api: "tooling" });
     const rawCoverage = await readSoql<{ ApexClassOrTrigger: { Name: string } | null; NumLinesCovered: number; NumLinesUncovered: number }>(

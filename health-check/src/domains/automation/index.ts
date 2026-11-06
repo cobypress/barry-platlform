@@ -1,41 +1,17 @@
 import { apexExtractor, metadataExtractor, scheduledJobsExtractor } from "../../extract/automation.ts";
 import { customObjectsExtractor } from "../../extract/configuration.ts";
-import { unreadReason, type MetadataBundle, type UnreadKind } from "../../extract/metadata-parse.ts";
-import { notSized, plural, type NotMeasurableResult, type Rule, type RuleContext, type RuleResult } from "../../engine/rule.ts";
+import { notSized, plural, type Rule, type RuleResult } from "../../engine/rule.ts";
 import { MIGRATE_TO_FLOW_NOTE, END_OF_SUPPORT } from "./notes.ts";
+import { apexGap, groupCount, metadataOr, UNNAMED, unnamedNote } from "./shared.ts";
 import type { DomainModule } from "../types.ts";
-import { isObjectId, objectResolver } from "../object-names.ts";
+import { objectResolver } from "../object-names.ts";
 
-const COVERAGE_MINIMUM = 75;
-const CLASS_COVERAGE_FLOOR = 50;
-const MIN_CLASS_LINES = 20;
-const API_VERSIONS_BEHIND = 15;
+// Apex coverage, API versions and trigger counts moved to technical health
+// (DECISIONS.md 169). This area keeps how the automation is built.
+
 const MIXED_AUTOMATION_LIMIT = 3;
 // Our judgement: past this, nobody new can tell what the automation does or why.
 const UNDOCUMENTED_LIMIT = 50;
-
-// An edition with no Apex says so plainly, rather than as a failed read.
-const apexGap = (what: string, reason: string): string => (reason.startsWith("Professional Edition has no Apex") ? reason : `Apex ${what} couldn't be read: ${reason}`);
-
-// `needs` names the kinds a rule counts. If the Tooling route couldn't read one
-// whole, the rule is not measurable rather than a pass on part of it (rule 5).
-function metadataOr(ctx: RuleContext, needs: UnreadKind[] = []): { bundle: MetadataBundle } | NotMeasurableResult {
-  const metadata = ctx.data(metadataExtractor);
-  if (metadata.status !== "ok") return { outcome: "not_measurable", reason: `Metadata couldn't be retrieved: ${metadata.reason}`, evidence: [ctx.ev(metadata.source, { count: null })] };
-  const unread = unreadReason(metadata.data, needs);
-  if (unread) return { outcome: "not_measurable", reason: unread, evidence: [ctx.ev(metadata.source, { count: null })] };
-  return { bundle: metadata.data };
-}
-
-const groupCount = (values: string[]): number => new Set(values).size;
-
-const UNNAMED = "a custom object we couldn't name";
-
-/** Says which triggers sit on custom objects we couldn't name, and why, or nothing. */
-function unnamedNote(count: number, idsRead: boolean, consequence: string): string {
-  if (count === 0) return "";
-  return ` ${plural(count, "active Apex trigger")} ${count === 1 ? "is" : "are"} on ${count === 1 ? UNNAMED : "custom objects we couldn't name"}${idsRead ? "" : ", because the list of custom objects couldn't be read"}, so ${consequence}.`;
-}
 
 const legacyWorkflowRules: Rule = {
   id: "aut.legacy-workflow-rules",
@@ -282,165 +258,10 @@ const undocumentedAutomation: Rule = {
   },
 };
 
-const oldApiVersions: Rule = {
-  id: "aut.old-api-versions",
-  version: 1,
-  domain: "automation",
-  title: "Code and flows on old API versions",
-  evaluate(ctx): RuleResult | RuleResult[] {
-    const result = metadataOr(ctx);
-    if ("outcome" in result) return result;
-    const { classes, triggers } = ctx.data(apexExtractor);
-    if (classes.status !== "ok") return { outcome: "not_measurable", reason: apexGap("classes", classes.reason), evidence: [ctx.ev(classes.source, { count: null })] };
-    if (triggers.status !== "ok") return { outcome: "not_measurable", reason: apexGap("triggers", triggers.reason), evidence: [ctx.ev(triggers.source, { count: null })] };
-    const newest = Math.max(0, ...classes.data.map((c) => c.ApiVersion), ...triggers.data.map((t) => t.ApiVersion), ...result.bundle.flows.map((f) => f.apiVersion));
-    const floor = newest - API_VERSIONS_BEHIND;
-    const old = {
-      "Apex classes": classes.data.filter((c) => c.ApiVersion < floor).length,
-      "Apex triggers": triggers.data.filter((t) => t.ApiVersion < floor).length,
-      "Active flows": result.bundle.flows.filter((f) => f.status === "Active" && f.apiVersion < floor).length,
-    };
-    const total = Object.values(old).reduce((a, b) => a + b, 0);
-    const evidence = [
-      ctx.ev(classes.source, { count: old["Apex classes"], note: `Older than version ${floor}` }),
-      ctx.ev(triggers.source, { count: old["Apex triggers"], note: `Older than version ${floor}` }),
-      ctx.ev({ kind: "metadata", path: "flows/*.flow" }, { count: old["Active flows"], note: `Older than version ${floor}` }),
-    ];
-    const segments = [{ dimension: "component type", segments: 3 }];
-    if (total === 0) return { outcome: "pass", summary: `Nothing is more than ${API_VERSIONS_BEHIND} versions behind the newest in this org.`, evidence, segmentsChecked: segments };
-    return {
-      outcome: "issue",
-      title: "Some automation is on very old API versions",
-      summary: `Components on an API version older than ${floor}, more than ${API_VERSIONS_BEHIND} versions behind the newest used here: ${Object.entries(old).filter(([, n]) => n > 0).map(([k, n]) => `${k}: ${n}`).join(", ")}. Salesforce retires old versions over time.`,
-      recommendation: "Bring these components forward as part of your next release cycle.",
-      recommendationType: "change",
-      severity: "medium",
-      confidence: "high",
-      evidence,
-      value: notSized("The cost depends on what breaks on upgrade, which needs testing."),
-      effort: { size: "M" },
-      owner: "Salesforce developer",
-      segmentsChecked: segments,
-      facts: { total, floor, ...old },
-    };
-  },
-};
-
-const apexCoverage: Rule = {
-  id: "aut.apex-coverage",
-  version: 2,
-  domain: "automation",
-  title: "Apex test coverage",
-  evaluate(ctx): RuleResult | RuleResult[] {
-    const { classes, orgCoverage, classCoverage } = ctx.data(apexExtractor);
-    if (classes.status !== "ok") return { outcome: "not_measurable", reason: apexGap("classes", classes.reason), evidence: [ctx.ev(classes.source, { count: null })] };
-    if (classes.data.length === 0) {
-      return { outcome: "pass", summary: "This org has no Apex of its own.", evidence: [ctx.ev(classes.source, { count: 0 })], segmentExemptReason: "There's no code to segment." };
-    }
-    // A coverage read that failed isn't an org with no figure. A read-only
-    // connection reads the classes but not their coverage (DECISIONS.md 73).
-    if (orgCoverage.status !== "ok") return { outcome: "not_measurable", reason: apexGap("coverage", orgCoverage.reason), evidence: [ctx.ev(orgCoverage.source, { count: null })] };
-    const percent = orgCoverage.data[0]?.PercentCovered;
-    if (percent === null || percent === undefined) {
-      return { outcome: "not_measurable", reason: "The org holds no coverage figure, which usually means tests haven't been run recently. We don't run tests, because that would change the org.", evidence: [ctx.ev(orgCoverage.source, { count: null })] };
-    }
-    // Production refuses Apex below 75% at deploy, so an org with Apex can't really
-    // be at 0%: the stored figures were cleared or only part-run. A real org stored
-    // coverage for 1 class of 108 and 0% overall.
-    if (percent === 0) {
-      return { outcome: "not_measurable", reason: "The org stores 0% coverage overall, which means the stored figures were cleared or only some tests have run since, rather than untested code. We don't run tests, because that would change the org.", evidence: [ctx.ev(orgCoverage.source, { count: 1 })] };
-    }
-    if (classCoverage.status !== "ok") {
-      return { outcome: "not_measurable", reason: `The org-wide figure is ${percent}%, but coverage by class couldn't be read, so we can't say the whole is healthy: ${classCoverage.reason}`, evidence: [ctx.ev(classCoverage.source, { count: null })] };
-    }
-    const measured = classCoverage.data.filter((c) => c.covered + c.uncovered >= MIN_CLASS_LINES);
-    const weak = measured.filter((c) => (c.covered / (c.covered + c.uncovered)) * 100 < CLASS_COVERAGE_FLOOR);
-    const evidence = [ctx.ev(orgCoverage.source, { count: 1 }), ctx.ev(classCoverage.source, { count: measured.length, exclusions: [`Classes under ${MIN_CLASS_LINES} lines`] })];
-    const segments = [{ dimension: "class", segments: measured.length }];
-    if (percent >= COVERAGE_MINIMUM && weak.length === 0) {
-      return { outcome: "pass", summary: `Org-wide coverage is ${percent}%, and no class is below ${CLASS_COVERAGE_FLOOR}%.`, evidence, segmentsChecked: segments, facts: { percent } };
-    }
-    return {
-      outcome: "issue",
-      title: percent < COVERAGE_MINIMUM ? "Apex coverage is below what a deployment needs" : "A healthy coverage total is hiding weak classes",
-      summary:
-        percent < COVERAGE_MINIMUM
-          ? `Org-wide coverage is ${percent}%, below the ${COVERAGE_MINIMUM}% Salesforce requires to deploy to production.`
-          : `Org-wide coverage is ${percent}%, but of ${plural(measured.length, "class", "classes")} we can measure, ${weak.length} ${weak.length === 1 ? "is" : "are"} below ${CLASS_COVERAGE_FLOOR}%.`,
-      recommendation: "Add meaningful tests to the weakest classes first.",
-      recommendationType: "change",
-      severity: percent < COVERAGE_MINIMUM ? "high" : "low",
-      confidence: "high",
-      evidence,
-      value: notSized("The cost is deployment risk rather than a direct figure."),
-      effort: { size: "M" },
-      owner: "Salesforce developer",
-      segmentsChecked: segments,
-      subjects: weak.map((c) => ({ type: "apex class", label: c.name })),
-      facts: { percent, weakClasses: weak.length, measuredClasses: measured.length },
-    };
-  },
-};
-
-const multipleTriggers: Rule = {
-  id: "aut.multiple-triggers",
-  version: 2,
-  domain: "automation",
-  title: "More than one trigger on an object",
-  evaluate(ctx): RuleResult | RuleResult[] {
-    const { triggers } = ctx.data(apexExtractor);
-    if (triggers.status !== "ok") return { outcome: "not_measurable", reason: apexGap("triggers", triggers.reason), evidence: [ctx.ev(triggers.source, { count: null })] };
-    const ids = ctx.data(customObjectsExtractor);
-    const objectOf = objectResolver(ids);
-    // Grouped by name where we have one. An id we can't name still says which
-    // triggers share an object, in either length, so it's grouped by id and never shown.
-    const keyOf = (value: string): { key: string; label: string | null } => {
-      const name = objectOf(value);
-      if (name) return { key: name, label: name };
-      return { key: isObjectId(value) ? value.slice(0, 15) : value, label: null };
-    };
-    const byObject = new Map<string, { label: string | null; n: number }>();
-    for (const t of triggers.data) {
-      if (t.Status !== "Active") continue;
-      const { key, label } = keyOf(t.TableEnumOrId);
-      byObject.set(key, { label, n: (byObject.get(key)?.n ?? 0) + 1 });
-    }
-    const unnamed = [...byObject.values()].filter((o) => o.label === null).reduce((sum, o) => sum + o.n, 0);
-    const multiple = [...byObject.values()].filter((o) => o.n > 1).sort((a, b) => (a.label === null ? 1 : 0) - (b.label === null ? 1 : 0) || (a.label ?? "").localeCompare(b.label ?? ""));
-    const note = unnamedNote(unnamed, ids.status === "ok", unnamed === 1 ? "it's grouped by the object's id instead" : "they're grouped by the object's id instead");
-    const evidence = [
-      ctx.ev(triggers.source, { count: triggers.data.length, exclusions: ["Inactive triggers", "Packaged triggers"] }),
-      ctx.ev(ids.source, { count: ids.status === "ok" ? ids.data.length : null, note: "Names the custom objects triggers refer to by id" }),
-    ];
-    const segments = [{ dimension: "object", segments: byObject.size }];
-    if (multiple.length === 0) {
-      return byObject.size === 0
-        ? { outcome: "pass", summary: "This org has no active triggers of its own.", evidence, segmentExemptReason: "There are no triggers to segment." }
-        : { outcome: "pass", summary: `No object has more than one active trigger, across ${byObject.size} objects.${note}`, evidence, segmentsChecked: segments, facts: { unnamedTriggers: unnamed } };
-    }
-    return {
-      outcome: "issue",
-      title: "Some objects have several triggers",
-      summary: `${multiple.map((o) => `${o.label ?? UNNAMED} has ${o.n}`).join("; ")}. Salesforce doesn't guarantee the order they run in.${note}`,
-      recommendation: "Move to one trigger per object, calling a handler class.",
-      recommendationType: "change",
-      severity: "medium",
-      confidence: "high",
-      evidence,
-      value: notSized("The cost is unpredictable behaviour rather than a direct figure."),
-      effort: { size: "M" },
-      owner: "Salesforce developer",
-      segmentsChecked: segments,
-      subjects: multiple.map((o) => ({ type: "object", label: o.label ?? "Custom object we couldn't name" })),
-      facts: { objects: multiple.length, unnamedTriggers: unnamed },
-    };
-  },
-};
-
 export const automationModule: DomainModule = {
   id: "automation",
   cloud: "sales",
   label: "Automation and code",
   extractors: [metadataExtractor, apexExtractor, scheduledJobsExtractor, customObjectsExtractor],
-  rules: [legacyWorkflowRules, legacyProcessBuilder, mixedAutomation, hardcodedIds, missingFaultPaths, undocumentedAutomation, oldApiVersions, apexCoverage, multipleTriggers],
+  rules: [legacyWorkflowRules, legacyProcessBuilder, mixedAutomation, hardcodedIds, missingFaultPaths, undocumentedAutomation],
 };
