@@ -1,3 +1,4 @@
+import { readinessLine } from "../narrative/readiness.ts";
 import { currentBody, POTENTIAL_REVENUE_RULES, TOP_ISSUE_COUNT, type BuiltReport } from "../narrative/sections.ts";
 import { areasOf, buildPlan, isSetupReview, scorecard, topIssues, verdictOf, type PlanPhase } from "../narrative/select.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
@@ -185,8 +186,11 @@ export function executiveHtml(report: BuiltReport, pseudonyms: Pseudonymiser): s
 
   add(`<div><div class="eyebrow">Black Cloud Barometer</div><h1>${documentTitle(run)}</h1><div class="sub">Executive summary</div></div>${coverScore(report.overall)}<div>${r.draft ? '<p><span class="mark">Draft, not approved for release</span></p>' : ""}<p class="for">Prepared for</p><p>${r.t(customer)}</p>${preparedBy ? `<p>by ${r.t(preparedBy)}, Black Cloud</p>` : ""}<p>${longDate(run.asOf)}</p></div>`, "dark cover");
 
+  // One line on AI readiness, only when its verdict is clear (DECISIONS.md 243).
+  const aiLine = readinessLine(report.readiness);
   add(`<div class="eyebrow">Verdict</div><div class="headline">${r.t(verdict.headline)}</div><div class="lead">${paragraphs(r, currentBody(built, "verdict").replace(`${verdict.headline}.\n\n`, ""))}</div>
     <div class="stat-row" style="margin-top:18px">${report.overall.status === "measured" ? `<div class="stat"><b>${report.overall.score}</b><span>Barometer score</span></div>` : ""}<div class="stat"><b>${verdict.issues}</b><span>Issues</span></div><div class="stat"><b>${verdict.critical}</b><span>Critical</span></div><div class="stat"><b>${verdict.high}</b><span>High</span></div><div class="stat"><b>${notMeasurable}</b><span>Not measurable</span></div></div>
+    ${aiLine ? `<p class="small-note" style="margin-top:10px">${r.t(aiLine)}</p>` : ""}
     <h3 class="sub">What matters most</h3>
     <table class="grid"><thead><tr><th>Issue</th><th style="width:34%">Impact</th></tr></thead><tbody>${top.map((f) => `<tr><td>${r.t(f.title)}${r.ref(f.id)}</td><td>${valueText(r, f).amount}</td></tr>`).join("")}</tbody></table>
     ${report.survey ? `<h3 class="sub">What your team says${report.survey.shown ? r.ref(SURVEY.responses) : ""}</h3>${paragraphs(r, currentBody(built, "team_survey"))}` : ""}

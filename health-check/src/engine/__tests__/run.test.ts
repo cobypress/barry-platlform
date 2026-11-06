@@ -238,7 +238,9 @@ describe("extraction failures", () => {
 
   test("an unreadable Opportunity doesn't crash the run", async () => {
     const { output } = await run({ failQuery: (soql) => (soql.includes("FROM Opportunity ") ? { errorCode: "INSUFFICIENT_ACCESS", message: "no" } : null) });
-    assert.ok(output!.metrics.every((m) => m.status === "not_measurable"));
+    // Every figure built from deals; AI readiness's never reads them (DECISIONS.md 237).
+    assert.ok(output!.metrics.filter((m) => !m.id.startsWith("ai.")).every((m) => m.status === "not_measurable"));
+    assert.ok(output!.metrics.filter((m) => m.id.startsWith("ai.")).every((m) => m.status === "measured"));
   });
 
   test("a failed ownership object blocks removal rather than reading as nothing owned", async () => {

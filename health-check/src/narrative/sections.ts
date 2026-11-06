@@ -8,6 +8,8 @@ import { ADOPTION_METRIC_IDS } from "../domains/adoption/index.ts";
 import { SERVICE_OPERATIONS_METRIC_IDS } from "../domains/service/index.ts";
 import { PROCESS_METRIC_IDS } from "../domains/historic-pipeline/process.ts";
 import { causesOf, DRIVER_GAP, WIN_DRIVERS, type Cause } from "../domains/historic-pipeline/drivers.ts";
+import { AI_METRIC_IDS } from "../domains/configuration/ai.ts";
+import { readinessOf, VERDICT_WORDS, type Readiness } from "./readiness.ts";
 import { DOCUMENTED_METRIC_IDS } from "../domains/configuration/documented.ts";
 import { buildDataset, checkNumbers, scopeDataset, SOURCE, toNumberCheckResult, type FigureSet, type StructuralFigure } from "../numbercheck/index.ts";
 import { compactMoney, money, monthYear } from "../render/format.ts";
@@ -90,6 +92,8 @@ export type BuiltReport = {
    * rule's output stays as the rule made it.
    */
   causes: Cause[];
+  /** Could this org put an AI agent to work safely (DECISIONS.md 236 to 243). Decided by code from the findings and the AI metrics. */
+  readiness: Readiness;
 };
 
 export const TOP_ISSUE_COUNT = 5;
@@ -140,7 +144,31 @@ export const valueSource = (group: string): string => `value:${group}`;
 export const INVESTMENT_SOURCE = "investment";
 const COMPARISONS = "comparisons";
 // Metrics with a raw notes section of their own, kept out of the pipeline metrics.
-const OWN_SECTION = new Set([...INVESTMENT_METRIC_IDS, ...ADOPTION_METRIC_IDS, ...PROCESS_METRIC_IDS, WIN_DRIVERS, ...DOCUMENTED_METRIC_IDS, ...SURVEY_METRIC_IDS, ...SERVICE_OPERATIONS_METRIC_IDS]);
+const OWN_SECTION = new Set([...INVESTMENT_METRIC_IDS, ...ADOPTION_METRIC_IDS, ...PROCESS_METRIC_IDS, WIN_DRIVERS, ...DOCUMENTED_METRIC_IDS, ...SURVEY_METRIC_IDS, ...SERVICE_OPERATIONS_METRIC_IDS, ...AI_METRIC_IDS]);
+
+/** Every finding readiness leans on: each pillar's, and the fixes. */
+const readinessFindings = (r: Readiness): string[] => [...new Set([...r.pillars.flatMap((p) => p.findingIds), ...r.fixes.map((f) => f.id)])];
+
+/** The verdict in a sentence, or the pillars' spread when there's no single one. No figures. */
+export function readinessOpening(r: Readiness): string {
+  const behind = r.pillars.filter((p) => p.verdict === "not_yet").map((p) => p.label.toLowerCase());
+  const list = (items: string[]): string => (items.length === 1 ? items[0]! : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`);
+  const need = behind.length === 1 ? "needs" : "need";
+  if (r.overall === "not_yet") return `Not yet: ${list(behind)} ${need} work before an AI agent goes live in this org.`;
+  if (r.overall === "ready") return "Largely ready: the foundations an AI agent needs are in place in this org.";
+  if (r.pillars.every((p) => p.verdict === "not_measurable")) return "We couldn't measure enough of this org to say whether an AI agent could work in it safely.";
+  return `Some of the way there${behind.length ? `: ${list(behind)} ${need} work first` : ""}. Each pillar below says where this org stands, and why.`;
+}
+
+function readinessText(r: Readiness, findings: Finding[]): string {
+  const title = (id: string): string => findings.find((f) => f.id === id)?.title ?? id;
+  return lines(
+    readinessOpening(r),
+    "Each pillar's verdict is decided by code from the checks and figures named with it: ready, nearly, not yet, or not measurable. There's no money figure here, because what an AI agent would be worth to this business can't be measured from Salesforce.",
+    ...r.pillars.map((p) => `${p.label}. ${p.question} ${VERDICT_WORDS[p.verdict]}. ${p.reason}${p.findingIds.length ? ` Behind it: ${p.findingIds.map(title).join("; ")}.` : ""}`),
+    r.fixes.length ? `What to fix before an agent goes live, in order: ${r.fixes.map((f) => f.title).join("; ")}.` : "We found nothing to fix first.",
+  );
+}
 
 const lines = (...parts: Array<string | null | undefined | false>): string => parts.filter(Boolean).join("\n\n");
 const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
@@ -245,7 +273,7 @@ function progressText(p: Progress, currency: string): string {
   );
 }
 
-function rawNotesSpecs(input: ReportInput, overall: OverallScore, comparisons: Comparison[], value: ValueModel, investment: Investment, effectiveMetrics: Metric[], progress: Progress | null, survey: SurveyView | null, causes: Cause[], interviews: InterviewView | null): Spec[] {
+function rawNotesSpecs(input: ReportInput, overall: OverallScore, comparisons: Comparison[], value: ValueModel, investment: Investment, effectiveMetrics: Metric[], progress: Progress | null, survey: SurveyView | null, causes: Cause[], interviews: InterviewView | null, readiness: Readiness): Spec[] {
   const { run, calibration, findings, metrics, manualSteps, intake, overrides = [] } = input;
   const exclusions = [...new Set([...findings.flatMap((f) => f.evidence.flatMap((e) => e.exclusions)), ...metrics.flatMap((m) => m.exclusions)])];
   const notMeasurable = findings.filter((f) => f.status === "not_measurable");
@@ -310,6 +338,14 @@ function rawNotesSpecs(input: ReportInput, overall: OverallScore, comparisons: C
       metricIds: metrics.filter((m) => m.id === WIN_DRIVERS).map((m) => m.id),
       sources: causes.flatMap((c) => c.findingIds),
     }]),
+    // Always there: it re-reads the findings, and a set-up review has most of them.
+    {
+      key: "ai_readiness",
+      title: "AI readiness",
+      body: readinessText(readiness, findings),
+      metricIds: metrics.filter((m) => AI_METRIC_IDS.includes(m.id)).map((m) => m.id),
+      sources: readinessFindings(readiness),
+    },
     // Set-up only, so a set-up review has it too.
     {
       key: "org_documented",
@@ -595,7 +631,7 @@ function executiveSpecs(input: ReportInput, team: Finding[], survey: SurveyView 
   ];
 }
 
-function fullSpecs(input: ReportInput, team: Finding[], metrics: Metric[], survey: SurveyView | null, interviews: InterviewView | null = null): Spec[] {
+function fullSpecs(input: ReportInput, team: Finding[], metrics: Metric[], survey: SurveyView | null, interviews: InterviewView | null, readiness: Readiness): Spec[] {
   const { intake } = input;
   const built = buildPlan(team);
   const { phases: plan, later } = built;
@@ -651,6 +687,19 @@ function fullSpecs(input: ReportInput, team: Finding[], metrics: Metric[], surve
     ...(survey ? [surveySpec(survey)] : []),
     ...(interviews ? [interviewSpec(input, interviews)] : []),
     statedVsActualSpec(intake, team),
+    {
+      key: "ai_readiness",
+      title: "AI readiness",
+      body: readinessOpening(readiness),
+      findingIds: readinessFindings(readiness),
+      metricIds: metrics.filter((m) => AI_METRIC_IDS.includes(m.id)).map((m) => m.id),
+      sources: SUMMARY_SOURCES,
+      brief: {
+        purpose:
+          "Tell a sales leader who is being pitched Agentforce, in two or three sentences, whether this org could put an AI agent to work safely and what would stop it. Each pillar's verdict is already decided and shown beside this text, with the five things to fix: word the overall picture, never change a verdict, and add no figure, forecast or AI opportunity.",
+        sources: [...team.filter((f) => readinessFindings(readiness).includes(f.id)).map(findingSource), ...metrics.filter((m) => AI_METRIC_IDS.includes(m.id)).map(metricSource)],
+      },
+    },
     {
       key: "roadmap",
       title: "Roadmap",
@@ -729,6 +778,7 @@ export function buildReport(given: ReportInput): BuiltReport {
   const survey = buildSurveyView(effective.metrics, team);
   const interviews = buildInterviewView(input.interviews, team, effective.metrics);
   const causes = causesOf(effective.metrics, team);
+  const readiness = readinessOf(run, team, effective.metrics);
   // A re-check compares with its first health check, built the same way, overrides and all.
   let progress: Progress | null = null;
   if (input.baseline) {
@@ -826,10 +876,11 @@ export function buildReport(given: ReportInput): BuiltReport {
     survey,
     interviews,
     causes,
+    readiness,
     outputs: {
-      raw_notes: build("raw_notes", rawNotesSpecs(input, overall, comparisons, value, investment, effective.metrics, progress, survey, causes, interviews)),
+      raw_notes: build("raw_notes", rawNotesSpecs(input, overall, comparisons, value, investment, effective.metrics, progress, survey, causes, interviews, readiness)),
       executive_summary: build("executive_summary", executiveSpecs(input, team, survey, interviews)),
-      full_health_check: build("full_health_check", fullSpecs(input, team, effective.metrics, survey, interviews)),
+      full_health_check: build("full_health_check", fullSpecs(input, team, effective.metrics, survey, interviews, readiness)),
     },
     briefs,
     scopes,

@@ -236,7 +236,7 @@ export class Simulator implements Transport {
     const envelope = (operation: string, inner: string): string =>
       `<?xml version="1.0"?><soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"><soapenv:Body><${operation}Response xmlns="http://soap.sforce.com/2006/04/metadata"><result>${inner}</result></${operation}Response></soapenv:Body></soapenv:Envelope>`;
     if (body.includes("<met:retrieve>")) {
-      this.#retrieving = body.includes("<met:name>Report</met:name>") ? org.REPORT_FILES : body.includes("<met:name>EscalationRules</met:name>") ? org.ESCALATION_FILES : org.METADATA_FILES;
+      this.#retrieving = body.includes("<met:name>Report</met:name>") ? org.REPORT_FILES : body.includes("<met:name>EscalationRules</met:name>") ? org.ESCALATION_FILES : body.includes("<met:name>Settings</met:name>") ? org.SETTINGS_FILES : org.METADATA_FILES;
       return respond(envelope("retrieve", `<done>false</done><id>${org.sfId("09S", 1)}</id><state>Queued</state>`));
     }
     // The first poll isn't ready, so the polling path is exercised.
@@ -518,6 +518,9 @@ export class Simulator implements Transport {
         return page(org.QUICK_TEXT);
       case "QuickTextUsage":
         return page(org.QUICK_TEXT_USAGE);
+      // Agents aren't enabled in the synthetic org.
+      case "BotDefinition":
+        return unsupported(object);
       case "KnowledgeArticleVersion":
         return /PublishStatus = 'Online'/.test(soql) ? page(org.ARTICLES) : reject("MALFORMED_QUERY", "Implementation restriction: KnowledgeArticleVersion query must filter on PublishStatus or Id");
       case "KnowledgeArticleViewStat":

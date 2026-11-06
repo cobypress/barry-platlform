@@ -81,7 +81,7 @@ function stripBodies<R extends { Name: string; Body?: string }>(rows: Sourced<R[
 
 export const apexExtractor: Extractor<ApexData> = {
   id: "apex",
-  version: 6,
+  version: 7,
   async run(ctx) {
     const references: ReferenceIndex = { users: {}, fields: {} };
     // Through REST, not Tooling: a user with View Setup but not Author Apex gets

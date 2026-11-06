@@ -206,3 +206,12 @@ d) Whether CPQ always has a `PackageLicense` row with namespace SBQQ. If it does
 e) Advanced Approvals: how its approval records point to a quote, so `cpq.discount-approvals` could read them rather than going not measurable.
 f) Revenue Cloud Advanced (Agentforce Revenue Management): its quote, pricing procedure and order objects, before we build for it.
 g) Twin fields: whether CPQ treats any differing types as compatible, such as text and text area, which we'd report as a mismatch today.
+
+## AI readiness (DECISIONS.md 236 to 245)
+
+a) The Settings members we retrieve are "Knowledge", "EinsteinGpt", "AgentPlatform" and "CustomerDataPlatform". The guide names the last two files `AgentPlatformSettings.settings` and `CustomerDataPlatformSettings.settings`, so their member names may differ. We parse by each file's root element, so any file that comes back is read. One that doesn't is unknown, and its pillar says so.
+b) Whether a connection holding only Barometer Read Only can read these settings any other way than the Metadata API.
+c) `BotDefinition` when agents aren't enabled: the guide says agents must be enabled to read it. We show the agents as unreadable, never as none.
+d) Counting published articles in a multilingual Knowledge base: whether `IsLatestVersion = true` without a language filter counts each article once.
+e) Whether `enableCustomerDataPlatform` being true means Data Cloud (Data 360) is provisioned and in use, or only switched on.
+f) Whether every active autolaunched flow can be an agent action, or only those with suitable inputs and outputs. We count them all as candidates, and say an agent needs a description to choose one.
