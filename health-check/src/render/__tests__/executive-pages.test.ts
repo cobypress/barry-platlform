@@ -107,6 +107,8 @@ describe("the executive summary, rebuilt around money", () => {
       if (a.severity !== b.severity) continue;
       const [x, y] = [report.added.get(a.id) ?? -1, report.added.get(b.id) ?? -1];
       assert.ok(x >= y, `${a.title} (${x}) before ${b.title} (${y})`);
+      // Equal adds, such as nothing, follow the issue's own figure.
+      if (x === y && a.value.kind !== "not_sized" && b.value.kind !== "not_sized" && a.ruleId !== "cur.coverage" && b.ruleId !== "cur.coverage") assert.ok(a.value.amount >= b.value.amount, `${a.title} before ${b.title}`);
     }
     // An issue whose money sits inside a larger overlapping one adds nothing, so ranks below one that adds money.
     const held = report.value.groups.flatMap((g) => g.lines.filter((l) => l.findingId !== g.counted.findingId)).map((l) => l.findingId);

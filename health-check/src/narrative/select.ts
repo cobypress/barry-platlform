@@ -86,6 +86,8 @@ export const rankBy =
   (a: Finding, b: Finding): number =>
     SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity) ||
     rankAmount(b, added) - rankAmount(a, added) ||
+    // Issues that add the same, such as nothing, follow their own figures.
+    (added ? sizedAmount(b) - sizedAmount(a) : 0) ||
     CONFIDENCE_ORDER.indexOf(a.confidence) - CONFIDENCE_ORDER.indexOf(b.confidence) ||
     a.id.localeCompare(b.id);
 
