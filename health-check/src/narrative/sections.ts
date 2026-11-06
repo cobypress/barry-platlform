@@ -473,7 +473,9 @@ function planFigures({ phases, later }: Plan): FigureSet["figures"] {
   ];
 }
 
-const planFindings = ({ phases }: Plan): Finding[] => phases.flatMap((p) => p.findings);
+/** Each action's issue, and the issues from the same rule its action also covers (night 3 review). */
+const withMerged = (f: Finding, plan: Plan): Finding[] => [f, ...(plan.alsoFor[f.id] ?? [])];
+const planFindings = (plan: Plan): Finding[] => plan.phases.flatMap((p) => p.findings.flatMap((f) => withMerged(f, plan)));
 
 /** Stated vs actual. Claude may draft it from the stated problems and the issues; a consultant's own links and assessment come first. */
 function statedVsActualSpec(intake: Intake | null | undefined, team: Finding[]): Spec {
@@ -652,7 +654,7 @@ function fullSpecs(input: ReportInput, team: Finding[], metrics: Metric[], surve
   const { intake } = input;
   const built = buildPlan(team, added);
   const { phases: plan, later } = built;
-  const roadmapFindings = [...planFindings(built), ...later];
+  const roadmapFindings = [...planFindings(built), ...later.flatMap((f) => withMerged(f, built))];
   const verdict = verdictOf(team);
   const issues = issuesOf(team, added);
   const notMeasurable = team.filter((f) => f.status === "not_measurable");
