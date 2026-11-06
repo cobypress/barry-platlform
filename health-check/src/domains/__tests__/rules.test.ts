@@ -256,7 +256,24 @@ describe("licence guards (rule 3)", () => {
   test("the default workflow user", () => assert.equal(status(8, "not-default-workflow-user"), "failed"));
   test("a manager of active users", () => assert.equal(status(12, "not-in-user-hierarchy"), "failed"));
   test("the owner of a scheduled job", () => assert.equal(status(13, "runs-no-automation"), "failed"));
-  test("LoginHistory that disagrees with LastLoginDate", () => assert.equal(status(15, "no-recent-login"), "failed"));
+  test("LoginHistory that disagrees with LastLoginDate: not counted as dormant, never offered, and said (DECISIONS.md 361)", () => {
+    // The login log shows them logging in, so they aren't among the dormant, and no guard is needed to stop their removal.
+    for (const answers of [undefined, loadAnswers()]) {
+      const findings = analyseExtracts(extracts, { answers }).findings.filter((f) => f.ruleId === "utl.dormant-licensed-users");
+      assert.ok(!findings.some((f) => f.subjects.some((s) => s.label === tokenOf(15))));
+      assert.ok(findings.some((f) => /One more user's last-login date is over 90 days old, but the login log shows them logging in since, so they aren't counted\./.test(f.summary)));
+    }
+  });
+
+  test("no one is counted as not having logged in for 90 days while the login log shows they have (DECISIONS.md 361)", () => {
+    // Pinned from the night 3 reading pass: "haven't logged in for 90 days: 6", then "has logged in recently (1)".
+    for (const answers of [undefined, loadAnswers()]) {
+      for (const f of analyseExtracts(extracts, { answers }).findings.filter((x) => x.ruleId === "utl.dormant-licensed-users" || x.ruleId === "utl.never-logged-in")) {
+        assert.ok(!f.guards.some((g) => g.guardId === "no-recent-login" && g.status === "failed"), `${f.ruleId}: ${f.summary}`);
+        assert.doesNotMatch(f.summary, /has logged in recently/);
+      }
+    }
+  });
   test("failed logins aren't logins", () => assert.equal(status(5, "no-recent-login"), "passed"));
 
   test("an incomplete ownership scan blocks, rather than reading as no records", () => {
@@ -318,6 +335,8 @@ describe("utilisation", () => {
     const integration = users.find((u) => u.IsActive && u.LastLoginDate !== null)!;
     integration.LastLoginDate = null;
     integration.CreatedDate = "2020-01-01T00:00:00.000Z";
+    // And none in the login log, or it isn't a user who never logged in (DECISIONS.md 361).
+    delete (changed.get("logins") as { data: { byUser: Record<string, unknown> } }).data.byUser[integration.Id];
     integration.Profile = { Name: "Sales Insights Integration User", UserLicense: { Name: "Sales Insights Integration User" } };
     const subjects = byRule(analyseExtracts(changed, { answers: loadAnswers() }).findings, "utl.never-logged-in").flatMap((f) => f.subjects.map((s) => s.label));
     integration.Profile = { Name: "Standard User", UserLicense: { Name: "Salesforce" } };
