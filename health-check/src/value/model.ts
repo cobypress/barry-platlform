@@ -66,6 +66,8 @@ export const RULE_GROUPS: Record<string, string> = {
   "pipe.segment-divergence": "segment-gaps",
   "utl.dormant-licensed-users": "unused-seats",
   "utl.never-logged-in": "unused-seats",
+  // An API-only account on a full seat can also be a dormant or never-used one: the same seat (DECISIONS.md 303).
+  "int.integration-user-licences": "unused-seats",
   "utl.unassigned-licence-seats": "unassigned-seats",
 };
 
