@@ -347,7 +347,9 @@ export function deliveryOutlookChart(value: Metric | undefined, count: Metric | 
   const expected = new Map(count?.status === "measured" ? count.series.map((p) => [p.date, p.value]) : []);
   const columns = m.series.map((p) => {
     const n = expected.get(p.date);
-    return { label: monthYear(p.date), value: p.value, text: p.value === null ? "Not measured" : compactMoney(p.value, currency), ...(typeof n === "number" ? { sub: dealCount(n) } : {}) };
+    // Deals are whole (DECISIONS.md 404), so a month with some value can round to none.
+    const sub = typeof n !== "number" ? null : n === 0 && (p.value ?? 0) > 0 ? "under 1 deal" : dealCount(n);
+    return { label: monthYear(p.date), value: p.value, text: p.value === null ? "Not measured" : compactMoney(p.value, currency), ...(sub ? { sub } : {}) };
   });
   return columnChart(id, title, columns, { alt: `Expected won value by month, ${compactMoney(m.value, currency)} in all.`, width });
 }

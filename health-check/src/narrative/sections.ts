@@ -13,7 +13,7 @@ import { AI_METRIC_IDS } from "../domains/configuration/ai.ts";
 import { readinessOf, VERDICT_WORDS, type Readiness } from "./readiness.ts";
 import { DOCUMENTED_METRIC_IDS } from "../domains/configuration/documented.ts";
 import { buildDataset, checkNumbers, scopeDataset, SOURCE, toNumberCheckResult, type FigureSet, type StructuralFigure } from "../numbercheck/index.ts";
-import { compactMoney, money, monthYear } from "../render/format.ts";
+import { compactMoney, longDate, money, monthYear } from "../render/format.ts";
 import { BENCHMARK_MIN_GROUP, type Calibration, type Finding, type ManualStep, type Metric, type NumberOverride, type ReportSection, type Run, type Score, type SectionVersion } from "../schemas/index.ts";
 import { ReportSection as ReportSectionSchema, SectionVersion as SectionVersionSchema } from "../schemas/index.ts";
 import type { SectionBrief } from "./draft.ts";
@@ -426,9 +426,9 @@ export function pipelineTodayText(metrics: Metric[], currency: string): string[]
     `You have ${plural(open.value, "open deal")}${value ? ` worth ${compactMoney(value.value, currency)}` : ""}.${blank && blank.value > 0 ? ` ${blank.value} of them have no amount, so they add nothing to that figure.` : ""}${weighted ? ` Weighted by how often deals at each stage have gone on to win, it's worth ${compactMoney(weighted.value, currency)}.` : ""}`,
   ];
   if (outlook) {
-    const first = monthYear(outlook.series[0]!.date);
-    const last = monthYear(outlook.series.at(-1)!.date);
-    parts.push(`From ${first} to ${last}, we expect about ${compactMoney(outlook.value, currency)} of it to be won${deals ? `, across about ${deals.value} deals` : ""}. That's the figure to plan delivery capacity against, not the full pipeline.`);
+    // From the report date, so the first month is only what's left of it (DECISIONS.md 404).
+    const range = outlook.dateRange ? `By ${longDate(outlook.dateRange.to)}` : `From ${monthYear(outlook.series[0]!.date)} to ${monthYear(outlook.series.at(-1)!.date)}`;
+    parts.push(`${range}, we expect about ${compactMoney(outlook.value, currency)} of it to be won${deals ? `, across about ${plural(deals.value, "deal")}` : ""}. That's the figure to plan delivery capacity against, not the full pipeline.`);
   }
   return parts;
 }
