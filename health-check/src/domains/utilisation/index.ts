@@ -299,10 +299,24 @@ const packageSeats: Rule = {
   },
 };
 
-function dormantRule(id: string, title: string, key: string, label: string, basisFor: (days: number) => string, isCandidate: (u: UserRow, cutoff: Date) => boolean): Rule {
+/** A login log time, as Salesforce writes it ("+0000"), as a date. */
+const loggedAt = (time: string): Date => new Date(time.replace(/\+0000$/, "Z"));
+
+function dormantRule(
+  id: string,
+  title: string,
+  key: string,
+  label: string,
+  basisFor: (days: number) => string,
+  isCandidate: (u: UserRow, cutoff: Date) => boolean,
+  /** The sentence for users the last-login date counts but the login log doesn't. */
+  shownOtherwise: (n: number, days: number) => string,
+  /** For "never logged in", any login in the log disproves it, not only one inside the period. */
+  anyLoginCounts = false,
+): Rule {
   return {
     id,
-    version: 1,
+    version: 2,
     domain: "utilisation",
     title,
     evaluate(ctx): RuleResult | RuleResult[] {
@@ -311,11 +325,23 @@ function dormantRule(id: string, title: string, key: string, label: string, basi
       const days = ctx.calibration.dormantDays;
       const cutoff = daysBefore(ctx.now, days);
       const active = users.data.filter((u) => u.IsActive && new Date(u.CreatedDate) < cutoff && !isIntegrationLicence(licenceOf(u)));
-      const candidates = active.filter((u) => isCandidate(u, cutoff));
-      if (candidates.length > 0) return reclaimFindings(ctx, candidates, { key, label, basis: basisFor(days) });
+      // The login log is the fuller record: a user it shows logging in inside the
+      // period hasn't stopped, whatever LastLoginDate says, so isn't counted (DECISIONS.md 361).
+      const logins = ctx.data(loginsExtractor);
+      const seen = (u: UserRow): boolean => {
+        const last = logins.status === "ok" ? logins.data.byUser[u.Id]?.lastSuccess : undefined;
+        return last !== undefined && (anyLoginCounts || loggedAt(last) >= cutoff);
+      };
+      const byDate = active.filter((u) => isCandidate(u, cutoff));
+      const candidates = byDate.filter((u) => !seen(u));
+      const otherwise = byDate.length - candidates.length;
+      const note = otherwise ? ` ${shownOtherwise(otherwise, days)}` : "";
+      if (candidates.length > 0) {
+        return reclaimFindings(ctx, candidates, { key, label, basis: basisFor(days) }).map((r) => (r.outcome === "issue" ? { ...r, summary: `${r.summary}${note}` } : r));
+      }
       return {
         outcome: "pass",
-        summary: `None of the ${active.length} active users ${basisFor(days)}.`,
+        summary: `None of the ${active.length} active users ${basisFor(days)}.${note}`,
         evidence: [ctx.ev(users.source, { count: active.length })],
         segmentsChecked: [
           { dimension: "licence", segments: new Set(active.map(licenceOf)).size },
@@ -333,6 +359,7 @@ const dormantUsers = dormantRule(
   "dormant users",
   (days) => `haven't logged in for ${days} days`,
   (u, cutoff) => u.LastLoginDate !== null && new Date(u.LastLoginDate) < cutoff,
+  (n, days) => `${n === 1 ? "One more user's" : `${n} more users'`} last-login date is over ${days} days old, but the login log shows ${n === 1 ? "them" : "each of them"} logging in since, so they aren't counted.`,
 );
 
 const neverLoggedIn = dormantRule(
@@ -342,6 +369,8 @@ const neverLoggedIn = dormantRule(
   "users who've never logged in",
   () => "have never logged in",
   (u) => u.LastLoginDate === null,
+  (n) => `${n === 1 ? "One more user has" : `${n} more users have`} no last-login date, but the login log shows ${n === 1 ? "them" : "each of them"} logging in, so they aren't counted.`,
+  true,
 );
 
 const unusedReports: Rule = {

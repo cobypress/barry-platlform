@@ -98,6 +98,31 @@ describe("the executive summary, rebuilt around money", () => {
     assert.equal(RECHECK_EXECUTIVE_MAX_PAGES, Math.floor(EXECUTIVE_MAX_PAGES * 1.1));
   });
 
+  test("what matters most ranks by what each issue adds to the total, after overlaps (DECISIONS.md 362)", () => {
+    const report = buildReport(base);
+    const top = topIssues(report.teamFindings, 50, report.added);
+    const order = ["critical", "high", "medium", "low", "info"];
+    for (let i = 1; i < top.length; i++) {
+      const [a, b] = [top[i - 1]!, top[i]!];
+      if (a.severity !== b.severity) continue;
+      const [x, y] = [report.added.get(a.id) ?? -1, report.added.get(b.id) ?? -1];
+      assert.ok(x >= y, `${a.title} (${x}) before ${b.title} (${y})`);
+      // Equal adds, such as nothing, follow the issue's own figure.
+      if (x === y && a.value.kind !== "not_sized" && b.value.kind !== "not_sized" && a.ruleId !== "cur.coverage" && b.ruleId !== "cur.coverage") assert.ok(a.value.amount >= b.value.amount, `${a.title} before ${b.title}`);
+    }
+    // An issue whose money sits inside a larger overlapping one adds nothing, so ranks below one that adds money.
+    const held = report.value.groups.flatMap((g) => g.lines.filter((l) => l.findingId !== g.counted.findingId)).map((l) => l.findingId);
+    assert.ok(held.length > 0);
+    for (const id of held) assert.equal(report.added.get(id), 0);
+    // The total is what the counted lines add.
+    const sum = [...report.added.values()].reduce((s, n) => s + n, 0);
+    assert.ok(Math.abs(sum - report.value.total.expected) < 1, `${sum} against ${report.value.total.expected}`);
+    // And the summary's top issues follow it.
+    const counted = (f: (typeof top)[number]) => order.indexOf(f.severity) * 1e12 - (report.added.get(f.id) ?? -1);
+    const shown = topIssues(report.teamFindings, 5, report.added);
+    assert.deepEqual(shown.map((f) => f.id), [...shown].sort((a, b) => counted(a) - counted(b) || 0).map((f) => f.id));
+  });
+
   test("the investment page's unassigned seats are the money page's, by the same name, with the share counted", () => {
     const report = buildReport(base);
     const seats = report.value.groups.find((g) => g.id === "unassigned-seats")!;

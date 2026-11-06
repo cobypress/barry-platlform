@@ -1,5 +1,5 @@
 import type { BuiltReport } from "../narrative/sections.ts";
-import { bySeverity, domainLabel, issuesOf } from "../narrative/select.ts";
+import { bySeverity, domainLabel, issuesOf, type Added } from "../narrative/select.ts";
 import type { Finding } from "../schemas/index.ts";
 import { compactMoney } from "./format.ts";
 import { estimateLines, type Render } from "./html.ts";
@@ -45,8 +45,8 @@ const FIRST_STEPS = 3;
 const list = (r: Render, items: Finding[], more: number, line: (f: Finding) => string, where: string): string =>
   `<ul>${items.map((f) => `<li>${line(f)}${r.ref(f.id)}</li>`).join("")}${more > 0 ? `<li>${r.t(`And ${more} more ${where}.`)}</li>` : ""}</ul>`;
 
-function groups(own: Finding[]) {
-  const issues = issuesOf(own).slice().sort(bySeverity);
+function groups(own: Finding[], added?: Added) {
+  const issues = issuesOf(own, added);
   return {
     issues,
     broken: issues.filter((f) => f.severity === "critical" || f.severity === "high"),
@@ -93,7 +93,7 @@ export function chapterFigures(own: Finding[]): number[] {
 export function chapterSlide(r: Render, report: BuiltReport, domain: string): string {
   const own = report.teamFindings.filter((f) => f.domain === domain);
   if (own.length === 0) return "";
-  const { issues, broken, belowPar, passed, open } = groups(own);
+  const { issues, broken, belowPar, passed, open } = groups(own, report.added);
   const worth = worthOf(report.value, new Set(own.map((f) => f.id)));
   const score = report.input.scores?.find((s) => s.domain === domain);
 

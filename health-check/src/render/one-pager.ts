@@ -108,7 +108,7 @@ export function onePagerHtml(report: BuiltReport, pseudonyms: Pseudonymiser): st
       ? `<div class="box"><div class="label">What you pay</div><div class="big">${m(cost.value)}</div><p>${r.t(`A year. ${ratio !== null ? `What fixing the issues is worth is ${ratio} times what you pay for Salesforce a year.` : cost.label + "."}`)}</p></div>`
       : `<div class="box"><div class="label">What you pay</div><p>${r.t("We don't have a figure for what you pay a year.")}</p></div>`;
 
-  const actions = buildPlan(report.teamFindings).phases.flatMap((phase) => phase.findings.map((f) => ({ f, phase }))).slice(0, ONE_PAGER_ACTIONS);
+  const actions = buildPlan(report.teamFindings, report.added).phases.flatMap((phase) => phase.findings.map((f) => ({ f, phase }))).slice(0, ONE_PAGER_ACTIONS);
   const todo = actions.length
     ? `<h2>The three things to do first</h2><ol class="do">${actions.map(({ f, phase }) => `<li><strong>${r.t(f.title)}.</strong> ${r.t(firstSentence(f.recommendation))}${r.ref(f.id)}<span class="owner">${r.t(`${f.owner}, days ${phase.from} to ${phase.to}`)}</span></li>`).join("")}</ol>`
     : "";

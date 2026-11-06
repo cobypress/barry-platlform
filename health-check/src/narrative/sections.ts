@@ -1,6 +1,6 @@
 import { compareWithBaseline, progressFigures, worthFigures, type Progress } from "../progress/compare.ts";
 import { factsText, type FactsSummary } from "../facts/summary.ts";
-import { buildValueModel, worthOf, HEADLINE_KINDS, KIND_LABELS, TEAM_TIME_GROUP, UK_HOURLY_BENCHMARK, WORKING_WEEKS, type TeamTime, type ValueModel } from "../value/model.ts";
+import { addedByFinding, buildValueModel, worthOf, HEADLINE_KINDS, KIND_LABELS, TEAM_TIME_GROUP, UK_HOURLY_BENCHMARK, WORKING_WEEKS, type TeamTime, type ValueModel } from "../value/model.ts";
 import { AREA_WEIGHTS, CRITICAL_CAP, GRADES, overallScore, type OverallScore } from "../domains/scoring.ts";
 import { comparisonId, comparisonNotes, compareRun, OWN_RANGE_MIN, type BenchmarkInput, type Comparison } from "../benchmark/compare.ts";
 import { quarterOf } from "../benchmark/export.ts";
@@ -20,7 +20,7 @@ import type { SectionBrief } from "./draft.ts";
 import type { Intake } from "./intake.ts";
 import { applyOverrides } from "./overrides.ts";
 import { assumptionsSource, findingSource, metricSource, planSource, statedProblemsSource, type PromptSource } from "./prompt.ts";
-import { areasOf, buildPlan, bySeverity, domainLabel, domainsInOrder, isSetupReview, issuesOf, scorecard, teamLevelFinding, topIssues, verdictOf, type Plan } from "./select.ts";
+import { areasOf, buildPlan, bySeverity, domainLabel, domainsInOrder, isSetupReview, issuesOf, rankBy, scorecard, teamLevelFinding, topIssues, verdictOf, type Added, type Plan } from "./select.ts";
 import { chapterFigures } from "../render/chapter.ts";
 import { MIN_RESPONSES, SURVEY, SURVEY_METRIC_IDS, surveyHours, surveyMetrics } from "../survey/summary.ts";
 import type { Survey } from "../survey/questions.ts";
@@ -74,6 +74,8 @@ export type BuiltReport = {
   overall: OverallScore;
   /** What the issues are worth over the next 12 months (roadmap 1.4). */
   value: ValueModel;
+  /** What each issue adds to that total, after the overlap rules: what issues are ranked on (DECISIONS.md 362). */
+  added: Added;
   /** For a re-check: what changed since the first health check. Null otherwise. */
   progress: Progress | null;
   /** Where the headline figures sit against published research and our own customers. */
@@ -580,10 +582,10 @@ function interviewSpec(input: ReportInput, view: InterviewView): Spec {
   };
 }
 
-function executiveSpecs(input: ReportInput, team: Finding[], survey: SurveyView | null, interviews: InterviewView | null = null): Spec[] {
+function executiveSpecs(input: ReportInput, team: Finding[], survey: SurveyView | null, interviews: InterviewView | null = null, added?: Added): Spec[] {
   const verdict = verdictOf(team);
-  const top = topIssues(team, TOP_ISSUE_COUNT);
-  const plan = buildPlan(team);
+  const top = topIssues(team, TOP_ISSUE_COUNT, added);
+  const plan = buildPlan(team, added);
   const planned = planFindings(plan);
   const rows = scorecard(team, input.scores ?? [], areasOf(input.run, team));
   const scoreSources = rows.filter((r) => r.score !== null).map((r) => `score:${r.domain}`);
@@ -625,8 +627,8 @@ function executiveSpecs(input: ReportInput, team: Finding[], survey: SurveyView 
       key: "plan_90_day",
       title: "90-day plan",
       body: plan.later.length
-        ? "Urgent fixes come first, and each month holds only what a team can take on. The full report has every action, and what comes after 90 days."
-        : "Urgent fixes come first, and each month holds only what a team can take on. The full report has every action.",
+        ? "Urgent fixes and quick wins come first, and beyond the quick wins, each month holds only what a team can take on. The full report has every action, and what comes after 90 days."
+        : "Urgent fixes and quick wins come first, and beyond the quick wins, each month holds only what a team can take on. The full report has every action.",
       findingIds: planned.map((f) => f.id),
       sources: [...SUMMARY_SOURCES, PLAN],
       ...(planned.length
@@ -642,13 +644,13 @@ function executiveSpecs(input: ReportInput, team: Finding[], survey: SurveyView 
   ];
 }
 
-function fullSpecs(input: ReportInput, team: Finding[], metrics: Metric[], survey: SurveyView | null, interviews: InterviewView | null, readiness: Readiness): Spec[] {
+function fullSpecs(input: ReportInput, team: Finding[], metrics: Metric[], survey: SurveyView | null, interviews: InterviewView | null, readiness: Readiness, added?: Added): Spec[] {
   const { intake } = input;
-  const built = buildPlan(team);
+  const built = buildPlan(team, added);
   const { phases: plan, later } = built;
   const roadmapFindings = [...planFindings(built), ...later];
   const verdict = verdictOf(team);
-  const issues = issuesOf(team);
+  const issues = issuesOf(team, added);
   const notMeasurable = team.filter((f) => f.status === "not_measurable");
   const passed = team.filter((f) => f.status === "passed");
   const pipelineMetrics = metrics.filter((m) => m.domain === "historic_pipeline" || m.domain === "current_pipeline");
@@ -786,6 +788,7 @@ export function buildReport(given: ReportInput): BuiltReport {
   const overall = overallScore(scores, effective.findings);
   const teamTime = teamTimeOf(effective.metrics);
   const value = buildValueModel(effective.findings, run, calibration.currency, intake?.hourlyCost, teamTime);
+  const added = addedByFinding(value);
   const survey = buildSurveyView(effective.metrics, team);
   const interviews = buildInterviewView(input.interviews, team, effective.metrics);
   const causes = causesOf(effective.metrics, team);
@@ -837,7 +840,7 @@ export function buildReport(given: ReportInput): BuiltReport {
     ...[OWN_RANGE_MIN, BENCHMARK_MIN_GROUP].map((value) => ({ source: COMPARISONS, kind: "number" as const, value })),
     ...[COMPARISONS, ...comparisons.map((c) => comparisonId(c.metric.key))].map((source) => ({ source, kind: "percent" as const, value: 50 })),
   );
-  dataset.figures.push(...planFigures(buildPlan(team)), ...overallFigures(overall), ...valueFigures(value));
+  dataset.figures.push(...planFigures(buildPlan(team, added)), ...overallFigures(overall), ...valueFigures(value));
   if (progress) {
     dataset.figures.push(...progressFigures(progress).map((value) => ({ source: PROGRESS, kind: "number" as const, value })));
     dataset.figures.push(...worthFigures(progress).map((value) => ({ source: PROGRESS, kind: "currency" as const, value, currency: calibration.currency })));
@@ -877,7 +880,8 @@ export function buildReport(given: ReportInput): BuiltReport {
   return {
     input,
     dataset,
-    teamFindings: team.slice().sort(bySeverity),
+    teamFindings: team.slice().sort(rankBy(added)),
+    added,
     metrics: effective.metrics,
     overall,
     value,
@@ -890,8 +894,8 @@ export function buildReport(given: ReportInput): BuiltReport {
     readiness,
     outputs: {
       raw_notes: build("raw_notes", rawNotesSpecs(input, overall, comparisons, value, investment, effective.metrics, progress, survey, causes, interviews, readiness)),
-      executive_summary: build("executive_summary", executiveSpecs(input, team, survey, interviews)),
-      full_health_check: build("full_health_check", fullSpecs(input, team, effective.metrics, survey, interviews, readiness)),
+      executive_summary: build("executive_summary", executiveSpecs(input, team, survey, interviews, added)),
+      full_health_check: build("full_health_check", fullSpecs(input, team, effective.metrics, survey, interviews, readiness, added)),
     },
     briefs,
     scopes,

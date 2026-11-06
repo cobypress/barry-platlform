@@ -381,8 +381,9 @@ function quarterlySlide(r: Render, metric: (id: string) => Metric | undefined): 
   return { classes: "tight", html: `${head}<table class="grid data"><thead><tr><th>Quarter starting</th><th class="num">Deals created</th><th class="num">Deals won</th><th class="num">Won value</th><th class="num">Win rate</th><th class="num">Median won deal</th><th class="num">Median cycle, days</th></tr></thead><tbody>${rows.join("")}</tbody></table>${notes.map((n) => `<p class="small-note">${r.t(n)}</p>`).join("")}` };
 }
 
-// Why these counts can differ from the lead funnel's and the new-and-repeat split (night 3 reading pass).
-const WINS_BASIS = "Type and lead source are the won deal's own fields. The lead funnel counts leads converted, by the lead's source, and new and repeat customers go by whether the account had won a deal before, so their counts can differ from these.";
+// Why these counts can differ from the lead funnel's and the new-and-repeat split (night 3 reading pass),
+// and from the stage-based pages' won deals (DECISIONS.md 364).
+const WINS_BASIS = "Every deal won in the window, by its own type and lead source, including any entered straight as won. The lead funnel and the new-and-repeat split count on other bases.";
 
 function winsSlides(r: Render, metric: (id: string) => Metric | undefined): Slide[] {
   const repeat = asMeasured(metric("historic.repeat_win_share"));
@@ -408,7 +409,7 @@ function closeDatesSlide(r: Render, metric: (id: string) => Metric | undefined, 
   const late = metric("historic.close_days_late");
   const block = (m: Metric | undefined, body: (x: Measured) => string): string => (m?.status === "measured" ? body(m) : `<h3>${r.t(m?.label ?? "Not measured")}</h3><p class="note">${r.t(m?.status === "not_measurable" ? m.reason : "This metric wasn't part of the run.")}</p>`);
   const panel = [
-    block(share, (m) => `<h3>Won in the quarter first forecast</h3><p class="big">${percent(m.value)}</p><p class="note">of ${m.n} won deals</p>`),
+    block(share, (m) => `<h3>Won in the quarter first forecast</h3><p class="big">${percent(m.value)}</p><p class="note">of the ${m.n} won deals we can follow through their stages</p>`),
     block(late, (m) => `<h3>Days late against the first close date</h3><p class="big">${m.value} days</p><p class="note">For the median won deal. The typical range is ${m.stats.p25} to ${m.stats.p75} days.</p>`),
   ].join("");
   const order = calibration.stages.filter((s) => s.category === "open").sort((a, b) => (a.order ?? 0) - (b.order ?? 0)).map((s) => s.name);
@@ -536,7 +537,7 @@ function lostAndSpeedSlideDense(r: Render, metric: (id: string) => Metric | unde
   const closedAs = count ? count.segments.filter((s) => s.dimension === "closed as") : [];
   const lines = [
     count ? `${count.value} lost and no decision deals closed in the window, shown by the last open stage each was in.${closedAs.length ? ` By how they closed: ${closedAs.map((s) => `${s.key} ${s.value}`).join(", ")}.` : ""}` : "",
-    share && late ? `${percent(share.value)} of ${share.n} won deals closed in the quarter first forecast, and the median won deal closed ${late.value} days after its first close date.` : "",
+    share && late ? `${percent(share.value)} of the ${share.n} won deals we can follow through their stages closed in the quarter first forecast, and the median won deal closed ${late.value} days after its first close date.` : "",
   ].filter(Boolean);
   const order = calibration.stages.filter((s) => s.category === "open").sort((a, b) => (a.order ?? 0) - (b.order ?? 0)).map((s) => s.name);
   return { html: `<div class="eyebrow">Where deals are lost</div><h2>Where deals drop out, and where time goes</h2>${lines.map((l) => `<p class="lede" style="font-size:15px;margin-bottom:8px">${r.t(l)}</p>`).join("")}<div class="chart-pair">${chartSlot(lostByStageChart(metric("historic.lost_by_stage"), metric("historic.lost_value_by_stage"), r.currency))}<div><h3 class="cap">Median days in each stage, won and lost deals</h3>${chartSlot(stageVelocityChart(metric("historic.stage_velocity_won"), metric("historic.stage_velocity_lost"), order))}</div></div>` };
@@ -636,8 +637,8 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   const metrics = report.metrics;
   const metric = (id: string): Metric | undefined => metrics.find((m) => m.id === id);
   const verdict = verdictOf(team);
-  const top = topIssues(team, TOP_ISSUE_COUNT);
-  const { phases: plan, later } = buildPlan(team);
+  const top = topIssues(team, TOP_ISSUE_COUNT, report.added);
+  const { phases: plan, later, alsoFor } = buildPlan(team, report.added);
   const setupReview = isSetupReview(run);
   // A set-up review shows only its own areas: the record areas get one line, below.
   const domains = areasOf(run, team);
@@ -785,7 +786,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   for (const domain of withIssues) {
     const label = domainLabel(domain);
     const own = team.filter((f) => f.domain === domain);
-    const issues = issuesOf(own);
+    const issues = issuesOf(own, report.added);
     if (!density?.domainSummary) add(`<div class="eyebrow">Area</div><h1>${r.t(label)}</h1><div class="body">${sectionBody(r, built, `domain_${domain}`)}</div>`, "dark divider");
     // Each area opens the same way. The tightest densities drop it to keep the deck in range.
     const glance = density && !density.domainSummary ? chapterSlide(r, report, domain) : "";
@@ -836,7 +837,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
     const cut = compact && all.length > 1;
     const pages = cut ? [all[0]!.slice(0, -1)] : all;
     pages.forEach((group, i) => {
-      add(`<div class="eyebrow">Roadmap</div><h2>Days ${phase.from} to ${phase.to}: ${phase.title}${i ? ", continued" : ""}</h2>${cut ? `<p style="font-size:15px;margin-bottom:6px">${COMPACT_NOTE}</p>` : ""}<ul class="action-list${dense ? " two-text" : ""}">${group.map((f) => `<li><strong>${r.t(f.title)}.</strong>${r.ref(f.id)} ${r.t(f.recommendation)} <span class="owner">${r.t(f.owner)}</span></li>`).join("")}</ul>`);
+      add(`<div class="eyebrow">Roadmap</div><h2>Days ${phase.from} to ${phase.to}: ${phase.title}${i ? ", continued" : ""}</h2>${cut ? `<p style="font-size:15px;margin-bottom:6px">${COMPACT_NOTE}</p>` : ""}<ul class="action-list${dense ? " two-text" : ""}">${group.map((f) => `<li><strong>${r.t(f.title)}.</strong>${r.ref(f.id)}${(alsoFor[f.id] ?? []).map((x) => r.ref(x.id)).join("")} ${r.t(f.recommendation)} <span class="owner">${r.t(f.owner)}</span></li>`).join("")}</ul>`);
     });
   }
 

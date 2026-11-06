@@ -29,7 +29,7 @@ export function riskPage(r: Render, report: BuiltReport): string {
 
 /** What happens next. Its only figures are the plan's own. */
 export function nextStepsPage(r: Render, report: BuiltReport): string {
-  const first = buildPlan(report.teamFindings).phases.find((p) => p.findings.length > 0);
+  const first = buildPlan(report.teamFindings, report.added).phases.find((p) => p.findings.length > 0);
   const start = first
     ? `Name an owner for each of the ${first.findings.length} ${first.findings.length === 1 ? "action" : "actions"} in days ${first.from} to ${first.to}, starting with this: ${first.findings[0]!.title}.`
     : "Agree who owns each action on the roadmap, and when it's due.";

@@ -153,7 +153,7 @@ function issues(r: Render, report: BuiltReport): string {
   const team = report.teamFindings;
   const sections = domainsInOrder(team)
     .map((domain) => {
-      const own = issuesOf(team.filter((f) => f.domain === domain)).slice().sort(bySeverity);
+      const own = issuesOf(team.filter((f) => f.domain === domain), report.added);
       if (own.length === 0) return "";
       const cards = own
         .map((f) => {
@@ -170,13 +170,15 @@ function issues(r: Render, report: BuiltReport): string {
 }
 
 function plan(r: Render, report: BuiltReport): string {
-  const { phases, later } = buildPlan(report.teamFindings);
+  const { phases, later, alsoFor } = buildPlan(report.teamFindings, report.added);
+  // The other issues the same action covers, by their references (DECISIONS.md 363).
+  const also = (f: { id: string }): string => (alsoFor[f.id] ?? []).map((x) => r.ref(x.id)).join("");
   const blocks = phases
     .filter((p) => p.findings.length > 0)
-    .map((p) => `<h2>${r.t(`Days ${p.from} to ${p.to}: ${p.title}`)}</h2><ul>${p.findings.map((f) => `<li><strong>${r.t(f.title)}.</strong> ${r.t(f.recommendation)} <span class="muted">${r.t(f.owner)}</span>${r.ref(f.id)}</li>`).join("")}</ul>`)
+    .map((p) => `<h2>${r.t(`Days ${p.from} to ${p.to}: ${p.title}`)}</h2><ul>${p.findings.map((f) => `<li><strong>${r.t(f.title)}.</strong> ${r.t(f.recommendation)} <span class="muted">${r.t(f.owner)}</span>${r.ref(f.id)}${also(f)}</li>`).join("")}</ul>`)
     .join("");
-  const after = later.length ? `<h2>After 90 days</h2><ul>${later.map((f) => `<li>${r.t(f.title)}${r.ref(f.id)}</li>`).join("")}</ul>` : "";
-  return page(`<h1>The plan</h1><p class="muted">${r.t("Urgent fixes come first, and each month holds only what a team can take on.")}</p>${blocks}${after}`);
+  const after = later.length ? `<h2>After 90 days</h2><ul>${later.map((f) => `<li>${r.t(f.title)}${r.ref(f.id)}${also(f)}</li>`).join("")}</ul>` : "";
+  return page(`<h1>The plan</h1><p class="muted">${r.t("Urgent fixes and quick wins come first, and beyond the quick wins, each month holds only what a team can take on.")}</p>${blocks}${after}`);
 }
 
 function compare(r: Render, report: BuiltReport): string {

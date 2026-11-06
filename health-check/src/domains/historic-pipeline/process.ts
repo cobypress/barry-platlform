@@ -200,10 +200,11 @@ const skippedStages: Rule = {
     if (p.expected.length === 0) return { outcome: "not_measurable", reason: `No open stage was passed through by more than ${USUAL_SHARE}% of won deals, and the calibration marks none as required.`, evidence: data.evidence };
     const result = segmentRate(p.won, (d) => skippedOf(p, d).length > 0, dimensions(ctx), { segmentLimit: SKIP_SEGMENT_LIMIT, minSegment: minSample });
     if (result.rate <= SKIP_LIMIT && result.hotspots.length === 0) {
-      return { outcome: "pass", summary: `${result.hits} of ${result.n} won deals (${result.rate}%) skipped an expected stage, within our limit of ${SKIP_LIMIT}%, and no segment is over ${SKIP_SEGMENT_LIMIT}%. ${expectedNote(p)}.`, evidence: data.evidence, segmentsChecked: result.segmentsChecked, facts: { hits: result.hits, n: result.n, rate: result.rate } };
+      return { outcome: "pass", summary: `${result.hits} of ${result.n} won deals we can follow through their stages (${result.rate}%) skipped an expected stage, within our limit of ${SKIP_LIMIT}%, and no segment is over ${SKIP_SEGMENT_LIMIT}%. ${expectedNote(p)}.`, evidence: data.evidence, segmentsChecked: result.segmentsChecked, facts: { hits: result.hits, n: result.n, rate: result.rate } };
     }
     const byStage = p.expected.map((stage) => ({ stage, n: p.won.filter((d) => !p.paths.get(d.Id)!.includes(stage)).length })).filter((s) => s.n > 0).sort((a, b) => b.n - a.n);
-    const where = result.rate > SKIP_LIMIT ? `${result.hits} of ${result.n} won deals (${result.rate}%)` : `${result.hits} of ${result.n} won deals overall (${result.rate}%), and more in some segments`;
+    // "We can follow through their stages": a deal entered straight as won has no path to read (DECISIONS.md 364).
+    const where = result.rate > SKIP_LIMIT ? `${result.hits} of ${result.n} won deals we can follow through their stages (${result.rate}%)` : `${result.hits} of ${result.n} won deals we can follow through their stages (${result.rate}%), and more in some segments`;
     return {
       outcome: "issue",
       title: "Won deals skip stages your process expects",

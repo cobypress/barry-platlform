@@ -272,6 +272,19 @@ export function buildValueModel(findings: Finding[], run: Run, currency: string,
   return { currency, hourly, groups, total, byKind, left };
 }
 
+/**
+ * What each finding adds to the total, by id (DECISIONS.md 362): the group's
+ * counted line its expected figure, and nothing for a line a larger overlapping
+ * one holds, for exposure, or for a figure left out of the model. A finding with
+ * no figure isn't in the map.
+ */
+export function addedByFinding(model: ValueModel): Map<string, number> {
+  const added = new Map<string, number>();
+  for (const g of model.groups) for (const line of g.lines) added.set(line.findingId, g.kind !== "exposure" && line.findingId === g.counted.findingId ? g.counted.expected : 0);
+  for (const l of model.left) if (!added.has(l.findingId)) added.set(l.findingId, 0);
+  return added;
+}
+
 /** What a set of findings is worth: within each group, the largest of their figures, added across groups. Exposure is left out, as in the total. */
 export function worthOf(model: ValueModel, findingIds: Set<string>): number {
   let sum = 0;
