@@ -1,6 +1,7 @@
 import { differenceWords, formatFigure, comparisonId } from "../benchmark/compare.ts";
 import type { BuiltReport } from "../narrative/sections.ts";
 import { buildPlan, isSetupReview, verdictOf } from "../narrative/select.ts";
+import { readinessLine } from "../narrative/readiness.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { canRelease } from "../schemas/index.ts";
 import { scoreLine } from "./executive.ts";
@@ -88,9 +89,11 @@ export function onePagerHtml(report: BuiltReport, pseudonyms: Pseudonymiser): st
     : "";
   const progress = report.progress && report.progress.score.before !== null && report.progress.score.after !== null ? `<p style="margin:-6px 0 12px">${r.t(`Since your last health check, your Barometer score has gone from ${report.progress.score.before} to ${report.progress.score.after}.`)}</p>` : "";
   const line = scoreLine(report, true);
+  // AI readiness, in one line and only when the verdict is clear (DECISIONS.md 243).
+  const aiLine = readinessLine(report.readiness);
 
   const body = `<div class="top"><div><div class="eyebrow">Black Cloud Barometer</div><h1>${r.t(customer)}</h1><div>${r.t(`${documentTitle(run)}: one page summary`)}</div></div><div class="who"><b>${longDate(run.asOf)}</b>${preparedBy ? r.t(`Prepared by ${preparedBy}, Black Cloud`) : r.t("Prepared by Black Cloud")}${r.draft ? '<br><span class="mark">Draft, not approved for release</span>' : ""}</div></div>
-<p class="headline">${r.t(verdictOf(report.teamFindings).headline)}</p>${progress}
+<p class="headline">${r.t(verdictOf(report.teamFindings).headline)}</p>${progress}${aiLine ? `<p style="font-size:11.5px;margin:-6px 0 10px">${r.t(aiLine)}</p>` : ""}
 <div class="trio">${score}${worth}${pay}</div>
 ${line ? `<p style="font-size:11.5px;color:var(--muted);margin:-6px 0 4px">${r.t(line)}</p>` : ""}
 ${comparisons(r, report)}${todo}

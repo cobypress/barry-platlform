@@ -1078,7 +1078,7 @@ export const APEX_CLASSES = [
   // Trap: a test that runs the code and checks nothing.
   { Id: sfId("01p", 4), Name: "OpportunityHandlerTest", ApiVersion: 60, Status: "Active", LengthWithoutComments: 300, Body: "@isTest class OpportunityHandlerTest { @isTest static void closes() { new OpportunityHandler().close(); } }" },
   // Clean: a callout through a named credential. The old address is in a comment, so it doesn't count.
-  { Id: sfId("01p", 5), Name: "FinanceSync", ApiVersion: 62, Status: "Active", LengthWithoutComments: 350, Body: "// Sends invoices to the finance system. Was req.setEndpoint('https://old.example.com').\npublic class FinanceSync { public void send() { HttpRequest req = new HttpRequest(); req.setEndpoint('callout:Finance_API/invoices'); new Http().send(req); } }" },
+  { Id: sfId("01p", 5), Name: "FinanceSync", ApiVersion: 62, Status: "Active", LengthWithoutComments: 350, Body: "// Sends invoices to the finance system. Was req.setEndpoint('https://old.example.com').\npublic class FinanceSync { @InvocableMethod(label='Send invoices') public static void sendAll(List<Id> ids) { new FinanceSync().send(); } public void send() { HttpRequest req = new HttpRequest(); req.setEndpoint('callout:Finance_API/invoices'); new Http().send(req); } }" },
   // Trap: reads the org's live data, and does check its result.
   { Id: sfId("01p", 6), Name: "LeadRouterTest", ApiVersion: 62, Status: "Active", LengthWithoutComments: 250, Body: "@isTest(SeeAllData=true) private class LeadRouterTest { @isTest static void routes() { new LeadRouter().route(new List<Lead>()); System.assertEquals(0, Limits.getDmlStatements()); } }" },
   // Trap: a test data factory has no test methods, so it has nothing to assert.
@@ -1442,3 +1442,14 @@ export const CPQ_APPROVALS = CPQ_QUOTES.filter((q, i) => q.OwnerId === userId(1)
 // Traps: two contracts ending soon with no renewal; one ending soon has one; one ends too late to count.
 const contract = (n: number, days: number, renewal: string | null) => ({ Id: sfId("800", n), ContractNumber: String(n).padStart(8, "0"), OwnerId: userId(n % 2 ? 1 : 2), EndDate: dateOnly(asOf + days * DAY), Status: "Activated", SBQQ__RenewalOpportunity__c: renewal });
 export const CPQ_CONTRACTS = [contract(101, 30, null), contract(102, 75, sfId("006", 1)), contract(103, 100, null), contract(104, 200, null)];
+
+// AI readiness (DECISIONS.md 236 to 243): the four settings, from a Settings
+// retrieve. Knowledge and generative AI are on; Agentforce and Data Cloud are
+// off. Agents aren't enabled, so BotDefinition can't be read.
+const settingsFile = (type: string, field: string, on: boolean) => `<?xml version="1.0" encoding="UTF-8"?><${type} xmlns="http://soap.sforce.com/2006/04/metadata"><${field}>${on}</${field}></${type}>`;
+export const SETTINGS_FILES: Record<string, string> = {
+  "settings/Knowledge.settings": settingsFile("KnowledgeSettings", "enableKnowledge", true),
+  "settings/EinsteinGpt.settings": settingsFile("EinsteinGptSettings", "enableEinsteinGptPlatform", true),
+  "settings/AgentPlatform.settings": settingsFile("AgentPlatformSettings", "enableAgentPlatform", false),
+  "settings/CustomerDataPlatform.settings": settingsFile("CustomerDataPlatformSettings", "enableCustomerDataPlatform", false),
+};

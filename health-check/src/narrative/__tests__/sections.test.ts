@@ -75,10 +75,11 @@ describe("the three outputs", () => {
     assert.equal(found.size, base.findings.length);
     // Investment, adoption, sales process, win drivers and org documentation figures have their own sections. Between them, every metric once, in order.
     const metricIds = (key: string) => raw.find((s) => s.key === key)!.metricIds;
-    const covered = [...metricIds("investment"), ...metricIds("adoption"), ...metricIds("pipeline_metrics"), ...metricIds("sales_process"), ...metricIds("win_drivers"), ...metricIds("org_documented")];
+    const covered = [...metricIds("investment"), ...metricIds("adoption"), ...metricIds("pipeline_metrics"), ...metricIds("sales_process"), ...metricIds("win_drivers"), ...metricIds("org_documented"), ...metricIds("ai_readiness")];
     assert.equal(new Set(covered).size, covered.length);
     assert.deepEqual(new Set(covered), new Set(base.metrics.map((m) => m.id)));
-    assert.deepEqual(metricIds("pipeline_metrics"), base.metrics.map((m) => m.id).filter((id) => !id.startsWith("investment.") && !id.startsWith("adoption.") && !PROCESS_METRIC_IDS.includes(id) && id !== WIN_DRIVERS && !id.startsWith("documented.")));
+    assert.deepEqual(metricIds("pipeline_metrics"), base.metrics.map((m) => m.id).filter((id) => !id.startsWith("investment.") && !id.startsWith("adoption.") && !PROCESS_METRIC_IDS.includes(id) && id !== WIN_DRIVERS && !id.startsWith("documented.") && !id.startsWith("ai.")));
+    assert.deepEqual(metricIds("ai_readiness"), ["ai.platform", "ai.actions", "ai.legacy_share"]);
     assert.ok(metricIds("investment").length > 0);
     assert.ok(metricIds("adoption").length > 0);
     assert.deepEqual(metricIds("sales_process"), PROCESS_METRIC_IDS);

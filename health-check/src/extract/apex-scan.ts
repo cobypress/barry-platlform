@@ -22,6 +22,8 @@ export type ApexScan = {
   literalEndpoints: number;
   /** setEndpoint given a "callout:" named credential. */
   namedCredentialEndpoints: number;
+  /** @InvocableMethod methods: what an agent, or a flow, can call (DECISIONS.md 238). */
+  invocable: number;
 };
 
 // A statement, so the keyword follows a statement's end, a block or a condition. Matched on the keyword itself.
@@ -117,5 +119,6 @@ export function scanApex(body: string): ApexScan {
     dmlInLoops: inLoops(code, spans, [DML, DATABASE_DML]),
     literalEndpoints: endpoints.filter((e) => /^https?:\/\//i.test(e)).length,
     namedCredentialEndpoints: endpoints.filter((e) => /^callout:/i.test(e)).length,
+    invocable: count(code, /@InvocableMethod\b/gi),
   };
 }

@@ -1,4 +1,5 @@
 import { currentBody, TOP_ISSUE_COUNT, type BuiltOutput, type BuiltReport } from "../narrative/sections.ts";
+import { VERDICT_WORDS, type ReadinessVerdict } from "../narrative/readiness.ts";
 import { areasOf, buildPlan, domainLabel, isSetupReview, issuesOf, recordAreasLine, scorecard, topIssues, verdictOf } from "../narrative/select.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { canRelease, type Finding, type Metric, type Run } from "../schemas/index.ts";
@@ -81,6 +82,17 @@ ol.contents.long li { margin-bottom: 4px; }
 .chart-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
 .lede { font-size: 17px; margin-bottom: 14px; }
 .small-note { font-size: 13.5px; color: var(--muted); margin-top: 10px; }
+.readiness-lede p { margin: 0 0 10px; }
+table.readiness { font-size: 14px; }
+table.readiness td { vertical-align: top; padding-top: 5px; padding-bottom: 5px; }
+table.readiness td:first-child { width: 13%; }
+table.readiness td:nth-child(2) { width: 11%; }
+.verdict { display: inline-block; border-radius: var(--radius-s); padding: 1px 8px; font-size: 12.5px; font-weight: 600; white-space: nowrap; border: 1px solid var(--carbon); }
+.verdict.ready { background: var(--chartreuse); border-color: var(--chartreuse); color: var(--carbon); }
+.verdict.not-yet { background: var(--alert); border-color: var(--alert); color: var(--ivory); }
+.verdict.unknown { color: var(--muted); border-color: var(--muted); }
+ol.readiness-fixes { columns: 2; column-gap: 36px; margin: 2px 0 0; padding-left: 22px; font-size: 14px; }
+ol.readiness-fixes li { margin-bottom: 4px; break-inside: avoid; }
 .data td.num, .data th.num { text-align: right; }
 .tight table.data { font-size: 15px; }
 .tight table.data td, .tight table.data th { padding: 5px 7px; }
@@ -514,6 +526,23 @@ function threeColumnList(r: Render, eyebrow: string, title: string, items: Array
 
 const sectionBody = (r: Render, built: BuiltOutput, key: string): string => paragraphs(r, currentBody(built, key));
 
+const VERDICT_CLASS: Record<ReadinessVerdict, string> = { ready: "ready", nearly: "nearly", not_yet: "not-yet", not_measurable: "unknown" };
+
+/**
+ * AI readiness on one slide (DECISIONS.md 242): each pillar's verdict, decided
+ * by code, why, and the findings behind it, then what to fix before an agent
+ * goes live. The opening is the section's text, which Claude may word.
+ */
+function readinessSlide(r: Render, report: BuiltReport, built: BuiltOutput): string {
+  const { pillars, fixes } = report.readiness;
+  // The questions are in the raw notes: here, the label is enough to read the row.
+  const rows = pillars.map((p) => `<tr><td><strong>${r.t(p.label)}</strong></td><td><span class="verdict ${VERDICT_CLASS[p.verdict]}">${VERDICT_WORDS[p.verdict]}</span></td><td>${r.t(p.reason)}${p.findingIds.slice(0, 2).map((id) => r.ref(id)).join("")}</td></tr>`);
+  const todo = fixes.length
+    ? `<h3 class="sub">What to fix before an agent goes live, in order</h3><ol class="readiness-fixes">${fixes.map((f) => `<li>${r.t(f.title)}${r.ref(f.id)}</li>`).join("")}</ol>`
+    : `<p class="small-note">${r.t("We found nothing that needs fixing first.")}</p>`;
+  return `<div class="eyebrow">AI readiness</div><h2>Could an AI agent work safely here?</h2><div class="lede readiness-lede">${sectionBody(r, built, "ai_readiness")}</div><table class="grid readiness"><tbody>${rows.join("")}</tbody></table>${todo}`;
+}
+
 const needsInput = (built: BuiltOutput, key: string): boolean => built.sections.find((s) => s.key === key)?.status === "needs_input";
 
 const inputChip = '<p style="margin-bottom:10px"><span class="chip input">Needs input from a consultant</span></p>';
@@ -676,6 +705,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
     ...(peopleSaid.length ? ["What your people told us"] : []),
     ...(working.length ? ["What's working well"] : []),
     ...(pipelinePages.length || gaps.length ? ["Pipeline"] : []),
+    "AI readiness",
     ...(plan.some((p) => p.findings.length > 0) ? ["Roadmap"] : []),
     "What happens next",
     ...(hasDocument(readDocument(metrics)) ? ["Your org, documented"] : []),
@@ -767,6 +797,9 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   }
   if (gaps.length) slides.push(...listSlides(r, "Pipeline", "What your data can't tell us yet", gaps, compact));
 
+  // Before the roadmap, so what to fix for an agent reads straight into when to fix it.
+  add(readinessSlide(r, report, built), "tight");
+
   const planned = plan.some((p) => p.findings.length > 0);
   // The engine's roadmap text only counts actions, which the boxes already show. Written text goes above them.
   const roadmap = built.versions.find((v) => v.id === built.sections.find((x) => x.key === "roadmap")?.currentVersionId);
@@ -807,8 +840,15 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   slides.push(...(compact ? listSlides(r, "Appendix", "Metric definitions", definitions, compact) : dense ? threeColumnList(r, "Appendix", "Metric definitions", definitions) : twoColumnList(r, "Appendix", "Metric definitions", definitions)));
   // Reference, so two to a line like the definitions.
   const reference = (title: string, items: Array<{ title: string; detail: string }>): Slide[] => (compact || items.length === 0 ? listSlides(r, "Appendix", title, items, compact) : twoColumnList(r, "Appendix", title, items));
-  slides.push(...reference("What we couldn't measure", team.filter((f) => f.status === "not_measurable").map((f) => ({ title: f.title, detail: f.notMeasurableReason ?? f.summary }))));
-  slides.push(...reference("Checks that passed", team.filter((f) => f.status === "passed").map((f) => ({ title: f.title, detail: f.summary }))));
+  const unmeasured = team.filter((f) => f.status === "not_measurable").map((f) => ({ title: f.title, detail: f.notMeasurableReason ?? f.summary }));
+  const passing = team.filter((f) => f.status === "passed").map((f) => ({ title: f.title, detail: f.summary }));
+  // At the three-column step the two lists share three columns, each item saying which it is (DECISIONS.md 244).
+  if (density?.threeColumnLists && unmeasured.length && passing.length) {
+    slides.push(...threeColumnList(r, "Appendix", "What we couldn't measure, and what passed", [...unmeasured.map((x) => ({ ...x, title: `Not measurable: ${x.title}` })), ...passing.map((x) => ({ ...x, title: `Passed: ${x.title}` }))]));
+  } else {
+    slides.push(...reference("What we couldn't measure", unmeasured));
+    slides.push(...reference("Checks that passed", passing));
+  }
   // Manual steps are working notes for us, not something the deck refers to.
   slides.push(detailSlide(r, notes.filter((s) => s.key !== "manual_steps")));
   return slides;

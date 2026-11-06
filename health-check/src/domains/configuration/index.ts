@@ -21,6 +21,8 @@ import { objectInventoryMetric } from "./inventory.ts";
 import { documentedMetrics } from "./documented.ts";
 import { orgDocumentationExtractor } from "../../extract/documentation.ts";
 import { accessExtractor } from "../../extract/security.ts";
+import { aiSignalsExtractor } from "../../extract/ai.ts";
+import { aiMetrics } from "./ai.ts";
 import { loginActivityExtractor } from "../../extract/adoption.ts";
 
 const FIELD_SPRAWL_LIMIT = 150;
@@ -364,7 +366,8 @@ export const configurationModule: DomainModule = {
     loginActivityExtractor,
     orgDocumentationExtractor,
     accessExtractor,
+    aiSignalsExtractor,
   ],
-  metrics: [objectInventoryMetric, documentedMetrics],
+  metrics: [objectInventoryMetric, documentedMetrics, aiMetrics],
   rules: [customFieldSprawl, unusedCustomFields, unassignedLayouts, undocumentedFields, stageSprawl, picklistSprawl, setupChangeConcentration],
 };

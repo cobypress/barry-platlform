@@ -77,7 +77,7 @@ describe("the read-only route reads what the retrieve reads", () => {
   });
 
   test("the run never asks the Metadata API more than once", () => {
-    assert.equal(readOnly.requests.filter((r) => r.url.includes("/Soap/m/")).length, 2, "one retrieve for automation and one for reports, each refused");
+    assert.equal(readOnly.requests.filter((r) => r.url.includes("/Soap/m/")).length, 3, "one retrieve each for automation, reports and the AI readiness settings, each refused");
     assert.ok(readOnly.requests.every((r) => r.method === "GET" || r.url.includes("/composite/batch") || r.url.includes("/Soap/m/")));
   });
 });

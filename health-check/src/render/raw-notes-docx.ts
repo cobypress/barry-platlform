@@ -307,7 +307,7 @@ export function buildRawNotes(report: BuiltReport, pseudonyms: Pseudonymiser): N
         if (records) notes.labelled("Records to fix", `${records.total.toLocaleString("en-GB")}, ${records.rows < records.total ? `the first ${records.rows.toLocaleString("en-GB")} of them ` : ""}on sheet ${ref(f.id)} of the action lists`);
       });
     }
-    if (s.key === "pipeline_metrics" || s.key === "investment" || s.key === "adoption" || s.key === "sales_process" || s.key === "team_survey" || s.key === "service_cases") metrics.filter((m) => s.items.some((item) => item.id === m.id)).forEach((m) => addMetric(notes, m, ref(m.id), calibration));
+    if (s.key === "pipeline_metrics" || s.key === "investment" || s.key === "adoption" || s.key === "sales_process" || s.key === "team_survey" || s.key === "service_cases" || s.key === "ai_readiness") metrics.filter((m) => s.items.some((item) => item.id === m.id)).forEach((m) => addMetric(notes, m, ref(m.id), calibration));
     if (s.key === "practice") addPractice(notes, domainsInOrder(report.teamFindings), ref);
     if (s.key === "win_drivers") metrics.filter((m) => s.items.some((item) => item.id === m.id)).forEach((m) => addDrivers(notes, m, ref(m.id), report));
     if (s.key === "org_documented") addDocumented(notes, metrics, s.items.map((item) => item.id), ref, calibration);
