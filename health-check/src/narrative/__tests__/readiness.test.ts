@@ -147,3 +147,26 @@ describe("in the documents", () => {
     assert.doesNotMatch(onePagerHtml(unclear, pseudonyms), /Ready for an AI agent\?/);
   });
 });
+
+describe("each reason says what caused its verdict (night 3 review)", () => {
+  const pillar = (findings: Finding[], metrics: Metric[], key: string) => readinessOf(run, findings, metrics).pillars.find((p) => p.key === key)!;
+
+  test("actions: with every flow described, a finding is the reason, not too few descriptions", () => {
+    const described = withMetric(AI_ACTIONS, (m) => ({ ...m, stats: { ...m.stats, described: m.stats.autolaunched! } }));
+    const actions = pillar(output!.findings, described, "actions");
+    assert.equal(actions.verdict, "nearly");
+    assert.doesNotMatch(actions.reason, /too few have one/);
+    const named = output!.findings.find((f) => f.status === "issue" && ["aut.undocumented-automation", "aut.flows-without-fault-paths"].includes(f.ruleId))!;
+    assert.ok(actions.reason.includes(inSentence(named.title)), actions.reason);
+  });
+
+  test("shape: inside the working line, a serious finding is the reason, not the share", () => {
+    const low = withMetric(AI_LEGACY_SHARE, (m) => ({ ...m, value: 5, stats: { ...m.stats, legacy: 1 } }));
+    const serious = output!.findings.find((f) => f.status === "issue" && (f.severity === "critical" || f.severity === "high") && ["aut.legacy-workflow-rules", "aut.legacy-process-builder", "aut.mixed-automation-on-object", "tech.governor-limit-risk"].includes(f.ruleId));
+    const findings = serious ? output!.findings : output!.findings.map((f) => (f.ruleId === "aut.mixed-automation-on-object" && f.status === "issue" ? { ...f, severity: "high" as const } : f));
+    const shape = pillar(findings, low, "shape");
+    assert.equal(shape.verdict, "nearly");
+    assert.doesNotMatch(shape.reason, /Our working line is 10%\.$/);
+    assert.match(shape.reason, /within our working line/);
+  });
+});

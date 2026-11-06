@@ -1,6 +1,6 @@
 import { AI_ACTIONS, AI_LEGACY_SHARE, AI_PLATFORM, ARTICLES_READY, LEGACY_NOT_YET, LEGACY_READY } from "../domains/configuration/ai.ts";
 import type { Finding, Metric, Run } from "../schemas/index.ts";
-import { isSetupReview, issuesOf, SEVERITY_ORDER } from "./select.ts";
+import { bySeverity, isSetupReview, issuesOf, SEVERITY_ORDER } from "./select.ts";
 
 // Readiness for Data Cloud and Agentforce (roadmap Stage 6, DECISIONS.md 236 to
 // 243): could this org put an AI agent to work safely, and what would stop it?
@@ -122,7 +122,9 @@ export function readinessOf(run: Pick<Run, "scope">, findings: Finding[], metric
     if (callable === null || auto === null || described === null || invocable === null) return { verdict: "not_measurable", reason: actions?.status === "not_measurable" ? actions.reason : "The automation an agent could call couldn't be read." };
     if (callable === 0) return { verdict: "not_yet", reason: "There's no active autolaunched flow or invocable Apex method for an agent to call." };
     const what = `${plural(auto, "active autolaunched flow")} (${described} described) and ${plural(invocable, "invocable Apex method")}`;
-    if ((auto > 0 && described * 2 < auto) || undocumented.length) return { verdict: "nearly", reason: `${what}. An agent chooses an action by its description, and too few have one.` };
+    // The reason is what made it "nearly": too few descriptions, or else the finding that did.
+    if (auto > 0 && described * 2 < auto) return { verdict: "nearly", reason: `${what}. An agent chooses an action by its description, and too few have one.` };
+    if (undocumented.length) return { verdict: "nearly", reason: `${what}. But ${inSentence(undocumented.slice().sort(bySeverity)[0]!.title)}.` };
     return { verdict: "ready", reason: `${what}.` };
   })();
   pillars.push({ key: "actions", label: "Actions", question: "Is there automation an agent could call?", ...act, findingIds: ids(undocumented), metricIds: [AI_ACTIONS] });
@@ -140,7 +142,10 @@ export function readinessOf(run: Pick<Run, "scope">, findings: Finding[], metric
     if (share === null || legacy === null) return { verdict: "not_measurable", reason: legacyMetric?.status === "not_measurable" ? legacyMetric.reason : "How the org's automation is built couldn't be read." };
     const text = `${share}% of active automation is still in Workflow Rules and Process Builder, which an agent can't call and Salesforce is retiring`;
     if (share > LEGACY_NOT_YET) return { verdict: "not_yet", reason: `${text}.` };
-    if (share > LEGACY_READY || shapeFindings.some((f) => f.severity === "critical" || f.severity === "high")) return { verdict: "nearly", reason: `${text}. Our working line is ${LEGACY_READY}%.` };
+    if (share > LEGACY_READY) return { verdict: "nearly", reason: `${text}. Our working line is ${LEGACY_READY}%.` };
+    // Within the line, a serious finding is what holds it back, so it's named rather than the share.
+    const serious = shapeFindings.filter((f) => f.severity === "critical" || f.severity === "high").sort(bySeverity)[0];
+    if (serious) return { verdict: "nearly", reason: `${text}, within our working line of ${LEGACY_READY}%, but ${inSentence(serious.title)}.` };
     return { verdict: "ready", reason: share === 0 ? "No active automation is left in Workflow Rules or Process Builder." : `${text}, within our working line of ${LEGACY_READY}%.` };
   })();
   pillars.push({ key: "shape", label: "Org shape", question: "Is the logic in tools an agent can work with?", ...shape, findingIds: ids(shapeFindings), metricIds: [AI_LEGACY_SHARE] });
