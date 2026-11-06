@@ -120,6 +120,8 @@ describe("discount leakage", () => {
     assert.ok(f.facts.segment1Median! >= f.facts.segment1PeerMedian! + DISCOUNT_GAP);
     assert.ok(f.facts.segment1WinRate! <= f.facts.segment1PeerWinRate!);
     assert.match(f.summary, /against .* for their team-mates/);
+    // One rep named, so the title is singular (night 3 reading pass).
+    assert.equal(f.title, "One rep discounts deeper than peers without winning more");
   });
 
   test("its figure is the discount past the peers' median on won deals, potential, and yearly in the value model", () => {

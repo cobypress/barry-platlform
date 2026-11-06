@@ -459,8 +459,10 @@ describe("the cover", () => {
     const { input } = loadRun(recorded);
     const report = buildReport({ ...input, preparedBy: "Ten Eyck" });
     assert.deepEqual(checkNumbers("by Ten Eyck, Black Cloud", report.dataset).unmatched, []);
-    const verdict = report.outputs.executive_summary.sections.find((s) => s.key === "verdict")!;
-    assert.notDeepEqual(checkNumbers("Ten Eyck", scopeDataset(report.dataset, [...verdict.findingIds, ...verdict.metricIds])).unmatched, []);
+    // The intake summary is where a preparer's name would most likely leak, and its own figures hold no 10.
+    // (The verdict used to serve, until its top issues came to hold a 10 of their own.)
+    const intake = report.outputs.raw_notes.sections.find((s) => s.key === "intake_summary")!;
+    assert.notDeepEqual(checkNumbers("Ten Eyck", scopeDataset(report.dataset, [...intake.findingIds, ...intake.metricIds])).unmatched, []);
   });
 
   test("the name is in nothing Claude would be sent", () => {

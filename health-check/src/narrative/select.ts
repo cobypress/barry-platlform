@@ -1,4 +1,5 @@
 import { SALES_CLOUD_DOMAINS, type Finding, type Run, type Score } from "../schemas/index.ts";
+import { NOT_MONEY_RULES } from "../value/model.ts";
 
 // The choices a report makes about its findings: what's top, what goes when, and
 // what an executive reader sees. All of it is code, so it's repeatable and Claude
@@ -65,7 +66,9 @@ export function teamLevelFinding(f: Finding): Finding {
   };
 }
 
-const sizedAmount = (f: Finding): number => (f.value.kind === "not_sized" ? -1 : f.value.amount);
+// A target such as pipeline needed for coverage isn't money, so it doesn't rank as money (DECISIONS.md 351):
+// it comes after every issue with a figure in money, and before those with none.
+const sizedAmount = (f: Finding): number => (f.value.kind === "not_sized" ? -1 : NOT_MONEY_RULES.has(f.ruleId) ? 0 : f.value.amount);
 
 export function bySeverity(a: Finding, b: Finding): number {
   return (

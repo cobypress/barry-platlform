@@ -147,6 +147,23 @@ describe("the deck's wording, as a customer reads it (night 3 reading pass, DECI
     assert.ok(items.every((x) => x.includes('class="ref"')), items.find((x) => !x.includes('class="ref"')));
   });
 
+  test("presentation from the second reading pass (DECISIONS.md 355)", () => {
+    // Pipeline at risk says so beside its figure; a campaign shortfall, which is spent, doesn't.
+    assert.match(html, /At risk: £[\d,]+ open pipeline today/);
+    assert.doesNotMatch(html, /At risk: £[\d,]+ more spent than won back/);
+    // An area's divider doesn't repeat the next slide's counts on another basis.
+    for (const divider of html.match(/<div class="eyebrow">Area<\/div><h1>[\s\S]*?<\/section>/g) ?? []) assert.doesNotMatch(divider, /stat-row/);
+    // Charts say what they show, and the wins slide says what it counts.
+    assert.match(html, /<h3 class="cap">Monthly active users<\/h3>/);
+    assert.match(html, /<h3 class="cap">Median days in each stage, won and lost deals<\/h3>/);
+    assert.match(html, /The value of your open pipeline at the end of each month\./);
+    assert.match(html, /reached (it|each stage) or a later one/);
+    assert.match(html, /Type and lead source are the won deal(&#39;|')s own fields\./);
+    // A driver says which way it points.
+    assert.match(html, /Driver: goes with (winning|losing)/);
+    assert.match(html, /Closing doesn(&#39;|')t count/);
+  });
+
   test("an area's first steps say each recommendation once", () => {
     for (const panel of html.match(/<h3>What to do first<\/h3><ul>[\s\S]*?<\/ul>/g) ?? []) {
       const items = [...panel.matchAll(/<li>([\s\S]*?)<\/li>/g)].map((m) => m[1]);

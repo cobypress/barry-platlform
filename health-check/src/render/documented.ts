@@ -103,7 +103,7 @@ export function dataModelDiagram(doc: OrgDocument, columns = 3): Chart {
     .map((o) => {
       const { x, y } = at.get(o.name)!;
       const name = o.name.length > 20 ? `${o.name.slice(0, 19)}…` : o.name;
-      const records = o.records === null ? "No count kept" : `${count(o.records)} records`;
+      const records = o.records === null ? "Not counted here" : `${count(o.records)} records`;
       return `<rect x="${x}" y="${y}" width="${BOX_W}" height="${BOX_H}" rx="${radius.small}" fill="${colour.carbon}" stroke="${colour.ivory}" stroke-width="1.2"/><text x="${x + BOX_W / 2}" y="${y + 22}" font-size="13" font-weight="${font.weights.semibold}" fill="${colour.ivory}" text-anchor="middle">${escapeXml(name)}</text><text x="${x + BOX_W / 2}" y="${y + 40}" font-size="11" fill="${colour.panelMuted}" text-anchor="middle">${escapeXml(records)}</text>`;
     })
     .join("");
@@ -126,7 +126,7 @@ export function objectsTable(r: Render, doc: OrgDocument, limit = Infinity): str
   const objects = doc.model.objects.slice(0, limit);
   const rows = objects.map((o) => [
     `${r.t(o.name)}`,
-    o.records === null ? r.t("No count kept") : count(o.records),
+    o.records === null ? r.t("Not counted here") : count(o.records),
     o.customFields === null ? r.t("Not read") : count(o.customFields),
     o.recordTypes.filter((t) => t.active).map((t) => r.t(t.name)).join(", ") || r.t("None"),
   ]);

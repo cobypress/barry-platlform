@@ -18,8 +18,17 @@ describe("the value model", () => {
   });
 
   test("exposure is shown beside the total, never in it", () => {
-    const model = buildValueModel([issue("cur.coverage", gbp(2_000_000, "more pipeline needed for the quarter starting 2026-10-01")), issue("utl.unassigned-licence-seats", { kind: "licence_cost", amount: 10_000, unit: "GBP", period: "per year", assumptions: ["Synthetic."] })], run, "GBP");
+    const model = buildValueModel([issue("cur.stuck-in-stage", gbp(2_000_000, "open pipeline today")), issue("utl.unassigned-licence-seats", { kind: "licence_cost", amount: 10_000, unit: "GBP", period: "per year", assumptions: ["Synthetic."] })], run, "GBP");
     assert.equal(model.byKind.exposure.expected, 2_000_000);
+    assert.deepEqual(model.total, { low: 5_000, expected: 7_500, high: 10_000 });
+  });
+
+  test("pipeline needed for coverage is a target, not money: it's in neither the total nor what's kept apart (DECISIONS.md 351)", () => {
+    const coverage = issue("cur.coverage", gbp(2_785_000, "more pipeline needed for the quarter starting 2026-10-01"));
+    const model = buildValueModel([coverage, issue("utl.unassigned-licence-seats", { kind: "licence_cost", amount: 10_000, unit: "GBP", period: "per year", assumptions: ["Synthetic."] })], run, "GBP");
+    assert.equal(model.byKind.exposure.expected, 0);
+    assert.ok(!model.groups.some((g) => g.lines.some((l) => l.findingId === coverage.id)));
+    assert.match(model.left.find((l) => l.findingId === coverage.id)?.reason ?? "", /a target to plan against, not money found or at risk/);
     assert.deepEqual(model.total, { low: 5_000, expected: 7_500, high: 10_000 });
   });
 
