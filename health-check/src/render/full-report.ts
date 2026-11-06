@@ -448,7 +448,9 @@ function driversSlide(r: Render, metric: (id: string) => Metric | undefined): Sl
   const widest = Math.max(DRIVER_GAP, ...drivers.map((d) => d.gap ?? 0));
   const rate = (s: Side): string => (s.rate === null ? "" : percent(s.rate));
   const rows = drivers.map((d) => {
-    const label = `<td>${r.t(d.label)}${d.isDriver ? ' <span class="chip">Driver</span>' : ""}</td>`;
+    // Which way the gap points, so a driver that went with winning isn't read as advice to do it (night 3 reading pass).
+    const way = d.with.rate !== null && d.without.rate !== null && d.with.rate > d.without.rate ? "goes with winning" : "goes with losing";
+    const label = `<td>${r.t(d.label)}${d.isDriver ? ` <span class="chip">Driver: ${way}</span>` : ""}</td>`;
     if (d.gap === null) return `<tr class="unmeasured">${label}<td colspan="6">Not measurable. ${r.t(d.reason ?? "")}</td></tr>`;
     // The bar is drawn, not written, so it carries no figure of its own.
     const bar = `<span class="gap-bar${d.isDriver ? " driver" : ""}" style="width:${Math.max(2, Math.round((90 * d.gap) / widest))}px"></span>`;
@@ -460,6 +462,10 @@ function driversSlide(r: Render, metric: (id: string) => Metric | undefined): Sl
     ...(m.stats.noDecision ? [`${m.stats.noDecision} no decision deals are left out of it.`] : []),
     ...(m.stats.cycleLineDays !== undefined ? [`A long cycle is over ${m.stats.cycleLineDays} days from creation to close.`] : []),
     "The last column is how many teams, record types and other segments with enough deals on both sides show the gap the same way.",
+    // Why this can say none while the skipped-stage issue counts many (DECISIONS.md 352).
+    ...(drivers.some((d) => d.key === "skipped")
+      ? ["Moving past an expected stage means moving on to a later open stage without entering it. Closing doesn't count: if it did, every won deal that closes without entering an expected stage would, which is what the skipped-stage issue counts, and no lost deal could, so the comparison would only measure winning."]
+      : []),
   ];
   const table = `<table class="grid data drivers"><thead><tr><th>Factor</th><th class="num">Deals with it</th><th class="num">Win rate</th><th class="num">Deals without it</th><th class="num">Win rate</th><th class="num">Gap</th><th class="num">Same way in segments</th></tr></thead><tbody>${rows.join("")}</tbody></table>`;
   return { classes: "tight", html: `<div class="eyebrow">Pipeline${r.ref(WIN_DRIVERS)}</div><h2>What separates your wins from your losses</h2><p class="lede">${r.t(lede)}</p>${table}<p class="small-note">${r.t(notes.join(" "))}</p>` };
