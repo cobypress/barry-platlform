@@ -28,7 +28,7 @@ import type { Survey } from "../survey/questions.ts";
 import { buildSurveyView, surveyViewFigures, type SurveyView } from "../survey/view.ts";
 import { CONCERN_AT, REKEYING_AT } from "../survey/pairings.ts";
 import type { Interview } from "../interviews/questions.ts";
-import { buildInterviewView, interviewDatasetText, interviewSource, interviewSources, interviewViewFigures, INTERVIEWS_SOURCE, READING_LABELS, SHARE_WITHIN_POINTS as SHARE_POINTS, executiveThemes, type InterviewView } from "../interviews/readings.ts";
+import { buildInterviewView, interviewDatasetText, interviewSource, interviewSources, interviewViewFigures, INTERVIEWS_SOURCE, READING_LABELS, SHARE_WITHIN_POINTS as SHARE_POINTS, COUNT_WITHIN_SHARE, executiveThemes, type InterviewView } from "../interviews/readings.ts";
 
 // The three outputs, built from one findings dataset. Each section gets a first
 // version written by the engine, so a report always exists even if Claude never
@@ -567,7 +567,7 @@ function interviewScope(view: InterviewView): Pick<Spec, "findingIds" | "metricI
 /** How the interviews were read, then every reading, for the raw notes. Roles only, and never the notes themselves. */
 function interviewMethod(view: InterviewView): string[] {
   return [
-    `We set each answer against a matching measure by rule, not judgement. A rating of ${CONCERN_AT} or less out of 5, or ${REKEYING_AT} hour or more a week typing data in again, is a problem the person feels, and an issue in the checks it's set against is a problem we found. A share someone gave us agrees with ours within ${SHARE_POINTS} points, and a count or a number of days within a quarter of ours. Where nothing in Salesforce measures it, we can't tell.`,
+    `We set each answer against a matching measure by rule, not judgement. A rating of ${CONCERN_AT} or less out of 5, or ${REKEYING_AT} hour or more a week typing data in again, is a problem the person feels, and an issue in the checks it's set against is a problem we found. A share someone gave us agrees with ours within ${SHARE_POINTS} points, and a count or a number of days within ${Math.round(COUNT_WITHIN_SHARE * 100)}% of ours. Where nothing in Salesforce measures it, we can't tell.`,
     "We keep each conversation's notes with the run, and don't put them in any document.",
     ...view.themes.map((t) => `${t.roleLabel}, ${t.topic.charAt(0).toLowerCase()}${t.topic.slice(1)}: ${t.said} ${t.found} ${READING_LABELS[t.reading]}: ${t.why}`),
   ];
@@ -874,7 +874,7 @@ export function buildReport(given: ReportInput): BuiltReport {
     dataset.figures.push(...surveyHours(effective.metrics).map((value) => ({ source: SURVEY_SOURCE, kind: "duration" as const, value, unit: "hour" })));
     dataset.figures.push(...[MIN_RESPONSES, 5, 10, WORKING_WEEKS, ...surveyViewFigures(survey)].map((value) => ({ source: SURVEY_SOURCE, kind: "number" as const, value })), { source: SURVEY_SOURCE, kind: "duration", value: WORKING_WEEKS, unit: "week" }, { source: SURVEY_SOURCE, kind: "duration", value: REKEYING_AT, unit: "hour" });
   }
-  if (interviews) dataset.figures.push(...interviewViewFigures(interviews).map((value) => ({ source: INTERVIEWS_SOURCE, kind: "number" as const, value })), { source: INTERVIEWS_SOURCE, kind: "duration", value: REKEYING_AT, unit: "hour" }, { source: INTERVIEWS_SOURCE, kind: "points", value: SHARE_POINTS });
+  if (interviews) dataset.figures.push(...interviewViewFigures(interviews).map((value) => ({ source: INTERVIEWS_SOURCE, kind: "number" as const, value })), { source: INTERVIEWS_SOURCE, kind: "duration", value: REKEYING_AT, unit: "hour" }, { source: INTERVIEWS_SOURCE, kind: "points", value: SHARE_POINTS }, { source: INTERVIEWS_SOURCE, kind: "percent", value: Math.round(COUNT_WITHIN_SHARE * 100) });
   // What fixing it is worth against what they pay, as the investment page says it.
   if (investment.annualCost.status === "measured" && investment.annualCost.value > 0 && value.total.expected > 0) {
     dataset.figures.push({ source: VALUE_TOTAL, kind: "ratio", value: Math.round((value.total.expected / investment.annualCost.value) * 10) / 10 });

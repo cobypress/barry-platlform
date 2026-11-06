@@ -1,7 +1,7 @@
 import { issuesOf } from "../narrative/select.ts";
 import { percent } from "../render/format.ts";
 import type { Finding, Metric } from "../schemas/index.ts";
-import { CONCERN_AT, REKEYING_AT, REKEYING_RULES, hours } from "../survey/pairings.ts";
+import { CONCERN_AT, REKEYING_AT, hours, isRekeyingCheck } from "../survey/pairings.ts";
 import { INTERVIEW_ROLES, questionFor, readInterviewAnswers, roleLabel, type Interview, type InterviewRole } from "./questions.ts";
 
 // What people told us in interviews, set against what the data shows. Code
@@ -18,8 +18,8 @@ export const READING_LABELS: Record<Reading, string> = { agrees: "Agrees", disag
 
 /** Within this many points, a share someone gave us agrees with the one we measured. */
 export const SHARE_WITHIN_POINTS = 10;
-/** Within this share of the measured figure, a count or a number of days agrees. */
-export const COUNT_WITHIN_SHARE = 0.25;
+/** Within this share of the measured figure, a count or a number of days agrees: "about 60 days" against 77 doesn't (DECISIONS.md 406). */
+export const COUNT_WITHIN_SHARE = 0.15;
 /** A count this close always agrees, however small: "6 systems" against 8 isn't a disagreement. */
 export const COUNT_WITHIN_AT_LEAST = 2;
 /** A theme reaches the executive summary when at least this many people's answers read the same way, and none the other. */
@@ -96,7 +96,7 @@ const MEASURES: Record<string, Measure> = {
   rekeying: {
     kind: "issues",
     topic: "Typing data in again",
-    issues: (f) => REKEYING_RULES.has(f.ruleId),
+    issues: isRekeyingCheck,
     felt: (v) => v >= REKEYING_AT,
     said: (who, v) => `${who} told us about ${hours(v)} a week go on typing data in again or keeping a spreadsheet alongside Salesforce.`,
   },

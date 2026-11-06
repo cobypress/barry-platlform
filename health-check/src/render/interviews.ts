@@ -25,7 +25,7 @@ export function interviewStats(r: Render, view: InterviewView): string {
 }
 
 function table(r: Render, rows: InterviewTheme[]): string {
-  return `<table class="grid"><thead><tr><th style="width:15%">Role</th><th style="width:31%">They told us</th><th style="width:34%">What the data shows</th><th>Together</th></tr></thead><tbody>${rows
+  return `<table class="grid"><thead><tr><th style="width:13%">Role</th><th style="width:31%">They told us</th><th style="width:36%">What the data shows</th><th>Together</th></tr></thead><tbody>${rows
     .map((t) => {
       const top = t.issues.slice(0, 1).map((f) => `<br><span style="font-size:13.5px;color:var(--muted)">${r.t(f.title)}${r.ref(f.id)}</span>`).join("");
       const ref = t.metricId ? r.ref(t.metricId) : "";

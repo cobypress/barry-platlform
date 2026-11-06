@@ -58,12 +58,15 @@ describe("what people told us, against the data", () => {
     assert.equal(one(2, [issue("data_quality", "dq.x", "not_measurable")]).reading, "cant_tell", "nothing measurable");
   });
 
-  test(`a share agrees within ${SHARE_WITHIN_POINTS} points, a count or days within a quarter, and says which way it's off`, () => {
+  test(`a share agrees within ${SHARE_WITHIN_POINTS} points, a count or days within 15%, and says which way it's off (DECISIONS.md 406)`, () => {
     const one = (answers: Record<string, number>, metrics: Metric[]) => buildThemes([interview({ answers })], [], metrics)[0]!;
     assert.equal(one({ win_rate: 40 }, [metric("historic.win_rate", 47)]).reading, "agrees");
     const high = one({ win_rate: 60 }, [metric("historic.win_rate", 47)]);
     assert.deepEqual([high.reading, high.why], ["disagrees", "Higher than the data shows."]);
-    assert.equal(one({ sales_cycle: 60 }, [metric("historic.sales_cycle_won", 77)]).reading, "agrees");
+    // "About 60 days" against 77 is 22% off, which a sales director would call a miss.
+    assert.deepEqual([one({ sales_cycle: 60 }, [metric("historic.sales_cycle_won", 77)]).reading, one({ sales_cycle: 60 }, [metric("historic.sales_cycle_won", 77)]).why], ["disagrees", "Lower than the data shows."]);
+    assert.equal(one({ sales_cycle: 66 }, [metric("historic.sales_cycle_won", 77)]).reading, "agrees", "11 days is within 15% of 77");
+    assert.equal(one({ sales_cycle: 65 }, [metric("historic.sales_cycle_won", 77)]).reading, "disagrees", "12 days isn't");
     assert.equal(one({ sales_cycle: 30 }, [metric("historic.sales_cycle_won", 77)]).why, "Lower than the data shows.");
     assert.equal(one({ win_rate: 40 }, []).reading, "cant_tell", "nothing measured to set it against");
     const admin = buildThemes([interview({ role: "admin", answers: { integrations: 6 } })], [], [metric("documented.integrations", 8)])[0]!;
