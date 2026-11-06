@@ -2,9 +2,10 @@ import { notSized, pct, plural, segmentRate, type Rule, type RuleContext, type R
 import { orgExtractor } from "../../extract/configuration.ts";
 import { escalationRulesExtractor, serviceActivityExtractor, serviceCasesExtractor, serviceSetupExtractor, type ArticleRow, type EscalationRule, type ServiceSetup } from "../../extract/service.ts";
 import { daysBefore, monthsBefore } from "../../extract/types.ts";
-import { usersExtractor } from "../../extract/users.ts";
+import { loginsExtractor, usersExtractor } from "../../extract/users.ts";
 import { costPerSeat, isPriced } from "../../money/seat-cost.ts";
 import type { Evidence, SegmentCheck, Value } from "../../schemas/index.ts";
+import { lapse } from "../logins.ts";
 import type { DomainModule } from "../types.ts";
 import { caseQueues, limitsOf, MIN_SEGMENT, originOf, priorityOf } from "./shared.ts";
 
@@ -207,20 +208,22 @@ const omniRouting: Rule = {
 
 const agentLicences: Rule = {
   id: "svc.agent-licences",
-  version: 1,
+  version: 2,
   domain: DOMAIN,
   title: "Service Cloud licences are used",
   evaluate(ctx) {
     const { supportUsers } = setupOf(ctx);
     if (supportUsers.status !== "ok") return nm(`Service Cloud users couldn't be read: ${supportUsers.reason}`, unavailableEvidence(ctx, supportUsers.source));
     const dormantDays = ctx.calibration.dormantDays;
-    const cutoff = daysBefore(ctx.now, dormantDays).getTime();
+    const cutoff = daysBefore(ctx.now, dormantDays);
     const licenceOf = (u: (typeof supportUsers.data)[number]) => u.Profile?.UserLicense?.Name ?? "Unknown";
     // Integration licences never log in by design.
     const users = supportUsers.data.filter((u) => !/\bintegration\b/i.test(licenceOf(u)));
     const evidence = [ctx.ev(supportUsers.source, { count: users.length, exclusions: ["Users on integration licences"] })];
     if (users.length === 0) return { outcome: "pass", summary: "No active user holds a Service Cloud licence.", evidence, segmentExemptReason: "There are no Service Cloud users" };
-    const dormant = users.filter((u) => !u.LastLoginDate || Date.parse(u.LastLoginDate) < cutoff);
+    // Judged as the dormant-user count judges them, login log and all, so the two agree about each person (DECISIONS.md 394).
+    const logins = ctx.data(loginsExtractor);
+    const dormant = users.filter((u) => lapse(u, logins, cutoff) !== null);
     // In a full check, someone who logs in but works no case also holds a seat for nothing.
     let idle: string[] = [];
     if (ctx.scope !== "essentials") {
@@ -442,7 +445,7 @@ export const serviceSetupModule: DomainModule = {
   id: DOMAIN,
   cloud: "service",
   label: "Service set-up",
-  extractors: [orgExtractor, usersExtractor, serviceSetupExtractor, escalationRulesExtractor, serviceCasesExtractor, serviceActivityExtractor],
+  extractors: [orgExtractor, usersExtractor, loginsExtractor, serviceSetupExtractor, escalationRulesExtractor, serviceCasesExtractor, serviceActivityExtractor],
   rules: [escalation, escalationTargets, queueSprawl, omniRouting, agentLicences, knowledgeUse, knowledgeCurrent, macros, caseRoutingOverlap],
 };
 
