@@ -36,18 +36,18 @@ Branch `hc/review-reading`, from health-check `70b95d8`. Decisions 391 to 393. E
 
 The synthetic and generated fingerprints are unchanged by all three, and all 2,097 tests pass.
 
-## Plausible, not fixed
+## Plausible, and what became of them
 
-- **The data-quality checks' "open pipeline today" figures aren't marked "At risk".**
-  - Five checks value affected deals as exposure, and their assumptions say so. Their period matches none of the value model's, so they're left out of the total, which is right.
-  - But on a card they read "£X open pipeline today", while every other exposure figure reads "At risk: £X …" (render/html.ts `valueText`).
-  - That's wording, not a wrong figure, so I left it for B's area.
+- **The data-quality checks' "open pipeline today" figures aren't marked "At risk".** Mistaken, as Brief BB found: the helper that values affected deals as exposure lives in data quality, but no data-quality check uses it. The five checks that give a figure for open pipeline today are all exposure rules and already read "At risk". A test now holds that (decision 395).
 - **Service Cloud's agent-licence check counts dormant users on the last-login date alone.**
   - `svc.agent-licences` doesn't use the login log as 361 does. A Service Cloud user the log clears is left out of the dormant-user count, but still counted as a seat held for nobody's casework.
   - It's a separate check with its own licence price, so it's not double money, but the two can disagree about one person.
+  - Fixed in Brief BB (decision 394): both checks now judge a user through one helper.
+  - One difference is left: a Service Cloud user created inside the dormant period who hasn't logged in is counted by the licence check, but not by the dormant-user count, which leaves new users out.
 - **The money table's "how it was reached" line says "if all came back" for seats and hours too.**
   - It's true as arithmetic: the figure before the share is counted.
   - But "came back" reads oddly for licences and time. That's wording, in B's area.
+  - Fixed in Brief BB (decision 395): each kind of money has its own words.
 
 ## Checked and clean
 
