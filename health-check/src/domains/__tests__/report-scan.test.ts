@@ -99,13 +99,13 @@ describe("the recommendation (rule 3)", () => {
   });
 
   test("with a whole scan, the clean field is recommended for removal", () => {
-    const account = fieldFindings(noPrivate()).find((f) => f.subjects.some((s) => s.label === "Account.Old_Sic_Code__c"))!;
+    const account = fieldFindings(noPrivate()).find((f) => f.subjects.some((s) => s.label === "Old Sic Code on Account"))!;
     assert.equal(account.recommendationType, "remove");
     assert.ok(account.guards.every((g) => g.status === "passed"));
   });
 
   test("a mixed object stays investigate, with every field blocked by the one that failed", () => {
-    const opportunity = fieldFindings(noPrivate()).find((f) => f.subjects.some((s) => s.label === "Opportunity.Old_Region__c"))!;
+    const opportunity = fieldFindings(noPrivate()).find((f) => f.subjects.some((s) => s.label === "Old Region on Opportunity"))!;
     assert.equal(opportunity.recommendationType, "investigate");
   });
 

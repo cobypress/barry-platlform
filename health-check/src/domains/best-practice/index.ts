@@ -5,6 +5,8 @@ import { looksShared } from "../../guards/user-guards.ts";
 import { notSized, plural, segmentRate, type IssueResult, type Rule, type RuleResult } from "../../engine/rule.ts";
 
 import type { DomainModule } from "../types.ts";
+import { labelsOf } from "../labels.ts";
+import { labelsExtractor } from "../../extract/labels.ts";
 
 // Rules that compare the org with something Salesforce itself says. The checks
 // in other domains are mostly ours: these quote the position, name where it came
@@ -86,7 +88,7 @@ export const SKEW_PRACTICE: Practice = {
 
 const ownershipSkew: Rule = {
   id: "bp.ownership-skew",
-  version: 1,
+  version: 2,
   records: true,
   domain: "best_practice",
   title: "One owner holding too many records",
@@ -108,7 +110,7 @@ const ownershipSkew: Rule = {
     return {
       outcome: "issue",
       title: "A few owners hold enough records to slow sharing changes",
-      summary: `${plural(skewed.length, "owner and object pair")} above ${OWNER_SKEW_RECORDS.toLocaleString("en-GB")} records. The largest is ${skewed[0]!.records.toLocaleString("en-GB")} ${skewed[0]!.object} records. ${noted(SKEW_PRACTICE)}`,
+      summary: `${plural(skewed.length, "owner and object pair")} above ${OWNER_SKEW_RECORDS.toLocaleString("en-GB")} records. The largest is ${skewed[0]!.records.toLocaleString("en-GB")} ${labelsOf(ctx).object(skewed[0]!.object)} records. ${noted(SKEW_PRACTICE)}`,
       recommendation: "Spread these records across more owners. If one owner has to stay, keep it out of the role hierarchy's lower levels and out of public groups used in sharing rules.",
       recommendationType: "change",
       severity: "medium",
@@ -119,7 +121,7 @@ const ownershipSkew: Rule = {
       owner: "Salesforce admin",
       dependencies: ["Check integrations that set this owner before moving records"],
       segmentsChecked: segments,
-      subjects: skewed.map((s) => ({ type: "owner", label: `${labelOf(s.owner)}: ${s.object}` })),
+      subjects: skewed.map((s) => ({ type: "owner", label: `${labelOf(s.owner)}: ${labelsOf(ctx).object(s.object)}` })),
       facts: { pairs: skewed.length, largest: skewed[0]!.records, limit: OWNER_SKEW_RECORDS },
     };
   },
@@ -219,6 +221,6 @@ export const bestPracticeModule: DomainModule = {
   id: "best_practice",
   cloud: "sales",
   label: "Best practice",
-  extractors: [usersExtractor, recordCountsExtractor, ownershipExtractor, metadataExtractor, scheduledJobsExtractor],
+  extractors: [labelsExtractor, usersExtractor, recordCountsExtractor, ownershipExtractor, metadataExtractor, scheduledJobsExtractor],
   rules: [usersWithoutRole, ownershipSkew, afterSaveSameRecord, jobsOnInactiveOwners],
 };

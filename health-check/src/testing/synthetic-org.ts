@@ -580,9 +580,20 @@ export const CAMPAIGNS = [
   { Id: sfId("701", 3), Type: "Email", ActualCost: null },
 ];
 
+/**
+ * A label as an org would show it, which is never the API name: "Old Sic Code" for
+ * Old_Sic_Code__c, "Discount" for SBQQ__Discount__c, "Lead Source" for LeadSource.
+ * Customer text uses these (DECISIONS.md 411), so a test can tell the two apart.
+ */
+export function apiLabel(name: string): string {
+  const bare = name.replace(/^[A-Za-z0-9]+__(?=.+__c$)/, "").replace(/__c$/, "");
+  if (bare !== name) return bare.replace(/_/g, " ");
+  return name.replace(/Id$/, " ID").replace(/([a-z])([A-Z])/g, "$1 $2").trim();
+}
+
 const standardField = (name: string, type = "string", extra: Record<string, unknown> = {}) => ({
   name,
-  label: name,
+  label: apiLabel(name),
   type,
   custom: false,
   calculated: false,
@@ -1436,7 +1447,7 @@ export const CPQ_PRODUCT_RULES = [
   { Id: sfId("a0S", 5), Name: "Old Bundle Check", SBQQ__Active__c: false, SBQQ__Type__c: "Validation" },
 ];
 
-const describedField = (name: string, type: string, custom = true) => ({ name, label: name, type, custom });
+const describedField = (name: string, type: string, custom = true) => ({ name, label: apiLabel(name), type, custom });
 // Trap: Warranty_Term__c is a number on the quote line and text on the opportunity product, so it won't copy.
 export const CPQ_DESCRIBES: Record<string, { fields: unknown[] }> = {
   SBQQ__Quote__c: { fields: ["Id", "Name", "OwnerId", "SBQQ__Primary__c", "SBQQ__Opportunity2__c", "SBQQ__ListAmount__c", "SBQQ__NetAmount__c", "SBQQ__Ordered__c", "CreatedDate"].map((n) => describedField(n, "string", n.endsWith("__c"))) },

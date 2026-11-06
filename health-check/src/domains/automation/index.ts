@@ -3,6 +3,8 @@ import { customObjectsExtractor } from "../../extract/configuration.ts";
 import { notSized, plural, type Rule, type RuleResult } from "../../engine/rule.ts";
 import { MIGRATE_TO_FLOW_NOTE, END_OF_SUPPORT } from "./notes.ts";
 import { apexGap, groupCount, metadataOr, UNNAMED, unnamedNote } from "./shared.ts";
+import { labelsOf } from "../labels.ts";
+import { labelsExtractor } from "../../extract/labels.ts";
 import type { DomainModule } from "../types.ts";
 import { objectResolver } from "../object-names.ts";
 
@@ -15,7 +17,7 @@ const UNDOCUMENTED_LIMIT = 50;
 
 const legacyWorkflowRules: Rule = {
   id: "aut.legacy-workflow-rules",
-  version: 2,
+  version: 3,
   domain: "automation",
   title: "Workflow Rules still active",
   evaluate(ctx): RuleResult | RuleResult[] {
@@ -40,7 +42,8 @@ const legacyWorkflowRules: Rule = {
       owner: "Salesforce admin",
       dependencies: ["Test each migrated rule in a sandbox before switching it off"],
       segmentsChecked: segments,
-      subjects: active.map((r) => ({ type: "workflow rule", label: `${r.object}.${r.name}` })),
+      // The rule's own name, and its object's label (DECISIONS.md 411).
+      subjects: active.map((r) => ({ type: "workflow rule", label: `${r.name} (${labelsOf(ctx).object(r.object)})` })),
       facts: { activeRules: active.length, objects },
     };
   },
@@ -80,7 +83,7 @@ const legacyProcessBuilder: Rule = {
 
 const mixedAutomation: Rule = {
   id: "aut.mixed-automation-on-object",
-  version: 3,
+  version: 4,
   domain: "automation",
   title: "Several automation tools acting on the same object",
   evaluate(ctx): RuleResult | RuleResult[] {
@@ -119,7 +122,7 @@ const mixedAutomation: Rule = {
     return {
       outcome: "issue",
       title: "Automation on some objects is split across several tools",
-      summary: `${mixed.map(([o, set]) => `${o} runs ${[...set].sort().join(", ")}`).join("; ")}. Salesforce runs these at different points when a record saves, so the outcome can be hard to predict.${note}`,
+      summary: `${mixed.map(([o, set]) => `${labelsOf(ctx).object(o)} runs ${[...set].sort().join(", ")}`).join("; ")}. Salesforce runs these at different points when a record saves, so the outcome can be hard to predict.${note}`,
       recommendation: "Decide for each object what belongs in Apex and what in Flow, then retire the older tools into that split.",
       recommendationType: "change",
       severity: "medium",
@@ -129,7 +132,7 @@ const mixedAutomation: Rule = {
       effort: { size: "L" },
       owner: "Salesforce developer",
       segmentsChecked: segments,
-      subjects: mixed.map(([o]) => ({ type: "object", label: o })),
+      subjects: mixed.map(([o]) => ({ type: "object", label: labelsOf(ctx).object(o) })),
       facts: { objects: mixed.length, unnamedTriggers: unnamed },
     };
   },
@@ -262,6 +265,6 @@ export const automationModule: DomainModule = {
   id: "automation",
   cloud: "sales",
   label: "Automation and code",
-  extractors: [metadataExtractor, apexExtractor, scheduledJobsExtractor, customObjectsExtractor],
+  extractors: [labelsExtractor, metadataExtractor, apexExtractor, scheduledJobsExtractor, customObjectsExtractor],
   rules: [legacyWorkflowRules, legacyProcessBuilder, mixedAutomation, hardcodedIds, missingFaultPaths, undocumentedAutomation],
 };
