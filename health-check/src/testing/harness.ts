@@ -1,4 +1,5 @@
-import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
+import { mkdtempSync, readdirSync } from "node:fs";
+import { readCheckpoint } from "../engine/checkpoint.ts";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SALES_CLOUD_MODULES } from "../domains/index.ts";
@@ -31,7 +32,7 @@ export function runFromRecording(overrides: Partial<RunOptions> = {}): Promise<R
 /** Every checkpoint from a run, ready to be changed and analysed again without any network. */
 export function loadExtracts(dir: string): Map<string, unknown> {
   const folder = join(dir, "checkpoints");
-  const entries = readdirSync(folder).filter((f) => f.endsWith(".json")).map((f) => [f.replace(/\.json$/, ""), JSON.parse(readFileSync(join(folder, f), "utf8"))] as const);
+  const entries = readdirSync(folder).filter((f) => f.endsWith(".json")).map((f) => [f.replace(/\.json$/, ""), readCheckpoint(join(folder, f))] as const);
   return new Map(entries);
 }
 

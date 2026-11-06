@@ -140,28 +140,35 @@ function mark(step: string): void {
 }
 
 let t = performance.now();
-const result = await runHealthCheck({
-  provider: syntheticProvider,
-  calibration: loadCalibration(),
-  answers: loadAnswers(),
-  modules: ALL_MODULES,
-  outDir,
-  now: new Date(AS_OF),
-  transport,
-  log: (line) => {
-    const done = /^\s+([\w-]+): (done|failed)/.exec(line);
-    if (done) mark(done[1]!);
-  },
-});
+/** The run job, as the worker runs it. Only counts come out, so its output can go before rendering, which a worker does as a job of its own. */
+async function runJob() {
+  const result = await runHealthCheck({
+    provider: syntheticProvider,
+    calibration: loadCalibration(),
+    answers: loadAnswers(),
+    modules: ALL_MODULES,
+    outDir: outDir!,
+    now: new Date(AS_OF),
+    transport,
+    log: (line) => {
+      const done = /^\s+([\w-]+): (done|failed)/.exec(line);
+      if (done) mark(done[1]!);
+    },
+  });
+  const output = result.output!;
+  return {
+    dir: result.dir,
+    findings: { issue: output.findings.filter((f) => f.status === "issue").length, passed: output.findings.filter((f) => f.status === "passed").length, notMeasurable: output.findings.filter((f) => f.status === "not_measurable").length },
+    budget: result.run.budget,
+    steps: result.run.steps.map((s) => ({ id: s.id, status: s.status, calls: s.calls, error: s.error })),
+  };
+}
+const result = await runJob();
 mark("analysis and writing");
 const runMs = performance.now() - t;
 const simulatorRssMb = await transport.memory();
 transport.child.kill();
-
-const output = result.output!;
-const findings = { issue: output.findings.filter((f) => f.status === "issue").length, passed: output.findings.filter((f) => f.status === "passed").length, notMeasurable: output.findings.filter((f) => f.status === "not_measurable").length };
-const budget = result.run.budget;
-const steps = result.run.steps.map((s) => ({ id: s.id, status: s.status, calls: s.calls, error: s.error }));
+const { findings, budget, steps } = result;
 
 let render: Record<string, unknown> | null = null;
 if (!args.includes("--no-render")) {
