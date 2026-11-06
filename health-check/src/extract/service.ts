@@ -115,7 +115,7 @@ const CLOSED_CASE: FieldSpec = { object: "Case", required: ["Id", "CreatedDate",
 /** Case volumes, as counts by month in the org's time zone, and the cases open now or closed in the last year. */
 export const serviceCasesExtractor: Extractor<ServiceCases> = {
   id: "service-cases",
-  version: 1,
+  version: 2,
   records: true,
   async run(ctx) {
     const after = since(ctx);
@@ -162,7 +162,7 @@ async function countOf(ctx: ExtractContext, soql: string): Promise<Sourced<numbe
 /** What happened to the year's cases: status changes, milestones, first replies, routing, articles. */
 export const serviceActivityExtractor: Extractor<ServiceActivity> = {
   id: "service-activity",
-  version: 1,
+  version: 2,
   records: true,
   async run(ctx) {
     const after = since(ctx);

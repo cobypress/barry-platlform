@@ -39,6 +39,8 @@ class Broker {
         void worker.processor(job).then(
           () => {
             worker.active--;
+            // As BullMQ: removeOnComplete true removes the job, and its id, at once. An age keeps it for that long.
+            if (job.opts.removeOnComplete === true) this.known.delete(`${job.queue}/${job.id}`);
             this.pump();
           },
           () => {
@@ -200,6 +202,20 @@ describe("the heavy gate", () => {
     h.release.get("once")!();
     await settle();
     assert.deepEqual(events, ["run once start", "run once done"]);
+  });
+
+  test("a re-delivery after the heavy job finished finds it, and doesn't run it twice (DECISIONS.md 398)", async () => {
+    // A crash between handing the job over and marking the console's job done: BullMQ delivers the
+    // console's job again once its lock lapses. By then the run may have finished. With the console's
+    // removeOnComplete: true copied over, its id was gone and the run went again.
+    const { h, send, events } = setup();
+    send(CONSOLE.run("done-once"));
+    await settle();
+    h.release.get("done-once")!();
+    await settle();
+    send(CONSOLE.run("done-once"));
+    await settle();
+    assert.deepEqual(events, ["run done-once start", "run done-once done"]);
   });
 
   test("the heavy slot's lock outlasts a long analysis, so a healthy run isn't taken for a dead one, and closing stops both workers", async () => {
