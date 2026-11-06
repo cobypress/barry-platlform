@@ -1,6 +1,6 @@
 import type { BuiltReport } from "../narrative/sections.ts";
 import { INVESTMENT } from "../money/investment.ts";
-import { HEADLINE_KINDS, KIND_LABELS } from "../value/model.ts";
+import { HEADLINE_KINDS, KIND_LABELS, type ValueModel } from "../value/model.ts";
 import { compactMoney } from "./format.ts";
 import { chartSlot, type Render } from "./html.ts";
 import { HALF_WIDTH, waterfallChart } from "./charts.ts";
@@ -31,6 +31,11 @@ const SLIDE_GROUPS = 7;
 /** The value model's basis for a figure measured over the analysis window. */
 const OVER_WINDOW_BASIS = /divided by/;
 
+/** The lines past the first `from`, added up: what the money table's last row holds when it can't name them all. */
+export function restOf(lines: ValueModel["groups"], from: number, k: "low" | "expected" | "high"): number {
+  return Math.round(lines.slice(from).reduce((sum, g) => sum + g.counted[k], 0) * 100) / 100;
+}
+
 /** Empty when nothing could be given a figure in money: the page is left out rather than showing a nought. A slide sets it in two columns. */
 export function moneyPage(r: Render, report: BuiltReport, format: "page" | "slide" = "page"): string {
   const eyebrow = "What it's worth";
@@ -59,7 +64,8 @@ export function moneyPage(r: Render, report: BuiltReport, format: "page" | "slid
   const label = (g: (typeof all)[number]) => `${r.t(g.label)}${r.ref(valueItemId(g.id))}${format === "page" ? `<span class="basis">${r.t(basis(g))}</span>` : ""}`;
   const rows = [
     ...groups.map((g) => `<tr><td>${label(g)}</td><td class="num">${m(g.counted.expected)}</td><td class="num">${m(g.counted.low)} to ${m(g.counted.high)}</td></tr>`),
-    ...(rest ? [`<tr><td colspan="3">${r.t(`And ${rest} smaller ${rest === 1 ? "line" : "lines"}, in the raw notes.`)}${r.ref(valueItemId(all[groups.length]!.id))}</td></tr>`] : []),
+    // With their amount, so the rows add up to the total beneath them (night 3 review).
+    ...(rest ? [`<tr><td>${r.t(`And ${rest} smaller ${rest === 1 ? "line" : "lines"}, in the raw notes.`)}${r.ref(valueItemId(all[groups.length]!.id))}</td><td class="num">${m(restOf(all, groups.length, "expected"))}</td><td class="num">${m(restOf(all, groups.length, "low"))} to ${m(restOf(all, groups.length, "high"))}</td></tr>`] : []),
     `<tr class="total"><td>${r.t("Total, each counted once")}</td><td class="num">${m(total.expected)}</td><td class="num">${m(total.low)} to ${m(total.high)}</td></tr>`,
   ].join("");
   const exposure = value.groups.filter((g) => g.kind === "exposure").sort((a, b) => b.counted.annual - a.counted.annual)[0];
