@@ -215,6 +215,55 @@ What the gate doesn't change:
 - A second run waits for the first. A queue of three 500-user runs takes about an hour and a half to clear.
 - A documents make waiting behind a run waits too. Among the heavy jobs waiting, documents go first, by the console's own priority.
 
+## Reading activity and leads in full (Brief AX)
+
+Branch `hc/full-reads`, from health-check `01a1a76`. Decisions 381 and 382.
+
+The capped record reads now take up to 1,000,000 rows, not 200,000. That covers activity, leads with their status changes and campaign members, won accounts and prior wins. Measured with `npm run scale`, so under the 1,536 MB heap cap, with every document rendered.
+
+| | Before (200,000) | After (1,000,000) |
+|---|---:|---:|
+| API calls | 1,236 | 1,596 |
+| of which activity | 235 | 544 |
+| of which leads | 196 | 248 |
+| Network minutes | 15 | 19 |
+| Compute | 31 s | 41 s |
+| Resident peak | 1,590 MB | 1,771 MB |
+| Heap peak, sampled | 1,002 MB | 918 MB |
+| Findings | 82 issues, 30 passed, 17 not measurable | 85 issues, 38 passed, 6 not measurable |
+
+The 11 checks that were not measurable only for want of rows are all measured now.
+
+| Check | Now | What it says |
+|---|---|---|
+| act.deals-without-activity | passed | 1,689 of 66,335 won and lost deals have no activity (2.5%) |
+| act.event-link-collapse | passed | 59.9% of events linked before, and 60.4% in the last 3 months |
+| act.rep-activity-spread | passed | No rep logs under 25% of the typical 4.01 activities per open deal |
+| act.won-vs-lost-activity | passed | A median of 4 logged activities on won deals, against 3 on lost |
+| act.unlinked-tasks | passed | 0 of 700,000 tasks are linked to nothing (the generated org links every task) |
+| lead.conversion-by-source | passed | 24.9% convert, and no source with 20 or more leads is under half that |
+| lead.source-return | passed | Every source with 20 or more leads has a win |
+| lead.campaign-return | passed | Every campaign type with a cost returned more than it cost |
+| lead.no-first-response | issue | 95,197 of 147,191 leads have no logged response after 7 days (64.7%) |
+| lead.response-time | issue | The median first response is 43 hours, against a working target of 24 |
+| lead.converted-no-opportunity | issue | 29,780 of 74,575 converted leads have no opportunity (39.9%) |
+
+Two findings keep their status and gain a value. dq.stale-leads and mkt.unworked-handovers were "not sized" before, because the org's return per lead couldn't be measured from part of its leads. Now they're sized at the org's own average won per lead, £1,418, measured on all 300,000 leads. The 6 still not measurable are:
+- dashboard use and forecast accuracy, which no data here can give;
+- Commit at risk and early-stage Commit, held by the forecast cap of 20,000;
+- the milestone check, held by the cases cap of 50,000;
+- unowned prospects, held by the synced-lead cap of 20,000.
+
+The scale org's fingerprint moves, as it should:
+- findings, metrics, scores, raw notes, sections and layout change;
+- the action lists don't.
+
+The synthetic org's and the small generated org's fingerprints are unchanged.
+
+**The full million.** An org scaled to 1.4 times has 700 users, 980,000 tasks, and 420,000 events and leads. It peaked at 1,981 MB resident, with 1,299 MB of the 1,536 MB heap, in 2,118 calls and 26 minutes of calls. That's the largest that fits under 2 GB with the worker's settings, and the margin is thin. An org with more than a million tasks is read as a part, and says so. The next step, if bigger orgs must be read in full, is the work deferred from Brief AS: trimming rows to the fields rules read, and streaming into running totals.
+
+**Already failing on `01a1a76`, not fixed here.** The full report's layout check fails on the scale org. A slide shows "£1.99m", the quarter's remaining quota from `cur.coverage`, and the number check holds that figure as a plain number, not money. It came with the "coverage isn't money" change, so it's in render and narrative, which are session B's.
+
 ## Reproducing
 
 ```bash
