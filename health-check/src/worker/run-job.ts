@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ALL_MODULES, knownModuleIds, modulesForRun } from "../domains/index.ts";
 import { runHealthCheck } from "../engine/run.ts";
@@ -6,7 +6,8 @@ import { applyNarrative, type Rejection } from "../narrative/apply.ts";
 import type { NarrativeClient } from "../narrative/client.ts";
 import { buildReport, type BuiltReport, type ReportInput } from "../narrative/sections.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
-import { loadRun, OUTPUT_FILES, SURVEY_FILE } from "../render/render-run.ts";
+import { INTERVIEWS_FILE, loadRun, OUTPUT_FILES, SURVEY_FILE } from "../render/render-run.ts";
+import { INTERVIEW_VERSION } from "../interviews/questions.ts";
 import { OAuthConnectionProvider, revokeConnection } from "../salesforce/oauth-provider.ts";
 import { OAuthError } from "../salesforce/oauth.ts";
 import { buildScanResult } from "../scan/result.ts";
@@ -171,6 +172,9 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
     // The survey as it stands now is the one the sections are built and reviewed
     // from, so the documents print what was approved. Comments never reach the folder.
     if (input.survey) writeFileSync(join(dir, SURVEY_FILE), `${JSON.stringify(withoutComments(input.survey), null, 2)}\n`, { mode: 0o600 });
+    // The interviews as they stand now, likewise. One deleted since an earlier delivery goes from the folder too.
+    if (input.interviews?.length) writeFileSync(join(dir, INTERVIEWS_FILE), `${JSON.stringify({ version: INTERVIEW_VERSION, interviews: input.interviews }, null, 2)}\n`, { mode: 0o600 });
+    else rmSync(join(dir, INTERVIEWS_FILE), { force: true });
     const { input: reportInput, pseudonyms } = loadRun(dir);
     // A scan and a pulse are never reviewed, so Claude has nothing to draft for either.
     const unreviewed = input.run.product === "scan" || input.run.product === "pulse";

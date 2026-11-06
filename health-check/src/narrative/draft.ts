@@ -21,6 +21,8 @@ export type SectionBrief = {
   model?: string;
   /** The engine has only a placeholder for this section, so an accepted draft means it no longer needs a person's input. */
   fillsPlaceholder?: boolean;
+  /** People appear by role only: a draft that keeps a person's token is refused (DECISIONS.md 184). */
+  rolesOnly?: boolean;
 };
 
 export type DraftResult =
@@ -38,7 +40,9 @@ function styleProblems(text: string): string[] {
   return /\p{Extended_Pictographic}/u.test(text.replace(/[©®™]/g, "")) ? ["Remove the emoji."] : [];
 }
 
-function review(text: string, set: FigureSet, allowed: Set<string>, pseudonyms: Pseudonymiser): { paragraphs: string[]; problems: string[] } {
+const PERSON_TOKEN = /\[\[(?:user|person|contact):[A-Z]\d{4}\]\]/;
+
+function review(text: string, set: FigureSet, allowed: Set<string>, pseudonyms: Pseudonymiser, rolesOnly = false): { paragraphs: string[]; problems: string[] } {
   let parsed: z.infer<typeof Draft>;
   try {
     parsed = Draft.parse(JSON.parse(text));
@@ -54,6 +58,7 @@ function review(text: string, set: FigureSet, allowed: Set<string>, pseudonyms: 
     for (const miss of outcome.unmatched) problems.push(`"${miss.raw}": ${miss.reason}.`);
     problems.push(...styleProblems(paragraph.text));
     if (holdsNameOrSecret(paragraph.text, pseudonyms)) problems.push("A paragraph holds a person's name or a secret.");
+    if (rolesOnly && PERSON_TOKEN.test(paragraph.text)) problems.push("Refer to people by their role, not by a token such as [[user:U0001]].");
   }
   return { paragraphs: parsed.paragraphs.map((p) => p.text), problems };
 }
@@ -87,7 +92,7 @@ export async function draftSection(input: { brief: SectionBrief; dataset: Figure
     if (reply.stopReason === "refusal") return { status: "rejected", reasons: ["Claude declined to write this section."], attempts: attempt };
     if (reply.stopReason === "max_tokens") return { status: "rejected", reasons: ["The reply was cut off, so it can't be trusted."], attempts: attempt };
 
-    const { paragraphs, problems } = review(reply.text, dataset, allowed, pseudonyms);
+    const { paragraphs, problems } = review(reply.text, dataset, allowed, pseudonyms, brief.rolesOnly);
     if (problems.length === 0) return { status: "accepted", body: paragraphs.join("\n\n"), model: reply.model, attempts: attempt };
     reasons = problems;
     feedback = problems;

@@ -50,7 +50,8 @@ const valueOf = (metrics: Metric[], id: string): number | null => {
   return m?.status === "measured" ? m.value : null;
 };
 
-const REKEYING_RULES = new Set(["dq.duplicate-rules-missing", "sec.personal-integration-accounts", "sec.self-authorised-connected-apps"]);
+/** The checks that bear on typing data in again. Interviews read them too. */
+export const REKEYING_RULES = new Set(["dq.duplicate-rules-missing", "sec.personal-integration-accounts", "sec.self-authorised-connected-apps"]);
 
 const SPECS: Spec[] = [
   {

@@ -175,6 +175,9 @@ export function executiveHtml(report: BuiltReport, pseudonyms: Pseudonymiser): s
   const notMeasurable = team.filter((f) => f.status === "not_measurable").length;
   const setupReview = isSetupReview(run);
 
+  // Only the strong themes, and only when there are some (DECISIONS.md 185).
+  const peopleSaid = built.sections.some((s) => s.key === "interviews") ? currentBody(built, "interviews") : "";
+
   const pages: string[] = [];
   const add = (html: string, classes = ""): void => {
     pages.push(`<section class="page ${classes}" data-page="${pages.length + 1}">${html}${classes.includes("cover") ? "" : footer(r, pages.length + 1)}</section>`);
@@ -187,7 +190,8 @@ export function executiveHtml(report: BuiltReport, pseudonyms: Pseudonymiser): s
     <h3 class="sub">What matters most</h3>
     <table class="grid"><thead><tr><th>Issue</th><th style="width:34%">Impact</th></tr></thead><tbody>${top.map((f) => `<tr><td>${r.t(f.title)}${r.ref(f.id)}</td><td>${valueText(r, f).amount}</td></tr>`).join("")}</tbody></table>
     ${report.survey ? `<h3 class="sub">What your team says${report.survey.shown ? r.ref(SURVEY.responses) : ""}</h3>${paragraphs(r, currentBody(built, "team_survey"))}` : ""}
-    <p style="margin-top:18px">${report.survey?.shown ? "Every figure here comes from your Salesforce org, or from your team's answers to our survey." : "Every figure here comes from your Salesforce org."} Where we couldn't measure something, we say so rather than estimate it.</p>`);
+    ${peopleSaid ? `<h3 class="sub">What your people told us</h3>${paragraphs(r, peopleSaid)}` : ""}
+    <p style="margin-top:18px">${sourcesLine(report.survey?.shown === true, Boolean(peopleSaid))} Where we couldn't measure something, we say so rather than estimate it.</p>`);
 
   const progressed = progressPage(r, report);
   if (progressed) add(progressed);
@@ -242,4 +246,10 @@ export function executiveHtml(report: BuiltReport, pseudonyms: Pseudonymiser): s
   if (referenced.length) add(detailPage(r, referenced));
 
   return document("Executive summary", "a4", `${CSS}\n${MONEY_CSS}\n${COMPARE_CSS}\n${PROGRESS_CSS}`, pages);
+}
+
+/** Where the executive summary's figures come from. What people told us is theirs, and labelled so. */
+export function sourcesLine(survey: boolean, interviews: boolean): string {
+  if (interviews) return `Every figure here comes from your Salesforce org${survey ? ", or from your team's answers to our survey" : ""}. Where a figure is what someone told us in an interview, we say so: it's their view, not a measure.`;
+  return survey ? "Every figure here comes from your Salesforce org, or from your team's answers to our survey." : "Every figure here comes from your Salesforce org.";
 }
