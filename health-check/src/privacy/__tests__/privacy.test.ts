@@ -70,6 +70,21 @@ describe("Pseudonymiser", () => {
   });
 });
 
+describe("Pseudonymiser at scale", () => {
+  test("scrubs a big org's action list in a moment, and a name labelled later is still scrubbed", () => {
+    // A 1,000-user org and 50,000 action list lines: the scrub once rebuilt its whole name list on every line (night 3 scale test).
+    const p = new Pseudonymiser();
+    for (let n = 1; n <= 1000; n++) p.label("user", `005${String(n).padStart(12, "0")}AAA`, `Synthetic User ${n}`, [`user${n}@example.com`]);
+    const started = performance.now();
+    for (let i = 0; i < 50_000; i++) p.scrub(`Open since 2026-01-0${i % 9}, owned by Synthetic User ${(i % 1000) + 1}`);
+    const seconds = (performance.now() - started) / 1000;
+    assert.ok(seconds < 2, `${seconds.toFixed(1)}s`);
+    assert.equal(p.scrub("Owned by Synthetic User 7"), "Owned by [[user:U0007]]");
+    p.label("user", "005000000009999AAA", "Late Joiner", []);
+    assert.equal(p.scrub("Owned by Late Joiner"), "Owned by [[user:U1001]]");
+  });
+});
+
 describe("redactSecrets", () => {
   const redacted: Array<[string, string, RegExp]> = [
     ["an XML password element", "<password>hunter2hunter</password>", /hunter2/],
