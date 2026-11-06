@@ -10,7 +10,7 @@ import { READING_LABELS } from "../interviews/readings.ts";
 import { byRole } from "../render/interviews.ts";
 import { effortText, renderContext, valueText, type Render } from "../render/html.ts";
 import { noteSections, referenceMap } from "../render/references.ts";
-import { HEADLINE_KINDS, KIND_LABELS } from "../value/model.ts";
+import { HEADLINE_KINDS, KIND_LABELS, yearlyByFinding } from "../value/model.ts";
 import { DOCUMENTED, readDocument } from "../domains/configuration/documented.ts";
 import { practiceFor, practiceId, sourceLabel } from "../practice/index.ts";
 import { activeUsersChart, lightningChart, loginChannelsChart } from "../render/charts.ts";
@@ -227,7 +227,7 @@ function org(r: Render, report: BuiltReport): string {
 
 /** The pages, each checked against the report's figures. Throws if any figure on a page can't be traced. */
 export function buildMicrositePages(report: BuiltReport, pseudonyms: Pseudonymiser): MicrositePages {
-  const r = renderContext(pseudonyms, report.input.calibration.currency, false, referenceMap(noteSections(report)));
+  const r = renderContext(pseudonyms, report.input.calibration.currency, false, referenceMap(noteSections(report)), yearlyByFinding(report.value));
   const changed = progress(r, report);
   const pages: MicrositePage[] = [
     { slug: "overview", title: "Overview", html: overview(r, report) },

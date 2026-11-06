@@ -1,3 +1,4 @@
+import { yearlyByFinding } from "../value/model.ts";
 import { readinessLine } from "../narrative/readiness.ts";
 import { currentBody, POTENTIAL_REVENUE_RULES, TOP_ISSUE_COUNT, type BuiltReport } from "../narrative/sections.ts";
 import { areasOf, buildPlan, isSetupReview, isUnpricedSaving, QUICK_WINS_HEADING, scorecard, topIssues, UNPRICED, verdictOf, type PlanPhase } from "../narrative/select.ts";
@@ -184,7 +185,7 @@ export function executiveHtml(report: BuiltReport, pseudonyms: Pseudonymiser): s
   const { run, intake, calibration, scores = [], preparedBy } = report.input;
   const built = report.outputs.executive_summary;
   const refs = referenceMap(noteSections(report));
-  const base = renderContext(pseudonyms, calibration.currency, !canRelease(built.sections).ok, refs);
+  const base = renderContext(pseudonyms, calibration.currency, !canRelease(built.sections).ok, refs, yearlyByFinding(report.value));
   // The last page lists every reference the summary used, so each tag is noted as it's printed.
   const used = new Set<string>();
   const r: Render = { ...base, ref: (id) => (used.add(id), base.ref(id)) };

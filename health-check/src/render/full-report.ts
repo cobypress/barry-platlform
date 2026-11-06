@@ -1,3 +1,4 @@
+import { yearlyByFinding } from "../value/model.ts";
 import { currentBody, TOP_ISSUE_COUNT, type BuiltOutput, type BuiltReport } from "../narrative/sections.ts";
 import { VERDICT_WORDS, type ReadinessVerdict } from "../narrative/readiness.ts";
 import { areasOf, buildPlan, domainLabel, isSetupReview, issuesOf, isUnpricedSaving, QUICK_WINS_HEADING, recordAreasLine, scorecard, topIssues, UNPRICED, verdictOf } from "../narrative/select.ts";
@@ -910,13 +911,13 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
 
 /** Slides at each density in turn, so a test can see how close a deck is to its ceiling. */
 export function slideCounts(report: BuiltReport, pseudonyms: Pseudonymiser): number[] {
-  const r = renderContext(pseudonyms, report.input.calibration.currency, true, referenceMap(noteSections(report)));
+  const r = renderContext(pseudonyms, report.input.calibration.currency, true, referenceMap(noteSections(report)), yearlyByFinding(report.value));
   return [...DENSITIES, null].map((density) => buildSlides(report, r, density).length);
 }
 
 export function fullReportHtml(report: BuiltReport, pseudonyms: Pseudonymiser): string {
   const built = report.outputs.full_health_check;
-  const r = renderContext(pseudonyms, report.input.calibration.currency, !canRelease(built.sections).ok, referenceMap(noteSections(report)));
+  const r = renderContext(pseudonyms, report.input.calibration.currency, !canRelease(built.sections).ok, referenceMap(noteSections(report)), yearlyByFinding(report.value));
   let slides: Slide[] = [];
   for (const density of [...DENSITIES, null]) {
     slides = buildSlides(report, r, density);

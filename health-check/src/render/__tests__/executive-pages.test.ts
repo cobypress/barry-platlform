@@ -147,6 +147,20 @@ describe("the executive summary, rebuilt around money", () => {
     assert.deepEqual(shown.map((f) => f.id), [...shown].sort((a, b) => counted(a) - counted(b) || 0).map((f) => f.id));
   });
 
+  test("a segment's gap reads as the value model's year, not the window's total (DECISIONS.md 405)", () => {
+    const report = buildReport(base);
+    const html = fullReportHtml(report, pseudonyms);
+    const gaps = report.input.findings.filter((f) => f.ruleId === "pipe.segment-divergence" && f.status === "issue" && f.value.kind === "revenue");
+    assert.ok(gaps.length > 0);
+    const lines = new Map(report.value.groups.flatMap((g) => g.lines).map((l) => [l.findingId, l.annual]));
+    for (const f of gaps) {
+      const year = lines.get(f.id);
+      assert.ok(year !== undefined, "each gap is counted in the value model");
+      assert.ok(html.includes(`About ${compactMoney(year, "GBP")} a year in wins the gap may have cost`), f.title);
+    }
+    assert.doesNotMatch(html, /in wins the gap may have cost, \d{1,2} \w{3} \d{4} to/);
+  });
+
   test("a kind of money under £1k stays in the table but has no bar in the waterfall (DECISIONS.md 402)", () => {
     const report = buildReport(base);
     assert.ok(report.value.byKind.time_cost.expected > 0 && report.value.byKind.time_cost.expected < 1000, "the synthetic org's manual work is small");

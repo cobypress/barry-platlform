@@ -15,7 +15,7 @@ import { AS_OF } from "../synthetic-org.ts";
 // a metric or the raw notes updates these, and says why in its commit.
 
 const GOLDEN: Record<string, Record<string, string>> = {
-  recorded: { "findings.json": "6325552c676998e9", "metrics.json": "b434d33ebc9de18d", "scores.json": "1ea33b649d72937a", "manual-steps.json": "c4daf1ca86584a33", "action-lists.json": "7637af7dbf94db82", "raw-notes.md": "b68e8eabbc33d12a" },
+  recorded: { "findings.json": "fd31495dfc4e7418", "metrics.json": "b434d33ebc9de18d", "scores.json": "1ea33b649d72937a", "manual-steps.json": "c4daf1ca86584a33", "action-lists.json": "7637af7dbf94db82", "raw-notes.md": "664e2a90461e391b" },
   generated: { "findings.json": "78df4bbdef378f0f", "metrics.json": "8c6030e06d385f2e", "scores.json": "763c408c24334b05", "manual-steps.json": "15ae87c4fd76d7b6", "action-lists.json": "8eeb97766d119778", "raw-notes.md": "1d7c41b1e9858598" },
 };
 

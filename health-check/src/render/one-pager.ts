@@ -1,3 +1,4 @@
+import { yearlyByFinding } from "../value/model.ts";
 import { differenceWords, formatFigure, comparisonId } from "../benchmark/compare.ts";
 import type { BuiltReport } from "../narrative/sections.ts";
 import { buildPlan, isSetupReview, verdictOf } from "../narrative/select.ts";
@@ -102,7 +103,7 @@ function seatsBox(r: Render, report: BuiltReport): string {
 export function onePagerHtml(report: BuiltReport, pseudonyms: Pseudonymiser): string {
   const { run, intake, calibration, preparedBy } = report.input;
   const built = report.outputs.executive_summary;
-  const r = renderContext(pseudonyms, calibration.currency, !canRelease(built.sections).ok, referenceMap(noteSections(report)));
+  const r = renderContext(pseudonyms, calibration.currency, !canRelease(built.sections).ok, referenceMap(noteSections(report)), yearlyByFinding(report.value));
   const m = (n: number): string => compactMoney(n, report.value.currency);
   const customer = intake?.customerName ?? run.customerRef ?? "Customer";
   const o = report.overall;

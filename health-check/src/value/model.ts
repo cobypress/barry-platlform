@@ -159,6 +159,9 @@ export type ValueLine = {
   basis: string;
 };
 
+/** Each counted finding's own figure over 12 months, by finding id. */
+export const yearlyByFinding = (value: { groups: ValueGroup[] }): Map<string, number> => new Map(value.groups.flatMap((g) => g.lines.map((l) => [l.findingId, l.annual] as const)));
+
 export type ValueGroup = { id: string; kind: ValueKind; label: string; realisation: Realisation; lines: ValueLine[]; counted: ValueLine };
 
 export type Range = { low: number; expected: number; high: number };
