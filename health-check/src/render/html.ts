@@ -93,7 +93,7 @@ function targetText(r: Render, f: Finding): string | null {
 }
 
 /** Ends with a full stop, as a sentence the reader sees should. */
-const sentence = (text: string): string => (text === "" || /[.!?:)]$/.test(text.trim()) ? text : `${text.trim()}.`);
+export const sentence = (text: string): string => (text === "" || /[.!?:)]$/.test(text.trim()) ? text : `${text.trim()}.`);
 
 /** The Barometer score as the cover shows it. Nothing when the org couldn't be given one. */
 export function coverScore(overall: OverallScore): string {

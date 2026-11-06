@@ -17,7 +17,7 @@ import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
 import { EXECUTIVE_PLAN_ITEMS, executiveHtml } from "../executive.ts";
 import { compactMoney, plainWords, ukDates } from "../format.ts";
 import { yearlyByFinding } from "../../value/model.ts";
-import { DECK_RANGE, fullReportHtml, INVENTORY_SLIDE_ROWS, slideCounts } from "../full-report.ts";
+import { DECK_RANGE, fullReportHtml, fullReportHtmlAt, INVENTORY_SLIDE_ROWS, slideCounts } from "../full-report.ts";
 import { INVENTORY_COLUMNS, OBJECT_INVENTORY } from "../../domains/configuration/inventory.ts";
 import { document } from "../html.ts";
 import { layoutOf, launchBrowser, pdfPageCount, renderPdf } from "../pdf.ts";
@@ -297,6 +297,49 @@ describe("a large, messy org", () => {
   });
 });
 
+describe("an issue with a long money working, alone on its slide (DECISIONS.md 416)", () => {
+  // As a real org's weighting can run: one line for each stage its deals sit in.
+  const STAGES = ["Prospecting", "Qualified", "Discovery", "Solution design", "Proposal", "Commercials", "Negotiation", "Legal review", "Procurement", "Contracting"];
+  function longWorking(): { input: ReportInput; finding: Finding } {
+    const source = output!.findings.find((f) => f.ruleId === "dq.opps-inactive-owner" && f.status === "issue")!;
+    assert.ok(source.value.kind === "revenue");
+    const assumptions = [
+      ...source.value.assumptions.slice(0, 2),
+      ...STAGES.map((stage, i) => `${i + 1} deals with £${(i + 3) * 17_000} weighted at ${40 + i}%: of ${300 + i * 7} deals closed 2024-10-31 to 2026-10-31 that were in the ${stage} stage at some point, ${120 + i * 5} went on to win`),
+      "Lost and no decision deals both count as not won",
+    ];
+    // Critical, so it has a slide of its own at every step but the last, which sets every issue as a card.
+    const finding: Finding = { ...source, severity: "critical", value: { ...source.value, assumptions } };
+    return { input: { ...full, findings: output!.findings.map((f) => (f.id === source.id ? finding : f)) }, finding };
+  }
+
+  test("fits at every density step, with the money's reference in sight", async () => {
+    const { input, finding } = longWorking();
+    const report = buildReport(input);
+    const steps = slideCounts(report, pseudonyms).length;
+    for (let step = 0; step < steps; step++) {
+      const html = fullReportHtmlAt(report, pseudonyms, step);
+      const { layout } = await renderPdf(browser, html, { minPages: 1, maxPages: 999, dataset: report.dataset });
+      assert.deepEqual(layout.problems, [], `step ${step}: ${describeProblems(layout.problems)}`);
+      // A slide, card or table row of its own, by its title.
+      const slide = html.split("<section ").find((s) => s.includes(`>${finding.title.replace(/'/g, "&#39;")}<`))!;
+      assert.ok(slide, `step ${step}: the issue has a slide`);
+      assert.match(slide, /<span class="ref" data-ref>R\d+\.\d+<\/span>/, `step ${step}: the money's reference`);
+      if (slide.includes('class="panel"')) assert.match(slide, /<strong>[^<]+<\/strong><span class="ref" data-ref>R\d+\.\d+<\/span><\/p><p class="note">[^]*The full working is at<span class="ref" data-ref>R\d+\.\d+<\/span>\./, `step ${step}: the figure keeps its reference, and the cut working says where the rest is`);
+    }
+  });
+
+  test("a working that fits is printed whole", () => {
+    const { input, finding } = longWorking();
+    assert.ok(finding.value.kind === "revenue");
+    const short = { ...finding, value: { ...finding.value, assumptions: finding.value.assumptions.slice(0, 3) } };
+    const html = fullReportHtmlAt(buildReport({ ...input, findings: input.findings.map((f) => (f.id === finding.id ? short : f)) }), pseudonyms, 0);
+    const slide = html.split("<section ").find((x) => x.includes(`<h2>${finding.title.replace(/'/g, "&#39;")}</h2>`))!;
+    assert.doesNotMatch(slide, /The full working is at/);
+    assert.ok(slide.includes("Lost and no decision deals") === false && slide.includes("Raw exposure"), "its three lines, all of them");
+  });
+});
+
 describe("a thin org", () => {
   test("gets a shorter deck flagged for review, never padding", async () => {
     // Nothing found and nothing measured: pages that say nothing are left out, so the deck is short.
@@ -339,6 +382,11 @@ describe("the layout checks fire", () => {
 
   test("content running into the footer", async () => {
     assert.ok((await checks(doc(page(`${ok}<div style="height:1040px"></div>${footer}`)))).includes("overflow"));
+  });
+
+  test("content inside a parent that stops short, running into the footer (DECISIONS.md 417)", async () => {
+    // The panel of an issue's own slide sits in a grid: its parent can end above the footer while it runs on.
+    assert.ok((await checks(doc(page(`${ok}<div style="height:10px"><div style="height:1000px"></div></div>${footer}`)))).includes("overflow"));
   });
 
   test("a chart slot with nothing in it", async () => {

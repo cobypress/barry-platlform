@@ -48,13 +48,20 @@ async function pageFacts(browserPage: Page): Promise<PageFacts[]> {
           outside.push(`${child.tagName.toLowerCase()}: ${(child.textContent ?? "").trim().slice(0, 60)}`);
         }
       }
-      // Footers sit on the page but mustn't collide with what's above them.
+      // Footers sit on the page but mustn't collide with what's above them. Every
+      // element is measured, not only the page's own children: a panel inside a
+      // grid can run on past a parent that stops short (DECISIONS.md 417).
       const footer = el.querySelector<HTMLElement>("[data-chrome]");
       if (footer) {
         const top = footer.getBoundingClientRect().top;
-        for (const child of el.children) {
-          if (child === footer) continue;
-          if (child.getBoundingClientRect().bottom > top + TOLERANCE) outside.push(`runs into the footer: ${(child.textContent ?? "").trim().slice(0, 60)}`);
+        for (const child of el.querySelectorAll<HTMLElement>("*")) {
+          if (footer.contains(child) || (child.closest("svg") && child.tagName !== "svg")) continue;
+          const rect = child.getBoundingClientRect();
+          if (rect.width === 0 && rect.height === 0) continue;
+          if (rect.bottom > top + TOLERANCE) {
+            outside.push(`runs into the footer: ${(child.textContent ?? "").trim().slice(0, 60)}`);
+            break;
+          }
         }
       }
       // Node by node: textContent would run neighbouring cells into one figure.
