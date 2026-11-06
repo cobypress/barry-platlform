@@ -7,7 +7,7 @@ import { Pseudonymiser, type PseudonymEntry } from "../../privacy/pseudonymiser.
 import { runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
 import { EXECUTIVE_MAX_PAGES, executiveHtml, executiveMaxPages, RECHECK_EXECUTIVE_MAX_PAGES } from "../executive.ts";
-import { fullReportHtml, fullReportHtmlAt, slideCounts } from "../full-report.ts";
+import { foldLoneCards, fullReportHtml, fullReportHtmlAt, slideCounts } from "../full-report.ts";
 import { onePagerHtml } from "../one-pager.ts";
 import { topIssues } from "../../narrative/select.ts";
 import { returnOnSpend } from "../money.ts";
@@ -145,6 +145,14 @@ describe("the executive summary, rebuilt around money", () => {
     const counted = (f: (typeof top)[number]) => order.indexOf(f.severity) * 1e12 - (report.added.get(f.id) ?? -1);
     const shown = topIssues(report.teamFindings, 5, report.added);
     assert.deepEqual(shown.map((f) => f.id), [...shown].sort((a, b) => counted(a) - counted(b) || 0).map((f) => f.id));
+  });
+
+  test("a lone card left by the count folds back onto the slide of cards before it, only where they fit (DECISIONS.md 409)", () => {
+    const six = { cards: ["a", "b", "c", "d", "e", "f"] };
+    assert.deepEqual(foldLoneCards([six, { cards: ["g"] }], () => true), [{ cards: ["a", "b", "c", "d", "e", "f", "g"] }]);
+    assert.deepEqual(foldLoneCards([six, { cards: ["g"] }], () => false), [six, { cards: ["g"] }], "too tall together");
+    assert.deepEqual(foldLoneCards([six, { one: "x" }, { cards: ["g"] }], () => true), [six, { one: "x" }, { cards: ["g"] }], "never across an issue on its own slide");
+    assert.deepEqual(foldLoneCards([six, { cards: ["g", "h"] }], () => true), [six, { cards: ["g", "h"] }], "two cards aren't stranded");
   });
 
   test("every density step can be rendered on its own, and sets definitions at 13px and references at 0.85em (DECISIONS.md 408)", () => {

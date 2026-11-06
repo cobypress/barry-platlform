@@ -216,22 +216,30 @@ function balance(findings: Finding[], causeOf: CauseOf): [Finding[], Finding[]] 
   return [findings.slice(0, best), findings.slice(best)];
 }
 
-function twoColumnSlides(r: Render, label: string, findings: Finding[], causeOf: CauseOf): Slide[] {
+/** Cards in two columns, a slide's worth to a group, by height. */
+function twoColumnGroups(findings: Finding[], causeOf: CauseOf): Finding[][] {
   const columns = paginate(findings, (f) => smallCardHeight(f, causeOf), ISSUE_SLIDE_BUDGET);
-  const slides: Slide[] = [];
-  for (let i = 0; i < columns.length; i += 2) {
-    const group = columns.slice(i, i + 2).flat();
-    // A lone card takes the full width. Half an empty slide looks like a mistake.
-    if (group.length === 1) {
-      slides.push(issueCards(r, label, group, causeOf));
-      continue;
-    }
-    const sides = balance(group, causeOf);
-    // Few cards get larger type, so a short slide doesn't look unfinished.
-    const roomy = Math.max(...sides.map((side) => side.reduce((sum, f) => sum + smallCardHeight(f, causeOf), 0))) * ROOMY_SCALE <= ISSUE_SLIDE_BUDGET;
-    slides.push({ html: `<div class="eyebrow">${r.t(label)}</div><h2>${groupTitle(group[0]!)}</h2><div class="two-up${roomy ? " roomy" : ""}">${sides.map((column) => `<div class="col">${column.map((f) => card(r, f, causeOf)).join("")}</div>`).join("")}</div>` });
-  }
-  return slides;
+  const groups: Finding[][] = [];
+  for (let i = 0; i < columns.length; i += 2) groups.push(columns.slice(i, i + 2).flat());
+  return groups;
+}
+
+function twoColumnSlide(r: Render, label: string, group: Finding[], causeOf: CauseOf): Slide {
+  // A lone card takes the full width. Half an empty slide looks like a mistake.
+  if (group.length === 1) return issueCards(r, label, group, causeOf);
+  const sides = balance(group, causeOf);
+  // Few cards get larger type, so a short slide doesn't look unfinished.
+  const roomy = Math.max(...sides.map((side) => side.reduce((sum, f) => sum + smallCardHeight(f, causeOf), 0))) * ROOMY_SCALE <= ISSUE_SLIDE_BUDGET;
+  return { html: `<div class="eyebrow">${r.t(label)}</div><h2>${groupTitle(group[0]!)}</h2><div class="two-up${roomy ? " roomy" : ""}">${sides.map((column) => `<div class="col">${column.map((f) => card(r, f, causeOf)).join("")}</div>`).join("")}</div>` };
+}
+
+/**
+ * Whether a slide's worth of cards fits one slide by height: in two balanced
+ * columns, or one under another.
+ */
+function cardsFit(group: Finding[], density: Density, causeOf: CauseOf): boolean {
+  if (density.columns) return Math.max(...balance(group, causeOf).map((side) => side.reduce((sum, f) => sum + smallCardHeight(f, causeOf), 0))) <= ISSUE_SLIDE_BUDGET;
+  return group.reduce((sum, f) => sum + cardHeight(f, causeOf), 0) <= ISSUE_SLIDE_BUDGET;
 }
 
 /** `columns` sets smaller cards in two columns, so an ordinary org keeps all its detail. */
@@ -273,26 +281,44 @@ function issueTable(r: Render, label: string, issues: Finding[]): Slide[] {
   return [{ classes: "tight", html: `<div class="eyebrow">${r.t(label)}</div><h2>Issues</h2>${note}<table class="grid"><thead><tr><th>Issue</th><th style="width:10%">Severity</th><th style="width:24%">Value</th><th style="width:18%">Owner</th></tr></thead><tbody>${rows.join("")}</tbody></table>` }];
 }
 
+/** An issue on its own slide, or a slide's worth of cards. */
+export type CardPiece<T> = { one: T } | { cards: T[] };
+
+/**
+ * A single card left over by the count goes back onto the slide of cards just
+ * before it, where the two fit one slide (DECISIONS.md 409). Never across an
+ * issue that has its own slide, so reading order holds.
+ */
+export function foldLoneCards<T>(pieces: Array<CardPiece<T>>, fits: (cards: T[]) => boolean): Array<CardPiece<T>> {
+  return pieces.reduce<Array<CardPiece<T>>>((out, piece) => {
+    const before = out.at(-1);
+    if ("cards" in piece && piece.cards.length === 1 && before && "cards" in before && fits([...before.cards, ...piece.cards])) out[out.length - 1] = { cards: [...before.cards, ...piece.cards] };
+    else out.push(piece);
+    return out;
+  }, []);
+}
+
 function domainIssueSlides(r: Render, label: string, issues: Finding[], density: Density, causeOf: CauseOf): Slide[] {
-  const slides: Slide[] = [];
+  const pieces: Array<CardPiece<Finding>> = [];
   let queue: Finding[] = [];
   const flush = (): void => {
-    if (density.columns) slides.push(...twoColumnSlides(r, label, queue, causeOf));
-    else for (const group of paginate(queue, (f) => cardHeight(f, causeOf), ISSUE_SLIDE_BUDGET)) slides.push(issueCards(r, label, group, causeOf));
+    const groups = density.columns ? twoColumnGroups(queue, causeOf) : paginate(queue, (f) => cardHeight(f, causeOf), ISSUE_SLIDE_BUDGET);
+    pieces.push(...groups.map((cards) => ({ cards })));
     queue = [];
   };
   for (const f of issues) {
     const perSlide = density[f.severity];
     if (perSlide === 1) {
       flush();
-      slides.push(issueSlide(r, label, f, causeOf));
+      pieces.push({ one: f });
     } else {
       queue.push(f);
       if (queue.length >= perSlide) flush();
     }
   }
   flush();
-  return slides;
+  const folded = foldLoneCards(pieces, (cards) => cardsFit(cards, density, causeOf));
+  return folded.map((piece) => ("one" in piece ? issueSlide(r, label, piece.one, causeOf) : density.columns ? twoColumnSlide(r, label, piece.cards, causeOf) : issueCards(r, label, piece.cards, causeOf)));
 }
 
 function metricRows(r: Render, metrics: Metric[], currency: string): string {
