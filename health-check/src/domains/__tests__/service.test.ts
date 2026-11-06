@@ -151,6 +151,30 @@ describe("Service Cloud on a clean org", () => {
     assert.deepEqual(clean.filter((f) => f.status !== "passed").map((f) => [f.ruleId, f.status, f.summary ?? f.notMeasurableReason]), []);
   });
 
+  test("never passes on a read that stopped at its row limit: it says the rest weren't read", () => {
+    const cutAt = (pick: (out: Map<string, unknown>) => { truncated: boolean }) => {
+      const out = cleanOrg(loadExtracts(dir));
+      pick(out).truncated = true;
+      return analyseExtracts(out, { modules: ALL_MODULES }).findings;
+    };
+    const activity = (out: Map<string, unknown>) => out.get(serviceActivityExtractor.id) as ServiceActivity;
+    const caseRead = (out: Map<string, unknown>) => out.get(serviceCasesExtractor.id) as ServiceCases;
+    const checks: Array<[string, (out: Map<string, unknown>) => { truncated: boolean }]> = [
+      ["svc.milestone-breaches", (out) => activity(out).milestones as { truncated: boolean }],
+      ["svc.reopened-cases", (out) => activity(out).statusChanges as { truncated: boolean }],
+      ["svc.first-reply-email", (out) => activity(out).replies as { truncated: boolean }],
+      ["svc.priority-resolution", (out) => caseRead(out).closedCases as { truncated: boolean }],
+      ["svc.case-classification", (out) => caseRead(out).closedCases as { truncated: boolean }],
+      ["svc.unassigned-cases", (out) => caseRead(out).open as { truncated: boolean }],
+      ["svc.case-customer", (out) => caseRead(out).open as { truncated: boolean }],
+    ];
+    for (const [ruleId, pick] of checks) {
+      const f = one(cutAt(pick), ruleId);
+      assert.equal(f.status, "not_measurable", ruleId);
+      assert.match(f.notMeasurableReason!, /stopped at its row limit/, ruleId);
+    }
+  });
+
   test("the calibrated limits move the line", () => {
     const loose = analyseExtracts(loadExtracts(dir), { modules: ALL_MODULES, calibration: { ...loadCalibration(), service: { backlogAgeDays: 500, originBlankShare: 20 } } }).findings;
     assert.equal(one(loose, "svc.backlog-age").status, "passed");

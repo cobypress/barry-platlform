@@ -32,6 +32,8 @@ function rowsOf<R>(ctx: RuleContext, source: Sourced<R[]>, what: string, note?: 
 }
 
 const nm = (reason: string, evidence: Evidence[]): RuleResult => ({ outcome: "not_measurable", reason, evidence });
+/** Why a check can't pass on a read that stopped at its row limit. */
+const cutOff = (n: number, scope: string): string => `The read stopped at its row limit, so we checked only the first ${n.toLocaleString("en-GB")} ${scope} in order of Salesforce id, and can't say the rest are within the line.`;
 const cases = (ctx: RuleContext): ServiceCases => ctx.data(serviceCasesExtractor);
 
 /** A rate rule over cases, with the segments rule 4 asks for. */
@@ -60,6 +62,8 @@ function caseRate<R>(
   const facts = { hits: result.hits, n: result.n, rate: result.rate, ...options.facts };
   const over = result.rate > options.totalLimit;
   if (!over && result.hotspots.length === 0) {
+    // A read that stopped at its row limit is a part, and a part can't show the rest are within the line (rule 5).
+    if (options.truncated) return nm(cutOff(result.n, options.scope), evidence);
     return { outcome: "pass", summary: `${options.pass(result.hits, result.n, result.rate)} No segment is above ${options.segmentLimit}%.`, evidence, segmentsChecked: result.segmentsChecked, facts: { ...facts, segmentLimit: options.segmentLimit } };
   }
   const worst = result.hotspots[0];
@@ -189,6 +193,8 @@ const priorityResolution: Rule = {
     const origins = new Set(read.rows.map(originOf)).size;
     const segmentsChecked: SegmentCheck[] = [{ dimension: "priority", segments: new Set(read.rows.map(priorityOf)).size }, { dimension: "origin", segments: origins }];
     const facts = { highMedianHours: highMedian, otherMedianHours: restMedian, high: high.length, other: rest.length };
+    // A median from part of the cases, in id order, isn't the cases' median.
+    if (read.truncated) return nm(cutOff(read.rows.length, "closed cases"), read.evidence);
     if (highMedian < restMedian) {
       return { outcome: "pass", summary: `High-priority cases took a median ${highMedian} hours to close, against ${restMedian} hours for the rest.`, evidence: read.evidence, segmentsChecked, facts };
     }
@@ -274,6 +280,9 @@ const firstReply: Rule = {
     if (emailCases.length < ctx.calibration.minSample) return nm(`Only ${plural(emailCases.length, "case")} came in by email in the last year, fewer than the ${ctx.calibration.minSample} we need.`, evidence);
     const answered = emailCases.filter((c) => first.has(c.Id) && first.get(c.Id)! >= Date.parse(c.CreatedDate));
     if (answered.length === 0) return nm("No email case has a reply sent from Salesforce, so replies may be sent from somewhere else.", evidence);
+    // A case whose reply wasn't read would count as unanswered, and a median from part of the cases isn't theirs.
+    const cut = [replies, data.open, data.closedCases].find((r) => r.truncated);
+    if (cut) return nm(`The read of ${cut === replies ? "replies" : "cases"} stopped at its row limit, so we can't tell how quickly every email case got its first reply.`, evidence);
     const hoursTo = (c: (typeof answered)[number]): number => (first.get(c.Id)! - Date.parse(c.CreatedDate)) / HOUR;
     const med = round1(median(answered.map(hoursTo)));
     const p75 = round1(quantile(answered.map(hoursTo), 0.75));
