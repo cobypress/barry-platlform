@@ -1,6 +1,6 @@
 import { currentBody, TOP_ISSUE_COUNT, type BuiltOutput, type BuiltReport } from "../narrative/sections.ts";
 import { VERDICT_WORDS, type ReadinessVerdict } from "../narrative/readiness.ts";
-import { areasOf, buildPlan, domainLabel, isSetupReview, issuesOf, recordAreasLine, scorecard, topIssues, verdictOf } from "../narrative/select.ts";
+import { areasOf, buildPlan, domainLabel, isSetupReview, issuesOf, isUnpricedSaving, QUICK_WINS_HEADING, recordAreasLine, scorecard, topIssues, UNPRICED, verdictOf } from "../narrative/select.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { ACCOUNT_ENGAGEMENT_DOMAINS, canRelease, CPQ_DOMAINS, SERVICE_CLOUD_DOMAINS, type Finding, type Metric, type Run } from "../schemas/index.ts";
 import { INVENTORY_COLUMNS, inventoryRows, OBJECT_INVENTORY } from "../domains/configuration/inventory.ts";
@@ -93,6 +93,10 @@ ol.contents.long { columns: 3; font-size: 0.92em; }
 ol.contents.long li { margin-bottom: 4px; }
 .action-list { margin: 0; padding-left: 22px; font-size: 18px; }
 .action-list li { margin-bottom: 8px; }
+.quick-panel { margin-top: 18px; background: var(--snow); border-radius: var(--radius-m); padding: 12px 18px; }
+.quick-panel h3 { font-size: 18px; margin: 0 0 8px; }
+.quick-panel .action-list { font-size: 15.5px; }
+.quick-panel .action-list li { margin-bottom: 4px; }
 .action-list .owner { color: var(--muted); font-size: 14.5px; }
 .chart-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
 .lede { font-size: 17px; margin-bottom: 14px; }
@@ -544,10 +548,10 @@ function lostAndSpeedSlideDense(r: Render, metric: (id: string) => Metric | unde
 }
 
 /** Definitions are reference, so a dense deck sets them small, in three columns. */
-function threeColumnList(r: Render, eyebrow: string, title: string, items: Array<{ title: string; detail: string; ref?: string }>): Slide[] {
+function threeColumnList(r: Render, eyebrow: string, title: string, items: Array<{ title: string; detail: string; ref?: string; also?: string[] }>): Slide[] {
   const pages = paginate(items, (x) => 26 + 17 * estimateLines(x.detail, 56), 3 * 490);
   return pages.map((group, i) => ({
-    html: `<div class="eyebrow">${r.t(eyebrow)}</div><h2>${r.t(title)}${i ? ", continued" : ""}</h2><div class="three-text">${group.map((x) => `<p class="definition"><strong>${r.t(x.title)}</strong>${x.ref ? r.ref(x.ref) : ""}<br>${r.t(x.detail)}</p>`).join("")}</div>`,
+    html: `<div class="eyebrow">${r.t(eyebrow)}</div><h2>${r.t(title)}${i ? ", continued" : ""}</h2><div class="three-text">${group.map((x) => `<p class="definition"><strong>${r.t(x.title)}</strong>${x.ref ? r.ref(x.ref) : ""}${(x.also ?? []).map((id) => r.ref(id)).join("")}<br>${r.t(x.detail)}</p>`).join("")}</div>`,
   }));
 }
 
@@ -574,21 +578,21 @@ const needsInput = (built: BuiltOutput, key: string): boolean => built.sections.
 
 const inputChip = '<p style="margin-bottom:10px"><span class="chip input">Needs input from a consultant</span></p>';
 
-function listSlides(r: Render, eyebrow: string, title: string, items: Array<{ title: string; detail: string; ref?: string }>, compact: boolean): Slide[] {
+function listSlides(r: Render, eyebrow: string, title: string, items: Array<{ title: string; detail: string; ref?: string; also?: string[] }>, compact: boolean): Slide[] {
   // An empty list is left out rather than given a page that says so.
   if (items.length === 0) return [];
   const pages = paginate(items, (x) => 16 + 24 * Math.max(estimateLines(x.detail, 85), estimateLines(x.title, 34)), LIST_BUDGET);
   const cut = compact && pages.length > 1;
   return (cut ? pages.slice(0, 1) : pages).map((group, i) => ({
     classes: "tight",
-    html: `<div class="eyebrow">${r.t(eyebrow)}</div><h2>${r.t(title)}${i ? ", continued" : ""}</h2>${cut ? `<p style="font-size:15px;margin-bottom:6px">${COMPACT_NOTE}</p>` : ""}<table class="grid"><tbody>${(cut ? group.slice(0, -1) : group).map((x) => `<tr><td style="width:30%"><strong>${r.t(x.title)}</strong>${x.ref ? r.ref(x.ref) : ""}</td><td>${r.t(x.detail)}</td></tr>`).join("")}</tbody></table>`,
+    html: `<div class="eyebrow">${r.t(eyebrow)}</div><h2>${r.t(title)}${i ? ", continued" : ""}</h2>${cut ? `<p style="font-size:15px;margin-bottom:6px">${COMPACT_NOTE}</p>` : ""}<table class="grid"><tbody>${(cut ? group.slice(0, -1) : group).map((x) => `<tr><td style="width:30%"><strong>${r.t(x.title)}</strong>${x.ref ? r.ref(x.ref) : ""}${(x.also ?? []).map((id) => r.ref(id)).join("")}</td><td>${r.t(x.detail)}</td></tr>`).join("")}</tbody></table>`,
   }));
 }
 
-function twoColumnList(r: Render, eyebrow: string, title: string, items: Array<{ title: string; detail: string; ref?: string }>): Slide[] {
+function twoColumnList(r: Render, eyebrow: string, title: string, items: Array<{ title: string; detail: string; ref?: string; also?: string[] }>): Slide[] {
   const pages = paginate(items, (x) => 28 + 19 * estimateLines(x.detail, 72), 2 * LIST_BUDGET);
   return pages.map((group, i) => ({
-    html: `<div class="eyebrow">${r.t(eyebrow)}</div><h2>${r.t(title)}${i ? ", continued" : ""}</h2><div class="two-text">${group.map((x) => `<p class="definition"><strong>${r.t(x.title)}</strong>${x.ref ? r.ref(x.ref) : ""}<br>${r.t(x.detail)}</p>`).join("")}</div>`,
+    html: `<div class="eyebrow">${r.t(eyebrow)}</div><h2>${r.t(title)}${i ? ", continued" : ""}</h2><div class="two-text">${group.map((x) => `<p class="definition"><strong>${r.t(x.title)}</strong>${x.ref ? r.ref(x.ref) : ""}${(x.also ?? []).map((id) => r.ref(id)).join("")}<br>${r.t(x.detail)}</p>`).join("")}</div>`,
   }));
 }
 
@@ -638,7 +642,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   const metric = (id: string): Metric | undefined => metrics.find((m) => m.id === id);
   const verdict = verdictOf(team);
   const top = topIssues(team, TOP_ISSUE_COUNT, report.added);
-  const { phases: plan, later, alsoFor } = buildPlan(team, report.added);
+  const { phases: plan, later, alsoFor, quickWins } = buildPlan(team, report.added);
   const setupReview = isSetupReview(run);
   // A set-up review shows only its own areas: the record areas get one line, below.
   const domains = areasOf(run, team);
@@ -831,19 +835,37 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   // The engine's roadmap text only counts actions, which the boxes already show. Written text goes above them.
   const roadmap = built.versions.find((v) => v.id === built.sections.find((x) => x.key === "roadmap")?.currentVersionId);
   const roadmapText = roadmap && roadmap.source !== "engine" ? `<div style="margin-bottom:18px">${sectionBody(r, built, "roadmap")}</div>` : "";
-  if (!dense && planned) add(`<div class="eyebrow">Roadmap</div><h2>The first 90 days</h2>${roadmapText}<div class="stat-row">${plan.map((p) => `<div class="stat"><b>${r.t(p.title)}</b><span>Days ${p.from} to ${p.to}</span><p style="margin-top:8px">${p.findings.length} ${p.findings.length === 1 ? "action" : "actions"}</p></div>`).join("")}</div>`);
-  for (const phase of plan.filter((p) => p.findings.length > 0)) {
-    const all = paginate(phase.findings, (f) => (dense ? 10 + 23 * estimateLines(`${f.title}. ${f.recommendation} ${f.owner}`, 58) : 12 + 28 * estimateLines(`${f.title}. ${f.recommendation} ${f.owner}`, 95)), dense ? 2 * LIST_BUDGET : LIST_BUDGET);
+  // Quick wins are their own box beside "Stabilise" (DECISIONS.md 366). In a roomy deck it sits on this
+  // overview, so it costs no slide; a dense deck has no overview, so they get a slide after "Stabilise".
+  // A line each: what to do for each is on its card in its area, and the box says so.
+  const quickItem = (f: Finding): string => `<li><strong>${r.t(f.title)}.</strong>${r.ref(f.id)}${(alsoFor[f.id] ?? []).map((x) => r.ref(x.id)).join("")}${isUnpricedSaving(f) ? ` ${r.t(UNPRICED)}` : ""} <span class="owner">${r.t(f.owner)}</span></li>`;
+  const quickOnOverview = !dense && planned && quickWins.length > 0;
+  const quickPanel = `<div class="quick-panel"><h3>${r.t(QUICK_WINS_HEADING)}</h3><ul class="action-list">${quickWins.map(quickItem).join("")}</ul><p class="small-note">${r.t("What to do for each is on its card in its area.")}</p></div>`;
+  const quickBox = quickOnOverview ? quickPanel : "";
+  if (!dense && planned) add(`<div class="eyebrow">Roadmap</div><h2>The first 90 days</h2>${roadmapText}<div class="stat-row">${plan.map((p) => `<div class="stat"><b>${r.t(p.title)}</b><span>Days ${p.from} to ${p.to}</span><p style="margin-top:8px">${p.findings.length} ${p.findings.length === 1 ? "action" : "actions"}</p></div>`).join("")}${quickWins.length ? `<div class="stat"><b>${r.t("Quick wins")}</b><span>Also days 1 to 30</span><p style="margin-top:8px">${quickWins.length} ${quickWins.length === 1 ? "action" : "actions"}</p></div>` : ""}</div>${quickBox}`);
+  // Quick wins are their own box beside "Stabilise", not part of it (DECISIONS.md 366).
+  // Without the overview, the box follows "Stabilise" on its pages, so it takes a slide only when those are full.
+  const quickInline = quickWins.length > 0 && !quickOnOverview;
+  const itemHeight = (f: Finding): number => (dense ? 10 + 23 * estimateLines(`${f.title}. ${f.recommendation} ${f.owner}`, 58) : 12 + 28 * estimateLines(`${f.title}. ${f.recommendation} ${f.owner}`, 95));
+  const quickHeight = 84 + quickWins.reduce((sum, f) => sum + 6 + 22 * estimateLines(`${f.title}. ${f.owner}`, dense ? 70 : 110), 0);
+  type Row = { f: Finding } | { quickBox: true };
+  plan.forEach((phase, k) => {
+    const rows: Row[] = [...phase.findings.map((f) => ({ f })), ...(k === 0 && quickInline ? [{ quickBox: true as const }] : [])];
+    if (rows.length === 0) return;
+    const all = paginate(rows, (x) => ("f" in x ? itemHeight(x.f) : quickHeight), dense ? 2 * LIST_BUDGET : LIST_BUDGET);
     const cut = compact && all.length > 1;
     const pages = cut ? [all[0]!.slice(0, -1)] : all;
     pages.forEach((group, i) => {
-      add(`<div class="eyebrow">Roadmap</div><h2>Days ${phase.from} to ${phase.to}: ${phase.title}${i ? ", continued" : ""}</h2>${cut ? `<p style="font-size:15px;margin-bottom:6px">${COMPACT_NOTE}</p>` : ""}<ul class="action-list${dense ? " two-text" : ""}">${group.map((f) => `<li><strong>${r.t(f.title)}.</strong>${r.ref(f.id)}${(alsoFor[f.id] ?? []).map((x) => r.ref(x.id)).join("")} ${r.t(f.recommendation)} <span class="owner">${r.t(f.owner)}</span></li>`).join("")}</ul>`);
+      const actions = group.flatMap((x) => ("f" in x ? [x.f] : []));
+      const list = `${actions.length ? `<ul class="action-list${dense ? " two-text" : ""}">${actions.map((f) => `<li><strong>${r.t(f.title)}.</strong>${r.ref(f.id)}${(alsoFor[f.id] ?? []).map((x) => r.ref(x.id)).join("")} ${r.t(f.recommendation)}${isUnpricedSaving(f) ? ` ${r.t(UNPRICED)}` : ""} <span class="owner">${r.t(f.owner)}</span></li>`).join("")}</ul>` : ""}${group.some((x) => "quickBox" in x) ? quickPanel : ""}`;
+      add(`<div class="eyebrow">Roadmap</div><h2>Days ${phase.from} to ${phase.to}: ${phase.title}${i ? ", continued" : ""}</h2>${cut ? `<p style="font-size:15px;margin-bottom:6px">${COMPACT_NOTE}</p>` : ""}${list}`);
     });
-  }
+  });
 
   // Titles only: each of these already has its card in its domain's section.
   // Each with its reference, so a reader can find the issue it comes from (night 3 reading pass).
-  const afterPlan = later.map((f) => ({ title: f.title, detail: `${severityWord(f.severity)}. ${effortText(f)}. ${f.owner}`, ref: f.id }));
+  // And the other issues each action covers, as the phases show them (DECISIONS.md 368).
+  const afterPlan = later.map((f) => ({ title: f.title, detail: `${severityWord(f.severity)}. ${effortText(f)}. ${f.owner}`, ref: f.id, also: (alsoFor[f.id] ?? []).map((x) => x.id) }));
   // Titles only, so at the densest they take three columns, as the metric definitions do.
   if (later.length) slides.push(...(density?.domainSummary || density?.threeColumnLists ? threeColumnList(r, "Roadmap", "After 90 days", afterPlan) : dense ? twoColumnList(r, "Roadmap", "After 90 days", afterPlan) : listSlides(r, "Roadmap", "After 90 days", afterPlan, compact)));
 
@@ -867,7 +889,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   // one to a line took a slide for every few metrics.
   slides.push(...(compact ? listSlides(r, "Appendix", "Metric definitions", definitions, compact) : dense ? threeColumnList(r, "Appendix", "Metric definitions", definitions) : twoColumnList(r, "Appendix", "Metric definitions", definitions)));
   // Reference, so two to a line like the definitions.
-  const reference = (title: string, items: Array<{ title: string; detail: string; ref?: string }>): Slide[] => (compact || items.length === 0 ? listSlides(r, "Appendix", title, items, compact) : twoColumnList(r, "Appendix", title, items));
+  const reference = (title: string, items: Array<{ title: string; detail: string; ref?: string; also?: string[] }>): Slide[] => (compact || items.length === 0 ? listSlides(r, "Appendix", title, items, compact) : twoColumnList(r, "Appendix", title, items));
   const unmeasured = team.filter((f) => f.status === "not_measurable").map((f) => ({ title: f.title, detail: f.notMeasurableReason ?? f.summary }));
   const passing = team.filter((f) => f.status === "passed").map((f) => ({ title: f.title, detail: f.summary }));
   // At the three-column step the two lists share three columns, each item saying which it is (DECISIONS.md 244).

@@ -4,7 +4,7 @@ import { z } from "zod";
 import { applyNarrative } from "../apply.ts";
 import type { NarrativeClient } from "../client.ts";
 import { Intake } from "../intake.ts";
-import { buildPlan, domainLabel, isQuickWin, PLAN_CAPACITY, scorecard, teamLevelFinding, teamLevelText, topIssues, verdictOf } from "../select.ts";
+import { buildPlan, domainLabel, isQuickWin, isUnpricedSaving, PLAN_CAPACITY, QUICK_WINS, scorecard, teamLevelFinding, teamLevelText, topIssues, verdictOf } from "../select.ts";
 import { buildReport, currentBody, TOP_ISSUE_COUNT, type ReportInput } from "../sections.ts";
 import { Pseudonymiser, type PseudonymEntry } from "../../privacy/pseudonymiser.ts";
 import { compactMoney } from "../../render/format.ts";
@@ -215,9 +215,9 @@ describe("ranking", () => {
   });
 
   test("a plan has three phases, no action repeated for the same rule, and every issue with something to do in it (DECISIONS.md 363)", () => {
-    const { phases: plan, later, alsoFor } = buildPlan(team);
+    const { phases: plan, later, alsoFor, quickWins } = buildPlan(team);
     assert.deepEqual(plan.map((p) => [p.from, p.to]), [[1, 30], [31, 60], [61, 90]]);
-    const actions = [...plan.flatMap((p) => p.findings), ...later];
+    const actions = [...plan.flatMap((p) => p.findings), ...quickWins, ...later];
     assert.equal(new Set(actions.map((f) => `${f.ruleId}|${f.recommendation}`)).size, actions.length);
     assert.ok(actions.length > 10);
     // Pinned from the night 3 reading pass: R18.2, R18.3 and R15.5 were in no phase.
@@ -229,24 +229,37 @@ describe("ranking", () => {
   });
 
   test("each phase holds what a team can take on, with urgent work first and quick wins in the first month (DECISIONS.md 363)", () => {
-    const { phases, later } = buildPlan(team);
+    const { phases, later, quickWins } = buildPlan(team);
     const load = (p: (typeof phases)[number]) => p.findings.filter((f) => !isQuickWin(f));
     phases.forEach((p, i) => assert.ok(load(p).length <= PLAN_CAPACITY[i]!, `${p.title}: ${load(p).length}`));
     assert.ok(later.length > 0, "the synthetic run has more actions than a 90-day plan holds");
     const urgent = (f: Finding): boolean => f.severity === "critical" || f.severity === "high";
     assert.ok(phases[0]!.findings.every((f) => urgent(f) || isQuickWin(f) || (f.severity === "medium" && f.effort.size === "XS")), "the first month is urgent work or quick wins");
     assert.ok(load(phases[0]!).length === PLAN_CAPACITY[0], "the first month is used");
-    // Every quick win is in the first month, licence savings included.
+    // Every quick win is in the first month, licence savings included: in its list, or past the list in "Stabilise".
     for (const f of [...phases.slice(1).flatMap((p) => p.findings), ...later]) assert.ok(!isQuickWin(f), f.title);
-    assert.ok(phases[0]!.findings.some((f) => f.ruleId === "utl.unassigned-licence-seats"));
+    assert.ok([...quickWins, ...phases[0]!.findings].some((f) => f.ruleId === "utl.unassigned-licence-seats"));
     // An urgent action only misses the plan when the plan is full of urgent work.
     for (const f of later.filter(urgent)) assert.ok(phases.every((p, i) => load(p).length === PLAN_CAPACITY[i] && load(p).every(urgent)), f.title);
     assert.ok(later.every((f) => f.severity !== "info"));
   });
 
-  test("large work and low-severity tidying never take the first month", () => {
+  test("large work and low-severity tidying never take the first month, though a low-severity licence saving that's a quick win can", () => {
     const { phases } = buildPlan(team);
-    for (const f of phases[0]!.findings) assert.ok(["XS", "S", "M"].includes(f.effort.size) && f.severity !== "low", f.title);
+    for (const f of phases[0]!.findings) assert.ok(["XS", "S", "M"].includes(f.effort.size) && (f.severity !== "low" || isQuickWin(f)), f.title);
+  });
+
+  test("days 1 to 30's quick wins are their own list of at most eight, the most money first, then the most serious (DECISIONS.md 366, 367)", () => {
+    const { phases, quickWins } = buildPlan(team);
+    assert.ok(quickWins.length > 0 && quickWins.length <= QUICK_WINS);
+    assert.ok(quickWins.every(isQuickWin));
+    for (const f of quickWins) assert.ok(!phases.some((p) => p.findings.includes(f)), `${f.title} is in a phase as well`);
+    const money = (f: Finding) => (f.value.kind === "licence_cost" || f.value.kind === "revenue" ? f.value.amount : 0);
+    for (let i = 1; i < quickWins.length; i++) assert.ok(money(quickWins[i - 1]!) >= money(quickWins[i]!), quickWins[i]!.title);
+    // An unpriced licence saving with very small or small effort is a quick win, and says its saving isn't priced.
+    const unpriced = team.filter((f) => f.status === "issue" && isUnpricedSaving(f) && (f.effort.size === "XS" || f.effort.size === "S"));
+    assert.ok(unpriced.length > 0, "the synthetic org has one: installed apps' seats with no price");
+    for (const f of unpriced) assert.ok(isQuickWin(f), f.title);
   });
 
   test("the verdict follows the worst severity", () => {

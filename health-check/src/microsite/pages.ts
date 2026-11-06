@@ -1,7 +1,7 @@
 import { comparisonId, formatFigure } from "../benchmark/compare.ts";
 import { checkNumbers } from "../numbercheck/index.ts";
 import type { BuiltReport } from "../narrative/sections.ts";
-import { buildPlan, bySeverity, domainLabel, domainsInOrder, issuesOf, scorecard, verdictOf } from "../narrative/select.ts";
+import { buildPlan, bySeverity, domainLabel, domainsInOrder, issuesOf, isUnpricedSaving, QUICK_WINS_HEADING, scorecard, UNPRICED, verdictOf } from "../narrative/select.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { compactMoney, longDate, percent } from "../render/format.ts";
 import { currentBody } from "../narrative/sections.ts";
@@ -170,15 +170,16 @@ function issues(r: Render, report: BuiltReport): string {
 }
 
 function plan(r: Render, report: BuiltReport): string {
-  const { phases, later, alsoFor } = buildPlan(report.teamFindings, report.added);
+  const { phases, later, alsoFor, quickWins } = buildPlan(report.teamFindings, report.added);
   // The other issues the same action covers, by their references (DECISIONS.md 363).
   const also = (f: { id: string }): string => (alsoFor[f.id] ?? []).map((x) => r.ref(x.id)).join("");
-  const blocks = phases
-    .filter((p) => p.findings.length > 0)
-    .map((p) => `<h2>${r.t(`Days ${p.from} to ${p.to}: ${p.title}`)}</h2><ul>${p.findings.map((f) => `<li><strong>${r.t(f.title)}.</strong> ${r.t(f.recommendation)} <span class="muted">${r.t(f.owner)}</span>${r.ref(f.id)}${also(f)}</li>`).join("")}</ul>`)
-    .join("");
+  const item = (f: (typeof quickWins)[number]): string => `<li><strong>${r.t(f.title)}.</strong> ${r.t(f.recommendation)}${isUnpricedSaving(f) ? ` ${r.t(UNPRICED)}` : ""} <span class="muted">${r.t(f.owner)}</span>${r.ref(f.id)}${also(f)}</li>`;
+  // Quick wins are their own box beside "Stabilise", not part of it (DECISIONS.md 366).
+  const quick = quickWins.length ? `<div class="good"><h2 style="margin-top:4px">${r.t(QUICK_WINS_HEADING)}</h2><ul>${quickWins.map(item).join("")}</ul></div>` : "";
+  const block = (p: (typeof phases)[number]): string => (p.findings.length ? `<h2>${r.t(`Days ${p.from} to ${p.to}: ${p.title}`)}</h2><ul>${p.findings.map(item).join("")}</ul>` : "");
+  const blocks = `${block(phases[0]!)}${quick}${phases.slice(1).map(block).join("")}`;
   const after = later.length ? `<h2>After 90 days</h2><ul>${later.map((f) => `<li>${r.t(f.title)}${r.ref(f.id)}${also(f)}</li>`).join("")}</ul>` : "";
-  return page(`<h1>The plan</h1><p class="muted">${r.t("Urgent fixes and quick wins come first, and beyond the quick wins, each month holds only what a team can take on.")}</p>${blocks}${after}`);
+  return page(`<h1>The plan</h1><p class="muted">${r.t("Urgent fixes come first, with a short list of quick wins beside them, and each month holds only what a team can take on.")}</p>${blocks}${after}`);
 }
 
 function compare(r: Render, report: BuiltReport): string {

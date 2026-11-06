@@ -177,6 +177,11 @@ describe("the deck's wording, as a customer reads it (night 3 reading pass, DECI
     assert.match(html, /Every deal won in the window, by its own type and lead source, including any entered straight as won\./);
   });
 
+  test("the deck shows days 1 to 30's quick wins as their own box, and says when a saving isn't priced (DECISIONS.md 366, 367)", () => {
+    assert.match(html, /<div class="quick-panel"><h3>Quick wins, also in days 1 to 30<\/h3>/);
+    assert.match(html, /seats nobody holds\.<\/strong>[\s\S]{0,400}?The saving isn(&#39;|')t priced\./i);
+  });
+
   test("an area's first steps say each recommendation once", () => {
     for (const panel of html.match(/<h3>What to do first<\/h3><ul>[\s\S]*?<\/ul>/g) ?? []) {
       const items = [...panel.matchAll(/<li>([\s\S]*?)<\/li>/g)].map((m) => m[1]);

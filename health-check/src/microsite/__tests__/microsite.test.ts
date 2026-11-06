@@ -79,6 +79,12 @@ describe("the microsite's pages", async () => {
     if (all.includes("doc-cols charts")) assert.match(all, /<h3 class="cap">Monthly active users<\/h3>/);
   });
 
+  test("the plan shows days 1 to 30's quick wins as their own box (DECISIONS.md 366)", () => {
+    const plan = pages.find((p) => p.slug === "plan")!.html;
+    assert.match(plan, /<div class="good"><h2 style="margin-top:4px">Quick wins, also in days 1 to 30<\/h2>/);
+    assert.ok(plan.indexOf("Quick wins, also in days 1 to 30") > plan.indexOf("Days 1 to 30: Stabilise"));
+  });
+
   test("an overview, every issue, the plan, the comparison when there's one, and the org documented", () => {
     assert.deepEqual(pages.map((p) => p.slug), ["overview", "issues", "plan", "compare", "org"]);
     for (const p of pages) assert.match(p.slug, /^[a-z0-9][a-z0-9-]{0,79}$/);

@@ -1,6 +1,6 @@
 import { readinessLine } from "../narrative/readiness.ts";
 import { currentBody, POTENTIAL_REVENUE_RULES, TOP_ISSUE_COUNT, type BuiltReport } from "../narrative/sections.ts";
-import { areasOf, buildPlan, isSetupReview, scorecard, topIssues, verdictOf, type PlanPhase } from "../narrative/select.ts";
+import { areasOf, buildPlan, isSetupReview, isUnpricedSaving, QUICK_WINS_HEADING, scorecard, topIssues, UNPRICED, verdictOf, type PlanPhase } from "../narrative/select.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { canRelease, type Finding, type Metric } from "../schemas/index.ts";
 import { deliveryOutlookChart, scorecardChart, scorecardOptions, winRateBySegment } from "./charts.ts";
@@ -42,6 +42,7 @@ h3.sub { font-size: 15px; font-weight: 600; margin: 22px 0 4px; }
 .phase li { margin-bottom: 4px; line-height: 1.45; }
 .phase ul { margin: 0; padding-left: 18px; }
 .phase .owner { color: var(--muted); font-size: 12px; }
+.phase.quick { background: var(--snow); border-radius: var(--radius-m); padding: 10px 14px; }
 .ref-list { columns: 2; column-gap: 24px; font-size: 11.5px; line-height: 1.35; }
 .ref-row { break-inside: avoid; margin-bottom: 5px; display: grid; grid-template-columns: 44px 1fr; }
 `;
@@ -71,8 +72,9 @@ const PLAN_CHARS = 90;
 const INTRO_CHARS = 100;
 const PLAN_LINE = 20;
 const PLAN_PAGE_BUDGET = 915;
-const planItemHeight = (r: Render, f: Finding): number => 4 + PLAN_LINE * estimateLines(`${r.t(f.title)}. ${r.t(f.recommendation)} ${r.t(f.owner)}`, PLAN_CHARS);
-const phaseHeight = (r: Render, items: Finding[], more: boolean): number => 44 + (items.length ? items.reduce((sum, f) => sum + planItemHeight(r, f), 0) : 22) + (more ? 18 : 0);
+// A quick win is a line here: its title says what to do, and the full report has the rest. The box's padding is the 20.
+const planItemHeight = (r: Render, f: Finding, quick = false): number => 4 + PLAN_LINE * estimateLines(quick ? `${r.t(f.title)}. ${isUnpricedSaving(f) ? UNPRICED : ""} ${r.t(f.owner)}` : `${r.t(f.title)}. ${r.t(f.recommendation)} ${r.t(f.owner)}`, PLAN_CHARS);
+const phaseHeight = (r: Render, items: Finding[], more: boolean, quick = false): number => 44 + (quick ? 20 : 0) + (items.length ? items.reduce((sum, f) => sum + planItemHeight(r, f, quick), 0) : 22) + (more ? 18 : 0);
 
 type PlanBlock = { phase: PlanPhase; items: Finding[] };
 
@@ -87,7 +89,7 @@ export const executiveMaxPages = (report: Pick<BuiltReport, "progress">): number
 type PlanPage = Array<PlanBlock | { intro: true }>;
 
 function planPages(r: Render, blocks: PlanBlock[], introHeight: number): PlanPage[] {
-  return paginate<PlanBlock | { intro: true }>([{ intro: true }, ...blocks], (b) => ("intro" in b ? introHeight : phaseHeight(r, b.items, b.phase.findings.length > b.items.length)), PLAN_PAGE_BUDGET);
+  return paginate<PlanBlock | { intro: true }>([{ intro: true }, ...blocks], (b) => ("intro" in b ? introHeight : phaseHeight(r, b.items, b.phase.findings.length > b.items.length, b.phase.key === "quick")), PLAN_PAGE_BUDGET);
 }
 
 /**
@@ -96,9 +98,9 @@ function planPages(r: Render, blocks: PlanBlock[], introHeight: number): PlanPag
  * it lose actions, from the longest phase first, so it never runs into the
  * footer or past the page limit, whatever the text length.
  */
-function planLayout(r: Render, phases: PlanPhase[], introHeight: number, pagesLeft: number): PlanPage[] {
-  const blocks: PlanBlock[] = phases.map((phase) => ({ phase, items: phase.findings.slice(0, EXECUTIVE_PLAN_ITEMS) }));
-  const height = (b: PlanBlock): number => phaseHeight(r, b.items, true);
+function planLayout(r: Render, phases: PlanPhase[], introHeight: number, pagesLeft: number, quickItems = EXECUTIVE_PLAN_ITEMS): PlanPage[] {
+  const blocks: PlanBlock[] = phases.map((phase) => ({ phase, items: phase.findings.slice(0, phase.key === "quick" ? quickItems : EXECUTIVE_PLAN_ITEMS) }));
+  const height = (b: PlanBlock): number => phaseHeight(r, b.items, true, b.phase.key === "quick");
   for (;;) {
     const pages = planPages(r, blocks, introHeight);
     const tooLong = blocks.some((b) => b.items.length > 1 && height(b) > PLAN_PAGE_BUDGET);
@@ -112,9 +114,11 @@ function planLayout(r: Render, phases: PlanPhase[], introHeight: number, pagesLe
 function phaseBlock(r: Render, { phase, items }: PlanBlock, alsoFor: Record<string, Finding[]> = {}): string {
   // The title says what the action is about. A recommendation on its own often says "these deals".
   // The other issues the same action covers, by their references (DECISIONS.md 363).
-  const rows = items.map((f) => `<li><strong>${r.t(f.title)}.</strong>${r.ref(f.id)}${(alsoFor[f.id] ?? []).map((x) => r.ref(x.id)).join("")} ${r.t(f.recommendation)} <span class="owner">${r.t(f.owner)}</span></li>`);
-  const more = phase.findings.length > items.length ? `<p class="owner">The full report lists the rest of this phase.</p>` : "";
+  const quick = phase.key === "quick";
+  const rows = items.map((f) => `<li><strong>${r.t(f.title)}.</strong>${r.ref(f.id)}${(alsoFor[f.id] ?? []).map((x) => r.ref(x.id)).join("")}${quick ? "" : ` ${r.t(f.recommendation)}`}${isUnpricedSaving(f) ? ` ${r.t(UNPRICED)}` : ""} <span class="owner">${r.t(f.owner)}</span></li>`);
+  const more = phase.findings.length > items.length ? `<p class="owner">${quick ? "The full report lists the rest, with what to do for each." : "The full report lists the rest of this phase."}</p>` : "";
   const body = rows.length ? `<ul>${rows.join("")}</ul>${more}` : "<p>Nothing planned for this phase.</p>";
+  if (phase.key === "quick") return `<section class="phase quick"><h3>${r.t(QUICK_WINS_HEADING)}</h3>${body}</section>`;
   return `<section class="phase"><h3>Days ${phase.from} to ${phase.to}: ${phase.title}</h3>${body}</section>`;
 }
 
@@ -187,7 +191,9 @@ export function executiveHtml(report: BuiltReport, pseudonyms: Pseudonymiser): s
   const team = report.teamFindings;
   const verdict = verdictOf(team);
   const top = topIssues(team, TOP_ISSUE_COUNT, report.added);
-  const { phases: plan, alsoFor } = buildPlan(team, report.added);
+  const { phases: urgent, alsoFor, quickWins } = buildPlan(team, report.added);
+  // Quick wins are their own box beside "Stabilise", not part of it (DECISIONS.md 366).
+  const plan = quickWins.length ? [urgent[0]!, { key: "quick", title: "Quick wins", from: 1, to: 30, findings: quickWins }, ...urgent.slice(1)] : urgent;
   const customer = intake?.customerName ?? run.customerRef ?? "Customer";
   const notMeasurable = team.filter((f) => f.status === "not_measurable").length;
   const setupReview = isSetupReview(run);
@@ -248,7 +254,13 @@ export function executiveHtml(report: BuiltReport, pseudonyms: Pseudonymiser): s
   if (risk) add(risk);
 
   // Two pages are kept back: what happens next, and the references.
-  planLayout(r, plan, introHeight, executiveMaxPages(report) - pages.length - 2).forEach((group, i) => {
+  // The quick wins' box mustn't cost the summary a page: it shows as many as fit
+  // in the pages the plan takes without it, down to one (DECISIONS.md 366).
+  const left = executiveMaxPages(report) - pages.length - 2;
+  const without = planLayout(r, urgent, introHeight, left).length;
+  // Failing that, the plan keeps its pages and a box of two, and its longest phases give up an action each until it fits.
+  const fits = [EXECUTIVE_PLAN_ITEMS, 3, 2, 1].map((n) => planLayout(r, plan, introHeight, left, n)).find((layout) => layout.length <= without);
+  (fits ?? planLayout(r, plan, introHeight, without, 2)).forEach((group, i) => {
     const phases = group.filter((b): b is PlanBlock => !("intro" in b));
     add(`<div class="eyebrow">90-day plan</div><h2>${i === 0 ? "What we'd do first" : "What we'd do first, continued"}</h2>${i === 0 ? `<p style="margin-bottom:14px">${r.t(intro)}</p>` : ""}${phases.map((b) => phaseBlock(r, b, alsoFor)).join("")}`);
   });
