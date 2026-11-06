@@ -109,6 +109,14 @@ describe("the deck's wording, as a customer reads it (night 3 reading pass, DECI
     assert.doesNotMatch(html, />(Low|Medium|High|Critical) risk</);
   });
 
+  test("every item after the 90 days carries its reference", () => {
+    const start = html.indexOf("After 90 days");
+    const after = html.slice(start, html.indexOf("What happens next", start));
+    const items = after.match(/<strong>[^<]+<\/strong>(<span class="ref"[^>]*>|<\/td>|<br>)/g) ?? [];
+    assert.ok(items.length > 0);
+    assert.ok(items.every((x) => x.includes('class="ref"')), items.find((x) => !x.includes('class="ref"')));
+  });
+
   test("an area's first steps say each recommendation once", () => {
     for (const panel of html.match(/<h3>What to do first<\/h3><ul>[\s\S]*?<\/ul>/g) ?? []) {
       const items = [...panel.matchAll(/<li>([\s\S]*?)<\/li>/g)].map((m) => m[1]);

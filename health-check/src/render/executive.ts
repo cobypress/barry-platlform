@@ -136,10 +136,20 @@ function pipelinePage(r: Render, report: BuiltReport, body: string): string {
   const table = potential.length
     ? `<h3 class="sub">Potential revenue in open deals</h3><table class="grid"><thead><tr><th>Deals</th><th style="width:30%">Potential revenue</th></tr></thead><tbody>${potential.map((f) => `<tr><td>${r.t(f.title)}${r.ref(f.id)}</td><td>${valueFigure(r, f)}</td></tr>`).join("")}</tbody></table>`
     : "";
+  // Said beside the lines it's about, not only in the text above the chart (night 3 reading pass).
+  const overlap = potential.length > 1 ? `<p style="margin-top:6px;color:var(--muted);font-size:0.85em">${r.t("These lines overlap, so they aren't added together. What fixing this is worth counts only the largest.")}</p>` : "";
   const chart = metrics.some((m) => m.id === "current.delivery_outlook_value")
     ? `<h3 class="sub">Expected won value by month</h3><div style="margin-top:8px">${chartSlot(deliveryOutlookChart(metrics.find((m) => m.id === "current.delivery_outlook_value"), metrics.find((m) => m.id === "current.delivery_outlook_deals"), r.currency))}</div>`
     : "";
-  return `<div class="eyebrow">Pipeline</div><h2>Your pipeline today</h2><div class="lead">${paragraphs(r, body)}</div>${stats ? `<div class="stat-row" style="margin-top:6px">${stats}</div>` : ""}${chart}${table}`;
+  return `<div class="eyebrow">Pipeline</div><h2>Your pipeline today</h2><div class="lead">${paragraphs(r, body)}</div>${stats ? `<div class="stat-row" style="margin-top:6px">${stats}</div>` : ""}${chart}${table}${overlap}`;
+}
+
+/** Which checks couldn't be measured, named, so the tile's count isn't left unexplained. Past three, the count and where to look. */
+function unmeasuredLine(r: Render, report: BuiltReport): string {
+  const open = report.teamFindings.filter((f) => f.status === "not_measurable");
+  if (open.length === 0) return "";
+  const text = open.length <= 3 ? `Not measurable: ${open.map((f) => f.title).join("; ")}. The full report's appendix says why for each.` : "The full report's appendix names each check we couldn't measure, and why.";
+  return `<p style="margin-top:8px;color:var(--muted);font-size:0.85em">${r.t(text)}</p>`;
 }
 
 /** How the one score comes from the area scores, for the scorecard pages. */
@@ -189,7 +199,7 @@ export function executiveHtml(report: BuiltReport, pseudonyms: Pseudonymiser): s
   // One line on AI readiness, only when its verdict is clear (DECISIONS.md 243).
   const aiLine = readinessLine(report.readiness);
   add(`<div class="eyebrow">Verdict</div><div class="headline">${r.t(verdict.headline)}</div><div class="lead">${paragraphs(r, currentBody(built, "verdict").replace(`${verdict.headline}.\n\n`, ""))}</div>
-    <div class="stat-row" style="margin-top:18px">${report.overall.status === "measured" ? `<div class="stat"><b>${report.overall.score}</b><span>Barometer score</span></div>` : ""}<div class="stat"><b>${verdict.issues}</b><span>Issues</span></div><div class="stat"><b>${verdict.critical}</b><span>Critical</span></div><div class="stat"><b>${verdict.high}</b><span>High</span></div><div class="stat"><b>${notMeasurable}</b><span>Not measurable</span></div></div>
+    <div class="stat-row" style="margin-top:18px">${report.overall.status === "measured" ? `<div class="stat"><b>${report.overall.score}</b><span>Barometer score</span></div>` : ""}<div class="stat"><b>${verdict.issues}</b><span>Issues</span></div><div class="stat"><b>${verdict.critical}</b><span>Critical</span></div><div class="stat"><b>${verdict.high}</b><span>High</span></div><div class="stat"><b>${notMeasurable}</b><span>Not measurable</span></div></div>${unmeasuredLine(r, report)}
     ${aiLine ? `<p class="small-note" style="margin-top:10px">${r.t(aiLine)}</p>` : ""}
     <h3 class="sub">What matters most</h3>
     <table class="grid"><thead><tr><th>Issue</th><th style="width:34%">Impact</th></tr></thead><tbody>${top.map((f) => `<tr><td>${r.t(f.title)}${r.ref(f.id)}</td><td>${valueText(r, f).amount}</td></tr>`).join("")}</tbody></table>

@@ -61,6 +61,15 @@ describe("the executive summary, rebuilt around money", () => {
     assert.doesNotMatch(money, /the expected case is the conservative one/);
   });
 
+  test("the checks behind the Not measurable tile are named, and the pipeline page's overlapping lines say so beside them", () => {
+    const report = buildReport(base);
+    const open = report.teamFindings.filter((f) => f.status === "not_measurable");
+    assert.ok(open.length > 0 && open.length <= 3);
+    for (const f of open) assert.ok(html.includes(f.title.replace(/'/g, "&#39;")), f.title);
+    assert.match(html, /Not measurable: .*The full report&#39;s appendix says why for each\.|Not measurable: .*The full report's appendix says why for each\./);
+    assert.match(html, /These lines overlap, so they aren(&#39;|')t added together\./);
+  });
+
   test("the investment page's unassigned seats are the money page's, by the same name, with the share counted", () => {
     const report = buildReport(base);
     const seats = report.value.groups.find((g) => g.id === "unassigned-seats")!;
