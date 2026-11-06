@@ -81,9 +81,13 @@ describe("delivery outlook", () => {
     assert.ok(Number.isInteger(deals.value) && deals.series.every((p) => Number.isInteger(p.value)), "whole deals");
     const value = metric("current.delivery_outlook_value");
     if (value.status !== "measured") return assert.fail("the outlook is measured");
-    const none = deals.series.find((p, i) => p.value === 0 && (value.series[i]!.value ?? 0) > 0);
-    assert.ok(none, "the recording has a month whose value rounds to under one deal");
-    const shown = texts(svg(deliveryOutlookChart(value, deals, "GBP")));
+    // A month whose value rounds to under one deal. The recording had one until its
+    // services deals took realistic cycles (DECISIONS.md 390), so it's made here, as the
+    // metric gives it: some value, and a count that rounds to none.
+    const month = value.series.findIndex((p) => (p.value ?? 0) > 0);
+    assert.ok(month >= 0, "a month with value");
+    const under = { ...deals, series: deals.series.map((p, i) => (i === month ? { ...p, value: 0 } : p)) };
+    const shown = texts(svg(deliveryOutlookChart(value, under, "GBP")));
     assert.ok(shown.includes("under 1 deal"));
     assert.ok(!shown.some((t) => /\d\.\d deals?/.test(t)));
   });

@@ -280,9 +280,10 @@ type PriorWin = { Id: string; AccountId: string; CloseDate: string; IsWon: boole
 /**
  * A services side to the business: account managers selling to retained
  * clients, mostly by word of mouth, with no lead source and a lot of repeat work.
- * It's added after the original deals so their seeded data doesn't move, and
- * every deal here was created over a year ago, so the activity checks, which
- * only read the last year, see exactly what they did before.
+ * It's added after the original deals so their seeded data doesn't move. A deal
+ * is created at its usual lead time before it closes, so its cycle is like the
+ * rest of the org's, and one created inside the last year has its work logged
+ * like the original deals' (buildActivity).
  */
 function buildServices(firstId: number): { opportunities: SyntheticOpportunity[]; history: SyntheticHistory[]; priorWins: PriorWin[] } {
   const random = seeded(SERVICES_SEED);
@@ -294,7 +295,6 @@ function buildServices(firstId: number): { opportunities: SyntheticOpportunity[]
     history.push({ Id: sfId("008", 500_000 + history.length), OpportunityId: oppId, StageName: stage, Amount: amount, CloseDate: close, CreatedDate: stampOf(at) });
   };
   const earliest = asOf - 725 * DAY;
-  const latest = asOf - 366 * DAY;
 
   /** One closed deal along `path`, with its time split across the stages. */
   const closedDeal = (path: string[], final: string, created: number, closed: number): void => {
@@ -349,9 +349,12 @@ function buildServices(firstId: number): { opportunities: SyntheticOpportunity[]
     const outcomes = [...Array<string>(won).fill("Closed Won"), ...Array<string>(lost).fill("lost"), ...Array<string>(noDecision).fill("Closed No Decision")];
     for (const outcome of outcomes) {
       const closed = dayMs(from) + between(0, Math.round((dayMs(to) - dayMs(from)) / DAY)) * DAY;
-      const usual = closed - between(40, 120) * DAY;
-      // A deal closing within the year was created before it, at some point over the months before.
-      const created = Math.max(earliest, usual <= latest ? usual : latest - between(0, 300) * DAY);
+      // Most deals take one to four months; a few retained clients' take five to ten,
+      // and sit in one stage for much of it. Every deal was once pushed back to over a
+      // year old instead, which gave the wins of 2026 cycles of a year or more (night 3
+      // reading pass, item 9).
+      const usual = closed - (random() < 0.12 ? between(150, 300) : between(40, 120)) * DAY;
+      const created = Math.max(earliest, usual);
       const final = outcome === "lost" ? (random() < 0.4 ? "Closed Lost - No Budget" : "Closed Lost") : outcome;
       const depth = final === "Closed Won" ? OPEN_PATH.length : between(1, OPEN_PATH.length);
       closedDeal(OPEN_PATH.slice(0, depth), final, created, closed);
@@ -485,6 +488,13 @@ function buildActivity(): { tasks: SyntheticTask[]; events: SyntheticEvent[]; em
     const at = asOf - between(1, 60) * DAY;
     const logged = i % 2 === 0 ? addTask(deal.OwnerId, deal.Id, at, "Email") : null;
     emails.push({ Id: sfId("02s", i + 1), RelatedToId: deal.Id, ActivityId: logged, MessageDate: stamp(at), CreatedById: deal.OwnerId });
+  }
+
+  // The services side's closed deals created inside the year, touched as the
+  // original deals are. Drawn last, so nothing above moves.
+  for (const deal of services.opportunities.filter((o) => o.IsClosed && new Date(o.CreatedDate.replace("+0000", "Z")).getTime() >= oneYearAgo)) {
+    const count = deal.IsWon ? between(5, 9) : between(1, 4);
+    for (let i = 0; i < count; i++) addTask(deal.OwnerId, deal.Id, new Date(deal.CreatedDate.replace("+0000", "Z")).getTime() + (i + 1) * DAY);
   }
   return { tasks, events, emails };
 }

@@ -78,7 +78,7 @@ describe("the sales process traps fire on the synthetic org", () => {
   test("deals go back a stage, and the EU team's far more than the rest", () => {
     const f = one(findings, "pipe.going-backwards");
     assert.equal(f.status, "issue");
-    assert.equal(f.facts.hits, 109);
+    assert.equal(f.facts.hits, 118);
     assert.match(f.summary, /team Sales EU, 73 of 110 \(66.4%\)/);
     assert.ok(f.segmentsChecked.some((s) => s.dimension === "team"));
     assert.equal(f.value.kind, "not_sized");
@@ -88,7 +88,7 @@ describe("the sales process traps fire on the synthetic org", () => {
     const f = one(findings, "pipe.dead-end-stage");
     assert.equal(f.status, "issue");
     assert.match(f.title, /Prospecting/);
-    assert.equal(f.facts.lost, 104);
+    assert.equal(f.facts.lost, 107);
     assert.ok(f.facts.wait! > f.facts.line!);
     assert.equal(f.recommendationType, "change");
   });
@@ -96,11 +96,11 @@ describe("the sales process traps fire on the synthetic org", () => {
   test("every process metric is measured, and the matrix holds the moves back", () => {
     for (const id of PROCESS_METRIC_IDS) measuredOf(metrics, id);
     const moves = measuredOf(metrics, "historic.stage_transitions");
-    assert.equal(moves.stats.backwards, 109);
+    assert.equal(moves.stats.backwards, 118);
     const { from, to, count } = transitionMatrix(moves, calibration);
     assert.deepEqual(from.slice(0, 2), ["Prospecting", "Qualified"]);
     assert.equal(to.at(-1), "Closed No Decision");
-    assert.equal(count("Discovery", "Prospecting"), 77);
+    assert.equal(count("Discovery", "Prospecting"), 82);
     assert.equal(count("Negotiation", "Closed Won"), 164);
     assert.equal(count("Closed Won", "Prospecting"), null);
     // Every move is one cell, so the cells add up to the total.
@@ -114,7 +114,7 @@ describe("the sales process traps fire on the synthetic org", () => {
     const lost = measuredOf(metrics, "historic.path_to_lost");
     assert.equal(lost.segments[0]!.key, "Prospecting > Closed Lost");
     assert.ok(lost.segments.length <= 5);
-    assert.equal(measuredOf(metrics, "historic.went_backwards").value, 25.9);
+    assert.equal(measuredOf(metrics, "historic.went_backwards").value, 28);
   });
 });
 

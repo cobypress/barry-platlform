@@ -155,7 +155,7 @@ describe("which comparisons the one-pager shows (DECISIONS.md 354)", () => {
   });
 
   test("on the sample, the one behind says it's worse, not only higher", () => {
-    assert.match(onePagerHtml(buildReport(base), pseudonyms), /so yours is 43 points higher, which is worse\./);
+    assert.match(onePagerHtml(buildReport(base), pseudonyms), /so yours is 44 points higher, which is worse\./);
   });
 
   test("only flattering ones when nothing is behind", () => {

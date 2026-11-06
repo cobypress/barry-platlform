@@ -132,7 +132,7 @@ describe("the sales process", () => {
     assert.deepEqual(order, [...order].sort((a, b) => a - b));
     assert.ok(order.every((i) => i > 0));
     assert.match(markup, /Rarely used, left out: Qualified/);
-    assert.match(markup, />395</, "Prospecting to Discovery is the main flow, not a skip");
+    assert.match(markup, />401</, "Prospecting to Discovery is the main flow, not a skip");
     assert.match(markup, /<path d="M[^"]+Q[^"]+" fill="none" stroke="#FCFFF3" stroke-width="[\d.]+" stroke-dasharray="6 4"\/>/, "a move back");
     assert.match(markup, /<path d="M[^"]+Q[^"]+" fill="none" stroke="#FCFFF3" stroke-width="[\d.]+"\/>/, "a skip");
   });
