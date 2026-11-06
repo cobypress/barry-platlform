@@ -68,7 +68,24 @@ export type PipelineData =
       unmapped: { finalStages: string[]; historyStages: string[] };
     };
 
+/**
+ * Deals built once for each analysis, by the analysis's own data accessor:
+ * every input here is fixed for the length of one. Twenty-odd rules and
+ * metrics read them, and each rebuilt a big org's 200,000 deals before
+ * (DECISIONS.md 343). Rules only read what they're given.
+ */
+const built = new WeakMap<RuleContext["data"], PipelineData>();
+
 export function loadPipeline(ctx: Omit<RuleContext, "metrics">): PipelineData {
+  let data = built.get(ctx.data);
+  if (!data) {
+    data = buildPipeline(ctx);
+    built.set(ctx.data, data);
+  }
+  return data;
+}
+
+function buildPipeline(ctx: Omit<RuleContext, "metrics">): PipelineData {
   const extract = ctx.data(opportunitiesExtractor);
   const { opportunities, history } = extract;
   const evidence = [
