@@ -325,7 +325,7 @@ const codeSize: Rule = {
 
 const classicLeftovers: Rule = {
   id: "tech.classic-leftovers",
-  version: 1,
+  version: 2,
   domain: DOMAIN,
   title: "Set-up that only works in Salesforce Classic",
   evaluate(ctx): RuleResult | RuleResult[] {
@@ -342,7 +342,8 @@ const classicLeftovers: Rule = {
       ctx.ev(pages.source, { count: classicPages.length, exclusions: ["Installed packages' pages", "Pages marked available in Lightning Experience"] }),
     ];
     const segments = [{ dimension: "component type", segments: 3 }];
-    const facts = { javascriptButtons: javascript.length, scontrols: controls.length, classicPages: classicPages.length, pages: pages.data.length };
+    // Unread s-controls aren't a count of none (DECISIONS.md 291).
+    const facts = { javascriptButtons: javascript.length, ...(scontrols.status === "ok" ? { scontrols: controls.length } : {}), classicPages: classicPages.length, pages: pages.data.length };
     if (javascript.length + controls.length + classicPages.length === 0) {
       if (scontrols.status !== "ok") return { outcome: "not_measurable", reason: `There are no JavaScript buttons or Classic-only pages, but s-controls couldn't be read: ${scontrols.reason}`, evidence };
       return { outcome: "pass", summary: `No JavaScript buttons or s-controls, and all ${plural(pages.data.length, "Visualforce page")} ${pages.data.length === 1 ? "is" : "are"} marked available in Lightning Experience.`, evidence, segmentsChecked: segments, facts };

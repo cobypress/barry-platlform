@@ -26,6 +26,8 @@ raw-notes.md <── renderRawNotes <── findings, metrics, manual steps <─
 
 Extraction talks to Salesforce and costs API calls. Analysis is a pure function of the checkpoints, so it can be re-run for free and always gives the same result.
 
+The last step of every run is the facts step (`src/extract/facts.ts`, DECISIONS.md 287 to 295). It checks the Salesforce names the engine assumes but couldn't verify offline, listed in `src/facts/assumptions.ts`, each with the QUESTIONS.md item it settles and the checks that rest on it. It writes `facts.json`. `hc facts` runs it alone, and `npm run questions` reads any number of facts files against QUESTIONS.md. When a rule depends on a name you couldn't verify, add an assumption for it, and a contradiction for it to the test in `src/facts/__tests__/facts.test.ts`, which proves the rule goes not measurable rather than wrong.
+
 ## Modules
 
 ```
@@ -161,6 +163,7 @@ The benchmark set is kept apart, in `~/.barometer/benchmarks/rows.jsonl` (folder
 | `benchmark-consent.json` | Who agreed to the benchmark export, how, when, and which metric keys went | No |
 | `pseudonym-map.json` | Names by token, and a token for each first name two people share | Never |
 | `findings.json`, `metrics.json`, `manual-steps.json` | Aggregates, metadata names and tokens | Yes |
+| `facts.json` | Whether the Salesforce names we assume exist: names, booleans and field types only. Kept with the findings | No: our own record |
 | `raw-notes.md` | Real names | Never: customer deliverable |
 | `raw-notes.docx`, `executive-summary.pdf`, `full-health-check.pdf` | Real names in the notes, team level in the PDFs | Never: customer deliverables |
 | `report-sections.json`, `layout-report.json`, `narrative-rejections.json` | Section text, tokens and check results | No: review records |

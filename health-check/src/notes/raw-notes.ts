@@ -1,4 +1,5 @@
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
+import { factsText, type FactsSummary } from "../facts/summary.ts";
 import type { Calibration, Evidence, Finding, ManualStep, Metric, Run, Score } from "../schemas/index.ts";
 import { domainLabel } from "../narrative/select.ts";
 import { automationOf, INVENTORY_COLUMNS, inventoryRows, OBJECT_INVENTORY } from "../domains/configuration/inventory.ts";
@@ -116,8 +117,8 @@ function manualBlock(s: ManualStep): string {
 
 const scoreLine = (s: Score): string => `| ${domainLabel(s.domain)} | ${s.status === "measured" ? s.score : `Not measurable. ${s.reason}`} |`;
 
-export function renderRawNotes(input: { run: Run; calibration: Calibration; findings: Finding[]; metrics: Metric[]; manualSteps: ManualStep[]; pseudonyms: Pseudonymiser; scores?: Score[] }): string {
-  const { run, calibration, findings, metrics, manualSteps, pseudonyms, scores = [] } = input;
+export function renderRawNotes(input: { run: Run; calibration: Calibration; findings: Finding[]; metrics: Metric[]; manualSteps: ManualStep[]; pseudonyms: Pseudonymiser; scores?: Score[]; facts?: FactsSummary | null }): string {
+  const { run, calibration, findings, metrics, manualSteps, pseudonyms, scores = [], facts = null } = input;
   const issues = findings.filter((f) => f.status === "issue").sort((a, b) => SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity) || a.id.localeCompare(b.id));
   const passed = findings.filter((f) => f.status === "passed");
   const notMeasurable = findings.filter((f) => f.status === "not_measurable");
@@ -148,6 +149,7 @@ export function renderRawNotes(input: { run: Run; calibration: Calibration; find
     `- Stage meanings: ${calibration.stages.map((s) => `${s.name} (${s.category})`).join(", ")}`,
     `- A user counts as dormant after ${calibration.dormantDays} days without logging in`,
     `- A figure needs at least ${calibration.minSample} deals behind it`,
+    ...(facts ? factsText(facts, (ruleId) => findings.find((f) => f.ruleId === ruleId)?.title).map((line) => `- ${line}`) : []),
     "",
     "## Manual steps",
     "",

@@ -11,7 +11,8 @@
     "test": "node --test \"src/**/__tests__/*.test.ts\"",
     "typecheck": "tsc --noEmit",
     "fixtures": "node src/testing/record-fixtures.ts",
-    "sample": "node src/render/sample.ts"
+    "sample": "node src/render/sample.ts",
+    "questions": "node src/facts/questions-report.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.4.0",

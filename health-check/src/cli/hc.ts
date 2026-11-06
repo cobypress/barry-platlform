@@ -25,6 +25,9 @@ const USAGE = `Black Cloud Barometer
       --service adds Service Cloud's two areas to the Sales Cloud ones
       --cpq adds Salesforce CPQ's two areas
       --pardot adds Marketing Cloud Account Engagement's area
+  hc facts --org <alias> [--out <dir>]
+  hc facts --connection <name> [--out <dir>]
+      checks the Salesforce names the engine assumes, reading no records
   hc render --run <run folder> [--narrative]
   hc benchmark --run <run folder> --consent "<who agreed and how>" [--industry <industry>] [--headcount <band>] [--out <dir>]
   hc benchmark --summary [--out <dir>]
@@ -37,6 +40,7 @@ Options:
   --connection <name>  Run through a stored OAuth connection instead of a CLI alias
   --answers <file>     Manual step answers (JSON array)
   --out <dir>          Where runs are written. Default: ~/.barometer/runs
+                       For facts, where its folder goes. Default: ~/.barometer/facts
                        For benchmark, the benchmark set's folder. Default: ~/.barometer/benchmarks
   --resume <run id>    Carry on a run that stopped at its API budget
   --budget-share <n>   Stop at this share of the org's daily API limit, 0 to 1
@@ -148,6 +152,21 @@ async function main(argv: string[]): Promise<number> {
   if (positionals[0] === "worker" && !values.help) return workerCommand();
 
   if (positionals[0] === "connect") return connectCommand(values.help ? undefined : positionals[1], values);
+
+  if (positionals[0] === "facts" && !values.help) {
+    if (!values.org === !values.connection) {
+      console.log(USAGE);
+      return EXIT.failed;
+    }
+    const { runFacts } = await import("../facts/run-facts.ts");
+    const provider: ConnectionProvider = values.connection ? new OAuthConnectionProvider(values.connection, { store: connectionStore(), client: optionalClient() }) : new SfCliConnectionProvider(values.org!);
+    const { dir, facts } = await runFacts({ provider, outDir: values.out ?? join(homedir(), ".barometer", "facts"), apiVersion: values["api-version"] ?? process.env.HC_SF_API_VERSION });
+    const count = (outcome: string): number => facts.facts.filter((f) => f.outcome === outcome).length;
+    console.log(`${facts.facts.length} facts in ${facts.calls} calls: ${count("confirmed")} as expected, ${count("contradicted")} different, ${count("open")} not seen yet, ${count("not_checked")} not checked.`);
+    for (const f of facts.facts.filter((x) => x.outcome === "contradicted")) console.log(`  ${f.id} (${f.question}): ${f.detail}`);
+    console.log(`Written to ${dir}\nnpm run questions -- ${dir}`);
+    return EXIT.ok;
+  }
 
   if (positionals[0] === "render" && values.run) {
     // Loaded here so `hc run` never needs Chromium or the Claude SDK.
