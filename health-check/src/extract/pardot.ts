@@ -15,8 +15,12 @@ export const PARDOT_NAMESPACE = "pi";
 export const PI_FIELDS = { url: "pi__url__c", score: "pi__score__c", grade: "pi__grade__c" } as const;
 /** A synced lead nobody has touched this long after it was created has been left unworked. Our judgement. */
 export const UNWORKED_DAYS = 14;
-/** The most open synced leads read. More is a part, and the checks say so. */
-export const PARDOT_LEAD_ROWS = 20_000;
+/**
+ * The most open synced leads read. A 500-user org has about 28,000 handed over
+ * in the last 90 days, so they're read in full (DECISIONS.md 385). More is a
+ * part, and the checks say so.
+ */
+export const PARDOT_LEAD_ROWS = 100_000;
 
 export type PardotPresence = { status: "installed"; leadFields: string[] } | { status: "absent" | "unknown"; reason: string };
 

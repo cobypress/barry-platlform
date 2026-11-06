@@ -1,14 +1,38 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { FIVE_HUNDRED_USERS } from "../../testing/scale-org.ts";
+import { buildScaleOrg, FIVE_HUNDRED_USERS } from "../../testing/scale-org.ts";
+import { FORECAST_MAX_ROWS } from "../forecast.ts";
 import { RECORD_READ_CAP } from "../opportunities.ts";
+import { PARDOT_LEAD_ROWS } from "../pardot.ts";
+import { CASE_ROW_CAP } from "../service.ts";
 
-// A 500-user customer's activity and leads are read in full (DECISIONS.md 381):
-// the capped reads hold the scale test's 500-user org. At or over the cap a
-// read is a part, so each must be under it.
+// A 500-user customer is read in full (DECISIONS.md 381 to 385): every capped
+// read holds the scale test's 500-user org. At or over its cap a read is a
+// part, so each list must be under it.
 
-test("the capped reads hold a 500-user org's year of tasks and events, and its leads, in full", () => {
-  for (const [what, rows] of [["tasks", FIVE_HUNDRED_USERS.tasks], ["events", FIVE_HUNDRED_USERS.events], ["leads", FIVE_HUNDRED_USERS.leads]] as const) {
-    assert.ok(rows < RECORD_READ_CAP, `${what}: ${rows} against a cap of ${RECORD_READ_CAP}`);
-  }
-});
+const org = buildScaleOrg(FIVE_HUNDRED_USERS);
+const cases = org.supportCases.cases;
+
+const lists: Array<[string, number, number]> = [
+  ["tasks", org.activity.tasks.length, RECORD_READ_CAP],
+  ["events", org.activity.events.length, RECORD_READ_CAP],
+  ["emails", org.activity.emails.length, RECORD_READ_CAP],
+  ["leads", org.leadFunnel.leads.length, RECORD_READ_CAP],
+  ["lead status changes", org.leadFunnel.statusChanges.length, RECORD_READ_CAP],
+  ["campaign members", org.leadFunnel.members.length, RECORD_READ_CAP],
+  ["forecast facts", org.forecastFacts.length, FORECAST_MAX_ROWS],
+  ["forecast rows", org.forecastItems.length, FORECAST_MAX_ROWS],
+  ["open cases", cases.filter((c) => !c.IsClosed).length, CASE_ROW_CAP],
+  ["closed cases", cases.filter((c) => c.IsClosed).length, CASE_ROW_CAP],
+  ["case status changes", org.supportCases.history.length, CASE_ROW_CAP],
+  ["case milestones", org.supportCases.milestones.length, CASE_ROW_CAP],
+  ["case replies", org.supportCases.replies.length, CASE_ROW_CAP],
+  ["routed work", org.supportCases.work.length, CASE_ROW_CAP],
+  ["open synced leads", org.pardotOpenLeads.length, PARDOT_LEAD_ROWS],
+];
+
+for (const [what, rows, cap] of lists) {
+  test(`a 500-user org's ${what} are read in full: ${rows.toLocaleString("en-GB")} under a cap of ${cap.toLocaleString("en-GB")}`, () => {
+    assert.ok(rows < cap, `${what}: ${rows} against ${cap}`);
+  });
+}
