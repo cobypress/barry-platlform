@@ -1,7 +1,7 @@
 import type { ScanResult } from "../scan/result.ts";
 import type { PulseResult } from "../pulse/result.ts";
 import { Run, type BenchmarkRow, type ConnectLink } from "../schemas/index.ts";
-import { ORG_AWAITING_CONNECT, RunClosedError, type ConnectJobInput, type DocumentsJobInput, type DocumentsMade, type LinkConnected, type LinkState, type PulseRun, type ReleasedRun, type RunJobInput, type RunOutputRecord, type RunProgress, type WorkerStore } from "./types.ts";
+import { ORG_AWAITING_CONNECT, RunClosedError, type ConnectJobInput, type DocumentsJobInput, type DriveShare, type ShareJobInput, type DocumentsMade, type LinkConnected, type LinkState, type PulseRun, type ReleasedRun, type RunJobInput, type RunOutputRecord, type RunProgress, type WorkerStore } from "./types.ts";
 
 // The WorkerStore for tests: the console's tables as plain maps, with the same
 // rules a database store must keep. Writes replace; a run in review or
@@ -183,6 +183,33 @@ export class MemoryWorkerStore implements WorkerStore {
 
   async listReleasedRuns(): Promise<ReleasedRun[]> {
     return [...this.runs.values()].filter((r) => r.run.status === "released").map((r) => ({ runId: r.run.id, releasedAt: this.releasedAt.get(r.run.id) ?? null }));
+  }
+
+  /** The microsite's readers, by run id, as the console keeps them. */
+  readonly readers = new Map<string, string[]>();
+  /** The console's share rows. */
+  shares: DriveShare[] = [];
+  /** False stands in for a console without the share table. */
+  sharesRecordable = true;
+
+  async loadShareJob(runId: string): Promise<ShareJobInput | null> {
+    const run = this.runs.get(runId)?.run ?? this.documents.get(runId)?.input.run;
+    if (!run) return null;
+    return {
+      runId,
+      released: run.status === "released",
+      folderId: this.documents.get(runId)?.input.driveFolderId ?? null,
+      readers: [...(this.readers.get(runId) ?? [])],
+      shares: structuredClone(this.shares.filter((s) => s.runId === runId)),
+      recordable: this.sharesRecordable,
+    };
+  }
+
+  async saveShare(share: DriveShare): Promise<void> {
+    const at = this.shares.findIndex((s) => s.runId === share.runId && s.folderId === share.folderId && s.email === share.email);
+    if (at === -1) this.shares.push(structuredClone(share));
+    else this.shares[at] = structuredClone(share);
+    this.writes.push({ method: "saveShare", id: share.runId, detail: share.state });
   }
 
   async failDocuments(runId: string, reason: string, _at: string): Promise<void> {

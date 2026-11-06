@@ -16,6 +16,8 @@ import {
   type DocumentsJobInput,
   type DocumentsMade,
   type DocumentsState,
+  type DriveShare,
+  type ShareJobInput,
   type LinkConnected,
   type RunJobInput,
   type RunOutputRecord,
@@ -147,6 +149,37 @@ export function interviewsFromRows(rows: Array<Record<string, unknown>>): Interv
     return parsed.success ? [parsed.data] : [];
   });
   return read.length ? read : null;
+}
+
+// The console's record of who the run's Drive folder is shared with (DECISIONS.md 252):
+// one row a run, folder and address, written only by the worker.
+export const DRIVE_SHARE: Columns = {
+  runId: "text", email: "text", folderId: "text", permissionId: "text", state: "text", sharedAt: "ts", removedAt: "ts", removedWhy: "text", error: "text", updatedAt: "ts",
+};
+
+/** A share row, or null when it can't be read as one. */
+export function shareFromRow(row: Record<string, unknown>): DriveShare | null {
+  const state = row.state;
+  if (state !== "shared" && state !== "removed" && state !== "failed") return null;
+  const why = row.removedWhy;
+  return {
+    runId: String(row.runId),
+    email: String(row.email),
+    folderId: String(row.folderId),
+    permissionId: (row.permissionId as string | null) ?? null,
+    state,
+    sharedAt: (row.sharedAt as string | null) ?? null,
+    removedAt: (row.removedAt as string | null) ?? null,
+    removedWhy: why === "reader_removed" || why === "folder_changed" || why === "retention" ? why : null,
+    error: (row.error as string | null) ?? null,
+    updatedAt: String(row.updatedAt),
+  };
+}
+
+/** The microsite's readers, from its JSON list of { email, addedBy, addedAt }. Anything that isn't an address is left out. */
+export function readersFromRow(row: Record<string, unknown> | undefined): string[] {
+  const list = Array.isArray(row?.readers) ? (row!.readers as unknown[]) : [];
+  return [...new Set(list.flatMap((r) => (r && typeof r === "object" && typeof (r as { email?: unknown }).email === "string" ? [(r as { email: string }).email.trim().toLowerCase()] : [])).filter((e) => e.includes("@")))];
 }
 
 export const CALIBRATION: Columns = {
@@ -395,6 +428,37 @@ export class PostgresWorkerStore implements WorkerStore {
   /** The run's interviews. Without the table, there are none (DECISIONS.md 180). */
   async #interviews(runId: string): Promise<Interview[] | null> {
     return interviewsFromRows((await this.#surveyQuery(INTERVIEW_SQL, runId)).rows);
+  }
+
+  async loadShareJob(runId: string): Promise<ShareJobInput | null> {
+    const run = one(await this.#pool.query(`SELECT "status" FROM "HealthCheckRun" WHERE "id" = $1`, [runId]));
+    if (!run) return null;
+    const [documents, access] = await Promise.all([
+      this.#pool.query(`SELECT "driveFolderId" FROM "HealthCheckDocuments" WHERE "runId" = $1`, [runId]),
+      this.#surveyQuery(`SELECT "readers" FROM "HealthCheckMicrositeAccess" WHERE "runId" = $1`, runId),
+    ]);
+    // The share table is the console's newest: without it, nothing can be recorded, so nothing is shared.
+    let shares: SqlResult;
+    try {
+      shares = await this.#pool.query(selectSql("HealthCheckDriveShare", DRIVE_SHARE, `"runId" = $1`, `"email", "folderId"`), [runId]);
+    } catch (err) {
+      if ((err as { code?: string }).code !== "42P01") throw err;
+      return { runId, released: run.status === "released", folderId: null, readers: [], shares: [], recordable: false };
+    }
+    return {
+      runId,
+      released: run.status === "released",
+      folderId: (one(documents)?.driveFolderId as string | null | undefined) ?? null,
+      readers: readersFromRow(one(access)),
+      shares: shares.rows.flatMap((r) => shareFromRow(r) ?? []),
+      recordable: true,
+    };
+  }
+
+  async saveShare(share: DriveShare): Promise<void> {
+    const { text, values } = insertSql("HealthCheckDriveShare", DRIVE_SHARE, share);
+    const update = Object.keys(DRIVE_SHARE).filter((c) => !["runId", "folderId", "email"].includes(c)).map((c) => `"${c}" = EXCLUDED."${c}"`).join(", ");
+    await this.#pool.query(`${text} ON CONFLICT ("runId", "folderId", "email") DO UPDATE SET ${update}`, values);
   }
 
   /** The run's survey: sent or not, and its answers. Without either table, it wasn't sent. */

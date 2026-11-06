@@ -13,6 +13,8 @@ import type { Interview } from "../interviews/questions.ts";
 const RunJobPayload = z.object({ kind: z.literal("run"), runId: z.string().min(1).max(100), correlation_id: z.string().max(300).optional() }).strict();
 const ConnectJobPayload = z.object({ kind: z.literal("connect"), linkId: z.string().uuid(), correlation_id: z.string().max(300).optional() }).strict();
 const DocumentsJobPayload = z.object({ kind: z.literal("documents"), runId: z.string().min(1).max(100), correlation_id: z.string().max(300).optional() }).strict();
+/** The console's readers changed on a released run: share its Drive folder to match (DECISIONS.md 251). */
+const ShareJobPayload = z.object({ kind: z.literal("share"), runId: z.string().min(1).max(100), correlation_id: z.string().max(300).optional() }).strict();
 /**
  * What lib/health-check/jobs.ts in the console sends today, before C2 moves it
  * to the contract. One step per job isn't needed: the engine's steps resume
@@ -20,7 +22,7 @@ const DocumentsJobPayload = z.object({ kind: z.literal("documents"), runId: z.st
  */
 const LegacyStepPayload = z.object({ runId: z.string().min(1).max(100), stepId: z.string().min(1).max(100), correlation_id: z.string().max(300) }).strict();
 
-export type WorkerJob = { kind: "run"; runId: string } | { kind: "connect"; linkId: string } | { kind: "documents"; runId: string };
+export type WorkerJob = { kind: "run"; runId: string } | { kind: "connect"; linkId: string } | { kind: "documents"; runId: string } | { kind: "share"; runId: string };
 
 export class BadJobError extends Error {
   constructor(message: string) {
@@ -37,9 +39,11 @@ export function parseJob(data: unknown): WorkerJob {
   if (connect.success) return { kind: "connect", linkId: connect.data.linkId };
   const documents = DocumentsJobPayload.safeParse(data);
   if (documents.success) return { kind: "documents", runId: documents.data.runId };
+  const share = ShareJobPayload.safeParse(data);
+  if (share.success) return { kind: "share", runId: share.data.runId };
   const legacy = LegacyStepPayload.safeParse(data);
   if (legacy.success) return { kind: "run", runId: legacy.data.runId };
-  throw new BadJobError("The job isn't a run, connect or documents job with ids only");
+  throw new BadJobError("The job isn't a run, connect, documents or share job with ids only");
 }
 
 /** The console's link states (contract with C2). */
@@ -150,6 +154,41 @@ export type DocumentsMade = {
   warnings: string[];
 };
 
+/**
+ * One person's read access to a released run's Drive folder, as the worker
+ * records it in the console's HealthCheckDriveShare (DECISIONS.md 252). One
+ * row a run, folder and address: shared, then removed, and shared again if
+ * they're added back. Failed keeps the reason, never a token.
+ */
+export type DriveShareState = "shared" | "removed" | "failed";
+export type DriveShareRemoved = "reader_removed" | "folder_changed" | "retention";
+export type DriveShare = {
+  runId: string;
+  email: string;
+  folderId: string;
+  permissionId: string | null;
+  state: DriveShareState;
+  sharedAt: string | null;
+  removedAt: string | null;
+  removedWhy: DriveShareRemoved | null;
+  error: string | null;
+  updatedAt: string;
+};
+
+/** What a share job needs: whether the run may be shared yet, its folder, who should have it, and who has. */
+export type ShareJobInput = {
+  runId: string;
+  /** Rule 10: only a released run's folder is ever shared. */
+  released: boolean;
+  /** The run's "Health check n" folder, from its last documents make. Null until there's one. */
+  folderId: string | null;
+  /** The microsite's readers, lower-cased. */
+  readers: string[];
+  shares: DriveShare[];
+  /** False when the console's share table isn't there yet, so nothing can be recorded and nothing is shared. */
+  recordable: boolean;
+};
+
 /** Raised by a store when the console has moved a run on, so the worker mustn't write to it. */
 export class RunClosedError extends Error {
   constructor(runId: string, status: string) {
@@ -184,6 +223,11 @@ export interface WorkerStore {
   saveDocuments(runId: string, made: DocumentsMade): Promise<void>;
   /** A reason the console can show. Never a token or a name. */
   failDocuments(runId: string, reason: string, at: string): Promise<void>;
+
+  /** The run's readers and shares, for a share job or the retention sweep. Null when there's no such run. */
+  loadShareJob(runId: string): Promise<ShareJobInput | null>;
+  /** One person's share on one folder, replacing the row for that run, folder and address. */
+  saveShare(share: DriveShare): Promise<void>;
 
   /** A consenting run's benchmark figures, all or none. The rows carry nothing that leads back to the run (rule 11). */
   addBenchmarkRows(rows: BenchmarkRow[]): Promise<void>;

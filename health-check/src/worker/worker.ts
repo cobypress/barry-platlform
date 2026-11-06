@@ -3,6 +3,7 @@ import { processConnectJob } from "./connect-job.ts";
 import type { Attempt, JobOutcome, WorkerDeps } from "./deps.ts";
 import { processDocumentsJob } from "./documents-job.ts";
 import { processRunJob } from "./run-job.ts";
+import { processShareJob } from "./share-job.ts";
 import { parseJob } from "./types.ts";
 
 // The one entry point a queue calls. It returns when the job is settled one
@@ -19,6 +20,7 @@ export function createJobHandler(deps: WorkerDeps): JobHandler {
   return async (data, attempt) => {
     const job = parseJob(data);
     if (job.kind === "documents") return processDocumentsJob(job.runId, deps, attempt);
+    if (job.kind === "share") return processShareJob(job.runId, deps, attempt);
     return job.kind === "run" ? processRunJob(job.runId, deps, attempt) : processConnectJob(job.linkId, deps, attempt);
   };
 }

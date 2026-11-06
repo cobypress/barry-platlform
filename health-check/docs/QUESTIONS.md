@@ -206,3 +206,12 @@ d) Whether CPQ always has a `PackageLicense` row with namespace SBQQ. If it does
 e) Advanced Approvals: how its approval records point to a quote, so `cpq.discount-approvals` could read them rather than going not measurable.
 f) Revenue Cloud Advanced (Agentforce Revenue Management): its quote, pricing procedure and order objects, before we build for it.
 g) Twin fields: whether CPQ treats any differing types as compatible, such as text and text area, which we'd report as a mismatch today.
+
+## Sharing the Drive folder (DECISIONS.md 251 to 256)
+
+To check with the real service account, on a copy of the Health checks folder:
+
+a) Does `drive.file` reach everything the documents job does? Creating a client folder inside "Health checks", which a person made, listing it, and reading it by id. If it does, the scope can narrow from `drive` (255).
+b) Is the service account a Manager of the shared drive, or is "Content managers can share folders" on? Without one of them, every share fails with Drive's reason recorded on the console's share row.
+c) Does the shared drive allow sharing with people outside the organisation? The customer's readers are outside it.
+d) Does a reader without a Google account get in from Google's email, and how long does that invitation last?

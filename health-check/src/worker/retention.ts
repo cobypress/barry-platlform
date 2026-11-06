@@ -2,6 +2,8 @@ import { existsSync, lstatSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { deleteRunFolder, isPurged, purgeRun } from "../retention/purge.ts";
 import { JobBusyError, withJobLock } from "./lock.ts";
+import type { FolderSharing } from "./drive.ts";
+import { syncShares } from "./share-job.ts";
 import type { ReleasedRun, WorkerStore } from "./types.ts";
 
 // Roadmap 2.3 and decision 16: a released run's raw extracts go 30 days after
@@ -23,12 +25,14 @@ const DAY = 86_400_000;
 // The engine's own rule for a run id, so the id can only name a folder directly inside the runs folder.
 const RUN_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/;
 
-export type RetentionAction = "extracts_deleted" | "folder_deleted" | "kept" | "already_purged" | "no_folder" | "no_release_date" | "busy" | "refused";
+export type RetentionAction = "extracts_deleted" | "folder_deleted" | "kept" | "already_purged" | "no_folder" | "no_release_date" | "busy" | "refused" | "access_kept";
 
 export type RetentionOutcome = { runId: string; action: RetentionAction; files: number; dryRun: boolean; reason?: string };
 
 export type RetentionDeps = {
-  store: Pick<WorkerStore, "listReleasedRuns" | "listPulseRuns">;
+  store: Pick<WorkerStore, "listReleasedRuns" | "listPulseRuns" | "loadShareJob" | "saveShare">;
+  /** Takes the customer's Drive access away at 12 months, before the run folder goes (DECISIONS.md 254). */
+  sharing?: FolderSharing | null;
   runsDir: string;
   /** The jobs' lock folder, so a documents job and the sweep never work on one run at once. */
   locksDir?: string;
@@ -79,6 +83,23 @@ const WHY: Partial<Record<RetentionAction, string>> = {
   folder_deleted: `the whole run folder, ${FOLDER_RETENTION_MONTHS} months after release, or after a pulse finished`,
 };
 
+/**
+ * Takes away everyone's access to a run's Drive folder, and says how many
+ * still have it. A dry run takes nothing away and counts who would lose it.
+ * The run folder is kept while anyone does, so the record of who has it isn't
+ * lost before they've lost it.
+ */
+async function accessLeft(runId: string, deps: RetentionDeps, now: Date): Promise<number> {
+  const input = await deps.store.loadShareJob(runId);
+  const active = input?.shares.filter((s) => s.state === "shared").length ?? 0;
+  if (active === 0 || deps.dryRun) {
+    if (active) deps.log(`Retention: run ${runId}: would take Drive access away from ${active} ${active === 1 ? "person" : "people"}.`);
+    return 0;
+  }
+  const result = await syncShares(runId, { store: deps.store, sharing: deps.sharing ?? null, now: () => now, log: deps.log }, { revokeAll: "retention" });
+  return result.failed;
+}
+
 /** One pass over every released run. Logs counts and run ids only, never a path or a name. */
 export async function retentionSweep(deps: RetentionDeps): Promise<RetentionOutcome[]> {
   const now = deps.now ?? new Date();
@@ -91,7 +112,15 @@ export async function retentionSweep(deps: RetentionDeps): Promise<RetentionOutc
   for (const run of runs) {
     let result: RetentionOutcome;
     try {
-      const work = async (): Promise<RetentionOutcome> => sweepOne(run, root, now, deps.dryRun);
+      const work = async (): Promise<RetentionOutcome> => {
+        // At 12 months, everyone's access to the Drive folder goes first, whether or not the run folder is still here.
+        const released = run.releasedAt ? new Date(run.releasedAt) : null;
+        if (released && !Number.isNaN(released.getTime()) && RUN_ID.test(run.runId) && dueFor(released, now) === "folder") {
+          const left = await accessLeft(run.runId, deps, now);
+          if (left > 0) return { runId: run.runId, action: "access_kept", files: 0, dryRun: deps.dryRun, reason: `${left} ${left === 1 ? "person still has" : "people still have"} the Drive folder` };
+        }
+        return sweepOne(run, root, now, deps.dryRun);
+      };
       result = deps.locksDir && RUN_ID.test(run.runId) ? await withJobLock(deps.locksDir, `run-${run.runId}`, work) : await work();
     } catch (err) {
       // A job holds the run: the next sweep will get it.
@@ -103,6 +132,7 @@ export async function retentionSweep(deps: RetentionDeps): Promise<RetentionOutc
     const why = WHY[result.action];
     if (why) deps.log(`Retention: run ${run.runId}: ${deps.dryRun ? "would delete" : "deleted"} ${why}${deps.dryRun ? "" : ` (${result.files} files)`}.`);
     if (result.action === "refused") deps.log(`Retention: run ${run.runId}: refused, ${result.reason}. Nothing was deleted.`);
+    if (result.action === "access_kept") deps.log(`Retention: run ${run.runId}: ${result.reason}, so its folder is kept until the next sweep takes their access away.`);
   }
   const count = (action: RetentionAction): number => outcomes.filter((o) => o.action === action).length;
   deps.log(

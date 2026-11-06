@@ -35,6 +35,27 @@ export interface DocumentDrive {
   moveFile(id: string, fromParentId: string, toParentId: string): Promise<void>;
 }
 
+/**
+ * Sharing a released run's folder with the customer's readers (DECISIONS.md
+ * 251). Always one named person, always as a reader: there's no way here to
+ * share with a domain, a group or "anyone with the link", or to give more than
+ * read access.
+ */
+export interface FolderSharing {
+  /** Gives one person read access to a folder, and returns the permission's id. */
+  share(folderId: string, email: string): Promise<string>;
+  /** Takes a permission away. One already gone is fine. */
+  unshare(folderId: string, permissionId: string): Promise<void>;
+}
+
+/** The only permission the worker ever creates. Frozen, so nothing can widen it on the way. */
+export const READER_PERMISSION = Object.freeze({ type: "user", role: "reader" } as const);
+
+// A permission id is digits, or letters for some kinds Google returns. Checked before it goes into a path.
+const PERMISSION_ID = /^[A-Za-z0-9_-]{1,200}$/;
+// The address goes into a JSON body, never a path, but nothing that isn't one goes at all.
+const EMAIL = /^[^\s@"<>]{1,64}@[A-Za-z0-9.-]{1,253}\.[A-Za-z]{2,63}$/;
+
 export class DriveError extends Error {
   constructor(message: string) {
     super(message);
@@ -61,7 +82,7 @@ const GOOGLE_HOSTS: ReadonlySet<string> = new Set(["www.googleapis.com", "oauth2
 
 type Fetch = typeof fetch;
 
-export class GoogleDrive implements DocumentDrive {
+export class GoogleDrive implements DocumentDrive, FolderSharing {
   readonly rootFolderId: string;
   readonly #config: DriveConfig;
   readonly #fetch: Fetch;
@@ -197,5 +218,30 @@ export class GoogleDrive implements DocumentDrive {
   async moveFile(id: string, fromParentId: string, toParentId: string): Promise<void> {
     if (![id, fromParentId, toParentId].every((x) => DRIVE_ID.test(x))) throw new DriveError("That isn't a Drive file id");
     await this.#json(`${API}/${id}?${ALL_DRIVES}&addParents=${toParentId}&removeParents=${fromParentId}&fields=id`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: "{}" });
+  }
+
+  /**
+   * A reader permission for one person. Google emails them that it's shared,
+   * which is how someone without a Google account gets in. Shared drives need
+   * the service account to be a Manager, or a Content manager where the drive
+   * lets them share folders, and the drive must allow people outside the
+   * organisation (QUESTIONS.md).
+   */
+  async share(folderId: string, email: string): Promise<string> {
+    if (!DRIVE_ID.test(folderId)) throw new DriveError("That isn't a Drive folder id");
+    if (!EMAIL.test(email)) throw new DriveError("That isn't an email address the worker will share with");
+    const created = await this.#json<{ id?: string }>(`${API}/${folderId}/permissions?${ALL_DRIVES}&sendNotificationEmail=true&fields=id`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...READER_PERMISSION, emailAddress: email }),
+    });
+    if (!created.id || !PERMISSION_ID.test(created.id)) throw new DriveError("Google Drive shared the folder without saying how, so it can't be taken back");
+    return created.id;
+  }
+
+  async unshare(folderId: string, permissionId: string): Promise<void> {
+    if (!DRIVE_ID.test(folderId) || !PERMISSION_ID.test(permissionId)) throw new DriveError("That isn't a Drive permission");
+    // A 404 is a permission, or a folder, that's already gone: nothing left to take away.
+    await this.#call(`${API}/${folderId}/permissions/${permissionId}?${ALL_DRIVES}`, { method: "DELETE" });
   }
 }

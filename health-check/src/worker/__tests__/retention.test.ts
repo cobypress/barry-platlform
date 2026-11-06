@@ -242,3 +242,44 @@ describe("released runs from the console's database", () => {
     assert.match(statements[0]!, /LEFT JOIN "HealthCheckRelease"/);
   });
 });
+
+describe("the retention sweep and the customer's Drive access", () => {
+  const share = (runId: string, email: string) => ({ runId, email, folderId: "folder-0000000001", permissionId: `perm-${email.slice(0, 3)}`, state: "shared" as const, sharedAt: RELEASED, removedAt: null, removedWhy: null, error: null, updatedAt: RELEASED });
+
+  test("at 12 months everyone's access goes first, then the run folder", async () => {
+    const { runs, store, lines } = setup();
+    const id = "hc-2026-01-01-00000009";
+    store.addRun(runInput({ run: consoleRun({ id, status: "released" }) }));
+    store.releasedAt.set(id, RELEASED);
+    runFolder(runs, id);
+    store.shares = [share(id, "ceo@customer.example.com"), share(id, "ops@customer.example.com")];
+    const taken: string[] = [];
+    const sharing = { share: async () => "x", unshare: async (_f: string, p: string) => void taken.push(p) };
+    assert.equal(action(await retentionSweep({ store, runsDir: runs, now: at(364), dryRun: false, log: (l) => lines.push(l), sharing }), id), "extracts_deleted");
+    assert.deepEqual(taken, [], "not a day before");
+    const outcomes = await retentionSweep({ store, runsDir: runs, now: addMonths(new Date(RELEASED), 12), dryRun: false, log: (l) => lines.push(l), sharing });
+    assert.equal(action(outcomes, id), "folder_deleted");
+    assert.deepEqual(taken.sort(), ["perm-ceo", "perm-ops"]);
+    assert.ok(store.shares.every((x) => x.state === "removed" && x.removedWhy === "retention"));
+    assert.ok(lines.every((l) => !l.includes("@")), "no address is logged");
+  });
+
+  test("access that can't be taken away keeps the folder until the next sweep, and a dry run takes nothing", async () => {
+    const { runs, store, lines } = setup();
+    const id = "hc-2026-01-01-0000000a";
+    store.addRun(runInput({ run: consoleRun({ id, status: "released" }) }));
+    store.releasedAt.set(id, RELEASED);
+    const dir = runFolder(runs, id);
+    store.shares = [share(id, "ceo@customer.example.com")];
+    const now = addMonths(new Date(RELEASED), 12);
+    const failing = { share: async () => "x", unshare: async () => { throw new Error("Google Drive refused a request (500): backend error"); } };
+    const dry = await retentionSweep({ store, runsDir: runs, now, dryRun: true, log: (l) => lines.push(l), sharing: failing });
+    assert.equal(action(dry, id), "folder_deleted");
+    assert.equal(store.shares[0]!.state, "shared", "a dry run takes nothing away");
+    const real = await retentionSweep({ store, runsDir: runs, now, dryRun: false, log: (l) => lines.push(l), sharing: failing });
+    assert.equal(action(real, id), "access_kept");
+    assert.ok(existsSync(dir), "the folder stays while someone still has the files");
+    assert.ok(lines.some((l) => /1 person still has the Drive folder/.test(l)));
+  });
+});
+

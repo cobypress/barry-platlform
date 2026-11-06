@@ -319,6 +319,26 @@ describe("the one-pager and the readout kit", () => {
   });
 });
 
+describe("sharing, after the documents are made", () => {
+  test("the run's new folder is shared with its readers, and a sharing failure doesn't fail the documents", async () => {
+    const drive = new MemoryDrive();
+    const deps = setup(jobInput(), drive);
+    deps.store.readers.set(RUN_ID, ["ceo@customer.example.com"]);
+    const shared: Array<[string, string]> = [];
+    deps.sharing = { share: async (folderId, email) => (shared.push([folderId, email]), "perm-0001"), unshare: async () => {} };
+    assert.equal((await processDocumentsJob(RUN_ID, deps, { final: true })).outcome, "done");
+    const made = deps.store.documents.get(RUN_ID)!.made!;
+    assert.deepEqual(shared, [[made.driveFolderId, "ceo@customer.example.com"]], "the Health check folder, not the client's, and never Black Cloud's own");
+    assert.equal(deps.store.shares[0]!.state, "shared");
+
+    const failing = setup(jobInput({ run: consoleRun({ id: "hc-2026-11-01-0000000b", status: "released", customerRef: "SYN-0002" }) }), new MemoryDrive());
+    failing.store.readers.set("hc-2026-11-01-0000000b", ["ceo@customer.example.com"]);
+    failing.sharing = { share: async () => { throw new Error("Google Drive refused a request (403): no"); }, unshare: async () => {} };
+    assert.equal((await processDocumentsJob("hc-2026-11-01-0000000b", failing, { final: true })).outcome, "done");
+    assert.equal(failing.store.shares[0]!.state, "failed");
+  });
+});
+
 describe("GoogleDrive", () => {
   const KEY = generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey.export({ type: "pkcs8", format: "pem" }).toString();
   const config = { clientEmail: "documents@example.iam.gserviceaccount.com", privateKey: KEY, rootFolderId: "root-folder-0001", subject: null };
