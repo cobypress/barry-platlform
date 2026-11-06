@@ -6,7 +6,7 @@ import { opportunitiesExtractor, stagesExtractor } from "../../extract/opportuni
 import { licencesExtractor, usersExtractor } from "../../extract/users.ts";
 import type { Value } from "../../schemas/index.ts";
 import { loadPipeline, type Deal } from "../historic-pipeline/cohort.ts";
-import { median } from "../historic-pipeline/metrics.ts";
+import { groupBy, median } from "../historic-pipeline/metrics.ts";
 import type { DomainModule } from "../types.ts";
 import { discountOf, listed, presenceGap } from "./shared.ts";
 
@@ -73,21 +73,31 @@ const discountLeakage: Rule = {
     const enough = (rs: Quoted[]): boolean => rs.filter((r) => r.deal.category === "won").length >= sample;
     // Like with like: a team against the other teams, and a rep against their own
     // team-mates, who sell into the same market. Both sides need the sample.
-    const candidates = [
-      ...[...new Set(rows.map((r) => r.deal.team))].sort().map((team) => ({ dimension: "team", key: team, members: rows.filter((r) => r.deal.team === team), peers: rows.filter((r) => r.deal.team !== team), against: "the other teams" })),
-      ...[...new Set(rows.map((r) => r.deal.OwnerId))].sort().map((owner) => {
-        const team = rows.find((r) => r.deal.OwnerId === owner)!.deal.team;
-        const members = rows.filter((r) => r.deal.OwnerId === owner);
-        return { dimension: "rep", key: rep(members[0]!), members, peers: rows.filter((r) => r.deal.team === team && r.deal.OwnerId !== owner), against: "their team-mates" };
+    // Each comparison is made and judged in turn, and only those flagged are kept:
+    // with every rep's peers held at once, a big org's quotes were held hundreds of
+    // times over (DECISIONS.md 344). Reps are labelled in the same order as before.
+    const byTeam = groupBy(rows, (r) => r.deal.team);
+    const byOwner = groupBy(rows, (r) => r.deal.OwnerId);
+    const teams = [...byTeam.keys()].sort();
+    const owners = [...byOwner.keys()].sort().map((owner) => ({ owner, key: rep(byOwner.get(owner)![0]!) }));
+    type Candidate = { dimension: string; key: string; members: Quoted[]; peers: () => Quoted[]; against: string };
+    const candidates: Candidate[] = [
+      ...teams.map((team) => ({ dimension: "team", key: team, members: byTeam.get(team)!, peers: () => rows.filter((r) => r.deal.team !== team), against: "the other teams" })),
+      ...owners.map(({ owner, key }) => {
+        const members = byOwner.get(owner)!;
+        const team = members[0]!.deal.team;
+        return { dimension: "rep", key, members, peers: () => byTeam.get(team)!.filter((r) => r.deal.OwnerId !== owner), against: "their team-mates" };
       }),
     ];
     const flagged = candidates.flatMap((c) => {
-      if (!enough(c.members) || !enough(c.peers)) return [];
+      if (!enough(c.members)) return [];
+      const peers = c.peers();
+      if (!enough(peers)) return [];
       const m = medianWon(c.members);
-      const pm = medianWon(c.peers);
+      const pm = medianWon(peers);
       const rate = winRate(c.members);
-      const peerRate = winRate(c.peers);
-      return m >= pm + DISCOUNT_GAP && rate <= peerRate ? [{ ...c, median: m, peerMedian: pm, rate, peerRate, rows: c.members }] : [];
+      const peerRate = winRate(peers);
+      return m >= pm + DISCOUNT_GAP && rate <= peerRate ? [{ dimension: c.dimension, key: c.key, against: c.against, median: m, peerMedian: pm, rate, peerRate, rows: c.members }] : [];
     });
     const deeper = rows.filter((r) => r.discount > norm);
     const shallower = rows.filter((r) => r.discount <= norm);
