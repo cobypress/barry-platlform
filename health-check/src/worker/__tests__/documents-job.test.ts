@@ -121,10 +121,11 @@ describe("a documents job", () => {
     assert.equal(made.clientName, "Synthetic Co");
     assert.equal(made.folderName, "Health check 1");
     assert.equal(drive.path(made.driveFolderId), "Synthetic Co / Health check 1");
-    assert.deepEqual(made.files.map((f) => f.name).sort(), ["Synthetic Co - Executive summary.pdf", "Synthetic Co - Full health check.pdf", "Synthetic Co - One page summary.pdf", "Synthetic Co - Raw notes.docx"]);
-    // The action lists go beside the decks, and the console's documents card isn't told of them (DECISIONS.md 197).
-    const inFolder = (await drive.files(made.driveFolderId)).map((f) => f.name);
-    for (const name of ["Synthetic Co - Action lists.xlsx", "Synthetic Co - Tickets.csv"]) assert.ok(inFolder.includes(name), name);
+    // The action lists go beside the decks, and the console's documents card is told of them, with their own outputs (DECISIONS.md 197).
+    assert.deepEqual(made.files.map((f) => f.name).sort(), ["Synthetic Co - Action lists.xlsx", "Synthetic Co - Executive summary.pdf", "Synthetic Co - Full health check.pdf", "Synthetic Co - One page summary.pdf", "Synthetic Co - Raw notes.docx", "Synthetic Co - Tickets.csv"]);
+    assert.deepEqual(made.files.filter((f) => f.name.endsWith(".xlsx") || f.name.endsWith(".csv")).map((f) => f.output).sort(), ["action_lists", "tickets"]);
+    const inFolder = (await drive.files(made.driveFolderId)).map((f) => f.id);
+    for (const f of made.files) assert.ok(inFolder.includes(f.driveFileId), `${f.name} is the file in the folder`);
     assert.deepEqual(made.warnings, ["The full health check, page 4: overflow"]);
     assert.equal(deps.store.documents.get(RUN_ID)!.input.state, "done");
   });
@@ -286,7 +287,7 @@ describe("the released documents", () => {
 });
 
 describe("the one-pager and the readout kit", () => {
-  test("the one-pager goes in the customer's folder, the kit only in Black Cloud's own, and the console hears of all four, never the kit", async () => {
+  test("the one-pager goes in the customer's folder, the kit only in Black Cloud's own, and the console hears of the other six, never the kit", async () => {
     const drive = new MemoryDrive();
     const deps = setup(jobInput(), drive);
     assert.equal((await processDocumentsJob(RUN_ID, deps, { final: true })).outcome, "done");
@@ -299,7 +300,7 @@ describe("the one-pager and the readout kit", () => {
     assert.equal(drive.path(kits[0]!.id), `${INTERNAL_FOLDER} / Synthetic Co - Health check 1 / Synthetic Co - Readout kit.docx`);
     // Nowhere under the client's folder, so sharing that folder can never share the kit.
     assert.ok(!drive.path(kits[0]!.id).startsWith("Synthetic Co /"));
-    assert.deepEqual(made.files.map((f) => f.output).sort(), ["ceo_one_pager", "executive_summary", "full_health_check", "raw_notes"]);
+    assert.deepEqual(made.files.map((f) => f.output).sort(), ["action_lists", "ceo_one_pager", "executive_summary", "full_health_check", "raw_notes", "tickets"], "everything in the client's folder, and never the readout kit");
   });
 
   test("made again, the one-pager moves into Version 1 with the rest, and the kit is replaced, not copied", async () => {
