@@ -185,3 +185,12 @@ j) For the privacy owner: the scrub turns the words "integration user" into a us
 a) The workbook was checked with openpyxl, not with Excel, Google Sheets or Numbers. Each follows the same standard, but the first real customer file should be opened in whichever the customer uses.
 b) The ticket file was shaped from what we know of Jira's CSV importer: a repeated "Labels" column for several labels, and the default priority names. It hasn't been imported into a real Jira, Linear or Asana project. A project with renamed priorities will need them mapped at import.
 c) A link is `https://<the connection's domain>/<id>`. We believe this opens a record in both Lightning Experience and Classic, but we haven't checked it on an org with Enhanced Domains switched on.
+
+## Roadmap 3.2's remaining checks (DECISIONS.md 201 to 209)
+
+a) A permission set group's assignment: whether `PermissionSetAssignment.PermissionSetId` is null or the group's own permission set. We handle both. If it's the group's own set, a group assigned to nobody may show that set as unused, under the group's name.
+b) `SELECT Name, COUNT(Id) FROM Account GROUP BY Name HAVING COUNT(Id) > 1` through REST on a very large Account table may time out. If it does, `dq.duplicate-accounts` is not measurable, with Salesforce's reason.
+c) Person accounts: an org that uses them has people's names as account names, and two people can share a name. `IsPersonAccount` exists only where person accounts are switched on, so we don't filter on it yet.
+d) Storage: we say that past the allowance Salesforce "can stop new records or files being saved". We haven't confirmed how strictly each edition enforces it.
+e) `PackageLicense.Status` values beyond Active, Expired, Free and Trial, and whether `NamespacePrefix` is ever empty for an app sold by the seat.
+f) Territories, if a customer uses them: `Territory2Model` (State 'Active'), `Territory2` and `UserTerritory2Association` would show territories with nobody assigned. Fair balance would need the customer's own rules.

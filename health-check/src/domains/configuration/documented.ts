@@ -1,6 +1,7 @@
 import { apexExtractor, metadataExtractor, type ApexTriggerRow } from "../../extract/automation.ts";
 import { loginActivityExtractor } from "../../extract/adoption.ts";
 import { CORE_OBJECTS, customObjectsExtractor, duplicateRulesExtractor, fieldUsageExtractor, isOwnCustomField, orgExtractor, recordCountsExtractor, schemaExtractor } from "../../extract/configuration.ts";
+import { accessExtractor, holdersOf } from "../../extract/security.ts";
 import { orgDocumentationExtractor } from "../../extract/documentation.ts";
 import { unreadReason } from "../../extract/metadata-parse.ts";
 import type { Sourced } from "../../extract/types.ts";
@@ -304,7 +305,11 @@ function access(ctx: Ctx): Metric {
   if (doc.roles.status === "ok") Object.assign(stats, { roles: doc.roles.data.length, roleDepth: roleDepth(doc.roles.data) });
   else exclusions.push(`The role hierarchy, which couldn't be read: ${doc.roles.reason}`);
   if (doc.permissionSets.status === "ok") {
-    for (const s of [...doc.permissionSets.data].sort((a, b) => b.assignees - a.assignees || a.Label.localeCompare(b.Label))) segments.push(seg("permission set", s.NamespacePrefix ? `${s.Label} (${s.NamespacePrefix})` : s.Label, s.assignees));
+    // Counted as the least-privilege checks count them, so a set held through a group isn't shown as held by nobody (DECISIONS.md 202).
+    const holders = holdersOf(ctx.data(accessExtractor));
+    if (holders) exclusions.push("A permission set inside a group counts for everyone the group is assigned to");
+    const held = (s: { Id: string; assignees: number }): number => holders?.get(s.Id)?.size ?? s.assignees;
+    for (const s of [...doc.permissionSets.data].sort((a, b) => held(b) - held(a) || a.Label.localeCompare(b.Label))) segments.push(seg("permission set", s.NamespacePrefix ? `${s.Label} (${s.NamespacePrefix})` : s.Label, held(s)));
     stats.permissionSets = doc.permissionSets.data.length;
   } else exclusions.push(`Permission sets, which couldn't be read: ${doc.permissionSets.reason}`);
   return measured(DEFINITIONS.access, evidence, active.length, segments, { exclusions, stats });

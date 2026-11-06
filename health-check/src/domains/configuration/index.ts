@@ -20,6 +20,7 @@ import { calibratedHours } from "../value.ts";
 import { objectInventoryMetric } from "./inventory.ts";
 import { documentedMetrics } from "./documented.ts";
 import { orgDocumentationExtractor } from "../../extract/documentation.ts";
+import { accessExtractor } from "../../extract/security.ts";
 import { loginActivityExtractor } from "../../extract/adoption.ts";
 
 const FIELD_SPRAWL_LIMIT = 150;
@@ -362,6 +363,7 @@ export const configurationModule: DomainModule = {
     loginsExtractor,
     loginActivityExtractor,
     orgDocumentationExtractor,
+    accessExtractor,
   ],
   metrics: [objectInventoryMetric, documentedMetrics],
   rules: [customFieldSprawl, unusedCustomFields, unassignedLayouts, undocumentedFields, stageSprawl, picklistSprawl, setupChangeConcentration],

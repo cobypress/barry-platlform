@@ -114,7 +114,7 @@ export type SyntheticOpportunity = {
   LeadSource: string | null;
   RecordType: { DeveloperName: string };
   Loss_Reason__c: string | null;
-  AccountId: string;
+  AccountId: string | null;
   NextStep: string | null;
 };
 
@@ -239,7 +239,8 @@ function buildPipeline(): { opportunities: SyntheticOpportunity[]; history: Synt
       RecordType: { DeveloperName: renewal ? "Renewal" : "New_Business" },
       Loss_Reason__c: null,
       // Trap: a quarter of open deals sit on one customer, so a loss there hurts.
-      AccountId: sfId("001", i % 4 === 0 ? 900 : (i % 120) + 1),
+      // Trap: a few open deals aren't linked to any account.
+      AccountId: i % 17 === 3 ? null : sfId("001", i % 4 === 0 ? 900 : (i % 120) + 1),
       // Trap: the total looks fine, and one rep leaves next steps empty on nearly everything.
       NextStep: owner === 14 ? (i % 8 === 0 ? "Call the buyer on Friday" : null) : i % 9 === 0 ? null : "Call the buyer on Friday",
     });
@@ -544,7 +545,7 @@ function buildLeads() {
 export const leadFunnel = buildLeads();
 
 // Past customers. Trap: an account with an open deal, or recent activity, isn't dormant.
-export const WON_ACCOUNTS = [...new Set(pipeline.opportunities.filter((o) => o.IsWon).map((o) => o.AccountId))].sort().map((Id, i) => ({
+export const WON_ACCOUNTS = [...new Set(pipeline.opportunities.flatMap((o) => (o.IsWon && o.AccountId ? [o.AccountId] : [])))].sort().map((Id, i) => ({
   Id,
   OwnerId: userId([1, 2, 3, 9][i % 4]!),
   LastActivityDate: i % 3 === 0 ? dateOnly(asOf - 200 * DAY) : i % 3 === 1 ? null : dateOnly(asOf - 20 * DAY),
@@ -912,11 +913,48 @@ export const DOCUMENTED_PERMISSION_SETS = [
   { Id: sfId("0PS", 4), Name: "Reporting_Everything", Label: "Reporting Everything", IsCustom: true, NamespacePrefix: null },
   { Id: sfId("0PS", 5), Name: "Sales_Console_User", Label: "Sales Console User", IsCustom: true, NamespacePrefix: null },
   { Id: sfId("0PS", 6), Name: "CPQ_User", Label: "CPQ User", IsCustom: false, NamespacePrefix: "acmecpq" },
+  // Trap: of our own, and held by nobody.
+  { Id: sfId("0PS", 7), Name: "Old_Territory_Access", Label: "Old Territory Access", IsCustom: true, NamespacePrefix: null },
+  // Trap: never assigned directly, but in a permission set group that is, so it's in use.
+  { Id: sfId("0PS", 8), Name: "Report_Builder", Label: "Report Builder", IsCustom: true, NamespacePrefix: null },
 ];
 // Who holds them, active users only, as the query asks. User 9 is inactive.
 export const DOCUMENTED_ASSIGNMENTS = ([[3, 2], [3, 9], [4, 1], [5, 1], [5, 2], [5, 3], [5, 5], [5, 7], [6, 1], [6, 2]] as const)
   .filter(([, user]) => USERS.find((u) => u.n === user)?.active !== false)
   .map(([set]) => ({ PermissionSetId: sfId("0PS", set) }));
+
+// Least privilege (DECISIONS.md 202). Each profile's own permission set. Traps: a
+// custom profile nobody has, and a community profile, whose users the users read
+// never holds, so it mustn't look empty.
+const profileSet = (id: string, name: string, custom: boolean, userType = "Standard") => ({ Id: id, IsCustom: custom, Profile: { Name: name, UserType: userType } });
+export const PROFILE_SETS = [
+  profileSet(sfId("0PS", 1), "System Administrator", false),
+  profileSet(sfId("0PS", 2), "API Only", true),
+  profileSet(sfId("0PS", 101), "Standard User", false),
+  profileSet(sfId("0PS", 102), "Old Sales Profile", true),
+  profileSet(sfId("0PS", 103), "Partner Community Custom", true, "PowerPartner"),
+];
+export const PERMISSION_SET_GROUP = sfId("0PG", 1);
+export const PERMISSION_SET_GROUP_COMPONENTS = [{ PermissionSetId: sfId("0PS", 8), PermissionSetGroupId: PERMISSION_SET_GROUP }];
+// Every active user's profile set, each set they hold, and one group assignment.
+// Traps: users 1 and 2 each hold a set nobody else on Standard User does.
+export const ACCESS_ASSIGNMENTS = [
+  ...USERS.filter((u) => u.active !== false).map((u) => ({ AssigneeId: userId(u.n), PermissionSetId: PROFILE_SETS.find((p) => p.Profile.Name === (u.profile ?? "Standard User"))!.Id, PermissionSetGroupId: null as string | null })),
+  ...([[3, 2], [4, 1], [5, 1], [5, 2], [5, 3], [5, 5], [5, 7], [6, 1], [6, 2]] as const).map(([set, user]) => ({ AssigneeId: userId(user), PermissionSetId: sfId("0PS", set) as string | null, PermissionSetGroupId: null as string | null })),
+  { AssigneeId: userId(1), PermissionSetId: null, PermissionSetGroupId: PERMISSION_SET_GROUP },
+];
+
+// Storage, as /limits reports it, in MB. Trap: data storage nearly full.
+export const STORAGE_LIMITS = { DataStorageMB: { Max: 10_240, Remaining: 1_300 }, FileStorageMB: { Max: 20_480, Remaining: 16_000 } };
+
+// Accounts that share an exact name. Traps: one name three times, one twice.
+export const DUPLICATE_ACCOUNTS = [
+  { Id: sfId("001", 9001), Name: "Synthetic Holdings", OwnerId: userId(1) },
+  { Id: sfId("001", 9002), Name: "Synthetic Holdings", OwnerId: userId(2) },
+  { Id: sfId("001", 9003), Name: "Synthetic Holdings", OwnerId: userId(14) },
+  { Id: sfId("001", 9004), Name: "Example Logistics", OwnerId: userId(3) },
+  { Id: sfId("001", 9005), Name: "Example Logistics", OwnerId: userId(3) },
+];
 
 export const CONNECTED_APPS = [
   { Name: "Data Loader", OptionsAllowAdminApprovedUsersOnly: false },

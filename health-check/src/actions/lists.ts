@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { FindingRecords } from "../engine/evaluate.ts";
 import { actionRecordsExtractor, type ActionRecords } from "../extract/action-records.ts";
 import { opportunitiesExtractor, type OpportunityExtract } from "../extract/opportunities.ts";
+import { duplicateAccountsExtractor, type DuplicateAccounts } from "../extract/duplicates.ts";
 import { usersExtractor, type UserRow } from "../extract/users.ts";
 import type { Sourced } from "../extract/types.ts";
 
@@ -14,7 +15,7 @@ import type { Sourced } from "../extract/types.ts";
 
 export const ACTION_LISTS_FILE = "action-lists.json";
 
-export const ACTION_OBJECTS = ["Opportunity", "Lead", "Contact", "User"] as const;
+export const ACTION_OBJECTS = ["Opportunity", "Lead", "Contact", "Account", "User"] as const;
 
 export const ActionRow = z.object({
   id: z.string().min(1),
@@ -54,6 +55,7 @@ const ok = <T>(s: Sourced<T> | undefined): T | null => (s?.status === "ok" ? s.d
 function directory(extracts: Map<string, unknown>): Record<(typeof ACTION_OBJECTS)[number], Map<string, { name: string | null; ownerId: string | null }>> {
   const opportunities = extracts.get(opportunitiesExtractor.id) as OpportunityExtract | undefined;
   const records = extracts.get(actionRecordsExtractor.id) as ActionRecords | undefined;
+  const duplicates = extracts.get(duplicateAccountsExtractor.id) as DuplicateAccounts | undefined;
   const users = ok(extracts.get(usersExtractor.id) as Sourced<UserRow[]> | undefined) ?? [];
   const names = opportunities?.names ?? {};
   const named = (rows: Array<{ Id: string; Name: string; OwnerId: string | null }>) => rows.map((r): [string, { name: string | null; ownerId: string | null }] => [r.Id, { name: r.Name, ownerId: r.OwnerId }]);
@@ -61,6 +63,7 @@ function directory(extracts: Map<string, unknown>): Record<(typeof ACTION_OBJECT
     Opportunity: new Map((ok(opportunities?.opportunities) ?? []).map((o) => [o.Id, { name: names[o.Id] ?? null, ownerId: o.OwnerId }])),
     Lead: new Map(named(ok(records?.staleLeads) ?? [])),
     Contact: new Map([...named(ok(records?.contactsNoAccount) ?? []), ...named(ok(records?.contactsNoEmail) ?? [])]),
+    Account: new Map(named(ok(duplicates?.accounts) ?? [])),
     User: new Map(users.map((u) => [u.Id, { name: u.Name, ownerId: null }])),
   };
 }

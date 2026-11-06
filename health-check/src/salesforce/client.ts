@@ -105,8 +105,8 @@ export type ClientOptions = {
 };
 
 export type OrgLimit = { Max: number; Remaining: number };
-/** The /limits entries kept for the integrations area (Integrations, roadmap 3.2). */
-export const REPORTED_LIMITS = ["DailyApiRequests", "DailyAsyncApexExecutions"] as const;
+/** The /limits entries kept for the integrations area and storage (roadmap 3.2). */
+export const REPORTED_LIMITS = ["DailyApiRequests", "DailyAsyncApexExecutions", "DataStorageMB", "FileStorageMB"] as const;
 const isLimit = (value: unknown): value is OrgLimit => typeof (value as OrgLimit)?.Max === "number" && typeof (value as OrgLimit)?.Remaining === "number";
 
 export class SalesforceClient {

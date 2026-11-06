@@ -236,6 +236,69 @@ const unassignedSeats: Rule = {
   },
 };
 
+
+/** How the calibration prices an installed app's seat: by its namespace, as "package:<namespace>" (DECISIONS.md 203). */
+export const packagePriceKey = (namespace: string): string => `package:${namespace}`;
+
+// Seats bought for installed apps (roadmap 3.2). A site licence (-1 seats), a free
+// app and a trial aren't seats anyone pays for one by one, so they're left out.
+const packageSeats: Rule = {
+  id: "utl.package-seats",
+  version: 1,
+  domain: "utilisation",
+  title: "Installed apps' seats nobody holds",
+  evaluate(ctx): RuleResult | RuleResult[] {
+    const { packageLicenses } = ctx.data(licencesExtractor);
+    if (packageLicenses.status !== "ok") return { outcome: "not_measurable", reason: `Installed packages' licences couldn't be read: ${packageLicenses.reason}`, evidence: [ctx.ev(packageLicenses.source, { count: null })] };
+    const seated = packageLicenses.data.filter((p) => p.Status === "Active" && p.AllowedLicenses > 0).sort((a, b) => (a.NamespacePrefix ?? "").localeCompare(b.NamespacePrefix ?? ""));
+    const name = (p: { NamespacePrefix: string | null }): string => p.NamespacePrefix ?? "An app with no namespace";
+    const unused = seated.filter((p) => p.UsedLicenses === 0);
+    const spare = seated.filter((p) => p.UsedLicenses > 0 && p.AllowedLicenses - p.UsedLicenses >= MIN_SPARE_SEATS && pct(p.AllowedLicenses - p.UsedLicenses, p.AllowedLicenses) >= SPARE_SEAT_SHARE);
+    const evidence = [ctx.ev(packageLicenses.source, { count: seated.length, exclusions: ["Site licences", "Free, trial and expired apps"], note: "Named by namespace: the licence record holds no app name" })];
+    const segments = [{ dimension: "installed app", segments: seated.length }];
+    if (unused.length + spare.length === 0) {
+      return seated.length
+        ? { outcome: "pass", summary: `All ${plural(seated.length, "installed app")} with seats ${seated.length === 1 ? "has" : "have"} them assigned, with fewer than ${SPARE_SEAT_SHARE}% spare.`, evidence, segmentsChecked: segments }
+        : { outcome: "pass", summary: "No installed app is licensed by the seat.", evidence, segmentExemptReason: "There are no seated apps to segment." };
+    }
+    const idle = (p: (typeof seated)[number]): number => p.AllowedLicenses - p.UsedLicenses;
+    const flagged = [...unused, ...spare];
+    // A figure only where the calibration prices the app's seat (DECISIONS.md 203).
+    const unpriced = flagged.filter((p) => !p.NamespacePrefix || ctx.calibration.licenceCosts[packagePriceKey(p.NamespacePrefix)] === undefined).map(name);
+    const price = (p: (typeof seated)[number]): number => ctx.calibration.licenceCosts[packagePriceKey(p.NamespacePrefix!)]!;
+    const value: Value = unpriced.length
+      ? notSized(`The calibration has no price for a seat of: ${unpriced.join(", ")}.`)
+      : {
+          kind: "licence_cost",
+          amount: flagged.reduce((sum, p) => sum + idle(p) * price(p), 0),
+          unit: ctx.calibration.currency,
+          period: "per year",
+          assumptions: flagged.map((p) => `${plural(idle(p), `${name(p)} seat`)} at ${price(p)} ${ctx.calibration.currency} a year, from the calibration`).concat("Assumes seats can be reduced, or the app cancelled, at renewal"),
+        };
+    const parts = [
+      unused.length ? `${unused.map((p) => `${name(p)} (${plural(p.AllowedLicenses, "seat")})`).join(", ")} ${unused.length === 1 ? "has" : "have"} nobody assigned at all` : "",
+      spare.length ? `${spare.map((p) => `${name(p)} has ${idle(p)} of ${p.AllowedLicenses} seats unassigned`).join("; ")}` : "",
+    ].filter(Boolean);
+    return {
+      outcome: "issue",
+      title: unused.length ? "Some installed apps aren't used by anyone" : "You're paying for app seats nobody holds",
+      summary: `${parts.join(". ")}.`,
+      recommendation: "Ask each app's owner whether it's still needed. Cancel the apps nobody uses, and reduce spare seats at renewal.",
+      recommendationType: "change",
+      severity: unused.length ? "medium" : "low",
+      confidence: "high",
+      evidence,
+      value,
+      effort: { size: "XS" },
+      owner: "Commercial owner of the Salesforce contract",
+      dependencies: ["Each app's renewal date", "Check whether any automation or integration depends on an app before cancelling it"],
+      segmentsChecked: segments,
+      subjects: flagged.map((p) => ({ type: "installed app", label: name(p) })),
+      facts: { unusedApps: unused.length, spareSeats: spare.reduce((sum, p) => sum + idle(p), 0), apps: seated.length, ...(value.kind === "licence_cost" ? { annualSaving: value.amount } : {}) },
+    };
+  },
+};
+
 function dormantRule(id: string, title: string, key: string, label: string, basisFor: (days: number) => string, isCandidate: (u: UserRow, cutoff: Date) => boolean): Rule {
   return {
     id,
@@ -473,5 +536,5 @@ export const utilisationModule: DomainModule = {
     orgExtractor,
   ],
   metrics: [investmentMetrics],
-  rules: [unassignedSeats, dormantUsers, neverLoggedIn, unusedReports, dashboardsOnInactiveUsers, dashboardUsage, eacConnections, eacAdvancedSync],
+  rules: [unassignedSeats, packageSeats, dormantUsers, neverLoggedIn, unusedReports, dashboardsOnInactiveUsers, dashboardUsage, eacConnections, eacAdvancedSync],
 };

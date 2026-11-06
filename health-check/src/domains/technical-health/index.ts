@@ -1,5 +1,6 @@
 import { apexExtractor, metadataExtractor, type ApexClassRow, type ApexTriggerRow } from "../../extract/automation.ts";
-import { customObjectsExtractor, orgExtractor } from "../../extract/configuration.ts";
+import { customObjectsExtractor, orgExtractor, recordCountsExtractor } from "../../extract/configuration.ts";
+import { apiLimitsExtractor } from "../../extract/integrations.ts";
 import { classicExtractor } from "../../extract/technical.ts";
 import { notSized, pct, plural, type Rule, type RuleResult } from "../../engine/rule.ts";
 import { apexGap, metadataOr, UNNAMED, unnamedNote } from "../automation/shared.ts";
@@ -376,10 +377,67 @@ const classicLeftovers: Rule = {
   },
 };
 
+
+// Storage against the allowance (roadmap 3.2). Salesforce reports both in
+// /limits, read as the connection was made. How fast it grows isn't read: the
+// org keeps no history of it, and a guess from record dates would ignore what's
+// deleted (DECISIONS.md 204).
+const STORAGE_WARNING = 80;
+const STORAGE_HIGH = 95;
+const STORAGE: Record<string, string> = { DataStorageMB: "data storage", FileStorageMB: "file storage" };
+const LARGEST_OBJECTS = 5;
+
+const storageUse: Rule = {
+  id: "tech.storage-use",
+  version: 1,
+  domain: DOMAIN,
+  title: "Data and file storage against the allowance",
+  evaluate(ctx): RuleResult | RuleResult[] {
+    const limits = ctx.data(apiLimitsExtractor);
+    if (limits.status !== "ok") return { outcome: "not_measurable", reason: `The org's limits couldn't be read: ${limits.reason}`, evidence: [ctx.ev(limits.source, { count: null })] };
+    const read = Object.entries(STORAGE).flatMap(([key, label]) => {
+      const limit = limits.data[key];
+      if (!limit || limit.Max <= 0) return [];
+      const used = Math.max(0, limit.Max - limit.Remaining);
+      return [{ key, label, used, max: limit.Max, share: pct(used, limit.Max) }];
+    });
+    const counts = ctx.data(recordCountsExtractor);
+    const evidence = [ctx.ev(limits.source, { count: read.length, note: "In MB, as Salesforce reported them when the connection was made" })];
+    if (read.length === 0) return { outcome: "not_measurable", reason: "The org reported no storage allowance.", evidence };
+    const largest = counts.status === "ok" ? [...counts.data].sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)).slice(0, LARGEST_OBJECTS).filter((o) => o.count > 0) : [];
+    if (counts.status === "ok") evidence.push(ctx.ev(counts.source, { count: counts.data.length, note: "Record counts by object, for the largest" }));
+    const segments = [{ dimension: "storage kind", segments: read.length }];
+    const facts = Object.fromEntries(read.flatMap((r) => [[`${r.key}Used`, r.used], [`${r.key}Max`, r.max], [`${r.key}Share`, r.share]]));
+    const text = (r: (typeof read)[number]): string => `${r.label} is ${r.share}% used (${r.used.toLocaleString("en-GB")} of ${r.max.toLocaleString("en-GB")} MB)`;
+    const list = (items: string[]): string => (items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`);
+    const opening = list(read.map(text));
+    const sentence = `${opening.charAt(0).toUpperCase()}${opening.slice(1)}.`;
+    const over = read.filter((r) => r.share >= STORAGE_WARNING);
+    if (over.length === 0) return { outcome: "pass", summary: sentence, evidence, segmentsChecked: segments, facts };
+    return {
+      outcome: "issue",
+      title: "Storage is close to the allowance",
+      summary: `${sentence} Past the allowance, Salesforce can stop new records or files being saved until space is freed or more is bought.${largest.length ? ` The objects with the most records: ${largest.map((o) => `${o.name} (${o.count.toLocaleString("en-GB")})`).join(", ")}.` : ""}`,
+      recommendation: "Archive or delete what you no longer need, starting with the largest objects and old files, and plan any extra storage before you reach the limit.",
+      recommendationType: "change",
+      severity: over.some((r) => r.share >= STORAGE_HIGH) ? "high" : "medium",
+      confidence: "high",
+      evidence,
+      value: notSized("We hold no price for extra storage, so we don't put a figure on it."),
+      effort: { size: "M" },
+      owner: "Salesforce admin",
+      dependencies: ["Agree with the business how long each kind of record must be kept before archiving any"],
+      segmentsChecked: segments,
+      subjects: over.map((r) => ({ type: "storage", label: r.label })),
+      facts,
+    };
+  },
+};
+
 export const technicalHealthModule: DomainModule = {
   id: DOMAIN,
   cloud: "sales",
   label: "Technical health",
-  extractors: [orgExtractor, metadataExtractor, apexExtractor, customObjectsExtractor, classicExtractor],
-  rules: [apexCoverage, testQuality, limitRisk, codeSize, oldApiVersions, multipleTriggers, classicLeftovers],
+  extractors: [orgExtractor, metadataExtractor, apexExtractor, customObjectsExtractor, classicExtractor, apiLimitsExtractor, recordCountsExtractor],
+  rules: [apexCoverage, testQuality, limitRisk, codeSize, storageUse, oldApiVersions, multipleTriggers, classicLeftovers],
 };

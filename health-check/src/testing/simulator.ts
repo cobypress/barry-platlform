@@ -28,6 +28,8 @@ export type SimulatorOptions = {
   withholdMetadata?: (soql: string) => boolean;
   /** The day's async Apex allowance, as /limits reports it. The synthetic org's own by default. */
   asyncApex?: { Max: number; Remaining: number };
+  /** Data and file storage, as /limits reports them. The synthetic org's own by default. */
+  storage?: typeof org.STORAGE_LIMITS;
 };
 
 type Json = Record<string, unknown>;
@@ -151,6 +153,7 @@ export class Simulator implements Transport {
   #readOnly: boolean;
   #withholdMetadata: SimulatorOptions["withholdMetadata"];
   #asyncApex: { Max: number; Remaining: number };
+  #storage: typeof org.STORAGE_LIMITS;
   #retrieveChecks = 0;
   #retrieving: Record<string, string> = org.METADATA_FILES;
 
@@ -162,6 +165,7 @@ export class Simulator implements Transport {
     this.#readOnly = options.readOnly ?? false;
     this.#withholdMetadata = options.withholdMetadata;
     this.#asyncApex = options.asyncApex ?? org.ASYNC_APEX_LIMIT;
+    this.#storage = options.storage ?? org.STORAGE_LIMITS;
   }
 
   get #limitInfo(): string {
@@ -174,7 +178,7 @@ export class Simulator implements Transport {
     const path = url.pathname;
 
     if (path === "/services/data/") return jsonResponse(200, [{ version: "60.0" }, { version: org.API_VERSION }], this.#limitInfo);
-    if (path.endsWith("/limits")) return jsonResponse(200, { DailyApiRequests: { Max: this.#limit, Remaining: this.#limit - this.#used }, DailyAsyncApexExecutions: this.#asyncApex }, this.#limitInfo);
+    if (path.endsWith("/limits")) return jsonResponse(200, { DailyApiRequests: { Max: this.#limit, Remaining: this.#limit - this.#used }, DailyAsyncApexExecutions: this.#asyncApex, ...this.#storage }, this.#limitInfo);
 
     this.#used++;
     if (path.endsWith("/limits/recordCount")) return jsonResponse(200, { sObjects: org.RECORD_COUNTS }, this.#limitInfo);
@@ -292,9 +296,13 @@ export class Simulator implements Transport {
       case "SecurityHealthCheckRisks":
         return tooling ? page(org.HEALTH_RISKS) : unsupported("SecurityHealthCheckRisks");
       case "PermissionSet":
+        if (/IsOwnedByProfile = true/.test(where)) return page(org.PROFILE_SETS);
         if (/PermissionsApiUserOnly = true/.test(where)) return page(org.PERMISSION_SETS.filter((s) => s.PermissionsApiUserOnly));
         return page(/IsOwnedByProfile = false/.test(where) ? org.DOCUMENTED_PERMISSION_SETS : org.PERMISSION_SETS);
+      case "PermissionSetGroupComponent":
+        return page(org.PERMISSION_SET_GROUP_COMPONENTS);
       case "PermissionSetAssignment": {
+        if (/\bPermissionSetGroupId\b/.test(soql)) return page(org.ACCESS_ASSIGNMENTS);
         if (/PermissionsApiUserOnly = true/.test(where)) {
           const sets = new Set(org.PERMISSION_SETS.filter((s) => s.PermissionsApiUserOnly && !s.IsOwnedByProfile).map((s) => s.Id));
           const inactive = new Set(org.usersTable.filter((u) => !u.IsActive).map((u) => u.Id));
@@ -418,8 +426,19 @@ export class Simulator implements Transport {
         return page(org.FORECAST_FACTS);
       case "OpportunityHistory":
         return this.#keyset(org.pipeline.history, soql);
-      case "Account":
+      case "Account": {
+        if (/GROUP BY Name/i.test(soql)) {
+          const sizes = new Map<string, number>();
+          for (const a of org.DUPLICATE_ACCOUNTS) sizes.set(a.Name, (sizes.get(a.Name) ?? 0) + 1);
+          return page([...sizes].filter(([, c]) => c > 1).sort(([, a], [, b]) => b - a).map(([Name, c]) => ({ Name, c })));
+        }
+        const named = /\bName IN \(([^)]*)\)/.exec(soql)?.[1];
+        if (named) {
+          const names = new Set([...named.matchAll(/'((?:[^'\\]|\\.)*)'/g)].map((m) => m[1]!.replace(/\\(.)/g, "$1")));
+          return page(org.DUPLICATE_ACCOUNTS.filter((a) => names.has(a.Name)));
+        }
         return this.#keyset(org.WON_ACCOUNTS, soql);
+      }
       case "LeadHistory":
         return this.#keyset(org.leadFunnel.statusChanges, soql);
       case "Campaign":
