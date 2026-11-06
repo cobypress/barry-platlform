@@ -3,7 +3,7 @@ import { MODELS } from "../config.ts";
 import { anthropicClient, anthropicClientWithKey, type NarrativeClient } from "../narrative/client.ts";
 import { checkClaude } from "../narrative/guard.ts";
 import { tokenKeySource, TokenStore } from "../salesforce/token-store.ts";
-import { HEALTH_CHECK_QUEUE, HEAVY_QUEUE, redisConnection, runQueuer, startQueueWorker, type BullModule } from "../worker/bullmq.ts";
+import { HEALTH_CHECK_QUEUE, HEAVY_QUEUE, lostRecorder, redisConnection, runQueuer, startQueueWorker, type BullModule } from "../worker/bullmq.ts";
 import { GoogleDrive } from "../worker/drive.ts";
 import { readWorkerEnv, WORKER_ENV } from "../worker/env.ts";
 import { PostgresWorkerStore, type SqlPool } from "../worker/postgres-store.ts";
@@ -94,7 +94,7 @@ export async function workerCommand(
     narrative,
     log,
   });
-  const worker = startQueueWorker(bull, handler, { redisUrl: config.redisUrl, concurrency: config.concurrency, log });
+  const worker = startQueueWorker(bull, handler, { redisUrl: config.redisUrl, concurrency: config.concurrency, log, onLost: lostRecorder(store) });
   log(`Taking jobs from health-check-jobs, ${config.concurrency} at a time, with runs and documents one at a time in ${HEAVY_QUEUE}.`);
   if (!config.drive) log("Google Drive isn't set up, so released runs' documents can't be made.");
   if (!config.micrositeKey) log("HC_MICROSITE_KEY isn't set, so released runs get documents but no customer microsite.");

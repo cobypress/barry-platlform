@@ -1,5 +1,5 @@
 import type { JobHandler } from "./worker.ts";
-import { BadJobError } from "./types.ts";
+import { BadJobError, type WorkerStore } from "./types.ts";
 
 // A thin adapter between BullMQ and the job handler, for the console's
 // "health-check-jobs" queue (blackcloud-next lib/health-check/jobs.ts). BullMQ
@@ -32,7 +32,7 @@ export type QueueSender = { add(name: string, data: unknown, opts: Record<string
 
 export type BullModule = {
   Queue: new (name: string, options: { connection: RedisConnection }) => QueueSender;
-  Worker: new (name: string, processor: (job: QueueJob) => Promise<unknown>, options: { connection: RedisConnection; concurrency: number; lockDuration?: number }) => QueueWorker;
+  Worker: new (name: string, processor: (job: QueueJob) => Promise<unknown>, options: { connection: RedisConnection; concurrency: number; lockDuration?: number; maxStalledCount?: number }) => QueueWorker;
   /** Thrown to tell BullMQ not to retry. */
   UnrecoverableError: new (message?: string) => Error;
 };
@@ -96,6 +96,17 @@ export const HEAVY_KINDS: ReadonlySet<string> = new Set(["run", "documents"]);
  * another worker. A job whose process died is found once this has passed.
  */
 export const HEAVY_LOCK_MS = 10 * 60_000;
+/**
+ * How often a heavy job may be put back after its process died (a deploy, a
+ * crash, running out of memory) before BullMQ gives up on it. A run resumes
+ * from its checkpoints, so trying again is cheap: two deploys during one long
+ * run shouldn't lose it (DECISIONS.md 396). BullMQ's default is 1.
+ */
+export const HEAVY_MAX_STALLS = 2;
+/** BullMQ 5's reason for a job put back more than maxStalledCount times. It fails the job without running its handler. */
+const STALLED_TOO_OFTEN = /stalled more than allowable limit/;
+/** What the console shows for such a job. */
+export const LOST_REASON = "The worker stopped part-way more than once, by a restart or by running out of memory, so this was given up. Queue it again: a run picks up from where it got to.";
 
 const isHeavy = (data: unknown): boolean => typeof data === "object" && data !== null && HEAVY_KINDS.has(String((data as { kind?: unknown }).kind));
 
@@ -117,16 +128,46 @@ export function gatedProcessor(handler: JobHandler, bull: Pick<BullModule, "Unre
   };
 }
 
+/**
+ * Records a job BullMQ gave up on without running its handler (DECISIONS.md 396):
+ * a run as failed, documents as not made, so the console says so and offers to
+ * queue it again. Connect and share jobs have their own retries and the daily sweep.
+ */
+export function lostRecorder(store: Pick<WorkerStore, "recordRunFailure" | "failDocuments">, now: () => Date = () => new Date()): (data: unknown, reason: string) => Promise<void> {
+  return async (data, reason) => {
+    const job = data as { kind?: unknown; runId?: unknown };
+    if (typeof job?.runId !== "string") return;
+    if (job.kind === "run") await store.recordRunFailure(job.runId, reason, now().toISOString());
+    else if (job.kind === "documents") await store.failDocuments(job.runId, reason, now().toISOString());
+  };
+}
+
 /** Both workers, closed together: the console's first, so nothing more is handed on, then the heavy one, which finishes the job in hand. */
 export type GatedWorkers = { light: QueueWorker; heavy: QueueWorker; close(): Promise<void> };
 
-export function startQueueWorker(bull: BullModule, handler: JobHandler, options: { redisUrl: string; concurrency: number; log: (line: string) => void }): GatedWorkers {
+export function startQueueWorker(
+  bull: BullModule,
+  handler: JobHandler,
+  options: {
+    redisUrl: string;
+    concurrency: number;
+    log: (line: string) => void;
+    /** Records a heavy job BullMQ gave up on without running its handler, so it isn't left in progress for ever (DECISIONS.md 396). */
+    onLost?: (data: unknown, reason: string) => Promise<void>;
+  },
+): GatedWorkers {
   const connection = redisConnection(options.redisUrl);
   const heavyQueue = new bull.Queue(HEAVY_QUEUE, { connection });
   const light = new bull.Worker(HEALTH_CHECK_QUEUE, gatedProcessor(handler, bull, heavyQueue, options.log), { connection, concurrency: options.concurrency });
-  const heavy = new bull.Worker(HEAVY_QUEUE, processorFor(handler, bull, options.log), { connection, concurrency: 1, lockDuration: HEAVY_LOCK_MS });
+  const heavy = new bull.Worker(HEAVY_QUEUE, processorFor(handler, bull, options.log), { connection, concurrency: 1, lockDuration: HEAVY_LOCK_MS, maxStalledCount: HEAVY_MAX_STALLS });
   for (const worker of [light, heavy]) {
-    worker.on("failed", (job, err) => options.log(`${job?.id ?? "?"} failed (attempt ${(job?.attemptsMade ?? 0)} of ${job?.opts.attempts ?? 1}): ${err.message}`));
+    worker.on("failed", (job, err) => {
+      options.log(`${job?.id ?? "?"} failed (attempt ${(job?.attemptsMade ?? 0)} of ${job?.opts.attempts ?? 1}): ${err.message}`);
+      // A failure the handler raised, it has already recorded. One BullMQ raised without running it, nobody has.
+      if (job && STALLED_TOO_OFTEN.test(err.message) && options.onLost) {
+        void options.onLost(job.data, LOST_REASON).catch((e: unknown) => options.log(`${job.id ?? "?"} couldn't be recorded as failed: ${e instanceof Error ? e.message : "unknown error"}`));
+      }
+    });
     worker.on("error", (err) => options.log(`Queue error: ${err.message}`));
   }
   return {
