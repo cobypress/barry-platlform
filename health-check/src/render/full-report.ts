@@ -129,7 +129,8 @@ h3.cap { font-size: 15px; font-weight: 600; color: var(--muted); margin: 0 0 6px
 .two-text.refs .definition { font-size: 17px; margin-bottom: 11px; }
 .three-text.refs { margin-top: 10px; }
 .three-text.refs .definition { font-size: 15.5px; margin-bottom: 10px; line-height: 1.3; }
-.three-text .definition { break-inside: avoid; margin-bottom: 8px; font-size: 12px; line-height: 1.32; }
+/* 13px, about 7pt printed: the smallest the deck sets reading text (DECISIONS.md 408). */
+.three-text .definition { break-inside: avoid; margin-bottom: 8px; font-size: 13px; line-height: 1.32; }
 .compact-rows table.grid { font-size: 13px; line-height: 1.3; }
 .compact-rows table.grid td, .compact-rows table.grid th { padding: 4px 7px; }
 .process { display: grid; grid-template-columns: 300px 1fr; gap: 22px; align-items: start; }
@@ -555,10 +556,13 @@ function lostAndSpeedSlideDense(r: Render, metric: (id: string) => Metric | unde
 /** A line of a list slide. `ref` is its reference, or several, as for an action that covers more than one issue. */
 type ListItem = { title: string; detail: string; ref?: string | string[] };
 const refsOf = (r: Render, ref: ListItem["ref"]): string => (ref === undefined ? "" : [ref].flat().map((id) => r.ref(id)).join(""));
+/** A list item's title with its references, as characters: a reference is about six (DECISIONS.md 408). */
+const titleText = (x: ListItem): string => `${x.title}${"\u00a0".repeat(6 * (x.ref === undefined ? 0 : [x.ref].flat().length))}`;
 
 /** Definitions are reference, so a dense deck sets them small, in three columns. */
 function threeColumnList(r: Render, eyebrow: string, title: string, items: ListItem[]): Slide[] {
-  const pages = paginate(items, (x) => 26 + 17 * estimateLines(x.detail, 56), 3 * 490);
+  // The title can wrap too, once its references are beside it.
+  const pages = paginate(items, (x) => 10 + 17.2 * (estimateLines(titleText(x), 46) + estimateLines(x.detail, 52)), 3 * 490);
   return pages.map((group, i) => ({
     html: `<div class="eyebrow">${r.t(eyebrow)}</div><h2>${r.t(title)}${i ? ", continued" : ""}</h2><div class="three-text">${group.map((x) => `<p class="definition"><strong>${r.t(x.title)}</strong>${refsOf(r, x.ref)}<br>${r.t(x.detail)}</p>`).join("")}</div>`,
   }));
@@ -599,7 +603,7 @@ function listSlides(r: Render, eyebrow: string, title: string, items: ListItem[]
 }
 
 function twoColumnList(r: Render, eyebrow: string, title: string, items: ListItem[]): Slide[] {
-  const pages = paginate(items, (x) => 28 + 19 * estimateLines(x.detail, 72), 2 * LIST_BUDGET);
+  const pages = paginate(items, (x) => 9 + 19 * (estimateLines(titleText(x), 64) + estimateLines(x.detail, 72)), 2 * LIST_BUDGET);
   return pages.map((group, i) => ({
     html: `<div class="eyebrow">${r.t(eyebrow)}</div><h2>${r.t(title)}${i ? ", continued" : ""}</h2><div class="two-text">${group.map((x) => `<p class="definition"><strong>${r.t(x.title)}</strong>${refsOf(r, x.ref)}<br>${r.t(x.detail)}</p>`).join("")}</div>`,
   }));
@@ -956,13 +960,25 @@ export function slideCounts(report: BuiltReport, pseudonyms: Pseudonymiser): num
 }
 
 export function fullReportHtml(report: BuiltReport, pseudonyms: Pseudonymiser): string {
+  return fullReportHtmlAt(report, pseudonyms, null);
+}
+
+/**
+ * The deck at one density step, by its place in the ladder (the last is the
+ * densest), so every step can be put through the layout check. With null, the
+ * roomiest step that fits the deck's range, as the deck is made.
+ */
+export function fullReportHtmlAt(report: BuiltReport, pseudonyms: Pseudonymiser, step: number | null): string {
   const built = report.outputs.full_health_check;
   const r = renderContext(pseudonyms, report.input.calibration.currency, !canRelease(built.sections).ok, referenceMap(noteSections(report)), yearlyByFinding(report.value));
+  const ladder = [...DENSITIES, null];
   let slides: Slide[] = [];
-  for (const density of [...DENSITIES, null]) {
-    slides = buildSlides(report, r, density);
-    if (slides.length <= deckRangeFor(report.input.run).max) break;
-  }
+  if (step !== null) slides = buildSlides(report, r, ladder[step] ?? null);
+  else
+    for (const density of ladder) {
+      slides = buildSlides(report, r, density);
+      if (slides.length <= deckRangeFor(report.input.run).max) break;
+    }
   const pages = slides.map((slide, i) => {
     const chrome = slide.classes?.includes("cover") ? "" : `<div class="footer" data-chrome><span>Black Cloud Barometer${r.draft ? " | Draft, not approved for release" : ""}</span><span>${i + 1}</span></div>`;
     return `<section class="page ${slide.classes ?? ""}" data-page="${i + 1}">${slide.html}${chrome}</section>`;

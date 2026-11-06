@@ -157,7 +157,7 @@ td.num, th.num { text-align: right; white-space: nowrap; }
 .cover-score b { font-size: 3.2em; font-weight: 700; line-height: 1; color: var(--chartreuse); margin-right: 10px; }
 .cover-score span { color: var(--panelMuted); }
 .cover-score .grade { font-weight: 600; margin-top: 4px; }
-.ref { color: var(--muted); font-size: 0.72em; font-weight: 400; letter-spacing: 0.02em; margin-left: 6px; white-space: nowrap; }
+.ref { color: var(--muted); font-size: 0.85em; font-weight: 400; letter-spacing: 0.02em; margin-left: 6px; white-space: nowrap; }
 .dark .ref { color: var(--panelMuted); }
 `;
 

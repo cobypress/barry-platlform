@@ -7,7 +7,7 @@ import { Pseudonymiser, type PseudonymEntry } from "../../privacy/pseudonymiser.
 import { runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
 import { EXECUTIVE_MAX_PAGES, executiveHtml, executiveMaxPages, RECHECK_EXECUTIVE_MAX_PAGES } from "../executive.ts";
-import { fullReportHtml } from "../full-report.ts";
+import { fullReportHtml, fullReportHtmlAt, slideCounts } from "../full-report.ts";
 import { onePagerHtml } from "../one-pager.ts";
 import { topIssues } from "../../narrative/select.ts";
 import { returnOnSpend } from "../money.ts";
@@ -145,6 +145,15 @@ describe("the executive summary, rebuilt around money", () => {
     const counted = (f: (typeof top)[number]) => order.indexOf(f.severity) * 1e12 - (report.added.get(f.id) ?? -1);
     const shown = topIssues(report.teamFindings, 5, report.added);
     assert.deepEqual(shown.map((f) => f.id), [...shown].sort((a, b) => counted(a) - counted(b) || 0).map((f) => f.id));
+  });
+
+  test("every density step can be rendered on its own, and sets definitions at 13px and references at 0.85em (DECISIONS.md 408)", () => {
+    const report = buildReport(base);
+    const counts = slideCounts(report, pseudonyms);
+    counts.forEach((n, step) => assert.equal([...fullReportHtmlAt(report, pseudonyms, step).matchAll(/<section class="page/g)].length, n, `step ${step}`));
+    const deck = fullReportHtml(report, pseudonyms);
+    assert.match(deck, /\.three-text \.definition \{[^}]*font-size: 13px/);
+    assert.match(deck, /\.ref \{[^}]*font-size: 0\.85em/);
   });
 
   test("the deck's contents give each entry's page, in page order, and each lands on its section (DECISIONS.md 407)", () => {
