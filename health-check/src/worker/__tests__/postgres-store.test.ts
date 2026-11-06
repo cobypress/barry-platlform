@@ -55,7 +55,7 @@ class FakePool implements SqlPool {
 }
 
 // Made up: one fact that differed, named with the checks resting on it.
-const FACTS: FactsReport = { version: 1, checkedAt: "2026-10-31T09:30:00.000Z", counts: { confirmed: 18, contradicted: 1, open: 1, notChecked: 1 }, differed: [{ id: "object.scontrol", affects: ["cfg.classic-dependencies"] }] };
+const FACTS: FactsReport = { version: 1, checkedAt: "2026-10-31T09:30:00.000Z", counts: { confirmed: 18, contradicted: 1, open: 1, notChecked: 1 }, differed: [{ id: "object.scontrol", question: "integrations.i", affects: ["tech.classic-leftovers"] }] };
 
 const RUN_ROW = {
   ...consoleRun(),

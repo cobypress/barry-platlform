@@ -50,15 +50,16 @@ export function factsText(summary: FactsSummary, titleOf: (ruleId: string) => st
 
 /**
  * What the worker sends the console with a run's results (DECISIONS.md 324):
- * how many facts came out each way, and for each one that differed, its
- * QUESTIONS.md id and the checks resting on it. Names and counts only, never
+ * how many facts came out each way, and for each one that differed, its id,
+ * its QUESTIONS.md id and the checks resting on it. Names and counts only, never
  * what was seen or the sentence about it, so it can sit beside any run.
  */
 export type FactsReport = {
   version: 1;
   checkedAt: string;
   counts: { confirmed: number; contradicted: number; open: number; notChecked: number };
-  differed: Array<{ id: string; affects: string[] }>;
+  /** The fact's own id, its QUESTIONS.md id ("integrations.i"), and the checks resting on it. */
+  differed: Array<{ id: string; question: string; affects: string[] }>;
 };
 
 export function factsReport(file: FactsFile): FactsReport {
@@ -67,6 +68,6 @@ export function factsReport(file: FactsFile): FactsReport {
     version: 1,
     checkedAt: file.checkedAt,
     counts: { confirmed: count("confirmed"), contradicted: count("contradicted"), open: count("open"), notChecked: count("not_checked") },
-    differed: file.facts.filter((f) => f.outcome === "contradicted").map((f) => ({ id: f.id, affects: [...f.affects] })),
+    differed: file.facts.filter((f) => f.outcome === "contradicted").map((f) => ({ id: f.id, question: f.question, affects: [...f.affects] })),
   };
 }

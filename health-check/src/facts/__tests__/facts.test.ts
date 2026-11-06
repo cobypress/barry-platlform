@@ -118,7 +118,7 @@ describe("where a fact contradicts what we assume", () => {
     const report = factsReport(FactsFile.parse(JSON.parse(wrong.text)));
     const count = (o: string) => wrong.facts.facts.filter((f) => f.outcome === o).length;
     assert.deepEqual(report.counts, { confirmed: count("confirmed"), contradicted: count("contradicted"), open: count("open"), notChecked: count("not_checked") });
-    assert.deepEqual(report.differed, wrong.facts.facts.filter((f) => f.outcome === "contradicted").map((f) => ({ id: f.id, affects: f.affects })));
+    assert.deepEqual(report.differed, wrong.facts.facts.filter((f) => f.outcome === "contradicted").map((f) => ({ id: f.id, question: f.question, affects: f.affects })));
     assert.ok(report.differed.length > 0);
     // Names only: every string in it is an id, apart from when it was checked.
     const strings: string[] = [];
