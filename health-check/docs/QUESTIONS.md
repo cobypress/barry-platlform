@@ -2,6 +2,8 @@
 
 None of these blocked Milestone 1.
 
+Each item has an id: its section's short name and its number or letter, such as `cpq.a` or `pay.49` (`SECTION_IDS` in `src/facts/questions.ts`). Every run's facts step checks the Salesforce names behind many of them, and `npm run questions -- <run folders>` says which those runs settled, contradicted or left open (DECISIONS.md 287 to 295).
+
 ## For Coby
 
 | # | Question | Why it matters | Needed by |
@@ -145,6 +147,10 @@ About 200 field references on 46 objects, and 6 Metadata types, were checked. Ev
 | | `LoginHistory`, `SecurityHealthCheck*`, `DuplicateRule`, `PermissionSet`, `ProfileLayout` | Permissions: Manage Users or Monitor Login History for all logins, otherwise View Setup and Configuration |
 | Couldn't confirm | `PermissionSet.PermissionsViewAllData` | The docs give the pattern `Permissions<PermissionName>` and say to use describe. `PermissionsModifyAllData` appears literally, `PermissionsViewAllData` doesn't |
 | | That Tooling `Layout` and `ProfileLayout` read without an object filter (item 1 above) | Nothing in the docs requires one |
+
+Still to confirm on a real org:
+
+a) `PermissionSet.PermissionsViewAllData`, beside `PermissionsModifyAllData`. The facts step checks both against the org's own PermissionSet describe.
 
 The forecast items, login history and campaign reads are now described first, so a missing optional field there costs one rule, not the source. See DECISIONS.md 41.
 

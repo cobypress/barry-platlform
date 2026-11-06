@@ -1490,3 +1490,19 @@ export const PARDOT_OPEN_LEADS = [
   ...Array.from({ length: 2 }, (_, i) => prospect(i + 28, userId(9), 40 + i, null)),
   prospect(30, userId(2), 120, null),
 ];
+
+// The facts step (DECISIONS.md 287 to 295). PermissionSet, described for the
+// permission fields we filter on, and the objects describe-global lists: every
+// object the simulator answers through REST. CPQ's are added only with CPQ.
+export const FACT_DESCRIBES: Record<string, { fields: unknown[] }> = {
+  PermissionSet: { fields: ["Id", "Label", "Name", "IsOwnedByProfile", "PermissionsModifyAllData", "PermissionsViewAllData", "PermissionsApiUserOnly"].map((f) => standardField(f, f.startsWith("Permissions") || f.startsWith("Is") ? "boolean" : "string")) },
+};
+export const SOBJECTS: readonly string[] = [
+  "Account", "ActivityUsrConnectionStatus", "AgentWork", "ApexClass", "ApexPage", "ApexTrigger", "AssignmentRule", "AsyncApexJob", "AuthProvider", "BotDefinition", "BusinessHours",
+  "Campaign", "CampaignMember", "Case", "CaseArticle", "CaseHistory", "CaseMilestone", "CaseStatus", "ConnectedApplication", "Contact", "Contract", "CronTrigger", "Dashboard",
+  "DuplicateRule", "EmailMessage", "EmailServicesAddress", "Event", "Folder", "ForecastingFact", "ForecastingItem", "ForecastingQuota", "ForecastingType", "Group", "GroupMember",
+  "KnowledgeArticleVersion", "KnowledgeArticleViewStat", "Lead", "LeadHistory", "LiveChatTranscript", "LoginHistory", "Macro", "MacroUsage", "MessagingSession", "MilestoneType",
+  "NamedCredential", "Opportunity", "OpportunityHistory", "OpportunityLineItem", "OpportunityStage", "OrderItem", "Organization", "PackageLicense", "Period", "PermissionSet",
+  "PermissionSetAssignment", "PermissionSetGroupComponent", "PermissionSetLicense", "ProcessDefinition", "ProcessInstance", "QueueRoutingConfig", "QueueSobject", "QuickText",
+  "QuickTextUsage", "RecordType", "Report", "Scontrol", "ServiceChannel", "SetupAuditTrail", "Site", "SlaProcess", "Task", "User", "UserLicense", "UserRole", "VoiceCall", "WebLink",
+];

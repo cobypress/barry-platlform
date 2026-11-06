@@ -26,14 +26,18 @@ export type SimulatorOptions = {
   readOnly?: boolean;
   /** Return a Tooling item with a null Metadata, for the single-row query that matches. */
   withholdMetadata?: (soql: string) => boolean;
-  /** The day's async Apex allowance, as /limits reports it. The synthetic org's own by default. */
-  asyncApex?: { Max: number; Remaining: number };
+  /** The day's async Apex allowance, as /limits reports it. The synthetic org's own by default, and null leaves it out. */
+  asyncApex?: { Max: number; Remaining: number } | null;
   /** Data and file storage, as /limits reports them. The synthetic org's own by default. */
   storage?: typeof org.STORAGE_LIMITS;
   /** False for an org without Salesforce CPQ: no SBQQ licence, and its objects can't be described. */
   cpq?: boolean;
   /** False for an org without Account Engagement: no pi licence, and none of its fields on Lead. */
   pardot?: boolean;
+  /** Objects this org doesn't have, or the user can't see: describe-global leaves them out, and describing or querying one fails as Salesforce does. */
+  missingObjects?: string[];
+  /** Package namespaces whose PackageLicense row this org lacks, though their objects and fields are there. */
+  unlicensed?: string[];
 };
 
 type Json = Record<string, unknown>;
@@ -156,10 +160,12 @@ export class Simulator implements Transport {
   #dropFields: Record<string, string[]>;
   #readOnly: boolean;
   #withholdMetadata: SimulatorOptions["withholdMetadata"];
-  #asyncApex: { Max: number; Remaining: number };
+  #asyncApex: { Max: number; Remaining: number } | null;
   #storage: typeof org.STORAGE_LIMITS;
   #cpq: boolean;
   #pardot: boolean;
+  #missing: Set<string>;
+  #unlicensed: Set<string>;
   #retrieveChecks = 0;
   // Each retrieve gets its own id, so a recording's status polls tell them apart
   // when a replay runs a different set of modules.
@@ -173,10 +179,13 @@ export class Simulator implements Transport {
     this.#dropFields = options.dropFields ?? {};
     this.#readOnly = options.readOnly ?? false;
     this.#withholdMetadata = options.withholdMetadata;
-    this.#asyncApex = options.asyncApex ?? org.ASYNC_APEX_LIMIT;
+    this.#asyncApex = options.asyncApex === undefined ? org.ASYNC_APEX_LIMIT : options.asyncApex;
     this.#storage = options.storage ?? org.STORAGE_LIMITS;
     this.#cpq = options.cpq ?? true;
     this.#pardot = options.pardot ?? true;
+    // A read-only connection can't see AuthProvider (DECISIONS.md 60).
+    this.#unlicensed = new Set(options.unlicensed ?? []);
+    this.#missing = new Set([...(options.missingObjects ?? []), ...(this.#readOnly ? ["AuthProvider"] : [])]);
     if (!this.#pardot) this.#dropFields = { ...this.#dropFields, Lead: [...(this.#dropFields.Lead ?? []), "pi__url__c", "pi__score__c", "pi__grade__c"] };
   }
 
@@ -190,7 +199,7 @@ export class Simulator implements Transport {
     const path = url.pathname;
 
     if (path === "/services/data/") return jsonResponse(200, [{ version: "60.0" }, { version: org.API_VERSION }], this.#limitInfo);
-    if (path.endsWith("/limits")) return jsonResponse(200, { DailyApiRequests: { Max: this.#limit, Remaining: this.#limit - this.#used }, DailyAsyncApexExecutions: this.#asyncApex, ...this.#storage }, this.#limitInfo);
+    if (path.endsWith("/limits")) return jsonResponse(200, { DailyApiRequests: { Max: this.#limit, Remaining: this.#limit - this.#used }, ...(this.#asyncApex ? { DailyAsyncApexExecutions: this.#asyncApex } : {}), ...this.#storage }, this.#limitInfo);
 
     this.#used++;
     if (path.endsWith("/limits/recordCount")) return jsonResponse(200, { sObjects: org.RECORD_COUNTS }, this.#limitInfo);
@@ -202,10 +211,14 @@ export class Simulator implements Transport {
       const body = reportDescribe(report[1]!);
       return body ? jsonResponse(200, body, this.#limitInfo) : jsonResponse(404, [{ errorCode: "NOT_FOUND", message: "The requested resource does not exist" }], this.#limitInfo);
     }
+    if (/\/sobjects\/?$/.test(path)) {
+      const names = [...org.SOBJECTS, ...(this.#cpq ? Object.keys(org.CPQ_DESCRIBES) : [])];
+      return jsonResponse(200, { sobjects: [...new Set(names)].filter((n) => !this.#missing.has(n)).sort().map((name) => ({ name, queryable: true, custom: name.endsWith("__c") })) }, this.#limitInfo);
+    }
     const describe = path.match(/\/sobjects\/([A-Za-z0-9_]+)\/describe$/);
     if (describe) {
       const name = describe[1]!;
-      const d = org.DESCRIBES[name] ?? org.FIELD_DESCRIBES[name] ?? (this.#cpq ? org.CPQ_DESCRIBES[name] : undefined);
+      const d = this.#missing.has(name) ? undefined : (org.DESCRIBES[name] ?? org.FIELD_DESCRIBES[name] ?? org.FACT_DESCRIBES[name] ?? (this.#cpq ? org.CPQ_DESCRIBES[name] : undefined));
       if (!d) return jsonResponse(404, [{ errorCode: "NOT_FOUND", message: "The requested resource does not exist" }], this.#limitInfo);
       const dropped = new Set(this.#dropFields[name] ?? []);
       return jsonResponse(200, { name, ...d, fields: d.fields.filter((f) => !dropped.has((f as { name: string }).name)) }, this.#limitInfo);
@@ -259,6 +272,7 @@ export class Simulator implements Transport {
     if (failure) return { error: failure };
 
     const object = soql.match(/\bFROM\s+([A-Za-z0-9_]+)/i)?.[1] ?? "";
+    if (!tooling && this.#missing.has(object)) return unsupported(object);
     const dropped = this.#dropFields[object] ?? [];
     const named = dropped.find((f) => new RegExp(`\\b${f}\\b`).test(soql));
     if (named) return reject("INVALID_FIELD", `No such column '${named}' on entity '${object}'.`);
@@ -294,7 +308,7 @@ export class Simulator implements Transport {
       case "PermissionSetLicense":
         return page(org.PERMISSION_SET_LICENSES);
       case "PackageLicense":
-        return page(org.PACKAGE_LICENSES.filter((p) => (this.#cpq || p.NamespacePrefix !== "SBQQ") && (this.#pardot || p.NamespacePrefix !== "pi")));
+        return page(org.PACKAGE_LICENSES.filter((p) => (this.#cpq || p.NamespacePrefix !== "SBQQ") && (this.#pardot || p.NamespacePrefix !== "pi") && !this.#unlicensed.has(p.NamespacePrefix ?? "")));
       case "SBQQ__PriceRule__c":
         return this.#cpq ? page(org.CPQ_PRICE_RULES) : unsupported(object);
       case "SBQQ__PriceAction__c":

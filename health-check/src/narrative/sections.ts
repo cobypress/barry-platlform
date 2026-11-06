@@ -1,4 +1,5 @@
 import { compareWithBaseline, progressFigures, worthFigures, type Progress } from "../progress/compare.ts";
+import { factsText, type FactsSummary } from "../facts/summary.ts";
 import { buildValueModel, worthOf, HEADLINE_KINDS, KIND_LABELS, TEAM_TIME_GROUP, UK_HOURLY_BENCHMARK, WORKING_WEEKS, type TeamTime, type ValueModel } from "../value/model.ts";
 import { AREA_WEIGHTS, CRITICAL_CAP, GRADES, overallScore, type OverallScore } from "../domains/scoring.ts";
 import { comparisonId, comparisonNotes, compareRun, OWN_RANGE_MIN, type BenchmarkInput, type Comparison } from "../benchmark/compare.ts";
@@ -51,6 +52,8 @@ export type ReportInput = {
   interviews?: Interview[] | null;
   /** Our own customers' benchmark rows. Without them, only published research is compared. */
   benchmark?: BenchmarkInput | null;
+  /** What the run's facts step found about how the org is built (DECISIONS.md 290). */
+  facts?: FactsSummary | null;
   /** How many records each issue's action list holds, by finding id. Counts only: the names stay in the run folder. */
   recordCounts?: Record<string, { rows: number; total: number }>;
   now?: Date;
@@ -181,7 +184,7 @@ function severityCounts({ critical, high }: { critical: number; high: number }):
   return `${critical} critical and ${high} high`;
 }
 
-function calibrationText(run: Run, c: Calibration): string {
+function calibrationText(run: Run, c: Calibration, facts: string[] = []): string {
   return [
     `Analysis window: ${run.analysisWindow.from} to ${run.analysisWindow.to}.`,
     `Calibration confirmed by ${c.confirmedBy} on ${c.confirmedAt.slice(0, 10)}.`,
@@ -190,7 +193,13 @@ function calibrationText(run: Run, c: Calibration): string {
     `A user counts as dormant after ${c.dormantDays} days without logging in.`,
     `A figure needs at least ${c.minSample} deals behind it.`,
     `Values are in ${c.currency}.`,
+    ...facts,
   ].join("\n");
+}
+
+/** The facts step's sentences, naming each affected check by its finding's title. */
+function factsLines(input: ReportInput): string[] {
+  return input.facts ? factsText(input.facts, (ruleId) => input.findings.find((f) => f.ruleId === ruleId)?.title) : [];
 }
 
 function overrideText(overrides: NumberOverride[]): string {
@@ -282,7 +291,7 @@ function rawNotesSpecs(input: ReportInput, overall: OverallScore, comparisons: C
     intake
       ? { key: "intake_summary", title: "Intake summary", body: intakeText(intake), sources: [INTAKE] }
       : { key: "intake_summary", title: "Intake summary", body: "No intake has been recorded for this run.", needsInput: true },
-    { key: "assumptions", title: "Assumptions", body: calibrationText(run, calibration), sources: [SOURCE.run, CALIBRATION] },
+    { key: "assumptions", title: "Assumptions", body: calibrationText(run, calibration, factsLines(input)), sources: [SOURCE.run, CALIBRATION] },
     ...(progress ? [{ key: "progress", title: "Since your last health check", body: progressText(progress, calibration.currency), sources: [PROGRESS] }] : []),
     { key: "barometer_score", title: "Barometer score", body: overallText(overall), sources: [OVERALL] },
     {
@@ -809,7 +818,7 @@ export function buildReport(given: ReportInput): BuiltReport {
     overrides,
     structural: STRUCTURE,
     extraText: [
-      { source: CALIBRATION, text: calibrationText(run, calibration) },
+      { source: CALIBRATION, text: calibrationText(run, calibration, factsLines(input)) },
       ...(intake ? [{ source: INTAKE, text: intakeText(intake) }] : []),
       // The cover's customer name, which can be a reference such as "ACME-02", and
       // the consultant's, which can read as a number ("Ten Eyck"). No section's scope includes it.

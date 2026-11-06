@@ -1,4 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { FACTS_FILE } from "../extract/facts.ts";
+import { FactsFile, summariseFacts } from "../facts/summary.ts";
 import { join, resolve } from "node:path";
 import { z } from "zod";
 import { assertOutsideGit } from "../engine/run.ts";
@@ -74,6 +76,7 @@ export function loadRun(dir: string, options: { baseline?: boolean } = {}): { in
   const intake = readOptional<unknown>(join(dir, "intake.json"));
   const survey = readOptional<unknown>(join(dir, SURVEY_FILE));
   const interviews = readOptional<unknown>(join(dir, INTERVIEWS_FILE));
+  const facts = readOptional<unknown>(join(dir, FACTS_FILE));
   const input: ReportInput = {
     run: Run.parse(read(join(dir, "run.json"))),
     calibration: Calibration.parse(read(join(dir, "calibration.json"))),
@@ -86,6 +89,7 @@ export function loadRun(dir: string, options: { baseline?: boolean } = {}): { in
     survey: survey ? Survey.parse(survey) : null,
     recordCounts: recordCounts(loadActionLists(dir)),
     interviews: interviews ? Interviews.parse(interviews).interviews : null,
+    facts: facts ? summariseFacts(FactsFile.parse(facts)) : null,
   };
   if (options.baseline !== false) input.baseline = loadBaseline(dir, input.run);
   return { input, pseudonyms: new Pseudonymiser(read<PseudonymEntry[]>(join(dir, "pseudonym-map.json"))) };

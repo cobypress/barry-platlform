@@ -6,7 +6,9 @@ import { modulesFor } from "../domains/scope.ts";
 import { scoreDomains } from "../domains/scoring.ts";
 import type { DomainModule } from "../domains/types.ts";
 import { orgExtractor } from "../extract/configuration.ts";
+import { FACTS_FILE, factsExtractor, type Facts } from "../extract/facts.ts";
 import { fieldDescribeExtractor } from "../extract/fields.ts";
+import { summariseFacts } from "../facts/summary.ts";
 import { monthsBefore, type ExtractContext, type Extractor, type PartialStore } from "../extract/types.ts";
 import type { UserRow } from "../extract/users.ts";
 import { usersExtractor } from "../extract/users.ts";
@@ -104,7 +106,9 @@ export function collectExtractors(modules: DomainModule[]): Extractor[] {
     [fieldDescribeExtractor.id, fieldDescribeExtractor],
   ]);
   for (const module of modules) for (const extractor of module.extractors) if (!seen.has(extractor.id)) seen.set(extractor.id, extractor);
-  return [...seen.values()];
+  // The facts step goes last on every run, so it can see which settings the modules retrieved.
+  seen.delete(factsExtractor.id);
+  return [...seen.values(), factsExtractor];
 }
 
 const calibrationHash = (calibration: Calibration): string => createHash("sha256").update(JSON.stringify(calibration)).digest("hex").slice(0, 16);
@@ -250,6 +254,8 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
     }
   }
 
+  // Names, booleans and types only, so it's kept as long as the findings (DECISIONS.md 288).
+  writeJson(join(dir, FACTS_FILE), extracts.get(factsExtractor.id));
   const org = extracts.get(orgExtractor.id) as { status: string; data?: Array<{ IsSandbox: boolean; Name?: string }> };
   run.isSandbox = org.data?.[0]?.IsSandbox ?? false;
   // The company information in Setup is the name the customer goes by, unless one was given.
@@ -301,6 +307,8 @@ function renderOutputs(dir: string, run: Run, calibration: Calibration, output: 
   writeJson(join(dir, "manual-steps.json"), output.manualSteps);
   const scores = scoreDomains(run.modules, output.findings, run.ruleSetVersion);
   writeJson(join(dir, "scores.json"), scores);
-  const notes = renderRawNotes({ run, calibration, ...output, scores, pseudonyms: loadPseudonyms(dir) });
+  const factsPath = join(dir, FACTS_FILE);
+  const facts = existsSync(factsPath) ? summariseFacts(readJson<Facts>(factsPath)) : null;
+  const notes = renderRawNotes({ run, calibration, ...output, scores, facts, pseudonyms: loadPseudonyms(dir) });
   writeFileSync(join(dir, "raw-notes.md"), notes, { mode: 0o600 });
 }

@@ -304,7 +304,7 @@ const interactiveIntegrations: Rule = {
 
 const apiUsage: Rule = {
   id: "int.api-usage",
-  version: 1,
+  version: 2,
   domain: DOMAIN,
   title: "Daily API and async Apex use against the allowance",
   evaluate(ctx): RuleResult | RuleResult[] {
@@ -318,15 +318,18 @@ const apiUsage: Rule = {
     });
     const evidence = [ctx.ev(limits.source, { count: read.length, note: "Read as the connection was made, over Salesforce's rolling 24 hours. Calls this check had already made that day are included." })];
     if (read.length === 0) return { outcome: "not_measurable", reason: "The org reported neither daily allowance with a maximum.", evidence };
+    // An allowance /limits didn't report can't be called within its limit (DECISIONS.md 291).
+    const unread = Object.entries(ALLOWANCES).filter(([key]) => !read.some((r) => r.key === key)).map(([, label]) => label);
     const segments = [{ dimension: "allowance", segments: read.length }];
     const facts = Object.fromEntries(read.flatMap((r) => [[`${r.key}Used`, r.used], [`${r.key}Max`, r.max], [`${r.key}Share`, r.share]]));
     const text = (r: (typeof read)[number]): string => `${r.share}% of its daily ${r.label} (${r.used.toLocaleString("en-GB")} of ${r.max.toLocaleString("en-GB")})`;
     const over = read.filter((r) => r.share >= ALLOWANCE_WARNING);
+    if (over.length === 0 && unread.length) return { outcome: "not_measurable", reason: `The org didn't report its daily allowance for ${listed(unread)}, so we can't say it's within it.`, evidence };
     if (over.length === 0) return { outcome: "pass", summary: `When we connected, the org had used ${listed(read.map(text))}.`, evidence, segmentsChecked: segments, facts };
     return {
       outcome: "issue",
       title: "The org is using up most of a daily allowance",
-      summary: `When we connected, the org had used ${listed(over.map(text))}. Past an allowance, Salesforce can refuse further calls or jobs until use falls back, and the integrations that depend on them stop.`,
+      summary: `When we connected, the org had used ${listed(over.map(text))}. Past an allowance, Salesforce can refuse further calls or jobs until use falls back, and the integrations that depend on them stop.${unread.length ? ` The org didn't report its daily allowance for ${listed(unread)}, so that one isn't checked.` : ""}`,
       recommendation: "Find which integrations and jobs use the most, then cut repeats: combine calls, and use bulk loads or change events for large volumes.",
       recommendationType: "investigate",
       severity: over.some((r) => r.share >= ALLOWANCE_HIGH) ? "high" : "medium",
