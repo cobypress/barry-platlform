@@ -23,6 +23,8 @@ import { MIN_RESPONSES, SURVEY, SURVEY_METRIC_IDS, surveyHours, surveyMetrics } 
 import type { Survey } from "../survey/questions.ts";
 import { buildSurveyView, surveyViewFigures, type SurveyView } from "../survey/view.ts";
 import { CONCERN_AT, REKEYING_AT } from "../survey/pairings.ts";
+import type { Interview } from "../interviews/questions.ts";
+import { buildInterviewView, interviewDatasetText, interviewSource, interviewSources, interviewViewFigures, INTERVIEWS_SOURCE, READING_LABELS, SHARE_WITHIN_POINTS as SHARE_POINTS, executiveThemes, type InterviewView } from "../interviews/readings.ts";
 
 // The three outputs, built from one findings dataset. Each section gets a first
 // version written by the engine, so a report always exists even if Claude never
@@ -43,6 +45,8 @@ export type ReportInput = {
   preparedBy?: string | null;
   /** The team survey's anonymous answers, as the console stores them (DECISIONS.md 140). */
   survey?: Survey | null;
+  /** The stakeholder interviews a consultant recorded, by role (DECISIONS.md 179). */
+  interviews?: Interview[] | null;
   /** Our own customers' benchmark rows. Without them, only published research is compared. */
   benchmark?: BenchmarkInput | null;
   /** How many records each issue's action list holds, by finding id. Counts only: the names stay in the run folder. */
@@ -78,6 +82,8 @@ export type BuiltReport = {
   scopes: Map<string, string[]>;
   /** What the team survey says, and against what we found. Null when the run has no survey. */
   survey: SurveyView | null;
+  /** What people told us in interviews, set against the data. Null when none were recorded. */
+  interviews: InterviewView | null;
   /**
    * What separates wins from losses, linked to the issues about the same thing
    * (roadmap 3.3). Kept beside the findings rather than written into them, so a
@@ -106,7 +112,7 @@ type Spec = {
   /** Other dataset sources this section's text may quote. */
   sources?: string[];
   needsInput?: boolean;
-  brief?: { purpose: string; sources: PromptSource[]; fillsPlaceholder?: boolean };
+  brief?: { purpose: string; sources: PromptSource[]; fillsPlaceholder?: boolean; rolesOnly?: boolean };
 };
 
 const SUMMARY_SOURCES = [SOURCE.run, SOURCE.summary, SOURCE.structure];
@@ -239,7 +245,7 @@ function progressText(p: Progress, currency: string): string {
   );
 }
 
-function rawNotesSpecs(input: ReportInput, overall: OverallScore, comparisons: Comparison[], value: ValueModel, investment: Investment, effectiveMetrics: Metric[], progress: Progress | null, survey: SurveyView | null, causes: Cause[]): Spec[] {
+function rawNotesSpecs(input: ReportInput, overall: OverallScore, comparisons: Comparison[], value: ValueModel, investment: Investment, effectiveMetrics: Metric[], progress: Progress | null, survey: SurveyView | null, causes: Cause[], interviews: InterviewView | null): Spec[] {
   const { run, calibration, findings, metrics, manualSteps, intake, overrides = [] } = input;
   const exclusions = [...new Set([...findings.flatMap((f) => f.evidence.flatMap((e) => e.exclusions)), ...metrics.flatMap((m) => m.exclusions)])];
   const notMeasurable = findings.filter((f) => f.status === "not_measurable");
@@ -276,6 +282,7 @@ function rawNotesSpecs(input: ReportInput, overall: OverallScore, comparisons: C
         }]
       : []),
     ...(survey ? [{ ...surveySpec(survey), body: lines(survey.paragraph, ...surveyMethod(survey)) }] : []),
+    ...(interviews ? [{ ...interviewScope(interviews), key: "interviews", title: "What your people told us", body: lines(interviews.paragraph, ...interviewMethod(interviews)) }] : []),
     ...domains.map((domain): Spec => {
       const own = findings.filter((f) => f.domain === domain);
       return { key: `findings_${domain}`, title: `Findings: ${domainLabel(domain)}`, body: `Every check we ran for ${domainLabel(domain).toLowerCase()}, with what it found and how to reproduce it.`, findingIds: own.map((f) => f.id) };
@@ -492,7 +499,41 @@ function surveySpec(view: SurveyView): Spec {
   };
 }
 
-function executiveSpecs(input: ReportInput, team: Finding[], survey: SurveyView | null): Spec[] {
+/** What the interview sections may quote: the readings, each interview, and the checks and figures they're set against. */
+function interviewScope(view: InterviewView): Pick<Spec, "findingIds" | "metricIds" | "sources"> {
+  return {
+    findingIds: [...new Set(view.themes.flatMap((t) => t.issues.map((f) => f.id)))],
+    metricIds: [...new Set(view.themes.flatMap((t) => (t.metricId ? [t.metricId] : [])))],
+    sources: [INTERVIEWS_SOURCE, ...Array.from({ length: view.count }, (_, i) => interviewSource(i + 1))],
+  };
+}
+
+/** How the interviews were read, then every reading, for the raw notes. Roles only, and never the notes themselves. */
+function interviewMethod(view: InterviewView): string[] {
+  return [
+    `We set each answer against a matching measure by rule, not judgement. A rating of ${CONCERN_AT} or less out of 5, or ${REKEYING_AT} hour or more a week typing data in again, is a problem the person feels, and an issue in the checks it's set against is a problem we found. A share someone gave us agrees with ours within ${SHARE_POINTS} points, and a count or a number of days within a quarter of ours. Where nothing in Salesforce measures it, we can't tell.`,
+    "We keep each conversation's notes with the run, and don't put them in any document.",
+    ...view.themes.map((t) => `${t.roleLabel}, ${t.topic.charAt(0).toLowerCase()}${t.topic.slice(1)}: ${t.said} ${t.found} ${READING_LABELS[t.reading]}: ${t.why}`),
+  ];
+}
+
+/** The chapter, the same opening in the full report and the microsite. Claude may draft it from the notes. */
+function interviewSpec(input: ReportInput, view: InterviewView): Spec {
+  return {
+    key: "interviews",
+    title: "What your people told us",
+    body: view.paragraph,
+    ...interviewScope(view),
+    brief: {
+      purpose:
+        "Say what the people we interviewed told us, theme by theme, grouped by role, and set each theme against what the data shows: say where it agrees, where it disagrees and where we can't tell, following the readings you're given. Draw the themes from the notes as well as the answers. Refer to people only by their role, such as \"your sales director\" or \"two sales reps\", never by name or token. A figure from an interview is only what that person told us: write it as what they said (\"told us\", \"said\", \"put it at\"), never as a figure we measured, and cite the interview it came from.",
+      sources: interviewSources(input.interviews ?? [], view) as PromptSource[],
+      rolesOnly: true,
+    },
+  };
+}
+
+function executiveSpecs(input: ReportInput, team: Finding[], survey: SurveyView | null, interviews: InterviewView | null = null): Spec[] {
   const verdict = verdictOf(team);
   const top = topIssues(team, TOP_ISSUE_COUNT);
   const plan = buildPlan(team);
@@ -513,6 +554,8 @@ function executiveSpecs(input: ReportInput, team: Finding[], survey: SurveyView 
       brief: { purpose: "Tell an executive reader, in a few sentences, what state this Salesforce org is in and what matters most.", sources: [summaryCounts(team), ...top.map(findingSource)] },
     },
     ...(survey ? [surveySpec(survey)] : []),
+    // Only what several people said the same way, and the data reads one way (DECISIONS.md 185).
+    ...(executiveThemes(interviews).length ? [{ key: "interviews", title: "What your people told us", body: lines(...executiveThemes(interviews).map((t) => t.sentence)), ...interviewScope(interviews!) }] : []),
     { key: "scorecard", title: "Scorecard", body: "Each area of your Salesforce, scored out of 100. Where an area can't be scored fairly, we say why rather than guess.", findingIds: team.map((f) => f.id), sources: [...SUMMARY_SOURCES, ...scoreSources] },
     // A set-up review reads no deals, so there's no pipeline to describe.
     ...(isSetupReview(input.run) ? [] : [pipelineSpec(input, team)]),
@@ -552,7 +595,7 @@ function executiveSpecs(input: ReportInput, team: Finding[], survey: SurveyView 
   ];
 }
 
-function fullSpecs(input: ReportInput, team: Finding[], metrics: Metric[], survey: SurveyView | null): Spec[] {
+function fullSpecs(input: ReportInput, team: Finding[], metrics: Metric[], survey: SurveyView | null, interviews: InterviewView | null = null): Spec[] {
   const { intake } = input;
   const built = buildPlan(team);
   const { phases: plan, later } = built;
@@ -606,6 +649,7 @@ function fullSpecs(input: ReportInput, team: Finding[], metrics: Metric[], surve
       },
     }]),
     ...(survey ? [surveySpec(survey)] : []),
+    ...(interviews ? [interviewSpec(input, interviews)] : []),
     statedVsActualSpec(intake, team),
     {
       key: "roadmap",
@@ -683,6 +727,7 @@ export function buildReport(given: ReportInput): BuiltReport {
   const teamTime = teamTimeOf(effective.metrics);
   const value = buildValueModel(effective.findings, run, calibration.currency, intake?.hourlyCost, teamTime);
   const survey = buildSurveyView(effective.metrics, team);
+  const interviews = buildInterviewView(input.interviews, team, effective.metrics);
   const causes = causesOf(effective.metrics, team);
   // A re-check compares with its first health check, built the same way, overrides and all.
   let progress: Progress | null = null;
@@ -720,6 +765,8 @@ export function buildReport(given: ReportInput): BuiltReport {
       // the consultant's, which can read as a number ("Ten Eyck"). No section's scope includes it.
       { source: COVER, text: [intake?.customerName, run.customerRef, input.preparedBy].filter(Boolean).join("\n") },
       ...(overrides.length ? [{ source: OVERRIDES, text: overrideText(overrides) }] : []),
+      // Each interview's words are what someone said, and can only be quoted as that (DECISIONS.md 183).
+      ...(interviews ? interviewDatasetText(input.interviews ?? [], interviews) : []),
       // The working the raw notes print, so every figure a comparison shows traces to it.
       ...comparisons.map((c) => ({ source: comparisonId(c.metric.key), text: comparisonNotes(c).map((l) => l.text).join("\n") })),
     ],
@@ -749,6 +796,7 @@ export function buildReport(given: ReportInput): BuiltReport {
     dataset.figures.push(...surveyHours(effective.metrics).map((value) => ({ source: SURVEY_SOURCE, kind: "duration" as const, value, unit: "hour" })));
     dataset.figures.push(...[MIN_RESPONSES, 5, 10, WORKING_WEEKS, ...surveyViewFigures(survey)].map((value) => ({ source: SURVEY_SOURCE, kind: "number" as const, value })), { source: SURVEY_SOURCE, kind: "duration", value: WORKING_WEEKS, unit: "week" }, { source: SURVEY_SOURCE, kind: "duration", value: REKEYING_AT, unit: "hour" });
   }
+  if (interviews) dataset.figures.push(...interviewViewFigures(interviews).map((value) => ({ source: INTERVIEWS_SOURCE, kind: "number" as const, value })), { source: INTERVIEWS_SOURCE, kind: "duration", value: REKEYING_AT, unit: "hour" }, { source: INTERVIEWS_SOURCE, kind: "points", value: SHARE_POINTS });
   // What fixing it is worth against what they pay, as the investment page says it.
   if (investment.annualCost.status === "measured" && investment.annualCost.value > 0 && value.total.expected > 0) {
     dataset.figures.push({ source: VALUE_TOTAL, kind: "ratio", value: Math.round((value.total.expected / investment.annualCost.value) * 10) / 10 });
@@ -776,11 +824,12 @@ export function buildReport(given: ReportInput): BuiltReport {
     comparisons,
     investment,
     survey,
+    interviews,
     causes,
     outputs: {
-      raw_notes: build("raw_notes", rawNotesSpecs(input, overall, comparisons, value, investment, effective.metrics, progress, survey, causes)),
-      executive_summary: build("executive_summary", executiveSpecs(input, team, survey)),
-      full_health_check: build("full_health_check", fullSpecs(input, team, effective.metrics, survey)),
+      raw_notes: build("raw_notes", rawNotesSpecs(input, overall, comparisons, value, investment, effective.metrics, progress, survey, causes, interviews)),
+      executive_summary: build("executive_summary", executiveSpecs(input, team, survey, interviews)),
+      full_health_check: build("full_health_check", fullSpecs(input, team, effective.metrics, survey, interviews)),
     },
     briefs,
     scopes,

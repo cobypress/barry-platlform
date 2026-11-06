@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { Intake } from "../narrative/intake.ts";
 import { SURVEY_VERSION, type Survey } from "../survey/questions.ts";
+import { Interview } from "../interviews/questions.ts";
 import { BenchmarkRow, HeadcountBand, Industry } from "../schemas/benchmark.ts";
 import { Calibration, ConnectLink, ManualAnswer, NumberOverride, ReportSection, Run, SectionVersion, type Finding, type ManualStep, type Metric, type Score } from "../schemas/index.ts";
 import {
@@ -122,6 +123,30 @@ function versionOf(value: unknown): number {
 export function surveyFromRows(rows: Array<Record<string, unknown>>, sent = false): Survey | null {
   if (rows.length === 0 && !sent) return null;
   return { version: SURVEY_VERSION, responses: rows.map((r) => ({ id: String(r.id), submittedAt: String(r.submittedAt), version: versionOf(r.version), answers: r.answers })) };
+}
+
+// The console's stakeholder interviews (DECISIONS.md 180). "answers" and
+// "version" are read through the row as JSON, as the survey's version is, so
+// the query works before and after the console adds either column. The
+// interviewer and who recorded it are never read: the engine has no use for them.
+export const INTERVIEW: Columns = { id: "text", role: "text", heldOn: "date", notes: "text" };
+export const INTERVIEW_SQL = selectSql("HealthCheckInterview", INTERVIEW, `"runId" = $1`, `"heldOn", "id"`).replace(
+  ` FROM "HealthCheckInterview"`,
+  `, to_jsonb("HealthCheckInterview") -> 'answers' AS "answers", to_jsonb("HealthCheckInterview") ->> 'version' AS "version" FROM "HealthCheckInterview"`,
+);
+
+/**
+ * A run's interviews, in the order they were held. One that can't be read (a
+ * role the engine doesn't know, a date it can't parse) is left out rather than
+ * stopping the run; its answers are read question by question later.
+ */
+export function interviewsFromRows(rows: Array<Record<string, unknown>>): Interview[] | null {
+  const read = rows.flatMap((r) => {
+    const version = r.version === null || r.version === undefined || r.version === "" ? undefined : Number(r.version);
+    const parsed = Interview.safeParse({ id: r.id, role: r.role, heldOn: r.heldOn, notes: r.notes ?? "", answers: r.answers ?? {}, ...(version === undefined || !Number.isInteger(version) || version < 1 ? {} : { version }) });
+    return parsed.success ? [parsed.data] : [];
+  });
+  return read.length ? read : null;
 }
 
 export const CALIBRATION: Columns = {
@@ -354,9 +379,9 @@ export class PostgresWorkerStore implements WorkerStore {
   }
 
   /**
-   * A query on one of the console's survey tables. A database without the table
-   * yet (Postgres 42P01) has no rows, so a worker deployed before that migration
-   * still runs every check rather than failing them.
+   * A query on one of the console's survey or interview tables. A database
+   * without the table yet (Postgres 42P01) has no rows, so a worker deployed
+   * before that migration still runs every check rather than failing them.
    */
   async #surveyQuery(text: string, runId: string): Promise<SqlResult> {
     try {
@@ -365,6 +390,11 @@ export class PostgresWorkerStore implements WorkerStore {
       if ((err as { code?: string }).code === "42P01") return { rows: [], rowCount: 0 };
       throw err;
     }
+  }
+
+  /** The run's interviews. Without the table, there are none (DECISIONS.md 180). */
+  async #interviews(runId: string): Promise<Interview[] | null> {
+    return interviewsFromRows((await this.#surveyQuery(INTERVIEW_SQL, runId)).rows);
   }
 
   /** The run's survey: sent or not, and its answers. Without either table, it wasn't sent. */
@@ -376,12 +406,13 @@ export class PostgresWorkerStore implements WorkerStore {
   async loadRunJob(runId: string): Promise<RunJobInput | null> {
     const row = one(await this.#pool.query(selectSql("HealthCheckRun", RUN, `"id" = $1`), [runId]));
     if (!row) return null;
-    const [steps, intake, calibration, answers, survey] = await Promise.all([
+    const [steps, intake, calibration, answers, survey, interviews] = await Promise.all([
       this.#pool.query(selectSql("HealthCheckRunStep", RUN_STEP, `"runId" = $1`, `"seq"`), [runId]),
       this.#pool.query(selectSql("HealthCheckIntake", INTAKE, `"runId" = $1`), [runId]),
       this.#pool.query(CALIBRATION_SQL, [runId]),
       this.#pool.query(selectSql("HealthCheckManualAnswer", MANUAL_ANSWER, `"runId" = $1`, `"answeredAt", "stepKey"`), [runId]),
       this.#survey(runId),
+      this.#interviews(runId),
     ]);
     const run = runFromRows(row, steps.rows.map(({ runId: _r, ...s }) => s));
     return {
@@ -391,6 +422,7 @@ export class PostgresWorkerStore implements WorkerStore {
       connectionName: (row.connectionName as string | null) ?? null,
       answers: answers.rows.map(answerFromRow),
       survey,
+      interviews,
     };
   }
 

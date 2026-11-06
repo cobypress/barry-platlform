@@ -12,6 +12,11 @@ export type DatasetFigure = {
   value: number;
   currency?: string;
   unit?: string;
+  /**
+   * Set when the figure is only what someone told us, such as "said in
+   * interview, Sales director". It can be quoted only as what was said.
+   */
+  said?: string;
 };
 
 export type FigureSet = {
@@ -35,8 +40,8 @@ export type DatasetInput = {
   currency?: string;
   overrides?: NumberOverride[];
   structural?: StructuralFigure[];
-  /** Engine or consultant text the report may quote, such as the intake. */
-  extraText?: Array<{ source: string; text: string }>;
+  /** Engine or consultant text the report may quote, such as the intake. `said` marks what a person told us. */
+  extraText?: Array<{ source: string; text: string; said?: string }>;
 };
 
 export const SOURCE = { run: "run", summary: "summary", structure: "structure" } as const;
@@ -46,15 +51,17 @@ const emptySet = (): FigureSet => ({ figures: [], dates: [], identifiers: [], to
 class Collector {
   readonly set = emptySet();
   readonly source: string;
+  readonly said: string | undefined;
 
-  constructor(set: FigureSet, source: string) {
+  constructor(set: FigureSet, source: string, said?: string) {
     this.set = set;
     this.source = source;
+    this.said = said;
   }
 
   number(value: number | null | undefined, kind: DatasetFigure["kind"] = "number", extra: { currency?: string; unit?: string } = {}): void {
     if (value === null || value === undefined || !Number.isFinite(value)) return;
-    this.set.figures.push({ source: this.source, kind, value, ...extra });
+    this.set.figures.push({ source: this.source, kind, value, ...extra, ...(this.said ? { said: this.said } : {}) });
   }
 
   date(iso: string | null | undefined): void {
@@ -235,7 +242,7 @@ export function buildDataset(input: DatasetInput): FigureSet {
       c.number(100);
     }
   }
-  for (const extra of input.extraText ?? []) new Collector(set, extra.source).text(extra.text);
+  for (const extra of input.extraText ?? []) new Collector(set, extra.source, extra.said).text(extra.text);
   for (const figure of input.structural ?? []) set.figures.push({ ...figure, source: SOURCE.structure });
   applyOverrides(set, input.overrides ?? []);
   return set;

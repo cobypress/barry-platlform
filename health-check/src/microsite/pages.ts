@@ -6,6 +6,8 @@ import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { compactMoney, longDate, percent } from "../render/format.ts";
 import { currentBody } from "../narrative/sections.ts";
 import { SURVEY } from "../survey/summary.ts";
+import { READING_LABELS } from "../interviews/readings.ts";
+import { byRole } from "../render/interviews.ts";
 import { effortText, renderContext, valueText, type Render } from "../render/html.ts";
 import { noteSections, referenceMap } from "../render/references.ts";
 import { HEADLINE_KINDS, KIND_LABELS } from "../value/model.ts";
@@ -81,8 +83,20 @@ function overview(r: Render, report: BuiltReport): string {
     .map((row) => `<tr><td>${r.t(row.label)}</td><td class="num">${row.score ?? r.t("Not scored")}</td><td class="num">${row.issues}</td></tr>`)
     .join("")}</tbody></table>`;
   return page(
-    `<h1>${r.t(`${customer}: your Salesforce health check`)}</h1><p class="muted">${longDate(run.asOf)}</p><h2>${r.t(verdict.headline)}</h2><div class="stats">${score}<div class="stat"><b>${verdict.issues}</b><span>Issues</span></div><div class="stat"><b>${verdict.critical}</b><span>Critical</span></div><div class="stat"><b>${verdict.high}</b><span>High</span></div></div>${worth}${investment}${areas}${teamSays(r, report)}`,
+    `<h1>${r.t(`${customer}: your Salesforce health check`)}</h1><p class="muted">${longDate(run.asOf)}</p><h2>${r.t(verdict.headline)}</h2><div class="stats">${score}<div class="stat"><b>${verdict.issues}</b><span>Issues</span></div><div class="stat"><b>${verdict.critical}</b><span>Critical</span></div><div class="stat"><b>${verdict.high}</b><span>High</span></div></div>${worth}${investment}${areas}${teamSays(r, report)}${peopleSaid(r, report)}`,
   );
+}
+
+/** What people told us in interviews, as the full report has it: the chapter's text, then each reading by role. Roles only, and never the notes. */
+function peopleSaid(r: Render, report: BuiltReport): string {
+  const view = report.interviews;
+  if (!view) return "";
+  const text = currentBody(report.outputs.full_health_check, "interviews")
+    .split(/\n{2,}/)
+    .map((p) => `<p>${r.t(p)}</p>`)
+    .join("");
+  const rows = byRole(view).map((t) => `<tr><td>${r.t(t.roleLabel)}</td><td>${r.t(t.said)}</td><td>${r.t(t.found)}</td><td>${r.t(`${READING_LABELS[t.reading]}. ${t.why}`)}</td></tr>`);
+  return `<h2>What your people told us</h2>${text}${rows.length ? `<table><thead><tr><th>Role</th><th>They told us</th><th>What the data shows</th><th>Together</th></tr></thead><tbody>${rows.join("")}</tbody></table>` : ""}`;
 }
 
 /** What the team survey says, as the executive summary has it, and the pairings. Only the line saying why under five answers. */

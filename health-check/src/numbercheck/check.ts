@@ -15,7 +15,21 @@ const MAX_ROUNDING_ERROR = 0.05;
 const FRACTION_TOLERANCE = 1;
 
 export type UnmatchedFigure = { raw: string; reason: string };
-export type CheckOutcome = { passed: boolean; checked: number; unmatched: UnmatchedFigure[] };
+/** A figure that traces only to what someone told us, with where it was said. */
+export type SaidFigure = { raw: string; source: string };
+export type CheckOutcome = { passed: boolean; checked: number; unmatched: UnmatchedFigure[]; said: SaidFigure[] };
+
+// A figure only someone said is their statement, not a measure (rule 1), so its
+// sentence has to say it was said. These are the words that do.
+export const ATTRIBUTION = /\b(?:said|say|says|saying|told us|tell us|tells us|telling us|rated|rate it|put it at|puts it at|putting it at|estimated?|estimates|reckon(?:s|ed)?|think|thinks|thought|believe[sd]?|feel|feels|felt|according to|in (?:an |the |our |their )?interviews?|guess(?:es|ed)?|recall(?:s|ed)?)\b/i;
+
+/** The sentence a figure sits in. A full stop inside a number ("2.5") doesn't end one. */
+function sentenceAround(text: string, start: number, end: number): string {
+  let from = 0;
+  for (const m of text.slice(0, start).matchAll(/[.!?](?=\s)|\n/g)) from = m.index + 1;
+  const stop = text.slice(end).search(/[.!?](?=\s|$)|\n/);
+  return text.slice(from, stop === -1 ? text.length : end + stop);
+}
 
 /** The figure as written is the real value rounded to the precision it shows, within limits. */
 export function agrees(written: number, step: number, real: number): boolean {
@@ -49,8 +63,27 @@ const dateMatches = (written: PartialDate, known: PartialDate): boolean => {
   return true;
 };
 
+function matchesFor(figure: Figure, set: FigureSet): DatasetFigure[] {
+  return candidates(figure, set).filter((f) => agrees(figure.value!, figure.step!, f.value));
+}
+
 function sourcesFor(figure: Figure, set: FigureSet): Set<string> {
-  return new Set(candidates(figure, set).filter((f) => agrees(figure.value!, figure.step!, f.value)).map((f) => f.source));
+  return new Set(matchesFor(figure, set).map((f) => f.source));
+}
+
+/**
+ * Where a figure was said, when nothing but a person's words backs it. Null
+ * when the data backs it too, or nothing does.
+ */
+function saidOnly(figure: Figure, set: FigureSet): string | null {
+  const hits =
+    figure.kind === "fraction"
+      ? set.figures.filter((f) => f.kind === "percent" && Math.abs(f.value - figure.value!) <= FRACTION_TOLERANCE)
+      : figure.value === undefined || figure.step === undefined
+        ? []
+        : matchesFor(figure, set);
+  if (hits.length === 0 || hits.some((h) => !h.said)) return null;
+  return [...new Set(hits.map((h) => h.said!))].join("; ");
 }
 
 function checkOne(figure: Figure, figures: Figure[], set: FigureSet): string | null {
@@ -100,19 +133,32 @@ function describe(figure: Figure): string {
 /** Checks text against a dataset. Anything that goes wrong in the check itself blocks. */
 export function checkNumbers(text: string, set: FigureSet): CheckOutcome {
   try {
-    const { figures } = extractFigures(text, { labels: set.labels.map((l) => l.value) });
+    const { figures, normalised: read } = extractFigures(text, { labels: set.labels.map((l) => l.value) });
     const unmatched: UnmatchedFigure[] = [];
+    const said: SaidFigure[] = [];
     for (const figure of figures) {
       const reason = checkOne(figure, figures, set);
-      if (reason) unmatched.push({ raw: figure.raw, reason });
+      if (reason) {
+        unmatched.push({ raw: figure.raw, reason });
+        continue;
+      }
+      const where = saidOnly(figure, set);
+      if (!where) continue;
+      if (ATTRIBUTION.test(sentenceAround(read, figure.start, figure.end))) said.push({ raw: figure.raw, source: where });
+      else unmatched.push({ raw: figure.raw, reason: `this is only what was ${where}, so write it as what they told us, not as a figure we measured` });
     }
-    return { passed: unmatched.length === 0, checked: figures.length, unmatched };
+    return { passed: unmatched.length === 0, checked: figures.length, unmatched, said };
   } catch (err) {
-    return { passed: false, checked: 0, unmatched: [{ raw: "(whole text)", reason: `The number check failed to run: ${err instanceof Error ? err.message : String(err)}` }] };
+    return { passed: false, checked: 0, unmatched: [{ raw: "(whole text)", reason: `The number check failed to run: ${err instanceof Error ? err.message : String(err)}` }], said: [] };
   }
 }
 
-/** In the shape `SectionVersion.numberCheck` stores. */
-export function toNumberCheckResult(outcome: CheckOutcome, now: Date): { passed: boolean; checkedAt: string; unmatched: string[] } {
-  return { passed: outcome.passed, checkedAt: now.toISOString(), unmatched: outcome.unmatched.map((u) => `${u.raw}: ${u.reason}`) };
+/** In the shape `SectionVersion.numberCheck` stores. `said` traces each figure only someone told us. */
+export function toNumberCheckResult(outcome: CheckOutcome, now: Date): { passed: boolean; checkedAt: string; unmatched: string[]; said?: string[] } {
+  return {
+    passed: outcome.passed,
+    checkedAt: now.toISOString(),
+    unmatched: outcome.unmatched.map((u) => `${u.raw}: ${u.reason}`),
+    ...(outcome.said.length ? { said: outcome.said.map((s) => `${s.raw}: ${s.source}`) } : {}),
+  };
 }

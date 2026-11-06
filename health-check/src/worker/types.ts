@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { Intake } from "../narrative/intake.ts";
 import type { BenchmarkRow, Calibration, ConnectLink, Finding, ManualAnswer, ManualStep, Metric, NumberOverride, ReportSection, Run, Score, SectionVersion } from "../schemas/index.ts";
 import type { Survey } from "../survey/questions.ts";
+import type { Interview } from "../interviews/questions.ts";
 
 // What the worker takes from the queue, and what it needs from the console's
 // database. Jobs carry ids only (the contract with the console, lane C2), so
@@ -56,6 +57,8 @@ export type RunJobInput = {
   answers: ManualAnswer[];
   /** The team survey's answers so far. Null or missing when nobody has answered. */
   survey?: Survey | null;
+  /** The stakeholder interviews recorded so far, by role. Null or missing when there are none. */
+  interviews?: Interview[] | null;
 };
 
 /**

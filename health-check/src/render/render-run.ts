@@ -17,9 +17,16 @@ import { ONE_PAGER_PAGES, onePagerHtml } from "./one-pager.ts";
 import { renderReadoutKitDocx } from "./readout-kit.ts";
 import { Survey } from "../survey/questions.ts";
 import { loadActionLists, recordCounts, writeActionFiles } from "../actions/index.ts";
+import { Interviews } from "../interviews/questions.ts";
 
 /** The team survey as it stood when the sections were built, comments left out (DECISIONS.md 147). */
 export const SURVEY_FILE = "survey.json";
+/**
+ * The stakeholder interviews as they stood when the sections were built
+ * (DECISIONS.md 180). Kept with the intake, outside the raw extracts, so it goes
+ * when the run folder goes, 12 months after release, as the intake does.
+ */
+export const INTERVIEWS_FILE = "interviews.json";
 
 // Turns a finished run folder into its three documents. Everything is written to
 // that folder, outside the repo, because this is where names exist in the clear.
@@ -66,6 +73,7 @@ function loadBaseline(dir: string, run: Run): ReportInput | null {
 export function loadRun(dir: string, options: { baseline?: boolean } = {}): { input: ReportInput; pseudonyms: Pseudonymiser } {
   const intake = readOptional<unknown>(join(dir, "intake.json"));
   const survey = readOptional<unknown>(join(dir, SURVEY_FILE));
+  const interviews = readOptional<unknown>(join(dir, INTERVIEWS_FILE));
   const input: ReportInput = {
     run: Run.parse(read(join(dir, "run.json"))),
     calibration: Calibration.parse(read(join(dir, "calibration.json"))),
@@ -77,6 +85,7 @@ export function loadRun(dir: string, options: { baseline?: boolean } = {}): { in
     intake: intake ? Intake.parse(intake) : null,
     survey: survey ? Survey.parse(survey) : null,
     recordCounts: recordCounts(loadActionLists(dir)),
+    interviews: interviews ? Interviews.parse(interviews).interviews : null,
   };
   if (options.baseline !== false) input.baseline = loadBaseline(dir, input.run);
   return { input, pseudonyms: new Pseudonymiser(read<PseudonymEntry[]>(join(dir, "pseudonym-map.json"))) };

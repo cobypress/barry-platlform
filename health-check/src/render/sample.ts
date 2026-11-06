@@ -4,7 +4,9 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { runFromRecording } from "../testing/harness.ts";
 import { loadAnswers } from "../testing/replay.ts";
-import { renderRun } from "./render-run.ts";
+import { INTERVIEWS_FILE, renderRun } from "./render-run.ts";
+import { INTERVIEW_VERSION } from "../interviews/questions.ts";
+import { syntheticInterviews } from "../testing/interviews.ts";
 
 // Renders every document from the synthetic org into a run folder outside the
 // repo, so they can be looked at. Sample output never goes in git.
@@ -25,6 +27,8 @@ const issue = (pattern: RegExp): string[] => output!.findings.filter((f) => f.st
 INTAKE.statedProblems[0]!.findingIds = issue(/already have closed/);
 INTAKE.statedProblems[1]!.findingIds = issue(/split across several tools/);
 writeFileSync(join(dir, "intake.json"), JSON.stringify(INTAKE, null, 2), { mode: 0o600 });
+// Five made-up conversations, by role, so the sample has its "What your people told us" chapter.
+writeFileSync(join(dir, INTERVIEWS_FILE), JSON.stringify({ version: INTERVIEW_VERSION, interviews: syntheticInterviews() }, null, 2), { mode: 0o600 });
 
 const result = await renderRun(dir);
 console.log(`Written to ${dir}`);

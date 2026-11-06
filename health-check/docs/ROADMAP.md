@@ -153,7 +153,7 @@ Industry and size groups as the set reaches 10 orgs per group, and new figures a
 ## Stage 4: The experience
 
 - **The microsite.** Each Complete run gets its own private site: the score, the money, every finding, and a drill-down from each figure to its working, with exports. Customers sign in with a link sent to their email address. It stays up for 12 months. The Google Drive folder is shared with the customer as well.
-- **The people inputs.** Stakeholder interviews: four or five structured 30-minute conversations (for example the sales director, sales ops, the admin and two reps), recorded as notes the report draws on. The user survey: five minutes, anonymous, sent to every Salesforce user (how easy it is, what slows them down, how many hours a week go on admin). The report then sets what people say against what the data shows, and the survey's hours feed the time cost.
+- **The people inputs.** Stakeholder interviews: four or five structured 30-minute conversations (for example the sales director, sales ops, the admin and two reps), recorded as notes the report draws on. The user survey: five minutes, anonymous, sent to every Salesforce user (how easy it is, what slows them down, how many hours a week go on admin). The report then sets what people say against what the data shows, and the survey's hours feed the time cost. (Interviews done 6 November 2026: decisions 179 to 188, with the console's Interviews tab.)
 - **The readout kit.** A presentation version of the deck and talking points for the consultant.
 - **Design.** A designer's pass on the page system and charts once Stage 1 sets the shape.
 - **Action lists (done, 6 November 2026).** Exports of every record that needs fixing, ready for their team or a ticketing tool.

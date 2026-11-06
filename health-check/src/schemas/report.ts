@@ -51,6 +51,8 @@ export const NumberCheckResult = z.object({
   passed: z.boolean(),
   checkedAt: Timestamp,
   unmatched: z.array(z.string()),
+  /** Figures only someone told us, each with where it was said ("40%: said in interview, Sales director"). */
+  said: z.array(z.string()).optional(),
 });
 
 export const SectionVersion = z.object({
