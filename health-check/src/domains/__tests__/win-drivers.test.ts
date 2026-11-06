@@ -91,11 +91,11 @@ describe("what separates wins from losses, on the synthetic org", () => {
 
   test("going back a stage separates them most: none of those deals won", () => {
     const d = factor(output!.metrics, "backwards");
-    assert.deepEqual([d.with.n, d.with.rate, d.without.n, d.without.rate, d.gap], [87, 0, 265, 61.9, 61.9]);
+    assert.deepEqual([d.with.n, d.with.rate, d.without.n, d.without.rate, d.gap], [91, 0, 261, 62.8, 62.8]);
     assert.deepEqual([d.with.won, d.without.won], [0, 164]);
     assert.ok(d.isDriver && d.riskLoses);
     // Rule 4: it holds inside every segment with enough deals on both sides.
-    assert.deepEqual([d.held, d.compared], [11, 11]);
+    assert.deepEqual([d.held, d.compared], [8, 8]);
     assert.equal(readDrivers(m)[0]!.key, "backwards");
   });
 
@@ -132,14 +132,16 @@ describe("what separates wins from losses, on the synthetic org", () => {
     assert.deepEqual([pushed.with.n, pushed.with.rate, pushed.without.rate, pushed.gap], [43, 55.8, 45.3, 10.5]);
     assert.ok(pushed.isDriver && !pushed.riskLoses);
     const long = factor(output!.metrics, "long");
-    assert.deepEqual([long.with.n, long.gap, m.stats.cycleLineDays], [72, 13, 114.8]);
+    assert.deepEqual([long.with.n, long.gap, m.stats.cycleLineDays], [70, 15, 91.8]);
+    // Still a driver that goes with winning, as the test's name says, now on a cycle line of realistic length.
+    assert.ok(long.isDriver && !long.riskLoses);
   });
 });
 
 describe("each factor, with enough deals and without", () => {
   test("logged activity", () => {
     const d = factor(analyseExtracts(quietDeals()).metrics, "activity");
-    assert.deepEqual([d.with.n, d.with.rate, d.without.n, d.without.rate, d.gap], [232, 59.9, 120, 20.8, 39.1]);
+    assert.deepEqual([d.with.n, d.with.rate, d.without.n, d.without.rate, d.gap], [229, 61.6, 123, 18.7, 42.9]);
     assert.ok(d.isDriver && d.riskLoses);
     // With activity on every closed deal but the first 12 made quiet.
     const busy = clone(extracts);
@@ -241,7 +243,7 @@ describe("links to the issues about the same thing", () => {
     assert.deepEqual(cause!.findingIds, [one(report.teamFindings, "pipe.going-backwards").id]);
     assert.equal(
       cause!.sentence,
-      "Measured from your own closed deals: the 87 that went back a stage at least once won 0% of the time, against 61.9% for the other 265, a gap of 61.9 points. The gap points the same way in 11 of the 11 segments, such as teams and record types, with enough deals on both sides. It shows how often the two went together, not proof that one caused the other.",
+      "Measured from your own closed deals: the 91 that went back a stage at least once won 0% of the time, against 62.8% for the other 261, a gap of 62.8 points. The gap points the same way in 8 of the 8 segments, such as teams and record types, with enough deals on both sides. It shows how often the two went together, not proof that one caused the other.",
     );
     // The finding itself is as the rule made it: the link sits beside it.
     assert.equal(one(report.input.findings, "pipe.going-backwards"), one(output!.findings, "pipe.going-backwards"));
@@ -259,7 +261,7 @@ describe("links to the issues about the same thing", () => {
     const report = reportOf(out);
     const cause = report.causes.find((c) => c.factor === "activity")!;
     assert.deepEqual(cause.findingIds, [one(out.findings, "dq.open-opps-no-activity").id]);
-    assert.match(cause.sentence, /^Measured from your own closed deals: the 120 that had no logged activity won 20.8% of the time, against 59.9% for the other 232, a gap of 39.1 points\./);
+    assert.match(cause.sentence, /^Measured from your own closed deals: the 123 that had no logged activity won 18.7% of the time, against 61.6% for the other 229, a gap of 42.9 points\./);
     assert.match(cause.sentence, /not proof that one caused the other\.$/);
   });
 
@@ -286,7 +288,7 @@ describe("in the reports", () => {
     assert.equal(slides.filter((s) => /<h2>What separates your wins from your losses<\/h2>/.test(s)).length, 1);
     const rows = [...slide.matchAll(/<tr[^>]*><td>([^<]*)/g)].map((x) => x[1]!.trim());
     assert.deepEqual(rows, ["Went back a stage at least once", "Had logged activity", "Took longer than 75% of won deals", "Close date pushed twice or more", "Moved past an expected stage without entering it"]);
-    assert.match(text(slide), /61\.9 points/);
+    assert.match(text(slide), /62\.8 points/);
     assert.match(text(slide), /Not measurable\. 0 deals with it/);
     assert.match(text(slide), /not proof that one caused the other/);
     const at = slides.indexOf(slide);
@@ -299,7 +301,7 @@ describe("in the reports", () => {
     assert.match(issue, /<p class="cause">/);
     for (const page of [slide, issue]) assert.deepEqual(checkNumbers(text(page), report.dataset).unmatched, []);
     // A gap is written in points, which the metric's plain stats couldn't back on their own.
-    assert.ok(report.dataset.figures.some((f) => f.source === WIN_DRIVERS && f.kind === "points" && f.value === 61.9));
+    assert.ok(report.dataset.figures.some((f) => f.source === WIN_DRIVERS && f.kind === "points" && f.value === 62.8));
     const bare = { ...report.dataset, figures: report.dataset.figures.filter((f) => !(f.source === WIN_DRIVERS && f.kind === "points")) };
     assert.notDeepEqual(checkNumbers(text(slide), bare).unmatched, []);
   });
@@ -321,7 +323,7 @@ describe("in the reports", () => {
     assert.match(words, new RegExp(`${section.ref} +What separates your wins from your losses`));
     assert.match(words, new RegExp(`${ref.replace(".", "\\.")} +What separates your wins from your losses: 46.6%`));
     assert.match(words, /Factor +Deals with it +Won +Win rate +Deals without it +Won +Win rate +Gap, points +Same way in segments +Driver/);
-    assert.match(words, /Went back a stage at least once +87 +0 +0% +265 +164 +61.9% +61.9 +11 of 11 +Yes/);
+    assert.match(words, /Went back a stage at least once +91 +0 +0% +261 +164 +62.8% +62.8 +8 of 8 +Yes/);
     assert.match(words, /Moved past an expected stage without entering it: +Not measurable\./);
     assert.match(words, /Linked to Deals often go back a stage/);
   });

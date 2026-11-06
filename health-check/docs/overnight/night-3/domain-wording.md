@@ -27,7 +27,7 @@ Each change has a test, and the test failed before its fix.
 - It still passes every check. But one slide over costs fifteen, which is item 23 of the reading pass.
 - The slide that tips it is the revenue opportunities chapter, which holds `rev.stalled-deals`.
 
-## Item 9: found, fix ready, held
+## Item 9: found, fix ready, held (landed later in Brief BH, on hc/synthetic-cycle)
 
 Jul 2026's median cycle of 355 days, against about 70 elsewhere, is neither a pattern nor an engine bug. It's an artefact of how the synthetic org is built.
 - The services block gives every deal a creation date over a year ago, so the activity checks, which read the last year, wouldn't move.
