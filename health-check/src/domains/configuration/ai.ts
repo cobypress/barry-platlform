@@ -1,5 +1,6 @@
 import { aiSignalsExtractor, ARTICLE_CAP, SETTINGS, type SettingKey } from "../../extract/ai.ts";
 import { apexExtractor, metadataExtractor } from "../../extract/automation.ts";
+import { unreadReason } from "../../extract/metadata-parse.ts";
 import { pct, type RuleContext } from "../../engine/rule.ts";
 import type { Metric, MetricSegment } from "../../schemas/index.ts";
 
@@ -78,6 +79,9 @@ function actionsMetric(ctx: Ctx): Metric {
   const autolaunched = active.filter((f) => f.processType === "AutoLaunchedFlow");
   const described = autolaunched.filter((f) => f.described).length;
   const invocable = classes.data.filter((c) => c.Status === "Active" && !c.isTest).reduce((sum, c) => sum + (c.scan?.invocable ?? 0), 0);
+  // The share needs every kind of automation read: a kind that couldn't be read
+  // isn't none, and counting it as none would move the share (rule 5).
+  const legacyUnread = legacyUnreadReason(ctx);
   const legacy = metadata.data.workflows.reduce((sum, w) => sum + w.rules.filter((r) => r.active).length, 0) + active.filter((f) => f.processType === "Workflow").length;
   const modern = active.filter((f) => f.processType !== "Workflow").length + (triggers.status === "ok" ? triggers.data.filter((t) => t.Status === "Active").length : 0);
   const segments: MetricSegment[] = [
@@ -93,12 +97,24 @@ function actionsMetric(ctx: Ctx): Metric {
     segments,
     segmentExemptReason: null,
     series: [],
-    stats: { autolaunched: autolaunched.length, described, invocable, legacy, automation: legacy + modern },
+    stats: { autolaunched: autolaunched.length, described, invocable, ...(legacyUnread ? {} : { legacy, automation: legacy + modern }) },
   };
+}
+
+/** Why the share of old automation can't be worked out, or null when it can. */
+function legacyUnreadReason(ctx: Ctx): string | null {
+  const metadata = ctx.data(metadataExtractor);
+  const { triggers } = ctx.data(apexExtractor);
+  if (metadata.status === "ok") {
+    const unread = unreadReason(metadata.data, ["workflowRules"]);
+    if (unread) return unread;
+  }
+  return triggers.status === "ok" ? null : `Apex triggers couldn't be read: ${triggers.reason}`;
 }
 
 // Its own metric, so the share and the lines read as percents in the number check.
 function legacyMetric(ctx: Ctx, actions: Metric): Metric {
+  const unread = legacyUnreadReason(ctx);
   const head = {
     id: AI_LEGACY_SHARE,
     domain: DOMAIN,
@@ -110,6 +126,7 @@ function legacyMetric(ctx: Ctx, actions: Metric): Metric {
     assumptions: [`Up to ${LEGACY_READY}% is ready, and past ${LEGACY_NOT_YET}% is not yet: our working lines`],
   };
   if (actions.status !== "measured") return { ...head, status: "not_measurable", reason: actions.reason };
+  if (unread) return { ...head, status: "not_measurable", reason: unread };
   const legacy = actions.stats.legacy!;
   const automation = actions.stats.automation!;
   return {
