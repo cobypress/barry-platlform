@@ -6,7 +6,7 @@ import { activityCaptureExtractor, usersExtractor } from "../../extract/users.ts
 import { notSized, plural, segmentRate, type NotMeasurableResult, type Rule, type RuleContext, type RuleResult } from "../../engine/rule.ts";
 import { shareRule } from "../current-pipeline/index.ts";
 import { loadPipeline, type Deal } from "../historic-pipeline/cohort.ts";
-import { closedInWindow, median, segment } from "../historic-pipeline/metrics.ts";
+import { closedInWindow, groupBy, median, segment } from "../historic-pipeline/metrics.ts";
 import { localDay, todayIn, zoneNote, zoneOf } from "../time-zone.ts";
 import type { Evidence, Metric, SeriesPoint } from "../../schemas/index.ts";
 import type { DomainModule } from "../types.ts";
@@ -94,9 +94,7 @@ const eventLinkCollapse: Rule = {
     const dimensions: Record<string, (e: { OwnerId: string }) => string> = { team: (e) => roles.get(e.OwnerId) ?? "No role", rep: (e) => ctx.userLabel(e.OwnerId) };
     const segmentsChecked = Object.entries(dimensions).map(([dimension, keyOf]) => ({ dimension, segments: new Set(data.events.map(keyOf)).size }));
     const hotspots = Object.entries(dimensions).flatMap(([dimension, keyOf]) => {
-      const groups = new Map<string, typeof data.events>();
-      for (const event of data.events) groups.set(keyOf(event), [...(groups.get(keyOf(event)) ?? []), event]);
-      return [...groups].flatMap(([key, rows]) => {
+      return [...groupBy(data.events, keyOf)].flatMap(([key, rows]) => {
         const comparison = compare(rows, prior, recent);
         return comparison.prior.total >= MIN_GROUP_EVENTS && comparison.collapsed ? [{ dimension, key, comparison }] : [];
       });
@@ -232,8 +230,10 @@ const repActivity: Rule = {
     for (const deal of pipeline.deals) if (deal.category === "open" && active.has(deal.OwnerId)) openByRep.set(deal.OwnerId, (openByRep.get(deal.OwnerId) ?? 0) + 1);
     const evidence = [stamped(ctx, data, openByRep.size, `Logged in the last ${RECENT_DAYS} days, per open deal`)];
     if (openByRep.size < MIN_REPS) return { outcome: "not_measurable", reason: `${plural(openByRep.size, "rep")} with open deals is too few to compare.`, evidence };
-    const recent = (touch: Touch): boolean => new Date(touch.at).toISOString() >= cutoff;
-    const rates = [...openByRep].map(([rep, deals]) => ({ rep, deals, rate: Math.round((data.touches.filter((t) => t.ownerId === rep && recent(t)).length / deals) * 100) / 100 }));
+    // Each rep's recent touches, counted in one pass over them all.
+    const recentByRep = new Map<string, number>();
+    for (const t of data.touches) if (new Date(t.at).toISOString() >= cutoff) recentByRep.set(t.ownerId, (recentByRep.get(t.ownerId) ?? 0) + 1);
+    const rates = [...openByRep].map(([rep, deals]) => ({ rep, deals, rate: Math.round(((recentByRep.get(rep) ?? 0) / deals) * 100) / 100 }));
     const typical = median(rates.map((r) => r.rate));
     const low = rates.filter((r) => r.rate < typical * REP_FLOOR_SHARE).sort((a, b) => a.rate - b.rate || a.rep.localeCompare(b.rep));
     const segments = [{ dimension: "rep", segments: rates.length }];
