@@ -146,12 +146,77 @@ Each fix is one commit with a test.
 - **Plan for about 20 to 30 minutes of wall time.** That's 15 to 19 minutes of calls at the assumed latency, plus retrieves and about a minute of compute. The calls are made one at a time.
 - **Next:** raise the activity and lead caps from 200,000 so a 500-user org gets those eleven checks. The cost is 360 more calls, 4 more minutes, and 7.6 to 8.3 GB resident for the whole test process. The worker's real peak is lower, without the generated org, but it should be measured on the worker host before the caps go up. I've left the caps as they are for that reason (decision 340).
 
+## Memory (Brief AS, night 3, later)
+
+Branch `hc/memory`, from health-check `879f9c8`, with health-check `7b64bd4` merged in. Decisions 341 to 347.
+
+### How it's measured now
+
+- The simulator and its generated org run in a child process (`scale-sim-child.ts`), so the figures are the engine's alone. In one process, the org's 1.6 GB hid them.
+- The engine's resident and heap peak are sampled every 50 ms, and reported for each step, for analysis, and for rendering. Analysis is one synchronous block, so its true heap peak comes from V8's GC trace instead: about 630 to 760 MB live at its worst.
+- `npm run scale` fails if the engine's resident peak is over `--limit-mb`, 2,500 by default. It runs under the worker's recommended heap cap, 1,536 MB, so the figure doesn't depend on the machine.
+- `--parallel 2` runs two jobs at once in one process, as a worker with two job slots might.
+
+### Before and after
+
+Both runs were measured the same way: `7b64bd4`'s engine and this branch, under the new runner, on the 500-user org with all four clouds and every document rendered. Resident peaks, in MB:
+
+| Step or phase | Before, default heap | After, default heap | Before, 1,536 MB cap | After, 1,536 MB cap |
+|---|---:|---:|---:|---:|
+| opportunities | 1,668 | 794 | 1,650 | 786 |
+| leads | 1,372 | 890 | 1,610 | 842 |
+| activity | 1,509 | 1,050 | 1,520 | 841 |
+| service-activity | 1,427 | 1,068 | 1,435 | 895 |
+| cpq-quotes | 1,548 | 1,119 | 1,562 | 924 |
+| the last extraction step (facts) | 1,585 | 1,135 | 1,451 | 897 |
+| analysis and writing | 3,234 | 1,683 | 1,716 | 1,472 |
+| rendering the documents | 3,239 | 2,057 | 1,716 | 1,629 |
+| **Peak** | **3,239** | **2,057** | **1,716** | **1,629** |
+| Heap peak, sampled | 2,036 | 998 | 961 | 980 |
+| Compute, seconds | 31 | 19 | 31 | 20 |
+| Run folder | 593 MB | 438 MB | 593 MB | 438 MB |
+
+- **Two 500-user jobs at once, after, under the 1,536 MB cap:** 2,045 MB resident, 1,271 MB heap, and both jobs reached the same conclusions.
+- **Under a 768 MB cap** the run ran out of heap during analysis. 1,024 MB worked, so one run's live peak sits between those two.
+- **Rendering.** Its row is the process's peak by then, run job included, because V8 doesn't hand freed memory back to the system. On its own, the documents job peaks at about 1.3 GB, most of it printing the decks. Those files are session B's, so I left them alone.
+
+### What was holding memory, and what changed
+
+1. **Analysis rebuilt the deals for every rule** (decision 343). `loadPipeline` made 200,000 deals with their history for each of the 21 rules and metrics that ask, and the garbage set the peak. They're now built once for each analysis. Analysis alone went from 3.3 GB to 2.3 GB resident, and ran 7 seconds faster.
+2. **CPQ held every rep's peers at once** (344). About 470 lists of 65,000 quotes, 543 MB, were held while the comparisons were judged. Each is now made, judged and dropped.
+3. **Checkpoints were one string** (345). The opportunities checkpoint was a 242-million-character string, held again as bytes. Checkpoints are now compact JSON, with long arrays an item to a line, written and read in pieces. That also removes the V8 string ceiling noted above. Extraction's peak went from about 1.65 GB to 0.8 GB.
+4. **Repeated values were held once per row** (346). JSON.parse makes a new string for every value. Each step's output now holds each repeated id or short value once. What's kept for analysis went from about 600 MB to 470 MB.
+5. **The heap cap** (347). With no cap, V8 sizes the heap from the machine's memory, 4.3 GB here, and lets garbage build up before collecting. Capped at 1,536 MB, it collects sooner, at a few seconds' cost.
+
+Not changed: trimming fields from the rows, and streaming reads into running totals. Both would mean rules reading something other than the rows they read now, so their findings would need re-checking one by one. With the four changes above and the cap, a run is under 2 GB without them. Rendering, which is session B's area, wasn't touched.
+
+### Holding the line
+
+- **Recorded and generated orgs.** `fingerprint.test.ts` holds the synthetic org's recorded run and a small generated org to `7b64bd4`'s own fingerprints: findings, metrics, scores, manual steps, action lists and raw notes. The fingerprints were taken by running `7b64bd4`, and this branch reproduces them exactly.
+- **The 500-user org.** Every run above, before and after, capped or not, one job or two, has the same fingerprint, report sections and layout included.
+- **The samples.** All seven variants rendered on `7b64bd4` and on this branch match file for file: Sales Cloud alone, with Service, CPQ or Account Engagement, with all three, and Essentials alone and with all three.
+
+### Recommended worker settings
+
+- **`NODE_OPTIONS=--max-old-space-size=1536`** on the worker, set explicitly.
+  - Without it, Node picks a heap limit from the host's memory. On a big host that lets garbage reach 2 GB or more. On a small one it could fall below this run's 0.65 to 0.75 GB live peak, and the run would fail. I couldn't check what Render gives.
+  - 1,536 MB is about twice one run's live peak, and two runs at once fitted in it.
+- **`HC_WORKER_CONCURRENCY=2`**, as now, so a connect job never waits behind a long run.
+- **A host with at least 3 GB of memory** for 500-user orgs.
+  - Two runs at once peaked at 2.05 GB resident.
+  - Printing the documents starts Chromium as a process of its own, which isn't counted here.
+  - 4 GB gives headroom for a bigger org or a third job.
+- **With only 2 GB**, set `HC_WORKER_CONCURRENCY=1`. One run peaks at 1.63 GB. A connect job may then wait behind a run, and a connect code lasts only minutes, so 2 GB isn't recommended.
+- **A follow-up worth doing.** Let the worker run connect and share jobs alongside a run, but only one run or documents job at a time. Then two job slots would never mean two big jobs, and 2 GB would do.
+
 ## Reproducing
 
 ```bash
 npm run scale -- /path/outside/the/repo                # the 500-user org, every module, with rendering
 npm run scale -- /path/outside/the/repo --factor 0.1   # a tenth of it
 npm run scale -- /path/outside/the/repo --no-render --latency 300 --per-record 0.5
+npm run scale -- /path/outside/the/repo --parallel 2                  # two jobs at once
+node --expose-gc src/testing/scale-run.ts /path/outside/the/repo --diagnose   # what each step's output keeps
 ```
 
 The summary goes to `scale-<factor>.json` in that folder, beside the run folder. The run folder holds the whole synthetic org's records in its checkpoints: about 0.6 GB at full size.
