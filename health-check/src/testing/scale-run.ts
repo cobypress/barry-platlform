@@ -15,7 +15,7 @@ import { AS_OF } from "./synthetic-org.ts";
 // through the simulator, which pages as Salesforce does. Nothing calls a real
 // org. The run folder goes outside the repository and is never committed.
 //
-//   node --max-old-space-size=8192 src/testing/scale-run.ts <out dir> [--factor 0.1] [--latency 200] [--per-record 0.3] [--daily 600000] [--no-render]
+//   node --max-old-space-size=12288 --expose-gc src/testing/scale-run.ts <out dir> [--factor 0.1] [--latency 200] [--per-record 0.3] [--daily 600000] [--no-render]
 //
 // There's no real waiting: each call's latency is added up, as the engine's
 // calls are made one at a time. --latency is per call in ms, and --per-record
@@ -78,6 +78,9 @@ const size = scaled(FIVE_HUNDRED_USERS, factor);
 let t = performance.now();
 const records = buildScaleOrg(size);
 const generateMs = performance.now() - t;
+// The generated org's own share of the heap, so the engine's can be told apart (run with --expose-gc for a clean reading).
+(globalThis as { gc?: () => void }).gc?.();
+const heapAfterGenerate = process.memoryUsage().heapUsed;
 sample();
 const counts = {
   users: records.users.length,
@@ -167,6 +170,7 @@ const summary = {
   maxCallsAtOnce: transport.maxInFlight,
   peakRssMb: mb(peakRss),
   peakHeapMb: mb(peakHeap),
+  generatedOrgHeapMb: mb(heapAfterGenerate),
   runFolderMb: Math.round((runBytes / 1024 / 1024) * 10) / 10,
   steps: marks,
   stepCalls: result.run.steps.map((s) => ({ id: s.id, status: s.status, calls: s.calls, error: s.error })),

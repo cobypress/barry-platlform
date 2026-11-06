@@ -61,6 +61,7 @@ function groups(own: Finding[]) {
 const PANEL_BUDGET = 300;
 const STEP_CHARS = 64;
 const GOOD_CHARS = 70;
+const NOTE_CHARS = 60;
 const firstSentence = (text: string): string => /^.*?[.!?](?=\s|$)/.exec(text)?.[0] ?? text;
 
 /**
@@ -68,9 +69,10 @@ const firstSentence = (text: string): string => /^.*?[.!?](?=\s|$)/.exec(text)?.
  * full recommendations, else each one's first sentence, else fewer of them.
  * The issue pages that follow have every recommendation in full.
  */
-function firstSteps(issues: Finding[], good: string[]): string[] {
+function firstSteps(issues: Finding[], good: string[], note: string | null): string[] {
   const height = (texts: string[], chars: number, line: number): number => texts.reduce((sum, t) => sum + estimateLines(t, chars) * line + 3, 0);
-  const room = PANEL_BUDGET - (good.length ? 22 + height(good, GOOD_CHARS, 16.3) : 0);
+  // The note about checks that couldn't be measured sits at the panel's foot, so it takes room too (night 3 scale test).
+  const room = PANEL_BUDGET - (good.length ? 22 + height(good, GOOD_CHARS, 16.3) : 0) - (note ? 6 + height([note], NOTE_CHARS, 18.2) : 0);
   const full = issues.slice(0, FIRST_STEPS).map((f) => f.recommendation);
   for (const steps of [full, full.map(firstSentence), full.slice(0, 2).map(firstSentence)]) if (height(steps, STEP_CHARS, 17.2) <= room) return steps;
   return full.slice(0, 1).map(firstSentence);
@@ -111,12 +113,13 @@ export function chapterSlide(r: Render, report: BuiltReport, domain: string): st
   ].join("");
 
   const good = practiceFor(domain).slice(0, PRACTICE_ON_SLIDE);
-  const steps = firstSteps(issues, good.map((p) => `${p.text} ${sourceLabel(p)}`));
+  const note = open.length ? `${open.length} more ${open.length === 1 ? "check" : "checks"} couldn't be measured here. The appendix says why.` : null;
+  const steps = firstSteps(issues, good.map((p) => `${p.text} ${sourceLabel(p)}`), note);
   const right = [
     `<h3>What it costs</h3><p>${worth > 0 ? r.t(`About ${compactMoney(worth, report.value.currency)} over the next 12 months, as part of the total on the money page.`) : r.t("Nothing here has a figure in money. Its weight is the risk it carries.")}</p>`,
     steps.length ? `<h3>What to do first</h3><ul>${steps.map((text) => `<li>${r.t(text)}</li>`).join("")}</ul>` : "",
     good.length ? `<h3>What good looks like</h3><ul class="good">${good.map((p, i) => `<li>${r.t(p.text)} <span class="src">${r.t(sourceLabel(p))}</span>${r.ref(practiceId(domain, i))}</li>`).join("")}</ul>` : "",
-    open.length ? `<p class="note" style="font-size:13.5px;color:var(--muted)">${r.t(`${open.length} more ${open.length === 1 ? "check" : "checks"} couldn't be measured here. The appendix says why.`)}</p>` : "",
+    note ? `<p class="note" style="font-size:13.5px;color:var(--muted)">${r.t(note)}</p>` : "",
   ].join("");
 
   return `<div class="chapter"><div class="eyebrow">${r.t(domainLabel(domain))}</div><h2>${r.t("At a glance")}</h2>${counts}<div class="cols"><div>${left}</div><div class="panel">${right}</div></div></div>`;
