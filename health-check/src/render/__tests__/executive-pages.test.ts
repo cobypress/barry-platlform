@@ -6,9 +6,13 @@ import { buildReport, type ReportInput } from "../../narrative/sections.ts";
 import { Pseudonymiser, type PseudonymEntry } from "../../privacy/pseudonymiser.ts";
 import { runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
-import { executiveHtml } from "../executive.ts";
+import { EXECUTIVE_MAX_PAGES, executiveHtml, executiveMaxPages, RECHECK_EXECUTIVE_MAX_PAGES } from "../executive.ts";
+import { fullReportHtml } from "../full-report.ts";
+import { topIssues } from "../../narrative/select.ts";
 import { returnOnSpend } from "../money.ts";
+import { compactMoney } from "../format.ts";
 import { Intake } from "../../narrative/intake.ts";
+import type { Finding } from "../../schemas/index.ts";
 
 const { output, run, dir } = await runFromRecording({ answers: loadAnswers() });
 const pseudonyms = new Pseudonymiser(JSON.parse(readFileSync(join(dir, "pseudonym-map.json"), "utf8")) as PseudonymEntry[]);
@@ -44,7 +48,63 @@ describe("the executive summary, rebuilt around money", () => {
   });
 
   test("without a cost, the investment page says it shows seats, and never why in pricing jargon", () => {
-    assert.match(html, /so this page shows your seats rather than their cost/);
+    assert.match(html, /so this page shows your seats rather than what they all cost/);
     assert.doesNotMatch(html, /current plans .* is priced as/);
+  });
+
+  test("the money table lists every line behind the total, says how each was counted, and ends with the total (DECISIONS.md 326)", () => {
+    const report = buildReport(base);
+    const m = (n: number) => compactMoney(n, report.value.currency);
+    const money = html.slice(html.indexOf("What fixing this is worth"), html.indexOf("What you pay, and what you use"));
+    const lines = report.value.groups.filter((g) => g.kind !== "exposure");
+    assert.ok(lines.length > 5, "more lines than the table used to show");
+    for (const g of lines) assert.ok(money.includes(`<td class="num">${m(g.counted.expected)}</td>`), g.label);
+    assert.match(money, new RegExp(`Total, each counted once</td><td class="num">${m(report.value.total.expected)}</td>`));
+    assert.match(money, /We count 50% \(25% to 100%\)/);
+    assert.doesNotMatch(money, /the expected case is the conservative one/);
+  });
+
+  test("the checks behind the Not measurable tile are named, and the pipeline page's overlapping lines say so beside them", () => {
+    const report = buildReport(base);
+    const open = report.teamFindings.filter((f) => f.status === "not_measurable");
+    assert.ok(open.length > 0 && open.length <= 3);
+    for (const f of open) assert.ok(html.includes(f.title.replace(/'/g, "&#39;")), f.title);
+    assert.match(html, /Not measurable: .*The full report&#39;s appendix says why for each\.|Not measurable: .*The full report's appendix says why for each\./);
+    assert.match(html, /These lines overlap, so they aren(&#39;|')t added together\./);
+  });
+
+  test("pipeline needed for coverage is said as a target, not money, and doesn't lead as money (DECISIONS.md 351)", () => {
+    const report = buildReport(base);
+    const coverage = report.teamFindings.find((f) => f.ruleId === "cur.coverage" && f.status === "issue")!;
+    assert.ok(coverage, "the synthetic run has a coverage gap");
+    const deck = fullReportHtml(report, pseudonyms);
+    assert.match(deck, /To reach 3x coverage of your £1\.2m quota this quarter, you(&#39;|')d need £2\.79m more pipeline/);
+    assert.doesNotMatch(deck + html, /£2,785,000|more pipeline needed for the quarter/);
+    const money = html.slice(html.indexOf("What fixing this is worth"), html.indexOf("What you pay, and what you use"));
+    assert.doesNotMatch(money, /£2\.79m/);
+    const top = topIssues(report.teamFindings, 5);
+    const sized = top.filter((f) => f.value.kind !== "not_sized" && f.ruleId !== "cur.coverage" && f.severity === coverage.severity);
+    for (const f of sized) assert.ok(top.indexOf(f) < (top.indexOf(coverage) === -1 ? Infinity : top.indexOf(coverage)), f.title);
+  });
+
+  test("a re-check's summary has 10% headroom over the first check's ceiling, as the decks do (DECISIONS.md 353)", () => {
+    const first = buildReport(base);
+    const fixed = new Set(first.teamFindings.filter((f) => f.status === "issue").map((f) => f.ruleId).slice(0, 3));
+    const later = base.findings.map((f): Finding => (fixed.has(f.ruleId) && f.status === "issue" ? { ...f, status: "passed", value: { kind: "not_sized", reason: "Passed." } } : f));
+    const recheck = buildReport({ ...base, run: { ...run, id: `${run.id}-recheck`, baselineRunId: run.id }, findings: later, baseline: base });
+    assert.ok(recheck.progress);
+    assert.equal(executiveMaxPages(first), EXECUTIVE_MAX_PAGES);
+    assert.equal(executiveMaxPages(recheck), RECHECK_EXECUTIVE_MAX_PAGES);
+    assert.equal(RECHECK_EXECUTIVE_MAX_PAGES, Math.floor(EXECUTIVE_MAX_PAGES * 1.1));
+  });
+
+  test("the investment page's unassigned seats are the money page's, by the same name, with the share counted", () => {
+    const report = buildReport(base);
+    const seats = report.value.groups.find((g) => g.id === "unassigned-seats")!;
+    const page = html.slice(html.indexOf("What you pay, and what you use"), html.indexOf("How each area stands"));
+    assert.match(page, /Seats nobody is assigned to/);
+    assert.match(page, /Seats you pay for, all licence types/);
+    assert.ok(page.includes(`We count a share of it, ${compactMoney(seats.counted.expected, report.value.currency)}, in what fixing this is worth.`));
+    assert.doesNotMatch(page, /Seats nobody uses/);
   });
 });

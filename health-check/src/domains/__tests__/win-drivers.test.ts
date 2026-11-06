@@ -108,13 +108,23 @@ describe("what separates wins from losses, on the synthetic org", () => {
   });
 
   test("a factor with too few deals on one side is not measurable, with that reason", () => {
-    // Every closed deal here has a last activity date, and nobody moves past Legal Review.
+    // Nobody moves past Legal Review into a later open stage: it's the last one before a close.
+    const skipped = factor(output!.metrics, "skipped");
+    assert.equal(skipped.gap, null);
+    assert.equal(skipped.reason, "0 deals with it, below the calibrated minimum of 20 on each side.");
+    assert.equal(m.segments.find((s) => s.dimension === skipped.label && s.key === "with")!.value, null);
+    assert.ok(!("skippedGap" in m.stats));
+  });
+
+  test("logged activity agrees with the activity checks: the deals they find with nothing logged are the ones without it here (DECISIONS.md 352)", () => {
+    // Pinned from the night 3 reading pass: this slide said no closed deal was without activity,
+    // while "Deals are closing with nothing logged against them" counted 24.
     const activity = factor(output!.metrics, "activity");
-    assert.equal(activity.gap, null);
-    assert.equal(activity.reason, "0 deals without it, below the calibrated minimum of 20 on each side.");
-    assert.equal(m.segments.find((s) => s.dimension === activity.label && s.key === "with")!.value, null);
-    assert.equal(factor(output!.metrics, "skipped").reason, "0 deals with it, below the calibrated minimum of 20 on each side.");
-    assert.ok(!("activityGap" in m.stats));
+    const quiet = output!.findings.find((f) => f.ruleId === "act.deals-without-activity")!;
+    assert.equal(quiet.status, "issue");
+    assert.equal(activity.without.n, quiet.facts.hits);
+    assert.deepEqual([activity.without.rate, activity.with.rate, activity.gap], [8.3, 49.4, 41.1]);
+    assert.ok(activity.isDriver && activity.riskLoses);
   });
 
   test("a close date pushed twice or more, and a long cycle, went with winning here", () => {
@@ -129,10 +139,20 @@ describe("what separates wins from losses, on the synthetic org", () => {
 describe("each factor, with enough deals and without", () => {
   test("logged activity", () => {
     const d = factor(analyseExtracts(quietDeals()).metrics, "activity");
-    assert.deepEqual([d.with.n, d.with.rate, d.without.n, d.without.rate, d.gap], [246, 56.9, 106, 22.6, 34.3]);
+    assert.deepEqual([d.with.n, d.with.rate, d.without.n, d.without.rate, d.gap], [232, 59.9, 120, 20.8, 39.1]);
     assert.ok(d.isDriver && d.riskLoses);
-    const thin = factor(analyseExtracts(quietDeals(12)).metrics, "activity");
-    assert.equal(thin.reason, "12 deals without it, below the calibrated minimum of 20 on each side.");
+    // With activity on every closed deal but the first 12 made quiet.
+    const busy = clone(extracts);
+    const e = busy.get(OPPS) as OpportunityExtract;
+    if (e.opportunities.status === "ok") e.opportunities = { ...e.opportunities, data: e.opportunities.data.map((o) => (o.IsClosed && o.LastActivityDate === null ? { ...o, LastActivityDate: o.CloseDate } : o)) };
+    const thinExtracts = clone(busy);
+    const t = thinExtracts.get(OPPS) as OpportunityExtract;
+    let quiet = 0;
+    if (t.opportunities.status === "ok") t.opportunities = { ...t.opportunities, data: t.opportunities.data.map((o) => (o.IsClosed && quiet++ < 12 ? { ...o, LastActivityDate: null } : o)) };
+    const thin = factor(analyseExtracts(thinExtracts).metrics, "activity");
+    // Some of those 12 closed outside the window or never left their first stage, so fewer than 12 count.
+    assert.ok(thin.without.n > 0 && thin.without.n < 20, String(thin.without.n));
+    assert.equal(thin.reason, `${thin.without.n} deals without it, below the calibrated minimum of 20 on each side.`);
   });
 
   test("a close date pushed twice or more", () => {
@@ -214,8 +234,9 @@ describe("the gap threshold", () => {
 describe("links to the issues about the same thing", () => {
   test("going back a stage is linked to its issue, with a sentence built from the figures", () => {
     const report = reportOf(output!);
-    assert.equal(report.causes.length, 1);
-    const [cause] = report.causes;
+    // Going back a stage, and no logged activity (DECISIONS.md 352), each linked to its own issue.
+    assert.deepEqual(report.causes.map((c) => c.factor).sort(), ["activity", "backwards"]);
+    const cause = report.causes.find((c) => c.factor === "backwards");
     assert.equal(cause!.factor, "backwards");
     assert.deepEqual(cause!.findingIds, [one(report.teamFindings, "pipe.going-backwards").id]);
     assert.equal(
@@ -238,12 +259,12 @@ describe("links to the issues about the same thing", () => {
     const report = reportOf(out);
     const cause = report.causes.find((c) => c.factor === "activity")!;
     assert.deepEqual(cause.findingIds, [one(out.findings, "dq.open-opps-no-activity").id]);
-    assert.match(cause.sentence, /^Measured from your own closed deals: the 106 that had no logged activity won 22.6% of the time, against 56.9% for the other 246, a gap of 34.3 points\./);
+    assert.match(cause.sentence, /^Measured from your own closed deals: the 120 that had no logged activity won 20.8% of the time, against 59.9% for the other 232, a gap of 39.1 points\./);
     assert.match(cause.sentence, /not proof that one caused the other\.$/);
   });
 
   test("nothing is linked to an issue that didn't fire", () => {
-    const passed = output!.findings.map((f) => (f.ruleId === "pipe.going-backwards" ? { ...f, status: "passed" as const } : f));
+    const passed = output!.findings.map((f) => (f.ruleId === "pipe.going-backwards" || f.ruleId === "dq.open-opps-no-activity" ? { ...f, status: "passed" as const } : f));
     assert.deepEqual(causesOf(output!.metrics, passed), []);
   });
 
@@ -264,9 +285,9 @@ describe("in the reports", () => {
   test("the full report has one slide, ranked by the gap, in the pipeline part", () => {
     assert.equal(slides.filter((s) => /<h2>What separates your wins from your losses<\/h2>/.test(s)).length, 1);
     const rows = [...slide.matchAll(/<tr[^>]*><td>([^<]*)/g)].map((x) => x[1]!.trim());
-    assert.deepEqual(rows, ["Went back a stage at least once", "Took longer than 75% of won deals", "Close date pushed twice or more", "Had logged activity", "Moved past an expected stage without entering it"]);
+    assert.deepEqual(rows, ["Went back a stage at least once", "Had logged activity", "Took longer than 75% of won deals", "Close date pushed twice or more", "Moved past an expected stage without entering it"]);
     assert.match(text(slide), /61\.9 points/);
-    assert.match(text(slide), /Not measurable\. 0 deals without it/);
+    assert.match(text(slide), /Not measurable\. 0 deals with it/);
     assert.match(text(slide), /not proof that one caused the other/);
     const at = slides.indexOf(slide);
     assert.ok(/How your sales process really runs/.test(slides[at - 1]!), "straight after the sales process");
@@ -301,7 +322,7 @@ describe("in the reports", () => {
     assert.match(words, new RegExp(`${ref.replace(".", "\\.")} +What separates your wins from your losses: 46.6%`));
     assert.match(words, /Factor +Deals with it +Won +Win rate +Deals without it +Won +Win rate +Gap, points +Same way in segments +Driver/);
     assert.match(words, /Went back a stage at least once +87 +0 +0% +265 +164 +61.9% +61.9 +11 of 11 +Yes/);
-    assert.match(words, /Had logged activity: +Not measurable\./);
+    assert.match(words, /Moved past an expected stage without entering it: +Not measurable\./);
     assert.match(words, /Linked to Deals often go back a stage/);
   });
 

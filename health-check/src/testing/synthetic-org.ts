@@ -491,6 +491,27 @@ function buildActivity(): { tasks: SyntheticTask[]; events: SyntheticEvent[]; em
 
 export const activity = buildActivity();
 
+// Salesforce sets an opportunity's LastActivityDate from the tasks and events
+// against it, so a closed deal created inside the readable year has the date of
+// its last one, or none. Before, every closed deal had its close day, and the
+// win drivers saw activity on deals the activity checks found nothing against
+// (night 3 reading pass). Older deals keep their close day: their activity
+// would be archived, not missing.
+{
+  const readableFrom = asOf - 365 * DAY;
+  const last = new Map<string, string>();
+  const touch = (dealId: string | null, at: string): void => {
+    if (!dealId) return;
+    const day = at.slice(0, 10);
+    if ((last.get(dealId) ?? "") < day) last.set(dealId, day);
+  };
+  for (const t of activity.tasks) touch(t.WhatId, t.CreatedDate);
+  for (const e of activity.events) touch(e.WhatId, e.StartDateTime);
+  for (const o of pipeline.opportunities) {
+    if (o.IsClosed && new Date(o.CreatedDate.replace("+0000", "Z")).getTime() >= readableFrom) o.LastActivityDate = last.get(o.Id) ?? null;
+  }
+}
+
 export type SyntheticLead = { Id: string; OwnerId: string; LeadSource: string | null; CreatedDate: string; IsConverted: boolean; ConvertedDate: string | null; ConvertedOpportunityId: string | null; ConvertedContactId: string | null };
 
 function buildLeads() {

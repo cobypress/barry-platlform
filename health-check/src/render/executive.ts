@@ -78,6 +78,11 @@ type PlanBlock = { phase: PlanPhase; items: Finding[] };
 
 /** The most pages the summary may take, the money and references pages included. The layout check holds it to this. */
 export const EXECUTIVE_MAX_PAGES = 14;
+/** A re-check's, with the 10% headroom decision 286 gave the decks: it carries a "since last time" page the first check doesn't (DECISIONS.md 353). */
+export const RECHECK_EXECUTIVE_MAX_PAGES = 15;
+
+/** The ceiling for this report's summary. */
+export const executiveMaxPages = (report: Pick<BuiltReport, "progress">): number => (report.progress ? RECHECK_EXECUTIVE_MAX_PAGES : EXECUTIVE_MAX_PAGES);
 
 type PlanPage = Array<PlanBlock | { intro: true }>;
 
@@ -136,10 +141,20 @@ function pipelinePage(r: Render, report: BuiltReport, body: string): string {
   const table = potential.length
     ? `<h3 class="sub">Potential revenue in open deals</h3><table class="grid"><thead><tr><th>Deals</th><th style="width:30%">Potential revenue</th></tr></thead><tbody>${potential.map((f) => `<tr><td>${r.t(f.title)}${r.ref(f.id)}</td><td>${valueFigure(r, f)}</td></tr>`).join("")}</tbody></table>`
     : "";
+  // Said beside the lines it's about, not only in the text above the chart (night 3 reading pass).
+  const overlap = potential.length > 1 ? `<p style="margin-top:6px;color:var(--muted);font-size:0.85em">${r.t("These lines overlap, so they aren't added together. What fixing this is worth counts only the largest.")}</p>` : "";
   const chart = metrics.some((m) => m.id === "current.delivery_outlook_value")
     ? `<h3 class="sub">Expected won value by month</h3><div style="margin-top:8px">${chartSlot(deliveryOutlookChart(metrics.find((m) => m.id === "current.delivery_outlook_value"), metrics.find((m) => m.id === "current.delivery_outlook_deals"), r.currency))}</div>`
     : "";
-  return `<div class="eyebrow">Pipeline</div><h2>Your pipeline today</h2><div class="lead">${paragraphs(r, body)}</div>${stats ? `<div class="stat-row" style="margin-top:6px">${stats}</div>` : ""}${chart}${table}`;
+  return `<div class="eyebrow">Pipeline</div><h2>Your pipeline today</h2><div class="lead">${paragraphs(r, body)}</div>${stats ? `<div class="stat-row" style="margin-top:6px">${stats}</div>` : ""}${chart}${table}${overlap}`;
+}
+
+/** Which checks couldn't be measured, named, so the tile's count isn't left unexplained. Past three, the count and where to look. */
+function unmeasuredLine(r: Render, report: BuiltReport): string {
+  const open = report.teamFindings.filter((f) => f.status === "not_measurable");
+  if (open.length === 0) return "";
+  const text = open.length <= 3 ? `Not measurable: ${open.map((f) => f.title).join("; ")}. The full report's appendix says why for each.` : "The full report's appendix names each check we couldn't measure, and why.";
+  return `<p style="margin-top:8px;color:var(--muted);font-size:0.85em">${r.t(text)}</p>`;
 }
 
 /** How the one score comes from the area scores, for the scorecard pages. */
@@ -154,7 +169,7 @@ const footer = (r: Render, n: number): string => `<div class="footer" data-chrom
 
 /** How a reference leads to the working, and every reference this summary used, in the order the notes hold them. */
 function detailPage(r: Render, items: Array<{ ref: string; title: string }>): string {
-  const lede = "Each issue in this summary carries a reference to the raw notes, the Word document that comes with it. There you'll find the working behind every figure: what we read from your Salesforce, the sample, the calculation and the assumptions. The full report has the same references for everything else, and the action lists, a spreadsheet and a ticket file, list each record to fix.";
+  const lede = "Each issue in this summary carries a reference to the raw notes, the Word document that comes with it. There you'll find the working behind every figure: what we read from your Salesforce, the sample, the calculation and the assumptions. The full report has the same references for everything else, and the action lists (a spreadsheet and a ticket file) name each record to fix.";
   // Two narrow columns, so a summary that leans on many references still fits one page.
   const rows = items.sort((a, b) => a.ref.localeCompare(b.ref, "en", { numeric: true })).map((x) => `<p class="ref-row"><b data-ref>${x.ref}</b><span>${r.t(x.title)}</span></p>`);
   return `<div class="eyebrow">Where to find the detail</div><h2>How we worked it out</h2><p style="margin-bottom:14px">${r.t(lede)}</p><div class="ref-list">${rows.join("")}</div>`;
@@ -189,10 +204,11 @@ export function executiveHtml(report: BuiltReport, pseudonyms: Pseudonymiser): s
   // One line on AI readiness, only when its verdict is clear (DECISIONS.md 243).
   const aiLine = readinessLine(report.readiness);
   add(`<div class="eyebrow">Verdict</div><div class="headline">${r.t(verdict.headline)}</div><div class="lead">${paragraphs(r, currentBody(built, "verdict").replace(`${verdict.headline}.\n\n`, ""))}</div>
-    <div class="stat-row" style="margin-top:18px">${report.overall.status === "measured" ? `<div class="stat"><b>${report.overall.score}</b><span>Barometer score</span></div>` : ""}<div class="stat"><b>${verdict.issues}</b><span>Issues</span></div><div class="stat"><b>${verdict.critical}</b><span>Critical</span></div><div class="stat"><b>${verdict.high}</b><span>High</span></div><div class="stat"><b>${notMeasurable}</b><span>Not measurable</span></div></div>
+    <div class="stat-row" style="margin-top:18px">${report.overall.status === "measured" ? `<div class="stat"><b>${report.overall.score}</b><span>Barometer score</span></div>` : ""}<div class="stat"><b>${verdict.issues}</b><span>Issues</span></div><div class="stat"><b>${verdict.critical}</b><span>Critical</span></div><div class="stat"><b>${verdict.high}</b><span>High</span></div><div class="stat"><b>${notMeasurable}</b><span>Not measurable</span></div></div>${unmeasuredLine(r, report)}
     ${aiLine ? `<p class="small-note" style="margin-top:10px">${r.t(aiLine)}</p>` : ""}
     <h3 class="sub">What matters most</h3>
     <table class="grid"><thead><tr><th>Issue</th><th style="width:34%">Impact</th></tr></thead><tbody>${top.map((f) => `<tr><td>${r.t(f.title)}${r.ref(f.id)}</td><td>${valueText(r, f).amount}</td></tr>`).join("")}</tbody></table>
+    ${top.some((f) => f.value.kind !== "not_sized") && report.value.total.expected > 0 ? `<p style="margin-top:6px;color:var(--muted);font-size:0.85em">${r.t("Each figure here is the issue's own, at its full size, and some are at risk rather than money to win. \"What fixing this is worth\" counts a share of the money ones, each sum only once.")}</p>` : ""}
     ${report.survey ? `<h3 class="sub">What your team says${report.survey.shown ? r.ref(SURVEY.responses) : ""}</h3>${paragraphs(r, currentBody(built, "team_survey"))}` : ""}
     ${peopleSaid ? `<h3 class="sub">What your people told us</h3>${paragraphs(r, peopleSaid)}` : ""}
     <p style="margin-top:18px">${sourcesLine(report.survey?.shown === true, Boolean(peopleSaid))} Where we couldn't measure something, we say so rather than estimate it.</p>`);
@@ -204,7 +220,7 @@ export function executiveHtml(report: BuiltReport, pseudonyms: Pseudonymiser): s
   const invested = investmentPage(r, report);
   if (invested) add(invested);
 
-  add(`<div class="eyebrow">Scorecard</div><h2>How each area stands</h2><p style="margin-bottom:14px">${r.t(currentBody(built, "scorecard") + scoreLine(report))}</p>${chartSlot(scorecardChart(scorecard(team, scores, areasOf(run, team)), scorecardOptions(report)))}${setupReview ? "" : `<h3 class="sub">Win rate by segment</h3><div style="margin-top:8px">${chartSlot(winRateBySegment(report.metrics.find((m) => m.id === "historic.win_rate")))}</div>`}`);
+  add(`<div class="eyebrow">Scorecard</div><h2>How each area stands</h2><p style="margin-bottom:14px">${r.t(currentBody(built, "scorecard") + scoreLine(report))}</p>${chartSlot(scorecardChart(scorecard(team, scores, areasOf(run, team)), scorecardOptions(report)))}${setupReview ? "" : `<h3 class="sub">Win rate by team and kind of deal</h3><div style="margin-top:8px">${chartSlot(winRateBySegment(report.metrics.find((m) => m.id === "historic.win_rate")))}</div>`}`);
 
   // Only figures with something to stand against, as in the full report.
   const compared = report.comparisons.filter((c) => c.value !== null && (c.published.length > 0 || c.own.status === "measured"));
@@ -231,7 +247,7 @@ export function executiveHtml(report: BuiltReport, pseudonyms: Pseudonymiser): s
   if (risk) add(risk);
 
   // Two pages are kept back: what happens next, and the references.
-  planLayout(r, plan, introHeight, EXECUTIVE_MAX_PAGES - pages.length - 2).forEach((group, i) => {
+  planLayout(r, plan, introHeight, executiveMaxPages(report) - pages.length - 2).forEach((group, i) => {
     const phases = group.filter((b): b is PlanBlock => !("intro" in b));
     add(`<div class="eyebrow">90-day plan</div><h2>${i === 0 ? "What we'd do first" : "What we'd do first, continued"}</h2>${i === 0 ? `<p style="margin-bottom:14px">${r.t(intro)}</p>` : ""}${phases.map((b) => phaseBlock(r, b)).join("")}`);
   });

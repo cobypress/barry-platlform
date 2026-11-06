@@ -61,7 +61,7 @@ export function readoutKit(report: BuiltReport): KitPart[] {
       points: [
         p.score.before !== null && p.score.after !== null ? `The Barometer score has gone from ${p.score.before} to ${p.score.after}.` : "We couldn't score both checks, so the change is told by rule rather than by score.",
         `${plural(p.fixed.length, "rule")} fixed, ${p.added.length} new, ${p.remaining.length} still open${p.unknown.length ? `, and ${p.unknown.length} we couldn't measure this time` : ""}.`,
-        `What fixing the issues is worth has gone from ${m(p.worth.before)} to ${m(p.worth.after)}.`,
+        `What the open issues are worth has gone from ${m(p.worth.before)} to ${m(p.worth.after)}.`,
       ],
       questions: [
         { question: "What did we fix?", answers: p.fixed.slice(0, 3).flatMap((c) => c.findingIds.slice(0, 1)) },

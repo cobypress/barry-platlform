@@ -73,6 +73,8 @@ h2 { font-size: 36px; font-weight: 600; line-height: 1.2; margin: 4px 0 16px; }
 .two-up.roomy .card { font-size: 16.5px; line-height: 1.42; padding: 12px 16px; margin-bottom: 12px; }
 .two-up.roomy .card h3 { font-size: 18px; margin: 4px 0; }
 .two-up.roomy .card .meta { font-size: 13.5px; }
+.meta > span { white-space: nowrap; flex-shrink: 0; }
+.meta > span.amount { white-space: normal; flex-shrink: 1; }
 .two-text { columns: 2; column-gap: 28px; }
 .two-text li, .two-text tr { break-inside: avoid; }
 .action-list.two-text { font-size: 15px; }
@@ -184,10 +186,11 @@ function smallCardHeight(f: Finding, causeOf: CauseOf = noCause): number {
 }
 
 function card(r: Render, f: Finding, causeOf: CauseOf = noCause): string {
-  return `<article class="card"><div class="meta">${severityChip(f)}<span>${effortText(f)}</span><span>${valueText(r, f).amount}</span>${r.ref(f.id)}</div><h3>${r.t(f.title)}</h3><p>${r.t(f.summary)}</p><p><strong>What to do:</strong> ${r.t(f.recommendation)}</p>${causeLine(r, causeOf(f))}</article>`;
+  return `<article class="card"><div class="meta">${severityChip(f)}<span>${effortText(f)}</span><span class="amount">${valueText(r, f).amount}</span>${r.ref(f.id)}</div><h3>${r.t(f.title)}</h3><p>${r.t(f.summary)}</p><p><strong>What to do:</strong> ${r.t(f.recommendation)}</p>${causeLine(r, causeOf(f))}</article>`;
 }
 
-const groupTitle = (f: Finding): string => (f.severity === "low" || f.severity === "info" ? "Smaller issues" : "Other issues");
+// Nothing comes before an area's first issue page, so its title isn't "Other issues".
+const groupTitle = (f: Finding): string => (f.severity === "low" || f.severity === "info" ? "Smaller issues" : "The issues in detail");
 
 function issueCards(r: Render, label: string, findings: Finding[], causeOf: CauseOf = noCause): Slide {
   return { html: `<div class="eyebrow">${r.t(label)}</div><h2>${groupTitle(findings[0]!)}</h2>${findings.map((f) => card(r, f, causeOf)).join("")}` };
@@ -378,6 +381,9 @@ function quarterlySlide(r: Render, metric: (id: string) => Metric | undefined): 
   return { classes: "tight", html: `${head}<table class="grid data"><thead><tr><th>Quarter starting</th><th class="num">Deals created</th><th class="num">Deals won</th><th class="num">Won value</th><th class="num">Win rate</th><th class="num">Median won deal</th><th class="num">Median cycle, days</th></tr></thead><tbody>${rows.join("")}</tbody></table>${notes.map((n) => `<p class="small-note">${r.t(n)}</p>`).join("")}` };
 }
 
+// Why these counts can differ from the lead funnel's and the new-and-repeat split (night 3 reading pass).
+const WINS_BASIS = "Type and lead source are the won deal's own fields. The lead funnel counts leads converted, by the lead's source, and new and repeat customers go by whether the account had won a deal before, so their counts can differ from these.";
+
 function winsSlides(r: Render, metric: (id: string) => Metric | undefined): Slide[] {
   const repeat = asMeasured(metric("historic.repeat_win_share"));
   const top = asMeasured(metric("historic.top_account_share"));
@@ -387,7 +393,7 @@ function winsSlides(r: Render, metric: (id: string) => Metric | undefined): Slid
   ].filter(Boolean);
   return [
     { html: `<div class="eyebrow">Where wins come from</div><h2>New and repeat customers</h2>${lines.map((l) => `<p class="lede">${r.t(l)}</p>`).join("")}<div class="chart-pair">${chartSlot(winsByCustomerChart(metric("historic.won_value_by_customer"), r.currency))}${chartSlot(topAccountsChart(metric("historic.top_account_share")))}</div>` },
-    { html: `<div class="eyebrow">Where wins come from</div><h2>Wins by type and lead source</h2><div class="chart-pair">${chartSlot(wonValueByChart(metric("historic.won_value_by_type"), "type", "won-by-type", "Won value by type", r.currency))}${chartSlot(wonValueByChart(metric("historic.won_value_by_source"), "lead source", "won-by-source", "Won value by lead source", r.currency))}</div>` },
+    { html: `<div class="eyebrow">Where wins come from</div><h2>Wins by type and lead source</h2><div class="chart-pair">${chartSlot(wonValueByChart(metric("historic.won_value_by_type"), "type", "won-by-type", "Won value by type", r.currency))}${chartSlot(wonValueByChart(metric("historic.won_value_by_source"), "lead source", "won-by-source", "Won value by lead source", r.currency))}</div><p class="small-note">${r.t(WINS_BASIS)}</p>` },
   ];
 }
 
@@ -406,7 +412,7 @@ function closeDatesSlide(r: Render, metric: (id: string) => Metric | undefined, 
     block(late, (m) => `<h3>Days late against the first close date</h3><p class="big">${m.value} days</p><p class="note">For the median won deal. The typical range is ${m.stats.p25} to ${m.stats.p75} days.</p>`),
   ].join("");
   const order = calibration.stages.filter((s) => s.category === "open").sort((a, b) => (a.order ?? 0) - (b.order ?? 0)).map((s) => s.name);
-  return { html: `<div class="eyebrow">Close dates and stage speed</div><h2>How far close dates hold, and where time goes</h2><div class="columns" style="grid-template-columns: 1fr 1.5fr"><div class="panel">${panel}</div>${chartSlot(stageVelocityChart(metric("historic.stage_velocity_won"), metric("historic.stage_velocity_lost"), order))}</div>` };
+  return { html: `<div class="eyebrow">Close dates and stage speed</div><h2>How far close dates hold, and where time goes</h2><div class="columns" style="grid-template-columns: 1fr 1.5fr"><div class="panel">${panel}</div><div><h3 class="cap">Median days in each stage, won and lost deals</h3>${chartSlot(stageVelocityChart(metric("historic.stage_velocity_won"), metric("historic.stage_velocity_lost"), order))}</div></div>` };
 }
 
 /** The close: what we'd do next, together. Its only figures are the plan's own. */
@@ -418,7 +424,7 @@ function adoptionSlide(r: Render, metric: (id: string) => Metric | undefined): s
   const [active, channels, lightning] = charts as [Chart, Chart, Chart];
   // References in small type beside the eyebrow, not at heading size.
   const refs = ["adoption.monthly_active_users", "adoption.mobile_login_share", "adoption.lightning_share"].map((id) => r.ref(id)).join("");
-  return `<div class="eyebrow">Adoption and usage${refs}</div><h2>Who uses Salesforce, and how</h2><div class="chart-pair"><div>${chartSlot(active)}</div><div class="stack">${chartSlot(channels)}${chartSlot(lightning)}</div></div>`;
+  return `<div class="eyebrow">Adoption and usage${refs}</div><h2>Who uses Salesforce, and how</h2><div class="chart-pair"><div><h3 class="cap">Monthly active users</h3>${chartSlot(active)}</div><div class="stack">${chartSlot(channels)}${chartSlot(lightning)}</div></div>`;
 }
 
 function processSlide(r: Render, metric: (id: string) => Metric | undefined, calibration: Calibration): Slide {
@@ -445,7 +451,9 @@ function driversSlide(r: Render, metric: (id: string) => Metric | undefined): Sl
   const widest = Math.max(DRIVER_GAP, ...drivers.map((d) => d.gap ?? 0));
   const rate = (s: Side): string => (s.rate === null ? "" : percent(s.rate));
   const rows = drivers.map((d) => {
-    const label = `<td>${r.t(d.label)}${d.isDriver ? ' <span class="chip">Driver</span>' : ""}</td>`;
+    // Which way the gap points, so a driver that went with winning isn't read as advice to do it (night 3 reading pass).
+    const way = d.with.rate !== null && d.without.rate !== null && d.with.rate > d.without.rate ? "goes with winning" : "goes with losing";
+    const label = `<td>${r.t(d.label)}${d.isDriver ? ` <span class="chip">Driver: ${way}</span>` : ""}</td>`;
     if (d.gap === null) return `<tr class="unmeasured">${label}<td colspan="6">Not measurable. ${r.t(d.reason ?? "")}</td></tr>`;
     // The bar is drawn, not written, so it carries no figure of its own.
     const bar = `<span class="gap-bar${d.isDriver ? " driver" : ""}" style="width:${Math.max(2, Math.round((90 * d.gap) / widest))}px"></span>`;
@@ -457,6 +465,10 @@ function driversSlide(r: Render, metric: (id: string) => Metric | undefined): Sl
     ...(m.stats.noDecision ? [`${m.stats.noDecision} no decision deals are left out of it.`] : []),
     ...(m.stats.cycleLineDays !== undefined ? [`A long cycle is over ${m.stats.cycleLineDays} days from creation to close.`] : []),
     "The last column is how many teams, record types and other segments with enough deals on both sides show the gap the same way.",
+    // Why this can say none while the skipped-stage issue counts many (DECISIONS.md 352).
+    ...(drivers.some((d) => d.key === "skipped")
+      ? ["Moving past an expected stage means moving on to a later open stage without entering it. Closing doesn't count: if it did, every won deal that closes without entering an expected stage would, which is what the skipped-stage issue counts, and no lost deal could, so the comparison would only measure winning."]
+      : []),
   ];
   const table = `<table class="grid data drivers"><thead><tr><th>Factor</th><th class="num">Deals with it</th><th class="num">Win rate</th><th class="num">Deals without it</th><th class="num">Win rate</th><th class="num">Gap</th><th class="num">Same way in segments</th></tr></thead><tbody>${rows.join("")}</tbody></table>`;
   return { classes: "tight", html: `<div class="eyebrow">Pipeline${r.ref(WIN_DRIVERS)}</div><h2>What separates your wins from your losses</h2><p class="lede">${r.t(lede)}</p>${table}<p class="small-note">${r.t(notes.join(" "))}</p>` };
@@ -514,7 +526,7 @@ function winsSlideDense(r: Render, metric: (id: string) => Metric | undefined): 
     wonValueByChart(metric("historic.won_value_by_type"), "type", "won-by-type", "Won value by type", r.currency),
     wonValueByChart(metric("historic.won_value_by_source"), "lead source", "won-by-source", "Won value by lead source", r.currency),
   ].map(chartSlot);
-  return { html: `<div class="eyebrow">Where wins come from</div><h2>New and repeat customers, type and lead source</h2>${lede.replace(/class="lede"/g, 'class="lede" style="font-size:15px;margin-bottom:8px"')}<div class="chart-pair" style="row-gap:12px">${grid.join("")}</div>` };
+  return { html: `<div class="eyebrow">Where wins come from</div><h2>New and repeat customers, type and lead source</h2>${lede.replace(/class="lede"/g, 'class="lede" style="font-size:15px;margin-bottom:8px"')}<div class="chart-pair" style="row-gap:12px">${grid.join("")}</div><p class="small-note">${r.t(WINS_BASIS)}</p>` };
 }
 
 function lostAndSpeedSlideDense(r: Render, metric: (id: string) => Metric | undefined, calibration: Calibration): Slide {
@@ -527,14 +539,14 @@ function lostAndSpeedSlideDense(r: Render, metric: (id: string) => Metric | unde
     share && late ? `${percent(share.value)} of ${share.n} won deals closed in the quarter first forecast, and the median won deal closed ${late.value} days after its first close date.` : "",
   ].filter(Boolean);
   const order = calibration.stages.filter((s) => s.category === "open").sort((a, b) => (a.order ?? 0) - (b.order ?? 0)).map((s) => s.name);
-  return { html: `<div class="eyebrow">Where deals are lost</div><h2>Where deals drop out, and where time goes</h2>${lines.map((l) => `<p class="lede" style="font-size:15px;margin-bottom:8px">${r.t(l)}</p>`).join("")}<div class="chart-pair">${chartSlot(lostByStageChart(metric("historic.lost_by_stage"), metric("historic.lost_value_by_stage"), r.currency))}${chartSlot(stageVelocityChart(metric("historic.stage_velocity_won"), metric("historic.stage_velocity_lost"), order))}</div>` };
+  return { html: `<div class="eyebrow">Where deals are lost</div><h2>Where deals drop out, and where time goes</h2>${lines.map((l) => `<p class="lede" style="font-size:15px;margin-bottom:8px">${r.t(l)}</p>`).join("")}<div class="chart-pair">${chartSlot(lostByStageChart(metric("historic.lost_by_stage"), metric("historic.lost_value_by_stage"), r.currency))}<div><h3 class="cap">Median days in each stage, won and lost deals</h3>${chartSlot(stageVelocityChart(metric("historic.stage_velocity_won"), metric("historic.stage_velocity_lost"), order))}</div></div>` };
 }
 
 /** Definitions are reference, so a dense deck sets them small, in three columns. */
-function threeColumnList(r: Render, eyebrow: string, title: string, items: Array<{ title: string; detail: string }>): Slide[] {
+function threeColumnList(r: Render, eyebrow: string, title: string, items: Array<{ title: string; detail: string; ref?: string }>): Slide[] {
   const pages = paginate(items, (x) => 26 + 17 * estimateLines(x.detail, 56), 3 * 490);
   return pages.map((group, i) => ({
-    html: `<div class="eyebrow">${r.t(eyebrow)}</div><h2>${r.t(title)}${i ? ", continued" : ""}</h2><div class="three-text">${group.map((x) => `<p class="definition"><strong>${r.t(x.title)}</strong><br>${r.t(x.detail)}</p>`).join("")}</div>`,
+    html: `<div class="eyebrow">${r.t(eyebrow)}</div><h2>${r.t(title)}${i ? ", continued" : ""}</h2><div class="three-text">${group.map((x) => `<p class="definition"><strong>${r.t(x.title)}</strong>${x.ref ? r.ref(x.ref) : ""}<br>${r.t(x.detail)}</p>`).join("")}</div>`,
   }));
 }
 
@@ -561,21 +573,21 @@ const needsInput = (built: BuiltOutput, key: string): boolean => built.sections.
 
 const inputChip = '<p style="margin-bottom:10px"><span class="chip input">Needs input from a consultant</span></p>';
 
-function listSlides(r: Render, eyebrow: string, title: string, items: Array<{ title: string; detail: string }>, compact: boolean): Slide[] {
+function listSlides(r: Render, eyebrow: string, title: string, items: Array<{ title: string; detail: string; ref?: string }>, compact: boolean): Slide[] {
   // An empty list is left out rather than given a page that says so.
   if (items.length === 0) return [];
   const pages = paginate(items, (x) => 16 + 24 * Math.max(estimateLines(x.detail, 85), estimateLines(x.title, 34)), LIST_BUDGET);
   const cut = compact && pages.length > 1;
   return (cut ? pages.slice(0, 1) : pages).map((group, i) => ({
     classes: "tight",
-    html: `<div class="eyebrow">${r.t(eyebrow)}</div><h2>${r.t(title)}${i ? ", continued" : ""}</h2>${cut ? `<p style="font-size:15px;margin-bottom:6px">${COMPACT_NOTE}</p>` : ""}<table class="grid"><tbody>${(cut ? group.slice(0, -1) : group).map((x) => `<tr><td style="width:30%"><strong>${r.t(x.title)}</strong></td><td>${r.t(x.detail)}</td></tr>`).join("")}</tbody></table>`,
+    html: `<div class="eyebrow">${r.t(eyebrow)}</div><h2>${r.t(title)}${i ? ", continued" : ""}</h2>${cut ? `<p style="font-size:15px;margin-bottom:6px">${COMPACT_NOTE}</p>` : ""}<table class="grid"><tbody>${(cut ? group.slice(0, -1) : group).map((x) => `<tr><td style="width:30%"><strong>${r.t(x.title)}</strong>${x.ref ? r.ref(x.ref) : ""}</td><td>${r.t(x.detail)}</td></tr>`).join("")}</tbody></table>`,
   }));
 }
 
-function twoColumnList(r: Render, eyebrow: string, title: string, items: Array<{ title: string; detail: string }>): Slide[] {
+function twoColumnList(r: Render, eyebrow: string, title: string, items: Array<{ title: string; detail: string; ref?: string }>): Slide[] {
   const pages = paginate(items, (x) => 28 + 19 * estimateLines(x.detail, 72), 2 * LIST_BUDGET);
   return pages.map((group, i) => ({
-    html: `<div class="eyebrow">${r.t(eyebrow)}</div><h2>${r.t(title)}${i ? ", continued" : ""}</h2><div class="two-text">${group.map((x) => `<p class="definition"><strong>${r.t(x.title)}</strong><br>${r.t(x.detail)}</p>`).join("")}</div>`,
+    html: `<div class="eyebrow">${r.t(eyebrow)}</div><h2>${r.t(title)}${i ? ", continued" : ""}</h2><div class="two-text">${group.map((x) => `<p class="definition"><strong>${r.t(x.title)}</strong>${x.ref ? r.ref(x.ref) : ""}<br>${r.t(x.detail)}</p>`).join("")}</div>`,
   }));
 }
 
@@ -609,7 +621,7 @@ function documentedSlides(r: Render, metrics: Metric[], dense: boolean): Slide[]
 const REFS_IN_TWO_COLUMNS = 22;
 
 function detailSlide(r: Render, notes: ReturnType<typeof noteSections>): Slide {
-  const lede = "Every issue and measure in this report carries a reference to the raw notes, the Word document that comes with it. Each one sets out the working behind the figure: what we read from your Salesforce, the sample, the calculation and the assumptions. The action lists, a spreadsheet and a ticket file, list each record to fix with a link to it, and give each issue a ticket.";
+  const lede = "Every issue and measure in this report carries a reference to the raw notes, the Word document that comes with it. Each one sets out the working behind the figure: what we read from your Salesforce, the sample, the calculation and the assumptions. The action lists (a spreadsheet and a ticket file) name each record to fix, with a link to it, and give each issue a ticket.";
   return {
     html: `<div class="eyebrow">Appendix</div><h2>Where to find the detail</h2><p class="lede">${r.t(lede)} <span data-ref>R4.3</span> is the third item in section <span data-ref>R4</span>.</p><div class="${notes.length > REFS_IN_TWO_COLUMNS ? "three-text" : "two-text"} refs">${notes.map((s) => `<p class="definition"><strong data-ref>${s.ref}</strong> ${r.t(s.title)}</p>`).join("")}</div>`,
   };
@@ -676,11 +688,11 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   // The last resort pairs pipeline charts as the dense decks do: it's there to keep the deck short.
   const densePipeline = dense || compact;
   if (densePipeline) {
-    page("How deals convert", ["historic.win_rate", "historic.stage_conversion"], () => ({ html: `<div class="eyebrow">Pipeline</div><h2>How deals convert</h2><div class="chart-pair"><div><h3 class="cap">Win rate by segment</h3>${chartSlot(winRateBySegment(metric("historic.win_rate"), undefined, HALF_WIDTH))}</div><div><h3 class="cap">Stage funnel</h3>${chartSlot(stageFunnel(metric("historic.stage_conversion"), HALF_WIDTH))}</div></div>` }));
+    page("How deals convert", ["historic.win_rate", "historic.stage_conversion"], () => ({ html: `<div class="eyebrow">Pipeline</div><h2>How deals convert</h2><div class="chart-pair"><div><h3 class="cap">Win rate by team and kind of deal</h3>${chartSlot(winRateBySegment(metric("historic.win_rate"), undefined, HALF_WIDTH))}</div><div><h3 class="cap">Stage funnel: deals that reached each stage or a later one</h3>${chartSlot(stageFunnel(metric("historic.stage_conversion"), HALF_WIDTH))}</div></div>` }));
   } else {
-    page("Win rate by segment", ["historic.win_rate"], () => ({ html: `<div class="eyebrow">Pipeline</div><h2>Win rate by segment</h2><div class="chart-wrap">${chartSlot(winRateBySegment(metric("historic.win_rate")))}</div>` }));
+    page("Win rate by segment", ["historic.win_rate"], () => ({ html: `<div class="eyebrow">Pipeline</div><h2>Win rate by team and kind of deal</h2><div class="chart-wrap">${chartSlot(winRateBySegment(metric("historic.win_rate")))}</div>` }));
     page("Three ways of reading the win rate", readings, () => ({ classes: "tight", html: `<div class="eyebrow">Pipeline</div><h2>Three ways of reading the win rate</h2>${metricRows(r, rowsOf(readings), r.currency)}` }));
-    page("Stage funnel", ["historic.stage_conversion"], () => ({ html: `<div class="eyebrow">Pipeline</div><h2>Stage funnel</h2><div class="chart-wrap">${chartSlot(stageFunnel(metric("historic.stage_conversion")))}</div>` }));
+    page("Stage funnel", ["historic.stage_conversion"], () => ({ html: `<div class="eyebrow">Pipeline</div><h2>Stage funnel</h2><p class="lede">${r.t("Each stage counts the deals that reached it or a later one, so a stage few deals sit in can still show many.")}</p><div class="chart-wrap">${chartSlot(stageFunnel(metric("historic.stage_conversion")))}</div>` }));
   }
   page("Quarter by quarter", quarterly, () => quarterlySlide(r, metric));
   if (densePipeline) {
@@ -697,7 +709,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   }
   page("How your sales process really runs", ["historic.path_to_won", "historic.path_to_lost", "historic.stage_transitions"], () => processSlide(r, metric, calibration));
   page("What separates your wins from your losses", [WIN_DRIVERS], () => driversSlide(r, metric));
-  page("Pipeline over time", ["historic.pipeline_point_in_time_value"], () => ({ html: `<div class="eyebrow">Pipeline</div><h2>Pipeline over time</h2><div class="chart-wrap" style="max-width:1000px">${chartSlot(pipelineOverTime(metric("historic.pipeline_point_in_time_value"), r.currency))}</div>` }));
+  page("Pipeline over time", ["historic.pipeline_point_in_time_value"], () => ({ html: `<div class="eyebrow">Pipeline</div><h2>Pipeline over time</h2><p class="lede">${r.t("The value of your open pipeline at the end of each month.")}</p><div class="chart-wrap" style="max-width:1000px">${chartSlot(pipelineOverTime(metric("historic.pipeline_point_in_time_value"), r.currency))}</div>` }));
 
   // Only figures with something to stand against: the raw notes say why the rest have nothing yet.
   const compared = report.comparisons.filter((c) => c.value !== null && (c.published.length > 0 || c.own.status === "measured"));
@@ -774,7 +786,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
     const label = domainLabel(domain);
     const own = team.filter((f) => f.domain === domain);
     const issues = issuesOf(own);
-    if (!density?.domainSummary) add(`<div class="eyebrow">Area</div><h1>${r.t(label)}</h1><div class="body">${sectionBody(r, built, `domain_${domain}`)}</div><div class="stat-row" style="max-width:640px;margin-top:20px;color:var(--carbon)"><div class="stat"><b>${issues.length}</b><span>Issues</span></div><div class="stat"><b>${own.filter((f) => f.status === "passed").length}</b><span>Passed</span></div><div class="stat"><b>${own.filter((f) => f.status === "not_measurable").length}</b><span>Not measurable</span></div></div>`, "dark divider");
+    if (!density?.domainSummary) add(`<div class="eyebrow">Area</div><h1>${r.t(label)}</h1><div class="body">${sectionBody(r, built, `domain_${domain}`)}</div>`, "dark divider");
     // Each area opens the same way. The tightest densities drop it to keep the deck in range.
     const glance = density && !density.domainSummary ? chapterSlide(r, report, domain) : "";
     if (glance) add(glance, "tight");
@@ -829,7 +841,8 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   }
 
   // Titles only: each of these already has its card in its domain's section.
-  const afterPlan = later.map((f) => ({ title: f.title, detail: `${severityWord(f.severity)}. ${effortText(f)}. ${f.owner}` }));
+  // Each with its reference, so a reader can find the issue it comes from (night 3 reading pass).
+  const afterPlan = later.map((f) => ({ title: f.title, detail: `${severityWord(f.severity)}. ${effortText(f)}. ${f.owner}`, ref: f.id }));
   // Titles only, so at the densest they take three columns, as the metric definitions do.
   if (later.length) slides.push(...(density?.domainSummary || density?.threeColumnLists ? threeColumnList(r, "Roadmap", "After 90 days", afterPlan) : dense ? twoColumnList(r, "Roadmap", "After 90 days", afterPlan) : listSlides(r, "Roadmap", "After 90 days", afterPlan, compact)));
 
@@ -853,7 +866,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   // one to a line took a slide for every few metrics.
   slides.push(...(compact ? listSlides(r, "Appendix", "Metric definitions", definitions, compact) : dense ? threeColumnList(r, "Appendix", "Metric definitions", definitions) : twoColumnList(r, "Appendix", "Metric definitions", definitions)));
   // Reference, so two to a line like the definitions.
-  const reference = (title: string, items: Array<{ title: string; detail: string }>): Slide[] => (compact || items.length === 0 ? listSlides(r, "Appendix", title, items, compact) : twoColumnList(r, "Appendix", title, items));
+  const reference = (title: string, items: Array<{ title: string; detail: string; ref?: string }>): Slide[] => (compact || items.length === 0 ? listSlides(r, "Appendix", title, items, compact) : twoColumnList(r, "Appendix", title, items));
   const unmeasured = team.filter((f) => f.status === "not_measurable").map((f) => ({ title: f.title, detail: f.notMeasurableReason ?? f.summary }));
   const passing = team.filter((f) => f.status === "passed").map((f) => ({ title: f.title, detail: f.summary }));
   // At the three-column step the two lists share three columns, each item saying which it is (DECISIONS.md 244).

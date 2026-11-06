@@ -29,7 +29,7 @@ export function progressPage(r: Render, report: BuiltReport): string {
     p.score.before !== null && p.score.after !== null
       ? `<div class="stat"><b>${p.score.before} to ${p.score.after}</b><span>Barometer score</span></div>`
       : "";
-  const pair = `<div class="pair stat-row">${score}<div class="stat"><b>${m(p.worth.before)} to ${m(p.worth.after)}</b><span>${r.t("What fixing the issues is worth")}</span></div><div class="stat"><b>${p.fixed.length}</b><span>${r.t("Fixed")}</span></div><div class="stat"><b>${p.added.length}</b><span>${r.t("New")}</span></div></div>`;
+  const pair = `<div class="pair stat-row">${score}<div class="stat"><b>${m(p.worth.before)} to ${m(p.worth.after)}</b><span>${r.t("What the open issues are worth")}</span></div><div class="stat"><b>${p.fixed.length}</b><span>${r.t("Fixed")}</span></div><div class="stat"><b>${p.added.length}</b><span>${r.t("New")}</span></div></div>`;
   const list = (title: string, items: typeof p.fixed): string =>
     items.length
       ? `<div><h3>${r.t(`${title} (${items.length})`)}</h3><ul>${items

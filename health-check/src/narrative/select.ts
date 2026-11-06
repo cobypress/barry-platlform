@@ -1,4 +1,5 @@
 import { SALES_CLOUD_DOMAINS, type Finding, type Run, type Score } from "../schemas/index.ts";
+import { NOT_MONEY_RULES } from "../value/model.ts";
 
 // The choices a report makes about its findings: what's top, what goes when, and
 // what an executive reader sees. All of it is code, so it's repeatable and Claude
@@ -44,25 +45,30 @@ const USER_TOKEN = /\[\[user:[A-Z]\d{4}\]\]/;
  * Executive reports stay at team level (see QUESTIONS.md, question 7). A token
  * would become a name at render, so it's replaced with a description before then.
  */
-export function teamLevelText(text: string): string {
+export function teamLevelText(text: string, kind: "text" | "title" = "text"): string {
+  // In a sentence, the first person named is "one rep", any after it "another", so two can be told apart
+  // (night 3 reading pass). A title keeps "a single rep": it's how the ranking knows a finding is about one person.
+  let named = 0;
+  const who = (noun: string) => (kind === "title" ? `a single ${noun}` : `${named++ === 0 ? "one" : "another"} ${noun}`);
   return text
-    .replace(/\b[Rr]ep \[\[user:[A-Z]\d{4}\]\]/g, "a single rep")
-    .replace(/(^|[.!?]\s+)\[\[user:[A-Z]\d{4}\]\]/g, "$1A single person")
-    .replace(/\[\[user:[A-Z]\d{4}\]\]/g, "a single person")
-    .replace(/(^|[.!?]\s+)a single (rep|person)/g, (_m, lead: string, noun: string) => `${lead}A single ${noun}`);
+    .replace(/Worst by rep: \[\[user:[A-Z]\d{4}\]\], at/g, "The worst rep is at")
+    .replace(/\b[Rr]ep \[\[user:[A-Z]\d{4}\]\]|\[\[user:[A-Z]\d{4}\]\]/g, (m) => who(/^[Rr]ep /.test(m) ? "rep" : "person"))
+    .replace(/(^|[.!?]\s+)(one|another|a single) (rep|person)/g, (_m, lead: string, first: string, noun: string) => `${lead}${first.charAt(0).toUpperCase()}${first.slice(1)} ${noun}`);
 }
 
 export function teamLevelFinding(f: Finding): Finding {
   return {
     ...f,
-    title: teamLevelText(f.title),
+    title: teamLevelText(f.title, "title"),
     summary: teamLevelText(f.summary),
     recommendation: teamLevelText(f.recommendation),
     subjects: f.subjects.filter((s) => !USER_TOKEN.test(s.label)),
   };
 }
 
-const sizedAmount = (f: Finding): number => (f.value.kind === "not_sized" ? -1 : f.value.amount);
+// A target such as pipeline needed for coverage isn't money, so it doesn't rank as money (DECISIONS.md 351):
+// it comes after every issue with a figure in money, and before those with none.
+const sizedAmount = (f: Finding): number => (f.value.kind === "not_sized" ? -1 : NOT_MONEY_RULES.has(f.ruleId) ? 0 : f.value.amount);
 
 export function bySeverity(a: Finding, b: Finding): number {
   return (

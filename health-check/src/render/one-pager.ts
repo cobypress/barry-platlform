@@ -42,15 +42,40 @@ ol.do .owner { display: block; font-size: 11px; color: var(--muted); }
 
 const firstSentence = (text: string): string => /^.*?[.!?](?=\s|$)/.exec(text)?.[0] ?? text;
 
+type Compared = BuiltReport["comparisons"][number];
+
+/** How far the figure sits from what it's compared with, as a share of that, so points and days can be ranked together. */
+function distance(c: Compared): number {
+  const p = c.published[0];
+  const against = p ? p.figure.value : c.own.status === "measured" ? c.own.median : null;
+  if (c.value === null || against === null) return 0;
+  return Math.abs(c.value - against) / Math.max(Math.abs(against), 1);
+}
+
+/** Behind what it's compared with: worse than the published figure, or in the bottom quarter of our customers. */
+const belowPar = (c: Compared): boolean => c.published[0]?.side === "worse" || (c.published.length === 0 && c.own.status === "measured" && c.own.position === "bottom quarter");
+
+/**
+ * The comparisons a board reads (DECISIONS.md 354): the ones furthest from what
+ * they're compared with, whichever way, and always at least one that's behind
+ * when any is. A page of only the flattering ones isn't credible.
+ */
+export function chooseComparisons(all: Compared[], count: number): Compared[] {
+  const candidates = all.filter((c) => c.value !== null && (c.published.length > 0 || c.own.status === "measured")).sort((a, b) => distance(b) - distance(a) || a.metric.key.localeCompare(b.metric.key));
+  const shown = candidates.slice(0, count);
+  const behind = candidates.find(belowPar);
+  if (behind && !shown.some(belowPar) && shown.length > 0) shown[shown.length - 1] = behind;
+  return shown;
+}
+
 function comparisons(r: Render, report: BuiltReport): string {
   if (isSetupReview(report.input.run)) return "";
-  // The figures with published research first, as the summary's comparison page leads with them.
-  const shown = report.comparisons.filter((c) => c.value !== null && (c.published.length > 0 || c.own.status === "measured")).sort((a, b) => b.published.length - a.published.length).slice(0, COMPARED);
+  const shown = chooseComparisons(report.comparisons, COMPARED);
   if (shown.length === 0) return "";
   const line = (c: (typeof shown)[number]): string => {
     const yours = formatFigure(c.value!, c.metric.unit);
     const p = c.published[0];
-    if (p) return `<p>${r.t(`${c.metric.label}: yours is ${yours}. Published research: ${formatFigure(p.figure.value, c.metric.unit)} ${p.figure.statistic}, so yours is ${differenceWords(c, p)}.`)}<span class="src">${r.t(`${p.figure.source.publisher}, ${p.figure.source.year}`)}</span>${r.ref(comparisonId(c.metric.key))}</p>`;
+    if (p) return `<p>${r.t(`${c.metric.label}: yours is ${yours}. Published research: ${formatFigure(p.figure.value, c.metric.unit)} ${p.figure.statistic}, so yours is ${differenceWords(c, p)}${p.side === "worse" ? ", which is worse" : p.side === "better" ? ", which is better" : ""}.`)}<span class="src">${r.t(`${p.figure.source.publisher}, ${p.figure.source.year}`)}</span>${r.ref(comparisonId(c.metric.key))}</p>`;
     const own = c.own;
     if (own.status !== "measured") return "";
     return `<p>${r.t(`${c.metric.label}: yours is ${yours}, ${own.position}. Black Cloud customers' middle half is ${formatFigure(own.p25, c.metric.unit)} to ${formatFigure(own.p75, c.metric.unit)}.`)}<span class="src">${r.t("Black Cloud customers")}</span>${r.ref(comparisonId(c.metric.key))}</p>`;
@@ -77,7 +102,7 @@ export function onePagerHtml(report: BuiltReport, pseudonyms: Pseudonymiser): st
   const worth =
     value.total.expected > 0
       ? `<div class="box"><div class="label">What fixing it is worth</div><div class="big">${m(value.total.expected)}</div><p>${r.t(`Over the next 12 months, expected. Between ${m(value.total.low)} and ${m(value.total.high)}.`)}</p></div>`
-      : `<div class="box"><div class="label">What fixing it is worth</div><p>${r.t("Nothing here has a figure in money. Its weight is the risk it carries.")}</p></div>`;
+      : `<div class="box"><div class="label">What fixing it is worth</div><p>${r.t("We haven't put a money figure on these. They matter for the risk they carry.")}</p></div>`;
   const pay =
     cost.status === "measured"
       ? `<div class="box"><div class="label">What you pay</div><div class="big">${m(cost.value)}</div><p>${r.t(`A year. ${ratio !== null ? `What fixing the issues is worth is ${ratio} times what you pay for Salesforce a year.` : cost.label + "."}`)}</p></div>`

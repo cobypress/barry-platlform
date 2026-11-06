@@ -21,9 +21,15 @@ export const MONEY_CSS = `
 .money .split { display: grid; grid-template-columns: 1fr 1.15fr; gap: 32px; align-items: start; }
 .money .split .kind { grid-template-columns: 44% 1fr 20%; }
 .money .waterfall { margin: 0 0 14px; }
+.money .basis { display: block; color: var(--muted); font-size: 0.78em; line-height: 1.3; margin-top: 1px; }
+.money tr.total td { font-weight: 700; border-bottom: none; border-top: 1px solid var(--carbon); }
 `;
 
-const TOP_GROUPS = 5;
+/** Rows of groups each format has room for, the total row aside. */
+const PAGE_GROUPS = 8;
+const SLIDE_GROUPS = 7;
+/** The value model's basis for a figure measured over the analysis window. */
+const OVER_WINDOW_BASIS = /divided by/;
 
 /** Empty when nothing could be given a figure in money: the page is left out rather than showing a nought. A slide sets it in two columns. */
 export function moneyPage(r: Render, report: BuiltReport, format: "page" | "slide" = "page"): string {
@@ -37,13 +43,33 @@ export function moneyPage(r: Render, report: BuiltReport, format: "page" | "slid
   const bars = kinds
     .map((k) => `<div class="kind"><span>${r.t(KIND_LABELS[k])}</span><div class="bar" style="width:${Math.max(1, Math.round((byKind[k].expected / largest) * 100))}%"></div><span class="amount">${m(byKind[k].expected)}</span></div>`)
     .join("");
-  const groups = value.groups.filter((g) => g.kind !== "exposure").sort((a, b) => b.counted.expected - a.counted.expected).slice(0, format === "slide" ? TOP_GROUPS - 1 : TOP_GROUPS);
-  const rows = groups.map((g) => `<tr><td>${r.t(g.label)}${r.ref(valueItemId(g.id))}</td><td class="num">${m(g.counted.expected)}</td><td class="num">${m(g.counted.low)} to ${m(g.counted.high)}</td></tr>`).join("");
+  // Every group, so the rows add up to the headline (night 3 reading pass). Past the
+  // most a page holds, the rest are named as a count with where to find them.
+  const all = value.groups.filter((g) => g.kind !== "exposure").sort((a, b) => b.counted.expected - a.counted.expected);
+  const room = format === "slide" ? SLIDE_GROUPS : PAGE_GROUPS;
+  const groups = all.length > room ? all.slice(0, room - 1) : all;
+  const rest = all.length - groups.length;
+  const pct = (n: number) => `${Math.round(n * 100)}%`;
+  // How each row was reached: its figure before any share, and the share counted. The page has room to say so; the slide points to it.
+  const basis = (g: (typeof all)[number]) => {
+    const c = g.counted;
+    const from = `${m(c.annual)} if all came back${g.lines.length > 1 ? ", the largest of overlapping issues" : ""}${OVER_WINDOW_BASIS.test(c.basis) ? ", a year's worth of what we measured" : ""}.`;
+    return `${from} We count ${pct(g.realisation.expected)} (${pct(g.realisation.low)} to ${pct(g.realisation.high)}).`;
+  };
+  const label = (g: (typeof all)[number]) => `${r.t(g.label)}${r.ref(valueItemId(g.id))}${format === "page" ? `<span class="basis">${r.t(basis(g))}</span>` : ""}`;
+  const rows = [
+    ...groups.map((g) => `<tr><td>${label(g)}</td><td class="num">${m(g.counted.expected)}</td><td class="num">${m(g.counted.low)} to ${m(g.counted.high)}</td></tr>`),
+    ...(rest ? [`<tr><td colspan="3">${r.t(`And ${rest} smaller ${rest === 1 ? "line" : "lines"}, in the raw notes.`)}${r.ref(valueItemId(all[groups.length]!.id))}</td></tr>`] : []),
+    `<tr class="total"><td>${r.t("Total, each counted once")}</td><td class="num">${m(total.expected)}</td><td class="num">${m(total.low)} to ${m(total.high)}</td></tr>`,
+  ].join("");
   const exposure = value.groups.filter((g) => g.kind === "exposure").sort((a, b) => b.counted.annual - a.counted.annual)[0];
   const exposureNote = exposure
     ? `<p class="note">${r.t(`Kept apart from this total: ${exposure.counted.title.replace(/\.$/, "")} (${m(exposure.counted.annual)}). That's exposure, not money found, so it's never added.`)}${r.ref(valueItemId(exposure.id))}</p>`
     : "";
-  const how = "Where several issues describe the same money, only the largest counts. Each figure is what's there if every case were won back, so we count a share of it, and the expected case is the conservative one.";
+  const how =
+    format === "page"
+      ? "Not every case will come back, so we count a share of each figure: the expected share, with a cautious one and all of it either side. Where several issues describe the same money, only the largest counts."
+      : "Not every case will come back, so we count a share of each figure, with a cautious share and all of it either side. Where several issues describe the same money, only the largest counts. The executive summary shows how each line was reached.";
   // Each kind building to the total, exposure apart. The bars stay only where the waterfall can't be drawn.
   const waterfall = waterfallChart(value, format === "slide" ? HALF_WIDTH : undefined);
   const build = waterfall.kind === "chart" ? `<div class="waterfall">${chartSlot(waterfall)}</div>` : `<div class="kinds">${bars}</div>`;
@@ -77,21 +103,23 @@ export function investmentPage(r: Render, report: BuiltReport): string {
   const unusedCost = measured(INVESTMENT.unusedSeatCost);
   const m = (n: number) => compactMoney(n, investment.currency);
   const cost = investment.annualCost;
+  // The value model's line for the same seats, so the two pages can be read together.
+  const seatShare = report.value.groups.find((g) => g.id === "unassigned-seats")?.counted ?? null;
   const stat = (figure: string, label: string, id: string) => `<div class="stat"><b>${figure}</b><span>${r.t(label)}</span>${r.ref(id)}</div>`;
   const stats = [
-    stat(String(paid.value), "Seats you pay for", INVESTMENT.seatsPaid),
+    stat(String(paid.value), "Seats you pay for, all licence types", INVESTMENT.seatsPaid),
     used ? stat(String(used.value), "Seats in use", INVESTMENT.seatsUsed) : "",
-    unused ? stat(String(unused.value), "Seats nobody uses", INVESTMENT.seatsUnused) : "",
+    unused ? stat(String(unused.value), "Seats nobody is assigned to", INVESTMENT.seatsUnused) : "",
     active ? stat(`${active.value}%`, "Of users active", INVESTMENT.activeUserShare) : "",
   ].join("");
   const headline =
     cost.status === "measured"
       ? `<p class="headline-figure">${m(cost.value)}</p><p class="range">${r.t(`A year. ${cost.label}.`)}</p>`
       : // Why it isn't priced is for the raw notes. Here it's enough to say what the page shows instead.
-        `<p class="range">${r.t("We don't have a figure for what you pay a year, so this page shows your seats rather than their cost.")}</p>`;
+        `<p class="range">${r.t("We don't have a figure for your whole Salesforce bill, so this page shows your seats rather than what they all cost.")}</p>`;
   const ratio = returnOnSpend(report);
   const lines = [
-    unusedCost ? `Seats nobody uses cost ${m(unusedCost.value)} a year.` : "",
+    unusedCost ? `${unused ? `The ${unused.value} seats nobody is assigned to` : "Seats nobody is assigned to"} cost ${m(unusedCost.value)} a year.${seatShare ? ` We count a share of it, ${m(seatShare.expected)}, in what fixing this is worth.` : ""}` : "",
     ratio !== null ? `What fixing the issues is worth, ${m(report.value.total.expected)} over 12 months, is ${ratio} times what you pay for Salesforce a year.` : "",
   ].filter(Boolean);
   return `<div class="money"><div class="eyebrow">Your investment</div><h2>What you pay, and what you use</h2>${headline}<div class="stat-row" style="margin:6px 0 16px">${stats}</div>${lines.map((l) => `<p style="margin-bottom:8px">${r.t(l)}</p>`).join("")}</div>`;

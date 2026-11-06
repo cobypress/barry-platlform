@@ -36,7 +36,8 @@ function publishedCell(r: Render, c: Comparison): string {
   if (!p) return `<span class="src">${r.t(c.value === null ? "Not available" : "None that measures this our way")}</span>`;
   const f = p.figure;
   // The source goes with the figure, always, in the same cell.
-  const against = `Yours is ${differenceWords(c, p)}`;
+  // Higher isn't always better, so the sentence says which this is (night 3 reading pass).
+  const against = `Yours is ${differenceWords(c, p)}${p.side === "worse" ? ", which is worse" : p.side === "better" ? ", which is better" : ""}`;
   return `${r.t(`${formatFigure(f.value, c.metric.unit)} ${f.statistic}. ${against}.`)}<span class="src">${r.t(`${f.source.publisher}, ${f.source.year}`)}</span>`;
 }
 

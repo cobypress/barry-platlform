@@ -43,7 +43,7 @@ export const GROUPS: Record<string, GroupSpec> = {
   "stalled-deals": { kind: "revenue_recoverable", label: "Stalled and neglected open deals", realisation: OPEN_DEALS },
   "unworked-leads": { kind: "revenue_recoverable", label: "Leads nobody worked", realisation: LONG_SHOTS },
   "past-customers": { kind: "revenue_recoverable", label: "Past customers and lost deals worth another look", realisation: LONG_SHOTS },
-  "segment-gaps": { kind: "conversion_uplift", label: "Teams and segments winning less often than the rest", realisation: LONG_SHOTS },
+  "segment-gaps": { kind: "conversion_uplift", label: "Teams, reps and kinds of deal winning less often than the rest", realisation: LONG_SHOTS },
   // Money given away on deals already won, so it doesn't overlap the segment gaps, which value wins not made (DECISIONS.md 322).
   "discount-leakage": { kind: "revenue_recoverable", label: "Potential: discount given beyond what peers gave", realisation: LONG_SHOTS },
   "unused-seats": { kind: "licence_waste", label: "Seats held by people who don't log in", realisation: SEATS },
@@ -87,7 +87,14 @@ export const WORKING_WEEKS = 46;
 export type TeamTime = { hoursPerWeek: number; users: number; usersFrom: string };
 
 /** Exposure: real money, but not money found. */
-export const EXPOSURE_RULES = new Set(["cur.coverage", "cur.stuck-in-stage", "cur.close-date-pushes", "cur.account-concentration", "fct.commit-at-risk", "fct.early-stage-commits", "lead.campaign-return"]);
+/**
+ * Figures that are a target, not money (DECISIONS.md 351): coverage's is the
+ * pipeline needed to reach 3 times what's left of quota. It's neither money
+ * found nor money at risk, so it never enters the model.
+ */
+export const NOT_MONEY_RULES = new Set(["cur.coverage"]);
+
+export const EXPOSURE_RULES = new Set(["cur.stuck-in-stage", "cur.close-date-pushes", "cur.account-concentration", "fct.commit-at-risk", "fct.early-stage-commits", "lead.campaign-return"]);
 
 // The fallback hourly cost when the customer gives none. ONS's median full-time
 // salary, plus what an employer pays on top, over a standard working year.
@@ -179,6 +186,10 @@ export function buildValueModel(findings: Finding[], run: Run, currency: string,
   const left: ValueModel["left"] = [];
   for (const f of findings) {
     if (f.status !== "issue" || f.value.kind === "not_sized") continue;
+    if (NOT_MONEY_RULES.has(f.ruleId)) {
+      left.push({ findingId: f.id, reason: "Pipeline needed to reach coverage of quota is a target to plan against, not money found or at risk." });
+      continue;
+    }
     const v = f.value;
     let annual: number;
     let basis: string;

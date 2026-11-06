@@ -41,8 +41,9 @@ function listCap(lists: Finding[][]): number {
 const FIRST_STEPS = 3;
 
 
-const list = (r: Render, items: Finding[], more: number, line: (f: Finding) => string): string =>
-  `<ul>${items.map((f) => `<li>${line(f)}${r.ref(f.id)}</li>`).join("")}${more > 0 ? `<li>${r.t(`And ${more} more in the raw notes.`)}</li>` : ""}</ul>`;
+/** `where` says where the rest are: issues are on the pages that follow, passed checks only in the raw notes. */
+const list = (r: Render, items: Finding[], more: number, line: (f: Finding) => string, where: string): string =>
+  `<ul>${items.map((f) => `<li>${line(f)}${r.ref(f.id)}</li>`).join("")}${more > 0 ? `<li>${r.t(`And ${more} more ${where}.`)}</li>` : ""}</ul>`;
 
 function groups(own: Finding[]) {
   const issues = issuesOf(own).slice().sort(bySeverity);
@@ -73,7 +74,8 @@ function firstSteps(issues: Finding[], good: string[], note: string | null): str
   const height = (texts: string[], chars: number, line: number): number => texts.reduce((sum, t) => sum + estimateLines(t, chars) * line + 3, 0);
   // The note about checks that couldn't be measured sits at the panel's foot, so it takes room too (night 3 scale test).
   const room = PANEL_BUDGET - (good.length ? 22 + height(good, GOOD_CHARS, 16.3) : 0) - (note ? 6 + height([note], NOTE_CHARS, 18.2) : 0);
-  const full = issues.slice(0, FIRST_STEPS).map((f) => f.recommendation);
+  // Several issues can share a recommendation; it's said once.
+  const full = [...new Set(issues.map((f) => f.recommendation))].slice(0, FIRST_STEPS);
   for (const steps of [full, full.map(firstSentence), full.slice(0, 2).map(firstSentence)]) if (height(steps, STEP_CHARS, 17.2) <= room) return steps;
   return full.slice(0, 1).map(firstSentence);
 }
@@ -107,16 +109,17 @@ export function chapterSlide(r: Render, report: BuiltReport, domain: string): st
 
   const cap = listCap([passed, broken, belowPar]);
   const left = [
-    passed.length ? `<h3>What's working</h3>${list(r, passed.slice(0, cap), passed.length - cap, (f) => r.t(f.title))}` : "",
-    broken.length ? `<h3>What's broken</h3>${list(r, broken.slice(0, cap), broken.length - cap, (f) => r.t(f.title))}` : "",
-    belowPar.length ? `<h3>What's below par</h3>${list(r, belowPar.slice(0, cap), belowPar.length - cap, (f) => r.t(f.title))}` : "",
+    // A passed check is listed by its title, which names what was checked, so the heading says it was fine.
+    passed.length ? `<h3>Checked and fine</h3>${list(r, passed.slice(0, cap), passed.length - cap, (f) => r.t(f.title), "in the raw notes")}` : "",
+    broken.length ? `<h3>What's broken</h3>${list(r, broken.slice(0, cap), broken.length - cap, (f) => r.t(f.title), "on the pages that follow")}` : "",
+    belowPar.length ? `<h3>What's below par</h3>${list(r, belowPar.slice(0, cap), belowPar.length - cap, (f) => r.t(f.title), "on the pages that follow")}` : "",
   ].join("");
 
   const good = practiceFor(domain).slice(0, PRACTICE_ON_SLIDE);
   const note = open.length ? `${open.length} more ${open.length === 1 ? "check" : "checks"} couldn't be measured here. The appendix says why.` : null;
   const steps = firstSteps(issues, good.map((p) => `${p.text} ${sourceLabel(p)}`), note);
   const right = [
-    `<h3>What it costs</h3><p>${worth > 0 ? r.t(`About ${compactMoney(worth, report.value.currency)} over the next 12 months, as part of the total on the money page.`) : r.t("Nothing here has a figure in money. Its weight is the risk it carries.")}</p>`,
+    `<h3>What it costs</h3><p>${worth > 0 ? r.t(`About ${compactMoney(worth, report.value.currency)} of the money page's total: a share of the figures that follow.`) : r.t("We haven't put a money figure on these. They matter for the risk they carry.")}</p>`,
     steps.length ? `<h3>What to do first</h3><ul>${steps.map((text) => `<li>${r.t(text)}</li>`).join("")}</ul>` : "",
     good.length ? `<h3>What good looks like</h3><ul class="good">${good.map((p, i) => `<li>${r.t(p.text)} <span class="src">${r.t(sourceLabel(p))}</span>${r.ref(practiceId(domain, i))}</li>`).join("")}</ul>` : "",
     note ? `<p class="note" style="font-size:13.5px;color:var(--muted)">${r.t(note)}</p>` : "",

@@ -139,8 +139,8 @@ describe("the ticket file", () => {
 
 describe("where the action lists are mentioned", () => {
   test("in both decks' detail pages and in the raw notes' counts", () => {
-    assert.match(fullReportHtml(unnamed, pseudonyms), /The action lists, a spreadsheet and a ticket file/);
-    assert.match(executiveHtml(unnamed, pseudonyms), /the action lists, a spreadsheet and a ticket file/);
+    assert.match(fullReportHtml(unnamed, pseudonyms), /The action lists \(a spreadsheet and a ticket file\)/);
+    assert.match(executiveHtml(unnamed, pseudonyms), /the action lists \(a spreadsheet and a ticket file\)/);
     assert.equal(input.recordCounts?.[finding("dq.stale-leads").id]?.rows, LEADS.stale);
   });
 });
@@ -213,6 +213,6 @@ describe("without consent, a person's token anywhere in the files' text becomes 
       assert.ok(!text.includes(entry.name), `${name} names ${entry.name}`);
       assert.ok(!text.includes(entry.token), `${name} keeps the token`);
     }
-    assert.ok(xml.includes("a single person") || csv.includes("a single person"), "the token became a role-free phrase");
+    assert.ok(/\b(one|another) person\b/i.test(xml) || /\b(one|another) person\b/i.test(csv), "the token became a role-free phrase");
   });
 });

@@ -377,7 +377,7 @@ const duplicateRulesMissing: Rule = {
     return {
       outcome: "issue",
       title: "Nothing stops duplicates on some core objects",
-      summary: `${missing.join(", ")} ${missing.length === 1 ? "has" : "have"} no active duplicate rule, so the same customer can be entered more than once.${skippedNote}`,
+      summary: `${missing.length > 1 ? `${missing.slice(0, -1).join(", ")} and ${missing.at(-1)}` : missing[0]} ${missing.length === 1 ? "has" : "have"} no active duplicate rule, so the same customer can be entered more than once.${skippedNote}`,
       recommendation: "Turn on matching and duplicate rules, starting in alert mode so you can see the effect.",
       recommendationType: "change",
       severity: "medium",

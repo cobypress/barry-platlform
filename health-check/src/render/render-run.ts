@@ -10,7 +10,7 @@ import { Intake } from "../narrative/intake.ts";
 import { buildReport, type BuiltReport, type ReportInput } from "../narrative/sections.ts";
 import { Pseudonymiser, type PseudonymEntry } from "../privacy/pseudonymiser.ts";
 import { Calibration, Finding, ManualStep, Metric, NumberOverride, Run, Score } from "../schemas/index.ts";
-import { EXECUTIVE_MAX_PAGES, executiveHtml } from "./executive.ts";
+import { EXECUTIVE_MAX_PAGES, executiveHtml, executiveMaxPages } from "./executive.ts";
 import { deckRangeFor, fullReportHtml } from "./full-report.ts";
 import { launchBrowser, pdfPageCount, renderPdf } from "./pdf.ts";
 import type { LayoutProblem, LayoutReport } from "./layout.ts";
@@ -134,7 +134,7 @@ export async function printDocuments(
   const scope = report.dataset;
   const browser = await launchBrowser();
   try {
-    const executive = await renderPdf(browser, executiveHtml(report, pseudonyms), { minPages: EXECUTIVE_PAGES.min, maxPages: EXECUTIVE_PAGES.max, dataset: scope });
+    const executive = await renderPdf(browser, executiveHtml(report, pseudonyms), { minPages: EXECUTIVE_PAGES.min, maxPages: executiveMaxPages(report), dataset: scope });
     const full = await renderPdf(browser, fullReportHtml(report, pseudonyms), { minPages: deckRangeFor(report.input.run).min, maxPages: deckRangeFor(report.input.run).max, dataset: scope });
     // Exactly one page, or it isn't a one-pager.
     const ceo = await renderPdf(browser, onePagerHtml(report, pseudonyms), { minPages: ONE_PAGER_PAGES.min, maxPages: ONE_PAGER_PAGES.max, dataset: scope });
