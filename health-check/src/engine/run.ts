@@ -2,7 +2,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileS
 import { createHash, randomUUID } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { BUDGET_DEFAULTS, RULE_SET_VERSION, SF_DEFAULTS } from "../config.ts";
-import { fileLines, readCheckpoint, writeCheckpoint } from "./checkpoint.ts";
+import { fileLines, readCheckpoint, trimToLastLine, writeCheckpoint } from "./checkpoint.ts";
 import { shareRepeatedValues } from "./share-values.ts";
 import { modulesFor } from "../domains/scope.ts";
 import { scoreDomains } from "../domains/scoring.ts";
@@ -76,7 +76,7 @@ const RUN_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/;
 const writeJson = (path: string, value: unknown): void => writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
 const readJson = <T>(path: string): T => JSON.parse(readFileSync(path, "utf8")) as T;
 
-class FilePartialStore implements PartialStore {
+export class FilePartialStore implements PartialStore {
   readonly #dir: string;
 
   constructor(dir: string) {
@@ -89,6 +89,8 @@ class FilePartialStore implements PartialStore {
 
   read<R>(key: string): R[] {
     if (!existsSync(this.#path(key))) return [];
+    // Half a line from a crash mid-append is dropped, so the read resumes from the last whole page row.
+    trimToLastLine(this.#path(key));
     // A line at a time: a big org's partial read can be hundreds of megabytes.
     const rows: R[] = [];
     for (const line of fileLines(this.#path(key))) if (line) rows.push(JSON.parse(line) as R);

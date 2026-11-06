@@ -4,7 +4,8 @@ import { randomBytes } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { workerCommand, type WorkerModules } from "../../cli/worker.ts";
-import { HEALTH_CHECK_QUEUE, processorFor, redisConnection, startQueueWorker, type BullModule, type QueueJob, type QueueWorker } from "../bullmq.ts";
+import { MemoryWorkerStore } from "../memory-store.ts";
+import { HEALTH_CHECK_QUEUE, HEAVY_QUEUE, lostRecorder, LOST_REASON, processorFor, redisConnection, startQueueWorker, type BullModule, type QueueJob, type QueueWorker } from "../bullmq.ts";
 import { readWorkerEnv, WORKER_ENV } from "../env.ts";
 import type { JobHandler } from "../worker.ts";
 import { BadJobError } from "../types.ts";
@@ -322,5 +323,54 @@ describe("a scan the worker queues itself", async () => {
         opts: { attempts: 3, backoff: { type: "exponential", delay: 30_000 }, removeOnComplete: true, removeOnFail: 200, priority: 10, jobId: "run-hc-2026-11-06-00000001-1700000000000" },
       },
     ]);
+  });
+});
+
+describe("a heavy job BullMQ gives up on (DECISIONS.md 396)", () => {
+  // BullMQ 5: a job whose process died is put back once its lock lapses. Past maxStalledCount it's
+  // failed with "job stalled more than allowable limit" without the handler running, so only the
+  // "failed" event knows. Before, that was logged and the run sat at "extracting" for ever.
+  const STALLED = "job stalled more than allowable limit";
+  const start = () => {
+    FakeWorker.made = [];
+    const lost: Array<{ data: unknown; reason: string }> = [];
+    startQueueWorker(bull, async () => ({ outcome: "done", detail: "" }), { redisUrl: "redis://localhost:6379", concurrency: 2, log: () => {}, onLost: async (data, reason) => void lost.push({ data, reason }) });
+    const heavy = FakeWorker.made.find((w) => w.name === HEAVY_QUEUE)!;
+    const fail = heavy.listeners.get("failed") as unknown as (job: QueueJob | undefined, err: Error) => void;
+    return { heavy, fail, lost };
+  };
+
+  test("a run that stalled too often is recorded as failed, with a reason the console can show", async () => {
+    const { fail, lost } = start();
+    fail({ id: "run-r1-1", name: "health-check-run", data: { kind: "run", runId: "r1" }, attemptsMade: 0, opts: { attempts: 3 } }, new Error(STALLED));
+    await new Promise((r) => setImmediate(r));
+    assert.equal(lost.length, 1);
+    assert.deepEqual(lost[0]!.data, { kind: "run", runId: "r1" });
+    assert.match(lost[0]!.reason, /stopped part-way more than once/);
+  });
+
+  test("a failure the handler raised itself isn't recorded twice: the handler already did", async () => {
+    const { fail, lost } = start();
+    fail({ id: "run-r1-1", name: "health-check-run", data: { kind: "run", runId: "r1" }, attemptsMade: 3, opts: { attempts: 3 } }, new Error("Salesforce timed out"));
+    await new Promise((r) => setImmediate(r));
+    assert.deepEqual(lost, []);
+  });
+
+  test("a heavy job may stall twice, since a run resumes from its checkpoints: two deploys during a long run don't lose it", () => {
+    const { heavy } = start();
+    assert.equal((heavy.options as { maxStalledCount?: number }).maxStalledCount, 2);
+  });
+
+  test("the worker records a lost run as failed and lost documents as not made, and leaves the rest", async () => {
+    const store = new MemoryWorkerStore();
+    const calls: string[] = [];
+    store.recordRunFailure = async (id, reason) => void calls.push(`run ${id}: ${reason}`);
+    store.failDocuments = async (id, reason) => void calls.push(`documents ${id}: ${reason}`);
+    const record = lostRecorder(store, () => new Date("2026-11-07T01:00:00.000Z"));
+    await record({ kind: "run", runId: "r1" }, LOST_REASON);
+    await record({ kind: "documents", runId: "r2" }, LOST_REASON);
+    await record({ kind: "connect", linkId: "l1" }, LOST_REASON);
+    await record({ kind: "share", runId: "r3" }, LOST_REASON);
+    assert.deepEqual(calls, [`run r1: ${LOST_REASON}`, `documents r2: ${LOST_REASON}`]);
   });
 });
