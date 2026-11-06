@@ -35,6 +35,16 @@ const FIX_ORDER = ["access", "data", "shape", "actions", "knowledge"];
 const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
 const severityRank = (f: Finding): number => SEVERITY_ORDER.indexOf(f.severity);
 
+// Words that keep their capital mid-sentence when a finding's title follows a colon.
+const PROPER = new Set(["Salesforce", "Apex", "Modify", "View", "Einstein", "Agentforce", "Classic", "Lightning", "Knowledge", "Workflow", "Process", "Visualforce", "Account", "Service", "CPQ"]);
+
+/** A finding's title as it reads after a colon: lower case, unless it opens with a name. */
+export function inSentence(title: string): string {
+  const first = title.split(/[\s,:;]/)[0] ?? "";
+  if (PROPER.has(first) || (first.length > 1 && first === first.toUpperCase())) return title;
+  return `${title.charAt(0).toLowerCase()}${title.slice(1)}`;
+}
+
 /** A verdict from findings alone: high or critical is "not yet", medium is "nearly", and nothing worse than low is "ready". */
 function fromFindings(own: Finding[], noun: string): { verdict: ReadinessVerdict; reason: string } {
   const measured = own.filter((f) => f.status !== "not_measurable");
@@ -42,10 +52,11 @@ function fromFindings(own: Finding[], noun: string): { verdict: ReadinessVerdict
   const issues = issuesOf(own);
   const serious = issues.filter((f) => f.severity === "critical" || f.severity === "high");
   const medium = issues.filter((f) => f.severity === "medium");
+  const subject = `${noun.charAt(0).toUpperCase()}${noun.slice(1)}`;
   // No counts: the number check traces figures, and a count of issues by severity isn't one the dataset holds.
-  if (serious.length) return { verdict: "not_yet", reason: `Critical or high issues in ${noun}, the first being: ${serious[0]!.title}.` };
-  if (medium.length) return { verdict: "nearly", reason: `Nothing critical or high in ${noun}, but medium issues remain, the first being: ${medium[0]!.title}.` };
-  return { verdict: "ready", reason: `Nothing above low severity in ${noun}.` };
+  if (serious.length) return { verdict: "not_yet", reason: `${subject} has ${serious.length === 1 ? "a critical or high issue" : "critical or high issues, such as"}: ${inSentence(serious[0]!.title)}.` };
+  if (medium.length) return { verdict: "nearly", reason: `${subject} has nothing critical or high, but ${medium.length === 1 ? "a medium issue" : "medium issues, such as"}: ${inSentence(medium[0]!.title)}.` };
+  return { verdict: "ready", reason: `${subject} has nothing above low severity.` };
 }
 
 const stat = (m: Metric | undefined, key: string): number | null => (m?.status === "measured" && key in m.stats ? m.stats[key]! : null);
