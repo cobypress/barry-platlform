@@ -91,6 +91,7 @@ table.readiness td:nth-child(2) { width: 11%; }
 .verdict.ready { background: var(--chartreuse); border-color: var(--chartreuse); color: var(--carbon); }
 .verdict.not-yet { background: var(--alert); border-color: var(--alert); color: var(--ivory); }
 .verdict.unknown { color: var(--muted); border-color: var(--muted); }
+table.readiness + h3.sub { margin: 22px 0 6px; }
 ol.readiness-fixes { columns: 2; column-gap: 36px; margin: 2px 0 0; padding-left: 22px; font-size: 14px; }
 ol.readiness-fixes li { margin-bottom: 4px; break-inside: avoid; }
 .data td.num, .data th.num { text-align: right; }

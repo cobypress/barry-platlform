@@ -58,6 +58,8 @@ export const RULE_GROUPS: Record<string, string> = {
   "rev.stalled-deals": "stalled-deals",
   "dq.stale-leads": "unworked-leads",
   "lead.no-first-response": "unworked-leads",
+  // A synced lead nobody worked is also a lead with no first response (DECISIONS.md 266).
+  "mkt.unworked-handovers": "unworked-leads",
   // A dormant account and a lost deal can be the same customer, so they're one pot.
   "rev.dormant-accounts": "past-customers",
   "rev.win-backs": "past-customers",

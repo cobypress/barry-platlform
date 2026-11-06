@@ -64,6 +64,8 @@ Service Cloud is the first module beyond Sales Cloud (`src/domains/service/`, DE
 
 Salesforce CPQ (`src/domains/cpq/`, DECISIONS.md 216 to 226) is built the same way, as the `cpq` module. Its objects belong to a managed package, so `src/extract/cpq.ts` describes each one before querying it, and reads nothing at all unless the package is installed.
 
+Account Engagement (`src/domains/account-engagement/`, DECISIONS.md 261 to 274) is the `account_engagement` module: one area, switched on by its own id. `src/extract/pardot.ts` reads only the fields its package puts on Lead and the campaign settings, checks each field against the Lead describe, and reads nothing unless the package is installed.
+
 AI readiness (`src/narrative/readiness.ts`, DECISIONS.md 236 to 245) is built with the report, as the value model is: code decides each pillar's verdict from the findings and the `ai.*` metrics, which `src/extract/ai.ts` and the configuration area provide. It isn't a scored area.
 
 ## The rules, and where each is enforced

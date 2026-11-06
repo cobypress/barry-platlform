@@ -13,16 +13,20 @@ import { revenueOpportunitiesModule } from "./revenue-opportunities/index.ts";
 import { securityModule } from "./security/index.ts";
 import { SERVICE_CLOUD_MODULES } from "./service/index.ts";
 import { CPQ_MODULE, CPQ_MODULES } from "./cpq/index.ts";
+import { ACCOUNT_ENGAGEMENT_MODULE, accountEngagementModule } from "./account-engagement/index.ts";
 import { technicalHealthModule } from "./technical-health/index.ts";
 import type { DomainModule } from "./types.ts";
 import { utilisationModule } from "./utilisation/index.ts";
 
 export const SALES_CLOUD_MODULES: DomainModule[] = [configurationModule, automationModule, technicalHealthModule, utilisationModule, adoptionModule, dataQualityModule, historicPipelineModule, securityModule, integrationsModule, bestPracticeModule, currentPipelineModule, forecastModule, activityModule, leadFunnelModule, revenueOpportunitiesModule];
 
-export { CPQ_MODULE, CPQ_MODULES, SERVICE_CLOUD_MODULES };
+/** Marketing Cloud Account Engagement (DECISIONS.md 261): one area, switched on by its own id. */
+export const ACCOUNT_ENGAGEMENT_MODULES: DomainModule[] = [accountEngagementModule];
 
-/** Every module the engine knows, Sales Cloud first, then Service Cloud and CPQ. */
-export const ALL_MODULES: DomainModule[] = [...SALES_CLOUD_MODULES, ...SERVICE_CLOUD_MODULES, ...CPQ_MODULES];
+export { ACCOUNT_ENGAGEMENT_MODULE, CPQ_MODULE, CPQ_MODULES, SERVICE_CLOUD_MODULES };
+
+/** Every module the engine knows, Sales Cloud first, then Service Cloud, CPQ and Account Engagement. */
+export const ALL_MODULES: DomainModule[] = [...SALES_CLOUD_MODULES, ...SERVICE_CLOUD_MODULES, ...CPQ_MODULES, ...ACCOUNT_ENGAGEMENT_MODULES];
 
 /** The console's module for both Service Cloud areas (DECISIONS.md 156). */
 export const SERVICE_MODULE = "service";

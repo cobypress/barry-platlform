@@ -27,6 +27,7 @@ export const DOMAIN_LABELS: Record<string, string> = {
   service_setup: "Service set-up",
   cpq_quoting: "Quoting and discounts",
   cpq_setup: "CPQ set-up",
+  account_engagement: "Marketing handover",
 };
 
 export const domainLabel = (domain: string): string => DOMAIN_LABELS[domain] ?? domain.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());

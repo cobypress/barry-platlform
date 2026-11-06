@@ -215,3 +215,15 @@ c) `BotDefinition` when agents aren't enabled: the guide says agents must be ena
 d) Counting published articles in a multilingual Knowledge base: whether `IsLatestVersion = true` without a language filter counts each article once.
 e) Whether `enableCustomerDataPlatform` being true means Data Cloud (Data 360) is provisioned and in use, or only switched on.
 f) Whether every active autolaunched flow can be an agent action, or only those with suitable inputs and outputs. We count them all as candidates, and say an agent needs a description to choose one.
+
+## Account Engagement (DECISIONS.md 261 to 274)
+
+The package's fields aren't in the Object Reference. Each is checked against the org's Lead describe, so a wrong name makes the lead checks not measurable, naming the field, rather than wrong. To confirm on a real org with Account Engagement:
+
+a) The namespace is `pi`, and the package always has a `PackageLicense` row with it. If it doesn't, the Lead describe still finds `pi__url__c`.
+b) `Lead.pi__url__c` is set on every lead synced with a prospect, and only on those. `Lead.pi__score__c` and `Lead.pi__grade__c` hold the score and grade. Contacts have the same fields, and we don't read them yet.
+c) Whether `pi__score__c` is ever left empty, or is always 0 for a prospect with no scored activity. We count both as no score.
+d) The Settings member for the campaign settings is "Campaign". We parse by the file's root element, `CampaignSettings`, so a different file name still parses, but a different member name returns nothing and the check goes not measurable.
+e) The connector user: Salesforce calls it the "B2BMA Integration User". Whether its licence and permission sets can be identified reliably from `User` and `PermissionSetAssignment` without the Account Engagement API.
+f) Sync errors: whether anything of them is visible from the Salesforce side, or only in Account Engagement's own connector error queue (which would need its API, a later decision).
+g) The handover moment: which lead status, field or assignment each org uses for "marketing qualified", so the time from handover to first touch can be measured per org.

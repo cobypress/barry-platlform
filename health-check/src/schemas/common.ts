@@ -29,6 +29,9 @@ export const SERVICE_CLOUD_DOMAINS = ["service_operations", "service_setup"] as 
 /** Salesforce CPQ's areas (roadmap Stage 6). A run has them only when its modules include "cpq". */
 export const CPQ_DOMAINS = ["cpq_quoting", "cpq_setup"] as const;
 
+/** Marketing Cloud Account Engagement's area (roadmap Stage 6). A run has it only when its modules include it. */
+export const ACCOUNT_ENGAGEMENT_DOMAINS = ["account_engagement"] as const;
+
 export const Timestamp = z.iso.datetime();
 export const CalendarDate = z.iso.date();
 

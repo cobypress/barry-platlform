@@ -2,7 +2,7 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { CPQ_MODULES, SALES_CLOUD_MODULES } from "../domains/index.ts";
+import { ACCOUNT_ENGAGEMENT_MODULES, CPQ_MODULES, SALES_CLOUD_MODULES } from "../domains/index.ts";
 import { runFromRecording } from "../testing/harness.ts";
 import { loadAnswers } from "../testing/replay.ts";
 import { INTERVIEWS_FILE, renderRun } from "./render-run.ts";
@@ -11,7 +11,7 @@ import { syntheticInterviews } from "../testing/interviews.ts";
 
 // Renders every document from the synthetic org into a run folder outside the
 // repo, so they can be looked at. Sample output never goes in git. --cpq adds
-// Salesforce CPQ's two areas.
+// Salesforce CPQ's two areas, and --pardot Account Engagement's area.
 
 const INTAKE = {
   customerName: "Synthetic Co",
@@ -26,7 +26,7 @@ const INTAKE = {
 
 const args = process.argv.slice(2);
 const outDir = args.find((a) => !a.startsWith("--")) ?? join(homedir(), ".barometer", "sample-runs");
-const modules = args.includes("--cpq") ? [...SALES_CLOUD_MODULES, ...CPQ_MODULES] : SALES_CLOUD_MODULES;
+const modules = [...SALES_CLOUD_MODULES, ...(args.includes("--cpq") ? CPQ_MODULES : []), ...(args.includes("--pardot") ? ACCOUNT_ENGAGEMENT_MODULES : [])];
 const { dir, output } = await runFromRecording({ answers: loadAnswers(), outDir, modules });
 const issue = (pattern: RegExp): string[] => output!.findings.filter((f) => f.status === "issue" && pattern.test(f.title)).map((f) => f.id);
 INTAKE.statedProblems[0]!.findingIds = issue(/already have closed/);

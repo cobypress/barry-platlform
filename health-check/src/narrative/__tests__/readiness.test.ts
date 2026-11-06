@@ -11,7 +11,7 @@ import { onePagerHtml } from "../../render/one-pager.ts";
 import type { Finding, Metric } from "../../schemas/index.ts";
 import { runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
-import { readinessLine, readinessOf, type Readiness } from "../readiness.ts";
+import { inSentence, readinessLine, readinessOf, type Readiness } from "../readiness.ts";
 import { buildReport } from "../sections.ts";
 
 // AI readiness (roadmap Stage 6, DECISIONS.md 236 to 244).
@@ -26,6 +26,26 @@ const metric = (id: string): Metric => output!.metrics.find((m) => m.id === id)!
 function withMetric(id: string, change: (m: Extract<Metric, { status: "measured" }>) => Metric): Metric[] {
   return output!.metrics.map((m) => (m.id === id && m.status === "measured" ? change(structuredClone(m)) : m));
 }
+
+describe("each pillar's reason", () => {
+  const data = (findings: Finding[]): string => readinessOf(run, findings, output!.metrics).pillars.find((p) => p.key === "data")!.reason;
+
+  test("names the area and one of its worst issues, the title in lower case after the colon", () => {
+    assert.equal(data(output!.findings), "Data quality has critical or high issues, such as: your pipeline includes deals that should already have closed.");
+  });
+
+  test("reads right when there's only one", () => {
+    const named = "Your pipeline includes deals that should already have closed";
+    const one = output!.findings.map((f) => ((f.severity === "critical" || f.severity === "high") && f.title !== named ? { ...f, severity: "low" as const } : f));
+    assert.equal(data(one), "Data quality has a critical or high issue: your pipeline includes deals that should already have closed.");
+  });
+
+  test("keeps a name or an acronym at the start of a title as it is", () => {
+    assert.equal(inSentence("Salesforce can't see who owns this"), "Salesforce can't see who owns this");
+    assert.equal(inSentence("CPQ price rules conflict"), "CPQ price rules conflict");
+    assert.equal(inSentence("Some leads have nobody to work them"), "some leads have nobody to work them");
+  });
+});
 
 describe("the settings", () => {
   test("are read from whichever file holds each type, and anything not returned is unknown", () => {
