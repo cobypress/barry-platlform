@@ -56,10 +56,14 @@ describe("the BullMQ adapter", () => {
   test("listens on the console's queue", () => {
     assert.equal(HEALTH_CHECK_QUEUE, "health-check-jobs");
     const lines: string[] = [];
-    const worker = startQueueWorker(bull, async () => ({ outcome: "done", detail: "" }), { redisUrl: "redis://localhost:6379", concurrency: 2, log: (l) => lines.push(l) }) as unknown as FakeWorker;
+    const workers = startQueueWorker(bull, async () => ({ outcome: "done", detail: "" }), { redisUrl: "redis://localhost:6379", concurrency: 2, log: (l) => lines.push(l) });
+    const worker = workers.light as unknown as FakeWorker;
     assert.equal(worker.name, "health-check-jobs");
     assert.equal(worker.options.concurrency, 2);
-    assert.ok(worker.listeners.has("failed") && worker.listeners.has("error"));
+    // Runs and documents are handed to a queue of their own, worked one at a time (DECISIONS.md 371).
+    const heavy = workers.heavy as unknown as FakeWorker;
+    assert.deepEqual([heavy.name, heavy.options.concurrency], ["health-check-heavy", 1]);
+    for (const w of [worker, heavy]) assert.ok(w.listeners.has("failed") && w.listeners.has("error"));
   });
 
   test("tells the handler which delivery is the last", async () => {
@@ -229,9 +233,10 @@ describe("hc worker", () => {
     const lines: string[] = [];
     const code = await workerCommand(env, { load: async () => modules, until: Promise.resolve(), log: (l) => lines.push(l) });
     assert.equal(code, 0);
-    assert.equal(FakeWorker.made.length, 1);
-    assert.equal(FakeWorker.made[0]!.closed, true);
-    assert.deepEqual(pools[0]!.options, { connectionString: env.HC_WORKER_DATABASE_URL, max: 4 });
+    // The console's queue and the heavy one, both closed on the way out.
+    assert.deepEqual(FakeWorker.made.map((w) => [w.name, w.closed]), [["health-check-jobs", true], ["health-check-heavy", true]]);
+    // A connection for each of the console's slots and the heavy one, and two spare.
+    assert.deepEqual(pools[0]!.options, { connectionString: env.HC_WORKER_DATABASE_URL, max: 5 });
     assert.equal(pools[0]!.ended, true);
     assert.ok(!lines.join("\n").includes(env.HC_CONNECT_KEY!) && !lines.join("\n").includes("pw@"));
     assert.ok(lines.some((l) => /Neither ANTHROPIC_API_KEY nor the ANTHROPIC_ federation variables are set, so report sections are the engine's own text/.test(l)));
