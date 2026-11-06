@@ -9,9 +9,10 @@ import { Pseudonymiser, type PseudonymEntry } from "../../../privacy/pseudonymis
 import type { Metric } from "../../../schemas/index.ts";
 import { runFromRecording } from "../../../testing/harness.ts";
 import { loadAnswers, loadCalibration } from "../../../testing/replay.ts";
-import { AI_LEGACY_SHARE, aiMetrics } from "../ai.ts";
+import { AI_ACTIONS, AI_LEGACY_SHARE, aiMetrics } from "../ai.ts";
 
-// What AI readiness counts when part of its source can't be read (night 3 review).
+// What AI readiness counts when part of its source can't be read, and which
+// flows an agent could actually call (night 3 review, DECISIONS.md 301 and 302).
 
 const { run, dir } = await runFromRecording({ answers: loadAnswers() });
 const pseudonyms = new Pseudonymiser(JSON.parse(readFileSync(join(dir, "pseudonym-map.json"), "utf8")) as PseudonymEntry[]);
@@ -51,5 +52,28 @@ describe("the share of automation still in old tools", () => {
     const share = find(metricsWith({ apex: { ...apex, triggers: { status: "unavailable", reason: "ApexTrigger couldn't be queried", source: { kind: "soql", api: "tooling", query: "SELECT" } } } }), AI_LEGACY_SHARE);
     assert.equal(share.status, "not_measurable");
     assert.match(share.status === "not_measurable" ? share.reason : "", /Apex triggers couldn't be read/);
+  });
+});
+
+describe("what an agent could call", () => {
+  test("is autolaunched flows with no trigger: a record-triggered, scheduled or platform event flow isn't one", () => {
+    const metadata = read<{ status: "ok"; data: MetadataBundle }>("metadata");
+    const active = metadata.data.flows.filter((f) => f.status === "Active" && f.processType === "AutoLaunchedFlow");
+    const callable = active.filter((f) => !f.triggerType && !f.scheduled);
+    assert.ok(active.length > callable.length, "the synthetic org has record-triggered flows to leave out");
+    const actions = find(metricsWith(), AI_ACTIONS);
+    assert.equal(actions.status, "measured");
+    if (actions.status !== "measured") return;
+    assert.equal(actions.stats.autolaunched, callable.length);
+    assert.equal(actions.stats.described, callable.filter((f) => f.described).length);
+  });
+
+  test("an org whose only flows are record-triggered, with no invocable Apex, has nothing to call", () => {
+    const metadata = read<{ status: "ok"; data: MetadataBundle; source: unknown }>("metadata");
+    const triggered = { ...metadata, data: { ...metadata.data, flows: metadata.data.flows.map((f) => (f.processType === "AutoLaunchedFlow" ? { ...f, triggerType: f.triggerType ?? "RecordAfterSave" } : f)) } };
+    const apex = read<{ classes: { status: string; data: Array<{ scan?: { invocable?: number } }> }; triggers: unknown }>("apex");
+    const none = { ...apex, classes: { ...apex.classes, data: apex.classes.data.map((c) => ({ ...c, scan: c.scan ? { ...c.scan, invocable: 0 } : c.scan })) } };
+    const actions = find(metricsWith({ metadata: triggered, apex: none }), AI_ACTIONS);
+    assert.equal(actions.status === "measured" && actions.value, 0);
   });
 });

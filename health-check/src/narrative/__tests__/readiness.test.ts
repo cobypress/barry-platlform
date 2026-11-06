@@ -59,7 +59,8 @@ describe("the settings", () => {
     assert.equal(m.status, "measured");
     assert.deepEqual(m.status === "measured" ? m.stats : {}, { knowledge: 1, generativeAi: 1, agentforce: 0, dataCloud: 0, articles: 30, articlesCapped: 0, articlesReady: 20 });
     const actions = metric(AI_ACTIONS);
-    assert.deepEqual(actions.status === "measured" ? [actions.stats.autolaunched, actions.stats.described, actions.stats.invocable] : [], [4, 1, 1]);
+    // One autolaunched flow with no trigger: the org's other three run on a record being saved (DECISIONS.md 302).
+    assert.deepEqual(actions.status === "measured" ? [actions.stats.autolaunched, actions.stats.described, actions.stats.invocable] : [], [1, 0, 1]);
     assert.equal(metric(AI_LEGACY_SHARE).status === "measured" && (metric(AI_LEGACY_SHARE) as { value: number }).value, 30.8);
   });
 });
