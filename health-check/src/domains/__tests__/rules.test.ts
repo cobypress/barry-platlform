@@ -5,7 +5,8 @@ import { analyseExtracts, clone, loadExtracts, runFromRecording } from "../../te
 import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
 import { sfId, userId } from "../../testing/synthetic-org.ts";
 import { apexExtractor, metadataExtractor } from "../../extract/automation.ts";
-import { activityCaptureExtractor, licencesExtractor, ownershipExtractor, usersExtractor } from "../../extract/users.ts";
+import { activityCaptureExtractor, licencesExtractor, ownershipExtractor, reportsExtractor, usersExtractor } from "../../extract/users.ts";
+import { REPORT_RECENT_DAYS } from "../adoption/index.ts";
 import { duplicateRulesExtractor } from "../../extract/configuration.ts";
 import { leadsExtractor } from "../../extract/leads.ts";
 import { opportunitiesExtractor } from "../../extract/opportunities.ts";
@@ -347,6 +348,17 @@ describe("utilisation", () => {
     const f = issue(analyseExtracts(extracts).findings, "utl.unused-reports");
     assert.equal(f.facts.reports, 79);
     assert.equal(f.facts.unused, 59);
+  });
+  test("a report counts as unused over the same period the report-use metric defines (night 3 reading pass, item 21)", () => {
+    // One report last run 200 days ago: run within 12 months, but not within the definition's 90 days.
+    const changed = clone(extracts);
+    const reports = changed.get(reportsExtractor.id) as { data: Array<{ LastRunDate: string | null }> };
+    reports.data.find((r) => r.LastRunDate !== null && Date.parse(r.LastRunDate) > Date.now() - 400 * 86_400_000)!.LastRunDate = new Date(Date.parse("2026-10-31T00:00:00Z") - 200 * 86_400_000).toISOString();
+    const { findings, metrics } = analyseExtracts(changed);
+    const f = issue(findings, "utl.unused-reports");
+    assert.equal(f.facts.unused, 60);
+    assert.match(f.summary, new RegExp(`haven't been run in ${REPORT_RECENT_DAYS} days`));
+    assert.match(metrics.find((m) => m.id === "adoption.reports_run_recently")!.definition, new RegExp(`in the last ${REPORT_RECENT_DAYS} days`));
   });
   test("dashboards running as an inactive user", () => assert.deepEqual(issue(analyseExtracts(extracts).findings, "utl.dashboards-inactive-running-user").subjects.map((s) => s.label), ["EU Pipeline"]));
   test("dashboard use is honestly not measurable", () => {

@@ -2,7 +2,7 @@ import { money } from "../../render/format.ts";
 import { fieldDescribeExtractor } from "../../extract/fields.ts";
 import { apexExtractor, metadataExtractor, scheduledJobsExtractor } from "../../extract/automation.ts";
 import { orgExtractor, recordCountsExtractor } from "../../extract/configuration.ts";
-import { daysBefore, monthsBefore } from "../../extract/types.ts";
+import { daysBefore } from "../../extract/types.ts";
 import {
   activityCaptureExtractor,
   licencesExtractor,
@@ -18,6 +18,7 @@ import { notSized, pct, plural, type RecordList, type Rule, type RuleContext, ty
 import type { Guard, Value } from "../../schemas/index.ts";
 import type { DomainModule } from "../types.ts";
 import { lapse, lapseByDate, type Lapse } from "../logins.ts";
+import { REPORT_RECENT_DAYS } from "../adoption/index.ts";
 import { calibratedHours } from "../value.ts";
 import { COMPLIMENTARY_LICENCES } from "../../money/licences.ts";
 import { investmentMetrics } from "./investment.ts";
@@ -27,7 +28,6 @@ const MIN_SPARE_SEATS = 2;
 // A real org showed the Sales Insights integration user as a licence to release.
 const isIntegrationLicence = (licence: string): boolean => /\bintegration\b/i.test(licence);
 const SPARE_SEAT_SHARE = 10;
-const UNUSED_REPORT_MONTHS = 12;
 const UNUSED_REPORT_SHARE = 50;
 const MIN_REPORTS = 50;
 const RECENT_REPORT_DAYS = 90;
@@ -363,13 +363,14 @@ const neverLoggedIn = dormantRule(
 
 const unusedReports: Rule = {
   id: "utl.unused-reports",
-  version: 2,
+  version: 3,
   domain: "utilisation",
   title: "Reports nobody runs",
   evaluate(ctx): RuleResult | RuleResult[] {
     const reports = ctx.data(reportsExtractor);
     if (reports.status !== "ok") return { outcome: "not_measurable", reason: `Reports couldn't be read: ${reports.reason}`, evidence: [ctx.ev(reports.source, { count: null })] };
-    const cutoff = monthsBefore(ctx.now, UNUSED_REPORT_MONTHS);
+    // The period the report-use metric defines, so the issue and the definition beside it agree (night 3 reading pass, item 21).
+    const cutoff = daysBefore(ctx.now, REPORT_RECENT_DAYS);
     const settled = reports.data.filter((r) => new Date(r.CreatedDate) < daysBefore(ctx.now, RECENT_REPORT_DAYS));
     const exclusions = [`Reports created in the last ${RECENT_REPORT_DAYS} days`, "Private reports the connected user can't see"];
     if (settled.length < MIN_REPORTS) {
@@ -382,11 +383,11 @@ const unusedReports: Rule = {
     const range = { from: cutoff.toISOString().slice(0, 10), to: ctx.window.to };
     const evidence = [ctx.ev(reports.source, { count: unused.length, dateRange: range, exclusions })];
     const segments = [{ dimension: "folder", segments: folders.size }];
-    if (share < UNUSED_REPORT_SHARE) return { outcome: "pass", summary: `${share}% of reports haven't been run in ${UNUSED_REPORT_MONTHS} months.`, evidence, segmentsChecked: segments, facts: { share } };
+    if (share < UNUSED_REPORT_SHARE) return { outcome: "pass", summary: `${share}% of reports haven't been run in ${REPORT_RECENT_DAYS} days.`, evidence, segmentsChecked: segments, facts: { share } };
     return {
       outcome: "issue",
       title: "Most reports aren't being used",
-      summary: `${unused.length} of ${settled.length} reports (${share}%) haven't been run in ${UNUSED_REPORT_MONTHS} months, so people will struggle to find the ones that matter.`,
+      summary: `${unused.length} of ${settled.length} reports (${share}%) haven't been run in ${REPORT_RECENT_DAYS} days, so people will struggle to find the ones that matter.`,
       recommendation: "Agree a core report set by team and archive the rest to a clearly labelled folder.",
       recommendationType: "investigate",
       severity: "low",
