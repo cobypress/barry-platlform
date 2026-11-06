@@ -62,6 +62,15 @@ describe("share rules", () => {
     assert.equal(f.value.kind, "revenue");
   });
 
+  test("open deals that couldn't be compared are counted in the summary, so its figures add up to the open pipeline (night 3 reading pass, item 21)", () => {
+    // Pinned from the reading pass: "58 of 70" beside 76 open deals elsewhere, with nothing to say where 6 went.
+    const f = run(extracts, "cur.stuck-in-stage");
+    const open = (extracts.get("opportunities") as { opportunities: { data: Array<{ IsClosed: boolean }> } }).opportunities.data.filter((o) => !o.IsClosed).length;
+    const left = open - (f.facts.n as number);
+    assert.ok(left > 0, `${open} open, ${f.facts.n} compared`);
+    assert.match(f.summary, new RegExp(` ${left} more open deals couldn't be compared, as they're in stages with too few won deals to set a line\\. `));
+  });
+
   test("with too few won deals there's no line, so it's not measurable", () => {
     const calibration = loadCalibration();
     calibration.minSample = 10_000;

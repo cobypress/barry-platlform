@@ -45,13 +45,25 @@ const dimensions = (ctx: RuleContext): Record<string, (d: Deal) => string> => ({
 });
 
 /** `problem` is an affected deal's line in the action list, in words that hold no name. */
-export type Scoped = { deals: Deal[]; isHit: (d: Deal) => boolean; problem?: (d: Deal) => string; exclusions?: string[]; evidence?: Evidence[] } | { reason: string; evidence?: Evidence[] };
+export type Scoped =
+  | {
+      deals: Deal[];
+      isHit: (d: Deal) => boolean;
+      problem?: (d: Deal) => string;
+      exclusions?: string[];
+      evidence?: Evidence[];
+      /** A sentence for the open deals left out of the count, so its figures add up to the open pipeline. */
+      leftOut?: string;
+    }
+  | { reason: string; evidence?: Evidence[] };
 
 type ShareRule = {
   id: string;
   /** Defaults to current pipeline. Forecast rules share this shape. */
   domain?: string;
   title: string;
+  /** Defaults to 1. */
+  version?: number;
   totalLimit: number;
   segmentLimit: number;
   severity: "high" | "medium" | "low";
@@ -72,7 +84,7 @@ type ShareRule = {
 export function shareRule(options: ShareRule): Rule {
   return {
     id: options.id,
-    version: 1,
+    version: options.version ?? 1,
     domain: options.domain ?? DOMAIN,
     title: options.title,
     evaluate(ctx): RuleResult | RuleResult[] {
@@ -86,15 +98,16 @@ export function shareRule(options: ShareRule): Rule {
       if (scoped.deals.length === 0) return { outcome: "pass", summary: `There are no ${options.scopeLabel} to check.`, evidence, segmentExemptReason: "There are no deals to segment." };
       const result = segmentRate(scoped.deals, scoped.isHit, dimensions(ctx), { segmentLimit: options.segmentLimit, minSegment: MIN_SEGMENT });
       const overLimit = result.rate > options.totalLimit;
+      const leftOut = scoped.leftOut ? ` ${scoped.leftOut}` : "";
       if (!overLimit && result.hotspots.length === 0) {
-        return { outcome: "pass", summary: `Affected: ${result.hits} of ${result.n} ${options.scopeLabel} (${result.rate}%), with no segment above ${options.segmentLimit}%.`, evidence, segmentsChecked: result.segmentsChecked, facts: { hits: result.hits, n: result.n, rate: result.rate } };
+        return { outcome: "pass", summary: `Affected: ${result.hits} of ${result.n} ${options.scopeLabel} (${result.rate}%), with no segment above ${options.segmentLimit}%.${leftOut}`, evidence, segmentsChecked: result.segmentsChecked, facts: { hits: result.hits, n: result.n, rate: result.rate } };
       }
       const worst = result.hotspots[0];
       const hidden = !overLimit ? ` The total looks acceptable, but by ${worst!.dimension}, ${worst!.key} is at ${worst!.rate}% (${worst!.hits} of ${worst!.n}).` : worst ? ` Worst by ${worst.dimension}: ${worst.key}, at ${worst.rate}%.` : "";
       return {
         outcome: "issue",
         title: options.issueTitle,
-        summary: `${options.sentence(result.hits, result.n, result.rate)}${hidden}`,
+        summary: `${options.sentence(result.hits, result.n, result.rate)}${leftOut}${hidden}`,
         recommendation: options.recommendation,
         recommendationType: "change",
         severity: options.severity,
@@ -131,8 +144,21 @@ function stageLines(ctx: RuleContext, data: Ready): Map<string, number> {
   return new Map([...byStage].filter(([, days]) => days.length >= ctx.calibration.minSample).map(([stage, days]) => [stage, quantile(days, STUCK_PERCENTILE)]));
 }
 
+/** The open deals stuck-in-stage couldn't compare, in a sentence, or nothing when it compared them all. */
+function leftOutSentence(noLine: number, noEntry: number): string | undefined {
+  const n = noLine + noEntry;
+  if (n === 0) return undefined;
+  const lead = `${n === 1 ? "One more open deal" : `${n} more open deals`} couldn't be compared`;
+  const line = (k: number) => `${k === 1 ? "a stage" : "stages"} with too few won deals to set a line`;
+  const entry = (k: number) => `history that doesn't show when ${k === 1 ? "it" : "they"} entered ${k === 1 ? "its" : "their"} stage`;
+  if (!noEntry) return `${lead}, as ${n === 1 ? "it's" : "they're"} in ${line(n)}.`;
+  if (!noLine) return `${lead}, as ${n === 1 ? "it has" : "they have"} ${entry(n)}.`;
+  return `${lead}: ${noLine} in ${line(noLine)}, and ${noEntry} with ${entry(noEntry)}.`;
+}
+
 const stuckInStage = shareRule({
   id: "cur.stuck-in-stage",
+  version: 2,
   title: "Open deals stuck in their stage",
   totalLimit: 40,
   segmentLimit: 60,
@@ -149,6 +175,8 @@ const stuckInStage = shareRule({
       isHit: (d) => daysSince(enteredCurrentStage(d)!, ctx.now) > lines.get(d.StageName)!,
       problem: (d) => `In ${d.StageName} for ${daysSince(enteredCurrentStage(d)!, ctx.now)} days, where three quarters of won deals moved on within ${Math.round(lines.get(d.StageName)!)} days`,
       exclusions: [...(noLine ? [`${plural(noLine, "deal")} in stages with too few won deals to compare`] : []), ...(noEntry ? [`${plural(noEntry, "deal")} whose history doesn't show when they entered this stage`] : [])],
+      // Said in the summary too, where "58 of 70" sat beside 76 open deals elsewhere (night 3 reading pass, item 21).
+      leftOut: leftOutSentence(noLine, noEntry),
     };
   },
   issueTitle: "Deals are sitting in stages for longer than your wins do",
