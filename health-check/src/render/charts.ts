@@ -541,15 +541,17 @@ const SHORT_KIND_LABELS: Partial<Record<keyof typeof KIND_LABELS, string>> = {
 };
 
 /** A waterfall of the expected value by kind, then the total, with the largest exposure beside it and never stacked. */
-export function waterfallChart(value: ValueModel, width = WIDTH): Chart {
+/** Kinds smaller than this stay in the money table but get no bar: a sliver beside six figures is noise (DECISIONS.md 402). */
+export const WATERFALL_MIN = 1000;
+
+export function waterfallChart(value: ValueModel, width = WIDTH, height = 320): Chart {
   const id = "value-waterfall";
   const title = "What fixing this is worth";
-  const kinds = HEADLINE_KINDS.filter((k) => value.byKind[k].expected > 0);
+  const kinds = HEADLINE_KINDS.filter((k) => value.byKind[k].expected >= WATERFALL_MIN);
   if (value.total.expected <= 0 || kinds.length === 0) return gap(id, title, "Nothing could be given a figure in money.");
   const m = (n: number) => compactMoney(n, value.currency);
   const exposure = value.byKind.exposure.expected > 0 ? value.byKind.exposure.expected : null;
   const box = width < WIDTH ? 140 : 170;
-  const height = 320;
   const plotRight = exposure ? width - PAD - box - 20 : width - PAD;
   // Room under the bars for a kind's name over four short lines.
   const [top, bottom] = [36, height - 78];

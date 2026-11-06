@@ -8,6 +8,7 @@ import { runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
 import { EXECUTIVE_MAX_PAGES, executiveHtml, executiveMaxPages, RECHECK_EXECUTIVE_MAX_PAGES } from "../executive.ts";
 import { fullReportHtml } from "../full-report.ts";
+import { onePagerHtml } from "../one-pager.ts";
 import { topIssues } from "../../narrative/select.ts";
 import { returnOnSpend } from "../money.ts";
 import { compactMoney } from "../format.ts";
@@ -22,7 +23,8 @@ const intake = (extra: Record<string, unknown> = {}) => Intake.parse({ customerN
 
 describe("the executive summary, rebuilt around money", () => {
   const html = executiveHtml(buildReport(base), pseudonyms);
-  const order = ["What fixing this is worth", "What you pay, and what you use", "How each area stands", "Your pipeline today", "What could hurt you", "What we'd do first", "What happens next", "How we worked it out"];
+  // With no figure for what they pay, the seats are on the money page, not a page of their own (DECISIONS.md 401).
+  const order = ["What fixing this is worth", "Your seats.", "How each area stands", "Your pipeline today", "What could hurt you", "What we'd do first", "What happens next", "How we worked it out"];
 
   test("reads in the order a CEO asks: worth, investment, standing, pipeline, risk, plan, next, working", () => {
     const at = order.map((h) => html.indexOf(h));
@@ -48,15 +50,18 @@ describe("the executive summary, rebuilt around money", () => {
     assert.match(page, new RegExp(`is ${ratio} times what you pay for Salesforce a year`));
   });
 
-  test("without a cost, the investment page says it shows seats, and never why in pricing jargon", () => {
-    assert.match(html, /so this page shows your seats rather than what they all cost/);
+  test("without a cost, the seats go on the money page, saying there's no figure for the bill, and never why in pricing jargon (DECISIONS.md 401)", () => {
+    assert.doesNotMatch(html, /What you pay, and what you use/);
+    const money = html.slice(html.indexOf("What fixing this is worth"), html.indexOf("How each area stands"));
+    assert.match(money, /Your seats\.<\/strong> 40 paid for, all licence types/);
+    assert.match(money, /We don(&#39;|')t have a figure for your whole Salesforce bill\./);
     assert.doesNotMatch(html, /current plans .* is priced as/);
   });
 
   test("the money table lists every line behind the total, says how each was counted, and ends with the total (DECISIONS.md 326)", () => {
     const report = buildReport(base);
     const m = (n: number) => compactMoney(n, report.value.currency);
-    const money = html.slice(html.indexOf("What fixing this is worth"), html.indexOf("What you pay, and what you use"));
+    const money = html.slice(html.indexOf("What fixing this is worth"), html.indexOf("How each area stands"));
     const lines = report.value.groups.filter((g) => g.kind !== "exposure");
     assert.ok(lines.length > 5, "more lines than the table used to show");
     for (const g of lines) assert.ok(money.includes(`<td class="num">${m(g.counted.expected)}</td>`), g.label);
@@ -81,7 +86,7 @@ describe("the executive summary, rebuilt around money", () => {
     const deck = fullReportHtml(report, pseudonyms);
     assert.match(deck, /To reach 3x coverage of your £1\.2m quota this quarter, you(&#39;|')d need £2\.79m more pipeline/);
     assert.doesNotMatch(deck + html, /£2,785,000|more pipeline needed for the quarter/);
-    const money = html.slice(html.indexOf("What fixing this is worth"), html.indexOf("What you pay, and what you use"));
+    const money = html.slice(html.indexOf("What fixing this is worth"), html.indexOf("How each area stands"));
     assert.doesNotMatch(money, /£2\.79m/);
     const top = topIssues(report.teamFindings, 5);
     const sized = top.filter((f) => f.value.kind !== "not_sized" && f.ruleId !== "cur.coverage" && f.severity === coverage.severity);
@@ -142,10 +147,29 @@ describe("the executive summary, rebuilt around money", () => {
     assert.deepEqual(shown.map((f) => f.id), [...shown].sort((a, b) => counted(a) - counted(b) || 0).map((f) => f.id));
   });
 
-  test("the investment page's unassigned seats are the money page's, by the same name, with the share counted", () => {
+  test("a kind of money under £1k stays in the table but has no bar in the waterfall (DECISIONS.md 402)", () => {
     const report = buildReport(base);
+    assert.ok(report.value.byKind.time_cost.expected > 0 && report.value.byKind.time_cost.expected < 1000, "the synthetic org's manual work is small");
+    const money = html.slice(html.indexOf("What fixing this is worth"), html.indexOf("How each area stands"));
+    const chart = /<svg[\s\S]*?<\/svg>/.exec(money)![0];
+    assert.doesNotMatch(chart, /Manual work/);
+    assert.match(chart, /Recoverable/);
+    assert.match(money, /Most reports aren(&#39;|')t being used/);
+  });
+
+  test("with no cost, the one-pager's box shows the seats nobody is assigned to (DECISIONS.md 401)", () => {
+    const page = onePagerHtml(buildReport(base), pseudonyms);
+    assert.match(page, /<div class="label">Seats nobody is assigned to<\/div><div class="big">15<\/div>/);
+    assert.match(page, /Of 40 you pay for, costing £18k a year\./);
+  });
+
+  test("the investment page's unassigned seats are the money page's, by the same name, with the share counted", () => {
+    // With the customer's own spend, the investment keeps its page.
+    const report = buildReport({ ...base, intake: intake({ salesforceSpendAnnual: 250_000 }) });
+    const withCost = executiveHtml(report, pseudonyms);
     const seats = report.value.groups.find((g) => g.id === "unassigned-seats")!;
-    const page = html.slice(html.indexOf("What you pay, and what you use"), html.indexOf("How each area stands"));
+    const page = withCost.slice(withCost.indexOf("What you pay, and what you use"), withCost.indexOf("How each area stands"));
+    assert.ok(withCost.indexOf("What you pay, and what you use") > withCost.indexOf("What fixing this is worth"));
     assert.match(page, /Seats nobody is assigned to/);
     assert.match(page, /Seats you pay for, all licence types/);
     assert.ok(page.includes(`We count a share of it, ${compactMoney(seats.counted.expected, report.value.currency)}, in what fixing this is worth.`));
