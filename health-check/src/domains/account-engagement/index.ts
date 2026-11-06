@@ -1,4 +1,4 @@
-import { notSized, pct, plural, type NotMeasurableResult, type Rule, type RuleContext, type RuleResult } from "../../engine/rule.ts";
+import { notSized, pct, plural, segmentRate, type NotMeasurableResult, type Rule, type RuleContext, type RuleResult } from "../../engine/rule.ts";
 import { schemaExtractor } from "../../extract/configuration.ts";
 import { pardotLeadsExtractor, pardotSetupExtractor, UNWORKED_DAYS, unworkedBefore, type SyncedLeadRow } from "../../extract/pardot.ts";
 import { daysBefore } from "../../extract/types.ts";
@@ -20,6 +20,8 @@ const UNRATED_SHARE = 50;
 const UNWORKED_SHARE = 10;
 /** Leads untouched longer than this are dq.stale-leads' business, so they aren't counted twice. */
 const STALE_DAYS = 90;
+/** A lead source needs this many handed-over leads before its own rate can be called out. */
+const MIN_SOURCE = 10;
 const OWNER = "Head of marketing";
 
 function presenceGap(ctx: RuleContext): NotMeasurableResult | null {
@@ -79,7 +81,7 @@ function openLeads(ctx: RuleContext): { rows: SyncedLeadRow[]; truncated: boolea
 
 const unworkedHandovers: Rule = {
   id: "mkt.unworked-handovers",
-  version: 1,
+  version: 2,
   records: true,
   domain: DOMAIN,
   title: "Leads handed to sales and never worked",
@@ -92,17 +94,21 @@ const unworkedHandovers: Rule = {
     const before = unworkedBefore(ctx.now).toISOString();
     const stale = daysBefore(ctx.now, STALE_DAYS).toISOString();
     // Created 14 to 90 days ago with nothing logged. Older ones are dq.stale-leads', and counted there.
-    const unworked = handed.filter((l) => l.LastActivityDate === null && l.CreatedDate < before && l.CreatedDate >= stale).sort((a, b) => a.CreatedDate.localeCompare(b.CreatedDate));
+    const isUnworked = (l: SyncedLeadRow): boolean => l.LastActivityDate === null && l.CreatedDate < before && l.CreatedDate >= stale;
+    const unworked = handed.filter(isUnworked).sort((a, b) => a.CreatedDate.localeCompare(b.CreatedDate));
     const rate = pct(unworked.length, handed.length);
     const facts = { handed: handed.length, unworked: unworked.length, rate, days: UNWORKED_DAYS, staleDays: STALE_DAYS };
     const evidence = read.evidence;
     if (handed.length === 0) return { outcome: "pass", summary: "No open lead synced from Account Engagement is owned by a salesperson.", evidence, segmentExemptReason: "There are no handed-over leads to segment.", facts };
-    const segments = [{ dimension: "lead source", segments: new Set(handed.map((l) => l.LeadSource ?? "No source")).size }];
-    if (unworked.length === 0 || rate < UNWORKED_SHARE) return { outcome: "pass", summary: `Of ${plural(handed.length, "open lead")} synced from Account Engagement and owned by a salesperson, ${unworked.length} made ${UNWORKED_DAYS} to ${STALE_DAYS} days ago ${unworked.length === 1 ? "has" : "have"} no activity logged (${rate}%).`, evidence, segmentsChecked: segments, facts };
+    // Rule 4: a source nobody works can hide under well-worked ones, so each source is checked before it passes.
+    const bySource = segmentRate(handed, isUnworked, { "lead source": (l) => l.LeadSource ?? "No source" }, { segmentLimit: UNWORKED_SHARE, minSegment: MIN_SOURCE });
+    const segments = bySource.segmentsChecked;
+    const worst = bySource.hotspots[0];
+    if (unworked.length === 0 || (rate < UNWORKED_SHARE && !worst)) return { outcome: "pass", summary: `Of ${plural(handed.length, "open lead")} synced from Account Engagement and owned by a salesperson, ${unworked.length} made ${UNWORKED_DAYS} to ${STALE_DAYS} days ago ${unworked.length === 1 ? "has" : "have"} no activity logged (${rate}%).`, evidence, segmentsChecked: segments, facts };
     return {
       outcome: "issue",
       title: "Leads marketing hands over aren't being followed up",
-      summary: `Of ${plural(handed.length, "open lead")} synced from Account Engagement and owned by a salesperson, ${read.truncated ? "at least " : ""}${unworked.length} (${rate}%) made ${UNWORKED_DAYS} to ${STALE_DAYS} days ago have no activity logged: marketing handed them over, and nobody followed up while they were warm.`,
+      summary: `Of ${plural(handed.length, "open lead")} synced from Account Engagement and owned by a salesperson, ${read.truncated ? "at least " : ""}${unworked.length} (${rate}%) made ${UNWORKED_DAYS} to ${STALE_DAYS} days ago have no activity logged: marketing handed them over, and nobody followed up while they were warm.${worst ? ` Worst by lead source: ${worst.key}, at ${worst.rate}% of ${worst.n}.` : ""}`,
       recommendation: "Agree how fast sales follows up a marketing lead, make it part of pipeline reviews, and send leads nobody will work back to marketing to nurture.",
       recommendationType: "change",
       severity: rate >= 50 ? "high" : "medium",
@@ -113,6 +119,7 @@ const unworkedHandovers: Rule = {
       owner: "Head of sales",
       dependencies: ["Check that activity is being logged before treating this as a follow-up problem"],
       segmentsChecked: segments,
+      subjects: bySource.hotspots.slice(0, 5).map((h) => ({ type: h.dimension, label: h.key })),
       facts,
       records: { object: "Lead", rows: unworked.map((l) => ({ id: l.Id, problem: `Created ${day(l.CreatedDate)}${l.LeadSource ? ` from ${l.LeadSource}` : ""}, owned by a salesperson, with no activity logged` })), fix: "Call or email them now, or hand them back to marketing to nurture" },
     };
