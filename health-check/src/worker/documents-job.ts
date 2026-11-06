@@ -8,6 +8,7 @@ import { renderReleased, type DocumentKey, type ReleasedDocuments } from "../ren
 import { safeReason, type Attempt, type JobOutcome, type WorkerDeps } from "./deps.ts";
 import type { DocumentDrive, DriveItem } from "./drive.ts";
 import { withJobLock } from "./lock.ts";
+import { syncShares } from "./share-job.ts";
 import { sealPages } from "../microsite/seal.ts";
 import { addMonths } from "./retention.ts";
 import type { DocumentFile, DocumentsJobInput } from "./types.ts";
@@ -244,6 +245,12 @@ async function documentsLocked(runId: string, deps: WorkerDeps, attempt: Attempt
     if (printed.caseStudy) await putInternal(deps.drive, clientName, folder.name, `${clientName} - Case study draft.docx`, printed.caseStudy);
     await deps.store.saveDocuments(runId, { at: now(), clientName, folderName: folder.name, driveFolderId: folder.id, driveFolderUrl: folder.url, files, warnings: printed.warnings });
     log(`Documents for ${runId} are in Drive${printed.warnings.length ? `, with ${printed.warnings.length} layout warnings` : ""}.`);
+    // The folder is now the run's: share it with its readers (DECISIONS.md 253). The documents are made either way.
+    try {
+      await syncShares(runId, { store: deps.store, sharing: deps.sharing ?? null, now: () => new Date(now()), log });
+    } catch (err) {
+      log(`The documents for ${runId} are made, but their sharing couldn't be brought up to date: ${safeReason(err)}`);
+    }
     await publishMicrosite(runId, printed.microsite, deps, now(), log);
     if (input.run.benchmarkOptIn) await contribute(runId, dir, input, deps, log);
     return { outcome: "done", detail: `${Object.keys(FILES).length} documents in ${folder.name}${target.id === folder.id ? "" : ` / ${target.name}`}, and the readout kit in ${INTERNAL_FOLDER}` };

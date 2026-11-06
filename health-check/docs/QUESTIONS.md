@@ -227,3 +227,12 @@ d) The Settings member for the campaign settings is "Campaign". We parse by the 
 e) The connector user: Salesforce calls it the "B2BMA Integration User". Whether its licence and permission sets can be identified reliably from `User` and `PermissionSetAssignment` without the Account Engagement API.
 f) Sync errors: whether anything of them is visible from the Salesforce side, or only in Account Engagement's own connector error queue (which would need its API, a later decision).
 g) The handover moment: which lead status, field or assignment each org uses for "marketing qualified", so the time from handover to first touch can be measured per org.
+
+## Sharing the Drive folder (DECISIONS.md 251 to 256)
+
+To check with the real service account, on a copy of the Health checks folder:
+
+a) Does `drive.file` reach everything the documents job does? Creating a client folder inside "Health checks", which a person made, listing it, and reading it by id. If it does, the scope can narrow from `drive` (255).
+b) Is the service account a Manager of the shared drive, or is "Content managers can share folders" on? Without one of them, every share fails with Drive's reason recorded on the console's share row.
+c) Does the shared drive allow sharing with people outside the organisation? The customer's readers are outside it.
+d) Does a reader without a Google account get in from Google's email, and how long does that invitation last?

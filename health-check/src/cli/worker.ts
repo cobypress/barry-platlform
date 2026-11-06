@@ -74,6 +74,8 @@ export async function workerCommand(
   const locksDir = join(dirname(config.runsDir), `${basename(config.runsDir)}-locks`);
   // Only for a free scan, queued the moment its prospect connects.
   const queue = new bull.Queue(HEALTH_CHECK_QUEUE, { connection: redisConnection(config.redisUrl) });
+  // One client for the documents and for sharing their folder (DECISIONS.md 251).
+  const google = config.drive ? new GoogleDrive(config.drive) : null;
   const handler = createJobHandler({
     store,
     tokens: new TokenStore({ dir: config.connectionsDir, key: tokenKeySource({ env: { HC_TOKEN_KEY: env.HC_TOKEN_KEY } as NodeJS.ProcessEnv, platform: "linux" }) }),
@@ -84,7 +86,8 @@ export async function workerCommand(
     connectKey: config.connectKey,
     stopAtShare: config.stopAtShare,
     apiVersion: config.apiVersion,
-    drive: config.drive ? new GoogleDrive(config.drive) : null,
+    drive: google,
+    sharing: google,
     micrositeKey: config.micrositeKey,
     queueRun: runQueuer(queue),
     narrative,
@@ -109,7 +112,7 @@ export async function workerCommand(
   }
   // Retention (decision 16): once now, then daily. A failed sweep is logged and tried again tomorrow.
   const sweep = (): void =>
-    void (options.sweep ?? retentionSweep)({ store, runsDir: config.runsDir, locksDir, dryRun: config.cleanupDryRun, log }).catch((err: unknown) =>
+    void (options.sweep ?? retentionSweep)({ store, runsDir: config.runsDir, locksDir, dryRun: config.cleanupDryRun, log, sharing: google }).catch((err: unknown) =>
       log(`Retention sweep failed, and will run again in a day: ${err instanceof Error ? err.message.slice(0, 200) : "unknown error"}`),
     );
   sweep();

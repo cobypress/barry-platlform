@@ -4,7 +4,7 @@ import type { OAuthClient } from "../salesforce/oauth.ts";
 import type { TokenStore } from "../salesforce/token-store.ts";
 import type { OAuthTransport, Transport } from "../salesforce/transport.ts";
 import type { renderReleased } from "../render/render-released.ts";
-import type { DocumentDrive } from "./drive.ts";
+import type { DocumentDrive, FolderSharing } from "./drive.ts";
 import type { WorkerStore } from "./types.ts";
 
 export type WorkerDeps = {
@@ -24,6 +24,8 @@ export type WorkerDeps = {
   narrative?: NarrativeClient;
   /** Where released documents go. Null when Drive isn't set up: a documents job then fails with what to set. */
   drive?: DocumentDrive | null;
+  /** Shares a released run's folder with its readers (DECISIONS.md 251). The same Google Drive client, when Drive is set up. */
+  sharing?: FolderSharing | null;
   /** Puts a run job on the queue, for a free scan the moment its prospect connects. Without it, the console's "Start the scan" does. */
   queueRun?: (runId: string) => Promise<void>;
   /** Seals the customer microsite. Without it, released runs get documents and no microsite. */
