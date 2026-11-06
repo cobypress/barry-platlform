@@ -256,7 +256,7 @@ export type WonAccountRow = { Id: string; OwnerId: string; LastActivityDate: str
 // Only accounts that have bought. The name isn't read, and no rule needs it.
 export const wonAccountsExtractor: Extractor<Sourced<WonAccountRow[]>> = {
   id: "won-accounts",
-  version: 1,
+  version: 2,
   partialKeys: ["won-accounts"],
   run: (ctx) => readCapped<WonAccountRow>(ctx, "won-accounts", "Id, OwnerId, LastActivityDate", "Account", "Id IN (SELECT AccountId FROM Opportunity WHERE IsWon = true)"),
 };

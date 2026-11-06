@@ -91,7 +91,7 @@ const notRead = (reason: string, query: string): Sourced<never> => ({ status: "u
 // Records, so a set-up review never reads them.
 export const pardotLeadsExtractor: Extractor<PardotLeads> = {
   id: "pardot-leads",
-  version: 1,
+  version: 2,
   records: true,
   partialKeys: ["pardot-open-leads"],
   async run(ctx) {

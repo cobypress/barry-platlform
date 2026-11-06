@@ -36,3 +36,25 @@ for (const [what, rows, cap] of lists) {
     assert.ok(rows < cap, `${what}: ${rows} against ${cap}`);
   });
 }
+
+test("a run resumed across the cap raise re-reads its capped steps: each extractor's version moved with its cap (DECISIONS.md 399)", async () => {
+  // A step is reused only when its checkpoint's version matches (engine/run.ts). These carried the
+  // versions below before 381 and 383 to 385 raised their caps, so a run resumed across that deploy
+  // reused reads capped at the old limits. A cap raised again needs its extractor's version moved again.
+  const { activityExtractor } = await import("../activity.ts");
+  const { leadsExtractor } = await import("../leads.ts");
+  const { forecastExtractor } = await import("../forecast.ts");
+  const { serviceCasesExtractor, serviceActivityExtractor } = await import("../service.ts");
+  const { pardotLeadsExtractor } = await import("../pardot.ts");
+  const { wonAccountsExtractor } = await import("../opportunities.ts");
+  const before: Array<[{ id: string; version: number }, number]> = [
+    [activityExtractor, 1],
+    [leadsExtractor, 2],
+    [wonAccountsExtractor, 1],
+    [forecastExtractor, 2],
+    [serviceCasesExtractor, 1],
+    [serviceActivityExtractor, 1],
+    [pardotLeadsExtractor, 1],
+  ];
+  for (const [extractor, version] of before) assert.ok(extractor.version > version, `${extractor.id} is still version ${extractor.version}`);
+});

@@ -14,7 +14,7 @@ export type ActivityExtract = { tasks: Sourced<TaskRow[]>; events: Sourced<Event
 export const ACTIVITY_DAYS = 365;
 export const activityExtractor: Extractor<ActivityExtract> = {
   id: "activity",
-  version: 1,
+  version: 2,
   partialKeys: ["activity-tasks", "activity-events", "activity-emails"],
   async run(ctx) {
     const from = daysBefore(ctx.now, ACTIVITY_DAYS);

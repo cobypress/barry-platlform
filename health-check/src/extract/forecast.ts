@@ -54,7 +54,7 @@ export const FORECAST_MAX_ROWS = 100_000;
 // so an older period says nothing about what was forecast back then.
 export const forecastExtractor: Extractor<ForecastData> = {
   id: "forecast",
-  version: 2,
+  version: 3,
   async run(ctx) {
     const today = soqlDate(ctx.now);
     const periods = await readSoql<PeriodRow>(ctx, `SELECT Id, Type, StartDate, EndDate FROM Period WHERE Type IN ('Month', 'Quarter') AND StartDate <= ${today} AND EndDate >= ${today}`);

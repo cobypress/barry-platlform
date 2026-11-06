@@ -20,7 +20,7 @@ export type LeadExtract = { leads: Sourced<LeadRow[]>; statusChanges: Sourced<Le
 
 export const leadsExtractor: Extractor<LeadExtract> = {
   id: "leads",
-  version: 2,
+  version: 3,
   partialKeys: ["leads", "lead-status", "campaign-members"],
   async run(ctx) {
     const since = `CreatedDate >= ${soqlDateTime(ctx.windowStart)}`;
