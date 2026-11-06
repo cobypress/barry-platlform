@@ -152,6 +152,14 @@ describe("background jobs that failed", () => {
     assert.match(none.summary, /No asynchronous Apex ran/);
   });
 
+  test("from a log too long to read whole, failures are a floor, not the week's totals (rule 5, night 3 review)", () => {
+    const f = one(edited<{ data: AsyncJobRow[]; truncated: boolean }>("async-jobs", (j) => void (j.truncated = true)), "int.failed-async-jobs");
+    assert.equal(f.status, "issue");
+    assert.match(f.summary, /^At least 3 asynchronous Apex jobs failed in the last 7 days/);
+    assert.doesNotMatch(f.summary, /3 of 7 asynchronous Apex jobs/);
+    assert.ok(f.evidence.some((e) => e.exclusions.some((x) => /too long to read in full/.test(x))));
+  });
+
   test("a log too long to read whole is never a pass", () => {
     const f = one(edited<{ data: AsyncJobRow[]; truncated: boolean }>("async-jobs", (j) => ((j.truncated = true), j.data.forEach((x) => ((x.Status = "Completed"), (x.NumberOfErrors = 0))))), "int.failed-async-jobs");
     assert.equal(f.status, "not_measurable");
