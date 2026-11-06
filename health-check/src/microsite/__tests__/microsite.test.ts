@@ -5,7 +5,9 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { buildReport, type ReportInput } from "../../narrative/sections.ts";
 import { Pseudonymiser, type PseudonymEntry } from "../../privacy/pseudonymiser.ts";
-import { scoreDomains } from "../../domains/scoring.ts";
+import { areaWeight, scoreDomains } from "../../domains/scoring.ts";
+import { scorecard } from "../../narrative/select.ts";
+import { rankScorecard } from "../../render/charts.ts";
 import { runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
 import { checkNumbers } from "../../numbercheck/index.ts";
@@ -94,8 +96,24 @@ describe("the microsite's pages", async () => {
 
   test("nothing runs or loads from elsewhere, and no name token survives", () => {
     for (const p of pages) {
-      assert.doesNotMatch(p.html, /<script|<iframe|<link|src=|href=|url\(|@import|on\w+=/i, p.slug);
+      // A link may only jump within its own page, to an id the page holds (DECISIONS.md 410): it loads nothing.
+      assert.doesNotMatch(p.html, /<script|<iframe|<link|src=|href=(?!"#[a-z0-9-]+")|url\(|@import|on\w+=/i, p.slug);
+      for (const [, id] of p.html.matchAll(/href="#([a-z0-9-]+)"/g)) assert.ok(p.html.includes(`id="${id}"`), `${p.slug}: #${id} is on the page`);
       assert.doesNotMatch(p.html, /\[\[user:/, p.slug);
+    }
+  });
+
+  test("every issue is reached from links to its area, in the scorecard's order, with what good looks like after the issues (DECISIONS.md 410)", () => {
+    const html = pages.find((p) => p.slug === "issues")!.html;
+    const jumps = [...html.matchAll(/<a href="#(area-[a-z0-9-]+)">/g)].map((m) => m[1]!);
+    const sections = [...html.matchAll(/<section id="(area-[a-z0-9-]+)">/g)].map((m) => m[1]!);
+    assert.ok(jumps.length > 5);
+    assert.deepEqual(jumps, sections, "a link for every area, in the order the areas come");
+    const ranked = rankScorecard(scorecard(report.teamFindings, report.input.scores ?? []), areaWeight).filter((row) => report.teamFindings.some((f) => f.domain === row.domain && f.status === "issue"));
+    assert.deepEqual(sections, ranked.map((row) => `area-${row.domain.replace(/_/g, "-")}`));
+    for (const section of html.split("<section ").slice(1)) {
+      const good = section.indexOf("What good looks like");
+      if (good >= 0) assert.ok(good > section.lastIndexOf('<div class="issue">'), "what good looks like follows the area's issues");
     }
   });
 

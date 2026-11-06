@@ -180,6 +180,11 @@ export type ScorecardOptions = {
   before?: Map<string, number | null>;
 };
 
+/** The scorecard's order: the area that holds the overall score back most first, its weight times its shortfall from 100, and areas with no score last. */
+export function rankScorecard<T extends { domain: string; score: number | null }>(rows: T[], weightOf: (domain: string) => number): T[] {
+  return [...rows].sort((a, b) => (a.score === null ? 1 : 0) - (b.score === null ? 1 : 0) || (b.score === null || a.score === null ? 0 : weightOf(b.domain) * (100 - b.score) - weightOf(a.domain) * (100 - a.score)));
+}
+
 /**
  * One bar per area. With weights, the area that holds the overall score back
  * most comes first: its weight times its shortfall from 100. A domain with no
@@ -190,9 +195,7 @@ export function scorecardChart(rows: ScorecardRow[], options: ScorecardOptions =
   const title = "Scorecard";
   if (rows.length === 0) return gap(id, title, "No domains were assessed.");
   const { weightOf, before } = options;
-  const ranked = weightOf
-    ? [...rows].sort((a, b) => (a.score === null ? 1 : 0) - (b.score === null ? 1 : 0) || (b.score === null || a.score === null ? 0 : weightOf(b.domain) * (100 - b.score) - weightOf(a.domain) * (100 - a.score)))
-    : rows;
+  const ranked = weightOf ? rankScorecard(rows, weightOf) : rows;
   // The weight sits in its own column between the name and the bar.
   const weightColumn = weightOf ? 54 : 0;
   const labelWidth = 200;
