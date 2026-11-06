@@ -3,14 +3,14 @@ import { MODELS } from "../config.ts";
 import { anthropicClient, anthropicClientWithKey, type NarrativeClient } from "../narrative/client.ts";
 import { checkClaude } from "../narrative/guard.ts";
 import { tokenKeySource, TokenStore } from "../salesforce/token-store.ts";
-import { HEALTH_CHECK_QUEUE, redisConnection, runQueuer, startQueueWorker, type BullModule } from "../worker/bullmq.ts";
+import { HEALTH_CHECK_QUEUE, HEAVY_QUEUE, redisConnection, runQueuer, startQueueWorker, type BullModule } from "../worker/bullmq.ts";
 import { GoogleDrive } from "../worker/drive.ts";
 import { readWorkerEnv, WORKER_ENV } from "../worker/env.ts";
 import { PostgresWorkerStore, type SqlPool } from "../worker/postgres-store.ts";
 import { retentionSweep, SWEEP_INTERVAL_MS } from "../worker/retention.ts";
 import { createJobHandler } from "../worker/worker.ts";
 
-// `hc worker`: takes run, connect and documents jobs from the console's queue until told
+// `hc worker`: takes run, connect, documents and share jobs from the console's queue until told
 // to stop. It refuses to start without every variable in WORKER_ENV. BullMQ
 // and pg aren't engine dependencies (see DECISIONS), so they're loaded here,
 // and only once the environment is complete.
@@ -69,7 +69,8 @@ export async function workerCommand(
 
   // With no key, the SDK finds the federation variables and the identity token itself, and refreshes its own access token.
   const narrative = config.claude.kind === "key" ? anthropicClientWithKey(config.claude.apiKey) : config.claude.kind === "federation" ? anthropicClient() : undefined;
-  const pool = new pg.Pool({ connectionString: config.databaseUrl, max: config.concurrency + 2 });
+  // One more for the heavy slot (DECISIONS.md 371).
+  const pool = new pg.Pool({ connectionString: config.databaseUrl, max: config.concurrency + 3 });
   const store = new PostgresWorkerStore(pool);
   const locksDir = join(dirname(config.runsDir), `${basename(config.runsDir)}-locks`);
   // Only for a free scan, queued the moment its prospect connects.
@@ -94,7 +95,7 @@ export async function workerCommand(
     log,
   });
   const worker = startQueueWorker(bull, handler, { redisUrl: config.redisUrl, concurrency: config.concurrency, log });
-  log(`Taking jobs from health-check-jobs, ${config.concurrency} at a time.`);
+  log(`Taking jobs from health-check-jobs, ${config.concurrency} at a time, with runs and documents one at a time in ${HEAVY_QUEUE}.`);
   if (!config.drive) log("Google Drive isn't set up, so released runs' documents can't be made.");
   if (!config.micrositeKey) log("HC_MICROSITE_KEY isn't set, so released runs get documents but no customer microsite.");
   log(

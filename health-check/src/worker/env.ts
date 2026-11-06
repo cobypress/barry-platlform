@@ -21,7 +21,7 @@ export const WORKER_ENV = {
     HC_SF_REDIRECT_URI: "The console's OAuth callback, exactly as registered on the app",
   },
   optional: {
-    HC_WORKER_CONCURRENCY: "Jobs at once, 1 to 8. Default 2, so a connect job never waits behind a long run",
+    HC_WORKER_CONCURRENCY: "Jobs at once from the console's queue, 1 to 8. Default 2. Runs and documents are handed to a queue of their own and run one at a time beside them, so a connect job never waits behind one",
     HC_API_BUDGET_SHARE: `Share of an org's daily API limit a run may use. Default ${BUDGET_DEFAULTS.stopAtShare}`,
     HC_SF_API_VERSION: "Pin a Salesforce API version",
     HC_DRIVE_SA_EMAIL: "Released documents: the Google service account's email. Set all three HC_DRIVE_ variables or none",

@@ -198,16 +198,22 @@ Not changed: trimming fields from the rows, and streaming reads into running tot
 
 ### Recommended worker settings
 
-- **`NODE_OPTIONS=--max-old-space-size=1536`** on the worker, set explicitly.
-  - Without it, Node picks a heap limit from the host's memory. On a big host that lets garbage reach 2 GB or more. On a small one it could fall below this run's 0.65 to 0.75 GB live peak, and the run would fail. I couldn't check what Render gives.
-  - 1,536 MB is about twice one run's live peak, and two runs at once fitted in it.
-- **`HC_WORKER_CONCURRENCY=2`**, as now, so a connect job never waits behind a long run.
-- **A host with at least 3 GB of memory** for 500-user orgs.
-  - Two runs at once peaked at 2.05 GB resident.
-  - Printing the documents starts Chromium as a process of its own, which isn't counted here.
-  - 4 GB gives headroom for a bigger org or a third job.
-- **With only 2 GB**, set `HC_WORKER_CONCURRENCY=1`. One run peaks at 1.63 GB. A connect job may then wait behind a run, and a connect code lasts only minutes, so 2 GB isn't recommended.
-- **A follow-up worth doing.** Let the worker run connect and share jobs alongside a run, but only one run or documents job at a time. Then two job slots would never mean two big jobs, and 2 GB would do.
+Updated for the heavy gate (decision 371, Brief AV). The worker now works runs and documents one at a time, in a queue of their own. Connect and share jobs keep flowing through the console's queue beside them. So two job slots never mean two big jobs.
+
+- **`NODE_OPTIONS=--max-old-space-size=1536`**, set explicitly.
+  - Without it, Node picks a heap limit from the host's memory. On a big host that lets garbage reach 2 GB or more, and on a small one it could fall below a run's 0.65 to 0.75 GB live peak.
+  - 1,536 MB is about twice one run's live peak.
+- **`HC_WORKER_CONCURRENCY=2`**, as now. That's two connect or share jobs at once, beside the one heavy job.
+- **A host with 2 GB of memory is enough for 500-user orgs.**
+  - One heavy job peaks at 1.63 GB resident, rendering included.
+  - Connect and share jobs add little: a token exchange, a describe or a Drive call.
+  - Printing the documents starts Chromium as a process of its own, which isn't counted in that figure. If Render's 2 GB covers Chromium too, 2 GB is tight while documents are printing, so 3 GB is the safer choice wherever documents are made.
+- **More than one worker process** each takes one heavy job. So it's one per process, not one across the service, and each process needs its own memory.
+
+What the gate doesn't change:
+- A run still takes 20 to 30 minutes at 500 users.
+- A second run waits for the first. A queue of three 500-user runs takes about an hour and a half to clear.
+- A documents make waiting behind a run waits too. Among the heavy jobs waiting, documents go first, by the console's own priority.
 
 ## Reproducing
 
