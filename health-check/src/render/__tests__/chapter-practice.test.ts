@@ -158,10 +158,23 @@ describe("the deck's wording, as a customer reads it (night 3 reading pass, DECI
     assert.match(html, /<h3 class="cap">Median days in each stage, won and lost deals<\/h3>/);
     assert.match(html, /The value of your open pipeline at the end of each month\./);
     assert.match(html, /reached (it|each stage) or a later one/);
-    assert.match(html, /Type and lead source are the won deal(&#39;|')s own fields\./);
+    assert.match(html, /The lead funnel and the new-and-repeat split count on other bases\./);
     // A driver says which way it points.
     assert.match(html, /Driver: goes with (winning|losing)/);
     assert.match(html, /Closing doesn(&#39;|')t count/);
+  });
+
+  test("167 wins and 164 are two honest bases, and each page says which (DECISIONS.md 364)", () => {
+    const metric = (id: string) => base.metrics.find((m) => m.id === id)! as Extract<(typeof base.metrics)[number], { status: "measured" }>;
+    // Every won deal in the window: the headline win rate, and type, source and customer.
+    const all = metric("historic.win_rate").stats.won!;
+    for (const id of ["historic.won_value_by_type", "historic.won_value_by_source", "historic.won_value_by_customer"]) assert.equal(metric(id).n, all, id);
+    // Won deals with stages to follow: what the stage-based pages read. A deal entered straight as won has none.
+    const followed = metric("historic.win_drivers").stats.won!;
+    assert.equal(metric("historic.close_date_reliability").n, followed);
+    assert.ok(followed < all && all - followed <= 5, `${all} against ${followed}`);
+    assert.match(html, /won deals we can follow through their stages/);
+    assert.match(html, /Every deal won in the window, by its own type and lead source, including any entered straight as won\./);
   });
 
   test("an area's first steps say each recommendation once", () => {

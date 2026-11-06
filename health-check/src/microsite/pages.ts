@@ -178,7 +178,7 @@ function plan(r: Render, report: BuiltReport): string {
     .map((p) => `<h2>${r.t(`Days ${p.from} to ${p.to}: ${p.title}`)}</h2><ul>${p.findings.map((f) => `<li><strong>${r.t(f.title)}.</strong> ${r.t(f.recommendation)} <span class="muted">${r.t(f.owner)}</span>${r.ref(f.id)}${also(f)}</li>`).join("")}</ul>`)
     .join("");
   const after = later.length ? `<h2>After 90 days</h2><ul>${later.map((f) => `<li>${r.t(f.title)}${r.ref(f.id)}${also(f)}</li>`).join("")}</ul>` : "";
-  return page(`<h1>The plan</h1><p class="muted">${r.t("Urgent fixes come first, and each month holds only what a team can take on.")}</p>${blocks}${after}`);
+  return page(`<h1>The plan</h1><p class="muted">${r.t("Urgent fixes and quick wins come first, and beyond the quick wins, each month holds only what a team can take on.")}</p>${blocks}${after}`);
 }
 
 function compare(r: Render, report: BuiltReport): string {

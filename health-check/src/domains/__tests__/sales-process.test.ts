@@ -70,7 +70,7 @@ describe("the sales process traps fire on the synthetic org", () => {
     const f = one(findings, "pipe.skipped-stages");
     assert.equal(f.status, "issue");
     assert.equal(f.confidence, "high");
-    assert.match(f.summary, /164 of 164 won deals \(100%\) never entered a stage we'd expect them to: Legal Review \(164\)/);
+    assert.match(f.summary, /164 of 164 won deals we can follow through their stages \(100%\) never entered a stage we'd expect them to: Legal Review \(164\)/);
     assert.match(f.summary, /the calibration marks as required: Legal Review/);
     assert.equal(f.value.kind, "not_sized");
   });

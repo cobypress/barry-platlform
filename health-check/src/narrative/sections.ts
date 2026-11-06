@@ -627,8 +627,8 @@ function executiveSpecs(input: ReportInput, team: Finding[], survey: SurveyView 
       key: "plan_90_day",
       title: "90-day plan",
       body: plan.later.length
-        ? "Urgent fixes come first, and each month holds only what a team can take on. The full report has every action, and what comes after 90 days."
-        : "Urgent fixes come first, and each month holds only what a team can take on. The full report has every action.",
+        ? "Urgent fixes and quick wins come first, and beyond the quick wins, each month holds only what a team can take on. The full report has every action, and what comes after 90 days."
+        : "Urgent fixes and quick wins come first, and beyond the quick wins, each month holds only what a team can take on. The full report has every action.",
       findingIds: planned.map((f) => f.id),
       sources: [...SUMMARY_SOURCES, PLAN],
       ...(planned.length
