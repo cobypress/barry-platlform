@@ -55,14 +55,21 @@ export async function readKeyset<R extends { Id: string }>(ctx: ExtractContext, 
   }
 }
 
-const MAX_ROWS = 200_000;
+/**
+ * The most rows a capped read takes: activity, leads and their history,
+ * campaign members, won accounts and prior wins. A 500-user org has about
+ * 700,000 tasks in a year and 300,000 leads, so it's read in full; an org
+ * with more says it's a part (DECISIONS.md 381). At 1,000,000 rows, the run
+ * still fits the worker's 1,536 MB heap (decision 347).
+ */
+export const RECORD_READ_CAP = 1_000_000;
 
 /** A keyset read with a ceiling on rows. `truncated` means a part, and keyset order means a biased part. */
 export async function readCapped<R extends { Id: string }>(ctx: ExtractContext, key: string, select: string, from: string, where: string): Promise<Sourced<R[]>> {
   const source: SourceInfo = { kind: "soql", api: "rest", query: `SELECT ${select} FROM ${from} WHERE ${where}` };
   try {
-    const rows = await readKeyset<R>(ctx, key, select, from, where, MAX_ROWS);
-    return { status: "ok", data: rows, source, truncated: rows.length >= MAX_ROWS };
+    const rows = await readKeyset<R>(ctx, key, select, from, where, RECORD_READ_CAP);
+    return { status: "ok", data: rows, source, truncated: rows.length >= RECORD_READ_CAP };
   } catch (err) {
     return unavailable(source, err);
   }
