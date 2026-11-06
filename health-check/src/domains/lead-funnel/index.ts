@@ -8,7 +8,7 @@ import { daysBefore } from "../../extract/types.ts";
 import { usersExtractor } from "../../extract/users.ts";
 import { notSized, pct, plural, segmentRate, type NotMeasurableResult, type Rule, type RuleContext, type RuleResult } from "../../engine/rule.ts";
 import { loadPipeline } from "../historic-pipeline/cohort.ts";
-import { median } from "../historic-pipeline/metrics.ts";
+import { groupBy, median } from "../historic-pipeline/metrics.ts";
 import { zoneNote } from "../time-zone.ts";
 import { atOwnLeadReturn } from "../value.ts";
 import type { Metric, MetricSegment } from "../../schemas/index.ts";
@@ -44,9 +44,7 @@ const round1 = (n: number): number => Math.round(n * 10) / 10;
 const settled = (ctx: Ctx, data: Ready): Lead[] => data.leads.filter((l) => created(l) < daysBefore(ctx.now, CONVERSION_AGE_DAYS));
 
 function groupsOf(leads: Lead[], keyOf: (l: Lead) => string): Array<[string, Lead[]]> {
-  const groups = new Map<string, Lead[]>();
-  for (const lead of leads) groups.set(keyOf(lead), [...(groups.get(keyOf(lead)) ?? []), lead]);
-  return [...groups].sort(([a], [b]) => a.localeCompare(b));
+  return [...groupBy(leads, keyOf)].sort(([a], [b]) => a.localeCompare(b));
 }
 
 const conversionBySource: Rule = {

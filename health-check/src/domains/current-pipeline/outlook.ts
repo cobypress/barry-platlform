@@ -2,7 +2,7 @@ import type { RuleContext } from "../../engine/rule.ts";
 import { stagesExtractor } from "../../extract/opportunities.ts";
 import type { Evidence, Metric, MetricSegment, SeriesPoint } from "../../schemas/index.ts";
 import type { Deal, PipelineData } from "../historic-pipeline/cohort.ts";
-import { median, round1, segment, SEGMENT_NOTE } from "../historic-pipeline/metrics.ts";
+import { groupBy, median, round1, segment, SEGMENT_NOTE } from "../historic-pipeline/metrics.ts";
 import { daysLate, firstForecast, stageWinRates, wonFromOpen, type Cohort } from "../historic-pipeline/outcomes.ts";
 import { todayIn, zoneNote } from "../time-zone.ts";
 
@@ -92,9 +92,7 @@ function weightedPipeline(deals: Deal[], rates: Map<string, Cohort>, minSample: 
   let value = 0;
   let n = 0;
   let stages = 0;
-  const groups = new Map<string, Deal[]>();
-  for (const d of deals) groups.set(d.StageName, [...(groups.get(d.StageName) ?? []), d]);
-  for (const [stage, group] of [...groups].sort(([a], [b]) => a.localeCompare(b))) {
+  for (const [stage, group] of [...groupBy(deals, (d) => d.StageName)].sort(([a], [b]) => a.localeCompare(b))) {
     const cohort = rates.get(stage);
     if (!cohort || cohort.rate === null) {
       const closed = cohort?.n ?? 0;
@@ -138,8 +136,7 @@ export function deliveryOutlook(ctx: Ctx, data: Ready, deals: Deal[], evidence: 
     if (expected < today) return "past";
     return expected > endOfOutlook ? "later" : `${expected.slice(0, 7)}-01`;
   };
-  const placed = new Map<string, Deal[]>();
-  for (const d of weighted) placed.set(timing(d), [...(placed.get(timing(d)) ?? []), d]);
+  const placed = groupBy(weighted, timing);
   const valueOf = (group: Deal[]): number => Math.round(group.reduce((sum, d) => sum + chance(d) * (d.Amount ?? 0), 0));
   const dealsOf = (group: Deal[]): number => round1(group.reduce((sum, d) => sum + chance(d), 0));
   const timingKeys: Array<[string, string]> = [["past", "Expected date already passed"], ["later", "Expected after the outlook"]];

@@ -2,7 +2,7 @@ import { notSized, pct, plural, segmentRate, type Rule, type RuleContext, type R
 import type { Calibration, Metric, MetricSegment } from "../../schemas/index.ts";
 import { loadPipeline, type Deal, type PipelineData } from "./cohort.ts";
 import { daysByStage, stageLeftFrom } from "./deep-dive.ts";
-import { base, dimensions, measured, median, notMeasurable, quantile, round1, segment, unmappedReason, type Base } from "./metrics.ts";
+import { base, dimensions, groupBy, measured, median, notMeasurable, quantile, round1, segment, unmappedReason, type Base } from "./metrics.ts";
 import { closedFromOpen } from "./outcomes.ts";
 
 // Roadmap 3.2: the sales process as deals really run it, read from stage
@@ -274,8 +274,7 @@ const deadEndStage: Rule = {
     const { minSample } = ctx.calibration;
     const lost = p.lost.filter((d) => stageLeftFrom(d, data) !== null);
     if (lost.length < minSample) return { outcome: "not_measurable", reason: `${lost.length} lost and no decision deals with stage history is below the calibrated minimum of ${minSample}.`, evidence: data.evidence };
-    const counts = new Map<string, Deal[]>();
-    for (const d of lost) counts.set(stageLeftFrom(d, data)!, [...(counts.get(stageLeftFrom(d, data)!) ?? []), d]);
+    const counts = groupBy(lost, (d) => stageLeftFrom(d, data)!);
     const [stage, dying] = [...counts].sort(([a, x], [b, y]) => y.length - x.length || a.localeCompare(b))[0]!;
     const share = pct(dying.length, lost.length);
     const wonDays = p.won.flatMap((d) => (daysByStage(d, data).has(stage) ? [daysByStage(d, data).get(stage)!] : []));

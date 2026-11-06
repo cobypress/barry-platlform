@@ -186,6 +186,30 @@ describe("approvals, orders and renewals", () => {
     assert.equal(f.status, "passed", f.summary);
   });
 
+  test("a quote or approval read cut off at its row limit gives no pass and no unapproved discount", () => {
+    // The clean twins of all three, each passing on the whole read.
+    const clean = (cpq: CpqQuotes): void => {
+      const quotes = (cpq.quotes as { data: Array<Record<string, unknown>> }).data;
+      const approvals = (cpq.approvals as { data: Array<{ Id: string; TargetObjectId: string; Status: string }> }).data;
+      quotes.forEach((q, i) => {
+        approvals.push({ Id: `04g${String(800000 + i).padStart(12, "0")}`, TargetObjectId: String(q.Id), Status: "Approved" });
+        q.SBQQ__Ordered__c = true;
+        if (q.OwnerId === userId(1) && q.SBQQ__NetAmount__c !== null) q.SBQQ__ListAmount__c = Math.round(Number(q.SBQQ__NetAmount__c) / 0.91);
+      });
+    };
+    const whole = edited<CpqQuotes>("cpq-quotes", clean);
+    const cutQuotes = edited<CpqQuotes>("cpq-quotes", (cpq) => (clean(cpq), Object.assign(cpq.quotes, { truncated: true })));
+    for (const id of ["cpq.discount-leakage", "cpq.discount-approvals", "cpq.quote-to-order"]) {
+      assert.equal(one(whole, id).status, "passed", id);
+      assert.equal(one(cutQuotes, id).status, "not_measurable", id);
+      assert.match(one(cutQuotes, id).notMeasurableReason!, /read of quotes stopped at its row limit/, id);
+    }
+    // An approval past the cut-off would make its quote look unapproved: the issue on the real org becomes not measurable.
+    const cutApprovals = edited<CpqQuotes>("cpq-quotes", (cpq) => void Object.assign(cpq.approvals, { truncated: true }));
+    assert.equal(one(output!.findings, "cpq.discount-approvals").status, "issue");
+    assert.match(one(cutApprovals, "cpq.discount-approvals").notMeasurableReason!, /read of approvals stopped at its row limit/);
+  });
+
   test("not measurable with Advanced Approvals, whose records we don't read", () => {
     const findings = edited<CpqSetup>("cpq-setup", (s) => void (s.presence = { status: "installed", advancedApprovals: true }));
     assert.match(one(findings, "cpq.discount-approvals").notMeasurableReason!, /Advanced Approvals/);

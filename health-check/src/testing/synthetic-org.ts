@@ -667,9 +667,9 @@ export const FILLED: Record<string, number | [number, number]> = {
   Old_Region__c: 0,
 };
 
-export const fieldFilled = (object: string, field: string, recent: boolean): number => {
+export const fieldFilled = (object: string, field: string, recent: boolean, records: Record<string, { total: number; recent: number }> = RECORD_TOTALS): number => {
   const planted = FILLED[field];
-  const totals = RECORD_TOTALS[object]!;
+  const totals = records[object]!;
   if (Array.isArray(planted)) return planted[recent ? 1 : 0];
   if (planted !== undefined) return recent ? Math.min(planted, 1) : planted;
   return Math.round((recent ? totals.recent : totals.total) * 0.6);

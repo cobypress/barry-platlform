@@ -156,6 +156,28 @@ describe("forecast rules", () => {
     assert.equal(run(changed, "fct.early-stage-commits").status, "not_measurable");
   });
 
+  test("a forecast read cut off at its row limit gives no figure and no clean pass, though it still shows forecasting is in use", () => {
+    const cleanCommit = clone(extracts);
+    const committed = new Set((cleanCommit.get("forecast") as Forecast).facts.data.filter((f: { ForecastCategoryName: string }) => f.ForecastCategoryName === "Commit").map((f: { OpportunityId: string }) => f.OpportunityId));
+    const { opportunities, history } = cleanCommit.get("opportunities") as { opportunities: { data: any[] }; history: { data: any[] } };
+    for (const o of opportunities.data.filter((o) => committed.has(o.Id))) Object.assign(o, { LastActivityDate: "2026-10-25", CloseDate: "2026-12-15", StageName: "Negotiation" });
+    history.data = history.data.filter((h) => !committed.has(h.OpportunityId));
+    for (const row of (cleanCommit.get("forecast") as Forecast).items.data) Object.assign(row, { ForecastAmount: row.AmountWithoutAdjustments, HasAdjustment: false });
+    const cut = clone(cleanCommit);
+    Object.assign((cut.get("forecast") as Forecast).items, { truncated: true });
+    Object.assign((cut.get("forecast") as Forecast).facts, { truncated: true });
+    for (const id of ["fct.commit-at-risk", "fct.early-stage-commits", "fct.manager-adjustments"]) {
+      assert.equal(run(cleanCommit, id).status, "passed", id);
+      const f = run(cut, id);
+      assert.equal(f.status, "not_measurable", id);
+      assert.match(f.notMeasurableReason!, /stopped at its row limit/, id);
+    }
+    assert.equal(analyseExtracts(cut).metrics.find((m) => m.id === "forecast.commit_against_quota")!.status, "not_measurable");
+    const inUse = run(cut, "fct.forecasting-in-use");
+    assert.equal(inUse.status, "passed");
+    assert.match(inUse.summary!, /in use: at least \d+ forecast rows for at least .* The read stopped at its row limit\./);
+  });
+
   test("unreadable facts are not measurable", () => {
     const changed = forecast((f) => (f.facts = gone("INSUFFICIENT_ACCESS")));
     assert.equal(run(changed, "fct.commit-at-risk").status, "not_measurable");

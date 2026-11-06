@@ -69,6 +69,9 @@ const scoringGrading: Rule = {
   },
 };
 
+/** Why a check can't pass on open synced leads read only to the row limit (rule 5): the rest weren't seen. */
+const cutOff = (read: number): string => `The read of open synced leads stopped at its row limit, so we checked only the first ${read.toLocaleString("en-GB")} in order of Salesforce id, and can't say the rest are followed up.`;
+
 /** Open synced leads, with the users who own them: or why they can't be read. */
 function openLeads(ctx: RuleContext): { rows: SyncedLeadRow[]; truncated: boolean; active: Set<string>; inactive: Set<string>; evidence: ReturnType<RuleContext["ev"]>[] } | NotMeasurableResult {
   const { open } = ctx.data(pardotLeadsExtractor);
@@ -105,6 +108,7 @@ const unworkedHandovers: Rule = {
     const bySource = segmentRate(handed, isUnworked, { "lead source": (l) => l.LeadSource ?? "No source" }, { segmentLimit: UNWORKED_SHARE, minSegment: MIN_SOURCE });
     const segments = bySource.segmentsChecked;
     const worst = bySource.hotspots[0];
+    if ((unworked.length === 0 || (rate < UNWORKED_SHARE && !worst)) && read.truncated) return { outcome: "not_measurable", reason: cutOff(read.rows.length), evidence };
     if (unworked.length === 0 || (rate < UNWORKED_SHARE && !worst)) return { outcome: "pass", summary: `Of ${plural(handed.length, "open lead")} synced from Account Engagement and owned by a salesperson, ${unworked.length} made ${UNWORKED_DAYS} to ${STALE_DAYS} days ago ${unworked.length === 1 ? "has" : "have"} no activity logged (${rate}%).`, evidence, segmentsChecked: segments, facts };
     return {
       outcome: "issue",
@@ -147,6 +151,7 @@ const unownedProspects: Rule = {
     const facts = { open: read.rows.length, inQueue: inQueue.length, inactiveOwner: leftBehind.length, rate, days: UNWORKED_DAYS };
     if (read.rows.length === 0) return { outcome: "pass", summary: "No lead synced from Account Engagement is open.", evidence: read.evidence, segmentExemptReason: "There are no open synced leads to segment.", facts };
     const segments = [{ dimension: "owner type", segments: 2 }];
+    if (all.length === 0 && read.truncated) return { outcome: "not_measurable", reason: cutOff(read.rows.length), evidence: read.evidence };
     if (all.length === 0) return { outcome: "pass", summary: `All ${plural(read.rows.length, "open lead")} synced from Account Engagement are owned by an active person, or have been in a queue for under ${UNWORKED_DAYS} days.`, evidence: read.evidence, segmentsChecked: segments, facts };
     const parts = [inQueue.length ? `${inQueue.length} ${inQueue.length === 1 ? "has" : "have"} sat untouched in a queue for ${UNWORKED_DAYS} days or more` : "", leftBehind.length ? `${leftBehind.length} ${leftBehind.length === 1 ? "is" : "are"} owned by someone who has left` : ""].filter(Boolean);
     return {

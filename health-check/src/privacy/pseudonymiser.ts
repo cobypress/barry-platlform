@@ -34,6 +34,8 @@ export class Pseudonymiser {
   #byId = new Map<string, PseudonymEntry>();
   #counters = new Map<string, number>();
   #matcher: RegExp | null = null;
+  /** Each alias, lower-cased, to its token. Built with the matcher, and dropped with it when a name is added. */
+  #lookup: Map<string, string> | null = null;
 
   constructor(entries: PseudonymEntry[] = []) {
     for (const entry of entries) {
@@ -52,6 +54,7 @@ export class Pseudonymiser {
     const token = `[[${kind}:${kind[0]!.toUpperCase()}${String(n).padStart(4, "0")}]]`;
     this.#byId.set(id, { token, id, name, aliases: [name, id, ...aliases].filter(Boolean) });
     this.#matcher = null;
+    this.#lookup = null;
     return token;
   }
 
@@ -70,8 +73,12 @@ export class Pseudonymiser {
 
   /** Replaces every known name, username, email and id in free text, and any other email. */
   scrub(text: string): string {
-    const lookup = new Map<string, string>();
-    for (const entry of this.#byId.values()) for (const alias of entry.aliases) lookup.set(alias.toLowerCase(), entry.token);
+    // Built once, not on every call: a big org scrubs hundreds of thousands of action list lines.
+    if (!this.#lookup) {
+      this.#lookup = new Map();
+      for (const entry of this.#byId.values()) for (const alias of entry.aliases) this.#lookup.set(alias.toLowerCase(), entry.token);
+    }
+    const lookup = this.#lookup;
     const matcher = this.#compile();
     const named = matcher ? text.replace(matcher, (m) => lookup.get(m.toLowerCase()) ?? m) : text;
     return named.replace(EMAIL, "[[email]]");

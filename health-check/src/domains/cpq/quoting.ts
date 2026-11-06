@@ -25,11 +25,16 @@ const MAX_LISTED = 4;
 
 type Quoted = { deal: Deal; quote: QuoteRow; discount: number };
 
+/** Why a check can't use a read cut off at its row limit. */
+const cutOff = (what: string, read: number): string => `The read of ${what} stopped at its row limit after ${read.toLocaleString("en-GB")}, so the rest weren't read and we can't match every won deal to its ${what === "quotes" ? "quote" : "approval"}.`;
+
 /** Closed deals in the window with a primary quote that has a list price, each with its discount. */
 function quotedDeals(ctx: RuleContext): { rows: Quoted[]; multiCurrency: boolean; evidence: ReturnType<RuleContext["ev"]>[] } | { reason: string; evidence: ReturnType<RuleContext["ev"]>[] } {
   const { quotes } = ctx.data(cpqQuotesExtractor);
   const data = loadPipeline(ctx);
   if (quotes.status !== "ok") return { reason: `Quotes couldn't be read: ${quotes.reason}`, evidence: [ctx.ev(quotes.source, { count: null })] };
+  // A deal whose quote is past the cut-off would look unquoted, and the part read is in id order, not a sample (rule 5).
+  if (quotes.truncated) return { reason: cutOff("quotes", quotes.data.length), evidence: [ctx.ev(quotes.source, { count: quotes.data.length })] };
   if (data.status !== "ok") return { reason: data.reason, evidence: data.evidence };
   const byDeal = new Map(quotes.data.filter((q) => q.SBQQ__Opportunity2__c).map((q) => [q.SBQQ__Opportunity2__c!, q]));
   const rows = data.deals.flatMap((deal): Quoted[] => {
@@ -153,6 +158,9 @@ const discountApprovals: Rule = {
     if (quotes.status !== "ok") return { outcome: "not_measurable", reason: `Quotes couldn't be read: ${quotes.reason}`, evidence: [ctx.ev(quotes.source, { count: null })] };
     if (presence.status === "installed" && presence.advancedApprovals) return { outcome: "not_measurable", reason: "Advanced Approvals is installed, and we don't read its approvals yet, so we can't say which discounts were approved.", evidence: [ctx.ev(quotes.source, { count: quotes.data.length })] };
     if (approvals.status !== "ok") return { outcome: "not_measurable", reason: `Approvals couldn't be read: ${approvals.reason}`, evidence: [ctx.ev(approvals.source, { count: null })] };
+    // An approval past the cut-off would make its quote look unapproved.
+    const cut = quotes.truncated ? ["quotes", quotes] as const : approvals.truncated ? ["approvals", approvals] as const : null;
+    if (cut) return { outcome: "not_measurable", reason: cutOff(cut[0], cut[1].data.length), evidence: [ctx.ev(cut[1].source, { count: cut[1].data.length })] };
     // Only a quote on a won deal is a discount given. A draft on a deal still open may not have reached its approval yet.
     const pipeline = loadPipeline(ctx);
     if (pipeline.status !== "ok") return { outcome: "not_measurable", reason: pipeline.reason, evidence: pipeline.evidence };

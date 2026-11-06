@@ -7,8 +7,6 @@ import * as org from "./synthetic-org.ts";
 // behind the real client and allowlist, so nothing about them is mocked. It's
 // also strict: SOQL it doesn't recognise gets a 400, as a real org would give.
 
-const CORE_TOTALS = org.RECORD_TOTALS;
-
 export type SimulatorOptions = {
   dailyLimit?: number;
   used?: number;
@@ -38,6 +36,71 @@ export type SimulatorOptions = {
   missingObjects?: string[];
   /** Package namespaces whose PackageLicense row this org lacks, though their objects and fields are there. */
   unlicensed?: string[];
+  /** The org's records, where they're many: the synthetic org's by default, or a bigger org's (scale-org.ts). */
+  records?: OrgRecords;
+  /**
+   * Rows a query page holds, as Salesforce's 2,000: more come through
+   * nextRecordsUrl, and a composite subrequest says there are more and stops.
+   * Left out, every query is answered in one page, as the recordings were made.
+   */
+  pageSize?: number;
+};
+
+/** The parts of an org that grow with it. A scale test swaps them for a generated org's (src/testing/scale-org.ts). */
+export type OrgRecords = {
+  users: typeof org.usersTable;
+  supportUsers: typeof org.supportUsers;
+  loginHistory: typeof org.LOGIN_HISTORY;
+  permissionAssignments: typeof org.PERMISSION_ASSIGNMENTS;
+  pipeline: typeof org.pipeline;
+  priorWins: typeof org.PRIOR_WINS;
+  activity: typeof org.activity;
+  wonAccounts: typeof org.WON_ACCOUNTS;
+  leadFunnel: typeof org.leadFunnel;
+  leads: typeof org.LEADS;
+  staleLeadRows: typeof org.STALE_LEAD_ROWS;
+  contacts: typeof org.CONTACTS;
+  contactsNoAccount: typeof org.CONTACTS_NO_ACCOUNT;
+  contactsNoEmail: typeof org.CONTACTS_NO_EMAIL;
+  supportCases: typeof org.supportCases;
+  cpqQuotes: typeof org.CPQ_QUOTES;
+  cpqApprovals: typeof org.CPQ_APPROVALS;
+  cpqContracts: typeof org.CPQ_CONTRACTS;
+  pardotCounts: typeof org.PARDOT_COUNTS;
+  pardotOpenLeads: typeof org.PARDOT_OPEN_LEADS;
+  recordTotals: typeof org.RECORD_TOTALS;
+  recordCounts: typeof org.RECORD_COUNTS;
+  ownership: typeof org.OWNERSHIP;
+  forecastItems: typeof org.FORECAST_ITEMS;
+  forecastFacts: typeof org.FORECAST_FACTS;
+};
+
+export const SYNTHETIC_RECORDS: OrgRecords = {
+  users: org.usersTable,
+  supportUsers: org.supportUsers,
+  loginHistory: org.LOGIN_HISTORY,
+  permissionAssignments: org.PERMISSION_ASSIGNMENTS,
+  pipeline: org.pipeline,
+  priorWins: org.PRIOR_WINS,
+  activity: org.activity,
+  wonAccounts: org.WON_ACCOUNTS,
+  leadFunnel: org.leadFunnel,
+  leads: org.LEADS,
+  staleLeadRows: org.STALE_LEAD_ROWS,
+  contacts: org.CONTACTS,
+  contactsNoAccount: org.CONTACTS_NO_ACCOUNT,
+  contactsNoEmail: org.CONTACTS_NO_EMAIL,
+  supportCases: org.supportCases,
+  cpqQuotes: org.CPQ_QUOTES,
+  cpqApprovals: org.CPQ_APPROVALS,
+  cpqContracts: org.CPQ_CONTRACTS,
+  pardotCounts: org.PARDOT_COUNTS,
+  pardotOpenLeads: org.PARDOT_OPEN_LEADS,
+  recordTotals: org.RECORD_TOTALS,
+  recordCounts: org.RECORD_COUNTS,
+  ownership: org.OWNERSHIP,
+  forecastItems: org.FORECAST_ITEMS,
+  forecastFacts: org.FORECAST_FACTS,
 };
 
 type Json = Record<string, unknown>;
@@ -171,6 +234,14 @@ export class Simulator implements Transport {
   // when a replay runs a different set of modules.
   #retrieves = 0;
   #retrieving: Record<string, string> = org.METADATA_FILES;
+  #d: OrgRecords;
+  #pageSize: number | null;
+  /** The rest of each query answered in pages, by its locator. */
+  #cursors = new Map<string, Json[]>();
+  /** Rows in Id order, sorted once per list: a big org's keyset reads would otherwise sort it on every page. */
+  #sorted = new WeakMap<object, Array<{ Id: string }>>();
+  /** Lists derived from the records for one kind of query, made once. */
+  #derived = new Map<string, Array<{ Id: string }>>();
 
   constructor(options: SimulatorOptions = {}) {
     this.#used = options.used ?? 1000;
@@ -184,6 +255,8 @@ export class Simulator implements Transport {
     this.#cpq = options.cpq ?? true;
     this.#pardot = options.pardot ?? true;
     // A read-only connection can't see AuthProvider (DECISIONS.md 60).
+    this.#d = options.records ?? SYNTHETIC_RECORDS;
+    this.#pageSize = options.pageSize ?? null;
     this.#unlicensed = new Set(options.unlicensed ?? []);
     this.#missing = new Set([...(options.missingObjects ?? []), ...(this.#readOnly ? ["AuthProvider"] : [])]);
     if (!this.#pardot) this.#dropFields = { ...this.#dropFields, Lead: [...(this.#dropFields.Lead ?? []), "pi__url__c", "pi__score__c", "pi__grade__c"] };
@@ -202,7 +275,7 @@ export class Simulator implements Transport {
     if (path.endsWith("/limits")) return jsonResponse(200, { DailyApiRequests: { Max: this.#limit, Remaining: this.#limit - this.#used }, ...(this.#asyncApex ? { DailyAsyncApexExecutions: this.#asyncApex } : {}), ...this.#storage }, this.#limitInfo);
 
     this.#used++;
-    if (path.endsWith("/limits/recordCount")) return jsonResponse(200, { sObjects: org.RECORD_COUNTS }, this.#limitInfo);
+    if (path.endsWith("/limits/recordCount")) return jsonResponse(200, { sObjects: this.#d.recordCounts }, this.#limitInfo);
     if (path.endsWith("/composite/batch")) return this.#composite(request);
     if (path.includes("/Soap/m/")) return this.#soap(request);
 
@@ -223,13 +296,33 @@ export class Simulator implements Transport {
       const dropped = new Set(this.#dropFields[name] ?? []);
       return jsonResponse(200, { name, ...d, fields: d.fields.filter((f) => !dropped.has((f as { name: string }).name)) }, this.#limitInfo);
     }
+    const more = path.match(/\/query\/([A-Za-z0-9]{15,18})-(\d+)$/);
+    if (more) {
+      const rows = this.#cursors.get(more[1]!);
+      if (!rows) return jsonResponse(400, [{ errorCode: "INVALID_QUERY_LOCATOR", message: "invalid query locator" }], this.#limitInfo);
+      return jsonResponse(200, this.#paged({ totalSize: rows.length, done: true, records: rows }, Number(more[2]), more[1]), this.#limitInfo);
+    }
     if (path.endsWith("/query") || path.endsWith("/query/")) {
       const soql = url.searchParams.get("q") ?? "";
       const result = this.#answer(soql, path.includes("/tooling/"));
       if ("error" in result) return jsonResponse(400, [result.error], this.#limitInfo);
-      return jsonResponse(200, result, this.#limitInfo);
+      return jsonResponse(200, this.#paged(result, 0), this.#limitInfo);
     }
     return jsonResponse(404, [{ errorCode: "NOT_FOUND", message: `No route for ${path}` }], this.#limitInfo);
+  }
+
+  /**
+   * A page of a result from `offset`, as Salesforce gives it: up to the page
+   * size, and a nextRecordsUrl for the rest. Without a page size, all of it.
+   */
+  #paged(result: Json, offset: number, locator?: string): Json {
+    const records = result.records as Json[] | undefined;
+    if (!this.#pageSize || !records || (offset === 0 && records.length <= this.#pageSize)) return result;
+    const id = locator ?? org.sfId("01g", this.#cursors.size + 1).slice(0, 15);
+    if (!locator) this.#cursors.set(id, records);
+    const end = offset + this.#pageSize;
+    const rest = end < records.length;
+    return { totalSize: records.length, done: !rest, records: records.slice(offset, end), ...(rest ? { nextRecordsUrl: `/services/data/v${org.API_VERSION}/query/${id}-${end}` } : {}) };
   }
 
   #composite(request: TransportRequest): TransportResponse {
@@ -239,7 +332,7 @@ export class Simulator implements Transport {
       if (sub.url.includes("/tooling/")) return { statusCode: 200, result: page([]) };
       const soql = new URLSearchParams(sub.url.split("?")[1]).get("q") ?? "";
       const result = this.#answer(soql, false);
-      return "error" in result ? { statusCode: 400, result: [result.error] } : { statusCode: 200, result };
+      return "error" in result ? { statusCode: 400, result: [result.error] } : { statusCode: 200, result: this.#paged(result, 0) };
     });
     return jsonResponse(200, { hasErrors: false, results }, this.#limitInfo);
   }
@@ -302,7 +395,7 @@ export class Simulator implements Transport {
       case "Organization":
         return page([{ Id: org.ORG_ID, Name: "Synthetic Co", OrganizationType: "Enterprise Edition", IsSandbox: false, TimeZoneSidKey: "Europe/London", FiscalYearStartMonth: 1, ...org.SHARING_DEFAULTS }]);
       case "User":
-        return page(/UserPermissionsSupportUser/.test(soql) ? org.supportUsers : org.usersTable);
+        return page(/UserPermissionsSupportUser/.test(soql) ? this.#d.supportUsers : this.#d.users);
       case "UserLicense":
         return page(org.USER_LICENSES);
       case "PermissionSetLicense":
@@ -318,22 +411,22 @@ export class Simulator implements Transport {
       case "SBQQ__Quote__c": {
         if (!this.#cpq) return unsupported(object);
         const after = /\bCreatedDate\s*>=\s*(\S+)/i.exec(where)?.[1];
-        return this.#keyset(org.CPQ_QUOTES.filter((q) => !after || new Date(q.CreatedDate.replace("+0000", "Z")) >= new Date(after)), soql);
+        return this.#keyset(this.#derive(`quotes ${after}`, () => this.#d.cpqQuotes.filter((q) => !after || new Date(q.CreatedDate.replace("+0000", "Z")) >= new Date(after))), soql);
       }
       case "ProcessInstance": {
         const after = /\bCreatedDate\s*>=\s*(\S+)/i.exec(where)?.[1];
-        return page(org.CPQ_APPROVALS.filter((a) => !after || new Date(a.CreatedDate.replace("+0000", "Z")) >= new Date(after)).map(({ CreatedDate: _c, ...a }) => a));
+        return page(this.#d.cpqApprovals.filter((a) => !after || new Date(a.CreatedDate.replace("+0000", "Z")) >= new Date(after)).map(({ CreatedDate: _c, ...a }) => a));
       }
       case "Contract": {
         const from = /\bEndDate >= (\d{4}-\d{2}-\d{2})/.exec(where)?.[1] ?? "0000";
         const to = /\bEndDate <= (\d{4}-\d{2}-\d{2})/.exec(where)?.[1] ?? "9999";
-        return page(org.CPQ_CONTRACTS.filter((c) => c.EndDate >= from && c.EndDate <= to && /Status = 'Activated'/.test(where) === (c.Status === "Activated")));
+        return page(this.#d.cpqContracts.filter((c) => c.EndDate >= from && c.EndDate <= to && /Status = 'Activated'/.test(where) === (c.Status === "Activated")));
       }
       case "LoginHistory": {
         if (/\b(Status|Application)\s*(=|!=|IN|LIKE)/i.test(where)) return reject("INVALID_FIELD", "field 'Status' can not be filtered in a query call");
         // LoginTime is filterable, and every read of it gives a start.
         const since = /\bLoginTime\s*>=\s*(\S+)/i.exec(where)?.[1];
-        return page(since ? org.LOGIN_HISTORY.filter((r) => new Date(r.LoginTime.replace("+0000", "Z")) >= new Date(since)) : org.LOGIN_HISTORY);
+        return page(since ? this.#d.loginHistory.filter((r) => new Date(r.LoginTime.replace("+0000", "Z")) >= new Date(since)) : this.#d.loginHistory);
       }
       case "SetupAuditTrail":
         return /\b(Section|Display|Action)\s*(=|!=|IN|LIKE)/i.test(where) ? reject("INVALID_FIELD", "field 'Section' can not be filtered in a query call") : page(org.SETUP_AUDIT);
@@ -351,10 +444,10 @@ export class Simulator implements Transport {
         if (/\bPermissionSetGroupId\b/.test(soql)) return page(org.ACCESS_ASSIGNMENTS);
         if (/PermissionsApiUserOnly = true/.test(where)) {
           const sets = new Set(org.PERMISSION_SETS.filter((s) => s.PermissionsApiUserOnly && !s.IsOwnedByProfile).map((s) => s.Id));
-          const inactive = new Set(org.usersTable.filter((u) => !u.IsActive).map((u) => u.Id));
-          return page(org.PERMISSION_ASSIGNMENTS.filter((a) => sets.has(a.PermissionSetId) && !inactive.has(a.AssigneeId)));
+          const inactive = new Set(this.#d.users.filter((u) => !u.IsActive).map((u) => u.Id));
+          return page(this.#d.permissionAssignments.filter((a) => sets.has(a.PermissionSetId) && !inactive.has(a.AssigneeId)));
         }
-        return page(/IsOwnedByProfile = false/.test(where) ? org.DOCUMENTED_ASSIGNMENTS : org.PERMISSION_ASSIGNMENTS);
+        return page(/IsOwnedByProfile = false/.test(where) ? org.DOCUMENTED_ASSIGNMENTS : this.#d.permissionAssignments);
       }
       case "WebLink":
         return page(org.WEB_LINKS.filter((l) => !/NamespacePrefix = null/.test(where) || l.NamespacePrefix === null));
@@ -447,31 +540,31 @@ export class Simulator implements Transport {
       case "Opportunity":
         if (/IsWon = true/.test(soql) && /CloseDate < /.test(soql)) {
           const before = soql.match(/CloseDate < (\d{4}-\d{2}-\d{2})/)?.[1] ?? "";
-          const earlier = [...org.PRIOR_WINS, ...org.pipeline.opportunities.filter((o) => o.IsWon && o.CloseDate < before)];
-          return this.#keyset(earlier.map(({ Id, AccountId, CloseDate }) => ({ Id, AccountId, CloseDate })), soql);
+          const earlier = () => [...this.#d.priorWins, ...this.#d.pipeline.opportunities.filter((o) => o.IsWon && o.CloseDate < before)];
+          return this.#keyset(this.#derive(`prior ${before}`, () => earlier().map(({ Id, AccountId, CloseDate }) => ({ Id, AccountId, CloseDate }))), soql);
         }
-        if (/NextStep != null/.test(soql)) return this.#keyset(org.pipeline.opportunities.filter((o) => !o.IsClosed && o.NextStep !== null).map((o) => ({ Id: o.Id })), soql);
+        if (/NextStep != null/.test(soql)) return this.#keyset(this.#derive("next steps", () => this.#d.pipeline.opportunities.filter((o) => !o.IsClosed && o.NextStep !== null).map((o) => ({ Id: o.Id }))), soql);
         // Free text the query didn't ask for mustn't come back, as on a real org.
-        return this.#keyset(org.pipeline.opportunities.map(({ NextStep, ...o }) => ({ ...o, Name: org.dealName(o.Id) })), soql);
+        return this.#keyset(this.#derive("opportunities", () => this.#d.pipeline.opportunities.map(({ NextStep, ...o }) => ({ ...o, Name: org.dealName(o.Id) }))), soql);
       case "ForecastingType":
         return page(org.FORECAST_TYPES);
       case "ForecastingQuota":
         return page(org.QUOTAS);
       case "Task":
-        return this.#keyset(org.activity.tasks, soql);
+        return this.#keyset(this.#d.activity.tasks, soql);
       case "Event":
-        return this.#keyset(org.activity.events, soql);
+        return this.#keyset(this.#d.activity.events, soql);
       case "EmailMessage":
         if (/\bParentId\b/.test(soql)) return this.#caseEmails(soql);
-        return this.#keyset(org.activity.emails, soql);
+        return this.#keyset(this.#d.activity.emails, soql);
       case "Period":
         return page(org.PERIODS);
       case "ForecastingItem":
-        return page(org.FORECAST_ITEMS);
+        return page(this.#d.forecastItems);
       case "ForecastingFact":
-        return page(org.FORECAST_FACTS);
+        return page(this.#d.forecastFacts);
       case "OpportunityHistory":
-        return this.#keyset(org.pipeline.history, soql);
+        return this.#keyset(this.#d.pipeline.history, soql);
       case "Account": {
         if (/GROUP BY Name/i.test(soql)) {
           const sizes = new Map<string, number>();
@@ -483,40 +576,40 @@ export class Simulator implements Transport {
           const names = new Set([...named.matchAll(/'((?:[^'\\]|\\.)*)'/g)].map((m) => m[1]!.replace(/\\(.)/g, "$1")));
           return page(org.DUPLICATE_ACCOUNTS.filter((a) => names.has(a.Name)));
         }
-        return this.#keyset(org.WON_ACCOUNTS, soql);
+        return this.#keyset(this.#d.wonAccounts, soql);
       }
       case "LeadHistory":
-        return this.#keyset(org.leadFunnel.statusChanges, soql);
+        return this.#keyset(this.#d.leadFunnel.statusChanges, soql);
       case "Campaign":
         return page(org.CAMPAIGNS);
       case "CampaignMember":
-        return this.#keyset(org.leadFunnel.members, soql);
+        return this.#keyset(this.#d.leadFunnel.members, soql);
       case "Lead":
         if (/\bpi__url__c\b/.test(soql)) {
-          if (/^SELECT COUNT\(\)/i.test(soql)) return count(/pi__grade__c = null/.test(soql) ? org.PARDOT_COUNTS.ungraded : /pi__score__c = null/.test(soql) ? org.PARDOT_COUNTS.unscored : org.PARDOT_COUNTS.synced);
+          if (/^SELECT COUNT\(\)/i.test(soql)) return count(/pi__grade__c = null/.test(soql) ? this.#d.pardotCounts.ungraded : /pi__score__c = null/.test(soql) ? this.#d.pardotCounts.unscored : this.#d.pardotCounts.synced);
           const since = /\bCreatedDate\s*>=\s*(\S+)/i.exec(where)?.[1];
-          return this.#keyset(org.PARDOT_OPEN_LEADS.filter((l) => !since || new Date(l.CreatedDate.replace("+0000", "Z")) >= new Date(since)), soql);
+          return this.#keyset(this.#derive(`prospects ${since}`, () => this.#d.pardotOpenLeads.filter((l) => !since || new Date(l.CreatedDate.replace("+0000", "Z")) >= new Date(since))), soql);
         }
-        if (/\bConvertedOpportunityId\b/.test(soql)) return this.#keyset(org.leadFunnel.leads, soql);
-        if (/GROUP BY LeadSource/i.test(soql)) return page(/LastActivityDate/i.test(soql) ? org.LEADS.staleBySource : org.LEADS.openBySource);
-        if (/^SELECT COUNT\(\)/i.test(soql)) return count(/LastActivityDate/i.test(soql) ? org.LEADS.stale : org.LEADS.open);
-        if (/^SELECT Id, Name\b/i.test(soql) && /LastActivityDate = null/.test(soql)) return this.#keyset(org.STALE_LEAD_ROWS, soql);
+        if (/\bConvertedOpportunityId\b/.test(soql)) return this.#keyset(this.#d.leadFunnel.leads, soql);
+        if (/GROUP BY LeadSource/i.test(soql)) return page(/LastActivityDate/i.test(soql) ? this.#d.leads.staleBySource : this.#d.leads.openBySource);
+        if (/^SELECT COUNT\(\)/i.test(soql)) return count(/LastActivityDate/i.test(soql) ? this.#d.leads.stale : this.#d.leads.open);
+        if (/^SELECT Id, Name\b/i.test(soql) && /LastActivityDate = null/.test(soql)) return this.#keyset(this.#d.staleLeadRows, soql);
         break;
       case "Contact":
-        if (/^SELECT COUNT\(\)/i.test(soql)) return count(/AccountId = null/.test(soql) ? org.CONTACTS.noAccount : /Email = null/.test(soql) ? org.CONTACTS.noEmail : org.CONTACTS.total);
-        if (/^SELECT Id, Name\b/i.test(soql)) return this.#keyset(/AccountId = null/.test(soql) ? org.CONTACTS_NO_ACCOUNT : org.CONTACTS_NO_EMAIL, soql);
+        if (/^SELECT COUNT\(\)/i.test(soql)) return count(/AccountId = null/.test(soql) ? this.#d.contacts.noAccount : /Email = null/.test(soql) ? this.#d.contacts.noEmail : this.#d.contacts.total);
+        if (/^SELECT Id, Name\b/i.test(soql)) return this.#keyset(/AccountId = null/.test(soql) ? this.#d.contactsNoAccount : this.#d.contactsNoEmail, soql);
         break;
       case "Case":
         return this.#cases(soql);
       case "CaseHistory":
-        return page(org.supportCases.history.filter((h) => h.CreatedDate >= since(soql, "CreatedDate")).map(({ Id: _id, Field: _f, ...h }) => h));
+        return page(this.#d.supportCases.history.filter((h) => h.CreatedDate >= since(soql, "CreatedDate")).map(({ Id: _id, Field: _f, ...h }) => h));
       case "CaseMilestone":
-        return page(org.supportCases.milestones.filter((m) => m.StartDate >= since(soql, "StartDate")));
+        return page(this.#d.supportCases.milestones.filter((m) => m.StartDate >= since(soql, "StartDate")));
       case "CaseStatus":
         return page(org.CASE_STATUSES);
       case "CaseArticle": {
-        const closed = new Set(org.supportCases.cases.filter((c) => c.IsClosed && c.ClosedDate! >= since(soql, "ClosedDate")).map((c) => c.Id));
-        return page(org.supportCases.articles.filter((a) => closed.has(a.CaseId)).map(({ CaseId }) => ({ CaseId })));
+        const closed = new Set(this.#d.supportCases.cases.filter((c) => c.IsClosed && c.ClosedDate! >= since(soql, "ClosedDate")).map((c) => c.Id));
+        return page(this.#d.supportCases.articles.filter((a) => closed.has(a.CaseId)).map(({ CaseId }) => ({ CaseId })));
       }
       case "Group":
         if (!/Type = 'Queue'/.test(soql)) break;
@@ -536,7 +629,7 @@ export class Simulator implements Transport {
       case "QueueRoutingConfig":
         return page(org.ROUTING_CONFIGS);
       case "AgentWork":
-        return page(org.supportCases.work.filter((w) => w.RequestDateTime >= since(soql, "RequestDateTime")).map(({ Id: _id, ...w }) => w));
+        return page(this.#d.supportCases.work.filter((w) => w.RequestDateTime >= since(soql, "RequestDateTime")).map(({ Id: _id, ...w }) => w));
       case "Macro":
         return page(org.MACROS);
       case "MacroUsage":
@@ -563,7 +656,7 @@ export class Simulator implements Transport {
 
   /** Case reads: monthly and origin counts, open cases, and cases closed in the year. */
   #cases(soql: string): Json | { error: { errorCode: string; message: string } } {
-    const all = org.supportCases.cases;
+    const all = this.#d.supportCases.cases;
     const month = (field: "CreatedDate" | "ClosedDate") => {
       const after = since(soql, field);
       const groups = new Map<string, { y: number; m: number; Priority: string | null; n: number }>();
@@ -595,9 +688,9 @@ export class Simulator implements Transport {
   /** Emails on cases: the first replies, or a count of those coming in. */
   #caseEmails(soql: string): Json {
     const after = since(soql, "CreatedDate");
-    const recent = new Set(org.supportCases.cases.filter((c) => c.CreatedDate >= after).map((c) => c.Id));
+    const recent = new Set(this.#d.supportCases.cases.filter((c) => c.CreatedDate >= after).map((c) => c.Id));
     const incoming = /Incoming = true/.test(soql);
-    const rows = org.supportCases.replies.filter((r) => r.Incoming === incoming && recent.has(r.ParentId));
+    const rows = this.#d.supportCases.replies.filter((r) => r.Incoming === incoming && recent.has(r.ParentId));
     if (/^SELECT COUNT\(\)/i.test(soql)) return { totalSize: rows.length, done: true, records: [] };
     return page(rows.map(({ ParentId, MessageDate }) => ({ ParentId, MessageDate })));
   }
@@ -609,27 +702,50 @@ export class Simulator implements Transport {
 
   #keyset(rows: Array<{ Id: string }>, soql: string): Json {
     const after = soql.match(/\bId > '([^']+)'/)?.[1];
-    const limit = Number(soql.match(/\bLIMIT (\d+)/)?.[1] ?? rows.length);
-    return page([...rows].sort((a, b) => a.Id.localeCompare(b.Id)).filter((r) => !after || r.Id > after).slice(0, limit));
+    let sorted = this.#sorted.get(rows);
+    if (!sorted) {
+      sorted = [...rows].sort((a, b) => a.Id.localeCompare(b.Id));
+      this.#sorted.set(rows, sorted);
+    }
+    const limit = Number(soql.match(/\bLIMIT (\d+)/)?.[1] ?? sorted.length);
+    // The first row after `after`, found by halving.
+    let low = 0;
+    let high = sorted.length;
+    while (after && low < high) {
+      const mid = (low + high) >> 1;
+      if (sorted[mid]!.Id.localeCompare(after) <= 0) low = mid + 1;
+      else high = mid;
+    }
+    return page(sorted.slice(low, low + limit));
+  }
+
+  /** A list derived from the records for one kind of query, made the first time it's asked for. */
+  #derive<T extends { Id: string }>(key: string, make: () => T[]): T[] {
+    let rows = this.#derived.get(key);
+    if (!rows) {
+      rows = make();
+      this.#derived.set(key, rows);
+    }
+    return rows as T[];
   }
 
   #fieldUsage(soql: string, object: string, where: string): Json {
     const recent = /CreatedDate/.test(where);
-    const totals = CORE_TOTALS[object]!;
+    const totals = this.#d.recordTotals[object]!;
     const row: Record<string, number> = { total: recent ? totals.recent : totals.total };
-    for (const match of soql.matchAll(/COUNT\(([A-Za-z0-9_]+__c)\) (f\d+)/g)) row[match[2]!] = org.fieldFilled(object, match[1]!, recent);
+    for (const match of soql.matchAll(/COUNT\(([A-Za-z0-9_]+__c)\) (f\d+)/g)) row[match[2]!] = org.fieldFilled(object, match[1]!, recent, this.#d.recordTotals);
     return page([row]);
   }
 
   #ownership(object: string): Json | { error: { errorCode: string; message: string } } {
     if (object === "Opportunity") {
       const byOwner = new Map<string, number>();
-      for (const o of org.pipeline.opportunities) byOwner.set(o.OwnerId, (byOwner.get(o.OwnerId) ?? 0) + 1);
+      for (const o of this.#d.pipeline.opportunities) byOwner.set(o.OwnerId, (byOwner.get(o.OwnerId) ?? 0) + 1);
       return page([...byOwner].map(([OwnerId, c]) => ({ OwnerId, c })));
     }
     // The read-only user has no access to custom objects' records.
     if (this.#readOnly && object.endsWith("__c")) return unsupported(object);
-    const rows = org.OWNERSHIP[object];
+    const rows = this.#d.ownership[object];
     if (rows) return page(rows.map(([n, c]) => ({ OwnerId: org.userId(n), c })));
     return { error: { errorCode: "INVALID_FIELD", message: "No such column 'OwnerId'" } };
   }
