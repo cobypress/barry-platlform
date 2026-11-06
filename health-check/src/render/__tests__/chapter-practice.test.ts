@@ -86,3 +86,33 @@ describe("what good looks like on each chapter's opening slide", () => {
     }
   });
 });
+
+describe("the deck's wording, as a customer reads it (night 3 reading pass, DECISIONS.md 327)", () => {
+  const html = fullReportHtml(buildReport(base), pseudonyms);
+
+  test("an area's first issue page isn't called \"Other issues\", and the issues left off the opening slide are said to follow", () => {
+    assert.doesNotMatch(html, /<h2>Other issues<\/h2>/);
+    assert.match(html, /<h2>The issues in detail<\/h2>/);
+    const lists = html.match(/<h3>What(&#39;|')s (broken|below par)<\/h3><ul>[\s\S]*?<\/ul>/g) ?? [];
+    assert.ok(lists.length > 0);
+    for (const list of lists) assert.doesNotMatch(list, /in the raw notes/, list);
+    assert.match(html, /more on the pages that follow\./);
+  });
+
+  test("passed checks are \"Checked and fine\", not \"What's working\" under a problem's title", () => {
+    assert.match(html, /<h3>Checked and fine<\/h3>/);
+    assert.doesNotMatch(html, /<h3>What&#39;s working<\/h3>|<h3>What's working<\/h3>/);
+  });
+
+  test("an issue with no money figure says so once, instead of repeating its severity as a risk", () => {
+    assert.match(html, />Not costed</);
+    assert.doesNotMatch(html, />(Low|Medium|High|Critical) risk</);
+  });
+
+  test("an area's first steps say each recommendation once", () => {
+    for (const panel of html.match(/<h3>What to do first<\/h3><ul>[\s\S]*?<\/ul>/g) ?? []) {
+      const items = [...panel.matchAll(/<li>([\s\S]*?)<\/li>/g)].map((m) => m[1]);
+      assert.equal(new Set(items).size, items.length, panel);
+    }
+  });
+});

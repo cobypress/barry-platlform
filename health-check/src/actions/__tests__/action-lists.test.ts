@@ -139,8 +139,8 @@ describe("the ticket file", () => {
 
 describe("where the action lists are mentioned", () => {
   test("in both decks' detail pages and in the raw notes' counts", () => {
-    assert.match(fullReportHtml(unnamed, pseudonyms), /The action lists, a spreadsheet and a ticket file/);
-    assert.match(executiveHtml(unnamed, pseudonyms), /the action lists, a spreadsheet and a ticket file/);
+    assert.match(fullReportHtml(unnamed, pseudonyms), /The action lists \(a spreadsheet and a ticket file\)/);
+    assert.match(executiveHtml(unnamed, pseudonyms), /the action lists \(a spreadsheet and a ticket file\)/);
     assert.equal(input.recordCounts?.[finding("dq.stale-leads").id]?.rows, LEADS.stale);
   });
 });

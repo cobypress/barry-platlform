@@ -205,7 +205,7 @@ export function scorecardChart(rows: ScorecardRow[], options: ScorecardOptions =
   const rowHeight = Math.min(fullRow, Math.floor((fullRow * 13) / ranked.length));
   const top = weightOf ? 36 : 18;
   const body: string[] = weightOf
-    ? [text(PAD, 22, before ? "Weakest for its weight first. A white mark is the score last time." : "Weakest for its weight first.", { size: 12, fill: colour.panelMuted }), text(PAD + labelWidth + weightColumn - 14, 22, "Weight", { size: 11, fill: colour.panelMuted, anchor: "end" })]
+    ? [text(PAD, 22, before ? "Ordered by how much each area holds your score back. A white mark is the score last time." : "Ordered by how much each area holds your score back.", { size: 12, fill: colour.panelMuted }), text(PAD + labelWidth + weightColumn - 14, 22, "Weight", { size: 11, fill: colour.panelMuted, anchor: "end" })]
     : [];
   ranked.forEach((row, i) => {
     const y = top + i * rowHeight;

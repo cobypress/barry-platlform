@@ -154,7 +154,7 @@ const footer = (r: Render, n: number): string => `<div class="footer" data-chrom
 
 /** How a reference leads to the working, and every reference this summary used, in the order the notes hold them. */
 function detailPage(r: Render, items: Array<{ ref: string; title: string }>): string {
-  const lede = "Each issue in this summary carries a reference to the raw notes, the Word document that comes with it. There you'll find the working behind every figure: what we read from your Salesforce, the sample, the calculation and the assumptions. The full report has the same references for everything else, and the action lists, a spreadsheet and a ticket file, list each record to fix.";
+  const lede = "Each issue in this summary carries a reference to the raw notes, the Word document that comes with it. There you'll find the working behind every figure: what we read from your Salesforce, the sample, the calculation and the assumptions. The full report has the same references for everything else, and the action lists (a spreadsheet and a ticket file) name each record to fix.";
   // Two narrow columns, so a summary that leans on many references still fits one page.
   const rows = items.sort((a, b) => a.ref.localeCompare(b.ref, "en", { numeric: true })).map((x) => `<p class="ref-row"><b data-ref>${x.ref}</b><span>${r.t(x.title)}</span></p>`);
   return `<div class="eyebrow">Where to find the detail</div><h2>How we worked it out</h2><p style="margin-bottom:14px">${r.t(lede)}</p><div class="ref-list">${rows.join("")}</div>`;

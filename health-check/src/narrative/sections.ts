@@ -728,7 +728,7 @@ function fullSpecs(input: ReportInput, team: Finding[], metrics: Metric[], surve
     {
       key: "appendix",
       title: "Appendix",
-      body: lines("How we worked, what we couldn't measure, and what passed.", notMeasurable.length ? `We couldn't measure ${plural(notMeasurable.length, "check")}. We report these rather than estimate them.` : null, passed.length ? `${plural(passed.length, "check")} passed.` : null),
+      body: lines("This part sets out how we worked, what we couldn't measure, and what passed.", notMeasurable.length ? `We couldn't measure ${plural(notMeasurable.length, "check")}. We report these rather than estimate them.` : null, passed.length ? `${plural(passed.length, "check")} passed.` : null),
       findingIds: [...notMeasurable, ...passed].map((f) => f.id),
       sources: [...SUMMARY_SOURCES, CALIBRATION],
       brief: {
