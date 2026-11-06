@@ -8,6 +8,7 @@ import { runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
 import { executiveHtml } from "../executive.ts";
 import { returnOnSpend } from "../money.ts";
+import { compactMoney } from "../format.ts";
 import { Intake } from "../../narrative/intake.ts";
 
 const { output, run, dir } = await runFromRecording({ answers: loadAnswers() });
@@ -44,7 +45,28 @@ describe("the executive summary, rebuilt around money", () => {
   });
 
   test("without a cost, the investment page says it shows seats, and never why in pricing jargon", () => {
-    assert.match(html, /so this page shows your seats rather than their cost/);
+    assert.match(html, /so this page shows your seats rather than what they all cost/);
     assert.doesNotMatch(html, /current plans .* is priced as/);
+  });
+
+  test("the money table lists every line behind the total, says how each was counted, and ends with the total (DECISIONS.md 326)", () => {
+    const report = buildReport(base);
+    const m = (n: number) => compactMoney(n, report.value.currency);
+    const money = html.slice(html.indexOf("What fixing this is worth"), html.indexOf("What you pay, and what you use"));
+    const lines = report.value.groups.filter((g) => g.kind !== "exposure");
+    assert.ok(lines.length > 5, "more lines than the table used to show");
+    for (const g of lines) assert.ok(money.includes(`<td class="num">${m(g.counted.expected)}</td>`), g.label);
+    assert.match(money, new RegExp(`Total, each counted once</td><td class="num">${m(report.value.total.expected)}</td>`));
+    assert.match(money, /We count 50% \(25% to 100%\)/);
+    assert.doesNotMatch(money, /the expected case is the conservative one/);
+  });
+
+  test("the investment page's unassigned seats are the money page's, by the same name, with the share counted", () => {
+    const report = buildReport(base);
+    const seats = report.value.groups.find((g) => g.id === "unassigned-seats")!;
+    const page = html.slice(html.indexOf("What you pay, and what you use"), html.indexOf("How each area stands"));
+    assert.match(page, /Seats nobody is assigned to/);
+    assert.ok(page.includes(`We count a share of it, ${compactMoney(seats.counted.expected, report.value.currency)}, in what fixing this is worth.`));
+    assert.doesNotMatch(page, /Seats nobody uses/);
   });
 });

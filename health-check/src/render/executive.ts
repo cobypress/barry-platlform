@@ -193,6 +193,7 @@ export function executiveHtml(report: BuiltReport, pseudonyms: Pseudonymiser): s
     ${aiLine ? `<p class="small-note" style="margin-top:10px">${r.t(aiLine)}</p>` : ""}
     <h3 class="sub">What matters most</h3>
     <table class="grid"><thead><tr><th>Issue</th><th style="width:34%">Impact</th></tr></thead><tbody>${top.map((f) => `<tr><td>${r.t(f.title)}${r.ref(f.id)}</td><td>${valueText(r, f).amount}</td></tr>`).join("")}</tbody></table>
+    ${top.some((f) => f.value.kind !== "not_sized") && report.value.total.expected > 0 ? `<p style="margin-top:6px;color:var(--muted);font-size:0.85em">${r.t("Each figure here is the issue's own, at its full size, and some are at risk rather than money to win. \"What fixing this is worth\" counts a share of the money ones, each sum only once.")}</p>` : ""}
     ${report.survey ? `<h3 class="sub">What your team says${report.survey.shown ? r.ref(SURVEY.responses) : ""}</h3>${paragraphs(r, currentBody(built, "team_survey"))}` : ""}
     ${peopleSaid ? `<h3 class="sub">What your people told us</h3>${paragraphs(r, peopleSaid)}` : ""}
     <p style="margin-top:18px">${sourcesLine(report.survey?.shown === true, Boolean(peopleSaid))} Where we couldn't measure something, we say so rather than estimate it.</p>`);

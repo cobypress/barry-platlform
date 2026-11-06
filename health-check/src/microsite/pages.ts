@@ -74,7 +74,7 @@ function overview(r: Render, report: BuiltReport): string {
     v.total.expected > 0
       ? `<h2>What fixing this is worth</h2><p class="figure">${m(v.total.expected)}</p><p class="muted">${r.t(`Over the next 12 months, expected. Between ${m(v.total.low)} and ${m(v.total.high)}.`)}</p><table><tbody>${HEADLINE_KINDS.filter((k) => v.byKind[k].expected > 0)
           .map((k) => `<tr><td>${r.t(KIND_LABELS[k])}</td><td class="num">${m(v.byKind[k].expected)}</td></tr>`)
-          .join("")}</tbody></table>`
+          .join("")}</tbody></table>${whereFrom(r, report)}`
       : "";
   const cost = report.investment.annualCost;
   const investment = cost.status === "measured" ? `<h2>Your investment</h2><p>${r.t(`${compactMoney(cost.value, v.currency)} a year. ${cost.label}.`)}</p>` : "";
@@ -85,6 +85,17 @@ function overview(r: Render, report: BuiltReport): string {
   return page(
     `<h1>${r.t(`${customer}: your Salesforce health check`)}</h1><p class="muted">${longDate(run.asOf)}</p><h2>${r.t(verdict.headline)}</h2><div class="stats">${score}<div class="stat"><b>${verdict.issues}</b><span>Issues</span></div><div class="stat"><b>${verdict.critical}</b><span>Critical</span></div><div class="stat"><b>${verdict.high}</b><span>High</span></div></div>${worth}${investment}${areas}${teamSays(r, report)}${peopleSaid(r, report)}`,
   );
+}
+
+/** Each line behind the total, with its range, adding up to it, and what's kept apart: as the executive summary's money page has them. */
+function whereFrom(r: Render, report: BuiltReport): string {
+  const v = report.value;
+  const m = (n: number) => compactMoney(n, v.currency);
+  const groups = v.groups.filter((g) => g.kind !== "exposure").sort((a, b) => b.counted.expected - a.counted.expected);
+  const rows = groups.map((g) => `<tr><td>${r.t(g.label)}</td><td class="num">${m(g.counted.expected)}</td><td class="num">${m(g.counted.low)} to ${m(g.counted.high)}</td></tr>`).join("");
+  const exposure = v.groups.filter((g) => g.kind === "exposure").sort((a, b) => b.counted.annual - a.counted.annual)[0];
+  const apart = exposure ? `<p class="muted">${r.t(`Kept apart from this total: ${exposure.counted.title.replace(/\.$/, "")} (${m(exposure.counted.annual)}). That's at risk, not money found, so it's never added.`)}</p>` : "";
+  return `<h3>Where it comes from</h3><table><thead><tr><th>Line</th><th class="num">Expected</th><th class="num">Range</th></tr></thead><tbody>${rows}<tr><td><b>${r.t("Total, each counted once")}</b></td><td class="num"><b>${m(v.total.expected)}</b></td><td class="num"><b>${m(v.total.low)} to ${m(v.total.high)}</b></td></tr></tbody></table>${apart}<p class="muted">${r.t("Not every case will come back, so we count a share of each figure, with a cautious share and all of it either side. Where several issues describe the same money, only the largest counts.")}</p>`;
 }
 
 /** What people told us in interviews, as the full report has it: the chapter's text, then each reading by role. Roles only, and never the notes. */
