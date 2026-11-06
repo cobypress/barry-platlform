@@ -149,3 +149,19 @@ describe("in a set-up review", async () => {
     assert.ok(!run.steps.some((s) => s.id === actionRecordsExtractor.id));
   });
 });
+
+describe("approved number overrides (night 3 review)", () => {
+  test("the tickets and the workbook carry the corrected figure, as the decks do", () => {
+    const f = finding("dq.open-opps-past-close");
+    const hits = f.facts.hits!;
+    const override = { id: "ov-0001", runId: input.run.id, target: { type: "finding" as const, id: f.id, field: "facts.hits" }, previousValue: hits, newValue: hits - 2, reason: "Two were test deals", overriddenBy: "Synthetic Consultant", overriddenAt: "2026-11-01T09:00:00.000Z" };
+    const report = buildReport({ ...input, intake: null, overrides: [override] });
+    const corrected = report.teamFindings.find((x) => x.id === f.id)!;
+    assert.match(corrected.summary, new RegExp(`\\b${hits - 2} of\\b`), "the decks' wording has the corrected figure");
+    // This issue's own ticket: another issue can quote the same figure for its own reasons.
+    const row = buildTickets(report, pseudonyms, lists).split("\r\n").find((line) => line.startsWith(`"${corrected.title}",`))!;
+    assert.ok(row, "the issue has a ticket");
+    assert.ok(row.includes(`${hits - 2} of`), "the ticket has the corrected figure");
+    assert.ok(!row.includes(`${hits} of`), "the ticket still has the figure the consultant corrected");
+  });
+});
