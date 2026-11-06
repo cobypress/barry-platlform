@@ -178,4 +178,13 @@ describe("callouts to addresses written into code", () => {
     const findings = edited<ApexData>("apex", (a) => (a.classes as { data: Array<{ scan: { literalEndpoints: number } | null }> }).data.forEach((c) => c.scan && (c.scan.literalEndpoints = 0)));
     assert.equal(one(findings, "int.hardcoded-endpoints").status, "passed");
   });
+
+  test("a literal address in a test class doesn't count (night 3 review: none had one before)", () => {
+    const findings = edited<ApexData>("apex", (a) => {
+      const classes = (a.classes as { data: Array<{ isTest: boolean; scan: { literalEndpoints: number } | null }> }).data;
+      classes.forEach((c) => c.scan && (c.scan.literalEndpoints = 0));
+      classes.find((c) => c.isTest && c.scan)!.scan!.literalEndpoints = 2;
+    });
+    assert.equal(one(findings, "int.hardcoded-endpoints").status, "passed");
+  });
 });
