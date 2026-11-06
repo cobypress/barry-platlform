@@ -35,6 +35,12 @@ describe("Pseudonymiser", () => {
     assert.equal(people().scrub("Sales Cloud is in Sales"), "Sales Cloud is in Sales");
   });
   test("but its username is still scrubbed", () => assert.equal(people().scrub("sales@example.com"), "[[user:U0002]]"));
+  test("Salesforce's own Integration User doesn't damage ordinary text, but its username and id are still scrubbed", () => {
+    const p = new Pseudonymiser();
+    p.label("user", "005000000000009AAA", "Integration User", ["integration@example.com"]);
+    assert.equal(p.scrub("Give each integration user its own licence"), "Give each integration user its own licence");
+    assert.equal(p.scrub("integration@example.com and 005000000000009AAA"), "[[user:U0001]] and [[user:U0001]]");
+  });
   test("doesn't match inside a longer word", () => {
     const p = new Pseudonymiser();
     p.label("user", "005000000000001AAA", "Al Lee");

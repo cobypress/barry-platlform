@@ -6,7 +6,7 @@ import { guardPrompt } from "../guard.ts";
 import { DRAFT_SCHEMA, findingSource, metricSource, SYSTEM_PROMPT } from "../prompt.ts";
 import { MODELS } from "../../config.ts";
 import { buildDataset, SOURCE } from "../../numbercheck/index.ts";
-import { Pseudonymiser } from "../../privacy/pseudonymiser.ts";
+import { isSalesforceUserName, Pseudonymiser } from "../../privacy/pseudonymiser.ts";
 import { runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers } from "../../testing/replay.ts";
 import { usersTable } from "../../testing/synthetic-org.ts";
@@ -162,7 +162,8 @@ describe("a real name can't reach the prompt", () => {
       const client = stub(reply([{ text: "We looked at this.", sources: [] }]));
       await draft(client, brief({ sources: [findingSource(leakyFinding(text))] }));
       const sent = `${client.requests[0]!.system}\n${client.requests[0]!.prompt}`;
-      if (user.Name.includes(" ")) assert.ok(!sent.includes(user.Name), `${user.Name} leaked`);
+      // Salesforce's own users ("Integration User") are nobody's name, and stay readable.
+      if (user.Name.includes(" ") && !isSalesforceUserName(user.Name)) assert.ok(!sent.includes(user.Name), `${user.Name} leaked`);
       assert.ok(!sent.includes(user.Username), `${user.Username} leaked`);
       assert.ok(!sent.includes(user.Id), `${user.Id} leaked`);
       assert.doesNotMatch(sent, /@example\.com/);

@@ -7,7 +7,7 @@
 // included) goes through guardPrompt() and sendPrompt() in src/narrative/guard.ts,
 // which also mask first names, surnames and other parts (src/privacy/names.ts).
 
-export type PseudonymEntry = { token: string; id: string; name: string; aliases: string[] };
+export type PseudonymEntry ={ token: string; id: string; name: string; aliases: string[] };
 
 const TOKEN = /\[\[([a-z]+):([A-Z]\d{4})\]\]/g;
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+/g;
@@ -16,10 +16,17 @@ function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+// The names Salesforce gives its own users. They're ordinary phrases ("give each
+// integration user its own licence"), and nobody's name.
+const SALESFORCE_USERS: ReadonlySet<string> = new Set(["integration user", "platform integration user", "automated process", "security user", "chatter expert", "insights integration"]);
+export const isSalesforceUserName = (name: string): boolean => SALESFORCE_USERS.has(name.trim().toLowerCase().replace(/\s+/g, " "));
+
 // A one-word name such as "Sales" can't be scrubbed from free text without
-// mangling ordinary words ("Sales Cloud"). Those are still tokenised wherever
-// the engine labels a user directly.
+// mangling ordinary words ("Sales Cloud"), and nor can Salesforce's own users'
+// names. Both are still tokenised wherever the engine labels a user directly.
+// Other shared names, such as "Shared Sales Desk", are still scrubbed.
 function isScrubbable(alias: string): boolean {
+  if (isSalesforceUserName(alias)) return false;
   return alias.includes("@") || /\S\s+\S/.test(alias.trim()) || /^[A-Za-z0-9]{15,18}$/.test(alias);
 }
 
