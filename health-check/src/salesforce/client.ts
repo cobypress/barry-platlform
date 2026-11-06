@@ -81,6 +81,8 @@ export const CLIENT_METHODS = [
   "connectionKind",
   "budget",
   "refreshLimits",
+  // What refreshLimits first read, kept. It sends nothing.
+  "limitsAtConnect",
   "query",
   "queryAll",
   "queryBatch",
@@ -100,6 +102,11 @@ export type ClientOptions = {
   retrievePollMs?: number;
 };
 
+export type OrgLimit = { Max: number; Remaining: number };
+/** The /limits entries kept for the integrations area (Integrations, roadmap 3.2). */
+export const REPORTED_LIMITS = ["DailyApiRequests", "DailyAsyncApexExecutions"] as const;
+const isLimit = (value: unknown): value is OrgLimit => typeof (value as OrgLimit)?.Max === "number" && typeof (value as OrgLimit)?.Remaining === "number";
+
 export class SalesforceClient {
   readonly budget: ApiBudget;
   readonly connectionKind: ConnectionProvider["kind"];
@@ -112,6 +119,7 @@ export class SalesforceClient {
   readonly #retrievePollMs: number;
   readonly #checkHost: boolean;
   #sinceLimitsRead = 0;
+  #limitsAtConnect: Record<string, OrgLimit> | null = null;
 
   private constructor(provider: ConnectionProvider, connection: OrgConnection, options: ClientOptions) {
     this.budget = options.budget;
@@ -150,10 +158,19 @@ export class SalesforceClient {
     return `/services/data/v${this.apiVersion}${path}`;
   }
 
+  /**
+   * The org's limits as first read on connecting, before this connection spent
+   * anything, so they show the org's own use. Only the ones a rule reads.
+   */
+  get limitsAtConnect(): Record<string, OrgLimit> {
+    return { ...this.#limitsAtConnect };
+  }
+
   /** Doesn't count against the daily limit. Also how the budget learns the limit. */
   async refreshLimits(): Promise<void> {
     const res = await this.#send({ method: "GET", path: this.#data("/limits") }, { free: true });
-    const limits = JSON.parse(res.text) as { DailyApiRequests?: { Max: number; Remaining: number } };
+    const limits = JSON.parse(res.text) as Record<string, OrgLimit | undefined>;
+    this.#limitsAtConnect ??= Object.fromEntries(REPORTED_LIMITS.flatMap((name) => (isLimit(limits[name]) ? [[name, { Max: limits[name].Max, Remaining: limits[name].Remaining }]] : [])));
     const daily = limits.DailyApiRequests;
     if (!daily) throw new Error("The org didn't report a daily API limit");
     this.budget.observe(daily.Max - daily.Remaining, daily.Max);

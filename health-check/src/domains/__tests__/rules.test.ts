@@ -401,11 +401,11 @@ describe("data quality", () => {
   test("undocumented automation is counted by type, with tests and hidden code left out", () => {
     const f = issue(analyseExtracts(extracts).findings, "aut.undocumented-automation");
     // Flows 3 of 4, Process Builders 1 of 1, Workflow Rules 2 of 3, validation rules 0 of 2,
-    // code 5 of 8: the commented class and triggers count, the test class doesn't.
+    // code 5 of 9: the commented classes and triggers count, the test classes don't.
     // The inactive validation rule on Invoice__c isn't counted.
-    assert.deepEqual(f.facts, { total: 18, missing: 11, rate: 61.1 });
+    assert.deepEqual(f.facts, { total: 19, missing: 11, rate: 57.9 });
     assert.match(f.summary, /Validation rules: 0 of 2/);
-    assert.match(f.summary, /Apex classes and triggers: 5 of 8/);
+    assert.match(f.summary, /Apex classes and triggers: 5 of 9/);
   });
   test("an edition with no Apex says so, rather than that the read failed", () => {
     const changed = clone(extracts);

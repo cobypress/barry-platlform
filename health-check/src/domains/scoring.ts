@@ -74,6 +74,10 @@ export const AREA_WEIGHTS: Record<string, number> = {
   lead_funnel: 1,
   revenue_opportunities: 1,
   automation: 1,
+  // Roadmap 3.2 (DECISIONS.md 172). An integration that stops takes data with it;
+  // sound code is a step further back from revenue, as configuration is.
+  integrations: 1,
+  technical_health: 0.75,
   configuration: 0.75,
   best_practice: 0.75,
   // Service Cloud (DECISIONS.md 156): how cases are handled touches customers

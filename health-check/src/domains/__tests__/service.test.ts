@@ -25,7 +25,8 @@ const one = (list: Finding[], ruleId: string): Finding => {
 
 describe("Service Cloud's modules", () => {
   test("run only when the run names them, and \"service\" brings in both", () => {
-    assert.deepEqual(modulesForRun(["configuration", "security"]).map((m) => m.id), ["configuration", "security"]);
+    // Security brings integrations, which grew out of it (DECISIONS.md 171).
+    assert.deepEqual(modulesForRun(["configuration", "security"]).map((m) => m.id), ["configuration", "security", "integrations"]);
     assert.deepEqual(modulesForRun(["configuration", "service"]).map((m) => m.id), ["configuration", "service_operations", "service_setup"]);
     assert.deepEqual(modulesForRun(["service_setup"]).map((m) => m.id), ["service_setup"]);
     assert.ok(knownModuleIds().has("service"));

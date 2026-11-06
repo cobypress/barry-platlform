@@ -94,9 +94,10 @@ describe("in a set-up review", async () => {
   const { output: essentials } = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: new Date(AS_OF), answers: loadAnswers(), scope: "essentials", transport: new Simulator() });
 
   test("both rules run and fire, from set-up alone", () => {
-    const security = modulesFor("essentials", SALES_CLOUD_MODULES).find((m) => m.id === "security")!;
+    // In the integrations area since roadmap 3.2 (DECISIONS.md 170).
+    const integrations = modulesFor("essentials", SALES_CLOUD_MODULES).find((m) => m.id === "integrations")!;
     for (const id of [APPS, SITES]) {
-      assert.ok(security.rules.some((r) => r.id === id), id);
+      assert.ok(integrations.rules.some((r) => r.id === id), id);
       assert.equal(one(essentials!.findings, id).status, "issue", id);
     }
   });

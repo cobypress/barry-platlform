@@ -24,6 +24,10 @@ const LEADS = (says: string) => page("Trailhead", "Track Prospects with Salesfor
 const CASE_QUEUES = (says: string) => page("Trailhead", "Create Case Queues and Assignment Rules", "https://trailhead.salesforce.com/content/learn/projects/set-up-case-escalation-entitlements/create-case-queues-assignment-rule", says);
 const ESCALATION = (says: string) => page("Trailhead", "Create Case Escalation Rules for Efficient Support", "https://trailhead.salesforce.com/content/learn/projects/set-up-case-escalation-entitlements/create-case-escalation-rule", says);
 const ENTITLEMENTS = (says: string) => page("Trailhead", "Create an Entitlement Process", "https://trailhead.salesforce.com/content/learn/projects/set-up-case-escalation-entitlements/create-entitlement-process", says);
+// Read for integrations and technical health (DECISIONS.md 173).
+const READ_6_NOV = "2026-11-06";
+const TRUST_6_NOV = (says: string): PracticeSource => ({ ...WA_TRUST(says), checked: READ_6_NOV });
+const OPS_6_NOV = (says: string): PracticeSource => ({ ...WA_OPS(says), checked: READ_6_NOV });
 const STALLED = (says: string) => page("Trailhead", "Empower Your Sales Team to Get Stalled Deals Back on Track", "https://trailhead.salesforce.com/content/learn/modules/sales-deal-acceleration/get-deals-back-on-track", says);
 
 export const PRACTICE: Record<string, Practice[]> = {
@@ -41,12 +45,26 @@ export const PRACTICE: Record<string, Practice[]> = {
     { text: "Find record ids in flows as they run, rather than typing them in.", source: page("Trailhead", "Make the Most of Global Variables and Values", "https://trailhead.salesforce.com/content/learn/modules/data-and-actions-in-flows/global-variables-values", "Flows shouldn't hard-code ids, because they differ from one org to the next.") },
     { text: "Write Apex tests that prove the code works, not just enough to pass the minimum.", source: page("Trailhead", "Get Started with Apex Unit Tests", "https://trailhead.salesforce.com/content/learn/modules/apex_testing/apex_testing_intro", "Tests should check that code behaves as it should, rather than being written only to meet the coverage requirement.") },
   ],
+  technical_health: [
+    { text: "Keep queries and saves out of loops, so code stays inside Salesforce's limits as volumes grow.", source: { ...page("Trailhead", "Effective Bulk Apex Trigger Design Techniques", "https://trailhead.salesforce.com/content/learn/modules/apex_triggers/apex_triggers_bulk", "A query inside a for loop can run into the limit on queries, and saving records one at a time wastes resources. Bulk code queries and saves once, and stays within the governor limits."), checked: READ_6_NOV } },
+    { text: "Treat Salesforce's minimum test coverage as the floor, and write tests that check what the code does.", source: OPS_6_NOV("Aim above the 75% coverage minimum from unit tests alone, and treat coverage as a floor rather than a ceiling.") },
+    { text: "Have tests create their own data, rather than depend on what's in the org.", source: OPS_6_NOV("Apex unit tests should check methods and classes in isolation from the org's existing data and from other systems.") },
+    { text: "Replace JavaScript buttons and s-controls, which Lightning Experience doesn't run.", source: null },
+    { text: "Bring code, flows and pages forward to a recent API version as part of each release.", source: null },
+  ],
   security: [
     { text: "Grant access through permission sets, with only the access each person needs.", source: WA_TRUST("Access should come through permission sets, built from documented least-privilege needs.") },
     { text: "Set org-wide defaults to Private for objects that hold sensitive data.", source: WA_TRUST("Start from Private defaults for sensitive objects, and keep anything more open for documented needs.") },
     { text: "Run Health Check regularly, and work through the risks it raises.", source: WA_TRUST("Health Check should be run regularly against Salesforce's security baseline, and its findings dealt with.") },
     { text: "Prefer object-level View All and Modify All to org-wide View All Data and Modify All Data.", source: SHARING("Object-level View All and Modify All are often a better choice than the administrative View All Data and Modify All Data.") },
     { text: "Require multi-factor authentication for everyone who logs in through the user interface.", source: WA_TRUST("Enforce multi-factor authentication for user interface logins.") },
+  ],
+  integrations: [
+    { text: "Run each integration as its own integration account, with only the access that integration needs.", source: TRUST_6_NOV("Give each integration a dedicated integration account with a least-privilege permission set, so its access is scoped to what it does.") },
+    { text: "Make integration accounts API only, and use the Salesforce Integration licence for new ones.", source: TRUST_6_NOV("Restrict integration and service accounts to API-only access with the API Only User permission, and for new builds use the API-only integrations profile with the Salesforce Integration licence.") },
+    { text: "Keep callout addresses and credentials in named credentials, not in code.", source: TRUST_6_NOV("Manage authentication centrally with named and external credentials, which also lets credentials be rotated.") },
+    { text: "Let only users an admin has approved use each connected app.", source: TRUST_6_NOV("Set an app's permitted users so that only admin-approved users are pre-authorised.") },
+    { text: "Watch API use against the daily allowance, and make sure failed background jobs reach someone.", source: OPS_6_NOV("Monitoring should flag API requests approaching the daily allocation, and logging and alerts should turn batch jobs that fail silently into problems someone can diagnose.") },
   ],
   best_practice: [
     { text: "Put users in roles that match the data they need to see, not just the org chart.", source: page("Trailhead", "Create a Role Hierarchy", "https://trailhead.salesforce.com/content/learn/modules/data_security/data_security_roles", "Each role stands for the level of data access a user or group needs, which needn't follow the organisation chart.") },

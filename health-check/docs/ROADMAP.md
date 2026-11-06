@@ -31,7 +31,7 @@ We keep the human layer (interviews, judgement, the live readout) and put machin
 | --- | --- | --- |
 | 1. Money, score, references | All six parts (decisions 82 to 93, 120, 129) | List prices for licences beyond the core editions (QUESTIONS 51) |
 | 2. Intake, Essentials, housekeeping | Call-notes intake, the Slack discovery canvas, Essentials, the retention sweep | Testing the canvas read-back on a real workspace |
-| 3. Depth | Chapters with "What good looks like" (sourced), adoption, the real sales process, root causes (what separates wins from losses, decisions 160 to 164 and 166), your org documented, two security checks, visuals, the 110-slide report | Integrations and technical health as their own areas |
+| 3. Depth | Chapters with "What good looks like" (sourced), adoption, the real sales process, root causes (what separates wins from losses, decisions 160 to 164 and 166), your org documented, two security checks, visuals, the 110-slide report, integrations and technical health as their own areas (decisions 169 to 178) | Permissions, packages, storage, and territory and quotas (3.2) |
 | 4. The experience | The customer microsite, the CEO one-pager, the readout kit, the team survey (engine; console in progress) | A designer's pass; stakeholder interview notes |
 | 5. Proof and growth | The 90-day re-check, Barometer Ongoing with the monthly pulse, the free scan with Slack approval | Case studies, "State of Salesforce", partners, the AppExchange decision |
 | 6. Beyond Sales Cloud | Service Cloud scoped (15 checks) | Building it (in progress), then CPQ, Marketing, Experience Cloud, Data Cloud |
@@ -127,8 +127,8 @@ The same shape each time: what we looked at, what's good, what's below par, what
 | Adoption and usage | Logins by role and team, feature use, daily and weekly active users, seats paid for and unused |
 | Process | The real sales process from stage history (skipped stages, deals going backwards, time in stage), as a flow, against the designed process |
 | Data model | Real duplicates, field fill rates per object, record type sprawl, orphaned records |
-| Integrations | Connected apps, API users and limits, what writes to what, failing integrations |
-| Technical health | Apex test coverage and quality, governor-limit risk, Classic leftovers, API versions |
+| Integrations (done, 6 November 2026) | Connected apps, API users and limits, what writes to what, failing integrations |
+| Technical health (done, 6 November 2026) | Apex test coverage and quality, governor-limit risk, Classic leftovers, API versions |
 | Permissions | Profile and permission set sprawl, access reviews, least privilege |
 | Packages | Installed apps, their seats and use, overlap |
 | Storage and limits | Data and file storage, growth rate, cost of growth |

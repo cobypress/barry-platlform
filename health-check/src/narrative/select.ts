@@ -10,7 +10,9 @@ const CONFIDENCE_ORDER = ["high", "medium", "low"] as const;
 export const DOMAIN_LABELS: Record<string, string> = {
   configuration: "Configuration",
   automation: "Automation",
+  technical_health: "Technical health",
   security: "Security and access",
+  integrations: "Integrations",
   best_practice: "Best practice",
   data_quality: "Data quality",
   utilisation: "Utilisation",
