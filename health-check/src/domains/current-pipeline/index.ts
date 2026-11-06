@@ -189,6 +189,7 @@ const stuckInStage = shareRule({
 
 const staleDeals = shareRule({
   id: "cur.stale-deals",
+  version: 2,
   title: "Open deals with no movement and no activity",
   totalLimit: 25,
   segmentLimit: 50,
@@ -207,7 +208,8 @@ const staleDeals = shareRule({
       problem: (d) => `No stage change in ${QUIET_DAYS} days, and ${d.LastActivityDate ? `last activity ${d.LastActivityDate}` : "no activity logged"}`,
     };
   },
-  issueTitle: "Part of your open pipeline isn't moving",
+  // Titled by its test, as two other checks find quiet deals by theirs (night 3 reading pass, item 16).
+  issueTitle: `Open deals with no stage change or activity in ${QUIET_DAYS} days`,
   sentence: (hits, n, rate) => `Open deals with no stage change and no logged activity in ${QUIET_DAYS} days: ${hits} of ${n} (${rate}%).`,
   recommendation: "Check that activity is being captured, then re-engage these deals or close them.",
   owner: "Head of sales",
