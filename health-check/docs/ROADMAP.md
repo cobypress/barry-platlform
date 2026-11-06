@@ -36,7 +36,7 @@ We keep the human layer (interviews, judgement, the live readout) and put machin
 | 5. Proof and growth | The 90-day re-check, Barometer Ongoing with the monthly pulse, the free scan with Slack approval | Case studies, "State of Salesforce", partners, the AppExchange decision |
 | 6. Beyond Sales Cloud | Service Cloud scoped (15 checks) | Building it (in progress), then CPQ, Marketing, Experience Cloud, Data Cloud |
 
-Connecting is "sign in and go" (decision 151): any user connects, and the request list keeps Barometer read only. The package is released (decision 153) for orgs that need it installed first.
+Connecting is "sign in and go" (decision 151): any user connects, and the request list keeps Barometer read only. Each org installs the released package once first (decisions 153 and 189), because Salesforce only signs people in to an external client app the org has installed; the connect page offers the install link before sign-in.
 
 ## Who it's for
 
