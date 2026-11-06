@@ -6,7 +6,7 @@ import type { DomainModule } from "./types.ts";
 // an extract that reads records doesn't run, and a rule that needs one is left
 // out: a check we chose not to make isn't a finding, not even "not measurable".
 
-export const ESSENTIALS_DOMAINS = ["configuration", "automation", "technical_health", "security", "integrations", "best_practice", "utilisation", "adoption", "service_setup", "cpq_setup"];
+export const ESSENTIALS_DOMAINS = ["configuration", "automation", "technical_health", "security", "integrations", "best_practice", "utilisation", "adoption", "service_setup", "cpq_setup", "account_engagement"];
 
 /** The modules a run of this scope runs, with record extracts and the rules that need them taken out. */
 export function modulesFor(scope: RunScope, modules: DomainModule[]): DomainModule[] {

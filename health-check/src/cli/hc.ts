@@ -7,7 +7,7 @@ import { z } from "zod";
 import { CONSENT_FILE, defaultBenchmarkDir, exportBenchmark, Industry } from "../benchmark/export.ts";
 import { formatSummary, summariseBenchmarks } from "../benchmark/summary.ts";
 import { BUDGET_DEFAULTS, envNumber } from "../config.ts";
-import { CPQ_MODULES, SALES_CLOUD_MODULES, SERVICE_CLOUD_MODULES } from "../domains/index.ts";
+import { ACCOUNT_ENGAGEMENT_MODULES, CPQ_MODULES, SALES_CLOUD_MODULES, SERVICE_CLOUD_MODULES } from "../domains/index.ts";
 import { runHealthCheck } from "../engine/run.ts";
 import { defaultRunsDir, purgeRun, sweepRuns } from "../retention/purge.ts";
 import { Calibration, HeadcountBand, ManualAnswer } from "../schemas/index.ts";
@@ -24,6 +24,7 @@ const USAGE = `Black Cloud Barometer
   hc run --connection <name> --calibration <file> [options]
       --service adds Service Cloud's two areas to the Sales Cloud ones
       --cpq adds Salesforce CPQ's two areas
+      --pardot adds Marketing Cloud Account Engagement's area
   hc render --run <run folder> [--narrative]
   hc benchmark --run <run folder> --consent "<who agreed and how>" [--industry <industry>] [--headcount <band>] [--out <dir>]
   hc benchmark --summary [--out <dir>]
@@ -95,6 +96,7 @@ async function main(argv: string[]): Promise<number> {
       "budget-share": { type: "string" },
       service: { type: "boolean" },
       cpq: { type: "boolean" },
+      pardot: { type: "boolean" },
       "api-version": { type: "string" },
       run: { type: "string" },
       narrative: { type: "boolean" },
@@ -181,7 +183,7 @@ async function main(argv: string[]): Promise<number> {
   const { run, dir, output } = await runHealthCheck({
     provider,
     calibration,
-    modules: [...SALES_CLOUD_MODULES, ...(values.service ? SERVICE_CLOUD_MODULES : []), ...(values.cpq ? CPQ_MODULES : [])],
+    modules: [...SALES_CLOUD_MODULES, ...(values.service ? SERVICE_CLOUD_MODULES : []), ...(values.cpq ? CPQ_MODULES : []), ...(values.pardot ? ACCOUNT_ENGAGEMENT_MODULES : [])],
     outDir: values.out ?? join(homedir(), ".barometer", "runs"),
     answers,
     resume: values.resume,

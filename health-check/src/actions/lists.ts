@@ -4,6 +4,7 @@ import { actionRecordsExtractor, type ActionRecords } from "../extract/action-re
 import { opportunitiesExtractor, type OpportunityExtract } from "../extract/opportunities.ts";
 import { duplicateAccountsExtractor, type DuplicateAccounts } from "../extract/duplicates.ts";
 import { cpqQuotesExtractor, type CpqQuotes } from "../extract/cpq.ts";
+import { pardotLeadsExtractor, type PardotLeads } from "../extract/pardot.ts";
 import { usersExtractor, type UserRow } from "../extract/users.ts";
 import type { Sourced } from "../extract/types.ts";
 
@@ -61,12 +62,13 @@ function directory(extracts: Map<string, unknown>): Record<(typeof ACTION_OBJECT
   const records = extracts.get(actionRecordsExtractor.id) as ActionRecords | undefined;
   const duplicates = extracts.get(duplicateAccountsExtractor.id) as DuplicateAccounts | undefined;
   const cpq = extracts.get(cpqQuotesExtractor.id) as CpqQuotes | undefined;
+  const pardot = extracts.get(pardotLeadsExtractor.id) as PardotLeads | undefined;
   const users = ok(extracts.get(usersExtractor.id) as Sourced<UserRow[]> | undefined) ?? [];
   const names = opportunities?.names ?? {};
   const named = (rows: Array<{ Id: string; Name: string; OwnerId: string | null }>) => rows.map((r): [string, { name: string | null; ownerId: string | null }] => [r.Id, { name: r.Name, ownerId: r.OwnerId }]);
   return {
     Opportunity: new Map((ok(opportunities?.opportunities) ?? []).map((o) => [o.Id, { name: names[o.Id] ?? null, ownerId: o.OwnerId }])),
-    Lead: new Map(named(ok(records?.staleLeads) ?? [])),
+    Lead: new Map([...named(ok(records?.staleLeads) ?? []), ...named(ok(pardot?.open) ?? [])]),
     Contact: new Map([...named(ok(records?.contactsNoAccount) ?? []), ...named(ok(records?.contactsNoEmail) ?? [])]),
     Account: new Map(named(ok(duplicates?.accounts) ?? [])),
     SBQQ__Quote__c: new Map(named(ok(cpq?.quotes) ?? [])),

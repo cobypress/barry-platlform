@@ -19,7 +19,12 @@ export const FIXTURE_DIR = fileURLToPath(new URL("../../fixtures/synthetic-org/"
 export function requestKey(request: TransportRequest): string {
   const url = new URL(request.url);
   const path = `${url.pathname}${url.search}`;
-  if (path.includes("/Soap/m/")) return `SOAP ${request.headers.SOAPAction?.replace(/"/g, "")}`;
+  // The body says which retrieve, or which retrieve's status, so a replay that runs
+  // a different set of modules still gets each one's own answer. The session id comes out.
+  if (path.includes("/Soap/m/")) {
+    const body = (request.body ?? "").replace(/<([\w:]*)sessionId>[^<]*<\/\1sessionId>/g, "");
+    return `SOAP ${request.headers.SOAPAction?.replace(/"/g, "")} ${createHash("sha256").update(body).digest("hex").slice(0, 16)}`;
+  }
   if (request.method === "POST") return `POST ${path} ${createHash("sha256").update(request.body ?? "").digest("hex").slice(0, 16)}`;
   return `GET ${path}`;
 }

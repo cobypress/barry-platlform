@@ -592,7 +592,16 @@ export const DESCRIBES: Record<string, { fields: unknown[]; recordTypeInfos: unk
   },
   Contact: { fields: [standardField("Id", "id"), standardField("Email", "email")], recordTypeInfos: [{ developerName: "Master", name: "Master", active: true, master: true }] },
   Lead: {
-    fields: [standardField("Id", "id"), picklist("LeadSource", 30), customField("Lead_Score__c"), customField("Old_Campaign_Ref__c", { externalId: true })],
+    fields: [
+      standardField("Id", "id"),
+      picklist("LeadSource", 30),
+      customField("Lead_Score__c"),
+      customField("Old_Campaign_Ref__c", { externalId: true }),
+      // Account Engagement's package fields. Namespaced, so they're not the org's own.
+      customField("pi__url__c"),
+      customField("pi__score__c"),
+      customField("pi__grade__c"),
+    ],
     recordTypeInfos: [{ developerName: "Master", name: "Master", active: true, master: true }],
   },
   Opportunity: {
@@ -703,6 +712,8 @@ export const PACKAGE_LICENSES = [
   { NamespacePrefix: "oldapp", AllowedLicenses: 10, UsedLicenses: 0, Status: "Expired", ExpirationDate: "2025-01-31T00:00:00.000Z" },
   // Salesforce CPQ, on a site licence, so it's no seat count (DECISIONS.md 216).
   { NamespacePrefix: "SBQQ", AllowedLicenses: -1, UsedLicenses: 30, Status: "Active", ExpirationDate: null },
+  // Account Engagement, on a site licence too (DECISIONS.md 262).
+  { NamespacePrefix: "pi", AllowedLicenses: -1, UsedLicenses: 40, Status: "Active", ExpirationDate: null },
 ];
 
 export const PERMISSION_SET_LICENSES = [{ MasterLabel: "Sales Console", TotalLicenses: 15, UsedLicenses: 3, Status: "Active", ExpirationDate: null }];
@@ -1452,4 +1463,30 @@ export const SETTINGS_FILES: Record<string, string> = {
   "settings/EinsteinGpt.settings": settingsFile("EinsteinGptSettings", "enableEinsteinGptPlatform", true),
   "settings/AgentPlatform.settings": settingsFile("AgentPlatformSettings", "enableAgentPlatform", false),
   "settings/CustomerDataPlatform.settings": settingsFile("CustomerDataPlatformSettings", "enableCustomerDataPlatform", false),
+  // Trap: Customizable Campaign Influence is on, and Account Engagement's models aren't allowed.
+  "settings/Campaign.settings": `<?xml version="1.0" encoding="UTF-8"?><CampaignSettings xmlns="http://soap.sforce.com/2006/04/metadata"><enableCampaignInfluence2>true</enableCampaignInfluence2><enableB2bmaCampaignInfluence2>false</enableB2bmaCampaignInfluence2></CampaignSettings>`,
 };
+
+// Account Engagement (DECISIONS.md 261 to 274). Trap: three in four synced
+// leads have no grade, so grading isn't in use; scoring is.
+export const PARDOT_COUNTS = { synced: 240, ungraded: 180, unscored: 30 };
+const prospect = (n: number, owner: string, createdDaysAgo: number, activityDaysAgo: number | null, source = "Web") => ({
+  Id: sfId("00Q", 50_000 + n),
+  Name: `Synthetic prospect ${n}`,
+  OwnerId: owner,
+  CreatedDate: daysAgo(createdDaysAgo),
+  LastActivityDate: activityDaysAgo === null ? null : daysAgo(activityDaysAgo).slice(0, 10),
+  LeadSource: source,
+});
+// Open synced leads. Traps: user 2 leaves the leads handed over 20 to 60 days
+// ago untouched; four sit in a queue for a month, and two are owned by someone
+// who's left. Clean twins: user 1 works theirs, a lead in the queue for three
+// days is still fresh, and one untouched for over 90 days is dq.stale-leads'.
+export const PARDOT_OPEN_LEADS = [
+  ...Array.from({ length: 12 }, (_, i) => prospect(i + 1, userId(1), 20 + i * 4, 5)),
+  ...Array.from({ length: 10 }, (_, i) => prospect(i + 13, userId(2), 20 + i * 4, null, i % 2 ? "Event" : "Web")),
+  ...Array.from({ length: 4 }, (_, i) => prospect(i + 23, sfId("00G", 1), 30 + i, null)),
+  prospect(27, sfId("00G", 1), 3, null),
+  ...Array.from({ length: 2 }, (_, i) => prospect(i + 28, userId(9), 40 + i, null)),
+  prospect(30, userId(2), 120, null),
+];

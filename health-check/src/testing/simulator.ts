@@ -32,6 +32,8 @@ export type SimulatorOptions = {
   storage?: typeof org.STORAGE_LIMITS;
   /** False for an org without Salesforce CPQ: no SBQQ licence, and its objects can't be described. */
   cpq?: boolean;
+  /** False for an org without Account Engagement: no pi licence, and none of its fields on Lead. */
+  pardot?: boolean;
 };
 
 type Json = Record<string, unknown>;
@@ -157,7 +159,11 @@ export class Simulator implements Transport {
   #asyncApex: { Max: number; Remaining: number };
   #storage: typeof org.STORAGE_LIMITS;
   #cpq: boolean;
+  #pardot: boolean;
   #retrieveChecks = 0;
+  // Each retrieve gets its own id, so a recording's status polls tell them apart
+  // when a replay runs a different set of modules.
+  #retrieves = 0;
   #retrieving: Record<string, string> = org.METADATA_FILES;
 
   constructor(options: SimulatorOptions = {}) {
@@ -170,6 +176,8 @@ export class Simulator implements Transport {
     this.#asyncApex = options.asyncApex ?? org.ASYNC_APEX_LIMIT;
     this.#storage = options.storage ?? org.STORAGE_LIMITS;
     this.#cpq = options.cpq ?? true;
+    this.#pardot = options.pardot ?? true;
+    if (!this.#pardot) this.#dropFields = { ...this.#dropFields, Lead: [...(this.#dropFields.Lead ?? []), "pi__url__c", "pi__score__c", "pi__grade__c"] };
   }
 
   get #limitInfo(): string {
@@ -237,7 +245,7 @@ export class Simulator implements Transport {
       `<?xml version="1.0"?><soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"><soapenv:Body><${operation}Response xmlns="http://soap.sforce.com/2006/04/metadata"><result>${inner}</result></${operation}Response></soapenv:Body></soapenv:Envelope>`;
     if (body.includes("<met:retrieve>")) {
       this.#retrieving = body.includes("<met:name>Report</met:name>") ? org.REPORT_FILES : body.includes("<met:name>EscalationRules</met:name>") ? org.ESCALATION_FILES : body.includes("<met:name>Settings</met:name>") ? org.SETTINGS_FILES : org.METADATA_FILES;
-      return respond(envelope("retrieve", `<done>false</done><id>${org.sfId("09S", 1)}</id><state>Queued</state>`));
+      return respond(envelope("retrieve", `<done>false</done><id>${org.sfId("09S", ++this.#retrieves)}</id><state>Queued</state>`));
     }
     // The first poll isn't ready, so the polling path is exercised.
     this.#retrieveChecks++;
@@ -286,7 +294,7 @@ export class Simulator implements Transport {
       case "PermissionSetLicense":
         return page(org.PERMISSION_SET_LICENSES);
       case "PackageLicense":
-        return page(this.#cpq ? org.PACKAGE_LICENSES : org.PACKAGE_LICENSES.filter((p) => p.NamespacePrefix !== "SBQQ"));
+        return page(org.PACKAGE_LICENSES.filter((p) => (this.#cpq || p.NamespacePrefix !== "SBQQ") && (this.#pardot || p.NamespacePrefix !== "pi")));
       case "SBQQ__PriceRule__c":
         return this.#cpq ? page(org.CPQ_PRICE_RULES) : unsupported(object);
       case "SBQQ__PriceAction__c":
@@ -470,6 +478,11 @@ export class Simulator implements Transport {
       case "CampaignMember":
         return this.#keyset(org.leadFunnel.members, soql);
       case "Lead":
+        if (/\bpi__url__c\b/.test(soql)) {
+          if (/^SELECT COUNT\(\)/i.test(soql)) return count(/pi__grade__c = null/.test(soql) ? org.PARDOT_COUNTS.ungraded : /pi__score__c = null/.test(soql) ? org.PARDOT_COUNTS.unscored : org.PARDOT_COUNTS.synced);
+          const since = /\bCreatedDate\s*>=\s*(\S+)/i.exec(where)?.[1];
+          return this.#keyset(org.PARDOT_OPEN_LEADS.filter((l) => !since || new Date(l.CreatedDate.replace("+0000", "Z")) >= new Date(since)), soql);
+        }
         if (/\bConvertedOpportunityId\b/.test(soql)) return this.#keyset(org.leadFunnel.leads, soql);
         if (/GROUP BY LeadSource/i.test(soql)) return page(/LastActivityDate/i.test(soql) ? org.LEADS.staleBySource : org.LEADS.openBySource);
         if (/^SELECT COUNT\(\)/i.test(soql)) return count(/LastActivityDate/i.test(soql) ? org.LEADS.stale : org.LEADS.open);

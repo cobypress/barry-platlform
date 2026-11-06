@@ -156,6 +156,14 @@ export const PRACTICE: Record<string, Practice[]> = {
     { text: "Delete price and product rules you've switched off for good, so the active set tells the whole story.", source: null },
     { text: "Try pricing changes in a sandbox against real quotes before they go live.", source: null },
   ],
+  // Marketing Cloud Account Engagement (DECISIONS.md 268).
+  account_engagement: [
+    { text: "Score every lead on its interest, so only the most qualified reach sales.", source: { ...page("Trailhead", "Get Started with Lead Scoring", "https://trailhead.salesforce.com/content/learn/modules/lead-scoring-and-grading-in-account-engagement/get-started-with-lead-scoring", "A score measures a prospect's interest by giving points to what they do, and the aim is to pass only the most qualified leads to sales."), checked: "2026-11-06" } },
+    { text: "Grade every lead on how well it fits your ideal customer, and hand over on both grade and score.", source: null },
+    { text: "Agree how fast sales follows up a marketing lead, and send back to marketing the ones nobody will work.", source: null },
+    { text: "Give every synced lead an active owner, and check the rules that assign them.", source: null },
+    { text: "Turn on Customizable Campaign Influence, and agree one model with sales and finance.", source: null },
+  ],
   service_setup: [
     { text: "Give each case queue a routing configuration, so work is pushed to agents with room for it.", source: page("Trailhead", "Optimize Workflows with Enhanced Omni-Channel Routing", "https://trailhead.salesforce.com/content/learn/modules/enhanced-omni-channel/improve-work-distribution-with-enhanced-omni-channel", "Work lands in a queue, and the routing engine passes it to an available member of that queue by remaining capacity, following the queue's routing configuration.") },
     { text: "Attach the article that solved a case, so the next agent can see what the customer already tried.", source: page("Trailhead", "Close Cases with Articles", "https://trailhead.salesforce.com/content/learn/modules/lightning-knowledge-setup-and-customization/close-cases-with-articles", "Agents should attach knowledge articles to cases, so the case shows what helped and a new agent on a reopened case can see what was tried.") },

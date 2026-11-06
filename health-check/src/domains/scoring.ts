@@ -88,6 +88,8 @@ export const AREA_WEIGHTS: Record<string, number> = {
   // is set up is a step further back, as for Service Cloud.
   cpq_quoting: 1.25,
   cpq_setup: 0.75,
+  // Account Engagement (DECISIONS.md 267): the leads it hands over feed the pipeline, as the lead funnel does.
+  account_engagement: 1,
 };
 const DEFAULT_AREA_WEIGHT = 1;
 /** An org with a critical issue can't score above this, however well the rest does. */

@@ -1,7 +1,7 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { DOMAIN_LABELS } from "../../narrative/select.ts";
-import { CPQ_DOMAINS, SALES_CLOUD_DOMAINS, SERVICE_CLOUD_DOMAINS } from "../../schemas/common.ts";
+import { ACCOUNT_ENGAGEMENT_DOMAINS, CPQ_DOMAINS, SALES_CLOUD_DOMAINS, SERVICE_CLOUD_DOMAINS } from "../../schemas/common.ts";
 import { OURS, PRACTICE, practiceFor, practiceItems, sourceLabel } from "../index.ts";
 
 const ALLOWED_HOSTS = ["architect.salesforce.com", "trailhead.salesforce.com", "help.salesforce.com"];
@@ -9,7 +9,7 @@ const DIGIT = /\d/;
 
 describe("what good looks like", () => {
   test("every area has three to five statements, and nothing else has any", () => {
-    const all = [...SALES_CLOUD_DOMAINS, ...SERVICE_CLOUD_DOMAINS, ...CPQ_DOMAINS];
+    const all = [...SALES_CLOUD_DOMAINS, ...SERVICE_CLOUD_DOMAINS, ...CPQ_DOMAINS, ...ACCOUNT_ENGAGEMENT_DOMAINS];
     for (const domain of all) {
       const n = practiceFor(domain).length;
       assert.ok(n >= 3 && n <= 5, `${domain}: ${n}`);
