@@ -78,6 +78,11 @@ type PlanBlock = { phase: PlanPhase; items: Finding[] };
 
 /** The most pages the summary may take, the money and references pages included. The layout check holds it to this. */
 export const EXECUTIVE_MAX_PAGES = 14;
+/** A re-check's, with the 10% headroom decision 286 gave the decks: it carries a "since last time" page the first check doesn't (DECISIONS.md 353). */
+export const RECHECK_EXECUTIVE_MAX_PAGES = 15;
+
+/** The ceiling for this report's summary. */
+export const executiveMaxPages = (report: Pick<BuiltReport, "progress">): number => (report.progress ? RECHECK_EXECUTIVE_MAX_PAGES : EXECUTIVE_MAX_PAGES);
 
 type PlanPage = Array<PlanBlock | { intro: true }>;
 
@@ -242,7 +247,7 @@ export function executiveHtml(report: BuiltReport, pseudonyms: Pseudonymiser): s
   if (risk) add(risk);
 
   // Two pages are kept back: what happens next, and the references.
-  planLayout(r, plan, introHeight, EXECUTIVE_MAX_PAGES - pages.length - 2).forEach((group, i) => {
+  planLayout(r, plan, introHeight, executiveMaxPages(report) - pages.length - 2).forEach((group, i) => {
     const phases = group.filter((b): b is PlanBlock => !("intro" in b));
     add(`<div class="eyebrow">90-day plan</div><h2>${i === 0 ? "What we'd do first" : "What we'd do first, continued"}</h2>${i === 0 ? `<p style="margin-bottom:14px">${r.t(intro)}</p>` : ""}${phases.map((b) => phaseBlock(r, b)).join("")}`);
   });
