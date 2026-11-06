@@ -1,6 +1,6 @@
 import type { BuiltReport } from "../narrative/sections.ts";
 import { INVESTMENT } from "../money/investment.ts";
-import { HEADLINE_KINDS, KIND_LABELS, type ValueModel } from "../value/model.ts";
+import { HEADLINE_KINDS, KIND_LABELS, type ValueKind, type ValueModel } from "../value/model.ts";
 import { compactMoney } from "./format.ts";
 import { chartSlot, type Render } from "./html.ts";
 import { HALF_WIDTH, waterfallChart } from "./charts.ts";
@@ -30,6 +30,13 @@ const PAGE_GROUPS = 8;
 const SLIDE_GROUPS = 7;
 /** The value model's basis for a figure measured over the analysis window. */
 const OVER_WINDOW_BASIS = /divided by/;
+/** What the figure before any share assumes, in words that fit the kind of money (DECISIONS.md 395). */
+const IN_FULL: Record<Exclude<ValueKind, "exposure">, string> = {
+  revenue_recoverable: "if all came back",
+  conversion_uplift: "if the gap closed in full",
+  licence_waste: "if every seat were released",
+  time_cost: "if all those hours were saved",
+};
 
 /** The lines past the first `from`, added up: what the money table's last row holds when it can't name them all. */
 export function restOf(lines: ValueModel["groups"], from: number, k: "low" | "expected" | "high"): number {
@@ -58,7 +65,7 @@ export function moneyPage(r: Render, report: BuiltReport, format: "page" | "slid
   // How each row was reached: its figure before any share, and the share counted. The page has room to say so; the slide points to it.
   const basis = (g: (typeof all)[number]) => {
     const c = g.counted;
-    const from = `${m(c.annual)} if all came back${g.lines.length > 1 ? ", the largest of overlapping issues" : ""}${OVER_WINDOW_BASIS.test(c.basis) ? ", a year's worth of what we measured" : ""}.`;
+    const from = `${m(c.annual)} ${IN_FULL[g.kind as keyof typeof IN_FULL]}${g.lines.length > 1 ? ", the largest of overlapping issues" : ""}${OVER_WINDOW_BASIS.test(c.basis) ? ", a year's worth of what we measured" : ""}.`;
     return `${from} We count ${pct(g.realisation.expected)} (${pct(g.realisation.low)} to ${pct(g.realisation.high)}).`;
   };
   const label = (g: (typeof all)[number]) => `${r.t(g.label)}${r.ref(valueItemId(g.id))}${format === "page" ? `<span class="basis">${r.t(basis(g))}</span>` : ""}`;

@@ -7,7 +7,7 @@ import type { Finding } from "../../schemas/index.ts";
 import { analyseExtracts, clone, loadExtracts, runFromRecording, tempDir } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration, syntheticProvider } from "../../testing/replay.ts";
 import { Simulator } from "../../testing/simulator.ts";
-import { AS_OF, CASE_QUEUES, sfId, userId } from "../../testing/synthetic-org.ts";
+import { AS_OF, CASE_QUEUES, sfId, userId, usersTable } from "../../testing/synthetic-org.ts";
 import { ALL_MODULES, knownModuleIds, modulesForRun, SALES_CLOUD_MODULES, SERVICE_CLOUD_MODULES } from "../index.ts";
 import { AREA_WEIGHTS } from "../scoring.ts";
 import { recordAreasLine } from "../../narrative/select.ts";
@@ -22,6 +22,7 @@ const one = (list: Finding[], ruleId: string): Finding => {
   assert.equal(found.length, 1, ruleId);
   return found[0]!;
 };
+const tokenOf = (n: number): string => `[[user:U${String(n).padStart(4, "0")}]]`;
 
 describe("Service Cloud's modules", () => {
   test("run only when the run names them, and \"service\" brings in both", () => {
@@ -89,6 +90,21 @@ describe("Service Cloud on the synthetic org", () => {
     assert.equal(one(findings, "svc.agent-licences").facts.dormant, 2);
     assert.match(one(findings, "aut.case-routing-overlap").summary, /active case assignment rule/);
     assert.equal(one(findings, "aut.case-routing-overlap").domain, "automation");
+  });
+
+  test("a user the login log shows logging in is a dormant seat in neither count (DECISIONS.md 361, 394)", () => {
+    // Ben Cross (15): LastLoginDate 150 days old, logging in since by the log. Ola Nowak (13): 220 days, and nothing in the log.
+    const extracts = loadExtracts(dir);
+    const setup = extracts.get(serviceSetupExtractor.id) as ServiceSetup;
+    for (const n of [13, 15]) {
+      const u = usersTable.find((x) => x.Id === userId(n))!;
+      if (setup.supportUsers.status === "ok") setup.supportUsers.data.push({ Id: u.Id, LastLoginDate: u.LastLoginDate, Profile: { UserLicense: { Name: u.Profile.UserLicense.Name } } });
+    }
+    const both = analyseExtracts(extracts, { modules: ALL_MODULES }).findings;
+    const dormantUsers = both.filter((f) => f.ruleId === "utl.dormant-licensed-users").flatMap((f) => f.subjects.map((s) => s.label));
+    assert.ok(dormantUsers.includes(tokenOf(13)) && !dormantUsers.includes(tokenOf(15)), dormantUsers.join(", "));
+    // Sam Reed (5) and Nina Hart (10) as before, and Ola Nowak; not Ben Cross.
+    assert.equal(one(both, "svc.agent-licences").facts.dormant, 3);
   });
 
   test("a finding names no person", () => {
