@@ -70,13 +70,14 @@ const scoringGrading: Rule = {
 };
 
 /** Open synced leads, with the users who own them: or why they can't be read. */
-function openLeads(ctx: RuleContext): { rows: SyncedLeadRow[]; truncated: boolean; active: Set<string>; evidence: ReturnType<RuleContext["ev"]>[] } | NotMeasurableResult {
+function openLeads(ctx: RuleContext): { rows: SyncedLeadRow[]; truncated: boolean; active: Set<string>; inactive: Set<string>; evidence: ReturnType<RuleContext["ev"]>[] } | NotMeasurableResult {
   const { open } = ctx.data(pardotLeadsExtractor);
   const users = ctx.data(usersExtractor);
   if (open.status !== "ok") return { outcome: "not_measurable", reason: `Synced leads couldn't be read: ${open.reason}`, evidence: [ctx.ev(open.source, { count: null })] };
   if (users.status !== "ok") return { outcome: "not_measurable", reason: `Users couldn't be read: ${users.reason}`, evidence: [ctx.ev(users.source, { count: null })] };
   const exclusions = [...(open.truncated ? [`Open synced leads past the first ${open.data.length.toLocaleString("en-GB")}, in order of Salesforce id`] : []), "Converted leads"];
-  return { rows: open.data, truncated: open.truncated, active: new Set(users.data.filter((u) => u.IsActive).map((u) => u.Id)), evidence: [ctx.ev(open.source, { count: open.data.length, dateRange: ctx.window, exclusions })] };
+  // The users read is Standard users only: an owner it doesn't cover, such as a partner user, isn't known to have left.
+  return { rows: open.data, truncated: open.truncated, active: new Set(users.data.filter((u) => u.IsActive).map((u) => u.Id)), inactive: new Set(users.data.filter((u) => !u.IsActive).map((u) => u.Id)), evidence: [ctx.ev(open.source, { count: open.data.length, dateRange: ctx.window, exclusions })] };
 }
 
 const unworkedHandovers: Rule = {
@@ -128,7 +129,7 @@ const unworkedHandovers: Rule = {
 
 const unownedProspects: Rule = {
   id: "mkt.unowned-prospects",
-  version: 1,
+  version: 2,
   records: true,
   domain: DOMAIN,
   title: "Synced leads nobody owns",
@@ -140,7 +141,7 @@ const unownedProspects: Rule = {
     const before = unworkedBefore(ctx.now).toISOString();
     // A queue can be how leads are shared out, so only one left there, untouched, counts.
     const inQueue = read.rows.filter((l) => queueOwned(l.OwnerId) && l.LastActivityDate === null && l.CreatedDate < before);
-    const leftBehind = read.rows.filter((l) => !queueOwned(l.OwnerId) && !read.active.has(l.OwnerId));
+    const leftBehind = read.rows.filter((l) => !queueOwned(l.OwnerId) && read.inactive.has(l.OwnerId));
     const all = [...inQueue, ...leftBehind];
     const rate = pct(all.length, read.rows.length);
     const facts = { open: read.rows.length, inQueue: inQueue.length, inactiveOwner: leftBehind.length, rate, days: UNWORKED_DAYS };

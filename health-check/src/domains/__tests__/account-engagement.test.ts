@@ -152,6 +152,14 @@ describe("unowned prospects", () => {
     assert.equal(list.rows.length, 6);
   });
 
+  test("a lead owned by someone the users read doesn't cover, such as a partner user, isn't counted as owned by someone who has left (night 3 review)", () => {
+    const findings = edited<PardotLeads>("pardot-leads", (l) => {
+      const row = openRows(l).find((r) => r.OwnerId === userId(1))!;
+      row.OwnerId = "005000000000999AAA";
+    });
+    assert.equal(one(findings, "mkt.unowned-prospects").facts.inactiveOwner, 2);
+  });
+
   test("quiet once an active salesperson owns them, and a lead new to the queue never counts", () => {
     const findings = edited<PardotLeads>("pardot-leads", (l) => openRows(l).forEach((r) => (r.OwnerId === userId(9) || (r.OwnerId.startsWith("00G") && r.CreatedDate < unworkedBefore(new Date(AS_OF)).toISOString())) && (r.OwnerId = userId(1))));
     assert.equal(one(findings, "mkt.unowned-prospects").status, "passed");
