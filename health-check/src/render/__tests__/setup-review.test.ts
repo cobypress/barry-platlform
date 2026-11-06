@@ -97,10 +97,10 @@ describe("the deck's ceiling (DECISIONS.md 281)", () => {
     assert.equal(max("complete", ["service_operations", "service_setup", "cpq_quoting", "cpq_setup", "account_engagement"]), 150);
   });
 
-  test("is 66 for a set-up review, and 6 more a module, up to 81, counting a module whichever of its areas runs", () => {
+  test("is 66 for a set-up review, and 6 more a module, up to 84, counting a module whichever of its areas runs", () => {
     assert.deepEqual(deckRangeFor({ scope: "essentials", modules: ["configuration"] }), { min: 12, max: 66 });
     assert.equal(max("essentials", ["cpq_setup"]), 72);
     assert.equal(max("essentials", ["cpq_setup", "account_engagement"]), 78);
-    assert.equal(max("essentials", ["service_setup", "cpq_setup", "account_engagement"]), 81);
+    assert.equal(max("essentials", ["service_setup", "cpq_setup", "account_engagement"]), 84);
   });
 });

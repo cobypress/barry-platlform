@@ -32,7 +32,7 @@ export const SETUP_REVIEW_DECK_RANGE = { min: 12, max: 66 } as const;
 // A customer with more Salesforce is paying for a check of more of it, so a
 // module gets room of its own rather than squeezing the core report. Essentials
 // gets 6, not 5: with 5, Service Cloud's set-up review fell to one table per area.
-export const MODULE_ROOM = { complete: { perModule: 10, cap: 150 }, essentials: { perModule: 6, cap: 81 } } as const;
+export const MODULE_ROOM = { complete: { perModule: 10, cap: 150 }, essentials: { perModule: 6, cap: 84 } } as const;
 /** The optional modules, each by its areas: a run has one on when it includes any of them. */
 const OPTIONAL_MODULES: ReadonlyArray<readonly string[]> = [SERVICE_CLOUD_DOMAINS, CPQ_DOMAINS, ACCOUNT_ENGAGEMENT_DOMAINS];
 
