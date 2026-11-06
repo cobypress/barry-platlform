@@ -457,19 +457,20 @@ function summaryCounts(findings: Finding[]): PromptSource {
 }
 
 /** The plan's shape as figures, under the id planSource uses, so a draft of a plan section can say "the first 30 days". */
-function planFigures({ phases, later }: Plan): FigureSet["figures"] {
+function planFigures({ phases, later, quickWins }: Plan): FigureSet["figures"] {
   const number = (value: number) => ({ source: PLAN, kind: "number" as const, value });
   const days = (value: number) => ({ source: PLAN, kind: "duration" as const, value, unit: "day" });
   return [
     ...phases.flatMap((p) => [number(p.findings.length), number(p.from), number(p.to), days(p.to), days(p.to - p.from + 1)]),
     number(later.length),
+    number(quickWins.length),
     number(phases.length),
     // Each phase is a month, as the engine's own text says.
     { source: PLAN, kind: "duration" as const, value: phases.length, unit: "month" },
   ];
 }
 
-const planFindings = ({ phases }: Plan): Finding[] => phases.flatMap((p) => p.findings);
+const planFindings = ({ phases, quickWins }: Plan): Finding[] => [...phases.flatMap((p) => p.findings), ...quickWins];
 
 /** Stated vs actual. Claude may draft it from the stated problems and the issues; a consultant's own links and assessment come first. */
 function statedVsActualSpec(intake: Intake | null | undefined, team: Finding[]): Spec {
@@ -627,8 +628,8 @@ function executiveSpecs(input: ReportInput, team: Finding[], survey: SurveyView 
       key: "plan_90_day",
       title: "90-day plan",
       body: plan.later.length
-        ? "Urgent fixes and quick wins come first, and beyond the quick wins, each month holds only what a team can take on. The full report has every action, and what comes after 90 days."
-        : "Urgent fixes and quick wins come first, and beyond the quick wins, each month holds only what a team can take on. The full report has every action.",
+        ? "Urgent fixes come first, with a short list of quick wins beside them, and each month holds only what a team can take on. The full report has every action, and what comes after 90 days."
+        : "Urgent fixes come first, with a short list of quick wins beside them, and each month holds only what a team can take on. The full report has every action.",
       findingIds: planned.map((f) => f.id),
       sources: [...SUMMARY_SOURCES, PLAN],
       ...(planned.length
@@ -647,7 +648,7 @@ function executiveSpecs(input: ReportInput, team: Finding[], survey: SurveyView 
 function fullSpecs(input: ReportInput, team: Finding[], metrics: Metric[], survey: SurveyView | null, interviews: InterviewView | null, readiness: Readiness, added?: Added): Spec[] {
   const { intake } = input;
   const built = buildPlan(team, added);
-  const { phases: plan, later } = built;
+  const { phases: plan, later, quickWins } = built;
   const roadmapFindings = [...planFindings(built), ...later];
   const verdict = verdictOf(team);
   const issues = issuesOf(team, added);
@@ -716,7 +717,7 @@ function fullSpecs(input: ReportInput, team: Finding[], metrics: Metric[], surve
     {
       key: "roadmap",
       title: "Roadmap",
-      body: [...plan.map((p) => `Days ${p.from} to ${p.to}, ${p.title}: ${plural(p.findings.length, "action")}.`), ...(later.length ? [`After 90 days: ${plural(later.length, "action")}.`] : [])].join("\n"),
+      body: [...plan.map((p) => `Days ${p.from} to ${p.to}, ${p.title}: ${plural(p.findings.length, "action")}.`), ...(quickWins.length ? [`Days 1 to 30, quick wins beside that: ${plural(quickWins.length, "action")}.`] : []), ...(later.length ? [`After 90 days: ${plural(later.length, "action")}.`] : [])].join("\n"),
       findingIds: roadmapFindings.map((f) => f.id),
       sources: [...SUMMARY_SOURCES, PLAN],
       ...(roadmapFindings.length

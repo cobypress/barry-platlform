@@ -91,8 +91,12 @@ describe("the executive summary", () => {
     assert.doesNotMatch(text, /Amount of \d/);
     assert.doesNotMatch(text, /for team /);
     const { phases: plan, later } = buildPlan(report.teamFindings);
-    const shown = plan.reduce((n, p) => n + Math.min(p.findings.length, EXECUTIVE_PLAN_ITEMS), 0);
-    assert.equal(html.match(/<li><strong>[^<]+\.<\/strong>/g)?.length, shown, "every plan action leads with its issue");
+    // Every action on the plan's pages, urgent or quick win, leads with its issue (the quick wins' box is sized to fit, DECISIONS.md 366).
+    const planPages = html.slice(html.indexOf('<div class="eyebrow">90-day plan</div>'), html.indexOf('<div class="eyebrow">Next steps</div>'));
+    const items = planPages.match(/<li>/g)?.length ?? 0;
+    assert.ok(items >= Math.min(plan[0]!.findings.length, EXECUTIVE_PLAN_ITEMS));
+    assert.equal(planPages.match(/<li><strong>[^<]+\.<\/strong>/g)?.length, items, "every plan action leads with its issue");
+    assert.match(planPages, /Quick wins, also in days 1 to 30/);
     const deckActions = [...fullReportHtml(report, pseudonyms).matchAll(/<ul class="action-list[^"]*">([\s\S]*?)<\/ul>/g)].flatMap((m) => m[1]!.split("<li>").slice(1));
     assert.ok(deckActions.length > 0);
     for (const item of deckActions) assert.match(item, /^<strong>/, "every roadmap action in the deck leads with its issue");

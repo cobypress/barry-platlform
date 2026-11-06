@@ -104,8 +104,25 @@ export function topIssues(findings: Finding[], count: number, added?: Added): Fi
 }
 
 export type PlanPhase = { key: string; title: string; from: number; to: number; findings: Finding[] };
-/** `alsoFor` holds, by an action's finding id, the other issues from the same rule that the same action covers. */
-export type Plan = { phases: PlanPhase[]; later: Finding[]; alsoFor: Record<string, Finding[]> };
+/**
+ * `alsoFor` holds, by an action's finding id, the other issues from the same rule
+ * that the same action covers. `quickWins` is days 1 to 30's short list beside
+ * "Stabilise", apart from the phases (DECISIONS.md 366).
+ */
+export type Plan = { phases: PlanPhase[]; later: Finding[]; alsoFor: Record<string, Finding[]>; quickWins: Finding[] };
+
+/** At most this many quick wins in days 1 to 30's list. The rest are planned as any other action. */
+export const QUICK_WINS = 8;
+/** The quick wins' heading, wherever the plan is shown. */
+export const QUICK_WINS_HEADING = "Quick wins, also in days 1 to 30";
+/** Said beside a licence saving we couldn't price (DECISIONS.md 367). */
+export const UNPRICED = "The saving isn't priced.";
+
+/** Rules whose action is to release or reduce licences: a saving, priced or not. */
+const LICENCE_SAVING_RULES = new Set(["utl.unassigned-licence-seats", "utl.package-seats", "utl.dormant-licensed-users", "utl.never-logged-in", "int.integration-user-licences"]);
+
+/** A licence saving we couldn't price, ready to act on: not one held up by its checks (DECISIONS.md 367). */
+export const isUnpricedSaving = (f: Finding): boolean => LICENCE_SAVING_RULES.has(f.ruleId) && f.value.kind === "not_sized" && f.recommendationType !== "investigate";
 
 // What one team can take on in each 30 days, as our working figure. A plan that
 // puts most of a report in its first month is a list, not a plan.
@@ -116,10 +133,12 @@ const SMALL = new Set(["XS", "S", "M"]);
 /** The index of the first phase an action may go in. Urgent work that can be done soon goes first, and large builds and low-severity tidying go last. */
 /**
  * A quick, cheap win: very small work that's at least medium, or that saves money,
- * such as a licence to release. It goes in the first 30 days, and doesn't count
- * against the phase's capacity, as it takes almost none of it (DECISIONS.md 363).
+ * such as a licence to release (DECISIONS.md 363); or a licence saving we couldn't
+ * price, with very small or small effort (DECISIONS.md 367).
  */
-export const isQuickWin = (f: Finding): boolean => f.effort.size === "XS" && (f.severity !== "low" && f.severity !== "info" ? true : f.value.kind === "licence_cost" || f.value.kind === "revenue");
+export const isQuickWin = (f: Finding): boolean =>
+  (f.effort.size === "XS" && (f.severity !== "low" && f.severity !== "info" ? true : f.value.kind === "licence_cost" || f.value.kind === "revenue")) ||
+  ((f.effort.size === "XS" || f.effort.size === "S") && isUnpricedSaving(f));
 
 function earliestPhase(f: Finding): number {
   const urgent = f.severity === "critical" || f.severity === "high";
@@ -156,9 +175,20 @@ export function buildPlan(findings: Finding[], added?: Added): Plan {
     { key: "fix", title: "Fix", from: 31, to: 60, findings: [] },
     { key: "build", title: "Build", from: 61, to: 90, findings: [] },
   ];
+  // Days 1 to 30's quick wins: the most money first, then the most serious, at most
+  // QUICK_WINS. The rest are planned as any other action (DECISIONS.md 366).
+  const money = (f: Finding): number => (added ? (added.get(f.id) ?? 0) : f.value.kind === "licence_cost" || f.value.kind === "revenue" ? f.value.amount : 0);
+  const quickWins = actions
+    .filter(isQuickWin)
+    .sort((a, b) => money(b) - money(a) || SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity) || actions.indexOf(a) - actions.indexOf(b))
+    .slice(0, QUICK_WINS);
+  const listed = new Set(quickWins);
   const later: Finding[] = [];
+  // The quick wins past the list stay in days 1 to 30, as 363 put them, and still
+  // don't count against its capacity, so they push no other action later.
   const load = (i: number): number => phases[i]!.findings.filter((f) => !isQuickWin(f)).length;
   for (const f of actions) {
+    if (listed.has(f)) continue;
     if (isQuickWin(f)) {
       phases[0]!.findings.push(f);
       continue;
@@ -166,7 +196,7 @@ export function buildPlan(findings: Finding[], added?: Added): Plan {
     const index = [0, 1, 2].slice(earliestPhase(f)).find((i) => load(i) < PLAN_CAPACITY[i]!);
     (index === undefined ? later : phases[index]!.findings).push(f);
   }
-  return { phases, later, alsoFor };
+  return { phases, later, alsoFor, quickWins };
 }
 
 export type Verdict = { headline: string; critical: number; high: number; issues: number };
