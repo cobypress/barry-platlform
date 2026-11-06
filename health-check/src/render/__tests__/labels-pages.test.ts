@@ -18,15 +18,13 @@ const pseudonyms = new Pseudonymiser(JSON.parse(readFileSync(join(dir, "pseudony
 const input: ReportInput = { run, calibration: loadCalibration(), findings: output!.findings, metrics: output!.metrics, manualSteps: output!.manualSteps };
 const report = buildReport(input);
 const text = (html: string): string => html.replace(/<style[\s\S]*?<\/style>/g, " ").replace(/data:[^"')]+/g, " ").replace(/<[^>]+>/g, " ");
-const API_NAME = /\b[A-Za-z][A-Za-z0-9]*__[A-Za-z0-9_]+\b|\b(?:Lead|Opportunity|Account|Contact|Case|User)\.[A-Z][A-Za-z0-9_]+\b/g;
-// Their labels need reads of their own, which come next.
-const LATER = /\bSBQQ__Discount__c\b/;
+const API_NAME = /\b[A-Za-z][A-Za-z0-9_]*__[A-Za-z0-9_]+\b|\b(?:Lead|Opportunity|Account|Contact|Case|User)\.[A-Z][A-Za-z0-9_]+\b/g;
 
 const pages = { full: text(fullReportHtml(report, pseudonyms)), microsite: text(JSON.stringify(buildMicrositePages(report, pseudonyms)).replace(/\\"/g, '"')) };
 
 test("no page a customer reads names an object or field by its API name", () => {
   for (const [name, t] of Object.entries(pages)) {
-    const found = [...new Set([...t.matchAll(API_NAME)].map((m) => m[0]).filter((m) => !LATER.test(m)))];
+    const found = [...new Set([...t.matchAll(API_NAME)].map((m) => m[0]))];
     assert.deepEqual(found, [], name);
   }
 });

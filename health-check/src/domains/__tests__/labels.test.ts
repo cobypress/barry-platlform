@@ -9,14 +9,11 @@ import { loadAnswers } from "../../testing/replay.ts";
 
 const { output } = await runFromRecording({ answers: loadAnswers(), modules: ALL_MODULES });
 const findings = output!.findings;
-const API_NAME = /\b[A-Za-z][A-Za-z0-9]*__[A-Za-z0-9_]+\b|\b(?:Lead|Opportunity|Account|Contact|Case|User)\.[A-Z][A-Za-z0-9_]+\b/;
+const API_NAME = /\b[A-Za-z][A-Za-z0-9_]*__[A-Za-z0-9_]+\b|\b(?:Lead|Opportunity|Account|Contact|Case|User)\.[A-Z][A-Za-z0-9_]+\b/;
 const customerText = (f: (typeof findings)[number]): string[] => [f.title, f.summary, f.recommendation ?? "", f.notMeasurableReason ?? "", ...f.subjects.map((s) => s.label)];
 
-// Their labels need reads of their own, which come next.
-const LATER = new Set(["cpq.price-rule-conflicts"]);
-
 test("no finding a customer reads names an object or field by its API name", () => {
-  const named = findings.filter((f) => !LATER.has(f.ruleId)).flatMap((f) => customerText(f).filter((t) => API_NAME.test(t)).map((t) => `${f.ruleId}: ${API_NAME.exec(t)![0]} in "${t.slice(0, 90)}"`));
+  const named = findings.flatMap((f) => customerText(f).filter((t) => API_NAME.test(t)).map((t) => `${f.ruleId}: ${API_NAME.exec(t)![0]} in "${t.slice(0, 90)}"`));
   assert.deepEqual(named, []);
 });
 
@@ -34,4 +31,10 @@ test("an installed app is named by its package's name, not its namespace (DECISI
   assert.match(seats.summary, /^Acme CPQ has 8 of 20 seats unassigned/);
   assert.deepEqual(seats.subjects.map((s) => s.label), ["Acme CPQ"]);
   for (const f of findings) for (const t of customerText(f)) assert.doesNotMatch(t, /\bacmecpq\b/, f.ruleId);
+});
+
+test("a price rule's field is named by its label on the object the action sets (DECISIONS.md 414)", () => {
+  const conflicts = findings.find((f) => f.ruleId === "cpq.price-rule-conflicts" && f.status === "issue")!;
+  assert.match(conflicts.summary, /Partner Discount and Volume Discount \(Discount on Quote Line\)/);
+  assert.ok(conflicts.evidence.some((e) => /SBQQ__Discount__c/.test(e.note ?? "")));
 });

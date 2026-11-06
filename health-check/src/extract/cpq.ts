@@ -49,8 +49,8 @@ async function planned<T>(ctx: ExtractContext, spec: FieldSpec, where: string, o
 export type PriceRuleRow = { Id: string; Name: string; SBQQ__Active__c: boolean; SBQQ__EvaluationEvent__c?: string | null; SBQQ__EvaluationOrder__c?: number | null; SBQQ__TargetObject__c?: string | null };
 export type PriceActionRow = { Id: string; SBQQ__Rule__c: string; SBQQ__Field__c: string | null; SBQQ__TargetObject__c?: string | null };
 export type ProductRuleRow = { Id: string; Name: string; SBQQ__Active__c: boolean; SBQQ__Type__c?: string | null };
-/** A custom field's name and type, from a describe: no data. */
-export type FieldType = { name: string; type: string };
+/** A custom field's name, type and label, from a describe: no data. The label is for customer text (DECISIONS.md 414). */
+export type FieldType = { name: string; type: string; label: string };
 export type TwinFields = { quoteLine: FieldType[]; opportunityProduct: FieldType[]; orderProduct: FieldType[] | null };
 
 export type CpqSetup = {
@@ -59,19 +59,21 @@ export type CpqSetup = {
   priceActions: Sourced<PriceActionRow[]>;
   productRules: Sourced<ProductRuleRow[]>;
   twins: Sourced<TwinFields>;
+  /** The quote's custom fields, for the labels of fields a price action sets on it. */
+  quoteFields: Sourced<FieldType[]>;
 };
 
 const PRICE_RULE: FieldSpec = { object: "SBQQ__PriceRule__c", required: ["Id", "Name", "SBQQ__Active__c"], optional: ["SBQQ__EvaluationEvent__c", "SBQQ__EvaluationOrder__c", "SBQQ__TargetObject__c"] };
 const PRICE_ACTION: FieldSpec = { object: "SBQQ__PriceAction__c", required: ["Id", "SBQQ__Rule__c", "SBQQ__Field__c"], optional: ["SBQQ__TargetObject__c"] };
 const PRODUCT_RULE: FieldSpec = { object: "SBQQ__ProductRule__c", required: ["Id", "Name", "SBQQ__Active__c"], optional: ["SBQQ__Type__c"] };
 
-type Describe = { fields: Array<{ name: string; type: string; custom?: boolean }> };
+type Describe = { fields: Array<{ name: string; type: string; label?: string; custom?: boolean }> };
 
 /** The custom fields of an object, by name and type. Null when Salesforce says the object isn't there. */
 async function customFields(ctx: ExtractContext, object: string): Promise<FieldType[] | null> {
   try {
     const d = await ctx.client.describe<Describe>(object);
-    return d.fields.filter((f) => f.custom || f.name.endsWith("__c")).map((f) => ({ name: f.name, type: f.type })).sort((a, b) => a.name.localeCompare(b.name));
+    return d.fields.filter((f) => f.custom || f.name.endsWith("__c")).map((f) => ({ name: f.name, type: f.type, label: f.label || f.name })).sort((a, b) => a.name.localeCompare(b.name));
   } catch (err) {
     if (isUnavailable(err) && (err.code === "NOT_FOUND" || err.code === "INVALID_TYPE")) return null;
     throw err;
@@ -80,12 +82,13 @@ async function customFields(ctx: ExtractContext, object: string): Promise<FieldT
 
 export const cpqSetupExtractor: Extractor<CpqSetup> = {
   id: "cpq-setup",
-  version: 1,
+  version: 2,
   async run(ctx) {
     const presence = await cpqPresence(ctx);
     const twinSource: SourceInfo = { kind: "rest", path: "sobjects/{SBQQ__QuoteLine__c, OpportunityLineItem, OrderItem}/describe" };
+    const quoteSource: SourceInfo = { kind: "rest", path: "sobjects/SBQQ__Quote__c/describe" };
     if (presence.status !== "installed") {
-      return { presence, priceRules: notRead(presence.reason, PRICE_RULE.object), priceActions: notRead(presence.reason, PRICE_ACTION.object), productRules: notRead(presence.reason, PRODUCT_RULE.object), twins: { status: "unavailable", reason: presence.reason, source: twinSource } };
+      return { presence, priceRules: notRead(presence.reason, PRICE_RULE.object), priceActions: notRead(presence.reason, PRICE_ACTION.object), productRules: notRead(presence.reason, PRODUCT_RULE.object), twins: { status: "unavailable", reason: presence.reason, source: twinSource }, quoteFields: { status: "unavailable", reason: presence.reason, source: quoteSource } };
     }
     let twins: Sourced<TwinFields>;
     try {
@@ -100,12 +103,20 @@ export const cpqSetupExtractor: Extractor<CpqSetup> = {
     } catch (err) {
       twins = unavailable(twinSource, err);
     }
+    let quoteFields: Sourced<FieldType[]>;
+    try {
+      const fields = await customFields(ctx, "SBQQ__Quote__c");
+      quoteFields = fields ? { status: "ok", data: fields, source: quoteSource, truncated: false } : { status: "unavailable", reason: "SBQQ__Quote__c couldn't be described.", source: quoteSource };
+    } catch (err) {
+      quoteFields = unavailable(quoteSource, err);
+    }
     return {
       presence,
       priceRules: await planned<PriceRuleRow>(ctx, PRICE_RULE, ""),
       priceActions: await planned<PriceActionRow>(ctx, PRICE_ACTION, ""),
       productRules: await planned<ProductRuleRow>(ctx, PRODUCT_RULE, ""),
       twins,
+      quoteFields,
     };
   },
 };

@@ -587,7 +587,7 @@ export const CAMPAIGNS = [
  */
 export function apiLabel(name: string): string {
   const bare = name.replace(/^[A-Za-z0-9]+__(?=.+__c$)/, "").replace(/__c$/, "");
-  if (bare !== name) return bare.replace(/_/g, " ");
+  if (bare !== name) return bare.replace(/_/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2");
   return name.replace(/Id$/, " ID").replace(/([a-z])([A-Z])/g, "$1 $2").trim();
 }
 
