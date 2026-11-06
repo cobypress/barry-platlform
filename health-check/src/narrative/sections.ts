@@ -240,13 +240,15 @@ function valueText(value: ValueModel): string {
   return lines(
     `Over the next 12 months, the issues we found are worth about ${m(total.expected)} to you, and between ${m(total.low)} and ${m(total.high)}.`,
     kinds.join("\n"),
-    "Figures that describe the same money are counted once: in each group below, only the largest counts. Each issue's figure is what's there if every case were won back, so we count a share of it, and the expected case is the conservative one. The items below show each figure, its share and why.",
+    "Figures that describe the same money are counted once: in each group below, only the largest counts. Each issue's figure is what's there if every case were won back. Not every case will come back, so we count a share of it: the expected share, with a cautious one and all of it either side. The items below show each figure, its share and why.",
     byKind.time_cost.expected > 0
       ? value.hourly.source === "customer"
         ? `Time is costed at the hourly figure you gave us, £${value.hourly.rate}.`
         : `Time is costed at £${value.hourly.rate} an hour: ${value.hourly.working.join(" ")}`
       : null,
-    exposure ? `Separately, the largest exposure we found is this: ${exposure.counted.title.replace(/\.$/, "")} (${m(exposure.counted.annual)}). Pipeline at risk, a gap in coverage or spend that isn't coming back is exposure, not money found, so it's never added to the total.` : null,
+    exposure ? `Separately, the largest exposure we found is this: ${exposure.counted.title.replace(/\.$/, "")} (${m(exposure.counted.annual)}). Pipeline at risk, or spend that isn't coming back, is exposure, not money found, so it's never added to the total.` : null,
+    // A target, such as pipeline needed for coverage, is in neither (DECISIONS.md 351).
+    ...[...new Set(value.left.map((l) => l.reason))].map((reason) => `Left out of the money altogether: ${reason.charAt(0).toLowerCase()}${reason.slice(1)}`),
   );
 }
 

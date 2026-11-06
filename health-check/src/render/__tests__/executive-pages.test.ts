@@ -7,6 +7,8 @@ import { Pseudonymiser, type PseudonymEntry } from "../../privacy/pseudonymiser.
 import { runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
 import { executiveHtml } from "../executive.ts";
+import { fullReportHtml } from "../full-report.ts";
+import { topIssues } from "../../narrative/select.ts";
 import { returnOnSpend } from "../money.ts";
 import { compactMoney } from "../format.ts";
 import { Intake } from "../../narrative/intake.ts";
@@ -68,6 +70,20 @@ describe("the executive summary, rebuilt around money", () => {
     for (const f of open) assert.ok(html.includes(f.title.replace(/'/g, "&#39;")), f.title);
     assert.match(html, /Not measurable: .*The full report&#39;s appendix says why for each\.|Not measurable: .*The full report's appendix says why for each\./);
     assert.match(html, /These lines overlap, so they aren(&#39;|')t added together\./);
+  });
+
+  test("pipeline needed for coverage is said as a target, not money, and doesn't lead as money (DECISIONS.md 351)", () => {
+    const report = buildReport(base);
+    const coverage = report.teamFindings.find((f) => f.ruleId === "cur.coverage" && f.status === "issue")!;
+    assert.ok(coverage, "the synthetic run has a coverage gap");
+    const deck = fullReportHtml(report, pseudonyms);
+    assert.match(deck, /To reach 3x coverage of your £1\.2m quota this quarter, you(&#39;|')d need £2\.79m more pipeline/);
+    assert.doesNotMatch(deck + html, /£2,785,000|more pipeline needed for the quarter/);
+    const money = html.slice(html.indexOf("What fixing this is worth"), html.indexOf("What you pay, and what you use"));
+    assert.doesNotMatch(money, /£2\.79m/);
+    const top = topIssues(report.teamFindings, 5);
+    const sized = top.filter((f) => f.value.kind !== "not_sized" && f.ruleId !== "cur.coverage" && f.severity === coverage.severity);
+    for (const f of sized) assert.ok(top.indexOf(f) < (top.indexOf(coverage) === -1 ? Infinity : top.indexOf(coverage)), f.title);
   });
 
   test("the investment page's unassigned seats are the money page's, by the same name, with the share counted", () => {

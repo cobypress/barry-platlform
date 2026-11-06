@@ -60,10 +60,26 @@ export function valueFigure(r: Render, f: Finding): string {
 export function valueText(r: Render, f: Finding): { amount: string; note: string } {
   // Not every issue has a cost we can put a figure on. Its severity is already beside it, so this says only that.
   if (f.value.kind === "not_sized") return { amount: "Not costed", note: r.t(sentence(f.value.reason)) };
+  const target = targetText(r, f);
+  if (target) return { amount: r.t(target), note: r.t(sentence(f.value.assumptions.join(". "))) };
   return { amount: r.t(`${valueFigure(r, f)} ${f.value.period}`), note: r.t(sentence(f.value.assumptions.join(". "))) };
 }
 
 export { compactMoney };
+
+/**
+ * Coverage's figure said as what it is: pipeline to build, not money (DECISIONS.md 351).
+ * Null for any other finding, or when its facts don't hold what the sentence needs.
+ */
+function targetText(r: Render, f: Finding): string | null {
+  if (f.ruleId !== "cur.coverage" || f.value.kind === "not_sized") return null;
+  const { target, quota, won, remaining, shortfall } = f.facts;
+  if (typeof target !== "number" || typeof quota !== "number" || typeof remaining !== "number" || typeof shortfall !== "number") return null;
+  const currency = /^[A-Z]{3}$/.test(f.value.unit) ? f.value.unit : r.currency;
+  const m = (n: number) => compactMoney(n, currency);
+  const of = won ? `what's left of your ${m(quota)} quota (${m(remaining)})` : `your ${m(quota)} quota`;
+  return `To reach ${target}x coverage of ${of} this quarter, you'd need ${m(shortfall)} more pipeline`;
+}
 
 /** Ends with a full stop, as a sentence the reader sees should. */
 const sentence = (text: string): string => (text === "" || /[.!?:)]$/.test(text.trim()) ? text : `${text.trim()}.`);
