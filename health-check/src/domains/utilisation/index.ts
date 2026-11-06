@@ -14,7 +14,7 @@ import {
   type UserRow,
 } from "../../extract/users.ts";
 import { USER_GUARD_BLOCKERS, userGuards } from "../../guards/user-guards.ts";
-import { notSized, pct, plural, type Rule, type RuleContext, type RuleResult } from "../../engine/rule.ts";
+import { notSized, pct, plural, type RecordList, type Rule, type RuleContext, type RuleResult } from "../../engine/rule.ts";
 import type { Guard, Value } from "../../schemas/index.ts";
 import type { DomainModule } from "../types.ts";
 import { calibratedHours } from "../value.ts";
@@ -72,6 +72,12 @@ function reclaimFindings(ctx: RuleContext, candidates: UserRow[], describe: { ke
   ];
   const manualStepIds = [manual.step.id];
   const label = (a: { user: UserRow }) => ({ type: "user", label: ctx.userLabel(a.user.Id) });
+  const lastLogin = (u: UserRow): string => (u.LastLoginDate ? `Last logged in ${u.LastLoginDate.slice(0, 10)}` : "Never logged in");
+  const records = (group: Array<{ user: UserRow; guards: Guard[] }>, fix: string, more: (a: { guards: Guard[] }) => string = () => ""): RecordList => ({
+    object: "User",
+    rows: group.map((a) => ({ id: a.user.Id, problem: `${lastLogin(a.user)}${more(a)}` })),
+    fix,
+  });
   const results: RuleResult[] = [];
 
   if (unanswered.length > 0) {
@@ -105,6 +111,7 @@ function reclaimFindings(ctx: RuleContext, candidates: UserRow[], describe: { ke
       segmentsChecked: segments,
       subjects: clear.map(label),
       facts: { users: clear.length, ...(value.kind === "licence_cost" ? { annualSaving: value.amount } : {}) },
+      records: records(clear, "Confirm with their manager, then deactivate the user and release the licence"),
       manualStepIds,
     });
   }
@@ -131,6 +138,7 @@ function reclaimFindings(ctx: RuleContext, candidates: UserRow[], describe: { ke
       segmentsChecked: segments,
       subjects: toCheck.map(label),
       facts: { users: toCheck.length, ...(cost.kind === "licence_cost" ? { seatCost: cost.amount } : {}) },
+      records: records(toCheck, "Check by hand that they own no records, then deactivate the user and release the licence"),
       manualStepIds,
     });
   }
@@ -158,6 +166,10 @@ function reclaimFindings(ctx: RuleContext, candidates: UserRow[], describe: { ke
       guards: blocked.flatMap((a) => a.guards),
       segmentsChecked: segments,
       subjects: blocked.map(label),
+      records: records(blocked, "Clear what's in the way, then look at the licence again", (a) => {
+        const reasons = [...new Set(a.guards.filter((g) => g.status === "failed").map((g) => USER_GUARD_BLOCKERS[g.guardId as keyof typeof USER_GUARD_BLOCKERS] ?? g.guardId))];
+        return reasons.length ? `. In the way: ${reasons.join(", ")}` : ". Not every check could be completed";
+      }),
       facts: { users: blocked.length, failed: failed.length, incomplete },
       manualStepIds,
     });

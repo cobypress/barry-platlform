@@ -554,7 +554,7 @@ function documentedSlides(r: Render, metrics: Metric[], dense: boolean): Slide[]
 const REFS_IN_TWO_COLUMNS = 22;
 
 function detailSlide(r: Render, notes: ReturnType<typeof noteSections>): Slide {
-  const lede = "Every issue and measure in this report carries a reference to the raw notes, the Word document that comes with it. Each one sets out the working behind the figure: what we read from your Salesforce, the sample, the calculation and the assumptions.";
+  const lede = "Every issue and measure in this report carries a reference to the raw notes, the Word document that comes with it. Each one sets out the working behind the figure: what we read from your Salesforce, the sample, the calculation and the assumptions. The action lists, a spreadsheet and a ticket file, list each record to fix with a link to it, and give each issue a ticket.";
   return {
     html: `<div class="eyebrow">Appendix</div><h2>Where to find the detail</h2><p class="lede">${r.t(lede)} <span data-ref>R4.3</span> is the third item in section <span data-ref>R4</span>.</p><div class="${notes.length > REFS_IN_TWO_COLUMNS ? "three-text" : "two-text"} refs">${notes.map((s) => `<p class="definition"><strong data-ref>${s.ref}</strong> ${r.t(s.title)}</p>`).join("")}</div>`,
   };

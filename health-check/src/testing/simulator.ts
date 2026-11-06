@@ -398,7 +398,7 @@ export class Simulator implements Transport {
         }
         if (/NextStep != null/.test(soql)) return this.#keyset(org.pipeline.opportunities.filter((o) => !o.IsClosed && o.NextStep !== null).map((o) => ({ Id: o.Id })), soql);
         // Free text the query didn't ask for mustn't come back, as on a real org.
-        return this.#keyset(org.pipeline.opportunities.map(({ NextStep, ...o }) => o), soql);
+        return this.#keyset(org.pipeline.opportunities.map(({ NextStep, ...o }) => ({ ...o, Name: org.dealName(o.Id) })), soql);
       case "ForecastingType":
         return page(org.FORECAST_TYPES);
       case "ForecastingQuota":
@@ -430,9 +430,11 @@ export class Simulator implements Transport {
         if (/\bConvertedOpportunityId\b/.test(soql)) return this.#keyset(org.leadFunnel.leads, soql);
         if (/GROUP BY LeadSource/i.test(soql)) return page(/LastActivityDate/i.test(soql) ? org.LEADS.staleBySource : org.LEADS.openBySource);
         if (/^SELECT COUNT\(\)/i.test(soql)) return count(/LastActivityDate/i.test(soql) ? org.LEADS.stale : org.LEADS.open);
+        if (/^SELECT Id, Name\b/i.test(soql) && /LastActivityDate = null/.test(soql)) return this.#keyset(org.STALE_LEAD_ROWS, soql);
         break;
       case "Contact":
         if (/^SELECT COUNT\(\)/i.test(soql)) return count(/AccountId = null/.test(soql) ? org.CONTACTS.noAccount : /Email = null/.test(soql) ? org.CONTACTS.noEmail : org.CONTACTS.total);
+        if (/^SELECT Id, Name\b/i.test(soql)) return this.#keyset(/AccountId = null/.test(soql) ? org.CONTACTS_NO_ACCOUNT : org.CONTACTS_NO_EMAIL, soql);
         break;
       case "Case":
         return this.#cases(soql);

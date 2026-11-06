@@ -72,6 +72,7 @@ const usersWithoutRole: Rule = {
       segmentsChecked: result.segmentsChecked,
       subjects: people.filter((u) => u.UserRole === null).map((u) => ({ type: "user", label: ctx.userLabel(u.Id) })),
       facts: { hits: result.hits, n: result.n, rate: result.rate },
+      records: { object: "User", rows: people.filter((u) => u.UserRole === null).map((u) => ({ id: u.Id, problem: "No role" })), fix: "Give them a role, or confirm with the business that they don't need one" },
     };
   },
 };

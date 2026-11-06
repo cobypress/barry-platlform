@@ -1,9 +1,10 @@
 import { duplicateRulesExtractor, recordCountsExtractor } from "../../extract/configuration.ts";
 import { crmHealthExtractor, opportunitiesExtractor } from "../../extract/opportunities.ts";
 import { leadsExtractor } from "../../extract/leads.ts";
+import { actionRecordsExtractor } from "../../extract/action-records.ts";
 import { daysBefore } from "../../extract/types.ts";
 import { ownershipExtractor, usersExtractor } from "../../extract/users.ts";
-import { notSized, pct, plural, segmentRate, type Rule, type RuleContext, type RuleResult } from "../../engine/rule.ts";
+import { notSized, pct, plural, segmentRate, type RecordList, type Rule, type RuleContext, type RuleResult } from "../../engine/rule.ts";
 import { localDay, todayIn, zoneOf } from "../time-zone.ts";
 import { atOwnLeadReturn } from "../value.ts";
 import { loadPipeline, type Deal } from "../historic-pipeline/cohort.ts";
@@ -49,6 +50,8 @@ type DealRuleOptions = {
   owner: string;
   /** True sizes the raw exposure. A situation sizes potential revenue at how often comparable deals still won. */
   sized: boolean | ((ctx: RuleContext, data: Extract<ReturnType<typeof loadPipeline>, { status: "ok" }>, deal: Deal) => Situation);
+  /** Each affected deal's line in the action list: what's wrong with it, with no name, and what to do. */
+  action: { problem: (d: Deal, ctx: RuleContext) => string; fix: string };
 };
 
 function dealRule(options: DealRuleOptions): Rule {
@@ -103,6 +106,7 @@ function dealRule(options: DealRuleOptions): Rule {
         segmentsChecked: result.segmentsChecked,
         subjects: result.hotspots.slice(0, 5).map((h) => ({ type: h.dimension, label: h.key })),
         facts: { hits: result.hits, n: result.n, rate: result.rate, ...(worst ? { worstSegmentRate: worst.rate } : {}) },
+        records: { object: "Opportunity", rows: deals.filter(hit).map((d) => ({ id: d.Id, problem: options.action.problem(d, ctx) })), fix: options.action.fix },
       };
     },
   };
@@ -125,6 +129,7 @@ const pastCloseDate = dealRule({
   effort: "S",
   owner: "Head of sales",
   sized: (ctx, data) => SITUATIONS.pastClose(ctx, data),
+  action: { problem: (d) => `Close date ${d.CloseDate}, still open in ${d.StageName}`, fix: "Close it as won or lost, or give it a real close date" },
 });
 
 const inactiveOwner = dealRule({
@@ -146,6 +151,7 @@ const inactiveOwner = dealRule({
   owner: "Sales operations",
   // When an owner left isn't in stage history, so the comparison is deals that reached the same stage.
   sized: (_ctx, _data, d) => SITUATIONS.inStage(d.StageName),
+  action: { problem: () => "Its owner is an inactive user", fix: "Give it to an active owner" },
 });
 
 const missingAmount = dealRule({
@@ -164,6 +170,7 @@ const missingAmount = dealRule({
   effort: "S",
   owner: "Sales operations",
   sized: false,
+  action: { problem: (d) => (d.Amount === 0 ? "Amount is 0" : "Amount is blank"), fix: "Enter the amount, even an estimate" },
 });
 
 const noRecentActivity = dealRule({
@@ -185,6 +192,7 @@ const noRecentActivity = dealRule({
   owner: "Head of sales",
   // Past activity isn't in stage history. The nearest it holds is a deal nobody changed in as long.
   sized: (_ctx, data) => SITUATIONS.unchangedFor(STALE_ACTIVITY_DAYS, data),
+  action: { problem: (d) => (d.LastActivityDate ? `Last activity ${d.LastActivityDate}` : "No activity logged"), fix: "Re-engage the customer and log it, or close the deal" },
 });
 
 const lossReasonMissing: Rule = {
@@ -221,6 +229,7 @@ const lossReasonMissing: Rule = {
       owner: "Sales operations",
       segmentsChecked: result.segmentsChecked,
       facts: { hits: result.hits, n: result.n, rate: result.rate },
+      records: { object: "Opportunity", rows: lost.filter((d) => !d.LossReason).map((d) => ({ id: d.Id, problem: `Lost, close date ${d.CloseDate}, with no loss reason` })), fix: "Record why it was lost" },
     };
   },
 };
@@ -355,6 +364,7 @@ const staleLeads: Rule = {
       segmentsChecked: segments,
       subjects: hotspots.slice(0, 5).map((h) => ({ type: "lead source", label: h.source })),
       facts: { stale: stale.data, open: open.data, rate },
+      records: staleLeadRecords(ctx, stale.data),
     };
   },
 };
@@ -395,14 +405,46 @@ const contactGaps: Rule = {
       owner: "Sales operations",
       segmentsChecked: segments,
       facts: { accountRate, emailRate },
+      records: contactRecords(ctx, noAccount.data + noEmail.data),
     };
   },
 };
+
+// The lists behind the two counts, read with the counts' own filters
+// (src/extract/action-records.ts). A list that stopped at its ceiling says it's
+// a part, with how to see the rest in Salesforce.
+function staleLeadRecords(ctx: RuleContext, total: number): RecordList | undefined {
+  const { staleLeads } = ctx.data(actionRecordsExtractor);
+  if (staleLeads.status !== "ok") return undefined;
+  const { staleBefore } = ctx.data(crmHealthExtractor);
+  return {
+    object: "Lead",
+    rows: staleLeads.data.map((l) => ({ id: l.Id, problem: `Created ${l.CreatedDate.slice(0, 10)}${l.LeadSource ? ` from ${l.LeadSource}` : ""}, with no activity logged` })),
+    fix: "Work it, or archive it if it's too old to work",
+    ...(staleLeads.data.length < total ? { part: { total, rest: `In Salesforce, a list view of open leads with no last activity, created before ${staleBefore}, shows them all.` } } : {}),
+  };
+}
+
+function contactRecords(ctx: RuleContext, total: number): RecordList | undefined {
+  const { contactsNoAccount, contactsNoEmail } = ctx.data(actionRecordsExtractor);
+  if (contactsNoAccount.status !== "ok" || contactsNoEmail.status !== "ok") return undefined;
+  // One line per gap: a contact with both appears twice, once for each fix.
+  const rows = [
+    ...contactsNoAccount.data.map((c) => ({ id: c.Id, problem: "No account" })),
+    ...contactsNoEmail.data.map((c) => ({ id: c.Id, problem: "No email address" })),
+  ];
+  return {
+    object: "Contact",
+    rows,
+    fix: "Link it to its account, or add the email address, as the line says",
+    ...(rows.length < total ? { part: { total, rest: "In Salesforce, list views of contacts with no account, and with no email, show them all." } } : {}),
+  };
+}
 
 export const dataQualityModule: DomainModule = {
   id: "data_quality",
   cloud: "sales",
   label: "Data quality",
-  extractors: [usersExtractor, recordCountsExtractor, ownershipExtractor, duplicateRulesExtractor, opportunitiesExtractor, crmHealthExtractor, leadsExtractor],
+  extractors: [usersExtractor, recordCountsExtractor, ownershipExtractor, duplicateRulesExtractor, opportunitiesExtractor, crmHealthExtractor, leadsExtractor, actionRecordsExtractor],
   rules: [pastCloseDate, inactiveOwner, missingAmount, noRecentActivity, lossReasonMissing, inactiveRecordOwners, duplicateRulesMissing, staleLeads, contactGaps],
 };

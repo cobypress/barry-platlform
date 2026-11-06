@@ -83,6 +83,8 @@ export const CLIENT_METHODS = [
   "refreshLimits",
   // What refreshLimits first read, kept. It sends nothing.
   "limitsAtConnect",
+  // The org's own domain, for the action lists' links. It sends nothing.
+  "instanceUrl",
   "query",
   "queryAll",
   "queryBatch",
@@ -156,6 +158,11 @@ export class SalesforceClient {
 
   #data(path: string): string {
     return `/services/data/v${this.apiVersion}${path}`;
+  }
+
+  /** The org's own domain, as the connection gave it: where a link to a record goes. */
+  get instanceUrl(): string {
+    return this.#connection.instanceUrl;
   }
 
   /**

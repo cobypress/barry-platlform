@@ -79,7 +79,7 @@ class MemoryDrive implements DocumentDrive {
 async function fakeRender(_dir: string, _approved: ApprovedRun, out: string) {
   mkdirSync(out, { recursive: true });
   const files = {} as Record<DocumentKey, string>;
-  for (const output of ["raw_notes", "executive_summary", "full_health_check", "ceo_one_pager", "readout_kit"] as DocumentKey[]) {
+  for (const output of ["raw_notes", "executive_summary", "full_health_check", "ceo_one_pager", "action_lists", "tickets", "readout_kit"] as DocumentKey[]) {
     files[output] = join(out, `${output}.bin`);
     writeFileSync(files[output], `synthetic ${output}`);
   }
@@ -122,6 +122,9 @@ describe("a documents job", () => {
     assert.equal(made.folderName, "Health check 1");
     assert.equal(drive.path(made.driveFolderId), "Synthetic Co / Health check 1");
     assert.deepEqual(made.files.map((f) => f.name).sort(), ["Synthetic Co - Executive summary.pdf", "Synthetic Co - Full health check.pdf", "Synthetic Co - One page summary.pdf", "Synthetic Co - Raw notes.docx"]);
+    // The action lists go beside the decks, and the console's documents card isn't told of them (DECISIONS.md 197).
+    const inFolder = (await drive.files(made.driveFolderId)).map((f) => f.name);
+    for (const name of ["Synthetic Co - Action lists.xlsx", "Synthetic Co - Tickets.csv"]) assert.ok(inFolder.includes(name), name);
     assert.deepEqual(made.warnings, ["The full health check, page 4: overflow"]);
     assert.equal(deps.store.documents.get(RUN_ID)!.input.state, "done");
   });
@@ -177,7 +180,7 @@ describe("a documents job", () => {
     const folders = (await drive.folders(doc.made!.driveFolderId)).map((f) => f.name.split(",")[0]).sort();
     assert.deepEqual(folders, ["Version 1", "Version 2"]);
     const v2 = (await drive.folders(doc.made!.driveFolderId)).find((f) => f.name.startsWith("Version 2"))!;
-    assert.equal((await drive.files(v2.id)).length, 4, "the three documents and the one-pager, none twice");
+    assert.equal((await drive.files(v2.id)).length, 6, "the three documents, the one-pager and the two action lists, none twice");
   });
 
   test("with its folder gone from Drive, the run gets the client's next number", async () => {
@@ -289,7 +292,7 @@ describe("the one-pager and the readout kit", () => {
     assert.equal((await processDocumentsJob(RUN_ID, deps, { final: true })).outcome, "done");
     const made = deps.store.documents.get(RUN_ID)!.made!;
     const customer = (await drive.files(made.driveFolderId)).map((f) => f.name).sort();
-    assert.deepEqual(customer, ["Synthetic Co - Executive summary.pdf", "Synthetic Co - Full health check.pdf", "Synthetic Co - One page summary.pdf", "Synthetic Co - Raw notes.docx"]);
+    assert.deepEqual(customer, ["Synthetic Co - Action lists.xlsx", "Synthetic Co - Executive summary.pdf", "Synthetic Co - Full health check.pdf", "Synthetic Co - One page summary.pdf", "Synthetic Co - Raw notes.docx", "Synthetic Co - Tickets.csv"]);
     const all = [...drive.items.values()];
     const kits = all.filter((i) => !i.folder && /Readout kit/.test(i.name));
     assert.equal(kits.length, 1);

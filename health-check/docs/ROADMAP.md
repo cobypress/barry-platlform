@@ -32,7 +32,7 @@ We keep the human layer (interviews, judgement, the live readout) and put machin
 | 1. Money, score, references | All six parts (decisions 82 to 93, 120, 129) | List prices for licences beyond the core editions (QUESTIONS 51) |
 | 2. Intake, Essentials, housekeeping | Call-notes intake, the Slack discovery canvas, Essentials, the retention sweep | Testing the canvas read-back on a real workspace |
 | 3. Depth | Chapters with "What good looks like" (sourced), adoption, the real sales process, root causes (what separates wins from losses, decisions 160 to 164 and 166), your org documented, two security checks, visuals, the 110-slide report, integrations and technical health as their own areas (decisions 169 to 178) | Permissions, packages, storage, and territory and quotas (3.2) |
-| 4. The experience | The customer microsite, the CEO one-pager, the readout kit, the team survey | Stakeholder interviews and action lists (both in progress); a designer's pass |
+| 4. The experience | The customer microsite, the CEO one-pager, the readout kit, the team survey, action lists (a workbook of every record to fix and a ticket file, decisions 191 to 200) | Stakeholder interviews (in progress); a designer's pass |
 | 5. Proof and growth | The 90-day re-check, Barometer Ongoing with the monthly pulse, the free scan with Slack approval, case study drafts from a re-check (decision 154) | Publishing the first case studies, "State of Salesforce", partners, the AppExchange decision |
 | 6. Beyond Sales Cloud | Service Cloud (decisions 155 to 158) | CPQ, Marketing, Experience Cloud, Data Cloud |
 
@@ -156,7 +156,7 @@ Industry and size groups as the set reaches 10 orgs per group, and new figures a
 - **The people inputs.** Stakeholder interviews: four or five structured 30-minute conversations (for example the sales director, sales ops, the admin and two reps), recorded as notes the report draws on. The user survey: five minutes, anonymous, sent to every Salesforce user (how easy it is, what slows them down, how many hours a week go on admin). The report then sets what people say against what the data shows, and the survey's hours feed the time cost.
 - **The readout kit.** A presentation version of the deck and talking points for the consultant.
 - **Design.** A designer's pass on the page system and charts once Stage 1 sets the shape.
-- **Action lists.** Exports of every record that needs fixing, ready for their team or a ticketing tool.
+- **Action lists (done, 6 November 2026).** Exports of every record that needs fixing, ready for their team or a ticketing tool.
 
 ## Stage 5: Proof and growth
 

@@ -45,6 +45,8 @@ export type ReportInput = {
   survey?: Survey | null;
   /** Our own customers' benchmark rows. Without them, only published research is compared. */
   benchmark?: BenchmarkInput | null;
+  /** How many records each issue's action list holds, by finding id. Counts only: the names stay in the run folder. */
+  recordCounts?: Record<string, { rows: number; total: number }>;
   now?: Date;
 };
 

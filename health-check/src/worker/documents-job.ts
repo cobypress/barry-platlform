@@ -36,6 +36,10 @@ const FILES: Record<Exclude<DocumentKey, "readout_kit">, { title: string; ext: s
   full_health_check: { title: "Full health check", ext: "pdf", mime: "application/pdf" },
   raw_notes: { title: "Raw notes", ext: "docx", mime: DOCX },
   ceo_one_pager: { title: "One page summary", ext: "pdf", mime: "application/pdf" },
+  // The action lists (DECISIONS.md 197). In the client's folder beside the decks,
+  // and not listed to the console, whose documents card takes only the four above.
+  action_lists: { title: "Action lists", ext: "xlsx", mime: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
+  tickets: { title: "Tickets", ext: "csv", mime: "text/csv" },
 };
 
 /**
@@ -219,7 +223,8 @@ async function documentsLocked(runId: string, deps: WorkerDeps, attempt: Attempt
     const printed = await (deps.renderReleased ?? renderReleased)(dir, { ...input, benchmark }, join(dir, "documents"));
     const folder = await folderFor(deps.drive, clientName, input.driveFolderId);
     const nameOf = (output: keyof typeof FILES): string => `${clientName} - ${FILES[output].title}.${FILES[output].ext}`;
-    const target = await versionFolderFor(deps.drive, folder, input.files, now(), [nameOf("ceo_one_pager")]);
+    // The console isn't told of the action lists, so they're known by name here, as the one-pager once was.
+    const target = await versionFolderFor(deps.drive, folder, input.files, now(), [nameOf("ceo_one_pager"), nameOf("action_lists"), nameOf("tickets")]);
     const existing = await deps.drive.files(target.id);
     const files: DocumentFile[] = [];
     for (const output of Object.keys(FILES) as Array<keyof typeof FILES>) {

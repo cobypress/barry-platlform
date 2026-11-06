@@ -412,6 +412,7 @@ const classicUsers: Rule = {
       segmentsChecked: segments,
       subjects: classic.map((u) => ({ type: "user", label: ctx.userLabel(u.Id) })),
       facts: { users: classic.length, share },
+      records: { object: "User", rows: classic.map((u) => ({ id: u.Id, problem: "Set to use Salesforce Classic" })), fix: "Find out what keeps them on Classic, then switch them to Lightning Experience" },
     };
   },
 };

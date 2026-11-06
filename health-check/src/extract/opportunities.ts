@@ -70,6 +70,13 @@ export async function readCapped<R extends { Id: string }>(ctx: ExtractContext, 
 
 export type OpportunityExtract = {
   opportunities: Sourced<OpportunityRow[]>;
+  /**
+   * Each deal's name, by id, for the action lists only (roadmap Stage 4). Kept
+   * apart from the rows, so no rule reads it: a deal's name often holds the
+   * customer's, and rule 7 keeps names out of findings. Undefined in a
+   * checkpoint from before it was read.
+   */
+  names?: Record<string, string>;
   history: Sourced<HistoryRow[]>;
   multiCurrency: boolean;
   lossReasonField: string | null;
@@ -92,7 +99,7 @@ function scopeClause(ctx: ExtractContext): string {
 
 export const opportunitiesExtractor: Extractor<OpportunityExtract> = {
   id: "opportunities",
-  version: 3,
+  version: 4,
   records: true,
   partialKeys: ["opportunities", "opportunity-history"],
   async run(ctx) {
@@ -119,7 +126,7 @@ export const opportunitiesExtractor: Extractor<OpportunityExtract> = {
     const lossField = ctx.calibration.fields.lossReason;
     const lossReasonField = lossField && available.has(lossField) ? lossField : null;
     const fields = [
-      "Id, AccountId, OwnerId, StageName, Amount, CloseDate, CreatedDate, IsClosed, IsWon, LastActivityDate",
+      "Id, Name, AccountId, OwnerId, StageName, Amount, CloseDate, CreatedDate, IsClosed, IsWon, LastActivityDate",
       ...["Type", "LeadSource", "CurrencyIsoCode"].filter((f) => available.has(f)),
       ...(available.has("RecordTypeId") ? ["RecordType.DeveloperName"] : []),
       ...(lossReasonField ? [lossReasonField] : []),
@@ -128,8 +135,10 @@ export const opportunitiesExtractor: Extractor<OpportunityExtract> = {
     const opportunitySource: SourceInfo = { kind: "soql", api: "rest", query: `SELECT ${fields} FROM Opportunity WHERE ${scope}` };
     const base = { multiCurrency: available.has("CurrencyIsoCode"), lossReasonField, windowFrom };
     let opportunities: OpportunityRow[];
+    const names: Record<string, string> = {};
     try {
       const raw = await readKeyset<{ Id: string } & Record<string, any>>(ctx, "opportunities", fields, "Opportunity", scope);
+      for (const r of raw) if (typeof r.Name === "string") names[r.Id] = r.Name;
       opportunities = raw.map((r) =>
         OpportunityRow.parse({
           Id: r.Id,
@@ -155,6 +164,7 @@ export const opportunitiesExtractor: Extractor<OpportunityExtract> = {
     }
 
     const ok = { status: "ok", source: opportunitySource, truncated: false, data: opportunities } as const;
+    const named = { ...base, names };
     try {
       const history = await readKeyset<HistoryRow>(
         ctx,
@@ -163,9 +173,9 @@ export const opportunitiesExtractor: Extractor<OpportunityExtract> = {
         "OpportunityHistory",
         historyWhere,
       );
-      return { ...base, opportunities: ok, history: { status: "ok", data: history.map((h) => HistoryRow.parse(h)), source: historySource, truncated: false } };
+      return { ...named, opportunities: ok, history: { status: "ok", data: history.map((h) => HistoryRow.parse(h)), source: historySource, truncated: false } };
     } catch (err) {
-      return { ...base, opportunities: ok, history: unavailable(historySource, err) };
+      return { ...named, opportunities: ok, history: unavailable(historySource, err) };
     }
   },
 };
@@ -197,12 +207,17 @@ export type CrmHealth = {
 
 const STALE_LEAD_DAYS = 90;
 
+/** Open leads nobody has touched: counted for `dq.stale-leads`, and listed for its action list with the same filter. */
+export function staleLeadFilter(now: Date): { where: string; before: Date } {
+  const before = daysBefore(now, STALE_LEAD_DAYS);
+  return { where: `IsConverted = false AND LastActivityDate = null AND CreatedDate < ${soqlDateTime(before)}`, before };
+}
+
 export const crmHealthExtractor: Extractor<CrmHealth> = {
   id: "crm-health",
   version: 1,
   async run(ctx) {
-    const staleBefore = daysBefore(ctx.now, STALE_LEAD_DAYS);
-    const stale = `IsConverted = false AND LastActivityDate = null AND CreatedDate < ${soqlDateTime(staleBefore)}`;
+    const { where: stale, before: staleBefore } = staleLeadFilter(ctx.now);
     const queries: Record<string, string> = {
       openLeads: "SELECT COUNT() FROM Lead WHERE IsConverted = false",
       staleLeads: `SELECT COUNT() FROM Lead WHERE ${stale}`,

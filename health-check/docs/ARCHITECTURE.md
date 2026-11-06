@@ -58,6 +58,8 @@ A domain is a `DomainModule` (`src/domains/types.ts`): extractors, metric builde
 
 Integrations and technical health (`src/domains/integrations/`, `src/domains/technical-health/`, DECISIONS.md 169 to 178) were made from checks that sat in security and automation. `AREAS_WITHIN` in `src/domains/index.ts` makes a run that names the older area run the newer one too, so module lists saved before them still run every check. Checks that need to know what Apex code does read facts `src/extract/apex-scan.ts` works out while the extractor holds the body. The body itself is never kept.
 
+The action lists (`src/actions/`, DECISIONS.md 191 to 200) are built in the worker. A rule hands the records it judged to the engine as `records` on its issue: ids and what's wrong, never a name. The engine keeps them out of the finding and joins names from the extracts into `action-lists.json`, which the documents turn into a workbook and a ticket file.
+
 Service Cloud is the first module beyond Sales Cloud (`src/domains/service/`, DECISIONS.md 155 to 158): two areas in `SERVICE_CLOUD_DOMAINS`, `SERVICE_CLOUD_MODULES` alongside `SALES_CLOUD_MODULES`, and `modulesForRun`, which turns a run's `service` module into both. Its synthetic data and traps are at the end of `src/testing/synthetic-org.ts`.
 
 ## The rules, and where each is enforced

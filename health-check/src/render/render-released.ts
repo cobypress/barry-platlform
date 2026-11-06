@@ -11,6 +11,7 @@ import type { LayoutReport } from "./layout.ts";
 import { renderCaseStudyDocx } from "./case-study.ts";
 import { writeFileSync } from "node:fs";
 import { loadRun, OUTPUT_FILES, printDocuments } from "./render-run.ts";
+import { writeActionFiles } from "../actions/index.ts";
 
 // The documents for a released run, in the wording the console approved. The
 // run folder supplies the findings, metrics and pseudonym map, as for `hc
@@ -31,8 +32,8 @@ export type ApprovedRun = {
   benchmark?: BenchmarkInput | null;
 };
 
-/** The report's three outputs, then the one-pager for the customer and the kit for Black Cloud only. */
-export type DocumentKey = ReportOutputKey | "ceo_one_pager" | "readout_kit";
+/** The report's three outputs, then the one-pager and the action lists for the customer, and the kit for Black Cloud only. */
+export type DocumentKey = ReportOutputKey | "ceo_one_pager" | "action_lists" | "tickets" | "readout_kit";
 
 export type ReleasedDocuments = {
   files: Record<DocumentKey, string>;
@@ -86,6 +87,8 @@ export async function renderReleased(dir: string, approved: ApprovedRun, outDir:
     full_health_check: join(out, OUTPUT_FILES.full),
     ceo_one_pager: join(out, OUTPUT_FILES.ceo),
     readout_kit: join(out, OUTPUT_FILES.kit),
+    action_lists: join(out, OUTPUT_FILES.actionLists),
+    tickets: join(out, OUTPUT_FILES.tickets),
   };
   const layout = await printDocuments(report, pseudonyms, {
     rawNotes: files.raw_notes,
@@ -95,6 +98,8 @@ export async function renderReleased(dir: string, approved: ApprovedRun, outDir:
     kit: files.readout_kit,
     layout: join(out, OUTPUT_FILES.layout),
   });
+  // Made from the same approved report, so they're under the same gate as the decks (rule 10).
+  writeActionFiles(report, pseudonyms, folder, { workbook: files.action_lists, tickets: files.tickets });
   let microsite: ReleasedDocuments["microsite"];
   try {
     microsite = { ok: true, pages: buildMicrositePages(report, pseudonyms) };

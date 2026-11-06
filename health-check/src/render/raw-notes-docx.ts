@@ -289,6 +289,7 @@ export function buildRawNotes(report: BuiltReport, pseudonyms: Pseudonymiser): N
   if (!release.ok) notes.blocks.push(new Paragraph({ spacing: { after: 160 }, children: [notes.run("Draft: not every section has been approved, so this document can't be released.", { bold: true, colour: hex(colour.alert) })] }));
   notes.para("These notes are the working record behind the reports: every check we ran, what it found and how to reproduce it.");
   notes.para("Every figure in the executive summary and the full report carries a reference such as R4.3. R4 is section 4 of these notes, and R4.3 is the third item in it.");
+  notes.para("The action lists come with these notes: a spreadsheet with a sheet for each issue about records, listing every record to fix with a link to it in Salesforce, and a ticket file with one ticket for each issue, ready to import into Jira or a similar tool. Both use the same references.");
 
   const sections = noteSections(report);
   notes.labelled("Contents", "");
@@ -299,7 +300,13 @@ export function buildRawNotes(report: BuiltReport, pseudonyms: Pseudonymiser): N
     notes.heading(`${s.ref} ${s.title}`, 2);
     notes.para(currentBody(built, s.key));
     if (s.key === "manual_steps") manualSteps.forEach((step) => addManualStep(notes, step, ref(step.id)));
-    if (s.key.startsWith("findings_")) rawNotesOrder(findings.filter((f) => s.items.some((item) => item.id === f.id))).forEach((f) => addFinding(notes, f, calibration.currency, ref(f.id)));
+    if (s.key.startsWith("findings_")) {
+      rawNotesOrder(findings.filter((f) => s.items.some((item) => item.id === f.id))).forEach((f) => {
+        addFinding(notes, f, calibration.currency, ref(f.id));
+        const records = report.input.recordCounts?.[f.id];
+        if (records) notes.labelled("Records to fix", `${records.total.toLocaleString("en-GB")}, ${records.rows < records.total ? `the first ${records.rows.toLocaleString("en-GB")} of them ` : ""}on sheet ${ref(f.id)} of the action lists`);
+      });
+    }
     if (s.key === "pipeline_metrics" || s.key === "investment" || s.key === "adoption" || s.key === "sales_process" || s.key === "team_survey" || s.key === "service_cases") metrics.filter((m) => s.items.some((item) => item.id === m.id)).forEach((m) => addMetric(notes, m, ref(m.id), calibration));
     if (s.key === "practice") addPractice(notes, domainsInOrder(report.teamFindings), ref);
     if (s.key === "win_drivers") metrics.filter((m) => s.items.some((item) => item.id === m.id)).forEach((m) => addDrivers(notes, m, ref(m.id), report));
