@@ -209,8 +209,17 @@ async function documentsLocked(runId: string, deps: WorkerDeps, attempt: Attempt
   if (input.run.status !== "released") return { outcome: "skipped", detail: `Run ${runId} isn't released, so it has no documents yet` };
   if (input.state !== "queued" && input.state !== "making") return { outcome: "skipped", detail: `The documents for ${runId} weren't asked for` };
 
+  // Brings the folder's sharing in line with the readers. A share job that found the run held by this one may have given up, so this runs however the make ends.
+  const share = async (): Promise<void> => {
+    try {
+      await syncShares(runId, { store: deps.store, sharing: deps.sharing ?? null, now: () => new Date(now()), log });
+    } catch (err) {
+      log(`The sharing for ${runId} couldn't be brought up to date: ${safeReason(err)}`);
+    }
+  };
   const fail = async (reason: string): Promise<JobOutcome> => {
     await deps.store.failDocuments(runId, reason, now());
+    await share();
     return { outcome: "failed", detail: reason };
   };
   if (!deps.drive) return fail("Google Drive isn't set up on the worker. Set HC_DRIVE_SA_EMAIL, HC_DRIVE_SA_KEY and HC_DRIVE_FOLDER_ID, then make the documents again.");
@@ -246,11 +255,7 @@ async function documentsLocked(runId: string, deps: WorkerDeps, attempt: Attempt
     await deps.store.saveDocuments(runId, { at: now(), clientName, folderName: folder.name, driveFolderId: folder.id, driveFolderUrl: folder.url, files, warnings: printed.warnings });
     log(`Documents for ${runId} are in Drive${printed.warnings.length ? `, with ${printed.warnings.length} layout warnings` : ""}.`);
     // The folder is now the run's: share it with its readers (DECISIONS.md 253). The documents are made either way.
-    try {
-      await syncShares(runId, { store: deps.store, sharing: deps.sharing ?? null, now: () => new Date(now()), log });
-    } catch (err) {
-      log(`The documents for ${runId} are made, but their sharing couldn't be brought up to date: ${safeReason(err)}`);
-    }
+    await share();
     await publishMicrosite(runId, printed.microsite, deps, now(), log);
     if (input.run.benchmarkOptIn) await contribute(runId, dir, input, deps, log);
     return { outcome: "done", detail: `${Object.keys(FILES).length} documents in ${folder.name}${target.id === folder.id ? "" : ` / ${target.name}`}, and the readout kit in ${INTERNAL_FOLDER}` };
