@@ -533,7 +533,26 @@ export class PostgresWorkerStore implements WorkerStore {
       for (const s of output.manualSteps) await this.#insert(client, "HealthCheckManualStep", MANUAL_STEP, manualStepRow(runId, s));
       for (const s of output.sections) await this.#insert(client, "HealthCheckSection", SECTION, sectionRow(s));
       for (const v of output.versions) await this.#insert(client, "HealthCheckSectionVersion", VERSION, versionRow(v));
+      await this.#writeFacts(client, runId, output.facts);
     });
+  }
+
+  /**
+   * The facts summary, replaced whole (blackcloud-next
+   * migrations/20261120_health_check_run_facts.sql). The table is the
+   * console's newest: without it (42P01) the run's results still save, so the
+   * statement runs inside a savepoint the transaction can go back to.
+   */
+  async #writeFacts(client: SqlClient, runId: string, facts: RunOutputRecord["facts"]): Promise<void> {
+    await client.query("SAVEPOINT run_facts");
+    try {
+      await client.query(`DELETE FROM "HealthCheckRunFacts" WHERE "runId" = $1`, [runId]);
+      if (facts) await client.query(`INSERT INTO "HealthCheckRunFacts" ("runId", "checkedAt", "facts") VALUES ($1, $2::timestamp(3), $3::jsonb)`, [runId, facts.checkedAt, JSON.stringify(facts)]);
+      await client.query("RELEASE SAVEPOINT run_facts");
+    } catch (err) {
+      if ((err as { code?: string }).code !== "42P01") throw err;
+      await client.query("ROLLBACK TO SAVEPOINT run_facts");
+    }
   }
 
   recordRunFailure(runId: string, reason: string, at: string): Promise<void> {

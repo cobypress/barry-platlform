@@ -6,6 +6,7 @@ import { buildReport } from "../../narrative/sections.ts";
 import { loadRun } from "../../render/render-run.ts";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { FactsReport } from "../../facts/summary.ts";
 import {
   CONNECT_LINK,
   FINDING,
@@ -52,6 +53,9 @@ class FakePool implements SqlPool {
     return this.statements.map((s) => s.text);
   }
 }
+
+// Made up: one fact that differed, named with the checks resting on it.
+const FACTS: FactsReport = { version: 1, checkedAt: "2026-10-31T09:30:00.000Z", counts: { confirmed: 18, contradicted: 1, open: 1, notChecked: 1 }, differed: [{ id: "object.scontrol", affects: ["cfg.classic-dependencies"] }] };
 
 const RUN_ROW = {
   ...consoleRun(),
@@ -269,6 +273,7 @@ describe("PostgresWorkerStore", () => {
       manualSteps: output!.manualSteps,
       sections: outputs.flatMap((o) => o.sections),
       versions: outputs.flatMap((o) => o.versions),
+      facts: FACTS,
     });
     const texts = pool.texts();
     assert.equal(texts[0], "BEGIN");
@@ -283,6 +288,37 @@ describe("PostgresWorkerStore", () => {
     assert.match(update.text, /"runDir" = \$12/);
     assert.equal(update.values[11], dir);
     assert.doesNotMatch(update.text, /customerRef|createdBy|benchmarkOptIn/, "the console's fields are left alone");
+    // The facts summary, replaced whole, in the same transaction (DECISIONS.md 324).
+    const facts = pool.statements.find((s) => s.text.startsWith(`INSERT INTO "HealthCheckRunFacts"`))!;
+    assert.deepEqual(facts.values, [run.id, FACTS.checkedAt, JSON.stringify(FACTS)]);
+    assert.ok(texts.indexOf(`DELETE FROM "HealthCheckRunFacts" WHERE "runId" = $1`) < texts.indexOf(facts.text));
+    assert.ok(texts.indexOf("RELEASE SAVEPOINT run_facts") < texts.indexOf("COMMIT"));
+  });
+
+  test("a console without the facts table still gets the run's results, and no facts", async () => {
+    const pool = new FakePool();
+    pool.handlers.push((text) => (text.includes("FOR UPDATE") ? { rows: [{ status: "extracting" }], rowCount: 1 } : undefined));
+    pool.handlers.push((text) => {
+      if (text.includes(`"HealthCheckRunFacts"`)) throw Object.assign(new Error(`relation "HealthCheckRunFacts" does not exist`), { code: "42P01" });
+      return undefined;
+    });
+    const run = consoleRun();
+    await new PostgresWorkerStore(pool).saveRunOutput(run.id, { progress: progressOf(run), runDir: "/runs/x", findings: [], metrics: [], scores: [], manualSteps: [], sections: [], versions: [], facts: FACTS });
+    const texts = pool.texts();
+    assert.ok(texts.indexOf("ROLLBACK TO SAVEPOINT run_facts") > texts.indexOf("SAVEPOINT run_facts"));
+    assert.equal(texts.at(-1), "COMMIT");
+  });
+
+  test("any other error with the facts still rolls the whole run back", async () => {
+    const pool = new FakePool();
+    pool.handlers.push((text) => (text.includes("FOR UPDATE") ? { rows: [{ status: "extracting" }], rowCount: 1 } : undefined));
+    pool.handlers.push((text) => {
+      if (text.startsWith(`INSERT INTO "HealthCheckRunFacts"`)) throw Object.assign(new Error("deadlock detected"), { code: "40P01" });
+      return undefined;
+    });
+    const run = consoleRun();
+    await assert.rejects(new PostgresWorkerStore(pool).saveRunOutput(run.id, { progress: progressOf(run), runDir: "/runs/x", findings: [], metrics: [], scores: [], manualSteps: [], sections: [], versions: [], facts: FACTS }), /deadlock/);
+    assert.equal(pool.texts().at(-1), "ROLLBACK");
   });
 
   test("refuses, and rolls back, once the console has the run in review", async () => {
