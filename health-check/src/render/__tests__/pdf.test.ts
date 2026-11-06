@@ -384,6 +384,11 @@ describe("the layout checks fire", () => {
     assert.ok((await checks(doc(page(`${ok}<div style="height:1040px"></div>${footer}`)))).includes("overflow"));
   });
 
+  test("content inside a parent that stops short, running into the footer (DECISIONS.md 417)", async () => {
+    // The panel of an issue's own slide sits in a grid: its parent can end above the footer while it runs on.
+    assert.ok((await checks(doc(page(`${ok}<div style="height:10px"><div style="height:1000px"></div></div>${footer}`)))).includes("overflow"));
+  });
+
   test("a chart slot with nothing in it", async () => {
     assert.ok((await checks(doc(page(`${ok}<figure data-expect-chart="funnel"></figure>`)))).includes("missing chart"));
   });
