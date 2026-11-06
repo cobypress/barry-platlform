@@ -242,3 +242,7 @@ a) Does `drive.file` reach everything the documents job does? Creating a client 
 b) Is the service account a Manager of the shared drive, or is "Content managers can share folders" on? Without one of them, every share fails with Drive's reason recorded on the console's share row.
 c) Does the shared drive allow sharing with people outside the organisation? The customer's readers are outside it.
 d) Does a reader without a Google account get in from Google's email, and how long does that invitation last?
+e) When the service account can no longer see the folder, does deleting a permission on it answer 404? `unshare` reads 404 as "already gone" and the share is recorded as removed, so if it does, the person would keep access while the console says they don't (night 3 review).
+f) Given a Google Group's address as a `type: "user"` reader, does Drive refuse it, or share with everyone in the group? A microsite reader's address is checked as an address only (night 3 review).
+g) Creating a reader permission for someone who already has one on the folder: does Drive return the existing permission's id, and does it ever change a higher role, such as a writer's, down to reader? The sync shares again after a failure, and decision 312 relies on one permission a person (night 3 review).
+h) Does `permissions.list` on a folder in a shared drive list a reader permission made on that folder with its `emailAddress` and `role: "reader"`, as `findReader` expects (312)?

@@ -3,7 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { deleteRunFolder, isPurged, purgeRun } from "../retention/purge.ts";
 import { JobBusyError, withJobLock } from "./lock.ts";
 import type { FolderSharing } from "./drive.ts";
-import { syncShares } from "./share-job.ts";
+import { mayHaveAccess, syncShares } from "./share-job.ts";
 import type { ReleasedRun, WorkerStore } from "./types.ts";
 
 // Roadmap 2.3 and decision 16: a released run's raw extracts go 30 days after
@@ -91,7 +91,7 @@ const WHY: Partial<Record<RetentionAction, string>> = {
  */
 async function accessLeft(runId: string, deps: RetentionDeps, now: Date): Promise<number> {
   const input = await deps.store.loadShareJob(runId);
-  const active = input?.shares.filter((s) => s.state === "shared").length ?? 0;
+  const active = input?.shares.filter(mayHaveAccess).length ?? 0;
   if (active === 0 || deps.dryRun) {
     if (active) deps.log(`Retention: run ${runId}: would take Drive access away from ${active} ${active === 1 ? "person" : "people"}.`);
     return 0;

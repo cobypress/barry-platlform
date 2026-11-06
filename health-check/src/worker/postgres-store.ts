@@ -433,21 +433,25 @@ export class PostgresWorkerStore implements WorkerStore {
   async loadShareJob(runId: string): Promise<ShareJobInput | null> {
     const run = one(await this.#pool.query(`SELECT "status" FROM "HealthCheckRun" WHERE "id" = $1`, [runId]));
     if (!run) return null;
-    const [documents, access] = await Promise.all([
+    const [documents, access, release] = await Promise.all([
       this.#pool.query(`SELECT "driveFolderId" FROM "HealthCheckDocuments" WHERE "runId" = $1`, [runId]),
       this.#surveyQuery(`SELECT "readers" FROM "HealthCheckMicrositeAccess" WHERE "runId" = $1`, runId),
+      // The last release, as the retention sweep reads it.
+      this.#pool.query(`SELECT to_char(MAX("releasedAt"), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "releasedAt" FROM "HealthCheckRelease" WHERE "runId" = $1`, [runId]),
     ]);
+    const releasedAt = one(release)?.releasedAt;
     // The share table is the console's newest: without it, nothing can be recorded, so nothing is shared.
     let shares: SqlResult;
     try {
       shares = await this.#pool.query(selectSql("HealthCheckDriveShare", DRIVE_SHARE, `"runId" = $1`, `"email", "folderId"`), [runId]);
     } catch (err) {
       if ((err as { code?: string }).code !== "42P01") throw err;
-      return { runId, released: run.status === "released", folderId: null, readers: [], shares: [], recordable: false };
+      return { runId, released: run.status === "released", releasedAt: null, folderId: null, readers: [], shares: [], recordable: false };
     }
     return {
       runId,
       released: run.status === "released",
+      releasedAt: typeof releasedAt === "string" ? releasedAt : null,
       folderId: (one(documents)?.driveFolderId as string | null | undefined) ?? null,
       readers: readersFromRow(one(access)),
       shares: shares.rows.flatMap((r) => shareFromRow(r) ?? []),

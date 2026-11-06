@@ -325,7 +325,7 @@ describe("sharing, after the documents are made", () => {
     const deps = setup(jobInput(), drive);
     deps.store.readers.set(RUN_ID, ["ceo@customer.example.com"]);
     const shared: Array<[string, string]> = [];
-    deps.sharing = { share: async (folderId, email) => (shared.push([folderId, email]), "perm-0001"), unshare: async () => {} };
+    deps.sharing = { share: async (folderId, email) => (shared.push([folderId, email]), "perm-0001"), findReader: async () => null, unshare: async () => {} };
     assert.equal((await processDocumentsJob(RUN_ID, deps, { final: true })).outcome, "done");
     const made = deps.store.documents.get(RUN_ID)!.made!;
     assert.deepEqual(shared, [[made.driveFolderId, "ceo@customer.example.com"]], "the Health check folder, not the client's, and never Black Cloud's own");
@@ -333,9 +333,25 @@ describe("sharing, after the documents are made", () => {
 
     const failing = setup(jobInput({ run: consoleRun({ id: "hc-2026-11-01-0000000b", status: "released", customerRef: "SYN-0002" }) }), new MemoryDrive());
     failing.store.readers.set("hc-2026-11-01-0000000b", ["ceo@customer.example.com"]);
-    failing.sharing = { share: async () => { throw new Error("Google Drive refused a request (403): no"); }, unshare: async () => {} };
+    failing.sharing = { share: async () => { throw new Error("Google Drive refused a request (403): no"); }, findReader: async () => null, unshare: async () => {} };
     assert.equal((await processDocumentsJob("hc-2026-11-01-0000000b", failing, { final: true })).outcome, "done");
     assert.equal(failing.store.shares[0]!.state, "failed");
+  });
+
+  test("a reader taken off while the documents were being made loses access even when the make fails", async () => {
+    // Their own share job found the run held by this one, and gave up after its last try.
+    const folder = "folder-0000000001";
+    const deps = setup(jobInput({ driveFolderId: folder }));
+    deps.store.readers.set(RUN_ID, []);
+    deps.store.shares = [{ runId: RUN_ID, email: "gone@customer.example.com", folderId: folder, permissionId: "perm-0001", state: "shared", sharedAt: "2026-11-01T09:00:00.000Z", removedAt: null, removedWhy: null, error: null, updatedAt: "2026-11-01T09:00:00.000Z" }];
+    const taken: string[] = [];
+    deps.sharing = { share: async () => "perm-0002", findReader: async () => null, unshare: async (_f, id) => void taken.push(id) };
+    deps.renderReleased = async () => {
+      throw new Error("the printer stopped");
+    };
+    assert.equal((await processDocumentsJob(RUN_ID, deps, { final: true })).outcome, "failed");
+    assert.deepEqual(taken, ["perm-0001"]);
+    assert.equal(deps.store.shares[0]!.state, "removed");
   });
 });
 
