@@ -127,7 +127,8 @@ const discountLeakage: Rule = {
     if (value.kind === "revenue") facts.excess = value.amount;
     return {
       outcome: "issue",
-      title: "Some teams and reps discount deeper without winning more",
+      // Singular when one is named, so the title matches the summary (night 3 reading pass).
+      title: flagged.length === 1 ? `${flagged[0]!.dimension === "rep" ? "One rep discounts" : "One team discounts"} deeper than peers without winning more` : "Some teams and reps discount deeper without winning more",
       summary: `${opening} ${listed(flagged.slice(0, MAX_LISTED).map((f) => `${f.key} discounts ${f.median}% against ${f.peerMedian}% for ${f.against}, and wins ${f.rate}% of closed deals against ${f.peerRate}%`))}${flagged.length > MAX_LISTED ? `, and ${flagged.length - MAX_LISTED} more` : ""}. That's at least ${DISCOUNT_GAP} points deeper, without winning more often.${depth}`,
       recommendation: "Agree a discount policy with limits by deal size, send anything deeper through approval, and review these deals against it in pipeline meetings.",
       recommendationType: "change",

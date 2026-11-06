@@ -204,7 +204,7 @@ function addDocumented(notes: Notes, metrics: Metric[], ids: string[], ref: (id:
     if (m.exclusions.length) notes.labelled("Excludes", m.exclusions.join("; "));
     if (m.assumptions.length) notes.labelled("Assumptions", m.assumptions.join("; "));
     if (id === DOCUMENTED.model && doc.model) {
-      notes.table(["Object", "Records", "Custom fields", "Record types"], doc.model.objects.map((o) => [o.name, o.records === null ? "No count kept" : String(o.records), o.customFields === null ? "Not read" : String(o.customFields), o.recordTypes.map((t) => `${t.name}${t.active ? "" : " (inactive)"}`).join(", ") || "None"]), [2400, 1300, 1300, 4300]);
+      notes.table(["Object", "Records", "Custom fields", "Record types"], doc.model.objects.map((o) => [o.name, o.records === null ? "Not counted here" : String(o.records), o.customFields === null ? "Not read" : String(o.customFields), o.recordTypes.map((t) => `${t.name}${t.active ? "" : " (inactive)"}`).join(", ") || "None"]), [2400, 1300, 1300, 4300]);
       const filled = doc.model.objects.filter((o) => o.mostFilled.length);
       if (filled.length) notes.table(["Object", "Most-filled custom field", "Filled", "Records"], filled.flatMap((o) => o.mostFilled.map((f) => [o.name, f.field, `${f.filledPct}%`, String(f.total)])), [2000, 4300, 1300, 1700]);
     }

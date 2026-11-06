@@ -103,6 +103,7 @@ describe("the executive summary, rebuilt around money", () => {
     const seats = report.value.groups.find((g) => g.id === "unassigned-seats")!;
     const page = html.slice(html.indexOf("What you pay, and what you use"), html.indexOf("How each area stands"));
     assert.match(page, /Seats nobody is assigned to/);
+    assert.match(page, /Seats you pay for, all licence types/);
     assert.ok(page.includes(`We count a share of it, ${compactMoney(seats.counted.expected, report.value.currency)}, in what fixing this is worth.`));
     assert.doesNotMatch(page, /Seats nobody uses/);
   });

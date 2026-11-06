@@ -5,6 +5,7 @@ import type { Finding, Run } from "../schemas/index.ts";
 import type { Chart } from "./charts.ts";
 import { fontFaces } from "./fonts.ts";
 import { compactMoney, escapeXml, money, plainWords, ukDates } from "./format.ts";
+import { EXPOSURE_RULES } from "../value/model.ts";
 
 // Shared by both PDFs. Every page is a fixed box, so a page can be measured and
 // checked rather than left to flow. Names go back in here, then get escaped, so a
@@ -62,6 +63,8 @@ export function valueText(r: Render, f: Finding): { amount: string; note: string
   if (f.value.kind === "not_sized") return { amount: "Not costed", note: r.t(sentence(f.value.reason)) };
   const target = targetText(r, f);
   if (target) return { amount: r.t(target), note: r.t(sentence(f.value.assumptions.join(". "))) };
+  // Pipeline at risk, or spend not coming back, isn't money to win: it says so beside the figure (night 3 reading pass).
+  if (EXPOSURE_RULES.has(f.ruleId) && f.ruleId !== "lead.campaign-return") return { amount: r.t(`At risk: ${valueFigure(r, f)} ${f.value.period}`), note: r.t(sentence(f.value.assumptions.join(". "))) };
   return { amount: r.t(`${valueFigure(r, f)} ${f.value.period}`), note: r.t(sentence(f.value.assumptions.join(". "))) };
 }
 

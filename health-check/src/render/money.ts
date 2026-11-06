@@ -107,7 +107,7 @@ export function investmentPage(r: Render, report: BuiltReport): string {
   const seatShare = report.value.groups.find((g) => g.id === "unassigned-seats")?.counted ?? null;
   const stat = (figure: string, label: string, id: string) => `<div class="stat"><b>${figure}</b><span>${r.t(label)}</span>${r.ref(id)}</div>`;
   const stats = [
-    stat(String(paid.value), "Seats you pay for", INVESTMENT.seatsPaid),
+    stat(String(paid.value), "Seats you pay for, all licence types", INVESTMENT.seatsPaid),
     used ? stat(String(used.value), "Seats in use", INVESTMENT.seatsUsed) : "",
     unused ? stat(String(unused.value), "Seats nobody is assigned to", INVESTMENT.seatsUnused) : "",
     active ? stat(`${active.value}%`, "Of users active", INVESTMENT.activeUserShare) : "",
