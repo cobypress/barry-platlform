@@ -31,7 +31,7 @@ We keep the human layer (interviews, judgement, the live readout) and put machin
 | --- | --- | --- |
 | 1. Money, score, references | All six parts (decisions 82 to 93, 120, 129) | List prices for licences beyond the core editions (QUESTIONS 51) |
 | 2. Intake, Essentials, housekeeping | Call-notes intake, the Slack discovery canvas, Essentials, the retention sweep | Testing the canvas read-back on a real workspace |
-| 3. Depth | Chapters with "What good looks like" (sourced), adoption, the real sales process, root causes (what separates wins from losses, decisions 160 to 164 and 166), your org documented, two security checks, visuals, the 110-slide report, integrations and technical health as their own areas (decisions 169 to 178) | Permissions, packages, storage, and territory and quotas (3.2) |
+| 3. Depth | Chapters with "What good looks like" (sourced), adoption, the real sales process, root causes (what separates wins from losses, decisions 160 to 164 and 166), your org documented, two security checks, visuals, the 110-slide report, integrations and technical health as their own areas (decisions 169 to 178), checks for permissions, packages, storage and the data model in their areas (decisions 201 to 209) | Record-type use, and territories if customers use them (3.2) |
 | 4. The experience | The customer microsite, the CEO one-pager, the readout kit, the team survey, action lists (a workbook of every record to fix and a ticket file, decisions 191 to 200) | Stakeholder interviews (in progress); a designer's pass |
 | 5. Proof and growth | The 90-day re-check, Barometer Ongoing with the monthly pulse, the free scan with Slack approval, case study drafts from a re-check (decision 154) | Publishing the first case studies, "State of Salesforce", partners, the AppExchange decision |
 | 6. Beyond Sales Cloud | Service Cloud (decisions 155 to 158) | CPQ, Marketing, Experience Cloud, Data Cloud |
@@ -126,13 +126,13 @@ The same shape each time: what we looked at, what's good, what's below par, what
 | --- | --- |
 | Adoption and usage | Logins by role and team, feature use, daily and weekly active users, seats paid for and unused |
 | Process | The real sales process from stage history (skipped stages, deals going backwards, time in stage), as a flow, against the designed process |
-| Data model | Real duplicates, field fill rates per object, record type sprawl, orphaned records |
+| Data model (done, 6 November 2026, except record-type use) | Real duplicates, field fill rates per object, record type sprawl, orphaned records |
 | Integrations (done, 6 November 2026) | Connected apps, API users and limits, what writes to what, failing integrations |
 | Technical health (done, 6 November 2026) | Apex test coverage and quality, governor-limit risk, Classic leftovers, API versions |
-| Permissions | Profile and permission set sprawl, access reviews, least privilege |
-| Packages | Installed apps, their seats and use, overlap |
-| Storage and limits | Data and file storage, growth rate, cost of growth |
-| Territory and quotas | Coverage, balance, quota against pipeline |
+| Permissions (done, 6 November 2026) | Profile and permission set sprawl, access reviews, least privilege |
+| Packages (done, 6 November 2026, except overlap) | Installed apps, their seats and use, overlap |
+| Storage and limits (done, 6 November 2026, except growth and its cost) | Data and file storage, growth rate, cost of growth |
+| Territory and quotas (quotas already covered; territories not built) | Coverage, balance, quota against pipeline |
 
 Rep-level insights are team-level by default, with named reps only when the customer opts in at intake (decision 7).
 

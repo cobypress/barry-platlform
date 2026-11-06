@@ -2,6 +2,7 @@ import { duplicateRulesExtractor, recordCountsExtractor } from "../../extract/co
 import { crmHealthExtractor, opportunitiesExtractor } from "../../extract/opportunities.ts";
 import { leadsExtractor } from "../../extract/leads.ts";
 import { actionRecordsExtractor } from "../../extract/action-records.ts";
+import { DUPLICATE_GROUPS, duplicateAccountsExtractor } from "../../extract/duplicates.ts";
 import { daysBefore } from "../../extract/types.ts";
 import { ownershipExtractor, usersExtractor } from "../../extract/users.ts";
 import { notSized, pct, plural, segmentRate, type RecordList, type Rule, type RuleContext, type RuleResult } from "../../engine/rule.ts";
@@ -194,6 +195,76 @@ const noRecentActivity = dealRule({
   sized: (_ctx, data) => SITUATIONS.unchangedFor(STALE_ACTIVITY_DAYS, data),
   action: { problem: (d) => (d.LastActivityDate ? `Last activity ${d.LastActivityDate}` : "No activity logged"), fix: "Re-engage the customer and log it, or close the deal" },
 });
+
+const noAccount = dealRule({
+  id: "dq.opps-without-account",
+  title: "Open deals with no account",
+  totalLimit: 2,
+  segmentLimit: 20,
+  severity: "medium",
+  scope: isOpen,
+  scopeLabel: "open deals",
+  isHit: (d) => !d.AccountId,
+  issueTitle: "Some open deals aren't linked to a customer",
+  sentence: (hits, n, rate) => `Open deals with no account: ${hits} of ${n} (${rate}%). Nobody looking at the customer sees them, and they're left out of every account-level report and figure.`,
+  recommendation: "Link each deal to its account, and make the account required on new deals.",
+  effort: "XS",
+  owner: "Sales operations",
+  sized: false,
+  action: { problem: () => "No account", fix: "Link it to the customer's account" },
+});
+
+// Exact names only (DECISIONS.md 205): "Acme Ltd" and "Acme Limited" aren't
+// matched, so this understates duplication rather than overstating it.
+const DUPLICATE_SHARE_MEDIUM = 5;
+
+const duplicateAccounts: Rule = {
+  id: "dq.duplicate-accounts",
+  version: 1,
+  records: true,
+  domain: "data_quality",
+  title: "Accounts that share a name",
+  evaluate(ctx): RuleResult | RuleResult[] {
+    const { groups, accounts } = ctx.data(duplicateAccountsExtractor);
+    if (groups.status !== "ok") return { outcome: "not_measurable", reason: `Accounts couldn't be grouped by name: ${groups.reason}`, evidence: [ctx.ev(groups.source, { count: null })] };
+    const counts = ctx.data(recordCountsExtractor);
+    const total = counts.status === "ok" ? (counts.data.find((o) => o.name === "Account")?.count ?? null) : null;
+    const sizes = new Map(groups.data.map((g) => [g.Name, g.c]));
+    const inGroups = groups.data.reduce((sum, g) => sum + g.c, 0);
+    const evidence = [ctx.ev(groups.source, { count: groups.data.length, exclusions: groups.data.length >= DUPLICATE_GROUPS ? [`Groups past the ${DUPLICATE_GROUPS} largest`] : [], note: "An exact match on the account name. Differences in spacing, punctuation or spelling aren't caught" })];
+    if (counts.status === "ok") evidence.push(ctx.ev(counts.source, { count: total }));
+    const share = total ? pct(inGroups, total) : null;
+    const facts = { accounts: inGroups, groups: groups.data.length, ...(share !== null && total ? { share, total } : {}) };
+    if (groups.data.length === 0) return { outcome: "pass", summary: "No two accounts share an exact name.", evidence, segmentExemptReason: "Every account is compared with every other at once.", facts };
+    return {
+      outcome: "issue",
+      title: "Some accounts look like duplicates",
+      summary: `${plural(inGroups, "account")} share their exact name with at least one other, in ${plural(groups.data.length, "group")}${share !== null && total ? `: ${share}% of ${total.toLocaleString("en-GB")} accounts` : ""}. Deals, contacts and activity split across the copies, so no one record shows the whole customer.`,
+      recommendation: "Check each group, merge the true duplicates into the record with the most history, then turn on duplicate rules so new ones are caught.",
+      // Merging is destructive, and some may be different companies or branches that share a name (rule 3).
+      recommendationType: "investigate",
+      severity: share !== null && share >= DUPLICATE_SHARE_MEDIUM ? "medium" : "low",
+      confidence: "medium",
+      evidence,
+      value: notSized("We can't say what the split history costs from the names alone."),
+      effort: { size: groups.data.length > 50 ? "L" : "M" },
+      owner: "Sales operations",
+      dependencies: ["Check that integrations don't hold any of these accounts' ids before merging"],
+      segmentsChecked: [{ dimension: "name", segments: groups.data.length }],
+      facts,
+      ...(accounts.status === "ok"
+        ? {
+            records: {
+              object: "Account" as const,
+              rows: accounts.data.map((a) => ({ id: a.Id, problem: `Shares its exact name with ${plural((sizes.get(a.Name) ?? 2) - 1, "other account")}` })),
+              fix: "Check whether it's the same customer, and merge it into one record if so",
+              ...(accounts.truncated ? { part: { total: inGroups, rest: "In Salesforce, an accounts report grouped by account name, showing groups of two or more, lists them all." } } : {}),
+            },
+          }
+        : {}),
+    };
+  },
+};
 
 const lossReasonMissing: Rule = {
   id: "dq.loss-reason-missing",
@@ -445,6 +516,6 @@ export const dataQualityModule: DomainModule = {
   id: "data_quality",
   cloud: "sales",
   label: "Data quality",
-  extractors: [usersExtractor, recordCountsExtractor, ownershipExtractor, duplicateRulesExtractor, opportunitiesExtractor, crmHealthExtractor, leadsExtractor, actionRecordsExtractor],
-  rules: [pastCloseDate, inactiveOwner, missingAmount, noRecentActivity, lossReasonMissing, inactiveRecordOwners, duplicateRulesMissing, staleLeads, contactGaps],
+  extractors: [usersExtractor, recordCountsExtractor, ownershipExtractor, duplicateRulesExtractor, opportunitiesExtractor, crmHealthExtractor, leadsExtractor, actionRecordsExtractor, duplicateAccountsExtractor],
+  rules: [pastCloseDate, inactiveOwner, missingAmount, noRecentActivity, noAccount, lossReasonMissing, inactiveRecordOwners, duplicateRulesMissing, duplicateAccounts, staleLeads, contactGaps],
 };

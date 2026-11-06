@@ -2,8 +2,8 @@ import { fieldDescribeExtractor } from "../../extract/fields.ts";
 import { loginsExtractor, usersExtractor, type UserRow } from "../../extract/users.ts";
 import { customObjectsExtractor, orgExtractor, recordCountsExtractor, type SharingDefaults } from "../../extract/configuration.ts";
 import { orgDocumentationExtractor } from "../../extract/documentation.ts";
-import { privilegedPermissionsExtractor, securityHealthExtractor, type HealthRiskRow } from "../../extract/security.ts";
-import { notSized, plural, segmentRate, type Rule, type RuleContext, type RuleResult } from "../../engine/rule.ts";
+import { accessExtractor, holdersOf, privilegedPermissionsExtractor, securityHealthExtractor, type AccessData, type HealthRiskRow } from "../../extract/security.ts";
+import { notSized, plural, segmentRate, type NotMeasurableResult, type Rule, type RuleContext, type RuleResult } from "../../engine/rule.ts";
 import type { DomainModule } from "../types.ts";
 
 // Working limits, stated in findings as our judgement rather than Salesforce's.
@@ -15,6 +15,9 @@ const MAX_LISTED_SETTINGS = 5;
 const ADMIN_PROFILE = "System Administrator";
 const EXPECTED_PRIVILEGED_KINDS = new Set(["admin", "integration", "system"]);
 const OPEN_ACCESS = new Set(["Edit", "ReadEditTransfer"]);
+// Our judgement: in a smaller profile, one person's extra access is too ordinary to flag.
+const MIN_PEERS = 5;
+const MAX_LISTED = 8;
 const SHARING_FIELDS: Array<[string, keyof SharingDefaults]> = [["Account", "DefaultAccountAccess"], ["Contact", "DefaultContactAccess"], ["Opportunity", "DefaultOpportunityAccess"], ["Lead", "DefaultLeadAccess"]];
 
 const riskGroups = (risks: HealthRiskRow[]): number => new Set(risks.map((r) => r.SettingGroup ?? "No group")).size;
@@ -204,10 +207,140 @@ const sharingDefaults: Rule = {
   },
 };
 
+
+// Least privilege beyond Modify and View All Data (roadmap 3.2, DECISIONS.md 202).
+// Only custom profiles for internal users, and only permission sets of the org's
+// own: a standard profile or a package's set isn't the customer's to remove.
+
+/** The org's own permission sets, by id, and who holds each, directly or through an assigned group. */
+function holdings(access: AccessData, sets: Array<{ Id: string; Label: string; IsCustom: boolean; NamespacePrefix: string | null }>): { ours: Map<string, string>; holders: Map<string, Set<string>> } {
+  return { ours: new Map(sets.filter((s) => s.IsCustom && !s.NamespacePrefix).map((s) => [s.Id, s.Label])), holders: holdersOf(access) ?? new Map() };
+}
+
+function accessGap(ctx: RuleContext): NotMeasurableResult | null {
+  const { permissionSets } = ctx.data(orgDocumentationExtractor);
+  const access = ctx.data(accessExtractor);
+  const users = ctx.data(usersExtractor);
+  for (const [what, read] of [["Users", users], ["Permission sets", permissionSets], ["Profiles", access.profiles], ["Permission set assignments", access.assignments], ["Permission set groups", access.groupComponents]] as const) {
+    if (read.status !== "ok") return { outcome: "not_measurable", reason: `${what} couldn't be read: ${read.reason}`, evidence: [ctx.ev(read.source, { count: null })] };
+  }
+  return null;
+}
+
+const unusedAccess: Rule = {
+  id: "sec.unused-access",
+  version: 1,
+  domain: "security",
+  title: "Profiles and permission sets nobody uses",
+  evaluate(ctx): RuleResult {
+    const gap = accessGap(ctx);
+    if (gap) return gap;
+    const { permissionSets } = ctx.data(orgDocumentationExtractor);
+    const access = ctx.data(accessExtractor);
+    const users = ctx.data(usersExtractor);
+    if (permissionSets.status !== "ok" || access.profiles.status !== "ok" || users.status !== "ok") throw new Error("unreachable");
+    const inUse = new Set(users.data.filter((u) => u.IsActive).map((u) => u.Profile?.Name ?? ""));
+    // Internal users only: the users read holds no portal or community users, so their profiles would all look empty.
+    const custom = access.profiles.data.filter((p) => p.IsCustom && p.Profile && (p.Profile.UserType ?? "Standard") === "Standard");
+    const emptyProfiles = custom.filter((p) => !inUse.has(p.Profile!.Name)).map((p) => p.Profile!.Name).sort();
+    const { ours, holders } = holdings(access, permissionSets.data);
+    const emptySets = [...ours].filter(([id]) => !holders.get(id)?.size).map(([, label]) => label).sort();
+    const evidence = [
+      ctx.ev(access.profiles.source, { count: custom.length, exclusions: ["Standard profiles", "Profiles for portal and community users"] }),
+      ctx.ev(permissionSets.source, { count: ours.size, exclusions: ["Standard permission sets", "Installed packages' permission sets"] }),
+      ctx.ev(access.assignments.source, { count: access.assignments.status === "ok" ? access.assignments.data.length : null, exclusions: ["Inactive users"], note: "A set inside a permission set group counts as held by everyone the group is assigned to" }),
+    ];
+    const segments = [{ dimension: "kind", segments: 2 }, { dimension: "profile", segments: custom.length }];
+    const facts = { emptyProfiles: emptyProfiles.length, customProfiles: custom.length, emptySets: emptySets.length, ownSets: ours.size };
+    if (emptyProfiles.length + emptySets.length === 0) {
+      return { outcome: "pass", summary: `All ${plural(custom.length, "custom profile")} ${custom.length === 1 ? "has" : "have"} active users, and all ${plural(ours.size, "permission set")} of your own ${ours.size === 1 ? "is" : "are"} held by someone.`, evidence, segmentsChecked: segments, facts };
+    }
+    const parts = [
+      emptyProfiles.length ? `${emptyProfiles.length} of ${plural(custom.length, "custom profile")} ${emptyProfiles.length === 1 ? "has" : "have"} no active users` : "",
+      emptySets.length ? `${emptySets.length} of ${plural(ours.size, "permission set")} of your own ${emptySets.length === 1 ? "is" : "are"} held by nobody, directly or through a group` : "",
+    ].filter(Boolean);
+    return {
+      outcome: "issue",
+      title: "Some profiles and permission sets aren't used by anyone",
+      summary: `${parts.join(", and ")}. Each one is more to review whenever access changes, and an unused one can be given out again without anyone checking what it grants.`,
+      recommendation: "Check each with whoever set it up, then delete the ones nobody needs, starting with any that grant wide access.",
+      recommendationType: "investigate",
+      severity: "low",
+      confidence: "high",
+      evidence,
+      value: notSized("A security gap is a risk to manage, not a figure we can put in revenue or hours."),
+      effort: { size: "S" },
+      owner: "Salesforce admin",
+      dependencies: ["Check that no automation, flow or integration relies on a profile or set before deleting it"],
+      segmentsChecked: segments,
+      subjects: [...emptyProfiles.map((label) => ({ type: "profile", label })), ...emptySets.map((label) => ({ type: "permission set", label }))],
+      facts,
+    };
+  },
+};
+
+const peerOutliers: Rule = {
+  id: "sec.peer-outlier-access",
+  version: 1,
+  domain: "security",
+  title: "People with access nobody else on their profile has",
+  evaluate(ctx): RuleResult {
+    const gap = accessGap(ctx);
+    if (gap) return gap;
+    const { permissionSets } = ctx.data(orgDocumentationExtractor);
+    const access = ctx.data(accessExtractor);
+    const users = ctx.data(usersExtractor);
+    if (permissionSets.status !== "ok" || users.status !== "ok") throw new Error("unreachable");
+    const { ours, holders } = holdings(access, permissionSets.data);
+    // Sets granting Modify or View All Data are judged by their own checks, so they aren't counted twice.
+    const { sets: privileged } = ctx.data(privilegedPermissionsExtractor);
+    if (privileged.status === "ok") for (const set of privileged.data) ours.delete(set.Id);
+    // Admins hold what they need to run the org, so they're nobody's peers here.
+    const people = users.data.filter((u) => u.IsActive && u.Profile && u.Profile.Name !== ADMIN_PROFILE);
+    const byProfile = new Map<string, UserRow[]>();
+    for (const u of people) byProfile.set(u.Profile!.Name, [...(byProfile.get(u.Profile!.Name) ?? []), u]);
+    const compared = [...byProfile].filter(([, members]) => members.length >= MIN_PEERS).sort(([a], [b]) => a.localeCompare(b));
+    const outliers: Array<{ user: UserRow; profile: string; set: string }> = [];
+    for (const [profile, members] of compared) {
+      for (const [id, label] of [...ours].sort(([, a], [, b]) => a.localeCompare(b))) {
+        const holding = members.filter((u) => holders.get(id)?.has(u.Id));
+        if (holding.length === 1) outliers.push({ user: holding[0]!, profile, set: label });
+      }
+    }
+    const evidence = [
+      ctx.ev(access.assignments.source, { count: access.assignments.status === "ok" ? access.assignments.data.length : null, exclusions: ["Inactive users", "System administrators", `Profiles with fewer than ${MIN_PEERS} active users`, "Standard and installed packages' permission sets", "Sets granting Modify or View All Data, which have their own checks"] }),
+      ctx.ev(users.source, { count: people.length }),
+    ];
+    const segments = [{ dimension: "profile", segments: compared.length }, { dimension: "permission set", segments: ours.size }];
+    const facts = { people: new Set(outliers.map((o) => o.user.Id)).size, grants: outliers.length, profiles: compared.length };
+    if (compared.length === 0) return { outcome: "pass", summary: `No profile has ${MIN_PEERS} or more active users to compare.`, evidence, segmentExemptReason: `Profiles with fewer than ${MIN_PEERS} active users aren't compared.` };
+    if (outliers.length === 0) return { outcome: "pass", summary: `Across ${plural(compared.length, "profile")} with ${MIN_PEERS} or more people, nobody holds a permission set of your own that no colleague on the same profile has.`, evidence, segmentsChecked: segments, facts };
+    const listed = outliers.slice(0, MAX_LISTED).map((o) => `${o.set} (${o.profile})`);
+    return {
+      outcome: "issue",
+      title: "Some people hold access nobody else on their profile has",
+      summary: `${plural(facts.people, "person", "people")} ${facts.people === 1 ? "holds" : "hold"} a permission set that nobody else on their profile does: ${listed.join(", ")}${outliers.length > MAX_LISTED ? `, and ${outliers.length - MAX_LISTED} more` : ""}. Access given to one person for one job tends to stay after the job is done.`,
+      recommendation: "Check with each person's manager whether they still need it, and remove it if not. If they do, write down why.",
+      recommendationType: "investigate",
+      severity: "low",
+      // One person's extra access can be right: a team lead, or a temporary job.
+      confidence: "medium",
+      evidence,
+      value: notSized("A security gap is a risk to manage, not a figure we can put in revenue or hours."),
+      effort: { size: "S" },
+      owner: "Salesforce admin",
+      segmentsChecked: segments,
+      subjects: [...new Map(outliers.map((o) => [o.user.Id, { type: "user", label: ctx.userLabel(o.user.Id) }])).values()],
+      facts,
+      records: { object: "User", rows: outliers.map((o) => ({ id: o.user.Id, problem: `Holds ${o.set}, which nobody else on the ${o.profile} profile has` })), fix: "Ask their manager whether they still need it, and remove it if not" },
+    };
+  },
+};
+
 export const securityModule: DomainModule = {
   id: "security",
   cloud: "sales",
   label: "Security and access",
-  extractors: [usersExtractor, fieldDescribeExtractor, loginsExtractor, securityHealthExtractor, privilegedPermissionsExtractor, recordCountsExtractor, customObjectsExtractor, orgDocumentationExtractor],
-  rules: [healthScore, healthRisks, modifyAllData, viewAllData, sharingDefaults],
+  extractors: [usersExtractor, fieldDescribeExtractor, loginsExtractor, securityHealthExtractor, privilegedPermissionsExtractor, recordCountsExtractor, customObjectsExtractor, orgDocumentationExtractor, accessExtractor],
+  rules: [healthScore, healthRisks, modifyAllData, viewAllData, sharingDefaults, unusedAccess, peerOutliers],
 };

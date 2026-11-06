@@ -205,6 +205,9 @@ const DENSITIES: Density[] = [
   { critical: 2, high: 3, medium: 4, low: 6, info: 6 },
   { critical: 1, high: 1, medium: 6, low: 6, info: 6, columns: 2 },
   { critical: 1, high: 6, medium: 6, low: 6, info: 6, columns: 2 },
+  // Up to eight cards a slide, still paginated by height, before the last step
+  // gives up the area chapters (DECISIONS.md 208).
+  { critical: 1, high: 8, medium: 8, low: 8, info: 8, columns: 2 },
   { critical: 24, high: 24, medium: 24, low: 24, info: 24, columns: 2, domainSummary: true },
 ];
 

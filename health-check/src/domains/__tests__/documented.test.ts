@@ -73,8 +73,16 @@ describe("every part, from the synthetic org", () => {
     assert.equal(a.roleCount, 4);
     assert.equal(a.roleDepth, 3);
     assert.equal(a.profiles.reduce((sum, p) => sum + p.users, 0), a.metric.value);
-    // User 9 is inactive, so Data Fix Temporary has one holder, not two.
-    assert.deepEqual(a.permissionSets, [{ name: "Sales Console User", users: 5 }, { name: "CPQ User (acmecpq)", users: 2 }, { name: "Data Fix Temporary", users: 1 }, { name: "Reporting Everything", users: 1 }]);
+    // User 9 is inactive, so Data Fix Temporary has one holder, not two. Report
+    // Builder is held through a permission set group, and Old Territory Access by nobody.
+    assert.deepEqual(a.permissionSets, [
+      { name: "Sales Console User", users: 5 },
+      { name: "CPQ User (acmecpq)", users: 2 },
+      { name: "Data Fix Temporary", users: 1 },
+      { name: "Report Builder", users: 1 },
+      { name: "Reporting Everything", users: 1 },
+      { name: "Old Territory Access", users: 0 },
+    ]);
   });
 
   test("the security model: each object's internal and external default", () => {
