@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { runHealthCheck } from "../../engine/run.ts";
 import { escalationRulesExtractor, parseEscalationRules, serviceActivityExtractor, serviceCasesExtractor, serviceSetupExtractor, type ServiceActivity, type ServiceCases, type ServiceSetup } from "../../extract/service.ts";
 import type { Sourced } from "../../extract/types.ts";
+import { usersExtractor, type UserRow } from "../../extract/users.ts";
 import type { Finding } from "../../schemas/index.ts";
 import { analyseExtracts, clone, loadExtracts, runFromRecording, tempDir } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration, syntheticProvider } from "../../testing/replay.ts";
@@ -105,6 +106,24 @@ describe("Service Cloud on the synthetic org", () => {
     assert.ok(dormantUsers.includes(tokenOf(13)) && !dormantUsers.includes(tokenOf(15)), dormantUsers.join(", "));
     // Sam Reed (5) and Nina Hart (10) as before, and Ola Nowak; not Ben Cross.
     assert.equal(one(both, "svc.agent-licences").facts.dormant, 3);
+  });
+
+  test("a user set up inside the dormant period is too new to judge, in both counts (DECISIONS.md 386)", () => {
+    // Eve Lane (16): a Service Cloud user created 10 days ago who hasn't logged in yet.
+    const extracts = loadExtracts(dir);
+    const users = extracts.get(usersExtractor.id) as Sourced<UserRow[]>;
+    const setup = extracts.get(serviceSetupExtractor.id) as ServiceSetup;
+    const nina = usersTable.find((x) => x.Id === userId(10))!;
+    const eve = { ...clone(nina), Id: userId(16), Name: "Eve Lane", Username: "eve.lane@example.com", Email: "eve.lane@example.com", CreatedDate: new Date(Date.parse(AS_OF) - 10 * 86_400_000).toISOString().replace("Z", "+0000"), LastLoginDate: null };
+    if (users.status === "ok") users.data.push(eve as unknown as UserRow);
+    if (setup.supportUsers.status === "ok") setup.supportUsers.data.push({ Id: eve.Id, LastLoginDate: null, Profile: { UserLicense: { Name: eve.Profile.UserLicense.Name } } });
+    const list = analyseExtracts(extracts, { modules: ALL_MODULES }).findings;
+    const never = list.filter((f) => f.ruleId === "utl.never-logged-in").flatMap((f) => f.subjects.map((s) => s.label));
+    assert.ok(never.includes(tokenOf(10)) && !never.includes(tokenOf(16)), never.join(", "));
+    // Neither dormant nor idle: Sam Reed (5) and Nina Hart (10) as before.
+    const before = one(findings, "svc.agent-licences").facts;
+    const after = one(list, "svc.agent-licences").facts;
+    assert.deepEqual([after.dormant, after.idle, after.users], [2, before.idle, (before.users as number) + 1]);
   });
 
   test("a finding names no person", () => {

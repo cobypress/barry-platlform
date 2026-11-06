@@ -17,7 +17,7 @@ import { USER_GUARD_BLOCKERS, userGuards } from "../../guards/user-guards.ts";
 import { notSized, pct, plural, type RecordList, type Rule, type RuleContext, type RuleResult } from "../../engine/rule.ts";
 import type { Guard, Value } from "../../schemas/index.ts";
 import type { DomainModule } from "../types.ts";
-import { lapse, lapseByDate, type Lapse } from "../logins.ts";
+import { judged, lapse, lapseByDate, type Lapse } from "../logins.ts";
 import { calibratedHours } from "../value.ts";
 import { COMPLIMENTARY_LICENCES } from "../../money/licences.ts";
 import { investmentMetrics } from "./investment.ts";
@@ -319,7 +319,7 @@ function dormantRule(
       if (users.status !== "ok") return { outcome: "not_measurable", reason: `Users couldn't be read: ${users.reason}`, evidence: [ctx.ev(users.source, { count: null })] };
       const days = ctx.calibration.dormantDays;
       const cutoff = daysBefore(ctx.now, days);
-      const active = users.data.filter((u) => u.IsActive && new Date(u.CreatedDate) < cutoff && !isIntegrationLicence(licenceOf(u)));
+      const active = users.data.filter((u) => u.IsActive && judged(u, cutoff) && !isIntegrationLicence(licenceOf(u)));
       // The login log is the fuller record: a user it shows logging in inside the
       // period hasn't stopped, whatever LastLoginDate says, so isn't counted (DECISIONS.md 361).
       const logins = ctx.data(loginsExtractor);

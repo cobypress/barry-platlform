@@ -43,7 +43,7 @@ The synthetic and generated fingerprints are unchanged by all three, and all 2,0
   - `svc.agent-licences` doesn't use the login log as 361 does. A Service Cloud user the log clears is left out of the dormant-user count, but still counted as a seat held for nobody's casework.
   - It's a separate check with its own licence price, so it's not double money, but the two can disagree about one person.
   - Fixed in Brief BB (decision 394): both checks now judge a user through one helper.
-  - One difference is left: a Service Cloud user created inside the dormant period who hasn't logged in is counted by the licence check, but not by the dormant-user count, which leaves new users out.
+  - The one difference left, a Service Cloud user set up inside the dormant period, was closed in Brief BC (decision 386): the helper judges neither check's newcomers.
 - **The money table's "how it was reached" line says "if all came back" for seats and hours too.**
   - It's true as arithmetic: the figure before the share is counted.
   - But "came back" reads oddly for licences and time. That's wording, in B's area.

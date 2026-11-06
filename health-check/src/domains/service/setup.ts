@@ -5,7 +5,7 @@ import { daysBefore, monthsBefore } from "../../extract/types.ts";
 import { loginsExtractor, usersExtractor } from "../../extract/users.ts";
 import { costPerSeat, isPriced } from "../../money/seat-cost.ts";
 import type { Evidence, SegmentCheck, Value } from "../../schemas/index.ts";
-import { lapse } from "../logins.ts";
+import { judged, lapse } from "../logins.ts";
 import type { DomainModule } from "../types.ts";
 import { caseQueues, limitsOf, MIN_SEGMENT, originOf, priorityOf } from "./shared.ts";
 
@@ -208,7 +208,7 @@ const omniRouting: Rule = {
 
 const agentLicences: Rule = {
   id: "svc.agent-licences",
-  version: 2,
+  version: 3,
   domain: DOMAIN,
   title: "Service Cloud licences are used",
   evaluate(ctx) {
@@ -217,9 +217,14 @@ const agentLicences: Rule = {
     const dormantDays = ctx.calibration.dormantDays;
     const cutoff = daysBefore(ctx.now, dormantDays);
     const licenceOf = (u: (typeof supportUsers.data)[number]) => u.Profile?.UserLicense?.Name ?? "Unknown";
+    // When each was set up is in the users read, not this one: someone set up inside the
+    // period is too new to judge, here as in the dormant-user count (DECISIONS.md 386).
+    const everyone = ctx.data(usersExtractor);
+    const created = new Map(everyone?.status === "ok" ? everyone.data.map((u) => [u.Id, u.CreatedDate]) : []);
     // Integration licences never log in by design.
-    const users = supportUsers.data.filter((u) => !/\bintegration\b/i.test(licenceOf(u)));
-    const evidence = [ctx.ev(supportUsers.source, { count: users.length, exclusions: ["Users on integration licences"] })];
+    const users = supportUsers.data.filter((u) => !/\bintegration\b/i.test(licenceOf(u))).map((u) => ({ ...u, CreatedDate: created.get(u.Id) ?? null }));
+    const newcomers = users.filter((u) => !judged(u, cutoff)).length;
+    const evidence = [ctx.ev(supportUsers.source, { count: users.length, exclusions: ["Users on integration licences", ...(newcomers ? [`Users set up in the last ${dormantDays} days`] : [])] })];
     if (users.length === 0) return { outcome: "pass", summary: "No active user holds a Service Cloud licence.", evidence, segmentExemptReason: "There are no Service Cloud users" };
     // Judged as the dormant-user count judges them, login log and all, so the two agree about each person (DECISIONS.md 394).
     const logins = ctx.data(loginsExtractor);
@@ -232,14 +237,17 @@ const agentLicences: Rule = {
       if (cases?.open.status === "ok" && cases.closedCases.status === "ok") {
         const since = daysBefore(ctx.now, dormantDays).getTime();
         const worked = new Set([...cases.open.data.map((c) => c.OwnerId), ...cases.closedCases.data.filter((c) => Date.parse(c.ClosedDate) >= since).map((c) => c.OwnerId), ...(work?.agentWork.status === "ok" ? work.agentWork.data.map((w) => w.UserId) : [])]);
-        idle = users.filter((u) => !dormant.includes(u) && !worked.has(u.Id)).map((u) => u.Id);
+        idle = users.filter((u) => judged(u, cutoff) && !dormant.includes(u) && !worked.has(u.Id)).map((u) => u.Id);
         evidence.push(ctx.ev(cases.open.source, { count: cases.open.data.length, note: "Case owners, to see who works cases" }));
       }
     }
     const wasted = dormant.length + idle.length;
     const segmentsChecked: SegmentCheck[] = [{ dimension: "licence", segments: new Set(users.map(licenceOf)).size }];
-    const facts = { users: users.length, dormant: dormant.length, idle: idle.length, days: dormantDays };
-    if (!wasted) return { outcome: "pass", summary: `All ${users.length} Service Cloud users logged in within ${dormantDays} days${ctx.scope !== "essentials" ? " and worked a case" : ""}.`, evidence, segmentsChecked, facts };
+    const facts = { users: users.length, dormant: dormant.length, idle: idle.length, days: dormantDays, ...(newcomers ? { newcomers } : {}) };
+    if (!wasted) {
+      const who = newcomers ? `${users.length - newcomers} Service Cloud users set up more than ${dormantDays} days ago` : `${users.length} Service Cloud users`;
+      return { outcome: "pass", summary: `All ${who} logged in within ${dormantDays} days${ctx.scope !== "essentials" ? " and worked a case" : ""}.`, evidence, segmentsChecked, facts };
+    }
     const org = ctx.data(orgExtractor);
     const edition = org.status === "ok" ? (org.data[0]?.OrganizationType ?? null) : null;
     const price = costPerSeat(SERVICE_SEAT, { calibration: ctx.calibration, edition });
