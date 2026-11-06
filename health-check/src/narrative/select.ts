@@ -70,27 +70,40 @@ export function teamLevelFinding(f: Finding): Finding {
 // it comes after every issue with a figure in money, and before those with none.
 const sizedAmount = (f: Finding): number => (f.value.kind === "not_sized" ? -1 : NOT_MONEY_RULES.has(f.ruleId) ? 0 : f.value.amount);
 
-export function bySeverity(a: Finding, b: Finding): number {
-  return (
-    SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity) ||
-    sizedAmount(b) - sizedAmount(a) ||
-    CONFIDENCE_ORDER.indexOf(a.confidence) - CONFIDENCE_ORDER.indexOf(b.confidence) ||
-    a.id.localeCompare(b.id)
-  );
-}
+/**
+ * What each issue adds to the total, after the overlap rules, by finding id
+ * (DECISIONS.md 362): its expected figure when it's the one its group counts,
+ * nothing when a larger overlapping issue holds the money, or when its figure is
+ * exposure or a target. An issue with no figure isn't in it.
+ */
+export type Added = ReadonlyMap<string, number>;
 
-export const issuesOf = (findings: Finding[]): Finding[] => findings.filter((f) => f.status === "issue").sort(bySeverity);
+const rankAmount = (f: Finding, added?: Added): number => (added ? (added.get(f.id) ?? (f.value.kind === "not_sized" ? -1 : 0)) : sizedAmount(f));
+
+/** Severity first, then money: what each adds to the total when that's known, else the issue's own figure. */
+export const rankBy =
+  (added?: Added) =>
+  (a: Finding, b: Finding): number =>
+    SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity) ||
+    rankAmount(b, added) - rankAmount(a, added) ||
+    CONFIDENCE_ORDER.indexOf(a.confidence) - CONFIDENCE_ORDER.indexOf(b.confidence) ||
+    a.id.localeCompare(b.id);
+
+export const bySeverity = rankBy();
+
+export const issuesOf = (findings: Finding[], added?: Added): Finding[] => findings.filter((f) => f.status === "issue").sort(rankBy(added));
 
 // Team-level findings have already lost their token, so both forms are checked.
 const aboutOnePerson = (f: Finding): boolean => USER_TOKEN.test(f.title) || /\ba single (?:rep|person)\b/i.test(f.title);
 
 /** A finding about one person's results doesn't belong in an executive top list. */
-export function topIssues(findings: Finding[], count: number): Finding[] {
-  return issuesOf(findings).filter((f) => !aboutOnePerson(f)).slice(0, count);
+export function topIssues(findings: Finding[], count: number, added?: Added): Finding[] {
+  return issuesOf(findings, added).filter((f) => !aboutOnePerson(f)).slice(0, count);
 }
 
 export type PlanPhase = { key: string; title: string; from: number; to: number; findings: Finding[] };
-export type Plan = { phases: PlanPhase[]; later: Finding[] };
+/** `alsoFor` holds, by an action's finding id, the other issues from the same rule that the same action covers. */
+export type Plan = { phases: PlanPhase[]; later: Finding[]; alsoFor: Record<string, Finding[]> };
 
 // What one team can take on in each 30 days, as our working figure. A plan that
 // puts most of a report in its first month is a list, not a plan.
@@ -99,6 +112,13 @@ export const PLAN_CAPACITY = [8, 10, 10] as const;
 const SMALL = new Set(["XS", "S", "M"]);
 
 /** The index of the first phase an action may go in. Urgent work that can be done soon goes first, and large builds and low-severity tidying go last. */
+/**
+ * A quick, cheap win: very small work that's at least medium, or that saves money,
+ * such as a licence to release. It goes in the first 30 days, and doesn't count
+ * against the phase's capacity, as it takes almost none of it (DECISIONS.md 363).
+ */
+export const isQuickWin = (f: Finding): boolean => f.effort.size === "XS" && (f.severity !== "low" && f.severity !== "info" ? true : f.value.kind === "licence_cost" || f.value.kind === "revenue");
+
 function earliestPhase(f: Finding): number {
   const urgent = f.severity === "critical" || f.severity === "high";
   if (!SMALL.has(f.effort.size)) return f.severity === "critical" ? 1 : 2;
@@ -112,11 +132,21 @@ function earliestPhase(f: Finding): number {
  * room, so urgent work overflows into the next month rather than off the plan.
  * What doesn't fit comes after 90 days.
  */
-export function buildPlan(findings: Finding[]): Plan {
-  const seen = new Set<string>();
-  const actions = issuesOf(findings).filter((f) => {
-    if (!f.recommendation || f.recommendationType === "none" || f.severity === "info" || seen.has(f.recommendation)) return false;
-    seen.add(f.recommendation);
+export function buildPlan(findings: Finding[], added?: Added): Plan {
+  // Every issue with something to do is planned (DECISIONS.md 363). One from the
+  // same rule with the same action joins that action, rather than repeating it or
+  // dropping off: before, R18.2 and R18.3 fell out of the plan this way.
+  const lead = new Map<string, Finding>();
+  const alsoFor: Record<string, Finding[]> = {};
+  const actions = issuesOf(findings, added).filter((f) => {
+    if (!f.recommendation || f.recommendationType === "none" || f.severity === "info") return false;
+    const key = `${f.ruleId}\u0000${f.recommendation}`;
+    const first = lead.get(key);
+    if (first) {
+      (alsoFor[first.id] ??= []).push(f);
+      return false;
+    }
+    lead.set(key, f);
     return true;
   });
   const phases: PlanPhase[] = [
@@ -125,11 +155,16 @@ export function buildPlan(findings: Finding[]): Plan {
     { key: "build", title: "Build", from: 61, to: 90, findings: [] },
   ];
   const later: Finding[] = [];
+  const load = (i: number): number => phases[i]!.findings.filter((f) => !isQuickWin(f)).length;
   for (const f of actions) {
-    const index = [0, 1, 2].slice(earliestPhase(f)).find((i) => phases[i]!.findings.length < PLAN_CAPACITY[i]!);
+    if (isQuickWin(f)) {
+      phases[0]!.findings.push(f);
+      continue;
+    }
+    const index = [0, 1, 2].slice(earliestPhase(f)).find((i) => load(i) < PLAN_CAPACITY[i]!);
     (index === undefined ? later : phases[index]!.findings).push(f);
   }
-  return { phases, later };
+  return { phases, later, alsoFor };
 }
 
 export type Verdict = { headline: string; critical: number; high: number; issues: number };

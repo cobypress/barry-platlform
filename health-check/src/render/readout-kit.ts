@@ -34,7 +34,7 @@ export function readoutKit(report: BuiltReport): KitPart[] {
   const team = report.teamFindings;
   const m = (n: number): string => compactMoney(n, report.value.currency);
   const verdict = verdictOf(team);
-  const top = topIssues(team, TOP_ISSUE_COUNT);
+  const top = topIssues(team, TOP_ISSUE_COUNT, report.added);
   const o = report.overall;
   const parts: KitPart[] = [];
 
@@ -179,7 +179,7 @@ export function readoutKit(report: BuiltReport): KitPart[] {
     });
   }
 
-  const phases = buildPlan(team).phases.filter((ph) => ph.findings.length > 0);
+  const phases = buildPlan(team, report.added).phases.filter((ph) => ph.findings.length > 0);
   parts.push({
     key: "plan",
     title: "The 90-day plan",

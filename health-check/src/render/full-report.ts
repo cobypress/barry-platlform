@@ -636,8 +636,8 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   const metrics = report.metrics;
   const metric = (id: string): Metric | undefined => metrics.find((m) => m.id === id);
   const verdict = verdictOf(team);
-  const top = topIssues(team, TOP_ISSUE_COUNT);
-  const { phases: plan, later } = buildPlan(team);
+  const top = topIssues(team, TOP_ISSUE_COUNT, report.added);
+  const { phases: plan, later, alsoFor } = buildPlan(team, report.added);
   const setupReview = isSetupReview(run);
   // A set-up review shows only its own areas: the record areas get one line, below.
   const domains = areasOf(run, team);
@@ -785,7 +785,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   for (const domain of withIssues) {
     const label = domainLabel(domain);
     const own = team.filter((f) => f.domain === domain);
-    const issues = issuesOf(own);
+    const issues = issuesOf(own, report.added);
     if (!density?.domainSummary) add(`<div class="eyebrow">Area</div><h1>${r.t(label)}</h1><div class="body">${sectionBody(r, built, `domain_${domain}`)}</div>`, "dark divider");
     // Each area opens the same way. The tightest densities drop it to keep the deck in range.
     const glance = density && !density.domainSummary ? chapterSlide(r, report, domain) : "";
@@ -836,7 +836,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
     const cut = compact && all.length > 1;
     const pages = cut ? [all[0]!.slice(0, -1)] : all;
     pages.forEach((group, i) => {
-      add(`<div class="eyebrow">Roadmap</div><h2>Days ${phase.from} to ${phase.to}: ${phase.title}${i ? ", continued" : ""}</h2>${cut ? `<p style="font-size:15px;margin-bottom:6px">${COMPACT_NOTE}</p>` : ""}<ul class="action-list${dense ? " two-text" : ""}">${group.map((f) => `<li><strong>${r.t(f.title)}.</strong>${r.ref(f.id)} ${r.t(f.recommendation)} <span class="owner">${r.t(f.owner)}</span></li>`).join("")}</ul>`);
+      add(`<div class="eyebrow">Roadmap</div><h2>Days ${phase.from} to ${phase.to}: ${phase.title}${i ? ", continued" : ""}</h2>${cut ? `<p style="font-size:15px;margin-bottom:6px">${COMPACT_NOTE}</p>` : ""}<ul class="action-list${dense ? " two-text" : ""}">${group.map((f) => `<li><strong>${r.t(f.title)}.</strong>${r.ref(f.id)}${(alsoFor[f.id] ?? []).map((x) => r.ref(x.id)).join("")} ${r.t(f.recommendation)} <span class="owner">${r.t(f.owner)}</span></li>`).join("")}</ul>`);
     });
   }
 

@@ -4,7 +4,7 @@ import { z } from "zod";
 import { applyNarrative } from "../apply.ts";
 import type { NarrativeClient } from "../client.ts";
 import { Intake } from "../intake.ts";
-import { buildPlan, domainLabel, PLAN_CAPACITY, scorecard, teamLevelFinding, teamLevelText, topIssues, verdictOf } from "../select.ts";
+import { buildPlan, domainLabel, isQuickWin, PLAN_CAPACITY, scorecard, teamLevelFinding, teamLevelText, topIssues, verdictOf } from "../select.ts";
 import { buildReport, currentBody, TOP_ISSUE_COUNT, type ReportInput } from "../sections.ts";
 import { Pseudonymiser, type PseudonymEntry } from "../../privacy/pseudonymiser.ts";
 import { compactMoney } from "../../render/format.ts";
@@ -214,23 +214,33 @@ describe("ranking", () => {
     for (const f of topIssues(team, 50)) assert.doesNotMatch(f.title, /a single/i);
   });
 
-  test("a plan has three phases, with no repeated action", () => {
-    const { phases: plan, later } = buildPlan(team);
+  test("a plan has three phases, no action repeated for the same rule, and every issue with something to do in it (DECISIONS.md 363)", () => {
+    const { phases: plan, later, alsoFor } = buildPlan(team);
     assert.deepEqual(plan.map((p) => [p.from, p.to]), [[1, 30], [31, 60], [61, 90]]);
-    const actions = [...plan.flatMap((p) => p.findings), ...later].map((f) => f.recommendation);
-    assert.equal(new Set(actions).size, actions.length);
+    const actions = [...plan.flatMap((p) => p.findings), ...later];
+    assert.equal(new Set(actions.map((f) => `${f.ruleId}|${f.recommendation}`)).size, actions.length);
     assert.ok(actions.length > 10);
+    // Pinned from the night 3 reading pass: R18.2, R18.3 and R15.5 were in no phase.
+    const placed = new Set([...actions, ...Object.values(alsoFor).flat()].map((f) => f.id));
+    for (const f of team.filter((x) => x.status === "issue" && x.recommendation && x.recommendationType !== "none" && x.severity !== "info")) assert.ok(placed.has(f.id), f.title);
+    // An issue from the same rule with the same action joins it, rather than repeating it.
+    for (const [id, others] of Object.entries(alsoFor)) for (const o of others) assert.equal(o.ruleId, actions.find((f) => f.id === id)!.ruleId);
+    assert.ok(Object.values(alsoFor).flat().some((f) => f.ruleId === "pipe.segment-divergence"));
   });
 
-  test("each phase holds what a team can take on, with urgent work first", () => {
+  test("each phase holds what a team can take on, with urgent work first and quick wins in the first month (DECISIONS.md 363)", () => {
     const { phases, later } = buildPlan(team);
-    phases.forEach((p, i) => assert.ok(p.findings.length <= PLAN_CAPACITY[i]!, `${p.title}: ${p.findings.length}`));
+    const load = (p: (typeof phases)[number]) => p.findings.filter((f) => !isQuickWin(f));
+    phases.forEach((p, i) => assert.ok(load(p).length <= PLAN_CAPACITY[i]!, `${p.title}: ${load(p).length}`));
     assert.ok(later.length > 0, "the synthetic run has more actions than a 90-day plan holds");
     const urgent = (f: Finding): boolean => f.severity === "critical" || f.severity === "high";
-    assert.ok(phases[0]!.findings.every((f) => urgent(f) || (f.severity === "medium" && f.effort.size === "XS")), "the first month is urgent work or the quickest medium fixes");
-    assert.ok(phases[0]!.findings.length === PLAN_CAPACITY[0], "the first month is used");
+    assert.ok(phases[0]!.findings.every((f) => urgent(f) || isQuickWin(f) || (f.severity === "medium" && f.effort.size === "XS")), "the first month is urgent work or quick wins");
+    assert.ok(load(phases[0]!).length === PLAN_CAPACITY[0], "the first month is used");
+    // Every quick win is in the first month, licence savings included.
+    for (const f of [...phases.slice(1).flatMap((p) => p.findings), ...later]) assert.ok(!isQuickWin(f), f.title);
+    assert.ok(phases[0]!.findings.some((f) => f.ruleId === "utl.unassigned-licence-seats"));
     // An urgent action only misses the plan when the plan is full of urgent work.
-    for (const f of later.filter(urgent)) assert.ok(phases.every((p, i) => p.findings.length === PLAN_CAPACITY[i] && p.findings.every(urgent)), f.title);
+    for (const f of later.filter(urgent)) assert.ok(phases.every((p, i) => load(p).length === PLAN_CAPACITY[i] && load(p).every(urgent)), f.title);
     assert.ok(later.every((f) => f.severity !== "info"));
   });
 

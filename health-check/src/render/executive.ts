@@ -109,9 +109,10 @@ function planLayout(r: Render, phases: PlanPhase[], introHeight: number, pagesLe
   }
 }
 
-function phaseBlock(r: Render, { phase, items }: PlanBlock): string {
+function phaseBlock(r: Render, { phase, items }: PlanBlock, alsoFor: Record<string, Finding[]> = {}): string {
   // The title says what the action is about. A recommendation on its own often says "these deals".
-  const rows = items.map((f) => `<li><strong>${r.t(f.title)}.</strong>${r.ref(f.id)} ${r.t(f.recommendation)} <span class="owner">${r.t(f.owner)}</span></li>`);
+  // The other issues the same action covers, by their references (DECISIONS.md 363).
+  const rows = items.map((f) => `<li><strong>${r.t(f.title)}.</strong>${r.ref(f.id)}${(alsoFor[f.id] ?? []).map((x) => r.ref(x.id)).join("")} ${r.t(f.recommendation)} <span class="owner">${r.t(f.owner)}</span></li>`);
   const more = phase.findings.length > items.length ? `<p class="owner">The full report lists the rest of this phase.</p>` : "";
   const body = rows.length ? `<ul>${rows.join("")}</ul>${more}` : "<p>Nothing planned for this phase.</p>";
   return `<section class="phase"><h3>Days ${phase.from} to ${phase.to}: ${phase.title}</h3>${body}</section>`;
@@ -185,8 +186,8 @@ export function executiveHtml(report: BuiltReport, pseudonyms: Pseudonymiser): s
   const r: Render = { ...base, ref: (id) => (used.add(id), base.ref(id)) };
   const team = report.teamFindings;
   const verdict = verdictOf(team);
-  const top = topIssues(team, TOP_ISSUE_COUNT);
-  const plan = buildPlan(team).phases;
+  const top = topIssues(team, TOP_ISSUE_COUNT, report.added);
+  const { phases: plan, alsoFor } = buildPlan(team, report.added);
   const customer = intake?.customerName ?? run.customerRef ?? "Customer";
   const notMeasurable = team.filter((f) => f.status === "not_measurable").length;
   const setupReview = isSetupReview(run);
@@ -249,7 +250,7 @@ export function executiveHtml(report: BuiltReport, pseudonyms: Pseudonymiser): s
   // Two pages are kept back: what happens next, and the references.
   planLayout(r, plan, introHeight, executiveMaxPages(report) - pages.length - 2).forEach((group, i) => {
     const phases = group.filter((b): b is PlanBlock => !("intro" in b));
-    add(`<div class="eyebrow">90-day plan</div><h2>${i === 0 ? "What we'd do first" : "What we'd do first, continued"}</h2>${i === 0 ? `<p style="margin-bottom:14px">${r.t(intro)}</p>` : ""}${phases.map((b) => phaseBlock(r, b)).join("")}`);
+    add(`<div class="eyebrow">90-day plan</div><h2>${i === 0 ? "What we'd do first" : "What we'd do first, continued"}</h2>${i === 0 ? `<p style="margin-bottom:14px">${r.t(intro)}</p>` : ""}${phases.map((b) => phaseBlock(r, b, alsoFor)).join("")}`);
   });
 
   add(nextStepsPage(r, report));
