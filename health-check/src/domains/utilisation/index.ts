@@ -2,7 +2,7 @@ import { money } from "../../render/format.ts";
 import { fieldDescribeExtractor } from "../../extract/fields.ts";
 import { apexExtractor, metadataExtractor, scheduledJobsExtractor } from "../../extract/automation.ts";
 import { orgExtractor, recordCountsExtractor } from "../../extract/configuration.ts";
-import { daysBefore, monthsBefore } from "../../extract/types.ts";
+import { daysBefore } from "../../extract/types.ts";
 import {
   activityCaptureExtractor,
   licencesExtractor,
@@ -18,7 +18,10 @@ import { notSized, pct, plural, type RecordList, type Rule, type RuleContext, ty
 import type { Guard, Value } from "../../schemas/index.ts";
 import type { DomainModule } from "../types.ts";
 import { judged, lapse, lapseByDate, type Lapse } from "../logins.ts";
+import { REPORT_RECENT_DAYS } from "../adoption/index.ts";
 import { calibratedHours } from "../value.ts";
+import { labelsOf } from "../labels.ts";
+import { labelsExtractor } from "../../extract/labels.ts";
 import { COMPLIMENTARY_LICENCES } from "../../money/licences.ts";
 import { investmentMetrics } from "./investment.ts";
 
@@ -27,7 +30,6 @@ const MIN_SPARE_SEATS = 2;
 // A real org showed the Sales Insights integration user as a licence to release.
 const isIntegrationLicence = (licence: string): boolean => /\bintegration\b/i.test(licence);
 const SPARE_SEAT_SHARE = 10;
-const UNUSED_REPORT_MONTHS = 12;
 const UNUSED_REPORT_SHARE = 50;
 const MIN_REPORTS = 50;
 const RECENT_REPORT_DAYS = 90;
@@ -245,17 +247,19 @@ export const packagePriceKey = (namespace: string): string => `package:${namespa
 // app and a trial aren't seats anyone pays for one by one, so they're left out.
 const packageSeats: Rule = {
   id: "utl.package-seats",
-  version: 1,
+  version: 2,
   domain: "utilisation",
   title: "Installed apps' seats nobody holds",
   evaluate(ctx): RuleResult | RuleResult[] {
     const { packageLicenses } = ctx.data(licencesExtractor);
     if (packageLicenses.status !== "ok") return { outcome: "not_measurable", reason: `Installed packages' licences couldn't be read: ${packageLicenses.reason}`, evidence: [ctx.ev(packageLicenses.source, { count: null })] };
     const seated = packageLicenses.data.filter((p) => p.Status === "Active" && p.AllowedLicenses > 0).sort((a, b) => (a.NamespacePrefix ?? "").localeCompare(b.NamespacePrefix ?? ""));
-    const name = (p: { NamespacePrefix: string | null }): string => p.NamespacePrefix ?? "An app with no namespace";
+    // By the package's name where it can be read; a licence record holds only the namespace (DECISIONS.md 413).
+    const labels = labelsOf(ctx);
+    const name = (p: { NamespacePrefix: string | null }): string => (p.NamespacePrefix ? labels.package(p.NamespacePrefix) : "An app with no namespace");
     const unused = seated.filter((p) => p.UsedLicenses === 0);
     const spare = seated.filter((p) => p.UsedLicenses > 0 && p.AllowedLicenses - p.UsedLicenses >= MIN_SPARE_SEATS && pct(p.AllowedLicenses - p.UsedLicenses, p.AllowedLicenses) >= SPARE_SEAT_SHARE);
-    const evidence = [ctx.ev(packageLicenses.source, { count: seated.length, exclusions: ["Site licences", "Free, trial and expired apps"], note: "Named by namespace: the licence record holds no app name" })];
+    const evidence = [ctx.ev(packageLicenses.source, { count: seated.length, exclusions: ["Site licences", "Free, trial and expired apps"], note: `Licence records by namespace: ${seated.map((p) => p.NamespacePrefix ?? "none").join(", ")}. Named from the installed packages, where they could be read` })];
     const segments = [{ dimension: "installed app", segments: seated.length }];
     if (unused.length + spare.length === 0) {
       return seated.length
@@ -363,13 +367,14 @@ const neverLoggedIn = dormantRule(
 
 const unusedReports: Rule = {
   id: "utl.unused-reports",
-  version: 2,
+  version: 3,
   domain: "utilisation",
   title: "Reports nobody runs",
   evaluate(ctx): RuleResult | RuleResult[] {
     const reports = ctx.data(reportsExtractor);
     if (reports.status !== "ok") return { outcome: "not_measurable", reason: `Reports couldn't be read: ${reports.reason}`, evidence: [ctx.ev(reports.source, { count: null })] };
-    const cutoff = monthsBefore(ctx.now, UNUSED_REPORT_MONTHS);
+    // The period the report-use metric defines, so the issue and the definition beside it agree (night 3 reading pass, item 21).
+    const cutoff = daysBefore(ctx.now, REPORT_RECENT_DAYS);
     const settled = reports.data.filter((r) => new Date(r.CreatedDate) < daysBefore(ctx.now, RECENT_REPORT_DAYS));
     const exclusions = [`Reports created in the last ${RECENT_REPORT_DAYS} days`, "Private reports the connected user can't see"];
     if (settled.length < MIN_REPORTS) {
@@ -382,11 +387,11 @@ const unusedReports: Rule = {
     const range = { from: cutoff.toISOString().slice(0, 10), to: ctx.window.to };
     const evidence = [ctx.ev(reports.source, { count: unused.length, dateRange: range, exclusions })];
     const segments = [{ dimension: "folder", segments: folders.size }];
-    if (share < UNUSED_REPORT_SHARE) return { outcome: "pass", summary: `${share}% of reports haven't been run in ${UNUSED_REPORT_MONTHS} months.`, evidence, segmentsChecked: segments, facts: { share } };
+    if (share < UNUSED_REPORT_SHARE) return { outcome: "pass", summary: `${share}% of reports haven't been run in ${REPORT_RECENT_DAYS} days.`, evidence, segmentsChecked: segments, facts: { share } };
     return {
       outcome: "issue",
       title: "Most reports aren't being used",
-      summary: `${unused.length} of ${settled.length} reports (${share}%) haven't been run in ${UNUSED_REPORT_MONTHS} months, so people will struggle to find the ones that matter.`,
+      summary: `${unused.length} of ${settled.length} reports (${share}%) haven't been run in ${REPORT_RECENT_DAYS} days, so people will struggle to find the ones that matter.`,
       recommendation: "Agree a core report set by team and archive the rest to a clearly labelled folder.",
       recommendationType: "investigate",
       severity: "low",
@@ -538,6 +543,7 @@ export const utilisationModule: DomainModule = {
   cloud: "sales",
   label: "Utilisation",
   extractors: [
+    labelsExtractor,
     usersExtractor,
     licencesExtractor,
     fieldDescribeExtractor,

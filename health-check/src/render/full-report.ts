@@ -538,7 +538,7 @@ function inventorySlide(r: Render, label: string, metric: Metric | undefined): S
   // Records stay in the raw notes: this table is about what a newcomer has to learn.
   const columns = INVENTORY_COLUMNS.filter((c) => c.key !== "records");
   const cell = (v: number | null): string => `<td class="num">${v === null ? "Not read" : v}</td>`;
-  const rows = shown.map((row) => `<tr><td>${r.t(row.object)}</td>${columns.map((c) => cell(row.counts[c.key])).join("")}</tr>`);
+  const rows = shown.map((row) => `<tr><td>${r.t(row.label)}</td>${columns.map((c) => cell(row.counts[c.key])).join("")}</tr>`);
   const own = m.stats.customObjects ? `your ${m.stats.coreObjects} core objects and ${m.stats.customObjects} custom objects of your own with records` : `your ${m.stats.coreObjects} core objects, and no custom objects of your own with records`;
   const automation = m.stats.automation ? ` Of the ${m.stats.automation} rules, flows and triggers on them, ${m.stats.undocumented ? `${m.stats.undocumented} have no description` : "every one has a description"}.` : " There's no automation on them.";
   const lede = `We counted ${m.value} objects: ${own}.${automation}`;

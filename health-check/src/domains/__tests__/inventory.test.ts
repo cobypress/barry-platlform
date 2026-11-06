@@ -66,8 +66,10 @@ describe("the object inventory", () => {
 
   test("every object has every column, so the table can be rebuilt from the metric", () => {
     const m = measured(inventory());
-    assert.equal(m.segments.length, 7 * INVENTORY_COLUMNS.length);
-    for (const s of m.segments) assert.ok(s.value !== null || s.notMeasurableReason, `${s.dimension} ${s.key}`);
+    // Label segments aside, which name an object for customer text (DECISIONS.md 412).
+    const columns = m.segments.filter((s) => s.dimension !== "label");
+    assert.equal(columns.length, 7 * INVENTORY_COLUMNS.length);
+    for (const s of columns) assert.ok(s.value !== null || s.notMeasurableReason, `${s.dimension} ${s.key}`);
   });
 
   test("leaves out objects from installed packages, even with records", () => {

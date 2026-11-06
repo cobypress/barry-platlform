@@ -102,7 +102,7 @@ describe("installed apps' seats", () => {
     const f = one(output!.findings, "utl.package-seats");
     assert.equal(f.status, "issue");
     assert.equal(f.severity, "low");
-    assert.match(f.summary, /acmecpq has 8 of 20 seats unassigned/);
+    assert.match(f.summary, /Acme CPQ has 8 of 20 seats unassigned/);
     assert.equal(f.value.kind, "not_sized");
   });
 
@@ -131,7 +131,7 @@ describe("storage against the allowance", () => {
     assert.equal(f.domain, "technical_health");
     assert.equal(f.severity, "medium");
     assert.match(f.summary, /Data storage is 87\.3% used \(8,940 of 10,240 MB\)/);
-    assert.match(f.summary, /Invoice__c \(12,000\)/);
+    assert.match(f.summary, /Invoice \(12,000\)/);
     assert.equal(f.value.kind, "not_sized");
   });
 

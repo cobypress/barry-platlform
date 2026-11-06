@@ -3,6 +3,8 @@ import { missingFieldReason } from "../../extract/fields.ts";
 import { cpqSetupExtractor, type FieldType } from "../../extract/cpq.ts";
 import { licencesExtractor } from "../../extract/users.ts";
 import type { DomainModule } from "../types.ts";
+import { labelsOf } from "../labels.ts";
+import { labelsExtractor } from "../../extract/labels.ts";
 import { listed, presenceGap } from "./shared.ts";
 
 // How CPQ is set up: its price and product rules, and the twin fields that carry
@@ -64,13 +66,20 @@ const events = (value: string | null | undefined): Set<string> => new Set((value
 // tell, so this is medium confidence.
 const priceRuleConflicts: Rule = {
   id: "cpq.price-rule-conflicts",
-  version: 1,
+  version: 2,
   domain: DOMAIN,
   title: "Price rules that set the same field at the same point",
   evaluate(ctx): RuleResult {
     const gap = presenceGap(ctx);
     if (gap) return gap;
-    const { priceRules, priceActions } = ctx.data(cpqSetupExtractor);
+    const { priceRules, priceActions, twins, quoteFields } = ctx.data(cpqSetupExtractor);
+    // A field by its label on the object the action sets, where the describe gave one (DECISIONS.md 414).
+    const labels = labelsOf(ctx);
+    const fieldName = (target: string | null | undefined, field: string): string => {
+      const object = /^quote$/i.test(target ?? "") ? "SBQQ__Quote__c" : "SBQQ__QuoteLine__c";
+      const fields = object === "SBQQ__Quote__c" ? (quoteFields.status === "ok" ? quoteFields.data : []) : twins.status === "ok" ? twins.data.quoteLine : [];
+      return `${fields.find((f) => f.name.toLowerCase() === field.toLowerCase())?.label ?? field} on ${labels.object(object)}`;
+    };
     if (priceRules.status !== "ok") return { outcome: "not_measurable", reason: `Price rules couldn't be read: ${priceRules.reason}`, evidence: [ctx.ev(priceRules.source, { count: null })] };
     if (priceActions.status !== "ok") return { outcome: "not_measurable", reason: `Price actions couldn't be read: ${priceActions.reason}`, evidence: [ctx.ev(priceActions.source, { count: null })] };
     const missing = missingFieldReason(priceRules, "SBQQ__PriceRule__c.SBQQ__EvaluationEvent__c", "SBQQ__PriceRule__c.SBQQ__EvaluationOrder__c");
@@ -78,7 +87,7 @@ const priceRuleConflicts: Rule = {
     const active = priceRules.data.filter((r) => r.SBQQ__Active__c && r.SBQQ__EvaluationOrder__c !== null && r.SBQQ__EvaluationOrder__c !== undefined).sort((a, b) => a.Name.localeCompare(b.Name));
     const fields = new Map<string, Set<string>>();
     for (const a of priceActions.data) if (a.SBQQ__Field__c) fields.set(a.SBQQ__Rule__c, (fields.get(a.SBQQ__Rule__c) ?? new Set()).add(`${(a.SBQQ__TargetObject__c ?? "").toLowerCase()}|${a.SBQQ__Field__c.toLowerCase()}`));
-    const pairs: Array<{ a: string; b: string; field: string }> = [];
+    const pairs: Array<{ a: string; b: string; field: string; named: string }> = [];
     for (let i = 0; i < active.length; i++) {
       for (let j = i + 1; j < active.length; j++) {
         const a = active[i]!;
@@ -87,10 +96,13 @@ const priceRuleConflicts: Rule = {
         const ea = events(a.SBQQ__EvaluationEvent__c);
         if (![...events(b.SBQQ__EvaluationEvent__c)].some((e) => ea.has(e))) continue;
         const shared = [...(fields.get(a.Id) ?? [])].find((f) => fields.get(b.Id)?.has(f));
-        if (shared) pairs.push({ a: a.Name, b: b.Name, field: priceActions.data.find((x) => x.SBQQ__Rule__c === a.Id && `${(x.SBQQ__TargetObject__c ?? "").toLowerCase()}|${x.SBQQ__Field__c?.toLowerCase()}` === shared)!.SBQQ__Field__c! });
+        if (shared) {
+          const action = priceActions.data.find((x) => x.SBQQ__Rule__c === a.Id && `${(x.SBQQ__TargetObject__c ?? "").toLowerCase()}|${x.SBQQ__Field__c?.toLowerCase()}` === shared)!;
+          pairs.push({ a: a.Name, b: b.Name, field: action.SBQQ__Field__c!, named: fieldName(action.SBQQ__TargetObject__c, action.SBQQ__Field__c!) });
+        }
       }
     }
-    const evidence = [ctx.ev(priceRules.source, { count: active.length, exclusions: ["Inactive rules", "Rules with no evaluation order"] }), ctx.ev(priceActions.source, { count: priceActions.data.length })];
+    const evidence = [ctx.ev(priceRules.source, { count: active.length, exclusions: ["Inactive rules", "Rules with no evaluation order"] }), ctx.ev(priceActions.source, { count: priceActions.data.length, ...(pairs.length ? { note: `Fields set by both rules of a pair: ${[...new Set(pairs.map((p) => p.field))].join(", ")}` } : {}) })];
     const segments = [{ dimension: "evaluation order", segments: new Set(active.map((r) => r.SBQQ__EvaluationOrder__c)).size }];
     const facts = { pairs: pairs.length, activeRules: active.length };
     if (active.length < 2) return { outcome: "pass", summary: `There ${active.length === 1 ? "is one active price rule" : "are no active price rules"} to compare.`, evidence, segmentExemptReason: "There are too few rules to compare.", facts };
@@ -98,7 +110,7 @@ const priceRuleConflicts: Rule = {
     return {
       outcome: "issue",
       title: "Some price rules compete to set the same field",
-      summary: `${plural(pairs.length, "pair")} of active price rules set the same field, at the same evaluation event and in the same evaluation order: ${listed(pairs.slice(0, MAX_LISTED).map((p) => `${p.a} and ${p.b} (${p.field})`))}${pairs.length > MAX_LISTED ? `, and ${pairs.length - MAX_LISTED} more` : ""}. When both apply, which one wins depends on the order CPQ happens to run them in, so a price can change without anyone changing a rule.`,
+      summary: `${plural(pairs.length, "pair")} of active price rules set the same field, at the same evaluation event and in the same evaluation order: ${listed(pairs.slice(0, MAX_LISTED).map((p) => `${p.a} and ${p.b} (${p.named})`))}${pairs.length > MAX_LISTED ? `, and ${pairs.length - MAX_LISTED} more` : ""}. When both apply, which one wins depends on the order CPQ happens to run them in, so a price can change without anyone changing a rule.`,
       recommendation: "Give each pair a different evaluation order, or merge them into one rule, and compare quote totals before and after.",
       recommendationType: "change",
       severity: "medium",
@@ -119,7 +131,7 @@ const priceRuleConflicts: Rule = {
 // order product, with the same API name, only when the types match (QUESTIONS.md).
 const twinFieldMismatch: Rule = {
   id: "cpq.twin-field-mismatch",
-  version: 1,
+  version: 2,
   domain: DOMAIN,
   title: "Twin fields whose types don't match",
   evaluate(ctx): RuleResult {
@@ -133,17 +145,17 @@ const twinFieldMismatch: Rule = {
     const mismatches = lines.flatMap((f) =>
       compare.flatMap(([where, others]) => {
         const twin = others.find((o) => o.name.toLowerCase() === f.name.toLowerCase());
-        return twin && twin.type !== f.type ? [{ name: f.name, where, line: f.type, other: twin.type }] : [];
+        return twin && twin.type !== f.type ? [{ name: f.name, label: f.label, where, line: f.type, other: twin.type }] : [];
       }),
     );
-    const evidence = [ctx.ev(twins.source, { count: lines.length, exclusions: ["CPQ's own fields"], note: "Custom fields' names and types, from each object's describe" })];
+    const evidence = [ctx.ev(twins.source, { count: lines.length, exclusions: ["CPQ's own fields"], note: `Custom fields' names and types, from each object's describe${mismatches.length ? `. Mismatched: ${mismatches.map((m) => m.name).join(", ")}` : ""}` })];
     const segments = [{ dimension: "object", segments: compare.length }];
     const facts = { mismatches: mismatches.length, quoteLineFields: lines.length };
     if (mismatches.length === 0) return { outcome: "pass", summary: `None of the ${plural(lines.length, "custom field")} on quote lines shares its name with a field of a different type on ${listed(compare.map(([w]) => `${w}s`))}.`, evidence, segmentsChecked: segments, facts };
     return {
       outcome: "issue",
       title: "Some twin fields won't copy",
-      summary: `${plural(mismatches.length, "custom field")} on quote lines ${mismatches.length === 1 ? "shares" : "share"} an API name with a field of a different type: ${listed(mismatches.slice(0, MAX_LISTED).map((m) => `${m.name} (${m.line} on the quote line, ${m.other} on the ${m.where})`))}. CPQ copies twin fields only when the name and type match, so these values don't carry over.`,
+      summary: `${plural(mismatches.length, "custom field")} on quote lines ${mismatches.length === 1 ? "shares" : "share"} an API name with a field of a different type: ${listed(mismatches.slice(0, MAX_LISTED).map((m) => `${m.label} (${m.line} on the quote line, ${m.other} on the ${m.where})`))}. CPQ copies twin fields only when the name and type match, so these values don't carry over.`,
       recommendation: "Give each pair the same type, or rename one of them if they aren't meant to be twins.",
       recommendationType: "change",
       severity: "medium",
@@ -154,7 +166,7 @@ const twinFieldMismatch: Rule = {
       owner: OWNER,
       dependencies: ["Check what reports and automation read each field before changing its type"],
       segmentsChecked: segments,
-      subjects: mismatches.map((m) => ({ type: "field", label: m.name })),
+      subjects: mismatches.map((m) => ({ type: "field", label: m.label })),
       facts,
     };
   },
@@ -164,6 +176,6 @@ export const cpqSetupModule: DomainModule = {
   id: DOMAIN,
   cloud: "cpq",
   label: "CPQ set-up",
-  extractors: [licencesExtractor, cpqSetupExtractor],
+  extractors: [labelsExtractor, licencesExtractor, cpqSetupExtractor],
   rules: [priceRuleConflicts, twinFieldMismatch, inactiveRules],
 };

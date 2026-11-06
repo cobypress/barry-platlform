@@ -17,6 +17,8 @@ import { fieldGuards } from "../../guards/field-guards.ts";
 import { notSized, pct, plural, type Rule, type RuleResult } from "../../engine/rule.ts";
 import type { DomainModule } from "../types.ts";
 import { calibratedHours } from "../value.ts";
+import { labelsOf } from "../labels.ts";
+import { labelsExtractor } from "../../extract/labels.ts";
 import { objectInventoryMetric } from "./inventory.ts";
 import { documentedMetrics } from "./documented.ts";
 import { orgDocumentationExtractor } from "../../extract/documentation.ts";
@@ -86,18 +88,21 @@ const customFieldSprawl: Rule = {
 
 const unusedCustomFields: Rule = {
   id: "cfg.unused-custom-fields",
-  version: 2,
+  version: 3,
   records: true,
   domain: "configuration",
   title: "Custom fields that are almost never filled in",
   evaluate(ctx): RuleResult | RuleResult[] {
     const usage = ctx.data(fieldUsageExtractor);
     const schema = ctx.data(schemaExtractor);
+    const labels = labelsOf(ctx);
     const results: RuleResult[] = [];
     for (const object of CORE_OBJECTS) {
       const scan = usage[object]!;
+      // Said by its label; the evidence keeps the API name (DECISIONS.md 411).
+      const named = labels.object(object);
       if (scan.status !== "ok") {
-        results.push({ outcome: "not_measurable", key: object, reason: `Field usage on ${object} couldn't be read: ${scan.reason}`, evidence: [ctx.ev(scan.source, { count: null })] });
+        results.push({ outcome: "not_measurable", key: object, reason: `Field usage on ${named} couldn't be read: ${scan.reason}`, evidence: [ctx.ev(scan.source, { count: null })] });
         continue;
       }
       const describe = schema[object]!;
@@ -106,35 +111,35 @@ const unusedCustomFields: Rule = {
       const range = { from: scan.data.recentFrom, to: ctx.window.to };
       const exclusions = [`Not scanned, because their type can't be counted: ${scan.data.notScanned.length} fields`, "Packaged and formula fields"];
       if (scan.data.fields.length > 0 && total < MIN_RECORDS_FOR_UNUSED) {
-        results.push({ outcome: "not_measurable", key: object, reason: `${object} has ${total} records, below the ${MIN_RECORDS_FOR_UNUSED} needed to call a field unused.`, evidence: [ctx.ev(scan.source, { count: total, exclusions })] });
+        results.push({ outcome: "not_measurable", key: object, reason: `${named} has ${total} records, below the ${MIN_RECORDS_FOR_UNUSED} needed to call a field unused.`, evidence: [ctx.ev(scan.source, { count: total, exclusions })] });
         continue;
       }
       // Both tests must agree: a field empty overall but filling up this year is a new field.
       const unused = scan.data.fields.filter((f) => pct(f.filled, f.total) < UNUSED_FILL_LIMIT && pct(f.recentFilled, f.recentTotal) < UNUSED_FILL_LIMIT);
       const segments = [{ dimension: "all records", segments: scan.data.fields.length }, { dimension: "records created in the last 12 months", segments: scan.data.fields.length }];
       if (unused.length === 0) {
-        results.push({ outcome: "pass", key: object, summary: `Every scanned custom field on ${object} is filled on at least ${UNUSED_FILL_LIMIT}% of records.`, evidence: [ctx.ev(scan.source, { count: scan.data.fields.length, exclusions })], segmentsChecked: segments });
+        results.push({ outcome: "pass", key: object, summary: `Every scanned custom field on ${named} is filled on at least ${UNUSED_FILL_LIMIT}% of records.`, evidence: [ctx.ev(scan.source, { count: scan.data.fields.length, exclusions })], segmentsChecked: segments });
         continue;
       }
       const fields = unused.flatMap((u) => summary?.fields.find((f) => f.name === u.field) ?? []);
       results.push({
         outcome: "issue",
         key: object,
-        title: `Custom fields on ${object} are almost never filled in`,
-        summary: `Of ${plural(scan.data.fields.length, "scanned custom field")} on ${object}, ${unused.length} ${unused.length === 1 ? "is" : "are"} filled on under ${UNUSED_FILL_LIMIT}% of records, both overall and on records from the last 12 months.`,
-        recommendation: `Remove ${plural(unused.length, "field")} from ${object} once the data is archived.`,
-        blockedRecommendation: `Review ${plural(unused.length, "field")} with the people who own ${object}. We aren't recommending removal, because not every dependency check could pass.`,
+        title: `Custom fields on ${named} are almost never filled in`,
+        summary: `Of ${plural(scan.data.fields.length, "scanned custom field")} on ${named}, ${unused.length} ${unused.length === 1 ? "is" : "are"} filled on under ${UNUSED_FILL_LIMIT}% of records, both overall and on records from the last 12 months.`,
+        recommendation: `Remove ${plural(unused.length, "field")} from ${named} once the data is archived.`,
+        blockedRecommendation: `Review ${plural(unused.length, "field")} with the people who own ${named}. We aren't recommending removal, because not every dependency check could pass.`,
         recommendationType: "remove",
         severity: "low",
         confidence: "medium",
-        evidence: [ctx.ev(scan.source, { count: unused.length, dateRange: range, exclusions })],
+        evidence: [ctx.ev(scan.source, { count: unused.length, dateRange: range, exclusions, note: `Fields: ${unused.map((u) => `${object}.${u.field}`).join(", ")}` })],
         value: calibratedHours(ctx, "custom-field-upkeep", unused.length, "unused custom field"),
         effort: { size: "M" },
         owner: "Salesforce admin",
         dependencies: ["Archive any data that must be kept before a field is deleted"],
         guards: fields.flatMap((f) => fieldGuards(ctx, object, f)),
         segmentsChecked: segments,
-        subjects: unused.map((u) => ({ type: "field", label: `${object}.${u.field}` })),
+        subjects: unused.map((u) => ({ type: "field", label: `${labels.field(object, u.field)} on ${named}` })),
         facts: { unusedFields: unused.length, scannedFields: scan.data.fields.length },
       });
     }
@@ -177,7 +182,7 @@ const unassignedLayouts: Rule = {
 
 const undocumentedFields: Rule = {
   id: "cfg.undocumented-fields",
-  version: 1,
+  version: 2,
   domain: "configuration",
   title: "Custom fields with no help text or description",
   evaluate(ctx): RuleResult | RuleResult[] {
@@ -195,10 +200,11 @@ const undocumentedFields: Rule = {
     const facts = { fields: fields.length, bare: bare.length, rate, noHelpText: noHelp };
     if (rate <= UNDOCUMENTED_FIELD_LIMIT) return { outcome: "pass", summary: `Custom fields with neither help text nor a description: ${bare.length} of ${fields.length} (${rate}%).`, evidence, segmentsChecked: segments, facts };
     const byObject = [...objects].map((o) => ({ o, n: bare.filter((f) => f.object === o).length })).filter((x) => x.n > 0).sort((a, b) => b.n - a.n || a.o.localeCompare(b.o));
+    const labels = labelsOf(ctx);
     return {
       outcome: "issue",
       title: "Most custom fields don't say what they're for",
-      summary: `Custom fields with neither help text nor a description: ${bare.length} of ${fields.length} (${rate}%), most on ${byObject.slice(0, 3).map((x) => `${x.o} (${x.n})`).join(", ")}. Users see no explanation when they fill these in, and whoever maintains the org can't tell what each one is for.`,
+      summary: `Custom fields with neither help text nor a description: ${bare.length} of ${fields.length} (${rate}%), most on ${byObject.slice(0, 3).map((x) => `${labels.object(x.o)} (${x.n})`).join(", ")}. Users see no explanation when they fill these in, and whoever maintains the org can't tell what each one is for.`,
       recommendation: "Add help text to the fields people fill in and a description to every field you keep, and retire the ones nobody can explain.",
       recommendationType: "change",
       severity: "low",
@@ -208,7 +214,7 @@ const undocumentedFields: Rule = {
       effort: { size: "M" },
       owner: "Salesforce admin",
       segmentsChecked: segments,
-      subjects: byObject.slice(0, 10).map((x) => ({ type: "object", label: x.o })),
+      subjects: byObject.slice(0, 10).map((x) => ({ type: "object", label: labels.object(x.o) })),
       facts,
     };
   },
@@ -259,19 +265,21 @@ const stageSprawl: Rule = {
 
 const picklistSprawl: Rule = {
   id: "cfg.picklist-sprawl",
-  version: 1,
+  version: 2,
   domain: "configuration",
   title: "Key picklists have too many values",
   evaluate(ctx): RuleResult | RuleResult[] {
     const schema = ctx.data(schemaExtractor);
-    const sized: Array<{ label: string; n: number }> = [];
+    const labels = labelsOf(ctx);
+    // The API name for facts and evidence, the labels for what a customer reads (DECISIONS.md 411).
+    const sized: Array<{ api: string; label: string; n: number }> = [];
     const evidence = [];
     for (const [object, name] of PICKLISTS) {
       const summary = schema[object]!;
       if (summary.status !== "ok") continue;
       const field = summary.data.fields.find((f) => f.name === name);
       if (!field) continue;
-      sized.push({ label: `${object}.${name}`, n: field.activePicklistValues.length });
+      sized.push({ api: `${object}.${name}`, label: `${field.label || name} on ${labels.object(object)}`, n: field.activePicklistValues.length });
       evidence.push(ctx.ev(summary.source, { count: field.activePicklistValues.length, note: `Active values on ${object}.${name}` }));
     }
     if (sized.length === 0) return { outcome: "not_measurable", reason: "None of the picklists we check could be read.", evidence: [ctx.ev(schema.Lead!.source, { count: null })] };
@@ -292,7 +300,7 @@ const picklistSprawl: Rule = {
       owner: "Salesforce admin",
       segmentsChecked: segments,
       subjects: over.map((p) => ({ type: "picklist", label: p.label })),
-      facts: Object.fromEntries(over.map((p) => [p.label, p.n])),
+      facts: Object.fromEntries(over.map((p) => [p.api, p.n])),
     };
   },
 };
@@ -349,6 +357,7 @@ export const configurationModule: DomainModule = {
   cloud: "sales",
   label: "Configuration",
   extractors: [
+    labelsExtractor,
     schemaExtractor,
     fieldUsageExtractor,
     recordCountsExtractor,

@@ -285,8 +285,9 @@ export class Simulator implements Transport {
       return body ? jsonResponse(200, body, this.#limitInfo) : jsonResponse(404, [{ errorCode: "NOT_FOUND", message: "The requested resource does not exist" }], this.#limitInfo);
     }
     if (/\/sobjects\/?$/.test(path)) {
-      const names = [...org.SOBJECTS, ...(this.#cpq ? Object.keys(org.CPQ_DESCRIBES) : [])];
-      return jsonResponse(200, { sobjects: [...new Set(names)].filter((n) => !this.#missing.has(n)).sort().map((name) => ({ name, queryable: true, custom: name.endsWith("__c") })) }, this.#limitInfo);
+      // The org's own custom objects are listed too, as Salesforce lists them, so each has its label.
+      const names = [...org.SOBJECTS, ...org.CUSTOM_OBJECTS.map((o) => `${o.DeveloperName}__c`), ...(this.#cpq ? Object.keys(org.CPQ_DESCRIBES) : [])];
+      return jsonResponse(200, { sobjects: [...new Set(names)].filter((n) => !this.#missing.has(n)).sort().map((name) => ({ name, label: org.apiLabel(name), queryable: true, custom: name.endsWith("__c") })) }, this.#limitInfo);
     }
     const describe = path.match(/\/sobjects\/([A-Za-z0-9_]+)\/describe$/);
     if (describe) {
@@ -400,6 +401,8 @@ export class Simulator implements Transport {
         return page(org.USER_LICENSES);
       case "PermissionSetLicense":
         return page(org.PERMISSION_SET_LICENSES);
+      case "InstalledSubscriberPackage":
+        return tooling ? page(org.INSTALLED_PACKAGES.filter((p) => (this.#cpq || p.SubscriberPackage.NamespacePrefix !== "SBQQ") && (this.#pardot || p.SubscriberPackage.NamespacePrefix !== "pi"))) : unsupported(object);
       case "PackageLicense":
         return page(org.PACKAGE_LICENSES.filter((p) => (this.#cpq || p.NamespacePrefix !== "SBQQ") && (this.#pardot || p.NamespacePrefix !== "pi") && !this.#unlicensed.has(p.NamespacePrefix ?? "")));
       case "SBQQ__PriceRule__c":

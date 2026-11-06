@@ -580,9 +580,20 @@ export const CAMPAIGNS = [
   { Id: sfId("701", 3), Type: "Email", ActualCost: null },
 ];
 
+/**
+ * A label as an org would show it, which is never the API name: "Old Sic Code" for
+ * Old_Sic_Code__c, "Discount" for SBQQ__Discount__c, "Lead Source" for LeadSource.
+ * Customer text uses these (DECISIONS.md 411), so a test can tell the two apart.
+ */
+export function apiLabel(name: string): string {
+  const bare = name.replace(/^[A-Za-z0-9]+__(?=.+__c$)/, "").replace(/__c$/, "");
+  if (bare !== name) return bare.replace(/_/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2");
+  return name.replace(/Id$/, " ID").replace(/([a-z])([A-Z])/g, "$1 $2").trim();
+}
+
 const standardField = (name: string, type = "string", extra: Record<string, unknown> = {}) => ({
   name,
-  label: name,
+  label: apiLabel(name),
   type,
   custom: false,
   calculated: false,
@@ -726,6 +737,13 @@ export const USER_LICENSES = [
 
 // Traps: a seat-limited package with spare seats; a site licence, a free and an
 // expired package, none of which are seats anyone pays for.
+/** Installed packages, as Tooling lists them: each app's name against its namespace. */
+export const INSTALLED_PACKAGES = [
+  { SubscriberPackage: { Name: "Acme CPQ", NamespacePrefix: "acmecpq" } },
+  { SubscriberPackage: { Name: "Salesforce CPQ", NamespacePrefix: "SBQQ" } },
+  { SubscriberPackage: { Name: "Account Engagement", NamespacePrefix: "pi" } },
+];
+
 export const PACKAGE_LICENSES = [
   { NamespacePrefix: "acmecpq", AllowedLicenses: 20, UsedLicenses: 12, Status: "Active", ExpirationDate: null },
   { NamespacePrefix: "sitewide", AllowedLicenses: -1, UsedLicenses: 40, Status: "Active", ExpirationDate: null },
@@ -907,7 +925,7 @@ export const PERMISSION_ASSIGNMENTS = [
 // Lookups and a master-detail between the documented objects, as Tooling's
 // FieldDefinition gives them. Traps: a lookup to User, which isn't a documented
 // object, and a field that isn't a relationship at all.
-const relationship = (object: string, field: string, dataType: string, to: string[] | null) => ({ EntityDefinition: { QualifiedApiName: object }, QualifiedApiName: field, DataType: dataType, ReferenceTo: to ? { referenceTo: to } : null });
+const relationship = (object: string, field: string, dataType: string, to: string[] | null) => ({ EntityDefinition: { QualifiedApiName: object }, QualifiedApiName: field, Label: apiLabel(field), DataType: dataType, ReferenceTo: to ? { referenceTo: to } : null });
 export const RELATIONSHIP_FIELDS = [
   relationship("Account", "ParentId", "Hierarchy", ["Account"]),
   relationship("Account", "OwnerId", "Lookup(User)", ["User"]),
@@ -1436,7 +1454,7 @@ export const CPQ_PRODUCT_RULES = [
   { Id: sfId("a0S", 5), Name: "Old Bundle Check", SBQQ__Active__c: false, SBQQ__Type__c: "Validation" },
 ];
 
-const describedField = (name: string, type: string, custom = true) => ({ name, label: name, type, custom });
+const describedField = (name: string, type: string, custom = true) => ({ name, label: apiLabel(name), type, custom });
 // Trap: Warranty_Term__c is a number on the quote line and text on the opportunity product, so it won't copy.
 export const CPQ_DESCRIBES: Record<string, { fields: unknown[] }> = {
   SBQQ__Quote__c: { fields: ["Id", "Name", "OwnerId", "SBQQ__Primary__c", "SBQQ__Opportunity2__c", "SBQQ__ListAmount__c", "SBQQ__NetAmount__c", "SBQQ__Ordered__c", "CreatedDate"].map((n) => describedField(n, "string", n.endsWith("__c"))) },

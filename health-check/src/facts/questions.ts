@@ -25,6 +25,7 @@ export const SECTION_IDS: Record<string, string> = {
   "AI readiness": "ai",
   "Account Engagement": "ae",
   "Sharing the Drive folder": "drive",
+  "Labels in customer text": "labels",
 };
 
 export type QuestionItem = { id: string; section: string; text: string };

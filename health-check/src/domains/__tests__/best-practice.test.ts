@@ -81,7 +81,7 @@ describe("ownership skew", () => {
     const f = one(analyseExtracts(extracts).findings, "bp.ownership-skew");
     assert.equal(f.status, "issue");
     assert.equal(f.facts.largest, 12_000);
-    assert.deepEqual(f.subjects.map((s) => s.label), [`${tokenOf(11)}: Invoice__c`]);
+    assert.deepEqual(f.subjects.map((s) => s.label), [`${tokenOf(11)}: Invoice`]);
   });
 
   test("exactly 10,000 isn't over the line", () => {

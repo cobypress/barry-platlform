@@ -5,6 +5,8 @@ import { classicExtractor } from "../../extract/technical.ts";
 import { notSized, pct, plural, type Rule, type RuleResult } from "../../engine/rule.ts";
 import { apexGap, metadataOr, UNNAMED, unnamedNote } from "../automation/shared.ts";
 import type { DomainModule } from "../types.ts";
+import { labelsOf } from "../labels.ts";
+import { labelsExtractor } from "../../extract/labels.ts";
 import { isObjectId, objectResolver } from "../object-names.ts";
 
 // Technical health (roadmap 3.2): how sound the code is, read from set-up only.
@@ -141,7 +143,7 @@ const apexCoverage: Rule = {
 
 const multipleTriggers: Rule = {
   id: "aut.multiple-triggers",
-  version: 2,
+  version: 3,
   domain: DOMAIN,
   title: "More than one trigger on an object",
   evaluate(ctx): RuleResult | RuleResult[] {
@@ -153,7 +155,7 @@ const multipleTriggers: Rule = {
     // triggers share an object, in either length, so it's grouped by id and never shown.
     const keyOf = (value: string): { key: string; label: string | null } => {
       const name = objectOf(value);
-      if (name) return { key: name, label: name };
+      if (name) return { key: name, label: labelsOf(ctx).object(name) };
       return { key: isObjectId(value) ? value.slice(0, 15) : value, label: null };
     };
     const byObject = new Map<string, { label: string | null; n: number }>();
@@ -390,7 +392,7 @@ const LARGEST_OBJECTS = 5;
 
 const storageUse: Rule = {
   id: "tech.storage-use",
-  version: 1,
+  version: 2,
   domain: DOMAIN,
   title: "Data and file storage against the allowance",
   evaluate(ctx): RuleResult | RuleResult[] {
@@ -418,7 +420,7 @@ const storageUse: Rule = {
     return {
       outcome: "issue",
       title: "Storage is close to the allowance",
-      summary: `${sentence} Past the allowance, Salesforce can stop new records or files being saved until space is freed or more is bought.${largest.length ? ` The objects with the most records: ${largest.map((o) => `${o.name} (${o.count.toLocaleString("en-GB")})`).join(", ")}.` : ""}`,
+      summary: `${sentence} Past the allowance, Salesforce can stop new records or files being saved until space is freed or more is bought.${largest.length ? ` The objects with the most records: ${largest.map((o) => `${labelsOf(ctx).object(o.name)} (${o.count.toLocaleString("en-GB")})`).join(", ")}.` : ""}`,
       recommendation: "Archive or delete what you no longer need, starting with the largest objects and old files, and plan any extra storage before you reach the limit.",
       recommendationType: "change",
       severity: over.some((r) => r.share >= STORAGE_HIGH) ? "high" : "medium",
@@ -439,6 +441,6 @@ export const technicalHealthModule: DomainModule = {
   id: DOMAIN,
   cloud: "sales",
   label: "Technical health",
-  extractors: [orgExtractor, metadataExtractor, apexExtractor, customObjectsExtractor, classicExtractor, apiLimitsExtractor, recordCountsExtractor],
+  extractors: [labelsExtractor, orgExtractor, metadataExtractor, apexExtractor, customObjectsExtractor, classicExtractor, apiLimitsExtractor, recordCountsExtractor],
   rules: [apexCoverage, testQuality, limitRisk, codeSize, storageUse, oldApiVersions, multipleTriggers, classicLeftovers],
 };

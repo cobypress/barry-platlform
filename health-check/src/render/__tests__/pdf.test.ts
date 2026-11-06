@@ -204,7 +204,8 @@ describe("where the complexity lives", () => {
     assert.match(slide, /<div class="eyebrow">Configuration<\/div>/);
     assert.match(slide, /We counted 7 objects: your 4 core objects and 3 custom objects of your own with records\. Of the 14 rules, flows and triggers on them, 8 have no description\./);
     const rows = [...slide.matchAll(/<tr><td>([^<]+)<\/td>/g)].map((m) => m[1]);
-    assert.deepEqual(rows, ["Opportunity", "Invoice__c", "Lead", "Account", "Project__c", "Contact", "Project_Line__c"]);
+    // By label, as the org shows them (DECISIONS.md 412).
+    assert.deepEqual(rows, ["Opportunity", "Invoice", "Lead", "Account", "Project", "Contact", "Project Line"]);
     assert.doesNotMatch(slide, /Only the busiest are shown/);
   });
 

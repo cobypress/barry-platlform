@@ -38,7 +38,7 @@ const dealSegments = (ctx: RuleContext, deals: Deal[]) => [
 
 const stalledDeals: Rule = {
   id: "rev.stalled-deals",
-  version: 2,
+  version: 3,
   domain: DOMAIN,
   title: "Stalled deals worth reviving",
   evaluate(ctx): RuleResult | RuleResult[] {
@@ -57,7 +57,8 @@ const stalledDeals: Rule = {
     const value = potentialRevenue(ctx, data, stalled, () => situation);
     return {
       outcome: "issue",
-      title: "Stalled deals are still sitting in your pipeline",
+      // Titled by its test, as two other checks find quiet deals by theirs (night 3 reading pass, item 16).
+      title: `Open deals with no stage change or activity in ${STALLED_DAYS} days`,
       summary: `${plural(stalled.length, "open deal")} of ${open.length} (${pct(stalled.length, open.length)}%) haven't changed stage or had activity in ${STALLED_DAYS} days.`,
       recommendation: "Give each owner a date to re-engage or close these. The ones that come back are the cheapest revenue you have.",
       recommendationType: "change",

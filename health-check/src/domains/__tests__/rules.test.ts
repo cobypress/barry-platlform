@@ -5,7 +5,8 @@ import { analyseExtracts, clone, loadExtracts, runFromRecording } from "../../te
 import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
 import { sfId, userId } from "../../testing/synthetic-org.ts";
 import { apexExtractor, metadataExtractor } from "../../extract/automation.ts";
-import { activityCaptureExtractor, licencesExtractor, ownershipExtractor, usersExtractor } from "../../extract/users.ts";
+import { activityCaptureExtractor, licencesExtractor, ownershipExtractor, reportsExtractor, usersExtractor } from "../../extract/users.ts";
+import { REPORT_RECENT_DAYS } from "../adoption/index.ts";
 import { duplicateRulesExtractor } from "../../extract/configuration.ts";
 import { leadsExtractor } from "../../extract/leads.ts";
 import { opportunitiesExtractor } from "../../extract/opportunities.ts";
@@ -70,7 +71,7 @@ describe("configuration", () => {
   test("a field filling up on new records isn't called unused", () => {
     const findings = analyseExtracts(extracts).findings;
     const lead = findings.find((f) => f.ruleId === "cfg.unused-custom-fields" && f.summary.includes("on Lead"))!;
-    assert.deepEqual(lead.subjects.map((s) => s.label), ["Lead.Old_Campaign_Ref__c"]);
+    assert.deepEqual(lead.subjects.map((s) => s.label), ["Old Campaign Ref on Lead"]);
   });
 
   test("field removal stays investigate until reports can be scanned", () => {
@@ -146,7 +147,7 @@ describe("automation", () => {
     assert.equal(f?.status, "not_measurable");
     assert.match(f?.notMeasurableReason ?? "", /cleared or only some tests have run/);
   });
-  test("two triggers on one object", () => assert.deepEqual(issue(analyseExtracts(extracts).findings, "aut.multiple-triggers").subjects.map((s) => s.label), ["Invoice__c", "Opportunity"]));
+  test("two triggers on one object", () => assert.deepEqual(issue(analyseExtracts(extracts).findings, "aut.multiple-triggers").subjects.map((s) => s.label), ["Invoice", "Opportunity"]));
 
   // Invoice__c's triggers name it by id, one in 15 characters and one in 18. Its
   // flow and Workflow Rule name it by API name. All four are one object.
@@ -156,10 +157,10 @@ describe("automation", () => {
   };
   test("a custom object's triggers and flows are one object, by name", () => {
     const mixed = issue(analyseExtracts(extracts).findings, "aut.mixed-automation-on-object");
-    assert.match(mixed.summary, /Invoice__c runs Apex trigger, Record-triggered flow, Workflow Rule/);
-    assert.deepEqual(mixed.subjects.map((s) => s.label), ["Invoice__c", "Opportunity"]);
+    assert.match(mixed.summary, /Invoice runs Apex trigger, Record-triggered flow, Workflow Rule/);
+    assert.deepEqual(mixed.subjects.map((s) => s.label), ["Invoice", "Opportunity"]);
     const multiple = issue(analyseExtracts(extracts).findings, "aut.multiple-triggers");
-    assert.match(multiple.summary, /^Invoice__c has 2; Opportunity has 2\./);
+    assert.match(multiple.summary, /^Invoice has 2; Opportunity has 2\./);
     for (const f of [mixed, multiple]) {
       assert.doesNotMatch(`${f.summary} ${f.subjects.map((s) => s.label).join(" ")}`, /01I/);
       assert.equal(f.facts.unnamedTriggers, 0);
@@ -348,6 +349,17 @@ describe("utilisation", () => {
     assert.equal(f.facts.reports, 79);
     assert.equal(f.facts.unused, 59);
   });
+  test("a report counts as unused over the same period the report-use metric defines (night 3 reading pass, item 21)", () => {
+    // One report last run 200 days ago: run within 12 months, but not within the definition's 90 days.
+    const changed = clone(extracts);
+    const reports = changed.get(reportsExtractor.id) as { data: Array<{ LastRunDate: string | null }> };
+    reports.data.find((r) => r.LastRunDate !== null && Date.parse(r.LastRunDate) > Date.now() - 400 * 86_400_000)!.LastRunDate = new Date(Date.parse("2026-10-31T00:00:00Z") - 200 * 86_400_000).toISOString();
+    const { findings, metrics } = analyseExtracts(changed);
+    const f = issue(findings, "utl.unused-reports");
+    assert.equal(f.facts.unused, 60);
+    assert.match(f.summary, new RegExp(`haven't been run in ${REPORT_RECENT_DAYS} days`));
+    assert.match(metrics.find((m) => m.id === "adoption.reports_run_recently")!.definition, new RegExp(`in the last ${REPORT_RECENT_DAYS} days`));
+  });
   test("dashboards running as an inactive user", () => assert.deepEqual(issue(analyseExtracts(extracts).findings, "utl.dashboards-inactive-running-user").subjects.map((s) => s.label), ["EU Pipeline"]));
   test("dashboard use is honestly not measurable", () => {
     const [f] = byRule(analyseExtracts(extracts).findings, "utl.dashboard-usage");
@@ -455,7 +467,7 @@ describe("data quality", () => {
     const f = issue(analyseExtracts(extracts).findings, "cfg.undocumented-fields");
     // Opportunity 3 of 4 bare, Invoice__c 2 of 3, Project__c 1 of 1.
     assert.deepEqual(f.facts, { fields: 8, bare: 6, rate: 75, noHelpText: 7 });
-    assert.deepEqual(f.subjects.map((s) => s.label), ["Opportunity", "Invoice__c", "Project__c"]);
+    assert.deepEqual(f.subjects.map((s) => s.label), ["Opportunity", "Invoice", "Project"]);
   });
   test("duplicate rules only count when active", () => assert.deepEqual(issue(analyseExtracts(extracts).findings, "dq.duplicate-rules-missing").subjects.map((s) => s.label), ["Account", "Contact"]));
   test("a missing duplicate rule on Lead isn't raised when no leads are created", () => {

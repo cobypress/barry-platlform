@@ -215,7 +215,7 @@ export async function readBundleThroughTooling(ctx: ExtractContext): Promise<Met
   const recordTypes = await tooling(ctx, "SELECT Id, Name, SobjectType, IsActive, NamespacePrefix FROM RecordType");
   bundle.recordTypes = recordTypes
     .filter((r) => bundle.objects.includes(String(r.SobjectType)))
-    .map((r) => ({ object: String(r.SobjectType), name: String(r.Name), active: String(r.IsActive) === "true" }))
+    .map((r) => ({ object: String(r.SobjectType), name: String(r.Name), label: String(r.Name), active: String(r.IsActive) === "true" }))
     .sort((a, b) => `${a.object}.${a.name}`.localeCompare(`${b.object}.${b.name}`));
 
   // Approval processes and assignment rules have no Tooling definition we can

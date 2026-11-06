@@ -44,7 +44,8 @@ describe("every part, from the synthetic org", () => {
     const invoice = doc.model!.objects.find((o) => o.name === "Invoice__c")!;
     assert.equal(invoice.records, 12_000);
     assert.equal(invoice.customFields, 3);
-    assert.deepEqual(invoice.recordTypes, [{ name: "Credit_Note", active: true }, { name: "Old_Format", active: false }, { name: "Standard", active: true }]);
+    // By label, as Setup shows them (DECISIONS.md 412).
+    assert.deepEqual(invoice.recordTypes, [{ name: "Credit Note", active: true }, { name: "Old Format", active: false }, { name: "Standard", active: true }]);
     const opportunity = doc.model!.objects.find((o) => o.name === "Opportunity")!;
     assert.equal(opportunity.mostFilled[0]!.field, "Competitor__c");
     assert.ok(doc.model!.objects.find((o) => o.name === "Account")!.mostFilled.length <= 10);
@@ -77,7 +78,7 @@ describe("every part, from the synthetic org", () => {
     // Builder is held through a permission set group, and Old Territory Access by nobody.
     assert.deepEqual(a.permissionSets, [
       { name: "Sales Console User", users: 5 },
-      { name: "CPQ User (acmecpq)", users: 2 },
+      { name: "CPQ User (Acme CPQ)", users: 2 },
       { name: "Data Fix Temporary", users: 1 },
       { name: "Report Builder", users: 1 },
       { name: "Reporting Everything", users: 1 },

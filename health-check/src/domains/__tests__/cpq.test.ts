@@ -92,7 +92,7 @@ describe("CPQ set-up", () => {
   test("a twin field whose type differs, and not one that matches", () => {
     const f = one(output!.findings, "cpq.twin-field-mismatch");
     assert.equal(f.status, "issue");
-    assert.deepEqual(f.subjects.map((s) => s.label), ["Warranty_Term__c"]);
+    assert.deepEqual(f.subjects.map((s) => s.label), ["Warranty Term"]);
   });
 
   test("inactive rules: four of eleven", () => {

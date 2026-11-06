@@ -35,6 +35,8 @@ export function exposure(ctx: RuleContext, deals: Deal[], multiCurrency: boolean
 
 type DealRuleOptions = {
   id: string;
+  /** Defaults to 1. */
+  version?: number;
   title: string;
   /** The share of affected deals overall above which this is an issue. */
   totalLimit: number;
@@ -58,7 +60,7 @@ type DealRuleOptions = {
 function dealRule(options: DealRuleOptions): Rule {
   return {
     id: options.id,
-    version: 1,
+    version: options.version ?? 1,
     domain: "data_quality",
     title: options.title,
     evaluate(ctx): RuleResult | RuleResult[] {
@@ -176,6 +178,7 @@ const missingAmount = dealRule({
 
 const noRecentActivity = dealRule({
   id: "dq.open-opps-no-activity",
+  version: 2,
   title: "Open deals with no recent activity",
   totalLimit: 25,
   segmentLimit: 50,
@@ -186,7 +189,8 @@ const noRecentActivity = dealRule({
     const cutoff = localDay(daysBefore(ctx.now, STALE_ACTIVITY_DAYS), zoneOf(ctx));
     return d.LastActivityDate === null || d.LastActivityDate < cutoff;
   },
-  issueTitle: "Part of your pipeline has gone quiet",
+  // Titled by its test, as two other checks find quiet deals by theirs (night 3 reading pass, item 16).
+  issueTitle: `Open deals with no activity in ${STALE_ACTIVITY_DAYS} days`,
   sentence: (hits, n, rate) => `Open deals with no logged activity in ${STALE_ACTIVITY_DAYS} days: ${hits} of ${n} (${rate}%).`,
   recommendation: "Review each quiet deal: either re-engage it or close it. Check that activity is being captured before treating this as a rep problem.",
   effort: "S",

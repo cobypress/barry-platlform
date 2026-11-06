@@ -246,3 +246,13 @@ e) When the service account can no longer see the folder, does deleting a permis
 f) Given a Google Group's address as a `type: "user"` reader, does Drive refuse it, or share with everyone in the group? A microsite reader's address is checked as an address only (night 3 review).
 g) Creating a reader permission for someone who already has one on the folder: does Drive return the existing permission's id, and does it ever change a higher role, such as a writer's, down to reader? The sync shares again after a failure, and decision 312 relies on one permission a person (night 3 review).
 h) Does `permissions.list` on a folder in a shared drive list a reader permission made on that folder with its `emailAddress` and `role: "reader"`, as `findReader` expects (312)?
+
+## Labels in customer text (DECISIONS.md 411 to 414)
+
+To check on a sandbox or a developer org, not a customer's:
+
+a) Does the global describe (`GET /sobjects`) give every custom object's `label` as Setup shows it, renamed standard objects included (an Opportunity relabelled "Deal")?
+b) Does a Tooling query of `FieldDefinition` accept `Label` beside `QualifiedApiName`, `DataType` and `ReferenceTo`, and give the label Setup shows?
+c) Does `SELECT SubscriberPackage.Name, SubscriberPackage.NamespacePrefix FROM InstalledSubscriberPackage` through the Tooling API work for a read-only integration user, and give the app's name as the customer knows it? If it's refused, apps are named by namespace, as before.
+d) In a retrieved object's metadata, is a record type's `<label>` always there, and is Tooling's `RecordType.Name` the same label?
+e) For CPQ: is a price action's `SBQQ__TargetObject__c` "Quote" or "Quote Line", so the field it sets is on `SBQQ__Quote__c` or `SBQQ__QuoteLine__c`, and its label is that object's describe's?

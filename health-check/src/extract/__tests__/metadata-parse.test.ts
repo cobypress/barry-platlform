@@ -43,7 +43,8 @@ describe("workflow rules and objects", () => {
     assert.deepEqual(bundle.objects, ["Empty_Object__c", "Invoice__c", "Opportunity", "Project__c", "Project_Line__c"]));
   test("a single record type parses the same as many", () => {
     const one = parseMetadataBundle({ "objects/A__c.object": "<CustomObject><recordTypes><fullName>Only</fullName><active>true</active></recordTypes></CustomObject>" });
-    assert.deepEqual(one.recordTypes, [{ object: "A__c", name: "Only", active: true }]);
+    // With no <label>, the developer name is the only name there is.
+    assert.deepEqual(one.recordTypes, [{ object: "A__c", name: "Only", label: "Only", active: true }]);
   });
   test("reads which of your own custom fields have help text or a description", () =>
     assert.deepEqual(
