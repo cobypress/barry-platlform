@@ -155,7 +155,8 @@ export type ValueModel = {
 
 const ONE_OFF = /^(potential revenue in deals open today|one-off\b)/i;
 const PER_YEAR = /^(per year|a year)$/i;
-const OVER_WINDOW = /^in wins the gap may have cost\b/i;
+// A figure measured over the analysis window: the gap in wins, or discount beyond what peers gave (DECISIONS.md 218).
+const OVER_WINDOW = /^(in wins the gap may have cost|in discount beyond what peers gave)\b/i;
 
 function yearsIn(run: Run): number {
   const days = (Date.parse(run.analysisWindow.to) - Date.parse(run.analysisWindow.from)) / 86_400_000;

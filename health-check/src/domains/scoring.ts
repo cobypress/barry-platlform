@@ -84,6 +84,10 @@ export const AREA_WEIGHTS: Record<string, number> = {
   // directly; how the set-up is built is a step further back.
   service_operations: 1.25,
   service_setup: 0.75,
+  // CPQ (DECISIONS.md 220): what quotes are sold for is revenue itself; how CPQ
+  // is set up is a step further back, as for Service Cloud.
+  cpq_quoting: 1.25,
+  cpq_setup: 0.75,
 };
 const DEFAULT_AREA_WEIGHT = 1;
 /** An org with a critical issue can't score above this, however well the rest does. */

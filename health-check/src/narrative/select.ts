@@ -25,6 +25,8 @@ export const DOMAIN_LABELS: Record<string, string> = {
   revenue_opportunities: "Revenue opportunities",
   service_operations: "Service operations",
   service_setup: "Service set-up",
+  cpq_quoting: "Quoting and discounts",
+  cpq_setup: "CPQ set-up",
 };
 
 export const domainLabel = (domain: string): string => DOMAIN_LABELS[domain] ?? domain.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
@@ -146,8 +148,8 @@ export function areasOf(run: Pick<Run, "scope" | "modules">, findings: Finding[]
 
 /** The areas a set-up review leaves to the full check, because they're measured from records. None for a complete run. */
 export function recordAreas(run: Pick<Run, "scope" | "modules">): string[] {
-  // Service Cloud's case area is a record area too, in a review that has Service Cloud.
-  const record: string[] = [...SALES_CLOUD_DOMAINS, ...(run.modules.includes("service_setup") ? ["service_operations"] : [])];
+  // Service Cloud's case area and CPQ's quoting area are record areas too, in a review that has them.
+  const record: string[] = [...SALES_CLOUD_DOMAINS, ...(run.modules.includes("service_setup") ? ["service_operations"] : []), ...(run.modules.includes("cpq_setup") ? ["cpq_quoting"] : [])];
   return isSetupReview(run) ? record.filter((d) => !run.modules.includes(d)) : [];
 }
 

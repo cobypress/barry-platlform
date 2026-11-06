@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Browser } from "playwright";
 import { strFromU8, unzipSync } from "fflate";
-import { ALL_MODULES } from "../../domains/index.ts";
+import { SALES_CLOUD_MODULES, SERVICE_CLOUD_MODULES } from "../../domains/index.ts";
 import { buildMicrositePages } from "../../microsite/pages.ts";
 import { buildReport, type BuiltReport } from "../../narrative/sections.ts";
 import { Pseudonymiser, type PseudonymEntry } from "../../privacy/pseudonymiser.ts";
@@ -22,7 +22,8 @@ import { EXECUTIVE_PAGES } from "../render-run.ts";
 // A health check with Service Cloud: its two areas go through every document
 // as any area does, with the same layout and number checks.
 
-const { output, run, dir } = await runFromRecording({ answers: loadAnswers(), modules: ALL_MODULES });
+// Sales and Service Cloud: CPQ has its own pages test.
+const { output, run, dir } = await runFromRecording({ answers: loadAnswers(), modules: [...SALES_CLOUD_MODULES, ...SERVICE_CLOUD_MODULES] });
 const pseudonyms = new Pseudonymiser(JSON.parse(readFileSync(join(dir, "pseudonym-map.json"), "utf8")) as PseudonymEntry[]);
 const scores = (JSON.parse(readFileSync(join(dir, "scores.json"), "utf8")) as unknown[]).map((s) => Score.parse(s));
 const report: BuiltReport = buildReport({ run, calibration: loadCalibration(), findings: output!.findings, metrics: output!.metrics, manualSteps: output!.manualSteps, scores });

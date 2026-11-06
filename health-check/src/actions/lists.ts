@@ -3,6 +3,7 @@ import type { FindingRecords } from "../engine/evaluate.ts";
 import { actionRecordsExtractor, type ActionRecords } from "../extract/action-records.ts";
 import { opportunitiesExtractor, type OpportunityExtract } from "../extract/opportunities.ts";
 import { duplicateAccountsExtractor, type DuplicateAccounts } from "../extract/duplicates.ts";
+import { cpqQuotesExtractor, type CpqQuotes } from "../extract/cpq.ts";
 import { usersExtractor, type UserRow } from "../extract/users.ts";
 import type { Sourced } from "../extract/types.ts";
 
@@ -15,7 +16,10 @@ import type { Sourced } from "../extract/types.ts";
 
 export const ACTION_LISTS_FILE = "action-lists.json";
 
-export const ACTION_OBJECTS = ["Opportunity", "Lead", "Contact", "Account", "User"] as const;
+export const ACTION_OBJECTS = ["Opportunity", "Lead", "Contact", "Account", "SBQQ__Quote__c", "Contract", "User"] as const;
+
+/** How a sheet names each object. */
+export const OBJECT_LABELS: Record<(typeof ACTION_OBJECTS)[number], string> = { Opportunity: "Opportunity", Lead: "Lead", Contact: "Contact", Account: "Account", SBQQ__Quote__c: "Quote", Contract: "Contract", User: "User" };
 
 export const ActionRow = z.object({
   id: z.string().min(1),
@@ -56,6 +60,7 @@ function directory(extracts: Map<string, unknown>): Record<(typeof ACTION_OBJECT
   const opportunities = extracts.get(opportunitiesExtractor.id) as OpportunityExtract | undefined;
   const records = extracts.get(actionRecordsExtractor.id) as ActionRecords | undefined;
   const duplicates = extracts.get(duplicateAccountsExtractor.id) as DuplicateAccounts | undefined;
+  const cpq = extracts.get(cpqQuotesExtractor.id) as CpqQuotes | undefined;
   const users = ok(extracts.get(usersExtractor.id) as Sourced<UserRow[]> | undefined) ?? [];
   const names = opportunities?.names ?? {};
   const named = (rows: Array<{ Id: string; Name: string; OwnerId: string | null }>) => rows.map((r): [string, { name: string | null; ownerId: string | null }] => [r.Id, { name: r.Name, ownerId: r.OwnerId }]);
@@ -64,6 +69,8 @@ function directory(extracts: Map<string, unknown>): Record<(typeof ACTION_OBJECT
     Lead: new Map(named(ok(records?.staleLeads) ?? [])),
     Contact: new Map([...named(ok(records?.contactsNoAccount) ?? []), ...named(ok(records?.contactsNoEmail) ?? [])]),
     Account: new Map(named(ok(duplicates?.accounts) ?? [])),
+    SBQQ__Quote__c: new Map(named(ok(cpq?.quotes) ?? [])),
+    Contract: new Map((ok(cpq?.contracts) ?? []).map((c) => [c.Id, { name: c.ContractNumber, ownerId: c.OwnerId }])),
     User: new Map(users.map((u) => [u.Id, { name: u.Name, ownerId: null }])),
   };
 }

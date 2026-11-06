@@ -62,6 +62,8 @@ The action lists (`src/actions/`, DECISIONS.md 191 to 200) are built in the work
 
 Service Cloud is the first module beyond Sales Cloud (`src/domains/service/`, DECISIONS.md 155 to 158): two areas in `SERVICE_CLOUD_DOMAINS`, `SERVICE_CLOUD_MODULES` alongside `SALES_CLOUD_MODULES`, and `modulesForRun`, which turns a run's `service` module into both. Its synthetic data and traps are at the end of `src/testing/synthetic-org.ts`.
 
+Salesforce CPQ (`src/domains/cpq/`, DECISIONS.md 216 to 226) is built the same way, as the `cpq` module. Its objects belong to a managed package, so `src/extract/cpq.ts` describes each one before querying it, and reads nothing at all unless the package is installed.
+
 ## The rules, and where each is enforced
 
 | Rule | Enforced by |

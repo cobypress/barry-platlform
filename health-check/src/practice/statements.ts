@@ -141,6 +141,21 @@ export const PRACTICE: Record<string, Practice[]> = {
     { text: "Record where every case came from and why the customer got in touch.", source: null },
     { text: "Review the backlog every week by age and priority, and work the oldest high-priority cases first.", source: null },
   ],
+  // Salesforce CPQ (DECISIONS.md 223). Read on 6 November 2026.
+  cpq_quoting: [
+    { text: "Set discount limits by deal size, and send anything deeper through approval.", source: null },
+    { text: "Compare each team's and rep's discounts with what they win, so you know what discounting buys.", source: null },
+    { text: "Create renewal opportunities well before contracts end, so renewals are in the forecast.", source: null },
+    { text: "Order every won quote, if orders are how you bill and deliver.", source: null },
+    { text: "Keep one primary quote on each opportunity, so reports read the price that was agreed.", source: null },
+  ],
+  cpq_setup: [
+    { text: "Give price rules that set the same field different evaluation orders, so it's clear which one wins.", source: { ...page("Trailhead", "Sequence Price Rules for Correct Calculations", "https://trailhead.salesforce.com/content/learn/modules/price-rules-in-salesforce-cpq/sequence-price-rules-for-correct-calculations", "CPQ orders price rules by their evaluation event, then their evaluation order, then each action's order, and within an event the rule with the larger evaluation order wins a conflict."), checked: "2026-11-06" } },
+    { text: "Keep a quote line field and its twin on the opportunity or order product to the same API name and data type.", source: { ...page("Trailhead", "Create Twin Fields on the Quote Line", "https://trailhead.salesforce.com/content/learn/projects/personalize-smartwatches-with-salesforce-cpq-attributes/create-twin-fields-on-the-quote-line", "CPQ copies a value between twin fields automatically, as long as their API names and data types match exactly."), checked: "2026-11-06" } },
+    { text: "Put a price rule that feeds another rule's conditions in an earlier evaluation event.", source: { ...page("Trailhead", "Sequence Price Rules for Correct Calculations", "https://trailhead.salesforce.com/content/learn/modules/price-rules-in-salesforce-cpq/sequence-price-rules-for-correct-calculations", "Rules in an earlier evaluation event always run before rules in a later one, so a rule whose result another rule depends on belongs in an earlier event."), checked: "2026-11-06" } },
+    { text: "Delete price and product rules you've switched off for good, so the active set tells the whole story.", source: null },
+    { text: "Try pricing changes in a sandbox against real quotes before they go live.", source: null },
+  ],
   service_setup: [
     { text: "Give each case queue a routing configuration, so work is pushed to agents with room for it.", source: page("Trailhead", "Optimize Workflows with Enhanced Omni-Channel Routing", "https://trailhead.salesforce.com/content/learn/modules/enhanced-omni-channel/improve-work-distribution-with-enhanced-omni-channel", "Work lands in a queue, and the routing engine passes it to an available member of that queue by remaining capacity, following the queue's routing configuration.") },
     { text: "Attach the article that solved a case, so the next agent can see what the customer already tried.", source: page("Trailhead", "Close Cases with Articles", "https://trailhead.salesforce.com/content/learn/modules/lightning-knowledge-setup-and-customization/close-cases-with-articles", "Agents should attach knowledge articles to cases, so the case shows what helped and a new agent on a reopened case can see what was tried.") },
