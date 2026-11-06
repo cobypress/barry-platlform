@@ -4,6 +4,7 @@ import { analyseExtracts, clone, loadExtracts, runFromRecording } from "../../te
 import { loadCalibration } from "../../testing/replay.ts";
 import { HEALTH_RISKS, sfId, userId } from "../../testing/synthetic-org.ts";
 import type { Finding } from "../../schemas/index.ts";
+import { API_ONLY_ACCOUNT } from "../integrations/index.ts";
 
 let extracts: Map<string, unknown>;
 const tokenOf = (n: number): string => `[[user:U${String(n).padStart(4, "0")}]]`;
@@ -187,6 +188,21 @@ describe("personal accounts used for integrations", () => {
     calibration.users.push({ userId: userId(14), kind: "integration" });
     const f = analyseExtracts(extracts, { calibration }).findings.find((x) => x.ruleId === "sec.personal-integration-accounts")!;
     assert.equal(f.status, "passed");
+  });
+
+  test("an account set to API only is an integration account here as on the licence check, described the same way (DECISIONS.md 323)", () => {
+    const changed = change<{ sets: { data: unknown[] }; assignments: { data: unknown[] } }>("api-only", (d) => {
+      d.sets.data.push({ Id: "0PS000000000099AAA", IsOwnedByProfile: false, Profile: null });
+      d.assignments.data.push({ AssigneeId: userId(14), PermissionSetId: "0PS000000000099AAA" });
+    });
+    const findings = analyseExtracts(changed).findings;
+    const personal = one(findings, "sec.personal-integration-accounts");
+    assert.equal(personal.status, "passed", "an API-only account isn't a personal one");
+    const licences = one(findings, "int.integration-user-licences");
+    const before = one(analyseExtracts(extracts).findings, "int.integration-user-licences");
+    assert.equal(licences.facts.accounts, (before.facts.accounts ?? 0) + 1, "the licence check counts it as an integration account");
+    const notes = (f: Finding): string => f.evidence.map((e) => [e.note ?? "", ...(e.exclusions ?? [])].join(" ")).join(" ");
+    for (const f of [personal, licences]) assert.match(notes(f), new RegExp(API_ONLY_ACCOUNT.replace(/[()]/g, "\\$&")), f.ruleId);
   });
 
   test("a truncated login log can't give a clean pass", () => {
