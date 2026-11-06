@@ -57,7 +57,7 @@ const sentence = (text: string): string => (/[.!?]$/.test(text.trim()) ? text.tr
 
 function partNote(list: ActionList): string | null {
   if (!list.part) return null;
-  return `The first ${list.rows.length.toLocaleString("en-GB")} of ${list.part.total.toLocaleString("en-GB")}, in order of Salesforce id. ${list.part.rest}`;
+  return `${list.part.label ?? `The first ${list.rows.length.toLocaleString("en-GB")} of ${list.part.total.toLocaleString("en-GB")}, in order of Salesforce id.`} ${list.part.rest}`;
 }
 
 function listSheet(c: Context, f: Finding, list: ActionList, name: string): Sheet {

@@ -18,8 +18,12 @@ export type RecordList = {
   rows: Array<{ id: string; problem: string }>;
   /** What to do to each record. */
   fix: string;
-  /** When the rows are a part of the whole: how many there are, and how to find the rest. */
-  part?: { total: number; rest: string };
+  /**
+   * When the rows are a part of the whole: how many there are, and how to find
+   * the rest. `label` says what the part is when it isn't simply the first rows
+   * in order of Salesforce id, such as two lists of which one stopped short.
+   */
+  part?: { total: number; rest: string; label?: string };
 };
 
 export type IssueResult = {

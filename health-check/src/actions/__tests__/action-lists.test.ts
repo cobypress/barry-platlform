@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { strFromU8, unzipSync } from "fflate";
 import { buildTickets, buildWorkbook, loadActionLists, PRIORITY, TICKET_COLUMNS } from "../index.ts";
 import { ACTION_LISTS_FILE, type ActionLists } from "../lists.ts";
-import { ACTION_ROWS, actionRecordsExtractor } from "../../extract/action-records.ts";
+import { ACTION_ROWS, actionRecordsExtractor, type ActionRecords } from "../../extract/action-records.ts";
 import { runHealthCheck } from "../../engine/run.ts";
 import { SALES_CLOUD_MODULES } from "../../domains/index.ts";
 import { buildReport } from "../../narrative/sections.ts";
@@ -14,7 +14,7 @@ import { fullReportHtml } from "../../render/full-report.ts";
 import { executiveHtml } from "../../render/executive.ts";
 import { loadRun } from "../../render/render-run.ts";
 import type { Finding } from "../../schemas/index.ts";
-import { runFromRecording, tempDir } from "../../testing/harness.ts";
+import { analyseExtracts, clone, loadExtracts, runFromRecording, tempDir } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration, syntheticProvider } from "../../testing/replay.ts";
 import { Simulator } from "../../testing/simulator.ts";
 import { AS_OF, LEADS, CONTACTS, USERS } from "../../testing/synthetic-org.ts";
@@ -163,5 +163,32 @@ describe("approved number overrides (night 3 review)", () => {
     assert.ok(row, "the issue has a ticket");
     assert.ok(row.includes(`${hits - 2} of`), "the ticket has the corrected figure");
     assert.ok(!row.includes(`${hits} of`), "the ticket still has the figure the consultant corrected");
+  });
+});
+
+describe("a list that's only part of the whole (night 3 review)", () => {
+  const extracts = loadExtracts(dir);
+  const records = (edit: (actions: ActionRecords, health: { counts: Record<string, { data: number }> }) => void) => {
+    const changed = clone(extracts);
+    edit(changed.get("action-records") as ActionRecords, changed.get("crm-health") as { counts: Record<string, { data: number }> });
+    return analyseExtracts(changed).records;
+  };
+
+  test("is one only when the read stopped at its ceiling, not because the count moved between the two reads", () => {
+    const list = records((a) => {
+      const leads = a.staleLeads as { data: unknown[]; truncated?: boolean };
+      leads.data = leads.data.slice(0, leads.data.length - 3);
+      leads.truncated = false;
+    }).find((r) => r.ruleId === "dq.stale-leads")!;
+    assert.equal(list.part, undefined, "three leads worked between the count and the list don't make it a part");
+  });
+
+  test("a contact list cut off in one gap only says so gap by gap, not as one first N in order of id", () => {
+    const list = records((a, health) => {
+      (a.contactsNoAccount as { truncated?: boolean }).truncated = true;
+      health.counts.contactsNoAccount!.data = 12_000;
+    }).find((r) => r.ruleId === "dq.contact-completeness")!;
+    assert.ok(list.part, "it's a part");
+    assert.match(list.part!.label ?? "", /^No account: the first [\d,]+ of 12,000, in order of Salesforce id\. No email address: all [\d,]+\.$/);
   });
 });

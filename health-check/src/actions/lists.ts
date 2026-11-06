@@ -37,7 +37,7 @@ export const ActionList = z.object({
   ruleId: z.string().min(1),
   object: z.enum(ACTION_OBJECTS),
   fix: z.string().min(1),
-  part: z.object({ total: z.number().int().nonnegative(), rest: z.string().min(1) }).optional(),
+  part: z.object({ total: z.number().int().nonnegative(), rest: z.string().min(1), label: z.string().min(1).optional() }).optional(),
   rows: z.array(ActionRow),
 });
 export type ActionList = z.infer<typeof ActionList>;

@@ -476,7 +476,7 @@ const contactGaps: Rule = {
       owner: "Sales operations",
       segmentsChecked: segments,
       facts: { accountRate, emailRate },
-      records: contactRecords(ctx, noAccount.data + noEmail.data),
+      records: contactRecords(ctx, noAccount.data + noEmail.data, { noAccount: noAccount.data, noEmail: noEmail.data }),
     };
   },
 };
@@ -492,11 +492,16 @@ function staleLeadRecords(ctx: RuleContext, total: number): RecordList | undefin
     object: "Lead",
     rows: staleLeads.data.map((l) => ({ id: l.Id, problem: `Created ${l.CreatedDate.slice(0, 10)}${l.LeadSource ? ` from ${l.LeadSource}` : ""}, with no activity logged` })),
     fix: "Work it, or archive it if it's too old to work",
-    ...(staleLeads.data.length < total ? { part: { total, rest: `In Salesforce, a list view of open leads with no last activity, created before ${staleBefore}, shows them all.` } } : {}),
+    // A part only when the read stopped at its ceiling: the count was read earlier, and a lead worked since isn't missing.
+    ...(staleLeads.truncated ? { part: { total, rest: `In Salesforce, a list view of open leads with no last activity, created before ${staleBefore}, shows them all.` } } : {}),
   };
 }
 
-function contactRecords(ctx: RuleContext, total: number): RecordList | undefined {
+/** One gap's part of a contact list: all of it, or the first rows read of how many there are. */
+const gapLabel = (name: string, read: number, truncated: boolean | undefined, count: number): string =>
+  truncated ? `${name}: the first ${read.toLocaleString("en-GB")} of ${count.toLocaleString("en-GB")}, in order of Salesforce id.` : `${name}: all ${read.toLocaleString("en-GB")}.`;
+
+function contactRecords(ctx: RuleContext, total: number, counts: { noAccount: number; noEmail: number }): RecordList | undefined {
   const { contactsNoAccount, contactsNoEmail } = ctx.data(actionRecordsExtractor);
   if (contactsNoAccount.status !== "ok" || contactsNoEmail.status !== "ok") return undefined;
   // One line per gap: a contact with both appears twice, once for each fix.
@@ -508,7 +513,16 @@ function contactRecords(ctx: RuleContext, total: number): RecordList | undefined
     object: "Contact",
     rows,
     fix: "Link it to its account, or add the email address, as the line says",
-    ...(rows.length < total ? { part: { total, rest: "In Salesforce, list views of contacts with no account, and with no email, show them all." } } : {}),
+    // Two lists, each in order of id and each with its own ceiling, so the part is said gap by gap.
+    ...(contactsNoAccount.truncated || contactsNoEmail.truncated
+      ? {
+          part: {
+            total,
+            rest: "In Salesforce, list views of contacts with no account, and with no email, show them all.",
+            label: [gapLabel("No account", contactsNoAccount.data.length, contactsNoAccount.truncated, counts.noAccount), gapLabel("No email address", contactsNoEmail.data.length, contactsNoEmail.truncated, counts.noEmail)].join(" "),
+          },
+        }
+      : {}),
   };
 }
 

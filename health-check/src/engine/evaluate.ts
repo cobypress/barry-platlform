@@ -132,7 +132,7 @@ function runRule(rule: Rule, ctx: RuleContext, pseudonyms: Pseudonymiser, record
         object,
         rows: rows.map((r) => ({ id: r.id, problem: pseudonyms.scrub(r.problem) })),
         fix: pseudonyms.scrub(fix),
-        ...(part ? { part: { total: part.total, rest: pseudonyms.scrub(part.rest) } } : {}),
+        ...(part ? { part: { total: part.total, rest: pseudonyms.scrub(part.rest), ...(part.label ? { label: pseudonyms.scrub(part.label) } : {}) } } : {}),
         findingId: findingId(rule.id, result.key ?? ""),
         ruleId: rule.id,
       });
