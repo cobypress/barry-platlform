@@ -31,6 +31,11 @@ test("no page a customer reads names an object or field by its API name", () => 
   }
 });
 
+test("no page names an installed app by its namespace (DECISIONS.md 413)", () => {
+  for (const [name, t] of Object.entries(pages)) assert.doesNotMatch(t, /\bacmecpq\b/, name);
+  assert.match(pages.microsite, /CPQ User \(Acme CPQ\)/);
+});
+
 test("objects, relationship fields and record types read as the org labels them", () => {
   assert.match(pages.microsite, /\bInvoice\b[^]*?\bAccount\b[^]*?\bLookup\b/);
   assert.match(pages.microsite, /Credit Note/);

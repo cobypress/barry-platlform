@@ -737,6 +737,13 @@ export const USER_LICENSES = [
 
 // Traps: a seat-limited package with spare seats; a site licence, a free and an
 // expired package, none of which are seats anyone pays for.
+/** Installed packages, as Tooling lists them: each app's name against its namespace. */
+export const INSTALLED_PACKAGES = [
+  { SubscriberPackage: { Name: "Acme CPQ", NamespacePrefix: "acmecpq" } },
+  { SubscriberPackage: { Name: "Salesforce CPQ", NamespacePrefix: "SBQQ" } },
+  { SubscriberPackage: { Name: "Account Engagement", NamespacePrefix: "pi" } },
+];
+
 export const PACKAGE_LICENSES = [
   { NamespacePrefix: "acmecpq", AllowedLicenses: 20, UsedLicenses: 12, Status: "Active", ExpirationDate: null },
   { NamespacePrefix: "sitewide", AllowedLicenses: -1, UsedLicenses: 40, Status: "Active", ExpirationDate: null },

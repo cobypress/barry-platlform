@@ -327,7 +327,7 @@ function access(ctx: Ctx): Metric {
     const holders = holdersOf(ctx.data(accessExtractor));
     if (holders) exclusions.push("A permission set inside a group counts for everyone the group is assigned to");
     const held = (s: { Id: string; assignees: number }): number => holders?.get(s.Id)?.size ?? s.assignees;
-    for (const s of [...doc.permissionSets.data].sort((a, b) => held(b) - held(a) || a.Label.localeCompare(b.Label))) segments.push(seg("permission set", s.NamespacePrefix ? `${s.Label} (${s.NamespacePrefix})` : s.Label, held(s)));
+    for (const s of [...doc.permissionSets.data].sort((a, b) => held(b) - held(a) || a.Label.localeCompare(b.Label))) segments.push(seg("permission set", s.NamespacePrefix ? `${s.Label} (${labelsOf(ctx).package(s.NamespacePrefix)})` : s.Label, held(s)));
     stats.permissionSets = doc.permissionSets.data.length;
   } else exclusions.push(`Permission sets, which couldn't be read: ${doc.permissionSets.reason}`);
   return measured(DEFINITIONS.access, evidence, active.length, segments, { exclusions, stats });

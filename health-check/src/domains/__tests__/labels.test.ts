@@ -28,3 +28,10 @@ test("labels come from the org: a field by its own label and an object by its ow
   const undocumented = findings.find((f) => f.ruleId === "cfg.undocumented-fields" && f.status === "issue")!;
   assert.match(undocumented.summary, /\bInvoice \(2\)/);
 });
+
+test("an installed app is named by its package's name, not its namespace (DECISIONS.md 413)", () => {
+  const seats = findings.find((f) => f.ruleId === "utl.package-seats" && f.status === "issue")!;
+  assert.match(seats.summary, /^Acme CPQ has 8 of 20 seats unassigned/);
+  assert.deepEqual(seats.subjects.map((s) => s.label), ["Acme CPQ"]);
+  for (const f of findings) for (const t of customerText(f)) assert.doesNotMatch(t, /\bacmecpq\b/, f.ruleId);
+});

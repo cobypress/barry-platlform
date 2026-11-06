@@ -102,7 +102,7 @@ describe("installed apps' seats", () => {
     const f = one(output!.findings, "utl.package-seats");
     assert.equal(f.status, "issue");
     assert.equal(f.severity, "low");
-    assert.match(f.summary, /acmecpq has 8 of 20 seats unassigned/);
+    assert.match(f.summary, /Acme CPQ has 8 of 20 seats unassigned/);
     assert.equal(f.value.kind, "not_sized");
   });
 

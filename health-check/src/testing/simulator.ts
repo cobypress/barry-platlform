@@ -401,6 +401,8 @@ export class Simulator implements Transport {
         return page(org.USER_LICENSES);
       case "PermissionSetLicense":
         return page(org.PERMISSION_SET_LICENSES);
+      case "InstalledSubscriberPackage":
+        return tooling ? page(org.INSTALLED_PACKAGES.filter((p) => (this.#cpq || p.SubscriberPackage.NamespacePrefix !== "SBQQ") && (this.#pardot || p.SubscriberPackage.NamespacePrefix !== "pi"))) : unsupported(object);
       case "PackageLicense":
         return page(org.PACKAGE_LICENSES.filter((p) => (this.#cpq || p.NamespacePrefix !== "SBQQ") && (this.#pardot || p.NamespacePrefix !== "pi") && !this.#unlicensed.has(p.NamespacePrefix ?? "")));
       case "SBQQ__PriceRule__c":

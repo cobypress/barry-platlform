@@ -10,13 +10,16 @@ export type Labels = {
   object: (name: string) => string;
   /** A field's label, from the describe the run already read for its object. */
   field: (object: string, name: string) => string;
+  /** An installed app's name, by its namespace (DECISIONS.md 413). */
+  package: (namespace: string) => string;
 };
 
 export function labelsOf(ctx: Pick<RuleContext, "data">): Labels {
-  const objects = ctx.data(labelsExtractor);
+  const labels = ctx.data(labelsExtractor);
   const schema = ctx.data(schemaExtractor);
   return {
-    object: (name) => (objects?.status === "ok" ? objects.data[name] : undefined) ?? name,
+    object: (name) => (labels?.objects.status === "ok" ? labels.objects.data[name] : undefined) ?? name,
+    package: (namespace) => (labels?.packages.status === "ok" ? labels.packages.data[namespace] : undefined) ?? namespace,
     field: (object, name) => {
       const described = schema?.[object];
       return (described?.status === "ok" ? described.data.fields.find((f) => f.name === name)?.label : undefined) ?? name;

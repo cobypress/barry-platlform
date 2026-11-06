@@ -20,6 +20,8 @@ import type { DomainModule } from "../types.ts";
 import { lapse, lapseByDate, type Lapse } from "../logins.ts";
 import { REPORT_RECENT_DAYS } from "../adoption/index.ts";
 import { calibratedHours } from "../value.ts";
+import { labelsOf } from "../labels.ts";
+import { labelsExtractor } from "../../extract/labels.ts";
 import { COMPLIMENTARY_LICENCES } from "../../money/licences.ts";
 import { investmentMetrics } from "./investment.ts";
 
@@ -245,17 +247,19 @@ export const packagePriceKey = (namespace: string): string => `package:${namespa
 // app and a trial aren't seats anyone pays for one by one, so they're left out.
 const packageSeats: Rule = {
   id: "utl.package-seats",
-  version: 1,
+  version: 2,
   domain: "utilisation",
   title: "Installed apps' seats nobody holds",
   evaluate(ctx): RuleResult | RuleResult[] {
     const { packageLicenses } = ctx.data(licencesExtractor);
     if (packageLicenses.status !== "ok") return { outcome: "not_measurable", reason: `Installed packages' licences couldn't be read: ${packageLicenses.reason}`, evidence: [ctx.ev(packageLicenses.source, { count: null })] };
     const seated = packageLicenses.data.filter((p) => p.Status === "Active" && p.AllowedLicenses > 0).sort((a, b) => (a.NamespacePrefix ?? "").localeCompare(b.NamespacePrefix ?? ""));
-    const name = (p: { NamespacePrefix: string | null }): string => p.NamespacePrefix ?? "An app with no namespace";
+    // By the package's name where it can be read; a licence record holds only the namespace (DECISIONS.md 413).
+    const labels = labelsOf(ctx);
+    const name = (p: { NamespacePrefix: string | null }): string => (p.NamespacePrefix ? labels.package(p.NamespacePrefix) : "An app with no namespace");
     const unused = seated.filter((p) => p.UsedLicenses === 0);
     const spare = seated.filter((p) => p.UsedLicenses > 0 && p.AllowedLicenses - p.UsedLicenses >= MIN_SPARE_SEATS && pct(p.AllowedLicenses - p.UsedLicenses, p.AllowedLicenses) >= SPARE_SEAT_SHARE);
-    const evidence = [ctx.ev(packageLicenses.source, { count: seated.length, exclusions: ["Site licences", "Free, trial and expired apps"], note: "Named by namespace: the licence record holds no app name" })];
+    const evidence = [ctx.ev(packageLicenses.source, { count: seated.length, exclusions: ["Site licences", "Free, trial and expired apps"], note: `Licence records by namespace: ${seated.map((p) => p.NamespacePrefix ?? "none").join(", ")}. Named from the installed packages, where they could be read` })];
     const segments = [{ dimension: "installed app", segments: seated.length }];
     if (unused.length + spare.length === 0) {
       return seated.length
@@ -539,6 +543,7 @@ export const utilisationModule: DomainModule = {
   cloud: "sales",
   label: "Utilisation",
   extractors: [
+    labelsExtractor,
     usersExtractor,
     licencesExtractor,
     fieldDescribeExtractor,

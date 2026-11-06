@@ -78,7 +78,7 @@ describe("every part, from the synthetic org", () => {
     // Builder is held through a permission set group, and Old Territory Access by nobody.
     assert.deepEqual(a.permissionSets, [
       { name: "Sales Console User", users: 5 },
-      { name: "CPQ User (acmecpq)", users: 2 },
+      { name: "CPQ User (Acme CPQ)", users: 2 },
       { name: "Data Fix Temporary", users: 1 },
       { name: "Report Builder", users: 1 },
       { name: "Reporting Everything", users: 1 },
