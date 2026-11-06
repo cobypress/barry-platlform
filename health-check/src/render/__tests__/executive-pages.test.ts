@@ -6,12 +6,13 @@ import { buildReport, type ReportInput } from "../../narrative/sections.ts";
 import { Pseudonymiser, type PseudonymEntry } from "../../privacy/pseudonymiser.ts";
 import { runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
-import { executiveHtml } from "../executive.ts";
+import { EXECUTIVE_MAX_PAGES, executiveHtml, executiveMaxPages, RECHECK_EXECUTIVE_MAX_PAGES } from "../executive.ts";
 import { fullReportHtml } from "../full-report.ts";
 import { topIssues } from "../../narrative/select.ts";
 import { returnOnSpend } from "../money.ts";
 import { compactMoney } from "../format.ts";
 import { Intake } from "../../narrative/intake.ts";
+import type { Finding } from "../../schemas/index.ts";
 
 const { output, run, dir } = await runFromRecording({ answers: loadAnswers() });
 const pseudonyms = new Pseudonymiser(JSON.parse(readFileSync(join(dir, "pseudonym-map.json"), "utf8")) as PseudonymEntry[]);
@@ -84,6 +85,17 @@ describe("the executive summary, rebuilt around money", () => {
     const top = topIssues(report.teamFindings, 5);
     const sized = top.filter((f) => f.value.kind !== "not_sized" && f.ruleId !== "cur.coverage" && f.severity === coverage.severity);
     for (const f of sized) assert.ok(top.indexOf(f) < (top.indexOf(coverage) === -1 ? Infinity : top.indexOf(coverage)), f.title);
+  });
+
+  test("a re-check's summary has 10% headroom over the first check's ceiling, as the decks do (DECISIONS.md 353)", () => {
+    const first = buildReport(base);
+    const fixed = new Set(first.teamFindings.filter((f) => f.status === "issue").map((f) => f.ruleId).slice(0, 3));
+    const later = base.findings.map((f): Finding => (fixed.has(f.ruleId) && f.status === "issue" ? { ...f, status: "passed", value: { kind: "not_sized", reason: "Passed." } } : f));
+    const recheck = buildReport({ ...base, run: { ...run, id: `${run.id}-recheck`, baselineRunId: run.id }, findings: later, baseline: base });
+    assert.ok(recheck.progress);
+    assert.equal(executiveMaxPages(first), EXECUTIVE_MAX_PAGES);
+    assert.equal(executiveMaxPages(recheck), RECHECK_EXECUTIVE_MAX_PAGES);
+    assert.equal(RECHECK_EXECUTIVE_MAX_PAGES, Math.floor(EXECUTIVE_MAX_PAGES * 1.1));
   });
 
   test("the investment page's unassigned seats are the money page's, by the same name, with the share counted", () => {

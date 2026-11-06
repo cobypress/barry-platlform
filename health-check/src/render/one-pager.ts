@@ -42,10 +42,35 @@ ol.do .owner { display: block; font-size: 11px; color: var(--muted); }
 
 const firstSentence = (text: string): string => /^.*?[.!?](?=\s|$)/.exec(text)?.[0] ?? text;
 
+type Compared = BuiltReport["comparisons"][number];
+
+/** How far the figure sits from what it's compared with, as a share of that, so points and days can be ranked together. */
+function distance(c: Compared): number {
+  const p = c.published[0];
+  const against = p ? p.figure.value : c.own.status === "measured" ? c.own.median : null;
+  if (c.value === null || against === null) return 0;
+  return Math.abs(c.value - against) / Math.max(Math.abs(against), 1);
+}
+
+/** Behind what it's compared with: worse than the published figure, or in the bottom quarter of our customers. */
+const belowPar = (c: Compared): boolean => c.published[0]?.side === "worse" || (c.published.length === 0 && c.own.status === "measured" && c.own.position === "bottom quarter");
+
+/**
+ * The comparisons a board reads (DECISIONS.md 354): the ones furthest from what
+ * they're compared with, whichever way, and always at least one that's behind
+ * when any is. A page of only the flattering ones isn't credible.
+ */
+export function chooseComparisons(all: Compared[], count: number): Compared[] {
+  const candidates = all.filter((c) => c.value !== null && (c.published.length > 0 || c.own.status === "measured")).sort((a, b) => distance(b) - distance(a) || a.metric.key.localeCompare(b.metric.key));
+  const shown = candidates.slice(0, count);
+  const behind = candidates.find(belowPar);
+  if (behind && !shown.some(belowPar) && shown.length > 0) shown[shown.length - 1] = behind;
+  return shown;
+}
+
 function comparisons(r: Render, report: BuiltReport): string {
   if (isSetupReview(report.input.run)) return "";
-  // The figures with published research first, as the summary's comparison page leads with them.
-  const shown = report.comparisons.filter((c) => c.value !== null && (c.published.length > 0 || c.own.status === "measured")).sort((a, b) => b.published.length - a.published.length).slice(0, COMPARED);
+  const shown = chooseComparisons(report.comparisons, COMPARED);
   if (shown.length === 0) return "";
   const line = (c: (typeof shown)[number]): string => {
     const yours = formatFigure(c.value!, c.metric.unit);

@@ -12,7 +12,7 @@ import { SALES_CLOUD_DOMAINS, type Finding } from "../../schemas/index.ts";
 import { runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
 import { executiveHtml } from "../executive.ts";
-import { onePagerHtml, ONE_PAGER_PAGES } from "../one-pager.ts";
+import { chooseComparisons, onePagerHtml, ONE_PAGER_PAGES } from "../one-pager.ts";
 import { launchBrowser, renderPdf } from "../pdf.ts";
 import { kitReferences, readoutKit, renderReadoutKitDocx } from "../readout-kit.ts";
 
@@ -136,5 +136,26 @@ describe("the readout kit", () => {
     assert.match(text, /Black Cloud only\. Never send this to the customer/);
     assert.match(text, /How is the score worked out\? +Answer: R\d+/);
     for (const part of readoutKit(report)) assert.ok(text.includes(part.title.replace(/'/g, "&apos;")) || text.includes(part.title), part.title);
+  });
+});
+
+describe("which comparisons the one-pager shows (DECISIONS.md 354)", () => {
+  // Made up: a figure, and published research it's better or worse than.
+  const made = (key: string, value: number, published: number, side: "better" | "worse") =>
+    ({ metric: { key, label: key, unit: "percent", better: "higher" }, value, reason: null, published: [{ figure: { value: published }, difference: value - published, side }], publishedReason: null, own: { status: "not_measurable", reason: "Synthetic.", tried: [] } }) as never;
+
+  test("the furthest from what they're compared with, whichever way", () => {
+    const chosen = chooseComparisons([made("near", 21, 20, "better"), made("far-up", 60, 20, "better"), made("far-down", 5, 20, "worse")], 2);
+    assert.deepEqual(chosen.map((c: { metric: { key: string } }) => c.metric.key), ["far-up", "far-down"]);
+  });
+
+  test("at least one that's behind, when any is, even if the flattering ones are further out", () => {
+    const chosen = chooseComparisons([made("up-a", 90, 20, "better"), made("up-b", 80, 20, "better"), made("down", 15, 20, "worse")], 2);
+    assert.deepEqual(chosen.map((c: { metric: { key: string } }) => c.metric.key), ["up-a", "down"]);
+  });
+
+  test("only flattering ones when nothing is behind", () => {
+    const chosen = chooseComparisons([made("up-a", 90, 20, "better"), made("up-b", 80, 20, "better")], 2);
+    assert.deepEqual(chosen.map((c: { metric: { key: string } }) => c.metric.key), ["up-a", "up-b"]);
   });
 });
