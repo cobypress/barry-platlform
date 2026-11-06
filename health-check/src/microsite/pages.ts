@@ -43,7 +43,14 @@ const STYLE = `<style>
 .bcr .meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 13px; color: rgba(255,255,255,.6); margin-bottom: 6px; }
 .bcr .chip { padding: 1px 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,.3); }
 .bcr .chip.alert { background: #e5484d; border-color: #e5484d; color: #fff; }
-.bcr .ref { font-size: 12px; color: rgba(255,255,255,.45); }
+.bcr .ref { font-size: 12px; color: rgba(255,255,255,.45); margin-left: 4px; white-space: nowrap; }
+.bcr .charts > div { flex: 1 1 100%; max-width: 640px; }
+@media (max-width: 600px) {
+  .bcr table.stack thead { display: none; }
+  .bcr table.stack tr { display: block; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,.08); }
+  .bcr table.stack td { display: block; border: none; padding: 2px 0; }
+  .bcr table.stack td[data-label]::before { content: attr(data-label); display: block; font-size: 12px; color: rgba(255,255,255,.5); }
+}
 .bcr ul { padding-left: 20px; }
 .bcr .doc-figure { margin: 8px 0 4px; max-width: 720px; }
 .bcr .doc-figure svg { display: block; width: 100%; height: auto; }
@@ -106,8 +113,9 @@ function peopleSaid(r: Render, report: BuiltReport): string {
     .split(/\n{2,}/)
     .map((p) => `<p>${r.t(p)}</p>`)
     .join("");
-  const rows = byRole(view).map((t) => `<tr><td>${r.t(t.roleLabel)}</td><td>${r.t(t.said)}</td><td>${r.t(t.found)}</td><td>${r.t(`${READING_LABELS[t.reading]}. ${t.why}`)}</td></tr>`);
-  return `<h2>What your people told us</h2>${text}${rows.length ? `<table><thead><tr><th>Role</th><th>They told us</th><th>What the data shows</th><th>Together</th></tr></thead><tbody>${rows.join("")}</tbody></table>` : ""}`;
+  // On a phone each row stacks, each cell under its column's name.
+  const rows = byRole(view).map((t) => `<tr><td data-label="Role">${r.t(t.roleLabel)}</td><td data-label="They told us">${r.t(t.said)}</td><td data-label="What the data shows">${r.t(t.found)}</td><td data-label="Together">${r.t(`${READING_LABELS[t.reading]}. ${t.why}`)}</td></tr>`);
+  return `<h2>What your people told us</h2>${text}${rows.length ? `<table class="stack"><thead><tr><th>Role</th><th>They told us</th><th>What the data shows</th><th>Together</th></tr></thead><tbody>${rows.join("")}</tbody></table>` : ""}`;
 }
 
 /** What the team survey says, as the executive summary has it, and the pairings. Only the line saying why under five answers. */
@@ -130,8 +138,15 @@ function teamSays(r: Render, report: BuiltReport): string {
 /** Adoption's charts, inline: they load nothing. Only the ones that could be drawn. */
 function adoptionCharts(report: BuiltReport): string {
   const metric = (id: string) => report.metrics.find((m) => m.id === id);
-  const charts = [activeUsersChart(metric("adoption.monthly_active_users")), loginChannelsChart(metric("adoption.mobile_login_share")), lightningChart(metric("adoption.lightning_share"))].filter((c) => c.kind === "chart");
-  return charts.length ? `<div class="doc-cols">${charts.map((c) => `<div class="doc-figure">${c.kind === "chart" ? c.svg : ""}</div>`).join("")}</div>` : "";
+  // One to a row, each under the heading of what it shows: three print-sized charts side by side were too small to read.
+  const charts = (
+    [
+      ["Monthly active users", activeUsersChart(metric("adoption.monthly_active_users"))],
+      ["How people sign in", loginChannelsChart(metric("adoption.mobile_login_share"))],
+      ["Lightning and Classic", lightningChart(metric("adoption.lightning_share"))],
+    ] as const
+  ).filter(([, c]) => c.kind === "chart");
+  return charts.length ? `<div class="doc-cols charts">${charts.map(([title, c]) => `<div><h3 class="cap">${title}</h3><div class="doc-figure">${c.kind === "chart" ? c.svg : ""}</div></div>`).join("")}</div>` : "";
 }
 
 function issues(r: Render, report: BuiltReport): string {
@@ -184,7 +199,7 @@ function progress(r: Render, report: BuiltReport): string {
   const list = (title: string, items: typeof p.fixed): string => (items.length ? `<h2>${r.t(`${title} (${items.length})`)}</h2><ul>${items.map((c) => `<li>${r.t(c.title)}${r.ref(c.findingIds[0]!)}</li>`).join("")}</ul>` : "");
   const score = p.score.before !== null && p.score.after !== null ? `<div class="stat"><b>${p.score.before} to ${p.score.after}</b><span>Barometer score</span></div>` : "";
   return page(
-    `<h1>Since your last health check</h1><div class="stats">${score}<div class="stat"><b>${m(p.worth.before)} to ${m(p.worth.after)}</b><span>${r.t("What fixing the issues is worth")}</span></div></div>${list("Fixed", p.fixed)}${list("Still open", p.remaining)}${list("New since then", p.added)}${list("Can't tell yet", p.unknown)}<p class="muted">${r.t("Some of the change in money can come from the business itself, not only from fixes.")}</p>`,
+    `<h1>Since your last health check</h1><div class="stats">${score}<div class="stat"><b>${m(p.worth.before)} to ${m(p.worth.after)}</b><span>${r.t("What the open issues are worth")}</span></div></div>${list("Fixed", p.fixed)}${list("Still open", p.remaining)}${list("New since then", p.added)}${list("Can't tell yet", p.unknown)}<p class="muted">${r.t("Some of the change in money can come from the business itself, not only from fixes.")}</p>`,
   );
 }
 
