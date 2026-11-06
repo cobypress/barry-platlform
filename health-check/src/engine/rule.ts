@@ -5,6 +5,23 @@ import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 type Severity = "critical" | "high" | "medium" | "low" | "info";
 type Confidence = "high" | "medium" | "low";
 
+/** The objects an action list can hold records of. */
+export type ActionObject = "Opportunity" | "Lead" | "Contact" | "User";
+
+/**
+ * The records an issue is about, for the action lists (roadmap Stage 4). Ids
+ * only, with what's wrong in words that hold no name: the engine keeps these out
+ * of the finding (rule 7) and joins each record's name in the worker.
+ */
+export type RecordList = {
+  object: ActionObject;
+  rows: Array<{ id: string; problem: string }>;
+  /** What to do to each record. */
+  fix: string;
+  /** When the rows are a part of the whole: how many there are, and how to find the rest. */
+  part?: { total: number; rest: string };
+};
+
 export type IssueResult = {
   outcome: "issue";
   /** Tells apart several findings from one rule. Stable across runs. */
@@ -27,6 +44,7 @@ export type IssueResult = {
   subjects?: Subject[];
   facts?: Record<string, number>;
   manualStepIds?: string[];
+  records?: RecordList;
 };
 
 export type PassResult = {

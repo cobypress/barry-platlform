@@ -44,7 +44,8 @@ const dimensions = (ctx: RuleContext): Record<string, (d: Deal) => string> => ({
   rep: (d) => ctx.userLabel(d.OwnerId),
 });
 
-export type Scoped = { deals: Deal[]; isHit: (d: Deal) => boolean; exclusions?: string[]; evidence?: Evidence[] } | { reason: string; evidence?: Evidence[] };
+/** `problem` is an affected deal's line in the action list, in words that hold no name. */
+export type Scoped = { deals: Deal[]; isHit: (d: Deal) => boolean; problem?: (d: Deal) => string; exclusions?: string[]; evidence?: Evidence[] } | { reason: string; evidence?: Evidence[] };
 
 type ShareRule = {
   id: string;
@@ -62,6 +63,8 @@ type ShareRule = {
   owner: string;
   /** True sizes the raw exposure. A situation sizes potential revenue at how often comparable deals still won. */
   sized: boolean | ((ctx: RuleContext, data: Ready) => Situation);
+  /** What to do to each affected deal, for the action list. With the scope's `problem`, the issue lists its deals. */
+  fix?: string;
 };
 
 // The shape every share-of-open-deals rule takes: scope, hit test, then the
@@ -108,6 +111,7 @@ export function shareRule(options: ShareRule): Rule {
         segmentsChecked: result.segmentsChecked,
         subjects: result.hotspots.slice(0, 5).map((h) => ({ type: h.dimension, label: h.key })),
         facts: { hits: result.hits, n: result.n, rate: result.rate, ...(worst ? { worstSegmentRate: worst.rate } : {}) },
+        ...(scoped.problem && options.fix ? { records: { object: "Opportunity" as const, rows: scoped.deals.filter(scoped.isHit).map((d) => ({ id: d.Id, problem: scoped.problem!(d) })), fix: options.fix } } : {}),
       };
     },
   };
@@ -138,6 +142,7 @@ const stuckInStage = shareRule({
     return {
       deals,
       isHit: (d) => daysSince(enteredCurrentStage(d)!, ctx.now) > lines.get(d.StageName)!,
+      problem: (d) => `In ${d.StageName} for ${daysSince(enteredCurrentStage(d)!, ctx.now)} days, where three quarters of won deals moved on within ${Math.round(lines.get(d.StageName)!)} days`,
       exclusions: [...(noLine ? [`${plural(noLine, "deal")} in stages with too few won deals to compare`] : []), ...(noEntry ? [`${plural(noEntry, "deal")} whose history doesn't show when they entered this stage`] : [])],
     };
   },
@@ -146,6 +151,7 @@ const stuckInStage = shareRule({
   recommendation: "Go through these in pipeline reviews, and either move each deal on with a dated next step or close it.",
   owner: "Head of sales",
   sized: true,
+  fix: "Move it on with a dated next step, or close it",
 });
 
 const staleDeals = shareRule({
@@ -162,13 +168,18 @@ const staleDeals = shareRule({
       const entered = enteredCurrentStage(d) ?? new Date(d.CreatedDate);
       return entered >= cutoff;
     };
-    return { deals: open, isHit: (d) => !moved(d) && (d.LastActivityDate === null || d.LastActivityDate < day) };
+    return {
+      deals: open,
+      isHit: (d) => !moved(d) && (d.LastActivityDate === null || d.LastActivityDate < day),
+      problem: (d) => `No stage change in ${QUIET_DAYS} days, and ${d.LastActivityDate ? `last activity ${d.LastActivityDate}` : "no activity logged"}`,
+    };
   },
   issueTitle: "Part of your open pipeline isn't moving",
   sentence: (hits, n, rate) => `Open deals with no stage change and no logged activity in ${QUIET_DAYS} days: ${hits} of ${n} (${rate}%).`,
   recommendation: "Check that activity is being captured, then re-engage these deals or close them.",
   owner: "Head of sales",
   sized: (_ctx, data) => SITUATIONS.inStageFor(QUIET_DAYS, data),
+  fix: "Re-engage the customer and log it, or close the deal",
 });
 
 const repeatedPushes = shareRule({
@@ -182,13 +193,14 @@ const repeatedPushes = shareRule({
     const fiscal = fiscalStartOf(ctx);
     const deals = open.filter((d) => d.history.length > 0);
     const noHistory = open.length - deals.length;
-    return { deals, isHit: (d) => pushesOf(d, fiscal).length >= REPEAT_PUSHES, exclusions: noHistory ? [`${plural(noHistory, "deal")} with no stage history`] : [] };
+    return { deals, isHit: (d) => pushesOf(d, fiscal).length >= REPEAT_PUSHES, problem: (d) => `Close date moved later ${pushesOf(d, fiscal).length} times`, exclusions: noHistory ? [`${plural(noHistory, "deal")} with no stage history`] : [] };
   },
   issueTitle: "Close dates are being pushed again and again",
   sentence: (hits, n, rate) => `Open deals whose close date has moved later ${REPEAT_PUSHES} or more times: ${hits} of ${n} (${rate}%). A date that keeps moving usually means the deal isn't really on track.`,
   recommendation: "Treat a second push as a trigger for a manager to review the deal.",
   owner: "Head of sales",
   sized: true,
+  fix: "Have a manager review it and agree a date the customer has confirmed",
 });
 
 const missingNextSteps = shareRule({
@@ -202,13 +214,14 @@ const missingNextSteps = shareRule({
     const steps = ctx.data(nextStepsExtractor);
     if (steps.status !== "ok") return { reason: `Next steps couldn't be read: ${steps.reason}`, evidence: [ctx.ev(steps.source, { count: null })] };
     const filled = new Set(steps.data);
-    return { deals: open, isHit: (d) => !filled.has(d.Id), evidence: [ctx.ev(steps.source, { count: steps.data.length, note: "Read as filled or empty only. The text itself is never fetched" })] };
+    return { deals: open, isHit: (d) => !filled.has(d.Id), problem: () => "Next step is empty", evidence: [ctx.ev(steps.source, { count: steps.data.length, note: "Read as filled or empty only. The text itself is never fetched" })] };
   },
   issueTitle: "Deals are missing a next step",
   sentence: (hits, n, rate) => `Open deals with an empty next step: ${hits} of ${n} (${rate}%).`,
   recommendation: "Make a next step part of how a deal stays in the forecast, and check it in pipeline reviews.",
   owner: "Head of sales",
   sized: false,
+  fix: "Write the next step, with a date",
 });
 
 function concentrationRule(options: { id: string; title: string; limit: number; keyOf: (d: Deal) => string | null | undefined; subject: string; labelOf: (ctx: RuleContext, key: string) => string; minKeys: number; issueTitle: string; sentence: (share: number) => string; recommendation: string }): Rule {

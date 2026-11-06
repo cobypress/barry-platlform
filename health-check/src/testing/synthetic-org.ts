@@ -1014,6 +1014,20 @@ export const LEADS = {
 
 export const CONTACTS = { total: 500, noAccount: 20, noEmail: 80 };
 
+// The records behind those counts, for the action lists. Synthetic names only.
+/** A synthetic deal's name, from its id. */
+export const dealName = (id: string): string => `Synthetic deal ${Number(id.slice(3, 15))}`;
+export const STALE_LEAD_ROWS = LEADS.staleBySource.flatMap(({ s, c }, k) =>
+  Array.from({ length: c }, (_, i) => {
+    const n = k * 1000 + i + 1;
+    return { Id: sfId("00Q", n), Name: `Synthetic lead ${n}`, OwnerId: userId(i % 2 ? 1 : 2), LeadSource: s, CreatedDate: daysAgo(120 + i) };
+  }),
+);
+// Traps: ten contacts have neither, so they're on both lists.
+const contactRow = (n: number) => ({ Id: sfId("003", n), Name: `Synthetic contact ${n}`, OwnerId: userId(n % 3 === 0 ? 3 : 14) });
+export const CONTACTS_NO_ACCOUNT = Array.from({ length: CONTACTS.noAccount }, (_, i) => contactRow(i + 1));
+export const CONTACTS_NO_EMAIL = Array.from({ length: CONTACTS.noEmail }, (_, i) => contactRow(i + 11));
+
 export const APEX_CLASSES = [
   // Trap: a SOQL for loop queries once, so it isn't a query in a loop.
   { Id: sfId("01p", 1), Name: "OpportunityHandler", ApiVersion: 60, Status: "Active", LengthWithoutComments: 1200, Body: "public class OpportunityHandler { /* uses Competitor__c */ public void close() { List<Opportunity> opps = new List<Opportunity>(); for (Opportunity o : [SELECT Id FROM Opportunity WHERE IsClosed = false]) { opps.add(o); } update opps; } }" },

@@ -11,6 +11,7 @@ import { monthsBefore, type ExtractContext, type Extractor, type PartialStore } 
 import type { UserRow } from "../extract/users.ts";
 import { usersExtractor } from "../extract/users.ts";
 import { renderRawNotes } from "../notes/raw-notes.ts";
+import { ACTION_LISTS_FILE, buildActionLists } from "../actions/lists.ts";
 import { Pseudonymiser, type PseudonymEntry } from "../privacy/pseudonymiser.ts";
 import { registerSharedNames } from "../privacy/names.ts";
 import { Run, type Calibration, type ManualAnswer, type RunScope, type RunStep } from "../schemas/index.ts";
@@ -256,6 +257,8 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
   run.status = "analysing";
   await saveRun();
   const output = analyseRun(dir, run, calibration, modules, extracts, options.answers ?? []);
+  // Each issue's records by name, for the action lists. Beside the pseudonym map, not in checkpoints/.
+  writeJson(join(dir, ACTION_LISTS_FILE), buildActionLists(output.records, extracts, client.instanceUrl));
   run.status = output.manualSteps.some((s) => s.status === "pending") ? "awaiting_manual" : "in_review";
   run.finishedAt = new Date().toISOString();
   await saveRun();

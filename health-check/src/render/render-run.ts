@@ -16,6 +16,7 @@ import { renderRawNotesDocx } from "./raw-notes-docx.ts";
 import { ONE_PAGER_PAGES, onePagerHtml } from "./one-pager.ts";
 import { renderReadoutKitDocx } from "./readout-kit.ts";
 import { Survey } from "../survey/questions.ts";
+import { loadActionLists, recordCounts, writeActionFiles } from "../actions/index.ts";
 
 /** The team survey as it stood when the sections were built, comments left out (DECISIONS.md 147). */
 export const SURVEY_FILE = "survey.json";
@@ -33,6 +34,9 @@ export const OUTPUT_FILES = {
   ceo: "ceo-one-pager.pdf",
   /** The consultant's talking points. Black Cloud only, never the customer's (DECISIONS.md 138). */
   kit: "readout-kit.docx",
+  /** The action lists: every record to fix, and a ticket an issue (DECISIONS.md 191 to 200). */
+  actionLists: "action-lists.xlsx",
+  tickets: "tickets.csv",
   sections: "report-sections.json",
   layout: "layout-report.json",
   rejections: "narrative-rejections.json",
@@ -72,6 +76,7 @@ export function loadRun(dir: string, options: { baseline?: boolean } = {}): { in
     overrides: z.array(NumberOverride).parse(readOptional(join(dir, "overrides.json")) ?? []),
     intake: intake ? Intake.parse(intake) : null,
     survey: survey ? Survey.parse(survey) : null,
+    recordCounts: recordCounts(loadActionLists(dir)),
   };
   if (options.baseline !== false) input.baseline = loadBaseline(dir, input.run);
   return { input, pseudonyms: new Pseudonymiser(read<PseudonymEntry[]>(join(dir, "pseudonym-map.json"))) };
@@ -94,11 +99,14 @@ export async function renderRun(dir: string, options: { client?: NarrativeClient
     full: join(folder, OUTPUT_FILES.full),
     ceo: join(folder, OUTPUT_FILES.ceo),
     kit: join(folder, OUTPUT_FILES.kit),
+    actionLists: join(folder, OUTPUT_FILES.actionLists),
+    tickets: join(folder, OUTPUT_FILES.tickets),
     sections: join(folder, OUTPUT_FILES.sections),
     layout: join(folder, OUTPUT_FILES.layout),
     rejections: join(folder, OUTPUT_FILES.rejections),
   };
   const layout = await printDocuments(report, pseudonyms, paths);
+  writeActionFiles(report, pseudonyms, folder, { workbook: paths.actionLists, tickets: paths.tickets });
   write(paths.sections, `${JSON.stringify(Object.values(report.outputs), null, 2)}\n`);
   write(paths.rejections, `${JSON.stringify(rejections, null, 2)}\n`);
   return { report, layout, rejections, passed: layout.executive.passed && layout.full.passed && layout.ceo.passed, files: Object.values(paths) };

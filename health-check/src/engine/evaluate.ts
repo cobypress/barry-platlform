@@ -4,7 +4,7 @@ import type { Extractor } from "../extract/types.ts";
 import { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { DESTRUCTIVE_RECOMMENDATIONS, Finding, Metric, type Calibration, type DateRange, type Evidence, type ManualAnswer, type ManualStep, type RunScope } from "../schemas/index.ts";
 import { MANUAL_STEPS } from "./manual-steps.ts";
-import type { IssueResult, ManualState, Rule, RuleContext, RuleResult } from "./rule.ts";
+import type { IssueResult, ManualState, RecordList, Rule, RuleContext, RuleResult } from "./rule.ts";
 
 export type AnalysisInput = {
   modules: DomainModule[];
@@ -20,7 +20,10 @@ export type AnalysisInput = {
   scope?: RunScope;
 };
 
-export type AnalysisOutput = { findings: Finding[]; metrics: Metric[]; manualSteps: ManualStep[] };
+/** An issue's records, by finding. Worker-only: never part of a finding or anything sent on. */
+export type FindingRecords = RecordList & { findingId: string; ruleId: string };
+
+export type AnalysisOutput = { findings: Finding[]; metrics: Metric[]; manualSteps: ManualStep[]; records: FindingRecords[] };
 
 const NOT_SIZED = { kind: "not_sized", reason: "No finding to size." } as const;
 
@@ -116,10 +119,24 @@ function engineEvidence(ruleId: string, note: string, now: Date): Evidence {
   return { kind: "engine", path: ruleId, count: null, dateRange: null, exclusions: [], capturedAt: now.toISOString(), note };
 }
 
-function runRule(rule: Rule, ctx: RuleContext, pseudonyms: Pseudonymiser): Finding[] {
+function runRule(rule: Rule, ctx: RuleContext, pseudonyms: Pseudonymiser, records: FindingRecords[]): Finding[] {
   try {
     const raw = rule.evaluate(ctx);
     const results = Array.isArray(raw) ? raw : [raw];
+    for (const result of results) {
+      if (result.outcome !== "issue" || !result.records?.rows.length) continue;
+      // The same last pass as the finding's text, for the words a rule wrote. Not
+      // the ids: the scrub would turn a user's id into their token.
+      const { object, rows, fix, part } = result.records;
+      records.push({
+        object,
+        rows: rows.map((r) => ({ id: r.id, problem: pseudonyms.scrub(r.problem) })),
+        fix: pseudonyms.scrub(fix),
+        ...(part ? { part: { total: part.total, rest: pseudonyms.scrub(part.rest) } } : {}),
+        findingId: findingId(rule.id, result.key ?? ""),
+        ruleId: rule.id,
+      });
+    }
     return results.map((result) => {
       // Rule 4: a rule isn't allowed to report "no problem" from a total alone.
       if (result.outcome === "pass" && !result.segmentsChecked?.length && !result.segmentExemptReason) {
@@ -194,12 +211,15 @@ export function analyse(input: AnalysisInput): AnalysisOutput {
   const metrics = modules.flatMap((m) => (m.metrics ?? []).flatMap((build) => build(base))).map((m) => Metric.parse(pseudonyms.scrubDeep(m)));
   const ctx: RuleContext = { ...base, metrics };
   const findings: Finding[] = [];
+  const records: FindingRecords[] = [];
   for (const module of modules) {
     for (const rule of module.rules) {
       currentRule = rule.id;
-      findings.push(...runRule(rule, ctx, pseudonyms));
+      findings.push(...runRule(rule, ctx, pseudonyms, records));
     }
   }
   currentRule = null;
-  return { findings, metrics, manualSteps: [...raised.values()] };
+  // Only what ended as an issue keeps its records, so a list never outlives its finding.
+  const issues = new Set(findings.filter((f) => f.status === "issue").map((f) => f.id));
+  return { findings, metrics, manualSteps: [...raised.values()], records: records.filter((r) => issues.has(r.findingId)) };
 }
