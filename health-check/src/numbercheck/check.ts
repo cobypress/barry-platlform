@@ -21,7 +21,7 @@ export type CheckOutcome = { passed: boolean; checked: number; unmatched: Unmatc
 
 // A figure only someone said is their statement, not a measure (rule 1), so its
 // sentence has to say it was said. These are the words that do.
-const ATTRIBUTION = /\b(?:said|say|says|saying|told us|tell us|tells us|telling us|rated|rate it|put it at|puts it at|putting it at|estimated?|estimates|reckon(?:s|ed)?|think|thinks|thought|believe[sd]?|feel|feels|felt|according to|in (?:an |the |our |their )?interviews?|guess(?:es|ed)?|recall(?:s|ed)?)\b/i;
+export const ATTRIBUTION = /\b(?:said|say|says|saying|told us|tell us|tells us|telling us|rated|rate it|put it at|puts it at|putting it at|estimated?|estimates|reckon(?:s|ed)?|think|thinks|thought|believe[sd]?|feel|feels|felt|according to|in (?:an |the |our |their )?interviews?|guess(?:es|ed)?|recall(?:s|ed)?)\b/i;
 
 /** The sentence a figure sits in. A full stop inside a number ("2.5") doesn't end one. */
 function sentenceAround(text: string, start: number, end: number): string {
