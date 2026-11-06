@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { fork } from "node:child_process";
-import { readdirSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ALL_MODULES } from "../domains/index.ts";
 import { runHealthCheck } from "../engine/run.ts";
@@ -17,11 +17,14 @@ import { AS_OF } from "./synthetic-org.ts";
 // through the simulator, which pages as Salesforce does. Nothing calls a real
 // org. The run folder goes outside the repository and is never committed.
 //
-//   npm run scale -- <out dir> [--factor 0.1] [--latency 200] [--per-record 0.3] [--daily 600000] [--no-render] [--limit-mb 2500] [--diagnose]
+//   npm run scale -- <out dir> [--factor 0.1] [--latency 200] [--per-record 0.3] [--daily 600000] [--no-render] [--limit-mb 2500] [--diagnose] [--parallel 2]
 //
 // The generated org and the simulator run in a process of their own, so the
 // memory measured here is the engine's alone (DECISIONS.md 342). The run fails
 // if the engine's resident peak goes over --limit-mb, so a regression shows.
+// `npm run scale` caps the heap at 1,536 MB, as the worker should be
+// (DECISIONS.md 347); without the cap, V8 sizes its heap from the machine's
+// memory and lets garbage build up, so the figures depend on the machine.
 // --diagnose collects garbage at each step's end, to show what each step's
 // output keeps; leave it off for the peak a worker would see.
 //
@@ -42,6 +45,7 @@ const perRecordMs = flag("per-record", 0.3);
 const dailyLimit = flag("daily", 600_000);
 const limitMb = flag("limit-mb", 2500);
 const diagnose = args.includes("--diagnose");
+const parallel = flag("parallel", 1);
 const gc = (globalThis as { gc?: () => void }).gc;
 if (diagnose && !gc) throw new Error("--diagnose needs node --expose-gc");
 
@@ -163,7 +167,24 @@ async function runJob() {
     steps: result.run.steps.map((s) => ({ id: s.id, status: s.status, calls: s.calls, error: s.error })),
   };
 }
-const result = await runJob();
+// --parallel n runs n jobs at once in this one process, as a worker with HC_WORKER_CONCURRENCY=n might, each against its own simulator.
+const others = await Promise.all(
+  Array.from({ length: parallel - 1 }, async (_, k) => {
+    const other = new ChildSimulator();
+    await other.start({ kind: "start", factor, pageSize: 2000, dailyLimit, used: Math.round(dailyLimit * 0.1) });
+    const folder = join(outDir, `parallel-${k + 1}`);
+    mkdirSync(folder, { recursive: true });
+    return { other, folder };
+  }),
+);
+const [result, ...alongside] = await Promise.all([
+  runJob(),
+  ...others.map(async ({ other, folder }) => {
+    const done = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), answers: loadAnswers(), modules: ALL_MODULES, outDir: folder, now: new Date(AS_OF), transport: other });
+    other.child.kill();
+    return fingerprint(done.dir);
+  }),
+]);
 mark("analysis and writing");
 const runMs = performance.now() - t;
 const simulatorRssMb = await transport.memory();
@@ -209,6 +230,9 @@ const summary = {
   steps,
   findings,
   fingerprint: fingerprint(result.dir),
+  parallel,
+  // The other jobs' conclusions match this one's, run for run (they leave out what only rendering writes).
+  alongsideMatch: alongside.every((other) => Object.entries(other).every(([file, hash]) => fingerprint(result!.dir)[file] === hash)),
   render,
 };
 writeFileSync(join(outDir, `scale-${factor}.json`), `${JSON.stringify(summary, null, 2)}\n`);
