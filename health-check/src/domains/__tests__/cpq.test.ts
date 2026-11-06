@@ -143,6 +143,21 @@ describe("approvals, orders and renewals", () => {
     assert.ok(list.rows.every((r) => /^Q-\d{5}$/.test(r.name ?? "")));
   });
 
+  test("a draft quote on a deal still open isn't an unapproved discount: its approval may simply not have happened yet (night 3 review)", () => {
+    const changed = clone(extracts);
+    const cpq = changed.get("cpq-quotes") as CpqQuotes;
+    const quotes = (cpq.quotes as { data: Array<Record<string, unknown>> }).data;
+    const approvals = (cpq.approvals as { data: Array<{ Id: string; TargetObjectId: string; Status: string }> }).data;
+    // Every quote there is went through approval, so the rule passes ...
+    quotes.forEach((q, i) => approvals.push({ Id: `04g${String(800000 + i).padStart(12, "0")}`, TargetObjectId: String(q.Id), Status: "Approved" }));
+    // ... and then a deep draft on a deal nobody has closed yet.
+    const deals = (changed.get("opportunities") as { opportunities: { data: Array<{ Id: string; IsClosed: boolean }> } }).opportunities.data;
+    const open = deals.find((d) => !d.IsClosed)!;
+    quotes.push({ ...quotes[0]!, Id: "a0Q000000000999AAA", Name: "Q-99999", SBQQ__Opportunity2__c: open.Id, SBQQ__ListAmount__c: 10_000, SBQQ__NetAmount__c: 7_000 });
+    const f = one(analyseExtracts(changed, { modules }).findings, "cpq.discount-approvals");
+    assert.equal(f.status, "passed", f.summary);
+  });
+
   test("not measurable with Advanced Approvals, whose records we don't read", () => {
     const findings = edited<CpqSetup>("cpq-setup", (s) => void (s.presence = { status: "installed", advancedApprovals: true }));
     assert.match(one(findings, "cpq.discount-approvals").notMeasurableReason!, /Advanced Approvals/);

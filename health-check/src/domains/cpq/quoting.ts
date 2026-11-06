@@ -142,7 +142,7 @@ const discountLeakage: Rule = {
 
 const discountApprovals: Rule = {
   id: "cpq.discount-approvals",
-  version: 1,
+  version: 2,
   domain: DOMAIN,
   title: "Deep discounts with no approval",
   evaluate(ctx): RuleResult {
@@ -153,23 +153,27 @@ const discountApprovals: Rule = {
     if (quotes.status !== "ok") return { outcome: "not_measurable", reason: `Quotes couldn't be read: ${quotes.reason}`, evidence: [ctx.ev(quotes.source, { count: null })] };
     if (presence.status === "installed" && presence.advancedApprovals) return { outcome: "not_measurable", reason: "Advanced Approvals is installed, and we don't read its approvals yet, so we can't say which discounts were approved.", evidence: [ctx.ev(quotes.source, { count: quotes.data.length })] };
     if (approvals.status !== "ok") return { outcome: "not_measurable", reason: `Approvals couldn't be read: ${approvals.reason}`, evidence: [ctx.ev(approvals.source, { count: null })] };
+    // Only a quote on a won deal is a discount given. A draft on a deal still open may not have reached its approval yet.
+    const pipeline = loadPipeline(ctx);
+    if (pipeline.status !== "ok") return { outcome: "not_measurable", reason: pipeline.reason, evidence: pipeline.evidence };
+    const won = new Set(pipeline.deals.filter((d) => d.category === "won").map((d) => d.Id));
     const approved = new Set(approvals.data.map((a) => a.TargetObjectId.slice(0, 15)));
-    const deep = quotes.data.flatMap((q) => {
+    const deep = quotes.data.filter((q) => q.SBQQ__Opportunity2__c !== null && won.has(q.SBQQ__Opportunity2__c)).flatMap((q) => {
       const d = discountOf(q);
       return d !== null && d >= DEEP_DISCOUNT ? [{ q, d }] : [];
     });
     const without = deep.filter(({ q }) => !approved.has(q.Id.slice(0, 15)));
     const anyApproval = quotes.data.some((q) => approved.has(q.Id.slice(0, 15)));
-    const evidence = [ctx.ev(quotes.source, { count: deep.length, dateRange: ctx.window, note: `Primary quotes discounted ${DEEP_DISCOUNT}% or more off list price` }), ctx.ev(approvals.source, { count: approvals.data.length, dateRange: ctx.window, note: "Approval processes started in the window, matched to quotes by id" })];
+    const evidence = [ctx.ev(quotes.source, { count: deep.length, dateRange: ctx.window, note: `Primary quotes on won deals discounted ${DEEP_DISCOUNT}% or more off list price`, exclusions: ["Quotes on deals still open or lost, whose approval may not have been needed or reached yet"] }), ctx.ev(approvals.source, { count: approvals.data.length, dateRange: ctx.window, note: "Approval processes started in the window, matched to quotes by id" })];
     const share = pct(without.length, deep.length);
     const facts = { deep: deep.length, without: without.length, share, threshold: DEEP_DISCOUNT };
-    if (deep.length === 0) return { outcome: "pass", summary: `No primary quote in the window was discounted ${DEEP_DISCOUNT}% or more off list price.`, evidence, segmentExemptReason: "There are no deep discounts to segment.", facts };
+    if (deep.length === 0) return { outcome: "pass", summary: `No primary quote on a won deal in the window was discounted ${DEEP_DISCOUNT}% or more off list price.`, evidence, segmentExemptReason: "There are no deep discounts to segment.", facts };
     const segments = [{ dimension: "approval", segments: 2 }];
-    if (without.length === 0) return { outcome: "pass", summary: `All ${plural(deep.length, "primary quote")} discounted ${DEEP_DISCOUNT}% or more went through an approval process.`, evidence, segmentsChecked: segments, facts };
+    if (without.length === 0) return { outcome: "pass", summary: `All ${plural(deep.length, "primary quote")} on won deals discounted ${DEEP_DISCOUNT}% or more went through an approval process.`, evidence, segmentsChecked: segments, facts };
     return {
       outcome: "issue",
       title: "Deep discounts aren't going through approval",
-      summary: `Of ${plural(deep.length, "primary quote")} in the window discounted ${DEEP_DISCOUNT}% or more off list price, ${without.length} (${share}%) never went through an approval process in Salesforce.${anyApproval ? "" : " No quote went through one at all."} We use ${DEEP_DISCOUNT}% as the line, which is our judgement rather than your policy.`,
+      summary: `Of ${plural(deep.length, "primary quote")} on won deals in the window discounted ${DEEP_DISCOUNT}% or more off list price, ${without.length} (${share}%) never went through an approval process in Salesforce.${anyApproval ? "" : " No quote went through one at all."} We use ${DEEP_DISCOUNT}% as the line, which is our judgement rather than your policy.`,
       recommendation: "Set the discount levels that need sign-off, build them into an approval process on the quote, and check who agreed the ones listed.",
       recommendationType: "change",
       severity: share >= 50 ? "medium" : "low",
