@@ -12,6 +12,7 @@ import { topIssues } from "../../narrative/select.ts";
 import { returnOnSpend } from "../money.ts";
 import { compactMoney } from "../format.ts";
 import { Intake } from "../../narrative/intake.ts";
+import { checkNumbers } from "../../numbercheck/index.ts";
 import type { Finding } from "../../schemas/index.ts";
 
 const { output, run, dir } = await runFromRecording({ answers: loadAnswers() });
@@ -85,6 +86,24 @@ describe("the executive summary, rebuilt around money", () => {
     const top = topIssues(report.teamFindings, 5);
     const sized = top.filter((f) => f.value.kind !== "not_sized" && f.ruleId !== "cur.coverage" && f.severity === coverage.severity);
     for (const f of sized) assert.ok(top.indexOf(f) < (top.indexOf(coverage) === -1 ? Infinity : top.indexOf(coverage)), f.title);
+  });
+
+  test("coverage's quota figures are traced as money, as a large org prints them (DECISIONS.md 369)", () => {
+    // Pinned from the scale run: "£1.99m", what's left of quota, was held as a plain number, so the deck failed its number check.
+    // These are the facts the scale org at 5% gives: some quota won, and pipeline enough overall but not for some reps.
+    for (const facts of [
+      { quota: 2_800_000, won: 1_486_500, remaining: 1_313_500, openThisQuarter: 2_225_000, coverage: 1.69, target: 3, shortfall: 1_715_500 },
+      { quota: 2_800_000, won: 1_486_500, remaining: 1_313_500, openThisQuarter: 13_556_750, coverage: 10.32, target: 3, shortfall: 0 },
+    ]) {
+      const findings = base.findings.map((f): Finding => (f.ruleId === "cur.coverage" && f.status === "issue" && f.value.kind === "revenue" ? { ...f, facts, value: { ...f.value, amount: facts.shortfall } } : f));
+      const report = buildReport({ ...base, findings });
+      const deck = fullReportHtml(report, pseudonyms);
+      const card = [...deck.matchAll(/<section class="page[^"]*"[^>]*>([\s\S]*?)<\/section>/g)].map((m) => m[1]!).find((x) => /To reach 3x coverage|some reps are below it/.test(x));
+      assert.ok(card, "the coverage slide");
+      const text = card.replace(/<div class="footer"[\s\S]*?<\/div>/g, " ").replace(/<span class="ref"[^>]*>[^<]*<\/span>/g, " ").replace(/<[^>]+>/g, " | ").replace(/&#39;/g, "'").replace(/&amp;/g, "&");
+      assert.deepEqual(checkNumbers(text, report.dataset).unmatched.filter((u) => /£/.test(u.raw)), [], text);
+      assert.match(text, facts.shortfall ? /you'd need £1\.72m more pipeline/ : /some reps are below it/);
+    }
   });
 
   test("a re-check's summary has 10% headroom over the first check's ceiling, as the decks do (DECISIONS.md 353)", () => {

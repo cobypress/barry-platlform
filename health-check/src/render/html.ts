@@ -81,6 +81,8 @@ function targetText(r: Render, f: Finding): string | null {
   const currency = /^[A-Z]{3}$/.test(f.value.unit) ? f.value.unit : r.currency;
   const m = (n: number) => compactMoney(n, currency);
   const of = won ? `what's left of your ${m(quota)} quota (${m(remaining)})` : `your ${m(quota)} quota`;
+  // Enough overall, but not for every rep: there's no gap to state, only who's short (DECISIONS.md 369).
+  if (shortfall <= 0) return `Open pipeline this quarter is ${f.facts.coverage}x ${won ? "what's left of quota" : "quota"} (${m(remaining)}), above the ${target}x target overall, but some reps are below it`;
   return `To reach ${target}x coverage of ${of} this quarter, you'd need ${m(shortfall)} more pipeline`;
 }
 

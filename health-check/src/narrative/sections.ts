@@ -1,6 +1,6 @@
 import { compareWithBaseline, progressFigures, worthFigures, type Progress } from "../progress/compare.ts";
 import { factsText, type FactsSummary } from "../facts/summary.ts";
-import { addedByFinding, buildValueModel, worthOf, HEADLINE_KINDS, KIND_LABELS, TEAM_TIME_GROUP, UK_HOURLY_BENCHMARK, WORKING_WEEKS, type TeamTime, type ValueModel } from "../value/model.ts";
+import { addedByFinding, buildValueModel, MONEY_FACTS, worthOf, HEADLINE_KINDS, KIND_LABELS, TEAM_TIME_GROUP, UK_HOURLY_BENCHMARK, WORKING_WEEKS, type TeamTime, type ValueModel } from "../value/model.ts";
 import { AREA_WEIGHTS, CRITICAL_CAP, GRADES, overallScore, type OverallScore } from "../domains/scoring.ts";
 import { comparisonId, comparisonNotes, compareRun, OWN_RANGE_MIN, type BenchmarkInput, type Comparison } from "../benchmark/compare.ts";
 import { quarterOf } from "../benchmark/export.ts";
@@ -836,6 +836,13 @@ export function buildReport(given: ReportInput): BuiltReport {
       ...comparisons.map((c) => ({ source: comparisonId(c.metric.key), text: comparisonNotes(c).map((l) => l.text).join("\n") })),
     ],
   });
+  // A target's money facts, such as what's left of quota, are printed as money, so they're held as money (DECISIONS.md 369).
+  for (const f of team) {
+    for (const name of MONEY_FACTS[f.ruleId] ?? []) {
+      const amount = f.facts[name];
+      if (typeof amount === "number" && amount > 0) dataset.figures.push({ source: f.id, kind: "currency", value: amount, currency: calibration.currency });
+    }
+  }
   // The floors, and the half of a group a quartile range holds ("the middle half").
   dataset.figures.push(
     ...[OWN_RANGE_MIN, BENCHMARK_MIN_GROUP].map((value) => ({ source: COMPARISONS, kind: "number" as const, value })),

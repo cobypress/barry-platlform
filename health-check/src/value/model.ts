@@ -94,6 +94,13 @@ export type TeamTime = { hoursPerWeek: number; users: number; usersFrom: string 
  */
 export const NOT_MONEY_RULES = new Set(["cur.coverage"]);
 
+/**
+ * A target finding's facts that are sums of money, so the number check holds them
+ * as money (DECISIONS.md 369). Its figure is printed beside them in their currency,
+ * and a fact is otherwise held as a plain number.
+ */
+export const MONEY_FACTS: Record<string, string[]> = { "cur.coverage": ["quota", "won", "remaining", "openThisQuarter", "shortfall"] };
+
 export const EXPOSURE_RULES = new Set(["cur.stuck-in-stage", "cur.close-date-pushes", "cur.account-concentration", "fct.commit-at-risk", "fct.early-stage-commits", "lead.campaign-return"]);
 
 // The fallback hourly cost when the customer gives none. ONS's median full-time
