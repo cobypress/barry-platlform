@@ -424,6 +424,19 @@ describe("a free scan's run job", () => {
     assert.equal(existsSync(join(deps.runsDir, RUN_ID)), false, "nothing of the org stays on the worker");
   });
 
+  test("sends the facts summary with its results, as an ordinary run does, though its folder is then deleted (DECISIONS.md 324)", async () => {
+    const { deps, handle } = await setup({}, runInput({ run: consoleRun({ scope: "essentials", product: "scan" }) }));
+    await handle(job, last);
+    const facts = stored(deps).output!.facts;
+    assert.ok(facts, "the scan's facts are sent");
+    assert.ok(facts.counts.confirmed > 0);
+    assert.equal(facts.counts.contradicted, facts.differed.length);
+    assert.equal(existsSync(join(deps.runsDir, RUN_ID)), false);
+    const { deps: ordinary, handle: run } = await setup();
+    await run(job, last);
+    assert.ok(stored(ordinary).output!.facts?.counts.confirmed, "an ordinary run's too");
+  });
+
   test("an ordinary run keeps its connection and writes no teaser", async () => {
     const { deps, handle } = await setup();
     await handle(job, last);

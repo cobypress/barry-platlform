@@ -124,6 +124,13 @@ describe("the ticket file", () => {
     for (const person of PEOPLE) assert.ok(!csv.includes(person), person);
   });
 
+  test("a part list's ticket counts every record to fix, not only the rows on the sheet (DECISIONS.md 325)", () => {
+    const part: ActionLists = { ...lists, lists: lists.lists.map((l) => (l.ruleId === "dq.stale-leads" ? { ...l, rows: l.rows.slice(0, 2), part: { total: 7210, rest: "A list view shows them all." } } : l)) };
+    const row = parse(buildTickets(unnamed, pseudonyms, part)).find((r) => r[6] === "dq.stale-leads")!;
+    assert.match(row[3]!, /Records to fix: 7,210, the first 2 of them/);
+    assert.equal(row[10], "7210");
+  });
+
   test("a cell that would start a formula is made text", () => {
     const report = buildReport({ ...input, intake: null, findings: input.findings.map((f) => (f.ruleId === "dq.open-opps-past-close" ? { ...f, title: "=HYPERLINK(\"http://x\")" } : f)) });
     assert.match(buildTickets(report, pseudonyms, lists), /"'=HYPERLINK\(""http:\/\/x""\)"/);

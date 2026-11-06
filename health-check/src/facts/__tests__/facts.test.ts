@@ -15,7 +15,7 @@ import { AS_OF, ORG_ID, USERS } from "../../testing/synthetic-org.ts";
 import { ASSUMPTIONS } from "../assumptions.ts";
 import { answerQuestions, parseQuestions, questionsReport, SECTION_IDS } from "../questions.ts";
 import { runFacts } from "../run-facts.ts";
-import { FactsFile } from "../summary.ts";
+import { FactsFile, factsReport } from "../summary.ts";
 
 // The facts step (DECISIONS.md 287 to 295).
 
@@ -84,7 +84,8 @@ const wrong = await run({
 const STATES_THE_GAP: Record<string, (f: Finding) => boolean> = {
   "tech.classic-leftovers": (f) => /S-controls couldn't be read/.test(f.summary) && !("scontrols" in (f.facts ?? {})),
   // The run-as scan is incomplete, so nobody is recommended for release (hard rule 3).
-  "utl.dormant-licensed-users": (f) => f.recommendationType !== "deactivate",
+  // And says so, so the raw notes' "the check that rests on it says so" is true (night 3 review).
+  "utl.dormant-licensed-users": (f) => f.recommendationType !== "deactivate" && (f.status === "not_measurable" || /couldn't complete every check/.test(f.summary)),
 };
 
 describe("where a fact contradicts what we assume", () => {
@@ -112,6 +113,20 @@ describe("where a fact contradicts what we assume", () => {
     const differed = wrong.facts.facts.filter((f) => f.outcome === "contradicted").length;
     assert.match(notes, new RegExp(`; ${differed} differed from what we expected, and those checks say so\\.`));
     assert.match(notes, /Scontrol isn't among the objects the connection can query\. The check that rests on it says so: "Parts of the org still depend on Salesforce Classic"\./);
+  });
+
+  test("the console's summary counts each outcome and names what differed and the checks resting on it, with nothing seen (DECISIONS.md 324)", () => {
+    const report = factsReport(FactsFile.parse(JSON.parse(wrong.text)));
+    const count = (o: string) => wrong.facts.facts.filter((f) => f.outcome === o).length;
+    assert.deepEqual(report.counts, { confirmed: count("confirmed"), contradicted: count("contradicted"), open: count("open"), notChecked: count("not_checked") });
+    assert.deepEqual(report.differed, wrong.facts.facts.filter((f) => f.outcome === "contradicted").map((f) => ({ id: f.id, question: f.question, affects: f.affects })));
+    assert.ok(report.differed.length > 0);
+    // Names only: every string in it is an id, apart from when it was checked.
+    const strings: string[] = [];
+    JSON.stringify({ ...report, checkedAt: undefined }, (_k, v: unknown) => (typeof v === "string" && strings.push(v), v));
+    for (const s of strings) assert.match(s, /^[a-z0-9][a-z0-9._-]*$/, s);
+    assert.equal(report.checkedAt, wrong.facts.checkedAt);
+    assert.deepEqual(factsReport(FactsFile.parse(JSON.parse(clean.text))).differed, []);
   });
 
   test("a package's names with no licence row is a contradiction that nothing rests on", async () => {

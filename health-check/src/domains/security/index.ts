@@ -281,7 +281,7 @@ const unusedAccess: Rule = {
 
 const peerOutliers: Rule = {
   id: "sec.peer-outlier-access",
-  version: 1,
+  version: 2,
   domain: "security",
   title: "People with access nobody else on their profile has",
   evaluate(ctx): RuleResult {
@@ -308,7 +308,7 @@ const peerOutliers: Rule = {
       }
     }
     const evidence = [
-      ctx.ev(access.assignments.source, { count: access.assignments.status === "ok" ? access.assignments.data.length : null, exclusions: ["Inactive users", "System administrators", `Profiles with fewer than ${MIN_PEERS} active users`, "Standard and installed packages' permission sets", "Sets granting Modify or View All Data, which have their own checks"] }),
+      ctx.ev(access.assignments.source, { count: access.assignments.status === "ok" ? access.assignments.data.length : null, exclusions: ["Inactive users", "System administrators", `Profiles with fewer than ${MIN_PEERS} active users`, "Standard and installed packages' permission sets", privileged.status === "ok" ? "Sets granting Modify or View All Data, which have their own checks" : "Which sets grant Modify or View All Data couldn't be read, so they're compared like any other"] }),
       ctx.ev(users.source, { count: people.length }),
     ];
     const segments = [{ dimension: "profile", segments: compared.length }, { dimension: "permission set", segments: ours.size }];

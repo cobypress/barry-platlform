@@ -39,7 +39,7 @@ const listed = (items: string[]): string => (items.length <= 1 ? (items[0] ?? ""
 
 const personalIntegrations: Rule = {
   id: "sec.personal-integration-accounts",
-  version: 2,
+  version: 4,
   domain: DOMAIN,
   title: "Personal accounts used for integrations",
   evaluate(ctx): RuleResult | RuleResult[] {
@@ -49,7 +49,10 @@ const personalIntegrations: Rule = {
     if (logins.status !== "ok") return { outcome: "not_measurable", reason: `LoginHistory couldn't be read: ${logins.reason}`, evidence: [ctx.ev(logins.source, { count: null })] };
     const gap = missingFieldReason(logins, "LoginHistory.ApiType");
     if (gap) return { outcome: "not_measurable", reason: gap, evidence: [ctx.ev(logins.source, { count: null })] };
+    // An API-only account is an integration account, as the licence checks count it.
+    const apiOnly = apiOnlyUsers(ctx);
     const isPerson = (u: UserRow): boolean => {
+      if (apiOnly?.(u)) return false;
       const kind = kindOf(ctx, u.Id);
       return kind ? !NON_PERSON_KINDS.has(kind) : !looksShared(u);
     };
@@ -58,8 +61,16 @@ const personalIntegrations: Rule = {
     const api = logins.data.apiByUser;
     const hits = people.filter((u) => (api[u.Id]?.logins ?? 0) >= MIN_API_LOGINS);
     const range = { from: logins.data.from, to: ctx.window.to };
-    const exclusions = ["Accounts calibrated as shared, system, integration or test", `People with fewer than ${MIN_API_LOGINS} API logins, which is normal for an occasional data load`];
-    const evidence = [ctx.ev(logins.source, { count: hits.length, dateRange: range, exclusions, note: "Salesforce only returns everyone's logins to a user with Manage Users or Monitor Login History" })];
+    const exclusions = [
+      "Accounts calibrated as shared, system, integration or test",
+      apiOnly ? `Accounts ${API_ONLY_ACCOUNT}` : "Who is API only couldn't be read, so an account set to API only may be counted as a person's",
+      `People with fewer than ${MIN_API_LOGINS} API logins, which is normal for an occasional data load`,
+    ];
+    const { sets } = ctx.data(apiOnlyExtractor);
+    const evidence = [
+      ctx.ev(logins.source, { count: hits.length, dateRange: range, exclusions, note: "Salesforce only returns everyone's logins to a user with Manage Users or Monitor Login History" }),
+      ctx.ev(sets.source, { count: sets.status === "ok" ? sets.data.length : null, note: API_ONLY_SETS }),
+    ];
     const segments = [{ dimension: "user kind", segments: new Set(people.map((u) => kindOf(ctx, u.Id) ?? "Not calibrated")).size }, { dimension: "role", segments: new Set(people.map((u) => u.UserRole?.Name ?? "No role")).size }];
     if (hits.length === 0) {
       if (logins.truncated) return { outcome: "not_measurable", reason: "The login log was too long to read in full, so we can't say no personal account is used this way.", evidence };
@@ -70,7 +81,8 @@ const personalIntegrations: Rule = {
     return {
       outcome: "issue",
       title: "Integrations look to be running on personal logins",
-      summary: `${plural(hits.length, "personal account")} made ${total} API logins since ${logins.data.from}, through ${applications.join(", ") || "an unnamed application"}. If that person leaves and the account is deactivated, the integration stops.`,
+      // A cut-off log holds only some of the logins, so its counts are floors (DECISIONS.md 325).
+      summary: `${logins.truncated ? "At least " : ""}${plural(hits.length, "personal account")} made ${logins.truncated ? "at least " : ""}${total} API logins since ${logins.data.from}, through ${applications.join(", ") || "an unnamed application"}.${logins.truncated ? " The login log was too long to read in full, so there may be more." : ""} If that person leaves and the account is deactivated, the integration stops.`,
       recommendation: "Move each integration to its own integration account, with an API-only profile and only the access it needs.",
       recommendationType: "investigate",
       severity: "medium",
@@ -173,9 +185,21 @@ const insecureRemoteSites: Rule = {
   },
 };
 
-/** Users the org treats as integrations: calibrated as one, or set to API only. Null when API-only couldn't be read. */
-function integrationAccounts(ctx: RuleContext, users: UserRow[]): { accounts: UserRow[]; apiOnly: ((u: UserRow) => boolean) | null } {
-  const { sets, assignments } = ctx.data(apiOnlyExtractor);
+/**
+ * How every check describes an API-only account (DECISIONS.md 323). Such an
+ * account is an integration's, whatever the calibration says about the rest.
+ */
+export const API_ONLY_ACCOUNT = "set to API only (API Only User on its profile or a permission set)";
+const API_ONLY_SETS = "Profiles and permission sets with API Only User";
+
+type ApiOnly = ((u: UserRow) => boolean) | null;
+const apiOnlyRead = new WeakMap<object, ApiOnly>();
+
+/** Who is API only, read once a run from the API-only extract and shared by every check. Null when it couldn't be read. */
+function apiOnlyUsers(ctx: RuleContext): ApiOnly {
+  const data = ctx.data(apiOnlyExtractor);
+  if (apiOnlyRead.has(data)) return apiOnlyRead.get(data)!;
+  const { sets, assignments } = data;
   const apiOnly =
     sets.status === "ok" && assignments.status === "ok"
       ? (() => {
@@ -184,6 +208,13 @@ function integrationAccounts(ctx: RuleContext, users: UserRow[]): { accounts: Us
           return (u: UserRow): boolean => profiles.has(u.Profile?.Name ?? "") || assigned.has(u.Id);
         })()
       : null;
+  apiOnlyRead.set(data, apiOnly);
+  return apiOnly;
+}
+
+/** Users the org treats as integrations: calibrated as one, or set to API only. */
+function integrationAccounts(ctx: RuleContext, users: UserRow[]): { accounts: UserRow[]; apiOnly: ApiOnly } {
+  const apiOnly = apiOnlyUsers(ctx);
   return { accounts: users.filter((u) => u.IsActive && (kindOf(ctx, u.Id) === "integration" || apiOnly?.(u) === true)), apiOnly };
 }
 
@@ -200,8 +231,8 @@ const integrationLicences: Rule = {
     const { sets } = ctx.data(apiOnlyExtractor);
     const { accounts, apiOnly } = integrationAccounts(ctx, users.data);
     const evidence = [
-      ctx.ev(users.source, { count: accounts.length, exclusions: ["Inactive users"], note: "Integration accounts: calibrated as one, or set to API only" }),
-      ctx.ev(sets.source, { count: sets.status === "ok" ? sets.data.length : null, note: "Profiles and permission sets that make a user API only" }),
+      ctx.ev(users.source, { count: accounts.length, exclusions: ["Inactive users"], note: `Integration accounts: calibrated as one, or ${API_ONLY_ACCOUNT}` }),
+      ctx.ev(sets.source, { count: sets.status === "ok" ? sets.data.length : null, note: API_ONLY_SETS }),
       ctx.ev(userLicenses.source, { count: userLicenses.data.length }),
     ];
     if (accounts.length === 0) {
@@ -272,7 +303,7 @@ const interactiveIntegrations: Rule = {
     const accounts = users.data.filter((u) => u.IsActive && kindOf(ctx, u.Id) === "integration" && !isIntegrationLicence(licenceOf(u)));
     const evidence = [
       ctx.ev(users.source, { count: accounts.length, exclusions: ["Inactive users", `Users on the ${INTEGRATION_LICENCE} licence`], note: "Accounts calibrated as integration accounts" }),
-      ctx.ev(sets.source, { count: sets.data.length, note: "Profiles and permission sets with API Only User" }),
+      ctx.ev(sets.source, { count: sets.data.length, note: API_ONLY_SETS }),
     ];
     if (accounts.length === 0) return { outcome: "not_measurable", reason: "No account is calibrated as an integration account, so we can't tell which accounts integrations run on.", evidence };
     const open = accounts.filter((u) => !apiOnly!(u));

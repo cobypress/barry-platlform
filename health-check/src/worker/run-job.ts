@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ALL_MODULES, knownModuleIds, modulesForRun } from "../domains/index.ts";
 import { runHealthCheck } from "../engine/run.ts";
@@ -18,6 +18,8 @@ import { safeReason, type Attempt, type JobOutcome, type WorkerDeps } from "./de
 import { withJobLock } from "./lock.ts";
 import { progressOf, RunClosedError, type RunJobInput } from "./types.ts";
 import { withoutComments } from "../survey/questions.ts";
+import { FACTS_FILE } from "../extract/facts.ts";
+import { FactsFile, factsReport, type FactsReport } from "../facts/summary.ts";
 
 // A run job: the engine's extract and analysis for one console run, through
 // the customer's stored OAuth connection. The run folder is named after the
@@ -194,6 +196,7 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
       // A section Claude's draft couldn't settle stays needs_input.
       sections: outputs.flatMap((o) => o.sections).map((s) => (result.run.status === "in_review" && s.status === "draft" ? { ...s, status: "in_review" as const } : s)),
       versions: outputs.flatMap((o) => o.versions),
+      facts: factsOf(dir, log),
     });
   } catch (err) {
     if (err instanceof RunClosedError) return { outcome: "skipped", detail: err.message };
@@ -206,6 +209,26 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
   if (input.run.product === "scan") await finishScan(runId, dir, name, deps, now().toISOString(), log);
   if (input.run.product === "pulse") await finishPulse(runId, dir, deps, now().toISOString(), log);
   return { outcome: "done", detail: `Run ${runId} is ${result.run.status.replace("_", " ")}` };
+}
+
+/**
+ * The facts step's summary for the console, scans included, read before a
+ * scan's folder is deleted. A run with no facts.json, or one that doesn't
+ * parse, sends none: the findings already say what each check could measure.
+ */
+function factsOf(dir: string, log: (line: string) => void): FactsReport | null {
+  const path = join(dir, FACTS_FILE);
+  if (!existsSync(path)) return null;
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    raw = null;
+  }
+  const parsed = FactsFile.safeParse(raw);
+  if (parsed.success) return factsReport(parsed.data);
+  log("The run's facts.json didn't parse, so the console gets no facts summary.");
+  return null;
 }
 
 /**

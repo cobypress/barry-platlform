@@ -77,6 +77,14 @@ describe("access nobody else on the profile has", () => {
     assert.match(list.rows[0]!.problem, /Holds Report Builder, which nobody else on the Standard User profile has/);
   });
 
+  test("when the privileged sets can't be read, its evidence doesn't say they were left out (DECISIONS.md 325)", () => {
+    const exclusions = (findings: Finding[]) => one(findings, "sec.peer-outlier-access").evidence.flatMap((e) => e.exclusions ?? []);
+    assert.ok(exclusions(output!.findings).includes("Sets granting Modify or View All Data, which have their own checks"));
+    const unread = exclusions(edited<{ sets: unknown }>("privileged-permissions", (p) => void (p.sets = gone)));
+    assert.ok(!unread.some((x) => x.startsWith("Sets granting Modify or View All Data")), unread.join("; "));
+    assert.ok(unread.includes("Which sets grant Modify or View All Data couldn't be read, so they're compared like any other"));
+  });
+
   test("passes when a second colleague holds it too", () => {
     const findings = edited<AccessData>("access", (a) => void (a.assignments as { data: unknown[] }).data.push({ AssigneeId: userId(3), PermissionSetId: null, PermissionSetGroupId: "0PG000000000001AAA" }));
     assert.equal(one(findings, "sec.peer-outlier-access").status, "passed");

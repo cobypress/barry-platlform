@@ -142,7 +142,7 @@ const discountLeakage: Rule = {
 
 const discountApprovals: Rule = {
   id: "cpq.discount-approvals",
-  version: 2,
+  version: 3,
   domain: DOMAIN,
   title: "Deep discounts with no approval",
   evaluate(ctx): RuleResult {
@@ -163,6 +163,8 @@ const discountApprovals: Rule = {
       return d !== null && d >= DEEP_DISCOUNT ? [{ q, d }] : [];
     });
     const without = deep.filter(({ q }) => !approved.has(q.Id.slice(0, 15)));
+    // A cut-off read can't show a quote had no approval: it may be among the rows not read (DECISIONS.md 325).
+    if (without.length > 0 && approvals.truncated) return { outcome: "not_measurable", reason: `The approvals read stopped at ${approvals.data.length.toLocaleString("en-GB")} rows, so a quote with no approval among them may have one we didn't read.`, evidence: [ctx.ev(approvals.source, { count: approvals.data.length, dateRange: ctx.window, note: "Approval processes started in the window, cut off" })] };
     const anyApproval = quotes.data.some((q) => approved.has(q.Id.slice(0, 15)));
     const evidence = [ctx.ev(quotes.source, { count: deep.length, dateRange: ctx.window, note: `Primary quotes on won deals discounted ${DEEP_DISCOUNT}% or more off list price`, exclusions: ["Quotes on deals still open or lost, whose approval may not have been needed or reached yet"] }), ctx.ev(approvals.source, { count: approvals.data.length, dateRange: ctx.window, note: "Approval processes started in the window, matched to quotes by id" })];
     const share = pct(without.length, deep.length);
