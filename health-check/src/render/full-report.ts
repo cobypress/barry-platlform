@@ -6,9 +6,9 @@ import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { ACCOUNT_ENGAGEMENT_DOMAINS, canRelease, CPQ_DOMAINS, SERVICE_CLOUD_DOMAINS, type Finding, type Metric, type Run } from "../schemas/index.ts";
 import { INVENTORY_COLUMNS, inventoryRows, OBJECT_INVENTORY } from "../domains/configuration/inventory.ts";
 import { activeUsersChart, lightningChart, loginChannelsChart, processFlowChart, scorecardOptions, type Chart, closedAsChart, deliveryOutlookChart, HALF_WIDTH, lostByStageChart, pipelineOverTime, scorecardChart, stageFunnel, stageVelocityChart, topAccountsChart, winRateBySegment, winsByCustomerChart, wonValueByChart } from "./charts.ts";
-import { compactMoney, longDate, monthYear, percent } from "./format.ts";
+import { compactMoney, longDate, monthYear, percent, ukDates } from "./format.ts";
 import type { Calibration } from "../schemas/index.ts";
-import { chartSlot, coverScore, document, documentTitle, effortText, estimateLines, paginate, paragraphs, renderContext, severityChip, valueFigure, valueText, type Render } from "./html.ts";
+import { chartSlot, coverScore, document, documentTitle, effortText, estimateLines, paginate, paragraphs, renderContext, sentence, severityChip, valueFigure, valueText, type Render } from "./html.ts";
 import { noteSections, referenceMap } from "./references.ts";
 import { scoreLine } from "./executive.ts";
 import { COMPARE_CSS, compareSlide } from "./compare.ts";
@@ -177,11 +177,61 @@ const noCause: CauseOf = () => null;
 /** The driver's sentence in small type, pointing to its working. */
 const causeLine = (r: Render, cause: string | null): string => (cause ? `<p class="cause">${r.t(cause)}${r.ref(WIN_DRIVERS)}</p>` : "");
 
+// An issue's own slide, measured in Chromium: below a one-line title the columns
+// have 507px before the footer, and each further title line takes 43px. In the
+// panel, the padding, headings and owner take about 170px around a two-line
+// figure, and the working is 14.5px on 21px lines, about 56 characters to a line.
+// These hold a line or so back, and the layout check measures the real thing afterwards.
+const PANEL_SPACE = 495;
+const TITLE_LINE = 44;
+const TITLE_CHARS = 48;
+const NOTE_LINE = 21;
+const NOTE_CHARS = 54;
+
+/** Lines of text wrapped at word breaks, as a browser sets it, to a cautious width. */
+function wrappedLines(text: string, chars: number): number {
+  let lines = 1;
+  let used = 0;
+  for (const word of text.split(/\s+/).filter(Boolean)) {
+    const need = used === 0 ? word.length : used + 1 + word.length;
+    if (need <= chars) used = need;
+    else {
+      lines += used === 0 ? Math.ceil(word.length / chars) - 1 : 1;
+      used = Math.min(word.length, chars);
+    }
+  }
+  return lines;
+}
+
+/**
+ * The money working as the panel can hold it: whole lines of the working, in
+ * order, while they fit, then where the rest is (DECISIONS.md 416). The
+ * figure's own reference stays beside the figure whatever is cut.
+ */
+function panelNote(r: Render, f: Finding, amount: string, note: string): string {
+  const lines = f.value.kind === "not_sized" ? [f.value.reason] : f.value.assumptions;
+  const fixed = 34 + 20 + 26 * wrappedLines(amount, 36) + 36 + 26 * wrappedLines(f.owner, 36) + (f.dependencies.length ? 36 + NOTE_LINE * wrappedLines(f.dependencies.join("; "), NOTE_CHARS) : 0);
+  const room = Math.floor((PANEL_SPACE - TITLE_LINE * (wrappedLines(f.title, TITLE_CHARS) - 1) - fixed) / NOTE_LINE);
+  // Measured as printed: "31 Oct 2024" is longer than its ISO date.
+  const used = (kept: string[]): number => wrappedLines(ukDates(sentence(kept.join(". "))), NOTE_CHARS);
+  if (used(lines) <= room) return note;
+  // A line held for the pointer.
+  const kept: string[] = [];
+  for (const line of lines) {
+    if (used([...kept, line]) > room - 1) break;
+    kept.push(line);
+  }
+  const ref = r.ref(f.id);
+  const pointer = ref ? `${r.t("The full working is at")}${ref}.` : r.t("The full working is in the raw notes.");
+  return `${kept.length ? `${r.t(sentence(kept.join(". ")))} ` : ""}${pointer}`;
+}
+
 function issueSlide(r: Render, label: string, f: Finding, causeOf: CauseOf = noCause): Slide {
   const value = valueText(r, f);
+  const note = panelNote(r, f, value.amount, value.note);
   const meta = `<div class="meta">${severityChip(f)}<span>Confidence ${f.confidence}</span><span>${effortText(f)}</span></div>`;
   return {
-    html: `<div class="eyebrow">${r.t(label)}</div><h2>${r.t(f.title)}</h2>${meta}<div class="columns" style="margin-top:14px"><div><p>${r.t(f.summary)}</p>${f.recommendation ? `<p style="margin-top:12px"><strong>What to do:</strong> ${r.t(f.recommendation)}</p>` : ""}${causeLine(r, causeOf(f))}</div><div class="panel"><h3>Value</h3><p><strong>${value.amount}</strong>${r.ref(f.id)}</p><p class="note">${value.note}</p><h3>Owner</h3><p>${r.t(f.owner)}</p>${f.dependencies.length ? `<h3>Depends on</h3><p class="note">${r.t(f.dependencies.join("; "))}</p>` : ""}</div></div>`,
+    html: `<div class="eyebrow">${r.t(label)}</div><h2>${r.t(f.title)}</h2>${meta}<div class="columns" style="margin-top:14px"><div><p>${r.t(f.summary)}</p>${f.recommendation ? `<p style="margin-top:12px"><strong>What to do:</strong> ${r.t(f.recommendation)}</p>` : ""}${causeLine(r, causeOf(f))}</div><div class="panel"><h3>Value</h3><p><strong>${value.amount}</strong>${r.ref(f.id)}</p><p class="note">${note}</p><h3>Owner</h3><p>${r.t(f.owner)}</p>${f.dependencies.length ? `<h3>Depends on</h3><p class="note">${r.t(f.dependencies.join("; "))}</p>` : ""}</div></div>`,
   };
 }
 
