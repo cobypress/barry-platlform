@@ -15,8 +15,12 @@ import { monthsBefore, readSoql, soqlDateTime, unavailable, type ExtractContext,
 
 /** How far back activity is read: a year of cases is enough to see a pattern, and bounds the API cost. */
 export const SERVICE_MONTHS = 12;
-/** Rows read for each list of cases. More is cut short, and the rules say so. */
-export const CASE_ROW_CAP = 50_000;
+/**
+ * Rows read for each list of cases. A 500-user org's year has about 94,000
+ * milestones, the longest list, so it's read in full (DECISIONS.md 384). More
+ * is cut short, and the rules say so.
+ */
+export const CASE_ROW_CAP = 200_000;
 
 const since = (ctx: ExtractContext): string => soqlDateTime(monthsBefore(ctx.now, SERVICE_MONTHS));
 

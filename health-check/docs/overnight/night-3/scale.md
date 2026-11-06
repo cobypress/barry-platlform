@@ -264,6 +264,34 @@ The synthetic org's and the small generated org's fingerprints are unchanged.
 
 **Already failing on `01a1a76`, not fixed here.** The full report's layout check fails on the scale org. A slide shows "£1.99m", the quarter's remaining quota from `cur.coverage`, and the number check holds that figure as a plain number, not money. It came with the "coverage isn't money" change, so it's in render and narrative, which are session B's.
 
+## The last three caps (Brief AY)
+
+Branch `hc/full-reads-2`, from health-check `a6b45e7`. Decisions 383 to 385.
+
+| Cap | Before | Now | The 500-user org's longest list |
+|---|---:|---:|---:|
+| Forecast rows, today's periods only | 20,000 | 100,000 | 31,272 facts |
+| Each list of cases | 50,000 | 200,000 | 94,334 milestones |
+| Open synced leads | 20,000 | 100,000 | 27,506 |
+
+The forecast read was already only the periods holding today, never history. What the Commit checks need is every deal in today's forecast, so there was nothing older to leave out.
+
+| | Before | After |
+|---|---:|---:|
+| API calls | 1,596 | 1,629 |
+| Network minutes | 19 | 20 |
+| Resident peak (1,536 MB heap) | 1,771 MB | 1,847 MB |
+| Findings | 85 issues, 38 passed, 6 not measurable | 86 issues, 41 passed, 2 not measurable |
+
+The checks that moved:
+- fct.commit-at-risk: not measurable to **issue**. 6,848 of 7,934 deals in Commit are past their close date, quiet for 30 days, or pushed twice or more (86.3%).
+- fct.early-stage-commits: not measurable to passed. 0 of 7,934.
+- svc.milestone-breaches: not measurable to passed. 9,136 of 94,334 missed (9.7%).
+- mkt.unowned-prospects: not measurable to passed. All 27,506 are owned by an active person, or new to a queue.
+- mkt.unworked-handovers stays an issue, now counted on all of them: 11,648 of 27,506 (42.3%), where it said "at least" before.
+
+Only dashboard use and forecast accuracy are left not measurable, and no read gives them. `read-caps.test.ts` builds the 500-user org and holds every capped list under its cap. The synthetic and generated fingerprints are unchanged. The scale org's findings, metrics, scores, action lists, raw notes and sections change with the four checks; its layout doesn't. The layout check still fails on the "£1.99m" number-check problem already on health-check, which session B has.
+
 ## Reproducing
 
 ```bash

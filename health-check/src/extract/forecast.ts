@@ -43,7 +43,12 @@ export type ForecastItemRow = {
 export type ForecastFactRow = { OpportunityId: string; ForecastCategoryName: string | null; PeriodId: string };
 export type ForecastData = { periods: Sourced<PeriodRow[]>; items: Sourced<ForecastItemRow[]>; facts: Sourced<ForecastFactRow[]> };
 
-const FORECAST_MAX_ROWS = 20_000;
+/**
+ * The most forecast rows read: the periods holding today only, never history.
+ * A 500-user org's quarter holds about 31,000 open deals, so it's read in full
+ * (DECISIONS.md 383). More is a part, and the checks say so.
+ */
+export const FORECAST_MAX_ROWS = 100_000;
 
 // Only the periods holding today: these objects show the forecast as it stands,
 // so an older period says nothing about what was forecast back then.
