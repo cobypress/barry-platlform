@@ -37,17 +37,20 @@ const FILES: Record<Exclude<DocumentKey, "readout_kit">, { title: string; ext: s
   raw_notes: { title: "Raw notes", ext: "docx", mime: DOCX },
   ceo_one_pager: { title: "One page summary", ext: "pdf", mime: "application/pdf" },
   // The action lists (DECISIONS.md 197). In the client's folder beside the decks,
-  // and not listed to the console, whose documents card takes only the four above.
+  // and listed to the console, whose documents card says what each is.
   action_lists: { title: "Action lists", ext: "xlsx", mime: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
   tickets: { title: "Tickets", ext: "csv", mime: "text/csv" },
 };
 
 /**
- * The files the console's documents card lists: the three reviewed outputs and
- * the one page summary, which its DocumentOutput accepts (blackcloud-next 52efbf6,
- * DECISIONS.md 139). The readout kit is never listed: it's for Black Cloud only.
+ * The files the console's documents card lists: the three reviewed outputs, the
+ * one page summary (blackcloud-next 52efbf6, DECISIONS.md 139) and the action
+ * lists and tickets, which its DocumentOutput accepts from hc/action-docs
+ * (DECISIONS.md 197). That console must be live before this worker: an output it
+ * doesn't know makes it refuse the whole documents row. The readout kit is never
+ * listed: it's for Black Cloud only.
  */
-const LISTED_TO_CONSOLE: ReadonlySet<DocumentKey> = new Set<DocumentKey>(["executive_summary", "full_health_check", "raw_notes", "ceo_one_pager"]);
+const LISTED_TO_CONSOLE: ReadonlySet<DocumentKey> = new Set<DocumentKey>(["executive_summary", "full_health_check", "raw_notes", "ceo_one_pager", "action_lists", "tickets"]);
 
 /**
  * Black Cloud's own folder for readout kits, beside the clients' folders, never
@@ -223,7 +226,7 @@ async function documentsLocked(runId: string, deps: WorkerDeps, attempt: Attempt
     const printed = await (deps.renderReleased ?? renderReleased)(dir, { ...input, benchmark }, join(dir, "documents"));
     const folder = await folderFor(deps.drive, clientName, input.driveFolderId);
     const nameOf = (output: keyof typeof FILES): string => `${clientName} - ${FILES[output].title}.${FILES[output].ext}`;
-    // The console isn't told of the action lists, so they're known by name here, as the one-pager once was.
+    // Also by name, for a make from before the console was told of these three.
     const target = await versionFolderFor(deps.drive, folder, input.files, now(), [nameOf("ceo_one_pager"), nameOf("action_lists"), nameOf("tickets")]);
     const existing = await deps.drive.files(target.id);
     const files: DocumentFile[] = [];

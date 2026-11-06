@@ -120,7 +120,7 @@ export type LinkConnected = {
 export type DocumentsState = "queued" | "making" | "done" | "failed";
 
 /** The console's DocumentOutput: the three reviewed outputs and the one page summary (DECISIONS 137, 139). */
-export type DocumentFile = { output: ReportSection["output"] | "ceo_one_pager"; name: string; driveFileId: string; url: string };
+export type DocumentFile = { output: ReportSection["output"] | "ceo_one_pager" | "action_lists" | "tickets"; name: string; driveFileId: string; url: string };
 
 export type DocumentsJobInput = {
   run: Run;
