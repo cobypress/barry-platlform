@@ -154,6 +154,10 @@ describe("which comparisons the one-pager shows (DECISIONS.md 354)", () => {
     assert.deepEqual(chosen.map((c: { metric: { key: string } }) => c.metric.key), ["up-a", "down"]);
   });
 
+  test("on the sample, the one behind says it's worse, not only higher", () => {
+    assert.match(onePagerHtml(buildReport(base), pseudonyms), /so yours is 43 points higher, which is worse\./);
+  });
+
   test("only flattering ones when nothing is behind", () => {
     const chosen = chooseComparisons([made("up-a", 90, 20, "better"), made("up-b", 80, 20, "better")], 2);
     assert.deepEqual(chosen.map((c: { metric: { key: string } }) => c.metric.key), ["up-a", "up-b"]);

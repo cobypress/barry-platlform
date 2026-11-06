@@ -75,7 +75,7 @@ function comparisons(r: Render, report: BuiltReport): string {
   const line = (c: (typeof shown)[number]): string => {
     const yours = formatFigure(c.value!, c.metric.unit);
     const p = c.published[0];
-    if (p) return `<p>${r.t(`${c.metric.label}: yours is ${yours}. Published research: ${formatFigure(p.figure.value, c.metric.unit)} ${p.figure.statistic}, so yours is ${differenceWords(c, p)}.`)}<span class="src">${r.t(`${p.figure.source.publisher}, ${p.figure.source.year}`)}</span>${r.ref(comparisonId(c.metric.key))}</p>`;
+    if (p) return `<p>${r.t(`${c.metric.label}: yours is ${yours}. Published research: ${formatFigure(p.figure.value, c.metric.unit)} ${p.figure.statistic}, so yours is ${differenceWords(c, p)}${p.side === "worse" ? ", which is worse" : p.side === "better" ? ", which is better" : ""}.`)}<span class="src">${r.t(`${p.figure.source.publisher}, ${p.figure.source.year}`)}</span>${r.ref(comparisonId(c.metric.key))}</p>`;
     const own = c.own;
     if (own.status !== "measured") return "";
     return `<p>${r.t(`${c.metric.label}: yours is ${yours}, ${own.position}. Black Cloud customers' middle half is ${formatFigure(own.p25, c.metric.unit)} to ${formatFigure(own.p75, c.metric.unit)}.`)}<span class="src">${r.t("Black Cloud customers")}</span>${r.ref(comparisonId(c.metric.key))}</p>`;
