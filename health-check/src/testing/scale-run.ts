@@ -1,13 +1,15 @@
 #!/usr/bin/env node
-import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { fork } from "node:child_process";
+import { readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ALL_MODULES } from "../domains/index.ts";
 import { runHealthCheck } from "../engine/run.ts";
 import { renderRun } from "../render/render-run.ts";
 import type { Transport, TransportRequest, TransportResponse } from "../salesforce/transport.ts";
+import { fingerprint } from "./fingerprint.ts";
 import { loadAnswers, loadCalibration, syntheticProvider } from "./replay.ts";
-import { buildScaleOrg, FIVE_HUNDRED_USERS, scaled } from "./scale-org.ts";
-import { Simulator } from "./simulator.ts";
+import type { ChildReply, ChildRequest, ChildStart } from "./scale-sim-child.ts";
+import { FIVE_HUNDRED_USERS, scaled } from "./scale-org.ts";
 import { AS_OF } from "./synthetic-org.ts";
 
 // The scale test (docs/overnight/night-3/scale.md): the whole engine, every
@@ -15,7 +17,13 @@ import { AS_OF } from "./synthetic-org.ts";
 // through the simulator, which pages as Salesforce does. Nothing calls a real
 // org. The run folder goes outside the repository and is never committed.
 //
-//   node --max-old-space-size=12288 --expose-gc src/testing/scale-run.ts <out dir> [--factor 0.1] [--latency 200] [--per-record 0.3] [--daily 600000] [--no-render]
+//   npm run scale -- <out dir> [--factor 0.1] [--latency 200] [--per-record 0.3] [--daily 600000] [--no-render] [--limit-mb 2500] [--diagnose]
+//
+// The generated org and the simulator run in a process of their own, so the
+// memory measured here is the engine's alone (DECISIONS.md 342). The run fails
+// if the engine's resident peak goes over --limit-mb, so a regression shows.
+// --diagnose collects garbage at each step's end, to show what each step's
+// output keeps; leave it off for the peak a worker would see.
 //
 // There's no real waiting: each call's latency is added up, as the engine's
 // calls are made one at a time. --latency is per call in ms, and --per-record
@@ -32,42 +40,79 @@ const factor = flag("factor", 1);
 const latencyMs = flag("latency", 200);
 const perRecordMs = flag("per-record", 0.3);
 const dailyLimit = flag("daily", 600_000);
+const limitMb = flag("limit-mb", 2500);
+const diagnose = args.includes("--diagnose");
+const gc = (globalThis as { gc?: () => void }).gc;
+if (diagnose && !gc) throw new Error("--diagnose needs node --expose-gc");
 
-const mb = (bytes: number): number => Math.round(bytes / 1024 / 1024);
+const mb = (bytes: number): number => Math.round(bytes / 1048576);
+
+// The engine's memory: peak resident and heap overall, and in each step or phase.
 let peakRss = 0;
 let peakHeap = 0;
+let stepRss = 0;
+let stepHeap = 0;
 const sample = (): void => {
   const m = process.memoryUsage();
   peakRss = Math.max(peakRss, m.rss);
   peakHeap = Math.max(peakHeap, m.heapUsed);
+  stepRss = Math.max(stepRss, m.rss);
+  stepHeap = Math.max(stepHeap, m.heapUsed);
 };
-const sampler = setInterval(sample, 100);
+const sampler = setInterval(sample, 50);
 
-/** Counts what goes over the wire, and the time it would have taken. */
-class Measured implements Transport {
-  readonly inner: Transport;
+type Mark = { step: string; calls: number; networkMs: number; computeMs: number; peakRssMb: number; peakHeapMb: number; heapAfterMb: number };
+const marks: Mark[] = [];
+
+/** The simulator in its own process, answering over IPC, with what goes over the wire counted and costed. */
+class ChildSimulator implements Transport {
+  readonly child = fork(join(import.meta.dirname, "scale-sim-child.ts"), [], { execArgv: ["--max-old-space-size=12288"], serialization: "advanced" });
+  #pending = new Map<number, (reply: Extract<ChildReply, { kind: "reply" }>) => void>();
+  #next = 0;
+  #memory: ((rssMb: number) => void) | null = null;
   calls = 0;
   records = 0;
   bytes = 0;
   networkMs = 0;
   inFlight = 0;
   maxInFlight = 0;
-  biggestPage = 0;
-  constructor(inner: Transport) {
-    this.inner = inner;
+
+  start(options: ChildStart): Promise<Extract<ChildReply, { kind: "ready" }>> {
+    return new Promise((resolve) => {
+      this.child.on("message", (message: ChildReply) => {
+        if (message.kind === "ready") resolve(message);
+        else if (message.kind === "reply") {
+          this.#pending.get(message.id)?.(message);
+          this.#pending.delete(message.id);
+        } else this.#memory?.(message.rssMb);
+      });
+      this.child.send(options);
+    });
   }
+
+  memory(): Promise<number> {
+    return new Promise((resolve) => {
+      this.#memory = resolve;
+      this.child.send({ kind: "memory" });
+    });
+  }
+
   async send(request: TransportRequest): Promise<TransportResponse> {
     this.inFlight++;
     this.maxInFlight = Math.max(this.maxInFlight, this.inFlight);
     try {
-      const res = await this.inner.send(request);
-      const rows = /"records":\[/.test(res.text) ? ((JSON.parse(res.text) as { records?: unknown[] }).records?.length ?? 0) : 0;
+      const id = ++this.#next;
+      const reply = await new Promise<Extract<ChildReply, { kind: "reply" }>>((resolve) => {
+        this.#pending.set(id, resolve);
+        this.child.send({ kind: "request", id, request: { method: request.method, url: request.url, headers: request.headers, body: request.body } } satisfies ChildRequest);
+      });
+      const rows = /"records":\[/.test(reply.text) ? ((JSON.parse(reply.text) as { records?: unknown[] }).records?.length ?? 0) : 0;
       this.calls++;
       this.records += rows;
-      this.bytes += res.text.length;
-      this.biggestPage = Math.max(this.biggestPage, res.text.length);
+      this.bytes += reply.text.length;
       this.networkMs += latencyMs + rows * perRecordMs;
-      return res;
+      const limitInfo = reply.limitInfo;
+      return { status: reply.status, text: reply.text, header: (name) => (name.toLowerCase() === "sforce-limit-info" ? limitInfo : null) };
     } finally {
       this.inFlight--;
     }
@@ -75,37 +120,26 @@ class Measured implements Transport {
 }
 
 const size = scaled(FIVE_HUNDRED_USERS, factor);
-let t = performance.now();
-const records = buildScaleOrg(size);
-const generateMs = performance.now() - t;
-// The generated org's own share of the heap, so the engine's can be told apart (run with --expose-gc for a clean reading).
-(globalThis as { gc?: () => void }).gc?.();
-const heapAfterGenerate = process.memoryUsage().heapUsed;
-sample();
-const counts = {
-  users: records.users.length,
-  opportunities: records.pipeline.opportunities.length,
-  opportunityHistory: records.pipeline.history.length,
-  leads: records.leadFunnel.leads.length,
-  leadHistory: records.leadFunnel.statusChanges.length,
-  campaignMembers: records.leadFunnel.members.length,
-  tasks: records.activity.tasks.length,
-  events: records.activity.events.length,
-  emails: records.activity.emails.length,
-  cases: records.supportCases.cases.length,
-  caseHistory: records.supportCases.history.length,
-  quotes: records.cpqQuotes.length,
-  forecastFacts: records.forecastFacts.length,
-  logins: records.loginHistory.length,
-  staleLeads: records.staleLeadRows.length,
-  contactsNoEmail: records.contactsNoEmail.length,
-};
-console.log(`Generated in ${Math.round(generateMs / 1000)}s: ${JSON.stringify(counts)}`);
+const transport = new ChildSimulator();
+const ready = await transport.start({ kind: "start", factor, pageSize: 2000, dailyLimit, used: Math.round(dailyLimit * 0.1) });
+console.log(`Generated in ${Math.round(ready.generateMs / 1000)}s, in its own process (${ready.rssMb} MB): ${JSON.stringify(ready.counts)}`);
 
-const transport = new Measured(new Simulator({ records, pageSize: 2000, dailyLimit, used: Math.round(dailyLimit * 0.1) }));
-const marks: Array<{ step: string; calls: number; networkMs: number; computeMs: number }> = [];
+gc?.();
+sample();
+const baselineRssMb = mb(process.memoryUsage().rss);
 let last = { calls: 0, networkMs: 0, at: performance.now() };
-t = performance.now();
+/** Closes a step or phase: what it cost, its peak, and what it left on the heap. */
+function mark(step: string): void {
+  sample();
+  if (diagnose) gc!();
+  const now = performance.now();
+  marks.push({ step, calls: transport.calls - last.calls, networkMs: Math.round(transport.networkMs - last.networkMs), computeMs: Math.round(now - last.at), peakRssMb: mb(stepRss), peakHeapMb: mb(stepHeap), heapAfterMb: mb(process.memoryUsage().heapUsed) });
+  last = { calls: transport.calls, networkMs: transport.networkMs, at: performance.now() };
+  stepRss = 0;
+  stepHeap = 0;
+}
+
+let t = performance.now();
 const result = await runHealthCheck({
   provider: syntheticProvider,
   calibration: loadCalibration(),
@@ -116,33 +150,24 @@ const result = await runHealthCheck({
   transport,
   log: (line) => {
     const done = /^\s+([\w-]+): (done|failed)/.exec(line);
-    if (!done) return;
-    const now = performance.now();
-    marks.push({ step: done[1]!, calls: transport.calls - last.calls, networkMs: Math.round(transport.networkMs - last.networkMs), computeMs: Math.round(now - last.at) });
-    last = { calls: transport.calls, networkMs: transport.networkMs, at: now };
+    if (done) mark(done[1]!);
   },
 });
+mark("analysis and writing");
 const runMs = performance.now() - t;
-sample();
+const simulatorRssMb = await transport.memory();
+transport.child.kill();
 
-function folderBytes(dir: string): number {
-  return readdirSync(dir, { withFileTypes: true }).reduce((n, e) => n + (e.isDirectory() ? folderBytes(join(dir, e.name)) : statSync(join(dir, e.name)).size), 0);
-}
-const runBytes = folderBytes(result.dir);
-
-// Which reads stopped at a cap, as the checkpoints record them.
-const truncated: string[] = [];
-const checkpoints = join(result.dir, "checkpoints");
-for (const file of readdirSync(checkpoints).filter((f) => f.endsWith(".json"))) {
-  const text = readFileSync(join(checkpoints, file), "utf8");
-  for (const m of text.matchAll(/"query":"([^"]{0,120})[^"]*"[^{}]*?"truncated":true|"truncated":true[^{}]*?"query":"([^"]{0,120})/g)) truncated.push(`${file}: ${m[1] ?? m[2]}`);
-}
+const output = result.output!;
+const findings = { issue: output.findings.filter((f) => f.status === "issue").length, passed: output.findings.filter((f) => f.status === "passed").length, notMeasurable: output.findings.filter((f) => f.status === "not_measurable").length };
+const budget = result.run.budget;
+const steps = result.run.steps.map((s) => ({ id: s.id, status: s.status, calls: s.calls, error: s.error }));
 
 let render: Record<string, unknown> | null = null;
 if (!args.includes("--no-render")) {
   t = performance.now();
   const rendered = await renderRun(result.dir);
-  sample();
+  mark("rendering the documents");
   render = {
     seconds: Math.round((performance.now() - t) / 1000),
     passed: rendered.passed,
@@ -154,30 +179,35 @@ if (!args.includes("--no-render")) {
 }
 clearInterval(sampler);
 
-const output = result.output!;
+function folderBytes(dir: string): number {
+  return readdirSync(dir, { withFileTypes: true }).reduce((n, e) => n + (e.isDirectory() ? folderBytes(join(dir, e.name)) : statSync(join(dir, e.name)).size), 0);
+}
+
 const summary = {
   size,
-  counts,
-  generateSeconds: Math.round(generateMs / 1000),
+  counts: ready.counts,
+  diagnose,
   runComputeSeconds: Math.round(runMs / 1000),
   latency: { perCallMs: latencyMs, perRecordMs },
   networkMinutes: Math.round(transport.networkMs / 60_000),
   calls: transport.calls,
-  budget: result.run.budget,
+  budget,
   recordsReturned: transport.records,
   megabytesReturned: mb(transport.bytes),
-  biggestResponseKb: Math.round(transport.biggestPage / 1024),
   maxCallsAtOnce: transport.maxInFlight,
-  peakRssMb: mb(peakRss),
-  peakHeapMb: mb(peakHeap),
-  generatedOrgHeapMb: mb(heapAfterGenerate),
-  runFolderMb: Math.round((runBytes / 1024 / 1024) * 10) / 10,
-  steps: marks,
-  stepCalls: result.run.steps.map((s) => ({ id: s.id, status: s.status, calls: s.calls, error: s.error })),
-  truncated,
-  findings: { issue: output.findings.filter((f) => f.status === "issue").length, pass: output.findings.filter((f) => f.status === "passed").length, notMeasurable: output.findings.filter((f) => f.status === "not_measurable").map((f) => `${f.ruleId}: ${f.summary.slice(0, 160)}`) },
+  engine: { baselineRssMb, peakRssMb: mb(peakRss), peakHeapMb: mb(peakHeap), limitMb },
+  simulatorRssMb,
+  runFolderMb: Math.round((folderBytes(result.dir) / 1048576) * 10) / 10,
+  marks,
+  steps,
+  findings,
+  fingerprint: fingerprint(result.dir),
   render,
 };
 writeFileSync(join(outDir, `scale-${factor}.json`), `${JSON.stringify(summary, null, 2)}\n`);
-console.log(JSON.stringify({ ...summary, steps: undefined, stepCalls: undefined, findings: { ...summary.findings, notMeasurable: summary.findings.notMeasurable.length } }, null, 2));
+console.log(JSON.stringify({ ...summary, marks: undefined, steps: undefined }, null, 2));
 console.log(`Written to ${join(outDir, `scale-${factor}.json`)}`);
+if (mb(peakRss) > limitMb) {
+  console.error(`The engine's resident peak, ${mb(peakRss)} MB, is over the limit of ${limitMb} MB.`);
+  process.exitCode = 1;
+}
