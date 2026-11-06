@@ -47,6 +47,16 @@ describe("profiles and permission sets nobody uses", () => {
     assert.ok(one(findings, "sec.unused-access").subjects.some((s) => s.label === "Report Builder"));
   });
 
+  test("quiet once every custom profile has users and every set of your own is held (night 3 review: the clean twin)", () => {
+    const changed = clone(extracts);
+    const access = changed.get("access") as AccessData;
+    const profiles = access.profiles as { data: Array<{ Profile?: { Name: string } | null }> };
+    profiles.data = profiles.data.filter((p) => p.Profile?.Name !== "Old Sales Profile");
+    const docs = changed.get("org-documentation") as { permissionSets: { data: Array<{ Label?: string; label?: string }> } };
+    docs.permissionSets.data = docs.permissionSets.data.filter((p) => (p.Label ?? p.label) !== "Old Territory Access");
+    assert.equal(one(analyseExtracts(changed).findings, "sec.unused-access").status, "passed");
+  });
+
   test("not measurable when the groups can't be read, since a set may be held through one", () => {
     assert.equal(one(edited<AccessData>("access", (a) => void (a.groupComponents = gone as never)), "sec.unused-access").status, "not_measurable");
   });
@@ -94,6 +104,11 @@ describe("installed apps' seats", () => {
     assert.deepEqual(f.value.kind === "licence_cost" ? f.value.amount : null, 2400);
   });
 
+  test("quiet when every seat of every app is assigned (night 3 review: the clean twin)", () => {
+    const f = one(edited<LicenceData>("licences", (l) => (l.packageLicenses as { data: Array<{ AllowedLicenses: number; UsedLicenses: number }> }).data.forEach((p) => p.AllowedLicenses > 0 && (p.UsedLicenses = p.AllowedLicenses))), "utl.package-seats");
+    assert.equal(f.status, "passed");
+  });
+
   test("medium when an app has nobody assigned at all", () => {
     const f = one(edited<LicenceData>("licences", (l) => (l.packageLicenses as { data: Array<{ NamespacePrefix: string | null; UsedLicenses: number }> }).data.forEach((p) => p.NamespacePrefix === "acmecpq" && (p.UsedLicenses = 0))), "utl.package-seats");
     assert.equal(f.severity, "medium");
@@ -122,6 +137,11 @@ describe("storage against the allowance", () => {
 });
 
 describe("open deals with no account", () => {
+  test("quiet once every open deal has an account (night 3 review: the clean twin)", () => {
+    const f = one(edited<{ opportunities: { data: Array<{ AccountId?: string | null }> } }>("opportunities", (o) => o.opportunities.data.forEach((d, i) => (d.AccountId = `001${String(i).padStart(12, "0")}AAA`))), "dq.opps-without-account");
+    assert.equal(f.status, "passed");
+  });
+
   test("fires, and lists every one", () => {
     const f = one(output!.findings, "dq.opps-without-account");
     assert.equal(f.status, "issue");

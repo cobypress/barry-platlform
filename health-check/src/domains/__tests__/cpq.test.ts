@@ -101,6 +101,13 @@ describe("CPQ set-up", () => {
     assert.equal(f.facts.inactive, 4);
     assert.equal(f.facts.total, 11);
   });
+
+  test("inactive rules: quiet when every rule is active (night 3 review: the clean twin)", () => {
+    const findings = edited<CpqSetup>("cpq-setup", (s) => {
+      for (const list of [s.priceRules, s.productRules] as Array<{ data?: Array<{ SBQQ__Active__c: boolean }> }>) list.data?.forEach((r) => (r.SBQQ__Active__c = true));
+    });
+    assert.equal(one(findings, "cpq.inactive-rules").status, "passed");
+  });
 });
 
 describe("discount leakage", () => {
@@ -161,6 +168,11 @@ describe("approvals, orders and renewals", () => {
   test("not measurable with Advanced Approvals, whose records we don't read", () => {
     const findings = edited<CpqSetup>("cpq-setup", (s) => void (s.presence = { status: "installed", advancedApprovals: true }));
     assert.match(one(findings, "cpq.discount-approvals").notMeasurableReason!, /Advanced Approvals/);
+  });
+
+  test("won quotes never ordered: quiet once every won quote is ordered (night 3 review: the clean twin)", () => {
+    const all = edited<CpqQuotes>("cpq-quotes", (q) => (q.quotes as { data: Array<{ SBQQ__Ordered__c?: boolean | null }> }).data.forEach((x) => (x.SBQQ__Ordered__c = true)));
+    assert.equal(one(all, "cpq.quote-to-order").status, "passed");
   });
 
   test("won quotes never ordered, listed by opportunity, and not measurable when nothing is ever ordered", () => {
