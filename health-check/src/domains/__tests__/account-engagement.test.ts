@@ -166,6 +166,26 @@ describe("unowned prospects", () => {
   });
 });
 
+describe("a read of open synced leads cut off at its row limit", () => {
+  test("never lets either lead check pass on the part it read", () => {
+    const clean = (l: PardotLeads): void =>
+      openRows(l).forEach((r) => {
+        r.LastActivityDate = AS_OF.slice(0, 10);
+        if (r.OwnerId === userId(9) || r.OwnerId.startsWith("00G")) r.OwnerId = userId(1);
+      });
+    const whole = edited<PardotLeads>("pardot-leads", clean);
+    const part = edited<PardotLeads>("pardot-leads", (l) => {
+      clean(l);
+      Object.assign(l.open, { truncated: true });
+    });
+    for (const id of ["mkt.unworked-handovers", "mkt.unowned-prospects"]) {
+      assert.equal(one(whole, id).status, "passed", id);
+      assert.equal(one(part, id).status, "not_measurable", id);
+      assert.match(one(part, id).notMeasurableReason!, /stopped at its row limit, so we checked only the first \d+/, id);
+    }
+  });
+});
+
 describe("campaign influence", () => {
   test("on, but not taking Account Engagement's models, is low", () => {
     const f = one(output!.findings, "mkt.campaign-influence");
