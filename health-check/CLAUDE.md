@@ -9,6 +9,8 @@ npm test            # all tests, no Salesforce org needed
 npm run typecheck
 npm run fixtures    # re-record after changing a query or the synthetic org
 npm run hc -- run --org <alias> --calibration <file>
+npm run hc -- facts --org <alias>   # only the Salesforce names we assume, never records
+npm run questions -- <facts.json | run folder ...>   # which QUESTIONS.md items real orgs settle
 ```
 
 Node 24 runs the TypeScript directly, so there's no build. Use `.ts` extensions in imports, and only erasable syntax: no enums or parameter properties.
