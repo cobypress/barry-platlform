@@ -31,4 +31,15 @@ describe("the money table", () => {
     assert.ok(restRow.includes(m(sum("expected"))), `${restRow} should carry ${m(sum("expected"))}`);
     assert.ok(restRow.includes(`${m(sum("low"))} to ${m(sum("high"))}`), restRow);
   });
+
+  test("each line's figure before the share is said in words that fit its kind (DECISIONS.md 395)", () => {
+    const report = buildReport(base);
+    const html = moneyPage(renderContext(pseudonyms, "GBP", false), report, "page");
+    const money = report.value.groups.filter((g) => g.kind !== "exposure").sort((a, b) => b.counted.expected - a.counted.expected);
+    const bases = [...html.matchAll(/<span class="basis">([^<]*)<\/span>/g)].map((x) => x[1]!);
+    const shown = money.slice(0, bases.length);
+    const words = { revenue_recoverable: "if all came back", conversion_uplift: "if the gap closed in full", licence_waste: "if every seat were released", time_cost: "if all those hours were saved" } as const;
+    assert.ok(new Set(shown.map((g) => g.kind)).size >= 3, shown.map((g) => g.kind).join(", "));
+    shown.forEach((g, i) => assert.ok(bases[i]!.startsWith(`${compactMoney(g.counted.annual, "GBP")} ${words[g.kind as keyof typeof words]}`), `${g.id}: ${bases[i]}`));
+  });
 });
