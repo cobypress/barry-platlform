@@ -170,7 +170,7 @@ describe("the executive summary, rebuilt around money", () => {
     const contents = [...pages.values()].find((t) => t.includes("What's in this report"))!;
     const at = deck.indexOf("<ol class=\"contents");
     const html = deck.slice(at, deck.indexOf("</ol>", at));
-    const entries = [...html.matchAll(/<li>(.*?)<span class="pg" data-ref>(\d+)<\/span><\/li>/g)].map((m) => ({ label: m[1]!.replace(/&#39;/g, "'"), page: Number(m[2]) }));
+    const entries = [...html.matchAll(/<li>(.*?)<span class="pg" data-ref data-goto="\d+">(\d+)<\/span><\/li>/g)].map((m) => ({ label: m[1]!.replace(/&#39;/g, "'"), page: Number(m[2]) }));
     assert.ok(contents && entries.length >= 20, `${entries.length} entries with a page`);
     assert.equal(entries.length, [...html.matchAll(/<li>/g)].length, "every entry has a page on this sample");
     assert.deepEqual(entries.map((e) => e.page), [...entries.map((e) => e.page)].sort((a, b) => a - b), "in page order");

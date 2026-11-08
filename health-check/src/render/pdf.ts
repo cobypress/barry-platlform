@@ -1,5 +1,6 @@
 /// <reference lib="dom" />
 import { chromium, type Browser } from "playwright";
+import { carryOver } from "./carry-over.ts";
 import { checkLayout, type LayoutExpectation, type LayoutReport } from "./layout.ts";
 
 // Chromium is only used to lay out and print HTML we built ourselves. Network
@@ -23,6 +24,7 @@ export async function renderPdf(browser: Browser, html: string, expectation: Lay
     await page.setContent(html, { waitUntil: "load" });
     await page.evaluate(() => document.fonts.ready.then(() => undefined));
     await page.emulateMedia({ media: "print" });
+    if (expectation.carryOver) await carryOver(page);
     const layout = await checkLayout(page, expectation);
     const pdf = await page.pdf({ preferCSSPageSize: true, printBackground: true });
     return { pdf, layout };
@@ -38,6 +40,7 @@ export async function layoutOf(browser: Browser, html: string, expectation: Layo
     await page.setContent(html, { waitUntil: "load" });
     await page.evaluate(() => document.fonts.ready.then(() => undefined));
     await page.emulateMedia({ media: "print" });
+    if (expectation.carryOver) await carryOver(page);
     return await checkLayout(page, expectation);
   } finally {
     await context.close();

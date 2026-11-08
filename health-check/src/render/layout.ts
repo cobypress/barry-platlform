@@ -15,6 +15,8 @@ export type LayoutExpectation = {
   maxPages: number;
   /** Rendered text must trace to this. Leave out only in a test of the layout alone. */
   dataset?: FigureSet;
+  /** Move what runs past a footer onto continued pages first (carry-over.ts). Not for a document that must keep its page count, such as the one-pager. */
+  carryOver?: boolean;
 };
 
 type PageFacts = {

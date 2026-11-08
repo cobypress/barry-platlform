@@ -843,7 +843,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
     const keyed = contents.map((c, i) => ({ c, i, at: (last = starts.get(c) ?? last) }));
     return keyed.sort((a, b) => a.at - b.at || a.i - b.i).map((x) => x.c);
   };
-  const contentsSlide = (): string => `<div class="eyebrow">Contents</div><h2>What's in this report</h2><ol class="contents${contents.length > CONTENTS_IN_TWO_COLUMNS ? " long" : ""}">${inPageOrder().map((c) => `<li>${r.t(c)}${starts.has(c) ? `<span class="pg" data-ref>${starts.get(c)}</span>` : ""}</li>`).join("")}</ol>`;
+  const contentsSlide = (): string => `<div class="eyebrow">Contents</div><h2>What's in this report</h2><ol class="contents${contents.length > CONTENTS_IN_TWO_COLUMNS ? " long" : ""}">${inPageOrder().map((c) => `<li>${r.t(c)}${starts.has(c) ? `<span class="pg" data-ref data-goto="${starts.get(c)}">${starts.get(c)}</span>` : ""}</li>`).join("")}</ol>`;
   add(contentsSlide());
 
   add(`<div class="eyebrow">How to read this report</div><h2>What the ratings mean</h2><table class="grid"><tbody>

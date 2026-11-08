@@ -114,7 +114,7 @@ describe("a survey with enough answers", () => {
     const against = html.indexOf("<h2>What your team says, against what we found</h2>");
     const adoption = html.indexOf("<h2>Who uses Salesforce, and how</h2>");
     assert.ok(adoption > 0 && says > adoption && against > says, "the survey follows the adoption chapter");
-    assert.match(html, /<li>What your team says<span class="pg" data-ref>\d+<\/span><\/li>/, "and the contents list it, with its page");
+    assert.match(html, /<li>What your team says<span class="pg" data-ref data-goto="\d+">\d+<\/span><\/li>/, "and the contents list it, with its page");
   });
 
   test("the microsite's overview carries it, and every page passes the number check", () => {
