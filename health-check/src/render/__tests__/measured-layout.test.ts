@@ -7,7 +7,8 @@ import type { Browser, Page } from "playwright";
 import { ALL_MODULES, CPQ_MODULES, SALES_CLOUD_MODULES, SERVICE_CLOUD_MODULES } from "../../domains/index.ts";
 import { LENGTH_TOLERANCE, wordCount } from "../../narrative/draft.ts";
 import { Intake } from "../../narrative/intake.ts";
-import { buildReport, currentBody, WORD_TARGETS, type BuiltReport, type ReportInput, type ReportOutputKey } from "../../narrative/sections.ts";
+import { buildReport, currentBody, VALUE_TOTAL, WORD_TARGETS, type BuiltReport, type ReportInput, type ReportOutputKey } from "../../narrative/sections.ts";
+import { checkNumbers, scopeDataset } from "../../numbercheck/index.ts";
 import { Pseudonymiser, type PseudonymEntry } from "../../privacy/pseudonymiser.ts";
 import { Score, type Finding } from "../../schemas/index.ts";
 import { runFromRecording } from "../../testing/harness.ts";
@@ -16,7 +17,7 @@ import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
 import { syntheticSurvey } from "../../testing/survey.ts";
 import { EXECUTIVE_PAGES } from "../render-run.ts";
 import { EXECUTIVE_MAX_PAGES, executiveHtml, executiveMaxPages, hasBothVoices, introLines, planIntroHeight, RECHECK_EXECUTIVE_MAX_PAGES } from "../executive.ts";
-import { fullReportHtmlAt, slideCounts, threeColumnItemHeight } from "../full-report.ts";
+import { fullReportHtml, fullReportHtmlAt, slideCounts, threeColumnItemHeight } from "../full-report.ts";
 import { estimateLines, paginateColumns } from "../html.ts";
 import { compactMoney } from "../format.ts";
 import { restOf } from "../money.ts";
@@ -424,6 +425,24 @@ const MONEY_CASES: Array<[string, (input: ReportInput) => Partial<ReportInput>]>
   ["a survey, with spend", (input) => ({ intake: { ...input.intake!, salesforceSpendAnnual: 250_000 }, survey: syntheticSurvey(12) })],
 ];
 
+/**
+ * The sample with nine lines of money of its own, each a value group labelled
+ * with the finding's title, at every length to sixteen words, and a survey and
+ * a figure for spend, so the page can't hold them all.
+ */
+function withManyLines(input: ReportInput): ReportInput {
+  const template = input.findings.find((f) => f.status === "issue")!;
+  const extra = Array.from({ length: 9 }, (_, i): Finding => ({
+    ...template,
+    id: `f-${String(900 + i).padStart(12, "0")}`,
+    ruleId: `synthetic.money_${i}`,
+    title: draft(8 + i, OPENINGS[i % OPENINGS.length]!).replace(/\.$/, ""),
+    severity: "low",
+    value: { kind: "licence_cost", amount: 31_000 + 4_700 * i, unit: "GBP", period: "per year", assumptions: ["A synthetic line for the money page."] },
+  }));
+  return { ...input, findings: [...input.findings, ...extra], intake: { ...input.intake!, salesforceSpendAnnual: 250_000 }, survey: syntheticSurvey(12) };
+}
+
 describe("the money page fits its page, with a survey or without and a figure for spend or without", () => {
   for (const [name, options] of SAMPLES) {
     test(name, async () => {
@@ -459,18 +478,7 @@ describe("the money page fits its page, with a survey or without and a figure fo
 
   test("with more lines than the page holds, on long labels, it names fewer and adds up the rest", async () => {
     const { input, names } = await sampleOf(SAMPLES[0]![1]);
-    // Lines of their own, each a value group labelled with the finding's title, at
-    // every length to sixteen words, so the page can't hold them all.
-    const template = input.findings.find((f) => f.status === "issue")!;
-    const extra = Array.from({ length: 9 }, (_, i): Finding => ({
-      ...template,
-      id: `f-${String(900 + i).padStart(12, "0")}`,
-      ruleId: `synthetic.money_${i}`,
-      title: draft(8 + i, OPENINGS[i % OPENINGS.length]!).replace(/\.$/, ""),
-      severity: "low",
-      value: { kind: "licence_cost", amount: 31_000 + 4_700 * i, unit: "GBP", period: "per year", assumptions: ["A synthetic line for the money page."] },
-    }));
-    const report = buildReport({ ...input, findings: [...input.findings, ...extra], intake: { ...input.intake!, salesforceSpendAnnual: 250_000 }, survey: syntheticSurvey(12) });
+    const report = buildReport(withManyLines(input));
     const html = executiveHtml(report, names);
     const page = moneyPageOf(html)!;
     const all = report.value.groups.filter((g) => g.kind !== "exposure").sort((a, b) => b.counted.expected - a.counted.expected);
@@ -494,6 +502,31 @@ describe("the money page fits its page, with a survey or without and a figure fo
       const named_ = all.slice(0, named).reduce((sum, g) => sum + g.counted[k], 0);
       assert.ok(Math.abs(named_ + restOf(all, named, k) - total[k]) < 0.01 * all.length, `${k}: ${named_} and ${restOf(all, named, k)} make ${total[k]}`);
     }
+  });
+
+  test("the count in its last row is a figure from the data at every cut the page or the slide can make", async () => {
+    // The estimate can name any number of lines from one up, so the count it leaves
+    // is held for every cut, not only the slide's or the one this sample makes.
+    const { input, names } = await sampleOf(SAMPLES[0]![1]);
+    const report = buildReport(withManyLines(input));
+    const n = report.value.groups.filter((g) => g.kind !== "exposure").length;
+    const page = moneyPageOf(executiveHtml(report, names))!;
+    const label = /<tr><td>(And \d+ smaller lines, in the raw notes\.)/.exec(page)![1]!;
+    assert.ok(n >= 15, `${n} lines`);
+    const counts = Array.from({ length: n - 1 }, (_, i) => n - 1 - i).map((c) => label.replace(/\d+ smaller lines/, c === 1 ? "1 smaller line" : `${c} smaller lines`));
+    // Against the data the layout check reads, and against the money's own figures
+    // alone: on this sample every count from 1 to 15 is some other figure too, so
+    // only the second shows the count is held for itself.
+    const money = scopeDataset(report.dataset, [VALUE_TOTAL]);
+    const untraced = counts.flatMap((text) => [report.dataset, money].flatMap((set) => checkNumbers(text, set).unmatched.map((u) => `${text} ${u.raw}: ${u.reason}`)));
+    assert.deepEqual(untraced, []);
+    // And the full report's slide, which names six and counts the rest, passes the
+    // number check as printed. Only that check: the slide isn't held by measure, and
+    // sixteen-word labels are longer than it was set for.
+    const full = fullReportHtml(report, names);
+    const slide = pagesOf(full).find((p) => p.includes('<div class="money">'))!;
+    assert.match(slide, new RegExp(`And ${n - 6} smaller lines, in the raw notes\\.`));
+    assert.deepEqual((await problemsOn(full, [{ page: slide, label: "the money slide" }], report)).filter((p) => p.includes("number check")), []);
   });
 });
 
