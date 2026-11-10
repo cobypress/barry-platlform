@@ -1015,7 +1015,7 @@ describe("the money names at least as many lines as before decision 448, and sta
     // and the cut decides them; large ones £31,000 and £4,700 more, so they come first.
     const NAMED: Array<["page" | "slides", number, number, number, "small" | "large", number[]]> = [
       ["page", 0, 0, 0, "small", [7, 7, 7, 7]], ["page", 0, 1, 4, "small", [8, 8, 7, 8]], ["page", 0, 1, 16, "small", [7, 8, 7, 8]], ["page", 0, 2, 4, "small", [7, 7, 7, 7]], ["page", 0, 2, 16, "small", [7, 7, 7, 7]], ["page", 0, 9, 4, "small", [7, 7, 7, 7]], ["page", 0, 9, 16, "small", [7, 7, 7, 7]] /* [6, 7, 7, 7] */, ["page", 0, 2, 16, "large", [7, 7, 7, 7]] /* [6, 7, 6, 7] */, ["page", 0, 10, 16, "large", [6, 7, 6, 7]], ["page", 0, 33, 16, "large", [6, 6, 6, 6]],
-      ["slides", 0, 0, 4, "large", [7, 7, 7, 7]], ["slides", 0, 1, 4, "large", [8, 8, 8, 8]], ["slides", 0, 2, 4, "large", [9, 9, 9, 9]] /* [7, 7, 9, 9] */, ["slides", 0, 9, 4, "large", [16, 16, 16, 16]], ["slides", 0, 8, 16, "large", [15, 15, 15, 15]], ["slides", 0, 16, 16, "large", [12, 12, 12, 12]] /* [11, 11, 11, 11] */, ["slides", 0, 40, 16, "large", [13, 13, 5, 5]],
+      ["slides", 0, 0, 4, "large", [7, 7, 7, 7]], ["slides", 0, 1, 4, "large", [8, 8, 8, 8]], ["slides", 0, 2, 4, "large", [9, 9, 9, 9]] /* [7, 7, 9, 9] */, ["slides", 0, 9, 4, "large", [16, 16, 16, 16]], ["slides", 0, 8, 16, "large", [15, 15, 15, 15]], ["slides", 0, 12, 16, "large", [13, 13, 13, 13]] /* [11, 11, 11, 11] */, ["slides", 0, 16, 16, "large", [12, 12, 12, 12]] /* [11, 11, 11, 11] */, ["slides", 0, 40, 16, "large", [13, 13, 5, 5]],
       ["page", 1, 0, 0, "small", [7, 7, 7, 7]], ["page", 1, 1, 4, "small", [8, 8, 7, 8]], ["page", 1, 1, 16, "small", [7, 8, 7, 8]], ["page", 1, 2, 4, "small", [7, 7, 7, 7]], ["page", 1, 2, 16, "small", [7, 7, 7, 7]], ["page", 1, 9, 4, "small", [7, 7, 7, 7]], ["page", 1, 9, 16, "small", [7, 7, 7, 7]] /* [6, 7, 7, 7] */,
       ["slides", 1, 0, 4, "large", [7, 7, 7, 7]], ["slides", 1, 1, 4, "large", [8, 8, 8, 8]], ["slides", 1, 2, 4, "large", [9, 9, 9, 9]], ["slides", 1, 9, 4, "large", [16, 16, 16, 16]],
       ["page", 2, 0, 0, "small", [8, 8, 7, 8]], ["page", 2, 1, 4, "small", [7, 7, 7, 7]], ["page", 2, 1, 16, "small", [7, 7, 7, 7]], ["page", 2, 2, 4, "small", [7, 7, 7, 7]], ["page", 2, 2, 16, "small", [7, 7, 7, 7]], ["page", 2, 9, 4, "small", [7, 7, 7, 7]], ["page", 2, 9, 16, "small", [7, 7, 7, 7]], ["page", 2, 1, 16, "large", [7, 7, 7, 7]], ["page", 2, 9, 16, "large", [7, 7, 7, 7]] /* [6, 7, 6, 7] */, ["page", 2, 32, 16, "large", [6, 6, 6, 6]] /* [5, 6, 6, 6] */,
@@ -1059,7 +1059,7 @@ describe("the money names at least as many lines as before decision 448, and sta
         }
       }
     }
-    assert.equal(NAMED.length, 64);
+    assert.equal(NAMED.length, 65);
     assert.deepEqual(fewer, []);
     assert.deepEqual(past, []);
   });

@@ -79,14 +79,14 @@ const CONTINUED_TABLE: TableMeasure = { ...SLIDE_TABLE, text: 1126 };
 // A slide's money starts 137.7px down, under the eyebrow and a one-line heading,
 // and the slide's padding starts at 667.2px: 529.47px as Chromium sets them,
 // counted as 529.4, as every row and the head are counted a little over
-// (DECISIONS.md 448). The table's head is 33.69px, counted as 33.7. Beside the
+// (DECISIONS.md 448). The table's head is 33.69px, counted as 34. Beside the
 // table the figure's column is 531.3px wide: the figure 52px, the range 4px
 // under it at 29px a line in 20px type, and the chart 10px under that, drawn 560
 // wide across the column with 14px under it.
 // The notes are 14px type at 20.3px a line, each 10px under what's above it,
 // across the slide's full width (DECISIONS.md 439).
 const SLIDE_ROOM = 529.4;
-const SLIDE_HEAD = 33.7;
+const SLIDE_HEAD = 34;
 const SLIDE_FIGURE = 66;
 const SLIDE_RANGE_LINE = 29;
 const SLIDE_RANGE_FONT = 20;
