@@ -947,6 +947,46 @@ describe("the full report's money fits its slides, two at most", () => {
   });
 });
 
+describe("a numeric column's heading sits over its figures, right-aligned, in every table (DECISIONS.md 447)", () => {
+  test("on every table with one in the full report and the executive summary, the full report's \"Result\" among them", async () => {
+    // The "Measure / Result" table had its heading at the left of a right-aligned column.
+    const gaps: string[] = [];
+    const seen = new Set<string>();
+    for (const [name, options] of [SAMPLES[0]!, SAMPLES[3]!]) {
+      const { input, names } = await sampleOf(options);
+      const report = buildReport({ ...input, survey: syntheticSurvey(12) });
+      for (const html of [fullReportHtml(report, names), executiveHtml(report, names)]) {
+        const page = await opened(documentOf(html, pagesOf(html).filter((p) => p.includes('<th class="num">'))));
+        try {
+          // Each numeric heading's text against the furthest right its column's figures reach.
+          const found = await page.evaluate(() =>
+            [...document.querySelectorAll<HTMLTableElement>("table.grid")].flatMap((table) => {
+              const heads = [...table.querySelectorAll<HTMLElement>("thead th")];
+              const right = (cell: Element) => {
+                const range = document.createRange();
+                range.selectNodeContents(cell);
+                return range.getBoundingClientRect().right;
+              };
+              const rows = [...table.querySelectorAll("tbody tr")].filter((tr) => tr.children.length === heads.length);
+              return heads.flatMap((th, col) => (th.classList.contains("num") && rows.length > 0 ? [{ head: th.textContent ?? "", table: heads.map((h) => h.textContent).join(" / "), gap: Math.round(Math.abs(right(th) - Math.max(...rows.map((tr) => right(tr.children[col]!)))) * 10) / 10 }] : []));
+            }),
+          );
+          for (const x of found) {
+            seen.add(x.table);
+            if (x.gap > 1) gaps.push(`${name}, ${x.table}: "${x.head}" ${x.gap}px from its figures`);
+          }
+        } finally {
+          await page.close();
+        }
+      }
+    }
+    assert.ok([...seen].some((t) => t.startsWith("Measure / Result /")), [...seen].join("; "));
+    assert.ok([...seen].some((t) => t.startsWith("Where it comes from / Expected / Range")), [...seen].join("; "));
+    assert.ok(seen.size >= 9, [...seen].join("; "));
+    assert.deepEqual(gaps, []);
+  });
+});
+
 describe("each theme under \"What your people told us\" is its own paragraph (DECISIONS.md 437)", () => {
   test("on the Verdict page with interviews alone, and on the voices' page with a survey too, with the page's gap between them", async () => {
     const { input, names } = await sampleOf(SAMPLES[0]![1]);

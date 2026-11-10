@@ -240,6 +240,8 @@ table.grid { width: 100%; border-collapse: collapse; }
 table.grid th { text-align: left; font-weight: 600; border-bottom: 1px solid var(--carbon); padding: 6px 8px; }
 table.grid td { border-bottom: 1px solid var(--rule); padding: 6px 8px; vertical-align: top; }
 td.num, th.num { text-align: right; white-space: nowrap; }
+/* A numeric column's heading over its figures, in every table: specific enough to beat the grid's left-aligned headings (DECISIONS.md 447). */
+table.grid th.num { text-align: right; }
 .cover-score b { font-size: 3.2em; font-weight: 700; line-height: 1; color: var(--chartreuse); margin-right: 10px; }
 .cover-score span { color: var(--panelMuted); }
 .cover-score .grade { font-weight: 600; margin-top: 4px; }

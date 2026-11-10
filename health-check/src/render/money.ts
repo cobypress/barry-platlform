@@ -24,8 +24,6 @@ export const MONEY_CSS = `
 .money .note.seats { color: var(--carbon); }
 .money .basis { display: block; color: var(--muted); font-size: 0.78em; line-height: 1.3; margin-top: 1px; }
 .money tr.total td { font-weight: 700; border-bottom: none; border-top: 1px solid var(--carbon); }
-/* Over their figures, which are right-aligned: the grid's left-aligned headings would otherwise win. */
-.money table.grid th.num { text-align: right; }
 `;
 
 /** Rows of groups the page has room for, the total row aside. */
