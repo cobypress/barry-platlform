@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-// The org handbook's data (DECISIONS.md 451 to 454): what each flow and
+// The org handbook's data (DECISIONS.md 451 to 455): what each flow and
 // validation rule does, written to handbook.json in the run folder. It's the
 // customer's own configuration, so it goes nowhere but the documents made for
 // them: not to the benchmark, Claude, the worker's store or the console (452).

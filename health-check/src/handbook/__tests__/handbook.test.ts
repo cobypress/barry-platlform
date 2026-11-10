@@ -18,7 +18,7 @@ import { buildHandbook, HANDBOOK_FILE } from "../build.ts";
 import { flowDetail, validationRuleDetail } from "../detail.ts";
 import { Handbook, MAX_CONDITIONS, MAX_FIELDS, MAX_STEPS, MAX_TEXT, type HandbookFlow, type ValidationRuleCoverage } from "../schema.ts";
 
-// The org handbook's data (DECISIONS.md 451 to 454).
+// The org handbook's data (DECISIONS.md 451 to 455).
 
 type Run = { dir: string; runId: string; calls: number; itemReads: number };
 
