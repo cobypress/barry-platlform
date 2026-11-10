@@ -38,6 +38,8 @@ h2 { font-size: 30px; line-height: 1.2; font-weight: 600; margin: 6px 0 18px; }
 .issue .action { margin-top: 6px; }
 table.grid { font-size: 12.5px; margin-top: 8px; }
 h3.sub { font-size: 15px; font-weight: 600; margin: 22px 0 4px; }
+.theme + .theme { margin-top: 10px; }
+.beside-verdict h3.sub { margin-top: 12px; }
 .phase { margin-bottom: 12px; }
 .phase h3 { font-size: 15px; font-weight: 600; margin-bottom: 6px; }
 .phase li { margin-bottom: 4px; line-height: 1.45; }
@@ -275,7 +277,12 @@ export function executiveHtml(report: BuiltReport, pseudonyms: Pseudonymiser): s
   // One line on AI readiness, only when its verdict is clear (DECISIONS.md 243).
   const aiLine = readinessLine(report.readiness);
   const teamSays = report.survey ? `<h3 class="sub">What your team says${report.survey.shown ? r.ref(SURVEY.responses) : ""}</h3>${paragraphs(r, currentBody(built, "team_survey"))}` : "";
-  const peopleTold = peopleSaid ? `<h3 class="sub">What your people told us</h3>${paragraphs(r, peopleSaid)}` : "";
+  // Each theme its own paragraph, with the gap the verdict's paragraphs have, so one doesn't run into the next (DECISIONS.md 437).
+  const themes = peopleSaid.split(/\n+/).filter((t) => t.trim()).map((t) => `<p class="theme">${r.t(t)}</p>`).join("");
+  const peopleTold = peopleSaid ? `<h3 class="sub">What your people told us</h3>${themes}` : "";
+  // The Verdict page is full on the longer samples' drafts at their targets: there the
+  // heading gives the gap back from the space above it, so the page holds what it held.
+  const peopleToldBesideVerdict = peopleTold ? `<div class="beside-verdict">${peopleTold}</div>` : "";
   // Both voices don't fit beside the verdict even on the engine's own text, so
   // together they take the next page; the sources line stays with the figures it
   // speaks for (DECISIONS.md 442). One alone stays where it always was.
@@ -287,7 +294,7 @@ export function executiveHtml(report: BuiltReport, pseudonyms: Pseudonymiser): s
     <table class="grid"><thead><tr><th>Issue</th><th style="width:34%">Impact</th></tr></thead><tbody>${top.map((f) => `<tr><td>${r.t(f.title)}${r.ref(f.id)}</td><td>${valueText(r, f).amount}</td></tr>`).join("")}</tbody></table>
     ${top.some((f) => f.value.kind !== "not_sized") && report.value.total.expected > 0 ? `<p style="margin-top:6px;color:var(--muted);font-size:0.85em">${r.t("Each figure here is the issue's own, at its full size, and some are at risk rather than money to win. \"What fixing this is worth\" counts a share of the money ones, each sum only once.")}</p>` : ""}
     ${voicesApart ? "" : teamSays}
-    ${voicesApart ? "" : peopleTold}
+    ${voicesApart ? "" : peopleToldBesideVerdict}
     <p style="margin-top:18px">${sourcesLine(report.survey?.shown === true, Boolean(peopleSaid))} Where we couldn't measure something, we say so rather than estimate it.</p>`);
   if (voicesApart) add(`<div class="eyebrow">Survey and interviews</div><h2>What your people say</h2>${teamSays}${peopleTold}`);
 

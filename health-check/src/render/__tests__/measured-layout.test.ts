@@ -392,7 +392,9 @@ describe("with both a survey and interviews, what people say takes the page afte
   });
 
   test("with one or neither, the Verdict page is as it was, byte for byte", async () => {
-    // Hashes of the Verdict page before decision 442, on the Sales Cloud sample.
+    // Hashes of the Verdict page before decision 442, on the Sales Cloud sample. With
+    // interviews alone, each theme became its own spaced paragraph, the heading above
+    // them giving the gap back (DECISIONS.md 437).
     const { input, names } = await sampleOf(SAMPLES[0]![1]);
     const survey = syntheticSurvey(12);
     const cases = { neither: { interviews: undefined }, survey: { interviews: undefined, survey }, interviews: {} };
@@ -406,7 +408,7 @@ describe("with both a survey and interviews, what people say takes the page afte
     // Each case prints what it's named for, so the hashes hold the voice beside the verdict.
     assert.match(verdicts.survey!, /<h3 class="sub">What your team says/);
     assert.match(verdicts.interviews!, /<h3 class="sub">What your people told us<\/h3>/);
-    assert.deepEqual(Object.fromEntries(Object.entries(verdicts).map(([key, page]) => [key, sha(page)])), { neither: "3e24b50f30626758", survey: "d6592a20fda36044", interviews: "28f733269a6ba3b4" });
+    assert.deepEqual(Object.fromEntries(Object.entries(verdicts).map(([key, page]) => [key, sha(page)])), { neither: "3e24b50f30626758", survey: "d6592a20fda36044", interviews: "fc49259b482d76bf" });
   });
 });
 
@@ -491,6 +493,37 @@ describe("the money page fits its page, with a survey or without and a figure fo
     for (const k of ["low", "expected", "high"] as const) {
       const named_ = all.slice(0, named).reduce((sum, g) => sum + g.counted[k], 0);
       assert.ok(Math.abs(named_ + restOf(all, named, k) - total[k]) < 0.01 * all.length, `${k}: ${named_} and ${restOf(all, named, k)} make ${total[k]}`);
+    }
+  });
+});
+
+describe("each theme under \"What your people told us\" is its own paragraph (DECISIONS.md 437)", () => {
+  test("on the Verdict page with interviews alone, and on the voices' page with a survey too, with the page's gap between them", async () => {
+    const { input, names } = await sampleOf(SAMPLES[0]![1]);
+    for (const [label, extra] of [["interviews alone", {}], ["both voices", { survey: syntheticSurvey(12) }]] as const) {
+      const report = buildReport({ ...input, ...extra });
+      const themes = currentBody(report.outputs.executive_summary, "interviews").split("\n\n");
+      assert.ok(themes.length >= 2, `${label}: ${themes.length} themes`);
+      // Set apart with a line between them, as an edit might, they still print one to a paragraph.
+      const built = report.outputs.executive_summary;
+      for (const body of [themes.join("\n\n"), themes.join("\n")]) {
+        built.versions.find((v) => v.id === built.sections.find((s) => s.key === "interviews")!.currentVersionId)!.body = body;
+        const html = executiveHtml(report, names);
+        const section = /<h3 class="sub">What your people told us<\/h3>([\s\S]*?)(?=<\/div>|<p style|<\/section>|<div class="footer")/.exec(html)![1]!.trim();
+        assert.equal(section, themes.map((t) => `<p class="theme">${t}</p>`).join(""), label);
+        assert.doesNotMatch(section, /<br>/);
+      }
+      const page = await opened(executiveHtml(report, names));
+      try {
+        const gaps = await page.evaluate(() => {
+          const ps = [...document.querySelectorAll<HTMLElement>("p.theme")];
+          const lead = document.querySelector<HTMLElement>(".lead p")!;
+          return { between: ps.slice(1).map((p, i) => p.getBoundingClientRect().top - ps[i]!.getBoundingClientRect().bottom), lead: parseFloat(getComputedStyle(lead).marginBottom) };
+        });
+        assert.deepEqual(gaps.between.map(Math.round), themes.slice(1).map(() => gaps.lead), label);
+      } finally {
+        await page.close();
+      }
     }
   });
 });
