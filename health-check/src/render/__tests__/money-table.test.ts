@@ -19,11 +19,12 @@ const base: ReportInput = { run, calibration: loadCalibration(), findings: outpu
 
 describe("the money table", () => {
   test("on the full report's slides every line is named, in order, and the rows add up to the total beneath them (DECISIONS.md 439)", () => {
-    // The slide used to name six and add up the rest. The full report has no ceiling, so it carries on instead.
+    // The slide used to name six and add up the rest. With the notes beneath the figure and the table, one slide holds them all.
     const report = buildReport(base);
     const money = report.value.groups.filter((g) => g.kind !== "exposure").sort((a, b) => b.counted.expected - a.counted.expected);
     assert.ok(money.length >= 8, `${money.length} lines: more than one slide held before`);
     const slides = moneySlides(renderContext(pseudonyms, "GBP", false), report);
+    assert.equal(slides.length, 1);
     const m = (n: number) => compactMoney(n, "GBP");
     const rows = slides.flatMap((s) => [...s.matchAll(/<tr( class="total")?><td>([\s\S]*?)<\/td><td class="num">([^<]*)<\/td><td class="num">([^<]*)<\/td><\/tr>/g)]);
     assert.doesNotMatch(slides.join(""), /smaller line/);
@@ -36,32 +37,17 @@ describe("the money table", () => {
     for (const k of ["low", "expected", "high"] as const) assert.ok(Math.abs(money.reduce((sum, g) => sum + g.counted[k], 0) - total[k]) < 0.01 * money.length, k);
   });
 
-  // DECISIONS.md 438: the page's last row never stands for one line that would fit the page in its place.
-  const fits = () => true;
-  const long = () => false;
-
-  test("one line left that fits the page is named, with no last row (DECISIONS.md 438)", () => {
-    assert.equal(linesToName(8, 8, () => true, fits), 8);
-    assert.equal(linesToName(8, 8, () => true, long), 8);
-  });
-
-  test("one line left whose label fits the row but which the page can't hold says \"And 1 smaller line\", naming as many as the cut gave (DECISIONS.md 438)", () => {
-    // The row is shorter than the line with its basis, so it stands for the line alone.
-    assert.equal(linesToName(8, 8, (n) => n <= 7, fits), 7);
-    assert.equal(linesToName(5, 8, (n) => n <= 4, fits), 4);
-  });
-
-  test("one line left whose label is longer than the row says \"And 1 smaller line\" (DECISIONS.md 438)", () => {
-    assert.equal(linesToName(8, 8, (n) => n <= 7, long), 7);
-  });
-
-  test("past the most the page has room for, the last row stands for the rest, and one line is always named (DECISIONS.md 435)", () => {
+  test("a table names the most it has room for, one fewer at a time until the page holds them, and always one (DECISIONS.md 435)", () => {
+    // Whether the last row may stand for one line is held by measure (DECISIONS.md 438), not here.
+    assert.equal(linesToName(8, 8, () => true), 8);
+    assert.equal(linesToName(8, 8, (n) => n <= 7), 7);
+    assert.equal(linesToName(5, 8, (n) => n <= 4), 4);
     // Past the most it has room for, the last row stands for the rest, never fewer than two.
-    assert.equal(linesToName(9, 8, () => true, fits), 7);
-    assert.equal(linesToName(16, 8, (n) => n <= 5, fits), 5);
+    assert.equal(linesToName(9, 8, () => true), 7);
+    assert.equal(linesToName(16, 8, (n) => n <= 5), 5);
     // One line is always named, whatever the room.
-    assert.equal(linesToName(2, 8, () => false, fits), 1);
-    assert.equal(linesToName(3, 8, () => false, fits), 1);
+    assert.equal(linesToName(2, 8, () => false), 1);
+    assert.equal(linesToName(3, 8, () => false), 1);
   });
 
   test("each line's figure before the share is said in words that fit its kind (DECISIONS.md 395)", () => {

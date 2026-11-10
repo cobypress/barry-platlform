@@ -1066,5 +1066,5 @@ export function fullReportHtmlAt(report: BuiltReport, pseudonyms: Pseudonymiser,
     const chrome = slide.classes?.includes("cover") ? "" : `<div class="footer" data-chrome><span>Black Cloud Barometer${r.draft ? " | Draft, not approved for release" : ""}</span><span>${i + 1}</span></div>`;
     return `<section class="page ${slide.classes ?? ""}" data-page="${i + 1}">${slide.html}${chrome}</section>`;
   });
-  return document("Full health check", "slide", `${CSS}\n${COMPARE_CSS}\n${MONEY_CSS}\n${CHAPTER_CSS}\n${PROGRESS_CSS}\n.money .headline-figure { font-size: 2.6em; } .money .range { margin: 4px 0 10px; } .money .kind { margin-bottom: 5px; } .money table.grid { font-size: 16px; } .money .split .kinds { font-size: 16px; } .money .split .note { font-size: 14px; }`, pages);
+  return document("Full health check", "slide", `${CSS}\n${COMPARE_CSS}\n${MONEY_CSS}\n${CHAPTER_CSS}\n${PROGRESS_CSS}\n.money .headline-figure { font-size: 2.6em; } .money .range { margin: 4px 0 10px; } .money .kind { margin-bottom: 5px; } .money table.grid { font-size: 16px; } .money .split .kinds { font-size: 16px; } .money .note { font-size: 14px; }`, pages);
 }
