@@ -16,7 +16,7 @@ export type ApexScan = {
   seeAllData: boolean;
   /** SOQL or Database.query inside a loop's body. A SOQL for loop's own query isn't counted. */
   queriesInLoops: number;
-  /** DML statements or Database DML methods inside a loop's body. */
+  /** DML statements or Database DML methods inside a loop's body. UPDATE TRACKING in a query isn't one. */
   dmlInLoops: number;
   /** setEndpoint given a literal http or https address, rather than a named credential. */
   literalEndpoints: number;
@@ -27,8 +27,9 @@ export type ApexScan = {
 };
 
 // A statement, so the keyword follows a statement's end, a block or a condition. Matched on the keyword itself.
-const DML = /(?<=(?:^|[;{})]|\belse)\s*)\b(?:insert|update|upsert|delete|undelete|merge)\s+[\w(\[]/gi;
-const DATABASE_DML = /\bDatabase\s*\.\s*(?:insert|update|upsert|delete|undelete|merge|convertLead)\s*\(/gi;
+// The first group is the kind of change, for what a class touches (apex-touches.ts).
+export const DML = /(?<=(?:^|[;{})]|\belse)\s*)\b(insert|update|upsert|delete|undelete|merge)\s+[\w(\[]/gi;
+export const DATABASE_DML = /\bDatabase\s*\.\s*(insert|update|upsert|delete|undelete|merge|convertLead)\s*\(/gi;
 const SOQL = /\[\s*SELECT\b/gi;
 const DATABASE_QUERY = /\bDatabase\s*\.\s*(?:query|queryWithBinds|countQuery|getQueryLocator)\s*\(/gi;
 
@@ -70,13 +71,34 @@ function read(body: string): { code: string; comments: number } {
 }
 
 /** The index just past the bracket that closes the one at `open`, or the end. */
-function closing(code: string, open: number, pair: "()" | "{}"): number {
+export function closing(code: string, open: number, pair: "()" | "{}" | "[]"): number {
   let depth = 0;
   for (let i = open; i < code.length; i++) {
     if (code[i] === pair[0]) depth++;
     else if (code[i] === pair[1] && --depth === 0) return i + 1;
   }
   return code.length;
+}
+
+const INLINE_QUERY = /\[\s*(?:SELECT|FIND)\b/gi;
+
+/**
+ * Each inline query's and search's contents blanked, its brackets kept, so the
+ * UPDATE in `UPDATE TRACKING` or `UPDATE VIEWSTAT` never reads as a statement,
+ * `update [SELECT ...];` still does, and every offset holds.
+ */
+export function withoutInlineQueries(code: string): string {
+  let out = "";
+  let from = 0;
+  for (const m of code.matchAll(INLINE_QUERY)) {
+    // One inside a query already blanked.
+    if (m.index < from) continue;
+    const close = closing(code, m.index, "[]");
+    const end = code[close - 1] === "]" ? close - 1 : close;
+    out += code.slice(from, m.index + 1) + code.slice(m.index + 1, end).replace(/[^\n]/g, " ");
+    from = end;
+  }
+  return out + code.slice(from);
 }
 
 /** Each loop body's span. A body without braces runs to its first semicolon. */
@@ -118,7 +140,7 @@ export function scanApex(body: string): ApexScan {
     asserts: count(code, /\b(?:System\s*\.\s*)?assert\w*\s*\(/gi) + count(code, /\bAssert\s*\.\s*\w+\s*\(/gi),
     seeAllData: /@isTest\s*\(\s*SeeAllData\s*=\s*true\s*\)/i.test(code),
     queriesInLoops: inLoops(code, spans, [SOQL, DATABASE_QUERY]),
-    dmlInLoops: inLoops(code, spans, [DML, DATABASE_DML]),
+    dmlInLoops: inLoops(withoutInlineQueries(code), spans, [DML, DATABASE_DML]),
     literalEndpoints: endpoints.filter((e) => /^https?:\/\//i.test(e)).length,
     namedCredentialEndpoints: endpoints.filter((e) => /^callout:/i.test(e)).length,
     invocable: count(code, /@InvocableMethod\b/gi),

@@ -35,6 +35,13 @@ describe("reading Apex as text", () => {
     assert.equal(scan.queriesInLoops, 1);
   });
 
+  test("UPDATE TRACKING or VIEWSTAT in a query inside a loop isn't a save, and a real one beside it still is", () => {
+    for (const query of ["[SELECT Id FROM FAQ__kav WHERE (Id = :x) UPDATE TRACKING]", "[FIND :t RETURNING FAQ__kav(Id WHERE PublishStatus = 'Online') UPDATE VIEWSTAT]"]) {
+      assert.equal(scanApex(`class A { void x() { for (Id i : ids) { List<SObject> r = ${query}; } } }`).dmlInLoops, 0, query);
+      assert.equal(scanApex(`class A { void x() { for (Id i : ids) { List<SObject> r = ${query}; update r; } } }`).dmlInLoops, 1, query);
+    }
+  });
+
   test("a variable called update isn't a save, and a query in a comment isn't a query", () => {
     const scan = scanApex("class A { void x() { for (Integer i = 0; i < 3; i++) { Boolean update = true; // [SELECT Id FROM Account]\n } } }");
     assert.equal(scan.queriesInLoops, 0);

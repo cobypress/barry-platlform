@@ -15,6 +15,7 @@ import { Handbook, HANDBOOK_VERSION, MAX_STEPS, type HandbookFlow, type Handbook
 // made up here, so every route through the document is seen.
 
 const RETRIEVE = { customObjects: "all" as const, standardObjects: ["Account", "Contact", "Lead", "Opportunity"] };
+const NO_APEX = { status: "ok" as const, items: [], total: 0, cut: false };
 
 function step(name: string, over: Partial<HandbookStep> = {}): HandbookStep {
   return { kind: "assignments", name, label: name.replace(/_/g, " "), object: null, fields: [], fieldsTotal: 0, detail: null, outcomes: [], next: null, fault: null, reached: true, ...over };
@@ -40,7 +41,7 @@ function rule(name: string, over: Partial<HandbookValidationRule> = {}): Handboo
 }
 
 function handbook(over: Partial<Handbook> = {}): Handbook {
-  return Handbook.parse({ version: HANDBOOK_VERSION, flows: { status: "ok", items: [] }, validationRules: { status: "ok", covers: RETRIEVE, items: [] }, ...over });
+  return Handbook.parse({ version: HANDBOOK_VERSION, flows: { status: "ok", items: [] }, validationRules: { status: "ok", covers: RETRIEVE, items: [] }, apexClasses: NO_APEX, apexTriggers: NO_APEX, ...over });
 }
 
 const OPTIONS = { clientName: "Synthetic Co", runDate: "2026-10-31T00:00:00.000Z" };
@@ -311,7 +312,7 @@ describe("a very large org", () => {
       }),
     );
     const rules = Array.from({ length: 2_000 }, (_, i) => rule(`Rule_${i}`, { object: `Object_${i % 40}__c`, formula: `AND(ISCHANGED(Status__c), ISBLANK(Field_${i}__c), Amount__c > ${i})`, formulaLength: 60, description: "Keeps the data complete." }));
-    const h = Handbook.parse({ version: HANDBOOK_VERSION, flows: { status: "ok", items: flows }, validationRules: { status: "ok", covers: RETRIEVE, items: rules } });
+    const h = handbook({ flows: { status: "ok", items: flows }, validationRules: { status: "ok", covers: RETRIEVE, items: rules } });
     const started = performance.now();
     const bytes = await renderHandbookDocx(h, OPTIONS);
     const ms = Math.round(performance.now() - started);
