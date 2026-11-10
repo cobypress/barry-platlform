@@ -53,7 +53,8 @@ export const OUTPUT_FILES = {
 
 const read = <T>(path: string): T => JSON.parse(readFileSync(path, "utf8")) as T;
 const readOptional = <T>(path: string): T | null => (existsSync(path) ? read<T>(path) : null);
-const write = (path: string, data: string | Buffer): void => writeFileSync(path, data, { mode: 0o600 });
+/** A file only the worker's own user can read: the documents hold real names. */
+export const write = (path: string, data: string | Buffer): void => writeFileSync(path, data, { mode: 0o600 });
 
 /**
  * A re-check's first health check, from the folder beside it, as the report

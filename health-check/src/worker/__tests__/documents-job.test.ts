@@ -1,7 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { buildReport, currentBody, type ReportOutputKey } from "../../narrative/sections.ts";
 import { approvedReport, heldFigures, isPlainFigure, layoutWarnings, renderReleased, type ApprovedRun, type DocumentKey, type HeldFigure } from "../../render/render-released.ts";
@@ -10,9 +10,15 @@ import { withoutComments } from "../../survey/questions.ts";
 import { syntheticSurvey } from "../../testing/survey.ts";
 import type { ReportSection, SectionVersion } from "../../schemas/index.ts";
 import { runFromRecording } from "../../testing/harness.ts";
+import { docxText } from "../../testing/docx-text.ts";
+import { HANDBOOK_FILE } from "../../handbook/build.ts";
+import { HANDBOOK_DOCX } from "../../handbook/docx.ts";
+import { HANDBOOK_NOT_MADE } from "../../handbook/read.ts";
+import { HANDBOOK_MARKER } from "../../testing/synthetic-org.ts";
 import { loadAnswers } from "../../testing/replay.ts";
 import { clientNameOf, folderFor, heldBackReason, heldBackSummary, INTERNAL_FOLDER, laterSurveyAnswers, processDocumentsJob } from "../documents-job.ts";
 import { DriveError, GoogleDrive, type DocumentDrive, type DriveItem } from "../drive.ts";
+import { z } from "zod";
 import type { DocumentsJobInput } from "../types.ts";
 import { baseDeps, consoleRun, INTAKE, RUN_ID, temp } from "./helpers.ts";
 
@@ -37,7 +43,7 @@ function approvedRun(edit = "We reworded this verdict in the console."): Approve
 
 class MemoryDrive implements DocumentDrive {
   readonly rootFolderId = "root-folder-0001";
-  readonly items = new Map<string, DriveItem & { parent: string; folder: boolean; bytes?: number; uploads: number }>();
+  readonly items = new Map<string, DriveItem & { parent: string; folder: boolean; bytes?: number; uploads: number; mime?: string; body?: Buffer }>();
   #next = 1;
   #add(parent: string, name: string, folder: boolean): DriveItem {
     const id = `drive-item-${String(this.#next++).padStart(4, "0")}`;
@@ -58,9 +64,9 @@ class MemoryDrive implements DocumentDrive {
   async createFolder(parentId: string, name: string) {
     return this.#add(parentId, name, true);
   }
-  async putFile(parentId: string, name: string, _mime: string, body: Buffer, replaceId?: string) {
+  async putFile(parentId: string, name: string, mime: string, body: Buffer, replaceId?: string) {
     const item = replaceId ? this.items.get(replaceId)! : (this.#add(parentId, name, false) as DriveItem & { uploads: number; bytes?: number });
-    Object.assign(item, { name, bytes: body.length, uploads: (item as { uploads: number }).uploads + 1 });
+    Object.assign(item, { name, mime, body, bytes: body.length, uploads: (item as { uploads: number }).uploads + 1 });
     return item;
   }
   async moveFile(id: string, from: string, to: string) {
@@ -126,7 +132,8 @@ describe("a documents job", () => {
     assert.deepEqual(made.files.filter((f) => f.name.endsWith(".xlsx") || f.name.endsWith(".csv")).map((f) => f.output).sort(), ["action_lists", "tickets"]);
     const inFolder = (await drive.files(made.driveFolderId)).map((f) => f.id);
     for (const f of made.files) assert.ok(inFolder.includes(f.driveFileId), `${f.name} is the file in the folder`);
-    assert.deepEqual(made.warnings, ["The full health check, page 4: overflow"]);
+    // This run folder has no handbook.json, so the warnings say why there's no handbook (DECISIONS.md 445).
+    assert.deepEqual(made.warnings, ["The full health check, page 4: overflow", HANDBOOK_NOT_MADE.missing]);
     assert.equal(deps.store.documents.get(RUN_ID)!.input.state, "done");
   });
 
@@ -318,7 +325,7 @@ describe("a documents job", () => {
     assert.equal((await processDocumentsJob(RUN_ID, deps, { final: true })).outcome, "done");
     const made = deps.store.documents.get(RUN_ID)!.made!;
     assert.equal((await drive.files(made.driveFolderId)).length, 6);
-    assert.deepEqual(made.warnings, ["The full health check, page 4: overflow"]);
+    assert.deepEqual(made.warnings, ["The full health check, page 4: overflow", HANDBOOK_NOT_MADE.missing]);
   });
 
   test("numbers past any health check folder already there, and ignores other folders", async () => {
@@ -789,5 +796,159 @@ describe("a case study draft", () => {
     const plain = new MemoryDrive();
     await processDocumentsJob(RUN_ID, setup(jobInput(), plain), { final: true });
     assert.ok(![...plain.items.values()].some((i) => /Case study/.test(i.name)));
+  });
+});
+
+describe("the org handbook", () => {
+  const DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  const NAME = "Synthetic Co - Org handbook.docx";
+  const SIX = ["Synthetic Co - Action lists.xlsx", "Synthetic Co - Executive summary.pdf", "Synthetic Co - Full health check.pdf", "Synthetic Co - One page summary.pdf", "Synthetic Co - Raw notes.docx", "Synthetic Co - Tickets.csv"];
+  const OVERFLOW = "The full health check, page 4: overflow";
+
+  /** A run folder as the run job leaves one, with the recorded synthetic org's handbook.json, or `contents` in its place. */
+  function withHandbook(input: DocumentsJobInput = jobInput(), drive: MemoryDrive = new MemoryDrive(), contents?: string) {
+    const deps = setup(input, drive);
+    const path = join(deps.runsDir, input.run.id, HANDBOOK_FILE);
+    if (contents === undefined) cpSync(join(recorded, HANDBOOK_FILE), path);
+    else writeFileSync(path, contents);
+    return deps;
+  }
+  const handbooks = (drive: MemoryDrive) => [...drive.items.values()].filter((i) => !i.folder && /Org handbook/.test(i.name));
+
+  test("goes in the customer's folder, as a Word file named for the client, and the console isn't told of it", async () => {
+    const drive = new MemoryDrive();
+    const deps = withHandbook(jobInput(), drive);
+    const result = await processDocumentsJob(RUN_ID, deps, { final: true });
+    assert.equal(result.outcome, "done", result.detail);
+    const made = deps.store.documents.get(RUN_ID)!.made!;
+    const [handbook, ...more] = handbooks(drive);
+    assert.equal(more.length, 0);
+    assert.equal(drive.path(handbook!.id), `Synthetic Co / Health check 1 / ${NAME}`);
+    assert.equal(handbook!.mime, DOCX);
+    // Its own words, from the run folder's handbook.json, in a real Word file.
+    assert.ok(docxText(handbook!.body!).includes(HANDBOOK_MARKER));
+    // Shared with the rest: it's in the folder the share job gives readers (share-job.ts, input.folderId).
+    assert.equal(drive.items.get(handbook!.id)!.parent, made.driveFolderId);
+    // Not in the record, nor its warnings: the console's DocumentOutput doesn't know the kind (DECISIONS.md 443).
+    assert.deepEqual(made.files.map((f) => f.name).sort(), SIX);
+    assert.deepEqual(made.files.map((f) => f.output).sort(), ["action_lists", "ceo_one_pager", "executive_summary", "full_health_check", "raw_notes", "tickets"]);
+    assert.ok(!made.files.some((f) => f.driveFileId === handbook!.id));
+    assert.deepEqual(made.warnings, [OVERFLOW]);
+    assert.match(result.detail!, /the org handbook in Health check 1/);
+    // Printed on the worker's disk beside the other documents, for its user only.
+    const onDisk = join(deps.runsDir, RUN_ID, "documents", HANDBOOK_DOCX);
+    assert.equal(statSync(onDisk).mode & 0o777, 0o600);
+    assert.deepEqual(readFileSync(onDisk), handbook!.body);
+  });
+
+  test("made again, it's replaced in place: one file, its id and link kept, outside the version folders", async () => {
+    const drive = new MemoryDrive();
+    const deps = withHandbook(jobInput(), drive);
+    await processDocumentsJob(RUN_ID, deps, { final: true });
+    const doc = deps.store.documents.get(RUN_ID)!;
+    const first = handbooks(drive)[0]!;
+    for (let make = 2; make <= 3; make++) {
+      doc.input = { ...doc.input, state: "queued", driveFolderId: doc.made!.driveFolderId, files: doc.made!.files };
+      assert.equal((await processDocumentsJob(RUN_ID, deps, { final: true })).outcome, "done");
+      const all = handbooks(drive);
+      assert.equal(all.length, 1, `make ${make}`);
+      assert.equal(all[0]!.id, first.id);
+      assert.equal(all[0]!.uploads, make);
+      assert.equal(drive.path(all[0]!.id), `Synthetic Co / Health check 1 / ${NAME}`);
+    }
+    // The reports moved into their versions as before, and the handbook is the one thing left beside them.
+    assert.deepEqual((await drive.files(doc.made!.driveFolderId)).map((f) => f.name), [NAME]);
+    assert.deepEqual((await drive.folders(doc.made!.driveFolderId)).map((f) => f.name.split(",")[0]).sort(), ["Version 1", "Version 2", "Version 3"]);
+  });
+
+  test("a run from before the handbook was kept gets the six documents as before, and one warning saying why", async () => {
+    const drive = new MemoryDrive();
+    const deps = setup(jobInput(), drive);
+    const result = await processDocumentsJob(RUN_ID, deps, { final: true });
+    assert.equal(result.outcome, "done", result.detail);
+    const made = deps.store.documents.get(RUN_ID)!.made!;
+    assert.deepEqual(made.files.map((f) => f.name).sort(), SIX);
+    assert.deepEqual((await drive.files(made.driveFolderId)).map((f) => f.name).sort(), SIX);
+    assert.deepEqual(handbooks(drive), []);
+    assert.deepEqual(made.warnings, [OVERFLOW, HANDBOOK_NOT_MADE.missing]);
+    assert.doesNotMatch(result.detail!, /handbook/);
+    assert.ok(deps.lines.includes(`Run ${RUN_ID}: ${HANDBOOK_NOT_MADE.missing}`), deps.lines.join("\n"));
+  });
+
+  test("a file that doesn't fit the format gets the same, with the other sentence and nothing from the file", async () => {
+    for (const contents of [JSON.stringify({ version: 1, flows: { status: "ok", items: [{ name: "HB-NOT-FIT-0445" }] } }), "{ not json HB-NOT-FIT-0445"]) {
+      const drive = new MemoryDrive();
+      const deps = withHandbook(jobInput(), drive, contents);
+      const result = await processDocumentsJob(RUN_ID, deps, { final: true });
+      assert.equal(result.outcome, "done", result.detail);
+      const made = deps.store.documents.get(RUN_ID)!.made!;
+      assert.deepEqual(made.files.map((f) => f.name).sort(), SIX);
+      assert.deepEqual(handbooks(drive), []);
+      assert.deepEqual(made.warnings, [OVERFLOW, HANDBOOK_NOT_MADE.format]);
+      assert.doesNotMatch(JSON.stringify([made, result, deps.lines, deps.store.writes]), /HB-NOT-FIT-0445/);
+    }
+  });
+
+  test("a make held back by the number check uploads no handbook, and makes none", async () => {
+    const drive = new MemoryDrive();
+    const deps = withHandbook(jobInput(), drive);
+    deps.renderReleased = async (dir, approved, out) => ({ ...(await fakeRender(dir, approved, out)), held: [{ document: "The full health check", page: 12, figure: "£1.99m", reason: "not in the data" }] });
+    assert.equal((await processDocumentsJob(RUN_ID, deps, { final: true })).outcome, "failed");
+    assert.deepEqual([...drive.items.values()], [], "nothing in Drive at all");
+    assert.ok(!existsSync(join(deps.runsDir, RUN_ID, "documents", HANDBOOK_DOCX)));
+  });
+
+  test("a make that fails before Drive uploads no handbook either", async () => {
+    const drive = new MemoryDrive();
+    const deps = withHandbook(jobInput(), drive);
+    deps.renderReleased = async () => {
+      throw new Error("the printer stopped");
+    };
+    assert.equal((await processDocumentsJob(RUN_ID, deps, { final: true })).outcome, "failed");
+    assert.deepEqual(handbooks(drive), []);
+  });
+
+  test("Drive refusing the handbook fails the make as it would for any file, and the retry finishes it", async () => {
+    const drive = new MemoryDrive();
+    const deps = withHandbook(jobInput(), drive);
+    const put = drive.putFile.bind(drive);
+    drive.putFile = async (...args) => {
+      if (args[1] === NAME) throw new DriveError("Google Drive refused a request (503): backend error");
+      return put(...args);
+    };
+    await assert.rejects(processDocumentsJob(RUN_ID, deps, { final: false }), /503/);
+    assert.ok(!deps.store.documents.get(RUN_ID)!.made, "nothing recorded as made");
+    drive.putFile = put;
+    assert.equal((await processDocumentsJob(RUN_ID, deps, { final: true })).outcome, "done");
+    assert.equal(handbooks(drive).length, 1);
+  });
+
+  test("a complete run and an essentials run both get it", async () => {
+    for (const scope of ["complete", "essentials"] as const) {
+      const drive = new MemoryDrive();
+      const deps = withHandbook(jobInput({ run: consoleRun({ status: "released", customerRef: "SYN-0001", scope }) }), drive);
+      assert.equal((await processDocumentsJob(RUN_ID, deps, { final: true })).outcome, "done", scope);
+      assert.equal(handbooks(drive).length, 1, scope);
+      assert.equal(deps.store.documents.get(RUN_ID)!.made!.files.length, 6, scope);
+    }
+  });
+
+  test("every warning it can add fits what the console reads", () => {
+    // The console's reader (blackcloud-next, read-only here):
+    //   lib/health-check/schemas.ts:143        warnings: z.array(z.string()).nullable()   (no cap on count or length)
+    //   lib/health-check/postgres-rows.ts:385  documentsFromRow parses the whole row with RunDocuments, so one bad value refuses it
+    //   migrations/20261105_health_check_documents.sql:20  "warnings" JSONB, which can't store a NUL
+    //   app/internal/health-check/(console)/[runId]/release/DocumentsCard.tsx:168-172  each warning is a list item keyed by its text
+    // So each sentence is a string on one line with no control character, and none repeats a layout warning.
+    const ConsoleWarnings = z.array(z.string()).nullable();
+    const sentences = Object.values(HANDBOOK_NOT_MADE);
+    assert.equal(new Set(sentences).size, sentences.length);
+    for (const sentence of sentences) {
+      assert.ok(ConsoleWarnings.safeParse([OVERFLOW, sentence]).success, sentence);
+      assert.doesNotMatch(sentence, /[\u0000-\u001F\u007F]/, sentence);
+      assert.match(sentence, /^The org handbook wasn't made: [^.]+\.$/, sentence);
+      assert.ok(sentence.length <= 200, sentence);
+      assert.doesNotMatch(sentence, /^The (executive summary|full health check|one page summary)/, "never read as a layout warning's page");
+    }
   });
 });
