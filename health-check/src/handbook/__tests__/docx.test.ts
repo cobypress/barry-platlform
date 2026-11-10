@@ -14,7 +14,8 @@ import { Handbook, HANDBOOK_VERSION, MAX_APEX_CLASSES, MAX_APEX_TRIGGERS, MAX_ST
 // The org handbook as a Word document (DECISIONS.md 443 to 445). The file is
 // made up here, so every route through the document is seen.
 
-const RETRIEVE = { customObjects: "all" as const, standardObjects: ["Account", "Contact", "Lead", "Opportunity"] };
+// What the retrieve reads on the synthetic org: the four, and Case, which its record counts list (decision 460).
+const RETRIEVE = { customObjects: "all" as const, standardObjects: ["Account", "Contact", "Lead", "Opportunity", "Case"] };
 const NO_APEX = { status: "ok" as const, items: [], total: 0, cut: false };
 
 function step(name: string, over: Partial<HandbookStep> = {}): HandbookStep {
@@ -94,7 +95,7 @@ describe("the handbook as a Word document", () => {
     assert.deepEqual(headings(paragraphs, 2), ["What it covers", "Flows", "Validation rules", "Apex classes", "Apex triggers"]);
     assert.match(text, /We read it from your org on 31 Oct 2026/);
     assert.match(text, /Flows: 2 flows, 1 of them active\./);
-    assert.match(text, /Validation rules: 3 validation rules, 2 of them active, on your custom objects and Account, Contact, Lead and Opportunity\./);
+    assert.match(text, /Validation rules: 3 validation rules, 2 of them active, on your custom objects and Account, Contact, Lead, Opportunity and Case\./);
     // Plain words, no emoji.
     assert.doesNotMatch(text, /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u);
   });
@@ -306,7 +307,7 @@ describe("the handbook as a Word document", () => {
     assert.match(unavailable.text, /We couldn't read your validation rules, so this handbook doesn't list them\. The retrieve timed out\./);
     assert.match(empty.text, /Flows: your org has none\./);
     assert.match(empty.text, /Your org has no flows: there were none to read, active or not\./);
-    assert.match(empty.text, /Your org has no validation rules on your custom objects and Account, Contact, Lead and Opportunity: there were none to read, active or not\./);
+    assert.match(empty.text, /Your org has no validation rules on your custom objects and Account, Contact, Lead, Opportunity and Case: there were none to read, active or not\./);
     assert.doesNotMatch(unavailable.text, /has no flows|has no validation rules|has none/);
     assert.doesNotMatch(empty.text, /couldn't read your/);
     // Each part's body says it, not only the first page.
@@ -317,7 +318,10 @@ describe("the handbook as a Word document", () => {
   test("the validation rules open with what they cover, from the file: a list on the retrieve route, every object on Tooling", async () => {
     const items = [rule("R1")];
     const retrieve = await render(handbook({ validationRules: { status: "ok", covers: RETRIEVE, items } }));
-    assert.match(retrieve.text, /## Validation rules\n\nThese are the validation rules on your custom objects and Account, Contact, Lead and Opportunity\. We didn't read the rules on your other standard objects/);
+    assert.match(retrieve.text, /## Validation rules\n\nThese are the validation rules on your custom objects and Account, Contact, Lead, Opportunity and Case\. We didn't read the rules on your other standard objects/);
+    // Where the record counts couldn't be read, or the wider retrieve failed, the four.
+    const four = await render(handbook({ validationRules: { status: "ok", covers: { customObjects: "all", standardObjects: ["Account", "Contact", "Lead", "Opportunity"] }, items } }));
+    assert.match(four.text, /These are the validation rules on your custom objects and Account, Contact, Lead and Opportunity\. We didn't read the rules on your other standard objects/);
     const tooling = await render(handbook({ validationRules: { status: "ok", covers: { customObjects: "all", standardObjects: "all" }, items } }));
     assert.match(tooling.text, /## Validation rules\n\nThese are the validation rules on every object\.\n/);
     assert.doesNotMatch(tooling.text, /other standard objects/);

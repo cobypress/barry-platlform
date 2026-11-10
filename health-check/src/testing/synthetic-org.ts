@@ -735,6 +735,10 @@ export const RECORD_COUNTS = [
   // Trap: a detail object has no OwnerId, which isn't a gap in the scan.
   { name: "Project_Line__c", count: 40 },
   { name: "Empty_Object__c", count: 0 },
+  // Trap (DECISIONS.md 460): Case is listed, so the retrieve names it and reads its
+  // validation rules, whatever its count. Quote and the rest of the further
+  // standard objects aren't, so they're never named.
+  { name: "Case", count: 0 },
 ];
 
 export const USER_LICENSES = [
@@ -1191,6 +1195,10 @@ const METADATA_NS = 'xmlns="http://soap.sforce.com/2006/04/metadata"';
 export const HANDBOOK_MARKER = "HB-MARKER-0451";
 export const HANDBOOK_PLANTED = "SYNTHETIC-FAKE-0000-NOT-REAL";
 const HANDBOOK_FORMULA = `AND(Paid__c, CONTAINS(Description, &quot;${HANDBOOK_MARKER}&quot;)) /* api_key = &quot;${HANDBOOK_PLANTED}&quot; */`;
+// The same on Case, a standard object read only for its validation rules (DECISIONS.md 460).
+export const HANDBOOK_CASE_MARKER = "HB-MARKER-0460";
+export const HANDBOOK_CASE_PLANTED = "SYNTHETIC-FAKE-0460-NOT-REAL";
+const HANDBOOK_CASE_FORMULA = `AND(IsEscalated, ISBLANK(Escalation_Reason__c), NOT(CONTAINS(Subject, &quot;${HANDBOOK_CASE_MARKER}&quot;))) /* access_token = &quot;${HANDBOOK_CASE_PLANTED}&quot; */`;
 
 // Trap: most automation has no description or comment, and most custom fields
 // have no help text. One flow, one validation rule and one field are documented.
@@ -1235,6 +1243,14 @@ export const METADATA_FILES: Record<string, string> = {
   <fields><fullName>Competitor__c</fullName><inlineHelpText>Who else the customer is talking to.</inlineHelpText><type>Text</type></fields>
   <fields><fullName>Amount</fullName><type>Currency</type></fields>
   <validationRules><fullName>Needs_Competitor</fullName><description>A competitor is needed to report on losses.</description><active>true</active><errorConditionFormula>ISBLANK(Competitor__c)</errorConditionFormula><errorDisplayField>Competitor__c</errorDisplayField><errorMessage>Name the competitor before you save this deal.</errorMessage></validationRules>
+</CustomObject>`,
+  // Trap (DECISIONS.md 460): Case is read for its validation rules only. Its rule
+  // is active with no description, and its custom field and record type mustn't
+  // be counted anywhere.
+  "objects/Case.object": `<?xml version="1.0"?><CustomObject ${METADATA_NS}>
+  <fields><fullName>Escalation_Reason__c</fullName><type>Text</type></fields>
+  <recordTypes><fullName>Support</fullName><active>true</active><label>Support</label></recordTypes>
+  <validationRules><fullName>Reason_When_Escalated</fullName><active>true</active><errorConditionFormula>${HANDBOOK_CASE_FORMULA}</errorConditionFormula><errorDisplayField>Escalation_Reason__c</errorDisplayField><errorMessage>Say why the case was escalated.</errorMessage></validationRules>
 </CustomObject>`,
   // Trap for the inventory: a busy custom object, with automation on it and an
   // inactive record type and rule that mustn't be counted.

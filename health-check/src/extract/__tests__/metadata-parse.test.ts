@@ -1,9 +1,12 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
+import { RETRIEVED_STANDARD_OBJECTS } from "../automation.ts";
 import { parseMetadataBundle } from "../metadata-parse.ts";
 import { METADATA_FILES, userId } from "../../testing/synthetic-org.ts";
 
-const bundle = parseMetadataBundle(METADATA_FILES);
+// As the engine reads the synthetic org: the four in full, and Case, which its
+// record counts list, for its validation rules only (DECISIONS.md 460).
+const bundle = parseMetadataBundle(METADATA_FILES, RETRIEVED_STANDARD_OBJECTS, ["Case"]);
 const flow = (name: string) => bundle.flows.find((f) => f.name === name)!;
 
 describe("flows", () => {
@@ -33,6 +36,7 @@ describe("workflow rules and objects", () => {
   });
   test("reads validation rules", () =>
     assert.deepEqual(bundle.validationRules, [
+      { object: "Case", name: "Reason_When_Escalated", active: true, described: false },
       { object: "Invoice__c", name: "Due_Date_Required", active: true, described: true },
       { object: "Invoice__c", name: "Old_Check", active: false, described: false },
       { object: "Opportunity", name: "Needs_Competitor", active: true, described: true },
@@ -73,11 +77,46 @@ describe("the reference index", () => {
   test("indexes custom fields used in flows and validation formulas", () => {
     assert.deepEqual(bundle.references.fields.Legacy_Code__c, ["flows/Opportunity_Route_Deal.flow"]);
     assert.deepEqual(bundle.references.fields.Competitor__c, ["objects/Opportunity.object#validationRules.Needs_Competitor"]);
+    // A standard object read for its rules only still has its formulas searched.
+    assert.deepEqual(bundle.references.fields.Escalation_Reason__c, ["objects/Case.object#validationRules.Reason_When_Escalated"]);
   });
   test("a field's own definition isn't a reference to it", () => assert.equal(bundle.references.fields.Old_Region__c, undefined));
   test("approval processes are searched too", () => {
     const b = parseMetadataBundle({ "approvalProcesses/Opp.approvalProcess": `<ApprovalProcess><x>${userId(9)}</x></ApprovalProcess>` });
     assert.ok(b.references.users[userId(9).slice(0, 15)]);
+  });
+});
+
+describe("standard objects read for their validation rules only (DECISIONS.md 460)", () => {
+  const CASE = `<CustomObject>
+    <fields><fullName>Escalation_Reason__c</fullName><type>Text</type></fields>
+    <recordTypes><fullName>Support</fullName><active>true</active><label>Support</label></recordTypes>
+    <validationRules><fullName>Needs_Reason</fullName><active>true</active><errorConditionFormula>ISBLANK(Escalation_Reason__c)</errorConditionFormula><errorMessage>Say why.</errorMessage></validationRules>
+  </CustomObject>`;
+  const files = { "objects/Case.object": CASE, "objects/A__c.object": "<CustomObject><fields><fullName>B__c</fullName></fields></CustomObject>" };
+
+  test("keeps the rules, their detail and what their formulas mention, and not the object, its fields or its record types", () => {
+    const b = parseMetadataBundle(files, ["Account"], ["Case"]);
+    assert.deepEqual(b.validationRules, [{ object: "Case", name: "Needs_Reason", active: true, described: false }]);
+    assert.deepEqual(b.handbook!.validationRules.map((r) => [r.object, r.name, r.formula, r.message]), [["Case", "Needs_Reason", "ISBLANK(Escalation_Reason__c)", "Say why."]]);
+    assert.deepEqual(b.references.fields.Escalation_Reason__c, ["objects/Case.object#validationRules.Needs_Reason"]);
+    assert.deepEqual(b.objects, ["A__c"]);
+    assert.deepEqual(b.customFields.map((f) => `${f.object}.${f.name}`), ["A__c.B__c"]);
+    assert.deepEqual(b.recordTypes, []);
+    assert.equal(b.filesRead, 2);
+  });
+
+  test("a standard object not named either way is read in full, as before", () => {
+    const b = parseMetadataBundle(files, ["Account"]);
+    assert.deepEqual(b.objects, ["A__c", "Case"]);
+    assert.deepEqual(b.customFields.map((f) => `${f.object}.${f.name}`), ["A__c.B__c", "Case.Escalation_Reason__c"]);
+    assert.deepEqual(b.recordTypes.map((r) => `${r.object}.${r.name}`), ["Case.Support"]);
+    assert.deepEqual(b.validationRules.map((r) => r.object), ["Case"]);
+  });
+
+  test("says it covers the objects named in full, then the ones read for their rules, in the order given", () => {
+    assert.deepEqual(parseMetadataBundle({}, RETRIEVED_STANDARD_OBJECTS, ["Case", "Quote", "User"]).handbook!.validationRulesCover, { customObjects: "all", standardObjects: ["Account", "Contact", "Lead", "Opportunity", "Case", "Quote", "User"] });
+    assert.deepEqual(parseMetadataBundle({}, RETRIEVED_STANDARD_OBJECTS).handbook!.validationRulesCover.standardObjects, ["Account", "Contact", "Lead", "Opportunity"]);
   });
 });
 

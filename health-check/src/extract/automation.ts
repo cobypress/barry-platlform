@@ -1,26 +1,40 @@
-import { isUnavailable } from "../salesforce/client.ts";
+import { isUnavailable, SalesforceError, type MetadataMember } from "../salesforce/client.ts";
 import { redactSecrets } from "../privacy/secrets.ts";
 import { scanApex, type ApexScan } from "./apex-scan.ts";
 import { readTouches, type ApexTouches } from "./apex-touches.ts";
-import { orgExtractor } from "./configuration.ts";
+import { orgExtractor, recordCountsExtractor } from "./configuration.ts";
 import { indexReferences, parseMetadataBundle, type MetadataBundle, type ReferenceIndex } from "./metadata-parse.ts";
 import { readBundleThroughTooling, ToolingGapError, TOOLING_PARTIAL_KEYS } from "./metadata-tooling.ts";
 import { readableReason, readSoql, unavailable, type Extractor, type Sourced, type SourceInfo } from "./types.ts";
 
+// Salesforce's wildcard for CustomObject brings custom objects only, so a standard
+// object's rules are read only where the retrieve names it (DECISIONS.md 455).
+// Every org has these four, so every retrieve names them.
+export const RETRIEVED_STANDARD_OBJECTS = ["Account", "Contact", "Lead", "Opportunity"] as const;
+
+// More standard objects, read for their validation rules and nothing else
+// (DECISIONS.md 460). One is named only when the org's record counts list it, so
+// we never ask for an object the org may not have.
+export const FURTHER_STANDARD_OBJECTS = ["Case", "Campaign", "CampaignMember", "Contract", "Order", "OrderItem", "Quote", "QuoteLineItem", "OpportunityLineItem", "Product2", "Pricebook2", "PricebookEntry", "Asset", "Task", "Event", "User"] as const;
+
 // One retrieve costs a few calls however many flows there are. The Tooling route
 // is one call per flow, because a query can only return Metadata one row at a time.
-export const RETRIEVE_TYPES = [
-  { name: "Flow", members: ["*"] },
-  { name: "Workflow", members: ["*"] },
-  { name: "CustomObject", members: ["*", "Account", "Contact", "Lead", "Opportunity"] },
-  { name: "ApprovalProcess", members: ["*"] },
-  { name: "AssignmentRules", members: ["Lead", "Case"] },
-];
+export function retrieveTypes(further: readonly string[] = []): MetadataMember[] {
+  return [
+    { name: "Flow", members: ["*"] },
+    { name: "Workflow", members: ["*"] },
+    { name: "CustomObject", members: ["*", ...RETRIEVED_STANDARD_OBJECTS, ...further] },
+    { name: "ApprovalProcess", members: ["*"] },
+    { name: "AssignmentRules", members: ["Lead", "Case"] },
+  ];
+}
 
-// Salesforce's wildcard for CustomObject brings custom objects only, so these are
-// the only standard objects whose validation rules the retrieve reads (DECISIONS.md
-// 455). Taken from the list above so the two can't drift apart.
-export const RETRIEVED_STANDARD_OBJECTS = RETRIEVE_TYPES.find((t) => t.name === "CustomObject")!.members.filter((m) => m !== "*");
+/** The further standard objects the record counts list by name, in the list's order. None when the counts couldn't be read. */
+export function furtherObjects(counts: Sourced<Array<{ name: string; count: number }>>): string[] {
+  if (counts.status !== "ok") return [];
+  const listed = new Set(counts.data.map((c) => c.name));
+  return FURTHER_STANDARD_OBJECTS.filter((o) => listed.has(o));
+}
 
 export const TOOLING_SOURCE: SourceInfo = { kind: "metadata", path: "Tooling API: FlowDefinition, Flow, WorkflowRule and its actions, ValidationRule, FieldDefinition, EntityParticle, RecordType" };
 
@@ -28,21 +42,54 @@ export const TOOLING_SOURCE: SourceInfo = { kind: "metadata", path: "Tooling API
 // all, so it reads the same bundle through Tooling instead (DECISIONS.md 73).
 const needsWritePermission = (err: unknown): boolean => isUnavailable(err) && err.code === "INSUFFICIENT_ACCESS";
 
+// Why a retrieve naming further objects failed, kept before the retrieve of the
+// four starts, so a run stopped at the budget during that one doesn't make the
+// failing retrieve again when it resumes. It holds the objects named and the
+// Salesforce error, nothing read from the org.
+const FALLBACK_PARTIAL = "metadata-retrieve-fallback";
+type Fallback = NonNullable<MetadataBundle["retrieveFallback"]>;
+
 export const metadataExtractor: Extractor<Sourced<MetadataBundle>> = {
   id: "metadata",
   // 8: each flow keeps every way it starts (DECISIONS.md 446).
-  version: 8,
-  partialKeys: TOOLING_PARTIAL_KEYS,
+  // 9: validation rules on the further standard objects the org has (DECISIONS.md 460).
+  version: 9,
+  partialKeys: [...TOOLING_PARTIAL_KEYS, FALLBACK_PARTIAL],
   async run(ctx) {
-    const source: SourceInfo = { kind: "metadata", path: RETRIEVE_TYPES.map((t) => t.name).join(", ") };
+    const further = furtherObjects(ctx.get(recordCountsExtractor));
+    const source: SourceInfo = { kind: "metadata", path: retrieveTypes().map((t) => t.name).join(", ") };
+    const retrieve = async (named: readonly string[]): Promise<Sourced<MetadataBundle> & { status: "ok" }> => {
+      const files = await ctx.client.retrieveMetadata(retrieveTypes(named));
+      return { status: "ok", data: parseMetadataBundle(files, RETRIEVED_STANDARD_OBJECTS, named), source, truncated: false };
+    };
     let retrieveError: unknown;
-    try {
-      const files = await ctx.client.retrieveMetadata(RETRIEVE_TYPES);
-      return { status: "ok", data: parseMetadataBundle(files, RETRIEVED_STANDARD_OBJECTS), source, truncated: false };
-    } catch (err) {
-      if (!needsWritePermission(err)) return unavailable(source, err);
-      retrieveError = err;
+    // A resumed run whose wider retrieve already failed goes straight to the four.
+    let first: Fallback | undefined = ctx.partial.read<Fallback>(FALLBACK_PARTIAL)[0];
+    if (!first) {
+      try {
+        return await retrieve(further);
+      } catch (err) {
+        retrieveError = err;
+      }
     }
+    // We can't tell from here what Salesforce does with a retrieve naming an
+    // object it won't give us, so a failure there is tried once more with the four
+    // only. A connection refused the Metadata API isn't about the objects named,
+    // and goes straight to Tooling. Anything not from Salesforce is thrown as before.
+    if (!first && further.length > 0 && retrieveError instanceof SalesforceError && !needsWritePermission(retrieveError)) {
+      first = { named: further, reason: readableReason(retrieveError.message) };
+      ctx.partial.append(FALLBACK_PARTIAL, [first]);
+    }
+    if (first) {
+      try {
+        const fallback = await retrieve([]);
+        fallback.data.retrieveFallback = first;
+        return fallback;
+      } catch (err) {
+        retrieveError = err;
+      }
+    }
+    if (!needsWritePermission(retrieveError)) return unavailable(source, retrieveError);
     try {
       return { status: "ok", data: await readBundleThroughTooling(ctx), source: TOOLING_SOURCE, truncated: false };
     } catch (err) {

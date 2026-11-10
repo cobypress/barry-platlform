@@ -7,7 +7,7 @@ import { contributeBenchmark, exportBenchmark } from "../../benchmark/export.ts"
 import type { NarrativeClient, NarrativeRequest } from "../../narrative/client.ts";
 import { runFromRecording, tempDir } from "../../testing/harness.ts";
 import { loadAnswers, loadRecording, ReplayTransport, type Recording } from "../../testing/replay.ts";
-import { HANDBOOK_MARKER, HANDBOOK_PLANTED } from "../../testing/synthetic-org.ts";
+import { HANDBOOK_CASE_MARKER, HANDBOOK_CASE_PLANTED, HANDBOOK_MARKER, HANDBOOK_PLANTED } from "../../testing/synthetic-org.ts";
 import type { RunOutputRecord } from "../../worker/types.ts";
 import { createJobHandler } from "../../worker/worker.ts";
 import { baseDeps, consoleRun, RUN_ID, runInput, syntheticConnection } from "../../worker/__tests__/helpers.ts";
@@ -34,10 +34,11 @@ const APEX_OBJECT = "Zebra_Ledger__c";
 // Each written as a query, so a reading that let either through would keep it.
 const APEX_LITERAL = "ZebraLiteral0457";
 const APEX_COMMENT = "ZebraComment0457";
+// The Case pair is in a rule on a standard object read for its rules only (decision 460).
 /** In handbook.json and nowhere else. */
-const ROUTED = [HANDBOOK_MARKER, APEX_OBJECT];
+const ROUTED = [HANDBOOK_MARKER, HANDBOOK_CASE_MARKER, APEX_OBJECT];
 /** Nowhere at all. */
-const NOWHERE = [HANDBOOK_PLANTED, APEX_LITERAL, APEX_COMMENT];
+const NOWHERE = [HANDBOOK_PLANTED, HANDBOOK_CASE_PLANTED, APEX_LITERAL, APEX_COMMENT];
 
 /** The recorded synthetic org, with one more class whose body holds all three. */
 function plantedRecording(): Recording {
@@ -154,7 +155,7 @@ describe("the documents job: handbook.json reaches the Word document and nothing
   const CLASS_OBJECT = "Hbdoc_Class_Ledger_0443__c";
   const TRIGGER_OBJECT = "Hbdoc_Trigger_Ledger_0443__c";
   /** In the Word document and nowhere else the make leaves. */
-  const PLANTED = [LITERAL, HANDBOOK_MARKER, CLASS_OBJECT, TRIGGER_OBJECT];
+  const PLANTED = [LITERAL, HANDBOOK_MARKER, HANDBOOK_CASE_MARKER, CLASS_OBJECT, TRIGGER_OBJECT];
   const uploads: Array<{ parent: string; name: string; body: Buffer }> = [];
   let deps: ReturnType<typeof baseDeps>;
   let outcome: Awaited<ReturnType<typeof processDocumentsJob>>;
@@ -223,7 +224,7 @@ describe("the documents job: handbook.json reaches the Word document and nothing
   test("the Word document holds it, on the worker's disk and in the customer's folder", () => {
     for (const bytes of [readFileSync(join(dir, "documents", HANDBOOK_DOCX)), uploads.find((u) => u.name.endsWith(" - Org handbook.docx"))!.body]) {
       const text = docxText(bytes);
-      for (const planted of [`CONTAINS(Notes__c, "${LITERAL}")`, `StageName equals ${LITERAL}`, `Description ${LITERAL}`, `Message ${LITERAL}`, HANDBOOK_MARKER]) assert.ok(text.includes(planted), planted);
+      for (const planted of [`CONTAINS(Notes__c, "${LITERAL}")`, `StageName equals ${LITERAL}`, `Description ${LITERAL}`, `Message ${LITERAL}`, HANDBOOK_MARKER, HANDBOOK_CASE_MARKER]) assert.ok(text.includes(planted), planted);
       // The path's label, under what starts the flow and on the step it starts at.
       assert.ok(text.includes(`\n'Remind ${LITERAL}': 30 days before CloseDate: step 9, Flag Stale\n`), "the path's label");
       assert.ok(text.includes(`Flag_Stale\nStarts the path 'Remind ${LITERAL}': 30 days before CloseDate\n`), "on its step");

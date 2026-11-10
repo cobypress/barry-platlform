@@ -6,7 +6,7 @@ import { SALES_CLOUD_MODULES } from "../../domains/index.ts";
 import { runHealthCheck } from "../../engine/run.ts";
 import { scanApex } from "../../extract/apex-scan.ts";
 import { readTouches } from "../../extract/apex-touches.ts";
-import { metadataExtractor, RETRIEVE_TYPES, type ApexClassRow, type ApexData, type ApexTriggerRow } from "../../extract/automation.ts";
+import { metadataExtractor, RETRIEVED_STANDARD_OBJECTS, type ApexClassRow, type ApexData, type ApexTriggerRow } from "../../extract/automation.ts";
 import { flowDetailMetadata, parseMetadataBundle, type MetadataBundle } from "../../extract/metadata-parse.ts";
 import { toolingValidationRule } from "../../extract/metadata-tooling.ts";
 import type { Sourced } from "../../extract/types.ts";
@@ -15,21 +15,24 @@ import type { Transport } from "../../salesforce/transport.ts";
 import { runFromRecording, tempDir } from "../../testing/harness.ts";
 import { loadCalibration, syntheticProvider } from "../../testing/replay.ts";
 import { Simulator } from "../../testing/simulator.ts";
-import { AS_OF, HANDBOOK_MARKER, HANDBOOK_PLANTED, METADATA_FILES } from "../../testing/synthetic-org.ts";
+import { AS_OF, HANDBOOK_CASE_MARKER, HANDBOOK_CASE_PLANTED, HANDBOOK_MARKER, HANDBOOK_PLANTED, METADATA_FILES } from "../../testing/synthetic-org.ts";
+import { docxText } from "../../testing/docx-text.ts";
 import { buildHandbook, HANDBOOK_FILE } from "../build.ts";
+import { renderHandbookDocx } from "../docx.ts";
 import { flowDetail, validationRuleDetail } from "../detail.ts";
 import { Handbook, MAX_APEX_CLASSES, MAX_APEX_TRIGGERS, MAX_CONDITIONS, MAX_FIELDS, MAX_PATHS, MAX_STEPS, MAX_TEXT, type HandbookFlow, type ValidationRuleCoverage } from "../schema.ts";
 
 // The org handbook's data (DECISIONS.md 451 to 457).
 
-type Run = { dir: string; runId: string; calls: number; itemReads: number };
+type Run = { dir: string; runId: string; calls: number; itemReads: number; retrieves: string[] };
 
 async function run(options: ConstructorParameters<typeof Simulator>[0] = {}): Promise<Run> {
   const transport = new Simulator(options);
   const result = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: new Date(AS_OF), transport, log: () => {} });
   const step = result.run.steps.find((s) => s.id === "metadata")!;
   const itemReads = transport.requests.filter((r) => decodeURIComponent(r.url).includes("SELECT Id, FullName, Metadata")).length;
-  return { dir: result.dir, runId: result.run.id, calls: step.calls, itemReads };
+  const retrieves = transport.requests.map((r) => r.body ?? "").filter((body) => body.includes("<met:retrieve>") && body.includes("<met:name>CustomObject</met:name>"));
+  return { dir: result.dir, runId: result.run.id, calls: step.calls, itemReads, retrieves };
 }
 
 const read = (dir: string, file: string): string => readFileSync(join(dir, file), "utf8");
@@ -52,7 +55,8 @@ describe("handbook.json from the synthetic org", () => {
     const h = handbookOf(retrieve);
     assert.deepEqual(flows(h).map((f) => f.name).sort(), plantedFlows);
     assert.ok(h.validationRules.status === "ok");
-    assert.deepEqual(h.validationRules.items.map((v) => `${v.object}.${v.name}`), ["Invoice__c.Due_Date_Required", "Invoice__c.Old_Check", "Opportunity.Needs_Competitor"]);
+    // Case's, a standard object read for its validation rules only (decision 460).
+    assert.deepEqual(h.validationRules.items.map((v) => `${v.object}.${v.name}`), ["Case.Reason_When_Escalated", "Invoice__c.Due_Date_Required", "Invoice__c.Old_Check", "Opportunity.Needs_Competitor"]);
   });
 
   test("a record-triggered flow's steps are in the order it runs them, with the step nothing reaches last", () => {
@@ -159,8 +163,13 @@ describe("handbook.json from the synthetic org", () => {
       const handbook = read(r.dir, HANDBOOK_FILE);
       assert.ok(handbook.includes(HANDBOOK_MARKER), "the formula is there");
       assert.ok(handbook.includes(`api_key = \\"[REDACTED]\\"`), "with the key redacted");
-      assert.ok(!handbook.includes(HANDBOOK_PLANTED));
-      assert.ok(!read(r.dir, "checkpoints/metadata.json").includes(HANDBOOK_PLANTED));
+      // The same on Case, read for its validation rules only (decision 460).
+      assert.ok(handbook.includes(HANDBOOK_CASE_MARKER), "Case's formula is there");
+      assert.ok(handbook.includes(`access_token = \\"[REDACTED]\\"`), "with its key redacted");
+      for (const planted of [HANDBOOK_PLANTED, HANDBOOK_CASE_PLANTED]) {
+        assert.ok(!handbook.includes(planted));
+        assert.ok(!read(r.dir, "checkpoints/metadata.json").includes(planted));
+      }
     }
   });
 });
@@ -179,13 +188,16 @@ describe("the Tooling route's item reads", () => {
     const [runId] = readdirSync(outDir);
     const partial = readFileSync(join(outDir, runId!, "checkpoints", "metadata-tooling.partial.jsonl"), "utf8");
     assert.ok(partial.includes(HANDBOOK_MARKER), "the formula was read");
+    assert.ok(partial.includes(HANDBOOK_CASE_MARKER), "Case's formula was read");
     assert.ok(!partial.includes(HANDBOOK_PLANTED));
+    assert.ok(!partial.includes(HANDBOOK_CASE_PLANTED));
   });
 });
 
 describe("the two routes", () => {
   // Only what they cover differs, as designed (decision 455): the synthetic org
-  // has no rule on a standard object the retrieve doesn't name.
+  // has no rule on a standard object the retrieve doesn't name, and Case's is on
+  // both (decision 460).
   test("the retrieve and Tooling give the same detail for the synthetic org", () => {
     const detail = (r: Run) => (JSON.parse(read(r.dir, "checkpoints/metadata.json")) as Sourced<MetadataBundle> & { status: "ok" }).data.handbook!;
     assert.ok(detail(retrieve).flows.length > 0);
@@ -203,10 +215,19 @@ describe("the two routes", () => {
       return part.status === "ok" ? part.covers : assert.fail("validation rules unavailable");
     };
 
-    test("the retrieve: every custom object, and the standard objects it names, taken from the list it asks for", () => {
-      const named = RETRIEVE_TYPES.find((t) => t.name === "CustomObject")!.members.filter((m) => m !== "*");
+    test("the retrieve: every custom object, and the standard objects it names, taken from the list it asked for", () => {
+      assert.equal(retrieve.retrieves.length, 1);
+      const types = [...retrieve.retrieves[0]!.matchAll(/<met:types>(.*?)<met:name>([^<]+)<\/met:name><\/met:types>/g)].find((t) => t[2] === "CustomObject")![1]!;
+      const named = [...types.matchAll(/<met:members>([^<]+)<\/met:members>/g)].map((m) => m[1]!).filter((m) => m !== "*");
       assert.deepEqual(covers(retrieve), { customObjects: "all", standardObjects: named });
-      assert.deepEqual(named, ["Account", "Contact", "Lead", "Opportunity"]);
+      // The four, then Case, which the synthetic org's record counts list, and not Quote, which they don't (decision 460).
+      assert.deepEqual(named, [...RETRIEVED_STANDARD_OBJECTS, "Case"]);
+    });
+
+    test("the document says which were read, and that the others weren't", async () => {
+      const text = docxText(await renderHandbookDocx(handbookOf(retrieve), { clientName: "Synthetic Co", runDate: AS_OF }));
+      assert.match(text, /These are the validation rules on your custom objects and Account, Contact, Lead, Opportunity and Case\. We didn't read the rules on your other standard objects, so a rule on one of those isn't listed here\./);
+      assert.match(text, /### Case: 1 rule/);
     });
 
     test("Tooling, which lists every rule: all of them", () => {
@@ -518,7 +539,7 @@ describe("when the metadata couldn't be read (decision 454)", () => {
     const modules = SALES_CLOUD_MODULES.filter((m) => m.id === "current_pipeline");
     const result = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules, outDir: tempDir(), now: new Date(AS_OF), transport: new Simulator(), log: () => {} });
     assert.ok(!result.run.steps.some((s) => s.id === "metadata"));
-    assert.deepEqual(handbookOf({ dir: result.dir, runId: result.run.id, calls: 0, itemReads: 0 }), buildHandbook(undefined));
+    assert.deepEqual(handbookOf({ dir: result.dir, runId: result.run.id, calls: 0, itemReads: 0, retrieves: [] }), buildHandbook(undefined));
   });
 
   test("validation rules that couldn't be listed are unavailable, while the flows are there", async () => {
@@ -533,7 +554,8 @@ describe("when the metadata couldn't be read (decision 454)", () => {
     const r = await run({ readOnly: true, withholdMetadata: (soql) => /FROM ValidationRule\b/.test(soql) });
     const h = handbookOf(r);
     assert.ok(h.validationRules.status === "ok");
-    assert.equal(h.validationRules.items.length, 3);
+    // Case's too, on Tooling as on the retrieve (decision 460).
+    assert.equal(h.validationRules.items.length, 4);
     assert.ok(h.validationRules.items.every((v) => v.formula === null && v.message === null));
   });
 
@@ -550,7 +572,8 @@ describe("when the metadata couldn't be read (decision 454)", () => {
     // The validation rules it kept are whole, so they stay.
     assert.ok(built.validationRules.status === "ok" && built.validationRules.items.length === 1);
     // And the step's version moved, so a resumed run reads the metadata again rather than reuse such a checkpoint.
-    assert.equal(metadataExtractor.version, 8);
+    // It has moved again since, to 9, for the further standard objects' rules (decision 460).
+    assert.equal(metadataExtractor.version, 9);
   });
 
   test("no metadata step, a failed one, or detail that doesn't fit: both parts say why", () => {
@@ -590,13 +613,14 @@ describe("the API budget", () => {
     // Measured on the base, before the handbook: 3 on the retrieve route, and on
     // Tooling 27 with 13 item reads for the six flows then planted. Tooling reads
     // one item per flow, Workflow Rule and validation rule, so the two draft flows
-    // planted for the handbook add two, and nothing else does.
+    // planted for the handbook add two, and the rule on Case planted for decision
+    // 460 one more. Naming Case in the retrieve adds nothing.
     const flowFiles = Object.keys(METADATA_FILES).filter((p) => p.startsWith("flows/")).length;
     assert.equal(flowFiles, 8);
     assert.equal(retrieve.calls, 3);
     assert.equal(retrieve.itemReads, 0);
-    assert.equal(tooling.calls, 27 + 2);
-    assert.equal(tooling.itemReads, 13 + 2);
+    assert.equal(tooling.calls, 27 + 2 + 1);
+    assert.equal(tooling.itemReads, 13 + 2 + 1);
   });
 });
 
