@@ -185,9 +185,8 @@ function conditionWords(c: HandbookCondition): Run[] {
 
 /**
  * One part of the handbook: what it says on the first page, and the part
- * itself. Each says "we couldn't read
- * this", "there's none" or what it holds, and the three never look alike
- * (decisions 453 and 454).
+ * itself. Each says "we couldn't read this", "there's none" or what it holds,
+ * and the three never look alike (decisions 453 and 454).
  */
 type Part = { covers: (h: Handbook) => string; write: (doc: Doc, h: Handbook) => void };
 
@@ -243,8 +242,8 @@ function writeFlow(doc: Doc, flow: HandbookFlow): void {
     const step = steps[n - 1]!;
     return `step ${n}, ${step.label ?? step.name}`;
   };
-  // None reached means the start names no first step: saying they never run
-  // would be our claim, not the file's, so this says only what the file holds.
+  // None reached means the start names no step the file has: saying they never
+  // run would be our claim, not the file's, so this says only what it holds.
   const noStart = steps.length > 0 && steps.every((s) => !s.reached);
   if (noStart) doc.para({ text: "This flow's metadata doesn't say where it starts, so its steps are listed in the order Salesforce gives them.", bold: true });
   steps.forEach((step, i) => {
@@ -334,7 +333,7 @@ function writeRule(doc: Doc, rule: HandbookValidationRule): void {
 // ─── Apex ─────────────────────────────────────────────────────────────────────
 
 type ApexItem = HandbookApexClass | HandbookApexTrigger;
-/** An Apex part as the file has it (decision 456): cut at a most, by name, or unavailable. */
+/** An Apex part as the file has it (decision 456): cut at its most, by name, or unavailable. */
 type Capped<T> = { status: "ok"; items: T[]; total: number; cut: boolean } | { status: "unavailable"; reason: string };
 
 /** "convertLead" is Apex's name; a reader says "convert lead". */
