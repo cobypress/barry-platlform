@@ -18,6 +18,8 @@ export type SectionBrief = {
   title: string;
   purpose: string;
   sources: PromptSource[];
+  /** The most words the section's page has room for, said in the prompt and checked on the reply (DECISIONS.md 440). */
+  maxWords: number;
   model?: string;
   /** The engine has only a placeholder for this section, so an accepted draft means it no longer needs a person's input. */
   fillsPlaceholder?: boolean;
@@ -26,7 +28,7 @@ export type SectionBrief = {
 };
 
 export type DraftResult =
-  | { status: "accepted"; body: string; model: string; attempts: number }
+  | { status: "accepted"; body: string; model: string; attempts: number; words: number }
   | { status: "rejected"; reasons: string[]; attempts: number; unavailable?: true };
 
 export const DRAFT_DEFAULTS = {
@@ -35,6 +37,16 @@ export const DRAFT_DEFAULTS = {
   // One redraft with the failures listed. After that a person is better value.
   maxAttempts: 2,
 } as const;
+
+/**
+ * How far over its target a draft may run before it's sent back. A quarter, so
+ * a draft a sentence over isn't asked for again: the carry-over step protects
+ * the page from what gets through (DECISIONS.md 440).
+ */
+export const LENGTH_TOLERANCE = 1.25;
+
+/** Words as a reader counts them: every run of characters between spaces. */
+export const wordCount = (paragraphs: string[]): number => paragraphs.join(" ").split(/\s+/).filter(Boolean).length;
 
 function styleProblems(text: string): string[] {
   return /\p{Extended_Pictographic}/u.test(text.replace(/[©®™]/g, "")) ? ["Remove the emoji."] : [];
@@ -69,6 +81,9 @@ export async function draftSection(input: { brief: SectionBrief; dataset: Figure
   const sources = guardDeep(brief.sources, pseudonyms);
   let feedback: string[] = [];
   let reasons: string[] = [];
+  // The last draft whose only fault was its length. If nothing better comes,
+  // it's kept: a long draft is better than none (DECISIONS.md 440).
+  let long: DraftResult | undefined;
 
   for (let attempt = 1; attempt <= DRAFT_DEFAULTS.maxAttempts; attempt++) {
     const prompt = buildPrompt({ ...brief, sources, feedback });
@@ -84,18 +99,26 @@ export async function draftSection(input: { brief: SectionBrief; dataset: Figure
         maxTokens: DRAFT_DEFAULTS.maxTokens,
       }, pseudonyms);
     } catch (err) {
-      if (err instanceof PromptRefused) return { status: "rejected", reasons: err.reasons, attempts: attempt };
+      if (err instanceof PromptRefused) return long ?? { status: "rejected", reasons: err.reasons, attempts: attempt };
       // Nothing is wrong with the section: Claude couldn't be reached.
-      return { status: "rejected", reasons: [`The call to Claude failed: ${err instanceof Error ? err.message : String(err)}`], attempts: attempt, unavailable: true };
+      return long ?? { status: "rejected", reasons: [`The call to Claude failed: ${err instanceof Error ? err.message : String(err)}`], attempts: attempt, unavailable: true };
     }
     // Neither of these gets better by asking again with the same input.
-    if (reply.stopReason === "refusal") return { status: "rejected", reasons: ["Claude declined to write this section."], attempts: attempt };
-    if (reply.stopReason === "max_tokens") return { status: "rejected", reasons: ["The reply was cut off, so it can't be trusted."], attempts: attempt };
+    if (reply.stopReason === "refusal") return long ?? { status: "rejected", reasons: ["Claude declined to write this section."], attempts: attempt };
+    if (reply.stopReason === "max_tokens") return long ?? { status: "rejected", reasons: ["The reply was cut off, so it can't be trusted."], attempts: attempt };
 
     const { paragraphs, problems } = review(reply.text, dataset, allowed, pseudonyms, brief.rolesOnly);
-    if (problems.length === 0) return { status: "accepted", body: paragraphs.join("\n\n"), model: reply.model, attempts: attempt };
+    if (problems.length === 0) {
+      const words = wordCount(paragraphs);
+      const accepted: DraftResult = { status: "accepted", body: paragraphs.join("\n\n"), model: reply.model, attempts: attempt, words };
+      if (words <= brief.maxWords * LENGTH_TOLERANCE) return accepted;
+      // Code never cuts Claude's words: it asks again.
+      long = accepted;
+      feedback = [`Your draft is ${words} words; the limit is ${brief.maxWords}. Cut it to ${brief.maxWords} words or fewer, keeping every figure as it is.`];
+      continue;
+    }
     reasons = problems;
     feedback = problems;
   }
-  return { status: "rejected", reasons, attempts: DRAFT_DEFAULTS.maxAttempts };
+  return long ?? { status: "rejected", reasons, attempts: DRAFT_DEFAULTS.maxAttempts };
 }

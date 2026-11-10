@@ -1,14 +1,19 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { anthropicClient, buildMessageParams, type MessagesApi, type NarrativeClient, type NarrativeReply, type NarrativeRequest } from "../client.ts";
-import { draftSection, DRAFT_DEFAULTS, type SectionBrief } from "../draft.ts";
+import { draftSection, DRAFT_DEFAULTS, LENGTH_TOLERANCE, wordCount, type SectionBrief } from "../draft.ts";
 import { guardPrompt } from "../guard.ts";
+import { Intake } from "../intake.ts";
+import { buildReport, WORD_TARGETS } from "../sections.ts";
 import { DRAFT_SCHEMA, findingSource, metricSource, SYSTEM_PROMPT } from "../prompt.ts";
 import { MODELS } from "../../config.ts";
 import { buildDataset, SOURCE } from "../../numbercheck/index.ts";
-import { isSalesforceUserName, Pseudonymiser } from "../../privacy/pseudonymiser.ts";
+import { isSalesforceUserName, Pseudonymiser, type PseudonymEntry } from "../../privacy/pseudonymiser.ts";
 import { runFromRecording } from "../../testing/harness.ts";
-import { loadAnswers } from "../../testing/replay.ts";
+import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
+import { syntheticInterviews } from "../../testing/interviews.ts";
 import { usersTable } from "../../testing/synthetic-org.ts";
 import type { Finding, Metric } from "../../schemas/index.ts";
 
@@ -24,6 +29,7 @@ const brief = (overrides: Partial<SectionBrief> = {}): SectionBrief => ({
   title: "Pipeline",
   purpose: "Explain the state of the pipeline.",
   sources: [findingSource(stale), metricSource(winRate)],
+  maxWords: 60,
   ...overrides,
 });
 
@@ -150,6 +156,93 @@ describe("a draft", () => {
     await draft(client, brief({ model: MODELS.notesAndScreenshots }));
     assert.equal(client.requests[0]!.model, MODELS.synthesis);
     assert.equal(client.requests[1]!.model, MODELS.notesAndScreenshots);
+  });
+});
+
+describe("a draft's length (DECISIONS.md 440)", () => {
+  // The brief's target is 60 words, so a draft is sent back past 75.
+  const target = brief().maxWords;
+  const limit = target * LENGTH_TOLERANCE;
+  const FILLER = "We looked closely at how your team works with deals from first call to close and what that means for the forecast".split(" ");
+  /** A draft of exactly n words: the figures in \`good\`, then plain words with no figure in them. */
+  const ofLength = (n: number, opening = good) => {
+    const rest = n - wordCount(opening.map((p) => p.text));
+    return [...opening, { text: Array.from({ length: rest }, (_, i) => FILLER[i % FILLER.length]).join(" "), sources: [] }];
+  };
+  const feedback = (words: number) => `Your draft is ${words} words; the limit is ${target}. Cut it to ${target} words or fewer, keeping every figure as it is.`;
+
+  test("the prompt states the target, after what the section is for", async () => {
+    const client = stub(reply(good));
+    await draft(client);
+    assert.match(client.requests[0]!.prompt, /What this section is for: Explain the state of the pipeline\.\nWrite at most 60 words\.\n/);
+  });
+
+  test("a draft over its target by more than a quarter goes back once, told both counts, and the shorter one is kept", async () => {
+    const client = stub(reply(ofLength(100)), reply(ofLength(50)));
+    const result = await draft(client);
+    assert.equal(client.requests.length, 2);
+    assert.ok(client.requests[1]!.prompt.includes(feedback(100)), client.requests[1]!.prompt.split("\n").slice(-3).join("\n"));
+    assert.doesNotMatch(client.requests[0]!.prompt, /Your draft is/);
+    assert.equal(result.status, "accepted");
+    assert.equal(result.status === "accepted" && result.attempts, 2);
+    assert.equal(result.status === "accepted" && result.words, 50);
+    assert.equal(result.status === "accepted" && result.body, ofLength(50).map((p) => p.text).join("\n\n"));
+  });
+
+  test("a draft over by a quarter or less is accepted first time", async () => {
+    for (const words of [70, limit]) {
+      const client = stub(reply(ofLength(words)));
+      const result = await draft(client);
+      assert.equal(client.requests.length, 1, `${words} words`);
+      assert.equal(result.status === "accepted" && result.words, words);
+    }
+    const over = stub(reply(ofLength(limit + 1)), reply(ofLength(limit + 1)));
+    await draft(over);
+    assert.equal(over.requests.length, 2, "one word past a quarter goes back");
+  });
+
+  test("a draft still over after the attempts is accepted if its figures pass, as the last reply", async () => {
+    const client = stub(reply(ofLength(100)), reply(ofLength(90)));
+    const result = await draft(client);
+    assert.equal(client.requests.length, DRAFT_DEFAULTS.maxAttempts);
+    assert.equal(result.status, "accepted");
+    assert.equal(result.status === "accepted" && result.words, 90);
+    assert.equal(result.status === "accepted" && result.body, ofLength(90).map((p) => p.text).join("\n\n"));
+  });
+
+  test("a long draft is kept if the shorter one breaks a figure", async () => {
+    const invented = [{ text: "Your win rate is 97%.", sources: [winRate.id] }];
+    const result = await draft(stub(reply(ofLength(100)), reply(invented)));
+    assert.equal(result.status, "accepted");
+    assert.equal(result.status === "accepted" && result.words, 100);
+    assert.doesNotMatch(result.status === "accepted" ? result.body : "", /97%/);
+  });
+
+  test("length is only checked once the figures pass: a draft with a bad figure is told about the figure", async () => {
+    const client = stub(reply(ofLength(100, [{ text: "Your win rate is 97%.", sources: [winRate.id] }])), reply(good));
+    const result = await draft(client);
+    assert.equal(result.status, "accepted");
+    assert.match(client.requests[1]!.prompt, /97%/);
+    assert.doesNotMatch(client.requests[1]!.prompt, /Your draft is/);
+  });
+
+  test("every brief states its own target, from the table", async () => {
+    const { output: o, run, dir } = await runFromRecording({ answers: loadAnswers() });
+    const issue = o!.findings.find((f) => f.status === "issue")!;
+    const intake = Intake.parse({ customerName: "Synthetic Co", summary: "The director says the forecast can't be trusted.", statedProblems: [{ id: "p1", statement: "We don't trust the forecast.", findingIds: [issue.id] }], capturedBy: "Synthetic Consultant", capturedAt: "2026-10-30T09:00:00.000Z" });
+    const report = buildReport({ run, calibration: loadCalibration(), findings: o!.findings, metrics: o!.metrics, manualSteps: o!.manualSteps, intake, interviews: syntheticInterviews() });
+    const names = new Pseudonymiser(JSON.parse(readFileSync(join(dir, "pseudonym-map.json"), "utf8")) as PseudonymEntry[]);
+    const seen = new Set<string>();
+    for (const [id, b] of report.briefs) {
+      const key = id.split(":").at(-1)!;
+      const group = (key.startsWith("domain_") ? "domain" : key) as keyof typeof WORD_TARGETS;
+      assert.equal(b.maxWords, WORD_TARGETS[group], id);
+      const client = stub(reply([{ text: "We looked closely at this.", sources: [] }]));
+      await draftSection({ brief: b, dataset: report.dataset, client, pseudonyms: names });
+      assert.ok(client.requests[0]!.prompt.includes(`\nWrite at most ${b.maxWords} words.\n`), id);
+      seen.add(group);
+    }
+    assert.deepEqual([...seen].sort(), Object.keys(WORD_TARGETS).sort(), "every target is used by a brief");
   });
 });
 
