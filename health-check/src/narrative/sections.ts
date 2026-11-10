@@ -460,10 +460,15 @@ function summaryCounts(findings: Finding[]): PromptSource {
   };
 }
 
-/** For a thin org, what the verdict's brief adds: the counts are summaryCounts' checks and notMeasurable (DECISIONS.md 450). */
+/**
+ * For a thin org, what the verdict's brief adds (DECISIONS.md 450). The page prints
+ * the engine's own sentence with the counts beneath Claude's text, so that's the one
+ * statement: Claude writes around it rather than saying it again.
+ */
 function thinDataBrief(team: Finding[]): string {
   const open = team.filter((f) => f.status === "not_measurable").length;
-  return `${open} of the ${team.length} checks couldn't be measured (the summary source's notMeasurable and checks). Say so once, briefly, as a fact and not as the customer's fault. Don't give a cause and don't list them: the appendix names each with its reason.`;
+  if (open === team.length) return `None of the ${team.length} checks could be measured. The page states that beneath your text; don't repeat it. Say plainly that this report can't give a verdict on the data yet, and don't present that as the customer's fault.`;
+  return `${open} of the ${team.length} checks couldn't be measured. The page states that with its counts beneath your text, so don't repeat the count or say what couldn't be measured: write the verdict from the checks we could measure, and don't present the gaps as the customer's fault.`;
 }
 
 /** The plan's shape as figures, under the id planSource uses, so a draft of a plan section can say "the first 30 days". */

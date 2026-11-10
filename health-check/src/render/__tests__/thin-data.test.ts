@@ -126,11 +126,13 @@ describe("a thin org", () => {
     for (const f of report.teamFindings.filter((x) => x.status === "not_measurable")) assert.ok(appendix.includes(f.title), f.title);
   });
 
-  test("the verdict's brief tells Claude to say it once, from counts its sources hold", () => {
+  test("the verdict's brief leaves the sentence to the page, from counts its sources hold", () => {
+    // Claude's text sits straight above the engine's sentence, so it mustn't say it again.
     const brief = report.briefs.get(`${run.id}:executive_summary:verdict`)!;
-    assert.ok(brief.purpose.includes(`${open} of the ${checks} checks couldn't be measured (the summary source's notMeasurable and checks)`), brief.purpose);
-    assert.match(brief.purpose, /Don't give a cause/);
-    assert.match(brief.purpose, /Say so once, briefly/);
+    assert.ok(brief.purpose.includes(`${open} of the ${checks} checks couldn't be measured.`), brief.purpose);
+    assert.match(brief.purpose, /don't repeat the count/);
+    // The executive summary has no appendix, and saying it once is the page's job.
+    assert.doesNotMatch(brief.purpose, /appendix|Say so once/);
     const summary = brief.sources.find((s) => s.kind === "summary")!;
     assert.equal(summary.checks, checks);
     assert.equal(summary.notMeasurable, open);
@@ -142,6 +144,42 @@ describe("a thin org", () => {
     const range = deckRangeFor(run);
     const fullLayout = await layoutOf(browser, full, { minPages: range.min, maxPages: range.max, dataset: report.dataset });
     assert.deepEqual(fullLayout.problems, [], JSON.stringify(fullLayout.problems.slice(0, 8)));
+  });
+});
+
+describe("an org with nothing measured", () => {
+  const report = buildReport({ ...base, findings: output!.findings.map(unmeasured) });
+  const { checks, open } = counts(report);
+  const exec = executiveHtml(report, pseudonyms);
+  const full = fullReportHtml(report, pseudonyms);
+
+  test("is told so, with no pages of findings to point to", () => {
+    assert.equal(open, checks);
+    const verdict = decode(pageWith(exec, '<div class="eyebrow">Verdict</div>'));
+    assert.ok(verdict.includes(`We couldn't measure any of the ${checks} checks. The full report's appendix names each, with the reason.`), verdict);
+    const overview = decode(pageWith(full, '<div class="eyebrow">Overview</div>'));
+    assert.ok(overview.includes(`We couldn't measure any of the ${checks} checks. The appendix names each, with the reason.`), overview);
+    for (const text of [decode(exec), decode(full)]) {
+      assert.ok(!text.includes("cover the ones we could"));
+      assert.ok(!text.includes(`${checks} of the ${checks}`));
+    }
+    assert.deepEqual(checkNumbers(`We couldn't measure any of the ${checks} checks.`, scopeDataset(report.dataset, [SOURCE.summary])).unmatched, []);
+  });
+
+  test("the verdict's brief says there's no verdict yet, without repeating the page", () => {
+    const { purpose } = report.briefs.get(`${run.id}:executive_summary:verdict`)!;
+    assert.ok(purpose.includes(`None of the ${checks} checks could be measured. The page states that beneath your text; don't repeat it.`), purpose);
+    assert.match(purpose, /can't give a verdict on the data yet/);
+    assert.doesNotMatch(purpose, /appendix|we could measure/);
+  });
+
+  test("both documents trace every figure, and nothing runs off a page", async () => {
+    const execLayout = await layoutOf(browser, exec, { minPages: EXECUTIVE_PAGES.min, maxPages: executiveMaxPages(report), dataset: report.dataset });
+    assert.deepEqual(execLayout.problems, [], JSON.stringify(execLayout.problems.slice(0, 8)));
+    // With nothing to show, the deck is shorter than the range, as an empty org's is in pdf.test.ts. Only that may be reported.
+    const range = deckRangeFor(run);
+    const fullLayout = await layoutOf(browser, full, { minPages: range.min, maxPages: range.max, dataset: report.dataset });
+    assert.deepEqual(fullLayout.problems.filter((p) => p.check !== "page count"), [], JSON.stringify(fullLayout.problems.slice(0, 8)));
   });
 });
 
