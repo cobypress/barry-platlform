@@ -99,10 +99,11 @@ export function planSource(id: string, plan: Plan): PromptSource {
   };
 }
 
-export function buildPrompt(input: { title: string; purpose: string; sources: PromptSource[]; feedback?: string[] }): string {
+export function buildPrompt(input: { title: string; purpose: string; maxWords: number; sources: PromptSource[]; feedback?: string[] }): string {
   const parts = [
     `Section: ${input.title}`,
     `What this section is for: ${input.purpose}`,
+    `Write at most ${input.maxWords} words.`,
     "",
     "<sources>",
     JSON.stringify(input.sources, null, 1),

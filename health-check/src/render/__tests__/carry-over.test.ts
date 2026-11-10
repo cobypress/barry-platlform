@@ -3,14 +3,18 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Browser, Page } from "playwright";
+import { ALL_MODULES, CPQ_MODULES, SALES_CLOUD_MODULES, SERVICE_CLOUD_MODULES } from "../../domains/index.ts";
+import { wordCount } from "../../narrative/draft.ts";
 import { Intake } from "../../narrative/intake.ts";
 import { buildReport, type BuiltReport, type ReportInput, type ReportOutputKey } from "../../narrative/sections.ts";
 import { Pseudonymiser, type PseudonymEntry } from "../../privacy/pseudonymiser.ts";
+import { Score } from "../../schemas/index.ts";
 import { runFromRecording } from "../../testing/harness.ts";
+import { syntheticInterviews } from "../../testing/interviews.ts";
 import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
 import { carryOver } from "../carry-over.ts";
-import { executiveHtml } from "../executive.ts";
-import { fullReportHtml } from "../full-report.ts";
+import { EXECUTIVE_MAX_PAGES, executiveHtml } from "../executive.ts";
+import { deckRangeFor, fullReportHtml, fullReportHtmlAt, slideCounts } from "../full-report.ts";
 import { checkLayout } from "../layout.ts";
 import { launchBrowser } from "../pdf.ts";
 
@@ -128,4 +132,103 @@ describe("carry-over: nothing runs past a footer", () => {
       await page.close();
     }
   });
+});
+
+// Each section Claude drafts has a word target, set by the room its page gives
+// it (DECISIONS.md 440). This holds the target to the page: a draft of exactly
+// that many words, in long words with no figures, fits every sample with no
+// continued page, at the deck's own density and at every other.
+
+/** Plain words averaging six letters, longer than most prose, so real text at its target takes less room. */
+const VOCABULARY = "pipeline forecast report account manager customer renewal business process records review changes service context visible problem careful planning owners pressure decision priority adoption training measure quality storage options history security profile control clearly matters outcome ordinary regular team deals stage close data level often enough always your with that their more each than when what only most work time".split(" ");
+
+/** Exactly n words, in sentences of thirteen, a paragraph for every fifty words or part of fifty, up to four. */
+function draftOf(n: number): string {
+  const words = Array.from({ length: n }, (_, i) => {
+    const word = VOCABULARY[(i * 7) % VOCABULARY.length]!;
+    const opening = i % 13 === 0 ? `${word.charAt(0).toUpperCase()}${word.slice(1)}` : word;
+    return i % 13 === 12 || i === n - 1 ? `${opening}.` : opening;
+  });
+  const size = Math.ceil(n / Math.min(4, Math.ceil(n / 50)));
+  const paragraphs: string[] = [];
+  for (let i = 0; i < n; i += size) paragraphs.push(words.slice(i, i + size).join(" "));
+  return paragraphs.join("\n\n");
+}
+
+/** Every section with a brief, as Claude's draft at its target. */
+function atTarget(report: BuiltReport, words: (target: number) => number = (target) => target): BuiltReport {
+  for (const key of ["executive_summary", "full_health_check"] as ReportOutputKey[]) {
+    const built = report.outputs[key];
+    for (const section of built.sections) {
+      const brief = report.briefs.get(section.id);
+      if (!brief) continue;
+      const version = built.versions.find((v) => v.id === section.currentVersionId)!;
+      version.body = draftOf(words(brief.maxWords));
+      // The roadmap prints written text only, never the engine's.
+      version.source = "claude_draft";
+    }
+  }
+  return report;
+}
+
+/** The pages carry-over had to add, and the pages after it. */
+async function continued(html: string): Promise<{ added: number; pages: number }> {
+  const page = await open(html);
+  try {
+    const added = await carryOver(page);
+    return { added, pages: (await checkLayout(page, { minPages: 1, maxPages: 999 })).pages };
+  } finally {
+    await page.close();
+  }
+}
+
+/** Actions the executive plan shows, so a longer introduction can't quietly cost one. */
+const planActions = (html: string): number => html.split('<section class="phase').slice(1).reduce((sum, block) => sum + (block.split("</section>")[0]!.match(/<li>/g) ?? []).length, 0);
+
+const SAMPLES: Array<[string, NonNullable<Parameters<typeof runFromRecording>[0]>]> = [
+  ["Sales Cloud", { modules: SALES_CLOUD_MODULES }],
+  ["Sales and Service Cloud", { modules: [...SALES_CLOUD_MODULES, ...SERVICE_CLOUD_MODULES] }],
+  ["Sales Cloud and CPQ", { modules: [...SALES_CLOUD_MODULES, ...CPQ_MODULES] }],
+  ["every module", { modules: ALL_MODULES }],
+  ["a set-up review", { scope: "essentials" }],
+];
+
+describe("a draft at its word target fits its page (DECISIONS.md 440)", () => {
+  test("the test's drafts are the length they claim, in long words with no figure", () => {
+    for (const n of [1, 20, 49, 50, 51, 120, 333]) {
+      const text = draftOf(n);
+      assert.equal(wordCount(text.split("\n\n")), n);
+      assert.doesNotMatch(text, /\d/);
+    }
+    const letters = draftOf(600).replace(/[^a-z]/gi, "").length / 600;
+    assert.ok(letters >= 6, `${letters} letters a word`);
+  });
+
+  for (const [name, options] of SAMPLES) {
+    test(name, async () => {
+      // As the sample run is: an intake with a linked problem, five interviews and the scores.
+      const sample = await runFromRecording({ answers: loadAnswers(), ...options });
+      const names = new Pseudonymiser(JSON.parse(readFileSync(join(sample.dir, "pseudonym-map.json"), "utf8")) as PseudonymEntry[]);
+      const scores = (JSON.parse(readFileSync(join(sample.dir, "scores.json"), "utf8")) as unknown[]).map((x) => Score.parse(x));
+      const linked = sample.output!.findings.find((f) => f.status === "issue")!;
+      const sampleInput: ReportInput = { run: sample.run, calibration: loadCalibration(), findings: sample.output!.findings, metrics: sample.output!.metrics, manualSteps: sample.output!.manualSteps, scores, interviews: syntheticInterviews(), intake: { ...intake, statedProblems: [{ ...intake.statedProblems[0]!, findingIds: [linked.id] }] } };
+      const report = atTarget(buildReport(sampleInput));
+      assert.ok([...report.briefs.keys()].some((id) => id.endsWith(":interviews")) && [...report.briefs.keys()].some((id) => id.endsWith(":stated_vs_actual")), "every kind of brief is in the sample");
+
+      const executive = executiveHtml(report, names);
+      const summary = await continued(executive);
+      assert.equal(summary.added, 0, "the executive summary needed a continued page");
+      assert.ok(summary.pages <= EXECUTIVE_MAX_PAGES, `${summary.pages} executive pages`);
+      assert.ok(planActions(executive) >= planActions(executiveHtml(buildReport(sampleInput), names)), "the plan's introduction cost it an action");
+
+      const range = deckRangeFor(sample.run);
+      const deck = await continued(fullReportHtml(report, names));
+      assert.equal(deck.added, 0, "the full report needed a continued slide");
+      assert.ok(deck.pages >= range.min && deck.pages <= range.max, `${deck.pages} slides`);
+      // A smaller org gets a roomier deck, with the dividers and roadmap text a dense one leaves out.
+      for (let step = 0; step < slideCounts(report, names).length; step++) {
+        assert.equal((await continued(fullReportHtmlAt(report, names, step))).added, 0, `the full report at density step ${step} needed a continued slide`);
+      }
+    });
+  }
 });

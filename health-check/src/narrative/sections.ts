@@ -122,8 +122,44 @@ type Spec = {
   /** Other dataset sources this section's text may quote. */
   sources?: string[];
   needsInput?: boolean;
-  brief?: { purpose: string; sources: PromptSource[]; fillsPlaceholder?: boolean; rolesOnly?: boolean };
+  brief?: { purpose: string; sources: PromptSource[]; maxWords: number; fillsPlaceholder?: boolean; rolesOnly?: boolean };
 };
+
+/**
+ * The most words Claude may write for each section it drafts (DECISIONS.md
+ * 440). Each is set by the room its page gives it, not by taste: the most words
+ * of a long-worded draft that fit, in the tightest of the samples and at every
+ * density of the deck, with a tenth kept back and rounded down to a five. The
+ * carry-over test in src/render/__tests__ holds each to its page.
+ *
+ *   section             room  where it's printed
+ *   verdict              41   executive verdict page, above the figures and the top five
+ *   pipeline             84   executive pipeline page, above its figures
+ *   top_issues           88   introduction to the executive top issues
+ *   plan_90_day          25   introduction to the executive plan; longer costs the quick wins an action
+ *   overview            184   the full report's overview slide
+ *   domain              100   "Each area at a glance" at the densest step; its divider slide holds 150
+ *   pipeline_deep_dive  100   the same list; its divider slide holds 145
+ *   interviews          184   "What your people told us", above its figures
+ *   stated_vs_actual    250   "What you told us, against what we found"
+ *   ai_readiness         36   the readiness slide, above the pillars and the fixes
+ *   roadmap              30   "The first 90 days", above the phases and the quick wins
+ *   appendix            150   the appendix's divider slide
+ */
+export const WORD_TARGETS = {
+  verdict: 35,
+  pipeline: 75,
+  top_issues: 75,
+  plan_90_day: 20,
+  overview: 165,
+  domain: 90,
+  pipeline_deep_dive: 90,
+  interviews: 165,
+  stated_vs_actual: 225,
+  ai_readiness: 30,
+  roadmap: 25,
+  appendix: 135,
+} as const;
 
 const SUMMARY_SOURCES = [SOURCE.run, SOURCE.summary, SOURCE.structure];
 const INTAKE = "intake";
@@ -512,6 +548,7 @@ function statedVsActualSpec(intake: Intake | null | undefined, team: Finding[]):
       purpose:
         "Set what you told us against what we found. For each stated problem, say whether our findings support it, partly support it or don't support it, naming the issues that bear on it. Where a problem has our own assessment, follow it. Then say what we found that matters more than the problems you raised, if anything does.",
       sources: [statedProblemsSource(INTAKE, stated), ...shown.map(findingSource)],
+      maxWords: WORD_TARGETS.stated_vs_actual,
       fillsPlaceholder: linked.length === 0,
     },
   };
@@ -534,7 +571,7 @@ function pipelineSpec(input: ReportInput, team: Finding[]): Spec {
     ),
     findingIds: potential.map((f) => f.id),
     metricIds: metrics.map((m) => m.id),
-    brief: { purpose: "Tell an executive reader what the open pipeline holds today, what it's likely to be worth and when, and the potential revenue in deals that have stalled.", sources: [...metrics.map(metricSource), ...potential.map(findingSource)] },
+    brief: { purpose: "Tell an executive reader what the open pipeline holds today, what it's likely to be worth and when, and the potential revenue in deals that have stalled.", sources: [...metrics.map(metricSource), ...potential.map(findingSource)], maxWords: WORD_TARGETS.pipeline },
   };
 }
 
@@ -595,6 +632,7 @@ function interviewSpec(input: ReportInput, view: InterviewView): Spec {
       purpose:
         "Say what the people we interviewed told us, theme by theme, grouped by role, and set each theme against what the data shows: say where it agrees, where it disagrees and where we can't tell, following the readings you're given. Draw the themes from the notes as well as the answers. Refer to people only by their role, such as \"your sales director\" or \"two sales reps\", never by name or token. A figure from an interview is only what that person told us: write it as what they said (\"told us\", \"said\", \"put it at\"), never as a figure we measured, and cite the interview it came from.",
       sources: interviewSources(input.interviews ?? [], view) as PromptSource[],
+      maxWords: WORD_TARGETS.interviews,
       rolesOnly: true,
     },
   };
@@ -618,7 +656,7 @@ function executiveSpecs(input: ReportInput, team: Finding[], survey: SurveyView 
       ),
       findingIds: top.map((f) => f.id),
       sources: SUMMARY_SOURCES,
-      brief: { purpose: `Tell an executive reader, in a few sentences, what state this Salesforce org is in and what matters most.${isThinData(team) ? ` ${thinDataBrief(team)}` : ""}`, sources: [summaryCounts(team), ...top.map(findingSource)] },
+      brief: { purpose: `Tell an executive reader what state this Salesforce org is in and what matters most.${isThinData(team) ? ` ${thinDataBrief(team)}` : ""}`, sources: [summaryCounts(team), ...top.map(findingSource)], maxWords: WORD_TARGETS.verdict },
     },
     ...(survey ? [surveySpec(survey)] : []),
     // Only what several people said the same way, and the data reads one way (DECISIONS.md 185).
@@ -635,8 +673,9 @@ function executiveSpecs(input: ReportInput, team: Finding[], survey: SurveyView 
       ...(top.length
         ? {
             brief: {
-              purpose: "Introduce the top issues to an executive reader in two or three sentences: what they have in common, and why they come before everything else. Each issue is set out in full straight after this text, so don't go through them one by one.",
+              purpose: "Introduce the top issues to an executive reader: what they have in common, and why they come before everything else. Each issue is set out in full straight after this text, so don't go through them one by one.",
               sources: [summaryCounts(team), ...top.map(findingSource)],
+              maxWords: WORD_TARGETS.top_issues,
             },
           }
         : {}),
@@ -653,8 +692,9 @@ function executiveSpecs(input: ReportInput, team: Finding[], survey: SurveyView 
         ? {
             brief: {
               purpose:
-                "Introduce the 90-day plan to an executive reader in two or three sentences: what each phase is for, and why the work comes in that order. Each phase's actions are listed straight after this text, so don't go through them one by one. If some actions come after the 90 days, say that the full report has them.",
+                "Introduce the 90-day plan to an executive reader: urgent fixes come first, with quick wins beside them, and each later phase builds on the one before. The phases' actions are listed straight after this text, so don't go through them. If some actions come after the 90 days, say the full report has them.",
               sources: [planSource(PLAN, plan), ...planned.map(findingSource)],
+              maxWords: WORD_TARGETS.plan_90_day,
             },
           }
         : {}),
@@ -685,8 +725,9 @@ function fullSpecs(input: ReportInput, team: Finding[], metrics: Metric[], surve
       sources: SUMMARY_SOURCES,
       brief: {
         purpose:
-          "Open the full report. In two or three short paragraphs, tell the reader what state their Salesforce is in, the few themes that run through the issues and why they matter to the business, and where to start. The verdict and the counts of issues are shown beside this text, so don't open by repeating them.",
+          "Open the full report. Tell the reader what state their Salesforce is in, the few themes that run through the issues and why they matter to the business, and where to start. The verdict and the counts of issues are shown beside this text, so don't open by repeating them.",
         sources: [summaryCounts(team), ...issues.map(findingSource)],
+        maxWords: WORD_TARGETS.overview,
       },
     },
     ...areasOf(input.run, team).map((domain): Spec => {
@@ -702,7 +743,7 @@ function fullSpecs(input: ReportInput, team: Finding[], metrics: Metric[], surve
         findingIds: own.map((f) => f.id),
         metricIds: measured.map((m) => m.id),
         sources: [SOURCE.summary],
-        brief: { purpose: `Explain what we found in ${label.toLowerCase()}, what it means for the customer, and what to do first.`, sources: [...own.map(findingSource), ...measured.map(metricSource)] },
+        brief: { purpose: `Explain what we found in ${label.toLowerCase()}, what it means for the customer, and what to do first.`, sources: [...own.map(findingSource), ...measured.map(metricSource)], maxWords: WORD_TARGETS.domain },
       };
     }),
     ...(setupReview ? [] : [{
@@ -713,6 +754,7 @@ function fullSpecs(input: ReportInput, team: Finding[], metrics: Metric[], surve
       brief: {
         purpose: "Explain the pipeline for someone planning delivery as well as someone selling: what's open today and what it's likely to be worth, when it's likely to land, where wins come from, where deals are lost, and how far close dates hold.",
         sources: pipelineMetrics.map(metricSource),
+        maxWords: WORD_TARGETS.pipeline_deep_dive,
       },
     }]),
     ...(survey ? [surveySpec(survey)] : []),
@@ -727,8 +769,9 @@ function fullSpecs(input: ReportInput, team: Finding[], metrics: Metric[], surve
       sources: SUMMARY_SOURCES,
       brief: {
         purpose:
-          "Tell a sales leader who is being pitched Agentforce, in two or three sentences, whether this org could put an AI agent to work safely and what would stop it. Each pillar's verdict is already decided and shown beside this text, with the five things to fix: word the overall picture, never change a verdict, and add no figure, forecast or AI opportunity.",
+          "Tell a sales leader who is being pitched Agentforce whether this org could put an AI agent to work safely and what would stop it. Each pillar's verdict is already decided and shown beside this text, with the five things to fix: word the overall picture, never change a verdict, and add no figure, forecast or AI opportunity.",
         sources: [...team.filter((f) => readinessFindings(readiness).includes(f.id)).map(findingSource), ...metrics.filter((m) => AI_METRIC_IDS.includes(m.id)).map(metricSource)],
+        maxWords: WORD_TARGETS.ai_readiness,
       },
     },
     {
@@ -741,8 +784,9 @@ function fullSpecs(input: ReportInput, team: Finding[], metrics: Metric[], surve
         ? {
             brief: {
               purpose:
-                "Walk the reader through the roadmap: what each phase is for, why the work comes in that order, and what's left for after the 90 days. Every action is listed in full after this text, so describe the shape of the plan and its priorities rather than each action.",
+                "Say what shapes the plan: urgent fixes first, quick wins beside them, and why the rest comes in this order. Every action is listed in full after this text, so describe its shape and priorities, not the actions. If anything is left for after the 90 days, say so.",
               sources: [planSource(PLAN, built), ...roadmapFindings.map(findingSource)],
+              maxWords: WORD_TARGETS.roadmap,
             },
           }
         : {}),
@@ -757,6 +801,7 @@ function fullSpecs(input: ReportInput, team: Finding[], metrics: Metric[], surve
         purpose:
           "Explain how we carried out this health check: the period of data we looked at, the working assumptions behind the figures, what we couldn't measure and why, and how many checks passed. Where something couldn't be measured, say that we report it rather than estimate it.",
         sources: [summaryCounts(team), assumptionsSource(CALIBRATION, input.run, input.calibration), ...notMeasurable.map(findingSource)],
+        maxWords: WORD_TARGETS.appendix,
       },
     },
   ];

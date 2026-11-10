@@ -136,7 +136,7 @@ describe("the last check before a send", () => {
     const broken = new BrokenScrub();
     for (const u of usersTable) broken.label("user", u.Id, u.Name, [u.Username, u.Email]);
     const client = recordingClient();
-    const result = await draftSection({ brief: { title: "T", purpose: "P", sources: [findingSource(finding)] }, dataset: buildDataset({ findings: [finding], metrics: [], currency: "GBP" }), client, pseudonyms: broken });
+    const result = await draftSection({ brief: { title: "T", purpose: "P", sources: [findingSource(finding)], maxWords: 100 }, dataset: buildDataset({ findings: [finding], metrics: [], currency: "GBP" }), client, pseudonyms: broken });
     assert.equal(client.requests.length, 0, "nothing was sent");
     assert.equal(result.status, "rejected");
     assert.match(result.status === "rejected" ? result.reasons.join() : "", /email address after scrubbing, so it wasn't sent/);
