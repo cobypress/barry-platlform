@@ -9,7 +9,7 @@ import { documentXml, docxParagraphs, docxText } from "../../testing/docx-text.t
 import { HANDBOOK_FILE } from "../build.ts";
 import { renderHandbookDocx, STEP_WORDS, wordSafe } from "../docx.ts";
 import { readHandbook } from "../read.ts";
-import { Handbook, HANDBOOK_VERSION, MAX_STEPS, type HandbookFlow, type HandbookStep, type HandbookValidationRule } from "../schema.ts";
+import { Handbook, HANDBOOK_VERSION, MAX_APEX_CLASSES, MAX_APEX_TRIGGERS, MAX_STEPS, type HandbookApexClass, type HandbookApexTouches, type HandbookApexTrigger, type HandbookFlow, type HandbookStep, type HandbookValidationRule } from "../schema.ts";
 
 // The org handbook as a Word document (DECISIONS.md 443 to 445). The file is
 // made up here, so every route through the document is seen.
@@ -39,6 +39,21 @@ function flow(name: string, over: Partial<HandbookFlow> = {}): HandbookFlow {
 function rule(name: string, over: Partial<HandbookValidationRule> = {}): HandbookValidationRule {
   return { object: "Opportunity", name, active: true, description: null, formula: "ISBLANK(Amount)", formulaCut: false, formulaLength: 15, message: "Give an amount.", messageField: "Amount", ...over };
 }
+
+function touches(over: Partial<HandbookApexTouches> = {}): HandbookApexTouches {
+  return { queries: [], queriesTotal: 0, changes: [], dynamicQueries: false, searches: false, ...over };
+}
+
+function apexClass(name: string, over: Partial<HandbookApexClass> = {}): HandbookApexClass {
+  return { name, apiVersion: 62, status: "Active", isTest: false, touches: touches(), ...over };
+}
+
+function trigger(name: string, over: Partial<HandbookApexTrigger> = {}): HandbookApexTrigger {
+  return { ...apexClass(name), object: "Opportunity", events: ["before insert"], ...over };
+}
+
+/** An ok Apex part holding these, uncut. */
+const apex = <T>(items: T[]) => ({ status: "ok" as const, items, total: items.length, cut: false });
 
 function handbook(over: Partial<Handbook> = {}): Handbook {
   return Handbook.parse({ version: HANDBOOK_VERSION, flows: { status: "ok", items: [] }, validationRules: { status: "ok", covers: RETRIEVE, items: [] }, apexClasses: NO_APEX, apexTriggers: NO_APEX, ...over });
@@ -76,7 +91,7 @@ describe("the handbook as a Word document", () => {
     const h = handbook({ flows: { status: "ok", items: [flow("One"), flow("Two", { status: "Draft" })] }, validationRules: { status: "ok", covers: RETRIEVE, items: [rule("R1"), rule("R2", { active: false }), rule("R3")] } });
     const { paragraphs, text } = await render(h);
     assert.deepEqual(headings(paragraphs, 1), ["Org handbook: Synthetic Co"]);
-    assert.deepEqual(headings(paragraphs, 2), ["What it covers", "Flows", "Validation rules"]);
+    assert.deepEqual(headings(paragraphs, 2), ["What it covers", "Flows", "Validation rules", "Apex classes", "Apex triggers"]);
     assert.match(text, /We read it from your org on 31 Oct 2026/);
     assert.match(text, /Flows: 2 flows, 1 of them active\./);
     assert.match(text, /Validation rules: 3 validation rules, 2 of them active, on your custom objects and Account, Contact, Lead and Opportunity\./);
@@ -203,7 +218,7 @@ describe("the handbook as a Word document", () => {
   });
 
   test("a part that couldn't be read says so with the reason, an empty one says the org has none, and the two never look alike", async () => {
-    const unavailable = await render(handbook({ flows: { status: "unavailable", reason: "Metadata couldn't be retrieved: INSUFFICIENT_ACCESS" }, validationRules: { status: "unavailable", reason: "The retrieve timed out" } }));
+    const unavailable = await render(handbook({ flows: { status: "unavailable", reason: "Metadata couldn't be retrieved: INSUFFICIENT_ACCESS" }, validationRules: { status: "unavailable", reason: "The retrieve timed out" }, apexClasses: { status: "unavailable", reason: "x" }, apexTriggers: { status: "unavailable", reason: "x" } }));
     const empty = await render(handbook());
     assert.match(unavailable.text, /We couldn't read your flows, so this handbook doesn't list them\. Metadata couldn't be retrieved: INSUFFICIENT_ACCESS\./);
     assert.match(unavailable.text, /We couldn't read your validation rules, so this handbook doesn't list them\. The retrieve timed out\./);
@@ -279,6 +294,121 @@ describe("the handbook as a Word document", () => {
   });
 });
 
+describe("the handbook's Apex", () => {
+  /** The paragraph for one class or trigger: its name, then its lines. */
+  const entry = (text: string, name: string): string => text.split("\n\n").find((p) => p.startsWith(`${name}\n`))!;
+
+  test("comes after the validation rules, classes then triggers, each counted on the first page", async () => {
+    const h = handbook({ apexClasses: apex([apexClass("Alpha"), apexClass("Beta", { status: "Inactive" }), apexClass("Gamma")]), apexTriggers: apex([trigger("OnDeal")]) });
+    const { paragraphs, text } = await render(h);
+    assert.deepEqual(headings(paragraphs, 2), ["What it covers", "Flows", "Validation rules", "Apex classes", "Apex triggers"]);
+    const covers = text.slice(text.indexOf("## What it covers"), text.indexOf("## Flows"));
+    assert.match(covers, /Validation rules: your org has none on [^\n]+\n\nApex classes: 3 classes, 2 of them active\.\n\nApex triggers: 1 trigger, 1 of them active\.\n/);
+    // In the file's order, which is by name: the document doesn't sort them again.
+    const unsorted = await render(handbook({ apexClasses: apex([apexClass("Zed"), apexClass("Able")]) }));
+    assert.ok(unsorted.text.indexOf("\nZed\n") < unsorted.text.indexOf("\nAble\n"));
+    // What the reading is, said once, at the top of the classes; the triggers point to it.
+    const classes = text.slice(text.indexOf("## Apex classes"), text.indexOf("## Apex triggers"));
+    assert.match(classes, /^## Apex classes\n\nYour org has 3 classes, 2 of them active\. They're listed by name\.\n\nWhat each one touches is read from its code's text: the objects named in its queries, and the kinds of change it makes\. It doesn't say which object a change is made to[^\n]*it can miss what the code does through another class[^\n]*\n\nAlpha\n/);
+    assert.equal(text.match(/read from its code's text/g)?.length, 1);
+    assert.match(text, /## Apex triggers\n\nYour org has 1 trigger, 1 of them active\. They're listed by name\.\n\nEach trigger shows the object it's on, as Salesforce gives it, and the events it runs on\. What it touches is read as the classes' is, with the same limits\.\n\nOnDeal\n/);
+    // With no class listed, the triggers say what the reading is themselves.
+    const alone = await render(handbook({ apexClasses: { status: "unavailable", reason: "No Apex" }, apexTriggers: apex([trigger("OnDeal")]) }));
+    assert.match(alone.text.slice(alone.text.indexOf("## Apex triggers")), /read from its code's text/);
+  });
+
+  test("a class with queries and changes and neither flag lists them, one paragraph for the class", async () => {
+    const h = handbook({ apexClasses: apex([apexClass("LeadRouter", { apiVersion: 61, touches: touches({ queries: ["Account", "Contact"], queriesTotal: 2, changes: ["insert", "update"] }) })]) });
+    const { text, paragraphs } = await render(h);
+    assert.equal(entry(text, "LeadRouter"), "LeadRouter\nAPI version 61.0. Status: Active. Test: No.\nQueries: Account, Contact\nChanges it makes: insert, update");
+    assert.equal(paragraphs.filter((p) => p.text.startsWith("LeadRouter")).length, 1);
+    assert.doesNotMatch(text, /builds queries as it runs|searches/);
+    // A class that touches nothing it names says so; a test says it is one.
+    const quiet = await render(handbook({ apexClasses: apex([apexClass("QuietTest", { isTest: true })]) }));
+    assert.equal(entry(quiet.text, "QuietTest"), "QuietTest\nAPI version 62.0. Status: Active. Test: Yes.\nQueries: none in its own code\nChanges it makes: none in its own code");
+  });
+
+  test("convertLead is printed as convert lead", async () => {
+    const { text } = await render(handbook({ apexClasses: apex([apexClass("Converter", { touches: touches({ changes: ["update", "convertLead"] }) })]) }));
+    assert.match(entry(text, "Converter"), /\nChanges it makes: update, convert lead$/);
+    assert.doesNotMatch(text, /convertLead/);
+  });
+
+  test("a cut list of queried objects says so with the full count", async () => {
+    const queries = Array.from({ length: 50 }, (_, i) => `Object_${String(i).padStart(2, "0")}__c`);
+    const { text } = await render(handbook({ apexClasses: apex([apexClass("Wide", { touches: touches({ queries, queriesTotal: 63 }) })]) }));
+    assert.match(entry(text, "Wide"), /\nQueries: Object_00__c, [^\n]*Object_49__c \[cut: the first 50 of 63 objects\]\n/);
+    const whole = await render(handbook({ apexClasses: apex([apexClass("Whole", { touches: touches({ queries, queriesTotal: 50 }) })]) }));
+    assert.doesNotMatch(whole.text, /\[cut:/);
+  });
+
+  test("a query built as it runs, or a search, is said, and an empty list beside one is never 'none'", async () => {
+    const items = [
+      apexClass("Both", { touches: touches({ queries: ["Account"], queriesTotal: 1, dynamicQueries: true, searches: true }) }),
+      apexClass("DynamicOnly", { touches: touches({ dynamicQueries: true }) }),
+      apexClass("SearchOnly", { touches: touches({ searches: true }) }),
+      apexClass("DynamicAndSearch", { touches: touches({ dynamicQueries: true, searches: true, changes: ["delete"] }) }),
+    ];
+    const { text } = await render(handbook({ apexClasses: apex(items) }));
+    assert.equal(entry(text, "Both").split("\n").slice(2).join("\n"), "Queries: Account\nIt also builds queries as it runs, so the objects those read aren't known from the code.\nIt also searches, and the objects a search reads aren't listed.\nChanges it makes: none in its own code");
+    assert.equal(entry(text, "DynamicOnly").split("\n").slice(2).join("\n"), "Queries: it builds them as it runs, so the objects they read aren't known from the code.\nChanges it makes: none in its own code");
+    assert.equal(entry(text, "SearchOnly").split("\n").slice(2).join("\n"), "It searches, and the objects a search reads aren't listed.\nChanges it makes: none in its own code");
+    assert.equal(entry(text, "DynamicAndSearch").split("\n").slice(2).join("\n"), "Queries: it builds them as it runs, so the objects they read aren't known from the code.\nIt also searches, and the objects a search reads aren't listed.\nChanges it makes: delete");
+    // With a flag up, no line says it queries nothing.
+    for (const name of ["DynamicOnly", "SearchOnly", "DynamicAndSearch"]) assert.doesNotMatch(entry(text, name), /Queries: none/, name);
+  });
+
+  test("code that couldn't be read says what it touches isn't known, and whether it's a test couldn't be told", async () => {
+    const items = [apexClass("Hidden", { isTest: null, touches: null }), apexClass("Unscanned", { isTest: null })];
+    const { text } = await render(handbook({ apexClasses: apex(items), apexTriggers: apex([trigger("HiddenTrigger", { isTest: null, touches: null })]) }));
+    assert.equal(entry(text, "Hidden"), "Hidden\nAPI version 62.0. Status: Active. Test: couldn't be told: the code couldn't be read.\nThe code couldn't be read, so what it touches isn't known.");
+    assert.doesNotMatch(entry(text, "Hidden"), /Queries|Changes|none/);
+    assert.match(entry(text, "Unscanned"), /Test: couldn't be told: the code couldn't be read\.\nQueries: none in its own code/);
+    assert.match(entry(text, "HiddenTrigger"), /\nThe code couldn't be read, so what it touches isn't known\.$/);
+  });
+
+  test("a trigger says its object as Salesforce gives it and its events in Apex's order, or that they weren't read", async () => {
+    const items = [
+      trigger("CustomTrigger", { object: "01I000000000001AAA", events: ["after update", "before insert", "after undelete"], touches: touches({ queries: ["Invoice__c"], queriesTotal: 1, changes: ["upsert"] }) }),
+      trigger("Unread", { object: "Account", events: null }),
+    ];
+    const { text } = await render(handbook({ apexTriggers: apex(items) }));
+    assert.equal(entry(text, "CustomTrigger"), "CustomTrigger\nOn: 01I000000000001AAA\nRuns: before insert, after update, after undelete\nAPI version 62.0. Status: Active. Test: No.\nQueries: Invoice__c\nChanges it makes: upsert");
+    assert.match(entry(text, "Unread"), /^Unread\nOn: Account\nThe events weren't read\.\nAPI version/);
+    assert.doesNotMatch(entry(text, "Unread"), /Runs:/);
+  });
+
+  test("a cut part says how many it lists of how many, by name, on the first page and in the part", async () => {
+    const classes = { status: "ok" as const, items: Array.from({ length: 3 }, (_, i) => apexClass(`C${i}`)), total: 6_200, cut: true };
+    const triggers = { status: "ok" as const, items: [trigger("T0")], total: 1_042, cut: true };
+    const { text } = await render(handbook({ apexClasses: classes, apexTriggers: triggers }));
+    assert.match(text, /Apex classes: 6,200 classes\. This handbook lists the first 3 of 6,200 classes, by name\./);
+    assert.match(text, /Apex triggers: 1,042 triggers\. This handbook lists the first 1 of 1,042 triggers, by name\./);
+    assert.match(text, /## Apex classes\n\nYour org has 6,200 classes\. This handbook lists the first 3 of 6,200 classes, by name\. The rest aren't in this handbook\./);
+    assert.match(text, /## Apex triggers\n\nYour org has 1,042 triggers\. This handbook lists the first 1 of 1,042 triggers, by name\. The rest aren't in this handbook\./);
+    // Never "N of them active" counted from part of the list.
+    assert.doesNotMatch(text, /(classes|triggers), \d+ of them active/);
+  });
+
+  test("each Apex part unavailable says so with its reason, empty says the org has none, and the two never look alike", async () => {
+    const unavailable = await render(handbook({ apexClasses: { status: "unavailable", reason: "Apex isn't available in Professional Edition" }, apexTriggers: { status: "unavailable", reason: "The trigger query was refused" } }));
+    const empty = await render(handbook());
+    for (const [title, reason] of [["Apex classes", "Apex isn't available in Professional Edition."], ["Apex triggers", "The trigger query was refused."]]) {
+      const said = `We couldn't read your ${title}, so this handbook doesn't list them. ${reason}`;
+      // On the first page and in the part's own body.
+      assert.equal(unavailable.text.split(said).length - 1, 2, title);
+      assert.ok(unavailable.text.slice(unavailable.text.indexOf(`## ${title}`)).startsWith(`## ${title}\n\n${said}`), title);
+      assert.match(empty.text, new RegExp(`${title}: your org has none\\.`));
+      assert.match(empty.text, new RegExp(`## ${title}\\n\\nYour org has no ${title}: there were none to read\\.`));
+    }
+    assert.doesNotMatch(unavailable.text, /has no Apex|Apex (classes|triggers): your org has none/);
+    assert.doesNotMatch(empty.text, /couldn't read your Apex/);
+    // One can be there while the other says why it isn't (decision 456).
+    const mixed = await render(handbook({ apexClasses: apex([apexClass("Only")]), apexTriggers: { status: "unavailable", reason: "Refused" } }));
+    assert.match(mixed.text, /Apex classes: 1 class, 1 of them active\.\n\nWe couldn't read your Apex triggers/);
+  });
+});
+
 describe("reading handbook.json", () => {
   const folder = (contents?: string): string => {
     const dir = join(tempDir(), "run");
@@ -314,7 +444,7 @@ describe("reading handbook.json", () => {
 });
 
 describe("a very large org", () => {
-  test("300 flows of 100 steps each and 2,000 validation rules make a document", async () => {
+  test("300 flows of 100 steps each, 2,000 validation rules, 5,000 Apex classes and 1,000 triggers make a document", async () => {
     const flows = Array.from({ length: 300 }, (_, f) =>
       flow(`Flow_${f}`, {
         status: f % 3 ? "Active" : "Draft",
@@ -326,7 +456,11 @@ describe("a very large org", () => {
       }),
     );
     const rules = Array.from({ length: 2_000 }, (_, i) => rule(`Rule_${i}`, { object: `Object_${i % 40}__c`, formula: `AND(ISCHANGED(Status__c), ISBLANK(Field_${i}__c), Amount__c > ${i})`, formulaLength: 60, description: "Keeps the data complete." }));
-    const h = handbook({ flows: { status: "ok", items: flows }, validationRules: { status: "ok", covers: RETRIEVE, items: rules } });
+    // The most of each the file keeps (decision 456), each class touching a few objects.
+    const wide = touches({ queries: ["Account", "Contact", "Opportunity", "Invoice__c"], queriesTotal: 4, changes: ["insert", "update"], dynamicQueries: true });
+    const classes = Array.from({ length: MAX_APEX_CLASSES }, (_, i) => apexClass(`Class_${String(i).padStart(4, "0")}`, { isTest: i % 4 === 0, touches: wide }));
+    const triggers = Array.from({ length: MAX_APEX_TRIGGERS }, (_, i) => trigger(`Trigger_${String(i).padStart(4, "0")}`, { object: `Object_${i % 40}__c`, events: ["before insert", "after update"], touches: wide }));
+    const h = handbook({ flows: { status: "ok", items: flows }, validationRules: { status: "ok", covers: RETRIEVE, items: rules }, apexClasses: apex(classes), apexTriggers: apex(triggers) });
     const started = performance.now();
     const bytes = await renderHandbookDocx(h, OPTIONS);
     const ms = Math.round(performance.now() - started);
@@ -335,6 +469,9 @@ describe("a very large org", () => {
     assert.equal(paragraphs.filter((p) => p.heading === 3).length, 300 + 40);
     assert.equal(paragraphs.filter((p) => p.heading === 4).length, 2_000);
     assert.equal(paragraphs.filter((p) => /^\d+\. (Decision|Update records): /.test(p.text)).length, 300 * 100);
+    // One paragraph for each class and trigger.
+    assert.equal(paragraphs.filter((p) => /^Class_\d{4}\nAPI version /.test(p.text)).length, MAX_APEX_CLASSES);
+    assert.equal(paragraphs.filter((p) => /^Trigger_\d{4}\nOn: /.test(p.text)).length, MAX_APEX_TRIGGERS);
     // Well inside what the documents job and Drive take, and quick enough not to hold a make up.
     assert.ok(bytes.length < 20 * 1_048_576, `${bytes.length} bytes`);
     assert.ok(ms < 120_000, `${ms} ms`);

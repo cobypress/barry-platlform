@@ -1,7 +1,7 @@
 import { AlignmentType, Document, Footer, HeadingLevel, Packer, PageNumber, Paragraph, TextRun } from "docx";
 import { colour, font } from "../design/tokens.ts";
 import { longDate } from "../render/format.ts";
-import type { Handbook, HandbookCondition, HandbookFlow, HandbookStep, HandbookValidationRule, ValidationRuleCoverage } from "./schema.ts";
+import { TRIGGER_EVENTS, type Handbook, type HandbookApexClass, type HandbookApexTouches, type HandbookApexTrigger, type HandbookCondition, type HandbookFlow, type HandbookStep, type HandbookValidationRule, type ValidationRuleCoverage } from "./schema.ts";
 
 // The org handbook as a Word document (DECISIONS.md 443 and 444): handbook.json
 // made readable, and nothing more. Code alone writes it, from the file: no
@@ -184,8 +184,8 @@ function conditionWords(c: HandbookCondition): Run[] {
 // ─── The parts ────────────────────────────────────────────────────────────────
 
 /**
- * One part of the handbook. A later part (Apex) is one more of these: what it
- * says on the first page, and the part itself. Each says "we couldn't read
+ * One part of the handbook: what it says on the first page, and the part
+ * itself. Each says "we couldn't read
  * this", "there's none" or what it holds, and the three never look alike
  * (decisions 453 and 454).
  */
@@ -331,15 +331,107 @@ function writeRule(doc: Doc, rule: HandbookValidationRule): void {
   doc.labelled("Where the message shows", rule.messageField === null ? "at the top of the page" : `beside the ${rule.messageField} field`);
 }
 
+// ─── Apex ─────────────────────────────────────────────────────────────────────
+
+type ApexItem = HandbookApexClass | HandbookApexTrigger;
+/** An Apex part as the file has it (decision 456): cut at a most, by name, or unavailable. */
+type Capped<T> = { status: "ok"; items: T[]; total: number; cut: boolean } | { status: "unavailable"; reason: string };
+
+/** "convertLead" is Apex's name; a reader says "convert lead". */
+const CHANGE_WORDS: Readonly<Record<string, string>> = { convertLead: "convert lead" };
+
+/** As Salesforce shows an API version: 62 is "62.0". */
+const apiVersion = (v: number): string => (Number.isInteger(v) ? v.toFixed(1) : String(v));
+
+const apexTotal = (part: Extract<Capped<ApexItem>, { status: "ok" }>): number => Math.max(part.total, part.items.length);
+const apexCut = (part: Extract<Capped<ApexItem>, { status: "ok" }>): boolean => part.cut || apexTotal(part) > part.items.length;
+
+/** Counts from the file. A cut part is counted by its total alone: what wasn't kept can't be told active or not. */
+function apexCounts(part: Extract<Capped<ApexItem>, { status: "ok" }>, one: string, many: string): string {
+  const total = apexTotal(part);
+  if (apexCut(part)) return `${plural(total, one, many)}. This handbook lists ${firstOf(part.items.length, total, many)}, by name`;
+  return `${plural(total, one, many)}, ${count(part.items.filter((i) => i.status === "Active").length)} of them active`;
+}
+
+/**
+ * What a class or trigger touches, line by line (decision 457). An empty list
+ * is "none" only when no flag says the code reads more than its list: a query
+ * built as it runs, or a search, reads objects the code doesn't name.
+ */
+function touchesLines(touches: HandbookApexTouches | null): Run[][] {
+  if (touches === null) return [[{ text: "The code couldn't be read, so what it touches isn't known.", bold: true }]];
+  const lines: Run[][] = [];
+  const total = Math.max(touches.queriesTotal, touches.queries.length);
+  if (touches.queries.length > 0) {
+    lines.push([{ text: `Queries: ${touches.queries.join(", ")}` }, ...(total > touches.queries.length ? [{ text: ` [cut: ${firstOf(touches.queries.length, total, "objects")}]`, bold: true }] : [])]);
+    if (touches.dynamicQueries) lines.push([{ text: "It also builds queries as it runs, so the objects those read aren't known from the code." }]);
+  } else if (touches.dynamicQueries) {
+    lines.push([{ text: "Queries: it builds them as it runs, so the objects they read aren't known from the code." }]);
+  } else if (!touches.searches) {
+    lines.push([{ text: "Queries: none in its own code" }]);
+  }
+  if (touches.searches) lines.push([{ text: `${lines.length ? "It also searches" : "It searches"}, and the objects a search reads aren't listed.` }]);
+  lines.push([{ text: `Changes it makes: ${touches.changes.length ? touches.changes.map((c) => wordFor(CHANGE_WORDS, c) ?? c).join(", ") : "none in its own code"}` }]);
+  return lines;
+}
+
+/** One class or trigger as one paragraph: an org can have thousands, and a heading and a paragraph a line each would bury the rest. */
+function writeApex(doc: Doc, item: ApexItem, more: Run[][] = []): void {
+  const test = item.isTest === null ? "couldn't be told: the code couldn't be read" : item.isTest ? "Yes" : "No";
+  doc.lines([{ text: item.name, bold: true }], [...more, [{ text: `API version ${apiVersion(item.apiVersion)}. Status: ${item.status}. Test: ${test}.` }], ...touchesLines(item.touches)]);
+}
+
+/** What the reading is and isn't, said once, where the first Apex listed starts. */
+const READING =
+  "What each one touches is read from its code's text: the objects named in its queries, and the kinds of change it makes. It doesn't say which object a change is made to, because the code names a variable there, not an object. And it can miss what the code does through another class, a method it calls or a library.";
+
+/** A part with Apex listed in it, so the reading has been said. */
+const listsApex = (part: Capped<ApexItem>): boolean => part.status === "ok" && part.items.length > 0;
+
+function apexPart<T extends ApexItem>(what: { title: string; one: string; many: string; get: (h: Handbook) => Capped<T>; intro: (h: Handbook) => string; write: (doc: Doc, item: T) => void }): Part {
+  return {
+    covers: (h) => {
+      const part = what.get(h);
+      if (part.status !== "ok") return unavailableWords(what.title, part.reason);
+      return apexTotal(part) ? `${what.title}: ${apexCounts(part, what.one, what.many)}.` : `${what.title}: your org has none.`;
+    },
+    write: (doc, h) => {
+      doc.heading(what.title, 2);
+      const part = what.get(h);
+      if (part.status !== "ok") return doc.para({ text: unavailableWords(what.title, part.reason), bold: true });
+      if (apexTotal(part) === 0) return doc.para(`Your org has no ${what.title}: there were none to read.`);
+      doc.para(`Your org has ${apexCounts(part, what.one, what.many)}.${apexCut(part) ? " The rest aren't in this handbook." : " They're listed by name."}`);
+      doc.para(what.intro(h));
+      for (const item of part.items) what.write(doc, item);
+    },
+  };
+}
+
+// In the file's order, which is by name (decision 456).
+const APEX_CLASSES = apexPart<HandbookApexClass>({ title: "Apex classes", one: "class", many: "classes", get: (h) => h.apexClasses, intro: () => READING, write: (doc, item) => writeApex(doc, item) });
+
+/** Events in Apex's order, whatever order the file has them in. */
+const eventWords = (events: HandbookApexTrigger["events"]): Run =>
+  events === null ? { text: "The events weren't read.", bold: true } : { text: `Runs: ${[...events].sort((a, b) => TRIGGER_EVENTS.indexOf(a) - TRIGGER_EVENTS.indexOf(b)).join(", ")}` };
+
+const APEX_TRIGGERS = apexPart<HandbookApexTrigger>({
+  title: "Apex triggers",
+  one: "trigger",
+  many: "triggers",
+  get: (h) => h.apexTriggers,
+  intro: (h) => `Each trigger shows the object it's on, as Salesforce gives it, and the events it runs on. ${listsApex(h.apexClasses) ? "What it touches is read as the classes' is, with the same limits." : READING}`,
+  write: (doc, item) => writeApex(doc, item, [[{ text: `On: ${item.object}` }], [eventWords(item.events)]]),
+});
+
 /** The parts, in the order the handbook runs. */
-const PARTS: Part[] = [FLOWS, VALIDATION_RULES];
+const PARTS: Part[] = [FLOWS, VALIDATION_RULES, APEX_CLASSES, APEX_TRIGGERS];
 
 /** The handbook as its document's blocks. Exported for the tests, which read the words without unzipping. */
 export function handbookBlocks(handbook: Handbook, options: { clientName: string; runDate: string }): Paragraph[] {
   const doc = new Doc();
   doc.heading(`Org handbook: ${options.clientName}`, 1);
-  doc.para(`This handbook sets out how your Salesforce org is configured: what each flow does, step by step, and what each validation rule checks. We read it from your org on ${longDate(options.runDate)}, for your health check, and it describes the org as it was that day.`);
-  doc.para("Everything in it comes from your org's own configuration. Names, descriptions, conditions, formulas and messages are as your admins wrote them, except that anything that looks like a password or a key is replaced with [REDACTED]. We haven't added to it or summarised it. Where we couldn't read something, or list only part of it, we say so.");
+  doc.para(`This handbook sets out how your Salesforce org is configured: what each flow does, step by step, what each validation rule checks, and what each Apex class and trigger touches. We read it from your org on ${longDate(options.runDate)}, for your health check, and it describes the org as it was that day.`);
+  doc.para("Everything in it comes from your org's own configuration. Names, descriptions, conditions, formulas and messages are as your admins wrote them, except that anything that looks like a password or a key is replaced with [REDACTED]. We haven't added to it or summarised it, except that what each piece of Apex touches is read from its code, as that part explains. Where we couldn't read something, or list only part of it, we say so.");
   doc.heading("What it covers", 2);
   for (const part of PARTS) doc.para(part.covers(handbook));
   for (const part of PARTS) part.write(doc, handbook);
