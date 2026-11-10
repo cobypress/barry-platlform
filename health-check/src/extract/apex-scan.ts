@@ -27,10 +27,11 @@ export type ApexScan = {
 };
 
 // A statement, so the keyword follows a statement's end, a block or a condition. Matched on the keyword itself.
-const DML = /(?<=(?:^|[;{})]|\belse)\s*)\b(?:insert|update|upsert|delete|undelete|merge)\s+[\w(\[]/gi;
-const DATABASE_DML = /\bDatabase\s*\.\s*(?:insert|update|upsert|delete|undelete|merge|convertLead)\s*\(/gi;
+// The first group is the kind of change, for what a class touches (apex-touches.ts).
+export const DML = /(?<=(?:^|[;{})]|\belse)\s*)\b(insert|update|upsert|delete|undelete|merge)\s+[\w(\[]/gi;
+export const DATABASE_DML = /\bDatabase\s*\.\s*(insert|update|upsert|delete|undelete|merge|convertLead)\s*\(/gi;
 const SOQL = /\[\s*SELECT\b/gi;
-const DATABASE_QUERY = /\bDatabase\s*\.\s*(?:query|queryWithBinds|countQuery|getQueryLocator)\s*\(/gi;
+export const DATABASE_QUERY = /\bDatabase\s*\.\s*(?:query|queryWithBinds|countQuery|getQueryLocator)\s*\(/gi;
 
 const count = (text: string, pattern: RegExp): number => text.match(pattern)?.length ?? 0;
 
@@ -70,7 +71,7 @@ function read(body: string): { code: string; comments: number } {
 }
 
 /** The index just past the bracket that closes the one at `open`, or the end. */
-function closing(code: string, open: number, pair: "()" | "{}"): number {
+export function closing(code: string, open: number, pair: "()" | "{}" | "[]"): number {
   let depth = 0;
   for (let i = open; i < code.length; i++) {
     if (code[i] === pair[0]) depth++;

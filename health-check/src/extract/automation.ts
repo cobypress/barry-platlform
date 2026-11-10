@@ -1,6 +1,7 @@
 import { isUnavailable } from "../salesforce/client.ts";
 import { redactSecrets } from "../privacy/secrets.ts";
 import { scanApex, type ApexScan } from "./apex-scan.ts";
+import { readTouches, type ApexTouches } from "./apex-touches.ts";
 import { orgExtractor } from "./configuration.ts";
 import { indexReferences, parseMetadataBundle, type MetadataBundle, type ReferenceIndex } from "./metadata-parse.ts";
 import { readBundleThroughTooling, ToolingGapError, TOOLING_PARTIAL_KEYS } from "./metadata-tooling.ts";
@@ -53,9 +54,15 @@ export const metadataExtractor: Extractor<Sourced<MetadataBundle>> = {
 };
 
 // The body isn't kept, so what rules need from it is worked out here: whether it
-// has any comment, whether it's a test, and what the scan finds. Null when the
-// body is hidden.
-type CodeFacts = { commented: boolean | null; isTest: boolean; scan: ApexScan | null };
+// has any comment, whether it's a test, what the scan finds, and what it touches
+// for the org's documents (DECISIONS.md 456). Null when the body is hidden.
+type CodeFacts = {
+  commented: boolean | null;
+  isTest: boolean;
+  scan: ApexScan | null;
+  /** Undefined in a checkpoint from before it was read, which says "not read", not "touches nothing". */
+  touches?: ApexTouches | null;
+};
 export type ApexClassRow = { Id: string; Name: string; ApiVersion: number; Status: string; LengthWithoutComments: number } & CodeFacts;
 /** When a trigger runs (Object Reference, API 68.0). Undefined in a checkpoint from before they were read. */
 export type TriggerUsage = { UsageBeforeInsert?: boolean; UsageBeforeUpdate?: boolean; UsageBeforeDelete?: boolean; UsageAfterInsert?: boolean; UsageAfterUpdate?: boolean; UsageAfterDelete?: boolean; UsageAfterUndelete?: boolean };
@@ -79,14 +86,14 @@ function stripBodies<R extends { Name: string; Body?: string }>(rows: Sourced<R[
     if (Body) indexReferences(references, redactSecrets(Body), `${prefix}/${row.Name}`);
     const readable = Boolean(Body) && Body !== "(hidden)";
     const scan = readable ? scanApex(Body!) : null;
-    return { ...row, commented: scan ? scan.commented : null, isTest: readable && /@isTest/i.test(Body!), scan };
+    return { ...row, commented: scan ? scan.commented : null, isTest: readable && /@isTest/i.test(Body!), scan, touches: readTouches(Body) };
   });
   return { ...rows, data };
 }
 
 export const apexExtractor: Extractor<ApexData> = {
   id: "apex",
-  version: 7,
+  version: 8,
   async run(ctx) {
     const references: ReferenceIndex = { users: {}, fields: {} };
     // Through REST, not Tooling: a user with View Setup but not Author Apex gets
