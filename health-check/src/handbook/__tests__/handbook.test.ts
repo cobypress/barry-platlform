@@ -1,6 +1,6 @@
 import { test, describe, before } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { SALES_CLOUD_MODULES } from "../../domains/index.ts";
 import { runHealthCheck } from "../../engine/run.ts";
@@ -8,6 +8,7 @@ import { flowDetailMetadata, parseMetadataBundle, type MetadataBundle } from "..
 import { toolingValidationRule } from "../../extract/metadata-tooling.ts";
 import type { Sourced } from "../../extract/types.ts";
 import { deleteRunFolder, purgeRun } from "../../retention/purge.ts";
+import type { Transport } from "../../salesforce/transport.ts";
 import { tempDir } from "../../testing/harness.ts";
 import { loadCalibration, syntheticProvider } from "../../testing/replay.ts";
 import { Simulator } from "../../testing/simulator.ts";
@@ -146,6 +147,24 @@ describe("handbook.json from the synthetic org", () => {
       assert.ok(!handbook.includes(HANDBOOK_PLANTED));
       assert.ok(!read(r.dir, "checkpoints/metadata.json").includes(HANDBOOK_PLANTED));
     }
+  });
+});
+
+describe("the Tooling route's item reads", () => {
+  // Each item is kept in a partial checkpoint as it's read, and a run that stops
+  // part-way leaves it there until the purge. In JSON a quote is \", which the
+  // patterns don't see, so each value is redacted on its own too.
+  test("a run that stops after the validation rules were read leaves no key in its partial checkpoint", async () => {
+    const simulator = new Simulator({ readOnly: true });
+    const dropping: Transport = {
+      send: (request) => (decodeURIComponent(request.url).includes("FROM FieldDefinition") ? Promise.reject(new Error("socket hang up")) : simulator.send(request)),
+    };
+    const outDir = tempDir();
+    await assert.rejects(runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir, now: new Date(AS_OF), transport: dropping, log: () => {} }), /socket hang up/);
+    const [runId] = readdirSync(outDir);
+    const partial = readFileSync(join(outDir, runId!, "checkpoints", "metadata-tooling.partial.jsonl"), "utf8");
+    assert.ok(partial.includes(HANDBOOK_MARKER), "the formula was read");
+    assert.ok(!partial.includes(HANDBOOK_PLANTED));
   });
 });
 
