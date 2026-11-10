@@ -42,12 +42,19 @@ export const TOOLING_SOURCE: SourceInfo = { kind: "metadata", path: "Tooling API
 // all, so it reads the same bundle through Tooling instead (DECISIONS.md 73).
 const needsWritePermission = (err: unknown): boolean => isUnavailable(err) && err.code === "INSUFFICIENT_ACCESS";
 
+// Why a retrieve naming further objects failed, kept before the retrieve of the
+// four starts, so a run stopped at the budget during that one doesn't make the
+// failing retrieve again when it resumes. It holds the objects named and the
+// Salesforce error, nothing read from the org.
+const FALLBACK_PARTIAL = "metadata-retrieve-fallback";
+type Fallback = NonNullable<MetadataBundle["retrieveFallback"]>;
+
 export const metadataExtractor: Extractor<Sourced<MetadataBundle>> = {
   id: "metadata",
   // 8: each flow keeps every way it starts (DECISIONS.md 446).
   // 9: validation rules on the further standard objects the org has (DECISIONS.md 460).
   version: 9,
-  partialKeys: TOOLING_PARTIAL_KEYS,
+  partialKeys: [...TOOLING_PARTIAL_KEYS, FALLBACK_PARTIAL],
   async run(ctx) {
     const further = furtherObjects(ctx.get(recordCountsExtractor));
     const source: SourceInfo = { kind: "metadata", path: retrieveTypes().map((t) => t.name).join(", ") };
@@ -56,17 +63,24 @@ export const metadataExtractor: Extractor<Sourced<MetadataBundle>> = {
       return { status: "ok", data: parseMetadataBundle(files, RETRIEVED_STANDARD_OBJECTS, named), source, truncated: false };
     };
     let retrieveError: unknown;
-    try {
-      return await retrieve(further);
-    } catch (err) {
-      retrieveError = err;
+    // A resumed run whose wider retrieve already failed goes straight to the four.
+    let first: Fallback | undefined = ctx.partial.read<Fallback>(FALLBACK_PARTIAL)[0];
+    if (!first) {
+      try {
+        return await retrieve(further);
+      } catch (err) {
+        retrieveError = err;
+      }
     }
     // We can't tell from here what Salesforce does with a retrieve naming an
     // object it won't give us, so a failure there is tried once more with the four
     // only. A connection refused the Metadata API isn't about the objects named,
     // and goes straight to Tooling. Anything not from Salesforce is thrown as before.
-    if (further.length > 0 && retrieveError instanceof SalesforceError && !needsWritePermission(retrieveError)) {
-      const first = { named: further, reason: readableReason(retrieveError.message) };
+    if (!first && further.length > 0 && retrieveError instanceof SalesforceError && !needsWritePermission(retrieveError)) {
+      first = { named: further, reason: readableReason(retrieveError.message) };
+      ctx.partial.append(FALLBACK_PARTIAL, [first]);
+    }
+    if (first) {
       try {
         const fallback = await retrieve([]);
         fallback.data.retrieveFallback = first;

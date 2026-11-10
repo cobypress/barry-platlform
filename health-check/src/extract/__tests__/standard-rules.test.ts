@@ -1,5 +1,12 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { automationModule } from "../../domains/automation/index.ts";
+import { FilePartialStore, runHealthCheck } from "../../engine/run.ts";
+import { tempDir } from "../../testing/harness.ts";
+import { loadCalibration } from "../../testing/replay.ts";
+import { AS_OF } from "../../testing/synthetic-org.ts";
 import { ApiBudget, BudgetStopError } from "../../salesforce/budget.ts";
 import { SalesforceClient } from "../../salesforce/client.ts";
 import { syntheticProvider } from "../../testing/replay.ts";
@@ -18,9 +25,8 @@ const COUNTS_SOURCE = { kind: "rest", path: "limits/recordCount" } as const;
 const listing = (...names: string[]): Counts => ({ status: "ok", data: names.map((name) => ({ name, count: 3 })), source: COUNTS_SOURCE, truncated: false });
 const UNREAD: Counts = { status: "unavailable", reason: "INSUFFICIENT_ACCESS: no", source: COUNTS_SOURCE };
 
-async function extract(counts: Counts, options: SimulatorOptions = {}, sim = new Simulator(options)): Promise<{ out: Sourced<MetadataBundle>; retrieves: string[][] }> {
+async function extract(counts: Counts, options: SimulatorOptions = {}, sim = new Simulator(options), partial: ExtractContext["partial"] = { read: () => [], append: () => {}, clear: () => {} }): Promise<{ out: Sourced<MetadataBundle>; retrieves: string[][] }> {
   const client = await SalesforceClient.connect(syntheticProvider, { budget: new ApiBudget({ stopAtShare: 0.5 }), transport: sim, sleep: async () => {} });
-  const partial = { read: () => [], append: () => {}, clear: () => {} };
   const get = <T>(extractor: Extractor<T>): T => {
     if (extractor.id !== recordCountsExtractor.id) throw new Error(`Extractor "${extractor.id}" must run first`);
     return counts as T;
@@ -112,6 +118,37 @@ describe("when a retrieve naming further objects fails", () => {
     const { out, retrieves } = await extract(listing("Case"), { readOnly: true });
     assert.equal(retrieves.length, 1);
     assert.equal(ok(out).route, "tooling");
+  });
+
+  test("a run stopped at the budget during the retrieve of the four resumes with that retrieve, never the one that failed", async () => {
+    const outDir = tempDir();
+    const options = { provider: syntheticProvider, calibration: loadCalibration(), modules: [automationModule], outDir, now: new Date(AS_OF), log: () => {} };
+    const wider = (body: string) => body.includes("<met:name>CustomObject</met:name>") && customObjects(body).includes("Case");
+    const four = (body: string) => body.includes("<met:name>CustomObject</met:name>") && !customObjects(body).includes("Case");
+    // The wider retrieve fails, and the budget runs out during the one that follows.
+    const first = new Simulator({ failRetrieve: (body) => (wider(body) ? { faultCode: "UNKNOWN_EXCEPTION", message: "Too many objects" } : four(body) ? { faultCode: "REQUEST_LIMIT_EXCEEDED", message: "TotalRequests Limit exceeded." } : null) });
+    const stopped = await runHealthCheck({ ...options, transport: first });
+    assert.equal(stopped.run.status, "stopped_budget");
+    assert.deepEqual(retrieved(first), [[...FOUR, "Case"], FOUR]);
+    // What the stopped run keeps: the objects named and Salesforce's error, nothing else.
+    const kept = readFileSync(join(stopped.dir, "checkpoints", "metadata-retrieve-fallback.partial.jsonl"), "utf8");
+    assert.deepEqual(kept.trim().split("\n").map((line) => JSON.parse(line)), [{ named: ["Case"], reason: "UNKNOWN_EXCEPTION: UNKNOWN_EXCEPTION: Too many objects" }]);
+
+    // Resumed, the wider retrieve would fail again if it were made.
+    const second = new Simulator({ failRetrieve: (body) => (wider(body) ? { faultCode: "UNKNOWN_EXCEPTION", message: "Too many objects" } : null) });
+    const resumed = await runHealthCheck({ ...options, transport: second, resume: stopped.run.id });
+    assert.ok(resumed.output, "the run finished");
+    assert.deepEqual(retrieved(second), [FOUR]);
+    const out = JSON.parse(readFileSync(join(resumed.dir, "checkpoints", "metadata.json"), "utf8")) as Sourced<MetadataBundle>;
+    const bundle = ok(out);
+    assert.deepEqual(bundle.handbook!.validationRulesCover.standardObjects, [...RETRIEVED_STANDARD_OBJECTS]);
+    assert.deepEqual(bundle.retrieveFallback, { named: ["Case"], reason: "UNKNOWN_EXCEPTION: UNKNOWN_EXCEPTION: Too many objects" });
+
+    // Saved with the step, the record is cleared, so the step run again names the further objects again.
+    const checkpoints = join(resumed.dir, "checkpoints");
+    assert.ok(!existsSync(join(checkpoints, "metadata-retrieve-fallback.partial.jsonl")));
+    const again = await extract(listing("Case"), {}, undefined, new FilePartialStore(checkpoints));
+    assert.deepEqual(again.retrieves, [[...FOUR, "Case"]]);
   });
 
   test("a stop at the API budget isn't a failed retrieve: nothing more is asked", async () => {
