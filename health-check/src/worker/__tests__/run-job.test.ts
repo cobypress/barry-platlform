@@ -13,7 +13,10 @@ import { loadAnswers, loadRecording, ReplayTransport } from "../../testing/repla
 import { Simulator } from "../../testing/simulator.ts";
 import { JobBusyError } from "../lock.ts";
 import { MemoryWorkerStore } from "../memory-store.ts";
-import { FACTS_FILE_MAX_BYTES, factsOf, SECTIONS_FILE } from "../run-job.ts";
+import { ConsoleFactsFile, FACTS_DETAIL_MAX, FACTS_FILE_MAX_BYTES, factsOf, SECTIONS_FILE } from "../run-job.ts";
+import { ASSUMPTIONS } from "../../facts/assumptions.ts";
+import type { ConnectionProvider } from "../../salesforce/connection.ts";
+import { Run } from "../../schemas/run.ts";
 import { RunClosedError, type RunProgress } from "../types.ts";
 import { createJobHandler } from "../worker.ts";
 import { ACCESS, baseDeps, CONNECTION, consoleRun, FlakyTransport, INTAKE, REFRESH, RUN_ID, runInput, syntheticConnection } from "./helpers.ts";
@@ -492,19 +495,150 @@ describe("the facts file a run job sends (DECISIONS.md 433)", () => {
   });
 
   test("is refused over the size cap, and the summary is still sent", () => {
-    const sent = file([fact("object.scontrol", `DETAIL-MARK ${"x".repeat(FACTS_FILE_MAX_BYTES)}`)]);
+    // Details are cut before the size is measured, so only many names can fill
+    // the file: each fact we assume, with as many observed names as the console
+    // keeps, each as long as it keeps, until one more wouldn't fit under the cap.
+    const size = (f: FactsFile): number => Buffer.byteLength(JSON.stringify(f), "utf8");
+    const fits = file([]);
+    full: for (const a of ASSUMPTIONS) {
+      const added = { ...fact(a.id, ""), observed: {} as Record<string, string> };
+      fits.facts.push(added);
+      if (size(fits) > FACTS_FILE_MAX_BYTES - 1) {
+        fits.facts.pop();
+        break;
+      }
+      for (let n = 0; n < 50; n++) {
+        const key = `OBS-MARK.${a.id}.${n}.`.padEnd(200, "k");
+        added.observed[key] = "v".repeat(100);
+        if (size(fits) > FACTS_FILE_MAX_BYTES - 1) {
+          delete added.observed[key];
+          break full;
+        }
+      }
+    }
+    // The last of the room goes in a detail, which is short enough not to be cut.
+    const last = fits.facts.at(-1)!;
+    last.detail = "y".repeat(FACTS_FILE_MAX_BYTES - 1 - size(fits));
+    assert.ok(last.detail.length <= FACTS_DETAIL_MAX);
+    assert.equal(size(fits), FACTS_FILE_MAX_BYTES - 1);
+    const carried = read(JSON.stringify(fits));
+    assert.deepEqual(carried.file, fits, "just under the cap is carried");
+    assert.deepEqual(carried.lines, []);
+
+    const sent = structuredClone(fits);
+    sent.facts.at(-1)!.detail += "y";
+    assert.equal(size(sent), FACTS_FILE_MAX_BYTES);
     const got = read(JSON.stringify(sent));
     assert.equal(got.file, null);
     assert.deepEqual(got.summary, factsReport(sent));
     assert.equal(got.lines.length, 1);
     assert.match(got.lines[0]!, /larger than the worker sends/);
-    assert.doesNotMatch(got.lines[0]!, /MARK|xxxx|object\.scontrol/);
-    // Just under the cap is carried.
-    const under = file([fact("object.scontrol", "")]);
-    const room = FACTS_FILE_MAX_BYTES - Buffer.byteLength(JSON.stringify(under)) - 1;
-    const fits = file([fact("object.scontrol", "y".repeat(room))]);
-    assert.equal(Buffer.byteLength(JSON.stringify(fits)), FACTS_FILE_MAX_BYTES - 1);
-    assert.deepEqual(read(JSON.stringify(fits)).file, fits);
+    assert.doesNotMatch(got.lines[0]!, /MARK|yyyy|object\.scontrol/);
+  });
+
+  test("sends a long detail on one line, cut inside the console's limit, and leaves facts.json on disk whole", () => {
+    // Salesforce's error text, made up, with the line breaks and runs of spaces a server's reply can have.
+    const long = `DETAIL-MARK INVALID_TYPE:\n  sObject type 'Scontrol' is not supported.\r\n\t${"Lorem ipsum\n\n dolor sit amet. ".repeat(300)}`.slice(0, 5000);
+    assert.equal(long.length, 5000);
+    const other = { ...fact("object.package-licence"), outcome: "confirmed" as const };
+    const onDisk = JSON.stringify(file([fact("object.scontrol", long), other]), null, 2);
+    const dir = mkdtempSync(join(tmpdir(), "hc-facts-"));
+    try {
+      writeFileSync(join(dir, FACTS_FILE), onDisk);
+      const lines: string[] = [];
+      const got = factsOf(dir, (line) => lines.push(line));
+      const sent = got.file!.facts[0]!.detail;
+      assert.equal(sent.length, 1000, "the console keeps 1000");
+      assert.ok(sent.endsWith("…"));
+      assert.doesNotMatch(sent, /\s\s|[\n\r\t]/);
+      assert.ok(sent.startsWith("DETAIL-MARK INVALID_TYPE: sObject type 'Scontrol' is not supported. Lorem ipsum dolor sit amet. Lorem"));
+      assert.deepEqual(got.file!.facts[1], other, "the other facts are sent as they are");
+      assert.deepEqual({ ...got.file!, facts: [] }, file([]));
+      assert.deepEqual(got.summary, factsReport(JSON.parse(onDisk)));
+      assert.deepEqual(lines, []);
+      assert.equal(readFileSync(join(dir, FACTS_FILE), "utf8"), onDisk, "facts.json on disk is unchanged");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("never cuts a detail through the middle of a character", () => {
+    // The emoji's two halves would sit either side of the cut, and half of one isn't valid in Postgres's jsonb.
+    const sent = file([fact("object.scontrol", `${"a".repeat(998)}\u{1F600}${"b".repeat(10)}`)]);
+    const detail = read(JSON.stringify(sent)).file!.facts[0]!.detail;
+    assert.equal(detail, `${"a".repeat(998)}…`);
+    assert.doesNotMatch(detail, /[\uD800-\uDFFF]/);
+  });
+
+  test("sends a detail without its control characters, which Postgres's jsonb can't always hold", () => {
+    const sent = file([fact("object.scontrol", "DETAIL-MARK INVALID_TYPE:\u0000sObject\u0007type \u009B'Scontrol'\u007F\u0000")]);
+    const got = read(JSON.stringify(sent));
+    assert.equal(got.file!.facts[0]!.detail, "DETAIL-MARK INVALID_TYPE: sObject type 'Scontrol'");
+    assert.deepEqual(got.lines, []);
+  });
+
+  test("is refused when a NUL is anywhere but a detail, and the summary is still sent", () => {
+    const cases: Array<[string, FactsFile]> = [
+      ["an observed name", file([{ ...fact("object.scontrol"), observed: { "Scontrol\u0000MARK": false } }])],
+      ["an observed value", file([{ ...fact("object.scontrol"), observed: { Scontrol: "picklist\u0000MARK" } }])],
+    ];
+    for (const [what, sent] of cases) {
+      const got = read(JSON.stringify(sent));
+      assert.equal(got.file, null, what);
+      assert.deepEqual(got.summary, factsReport(sent), what);
+      assert.deepEqual(got.lines, ["The run's facts.json doesn't fit the console's shape for it, so the console gets the facts summary but not the file."], what);
+    }
+  });
+
+  test("sends a detail of exactly the console's limit as it is", () => {
+    const sent = file([fact("object.scontrol", `DETAIL-MARK ${"z".repeat(1000 - 12)}`)]);
+    assert.equal(sent.facts[0]!.detail.length, 1000);
+    assert.deepEqual(read(JSON.stringify(sent)).file, sent);
+  });
+
+  test("is refused when a value breaks one of the console's caps, and the summary is still sent", () => {
+    const cases: Array<[string, FactsFile]> = [
+      ["an observed value of 101 characters", file([{ ...fact("object.scontrol"), observed: { Scontrol: `OBS-MARK${"v".repeat(93)}` } }])],
+      ["an affected check with a capital letter", file([{ ...fact("object.scontrol"), affects: ["tech.Classic-MARK"] }])],
+      ["an empty sentence", file([{ ...fact("object.scontrol"), says: "" }])],
+      ["a fact listed twice", file([fact("object.scontrol"), fact("object.scontrol")])],
+      ["a connection kind that isn't a name", { ...file(), connectionKind: "OAuth MARK" }],
+      ["a time that isn't one", { ...file(), checkedAt: "Tuesday MARK" }],
+    ];
+    assert.equal((cases[0]![1].facts[0]!.observed.Scontrol as string).length, 101);
+    for (const [what, sent] of cases) {
+      const got = read(JSON.stringify(sent));
+      assert.equal(got.file, null, what);
+      assert.deepEqual(got.summary, factsReport(sent), what);
+      // One fixed line, so nothing of the file can be in it.
+      assert.deepEqual(got.lines, ["The run's facts.json doesn't fit the console's shape for it, so the console gets the facts summary but not the file."], what);
+    }
+  });
+
+  test("the engine's own facts fit the console's caps: every assumption and every connection kind", () => {
+    // facts.json records the connection provider's kind. The compiler holds this
+    // list to ConnectionProvider["kind"], so a kind added there fails typecheck here.
+    const kinds = Object.keys({ "sf-cli": true, oauth: true } satisfies Record<ConnectionProvider["kind"], true>);
+    assert.deepEqual([...kinds].sort(), [...Run.shape.connectionKind.options].sort(), "the run schema allows the same kinds");
+    assert.ok(ASSUMPTIONS.length <= 100, "no more facts than the console keeps");
+    assert.equal(new Set(ASSUMPTIONS.map((a) => a.id)).size, ASSUMPTIONS.length, "each id once");
+    for (const connectionKind of kinds) {
+      const sent: FactsFile = {
+        ...file(),
+        connectionKind,
+        facts: ASSUMPTIONS.map((a) => ({ id: a.id, question: a.question, covers: a.covers, says: a.says, outcome: "confirmed", detail: "", observed: {}, affects: [...a.affects] })),
+      };
+      const parsed = ConsoleFactsFile.safeParse(sent);
+      assert.ok(parsed.success, `${connectionKind}: ${parsed.error?.issues.map((i) => `${i.path.join(".")} ${i.message}`).join("; ")}`);
+    }
+    // The same caps said plainly, so a slip in the worker's copy of the console's schema can't hide one.
+    const name = /^[a-z0-9][a-z0-9._-]*$/;
+    for (const a of ASSUMPTIONS) {
+      for (const n of [a.id, a.question, ...a.affects]) assert.ok(name.test(n) && n.length <= 100, `${a.id}: ${n}`);
+      assert.ok(a.says.length >= 1 && a.says.length <= 500, a.id);
+      assert.ok(a.affects.length <= 50, a.id);
+    }
+    for (const k of kinds) assert.ok(name.test(k) && k.length <= 40, k);
   });
 
   test("is refused when it doesn't parse, and there's no summary, as before", () => {
