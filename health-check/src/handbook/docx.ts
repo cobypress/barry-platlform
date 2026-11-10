@@ -1,7 +1,7 @@
 import { AlignmentType, Document, Footer, HeadingLevel, Packer, PageNumber, Paragraph, TextRun } from "docx";
 import { colour, font } from "../design/tokens.ts";
 import { longDate } from "../render/format.ts";
-import { TRIGGER_EVENTS, type Handbook, type HandbookApexClass, type HandbookApexTouches, type HandbookApexTrigger, type HandbookCondition, type HandbookFlow, type HandbookStep, type HandbookValidationRule, type ValidationRuleCoverage } from "./schema.ts";
+import { TRIGGER_EVENTS, type Handbook, type HandbookApexClass, type HandbookApexTouches, type HandbookApexTrigger, type HandbookCondition, type HandbookFlow, type HandbookPath, type HandbookStep, type HandbookValidationRule, type ValidationRuleCoverage } from "./schema.ts";
 
 // The org handbook as a Word document (DECISIONS.md 443 and 444): handbook.json
 // made readable, and nothing more. Code alone writes it, from the file: no
@@ -135,7 +135,7 @@ const OPERATOR_WORDS: Readonly<Record<string, string>> = {
 };
 
 /** Our word for one of Salesforce's, or undefined. Its own keys only: a kind named "constructor" isn't a word we have. */
-const wordFor = (words: Readonly<Record<string, string>>, raw: string): string | undefined => (Object.hasOwn(words, raw) ? words[raw] : undefined);
+const wordFor = <T = string>(words: Readonly<Record<string, T>>, raw: string): T | undefined => (Object.hasOwn(words, raw) ? words[raw] : undefined);
 
 /** Salesforce's own word with ours beside it, so an admin can search for either. */
 const named = (words: Readonly<Record<string, string>>, raw: string): string => {
@@ -170,6 +170,59 @@ function scheduleWords(schedule: NonNullable<HandbookFlow["start"]["schedule"]>)
   ];
   return parts.filter(Boolean).join(", ");
 }
+
+// Flow Builder's units for a scheduled path's offset. One not here prints as
+// Salesforce records it, beside its number, never turned into words.
+const UNIT_WORDS: Readonly<Record<string, [string, string]>> = { Minutes: ["minute", "minutes"], Hours: ["hour", "hours"], Days: ["day", "days"], Weeks: ["week", "weeks"], Months: ["month", "months"] };
+
+/**
+ * When a later path runs, from what the file keeps and nothing else (decision
+ * 446): "30 days before CloseDate", "1 hour after the record is saved". Words
+ * only when the number, a unit we know and what it counts from are all there;
+ * otherwise Salesforce's own values, as it records them.
+ */
+export function whenWords(when: HandbookPath["when"]): string {
+  if (when === null) return "when it runs isn't recorded";
+  const { offsetNumber, offsetUnit, timeSource, recordField } = when;
+  const unit = offsetUnit === null ? undefined : wordFor(UNIT_WORDS, offsetUnit);
+  // A field it counts from, the moment the record is saved, or Salesforce's own word for another.
+  const from = timeSource === "RecordField" || timeSource === null ? recordField : timeSource === "RecordTriggerEvent" ? "the record is saved" : `what Salesforce calls ${timeSource}${recordField ? ` (${recordField})` : ""}`;
+  if (unit && offsetNumber !== null && from !== null) {
+    const n = Math.abs(offsetNumber);
+    return `${count(n)} ${n === 1 ? unit[0] : unit[1]} ${offsetNumber < 0 ? "before" : "after"} ${from}`;
+  }
+  const kept = [offsetNumber !== null ? `offset ${offsetNumber}` : "", offsetUnit ? `unit ${offsetUnit}` : "", timeSource ? `counted from ${timeSource}` : "", recordField ? `field ${recordField}` : ""].filter(Boolean);
+  return kept.length ? `as Salesforce records it: ${kept.join(", ")}` : "when it runs isn't recorded";
+}
+
+/** When a path runs, in words, under Salesforce's own name for a kind we have none for. */
+function pathWhen(path: HandbookPath): string {
+  if (path.kind === "immediate") return "runs straight away";
+  if (path.kind === "scheduled") return whenWords(path.when);
+  if (path.kind === "afterCommit") return "after the save is committed";
+  return `a path Salesforce calls ${path.kind}${path.when ? `, ${whenWords(path.when)}` : ""}`;
+}
+
+const upperFirst = (text: string): string => `${text[0]!.toUpperCase()}${text.slice(1)}`;
+
+/** A path as "What starts it" lists it: "'30 days before close': 30 days before CloseDate". */
+function pathWords(path: HandbookPath): string {
+  const when = pathWhen(path);
+  if (path.label !== null) return `'${path.label}': ${when}`;
+  return path.kind === "scheduled" ? `Scheduled, ${when}` : upperFirst(when);
+}
+
+/** The same path, on the step it starts at. */
+function pathStartWords(path: HandbookPath): string {
+  const when = pathWhen(path);
+  if (path.label !== null) return `Starts the path '${path.label}': ${when}`;
+  if (path.kind === "scheduled") return `Starts the scheduled path: ${when}`;
+  if (path.kind === "immediate" || path.kind === "afterCommit") return `Starts the path that ${path.kind === "immediate" ? "" : "runs "}${when}`;
+  return `Starts ${when}`;
+}
+
+/** A flow that starts more than one way, so its paths are listed. One with only its immediate path prints as before. */
+const manyPaths = (flow: HandbookFlow): boolean => flow.start.pathsCut || flow.start.pathsTotal > 1 || flow.start.paths.some((p) => p.kind !== "immediate");
 
 /** "the first 500 of 612 steps" (decision 453). */
 const firstOf = (shown: number, total: number, what: string): string => `the first ${count(shown)} of ${count(total)} ${what}`;
@@ -213,7 +266,7 @@ const FLOWS: Part = {
     if (h.flows.status !== "ok") return doc.para({ text: unavailableWords("flows", h.flows.reason), bold: true });
     if (h.flows.items.length === 0) return doc.para("Your org has no flows: there were none to read, active or not.");
     doc.para(`Your org has ${flowCounts(h.flows.items)}. Active flows come first, then the rest, each in order of its label.`);
-    doc.para("Each flow's steps are numbered in the order the flow runs them, from its start, following each path to its end before the next. A step no path reaches is listed after the rest and marked. A kind of step we have no plain name for appears under Salesforce's own name for it.");
+    doc.para("Each flow's steps are numbered in the order the flow runs them, from its start, following each path to its end before the next. A flow that starts in more than one way, such as one with a scheduled path, lists its steps path by path: the steps that run straight away first, then each later path's in turn, and the step each path starts at says so. A step no path reaches is listed after the rest and marked. A kind of step we have no plain name for appears under Salesforce's own name for it.");
     for (const flow of flowOrder(h.flows.items)) writeFlow(doc, flow);
   },
 };
@@ -225,15 +278,9 @@ function writeFlow(doc: Doc, flow: HandbookFlow): void {
   doc.labelled("Type", named(TYPE_WORDS, flow.processType));
   doc.labelled("Description", ...(flow.description === null ? [{ text: "none given", muted: true }] : [flow.description]));
   doc.labelled("What starts it", `${startWords(flow)}.`);
-  if (flow.start.schedule) doc.labelled("Schedule", `${scheduleWords(flow.start.schedule)}.`);
-  writeEntry(doc, flow.start.entry);
 
   // Reached steps first, then any no path reaches, each in the file's order (decision 453).
   const steps = [...flow.steps.filter((s) => s.reached), ...flow.steps.filter((s) => !s.reached)];
-  const total = Math.max(flow.stepsTotal, steps.length);
-  if (total === 0) return doc.labelled("Steps", { text: "none. This flow has no steps.", muted: true });
-  const cut = flow.cut || total > steps.length;
-  doc.labelled("Steps", cut ? `${plural(total, "step")}. This lists ${firstOf(steps.length, total, "steps")}, in the order the flow runs them; the rest aren't in this handbook.` : `${plural(total, "step")}.`);
   const number = new Map(steps.map((s, i) => [s.name, i + 1]));
   const where = (name: string | null): string => {
     if (name === null) return "the flow ends here";
@@ -242,13 +289,30 @@ function writeFlow(doc: Doc, flow: HandbookFlow): void {
     const step = steps[n - 1]!;
     return `step ${n}, ${step.label ?? step.name}`;
   };
+
+  // Every way it starts, each with the step it leads to, so a step that runs
+  // 30 days later never reads as one that runs straight away (decision 446).
+  const starts = new Map<string, HandbookPath[]>();
+  if (manyPaths(flow)) {
+    const total = Math.max(flow.start.pathsTotal, flow.start.paths.length);
+    const cut = flow.start.pathsCut || total > flow.start.paths.length;
+    doc.lines([{ text: "It starts in ", bold: true }, { text: `${plural(total, "way")}${cut ? `. This lists ${firstOf(flow.start.paths.length, total, "ways")}` : ""}:` }], flow.start.paths.map((p) => [{ text: `${pathWords(p)}: ${p.next === null ? "it leads to no step" : where(p.next)}` }]));
+    for (const p of flow.start.paths) if (p.next !== null) starts.set(p.next, [...(starts.get(p.next) ?? []), p]);
+  }
+  if (flow.start.schedule) doc.labelled("Schedule", `${scheduleWords(flow.start.schedule)}.`);
+  writeEntry(doc, flow.start.entry);
+
+  const total = Math.max(flow.stepsTotal, steps.length);
+  if (total === 0) return doc.labelled("Steps", { text: "none. This flow has no steps.", muted: true });
+  const cut = flow.cut || total > steps.length;
+  doc.labelled("Steps", cut ? `${plural(total, "step")}. This lists ${firstOf(steps.length, total, "steps")}, in the order the flow runs them; the rest aren't in this handbook.` : `${plural(total, "step")}.`);
   // None reached means the start names no step the file has: saying they never
   // run would be our claim, not the file's, so this says only what it holds.
   const noStart = steps.length > 0 && steps.every((s) => !s.reached);
   if (noStart) doc.para({ text: "This flow's metadata doesn't say where it starts, so its steps are listed in the order Salesforce gives them.", bold: true });
   steps.forEach((step, i) => {
     if (!noStart && !step.reached && (i === 0 || steps[i - 1]!.reached)) doc.para({ text: "No path from the flow's start reaches the steps below, so they never run as the flow stands.", bold: true });
-    writeStep(doc, step, i + 1, where, !noStart);
+    writeStep(doc, step, i + 1, where, !noStart, starts.get(step.name) ?? []);
   });
 }
 
@@ -267,11 +331,12 @@ function writeEntry(doc: Doc, entry: HandbookFlow["start"]["entry"]): void {
   }
 }
 
-function writeStep(doc: Doc, step: HandbookStep, n: number, where: (name: string | null) => string, markUnreached: boolean): void {
+function writeStep(doc: Doc, step: HandbookStep, n: number, where: (name: string | null) => string, markUnreached: boolean, starts: HandbookPath[]): void {
   const title: Run[] = [{ text: `${n}. ${stepKindWords(step.kind)}: ${step.label ?? step.name}`, bold: true }];
   if (step.label !== null && step.label !== step.name) title.push({ text: `  ${step.name}`, muted: true });
   if (markUnreached && !step.reached) title.push({ text: "  (no path reaches this step)", bold: true });
-  const lines: Run[][] = [];
+  // The paths that start here, first, so the step is read as theirs.
+  const lines: Run[][] = starts.map((p) => [{ text: pathStartWords(p), bold: true }]);
   if (step.object) lines.push([{ text: `On: ${step.object}` }]);
   const fieldsTotal = Math.max(step.fieldsTotal, step.fields.length);
   if (fieldsTotal > 0) lines.push([{ text: `Fields: ${step.fields.join(", ")}` }, ...(fieldsTotal > step.fields.length ? [{ text: ` [cut: ${firstOf(step.fields.length, fieldsTotal, "fields")}]`, bold: true }] : [])]);
@@ -375,9 +440,10 @@ function touchesLines(touches: HandbookApexTouches | null): Run[][] {
 }
 
 /** One class or trigger as one paragraph: an org can have thousands, and a heading and a paragraph a line each would bury the rest. */
-function writeApex(doc: Doc, item: ApexItem, more: Run[][] = []): void {
-  const test = item.isTest === null ? "couldn't be told: the code couldn't be read" : item.isTest ? "Yes" : "No";
-  doc.lines([{ text: item.name, bold: true }], [...more, [{ text: `API version ${apiVersion(item.apiVersion)}. Status: ${item.status}. Test: ${test}.` }], ...touchesLines(item.touches)]);
+function writeApex(doc: Doc, item: ApexItem, trigger?: Run[][]): void {
+  // A trigger can't be a test, so only a class says whether it is one.
+  const test = trigger ? "" : ` Test: ${item.isTest === null ? "couldn't be told: the code couldn't be read" : item.isTest ? "Yes" : "No"}.`;
+  doc.lines([{ text: item.name, bold: true }], [...(trigger ?? []), [{ text: `API version ${apiVersion(item.apiVersion)}. Status: ${item.status}.${test}` }], ...touchesLines(item.touches)]);
 }
 
 /** What the reading is and isn't, said once, where the first Apex listed starts. */
@@ -418,7 +484,7 @@ const APEX_TRIGGERS = apexPart<HandbookApexTrigger>({
   one: "trigger",
   many: "triggers",
   get: (h) => h.apexTriggers,
-  intro: (h) => `Each trigger shows the object it's on, as Salesforce gives it, and the events it runs on. ${listsApex(h.apexClasses) ? "What it touches is read as the classes' is, with the same limits." : READING}`,
+  intro: (h) => `Each trigger shows the object it's on and the events it runs on. A custom object we couldn't name shows as the id Salesforce gives it. ${listsApex(h.apexClasses) ? "What it touches is read as the classes' is, with the same limits." : READING}`,
   write: (doc, item) => writeApex(doc, item, [[{ text: `On: ${item.object}` }], [eventWords(item.events)]]),
 });
 

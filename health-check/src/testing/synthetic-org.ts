@@ -1266,10 +1266,15 @@ export const METADATA_FILES: Record<string, string> = {
 </Flow>`,
   // Trap for the handbook: a draft record-triggered flow with every kind of path,
   // a step nothing reaches, and an element of a kind the parser has no case for.
-  // A draft, and no custom field, so no rule's finding moves.
+  // It also starts three ways (decision 446): straight away, on a scheduled path
+  // 30 days before the close date, and after the save is committed, each of the
+  // later two to an assignment of its own. A draft, and no custom field, so no
+  // rule's finding moves.
   "flows/Opportunity_Stage_Review.flow": `<?xml version="1.0"?><Flow ${METADATA_NS}>
   <apiVersion>62.0</apiVersion><label>Stage Review</label><processType>AutoLaunchedFlow</processType><status>Draft</status>
   <actionCalls><name>Notify_Owner</name><label>Notify Owner</label><locationX>50</locationX><locationY>900</locationY><actionName>chatterPost</actionName><actionType>chatterPost</actionType></actionCalls>
+  <assignments><name>Flag_Stale</name><label>Flag Stale</label><locationX>300</locationX><locationY>100</locationY><assignmentItems><assignToReference>$Record.NextStep</assignToReference><operator>Assign</operator><value><stringValue>Chase</stringValue></value></assignmentItems></assignments>
+  <assignments><name>Mark_Synced</name><label>Mark Synced</label><locationX>450</locationX><locationY>100</locationY><assignmentItems><assignToReference>$Record.NextStep</assignToReference><operator>Assign</operator><value><stringValue>Synced</stringValue></value></assignmentItems></assignments>
   <assignments><name>Old_Step</name><label>Old Step</label><locationX>600</locationX><locationY>100</locationY><assignmentItems><assignToReference>$Record.NextStep</assignToReference><operator>Assign</operator><value><stringValue>Review</stringValue></value></assignmentItems></assignments>
   <assignments><name>Set_Next_Step</name><label>Set Next Step</label><locationX>50</locationX><locationY>600</locationY><assignmentItems><assignToReference>$Record.NextStep</assignToReference><operator>Assign</operator><value><stringValue>Call</stringValue></value></assignmentItems></assignments>
   <decisions><name>Check_Size</name><label>Check Size</label><locationX>50</locationX><locationY>300</locationY><defaultConnector><targetReference>Set_Next_Step</targetReference></defaultConnector><defaultConnectorLabel>Small Deal</defaultConnectorLabel>
@@ -1284,7 +1289,10 @@ export const METADATA_FILES: Record<string, string> = {
     <filters><field>StageName</field><operator>EqualTo</operator><value><stringValue>Negotiation</stringValue></value></filters>
     <filters><field>Amount</field><operator>GreaterThan</operator><value><numberValue>5000.0</numberValue></value></filters>
     <filters><field>IsPrivate</field><operator>EqualTo</operator><value><booleanValue>false</booleanValue></value></filters>
-    <object>Opportunity</object><recordTriggerType>CreateAndUpdate</recordTriggerType><triggerType>RecordAfterSave</triggerType></start>
+    <object>Opportunity</object><recordTriggerType>CreateAndUpdate</recordTriggerType>
+    <scheduledPaths><name>X30_days_before_close</name><connector><targetReference>Flag_Stale</targetReference></connector><label>30 days before close</label><offsetNumber>-30</offsetNumber><offsetUnit>Days</offsetUnit><recordField>CloseDate</recordField><timeSource>RecordField</timeSource></scheduledPaths>
+    <scheduledPaths><connector><targetReference>Mark_Synced</targetReference></connector><pathType>AsyncAfterCommit</pathType></scheduledPaths>
+    <triggerType>RecordAfterSave</triggerType></start>
   <subflows><name>Run_Approval</name><label>Run Approval</label><locationX>50</locationX><locationY>700</locationY><connector><targetReference>Summarise_Deal</targetReference></connector><flowName>Discount_Approval_Steps</flowName></subflows>
 </Flow>`,
   // Trap for the handbook: a scheduled flow, also a draft.

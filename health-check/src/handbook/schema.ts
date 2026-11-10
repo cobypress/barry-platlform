@@ -7,13 +7,16 @@ import { CHANGES, MAX_QUERIED_OBJECTS } from "../extract/apex-touches.ts";
 // made for them: not to the benchmark, Claude, the worker's store or the
 // console (452).
 
+// Still 2 with each flow's paths added (decision 446): no file of version 2 had
+// left an engine before them, so none in a run folder lacks them.
 export const HANDBOOK_VERSION = 2;
 
-// The most a flow, step, entry and text keep (decision 453). Anything past
-// these is cut, marked as cut, and carries its full count.
+// The most a flow, step, entry, start and text keep (decision 453). Anything
+// past these is cut, marked as cut, and carries its full count.
 export const MAX_STEPS = 500;
 export const MAX_FIELDS = 50;
 export const MAX_CONDITIONS = 50;
+export const MAX_PATHS = 50;
 export const MAX_TEXT = 4_000;
 // And the most Apex classes and triggers, by name (decision 456).
 export const MAX_APEX_CLASSES = 5_000;
@@ -55,6 +58,31 @@ export const HandbookStep = z.strictObject({
 });
 export type HandbookStep = z.infer<typeof HandbookStep>;
 
+/**
+ * One way a flow starts running (decision 446): the start's own connector, or
+ * one of its scheduled paths. `kind` is "immediate", "scheduled" (a path with
+ * no pathType) or "afterCommit" (pathType AsyncAfterCommit), and any other
+ * pathType under Salesforce's own name for it, as a step's kind is (453).
+ */
+export const HandbookPath = z.strictObject({
+  kind: z.string().min(1),
+  /** As the admin wrote it, redacted like other free text. */
+  label: z.string().nullable(),
+  /** When a later path runs, as Salesforce records it, with nothing worked out. Null for the immediate path. */
+  when: z
+    .strictObject({
+      /** Flow Builder saves "before" as a negative number (QUESTIONS.md, handbook). */
+      offsetNumber: z.number().nullable(),
+      offsetUnit: z.string().nullable(),
+      /** "RecordField" or "RecordTriggerEvent", as Salesforce names them. */
+      timeSource: z.string().nullable(),
+      recordField: z.string().nullable(),
+    })
+    .nullable(),
+  next: z.string().nullable(),
+});
+export type HandbookPath = z.infer<typeof HandbookPath>;
+
 export const HandbookFlow = z.strictObject({
   name: z.string(),
   label: z.string(),
@@ -75,6 +103,10 @@ export const HandbookFlow = z.strictObject({
       conditionsTotal: Count,
       cut: z.boolean(),
     }),
+    /** Every way it starts, the immediate path first when the start has one. */
+    paths: z.array(HandbookPath).max(MAX_PATHS),
+    pathsTotal: Count,
+    pathsCut: z.boolean(),
   }),
   /** In the order the flow runs them, from the start, then any no path reaches. */
   steps: z.array(HandbookStep).max(MAX_STEPS),
@@ -143,7 +175,7 @@ export const TRIGGER_EVENTS = ["before insert", "before update", "before delete"
 
 export const HandbookApexTrigger = z.strictObject({
   ...apexItem,
-  /** TableEnumOrId as Salesforce gives it. */
+  /** TableEnumOrId, a custom object's id given as its API name when the run could name it, and as Salesforce gives it when not. */
   object: z.string().min(1),
   /** Null when the run didn't read them, never an empty list. */
   events: z.array(z.enum(TRIGGER_EVENTS)).min(1).nullable(),

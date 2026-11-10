@@ -7,9 +7,9 @@ import { XMLValidator } from "fast-xml-parser";
 import { tempDir } from "../../testing/harness.ts";
 import { documentXml, docxParagraphs, docxText } from "../../testing/docx-text.ts";
 import { HANDBOOK_FILE } from "../build.ts";
-import { renderHandbookDocx, STEP_WORDS, wordSafe } from "../docx.ts";
+import { renderHandbookDocx, STEP_WORDS, whenWords, wordSafe } from "../docx.ts";
 import { readHandbook } from "../read.ts";
-import { Handbook, HANDBOOK_VERSION, MAX_APEX_CLASSES, MAX_APEX_TRIGGERS, MAX_STEPS, type HandbookApexClass, type HandbookApexTouches, type HandbookApexTrigger, type HandbookFlow, type HandbookStep, type HandbookValidationRule } from "../schema.ts";
+import { Handbook, HANDBOOK_VERSION, MAX_APEX_CLASSES, MAX_APEX_TRIGGERS, MAX_STEPS, type HandbookApexClass, type HandbookPath, type HandbookApexTouches, type HandbookApexTrigger, type HandbookFlow, type HandbookStep, type HandbookValidationRule } from "../schema.ts";
 
 // The org handbook as a Word document (DECISIONS.md 443 to 445). The file is
 // made up here, so every route through the document is seen.
@@ -28,7 +28,7 @@ function flow(name: string, over: Partial<HandbookFlow> = {}): HandbookFlow {
     status: "Active",
     processType: "AutoLaunchedFlow",
     description: null,
-    start: { object: "Opportunity", triggerType: "RecordAfterSave", recordTriggerType: "Update", schedule: null, entry: { logic: null, formula: null, formulaCut: false, formulaLength: null, conditions: [], conditionsTotal: 0, cut: false } },
+    start: { object: "Opportunity", triggerType: "RecordAfterSave", recordTriggerType: "Update", schedule: null, entry: { logic: null, formula: null, formulaCut: false, formulaLength: null, conditions: [], conditionsTotal: 0, cut: false }, paths: [], pathsTotal: 0, pathsCut: false },
     steps: [],
     stepsTotal: 0,
     cut: false,
@@ -194,6 +194,86 @@ describe("the handbook as a Word document", () => {
     assert.equal(text.match(/Entry conditions: none/g)?.length, 4);
   });
 
+  describe("every way a flow starts (decision 446)", () => {
+    const immediate = (next: string): HandbookPath => ({ kind: "immediate", label: null, when: null, next });
+    const closeDate = { offsetNumber: -30, offsetUnit: "Days", timeSource: "RecordField", recordField: "CloseDate" };
+    /** The adversary's flow: Set_Flag straight away, Email_Owner 30 days before the close date. */
+    const reminder = flow("Close_Reminder", {
+      start: { ...flow("x").start, recordTriggerType: "CreateAndUpdate", paths: [immediate("Set_Flag"), { kind: "scheduled", label: "30 days before close", when: closeDate, next: "Email_Owner" }], pathsTotal: 2 },
+      steps: [step("Set_Flag"), step("Email_Owner", { kind: "actionCalls", detail: "emailSimple (emailSimple)" })],
+      stepsTotal: 2,
+    });
+
+    test("the adversary's flow lists both paths under what starts it, and the email's step says it's the scheduled path's", async () => {
+      const { text } = await render(handbook({ flows: { status: "ok", items: [reminder] } }));
+      const part = text.slice(text.indexOf("### Close Reminder\n")).split(/\n## /)[0]!;
+      assert.match(
+        part,
+        /\nWhat starts it: When an Opportunity record is created or updated, after the change is saved\.\n\nIt starts in 2 ways:\nRuns straight away: step 1, Set Flag\n'30 days before close': 30 days before CloseDate: step 2, Email Owner\n\nEntry conditions: none\n/,
+      );
+      const [first, second] = stepLines(text, "Close Reminder");
+      assert.equal(first, "1. Assignment: Set Flag  Set_Flag\nStarts the path that runs straight away\nThen: the flow ends here");
+      assert.equal(second, "2. Action: Email Owner  Email_Owner\nStarts the path '30 days before close': 30 days before CloseDate\nAction: emailSimple (emailSimple)\nThen: the flow ends here");
+      // The order the steps come in is said once, for every flow.
+      assert.match(text, /lists its steps path by path: the steps that run straight away first, then each later path's in turn, and the step each path starts at says so\./);
+    });
+
+    test("a flow with only its immediate path prints as a flow from before paths were kept", async () => {
+      const steps = [step("Set_Flag", { next: "Notify" }), step("Notify")];
+      const one = await render(handbook({ flows: { status: "ok", items: [flow("Plain", { start: { ...flow("x").start, paths: [immediate("Set_Flag")], pathsTotal: 1 }, steps, stepsTotal: 2 })] } }));
+      const none = await render(handbook({ flows: { status: "ok", items: [flow("Plain", { steps, stepsTotal: 2 })] } }));
+      assert.equal(one.text, none.text);
+      assert.doesNotMatch(one.text, /It starts in|Starts the path|Runs straight away/);
+    });
+
+    test("a path after the save is committed, one Salesforce names a way we have no word for, and one with no step", async () => {
+      const paths: HandbookPath[] = [
+        immediate("A"),
+        { kind: "afterCommit", label: null, when: null, next: "B" },
+        { kind: "afterCommit", label: "Run async", when: null, next: "B" },
+        { kind: "ApprovalRecall", label: null, when: null, next: "C" },
+        { kind: "scheduled", label: null, when: { offsetNumber: 1, offsetUnit: "Hours", timeSource: "RecordTriggerEvent", recordField: null }, next: null },
+        { kind: "scheduled", label: null, when: closeDate, next: "Gone" },
+      ];
+      const f = flow("Many", { start: { ...flow("x").start, paths, pathsTotal: paths.length }, steps: [step("A"), step("B"), step("C")], stepsTotal: 3 });
+      const { text } = await render(handbook({ flows: { status: "ok", items: [f] } }));
+      assert.ok(
+        text.includes(
+          "It starts in 6 ways:\nRuns straight away: step 1, A\nAfter the save is committed: step 2, B\n'Run async': after the save is committed: step 2, B\nA path Salesforce calls ApprovalRecall: step 3, C\nScheduled, 1 hour after the record is saved: it leads to no step\nScheduled, 30 days before CloseDate: Gone, which isn't among the steps listed here\n",
+        ),
+        text,
+      );
+      const lines = stepLines(text, "Many");
+      assert.equal(lines[1], "2. Assignment: B\nStarts the path that runs after the save is committed\nStarts the path 'Run async': after the save is committed\nThen: the flow ends here");
+      assert.equal(lines[2], "3. Assignment: C\nStarts a path Salesforce calls ApprovalRecall\nThen: the flow ends here");
+    });
+
+    test("paths cut at the most the file keeps say so with the full count", async () => {
+      const paths = Array.from({ length: 50 }, (_, i): HandbookPath => (i === 0 ? immediate("A") : { kind: "scheduled", label: `P${i}`, when: closeDate, next: "A" }));
+      const f = flow("Cut", { start: { ...flow("x").start, paths, pathsTotal: 73, pathsCut: true }, steps: [step("A")], stepsTotal: 1 });
+      const { text } = await render(handbook({ flows: { status: "ok", items: [f] } }));
+      assert.match(text, /It starts in 73 ways\. This lists the first 50 of 73 ways:\n/);
+    });
+
+    test("when a path runs is put in words only from what the file keeps", () => {
+      const when = (over: Partial<NonNullable<HandbookPath["when"]>>) => whenWords({ ...closeDate, ...over });
+      assert.equal(when({}), "30 days before CloseDate");
+      assert.equal(when({ offsetNumber: 2, offsetUnit: "Weeks" }), "2 weeks after CloseDate");
+      assert.equal(when({ offsetNumber: 1, offsetUnit: "Hours", timeSource: "RecordTriggerEvent", recordField: null }), "1 hour after the record is saved");
+      assert.equal(when({ offsetNumber: 0, offsetUnit: "Minutes" }), "0 minutes after CloseDate");
+      // A unit we don't know, or no number, isn't turned into words: the sign stays Salesforce's.
+      assert.equal(when({ offsetUnit: "Fortnights" }), "as Salesforce records it: offset -30, unit Fortnights, counted from RecordField, field CloseDate");
+      assert.equal(when({ offsetNumber: null }), "as Salesforce records it: unit Days, counted from RecordField, field CloseDate");
+      // A time source we don't know, under Salesforce's own word for it.
+      assert.equal(when({ timeSource: "RecordEvent" }), "30 days before what Salesforce calls RecordEvent (CloseDate)");
+      assert.equal(when({ recordField: null }), "as Salesforce records it: offset -30, unit Days, counted from RecordField");
+      assert.equal(whenWords(null), "when it runs isn't recorded");
+      assert.equal(whenWords({ offsetNumber: null, offsetUnit: null, timeSource: null, recordField: null }), "when it runs isn't recorded");
+      // Words of the file's own that happen to be JavaScript's aren't units.
+      assert.equal(when({ offsetUnit: "constructor" }), "as Salesforce records it: offset -30, unit constructor, counted from RecordField, field CloseDate");
+    });
+  });
+
   test("says each cut with its full count: steps, fields, conditions, formula and value", async () => {
     const steps = Array.from({ length: MAX_STEPS }, (_, i) => step(`S${i}`, i === 0 ? { fields: ["A__c", "B__c"], fieldsTotal: 62 } : {}));
     const long = "X".repeat(4_000);
@@ -311,7 +391,7 @@ describe("the handbook's Apex", () => {
     const classes = text.slice(text.indexOf("## Apex classes"), text.indexOf("## Apex triggers"));
     assert.match(classes, /^## Apex classes\n\nYour org has 3 classes, 2 of them active\. They're listed by name\.\n\nWhat each one touches is read from its code's text: the objects named in its queries, and the kinds of change it makes\. It doesn't say which object a change is made to[^\n]*it can miss what the code does through another class[^\n]*\n\nAlpha\n/);
     assert.equal(text.match(/read from its code's text/g)?.length, 1);
-    assert.match(text, /## Apex triggers\n\nYour org has 1 trigger, 1 of them active\. They're listed by name\.\n\nEach trigger shows the object it's on, as Salesforce gives it, and the events it runs on\. What it touches is read as the classes' is, with the same limits\.\n\nOnDeal\n/);
+    assert.match(text, /## Apex triggers\n\nYour org has 1 trigger, 1 of them active\. They're listed by name\.\n\nEach trigger shows the object it's on and the events it runs on\. A custom object we couldn't name shows as the id Salesforce gives it\. What it touches is read as the classes' is, with the same limits\.\n\nOnDeal\n/);
     // With no class listed, the triggers say what the reading is themselves.
     const alone = await render(handbook({ apexClasses: { status: "unavailable", reason: "No Apex" }, apexTriggers: apex([trigger("OnDeal")]) }));
     assert.match(alone.text.slice(alone.text.indexOf("## Apex triggers")), /read from its code's text/);
@@ -365,15 +445,27 @@ describe("the handbook's Apex", () => {
     assert.doesNotMatch(entry(text, "Hidden"), /Queries|Changes|none/);
     assert.match(entry(text, "Unscanned"), /Test: couldn't be told: the code couldn't be read\.\nQueries: none in its own code/);
     assert.match(entry(text, "HiddenTrigger"), /\nThe code couldn't be read, so what it touches isn't known\.$/);
+    // A trigger can't be a test, so it never says whether it is one, whatever the file holds.
+    assert.doesNotMatch(entry(text, "HiddenTrigger"), /Test:/);
   });
 
-  test("a trigger says its object as Salesforce gives it and its events in Apex's order, or that they weren't read", async () => {
+  test("a trigger has no Test line, test or not, and a class keeps its", async () => {
+    const { text } = await render(handbook({ apexClasses: apex([apexClass("Svc"), apexClass("SvcTest", { isTest: true })]), apexTriggers: apex([trigger("OnDeal"), trigger("OddTrigger", { isTest: true })]) }));
+    for (const name of ["OnDeal", "OddTrigger"]) assert.doesNotMatch(entry(text, name), /Test:/, name);
+    assert.match(entry(text, "OnDeal"), /\nAPI version 62\.0\. Status: Active\.\n/);
+    assert.match(entry(text, "Svc"), /Test: No\./);
+    assert.match(entry(text, "SvcTest"), /Test: Yes\./);
+  });
+
+  test("a trigger says its object as the file gives it and its events in Apex's order, or that they weren't read", async () => {
     const items = [
-      trigger("CustomTrigger", { object: "01I000000000001AAA", events: ["after update", "before insert", "after undelete"], touches: touches({ queries: ["Invoice__c"], queriesTotal: 1, changes: ["upsert"] }) }),
+      trigger("CustomTrigger", { object: "Invoice__c", events: ["after update", "before insert", "after undelete"], touches: touches({ queries: ["Invoice__c"], queriesTotal: 1, changes: ["upsert"] }) }),
+      trigger("Unnamed", { object: "01I000000000001AAA" }),
       trigger("Unread", { object: "Account", events: null }),
     ];
     const { text } = await render(handbook({ apexTriggers: apex(items) }));
-    assert.equal(entry(text, "CustomTrigger"), "CustomTrigger\nOn: 01I000000000001AAA\nRuns: before insert, after update, after undelete\nAPI version 62.0. Status: Active. Test: No.\nQueries: Invoice__c\nChanges it makes: upsert");
+    assert.equal(entry(text, "CustomTrigger"), "CustomTrigger\nOn: Invoice__c\nRuns: before insert, after update, after undelete\nAPI version 62.0. Status: Active.\nQueries: Invoice__c\nChanges it makes: upsert");
+    assert.match(entry(text, "Unnamed"), /^Unnamed\nOn: 01I000000000001AAA\n/);
     assert.match(entry(text, "Unread"), /^Unread\nOn: Account\nThe events weren't read\.\nAPI version/);
     assert.doesNotMatch(entry(text, "Unread"), /Runs:/);
   });

@@ -1,7 +1,9 @@
 import type { ApexClassRow, ApexData, ApexTriggerRow, TriggerUsage } from "../extract/automation.ts";
+import type { CustomObjectRow } from "../extract/configuration.ts";
 import { unreadReason, type MetadataBundle } from "../extract/metadata-parse.ts";
 import type { Sourced } from "../extract/types.ts";
-import { Handbook, HANDBOOK_VERSION, MAX_APEX_CLASSES, MAX_APEX_TRIGGERS, TRIGGER_EVENTS, type HandbookApexClass, type HandbookApexTrigger } from "./schema.ts";
+import { objectResolver } from "../domains/object-names.ts";
+import { Handbook, HANDBOOK_VERSION, MAX_APEX_CLASSES, MAX_APEX_TRIGGERS, TRIGGER_EVENTS, type HandbookApexClass, type HandbookApexTrigger, type HandbookFlow } from "./schema.ts";
 
 /**
  * In the run folder, beside the findings: kept by `hc purge`, deleted with the
@@ -23,8 +25,12 @@ function metadataParts(metadata: Sourced<MetadataBundle> | undefined): Pick<Hand
   const detail = metadata.data.handbook;
   if (!detail) return both("This run's metadata was read before the handbook's detail was kept.");
   const unread = unreadReason(metadata.data, ["validationRules"]);
+  // A checkpoint from version 7 of the step kept no flow's paths, and a flow
+  // listed without its later paths would print them as ordinary steps (decision
+  // 446). Its validation rules are whole, so they stay.
+  const pathless = detail.flows.some((f) => !Array.isArray((f.start as Partial<HandbookFlow["start"]> | undefined)?.paths));
   return {
-    flows: { status: "ok", items: detail.flows },
+    flows: pathless ? unavailable("This run's metadata was read before the handbook kept every way a flow starts.") : { status: "ok", items: detail.flows },
     validationRules: unread ? unavailable(unread) : { status: "ok", covers: detail.validationRulesCover, items: detail.validationRules },
   };
 }
@@ -45,7 +51,12 @@ function apexClass(row: ApexClassRow | ApexTriggerRow): HandbookApexClass {
   return { name: row.Name, apiVersion: row.ApiVersion, status: row.Status, isTest: row.scan ? row.scan.testClass : null, touches: row.touches ?? null };
 }
 
-const apexTrigger = (row: ApexTriggerRow): HandbookApexTrigger => ({ ...apexClass(row), object: row.TableEnumOrId, events: events(row) });
+// A trigger on a custom object can name it by its 01I id, which no admin can
+// read. The custom objects list names it, as the automation rules do; an id it
+// doesn't name stays as Salesforce gave it rather than a guess.
+const apexTrigger =
+  (objectOf: (value: string) => string | null) =>
+  (row: ApexTriggerRow): HandbookApexTrigger => ({ ...apexClass(row), object: objectOf(row.TableEnumOrId) ?? row.TableEnumOrId, events: events(row) });
 
 const byName = (a: { Name: string }, b: { Name: string }): number => (a.Name < b.Name ? -1 : a.Name > b.Name ? 1 : 0);
 
@@ -55,20 +66,21 @@ function capped<R extends { Name: string }, I>(rows: Sourced<R[]>, max: number, 
   return { status: "ok" as const, items: [...rows.data].sort(byName).slice(0, max).map(item), total: rows.data.length, cut: rows.data.length > max };
 }
 
-function apexParts(apex: ApexData | undefined): Pick<Handbook, "apexClasses" | "apexTriggers"> {
+function apexParts(apex: ApexData | undefined, customObjects: Sourced<CustomObjectRow[]> | undefined): Pick<Handbook, "apexClasses" | "apexTriggers"> {
   if (!apex) return { apexClasses: unavailable("This run didn't read the org's Apex."), apexTriggers: unavailable("This run didn't read the org's Apex.") };
-  return { apexClasses: capped(apex.classes, MAX_APEX_CLASSES, apexClass), apexTriggers: capped(apex.triggers, MAX_APEX_TRIGGERS, apexTrigger) };
+  const objectOf = customObjects ? objectResolver(customObjects) : () => null;
+  return { apexClasses: capped(apex.classes, MAX_APEX_CLASSES, apexClass), apexTriggers: capped(apex.triggers, MAX_APEX_TRIGGERS, apexTrigger(objectOf)) };
 }
 
 /**
- * The handbook's data from the metadata and apex steps' output, either of which
- * is undefined when the run didn't have that step. A part that couldn't be read
+ * The handbook's data from the metadata, apex and custom objects steps' output,
+ * any of which is undefined when the run didn't have that step. A part that couldn't be read
  * says why, so the documents can tell "no flows" from "we couldn't read them"
  * (decision 454). Checked against the schema here, so a file that doesn't fit is
  * never written: its parts say so instead, and the run carries on.
  */
-export function buildHandbook(metadata: Sourced<MetadataBundle> | undefined, apex?: ApexData): Handbook {
-  const handbook = Handbook.safeParse({ version: HANDBOOK_VERSION, ...metadataParts(metadata), ...apexParts(apex) });
+export function buildHandbook(metadata: Sourced<MetadataBundle> | undefined, apex?: ApexData, customObjects?: Sourced<CustomObjectRow[]>): Handbook {
+  const handbook = Handbook.safeParse({ version: HANDBOOK_VERSION, ...metadataParts(metadata), ...apexParts(apex, customObjects) });
   if (handbook.success) return handbook.data;
   const where = handbook.error.issues[0]?.path.join(".") ?? "";
   return allUnavailable(`The handbook's data didn't fit its format${where ? ` at ${where}` : ""}, so it wasn't kept.`);

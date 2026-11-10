@@ -7,7 +7,7 @@ import { shareRepeatedValues } from "./share-values.ts";
 import { modulesFor } from "../domains/scope.ts";
 import { scoreDomains } from "../domains/scoring.ts";
 import type { DomainModule } from "../domains/types.ts";
-import { orgExtractor } from "../extract/configuration.ts";
+import { customObjectsExtractor, orgExtractor, type CustomObjectRow } from "../extract/configuration.ts";
 import { FACTS_FILE, factsExtractor, type Facts } from "../extract/facts.ts";
 import { apexExtractor, metadataExtractor, type ApexData } from "../extract/automation.ts";
 import type { MetadataBundle } from "../extract/metadata-parse.ts";
@@ -269,7 +269,10 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
   writeJson(join(dir, FACTS_FILE), extracts.get(factsExtractor.id));
   // The customer's own configuration, for their handbook: kept as long as the
   // findings, and read by nothing else here (DECISIONS.md 451 to 457).
-  writeJson(join(dir, HANDBOOK_FILE), buildHandbook(extracts.get(metadataExtractor.id) as Sourced<MetadataBundle> | undefined, extracts.get(apexExtractor.id) as ApexData | undefined));
+  writeJson(
+    join(dir, HANDBOOK_FILE),
+    buildHandbook(extracts.get(metadataExtractor.id) as Sourced<MetadataBundle> | undefined, extracts.get(apexExtractor.id) as ApexData | undefined, extracts.get(customObjectsExtractor.id) as Sourced<CustomObjectRow[]> | undefined),
+  );
   const org = extracts.get(orgExtractor.id) as { status: string; data?: Array<{ IsSandbox: boolean; Name?: string }> };
   run.isSandbox = org.data?.[0]?.IsSandbox ?? false;
   // The company information in Setup is the name the customer goes by, unless one was given.

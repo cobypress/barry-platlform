@@ -1,5 +1,5 @@
 import { redactSecrets } from "../privacy/secrets.ts";
-import { MAX_CONDITIONS, MAX_FIELDS, MAX_STEPS, MAX_TEXT, type HandbookCondition, type HandbookFlow, type HandbookOutcome, type HandbookStep, type HandbookValidationRule } from "./schema.ts";
+import { MAX_CONDITIONS, MAX_FIELDS, MAX_PATHS, MAX_STEPS, MAX_TEXT, type HandbookCondition, type HandbookFlow, type HandbookOutcome, type HandbookPath, type HandbookStep, type HandbookValidationRule } from "./schema.ts";
 
 // What each flow and validation rule does, for the handbook (DECISIONS.md 451).
 // The retrieve gives XML and Tooling gives JSON with the same element names, so
@@ -131,8 +131,9 @@ function stepOf(kind: string, element: Node): HandbookStep {
 }
 
 /**
- * Steps in the order the flow runs them: depth first from the start, following
- * each step's next, then its outcomes, then its fault path, each step once.
+ * Steps in the order the flow runs them: depth first from the start, path by
+ * path (its own connector, then each scheduled path in turn), following each
+ * step's next, then its outcomes, then its fault path, each step once.
  * Steps no path reaches follow, by kind and then as the file lists them.
  */
 function orderSteps(flow: Node): HandbookStep[] {
@@ -156,6 +157,37 @@ function orderSteps(flow: Node): HandbookStep[] {
     stack.push(...ways.reverse());
   }
   return [...reached, ...all.filter((s) => !s.reached)];
+}
+
+/** A whole number as Salesforce records it: 5 from Tooling, "5" from the XML. */
+function numberOf(value: unknown): number | null {
+  const text = plain(value);
+  return text !== null && Number.isFinite(Number(text)) ? Number(text) : null;
+}
+
+// Salesforce's pathType for the path that runs once the save is committed (Flow
+// Builder's "Run Asynchronously"). A scheduled path has none.
+const PATH_KINDS: Readonly<Record<string, string>> = { AsyncAfterCommit: "afterCommit" };
+
+/**
+ * Every way the flow starts (decision 446): the start's connector first, then
+ * its scheduled paths in the file's order. Each `when` is kept as Salesforce
+ * records it, and nothing is worked out from it here.
+ */
+function pathsOf(start: Node): Pick<HandbookFlow["start"], "paths" | "pathsTotal" | "pathsCut"> {
+  const immediate: HandbookPath[] = target(start.connector) !== null ? [{ kind: "immediate", label: null, when: null, next: target(start.connector) }] : [];
+  const later = nodes(start.scheduledPaths).map((p): HandbookPath => {
+    const type = plain(p.pathType);
+    const when = { offsetNumber: numberOf(p.offsetNumber), offsetUnit: plain(p.offsetUnit), timeSource: plain(p.timeSource), recordField: plain(p.recordField) };
+    return {
+      kind: type === null ? "scheduled" : Object.hasOwn(PATH_KINDS, type) ? PATH_KINDS[type]! : type,
+      label: free(p.label),
+      when: Object.values(when).some((v) => v !== null) ? when : null,
+      next: target(p.connector),
+    };
+  });
+  const all = [...immediate, ...later];
+  return { paths: all.slice(0, MAX_PATHS), pathsTotal: all.length, pathsCut: all.length > MAX_PATHS };
 }
 
 function entryOf(start: Node): HandbookFlow["start"]["entry"] {
@@ -192,6 +224,7 @@ export function flowDetail(name: string, flow: Node, object: string | null): Han
       recordTriggerType: plain(start.recordTriggerType),
       schedule: schedule ? { frequency: plain(schedule.frequency), startDate: plain(schedule.startDate), startTime: plain(schedule.startTime) } : null,
       entry: entryOf(start),
+      ...pathsOf(start),
     },
     steps: steps.slice(0, MAX_STEPS),
     stepsTotal: steps.length,

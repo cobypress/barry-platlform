@@ -147,8 +147,8 @@ describe("the handbook's detail goes nowhere but handbook.json", () => {
 describe("the documents job: handbook.json reaches the Word document and nothing else", () => {
   // Decision 452 as decision 443 amends it: the file's contents go to the
   // customer's handbook document and nowhere else. A literal planted in a
-  // formula, a condition's value, a description and a message is followed
-  // from the run folder through a documents make, and so are objects named only
+  // formula, a condition's value, a description, a message and a scheduled
+  // path's label (decision 446) is followed from the run folder through a documents make, and so are objects named only
   // in an Apex class's and a trigger's queries (decisions 456 and 457).
   const LITERAL = "HB-DOC-LITERAL-0443";
   const CLASS_OBJECT = "Hbdoc_Class_Ledger_0443__c";
@@ -207,6 +207,8 @@ describe("the documents job: handbook.json reaches the Word document and nothing
     handbook.validationRules.items.push({ object: "Invoice__c", name: "Planted_Rule", active: true, description: `Description ${LITERAL}`, formula: `CONTAINS(Notes__c, "${LITERAL}")`, formulaCut: false, formulaLength: 40, message: `Message ${LITERAL}`, messageField: null });
     const flow = handbook.flows.items.find((f) => f.name === "Opportunity_Stage_Review")!;
     flow.start.entry.conditions[0]!.value = LITERAL;
+    const scheduled = flow.start.paths.find((p) => p.kind === "scheduled")!;
+    scheduled.label = `Remind ${LITERAL}`;
     const touches = (object: string) => ({ queries: [object], queriesTotal: 1, changes: ["update" as const], dynamicQueries: false, searches: false });
     handbook.apexClasses.items.push({ name: "PlantedLedgerSync", apiVersion: 62, status: "Active", isTest: false, touches: touches(CLASS_OBJECT) });
     handbook.apexClasses.total += 1;
@@ -222,9 +224,12 @@ describe("the documents job: handbook.json reaches the Word document and nothing
     for (const bytes of [readFileSync(join(dir, "documents", HANDBOOK_DOCX)), uploads.find((u) => u.name.endsWith(" - Org handbook.docx"))!.body]) {
       const text = docxText(bytes);
       for (const planted of [`CONTAINS(Notes__c, "${LITERAL}")`, `StageName equals ${LITERAL}`, `Description ${LITERAL}`, `Message ${LITERAL}`, HANDBOOK_MARKER]) assert.ok(text.includes(planted), planted);
+      // The path's label, under what starts the flow and on the step it starts at.
+      assert.ok(text.includes(`\n'Remind ${LITERAL}': 30 days before CloseDate: step 9, Flag Stale\n`), "the path's label");
+      assert.ok(text.includes(`Flag_Stale\nStarts the path 'Remind ${LITERAL}': 30 days before CloseDate\n`), "on its step");
       // Each Apex object as what its class or trigger queries.
       assert.ok(text.includes(`PlantedLedgerSync\nAPI version 62.0. Status: Active. Test: No.\nQueries: ${CLASS_OBJECT}\n`), CLASS_OBJECT);
-      assert.ok(text.includes(`PlantedLedgerTrigger\nOn: Account\nRuns: after update\nAPI version 62.0. Status: Active. Test: No.\nQueries: ${TRIGGER_OBJECT}\n`), TRIGGER_OBJECT);
+      assert.ok(text.includes(`PlantedLedgerTrigger\nOn: Account\nRuns: after update\nAPI version 62.0. Status: Active.\nQueries: ${TRIGGER_OBJECT}\n`), TRIGGER_OBJECT);
     }
   });
 
