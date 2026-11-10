@@ -257,7 +257,7 @@ c) Does `SELECT SubscriberPackage.Name, SubscriberPackage.NamespacePrefix FROM I
 d) In a retrieved object's metadata, is a record type's `<label>` always there, and is Tooling's `RecordType.Name` the same label?
 e) For CPQ: is a price action's `SBQQ__TargetObject__c` "Quote" or "Quote Line", so the field it sets is on `SBQQ__Quote__c` or `SBQQ__QuoteLine__c`, and its label is that object's describe's?
 
-## The org handbook's data (DECISIONS.md 451 to 455)
+## The org handbook's data (DECISIONS.md 451 to 457)
 
 To check on a sandbox or a developer org, not a customer's. The route test in `src/handbook/__tests__/handbook.test.ts` feeds a hand-written Tooling flow built on these answers.
 
@@ -266,3 +266,7 @@ b) Does every element on the canvas carry `locationX` on both routes, auto-layou
 c) Does Tooling's `ValidationRule.Metadata` give `errorMessage` and `errorDisplayField`, as the Metadata API does? If not, the Tooling route's rules show no message.
 d) Does a retrieve write a quote inside a formula as `&quot;`? The handbook redacts each value after parsing either way, so this only says how often the whole-file redaction misses one.
 e) Does the Metadata API's `*` for `CustomObject` bring any standard object in a real org? We assume none (decision 455): on the retrieve route the handbook's validation rules say they cover your custom objects and Account, Contact, Lead and Opportunity, the four the retrieve names, and on the Tooling route every object. `aut.undocumented-automation` counts validation rules by route for the same reason: custom objects and those four on the retrieve, every rule on Tooling. If the wildcard brings a standard object, its rules are read but the list says it covers less than it holds.
+f) Is `ApexTrigger.TableEnumOrId` through REST the object's API name for a standard object (`Opportunity`) and, for a custom object, its id (`01I...`, 15 or 18 characters) rather than `Invoice__c`? The synthetic org assumes the id, as `real-org.22` does. The handbook keeps the value exactly as Salesforce gives it (decision 456), so if it's an id the documents have to name the object from the custom objects list before a reader sees it.
+g) Does REST's `ApexTrigger` give all seven `Usage` fields (`UsageBeforeInsert` to `UsageAfterUndelete`) as true or false for every trigger, whatever its API version? The handbook lists the events that are true, in a fixed order, and says the events weren't read when none is, so a trigger whose fields come back null or all false shows no events rather than a wrong list.
+h) Is a class or trigger whose code Salesforce withholds given a `Body` of exactly `(hidden)` through REST, or no `Body`? Either gives "couldn't be read" for what it touches (decision 457). Any other placeholder would be read as code, find nothing, and say it touches nothing.
+i) Are `insert`, `update`, `upsert`, `delete`, `undelete` and `merge` still the only DML statements, and the `Database` methods of those names and `convertLead` the only ones that change records, in the current Apex reference? The reading counts no other: a class that only uses `Database.insertAsync`, `insertImmediate`, `deleteAsync` (external and big objects) or `EventBus.publish` shows no change.
