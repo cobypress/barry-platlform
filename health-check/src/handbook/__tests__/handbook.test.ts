@@ -568,6 +568,17 @@ describe("Apex (decisions 456 and 457)", () => {
     assert.deepEqual([items.get("Hidden")!.touches, items.get("Hidden")!.isTest], [null, null]);
   });
 
+  test("a test is a class annotated @isTest, not one whose comment names it", () => {
+    // The row's isTest finds @isTest anywhere, as the rules that use it expect; the handbook asks the scan.
+    const body = (code: string) => ({ isTest: /@isTest/i.test(code), scan: scanApex(code), touches: readTouches(code) });
+    const svc = cls("Svc", body("public class Svc { // Tests live in the @isTest class SvcTest\n public void run() { } }"));
+    const svcTest = cls("SvcTest", body("@isTest private class SvcTest { @isTest static void runs() { new Svc().run(); } }"));
+    assert.equal(svc.isTest, true);
+    const h = buildHandbook(undefined, apex(ok([svc, svcTest]), ok([])));
+    assert.ok(h.apexClasses.status === "ok");
+    assert.deepEqual(h.apexClasses.items.map((c) => [c.name, c.isTest]), [["Svc", false], ["SvcTest", true]]);
+  });
+
   test("each part is ok or unavailable on its own, with its source's reason", () => {
     const failed = (reason: string) => ({ status: "unavailable" as const, reason, source });
     const noClasses = buildHandbook(undefined, apex(failed("ApexClass isn't available in this org, or to the connected user."), ok([trg("T")])));

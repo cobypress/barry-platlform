@@ -39,9 +39,10 @@ function events(row: TriggerUsage): HandbookApexTrigger["events"] {
 }
 
 function apexClass(row: ApexClassRow | ApexTriggerRow): HandbookApexClass {
-  // No scan means the body couldn't be read, so whether it's a test can't be told.
-  const read = row.scan != null;
-  return { name: row.Name, apiVersion: row.ApiVersion, status: row.Status, isTest: read ? row.isTest : null, touches: row.touches ?? null };
+  // The class itself annotated, read from its code without comments: the row's
+  // isTest finds @isTest anywhere, a comment's included. No scan means the body
+  // couldn't be read, so whether it's a test can't be told.
+  return { name: row.Name, apiVersion: row.ApiVersion, status: row.Status, isTest: row.scan ? row.scan.testClass : null, touches: row.touches ?? null };
 }
 
 const apexTrigger = (row: ApexTriggerRow): HandbookApexTrigger => ({ ...apexClass(row), object: row.TableEnumOrId, events: events(row) });
