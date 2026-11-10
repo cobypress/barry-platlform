@@ -4,7 +4,7 @@ import type { ReportOutputKey } from "../narrative/sections.ts";
 import type { BenchmarkInput } from "../benchmark/compare.ts";
 import { AlreadyContributed, CONSENT_FILE, contributeBenchmark } from "../benchmark/export.ts";
 import { longDate } from "../render/format.ts";
-import { renderReleased, type DocumentKey, type ReleasedDocuments } from "../render/render-released.ts";
+import { describeHeld, renderReleased, type DocumentKey, type HeldFigure, type ReleasedDocuments } from "../render/render-released.ts";
 import { safeReason, type Attempt, type JobOutcome, type WorkerDeps } from "./deps.ts";
 import type { DocumentDrive, DriveItem } from "./drive.ts";
 import { withJobLock } from "./lock.ts";
@@ -182,6 +182,23 @@ async function benchmarkFor(dir: string, deps: WorkerDeps, log: (line: string) =
   }
 }
 
+/** How many held figures the error lists by name. The rest are counted. */
+const HELD_LISTED = 10;
+
+/**
+ * Why the documents were held back, for the console's Release tab and the log:
+ * each document, page, figure and reason, so a person knows which section to
+ * edit (DECISIONS.md 430). One line, since the log takes it as it is.
+ */
+export function heldBackReason(held: HeldFigure[]): string {
+  const pages = new Set(held.map((h) => `${h.document}, page ${h.page}`)).size;
+  const sentence = (text: string): string => (/[.!?]$/.test(text) ? text : `${text}.`);
+  const listed = held.slice(0, HELD_LISTED).map((h) => sentence(describeHeld(h)));
+  const more = held.length > HELD_LISTED ? [`And ${held.length - HELD_LISTED} more.`] : [];
+  const count = `${held.length} ${held.length === 1 ? "figure" : "figures"} on ${pages} ${pages === 1 ? "page" : "pages"}`;
+  return [`Held back: ${count} can't be traced to the data.`, ...listed, ...more, "Edit the wording in those sections, approve them again, and make the documents again."].join(" ").replace(/\s+/g, " ");
+}
+
 /**
  * The customer microsite: its pages, sealed for the console to open, kept for 12
  * months (decision 21). Never a reason to fail the documents, which are already
@@ -234,6 +251,13 @@ async function documentsLocked(runId: string, deps: WorkerDeps, attempt: Attempt
     const later = laterSurveyAnswers(dir, input.survey);
     if (later) log(`${later} survey answers came in after the sections were built, so the documents leave them out, as approved`);
     const printed = await (deps.renderReleased ?? renderReleased)(dir, { ...input, benchmark }, join(dir, "documents"));
+    // A figure we can't trace stops everything before Drive: nothing uploaded, shared anew, published or contributed.
+    // Not thrown, so the queue doesn't retry: the same wording would fail the same way.
+    if (printed.held.length > 0) {
+      const reason = heldBackReason(printed.held);
+      log(`Run ${runId}'s documents weren't uploaded. ${reason}`);
+      return fail(reason);
+    }
     const folder = await folderFor(deps.drive, clientName, input.driveFolderId);
     const nameOf = (output: keyof typeof FILES): string => `${clientName} - ${FILES[output].title}.${FILES[output].ext}`;
     // Also by name, for a make from before the console was told of these three.

@@ -4,14 +4,14 @@ import { generateKeyPairSync } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { buildReport, currentBody, type ReportOutputKey } from "../../narrative/sections.ts";
-import { approvedReport, layoutWarnings, renderReleased, type ApprovedRun, type DocumentKey } from "../../render/render-released.ts";
+import { approvedReport, heldFigures, layoutWarnings, renderReleased, type ApprovedRun, type DocumentKey, type HeldFigure } from "../../render/render-released.ts";
 import { loadRun, SURVEY_FILE } from "../../render/render-run.ts";
 import { withoutComments } from "../../survey/questions.ts";
 import { syntheticSurvey } from "../../testing/survey.ts";
 import type { ReportSection, SectionVersion } from "../../schemas/index.ts";
 import { runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers } from "../../testing/replay.ts";
-import { clientNameOf, folderFor, INTERNAL_FOLDER, laterSurveyAnswers, processDocumentsJob } from "../documents-job.ts";
+import { clientNameOf, folderFor, heldBackReason, INTERNAL_FOLDER, laterSurveyAnswers, processDocumentsJob } from "../documents-job.ts";
 import { DriveError, GoogleDrive, type DocumentDrive, type DriveItem } from "../drive.ts";
 import type { DocumentsJobInput } from "../types.ts";
 import { baseDeps, consoleRun, INTAKE, RUN_ID, temp } from "./helpers.ts";
@@ -83,7 +83,7 @@ async function fakeRender(_dir: string, _approved: ApprovedRun, out: string) {
     files[output] = join(out, `${output}.bin`);
     writeFileSync(files[output], `synthetic ${output}`);
   }
-  return { files, warnings: ["The full health check, page 4: overflow"] };
+  return { files, warnings: ["The full health check, page 4: overflow"], held: [] as HeldFigure[] };
 }
 
 function jobInput(overrides: Partial<DocumentsJobInput> = {}): DocumentsJobInput {
@@ -246,6 +246,56 @@ describe("a documents job", () => {
     assert.equal(clientNameOf({ intake: null, run: consoleRun({ customerRef: null }) }), "Unnamed client");
   });
 
+  test("a page whose figure can't be traced holds the documents back", async () => {
+    const drive = new MemoryDrive();
+    let uploads = 0;
+    const put = drive.putFile.bind(drive);
+    drive.putFile = async (...args) => (uploads++, put(...args));
+    const folder = "folder-0000000001";
+    // The recorded run folder, opted in and banded, so the benchmark would take its figures if the job got that far.
+    const deps = baseDeps({ drive, renderReleased: fakeRender });
+    const input = jobInput({ driveFolderId: folder, intake: { ...INTAKE, customerName: "Synthetic Co", industry: "technology", headcountBand: "51-200" }, run: consoleRun({ status: "released", customerRef: "SYN-0001", benchmarkOptIn: true }) });
+    cpSync(recorded, join(deps.runsDir, input.run.id), { recursive: true });
+    deps.store.addDocumentsJob(input);
+    deps.micrositeKey = Buffer.alloc(32, 9);
+    deps.renderReleased = async (dir, approved, out) => ({
+      ...(await fakeRender(dir, approved, out)),
+      warnings: ["The full health check, page 12: number check: £1.99m: not in the data"],
+      held: [{ document: "The full health check", page: 12, figure: "£1.99m", reason: "not in the data" }],
+      microsite: { ok: true as const, pages: { pages: [{ slug: "overview", title: "Overview", html: "<p>Synthetic.</p>" }] } },
+    });
+    // A reader taken off the list still loses access, as on any failure.
+    deps.store.readers.set(RUN_ID, []);
+    deps.store.shares = [{ runId: RUN_ID, email: "gone@customer.example.com", folderId: folder, permissionId: "perm-0001", state: "shared", sharedAt: "2026-11-01T09:00:00.000Z", removedAt: null, removedWhy: null, error: null, updatedAt: "2026-11-01T09:00:00.000Z" }];
+    const taken: string[] = [];
+    deps.sharing = { share: async () => "perm-0002", findReader: async () => null, unshare: async (_f, id) => void taken.push(id) };
+    // Not the queue's last try, and still no throw: the same wording would fail again.
+    const result = await processDocumentsJob(RUN_ID, deps, { final: false });
+    assert.equal(result.outcome, "failed");
+    assert.equal(uploads, 0, "nothing uploaded");
+    assert.deepEqual([...drive.items.values()], [], "no folder made either");
+    assert.equal(deps.store.microsites.size, 0, "no microsite");
+    assert.equal(deps.store.benchmarkRows.length, 0, "nothing added to the benchmark set");
+    const doc = deps.store.documents.get(RUN_ID)!;
+    assert.equal(doc.input.state, "failed");
+    assert.ok(!doc.made, "no documents recorded as made");
+    for (const part of ["The full health check", "page 12", "£1.99m", "not in the data"]) assert.ok(doc.error!.includes(part), doc.error!);
+    assert.equal(result.detail, doc.error);
+    assert.deepEqual(taken, ["perm-0001"]);
+    assert.equal(deps.store.shares[0]!.state, "removed");
+    assert.ok(deps.lines.some((l) => !l.includes("\n") && l.includes("weren't uploaded") && l.includes("page 12: £1.99m: not in the data")), deps.lines.join("\n"));
+  });
+
+  test("a layout problem that isn't a number check still uploads, with the warning", async () => {
+    const drive = new MemoryDrive();
+    const deps = setup(jobInput(), drive);
+    deps.renderReleased = async (dir, approved, out) => ({ ...(await fakeRender(dir, approved, out)), warnings: ["The full health check, page 4: overflow"], held: [] });
+    assert.equal((await processDocumentsJob(RUN_ID, deps, { final: true })).outcome, "done");
+    const made = deps.store.documents.get(RUN_ID)!.made!;
+    assert.equal((await drive.files(made.driveFolderId)).length, 6);
+    assert.deepEqual(made.warnings, ["The full health check, page 4: overflow"]);
+  });
+
   test("numbers past any health check folder already there, and ignores other folders", async () => {
     const drive = new MemoryDrive();
     const client = await drive.createFolder(drive.rootFolderId, "Synthetic Co");
@@ -272,17 +322,50 @@ describe("the released documents", () => {
     cpSync(recorded, dir, { recursive: true });
     const result = await renderReleased(dir, { ...approvedRun(), preparedBy: "Synthetic Consultant" }, join(dir, "documents"));
     for (const file of Object.values(result.files)) assert.ok(existsSync(file) && statSync(file).size > 1000, file);
+    // Every figure on the approved pages traces to the data, so nothing holds them back, and no warning carries a detail.
+    assert.deepEqual(result.held, []);
     assert.ok(result.warnings.every((w) => /^The (executive summary|full health check)(, page \d+)?: [a-z ]+$/.test(w)), JSON.stringify(result.warnings));
     // The cover has room for the consultant's line.
     assert.deepEqual(result.warnings.filter((w) => /, page 1:/.test(w)), []);
   });
 
-  test("layout warnings leave the detail out", () => {
+  test("layout warnings leave the detail out, except a number check's figure and reason", () => {
     const warnings = layoutWarnings({
       executive: { pages: 6, passed: false, problems: [{ page: 2, check: "empty section", detail: 'only "Ada Lovelace"' }] },
-      full: { pages: 40, passed: false, problems: [{ page: 0, check: "page count", detail: "61 pages" }] },
+      full: { pages: 40, passed: false, problems: [{ page: 0, check: "page count", detail: "61 pages" }, { page: 12, check: "number check", detail: "£1.99m: not in the data" }] },
     });
-    assert.deepEqual(warnings, ["The executive summary, page 2: empty section", "The full health check: page count"]);
+    assert.deepEqual(warnings, ["The executive summary, page 2: empty section", "The full health check: page count", "The full health check, page 12: number check: £1.99m: not in the data"]);
+  });
+
+  test("the figures held back are the number check's alone, from every document", () => {
+    const layout = {
+      executive: { pages: 6, passed: false, problems: [{ page: 4, check: "number check", detail: "31.4: not in the data" }, { page: 5, check: "overflow", detail: "p: Ada Lovelace owns 40 deals" }] },
+      full: { pages: 40, passed: false, problems: [{ page: 12, check: "number check", detail: "£1.99m: can't be £1.99m of £1.2m" }, { page: 13, check: "leftover", detail: "NaN" }] },
+      ceo: { pages: 1, passed: false, problems: [{ page: 1, check: "number check", detail: "(whole text): The number check failed to run: boom" }] },
+    };
+    assert.deepEqual(heldFigures(layout), [
+      { document: "The executive summary", page: 4, figure: "31.4", reason: "not in the data" },
+      // Split at the first ": " only, so a reason that has one keeps it.
+      { document: "The full health check", page: 12, figure: "£1.99m", reason: "can't be £1.99m of £1.2m" },
+      { document: "The one page summary", page: 1, figure: "(whole text)", reason: "The number check failed to run: boom" },
+    ]);
+    assert.deepEqual(layoutWarnings(layout).filter((w) => /overflow|leftover/.test(w)), ["The executive summary, page 5: overflow", "The full health check, page 13: leftover"]);
+    assert.deepEqual(heldFigures({ executive: { pages: 6, passed: true, problems: [] }, full: { pages: 40, passed: false, problems: [{ page: 3, check: "overflow", detail: "x" }] } }), []);
+  });
+
+  test("the reason the documents were held back names each figure, ten at most", () => {
+    const one: HeldFigure = { document: "The full health check", page: 12, figure: "£1.99m", reason: "not in the data" };
+    assert.equal(
+      heldBackReason([one, { document: "The executive summary", page: 4, figure: "31.4", reason: "not in the data" }]),
+      "Held back: 2 figures on 2 pages can't be traced to the data. The full health check, page 12: £1.99m: not in the data. The executive summary, page 4: 31.4: not in the data. Edit the wording in those sections, approve them again, and make the documents again.",
+    );
+    assert.match(heldBackReason([one]), /^Held back: 1 figure on 1 page can't be traced/);
+    const many = Array.from({ length: 13 }, (_, i) => ({ ...one, figure: `£${i + 1}m`, page: i < 2 ? 12 : 20 }));
+    const reason = heldBackReason(many);
+    assert.match(reason, /^Held back: 13 figures on 2 pages /);
+    assert.match(reason, /£10m: not in the data\. And 3 more\. Edit the wording/);
+    assert.doesNotMatch(reason, /£11m/);
+    assert.doesNotMatch(heldBackReason([{ ...one, reason: "it\nbroke." }]), /\n|\.\./, "one line, one full stop");
   });
 });
 
