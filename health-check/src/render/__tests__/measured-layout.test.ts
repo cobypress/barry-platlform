@@ -7,7 +7,7 @@ import type { Browser, Page } from "playwright";
 import { ALL_MODULES, CPQ_MODULES, SALES_CLOUD_MODULES, SERVICE_CLOUD_MODULES } from "../../domains/index.ts";
 import { LENGTH_TOLERANCE, wordCount } from "../../narrative/draft.ts";
 import { Intake } from "../../narrative/intake.ts";
-import { buildReport, WORD_TARGETS, type BuiltReport, type ReportInput, type ReportOutputKey } from "../../narrative/sections.ts";
+import { buildReport, currentBody, WORD_TARGETS, type BuiltReport, type ReportInput, type ReportOutputKey } from "../../narrative/sections.ts";
 import { Pseudonymiser, type PseudonymEntry } from "../../privacy/pseudonymiser.ts";
 import { Score, type Finding } from "../../schemas/index.ts";
 import { runFromRecording } from "../../testing/harness.ts";
@@ -15,9 +15,9 @@ import { syntheticInterviews } from "../../testing/interviews.ts";
 import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
 import { syntheticSurvey } from "../../testing/survey.ts";
 import { EXECUTIVE_PAGES } from "../render-run.ts";
-import { EXECUTIVE_MAX_PAGES, executiveHtml, executiveMaxPages, hasBothVoices, planIntroHeight, RECHECK_EXECUTIVE_MAX_PAGES } from "../executive.ts";
+import { EXECUTIVE_MAX_PAGES, executiveHtml, executiveMaxPages, hasBothVoices, introLines, planIntroHeight, RECHECK_EXECUTIVE_MAX_PAGES } from "../executive.ts";
 import { fullReportHtmlAt, slideCounts, threeColumnItemHeight } from "../full-report.ts";
-import { paginateColumns } from "../html.ts";
+import { estimateLines, paginateColumns } from "../html.ts";
 import { compactMoney } from "../format.ts";
 import { restOf } from "../money.ts";
 import { launchBrowser, layoutOf } from "../pdf.ts";
@@ -211,6 +211,34 @@ describe("an estimate never counts a line too few", () => {
     } finally {
       await page.close();
     }
+  });
+
+  test("the plan's introduction is set a word at a time, so the engine's own is counted on the two lines it takes", async () => {
+    // DECISIONS.md 436: counted by characters, its 184 took three lines, and the Sales Cloud plan lost its twelfth action.
+    const { input, names } = await sampleOf(SAMPLES[0]![1]);
+    const report = buildReport(input);
+    const intro = currentBody(report.outputs.executive_summary, "plan_90_day");
+    assert.equal(intro.length, 184);
+    assert.equal(estimateLines(intro, 85), 3);
+    assert.equal(introLines(intro), 2);
+    const html = executiveHtml(report, names);
+    const page = await opened(html);
+    try {
+      const height = await page.evaluate(() => {
+        const plan = [...document.querySelectorAll(".page")].find((p) => p.querySelector(".eyebrow")?.textContent === "90-day plan")!;
+        return plan.querySelector<HTMLElement>("h2 + p")!.getBoundingClientRect().height;
+      });
+      assert.equal(Math.round(height / 20.25), 2);
+    } finally {
+      await page.close();
+    }
+    const actions = html.split('<section class="phase').slice(1).reduce((sum, block) => sum + (block.split("</section>")[0]!.match(/<li>/g) ?? []).length, 0);
+    assert.equal(actions, 12);
+    // A word that doesn't fit starts the next line, however few characters the line has.
+    assert.equal(introLines("mmmm ".repeat(10).trim()), 1);
+    assert.equal(introLines("mmmm ".repeat(11).trim()), 2);
+    // And narrow letters fit more than a character count allows.
+    assert.equal(introLines("i ".repeat(80).trim()), 1);
   });
 });
 
