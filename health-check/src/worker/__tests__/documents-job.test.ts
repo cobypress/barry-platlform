@@ -386,23 +386,33 @@ describe("the released documents", () => {
     assert.deepEqual(layoutWarnings({ executive: { pages: 6, passed: false, problems: [{ page: 3, check: "number check", detail: "jo@example.com: this id isn't in the data" }] }, full: { pages: 40, passed: true, problems: [] } }), ["The executive summary, page 3: number check: an identifier: this id isn't in the data"]);
   });
 
-  test("the reason the documents were held back names each figure, ten at most", () => {
+  test("the reason the documents were held back names each figure, ten at most, one line each", () => {
     const one: HeldFigure = { document: "The full health check", page: 12, figure: "£1.99m", reason: "not in the data" };
     assert.equal(
       heldBackReason([one, { document: "The executive summary", page: 4, figure: "31.4", reason: "not in the data" }]),
-      "Held back: 2 figures on 2 pages can't be traced to the data. The full health check, page 12: £1.99m: not in the data. The executive summary, page 4: 31.4: not in the data. Edit the wording in those sections, approve them again, and make the documents again.",
+      "Held back: 2 figures on 2 pages can't be traced to the data.\nThe full health check, page 12: £1.99m: not in the data.\nThe executive summary, page 4: 31.4: not in the data.\nEdit the wording in those sections, approve them again, and make the documents again.",
     );
     assert.match(heldBackReason([one]), /^Held back: 1 figure on 1 page can't be traced/);
     const many = Array.from({ length: 13 }, (_, i) => ({ ...one, figure: `£${i + 1}m`, page: i < 2 ? 12 : 20 }));
     const reason = heldBackReason(many);
     assert.match(reason, /^Held back: 13 figures on 2 pages /);
-    assert.match(reason, /£10m: not in the data\. And 3 more\. Edit the wording/);
+    assert.match(reason, /\n.*£10m: not in the data\.\nAnd 3 more\.\nEdit the wording/);
+    assert.equal(reason.split("\n").length, 13, "the count, ten figures, the rest counted, then what to do");
     assert.doesNotMatch(reason, /£11m/);
-    assert.doesNotMatch(heldBackReason([{ ...one, reason: "it\nbroke." }]), /\n|\.\./, "one line, one full stop");
     // The checker's own error message is cut short.
     const long = heldBackReason([{ document: "The full health check", page: 12, figure: "(whole text)", reason: `The number check failed to run: ${"x".repeat(500)}` }]);
-    assert.ok(long.includes(`The full health check, page 12: (whole text): The number check failed to run: ${"x".repeat(200 - 32)}. Edit`), long);
+    assert.ok(long.includes(`\nThe full health check, page 12: (whole text): The number check failed to run: ${"x".repeat(200 - 32)}.\nEdit`), long);
     assert.equal(heldBackSummary([one, one]), "Held back: 2 figures on 1 page can't be traced to the data. See the run's Release tab.");
+  });
+
+  test("a newline or a run of spaces inside a held reason doesn't start a line of its own", () => {
+    const one: HeldFigure = { document: "The full health check", page: 12, figure: "£1.99m", reason: "it\nbroke\r\n\n  badly." };
+    const lines = heldBackReason([one]).split("\n");
+    assert.deepEqual(lines, [
+      "Held back: 1 figure on 1 page can't be traced to the data.",
+      "The full health check, page 12: £1.99m: it broke badly.",
+      "Edit the wording in those sections, approve them again, and make the documents again.",
+    ]);
   });
 });
 

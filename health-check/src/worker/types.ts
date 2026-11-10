@@ -1,6 +1,6 @@
 import type { ScanResult } from "../scan/result.ts";
 import type { PulseResult } from "../pulse/result.ts";
-import type { FactsReport } from "../facts/summary.ts";
+import type { FactsFile, FactsReport } from "../facts/summary.ts";
 import { z } from "zod";
 import type { Intake } from "../narrative/intake.ts";
 import type { BenchmarkRow, Calibration, ConnectLink, Finding, ManualAnswer, ManualStep, Metric, NumberOverride, ReportSection, Run, Score, SectionVersion } from "../schemas/index.ts";
@@ -90,6 +90,12 @@ export type RunOutputRecord = {
   versions: SectionVersion[];
   /** What the facts step found, in names and counts (DECISIONS.md 324). Null when the run folder has no facts.json. */
   facts: FactsReport | null;
+  /**
+   * The whole of facts.json (DECISIONS.md 433): the names we assume, booleans
+   * and field types, never a record or a value. Null when there's no summary,
+   * or when the file names a fact we don't assume or is over the size cap.
+   */
+  factsFile: FactsFile | null;
 };
 
 /**
