@@ -573,7 +573,7 @@ describe("the money page fits its page, with a survey or without and a figure fo
     assert.equal(chartOf(roomy), "320");
   });
 
-  test("every module and CPQ without spend name all their lines, and the last row never stands for one that fits its row (DECISIONS.md 438)", async () => {
+  test("every module and CPQ without spend name all their lines, and the last row never stands for one line the page could hold (DECISIONS.md 438)", async () => {
     const namedOn = (page: string) => [...page.matchAll(/<span class="basis">/g)].length;
     const lastRow = (page: string) => /<tr><td>(And \d+ smaller lines?), in the raw notes\./.exec(page)?.[1] ?? null;
     for (const [name, options] of [SAMPLES[2]!, SAMPLES[3]!]) {
@@ -587,11 +587,12 @@ describe("the money page fits its page, with a survey or without and a figure fo
       assert.equal(namedOn(page), 8, name);
       assert.equal(lastRow(page), null, name);
       // With a survey, the eighth's basis takes a second line and the page can't hold it.
-      // Its label fits the row, so the row stands for two rather than for it alone.
+      // Its label fits the row, but the row is shorter than the line with its basis, so
+      // it stands for the eighth alone and the page names the seven it holds.
       const surveyed = buildReport({ ...input, survey: syntheticSurvey(12) });
       const crowded = moneyPageOf(executiveHtml(surveyed, names))!;
-      assert.deepEqual([namedOn(crowded), lastRow(crowded)], [6, "And 2 smaller lines"], name);
-      // Where the eighth's label would take more room than the row's own words, the row stands for it alone.
+      assert.deepEqual([namedOn(crowded), lastRow(crowded)], [7, "And 1 smaller line"], name);
+      // Where the eighth's label would take more room than the row's own words, the row stands for it alone too.
       const ordered = surveyed.value.groups.filter((g) => g.kind !== "exposure").sort((a, b) => b.counted.expected - a.counted.expected);
       ordered[7]!.label = draft(16, OPENINGS[1]!).replace(/\.$/, "");
       const longer = executiveHtml(surveyed, names);

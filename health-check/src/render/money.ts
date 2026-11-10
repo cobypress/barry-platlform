@@ -101,16 +101,17 @@ export function restOf(lines: ValueModel["groups"], from: number, k: "low" | "ex
 /**
  * How many lines the page's table names, the rest added up in its last row
  * (DECISIONS.md 435): from the most it has room for, one fewer at a time until
- * the page holds them. The last row never stands for one line whose label takes
- * no more room than the row's own words (438): that row is as tall as the line,
- * less its basis, so the line is named where the page holds it, and where it
- * doesn't, the row stands for two. Where the line's label would take more room,
- * the row still stands for it alone.
+ * the page holds them. The last row never stands for one line that would fit
+ * the page in its place (438): where its label takes no more room than the row's
+ * own words, the line is named if the page holds it with its basis. Where the
+ * page can't, the row is shorter than the line and stands for it alone, so the
+ * page still names every line it holds and never fewer than the cut gave. Where
+ * the line's label would take more room than the row, the row stands for it too.
  */
 export function linesToName(count: number, most: number, holds: (named: number) => boolean, fitsRestRow: (line: number) => boolean): number {
   let named = count > most ? most - 1 : count;
   while (named > 1 && !holds(named)) named -= 1;
-  if (count - named === 1 && fitsRestRow(named)) return holds(count) ? count : Math.max(1, named - 1);
+  if (count - named === 1 && fitsRestRow(named)) return holds(count) ? count : named;
   return named;
 }
 

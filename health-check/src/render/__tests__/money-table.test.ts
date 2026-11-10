@@ -36,15 +36,26 @@ describe("the money table", () => {
     for (const k of ["low", "expected", "high"] as const) assert.ok(Math.abs(money.reduce((sum, g) => sum + g.counted[k], 0) - total[k]) < 0.01 * money.length, k);
   });
 
-  test("the page's last row never stands for one line whose label fits its row (DECISIONS.md 438)", () => {
-    const fits = () => true;
-    const long = () => false;
-    // The page holds seven of eight: the eighth's label fits the row, but its basis doesn't fit the page, so the row stands for two.
-    assert.equal(linesToName(8, 8, (n) => n <= 7, fits), 6);
-    // Where its label is longer than the row's own words, the row stands for it alone: it takes less room than the line.
-    assert.equal(linesToName(8, 8, (n) => n <= 7, long), 7);
-    // Where the page holds every line, each is named.
+  // DECISIONS.md 438: the page's last row never stands for one line that would fit the page in its place.
+  const fits = () => true;
+  const long = () => false;
+
+  test("one line left that fits the page is named, with no last row (DECISIONS.md 438)", () => {
     assert.equal(linesToName(8, 8, () => true, fits), 8);
+    assert.equal(linesToName(8, 8, () => true, long), 8);
+  });
+
+  test("one line left whose label fits the row but which the page can't hold says \"And 1 smaller line\", naming as many as the cut gave (DECISIONS.md 438)", () => {
+    // The row is shorter than the line with its basis, so it stands for the line alone.
+    assert.equal(linesToName(8, 8, (n) => n <= 7, fits), 7);
+    assert.equal(linesToName(5, 8, (n) => n <= 4, fits), 4);
+  });
+
+  test("one line left whose label is longer than the row says \"And 1 smaller line\" (DECISIONS.md 438)", () => {
+    assert.equal(linesToName(8, 8, (n) => n <= 7, long), 7);
+  });
+
+  test("past the most the page has room for, the last row stands for the rest, and one line is always named (DECISIONS.md 435)", () => {
     // Past the most it has room for, the last row stands for the rest, never fewer than two.
     assert.equal(linesToName(9, 8, () => true, fits), 7);
     assert.equal(linesToName(16, 8, (n) => n <= 5, fits), 5);
