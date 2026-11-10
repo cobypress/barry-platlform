@@ -1,4 +1,4 @@
-import { closing, codeOnly, DATABASE_DML, DATABASE_QUERY, DML } from "./apex-scan.ts";
+import { closing, codeOnly, DATABASE_DML, DML } from "./apex-scan.ts";
 
 // What an Apex class or trigger works on, read from its text while the body is
 // in hand (DECISIONS.md 456 and 457). Comments go and every string is blanked
@@ -21,7 +21,15 @@ export type ApexTouches = {
   changes: ApexChange[];
   /** It builds a query at run time, so the objects that query reads aren't known. */
   dynamicQueries: boolean;
+  /** It searches, inline or at run time. A search isn't a query, and the objects it reads aren't kept. */
+  searches: boolean;
 };
+
+// Every Database method that runs a query string, WithBinds forms included, and
+// a search built at run time. Wider than the scan's DATABASE_QUERY, whose count
+// feeds a rule's figures.
+const RUN_TIME_QUERY = /\b(?:Database\s*\.\s*(?:query|countQuery|getQueryLocator|getCursor)\w*|Search\s*\.\s*query)\s*\(/gi;
+const SEARCH = /\[\s*FIND\b|\bSearch\s*\.\s*(?:query|find)\s*\(/i;
 
 const FROM = /\bFROM\s+([A-Za-z]\w*)/iy;
 const NESTED = /\(\s*SELECT\b/iy;
@@ -80,6 +88,7 @@ export function readTouches(body: string | undefined): ApexTouches | null {
     queriesTotal: objects.length,
     changes: CHANGES.filter((c) => kinds.has(c.toLowerCase())),
     // getQueryLocator given an inline query reads what that query says, which is read above.
-    dynamicQueries: [...code.matchAll(DATABASE_QUERY)].some((m) => !/^\s*\[/.test(code.slice(m.index + m[0].length))),
+    dynamicQueries: [...code.matchAll(RUN_TIME_QUERY)].some((m) => !/^\s*\[/.test(code.slice(m.index + m[0].length))),
+    searches: SEARCH.test(code),
   };
 }

@@ -120,6 +120,8 @@ export const HandbookApexTouches = z.strictObject({
   changes: z.array(z.enum(CHANGES)),
   /** It builds a query at run time, so what that query reads isn't known. */
   dynamicQueries: z.boolean(),
+  /** It searches. What a search reads isn't kept. */
+  searches: z.boolean(),
 });
 export type HandbookApexTouches = z.infer<typeof HandbookApexTouches>;
 

@@ -510,7 +510,7 @@ describe("Apex (decisions 456 and 457)", () => {
         apiVersion: 60,
         status: "Active",
         isTest: false,
-        touches: { queries: ["Opportunity"], queriesTotal: 1, changes: ["update"], dynamicQueries: false },
+        touches: { queries: ["Opportunity"], queriesTotal: 1, changes: ["update"], dynamicQueries: false, searches: false },
       });
       assert.deepEqual(h.apexClasses.items.map((c) => c.name), [...h.apexClasses.items.map((c) => c.name)].sort());
       assert.equal(h.apexClasses.items.find((c) => c.name === "OpportunityHandlerTest")!.isTest, true);
@@ -583,7 +583,7 @@ describe("Apex (decisions 456 and 457)", () => {
   });
 
   test("Apex that doesn't fit the format leaves no part kept, as the rest does", () => {
-    const bad = cls("Bad", { touches: { queries: ["Not an identifier"], queriesTotal: 1, changes: [], dynamicQueries: false } });
+    const bad = cls("Bad", { touches: { queries: ["Not an identifier"], queriesTotal: 1, changes: [], dynamicQueries: false, searches: false } });
     const h = buildHandbook(undefined, apex(ok([bad]), ok([])));
     for (const part of [h.flows, h.validationRules, h.apexClasses, h.apexTriggers]) {
       assert.ok(part.status === "unavailable");

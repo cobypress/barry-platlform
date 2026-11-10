@@ -31,7 +31,7 @@ export type ApexScan = {
 export const DML = /(?<=(?:^|[;{})]|\belse)\s*)\b(insert|update|upsert|delete|undelete|merge)\s+[\w(\[]/gi;
 export const DATABASE_DML = /\bDatabase\s*\.\s*(insert|update|upsert|delete|undelete|merge|convertLead)\s*\(/gi;
 const SOQL = /\[\s*SELECT\b/gi;
-export const DATABASE_QUERY = /\bDatabase\s*\.\s*(?:query|queryWithBinds|countQuery|getQueryLocator)\s*\(/gi;
+const DATABASE_QUERY = /\bDatabase\s*\.\s*(?:query|queryWithBinds|countQuery|getQueryLocator)\s*\(/gi;
 
 const count = (text: string, pattern: RegExp): number => text.match(pattern)?.length ?? 0;
 

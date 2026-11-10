@@ -70,6 +70,19 @@ describe("queries built at run time", () => {
     }
   });
 
+  test("the WithBinds forms, a cursor and a search built at run time say the same", () => {
+    for (const call of [
+      "Database.getQueryLocatorWithBinds(q, binds, AccessLevel.USER_MODE)",
+      "Database.countQueryWithBinds(q, binds, AccessLevel.USER_MODE)",
+      "Database.getCursor(q)",
+      "Database.getCursorWithBinds(q, binds, AccessLevel.USER_MODE)",
+      "Search.query(q)",
+    ]) {
+      const t = touches(`class A { void x() { ${call}; } }`);
+      assert.deepEqual([t.dynamicQueries, t.queries], [true, []], call);
+    }
+  });
+
   test("getQueryLocator given an inline query reads that query's object instead", () => {
     const t = touches("class B implements Database.Batchable<SObject> { public Database.QueryLocator start(Database.BatchableContext c) { return Database.getQueryLocator([SELECT Id FROM Contact]); } }");
     assert.deepEqual([t.dynamicQueries, t.queries], [false, ["Contact"]]);
@@ -80,11 +93,26 @@ describe("queries built at run time", () => {
   });
 });
 
+describe("searches", () => {
+  test("an inline search, Search.query or Search.find says it searches, and only Search.query is also a query built at run time", () => {
+    const inline = touches("class A { void x() { List<List<SObject>> r = [FIND :term IN ALL FIELDS RETURNING Account(Id), Contact(Id)]; } }");
+    assert.deepEqual([inline.searches, inline.dynamicQueries, inline.queries], [true, false, []]);
+    const query = touches("class A { void x() { List<List<SObject>> r = Search.query(q); } }");
+    assert.deepEqual([query.searches, query.dynamicQueries], [true, true]);
+    assert.equal(touches("class A { void x() { Search.SearchResults r = Search.find(q); } }").searches, true);
+  });
+
+  test("a class that only queries, or names a search in a comment or a string, doesn't search", () => {
+    assert.equal(touches("class A { void x() { Account a = [SELECT Id FROM Account]; Database.query(q); } }").searches, false);
+    assert.equal(touches("class A { // [FIND 'x' RETURNING Account]\n String s = 'Search.query(q)'; String find = 'x'; }").searches, false);
+  });
+});
+
 describe("a body Salesforce hides", () => {
   test("gives null for the whole reading, never empty lists", () => {
     assert.equal(readTouches("(hidden)"), null);
     assert.equal(readTouches(undefined), null);
     assert.equal(readTouches(""), null);
-    assert.deepEqual(readTouches("class A { }"), { queries: [], queriesTotal: 0, changes: [], dynamicQueries: false });
+    assert.deepEqual(readTouches("class A { }"), { queries: [], queriesTotal: 0, changes: [], dynamicQueries: false, searches: false });
   });
 });
