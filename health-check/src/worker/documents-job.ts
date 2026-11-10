@@ -197,13 +197,15 @@ function heldBackCount(held: HeldFigure[]): string {
  * Why the documents were held back, for the console's Release tab only: each
  * document, page, figure and reason, so a person knows which section to edit
  * (DECISIONS.md 430). Values that aren't plain figures are already masked
- * (heldFigures). One line.
+ * (heldFigures). One line per figure (DECISIONS.md 434): the count, each figure,
+ * then what to do. Whitespace is collapsed within each line, so a newline in a
+ * reason can't start a line of its own.
  */
 export function heldBackReason(held: HeldFigure[]): string {
   const sentence = (text: string): string => (/[.!?]$/.test(text) ? text : `${text}.`);
   const listed = held.slice(0, HELD_LISTED).map((h) => sentence(describeHeld({ ...h, reason: safeReason(new Error(h.reason)).slice(0, HELD_REASON_MAX) })));
   const more = held.length > HELD_LISTED ? [`And ${held.length - HELD_LISTED} more.`] : [];
-  return [heldBackCount(held), ...listed, ...more, "Edit the wording in those sections, approve them again, and make the documents again."].join(" ").replace(/\s+/g, " ");
+  return [heldBackCount(held), ...listed, ...more, "Edit the wording in those sections, approve them again, and make the documents again."].map((line) => line.replace(/\s+/g, " ")).join("\n");
 }
 
 /**
