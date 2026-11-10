@@ -8,7 +8,7 @@ import { INVENTORY_COLUMNS, inventoryRows, OBJECT_INVENTORY } from "../domains/c
 import { activeUsersChart, lightningChart, loginChannelsChart, processFlowChart, scorecardOptions, type Chart, closedAsChart, deliveryOutlookChart, HALF_WIDTH, lostByStageChart, pipelineOverTime, scorecardChart, stageFunnel, stageVelocityChart, topAccountsChart, winRateBySegment, winsByCustomerChart, wonValueByChart } from "./charts.ts";
 import { compactMoney, longDate, monthYear, percent, ukDates } from "./format.ts";
 import type { Calibration } from "../schemas/index.ts";
-import { chartSlot, coverScore, document, documentTitle, effortText, estimateLines, paginate, paginateColumns, paragraphs, renderContext, sentence, severityChip, valueFigure, valueText, type Render } from "./html.ts";
+import { chartSlot, coverScore, document, documentTitle, effortText, estimateLines, paginate, paginateColumns, paragraphs, renderContext, sentence, severityChip, valueFigure, valueText, wrappedLines, type Render } from "./html.ts";
 import { noteSections, referenceMap } from "./references.ts";
 import { scoreLine } from "./executive.ts";
 import { COMPARE_CSS, compareSlide } from "./compare.ts";
@@ -187,21 +187,6 @@ const TITLE_LINE = 44;
 const TITLE_CHARS = 48;
 const NOTE_LINE = 21;
 const NOTE_CHARS = 54;
-
-/** Lines of text wrapped at word breaks, as a browser sets it, to a cautious width. */
-function wrappedLines(text: string, chars: number): number {
-  let lines = 1;
-  let used = 0;
-  for (const word of text.split(/\s+/).filter(Boolean)) {
-    const need = used === 0 ? word.length : used + 1 + word.length;
-    if (need <= chars) used = need;
-    else {
-      lines += used === 0 ? Math.ceil(word.length / chars) - 1 : 1;
-      used = Math.min(word.length, chars);
-    }
-  }
-  return lines;
-}
 
 /**
  * The money working as the panel can hold it: whole lines of the working, in

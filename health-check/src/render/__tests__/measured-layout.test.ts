@@ -7,7 +7,8 @@ import type { Browser, Page } from "playwright";
 import { ALL_MODULES, CPQ_MODULES, SALES_CLOUD_MODULES, SERVICE_CLOUD_MODULES } from "../../domains/index.ts";
 import { LENGTH_TOLERANCE, wordCount } from "../../narrative/draft.ts";
 import { Intake } from "../../narrative/intake.ts";
-import { buildReport, WORD_TARGETS, type BuiltReport, type ReportInput, type ReportOutputKey } from "../../narrative/sections.ts";
+import { buildReport, currentBody, VALUE_TOTAL, WORD_TARGETS, type BuiltReport, type ReportInput, type ReportOutputKey } from "../../narrative/sections.ts";
+import { checkNumbers, scopeDataset } from "../../numbercheck/index.ts";
 import { Pseudonymiser, type PseudonymEntry } from "../../privacy/pseudonymiser.ts";
 import { Score, type Finding } from "../../schemas/index.ts";
 import { runFromRecording } from "../../testing/harness.ts";
@@ -15,9 +16,11 @@ import { syntheticInterviews } from "../../testing/interviews.ts";
 import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
 import { syntheticSurvey } from "../../testing/survey.ts";
 import { EXECUTIVE_PAGES } from "../render-run.ts";
-import { EXECUTIVE_MAX_PAGES, executiveHtml, executiveMaxPages, hasBothVoices, planIntroHeight, RECHECK_EXECUTIVE_MAX_PAGES } from "../executive.ts";
-import { fullReportHtmlAt, slideCounts, threeColumnItemHeight } from "../full-report.ts";
-import { paginateColumns } from "../html.ts";
+import { EXECUTIVE_MAX_PAGES, executiveHtml, executiveMaxPages, hasBothVoices, introLines, planIntroHeight, RECHECK_EXECUTIVE_MAX_PAGES } from "../executive.ts";
+import { fullReportHtml, fullReportHtmlAt, slideCounts, threeColumnItemHeight } from "../full-report.ts";
+import { estimateLines, paginateColumns, printed, renderContext } from "../html.ts";
+import { compactMoney } from "../format.ts";
+import { restOf } from "../money.ts";
 import { launchBrowser, layoutOf } from "../pdf.ts";
 
 // DECISIONS.md 442: a page laid out by estimate is held to measured text. Each
@@ -210,6 +213,78 @@ describe("an estimate never counts a line too few", () => {
       await page.close();
     }
   });
+
+  test("the plan's introduction is set a word at a time, so the engine's own is counted on the two lines it takes", async () => {
+    // DECISIONS.md 436: counted by characters, its 184 took three lines, and the Sales Cloud plan lost its twelfth action.
+    const { input, names } = await sampleOf(SAMPLES[0]![1]);
+    const report = buildReport(input);
+    const intro = currentBody(report.outputs.executive_summary, "plan_90_day");
+    assert.equal(intro.length, 184);
+    assert.equal(estimateLines(intro, 85), 3);
+    assert.equal(introLines(intro), 2);
+    const html = executiveHtml(report, names);
+    const page = await opened(html);
+    try {
+      const height = await page.evaluate(() => {
+        const plan = [...document.querySelectorAll(".page")].find((p) => p.querySelector(".eyebrow")?.textContent === "90-day plan")!;
+        return plan.querySelector<HTMLElement>("h2 + p")!.getBoundingClientRect().height;
+      });
+      assert.equal(Math.round(height / 20.25), 2);
+    } finally {
+      await page.close();
+    }
+    const actions = html.split('<section class="phase').slice(1).reduce((sum, block) => sum + (block.split("</section>")[0]!.match(/<li>/g) ?? []).length, 0);
+    assert.equal(actions, 12);
+    // A word that doesn't fit starts the next line, however few characters the line has.
+    assert.equal(introLines("mmmm ".repeat(10).trim()), 1);
+    assert.equal(introLines("mmmm ".repeat(11).trim()), 2);
+    // And narrow letters fit more than a character count allows.
+    assert.equal(introLines("i ".repeat(80).trim()), 1);
+  });
+
+  test("the plan's introduction is measured as it prints, where our words for the engine's are longer and an entity is one character", async () => {
+    const { input, names } = await sampleOf(SAMPLES[0]![1]);
+    const t = renderContext(names, loadCalibration().currency, false).t;
+    // Each entity is the one character it prints, at that character's width.
+    assert.equal(printed(t(`It's "a" & <b>.`)), `It's "a" & <b>.`);
+    // A space no line breaks at stays inside its word.
+    assert.equal(printed("90&#160;days").split(/\s+/).length, 1);
+    /** The plan with the engine's introduction changed: its lines in Chromium as stored and as printed, and the actions it shows. */
+    const planWith = async (from: string, to: string) => {
+      const report = buildReport(input);
+      const built = report.outputs.executive_summary;
+      const version = built.versions.find((v) => v.id === built.sections.find((s) => s.key === "plan_90_day")!.currentVersionId)!;
+      const stored = version.body.replace(from, to);
+      assert.notEqual(stored, version.body);
+      version.body = stored;
+      const html = executiveHtml(report, names);
+      const page = await opened(html);
+      try {
+        const lines = await page.evaluate((stored) => {
+          const plan = [...document.querySelectorAll(".page")].find((p) => p.querySelector(".eyebrow")?.textContent === "90-day plan")!;
+          const intro = plan.querySelector<HTMLElement>("h2 + p")!;
+          const asPrinted = intro.getBoundingClientRect().height;
+          intro.textContent = stored;
+          return [intro.getBoundingClientRect().height, asPrinted].map((h) => Math.round(h / 20.25));
+        }, stored);
+        const actions = html.split('<section class="phase').slice(1).reduce((sum, block) => sum + (block.split("</section>")[0]!.match(/<li>/g) ?? []).length, 0);
+        return { stored, shown: printed(t(stored)), lines, actions };
+      } finally {
+        await page.close();
+      }
+    };
+    // "The calibration" prints as "What we agreed with you": two lines as stored,
+    // three as printed, and the third costs the plan the action the engine's own
+    // introduction leaves room for.
+    const longer = await planWith("The full report has", "The calibration has");
+    assert.match(longer.shown, /What we agreed with you has/);
+    assert.deepEqual([introLines(longer.stored), introLines(longer.shown), ...longer.lines, longer.actions], [2, 3, 2, 3, 11]);
+    // An apostrophe is written &#39; on the page, five characters that print as one:
+    // counted as written it would take a third line, and an action, it doesn't.
+    const apostrophe = await planWith("Urgent fixes come first", "Urgent fixes don't wait");
+    assert.match(t(apostrophe.stored), /don&#39;t/);
+    assert.deepEqual([introLines(t(apostrophe.stored)), introLines(apostrophe.shown), ...apostrophe.lines, apostrophe.actions], [3, 2, 2, 2, 12]);
+  });
 });
 
 // The full report's three-column lists: "Each area at a glance" holds each area's
@@ -329,8 +404,7 @@ describe("with both a survey and interviews, what people say takes the page afte
       assert.ok(html.includes('<div class="eyebrow">Your investment</div>'), "the investment page");
       assert.equal(executiveMaxPages(report), EXECUTIVE_MAX_PAGES + 1);
       const layout = await layoutOf(browser, html, { minPages: EXECUTIVE_PAGES.min, maxPages: executiveMaxPages(report), dataset: report.dataset });
-      // Only the page count: "What it's worth" overflows here on the base commit too, which isn't this decision's.
-      assert.deepEqual(layout.problems.filter((p) => p.check === "page count"), []);
+      assert.deepEqual(layout.problems, []);
       assert.ok(layout.pages <= executiveMaxPages(report), `${layout.pages} pages`);
     });
   }
@@ -363,7 +437,9 @@ describe("with both a survey and interviews, what people say takes the page afte
   });
 
   test("with one or neither, the Verdict page is as it was, byte for byte", async () => {
-    // Hashes of the Verdict page before decision 442, on the Sales Cloud sample.
+    // Hashes of the Verdict page before decision 442, on the Sales Cloud sample. With
+    // interviews alone, each theme became its own spaced paragraph, the heading above
+    // them giving the gap back (DECISIONS.md 437).
     const { input, names } = await sampleOf(SAMPLES[0]![1]);
     const survey = syntheticSurvey(12);
     const cases = { neither: { interviews: undefined }, survey: { interviews: undefined, survey }, interviews: {} };
@@ -377,6 +453,154 @@ describe("with both a survey and interviews, what people say takes the page afte
     // Each case prints what it's named for, so the hashes hold the voice beside the verdict.
     assert.match(verdicts.survey!, /<h3 class="sub">What your team says/);
     assert.match(verdicts.interviews!, /<h3 class="sub">What your people told us<\/h3>/);
-    assert.deepEqual(Object.fromEntries(Object.entries(verdicts).map(([key, page]) => [key, sha(page)])), { neither: "3e24b50f30626758", survey: "d6592a20fda36044", interviews: "28f733269a6ba3b4" });
+    assert.deepEqual(Object.fromEntries(Object.entries(verdicts).map(([key, page]) => [key, sha(page)])), { neither: "3e24b50f30626758", survey: "d6592a20fda36044", interviews: "fc49259b482d76bf" });
+  });
+});
+
+// DECISIONS.md 435: the money page ("What it's worth") is held to its page by
+// measure. A survey can join the time lines into one that's the largest of
+// several, whose basis takes a second line, and a figure for what the customer
+// pays moves the seats off this page and draws the chart taller.
+const moneyPageOf = (html: string): string | undefined => pagesOf(html).find((p) => p.includes(`<div class="eyebrow">What it&#39;s worth</div>`));
+const MONEY_CASES: Array<[string, (input: ReportInput) => Partial<ReportInput>]> = [
+  ["no survey, no spend", () => ({})],
+  ["no survey, with spend", (input) => ({ intake: { ...input.intake!, salesforceSpendAnnual: 250_000 } })],
+  ["a survey, no spend", () => ({ survey: syntheticSurvey(12) })],
+  ["a survey, with spend", (input) => ({ intake: { ...input.intake!, salesforceSpendAnnual: 250_000 }, survey: syntheticSurvey(12) })],
+];
+
+/**
+ * The sample with nine lines of money of its own, each a value group labelled
+ * with the finding's title, at every length to sixteen words, and a survey and
+ * a figure for spend, so the page can't hold them all.
+ */
+function withManyLines(input: ReportInput): ReportInput {
+  const template = input.findings.find((f) => f.status === "issue")!;
+  const extra = Array.from({ length: 9 }, (_, i): Finding => ({
+    ...template,
+    id: `f-${String(900 + i).padStart(12, "0")}`,
+    ruleId: `synthetic.money_${i}`,
+    title: draft(8 + i, OPENINGS[i % OPENINGS.length]!).replace(/\.$/, ""),
+    severity: "low",
+    value: { kind: "licence_cost", amount: 31_000 + 4_700 * i, unit: "GBP", period: "per year", assumptions: ["A synthetic line for the money page."] },
+  }));
+  return { ...input, findings: [...input.findings, ...extra], intake: { ...input.intake!, salesforceSpendAnnual: 250_000 }, survey: syntheticSurvey(12) };
+}
+
+describe("the money page fits its page, with a survey or without and a figure for spend or without", () => {
+  for (const [name, options] of SAMPLES) {
+    test(name, async () => {
+      const { input, names } = await sampleOf(options);
+      const problems: string[] = [];
+      for (const [label, extra] of MONEY_CASES) {
+        const report = buildReport({ ...input, ...extra(input) });
+        const html = executiveHtml(report, names);
+        assert.ok(moneyPageOf(html), `${label}: the money page`);
+        // The whole summary, every check, with nothing carried over.
+        const layout = await layoutOf(browser, html, { minPages: EXECUTIVE_PAGES.min, maxPages: executiveMaxPages(report), dataset: report.dataset });
+        problems.push(...layout.problems.map((p) => `${label}, page ${p.page}: ${p.check}, ${p.detail}`));
+      }
+      assert.deepEqual(problems, []);
+    });
+  }
+
+  test("the chart takes its shorter height before the table names a line fewer, and only when it must", async () => {
+    const chartOf = (page: string) => /viewBox="0 0 800 (\d+)"/.exec(page)?.[1];
+    const namedOn = (page: string) => [...page.matchAll(/<span class="basis">/g)].length;
+    // Every module, with a survey and spend: the tall chart overflowed by 13px. The shorter one makes room for every line.
+    const every = await sampleOf(SAMPLES[3]![1]);
+    const full = buildReport({ ...every.input, ...MONEY_CASES[3]![1](every.input) });
+    const crowded = moneyPageOf(executiveHtml(full, every.names))!;
+    assert.equal(chartOf(crowded), "250");
+    assert.equal(namedOn(crowded), full.value.groups.filter((g) => g.kind !== "exposure").length);
+    assert.doesNotMatch(crowded, /smaller line/);
+    // Sales Cloud with spend has the room, so the chart keeps its height.
+    const sales = await sampleOf(SAMPLES[0]![1]);
+    const roomy = moneyPageOf(executiveHtml(buildReport({ ...sales.input, ...MONEY_CASES[1]![1](sales.input) }), sales.names))!;
+    assert.equal(chartOf(roomy), "320");
+  });
+
+  test("with more lines than the page holds, on long labels, it names fewer and adds up the rest", async () => {
+    const { input, names } = await sampleOf(SAMPLES[0]![1]);
+    const report = buildReport(withManyLines(input));
+    const html = executiveHtml(report, names);
+    const page = moneyPageOf(html)!;
+    const all = report.value.groups.filter((g) => g.kind !== "exposure").sort((a, b) => b.counted.expected - a.counted.expected);
+    assert.ok(all.length >= 15, `${all.length} lines`);
+    assert.deepEqual(await problemsOn(html, [{ page, label: "the money page" }], report), []);
+    // The chart took its shorter height, and the table named fewer lines than the most it can.
+    assert.match(page, /viewBox="0 0 800 250"/);
+    const named = [...page.matchAll(/<span class="basis">/g)].length;
+    assert.ok(named >= 1 && named < 7, `${named} lines named`);
+    // The largest, in order, then the rest in one row, and the rows add up to the total beneath them.
+    const m = (n: number) => compactMoney(n, report.value.currency);
+    const rows = /<tbody>([\s\S]*)<\/tbody>/.exec(page)![1]!.split("</tr>").filter(Boolean);
+    assert.equal(rows.length, named + 2);
+    all.slice(0, named).forEach((g, i) => assert.ok(rows[i]!.includes(`<td class="num">${m(g.counted.expected)}</td>`), `${g.label}: ${rows[i]}`));
+    const rest = rows[named]!;
+    assert.match(rest, new RegExp(`And ${all.length - named} smaller lines, in the raw notes\\.`));
+    assert.ok(rest.includes(`<td class="num">${m(restOf(all, named, "expected"))}</td><td class="num">${m(restOf(all, named, "low"))} to ${m(restOf(all, named, "high"))}</td>`), rest);
+    const { total } = report.value;
+    assert.ok(rows[named + 1]!.includes(`<td class="num">${m(total.expected)}</td><td class="num">${m(total.low)} to ${m(total.high)}</td>`), rows[named + 1]);
+    for (const k of ["low", "expected", "high"] as const) {
+      const named_ = all.slice(0, named).reduce((sum, g) => sum + g.counted[k], 0);
+      assert.ok(Math.abs(named_ + restOf(all, named, k) - total[k]) < 0.01 * all.length, `${k}: ${named_} and ${restOf(all, named, k)} make ${total[k]}`);
+    }
+  });
+
+  test("the count in its last row is a figure from the data at every cut the page or the slide can make", async () => {
+    // The estimate can name any number of lines from one up, so the count it leaves
+    // is held for every cut, not only the slide's or the one this sample makes.
+    const { input, names } = await sampleOf(SAMPLES[0]![1]);
+    const report = buildReport(withManyLines(input));
+    const n = report.value.groups.filter((g) => g.kind !== "exposure").length;
+    const page = moneyPageOf(executiveHtml(report, names))!;
+    const label = /<tr><td>(And \d+ smaller lines, in the raw notes\.)/.exec(page)![1]!;
+    assert.ok(n >= 15, `${n} lines`);
+    const counts = Array.from({ length: n - 1 }, (_, i) => n - 1 - i).map((c) => label.replace(/\d+ smaller lines/, c === 1 ? "1 smaller line" : `${c} smaller lines`));
+    // Against the data the layout check reads, and against the money's own figures
+    // alone: on this sample every count from 1 to 15 is some other figure too, so
+    // only the second shows the count is held for itself.
+    const money = scopeDataset(report.dataset, [VALUE_TOTAL]);
+    const untraced = counts.flatMap((text) => [report.dataset, money].flatMap((set) => checkNumbers(text, set).unmatched.map((u) => `${text} ${u.raw}: ${u.reason}`)));
+    assert.deepEqual(untraced, []);
+    // And the full report's slide, which names six and counts the rest, passes the
+    // number check as printed. Only that check: the slide isn't held by measure, and
+    // sixteen-word labels are longer than it was set for.
+    const full = fullReportHtml(report, names);
+    const slide = pagesOf(full).find((p) => p.includes('<div class="money">'))!;
+    assert.match(slide, new RegExp(`And ${n - 6} smaller lines, in the raw notes\\.`));
+    assert.deepEqual((await problemsOn(full, [{ page: slide, label: "the money slide" }], report)).filter((p) => p.includes("number check")), []);
+  });
+});
+
+describe("each theme under \"What your people told us\" is its own paragraph (DECISIONS.md 437)", () => {
+  test("on the Verdict page with interviews alone, and on the voices' page with a survey too, with the page's gap between them", async () => {
+    const { input, names } = await sampleOf(SAMPLES[0]![1]);
+    for (const [label, extra] of [["interviews alone", {}], ["both voices", { survey: syntheticSurvey(12) }]] as const) {
+      const report = buildReport({ ...input, ...extra });
+      const themes = currentBody(report.outputs.executive_summary, "interviews").split("\n\n");
+      assert.ok(themes.length >= 2, `${label}: ${themes.length} themes`);
+      // Set apart with a line between them, as an edit might, they still print one to a paragraph.
+      const built = report.outputs.executive_summary;
+      for (const body of [themes.join("\n\n"), themes.join("\n")]) {
+        built.versions.find((v) => v.id === built.sections.find((s) => s.key === "interviews")!.currentVersionId)!.body = body;
+        const html = executiveHtml(report, names);
+        const section = /<h3 class="sub">What your people told us<\/h3>([\s\S]*?)(?=<\/div>|<p style|<\/section>|<div class="footer")/.exec(html)![1]!.trim();
+        assert.equal(section, themes.map((t) => `<p class="theme">${t}</p>`).join(""), label);
+        assert.doesNotMatch(section, /<br>/);
+      }
+      const page = await opened(executiveHtml(report, names));
+      try {
+        const gaps = await page.evaluate(() => {
+          const ps = [...document.querySelectorAll<HTMLElement>("p.theme")];
+          const lead = document.querySelector<HTMLElement>(".lead p")!;
+          return { between: ps.slice(1).map((p, i) => p.getBoundingClientRect().top - ps[i]!.getBoundingClientRect().bottom), lead: parseFloat(getComputedStyle(lead).marginBottom) };
+        });
+        assert.deepEqual(gaps.between.map(Math.round), themes.slice(1).map(() => gaps.lead), label);
+      } finally {
+        await page.close();
+      }
+    }
   });
 });

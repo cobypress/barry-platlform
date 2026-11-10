@@ -6,7 +6,7 @@ import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { canRelease, type Finding, type Metric } from "../schemas/index.ts";
 import { deliveryOutlookChart, scorecardChart, scorecardOptions, winRateBySegment } from "./charts.ts";
 import { compactMoney, longDate, monthYear } from "./format.ts";
-import { chartSlot, coverScore, document, documentTitle, effortText, estimateLines, paginate, paragraphs, renderContext, severityChip, valueFigure, valueText, type Render } from "./html.ts";
+import { chartSlot, coverScore, document, documentTitle, effortText, estimateLines, paginate, paragraphs, printed, renderContext, severityChip, valueFigure, valueText, type Render } from "./html.ts";
 import { noteSections, referenceMap, valueItemId } from "./references.ts";
 import { investmentPage, MONEY_CSS, moneyPage } from "./money.ts";
 import { PROGRESS_CSS, progressPage } from "./progress.ts";
@@ -38,6 +38,8 @@ h2 { font-size: 30px; line-height: 1.2; font-weight: 600; margin: 6px 0 18px; }
 .issue .action { margin-top: 6px; }
 table.grid { font-size: 12.5px; margin-top: 8px; }
 h3.sub { font-size: 15px; font-weight: 600; margin: 22px 0 4px; }
+.theme + .theme { margin-top: 10px; }
+.beside-verdict h3.sub { margin-top: 12px; }
 .phase { margin-bottom: 12px; }
 .phase h3 { font-size: 15px; font-weight: 600; margin-bottom: 6px; }
 .phase li { margin-bottom: 4px; line-height: 1.45; }
@@ -73,21 +75,43 @@ export const EXECUTIVE_PLAN_ITEMS = 4;
 // just above what was measured, and the page has its full 925px. The layout
 // check measures the real thing.
 const PLAN_CHARS = 90;
-// The introduction runs the page's full 658px at 13.5px. Measured by its height,
-// on long-worded prose, the long words alone and the word target test's
-// vocabulary, from every word at every length to 60 words, the fewest characters
-// a line that never counted a line too few was 88 on the prose, and 91 and 92 on
-// the rest. At 100 a 13-word introduction took two lines counted as one, and the
-// plan ran into the footer (DECISIONS.md 442); 85 errs towards a new page. A line
-// is 20.25px (13.5px at 1.5), counted as 20.5.
-const INTRO_CHARS = 85;
+// The introduction runs the page's full 658px at 13.5px. It's set a word at a
+// time, as the browser sets it: a word that doesn't fit starts the next line,
+// and a word is as wide as its letters, each at the width Chromium gives it in
+// Poppins at 13.5px, rounded up. Characters a line can't do it: on long-worded
+// prose the most that never counted a line too few was 92, which still counted
+// the 184-character introduction the engine writes as three lines where it takes
+// two (DECISIONS.md 436). Wrapped by width, no draft from every word at every
+// length to 60 words was counted a line too few up to 658px, so 640 errs towards
+// a new page. A line is 20.25px (13.5px at 1.5), counted as 20.5.
+const INTRO_WIDTH = 640;
+/** a to z in Poppins at 13.5px. */
+const LOWER_WIDTHS = [9.2, 9.2, 8.2, 9.2, 8.4, 4.5, 9.2, 8.7, 3.4, 3.4, 7, 3.4, 14, 8.7, 8.7, 9.2, 9.2, 5.1, 7.1, 5, 8.7, 7.6, 11.1, 6.5, 7.6, 6.2];
+/** Any other character: capitals and figures at their widest, light punctuation, and the widest we measured for the rest. */
+const glyphWidth = (c: string): number =>
+  /[a-z]/.test(c) ? LOWER_WIDTHS[c.charCodeAt(0) - 97]! : /[MW]/.test(c) ? 13.2 : /[A-Z]/.test(c) ? 10.7 : /\d/.test(c) ? 8.6 : c === " " ? 3.6 : /[,.:;'!]/.test(c) ? 4.1 : c === "-" ? 7.5 : 14;
 const PLAN_LINE = 19.8;
 const PHASE_HEAD = 41;
 const PLAN_PAGE_BUDGET = 925;
 /** About the characters a reference tag takes beside an action, at 0.85em with its margin (DECISIONS.md 418). */
 const REF_CHARS = 5;
-/** The plan's introduction's height, its 14px margin included. */
-export const planIntroHeight = (intro: string): number => 14 + 20.5 * estimateLines(intro, INTRO_CHARS);
+/** Lines of the introduction, wrapped a word at a time by the width of its letters. */
+export function introLines(intro: string): number {
+  const width = (word: string) => [...word].reduce((sum, c) => sum + glyphWidth(c), 0);
+  let lines = 1;
+  let used = 0;
+  for (const word of intro.split(/\s+/).filter(Boolean)) {
+    const need = used === 0 ? width(word) : used + glyphWidth(" ") + width(word);
+    if (need <= INTRO_WIDTH || used === 0) used = need;
+    else {
+      lines += 1;
+      used = width(word);
+    }
+  }
+  return lines;
+}
+/** The plan's introduction's height, its 14px margin included, from its text as it prints. */
+export const planIntroHeight = (intro: string): number => 14 + 20.5 * introLines(intro);
 /** An action's height on the page, from its words and its references. */
 type ItemHeight = (f: Finding, quick: boolean) => number;
 // A quick win is a line here: its title says what to do, and the full report has the rest. The box's padding is the 20.
@@ -253,7 +277,13 @@ export function executiveHtml(report: BuiltReport, pseudonyms: Pseudonymiser): s
   // One line on AI readiness, only when its verdict is clear (DECISIONS.md 243).
   const aiLine = readinessLine(report.readiness);
   const teamSays = report.survey ? `<h3 class="sub">What your team says${report.survey.shown ? r.ref(SURVEY.responses) : ""}</h3>${paragraphs(r, currentBody(built, "team_survey"))}` : "";
-  const peopleTold = peopleSaid ? `<h3 class="sub">What your people told us</h3>${paragraphs(r, peopleSaid)}` : "";
+  // Each theme its own paragraph, with the gap the verdict's paragraphs have, so one doesn't run into the next (DECISIONS.md 437).
+  const themes = peopleSaid.split(/\n+/).filter((t) => t.trim()).map((t) => `<p class="theme">${r.t(t)}</p>`).join("");
+  const peopleTold = peopleSaid ? `<h3 class="sub">What your people told us</h3>${themes}` : "";
+  // The Verdict page is full on the longer samples' drafts at their targets: there the
+  // heading sits 10px nearer what's above it, giving back one gap, so two themes take
+  // the room they took before.
+  const peopleToldBesideVerdict = peopleTold ? `<div class="beside-verdict">${peopleTold}</div>` : "";
   // Both voices don't fit beside the verdict even on the engine's own text, so
   // together they take the next page; the sources line stays with the figures it
   // speaks for (DECISIONS.md 442). One alone stays where it always was.
@@ -265,7 +295,7 @@ export function executiveHtml(report: BuiltReport, pseudonyms: Pseudonymiser): s
     <table class="grid"><thead><tr><th>Issue</th><th style="width:34%">Impact</th></tr></thead><tbody>${top.map((f) => `<tr><td>${r.t(f.title)}${r.ref(f.id)}</td><td>${valueText(r, f).amount}</td></tr>`).join("")}</tbody></table>
     ${top.some((f) => f.value.kind !== "not_sized") && report.value.total.expected > 0 ? `<p style="margin-top:6px;color:var(--muted);font-size:0.85em">${r.t("Each figure here is the issue's own, at its full size, and some are at risk rather than money to win. \"What fixing this is worth\" counts a share of the money ones, each sum only once.")}</p>` : ""}
     ${voicesApart ? "" : teamSays}
-    ${voicesApart ? "" : peopleTold}
+    ${voicesApart ? "" : peopleToldBesideVerdict}
     <p style="margin-top:18px">${sourcesLine(report.survey?.shown === true, Boolean(peopleSaid))} Where we couldn't measure something, we say so rather than estimate it.</p>`);
   if (voicesApart) add(`<div class="eyebrow">Survey and interviews</div><h2>What your people say</h2>${teamSays}${peopleTold}`);
 
@@ -296,8 +326,9 @@ export function executiveHtml(report: BuiltReport, pseudonyms: Pseudonymiser): s
   });
 
   const intro = currentBody(built, "plan_90_day");
-  // The first page also carries the introduction, so it has less room.
-  const introHeight = planIntroHeight(intro);
+  // The first page also carries the introduction, so it has less room. It's measured as it
+  // prints: a name in place of its token, and our words for the engine's, can make it longer.
+  const introHeight = planIntroHeight(printed(r.t(intro)));
   // One page is kept back for the references.
   const risk = riskPage(r, report);
   if (risk) add(risk);

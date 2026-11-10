@@ -306,9 +306,10 @@ function valueFigures(value: ValueModel): FigureSet["figures"] {
     const shares = [g.realisation.low, g.realisation.expected, g.realisation.high].map((n) => percent(source, n * 100));
     return [...shares, ...g.lines.flatMap((l) => [cash(source, l.annual), cash(source, l.low), cash(source, l.expected), cash(source, l.high)])];
   });
-  // The money table's last row, when there are more lines than it has room for: the rest, added up (night 3 review).
+  // The money table's last row, when there are more lines than it has room for: the rest, added up (night 3 review),
+  // and how many they are. The page can name any number of lines from one (DECISIONS.md 435), so each cut is here.
   const money = value.groups.filter((g) => g.kind !== "exposure").sort((a, b) => b.counted.expected - a.counted.expected);
-  const rests = money.slice(1).flatMap((_, i) => (["low", "expected", "high"] as const).map((k) => cash(VALUE_TOTAL, restOf(money, i + 1, k))));
+  const rests = money.slice(1).flatMap((_, i) => [...(["low", "expected", "high"] as const).map((k) => cash(VALUE_TOTAL, restOf(money, i + 1, k))), number(VALUE_TOTAL, money.length - i - 1)]);
   return [...totals, ...rate, ...groups, ...rests];
 }
 

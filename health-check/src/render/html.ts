@@ -109,6 +109,30 @@ export const effortText = (f: Finding): string => `Effort: ${EFFORT_WORDS[f.effo
 /** Lines of wrapped text, near enough to decide what fits on a page. */
 export const estimateLines = (text: string, charsPerLine: number): number => Math.max(1, Math.ceil(text.length / charsPerLine));
 
+const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"' };
+/** One character for an entity: the one it shows, or a letter for a space a line can't break at. */
+const entity = (e: string): string => {
+  const c = e.startsWith("#") ? String.fromCharCode(Number(e.slice(1))) : (ENTITIES[e] ?? "x");
+  return /\s/.test(c) ? "x" : c;
+};
+/** Text as it prints: tags and the references in them as words, an entity as the one character it shows. */
+export const printed = (html: string): string => html.replace(/<[^>]*>/g, " ").replace(/&(#\d+|[a-z]+);/g, (_, e: string) => entity(e));
+
+/** Lines of text wrapped at word breaks, as a browser sets it, to a cautious width: a word that doesn't fit starts the next line. */
+export function wrappedLines(text: string, chars: number): number {
+  let lines = 1;
+  let used = 0;
+  for (const word of text.split(/\s+/).filter(Boolean)) {
+    const need = used === 0 ? word.length : used + 1 + word.length;
+    if (need <= chars) used = need;
+    else {
+      lines += used === 0 ? Math.ceil(word.length / chars) - 1 : 1;
+      used = Math.min(word.length, chars);
+    }
+  }
+  return lines;
+}
+
 /** Fills pages in order, moving to a new page when the next item wouldn't fit. */
 export function paginate<T>(items: T[], heightOf: (item: T) => number, budget: number): T[][] {
   const pages: T[][] = [];
