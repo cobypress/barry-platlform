@@ -256,3 +256,12 @@ b) Does a Tooling query of `FieldDefinition` accept `Label` beside `QualifiedApi
 c) Does `SELECT SubscriberPackage.Name, SubscriberPackage.NamespacePrefix FROM InstalledSubscriberPackage` through the Tooling API work for a read-only integration user, and give the app's name as the customer knows it? If it's refused, apps are named by namespace, as before.
 d) In a retrieved object's metadata, is a record type's `<label>` always there, and is Tooling's `RecordType.Name` the same label?
 e) For CPQ: is a price action's `SBQQ__TargetObject__c` "Quote" or "Quote Line", so the field it sets is on `SBQQ__Quote__c` or `SBQQ__QuoteLine__c`, and its label is that object's describe's?
+
+## The org handbook's data (DECISIONS.md 451 to 454)
+
+To check on a sandbox or a developer org, not a customer's. The route test in `src/handbook/__tests__/handbook.test.ts` feeds a hand-written Tooling flow built on these answers.
+
+a) In Tooling's `Flow.Metadata`, are a value's unused members (`stringValue`, `numberValue`, `booleanValue` and the rest) null, rather than a default such as 0 or false? And is a number 5000 where the retrieve says 5000.0? If a default comes back, an entry condition's value could read as the wrong one.
+b) Does every element on the canvas carry `locationX` on both routes, auto-layout flows included? An element of a kind the parser doesn't know is kept when it has one, or a connector.
+c) Does Tooling's `ValidationRule.Metadata` give `errorMessage` and `errorDisplayField`, as the Metadata API does? If not, the Tooling route's rules show no message.
+d) Does a retrieve write a quote inside a formula as `&quot;`? The handbook redacts each value after parsing either way, so this only says how often the whole-file redaction misses one.
