@@ -243,9 +243,13 @@ function writeFlow(doc: Doc, flow: HandbookFlow): void {
     const step = steps[n - 1]!;
     return `step ${n}, ${step.label ?? step.name}`;
   };
+  // None reached means the start names no first step: saying they never run
+  // would be our claim, not the file's, so this says only what the file holds.
+  const noStart = steps.length > 0 && steps.every((s) => !s.reached);
+  if (noStart) doc.para({ text: "This flow's metadata doesn't say where it starts, so its steps are listed in the order Salesforce gives them.", bold: true });
   steps.forEach((step, i) => {
-    if (!step.reached && (i === 0 || steps[i - 1]!.reached)) doc.para({ text: "No path from the flow's start reaches the steps below, so they never run as the flow stands.", bold: true });
-    writeStep(doc, step, i + 1, where);
+    if (!noStart && !step.reached && (i === 0 || steps[i - 1]!.reached)) doc.para({ text: "No path from the flow's start reaches the steps below, so they never run as the flow stands.", bold: true });
+    writeStep(doc, step, i + 1, where, !noStart);
   });
 }
 
@@ -264,10 +268,10 @@ function writeEntry(doc: Doc, entry: HandbookFlow["start"]["entry"]): void {
   }
 }
 
-function writeStep(doc: Doc, step: HandbookStep, n: number, where: (name: string | null) => string): void {
+function writeStep(doc: Doc, step: HandbookStep, n: number, where: (name: string | null) => string, markUnreached: boolean): void {
   const title: Run[] = [{ text: `${n}. ${stepKindWords(step.kind)}: ${step.label ?? step.name}`, bold: true }];
   if (step.label !== null && step.label !== step.name) title.push({ text: `  ${step.name}`, muted: true });
-  if (!step.reached) title.push({ text: "  (no path reaches this step)", bold: true });
+  if (markUnreached && !step.reached) title.push({ text: "  (no path reaches this step)", bold: true });
   const lines: Run[][] = [];
   if (step.object) lines.push([{ text: `On: ${step.object}` }]);
   const fieldsTotal = Math.max(step.fieldsTotal, step.fields.length);

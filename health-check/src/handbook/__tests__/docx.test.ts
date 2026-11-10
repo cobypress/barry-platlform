@@ -123,6 +123,20 @@ describe("the handbook as a Word document", () => {
     assert.deepEqual(stepLines(text, "Mixed").map((l) => l.split("\n")[0]), ["1. Assignment: First", "2. Assignment: Second", "3. Assignment: Lost  (no path reaches this step)"]);
   });
 
+  test("a flow whose start names no first step says its metadata doesn't say where it starts, and marks no step", async () => {
+    // detail.ts marks every step unreached when the start names none: that's the file's silence, not a fact about the flow.
+    const steps = [step("Assign_Lead", { next: "Notify" }), step("Notify")].map((s) => ({ ...s, reached: false }));
+    const items = [flow("No_Start", { steps, stepsTotal: 2 }), flow("Some_Reached", { steps: [step("First"), step("Lost", { reached: false })], stepsTotal: 2 })];
+    const { text } = await render(handbook({ flows: { status: "ok", items } }));
+    const noStart = text.slice(text.indexOf("### No Start\n")).split(/\n### /)[0]!;
+    assert.match(noStart, /\nSteps: 2 steps\.\n\nThis flow's metadata doesn't say where it starts, so its steps are listed in the order Salesforce gives them\.\n\n1\. Assignment: Assign Lead  Assign_Lead\nThen: step 2, Notify\n\n2\. Assignment: Notify\nThen: the flow ends here/);
+    assert.doesNotMatch(noStart, /no path reaches this step|No path from the flow's start|never run/);
+    // A flow with a start that reaches some steps keeps the old words, once, and marks the rest.
+    const some = text.slice(text.indexOf("### Some Reached\n")).split(/\n### /)[0]!;
+    assert.match(some, /1\. Assignment: First\nThen: the flow ends here\n\nNo path from the flow's start reaches the steps below, so they never run as the flow stands\.\n\n2\. Assignment: Lost  \(no path reaches this step\)/);
+    assert.doesNotMatch(some, /doesn't say where it starts/);
+  });
+
   test("words each kind of step the engine knows, and an unknown kind under Salesforce's own name", async () => {
     const kinds = [...Object.keys(STEP_WORDS), "promptSteps", "someFutureKind"];
     const steps = kinds.map((kind, i) => step(`S${i}`, { kind, label: `Step ${i}` }));
