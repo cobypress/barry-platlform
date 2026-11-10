@@ -108,8 +108,20 @@ export const EXECUTIVE_MAX_PAGES = 14;
 /** A re-check's, with the 10% headroom decision 286 gave the decks: it carries a "since last time" page the first check doesn't (DECISIONS.md 353). */
 export const RECHECK_EXECUTIVE_MAX_PAGES = 15;
 
-/** The ceiling for this report's summary. */
-export const executiveMaxPages = (report: Pick<BuiltReport, "progress">): number => (report.progress ? RECHECK_EXECUTIVE_MAX_PAGES : EXECUTIVE_MAX_PAGES);
+/** The interviews' strong themes, as the Verdict page prints them, or nothing when there are none (DECISIONS.md 185). */
+const peopleSaidOf = (report: Pick<BuiltReport, "outputs">): string => {
+  const built = report.outputs.executive_summary;
+  return built.sections.some((s) => s.key === "interviews") ? currentBody(built, "interviews") : "";
+};
+
+/**
+ * Both a survey and interviews to show: together they don't fit beside the
+ * verdict, so they take a page of their own after it (DECISIONS.md 442).
+ */
+export const hasBothVoices = (report: Pick<BuiltReport, "survey" | "outputs">): boolean => Boolean(report.survey) && peopleSaidOf(report) !== "";
+
+/** The ceiling for this report's summary. The voices' own page raises it by one, as a re-check's "since last time" page does. */
+export const executiveMaxPages = (report: Pick<BuiltReport, "progress" | "survey" | "outputs">): number => (report.progress ? RECHECK_EXECUTIVE_MAX_PAGES : EXECUTIVE_MAX_PAGES) + (hasBothVoices(report) ? 1 : 0);
 
 type PlanPage = Array<PlanBlock | { intro: true }>;
 
@@ -229,7 +241,7 @@ export function executiveHtml(report: BuiltReport, pseudonyms: Pseudonymiser): s
   const setupReview = isSetupReview(run);
 
   // Only the strong themes, and only when there are some (DECISIONS.md 185).
-  const peopleSaid = built.sections.some((s) => s.key === "interviews") ? currentBody(built, "interviews") : "";
+  const peopleSaid = peopleSaidOf(report);
 
   const pages: string[] = [];
   const add = (html: string, classes = ""): void => {
@@ -245,7 +257,7 @@ export function executiveHtml(report: BuiltReport, pseudonyms: Pseudonymiser): s
   // Both voices don't fit beside the verdict even on the engine's own text, so
   // together they take the next page; the sources line stays with the figures it
   // speaks for (DECISIONS.md 442). One alone stays where it always was.
-  const voicesApart = teamSays !== "" && peopleTold !== "";
+  const voicesApart = hasBothVoices(report);
   add(`<div class="eyebrow">Verdict</div><div class="headline">${r.t(verdict.headline)}</div><div class="lead">${paragraphs(r, currentBody(built, "verdict").replace(`${verdict.headline}.\n\n`, ""))}</div>
     <div class="stat-row" style="margin-top:18px">${report.overall.status === "measured" ? `<div class="stat"><b>${report.overall.score}</b><span>Barometer score</span></div>` : ""}<div class="stat"><b>${verdict.issues}</b><span>Issues</span></div><div class="stat"><b>${verdict.critical}</b><span>Critical</span></div><div class="stat"><b>${verdict.high}</b><span>High</span></div><div class="stat"><b>${notMeasurable}</b><span>Not measurable</span></div></div>${unmeasuredLine(r, report)}
     ${aiLine ? `<p class="small-note" style="margin-top:10px">${r.t(aiLine)}</p>` : ""}

@@ -15,7 +15,7 @@ import { syntheticInterviews } from "../../testing/interviews.ts";
 import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
 import { syntheticSurvey } from "../../testing/survey.ts";
 import { EXECUTIVE_PAGES } from "../render-run.ts";
-import { executiveHtml, executiveMaxPages, planIntroHeight } from "../executive.ts";
+import { EXECUTIVE_MAX_PAGES, executiveHtml, executiveMaxPages, hasBothVoices, planIntroHeight, RECHECK_EXECUTIVE_MAX_PAGES } from "../executive.ts";
 import { fullReportHtmlAt, slideCounts, threeColumnItemHeight } from "../full-report.ts";
 import { paginateColumns } from "../html.ts";
 import { launchBrowser, layoutOf } from "../pdf.ts";
@@ -317,6 +317,40 @@ describe("with both a survey and interviews, what people say takes the page afte
       assert.deepEqual(layout.problems, [], JSON.stringify(layout.problems.slice(0, 8)));
     });
   }
+
+  // The voices' page is one more, so the ceiling rises by one, as a re-check's does
+  // for its "since last time" page. Without it, a run that also has the
+  // investment page left the plan no page and still printed one, past the ceiling.
+  for (const [name, options] of [SAMPLES[2]!, SAMPLES[3]!]) {
+    test(`${name}, with the investment page too, stays within its ceiling`, async () => {
+      const { input, names } = await sampleOf(options);
+      const report = buildReport({ ...input, intake: { ...input.intake!, salesforceSpendAnnual: 250_000 }, survey: syntheticSurvey(12) });
+      const html = executiveHtml(report, names);
+      assert.ok(html.includes('<div class="eyebrow">Your investment</div>'), "the investment page");
+      assert.equal(executiveMaxPages(report), EXECUTIVE_MAX_PAGES + 1);
+      const layout = await layoutOf(browser, html, { minPages: EXECUTIVE_PAGES.min, maxPages: executiveMaxPages(report), dataset: report.dataset });
+      // Only the page count: "What it's worth" overflows here on the base commit too, which isn't this decision's.
+      assert.deepEqual(layout.problems.filter((p) => p.check === "page count"), []);
+      assert.ok(layout.pages <= executiveMaxPages(report), `${layout.pages} pages`);
+    });
+  }
+
+  test("the ceiling rises only with both voices, on a first check and a re-check", async () => {
+    const { input } = await sampleOf(SAMPLES[0]![1]);
+    const survey = syntheticSurvey(12);
+    const fixed = new Set(input.findings.filter((f) => f.status === "issue").map((f) => f.ruleId).slice(0, 3));
+    const later = input.findings.map((f): Finding => (fixed.has(f.ruleId) && f.status === "issue" ? { ...f, status: "passed", value: { kind: "not_sized", reason: "Passed." } } : f));
+    const recheck = (extra: Partial<ReportInput>) => buildReport({ ...input, ...extra, run: { ...input.run, id: `${input.run.id}-recheck`, baselineRunId: input.run.id }, findings: later, baseline: input });
+    const cases: Array<[string, Partial<ReportInput>, boolean]> = [["neither", { interviews: undefined }, false], ["a survey", { interviews: undefined, survey }, false], ["interviews", {}, false], ["both", { survey }, true]];
+    for (const [label, extra, both] of cases) {
+      const first = buildReport({ ...input, ...extra });
+      const again = recheck(extra);
+      assert.ok(again.progress, label);
+      assert.equal(hasBothVoices(first), both, label);
+      assert.equal(executiveMaxPages(first), EXECUTIVE_MAX_PAGES + (both ? 1 : 0), label);
+      assert.equal(executiveMaxPages(again), RECHECK_EXECUTIVE_MAX_PAGES + (both ? 1 : 0), label);
+    }
+  });
 
   test("a thin org's line stays on the Verdict page", async () => {
     const { input, names } = await sampleOf(SAMPLES[0]![1]);
