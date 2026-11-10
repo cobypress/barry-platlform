@@ -61,6 +61,22 @@ describe("the kinds of change it makes", () => {
   test("a change in a comment or a string isn't read", () => {
     assert.deepEqual(touches("class A { // update records;\n String s = '; delete everything'; }").changes, []);
   });
+
+  test("UPDATE TRACKING and UPDATE VIEWSTAT in a query or a search aren't an update, nor is FOR UPDATE", () => {
+    for (const query of [
+      "[FIND :term IN ALL FIELDS RETURNING KnowledgeArticleVersion(Id, Title WHERE PublishStatus = 'Online') UPDATE TRACKING]",
+      "[SELECT Id FROM FAQ__kav WHERE (Id = :x) UPDATE TRACKING]",
+      "[SELECT Id FROM FAQ__kav WITH DATA CATEGORY Geography__c AT (usa__c, uk__c) UPDATE VIEWSTAT]",
+      "[SELECT Id FROM Account FOR UPDATE]",
+    ]) {
+      assert.deepEqual(touches(`class A { void x() { List<SObject> r = ${query}; } }`).changes, [], query);
+    }
+  });
+
+  test("a real update on the statement after a query is still read, and so is one given a query", () => {
+    assert.deepEqual(touches("class A { void x() { Account a = [SELECT Id FROM Account WHERE (Id = :x) LIMIT 1]; update a; } }").changes, ["update"]);
+    assert.deepEqual(touches("class A { void x() { update [SELECT Id FROM Account WHERE (Id = :x)]; } }").changes, ["update"]);
+  });
 });
 
 describe("queries built at run time", () => {

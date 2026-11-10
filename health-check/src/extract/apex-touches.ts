@@ -1,4 +1,4 @@
-import { closing, codeOnly, DATABASE_DML, DML } from "./apex-scan.ts";
+import { closing, codeOnly, DATABASE_DML, DML, withoutInlineQueries } from "./apex-scan.ts";
 
 // What an Apex class or trigger works on, read from its text while the body is
 // in hand (DECISIONS.md 456 and 457). Comments go and every string is blanked
@@ -80,8 +80,10 @@ export function readTouches(body: string | undefined): ApexTouches | null {
   for (const name of named) if (!seen.has(name.toLowerCase())) seen.set(name.toLowerCase(), name);
   const objects = [...seen.values()].sort(byLowerCase);
 
+  // Nothing inside an inline query's or search's brackets is a statement.
+  const statements = withoutInlineQueries(code);
   const kinds = new Set<string>();
-  for (const pattern of [DML, DATABASE_DML]) for (const m of code.matchAll(pattern)) kinds.add(m[1]!.toLowerCase());
+  for (const pattern of [DML, DATABASE_DML]) for (const m of statements.matchAll(pattern)) kinds.add(m[1]!.toLowerCase());
 
   return {
     queries: objects.slice(0, MAX_QUERIED_OBJECTS),
