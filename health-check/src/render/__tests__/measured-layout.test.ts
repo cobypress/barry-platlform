@@ -18,6 +18,8 @@ import { EXECUTIVE_PAGES } from "../render-run.ts";
 import { EXECUTIVE_MAX_PAGES, executiveHtml, executiveMaxPages, hasBothVoices, planIntroHeight, RECHECK_EXECUTIVE_MAX_PAGES } from "../executive.ts";
 import { fullReportHtmlAt, slideCounts, threeColumnItemHeight } from "../full-report.ts";
 import { paginateColumns } from "../html.ts";
+import { compactMoney } from "../format.ts";
+import { restOf } from "../money.ts";
 import { launchBrowser, layoutOf } from "../pdf.ts";
 
 // DECISIONS.md 442: a page laid out by estimate is held to measured text. Each
@@ -329,8 +331,7 @@ describe("with both a survey and interviews, what people say takes the page afte
       assert.ok(html.includes('<div class="eyebrow">Your investment</div>'), "the investment page");
       assert.equal(executiveMaxPages(report), EXECUTIVE_MAX_PAGES + 1);
       const layout = await layoutOf(browser, html, { minPages: EXECUTIVE_PAGES.min, maxPages: executiveMaxPages(report), dataset: report.dataset });
-      // Only the page count: "What it's worth" overflows here on the base commit too, which isn't this decision's.
-      assert.deepEqual(layout.problems.filter((p) => p.check === "page count"), []);
+      assert.deepEqual(layout.problems, []);
       assert.ok(layout.pages <= executiveMaxPages(report), `${layout.pages} pages`);
     });
   }
@@ -378,5 +379,90 @@ describe("with both a survey and interviews, what people say takes the page afte
     assert.match(verdicts.survey!, /<h3 class="sub">What your team says/);
     assert.match(verdicts.interviews!, /<h3 class="sub">What your people told us<\/h3>/);
     assert.deepEqual(Object.fromEntries(Object.entries(verdicts).map(([key, page]) => [key, sha(page)])), { neither: "3e24b50f30626758", survey: "d6592a20fda36044", interviews: "28f733269a6ba3b4" });
+  });
+});
+
+// DECISIONS.md 435: the money page ("What it's worth") is held to its page by
+// measure. A survey can join the time lines into one that's the largest of
+// several, whose basis takes a second line, and a figure for what the customer
+// pays moves the seats off this page and draws the chart taller.
+const moneyPageOf = (html: string): string | undefined => pagesOf(html).find((p) => p.includes(`<div class="eyebrow">What it&#39;s worth</div>`));
+const MONEY_CASES: Array<[string, (input: ReportInput) => Partial<ReportInput>]> = [
+  ["no survey, no spend", () => ({})],
+  ["no survey, with spend", (input) => ({ intake: { ...input.intake!, salesforceSpendAnnual: 250_000 } })],
+  ["a survey, no spend", () => ({ survey: syntheticSurvey(12) })],
+  ["a survey, with spend", (input) => ({ intake: { ...input.intake!, salesforceSpendAnnual: 250_000 }, survey: syntheticSurvey(12) })],
+];
+
+describe("the money page fits its page, with a survey or without and a figure for spend or without", () => {
+  for (const [name, options] of SAMPLES) {
+    test(name, async () => {
+      const { input, names } = await sampleOf(options);
+      const problems: string[] = [];
+      for (const [label, extra] of MONEY_CASES) {
+        const report = buildReport({ ...input, ...extra(input) });
+        const html = executiveHtml(report, names);
+        assert.ok(moneyPageOf(html), `${label}: the money page`);
+        // The whole summary, every check, with nothing carried over.
+        const layout = await layoutOf(browser, html, { minPages: EXECUTIVE_PAGES.min, maxPages: executiveMaxPages(report), dataset: report.dataset });
+        problems.push(...layout.problems.map((p) => `${label}, page ${p.page}: ${p.check}, ${p.detail}`));
+      }
+      assert.deepEqual(problems, []);
+    });
+  }
+
+  test("the chart takes its shorter height before the table names a line fewer, and only when it must", async () => {
+    const chartOf = (page: string) => /viewBox="0 0 800 (\d+)"/.exec(page)?.[1];
+    const namedOn = (page: string) => [...page.matchAll(/<span class="basis">/g)].length;
+    // Every module, with a survey and spend: the tall chart overflowed by 13px. The shorter one makes room for every line.
+    const every = await sampleOf(SAMPLES[3]![1]);
+    const full = buildReport({ ...every.input, ...MONEY_CASES[3]![1](every.input) });
+    const crowded = moneyPageOf(executiveHtml(full, every.names))!;
+    assert.equal(chartOf(crowded), "250");
+    assert.equal(namedOn(crowded), full.value.groups.filter((g) => g.kind !== "exposure").length);
+    assert.doesNotMatch(crowded, /smaller line/);
+    // Sales Cloud with spend has the room, so the chart keeps its height.
+    const sales = await sampleOf(SAMPLES[0]![1]);
+    const roomy = moneyPageOf(executiveHtml(buildReport({ ...sales.input, ...MONEY_CASES[1]![1](sales.input) }), sales.names))!;
+    assert.equal(chartOf(roomy), "320");
+  });
+
+  test("with more lines than the page holds, on long labels, it names fewer and adds up the rest", async () => {
+    const { input, names } = await sampleOf(SAMPLES[0]![1]);
+    // Lines of their own, each a value group labelled with the finding's title, at
+    // every length to sixteen words, so the page can't hold them all.
+    const template = input.findings.find((f) => f.status === "issue")!;
+    const extra = Array.from({ length: 9 }, (_, i): Finding => ({
+      ...template,
+      id: `f-${String(900 + i).padStart(12, "0")}`,
+      ruleId: `synthetic.money_${i}`,
+      title: draft(8 + i, OPENINGS[i % OPENINGS.length]!).replace(/\.$/, ""),
+      severity: "low",
+      value: { kind: "licence_cost", amount: 31_000 + 4_700 * i, unit: "GBP", period: "per year", assumptions: ["A synthetic line for the money page."] },
+    }));
+    const report = buildReport({ ...input, findings: [...input.findings, ...extra], intake: { ...input.intake!, salesforceSpendAnnual: 250_000 }, survey: syntheticSurvey(12) });
+    const html = executiveHtml(report, names);
+    const page = moneyPageOf(html)!;
+    const all = report.value.groups.filter((g) => g.kind !== "exposure").sort((a, b) => b.counted.expected - a.counted.expected);
+    assert.ok(all.length >= 15, `${all.length} lines`);
+    assert.deepEqual(await problemsOn(html, [{ page, label: "the money page" }], report), []);
+    // The chart took its shorter height, and the table named fewer lines than the most it can.
+    assert.match(page, /viewBox="0 0 800 250"/);
+    const named = [...page.matchAll(/<span class="basis">/g)].length;
+    assert.ok(named >= 1 && named < 7, `${named} lines named`);
+    // The largest, in order, then the rest in one row, and the rows add up to the total beneath them.
+    const m = (n: number) => compactMoney(n, report.value.currency);
+    const rows = /<tbody>([\s\S]*)<\/tbody>/.exec(page)![1]!.split("</tr>").filter(Boolean);
+    assert.equal(rows.length, named + 2);
+    all.slice(0, named).forEach((g, i) => assert.ok(rows[i]!.includes(`<td class="num">${m(g.counted.expected)}</td>`), `${g.label}: ${rows[i]}`));
+    const rest = rows[named]!;
+    assert.match(rest, new RegExp(`And ${all.length - named} smaller lines, in the raw notes\\.`));
+    assert.ok(rest.includes(`<td class="num">${m(restOf(all, named, "expected"))}</td><td class="num">${m(restOf(all, named, "low"))} to ${m(restOf(all, named, "high"))}</td>`), rest);
+    const { total } = report.value;
+    assert.ok(rows[named + 1]!.includes(`<td class="num">${m(total.expected)}</td><td class="num">${m(total.low)} to ${m(total.high)}</td>`), rows[named + 1]);
+    for (const k of ["low", "expected", "high"] as const) {
+      const named_ = all.slice(0, named).reduce((sum, g) => sum + g.counted[k], 0);
+      assert.ok(Math.abs(named_ + restOf(all, named, k) - total[k]) < 0.01 * all.length, `${k}: ${named_} and ${restOf(all, named, k)} make ${total[k]}`);
+    }
   });
 });
