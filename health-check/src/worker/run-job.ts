@@ -20,6 +20,7 @@ import { progressOf, RunClosedError, type RunJobInput } from "./types.ts";
 import { withoutComments } from "../survey/questions.ts";
 import { FACTS_FILE } from "../extract/facts.ts";
 import { FactsFile, factsReport, type FactsReport } from "../facts/summary.ts";
+import { ASSUMPTIONS } from "../facts/assumptions.ts";
 
 // A run job: the engine's extract and analysis for one console run, through
 // the customer's stored OAuth connection. The run folder is named after the
@@ -183,6 +184,7 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
     const report = deps.narrative && !unreviewed ? await draftSections(runId, dir, reportInput, deps.narrative, pseudonyms, now(), log) : buildReport(reportInput);
     const outputs = Object.values(report.outputs);
     writeFileSync(join(dir, SECTIONS_FILE), `${JSON.stringify(outputs, null, 2)}\n`, { mode: 0o600 });
+    const facts = factsOf(dir, log);
     await deps.store.saveRunOutput(runId, {
       progress: progressOf(result.run),
       runDir: dir,
@@ -196,7 +198,8 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
       // A section Claude's draft couldn't settle stays needs_input.
       sections: outputs.flatMap((o) => o.sections).map((s) => (result.run.status === "in_review" && s.status === "draft" ? { ...s, status: "in_review" as const } : s)),
       versions: outputs.flatMap((o) => o.versions),
-      facts: factsOf(dir, log),
+      facts: facts.summary,
+      factsFile: facts.file,
     });
   } catch (err) {
     if (err instanceof RunClosedError) return { outcome: "skipped", detail: err.message };
@@ -211,14 +214,23 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
   return { outcome: "done", detail: `Run ${runId} is ${result.run.status.replace("_", " ")}` };
 }
 
+/** The most of facts.json the worker sends. A real one is a few kilobytes; more means the step changed. */
+export const FACTS_FILE_MAX_BYTES = 256 * 1024;
+
+const ASSUMED_IDS = new Set(ASSUMPTIONS.map((a) => a.id));
+
 /**
  * The facts step's summary for the console, scans included, read before a
- * scan's folder is deleted. A run with no facts.json, or one that doesn't
- * parse, sends none: the findings already say what each check could measure.
+ * scan's folder is deleted, and beside it the whole file (DECISIONS.md 433). A
+ * run with no facts.json, or one that doesn't parse, sends neither: the findings
+ * already say what each check could measure. The file goes only while it is
+ * what decision 288 describes, the facts we assume and nothing else, so one
+ * naming a fact we don't assume, or too big to be only those, keeps to the
+ * summary. The log line says which check failed and never quotes the file.
  */
-function factsOf(dir: string, log: (line: string) => void): FactsReport | null {
+export function factsOf(dir: string, log: (line: string) => void): { summary: FactsReport | null; file: FactsFile | null } {
   const path = join(dir, FACTS_FILE);
-  if (!existsSync(path)) return null;
+  if (!existsSync(path)) return { summary: null, file: null };
   let raw: unknown;
   try {
     raw = JSON.parse(readFileSync(path, "utf8"));
@@ -226,9 +238,21 @@ function factsOf(dir: string, log: (line: string) => void): FactsReport | null {
     raw = null;
   }
   const parsed = FactsFile.safeParse(raw);
-  if (parsed.success) return factsReport(parsed.data);
-  log("The run's facts.json didn't parse, so the console gets no facts summary.");
-  return null;
+  if (!parsed.success) {
+    log("The run's facts.json didn't parse, so the console gets no facts summary or file.");
+    return { summary: null, file: null };
+  }
+  const summary = factsReport(parsed.data);
+  if (parsed.data.facts.some((f) => !ASSUMED_IDS.has(f.id))) {
+    log("The run's facts.json names a fact we don't assume, so the console gets the facts summary but not the file.");
+    return { summary, file: null };
+  }
+  // Parsing dropped any key the schema doesn't name, so this is the file as sent.
+  if (Buffer.byteLength(JSON.stringify(parsed.data), "utf8") >= FACTS_FILE_MAX_BYTES) {
+    log("The run's facts.json is larger than the worker sends, so the console gets the facts summary but not the file.");
+    return { summary, file: null };
+  }
+  return { summary, file: parsed.data };
 }
 
 /**

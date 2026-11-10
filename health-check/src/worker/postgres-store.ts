@@ -537,26 +537,37 @@ export class PostgresWorkerStore implements WorkerStore {
       for (const s of output.manualSteps) await this.#insert(client, "HealthCheckManualStep", MANUAL_STEP, manualStepRow(runId, s));
       for (const s of output.sections) await this.#insert(client, "HealthCheckSection", SECTION, sectionRow(s));
       for (const v of output.versions) await this.#insert(client, "HealthCheckSectionVersion", VERSION, versionRow(v));
-      await this.#writeFacts(client, runId, output.facts);
+      await this.#writeFacts(client, runId, output.facts, output.factsFile);
     });
   }
 
   /**
-   * The facts summary, replaced whole (blackcloud-next
-   * migrations/20261120_health_check_run_facts.sql). The table is the
-   * console's newest: without it (42P01) the run's results still save, so the
-   * statement runs inside a savepoint the transaction can go back to.
+   * The facts summary and the whole file, replaced whole (blackcloud-next
+   * migrations/20261120_health_check_run_facts.sql and
+   * 20261121_health_check_run_facts_file.sql). The table is the console's
+   * newest and the file column newer still: without the table (42P01) the
+   * run's results still save, and without the column (42703) the summary does
+   * too, so the statements run inside a savepoint the transaction can go back to.
    */
-  async #writeFacts(client: SqlClient, runId: string, facts: RunOutputRecord["facts"]): Promise<void> {
+  async #writeFacts(client: SqlClient, runId: string, facts: RunOutputRecord["facts"], file: RunOutputRecord["factsFile"]): Promise<void> {
+    const write = async (withFile: boolean): Promise<void> => {
+      await client.query(`DELETE FROM "HealthCheckRunFacts" WHERE "runId" = $1`, [runId]);
+      if (!facts) return;
+      if (withFile) await client.query(`INSERT INTO "HealthCheckRunFacts" ("runId", "checkedAt", "facts", "file") VALUES ($1, $2::timestamp(3), $3::jsonb, $4::jsonb)`, [runId, facts.checkedAt, JSON.stringify(facts), file ? JSON.stringify(file) : null]);
+      else await client.query(`INSERT INTO "HealthCheckRunFacts" ("runId", "checkedAt", "facts") VALUES ($1, $2::timestamp(3), $3::jsonb)`, [runId, facts.checkedAt, JSON.stringify(facts)]);
+    };
     await client.query("SAVEPOINT run_facts");
     try {
-      await client.query(`DELETE FROM "HealthCheckRunFacts" WHERE "runId" = $1`, [runId]);
-      if (facts) await client.query(`INSERT INTO "HealthCheckRunFacts" ("runId", "checkedAt", "facts") VALUES ($1, $2::timestamp(3), $3::jsonb)`, [runId, facts.checkedAt, JSON.stringify(facts)]);
-      await client.query("RELEASE SAVEPOINT run_facts");
+      await write(true);
     } catch (err) {
-      if ((err as { code?: string }).code !== "42P01") throw err;
+      const code = (err as { code?: string }).code;
+      if (code !== "42P01" && code !== "42703") throw err;
       await client.query("ROLLBACK TO SAVEPOINT run_facts");
+      if (code === "42P01") return;
+      // A console without the file column: the summary as before. Any error now is a real one.
+      await write(false);
     }
+    await client.query("RELEASE SAVEPOINT run_facts");
   }
 
   recordRunFailure(runId: string, reason: string, at: string): Promise<void> {

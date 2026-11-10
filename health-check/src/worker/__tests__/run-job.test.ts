@@ -1,7 +1,10 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { FACTS_FILE } from "../../extract/facts.ts";
+import { FactsFile, factsReport } from "../../facts/summary.ts";
 import type { Rejection } from "../../narrative/apply.ts";
 import type { NarrativeClient, NarrativeRequest } from "../../narrative/client.ts";
 import { OUTPUT_FILES, SURVEY_FILE } from "../../render/render-run.ts";
@@ -10,7 +13,7 @@ import { loadAnswers, loadRecording, ReplayTransport } from "../../testing/repla
 import { Simulator } from "../../testing/simulator.ts";
 import { JobBusyError } from "../lock.ts";
 import { MemoryWorkerStore } from "../memory-store.ts";
-import { SECTIONS_FILE } from "../run-job.ts";
+import { FACTS_FILE_MAX_BYTES, factsOf, SECTIONS_FILE } from "../run-job.ts";
 import { RunClosedError, type RunProgress } from "../types.ts";
 import { createJobHandler } from "../worker.ts";
 import { ACCESS, baseDeps, CONNECTION, consoleRun, FlakyTransport, INTAKE, REFRESH, RUN_ID, runInput, syntheticConnection } from "./helpers.ts";
@@ -442,5 +445,86 @@ describe("a free scan's run job", () => {
     await handle(job, last);
     assert.equal(deps.store.scanResults.size, 0);
     assert.equal(deps.tokens.has(CONNECTION), true);
+  });
+});
+
+describe("the facts file a run job sends (DECISIONS.md 433)", () => {
+  // Made up: a fact we assume, with marked text so a log line that quoted the file would show.
+  const fact = (id: string, detail = "DETAIL-MARK Scontrol isn't in the org's objects."): FactsFile["facts"][number] => ({
+    id,
+    question: "integrations.i",
+    covers: "part",
+    says: "Scontrol can be queried in any org, including one that never had s-controls.",
+    outcome: "contradicted",
+    detail,
+    observed: { Scontrol: false },
+    affects: ["tech.classic-leftovers"],
+  });
+  const file = (facts = [fact("object.scontrol")]): FactsFile => ({ version: 1, checkedAt: "2026-10-31T09:30:00.000Z", apiVersion: "62.0", connectionKind: "oauth", calls: 4, facts });
+
+  const read = (content: string) => {
+    const dir = mkdtempSync(join(tmpdir(), "hc-facts-"));
+    try {
+      writeFileSync(join(dir, FACTS_FILE), content);
+      const lines: string[] = [];
+      return { ...factsOf(dir, (line) => lines.push(line)), lines };
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
+  test("is carried beside the summary when it parses, names only facts we assume and is under the cap", () => {
+    const sent = file([fact("object.scontrol"), { ...fact("object.package-licence"), outcome: "confirmed" }]);
+    const got = read(JSON.stringify(sent));
+    assert.deepEqual(got.file, sent);
+    assert.deepEqual(got.summary, factsReport(sent));
+    assert.deepEqual(got.lines, []);
+  });
+
+  test("is refused when it names a fact we don't assume, and the summary is still sent", () => {
+    const sent = file([fact("object.scontrol"), fact("ID-MARK.not-assumed")]);
+    const got = read(JSON.stringify(sent));
+    assert.equal(got.file, null);
+    assert.deepEqual(got.summary, factsReport(sent));
+    assert.equal(got.lines.length, 1);
+    assert.match(got.lines[0]!, /names a fact we don't assume/);
+    assert.doesNotMatch(got.lines[0]!, /MARK|object\.scontrol|integrations/);
+  });
+
+  test("is refused over the size cap, and the summary is still sent", () => {
+    const sent = file([fact("object.scontrol", `DETAIL-MARK ${"x".repeat(FACTS_FILE_MAX_BYTES)}`)]);
+    const got = read(JSON.stringify(sent));
+    assert.equal(got.file, null);
+    assert.deepEqual(got.summary, factsReport(sent));
+    assert.equal(got.lines.length, 1);
+    assert.match(got.lines[0]!, /larger than the worker sends/);
+    assert.doesNotMatch(got.lines[0]!, /MARK|xxxx|object\.scontrol/);
+    // Just under the cap is carried.
+    const under = file([fact("object.scontrol", "")]);
+    const room = FACTS_FILE_MAX_BYTES - Buffer.byteLength(JSON.stringify(under)) - 1;
+    const fits = file([fact("object.scontrol", "y".repeat(room))]);
+    assert.equal(Buffer.byteLength(JSON.stringify(fits)), FACTS_FILE_MAX_BYTES - 1);
+    assert.deepEqual(read(JSON.stringify(fits)).file, fits);
+  });
+
+  test("is refused when it doesn't parse, and there's no summary, as before", () => {
+    for (const content of ["{ DETAIL-MARK not json", JSON.stringify({ ...file(), facts: [{ ...fact("object.scontrol"), outcome: "DETAIL-MARK" }] })]) {
+      const got = read(content);
+      assert.equal(got.file, null);
+      assert.equal(got.summary, null);
+      assert.equal(got.lines.length, 1);
+      assert.match(got.lines[0]!, /didn't parse/);
+      assert.doesNotMatch(got.lines[0]!, /MARK|object\.scontrol/);
+    }
+  });
+
+  test("a run sends the facts.json its folder holds, whole", async () => {
+    const { deps, handle } = await setup();
+    await handle(job, last);
+    const run = stored(deps);
+    const onDisk = FactsFile.parse(JSON.parse(readFileSync(join(run.runDir!, FACTS_FILE), "utf8")));
+    assert.ok(onDisk.facts.length > 0);
+    assert.deepEqual(run.output!.factsFile, onDisk);
+    assert.deepEqual(run.output!.facts, factsReport(onDisk));
   });
 });

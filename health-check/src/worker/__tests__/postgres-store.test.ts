@@ -6,7 +6,7 @@ import { buildReport } from "../../narrative/sections.ts";
 import { loadRun } from "../../render/render-run.ts";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { FactsReport } from "../../facts/summary.ts";
+import type { FactsFile, FactsReport } from "../../facts/summary.ts";
 import {
   CONNECT_LINK,
   FINDING,
@@ -56,6 +56,16 @@ class FakePool implements SqlPool {
 
 // Made up: one fact that differed, named with the checks resting on it.
 const FACTS: FactsReport = { version: 1, checkedAt: "2026-10-31T09:30:00.000Z", counts: { confirmed: 18, contradicted: 1, open: 1, notChecked: 1 }, differed: [{ id: "object.scontrol", question: "integrations.i", affects: ["tech.classic-leftovers"] }] };
+// Made up too: the file that summary came from, cut to the fact that differed.
+const FILE: FactsFile = {
+  version: 1,
+  checkedAt: FACTS.checkedAt,
+  apiVersion: "62.0",
+  connectionKind: "oauth",
+  calls: 4,
+  facts: [{ id: "object.scontrol", question: "integrations.i", covers: "part", says: "Scontrol can be queried in any org, including one that never had s-controls.", outcome: "contradicted", detail: "Scontrol isn't in the org's objects.", observed: { Scontrol: false }, affects: ["tech.classic-leftovers"] }],
+};
+const EMPTY = { findings: [], metrics: [], scores: [], manualSteps: [], sections: [], versions: [], facts: FACTS, factsFile: FILE };
 
 const RUN_ROW = {
   ...consoleRun(),
@@ -274,6 +284,7 @@ describe("PostgresWorkerStore", () => {
       sections: outputs.flatMap((o) => o.sections),
       versions: outputs.flatMap((o) => o.versions),
       facts: FACTS,
+      factsFile: FILE,
     });
     const texts = pool.texts();
     assert.equal(texts[0], "BEGIN");
@@ -288,11 +299,79 @@ describe("PostgresWorkerStore", () => {
     assert.match(update.text, /"runDir" = \$12/);
     assert.equal(update.values[11], dir);
     assert.doesNotMatch(update.text, /customerRef|createdBy|benchmarkOptIn/, "the console's fields are left alone");
-    // The facts summary, replaced whole, in the same transaction (DECISIONS.md 324).
+    // The facts summary and the whole file, replaced whole, in the same transaction (DECISIONS.md 324 and 433).
     const facts = pool.statements.find((s) => s.text.startsWith(`INSERT INTO "HealthCheckRunFacts"`))!;
-    assert.deepEqual(facts.values, [run.id, FACTS.checkedAt, JSON.stringify(FACTS)]);
+    assert.deepEqual(facts.values, [run.id, FACTS.checkedAt, JSON.stringify(FACTS), JSON.stringify(FILE)]);
     assert.ok(texts.indexOf(`DELETE FROM "HealthCheckRunFacts" WHERE "runId" = $1`) < texts.indexOf(facts.text));
     assert.ok(texts.indexOf("RELEASE SAVEPOINT run_facts") < texts.indexOf("COMMIT"));
+  });
+
+  test("writes the whole facts file to its own column, inside the facts savepoint, after the delete", async () => {
+    const pool = new FakePool();
+    pool.handlers.push((text) => (text.includes("FOR UPDATE") ? { rows: [{ status: "extracting" }], rowCount: 1 } : undefined));
+    const run = consoleRun();
+    await new PostgresWorkerStore(pool).saveRunOutput(run.id, { progress: progressOf(run), runDir: "/runs/x", ...EMPTY });
+    const texts = pool.texts();
+    const at = (text: string) => texts.indexOf(text);
+    const insert = pool.statements.find((s) => s.text.startsWith(`INSERT INTO "HealthCheckRunFacts"`))!;
+    assert.equal(insert.text, `INSERT INTO "HealthCheckRunFacts" ("runId", "checkedAt", "facts", "file") VALUES ($1, $2::timestamp(3), $3::jsonb, $4::jsonb)`);
+    assert.deepEqual(JSON.parse(insert.values[3] as string), FILE);
+    assert.ok(at("SAVEPOINT run_facts") < at(`DELETE FROM "HealthCheckRunFacts" WHERE "runId" = $1`));
+    assert.ok(at(`DELETE FROM "HealthCheckRunFacts" WHERE "runId" = $1`) < at(insert.text));
+    assert.ok(at(insert.text) < at("RELEASE SAVEPOINT run_facts"));
+    assert.ok(at("RELEASE SAVEPOINT run_facts") < at("COMMIT"));
+    assert.equal(texts.filter((t) => t.startsWith(`INSERT INTO "HealthCheckRunFacts"`)).length, 1);
+  });
+
+  test("a summary whose file was refused writes the file column as null", async () => {
+    const pool = new FakePool();
+    pool.handlers.push((text) => (text.includes("FOR UPDATE") ? { rows: [{ status: "extracting" }], rowCount: 1 } : undefined));
+    const run = consoleRun();
+    await new PostgresWorkerStore(pool).saveRunOutput(run.id, { progress: progressOf(run), runDir: "/runs/x", ...EMPTY, factsFile: null });
+    const insert = pool.statements.find((s) => s.text.startsWith(`INSERT INTO "HealthCheckRunFacts"`))!;
+    assert.deepEqual(insert.values, [run.id, FACTS.checkedAt, JSON.stringify(FACTS), null]);
+  });
+
+  test("a console without the file column still gets the facts summary and the run's results", async () => {
+    const pool = new FakePool();
+    pool.handlers.push((text) => (text.includes("FOR UPDATE") ? { rows: [{ status: "extracting" }], rowCount: 1 } : undefined));
+    pool.handlers.push((text) => {
+      if (text.startsWith(`INSERT INTO "HealthCheckRunFacts"`) && text.includes(`"file"`)) throw Object.assign(new Error(`column "file" of relation "HealthCheckRunFacts" does not exist`), { code: "42703" });
+      return undefined;
+    });
+    const run = consoleRun();
+    await new PostgresWorkerStore(pool).saveRunOutput(run.id, { progress: progressOf(run), runDir: "/runs/x", ...EMPTY });
+    const facts = pool.texts().slice(pool.texts().indexOf("SAVEPOINT run_facts"));
+    assert.deepEqual(facts, [
+      "SAVEPOINT run_facts",
+      `DELETE FROM "HealthCheckRunFacts" WHERE "runId" = $1`,
+      `INSERT INTO "HealthCheckRunFacts" ("runId", "checkedAt", "facts", "file") VALUES ($1, $2::timestamp(3), $3::jsonb, $4::jsonb)`,
+      "ROLLBACK TO SAVEPOINT run_facts",
+      `DELETE FROM "HealthCheckRunFacts" WHERE "runId" = $1`,
+      `INSERT INTO "HealthCheckRunFacts" ("runId", "checkedAt", "facts") VALUES ($1, $2::timestamp(3), $3::jsonb)`,
+      "RELEASE SAVEPOINT run_facts",
+      "COMMIT",
+    ]);
+    assert.deepEqual(pool.statements.at(-3)!.values, [run.id, FACTS.checkedAt, JSON.stringify(FACTS)]);
+  });
+
+  test("an error on the facts row that isn't a missing column isn't retried without the file: the whole run rolls back", async () => {
+    const pool = new FakePool();
+    pool.handlers.push((text) => (text.includes("FOR UPDATE") ? { rows: [{ status: "extracting" }], rowCount: 1 } : undefined));
+    let thrown = false;
+    pool.handlers.push((text) => {
+      // Only once, so a retry would succeed and commit if the store made one.
+      if (!thrown && text.startsWith(`INSERT INTO "HealthCheckRunFacts"`)) {
+        thrown = true;
+        throw Object.assign(new Error("deadlock detected"), { code: "40P01" });
+      }
+      return undefined;
+    });
+    const run = consoleRun();
+    await assert.rejects(new PostgresWorkerStore(pool).saveRunOutput(run.id, { progress: progressOf(run), runDir: "/runs/x", ...EMPTY }), /deadlock/);
+    assert.equal(pool.texts().at(-1), "ROLLBACK");
+    assert.ok(!pool.texts().includes("ROLLBACK TO SAVEPOINT run_facts"));
+    assert.ok(!pool.texts().includes("COMMIT"));
   });
 
   test("a console without the facts table still gets the run's results, and no facts", async () => {
@@ -303,7 +382,7 @@ describe("PostgresWorkerStore", () => {
       return undefined;
     });
     const run = consoleRun();
-    await new PostgresWorkerStore(pool).saveRunOutput(run.id, { progress: progressOf(run), runDir: "/runs/x", findings: [], metrics: [], scores: [], manualSteps: [], sections: [], versions: [], facts: FACTS });
+    await new PostgresWorkerStore(pool).saveRunOutput(run.id, { progress: progressOf(run), runDir: "/runs/x", findings: [], metrics: [], scores: [], manualSteps: [], sections: [], versions: [], facts: FACTS, factsFile: FILE });
     const texts = pool.texts();
     assert.ok(texts.indexOf("ROLLBACK TO SAVEPOINT run_facts") > texts.indexOf("SAVEPOINT run_facts"));
     assert.equal(texts.at(-1), "COMMIT");
@@ -317,7 +396,7 @@ describe("PostgresWorkerStore", () => {
       return undefined;
     });
     const run = consoleRun();
-    await assert.rejects(new PostgresWorkerStore(pool).saveRunOutput(run.id, { progress: progressOf(run), runDir: "/runs/x", findings: [], metrics: [], scores: [], manualSteps: [], sections: [], versions: [], facts: FACTS }), /deadlock/);
+    await assert.rejects(new PostgresWorkerStore(pool).saveRunOutput(run.id, { progress: progressOf(run), runDir: "/runs/x", findings: [], metrics: [], scores: [], manualSteps: [], sections: [], versions: [], facts: FACTS, factsFile: FILE }), /deadlock/);
     assert.equal(pool.texts().at(-1), "ROLLBACK");
   });
 
