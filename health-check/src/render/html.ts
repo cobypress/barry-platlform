@@ -148,19 +148,22 @@ const glyphWidth = (c: string): number =>
 /**
  * Lines of text set `width` pixels wide in Poppins at `px`, a word at a time, as
  * the browser sets it: a word that doesn't fit starts the next line, and a word
- * is as wide as its letters. Give it the text as it prints (`printed`).
+ * is as wide as its letters. Give it the text as it prints (`printed`). `tail`
+ * is anything `px` wide set after the last word with no space between, such as a
+ * reference tag: the browser can't break before it, so it goes with that word.
  */
-export function textLines(text: string, width: number, px: number): number {
+export function textLines(text: string, width: number, px: number, tail = 0): number {
   const room = (width * MEASURED_AT) / px;
-  const wide = (word: string) => [...word].reduce((sum, c) => sum + glyphWidth(c), 0);
+  const words = text.split(/\s+/).filter(Boolean);
+  const wide = (word: string, i: number) => [...word].reduce((sum, c) => sum + glyphWidth(c), 0) + (i === words.length - 1 ? (tail * MEASURED_AT) / px : 0);
   let lines = 1;
   let used = 0;
-  for (const word of text.split(/\s+/).filter(Boolean)) {
-    const need = used === 0 ? wide(word) : used + glyphWidth(" ") + wide(word);
+  for (const [i, word] of words.entries()) {
+    const need = used === 0 ? wide(word, i) : used + glyphWidth(" ") + wide(word, i);
     if (need <= room || used === 0) used = need;
     else {
       lines += 1;
-      used = wide(word);
+      used = wide(word, i);
     }
   }
   return lines;

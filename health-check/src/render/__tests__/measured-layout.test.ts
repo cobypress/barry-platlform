@@ -20,7 +20,7 @@ import { EXECUTIVE_MAX_PAGES, executiveHtml, executiveMaxPages, hasBothVoices, i
 import { deckRangeFor, fullReportHtml, fullReportHtmlAt, slideCounts, threeColumnItemHeight } from "../full-report.ts";
 import { estimateLines, paginateColumns, printed, renderContext } from "../html.ts";
 import { compactMoney } from "../format.ts";
-import { moneyBasisLines, moneyLabelLines, moneyPageColumn, restOf } from "../money.ts";
+import { moneyBasisLines, moneyLabelLines, moneyPageColumn, moneyPageRow, restOf } from "../money.ts";
 import { launchBrowser, layoutOf } from "../pdf.ts";
 
 // DECISIONS.md 442: a page laid out by estimate is held to measured text. Each
@@ -622,6 +622,40 @@ describe("the money page fits its page, with a survey or without and a figure fo
     }
   });
 
+  test("with a survey and no spend, every module's and CPQ's eighth line, set in the last row's place, runs past the page: the row is right to stand for it (DECISIONS.md 448)", async () => {
+    // Measured: 25.8px under the notes and a last row of 31.75px, against the eighth
+    // line's 58.09px with its basis on two lines. It would run 0.56px into the margin.
+    for (const [name, options] of [SAMPLES[2]!, SAMPLES[3]!]) {
+      const { input, names } = await sampleOf(options);
+      const report = buildReport({ ...input, ...MONEY_CASES[2]![1](input) });
+      const html = executiveHtml(report, names);
+      const money = moneyPageOf(html)!;
+      assert.match(money, /<tr><td>And 1 smaller line, in the raw notes\./, name);
+      const eighth = moneyPageRow(renderContext(names, report.value.currency, false), report, 7);
+      const page = await opened(documentOf(html, [money]));
+      try {
+        const m = await page.evaluate((eighth) => {
+          const sheet = document.querySelector<HTMLElement>(".page")!;
+          const room = sheet.getBoundingClientRect().bottom - parseFloat(getComputedStyle(sheet).paddingBottom);
+          const bottom = () => Math.max(...[...sheet.querySelectorAll<HTMLElement>(".money *")].map((x) => x.getBoundingClientRect().bottom));
+          const rest = [...sheet.querySelectorAll<HTMLElement>("table.grid tbody tr")].at(-2)!;
+          const free = room - bottom();
+          const last = rest.getBoundingClientRect().height;
+          // The line in the row's place, with the reference the row gave it: its own.
+          const ref = rest.querySelector(".ref")!;
+          rest.insertAdjacentHTML("afterend", eighth);
+          const line = rest.nextElementSibling as HTMLElement;
+          rest.remove();
+          line.querySelector("td")!.insertBefore(ref, line.querySelector(".basis"));
+          return { free, last, line: line.getBoundingClientRect().height, past: bottom() - room };
+        }, eighth);
+        assert.ok(m.free >= 0 && m.line > m.last + m.free && m.past > 0, `${name}: ${JSON.stringify(m)}`);
+      } finally {
+        await page.close();
+      }
+    }
+  });
+
   test("with more lines than the page holds, on long labels, it names fewer and adds up the rest", async () => {
     const { input, names } = await sampleOf(SAMPLES[0]![1]);
     const report = buildReport(withManyLines(input));
@@ -799,10 +833,11 @@ describe("the full report's money fits its slides, two at most", () => {
     assert.deepEqual(await problemsOn(html, slides.map((page, i) => ({ page, label: `money slide ${i + 1}` })), report), []);
   });
 
-  test("with 8, 16 and 40 lines more of sixteen words: two slides at most, every line named where they hold them and the rest added up where they don't, every check passing", async () => {
+  test("with 8, 16 and 40 lines more of sixteen words: two slides at most, every line named where they hold them and the rest added up where they don't, the first of two as full as it can be, every check passing", async () => {
     const { input, names } = await sampleOf(SAMPLES[0]![1]);
     const problems: string[] = [];
     const shapes: string[] = [];
+    const room: string[] = [];
     for (const n of [8, 16, 40])
       for (const [kind, extra] of [MONEY_CASES[0]!, MONEY_CASES[3]!]) {
         const more = withMoneyLines(input, n, 16);
@@ -813,8 +848,31 @@ describe("the full report's money fits its slides, two at most", () => {
         problems.push(...slidesWrong(html, report, names).map((w) => `${label}: ${w}`));
         problems.push(...(await problemsOn(html, slides.map((page, i) => ({ page, label: `${label}, money slide ${i + 1}` })), report)));
         shapes.push(`${n}: ${slides.length} slides, ${/And (\d+) smaller lines/.exec(slides.join(""))?.[1] ?? 0} added up`);
+        if (slides.length < 2) continue;
+        // The first of two names every line it has room for (DECISIONS.md 448): the next
+        // line, the continued slide's first, takes more than the room under the first's
+        // table. At 40 lines the 70.5px left under seven is the next line's room: it's
+        // three lines of label, 80.6px.
+        const page = await opened(documentOf(html, slides));
+        try {
+          const m = await page.evaluate(() => {
+            const [first, continued] = [...document.querySelectorAll<HTMLElement>(".page")];
+            const bottom = first!.getBoundingClientRect().bottom - parseFloat(getComputedStyle(first!).paddingBottom);
+            const table = first!.querySelector<HTMLElement>("table.grid")!;
+            const free = bottom - table.getBoundingClientRect().bottom;
+            const before = table.getBoundingClientRect().height;
+            table.querySelector("tbody")!.append(continued!.querySelector("tbody tr")!.cloneNode(true));
+            return { free, next: table.getBoundingClientRect().height - before };
+          });
+          room.push(`${label}: ${m.free.toFixed(1)}px free, the next line ${m.next.toFixed(1)}px`);
+          if (!(m.free >= 0 && m.next > m.free)) problems.push(room.at(-1)!);
+        } finally {
+          await page.close();
+        }
       }
     assert.deepEqual(problems, []);
+    // Two slides at each length without a survey, and at 8 and 16 with one.
+    assert.equal(room.length, 5, room.join("; "));
     // The adversary's case: eight long lines more overflowed the continued slide when its notes printed larger than counted.
     assert.ok(shapes.slice(0, 2).every((x) => x === "8: 2 slides, 0 added up"), shapes.join("; "));
     // Past what two hold, the rest added up; on one slide where the deck is at its ceiling (the test below).
@@ -944,6 +1002,66 @@ describe("the full report's money fits its slides, two at most", () => {
     const money = scopeDataset(report.dataset, [VALUE_TOTAL]);
     const untraced = counts.flatMap((text) => [report.dataset, money].flatMap((set) => checkNumbers(text, set).unmatched.map((u) => `${text} ${u.raw}: ${u.reason}`)));
     assert.deepEqual(untraced, []);
+  });
+});
+
+// DECISIONS.md 448: the page and the slides fill their room before adding lines up.
+describe("the money names at least as many lines as before decision 448, and stays inside the margins", () => {
+  test("on the page and the slides, on every sample with lines more of four and sixteen words, small and large, in every case", async () => {
+    // Lines named at 60684b8, or more where decision 448 names more (the 60684b8 count in
+    // the comment): counted by building that commit's documents (`git archive 60684b8`)
+    // from the same samples, extra lines and cases, in order no survey and no spend,
+    // spend, a survey, both. Small lines are £900 and £470 more each, so most come last
+    // and the cut decides them; large ones £31,000 and £4,700 more, so they come first.
+    const NAMED: Array<["page" | "slides", number, number, number, "small" | "large", number[]]> = [
+      ["page", 0, 0, 0, "small", [7, 7, 7, 7]], ["page", 0, 1, 4, "small", [8, 8, 7, 8]], ["page", 0, 1, 16, "small", [7, 8, 7, 8]], ["page", 0, 2, 4, "small", [7, 7, 7, 7]], ["page", 0, 2, 16, "small", [7, 7, 7, 7]], ["page", 0, 9, 4, "small", [7, 7, 7, 7]], ["page", 0, 9, 16, "small", [7, 7, 7, 7]] /* [6, 7, 7, 7] */, ["page", 0, 2, 16, "large", [7, 7, 7, 7]] /* [6, 7, 6, 7] */, ["page", 0, 10, 16, "large", [6, 7, 6, 7]], ["page", 0, 33, 16, "large", [6, 6, 6, 6]],
+      ["slides", 0, 0, 4, "large", [7, 7, 7, 7]], ["slides", 0, 1, 4, "large", [8, 8, 8, 8]], ["slides", 0, 2, 4, "large", [9, 9, 9, 9]] /* [7, 7, 9, 9] */, ["slides", 0, 9, 4, "large", [16, 16, 16, 16]], ["slides", 0, 8, 16, "large", [15, 15, 15, 15]], ["slides", 0, 16, 16, "large", [12, 12, 12, 12]] /* [11, 11, 11, 11] */, ["slides", 0, 40, 16, "large", [13, 13, 5, 5]],
+      ["page", 1, 0, 0, "small", [7, 7, 7, 7]], ["page", 1, 1, 4, "small", [8, 8, 7, 8]], ["page", 1, 1, 16, "small", [7, 8, 7, 8]], ["page", 1, 2, 4, "small", [7, 7, 7, 7]], ["page", 1, 2, 16, "small", [7, 7, 7, 7]], ["page", 1, 9, 4, "small", [7, 7, 7, 7]], ["page", 1, 9, 16, "small", [7, 7, 7, 7]] /* [6, 7, 7, 7] */,
+      ["slides", 1, 0, 4, "large", [7, 7, 7, 7]], ["slides", 1, 1, 4, "large", [8, 8, 8, 8]], ["slides", 1, 2, 4, "large", [9, 9, 9, 9]], ["slides", 1, 9, 4, "large", [16, 16, 16, 16]],
+      ["page", 2, 0, 0, "small", [8, 8, 7, 8]], ["page", 2, 1, 4, "small", [7, 7, 7, 7]], ["page", 2, 1, 16, "small", [7, 7, 7, 7]], ["page", 2, 2, 4, "small", [7, 7, 7, 7]], ["page", 2, 2, 16, "small", [7, 7, 7, 7]], ["page", 2, 9, 4, "small", [7, 7, 7, 7]], ["page", 2, 9, 16, "small", [7, 7, 7, 7]], ["page", 2, 1, 16, "large", [7, 7, 7, 7]], ["page", 2, 9, 16, "large", [7, 7, 7, 7]] /* [6, 7, 6, 7] */, ["page", 2, 32, 16, "large", [6, 6, 6, 6]] /* [5, 6, 6, 6] */,
+      ["slides", 2, 0, 4, "large", [8, 8, 8, 8]], ["slides", 2, 1, 4, "large", [9, 9, 9, 9]] /* [7, 7, 9, 9] */, ["slides", 2, 2, 4, "large", [10, 10, 10, 10]], ["slides", 2, 9, 4, "large", [17, 17, 17, 17]],
+      ["page", 3, 0, 0, "small", [8, 8, 7, 8]], ["page", 3, 1, 4, "small", [7, 7, 7, 7]], ["page", 3, 1, 16, "small", [7, 7, 7, 7]], ["page", 3, 2, 4, "small", [7, 7, 7, 7]], ["page", 3, 2, 16, "small", [7, 7, 7, 7]], ["page", 3, 9, 4, "small", [7, 7, 7, 7]], ["page", 3, 9, 16, "small", [7, 7, 7, 7]],
+      ["slides", 3, 0, 4, "large", [8, 8, 8, 8]], ["slides", 3, 1, 4, "large", [9, 9, 9, 9]], ["slides", 3, 2, 4, "large", [10, 10, 10, 10]], ["slides", 3, 9, 4, "large", [17, 17, 17, 17]],
+      ["page", 4, 0, 0, "small", [3, 3, 3, 3]], ["page", 4, 1, 4, "small", [4, 4, 4, 4]], ["page", 4, 1, 16, "small", [4, 4, 4, 4]], ["page", 4, 2, 4, "small", [5, 5, 5, 5]], ["page", 4, 2, 16, "small", [5, 5, 5, 5]], ["page", 4, 9, 4, "small", [7, 7, 7, 7]], ["page", 4, 9, 16, "small", [6, 7, 6, 7]],
+      ["slides", 4, 0, 4, "large", [3, 3, 3, 3]], ["slides", 4, 1, 4, "large", [4, 4, 4, 4]], ["slides", 4, 2, 4, "large", [5, 5, 5, 5]], ["slides", 4, 9, 4, "large", [10, 10, 12, 12]],
+    ];
+    const fewer: string[] = [];
+    const past: string[] = [];
+    for (const [s, [name, options]] of SAMPLES.entries()) {
+      const { input, names } = await sampleOf(options);
+      for (const doc of ["page", "slides"] as const) {
+        const printed: Array<{ page: string; label: string }> = [];
+        let head = "";
+        for (const [, , n, words, size, before] of NAMED.filter((x) => x[0] === doc && x[1] === s)) {
+          const more = withMoneyLines(input, n, words, size === "small" ? (i) => 900 + 470 * i : undefined);
+          for (const [i, [kind, extra]] of MONEY_CASES.entries()) {
+            const report = buildReport({ ...more, ...extra(more) });
+            const html = doc === "page" ? executiveHtml(report, names) : fullReportHtml(report, names);
+            const pages = doc === "page" ? [moneyPageOf(html)!] : moneySlidesOf(html);
+            const named = pages.join("").match(doc === "page" ? /<span class="basis">/g : /<tr><td>(?!And \d+ smaller lines?, in the raw notes)/g)?.length ?? 0;
+            const label = `${name} and ${n} ${size} lines of ${words} words, ${kind}, the ${doc}`;
+            if (named < before[i]!) fewer.push(`${label}: ${named} named, ${before[i]} before`);
+            head = html;
+            printed.push(...pages.map((page, k) => ({ page, label: `${label} ${k + 1}` })));
+          }
+        }
+        // The estimate is never under the browser's measure, so nothing it sets runs into
+        // the margin: the layout check allows that, as the footer sits lower.
+        const page = await opened(documentOf(head, printed.map((p) => p.page)));
+        try {
+          const free = await page.evaluate(() =>
+            [...document.querySelectorAll<HTMLElement>(".page")].map((sheet) => sheet.getBoundingClientRect().bottom - parseFloat(getComputedStyle(sheet).paddingBottom) - Math.max(...[...sheet.querySelectorAll<HTMLElement>(".money *")].map((x) => x.getBoundingClientRect().bottom))),
+          );
+          past.push(...free.flatMap((f, k) => (f < 0 ? [`${printed[k]!.label}: ${(-f).toFixed(2)}px into the margin`] : [])));
+          assert.equal(free.length, printed.length);
+        } finally {
+          await page.close();
+        }
+      }
+    }
+    assert.equal(NAMED.length, 64);
+    assert.deepEqual(fewer, []);
+    assert.deepEqual(past, []);
   });
 });
 
