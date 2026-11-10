@@ -203,7 +203,7 @@ describe("the base sample, below the threshold", () => {
   test("the verdict's brief says nothing about thin data", () => {
     // Not the exact purpose: other briefs work (decision 440) adds to it, and this is only about 450.
     const { purpose } = report.briefs.get(`${run.id}:executive_summary:verdict`)!;
-    assert.match(purpose, /^Tell an executive reader, in a few sentences, what state this Salesforce org is in and what matters most\./);
+    assert.match(purpose, /^Tell an executive reader what state this Salesforce org is in and what matters most\./);
     assert.doesNotMatch(purpose, /says less than|couldn't be measured/);
   });
 });
