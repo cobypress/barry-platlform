@@ -21,6 +21,8 @@ import { withoutComments } from "../survey/questions.ts";
 import { FACTS_FILE } from "../extract/facts.ts";
 import { FactsFile, factsReport, type FactsReport } from "../facts/summary.ts";
 import { ASSUMPTIONS } from "../facts/assumptions.ts";
+import { Timestamp } from "../schemas/common.ts";
+import { z } from "zod";
 
 // A run job: the engine's extract and analysis for one console run, through
 // the customer's stored OAuth connection. The run folder is named after the
@@ -217,7 +219,54 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
 /** The most of facts.json the worker sends. A real one is a few kilobytes; more means the step changed. */
 export const FACTS_FILE_MAX_BYTES = 256 * 1024;
 
+/** The longest detail the console keeps. A fact that couldn't be checked carries Salesforce's error text, which has no limit of its own. */
+export const FACTS_DETAIL_MAX = 1000;
+
 const ASSUMED_IDS = new Set(ASSUMPTIONS.map((a) => a.id));
+
+// What the console reads the file back through, blackcloud-next
+// lib/health-check/run-facts.ts (`FactsFile`). It reads the whole file as null
+// if any one value breaks a cap, so the worker checks the same caps first and
+// keeps to the summary rather than store a file the run page can't show. Change
+// the two together.
+const ConsoleName = z.string().regex(/^[a-z0-9][a-z0-9._-]*$/);
+const ConsoleCount = z.number().int().nonnegative();
+export const ConsoleFactsFile = z
+  .object({
+    version: z.number().int().positive(),
+    checkedAt: Timestamp,
+    apiVersion: z.string().min(1).max(20),
+    connectionKind: ConsoleName.max(40),
+    calls: ConsoleCount,
+    facts: z
+      .array(
+        z.object({
+          id: ConsoleName.max(100),
+          question: ConsoleName.max(100),
+          covers: z.enum(["whole", "part"]),
+          says: z.string().min(1).max(500),
+          outcome: z.enum(["confirmed", "contradicted", "open", "not_checked"]),
+          // The console's figure, not FACTS_DETAIL_MAX, so a change to the cut can't move the check with it.
+          detail: z.string().max(1000),
+          observed: z
+            .record(z.string().min(1).max(200), z.union([z.boolean(), z.string().max(100), z.null()]))
+            .refine((o) => Object.keys(o).length <= 50),
+          affects: z.array(ConsoleName.max(100)).max(50),
+        }),
+      )
+      .max(100),
+  })
+  .refine((f) => new Set(f.facts.map((x) => x.id)).size === f.facts.length);
+
+/** A detail as sent: on one line, and cut inside the console's limit with an ellipsis. */
+function sentDetail(detail: string): string {
+  const line = detail.replace(/\s+/g, " ").trim();
+  if (line.length <= FACTS_DETAIL_MAX) return line;
+  let cut = line.slice(0, FACTS_DETAIL_MAX - 1);
+  // Never half an emoji: a lone surrogate isn't valid in the console's jsonb.
+  if (/[\uD800-\uDBFF]$/.test(cut)) cut = cut.slice(0, -1);
+  return `${cut}…`;
+}
 
 /**
  * The facts step's summary for the console, scans included, read before a
@@ -226,7 +275,10 @@ const ASSUMED_IDS = new Set(ASSUMPTIONS.map((a) => a.id));
  * already say what each check could measure. The file goes only while it is
  * what decision 288 describes, the facts we assume and nothing else, so one
  * naming a fact we don't assume, or too big to be only those, keeps to the
- * summary. The log line says which check failed and never quotes the file.
+ * summary. Each detail is sent on one line and cut to what the console keeps,
+ * so one long error from Salesforce doesn't lose every fact; facts.json on disk
+ * keeps it whole. A file that still doesn't fit the console's caps keeps to the
+ * summary too. The log line says which check failed and never quotes the file.
  */
 export function factsOf(dir: string, log: (line: string) => void): { summary: FactsReport | null; file: FactsFile | null } {
   const path = join(dir, FACTS_FILE);
@@ -243,16 +295,21 @@ export function factsOf(dir: string, log: (line: string) => void): { summary: Fa
     return { summary: null, file: null };
   }
   const summary = factsReport(parsed.data);
-  if (parsed.data.facts.some((f) => !ASSUMED_IDS.has(f.id))) {
+  // Parsing dropped any key the schema doesn't name, so with the details cut this is the file as sent.
+  const file: FactsFile = { ...parsed.data, facts: parsed.data.facts.map((f) => ({ ...f, detail: sentDetail(f.detail) })) };
+  if (file.facts.some((f) => !ASSUMED_IDS.has(f.id))) {
     log("The run's facts.json names a fact we don't assume, so the console gets the facts summary but not the file.");
     return { summary, file: null };
   }
-  // Parsing dropped any key the schema doesn't name, so this is the file as sent.
-  if (Buffer.byteLength(JSON.stringify(parsed.data), "utf8") >= FACTS_FILE_MAX_BYTES) {
+  if (Buffer.byteLength(JSON.stringify(file), "utf8") >= FACTS_FILE_MAX_BYTES) {
     log("The run's facts.json is larger than the worker sends, so the console gets the facts summary but not the file.");
     return { summary, file: null };
   }
-  return { summary, file: parsed.data };
+  if (!ConsoleFactsFile.safeParse(file).success) {
+    log("The run's facts.json doesn't fit the console's shape for it, so the console gets the facts summary but not the file.");
+    return { summary, file: null };
+  }
+  return { summary, file };
 }
 
 /**
