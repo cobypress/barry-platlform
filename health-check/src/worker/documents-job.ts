@@ -158,17 +158,25 @@ async function makeHandbook(dir: string, out: string, clientName: string, runDat
   }
 }
 
+const HANDBOOK_SUFFIX = " - Org handbook.docx";
+
 /**
  * The handbook, in the run's own folder in the customer's Drive, beside the
  * version folders, since it's the same for every make. It replaces the one
- * there by name, so a remake leaves one, with the same id and link. It's never
- * in `files`: the console doesn't know the kind yet and would refuse the whole
- * row (DECISIONS.md 443). Shared with the folder, as everything in it is.
+ * there whose name ends as a handbook's, whatever the client was called when it
+ * was made, so a remake leaves one, with the same id and link; Drive renames it
+ * to the client's name now (DECISIONS.md 446). It's never in `files`: the
+ * console doesn't know the kind yet and would refuse the whole row (443).
+ * Shared with the folder, as everything in it is.
  */
-async function putHandbook(drive: DocumentDrive, folder: DriveItem, clientName: string, path: string): Promise<DriveItem> {
-  const name = `${clientName} - Org handbook.docx`;
-  const replaceId = (await drive.files(folder.id)).find((f) => f.name === name)?.id;
-  return drive.putFile(folder.id, name, DOCX, readFileSync(path), replaceId);
+async function putHandbook(drive: DocumentDrive, folder: DriveItem, clientName: string, path: string, runId: string, log: (line: string) => void): Promise<DriveItem> {
+  const handbooks = (await drive.files(folder.id)).filter((f) => f.name.trim().toLowerCase().endsWith(HANDBOOK_SUFFIX.toLowerCase()));
+  // Made before a rename was followed, a folder can hold more than one. The
+  // newest is replaced and the rest left for a person, since one may be a copy
+  // someone keeps. Only the count is logged: the names are the customer's.
+  if (handbooks.length > 1) log(`Run ${runId}'s Drive folder held ${handbooks.length} org handbooks, so the newest was replaced and the other ${handbooks.length - 1} left as they were.`);
+  const newest = handbooks.reduce<DriveItem | undefined>((kept, f) => (kept === undefined || (f.createdAt ?? "") >= (kept.createdAt ?? "") ? f : kept), undefined);
+  return drive.putFile(folder.id, `${clientName}${HANDBOOK_SUFFIX}`, DOCX, readFileSync(path), newest?.id);
 }
 
 /** A file for Black Cloud only, beside the clients' folders and never inside one, replaced on each make. */
@@ -333,7 +341,7 @@ async function documentsLocked(runId: string, deps: WorkerDeps, attempt: Attempt
       const item = await deps.drive.putFile(target.id, name, mime, readFileSync(printed.files[output]), replaceId);
       if (LISTED_TO_CONSOLE.has(output)) files.push({ output: output as DocumentFile["output"], name: item.name, driveFileId: item.id, url: item.url });
     }
-    if (handbook.ok) await putHandbook(deps.drive, folder, clientName, handbook.path);
+    if (handbook.ok) await putHandbook(deps.drive, folder, clientName, handbook.path, runId, log);
     await putReadoutKit(deps.drive, clientName, folder.name, printed.files.readout_kit);
     // Only a re-check whose customer agreed to be a case study has one, and it's a draft for us to finish with them.
     if (printed.caseStudy) await putInternal(deps.drive, clientName, folder.name, `${clientName} - Case study draft.docx`, printed.caseStudy);

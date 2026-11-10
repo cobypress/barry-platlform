@@ -530,6 +530,8 @@ describe("GoogleDrive", () => {
     ]);
     const item = await new GoogleDrive(config, impl).putFile("folder-0000000001", "Synthetic Co - Raw notes.docx", "application/octet-stream", Buffer.from("bytes"), "file-0000000001");
     assert.equal(item.id, "file-0000000001");
+    // A replace sends the name too, so a file made under an old name takes the new one (the org handbook's, DECISIONS.md 446).
+    assert.deepEqual(JSON.parse(String(calls[1]!.init.body)), { name: "Synthetic Co - Raw notes.docx" });
     assert.match(calls[1]!.url, /fields=id%2Cname%2CwebViewLink|fields=id,name,webViewLink/);
     assert.equal((calls[1]!.init.headers as Record<string, string>)["X-Upload-Content-Length"], "5");
   });
@@ -861,6 +863,49 @@ describe("the org handbook", () => {
     assert.deepEqual((await drive.folders(doc.made!.driveFolderId)).map((f) => f.name.split(",")[0]).sort(), ["Version 1", "Version 2", "Version 3"]);
   });
 
+  /** Makes the documents again, as the console asks for a remake, under the client's name now. */
+  async function remake(deps: ReturnType<typeof setup>, customerName: string) {
+    const doc = deps.store.documents.get(RUN_ID)!;
+    doc.input = { ...doc.input, intake: { ...doc.input.intake!, customerName }, state: "queued", driveFolderId: doc.made!.driveFolderId, files: doc.made!.files };
+    const result = await processDocumentsJob(RUN_ID, deps, { final: true });
+    assert.equal(result.outcome, "done", result.detail);
+  }
+
+  test("a client renamed or re-cased between makes still has one handbook: three makes, three names, one file under the last", async () => {
+    const drive = new MemoryDrive();
+    const deps = withHandbook(jobInput(), drive);
+    await processDocumentsJob(RUN_ID, deps, { final: true });
+    const first = handbooks(drive)[0]!;
+    await remake(deps, "Synthetic Company");
+    await remake(deps, "SYNTHETIC company");
+    const all = handbooks(drive);
+    assert.equal(all.length, 1);
+    assert.equal(all[0]!.id, first.id, "the same file, so its link keeps working");
+    assert.equal(all[0]!.uploads, 3);
+    // Drive renames it on the replace, so it carries the client's name now.
+    assert.equal(drive.path(all[0]!.id), "Synthetic Co / Health check 1 / SYNTHETIC company - Org handbook.docx");
+    assert.ok(!deps.lines.some((l) => /org handbooks/.test(l)), "one was there each time, so nothing to say");
+  });
+
+  test("a folder already holding two handbooks has the newest replaced and the other left, and the log says how many with nothing from the files", async () => {
+    const drive = new MemoryDrive();
+    const deps = withHandbook(jobInput(), drive);
+    await processDocumentsJob(RUN_ID, deps, { final: true });
+    const folderId = deps.store.documents.get(RUN_ID)!.made!.driveFolderId;
+    const older = handbooks(drive)[0]!;
+    // As a make before decision 446 left it after a rename: a second under the other name, made later.
+    const newer = drive.items.get((await drive.putFile(folderId, "Synthetic Co Ltd - ORG HANDBOOK.DOCX", "application/octet-stream", Buffer.from("old"))).id)!;
+    newer.createdAt = "2026-11-05T09:00:00.000Z";
+    await remake(deps, "Synthetic Group");
+    const all = handbooks(drive).filter((i) => /org handbook\.docx$/i.test(i.name));
+    assert.equal(all.length, 2, "none added");
+    assert.deepEqual([newer.uploads, newer.name], [2, "Synthetic Group - Org handbook.docx"]);
+    assert.deepEqual([older.uploads, older.name], [1, NAME], "the older one left as it was");
+    const said = deps.lines.filter((l) => /org handbooks/.test(l));
+    assert.deepEqual(said, [`Run ${RUN_ID}'s Drive folder held 2 org handbooks, so the newest was replaced and the other 1 left as they were.`]);
+    assert.doesNotMatch(deps.lines.join("\n"), /Synthetic Co Ltd|ORG HANDBOOK|Synthetic Co - Org/);
+  });
+
   test("a run from before the handbook was kept gets the six documents as before, and one warning saying why", async () => {
     const drive = new MemoryDrive();
     const deps = setup(jobInput(), drive);
@@ -949,6 +994,13 @@ describe("the org handbook", () => {
       assert.equal(handbooks(drive).length, 1, scope);
       assert.equal(deps.store.documents.get(RUN_ID)!.made!.files.length, 6, scope);
     }
+  });
+
+  test("each sentence begins exactly with the words the console splits on", () => {
+    // The console's DocumentsCard tells the handbook's warning from a layout
+    // warning by this prefix, word for word, so none of the four may change it.
+    for (const sentence of Object.values(HANDBOOK_NOT_MADE)) assert.ok(sentence.startsWith("The org handbook wasn't made:"), sentence);
+    assert.equal(Object.keys(HANDBOOK_NOT_MADE).length, 4);
   });
 
   test("every warning it can add fits what the console reads", () => {
