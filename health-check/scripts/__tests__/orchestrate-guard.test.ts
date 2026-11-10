@@ -47,6 +47,7 @@ describe("the orchestration guard blocks what stays Coby's", () => {
     ["Edit", `${ENGINE}/src/salesforce/allowlist.ts`],
     ["Write", `${ENGINE}/src/salesforce/__tests__/read-only-guarantee.test.ts`],
     ["Edit", `${ENGINE}/src/privacy/__tests__/privacy.test.ts`],
+    ["Edit", "/x/worktrees/b-draft-length/health-check/src/narrative/__tests__/routes.test.ts"],
     ["Edit", "/x/worktrees/console-a/lib/health-check/__tests__/connect-crypto.test.ts"],
     ["Write", `${ENGINE}/scripts/orchestrate-settings.json`],
     ["Edit", "/x/barry-platlform/health-check/.claude/settings.json"],

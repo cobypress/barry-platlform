@@ -20,6 +20,8 @@ const LOCKED_FILES: RegExp[] = [
   /health-check\/src\/salesforce\/allowlist\.ts$/,
   /health-check\/src\/salesforce\/__tests__\/(allowlist|read-only-guarantee)\.test\.ts$/,
   /health-check\/src\/privacy\/__tests__\/[^/]+\.test\.ts$/,
+  // The only way to Claude is through the guard, and this test is what holds it to that.
+  /health-check\/src\/narrative\/__tests__\/routes\.test\.ts$/,
   /lib\/health-check\/__tests__\/(auth|connect-crypto|microsite)\.test\.ts$/,
   /health-check\/scripts\/orchestrate-[^/]+$/,
   /health-check\/scripts\/__tests__\/orchestrate-guard\.test\.ts$/,
