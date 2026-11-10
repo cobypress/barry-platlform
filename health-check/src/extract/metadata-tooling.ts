@@ -31,12 +31,12 @@ type Row = Record<string, any>;
 type ItemRead = { key: string; fullName: string | null; metadata: Row | null };
 
 const own = (row: Row): boolean => !row.NamespacePrefix;
+const quote = (values: string[]): string => values.map((v) => `'${v.replace(/'/g, "\\'")}'`).join(", ");
 
 // Whole, then value by value: in JSON a quote in a formula is \", which the
 // patterns don't see, and an item is kept in the partial checkpoint as it's read.
 const redactValues = (value: unknown): unknown =>
   typeof value === "string" ? redactSecrets(value) : Array.isArray(value) ? value.map(redactValues) : value !== null && typeof value === "object" ? Object.fromEntries(Object.entries(value).map(([k, v]) => [k, redactValues(v)])) : value;
-const quote = (values: string[]): string => values.map((v) => `'${v.replace(/'/g, "\\'")}'`).join(", ");
 
 class ItemReader {
   readonly #ctx: ExtractContext;
