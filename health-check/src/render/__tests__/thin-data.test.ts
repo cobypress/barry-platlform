@@ -16,7 +16,7 @@ import { executiveHtml, executiveMaxPages } from "../executive.ts";
 import { deckRangeFor, fullReportHtml } from "../full-report.ts";
 import { launchBrowser, layoutOf } from "../pdf.ts";
 
-// DECISIONS.md 450: an org with too little data hears it once, at the front, not
+// DECISIONS.md 450: an org with many checks not measurable hears it once, at the front, not
 // area by area. The base sample has 2 of 102 checks not measurable; the thin copy
 // turns whole areas, and part of others, not measurable to pass a third.
 
@@ -48,7 +48,7 @@ const pageWith = (html: string, marker: string): string => {
   return page;
 };
 const counts = (report: BuiltReport) => ({ checks: report.teamFindings.length, open: report.teamFindings.filter((f) => f.status === "not_measurable").length });
-const front = (n: number, of: number, appendix: string): string => `We couldn't measure ${n} of the ${of} checks: this org holds too little data for them. ${appendix} names each, with the reason. The pages that follow cover the ones we could.`;
+const front = (n: number, of: number, appendix: string): string => `We couldn't measure ${n} of the ${of} checks, so this report says less than a full report would. ${appendix} names each, with the reason. The pages that follow cover the ones we could.`;
 
 let browser: Browser;
 before(async () => {
@@ -81,6 +81,13 @@ describe("a thin org", () => {
   test("the Overview says it too", () => {
     const overview = decode(pageWith(full, '<div class="eyebrow">Overview</div>'));
     assert.ok(overview.includes(front(open, checks, "The appendix")), overview);
+  });
+
+  test("gives no cause: code doesn't know why each check couldn't be measured", () => {
+    // Each check's own reason is in the appendix; the front sentence and the brief don't guess one.
+    assert.doesNotMatch(decode(exec), /too little data/);
+    assert.doesNotMatch(decode(full), /too little data/);
+    assert.doesNotMatch(report.briefs.get(`${run.id}:executive_summary:verdict`)!.purpose, /too little data/);
   });
 
   test("its counts trace to the summary's own figures, not to a figure that happens to match", () => {
@@ -121,7 +128,8 @@ describe("a thin org", () => {
 
   test("the verdict's brief tells Claude to say it once, from counts its sources hold", () => {
     const brief = report.briefs.get(`${run.id}:executive_summary:verdict`)!;
-    assert.ok(brief.purpose.includes(`${open} of the ${checks} checks couldn't be measured, because this org holds too little data for them`), brief.purpose);
+    assert.ok(brief.purpose.includes(`${open} of the ${checks} checks couldn't be measured (the summary source's notMeasurable and checks)`), brief.purpose);
+    assert.match(brief.purpose, /Don't give a cause/);
     assert.match(brief.purpose, /Say so once, briefly/);
     const summary = brief.sources.find((s) => s.kind === "summary")!;
     assert.equal(summary.checks, checks);
@@ -146,18 +154,18 @@ describe("the base sample, below the threshold", () => {
     assert.deepEqual(counts(report), { checks: 102, open: 2 });
     const verdict = decode(pageWith(exec, '<div class="eyebrow">Verdict</div>'));
     assert.ok(verdict.includes("Not measurable: Forecast accuracy; Dashboard use. The full report's appendix says why for each."), verdict);
-    assert.ok(!verdict.includes("this org holds too little data"));
+    assert.ok(!verdict.includes("says less than a full report would"));
   });
 
   test("keeps each area's note, and says nothing on the Overview", () => {
     assert.equal([...decode(full).matchAll(/1 more check couldn't be measured here\. The appendix says why\./g)].length, 2);
-    assert.ok(!decode(full).includes("this org holds too little data"));
+    assert.ok(!decode(full).includes("says less than a full report would"));
   });
 
   test("the verdict's brief says nothing about thin data", () => {
     // Not the exact purpose: other briefs work (decision 440) adds to it, and this is only about 450.
     const { purpose } = report.briefs.get(`${run.id}:executive_summary:verdict`)!;
     assert.match(purpose, /^Tell an executive reader, in a few sentences, what state this Salesforce org is in and what matters most\./);
-    assert.doesNotMatch(purpose, /too little data|couldn't be measured/);
+    assert.doesNotMatch(purpose, /says less than|couldn't be measured/);
   });
 });

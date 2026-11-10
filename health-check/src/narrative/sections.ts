@@ -463,7 +463,7 @@ function summaryCounts(findings: Finding[]): PromptSource {
 /** For a thin org, what the verdict's brief adds: the counts are summaryCounts' checks and notMeasurable (DECISIONS.md 450). */
 function thinDataBrief(team: Finding[]): string {
   const open = team.filter((f) => f.status === "not_measurable").length;
-  return `${open} of the ${team.length} checks couldn't be measured, because this org holds too little data for them (the summary source's notMeasurable and checks). Say so once, briefly, as a fact about the data and not as the customer's fault. Don't list them: the appendix names each.`;
+  return `${open} of the ${team.length} checks couldn't be measured (the summary source's notMeasurable and checks). Say so once, briefly, as a fact and not as the customer's fault. Don't give a cause and don't list them: the appendix names each with its reason.`;
 }
 
 /** The plan's shape as figures, under the id planSource uses, so a draft of a plan section can say "the first 30 days". */

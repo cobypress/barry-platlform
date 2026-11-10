@@ -209,9 +209,9 @@ export function verdictOf(findings: Finding[]): Verdict {
   return { headline, critical, high, issues: issues.length };
 }
 
-// Past this share of checks not measurable, the org holds too little data for the
-// report to say so area by area: a Developer Edition had 36 of 99, and every area
-// said it again. Then it's said once, at the front (DECISIONS.md 450). A third
+// Past this share of checks not measurable, saying so area by area reads as a
+// report about what we couldn't do: a Developer Edition had 36 of 99, and every
+// area said it again. Then it's said once, at the front (DECISIONS.md 450). A third
 // leaves an ordinary org, with a few gaps, as it was. Presentation only: no
 // verdict, score or figure depends on it.
 export const THIN_DATA_SHARE = 1 / 3;
@@ -225,10 +225,12 @@ export function isThinData(findings: Finding[]): boolean {
 /**
  * The one sentence a thin report carries at the front. Both counts are in the
  * dataset's summary source; how many we could measure isn't, so it isn't given.
+ * No cause: code doesn't know why each check couldn't be measured, and the
+ * appendix gives each its own reason.
  */
 export function thinDataLine(findings: Finding[], appendix: "The full report's appendix" | "The appendix"): string {
   const open = findings.filter((f) => f.status === "not_measurable").length;
-  return `We couldn't measure ${open} of the ${findings.length} checks: this org holds too little data for them. ${appendix} names each, with the reason. The pages that follow cover the ones we could.`;
+  return `We couldn't measure ${open} of the ${findings.length} checks, so this report says less than a full report would. ${appendix} names each, with the reason. The pages that follow cover the ones we could.`;
 }
 
 export type ScorecardRow = { domain: string; label: string; score: number | null; note: string; assessed: boolean; issues: number; high: number };
