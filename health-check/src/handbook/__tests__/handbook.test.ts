@@ -4,21 +4,23 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { SALES_CLOUD_MODULES } from "../../domains/index.ts";
 import { runHealthCheck } from "../../engine/run.ts";
-import { RETRIEVE_TYPES } from "../../extract/automation.ts";
+import { scanApex } from "../../extract/apex-scan.ts";
+import { readTouches } from "../../extract/apex-touches.ts";
+import { RETRIEVE_TYPES, type ApexClassRow, type ApexData, type ApexTriggerRow } from "../../extract/automation.ts";
 import { flowDetailMetadata, parseMetadataBundle, type MetadataBundle } from "../../extract/metadata-parse.ts";
 import { toolingValidationRule } from "../../extract/metadata-tooling.ts";
 import type { Sourced } from "../../extract/types.ts";
 import { deleteRunFolder, purgeRun } from "../../retention/purge.ts";
 import type { Transport } from "../../salesforce/transport.ts";
-import { tempDir } from "../../testing/harness.ts";
+import { runFromRecording, tempDir } from "../../testing/harness.ts";
 import { loadCalibration, syntheticProvider } from "../../testing/replay.ts";
 import { Simulator } from "../../testing/simulator.ts";
 import { AS_OF, HANDBOOK_MARKER, HANDBOOK_PLANTED, METADATA_FILES } from "../../testing/synthetic-org.ts";
 import { buildHandbook, HANDBOOK_FILE } from "../build.ts";
 import { flowDetail, validationRuleDetail } from "../detail.ts";
-import { Handbook, MAX_CONDITIONS, MAX_FIELDS, MAX_STEPS, MAX_TEXT, type HandbookFlow, type ValidationRuleCoverage } from "../schema.ts";
+import { Handbook, MAX_APEX_CLASSES, MAX_APEX_TRIGGERS, MAX_CONDITIONS, MAX_FIELDS, MAX_STEPS, MAX_TEXT, type HandbookFlow, type ValidationRuleCoverage } from "../schema.ts";
 
-// The org handbook's data (DECISIONS.md 451 to 455).
+// The org handbook's data (DECISIONS.md 451 to 457).
 
 type Run = { dir: string; runId: string; calls: number; itemReads: number };
 
@@ -31,6 +33,8 @@ async function run(options: ConstructorParameters<typeof Simulator>[0] = {}): Pr
 }
 
 const read = (dir: string, file: string): string => readFileSync(join(dir, file), "utf8");
+/** The Apex parts, for a file whose other parts a test is about. */
+const APEX_UNREAD = { apexClasses: { status: "unavailable", reason: "x" }, apexTriggers: { status: "unavailable", reason: "x" } } as const;
 const handbookOf = (r: Run): Handbook => Handbook.parse(JSON.parse(read(r.dir, HANDBOOK_FILE)));
 const flows = (h: Handbook): HandbookFlow[] => (h.flows.status === "ok" ? h.flows.items : assert.fail("flows unavailable"));
 
@@ -203,10 +207,10 @@ describe("the two routes", () => {
       const items = handbookOf(retrieve).validationRules;
       assert.ok(items.status === "ok");
       const { covers: _, ...bare } = items;
-      assert.equal(Handbook.safeParse({ version: 1, flows: { status: "ok", items: [] }, validationRules: bare }).success, false);
-      assert.equal(Handbook.safeParse({ version: 1, flows: { status: "ok", items: [] }, validationRules: items }).success, true);
+      assert.equal(Handbook.safeParse({ version: 2, flows: { status: "ok", items: [] }, validationRules: bare, ...APEX_UNREAD }).success, false);
+      assert.equal(Handbook.safeParse({ version: 2, flows: { status: "ok", items: [] }, validationRules: items, ...APEX_UNREAD }).success, true);
       // Unavailable says why instead, with nothing to cover.
-      assert.equal(Handbook.safeParse({ version: 1, flows: { status: "ok", items: [] }, validationRules: { status: "unavailable", reason: "x", covers: items.covers } }).success, false);
+      assert.equal(Handbook.safeParse({ version: 2, flows: { status: "ok", items: [] }, validationRules: { status: "unavailable", reason: "x", covers: items.covers }, ...APEX_UNREAD }).success, false);
     });
 
     test("a bundle with no checkpointed coverage gives no list rather than one that claims too much", () => {
@@ -336,7 +340,7 @@ describe("caps (decision 453)", () => {
     assert.deepEqual([at.steps.length, at.stepsTotal, at.cut], [500, 500, false]);
     const over = flowDetail("Over", steps(501), null);
     assert.deepEqual([over.steps.length, over.stepsTotal, over.cut], [500, 501, true]);
-    assert.ok(Handbook.safeParse({ version: 1, flows: { status: "ok", items: [over] }, validationRules: { status: "ok", covers: { customObjects: "all", standardObjects: "all" }, items: [] } }).success);
+    assert.ok(Handbook.safeParse({ version: 2, flows: { status: "ok", items: [over] }, validationRules: { status: "ok", covers: { customObjects: "all", standardObjects: "all" }, items: [] }, ...APEX_UNREAD }).success);
   });
 
   test(`a step keeps ${MAX_FIELDS} fields, with the full count beside them`, () => {
@@ -427,7 +431,8 @@ describe("when the metadata couldn't be read (decision 454)", () => {
 
   test("no metadata step, a failed one, or detail that doesn't fit: both parts say why", () => {
     const source = { kind: "metadata" as const, path: "Flow" };
-    assert.deepEqual(buildHandbook(undefined), { version: 1, flows: { status: "unavailable", reason: "This run didn't read the org's metadata." }, validationRules: { status: "unavailable", reason: "This run didn't read the org's metadata." } });
+    const noApex = { status: "unavailable", reason: "This run didn't read the org's Apex." };
+    assert.deepEqual(buildHandbook(undefined), { version: 2, flows: { status: "unavailable", reason: "This run didn't read the org's metadata." }, validationRules: { status: "unavailable", reason: "This run didn't read the org's metadata." }, apexClasses: noApex, apexTriggers: noApex });
     const failed = buildHandbook({ status: "unavailable", reason: "Salesforce said no.", source });
     assert.deepEqual(failed.flows, { status: "unavailable", reason: "Metadata couldn't be retrieved: Salesforce said no." });
     const bundle = parseMetadataBundle({});
@@ -468,5 +473,140 @@ describe("the API budget", () => {
     assert.equal(retrieve.itemReads, 0);
     assert.equal(tooling.calls, 27 + 2);
     assert.equal(tooling.itemReads, 13 + 2);
+  });
+});
+
+describe("Apex (decisions 456 and 457)", () => {
+  const source = { kind: "soql" as const, api: "rest" as const, query: "SELECT Id FROM ApexClass" };
+  const ok = <T>(data: T[]) => ({ status: "ok" as const, data, source, truncated: false });
+  const BODY = "public class A { void x() { update [SELECT Id FROM Account]; } }";
+  const cls = (name: string, extra: Partial<ApexClassRow> = {}): ApexClassRow => ({ Id: "01p000000000001AAA", Name: name, ApiVersion: 62, Status: "Active", LengthWithoutComments: 60, commented: false, isTest: false, scan: scanApex(BODY), touches: readTouches(BODY), ...extra });
+  const NO_USAGE = { UsageBeforeInsert: false, UsageBeforeUpdate: false, UsageBeforeDelete: false, UsageAfterInsert: false, UsageAfterUpdate: false, UsageAfterDelete: false, UsageAfterUndelete: false };
+  const trg = (name: string, extra: Partial<ApexTriggerRow> = {}): ApexTriggerRow => ({ ...cls(name), Id: "01q000000000001AAA", TableEnumOrId: "Account", ...NO_USAGE, UsageBeforeInsert: true, ...extra });
+  const apex = (classes: ApexData["classes"], triggers: ApexData["triggers"]): ApexData => ({ classes, triggers, orgCoverage: ok([]), classCoverage: ok([]), references: { users: {}, fields: {} } });
+  const named = (n: number) => Array.from({ length: n }, (_, i) => `Code_${String(n - i).padStart(5, "0")}`);
+
+  describe("from the recorded synthetic org", () => {
+    let dir: string;
+    before(async () => {
+      dir = (await runFromRecording()).dir;
+    });
+
+    test("a version 2 file that validates against the schema, with both parts read", () => {
+      const raw = JSON.parse(read(dir, HANDBOOK_FILE));
+      assert.equal(raw.version, 2);
+      const h = Handbook.parse(raw);
+      assert.ok(h.apexClasses.status === "ok" && h.apexTriggers.status === "ok");
+      assert.deepEqual([h.apexClasses.total, h.apexClasses.cut, h.apexTriggers.total, h.apexTriggers.cut], [7, false, 5, false]);
+      // A file of the first version doesn't fit.
+      assert.equal(Handbook.safeParse({ ...raw, version: 1 }).success, false);
+    });
+
+    test("lists OpportunityHandler, which queries Opportunity and updates, and not the field its comment names", () => {
+      const h = Handbook.parse(JSON.parse(read(dir, HANDBOOK_FILE)));
+      assert.ok(h.apexClasses.status === "ok");
+      assert.deepEqual(h.apexClasses.items.find((c) => c.name === "OpportunityHandler"), {
+        name: "OpportunityHandler",
+        apiVersion: 60,
+        status: "Active",
+        isTest: false,
+        touches: { queries: ["Opportunity"], queriesTotal: 1, changes: ["update"], dynamicQueries: false },
+      });
+      assert.deepEqual(h.apexClasses.items.map((c) => c.name), [...h.apexClasses.items.map((c) => c.name)].sort());
+      assert.equal(h.apexClasses.items.find((c) => c.name === "OpportunityHandlerTest")!.isTest, true);
+    });
+
+    test("each trigger with its object as Salesforce gives it, and its events in order", () => {
+      const h = Handbook.parse(JSON.parse(read(dir, HANDBOOK_FILE)));
+      assert.ok(h.apexTriggers.status === "ok");
+      const invoice = h.apexTriggers.items.find((t) => t.name === "InvoiceTrigger")!;
+      assert.deepEqual([invoice.object, invoice.events], ["01I000000000001AAA", ["before insert", "before update"]]);
+      assert.deepEqual(h.apexTriggers.items.find((t) => t.name === "OpportunityTrigger")!.events, ["before insert"]);
+    });
+
+    test("the apex step's checkpoint keeps the reading and drops the body", () => {
+      const checkpoint = read(dir, "checkpoints/apex.json");
+      assert.match(checkpoint, /"touches":\{"queries":\["Opportunity"\]/);
+      assert.ok(!checkpoint.includes("public class") && !checkpoint.includes("uses Competitor__c"));
+    });
+  });
+
+  test(`at most ${MAX_APEX_CLASSES} classes and ${MAX_APEX_TRIGGERS} triggers, by name, a cut part marked with the full count`, () => {
+    assert.deepEqual([MAX_APEX_CLASSES, MAX_APEX_TRIGGERS], [5_000, 1_000]);
+    const at = buildHandbook(undefined, apex(ok(named(5_000).map((n) => cls(n))), ok(named(1_000).map((n) => trg(n)))));
+    assert.ok(at.apexClasses.status === "ok" && at.apexTriggers.status === "ok");
+    assert.deepEqual([at.apexClasses.items.length, at.apexClasses.total, at.apexClasses.cut], [5_000, 5_000, false]);
+    assert.deepEqual([at.apexTriggers.items.length, at.apexTriggers.total, at.apexTriggers.cut], [1_000, 1_000, false]);
+    const over = buildHandbook(undefined, apex(ok(named(5_001).map((n) => cls(n))), ok(named(1_001).map((n) => trg(n)))));
+    assert.ok(over.apexClasses.status === "ok" && over.apexTriggers.status === "ok");
+    assert.deepEqual([over.apexClasses.items.length, over.apexClasses.total, over.apexClasses.cut], [5_000, 5_001, true]);
+    assert.deepEqual([over.apexTriggers.items.length, over.apexTriggers.total, over.apexTriggers.cut], [1_000, 1_001, true]);
+    // The first by name are kept, whatever order Salesforce sent them in.
+    assert.deepEqual([over.apexClasses.items[0]!.name, over.apexClasses.items.at(-1)!.name], ["Code_00001", "Code_05000"]);
+  });
+
+  test("a trigger's events in a fixed order, and null when the row has none of the Usage fields", () => {
+    const usage = { UsageAfterUndelete: true, UsageBeforeInsert: true, UsageAfterUpdate: true };
+    const old = trg("Old");
+    for (const key of Object.keys(NO_USAGE)) delete (old as Record<string, unknown>)[key];
+    const h = buildHandbook(undefined, apex(ok([]), ok([trg("Many", { ...NO_USAGE, ...usage }), old, trg("None", NO_USAGE)])));
+    assert.ok(h.apexTriggers.status === "ok");
+    const events = new Map(h.apexTriggers.items.map((t) => [t.name, t.events]));
+    assert.deepEqual(events.get("Many"), ["before insert", "after update", "after undelete"]);
+    assert.equal(events.get("Old"), null);
+    // Never an empty list: a trigger runs on something, so none at all says nothing was read.
+    assert.equal(events.get("None"), null);
+  });
+
+  test("a hidden body, and a checkpoint row from before the reading, read as not read rather than touching nothing", () => {
+    const { touches: _, ...before } = cls("Before");
+    const hidden = cls("Hidden", { scan: null, commented: null, touches: readTouches("(hidden)") });
+    const h = buildHandbook(undefined, apex(ok([before as ApexClassRow, hidden]), ok([])));
+    assert.ok(h.apexClasses.status === "ok");
+    const items = new Map(h.apexClasses.items.map((c) => [c.name, c]));
+    assert.deepEqual([items.get("Before")!.touches, items.get("Before")!.isTest], [null, false]);
+    assert.deepEqual([items.get("Hidden")!.touches, items.get("Hidden")!.isTest], [null, null]);
+  });
+
+  test("each part is ok or unavailable on its own, with its source's reason", () => {
+    const failed = (reason: string) => ({ status: "unavailable" as const, reason, source });
+    const noClasses = buildHandbook(undefined, apex(failed("ApexClass isn't available in this org, or to the connected user."), ok([trg("T")])));
+    assert.deepEqual(noClasses.apexClasses, { status: "unavailable", reason: "ApexClass isn't available in this org, or to the connected user." });
+    assert.equal(noClasses.apexTriggers.status, "ok");
+    const noTriggers = buildHandbook(undefined, apex(ok([cls("C")]), failed("ApexTrigger isn't available in this org, or to the connected user.")));
+    assert.equal(noTriggers.apexClasses.status, "ok");
+    assert.deepEqual(noTriggers.apexTriggers, { status: "unavailable", reason: "ApexTrigger isn't available in this org, or to the connected user." });
+    // Nor does the metadata's state reach them, or theirs the metadata's.
+    assert.equal(noClasses.flows.status, "unavailable");
+    const metadataFailed = buildHandbook({ status: "unavailable", reason: "Salesforce said no.", source: { kind: "metadata", path: "Flow" } }, apex(ok([cls("C")]), ok([])));
+    assert.deepEqual([metadataFailed.flows.status, metadataFailed.apexClasses.status, metadataFailed.apexTriggers.status], ["unavailable", "ok", "ok"]);
+  });
+
+  test("Apex that doesn't fit the format leaves no part kept, as the rest does", () => {
+    const bad = cls("Bad", { touches: { queries: ["Not an identifier"], queriesTotal: 1, changes: [], dynamicQueries: false } });
+    const h = buildHandbook(undefined, apex(ok([bad]), ok([])));
+    for (const part of [h.flows, h.validationRules, h.apexClasses, h.apexTriggers]) {
+      assert.ok(part.status === "unavailable");
+      assert.equal(part.reason, "The handbook's data didn't fit its format at apexClasses.items.0.touches.queries.0, so it wasn't kept.");
+    }
+  });
+
+  test("a Professional Edition org's reason passes through unchanged", async () => {
+    const simulator = new Simulator({ failQuery: (soql) => (/FROM Apex(Class|Trigger) WHERE/.test(soql) ? { errorCode: "INVALID_TYPE", message: `sObject type '${/FROM (\w+)/.exec(soql)![1]}' is not supported.` } : null) });
+    const professional: Transport = {
+      send: async (request) => {
+        const response = await simulator.send(request);
+        return decodeURIComponent(request.url).includes("FROM Organization") ? { ...response, text: response.text.replace("Enterprise Edition", "Professional Edition") } : response;
+      },
+    };
+    const result = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: new Date(AS_OF), transport: professional, log: () => {} });
+    const h = Handbook.parse(JSON.parse(read(result.dir, HANDBOOK_FILE)));
+    for (const part of [h.apexClasses, h.apexTriggers]) assert.deepEqual(part, { status: "unavailable", reason: "Professional Edition has no Apex, so there's no code to check." });
+    assert.equal(h.flows.status, "ok");
+  });
+
+  test("a run with no apex step says so", () => {
+    const h = buildHandbook(undefined);
+    assert.deepEqual([h.apexClasses, h.apexTriggers], [{ status: "unavailable", reason: "This run didn't read the org's Apex." }, { status: "unavailable", reason: "This run didn't read the org's Apex." }]);
   });
 });
