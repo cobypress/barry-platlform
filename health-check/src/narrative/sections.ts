@@ -497,14 +497,17 @@ function summaryCounts(findings: Finding[]): PromptSource {
 }
 
 /**
- * For a thin org, what the verdict's brief adds (DECISIONS.md 450). The page prints
- * the engine's own sentence with the counts beneath Claude's text, so that's the one
- * statement: Claude writes around it rather than saying it again.
+ * For a thin org, what the verdict's brief adds (DECISIONS.md 450), and the full
+ * report's Overview's (441). Each page prints the engine's own sentence with the
+ * counts beneath Claude's text, so that's the one statement: Claude writes around it
+ * rather than saying it again. The Overview opens the report rather than giving the
+ * verdict, so it's named for what it is.
  */
-function thinDataBrief(team: Finding[]): string {
+function thinDataBrief(team: Finding[], section: "verdict" | "overview"): string {
   const open = team.filter((f) => f.status === "not_measurable").length;
-  if (open === team.length) return `None of the ${team.length} checks could be measured. The page states that beneath your text; don't repeat it. Say plainly that this report can't give a verdict on the data yet, and don't present that as the customer's fault.`;
-  return `${open} of the ${team.length} checks couldn't be measured. The page states that with its counts beneath your text, so don't repeat the count or say what couldn't be measured: write the verdict from the checks we could measure, and don't present the gaps as the customer's fault.`;
+  const none = section === "verdict" ? "a verdict" : "a view";
+  if (open === team.length) return `None of the ${team.length} checks could be measured. The page states that beneath your text; don't repeat it. Say plainly that this report can't give ${none} on the data yet, and don't present that as the customer's fault.`;
+  return `${open} of the ${team.length} checks couldn't be measured. The page states that with its counts beneath your text, so don't repeat the count or say what couldn't be measured: write the ${section} from the checks we could measure, and don't present the gaps as the customer's fault.`;
 }
 
 /** The plan's shape as figures, under the id planSource uses, so a draft of a plan section can say "the first 30 days". */
@@ -656,7 +659,7 @@ function executiveSpecs(input: ReportInput, team: Finding[], survey: SurveyView 
       ),
       findingIds: top.map((f) => f.id),
       sources: SUMMARY_SOURCES,
-      brief: { purpose: `Tell an executive reader what state this Salesforce org is in and what matters most.${isThinData(team) ? ` ${thinDataBrief(team)}` : ""}`, sources: [summaryCounts(team), ...top.map(findingSource)], maxWords: WORD_TARGETS.verdict },
+      brief: { purpose: `Tell an executive reader what state this Salesforce org is in and what matters most.${isThinData(team) ? ` ${thinDataBrief(team, "verdict")}` : ""}`, sources: [summaryCounts(team), ...top.map(findingSource)], maxWords: WORD_TARGETS.verdict },
     },
     ...(survey ? [surveySpec(survey)] : []),
     // Only what several people said the same way, and the data reads one way (DECISIONS.md 185).
@@ -724,8 +727,7 @@ function fullSpecs(input: ReportInput, team: Finding[], metrics: Metric[], surve
       findingIds: issues.map((f) => f.id),
       sources: SUMMARY_SOURCES,
       brief: {
-        purpose:
-          "Open the full report. Tell the reader what state their Salesforce is in, the few themes that run through the issues and why they matter to the business, and where to start. The verdict and the counts of issues are shown beside this text, so don't open by repeating them.",
+        purpose: `Open the full report. Tell the reader what state their Salesforce is in, the few themes that run through the issues and why they matter to the business, and where to start. The verdict and the counts of issues are shown beside this text, so don't open by repeating them.${isThinData(team) ? ` ${thinDataBrief(team, "overview")}` : ""}`,
         sources: [summaryCounts(team), ...issues.map(findingSource)],
         maxWords: WORD_TARGETS.overview,
       },
