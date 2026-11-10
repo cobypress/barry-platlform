@@ -96,6 +96,21 @@ describe("sharing a run's folder with its readers", () => {
     assert.equal(store.shares.length, 2, "one row a run, folder and address");
   });
 
+  test("without grant, a reader taken off loses access and a new one isn't given it", async () => {
+    const { store, sharing, deps } = setup();
+    await syncShares(RUN, deps);
+    // After a failed make: ops is taken off, and a reader added meanwhile waits for documents that were made.
+    store.readers.set(RUN, ["ceo@customer.example.com", "new@customer.example.com"]);
+    const result = await syncShares(RUN, deps, { grant: false });
+    assert.deepEqual([result.shared, result.removed, result.failed], [0, 1, 0]);
+    assert.deepEqual(sharing.who(), ["ceo@customer.example.com"], "ceo keeps the access they had");
+    assert.ok(!sharing.calls.some((c) => c.includes("new@")), sharing.calls.join("\n"));
+    // With nothing to take away, Drive isn't needed at all.
+    assert.equal((await syncShares(RUN, { ...deps, sharing: null }, { grant: false })).failed, 0);
+    // The next sync that may grant shares it.
+    assert.equal((await syncShares(RUN, deps)).shared, 1);
+  });
+
   test("a new folder is shared, and the old one's access is taken away", async () => {
     const { store, sharing, deps } = setup({ readers: ["ceo@customer.example.com"] });
     await syncShares(RUN, deps);

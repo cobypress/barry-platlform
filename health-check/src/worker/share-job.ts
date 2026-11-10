@@ -29,9 +29,12 @@ const RUN_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/;
 /**
  * Brings the run's shares in line with its readers. Removals come first, one
  * at a time: Drive doesn't take changes to one folder's permissions at once.
- * `revokeAll` takes everyone's access away, whatever the list says.
+ * `revokeAll` takes everyone's access away, whatever the list says. With
+ * `grant: false` nobody new is given access, and removals go ahead as ever:
+ * after a failed make, the folder still holds documents a new reader was never
+ * meant to get.
  */
-export async function syncShares(runId: string, deps: ShareDeps, options: { revokeAll?: DriveShareRemoved } = {}): Promise<ShareSummary> {
+export async function syncShares(runId: string, deps: ShareDeps, options: { revokeAll?: DriveShareRemoved; grant?: boolean } = {}): Promise<ShareSummary> {
   const input = await deps.store.loadShareJob(runId);
   if (!input) return { shared: 0, removed: 0, failed: 0, detail: "There's no such run" };
   if (!input.recordable) return { shared: 0, removed: 0, failed: 0, detail: "The console can't record shares yet, so nothing was shared" };
@@ -45,7 +48,8 @@ export async function syncShares(runId: string, deps: ShareDeps, options: { revo
   const wanted = new Set(revokeAll || !input.released || !input.folderId ? [] : input.readers.map((r) => r.trim().toLowerCase()));
   const summary = { shared: 0, removed: 0, failed: 0 };
   const shared = (email: string): boolean => active.some((s) => s.state === "shared" && s.email === email && s.folderId === input.folderId);
-  const needsDrive = active.some((s) => !wanted.has(s.email) || s.folderId !== input.folderId) || [...wanted].some((e) => !shared(e));
+  const grant = options.grant ?? true;
+  const needsDrive = active.some((s) => !wanted.has(s.email) || s.folderId !== input.folderId) || (grant && [...wanted].some((e) => !shared(e)));
   if (needsDrive && !deps.sharing) return { ...summary, failed: 1, detail: "Google Drive isn't set up here, so the folder's sharing can't change" };
 
   for (const share of active) {
@@ -73,7 +77,7 @@ export async function syncShares(runId: string, deps: ShareDeps, options: { revo
     }
   }
 
-  for (const email of wanted) {
+  for (const email of grant ? wanted : []) {
     if (shared(email)) continue;
     const before = input.shares.find((s) => s.email === email && s.folderId === input.folderId);
     const base: DriveShare = before ?? { runId, email, folderId: input.folderId!, permissionId: null, state: "failed", sharedAt: null, removedAt: null, removedWhy: null, error: null, updatedAt: at() };

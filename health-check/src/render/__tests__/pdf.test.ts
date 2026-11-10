@@ -24,6 +24,7 @@ import { INVENTORY_COLUMNS, OBJECT_INVENTORY } from "../../domains/configuration
 import { document } from "../html.ts";
 import { layoutOf, launchBrowser, pdfPageCount, renderPdf } from "../pdf.ts";
 import { EXECUTIVE_PAGES, OUTPUT_FILES, renderRun } from "../render-run.ts";
+import { heldFigures } from "../render-released.ts";
 
 const { output, run, dir } = await runFromRecording({ answers: loadAnswers() });
 const pseudonyms = new Pseudonymiser(JSON.parse(readFileSync(join(dir, "pseudonym-map.json"), "utf8")) as PseudonymEntry[]);
@@ -462,6 +463,9 @@ describe("the layout checks fire", () => {
     const html = executiveHtml(report, pseudonyms).replace("Issues</span>", "Issues, worth £9,123,456</span>");
     const { layout } = await renderPdf(browser, html, { ...execRange, dataset: report.dataset });
     assert.ok(layout.problems.some((p) => p.check === "number check" && p.detail.includes("9,123,456")), describeProblems(layout.problems));
+    // And it holds the documents back, named so a person can find it (DECISIONS.md 430).
+    const held = heldFigures({ executive: layout, full: { pages: 0, passed: true, problems: [] } });
+    assert.ok(held.some((h) => h.document === "The executive summary" && h.page > 0 && h.figure.includes("9,123,456") && h.reason.length > 0), JSON.stringify(held));
   });
 });
 
