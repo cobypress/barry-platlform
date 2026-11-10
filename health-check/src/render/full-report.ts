@@ -1,7 +1,7 @@
 import { yearlyByFinding } from "../value/model.ts";
 import { currentBody, TOP_ISSUE_COUNT, type BuiltOutput, type BuiltReport } from "../narrative/sections.ts";
 import { VERDICT_WORDS, type ReadinessVerdict } from "../narrative/readiness.ts";
-import { areasOf, buildPlan, domainLabel, isSetupReview, issuesOf, isUnpricedSaving, QUICK_WINS_HEADING, recordAreasLine, scorecard, topIssues, UNPRICED, verdictOf } from "../narrative/select.ts";
+import { areasOf, buildPlan, domainLabel, isSetupReview, issuesOf, isThinData, isUnpricedSaving, QUICK_WINS_HEADING, recordAreasLine, scorecard, thinDataLine, topIssues, UNPRICED, verdictOf } from "../narrative/select.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { ACCOUNT_ENGAGEMENT_DOMAINS, canRelease, CPQ_DOMAINS, SERVICE_CLOUD_DOMAINS, type Finding, type Metric, type Run } from "../schemas/index.ts";
 import { INVENTORY_COLUMNS, inventoryRows, OBJECT_INVENTORY } from "../domains/configuration/inventory.ts";
@@ -755,6 +755,9 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   const quiet = assessed.filter((d) => !withIssues.includes(d));
   const working = quiet.filter((d) => team.some((f) => f.domain === d && f.status === "passed"));
   const unclear = [...quiet.filter((d) => !working.includes(d)), ...unassessed];
+  // A thin org is told once, on the Overview, so the area pages don't each say it again (DECISIONS.md 450).
+  // "Where we can't give a view yet" needs nothing more: it only ever holds areas with nothing measured.
+  const thin = isThinData(team);
   const sized = (ids: string[]): boolean => ids.some((id) => metric(id)?.status === "measured");
 
   // Each deep-dive page shows only if one of its figures could be measured. The
@@ -862,7 +865,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   add(`<div class="eyebrow">What we found against it</div><h2>What you told us, against what we found</h2>${needsInput(built, "stated_vs_actual") ? inputChip : ""}${sectionBody(r, built, "stated_vs_actual")}`);
 
   mark("Overview and scorecard");
-  add(`<div class="eyebrow">Overview</div><h2>${r.t(verdict.headline)}</h2><div>${sectionBody(r, built, "overview").replace(`<p>${r.t(verdict.headline)}.</p>`, "")}</div><div class="stat-row" style="margin-top:18px">${report.overall.status === "measured" ? `<div class="stat"><b>${report.overall.score}</b><span>Barometer score</span></div>` : ""}<div class="stat"><b>${verdict.issues}</b><span>Issues</span></div><div class="stat"><b>${verdict.critical}</b><span>Critical</span></div><div class="stat"><b>${verdict.high}</b><span>High</span></div><div class="stat"><b>${team.filter((f) => f.status === "not_measurable").length}</b><span>Not measurable</span></div><div class="stat"><b>${team.filter((f) => f.status === "passed").length}</b><span>Passed</span></div></div>`);
+  add(`<div class="eyebrow">Overview</div><h2>${r.t(verdict.headline)}</h2><div>${sectionBody(r, built, "overview").replace(`<p>${r.t(verdict.headline)}.</p>`, "")}</div><div class="stat-row" style="margin-top:18px">${report.overall.status === "measured" ? `<div class="stat"><b>${report.overall.score}</b><span>Barometer score</span></div>` : ""}<div class="stat"><b>${verdict.issues}</b><span>Issues</span></div><div class="stat"><b>${verdict.critical}</b><span>Critical</span></div><div class="stat"><b>${verdict.high}</b><span>High</span></div><div class="stat"><b>${team.filter((f) => f.status === "not_measurable").length}</b><span>Not measurable</span></div><div class="stat"><b>${team.filter((f) => f.status === "passed").length}</b><span>Passed</span></div></div>${thin ? `<p class="small-note">${r.t(thinDataLine(team, "The appendix"))}</p>` : ""}`);
 
   const progressed = progressPage(r, report);
   if (progressed) mark("Since your last health check");
@@ -925,7 +928,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
       const own = team.filter((f) => f.domain === d);
       const passed = own.filter((f) => f.status === "passed").length;
       const open = own.filter((f) => f.status === "not_measurable").length;
-      return { title: domainLabel(d), detail: `No issues ${passed === 1 ? "in the one check" : `across the ${passed} checks`} we could make here.${open ? ` ${open} more couldn't be measured, and the appendix lists them.` : ""}` };
+      return { title: domainLabel(d), detail: `No issues ${passed === 1 ? "in the one check" : `across the ${passed} checks`} we could make here.${open && !thin ? ` ${open} more couldn't be measured, and the appendix lists them.` : ""}` };
     }), compact));
   }
   const recordLine = recordAreasLine(run);
