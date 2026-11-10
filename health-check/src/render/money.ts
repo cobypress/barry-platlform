@@ -183,13 +183,16 @@ const EYEBROW = "What it's worth";
 const TITLE = "What fixing this is worth";
 
 /**
- * The label column's width where a table prints these rows: the browser makes
- * the figures' columns as wide as their widest text in the rows it prints, and
- * the label has the rest. Never wider than the browser's (DECISIONS.md 438).
+ * The label column's width where a table prints the lines from `from` to `to`
+ * and, where `last`, the rest added up if any are left and the total: the
+ * browser makes the figures' columns as wide as their widest text in the rows it
+ * prints, and the label has the rest. Never wider than the browser's (DECISIONS.md 438).
  */
-function labelColumn(parts: Parts, measure: TableMeasure, rows: Figures[]): number {
+function labelColumn(parts: Parts, measure: TableMeasure, from: number, to: number, last: boolean): number {
+  const { all, total } = parts;
+  const rows = [...all.slice(from, to).map((g) => g.counted), ...(last && to < all.length ? [parts.rest(to)] : []), ...(last ? [total] : [])];
   const scale = measure.font / FIGURE_AT;
-  const widest = (head: number, text: (x: Figures) => string) => scale * Math.max(head, ...rows.map((x) => figureWidth(text(x), x === parts.total)));
+  const widest = (head: number, text: (x: Figures) => string) => scale * Math.max(head, ...rows.map((x) => figureWidth(text(x), x === total)));
   return measure.text - widest(EXPECTED_HEAD, (x) => parts.m(x.expected)) - widest(RANGE_HEAD, (x) => parts.range(x.low, x.high));
 }
 
@@ -207,9 +210,9 @@ export const moneyBasisLines = (basis: string, width: number): number => textLin
  * column is the one these rows print in.
  */
 function rowsHeight(r: Render, parts: Parts, measure: TableMeasure, from: number, to: number, last: boolean): number {
-  const { all, total } = parts;
+  const { all } = parts;
   const left = last && to < all.length;
-  const column = labelColumn(parts, measure, [...all.slice(from, to).map((g) => g.counted), ...(left ? [parts.rest(to)] : []), ...(last ? [total] : [])]);
+  const column = labelColumn(parts, measure, from, to, last);
   const line = (label: string) => measure.row + measure.line * labelLines(r.t(label), column, measure);
   const basis = (g: Group) => (measure.basis ? measure.basis.line * textLines(printed(r.t(parts.basis(g))), column, measure.basis.font) : 0);
   return all.slice(from, to).reduce((sum, g) => sum + line(g.label) + basis(g), 0) + (left ? line(restLabel(all.length - to)) : 0) + (last ? 1 + line("Total, each counted once") : 0);
@@ -253,8 +256,7 @@ export function moneyPage(r: Render, report: BuiltReport): string {
 export function moneyPageColumn(r: Render, report: BuiltReport): number {
   const parts = moneyParts(r, report);
   const { named } = pagePlan(r, report, parts, `${pageNotes(r, parts)}${seatsOnMoneyPage(r, report)}`);
-  const { all, total } = parts;
-  return labelColumn(parts, PAGE_TABLE, [...all.slice(0, named).map((g) => g.counted), ...(named < all.length ? [parts.rest(named)] : []), total]);
+  return labelColumn(parts, PAGE_TABLE, 0, named, true);
 }
 
 /**
