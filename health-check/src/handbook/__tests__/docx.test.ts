@@ -267,6 +267,8 @@ describe("the handbook as a Word document", () => {
       // A time source we don't know, under Salesforce's own word for it.
       assert.equal(when({ timeSource: "RecordEvent" }), "30 days before what Salesforce calls RecordEvent (CloseDate)");
       assert.equal(when({ recordField: null }), "as Salesforce records it: offset -30, unit Days, counted from RecordField");
+      // Nor is a field taken to be what it counts from when no time source says so.
+      assert.equal(when({ timeSource: null }), "as Salesforce records it: offset -30, unit Days, field CloseDate");
       assert.equal(whenWords(null), "when it runs isn't recorded");
       assert.equal(whenWords({ offsetNumber: null, offsetUnit: null, timeSource: null, recordField: null }), "when it runs isn't recorded");
       // Words of the file's own that happen to be JavaScript's aren't units.

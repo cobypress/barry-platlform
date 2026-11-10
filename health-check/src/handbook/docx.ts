@@ -185,8 +185,13 @@ export function whenWords(when: HandbookPath["when"]): string {
   if (when === null) return "when it runs isn't recorded";
   const { offsetNumber, offsetUnit, timeSource, recordField } = when;
   const unit = offsetUnit === null ? undefined : wordFor(UNIT_WORDS, offsetUnit);
-  // A field it counts from, the moment the record is saved, or Salesforce's own word for another.
-  const from = timeSource === "RecordField" || timeSource === null ? recordField : timeSource === "RecordTriggerEvent" ? "the record is saved" : `what Salesforce calls ${timeSource}${recordField ? ` (${recordField})` : ""}`;
+  // A field it counts from, the moment the record is saved, or Salesforce's own
+  // word for another. With no time source, what it counts from isn't said.
+  const from =
+    timeSource === null ? null
+    : timeSource === "RecordField" ? recordField
+    : timeSource === "RecordTriggerEvent" ? "the record is saved"
+    : `what Salesforce calls ${timeSource}${recordField ? ` (${recordField})` : ""}`;
   if (unit && offsetNumber !== null && from !== null) {
     const n = Math.abs(offsetNumber);
     return `${count(n)} ${n === 1 ? unit[0] : unit[1]} ${offsetNumber < 0 ? "before" : "after"} ${from}`;

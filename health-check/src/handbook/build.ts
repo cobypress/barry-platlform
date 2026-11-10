@@ -74,8 +74,8 @@ function apexParts(apex: ApexData | undefined, customObjects: Sourced<CustomObje
 
 /**
  * The handbook's data from the metadata, apex and custom objects steps' output,
- * any of which is undefined when the run didn't have that step. A part that couldn't be read
- * says why, so the documents can tell "no flows" from "we couldn't read them"
+ * any of which is undefined when the run didn't have that step. A part that
+ * couldn't be read says why, so the documents can tell "no flows" from "we couldn't read them"
  * (decision 454). Checked against the schema here, so a file that doesn't fit is
  * never written: its parts say so instead, and the run carries on.
  */
