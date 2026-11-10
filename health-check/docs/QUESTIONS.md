@@ -257,7 +257,7 @@ c) Does `SELECT SubscriberPackage.Name, SubscriberPackage.NamespacePrefix FROM I
 d) In a retrieved object's metadata, is a record type's `<label>` always there, and is Tooling's `RecordType.Name` the same label?
 e) For CPQ: is a price action's `SBQQ__TargetObject__c` "Quote" or "Quote Line", so the field it sets is on `SBQQ__Quote__c` or `SBQQ__QuoteLine__c`, and its label is that object's describe's?
 
-## The org handbook's data (DECISIONS.md 451 to 454)
+## The org handbook's data (DECISIONS.md 451 to 455)
 
 To check on a sandbox or a developer org, not a customer's. The route test in `src/handbook/__tests__/handbook.test.ts` feeds a hand-written Tooling flow built on these answers.
 
@@ -265,3 +265,4 @@ a) In Tooling's `Flow.Metadata`, are a value's unused members (`stringValue`, `n
 b) Does every element on the canvas carry `locationX` on both routes, auto-layout flows included? An element of a kind the parser doesn't know is kept when it has one, or a connector.
 c) Does Tooling's `ValidationRule.Metadata` give `errorMessage` and `errorDisplayField`, as the Metadata API does? If not, the Tooling route's rules show no message.
 d) Does a retrieve write a quote inside a formula as `&quot;`? The handbook redacts each value after parsing either way, so this only says how often the whole-file redaction misses one.
+e) Does the Metadata API's `*` for `CustomObject` bring any standard object in a real org? We assume none (decision 455): on the retrieve route the handbook's validation rules say they cover your custom objects and Account, Contact, Lead and Opportunity, the four the retrieve names, and on the Tooling route every object. `aut.undocumented-automation` counts validation rules by route for the same reason: custom objects and those four on the retrieve, every rule on Tooling. If the wildcard brings a standard object, its rules are read but the list says it covers less than it holds.
