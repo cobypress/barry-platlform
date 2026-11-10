@@ -144,6 +144,7 @@ describe("what reads it", () => {
     ["src/engine/run.ts", "writes handbook.json"],
     ["src/testing/fingerprint.ts", "hashes it, in tests only"],
     ["src/testing/synthetic-org.ts", "plants its traps"],
+    ["src/facts/questions.ts", "names its section of QUESTIONS.md, and reads no run"],
   ]);
   const root = fileURLToPath(new URL("../../../", import.meta.url));
 
