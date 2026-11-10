@@ -20,7 +20,7 @@ import type { SectionBrief } from "./draft.ts";
 import type { Intake } from "./intake.ts";
 import { applyOverrides } from "./overrides.ts";
 import { assumptionsSource, findingSource, metricSource, planSource, statedProblemsSource, type PromptSource } from "./prompt.ts";
-import { areasOf, buildPlan, bySeverity, domainLabel, domainsInOrder, isSetupReview, issuesOf, rankBy, scorecard, teamLevelFinding, topIssues, verdictOf, type Added, type Plan } from "./select.ts";
+import { areasOf, buildPlan, bySeverity, domainLabel, domainsInOrder, isSetupReview, isThinData, issuesOf, rankBy, scorecard, teamLevelFinding, topIssues, verdictOf, type Added, type Plan } from "./select.ts";
 import { chapterFigures } from "../render/chapter.ts";
 import { restOf } from "../render/money.ts";
 import { MIN_RESPONSES, SURVEY, SURVEY_METRIC_IDS, surveyHours, surveyMetrics } from "../survey/summary.ts";
@@ -460,6 +460,17 @@ function summaryCounts(findings: Finding[]): PromptSource {
   };
 }
 
+/**
+ * For a thin org, what the verdict's brief adds (DECISIONS.md 450). The page prints
+ * the engine's own sentence with the counts beneath Claude's text, so that's the one
+ * statement: Claude writes around it rather than saying it again.
+ */
+function thinDataBrief(team: Finding[]): string {
+  const open = team.filter((f) => f.status === "not_measurable").length;
+  if (open === team.length) return `None of the ${team.length} checks could be measured. The page states that beneath your text; don't repeat it. Say plainly that this report can't give a verdict on the data yet, and don't present that as the customer's fault.`;
+  return `${open} of the ${team.length} checks couldn't be measured. The page states that with its counts beneath your text, so don't repeat the count or say what couldn't be measured: write the verdict from the checks we could measure, and don't present the gaps as the customer's fault.`;
+}
+
 /** The plan's shape as figures, under the id planSource uses, so a draft of a plan section can say "the first 30 days". */
 function planFigures({ phases, later, quickWins }: Plan): FigureSet["figures"] {
   const number = (value: number) => ({ source: PLAN, kind: "number" as const, value });
@@ -607,7 +618,7 @@ function executiveSpecs(input: ReportInput, team: Finding[], survey: SurveyView 
       ),
       findingIds: top.map((f) => f.id),
       sources: SUMMARY_SOURCES,
-      brief: { purpose: "Tell an executive reader, in a few sentences, what state this Salesforce org is in and what matters most.", sources: [summaryCounts(team), ...top.map(findingSource)] },
+      brief: { purpose: `Tell an executive reader, in a few sentences, what state this Salesforce org is in and what matters most.${isThinData(team) ? ` ${thinDataBrief(team)}` : ""}`, sources: [summaryCounts(team), ...top.map(findingSource)] },
     },
     ...(survey ? [surveySpec(survey)] : []),
     // Only what several people said the same way, and the data reads one way (DECISIONS.md 185).
