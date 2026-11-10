@@ -19,7 +19,7 @@ You build one task from a self-contained brief. The brief names the repo, worktr
 - Never open a `.env` file. Never edit a security test, `src/salesforce/allowlist.ts` or a `scripts/orchestrate-*` file: if the task needs one, stop and report it as blocked.
 - Tests stay green. Never skip, weaken or delete a test to get a pass. A test that has to change because behaviour changed on purpose is named in your report with the reason.
 - **Hand mutations.** For each fix or rule, break the code on purpose (invert the condition, drop the guard), run its test, see it fail, and restore. Report each mutation and the test that caught it. A change no test catches isn't done.
-- Decisions go in `docs/DECISIONS.md` (engine) using only the numbers in your brief, with the reason.
+- Decisions go in `docs/DECISIONS.md` (engine) using only the numbers in your brief, with the reason. The orchestrator writes the lane's decisions before you start, so edit that file only when the brief says to: three lanes appending rows to the same table conflict at merge. Otherwise put any change to a decision's wording in your report.
 - Match the code around you: comment density, naming, plain UK English in anything a customer reads.
 - Commit in small steps: `new - health check - …`, `fix - health check - …` or `docs - health check - …`, ending with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 - Review your own diff before you report (`git diff <base>...HEAD`): read it as the adversary will.
