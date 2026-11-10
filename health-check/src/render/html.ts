@@ -133,6 +133,39 @@ export function wrappedLines(text: string, chars: number): number {
   return lines;
 }
 
+// Each letter as wide as Chromium sets it in Poppins at 13.5px, rounded up
+// (DECISIONS.md 436). Type at another size scales with it, so one table serves
+// every size a page sets (438).
+/** a to z in Poppins at 13.5px. */
+const LOWER_WIDTHS = [9.2, 9.2, 8.2, 9.2, 8.4, 4.5, 9.2, 8.7, 3.4, 3.4, 7, 3.4, 14, 8.7, 8.7, 9.2, 9.2, 5.1, 7.1, 5, 8.7, 7.6, 11.1, 6.5, 7.6, 6.2];
+const MEASURED_AT = 13.5;
+/** The signs a money line says its basis with: a pound, a percentage and its brackets (DECISIONS.md 438). */
+const SIGN_WIDTHS: Record<string, number> = { "£": 8.4, "%": 10.3, "(": 6.2, ")": 6.2 };
+/** Any other character: capitals and figures at their widest, light punctuation, and the widest we measured for the rest. */
+const glyphWidth = (c: string): number =>
+  /[a-z]/.test(c) ? LOWER_WIDTHS[c.charCodeAt(0) - 97]! : /[MW]/.test(c) ? 13.2 : /[A-Z]/.test(c) ? 10.7 : /\d/.test(c) ? 8.6 : c === " " ? 3.6 : /[,.:;'!]/.test(c) ? 4.1 : c === "-" ? 7.5 : (SIGN_WIDTHS[c] ?? 14);
+
+/**
+ * Lines of text set `width` pixels wide in Poppins at `px`, a word at a time, as
+ * the browser sets it: a word that doesn't fit starts the next line, and a word
+ * is as wide as its letters. Give it the text as it prints (`printed`).
+ */
+export function textLines(text: string, width: number, px: number): number {
+  const room = (width * MEASURED_AT) / px;
+  const wide = (word: string) => [...word].reduce((sum, c) => sum + glyphWidth(c), 0);
+  let lines = 1;
+  let used = 0;
+  for (const word of text.split(/\s+/).filter(Boolean)) {
+    const need = used === 0 ? wide(word) : used + glyphWidth(" ") + wide(word);
+    if (need <= room || used === 0) used = need;
+    else {
+      lines += 1;
+      used = wide(word);
+    }
+  }
+  return lines;
+}
+
 /** Fills pages in order, moving to a new page when the next item wouldn't fit. */
 export function paginate<T>(items: T[], heightOf: (item: T) => number, budget: number): T[][] {
   const pages: T[][] = [];

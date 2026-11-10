@@ -6,7 +6,7 @@ import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { canRelease, type Finding, type Metric } from "../schemas/index.ts";
 import { deliveryOutlookChart, scorecardChart, scorecardOptions, winRateBySegment } from "./charts.ts";
 import { compactMoney, longDate, monthYear } from "./format.ts";
-import { chartSlot, coverScore, document, documentTitle, effortText, estimateLines, paginate, paragraphs, printed, renderContext, severityChip, valueFigure, valueText, type Render } from "./html.ts";
+import { chartSlot, coverScore, document, documentTitle, effortText, estimateLines, paginate, paragraphs, printed, renderContext, severityChip, textLines, valueFigure, valueText, type Render } from "./html.ts";
 import { noteSections, referenceMap, valueItemId } from "./references.ts";
 import { investmentPage, MONEY_CSS, moneyPage } from "./money.ts";
 import { PROGRESS_CSS, progressPage } from "./progress.ts";
@@ -78,38 +78,20 @@ const PLAN_CHARS = 90;
 // The introduction runs the page's full 658px at 13.5px. It's set a word at a
 // time, as the browser sets it: a word that doesn't fit starts the next line,
 // and a word is as wide as its letters, each at the width Chromium gives it in
-// Poppins at 13.5px, rounded up. Characters a line can't do it: on long-worded
-// prose the most that never counted a line too few was 92, which still counted
-// the 184-character introduction the engine writes as three lines where it takes
-// two (DECISIONS.md 436). Wrapped by width, no draft from every word at every
-// length to 60 words was counted a line too few up to 658px, so 640 errs towards
-// a new page. A line is 20.25px (13.5px at 1.5), counted as 20.5.
+// Poppins at 13.5px, rounded up (`textLines` in html.ts). Characters a line can't
+// do it: on long-worded prose the most that never counted a line too few was 92,
+// which still counted the 184-character introduction the engine writes as three
+// lines where it takes two (DECISIONS.md 436). Wrapped by width, no draft from
+// every word at every length to 60 words was counted a line too few up to 658px,
+// so 640 errs towards a new page. A line is 20.25px (13.5px at 1.5), counted as 20.5.
 const INTRO_WIDTH = 640;
-/** a to z in Poppins at 13.5px. */
-const LOWER_WIDTHS = [9.2, 9.2, 8.2, 9.2, 8.4, 4.5, 9.2, 8.7, 3.4, 3.4, 7, 3.4, 14, 8.7, 8.7, 9.2, 9.2, 5.1, 7.1, 5, 8.7, 7.6, 11.1, 6.5, 7.6, 6.2];
-/** Any other character: capitals and figures at their widest, light punctuation, and the widest we measured for the rest. */
-const glyphWidth = (c: string): number =>
-  /[a-z]/.test(c) ? LOWER_WIDTHS[c.charCodeAt(0) - 97]! : /[MW]/.test(c) ? 13.2 : /[A-Z]/.test(c) ? 10.7 : /\d/.test(c) ? 8.6 : c === " " ? 3.6 : /[,.:;'!]/.test(c) ? 4.1 : c === "-" ? 7.5 : 14;
 const PLAN_LINE = 19.8;
 const PHASE_HEAD = 41;
 const PLAN_PAGE_BUDGET = 925;
 /** About the characters a reference tag takes beside an action, at 0.85em with its margin (DECISIONS.md 418). */
 const REF_CHARS = 5;
 /** Lines of the introduction, wrapped a word at a time by the width of its letters. */
-export function introLines(intro: string): number {
-  const width = (word: string) => [...word].reduce((sum, c) => sum + glyphWidth(c), 0);
-  let lines = 1;
-  let used = 0;
-  for (const word of intro.split(/\s+/).filter(Boolean)) {
-    const need = used === 0 ? width(word) : used + glyphWidth(" ") + width(word);
-    if (need <= INTRO_WIDTH || used === 0) used = need;
-    else {
-      lines += 1;
-      used = width(word);
-    }
-  }
-  return lines;
-}
+export const introLines = (intro: string): number => textLines(intro, INTRO_WIDTH, 13.5);
 /** The plan's introduction's height, its 14px margin included, from its text as it prints. */
 export const planIntroHeight = (intro: string): number => 14 + 20.5 * introLines(intro);
 /** An action's height on the page, from its words and its references. */
