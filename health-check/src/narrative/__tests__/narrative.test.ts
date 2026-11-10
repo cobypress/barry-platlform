@@ -17,7 +17,8 @@ import { syntheticInterviews } from "../../testing/interviews.ts";
 import { usersTable } from "../../testing/synthetic-org.ts";
 import type { Finding, Metric } from "../../schemas/index.ts";
 
-const { output } = await runFromRecording({ answers: loadAnswers() });
+const sample = await runFromRecording({ answers: loadAnswers() });
+const { output } = sample;
 const findings: Finding[] = output!.findings;
 const metrics: Metric[] = output!.metrics;
 const dataset = buildDataset({ findings, metrics, currency: "GBP" });
@@ -227,7 +228,7 @@ describe("a draft's length (DECISIONS.md 440)", () => {
   });
 
   test("every brief states its own target, from the table", async () => {
-    const { output: o, run, dir } = await runFromRecording({ answers: loadAnswers() });
+    const { output: o, run, dir } = sample;
     const issue = o!.findings.find((f) => f.status === "issue")!;
     const intake = Intake.parse({ customerName: "Synthetic Co", summary: "The director says the forecast can't be trusted.", statedProblems: [{ id: "p1", statement: "We don't trust the forecast.", findingIds: [issue.id] }], capturedBy: "Synthetic Consultant", capturedAt: "2026-10-30T09:00:00.000Z" });
     const report = buildReport({ run, calibration: loadCalibration(), findings: o!.findings, metrics: o!.metrics, manualSteps: o!.manualSteps, intake, interviews: syntheticInterviews() });
@@ -243,6 +244,15 @@ describe("a draft's length (DECISIONS.md 440)", () => {
       seen.add(group);
     }
     assert.deepEqual([...seen].sort(), Object.keys(WORD_TARGETS).sort(), "every target is used by a brief");
+  });
+
+  test("the word target is a brief's only length instruction", () => {
+    const { output: o, run } = sample;
+    const issue = o!.findings.find((f) => f.status === "issue")!;
+    const intake = Intake.parse({ customerName: "Synthetic Co", summary: "The director says the forecast can't be trusted.", statedProblems: [{ id: "p1", statement: "We don't trust the forecast.", findingIds: [issue.id] }], capturedBy: "Synthetic Consultant", capturedAt: "2026-10-30T09:00:00.000Z" });
+    const report = buildReport({ run, calibration: loadCalibration(), findings: o!.findings, metrics: o!.metrics, manualSteps: o!.manualSteps, intake, interviews: syntheticInterviews() });
+    assert.ok(report.briefs.size >= 12, `${report.briefs.size} briefs`);
+    for (const [id, b] of report.briefs) assert.doesNotMatch(b.purpose, /\b(one|two|three|few) (short )?(sentences?|paragraphs?)\b/i, id);
   });
 });
 

@@ -645,7 +645,7 @@ function executiveSpecs(input: ReportInput, team: Finding[], survey: SurveyView 
       ),
       findingIds: top.map((f) => f.id),
       sources: SUMMARY_SOURCES,
-      brief: { purpose: "Tell an executive reader, in a few sentences, what state this Salesforce org is in and what matters most.", sources: [summaryCounts(team), ...top.map(findingSource)], maxWords: WORD_TARGETS.verdict },
+      brief: { purpose: "Tell an executive reader what state this Salesforce org is in and what matters most.", sources: [summaryCounts(team), ...top.map(findingSource)], maxWords: WORD_TARGETS.verdict },
     },
     ...(survey ? [surveySpec(survey)] : []),
     // Only what several people said the same way, and the data reads one way (DECISIONS.md 185).
@@ -662,7 +662,7 @@ function executiveSpecs(input: ReportInput, team: Finding[], survey: SurveyView 
       ...(top.length
         ? {
             brief: {
-              purpose: "Introduce the top issues to an executive reader in two or three sentences: what they have in common, and why they come before everything else. Each issue is set out in full straight after this text, so don't go through them one by one.",
+              purpose: "Introduce the top issues to an executive reader: what they have in common, and why they come before everything else. Each issue is set out in full straight after this text, so don't go through them one by one.",
               sources: [summaryCounts(team), ...top.map(findingSource)],
               maxWords: WORD_TARGETS.top_issues,
             },
@@ -681,7 +681,7 @@ function executiveSpecs(input: ReportInput, team: Finding[], survey: SurveyView 
         ? {
             brief: {
               purpose:
-                "Introduce the 90-day plan to an executive reader in two or three sentences: what each phase is for, and why the work comes in that order. Each phase's actions are listed straight after this text, so don't go through them one by one. If some actions come after the 90 days, say that the full report has them.",
+                "Introduce the 90-day plan to an executive reader: urgent fixes come first, with quick wins beside them, and each later phase builds on the one before. The phases' actions are listed straight after this text, so don't go through them. If some actions come after the 90 days, say the full report has them.",
               sources: [planSource(PLAN, plan), ...planned.map(findingSource)],
               maxWords: WORD_TARGETS.plan_90_day,
             },
@@ -714,7 +714,7 @@ function fullSpecs(input: ReportInput, team: Finding[], metrics: Metric[], surve
       sources: SUMMARY_SOURCES,
       brief: {
         purpose:
-          "Open the full report. In two or three short paragraphs, tell the reader what state their Salesforce is in, the few themes that run through the issues and why they matter to the business, and where to start. The verdict and the counts of issues are shown beside this text, so don't open by repeating them.",
+          "Open the full report. Tell the reader what state their Salesforce is in, the few themes that run through the issues and why they matter to the business, and where to start. The verdict and the counts of issues are shown beside this text, so don't open by repeating them.",
         sources: [summaryCounts(team), ...issues.map(findingSource)],
         maxWords: WORD_TARGETS.overview,
       },
@@ -758,7 +758,7 @@ function fullSpecs(input: ReportInput, team: Finding[], metrics: Metric[], surve
       sources: SUMMARY_SOURCES,
       brief: {
         purpose:
-          "Tell a sales leader who is being pitched Agentforce, in two or three sentences, whether this org could put an AI agent to work safely and what would stop it. Each pillar's verdict is already decided and shown beside this text, with the five things to fix: word the overall picture, never change a verdict, and add no figure, forecast or AI opportunity.",
+          "Tell a sales leader who is being pitched Agentforce whether this org could put an AI agent to work safely and what would stop it. Each pillar's verdict is already decided and shown beside this text, with the five things to fix: word the overall picture, never change a verdict, and add no figure, forecast or AI opportunity.",
         sources: [...team.filter((f) => readinessFindings(readiness).includes(f.id)).map(findingSource), ...metrics.filter((m) => AI_METRIC_IDS.includes(m.id)).map(metricSource)],
         maxWords: WORD_TARGETS.ai_readiness,
       },
@@ -773,7 +773,7 @@ function fullSpecs(input: ReportInput, team: Finding[], metrics: Metric[], surve
         ? {
             brief: {
               purpose:
-                "Walk the reader through the roadmap: what each phase is for, why the work comes in that order, and what's left for after the 90 days. Every action is listed in full after this text, so describe the shape of the plan and its priorities rather than each action.",
+                "Say what shapes the plan: urgent fixes first, quick wins beside them, and why the rest comes in this order. Every action is listed in full after this text, so describe its shape and priorities, not the actions. If anything is left for after the 90 days, say so.",
               sources: [planSource(PLAN, built), ...roadmapFindings.map(findingSource)],
               maxWords: WORD_TARGETS.roadmap,
             },
