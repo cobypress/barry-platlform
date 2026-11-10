@@ -2,9 +2,10 @@ import { z } from "zod";
 import { CHANGES, MAX_QUERIED_OBJECTS } from "../extract/apex-touches.ts";
 
 // The org handbook's data (DECISIONS.md 451 to 457): what each flow, validation
-// rule, Apex class and trigger does, written to handbook.json in the run folder. It's the
-// customer's own configuration, so it goes nowhere but the documents made for
-// them: not to the benchmark, Claude, the worker's store or the console (452).
+// rule, Apex class and trigger does, written to handbook.json in the run folder.
+// It's the customer's own configuration, so it goes nowhere but the documents
+// made for them: not to the benchmark, Claude, the worker's store or the
+// console (452).
 
 export const HANDBOOK_VERSION = 2;
 
