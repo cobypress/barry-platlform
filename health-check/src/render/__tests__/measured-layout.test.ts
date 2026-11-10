@@ -247,6 +247,8 @@ describe("an estimate never counts a line too few", () => {
     const t = renderContext(names, loadCalibration().currency, false).t;
     // Each entity is the one character it prints, at that character's width.
     assert.equal(printed(t(`It's "a" & <b>.`)), `It's "a" & <b>.`);
+    // A space no line breaks at stays inside its word.
+    assert.equal(printed("90&#160;days").split(/\s+/).length, 1);
     /** The plan with the engine's introduction changed: its lines in Chromium as stored and as printed, and the actions it shows. */
     const planWith = async (from: string, to: string) => {
       const report = buildReport(input);
