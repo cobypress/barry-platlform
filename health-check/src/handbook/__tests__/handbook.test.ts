@@ -342,6 +342,13 @@ describe("when the metadata couldn't be read (decision 454)", () => {
     }
   });
 
+  test("a run with no metadata step writes it too, saying so", async () => {
+    const modules = SALES_CLOUD_MODULES.filter((m) => m.id === "current_pipeline");
+    const result = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules, outDir: tempDir(), now: new Date(AS_OF), transport: new Simulator(), log: () => {} });
+    assert.ok(!result.run.steps.some((s) => s.id === "metadata"));
+    assert.deepEqual(handbookOf({ dir: result.dir, runId: result.run.id, calls: 0, itemReads: 0 }), buildHandbook(undefined));
+  });
+
   test("validation rules that couldn't be listed are unavailable, while the flows are there", async () => {
     const r = await run({ readOnly: true, failQuery: (soql) => (/FROM ValidationRule\b/.test(soql) ? { errorCode: "INVALID_TYPE", message: "sObject type 'ValidationRule' is not supported." } : null) });
     const h = handbookOf(r);
