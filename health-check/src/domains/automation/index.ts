@@ -1,5 +1,5 @@
 import { apexExtractor, metadataExtractor, scheduledJobsExtractor } from "../../extract/automation.ts";
-import { customObjectsExtractor } from "../../extract/configuration.ts";
+import { customObjectsExtractor, recordCountsExtractor } from "../../extract/configuration.ts";
 import { notSized, plural, type Rule, type RuleResult } from "../../engine/rule.ts";
 import { MIGRATE_TO_FLOW_NOTE, END_OF_SUPPORT } from "./notes.ts";
 import { apexGap, groupCount, metadataOr, UNNAMED, unnamedNote } from "./shared.ts";
@@ -265,6 +265,7 @@ export const automationModule: DomainModule = {
   id: "automation",
   cloud: "sales",
   label: "Automation and code",
-  extractors: [labelsExtractor, metadataExtractor, apexExtractor, scheduledJobsExtractor, customObjectsExtractor],
+  // Record counts first: the metadata step reads them to know which standard objects to name.
+  extractors: [labelsExtractor, recordCountsExtractor, metadataExtractor, apexExtractor, scheduledJobsExtractor, customObjectsExtractor],
   rules: [legacyWorkflowRules, legacyProcessBuilder, mixedAutomation, hardcodedIds, missingFaultPaths, undocumentedAutomation],
 };

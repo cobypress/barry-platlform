@@ -24,6 +24,8 @@ export type SimulatorOptions = {
   readOnly?: boolean;
   /** Return a Tooling item with a null Metadata, for the single-row query that matches. */
   withholdMetadata?: (soql: string) => boolean;
+  /** Refuse a Metadata API retrieve whose request body matches, with this SOAP fault. */
+  failRetrieve?: (body: string) => { faultCode: string; message: string } | null;
   /** The day's async Apex allowance, as /limits reports it. The synthetic org's own by default, and null leaves it out. */
   asyncApex?: { Max: number; Remaining: number } | null;
   /** Data and file storage, as /limits reports them. The synthetic org's own by default. */
@@ -208,6 +210,19 @@ function reportDescribe(id: string): Json | null {
   };
 }
 
+/**
+ * The files a retrieve gives for what it asked: as Salesforce's wildcard for
+ * CustomObject brings custom objects only, a standard object's file comes back
+ * only when the request names it.
+ */
+function namedObjectsOnly(files: Record<string, string>, body: string): Record<string, string> {
+  const types = [...body.matchAll(/<met:types>(.*?)<met:name>([^<]+)<\/met:name><\/met:types>/g)];
+  const objects = types.find((t) => t[2] === "CustomObject")?.[1] ?? "";
+  const members = new Set([...objects.matchAll(/<met:members>([^<]+)<\/met:members>/g)].map((m) => m[1]));
+  const wanted = (object: string): boolean => (/__c$/.test(object) ? members.has("*") : members.has(object));
+  return Object.fromEntries(Object.entries(files).filter(([path]) => !path.startsWith("objects/") || wanted(path.slice(8).replace(/\.object$/, ""))));
+}
+
 /** Rows whose object is in the query's `EntityDefinition.QualifiedApiName IN (...)`. */
 function inObjects(rows: Json[], soql: string): Json[] {
   const list = soql.match(/EntityDefinition\.QualifiedApiName IN \(([^)]*)\)/)?.[1] ?? "";
@@ -223,6 +238,7 @@ export class Simulator implements Transport {
   #dropFields: Record<string, string[]>;
   #readOnly: boolean;
   #withholdMetadata: SimulatorOptions["withholdMetadata"];
+  #failRetrieve: SimulatorOptions["failRetrieve"];
   #asyncApex: { Max: number; Remaining: number } | null;
   #storage: typeof org.STORAGE_LIMITS;
   #cpq: boolean;
@@ -250,6 +266,7 @@ export class Simulator implements Transport {
     this.#dropFields = options.dropFields ?? {};
     this.#readOnly = options.readOnly ?? false;
     this.#withholdMetadata = options.withholdMetadata;
+    this.#failRetrieve = options.failRetrieve;
     this.#asyncApex = options.asyncApex === undefined ? org.ASYNC_APEX_LIMIT : options.asyncApex;
     this.#storage = options.storage ?? org.STORAGE_LIMITS;
     this.#cpq = options.cpq ?? true;
@@ -351,7 +368,15 @@ export class Simulator implements Transport {
     const envelope = (operation: string, inner: string): string =>
       `<?xml version="1.0"?><soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"><soapenv:Body><${operation}Response xmlns="http://soap.sforce.com/2006/04/metadata"><result>${inner}</result></${operation}Response></soapenv:Body></soapenv:Envelope>`;
     if (body.includes("<met:retrieve>")) {
-      this.#retrieving = body.includes("<met:name>Report</met:name>") ? org.REPORT_FILES : body.includes("<met:name>EscalationRules</met:name>") ? org.ESCALATION_FILES : body.includes("<met:name>Settings</met:name>") ? org.SETTINGS_FILES : org.METADATA_FILES;
+      const failure = this.#failRetrieve?.(body);
+      if (failure) {
+        return {
+          status: 500,
+          header: () => null,
+          text: `<?xml version="1.0"?><soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"><soapenv:Body><soapenv:Fault><faultcode>sf:${failure.faultCode}</faultcode><faultstring>${failure.faultCode}: ${failure.message}</faultstring></soapenv:Fault></soapenv:Body></soapenv:Envelope>`,
+        };
+      }
+      this.#retrieving = body.includes("<met:name>Report</met:name>") ? org.REPORT_FILES : body.includes("<met:name>EscalationRules</met:name>") ? org.ESCALATION_FILES : body.includes("<met:name>Settings</met:name>") ? org.SETTINGS_FILES : namedObjectsOnly(org.METADATA_FILES, body);
       return respond(envelope("retrieve", `<done>false</done><id>${org.sfId("09S", ++this.#retrieves)}</id><state>Queued</state>`));
     }
     // The first poll isn't ready, so the polling path is exercised.

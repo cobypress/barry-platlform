@@ -3,8 +3,9 @@ import assert from "node:assert/strict";
 import { SALES_CLOUD_MODULES } from "../index.ts";
 import { analyseExtracts, clone, loadExtracts, runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
-import { sfId, userId } from "../../testing/synthetic-org.ts";
-import { apexExtractor, metadataExtractor } from "../../extract/automation.ts";
+import { METADATA_FILES, sfId, userId } from "../../testing/synthetic-org.ts";
+import { apexExtractor, metadataExtractor, RETRIEVED_STANDARD_OBJECTS } from "../../extract/automation.ts";
+import { parseMetadataBundle, type MetadataBundle } from "../../extract/metadata-parse.ts";
 import { activityCaptureExtractor, licencesExtractor, ownershipExtractor, reportsExtractor, usersExtractor } from "../../extract/users.ts";
 import { REPORT_RECENT_DAYS } from "../adoption/index.ts";
 import { duplicateRulesExtractor } from "../../extract/configuration.ts";
@@ -440,11 +441,12 @@ describe("data quality", () => {
   test("records with inactive owners", () => assert.equal(issue(analyseExtracts(extracts).findings, "dq.records-inactive-owner").facts.strandedTotal, 190));
   test("undocumented automation is counted by type, with tests and hidden code left out", () => {
     const f = issue(analyseExtracts(extracts).findings, "aut.undocumented-automation");
-    // Flows 3 of 4, Process Builders 1 of 1, Workflow Rules 2 of 3, validation rules 0 of 2,
+    // Flows 3 of 4, Process Builders 1 of 1, Workflow Rules 2 of 3, validation rules 1 of 3,
     // code 5 of 9: the commented classes and triggers count, the test classes don't.
-    // The inactive validation rule on Invoice__c isn't counted.
-    assert.deepEqual(f.facts, { total: 19, missing: 11, rate: 57.9 });
-    assert.match(f.summary, /Validation rules: 0 of 2/);
+    // The inactive validation rule on Invoice__c isn't counted, and the one on Case,
+    // read for its validation rules only, is (decision 460).
+    assert.deepEqual(f.facts, { total: 20, missing: 12, rate: 60 });
+    assert.match(f.summary, /Validation rules: 1 of 3/);
     assert.match(f.summary, /Apex classes and triggers: 5 of 9/);
   });
   test("an edition with no Apex says so, rather than that the read failed", () => {
@@ -456,12 +458,47 @@ describe("data quality", () => {
   });
   test("documented automation passes", () => {
     const changed = clone(extracts);
-    const metadata = changed.get(metadataExtractor.id) as { data: { flows: Array<{ described: boolean }>; workflows: Array<{ rules: Array<{ described: boolean }> }> } };
+    const metadata = changed.get(metadataExtractor.id) as { data: { flows: Array<{ described: boolean }>; workflows: Array<{ rules: Array<{ described: boolean }> }>; validationRules: Array<{ described: boolean }> } };
     for (const f of metadata.data.flows) f.described = true;
     for (const r of metadata.data.workflows.flatMap((w) => w.rules)) r.described = true;
+    for (const v of metadata.data.validationRules) v.described = true;
     const apex = changed.get(apexExtractor.id) as { classes: { data: Array<{ commented: boolean | null }> }; triggers: { data: Array<{ commented: boolean | null }> } };
     for (const c of [...apex.classes.data, ...apex.triggers.data]) c.commented = true;
     assert.equal(byRule(analyseExtracts(changed).findings, "aut.undocumented-automation")[0]?.status, "passed");
+  });
+  test("a standard object read for its validation rules only moves those rules' counts and nothing else (decision 460)", () => {
+    // The retrieve gives custom objects and the standard objects it names. The synthetic org's record counts list Case.
+    const given = Object.fromEntries(Object.entries(METADATA_FILES).filter(([path]) => !path.startsWith("objects/") || /__c\.object$/.test(path) || /^objects\/(Opportunity|Case)\.object$/.test(path)));
+    const withoutCase = Object.fromEntries(Object.entries(given).filter(([path]) => path !== "objects/Case.object"));
+    assert.equal(Object.keys(withoutCase).length, Object.keys(given).length - 1);
+    const recorded = (extracts.get(metadataExtractor.id) as { data: MetadataBundle }).data;
+    const withIt = parseMetadataBundle(given, RETRIEVED_STANDARD_OBJECTS, ["Case"]);
+    // The engine's own bundle, so the comparison is with what a run reads.
+    assert.deepEqual(withIt, recorded);
+    const analysed = (bundle: MetadataBundle) => {
+      const changed = clone(extracts);
+      (changed.get(metadataExtractor.id) as { data: MetadataBundle }).data = bundle;
+      return analyseExtracts(changed);
+    };
+    const [a, b] = [analysed(withIt), analysed(parseMetadataBundle(withoutCase, RETRIEVED_STANDARD_OBJECTS))];
+    const metric = (out: typeof a, id: string) => out.metrics.find((m) => m.id === id);
+    for (const id of ["configuration.object_inventory", "documented.data_model"]) {
+      assert.ok(metric(a, id), id);
+      assert.deepEqual(metric(a, id), metric(b, id), id);
+    }
+    assert.deepEqual(byRule(a.findings, "cfg.undocumented-fields"), byRule(b.findings, "cfg.undocumented-fields"));
+    assert.ok(byRule(a.findings, "cfg.undocumented-fields").length > 0);
+    // The Case rule is active with no description, so it counts once among the undocumented.
+    const undocumented = (out: typeof a) => issue(out.findings, "aut.undocumented-automation").facts;
+    assert.deepEqual([undocumented(a).total, undocumented(a).missing], [undocumented(b).total! + 1, undocumented(b).missing! + 1]);
+    // And it's on the documented automation figure, and nothing else moves.
+    const automation = (out: typeof a) => {
+      const m = metric(out, "documented.automation");
+      return m?.status === "measured" ? m.value : assert.fail("documented.automation not measured");
+    };
+    assert.equal(automation(a), automation(b) + 1);
+    const others = (out: typeof a) => [out.findings.filter((f) => f.ruleId !== "aut.undocumented-automation"), out.metrics.filter((m) => m.id !== "documented.automation")];
+    assert.deepEqual(others(a), others(b));
   });
   test("custom fields with no help text or description", () => {
     const f = issue(analyseExtracts(extracts).findings, "cfg.undocumented-fields");

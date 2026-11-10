@@ -8,7 +8,8 @@ import type { DomainModule } from "../../domains/types.ts";
 import type { Extractor } from "../../extract/types.ts";
 import { Pseudonymiser } from "../../privacy/pseudonymiser.ts";
 import type { Evidence } from "../../schemas/index.ts";
-import { SALES_CLOUD_MODULES } from "../../domains/index.ts";
+import { ALL_MODULES, SALES_CLOUD_MODULES } from "../../domains/index.ts";
+import { modulesFor } from "../../domains/scope.ts";
 import { loadCalibration } from "../../testing/replay.ts";
 
 const at = "2026-10-31T12:00:00.000Z";
@@ -147,6 +148,16 @@ describe("domains are plug-ins", () => {
     assert.ok(ids.indexOf("schema") < ids.indexOf("field-usage"));
     assert.ok(ids.indexOf("schema") < ids.indexOf("opportunities"));
     assert.ok(ids.indexOf("record-counts") < ids.indexOf("ownership"));
+  });
+
+  test("the metadata step has the record counts before it, whichever modules a run picks, in either scope (DECISIONS.md 460)", () => {
+    for (const scope of ["complete", "essentials"] as const) {
+      for (const module of modulesFor(scope, ALL_MODULES)) {
+        const ids = collectExtractors([module]).map((e) => e.id);
+        if (!ids.includes("metadata")) continue;
+        assert.ok(ids.includes("record-counts") && ids.indexOf("record-counts") < ids.indexOf("metadata"), `${scope} ${module.id}: ${ids.join(", ")}`);
+      }
+    }
   });
 });
 

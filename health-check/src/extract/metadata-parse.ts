@@ -80,6 +80,12 @@ export type MetadataBundle = {
   filesRead: number;
   /** Undefined in a checkpoint from before version 7 of the step; version 7's flows have no paths. */
   handbook?: HandbookDetail;
+  /**
+   * When a retrieve that also named further standard objects failed and this
+   * bundle is from one more naming only the four: the ones it named, and why it
+   * failed (DECISIONS.md 460). Kept so the reason isn't lost.
+   */
+  retrieveFallback?: { named: string[]; reason: string };
 };
 
 // Arrays are forced so one child element parses the same as many.
@@ -238,13 +244,17 @@ function parseObject(path: string, xml: string, index: ReferenceIndex): { object
 
 /**
  * Turns the unzipped retrieve into summaries. A file that can't be parsed fails
- * the extractor. `standardObjects` are the ones the retrieve named: its wildcard
- * brings custom objects only, so theirs are the only standard objects' rules it
- * holds (DECISIONS.md 455).
+ * the extractor. `standardObjects` are the ones the retrieve named in full: its
+ * wildcard brings custom objects only, so theirs are the only standard objects'
+ * rules it holds besides `rulesOnly` (DECISIONS.md 455). From a `rulesOnly`
+ * object it keeps the validation rules, their detail and what their formulas
+ * mention, and not the object, its fields or its record types, so nothing else
+ * counts it (DECISIONS.md 460).
  */
-export function parseMetadataBundle(files: Record<string, string>, standardObjects: readonly string[] = []): MetadataBundle {
-  const validationRulesCover: ValidationRuleCoverage = { customObjects: "all", standardObjects: [...standardObjects] };
+export function parseMetadataBundle(files: Record<string, string>, standardObjects: readonly string[] = [], rulesOnly: readonly string[] = []): MetadataBundle {
+  const validationRulesCover: ValidationRuleCoverage = { customObjects: "all", standardObjects: [...standardObjects, ...rulesOnly] };
   const bundle: MetadataBundle = { route: "retrieve", unsearched: [], flows: [], workflows: [], validationRules: [], customFields: [], recordTypes: [], objects: [], references: { users: {}, fields: {} }, filesRead: 0, handbook: { flows: [], validationRules: [], validationRulesCover } };
+  const onlyRules = new Set(rulesOnly);
   for (const [path, raw] of Object.entries(files).sort(([a], [b]) => a.localeCompare(b))) {
     if (path === "package.xml") continue;
     const xml = redactSecrets(raw);
@@ -261,6 +271,7 @@ export function parseMetadataBundle(files: Record<string, string>, standardObjec
       const parsed = parseObject(path, xml, bundle.references);
       bundle.validationRules.push(...parsed.validationRules);
       bundle.handbook!.validationRules.push(...parsed.ruleDetails);
+      if (onlyRules.has(parsed.object)) continue;
       bundle.customFields.push(...parsed.customFields);
       bundle.recordTypes.push(...parsed.recordTypes);
       bundle.objects.push(parsed.object);

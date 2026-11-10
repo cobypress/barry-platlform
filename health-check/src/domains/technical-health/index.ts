@@ -441,6 +441,7 @@ export const technicalHealthModule: DomainModule = {
   id: DOMAIN,
   cloud: "sales",
   label: "Technical health",
-  extractors: [labelsExtractor, orgExtractor, metadataExtractor, apexExtractor, customObjectsExtractor, classicExtractor, apiLimitsExtractor, recordCountsExtractor],
+  // Record counts before the metadata step, which reads them to know which standard objects to name.
+  extractors: [labelsExtractor, orgExtractor, recordCountsExtractor, metadataExtractor, apexExtractor, customObjectsExtractor, classicExtractor, apiLimitsExtractor],
   rules: [apexCoverage, testQuality, limitRisk, codeSize, storageUse, oldApiVersions, multipleTriggers, classicLeftovers],
 };
