@@ -258,9 +258,13 @@ export const ConsoleFactsFile = z
   })
   .refine((f) => new Set(f.facts.map((x) => x.id)).size === f.facts.length);
 
-/** A detail as sent: on one line, and cut inside the console's limit with an ellipsis. */
+/**
+ * A detail as sent: on one line, with no control character, and cut inside the
+ * console's limit with an ellipsis. Postgres's jsonb can't hold U+0000, and a
+ * failed insert there rolls back the whole run's results, not only the facts.
+ */
 function sentDetail(detail: string): string {
-  const line = detail.replace(/\s+/g, " ").trim();
+  const line = detail.replace(/[\u0000-\u001F\u007F-\u009F]/g, " ").replace(/\s+/g, " ").trim();
   if (line.length <= FACTS_DETAIL_MAX) return line;
   let cut = line.slice(0, FACTS_DETAIL_MAX - 1);
   // Never half an emoji: a lone surrogate isn't valid in the console's jsonb.
@@ -305,11 +309,20 @@ export function factsOf(dir: string, log: (line: string) => void): { summary: Fa
     log("The run's facts.json is larger than the worker sends, so the console gets the facts summary but not the file.");
     return { summary, file: null };
   }
-  if (!ConsoleFactsFile.safeParse(file).success) {
+  // Only the detail carries Salesforce's text, so a NUL anywhere else means the step changed: refuse rather than mend.
+  if (!ConsoleFactsFile.safeParse(file).success || holdsNul(file)) {
     log("The run's facts.json doesn't fit the console's shape for it, so the console gets the facts summary but not the file.");
     return { summary, file: null };
   }
   return { summary, file };
+}
+
+/** Whether any string in the value, or any object key, holds U+0000, which Postgres's jsonb refuses. */
+function holdsNul(value: unknown): boolean {
+  if (typeof value === "string") return value.includes("\u0000");
+  if (Array.isArray(value)) return value.some(holdsNul);
+  if (value && typeof value === "object") return Object.entries(value).some(([k, v]) => k.includes("\u0000") || holdsNul(v));
+  return false;
 }
 
 /**

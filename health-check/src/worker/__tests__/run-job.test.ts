@@ -570,6 +570,26 @@ describe("the facts file a run job sends (DECISIONS.md 433)", () => {
     assert.doesNotMatch(detail, /[\uD800-\uDFFF]/);
   });
 
+  test("sends a detail without its control characters, which Postgres's jsonb can't always hold", () => {
+    const sent = file([fact("object.scontrol", "DETAIL-MARK INVALID_TYPE:\u0000sObject\u0007type \u009B'Scontrol'\u007F\u0000")]);
+    const got = read(JSON.stringify(sent));
+    assert.equal(got.file!.facts[0]!.detail, "DETAIL-MARK INVALID_TYPE: sObject type 'Scontrol'");
+    assert.deepEqual(got.lines, []);
+  });
+
+  test("is refused when a NUL is anywhere but a detail, and the summary is still sent", () => {
+    const cases: Array<[string, FactsFile]> = [
+      ["an observed name", file([{ ...fact("object.scontrol"), observed: { "Scontrol\u0000MARK": false } }])],
+      ["an observed value", file([{ ...fact("object.scontrol"), observed: { Scontrol: "picklist\u0000MARK" } }])],
+    ];
+    for (const [what, sent] of cases) {
+      const got = read(JSON.stringify(sent));
+      assert.equal(got.file, null, what);
+      assert.deepEqual(got.summary, factsReport(sent), what);
+      assert.deepEqual(got.lines, ["The run's facts.json doesn't fit the console's shape for it, so the console gets the facts summary but not the file."], what);
+    }
+  });
+
   test("sends a detail of exactly the console's limit as it is", () => {
     const sent = file([fact("object.scontrol", `DETAIL-MARK ${"z".repeat(1000 - 12)}`)]);
     assert.equal(sent.facts[0]!.detail.length, 1000);
