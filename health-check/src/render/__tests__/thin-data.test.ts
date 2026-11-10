@@ -138,6 +138,19 @@ describe("a thin org", () => {
     assert.equal(summary.notMeasurable, open);
   });
 
+  test("the Overview's brief leaves the sentence to the page too, from counts its sources hold", () => {
+    // DECISIONS.md 441: the Overview page prints the same sentence beneath Claude's text.
+    const brief = report.briefs.get(`${run.id}:full_health_check:overview`)!;
+    assert.ok(brief.purpose.includes(`${open} of the ${checks} checks couldn't be measured.`), brief.purpose);
+    assert.match(brief.purpose, /don't repeat the count/);
+    assert.match(brief.purpose, /write the overview from the checks we could measure/);
+    // It opens the report; it isn't the verdict, and it states no length beside its word target.
+    assert.doesNotMatch(brief.purpose, /verdict from|sentences?\b|\bwords\b/);
+    const summary = brief.sources.find((s) => s.kind === "summary")!;
+    assert.equal(summary.checks, checks);
+    assert.equal(summary.notMeasurable, open);
+  });
+
   test("both documents pass every layout and number check", async () => {
     const execLayout = await layoutOf(browser, exec, { minPages: EXECUTIVE_PAGES.min, maxPages: executiveMaxPages(report), dataset: report.dataset });
     assert.deepEqual(execLayout.problems, [], JSON.stringify(execLayout.problems.slice(0, 8)));
@@ -173,6 +186,13 @@ describe("an org with nothing measured", () => {
     assert.doesNotMatch(purpose, /appendix|we could measure/);
   });
 
+  test("the Overview's brief says there's no view yet, without repeating the page", () => {
+    const { purpose } = report.briefs.get(`${run.id}:full_health_check:overview`)!;
+    assert.ok(purpose.includes(`None of the ${checks} checks could be measured. The page states that beneath your text; don't repeat it.`), purpose);
+    assert.match(purpose, /can't give a view on the data yet/);
+    assert.doesNotMatch(purpose, /verdict on|we could measure/);
+  });
+
   test("both documents trace every figure, and nothing runs off a page", async () => {
     const execLayout = await layoutOf(browser, exec, { minPages: EXECUTIVE_PAGES.min, maxPages: executiveMaxPages(report), dataset: report.dataset });
     assert.deepEqual(execLayout.problems, [], JSON.stringify(execLayout.problems.slice(0, 8)));
@@ -205,5 +225,11 @@ describe("the base sample, below the threshold", () => {
     const { purpose } = report.briefs.get(`${run.id}:executive_summary:verdict`)!;
     assert.match(purpose, /^Tell an executive reader what state this Salesforce org is in and what matters most\./);
     assert.doesNotMatch(purpose, /says less than|couldn't be measured/);
+  });
+
+  test("the Overview's brief says nothing about thin data", () => {
+    const { purpose } = report.briefs.get(`${run.id}:full_health_check:overview`)!;
+    assert.match(purpose, /^Open the full report\./);
+    assert.doesNotMatch(purpose, /says less than|couldn't be measured|could be measured/);
   });
 });

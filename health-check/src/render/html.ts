@@ -128,6 +128,35 @@ export function paginate<T>(items: T[], heightOf: (item: T) => number, budget: n
   return pages;
 }
 
+/**
+ * Fills pages of side-by-side columns, as the browser fills a multi-column list
+ * whose items don't break: an item goes on down the column it's in, or tops the
+ * next, or starts a page. A height shared across the columns would let two tall
+ * items into a column that holds only one (DECISIONS.md 442).
+ */
+export function paginateColumns<T>(items: T[], heightOf: (item: T) => number, columns: number, columnHeight: number): T[][] {
+  const pages: T[][] = [];
+  let current: T[] = [];
+  let column = 0;
+  let used = 0;
+  for (const item of items) {
+    const height = heightOf(item);
+    if (current.length > 0 && used + height > columnHeight) {
+      column += 1;
+      used = 0;
+      if (column === columns) {
+        pages.push(current);
+        current = [];
+        column = 0;
+      }
+    }
+    current.push(item);
+    used += height;
+  }
+  if (current.length > 0) pages.push(current);
+  return pages;
+}
+
 const BASE_CSS = `
 *, *::before, *::after { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; background: var(--ivory); color: var(--carbon); font-family: var(--font); -webkit-print-color-adjust: exact; print-color-adjust: exact; }
