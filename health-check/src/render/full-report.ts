@@ -8,7 +8,7 @@ import { INVENTORY_COLUMNS, inventoryRows, OBJECT_INVENTORY } from "../domains/c
 import { activeUsersChart, lightningChart, loginChannelsChart, processFlowChart, scorecardOptions, type Chart, closedAsChart, deliveryOutlookChart, HALF_WIDTH, lostByStageChart, pipelineOverTime, scorecardChart, stageFunnel, stageVelocityChart, topAccountsChart, winRateBySegment, winsByCustomerChart, wonValueByChart } from "./charts.ts";
 import { compactMoney, longDate, monthYear, percent, ukDates } from "./format.ts";
 import type { Calibration } from "../schemas/index.ts";
-import { chartSlot, coverScore, document, documentTitle, effortText, estimateLines, paginate, paragraphs, renderContext, sentence, severityChip, valueFigure, valueText, type Render } from "./html.ts";
+import { chartSlot, coverScore, document, documentTitle, effortText, estimateLines, paginate, paginateColumns, paragraphs, renderContext, sentence, severityChip, valueFigure, valueText, type Render } from "./html.ts";
 import { noteSections, referenceMap } from "./references.ts";
 import { scoreLine } from "./executive.ts";
 import { COMPARE_CSS, compareSlide } from "./compare.ts";
@@ -630,15 +630,33 @@ function lostAndSpeedSlideDense(r: Render, metric: (id: string) => Metric | unde
 }
 
 /** A line of a list slide. `ref` is its reference, or several, as for an action that covers more than one issue. */
-type ListItem = { title: string; detail: string; ref?: string | string[] };
+export type ListItem = { title: string; detail: string; ref?: string | string[] };
 const refsOf = (r: Render, ref: ListItem["ref"]): string => (ref === undefined ? "" : [ref].flat().map((id) => r.ref(id)).join(""));
 /** A list item's title with its references, as characters: a reference is about six (DECISIONS.md 408). */
 const titleText = (x: ListItem): string => `${x.title}${"\u00a0".repeat(6 * (x.ref === undefined ? 0 : [x.ref].flat().length))}`;
 
+// A three-column list as Chromium sets it (DECISIONS.md 442). A column is 375px
+// wide at 13px. Measured by the height of each item, on long-worded prose, the
+// long words alone and the word target test's vocabulary, from every word at
+// every length to 60 words, the fewest characters a line that never counted a
+// line too few was 46 on the prose, bold or not, and 51 to 53 on the rest; 52
+// counted 60 of the prose's lines short. Both take 44, so a page is started early
+// rather than late. A line is 17.16px (13px at 1.32), and an item's 8px margin is
+// taken as 10. A column runs 542px from the top of the list to the footer, under
+// a one-line title, on every list and sample; 525 keeps clear of the footer.
+const THREE_COLUMN_TITLE_CHARS = 44;
+const THREE_COLUMN_DETAIL_CHARS = 44;
+const THREE_COLUMN_LINE = 17.2;
+const THREE_COLUMN_ITEM_GAP = 10;
+const THREE_COLUMN_HEIGHT = 525;
+
+/** An item's height in a three-column list, margin and all. The title can wrap too, once its references are beside it. */
+export const threeColumnItemHeight = (x: ListItem): number => THREE_COLUMN_ITEM_GAP + THREE_COLUMN_LINE * (estimateLines(titleText(x), THREE_COLUMN_TITLE_CHARS) + estimateLines(x.detail, THREE_COLUMN_DETAIL_CHARS));
+
 /** Definitions are reference, so a dense deck sets them small, in three columns. */
 function threeColumnList(r: Render, eyebrow: string, title: string, items: ListItem[]): Slide[] {
-  // The title can wrap too, once its references are beside it.
-  const pages = paginate(items, (x) => 10 + 17.2 * (estimateLines(titleText(x), 46) + estimateLines(x.detail, 52)), 3 * 490);
+  // Items don't break, so the columns are filled one at a time, as the browser fills them.
+  const pages = paginateColumns(items, threeColumnItemHeight, 3, THREE_COLUMN_HEIGHT);
   return pages.map((group, i) => ({
     html: `<div class="eyebrow">${r.t(eyebrow)}</div><h2>${r.t(title)}${i ? ", continued" : ""}</h2><div class="three-text">${group.map((x) => `<p class="definition"><strong>${r.t(x.title)}</strong>${refsOf(r, x.ref)}<br>${r.t(x.detail)}</p>`).join("")}</div>`,
   }));
