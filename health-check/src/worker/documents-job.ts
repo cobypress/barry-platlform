@@ -171,12 +171,29 @@ const HANDBOOK_SUFFIX = " - Org handbook.docx";
  */
 async function putHandbook(drive: DocumentDrive, folder: DriveItem, clientName: string, path: string, runId: string, log: (line: string) => void): Promise<DriveItem> {
   const handbooks = (await drive.files(folder.id)).filter((f) => f.name.trim().toLowerCase().endsWith(HANDBOOK_SUFFIX.toLowerCase()));
-  // Made before a rename was followed, a folder can hold more than one. The
-  // newest is replaced and the rest left for a person, since one may be a copy
-  // someone keeps. Only the count is logged: the names are the customer's.
-  if (handbooks.length > 1) log(`Run ${runId}'s Drive folder held ${handbooks.length} org handbooks, so the newest was replaced and the other ${handbooks.length - 1} left as they were.`);
-  const newest = handbooks.reduce<DriveItem | undefined>((kept, f) => (kept === undefined || (f.createdAt ?? "") >= (kept.createdAt ?? "") ? f : kept), undefined);
-  return drive.putFile(folder.id, `${clientName}${HANDBOOK_SUFFIX}`, DOCX, readFileSync(path), newest?.id);
+  // A folder can hold more than one: made before a rename was followed, or a
+  // copy someone made in Drive ("Copy of … - Org handbook.docx"). The oldest is
+  // ours, the first one made and so the one whose link was shared; a newer one
+  // may be a copy someone keeps, so it's left for a person. Only the count is
+  // logged: the names are the customer's.
+  if (handbooks.length > 1) log(`Run ${runId}'s Drive folder held ${handbooks.length} org handbooks, so the first one made was replaced and the other ${handbooks.length - 1} left as they were.`);
+  const ours = [...handbooks].sort(oldestFirst)[0];
+  return drive.putFile(folder.id, `${clientName}${HANDBOOK_SUFFIX}`, DOCX, readFileSync(path), ours?.id);
+}
+
+/**
+ * By Drive's created time, oldest first. One Drive gave no time for goes after
+ * every one it did, since it can't be shown to be the first. Equal times, or
+ * none, fall back to the id: Drive's ids carry no order, but the same file
+ * wins on every make, whatever order Drive lists them in.
+ */
+function oldestFirst(a: DriveItem, b: DriveItem): number {
+  if (a.createdAt !== b.createdAt) {
+    if (a.createdAt === undefined) return 1;
+    if (b.createdAt === undefined) return -1;
+    return a.createdAt < b.createdAt ? -1 : 1;
+  }
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 }
 
 /** A file for Black Cloud only, beside the clients' folders and never inside one, replaced on each make. */

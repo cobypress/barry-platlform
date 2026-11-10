@@ -887,7 +887,7 @@ describe("the org handbook", () => {
     assert.ok(!deps.lines.some((l) => /org handbooks/.test(l)), "one was there each time, so nothing to say");
   });
 
-  test("a folder already holding two handbooks has the newest replaced and the other left, and the log says how many with nothing from the files", async () => {
+  test("a folder already holding two handbooks has the first one made replaced and the other left, and the log says how many with nothing from the files", async () => {
     const drive = new MemoryDrive();
     const deps = withHandbook(jobInput(), drive);
     await processDocumentsJob(RUN_ID, deps, { final: true });
@@ -897,13 +897,67 @@ describe("the org handbook", () => {
     const newer = drive.items.get((await drive.putFile(folderId, "Synthetic Co Ltd - ORG HANDBOOK.DOCX", "application/octet-stream", Buffer.from("old"))).id)!;
     newer.createdAt = "2026-11-05T09:00:00.000Z";
     await remake(deps, "Synthetic Group");
-    const all = handbooks(drive).filter((i) => /org handbook\.docx$/i.test(i.name));
+    const all = [...drive.items.values()].filter((i) => !i.folder && /org handbook\.docx$/i.test(i.name));
     assert.equal(all.length, 2, "none added");
-    assert.deepEqual([newer.uploads, newer.name], [2, "Synthetic Group - Org handbook.docx"]);
-    assert.deepEqual([older.uploads, older.name], [1, NAME], "the older one left as it was");
+    assert.deepEqual([older.uploads, older.name], [2, "Synthetic Group - Org handbook.docx"], "the first one made is the one whose link was shared");
+    assert.deepEqual([newer.uploads, newer.name, newer.body!.toString()], [1, "Synthetic Co Ltd - ORG HANDBOOK.DOCX", "old"], "the newer one left as it was");
     const said = deps.lines.filter((l) => /org handbooks/.test(l));
-    assert.deepEqual(said, [`Run ${RUN_ID}'s Drive folder held 2 org handbooks, so the newest was replaced and the other 1 left as they were.`]);
+    assert.deepEqual(said, [`Run ${RUN_ID}'s Drive folder held 2 org handbooks, so the first one made was replaced and the other 1 left as they were.`]);
     assert.doesNotMatch(deps.lines.join("\n"), /Synthetic Co Ltd|ORG HANDBOOK|Synthetic Co - Org/);
+  });
+
+  test("a copy someone made in Drive doesn't take the handbook's place: a remake updates the original, whose link was shared, and leaves the copy", async () => {
+    const drive = new MemoryDrive();
+    const deps = withHandbook(jobInput(), drive);
+    await processDocumentsJob(RUN_ID, deps, { final: true });
+    const folderId = deps.store.documents.get(RUN_ID)!.made!.driveFolderId;
+    const original = handbooks(drive)[0]!;
+    // Stale, so the remake's contents can be told from the first make's.
+    original.body = Buffer.from("stale");
+    // Drive's "Make a copy": the same ending, made later.
+    const copy = drive.items.get((await drive.putFile(folderId, `Copy of ${NAME}`, DOCX, Buffer.from("their copy"))).id)!;
+    copy.createdAt = "2026-11-05T09:00:00.000Z";
+    await remake(deps, "Synthetic Co");
+    assert.equal(handbooks(drive).length, 2, "none added");
+    assert.deepEqual([original.uploads, drive.path(original.id)], [2, `Synthetic Co / Health check 1 / ${NAME}`]);
+    assert.ok(docxText(original.body!).includes(HANDBOOK_MARKER), "the original has the new contents");
+    assert.deepEqual([copy.uploads, copy.name, copy.body!.toString()], [1, `Copy of ${NAME}`, "their copy"], "the copy untouched");
+    assert.deepEqual(
+      deps.lines.filter((l) => /org handbooks/.test(l)),
+      [`Run ${RUN_ID}'s Drive folder held 2 org handbooks, so the first one made was replaced and the other 1 left as they were.`],
+    );
+  });
+
+  test("handbooks made at the same time, or with no time from Drive, replace the same one whatever order Drive lists them in: the lowest id, after any with a time", async () => {
+    // Two handbooks, `second` made after `first` so with the higher id, their times set by `times`.
+    async function twoHandbooks(times: [string | undefined, string | undefined], listed: "as made" | "reversed") {
+      const drive = new MemoryDrive();
+      const deps = withHandbook(jobInput(), drive);
+      await processDocumentsJob(RUN_ID, deps, { final: true });
+      const folderId = deps.store.documents.get(RUN_ID)!.made!.driveFolderId;
+      const first = handbooks(drive)[0]!;
+      const second = drive.items.get((await drive.putFile(folderId, `Copy of ${NAME}`, DOCX, Buffer.from("their copy"))).id)!;
+      assert.ok(first.id < second.id);
+      for (const [item, at] of [[first, times[0]], [second, times[1]]] as const) {
+        if (at === undefined) delete item.createdAt;
+        else item.createdAt = at;
+      }
+      if (listed === "reversed") {
+        const files = drive.files.bind(drive);
+        drive.files = async (parentId: string) => (await files(parentId)).reverse();
+      }
+      await remake(deps, "Synthetic Co");
+      return { first, second };
+    }
+    for (const listed of ["as made", "reversed"] as const) {
+      const same = await twoHandbooks(["2026-11-04T18:00:00.000Z", "2026-11-04T18:00:00.000Z"], listed);
+      assert.deepEqual([same.first.uploads, same.second.uploads], [2, 1], `equal times, listed ${listed}`);
+      const neither = await twoHandbooks([undefined, undefined], listed);
+      assert.deepEqual([neither.first.uploads, neither.second.uploads], [2, 1], `no times, listed ${listed}`);
+      // The one with a time is replaced, though the other has the lower id.
+      const one = await twoHandbooks([undefined, "2026-11-05T09:00:00.000Z"], listed);
+      assert.deepEqual([one.first.uploads, one.second.uploads], [1, 2], `one time, listed ${listed}`);
+    }
   });
 
   test("a run from before the handbook was kept gets the six documents as before, and one warning saying why", async () => {
