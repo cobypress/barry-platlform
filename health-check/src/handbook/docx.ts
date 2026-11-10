@@ -134,16 +134,22 @@ const OPERATOR_WORDS: Readonly<Record<string, string>> = {
   IsChanged: "has changed:",
 };
 
-/** Salesforce's own word with ours beside it, so an admin can search for either. */
-const named = (words: Readonly<Record<string, string>>, raw: string): string => (words[raw] ? `${words[raw]} (${raw})` : raw);
+/** Our word for one of Salesforce's, or undefined. Its own keys only: a kind named "constructor" isn't a word we have. */
+const wordFor = (words: Readonly<Record<string, string>>, raw: string): string | undefined => (Object.hasOwn(words, raw) ? words[raw] : undefined);
 
-export const stepKindWords = (kind: string): string => STEP_WORDS[kind] ?? kind;
+/** Salesforce's own word with ours beside it, so an admin can search for either. */
+const named = (words: Readonly<Record<string, string>>, raw: string): string => {
+  const ours = wordFor(words, raw);
+  return ours ? `${ours} (${raw})` : raw;
+};
+
+export const stepKindWords = (kind: string): string => wordFor(STEP_WORDS, kind) ?? kind;
 
 /** What starts a flow, from its start element, in words. */
 function startWords(flow: HandbookFlow): string {
   const { object, triggerType, recordTriggerType } = flow.start;
   const what = object ? `${/^[AEIOU]/i.test(object) ? "an" : "a"} ${object} record` : "a record";
-  const when = ({ Create: "created", Update: "updated", CreateAndUpdate: "created or updated", Delete: "deleted" } as Record<string, string>)[recordTriggerType ?? ""];
+  const when = recordTriggerType ? wordFor({ Create: "created", Update: "updated", CreateAndUpdate: "created or updated", Delete: "deleted" }, recordTriggerType) : undefined;
   const change = when ? `is ${when}` : recordTriggerType ? `is saved (Salesforce's trigger: ${recordTriggerType})` : "is saved";
   if (triggerType === "RecordBeforeSave") return `When ${what} ${change}, before the change is saved`;
   if (triggerType === "RecordAfterSave") return `When ${what} ${change}, after the change is saved`;
@@ -169,7 +175,7 @@ function scheduleWords(schedule: NonNullable<HandbookFlow["start"]["schedule"]>)
 const firstOf = (shown: number, total: number, what: string): string => `the first ${count(shown)} of ${count(total)} ${what}`;
 
 function conditionWords(c: HandbookCondition): Run[] {
-  const operator = c.operator ? (OPERATOR_WORDS[c.operator] ?? c.operator) : "(no operator given)";
+  const operator = c.operator ? (wordFor(OPERATOR_WORDS, c.operator) ?? c.operator) : "(no operator given)";
   const value: Run[] = c.value === null ? [{ text: "(no value)", muted: true }] : [{ text: c.value }];
   const cut = c.valueCut || (c.valueLength !== null && c.value !== null && c.valueLength > c.value.length);
   return [{ text: `${c.field} ${operator} ` }, ...value, ...(cut ? [{ text: ` [cut: ${firstOf(c.value?.length ?? 0, c.valueLength ?? 0, "characters")}]`, bold: true }] : [])];
@@ -249,7 +255,7 @@ function writeEntry(doc: Doc, entry: HandbookFlow["start"]["entry"]): void {
   if (total > 0) {
     const cut = entry.cut || total > entry.conditions.length;
     doc.labelled("Entry conditions", cut ? `${plural(total, "condition")}. This lists ${firstOf(entry.conditions.length, total, "conditions")}.` : `${plural(total, "condition")}.`);
-    if (entry.logic) doc.labelled("Combined as", ({ and: "all of them must be met", or: "any one of them is enough" } as Record<string, string>)[entry.logic.toLowerCase()] ?? entry.logic);
+    if (entry.logic) doc.labelled("Combined as", wordFor({ and: "all of them must be met", or: "any one of them is enough" }, entry.logic.toLowerCase()) ?? entry.logic);
     doc.lines([], entry.conditions.map((c, i) => [{ text: `${i + 1}. ` }, ...conditionWords(c)]));
   }
   if (entry.formula !== null) {
@@ -266,7 +272,7 @@ function writeStep(doc: Doc, step: HandbookStep, n: number, where: (name: string
   if (step.object) lines.push([{ text: `On: ${step.object}` }]);
   const fieldsTotal = Math.max(step.fieldsTotal, step.fields.length);
   if (fieldsTotal > 0) lines.push([{ text: `Fields: ${step.fields.join(", ")}` }, ...(fieldsTotal > step.fields.length ? [{ text: ` [cut: ${firstOf(step.fields.length, fieldsTotal, "fields")}]`, bold: true }] : [])]);
-  if (step.detail) lines.push([{ text: `${DETAIL_WORDS[step.kind] ?? "Uses"}: ${step.detail}` }]);
+  if (step.detail) lines.push([{ text: `${wordFor(DETAIL_WORDS, step.kind) ?? "Uses"}: ${step.detail}` }]);
   for (const o of step.outcomes) lines.push([{ text: `${o.label}: ${where(o.next)}` }]);
   // A step with outcomes goes where they say; one without goes on, or ends the flow.
   if (step.next !== null || step.outcomes.length === 0) lines.push([{ text: `Then: ${where(step.next)}` }]);

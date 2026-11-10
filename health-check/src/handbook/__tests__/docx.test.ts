@@ -134,6 +134,13 @@ describe("the handbook as a Word document", () => {
     assert.match(text, /A kind of step we have no plain name for appears under Salesforce's own name for it\./);
   });
 
+  test("a name from the file that happens to be a JavaScript word prints as written", async () => {
+    const entry = { logic: "constructor", formula: null, formulaCut: false, formulaLength: null, conditions: [{ field: "Amount", operator: "toString", value: "1", valueCut: false, valueLength: 1 }], conditionsTotal: 1, cut: false };
+    const odd = flow("Odd", { status: "__proto__", processType: "hasOwnProperty", start: { ...flow("x").start, recordTriggerType: "valueOf", entry }, steps: [step("S", { kind: "constructor", detail: "x" })], stepsTotal: 1 });
+    const { text } = await render(handbook({ flows: { status: "ok", items: [odd] } }));
+    for (const line of ["Status: __proto__", "Type: hasOwnProperty", "is saved (Salesforce's trigger: valueOf)", "Combined as: constructor", "1. Amount toString 1", "1. constructor: S", "Uses: x"]) assert.ok(text.includes(line), line);
+  });
+
   test("says what starts a flow, its schedule and its entry conditions", async () => {
     const items = [
       flow("Before", { start: { ...flow("x").start, object: "Lead", triggerType: "RecordBeforeSave", recordTriggerType: "Create" } }),
