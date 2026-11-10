@@ -281,7 +281,8 @@ export function executiveHtml(report: BuiltReport, pseudonyms: Pseudonymiser): s
   const themes = peopleSaid.split(/\n+/).filter((t) => t.trim()).map((t) => `<p class="theme">${r.t(t)}</p>`).join("");
   const peopleTold = peopleSaid ? `<h3 class="sub">What your people told us</h3>${themes}` : "";
   // The Verdict page is full on the longer samples' drafts at their targets: there the
-  // heading gives the gap back from the space above it, so the page holds what it held.
+  // heading sits 10px nearer what's above it, giving back one gap, so two themes take
+  // the room they took before.
   const peopleToldBesideVerdict = peopleTold ? `<div class="beside-verdict">${peopleTold}</div>` : "";
   // Both voices don't fit beside the verdict even on the engine's own text, so
   // together they take the next page; the sources line stays with the figures it
