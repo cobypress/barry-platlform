@@ -97,7 +97,7 @@ function markUnread(bundle: MetadataBundle, kind: UnreadKind, reason: string): v
 }
 
 export async function readBundleThroughTooling(ctx: ExtractContext): Promise<MetadataBundle> {
-  const bundle: MetadataBundle = { route: "tooling", unsearched: [], flows: [], workflows: [], validationRules: [], customFields: [], recordTypes: [], objects: [], references: { users: {}, fields: {} }, filesRead: 0, handbook: { flows: [], validationRules: [] } };
+  const bundle: MetadataBundle = { route: "tooling", unsearched: [], flows: [], workflows: [], validationRules: [], customFields: [], recordTypes: [], objects: [], references: { users: {}, fields: {} }, filesRead: 0, handbook: { flows: [], validationRules: [], validationRulesCover: { customObjects: "all", standardObjects: "all" } } };
   const reader = new ItemReader(ctx);
   const index = (metadata: Row | null, path: string): void => {
     if (metadata) indexReferences(bundle.references, JSON.stringify(metadata), path);

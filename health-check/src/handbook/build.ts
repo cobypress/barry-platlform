@@ -30,7 +30,7 @@ export function buildHandbook(metadata: Sourced<MetadataBundle> | undefined): Ha
   const handbook = Handbook.safeParse({
     version: HANDBOOK_VERSION,
     flows: { status: "ok", items: detail.flows },
-    validationRules: unread ? unavailable(unread) : { status: "ok", items: detail.validationRules },
+    validationRules: unread ? unavailable(unread) : { status: "ok", covers: detail.validationRulesCover, items: detail.validationRules },
   });
   if (handbook.success) return handbook.data;
   const where = handbook.error.issues[0]?.path.join(".") ?? "";

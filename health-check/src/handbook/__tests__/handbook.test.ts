@@ -4,6 +4,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { SALES_CLOUD_MODULES } from "../../domains/index.ts";
 import { runHealthCheck } from "../../engine/run.ts";
+import { RETRIEVE_TYPES } from "../../extract/automation.ts";
 import { flowDetailMetadata, parseMetadataBundle, type MetadataBundle } from "../../extract/metadata-parse.ts";
 import { toolingValidationRule } from "../../extract/metadata-tooling.ts";
 import type { Sourced } from "../../extract/types.ts";
@@ -15,7 +16,7 @@ import { Simulator } from "../../testing/simulator.ts";
 import { AS_OF, HANDBOOK_MARKER, HANDBOOK_PLANTED, METADATA_FILES } from "../../testing/synthetic-org.ts";
 import { buildHandbook, HANDBOOK_FILE } from "../build.ts";
 import { flowDetail, validationRuleDetail } from "../detail.ts";
-import { Handbook, MAX_CONDITIONS, MAX_FIELDS, MAX_STEPS, MAX_TEXT, type HandbookFlow } from "../schema.ts";
+import { Handbook, MAX_CONDITIONS, MAX_FIELDS, MAX_STEPS, MAX_TEXT, type HandbookFlow, type ValidationRuleCoverage } from "../schema.ts";
 
 // The org handbook's data (DECISIONS.md 451 to 454).
 
@@ -169,11 +170,51 @@ describe("the Tooling route's item reads", () => {
 });
 
 describe("the two routes", () => {
+  // Only what they cover differs, as designed (decision 455): the synthetic org
+  // has no rule on a standard object the retrieve doesn't name.
   test("the retrieve and Tooling give the same detail for the synthetic org", () => {
-    const detail = (r: Run) => (JSON.parse(read(r.dir, "checkpoints/metadata.json")) as Sourced<MetadataBundle> & { status: "ok" }).data.handbook;
-    assert.ok(detail(retrieve)!.flows.length > 0);
-    assert.deepEqual(detail(tooling), detail(retrieve));
-    assert.deepEqual(handbookOf(tooling), handbookOf(retrieve));
+    const detail = (r: Run) => (JSON.parse(read(r.dir, "checkpoints/metadata.json")) as Sourced<MetadataBundle> & { status: "ok" }).data.handbook!;
+    assert.ok(detail(retrieve).flows.length > 0);
+    assert.deepEqual([detail(tooling).flows, detail(tooling).validationRules], [detail(retrieve).flows, detail(retrieve).validationRules]);
+    const [fromTooling, fromRetrieve] = [handbookOf(tooling), handbookOf(retrieve)];
+    assert.deepEqual(fromTooling.flows, fromRetrieve.flows);
+    assert.ok(fromTooling.validationRules.status === "ok" && fromRetrieve.validationRules.status === "ok");
+    assert.deepEqual(fromTooling.validationRules.items, fromRetrieve.validationRules.items);
+    assert.notDeepEqual(fromTooling.validationRules.covers, fromRetrieve.validationRules.covers);
+  });
+
+  describe("which objects' validation rules each route covers (decision 455)", () => {
+    const covers = (r: Run): ValidationRuleCoverage => {
+      const part = handbookOf(r).validationRules;
+      return part.status === "ok" ? part.covers : assert.fail("validation rules unavailable");
+    };
+
+    test("the retrieve: every custom object, and the standard objects it names, taken from the list it asks for", () => {
+      const named = RETRIEVE_TYPES.find((t) => t.name === "CustomObject")!.members.filter((m) => m !== "*");
+      assert.deepEqual(covers(retrieve), { customObjects: "all", standardObjects: named });
+      assert.deepEqual(named, ["Account", "Contact", "Lead", "Opportunity"]);
+    });
+
+    test("Tooling, which lists every rule: all of them", () => {
+      assert.deepEqual(covers(tooling), { customObjects: "all", standardObjects: "all" });
+    });
+
+    test("a list of validation rules that doesn't say what it covers doesn't fit", () => {
+      const items = handbookOf(retrieve).validationRules;
+      assert.ok(items.status === "ok");
+      const { covers: _, ...bare } = items;
+      assert.equal(Handbook.safeParse({ version: 1, flows: { status: "ok", items: [] }, validationRules: bare }).success, false);
+      assert.equal(Handbook.safeParse({ version: 1, flows: { status: "ok", items: [] }, validationRules: items }).success, true);
+      // Unavailable says why instead, with nothing to cover.
+      assert.equal(Handbook.safeParse({ version: 1, flows: { status: "ok", items: [] }, validationRules: { status: "unavailable", reason: "x", covers: items.covers } }).success, false);
+    });
+
+    test("a bundle with no checkpointed coverage gives no list rather than one that claims too much", () => {
+      const bundle = parseMetadataBundle({});
+      const { validationRulesCover: _, ...old } = bundle.handbook!;
+      const built = buildHandbook({ status: "ok", data: { ...bundle, handbook: old as MetadataBundle["handbook"] }, source: { kind: "metadata", path: "CustomObject" }, truncated: false });
+      assert.equal(built.validationRules.status, "unavailable");
+    });
   });
 
   // The simulator's Tooling view is the XML parsed, so it can't show a real
@@ -295,7 +336,7 @@ describe("caps (decision 453)", () => {
     assert.deepEqual([at.steps.length, at.stepsTotal, at.cut], [500, 500, false]);
     const over = flowDetail("Over", steps(501), null);
     assert.deepEqual([over.steps.length, over.stepsTotal, over.cut], [500, 501, true]);
-    assert.ok(Handbook.safeParse({ version: 1, flows: { status: "ok", items: [over] }, validationRules: { status: "ok", items: [] } }).success);
+    assert.ok(Handbook.safeParse({ version: 1, flows: { status: "ok", items: [over] }, validationRules: { status: "ok", covers: { customObjects: "all", standardObjects: "all" }, items: [] } }).success);
   });
 
   test(`a step keeps ${MAX_FIELDS} fields, with the full count beside them`, () => {
@@ -394,7 +435,7 @@ describe("when the metadata couldn't be read (decision 454)", () => {
     assert.equal(old.flows.status, "unavailable");
     const tooMany = flowDetail("Big", { assignments: Array.from({ length: 500 }, (_, i) => ({ name: `Step_${i}` })) }, null);
     tooMany.steps.push(tooMany.steps[0]!);
-    const misfit = buildHandbook({ status: "ok", data: { ...bundle, handbook: { flows: [tooMany], validationRules: [] } }, source, truncated: false });
+    const misfit = buildHandbook({ status: "ok", data: { ...bundle, handbook: { flows: [tooMany], validationRules: [], validationRulesCover: { customObjects: "all", standardObjects: [] } } }, source, truncated: false });
     assert.ok(misfit.flows.status === "unavailable");
     assert.match(misfit.flows.reason, /^The handbook's data didn't fit its format at flows\.items\.0\.steps, so it wasn't kept\.$/);
   });

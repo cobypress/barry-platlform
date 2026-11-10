@@ -93,13 +93,24 @@ export const HandbookValidationRule = z.strictObject({
 });
 export type HandbookValidationRule = z.infer<typeof HandbookValidationRule>;
 
+/**
+ * Which objects' validation rules were read (decision 455). Tooling lists every
+ * rule. The retrieve asks for every custom object and names a few standard ones,
+ * and its wildcard brings no standard object, so it holds those few and no more.
+ */
+export const ValidationRuleCoverage = z.strictObject({
+  customObjects: z.literal("all"),
+  standardObjects: z.union([z.literal("all"), z.array(z.string().min(1))]),
+});
+export type ValidationRuleCoverage = z.infer<typeof ValidationRuleCoverage>;
+
 // "We couldn't read it" and "there's none" must never look alike (decision 454, rule 5).
-const part = <T extends z.ZodType>(item: T) =>
-  z.discriminatedUnion("status", [z.strictObject({ status: z.literal("ok"), items: z.array(item) }), z.strictObject({ status: z.literal("unavailable"), reason: z.string().min(1) })]);
+const Unavailable = z.strictObject({ status: z.literal("unavailable"), reason: z.string().min(1) });
 
 export const Handbook = z.strictObject({
   version: z.literal(HANDBOOK_VERSION),
-  flows: part(HandbookFlow),
-  validationRules: part(HandbookValidationRule),
+  flows: z.discriminatedUnion("status", [z.strictObject({ status: z.literal("ok"), items: z.array(HandbookFlow) }), Unavailable]),
+  // Nor may "no rule on Case" and "we didn't read Case": the list says what it covers.
+  validationRules: z.discriminatedUnion("status", [z.strictObject({ status: z.literal("ok"), covers: ValidationRuleCoverage, items: z.array(HandbookValidationRule) }), Unavailable]),
 });
 export type Handbook = z.infer<typeof Handbook>;

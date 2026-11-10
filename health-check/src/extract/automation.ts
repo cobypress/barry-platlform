@@ -8,13 +8,18 @@ import { readableReason, readSoql, unavailable, type Extractor, type Sourced, ty
 
 // One retrieve costs a few calls however many flows there are. The Tooling route
 // is one call per flow, because a query can only return Metadata one row at a time.
-const RETRIEVE_TYPES = [
+export const RETRIEVE_TYPES = [
   { name: "Flow", members: ["*"] },
   { name: "Workflow", members: ["*"] },
   { name: "CustomObject", members: ["*", "Account", "Contact", "Lead", "Opportunity"] },
   { name: "ApprovalProcess", members: ["*"] },
   { name: "AssignmentRules", members: ["Lead", "Case"] },
 ];
+
+// Salesforce's wildcard for CustomObject brings custom objects only, so these are
+// the only standard objects whose validation rules the retrieve reads (DECISIONS.md
+// 455). Taken from the list above so the two can't drift apart.
+export const RETRIEVED_STANDARD_OBJECTS = RETRIEVE_TYPES.find((t) => t.name === "CustomObject")!.members.filter((m) => m !== "*");
 
 export const TOOLING_SOURCE: SourceInfo = { kind: "metadata", path: "Tooling API: FlowDefinition, Flow, WorkflowRule and its actions, ValidationRule, FieldDefinition, EntityParticle, RecordType" };
 
@@ -31,7 +36,7 @@ export const metadataExtractor: Extractor<Sourced<MetadataBundle>> = {
     let retrieveError: unknown;
     try {
       const files = await ctx.client.retrieveMetadata(RETRIEVE_TYPES);
-      return { status: "ok", data: parseMetadataBundle(files), source, truncated: false };
+      return { status: "ok", data: parseMetadataBundle(files, RETRIEVED_STANDARD_OBJECTS), source, truncated: false };
     } catch (err) {
       if (!needsWritePermission(err)) return unavailable(source, err);
       retrieveError = err;

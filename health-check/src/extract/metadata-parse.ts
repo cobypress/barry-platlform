@@ -1,7 +1,7 @@
 import { XMLParser } from "fast-xml-parser";
 import { redactSecrets } from "../privacy/secrets.ts";
 import { flowDetail, validationRuleDetail } from "../handbook/detail.ts";
-import type { HandbookFlow, HandbookValidationRule } from "../handbook/schema.ts";
+import type { HandbookFlow, HandbookValidationRule, ValidationRuleCoverage } from "../handbook/schema.ts";
 
 export type FlowSummary = {
   name: string;
@@ -51,7 +51,7 @@ export function unreadReason(bundle: MetadataBundle, needs: UnreadKind[]): strin
 }
 
 /** What the handbook keeps of each flow and validation rule, beside the summaries (DECISIONS.md 451). */
-export type HandbookDetail = { flows: HandbookFlow[]; validationRules: HandbookValidationRule[] };
+export type HandbookDetail = { flows: HandbookFlow[]; validationRules: HandbookValidationRule[]; validationRulesCover: ValidationRuleCoverage };
 
 export type MetadataBundle = {
   /** How it was read: one Metadata API retrieve, or Tooling item by item for a connection that can't use the Metadata API. */
@@ -236,9 +236,15 @@ function parseObject(path: string, xml: string, index: ReferenceIndex): { object
   return { object, validationRules, ruleDetails, customFields, recordTypes };
 }
 
-/** Turns the unzipped retrieve into summaries. A file that can't be parsed fails the extractor. */
-export function parseMetadataBundle(files: Record<string, string>): MetadataBundle {
-  const bundle: MetadataBundle = { route: "retrieve", unsearched: [], flows: [], workflows: [], validationRules: [], customFields: [], recordTypes: [], objects: [], references: { users: {}, fields: {} }, filesRead: 0, handbook: { flows: [], validationRules: [] } };
+/**
+ * Turns the unzipped retrieve into summaries. A file that can't be parsed fails
+ * the extractor. `standardObjects` are the ones the retrieve named: its wildcard
+ * brings custom objects only, so theirs are the only standard objects' rules it
+ * holds (DECISIONS.md 455).
+ */
+export function parseMetadataBundle(files: Record<string, string>, standardObjects: readonly string[] = []): MetadataBundle {
+  const validationRulesCover: ValidationRuleCoverage = { customObjects: "all", standardObjects: [...standardObjects] };
+  const bundle: MetadataBundle = { route: "retrieve", unsearched: [], flows: [], workflows: [], validationRules: [], customFields: [], recordTypes: [], objects: [], references: { users: {}, fields: {} }, filesRead: 0, handbook: { flows: [], validationRules: [], validationRulesCover } };
   for (const [path, raw] of Object.entries(files).sort(([a], [b]) => a.localeCompare(b))) {
     if (path === "package.xml") continue;
     const xml = redactSecrets(raw);
