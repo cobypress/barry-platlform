@@ -148,8 +148,13 @@ describe("the documents job: handbook.json reaches the Word document and nothing
   // Decision 452 as decision 443 amends it: the file's contents go to the
   // customer's handbook document and nowhere else. A literal planted in a
   // formula, a condition's value, a description and a message is followed
-  // from the run folder through a documents make.
+  // from the run folder through a documents make, and so are objects named only
+  // in an Apex class's and a trigger's queries (decisions 456 and 457).
   const LITERAL = "HB-DOC-LITERAL-0443";
+  const CLASS_OBJECT = "Hbdoc_Class_Ledger_0443__c";
+  const TRIGGER_OBJECT = "Hbdoc_Trigger_Ledger_0443__c";
+  /** In the Word document and nowhere else the make leaves. */
+  const PLANTED = [LITERAL, HANDBOOK_MARKER, CLASS_OBJECT, TRIGGER_OBJECT];
   const uploads: Array<{ parent: string; name: string; body: Buffer }> = [];
   let deps: ReturnType<typeof baseDeps>;
   let outcome: Awaited<ReturnType<typeof processDocumentsJob>>;
@@ -198,10 +203,15 @@ describe("the documents job: handbook.json reaches the Word document and nothing
     dir = join(deps.runsDir, RUN_ID);
     cpSync(source, dir, { recursive: true });
     const handbook = Handbook.parse(JSON.parse(readFileSync(join(dir, HANDBOOK_FILE), "utf8")));
-    assert.ok(handbook.validationRules.status === "ok" && handbook.flows.status === "ok");
+    assert.ok(handbook.validationRules.status === "ok" && handbook.flows.status === "ok" && handbook.apexClasses.status === "ok" && handbook.apexTriggers.status === "ok");
     handbook.validationRules.items.push({ object: "Invoice__c", name: "Planted_Rule", active: true, description: `Description ${LITERAL}`, formula: `CONTAINS(Notes__c, "${LITERAL}")`, formulaCut: false, formulaLength: 40, message: `Message ${LITERAL}`, messageField: null });
     const flow = handbook.flows.items.find((f) => f.name === "Opportunity_Stage_Review")!;
     flow.start.entry.conditions[0]!.value = LITERAL;
+    const touches = (object: string) => ({ queries: [object], queriesTotal: 1, changes: ["update" as const], dynamicQueries: false, searches: false });
+    handbook.apexClasses.items.push({ name: "PlantedLedgerSync", apiVersion: 62, status: "Active", isTest: false, touches: touches(CLASS_OBJECT) });
+    handbook.apexClasses.total += 1;
+    handbook.apexTriggers.items.push({ name: "PlantedLedgerTrigger", apiVersion: 62, status: "Active", isTest: false, touches: touches(TRIGGER_OBJECT), object: "Account", events: ["after update"] });
+    handbook.apexTriggers.total += 1;
     writeFileSync(join(dir, HANDBOOK_FILE), JSON.stringify(handbook));
     deps.store.addDocumentsJob({ run: consoleRun({ status: "released" }), intake: null, sections: [], versions: [], overrides: [], preparedBy: null, state: "queued", driveFolderId: null, files: [] });
     outcome = await processDocumentsJob(RUN_ID, deps, { final: true });
@@ -212,13 +222,16 @@ describe("the documents job: handbook.json reaches the Word document and nothing
     for (const bytes of [readFileSync(join(dir, "documents", HANDBOOK_DOCX)), uploads.find((u) => u.name.endsWith(" - Org handbook.docx"))!.body]) {
       const text = docxText(bytes);
       for (const planted of [`CONTAINS(Notes__c, "${LITERAL}")`, `StageName equals ${LITERAL}`, `Description ${LITERAL}`, `Message ${LITERAL}`, HANDBOOK_MARKER]) assert.ok(text.includes(planted), planted);
+      // Each Apex object as what its class or trigger queries.
+      assert.ok(text.includes(`PlantedLedgerSync\nAPI version 62.0. Status: Active. Test: No.\nQueries: ${CLASS_OBJECT}\n`), CLASS_OBJECT);
+      assert.ok(text.includes(`PlantedLedgerTrigger\nOn: Account\nRuns: after update\nAPI version 62.0. Status: Active. Test: No.\nQueries: ${TRIGGER_OBJECT}\n`), TRIGGER_OBJECT);
     }
   });
 
   test("no other upload holds it", () => {
     const others = uploads.filter((u) => !u.name.endsWith(" - Org handbook.docx"));
     assert.equal(others.length, 7, "the six documents and the readout kit");
-    for (const u of others) assert.ok(!u.body.includes(LITERAL) && !u.body.includes(HANDBOOK_MARKER), u.name);
+    for (const u of others) assert.deepEqual(PLANTED.filter((p) => u.body.includes(p)), [], u.name);
   });
 
   test("nor the store's record, its warnings, the log or the queue's outcome", () => {
@@ -226,13 +239,13 @@ describe("the documents job: handbook.json reaches the Word document and nothing
     assert.ok(made.files.length === 6 && !made.files.some((f) => /handbook/i.test(f.name)));
     const store = { documents: [...deps.store.documents.values()], writes: deps.store.writes, runs: [...deps.store.runs.values()], shares: deps.store.shares, microsites: [...deps.store.microsites.values()], benchmark: deps.store.benchmarkRows };
     for (const [where, text] of [["store", JSON.stringify(store)], ["warnings", JSON.stringify(made.warnings)], ["log", deps.lines.join("\n")], ["outcome", JSON.stringify(outcome)]] as const) {
-      for (const planted of [LITERAL, HANDBOOK_MARKER, "Planted_Rule", "Opportunity_Stage_Review"]) assert.ok(!text.includes(planted), `${planted} in the ${where}`);
+      for (const planted of [...PLANTED, "Planted_Rule", "Opportunity_Stage_Review", "PlantedLedgerSync", "PlantedLedgerTrigger"]) assert.ok(!text.includes(planted), `${planted} in the ${where}`);
     }
   });
 
   test("nor any other file the make leaves in the run folder", () => {
     const files = filesIn(dir);
-    const holding = [...files.keys()].filter((f) => isOutput(f) && f !== `documents/${HANDBOOK_DOCX}` && files.get(f)!.includes(LITERAL));
+    const holding = [...files.keys()].filter((f) => isOutput(f) && f !== `documents/${HANDBOOK_DOCX}` && PLANTED.some((p) => files.get(f)!.includes(p)));
     assert.deepEqual(holding, []);
     assert.ok(files.has(`documents/${HANDBOOK_DOCX}`));
   });

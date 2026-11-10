@@ -889,6 +889,24 @@ describe("the org handbook", () => {
     }
   });
 
+  test("a version 1 file, written before the Apex was kept, gets the six documents and the format warning, never half a handbook", async () => {
+    // As an engine before decisions 456 and 457 wrote it: the same flows and rules, no Apex parts.
+    const { apexClasses: _classes, apexTriggers: _triggers, ...rest } = JSON.parse(readFileSync(join(recorded, HANDBOOK_FILE), "utf8")) as Record<string, unknown>;
+    const v1 = JSON.stringify({ ...rest, version: 1 });
+    assert.ok(v1.includes(HANDBOOK_MARKER), "the recorded flows and rules, marker included");
+    const drive = new MemoryDrive();
+    const deps = withHandbook(jobInput(), drive, v1);
+    const result = await processDocumentsJob(RUN_ID, deps, { final: true });
+    assert.equal(result.outcome, "done", result.detail);
+    const made = deps.store.documents.get(RUN_ID)!.made!;
+    assert.deepEqual(made.files.map((f) => f.name).sort(), SIX);
+    assert.deepEqual((await drive.files(made.driveFolderId)).map((f) => f.name).sort(), SIX);
+    assert.deepEqual(handbooks(drive), []);
+    assert.ok(!existsSync(join(deps.runsDir, RUN_ID, "documents", HANDBOOK_DOCX)));
+    assert.deepEqual(made.warnings, [OVERFLOW, HANDBOOK_NOT_MADE.format]);
+    assert.doesNotMatch(JSON.stringify([made, result, deps.lines, deps.store.writes]), new RegExp(HANDBOOK_MARKER));
+  });
+
   test("a make held back by the number check uploads no handbook, and makes none", async () => {
     const drive = new MemoryDrive();
     const deps = withHandbook(jobInput(), drive);
