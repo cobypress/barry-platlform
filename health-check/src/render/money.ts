@@ -65,11 +65,11 @@ const NOTE_CHARS = 106;
  * 12.5px, and its basis 12.7px a line at 9.75px after 1px, counted as 13.7. On a
  * slide a row is 11px and 23.2px a line at 16px, with no basis: in the split
  * beside the figure the table is 611px wide, and on a continued slide the
- * slide's full 1174px. A label and its
- * basis are set a word at a time by the measured width of their letters
- * (`textLines`, DECISIONS.md 438), so the estimate counts the lines the browser
- * sets, never fewer: characters a line had to be set for the longest words, and
- * counted the engine's labels and bases a line long.
+ * slide's full 1174px. A label and its basis are set a word at a time by the
+ * measured width of their letters (`textLines`, DECISIONS.md 438), so the
+ * estimate counts the lines the browser sets, never fewer: characters a line had
+ * to be set for the longest words, and counted the engine's labels and bases a
+ * line long.
  */
 type TableMeasure = { font: number; text: number; row: number; line: number; basis: { font: number; line: number } | null };
 const PAGE_TABLE: TableMeasure = { font: 12.5, text: 609.6, row: 13, line: 18.75, basis: { font: 9.75, line: 13.7 } };
