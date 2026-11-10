@@ -8,7 +8,7 @@
   "bin": { "hc": "src/cli/hc.ts" },
   "scripts": {
     "hc": "node src/cli/hc.ts",
-    "test": "node --test \"src/**/__tests__/*.test.ts\"",
+    "test": "node --test \"src/**/__tests__/*.test.ts\" \"scripts/**/__tests__/*.test.ts\"",
     "typecheck": "tsc --noEmit",
     "fixtures": "node src/testing/record-fixtures.ts",
     "sample": "node src/render/sample.ts",

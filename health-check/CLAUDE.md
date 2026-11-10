@@ -2,6 +2,8 @@
 
 The Salesforce health check engine. Read `docs/ARCHITECTURE.md` first, and `docs/DECISIONS.md` before changing an approach.
 
+The build is run by an orchestrator and its agents: `docs/orchestration.md` is the method (start it with `claude --model fable`, then `/coordinate`).
+
 ## Commands
 
 ```bash

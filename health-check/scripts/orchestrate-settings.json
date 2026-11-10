@@ -1,0 +1,41 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(git push *)",
+      "Bash(git push)",
+      "Bash(vercel *)",
+      "Bash(npx vercel *)",
+      "Bash(sf *)",
+      "Bash(sfdx *)",
+      "Bash(neon *)",
+      "Bash(psql *)",
+      "Bash(security *)",
+      "Bash(printenv *)",
+      "Bash(npm publish *)",
+      "Bash(gh pr create *)",
+      "Bash(gh release *)",
+      "Read(**/.env)",
+      "Read(**/.env.local)",
+      "Read(**/.env.production)",
+      "Read(**/.env.development)",
+      "Read(~/Desktop/Clients Orgs/**)",
+      "Read(~/.barometer/**)",
+      "Read(~/.ssh/**)",
+      "Edit(**/.env*)",
+      "Edit(~/Desktop/Clients Orgs/**)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$HOME/Desktop/Black Cloud/barry-platlform/health-check/scripts/orchestrate-guard.ts\""
+          }
+        ]
+      }
+    ]
+  }
+}
