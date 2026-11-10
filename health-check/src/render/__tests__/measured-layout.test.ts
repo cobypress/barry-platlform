@@ -18,7 +18,7 @@ import { syntheticSurvey } from "../../testing/survey.ts";
 import { EXECUTIVE_PAGES } from "../render-run.ts";
 import { EXECUTIVE_MAX_PAGES, executiveHtml, executiveMaxPages, hasBothVoices, introLines, planIntroHeight, RECHECK_EXECUTIVE_MAX_PAGES } from "../executive.ts";
 import { fullReportHtml, fullReportHtmlAt, slideCounts, threeColumnItemHeight } from "../full-report.ts";
-import { estimateLines, paginateColumns } from "../html.ts";
+import { estimateLines, paginateColumns, printed, renderContext } from "../html.ts";
 import { compactMoney } from "../format.ts";
 import { restOf } from "../money.ts";
 import { launchBrowser, layoutOf } from "../pdf.ts";
@@ -240,6 +240,48 @@ describe("an estimate never counts a line too few", () => {
     assert.equal(introLines("mmmm ".repeat(11).trim()), 2);
     // And narrow letters fit more than a character count allows.
     assert.equal(introLines("i ".repeat(80).trim()), 1);
+  });
+
+  test("the plan's introduction is measured as it prints, where our words for the engine's are longer and an entity is one character", async () => {
+    const { input, names } = await sampleOf(SAMPLES[0]![1]);
+    const t = renderContext(names, loadCalibration().currency, false).t;
+    // Each entity is the one character it prints, at that character's width.
+    assert.equal(printed(t(`It's "a" & <b>.`)), `It's "a" & <b>.`);
+    /** The plan with the engine's introduction changed: its lines in Chromium as stored and as printed, and the actions it shows. */
+    const planWith = async (from: string, to: string) => {
+      const report = buildReport(input);
+      const built = report.outputs.executive_summary;
+      const version = built.versions.find((v) => v.id === built.sections.find((s) => s.key === "plan_90_day")!.currentVersionId)!;
+      const stored = version.body.replace(from, to);
+      assert.notEqual(stored, version.body);
+      version.body = stored;
+      const html = executiveHtml(report, names);
+      const page = await opened(html);
+      try {
+        const lines = await page.evaluate((stored) => {
+          const plan = [...document.querySelectorAll(".page")].find((p) => p.querySelector(".eyebrow")?.textContent === "90-day plan")!;
+          const intro = plan.querySelector<HTMLElement>("h2 + p")!;
+          const asPrinted = intro.getBoundingClientRect().height;
+          intro.textContent = stored;
+          return [intro.getBoundingClientRect().height, asPrinted].map((h) => Math.round(h / 20.25));
+        }, stored);
+        const actions = html.split('<section class="phase').slice(1).reduce((sum, block) => sum + (block.split("</section>")[0]!.match(/<li>/g) ?? []).length, 0);
+        return { stored, shown: printed(t(stored)), lines, actions };
+      } finally {
+        await page.close();
+      }
+    };
+    // "The calibration" prints as "What we agreed with you": two lines as stored,
+    // three as printed, and the third costs the plan the action the engine's own
+    // introduction leaves room for.
+    const longer = await planWith("The full report has", "The calibration has");
+    assert.match(longer.shown, /What we agreed with you has/);
+    assert.deepEqual([introLines(longer.stored), introLines(longer.shown), ...longer.lines, longer.actions], [2, 3, 2, 3, 11]);
+    // An apostrophe is written &#39; on the page, five characters that print as one:
+    // counted as written it would take a third line, and an action, it doesn't.
+    const apostrophe = await planWith("Urgent fixes come first", "Urgent fixes don't wait");
+    assert.match(t(apostrophe.stored), /don&#39;t/);
+    assert.deepEqual([introLines(t(apostrophe.stored)), introLines(apostrophe.shown), ...apostrophe.lines, apostrophe.actions], [3, 2, 2, 2, 12]);
   });
 });
 

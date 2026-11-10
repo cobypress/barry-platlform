@@ -109,6 +109,11 @@ export const effortText = (f: Finding): string => `Effort: ${EFFORT_WORDS[f.effo
 /** Lines of wrapped text, near enough to decide what fits on a page. */
 export const estimateLines = (text: string, charsPerLine: number): number => Math.max(1, Math.ceil(text.length / charsPerLine));
 
+const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"' };
+/** Text as it prints: tags and the references in them as words, an entity as the one character it shows. */
+export const printed = (html: string): string =>
+  html.replace(/<[^>]*>/g, " ").replace(/&(#\d+|[a-z]+);/g, (_, e: string) => (e.startsWith("#") ? String.fromCharCode(Number(e.slice(1))) : (ENTITIES[e] ?? "x")));
+
 /** Lines of text wrapped at word breaks, as a browser sets it, to a cautious width: a word that doesn't fit starts the next line. */
 export function wrappedLines(text: string, chars: number): number {
   let lines = 1;

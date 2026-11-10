@@ -6,7 +6,7 @@ import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { canRelease, type Finding, type Metric } from "../schemas/index.ts";
 import { deliveryOutlookChart, scorecardChart, scorecardOptions, winRateBySegment } from "./charts.ts";
 import { compactMoney, longDate, monthYear } from "./format.ts";
-import { chartSlot, coverScore, document, documentTitle, effortText, estimateLines, paginate, paragraphs, renderContext, severityChip, valueFigure, valueText, type Render } from "./html.ts";
+import { chartSlot, coverScore, document, documentTitle, effortText, estimateLines, paginate, paragraphs, printed, renderContext, severityChip, valueFigure, valueText, type Render } from "./html.ts";
 import { noteSections, referenceMap, valueItemId } from "./references.ts";
 import { investmentPage, MONEY_CSS, moneyPage } from "./money.ts";
 import { PROGRESS_CSS, progressPage } from "./progress.ts";
@@ -110,7 +110,7 @@ export function introLines(intro: string): number {
   }
   return lines;
 }
-/** The plan's introduction's height, its 14px margin included. */
+/** The plan's introduction's height, its 14px margin included, from its text as it prints. */
 export const planIntroHeight = (intro: string): number => 14 + 20.5 * introLines(intro);
 /** An action's height on the page, from its words and its references. */
 type ItemHeight = (f: Finding, quick: boolean) => number;
@@ -326,8 +326,9 @@ export function executiveHtml(report: BuiltReport, pseudonyms: Pseudonymiser): s
   });
 
   const intro = currentBody(built, "plan_90_day");
-  // The first page also carries the introduction, so it has less room.
-  const introHeight = planIntroHeight(intro);
+  // The first page also carries the introduction, so it has less room. It's measured as it
+  // prints: a name in place of its token, and our words for the engine's, can make it longer.
+  const introHeight = planIntroHeight(printed(r.t(intro)));
   // One page is kept back for the references.
   const risk = riskPage(r, report);
   if (risk) add(risk);

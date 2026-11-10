@@ -2,7 +2,7 @@ import type { BuiltReport } from "../narrative/sections.ts";
 import { INVESTMENT } from "../money/investment.ts";
 import { HEADLINE_KINDS, KIND_LABELS, type ValueKind, type ValueModel } from "../value/model.ts";
 import { compactMoney } from "./format.ts";
-import { chartSlot, wrappedLines, type Render } from "./html.ts";
+import { chartSlot, printed, wrappedLines, type Render } from "./html.ts";
 import { HALF_WIDTH, waterfallChart } from "./charts.ts";
 import { valueItemId } from "./references.ts";
 
@@ -80,9 +80,6 @@ const LABEL_PX = 7;
 const BASIS_PX = 5.1;
 /** A reference tag beside a label, counted as a word, as wide as the widest. */
 const REF_WORD = "R00.00";
-
-/** Text as it prints: tags and the references in them as words, an entity as one character. */
-const printed = (html: string): string => html.replace(/<[^>]*>/g, " ").replace(/&(#\d+|[a-z]+);/g, "x");
 
 /** The lines past the first `from`, added up: what the money table's last row holds when it can't name them all. */
 export function restOf(lines: ValueModel["groups"], from: number, k: "low" | "expected" | "high"): number {
