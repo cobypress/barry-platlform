@@ -1,6 +1,8 @@
 import { isUnavailable } from "../salesforce/client.ts";
 import { redactSecrets } from "../privacy/secrets.ts";
-import { hasText, indexReferences, summariseFlowMetadata, summariseWorkflowRule, type MetadataBundle, type UnreadKind, type WorkflowSummary } from "./metadata-parse.ts";
+import { validationRuleDetail } from "../handbook/detail.ts";
+import type { HandbookValidationRule } from "../handbook/schema.ts";
+import { flowDetailMetadata, hasText, indexReferences, summariseFlowMetadata, summariseWorkflowRule, type MetadataBundle, type UnreadKind, type WorkflowSummary } from "./metadata-parse.ts";
 import { readableReason } from "./types.ts";
 import type { ExtractContext } from "./types.ts";
 
@@ -90,7 +92,7 @@ function markUnread(bundle: MetadataBundle, kind: UnreadKind, reason: string): v
 }
 
 export async function readBundleThroughTooling(ctx: ExtractContext): Promise<MetadataBundle> {
-  const bundle: MetadataBundle = { route: "tooling", unsearched: [], flows: [], workflows: [], validationRules: [], customFields: [], recordTypes: [], objects: [], references: { users: {}, fields: {} }, filesRead: 0 };
+  const bundle: MetadataBundle = { route: "tooling", unsearched: [], flows: [], workflows: [], validationRules: [], customFields: [], recordTypes: [], objects: [], references: { users: {}, fields: {} }, filesRead: 0, handbook: { flows: [], validationRules: [] } };
   const reader = new ItemReader(ctx);
   const index = (metadata: Row | null, path: string): void => {
     if (metadata) indexReferences(bundle.references, JSON.stringify(metadata), path);
@@ -114,6 +116,7 @@ export async function readBundleThroughTooling(ctx: ExtractContext): Promise<Met
     if (!metadata) throw new ToolingGapError(`Flow ${version.name} came back without its definition.`);
     const summary = summariseFlowMetadata(version.name, metadata);
     bundle.flows.push(summary);
+    bundle.handbook!.flows.push(flowDetailMetadata(version.name, metadata));
     index(metadata, summary.path);
     bundle.filesRead++;
   }
@@ -182,8 +185,9 @@ export async function readBundleThroughTooling(ctx: ExtractContext): Promise<Met
       const object = objectName(String(rule.EntityDefinitionId));
       const name = String(rule.ValidationName);
       bundle.validationRules.push({ object, name, active: String(rule.Active) === "true", described: hasText(rule.Description) });
+      const item = search ? await optional(bundle, "validation rule formulas", () => reader.read("ValidationRule", rule.Id)) : null;
+      bundle.handbook!.validationRules.push(toolingValidationRule(object, rule, item?.metadata ?? null));
       if (!search) continue;
-      const item = await optional(bundle, "validation rule formulas", () => reader.read("ValidationRule", rule.Id));
       if (item?.metadata) indexReferences(bundle.references, String(item.metadata.errorConditionFormula ?? ""), `objects/${object}.object#validationRules.${name}`);
       else if (item) bundle.unsearched!.push("validation rule formulas");
     }
@@ -227,6 +231,17 @@ export async function readBundleThroughTooling(ctx: ExtractContext): Promise<Met
 
   bundle.unsearched = [...new Set(bundle.unsearched)];
   return bundle;
+}
+
+/**
+ * A validation rule's handbook detail on this route: whether it's active and its
+ * description from the list, as the summary takes them, and the formula, message
+ * and field from the definition already read for references. With no
+ * definition, those three are null rather than guessed.
+ */
+export function toolingValidationRule(object: string, row: Row, metadata: Row | null): HandbookValidationRule {
+  const definition = metadata ? { errorConditionFormula: metadata.errorConditionFormula, errorMessage: metadata.errorMessage, errorDisplayField: metadata.errorDisplayField } : {};
+  return validationRuleDetail(object, String(row.ValidationName), { ...definition, active: row.Active, description: row.Description });
 }
 
 /** The Tooling route can't give a whole picture. Reported as unavailable, like a failed read. */
