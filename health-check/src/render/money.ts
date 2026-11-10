@@ -2,7 +2,7 @@ import type { BuiltReport } from "../narrative/sections.ts";
 import { INVESTMENT } from "../money/investment.ts";
 import { HEADLINE_KINDS, KIND_LABELS, type ValueKind, type ValueModel } from "../value/model.ts";
 import { compactMoney } from "./format.ts";
-import { chartSlot, printed, wrappedLines, type Render } from "./html.ts";
+import { chartSlot, printed, textLines, wrappedLines, type Render } from "./html.ts";
 import { HALF_WIDTH, waterfallChart } from "./charts.ts";
 import { valueItemId } from "./references.ts";
 
@@ -26,9 +26,8 @@ export const MONEY_CSS = `
 .money tr.total td { font-weight: 700; border-bottom: none; border-top: 1px solid var(--carbon); }
 `;
 
-/** Rows of groups each format has room for, the total row aside. */
+/** Rows of groups the page has room for, the total row aside. */
 const PAGE_GROUPS = 8;
-const SLIDE_GROUPS = 7;
 /** The value model's basis for a figure measured over the analysis window. */
 const OVER_WINDOW_BASIS = /divided by/;
 /** What the figure before any share assumes, in words that fit the kind of money (DECISIONS.md 395). */
@@ -42,42 +41,51 @@ const IN_FULL: Record<Exclude<ValueKind, "exposure">, string> = {
 // The page's height, estimated so the chart and the table fit the executive
 // summary's page (DECISIONS.md 435). Measured in Chromium at A4 and 13.5px:
 // 987px between the paddings, 171px from the eyebrow to the chart, the chart
-// drawn 800 wide across 658px with 14px under it, the table's head 31.5px, a
-// row 13px and 18.75px a line, its basis 12.7px a line after 1px, a note 10px
-// above and 17.2px a line. The label column is what the figures leave: their
-// characters as wide as the total row's bold sets them. Characters a line were
-// set wrapping a word at a time, and the most that never counted a line too few
-// were, for a label, 66 at 451px and 56 at 389px on long-worded prose; for a
-// basis, which is always the same sentence, 89 and 81 on every form it takes;
-// and 110 a note line on the prose. Each is set below that, so the estimate
-// errs towards naming a line fewer.
+// drawn 800 wide across 658px with 14px under it, the table's head 31.5px, and a
+// note 10px above and 17.2px a line. A note line is counted at 106 characters:
+// the most that never counted a line too few on the prose was 110.
 const MONEY_ROOM = 986;
 const MONEY_HEAD = 171;
 const CHART_SCALE = 658 / 800;
 const TALL_CHART = 320;
 const SHORT_CHART = 250;
 const TABLE_HEAD = 32;
-/** A row's padding and rule. */
-const ROW = 13;
-const ROW_LINE = 18.75;
-/** A basis line, with the 1px above the first counted on each. */
-const BASIS_LINE = 13.7;
 /** A kind's bar where the chart can't be drawn: its name on two lines and the gap under it. */
 const BAR = 49;
 const NOTE_GAP = 10;
 const NOTE_LINE = 17.25;
 const NOTE_CHARS = 106;
-/** The page's 658px less the three columns' padding. */
-const TABLE_TEXT = 610;
-/** The figures' headings, at their widest: a column is never narrower. */
+
+/**
+ * How the money table is set, measured in Chromium. `text` is the table's width
+ * less its three columns' padding: the label column has what the figures leave.
+ * On the page a row is 13px and 18.75px a line at 12.5px, and its basis 12.7px a
+ * line at 9.75px after 1px, counted as 13.7. On a slide a row is 11px and 23.2px
+ * a line at 16px, with no basis: in the split beside the figure the table is
+ * 611px wide, and on a continued slide the slide's full 1174px.
+ */
+type TableMeasure = { font: number; text: number; row: number; line: number; basis: { font: number; line: number } | null };
+const PAGE_TABLE: TableMeasure = { font: 12.5, text: 610, row: 13, line: 18.75, basis: { font: 9.75, line: 13.7 } };
+const SLIDE_TABLE: TableMeasure = { font: 16, text: 563, row: 11, line: 23.25, basis: null };
+const CONTINUED_TABLE: TableMeasure = { ...SLIDE_TABLE, text: 1126 };
+// A slide's table starts 138px down, under the eyebrow and a one-line heading, and
+// the slide's padding starts at 667px: 529px, with 525 keeping clear. Its head is
+// 33.7px, and a note 10px above and 20.3px a line at 14px, as wide as the table.
+const SLIDE_ROOM = 525;
+const SLIDE_HEAD = 34;
+const SLIDE_NOTE_GAP = 10;
+const SLIDE_NOTE_LINE = 20.5;
+const SLIDE_NOTE_FONT = 14;
+const SLIDE_SPLIT_WIDTH = 611;
+const SLIDE_FULL_WIDTH = 1174;
+
+/** The figures' headings in bold at 12.5px, at their widest: a column is never narrower. */
 const EXPECTED_HEAD = 59;
 const RANGE_HEAD = 41;
 /** A figure's characters in bold at 12.5px, rounded up: a capital not named is 10px, any other 8.5px. */
 const FIGURE_WIDTHS: Record<string, number> = { "1": 4.8, ".": 3.6, " ": 3.4, t: 5.1, m: 13.3, "€": 10.2, M: 11.5, W: 13.2 };
+const FIGURE_AT = 12.5;
 const figureWidth = (text: string): number => [...text].reduce((sum, c) => sum + (FIGURE_WIDTHS[c] ?? (/[A-Z]/.test(c) ? 10 : 8.5)), 0);
-/** A label's and a basis's character, wrapped a word at a time. */
-const LABEL_PX = 7;
-const BASIS_PX = 5.1;
 /** A reference tag beside a label, counted as a word, as wide as the widest. */
 const REF_WORD = "R00.00";
 
@@ -86,12 +94,28 @@ export function restOf(lines: ValueModel["groups"], from: number, k: "low" | "ex
   return Math.round(lines.slice(from).reduce((sum, g) => sum + g.counted[k], 0) * 100) / 100;
 }
 
-/** Empty when nothing could be given a figure in money: the page is left out rather than showing a nought. A slide sets it in two columns. */
-export function moneyPage(r: Render, report: BuiltReport, format: "page" | "slide" = "page"): string {
-  const eyebrow = "What it's worth";
+/**
+ * How many lines the page's table names, the rest added up in its last row
+ * (DECISIONS.md 435): from the most it has room for, one fewer at a time until
+ * the page holds them. The last row never stands for one line whose label takes
+ * no more room than the row's own words (438): that row is as tall as the line,
+ * less its basis, so the line is named where the page holds it, and where it
+ * doesn't, the row stands for two. Where the line's label would take more room,
+ * the row still stands for it alone.
+ */
+export function linesToName(count: number, most: number, holds: (named: number) => boolean, fitsRestRow: (line: number) => boolean): number {
+  let named = count > most ? most - 1 : count;
+  while (named > 1 && !holds(named)) named -= 1;
+  if (count - named === 1 && fitsRestRow(named)) return holds(count) ? count : Math.max(1, named - 1);
+  return named;
+}
+
+type Group = ValueModel["groups"][number];
+
+/** What the money page and the slides share: every line, largest first, and how each is said. */
+function moneyParts(r: Render, report: BuiltReport) {
   const { value } = report;
   const { total, byKind } = value;
-  if (total.expected <= 0) return "";
   const m = (n: number) => compactMoney(n, value.currency);
   const kinds = HEADLINE_KINDS.filter((k) => byKind[k].expected > 0);
   const largest = Math.max(...kinds.map((k) => byKind[k].expected));
@@ -101,92 +125,156 @@ export function moneyPage(r: Render, report: BuiltReport, format: "page" | "slid
   // Every group, so the rows add up to the headline (night 3 reading pass). Past the
   // most a page holds, the rest are named as a count with where to find them.
   const all = value.groups.filter((g) => g.kind !== "exposure").sort((a, b) => b.counted.expected - a.counted.expected);
-  const room = format === "slide" ? SLIDE_GROUPS : PAGE_GROUPS;
   const pct = (n: number) => `${Math.round(n * 100)}%`;
   // How each row was reached: its figure before any share, and the share counted. The page has room to say so; the slide points to it.
-  const basis = (g: (typeof all)[number]) => {
+  const basis = (g: Group) => {
     const c = g.counted;
     const from = `${m(c.annual)} ${IN_FULL[g.kind as keyof typeof IN_FULL]}${g.lines.length > 1 ? ", the largest of overlapping issues" : ""}${OVER_WINDOW_BASIS.test(c.basis) ? ", a year's worth of what we measured" : ""}.`;
     return `${from} We count ${pct(g.realisation.expected)} (${pct(g.realisation.low)} to ${pct(g.realisation.high)}).`;
   };
-  const restLabel = (rest: number) => `And ${rest} smaller ${rest === 1 ? "line" : "lines"}, in the raw notes.`;
   const range = (low: number, high: number) => `${m(low)} to ${m(high)}`;
   const exposure = value.groups.filter((g) => g.kind === "exposure").sort((a, b) => b.counted.annual - a.counted.annual)[0];
   const exposureNote = exposure
     ? `<p class="note">${r.t(`Kept apart from this total: ${exposure.counted.title.replace(/\.$/, "")} (${m(exposure.counted.annual)}). That's exposure, not money found, so it's never added.`)}${r.ref(valueItemId(exposure.id))}</p>`
     : "";
-  const how =
-    format === "page"
-      ? "Not every case will come back, so we count a share of each figure: the expected share, with a cautious one and all of it either side. Where several issues describe the same money, only the largest counts."
-      : "Not every case will come back, so we count a share of each figure, with a cautious share and all of it either side. Where several issues describe the same money, only the largest counts. The executive summary shows how each line was reached.";
-  const notes = `${exposureNote}<p class="note">${r.t(how)}</p>`;
-  const seats = format === "page" ? seatsOnMoneyPage(r, report) : "";
-  // With the seats on this page, the chart is shorter to make room for them.
-  let chart = format === "page" && !investmentHasPage(report) ? SHORT_CHART : TALL_CHART;
-  let named = all.length > room ? room - 1 : all.length;
-  if (format === "page") {
-    // Where the page can't hold it all, the chart first takes its shorter height, then
-    // the table names fewer lines and adds the rest up in its last row (DECISIONS.md 435).
-    const parts: PageParts = { all, total, drawn: waterfallChart(value).kind === "chart", kinds: kinds.length, notes: `${notes}${seats}`, basis, restLabel, range, m };
-    const fits = (c: number, n: number) => moneyPageHeight(r, parts, c, n) <= MONEY_ROOM;
-    if (!fits(chart, named)) chart = SHORT_CHART;
-    while (named > 1 && !fits(chart, named)) named -= 1;
-  }
-  const groups = all.slice(0, named);
-  const rest = all.length - named;
-  const label = (g: (typeof all)[number]) => `${r.t(g.label)}${r.ref(valueItemId(g.id))}${format === "page" ? `<span class="basis">${r.t(basis(g))}</span>` : ""}`;
-  const rows = [
-    ...groups.map((g) => `<tr><td>${label(g)}</td><td class="num">${m(g.counted.expected)}</td><td class="num">${range(g.counted.low, g.counted.high)}</td></tr>`),
-    // With their amount, so the rows add up to the total beneath them (night 3 review).
-    ...(rest ? [`<tr><td>${r.t(restLabel(rest))}${r.ref(valueItemId(all[named]!.id))}</td><td class="num">${m(restOf(all, named, "expected"))}</td><td class="num">${range(restOf(all, named, "low"), restOf(all, named, "high"))}</td></tr>`] : []),
-    `<tr class="total"><td>${r.t("Total, each counted once")}</td><td class="num">${m(total.expected)}</td><td class="num">${range(total.low, total.high)}</td></tr>`,
-  ].join("");
-  // Each kind building to the total, exposure apart. The bars stay only where the waterfall can't be drawn.
-  const waterfall = waterfallChart(value, format === "slide" ? HALF_WIDTH : undefined, chart);
-  const build = waterfall.kind === "chart" ? `<div class="waterfall">${chartSlot(waterfall)}</div>` : `<div class="kinds">${bars}</div>`;
-  const figure = `<p class="headline-figure">${m(total.expected)}</p><p class="range">${r.t(`Over the next 12 months, expected. Between ${m(total.low)} and ${m(total.high)}.`)}</p>${build}`;
-  const table = `<table class="grid"><thead><tr><th>Where it comes from</th><th class="num">Expected</th><th class="num">Range</th></tr></thead><tbody>${rows}</tbody></table>`;
-  const head = `<div class="eyebrow">${r.t(eyebrow)}</div><h2>What fixing this is worth</h2>`;
-  if (format === "slide") return `<div class="money">${head}<div class="split"><div>${figure}</div><div>${table}${notes}</div></div></div>`;
-  return `<div class="money">${head}${figure}${table}${notes}${seats}</div>`;
+  const figure = (chart: number | undefined, width?: number) => {
+    const waterfall = waterfallChart(value, width, chart);
+    // Each kind building to the total, exposure apart. The bars stay only where the waterfall can't be drawn.
+    const build = waterfall.kind === "chart" ? `<div class="waterfall">${chartSlot(waterfall)}</div>` : `<div class="kinds">${bars}</div>`;
+    return `<p class="headline-figure">${m(total.expected)}</p><p class="range">${r.t(`Over the next 12 months, expected. Between ${m(total.low)} and ${m(total.high)}.`)}</p>${build}`;
+  };
+  const row = (label: string, g: { expected: number; low: number; high: number }, cls = "") => `<tr${cls ? ` class="${cls}"` : ""}><td>${label}</td><td class="num">${m(g.expected)}</td><td class="num">${range(g.low, g.high)}</td></tr>`;
+  const totalRow = row(r.t("Total, each counted once"), total, "total");
+  const table = (rows: string) => `<table class="grid"><thead><tr><th>Where it comes from</th><th class="num">Expected</th><th class="num">Range</th></tr></thead><tbody>${rows}</tbody></table>`;
+  return { value, total, m, kinds, all, basis, range, exposureNote, figure, row, totalRow, table };
 }
+type Parts = ReturnType<typeof moneyParts>;
 
-type Groups = ValueModel["groups"];
-type PageParts = {
-  all: Groups;
-  total: ValueModel["total"];
-  drawn: boolean;
-  kinds: number;
-  notes: string;
-  basis: (g: Groups[number]) => string;
-  restLabel: (rest: number) => string;
-  range: (low: number, high: number) => string;
-  m: (n: number) => string;
-};
+const EYEBROW = "What it's worth";
+const TITLE = "What fixing this is worth";
 
 /**
- * The money page's height, estimated, with the chart drawn `chart` high and the
- * first `named` lines named in the table, the rest added up in its last row.
- * Never calls `r.ref`: on the executive summary that notes a reference as used.
+ * The label column's width, from the widest figure in any row: the table makes
+ * the figures' columns as wide as their widest text, and the label has the rest.
  */
-function moneyPageHeight(r: Render, parts: PageParts, chart: number, named: number): number {
-  const { all, total, drawn, kinds, notes, basis, restLabel, range, m } = parts;
-  const shown = all.slice(0, named);
-  const rest = named < all.length ? { expected: restOf(all, named, "expected"), low: restOf(all, named, "low"), high: restOf(all, named, "high") } : null;
-  const lines = [...shown.map((g) => g.counted), total, ...(rest ? [rest] : [])];
-  // The figures' columns take what their widest text needs; the label column has the rest.
-  const widest = (head: number, texts: string[]) => Math.max(head, ...texts.map(figureWidth));
-  const column = TABLE_TEXT - widest(EXPECTED_HEAD, lines.map((x) => m(x.expected))) - widest(RANGE_HEAD, lines.map((x) => range(x.low, x.high)));
-  const wrapped = (text: string, px: number) => wrappedLines(printed(text), Math.floor(column / px));
-  const row = (label: string) => ROW + ROW_LINE * wrapped(label, LABEL_PX);
-  const rows =
-    shown.reduce((sum, g) => sum + row(`${r.t(g.label)} ${REF_WORD}`) + BASIS_LINE * wrapped(r.t(basis(g)), BASIS_PX), 0) +
-    (rest ? row(`${r.t(restLabel(all.length - named))} ${REF_WORD}`) : 0) +
-    // The total, with the rule above it.
+function labelColumn(parts: Parts, measure: TableMeasure, extra: Array<{ expected: number; low: number; high: number }> = []): number {
+  const lines = [...parts.all.map((g) => g.counted), parts.total, ...extra];
+  const scale = measure.font / FIGURE_AT;
+  const widest = (head: number, texts: string[]) => scale * Math.max(head, ...texts.map(figureWidth));
+  return measure.text - widest(EXPECTED_HEAD, lines.map((x) => parts.m(x.expected))) - widest(RANGE_HEAD, lines.map((x) => parts.range(x.low, x.high)));
+}
+
+/** A label's lines, with its reference, at the table's type. Never calls `r.ref`: on the executive summary that notes a reference as used. */
+const labelLines = (label: string, column: number, measure: TableMeasure): number => textLines(printed(`${label} ${REF_WORD}`), column, measure.font);
+
+/** A money line's label, with its reference, in lines `width` pixels wide on the page or a slide: what the estimate counts (DECISIONS.md 438). */
+export const moneyLabelLines = (label: string, width: number, format: "page" | "slide"): number => labelLines(label, width, format === "page" ? PAGE_TABLE : SLIDE_TABLE);
+/** A basis under a label on the page, in lines `width` pixels wide. */
+export const moneyBasisLines = (basis: string, width: number): number => textLines(printed(basis), width, PAGE_TABLE.basis!.font);
+
+/** A line's row: its label and, on the page, its basis. */
+function rowHeight(r: Render, parts: Parts, g: Group, column: number, measure: TableMeasure): number {
+  const basis = measure.basis ? measure.basis.line * textLines(printed(r.t(parts.basis(g))), column, measure.basis.font) : 0;
+  return measure.row + measure.line * labelLines(r.t(g.label), column, measure) + basis;
+}
+
+/** The executive summary's page: the figure, the chart, and the table as the page holds it (DECISIONS.md 435 and 438). Empty when nothing could be given a figure in money. */
+export function moneyPage(r: Render, report: BuiltReport): string {
+  if (report.value.total.expected <= 0) return "";
+  const parts = moneyParts(r, report);
+  const { all, total, m, basis, exposureNote, row, totalRow, table } = parts;
+  const restLabel = (rest: number) => `And ${rest} smaller ${rest === 1 ? "line" : "lines"}, in the raw notes.`;
+  const how = "Not every case will come back, so we count a share of each figure: the expected share, with a cautious one and all of it either side. Where several issues describe the same money, only the largest counts.";
+  const notes = `${exposureNote}<p class="note">${r.t(how)}</p>`;
+  const seats = seatsOnMoneyPage(r, report);
+  const drawn = waterfallChart(report.value).kind === "chart";
+  // Notes are counted by characters, wrapped a word at a time.
+  const noted = [...`${notes}${seats}`.matchAll(/<p[^>]*>([\s\S]*?)<\/p>/g)].reduce((sum, [, text]) => sum + NOTE_GAP + NOTE_LINE * wrappedLines(printed(text!), NOTE_CHARS), 0);
+  const rest = (named: number) => ({ expected: restOf(all, named, "expected"), low: restOf(all, named, "low"), high: restOf(all, named, "high") });
+  // The figures in the last row can be wider than any line's, so the column allows for every cut's.
+  const column = labelColumn(parts, PAGE_TABLE, all.slice(1).map((_, i) => rest(i + 1)));
+  const restRow = (n: number) => PAGE_TABLE.row + PAGE_TABLE.line * labelLines(r.t(restLabel(n)), column, PAGE_TABLE);
+  /** The page's height with the chart drawn `chart` high and the first `named` lines named, the rest added up in the last row. */
+  const height = (chart: number, named: number) => {
+    const rows =
+      all.slice(0, named).reduce((sum, g) => sum + rowHeight(r, parts, g, column, PAGE_TABLE), 0) +
+      (named < all.length ? restRow(all.length - named) : 0) +
+      // The total, with the rule above it.
+      1 +
+      PAGE_TABLE.row +
+      PAGE_TABLE.line * labelLines(r.t("Total, each counted once"), column, PAGE_TABLE);
+    return MONEY_HEAD + (drawn ? chart * CHART_SCALE + 14 : parts.kinds.length * BAR + 16) + TABLE_HEAD + rows + noted;
+  };
+  // With the seats on this page, the chart is shorter to make room for them. Where the
+  // page can't hold it all, the chart first takes its shorter height, then the table
+  // names fewer lines and adds the rest up in its last row (DECISIONS.md 435).
+  let chart = investmentHasPage(report) ? TALL_CHART : SHORT_CHART;
+  const most = all.length > PAGE_GROUPS ? PAGE_GROUPS - 1 : all.length;
+  if (height(chart, most) > MONEY_ROOM) chart = SHORT_CHART;
+  const holds = (named: number) => height(chart, named) <= MONEY_ROOM;
+  // A line takes the last row's place when its label is no taller than the row's own words (DECISIONS.md 438).
+  const fitsRestRow = (line: number) => labelLines(r.t(all[line]!.label), column, PAGE_TABLE) <= labelLines(r.t(restLabel(1)), column, PAGE_TABLE);
+  const named = linesToName(all.length, PAGE_GROUPS, holds, fitsRestRow);
+  const left = all.length - named;
+  const label = (g: Group) => `${r.t(g.label)}${r.ref(valueItemId(g.id))}<span class="basis">${r.t(basis(g))}</span>`;
+  const rows = [
+    ...all.slice(0, named).map((g) => row(label(g), g.counted)),
+    // With their amount, so the rows add up to the total beneath them (night 3 review).
+    ...(left ? [row(`${r.t(restLabel(left))}${r.ref(valueItemId(all[named]!.id))}`, rest(named))] : []),
+    totalRow,
+  ].join("");
+  const head = `<div class="eyebrow">${r.t(EYEBROW)}</div><h2>${TITLE}</h2>`;
+  return `<div class="money">${head}${parts.figure(chart)}${table(rows)}${notes}${seats}</div>`;
+}
+
+/**
+ * The full report's money, set in two columns: the figure and the chart beside
+ * the table. The full report has no ceiling, so where the table can't fit the
+ * slide it carries on to the next, its heading repeated and continued, every
+ * line named and the total on the last (DECISIONS.md 439). Nothing is cut or
+ * added up. Empty when nothing could be given a figure in money.
+ */
+export function moneySlides(r: Render, report: BuiltReport): string[] {
+  if (report.value.total.expected <= 0) return [];
+  const parts = moneyParts(r, report);
+  const { all, row, totalRow, table, exposureNote } = parts;
+  const how = "Not every case will come back, so we count a share of each figure, with a cautious share and all of it either side. Where several issues describe the same money, only the largest counts. The executive summary shows how each line was reached.";
+  const notes = `${exposureNote}<p class="note">${r.t(how)}</p>`;
+  /** What follows the last line: the total, with the rule above it, and the notes, as wide as the table. */
+  const end = (measure: TableMeasure, column: number, width: number) =>
     1 +
-    row(r.t("Total, each counted once"));
-  const noted = [...notes.matchAll(/<p[^>]*>([\s\S]*?)<\/p>/g)].reduce((sum, [, text]) => sum + NOTE_GAP + NOTE_LINE * wrappedLines(printed(text!), NOTE_CHARS), 0);
-  return MONEY_HEAD + (drawn ? chart * CHART_SCALE + 14 : kinds * BAR + 16) + TABLE_HEAD + rows + noted;
+    measure.row +
+    measure.line * labelLines(r.t("Total, each counted once"), column, measure) +
+    [...notes.matchAll(/<p[^>]*>([\s\S]*?)<\/p>/g)].reduce((sum, [, text]) => sum + SLIDE_NOTE_GAP + SLIDE_NOTE_LINE * textLines(printed(text!), width, SLIDE_NOTE_FONT), 0);
+  const slides: Group[][] = [];
+  let current: Group[] = [];
+  let used = SLIDE_HEAD;
+  let measure = SLIDE_TABLE;
+  let width = SLIDE_SPLIT_WIDTH;
+  const heightOf = (g: Group, i: number) => {
+    const column = labelColumn(parts, measure);
+    return rowHeight(r, parts, g, column, measure) + (i === all.length - 1 ? end(measure, column, width) : 0);
+  };
+  all.forEach((g, i) => {
+    // The last line goes with the total and the notes, so a slide never holds the total alone.
+    if (current.length > 0 && used + heightOf(g, i) > SLIDE_ROOM) {
+      slides.push(current);
+      current = [];
+      used = SLIDE_HEAD;
+      measure = CONTINUED_TABLE;
+      width = SLIDE_FULL_WIDTH;
+    }
+    current.push(g);
+    used += heightOf(g, i);
+  });
+  slides.push(current);
+  return slides.map((group, i) => {
+    const last = i === slides.length - 1;
+    const rows = `${group.map((g) => row(`${r.t(g.label)}${r.ref(valueItemId(g.id))}`, g.counted)).join("")}${last ? totalRow : ""}`;
+    const tableAndNotes = `${table(rows)}${last ? notes : ""}`;
+    const head = `<div class="eyebrow">${r.t(EYEBROW)}</div><h2>${TITLE}${i ? ", continued" : ""}</h2>`;
+    return i === 0 ? `<div class="money">${head}<div class="split"><div>${parts.figure(TALL_CHART, HALF_WIDTH)}</div><div>${tableAndNotes}</div></div></div>` : `<div class="money">${head}${tableAndNotes}</div>`;
+  });
 }
 
 /** What fixing it is worth against what they pay a year, to one decimal place. Null without both. */

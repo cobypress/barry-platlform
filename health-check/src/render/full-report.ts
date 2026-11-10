@@ -12,7 +12,7 @@ import { chartSlot, coverScore, document, documentTitle, effortText, estimateLin
 import { noteSections, referenceMap } from "./references.ts";
 import { scoreLine } from "./executive.ts";
 import { COMPARE_CSS, compareSlide } from "./compare.ts";
-import { MONEY_CSS, moneyPage } from "./money.ts";
+import { MONEY_CSS, moneySlides } from "./money.ts";
 import { CHAPTER_CSS, chapterSlide } from "./chapter.ts";
 import { PROGRESS_CSS, progressPage } from "./progress.ts";
 import { DOCUMENTED, DOCUMENTED_METRIC_IDS, readDocument } from "../domains/configuration/documented.ts";
@@ -873,9 +873,10 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   const progressed = progressPage(r, report);
   if (progressed) mark("Since your last health check");
   if (progressed) add(progressed, "tight");
-  const worth = moneyPage(r, report, "slide");
-  if (worth) mark("What fixing this is worth");
-  if (worth) add(worth, "tight");
+  // Every line named, carrying on to a following slide where one can't hold them (DECISIONS.md 439).
+  const worth = moneySlides(r, report);
+  if (worth.length) mark("What fixing this is worth");
+  for (const slide of worth) add(slide, "tight");
 
   add(`<div class="eyebrow">Scorecard</div><h2>How each area stands</h2>${scoreLine(report) ? `<p class="lede">${r.t(scoreLine(report, true))}</p>` : ""}<div class="chart-wrap" style="max-width:${scoreLine(report) ? 760 : 880}px">${chartSlot(scorecardChart(scorecard(team, scores, domains), scorecardOptions(report)))}</div>`);
 

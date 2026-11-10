@@ -20,7 +20,7 @@ import { EXECUTIVE_MAX_PAGES, executiveHtml, executiveMaxPages, hasBothVoices, i
 import { fullReportHtml, fullReportHtmlAt, slideCounts, threeColumnItemHeight } from "../full-report.ts";
 import { estimateLines, paginateColumns, printed, renderContext } from "../html.ts";
 import { compactMoney } from "../format.ts";
-import { restOf } from "../money.ts";
+import { moneyBasisLines, moneyLabelLines, restOf } from "../money.ts";
 import { launchBrowser, layoutOf } from "../pdf.ts";
 
 // DECISIONS.md 442: a page laid out by estimate is held to measured text. Each
@@ -212,6 +212,59 @@ describe("an estimate never counts a line too few", () => {
     } finally {
       await page.close();
     }
+  });
+
+  test("the money table's label and basis, on the page and on the slides, on labels of every length to sixteen words (DECISIONS.md 438)", async () => {
+    // Each draft set as a line's label, its reference beside it, in the column the page
+    // or the slide gives it there; and every basis the samples print, where it prints.
+    const drafts = windows(16);
+    /** Each draft's lines in the first row of the given table, with the width it was set at, and every basis's. */
+    const measure = async (html: string, which: (page: string) => boolean, index: number) => {
+      const page = await opened(html);
+      try {
+        const at = pagesOf(html).map(which).reduce<number[]>((found, yes, i) => (yes ? [...found, i] : found), [])[index]!;
+        return await page.evaluate(
+          ({ drafts, at }) => {
+            const td = document.querySelectorAll<HTMLElement>(".page")[at]!.querySelector<HTMLElement>("table.grid tbody td")!;
+            const style = getComputedStyle(td);
+            const inner = () => td.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+            const basis = td.querySelector<HTMLElement>(".basis");
+            const ref = td.querySelector<HTMLElement>(".ref")!;
+            const bases = [...document.querySelectorAll<HTMLElement>(".basis")].map((b) => {
+              const cell = b.closest("td")!;
+              const cs = getComputedStyle(cell);
+              return { text: b.textContent ?? "", width: cell.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight), lines: Math.round(b.getBoundingClientRect().height / parseFloat(getComputedStyle(b).lineHeight)) };
+            });
+            const labels = drafts.map((text) => {
+              td.replaceChildren(document.createTextNode(text), ref, ...(basis ? [basis] : []));
+              const height = td.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom) - (basis ? basis.getBoundingClientRect().height + 1 : 0);
+              return { text, width: inner(), lines: Math.round(height / parseFloat(style.lineHeight)) };
+            });
+            return { labels, bases };
+          },
+          { drafts, at },
+        );
+      } finally {
+        await page.close();
+      }
+    };
+    const { input, names } = await sampleOf(SAMPLES[2]![1]);
+    const isMoney = (p: string) => p.includes(`<div class="eyebrow">What it&#39;s worth</div>`);
+    const onPage = await measure(executiveHtml(buildReport(input), names), isMoney, 0);
+    const worst = buildReport(withManyLines(input));
+    const onWorst = await measure(executiveHtml(worst, names), isMoney, 0);
+    const full = fullReportHtml(worst, names);
+    const beside = await measure(full, isMoney, 0);
+    const continued = await measure(full, isMoney, 1);
+    const under = [
+      ...[...onPage.labels, ...onWorst.labels].filter((x) => moneyLabelLines(x.text, x.width, "page") < x.lines).map((x) => `page, ${x.lines} lines at ${x.width}px: ${x.text}`),
+      ...[...beside.labels, ...continued.labels].filter((x) => moneyLabelLines(x.text, x.width, "slide") < x.lines).map((x) => `slide, ${x.lines} lines at ${x.width}px: ${x.text}`),
+      ...[...onPage.bases, ...onWorst.bases].filter((x) => moneyBasisLines(x.text, x.width) < x.lines).map((x) => `basis, ${x.lines} lines at ${x.width}px: ${x.text}`),
+    ];
+    assert.ok(onPage.labels.length === drafts.length && onPage.bases.length >= 7 && continued.labels[0]!.width > 2 * beside.labels[0]!.width, "measured on the page, beside the figure and across a continued slide");
+    // Labels of more than one line, so the test can't pass on one-line labels alone.
+    assert.ok(onPage.labels.some((x) => x.lines >= 2) && beside.labels.some((x) => x.lines >= 3) && onPage.bases.some((x) => x.lines === 2));
+    assert.deepEqual(under, []);
   });
 
   test("the plan's introduction is set a word at a time, so the engine's own is counted on the two lines it takes", async () => {
@@ -520,6 +573,35 @@ describe("the money page fits its page, with a survey or without and a figure fo
     assert.equal(chartOf(roomy), "320");
   });
 
+  test("every module and CPQ without spend name all their lines, and the last row never stands for one that fits its row (DECISIONS.md 438)", async () => {
+    const namedOn = (page: string) => [...page.matchAll(/<span class="basis">/g)].length;
+    const lastRow = (page: string) => /<tr><td>(And \d+ smaller lines?), in the raw notes\./.exec(page)?.[1] ?? null;
+    for (const [name, options] of [SAMPLES[2]!, SAMPLES[3]!]) {
+      const { input, names } = await sampleOf(options);
+      // Without a survey: session 3 named seven and said "And 1 smaller line" with the eighth's room to spare.
+      const report = buildReport(input);
+      const all = report.value.groups.filter((g) => g.kind !== "exposure").sort((a, b) => b.counted.expected - a.counted.expected);
+      assert.equal(all.length, 8, name);
+      const html = executiveHtml(report, names);
+      const page = moneyPageOf(html)!;
+      assert.equal(namedOn(page), 8, name);
+      assert.equal(lastRow(page), null, name);
+      // With a survey, the eighth's basis takes a second line and the page can't hold it.
+      // Its label fits the row, so the row stands for two rather than for it alone.
+      const surveyed = buildReport({ ...input, survey: syntheticSurvey(12) });
+      const crowded = moneyPageOf(executiveHtml(surveyed, names))!;
+      assert.deepEqual([namedOn(crowded), lastRow(crowded)], [6, "And 2 smaller lines"], name);
+      // Where the eighth's label would take more room than the row's own words, the row stands for it alone.
+      const ordered = surveyed.value.groups.filter((g) => g.kind !== "exposure").sort((a, b) => b.counted.expected - a.counted.expected);
+      ordered[7]!.label = draft(16, OPENINGS[1]!).replace(/\.$/, "");
+      const longer = executiveHtml(surveyed, names);
+      assert.deepEqual([namedOn(moneyPageOf(longer)!), lastRow(moneyPageOf(longer)!)], [7, "And 1 smaller line"], name);
+      // Each against its own report's figures, with nothing carried over.
+      assert.deepEqual(await problemsOn(html, [{ page, label: `${name}, no survey` }], report), []);
+      assert.deepEqual(await problemsOn(longer, [{ page: crowded, label: `${name}, a survey` }, { page: moneyPageOf(longer)!, label: `${name}, a survey and a long eighth label` }], surveyed), []);
+    }
+  });
+
   test("with more lines than the page holds, on long labels, it names fewer and adds up the rest", async () => {
     const { input, names } = await sampleOf(SAMPLES[0]![1]);
     const report = buildReport(withManyLines(input));
@@ -548,7 +630,7 @@ describe("the money page fits its page, with a survey or without and a figure fo
     }
   });
 
-  test("the count in its last row is a figure from the data at every cut the page or the slide can make", async () => {
+  test("the count in its last row is a figure from the data at every cut the page can make", async () => {
     // The estimate can name any number of lines from one up, so the count it leaves
     // is held for every cut, not only the slide's or the one this sample makes.
     const { input, names } = await sampleOf(SAMPLES[0]![1]);
@@ -564,13 +646,54 @@ describe("the money page fits its page, with a survey or without and a figure fo
     const money = scopeDataset(report.dataset, [VALUE_TOTAL]);
     const untraced = counts.flatMap((text) => [report.dataset, money].flatMap((set) => checkNumbers(text, set).unmatched.map((u) => `${text} ${u.raw}: ${u.reason}`)));
     assert.deepEqual(untraced, []);
-    // And the full report's slide, which names six and counts the rest, passes the
-    // number check as printed. Only that check: the slide isn't held by measure, and
-    // sixteen-word labels are longer than it was set for.
-    const full = fullReportHtml(report, names);
-    const slide = pagesOf(full).find((p) => p.includes('<div class="money">'))!;
-    assert.match(slide, new RegExp(`And ${n - 6} smaller lines, in the raw notes\\.`));
-    assert.deepEqual((await problemsOn(full, [{ page: slide, label: "the money slide" }], report)).filter((p) => p.includes("number check")), []);
+  });
+});
+
+// DECISIONS.md 439: the full report's money is held to its slide by measure. The
+// full report has no ceiling, so where the table can't fit, it carries on.
+const moneySlidesOf = (html: string): string[] => pagesOf(html).filter((p) => p.includes(`<div class="money"><div class="eyebrow">What it&#39;s worth</div>`));
+
+describe("the full report's money slide fits its slide, carrying on where it must", () => {
+  test("with sixteen-word labels: every line named once, in order, the total once on the last, and every check passing", async () => {
+    const { input, names } = await sampleOf(SAMPLES[0]![1]);
+    const report = buildReport(withManyLines(input));
+    const html = fullReportHtml(report, names);
+    const slides = moneySlidesOf(html);
+    // One after another, the heading repeated and continued, as the full report's other lists carry on.
+    assert.ok(slides.length >= 2, `${slides.length} slides`);
+    const at = pagesOf(html).indexOf(slides[0]!);
+    assert.deepEqual(pagesOf(html).slice(at, at + slides.length), slides);
+    assert.deepEqual(slides.map(titleOf), ["What fixing this is worth", ...slides.slice(1).map(() => "What fixing this is worth, continued")]);
+    const t = renderContext(names, report.value.currency, false).t;
+    const all = report.value.groups.filter((g) => g.kind !== "exposure").sort((a, b) => b.counted.expected - a.counted.expected);
+    assert.ok(all.length >= 15, `${all.length} lines`);
+    const m = (n: number) => compactMoney(n, report.value.currency);
+    const rows = slides.flatMap((slide) => [...slide.matchAll(/<tr><td>(.*?)<span class="ref"[^>]*>[^<]*<\/span><\/td><td class="num">([^<]*)<\/td>/g)].map((x) => [x[1], x[2]]));
+    assert.deepEqual(rows, all.map((g) => [t(g.label), m(g.counted.expected)]));
+    assert.doesNotMatch(slides.join(""), /smaller line/);
+    const { total } = report.value;
+    assert.deepEqual(slides.map((s) => (s.match(/<tr class="total"><td>Total, each counted once<\/td>/g) ?? []).length), [...slides.slice(1).map(() => 0), 1]);
+    assert.ok(slides.at(-1)!.includes(`<td class="num">${m(total.expected)}</td><td class="num">${m(total.low)} to ${m(total.high)}</td>`));
+    // The layout check on each slide, the number check among it, with nothing carried over.
+    assert.deepEqual(await problemsOn(html, slides.map((page, i) => ({ page, label: `money slide ${i + 1}` })), report), []);
+  });
+
+  test("on every sample, with a survey or without and a figure for spend or without", async () => {
+    const problems: string[] = [];
+    const counts: string[] = [];
+    for (const [name, options] of SAMPLES) {
+      const { input, names } = await sampleOf(options);
+      for (const [label, extra] of MONEY_CASES) {
+        const report = buildReport({ ...input, ...extra(input) });
+        const html = fullReportHtml(report, names);
+        const slides = moneySlidesOf(html);
+        counts.push(`${name}, ${label}: ${slides.length}`);
+        problems.push(...(await problemsOn(html, slides.map((page, i) => ({ page, label: `${name}, ${label}, money slide ${i + 1}` })), report)));
+      }
+    }
+    assert.deepEqual(problems, []);
+    // CPQ and every module's eight lines don't fit beside the figure, so they carry on.
+    assert.ok(counts.some((c) => c.endsWith(": 2")) && counts.every((c) => /: [12]$/.test(c)), counts.join("; "));
   });
 });
 
