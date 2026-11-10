@@ -1185,6 +1185,13 @@ export const REPORT_FILES: Record<string, string> = Object.fromEntries(
 
 const METADATA_NS = 'xmlns="http://soap.sforce.com/2006/04/metadata"';
 
+// Trap for the handbook (DECISIONS.md 451 to 454): a marker that must reach
+// handbook.json and nothing else, and a made-up key that must reach nothing. The
+// quotes are &quot;, as a retrieve writes them, so the key only shows once parsed.
+export const HANDBOOK_MARKER = "HB-MARKER-0451";
+export const HANDBOOK_PLANTED = "SYNTHETIC-FAKE-0000-NOT-REAL";
+const HANDBOOK_FORMULA = `AND(Paid__c, CONTAINS(Description, &quot;${HANDBOOK_MARKER}&quot;)) /* api_key = &quot;${HANDBOOK_PLANTED}&quot; */`;
+
 // Trap: most automation has no description or comment, and most custom fields
 // have no help text. One flow, one validation rule and one field are documented.
 export const METADATA_FILES: Record<string, string> = {
@@ -1227,7 +1234,7 @@ export const METADATA_FILES: Record<string, string> = {
   <fields><fullName>Deal_Score__c</fullName><type>Number</type></fields>
   <fields><fullName>Competitor__c</fullName><inlineHelpText>Who else the customer is talking to.</inlineHelpText><type>Text</type></fields>
   <fields><fullName>Amount</fullName><type>Currency</type></fields>
-  <validationRules><fullName>Needs_Competitor</fullName><description>A competitor is needed to report on losses.</description><active>true</active><errorConditionFormula>ISBLANK(Competitor__c)</errorConditionFormula></validationRules>
+  <validationRules><fullName>Needs_Competitor</fullName><description>A competitor is needed to report on losses.</description><active>true</active><errorConditionFormula>ISBLANK(Competitor__c)</errorConditionFormula><errorDisplayField>Competitor__c</errorDisplayField><errorMessage>Name the competitor before you save this deal.</errorMessage></validationRules>
 </CustomObject>`,
   // Trap for the inventory: a busy custom object, with automation on it and an
   // inactive record type and rule that mustn't be counted.
@@ -1239,7 +1246,7 @@ export const METADATA_FILES: Record<string, string> = {
   <recordTypes><fullName>Credit_Note</fullName><active>true</active><label>Credit Note</label></recordTypes>
   <recordTypes><fullName>Old_Format</fullName><active>false</active><label>Old Format</label></recordTypes>
   <validationRules><fullName>Due_Date_Required</fullName><description>Finance can't chase an invoice with no due date.</description><active>true</active><errorConditionFormula>ISBLANK(Due_Date__c)</errorConditionFormula></validationRules>
-  <validationRules><fullName>Old_Check</fullName><active>false</active><errorConditionFormula>Paid__c</errorConditionFormula></validationRules>
+  <validationRules><fullName>Old_Check</fullName><active>false</active><errorConditionFormula>${HANDBOOK_FORMULA}</errorConditionFormula></validationRules>
 </CustomObject>`,
   "workflows/Invoice__c.workflow": `<?xml version="1.0"?><Workflow ${METADATA_NS}>
   <rules><fullName>Notify_Overdue</fullName><active>true</active><description>Tells finance when an invoice passes its due date.</description><actions><name>Alert</name><type>Alert</type></actions></rules>
@@ -1256,6 +1263,35 @@ export const METADATA_FILES: Record<string, string> = {
   <apiVersion>62.0</apiVersion><label>Set Invoice Status</label><processType>AutoLaunchedFlow</processType><status>Active</status>
   <start><object>Invoice__c</object><triggerType>RecordBeforeSave</triggerType></start>
   <assignments><name>Mark_Paid</name></assignments>
+</Flow>`,
+  // Trap for the handbook: a draft record-triggered flow with every kind of path,
+  // a step nothing reaches, and an element of a kind the parser has no case for.
+  // A draft, and no custom field, so no rule's finding moves.
+  "flows/Opportunity_Stage_Review.flow": `<?xml version="1.0"?><Flow ${METADATA_NS}>
+  <apiVersion>62.0</apiVersion><label>Stage Review</label><processType>AutoLaunchedFlow</processType><status>Draft</status>
+  <actionCalls><name>Notify_Owner</name><label>Notify Owner</label><locationX>50</locationX><locationY>900</locationY><actionName>chatterPost</actionName><actionType>chatterPost</actionType></actionCalls>
+  <assignments><name>Old_Step</name><label>Old Step</label><locationX>600</locationX><locationY>100</locationY><assignmentItems><assignToReference>$Record.NextStep</assignToReference><operator>Assign</operator><value><stringValue>Review</stringValue></value></assignmentItems></assignments>
+  <assignments><name>Set_Next_Step</name><label>Set Next Step</label><locationX>50</locationX><locationY>600</locationY><assignmentItems><assignToReference>$Record.NextStep</assignToReference><operator>Assign</operator><value><stringValue>Call</stringValue></value></assignmentItems></assignments>
+  <decisions><name>Check_Size</name><label>Check Size</label><locationX>50</locationX><locationY>300</locationY><defaultConnector><targetReference>Set_Next_Step</targetReference></defaultConnector><defaultConnectorLabel>Small Deal</defaultConnectorLabel>
+    <rules><name>Large</name><conditionLogic>and</conditionLogic><conditions><leftValueReference>$Record.Amount</leftValueReference><operator>GreaterThan</operator><rightValue><numberValue>100000.0</numberValue></rightValue></conditions><connector><targetReference>Each_Line</targetReference></connector><label>Large Deal</label></rules>
+    <rules><name>Medium</name><conditionLogic>and</conditionLogic><conditions><leftValueReference>$Record.Probability</leftValueReference><operator>GreaterThan</operator><rightValue><numberValue>50.0</numberValue></rightValue></conditions><connector><targetReference>Notify_Owner</targetReference></connector><label>Medium Deal</label></rules>
+  </decisions>
+  <loops><name>Each_Line</name><label>Each Line</label><locationX>50</locationX><locationY>400</locationY><collectionReference>Line_Items</collectionReference><iterationOrder>Asc</iterationOrder><nextValueConnector><targetReference>Set_Next_Step</targetReference></nextValueConnector><noMoreValuesConnector><targetReference>Run_Approval</targetReference></noMoreValuesConnector></loops>
+  <promptSteps><name>Summarise_Deal</name><label>Summarise Deal</label><locationX>50</locationX><locationY>800</locationY><connector><targetReference>Notify_Owner</targetReference></connector></promptSteps>
+  <recordCreates><name>Log_Failure</name><label>Log Failure</label><locationX>300</locationX><locationY>200</locationY><inputAssignments><field>Subject</field><value><stringValue>Stage review failed</stringValue></value></inputAssignments><object>Task</object></recordCreates>
+  <recordLookups><name>Get_Account</name><label>Get Account</label><locationX>50</locationX><locationY>200</locationY><connector><targetReference>Check_Size</targetReference></connector><faultConnector><targetReference>Log_Failure</targetReference></faultConnector><filterLogic>and</filterLogic><filters><field>Id</field><operator>EqualTo</operator><value><elementReference>$Record.AccountId</elementReference></value></filters><object>Account</object><queriedFields>Id</queriedFields><queriedFields>Industry</queriedFields></recordLookups>
+  <start><locationX>50</locationX><locationY>0</locationY><connector><targetReference>Get_Account</targetReference></connector><filterLogic>1 AND (2 OR 3)</filterLogic>
+    <filters><field>StageName</field><operator>EqualTo</operator><value><stringValue>Negotiation</stringValue></value></filters>
+    <filters><field>Amount</field><operator>GreaterThan</operator><value><numberValue>5000.0</numberValue></value></filters>
+    <filters><field>IsPrivate</field><operator>EqualTo</operator><value><booleanValue>false</booleanValue></value></filters>
+    <object>Opportunity</object><recordTriggerType>CreateAndUpdate</recordTriggerType><triggerType>RecordAfterSave</triggerType></start>
+  <subflows><name>Run_Approval</name><label>Run Approval</label><locationX>50</locationX><locationY>700</locationY><connector><targetReference>Summarise_Deal</targetReference></connector><flowName>Discount_Approval_Steps</flowName></subflows>
+</Flow>`,
+  // Trap for the handbook: a scheduled flow, also a draft.
+  "flows/Weekly_Renewal_Check.flow": `<?xml version="1.0"?><Flow ${METADATA_NS}>
+  <apiVersion>62.0</apiVersion><label>Weekly Renewal Check</label><processType>AutoLaunchedFlow</processType><status>Draft</status>
+  <recordLookups><name>Find_Renewals</name><label>Find Renewals</label><locationX>50</locationX><locationY>200</locationY><filterLogic>and</filterLogic><filters><field>Type</field><operator>EqualTo</operator><value><stringValue>Renewal</stringValue></value></filters><object>Opportunity</object><queriedFields>Id</queriedFields></recordLookups>
+  <start><locationX>50</locationX><locationY>0</locationY><connector><targetReference>Find_Renewals</targetReference></connector><schedule><frequency>Weekly</frequency><startDate>2026-11-02</startDate><startTime>07:00:00.000Z</startTime></schedule><triggerType>Scheduled</triggerType></start>
 </Flow>`,
   "approvalProcesses/Opportunity.Discount_Approval.approvalProcess": `<?xml version="1.0"?><ApprovalProcess ${METADATA_NS}><active>true</active></ApprovalProcess>`,
 };
