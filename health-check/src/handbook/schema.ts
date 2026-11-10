@@ -1,11 +1,13 @@
 import { z } from "zod";
+import { CHANGES, MAX_QUERIED_OBJECTS } from "../extract/apex-touches.ts";
 
-// The org handbook's data (DECISIONS.md 451 to 455): what each flow and
-// validation rule does, written to handbook.json in the run folder. It's the
-// customer's own configuration, so it goes nowhere but the documents made for
-// them: not to the benchmark, Claude, the worker's store or the console (452).
+// The org handbook's data (DECISIONS.md 451 to 457): what each flow, validation
+// rule, Apex class and trigger does, written to handbook.json in the run folder.
+// It's the customer's own configuration, so it goes nowhere but the documents
+// made for them: not to the benchmark, Claude, the worker's store or the
+// console (452).
 
-export const HANDBOOK_VERSION = 1;
+export const HANDBOOK_VERSION = 2;
 
 // The most a flow, step, entry and text keep (decision 453). Anything past
 // these is cut, marked as cut, and carries its full count.
@@ -13,6 +15,9 @@ export const MAX_STEPS = 500;
 export const MAX_FIELDS = 50;
 export const MAX_CONDITIONS = 50;
 export const MAX_TEXT = 4_000;
+// And the most Apex classes and triggers, by name (decision 456).
+export const MAX_APEX_CLASSES = 5_000;
+export const MAX_APEX_TRIGGERS = 1_000;
 
 const Count = z.number().int().nonnegative();
 const Text = z.string().max(MAX_TEXT);
@@ -104,13 +109,60 @@ export const ValidationRuleCoverage = z.strictObject({
 });
 export type ValidationRuleCoverage = z.infer<typeof ValidationRuleCoverage>;
 
+/**
+ * What a class or trigger touches, read from its code with comments and strings
+ * left out (decision 457). Identifiers only: no code, comment or string is kept.
+ */
+export const HandbookApexTouches = z.strictObject({
+  /** Objects after FROM in its inline queries, sorted. */
+  queries: z.array(z.string().regex(/^[A-Za-z]\w*$/)).max(MAX_QUERIED_OBJECTS),
+  queriesTotal: Count,
+  changes: z.array(z.enum(CHANGES)),
+  /** It builds a query at run time, so what that query reads isn't known. */
+  dynamicQueries: z.boolean(),
+  /** It searches. What a search reads isn't kept. */
+  searches: z.boolean(),
+});
+export type HandbookApexTouches = z.infer<typeof HandbookApexTouches>;
+
+const apexItem = {
+  name: z.string(),
+  apiVersion: z.number(),
+  status: z.string(),
+  /** Null when the code couldn't be read, so it can't be told. */
+  isTest: z.boolean().nullable(),
+  /** Null when the code couldn't be read, or the run didn't read what it touches. */
+  touches: HandbookApexTouches.nullable(),
+};
+
+export const HandbookApexClass = z.strictObject(apexItem);
+export type HandbookApexClass = z.infer<typeof HandbookApexClass>;
+
+/** Trigger events in a fixed order, by the names Apex gives them. */
+export const TRIGGER_EVENTS = ["before insert", "before update", "before delete", "after insert", "after update", "after delete", "after undelete"] as const;
+
+export const HandbookApexTrigger = z.strictObject({
+  ...apexItem,
+  /** TableEnumOrId as Salesforce gives it. */
+  object: z.string().min(1),
+  /** Null when the run didn't read them, never an empty list. */
+  events: z.array(z.enum(TRIGGER_EVENTS)).min(1).nullable(),
+});
+export type HandbookApexTrigger = z.infer<typeof HandbookApexTrigger>;
+
 // "We couldn't read it" and "there's none" must never look alike (decision 454, rule 5).
 const Unavailable = z.strictObject({ status: z.literal("unavailable"), reason: z.string().min(1) });
+
+/** A list cut at `max` by name, with the full count beside it (decision 453). */
+const capped = <T extends z.ZodType>(item: T, max: number) =>
+  z.discriminatedUnion("status", [z.strictObject({ status: z.literal("ok"), items: z.array(item).max(max), total: Count, cut: z.boolean() }), Unavailable]);
 
 export const Handbook = z.strictObject({
   version: z.literal(HANDBOOK_VERSION),
   flows: z.discriminatedUnion("status", [z.strictObject({ status: z.literal("ok"), items: z.array(HandbookFlow) }), Unavailable]),
   // Nor may "no rule on Case" and "we didn't read Case": the list says what it covers.
   validationRules: z.discriminatedUnion("status", [z.strictObject({ status: z.literal("ok"), covers: ValidationRuleCoverage, items: z.array(HandbookValidationRule) }), Unavailable]),
+  apexClasses: capped(HandbookApexClass, MAX_APEX_CLASSES),
+  apexTriggers: capped(HandbookApexTrigger, MAX_APEX_TRIGGERS),
 });
 export type Handbook = z.infer<typeof Handbook>;

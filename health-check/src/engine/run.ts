@@ -9,7 +9,7 @@ import { scoreDomains } from "../domains/scoring.ts";
 import type { DomainModule } from "../domains/types.ts";
 import { orgExtractor } from "../extract/configuration.ts";
 import { FACTS_FILE, factsExtractor, type Facts } from "../extract/facts.ts";
-import { metadataExtractor } from "../extract/automation.ts";
+import { apexExtractor, metadataExtractor, type ApexData } from "../extract/automation.ts";
 import type { MetadataBundle } from "../extract/metadata-parse.ts";
 import { fieldDescribeExtractor } from "../extract/fields.ts";
 import { summariseFacts } from "../facts/summary.ts";
@@ -268,8 +268,8 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
   // Names, booleans and types only, so it's kept as long as the findings (DECISIONS.md 288).
   writeJson(join(dir, FACTS_FILE), extracts.get(factsExtractor.id));
   // The customer's own configuration, for their handbook: kept as long as the
-  // findings, and read by nothing else here (DECISIONS.md 451 to 454).
-  writeJson(join(dir, HANDBOOK_FILE), buildHandbook(extracts.get(metadataExtractor.id) as Sourced<MetadataBundle> | undefined));
+  // findings, and read by nothing else here (DECISIONS.md 451 to 457).
+  writeJson(join(dir, HANDBOOK_FILE), buildHandbook(extracts.get(metadataExtractor.id) as Sourced<MetadataBundle> | undefined, extracts.get(apexExtractor.id) as ApexData | undefined));
   const org = extracts.get(orgExtractor.id) as { status: string; data?: Array<{ IsSandbox: boolean; Name?: string }> };
   run.isSandbox = org.data?.[0]?.IsSandbox ?? false;
   // The company information in Setup is the name the customer goes by, unless one was given.

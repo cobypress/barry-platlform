@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { contributeBenchmark, exportBenchmark } from "../../benchmark/export.ts";
 import type { NarrativeClient, NarrativeRequest } from "../../narrative/client.ts";
 import { runFromRecording, tempDir } from "../../testing/harness.ts";
-import { loadAnswers, loadRecording, ReplayTransport } from "../../testing/replay.ts";
+import { loadAnswers, loadRecording, ReplayTransport, type Recording } from "../../testing/replay.ts";
 import { HANDBOOK_MARKER, HANDBOOK_PLANTED } from "../../testing/synthetic-org.ts";
 import type { RunOutputRecord } from "../../worker/types.ts";
 import { createJobHandler } from "../../worker/worker.ts";
@@ -19,6 +19,39 @@ import { HANDBOOK_FILE } from "../build.ts";
 // folder's other files, the worker's store and the console, Claude, and the
 // benchmark. It must be in handbook.json and nowhere else. The made-up key
 // beside it must be nowhere at all.
+//
+// So with Apex (decisions 456 and 457): an object named only in a class's
+// query reaches handbook.json and nowhere else, and a string and a comment
+// from the same class reach nothing at all, the handbook included.
+
+const APEX_OBJECT = "Zebra_Ledger__c";
+// Each written as a query, so a reading that let either through would keep it.
+const APEX_LITERAL = "ZebraLiteral0457";
+const APEX_COMMENT = "ZebraComment0457";
+/** In handbook.json and nowhere else. */
+const ROUTED = [HANDBOOK_MARKER, APEX_OBJECT];
+/** Nowhere at all. */
+const NOWHERE = [HANDBOOK_PLANTED, APEX_LITERAL, APEX_COMMENT];
+
+/** The recorded synthetic org, with one more class whose body holds all three. */
+function plantedRecording(): Recording {
+  const recording = loadRecording();
+  const classes = recording.exchanges.find((e) => decodeURIComponent(e.key).includes("FROM ApexClass WHERE"))!;
+  const page = JSON.parse(classes.text) as { totalSize: number; records: unknown[] };
+  page.records.push({
+    Id: "01p000000000099AAA",
+    Name: "ZebraLedgerSync",
+    ApiVersion: 62,
+    Status: "Active",
+    LengthWithoutComments: 200,
+    Body: `public class ZebraLedgerSync { // Was [SELECT Id FROM ${APEX_COMMENT}]\n public void sync() { String tag = '[SELECT Id FROM ${APEX_LITERAL}]'; List<SObject> rows = [SELECT Id FROM ${APEX_OBJECT} WHERE Name = :tag]; update rows; } }`,
+  });
+  page.totalSize = page.records.length;
+  classes.text = JSON.stringify(page);
+  return recording;
+}
+
+const holding = (text: string, markers: string[]): string[] => markers.filter((m) => text.includes(m));
 
 /** Every file in a run folder, by its path inside it. */
 function filesIn(dir: string): Map<string, string> {
@@ -46,7 +79,7 @@ describe("the handbook's detail goes nowhere but handbook.json", () => {
         return { stopReason: "end_turn", model: request.model, text: JSON.stringify({ paragraphs: [{ text: "We looked closely at this area.", sources: [] }] }) };
       },
     };
-    deps = baseDeps({ dataTransport: new ReplayTransport(loadRecording()), narrative });
+    deps = baseDeps({ dataTransport: new ReplayTransport(plantedRecording()), narrative });
     // Exactly what the Postgres store would be handed.
     const save = deps.store.saveRunOutput.bind(deps.store);
     deps.store.saveRunOutput = async (runId, output) => {
@@ -58,9 +91,12 @@ describe("the handbook's detail goes nowhere but handbook.json", () => {
     assert.equal((await createJobHandler(deps)({ kind: "run", runId: RUN_ID }, { final: true })).outcome, "done");
   });
 
-  test("the marker reaches handbook.json", () => {
+  test("the marker and the object named only in an Apex query reach handbook.json", () => {
     const files = filesIn(join(deps.runsDir, RUN_ID));
-    assert.ok(files.get(HANDBOOK_FILE)!.includes(HANDBOOK_MARKER));
+    assert.deepEqual(holding(files.get(HANDBOOK_FILE)!, ROUTED), ROUTED);
+    // As what the planted class queries, not by chance.
+    const classes = (JSON.parse(files.get(HANDBOOK_FILE)!) as { apexClasses: { items: Array<{ name: string; touches: { queries: string[] } | null }> } }).apexClasses.items;
+    assert.deepEqual(classes.find((c) => c.name === "ZebraLedgerSync")?.touches?.queries, [APEX_OBJECT]);
   });
 
   test("and no other file in the run folder", () => {
@@ -68,43 +104,44 @@ describe("the handbook's detail goes nowhere but handbook.json", () => {
     const outputs = [...files.keys()].filter(isOutput);
     // The files a worker's run leaves, so a new one can't slip past unchecked.
     for (const file of ["findings.json", "metrics.json", "scores.json", "manual-steps.json", "action-lists.json", "raw-notes.md", "report-sections.json", "facts.json", "run.json", "pseudonym-map.json"]) assert.ok(outputs.includes(file), file);
-    assert.deepEqual(outputs.filter((f) => files.get(f)!.includes(HANDBOOK_MARKER)), []);
+    assert.deepEqual(outputs.filter((f) => holding(files.get(f)!, ROUTED).length > 0), []);
   });
 
-  test("and the made-up key in the same formula reaches no file at all, checkpoints included", () => {
+  test("and the made-up key in the same formula, and the Apex body's string and comment, reach no file at all, checkpoints included", () => {
     const files = filesIn(join(deps.runsDir, RUN_ID));
-    assert.deepEqual([...files.keys()].filter((f) => files.get(f)!.includes(HANDBOOK_PLANTED)), []);
+    assert.ok(files.has(HANDBOOK_FILE) && files.has("checkpoints/apex.json"));
+    assert.deepEqual([...files.keys()].filter((f) => holding(files.get(f)!, NOWHERE).length > 0), []);
   });
 
   test("nothing of it is handed to the worker's store or the console", () => {
     assert.equal(saved.length, 1);
     assert.ok(saved[0]!.findings.length > 0 && saved[0]!.sections.length > 0, "the results were saved");
-    assert.doesNotMatch(JSON.stringify(saved), new RegExp(HANDBOOK_MARKER));
+    assert.deepEqual(holding(JSON.stringify(saved), [...ROUTED, ...NOWHERE]), []);
     const store = { runs: [...deps.store.runs.values()], writes: deps.store.writes, documents: [...deps.store.documents.values()], benchmark: deps.store.benchmarkRows, scans: [...deps.store.scanResults.values()], pulses: [...deps.store.pulseResults.values()], microsites: [...deps.store.microsites.values()] };
-    assert.doesNotMatch(JSON.stringify(store), new RegExp(HANDBOOK_MARKER));
+    assert.deepEqual(holding(JSON.stringify(store), [...ROUTED, ...NOWHERE]), []);
     assert.doesNotMatch(JSON.stringify(store), /"steps":\[\{"kind"/, "no handbook step either");
   });
 
   test("nothing of it is sent to Claude", () => {
     assert.ok(asked.length > 10, `${asked.length} prompts`);
-    assert.doesNotMatch(JSON.stringify(asked), new RegExp(HANDBOOK_MARKER));
+    assert.deepEqual(holding(JSON.stringify(asked), [...ROUTED, ...NOWHERE]), []);
   });
 
   test("a free scan, which reads the same metadata, hands none of it over either", async () => {
-    const scan = baseDeps({ dataTransport: new ReplayTransport(loadRecording()) });
+    const scan = baseDeps({ dataTransport: new ReplayTransport(plantedRecording()) });
     scan.store.addRun(runInput({ run: consoleRun({ scope: "essentials", product: "scan" }) }));
     await scan.tokens.save(syntheticConnection());
     await createJobHandler(scan)({ kind: "run", runId: RUN_ID }, { final: true });
     assert.ok(scan.store.scanResults.get(RUN_ID), "the teaser is saved");
     assert.ok(scan.store.runs.get(RUN_ID)!.run.steps.some((s) => s.id === "metadata"), "the scan read the metadata");
-    assert.doesNotMatch(JSON.stringify({ runs: [...scan.store.runs.values()], scans: [...scan.store.scanResults.values()], writes: scan.store.writes }), new RegExp(HANDBOOK_MARKER));
+    assert.deepEqual(holding(JSON.stringify({ runs: [...scan.store.runs.values()], scans: [...scan.store.scanResults.values()], writes: scan.store.writes }), [...ROUTED, ...NOWHERE]), []);
   });
 });
 
 describe("the benchmark", () => {
   let source: string;
   before(async () => {
-    source = (await runFromRecording({ answers: loadAnswers() })).dir;
+    source = (await runFromRecording({ answers: loadAnswers(), transport: new ReplayTransport(plantedRecording()) })).dir;
   });
   const copy = (): string => {
     const dir = join(tempDir(), "run");
@@ -113,22 +150,22 @@ describe("the benchmark", () => {
   };
   const options = (runDir: string) => ({ runDir, industry: "technology", headcount: "51-200", consent: "Synthetic Person agreed by email", now: new Date("2026-11-03T10:00:00.000Z") });
 
-  test("the run it's made from has the marker in its handbook", () => assert.ok(readFileSync(join(source, HANDBOOK_FILE), "utf8").includes(HANDBOOK_MARKER)));
+  test("the run it's made from has the markers in its handbook", () => assert.deepEqual(holding(readFileSync(join(source, HANDBOOK_FILE), "utf8"), ROUTED), ROUTED));
 
   test("hc benchmark's store and consent record hold none of it", () => {
     const run = copy();
     const store = tempDir();
     const result = exportBenchmark({ ...options(run), storeDir: store });
     assert.ok(result.rows.length > 0);
-    for (const [path, text] of [...filesIn(store), ...[...filesIn(run)].filter(([f]) => isOutput(f))]) assert.ok(!text.includes(HANDBOOK_MARKER), path);
-    assert.doesNotMatch(JSON.stringify(result), new RegExp(HANDBOOK_MARKER));
+    for (const [path, text] of [...filesIn(store), ...[...filesIn(run)].filter(([f]) => isOutput(f))]) assert.deepEqual(holding(text, [...ROUTED, ...NOWHERE]), [], path);
+    assert.deepEqual(holding(JSON.stringify(result), [...ROUTED, ...NOWHERE]), []);
   });
 
   test("the worker's contribution to the console's benchmark table holds none of it", async () => {
     const written: unknown[] = [];
     const result = await contributeBenchmark(options(copy()), async (rows) => void written.push(...rows));
     assert.ok(written.length > 0);
-    assert.doesNotMatch(JSON.stringify([written, result]), new RegExp(HANDBOOK_MARKER));
+    assert.deepEqual(holding(JSON.stringify([written, result]), [...ROUTED, ...NOWHERE]), []);
   });
 });
 
