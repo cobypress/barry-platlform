@@ -42,10 +42,11 @@ const IN_FULL: Record<Exclude<ValueKind, "exposure">, string> = {
 // summary's page (DECISIONS.md 435). Measured in Chromium at A4 and 13.5px:
 // 986.45px between the paddings, 170.41px from the eyebrow to the chart, the
 // chart drawn 800 wide across 658px with 14px under it, the table's head 31.25px,
-// and a note 10px above and 17.2px a line. Each is counted at or a little over
-// what the browser sets, so the page fills its room before adding lines up
-// (448). A note line is counted at 106 characters: the most that never counted
-// a line too few on the prose was 110.
+// and a note 10px above and 17.2px a line. The room is counted a little under
+// what the browser sets and each part at or a little over, so the page fills its
+// room before adding lines up and never runs into the margin (448). A note line
+// is counted at 106 characters: the most that never counted a line too few on
+// the prose was 110.
 const MONEY_ROOM = 986.4;
 const MONEY_HEAD = 170.5;
 const CHART_SCALE = 658 / 800;
