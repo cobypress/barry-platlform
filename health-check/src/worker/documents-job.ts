@@ -184,19 +184,34 @@ async function benchmarkFor(dir: string, deps: WorkerDeps, log: (line: string) =
 
 /** How many held figures the error lists by name. The rest are counted. */
 const HELD_LISTED = 10;
+/** A reason can carry the checker's own error message, so each is cut short. */
+const HELD_REASON_MAX = 200;
+
+/** "Held back: 2 figures on 2 pages can't be traced to the data." */
+function heldBackCount(held: HeldFigure[]): string {
+  const pages = new Set(held.map((h) => `${h.document}, page ${h.page}`)).size;
+  return `Held back: ${held.length} ${held.length === 1 ? "figure" : "figures"} on ${pages} ${pages === 1 ? "page" : "pages"} can't be traced to the data.`;
+}
 
 /**
- * Why the documents were held back, for the console's Release tab and the log:
- * each document, page, figure and reason, so a person knows which section to
- * edit (DECISIONS.md 430). One line, since the log takes it as it is.
+ * Why the documents were held back, for the console's Release tab only: each
+ * document, page, figure and reason, so a person knows which section to edit
+ * (DECISIONS.md 430). Values that aren't plain figures are already masked
+ * (heldFigures). One line.
  */
 export function heldBackReason(held: HeldFigure[]): string {
-  const pages = new Set(held.map((h) => `${h.document}, page ${h.page}`)).size;
   const sentence = (text: string): string => (/[.!?]$/.test(text) ? text : `${text}.`);
-  const listed = held.slice(0, HELD_LISTED).map((h) => sentence(describeHeld(h)));
+  const listed = held.slice(0, HELD_LISTED).map((h) => sentence(describeHeld({ ...h, reason: safeReason(new Error(h.reason)).slice(0, HELD_REASON_MAX) })));
   const more = held.length > HELD_LISTED ? [`And ${held.length - HELD_LISTED} more.`] : [];
-  const count = `${held.length} ${held.length === 1 ? "figure" : "figures"} on ${pages} ${pages === 1 ? "page" : "pages"}`;
-  return [`Held back: ${count} can't be traced to the data.`, ...listed, ...more, "Edit the wording in those sections, approve them again, and make the documents again."].join(" ").replace(/\s+/g, " ");
+  return [heldBackCount(held), ...listed, ...more, "Edit the wording in those sections, approve them again, and make the documents again."].join(" ").replace(/\s+/g, " ");
+}
+
+/**
+ * The same, for the log and the job's outcome, which the queue logs too: counts
+ * only, since even a figure is the customer's.
+ */
+export function heldBackSummary(held: HeldFigure[]): string {
+  return `${heldBackCount(held)} See the run's Release tab.`;
 }
 
 /**
@@ -227,17 +242,19 @@ async function documentsLocked(runId: string, deps: WorkerDeps, attempt: Attempt
   if (input.state !== "queued" && input.state !== "making") return { outcome: "skipped", detail: `The documents for ${runId} weren't asked for` };
 
   // Brings the folder's sharing in line with the readers. A share job that found the run held by this one may have given up, so this runs however the make ends.
-  const share = async (): Promise<void> => {
+  const share = async (options: { grant?: boolean } = {}): Promise<void> => {
     try {
-      await syncShares(runId, { store: deps.store, sharing: deps.sharing ?? null, now: () => new Date(now()), log });
+      await syncShares(runId, { store: deps.store, sharing: deps.sharing ?? null, now: () => new Date(now()), log }, options);
     } catch (err) {
       log(`The sharing for ${runId} couldn't be brought up to date: ${safeReason(err)}`);
     }
   };
-  const fail = async (reason: string): Promise<JobOutcome> => {
+  // A failed make only takes access away: the folder still holds the last make, which a new reader was never given.
+  // `detail` is what the log and the queue are told, when it mustn't be the whole reason the console shows.
+  const fail = async (reason: string, detail = reason): Promise<JobOutcome> => {
     await deps.store.failDocuments(runId, reason, now());
-    await share();
-    return { outcome: "failed", detail: reason };
+    await share({ grant: false });
+    return { outcome: "failed", detail };
   };
   if (!deps.drive) return fail("Google Drive isn't set up on the worker. Set HC_DRIVE_SA_EMAIL, HC_DRIVE_SA_KEY and HC_DRIVE_FOLDER_ID, then make the documents again.");
   // The folder is the worker's own, named after the run, never a path from the database.
@@ -254,9 +271,9 @@ async function documentsLocked(runId: string, deps: WorkerDeps, attempt: Attempt
     // A figure we can't trace stops everything before Drive: nothing uploaded, shared anew, published or contributed.
     // Not thrown, so the queue doesn't retry: the same wording would fail the same way.
     if (printed.held.length > 0) {
-      const reason = heldBackReason(printed.held);
-      log(`Run ${runId}'s documents weren't uploaded. ${reason}`);
-      return fail(reason);
+      const summary = heldBackSummary(printed.held);
+      log(`Run ${runId}'s documents weren't uploaded. ${summary}`);
+      return fail(heldBackReason(printed.held), summary);
     }
     const folder = await folderFor(deps.drive, clientName, input.driveFolderId);
     const nameOf = (output: keyof typeof FILES): string => `${clientName} - ${FILES[output].title}.${FILES[output].ext}`;

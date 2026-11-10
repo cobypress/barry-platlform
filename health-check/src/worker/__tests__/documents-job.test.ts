@@ -4,14 +4,14 @@ import { generateKeyPairSync } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { buildReport, currentBody, type ReportOutputKey } from "../../narrative/sections.ts";
-import { approvedReport, heldFigures, layoutWarnings, renderReleased, type ApprovedRun, type DocumentKey, type HeldFigure } from "../../render/render-released.ts";
+import { approvedReport, heldFigures, isPlainFigure, layoutWarnings, renderReleased, type ApprovedRun, type DocumentKey, type HeldFigure } from "../../render/render-released.ts";
 import { loadRun, SURVEY_FILE } from "../../render/render-run.ts";
 import { withoutComments } from "../../survey/questions.ts";
 import { syntheticSurvey } from "../../testing/survey.ts";
 import type { ReportSection, SectionVersion } from "../../schemas/index.ts";
 import { runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers } from "../../testing/replay.ts";
-import { clientNameOf, folderFor, heldBackReason, INTERNAL_FOLDER, laterSurveyAnswers, processDocumentsJob } from "../documents-job.ts";
+import { clientNameOf, folderFor, heldBackReason, heldBackSummary, INTERNAL_FOLDER, laterSurveyAnswers, processDocumentsJob } from "../documents-job.ts";
 import { DriveError, GoogleDrive, type DocumentDrive, type DriveItem } from "../drive.ts";
 import type { DocumentsJobInput } from "../types.ts";
 import { baseDeps, consoleRun, INTAKE, RUN_ID, temp } from "./helpers.ts";
@@ -264,11 +264,12 @@ describe("a documents job", () => {
       held: [{ document: "The full health check", page: 12, figure: "£1.99m", reason: "not in the data" }],
       microsite: { ok: true as const, pages: { pages: [{ slug: "overview", title: "Overview", html: "<p>Synthetic.</p>" }] } },
     });
-    // A reader taken off the list still loses access, as on any failure.
-    deps.store.readers.set(RUN_ID, []);
+    // A reader taken off the list still loses access, as on any failure, and a reader added since isn't given the last make's folder.
+    deps.store.readers.set(RUN_ID, ["new@customer.example.com"]);
     deps.store.shares = [{ runId: RUN_ID, email: "gone@customer.example.com", folderId: folder, permissionId: "perm-0001", state: "shared", sharedAt: "2026-11-01T09:00:00.000Z", removedAt: null, removedWhy: null, error: null, updatedAt: "2026-11-01T09:00:00.000Z" }];
     const taken: string[] = [];
-    deps.sharing = { share: async () => "perm-0002", findReader: async () => null, unshare: async (_f, id) => void taken.push(id) };
+    const given: string[] = [];
+    deps.sharing = { share: async (_f, email) => (given.push(email), "perm-0002"), findReader: async () => null, unshare: async (_f, id) => void taken.push(id) };
     // Not the queue's last try, and still no throw: the same wording would fail again.
     const result = await processDocumentsJob(RUN_ID, deps, { final: false });
     assert.equal(result.outcome, "failed");
@@ -280,10 +281,34 @@ describe("a documents job", () => {
     assert.equal(doc.input.state, "failed");
     assert.ok(!doc.made, "no documents recorded as made");
     for (const part of ["The full health check", "page 12", "£1.99m", "not in the data"]) assert.ok(doc.error!.includes(part), doc.error!);
-    assert.equal(result.detail, doc.error);
     assert.deepEqual(taken, ["perm-0001"]);
     assert.equal(deps.store.shares[0]!.state, "removed");
-    assert.ok(deps.lines.some((l) => !l.includes("\n") && l.includes("weren't uploaded") && l.includes("page 12: £1.99m: not in the data")), deps.lines.join("\n"));
+    assert.deepEqual(given, [], "nobody new is given the folder");
+    // The log and the queue get counts only; the figure stays in the error the console shows.
+    assert.equal(result.detail, "Held back: 1 figure on 1 page can't be traced to the data. See the run's Release tab.");
+    assert.ok(deps.lines.some((l) => l.includes("weren't uploaded") && l.includes(result.detail!)), deps.lines.join("\n"));
+    for (const line of [...deps.lines, result.detail!]) assert.ok(!line.includes("£1.99m") && !line.includes("not in the data"), line);
+  });
+
+  test("a held value that isn't a plain figure is masked everywhere, and logged nowhere", async () => {
+    const values = ["001000000000001AAA", "jo@example.com", "https://example.my.salesforce.com/001000000000001"];
+    const deps = setup();
+    deps.renderReleased = async (dir, approved, out) => {
+      const made = await fakeRender(dir, approved, out);
+      const executive = { pages: 6, passed: false, problems: values.map((v, i) => ({ page: i + 2, check: "number check", detail: `${v}: this id isn't in the data` })) };
+      const full = { pages: 40, passed: false, problems: [{ page: 12, check: "number check", detail: "£1.99m: not in the data" }] };
+      return { ...made, warnings: layoutWarnings({ executive, full }), held: heldFigures({ executive, full }) };
+    };
+    const result = await processDocumentsJob(RUN_ID, deps, { final: true });
+    assert.equal(result.outcome, "failed");
+    const error = deps.store.documents.get(RUN_ID)!.error!;
+    assert.match(error, /^Held back: 4 figures on 4 pages /);
+    assert.equal(error.match(/an identifier: this id isn't in the data/g)?.length, 3, error);
+    assert.ok(error.includes("The full health check, page 12: £1.99m: not in the data"), error);
+    for (const text of [error, result.detail!, ...deps.lines]) {
+      for (const v of [...values, "001000000000001", "example.com"]) assert.ok(!text.includes(v), `${v} in ${text}`);
+    }
+    for (const text of [result.detail!, ...deps.lines]) assert.ok(!text.includes("£1.99m"), text);
   });
 
   test("a layout problem that isn't a number check still uploads, with the warning", async () => {
@@ -353,6 +378,14 @@ describe("the released documents", () => {
     assert.deepEqual(heldFigures({ executive: { pages: 6, passed: true, problems: [] }, full: { pages: 40, passed: false, problems: [{ page: 3, check: "overflow", detail: "x" }] } }), []);
   });
 
+  test("only a plain figure is repeated; an id, an email or a web address is masked", () => {
+    for (const raw of ["£1.99m", "31.4", "2,423,000", "43%", "10.32x", "90 days", "(whole text)", "-12%", "1.5 percentage points", "12-15", "31 March 2026", "half", "0.5", "£250k"]) assert.ok(isPlainFigure(raw), raw);
+    for (const raw of ["001000000000001AAA", "001000000000001", "jo@example.com", "f-0001", "https://example.my.salesforce.com/001000000000001", "www.example.com", "hc-2026-11-01-0000000a", "Q3", "1.2.3", "May", "Ada 12", "1234567890"]) assert.ok(!isPlainFigure(raw), raw);
+    const held = heldFigures({ executive: { pages: 6, passed: false, problems: [{ page: 3, check: "number check", detail: "001000000000001AAA: this id isn't in the data" }] }, full: { pages: 40, passed: true, problems: [] } });
+    assert.deepEqual(held, [{ document: "The executive summary", page: 3, figure: "an identifier", reason: "this id isn't in the data", masked: true }]);
+    assert.deepEqual(layoutWarnings({ executive: { pages: 6, passed: false, problems: [{ page: 3, check: "number check", detail: "jo@example.com: this id isn't in the data" }] }, full: { pages: 40, passed: true, problems: [] } }), ["The executive summary, page 3: number check: an identifier: this id isn't in the data"]);
+  });
+
   test("the reason the documents were held back names each figure, ten at most", () => {
     const one: HeldFigure = { document: "The full health check", page: 12, figure: "£1.99m", reason: "not in the data" };
     assert.equal(
@@ -366,6 +399,10 @@ describe("the released documents", () => {
     assert.match(reason, /£10m: not in the data\. And 3 more\. Edit the wording/);
     assert.doesNotMatch(reason, /£11m/);
     assert.doesNotMatch(heldBackReason([{ ...one, reason: "it\nbroke." }]), /\n|\.\./, "one line, one full stop");
+    // The checker's own error message is cut short.
+    const long = heldBackReason([{ document: "The full health check", page: 12, figure: "(whole text)", reason: `The number check failed to run: ${"x".repeat(500)}` }]);
+    assert.ok(long.includes(`The full health check, page 12: (whole text): The number check failed to run: ${"x".repeat(200 - 32)}. Edit`), long);
+    assert.equal(heldBackSummary([one, one]), "Held back: 2 figures on 1 page can't be traced to the data. See the run's Release tab.");
   });
 });
 

@@ -47,8 +47,12 @@ export type ReleasedDocuments = {
   caseStudy?: string;
 };
 
-/** A figure on a printed page that doesn't trace to the run's data. */
-export type HeldFigure = { document: string; page: number; figure: string; reason: string };
+/**
+ * A figure on a printed page that doesn't trace to the run's data. `masked`
+ * when what the number check flagged wasn't a plain figure, so `figure` says
+ * "an identifier" in its place.
+ */
+export type HeldFigure = { document: string; page: number; figure: string; reason: string; masked?: true };
 
 const DOCUMENT_NAMES = { executive: "The executive summary", full: "The full health check", ceo: "The one page summary" } as const;
 
@@ -56,6 +60,33 @@ type Layouts = { executive: LayoutReport; full: LayoutReport; ceo?: LayoutReport
 
 /** The check `checkLayout` names a figure the number check couldn't trace. */
 const NUMBER_CHECK = "number check";
+
+const FIGURE_NUMBER = String.raw`[-+\u2212]?[£$€]?[-\u2212]?(?:[1-9]\d{0,2}(?:,\d{3})+|[1-9]\d{0,8}|0)(?:\.\d+)?(?:k|mn|m|bn|b|x|%|st|nd|rd|th)?`;
+const FIGURE_WORDS = String.raw`a|an|in|of|and|to|per|cent|percent|percentage|points?|pts?|ppts?|pp|bps|basis|times|fold|gbp|usd|eur|pounds?|sterling|dollars?|euros?|hundreds?|thousands?|millions?|billions?|trillions?|dozens|tens|scores|half|thirds?|quarters?|fifths?|tenths?|days?|weeks?|months?|years?|hours?|minutes?`;
+const MONTHS = String.raw`jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?`;
+
+/**
+ * A figure as the report prints it: numbers (a currency sign, commas, a decimal
+ * point, k, m, bn, %, x) joined by spaces or hyphens to a short list of unit and
+ * scale words, or a date with a month in it. Anything else the number check
+ * flagged (a record id, an email, a web address) might be a CRM record, and
+ * rule 7 keeps those in the worker, so it isn't repeated to the console or the
+ * log. A number with a leading zero, or more than nine digits without commas,
+ * reads as an id too.
+ */
+const PLAIN_FIGURE = new RegExp(String.raw`^(?:${FIGURE_NUMBER}(?:[-\u2013]${FIGURE_NUMBER})?|${FIGURE_WORDS}|${MONTHS})(?:[ -](?:${FIGURE_NUMBER}|${FIGURE_WORDS}|${MONTHS}))*$`, "i");
+const MONTH_WORD = new RegExp(String.raw`(?:^|[ -])(?:${MONTHS})(?=$|[ -])`, "i");
+
+/** Whether a flagged value may be repeated. A month alone could be someone's name, so a date needs its number. */
+export function isPlainFigure(raw: string): boolean {
+  if (raw === "(whole text)") return true;
+  return PLAIN_FIGURE.test(raw) && (/\d/.test(raw) || !MONTH_WORD.test(raw));
+}
+
+/** The flagged value, or "an identifier" in its place when it isn't a plain figure. */
+function shownFigure(raw: string): { figure: string; masked?: true } {
+  return isPlainFigure(raw) ? { figure: raw } : { figure: "an identifier", masked: true };
+}
 
 function problemsOf(layout: Layouts): Array<{ document: string; problem: LayoutProblem }> {
   return (Object.keys(DOCUMENT_NAMES) as Array<keyof typeof DOCUMENT_NAMES>).flatMap((doc) => (layout[doc]?.problems ?? []).map((problem) => ({ document: DOCUMENT_NAMES[doc], problem })));
@@ -71,20 +102,30 @@ const where = (document: string, page: number): string => (page === 0 ? document
  * person needs both to know what to fix.
  */
 export function layoutWarnings(layout: Layouts): string[] {
-  return problemsOf(layout).map(({ document, problem: p }) => `${where(document, p.page)}: ${p.check}${p.check === NUMBER_CHECK ? `: ${p.detail}` : ""}`);
+  return problemsOf(layout).map(({ document, problem: p }) => {
+    if (p.check !== NUMBER_CHECK) return `${where(document, p.page)}: ${p.check}`;
+    const { figure, reason } = splitDetail(p.detail);
+    return `${where(document, p.page)}: ${p.check}: ${shownFigure(figure).figure}${reason ? `: ${reason}` : ""}`;
+  });
+}
+
+/** A number check's detail is "<figure>: <reason>" (layout.ts), split at the first ": ", since a reason can hold one too. */
+function splitDetail(detail: string): { figure: string; reason: string } {
+  const at = detail.indexOf(": ");
+  return at < 0 ? { figure: detail, reason: "" } : { figure: detail.slice(0, at), reason: detail.slice(at + 2) };
 }
 
 /**
- * The figures that hold the documents back. The detail is "<figure>: <reason>"
- * (layout.ts), split at the first ": ", since a reason can hold one too. A check
- * that failed to run counts, with "(whole text)" as its figure.
+ * The figures that hold the documents back, with any value that isn't a plain
+ * figure masked. A check that failed to run counts, with "(whole text)" as its
+ * figure.
  */
 export function heldFigures(layout: Layouts): HeldFigure[] {
   return problemsOf(layout)
     .filter(({ problem }) => problem.check === NUMBER_CHECK)
     .map(({ document, problem }) => {
-      const at = problem.detail.indexOf(": ");
-      return at < 0 ? { document, page: problem.page, figure: problem.detail, reason: "" } : { document, page: problem.page, figure: problem.detail.slice(0, at), reason: problem.detail.slice(at + 2) };
+      const { figure, reason } = splitDetail(problem.detail);
+      return { document, page: problem.page, ...shownFigure(figure), reason };
     });
 }
 
