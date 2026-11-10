@@ -17,7 +17,7 @@ import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
 import { syntheticSurvey } from "../../testing/survey.ts";
 import { EXECUTIVE_PAGES } from "../render-run.ts";
 import { EXECUTIVE_MAX_PAGES, executiveHtml, executiveMaxPages, hasBothVoices, introLines, planIntroHeight, RECHECK_EXECUTIVE_MAX_PAGES } from "../executive.ts";
-import { fullReportHtml, fullReportHtmlAt, slideCounts, threeColumnItemHeight } from "../full-report.ts";
+import { deckRangeFor, fullReportHtml, fullReportHtmlAt, slideCounts, threeColumnItemHeight } from "../full-report.ts";
 import { estimateLines, paginateColumns, printed, renderContext } from "../html.ts";
 import { compactMoney } from "../format.ts";
 import { moneyBasisLines, moneyLabelLines, moneyPageColumn, restOf } from "../money.ts";
@@ -799,7 +799,7 @@ describe("the full report's money fits its slides, two at most", () => {
     assert.deepEqual(await problemsOn(html, slides.map((page, i) => ({ page, label: `money slide ${i + 1}` })), report), []);
   });
 
-  test("with 8, 16 and 40 lines more of sixteen words: two slides, every line named where they hold them and the rest added up where they don't, every check passing", async () => {
+  test("with 8, 16 and 40 lines more of sixteen words: two slides at most, every line named where they hold them and the rest added up where they don't, every check passing", async () => {
     const { input, names } = await sampleOf(SAMPLES[0]![1]);
     const problems: string[] = [];
     const shapes: string[] = [];
@@ -817,7 +817,8 @@ describe("the full report's money fits its slides, two at most", () => {
     assert.deepEqual(problems, []);
     // The adversary's case: eight long lines more overflowed the continued slide when its notes printed larger than counted.
     assert.ok(shapes.slice(0, 2).every((x) => x === "8: 2 slides, 0 added up"), shapes.join("; "));
-    assert.ok(shapes.slice(2).every((x) => /: 2 slides, [1-9]\d* added up$/.test(x)), shapes.join("; "));
+    // Past what two hold, the rest added up; on one slide where the deck is at its ceiling (the test below).
+    assert.ok(shapes.slice(2).every((x) => /: [12] slides, [1-9]\d* added up$/.test(x)) && shapes[4]!.startsWith("40: 2 slides"), shapes.join("; "));
   });
 
   test("on every sample with 0, 1, 2 and 9 lines more, with a survey or without and a figure for spend or without", async () => {
@@ -906,6 +907,29 @@ describe("the full report's money fits its slides, two at most", () => {
       assert.deepEqual(gaps.filter((x) => x.gap > 1), []);
     } finally {
       await page.close();
+    }
+  });
+
+  test("with a survey, interviews and 40 lines more, the deck keeps the density step it had with one money slide", async () => {
+    // At 589049f, before the second slide, Sales Cloud built at step 8 with 120 slides and
+    // Sales and Service Cloud at step 9 with 130, each at its ceiling. A second money
+    // slide took them a step denser, the second to the step that gives up the area
+    // chapters; so where it's the second slide that takes the deck past its ceiling,
+    // the money adds the rest up on one (DECISIONS.md 439).
+    for (const [[name, options], step, slides] of [[SAMPLES[0]!, 8, 120], [SAMPLES[1]!, 9, 130]] as const) {
+      const { input, names } = await sampleOf(options);
+      const report = buildReport({ ...withMoneyLines(input, 40, 16, (i) => 900 + 470 * i), survey: syntheticSurvey(12) });
+      const counts = slideCounts(report, names);
+      const { max } = deckRangeFor(report.input.run);
+      assert.equal(max, slides, name);
+      assert.deepEqual([counts.findIndex((c) => c <= max), counts.find((c) => c <= max)], [step, slides], `${name}: ${counts.join(", ")}`);
+      const html = fullReportHtml(report, names);
+      assert.equal(pagesOf(html).length, slides, name);
+      const money = moneySlidesOf(html);
+      assert.equal(money.length, 1, name);
+      assert.match(money[0]!, /And \d+ smaller lines, in the raw notes\./);
+      assert.deepEqual(slidesWrong(html, report, names), [], name);
+      assert.deepEqual(await problemsOn(html, [{ page: money[0]!, label: name }], report), []);
     }
   });
 

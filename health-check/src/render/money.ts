@@ -259,23 +259,26 @@ export function moneyPageColumn(r: Render, report: BuiltReport): number {
 
 /**
  * How the full report sets its money (DECISIONS.md 439): `chart` beside the
- * table, `first` lines on the first slide, and where there's a continued slide,
- * `named` lines on it and the rest added up in its last row.
+ * table, `first` lines on the first slide, the rest added up in its last row if
+ * any are left; and where there's a continued slide, `continued` lines on it,
+ * the rest added up in its last row instead.
  */
-type SlidePlan = { chart: number; first: number; named: number };
+type SlidePlan = { chart: number; first: number; continued: number | null };
 
-function slidePlan(r: Render, parts: Parts, notes: string): SlidePlan {
+function slidePlan(r: Render, parts: Parts, notes: string, most: 1 | 2): SlidePlan {
   const { all } = parts;
   const n = all.length;
   /** The notes across the slide's full width. */
   const noted = [...notes.matchAll(/<p[^>]*>([\s\S]*?)<\/p>/g)].reduce((sum, [, text]) => sum + SLIDE_NOTE_GAP + SLIDE_NOTE_LINE * textLines(printed(text!), SLIDE_FULL_WIDTH, SLIDE_NOTE_FONT), 0);
   /** The figure's column: the figure, its range and the chart `chart` high, or the bars. */
   const figure = (chart: number) => SLIDE_FIGURE + SLIDE_RANGE_LINE * textLines(printed(parts.ranged), SLIDE_FIGURE_WIDTH, SLIDE_RANGE_FONT) + (parts.drawn ? chart * SLIDE_CHART_SCALE + 14 : parts.kinds.length * SLIDE_BAR + 16);
-  // One slide: the figure beside the whole table, and the notes beneath both, under the taller.
-  const one = (chart: number) => Math.max(figure(chart), SLIDE_HEAD + rowsHeight(r, parts, SLIDE_TABLE, 0, n, true)) + noted <= SLIDE_ROOM;
-  for (const chart of [TALL_CHART, SHORT_CHART]) if (one(chart)) return { chart, first: n, named: 0 };
+  // One slide: the figure beside the table, and the notes beneath both, under the taller.
+  const one = (chart: number, named: number) => Math.max(figure(chart), SLIDE_HEAD + rowsHeight(r, parts, SLIDE_TABLE, 0, named, true)) + noted <= SLIDE_ROOM;
+  for (const chart of [TALL_CHART, SHORT_CHART]) if (one(chart, n)) return { chart, first: n, continued: null };
+  // Where the deck can't take a second slide, one adds the rest up, as the page does.
+  if (most === 1) return { chart: SHORT_CHART, first: linesToName(n, n, (named) => one(SHORT_CHART, named)), continued: null };
   // Two lines can't be split without leaving one alone on the continued slide.
-  if (n <= 2) return { chart: SHORT_CHART, first: n, named: 0 };
+  if (n <= 2) return { chart: SHORT_CHART, first: n, continued: null };
   // Two: the first as many lines as fit beside the figure, the continued slide the rest
   // across the full width with the total and the notes, and never only one line.
   let fit = n - 1;
@@ -283,7 +286,7 @@ function slidePlan(r: Render, parts: Parts, notes: string): SlidePlan {
   const first = Math.max(1, Math.min(fit, n - 2));
   const continued = (named: number) => SLIDE_HEAD + rowsHeight(r, parts, CONTINUED_TABLE, first, first + named, true) + noted <= SLIDE_ROOM;
   // The deck has a ceiling, so where two can't hold every line the last row adds the rest up.
-  return { chart: TALL_CHART, first, named: linesToName(n - first, n - first, continued) };
+  return { chart: TALL_CHART, first, continued: linesToName(n - first, n - first, continued) };
 }
 
 /**
@@ -292,24 +295,24 @@ function slidePlan(r: Render, parts: Parts, notes: string): SlidePlan {
  * shorter height if that's what it takes. Otherwise it carries on to one
  * following slide, its heading repeated and continued, with the table across the
  * full width and the total and the notes on it. The deck has a ceiling, so the
- * money never takes more than two slides: where two can't hold every line, the
- * last row adds the rest up, as the executive summary's does. Empty when nothing
- * could be given a figure in money.
+ * money never takes more than two slides, or more than `most`: where they can't
+ * hold every line, the last row adds the rest up, as the executive summary's
+ * does. Empty when nothing could be given a figure in money.
  */
-export function moneySlides(r: Render, report: BuiltReport): string[] {
+export function moneySlides(r: Render, report: BuiltReport, most: 1 | 2 = 2): string[] {
   if (report.value.total.expected <= 0) return [];
   const parts = moneyParts(r, report);
   const { all, row, restRow, totalRow, table, exposureNote } = parts;
   const how = "Not every case will come back, so we count a share of each figure, with a cautious share and all of it either side. Where several issues describe the same money, only the largest counts. The executive summary shows how each line was reached.";
   const notes = `${exposureNote}<p class="note">${r.t(how)}</p>`;
-  const { chart, first, named } = slidePlan(r, parts, notes);
-  const head = (continued: boolean) => `<div class="eyebrow">${r.t(EYEBROW)}</div><h2>${TITLE}${continued ? ", continued" : ""}</h2>`;
+  const { chart, first, continued } = slidePlan(r, parts, notes, most);
+  const head = (more: boolean) => `<div class="eyebrow">${r.t(EYEBROW)}</div><h2>${TITLE}${more ? ", continued" : ""}</h2>`;
   const lines = (from: number, to: number) => all.slice(from, to).map((g) => row(`${r.t(g.label)}${r.ref(valueItemId(g.id))}`, g.counted)).join("");
+  /** The lines from `from` to `to`, the rest added up if any are left, and the total. */
+  const last = (from: number, to: number) => `${lines(from, to)}${to < all.length ? restRow(to) : ""}${totalRow}`;
   const split = (rows: string) => `<div class="split"><div>${parts.figure(chart, HALF_WIDTH)}</div><div>${table(rows)}</div></div>`;
-  if (first === all.length) return [`<div class="money">${head(false)}${split(`${lines(0, first)}${totalRow}`)}${notes}</div>`];
-  const to = first + named;
-  const rest = `${lines(first, to)}${to < all.length ? restRow(to) : ""}${totalRow}`;
-  return [`<div class="money">${head(false)}${split(lines(0, first))}</div>`, `<div class="money">${head(true)}${table(rest)}${notes}</div>`];
+  if (continued === null) return [`<div class="money">${head(false)}${split(last(0, first))}${notes}</div>`];
+  return [`<div class="money">${head(false)}${split(lines(0, first))}</div>`, `<div class="money">${head(true)}${table(last(first, first + continued))}${notes}</div>`];
 }
 
 /** What fixing it is worth against what they pay a year, to one decimal place. Null without both. */

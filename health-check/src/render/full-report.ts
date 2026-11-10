@@ -724,7 +724,7 @@ function detailSlide(r: Render, notes: ReturnType<typeof noteSections>): Slide {
   };
 }
 
-function buildSlides(report: BuiltReport, r: Render, density: Density | null): Slide[] {
+function buildSlides(report: BuiltReport, r: Render, density: Density | null, money: 1 | 2 = 2): Slide[] {
   const compact = density === null;
   const dense = density?.columns === 2;
   const { run, intake, calibration, scores = [], preparedBy } = report.input;
@@ -873,8 +873,8 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   const progressed = progressPage(r, report);
   if (progressed) mark("Since your last health check");
   if (progressed) add(progressed, "tight");
-  // Every line named, carrying on to a following slide where one can't hold them (DECISIONS.md 439).
-  const worth = moneySlides(r, report);
+  // One slide, or two where one can't hold every line, the second its continuation (DECISIONS.md 439).
+  const worth = moneySlides(r, report, money);
   if (worth.length) mark("What fixing this is worth");
   for (const slide of worth) add(slide, "tight");
 
@@ -1036,10 +1036,24 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null): S
   return slides;
 }
 
+/**
+ * The slides at one density. The money takes a second slide where one can't hold
+ * it (DECISIONS.md 439), but where that slide is the one that takes the deck past
+ * its ceiling, the money adds the rest up on one slide, as it did before, and the
+ * deck keeps the density it had rather than giving one up for it.
+ */
+function slidesAt(report: BuiltReport, r: Render, density: Density | null): Slide[] {
+  const slides = buildSlides(report, r, density);
+  const { max } = deckRangeFor(report.input.run);
+  if (slides.length !== max + 1) return slides;
+  const one = buildSlides(report, r, density, 1);
+  return one.length <= max ? one : slides;
+}
+
 /** Slides at each density in turn, so a test can see how close a deck is to its ceiling. */
 export function slideCounts(report: BuiltReport, pseudonyms: Pseudonymiser): number[] {
   const r = renderContext(pseudonyms, report.input.calibration.currency, true, referenceMap(noteSections(report)), yearlyByFinding(report.value));
-  return [...DENSITIES, null].map((density) => buildSlides(report, r, density).length);
+  return [...DENSITIES, null].map((density) => slidesAt(report, r, density).length);
 }
 
 export function fullReportHtml(report: BuiltReport, pseudonyms: Pseudonymiser): string {
@@ -1056,10 +1070,10 @@ export function fullReportHtmlAt(report: BuiltReport, pseudonyms: Pseudonymiser,
   const r = renderContext(pseudonyms, report.input.calibration.currency, !canRelease(built.sections).ok, referenceMap(noteSections(report)), yearlyByFinding(report.value));
   const ladder = [...DENSITIES, null];
   let slides: Slide[] = [];
-  if (step !== null) slides = buildSlides(report, r, ladder[step] ?? null);
+  if (step !== null) slides = slidesAt(report, r, ladder[step] ?? null);
   else
     for (const density of ladder) {
-      slides = buildSlides(report, r, density);
+      slides = slidesAt(report, r, density);
       if (slides.length <= deckRangeFor(report.input.run).max) break;
     }
   const pages = slides.map((slide, i) => {
