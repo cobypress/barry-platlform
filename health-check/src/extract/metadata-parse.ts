@@ -78,7 +78,7 @@ export type MetadataBundle = {
   objects: string[];
   references: ReferenceIndex;
   filesRead: number;
-  /** Undefined in a checkpoint from before version 7 of the step. */
+  /** Undefined in a checkpoint from before version 7 of the step; version 7's flows have no paths. */
   handbook?: HandbookDetail;
 };
 

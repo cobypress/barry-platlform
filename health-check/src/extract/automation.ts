@@ -30,7 +30,8 @@ const needsWritePermission = (err: unknown): boolean => isUnavailable(err) && er
 
 export const metadataExtractor: Extractor<Sourced<MetadataBundle>> = {
   id: "metadata",
-  version: 7,
+  // 8: each flow keeps every way it starts (DECISIONS.md 446).
+  version: 8,
   partialKeys: TOOLING_PARTIAL_KEYS,
   async run(ctx) {
     const source: SourceInfo = { kind: "metadata", path: RETRIEVE_TYPES.map((t) => t.name).join(", ") };

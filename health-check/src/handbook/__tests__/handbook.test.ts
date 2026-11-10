@@ -6,7 +6,7 @@ import { SALES_CLOUD_MODULES } from "../../domains/index.ts";
 import { runHealthCheck } from "../../engine/run.ts";
 import { scanApex } from "../../extract/apex-scan.ts";
 import { readTouches } from "../../extract/apex-touches.ts";
-import { RETRIEVE_TYPES, type ApexClassRow, type ApexData, type ApexTriggerRow } from "../../extract/automation.ts";
+import { metadataExtractor, RETRIEVE_TYPES, type ApexClassRow, type ApexData, type ApexTriggerRow } from "../../extract/automation.ts";
 import { flowDetailMetadata, parseMetadataBundle, type MetadataBundle } from "../../extract/metadata-parse.ts";
 import { toolingValidationRule } from "../../extract/metadata-tooling.ts";
 import type { Sourced } from "../../extract/types.ts";
@@ -18,7 +18,7 @@ import { Simulator } from "../../testing/simulator.ts";
 import { AS_OF, HANDBOOK_MARKER, HANDBOOK_PLANTED, METADATA_FILES } from "../../testing/synthetic-org.ts";
 import { buildHandbook, HANDBOOK_FILE } from "../build.ts";
 import { flowDetail, validationRuleDetail } from "../detail.ts";
-import { Handbook, MAX_APEX_CLASSES, MAX_APEX_TRIGGERS, MAX_CONDITIONS, MAX_FIELDS, MAX_STEPS, MAX_TEXT, type HandbookFlow, type ValidationRuleCoverage } from "../schema.ts";
+import { Handbook, MAX_APEX_CLASSES, MAX_APEX_TRIGGERS, MAX_CONDITIONS, MAX_FIELDS, MAX_PATHS, MAX_STEPS, MAX_TEXT, type HandbookFlow, type ValidationRuleCoverage } from "../schema.ts";
 
 // The org handbook's data (DECISIONS.md 451 to 457).
 
@@ -71,10 +71,13 @@ describe("handbook.json from the synthetic org", () => {
         ["Notify_Owner", "actionCalls", true],
         // The lookup's fault path comes after everything its next step leads to.
         ["Log_Failure", "recordCreates", true],
+        // Then each later path's steps, in the start's order (decision 446).
+        ["Flag_Stale", "assignments", true],
+        ["Mark_Synced", "assignments", true],
         ["Old_Step", "assignments", false],
       ],
     );
-    assert.equal(f.stepsTotal, 9);
+    assert.equal(f.stepsTotal, 11);
     assert.equal(f.cut, false);
   });
 
@@ -98,6 +101,13 @@ describe("handbook.json from the synthetic org", () => {
         conditionsTotal: 3,
         cut: false,
       },
+      paths: [
+        { kind: "immediate", label: null, when: null, next: "Get_Account" },
+        { kind: "scheduled", label: "30 days before close", when: { offsetNumber: -30, offsetUnit: "Days", timeSource: "RecordField", recordField: "CloseDate" }, next: "Flag_Stale" },
+        { kind: "afterCommit", label: null, when: null, next: "Mark_Synced" },
+      ],
+      pathsTotal: 3,
+      pathsCut: false,
     });
   });
 
@@ -304,6 +314,92 @@ describe("the two routes", () => {
     assert.equal(fromXml.steps.find((s) => s.name === "Mark")!.detail, "$Record");
   });
 
+  // The adversary's flow (decision 446): Set_Flag straight away, Email_Owner on a
+  // path 30 days before the close date, and two more ways to start.
+  const PATHS_XML = `<?xml version="1.0" encoding="UTF-8"?><Flow xmlns="http://soap.sforce.com/2006/04/metadata">
+    <apiVersion>62.0</apiVersion><label>Close Reminder</label><processType>AutoLaunchedFlow</processType><status>Active</status>
+    <actionCalls><name>Email_Owner</name><label>Email Owner</label><locationX>300</locationX><locationY>300</locationY><actionName>emailSimple</actionName><actionType>emailSimple</actionType></actionCalls>
+    <assignments><name>Recalled</name><label>Recalled</label><locationX>700</locationX><locationY>300</locationY></assignments>
+    <assignments><name>Set_Flag</name><label>Set Flag</label><locationX>50</locationX><locationY>300</locationY><assignmentItems><assignToReference>$Record.NextStep</assignToReference><operator>Assign</operator><value><stringValue>Flagged</stringValue></value></assignmentItems></assignments>
+    <recordUpdates><name>Sync_Ledger</name><label>Sync Ledger</label><locationX>500</locationX><locationY>300</locationY><inputReference>$Record</inputReference></recordUpdates>
+    <start><locationX>50</locationX><locationY>0</locationY><connector><targetReference>Set_Flag</targetReference></connector><object>Opportunity</object><recordTriggerType>CreateAndUpdate</recordTriggerType>
+      <scheduledPaths><name>X30_days_before_close</name><connector><targetReference>Email_Owner</targetReference></connector><label>30 days before close</label><offsetNumber>-30</offsetNumber><offsetUnit>Days</offsetUnit><recordField>CloseDate</recordField><timeSource>RecordField</timeSource></scheduledPaths>
+      <scheduledPaths><name>Run_Async</name><connector><targetReference>Sync_Ledger</targetReference></connector><label>Run &quot;async&quot;</label><pathType>AsyncAfterCommit</pathType></scheduledPaths>
+      <scheduledPaths><name>Recall</name><connector><targetReference>Recalled</targetReference></connector><pathType>ApprovalRecall</pathType></scheduledPaths>
+      <triggerType>RecordAfterSave</triggerType></start>
+  </Flow>`;
+  const path = (over: Record<string, unknown>) => ({ ...node, connector: null, label: null, maxBatchSize: null, name: null, offsetNumber: null, offsetUnit: null, pathType: null, recordField: null, timeSource: null, ...over });
+  const PATHS_JSON = {
+    apiVersion: 62,
+    description: null,
+    label: "Close Reminder",
+    processType: "AutoLaunchedFlow",
+    status: "Active",
+    decisions: [],
+    loops: [],
+    processMetadataValues: [],
+    actionCalls: [{ ...node, locationX: 300, locationY: 300, name: "Email_Owner", label: "Email Owner", actionName: "emailSimple", actionType: "emailSimple", connector: null, faultConnector: null, inputParameters: [] }],
+    assignments: [
+      { ...node, locationX: 700, locationY: 300, name: "Recalled", label: "Recalled", connector: null, assignmentItems: [] },
+      { ...node, locationX: 50, locationY: 300, name: "Set_Flag", label: "Set Flag", connector: null, assignmentItems: [{ assignToReference: "$Record.NextStep", operator: "Assign", processMetadataValues: [], value: { ...NO_VALUE, stringValue: "Flagged" } }] },
+    ],
+    recordUpdates: [{ ...node, locationX: 500, locationY: 300, name: "Sync_Ledger", label: "Sync Ledger", object: null, filterLogic: null, filters: [], inputReference: "$Record", connector: null, faultConnector: null, inputAssignments: [] }],
+    start: {
+      ...node,
+      locationX: 50,
+      locationY: 0,
+      connector: to("Set_Flag"),
+      doesRequireRecordChangedToMeetCriteria: false,
+      filterFormula: null,
+      filterLogic: null,
+      filters: [],
+      object: "Opportunity",
+      recordTriggerType: "CreateAndUpdate",
+      schedule: null,
+      scheduledPaths: [
+        path({ name: "X30_days_before_close", connector: to("Email_Owner"), label: "30 days before close", offsetNumber: -30, offsetUnit: "Days", recordField: "CloseDate", timeSource: "RecordField" }),
+        path({ name: "Run_Async", connector: to("Sync_Ledger"), label: 'Run "async"', pathType: "AsyncAfterCommit" }),
+        path({ name: "Recall", connector: to("Recalled"), pathType: "ApprovalRecall" }),
+      ],
+      triggerType: "RecordAfterSave",
+    },
+  };
+
+  test("a scheduled path keeps its label, offset, unit, time source, field and target, the same from the retrieve's XML and Tooling's JSON", () => {
+    const fromXml = parseMetadataBundle({ "flows/Close_Reminder.flow": PATHS_XML }).handbook!.flows[0]!;
+    const fromJson = flowDetailMetadata("Close_Reminder", PATHS_JSON);
+    assert.deepEqual(fromJson, fromXml);
+    assert.deepEqual(fromXml.start.paths[1], { kind: "scheduled", label: "30 days before close", when: { offsetNumber: -30, offsetUnit: "Days", timeSource: "RecordField", recordField: "CloseDate" }, next: "Email_Owner" });
+    // The immediate path first, then the start's scheduled paths in its order.
+    assert.deepEqual(fromXml.start.paths.map((p) => [p.kind, p.next]), [["immediate", "Set_Flag"], ["scheduled", "Email_Owner"], ["afterCommit", "Sync_Ledger"], ["ApprovalRecall", "Recalled"]]);
+    assert.deepEqual([fromXml.start.pathsTotal, fromXml.start.pathsCut], [4, false]);
+    // Steps path by path, the immediate path's first.
+    assert.deepEqual(fromXml.steps.map((s) => [s.name, s.reached]), [["Set_Flag", true], ["Email_Owner", true], ["Sync_Ledger", true], ["Recalled", true]]);
+    assert.ok(Handbook.safeParse({ version: 2, flows: { status: "ok", items: [fromXml] }, validationRules: { status: "ok", covers: { customObjects: "all", standardObjects: "all" }, items: [] }, ...APEX_UNREAD }).success);
+  });
+
+  test("a path that runs after the save is committed, with its label as the admin wrote it and no time", () => {
+    const fromXml = parseMetadataBundle({ "flows/Close_Reminder.flow": PATHS_XML }).handbook!.flows[0]!;
+    assert.deepEqual(fromXml.start.paths[2], { kind: "afterCommit", label: 'Run "async"', when: null, next: "Sync_Ledger" });
+  });
+
+  test("a pathType we have no word for is kept under Salesforce's own name", () => {
+    const fromJson = flowDetailMetadata("Close_Reminder", PATHS_JSON);
+    assert.deepEqual(fromJson.start.paths[3], { kind: "ApprovalRecall", label: null, when: null, next: "Recalled" });
+    // Nor is one that's no word at all lost.
+    const odd = flowDetail("Odd", { start: { scheduledPaths: [{ pathType: "constructor", offsetNumber: "2", offsetUnit: "Fortnights" }] } }, null);
+    assert.deepEqual(odd.start.paths, [{ kind: "constructor", label: null, when: { offsetNumber: 2, offsetUnit: "Fortnights", timeSource: null, recordField: null }, next: null }]);
+  });
+
+  test("a flow with only its immediate path keeps the file's shape, with a one-entry list", () => {
+    const fromXml = parseMetadataBundle({ "flows/Route.flow": XML }).handbook!.flows[0]!;
+    assert.deepEqual(Object.keys(fromXml.start), ["object", "triggerType", "recordTriggerType", "schedule", "entry", "paths", "pathsTotal", "pathsCut"]);
+    assert.deepEqual([fromXml.start.paths, fromXml.start.pathsTotal, fromXml.start.pathsCut], [[{ kind: "immediate", label: null, when: null, next: "Big" }], 1, false]);
+    assert.deepEqual(flowDetailMetadata("Route", JSON_FLOW).start.paths, fromXml.start.paths);
+    // A start with no connector, as a Process Builder's, has no immediate path to list.
+    assert.deepEqual(flowDetail("Old", { startElementReference: "A", assignments: [{ name: "A" }] }, null).start.paths, []);
+  });
+
   test("a validation rule read from the retrieve's XML and from Tooling gives the same detail", () => {
     const xml = `<CustomObject><validationRules><fullName>Needs_Reason</fullName><active>true</active><description>Why a deal was lost.</description><errorConditionFormula>AND(ISPICKVAL(StageName, &quot;Closed Lost&quot;), ISBLANK(Loss_Reason__c))</errorConditionFormula><errorDisplayField>Loss_Reason__c</errorDisplayField><errorMessage>Say why the deal was lost.</errorMessage></validationRules></CustomObject>`;
     const fromXml = parseMetadataBundle({ "objects/Opportunity.object": xml }).handbook!.validationRules[0]!;
@@ -359,6 +455,16 @@ describe("caps (decision 453)", () => {
     assert.deepEqual([over.conditions.length, over.conditionsTotal, over.cut], [50, 51, true]);
   });
 
+  test(`a start keeps ${MAX_PATHS} paths, and marks one more as cut with the full count`, () => {
+    assert.equal(MAX_PATHS, 50);
+    const start = (later: number) => ({ start: { connector: { targetReference: "A" }, scheduledPaths: Array.from({ length: later }, (_, i) => ({ label: `Path ${i}`, offsetNumber: i, offsetUnit: "Days", timeSource: "RecordTriggerEvent", connector: { targetReference: "A" } })) }, assignments: [{ name: "A" }] });
+    const at = flowDetail("At", start(49), null).start;
+    assert.deepEqual([at.paths.length, at.pathsTotal, at.pathsCut], [50, 50, false]);
+    const over = flowDetail("Over", start(50), null).start;
+    assert.deepEqual([over.paths.length, over.pathsTotal, over.pathsCut, over.paths[0]!.kind, over.paths.at(-1)!.label], [50, 51, true, "immediate", "Path 48"]);
+    assert.ok(Handbook.safeParse({ version: 2, flows: { status: "ok", items: [flowDetail("Over", start(50), null)] }, validationRules: { status: "ok", covers: { customObjects: "all", standardObjects: "all" }, items: [] }, ...APEX_UNREAD }).success);
+  });
+
   test(`a formula or value keeps ${MAX_TEXT} characters, and marks one more as cut with its length`, () => {
     assert.equal(MAX_TEXT, 4_000);
     const at = validationRuleDetail("A__c", "At", { errorConditionFormula: "a".repeat(4_000) });
@@ -389,9 +495,11 @@ describe("secrets (decision 452)", () => {
       null,
     );
     const rule = validationRuleDetail("A__c", "Rule", { errorConditionFormula: key, errorMessage: key, description: key });
-    const kept = JSON.stringify([flow, rule]);
+    // A scheduled path's label too (decision 446).
+    const path = flowDetail("Path", { start: { scheduledPaths: [{ label: key, offsetNumber: 1, offsetUnit: "Days" }] } }, null);
+    const kept = JSON.stringify([flow, rule, path]);
     assert.ok(!kept.includes("abcdefghijklmnop"), kept);
-    assert.equal(kept.match(/Bearer \[REDACTED\]/g)!.length, 10);
+    assert.equal(kept.match(/Bearer \[REDACTED\]/g)!.length, 11);
   });
 });
 
@@ -427,6 +535,22 @@ describe("when the metadata couldn't be read (decision 454)", () => {
     assert.ok(h.validationRules.status === "ok");
     assert.equal(h.validationRules.items.length, 3);
     assert.ok(h.validationRules.items.every((v) => v.formula === null && v.message === null));
+  });
+
+  test("a checkpoint from version 7 of the metadata step, whose flows have no paths, gives no flows rather than a list without them", () => {
+    const bundle = parseMetadataBundle({ "flows/Route.flow": "<Flow><label>Route</label><start><connector><targetReference>A</targetReference></connector></start><assignments><name>A</name></assignments></Flow>", "objects/Opportunity.object": "<CustomObject><validationRules><fullName>R</fullName><active>true</active></validationRules></CustomObject>" });
+    const detail = bundle.handbook!;
+    const old = detail.flows.map((f) => {
+      const { paths: _p, pathsTotal: _t, pathsCut: _c, ...start } = f.start;
+      return { ...f, start } as unknown as HandbookFlow;
+    });
+    const source = { kind: "metadata" as const, path: "Flow" };
+    const built = buildHandbook({ status: "ok", data: { ...bundle, handbook: { ...detail, flows: old } }, source, truncated: false });
+    assert.deepEqual(built.flows, { status: "unavailable", reason: "This run's metadata was read before the handbook kept every way a flow starts." });
+    // The validation rules it kept are whole, so they stay.
+    assert.ok(built.validationRules.status === "ok" && built.validationRules.items.length === 1);
+    // And the step's version moved, so a resumed run reads the metadata again rather than reuse such a checkpoint.
+    assert.equal(metadataExtractor.version, 8);
   });
 
   test("no metadata step, a failed one, or detail that doesn't fit: both parts say why", () => {
@@ -516,11 +640,12 @@ describe("Apex (decisions 456 and 457)", () => {
       assert.equal(h.apexClasses.items.find((c) => c.name === "OpportunityHandlerTest")!.isTest, true);
     });
 
-    test("each trigger with its object as Salesforce gives it, and its events in order", () => {
+    test("each trigger with its object, a custom object's id named from the custom objects list, and its events in order", () => {
       const h = Handbook.parse(JSON.parse(read(dir, HANDBOOK_FILE)));
       assert.ok(h.apexTriggers.status === "ok");
       const invoice = h.apexTriggers.items.find((t) => t.name === "InvoiceTrigger")!;
-      assert.deepEqual([invoice.object, invoice.events], ["01I000000000001AAA", ["before insert", "before update"]]);
+      // Salesforce gives this one as 01I000000000001AAA.
+      assert.deepEqual([invoice.object, invoice.events], ["Invoice__c", ["before insert", "before update"]]);
       assert.deepEqual(h.apexTriggers.items.find((t) => t.name === "OpportunityTrigger")!.events, ["before insert"]);
     });
 
@@ -543,6 +668,20 @@ describe("Apex (decisions 456 and 457)", () => {
     assert.deepEqual([over.apexTriggers.items.length, over.apexTriggers.total, over.apexTriggers.cut], [1_000, 1_001, true]);
     // The first by name are kept, whatever order Salesforce sent them in.
     assert.deepEqual([over.apexClasses.items[0]!.name, over.apexClasses.items.at(-1)!.name], ["Code_00001", "Code_05000"]);
+  });
+
+  test("a trigger on a custom object is given by its API name, by a 15 or 18 character id, and an id the list doesn't name stays as given", () => {
+    const objects = { status: "ok" as const, data: [{ Id: "01I000000000007", DeveloperName: "Invoice", NamespacePrefix: null }, { Id: "01I000000000008", DeveloperName: "Ledger", NamespacePrefix: "acme" }], source: { kind: "soql" as const, api: "tooling" as const, query: "SELECT DurableId FROM EntityDefinition" }, truncated: false };
+    const triggers = [trg("By18", { TableEnumOrId: "01I000000000007AAA" }), trg("By15", { TableEnumOrId: "01I000000000008" }), trg("Unmatched", { TableEnumOrId: "01I000000000009AAA" }), trg("Standard", { TableEnumOrId: "Account" })];
+    const h = buildHandbook(undefined, apex(ok([]), ok(triggers)), objects);
+    assert.ok(h.apexTriggers.status === "ok");
+    assert.deepEqual(Object.fromEntries(h.apexTriggers.items.map((t) => [t.name, t.object])), { By15: "acme__Ledger__c", By18: "Invoice__c", Standard: "Account", Unmatched: "01I000000000009AAA" });
+    // With no list, or one that couldn't be read, every id stays as Salesforce gave it.
+    for (const none of [undefined, { status: "unavailable" as const, reason: "x", source: objects.source }]) {
+      const bare = buildHandbook(undefined, apex(ok([]), ok(triggers)), none);
+      assert.ok(bare.apexTriggers.status === "ok");
+      assert.deepEqual(Object.fromEntries(bare.apexTriggers.items.map((t) => [t.name, t.object])), { By15: "01I000000000008", By18: "01I000000000007AAA", Standard: "Account", Unmatched: "01I000000000009AAA" });
+    }
   });
 
   test("a trigger's events in a fixed order, and null when the row has none of the Usage fields", () => {

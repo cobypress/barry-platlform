@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ReportOutputKey } from "../narrative/sections.ts";
 import type { BenchmarkInput } from "../benchmark/compare.ts";
@@ -12,7 +12,9 @@ import { syncShares } from "./share-job.ts";
 import { sealPages } from "../microsite/seal.ts";
 import { addMonths } from "./retention.ts";
 import type { DocumentFile, DocumentsJobInput } from "./types.ts";
-import { SURVEY_FILE } from "../render/render-run.ts";
+import { SURVEY_FILE, write } from "../render/render-run.ts";
+import { HANDBOOK_DOCX, renderHandbookDocx } from "../handbook/docx.ts";
+import { HANDBOOK_NOT_MADE, readHandbook } from "../handbook/read.ts";
 import { Survey } from "../survey/questions.ts";
 
 // A documents job: once the console has released a run, print its three
@@ -49,7 +51,9 @@ const FILES: Record<Exclude<DocumentKey, "readout_kit">, { title: string; ext: s
  * lists and tickets, which its DocumentOutput accepts from hc/action-docs
  * (DECISIONS.md 197). That console must be live before this worker: an output it
  * doesn't know makes it refuse the whole documents row. The readout kit is never
- * listed: it's for Black Cloud only.
+ * listed: it's for Black Cloud only. Nor is the org handbook, which isn't a
+ * DocumentKey at all: it's made and uploaded on its own (putHandbook) until a
+ * console that knows the kind is live (DECISIONS.md 443).
  */
 const LISTED_TO_CONSOLE: ReadonlySet<DocumentKey> = new Set<DocumentKey>(["executive_summary", "full_health_check", "raw_notes", "ceo_one_pager", "action_lists", "tickets"]);
 
@@ -130,6 +134,66 @@ export async function versionFolderFor(drive: DocumentDrive, folder: DriveItem, 
 /** The readout kit, in Black Cloud's own folder: one per client and health check, replaced on each make. */
 async function putReadoutKit(drive: DocumentDrive, clientName: string, folderName: string, path: string): Promise<DriveItem> {
   return putInternal(drive, clientName, folderName, `${clientName} - Readout kit.docx`, path);
+}
+
+/**
+ * The org handbook (DECISIONS.md 443 to 445), made from the run folder's
+ * handbook.json into the documents folder. It's the customer's own
+ * configuration, so nothing from it goes anywhere but this file and their
+ * Drive folder: what comes back is a path or a sentence fixed in read.ts.
+ * Without one, the other documents are made as before and the warnings say
+ * why; nothing here fails the make.
+ */
+async function makeHandbook(dir: string, out: string, clientName: string, runDate: string): Promise<{ ok: true; path: string } | { ok: false; warning: string }> {
+  const read = readHandbook(dir);
+  if (!read.ok) return { ok: false, warning: HANDBOOK_NOT_MADE[read.why] };
+  try {
+    const path = join(out, HANDBOOK_DOCX);
+    mkdirSync(out, { recursive: true, mode: 0o700 });
+    write(path, await renderHandbookDocx(read.handbook, { clientName, runDate }));
+    return { ok: true, path };
+  } catch {
+    // The error could quote the handbook, so it isn't kept.
+    return { ok: false, warning: HANDBOOK_NOT_MADE.render };
+  }
+}
+
+const HANDBOOK_SUFFIX = " - Org handbook.docx";
+
+/**
+ * The handbook, in the run's own folder in the customer's Drive, beside the
+ * version folders, since it's the same for every make. It replaces the one
+ * there whose name ends as a handbook's, whatever the client was called when it
+ * was made, so a remake leaves one, with the same id and link; Drive renames it
+ * to the client's name now (DECISIONS.md 446). It's never in `files`: the
+ * console doesn't know the kind yet and would refuse the whole row (443).
+ * Shared with the folder, as everything in it is.
+ */
+async function putHandbook(drive: DocumentDrive, folder: DriveItem, clientName: string, path: string, runId: string, log: (line: string) => void): Promise<DriveItem> {
+  const handbooks = (await drive.files(folder.id)).filter((f) => f.name.trim().toLowerCase().endsWith(HANDBOOK_SUFFIX.toLowerCase()));
+  // A folder can hold more than one: made before a rename was followed, or a
+  // copy someone made in Drive ("Copy of … - Org handbook.docx"). The oldest is
+  // ours, the first one made and so the one whose link was shared; a newer one
+  // may be a copy someone keeps, so it's left for a person. Only the count is
+  // logged: the names are the customer's.
+  if (handbooks.length > 1) log(`Run ${runId}'s Drive folder held ${handbooks.length} org handbooks, so the first one made was replaced and the other ${handbooks.length - 1} left as they were.`);
+  const ours = [...handbooks].sort(oldestFirst)[0];
+  return drive.putFile(folder.id, `${clientName}${HANDBOOK_SUFFIX}`, DOCX, readFileSync(path), ours?.id);
+}
+
+/**
+ * By Drive's created time, oldest first. One Drive gave no time for goes after
+ * every one it did, since it can't be shown to be the first. Equal times, or
+ * none, fall back to the id: Drive's ids carry no order, but the same file
+ * wins on every make, whatever order Drive lists them in.
+ */
+function oldestFirst(a: DriveItem, b: DriveItem): number {
+  if (a.createdAt !== b.createdAt) {
+    if (a.createdAt === undefined) return 1;
+    if (b.createdAt === undefined) return -1;
+    return a.createdAt < b.createdAt ? -1 : 1;
+  }
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 }
 
 /** A file for Black Cloud only, beside the clients' folders and never inside one, replaced on each make. */
@@ -277,6 +341,8 @@ async function documentsLocked(runId: string, deps: WorkerDeps, attempt: Attempt
       log(`Run ${runId}'s documents weren't uploaded. ${summary}`);
       return fail(heldBackReason(printed.held), summary);
     }
+    const handbook = await makeHandbook(dir, join(dir, "documents"), clientName, input.run.asOf);
+    if (!handbook.ok) log(`Run ${runId}: ${handbook.warning}`);
     const folder = await folderFor(deps.drive, clientName, input.driveFolderId);
     const nameOf = (output: keyof typeof FILES): string => `${clientName} - ${FILES[output].title}.${FILES[output].ext}`;
     // Also by name, for a make from before the console was told of these three.
@@ -292,16 +358,17 @@ async function documentsLocked(runId: string, deps: WorkerDeps, attempt: Attempt
       const item = await deps.drive.putFile(target.id, name, mime, readFileSync(printed.files[output]), replaceId);
       if (LISTED_TO_CONSOLE.has(output)) files.push({ output: output as DocumentFile["output"], name: item.name, driveFileId: item.id, url: item.url });
     }
+    if (handbook.ok) await putHandbook(deps.drive, folder, clientName, handbook.path, runId, log);
     await putReadoutKit(deps.drive, clientName, folder.name, printed.files.readout_kit);
     // Only a re-check whose customer agreed to be a case study has one, and it's a draft for us to finish with them.
     if (printed.caseStudy) await putInternal(deps.drive, clientName, folder.name, `${clientName} - Case study draft.docx`, printed.caseStudy);
-    await deps.store.saveDocuments(runId, { at: now(), clientName, folderName: folder.name, driveFolderId: folder.id, driveFolderUrl: folder.url, files, warnings: printed.warnings });
+    await deps.store.saveDocuments(runId, { at: now(), clientName, folderName: folder.name, driveFolderId: folder.id, driveFolderUrl: folder.url, files, warnings: [...printed.warnings, ...(handbook.ok ? [] : [handbook.warning])] });
     log(`Documents for ${runId} are in Drive${printed.warnings.length ? `, with ${printed.warnings.length} layout warnings` : ""}.`);
     // The folder is now the run's: share it with its readers (DECISIONS.md 253). The documents are made either way.
     await share();
     await publishMicrosite(runId, printed.microsite, deps, now(), log);
     if (input.run.benchmarkOptIn) await contribute(runId, dir, input, deps, log);
-    return { outcome: "done", detail: `${Object.keys(FILES).length} documents in ${folder.name}${target.id === folder.id ? "" : ` / ${target.name}`}, and the readout kit in ${INTERNAL_FOLDER}` };
+    return { outcome: "done", detail: `${Object.keys(FILES).length} documents in ${folder.name}${target.id === folder.id ? "" : ` / ${target.name}`}${handbook.ok ? `, the org handbook in ${folder.name}` : ""}, and the readout kit in ${INTERNAL_FOLDER}` };
   } catch (err) {
     const reason = safeReason(err);
     // Printing and uploading again is safe: the folders and files are reused.
