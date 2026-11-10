@@ -6,8 +6,8 @@ import { join } from "node:path";
 // memory can be shown to change nothing a customer would see (DECISIONS.md
 // 341). The run's own times and ids are left out: they differ on every run.
 
-/** The files compared, in a run folder. The sections and raw notes are what every deck is printed from. */
-export const FINGERPRINTED = ["findings.json", "metrics.json", "scores.json", "manual-steps.json", "action-lists.json", "raw-notes.md", "report-sections.json", "layout-report.json"] as const;
+/** The files compared, in a run folder. The sections and raw notes are what every deck is printed from, and the handbook's data what the handbook is. */
+export const FINGERPRINTED = ["findings.json", "metrics.json", "scores.json", "manual-steps.json", "action-lists.json", "raw-notes.md", "report-sections.json", "layout-report.json", "handbook.json"] as const;
 
 /** Run ids and wall-clock times, which differ between two runs of the same org. */
 const VOLATILE = /hc-\d{4}-\d{2}-\d{2}-[0-9a-f]{8}|"(startedAt|finishedAt|updatedAt|createdAt|madeAt|generatedAt)":\s*"[^"]*"/g;

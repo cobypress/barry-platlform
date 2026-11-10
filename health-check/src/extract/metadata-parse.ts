@@ -1,5 +1,7 @@
 import { XMLParser } from "fast-xml-parser";
 import { redactSecrets } from "../privacy/secrets.ts";
+import { flowDetail, validationRuleDetail } from "../handbook/detail.ts";
+import type { HandbookFlow, HandbookValidationRule, ValidationRuleCoverage } from "../handbook/schema.ts";
 
 export type FlowSummary = {
   name: string;
@@ -48,6 +50,9 @@ export function unreadReason(bundle: MetadataBundle, needs: UnreadKind[]): strin
   return kind ? `${UNREAD_LABELS[kind]} couldn't be read: ${bundle.unread![kind]}` : null;
 }
 
+/** What the handbook keeps of each flow and validation rule, beside the summaries (DECISIONS.md 451). */
+export type HandbookDetail = { flows: HandbookFlow[]; validationRules: HandbookValidationRule[]; validationRulesCover: ValidationRuleCoverage };
+
 export type MetadataBundle = {
   /** How it was read: one Metadata API retrieve, or Tooling item by item for a connection that can't use the Metadata API. */
   route?: "retrieve" | "tooling";
@@ -73,6 +78,8 @@ export type MetadataBundle = {
   objects: string[];
   references: ReferenceIndex;
   filesRead: number;
+  /** Undefined in a checkpoint from before version 7 of the step. */
+  handbook?: HandbookDetail;
 };
 
 // Arrays are forced so one child element parses the same as many.
@@ -148,14 +155,20 @@ function summariseFlow(name: string, path: string, flow: Record<string, any>, id
   };
 }
 
-function parseFlow(path: string, xml: string): FlowSummary {
+function parseFlow(path: string, xml: string): { summary: FlowSummary; detail: HandbookFlow } {
   const flow = (parser.parse(xml) as { Flow: Record<string, any> }).Flow;
   const name = path.replace(/^flows\//, "").replace(/\.flow(-meta\.xml)?$/, "");
-  return summariseFlow(name, path, flow, {
+  const summary = summariseFlow(name, path, flow, {
     hardcodedUserIds: distinct(xml, ELEMENT_USER_ID),
     hardcodedOtherIds: distinct(xml, ELEMENT_OTHER_ID),
     hardcodedEmails: distinct(xml, ELEMENT_EMAIL),
   });
+  return { summary, detail: flowDetailMetadata(name, flow) };
+}
+
+/** A flow's detail for the handbook, from either route: the one place both read it. */
+export function flowDetailMetadata(name: string, flow: Record<string, any>): HandbookFlow {
+  return flowDetail(name, flow, flowObject(flow));
 }
 
 /** Every string and number in a parsed document, which is what an XML element's text would be. */
@@ -204,13 +217,15 @@ function parseWorkflow(path: string, xml: string): WorkflowSummary {
   };
 }
 
-function parseObject(path: string, xml: string, index: ReferenceIndex): { object: string; validationRules: ValidationRuleSummary[]; customFields: CustomFieldSummary[]; recordTypes: RecordTypeSummary[] } {
+function parseObject(path: string, xml: string, index: ReferenceIndex): { object: string; validationRules: ValidationRuleSummary[]; ruleDetails: HandbookValidationRule[]; customFields: CustomFieldSummary[]; recordTypes: RecordTypeSummary[] } {
   const object = path.replace(/^objects\//, "").replace(/\.object(-meta\.xml)?$/, "");
   const parsed = (parser.parse(xml) as { CustomObject?: Record<string, any> }).CustomObject ?? {};
   const customFields = ((parsed.fields ?? []) as Array<Record<string, any>>)
     .map((f) => ({ object, name: String(f.fullName ?? ""), described: hasText(f.description), helpText: hasText(f.inlineHelpText) }))
     .filter((f) => /^[A-Za-z][A-Za-z0-9_]*__c$/.test(f.name) && !/__.*__c$/.test(f.name));
-  const validationRules = ((parsed.validationRules ?? []) as Array<Record<string, any>>).map((rule) => {
+  const rules = (parsed.validationRules ?? []) as Array<Record<string, any>>;
+  const ruleDetails = rules.map((rule) => validationRuleDetail(object, String(rule.fullName ?? ""), rule));
+  const validationRules = rules.map((rule) => {
     const name = String(rule.fullName ?? "");
     // Only the formula: the whole file also defines every field on the object,
     // and a field defining itself isn't a reference to it.
@@ -218,18 +233,26 @@ function parseObject(path: string, xml: string, index: ReferenceIndex): { object
     return { object, name, active: String(rule.active) === "true", described: hasText(rule.description) };
   });
   const recordTypes = ((parsed.recordTypes ?? []) as Array<Record<string, any>>).map((r) => ({ object, name: String(r.fullName ?? ""), label: String(r.label ?? r.fullName ?? ""), active: String(r.active) === "true" }));
-  return { object, validationRules, customFields, recordTypes };
+  return { object, validationRules, ruleDetails, customFields, recordTypes };
 }
 
-/** Turns the unzipped retrieve into summaries. A file that can't be parsed fails the extractor. */
-export function parseMetadataBundle(files: Record<string, string>): MetadataBundle {
-  const bundle: MetadataBundle = { route: "retrieve", unsearched: [], flows: [], workflows: [], validationRules: [], customFields: [], recordTypes: [], objects: [], references: { users: {}, fields: {} }, filesRead: 0 };
+/**
+ * Turns the unzipped retrieve into summaries. A file that can't be parsed fails
+ * the extractor. `standardObjects` are the ones the retrieve named: its wildcard
+ * brings custom objects only, so theirs are the only standard objects' rules it
+ * holds (DECISIONS.md 455).
+ */
+export function parseMetadataBundle(files: Record<string, string>, standardObjects: readonly string[] = []): MetadataBundle {
+  const validationRulesCover: ValidationRuleCoverage = { customObjects: "all", standardObjects: [...standardObjects] };
+  const bundle: MetadataBundle = { route: "retrieve", unsearched: [], flows: [], workflows: [], validationRules: [], customFields: [], recordTypes: [], objects: [], references: { users: {}, fields: {} }, filesRead: 0, handbook: { flows: [], validationRules: [], validationRulesCover } };
   for (const [path, raw] of Object.entries(files).sort(([a], [b]) => a.localeCompare(b))) {
     if (path === "package.xml") continue;
     const xml = redactSecrets(raw);
     bundle.filesRead++;
     if (path.startsWith("flows/")) {
-      bundle.flows.push(parseFlow(path, xml));
+      const { summary, detail } = parseFlow(path, xml);
+      bundle.flows.push(summary);
+      bundle.handbook!.flows.push(detail);
       indexReferences(bundle.references, xml, path);
     } else if (path.startsWith("workflows/")) {
       bundle.workflows.push(parseWorkflow(path, xml));
@@ -237,6 +260,7 @@ export function parseMetadataBundle(files: Record<string, string>): MetadataBund
     } else if (path.startsWith("objects/")) {
       const parsed = parseObject(path, xml, bundle.references);
       bundle.validationRules.push(...parsed.validationRules);
+      bundle.handbook!.validationRules.push(...parsed.ruleDetails);
       bundle.customFields.push(...parsed.customFields);
       bundle.recordTypes.push(...parsed.recordTypes);
       bundle.objects.push(parsed.object);

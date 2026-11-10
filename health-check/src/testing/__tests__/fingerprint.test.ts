@@ -15,15 +15,15 @@ import { AS_OF } from "../synthetic-org.ts";
 // a metric or the raw notes updates these, and says why in its commit.
 
 const GOLDEN: Record<string, Record<string, string>> = {
-  recorded: { "findings.json": "e464e6dc3979cea5", "metrics.json": "276403a56a14e8fa", "scores.json": "1ea33b649d72937a", "manual-steps.json": "c4daf1ca86584a33", "action-lists.json": "7018f033c3c80e0a", "raw-notes.md": "7b800e2c67d8673a" },
-  generated: { "findings.json": "86217afb2fc61657", "metrics.json": "afb1e8aa8eb54de9", "scores.json": "763c408c24334b05", "manual-steps.json": "15ae87c4fd76d7b6", "action-lists.json": "8eeb97766d119778", "raw-notes.md": "8413fba3f36917e2" },
+  recorded: { "findings.json": "e464e6dc3979cea5", "metrics.json": "d100074f8026a773", "scores.json": "1ea33b649d72937a", "manual-steps.json": "c4daf1ca86584a33", "action-lists.json": "7018f033c3c80e0a", "raw-notes.md": "295efdb58c3aaf87", "handbook.json": "8109a3a82463b77e" },
+  generated: { "findings.json": "86217afb2fc61657", "metrics.json": "0dd9f9f5ad500a36", "scores.json": "763c408c24334b05", "manual-steps.json": "15ae87c4fd76d7b6", "action-lists.json": "8eeb97766d119778", "raw-notes.md": "2a51baef177c5734", "handbook.json": "8109a3a82463b77e" },
 };
 
 const recorded = async () => fingerprint((await runFromRecording({ answers: loadAnswers(), modules: ALL_MODULES })).dir);
 const generated = async () =>
   fingerprint((await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), answers: loadAnswers(), modules: ALL_MODULES, outDir: tempDir(), now: new Date(AS_OF), transport: new Simulator({ records: buildScaleOrg(scaled(FIVE_HUNDRED_USERS, 0.005)), pageSize: 2000 }) })).dir);
 
-test("the synthetic org's findings, metrics, scores, action lists and raw notes are as they were", async () => {
+test("the synthetic org's findings, metrics, scores, action lists, raw notes and handbook are as they were", async () => {
   assert.deepEqual(await recorded(), GOLDEN.recorded);
 });
 
