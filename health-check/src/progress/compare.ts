@@ -174,7 +174,9 @@ export function progressFigures(p: Progress): number[] {
   ].filter((n): n is number => n !== null);
   const overflow = [p.fixed, p.remaining, p.added].filter((l) => l.length > PROGRESS_LISTED).map((l) => l.length - PROGRESS_LISTED);
   const storage = comparedStorage(p).flatMap((k) => [k.then.used, k.then.max, k.now.used, k.now.max, Math.abs(k.now.used - k.then.used), ...(k.average === null ? [] : [k.average])]);
-  return [...pairs, ...changes, p.fixed.length, p.remaining.length, p.added.length, p.unknown.length, ...overflow, ...storage];
+  // "The two health checks'" reads as a figure, so the sentence that says it carries its 2.
+  const notCompared = p.storage && "notCompared" in p.storage && p.storage.notCompared === "not_alike" ? [2] : [];
+  return [...pairs, ...changes, p.fixed.length, p.remaining.length, p.added.length, p.unknown.length, ...overflow, ...storage, ...notCompared];
 }
 
 /** The day counts the storage sentences print ("in 118 days", "every 30 days"). The number check reads them as days, not plain counts. */
@@ -182,5 +184,12 @@ export function progressDays(p: Progress): number[] {
   const kinds = comparedStorage(p);
   return [...kinds.map((k) => k.days), ...(kinds.some((k) => k.average !== null) ? [STORAGE_AVERAGE_DAYS] : [])];
 }
+
+/**
+ * The titles a page about progress lists. A fixed or can't-tell rule's title is
+ * the earlier run's, whose findings aren't in this run's data, so the titles go
+ * in as text: a figure in one ("90 days") then traces (DECISIONS.md 503).
+ */
+export const progressTitles = (p: Progress): string[] => [p.fixed, p.remaining, p.added, p.unknown].flatMap((list) => list.map((c) => c.title));
 
 export const worthFigures = (p: Progress): number[] => [p.worth.before, p.worth.after, Math.abs(p.worth.before - p.worth.after)];

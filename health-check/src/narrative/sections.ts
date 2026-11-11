@@ -1,4 +1,4 @@
-import { compareWithBaseline, limitsReadAt, progressDays, progressFigures, storageSentences, worthFigures, type Progress } from "../progress/compare.ts";
+import { compareWithBaseline, limitsReadAt, progressDays, progressFigures, progressTitles, storageSentences, worthFigures, type Progress } from "../progress/compare.ts";
 import { factsText, type FactsSummary } from "../facts/summary.ts";
 import { addedByFinding, buildValueModel, MONEY_FACTS, worthOf, HEADLINE_KINDS, KIND_LABELS, TEAM_TIME_GROUP, UK_HOURLY_BENCHMARK, WORKING_WEEKS, type TeamTime, type ValueModel } from "../value/model.ts";
 import { AREA_WEIGHTS, CRITICAL_CAP, GRADES, overallScore, type OverallScore } from "../domains/scoring.ts";
@@ -900,6 +900,8 @@ export function buildReport(given: ReportInput): BuiltReport {
       ...(interviews ? interviewDatasetText(input.interviews ?? [], interviews) : []),
       // The working the raw notes print, so every figure a comparison shows traces to it.
       ...comparisons.map((c) => ({ source: comparisonId(c.metric.key), text: comparisonNotes(c).map((l) => l.text).join("\n") })),
+      // The rules a re-check lists, by title. Code's own text, checked in the run it came from; no brief's scope includes it.
+      ...(progress ? [{ source: PROGRESS, text: progressTitles(progress).join("\n") }] : []),
     ],
   });
   // A target's money facts, such as what's left of quota, are printed as money, so they're held as money (DECISIONS.md 369).
