@@ -8,8 +8,9 @@ import { CHANGES_NOT_KEPT, TRIGGER_EVENTS, type Handbook, type HandbookChange, t
 // made readable, and nothing more. Code alone writes it, from the file: no
 // Claude text, no figure from the value model, and no name added but who made
 // each recent change and who last changed each class and trigger, restored
-// from the run's pseudonym map (decisions 421, 461 and 473). The admin's own text prints as written, so a reader can trust that
-// what isn't here doesn't exist, or is said to be missing.
+// from the run's pseudonym map (decisions 421, 461 and 473). The admin's own
+// text prints as written, so a reader can trust that what isn't here doesn't
+// exist, or is said to be missing.
 
 /** The document in the run's documents folder, beside the reports. */
 export const HANDBOOK_DOCX = "org-handbook.docx";

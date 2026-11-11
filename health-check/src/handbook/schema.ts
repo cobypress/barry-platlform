@@ -282,7 +282,7 @@ const olderParts = {
   apexTriggers: capped(z.strictObject({ ...olderApexItem, ...triggerItem }), MAX_APEX_TRIGGERS),
 };
 
-/** A file from before the last changes were kept. It's read as a handbook whose Apex says so (decision 473). */
+/** A file from before the last changes were kept. It's read as a handbook whose Apex lists them as not kept, and says nothing of them (decision 473). */
 export const HandbookVersion3 = z.strictObject({ version: z.literal(3), ...olderParts, recentChanges: HandbookRecentChanges });
 
 /**
