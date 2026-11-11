@@ -9,7 +9,17 @@
 
 export type PseudonymEntry ={ token: string; id: string; name: string; aliases: string[] };
 
-const TOKEN = /\[\[([a-z]+):([A-Z]\d{4})\]\]/g;
+// A token's number is padded to four digits with no ceiling, so the 10,000th of a
+// kind is [[user:U10000]]. Every pattern that finds a token is built from these
+// two, so none stops at four digits (decision 464). A test holds that no other
+// source file spells a token's digits itself.
+
+/** A token's code as a regex source: its kind's letter (or `letter`, itself a source), then four digits or more. */
+export const tokenCode = (letter = "[A-Z]"): string => String.raw`${letter}\d{4,}`;
+/** A whole token as a regex source. `kinds` is an alternation such as "user" or "user|person|contact". */
+export const tokenSource = (kinds = "[a-z]+", letter?: string): string => String.raw`\[\[(?:${kinds}):${tokenCode(letter)}\]\]`;
+
+const TOKEN = new RegExp(tokenSource(), "g");
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+/g;
 
 function escapeRegex(value: string): string {
