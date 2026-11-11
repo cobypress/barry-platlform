@@ -12,8 +12,8 @@ const PATTERNS: ReadonlyArray<[RegExp, string]> = [
   // key = "value" and key: 'value' in Apex, formulas and config.
   [/((?:password|passwd|secret|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|auth[_-]?token)["']?\s*[:=]\s*["'])[^"'\n]{4,}(["'])/gi, `$1${REPLACEMENT}$2`],
   // The same, for a value holding the other kind of quote (decision 472): it runs
-  // to the next quote of its own kind on the line. After the one above, so a
-  // value it stops short cannot hide a second key from it.
+  // to the next quote of its own kind on the line. It runs after the one above:
+  // run first, a value it carried past a second key would hide that key's value.
   [/((?:password|passwd|secret|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|auth[_-]?token)["']?\s*[:=]\s*(["']))(?:(?!\2)[^\n]){4,}\2/gi, `$1${REPLACEMENT}$2`],
   [/\bBearer\s+[A-Za-z0-9._~+/!-]{16,}=*/g, `Bearer ${REPLACEMENT}`],
   [/\bAKIA[0-9A-Z]{16}\b/g, REPLACEMENT],
