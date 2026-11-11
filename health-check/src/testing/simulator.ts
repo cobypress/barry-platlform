@@ -1,6 +1,7 @@
 import { XMLParser } from "fast-xml-parser";
 import { strToU8, zipSync } from "fflate";
 import type { Transport, TransportRequest, TransportResponse } from "../salesforce/transport.ts";
+import { entityDecoder } from "../extract/metadata-parse.ts";
 import * as org from "./synthetic-org.ts";
 
 // Answers requests the way Salesforce would, from the synthetic org. It sits
@@ -161,11 +162,13 @@ function londonMonth(value: string): [number, number] {
 // The Tooling view of the synthetic org's metadata, built from the same files the
 // retrieve returns, so the two routes can be compared. Values stay strings, as
 // the XML parser gives them; real Tooling sends booleans and numbers, and the
-// engine reads both.
-const toolingParser = new XMLParser({
+// engine reads both. Character references decode with the retrieve parser's own
+// decoder, so a value reads the same by either route (DECISIONS.md 476).
+export const toolingParser = new XMLParser({
   ignoreAttributes: true,
   parseTagValue: false,
   isArray: (name) => ["rules", "actions", "workflowTimeTriggers", "validationRules", "fields", "recordCreates", "recordUpdates", "recordDeletes", "actionCalls", "loops", "recordTypes"].includes(name),
+  entityDecoder,
 });
 
 type ToolingItem = { Id: string; FullName: string; Metadata: Json };
