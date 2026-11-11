@@ -240,6 +240,12 @@ describe("the part on its own", () => {
     assert.deepEqual([c.what!.length, c.whatCut, c.whatLength], [MAX_TEXT, true, MAX_TEXT + 10]);
   });
 
+  test("a key in a Display is redacted here too, whatever the step kept", () => {
+    const part = recentChanges(audit([change(1, { Display: `Set the client_secret = "${CHANGES_PLANTED}" on Lead Router` })]), label);
+    assert.ok(part.status === "ok");
+    assert.equal(part.items[0]!.what, 'Set the client_secret = "[REDACTED]" on Lead Router');
+  });
+
   test("a read that failed on a real run leaves the part unavailable with the step's own reason", async () => {
     const run = await simulated({ failQuery: (soql) => (soql.includes("FROM SetupAuditTrail") ? { errorCode: "INSUFFICIENT_ACCESS", message: "Setup audit trail refused" } : null) });
     const part = Handbook.parse(read(run.dir, HANDBOOK_FILE)).recentChanges;
