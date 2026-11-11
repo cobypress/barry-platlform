@@ -81,7 +81,8 @@ function metricBlock(m: Metric): string {
     return [`### ${m.label}`, "", `**Not measurable.** ${m.reason}`, "", `*Definition:* ${m.definition}`, ""].join("\n");
   }
   const unit = m.unit === "percent" ? "%" : m.unit === "days" ? " days" : "";
-  const sample = m.id === OBJECT_INVENTORY ? `${m.n} objects` : `${m.n} deals`;
+  // A measure doesn't say what its sample counts, so only the inventory names it (DECISIONS.md 449).
+  const sample = m.id === OBJECT_INVENTORY ? `${m.n} objects` : `${m.n}`;
   const lines = [`### ${m.label}: ${m.value}${unit}`, "", `*Definition:* ${m.definition}`, "", `**Sample:** ${sample}${m.dateRange ? `, ${m.dateRange.from} to ${m.dateRange.to}` : ""}`, ""];
   if (Object.keys(m.stats).length) lines.push(`**Detail:** ${Object.entries(m.stats).map(([k, v]) => `${k} ${v}`).join(", ")}`, "");
   if (m.exclusions.length) lines.push(`**Excludes:** ${m.exclusions.join("; ")}`, "");
