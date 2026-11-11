@@ -1,6 +1,7 @@
-import type { Finding, Score } from "../schemas/index.ts";
+import type { Finding, Run, Score } from "../schemas/index.ts";
 import type { OverallScore } from "../domains/scoring.ts";
 import type { ValueModel } from "../value/model.ts";
+import { apiLimitsExtractor } from "../extract/integrations.ts";
 
 // The re-check (roadmap Stage 5): what changed since the first health check.
 // Checks are lined up by rule, not by finding, because a rule can raise one
@@ -21,9 +22,18 @@ export type Progress = {
   added: RuleChange[];
   unknown: RuleChange[];
   areas: Array<{ domain: string; before: number | null; after: number | null }>;
+  /** Storage then and now (DECISIONS.md 500). Null when this run has no storage finding, so nothing is said. */
+  storage: StorageProgress | null;
 };
 
-export type ProgressSide = { runId: string; asOf: string; findings: Finding[]; scores: Score[]; overall: OverallScore; value: ValueModel };
+export type StorageReading = { used: number; max: number };
+/** One kind of storage, read by both runs. The average is set only for a rise over 30 days or more. */
+export type StorageChange = { label: string; then: StorageReading; now: StorageReading; days: number; average: number | null };
+export type StorageNotCompared = "not_read_then" | "unreadable_now" | "unreadable_then" | "not_alike";
+export type StorageProgress = { compared: StorageChange[] } | { notCompared: StorageNotCompared };
+
+/** `limitsReadAt` is when the run's `api-limits` step finished: when its storage was read. */
+export type ProgressSide = { runId: string; asOf: string; findings: Finding[]; scores: Score[]; overall: OverallScore; value: ValueModel; limitsReadAt: string | null };
 
 const byRule = (findings: Finding[]): Map<string, Finding[]> => {
   const map = new Map<string, Finding[]>();
@@ -68,8 +78,89 @@ export function compareWithBaseline(baseline: ProgressSide, current: ProgressSid
     added,
     unknown,
     areas: domains.map((domain) => ({ domain, before: scoreOf(baseline.scores, domain), after: scoreOf(current.scores, domain) })).filter((a) => a.before !== null || a.after !== null),
+    storage: compareStorage(baseline, current),
   };
 }
+
+// Storage growth (DECISIONS.md 500). The org keeps no history of its storage,
+// but a re-check holds two readings of ours, so the change between them is
+// measured, not estimated. No run-out date: two readings can't tell a steady
+// rise from one data load.
+
+export const STORAGE_RULE = "tech.storage-use";
+/**
+ * The rule's versions that read storage the same way: the same fact keys, used
+ * as the allowance less what remains, in MB. Version 2 changed only how the
+ * largest objects are named. A reading from a version not on this list may mean
+ * something else, so it isn't compared. Whoever raises the rule's version
+ * decides whether it belongs here (a test fails until they do).
+ */
+export const STORAGE_READ_ALIKE: readonly number[] = [1, 2];
+const STORAGE_KINDS = [
+  ["DataStorageMB", "Data storage"],
+  ["FileStorageMB", "File storage"],
+] as const;
+/** An average is given over this many days, and only when the readings are at least this far apart. */
+export const STORAGE_AVERAGE_DAYS = 30;
+const DAY_MS = 86_400_000;
+
+/** When the run read its limits: its `api-limits` step's finish. A reused checkpoint keeps the first one, as it keeps that connection's limits. */
+export const limitsReadAt = (run: Run): string | null => run.steps.find((s) => s.id === apiLimitsExtractor.id)?.finishedAt ?? null;
+
+/** A kind's used and allowance figures, when both are whole MB and the allowance is above 0. */
+function readingOf(f: Finding, key: string): StorageReading | null {
+  const used = f.facts[`${key}Used`];
+  const max = f.facts[`${key}Max`];
+  if (used === undefined || max === undefined || !Number.isInteger(used) || !Number.isInteger(max) || used < 0 || max <= 0) return null;
+  return { used, max };
+}
+
+function compareStorage(baseline: ProgressSide, current: ProgressSide): StorageProgress | null {
+  const now = current.findings.find((f) => f.ruleId === STORAGE_RULE);
+  if (!now) return null;
+  const then = baseline.findings.find((f) => f.ruleId === STORAGE_RULE);
+  if (!then) return { notCompared: "not_read_then" };
+  if (now.status === "not_measurable") return { notCompared: "unreadable_now" };
+  if (then.status === "not_measurable") return { notCompared: "unreadable_then" };
+  const notAlike: StorageProgress = { notCompared: "not_alike" };
+  if (![then, now].every((f) => (f.status === "issue" || f.status === "passed") && STORAGE_READ_ALIKE.includes(f.ruleVersion))) return notAlike;
+  const from = Date.parse(baseline.limitsReadAt ?? "");
+  const to = Date.parse(current.limitsReadAt ?? "");
+  if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) return notAlike;
+  const days = Math.floor((to - from) / DAY_MS);
+  const compared = STORAGE_KINDS.flatMap(([key, label]): StorageChange[] => {
+    const [a, b] = [readingOf(then, key), readingOf(now, key)];
+    if (!a || !b) return [];
+    const rise = b.used - a.used;
+    return [{ label, then: a, now: b, days, average: rise > 0 && days >= STORAGE_AVERAGE_DAYS ? Math.round((rise / days) * STORAGE_AVERAGE_DAYS) : null }];
+  });
+  return compared.length ? { compared } : notAlike;
+}
+
+const NOT_COMPARED: Record<StorageNotCompared, string> = {
+  not_read_then: "Your last health check didn't read storage, so we can't say how it has changed.",
+  unreadable_now: "Storage couldn't be read this time, so we can't say how it has changed since your last health check.",
+  unreadable_then: "Storage couldn't be read last time, so we can't say how it has changed since your last health check.",
+  not_alike: "We can't set the two health checks' storage readings side by side, so we don't compare them.",
+};
+
+const mb = (n: number): string => n.toLocaleString("en-GB");
+const dayCount = (n: number): string => `${n} ${n === 1 ? "day" : "days"}`;
+
+/** What every page about progress says about storage, one sentence a kind, so they can't differ. Empty when there's nothing to say. */
+export function storageSentences(p: Progress): string[] {
+  const s = p.storage;
+  if (!s) return [];
+  if ("notCompared" in s) return [NOT_COMPARED[s.notCompared]];
+  return s.compared.map((k) => {
+    const change = k.now.used - k.then.used;
+    const average = k.average === null ? "" : ` (an average of ${mb(k.average)} MB every ${STORAGE_AVERAGE_DAYS} days)`;
+    const moved = change === 0 ? `the same as ${dayCount(k.days)} ago` : `${change > 0 ? "up" : "down"} ${mb(Math.abs(change))} MB in ${dayCount(k.days)}${average}`;
+    return `${k.label}: ${mb(k.then.used)} of ${mb(k.then.max)} MB used then, ${mb(k.now.used)} of ${mb(k.now.max)} MB now, ${moved}.`;
+  });
+}
+
+const comparedStorage = (p: Progress): StorageChange[] => (p.storage && "compared" in p.storage ? p.storage.compared : []);
 
 /** Every figure a page about progress quotes, for the number check. */
 /** How many of each list the progress page names. The rest are counted, so the count is a figure too. */
@@ -82,7 +173,14 @@ export function progressFigures(p: Progress): number[] {
     ...p.areas.map((a) => (a.before !== null && a.after !== null ? Math.abs(a.after - a.before) : null)),
   ].filter((n): n is number => n !== null);
   const overflow = [p.fixed, p.remaining, p.added].filter((l) => l.length > PROGRESS_LISTED).map((l) => l.length - PROGRESS_LISTED);
-  return [...pairs, ...changes, p.fixed.length, p.remaining.length, p.added.length, p.unknown.length, ...overflow];
+  const storage = comparedStorage(p).flatMap((k) => [k.then.used, k.then.max, k.now.used, k.now.max, Math.abs(k.now.used - k.then.used), ...(k.average === null ? [] : [k.average])]);
+  return [...pairs, ...changes, p.fixed.length, p.remaining.length, p.added.length, p.unknown.length, ...overflow, ...storage];
+}
+
+/** The day counts the storage sentences print ("in 118 days", "every 30 days"). The number check reads them as days, not plain counts. */
+export function progressDays(p: Progress): number[] {
+  const kinds = comparedStorage(p);
+  return [...kinds.map((k) => k.days), ...(kinds.some((k) => k.average !== null) ? [STORAGE_AVERAGE_DAYS] : [])];
 }
 
 export const worthFigures = (p: Progress): number[] => [p.worth.before, p.worth.after, Math.abs(p.worth.before - p.worth.after)];

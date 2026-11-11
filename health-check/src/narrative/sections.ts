@@ -1,4 +1,4 @@
-import { compareWithBaseline, progressFigures, worthFigures, type Progress } from "../progress/compare.ts";
+import { compareWithBaseline, limitsReadAt, progressDays, progressFigures, storageSentences, worthFigures, type Progress } from "../progress/compare.ts";
 import { factsText, type FactsSummary } from "../facts/summary.ts";
 import { addedByFinding, buildValueModel, MONEY_FACTS, worthOf, HEADLINE_KINDS, KIND_LABELS, TEAM_TIME_GROUP, UK_HOURLY_BENCHMARK, WORKING_WEEKS, type TeamTime, type ValueModel } from "../value/model.ts";
 import { AREA_WEIGHTS, CRITICAL_CAP, GRADES, overallScore, type OverallScore } from "../domains/scoring.ts";
@@ -324,6 +324,7 @@ function progressText(p: Progress, currency: string): string {
     list("Still open", p.remaining),
     list("New since then", p.added),
     list("Can't tell yet", p.unknown, ", because these couldn't be measured this time"),
+    storageSentences(p).join("\n"),
   );
 }
 
@@ -864,8 +865,8 @@ export function buildReport(given: ReportInput): BuiltReport {
   if (input.baseline) {
     const first = buildReport({ ...input.baseline, baseline: null });
     progress = compareWithBaseline(
-      { runId: first.input.run.id, asOf: first.input.run.asOf, findings: first.teamFindings, scores: first.input.scores ?? [], overall: first.overall, value: first.value },
-      { runId: run.id, asOf: run.asOf, findings: team, scores, overall, value },
+      { runId: first.input.run.id, asOf: first.input.run.asOf, findings: first.teamFindings, scores: first.input.scores ?? [], overall: first.overall, value: first.value, limitsReadAt: limitsReadAt(first.input.run) },
+      { runId: run.id, asOf: run.asOf, findings: team, scores, overall, value, limitsReadAt: limitsReadAt(run) },
     );
   }
   // Every compared figure comes from deals, which a set-up review never reads.
@@ -917,6 +918,7 @@ export function buildReport(given: ReportInput): BuiltReport {
   if (progress) {
     dataset.figures.push(...progressFigures(progress).map((value) => ({ source: PROGRESS, kind: "number" as const, value })));
     dataset.figures.push(...worthFigures(progress).map((value) => ({ source: PROGRESS, kind: "currency" as const, value, currency: calibration.currency })));
+    dataset.figures.push(...progressDays(progress).map((value) => ({ source: PROGRESS, kind: "duration" as const, value, unit: "day" })));
   }
   // What each area is worth, as its chapter in the full report says it, and the chapter's counts.
   for (const domain of new Set(team.map((f) => f.domain))) {

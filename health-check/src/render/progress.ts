@@ -1,6 +1,6 @@
 import type { BuiltReport } from "../narrative/sections.ts";
 import { domainLabel } from "../narrative/select.ts";
-import { PROGRESS_LISTED } from "../progress/compare.ts";
+import { PROGRESS_LISTED, storageSentences } from "../progress/compare.ts";
 import { compactMoney } from "./format.ts";
 import type { Render } from "./html.ts";
 
@@ -40,5 +40,6 @@ export function progressPage(r: Render, report: BuiltReport): string {
   const moved = p.areas.filter((a) => a.before !== null && a.after !== null && a.before !== a.after).sort((a, b) => Math.abs(b.after! - b.before!) - Math.abs(a.after! - a.before!));
   const areas = moved.length ? `<p class="note">${r.t(`Biggest moves: ${moved.slice(0, 4).map((a) => `${domainLabel(a.domain)} ${a.before} to ${a.after}`).join(", ")}.`)}</p>` : "";
   const unknown = p.unknown.length ? `<p class="note">${r.t(`We can't tell yet for ${p.unknown.length} more, because they couldn't be measured this time. The raw notes list them.`)}</p>` : "";
-  return `<div class="progress"><div class="eyebrow">${r.t("Since your last health check")}</div><h2>${r.t("What has changed")}</h2>${pair}<div class="lists">${list("Fixed", p.fixed)}${list("Still open", p.remaining)}${list("New since then", p.added)}</div>${areas}${unknown}<p class="note">${r.t("Some of the change in money can come from the business itself, not only from fixes.")}</p></div>`;
+  const storage = storageSentences(p).map((s) => `<p class="note">${r.t(s)}</p>`).join("");
+  return `<div class="progress"><div class="eyebrow">${r.t("Since your last health check")}</div><h2>${r.t("What has changed")}</h2>${pair}<div class="lists">${list("Fixed", p.fixed)}${list("Still open", p.remaining)}${list("New since then", p.added)}</div>${areas}${unknown}${storage}<p class="note">${r.t("Some of the change in money can come from the business itself, not only from fixes.")}</p></div>`;
 }

@@ -15,6 +15,7 @@ import { DOCUMENTED, readDocument } from "../domains/configuration/documented.ts
 import { practiceFor, practiceId, sourceLabel } from "../practice/index.ts";
 import { activeUsersChart, lightningChart, loginChannelsChart, rankScorecard } from "../render/charts.ts";
 import { areaWeight } from "../domains/scoring.ts";
+import { storageSentences } from "../progress/compare.ts";
 import { accessBlock, automationLists, automationTable, dataModelDiagram, DIAGRAM_KEY, hasDocument, integrationsBlock, objectsTable, relationshipsTable, sharingTable } from "../render/documented.ts";
 
 // The customer microsite's pages (roadmap Stage 4). Built for a browser, not
@@ -214,7 +215,7 @@ function progress(r: Render, report: BuiltReport): string {
   const list = (title: string, items: typeof p.fixed): string => (items.length ? `<h2>${r.t(`${title} (${items.length})`)}</h2><ul>${items.map((c) => `<li>${r.t(c.title)}${r.ref(c.findingIds[0]!)}</li>`).join("")}</ul>` : "");
   const score = p.score.before !== null && p.score.after !== null ? `<div class="stat"><b>${p.score.before} to ${p.score.after}</b><span>Barometer score</span></div>` : "";
   return page(
-    `<h1>Since your last health check</h1><div class="stats">${score}<div class="stat"><b>${m(p.worth.before)} to ${m(p.worth.after)}</b><span>${r.t("What the open issues are worth")}</span></div></div>${list("Fixed", p.fixed)}${list("Still open", p.remaining)}${list("New since then", p.added)}${list("Can't tell yet", p.unknown)}<p class="muted">${r.t("Some of the change in money can come from the business itself, not only from fixes.")}</p>`,
+    `<h1>Since your last health check</h1><div class="stats">${score}<div class="stat"><b>${m(p.worth.before)} to ${m(p.worth.after)}</b><span>${r.t("What the open issues are worth")}</span></div></div>${list("Fixed", p.fixed)}${list("Still open", p.remaining)}${list("New since then", p.added)}${list("Can't tell yet", p.unknown)}${storageSentences(p).map((s) => `<p>${r.t(s)}</p>`).join("")}<p class="muted">${r.t("Some of the change in money can come from the business itself, not only from fixes.")}</p>`,
   );
 }
 

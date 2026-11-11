@@ -367,6 +367,23 @@ describe("a re-check with an intake and interviews (DECISIONS.md 418)", () => {
     const { layout } = await renderPdf(browser, fullReportHtml(report, pseudonyms), { ...deckRange, dataset: report.dataset });
     assert.deepEqual(layout.problems, [], describeProblems(layout.problems));
   });
+
+  test("both still fit with a storage sentence for each kind on the progress page (DECISIONS.md 500)", async () => {
+    // The earlier check read its limits 118 days before, with less of each kind used: a rise
+    // with an average is the longest sentence, so this is the progress page at its fullest.
+    const plain = recheck();
+    const limitsAt = (iso: string) => ({ ...plain.input.run, steps: plain.input.run.steps.map((s) => (s.id === "api-limits" ? { ...s, finishedAt: iso } : s)) });
+    const less = (f: Finding): Finding => ({ ...f, facts: { ...f.facts, DataStorageMBUsed: f.facts.DataStorageMBUsed! - 470, FileStorageMBUsed: f.facts.FileStorageMBUsed! - 520 } });
+    const earlier: ReportInput = { ...plain.input.baseline!, run: { ...limitsAt("2026-07-14T12:00:00.000Z"), id: run.id, baselineRunId: null }, findings: plain.input.baseline!.findings.map((f) => (f.ruleId === "tech.storage-use" ? less(f) : f)) };
+    const report = buildReport({ ...plain.input, run: limitsAt("2026-11-09T12:00:00.000Z"), baseline: earlier });
+    const html = executiveHtml(report, pseudonyms);
+    assert.match(html, /Data storage: [\d,]+ of [\d,]+ MB used then, [\d,]+ of [\d,]+ MB now, up 470 MB in 118 days \(an average of 119 MB every 30 days\)\./);
+    assert.match(html, /File storage: [\d,]+ of [\d,]+ MB used then, [\d,]+ of [\d,]+ MB now, up 520 MB in 118 days \(an average of 132 MB every 30 days\)\./);
+    const exec = await renderPdf(browser, html, { minPages: EXECUTIVE_PAGES.min, maxPages: executiveMaxPages(report), dataset: report.dataset });
+    assert.deepEqual(exec.layout.problems, [], describeProblems(exec.layout.problems));
+    const deck = await renderPdf(browser, fullReportHtml(report, pseudonyms), { ...deckRange, dataset: report.dataset });
+    assert.deepEqual(deck.layout.problems, [], describeProblems(deck.layout.problems));
+  });
 });
 
 describe("a thin org", () => {
