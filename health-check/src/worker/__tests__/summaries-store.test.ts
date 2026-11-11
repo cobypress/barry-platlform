@@ -129,3 +129,21 @@ describe("the memory store's summaries row", () => {
     assert.ok(!JSON.stringify(read).includes("approver.zz") && !JSON.stringify(read).includes("11:11:00"));
   });
 });
+
+describe("a summary holding a character printing or the database would change or refuse", () => {
+  const CHARACTERS: Array<[string, string]> = [["U+0000", "\u0000"], ["U+000B", "\u000B"], ["U+0001", "\u0001"], ["U+FFFF", "￿"], ["a lone high surrogate", "\uD800"], ["a lone low surrogate", "\uDC00"]];
+
+  test("is dropped at save with notWritten one higher, and the other items written", async () => {
+    for (const [what, c] of CHARACTERS) {
+      const s = store();
+      await s.saveRunOutput(RUN_ID, output({ ...FIRST, items: [{ ...FIRST.items[0]!, summary: `Sends each lead${c} on.` }, FIRST.items[1]!] }));
+      const row = s.summaries.get(RUN_ID)!;
+      assert.deepEqual(row.items, [{ ...FIRST.items[1]!, struck: false }], what);
+      assert.equal(row.leftOut.notWritten, FIRST.leftOut.notWritten + 1, what);
+      // Alone, it leaves no row at all.
+      const alone = store();
+      await alone.saveRunOutput(RUN_ID, output({ ...FIRST, items: [{ ...FIRST.items[0]!, name: `Lead${c}Router` }] }));
+      assert.equal(alone.summaries.size, 0, what);
+    }
+  });
+});

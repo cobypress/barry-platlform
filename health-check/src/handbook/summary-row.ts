@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { Timestamp } from "../schemas/common.ts";
+import { plainText } from "./plain-text.ts";
 import type { Handbook } from "./schema.ts";
 import type { HandbookSummaries } from "./summaries.ts";
 
@@ -43,11 +44,13 @@ export const ConsoleSummariesRow = ConsoleRowShape.refine((r) => (r.decidedBy ==
 export type ConsoleSummariesRow = z.infer<typeof ConsoleSummariesRow>;
 
 /**
- * The row as the documents job reads it: the same schema without who decided
- * it or when, which the worker never reads (decision 495). The database's own
- * checks hold the status to those two.
+ * The row as the documents job reads it: the same schema with only what it
+ * prints from. Never who decided it or when (decision 495), which the
+ * database's own checks hold the status to; and not the model or the time,
+ * so a timestamp read back in a form we didn't expect can't make an approved
+ * row read as none.
  */
-const StoredRow = ConsoleRowShape.omit({ decidedBy: true, decidedAt: true }).strict();
+const StoredRow = ConsoleRowShape.omit({ decidedBy: true, decidedAt: true, model: true, madeAt: true }).strict();
 
 /** What the run job hands the store: handbook-summaries.json's summaries and counts, never the code. */
 export type SummariesToSave = Pick<HandbookSummaries, "model" | "madeAt" | "items" | "leftOut">;
@@ -58,19 +61,31 @@ export type StoredSummaries = Pick<ConsoleSummariesRow, "status" | "items" | "le
 /** Problems in a parse, counted: an issue's message can quote the value. */
 const issuesOf = (error: z.ZodError): number => error.issues.length;
 
-/** The row the worker writes: waiting, nobody and no time decided, nothing struck. Checked against the console's schema first. */
-export function waitingRow(runId: string, summaries: SummariesToSave): { ok: true; row: ConsoleSummariesRow } | { ok: false; issues: number } {
+/**
+ * The row the worker writes: waiting, nobody and no time decided, nothing
+ * struck, checked against the console's schema. Only summaries that could be
+ * printed as they stand go in, by printableText, under a name that's plain
+ * text: anything else would be refused by the database (a U+0000 or a lone
+ * surrogate) or changed by printing, and a file written before the summary
+ * route checked for them can hold one. Each left out is counted as not
+ * written, so the counts still add up to what was read. With none left, there
+ * is no row: `row` is null.
+ */
+export function waitingRow(runId: string, summaries: SummariesToSave): { ok: true; row: ConsoleSummariesRow | null; dropped: number } | { ok: false; issues: number } {
+  const kept = summaries.items.filter((i) => printableText(i.summary) && plainText(i.name));
+  const dropped = summaries.items.length - kept.length;
+  if (kept.length === 0) return { ok: true, row: null, dropped };
   const parsed = ConsoleSummariesRow.safeParse({
     runId,
     status: "waiting",
     model: summaries.model,
     madeAt: summaries.madeAt,
-    items: summaries.items.map((i) => ({ kind: i.kind, name: i.name, summary: i.summary, struck: false })),
-    leftOut: summaries.leftOut,
+    items: kept.map((i) => ({ kind: i.kind, name: i.name, summary: i.summary, struck: false })),
+    leftOut: { ...summaries.leftOut, notWritten: summaries.leftOut.notWritten + dropped },
     decidedBy: null,
     decidedAt: null,
   });
-  return parsed.success ? { ok: true, row: parsed.data } : { ok: false, issues: issuesOf(parsed.error) };
+  return parsed.success ? { ok: true, row: parsed.data, dropped } : { ok: false, issues: issuesOf(parsed.error) };
 }
 
 /** A row read back, held to the console's schema. One that fails reads as none. */
@@ -90,10 +105,11 @@ export const PRINT_MAX = 1_200;
  * writes, so the checks that matter on paper are made again (decision 495):
  * nothing in double square brackets, since anything that restores names would
  * turn a token into a person's name; no line break, which Word splits into
- * lines; something there; and no more than was ever written.
+ * lines; no character Word can't hold, which printing would change; something
+ * there; and no more than was ever written.
  */
 export function printableText(summary: string): boolean {
-  return !summary.includes("[[") && !/[\r\n\u2028\u2029]/.test(summary) && summary.trim() !== "" && summary.length <= PRINT_MAX;
+  return plainText(summary) && !summary.includes("[[") && !/[\r\n\u2028\u2029]/.test(summary) && summary.trim() !== "" && summary.length <= PRINT_MAX;
 }
 
 /** The summaries the handbook prints, and how many of the rest were left out and why, worked out here and only counted in the document. */

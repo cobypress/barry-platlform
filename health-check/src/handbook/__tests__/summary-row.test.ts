@@ -2,11 +2,12 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { MODELS } from "../../config.ts";
 import { APEX_SOURCE_MAX_ITEMS } from "../../extract/apex-source.ts";
-import { renderHandbookDocx, summaryCountWords } from "../docx.ts";
+import { renderHandbookDocx, summaryCountWords, wordSafe } from "../docx.ts";
+import { plainText } from "../plain-text.ts";
 import { Pseudonymiser } from "../../privacy/pseudonymiser.ts";
 import { docxText } from "../../testing/docx-text.ts";
 import { Handbook, HANDBOOK_VERSION, type HandbookApexClass, type HandbookApexTrigger } from "../schema.ts";
-import { HandbookSummaries, SUMMARY_LIMITS } from "../summaries.ts";
+import { HandbookSummaries, replyProblems, SUMMARY_LIMITS } from "../summaries.ts";
 import { CONSOLE_SUMMARY_LIMITS, ConsoleSummariesRow, PRINT_MAX, printableSummaries, printableText, storedFromRow, waitingRow, type StoredSummaries, type SummariesToSave } from "../summary-row.ts";
 
 // Claude's summaries as the console keeps them (DECISIONS.md 494 and 495): the
@@ -43,7 +44,8 @@ describe("the console's limits, against everything the worker can write", () => 
     items[2] = item(2, { kind: "class", summary: astral });
     const largest = HandbookSummaries.parse({ version: 1, ...file(items, { leftOut: { tests: 9, tooLarge: 9, overLimit: 9, unreadable: 9, refused: 9, notWritten: 9 } }) });
     const row = waitingRow("hc-2026-10-31-00000001", largest);
-    assert.ok(row.ok);
+    assert.ok(row.ok && row.row);
+    assert.equal(row.dropped, 0);
     assert.equal(row.row.items.length, 200);
     assert.ok(row.row.items.every((i) => i.struck === false));
     assert.equal(row.row.items[2]!.summary, astral);
@@ -54,7 +56,6 @@ describe("the console's limits, against everything the worker can write", () => 
     const over: Array<[string, SummariesToSave]> = [
       ["251 items", file(Array.from({ length: 251 }, (_, i) => item(i)))],
       ["a 256-character name", file([item(1, { name: "N".repeat(256) })])],
-      ["a 1,201-character summary", file([item(1, { summary: "s".repeat(1_201) })])],
       ["a 101-character model", file([item(1)], { model: "m".repeat(101) })],
     ];
     for (const [what, summaries] of over) {
@@ -65,8 +66,18 @@ describe("the console's limits, against everything the worker can write", () => 
     }
     // And at each limit, it's taken.
     for (const summaries of [file(Array.from({ length: 250 }, (_, i) => item(i))), file([item(1, { name: "N".repeat(255) })]), file([item(1, { summary: "s".repeat(1_200) })]), file([item(1)], { model: "m".repeat(100) })]) {
-      assert.ok(waitingRow("hc-2026-10-31-00000001", summaries).ok);
+      const row = waitingRow("hc-2026-10-31-00000001", summaries);
+      assert.ok(row.ok && row.row);
     }
+  });
+
+  test("a summary over 1,200 characters is left out of the row as not written, since it could never be printed; alone, there's no row", () => {
+    const alone = waitingRow("hc-2026-10-31-00000001", file([item(1, { summary: "s".repeat(1_201) })]));
+    assert.deepEqual(alone, { ok: true, row: null, dropped: 1 });
+    const beside = waitingRow("hc-2026-10-31-00000001", file([item(1, { summary: "s".repeat(1_201) }), item(2)]));
+    assert.ok(beside.ok && beside.row);
+    assert.deepEqual(beside.row.items.map((i) => i.name), ["Synthetic0002"]);
+    assert.equal(beside.row.leftOut.notWritten, 1);
   });
 
   test("the console's rule on who decided: waiting exactly when nobody and no time did", () => {
@@ -79,12 +90,13 @@ describe("the console's limits, against everything the worker can write", () => 
   });
 
   test("a row read back gives its status, items and counts, never who decided it", () => {
-    const read = storedFromRow({ runId: "r", status: "approved", model: "m", madeAt: MADE_AT, items: [{ ...item(1), struck: true }], leftOut: LEFT_OUT });
+    // Only what the handbook prints from is read: not the model or the time either.
+    const read = storedFromRow({ runId: "r", status: "approved", items: [{ ...item(1), struck: true }], leftOut: LEFT_OUT });
     assert.ok(read.ok);
     assert.deepEqual(Object.keys(read.stored).sort(), ["items", "leftOut", "status"]);
-    // A key the console's schema doesn't have, a missing one, or a value outside it: none.
-    for (const bad of [{ decidedBy: "consultant@example.com" }, { status: "done" }, { items: [item(1)] }, { model: "" }, { madeAt: "yesterday" }]) {
-      assert.ok(!storedFromRow({ runId: "r", status: "approved", model: "m", madeAt: MADE_AT, items: [], leftOut: LEFT_OUT, ...bad }).ok, JSON.stringify(bad));
+    // A key it doesn't read, a missing one, or a value outside the console's schema: none.
+    for (const bad of [{ decidedBy: "consultant@example.com" }, { model: "m" }, { madeAt: MADE_AT }, { status: "done" }, { items: [item(1)] }, { runId: "" }]) {
+      assert.ok(!storedFromRow({ runId: "r", status: "approved", items: [], leftOut: LEFT_OUT, ...bad }).ok, JSON.stringify(bad));
     }
   });
 });
@@ -204,5 +216,67 @@ describe("the renderer and a summary", () => {
     const options = { clientName: "Synthetic Co", runDate: "2026-10-31T00:00:00.000Z" };
     const text = docxText(await renderHandbookDocx(handbook(), { ...options, summaries: { items: [], counts: { tests: 1, tooLarge: 0, overLimit: 0, rest: 0 } } }));
     assert.equal(text, docxText(await renderHandbookDocx(handbook(), options)));
+  });
+});
+
+// Fix round on decisions 494 and 495: a summary may hold no character that
+// printing would change (wordSafe) or the database would refuse (jsonb takes
+// no U+0000 and no lone surrogate, SQLSTATE 22P05), at any of the three
+// places it's checked: as Claude writes it, as it's saved, and as it's printed.
+const UNPRINTABLE: Array<[string, string]> = [
+  ["U+0000", "\u0000"],
+  ["U+000B", "\u000B"],
+  ["U+0001", "\u0001"],
+  ["U+FFFF", "\uFFFF"],
+  ["a lone high surrogate", "\uD800"],
+  ["a lone low surrogate", "\uDC00"],
+];
+
+describe("a character printing or the database would change or refuse", () => {
+  test("is a problem in Claude's reply, so it gets its one more try", () => {
+    for (const [what, c] of UNPRINTABLE) {
+      const problems = replyProblems(`Runs${c}nightly for each lead.`, "Describe this Apex class.", new Pseudonymiser());
+      assert.ok(problems.includes("It holds a character that can't be printed, such as a control character. Write plain text."), what);
+    }
+    assert.deepEqual(replyProblems("Runs nightly for each lead.", "Describe this Apex class.", new Pseudonymiser()), []);
+  });
+
+  test("is left out of the row at save, counted as not written, and the rest written; in a name too", () => {
+    for (const [what, c] of UNPRINTABLE) {
+      for (const bad of [item(1, { summary: `Runs${c}nightly.` }), item(1, { name: `Synthetic${c}0001` })]) {
+        const row = waitingRow("hc-2026-10-31-00000001", file([bad, item(2)], { leftOut: { ...LEFT_OUT, notWritten: 3 } }));
+        assert.ok(row.ok && row.row, what);
+        assert.equal(row.dropped, 1, what);
+        assert.deepEqual(row.row.items.map((i) => i.name), ["Synthetic0002"], what);
+        assert.equal(row.row.leftOut.notWritten, 4, what);
+        assert.ok(!JSON.stringify(row.row).includes(c) && !/\\u(0000|d800|dc00)/i.test(JSON.stringify(row.row)), what);
+      }
+      assert.deepEqual(waitingRow("hc-2026-10-31-00000001", file([item(1, { summary: `Runs${c}nightly.` })])), { ok: true, row: null, dropped: 1 }, what);
+    }
+  });
+
+  test("is not printed, and is counted with the rest", () => {
+    for (const [what, c] of UNPRINTABLE) {
+      assert.ok(!printableText(`Runs${c}nightly.`), what);
+      const printed = printableSummaries(handbook(), stored([one("class", "LeadRouter"), one("class", "Shared", `Runs${c}nightly.`)]))!;
+      assert.deepEqual(printed.items.map((i) => i.name), ["LeadRouter"], what);
+      assert.equal(printed.counts.rest, 1, what);
+    }
+  });
+
+  test("whatever printableText takes, wordSafe leaves as it is; and plain text is exactly what wordSafe leaves alone", () => {
+    const planted: string[] = [];
+    // Every character below U+0100 on its own and inside a word, the ends of the BMP, the separators, the replacement character, and surrogates paired and alone.
+    for (let code = 0; code < 0x100; code++) planted.push(String.fromCharCode(code), `Runs${String.fromCharCode(code)}nightly.`);
+    for (const c of ["\uFFFD", "\uFFFE", "\uFFFF", "\uFEFF", "\u2028", "\u2029", "\u{1D49C}", "\uD800", "\uDBFF", "\uDC00", "\uDFFF", "\uDC00\uD800", "\uD800\uDC00x", "x\uD800", "\uDFFFx"]) planted.push(c, `Runs ${c} nightly.`);
+    let printable = 0;
+    for (const s of planted) {
+      assert.equal(plainText(s), wordSafe(s) === s, JSON.stringify(s));
+      if (printableText(s)) {
+        printable++;
+        assert.equal(wordSafe(s), s, JSON.stringify(s));
+      }
+    }
+    assert.ok(printable > 100 && printable < planted.length, "both outcomes were seen");
   });
 });

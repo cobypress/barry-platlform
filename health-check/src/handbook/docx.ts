@@ -5,6 +5,7 @@ import { UNKNOWN_USER, type Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { compareHandbooks, type Changed, type Compared, type Component, type Detail, type HandbookComparison, type KindComparison, type NotCompared, type Reading } from "./compare.ts";
 import type { EarlierHandbook } from "./read.ts";
 import type { PrintedSummaries } from "./summary-row.ts";
+import { WORD_UNSAFE } from "./plain-text.ts";
 import { APEX_SOURCE_MAX_ITEMS } from "../extract/apex-source.ts";
 import { CHANGES_NOT_KEPT, TRIGGER_EVENTS, type Handbook, type HandbookChange, type HandbookApexClass, type HandbookLastChange, type HandbookApexTouches, type HandbookApexTrigger, type HandbookCondition, type HandbookFlow, type HandbookFlowItem, type HandbookPath, type HandbookStep, type HandbookValidationRule, type HandbookValidationRuleItem, type LastChanges, type ValidationRuleCoverage } from "./schema.ts";
 
@@ -32,10 +33,11 @@ const CODE = "Courier New";
  * half of a surrogate pair, U+FFFE or U+FFFF, and one of them makes a file Word
  * calls corrupt. The docx package drops the control characters silently but
  * not the rest, so each becomes U+FFFD here: the reader sees something was
- * there. Tab, line feed and carriage return are XML's own and are kept.
+ * there. Tab, line feed and carriage return are XML's own and are kept. The
+ * characters are plain-text.ts's, which a summary is held to as well.
  */
 export function wordSafe(text: string): string {
-  return text.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F￾￿]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "�");
+  return text.replace(WORD_UNSAFE, "\uFFFD");
 }
 
 const count = (n: number): string => n.toLocaleString("en-GB");
