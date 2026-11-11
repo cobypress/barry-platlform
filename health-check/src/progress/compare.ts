@@ -91,11 +91,12 @@ export const STORAGE_RULE = "tech.storage-use";
 /**
  * The rule's versions that read storage the same way: the same fact keys, used
  * as the allowance less what remains, in MB. Version 2 changed only how the
- * largest objects are named. A reading from a version not on this list may mean
- * something else, so it isn't compared. Whoever raises the rule's version
+ * largest objects are named, and version 3 only how a kind past its allowance
+ * is worded (DECISIONS.md 502). A reading from a version not on this list may
+ * mean something else, so it isn't compared. Whoever raises the rule's version
  * decides whether it belongs here (a test fails until they do).
  */
-export const STORAGE_READ_ALIKE: readonly number[] = [1, 2];
+export const STORAGE_READ_ALIKE: readonly number[] = [1, 2, 3];
 const STORAGE_KINDS = [
   ["DataStorageMB", "Data storage"],
   ["FileStorageMB", "File storage"],

@@ -394,7 +394,8 @@ const LARGEST_OBJECTS = 5;
 
 const storageUse: Rule = {
   id: "tech.storage-use",
-  version: 2,
+  // 3: a kind past its allowance reads "10,500 MB, over the 10,240 MB allowance" (DECISIONS.md 502).
+  version: 3,
   domain: DOMAIN,
   title: "Data and file storage against the allowance",
   evaluate(ctx): RuleResult | RuleResult[] {
@@ -413,7 +414,9 @@ const storageUse: Rule = {
     if (counts.status === "ok") evidence.push(ctx.ev(counts.source, { count: counts.data.length, note: "Record counts by object, for the largest" }));
     const segments = [{ dimension: "storage kind", segments: read.length }];
     const facts = Object.fromEntries(read.flatMap((r) => [[`${r.key}Used`, r.used], [`${r.key}Max`, r.max], [`${r.key}Share`, r.share]]));
-    const text = (r: (typeof read)[number]): string => `${r.label} is ${r.share}% used (${r.used.toLocaleString("en-GB")} of ${r.max.toLocaleString("en-GB")} MB)`;
+    // Past the allowance, "10,500 of 10,240 MB" would read as a part larger than its whole, which the number check refuses.
+    const amount = (r: (typeof read)[number]): string => (r.used > r.max ? `${r.used.toLocaleString("en-GB")} MB, over the ${r.max.toLocaleString("en-GB")} MB allowance` : `${r.used.toLocaleString("en-GB")} of ${r.max.toLocaleString("en-GB")} MB`);
+    const text = (r: (typeof read)[number]): string => `${r.label} is ${r.share}% used (${amount(r)})`;
     const list = (items: string[]): string => (items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`);
     const opening = list(read.map(text));
     const sentence = `${opening.charAt(0).toUpperCase()}${opening.slice(1)}.`;

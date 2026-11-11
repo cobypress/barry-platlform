@@ -136,7 +136,7 @@ describe("storage on a re-check (DECISIONS.md 500)", () => {
       ["the earlier run has no storage finding", { edit: gone }, {}, NOT_READ_THEN],
       ["the earlier finding wasn't measurable", { edit: notMeasurable }, {}, UNREADABLE_THEN],
       ["this run's finding wasn't measurable", {}, { edit: notMeasurable }, UNREADABLE_NOW],
-      ["the earlier finding was made by a rule version not on the list, reading the same figures", { edit: (f) => ({ ...THEN(f)!, ruleVersion: 3 }) }, {}, NOT_ALIKE],
+      ["the earlier finding was made by a rule version not on the list, reading the same figures", { edit: (f) => ({ ...THEN(f)!, ruleVersion: 4 }) }, {}, NOT_ALIKE],
       ["no kind is held by both", { edit: kinds(null, [4_480, 20_480]) }, { edit: kinds([9_410, 10_240], null) }, NOT_ALIKE],
       ["the earlier reading has no time", { at: null }, {}, NOT_ALIKE],
       ["this reading has no time", {}, { at: null }, NOT_ALIKE],
@@ -306,6 +306,12 @@ describe("storage on a re-check, corrected after review (DECISIONS.md 501 and 50
     assert.ok(progressFigures(without.progress!).includes(rest - 1));
     // The microsite lists every one.
     assert.equal(decoded(micrositePage(report)).split("<li>").length - 1, p.fixed.length + p.remaining.length + p.added.length + p.unknown.length);
+  });
+
+  test("an earlier finding from version 2 of the rule and one from version 3 are compared", () => {
+    assert.equal(storageFinding.ruleVersion, 3);
+    const report = recheck({ edit: (f) => ({ ...THEN(f)!, ruleVersion: 2 }) });
+    assert.deepEqual(storageSentences(report.progress!), [DATA_118, FILE_118]);
   });
 });
 
