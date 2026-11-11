@@ -7,7 +7,7 @@ import { contributeBenchmark, exportBenchmark } from "../../benchmark/export.ts"
 import type { NarrativeClient, NarrativeRequest } from "../../narrative/client.ts";
 import { runFromRecording, tempDir } from "../../testing/harness.ts";
 import { loadAnswers, loadRecording, ReplayTransport, type Recording } from "../../testing/replay.ts";
-import { APEX_OUTSIDE_MODIFIER, CHANGES_DELEGATE, CHANGES_MARKER, CHANGES_PLANTED, HANDBOOK_CASE_MARKER, HANDBOOK_CASE_PLANTED, HANDBOOK_MARKER, HANDBOOK_PLANTED, USER_ADMIN_MARKER } from "../../testing/synthetic-org.ts";
+import { APEX_OUTSIDE_MODIFIER, CHANGES_DELEGATE, COMPONENT_OUTSIDE_MODIFIER, CHANGES_MARKER, CHANGES_PLANTED, HANDBOOK_CASE_MARKER, HANDBOOK_CASE_PLANTED, HANDBOOK_MARKER, HANDBOOK_PLANTED, USER_ADMIN_MARKER } from "../../testing/synthetic-org.ts";
 import type { RunOutputRecord } from "../../worker/types.ts";
 import { createJobHandler } from "../../worker/worker.ts";
 import { baseDeps, consoleRun, RUN_ID, runInput, syntheticConnection } from "../../worker/__tests__/helpers.ts";
@@ -41,6 +41,11 @@ import type { DocumentKey } from "../../render/render-released.ts";
 // pseudonym map and the step's checkpoint, which the labelling reads, and no
 // other file: handbook.json holds the token. Its only way out is the Word
 // document, through the map.
+//
+// And with who last changed each flow and validation rule (decision 482): a
+// name Salesforce gives beside a flow's active version, and another beside a
+// rule, each for someone the run's user list doesn't hold, the same way, the
+// flows' and rules' own step's checkpoint holding them.
 
 const APEX_OBJECT = "Zebra_Ledger__c";
 // Each written as a query, so a reading that let either through would keep it.
@@ -56,6 +61,11 @@ const NOWHERE = [HANDBOOK_PLANTED, HANDBOOK_CASE_PLANTED, APEX_LITERAL, APEX_COM
 /** Who last changed the planted class, as Salesforce names them: in the pseudonym map and the step's checkpoint, and no other file. */
 const APEX_MODIFIER = "Wren Quillfeather";
 const APEX_MODIFIER_ID = "005000000000961AAA";
+/** Who last changed a planted flow version and a rule, as Salesforce names them: in the pseudonym map and that step's checkpoint, and no other file. */
+const FLOW_MODIFIER = "Fen Larkspur";
+const FLOW_MODIFIER_ID = "005000000000966AAA";
+const RULE_MODIFIER = "Oriel Thistlecombe";
+const RULE_MODIFIER_ID = "005000000000967AAA";
 
 /** The recorded synthetic org, with one more class whose body holds all three. */
 function plantedRecording(): Recording {
@@ -75,12 +85,26 @@ function plantedRecording(): Recording {
   });
   page.totalSize = page.records.length;
   classes.text = JSON.stringify(page);
+  // A later active version of a synthetic flow, and a change to a synthetic rule, each by someone the user list doesn't hold.
+  const changed = (id: string, name: string) => ({ LastModifiedDate: "2026-10-03T09:00:00.000+0000", LastModifiedById: id, LastModifiedBy: { Name: name } });
+  const plant = (from: string, edit: (records: Array<Record<string, any>>) => void) => {
+    const exchange = recording.exchanges.find((e) => decodeURIComponent(e.key).includes(from))!;
+    const list = JSON.parse(exchange.text) as { totalSize: number; records: Array<Record<string, any>> };
+    edit(list.records);
+    list.totalSize = list.records.length;
+    exchange.text = JSON.stringify(list);
+  };
+  plant("LastModifiedBy.Name FROM Flow", (records) => {
+    for (const r of records) if (r.Definition.DeveloperName === "Opportunity_Stage_Review") r.Status = "Obsolete";
+    records.push({ Id: "301000000000999AAA", DefinitionId: "300000000000999AAA", Definition: { DeveloperName: "Opportunity_Stage_Review", NamespacePrefix: null }, VersionNumber: 2, Status: "Active", ...changed(FLOW_MODIFIER_ID, FLOW_MODIFIER) });
+  });
+  plant("LastModifiedBy.Name FROM ValidationRule", (records) => Object.assign(records.find((r) => r.ValidationName === "Reason_When_Escalated")!, changed(RULE_MODIFIER_ID, RULE_MODIFIER)));
   return recording;
 }
 
 const holding = (text: string, markers: string[]): string[] => markers.filter((m) => text.includes(m));
-/** Who last changed a class, the planted one's and the synthetic org's own: named in no output but the pseudonym map. */
-const MODIFIERS = [APEX_MODIFIER, APEX_OUTSIDE_MODIFIER.name];
+/** Who last changed a class, flow or rule, the planted ones' and the synthetic org's own: named in no output but the pseudonym map. */
+const MODIFIERS = [APEX_MODIFIER, APEX_OUTSIDE_MODIFIER.name, FLOW_MODIFIER, RULE_MODIFIER, COMPONENT_OUTSIDE_MODIFIER.name];
 
 /** Every file in a run folder, by its path inside it. */
 function filesIn(dir: string): Map<string, string> {
@@ -143,8 +167,24 @@ describe("the handbook's detail goes nowhere but handbook.json", () => {
     assert.equal(entry.name, APEX_MODIFIER);
     const classes = (JSON.parse(files.get(HANDBOOK_FILE)!) as { apexClasses: { items: Array<{ name: string; lastChanged: { at: string; by: string | null } | null }> } }).apexClasses.items;
     assert.deepEqual(classes.find((c) => c.name === "ZebraLedgerSync")?.lastChanged, { at: "2026-10-02T09:00:00.000+0000", by: entry.token });
-    // And the synthetic org's own, the same way.
-    assert.deepEqual([...files.keys()].filter((f) => files.get(f)!.includes(APEX_OUTSIDE_MODIFIER.name)).sort(), ["checkpoints/apex.json", "pseudonym-map.json"]);
+    // And the synthetic org's own, the same way, who last changed a flow as well (decision 482).
+    assert.deepEqual([...files.keys()].filter((f) => files.get(f)!.includes(APEX_OUTSIDE_MODIFIER.name)).sort(), ["checkpoints/apex.json", "checkpoints/component-changes.json", "pseudonym-map.json"]);
+  });
+
+  test("who last changed the planted flow and rule are tokens in handbook.json, and named only in the pseudonym map and their step's checkpoint", () => {
+    const files = filesIn(join(deps.runsDir, RUN_ID));
+    const map = JSON.parse(files.get("pseudonym-map.json")!) as Array<{ token: string; id: string; name: string }>;
+    const handbook = JSON.parse(files.get(HANDBOOK_FILE)!) as { flows: { items: Array<{ name: string; lastChanged: unknown }> }; validationRules: { items: Array<{ object: string; name: string; lastChanged: unknown }> } };
+    for (const [name, id, lastChanged] of [
+      [FLOW_MODIFIER, FLOW_MODIFIER_ID, handbook.flows.items.find((f) => f.name === "Opportunity_Stage_Review")!.lastChanged],
+      [RULE_MODIFIER, RULE_MODIFIER_ID, handbook.validationRules.items.find((r) => r.object === "Case" && r.name === "Reason_When_Escalated")!.lastChanged],
+      [COMPONENT_OUTSIDE_MODIFIER.name, COMPONENT_OUTSIDE_MODIFIER.id, handbook.validationRules.items.find((r) => r.name === "Due_Date_Required")!.lastChanged],
+    ] as const) {
+      assert.deepEqual([...files.keys()].filter((f) => files.get(f)!.includes(name)).sort(), ["checkpoints/component-changes.json", "pseudonym-map.json"], name);
+      const entry = map.find((e) => e.id === id)!;
+      assert.equal(entry.name, name);
+      assert.equal((lastChanged as { by: string }).by, entry.token, name);
+    }
   });
 
   test("and the made-up key in the same formula, and the Apex body's string and comment, reach no file at all, checkpoints included", () => {
@@ -241,7 +281,7 @@ describe("the documents job: handbook.json reaches the Word document and nothing
     cpSync(source, dir, { recursive: true });
     const handbook = Handbook.parse(JSON.parse(readFileSync(join(dir, HANDBOOK_FILE), "utf8")));
     assert.ok(handbook.validationRules.status === "ok" && handbook.flows.status === "ok" && handbook.apexClasses.status === "ok" && handbook.apexTriggers.status === "ok");
-    handbook.validationRules.items.push({ object: "Invoice__c", name: "Planted_Rule", active: true, description: `Description ${LITERAL}`, formula: `CONTAINS(Notes__c, "${LITERAL}")`, formulaCut: false, formulaLength: 40, message: `Message ${LITERAL}`, messageField: null });
+    handbook.validationRules.items.push({ object: "Invoice__c", name: "Planted_Rule", active: true, description: `Description ${LITERAL}`, formula: `CONTAINS(Notes__c, "${LITERAL}")`, formulaCut: false, formulaLength: 40, message: `Message ${LITERAL}`, messageField: null, lastChanged: null });
     const flow = handbook.flows.items.find((f) => f.name === "Opportunity_Stage_Review")!;
     flow.start.entry.conditions[0]!.value = LITERAL;
     const scheduled = flow.start.paths.find((p) => p.kind === "scheduled")!;
@@ -267,6 +307,8 @@ describe("the documents job: handbook.json reaches the Word document and nothing
       for (const nowhere of [CHANGES_PLANTED, USER_ADMIN_MARKER, USER_ADMIN_EMAIL]) assert.ok(!text.includes(nowhere), nowhere);
       // Who last changed a class, restored from the run's map: someone the user list doesn't hold, named as Salesforce named them.
       assert.ok(text.includes(`\nFinanceSync\nAPI version 62.0. Status: Active. Test: No.\nLast changed 13 Oct 2026 by ${APEX_OUTSIDE_MODIFIER.name}\n`), APEX_OUTSIDE_MODIFIER.name);
+      // And a validation rule, the same way (decision 482).
+      assert.ok(text.includes(`\n#### Due_Date_Required\n\nActive: Yes\n\nLast changed 6 Oct 2026 by ${COMPONENT_OUTSIDE_MODIFIER.name}\n`), COMPONENT_OUTSIDE_MODIFIER.name);
       // The path's label, under what starts the flow and on the step it starts at.
       assert.ok(text.includes(`\n'Remind ${LITERAL}': 30 days before CloseDate: step 9, Flag Stale\n`), "the path's label");
       assert.ok(text.includes(`Flag_Stale\nStarts the path 'Remind ${LITERAL}': 30 days before CloseDate\n`), "on its step");
@@ -279,7 +321,7 @@ describe("the documents job: handbook.json reaches the Word document and nothing
   test("no other upload holds it", () => {
     const others = uploads.filter((u) => !u.name.endsWith(" - Org handbook.docx"));
     assert.equal(others.length, 7, "the six documents and the readout kit");
-    for (const u of others) assert.deepEqual([...PLANTED, CHANGES_PLANTED, USER_ADMIN_MARKER, USER_ADMIN_EMAIL, APEX_OUTSIDE_MODIFIER.name].filter((p) => u.body.includes(p)), [], u.name);
+    for (const u of others) assert.deepEqual([...PLANTED, CHANGES_PLANTED, USER_ADMIN_MARKER, USER_ADMIN_EMAIL, APEX_OUTSIDE_MODIFIER.name, COMPONENT_OUTSIDE_MODIFIER.name].filter((p) => u.body.includes(p)), [], u.name);
   });
 
   test("nor the store's record, its warnings, the log or the queue's outcome", () => {
@@ -287,7 +329,7 @@ describe("the documents job: handbook.json reaches the Word document and nothing
     assert.ok(made.files.length === 6 && !made.files.some((f) => /handbook/i.test(f.name)));
     const store = { documents: [...deps.store.documents.values()], writes: deps.store.writes, runs: [...deps.store.runs.values()], shares: deps.store.shares, microsites: [...deps.store.microsites.values()], benchmark: deps.store.benchmarkRows };
     for (const [where, text] of [["store", JSON.stringify(store)], ["warnings", JSON.stringify(made.warnings)], ["log", deps.lines.join("\n")], ["outcome", JSON.stringify(outcome)]] as const) {
-      for (const planted of [...PLANTED, "Planted_Rule", "Opportunity_Stage_Review", "PlantedLedgerSync", "PlantedLedgerTrigger", APEX_OUTSIDE_MODIFIER.name]) assert.ok(!text.includes(planted), `${planted} in the ${where}`);
+      for (const planted of [...PLANTED, "Planted_Rule", "Opportunity_Stage_Review", "PlantedLedgerSync", "PlantedLedgerTrigger", APEX_OUTSIDE_MODIFIER.name, COMPONENT_OUTSIDE_MODIFIER.name]) assert.ok(!text.includes(planted), `${planted} in the ${where}`);
     }
   });
 
@@ -295,8 +337,8 @@ describe("the documents job: handbook.json reaches the Word document and nothing
     const files = filesIn(dir);
     const holding = [...files.keys()].filter((f) => isOutput(f) && f !== `documents/${HANDBOOK_DOCX}` && PLANTED.some((p) => files.get(f)!.includes(p)));
     assert.deepEqual(holding, []);
-    // The name, as before the make: in the run's map alone.
-    assert.deepEqual([...files.keys()].filter((f) => isOutput(f) && files.get(f)!.includes(APEX_OUTSIDE_MODIFIER.name)), ["pseudonym-map.json"]);
+    // The names, as before the make: in the run's map alone.
+    for (const name of [APEX_OUTSIDE_MODIFIER.name, COMPONENT_OUTSIDE_MODIFIER.name]) assert.deepEqual([...files.keys()].filter((f) => isOutput(f) && files.get(f)!.includes(name)), ["pseudonym-map.json"], name);
     assert.ok(files.has(`documents/${HANDBOOK_DOCX}`));
   });
 });
@@ -321,7 +363,7 @@ describe("the benchmark", () => {
     const result = exportBenchmark({ ...options(run), storeDir: store });
     assert.ok(result.rows.length > 0);
     for (const [path, text] of filesIn(store)) assert.deepEqual(holding(text, [...ROUTED, ...NOWHERE, ...MODIFIERS]), [], path);
-    // The run's own pseudonym map holds who changed each class, as it holds every user's name.
+    // The run's own pseudonym map holds who changed each class, flow and rule, as it holds every user's name.
     for (const [path, text] of [...filesIn(run)].filter(([f]) => isOutput(f))) assert.deepEqual(holding(text, [...ROUTED, ...NOWHERE, ...(path === "pseudonym-map.json" ? [] : MODIFIERS)]), [], path);
     assert.deepEqual(holding(JSON.stringify(result), [...ROUTED, ...NOWHERE, ...MODIFIERS]), []);
   });
