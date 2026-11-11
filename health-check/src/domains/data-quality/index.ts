@@ -1,5 +1,5 @@
 import { duplicateRulesExtractor, recordCountsExtractor, schemaExtractor } from "../../extract/configuration.ts";
-import { crmHealthExtractor, opportunitiesExtractor } from "../../extract/opportunities.ts";
+import { crmHealthExtractor, opportunitiesExtractor, stagesExtractor } from "../../extract/opportunities.ts";
 import { leadsExtractor } from "../../extract/leads.ts";
 import { actionRecordsExtractor } from "../../extract/action-records.ts";
 import { DUPLICATE_GROUPS, duplicateAccountsExtractor } from "../../extract/duplicates.ts";
@@ -534,7 +534,8 @@ export const dataQualityModule: DomainModule = {
   id: "data_quality",
   cloud: "sales",
   label: "Data quality",
-  // The opportunities read plans its SELECT from the schema, so the schema goes before it.
-  extractors: [usersExtractor, recordCountsExtractor, ownershipExtractor, duplicateRulesExtractor, schemaExtractor, opportunitiesExtractor, crmHealthExtractor, leadsExtractor, actionRecordsExtractor, duplicateAccountsExtractor],
+  // The opportunities read plans its SELECT from the schema and winds deals back
+  // with the stages (DECISIONS.md 465), so both go before it.
+  extractors: [usersExtractor, recordCountsExtractor, ownershipExtractor, duplicateRulesExtractor, schemaExtractor, stagesExtractor, opportunitiesExtractor, crmHealthExtractor, leadsExtractor, actionRecordsExtractor, duplicateAccountsExtractor],
   rules: [pastCloseDate, inactiveOwner, missingAmount, noRecentActivity, noAccount, lossReasonMissing, inactiveRecordOwners, duplicateRulesMissing, duplicateAccounts, staleLeads, contactGaps],
 };

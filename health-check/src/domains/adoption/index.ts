@@ -2,7 +2,7 @@ import { loginActivityExtractor, type LoginActivity, type LoginChannel } from ".
 import { daysBefore } from "../../extract/types.ts";
 import { reportsExtractor, usersExtractor, type UserRow } from "../../extract/users.ts";
 import { schemaExtractor } from "../../extract/configuration.ts";
-import { opportunitiesExtractor } from "../../extract/opportunities.ts";
+import { opportunitiesExtractor, stagesExtractor } from "../../extract/opportunities.ts";
 import { notSized, pct, plural, type Rule, type RuleContext, type RuleResult } from "../../engine/rule.ts";
 import type { Evidence, Metric, MetricSegment, SeriesPoint } from "../../schemas/index.ts";
 import { opportunitiesGate } from "../gate.ts";
@@ -424,8 +424,9 @@ export const adoptionModule: DomainModule = {
   cloud: "sales",
   label: "Adoption and usage",
   // The metrics gate on the opportunities read (DECISIONS.md 37), which plans its
-  // SELECT from the schema, so both are listed and this module runs alone.
-  extractors: [usersExtractor, schemaExtractor, opportunitiesExtractor, loginActivityExtractor, reportsExtractor],
+  // SELECT from the schema and winds deals back with the stages (DECISIONS.md
+  // 465), so all three are listed and this module runs alone.
+  extractors: [usersExtractor, schemaExtractor, stagesExtractor, opportunitiesExtractor, loginActivityExtractor, reportsExtractor],
   metrics: [adoptionMetrics],
   rules: [fallingAdoption, lowEngagement, classicUsers],
 };

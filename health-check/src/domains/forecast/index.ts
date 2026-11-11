@@ -2,7 +2,7 @@ import { fieldDescribeExtractor, missingFieldReason } from "../../extract/fields
 import { schemaExtractor } from "../../extract/configuration.ts";
 import { forecastExtractor, quotasExtractor, revenueForecastType, type ForecastItemRow } from "../../extract/forecast.ts";
 import { opportunitiesExtractor, stagesExtractor } from "../../extract/opportunities.ts";
-import { daysBefore } from "../../extract/types.ts";
+import { daysBefore, type SourceInfo } from "../../extract/types.ts";
 import { usersExtractor } from "../../extract/users.ts";
 import { notSized, pct, plural, segmentRate, type NotMeasurableResult, type Rule, type RuleContext, type RuleResult } from "../../engine/rule.ts";
 import { coverageOf, shareRule, type Scoped } from "../current-pipeline/index.ts";
@@ -189,10 +189,40 @@ function commitDeals(ctx: RuleContext, open: Deal[]): { commit: Deal[]; evidence
   return { commit: open.filter((d) => committed.has(d.Id)), evidence };
 }
 
+/**
+ * The deals the deals read holds as open that have closed since the run's date
+ * (DECISIONS.md 466): the forecast facts are as they stand, so a deal's fact
+ * gives the category it has now, and the one it had then can't be read.
+ */
+function closedSinceTheRun(ctx: Ctx, open: Deal[]): { closed: Deal[]; source: SourceInfo } | { reason: string; evidence: Evidence[] } {
+  const { closedSinceTheRun: read } = ctx.data(forecastExtractor);
+  if (read.status !== "ok") return { reason: `Deals closed since this run's date couldn't be read: ${read.reason}`, evidence: [ctx.ev(read.source, { count: null })] };
+  // A part of the list would quietly miss a deal closed since (DECISIONS.md 467).
+  if (read.truncated) return { reason: `The read of deals closed since this run's date stopped at its row limit after ${read.data.length.toLocaleString("en-GB")} rows, so the rest weren't read.`, evidence: [ctx.ev(read.source, { count: read.data.length })] };
+  const ids = new Set(read.data);
+  // The list goes by Salesforce's flag, not the calibration's open. A deal it
+  // already flagged closed at the run's date can't have closed since: an edit
+  // to it puts it on the list and changes nothing (decision 467).
+  return { closed: ids.size > 0 ? open.filter((d) => !d.IsClosed && ids.has(d.Id)) : [], source: read.source };
+}
+
 function commitScope(ctx: RuleContext, open: Deal[], isHit: (d: Deal) => boolean): Scoped {
   const result = commitDeals(ctx, open);
   if ("reason" in result) return result;
-  return { deals: result.commit, isHit, evidence: result.evidence };
+  const since = closedSinceTheRun(ctx, open);
+  if ("reason" in since) return since;
+  const left = since.closed.length;
+  if (left === 0) return { deals: result.commit, isHit, evidence: result.evidence };
+  // Left out and said: counted as it is now, a deal's later state would be in
+  // a figure dated to the run (rule 5).
+  const closed = new Set(since.closed.map((d) => d.Id));
+  return {
+    deals: result.commit.filter((d) => !closed.has(d.Id)),
+    isHit,
+    evidence: result.evidence,
+    exclusions: [`${plural(left, "deal")} closed since this run's date, whose forecast category then can't be read`],
+    leftOut: `${left === 1 ? "One deal open at this run's date and closed since is" : `${left} deals open at this run's date and closed since are`} left out, as we can't read the forecast category ${left === 1 ? "it" : "they"} had then.`,
+  };
 }
 
 const commitAtRisk = shareRule({
@@ -257,6 +287,16 @@ function forecastMetrics(ctx: Ctx): Metric[] {
   const { facts } = ctx.data(forecastExtractor);
   if (facts.status !== "ok") return [notMeasurable(`Forecast facts couldn't be read: ${facts.reason}`, [ctx.ev(facts.source, { count: null })])];
   if (facts.truncated) return [notMeasurable(cutOff(facts.data.length), [ctx.ev(facts.source, { count: facts.data.length })])];
+  // A sum, so a deal left out would understate it: where a quota holder owns a
+  // deal closed since, whose category then can't be read, there's no figure.
+  const since = closedSinceTheRun(ctx, open);
+  if ("reason" in since) return [notMeasurable(since.reason, since.evidence)];
+  const holders = new Set(covered.reps.map((r) => r.owner));
+  const unread = since.closed.filter((d) => holders.has(d.OwnerId)).length;
+  if (unread > 0) {
+    const reason = unread === 1 ? "One deal open at this run's date has closed since, so its forecast category then can't be read." : `${unread} deals open at this run's date have closed since, so their forecast category then can't be read.`;
+    return [notMeasurable(reason, [ctx.ev(since.source, { count: unread, note: "Deals open at this run's date, owned by people with a quota, and closed since" })])];
+  }
   const committed = new Set(facts.data.filter((f) => f.ForecastCategoryName === COMMIT).map((f) => f.OpportunityId));
   const commitOf = (owner: string): number => open.filter((d) => d.OwnerId === owner && committed.has(d.Id)).reduce((sum, d) => sum + (d.Amount ?? 0), 0);
   const round = (n: number): number => Math.round(n * 10) / 10;

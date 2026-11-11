@@ -18,10 +18,11 @@ import type { LoginSummary } from "../users.ts";
 
 // Every read with a window on when something happened stops at the run's own
 // date (DECISIONS.md 463 and 480), so a step read late, or again on a resumed
-// run, doesn't take in what was made since. Two reads are left as they are, by
-// decision 480, and named here.
+// run, doesn't take in what was made since. ForecastingQuota is left as it is,
+// by decision 480, and the opportunities scope's ways in by 465, named here.
 
 const RUN_END = soqlDateTime(upToItsSecond(new Date(org.AS_OF)));
+const RUN_START = soqlDateTime(new Date(org.AS_OF));
 const LATER = org.LATER_THAN_THE_RUN;
 
 /** Every SOQL query a run sent, through the query route or a composite batch. */
@@ -39,10 +40,13 @@ function queriesOf(sim: Simulator): string[] {
 /** The object a filter at `index` belongs to: the nearest FROM before it, which is a subquery's own where it has one. */
 const objectAt = (soql: string, index: number): string => [...soql.slice(0, index).matchAll(/\bFROM\s+([A-Za-z0-9_]+)/g)].at(-1)?.[1] ?? "?";
 
-// The opportunities scope keeps every open deal, with an OR (opportunities.ts):
-// its end needs its own change, since it moves which deals every pipeline
-// figure counts (DECISIONS.md 480).
-const OPPORTUNITY_SCOPE = /\(CreatedDate >= \S+ OR CloseDate >= \S+ OR LastModifiedDate >= \S+ OR IsClosed = false/g;
+// The opportunities scope keeps every open deal, with an OR (opportunities.ts),
+// and ends on CreatedDate (DECISIONS.md 465). Its LastModifiedDate is a way
+// into the scope, not a window: a deal changed since the run's date may have
+// been in the scope at it, and it's wound back from its history, so that
+// clause has no end of its own.
+const WAY_IN = "Opportunity.LastModifiedDate";
+const SCOPE = String.raw`\(CreatedDate >= \S+ OR CloseDate >= \S+ OR LastModifiedDate >= \S+ OR IsClosed = false(?: OR StageName IN \([^)]*\))?\)`;
 
 describe("a full synthetic run's queries", () => {
   let queries: string[];
@@ -56,20 +60,25 @@ describe("a full synthetic run's queries", () => {
     queries = queriesOf(sim);
   });
 
-  test("every filter from a date-time to now ends at the run's date, on the same field, but the opportunities scope", () => {
+  test("every filter from a date-time to now ends at the run's date, on the same field, but the opportunities scope's way in and the deals changed since the run's start", () => {
     const ended = new Set<string>();
     const unended: string[] = [];
-    let scopes = 0;
-    for (const query of queries) {
-      const soql = query.replace(OPPORTUNITY_SCOPE, () => (scopes++, "(scope"));
+    let waysIn = 0;
+    let sinceTheRun = 0;
+    for (const soql of queries) {
       for (const m of soql.matchAll(/\b([A-Za-z_]+)\s*>=\s*(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)/g)) {
         const read = `${objectAt(soql, m.index)}.${m[1]}`;
         if (soql.includes(`${m[1]} <= ${RUN_END}`)) ended.add(read);
-        else unended.push(`${read} in: ${query}`);
+        // The next-steps and closed-since reads look at what changed after the
+        // run's start, so it's where they begin, not a window (DECISIONS.md 466).
+        else if (read === WAY_IN && m[2] === RUN_START && !/\bCloseDate >=/.test(soql)) sinceTheRun++;
+        else if (read === WAY_IN) waysIn++;
+        else unended.push(`${read} in: ${soql}`);
       }
     }
     assert.deepEqual(unended, []);
-    assert.ok(scopes >= 2, "the opportunities and their history were read with the scope");
+    assert.ok(waysIn >= 2, "the opportunities and their history were read with the scope");
+    assert.ok(sinceTheRun >= 2, "the next steps and the deals closed since were read from the run's start");
     // The reads decision 480 names, and the trail's (463): if one stopped being read, this would pass for nothing.
     const named = [
       "Task.CreatedDate", "Event.StartDateTime", "EmailMessage.MessageDate", "AsyncApexJob.CreatedDate",
@@ -90,9 +99,34 @@ describe("a full synthetic run's queries", () => {
     }
     // ForecastingQuota.StartDate is the period a quota is for, not when it was
     // made, so a quota for a later period is part of the plan as it stood
-    // (DECISIONS.md 480). The Contract and Period reads look forward from today.
+    // (DECISIONS.md 480). Opportunity.CloseDate is a way into the opportunities
+    // scope, which ends on CreatedDate (465). The Contract and Period reads look
+    // forward from today.
     assert.deepEqual([...fromADate].sort(), ["Contract.EndDate", "ForecastingQuota.StartDate", "Opportunity.CloseDate", "Period.EndDate"]);
     assert.ok(queries.some((q) => /FROM ForecastingQuota WHERE StartDate >= \d{4}-\d{2}-\d{2}$/.test(q)), "ForecastingQuota is read from its start alone");
+  });
+
+  test("the opportunities, their history, the next steps and the deals closed since end on the deal's CreatedDate at the run's date (DECISIONS.md 465 and 466)", () => {
+    const end = ` AND CreatedDate <= ${RUN_END}`;
+    const deals = queries.filter((q) => new RegExp(`^SELECT Id, Name, .* FROM Opportunity WHERE ${SCOPE}${end}( AND Id > '\\w+')? ORDER BY Id`).test(q));
+    // The history's own rows have no end in the query: the later ones are how a deal changed since is found.
+    const history = queries.filter((q) => new RegExp(`FROM OpportunityHistory WHERE OpportunityId IN \\(SELECT Id FROM Opportunity WHERE ${SCOPE}${end}\\)( AND Id > '\\w+')? ORDER BY Id`).test(q));
+    const steps = queries.filter((q) => new RegExp(`^SELECT Id FROM Opportunity WHERE \\(IsClosed = false(?: OR StageName IN \\([^)]*\\))? OR LastModifiedDate >= ${RUN_START}\\) AND NextStep != null${end}( AND Id > '\\w+')? ORDER BY Id`).test(q));
+    // Read whole each time, never a keyset (DECISIONS.md 467).
+    const closedSince = queries.filter((q) => new RegExp(`^SELECT Id FROM Opportunity WHERE IsClosed = true AND LastModifiedDate >= ${RUN_START}${end}$`).test(q));
+    assert.ok(deals.length > 0 && history.length > 0 && steps.length > 0 && closedSince.length > 0, `deals ${deals.length}, history ${history.length}, next steps ${steps.length}, closed since ${closedSince.length}`);
+    // Every other read of a deal is left without the end on purpose, and named:
+    // the wins before the window, and reads of how things stand with no window
+    // (DECISIONS.md 481), which are as they were when read.
+    const left: Array<[string, RegExp]> = [
+      ["prior wins", /^SELECT Id, AccountId, CloseDate FROM Opportunity WHERE .* AND CloseDate < \d{4}-\d{2}-\d{2} ORDER BY Id/],
+      ["won accounts", /^SELECT Id, OwnerId, LastActivityDate FROM Account WHERE Id IN \(SELECT AccountId FROM Opportunity WHERE IsWon = true\)/],
+      ["ownership count", /^SELECT OwnerId, COUNT\(Id\) c FROM Opportunity GROUP BY OwnerId$/],
+      ["field usage, all time", /^SELECT COUNT\(Id\) total, .* FROM Opportunity$/],
+    ];
+    const unended = queries.filter((q) => /\bFROM Opportunity(History)?\b/.test(q) && !q.includes(end));
+    assert.deepEqual(unended.filter((q) => !left.some(([, read]) => read.test(q))), []);
+    assert.deepEqual([...new Set(unended.flatMap((q) => left.filter(([, read]) => read.test(q)).map(([name]) => name)))].sort(), left.map(([name]) => name).sort());
   });
 
   test("the records made after the run's date are in the org, and none of them is read", () => {
@@ -209,9 +243,13 @@ describe("a full synthetic run's queries", () => {
   });
 });
 
-test("no step whose read gained an end changed its version, so runs in flight keep their checkpoints", () => {
-  // DECISIONS.md 480: what each step keeps has the same shape as before.
+test("no step whose read gained an end changed its version, so runs in flight keep their checkpoints, but the opportunities and the next steps", () => {
+  // DECISIONS.md 480 and 465: what each step keeps has the same shape as before.
+  // The opportunities went from 4 to 5 on purpose (465): a checkpoint from 4
+  // may hold deals read late as they are now, which a re-read winds back. The
+  // next steps went from 1 to 2 (466): a checkpoint from 1 lists only the deals
+  // open when it was read, so one closed since reads as having none.
   const versions = Object.fromEntries(collectExtractors(ALL_MODULES).map((e) => [e.id, e.version]));
-  const touched = { activity: 2, "async-jobs": 1, leads: 3, "pardot-leads": 2, "cpq-quotes": 1, logins: 4, "login-activity": 1, "field-usage": 1, "service-setup": 1, "service-cases": 2, "service-activity": 2, "setup-audit": 2 };
+  const touched = { opportunities: 5, "next-steps": 2, activity: 2, "async-jobs": 1, leads: 3, "pardot-leads": 2, "cpq-quotes": 1, logins: 4, "login-activity": 1, "field-usage": 1, "service-setup": 1, "service-cases": 2, "service-activity": 2, "setup-audit": 2 };
   assert.deepEqual(Object.fromEntries(Object.keys(touched).map((id) => [id, versions[id]])), touched);
 });
