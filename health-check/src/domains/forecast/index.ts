@@ -197,8 +197,13 @@ function commitDeals(ctx: RuleContext, open: Deal[]): { commit: Deal[]; evidence
 function closedSinceTheRun(ctx: Ctx, open: Deal[]): { closed: Deal[]; source: SourceInfo } | { reason: string; evidence: Evidence[] } {
   const { closedSinceTheRun: read } = ctx.data(forecastExtractor);
   if (read.status !== "ok") return { reason: `Deals closed since this run's date couldn't be read: ${read.reason}`, evidence: [ctx.ev(read.source, { count: null })] };
+  // A part of the list would quietly miss a deal closed since (DECISIONS.md 467).
+  if (read.truncated) return { reason: `The read of deals closed since this run's date stopped at its row limit after ${read.data.length.toLocaleString("en-GB")} rows, so the rest weren't read.`, evidence: [ctx.ev(read.source, { count: read.data.length })] };
   const ids = new Set(read.data);
-  return { closed: ids.size > 0 ? open.filter((d) => ids.has(d.Id)) : [], source: read.source };
+  // The list goes by Salesforce's flag, not the calibration's open. A deal it
+  // already flagged closed at the run's date can't have closed since: an edit
+  // to it puts it on the list and changes nothing (decision 467).
+  return { closed: ids.size > 0 ? open.filter((d) => !d.IsClosed && ids.has(d.Id)) : [], source: read.source };
 }
 
 function commitScope(ctx: RuleContext, open: Deal[], isHit: (d: Deal) => boolean): Scoped {
