@@ -1,5 +1,5 @@
 import { SF_DEFAULTS } from "../config.ts";
-import { SalesforceError } from "../salesforce/client.ts";
+import { isUnavailable } from "../salesforce/client.ts";
 import { monthsBefore, readableReason, readSoql, soqlUpTo, soqlWindow, type Extractor, type Sourced } from "./types.ts";
 
 // Record-type use (DECISIONS.md 497). The step reads its own list of record
@@ -8,6 +8,10 @@ import { monthsBefore, readableReason, readSoql, soqlUpTo, soqlWindow, type Extr
 // at the run's date and run together every time: a list read at one moment set
 // against counts read at another would call a type made since unused, or count
 // records made since. So there are no partial keys, on purpose.
+//
+// Tasks and events are never counted (DECISIONS.md 498): a plain query leaves
+// out activities Salesforce has archived, after a year by default (decision
+// 35), so a task type last used 14 months ago would read as never used.
 
 export type RecordTypeRow = { Id: string; DeveloperName: string; Name: string; SobjectType: string; IsActive: boolean; NamespacePrefix: string | null; CreatedDate: string };
 /** One group of an object's records. A null type is a record with none. */
@@ -25,6 +29,8 @@ export type RecordTypeUse = {
   truncated: string[];
   /** Objects with an active type of their own beyond the ones we count. */
   notRead: string[];
+  /** Tasks and events with an active type of their own, which are never counted. */
+  activities: string[];
   /** The two counts' queries, with <object> for each object. */
   queries: { all: string; recent: string };
 };
@@ -32,6 +38,8 @@ export type RecordTypeUse = {
 /** How many objects are counted, those with the most active types first. Two counts each, so two composite calls. */
 export const RECORD_TYPE_OBJECTS = 25;
 export const RECENT_MONTHS = 12;
+/** Archived activities are out of a plain count, and queryAll isn't on the allowlist. */
+export const ACTIVITY_OBJECTS: ReadonlySet<string> = new Set(["Task", "Event"]);
 
 const LIST = (end: string): string => `SELECT Id, DeveloperName, Name, SobjectType, IsActive, NamespacePrefix, CreatedDate FROM RecordType WHERE ${end}`;
 const COUNT = (object: string, where: string): string => `SELECT RecordTypeId, COUNT(Id) c FROM ${object} WHERE ${where} GROUP BY RecordTypeId`;
@@ -40,7 +48,7 @@ export const isPackaged = (type: Pick<RecordTypeRow, "NamespacePrefix">): boolea
 
 export const recordTypeUseExtractor: Extractor<RecordTypeUse> = {
   id: "record-type-use",
-  version: 1,
+  version: 2,
   // Counts records on every object it reads, so a set-up review never runs it.
   records: true,
   async run(ctx) {
@@ -54,13 +62,17 @@ export const recordTypeUseExtractor: Extractor<RecordTypeUse> = {
       refused: [],
       truncated: [],
       notRead: [],
+      activities: [],
       queries: { all: COUNT("<object>", end), recent: COUNT("<object>", recent) },
     };
     if (out.types.status !== "ok") return out;
 
     const active = new Map<string, number>();
     for (const type of out.types.data) if (type.IsActive && !isPackaged(type)) active.set(type.SobjectType, (active.get(type.SobjectType) ?? 0) + 1);
-    const ranked = [...active].sort(([a, n], [b, m]) => m - n || a.localeCompare(b)).map(([object]) => object);
+    const ordered = [...active].sort(([a, n], [b, m]) => m - n || a.localeCompare(b)).map(([object]) => object);
+    out.activities = ordered.filter((object) => ACTIVITY_OBJECTS.has(object));
+    // Before the 25, so an activity never takes the place of an object we can count.
+    const ranked = ordered.filter((object) => !ACTIVITY_OBJECTS.has(object));
     const objects = ranked.slice(0, RECORD_TYPE_OBJECTS);
     out.notRead = ranked.slice(RECORD_TYPE_OBJECTS);
 
@@ -71,13 +83,20 @@ export const recordTypeUseExtractor: Extractor<RecordTypeUse> = {
       const chunk = queries.slice(i, i + SF_DEFAULTS.compositeBatchSize);
       try {
         for (const result of await ctx.client.queryBatch<RecordTypeCount>(chunk)) {
-          results.push(result.ok ? { ok: true, records: result.result.records, truncated: result.result.truncated } : { ok: false, reason: readableReason(result.error.message) });
+          if (result.ok) results.push({ ok: true, records: result.result.records, truncated: result.result.truncated });
+          // One count refused is that object not judged. Any other error, a
+          // server fault or a limit, may be gone on the next try, so it stops
+          // the step rather than being kept as Salesforce's answer.
+          else if (isUnavailable(result.error)) results.push({ ok: false, reason: readableReason(result.error.message) });
+          else throw result.error;
         }
       } catch (err) {
         // A whole call refused leaves its objects not judged, as one refused
-        // count does. A budget stop isn't Salesforce's answer: it goes up, and
-        // the step is read again from its start on resume.
-        if (!(err instanceof SalesforceError)) throw err;
+        // count does, but only for the codes the engine takes as Salesforce's
+        // answer (DECISIONS.md 498). A 502 after the retries, a session still
+        // expired after the refresh or a budget stop goes up, as in every other
+        // batch read, and the step is read again from its start on resume.
+        if (!isUnavailable(err)) throw err;
         results.push(...chunk.map(() => ({ ok: false as const, reason: readableReason(err.message) })));
       }
     }

@@ -5,7 +5,7 @@ import { actionRecordsExtractor } from "../../extract/action-records.ts";
 import { DUPLICATE_GROUPS, duplicateAccountsExtractor } from "../../extract/duplicates.ts";
 import { daysBefore } from "../../extract/types.ts";
 import { ownershipExtractor, usersExtractor } from "../../extract/users.ts";
-import { isPackaged, RECORD_TYPE_OBJECTS, recordTypeUseExtractor, type RecordTypeCount, type RecordTypeRow } from "../../extract/record-types.ts";
+import { ACTIVITY_OBJECTS, isPackaged, RECORD_TYPE_OBJECTS, recordTypeUseExtractor, type RecordTypeCount, type RecordTypeRow } from "../../extract/record-types.ts";
 import { labelsExtractor } from "../../extract/labels.ts";
 import { recordTypeGuard } from "../../guards/record-type-guards.ts";
 import { labelsOf } from "../labels.ts";
@@ -534,11 +534,13 @@ const recordTypeUse: Rule = {
     // type deleted since). They're records made on the object, never a type of ours.
     const total = (rows: RecordTypeCount[]): number => rows.reduce((sum, r) => sum + r.c, 0);
     const of = (rows: RecordTypeCount[], id: string): number => rows.filter((r) => r.RecordTypeId === id).reduce((sum, r) => sum + r.c, 0);
-    const why = { under: [] as string[], notRead: [] as string[], refused: [] as string[], truncated: [] as string[] };
+    const why = { activities: [] as string[], under: [] as string[], notRead: [] as string[], refused: [] as string[], truncated: [] as string[] };
     const judgedObjects = new Set<string>();
     for (const object of [...new Set(candidates.map((t) => t.SobjectType))].sort()) {
       const counts = use.counted[object];
-      if (counts && total(counts.recent) >= RECORD_TYPE_MIN_RECENT) judgedObjects.add(object);
+      // Never judged, whatever a count says: archived activities are out of it (DECISIONS.md 498).
+      if (ACTIVITY_OBJECTS.has(object)) why.activities.push(object);
+      else if (counts && total(counts.recent) >= RECORD_TYPE_MIN_RECENT) judgedObjects.add(object);
       else if (counts) why.under.push(object);
       else if (use.refused.some((r) => r.object === object)) why.refused.push(object);
       else if (use.truncated.includes(object)) why.truncated.push(object);
@@ -560,6 +562,7 @@ const recordTypeUse: Rule = {
         {
           count: judged.length ? noRecords.length : null,
           exclusions: [
+            `Tasks and events, which we never count, because Salesforce archives older activities out of a count: ${objects(why.activities)}`,
             `Objects with fewer than ${RECORD_TYPE_MIN_RECENT} records made in the last 12 months: ${objects(why.under)}`,
             `Objects past the ${RECORD_TYPE_OBJECTS} with the most active record types: ${objects(why.notRead)}`,
             `Objects whose count Salesforce refused: ${objects(why.refused)}`,
@@ -584,6 +587,7 @@ const recordTypeUse: Rule = {
     }
     if (judged.length === 0) {
       const parts = [
+        why.activities.length ? `we don't count ${listed(why.activities.map((o) => (o === "Task" ? "tasks" : "events")), 2)}, because Salesforce archives older ones out of a count` : "",
         why.under.length ? `${plural(why.under.length, "object has", "objects have")} fewer than ${RECORD_TYPE_MIN_RECENT} records made in the last 12 months` : "",
         why.refused.length + why.truncated.length ? `Salesforce refused or cut short the count on ${plural(why.refused.length + why.truncated.length, "object")}` : "",
         why.notRead.length ? `${plural(why.notRead.length, "object is", "objects are")} past the ${RECORD_TYPE_OBJECTS} we count` : "",

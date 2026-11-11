@@ -305,7 +305,7 @@ h) The documents job reads the row with the switch on, the same way. A first mak
 i) Is a class's name in `handbook.json` always spelt as `apex-source.json` spells it? Both come from the same Apex rows, `NamespacePrefix = null`, so they should be; a summary is printed only against an exact match of kind and name. Apex names are unique within a kind in an org without regard to case, so two entries of one kind can't share a name from a real read; one that did would print neither summary. A class and a trigger can share a name, and each prints only its own kind's summary.
 j) How a summary reads in Word, with the label in bold at the end of the entry's paragraph under its hanging indent: does a summary of 80 words wrap well there, and is it clear it belongs to the entry above it? The sample in `shots/d-print-summaries` is made from made-up text (`node src/handbook/sample.ts <folder> --summaries`).
 
-## Record-type use (DECISIONS.md 497)
+## Record-type use (DECISIONS.md 497 and 498)
 
 `dq.record-type-use` reads its own list of record types and two counts by type on up to 25 objects, all ending at the run's date. None of it has been run against a real org.
 
@@ -315,4 +315,6 @@ c) Records on the Master type: does `RecordTypeId` come back null, or as `012000
 d) Person accounts: their record types have `SobjectType` 'Account', so business accounts and person accounts are counted together on Account. Is that right, or does a person account type ever come back under `PersonAccount`, which we would count as an object of its own and could refuse?
 e) Business processes: an opportunity, case or lead record type is tied to a sales, support or lead process. Does a type that's only there to carry a process (and so has no records of its own) need saying differently? We say only what the counts say, and the finding stays a review.
 f) Can a record type be deleted while records still carry its id? We read such a row as records on the object and never as a type of ours. If Salesforce always moves the records first, the case never arises.
+g) Activities: tasks and events are never counted, because a plain query leaves out activities Salesforce has archived (after 365 days by default, decision 35), so a task type last used over a year ago would read as never used. Nothing to confirm unless `queryAll` is ever allowed: then an archived task's `RecordTypeId` would need checking, and whether an org can change when activities are archived.
+h) Which codes can one subrequest in a composite batch come back with? One with a code the engine takes as Salesforce's answer (`INVALID_FIELD`, `QUERY_TIMEOUT`, `UNKNOWN_EXCEPTION` and the rest in `src/salesforce/client.ts`) leaves that object refused; any other, or none, stops the step so it's read again on resume (DECISIONS.md 498). If a real org refuses one object's count for good with a code outside that list (for example `INVALID_QUERY_FILTER_OPERATOR` on an object whose `CreatedDate` can't be filtered), the run stops at this step every time until the code is added there.
 

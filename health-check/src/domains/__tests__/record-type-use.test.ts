@@ -1,17 +1,19 @@
 import { before, describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { readCheckpoint } from "../../engine/checkpoint.ts";
 import { applyGuards } from "../../engine/evaluate.ts";
 import type { IssueResult, RuleContext } from "../../engine/rule.ts";
 import { runHealthCheck, type RunOptions } from "../../engine/run.ts";
-import { RECORD_TYPE_OBJECTS, recordTypeUseExtractor, type RecordTypeUse } from "../../extract/record-types.ts";
+import { ACTIVITY_OBJECTS, RECORD_TYPE_OBJECTS, recordTypeUseExtractor, type RecordTypeUse } from "../../extract/record-types.ts";
 import { daysBefore, soqlDateTime, upToItsSecond, type ExtractContext, type Extractor, type SourceInfo } from "../../extract/types.ts";
 import { RECORD_TYPE_GUARD } from "../../guards/record-type-guards.ts";
 import { Pseudonymiser } from "../../privacy/pseudonymiser.ts";
+import { escapeXml } from "../../render/format.ts";
+import { renderContext, valueText } from "../../render/html.ts";
 import { ApiBudget, BudgetStopError } from "../../salesforce/budget.ts";
-import { SalesforceClient } from "../../salesforce/client.ts";
+import { SalesforceClient, SalesforceError } from "../../salesforce/client.ts";
 import type { Transport, TransportRequest } from "../../salesforce/transport.ts";
 import type { Finding } from "../../schemas/index.ts";
 import { analyseExtracts, clone, loadExtracts, tempDir } from "../../testing/harness.ts";
@@ -22,9 +24,10 @@ import { dataQualityModule } from "../data-quality/index.ts";
 import { SALES_CLOUD_MODULES } from "../index.ts";
 import { modulesFor } from "../scope.ts";
 
-// Record-type use (DECISIONS.md 497): one step that reads the record types and
-// two counts by type, all to the run's date, and one finding for the org that
-// stays a review until what names a record type can be read.
+// Record-type use (DECISIONS.md 497 and 498): one step that reads the record
+// types and two counts by type, all to the run's date, and one finding for the
+// org that stays a review until what names a record type can be read. Tasks and
+// events are never counted, and a temporary failure stops the step.
 
 const RULE = "dq.record-type-use";
 const T = new Date(org.AS_OF);
@@ -158,6 +161,10 @@ const TYPES = {
   broken: type("Broken__c", "Thing", daysUntil(T, 300)),
   cut: type("Cut__c", "Thing", daysUntil(T, 300)),
   last: type("Zz_Last__c", "Thing", daysUntil(T, 300)),
+  // Active and old, on objects with 50 recent records and none of them on it:
+  // counted, each would be "no records at all". Activities never are.
+  task: type("Task", "Call_Log", daysUntil(T, 800)),
+  event: type("Event", "Site_Visit", daysUntil(T, 800)),
 };
 // Enough objects of one type each that Zz_Last__c is the 26th.
 const FILLERS = Array.from({ length: RECORD_TYPE_OBJECTS - 4 }, (_, i) => type(`Filler_${String(i + 1).padStart(2, "0")}__c`, "Thing", daysUntil(T, 300)));
@@ -170,6 +177,8 @@ const GROUPS: Record<string, org.RecordTypeGroup[]> = {
   Broken__c: [recent(TYPES.broken.Id, 50)],
   Cut__c: [recent(null, 50)],
   Zz_Last__c: [recent(null, 50)],
+  Task: [recent(null, 50)],
+  Event: [recent(null, 50)],
 };
 const TRAPS: SimulatorOptions = {
   recordTypes: [...Object.values(TYPES), ...FILLERS],
@@ -204,7 +213,33 @@ describe("what isn't judged", () => {
     assert.equal(exclusion(f, "Objects past the 25"), "Objects past the 25 with the most active record types: 1 (Zz_Last__c)");
     assert.equal(exclusion(f, "Objects whose count Salesforce refused"), "Objects whose count Salesforce refused: 1 (Broken__c)");
     assert.equal(exclusion(f, "Objects whose count came back cut short"), "Objects whose count came back cut short: 1 (Cut__c)");
-    for (const quiet of ["Old Format", "New Type", "Partner", "Billing Run", "Default", "Thing"]) assert.ok(!names(f).some((s) => s.startsWith(quiet)), quiet);
+    assert.equal(exclusion(f, "Tasks and events"), "Tasks and events, which we never count, because Salesforce archives older activities out of a count: 2 (Event and Task)");
+    for (const quiet of ["Old Format", "New Type", "Partner", "Billing Run", "Default", "Thing", "Call Log", "Site Visit"]) assert.ok(!names(f).some((s) => s.startsWith(quiet)), quiet);
+  });
+
+  test("tasks and events are never counted, and don't take the place of an object we can count", () => {
+    assert.ok(!queriesOf(traps.sim.requests).some((q) => isCount(q) && /FROM (Task|Event) /.test(q)));
+    assert.deepEqual(traps.out.activities, ["Event", "Task"]);
+    assert.equal(traps.out.counted.Task, undefined);
+    assert.equal(traps.out.counted.Event, undefined);
+    // Left out before the 25, so the 26th object is still the only one past it.
+    assert.deepEqual(traps.out.notRead, ["Zz_Last__c"]);
+  });
+
+  test("an activity's count, were one ever read, still judges no type of it", () => {
+    const counted = { ...traps.out.counted, Task: { all: [{ RecordTypeId: null, c: 50 }], recent: [{ RecordTypeId: null, c: 50 }] } };
+    const g = judge({ ...traps.out, counted });
+    assert.ok(!names(g).some((s) => s.startsWith("Call Log")));
+    assert.match(exclusion(g, "Tasks and events"), /: 2 \(Event and Task\)$/);
+    assert.deepEqual([...ACTIVITY_OBJECTS].sort(), ["Event", "Task"]);
+  });
+
+  test("an org whose only types are on tasks and events has nothing judged, and says why", async () => {
+    const { out, sim } = await read(T, { recordTypes: [TYPES.task, TYPES.event], recordTypeGroups: GROUPS });
+    assert.ok(!queriesOf(sim.requests).some(isCount));
+    const g = judge(out);
+    assert.equal(g.status, "not_measurable");
+    assert.equal(g.notMeasurableReason, "None of your 2 record types could be judged: we don't count events and tasks, because Salesforce archives older ones out of a count.");
   });
 
   test("the step keeps why each object wasn't counted, and reads 25 objects in three calls", () => {
@@ -226,7 +261,7 @@ describe("what isn't judged", () => {
     assert.deepEqual(out.counted, {});
     const g = judge(out);
     assert.equal(g.status, "not_measurable");
-    assert.match(g.notMeasurableReason!, /^None of your \d+ record types could be judged: Salesforce refused or cut short the count on 25 objects; 1 object is past the 25 we count\.$/);
+    assert.match(g.notMeasurableReason!, /^None of your \d+ record types could be judged: we don't count events and tasks, because Salesforce archives older ones out of a count; Salesforce refused or cut short the count on 25 objects; 1 object is past the 25 we count\.$/);
   });
 
   test("a whole composite call refused leaves its objects not judged, and the step still finishes", async () => {
@@ -257,6 +292,39 @@ describe("what isn't judged", () => {
       },
     });
     await assert.rejects(read(T, TRAPS, limit), BudgetStopError);
+  });
+
+  // Every try at a count call, retries and the try after a refresh too.
+  const everyCountCall = (status: number, text: string) => (sim: Simulator): Transport => ({
+    async send(request) {
+      if (request.url.endsWith("/composite/batch") && queriesOf([request]).some(isCount)) return { status, header: () => null, text };
+      return sim.send(request);
+    },
+  });
+  const BAD_GATEWAY = everyCountCall(502, "<html><body>502 Bad Gateway</body></html>");
+  const EXPIRED = everyCountCall(401, JSON.stringify([{ errorCode: "INVALID_SESSION_ID", message: "Session expired or invalid" }]));
+
+  test("a 502 through every retry isn't Salesforce's answer: the step stops rather than saving the objects as refused", async () => {
+    await assert.rejects(read(T, TRAPS, BAD_GATEWAY), (err: unknown) => err instanceof SalesforceError && err.code === "HTTP_502");
+  });
+
+  test("a session still expired after the refresh stops the step too", async () => {
+    await assert.rejects(read(T, TRAPS, EXPIRED), (err: unknown) => err instanceof SalesforceError && err.code === "INVALID_SESSION_ID");
+  });
+
+  test("one count answered with a code that isn't Salesforce's answer stops the step; one with such a code is that object refused", async () => {
+    const busy = editComposite((soql, item) => {
+      if (/FROM Cut__c /.test(soql)) Object.assign(item, { statusCode: 503, result: [{ errorCode: "SERVER_UNAVAILABLE", message: "Server temporarily unavailable" }] });
+    });
+    await assert.rejects(read(T, TRAPS, busy), (err: unknown) => err instanceof SalesforceError && err.code === "SERVER_UNAVAILABLE");
+    // No code at all can't be told from a fault either.
+    const bare = editComposite((soql, item) => {
+      if (/FROM Cut__c /.test(soql)) Object.assign(item, { statusCode: 500, result: [{}] });
+    });
+    await assert.rejects(read(T, TRAPS, bare), (err: unknown) => err instanceof SalesforceError && err.code === "UNKNOWN");
+    // Broken__c's INVALID_FIELD, in the traps, is Salesforce's answer: refused, and the step finishes.
+    const { out } = await read(T, TRAPS);
+    assert.deepEqual(out.refused.map((r) => r.object), ["Broken__c"]);
   });
 });
 
@@ -385,6 +453,41 @@ describe("a run stopped between the reads", () => {
     const finding = (fs: Finding[]) => fs.find((x) => x.ruleId === RULE);
     assert.deepEqual(finding(resumed.output!.findings), finding(straight.output!.findings));
   });
+});
+
+describe("a run whose counts fail for a moment", () => {
+  for (const [name, status, text, code] of [
+    ["a 502 through every retry", 502, "<html><body>502 Bad Gateway</body></html>", "HTTP_502"],
+    ["a session still expired after the refresh", 401, JSON.stringify([{ errorCode: "INVALID_SESSION_ID", message: "Session expired or invalid" }]), "INVALID_SESSION_ID"],
+  ] as const) {
+    test(`${name}: no checkpoint, the step isn't done, and a resume reads the list and both counts again`, async () => {
+      const failing = new Simulator();
+      const transport: Transport = {
+        async send(request) {
+          if (request.url.endsWith("/composite/batch") && queriesOf([request]).some(isCount)) return { status, header: () => null, text };
+          return failing.send(request);
+        },
+      };
+      const outDir = tempDir();
+      const runId = `rt-${status}`;
+      const options = { provider: syntheticProvider, calibration: loadCalibration(), answers: loadAnswers(), modules: SALES_CLOUD_MODULES, outDir, now: T, log: () => {} };
+      await assert.rejects(runHealthCheck({ ...options, transport, runId }), (err: unknown) => err instanceof SalesforceError && err.code === code);
+      const checkpoints = readdirSync(join(outDir, runId, "checkpoints"));
+      assert.ok(!checkpoints.some((f) => f.startsWith(recordTypeUseExtractor.id)), checkpoints.join(", "));
+      const run = JSON.parse(readFileSync(join(outDir, runId, "run.json"), "utf8")) as { status: string; steps: Array<{ id: string; status: string }> };
+      assert.equal(run.status, "failed");
+      assert.equal(run.steps.find((s) => s.id === recordTypeUseExtractor.id)!.status, "failed");
+
+      const second = new Simulator();
+      const resumed = await runHealthCheck({ ...options, transport: second, resume: runId });
+      assert.equal(resumed.run.steps.find((s) => s.id === recordTypeUseExtractor.id)!.status, "done");
+      const again = queriesOf(second.requests);
+      assert.equal(again.filter(isList).length, 1, "the list is read again");
+      assert.equal(again.filter(isCount).length, 2 * 4, "both counts on each object are read again");
+      const finding = (fs: Finding[]) => fs.find((x) => x.ruleId === RULE);
+      assert.deepEqual(finding(resumed.output!.findings), synthetic.findings.find((x) => x.ruleId === RULE));
+    });
+  }
 });
 
 describe("the guard", () => {
