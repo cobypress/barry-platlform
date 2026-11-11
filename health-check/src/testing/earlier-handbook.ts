@@ -37,7 +37,7 @@ export function withEarlier(dir: string, edit: (h: Handbook) => unknown = plantE
  * part names which details changed.
  */
 export function olderReading(h: Handbook): void {
-  h.readBy = { metadata: null, apex: null };
+  h.readBy = { metadata: null, apex: null, build: null };
 }
 
 /** A flow the synthetic org had at its earlier health check and has since removed. */

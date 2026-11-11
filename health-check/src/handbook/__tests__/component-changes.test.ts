@@ -336,7 +336,7 @@ describe("handbook.json of an earlier version", () => {
     write(withoutReadings({ ...current, version: 5 }));
     const back = readHandbook(dir);
     assert.ok(back.ok);
-    assert.deepEqual(back.handbook, { ...current, readBy: { metadata: null, apex: null } });
+    assert.deepEqual(back.handbook, { ...current, readBy: { metadata: null, apex: null, build: null } });
     // But a version 5 file that says which reading made it is no version we wrote.
     write({ ...current, version: 5 });
     assert.deepEqual(readHandbook(dir), { ok: false, why: "format" });

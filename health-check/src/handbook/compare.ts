@@ -47,7 +47,8 @@ export type Route = "retrieve" | "tooling";
 
 /**
  * Why a kind's details weren't compared, from the two files' `readBy` for it
- * (decision 484): the earlier file's reading is older than this one's, the two
+ * and their build (decisions 484 and 485): the earlier file's reading is older
+ * than this one's, the two
  * differ some other way, or the earlier file, this one or both don't say,
  * which a file from before the readings were kept, or a run that reused a
  * step read before then, doesn't.
@@ -152,16 +153,31 @@ function lastChangedDiffers(before: HandbookLastChange | null, after: HandbookLa
 
 const differs = (a: unknown, b: unknown): boolean => !isDeepStrictEqual(a, b);
 
+/** One number a file holds of how it was made: its step's for the kind, or its build's. */
+type Stamp = { before: number | null; after: number | null };
+
 /**
- * Whether both files were made by the same reading of a kind (decision 484):
- * null when they were, so its details can be compared. A file that doesn't say
- * is never taken to be the same reading as one that does, or as another that
+ * Whether both files were made by the same reading of a kind (decisions 484
+ * and 485): the same step number for it and the same build number, or null
+ * when they were, so its details can be compared. A file that doesn't say is
+ * never taken to be the same reading as one that does, or as another that
  * doesn't: a parser fix can move a detail of a component nobody touched.
+ * "older" only where every number is known and none of the earlier file's is
+ * higher, so the earlier reading is the older one; "differs" otherwise.
  */
-export function readingOf(before: number | null, after: number | null): Reading | null {
-  if (before === null || after === null) return before === null && after === null ? "unknownBoth" : before === null ? "unknownBefore" : "unknownNow";
-  return before === after ? null : before < after ? "older" : "differs";
+export function readingOf(...stamps: Stamp[]): Reading | null {
+  const unknownBefore = stamps.some((s) => s.before === null);
+  const unknownNow = stamps.some((s) => s.after === null);
+  if (unknownBefore || unknownNow) return unknownBefore && unknownNow ? "unknownBoth" : unknownBefore ? "unknownBefore" : "unknownNow";
+  if (stamps.every((s) => s.before === s.after)) return null;
+  return stamps.every((s) => s.before! <= s.after!) ? "older" : "differs";
 }
+
+/** The step's number for a kind and the build's, as `readingOf` takes them. */
+const stampsOf = (before: Handbook, after: Handbook, step: "metadata" | "apex"): Stamp[] => [
+  { before: before.readBy[step], after: after.readBy[step] },
+  { before: before.readBy.build, after: after.readBy.build },
+];
 
 // ─── Flows ────────────────────────────────────────────────────────────────────
 
@@ -219,7 +235,7 @@ function compareFlows(before: Handbook, after: Handbook): KindComparison {
   const [was, now] = [routeOf(before), routeOf(after)];
   const routes = was === null || now === null ? "unknown" : was !== now ? "differ" : null;
   // The same route and the same reading, or only the dates.
-  const reading = readingOf(before.readBy.metadata, after.readBy.metadata);
+  const reading = readingOf(...stampsOf(before, after, "metadata"));
   const full = routes === null && reading === null;
   const kind: Kind<HandbookFlowItem> = { key: (f) => f.name, component: (f) => ({ name: f.name, label: f.label || null, object: null }), differ: flowDiffer, inScope: () => true };
   const result = compareKind(before.flows.items, after.flows.items, kind, { before: before.flows.lastChanges, after: after.flows.lastChanges }, full);
@@ -299,7 +315,7 @@ function compareRules(before: Handbook, after: Handbook): KindComparison {
     differ: ruleDiffer,
     inScope: (r) => !skipped.has(r.object) && !unnamed(r),
   };
-  const reading = readingOf(before.readBy.metadata, after.readBy.metadata);
+  const reading = readingOf(...stampsOf(before, after, "metadata"));
   const result = compareKind(was.items, now.items, kind, { before: was.lastChanges, after: now.lastChanges }, reading === null);
   // By name: one rule seen under its id in one run and its name in the other is one.
   const unnamedCount = new Set([...was.items, ...now.items].filter((r) => !skipped.has(r.object) && unnamed(r)).map((r) => r.name)).size;
@@ -350,13 +366,13 @@ function triggerDiffer(before: HandbookApexTrigger, after: HandbookApexTrigger):
   return { details, unread: apex.unread || objectUnread || eventsUnread };
 }
 
-function compareApex<T extends HandbookApexClass>(before: ApexPart<T>, after: ApexPart<T>, readBy: [number | null, number | null], differ: (b: T, a: T) => Difference, object: (item: T) => string | null): KindComparison {
+function compareApex<T extends HandbookApexClass>(before: ApexPart<T>, after: ApexPart<T>, stamps: Stamp[], differ: (b: T, a: T) => Difference, object: (item: T) => string | null): KindComparison {
   const skip = notCompared(before, after);
   if (skip || before.status !== "ok" || after.status !== "ok") return skip!;
   const upTo = rangeOf(before, after);
   const inRange = (item: T): boolean => upTo === null || item.name <= upTo;
   const kind: Kind<T> = { key: (i) => i.name, component: (i) => ({ name: i.name, label: null, object: object(i) }), differ, inScope: inRange };
-  const reading = readingOf(...readBy);
+  const reading = readingOf(...stamps);
   const result = compareKind(before.items, after.items, kind, { before: before.lastChanges, after: after.lastChanges }, reading === null);
   const range = upTo === null ? null : { upTo, leftOut: Math.max(after.total, after.items.length) - after.items.filter(inRange).length };
   return { ...result, ...none(), added: result.added.sort(byName), removed: result.removed.sort(byName), changed: result.changed.sort(byName), range, reading };
@@ -364,7 +380,7 @@ function compareApex<T extends HandbookApexClass>(before: ApexPart<T>, after: Ap
 
 /** The two handbooks side by side, each kind on its own. `before` is the earlier health check's. */
 export function compareHandbooks(before: Handbook, after: Handbook): HandbookComparison {
-  const apex: [number | null, number | null] = [before.readBy.apex, after.readBy.apex];
+  const apex = stampsOf(before, after, "apex");
   return {
     flows: compareFlows(before, after),
     validationRules: compareRules(before, after),

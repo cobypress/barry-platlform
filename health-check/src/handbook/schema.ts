@@ -12,7 +12,8 @@ import { tokenSource } from "../privacy/pseudonymiser.ts";
 // left an engine before them, so none in a run folder lacks them. 3 adds the
 // recent changes (decision 461), 4 when each class and trigger was last changed
 // and by whom (decision 473), and 5 the same for each flow and validation rule
-// (decision 482), and 6 which reading of the org made it (decision 484). Files
+// (decision 482), and 6 which reading of the org made it and which build of
+// the file (decisions 484 and 485). Files
 // of versions 2 to 5 are still read.
 export const HANDBOOK_VERSION = 6;
 
@@ -293,15 +294,18 @@ const parts = {
 };
 
 /**
- * Which reading of the org made the file (decision 484): the numbers beside
- * the code that works out the flows' and rules' detail (detail.ts) and what
- * each class and trigger touches (apex-touches.ts), as each step stamped its
- * own output when it read. Null where it isn't known: a step that didn't run
- * or couldn't read, or one read before the stamp was kept and reused since. A
+ * Which reading of the org made the file (decisions 484 and 485): the numbers
+ * beside the code that works out the flows' and rules' detail (detail.ts) and
+ * what each class and trigger touches (apex-touches.ts), as each step stamped
+ * its own output when it read, and the number beside the code that builds the
+ * file from those outputs (build.ts), written when it's built. Null where it
+ * isn't known: a step that didn't run or couldn't read, one read before the
+ * stamp was kept and reused since, or a Tooling read resumed from items kept
+ * under another number; and all three in a file of version 5 or before. A
  * re-check compares a kind's details only where both files hold the same
- * number for it.
+ * number for it and the same build number.
  */
-export const HandbookReadBy = z.strictObject({ metadata: z.number().int().positive().nullable(), apex: z.number().int().positive().nullable() });
+export const HandbookReadBy = z.strictObject({ metadata: z.number().int().positive().nullable(), apex: z.number().int().positive().nullable(), build: z.number().int().positive().nullable() });
 export type HandbookReadBy = z.infer<typeof HandbookReadBy>;
 
 export const Handbook = z.strictObject({ version: z.literal(HANDBOOK_VERSION), readBy: HandbookReadBy, ...parts });

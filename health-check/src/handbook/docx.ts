@@ -698,6 +698,17 @@ function changedWords(change: Changed, names: Names): string {
 
 /** What follows from comparing a kind only by its dates, said once however many reasons there are. */
 const DATES_ONLY = "we've compared only which were added or removed and when each was last changed";
+/** The same where either file holds no last-changed dates for the kind, so only which were added or removed is left (decision 485). */
+const ADDED_OR_REMOVED_ONLY = "we've compared only which were added or removed";
+
+/** Both files say when each was last changed, so dates are compared where both hold one. */
+const dated = (c: Compared): boolean => c.lastChanges.before === "read" && c.lastChanges.after === "read";
+
+/**
+ * Compared by dates alone, and either file holds none: only which were added
+ * or removed is compared, so nothing can be called changed (decision 485).
+ */
+const addedOrRemovedOnly = (c: Compared): boolean => (c.routes !== null || c.reading !== null) && !dated(c);
 
 /**
  * Why a kind was compared only by its dates (decision 484), as a clause that
@@ -727,9 +738,12 @@ function sinceNotes(kind: SinceKind, c: Compared): string[] {
   const notes: string[] = [];
   const these = (n: number): string => (n === 1 ? "that one" : "those");
   // Compared only by dates: one sentence, its consequence said once, with both reasons where a flow has two.
+  // Where either file holds no dates, the sentence says only which were added
+  // or removed were compared, and nothing after it says the dates weren't.
   const reasons = [...(c.routes ? [routeWords(kind, c.routes)] : []), ...(c.reading ? [readingWords(kind, c.reading)] : [])];
-  if (reasons.length === 1) notes.push(`${reasons[0]}, so ${DATES_ONLY}.`);
-  if (reasons.length > 1) notes.push(`${upperFirst(DATES_ONLY.replace("which were", `which ${kind.many} were`))}, for two reasons: ${reasons.map(lowerFirst).join("; and ")}.`);
+  const consequence = dated(c) ? DATES_ONLY : ADDED_OR_REMOVED_ONLY;
+  if (reasons.length === 1) notes.push(`${reasons[0]}, so ${consequence}.`);
+  if (reasons.length > 1) notes.push(`${upperFirst(consequence.replace("which were", `which ${kind.many} were`))}, for two reasons: ${reasons.map(lowerFirst).join("; and ")}.`);
   if (c.stepsCut) notes.push(`${upperFirst(plural(c.stepsCut, kind.one, kind.many))} had more steps than this handbook keeps in one of the two health checks, so for ${these(c.stepsCut)} we compared how many steps each has and the steps both kept.`);
   if (c.leftOutObjects.length) notes.push(`We left out the rules on ${listed(c.leftOutObjects)}: we can't be sure both health checks read the rules on ${c.leftOutObjects.length === 1 ? "that object" : "those objects"}, so a rule there isn't called added or removed.`);
   if (c.unnamed) notes.push(`We left out ${plural(c.unnamed, kind.one, kind.many)} whose object one of the two health checks could name only by its id, so ${c.unnamed === 1 ? "it isn't" : "they aren't"} called added, removed or changed.`);
@@ -743,7 +757,7 @@ function sinceNotes(kind: SinceKind, c: Compared): string[] {
     notes.push(`For ${plural(c.unread, kind.one, kind.many)}, one of the two health checks couldn't read ${which}, so ${what} compared.`);
   }
   const { before, after } = c.lastChanges;
-  if (c.common > 0 && (before !== "read" || after !== "read")) {
+  if (c.common > 0 && reasons.length === 0 && !dated(c)) {
     const who = before !== "read" && after !== "read" ? "Neither health check says" : before !== "read" ? "Your earlier health check doesn't say" : "This health check doesn't say";
     notes.push(`${who} when each ${kind.one} was last changed, so that isn't compared.`);
   }
@@ -758,12 +772,14 @@ function sinceList(doc: Doc, label: string, kind: SinceKind, lines: string[]): v
 function writeSinceKind(doc: Doc, kind: SinceKind, c: KindComparison, names: Names): void {
   doc.heading(kind.title, 3);
   if (c.status !== "compared") return doc.para({ text: notComparedWords(kind, c.unreadIn), bold: true });
+  // Where nothing could be called changed, the part never says nothing changed.
+  const changes = !addedOrRemovedOnly(c);
   if (c.added.length + c.removed.length + c.changed.length === 0) {
-    doc.para(`No ${kind.many} were added, removed or changed.`);
+    doc.para(changes ? `No ${kind.many} were added, removed or changed.` : `No ${kind.many} were added or removed.`);
   } else {
     sinceList(doc, "Added", kind, c.added.map(kind.name));
     sinceList(doc, "Removed", kind, c.removed.map(kind.name));
-    sinceList(doc, "Changed", kind, c.changed.map((change) => `${kind.name(change)}: ${changedWords(change, names)}`));
+    if (changes) sinceList(doc, "Changed", kind, c.changed.map((change) => `${kind.name(change)}: ${changedWords(change, names)}`));
   }
   for (const note of sinceNotes(kind, c)) doc.para(note);
 }

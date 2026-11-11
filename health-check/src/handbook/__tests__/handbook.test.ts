@@ -17,7 +17,7 @@ import { loadCalibration, syntheticProvider } from "../../testing/replay.ts";
 import { Simulator } from "../../testing/simulator.ts";
 import { AS_OF, HANDBOOK_CASE_MARKER, HANDBOOK_CASE_PLANTED, HANDBOOK_MARKER, HANDBOOK_PLANTED, METADATA_FILES } from "../../testing/synthetic-org.ts";
 import { docxText } from "../../testing/docx-text.ts";
-import { buildHandbook, HANDBOOK_FILE } from "../build.ts";
+import { BUILD_READING, buildHandbook, HANDBOOK_FILE } from "../build.ts";
 import { renderHandbookDocx } from "../docx.ts";
 import { flowDetail, validationRuleDetail } from "../detail.ts";
 import { Handbook, HANDBOOK_VERSION, MAX_APEX_CLASSES, MAX_APEX_TRIGGERS, MAX_CONDITIONS, MAX_FIELDS, MAX_PATHS, MAX_STEPS, MAX_TEXT, type HandbookFlow, type ValidationRuleCoverage } from "../schema.ts";
@@ -38,7 +38,8 @@ async function run(options: ConstructorParameters<typeof Simulator>[0] = {}): Pr
 const read = (dir: string, file: string): string => readFileSync(join(dir, file), "utf8");
 /** The Apex parts and recent changes, for a file whose other parts a test is about. */
 /** A hand-made file's readings, which no step stamped (decision 484). */
-const NOT_READ_BY = { metadata: null, apex: null } as const;
+// Neither step read, and the file built by this code (decision 485).
+const NOT_READ_BY = { metadata: null, apex: null, build: BUILD_READING } as const;
 const APEX_UNREAD = { apexClasses: { status: "unavailable", reason: "x" }, apexTriggers: { status: "unavailable", reason: "x" }, recentChanges: { status: "unavailable", reason: "x" } } as const;
 /** Flows as a run that read none's last changes lists them (decision 482). */
 const flowsListed = (...items: HandbookFlow[]) => ({ status: "ok" as const, items: items.map((f) => ({ ...f, lastChanged: null })), lastChanges: "not_kept" as const });
@@ -676,7 +677,7 @@ describe("Apex (decisions 456 and 457)", () => {
     test("a version 6 file that validates against the schema, with both parts read, and which reading made each", () => {
       const raw = JSON.parse(read(dir, HANDBOOK_FILE));
       assert.equal(raw.version, 6);
-      assert.deepEqual(raw.readBy, { metadata: 1, apex: 1 });
+      assert.deepEqual(raw.readBy, { metadata: 1, apex: 1, build: 1 });
       const h = Handbook.parse(raw);
       assert.ok(h.apexClasses.status === "ok" && h.apexTriggers.status === "ok");
       assert.deepEqual([h.apexClasses.total, h.apexClasses.cut, h.apexTriggers.total, h.apexTriggers.cut], [7, false, 5, false]);

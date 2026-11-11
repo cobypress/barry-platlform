@@ -26,8 +26,8 @@ export const HANDBOOK_NOT_MADE = {
   render: "The org handbook wasn't made: it couldn't be written as a Word document.",
 } as const;
 
-/** An older file's readings, which it didn't keep (decision 484). */
-const NOT_KNOWN: HandbookReadBy = { metadata: null, apex: null };
+/** An older file's readings and build, which it didn't keep (decisions 484 and 485). */
+const NOT_KNOWN: HandbookReadBy = { metadata: null, apex: null, build: null };
 
 /**
  * The run folder's handbook, checked against its schema. A file that doesn't

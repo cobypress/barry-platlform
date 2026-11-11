@@ -16,7 +16,7 @@ import { tempDir } from "../../testing/harness.ts";
 import { loadCalibration, syntheticProvider } from "../../testing/replay.ts";
 import { Simulator } from "../../testing/simulator.ts";
 import { AS_OF } from "../../testing/synthetic-org.ts";
-import { HANDBOOK_FILE } from "../build.ts";
+import { BUILD_READING, HANDBOOK_FILE } from "../build.ts";
 import { compareHandbooks, type KindComparison } from "../compare.ts";
 import { METADATA_READING } from "../detail.ts";
 import { renderHandbookDocx, SINCE_TITLE } from "../docx.ts";
@@ -101,7 +101,7 @@ describe("a run resumed with a step's checkpoint from before the readings were k
       const file = read<{ version: number; readBy: unknown }>(first.dir, HANDBOOK_FILE);
       assert.equal(file.version, HANDBOOK_VERSION);
       assert.equal(HANDBOOK_VERSION, 6);
-      assert.deepEqual(file.readBy, half === "metadata" ? { metadata: null, apex: APEX_READING } : { metadata: METADATA_READING, apex: null });
+      assert.deepEqual(file.readBy, half === "metadata" ? { metadata: null, apex: APEX_READING, build: BUILD_READING } : { metadata: METADATA_READING, apex: null, build: BUILD_READING });
 
       // Set against a run read afresh, the reused half is compared by its dates alone, and says it's this run's.
       const c = compareHandbooks(earlier, handbookIn(first.dir));
@@ -124,6 +124,6 @@ describe("a run resumed with a step's checkpoint from before the readings were k
     const asked = reads(resumed.transport);
     assert.ok(asked.metadata > 0, "the metadata step read");
     assert.equal(asked.apex, 0, "the Apex wasn't read again");
-    assert.deepEqual(read<{ readBy: unknown }>(first.dir, HANDBOOK_FILE).readBy, { metadata: METADATA_READING, apex: null });
+    assert.deepEqual(read<{ readBy: unknown }>(first.dir, HANDBOOK_FILE).readBy, { metadata: METADATA_READING, apex: null, build: BUILD_READING });
   });
 });
