@@ -19,12 +19,14 @@ import { scoreDomains } from "../../domains/scoring.ts";
 import { syntheticInterviews } from "../../testing/interviews.ts";
 import { compactMoney, plainWords, ukDates } from "../format.ts";
 import { yearlyByFinding } from "../../value/model.ts";
-import { DECK_RANGE, fullReportHtml, fullReportHtmlAt, INVENTORY_SLIDE_ROWS, slideCounts } from "../full-report.ts";
+import { DECK_RANGE, deckRangeFor, fullReportHtml, fullReportHtmlAt, INVENTORY_SLIDE_ROWS, slideCounts } from "../full-report.ts";
 import { INVENTORY_COLUMNS, OBJECT_INVENTORY } from "../../domains/configuration/inventory.ts";
 import { document } from "../html.ts";
 import { layoutOf, launchBrowser, pdfPageCount, renderPdf } from "../pdf.ts";
 import { EXECUTIVE_PAGES, OUTPUT_FILES, renderRun } from "../render-run.ts";
 import { heldFigures } from "../render-released.ts";
+import { carryOver } from "../carry-over.ts";
+import { storageSentences } from "../../progress/compare.ts";
 
 const { output, run, dir } = await runFromRecording({ answers: loadAnswers() });
 const pseudonyms = new Pseudonymiser(JSON.parse(readFileSync(join(dir, "pseudonym-map.json"), "utf8")) as PseudonymEntry[]);
@@ -366,6 +368,189 @@ describe("a re-check with an intake and interviews (DECISIONS.md 418)", () => {
     const report = recheck();
     const { layout } = await renderPdf(browser, fullReportHtml(report, pseudonyms), { ...deckRange, dataset: report.dataset });
     assert.deepEqual(layout.problems, [], describeProblems(layout.problems));
+  });
+
+  test("the slide's heading sits on the page, spaced as it was inside the progress block (DECISIONS.md 505)", async () => {
+    // Inside the block, the pair's top margin folded into the heading's; beside it, the heading's alone sets the gap.
+    const report = recheck();
+    for (const [deck, html] of [["executive", executiveHtml(report, pseudonyms)], ["full report", fullReportHtml(report, pseudonyms)]] as const) {
+      const page = await browser.newPage();
+      try {
+        await page.setContent(html, { waitUntil: "load" });
+        await page.evaluate(() => window.document.fonts.ready.then(() => undefined));
+        await page.emulateMedia({ media: "print" });
+        const gaps = await page.evaluate(() => {
+          const slide = [...window.document.querySelectorAll<HTMLElement>(".page")].find((p) => p.querySelector(":scope > .eyebrow")?.textContent === "Since your last health check")!;
+          const [eyebrow, h2, block] = [...slide.children] as HTMLElement[];
+          const box = (el: Element) => el.getBoundingClientRect();
+          const pair = slide.querySelector(".progress > .pair")!;
+          return {
+            order: [eyebrow!.className, h2!.tagName, block!.className],
+            top: box(eyebrow!).top - box(slide).top - parseFloat(getComputedStyle(slide).paddingTop),
+            headingGap: box(h2!).top - box(eyebrow!).bottom - parseFloat(getComputedStyle(h2!).marginTop),
+            pairGap: box(pair).top - box(h2!).bottom - parseFloat(getComputedStyle(h2!).marginBottom),
+          };
+        });
+        assert.deepEqual(gaps.order, ["eyebrow", "H2", "progress"], deck);
+        for (const [name, gap] of [["top", gaps.top], ["eyebrow to heading", gaps.headingGap], ["heading to figures", gaps.pairGap]] as const) assert.ok(Math.abs(gap) < 0.01, `${deck}, ${name}: ${gap}px more than the margins`);
+      } finally {
+        await page.close();
+      }
+    }
+  });
+
+  test("both still fit with a storage sentence for each kind on the progress page (DECISIONS.md 500)", async () => {
+    // The earlier check read its limits 118 days before, with less of each kind used: a rise
+    // with an average is the longest sentence, so this is the progress page at its fullest.
+    const plain = recheck();
+    const limitsAt = (iso: string) => ({ ...plain.input.run, steps: plain.input.run.steps.map((s) => (s.id === "api-limits" ? { ...s, finishedAt: iso } : s)) });
+    const less = (f: Finding): Finding => ({ ...f, facts: { ...f.facts, DataStorageMBUsed: f.facts.DataStorageMBUsed! - 470, FileStorageMBUsed: f.facts.FileStorageMBUsed! - 520 } });
+    const earlier: ReportInput = { ...plain.input.baseline!, run: { ...limitsAt("2026-07-14T12:00:00.000Z"), id: run.id, baselineRunId: null }, findings: plain.input.baseline!.findings.map((f) => (f.ruleId === "tech.storage-use" ? less(f) : f)) };
+    const report = buildReport({ ...plain.input, run: limitsAt("2026-11-09T12:00:00.000Z"), baseline: earlier });
+    const html = executiveHtml(report, pseudonyms);
+    assert.match(html, /Data storage: [\d,]+ of [\d,]+ MB used then, [\d,]+ of [\d,]+ MB now, up 470 MB in 118 days \(an average of 119 MB every 30 days\)\./);
+    assert.match(html, /File storage: [\d,]+ of [\d,]+ MB used then, [\d,]+ of [\d,]+ MB now, up 520 MB in 118 days \(an average of 132 MB every 30 days\)\./);
+    const exec = await renderPdf(browser, html, { minPages: EXECUTIVE_PAGES.min, maxPages: executiveMaxPages(report), dataset: report.dataset });
+    assert.deepEqual(exec.layout.problems, [], describeProblems(exec.layout.problems));
+    const deck = await renderPdf(browser, fullReportHtml(report, pseudonyms), { ...deckRange, dataset: report.dataset });
+    assert.deepEqual(deck.layout.problems, [], describeProblems(deck.layout.problems));
+  });
+});
+
+describe("the progress page at its fullest with the engine's own titles, and past it with the customer's (DECISIONS.md 501 and 505)", () => {
+  // The longest titles the engine writes itself, six in each of the three lists the
+  // page names (each longer than it names), one rule that can't be told, area
+  // scores that move, and both storage sentences at their longest: six-digit
+  // figures, allowances that differ between the runs, a rise with an average.
+  // A title carrying the customer's own words, such as a team's name, has no
+  // longest: the last case plants one and the slide carries on (DECISIONS.md 505).
+  const STORAGE = "tech.storage-use";
+  const longest = [...new Map(output!.findings.filter((f) => f.status === "issue" && f.ruleId !== STORAGE).map((f) => [f.ruleId, f])).values()].sort((a, b) => b.title.length - a.title.length);
+  const fixed = new Set(longest.filter((_, i) => i % 3 === 0).slice(0, 6).map((f) => f.ruleId));
+  const added = new Set(longest.filter((_, i) => i % 3 === 1).slice(0, 6).map((f) => f.ruleId));
+  const unknown = longest.filter((_, i) => i % 3 === 2)[6]!.ruleId;
+  // Issues first, longest title first, so the titles the page names are the longest.
+  const ordered = (findings: Finding[]): Finding[] => [...findings].sort((a, b) => (b.status === "issue" ? b.title.length : 0) - (a.status === "issue" ? a.title.length : 0));
+  const passed = (f: Finding): Finding => ({ ...f, status: "passed", value: { kind: "not_sized", reason: "Passed." } });
+  const limitsAt = (iso: string, extra: Partial<typeof run> = {}) => ({ ...run, ...extra, steps: run.steps.map((s) => (s.id === "api-limits" ? { ...s, finishedAt: iso } : s)) });
+  /** `planted`: a rule fixed since the earlier check, one of its issues then (titled `replacing`) titled in the customer's words. */
+  const storage = (then: Record<string, number>, now: Record<string, number>, planted?: { ruleId: string; replacing: string; title: string }): BuiltReport => {
+    const input: ReportInput = { ...full, interviews: syntheticInterviews() };
+    const fixedNow = planted ? new Set([...fixed, planted.ruleId]) : fixed;
+    const first = planted && output!.findings.find((f) => f.ruleId === planted.ruleId && f.status === "issue" && f.title === planted.replacing);
+    assert.ok(!planted || first, "the planted title replaces one the synthetic run has");
+    const before = ordered(output!.findings.map((f) => (f.ruleId === STORAGE ? { ...f, facts: then } : f === first ? { ...f, title: planted!.title } : added.has(f.ruleId) && f.status === "issue" ? passed(f) : f)));
+    const later = ordered(
+      output!.findings.map((f): Finding =>
+        f.ruleId === STORAGE ? { ...f, facts: now } : fixedNow.has(f.ruleId) && f.status === "issue" ? passed(f) : f.ruleId === unknown && f.status === "issue" ? { ...f, status: "not_measurable", notMeasurableReason: "Couldn't be read this time.", value: { kind: "not_sized", reason: "Not measured." } } : f,
+      ),
+    );
+    const earlier: ReportInput = { ...input, run: limitsAt("2026-07-14T12:00:00.000Z"), findings: before, scores: scoreDomains(run.modules, before) };
+    return buildReport({ ...input, run: limitsAt("2026-11-09T12:00:00.000Z", { id: `${run.id}-recheck`, baselineRunId: run.id }), findings: later, scores: scoreDomains(run.modules, later), baseline: earlier });
+  };
+  const kinds = (data: [number, number], file: [number, number]) => ({
+    DataStorageMBUsed: data[0], DataStorageMBMax: data[1], DataStorageMBShare: Math.round((data[0] / data[1]) * 1000) / 10,
+    FileStorageMBUsed: file[0], FileStorageMBMax: file[1], FileStorageMBShare: Math.round((file[0] / file[1]) * 1000) / 10,
+  });
+  const cases: Array<[string, BuiltReport, RegExp]> = [
+    ["a rise in both, with allowances that changed", storage(kinds([812_345, 900_000], [712_345, 800_000]), kinds([912_345, 950_000], [812_345, 850_000])), /Data storage: 812,345 of 900,000 MB used then, 912,345 of 950,000 MB now, up 100,000 MB in 118 days \(an average of 25,424 MB every 30 days\)\. File storage: /],
+    ["both past their allowance now", storage(kinds([812_345, 900_000], [712_345, 800_000]), kinds([962_345, 950_000], [862_345, 850_000])), /Data storage: 812,345 of 900,000 MB used then, 962,345 MB used now, over the 950,000 MB allowance, up 150,000 MB in 118 days \(an average of 38,136 MB every 30 days\)\. File storage: /],
+  ];
+
+  for (const [name, report, sentences] of cases) {
+    test(`${name}: both decks fit as printDocuments renders them, with nothing carried onto a continued page`, async () => {
+      const p = report.progress!;
+      for (const list of [p.fixed, p.remaining, p.added]) assert.ok(list.length > 5, "each list is longer than the page names");
+      assert.ok(p.unknown.length > 0);
+      assert.ok(p.areas.filter((a) => a.before !== null && a.after !== null && a.before !== a.after).length >= 4, "four area moves");
+      const range = deckRangeFor(report.input.run);
+      for (const [deck, html, pages] of [["executive", executiveHtml(report, pseudonyms), { minPages: EXECUTIVE_PAGES.min, maxPages: executiveMaxPages(report) }], ["full report", fullReportHtml(report, pseudonyms), { minPages: range.min, maxPages: range.max }]] as const) {
+        assert.match(html, sentences, deck);
+        const printed = await renderPdf(browser, html, { ...pages, dataset: report.dataset, carryOver: true });
+        assert.deepEqual(printed.layout.problems, [], `${deck}: ${describeProblems(printed.layout.problems)}`);
+        // Laid out with nothing carried over, the progress page still fits: the slide holds it all.
+        const alone = await layoutOf(browser, html, { ...pages, dataset: report.dataset });
+        assert.deepEqual(alone.problems, [], `${deck}: ${describeProblems(alone.problems)}`);
+        assert.equal(alone.pages, printed.layout.pages, deck);
+      }
+    });
+  }
+
+  // The adversary's case: both kinds past their allowance at six digits, and a team
+  // named in the Fixed list's first title (pipe.segment-divergence words it so).
+  const TEAM_TITLE = "Slippage rate for the Enterprise Sales North America team is well above the overall figure";
+  const CLOSING = "Some of the change in money can come from the business itself, not only from fixes.";
+  const SEGMENT = "pipe.segment-divergence";
+  const planted = storage(kinds([812_345, 900_000], [712_345, 800_000]), kinds([962_345, 950_000], [862_345, 850_000]), { ruleId: SEGMENT, replacing: "Win rate for the Sales EU team is well below the overall figure", title: TEAM_TITLE });
+  // The Fixed list follows the earlier check's ranking; first, as it is when that rule ranked highest.
+  const customer: BuiltReport = { ...planted, progress: { ...planted.progress!, fixed: [...planted.progress!.fixed].sort((a, b) => Number(b.ruleId === SEGMENT) - Number(a.ruleId === SEGMENT)) } };
+
+  /** Each slide of the progress page once carried over as printDocuments does: its eyebrow, heading, and the text under them. */
+  async function progressSlides(html: string): Promise<{ pages: number; slides: Array<{ eyebrow: string; heading: string; notes: string[] }> }> {
+    const context = await browser.newContext({ offline: true });
+    try {
+      const page = await context.newPage();
+      await page.setContent(html, { waitUntil: "load" });
+      await page.evaluate(() => window.document.fonts.ready.then(() => undefined));
+      await page.emulateMedia({ media: "print" });
+      await carryOver(page);
+      return await page.evaluate(() => {
+        const pages = [...window.document.querySelectorAll<HTMLElement>(".page")];
+        const first = pages.findIndex((p) => p.querySelector("h2")?.textContent === "What has changed");
+        const slides = [];
+        // The slide, then each page carried on from it: one with a continued heading, or with none at all.
+        for (let i = first; i >= 0 && i < pages.length && pages[i]!.querySelector(".progress"); i++) {
+          const p = pages[i]!;
+          const heading = p.querySelector("h2")?.textContent ?? "";
+          if (i > first && heading && !/, continued$/.test(heading)) break;
+          slides.push({ eyebrow: p.querySelector(".eyebrow")?.textContent ?? "", heading, notes: [...p.querySelectorAll(".progress > p.note")].map((n) => n.textContent ?? "") });
+        }
+        return { pages: pages.length, slides };
+      });
+    } finally {
+      await context.close();
+    }
+  }
+
+  test("past its fullest, with a title in the customer's own words: the closing note goes to a continued slide that carries the heading (DECISIONS.md 505)", async () => {
+    const p = customer.progress!;
+    assert.equal(p.fixed[0]!.title, TEAM_TITLE, "the Fixed list opens with the customer's title");
+    for (const list of [p.fixed, p.remaining, p.added]) assert.ok(list.length >= 6, "six or more rules a list");
+    assert.equal(p.unknown.length, 1);
+    const stored = storageSentences(p).join(" ");
+    assert.match(stored, /962,345 MB used now, over the 950,000 MB allowance.* 862,345 MB used now, over the 850,000 MB allowance/);
+    const range = deckRangeFor(customer.input.run);
+    const html = fullReportHtml(customer, pseudonyms);
+    const printed = await renderPdf(browser, html, { minPages: range.min, maxPages: range.max, dataset: customer.dataset, carryOver: true });
+    assert.equal(printed.layout.passed, true);
+    assert.deepEqual(printed.layout.problems, [], describeProblems(printed.layout.problems));
+    const carried = await progressSlides(html);
+    assert.equal(carried.pages, printed.layout.pages);
+    // What the customer reads: the slide whole, storage included, then the closing note under the slide's heading.
+    assert.deepEqual(
+      carried.slides.map((s) => [s.eyebrow, s.heading]),
+      [
+        ["Since your last health check", "What has changed"],
+        ["Since your last health check", "What has changed, continued"],
+      ],
+      JSON.stringify(carried.slides),
+    );
+    assert.ok(carried.slides[0]!.notes.includes(stored), "the storage paragraph whole on the first slide");
+    assert.ok(!carried.slides[0]!.notes.includes(CLOSING));
+    assert.deepEqual(carried.slides[1]!.notes, [CLOSING]);
+    // The same case with no storage sentence: the slide holds it all, so storage costs exactly the one slide.
+    const without: BuiltReport = { ...customer, progress: { ...p, storage: null } };
+    const withoutHtml = fullReportHtml(without, pseudonyms);
+    const plain = await renderPdf(browser, withoutHtml, { minPages: range.min, maxPages: range.max, dataset: without.dataset, carryOver: true });
+    assert.deepEqual(plain.layout.problems, [], describeProblems(plain.layout.problems));
+    assert.equal(printed.layout.pages, plain.layout.pages + 1);
+    assert.deepEqual((await progressSlides(withoutHtml)).slides.map((s) => s.heading), ["What has changed"]);
+  });
+
+  test("past its fullest, with a title in the customer's own words: the executive summary keeps within its re-check ceiling", async () => {
+    const printed = await renderPdf(browser, executiveHtml(customer, pseudonyms), { minPages: EXECUTIVE_PAGES.min, maxPages: executiveMaxPages(customer), dataset: customer.dataset, carryOver: true });
+    assert.deepEqual(printed.layout.problems, [], describeProblems(printed.layout.problems));
+    assert.ok(printed.layout.pages <= executiveMaxPages(customer), `${printed.layout.pages} pages`);
   });
 });
 
