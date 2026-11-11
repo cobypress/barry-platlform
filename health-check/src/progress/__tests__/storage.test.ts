@@ -107,8 +107,12 @@ describe("storage on a re-check (DECISIONS.md 500)", () => {
   });
 
   test("an allowance that changed between the runs is printed as each run read it", () => {
-    const report = recheck({}, { edit: kinds([9_410, 15_360], null) });
-    assert.deepEqual(storageSentences(report.progress!), ["Data storage: 8,940 of 10,240 MB used then, 9,410 of 15,360 MB now, up 470 MB in 118 days (an average of 119 MB every 30 days)."]);
+    // The earlier allowance is no longer the org's, so only the earlier reading backs it.
+    const report = recheck({ edit: kinds([8_940, 10_000], null) }, { edit: kinds([9_410, 15_360], null) });
+    const [sentence] = storageSentences(report.progress!);
+    assert.equal(sentence, "Data storage: 8,940 of 10,000 MB used then, 9,410 of 15,360 MB now, up 470 MB in 118 days (an average of 119 MB every 30 days).");
+    const section = report.outputs.raw_notes.sections.find((s) => s.key === "progress")!;
+    assert.deepEqual(checkNumbers(sentence!, scopeDataset(report.dataset, report.scopes.get(section.id)!)).unmatched, []);
   });
 
   test("the days are between the two limits readings, not the runs' dates", () => {
