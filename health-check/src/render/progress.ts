@@ -8,7 +8,8 @@ import type { Render } from "./html.ts";
 // Shared by both decks. Its figures are the progress model's own.
 
 export const PROGRESS_CSS = `
-.progress .pair { display: flex; gap: 12px; margin: 8px 0 16px; }
+/* No top margin: the heading's own sits beside the block, where the pair's used to fold into it (DECISIONS.md 505). */
+.progress .pair { display: flex; gap: 12px; margin: 0 0 16px; }
 .progress .pair .stat { padding: 10px 12px; }
 .progress .pair .stat b { font-size: 1.4em; }
 .progress .lists { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
@@ -42,5 +43,7 @@ export function progressPage(r: Render, report: BuiltReport): string {
   // One paragraph for both kinds, so the slide keeps its room (DECISIONS.md 501).
   const sentences = storageSentences(p);
   const storage = sentences.length ? `<p class="note">${r.t(sentences.join(" "))}</p>` : "";
-  return `<div class="progress"><div class="eyebrow">${r.t("Since your last health check")}</div><h2>${r.t("What has changed")}</h2>${pair}<div class="lists">${list("Fixed", p.fixed)}${list("Still open", p.remaining)}${list("New since then", p.added)}</div>${areas}${unknown}${storage}<p class="note">${r.t("Some of the change in money can come from the business itself, not only from fixes.")}</p></div>`;
+  // The eyebrow and heading sit on the page itself, as on every other slide, so a
+  // continued slide carries them (DECISIONS.md 505).
+  return `<div class="eyebrow">${r.t("Since your last health check")}</div><h2>${r.t("What has changed")}</h2><div class="progress">${pair}<div class="lists">${list("Fixed", p.fixed)}${list("Still open", p.remaining)}${list("New since then", p.added)}</div>${areas}${unknown}${storage}<p class="note">${r.t("Some of the change in money can come from the business itself, not only from fixes.")}</p></div>`;
 }
