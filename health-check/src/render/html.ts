@@ -18,6 +18,8 @@ export type Render = {
   draft: boolean;
   /** Where in the raw notes a finding or metric's working is, as a small tag. Empty when it has none. */
   ref(id: string): string;
+  /** The words of a reference's tag ("R4.3"), for measuring it without printing it: on the executive summary it isn't noted as used. Empty when it has none. */
+  refText(id: string): string;
   /** A counted finding's own figure over 12 months, from the value model. */
   yearly(findingId: string): number | undefined;
 };
@@ -35,6 +37,7 @@ export function renderContext(pseudonyms: Pseudonymiser, currency: string, draft
       const ref = refs.get(id);
       return ref ? refTag(ref) : "";
     },
+    refText: (id) => refs.get(id) ?? "",
   };
 }
 
