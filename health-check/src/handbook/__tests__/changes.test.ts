@@ -6,7 +6,7 @@ import { SALES_CLOUD_MODULES } from "../../domains/index.ts";
 import { runHealthCheck } from "../../engine/run.ts";
 import type { SetupAuditChange, SetupAuditSummary } from "../../extract/configuration.ts";
 import type { Sourced } from "../../extract/types.ts";
-import type { PseudonymEntry } from "../../privacy/pseudonymiser.ts";
+import { Pseudonymiser, type PseudonymEntry } from "../../privacy/pseudonymiser.ts";
 import { loadPseudonymMap } from "../../render/render-run.ts";
 import type { Finding } from "../../schemas/index.ts";
 import { docxText } from "../../testing/docx-text.ts";
@@ -285,6 +285,18 @@ describe("the part on its own", () => {
     const part = recentChanges(audit([change(1, { Display: `Set the client_secret = "${CHANGES_PLANTED}" on Lead Router` })]), label);
     assert.ok(part.status === "ok");
     assert.equal(part.items[0]!.what, 'Set the client_secret = "[REDACTED]" on Lead Router');
+  });
+
+  test("a token of five digits, which the map doesn't restore, prints as a user we couldn't look up and never as the token", async () => {
+    // The 10,000th user: Pseudonymiser.restore knows four digits only. If it
+    // learns five, the name is right here and this test changes with it.
+    const token = "[[user:U10000]]";
+    const pseudonyms = new Pseudonymiser([{ token, id: userId(4), name: "Jo Ellis", aliases: [] }]);
+    const part = recentChanges(audit([change(1)]), () => token);
+    assert.ok(part.status === "ok" && part.items[0]!.by === token);
+    const text = docxText(await renderHandbookDocx(Handbook.parse({ version: 3, ...bare, recentChanges: part }), { ...OPTIONS, pseudonyms }));
+    assert.match(text, /\n1 Oct 2026 at 08:00 UTC, a user whose name we couldn't look up: Flows {2}changedinteractiondef\nChange 1(\n|$)/);
+    assert.ok(!text.includes(token) && !text.includes("U10000"));
   });
 
   test("a read that failed on a real run leaves the part unavailable with the step's own reason", async () => {
