@@ -666,9 +666,9 @@ describe("Apex (decisions 456 and 457)", () => {
       dir = (await runFromRecording()).dir;
     });
 
-    test("a version 3 file that validates against the schema, with both parts read", () => {
+    test("a version 4 file that validates against the schema, with both parts read", () => {
       const raw = JSON.parse(read(dir, HANDBOOK_FILE));
-      assert.equal(raw.version, 3);
+      assert.equal(raw.version, 4);
       const h = Handbook.parse(raw);
       assert.ok(h.apexClasses.status === "ok" && h.apexTriggers.status === "ok");
       assert.deepEqual([h.apexClasses.total, h.apexClasses.cut, h.apexTriggers.total, h.apexTriggers.cut], [7, false, 5, false]);
@@ -685,6 +685,8 @@ describe("Apex (decisions 456 and 457)", () => {
         status: "Active",
         isTest: false,
         touches: { queries: ["Opportunity"], queriesTotal: 1, changes: ["update"], dynamicQueries: false, searches: false },
+        // Jo Ellis, the run's fourth user (decision 473).
+        lastChanged: { at: "2026-09-21T12:00:00.000+0000", by: "[[user:U0004]]" },
       });
       assert.deepEqual(h.apexClasses.items.map((c) => c.name), [...h.apexClasses.items.map((c) => c.name)].sort());
       assert.equal(h.apexClasses.items.find((c) => c.name === "OpportunityHandlerTest")!.isTest, true);

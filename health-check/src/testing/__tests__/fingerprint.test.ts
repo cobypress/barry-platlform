@@ -15,8 +15,8 @@ import { AS_OF } from "../synthetic-org.ts";
 // a metric or the raw notes updates these, and says why in its commit.
 
 const GOLDEN: Record<string, Record<string, string>> = {
-  recorded: { "findings.json": "d8f7c6edee850bab", "metrics.json": "5b17208f28ac59c3", "scores.json": "1ea33b649d72937a", "manual-steps.json": "c4daf1ca86584a33", "action-lists.json": "7018f033c3c80e0a", "raw-notes.md": "98344bf3b98435cf", "handbook.json": "86f7eb0fb3ceb95a" },
-  generated: { "findings.json": "d6b3bef8e962d5a5", "metrics.json": "259f96e994bafc7d", "scores.json": "763c408c24334b05", "manual-steps.json": "15ae87c4fd76d7b6", "action-lists.json": "8eeb97766d119778", "raw-notes.md": "0cad43aba331f194", "handbook.json": "b9790d4d0b304876" },
+  recorded: { "findings.json": "403164176aa040c4", "metrics.json": "836b5c59915764b8", "scores.json": "1ea33b649d72937a", "manual-steps.json": "c4daf1ca86584a33", "action-lists.json": "7018f033c3c80e0a", "raw-notes.md": "41cff840dbd4ef42", "handbook.json": "787c0d882f51d217" },
+  generated: { "findings.json": "0de73a56425017cc", "metrics.json": "c6ba15c427babae1", "scores.json": "763c408c24334b05", "manual-steps.json": "15ae87c4fd76d7b6", "action-lists.json": "8eeb97766d119778", "raw-notes.md": "264bf1fc0529fd94", "handbook.json": "d03dca40ff937e00" },
 };
 
 const recorded = async () => fingerprint((await runFromRecording({ answers: loadAnswers(), modules: ALL_MODULES })).dir);

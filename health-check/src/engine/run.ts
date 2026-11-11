@@ -14,12 +14,12 @@ import type { MetadataBundle } from "../extract/metadata-parse.ts";
 import { fieldDescribeExtractor } from "../extract/fields.ts";
 import { summariseFacts } from "../facts/summary.ts";
 import { monthsBefore, type ExtractContext, type Extractor, type PartialStore, type Sourced } from "../extract/types.ts";
-import { buildHandbook, HANDBOOK_FILE, recentChanges } from "../handbook/build.ts";
+import { buildHandbook, HANDBOOK_FILE, labelApexModifiers, recentChanges } from "../handbook/build.ts";
 import type { UserRow } from "../extract/users.ts";
 import { usersExtractor } from "../extract/users.ts";
 import { renderRawNotes } from "../notes/raw-notes.ts";
 import { ACTION_LISTS_FILE, buildActionLists } from "../actions/lists.ts";
-import { Pseudonymiser, type PseudonymEntry } from "../privacy/pseudonymiser.ts";
+import { Pseudonymiser, UNKNOWN_USER, type PseudonymEntry } from "../privacy/pseudonymiser.ts";
 import { registerSharedNames } from "../privacy/names.ts";
 import { Run, type Calibration, type ManualAnswer, type RunScope, type RunStep } from "../schemas/index.ts";
 import { ApiBudget, BudgetStopError } from "../salesforce/budget.ts";
@@ -298,7 +298,12 @@ function analyseRun(dir: string, run: Run, calibration: Calibration, modules: Do
   // trail names them (DECISIONS.md 461): before the analysis, so a rule that
   // names the same person gives the same token, and before the map is saved,
   // so every token in handbook.json can be restored.
-  const changes = recentChanges(extracts.get(setupAuditExtractor.id) as Sourced<SetupAuditSummary> | undefined, (id, trailName) => pseudonyms.label("user", id, directory.get(id)?.name ?? trailName ?? "Unknown user"));
+  const changes = recentChanges(extracts.get(setupAuditExtractor.id) as Sourced<SetupAuditSummary> | undefined, (id, trailName) => pseudonyms.label("user", id, directory.get(id)?.name ?? trailName ?? UNKNOWN_USER));
+  // Then whoever last changed a class or trigger and is in neither, named as
+  // Salesforce named them beside it (DECISIONS.md 473). Last, so no token
+  // above moves, and before the shared names, so theirs are counted.
+  const apex = extracts.get(apexExtractor.id) as ApexData | undefined;
+  const modifiers = labelApexModifiers(apex, (id, name) => pseudonyms.label("user", id, directory.get(id)?.name ?? name ?? UNKNOWN_USER));
   if (run.customerRef) pseudonyms.label("customer", run.orgId, run.customerRef);
   // A first name two people share gets its own token, saved with the map so a
   // report rendered later can restore it.
@@ -320,7 +325,7 @@ function analyseRun(dir: string, run: Run, calibration: Calibration, modules: Do
   // findings, and read by nothing else here (DECISIONS.md 451 to 457).
   writeJson(
     join(dir, HANDBOOK_FILE),
-    buildHandbook(extracts.get(metadataExtractor.id) as Sourced<MetadataBundle> | undefined, extracts.get(apexExtractor.id) as ApexData | undefined, extracts.get(customObjectsExtractor.id) as Sourced<CustomObjectRow[]> | undefined, changes),
+    buildHandbook(extracts.get(metadataExtractor.id) as Sourced<MetadataBundle> | undefined, apex, extracts.get(customObjectsExtractor.id) as Sourced<CustomObjectRow[]> | undefined, changes, modifiers),
   );
   renderOutputs(dir, run, calibration, output);
   return output;

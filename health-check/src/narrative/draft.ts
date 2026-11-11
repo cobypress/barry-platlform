@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { MODELS } from "../config.ts";
 import { checkNumbers, scopeDataset, type FigureSet } from "../numbercheck/index.ts";
-import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
+import { tokenSource, type Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import type { NarrativeClient } from "./client.ts";
 import { guardDeep, holdsNameOrSecret, PromptRefused, sendPrompt } from "./guard.ts";
 import { buildPrompt, DRAFT_SCHEMA, SYSTEM_PROMPT, type PromptSource } from "./prompt.ts";
@@ -52,7 +52,7 @@ function styleProblems(text: string): string[] {
   return /\p{Extended_Pictographic}/u.test(text.replace(/[©®™]/g, "")) ? ["Remove the emoji."] : [];
 }
 
-const PERSON_TOKEN = /\[\[(?:user|person|contact):[A-Z]\d{4}\]\]/;
+const PERSON_TOKEN = new RegExp(tokenSource("user|person|contact"));
 
 function review(text: string, set: FigureSet, allowed: Set<string>, pseudonyms: Pseudonymiser, rolesOnly = false): { paragraphs: string[]; problems: string[] } {
   let parsed: z.infer<typeof Draft>;
