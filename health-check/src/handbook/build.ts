@@ -1,4 +1,5 @@
-import type { ApexClassRow, ApexData, ApexTriggerRow, LastChanged, TriggerUsage } from "../extract/automation.ts";
+import type { ApexClassRow, ApexData, ApexTriggerRow, LastChange, LastChanged, TriggerUsage } from "../extract/automation.ts";
+import type { ComponentChanges, ComponentChangesData } from "../extract/component-changes.ts";
 import { SETUP_AUDIT_DAYS, type CustomObjectRow, type SetupAuditSummary } from "../extract/configuration.ts";
 import { unreadReason, type MetadataBundle } from "../extract/metadata-parse.ts";
 import type { Sourced } from "../extract/types.ts";
@@ -19,7 +20,16 @@ function allUnavailable(reason: string): Handbook {
   return { version: HANDBOOK_VERSION, flows: part, validationRules: part, apexClasses: part, apexTriggers: part, recentChanges: part };
 }
 
-function metadataParts(metadata: Sourced<MetadataBundle> | undefined): Pick<Handbook, "flows" | "validationRules"> {
+/** A rule's place in the list of changes: its object and name, which a dot can't confuse. */
+const ruleKey = (object: string, name: string): string => JSON.stringify([object, name]);
+
+/**
+ * Each flow and validation rule with its last change (decision 482): a flow's
+ * by its developer name, which is the flow's name on either route, and a
+ * rule's by its object and name, so a rule of the same name on another object
+ * is never taken for it. One with no line in Salesforce's list has none here.
+ */
+function metadataParts(metadata: Sourced<MetadataBundle> | undefined, components: ComponentChangesData | undefined, modifiers: Modifiers): Pick<Handbook, "flows" | "validationRules"> {
   const both = (reason: string) => ({ flows: unavailable(reason), validationRules: unavailable(reason) });
   if (!metadata) return both("This run didn't read the org's metadata.");
   if (metadata.status !== "ok") return both(`Metadata couldn't be retrieved: ${metadata.reason}`);
@@ -30,9 +40,16 @@ function metadataParts(metadata: Sourced<MetadataBundle> | undefined): Pick<Hand
   // listed without its later paths would print them as ordinary steps (decision
   // 446). Its validation rules are whole, so they stay.
   const pathless = detail.flows.some((f) => !Array.isArray((f.start as Partial<HandbookFlow["start"]> | undefined)?.paths));
+  const { flows, validationRules } = components ?? {};
+  const flowLines = new Map(flows?.status === "read" ? flows.items.map((c) => [c.name, c]) : []);
+  const ruleLines = new Map(validationRules?.status === "read" ? validationRules.items.map((c) => [ruleKey(c.object, c.name), c]) : []);
   return {
-    flows: pathless ? unavailable("This run's metadata was read before the handbook kept every way a flow starts.") : { status: "ok", items: detail.flows },
-    validationRules: unread ? unavailable(unread) : { status: "ok", covers: detail.validationRulesCover, items: detail.validationRules },
+    flows: pathless
+      ? unavailable("This run's metadata was read before the handbook kept every way a flow starts.")
+      : { status: "ok", items: detail.flows.map((f) => ({ ...f, lastChanged: handbookChange(flowLines.get(f.name), modifiers) })), lastChanges: lastChangesOf(flows) },
+    validationRules: unread
+      ? unavailable(unread)
+      : { status: "ok", covers: detail.validationRulesCover, items: detail.validationRules.map((r) => ({ ...r, lastChanged: handbookChange(ruleLines.get(ruleKey(r.object, r.name)), modifiers) })), lastChanges: lastChangesOf(validationRules) },
   };
 }
 
@@ -73,10 +90,17 @@ function capped<R extends { Name: string }, I>(rows: Sourced<R[]>, max: number, 
 /** A user's token, from the run's pseudonymiser: the name is the run's user list's, or else the one Salesforce gave beside the id. */
 export type LabelUser = (id: string, trailName: string | null) => string;
 
-/** The tokens for who last changed each class and trigger, by user id (decision 473). */
-export type ApexModifiers = ReadonlyMap<string, string>;
+/** The tokens for who last changed each class, trigger, flow and validation rule, by user id (decisions 473 and 482). */
+export type Modifiers = ReadonlyMap<string, string>;
 
 const byId = ([a]: [string, unknown], [b]: [string, unknown]): number => (a < b ? -1 : a > b ? 1 : 0);
+
+/** Everyone in these last changes, labelled once each in id order, named as Salesforce first named them. */
+function labelInIdOrder(changes: Iterable<LastChange>, label: LabelUser): Modifiers {
+  const named = new Map<string, string | null>();
+  for (const c of changes) if (c.byId && !named.get(c.byId)) named.set(c.byId, c.byName);
+  return new Map([...named].sort(byId).map(([id, name]) => [id, label(id, name)]));
+}
 
 /**
  * Labels everyone who last changed a class or trigger, in id order, as the
@@ -84,33 +108,41 @@ const byId = ([a]: [string, unknown], [b]: [string, unknown]): number => (a < b 
  * run labels its user list and the trail's users first, so theirs don't move:
  * this only adds those neither holds, named as Salesforce named them.
  */
-export function labelApexModifiers(apex: ApexData | undefined, label: LabelUser): ApexModifiers {
-  const named = new Map<string, string | null>();
-  for (const part of [apex?.lastChanged?.classes, apex?.lastChanged?.triggers]) {
-    if (part?.status !== "read") continue;
-    for (const c of Object.values(part.byRow)) if (c.byId && !named.get(c.byId)) named.set(c.byId, c.byName);
-  }
-  return new Map([...named].sort(byId).map(([id, name]) => [id, label(id, name)]));
+export function labelApexModifiers(apex: ApexData | undefined, label: LabelUser): Modifiers {
+  const parts = [apex?.lastChanged?.classes, apex?.lastChanged?.triggers];
+  return labelInIdOrder(parts.flatMap((part) => (part?.status === "read" ? Object.values(part.byRow) : [])), label);
 }
 
 /**
- * A class's or trigger's last change. Null when it wasn't read, or Salesforce
+ * The same for each flow and validation rule (decision 482). The run labels
+ * them after Apex's, so no token Apex's labelling gave moves.
+ */
+export function labelComponentModifiers(components: ComponentChangesData | undefined, label: LabelUser): Modifiers {
+  const parts: Array<ComponentChanges<LastChange> | undefined> = [components?.flows, components?.validationRules];
+  return labelInIdOrder(parts.flatMap((part) => (part?.status === "read" ? part.items : [])), label);
+}
+
+/**
+ * One last change as the file keeps it. Null when it wasn't read, or Salesforce
  * gave no date; and when its user has no token, which a run never leaves, so
  * nobody is ever shown as "no user" for want of one.
  */
-function lastChangeOf(state: LastChanged | undefined, modifiers: ApexModifiers): LastChangeOf {
-  return (row) => {
-    const c = state?.status === "read" ? state.byRow[row.Id] : undefined;
-    if (!c?.at) return null;
-    if (c.byId === null) return { at: c.at, by: null };
-    const by = modifiers.get(c.byId);
-    return by ? { at: c.at, by } : null;
-  };
+function handbookChange(c: LastChange | undefined, modifiers: Modifiers): HandbookLastChange | null {
+  if (!c?.at) return null;
+  if (c.byId === null) return { at: c.at, by: null };
+  const by = modifiers.get(c.byId);
+  return by ? { at: c.at, by } : null;
 }
 
-const lastChangesOf = (state: LastChanged | undefined): LastChanges => (state === undefined ? "not_kept" : state.status);
+/** A class's or trigger's last change, by its Id. */
+function lastChangeOf(state: LastChanged | undefined, modifiers: Modifiers): LastChangeOf {
+  return (row) => handbookChange(state?.status === "read" ? state.byRow[row.Id] : undefined, modifiers);
+}
 
-function apexParts(apex: ApexData | undefined, customObjects: Sourced<CustomObjectRow[]> | undefined, modifiers: ApexModifiers): Pick<Handbook, "apexClasses" | "apexTriggers"> {
+/** Undefined when the run had no such read: its step came before they were kept. */
+const lastChangesOf = (state: { status: "read" | "refused" } | undefined): LastChanges => (state === undefined ? "not_kept" : state.status);
+
+function apexParts(apex: ApexData | undefined, customObjects: Sourced<CustomObjectRow[]> | undefined, modifiers: Modifiers): Pick<Handbook, "apexClasses" | "apexTriggers"> {
   if (!apex) return { apexClasses: unavailable("This run didn't read the org's Apex."), apexTriggers: unavailable("This run didn't read the org's Apex.") };
   const objectOf = customObjects ? objectResolver(customObjects) : () => null;
   const { classes, triggers } = apex.lastChanged ?? {};
@@ -152,16 +184,24 @@ export function recentChanges(audit: Sourced<SetupAuditSummary> | undefined, lab
 }
 
 /**
- * The handbook's data from the metadata, apex and custom objects steps' output,
- * any of which is undefined when the run didn't have that step, the recent
- * changes made from the setup audit step's, and the tokens of who last changed
- * each class and trigger. A part that
- * couldn't be read says why, so the documents can tell "no flows" from "we couldn't read them"
- * (decision 454). Checked against the schema here, so a file that doesn't fit is
- * never written: its parts say so instead, and the run carries on.
+ * The handbook's data from the metadata, apex, custom objects and component
+ * changes steps' output, any of which is undefined when the run didn't have
+ * that step, the recent changes made from the setup audit step's, and the
+ * tokens of who last changed each class, trigger, flow and validation rule. A
+ * part that couldn't be read says why, so the documents can tell "no flows"
+ * from "we couldn't read them" (decision 454). Checked against the schema here,
+ * so a file that doesn't fit is never written: its parts say so instead, and
+ * the run carries on.
  */
-export function buildHandbook(metadata: Sourced<MetadataBundle> | undefined, apex?: ApexData, customObjects?: Sourced<CustomObjectRow[]>, changes: HandbookRecentChanges = unavailable(TRAIL_NOT_READ), modifiers: ApexModifiers = new Map()): Handbook {
-  const handbook = Handbook.safeParse({ version: HANDBOOK_VERSION, ...metadataParts(metadata), ...apexParts(apex, customObjects, modifiers), recentChanges: changes });
+export function buildHandbook(
+  metadata: Sourced<MetadataBundle> | undefined,
+  apex?: ApexData,
+  customObjects?: Sourced<CustomObjectRow[]>,
+  changes: HandbookRecentChanges = unavailable(TRAIL_NOT_READ),
+  modifiers: Modifiers = new Map(),
+  components?: ComponentChangesData,
+): Handbook {
+  const handbook = Handbook.safeParse({ version: HANDBOOK_VERSION, ...metadataParts(metadata, components, modifiers), ...apexParts(apex, customObjects, modifiers), recentChanges: changes });
   if (handbook.success) return handbook.data;
   const where = handbook.error.issues[0]?.path.join(".") ?? "";
   return allUnavailable(`The handbook's data didn't fit its format${where ? ` at ${where}` : ""}, so it wasn't kept.`);

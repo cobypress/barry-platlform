@@ -18,6 +18,7 @@ import { HANDBOOK_FILE, recentChanges } from "../build.ts";
 import { renderHandbookDocx } from "../docx.ts";
 import { readHandbook } from "../read.ts";
 import { CHANGES_NOT_KEPT, Handbook, HANDBOOK_VERSION, MAX_TEXT, type HandbookChange } from "../schema.ts";
+import { olderComponents } from "./older-files.ts";
 
 // The handbook's recent changes, from the Setup Audit Trail (DECISIONS.md 461
 // and 462). Who made each is a token in handbook.json, and a name only in the
@@ -336,9 +337,9 @@ function olderApex<T extends Record<string, unknown>>(file: T): T {
 describe("a handbook.json from before recent changes were kept", () => {
   test("still makes its document, whose last part says the run was read before they were kept", async () => {
     // A version 2 file as runs wrote it: the synthetic org's, without the fifth
-    // part, or any class's or trigger's last change (decision 473).
+    // part, or any class's, trigger's, flow's or rule's last change (decisions 473 and 482).
     const { dir: source } = await runFromRecording();
-    const { recentChanges: _gone, ...four } = olderApex(read<Record<string, unknown>>(source, HANDBOOK_FILE));
+    const { recentChanges: _gone, ...four } = olderApex(olderComponents(read<Record<string, unknown>>(source, HANDBOOK_FILE)));
     const dir = join(tempDir(), "run");
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, HANDBOOK_FILE), JSON.stringify({ ...four, version: 2 }));

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { RETRIEVED_STANDARD_OBJECTS } from "../automation.ts";
 import { parseMetadataBundle } from "../metadata-parse.ts";
 import { METADATA_FILES, userId } from "../../testing/synthetic-org.ts";
+import { toolingParser } from "../../testing/simulator.ts";
 
 // As the engine reads the synthetic org: the four in full, and Case, which its
 // record counts list, for its validation rules only (DECISIONS.md 460).
@@ -175,5 +176,20 @@ describe("character references in a value (DECISIONS.md 471)", () => {
 
   test("HTML's names aren't XML's, so they stay as text", () => {
     both("&nbsp;&copy;&eacute;&euro;", "&nbsp;&copy;&eacute;&euro;");
+  });
+
+  // The simulator builds its Tooling view of the synthetic org with its own parser
+  // (DECISIONS.md 476). It must read a value as the retrieve does, or the two
+  // routes would differ in the recordings without anyone seeing it.
+  test("the simulator's Tooling parser reads each the same as the retrieve parser", () => {
+    const simulator = (text: string): [string, string] => {
+      const rule = (toolingParser.parse(`<CustomObject><validationRules><fullName>R</fullName><errorConditionFormula>${text}</errorConditionFormula></validationRules></CustomObject>`) as { CustomObject: { validationRules: Array<{ errorConditionFormula: string }> } }).CustomObject.validationRules[0]!;
+      const flow = (toolingParser.parse(`<Flow><start><filters><value><stringValue>${text}</stringValue></value></filters></start></Flow>`) as { Flow: { start: { filters: { value: { stringValue: string } } } } }).Flow;
+      return [rule.errorConditionFormula, flow.start.filters.value.stringValue];
+    };
+    for (const [text, expected] of [["&#34;", '"'], ["&#x27;", "'"], ["&amp;#34;", "&#34;"], ["&lt;", "<"], ["a&#34;b&#x27;c&amp;#34;d&lt;e", `a"b'c&#34;d<e`]] as const) {
+      assert.deepEqual(read(text), [expected, expected], `retrieve: ${text}`);
+      assert.deepEqual(simulator(text), [expected, expected], `simulator: ${text}`);
+    }
   });
 });

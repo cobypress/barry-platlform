@@ -1,4 +1,5 @@
 import { apexExtractor, metadataExtractor, type ApexClassRow, type ApexTriggerRow } from "../../extract/automation.ts";
+import { componentChangesExtractor } from "../../extract/component-changes.ts";
 import { customObjectsExtractor, orgExtractor, recordCountsExtractor } from "../../extract/configuration.ts";
 import { apiLimitsExtractor } from "../../extract/integrations.ts";
 import { classicExtractor } from "../../extract/technical.ts";
@@ -442,6 +443,6 @@ export const technicalHealthModule: DomainModule = {
   cloud: "sales",
   label: "Technical health",
   // Record counts before the metadata step, which reads them to know which standard objects to name.
-  extractors: [labelsExtractor, orgExtractor, recordCountsExtractor, metadataExtractor, apexExtractor, customObjectsExtractor, classicExtractor, apiLimitsExtractor],
+  extractors: [labelsExtractor, orgExtractor, recordCountsExtractor, metadataExtractor, apexExtractor, componentChangesExtractor, customObjectsExtractor, classicExtractor, apiLimitsExtractor],
   rules: [apexCoverage, testQuality, limitRisk, codeSize, storageUse, oldApiVersions, multipleTriggers, classicLeftovers],
 };

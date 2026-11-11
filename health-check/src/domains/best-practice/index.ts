@@ -1,4 +1,5 @@
 import { metadataExtractor, scheduledJobsExtractor } from "../../extract/automation.ts";
+import { componentChangesExtractor } from "../../extract/component-changes.ts";
 import { ownershipExtractor, usersExtractor, type UserRow } from "../../extract/users.ts";
 import { recordCountsExtractor } from "../../extract/configuration.ts";
 import { looksShared } from "../../guards/user-guards.ts";
@@ -221,6 +222,6 @@ export const bestPracticeModule: DomainModule = {
   id: "best_practice",
   cloud: "sales",
   label: "Best practice",
-  extractors: [labelsExtractor, usersExtractor, recordCountsExtractor, ownershipExtractor, metadataExtractor, scheduledJobsExtractor],
+  extractors: [labelsExtractor, usersExtractor, recordCountsExtractor, ownershipExtractor, metadataExtractor, componentChangesExtractor, scheduledJobsExtractor],
   rules: [usersWithoutRole, ownershipSkew, afterSaveSameRecord, jobsOnInactiveOwners],
 };

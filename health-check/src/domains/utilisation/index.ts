@@ -1,6 +1,7 @@
 import { money } from "../../render/format.ts";
 import { fieldDescribeExtractor } from "../../extract/fields.ts";
 import { apexExtractor, metadataExtractor, scheduledJobsExtractor } from "../../extract/automation.ts";
+import { componentChangesExtractor } from "../../extract/component-changes.ts";
 import { orgExtractor, recordCountsExtractor, schemaExtractor } from "../../extract/configuration.ts";
 import { opportunitiesExtractor, stagesExtractor } from "../../extract/opportunities.ts";
 import { daysBefore } from "../../extract/types.ts";
@@ -559,6 +560,7 @@ export const utilisationModule: DomainModule = {
     ownershipExtractor,
     metadataExtractor,
     apexExtractor,
+    componentChangesExtractor,
     scheduledJobsExtractor,
     runAsExtractor,
     reportsExtractor,

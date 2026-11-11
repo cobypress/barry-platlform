@@ -5,8 +5,9 @@ import { domainLabel } from "../narrative/select.ts";
 import { automationOf, INVENTORY_COLUMNS, inventoryRows, OBJECT_INVENTORY } from "../domains/configuration/inventory.ts";
 import { RETRIEVED_STANDARD_OBJECTS } from "../extract/automation.ts";
 
-// The Markdown forerunner of the Word raw notes. This is the one place tokens
-// become names, because this document is what the customer's admin reads.
+// The Markdown forerunner of the Word raw notes. It stays in the run's folder and
+// is never uploaded: the Word raw notes are what go to the customer's folder
+// (DECISIONS.md 425). Tokens become names here, as they do in the Word version.
 
 const SEVERITY_ORDER = ["critical", "high", "medium", "low", "info"];
 
