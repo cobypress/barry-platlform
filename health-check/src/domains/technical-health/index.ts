@@ -394,7 +394,8 @@ const LARGEST_OBJECTS = 5;
 
 const storageUse: Rule = {
   id: "tech.storage-use",
-  // 3: a kind past its allowance reads "10,500 MB, over the 10,240 MB allowance" (DECISIONS.md 502).
+  // 3: a kind past its allowance reads "10,500 MB, over the 10,240 MB allowance" (DECISIONS.md 502),
+  // and the finding is titled and advised as past it (504). Version 3 hadn't shipped, so it stays 3.
   version: 3,
   domain: DOMAIN,
   title: "Data and file storage against the allowance",
@@ -422,11 +423,15 @@ const storageUse: Rule = {
     const sentence = `${opening.charAt(0).toUpperCase()}${opening.slice(1)}.`;
     const over = read.filter((r) => r.share >= STORAGE_WARNING);
     if (over.length === 0) return { outcome: "pass", summary: sentence, evidence, segmentsChecked: segments, facts };
+    // Once a kind is past its allowance, "close to" and "before you reach the limit" are untrue (DECISIONS.md 504).
+    const past = read.some((r) => r.used > r.max);
     return {
       outcome: "issue",
-      title: "Storage is close to the allowance",
+      title: past ? "Storage is past the allowance" : "Storage is close to the allowance",
       summary: `${sentence} Past the allowance, Salesforce can stop new records or files being saved until space is freed or more is bought.${largest.length ? ` The objects with the most records: ${largest.map((o) => `${labelsOf(ctx).object(o.name)} (${o.count.toLocaleString("en-GB")})`).join(", ")}.` : ""}`,
-      recommendation: "Archive or delete what you no longer need, starting with the largest objects and old files, and plan any extra storage before you reach the limit.",
+      recommendation: past
+        ? "Archive or delete what you no longer need, starting with the largest objects and old files, and arrange extra storage now, because you are past the allowance."
+        : "Archive or delete what you no longer need, starting with the largest objects and old files, and plan any extra storage before you reach the limit.",
       recommendationType: "change",
       severity: over.some((r) => r.share >= STORAGE_HIGH) ? "high" : "medium",
       confidence: "high",
