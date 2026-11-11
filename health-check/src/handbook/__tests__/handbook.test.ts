@@ -430,6 +430,31 @@ describe("the two routes", () => {
     assert.equal(fromXml.formula, 'AND(ISPICKVAL(StageName, "Closed Lost"), ISBLANK(Loss_Reason__c))');
   });
 
+  // A retrieve may write a quote as &quot; or as &#34;, and both mean the same (decision 471).
+  const quoted = (q: string, a: string) =>
+    `<CustomObject><validationRules><fullName>Needs_Reason</fullName><active>true</active><description>Why a deal was lost.</description><errorConditionFormula>AND(ISPICKVAL(StageName, ${q}Closed Lost${q}), ISBLANK(Loss_Reason__c), CONTAINS(Notes__c, ${a}secret: ${q}abcd-1234-efgh${q}${a}))</errorConditionFormula><errorDisplayField>Loss_Reason__c</errorDisplayField><errorMessage>Say why the deal was lost.</errorMessage></validationRules></CustomObject>`;
+  const NUMERIC = [["&#34;", "&#39;"], ["&#x22;", "&#x27;"]] as const;
+
+  test("a quote written as a numeric reference gives the handbook the same detail and the same redaction as &quot;", () => {
+    const named = parseMetadataBundle({ "objects/Opportunity.object": quoted("&quot;", "&apos;") }).handbook!;
+    assert.equal(named.validationRules[0]!.formula, `AND(ISPICKVAL(StageName, "Closed Lost"), ISBLANK(Loss_Reason__c), CONTAINS(Notes__c, 'secret: "[REDACTED]"'))`);
+    for (const [q, a] of NUMERIC) {
+      const numeric = parseMetadataBundle({ "objects/Opportunity.object": quoted(q, a) }).handbook!;
+      assert.deepEqual(numeric.validationRules, named.validationRules, q);
+      assert.ok(!JSON.stringify(numeric).includes("abcd-1234"), q);
+    }
+    // And a flow's values: the flow above, with its quotes written the other way.
+    const flow = parseMetadataBundle({ "flows/Route.flow": XML.replaceAll("&quot;", "&#34;") }).handbook!.flows[0]!;
+    assert.deepEqual(flow, parseMetadataBundle({ "flows/Route.flow": XML }).handbook!.flows[0]!);
+    assert.deepEqual(flow.start.entry.conditions.map((c) => c.value), ["5000", 'secret: "[REDACTED]"', "false"]);
+  });
+
+  test("a quote written as a numeric reference leaves the formula's field references, which the guards read, as they are with &quot;", () => {
+    const named = parseMetadataBundle({ "objects/Opportunity.object": quoted("&quot;", "&apos;") }).references;
+    assert.deepEqual(named.fields, { Loss_Reason__c: ["objects/Opportunity.object#validationRules.Needs_Reason"], Notes__c: ["objects/Opportunity.object#validationRules.Needs_Reason"] });
+    for (const [q, a] of NUMERIC) assert.deepEqual(parseMetadataBundle({ "objects/Opportunity.object": quoted(q, a) }).references, named, q);
+  });
+
   test("a validation rule whose definition wasn't read keeps no formula rather than a guess", () => {
     const row = { ValidationName: "Needs_Reason", Active: false, Description: null };
     assert.deepEqual(toolingValidationRule("Opportunity", row, null), {
@@ -572,8 +597,9 @@ describe("when the metadata couldn't be read (decision 454)", () => {
     // The validation rules it kept are whole, so they stay.
     assert.ok(built.validationRules.status === "ok" && built.validationRules.items.length === 1);
     // And the step's version moved, so a resumed run reads the metadata again rather than reuse such a checkpoint.
-    // It has moved again since, to 9, for the further standard objects' rules (decision 460).
-    assert.equal(metadataExtractor.version, 9);
+    // It has moved again since, to 9, for the further standard objects' rules (decision 460),
+    // and to 10, for numeric character references (decision 471).
+    assert.equal(metadataExtractor.version, 10);
   });
 
   test("no metadata step, a failed one, or detail that doesn't fit: both parts say why", () => {

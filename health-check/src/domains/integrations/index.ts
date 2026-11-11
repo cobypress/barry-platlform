@@ -1,5 +1,5 @@
 import { apexExtractor } from "../../extract/automation.ts";
-import { orgExtractor } from "../../extract/configuration.ts";
+import { customObjectsExtractor, orgExtractor, recordCountsExtractor } from "../../extract/configuration.ts";
 import { orgDocumentationExtractor } from "../../extract/documentation.ts";
 import { fieldDescribeExtractor, missingFieldReason } from "../../extract/fields.ts";
 import { apiLimitsExtractor, apiOnlyExtractor, ASYNC_JOB_DAYS, asyncJobsExtractor } from "../../extract/integrations.ts";
@@ -468,6 +468,8 @@ export const integrationsModule: DomainModule = {
   id: DOMAIN,
   cloud: "sales",
   label: "Integrations",
-  extractors: [orgExtractor, usersExtractor, fieldDescribeExtractor, loginsExtractor, licencesExtractor, orgDocumentationExtractor, apexExtractor, apiOnlyExtractor, apiLimitsExtractor, asyncJobsExtractor],
+  // The documentation read lists the objects the record counts name, or the
+  // custom objects when the counts can't be read, so both go before it.
+  extractors: [orgExtractor, usersExtractor, fieldDescribeExtractor, loginsExtractor, licencesExtractor, recordCountsExtractor, customObjectsExtractor, orgDocumentationExtractor, apexExtractor, apiOnlyExtractor, apiLimitsExtractor, asyncJobsExtractor],
   rules: [personalIntegrations, interactiveIntegrations, integrationLicences, selfAuthorisedApps, insecureRemoteSites, hardcodedEndpoints, apiUsage, failedJobs],
 };

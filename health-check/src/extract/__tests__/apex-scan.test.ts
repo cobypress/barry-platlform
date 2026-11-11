@@ -35,6 +35,24 @@ describe("reading Apex as text", () => {
     assert.equal(scan.queriesInLoops, 1);
   });
 
+  test("every Database query method the handbook reads counts in a loop, once, and not outside one, in a comment or in a string (decision 470)", () => {
+    for (const method of ["queryWithBinds", "countQueryWithBinds", "getQueryLocatorWithBinds", "getCursor", "getCursorWithBinds"]) {
+      const call = `Database.${method}(q, binds, AccessLevel.USER_MODE)`;
+      assert.equal(scanApex(`class A { void x() { for (Id i : ids) { Object r = ${call}; } } }`).queriesInLoops, 1, `${method} in a loop`);
+      assert.equal(scanApex(`class A { void x() { while (more) Database . ${method} (q); } }`).queriesInLoops, 1, `${method} spaced, in a loop without braces`);
+      assert.equal(scanApex(`class A { void x() { Object r = ${call}; for (Id i : ids) { n++; } } }`).queriesInLoops, 0, `${method} before a loop`);
+      assert.equal(scanApex(`class A { void x() { for (Id i : ids) { n++; // ${call}\n /* ${call} */ } } }`).queriesInLoops, 0, `${method} in a comment`);
+      assert.equal(scanApex(`class A { void x() { for (Id i : ids) { String s = '${call}'; } } }`).queriesInLoops, 0, `${method} in a string`);
+    }
+  });
+
+  test("a search in a loop isn't a query, and nor is a method that only ends in Database (decision 470)", () => {
+    assert.equal(scanApex("class A { void x() { for (Id i : ids) { Search.query(q); Search.find(q); } } }").queriesInLoops, 0);
+    assert.equal(scanApex("class A { void x() { for (Id i : ids) { MyDatabase.query(q); MyDatabase.getCursor(q); Database.fetch(q); } } }").queriesInLoops, 0);
+    // A Database class reached through another name is read as it always was.
+    assert.equal(scanApex("class A { void x() { for (Id i : ids) { x.Database.query(q); } } }").queriesInLoops, 1);
+  });
+
   test("UPDATE TRACKING or VIEWSTAT in a query inside a loop isn't a save, and a real one beside it still is", () => {
     for (const query of ["[SELECT Id FROM FAQ__kav WHERE (Id = :x) UPDATE TRACKING]", "[FIND :t RETURNING FAQ__kav(Id WHERE PublishStatus = 'Online') UPDATE VIEWSTAT]"]) {
       assert.equal(scanApex(`class A { void x() { for (Id i : ids) { List<SObject> r = ${query}; } } }`).dmlInLoops, 0, query);

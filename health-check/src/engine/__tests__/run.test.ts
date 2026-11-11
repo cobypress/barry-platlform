@@ -68,6 +68,14 @@ describe("a full run", () => {
     assert.match(notes, /\| owns-no-records \| failed \|/);
   });
 
+  test("a measure's sample is its number alone, but for the object inventory's objects (DECISIONS.md 449)", async () => {
+    const { dir } = await runFromRecording({ answers: loadAnswers() });
+    const notes = readFileSync(join(dir, "raw-notes.md"), "utf8");
+    assert.match(notes, /^\*\*Sample:\*\* 7 objects$/m);
+    assert.doesNotMatch(notes, /\*\*Sample:\*\* \d+ deals/);
+    assert.match(notes, /^\*\*Sample:\*\* \d+, \d{4}-\d{2}-\d{2} to \d{4}-\d{2}-\d{2}$/m, "a dated sample keeps its period");
+  });
+
   test("the same recording gives the same findings", async () => {
     const a = await runFromRecording({ answers: loadAnswers() });
     const b = await runFromRecording({ answers: loadAnswers() });

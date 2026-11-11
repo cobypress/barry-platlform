@@ -267,6 +267,9 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
 
   // Names, booleans and types only, so it's kept as long as the findings (DECISIONS.md 288).
   writeJson(join(dir, FACTS_FILE), extracts.get(factsExtractor.id));
+  // Which objects' rules weren't read, for the raw notes. Render reads only the run folder (DECISIONS.md 425).
+  const bundle = extracts.get(metadataExtractor.id) as Sourced<MetadataBundle> | undefined;
+  run.retrieveFallback = bundle?.status === "ok" ? bundle.data.retrieveFallback : undefined;
   const org = extracts.get(orgExtractor.id) as { status: string; data?: Array<{ IsSandbox: boolean; Name?: string }> };
   run.isSandbox = org.data?.[0]?.IsSandbox ?? false;
   // The company information in Setup is the name the customer goes by, unless one was given.

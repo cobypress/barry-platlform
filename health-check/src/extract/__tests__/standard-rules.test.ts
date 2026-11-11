@@ -5,6 +5,10 @@ import { join } from "node:path";
 import { automationModule } from "../../domains/automation/index.ts";
 import { FilePartialStore, runHealthCheck } from "../../engine/run.ts";
 import { tempDir } from "../../testing/harness.ts";
+import { buildReport } from "../../narrative/sections.ts";
+import { loadRun } from "../../render/render-run.ts";
+import { renderRawNotesDocx } from "../../render/raw-notes-docx.ts";
+import { docxText } from "../../testing/docx-text.ts";
 import { loadCalibration } from "../../testing/replay.ts";
 import { AS_OF } from "../../testing/synthetic-org.ts";
 import { ApiBudget, BudgetStopError } from "../../salesforce/budget.ts";
@@ -155,5 +159,34 @@ describe("when a retrieve naming further objects fails", () => {
     const sim = new Simulator({ failRetrieve: () => ({ faultCode: "REQUEST_LIMIT_EXCEEDED", message: "TotalRequests Limit exceeded." }) });
     await assert.rejects(extract(listing("Case"), {}, sim), BudgetStopError);
     assert.equal(retrieved(sim).length, 1);
+  });
+});
+
+// Render reads only the run folder, so the fallback travels in run.json (DECISIONS.md 425).
+describe("a fallback to the four, in the raw notes", () => {
+  const wider = (body: string) => body.includes("<met:name>CustomObject</met:name>") && customObjects(body).includes("Case");
+  const run = (sim: Simulator) => runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: [automationModule], outDir: tempDir(), now: new Date(AS_OF), log: () => {}, transport: sim });
+  const said = (reason: string) => `Validation rules on Case weren't read: the wider retrieve failed (${reason}), so the engine read the four standard objects it always names, Account, Contact, Lead and Opportunity.`;
+  const told = "We didn't read the validation rules on Case: Salesforce refused the wider read, so the validation rules we checked are those on your custom objects and Account, Contact, Lead and Opportunity.";
+
+  test("goes from the bundle to run.json and the markdown with its reason, and to the Word version without it", async () => {
+    // A message nothing else prints, so its absence from the Word version means something.
+    const { dir } = await run(new Simulator({ failRetrieve: (body) => (wider(body) ? { faultCode: "UNKNOWN_EXCEPTION", message: "zqx-too-many-objects-4417" } : null) }));
+    const reason = "UNKNOWN_EXCEPTION: UNKNOWN_EXCEPTION: zqx-too-many-objects-4417";
+    assert.deepEqual(JSON.parse(readFileSync(join(dir, "run.json"), "utf8")).retrieveFallback, { named: ["Case"], reason });
+    assert.ok(readFileSync(join(dir, "raw-notes.md"), "utf8").includes(said(reason)));
+    // The Word raw notes go to the customer's folder, so Salesforce's error text stays out (DECISIONS.md 425).
+    const { input, pseudonyms } = loadRun(dir);
+    const word = docxText(await renderRawNotesDocx(buildReport(input), pseudonyms));
+    assert.ok(word.includes(told), "the customer's sentence");
+    for (const part of ["zqx-too-many-objects-4417", "UNKNOWN_EXCEPTION", "wider retrieve"]) assert.ok(!word.includes(part), `no error text: ${part}`);
+  });
+
+  test("a run whose wider retrieve worked has none, in run.json or the notes", async () => {
+    const sim = new Simulator();
+    const { dir } = await run(sim);
+    assert.deepEqual(retrieved(sim), [[...FOUR, "Case"]], "the wider retrieve was made");
+    assert.ok(!("retrieveFallback" in JSON.parse(readFileSync(join(dir, "run.json"), "utf8"))));
+    assert.doesNotMatch(readFileSync(join(dir, "raw-notes.md"), "utf8"), /wider retrieve/);
   });
 });

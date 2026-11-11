@@ -11,6 +11,10 @@ const PATTERNS: ReadonlyArray<[RegExp, string]> = [
   [/(<([A-Za-z]*(?:password|secret|apiKey|privateKey|accessToken|refreshToken|clientSecret|consumerSecret)[A-Za-z]*)>)[^<]*(<\/\2>)/gi, `$1${REPLACEMENT}$3`],
   // key = "value" and key: 'value' in Apex, formulas and config.
   [/((?:password|passwd|secret|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|auth[_-]?token)["']?\s*[:=]\s*["'])[^"'\n]{4,}(["'])/gi, `$1${REPLACEMENT}$2`],
+  // The same, for a value holding the other kind of quote (decision 472): it runs
+  // to the next quote of its own kind on the line. It runs after the one above:
+  // run first, a value it carried past a second key would hide that key's value.
+  [/((?:password|passwd|secret|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|auth[_-]?token)["']?\s*[:=]\s*(["']))(?:(?!\2)[^\n]){4,}\2/gi, `$1${REPLACEMENT}$2`],
   [/\bBearer\s+[A-Za-z0-9._~+/!-]{16,}=*/g, `Bearer ${REPLACEMENT}`],
   [/\bAKIA[0-9A-Z]{16}\b/g, REPLACEMENT],
   [/\bsk-[A-Za-z0-9_-]{20,}\b/g, REPLACEMENT],
