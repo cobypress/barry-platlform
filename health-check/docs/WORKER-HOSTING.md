@@ -19,7 +19,7 @@ A **Background Worker**, not a web service: it listens to Redis and serves nothi
 | Instances | One. The token store is on its disk, so a second copy wouldn't see it |
 | Compute | 1 CPU and 2 GB. A run holds the org's data in memory, and 512 MB is enough only for test orgs |
 | Region | Frankfurt, the EU region nearest Neon's London (QUESTIONS.md 2) |
-| Disk | Mounted at `/var/data`, 1 GB to start. Run folders hold CRM records, and nothing deletes them yet: the plan's retention periods aren't built (QUESTIONS.md 41) |
+| Disk | Mounted at `/var/data`, 1 GB to start. Run folders hold CRM records. The retention sweep deletes a run's `checkpoints/` 30 days after release and the whole folder at 12 months (`src/worker/retention.ts`, decisions 98 and 254) |
 
 Set `NODE_VERSION=24` as well as the repo's pin, and `PLAYWRIGHT_BROWSERS_PATH=0`, so the build puts Chromium inside `node_modules`, where the running service can find it. Chromium prints the released documents. Don't set `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD`, which stops that install (it was set until 2026-11-05, when the worker didn't render). The Barry worker is in Oregon, but that doesn't matter: this worker reaches Redis by the same public `REDIS_URL` Vercel uses, not Render's private network.
 
