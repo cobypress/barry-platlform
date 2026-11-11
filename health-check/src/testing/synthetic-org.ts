@@ -1458,7 +1458,7 @@ function buildCases() {
   const milestones: Array<{ CaseId: string; MilestoneTypeId: string; IsCompleted: boolean; IsViolated: boolean; StartDate: string; TargetDate: string; CompletionDate: string | null }> = [];
   const replies: Array<{ Id: string; ParentId: string; MessageDate: string; Incoming: boolean }> = [];
   const work: Array<{ Id: string; UserId: string; Status: string; RequestDateTime: string; AcceptDateTime: string | null; DeclineDateTime: string | null; SpeedToAnswer: number | null }> = [];
-  const articles: Array<{ Id: string; CaseId: string }> = [];
+  const articles: Array<{ Id: string; CaseId: string; CreatedDate: string }> = [];
   let n = 0;
   // A year of cases, more arriving in recent months. Trap: from the sixth month
   // back, more cases come in each month than are closed.
@@ -1503,7 +1503,7 @@ function buildCases() {
           history.push({ Id: sfId("017", history.length + 1), CaseId: id, Field: "Status", OldValue: "Closed", NewValue: "Working", CreatedDate: iso(created + span * 0.5) });
         }
         // Trap: few closed cases have an article attached.
-        if (random() < 0.03) articles.push({ Id: sfId("0Ar", articles.length + 1), CaseId: id });
+        if (random() < 0.03) articles.push({ Id: sfId("0Ar", articles.length + 1), CaseId: id, CreatedDate: iso(closedAt) });
       }
       // Entitlements: a first response and a resolution milestone on each case. Trap: one in five resolutions is missed.
       milestones.push({ CaseId: id, MilestoneTypeId: sfId("557", 1), IsCompleted: true, IsViolated: random() < 0.04, StartDate: iso(created), TargetDate: iso(created + 8 * 3_600_000), CompletionDate: iso(created + 4 * 3_600_000) });
@@ -1535,8 +1535,13 @@ export const supportCases = buildCases();
 // finding if it were: a login by the clean dormant user, a failing job on a
 // class with no other failure, a lead and a task, a meeting next week, and a
 // high-priority case opened and closed since, with its history, milestone,
-// routing, replies and article. Added last, so nothing generated above moves.
+// routing, replies and article. The service reads that hang off a case end on
+// their own dates too (DECISIONS.md 481): an open email case opened since,
+// with its reply; a reply and an incoming email since on an earlier email case
+// that had no reply at the run's date; and an article attached since to a case
+// closed in the year. Added last, so nothing generated above moves.
 const LATER = asOf + 2 * 3_600_000;
+const generatedCases = supportCases.cases.slice();
 export const LATER_THAN_THE_RUN = {
   task: sfId("00T", 900_001),
   event: sfId("00U", 900_001),
@@ -1546,6 +1551,14 @@ export const LATER_THAN_THE_RUN = {
   asyncJob: sfId("707", 900_001),
   login: { UserId: userId(5), LoginTime: stamp(LATER) },
   case: sfId("500", 900_001),
+  openCase: sfId("500", 900_002),
+  /** The latest email case in the year with no reply sent by the run's date. */
+  unansweredCase: generatedCases.findLast((c) => c.Origin === "Email" && !supportCases.replies.some((r) => r.ParentId === c.Id && !r.Incoming))!.Id,
+  /** The latest case closed in the year with no article attached by the run's date. */
+  closedCase: generatedCases.findLast((c) => c.IsClosed && !supportCases.articles.some((a) => a.CaseId === c.Id))!.Id,
+  reply: sfId("02s", 900_005),
+  incoming: sfId("02s", 900_006),
+  article: sfId("0Ar", 900_002),
 } as const;
 activity.tasks.push({ Id: LATER_THAN_THE_RUN.task, OwnerId: userId(14), WhoId: LATER_THAN_THE_RUN.lead, WhatId: null, CreatedDate: stamp(LATER), TaskSubtype: "Call" });
 activity.events.push({ Id: LATER_THAN_THE_RUN.event, OwnerId: userId(14), WhoId: null, WhatId: null, StartDateTime: stamp(asOf + 7 * DAY) });
@@ -1562,8 +1575,18 @@ LOGIN_HISTORY.push({ ...LATER_THAN_THE_RUN.login, Status: "Success", ApiType: nu
   supportCases.milestones.push({ CaseId: Id, MilestoneTypeId: sfId("557", 1), IsCompleted: true, IsViolated: true, StartDate: stamp(LATER), TargetDate: stamp(LATER + 3_600_000), CompletionDate: stamp(closed) });
   supportCases.replies.push({ Id: sfId("02s", 900_002), ParentId: Id, MessageDate: stamp(LATER), Incoming: true }, { Id: sfId("02s", 900_003), ParentId: Id, MessageDate: stamp(LATER + 2 * 3_600_000), Incoming: false });
   supportCases.work.push({ Id: sfId("0Bz", 900_001), UserId: userId(1), Status: "Declined", RequestDateTime: stamp(LATER), AcceptDateTime: null, DeclineDateTime: stamp(LATER + 30_000), SpeedToAnswer: null });
-  supportCases.articles.push({ Id: sfId("0Ar", 900_001), CaseId: Id });
+  supportCases.articles.push({ Id: sfId("0Ar", 900_001), CaseId: Id, CreatedDate: stamp(closed) });
 }
+{
+  const Id = LATER_THAN_THE_RUN.openCase;
+  supportCases.cases.push({ Id, Status: "New", IsClosed: false, Priority: "Medium", Origin: "Email", OwnerId: userId(2), CreatedDate: stamp(LATER), ClosedDate: null, Type: "Question", Reason: null, ContactId: sfId("003", 2), AccountId: null });
+  supportCases.replies.push({ Id: sfId("02s", 900_004), ParentId: Id, MessageDate: stamp(LATER), Incoming: true }, { Id: sfId("02s", 900_007), ParentId: Id, MessageDate: stamp(LATER + 3_600_000), Incoming: false });
+}
+supportCases.replies.push(
+  { Id: LATER_THAN_THE_RUN.incoming, ParentId: LATER_THAN_THE_RUN.unansweredCase, MessageDate: stamp(LATER), Incoming: true },
+  { Id: LATER_THAN_THE_RUN.reply, ParentId: LATER_THAN_THE_RUN.unansweredCase, MessageDate: stamp(LATER + 3_600_000), Incoming: false },
+);
+supportCases.articles.push({ Id: LATER_THAN_THE_RUN.article, CaseId: LATER_THAN_THE_RUN.closedCase, CreatedDate: stamp(LATER) });
 
 // Salesforce CPQ (DECISIONS.md 216 to 225). Read only when a run includes the
 // "cpq" module.

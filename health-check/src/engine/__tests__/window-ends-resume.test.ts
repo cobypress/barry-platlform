@@ -17,24 +17,28 @@ import { runHealthCheck } from "../run.ts";
 /** The steps whose reads gained an end. */
 const STEPS = ["activity", "async-jobs", "leads", "pardot-leads", "cpq-quotes", "logins", "login-activity", "field-usage", "service-setup", "service-cases", "service-activity"];
 
-// The org as it was at the run's date: none of what it has gained since.
+// The org as it was at the run's date: none of what it has gained since, each
+// record by its own date as well as by its case's (DECISIONS.md 481), so a
+// reply or an article link made since on an earlier case is gone too.
 // AsyncApexJob isn't among the records a test can swap, so its later job is
 // there both times, and the first read's end leaves it out too.
 const stamp = new Date(AS_OF).toISOString().replace("Z", "+0000");
 const by = <T>(rows: T[], field: keyof T): T[] => rows.filter((r) => !(typeof r[field] === "string" && (r[field] as string) > stamp));
-const lateCases = new Set(SYNTHETIC_RECORDS.supportCases.cases.filter((c) => c.CreatedDate > stamp).map((c) => c.Id));
+const { supportCases } = SYNTHETIC_RECORDS;
+const lateCases = new Set(supportCases.cases.filter((c) => c.CreatedDate > stamp).map((c) => c.Id));
+const onEarlier = <T extends { CaseId: string } | { ParentId: string }>(rows: T[]): T[] => rows.filter((r) => !lateCases.has("CaseId" in r ? r.CaseId : r.ParentId));
 const AT_THE_RUN: OrgRecords = {
   ...SYNTHETIC_RECORDS,
   activity: { tasks: by(SYNTHETIC_RECORDS.activity.tasks, "CreatedDate"), events: by(SYNTHETIC_RECORDS.activity.events, "StartDateTime"), emails: by(SYNTHETIC_RECORDS.activity.emails, "MessageDate") },
   leadFunnel: { ...SYNTHETIC_RECORDS.leadFunnel, leads: by(SYNTHETIC_RECORDS.leadFunnel.leads, "CreatedDate"), statusChanges: by(SYNTHETIC_RECORDS.leadFunnel.statusChanges, "CreatedDate") },
   loginHistory: by(SYNTHETIC_RECORDS.loginHistory, "LoginTime"),
   supportCases: {
-    cases: SYNTHETIC_RECORDS.supportCases.cases.filter((c) => !lateCases.has(c.Id)),
-    history: SYNTHETIC_RECORDS.supportCases.history.filter((h) => !lateCases.has(h.CaseId)),
-    milestones: SYNTHETIC_RECORDS.supportCases.milestones.filter((m) => !lateCases.has(m.CaseId)),
-    replies: SYNTHETIC_RECORDS.supportCases.replies.filter((r) => !lateCases.has(r.ParentId)),
-    work: by(SYNTHETIC_RECORDS.supportCases.work, "RequestDateTime"),
-    articles: SYNTHETIC_RECORDS.supportCases.articles.filter((a) => !lateCases.has(a.CaseId)),
+    cases: by(supportCases.cases, "CreatedDate"),
+    history: by(onEarlier(supportCases.history), "CreatedDate"),
+    milestones: by(onEarlier(supportCases.milestones), "StartDate"),
+    replies: by(onEarlier(supportCases.replies), "MessageDate"),
+    work: by(supportCases.work, "RequestDateTime"),
+    articles: by(onEarlier(supportCases.articles), "CreatedDate"),
   },
 };
 
@@ -49,6 +53,9 @@ test("a resumed run that reads its windowed steps again, after the org has gaine
   const outDir = tempDir();
   const options = { provider: syntheticProvider, calibration: loadCalibration(), answers: loadAnswers(), modules: ALL_MODULES, outDir, log: () => {} };
   assert.ok(lateCases.size > 0 && AT_THE_RUN.activity.tasks.length < SYNTHETIC_RECORDS.activity.tasks.length, "the org has gained records since");
+  assert.ok(AT_THE_RUN.supportCases.cases.some((c) => !c.IsClosed) && supportCases.cases.some((c) => lateCases.has(c.Id) && !c.IsClosed), "an open case since");
+  assert.ok(AT_THE_RUN.supportCases.replies.length < onEarlier(supportCases.replies).length, "a reply since on an earlier case");
+  assert.ok(AT_THE_RUN.supportCases.articles.length < onEarlier(supportCases.articles).length, "an article link since on an earlier case");
   const first = await runHealthCheck({ ...options, now: new Date(AS_OF), transport: new Simulator({ records: AT_THE_RUN }) });
   const was = { steps: Object.fromEntries(STEPS.map((id) => [id, read(first.dir, `checkpoints/${id}.json`)])), concluded: concluded(first.dir) };
 

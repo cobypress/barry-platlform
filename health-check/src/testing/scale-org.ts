@@ -213,7 +213,7 @@ export function buildScaleOrg(size: ScaleSize, seed = 20261107): OrgRecords {
     supportCases.cases.push({ Id, Status: isOpen ? pick(["New", "Working", "Escalated"] as const) : "Closed", IsClosed: !isOpen, Priority: pick(["High", "Medium", "Low"] as const), Origin: origin, OwnerId: owner, CreatedDate: stamp(created), ClosedDate: isOpen ? null : stamp(closedAt), Type: pick(["Problem", "Question", null] as const), Reason: pick(["Installation", "Performance", null] as const), ContactId: random() < 0.05 ? null : contact(), AccountId: random() < 0.4 ? null : account() });
     if (!isOpen) {
       supportCases.history.push({ Id: org.sfId("017", 50 * BASE + supportCases.history.length + 1), CaseId: Id, Field: "Status", OldValue: "Working", NewValue: "Closed", CreatedDate: stamp(closedAt) });
-      if (random() < 0.05) supportCases.articles.push({ Id: org.sfId("0Ar", BASE + supportCases.articles.length + 1), CaseId: Id });
+      if (random() < 0.05) supportCases.articles.push({ Id: org.sfId("0Ar", BASE + supportCases.articles.length + 1), CaseId: Id, CreatedDate: stamp(closedAt) });
     }
     supportCases.milestones.push({ CaseId: Id, MilestoneTypeId: org.sfId("557", 1), IsCompleted: true, IsViolated: random() < 0.05, StartDate: stamp(created), TargetDate: stamp(created + 8 * 3_600_000), CompletionDate: stamp(created + 4 * 3_600_000) });
     if (!isOpen) supportCases.milestones.push({ CaseId: Id, MilestoneTypeId: org.sfId("557", 2), IsCompleted: true, IsViolated: random() < 0.15, StartDate: stamp(created), TargetDate: stamp(created + 5 * DAY), CompletionDate: stamp(closedAt) });

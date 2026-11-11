@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { ALL_MODULES } from "../../domains/index.ts";
 import { readCheckpoint } from "../../engine/checkpoint.ts";
 import { collectExtractors, runHealthCheck } from "../../engine/run.ts";
+import type { Finding } from "../../schemas/index.ts";
 import { tempDir } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration, syntheticProvider } from "../../testing/replay.ts";
 import { Simulator } from "../../testing/simulator.ts";
@@ -46,9 +47,12 @@ const OPPORTUNITY_SCOPE = /\(CreatedDate >= \S+ OR CloseDate >= \S+ OR LastModif
 describe("a full synthetic run's queries", () => {
   let queries: string[];
   let dir: string;
+  let findings: Finding[];
   before(async () => {
     const sim = new Simulator();
-    dir = (await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), answers: loadAnswers(), modules: ALL_MODULES, outDir: tempDir(), now: new Date(org.AS_OF), transport: sim, log: () => {} })).dir;
+    const run = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), answers: loadAnswers(), modules: ALL_MODULES, outDir: tempDir(), now: new Date(org.AS_OF), transport: sim, log: () => {} });
+    ({ dir } = run);
+    findings = run.output!.findings;
     queries = queriesOf(sim);
   });
 
@@ -139,7 +143,69 @@ describe("a full synthetic run's queries", () => {
     assert.ok(!ok(activityOfCases.milestones).some((m) => m.CaseId === LATER.case));
     assert.ok(!ok(activityOfCases.replies).some((r) => r.ParentId === LATER.case));
     assert.ok(!ok(activityOfCases.agentWork).some((w) => after(w.RequestDateTime)));
-    assert.equal(ok(activityOfCases.caseArticles).length, org.supportCases.articles.length - 1);
+
+    // Each read that hangs off a case ends on its own date too (DECISIONS.md 481).
+    // An open email case opened since, with its reply.
+    const open = org.supportCases.cases.find((c) => c.Id === LATER.openCase)!;
+    assert.ok(after(open.CreatedDate) && !open.IsClosed && open.Origin === "Email");
+    assert.ok(org.supportCases.replies.some((r) => r.ParentId === LATER.openCase && !r.Incoming));
+    assert.ok(ok(cases.open).length > 0 && !ok(cases.open).some((c) => c.Id === LATER.openCase || after(c.CreatedDate)));
+    // A reply and an incoming email since, on an email case of the year that had no reply at the run's date.
+    const earlier = org.supportCases.cases.find((c) => c.Id === LATER.unansweredCase)!;
+    assert.ok(year(earlier.CreatedDate) && earlier.Origin === "Email");
+    assert.ok(!org.supportCases.replies.some((r) => r.ParentId === LATER.unansweredCase && !r.Incoming && !after(r.MessageDate)), "no reply at the run's date");
+    for (const id of [LATER.reply, LATER.incoming]) assert.ok(after(org.supportCases.replies.find((r) => r.Id === id)?.MessageDate));
+    assert.ok(!ok(activityOfCases.replies).some((r) => r.ParentId === LATER.unansweredCase || after(r.MessageDate)));
+    const inYearCases = new Set(org.supportCases.cases.filter((c) => year(c.CreatedDate)).map((c) => c.Id));
+    const email = activityOfCases.channels.find((c) => c.channel === "Email")!;
+    assert.equal(ok(email.count), org.supportCases.replies.filter((r) => r.Incoming && inYearCases.has(r.ParentId) && !after(r.MessageDate)).length);
+    // An article attached since to a case closed in the year.
+    const closed = org.supportCases.cases.find((c) => c.Id === LATER.closedCase)!;
+    assert.ok(closed.IsClosed && year(closed.ClosedDate));
+    assert.ok(after(org.supportCases.articles.find((a) => a.Id === LATER.article)?.CreatedDate));
+    assert.ok(!ok(activityOfCases.caseArticles).some((a) => a.CaseId === LATER.closedCase));
+    const closedInYear = new Set(org.supportCases.cases.filter((c) => c.IsClosed && year(c.ClosedDate)).map((c) => c.Id));
+    assert.equal(ok(activityOfCases.caseArticles).length, org.supportCases.articles.filter((a) => closedInYear.has(a.CaseId) && !after(a.CreatedDate)).length);
+    assert.equal(ok(activityOfCases.caseArticles).length, org.supportCases.articles.length - 2);
+  });
+
+  test("the first reply on email cases counts the cases opened, and the replies sent, by the run's date (DECISIONS.md 481)", () => {
+    // Worked out from the org as it stood at the run's date, apart from the read:
+    // an email case opened since, or a reply sent since, would move these.
+    const at = new Date(org.AS_OF).toISOString().replace("Z", "+0000");
+    const from = new Date(new Date(org.AS_OF).setUTCMonth(new Date(org.AS_OF).getUTCMonth() - 12)).toISOString().replace("Z", "+0000");
+    const inYear = (value: string | null) => !!value && value >= from && value <= at;
+    const emailCases = org.supportCases.cases.filter((c) => c.Origin === "Email" && inYear(c.CreatedDate) && (!c.IsClosed || inYear(c.ClosedDate)));
+    const first = new Map<string, string>();
+    for (const r of org.supportCases.replies) if (!r.Incoming && r.MessageDate <= at && (!first.has(r.ParentId) || r.MessageDate < first.get(r.ParentId)!)) first.set(r.ParentId, r.MessageDate);
+    const answered = emailCases.filter((c) => first.has(c.Id) && first.get(c.Id)! >= c.CreatedDate).length;
+    const facts = findings.find((f) => f.ruleId === "svc.first-reply-email")!.facts as { cases: number; answered: number; unanswered: number };
+    assert.deepEqual({ cases: facts.cases, answered: facts.answered, unanswered: facts.unanswered }, { cases: emailCases.length, answered, unanswered: emailCases.length - answered });
+    // The planted cases are among those the figure is about: one left out, one still unanswered.
+    assert.ok(!emailCases.some((c) => c.Id === LATER.openCase) && emailCases.some((c) => c.Id === LATER.unansweredCase) && !first.has(LATER.unansweredCase));
+  });
+
+  test("every read of Case, and of an email or article link on a case, ends at the run's date, but the ownership count", () => {
+    // The ownership scan counts the records each user owns now, for the guard
+    // on deactivating them: a case made since is still theirs, so it isn't a
+    // window on when something happened, and cutting it would only hide work.
+    const ownership = /^SELECT OwnerId, COUNT\(Id\) c FROM Case GROUP BY OwnerId$/;
+    const read = new Set<string>();
+    const unended: string[] = [];
+    for (const query of queries) {
+      if (ownership.test(query)) {
+        read.add("ownership");
+        continue;
+      }
+      const ends = new Set([...query.matchAll(new RegExp(`\\b[A-Za-z_]+ <= ${RUN_END}`, "g"))].map((m) => objectAt(query, m.index)));
+      for (const m of query.matchAll(/\bFROM (Case|EmailMessage|CaseArticle)\b/g)) {
+        read.add(m[1]!);
+        if (!ends.has(m[1]!)) unended.push(`${m[1]} in: ${query}`);
+      }
+    }
+    assert.deepEqual(unended, []);
+    assert.deepEqual([...read].sort(), ["Case", "CaseArticle", "EmailMessage", "ownership"]);
+    assert.ok(queries.some((q) => q.endsWith(`FROM Case WHERE IsClosed = false AND CreatedDate <= ${RUN_END}`)), "the open cases are read to the run's date");
   });
 });
 
