@@ -59,7 +59,7 @@ For Claude's summaries of each health check's Apex classes and triggers (DECISIO
 
 | Variable | Value |
 | --- | --- |
-| `HC_HANDBOOK_SUMMARIES` | `on`, exactly, to turn them on: the Apex step keeps the redacted code in the run folder until Claude has summarised it, and then deletes it. Anything else, or unset, is off. It needs Claude set up as above. The log says at every start whether it's on |
+| `HC_HANDBOOK_SUMMARIES` | `on`, exactly, to turn them on: the Apex step keeps the redacted code in the run folder until Claude has summarised it, and then deletes it. Anything else, or unset, is off. It needs Claude set up as above: without Claude no code is kept. The log says at every start which of the three it is: off, on, or on with Claude not set up. Kept code is deleted after seven days by the daily retention sweep even when `HC_CLEANUP_DRY_RUN` is 1: the dry run doesn't cover it |
 
 Keep `HC_TOKEN_KEY` somewhere safe as well. Without it the stored tokens can't be opened, and every customer would have to connect again.
 

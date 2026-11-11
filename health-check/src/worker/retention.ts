@@ -111,11 +111,13 @@ export const KEPT_CODE_FILES: readonly string[] = [APEX_SOURCE_FILE, SUMMARIES_P
  * Deletes the Apex code a run kept for Claude's summaries, and the partial
  * summaries beside it, once either is more than seven days old, whatever the
  * run's state in the database (DECISIONS.md 491): a run stopped on the API
- * budget and never resumed mustn't keep code. Only those two names, only
- * directly inside a run's folder, never through a link, and never outside the
- * runs folder. Returns how many it deleted, or would have.
+ * budget and never resumed mustn't keep code. A dry run doesn't hold it back:
+ * the dry run is for deletions a person might want to check first, and kept
+ * code is never one. Only those two names, only directly inside a run's
+ * folder, never through a link, and never outside the runs folder. Returns
+ * how many it deleted.
  */
-export function sweepKeptCode(runsDir: string, now: Date, dryRun: boolean): number {
+export function sweepKeptCode(runsDir: string, now: Date): number {
   const root = resolve(runsDir);
   if (!existsSync(root)) return 0;
   let deleted = 0;
@@ -132,7 +134,7 @@ export function sweepKeptCode(runsDir: string, now: Date, dryRun: boolean): numb
         continue;
       }
       if (!stat.isFile() || now.getTime() - stat.mtimeMs <= KEPT_CODE_DAYS * DAY) continue;
-      if (!dryRun) rmSync(path);
+      rmSync(path);
       deleted++;
     }
   }
@@ -144,9 +146,10 @@ export async function retentionSweep(deps: RetentionDeps): Promise<RetentionOutc
   const now = deps.now ?? new Date();
   const root = resolve(deps.runsDir);
   // First, and on its own: it looks at every run folder, released or not.
+  let kept = 0;
   try {
-    const kept = sweepKeptCode(root, now, deps.dryRun);
-    if (kept) deps.log(`Retention: ${deps.dryRun ? "would delete" : "deleted"} ${kept} ${kept === 1 ? "file" : "files"} of Apex code or summaries kept for Claude for more than ${KEPT_CODE_DAYS} days.`);
+    kept = sweepKeptCode(root, now);
+    if (kept) deps.log(`Retention: deleted ${kept} ${kept === 1 ? "file" : "files"} of Apex code or summaries kept for Claude for more than ${KEPT_CODE_DAYS} days${deps.dryRun ? ", even in a dry run: kept code is never held back" : ""}.`);
   } catch {
     deps.log("Retention: the sweep of Apex code kept for Claude's summaries failed, and will run again in a day.");
   }
@@ -182,7 +185,7 @@ export async function retentionSweep(deps: RetentionDeps): Promise<RetentionOutc
   }
   const count = (action: RetentionAction): number => outcomes.filter((o) => o.action === action).length;
   deps.log(
-    `Retention sweep${deps.dryRun ? " (dry run, nothing deleted)" : ""}: ${released.length} released runs and ${pulses.length} pulses. Raw extracts ${deps.dryRun ? "due" : "deleted"}: ${count("extracts_deleted")}. Run folders ${deps.dryRun ? "due" : "deleted"}: ${count("folder_deleted")}. Kept: ${count("kept") + count("already_purged") + count("no_folder")}. No release date we can read: ${count("no_release_date")}. Busy: ${count("busy")}. Refused: ${count("refused")}.`,
+    `Retention sweep${deps.dryRun ? ` (dry run, nothing deleted${kept ? " but the Apex code kept for Claude" : ""})` : ""}: ${released.length} released runs and ${pulses.length} pulses. Raw extracts ${deps.dryRun ? "due" : "deleted"}: ${count("extracts_deleted")}. Run folders ${deps.dryRun ? "due" : "deleted"}: ${count("folder_deleted")}. Kept: ${count("kept") + count("already_purged") + count("no_folder")}. No release date we can read: ${count("no_release_date")}. Busy: ${count("busy")}. Refused: ${count("refused")}.`,
   );
   return outcomes;
 }

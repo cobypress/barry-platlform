@@ -348,11 +348,15 @@ describe("the Apex code kept for Claude's summaries (decision 491)", () => {
     assert.deepEqual(KEPT_CODE_FILES, [APEX_SOURCE_FILE, SUMMARIES_PARTIAL_FILE]);
   });
 
-  test("a dry run deletes nothing, and says what it would", async () => {
-    const { runs, sweep, lines } = setup();
+  test("a dry run still deletes it, and says so, while the released runs' purge deletes nothing", async () => {
+    const { runs, sweep, lines, release } = setup();
     const old = plant(join(runs, "hc-2026-11-01-00000006"), APEX_SOURCE_FILE, 10);
-    await sweep(NOW, true);
-    assert.ok(existsSync(old));
-    assert.ok(lines.includes("Retention: would delete 1 file of Apex code or summaries kept for Claude for more than 7 days."));
+    const released = release("hc-2026-01-01-00000014");
+    const outcomes = await sweep(NOW, true);
+    assert.ok(!existsSync(old));
+    assert.ok(lines.includes("Retention: deleted 1 file of Apex code or summaries kept for Claude for more than 7 days, even in a dry run: kept code is never held back."));
+    assert.equal(action(outcomes, "hc-2026-01-01-00000014"), "extracts_deleted", "its extracts due, as a dry run reports it");
+    assert.ok(existsSync(join(released, "checkpoints")) && existsSync(join(released, "run.json")), "and nothing of the released run deleted");
+    assert.ok(lines.some((l) => /dry run, nothing deleted but the Apex code kept for Claude/.test(l)));
   });
 });

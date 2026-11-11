@@ -33,7 +33,7 @@ export const WORKER_ENV = {
     ANTHROPIC_ORGANIZATION_ID: "The Anthropic organization's id",
     ANTHROPIC_SERVICE_ACCOUNT_ID: "The service account the rule acts as (svac_...)",
     ANTHROPIC_WORKSPACE_ID: "The workspace Claude's usage is billed to (wrkspc_...)",
-    HC_CLEANUP_DRY_RUN: "1 to log what the daily retention sweep would delete, and delete nothing. 0 or unset: it deletes",
+    HC_CLEANUP_DRY_RUN: "1 to log what the daily retention sweep would delete, and delete nothing of released runs and pulses. It doesn't cover Apex code kept for Claude's summaries, which is deleted after seven days whatever this says. 0 or unset: it deletes",
     HC_HANDBOOK_SUMMARIES: "on, exactly, and Claude summarises each health check's Apex classes and triggers for the org handbook, from code the run keeps until then. Anything else, or unset, is off. Leave it unset until the privacy notice says Apex code is sent to Claude",
     HC_MICROSITE_KEY: "The customer microsite: 32 bytes, base64 (openssl rand -base64 32), the same value as the console's, and different from HC_CONNECT_KEY and HC_TOKEN_KEY. Without it, released runs get documents but no microsite",
   },
