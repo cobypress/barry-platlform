@@ -9,7 +9,7 @@ import type { Browser } from "playwright";
 import type { NarrativeClient } from "../../narrative/client.ts";
 import { Intake } from "../../narrative/intake.ts";
 import { buildReport, currentBody, type BuiltReport, type ReportInput } from "../../narrative/sections.ts";
-import { buildPlan, topIssues, verdictOf } from "../../narrative/select.ts";
+import { buildPlan, domainLabel, topIssues, verdictOf } from "../../narrative/select.ts";
 import { Pseudonymiser, type PseudonymEntry } from "../../privacy/pseudonymiser.ts";
 import { SALES_CLOUD_DOMAINS, type Finding, type Metric, type NumberOverride, type ReportSection } from "../../schemas/index.ts";
 import { runFromRecording } from "../../testing/harness.ts";
@@ -551,6 +551,191 @@ describe("the progress page at its fullest with the engine's own titles, and pas
     const printed = await renderPdf(browser, executiveHtml(customer, pseudonyms), { minPages: EXECUTIVE_PAGES.min, maxPages: executiveMaxPages(customer), dataset: customer.dataset, carryOver: true });
     assert.deepEqual(printed.layout.problems, [], describeProblems(printed.layout.problems));
     assert.ok(printed.layout.pages <= executiveMaxPages(customer), `${printed.layout.pages} pages`);
+  });
+
+  // Longer still, a list itself splits across the two slides, and what goes over
+  // keeps its label (DECISIONS.md 507 and 508). Titles grow as a long team name makes them.
+  const TEAMS = " for the Enterprise Sales North America and Asia Pacific Partner Channel teams";
+  const longer = (lists: Array<"fixed" | "remaining" | "added">, extra: number): BuiltReport => {
+    const p = customer.progress!;
+    const tail = TEAMS.repeat(Math.ceil(extra / TEAMS.length)).slice(0, extra);
+    return { ...customer, progress: { ...p, ...Object.fromEntries(lists.map((k) => [k, p[k].map((c) => ({ ...c, title: c.title + tail }))])) } };
+  };
+  type Column = { label: string | null; first: string | null; items: string[] };
+  type ListSlide = { eyebrow: string; heading: string; columns: Column[] };
+
+  /** The progress slide's lists as built, then the slide and its continued slide once carried over: each column's label, what opens it, and its items without their references. */
+  async function carriedLists(html: string): Promise<{ built: ListSlide; slides: ListSlide[]; continued: string }> {
+    const context = await browser.newContext({ offline: true });
+    try {
+      const page = await context.newPage();
+      await page.setContent(html, { waitUntil: "load" });
+      await page.evaluate(() => window.document.fonts.ready.then(() => undefined));
+      await page.emulateMedia({ media: "print" });
+      const lists = () =>
+        page.evaluate(() => {
+          const pages = [...window.document.querySelectorAll<HTMLElement>(".page")];
+          const first = pages.findIndex((p) => p.querySelector("h2")?.textContent === "What has changed");
+          const text = (el: Element): string => {
+            const copy = el.cloneNode(true) as Element;
+            for (const ref of copy.querySelectorAll("[data-ref]")) ref.remove();
+            return copy.textContent ?? "";
+          };
+          const slides = [];
+          for (let i = first; i >= 0 && i < pages.length && pages[i]!.querySelector(".progress"); i++) {
+            const p = pages[i]!;
+            const heading = p.querySelector("h2")?.textContent ?? "";
+            if (i > first && !/, continued$/.test(heading)) break;
+            const columns = [...p.querySelectorAll(".progress .lists > div")].map((col) => ({ label: col.querySelector(":scope > h3")?.textContent ?? null, first: col.firstElementChild?.tagName ?? null, items: [...col.querySelectorAll("li")].map(text) }));
+            slides.push({ eyebrow: p.querySelector(".eyebrow")?.textContent ?? "", heading, columns });
+          }
+          return { slides, continued: pages[first + 1]?.outerHTML ?? "" };
+        });
+      const built = (await lists()).slides[0]!;
+      await carryOver(page);
+      return { built, ...(await lists()) };
+    } finally {
+      await context.close();
+    }
+  }
+
+  /** The slide and one continued slide; `split` the columns carried on, each under its label marked continued; every title printed once, in order, under its own label. */
+  function assertLabelled({ built, slides }: { built: ListSlide; slides: ListSlide[] }, split: number[]): void {
+    assert.deepEqual(slides.map((s) => [s.eyebrow, s.heading]), [["Since your last health check", "What has changed"], ["Since your last health check", "What has changed, continued"]], JSON.stringify(slides));
+    const [first, next] = slides as [ListSlide, ListSlide];
+    // No item on the continued slide without its label above it.
+    for (const col of next.columns) if (col.items.length) assert.equal(col.first, "H3", JSON.stringify(col));
+    assert.deepEqual(next.columns.filter((c) => c.items.length).map((c) => c.label), split.map((i) => `${built.columns[i]!.label}, continued`));
+    for (const col of built.columns) {
+      const stays = first.columns.find((c) => c.label === col.label)!;
+      const goes = next.columns.find((c) => c.label === `${col.label}, continued`);
+      assert.ok(stays.items.length > 0, `${col.label}: some of it stays`);
+      assert.deepEqual([...stays.items, ...(goes?.items ?? [])], col.items, `${col.label}: each title once, in order`);
+    }
+  }
+
+  test("a list split across the two slides keeps its label: one of the three on the full report (DECISIONS.md 507 and 508)", async () => {
+    const report = longer(["remaining"], 2 * TEAMS.length);
+    const range = deckRangeFor(report.input.run);
+    const html = fullReportHtml(report, pseudonyms);
+    const printed = await renderPdf(browser, html, { minPages: range.min, maxPages: range.max, dataset: report.dataset, carryOver: true });
+    assert.equal(printed.layout.passed, true);
+    assert.deepEqual(printed.layout.problems, [], describeProblems(printed.layout.problems));
+    const carried = await carriedLists(html);
+    // The label's count is the whole list's, as on the first slide.
+    assert.deepEqual(carried.built.columns.map((c) => c.label), [`Fixed (${report.progress!.fixed.length})`, `Still open (${report.progress!.remaining.length})`, `New since then (${report.progress!.added.length})`]);
+    assertLabelled(carried, [1]);
+  });
+
+  test("all three split, with every optional part at its longest: labelled, and no further slide on either document (DECISIONS.md 507 and 508)", async () => {
+    const report = longer(["fixed", "remaining", "added"], 2 * TEAMS.length);
+    const range = deckRangeFor(report.input.run);
+    const html = fullReportHtml(report, pseudonyms);
+    const printed = await renderPdf(browser, html, { minPages: range.min, maxPages: range.max, dataset: report.dataset, carryOver: true });
+    assert.equal(printed.layout.passed, true);
+    assert.deepEqual(printed.layout.problems, [], describeProblems(printed.layout.problems));
+    assertLabelled(await carriedLists(html), [0, 1, 2]);
+    // Rendered the same way with the carry-over as it was before the labels (fe5b440), this case printed 114 slides and 13 pages.
+    assert.equal(printed.layout.pages, 114);
+    const executive = executiveHtml(report, pseudonyms);
+    const summary = await renderPdf(browser, executive, { minPages: EXECUTIVE_PAGES.min, maxPages: executiveMaxPages(report), dataset: report.dataset, carryOver: true });
+    assert.equal(summary.layout.passed, true);
+    assert.deepEqual(summary.layout.problems, [], describeProblems(summary.layout.problems));
+    assert.equal(summary.layout.pages, 13);
+    // The executive summary's slide is larger: at this length its lists stay whole, and nothing it carries is a list item without its label.
+    for (const slide of (await carriedLists(executive)).slides) for (const col of slide.columns) if (col.items.length) assert.equal(col.first, "H3", JSON.stringify(col));
+  });
+
+  test("on the executive summary too, once titles are long enough to split its lists (DECISIONS.md 507 and 508)", async () => {
+    // Measured: its lists split only once every title is about 380 characters longer than the
+    // engine's own, after every note has already gone over. No title the engine writes is that
+    // long, so this length is planted to hold the label there as well.
+    const report = longer(["fixed", "remaining", "added"], 400);
+    const html = executiveHtml(report, pseudonyms);
+    const printed = await renderPdf(browser, html, { minPages: EXECUTIVE_PAGES.min, maxPages: executiveMaxPages(report), dataset: report.dataset, carryOver: true });
+    assert.equal(printed.layout.passed, true);
+    assert.deepEqual(printed.layout.problems, [], describeProblems(printed.layout.problems));
+    assertLabelled(await carriedLists(html), [0, 1, 2]);
+  });
+
+  test("the 505 case's continued slide is as it was before the labels, character for character", async () => {
+    const html = fullReportHtml(customer, pseudonyms);
+    const { continued } = await carriedLists(html);
+    assert.equal(
+      continued.replace(/<div class="footer"[\s\S]*$/, ""),
+      '<section class="page tight" style="justify-content: flex-start;" data-page="8"><div class="eyebrow">Since your last health check</div><h2>What has changed, continued</h2><div class="progress"><p class="note">Some of the change in money can come from the business itself, not only from fixes.</p></div>',
+    );
+  });
+});
+
+describe("a list split across a chapter slide keeps the label it sits under (DECISIONS.md 508)", () => {
+  // Issue titles in two areas as long as a team's name can make them. The deck is the one
+  // the documents job prints (fullReportHtml picks the density step as render-run.ts does).
+  // Configuration's "What's below par" and Automation's split inside their lists.
+  const TEAMS = " for the Enterprise Sales North America and Asia Pacific Partner Channel teams";
+  const extra: Record<string, number> = { configuration: 200, automation: 160 };
+  const findings = output!.findings.map((f) => (f.status === "issue" && extra[f.domain] ? { ...f, title: f.title + TEAMS.repeat(3).slice(0, extra[f.domain]) } : f));
+  const report = buildReport({ ...base, findings });
+
+  test("each carried list sits under the label of its own band, and no label sits directly above another heading", async () => {
+    const range = deckRangeFor(report.input.run);
+    const html = fullReportHtml(report, pseudonyms);
+    const printed = await renderPdf(browser, html, { minPages: range.min, maxPages: range.max, dataset: report.dataset, carryOver: true });
+    assert.equal(printed.layout.passed, true);
+    assert.deepEqual(printed.layout.problems, [], describeProblems(printed.layout.problems));
+    // 120 before the labels too (fe5b440, rendered the same way): they cost no slide.
+    assert.equal(printed.layout.pages, 120);
+
+    const context = await browser.newContext({ offline: true });
+    try {
+      const page = await context.newPage();
+      await page.setContent(html, { waitUntil: "load" });
+      await page.evaluate(() => window.document.fonts.ready.then(() => undefined));
+      await page.emulateMedia({ media: "print" });
+      await carryOver(page);
+      const facts = await page.evaluate(() => {
+        const pages = [...window.document.querySelectorAll<HTMLElement>(".page")];
+        const text = (el: Element): string => {
+          const copy = el.cloneNode(true) as Element;
+          for (const ref of copy.querySelectorAll("[data-ref]")) ref.remove();
+          return copy.textContent ?? "";
+        };
+        // A chapter's continued slide has no title of its own (listed for later in 508): the area is the slide before's.
+        const carried = pages.flatMap((p, i) => {
+          if (!p.querySelector(".chapter") || p.querySelector(".chapter > h2")) return [];
+          const left = p.querySelector(".cols > div:first-child");
+          const groups: Array<{ label: string; items: string[] }> = [];
+          for (const el of left ? [...left.children] : []) {
+            if (el.tagName === "H3") groups.push({ label: el.textContent ?? "", items: [] });
+            else if (groups.length) groups.at(-1)!.items.push(...[...el.querySelectorAll("li")].map(text));
+            else groups.push({ label: "", items: [...el.querySelectorAll("li")].map(text) });
+          }
+          return [{ area: pages[i - 1]!.querySelector(".chapter > .eyebrow")?.textContent ?? "", groups }];
+        });
+        const stacked = [...window.document.querySelectorAll("h3, h4, h5")].filter((h) => /, continued$/.test(h.textContent ?? "") && /^H[1-5]$/.test(h.nextElementSibling?.tagName ?? "")).map((h) => h.textContent);
+        return { carried, stacked };
+      });
+      assert.deepEqual(facts.stacked, []);
+      assert.deepEqual(facts.carried.map((c) => [c.area, c.groups[0]!.label]), [
+        ["Configuration", "What's below par, continued"],
+        ["Automation", "What's below par, continued"],
+      ]);
+      // Each carried title's finding is in the band its label names.
+      const band = (f: Finding): string => (f.status === "passed" ? "Checked and fine" : f.severity === "critical" || f.severity === "high" ? "What's broken" : "What's below par");
+      const domainOf = (area: string): string => report.teamFindings.find((f) => domainLabel(f.domain) === area)!.domain;
+      for (const { area, groups } of facts.carried) {
+        const own = report.teamFindings.filter((f) => f.domain === domainOf(area));
+        for (const { label, items } of groups) {
+          for (const item of items.filter((i) => !/^And \d+ more/.test(i))) {
+            const matches = own.filter((f) => plainWords(ukDates(pseudonyms.restore(f.title))) === item);
+            assert.ok(matches.length > 0, `${area}: ${item}`);
+            for (const f of matches) assert.equal(label.replace(/, continued$/, ""), band(f), `${area}: ${item}`);
+          }
+        }
+      }
+    } finally {
+      await context.close();
+    }
   });
 });
 
