@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { CHANGES, MAX_QUERIED_OBJECTS } from "../extract/apex-touches.ts";
+import { tokenSource } from "../privacy/pseudonymiser.ts";
 
 // The org handbook's data (DECISIONS.md 451 to 457): what each flow, validation
 // rule, Apex class and trigger does, written to handbook.json in the run folder.
@@ -162,7 +163,7 @@ export const HandbookApexTouches = z.strictObject({
 export type HandbookApexTouches = z.infer<typeof HandbookApexTouches>;
 
 /** A pseudonymiser's token for a user: a name only when the Word document is made (decision 421). */
-export const UserToken = z.string().regex(/^\[\[user:U\d{4,}\]\]$/);
+export const UserToken = z.string().regex(new RegExp(`^${tokenSource("user", "U")}$`));
 
 /** When a class or trigger was last changed, and by whom (decision 473). */
 export const HandbookLastChange = z.strictObject({

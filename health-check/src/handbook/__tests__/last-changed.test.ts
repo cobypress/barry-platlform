@@ -5,7 +5,7 @@ import { join, sep } from "node:path";
 import { SALES_CLOUD_MODULES } from "../../domains/index.ts";
 import { runHealthCheck } from "../../engine/run.ts";
 import type { ApexClassRow, ApexData, ApexTriggerRow, LastChanged } from "../../extract/automation.ts";
-import { Pseudonymiser, type PseudonymEntry } from "../../privacy/pseudonymiser.ts";
+import { Pseudonymiser, tokenSource, type PseudonymEntry } from "../../privacy/pseudonymiser.ts";
 import { loadPseudonymMap } from "../../render/render-run.ts";
 import { docxText } from "../../testing/docx-text.ts";
 import { runFromRecording, tempDir } from "../../testing/harness.ts";
@@ -22,7 +22,7 @@ import { CHANGES_NOT_KEPT, Handbook, HANDBOOK_VERSION, type HandbookApexClass } 
 
 const read = <T>(dir: string, file: string): T => JSON.parse(readFileSync(join(dir, file), "utf8")) as T;
 const OPTIONS = { clientName: "Synthetic Co", runDate: AS_OF };
-const TOKEN = /\[\[[a-z]+:[A-Z]\d{4,}\]\]/;
+const TOKEN = new RegExp(tokenSource());
 const NEW_FIELDS = ", LastModifiedDate, LastModifiedById, LastModifiedBy.Name";
 const REFUSED_SENTENCE = "We couldn't read when your Apex classes and triggers were last changed, or by whom, so this handbook doesn't say.";
 /** Salesforce's own words for a refusal: in the run folder's checkpoints, and in nothing made from them. */

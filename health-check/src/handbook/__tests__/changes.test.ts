@@ -287,16 +287,31 @@ describe("the part on its own", () => {
     assert.equal(part.items[0]!.what, 'Set the client_secret = "[REDACTED]" on Lead Router');
   });
 
+  // The 10,000th user's token has five digits, and restore() names it (decision 464).
+  const tenThousand = (): { pseudonyms: Pseudonymiser; token: string } => {
+    const pseudonyms = new Pseudonymiser();
+    for (let n = 1; n < 10_000; n++) pseudonyms.label("user", `filler-${String(n).padStart(5, "0")}`, "Sales");
+    return { pseudonyms, token: pseudonyms.label("user", userId(4), "Jo Ellis") };
+  };
+
+  test("a token of five digits, the 10,000th user's, prints as their name", async () => {
+    const { pseudonyms, token } = tenThousand();
+    assert.equal(token, "[[user:U10000]]");
+    const part = recentChanges(audit([change(1)]), () => token);
+    assert.ok(part.status === "ok" && part.items[0]!.by === token);
+    const text = docxText(await renderHandbookDocx(Handbook.parse({ version: HANDBOOK_VERSION, ...bare, recentChanges: part }), { ...OPTIONS, pseudonyms }));
+    assert.match(text, /\n1 Oct 2026 at 08:00 UTC, Jo Ellis: Flows {2}changedinteractiondef\nChange 1(\n|$)/);
+    assert.ok(!text.includes(token) && !text.includes("U10000"));
+  });
+
   test("a token of five digits, which the map doesn't restore, prints as a user we couldn't look up and never as the token", async () => {
-    // The 10,000th user: Pseudonymiser.restore knows four digits only. If it
-    // learns five, the name is right here and this test changes with it.
-    const token = "[[user:U10000]]";
-    const pseudonyms = new Pseudonymiser([{ token, id: userId(4), name: "Jo Ellis", aliases: [] }]);
+    const { pseudonyms } = tenThousand();
+    const token = "[[user:U10001]]";
     const part = recentChanges(audit([change(1)]), () => token);
     assert.ok(part.status === "ok" && part.items[0]!.by === token);
     const text = docxText(await renderHandbookDocx(Handbook.parse({ version: HANDBOOK_VERSION, ...bare, recentChanges: part }), { ...OPTIONS, pseudonyms }));
     assert.match(text, /\n1 Oct 2026 at 08:00 UTC, a user whose name we couldn't look up: Flows {2}changedinteractiondef\nChange 1(\n|$)/);
-    assert.ok(!text.includes(token) && !text.includes("U10000"));
+    assert.ok(!text.includes(token) && !text.includes("U10001"));
   });
 
   test("a read that failed on a real run leaves the part unavailable with the step's own reason", async () => {

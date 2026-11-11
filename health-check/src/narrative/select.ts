@@ -1,5 +1,6 @@
 import { SALES_CLOUD_DOMAINS, type Finding, type Run, type Score } from "../schemas/index.ts";
 import { NOT_MONEY_RULES } from "../value/model.ts";
+import { tokenSource } from "../privacy/pseudonymiser.ts";
 
 // The choices a report makes about its findings: what's top, what goes when, and
 // what an executive reader sees. All of it is code, so it's repeatable and Claude
@@ -39,7 +40,10 @@ export function domainsInOrder(findings: Finding[]): string[] {
   return [...SALES_CLOUD_DOMAINS, ...extra];
 }
 
-const USER_TOKEN = /\[\[user:[A-Z]\d{4}\]\]/;
+const USER = tokenSource("user");
+const USER_TOKEN = new RegExp(USER);
+const WORST_REP = new RegExp(`Worst by rep: ${USER}, at`, "g");
+const REP_OR_USER = new RegExp(String.raw`\b[Rr]ep ${USER}|${USER}`, "g");
 
 /**
  * Executive reports stay at team level (see QUESTIONS.md, question 7). A token
@@ -51,8 +55,8 @@ export function teamLevelText(text: string, kind: "text" | "title" = "text"): st
   let named = 0;
   const who = (noun: string) => (kind === "title" ? `a single ${noun}` : `${named++ === 0 ? "one" : "another"} ${noun}`);
   return text
-    .replace(/Worst by rep: \[\[user:[A-Z]\d{4}\]\], at/g, "The worst rep is at")
-    .replace(/\b[Rr]ep \[\[user:[A-Z]\d{4}\]\]|\[\[user:[A-Z]\d{4}\]\]/g, (m) => who(/^[Rr]ep /.test(m) ? "rep" : "person"))
+    .replace(WORST_REP, "The worst rep is at")
+    .replace(REP_OR_USER, (m) => who(/^[Rr]ep /.test(m) ? "rep" : "person"))
     .replace(/(^|[.!?]\s+)(one|another|a single) (rep|person)/g, (_m, lead: string, first: string, noun: string) => `${lead}${first.charAt(0).toUpperCase()}${first.slice(1)} ${noun}`);
 }
 
