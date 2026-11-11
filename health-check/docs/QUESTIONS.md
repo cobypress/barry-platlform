@@ -201,8 +201,10 @@ a) A permission set group's assignment: whether `PermissionSetAssignment.Permiss
 b) `SELECT Name, COUNT(Id) FROM Account GROUP BY Name HAVING COUNT(Id) > 1` through REST on a very large Account table may time out. If it does, `dq.duplicate-accounts` is not measurable, with Salesforce's reason.
 c) Person accounts: an org that uses them has people's names as account names, and two people can share a name. `IsPersonAccount` exists only where person accounts are switched on, so we don't filter on it yet.
 d) Storage: we say that past the allowance Salesforce "can stop new records or files being saved". We haven't confirmed how strictly each edition enforces it.
-e) `PackageLicense.Status` values beyond Active, Expired, Free and Trial, and whether `NamespacePrefix` is ever empty for an app sold by the seat.
-f) Territories, if a customer uses them: `Territory2Model` (State 'Active'), `Territory2` and `UserTerritory2Association` would show territories with nobody assigned. Fair balance would need the customer's own rules.
+e) Storage growth (DECISIONS.md 500): how soon `/limits` reflects records or files just added or deleted. Setup's storage page isn't live, and we haven't confirmed whether `/limits` is, so a re-check soon after a large load or clear-out may compare a reading that lags.
+f) Storage past the allowance: what `/limits` reports as `Remaining` once an org has used more than its allowance. We assume a negative number, so used exceeds the allowance. If it stops at 0, used reads as the allowance, and growth past the allowance shows as none.
+g) `PackageLicense.Status` values beyond Active, Expired, Free and Trial, and whether `NamespacePrefix` is ever empty for an app sold by the seat.
+h) Territories, if a customer uses them: `Territory2Model` (State 'Active'), `Territory2` and `UserTerritory2Association` would show territories with nobody assigned. Fair balance would need the customer's own rules.
 
 ## Salesforce CPQ (DECISIONS.md 216 to 226)
 

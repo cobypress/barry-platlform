@@ -383,9 +383,10 @@ const classicLeftovers: Rule = {
 
 
 // Storage against the allowance (roadmap 3.2). Salesforce reports both in
-// /limits, read as the connection was made. How fast it grows isn't read: the
-// org keeps no history of it, and a guess from record dates would ignore what's
-// deleted (DECISIONS.md 204).
+// /limits, read as the connection was made. The org keeps no history of it, and
+// a guess from record dates would ignore what's deleted (DECISIONS.md 204), so
+// growth is never read here: a re-check sets these facts beside its earlier
+// health check's in src/progress/compare.ts (DECISIONS.md 500).
 const STORAGE_WARNING = 80;
 const STORAGE_HIGH = 95;
 const STORAGE: Record<string, string> = { DataStorageMB: "data storage", FileStorageMB: "file storage" };
