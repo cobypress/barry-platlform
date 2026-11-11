@@ -15,6 +15,7 @@ import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
 import { carryOver } from "../carry-over.ts";
 import { EXECUTIVE_MAX_PAGES, executiveHtml } from "../executive.ts";
 import { deckRangeFor, fullReportHtml, fullReportHtmlAt, slideCounts } from "../full-report.ts";
+import { document as htmlDocument } from "../html.ts";
 import { checkLayout } from "../layout.ts";
 import { launchBrowser } from "../pdf.ts";
 
@@ -128,6 +129,160 @@ describe("carry-over: nothing runs past a footer", () => {
       const before = await page.evaluate(() => document.body.innerHTML);
       assert.equal(await carryOver(page), 0);
       assert.equal(await page.evaluate(() => document.body.innerHTML), before);
+    } finally {
+      await page.close();
+    }
+  });
+});
+
+// A list split across pages keeps its label (DECISIONS.md 507 and 508): the part
+// that goes on starts with the nearest heading that stayed above the split, marked
+// as continued. Hand-built pages with fixed heights put each split where it's wanted:
+// the content runs from 40px to 540px, a heading is 30px and a list item 40px.
+
+const SPLIT_CSS = `
+.page { width: 600px; height: 600px; padding: 40px 40px 60px; font-size: 14px; }
+.footer { bottom: 20px; left: 40px; right: 40px; }
+h2, h3 { height: 30px; line-height: 30px; font-size: 16px; overflow: hidden; white-space: nowrap; }
+ul { margin: 0; padding: 0 0 0 18px; }
+li { height: 40px; }
+.lists { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+`;
+const gap = (px: number): string => `<div style="height:${px}px"></div>`;
+const lis = (name: string, n: number): string => Array.from({ length: n }, (_, i) => `<li>${name}${i + 1}</li>`).join("");
+const items = (name: string, n: number): string => `<ul>${lis(name, n)}</ul>`;
+const part = (label: string, name: string, n: number): string => `<h3>${label}</h3>${items(name, n)}`;
+const sheet = (body: string): string => htmlDocument("Test", "a4", SPLIT_CSS, [`<section class="page" data-page="1"><h2>Title</h2>${body}<div class="footer" data-chrome><span>Footer</span><span>1</span></div></section>`]);
+
+/** Each page's headings and list items in order, as "h3:Label" and "li:A1", once carried over. */
+async function split(body: string): Promise<{ added: number; pages: string[][]; page: Page }> {
+  const page = await open(sheet(body));
+  const added = await carryOver(page);
+  const pages = await page.evaluate(() => [...document.querySelectorAll(".page")].map((p) => [...p.querySelectorAll("h2, h3, li")].map((e) => `${e.tagName.toLowerCase()}:${e.textContent}`)));
+  return { added, pages, page };
+}
+const li = (name: string, from: number, to: number): string[] => Array.from({ length: to - from + 1 }, (_, i) => `li:${name}${from + i}`);
+
+describe("carry-over: a list split across pages keeps its label (DECISIONS.md 507 and 508)", () => {
+  test("a headed block split inside: the label once at the start of the carried block, before its list", async () => {
+    const { added, pages, page } = await split(`${gap(100)}<div>${part("Label", "A", 10)}</div>`);
+    try {
+      assert.equal(added, 1);
+      assert.deepEqual(pages, [
+        ["h2:Title", "h3:Label", ...li("A", 1, 8)],
+        ["h2:Title, continued", "h3:Label, continued", ...li("A", 9, 10)],
+      ]);
+      // Inside the carried block, the copy comes first and only once.
+      assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll(".page")[1]!.querySelector(":scope > div")!.children].map((c) => c.tagName)), ["H3", "UL"]);
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("a block moved whole keeps its own heading as it was, with nothing copied over it", async () => {
+    // It starts past the footer, below a heading of the page's own that stays.
+    const { pages, page } = await split(`<h3>Section</h3>${gap(430)}<div style="margin-top:20px">${part("Label", "A", 3)}</div>`);
+    try {
+      assert.deepEqual(pages, [
+        ["h2:Title", "h3:Section"],
+        ["h2:Title, continued", "h3:Label", ...li("A", 1, 3)],
+      ]);
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("a block with no heading of its own gains none", async () => {
+    const { pages, page } = await split(`${gap(100)}<div>${items("A", 10)}</div>`);
+    try {
+      assert.deepEqual(pages, [
+        ["h2:Title", ...li("A", 1, 9)],
+        ["h2:Title, continued", "li:A10"],
+      ]);
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("split across three pages, the label is marked continued once on the second and on the third", async () => {
+    const { added, pages, page } = await split(`<div>${part("Label", "A", 30)}</div>`);
+    try {
+      assert.equal(added, 2);
+      assert.deepEqual(pages, [
+        ["h2:Title", "h3:Label", ...li("A", 1, 11)],
+        ["h2:Title, continued", "h3:Label, continued", ...li("A", 12, 22)],
+        ["h2:Title, continued", "h3:Label, continued", ...li("A", 23, 30)],
+      ]);
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("three columns side by side, one split: only that one is labelled, and the empty shell of another gains nothing", async () => {
+    const { pages, page } = await split(`${gap(100)}<div class="lists"><div>${part("Left (3)", "L", 3)}</div><div>${part("Middle (12)", "M", 12)}</div><div>${part("Right (3)", "R", 3)}</div></div>`);
+    try {
+      assert.deepEqual(pages[1], ["h2:Title, continued", "h3:Middle (12), continued", ...li("M", 9, 12)]);
+      // The left column still crossed (the row was as tall as the middle one) when its turn came, so its shell went over empty.
+      assert.match(await page.evaluate(() => document.querySelectorAll(".page")[1]!.querySelector(".lists")!.innerHTML), /^<div><\/div><div><h3>Middle \(12\), continued<\/h3><ul>/);
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("three columns side by side, all split: each carries its own label", async () => {
+    const { pages, page } = await split(`${gap(100)}<div class="lists"><div>${part("Left (12)", "L", 12)}</div><div>${part("Middle (12)", "M", 12)}</div><div>${part("Right (12)", "R", 12)}</div></div>`);
+    try {
+      assert.deepEqual(pages[1], ["h2:Title, continued", "h3:Left (12), continued", ...li("L", 9, 12), "h3:Middle (12), continued", ...li("M", 9, 12), "h3:Right (12), continued", ...li("R", 9, 12)]);
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("a column of three headed parts: the label is the nearest heading that stays, and none where the split falls between parts", async () => {
+    // Inside the third part.
+    let { pages, page } = await split(`<div>${part("A", "A", 3)}${part("B", "B", 3)}${part("C", "C", 6)}</div>`);
+    await page.close();
+    assert.deepEqual(pages[1], ["h2:Title, continued", "h3:C, continued", ...li("C", 4, 6)]);
+    // Inside the second: the third part goes over after it with its own heading.
+    ({ pages, page } = await split(`<div>${part("A", "A", 3)}${part("B", "B", 10)}${part("C", "C", 2)}</div>`));
+    await page.close();
+    assert.deepEqual(pages[1], ["h2:Title, continued", "h3:B, continued", ...li("B", 8, 10), "h3:C", ...li("C", 1, 2)]);
+    // Between the second and the third: the third's heading fits but its first item doesn't, so the heading goes with its list.
+    ({ pages, page } = await split(`<div>${part("A", "A", 6)}${part("B", "B", 3)}${part("C", "C", 3)}</div>`));
+    await page.close();
+    assert.deepEqual(pages, [
+      ["h2:Title", "h3:A", ...li("A", 1, 6), "h3:B", ...li("B", 1, 3)],
+      ["h2:Title, continued", "h3:C", ...li("C", 1, 3)],
+    ]);
+  });
+
+  test("a heading with a sub-heading: the sub-heading's label", async () => {
+    const { pages, page } = await split(`<div><h3>Main</h3><h3 class="cap">Sub</h3>${items("S", 12)}</div>`);
+    try {
+      assert.deepEqual(pages[1], ["h2:Title, continued", "h3:Sub, continued", ...li("S", 11, 12)]);
+      assert.equal(await page.evaluate(() => document.querySelectorAll(".page")[1]!.querySelector("h3")!.className), "cap");
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("a heading whose list starts past the footer goes over with it, whole and unmarked, when something else stays", async () => {
+    const { pages, page } = await split(`${gap(440)}<div><h3>Label</h3><ul style="margin-top:20px">${lis("A", 3)}</ul></div>`);
+    try {
+      assert.deepEqual(pages, [["h2:Title"], ["h2:Title, continued", "h3:Label", ...li("A", 1, 3)]]);
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("the same block alone on its page: nothing moves, so the page keeps it and the run ends", async () => {
+    // Only headings would stay, so the page is left as it was, past its footer, and the layout check reports it.
+    const { added, pages, page } = await split(`<div><h3 style="height:470px">Label</h3><ul style="margin-top:20px">${lis("A", 3)}</ul></div>`);
+    try {
+      assert.equal(added, 0);
+      assert.deepEqual(pages, [["h2:Title", "h3:Label", ...li("A", 1, 3)]]);
+      const layout = await checkLayout(page, { minPages: 1, maxPages: 1 });
+      assert.ok(layout.problems.some((p) => p.page === 1 && p.check === "overflow"), JSON.stringify(layout.problems));
     } finally {
       await page.close();
     }
