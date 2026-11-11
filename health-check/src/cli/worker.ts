@@ -71,7 +71,7 @@ export async function workerCommand(
   const narrative = config.claude.kind === "key" ? anthropicClientWithKey(config.claude.apiKey) : config.claude.kind === "federation" ? anthropicClient() : undefined;
   // One more for the heavy slot (DECISIONS.md 371).
   const pool = new pg.Pool({ connectionString: config.databaseUrl, max: config.concurrency + 3 });
-  const store = new PostgresWorkerStore(pool);
+  const store = new PostgresWorkerStore(pool, { log });
   const locksDir = join(dirname(config.runsDir), `${basename(config.runsDir)}-locks`);
   // Only for a free scan, queued the moment its prospect connects.
   const queue = new bull.Queue(HEALTH_CHECK_QUEUE, { connection: redisConnection(config.redisUrl) });

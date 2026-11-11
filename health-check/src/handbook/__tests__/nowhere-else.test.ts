@@ -509,8 +509,11 @@ describe("what reads it", () => {
     ["src/handbook/compare.ts", "sets a re-check's file beside its earlier health check's, for the Word document alone, keeping nothing (DECISIONS.md 483)"],
     ["src/testing/earlier-handbook.ts", "makes up a synthetic earlier health check beside a synthetic run, for the tests and the sample"],
     ["src/handbook/sample.ts", "writes the synthetic org's document outside the repo, for a person to read"],
-    ["src/worker/documents-job.ts", "puts the Word document in the customer's Drive folder, and lists only its name, id and link to the console (DECISIONS.md 477)"],
-    ["src/worker/types.ts", "names the kind the console is told of, org_handbook, and reads no file (DECISIONS.md 477)"],
+    ["src/worker/documents-job.ts", "puts the Word document in the customer's Drive folder, and lists only its name, id and link to the console (DECISIONS.md 477); gives it the approved summaries, never the reports (495)"],
+    ["src/worker/types.ts", "names the kind the console is told of, org_handbook, and the summaries' fields the store carries, and reads no file (DECISIONS.md 477, 494 and 495)"],
+    ["src/handbook/summary-row.ts", "holds the console's limits and row for Claude's summaries, and which approved ones the Word document prints; reads no file (DECISIONS.md 494 and 495)"],
+    ["src/worker/postgres-store.ts", "writes Claude's summaries to the console's table while they wait, and reads the row back for the documents job, never who decided it (DECISIONS.md 494 and 495)"],
+    ["src/worker/memory-store.ts", "keeps the Postgres store's rules for the summaries' row, for the tests"],
     ["src/extract/metadata-parse.ts", "keeps the detail on the retrieve route"],
     ["src/extract/metadata-tooling.ts", "keeps the detail on the Tooling route"],
     ["src/engine/run.ts", "writes handbook.json"],
@@ -520,7 +523,7 @@ describe("what reads it", () => {
     ["src/extract/apex-touches.ts", "holds the number of the Apex reading the apex step stamps on its output, for handbook.json (DECISIONS.md 484)"],
     ["src/extract/automation.ts", "stamps that number on the apex step's output, and keeps nothing else for the handbook"],
     ["src/handbook/summaries.ts", "writes Claude's summaries of the kept Apex code to a file of their own, never into handbook.json (DECISIONS.md 492)"],
-    ["src/worker/run-job.ts", "runs those summaries after the analysis, and deletes the kept code when a run fails for good"],
+    ["src/worker/run-job.ts", "runs those summaries after the analysis, deletes the kept code when a run fails for good, and gives the store the summaries file's summaries, never the code (DECISIONS.md 494)"],
     ["src/worker/retention.ts", "deletes the kept code and partial summaries after seven days, by their names"],
     ["src/worker/env.ts", "reads the switch, HC_HANDBOOK_SUMMARIES"],
     ["src/config.ts", "names the summaries' model"],
@@ -687,11 +690,71 @@ describe("with the summaries' switch on, Apex code goes to Claude by the summary
     assert.deepEqual(holding(readFileSync(join(on.dir, SUMMARIES_FILE), "utf8"), [...APEX_MARKERS, PASTED_CREDENTIAL, COMMENTER.Name]), []);
   });
 
-  test("the store, the console's writes, the benchmark and the log hold nothing of the code or the summaries", async () => {
-    const markers = [...APEX_MARKERS, PASTED_CREDENTIAL, SUMMARY_MARKER, LONGEST_NAME, "ZebraKeyHolder"];
+  // Decision 494: the summaries go to the console's table for a person to
+  // approve, and only there: never the code, and nothing else of the handbook.
+  test("the store's saved output holds the summaries only in handbookSummaries, the file's as written, and nothing of the code anywhere", () => {
+    const code = [...APEX_MARKERS, PASTED_CREDENTIAL];
+    const summaries = [SUMMARY_MARKER, LONGEST_NAME, "ZebraKeyHolder"];
     assert.equal(on.saved.length, 1);
-    const store = { saved: on.saved, runs: [...on.deps.store.runs.values()], writes: on.deps.store.writes, documents: [...on.deps.store.documents.values()], benchmark: on.deps.store.benchmarkRows, scans: [...on.deps.store.scanResults.values()], pulses: [...on.deps.store.pulseResults.values()] };
-    assert.deepEqual(holding(JSON.stringify(store), markers), []);
+    const { handbookSummaries, ...rest } = on.saved[0]!;
+    const file = JSON.parse(readFileSync(join(on.dir, SUMMARIES_FILE), "utf8")) as Record<string, unknown>;
+    assert.deepEqual(handbookSummaries, { model: file.model, madeAt: file.madeAt, items: file.items, leftOut: file.leftOut });
+    assert.deepEqual(holding(JSON.stringify(handbookSummaries), summaries), summaries, "the route was taken");
+    // The summaries name their classes, and a planted class is a name the handbook holds too: that is all of it they carry.
+    assert.deepEqual(holding(JSON.stringify(handbookSummaries), [...code, ...ROUTED, ...NOWHERE, ...MODIFIERS, ...READINGS]), []);
+    assert.deepEqual(holding(JSON.stringify(rest), [...code, ...summaries]), []);
+    // The console's table holds that and only that, waiting.
+    const row = on.deps.store.summaries.get(RUN_ID)!;
+    assert.equal(row.status, "waiting");
+    assert.deepEqual(row.items, handbookSummaries!.items.map((i) => ({ ...i, struck: false })));
+    // And the store's other tables hold neither; its copy of the output, the same as what was saved.
+    const others = { runs: [...on.deps.store.runs.values()].map(({ output, ...r }) => ({ ...r, output: output && (({ handbookSummaries: _s, ...o }) => o)(output) })), writes: on.deps.store.writes, documents: [...on.deps.store.documents.values()], benchmark: on.deps.store.benchmarkRows, scans: [...on.deps.store.scanResults.values()], pulses: [...on.deps.store.pulseResults.values()] };
+    assert.deepEqual(holding(JSON.stringify(others), [...code, ...summaries]), []);
+    assert.deepEqual(holding(JSON.stringify(row), code), []);
+  });
+
+  test("with the switch off, the saved output and the store hold none of either", () => {
+    assert.equal(off.saved.length, 1);
+    assert.ok(!("handbookSummaries" in off.saved[0]!));
+    assert.equal(off.deps.store.summaries.size, 0);
+    const store = { saved: off.saved, runs: [...off.deps.store.runs.values()], writes: off.deps.store.writes };
+    assert.deepEqual(holding(JSON.stringify(store), [...APEX_MARKERS, PASTED_CREDENTIAL, SUMMARY_MARKER, LONGEST_NAME, "ZebraKeyHolder"]), []);
+  });
+
+  test("a documents make that prints the approved summaries sends Claude nothing", async () => {
+    const asked: NarrativeRequest[] = [];
+    const uploads: Array<{ name: string; body: Buffer }> = [];
+    const drive: DocumentDrive = {
+      rootFolderId: "root-folder-0001",
+      folder: async () => null,
+      folders: async () => [],
+      files: async () => [],
+      createFolder: async (_parent, name) => ({ id: `folder-${name.length}`, name, url: "https://drive.example.com/f" }),
+      putFile: async (_parent, name, _mime, body) => (uploads.push({ name, body }), { id: `file-${uploads.length}`, name, url: "https://drive.example.com/x" }),
+      moveFile: async () => {},
+    };
+    const deps = baseDeps({
+      drive,
+      apexSummaries: true,
+      narrative: { complete: async (request) => (asked.push(request), { stopReason: "end_turn", model: request.model, text: "{}" }) },
+      renderReleased: async (_dir, _approved, out) => {
+        mkdirSync(out, { recursive: true });
+        const files = {} as Record<DocumentKey, string>;
+        for (const key of ["raw_notes", "executive_summary", "full_health_check", "ceo_one_pager", "action_lists", "tickets", "readout_kit"] as DocumentKey[]) writeFileSync((files[key] = join(out, `${key}.bin`)), `synthetic ${key}`);
+        return { files, warnings: [], held: [] };
+      },
+    });
+    cpSync(on.dir, join(deps.runsDir, RUN_ID), { recursive: true });
+    deps.store.summaries.set(RUN_ID, { ...on.deps.store.summaries.get(RUN_ID)!, status: "approved", decidedBy: "consultant@example.com", decidedAt: "2026-11-05T10:00:00.000Z" });
+    deps.store.addDocumentsJob({ run: consoleRun({ status: "released" }), intake: null, sections: [], versions: [], overrides: [], preparedBy: null, state: "queued", driveFolderId: null, files: [] });
+    assert.equal((await processDocumentsJob(RUN_ID, deps, { final: true })).outcome, "done");
+    const handbook = docxText(uploads.find((u) => u.name.endsWith(" - Org handbook.docx"))!.body);
+    assert.ok(handbook.includes(`Summary (written by Claude, checked by us): Keeps the ${SUMMARY_MARKER} ledger in step when ZebraKeyHolder runs.`), "it printed them");
+    assert.deepEqual(asked, []);
+  });
+
+  test("the log holds nothing of the code or the summaries, and the benchmark none of either", async () => {
+    const markers = [...APEX_MARKERS, PASTED_CREDENTIAL, SUMMARY_MARKER, LONGEST_NAME, "ZebraKeyHolder"];
     assert.deepEqual(holding(on.deps.lines.join("\n"), markers), []);
     assert.ok(on.deps.lines.some((l) => /^Claude summarised 12 of the 12 Apex classes and triggers kept for run /.test(l)));
     const copy = join(tempDir(), "run");

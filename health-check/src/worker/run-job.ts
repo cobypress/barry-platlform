@@ -20,7 +20,8 @@ import { progressOf, RunClosedError, type RunJobInput } from "./types.ts";
 import { withoutComments } from "../survey/questions.ts";
 import { FACTS_FILE } from "../extract/facts.ts";
 import { APEX_SOURCE_FILE } from "../extract/apex-source.ts";
-import { summariseApex, SUMMARIES_PARTIAL_FILE } from "../handbook/summaries.ts";
+import { HandbookSummaries, summariseApex, SUMMARIES_FILE, SUMMARIES_PARTIAL_FILE } from "../handbook/summaries.ts";
+import type { SummariesToSave } from "../handbook/summary-row.ts";
 import { FactsFile, factsReport, type FactsReport } from "../facts/summary.ts";
 import { ASSUMPTIONS } from "../facts/assumptions.ts";
 import { Timestamp } from "../schemas/common.ts";
@@ -201,6 +202,8 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
     const outputs = Object.values(report.outputs);
     writeFileSync(join(dir, SECTIONS_FILE), `${JSON.stringify(outputs, null, 2)}\n`, { mode: 0o600 });
     const facts = factsOf(dir, log);
+    // Only with the switch on, as it stands now: off, the console's table is never named.
+    const handbookSummaries = apexSummaries ? summariesOf(dir, runId, log) : null;
     await deps.store.saveRunOutput(runId, {
       progress: progressOf(result.run),
       runDir: dir,
@@ -216,6 +219,7 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
       versions: outputs.flatMap((o) => o.versions),
       facts: facts.summary,
       factsFile: facts.file,
+      ...(handbookSummaries ? { handbookSummaries } : {}),
     });
   } catch (err) {
     if (err instanceof RunClosedError) return { outcome: "skipped", detail: err.message };
@@ -237,6 +241,33 @@ function forgetApexSource(dir: string, runId: string, log: (line: string) => voi
   } catch {
     log(`The Apex code kept for run ${runId}'s summaries couldn't be deleted. The retention sweep deletes it within seven days.`);
   }
+}
+
+/**
+ * Claude's summaries for the console to hold until a person decides them
+ * (DECISIONS.md 494), from handbook-summaries.json as it is once the summaries
+ * have run: this delivery's, or an earlier one's when the code was gone
+ * before this one asked. None from a file with no summaries in it, since a
+ * row of nothing would hold the release for a decision about nothing. A file
+ * that doesn't parse is logged without a word of it, and not sent.
+ */
+function summariesOf(dir: string, runId: string, log: (line: string) => void): SummariesToSave | null {
+  const path = join(dir, SUMMARIES_FILE);
+  if (!existsSync(path)) return null;
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    raw = null;
+  }
+  const parsed = HandbookSummaries.safeParse(raw);
+  if (!parsed.success) {
+    log(`Run ${runId}'s file of Claude's summaries didn't parse, so the console gets none of them.`);
+    return null;
+  }
+  if (parsed.data.items.length === 0) return null;
+  const { model, madeAt, items, leftOut } = parsed.data;
+  return { model, madeAt, items, leftOut };
 }
 
 /** The most of facts.json the worker sends. A real one is a few kilobytes; more means the step changed. */

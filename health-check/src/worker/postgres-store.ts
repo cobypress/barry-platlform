@@ -6,6 +6,7 @@ import { Intake } from "../narrative/intake.ts";
 import { SURVEY_VERSION, type Survey } from "../survey/questions.ts";
 import { Interview } from "../interviews/questions.ts";
 import { BenchmarkRow, HeadcountBand, Industry } from "../schemas/benchmark.ts";
+import { storedFromRow, waitingRow, type ConsoleSummariesRow, type StoredSummaries } from "../handbook/summary-row.ts";
 import { Calibration, ConnectLink, ManualAnswer, NumberOverride, ReportSection, Run, SectionVersion, type Finding, type ManualStep, type Metric, type Score } from "../schemas/index.ts";
 import {
   LinkState,
@@ -14,6 +15,7 @@ import {
   type ConnectJobInput,
   type DocumentFile,
   type DocumentsJobInput,
+  type DocumentsJobReads,
   type DocumentsMade,
   type DocumentsState,
   type DriveShare,
@@ -227,6 +229,14 @@ export const DOCUMENTS: Columns = {
   runId: "text", status: "text", requestedBy: "text", requestedAt: "ts", startedAt: "ts", finishedAt: "ts", error: "text", warnings: "json", clientName: "text",
   folderName: "text", driveFolderId: "text", driveFolderUrl: "text", files: "json",
 };
+/**
+ * blackcloud-next migrations/20261122_health_check_handbook_summaries.sql
+ * (DECISIONS.md 494). The worker writes every column of a waiting row; the
+ * documents job reads all but who decided it and when (495).
+ */
+export const HANDBOOK_SUMMARIES: Columns = { runId: "text", status: "text", model: "text", madeAt: "ts", items: "json", leftOut: "json", decidedBy: "text", decidedAt: "ts" };
+const HANDBOOK_SUMMARIES_READ: Columns = { runId: "text", status: "text", model: "text", madeAt: "ts", items: "json", leftOut: "json" };
+export const HANDBOOK_SUMMARIES_MIGRATION = "20261122_health_check_handbook_summaries.sql";
 export const BENCHMARK_ROW: Columns = {
   id: "text", metricKey: "text", ruleSetVersion: "text", value: "num", unit: "text", industry: "text", headcountBand: "text", userBand: "text", dealSizeBand: "text", period: "text",
 };
@@ -391,9 +401,19 @@ const one = (r: SqlResult): Record<string, unknown> | undefined => r.rows[0];
 
 export class PostgresWorkerStore implements WorkerStore {
   readonly #pool: SqlPool;
+  readonly #log: (line: string) => void;
+  /** Said once: a console without the summaries' table says so on every save and every make otherwise. */
+  #saidNoSummariesTable = false;
 
-  constructor(pool: SqlPool) {
+  constructor(pool: SqlPool, options: { log?: (line: string) => void } = {}) {
     this.#pool = pool;
+    this.#log = options.log ?? (() => {});
+  }
+
+  #noSummariesTable(): void {
+    if (this.#saidNoSummariesTable) return;
+    this.#saidNoSummariesTable = true;
+    this.#log(`The console's database has no HealthCheckHandbookSummaries table yet, so Claude's summaries are neither saved nor printed. Apply the console's migration ${HANDBOOK_SUMMARIES_MIGRATION}.`);
   }
 
   async #transaction<T>(work: (client: SqlClient) => Promise<T>): Promise<T> {
@@ -523,6 +543,9 @@ export class PostgresWorkerStore implements WorkerStore {
   }
 
   saveRunOutput(runId: string, output: RunOutputRecord): Promise<void> {
+    // Held to the console's schema before any SQL: a row it can't read would hold the run's release.
+    const summaries = output.handbookSummaries ? waitingRow(runId, output.handbookSummaries) : null;
+    if (summaries && !summaries.ok) this.#log(`Claude's summaries for run ${runId} don't fit the console's limits (${summaries.issues} problems), so they aren't saved with its results.`);
     return this.#transaction(async (client) => {
       await this.#openRun(client, runId);
       await this.#writeProgress(client, runId, output.progress, output.runDir);
@@ -538,7 +561,51 @@ export class PostgresWorkerStore implements WorkerStore {
       for (const s of output.sections) await this.#insert(client, "HealthCheckSection", SECTION, sectionRow(s));
       for (const v of output.versions) await this.#insert(client, "HealthCheckSectionVersion", VERSION, versionRow(v));
       await this.#writeFacts(client, runId, output.facts, output.factsFile);
+      if (summaries?.ok) await this.#writeSummaries(client, summaries.row);
     });
+  }
+
+  /**
+   * Claude's summaries, waiting for a person (DECISIONS.md 494), in one
+   * statement so nothing can decide the row between a check and the write: a
+   * new row, or a waiting row's text and counts replaced, its strikes with
+   * them. A row a person has decided is left as it is. Nothing is deleted:
+   * a delivery with no summaries leaves an earlier waiting row alone. Without
+   * the table (42P01) the rest of the run still saves, inside a savepoint.
+   */
+  async #writeSummaries(client: SqlClient, row: ConsoleSummariesRow): Promise<void> {
+    const { text, values } = insertSql("HealthCheckHandbookSummaries", HANDBOOK_SUMMARIES, row);
+    await client.query("SAVEPOINT handbook_summaries");
+    try {
+      await client.query(
+        `${text} ON CONFLICT ("runId") DO UPDATE SET "model" = EXCLUDED."model", "madeAt" = EXCLUDED."madeAt", "items" = EXCLUDED."items", "leftOut" = EXCLUDED."leftOut" WHERE "HealthCheckHandbookSummaries"."status" = 'waiting'`,
+        values,
+      );
+    } catch (err) {
+      if ((err as { code?: string }).code !== "42P01") throw err;
+      await client.query("ROLLBACK TO SAVEPOINT handbook_summaries");
+      this.#noSummariesTable();
+      return;
+    }
+    await client.query("RELEASE SAVEPOINT handbook_summaries");
+  }
+
+  /** The run's summaries row for the handbook (DECISIONS.md 495), never who decided it. Without the table, or a row that reads, none. */
+  async #summaries(runId: string): Promise<StoredSummaries | null> {
+    let result: SqlResult;
+    try {
+      result = await this.#pool.query(selectSql("HealthCheckHandbookSummaries", HANDBOOK_SUMMARIES_READ, `"runId" = $1`), [runId]);
+    } catch (err) {
+      if ((err as { code?: string }).code !== "42P01") throw err;
+      this.#noSummariesTable();
+      return null;
+    }
+    const row = one(result);
+    if (!row) return null;
+    const read = storedFromRow(row);
+    if (read.ok) return read.stored;
+    this.#log(`Run ${runId}'s row of Claude's summaries doesn't read as the console's (${read.issues} problems), so the org handbook prints none.`);
+    return null;
   }
 
   /**
@@ -611,10 +678,10 @@ export class PostgresWorkerStore implements WorkerStore {
     if (result.rowCount !== 1) throw new Error(`Link ${linkId} wasn't pending, so it wasn't refused`);
   }
 
-  async loadDocumentsJob(runId: string): Promise<DocumentsJobInput | null> {
+  async loadDocumentsJob(runId: string, reads: DocumentsJobReads = {}): Promise<DocumentsJobInput | null> {
     const row = one(await this.#pool.query(selectSql("HealthCheckRun", RUN_DOCUMENTS, `"id" = $1`), [runId]));
     if (!row) return null;
-    const [steps, intake, sections, versions, overrides, documents, survey] = await Promise.all([
+    const [steps, intake, sections, versions, overrides, documents, survey, summaries] = await Promise.all([
       this.#pool.query(selectSql("HealthCheckRunStep", RUN_STEP, `"runId" = $1`, `"seq"`), [runId]),
       this.#pool.query(selectSql("HealthCheckIntake", INTAKE, `"runId" = $1`), [runId]),
       this.#pool.query(selectSql("HealthCheckSection", SECTION, `"runId" = $1`, `"output", "order"`), [runId]),
@@ -622,6 +689,8 @@ export class PostgresWorkerStore implements WorkerStore {
       this.#pool.query(selectSql("HealthCheckNumberOverride", OVERRIDE, `"runId" = $1`, `"seq"`), [runId]),
       this.#pool.query(selectSql("HealthCheckDocuments", DOCUMENTS, `"runId" = $1`), [runId]),
       this.#survey(runId),
+      // With the switch off, no statement names the table.
+      reads.handbookSummaries === true ? this.#summaries(runId) : Promise.resolve(null),
     ]);
     const run = runFromRows(row, steps.rows.map(({ runId: _r, ...s }) => s));
     const doc = one(documents);
@@ -637,6 +706,7 @@ export class PostgresWorkerStore implements WorkerStore {
       state: (doc?.status as DocumentsState | undefined) ?? null,
       driveFolderId: (doc?.driveFolderId as string | null | undefined) ?? null,
       files: (doc?.files as DocumentFile[] | null | undefined) ?? [],
+      handbookSummaries: summaries,
     };
   }
 

@@ -15,6 +15,7 @@ import type { DocumentFile, DocumentsJobInput } from "./types.ts";
 import { loadPseudonymMap, SURVEY_FILE, write } from "../render/render-run.ts";
 import { HANDBOOK_DOCX, renderHandbookDocx } from "../handbook/docx.ts";
 import { HANDBOOK_NOT_MADE, readEarlierHandbook, readHandbook } from "../handbook/read.ts";
+import { printableSummaries, type StoredSummaries } from "../handbook/summary-row.ts";
 import { Survey } from "../survey/questions.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 
@@ -145,9 +146,11 @@ async function putReadoutKit(drive: DocumentDrive, clientName: string, folderNam
  * Without one, the other documents are made as before and the warnings say
  * why; nothing here fails the make.
  */
-async function makeHandbook(dir: string, out: string, clientName: string, runDate: string): Promise<{ ok: true; path: string; unnamed: boolean; noEarlier: boolean } | { ok: false; warning: string }> {
+async function makeHandbook(dir: string, out: string, clientName: string, runDate: string, stored: StoredSummaries | null): Promise<{ ok: true; path: string; unnamed: boolean; noEarlier: boolean } | { ok: false; warning: string }> {
   const read = readHandbook(dir);
   if (!read.ok) return { ok: false, warning: HANDBOOK_NOT_MADE[read.why] };
+  // Only what a person approved, checked again as it's printed (decision 495). The row's text, never the run folder's file.
+  const summaries = printableSummaries(read.handbook, stored);
   // Who made each recent change is a token in the file, named from the run's
   // map as the reports are (DECISIONS.md 421). Without the map the handbook is
   // still made, naming no one: a token never reaches the customer.
@@ -164,7 +167,7 @@ async function makeHandbook(dir: string, out: string, clientName: string, runDat
     const earlier = readEarlierHandbook(dir);
     const path = join(out, HANDBOOK_DOCX);
     mkdirSync(out, { recursive: true, mode: 0o700 });
-    write(path, await renderHandbookDocx(read.handbook, { clientName, runDate, pseudonyms, earlier }));
+    write(path, await renderHandbookDocx(read.handbook, { clientName, runDate, pseudonyms, earlier, summaries }));
     return { ok: true, path, unnamed: pseudonyms === null, noEarlier: earlier === null };
   } catch {
     // The error could quote the handbook, so it isn't kept.
@@ -327,8 +330,11 @@ async function publishMicrosite(runId: string, microsite: ReleasedDocuments["mic
 async function documentsLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Promise<JobOutcome> {
   const log = deps.log ?? (() => {});
   const now = () => (deps.now ?? (() => new Date()))().toISOString();
-  const input = await deps.store.loadDocumentsJob(runId);
+  // The switch gates printing as well as asking, so unsetting it is a complete off (decision 495).
+  const summariesOn = deps.apexSummaries === true;
+  const input = await deps.store.loadDocumentsJob(runId, { handbookSummaries: summariesOn });
   if (!input) return { outcome: "skipped", detail: `No run ${runId}` };
+  const { handbookSummaries, ...job } = input;
   if (input.run.product === "pulse") return { outcome: "skipped", detail: `Run ${runId} is a pulse, which never has documents` };
   if (input.run.status !== "released") return { outcome: "skipped", detail: `Run ${runId} isn't released, so it has no documents yet` };
   if (input.state !== "queued" && input.state !== "making") return { outcome: "skipped", detail: `The documents for ${runId} weren't asked for` };
@@ -359,7 +365,8 @@ async function documentsLocked(runId: string, deps: WorkerDeps, attempt: Attempt
     const benchmark = await benchmarkFor(dir, deps, log);
     const later = laterSurveyAnswers(dir, input.survey);
     if (later) log(`${later} survey answers came in after the sections were built, so the documents leave them out, as approved`);
-    const printed = await (deps.renderReleased ?? renderReleased)(dir, { ...input, benchmark }, join(dir, "documents"));
+    // The summaries are the handbook's alone: the reports are never given them.
+    const printed = await (deps.renderReleased ?? renderReleased)(dir, { ...job, benchmark }, join(dir, "documents"));
     // A figure we can't trace stops everything before Drive: nothing uploaded, shared anew, published or contributed.
     // Not thrown, so the queue doesn't retry: the same wording would fail the same way.
     if (printed.held.length > 0) {
@@ -367,7 +374,7 @@ async function documentsLocked(runId: string, deps: WorkerDeps, attempt: Attempt
       log(`Run ${runId}'s documents weren't uploaded. ${summary}`);
       return fail(heldBackReason(printed.held), summary);
     }
-    const handbook = await makeHandbook(dir, join(dir, "documents"), clientName, input.run.asOf);
+    const handbook = await makeHandbook(dir, join(dir, "documents"), clientName, input.run.asOf, summariesOn ? (handbookSummaries ?? null) : null);
     if (!handbook.ok) log(`Run ${runId}: ${handbook.warning}`);
     else if (handbook.unnamed) log(`Run ${runId}: the org handbook names no one who made a recent change, because the run's pseudonym map couldn't be read.`);
     // Fixed words: nothing from either folder, and not which check it failed, since one is that it's another org's.

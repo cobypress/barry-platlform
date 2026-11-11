@@ -10,7 +10,10 @@ import { withoutComments } from "../../survey/questions.ts";
 import { syntheticSurvey } from "../../testing/survey.ts";
 import { ReportOutput, type ReportSection, type SectionVersion } from "../../schemas/index.ts";
 import { runFromRecording } from "../../testing/harness.ts";
-import { docxText } from "../../testing/docx-text.ts";
+import { docxParagraphs, docxText } from "../../testing/docx-text.ts";
+import { strFromU8, unzipSync } from "fflate";
+import { loadPseudonymMap } from "../../render/render-run.ts";
+import type { ConsoleSummariesRow } from "../../handbook/summary-row.ts";
 import { HANDBOOK_FILE } from "../../handbook/build.ts";
 import { HANDBOOK_DOCX, NO_EARLIER, SINCE_TITLE } from "../../handbook/docx.ts";
 import { withEarlier } from "../../testing/earlier-handbook.ts";
@@ -1357,5 +1360,131 @@ describe("the org handbook", () => {
       assert.ok(sentence.length <= 200, sentence);
       assert.doesNotMatch(sentence, /^The (executive summary|full health check|one page summary)/, "never read as a layout warning's page");
     }
+  });
+});
+
+// Decision 495: the org handbook prints a summary only when a person approved
+// the row, and only one it can print as it stands, under its own class or
+// trigger. Every other case makes the document it made before summaries.
+describe("Claude's summaries in the org handbook", () => {
+  const LEFT_OUT = { tests: 0, tooLarge: 0, overLimit: 0, unreadable: 0, refused: 0, notWritten: 0 };
+  type Item = ConsoleSummariesRow["items"][number];
+  const row = (status: ConsoleSummariesRow["status"], items: Item[], leftOut = LEFT_OUT): ConsoleSummariesRow => ({
+    runId: RUN_ID,
+    status,
+    model: "claude-haiku-5-5",
+    madeAt: "2026-11-03T10:00:00.000Z",
+    items,
+    leftOut,
+    decidedBy: status === "waiting" ? null : "approver.zz@example.com",
+    decidedAt: status === "waiting" ? null : "2026-11-05T11:11:00.000Z",
+  });
+  const item = (kind: Item["kind"], name: string, summary: string, struck = false): Item => ({ kind, name, summary, struck });
+  const GOOD = item("class", "LeadRouter", "Quokka routes each new lead to the right queue.");
+  const STRUCK = item("class", "FinanceSync", "Zebrastruck copies each invoice to finance.", true);
+  const LABEL = "Summary (written by Claude, checked by us): ";
+  const INTRO = "Some classes and triggers below carry a short summary. Claude, an AI model, wrote each one from the code, and one of our consultants read and approved it before it reached you. A summary is a guide to what the code does: the code is what runs.";
+  const OPENING_BEFORE = "We haven't added to it or summarised it, except that what each piece of Apex touches is read from its code, as that part explains.";
+  const OPENING_AFTER = "We haven't added to it, except that what each piece of Apex touches is read from its code and that some classes and triggers carry a short summary written by Claude and approved by us, as that part explains.";
+
+  /** A make with the recorded handbook and the run's map; the row as the console holds it, or none. */
+  async function make(summaries: unknown, switchOn = true) {
+    const drive = new MemoryDrive();
+    const deps = setup(jobInput(), drive);
+    deps.apexSummaries = switchOn;
+    for (const file of [HANDBOOK_FILE, "pseudonym-map.json"]) cpSync(join(recorded, file), join(deps.runsDir, RUN_ID, file));
+    if (summaries !== undefined) deps.store.summaries.set(RUN_ID, summaries as ConsoleSummariesRow);
+    const result = await processDocumentsJob(RUN_ID, deps, { final: true });
+    assert.equal(result.outcome, "done", result.detail);
+    const body = [...drive.items.values()].find((i) => !i.folder && /Org handbook/.test(i.name))!.body!;
+    return { body, text: docxText(body), paragraphs: docxParagraphs(body), deps };
+  }
+
+  /**
+   * The Word file's parts, with the two times the docx package stamps on every
+   * file it makes taken out of docProps/core.xml: everything else, byte for byte.
+   */
+  const parts = (bytes: Buffer): Record<string, string> =>
+    Object.fromEntries(Object.entries(unzipSync(new Uint8Array(bytes))).map(([name, data]) => [name, name === "docProps/core.xml" ? strFromU8(data).replace(/<dcterms:(created|modified)[^>]*>[^<]*<\/dcterms:\1>/g, "") : strFromU8(data)]));
+
+  test("an approved row with two, one struck out: the other once, under its own class, labelled; the intro, the counts and the changed opening", async () => {
+    const { text, paragraphs } = await make(row("approved", [GOOD, STRUCK], { ...LEFT_OUT, tests: 2, tooLarge: 1, unreadable: 1 }));
+    assert.equal(text.split(`${LABEL}${GOOD.summary}`).length - 1, 1);
+    const own = paragraphs.filter((p) => p.text.includes(GOOD.summary));
+    assert.equal(own.length, 1);
+    assert.match(own[0]!.text, /^LeadRouter\n/);
+    assert.ok(own[0]!.text.endsWith(`\n${LABEL}${GOOD.summary}`), "after the entry's own lines");
+    assert.ok(!text.includes("Zebrastruck"));
+    // Said once, at the top of the Apex classes, then counted: the struck one with the unreadable one.
+    const at = paragraphs.findIndex((p) => p.heading === 2 && p.text === "Apex classes");
+    assert.deepEqual(paragraphs.slice(at + 1, at + 3).map((p) => p.text), [INTRO, "Of the Apex classes and triggers we read, 1 carries a summary, and the others are 2 test classes, 1 that was too large to summarise whole and 2 that we couldn't summarise or chose to leave out."]);
+    assert.equal(text.split(INTRO).length - 1, 1);
+    assert.ok(text.includes(OPENING_AFTER) && !text.includes(OPENING_BEFORE));
+    // Who approved it is never printed.
+    assert.ok(!text.includes("approver.zz") && !text.includes("11:11"));
+  });
+
+  test("no row, waiting, left out, the switch off, a row that doesn't read, or all struck: the document made without summaries, part for part", async () => {
+    const plain = await make(undefined, false);
+    const without = parts(plain.body);
+    assert.ok(plain.text.includes(OPENING_BEFORE));
+    const cases: Array<[string, unknown, boolean]> = [
+      ["no row", undefined, true],
+      ["waiting", row("waiting", [GOOD]), true],
+      ["left out", row("left_out", [GOOD]), true],
+      ["the switch off, approved", row("approved", [GOOD]), false],
+      ["a row that doesn't read", { ...row("approved", [GOOD]), items: [{ ...GOOD, struck: "no" }] }, true],
+      ["a row with a status the console doesn't have", { ...row("approved", [GOOD]), status: "done" }, true],
+      // Over the console's limit, so the whole row is unreadable, as the console reads it: the good one doesn't print either.
+      ["a row holding a 1,201-character summary", row("approved", [GOOD, item("trigger", "InvoiceAudit", `Zebra5 ${"s".repeat(1_194)}`)]), true],
+      ["approved, all struck", row("approved", [{ ...GOOD, struck: true }, STRUCK]), true],
+      ["approved, nothing printable", row("approved", [item("class", "NotInThisOrg", "Zebragone.")]), true],
+    ];
+    for (const [what, summaries, on] of cases) {
+      const made = await make(summaries, on);
+      assert.deepEqual(parts(made.body), without, what);
+      assert.ok(!made.text.includes("Quokka") && !made.text.includes(LABEL), what);
+    }
+  });
+
+  test("planted and not printed, each counted with the rest; a summary that only looks like a name prints as written", async () => {
+    const baseline = (await make(undefined, false)).text;
+    // A person the run's map knows whom the handbook doesn't otherwise name.
+    const [person, other] = loadPseudonymMap(recorded).entries().filter((e) => !baseline.includes(e.name) && /^\w+ \w+$/.test(e.name));
+    assert.ok(person && other, "the map has two people the handbook doesn't name");
+    // Another of them, by name and by their token's code without its brackets: text, not a token.
+    const LOOKS_LIKE = item("trigger", "InvoiceTrigger", `Quokkalike fills in ${other.token.slice(2, -2)} for ${other.name} as the code spells it.`);
+    // A summary over 1,200 characters can't be in a row the console reads (the case above);
+    // printableText refuses one all the same (summary-row.test.ts), and a line break stands in for it here.
+    const planted = [
+      item("class", "FinanceSync", `Zebra1 copies invoices for ${person.token} each night.`),
+      item("class", "LegacySync", "Zebra2 runs for [[user-9999]] alone."),
+      item("class", "OpportunityHandler", "Zebra3 reads the record [[id]] first."),
+      item("trigger", "AccountTrigger", "Zebra4 hands each account on.\nThen it stops."),
+      item("class", "NotInThisOrg", "Zebra6 does nothing here."),
+      item("trigger", "LeadRouter", "Zebra7 is a class, not a trigger."),
+    ];
+    const { text } = await make(row("approved", [GOOD, ...planted, LOOKS_LIKE]));
+    for (const n of [1, 2, 3, 4, 6, 7]) assert.ok(!text.includes(`Zebra${n}`), `Zebra${n}`);
+    assert.ok(!text.includes(person.name) && !text.includes(person.token), "the person's name, and their token");
+    assert.ok(!text.includes("[[user-9999]]") && !text.includes("[[id]]"));
+    assert.ok(text.includes("Of the Apex classes and triggers we read, 2 carry a summary, and the others are 6 that we couldn't summarise or chose to leave out."));
+    // Never through the run's names: printed exactly as approved.
+    assert.ok(text.includes(`${LABEL}${LOOKS_LIKE.summary}`));
+    assert.ok(text.includes(`${LABEL}${GOOD.summary}`));
+  });
+
+  test("the reports are never given the summaries", async () => {
+    const drive = new MemoryDrive();
+    const given: unknown[] = [];
+    const deps = baseDeps({ drive, renderReleased: async (dir, approved, out) => (given.push(approved), fakeRender(dir, approved, out)), apexSummaries: true });
+    mkdirSync(join(deps.runsDir, RUN_ID), { recursive: true });
+    writeFileSync(join(deps.runsDir, RUN_ID, "run.json"), "{}");
+    cpSync(join(recorded, HANDBOOK_FILE), join(deps.runsDir, RUN_ID, HANDBOOK_FILE));
+    deps.store.addDocumentsJob(jobInput());
+    deps.store.summaries.set(RUN_ID, row("approved", [GOOD]));
+    assert.equal((await processDocumentsJob(RUN_ID, deps, { final: true })).outcome, "done");
+    assert.equal(given.length, 1);
+    assert.ok(!("handbookSummaries" in (given[0] as object)) && !JSON.stringify(given[0]).includes("Quokka"));
   });
 });

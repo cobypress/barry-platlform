@@ -21,7 +21,8 @@ import {
   type SqlPool,
   type SqlResult,
 } from "../postgres-store.ts";
-import { progressOf, RunClosedError } from "../types.ts";
+import { progressOf, RunClosedError, type RunOutputRecord } from "../types.ts";
+import { MODELS } from "../../config.ts";
 import { consoleRun, INTAKE } from "./helpers.ts";
 import { SURVEY_VERSION } from "../../survey/questions.ts";
 import { limitsOf, SERVICE_DEFAULTS } from "../../domains/service/shared.ts";
@@ -585,5 +586,191 @@ describe("a database without the survey table yet", () => {
     });
     pool.handlers.push((text) => (text.includes(`FROM "HealthCheckRun" WHERE "id"`) ? { rows: [RUN_ROW as Record<string, unknown>], rowCount: 1 } : undefined));
     await assert.rejects(new PostgresWorkerStore(pool).loadRunJob(RUN_ROW.id as string), /connection reset/);
+  });
+});
+
+// Claude's summaries in the console's table (DECISIONS.md 494 and 495). Only
+// the SQL's text and the transaction's shape can be held here: what ON CONFLICT
+// … WHERE does on a real Postgres is for the first real run (QUESTIONS.md).
+
+const SUMMARIES_TABLE = "HealthCheckHandbookSummaries";
+const SUMMARIES_SQL = `INSERT INTO "HealthCheckHandbookSummaries" ("runId", "status", "model", "madeAt", "items", "leftOut", "decidedBy", "decidedAt") VALUES ($1, $2, $3, $4::timestamp(3), $5::jsonb, $6::jsonb, $7, $8::timestamp(3)) ON CONFLICT ("runId") DO UPDATE SET "model" = EXCLUDED."model", "madeAt" = EXCLUDED."madeAt", "items" = EXCLUDED."items", "leftOut" = EXCLUDED."leftOut" WHERE "HealthCheckHandbookSummaries"."status" = 'waiting'`;
+// Made up, as every fixture is.
+const SUMMARIES: NonNullable<RunOutputRecord["handbookSummaries"]> = {
+  model: MODELS.handbookSummaries,
+  madeAt: "2026-11-03T10:00:00.000Z",
+  items: [
+    { kind: "class", name: "LeadRouter", summary: "Sends each new lead to the right queue." },
+    { kind: "trigger", name: "AccountTrigger", summary: "Hands each saved account to its handler." },
+  ],
+  leftOut: { tests: 2, tooLarge: 1, overLimit: 0, unreadable: 3, refused: 1, notWritten: 4 },
+};
+
+function openRunPool(status = "extracting"): FakePool {
+  const pool = new FakePool();
+  pool.handlers.push((text) => (text.includes("FOR UPDATE") ? { rows: [{ status }], rowCount: 1 } : undefined));
+  return pool;
+}
+
+const naming = (pool: FakePool): string[] => pool.texts().filter((t) => t.includes(SUMMARIES_TABLE));
+const missingTable = () => Object.assign(new Error(`relation "${SUMMARIES_TABLE}" does not exist`), { code: "42P01" });
+
+describe("PostgresWorkerStore, Claude's summaries on save", () => {
+  const run = consoleRun();
+  const save = (store: PostgresWorkerStore, extra: Partial<RunOutputRecord> = {}) => store.saveRunOutput(run.id, { progress: progressOf(run), runDir: "/runs/x", ...EMPTY, ...extra });
+
+  test("one statement, after the facts, inside the transaction and its own savepoint: a waiting row, nobody and no time decided, nothing struck", async () => {
+    const pool = openRunPool();
+    await save(new PostgresWorkerStore(pool), { handbookSummaries: SUMMARIES });
+    const texts = pool.texts();
+    const statement = pool.statements.filter((s) => s.text.includes(SUMMARIES_TABLE));
+    assert.equal(statement.length, 1);
+    assert.equal(statement[0]!.text, SUMMARIES_SQL);
+    assert.deepEqual(statement[0]!.values, [
+      run.id,
+      "waiting",
+      MODELS.handbookSummaries,
+      "2026-11-03T10:00:00.000Z",
+      JSON.stringify(SUMMARIES.items.map((i) => ({ ...i, struck: false }))),
+      JSON.stringify({ tests: 2, tooLarge: 1, overLimit: 0, unreadable: 3, refused: 1, notWritten: 4 }),
+      null,
+      null,
+    ]);
+    const at = texts.indexOf(SUMMARIES_SQL);
+    assert.equal(texts[0], "BEGIN");
+    assert.deepEqual(texts.slice(at - 1, at + 3), ["SAVEPOINT handbook_summaries", SUMMARIES_SQL, "RELEASE SAVEPOINT handbook_summaries", "COMMIT"]);
+    assert.ok(texts.indexOf("RELEASE SAVEPOINT run_facts") < at - 1, "after the facts");
+    assert.equal(texts.filter((t) => t === "BEGIN" || t === "COMMIT").length, 2, "one transaction");
+  });
+
+  test("with no summaries in the output, no statement names the table: not a write, a delete or a read", async () => {
+    const pool = openRunPool();
+    await save(new PostgresWorkerStore(pool));
+    assert.deepEqual(naming(pool), []);
+    assert.ok(!pool.texts().some((t) => t.includes("handbook_summaries")));
+    assert.equal(pool.texts().at(-1), "COMMIT");
+  });
+
+  test("a console without the table (42P01) still gets the run's other rows, and the log says so once across two saves", async () => {
+    const pool = openRunPool();
+    pool.handlers.push((text) => {
+      if (text.includes(SUMMARIES_TABLE)) throw missingTable();
+      return undefined;
+    });
+    const lines: string[] = [];
+    const store = new PostgresWorkerStore(pool, { log: (l) => lines.push(l) });
+    await save(store, { handbookSummaries: SUMMARIES });
+    let texts = pool.texts();
+    assert.deepEqual(texts.slice(texts.indexOf("SAVEPOINT handbook_summaries")), ["SAVEPOINT handbook_summaries", SUMMARIES_SQL, "ROLLBACK TO SAVEPOINT handbook_summaries", "COMMIT"]);
+    assert.ok(texts.some((t) => t.startsWith(`INSERT INTO "HealthCheckRunFacts"`)) && texts.some((t) => t.startsWith(`UPDATE "HealthCheckRun"`)));
+    await save(store, { handbookSummaries: SUMMARIES });
+    texts = pool.texts();
+    assert.equal(texts.at(-1), "COMMIT");
+    assert.deepEqual(lines, [`The console's database has no HealthCheckHandbookSummaries table yet, so Claude's summaries are neither saved nor printed. Apply the console's migration 20261122_health_check_handbook_summaries.sql.`]);
+  });
+
+  test("any other error rolls the whole save back and is thrown: a missing run, or a check the console's table makes", async () => {
+    for (const code of ["23503", "23514"]) {
+      const pool = openRunPool();
+      pool.handlers.push((text) => {
+        if (text.includes(SUMMARIES_TABLE)) throw Object.assign(new Error(`violates constraint ${code}`), { code });
+        return undefined;
+      });
+      const lines: string[] = [];
+      await assert.rejects(save(new PostgresWorkerStore(pool, { log: (l) => lines.push(l) }), { handbookSummaries: SUMMARIES }), new RegExp(code));
+      assert.equal(pool.texts().at(-1), "ROLLBACK", code);
+      assert.ok(!pool.texts().includes("COMMIT"), code);
+      assert.ok(!pool.texts().includes("ROLLBACK TO SAVEPOINT handbook_summaries"), code);
+      assert.deepEqual(lines, [], code);
+    }
+  });
+
+  test("a run the console has closed refuses before anything, and no statement names the table", async () => {
+    for (const status of ["in_review", "released"]) {
+      const pool = openRunPool(status);
+      await assert.rejects(save(new PostgresWorkerStore(pool), { handbookSummaries: SUMMARIES }), RunClosedError);
+      assert.deepEqual(naming(pool), [], status);
+      assert.equal(pool.texts().at(-1), "ROLLBACK");
+    }
+  });
+
+  test("summaries over one of the console's limits write no row, the run saves, and the log gives a count and nothing of the text", async () => {
+    const over: Array<NonNullable<RunOutputRecord["handbookSummaries"]>> = [
+      { ...SUMMARIES, items: Array.from({ length: 251 }, (_, i) => ({ kind: "class" as const, name: `Synthetic${i}`, summary: "Quokkatext keeps it in step." })) },
+      { ...SUMMARIES, items: [{ kind: "class", name: "Q".repeat(256), summary: "Quokkatext keeps it in step." }] },
+      { ...SUMMARIES, items: [{ kind: "class", name: "LeadRouter", summary: `Quokkatext ${"s".repeat(1_190)}` }] },
+      { ...SUMMARIES, model: "m".repeat(101) },
+    ];
+    for (const handbookSummaries of over) {
+      const pool = openRunPool();
+      const lines: string[] = [];
+      await save(new PostgresWorkerStore(pool, { log: (l) => lines.push(l) }), { handbookSummaries });
+      assert.deepEqual(naming(pool), []);
+      assert.equal(pool.texts().at(-1), "COMMIT");
+      assert.equal(lines.length, 1);
+      assert.match(lines[0]!, /^Claude's summaries for run hc-2026-10-31-00000001 don't fit the console's limits \(\d+ problems?\), so they aren't saved with its results\.$/);
+    }
+  });
+});
+
+describe("PostgresWorkerStore, Claude's summaries for the documents", () => {
+  const released = (pool: FakePool, summaries?: (text: string) => SqlResult | undefined) => {
+    pool.handlers.push((text) => (text.includes(`FROM "HealthCheckRun" WHERE`) ? { rows: [{ ...RUN_ROW, status: "released" }], rowCount: 1 } : undefined));
+    if (summaries) pool.handlers.push((text) => (text.includes(SUMMARIES_TABLE) ? summaries(text) : undefined));
+  };
+  const ROW = { runId: RUN_ROW.id, status: "approved", model: MODELS.handbookSummaries, madeAt: "2026-11-03T10:00:00.000Z", items: [{ ...SUMMARIES.items[0]!, struck: false }, { ...SUMMARIES.items[1]!, struck: true }], leftOut: SUMMARIES.leftOut };
+
+  test("with the switch off, nothing reads the table", async () => {
+    for (const reads of [undefined, {}, { handbookSummaries: false }]) {
+      const pool = new FakePool();
+      released(pool, () => ({ rows: [ROW], rowCount: 1 }));
+      const job = (await new PostgresWorkerStore(pool).loadDocumentsJob(RUN_ROW.id, reads))!;
+      assert.deepEqual(naming(pool), [], JSON.stringify(reads));
+      assert.equal(job.handbookSummaries, null);
+    }
+  });
+
+  test("with it on, reads the row's status, items and counts, and never who decided it or when", async () => {
+    const pool = new FakePool();
+    released(pool, () => ({ rows: [ROW], rowCount: 1 }));
+    const job = (await new PostgresWorkerStore(pool).loadDocumentsJob(RUN_ROW.id, { handbookSummaries: true }))!;
+    assert.deepEqual(naming(pool), [`SELECT "runId", "status", "model", to_char("madeAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "madeAt", "items", "leftOut" FROM "HealthCheckHandbookSummaries" WHERE "runId" = $1`]);
+    assert.deepEqual(pool.statements.find((s) => s.text.includes(SUMMARIES_TABLE))!.values, [RUN_ROW.id]);
+    assert.deepEqual(job.handbookSummaries, { status: "approved", items: ROW.items, leftOut: ROW.leftOut });
+  });
+
+  test("no row is none; without the table it's none, said once with the save's line; a row that doesn't read is none, logged with a count only", async () => {
+    const none = new FakePool();
+    released(none, () => ({ rows: [], rowCount: 0 }));
+    assert.equal((await new PostgresWorkerStore(none).loadDocumentsJob(RUN_ROW.id, { handbookSummaries: true }))!.handbookSummaries, null);
+
+    const missing = new FakePool();
+    released(missing, () => {
+      throw missingTable();
+    });
+    const lines: string[] = [];
+    const store = new PostgresWorkerStore(missing, { log: (l) => lines.push(l) });
+    assert.equal((await store.loadDocumentsJob(RUN_ROW.id, { handbookSummaries: true }))!.handbookSummaries, null);
+    assert.equal((await store.loadDocumentsJob(RUN_ROW.id, { handbookSummaries: true }))!.handbookSummaries, null);
+    assert.equal(lines.length, 1);
+    assert.match(lines[0]!, /no HealthCheckHandbookSummaries table yet/);
+
+    for (const bad of [{ ...ROW, status: "decided" }, { ...ROW, items: [{ kind: "class", name: "LeadRouter", summary: "Quokkatext is printed here.", struck: "no" }] }, { ...ROW, decidedBy: "consultant@example.com" }]) {
+      const pool = new FakePool();
+      released(pool, () => ({ rows: [bad], rowCount: 1 }));
+      const said: string[] = [];
+      assert.equal((await new PostgresWorkerStore(pool, { log: (l) => said.push(l) }).loadDocumentsJob(RUN_ROW.id, { handbookSummaries: true }))!.handbookSummaries, null);
+      assert.equal(said.length, 1);
+      assert.match(said[0]!, /^Run hc-2026-10-31-00000001's row of Claude's summaries doesn't read as the console's \(\d+ problems?\), so the org handbook prints none\.$/);
+      assert.ok(!said[0]!.includes("Quokkatext") && !said[0]!.includes("consultant@example.com"));
+    }
+  });
+
+  test("any other error reading the row stops the load, as the other reads do", async () => {
+    const pool = new FakePool();
+    released(pool, () => {
+      throw Object.assign(new Error("connection reset"), { code: "08006" });
+    });
+    await assert.rejects(new PostgresWorkerStore(pool).loadDocumentsJob(RUN_ROW.id, { handbookSummaries: true }), /connection reset/);
   });
 });

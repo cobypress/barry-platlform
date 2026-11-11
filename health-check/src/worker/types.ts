@@ -6,6 +6,7 @@ import type { Intake } from "../narrative/intake.ts";
 import type { BenchmarkRow, Calibration, ConnectLink, Finding, ManualAnswer, ManualStep, Metric, NumberOverride, ReportSection, Run, Score, SectionVersion } from "../schemas/index.ts";
 import type { Survey } from "../survey/questions.ts";
 import type { Interview } from "../interviews/questions.ts";
+import type { StoredSummaries, SummariesToSave } from "../handbook/summary-row.ts";
 
 // What the worker takes from the queue, and what it needs from the console's
 // database. Jobs carry ids only (the contract with the console, lane C2), so
@@ -96,6 +97,12 @@ export type RunOutputRecord = {
    * or when the file names a fact we don't assume or is over the size cap.
    */
   factsFile: FactsFile | null;
+  /**
+   * Claude's summaries of the run's Apex code, for a person to approve before
+   * the org handbook prints them (DECISIONS.md 494): only with the worker's
+   * switch on and a handbook-summaries.json holding at least one. Never the code.
+   */
+  handbookSummaries?: SummariesToSave;
 };
 
 /**
@@ -155,7 +162,16 @@ export type DocumentsJobInput = {
   /** From an earlier make, so the documents go back to the same Drive folder. */
   driveFolderId: string | null;
   files: DocumentFile[];
+  /**
+   * The console's row of Claude's summaries for the run (DECISIONS.md 495): its
+   * status, items and counts, never who decided it. Null with the worker's
+   * switch off, with no row, or with one that doesn't read.
+   */
+  handbookSummaries?: StoredSummaries | null;
 };
+
+/** What a documents job asks the store to read beyond the run: the summaries only with the worker's switch on. */
+export type DocumentsJobReads = { handbookSummaries?: boolean };
 
 export type DocumentsMade = {
   at: string;
@@ -232,7 +248,8 @@ export interface WorkerStore {
   /** Moves a pending link to refused with a reason the console can show, and clears its sealed secrets. Never a token. */
   refuseLink(linkId: string, reason: string, at: string): Promise<void>;
 
-  loadDocumentsJob(runId: string): Promise<DocumentsJobInput | null>;
+  /** With `handbookSummaries` unset or false, nothing reads the summaries' table. */
+  loadDocumentsJob(runId: string, reads?: DocumentsJobReads): Promise<DocumentsJobInput | null>;
   /** Moves queued (or making, on a second delivery) to making. False if the console hasn't asked, so there's nothing to do. */
   startDocuments(runId: string, at: string): Promise<boolean>;
   saveDocuments(runId: string, made: DocumentsMade): Promise<void>;
