@@ -83,11 +83,24 @@ const listed = (items: readonly string[]): string => (items.length <= 1 ? (items
  * When the wider retrieve failed and only the four standard objects were read
  * (DECISIONS.md 425): which objects' rules weren't read, and Salesforce's reason.
  * Null when there was no fallback, so those notes print as they always have.
+ * This markdown stays in the run folder; the Word version goes to the customer
+ * and uses retrieveFallbackForCustomer, which leaves the reason out.
  */
 export function retrieveFallbackLine(run: Pick<Run, "retrieveFallback">): string | null {
   const fallback = run.retrieveFallback;
   if (!fallback) return null;
   return `Validation rules on ${listed(fallback.named)} weren't read: the wider retrieve failed (${fallback.reason}), so the engine read the four standard objects it always names, ${listed(RETRIEVED_STANDARD_OBJECTS)}.`;
+}
+
+/**
+ * The same fact for the Word raw notes, which go to the customer's folder: what
+ * wasn't covered, without Salesforce's error text, which is unreviewed and of no
+ * use to them (DECISIONS.md 425). Null when there was no fallback.
+ */
+export function retrieveFallbackForCustomer(run: Pick<Run, "retrieveFallback">): string | null {
+  const fallback = run.retrieveFallback;
+  if (!fallback) return null;
+  return `We didn't read the validation rules on ${listed(fallback.named)}: Salesforce refused the wider read, so the validation rules we checked are those on your custom objects and ${listed(RETRIEVED_STANDARD_OBJECTS)}.`;
 }
 
 function metricBlock(m: Metric): string {

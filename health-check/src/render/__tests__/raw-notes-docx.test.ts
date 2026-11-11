@@ -12,6 +12,7 @@ import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
 import { plainWords, ukDates } from "../format.ts";
 import { renderRawNotesDocx } from "../raw-notes-docx.ts";
 import { renderRawNotes } from "../../notes/raw-notes.ts";
+import { docxText } from "../../testing/docx-text.ts";
 
 const { output, run, dir } = await runFromRecording({ answers: loadAnswers() });
 const pseudonyms = new Pseudonymiser(JSON.parse(readFileSync(join(dir, "pseudonym-map.json"), "utf8")) as PseudonymEntry[]);
@@ -189,8 +190,11 @@ describe("how you compare, in the full report", async () => {
 
 // The wider retrieve failed and only the four standard objects were read (DECISIONS.md 425).
 describe("a retrieve that fell back to the four standard objects, in the raw notes", () => {
-  const fellBack: ReportInput = { ...base, run: { ...run, retrieveFallback: { named: ["Case", "Quote"], reason: "X" } } };
-  const SAID = /Validation rules on Case and Quote weren't read: the wider retrieve failed \(X\), so the engine read the four standard objects it always names, Account, Contact, Lead and Opportunity\./;
+  // A reason no other text in the notes could hold, so its absence means something.
+  const REASON = "UNKNOWN_EXCEPTION: zqx-retrieve-refused-7731";
+  const fellBack: ReportInput = { ...base, run: { ...run, retrieveFallback: { named: ["Case", "Quote"], reason: REASON } } };
+  const SAID = /Validation rules on Case and Quote weren't read: the wider retrieve failed \(UNKNOWN_EXCEPTION: zqx-retrieve-refused-7731\), so the engine read the four standard objects it always names, Account, Contact, Lead and Opportunity\./;
+  const TOLD = "We didn't read the validation rules on Case and Quote: Salesforce refused the wider read, so the validation rules we checked are those on your custom objects and Account, Contact, Lead and Opportunity.";
   const markdown = (input: ReportInput): string => renderRawNotes({ ...input, pseudonyms });
 
   test("names the objects and Salesforce's reason in the markdown, under what we couldn't measure", () => {
@@ -201,12 +205,14 @@ describe("a retrieve that fell back to the four standard objects, in the raw not
     assert.ok(notes.indexOf("## Checks passed") > at, "before the checks passed");
   });
 
-  test("and in the Word version, with the exclusions and limits", async () => {
-    const { text } = await render(fellBack);
-    assert.match(text, /Case and Quote weren't read/);
-    assert.match(text, /\(X\)/);
+  test("and in the Word version, which goes to the customer, names the objects with the exclusions and limits but not Salesforce's reason", async () => {
+    const { bytes, text } = await render(fellBack);
+    assert.ok(text.includes(TOLD), "the customer's sentence");
+    for (const part of [REASON, "zqx-retrieve-refused-7731", "UNKNOWN_EXCEPTION", "wider retrieve"]) assert.ok(!text.includes(part), `no error text: ${part}`);
+    assert.ok(!docxText(bytes).includes("zqx-retrieve-refused-7731"), "nor anywhere in the document's paragraphs");
+    assert.ok(!strFromU8(unzipSync(new Uint8Array(bytes))["word/document.xml"]!).includes("zqx-retrieve-refused-7731"), "nor in its XML");
     // The section titles are in the contents first, so it's their last place that counts.
-    const at = text.search(/Case and Quote weren't read/);
+    const at = text.indexOf(TOLD);
     assert.ok(text.lastIndexOf("Exclusions and limits", at) > text.lastIndexOf("Queries", at), "in the exclusions and limits");
     assert.ok(text.indexOf("Overrides", at) > at, "before the overrides");
   });
@@ -214,6 +220,7 @@ describe("a retrieve that fell back to the four standard objects, in the raw not
   test("a run with no fallback says nothing of it, in either", async () => {
     assert.equal(run.retrieveFallback, undefined);
     assert.doesNotMatch(markdown(base), /wider retrieve/);
-    assert.doesNotMatch(notes.text, /wider retrieve/);
+    assert.doesNotMatch(notes.text, /wider retrieve|wider read/);
   });
 });
+
