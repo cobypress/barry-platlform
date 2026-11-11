@@ -23,11 +23,11 @@ import type { Handbook } from "../schema.ts";
 
 const PINS = {
   metadata: { reading: 1, hash: "78228ad58aa193a2" },
-  apex: { reading: 1, hash: "5aea97b5794f637b" },
+  apex: { reading: 1, hash: "70dc66b571d6a373" },
 };
 
 const fix = (half: keyof typeof PINS, route: string, hash: string): string =>
-  `The ${half} reading of the synthetic org moved on the ${route} route (hash ${hash}). If how we read changed, raise ${half === "metadata" ? "METADATA_READING in src/handbook/detail.ts" : "APEX_READING in src/extract/apex-touches.ts, or BUILD_READING in src/handbook/build.ts if only a trigger's events moved,"} and update this pin's number and hash; if only the synthetic org changed, update the hash alone.`;
+  `The ${half} reading of the synthetic org moved on the ${route} route (hash ${hash}). If how we read changed, raise ${half === "metadata" ? "METADATA_READING in src/handbook/detail.ts" : "APEX_READING in src/extract/apex-touches.ts, or BUILD_READING in src/handbook/build.ts if only a trigger's events or object moved,"} and update this pin's number and hash; if only the synthetic org changed, update the hash alone.`;
 
 const hashOf = (value: unknown): string => createHash("sha256").update(JSON.stringify(value)).digest("hex").slice(0, 16);
 
@@ -38,12 +38,16 @@ function metadataDetail(h: Handbook): unknown {
   return { flows: h.flows.items.map(undated), validationRules: h.validationRules.items.map(undated) };
 }
 
-/** What the code tells of each class and trigger: whether it's a test, what it touches, and a trigger's events. */
+/**
+ * What the code tells of each class and trigger: whether it's a test, what it
+ * touches, and a trigger's events and the object it's on, which the build
+ * names from the custom objects step (decision 486).
+ */
 function apexDetail(h: Handbook): unknown {
   if (h.apexClasses.status !== "ok" || h.apexTriggers.status !== "ok") return assert.fail("the synthetic org's Apex was read");
   return {
     classes: h.apexClasses.items.map((c) => [c.name, c.isTest, c.touches]),
-    triggers: h.apexTriggers.items.map((t) => [t.name, t.isTest, t.touches, t.events]),
+    triggers: h.apexTriggers.items.map((t) => [t.name, t.isTest, t.touches, t.events, t.object]),
   };
 }
 
