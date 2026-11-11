@@ -605,7 +605,9 @@ describe("the progress page at its fullest with the engine's own titles, and pas
     const [first, next] = slides as [ListSlide, ListSlide];
     // No item on the continued slide without its label above it.
     for (const col of next.columns) if (col.items.length) assert.equal(col.first, "H3", JSON.stringify(col));
+    // Labels only over what was carried: a column's empty shell gains none.
     assert.deepEqual(next.columns.filter((c) => c.items.length).map((c) => c.label), split.map((i) => `${built.columns[i]!.label}, continued`));
+    assert.deepEqual(next.columns.flatMap((c) => (c.label ? [c.label] : [])), split.map((i) => `${built.columns[i]!.label}, continued`));
     for (const col of built.columns) {
       const stays = first.columns.find((c) => c.label === col.label)!;
       const goes = next.columns.find((c) => c.label === `${col.label}, continued`);
