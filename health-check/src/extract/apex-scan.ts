@@ -32,8 +32,9 @@ export const DML = /(?<=(?:^|[;{})]|\belse)\s*)\b(insert|update|upsert|delete|un
 export const DATABASE_DML = /\bDatabase\s*\.\s*(insert|update|upsert|delete|undelete|merge|convertLead)\s*\(/gi;
 const SOQL = /\[\s*SELECT\b/gi;
 // Every Database method that runs a query string, WithBinds forms and cursors
-// included. What a class touches (apex-touches.ts) reads the same set, so a loop
-// the handbook marks is one this counts (DECISIONS.md 470).
+// included. What a class touches (apex-touches.ts) reads the same set, so a
+// query built at run time that it marks, inside a loop, is one this counts
+// (DECISIONS.md 470).
 export const DATABASE_QUERY_METHOD = String.raw`Database\s*\.\s*(?:query|countQuery|getQueryLocator|getCursor)\w*`;
 const DATABASE_QUERY = new RegExp(String.raw`\b${DATABASE_QUERY_METHOD}\s*\(`, "gi");
 
