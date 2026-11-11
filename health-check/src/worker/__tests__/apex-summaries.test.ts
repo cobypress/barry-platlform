@@ -119,6 +119,29 @@ describe("summaries and a run stopped or failed part way", () => {
   });
 });
 
+describe("the switch on with no Claude to ask", () => {
+  test("a full run keeps no code at any request to Salesforce nor at the end", async () => {
+    let dir = "";
+    let looked = 0;
+    const seen: number[] = [];
+    const replay = new ReplayTransport(fiveRecording());
+    const watching: Transport = { send: (request) => (looked++, dir && has(dir, APEX_SOURCE_FILE) && seen.push(looked), replay.send(request)) };
+    const run = await setup({ dataTransport: watching, apexSummaries: true });
+    dir = run.dir;
+    assert.equal((await run.handle(job, once)).outcome, "done");
+    assert.ok(looked > 10);
+    assert.deepEqual(seen, []);
+    assert.ok(!has(dir, APEX_SOURCE_FILE) && !has(dir, SUMMARIES_FILE) && !has(dir, SUMMARIES_PARTIAL_FILE));
+  });
+
+  test("a budget stop after the Apex step leaves none", async () => {
+    const { handle, dir } = await setup({ dataTransport: new AfterApex(new ReplayTransport(fiveRecording()), "budget"), apexSummaries: true });
+    assert.equal((await handle(job, once)).outcome, "stopped_budget");
+    assert.ok(has(dir, "checkpoints/apex.json"), "the Apex step finished");
+    assert.ok(!has(dir, APEX_SOURCE_FILE));
+  });
+});
+
 describe("a job delivered again", () => {
   /**
    * A single delivery, with the run folder copied as a crash would have left it

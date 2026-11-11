@@ -100,7 +100,13 @@ export async function workerCommand(
   if (!config.drive) log("Google Drive isn't set up, so released runs' documents can't be made.");
   if (!config.micrositeKey) log("HC_MICROSITE_KEY isn't set, so released runs get documents but no customer microsite.");
   // Said at every start, so a deploy that turns it on or off shows in the log.
-  log(config.apexSummaries ? `Claude summarises each health check's Apex classes and triggers${narrative ? "" : ", once Claude is set up"}.` : "Claude doesn't summarise Apex code: the switch is off.");
+  log(
+    !config.apexSummaries
+      ? "Claude's summaries of Apex code are off: the switch isn't on."
+      : narrative
+        ? "Claude's summaries of Apex code are on: each health check keeps its Apex code until Claude has summarised it."
+        : "Claude's summaries of Apex code are switched on, but Claude isn't set up, so no code is kept and nothing is asked.",
+  );
   log(
     config.claude.kind === "key"
       ? "Claude drafts each run's report sections, signed in with ANTHROPIC_API_KEY."

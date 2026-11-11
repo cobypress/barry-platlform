@@ -125,8 +125,9 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
   const modules = modulesForRun(input.run.modules, deps.modules ?? ALL_MODULES);
   const provider = new OAuthConnectionProvider(name, { store: deps.tokens, client: deps.oauthClient, transport: deps.oauthTransport, env: approvedFromConsole(name) });
   const secrets = [stored.accessToken, stored.refreshToken];
-  // A health check or essentials run only: a scan and a pulse never keep code (DECISIONS.md 492).
-  const apexSummaries = deps.apexSummaries === true && input.run.product === "barometer";
+  // A health check or essentials run only, with Claude to ask: a scan and a
+  // pulse never keep code, and nor does a worker that can't send it anywhere (DECISIONS.md 492).
+  const apexSummaries = deps.apexSummaries === true && deps.narrative !== undefined && input.run.product === "barometer";
 
   let result: Awaited<ReturnType<typeof runHealthCheck>>;
   try {
