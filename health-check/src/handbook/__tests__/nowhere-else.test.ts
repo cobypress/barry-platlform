@@ -280,7 +280,7 @@ describe("the documents job: handbook.json reaches the Word document and nothing
   const SINCE_NOWHERE = "HB-SINCE-NOWHERE-0483";
   /** In the Word document and nowhere else the make leaves. */
   const PLANTED = [LITERAL, HANDBOOK_MARKER, HANDBOOK_CASE_MARKER, CLASS_OBJECT, TRIGGER_OBJECT, CHANGES_MARKER, CHANGES_DELEGATE, SINCE_MARKER];
-  const uploads: Array<{ parent: string; name: string; body: Buffer }> = [];
+  const uploads: Array<{ parent: string; name: string; body: Buffer; item: DriveItem }> = [];
   let deps: ReturnType<typeof baseDeps>;
   let outcome: Awaited<ReturnType<typeof processDocumentsJob>>;
   let dir: string;
@@ -319,8 +319,9 @@ describe("the documents job: handbook.json reaches the Word document and nothing
       return this.#add(parent, name, true);
     }
     async putFile(parent: string, name: string, _mime: string, body: Buffer, replaceId?: string) {
-      uploads.push({ parent, name, body });
-      return replaceId ? this.#items.find((i) => i.id === replaceId)! : this.#add(parent, name, false);
+      const item = replaceId ? this.#items.find((i) => i.id === replaceId)! : this.#add(parent, name, false);
+      uploads.push({ parent, name, body, item });
+      return item;
     }
     async moveFile() {}
   }
@@ -415,7 +416,14 @@ describe("the documents job: handbook.json reaches the Word document and nothing
 
   test("nor the store's record, its warnings, the log or the queue's outcome", () => {
     const made = deps.store.documents.get(RUN_ID)!.made!;
-    assert.ok(made.files.length === 6 && !made.files.some((f) => /handbook/i.test(f.name)));
+    // Listed last since decision 477, by Drive's name, id and link for the file and nothing else of it.
+    assert.equal(made.files.length, 7);
+    assert.ok(!made.files.slice(0, 6).some((f) => /handbook/i.test(f.name)));
+    const listed = made.files[6]!;
+    const kept = uploads.filter((u) => u.name.endsWith(" - Org handbook.docx"));
+    assert.equal(kept.length, 1);
+    assert.deepEqual(Object.keys(listed).sort(), ["driveFileId", "name", "output", "url"]);
+    assert.deepEqual(listed, { output: "org_handbook", name: kept[0]!.item.name, driveFileId: kept[0]!.item.id, url: kept[0]!.item.url });
     const store = { documents: [...deps.store.documents.values()], writes: deps.store.writes, runs: [...deps.store.runs.values()], shares: deps.store.shares, microsites: [...deps.store.microsites.values()], benchmark: deps.store.benchmarkRows };
     for (const [where, text] of [["store", JSON.stringify(store)], ["warnings", JSON.stringify(made.warnings)], ["log", deps.lines.join("\n")], ["outcome", JSON.stringify(outcome)]] as const) {
       for (const planted of [...PLANTED, SINCE_FLOW, SINCE_NOWHERE, "Planted_Rule", "Opportunity_Stage_Review", "PlantedLedgerSync", "PlantedLedgerTrigger", APEX_OUTSIDE_MODIFIER.name, COMPONENT_OUTSIDE_MODIFIER.name]) assert.ok(!text.includes(planted), `${planted} in the ${where}`);
@@ -494,7 +502,8 @@ describe("what reads it", () => {
     ["src/handbook/compare.ts", "sets a re-check's file beside its earlier health check's, for the Word document alone, keeping nothing (DECISIONS.md 483)"],
     ["src/testing/earlier-handbook.ts", "makes up a synthetic earlier health check beside a synthetic run, for the tests and the sample"],
     ["src/handbook/sample.ts", "writes the synthetic org's document outside the repo, for a person to read"],
-    ["src/worker/documents-job.ts", "puts the Word document in the customer's Drive folder, and lists it nowhere"],
+    ["src/worker/documents-job.ts", "puts the Word document in the customer's Drive folder, and lists only its name, id and link to the console (DECISIONS.md 477)"],
+    ["src/worker/types.ts", "names the kind the console is told of, org_handbook, and reads no file (DECISIONS.md 477)"],
     ["src/extract/metadata-parse.ts", "keeps the detail on the retrieve route"],
     ["src/extract/metadata-tooling.ts", "keeps the detail on the Tooling route"],
     ["src/engine/run.ts", "writes handbook.json"],

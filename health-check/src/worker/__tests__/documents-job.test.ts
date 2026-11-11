@@ -8,7 +8,7 @@ import { approvedReport, heldFigures, isPlainFigure, layoutWarnings, renderRelea
 import { loadRun, SURVEY_FILE } from "../../render/render-run.ts";
 import { withoutComments } from "../../survey/questions.ts";
 import { syntheticSurvey } from "../../testing/survey.ts";
-import type { ReportSection, SectionVersion } from "../../schemas/index.ts";
+import { ReportOutput, type ReportSection, type SectionVersion } from "../../schemas/index.ts";
 import { runFromRecording } from "../../testing/harness.ts";
 import { docxText } from "../../testing/docx-text.ts";
 import { HANDBOOK_FILE } from "../../handbook/build.ts";
@@ -20,7 +20,7 @@ import { loadAnswers } from "../../testing/replay.ts";
 import { clientNameOf, folderFor, heldBackReason, heldBackSummary, INTERNAL_FOLDER, laterSurveyAnswers, processDocumentsJob } from "../documents-job.ts";
 import { DriveError, GoogleDrive, type DocumentDrive, type DriveItem } from "../drive.ts";
 import { z } from "zod";
-import type { DocumentsJobInput } from "../types.ts";
+import type { DocumentFile, DocumentsJobInput } from "../types.ts";
 import { baseDeps, consoleRun, INTAKE, RUN_ID, temp } from "./helpers.ts";
 
 // The synthetic org's run folder, recorded once, stands in for one on the worker's disk.
@@ -537,6 +537,16 @@ describe("GoogleDrive", () => {
     assert.equal((calls[1]!.init.headers as Record<string, string>)["X-Upload-Content-Length"], "5");
   });
 
+  test("an upload whose answer has no link comes back with none: the documents job checks the handbook's before listing it", async () => {
+    const session = "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&upload_id=synthetic";
+    const { impl } = fakeFetch([
+      (url, init) => (url.startsWith("https://www.googleapis.com/upload/drive/v3/files?") && init.method === "POST" ? new Response(null, { status: 200, headers: { location: session } }) : undefined),
+      (url, init) => (url === session && init.method === "PUT" ? Response.json({ id: "file-0000000002", name: "Synthetic Co - Org handbook.docx" }) : undefined),
+    ]);
+    const item = await new GoogleDrive(config, impl).putFile("folder-0000000001", "Synthetic Co - Org handbook.docx", "application/octet-stream", Buffer.from("bytes"));
+    assert.deepEqual([item.id, item.url], ["file-0000000002", undefined]);
+  });
+
   test("moves a file between folders in one request, keeping its id", async () => {
     const { impl, calls } = fakeFetch([(url, init) => (url.startsWith("https://www.googleapis.com/drive/v3/files/file-0000000001?") && init.method === "PATCH" ? Response.json({ id: "file-0000000001" }) : undefined)]);
     await new GoogleDrive(config, impl).moveFile("file-0000000001", "folder-0000000001", "folder-0000000002");
@@ -818,9 +828,20 @@ describe("the org handbook", () => {
   }
   const handbooks = (drive: MemoryDrive) => [...drive.items.values()].filter((i) => !i.folder && /Org handbook/.test(i.name));
 
-  test("goes in the customer's folder, as a Word file named for the client, and the console isn't told of it", async () => {
+  test("goes in the customer's folder, as a Word file named for the client, and the console is told of it last, as Drive returned it", async () => {
     const drive = new MemoryDrive();
     const deps = withHandbook(jobInput(), drive);
+    // What Drive returned for the upload, as its own copy, with a name and link
+    // of Drive's choosing: the entry must be these, not what the job asked for.
+    const put = drive.putFile.bind(drive);
+    let returned: DriveItem | undefined;
+    drive.putFile = async (...args) => {
+      const item = await put(...args);
+      if (args[1] !== NAME) return item;
+      const copy = { ...item, name: `${NAME} as Drive keeps it`, url: `https://drive.example.com/open?id=${item.id}` };
+      returned = copy;
+      return copy;
+    };
     const result = await processDocumentsJob(RUN_ID, deps, { final: true });
     assert.equal(result.outcome, "done", result.detail);
     const made = deps.store.documents.get(RUN_ID)!.made!;
@@ -832,10 +853,12 @@ describe("the org handbook", () => {
     assert.ok(docxText(handbook!.body!).includes(HANDBOOK_MARKER));
     // Shared with the rest: it's in the folder the share job gives readers (share-job.ts, input.folderId).
     assert.equal(drive.items.get(handbook!.id)!.parent, made.driveFolderId);
-    // Not in the record, nor its warnings: the console's DocumentOutput doesn't know the kind (DECISIONS.md 443).
-    assert.deepEqual(made.files.map((f) => f.name).sort(), SIX);
-    assert.deepEqual(made.files.map((f) => f.output).sort(), ["action_lists", "ceo_one_pager", "executive_summary", "full_health_check", "raw_notes", "tickets"]);
-    assert.ok(!made.files.some((f) => f.driveFileId === handbook!.id));
+    // In the record after the six, now the console knows the kind (DECISIONS.md 477): Drive's name, id and link, and nothing else.
+    assert.equal(made.files.length, 7);
+    assert.deepEqual(made.files.slice(0, 6).map((f) => f.name).sort(), SIX);
+    assert.deepEqual(made.files.slice(0, 6).map((f) => f.output).sort(), ["action_lists", "ceo_one_pager", "executive_summary", "full_health_check", "raw_notes", "tickets"]);
+    assert.deepEqual(made.files[6], { output: "org_handbook", name: returned!.name, driveFileId: returned!.id, url: returned!.url });
+    assert.equal(returned!.id, handbook!.id);
     assert.deepEqual(made.warnings, [OVERFLOW]);
     assert.match(result.detail!, /the org handbook in Health check 1/);
     // Printed on the worker's disk beside the other documents, for its user only.
@@ -876,18 +899,67 @@ describe("the org handbook", () => {
     await processDocumentsJob(RUN_ID, deps, { final: true });
     const doc = deps.store.documents.get(RUN_ID)!;
     const first = handbooks(drive)[0]!;
+    const listed = doc.made!.files.at(-1)!;
+    assert.deepEqual(listed, { output: "org_handbook", name: NAME, driveFileId: first.id, url: first.url });
     for (let make = 2; make <= 3; make++) {
+      // The record from the last make, handbook entry and all, as the console's row holds it.
       doc.input = { ...doc.input, state: "queued", driveFolderId: doc.made!.driveFolderId, files: doc.made!.files };
+      assert.equal(doc.input.files.length, 7);
       assert.equal((await processDocumentsJob(RUN_ID, deps, { final: true })).outcome, "done");
       const all = handbooks(drive);
       assert.equal(all.length, 1, `make ${make}`);
       assert.equal(all[0]!.id, first.id);
       assert.equal(all[0]!.uploads, make);
       assert.equal(drive.path(all[0]!.id), `Synthetic Co / Health check 1 / ${NAME}`);
+      // Listed again, last, with the same id and link as the first make's.
+      assert.equal(doc.made!.files.length, 7, `make ${make}`);
+      assert.deepEqual(doc.made!.files.at(-1), listed, `make ${make}`);
     }
     // The reports moved into their versions as before, and the handbook is the one thing left beside them.
     assert.deepEqual((await drive.files(doc.made!.driveFolderId)).map((f) => f.name), [NAME]);
     assert.deepEqual((await drive.folders(doc.made!.driveFolderId)).map((f) => f.name.split(",")[0]).sort(), ["Version 1", "Version 2", "Version 3"]);
+  });
+
+  test("made again, the version folders are the ones made before it was listed: its entry moves nothing and decides nothing", async () => {
+    /** Everything under the run's folder: each path, with its id, and for a file how many times it was uploaded. */
+    const tree = (drive: MemoryDrive, folderId: string): string[] => {
+      const under = `${drive.path(folderId)} / `;
+      return [...drive.items.values()].filter((i) => drive.path(i.id).startsWith(under)).map((i) => `${drive.path(i.id)} [${i.id}${i.folder ? "" : `, uploaded ${i.uploads}`}]`).sort();
+    };
+    // The same three makes twice: from the record as it is now, and from the
+    // record without the handbook's entry, as every make before decision 477 left it.
+    async function threeMakes(withEntry: boolean) {
+      const drive = new MemoryDrive();
+      const deps = withHandbook(jobInput(), drive);
+      assert.equal((await processDocumentsJob(RUN_ID, deps, { final: true })).outcome, "done");
+      const doc = deps.store.documents.get(RUN_ID)!;
+      for (let make = 2; make <= 3; make++) {
+        const files = withEntry ? doc.made!.files : doc.made!.files.filter((f) => f.output !== "org_handbook");
+        assert.equal(files.length, withEntry ? 7 : 6);
+        doc.input = { ...doc.input, state: "queued", driveFolderId: doc.made!.driveFolderId, files };
+        assert.equal((await processDocumentsJob(RUN_ID, deps, { final: true })).outcome, "done");
+      }
+      return tree(drive, doc.made!.driveFolderId);
+    }
+    const listed = await threeMakes(true);
+    assert.deepEqual(listed, await threeMakes(false));
+    // Which is: the handbook alone beside the versions, the same file uploaded
+    // three times; the first make's six moved into Version 1 with their ids; a
+    // new six in each later version, each uploaded once.
+    const H = "Synthetic Co / Health check 1";
+    const six = (version: string, ids: number[]) => [
+      `${H} / ${version} [drive-item-${String(ids[0]).padStart(4, "0")}]`,
+      ...["Executive summary.pdf", "Full health check.pdf", "Raw notes.docx", "One page summary.pdf", "Action lists.xlsx", "Tickets.csv"].map((name, i) => `${H} / ${version} / Synthetic Co - ${name} [drive-item-${String(ids[i + 1]).padStart(4, "0")}, uploaded 1]`),
+    ];
+    assert.deepEqual(
+      listed,
+      [
+        `${H} / ${NAME} [drive-item-0009, uploaded 3]`,
+        ...six("Version 1, 4 Nov 2026", [13, 3, 4, 5, 6, 7, 8]),
+        ...six("Version 2, 31 Oct 2026", [14, 15, 16, 17, 18, 19, 20]),
+        ...six("Version 3, 31 Oct 2026", [21, 22, 23, 24, 25, 26, 27]),
+      ].sort(),
+    );
   });
 
   /** Makes the documents again, as the console asks for a remake, under the client's name now. */
@@ -993,10 +1065,13 @@ describe("the org handbook", () => {
     const result = await processDocumentsJob(RUN_ID, deps, { final: true });
     assert.equal(result.outcome, "done", result.detail);
     const made = deps.store.documents.get(RUN_ID)!.made!;
+    assert.equal(made.files.length, 6);
     assert.deepEqual(made.files.map((f) => f.name).sort(), SIX);
+    assert.ok(!made.files.some((f) => f.output === "org_handbook"));
     assert.deepEqual((await drive.files(made.driveFolderId)).map((f) => f.name).sort(), SIX);
     assert.deepEqual(handbooks(drive), []);
     assert.deepEqual(made.warnings, [OVERFLOW, HANDBOOK_NOT_MADE.missing]);
+    assert.ok((Object.values(HANDBOOK_NOT_MADE) as string[]).includes(made.warnings.at(-1)!), "one of the four sentences in read.ts");
     assert.doesNotMatch(result.detail!, /handbook/);
     assert.ok(deps.lines.includes(`Run ${RUN_ID}: ${HANDBOOK_NOT_MADE.missing}`), deps.lines.join("\n"));
   });
@@ -1008,6 +1083,7 @@ describe("the org handbook", () => {
       const result = await processDocumentsJob(RUN_ID, deps, { final: true });
       assert.equal(result.outcome, "done", result.detail);
       const made = deps.store.documents.get(RUN_ID)!.made!;
+      assert.equal(made.files.length, 6);
       assert.deepEqual(made.files.map((f) => f.name).sort(), SIX);
       assert.deepEqual(handbooks(drive), []);
       assert.deepEqual(made.warnings, [OVERFLOW, HANDBOOK_NOT_MADE.format]);
@@ -1025,6 +1101,7 @@ describe("the org handbook", () => {
     const result = await processDocumentsJob(RUN_ID, deps, { final: true });
     assert.equal(result.outcome, "done", result.detail);
     const made = deps.store.documents.get(RUN_ID)!.made!;
+    assert.equal(made.files.length, 6);
     assert.deepEqual(made.files.map((f) => f.name).sort(), SIX);
     assert.deepEqual((await drive.files(made.driveFolderId)).map((f) => f.name).sort(), SIX);
     assert.deepEqual(handbooks(drive), []);
@@ -1065,6 +1142,25 @@ describe("the org handbook", () => {
     drive.putFile = put;
     assert.equal((await processDocumentsJob(RUN_ID, deps, { final: true })).outcome, "done");
     assert.equal(handbooks(drive).length, 1);
+    // The retry lists it, as a first make would.
+    const files = deps.store.documents.get(RUN_ID)!.made!.files;
+    assert.deepEqual([files.length, files.at(-1)!.output, files.at(-1)!.driveFileId], [7, "org_handbook", handbooks(drive)[0]!.id]);
+  });
+
+  test("Drive refusing the handbook on the last try fails the make, recording nothing as made", async () => {
+    const drive = new MemoryDrive();
+    const deps = withHandbook(jobInput(), drive);
+    const put = drive.putFile.bind(drive);
+    drive.putFile = async (...args) => {
+      if (args[1] === NAME) throw new DriveError("Google Drive refused a request (503): backend error");
+      return put(...args);
+    };
+    const result = await processDocumentsJob(RUN_ID, deps, { final: true });
+    assert.equal(result.outcome, "failed");
+    const doc = deps.store.documents.get(RUN_ID)!;
+    assert.equal(doc.made, null);
+    assert.equal(doc.error, "The documents couldn't be made: Google Drive refused a request (503): backend error");
+    assert.deepEqual(doc.input.files, [], "the console's row keeps the list it had");
   });
 
   test("a complete run and an essentials run both get it", async () => {
@@ -1073,7 +1169,9 @@ describe("the org handbook", () => {
       const deps = withHandbook(jobInput({ run: consoleRun({ status: "released", customerRef: "SYN-0001", scope }) }), drive);
       assert.equal((await processDocumentsJob(RUN_ID, deps, { final: true })).outcome, "done", scope);
       assert.equal(handbooks(drive).length, 1, scope);
-      assert.equal(deps.store.documents.get(RUN_ID)!.made!.files.length, 6, scope);
+      const files = deps.store.documents.get(RUN_ID)!.made!.files;
+      assert.equal(files.length, 7, scope);
+      assert.deepEqual([files.at(-1)!.output, files.at(-1)!.driveFileId], ["org_handbook", handbooks(drive)[0]!.id], scope);
     }
   });
 
@@ -1158,6 +1256,80 @@ describe("the org handbook", () => {
       assert.deepEqual([all.length, all[0]!.id, all[0]!.uploads], [1, first.id, 2]);
       assert.equal(partOf(all[0]!.body!), `## ${SINCE_TITLE}\n\n${NO_EARLIER}\n`);
       assert.deepEqual(readFileSync(join(deps.runsDir, RUN_ID, "documents", HANDBOOK_DOCX)), all[0]!.body);
+    });
+  });
+
+  describe("every entry the job lists fits what the console reads (decision 477)", () => {
+    // The console's DocumentFile, word for word (blackcloud-next, read-only here,
+    // lib/health-check/schemas.ts:118-127 on origin/main). Its documentsFromRow
+    // parses the whole row, so one entry it can't read hides the other six too.
+    const DocumentOutput = z.enum([...ReportOutput.options, "ceo_one_pager", "action_lists", "tickets", "org_handbook"]);
+    const ConsoleFile = z.object({ output: DocumentOutput, name: z.string().min(1), driveFileId: z.string().min(1), url: z.url() });
+    const SEVEN = ["action_lists", "ceo_one_pager", "executive_summary", "full_health_check", "org_handbook", "raw_notes", "tickets"];
+
+    function fits(files: DocumentFile[], what: string) {
+      assert.ok(z.array(ConsoleFile).safeParse(files).success, what);
+      for (const f of files) {
+        assert.deepEqual(Object.keys(f).sort(), ["driveFileId", "name", "output", "url"], what);
+        assert.ok(typeof f.name === "string" && f.name.length > 0, what);
+        assert.ok(typeof f.driveFileId === "string" && f.driveFileId.length > 0, what);
+        assert.ok(SEVEN.includes(f.output), `${what}: ${f.output}`);
+        // Stricter than z.url(), which takes any scheme: a link a consultant can open.
+        assert.match(new URL(f.url).protocol, /^https?:$/, what);
+      }
+    }
+
+    // What limits the client's name in a file's: the intake's customerName is
+    // at least one character (src/narrative/intake.ts), and clientNameOf
+    // collapses its spaces, trims it and keeps 120 characters, else "Unnamed client".
+    const NAMES: Array<[string, Partial<DocumentsJobInput>]> = [
+      ["one character", { intake: { ...INTAKE, customerName: "X" } }],
+      ["only spaces", { intake: { ...INTAKE, customerName: "   " } }],
+      ["no intake and no reference", { intake: null, run: consoleRun({ status: "released", customerRef: null }) }],
+      ["a slash, quotes and letters beyond ASCII", { intake: { ...INTAKE, customerName: `Ōtautahi / "Ngā" Kōrero's — Société\\Ünïcødé 東京 Ltd.` } }],
+      ["longer than 120 characters", { intake: { ...INTAKE, customerName: "Synthetic Holdings ".repeat(10) } }],
+    ];
+
+    test("on a first make and a remake, for a client name at each extreme: seven entries, one of each kind, the handbook last", async () => {
+      for (const [what, overrides] of NAMES) {
+        const drive = new MemoryDrive();
+        const deps = withHandbook(jobInput(overrides), drive);
+        assert.equal((await processDocumentsJob(RUN_ID, deps, { final: true })).outcome, "done", what);
+        const doc = deps.store.documents.get(RUN_ID)!;
+        const first = doc.made!.files;
+        doc.input = { ...doc.input, state: "queued", driveFolderId: doc.made!.driveFolderId, files: first };
+        assert.equal((await processDocumentsJob(RUN_ID, deps, { final: true })).outcome, "done", what);
+        for (const [make, files] of [["first make", first], ["remake", doc.made!.files]] as const) {
+          assert.equal(files.length, 7, `${what}, ${make}`);
+          assert.deepEqual(files.map((f) => f.output).sort(), SEVEN, `${what}, ${make}`);
+          assert.equal(files.at(-1)!.output, "org_handbook", `${what}, ${make}`);
+          assert.ok(files.at(-1)!.name.endsWith(" - Org handbook.docx"), `${what}, ${make}`);
+          fits(files, `${what}, ${make}`);
+        }
+        assert.deepEqual(doc.made!.files.at(-1), first.at(-1), `${what}: the same file and link on the remake`);
+      }
+    });
+
+    test("a handbook Drive returns no name, id or usable link for is left out, so the six still reach the console", async () => {
+      const spoilt: Array<Partial<Record<keyof DriveItem, string | undefined>>> = [{ url: undefined }, { url: "" }, { url: "not a link" }, { url: "javascript:alert(1)" }, { name: "" }, { id: "" }];
+      for (const spoil of spoilt) {
+        const what = JSON.stringify(spoil);
+        const drive = new MemoryDrive();
+        const deps = withHandbook(jobInput(), drive);
+        const put = drive.putFile.bind(drive);
+        // As the real client returns an upload whose answer lacks a field (drive.ts, item).
+        drive.putFile = async (...args) => {
+          const item = await put(...args);
+          return args[1] === NAME ? ({ ...item, ...spoil } as typeof item) : item;
+        };
+        assert.equal((await processDocumentsJob(RUN_ID, deps, { final: true })).outcome, "done", what);
+        const made = deps.store.documents.get(RUN_ID)!.made!;
+        assert.deepEqual(made.files.map((f) => f.name).sort(), SIX, what);
+        fits(made.files, what);
+        assert.equal(handbooks(drive).length, 1, `${what}: still in the customer's folder`);
+        assert.deepEqual(made.warnings, [OVERFLOW], what);
+        assert.ok(deps.lines.includes(`Run ${RUN_ID}: the org handbook is in Drive but isn't listed to the console, because Drive didn't return a name, id and link it can use.`), what);
+      }
     });
   });
 
