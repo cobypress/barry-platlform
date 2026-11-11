@@ -249,24 +249,7 @@ const missingNextSteps = shareRule({
     const steps = ctx.data(nextStepsExtractor);
     if (steps.status !== "ok") return { reason: `Next steps couldn't be read: ${steps.reason}`, evidence: [ctx.ev(steps.source, { count: null })] };
     const filled = new Set(steps.data);
-    // A deal open at the run's date and closed since reads as open, but the
-    // next-steps read lists deals open now, so its next step then can't be
-    // read: it's left out and said, not counted as empty (DECISIONS.md 465).
-    const unread = new Set(ctx.data(opportunitiesExtractor).closedSince ?? []);
-    const deals = unread.size > 0 ? open.filter((d) => !unread.has(d.Id)) : open;
-    const left = open.length - deals.length;
-    return {
-      deals,
-      isHit: (d) => !filled.has(d.Id),
-      problem: () => "Next step is empty",
-      evidence: [ctx.ev(steps.source, { count: steps.data.length, note: "Read as filled or empty only. The text itself is never fetched" })],
-      ...(left > 0
-        ? {
-            exclusions: [`${plural(left, "deal")} closed since this run's date, whose next step then can't be read`],
-            leftOut: `${left === 1 ? "One deal open at this run's date and closed since is" : `${left} deals open at this run's date and closed since are`} left out, as we can't read the next step ${left === 1 ? "it" : "they"} had then.`,
-          }
-        : {}),
-    };
+    return { deals: open, isHit: (d) => !filled.has(d.Id), problem: () => "Next step is empty", evidence: [ctx.ev(steps.source, { count: steps.data.length, note: "Read as filled or empty only. The text itself is never fetched" })] };
   },
   issueTitle: "Deals are missing a next step",
   sentence: (hits, n, rate) => `Open deals with an empty next step: ${hits} of ${n} (${rate}%).`,

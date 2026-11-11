@@ -98,13 +98,6 @@ export type OpportunityExtract = {
    * checkpoint from before it was counted.
    */
   sinceTheRun?: { woundBack?: number; asRead?: number; madeSince?: number };
-  /**
-   * Deals wound back to open that are closed as read, so the next-steps read,
-   * which lists open deals as they stand, can't have listed them: their next
-   * step at the run's date can't be read (DECISIONS.md 465). Ids only.
-   * Undefined in a checkpoint from before it was kept.
-   */
-  closedSince?: string[];
 };
 
 /** By time, then id, as the pipeline sorts each deal's history (historic-pipeline/cohort.ts). */
@@ -120,7 +113,6 @@ export type AsAtTheRun = {
   woundBack: number;
   asRead: number;
   madeSince: number;
-  closedSince: string[];
 };
 
 /**
@@ -134,15 +126,14 @@ export type AsAtTheRun = {
  * as read, so a run where nothing has happened since gives what it always did.
  * One that can't be wound back (no row by the end, or a stage then that the
  * stages read doesn't hold, or no stages read) is kept as read, with all its
- * history, and counted. `openStages` are the calibration's, which the
- * next-steps read lists as open beside IsClosed false.
+ * history, and counted.
  */
 export function asAtTheRun(
   opportunities: OpportunityRow[],
   history: HistoryRow[],
   stages: Sourced<StageRow[]>,
   now: Date,
-  options: { names?: Record<string, string>; openStages?: ReadonlySet<string> } = {},
+  options: { names?: Record<string, string> } = {},
 ): AsAtTheRun {
   const end = upToItsSecond(now).getTime();
   // A CreatedDate that doesn't parse compares false, so the deal is kept as read.
@@ -156,7 +147,7 @@ export function asAtTheRun(
       };
   const later = (h: HistoryRow): boolean => Date.parse(h.CreatedDate) > end;
   const changed = new Set(cut.history.filter(later).map((h) => h.OpportunityId));
-  if (changed.size === 0) return { ...cut, woundBack: 0, asRead: 0, madeSince: made.size, closedSince: [] };
+  if (changed.size === 0) return { ...cut, woundBack: 0, asRead: 0, madeSince: made.size };
 
   const lastByTheEnd = new Map<string, HistoryRow>();
   for (const h of cut.history) {
@@ -165,10 +156,7 @@ export function asAtTheRun(
     if (!last || byTimeThenId(last, h) < 0) lastByTheEnd.set(h.OpportunityId, h);
   }
   const byStage = new Map(stages.status === "ok" ? stages.data.map((s) => [s.ApiName, s]) : []);
-  // The next-steps read's own test of open, so a deal it lists now is never in closedSince.
-  const listedAsOpen = (stageName: string, isClosed: boolean): boolean => !isClosed || (options.openStages?.has(stageName) ?? false);
   const asRead = new Set<string>();
-  const closedSince: string[] = [];
   let woundBack = 0;
   const deals = cut.opportunities.map((o) => {
     if (!changed.has(o.Id)) return o;
@@ -179,16 +167,13 @@ export function asAtTheRun(
       return o;
     }
     woundBack++;
-    if (listedAsOpen(last.StageName, stage.IsClosed) && !listedAsOpen(o.StageName, o.IsClosed)) closedSince.push(o.Id);
     return { ...o, StageName: last.StageName, Amount: last.Amount, CloseDate: last.CloseDate, IsClosed: stage.IsClosed, IsWon: stage.IsWon };
   });
-  return { ...cut, opportunities: deals, history: cut.history.filter((h) => !later(h) || asRead.has(h.OpportunityId)), woundBack, asRead: asRead.size, madeSince: made.size, closedSince };
+  return { ...cut, opportunities: deals, history: cut.history.filter((h) => !later(h) || asRead.has(h.OpportunityId)), woundBack, asRead: asRead.size, madeSince: made.size };
 }
 
-const openStageNames = (ctx: ExtractContext): string[] => ctx.calibration.stages.filter((s) => s.category === "open").map((s) => s.name);
-
 function calibratedOpenStages(ctx: ExtractContext): string {
-  const open = openStageNames(ctx).map((name) => `'${name.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`);
+  const open = ctx.calibration.stages.filter((s) => s.category === "open").map((s) => `'${s.name.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`);
   return open.length > 0 ? ` OR StageName IN (${open.join(", ")})` : "";
 }
 
@@ -276,7 +261,6 @@ export const opportunitiesExtractor: Extractor<OpportunityExtract> = {
       return { ...base, opportunities: failed, history: { status: "unavailable", reason: "Opportunity couldn't be read", source: historySource } };
     }
 
-    const openStages = new Set(openStageNames(ctx));
     let history: HistoryRow[];
     try {
       const raw = await readKeyset<HistoryRow>(
@@ -290,7 +274,7 @@ export const opportunitiesExtractor: Extractor<OpportunityExtract> = {
     } catch (err) {
       // With no history, nothing can be wound back, so every deal is as read.
       // A deal made since is still left out: it needs only its own date.
-      const cut = asAtTheRun(opportunities, [], stages, ctx.now, { names, openStages });
+      const cut = asAtTheRun(opportunities, [], stages, ctx.now, { names });
       return {
         ...base,
         names: cut.names,
@@ -303,14 +287,13 @@ export const opportunitiesExtractor: Extractor<OpportunityExtract> = {
     // that changed since is found, and it's dropped here (DECISIONS.md 465).
     // A deal made since can still be on a page kept from before the read had
     // its end, so it's dropped here too.
-    const atTheRun = asAtTheRun(opportunities, history, stages, ctx.now, { names, openStages });
+    const atTheRun = asAtTheRun(opportunities, history, stages, ctx.now, { names });
     return {
       ...base,
       names: atTheRun.names,
       opportunities: { status: "ok", source: opportunitySource, truncated: false, data: atTheRun.opportunities },
       history: { status: "ok", data: atTheRun.history, source: historySource, truncated: false },
       sinceTheRun: { woundBack: atTheRun.woundBack, asRead: atTheRun.asRead, madeSince: atTheRun.madeSince },
-      closedSince: atTheRun.closedSince,
     };
   },
 };
@@ -318,18 +301,23 @@ export const opportunitiesExtractor: Extractor<OpportunityExtract> = {
 // NextStep is free text, so the rule only ever needs to know whether it's filled.
 // Filtering means the text is never selected, so it can't reach a checkpoint.
 // It ends where the deals do (DECISIONS.md 465), as cur.missing-next-steps sets
-// the two against each other. It reads next steps as they stand: a deal closed
-// since isn't listed, though the deals read winds it back to open, so the deals
-// read names it in closedSince and the rule leaves it out.
+// the two against each other. A deal the deals read holds as open can have
+// closed since, at any point up to this read, so a deal changed since the run's
+// start is listed too, whatever its stage now: closing a deal changes it
+// (DECISIONS.md 466). The next step itself is as it stands.
 export const nextStepsExtractor: Extractor<Sourced<string[]>> = {
   id: "next-steps",
-  version: 1,
-  partialKeys: ["next-steps"],
+  // 2: a version 1 checkpoint lists only the deals open when it was read, so
+  // one closed since the run's date reads as having no next step. Pages kept
+  // part-way through a version 1 read are under the old key and aren't resumed
+  // from, for the same reason; both keys are cleared once this step is saved.
+  version: 2,
+  partialKeys: ["next-steps-since", "next-steps"],
   async run(ctx) {
-    const where = `(IsClosed = false${calibratedOpenStages(ctx)}) AND NextStep != null AND ${soqlUpTo("CreatedDate", ctx.now)}`;
+    const where = `(IsClosed = false${calibratedOpenStages(ctx)} OR LastModifiedDate >= ${soqlDateTime(ctx.now)}) AND NextStep != null AND ${soqlUpTo("CreatedDate", ctx.now)}`;
     const source: SourceInfo = { kind: "soql", api: "rest", query: `SELECT Id FROM Opportunity WHERE ${where}` };
     try {
-      const rows = await readKeyset<{ Id: string }>(ctx, "next-steps", "Id", "Opportunity", where);
+      const rows = await readKeyset<{ Id: string }>(ctx, "next-steps-since", "Id", "Opportunity", where);
       return { status: "ok", data: rows.map((r) => r.Id), source, truncated: false };
     } catch (err) {
       return unavailable(source, err);

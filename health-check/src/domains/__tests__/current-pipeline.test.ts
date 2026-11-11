@@ -124,40 +124,6 @@ describe("share rules", () => {
     assert.equal(run(changed, "cur.missing-next-steps").status, "passed");
   });
 
-  describe("deals open at the run's date and closed since, whose next step then can't be read (DECISIONS.md 465)", () => {
-    const rowsOf = (changed: Map<string, unknown>) => analyseExtracts(changed).records.filter((r) => r.ruleId === "cur.missing-next-steps").flatMap((r) => r.rows.map((row) => row.id));
-    const withClosed = (closedSince: string[] | undefined) => opportunities((e) => (closedSince === undefined ? delete e.closedSince : (e.closedSince = closedSince)));
-
-    test("none, in a checkpoint from before they were kept or an empty list, leaves the finding as it was", () => {
-      assert.deepEqual((extracts.get("opportunities") as OpportunityExtract).closedSince, []);
-      const today = run(extracts, "cur.missing-next-steps");
-      assert.deepEqual(run(withClosed(undefined), "cur.missing-next-steps"), today);
-      assert.doesNotMatch(today.summary, /closed since/);
-    });
-
-    test("are left out of the deals tested and the action list, and said, with the count worked out", () => {
-      const today = run(extracts, "cur.missing-next-steps");
-      const hit = rowsOf(extracts)[0]!;
-      const filled = (extracts.get("next-steps") as { data: string[] }).data[0]!;
-      const one = withClosed([hit]);
-      const f = run(one, "cur.missing-next-steps");
-      assert.deepEqual({ n: f.facts.n, hits: f.facts.hits }, { n: today.facts.n! - 1, hits: today.facts.hits! - 1 });
-      assert.ok(rowsOf(extracts).includes(hit) && !rowsOf(one).includes(hit));
-      assert.equal(f.evidence[0]!.count, today.evidence[0]!.count! - 1);
-      assert.deepEqual(f.evidence[0]!.exclusions, [...today.evidence[0]!.exclusions, "1 deal closed since this run's date, whose next step then can't be read"]);
-      assert.match(f.summary, /\. One deal open at this run's date and closed since is left out, as we can't read the next step it had then\./);
-
-      const two = run(withClosed([hit, filled]), "cur.missing-next-steps");
-      assert.deepEqual({ n: two.facts.n, hits: two.facts.hits }, { n: today.facts.n! - 2, hits: today.facts.hits! - 1 });
-      assert.match(two.summary, /\. 2 deals open at this run's date and closed since are left out, as we can't read the next step they had then\./);
-    });
-
-    test("count only those among the open deals", () => {
-      const closed = (extracts.get("opportunities") as OpportunityExtract & { opportunities: { data: Array<{ Id: string; IsClosed: boolean }> } }).opportunities.data.find((o) => o.IsClosed)!.Id;
-      assert.deepEqual(run(withClosed([closed]), "cur.missing-next-steps"), run(extracts, "cur.missing-next-steps"));
-    });
-  });
-
   test("unreadable next steps are not measurable, not all empty", () => {
     const changed = clone(extracts);
     changed.set("next-steps", gone);
