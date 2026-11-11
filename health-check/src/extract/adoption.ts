@@ -1,5 +1,5 @@
 import { FIELD_SPECS, planFields } from "./fields.ts";
-import { readSoql, soqlDateTime, type Extractor, type Sourced } from "./types.ts";
+import { readSoql, soqlWindow, type Extractor, type Sourced } from "./types.ts";
 
 // Who logs in, on which days and how, across the analysis window. Salesforce
 // keeps login history for a limited time, so the months it covers are worked
@@ -49,7 +49,7 @@ export const loginActivityExtractor: Extractor<Sourced<LoginActivity>> = {
   async run(ctx) {
     const from = ctx.windowStart;
     const plan = planFields(ctx, FIELD_SPECS.loginActivity);
-    const where = `WHERE LoginTime >= ${soqlDateTime(from)} ORDER BY LoginTime DESC`;
+    const where = `WHERE ${soqlWindow("LoginTime", from, ctx.now)} ORDER BY LoginTime DESC`;
     if (!plan.ok) return { status: "unavailable", reason: plan.reason, source: { kind: "soql", api: "rest", query: `SELECT ${FIELD_SPECS.loginActivity.required.join(", ")} FROM LoginHistory ${where}` } };
     // Newest first, so a capped read loses the oldest months, which are then left out.
     const rows = await readSoql<Row>(ctx, `SELECT ${plan.select} FROM LoginHistory ${where}`, { maxRecords: MAX_ROWS, missingFields: plan.missing });

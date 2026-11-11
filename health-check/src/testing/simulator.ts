@@ -128,6 +128,29 @@ function since(soql: string, field: string): string {
   return value ? new Date(value).toISOString().replace("Z", "+0000") : "";
 }
 
+/** The instant a query's `field <= ...` reads to, in the same text. Past every date when it gives no end. */
+function until(soql: string, field: string): string {
+  const value = new RegExp(`\\b${field}\\s*<=\\s*(\\S+?)\\)?(?:\\s|$)`).exec(soql)?.[1];
+  return value ? new Date(value).toISOString().replace("Z", "+0000") : "\uffff";
+}
+
+/** Whether a stored date is inside the query's window on that field, at both ends (DECISIONS.md 480). */
+const within = (value: string | null | undefined, soql: string, field: string): boolean => !!value && value >= since(soql, field) && value <= until(soql, field);
+
+/**
+ * Rows up to the query's end on a field, for reads the simulator doesn't filter
+ * by their start: what Salesforce holds now can be later than the run, and a
+ * read that ends at the run's date mustn't see it. A row without the field
+ * passes, as the synthetic org leaves some dates out.
+ */
+const upTo = <T>(rows: T[], soql: string, field: string): T[] => {
+  const end = until(soql, field);
+  return rows.filter((r) => {
+    const value = (r as Record<string, unknown>)[field];
+    return typeof value !== "string" || value <= end;
+  });
+};
+
 const LONDON = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", year: "numeric", month: "numeric" });
 /** Year and month in the synthetic org's zone, as CALENDAR_MONTH(convertTimezone(...)) gives them. */
 function londonMonth(value: string): [number, number] {
@@ -447,11 +470,11 @@ export class Simulator implements Transport {
       case "SBQQ__Quote__c": {
         if (!this.#cpq) return unsupported(object);
         const after = /\bCreatedDate\s*>=\s*(\S+)/i.exec(where)?.[1];
-        return this.#keyset(this.#derive(`quotes ${after}`, () => this.#d.cpqQuotes.filter((q) => !after || new Date(q.CreatedDate.replace("+0000", "Z")) >= new Date(after))), soql);
+        return this.#keyset(this.#derive(`quotes ${after} ${until(where, "CreatedDate")}`, () => upTo(this.#d.cpqQuotes.filter((q) => !after || new Date(q.CreatedDate.replace("+0000", "Z")) >= new Date(after)), where, "CreatedDate")), soql);
       }
       case "ProcessInstance": {
         const after = /\bCreatedDate\s*>=\s*(\S+)/i.exec(where)?.[1];
-        return page(this.#d.cpqApprovals.filter((a) => !after || new Date(a.CreatedDate.replace("+0000", "Z")) >= new Date(after)).map(({ CreatedDate: _c, ...a }) => a));
+        return page(upTo(this.#d.cpqApprovals.filter((a) => !after || new Date(a.CreatedDate.replace("+0000", "Z")) >= new Date(after)), where, "CreatedDate").map(({ CreatedDate: _c, ...a }) => a));
       }
       case "Contract": {
         const from = /\bEndDate >= (\d{4}-\d{2}-\d{2})/.exec(where)?.[1] ?? "0000";
@@ -460,9 +483,9 @@ export class Simulator implements Transport {
       }
       case "LoginHistory": {
         if (/\b(Status|Application)\s*(=|!=|IN|LIKE)/i.test(where)) return reject("INVALID_FIELD", "field 'Status' can not be filtered in a query call");
-        // LoginTime is filterable, and every read of it gives a start.
+        // LoginTime is filterable, and every read of it gives a start and an end.
         const since = /\bLoginTime\s*>=\s*(\S+)/i.exec(where)?.[1];
-        return page(since ? this.#d.loginHistory.filter((r) => new Date(r.LoginTime.replace("+0000", "Z")) >= new Date(since)) : this.#d.loginHistory);
+        return page(upTo(since ? this.#d.loginHistory.filter((r) => new Date(r.LoginTime.replace("+0000", "Z")) >= new Date(since)) : this.#d.loginHistory, where, "LoginTime"));
       }
       case "SetupAuditTrail": {
         if (/\b(Section|Display|Action)\s*(=|!=|IN|LIKE)/i.test(where)) return reject("INVALID_FIELD", "field 'Section' can not be filtered in a query call");
@@ -499,7 +522,7 @@ export class Simulator implements Transport {
         return page(org.APEX_PAGES.filter((p) => !/NamespacePrefix = null/.test(where) || p.NamespacePrefix === null));
       case "AsyncApexJob": {
         const since = /\bCreatedDate\s*>=\s*(\S+)/i.exec(where)?.[1];
-        return page(since ? org.ASYNC_JOBS.filter((j) => new Date(j.CreatedDate.replace("+0000", "Z")) >= new Date(since)) : org.ASYNC_JOBS);
+        return page(upTo(since ? org.ASYNC_JOBS.filter((j) => new Date(j.CreatedDate.replace("+0000", "Z")) >= new Date(since)) : org.ASYNC_JOBS, where, "CreatedDate"));
       }
       case "UserRole":
         return page(org.ROLES);
@@ -592,13 +615,14 @@ export class Simulator implements Transport {
         return page(org.FORECAST_TYPES);
       case "ForecastingQuota":
         return page(org.QUOTAS);
+      // Activity is read from its start without a filter here, as it always was, and to its end.
       case "Task":
-        return this.#keyset(this.#d.activity.tasks, soql);
+        return this.#keyset(this.#upTo("tasks", this.#d.activity.tasks, where, "CreatedDate"), soql);
       case "Event":
-        return this.#keyset(this.#d.activity.events, soql);
+        return this.#keyset(this.#upTo("events", this.#d.activity.events, where, "StartDateTime"), soql);
       case "EmailMessage":
         if (/\bParentId\b/.test(soql)) return this.#caseEmails(soql);
-        return this.#keyset(this.#d.activity.emails, soql);
+        return this.#keyset(this.#upTo("emails", this.#d.activity.emails, where, "MessageDate"), soql);
       case "Period":
         return page(org.PERIODS);
       case "ForecastingItem":
@@ -621,18 +645,18 @@ export class Simulator implements Transport {
         return this.#keyset(this.#d.wonAccounts, soql);
       }
       case "LeadHistory":
-        return this.#keyset(this.#d.leadFunnel.statusChanges, soql);
+        return this.#keyset(this.#upTo("lead status", this.#d.leadFunnel.statusChanges, where, "CreatedDate"), soql);
       case "Campaign":
         return page(org.CAMPAIGNS);
       case "CampaignMember":
-        return this.#keyset(this.#d.leadFunnel.members, soql);
+        return this.#keyset(this.#upTo("campaign members", this.#d.leadFunnel.members, where, "CreatedDate"), soql);
       case "Lead":
         if (/\bpi__url__c\b/.test(soql)) {
           if (/^SELECT COUNT\(\)/i.test(soql)) return count(/pi__grade__c = null/.test(soql) ? this.#d.pardotCounts.ungraded : /pi__score__c = null/.test(soql) ? this.#d.pardotCounts.unscored : this.#d.pardotCounts.synced);
           const since = /\bCreatedDate\s*>=\s*(\S+)/i.exec(where)?.[1];
-          return this.#keyset(this.#derive(`prospects ${since}`, () => this.#d.pardotOpenLeads.filter((l) => !since || new Date(l.CreatedDate.replace("+0000", "Z")) >= new Date(since))), soql);
+          return this.#keyset(this.#derive(`prospects ${since} ${until(where, "CreatedDate")}`, () => upTo(this.#d.pardotOpenLeads.filter((l) => !since || new Date(l.CreatedDate.replace("+0000", "Z")) >= new Date(since)), where, "CreatedDate")), soql);
         }
-        if (/\bConvertedOpportunityId\b/.test(soql)) return this.#keyset(this.#d.leadFunnel.leads, soql);
+        if (/\bConvertedOpportunityId\b/.test(soql)) return this.#keyset(this.#upTo("leads", this.#d.leadFunnel.leads, where, "CreatedDate"), soql);
         if (/GROUP BY LeadSource/i.test(soql)) return page(/LastActivityDate/i.test(soql) ? this.#d.leads.staleBySource : this.#d.leads.openBySource);
         if (/^SELECT COUNT\(\)/i.test(soql)) return count(/LastActivityDate/i.test(soql) ? this.#d.leads.stale : this.#d.leads.open);
         if (/^SELECT Id, Name\b/i.test(soql) && /LastActivityDate = null/.test(soql)) return this.#keyset(this.#d.staleLeadRows, soql);
@@ -644,14 +668,15 @@ export class Simulator implements Transport {
       case "Case":
         return this.#cases(soql);
       case "CaseHistory":
-        return page(this.#d.supportCases.history.filter((h) => h.CreatedDate >= since(soql, "CreatedDate")).map(({ Id: _id, Field: _f, ...h }) => h));
+        return page(this.#d.supportCases.history.filter((h) => within(h.CreatedDate, soql, "CreatedDate")).map(({ Id: _id, Field: _f, ...h }) => h));
       case "CaseMilestone":
-        return page(this.#d.supportCases.milestones.filter((m) => m.StartDate >= since(soql, "StartDate")));
+        return page(this.#d.supportCases.milestones.filter((m) => within(m.StartDate, soql, "StartDate")));
       case "CaseStatus":
         return page(org.CASE_STATUSES);
       case "CaseArticle": {
-        const closed = new Set(this.#d.supportCases.cases.filter((c) => c.IsClosed && c.ClosedDate! >= since(soql, "ClosedDate")).map((c) => c.Id));
-        return page(this.#d.supportCases.articles.filter((a) => closed.has(a.CaseId)).map(({ CaseId }) => ({ CaseId })));
+        const closed = new Set(this.#d.supportCases.cases.filter((c) => c.IsClosed && within(c.ClosedDate, soql, "ClosedDate")).map((c) => c.Id));
+        // The link's own date ends the read too, as an article can be attached after its case closed (DECISIONS.md 481).
+        return page(upTo(this.#d.supportCases.articles, soql, "CreatedDate").filter((a) => closed.has(a.CaseId)).map(({ CaseId }) => ({ CaseId })));
       }
       case "Group":
         if (!/Type = 'Queue'/.test(soql)) break;
@@ -671,7 +696,7 @@ export class Simulator implements Transport {
       case "QueueRoutingConfig":
         return page(org.ROUTING_CONFIGS);
       case "AgentWork":
-        return page(this.#d.supportCases.work.filter((w) => w.RequestDateTime >= since(soql, "RequestDateTime")).map(({ Id: _id, ...w }) => w));
+        return page(this.#d.supportCases.work.filter((w) => within(w.RequestDateTime, soql, "RequestDateTime")).map(({ Id: _id, ...w }) => w));
       case "Macro":
         return page(org.MACROS);
       case "MacroUsage":
@@ -700,11 +725,10 @@ export class Simulator implements Transport {
   #cases(soql: string): Json | { error: { errorCode: string; message: string } } {
     const all = this.#d.supportCases.cases;
     const month = (field: "CreatedDate" | "ClosedDate") => {
-      const after = since(soql, field);
       const groups = new Map<string, { y: number; m: number; Priority: string | null; n: number }>();
       for (const c of all) {
         const value = c[field];
-        if (!value || value < after || (field === "ClosedDate" && !c.IsClosed)) continue;
+        if (!value || !within(value, soql, field) || (field === "ClosedDate" && !c.IsClosed)) continue;
         const [y, m] = londonMonth(value);
         const key = `${y}-${m}-${c.Priority}`;
         const g = groups.get(key) ?? { y, m, Priority: c.Priority, n: 0 };
@@ -717,22 +741,21 @@ export class Simulator implements Transport {
     if (/CALENDAR_YEAR\(convertTimezone\(ClosedDate\)\)/.test(soql)) return month("ClosedDate");
     if (/GROUP BY Origin/.test(soql)) {
       const counts = new Map<string | null, number>();
-      for (const c of all.filter((x) => x.CreatedDate >= since(soql, "CreatedDate"))) counts.set(c.Origin, (counts.get(c.Origin) ?? 0) + 1);
+      for (const c of all.filter((x) => within(x.CreatedDate, soql, "CreatedDate"))) counts.set(c.Origin, (counts.get(c.Origin) ?? 0) + 1);
       return page([...counts].map(([Origin, n]) => ({ Origin, n })));
     }
-    if (/WHERE IsClosed = false/.test(soql)) return page(all.filter((c) => !c.IsClosed).map(({ Id, Status, Priority, Origin, OwnerId, CreatedDate, ContactId, AccountId }) => ({ Id, Status, Priority, Origin, OwnerId, CreatedDate, ContactId, AccountId })));
+    if (/WHERE IsClosed = false/.test(soql)) return page(upTo(all, soql, "CreatedDate").filter((c) => !c.IsClosed).map(({ Id, Status, Priority, Origin, OwnerId, CreatedDate, ContactId, AccountId }) => ({ Id, Status, Priority, Origin, OwnerId, CreatedDate, ContactId, AccountId })));
     if (/WHERE IsClosed = true AND ClosedDate >=/.test(soql)) {
-      return page(all.filter((c) => c.IsClosed && c.ClosedDate! >= since(soql, "ClosedDate")).map(({ Id, CreatedDate, ClosedDate, Priority, Origin, OwnerId, Type, Reason }) => ({ Id, CreatedDate, ClosedDate, Priority, Origin, OwnerId, Type, Reason })));
+      return page(all.filter((c) => c.IsClosed && within(c.ClosedDate, soql, "ClosedDate")).map(({ Id, CreatedDate, ClosedDate, Priority, Origin, OwnerId, Type, Reason }) => ({ Id, CreatedDate, ClosedDate, Priority, Origin, OwnerId, Type, Reason })));
     }
     return reject("MALFORMED_QUERY", `The synthetic org doesn't answer this case query: ${soql.slice(0, 120)}`);
   }
 
-  /** Emails on cases: the first replies, or a count of those coming in. */
+  /** Emails on cases: the first replies, or a count of those coming in, each to its own end as well as its case's. */
   #caseEmails(soql: string): Json {
-    const after = since(soql, "CreatedDate");
-    const recent = new Set(this.#d.supportCases.cases.filter((c) => c.CreatedDate >= after).map((c) => c.Id));
+    const recent = new Set(this.#d.supportCases.cases.filter((c) => within(c.CreatedDate, soql, "CreatedDate")).map((c) => c.Id));
     const incoming = /Incoming = true/.test(soql);
-    const rows = this.#d.supportCases.replies.filter((r) => r.Incoming === incoming && recent.has(r.ParentId));
+    const rows = upTo(this.#d.supportCases.replies, soql, "MessageDate").filter((r) => r.Incoming === incoming && recent.has(r.ParentId));
     if (/^SELECT COUNT\(\)/i.test(soql)) return { totalSize: rows.length, done: true, records: [] };
     return page(rows.map(({ ParentId, MessageDate }) => ({ ParentId, MessageDate })));
   }
@@ -759,6 +782,12 @@ export class Simulator implements Transport {
       else high = mid;
     }
     return page(sorted.slice(low, low + limit));
+  }
+
+  /** The rows a keyset read can see, to its end on `field`: derived once for each end, so its sorted copy is kept. */
+  #upTo<T extends { Id: string }>(name: string, rows: T[], where: string, field: string): T[] {
+    const end = until(where, field);
+    return end === "\uffff" ? rows : this.#derive(`${name} to ${end}`, () => upTo(rows, where, field));
   }
 
   /** A list derived from the records for one kind of query, made the first time it's asked for. */

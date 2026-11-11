@@ -1,5 +1,5 @@
 import { readCapped } from "./opportunities.ts";
-import { daysBefore, soqlDateTime, type Extractor, type Sourced } from "./types.ts";
+import { daysBefore, soqlWindow, type Extractor, type Sourced } from "./types.ts";
 
 // Ids and dates only. Subject, Description and message bodies are customer
 // conversations, and no rule needs them.
@@ -18,13 +18,13 @@ export const activityExtractor: Extractor<ActivityExtract> = {
   partialKeys: ["activity-tasks", "activity-events", "activity-emails"],
   async run(ctx) {
     const from = daysBefore(ctx.now, ACTIVITY_DAYS);
-    const start = soqlDateTime(from);
-    const end = soqlDateTime(ctx.now);
+    // Each read stops at the run's own date (DECISIONS.md 480), so a resumed run reads what it would have at the start.
+    const window = (field: string): string => soqlWindow(field, from, ctx.now);
     return {
-      tasks: await readCapped<TaskRow>(ctx, "activity-tasks", "Id, OwnerId, WhoId, WhatId, CreatedDate, TaskSubtype", "Task", `CreatedDate >= ${start}`),
+      tasks: await readCapped<TaskRow>(ctx, "activity-tasks", "Id, OwnerId, WhoId, WhatId, CreatedDate, TaskSubtype", "Task", window("CreatedDate")),
       // IsChild leaves out each invitee's copy, which would count one meeting many times.
-      events: await readCapped<EventRow>(ctx, "activity-events", "Id, OwnerId, WhoId, WhatId, StartDateTime", "Event", `IsChild = false AND StartDateTime >= ${start} AND StartDateTime <= ${end}`),
-      emails: await readCapped<EmailRow>(ctx, "activity-emails", "Id, RelatedToId, ActivityId, MessageDate, CreatedById", "EmailMessage", `MessageDate >= ${start}`),
+      events: await readCapped<EventRow>(ctx, "activity-events", "Id, OwnerId, WhoId, WhatId, StartDateTime", "Event", `IsChild = false AND ${window("StartDateTime")}`),
+      emails: await readCapped<EmailRow>(ctx, "activity-emails", "Id, RelatedToId, ActivityId, MessageDate, CreatedById", "EmailMessage", window("MessageDate")),
       from: from.toISOString().slice(0, 10),
     };
   },

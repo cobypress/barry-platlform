@@ -1,7 +1,7 @@
 import { isUnavailable } from "../salesforce/client.ts";
 import { describeObject, planFrom, type FieldSpec } from "./fields.ts";
 import { readKeyset } from "./opportunities.ts";
-import { readSoql, soqlDate, soqlDateTime, unavailable, type ExtractContext, type Extractor, type Sourced, type SourceInfo } from "./types.ts";
+import { readSoql, soqlDate, soqlWindow, unavailable, type ExtractContext, type Extractor, type Sourced, type SourceInfo } from "./types.ts";
 import { licencesExtractor } from "./users.ts";
 
 // Salesforce CPQ's reads (roadmap Stage 6, DECISIONS.md 216 to 219). CPQ is a
@@ -139,8 +139,8 @@ export const cpqQuotesExtractor: Extractor<CpqQuotes> = {
   partialKeys: ["cpq-quotes"],
   async run(ctx) {
     const { presence } = ctx.get(cpqSetupExtractor);
-    const from = soqlDateTime(ctx.windowStart);
-    const quoteWhere = `SBQQ__Primary__c = true AND CreatedDate >= ${from}`;
+    const window = soqlWindow("CreatedDate", ctx.windowStart, ctx.now);
+    const quoteWhere = `SBQQ__Primary__c = true AND ${window}`;
     if (presence.status !== "installed") {
       return { quotes: notRead(presence.reason, QUOTE.object), approvals: notRead(presence.reason, "ProcessInstance"), contracts: notRead(presence.reason, CONTRACT.object) };
     }
@@ -157,7 +157,7 @@ export const cpqQuotesExtractor: Extractor<CpqQuotes> = {
       }
     }
     // Every approval started in the window. Matched to quotes by id, which avoids a filter on the polymorphic TargetObject.
-    const approvals = await readSoql<ApprovalRow>(ctx, `SELECT Id, TargetObjectId, Status FROM ProcessInstance WHERE CreatedDate >= ${from}`, { maxRecords: APPROVAL_ROWS });
+    const approvals = await readSoql<ApprovalRow>(ctx, `SELECT Id, TargetObjectId, Status FROM ProcessInstance WHERE ${window}`, { maxRecords: APPROVAL_ROWS });
     const today = soqlDate(ctx.now);
     const until = soqlDate(new Date(ctx.now.getTime() + RENEWAL_DAYS * 86_400_000));
     const contracts = await planned<ContractRow>(ctx, CONTRACT, `Status = 'Activated' AND EndDate >= ${today} AND EndDate <= ${until}`);

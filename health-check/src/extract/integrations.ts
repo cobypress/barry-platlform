@@ -1,5 +1,5 @@
 import type { OrgLimit } from "../salesforce/client.ts";
-import { daysBefore, readSoql, soqlDateTime, type Extractor, type Sourced } from "./types.ts";
+import { daysBefore, readSoql, soqlWindow, type Extractor, type Sourced } from "./types.ts";
 
 // What the integrations area reads beyond what security and "Your org,
 // documented" already hold: who is API-only, the org's API and async Apex use,
@@ -44,5 +44,5 @@ export const asyncJobsExtractor: Extractor<Sourced<AsyncJobRow[]>> = {
   id: "async-jobs",
   version: 1,
   run: (ctx) =>
-    readSoql<AsyncJobRow>(ctx, `SELECT Id, JobType, Status, NumberOfErrors, ApexClass.Name, CreatedDate FROM AsyncApexJob WHERE CreatedDate >= ${soqlDateTime(daysBefore(ctx.now, ASYNC_JOB_DAYS))}`, { maxRecords: ASYNC_JOB_MAX_ROWS }),
+    readSoql<AsyncJobRow>(ctx, `SELECT Id, JobType, Status, NumberOfErrors, ApexClass.Name, CreatedDate FROM AsyncApexJob WHERE ${soqlWindow("CreatedDate", daysBefore(ctx.now, ASYNC_JOB_DAYS), ctx.now)}`, { maxRecords: ASYNC_JOB_MAX_ROWS }),
 };
