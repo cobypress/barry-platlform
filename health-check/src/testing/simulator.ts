@@ -48,6 +48,8 @@ export type SimulatorOptions = {
   pageSize?: number;
   /** The Setup Audit Trail's rows: the synthetic org's by default, or a test's own, such as a change no user made. */
   setupAudit?: Array<Record<string, unknown>>;
+  /** The Apex classes: the synthetic org's by default, or a test's own, such as one changed by a user nobody can name. */
+  apexClasses?: Array<Record<string, unknown>>;
 };
 
 /** The parts of an org that grow with it. A scale test swaps them for a generated org's (src/testing/scale-org.ts). */
@@ -255,6 +257,7 @@ export class Simulator implements Transport {
   #d: OrgRecords;
   #pageSize: number | null;
   #setupAudit: Array<Record<string, unknown>>;
+  #apexClasses: Array<Record<string, unknown>>;
   /** The rest of each query answered in pages, by its locator. */
   #cursors = new Map<string, Json[]>();
   /** Rows in Id order, sorted once per list: a big org's keyset reads would otherwise sort it on every page. */
@@ -278,6 +281,7 @@ export class Simulator implements Transport {
     this.#d = options.records ?? SYNTHETIC_RECORDS;
     this.#pageSize = options.pageSize ?? null;
     this.#setupAudit = options.setupAudit ?? org.SETUP_AUDIT;
+    this.#apexClasses = options.apexClasses ?? org.APEX_CLASSES;
     this.#unlicensed = new Set(options.unlicensed ?? []);
     this.#missing = new Set([...(options.missingObjects ?? []), ...(this.#readOnly ? ["AuthProvider"] : [])]);
     if (!this.#pardot) this.#dropFields = { ...this.#dropFields, Lead: [...(this.#dropFields.Lead ?? []), "pi__url__c", "pi__score__c", "pi__grade__c"] };
@@ -541,7 +545,7 @@ export class Simulator implements Transport {
       case "DuplicateRule":
         return page(org.DUPLICATE_RULES);
       case "ApexClass":
-        return page(org.APEX_CLASSES);
+        return page(this.#apexClasses);
       case "ApexTrigger":
         return page(org.APEX_TRIGGERS);
       case "ApexOrgWideCoverage":
