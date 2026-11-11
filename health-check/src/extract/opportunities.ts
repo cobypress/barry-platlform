@@ -111,8 +111,8 @@ function byTimeThenId(a: HistoryRow, b: HistoryRow): number {
  * its last row at or before the end, and IsClosed and IsWon from that stage.
  * A deal with no later row is left exactly as read, so a run where nothing has
  * happened since gives what it always did. One that can't be wound back (no
- * row by the end, or a stage the stages read doesn't hold) is kept as read,
- * with all its history, and counted.
+ * row by the end, or a stage then that the stages read doesn't hold, or no
+ * stages read) is kept as read, with all its history, and counted.
  */
 export function asAtTheRun(opportunities: OpportunityRow[], history: HistoryRow[], stages: Sourced<StageRow[]>, now: Date): { opportunities: OpportunityRow[]; history: HistoryRow[]; woundBack: number; asRead: number } {
   const end = upToItsSecond(now).getTime();

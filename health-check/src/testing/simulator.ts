@@ -635,7 +635,7 @@ export class Simulator implements Transport {
         // The end is on the deal, in the subquery: a deal's rows are read whatever
         // their own date, as the later ones are how a change since is found.
         const end = until(where, "CreatedDate");
-        if (end === "￿") return this.#keyset(this.#d.pipeline.history, soql);
+        if (end === "\uffff") return this.#keyset(this.#d.pipeline.history, soql);
         return this.#keyset(
           this.#derive(`history of deals to ${end}`, () => {
             const deals = new Set(upTo(this.#d.pipeline.opportunities, where, "CreatedDate").map((o) => o.Id));
