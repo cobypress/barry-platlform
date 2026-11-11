@@ -69,7 +69,7 @@ export const forecastExtractor: Extractor<ForecastData> = {
   // 4: the deals closed since the run's date are read beside the facts, so the
   // Commit figures can leave out a deal whose category then can't be read
   // (DECISIONS.md 466). A version 3 checkpoint has no such list, and its facts
-  // may be from a day after a deal it counts as open closed.
+  // may have been read after a deal open at the run's date had closed.
   version: 4,
   partialKeys: ["closed-since-the-run"],
   async run(ctx) {

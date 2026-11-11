@@ -208,8 +208,8 @@ function commitScope(ctx: RuleContext, open: Deal[], isHit: (d: Deal) => boolean
   if ("reason" in since) return since;
   const left = since.closed.length;
   if (left === 0) return { deals: result.commit, isHit, evidence: result.evidence };
-  // Left out, and said, as missing next steps did (DECISIONS.md 465): counted
-  // as it is now, the deal would be in a figure dated to the run (rule 5).
+  // Left out and said: counted as it is now, a deal's later state would be in
+  // a figure dated to the run (rule 5).
   const closed = new Set(since.closed.map((d) => d.Id));
   return {
     deals: result.commit.filter((d) => !closed.has(d.Id)),
