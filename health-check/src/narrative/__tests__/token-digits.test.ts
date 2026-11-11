@@ -136,14 +136,18 @@ describe("a roles-only draft and a five-digit token", () => {
 });
 
 describe("one definition of a token's digits", () => {
-  // A token's code spelled out in a regex: a letter, or [A-Z], then \d with a count;
-  // or any counted \d on the same line as an escaped "[[". Doubled backslashes are
-  // folded first so a pattern in an ordinary string counts too.
-  const SPELLED = /(?:\[A-Z\]|(?<![A-Za-z])[A-Z])\\d(?:\{\d|[+*])/;
-  const DIGITS = /\\d(?:\{\d|[+*])/;
+  // A token's code spelled out in a regex: a letter, or [A-Z], then a digit (\d,
+  // [0-9] or [\d]) with a count or a repeat, or written out four times or more; or
+  // the same digits on a line with an escaped "[[" (decision 475). Any file is
+  // read, not only one that writes "[[" itself, since a token's brackets can come
+  // from elsewhere. Doubled backslashes are folded first so a pattern in an
+  // ordinary string counts too.
+  const DIGIT = String.raw`(?:\\d|\[0-9\]|\[\\d\])`;
+  const COUNTED = `${DIGIT}(?:\\{\\d|[+*]|${DIGIT}{3})`;
+  const SPELLED = new RegExp(String.raw`(?:\[A-Z\]|(?<![A-Za-z])[A-Z])` + COUNTED);
+  const DIGITS = new RegExp(COUNTED);
   const spellsDigits = (source: string): number[] => {
     const text = source.replace(/\\\\/g, "\\");
-    if (!text.includes(String.raw`\[\[`)) return [];
     return text.split("\n").flatMap((line, i) => (SPELLED.test(line) || (line.includes(String.raw`\[\[`) && DIGITS.test(line)) ? [i + 1] : []));
   };
   const DEFINES = join(SRC, "privacy", "pseudonymiser.ts");
@@ -169,6 +173,52 @@ describe("one definition of a token's digits", () => {
     ];
     for (const line of old) assert.deepEqual(spellsDigits(line), [1], line);
     assert.deepEqual(spellsDigits(String.raw`const ISO = /\d{4}-\d{2}/;` + "\n" + String.raw`const T = /\[\[[^\]]*\]\]/g;`), [], "a date or an any-content token is fine");
+  });
+
+  test("the check catches the other spellings of the same digits (decision 475)", () => {
+    // Each beside a token letter, on its own in a file and below a line holding an
+    // escaped "[["; then without the letter, on the "[[" line itself.
+    const OTHER = String.raw`const T = /\[\[[^\]]*\]\]/g;`;
+    const spellings = [
+      String.raw`const C = /[A-Z][0-9]{4}/;`,
+      String.raw`const C = /U[0-9]{4,}/;`,
+      String.raw`const C = /[A-Z][0-9]+/;`,
+      String.raw`const C = /U[0-9]*/;`,
+      String.raw`const C = /[A-Z][\d]{4}/;`,
+      String.raw`const C = /U[\d]+/;`,
+      String.raw`const C = /[A-Z][\d]*/;`,
+      String.raw`const C = /[A-Z]\d\d\d\d/;`,
+      String.raw`const C = /U\d\d\d\d\d?/;`,
+      String.raw`const C = /[A-Z][0-9][0-9][0-9][0-9]/;`,
+      String.raw`const C = /U[0-9]\d[0-9]\d/;`,
+      String.raw`const C = new RegExp("[A-Z][0-9]{4}");`,
+      String.raw`const C = new RegExp("U\\d\\d\\d\\d");`,
+    ];
+    for (const line of spellings) {
+      assert.deepEqual(spellsDigits(line), [1], line);
+      assert.deepEqual(spellsDigits(`${OTHER}\n${line}`), [2], line);
+    }
+    const onTheLine = [String.raw`/\[\[user:[A-Z][0-9]{4}\]\]/`, String.raw`/\[\[user:\w[\d]+\]\]/`, String.raw`/\[\[user:\w\d\d\d\d\]\]/`, String.raw`/\[\[user:\w[0-9][0-9][0-9][0-9]\]\]/`];
+    for (const line of onTheLine) assert.deepEqual(spellsDigits(line), [1], line);
+  });
+
+  test("digits that can't be a token's code stay quiet", () => {
+    const OTHER = String.raw`const T = /\[\[[^\]]*\]\]/g;`;
+    const quiet = [
+      String.raw`const ISO = /\d{4}-\d{2}/;`,
+      String.raw`const YEAR = /^\d\d\d\d-\d\d$/;`,
+      String.raw`const ID = /^[0-9]{15}$/;`,
+      String.raw`const ID = /^[a-zA-Z0-9]{15}(?:[a-zA-Z0-9]{3})?$/;`,
+      String.raw`const RUN = /^hc-[0-9]{4}-[0-9]{2}-[\d]{2}$/;`,
+      String.raw`const FY = /FY\d{4}/;`,
+      String.raw`const Q = /Q[0-9]/;`,
+      // Three written out is short of any token, which has four digits or more.
+      String.raw`const CODE = /^R\d\d\d$/;`,
+    ];
+    for (const line of quiet) {
+      assert.deepEqual(spellsDigits(line), [], line);
+      assert.deepEqual(spellsDigits(`${OTHER}\n${line}`), [], line);
+    }
   });
 
   test("no source file but the pseudonymiser spells a token's digits", () => {
