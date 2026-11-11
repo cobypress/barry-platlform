@@ -14,7 +14,7 @@ import { addMonths } from "./retention.ts";
 import type { DocumentFile, DocumentsJobInput } from "./types.ts";
 import { loadPseudonymMap, SURVEY_FILE, write } from "../render/render-run.ts";
 import { HANDBOOK_DOCX, renderHandbookDocx } from "../handbook/docx.ts";
-import { HANDBOOK_NOT_MADE, readHandbook } from "../handbook/read.ts";
+import { HANDBOOK_NOT_MADE, readEarlierHandbook, readHandbook } from "../handbook/read.ts";
 import { Survey } from "../survey/questions.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 
@@ -145,7 +145,7 @@ async function putReadoutKit(drive: DocumentDrive, clientName: string, folderNam
  * Without one, the other documents are made as before and the warnings say
  * why; nothing here fails the make.
  */
-async function makeHandbook(dir: string, out: string, clientName: string, runDate: string): Promise<{ ok: true; path: string; unnamed: boolean } | { ok: false; warning: string }> {
+async function makeHandbook(dir: string, out: string, clientName: string, runDate: string): Promise<{ ok: true; path: string; unnamed: boolean; noEarlier: boolean } | { ok: false; warning: string }> {
   const read = readHandbook(dir);
   if (!read.ok) return { ok: false, warning: HANDBOOK_NOT_MADE[read.why] };
   // Who made each recent change is a token in the file, named from the run's
@@ -158,10 +158,14 @@ async function makeHandbook(dir: string, out: string, clientName: string, runDat
     pseudonyms = null;
   }
   try {
+    // A re-check's handbook says what changed since its earlier one (DECISIONS.md
+    // 483), worked out here from the two files and kept nowhere. The earlier
+    // folder is only read: its run.json and handbook.json, never its map.
+    const earlier = readEarlierHandbook(dir);
     const path = join(out, HANDBOOK_DOCX);
     mkdirSync(out, { recursive: true, mode: 0o700 });
-    write(path, await renderHandbookDocx(read.handbook, { clientName, runDate, pseudonyms }));
-    return { ok: true, path, unnamed: pseudonyms === null };
+    write(path, await renderHandbookDocx(read.handbook, { clientName, runDate, pseudonyms, earlier }));
+    return { ok: true, path, unnamed: pseudonyms === null, noEarlier: earlier === null };
   } catch {
     // The error could quote the handbook, so it isn't kept.
     return { ok: false, warning: HANDBOOK_NOT_MADE.render };
@@ -354,6 +358,8 @@ async function documentsLocked(runId: string, deps: WorkerDeps, attempt: Attempt
     const handbook = await makeHandbook(dir, join(dir, "documents"), clientName, input.run.asOf);
     if (!handbook.ok) log(`Run ${runId}: ${handbook.warning}`);
     else if (handbook.unnamed) log(`Run ${runId}: the org handbook names no one who made a recent change, because the run's pseudonym map couldn't be read.`);
+    // Fixed words: nothing from either folder, and not which check it failed, since one is that it's another org's.
+    if (handbook.ok && handbook.noEarlier) log(`Run ${runId}: the org handbook says there was no earlier handbook to compare with.`);
     const folder = await folderFor(deps.drive, clientName, input.driveFolderId);
     const nameOf = (output: keyof typeof FILES): string => `${clientName} - ${FILES[output].title}.${FILES[output].ext}`;
     // Also by name, for a make from before the console was told of these three.
