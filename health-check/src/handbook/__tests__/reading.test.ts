@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { SALES_CLOUD_MODULES } from "../../domains/index.ts";
 import { runHealthCheck } from "../../engine/run.ts";
@@ -23,6 +23,7 @@ import { METADATA_READING } from "../detail.ts";
 import { renderHandbookDocx, SINCE_TITLE } from "../docx.ts";
 import { readHandbook } from "../read.ts";
 import { Handbook, HANDBOOK_VERSION } from "../schema.ts";
+import { withoutReadings } from "./older-files.ts";
 
 // Which reading made a handbook (DECISIONS.md 484) is stamped on each step's
 // output when the step reads, never when the file is built: a run in flight
@@ -75,17 +76,35 @@ async function fromBefore(strip: "metadata" | "apex") {
 
 const compared = (c: KindComparison) => (c.status === "compared" ? c : assert.fail(`not compared: ${c.unreadIn}`));
 
-/** One kind's words in the part, as the customer reads them. */
-async function kindText(earlier: Handbook, dir: string, title: string): Promise<string> {
-  const text = docxText(await renderHandbookDocx(handbookIn(dir), { clientName: "Synthetic Co", runDate: AS_OF, pseudonyms: loadPseudonymMap(dir), earlier: { handbook: earlier, asOf: EARLIER_AS_OF } }));
+/** The whole of the run's handbook set against an earlier one, as the customer reads it. */
+async function documentText(earlier: Handbook, dir: string): Promise<string> {
+  return docxText(await renderHandbookDocx(handbookIn(dir), { clientName: "Synthetic Co", runDate: AS_OF, pseudonyms: loadPseudonymMap(dir), earlier: { handbook: earlier, asOf: EARLIER_AS_OF } }));
+}
+
+/** One kind's words in the part. */
+function kindIn(text: string, title: string): string {
   const part = text.slice(text.indexOf(`\n## ${SINCE_TITLE}\n`), text.indexOf("\n## Recent changes\n"));
   const start = part.indexOf(`\n### ${title}\n`);
+  assert.ok(start >= 0, `the part has ${title}`);
   const rest = part.slice(start + `\n### ${title}\n`.length);
   return rest.slice(0, rest.indexOf("\n### ") < 0 ? undefined : rest.indexOf("\n### ")).trim();
 }
 
-const UNRECORDED_NOW = (many: string, one: string): RegExp =>
-  new RegExp(`\\n\\nThis health check read your ${many} before we began to record which version of our reader read them, and two versions can read the same ${one} differently, so we've compared only which were added or removed and when each was last changed\\.$`);
+const kindText = async (earlier: Handbook, dir: string, title: string): Promise<string> => kindIn(await documentText(earlier, dir), title);
+
+/**
+ * The sentence for a kind one health check holds no number for (decision
+ * 486), the same whichever case left it empty, and true of each: a file from
+ * before the numbers were kept, a reused step read before then, and a Tooling
+ * read stopped under one number and resumed under another.
+ */
+const UNKNOWN = (which: "your earlier health check" | "this health check", many: string, one: string): string =>
+  `We can't tell which version of our reader read your ${many} in ${which}, and two versions can read the same ${one} differently, so we've compared only which were added or removed and when each was last changed.`;
+
+/** The heart of what the part said before decision 486, false of a read resumed under another number. */
+const OLD_WORDS = /we began to record/;
+
+const UNRECORDED_NOW = (many: string, one: string): RegExp => new RegExp(`\\n\\n${UNKNOWN("this health check", many, one).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`);
 
 describe("a run resumed with a step's checkpoint from before the readings were kept", () => {
   for (const half of ["metadata", "apex"] as const) {
@@ -170,6 +189,32 @@ describe("a Tooling read stopped part way and resumed (decision 485)", () => {
       assert.deepEqual(read<{ readBy: unknown }>(resumed.dir, HANDBOOK_FILE).readBy, { metadata: expected, apex: APEX_READING, build: BUILD_READING });
       // Both kept files are cleared once the step's output is saved.
       assert.ok(!existsSync(join(checkpoints, READING_KEPT)) && !existsSync(join(checkpoints, ITEMS_KEPT)));
+      if (expected !== null) return;
+
+      // Set against a run read afresh by the same route, the part says we
+      // can't tell which version read this one, which is true whether a number
+      // was never kept or another was (decision 486).
+      const fresh = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: new Date(AS_OF), transport: new Simulator({ readOnly: true }), log: () => {} });
+      const text = await documentText(handbookIn(fresh.dir), resumed.dir);
+      assert.equal(kindIn(text, "Flows"), `No flows were added, removed or changed.\n\n${UNKNOWN("this health check", "flows", "flow")}`);
+      assert.equal(kindIn(text, "Validation rules"), `No validation rules were added, removed or changed.\n\n${UNKNOWN("this health check", "validation rules", "validation rule")}`);
+      assert.doesNotMatch(text, OLD_WORDS);
     });
   }
+});
+
+describe("an earlier handbook from before the numbers were kept (decision 486)", () => {
+  test("a version 5 baseline: the same sentence, of the earlier health check", async () => {
+    const now = await run();
+    const dir = join(tempDir(), "earlier");
+    mkdirSync(dir);
+    const file = read<Record<string, unknown>>(now.dir, HANDBOOK_FILE);
+    writeFileSync(join(dir, HANDBOOK_FILE), JSON.stringify({ ...withoutReadings(file), version: 5 }));
+    const earlier = handbookIn(dir);
+    assert.deepEqual(earlier.readBy, { metadata: null, apex: null, build: null });
+    const text = await documentText(earlier, now.dir);
+    assert.equal(kindIn(text, "Flows"), `No flows were added, removed or changed.\n\n${UNKNOWN("your earlier health check", "flows", "flow")}`);
+    assert.equal(kindIn(text, "Validation rules"), `No validation rules were added, removed or changed.\n\n${UNKNOWN("your earlier health check", "validation rules", "validation rule")}`);
+    assert.doesNotMatch(text, OLD_WORDS);
+  });
 });

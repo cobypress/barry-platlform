@@ -119,11 +119,11 @@ function asVersion(file: Handbook, version: number): Record<string, unknown> {
 
 /** The sentence for a kind whose earlier file says no reading. */
 const unrecorded = (many: string, one: string): string =>
-  `Your earlier health check read your ${many} before we began to record which version of our reader read them, and two versions can read the same ${one} differently, so we've compared only which were added or removed and when each was last changed.`;
+  `We can't tell which version of our reader read your ${many} in your earlier health check, and two versions can read the same ${one} differently, so we've compared only which were added or removed and when each was last changed.`;
 
 /** The same, where either file holds no last-changed dates for the kind (decision 485). */
 const addedOrRemoved = (many: string, one: string): string =>
-  `Your earlier health check read your ${many} before we began to record which version of our reader read them, and two versions can read the same ${one} differently, so we've compared only which were added or removed.`;
+  `We can't tell which version of our reader read your ${many} in your earlier health check, and two versions can read the same ${one} differently, so we've compared only which were added or removed.`;
 
 describe("no baseline", () => {
   // The synthetic org's handbook as an engine at 17586d0, before decision 483,
@@ -472,14 +472,14 @@ describe("never guessed", () => {
       h.readBy = { metadata: 1, apex: 1, build: 1 };
     });
     const unknownNow = Handbook.parse({ ...after, readBy: { metadata: null, apex: 1, build: 1 } });
-    assert.match(kindIn(partOf(await textOf(earlier, unknownNow)), "Validation rules"), /\n\nThis health check read your validation rules before we began to record which version of our reader read them, and two versions can read the same validation rule differently, so we've compared only which were added or removed and when each was last changed\.$/);
+    assert.match(kindIn(partOf(await textOf(earlier, unknownNow)), "Validation rules"), /\n\nWe can't tell which version of our reader read your validation rules in this health check, and two versions can read the same validation rule differently, so we've compared only which were added or removed and when each was last changed\.$/);
     const neither = earlierOf((h) => {
       plantReadings(h);
       h.readBy = { metadata: null, apex: null, build: 1 };
     });
     const both = compareHandbooks(neither.handbook, Handbook.parse({ ...after, readBy: { metadata: null, apex: null, build: 1 } }));
     for (const kind of Object.values(both)) assert.equal(compared(kind).reading, "unknownBoth");
-    assert.match(kindIn(partOf(await textOf(neither, Handbook.parse({ ...after, readBy: { metadata: null, apex: null, build: 1 } }))), "Apex classes"), /\n\nBoth health checks read your Apex classes before we began to record which version of our reader read them, and two versions can read the same Apex class differently, so we've compared only which were added or removed and when each was last changed\.$/);
+    assert.match(kindIn(partOf(await textOf(neither, Handbook.parse({ ...after, readBy: { metadata: null, apex: null, build: 1 } }))), "Apex classes"), /\n\nWe can't tell which version of our reader read your Apex classes in either health check, and two versions can read the same Apex class differently, so we've compared only which were added or removed and when each was last changed\.$/);
   });
 
   test("flows by another route and another reading: one sentence gives both reasons and says what follows once", async () => {
@@ -493,7 +493,7 @@ describe("never guessed", () => {
     const words = kindIn(partOf(await textOf(earlier)), "Flows");
     assert.equal(
       words,
-      "No flows were added, removed or changed.\n\nWe've compared only which flows were added or removed and when each was last changed, for two reasons: your earlier health check read your flows by a different route from this one, and the two routes can give a different version of a flow; and your earlier health check read your flows before we began to record which version of our reader read them, and two versions can read the same flow differently.",
+      "No flows were added, removed or changed.\n\nWe've compared only which flows were added or removed and when each was last changed, for two reasons: your earlier health check read your flows by a different route from this one, and the two routes can give a different version of a flow; and we can't tell which version of our reader read your flows in your earlier health check, and two versions can read the same flow differently.",
     );
     assert.equal(words.match(/we've compared only/gi)?.length, 1);
   });

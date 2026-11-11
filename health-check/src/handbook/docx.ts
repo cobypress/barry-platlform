@@ -712,16 +712,20 @@ const addedOrRemovedOnly = (c: Compared): boolean => (c.routes !== null || c.rea
 
 /**
  * Why a kind was compared only by its dates (decision 484), as a clause that
- * ends before the consequence. Each is true of every case its key covers: a
- * file with no reading recorded was read before we kept one, whichever run it
- * is, a resumed run's reused step included.
+ * ends before the consequence. Each is true of every case its key covers.
+ * "older" and "differs" are said only where every number is known. A file
+ * with no number for the kind says only that we can't tell which version read
+ * it (decision 486), because three cases leave the number empty: a file from
+ * before the numbers were kept, a reused step read before then, and a Tooling
+ * read stopped under one number and resumed under another, where a number was
+ * recorded and no one version read the whole.
  */
 function readingWords(kind: SinceKind, reading: Reading): string {
   const same = `the same ${kind.one} differently`;
   if (reading === "older") return `Your earlier health check read your ${kind.many} with an earlier version of our reader, which can read ${same}`;
   if (reading === "differs") return `Your earlier health check read your ${kind.many} with a different version of our reader from this one, which can read ${same}`;
-  const who = { unknownBefore: "Your earlier health check", unknownNow: "This health check", unknownBoth: "Both health checks" }[reading];
-  return `${who} read your ${kind.many} before we began to record which version of our reader read them, and two versions can read ${same}`;
+  const which = { unknownBefore: "your earlier health check", unknownNow: "this health check", unknownBoth: "either health check" }[reading];
+  return `We can't tell which version of our reader read your ${kind.many} in ${which}, and two versions can read ${same}`;
 }
 
 /** Why flows were compared only by their dates, by route: a clause that ends before the consequence. */
