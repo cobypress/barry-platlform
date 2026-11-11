@@ -235,9 +235,11 @@ describe("a full synthetic run's queries", () => {
   });
 });
 
-test("no step whose read gained an end changed its version, so runs in flight keep their checkpoints", () => {
+test("no step whose read gained an end changed its version, so runs in flight keep their checkpoints, but the opportunities", () => {
   // DECISIONS.md 480 and 465: what each step keeps has the same shape as before.
+  // The opportunities went from 4 to 5 on purpose (465): a checkpoint from 4
+  // may hold deals read late as they are now, which a re-read winds back.
   const versions = Object.fromEntries(collectExtractors(ALL_MODULES).map((e) => [e.id, e.version]));
-  const touched = { opportunities: 4, "next-steps": 1, activity: 2, "async-jobs": 1, leads: 3, "pardot-leads": 2, "cpq-quotes": 1, logins: 4, "login-activity": 1, "field-usage": 1, "service-setup": 1, "service-cases": 2, "service-activity": 2, "setup-audit": 2 };
+  const touched = { opportunities: 5, "next-steps": 1, activity: 2, "async-jobs": 1, leads: 3, "pardot-leads": 2, "cpq-quotes": 1, logins: 4, "login-activity": 1, "field-usage": 1, "service-setup": 1, "service-cases": 2, "service-activity": 2, "setup-audit": 2 };
   assert.deepEqual(Object.fromEntries(Object.keys(touched).map((id) => [id, versions[id]])), touched);
 });
