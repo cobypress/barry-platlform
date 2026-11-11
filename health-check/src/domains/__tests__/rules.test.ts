@@ -13,6 +13,9 @@ import { leadsExtractor } from "../../extract/leads.ts";
 import { opportunitiesExtractor } from "../../extract/opportunities.ts";
 import { Finding } from "../../schemas/index.ts";
 import { USER_GUARD_IDS } from "../../guards/user-guards.ts";
+import type { Rule, RuleResult } from "../../engine/rule.ts";
+import { DESTRUCTIVE_RECOMMENDATIONS } from "../../schemas/index.ts";
+import { plainWords } from "../../render/format.ts";
 
 let extracts: Map<string, unknown>;
 let tokenOf: (n: number) => string;
@@ -616,5 +619,62 @@ describe("repeatability", () => {
     const b = analyseExtracts(clone(extracts)).findings.map((f) => f.id);
     assert.deepEqual(a, b);
     assert.equal(new Set(a).size, a.length, "ids are unique");
+  });
+});
+
+// Every reason a destructive rule can give for having no figure, as a blocked
+// finding prints it (DECISIONS.md 498). Hours and seats are sized as a saving:
+// "the calibration has no time" on a blocked finding would say that agreeing one
+// gives a figure, and it doesn't while a guard holds it back. So those print the
+// guards' reason. Record types never have a figure, and keep their own
+// (src/domains/__tests__/record-type-use.test.ts).
+describe("a blocked finding's reason for having no figure", () => {
+  const ENGINE = "Not counted as a saving, because not every guard passed.";
+  /** The modules with one rule's destructive findings held back by an unknown guard, as any guard can. */
+  const heldBack = (ruleId: string) =>
+    SALES_CLOUD_MODULES.map((m) => ({
+      ...m,
+      rules: m.rules.map((r): Rule => (r.id !== ruleId ? r : { ...r, evaluate: (ctx) => [r.evaluate(ctx)].flat().map((x): RuleResult => (x.outcome === "issue" && DESTRUCTIVE_RECOMMENDATIONS.has(x.recommendationType) ? { ...x, guards: (x.guards ?? []).map((g, i) => (i === 0 ? { ...g, status: "unknown" as const } : g)) } : x)) })),
+    }));
+
+  test("unused custom fields, with no time agreed and with one: the guards' reason, in plain words", () => {
+    const noTime = loadCalibration();
+    assert.equal(noTime.effortMinutes["custom-field-upkeep"], undefined, "the synthetic calibration agrees no time");
+    const timed = loadCalibration();
+    timed.effortMinutes = { "custom-field-upkeep": 30 };
+    for (const calibration of [noTime, timed]) {
+      const blocked = byRule(analyseExtracts(extracts, { calibration }).findings, "cfg.unused-custom-fields").filter((f) => f.status === "issue");
+      assert.ok(blocked.length > 0 && blocked.every((f) => f.recommendationType === "investigate"));
+      for (const f of blocked) {
+        assert.deepEqual(f.value, { kind: "not_sized", reason: ENGINE }, f.summary);
+        assert.equal(plainWords(ENGINE), "Not counted as a saving, because not every check on it passed.");
+      }
+    }
+  });
+
+  for (const ruleId of ["utl.dormant-licensed-users", "utl.never-logged-in"]) {
+    test(`${ruleId}: the users to release, held back, with no price agreed and with one: the guards' reason`, () => {
+      const unpriced = loadCalibration();
+      unpriced.licenceCosts = {};
+      for (const calibration of [unpriced, loadCalibration()]) {
+        // As the rule writes them, every guard passed, so the engine never blocks them.
+        const free = analyseExtracts(extracts, { answers: loadAnswers(), calibration }).findings.filter((f) => f.ruleId === ruleId && f.title.startsWith("Licences you can release"));
+        assert.ok(free.length > 0);
+        for (const f of free) assert.equal(f.recommendationType, "deactivate");
+        const held = analyseExtracts(extracts, { answers: loadAnswers(), calibration, modules: heldBack(ruleId) }).findings.filter((f) => f.ruleId === ruleId && f.title.startsWith("Licences you can release"));
+        assert.equal(held.length, free.length);
+        for (const f of held) {
+          assert.equal(f.recommendationType, "investigate");
+          assert.deepEqual(f.value, { kind: "not_sized", reason: ENGINE });
+        }
+      }
+    });
+  }
+
+  test("the users to release, unpriced and unblocked, say the price is missing", () => {
+    const calibration = loadCalibration();
+    calibration.licenceCosts = {};
+    const clear = analyseExtracts(extracts, { answers: loadAnswers(), calibration }).findings.find((f) => f.recommendationType === "deactivate")!;
+    assert.ok(clear.value.kind === "not_sized" && /^The calibration has no cost for: /.test(clear.value.reason));
   });
 });

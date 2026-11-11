@@ -499,8 +499,12 @@ describe("the guard", () => {
     // One guard per type, each unknown, so "not every guard passed" is true of it.
     assert.deepEqual(f.guards.map((g) => [g.guardId, g.subject, g.status]), [[RECORD_TYPE_GUARD, "Case.Support", "unknown"], [RECORD_TYPE_GUARD, "Invoice__c.Credit_Note", "unknown"]]);
     assert.ok(f.guards.every((g) => /We don't read which profiles default to this record type, or which flows, Apex and integrations name it/.test(g.detail)));
-    // The engine's own words for a blocked finding: true of this one, which never had a figure.
-    assert.deepEqual(f.value, { kind: "not_sized", reason: "Not counted as a saving, because not every guard passed." });
+    // Its own reason for having no figure, kept when the guards block it (DECISIONS.md 498):
+    // "not counted as a saving" would say a saving was waiting, and none ever is.
+    const reason = "We don't put a figure on this: the only one to hand would be a guess at upkeep hours.";
+    assert.deepEqual(f.value, { kind: "not_sized", reason });
+    // As a report page prints it, beside "Not costed".
+    assert.deepEqual(valueText(renderContext(new Pseudonymiser(), "GBP", false), f), { amount: "Not costed", note: escapeXml(reason) });
     assert.deepEqual(f.dependencies, ["Check which profiles default to each record type", "Check which flows, Apex and integrations name each record type"]);
   });
 
@@ -525,6 +529,7 @@ describe("the guard", () => {
     const printed = applyGuards(raw);
     assert.equal(printed.recommendationType, "investigate");
     assert.equal(printed.recommendation, raw.blockedRecommendation);
+    assert.deepEqual(printed.value, raw.value);
     // Were every guard to pass, the deactivation would print: it's the guard that holds it back.
     assert.equal(applyGuards({ ...raw, guards: raw.guards!.map((g) => ({ ...g, status: "passed" as const })) }).recommendationType, "deactivate");
   });
