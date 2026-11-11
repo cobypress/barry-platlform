@@ -67,7 +67,7 @@ const notKept = <P extends { status: string }>(part: P) => (part.status === "ok"
 
 function handbook(over: Over = {}): Handbook {
   const { flows = { status: "ok", items: [] }, validationRules = { status: "ok", covers: RETRIEVE, items: [] }, ...rest } = over;
-  return Handbook.parse({ version: HANDBOOK_VERSION, flows: notKept(flows), validationRules: notKept(validationRules), apexClasses: NO_APEX, apexTriggers: NO_APEX, recentChanges: NO_CHANGES, ...rest });
+  return Handbook.parse({ version: HANDBOOK_VERSION, readBy: { metadata: null, apex: null, build: null }, flows: notKept(flows), validationRules: notKept(validationRules), apexClasses: NO_APEX, apexTriggers: NO_APEX, recentChanges: NO_CHANGES, ...rest });
 }
 
 const OPTIONS = { clientName: "Synthetic Co", runDate: "2026-10-31T00:00:00.000Z" };

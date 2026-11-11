@@ -243,7 +243,7 @@ describe("the part on its own", () => {
     truncated,
   });
   const label = (id: string) => `[[user:U${id.slice(-7, -3)}]]`;
-  const bare = { flows: { status: "unavailable", reason: "x" }, validationRules: { status: "unavailable", reason: "x" }, apexClasses: { status: "unavailable", reason: "x" }, apexTriggers: { status: "unavailable", reason: "x" } } as const;
+  const bare = { readBy: { metadata: null, apex: null, build: null }, flows: { status: "unavailable", reason: "x" }, validationRules: { status: "unavailable", reason: "x" }, apexClasses: { status: "unavailable", reason: "x" }, apexTriggers: { status: "unavailable", reason: "x" } } as const;
   const doc = async (recent: Handbook["recentChanges"]) => docxText(await renderHandbookDocx(Handbook.parse({ version: HANDBOOK_VERSION, ...bare, recentChanges: recent }), OPTIONS));
 
   test("says it's cut when the trail had more than the read takes", async () => {

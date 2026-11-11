@@ -1,7 +1,7 @@
 import { isUnavailable, SalesforceError, type MetadataMember } from "../salesforce/client.ts";
 import { redactSecrets } from "../privacy/secrets.ts";
 import { scanApex, type ApexScan } from "./apex-scan.ts";
-import { readTouches, type ApexTouches } from "./apex-touches.ts";
+import { APEX_READING, readTouches, type ApexTouches } from "./apex-touches.ts";
 import { orgExtractor, recordCountsExtractor } from "./configuration.ts";
 import { indexReferences, parseMetadataBundle, type MetadataBundle, type ReferenceIndex } from "./metadata-parse.ts";
 import { readBundleThroughTooling, ToolingGapError, TOOLING_PARTIAL_KEYS } from "./metadata-tooling.ts";
@@ -146,6 +146,12 @@ export type ApexData = {
    * from before version 10.
    */
   lastChanged?: { classes: LastChanged; triggers: LastChanged };
+  /**
+   * Which reading of the code made what the org's handbook keeps of each class
+   * and trigger (DECISIONS.md 484), stamped as the step reads. Undefined in a
+   * checkpoint read before it was kept, which the handbook says as null.
+   */
+  handbookReading?: number;
 };
 
 // Bodies are scanned for references here and then dropped, so code never sits
@@ -248,6 +254,7 @@ export const apexExtractor: Extractor<ApexData> = {
       classCoverage,
       references,
       lastChanged: { classes: classes.lastChanged, triggers: triggers.lastChanged },
+      handbookReading: APEX_READING,
     };
   },
 };

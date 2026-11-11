@@ -4,6 +4,7 @@ import { FactsFile, summariseFacts } from "../facts/summary.ts";
 import { join, resolve } from "node:path";
 import { z } from "zod";
 import { assertOutsideGit } from "../engine/run.ts";
+import { baselineRun } from "./baseline.ts";
 import { applyNarrative, type Rejection } from "../narrative/apply.ts";
 import type { NarrativeClient } from "../narrative/client.ts";
 import { Intake } from "../narrative/intake.ts";
@@ -61,12 +62,10 @@ export const write = (path: string, data: string | Buffer): void => writeFileSyn
  * compares against it. Null if it's gone (retention), unreadable, or another org's.
  */
 function loadBaseline(dir: string, run: Run): ReportInput | null {
-  if (!run.baselineRunId || !/^[A-Za-z0-9_-]+$/.test(run.baselineRunId)) return null;
-  const other = join(dir, "..", run.baselineRunId);
-  if (!existsSync(join(other, "run.json")) || !existsSync(join(other, "findings.json"))) return null;
+  const baseline = baselineRun(dir, run);
+  if (!baseline || !existsSync(join(baseline.dir, "findings.json"))) return null;
   try {
-    const { input } = loadRun(other, { baseline: false });
-    return input.run.orgId.slice(0, 15) === run.orgId.slice(0, 15) ? input : null;
+    return loadRun(baseline.dir, { baseline: false }).input;
   } catch {
     return null;
   }

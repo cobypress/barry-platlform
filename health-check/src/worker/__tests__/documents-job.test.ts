@@ -1,7 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { buildReport, currentBody, type ReportOutputKey } from "../../narrative/sections.ts";
 import { approvedReport, heldFigures, isPlainFigure, layoutWarnings, renderReleased, type ApprovedRun, type DocumentKey, type HeldFigure } from "../../render/render-released.ts";
@@ -12,7 +12,8 @@ import type { ReportSection, SectionVersion } from "../../schemas/index.ts";
 import { runFromRecording } from "../../testing/harness.ts";
 import { docxText } from "../../testing/docx-text.ts";
 import { HANDBOOK_FILE } from "../../handbook/build.ts";
-import { HANDBOOK_DOCX } from "../../handbook/docx.ts";
+import { HANDBOOK_DOCX, NO_EARLIER, SINCE_TITLE } from "../../handbook/docx.ts";
+import { withEarlier } from "../../testing/earlier-handbook.ts";
 import { HANDBOOK_NOT_MADE } from "../../handbook/read.ts";
 import { HANDBOOK_MARKER } from "../../testing/synthetic-org.ts";
 import { loadAnswers } from "../../testing/replay.ts";
@@ -1074,6 +1075,90 @@ describe("the org handbook", () => {
       assert.equal(handbooks(drive).length, 1, scope);
       assert.equal(deps.store.documents.get(RUN_ID)!.made!.files.length, 6, scope);
     }
+  });
+
+  describe("a re-check's (decision 483)", () => {
+    const NO_EARLIER_LOGGED = `Run ${RUN_ID}: the org handbook says there was no earlier handbook to compare with.`;
+    /** The synthetic run as a re-check, its planted earlier health check beside it on the worker's disk. */
+    function recheck(drive: MemoryDrive) {
+      const deps = withHandbook(jobInput(), drive);
+      const dir = join(deps.runsDir, RUN_ID);
+      cpSync(join(recorded, "run.json"), join(dir, "run.json"));
+      cpSync(join(recorded, "pseudonym-map.json"), join(dir, "pseudonym-map.json"));
+      return { deps, dir, earlier: withEarlier(dir) };
+    }
+    const partOf = (body: Buffer): string => {
+      const text = docxText(body);
+      return text.slice(text.indexOf(`\n## ${SINCE_TITLE}\n`) + 1, text.indexOf("\n## Recent changes\n"));
+    };
+
+    test("handbook has the part, from the earlier folder beside the run's own, and the console hears nothing of it", async () => {
+      const drive = new MemoryDrive();
+      const { deps } = recheck(drive);
+      const result = await processDocumentsJob(RUN_ID, deps, { final: true });
+      assert.equal(result.outcome, "done", result.detail);
+      const part = partOf(handbooks(drive)[0]!.body!);
+      assert.match(part, /^## Changed since your last health check\n\nThis compares your org on 31 Oct 2026 with your health check of 14 Jul 2026\./);
+      assert.match(part, /\nRemoved: 1 flow\nLead Nurture \(old\) \(Lead_Nurture_Old\)\n/);
+      assert.match(part, /\nFinanceSync: last changed 13 Oct 2026 by Ash Rowe\n/);
+      const made = deps.store.documents.get(RUN_ID)!.made!;
+      assert.deepEqual(made.warnings, [OVERFLOW]);
+      assert.doesNotMatch(JSON.stringify([made, result, deps.lines]), /Lead_Nurture_Old|earlier handbook/);
+    });
+
+    test("with its baseline named and nothing to read, the handbook is still made, with the one sentence, and the log says so in fixed words", async () => {
+      const spoil: Array<[string, (dir: string, earlier: string) => void]> = [
+        ["folder gone", (_dir, earlier) => rmSync(earlier, { recursive: true })],
+        ["run.json missing", (_dir, earlier) => rmSync(join(earlier, "run.json"))],
+        ["handbook.json missing", (_dir, earlier) => rmSync(join(earlier, HANDBOOK_FILE))],
+        ["handbook.json damaged", (_dir, earlier) => writeFileSync(join(earlier, HANDBOOK_FILE), "{ HB-DAMAGED-0483")],
+        ["another org's", (_dir, earlier) => {
+          const other = JSON.parse(readFileSync(join(earlier, "run.json"), "utf8")) as Record<string, unknown>;
+          writeFileSync(join(earlier, "run.json"), JSON.stringify({ ...other, orgId: "00D000000000777AAA" }));
+        }],
+        ["a path in its id", (dir) => {
+          const own = JSON.parse(readFileSync(join(dir, "run.json"), "utf8")) as Record<string, unknown>;
+          writeFileSync(join(dir, "run.json"), JSON.stringify({ ...own, baselineRunId: `../runs/${RUN_ID}-earlier` }));
+        }],
+      ];
+      for (const [what, spoilIt] of spoil) {
+        const drive = new MemoryDrive();
+        const { deps, dir, earlier } = recheck(drive);
+        spoilIt(dir, earlier);
+        const result = await processDocumentsJob(RUN_ID, deps, { final: true });
+        assert.equal(result.outcome, "done", what);
+        assert.equal(partOf(handbooks(drive)[0]!.body!), `## ${SINCE_TITLE}\n\n${NO_EARLIER}\n`, what);
+        assert.deepEqual(deps.store.documents.get(RUN_ID)!.made!.warnings, [OVERFLOW], what);
+        assert.deepEqual(deps.lines.filter((l) => /earlier handbook/.test(l)), [NO_EARLIER_LOGGED], what);
+        assert.doesNotMatch(JSON.stringify([result, deps.lines]), /00D000000000777|HB-DAMAGED|-earlier/, what);
+      }
+    });
+
+    test("with no baseline named, nothing is said of one, in the document or the log", async () => {
+      const drive = new MemoryDrive();
+      const deps = withHandbook(jobInput(), drive);
+      cpSync(join(recorded, "run.json"), join(deps.runsDir, RUN_ID, "run.json"));
+      assert.equal((await processDocumentsJob(RUN_ID, deps, { final: true })).outcome, "done");
+      assert.doesNotMatch(docxText(handbooks(drive)[0]!.body!), /Changed since|earlier handbook/);
+      assert.ok(!deps.lines.some((l) => /earlier handbook/.test(l)));
+    });
+
+    test("made again after retention took the earlier folder, the same file in Drive loses the part and says so", async () => {
+      const drive = new MemoryDrive();
+      const { deps, earlier } = recheck(drive);
+      await processDocumentsJob(RUN_ID, deps, { final: true });
+      const first = handbooks(drive)[0]!;
+      assert.match(partOf(first.body!), /\nRemoved: 1 flow\n/);
+      // The earlier run's folder goes 12 months after its release (retention.ts), before this one's.
+      rmSync(earlier, { recursive: true });
+      const doc = deps.store.documents.get(RUN_ID)!;
+      doc.input = { ...doc.input, state: "queued", driveFolderId: doc.made!.driveFolderId, files: doc.made!.files };
+      assert.equal((await processDocumentsJob(RUN_ID, deps, { final: true })).outcome, "done");
+      const all = handbooks(drive);
+      assert.deepEqual([all.length, all[0]!.id, all[0]!.uploads], [1, first.id, 2]);
+      assert.equal(partOf(all[0]!.body!), `## ${SINCE_TITLE}\n\n${NO_EARLIER}\n`);
+      assert.deepEqual(readFileSync(join(deps.runsDir, RUN_ID, "documents", HANDBOOK_DOCX)), all[0]!.body);
+    });
   });
 
   test("each sentence begins exactly with the words the console splits on", () => {

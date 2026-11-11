@@ -5,7 +5,7 @@ import { unreadReason, type MetadataBundle } from "../extract/metadata-parse.ts"
 import type { Sourced } from "../extract/types.ts";
 import { objectResolver } from "../domains/object-names.ts";
 import { capped as cutText } from "./detail.ts";
-import { CHANGES_NOT_KEPT, Handbook, HANDBOOK_VERSION, HandbookRecentChanges, MAX_APEX_CLASSES, MAX_APEX_TRIGGERS, MAX_CHANGES, TRIGGER_EVENTS, type HandbookApexClass, type HandbookApexTrigger, type HandbookFlow, type HandbookLastChange, type LastChanges } from "./schema.ts";
+import { CHANGES_NOT_KEPT, Handbook, HANDBOOK_VERSION, HandbookRecentChanges, MAX_APEX_CLASSES, MAX_APEX_TRIGGERS, MAX_CHANGES, TRIGGER_EVENTS, type HandbookApexClass, type HandbookApexTrigger, type HandbookFlow, type HandbookReadBy, type HandbookLastChange, type LastChanges } from "./schema.ts";
 
 /**
  * In the run folder, beside the findings: kept by `hc purge`, deleted with the
@@ -15,9 +15,36 @@ export const HANDBOOK_FILE = "handbook.json";
 
 const unavailable = (reason: string) => ({ status: "unavailable" as const, reason });
 
+/**
+ * Which build of the file this is (DECISIONS.md 485), written into
+ * handbook.json as `readBy.build` each time it's built. Part of what the file
+ * keeps is worked out here, from the steps' raw fields, and not when the steps
+ * read: a trigger's events and the object it's on, which field says whether a
+ * class is a test, the sorting, the caps and the cuts, and which last change
+ * belongs to which component. A file can be built days after its steps read,
+ * under newer code, so the steps' numbers can't vouch for this. A re-check
+ * names which details of a component differ only when both files hold the same
+ * build number too. Raise it with any change here, or to the caps in
+ * schema.ts, that moves what the file keeps for a component nobody touched.
+ * `source-pin.test.ts` holds it to a hash of this file's text.
+ */
+export const BUILD_READING = 1;
+
 function allUnavailable(reason: string): Handbook {
   const part = unavailable(reason);
-  return { version: HANDBOOK_VERSION, flows: part, validationRules: part, apexClasses: part, apexTriggers: part, recentChanges: part };
+  // No part holds a step's reading, so none is said.
+  return { version: HANDBOOK_VERSION, readBy: { metadata: null, apex: null, build: BUILD_READING }, flows: part, validationRules: part, apexClasses: part, apexTriggers: part, recentChanges: part };
+}
+
+/**
+ * Which reading made the file (decisions 484 and 485), as each step stamped
+ * its own output when it read, so a checkpoint reused from before the stamp
+ * was kept says null whatever code builds the file now. Null too where the
+ * step didn't run, or its metadata wasn't read; never this code's own number
+ * for a step's. The build's own is this code's, since it builds the file now.
+ */
+function readByOf(metadata: Sourced<MetadataBundle> | undefined, apex: ApexData | undefined): HandbookReadBy {
+  return { metadata: (metadata?.status === "ok" ? metadata.data.handbook?.handbookReading : undefined) ?? null, apex: apex?.handbookReading ?? null, build: BUILD_READING };
 }
 
 /** A rule's place in the list of changes: its object and name, which a dot can't confuse. */
@@ -201,7 +228,7 @@ export function buildHandbook(
   modifiers: Modifiers = new Map(),
   components?: ComponentChangesData,
 ): Handbook {
-  const handbook = Handbook.safeParse({ version: HANDBOOK_VERSION, ...metadataParts(metadata, components, modifiers), ...apexParts(apex, customObjects, modifiers), recentChanges: changes });
+  const handbook = Handbook.safeParse({ version: HANDBOOK_VERSION, readBy: readByOf(metadata, apex), ...metadataParts(metadata, components, modifiers), ...apexParts(apex, customObjects, modifiers), recentChanges: changes });
   if (handbook.success) return handbook.data;
   const where = handbook.error.issues[0]?.path.join(".") ?? "";
   return allUnavailable(`The handbook's data didn't fit its format${where ? ` at ${where}` : ""}, so it wasn't kept.`);
