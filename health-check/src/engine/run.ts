@@ -10,11 +10,12 @@ import type { DomainModule } from "../domains/types.ts";
 import { customObjectsExtractor, orgExtractor, setupAuditExtractor, type CustomObjectRow, type SetupAuditSummary } from "../extract/configuration.ts";
 import { FACTS_FILE, factsExtractor, type Facts } from "../extract/facts.ts";
 import { apexExtractor, metadataExtractor, type ApexData } from "../extract/automation.ts";
+import { componentChangesExtractor, type ComponentChangesData } from "../extract/component-changes.ts";
 import type { MetadataBundle } from "../extract/metadata-parse.ts";
 import { fieldDescribeExtractor } from "../extract/fields.ts";
 import { summariseFacts } from "../facts/summary.ts";
 import { monthsBefore, type ExtractContext, type Extractor, type PartialStore, type Sourced } from "../extract/types.ts";
-import { buildHandbook, HANDBOOK_FILE, labelApexModifiers, recentChanges } from "../handbook/build.ts";
+import { buildHandbook, HANDBOOK_FILE, labelApexModifiers, labelComponentModifiers, recentChanges } from "../handbook/build.ts";
 import type { UserRow } from "../extract/users.ts";
 import { usersExtractor } from "../extract/users.ts";
 import { renderRawNotes } from "../notes/raw-notes.ts";
@@ -300,10 +301,16 @@ function analyseRun(dir: string, run: Run, calibration: Calibration, modules: Do
   // so every token in handbook.json can be restored.
   const changes = recentChanges(extracts.get(setupAuditExtractor.id) as Sourced<SetupAuditSummary> | undefined, (id, trailName) => pseudonyms.label("user", id, directory.get(id)?.name ?? trailName ?? UNKNOWN_USER));
   // Then whoever last changed a class or trigger and is in neither, named as
-  // Salesforce named them beside it (DECISIONS.md 473). Last, so no token
-  // above moves, and before the shared names, so theirs are counted.
+  // Salesforce named them beside it (DECISIONS.md 473). After those, so no
+  // token above moves, and before the shared names, so theirs are counted.
   const apex = extracts.get(apexExtractor.id) as ApexData | undefined;
-  const modifiers = labelApexModifiers(apex, (id, name) => pseudonyms.label("user", id, directory.get(id)?.name ?? name ?? UNKNOWN_USER));
+  const apexModifiers = labelApexModifiers(apex, (id, name) => pseudonyms.label("user", id, directory.get(id)?.name ?? name ?? UNKNOWN_USER));
+  // Then whoever last changed a flow or validation rule and is in none of
+  // those, the same way (DECISIONS.md 482): after Apex's, so no token above
+  // moves, and before the shared names too.
+  const components = extracts.get(componentChangesExtractor.id) as ComponentChangesData | undefined;
+  const componentModifiers = labelComponentModifiers(components, (id, name) => pseudonyms.label("user", id, directory.get(id)?.name ?? name ?? UNKNOWN_USER));
+  const modifiers = new Map([...apexModifiers, ...componentModifiers]);
   if (run.customerRef) pseudonyms.label("customer", run.orgId, run.customerRef);
   // A first name two people share gets its own token, saved with the map so a
   // report rendered later can restore it.
@@ -325,7 +332,7 @@ function analyseRun(dir: string, run: Run, calibration: Calibration, modules: Do
   // findings, and read by nothing else here (DECISIONS.md 451 to 457).
   writeJson(
     join(dir, HANDBOOK_FILE),
-    buildHandbook(extracts.get(metadataExtractor.id) as Sourced<MetadataBundle> | undefined, apex, extracts.get(customObjectsExtractor.id) as Sourced<CustomObjectRow[]> | undefined, changes, modifiers),
+    buildHandbook(extracts.get(metadataExtractor.id) as Sourced<MetadataBundle> | undefined, apex, extracts.get(customObjectsExtractor.id) as Sourced<CustomObjectRow[]> | undefined, changes, modifiers, components),
   );
   renderOutputs(dir, run, calibration, output);
   return output;

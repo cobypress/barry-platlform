@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { HANDBOOK_FILE } from "./build.ts";
-import { CHANGES_NOT_KEPT, Handbook, HANDBOOK_VERSION, HandbookVersion2, HandbookVersion3 } from "./schema.ts";
+import { CHANGES_NOT_KEPT, Handbook, HANDBOOK_VERSION, HandbookVersion2, HandbookVersion3, HandbookVersion4 } from "./schema.ts";
 
 // The one reader of handbook.json (DECISIONS.md 443 and 445). It gives the
 // handbook, or why there isn't one in words fixed here: nothing from the file
@@ -46,19 +46,24 @@ export function readHandbook(runDir: string): HandbookRead {
   }
   const parsed = Handbook.safeParse(data);
   if (parsed.success) return { ok: true, handbook: parsed.data };
-  // A run from before the last changes were kept still makes its document,
-  // its Apex without them and saying nothing of them (decision 473).
+  // A run from before the flows' and validation rules' last changes were kept
+  // still makes its document, those without them and saying nothing of them
+  // (decision 482). Its Apex is whole.
+  const four = HandbookVersion4.safeParse(data);
+  if (four.success) return { ok: true, handbook: { ...four.data, version: HANDBOOK_VERSION, flows: notKept(four.data.flows), validationRules: notKept(four.data.validationRules) } };
+  // And one from before any were kept, its Apex without them too (decision 473).
   const three = HandbookVersion3.safeParse(data);
-  if (three.success) return { ok: true, handbook: { ...three.data, version: HANDBOOK_VERSION, apexClasses: notKept(three.data.apexClasses), apexTriggers: notKept(three.data.apexTriggers) } };
+  if (three.success) return { ok: true, handbook: { ...three.data, version: HANDBOOK_VERSION, flows: notKept(three.data.flows), validationRules: notKept(three.data.validationRules), apexClasses: notKept(three.data.apexClasses), apexTriggers: notKept(three.data.apexTriggers) } };
   // And one from before the recent changes were kept, with that part saying so
   // (decision 462). Its other four parts are whole.
   const two = HandbookVersion2.safeParse(data);
-  if (two.success) return { ok: true, handbook: { ...two.data, version: HANDBOOK_VERSION, apexClasses: notKept(two.data.apexClasses), apexTriggers: notKept(two.data.apexTriggers), recentChanges: { status: "unavailable", reason: CHANGES_NOT_KEPT } } };
+  if (two.success) return { ok: true, handbook: { ...two.data, version: HANDBOOK_VERSION, flows: notKept(two.data.flows), validationRules: notKept(two.data.validationRules), apexClasses: notKept(two.data.apexClasses), apexTriggers: notKept(two.data.apexTriggers), recentChanges: { status: "unavailable", reason: CHANGES_NOT_KEPT } } };
   return { ok: false, why: "format" };
 }
 
-/** An older file's Apex list, each class or trigger with no last change and the list saying they weren't kept. */
-function notKept<T extends object>(part: { status: "ok"; items: T[]; total: number; cut: boolean } | { status: "unavailable"; reason: string }) {
-  if (part.status !== "ok") return part;
-  return { ...part, items: part.items.map((item) => ({ ...item, lastChanged: null })), lastChanges: "not_kept" as const };
+/** An older file's list, each item with no last change and the list saying they weren't kept. */
+function notKept<P extends { status: "ok"; items: object[] } | { status: "unavailable"; reason: string }>(part: P) {
+  if (part.status !== "ok") return part as Extract<P, { status: "unavailable" }>;
+  const ok = part as Extract<P, { status: "ok" }>;
+  return { ...ok, items: ok.items.map((item) => ({ ...item, lastChanged: null })) as Array<Extract<P, { status: "ok" }>["items"][number] & { lastChanged: null }>, lastChanges: "not_kept" as const };
 }

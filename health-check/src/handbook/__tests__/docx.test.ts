@@ -9,7 +9,7 @@ import { documentXml, docxParagraphs, docxText } from "../../testing/docx-text.t
 import { HANDBOOK_FILE } from "../build.ts";
 import { renderHandbookDocx, STEP_WORDS, whenWords, wordSafe } from "../docx.ts";
 import { readHandbook } from "../read.ts";
-import { Handbook, HANDBOOK_VERSION, MAX_APEX_CLASSES, MAX_APEX_TRIGGERS, MAX_STEPS, type HandbookApexClass, type HandbookPath, type HandbookApexTouches, type HandbookApexTrigger, type HandbookFlow, type HandbookStep, type HandbookValidationRule, type LastChanges } from "../schema.ts";
+import { Handbook, HANDBOOK_VERSION, MAX_APEX_CLASSES, MAX_APEX_TRIGGERS, MAX_STEPS, type HandbookApexClass, type HandbookPath, type HandbookApexTouches, type HandbookApexTrigger, type HandbookFlowItem, type HandbookStep, type HandbookValidationRuleItem, type LastChanges } from "../schema.ts";
 
 // The org handbook as a Word document (DECISIONS.md 443 to 445). The file is
 // made up here, so every route through the document is seen.
@@ -23,7 +23,7 @@ function step(name: string, over: Partial<HandbookStep> = {}): HandbookStep {
   return { kind: "assignments", name, label: name.replace(/_/g, " "), object: null, fields: [], fieldsTotal: 0, detail: null, outcomes: [], next: null, fault: null, reached: true, ...over };
 }
 
-function flow(name: string, over: Partial<HandbookFlow> = {}): HandbookFlow {
+function flow(name: string, over: Partial<HandbookFlowItem> = {}): HandbookFlowItem {
   return {
     name,
     label: name.replace(/_/g, " "),
@@ -34,12 +34,13 @@ function flow(name: string, over: Partial<HandbookFlow> = {}): HandbookFlow {
     steps: [],
     stepsTotal: 0,
     cut: false,
+    lastChanged: null,
     ...over,
   };
 }
 
-function rule(name: string, over: Partial<HandbookValidationRule> = {}): HandbookValidationRule {
-  return { object: "Opportunity", name, active: true, description: null, formula: "ISBLANK(Amount)", formulaCut: false, formulaLength: 15, message: "Give an amount.", messageField: "Amount", ...over };
+function rule(name: string, over: Partial<HandbookValidationRuleItem> = {}): HandbookValidationRuleItem {
+  return { object: "Opportunity", name, active: true, description: null, formula: "ISBLANK(Amount)", formulaCut: false, formulaLength: 15, message: "Give an amount.", messageField: "Amount", lastChanged: null, ...over };
 }
 
 function touches(over: Partial<HandbookApexTouches> = {}): HandbookApexTouches {
@@ -57,8 +58,16 @@ function trigger(name: string, over: Partial<HandbookApexTrigger> = {}): Handboo
 /** An ok Apex part holding these, uncut, from a run that kept no last changes unless it says so. */
 const apex = <T>(items: T[], lastChanges: LastChanges = "not_kept") => ({ status: "ok" as const, items, total: items.length, cut: false, lastChanges });
 
-function handbook(over: Partial<Handbook> = {}): Handbook {
-  return Handbook.parse({ version: HANDBOOK_VERSION, flows: { status: "ok", items: [] }, validationRules: { status: "ok", covers: RETRIEVE, items: [] }, apexClasses: NO_APEX, apexTriggers: NO_APEX, recentChanges: NO_CHANGES, ...over });
+/** A part as a test gives it, which says whether its last changes were read only when that's what it tests. */
+type Kept<P> = P extends { status: "ok"; lastChanges: LastChanges } ? Omit<P, "lastChanges"> & { lastChanges?: LastChanges } : P;
+type Over = Omit<Partial<Handbook>, "flows" | "validationRules"> & { flows?: Kept<Handbook["flows"]>; validationRules?: Kept<Handbook["validationRules"]> };
+
+/** From a run that kept no flow's or rule's last change, unless the part says so. */
+const notKept = <P extends { status: string }>(part: P) => (part.status === "ok" && !("lastChanges" in part) ? { ...part, lastChanges: "not_kept" } : part);
+
+function handbook(over: Over = {}): Handbook {
+  const { flows = { status: "ok", items: [] }, validationRules = { status: "ok", covers: RETRIEVE, items: [] }, ...rest } = over;
+  return Handbook.parse({ version: HANDBOOK_VERSION, flows: notKept(flows), validationRules: notKept(validationRules), apexClasses: NO_APEX, apexTriggers: NO_APEX, recentChanges: NO_CHANGES, ...rest });
 }
 
 const OPTIONS = { clientName: "Synthetic Co", runDate: "2026-10-31T00:00:00.000Z" };

@@ -1207,6 +1207,42 @@ export const APEX_TRIGGERS = [
   { Id: sfId("01q", 5), Name: "InvoiceAudit", TableEnumOrId: sfId("01I", 1).slice(0, 15), ApiVersion: 62, LengthWithoutComments: 140, Status: "Active", ...usage("AfterUpdate"), ...changedBy(4, 7), Body: "// Records who changed an invoice's total.\ntrigger InvoiceAudit on Invoice__c (after update) { }" },
 ];
 
+// When each flow and validation rule was last changed and by whom, as Tooling's
+// Flow and ValidationRule list them (DECISIONS.md 482). Every flow in
+// METADATA_FILES has its versions here, the one its file is (the active
+// version, or the highest when none is active) with the status the file has.
+/** Someone the user list doesn't hold, who last changed a validation rule. */
+export const COMPONENT_OUTSIDE_MODIFIER = { id: userId(965), name: "Tam Okafor" };
+type Version = { VersionNumber: number; Status: string } & ReturnType<typeof changedBy>;
+const version = (n: number, status: string, who: Parameters<typeof changedBy>[0], days: number): Version => ({ VersionNumber: n, Status: status, ...changedBy(who, days) });
+
+export const FLOW_VERSIONS: Array<{ name: string; namespace: string | null; versions: Version[] }> = [
+  { name: "Opportunity_Route_Deal", namespace: null, versions: [version(1, "Obsolete", 4, 400), version(2, "Active", 4, 60)] },
+  // Trap: a later version, saved but never activated, by someone else. The active version's change is the line.
+  { name: "Lead_Assign", namespace: null, versions: [version(1, "Obsolete", 2, 300), version(2, "Active", 4, 120), version(3, "Draft", 1, 10)] },
+  { name: "Renewal_Notice", namespace: null, versions: [version(1, "Active", 9, 700)] },
+  { name: "Opportunity_Old_Process", namespace: null, versions: [version(1, "Active", 9, 800)] },
+  // Trap: no version is active, so the highest-numbered one's change is the line.
+  { name: "Draft_Idea", namespace: null, versions: [version(1, "Draft", 1, 50), version(2, "Draft", 2, 30)] },
+  // Changed by the same person outside the user list as two pieces of Apex, so they share a token.
+  { name: "Invoice_Set_Status", namespace: null, versions: [version(1, "Active", APEX_OUTSIDE_MODIFIER, 18)] },
+  { name: "Opportunity_Stage_Review", namespace: null, versions: [version(1, "Draft", 4, 5)] },
+  { name: "Weekly_Renewal_Check", namespace: null, versions: [version(1, "Obsolete", 13, 200), version(2, "Draft", 4, 14)] },
+  // Trap: a managed package's flow of the same name, active and at a higher version. It isn't the org's own.
+  { name: "Lead_Assign", namespace: "acme", versions: [version(9, "Active", 2, 1)] },
+];
+
+export const VALIDATION_RULE_CHANGES: Array<{ object: string; name: string; namespace: string | null } & ReturnType<typeof changedBy>> = [
+  { object: "Opportunity", name: "Needs_Competitor", namespace: null, ...changedBy(4, 75) },
+  { object: "Case", name: "Reason_When_Escalated", namespace: null, ...changedBy(2, 45) },
+  // Trap: changed by someone the run's user list doesn't hold, named only by Salesforce beside the rule.
+  { object: "Invoice__c", name: "Due_Date_Required", namespace: null, ...changedBy(COMPONENT_OUTSIDE_MODIFIER, 25) },
+  // Trap: Salesforce records no user for this change, so its date stands alone.
+  { object: "Invoice__c", name: "Old_Check", namespace: null, ...changedBy(null, 500) },
+  // Trap: a managed package's rule of the same name on the same object, changed more recently. It isn't the org's own.
+  { object: "Opportunity", name: "Needs_Competitor", namespace: "acme", ...changedBy(1, 2) },
+];
+
 export const ORG_COVERAGE = [{ PercentCovered: 82 }];
 
 export const CLASS_COVERAGE = [

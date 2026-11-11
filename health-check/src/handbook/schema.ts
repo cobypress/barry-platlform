@@ -10,9 +10,10 @@ import { tokenSource } from "../privacy/pseudonymiser.ts";
 
 // Still 2 with each flow's paths added (decision 446): no file of version 2 had
 // left an engine before them, so none in a run folder lacks them. 3 adds the
-// recent changes (decision 461), and 4 when each class and trigger was last
-// changed and by whom (decision 473). Files of versions 2 and 3 are still read.
-export const HANDBOOK_VERSION = 4;
+// recent changes (decision 461), 4 when each class and trigger was last changed
+// and by whom (decision 473), and 5 the same for each flow and validation rule
+// (decision 482). Files of versions 2, 3 and 4 are still read.
+export const HANDBOOK_VERSION = 5;
 
 // The most a flow, step, entry, start and text keep (decision 453). Anything
 // past these is cut, marked as cut, and carries its full count.
@@ -165,7 +166,7 @@ export type HandbookApexTouches = z.infer<typeof HandbookApexTouches>;
 /** A pseudonymiser's token for a user: a name only when the Word document is made (decision 421). */
 export const UserToken = z.string().regex(new RegExp(`^${tokenSource("user", "U")}$`));
 
-/** When a class or trigger was last changed, and by whom (decision 473). */
+/** When a class, trigger, flow or validation rule was last changed, and by whom (decisions 473 and 482). */
 export const HandbookLastChange = z.strictObject({
   /** LastModifiedDate, as Salesforce gave it when the step read: it can be after the run's date. */
   at: z.string().min(1),
@@ -207,6 +208,18 @@ const triggerItem = {
 export const HandbookApexTrigger = z.strictObject({ ...apexItem, ...triggerItem });
 export type HandbookApexTrigger = z.infer<typeof HandbookApexTrigger>;
 
+/**
+ * A flow as the file lists it: what the metadata step read, and when it was
+ * last changed and by whom (decision 482). Null when that wasn't read, which
+ * the part says, or Salesforce's list of changes had no line for it.
+ */
+export const HandbookFlowItem = z.strictObject({ ...HandbookFlow.shape, lastChanged: HandbookLastChange.nullable() });
+export type HandbookFlowItem = z.infer<typeof HandbookFlowItem>;
+
+/** A validation rule as the file lists it, with its last change as a flow has it. */
+export const HandbookValidationRuleItem = z.strictObject({ ...HandbookValidationRule.shape, lastChanged: HandbookLastChange.nullable() });
+export type HandbookValidationRuleItem = z.infer<typeof HandbookValidationRuleItem>;
+
 // "We couldn't read it" and "there's none" must never look alike (decision 454, rule 5).
 const Unavailable = z.strictObject({ status: z.literal("unavailable"), reason: z.string().min(1) });
 
@@ -216,9 +229,9 @@ const capped = <T extends z.ZodType>(item: T, max: number) =>
 
 /**
  * Whether this run read when each was last changed: "refused" when Salesforce
- * refused the fields and the list was read without them, "not_kept" when the
- * run was read before they were kept (decision 473). Salesforce's reason is
- * never here: it stays in the run folder.
+ * refused the read (for Apex, the fields, and the list was read without them),
+ * "not_kept" when the run was read before they were kept (decisions 473 and
+ * 482). Salesforce's reason is never here: it stays in the run folder.
  */
 export const LAST_CHANGES = ["read", "refused", "not_kept"] as const;
 export type LastChanges = (typeof LAST_CHANGES)[number];
@@ -261,7 +274,8 @@ export const HandbookRecentChanges = z.discriminatedUnion("status", [
 ]);
 export type HandbookRecentChanges = z.infer<typeof HandbookRecentChanges>;
 
-const metadataParts = {
+/** The flows and validation rules as a file of version 4 or before has them: neither says when it was last changed. */
+const olderMetadataParts = {
   flows: z.discriminatedUnion("status", [z.strictObject({ status: z.literal("ok"), items: z.array(HandbookFlow) }), Unavailable]),
   // Nor may "no rule on Case" and "we didn't read Case": the list says what it covers.
   validationRules: z.discriminatedUnion("status", [z.strictObject({ status: z.literal("ok"), covers: ValidationRuleCoverage, items: z.array(HandbookValidationRule) }), Unavailable]),
@@ -269,16 +283,27 @@ const metadataParts = {
 
 export const Handbook = z.strictObject({
   version: z.literal(HANDBOOK_VERSION),
-  ...metadataParts,
+  // Each saying whether the last changes were read, as an Apex list does (decision 482).
+  flows: z.discriminatedUnion("status", [z.strictObject({ status: z.literal("ok"), items: z.array(HandbookFlowItem), lastChanges: z.enum(LAST_CHANGES) }), Unavailable]),
+  validationRules: z.discriminatedUnion("status", [z.strictObject({ status: z.literal("ok"), covers: ValidationRuleCoverage, items: z.array(HandbookValidationRuleItem), lastChanges: z.enum(LAST_CHANGES) }), Unavailable]),
   apexClasses: cappedApex(HandbookApexClass, MAX_APEX_CLASSES),
   apexTriggers: cappedApex(HandbookApexTrigger, MAX_APEX_TRIGGERS),
   recentChanges: HandbookRecentChanges,
 });
 export type Handbook = z.infer<typeof Handbook>;
 
+/** A file from before the flows' and validation rules' last changes were kept. It's read as a handbook that lists them as not kept, and says nothing of them (decision 482). */
+export const HandbookVersion4 = z.strictObject({
+  version: z.literal(4),
+  ...olderMetadataParts,
+  apexClasses: cappedApex(HandbookApexClass, MAX_APEX_CLASSES),
+  apexTriggers: cappedApex(HandbookApexTrigger, MAX_APEX_TRIGGERS),
+  recentChanges: HandbookRecentChanges,
+});
+
 /** The four parts as a file of version 3 or before has them: no class or trigger says when it was last changed. */
 const olderParts = {
-  ...metadataParts,
+  ...olderMetadataParts,
   apexClasses: capped(z.strictObject(olderApexItem), MAX_APEX_CLASSES),
   apexTriggers: capped(z.strictObject({ ...olderApexItem, ...triggerItem }), MAX_APEX_TRIGGERS),
 };

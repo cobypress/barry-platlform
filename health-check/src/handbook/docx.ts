@@ -2,13 +2,14 @@ import { AlignmentType, Document, Footer, HeadingLevel, Packer, PageNumber, Para
 import { colour, font } from "../design/tokens.ts";
 import { longDate } from "../render/format.ts";
 import { UNKNOWN_USER, type Pseudonymiser } from "../privacy/pseudonymiser.ts";
-import { CHANGES_NOT_KEPT, TRIGGER_EVENTS, type Handbook, type HandbookChange, type HandbookApexClass, type HandbookLastChange, type HandbookApexTouches, type HandbookApexTrigger, type HandbookCondition, type HandbookFlow, type HandbookPath, type HandbookStep, type HandbookValidationRule, type ValidationRuleCoverage } from "./schema.ts";
+import { CHANGES_NOT_KEPT, TRIGGER_EVENTS, type Handbook, type HandbookChange, type HandbookApexClass, type HandbookLastChange, type HandbookApexTouches, type HandbookApexTrigger, type HandbookCondition, type HandbookFlow, type HandbookFlowItem, type HandbookPath, type HandbookStep, type HandbookValidationRule, type HandbookValidationRuleItem, type LastChanges, type ValidationRuleCoverage } from "./schema.ts";
 
 // The org handbook as a Word document (DECISIONS.md 443 and 444): handbook.json
 // made readable, and nothing more. Code alone writes it, from the file: no
 // Claude text, no figure from the value model, and no name added but who made
-// each recent change and who last changed each class and trigger, restored
-// from the run's pseudonym map (decisions 421, 461 and 473). The admin's own
+// each recent change and who last changed each class, trigger, flow and
+// validation rule, restored from the run's pseudonym map (decisions 421, 461,
+// 473 and 482). The admin's own
 // text prints as written, so a reader can trust that what isn't here doesn't
 // exist, or is said to be missing.
 
@@ -72,6 +73,11 @@ class Doc {
 
   labelled(label: string, ...parts: Array<Run | string>): void {
     this.blocks.push(new Paragraph({ spacing: { after: 60 }, children: this.#runs([{ text: `${label}: `, bold: true }, ...parts.map((p) => (typeof p === "string" ? { text: p } : p))]) }));
+  }
+
+  /** A line set as the labelled lines around it are, with no label of its own. */
+  line(parts: Run[]): void {
+    this.blocks.push(new Paragraph({ spacing: { after: 60 }, children: this.#runs(parts) }));
   }
 
   /** A formula, in a fixed-width face, set apart so it can be copied out whole. */
@@ -258,7 +264,7 @@ type Names = (token: string) => string | null;
 const unavailableWords = (what: string, reason: string): string => `We couldn't read your ${what}, so this handbook doesn't list them. ${sentence(reason)}`;
 
 /** Active first, then by label, then by API name, so the order is the same every time. */
-export function flowOrder(flows: HandbookFlow[]): HandbookFlow[] {
+export function flowOrder<F extends HandbookFlow>(flows: F[]): F[] {
   const label = (f: HandbookFlow): string => f.label || f.name;
   return [...flows].sort((a, b) => Number(b.status === "Active") - Number(a.status === "Active") || label(a).localeCompare(label(b), "en-GB") || a.name.localeCompare(b.name, "en-GB"));
 }
@@ -268,25 +274,45 @@ const flowCounts = (items: HandbookFlow[]): string => {
   return `${plural(items.length, "flow")}, ${count(active)} of them active`;
 };
 
+/**
+ * Said once, under a part's own line in "What it covers" (decision 482): that
+ * each flow or validation rule listed shows its last change, or that this run
+ * couldn't read them. A file from before they were kept says nothing.
+ */
+function lastChangedSaid(one: string, many: string, part: { status: "ok"; items: Array<{ lastChanged: HandbookLastChange | null }>; lastChanges: LastChanges } | { status: "unavailable" }): string | null {
+  if (part.status !== "ok" || part.items.length === 0) return null;
+  if (part.lastChanges === "refused") return `We couldn't read when your ${many} were last changed, or by whom, so this handbook doesn't say.`;
+  if (part.lastChanges !== "read") return null;
+  // Salesforce's list can lack one, so "each" is said only of those it gave.
+  const missing = part.items.filter((i) => i.lastChanged === null).length;
+  if (missing === part.items.length) return `Salesforce's list of changes had nothing for your ${many}, so none shows when it was last changed.`;
+  // A date alone would otherwise read as a name left off.
+  const dateAlone = part.items.some((i) => i.lastChanged?.by === null) ? ", or the date alone where Salesforce records no user" : "";
+  const gap = missing ? ` Salesforce's list of changes had nothing for ${plural(missing, one)}, so ${missing === 1 ? "that one shows" : "those show"} neither.` : "";
+  return `Each ${one} shows when it was last changed and by whom${dateAlone}.${gap}`;
+}
+
 const FLOWS: Part = {
   covers: (h) => {
     if (h.flows.status !== "ok") return unavailableWords("flows", h.flows.reason);
     return h.flows.items.length ? `Flows: ${flowCounts(h.flows.items)}.` : "Flows: your org has none.";
   },
-  write: (doc, h) => {
+  alsoCovers: (h) => lastChangedSaid("flow", "flows", h.flows),
+  write: (doc, h, names) => {
     doc.heading("Flows", 2);
     if (h.flows.status !== "ok") return doc.para({ text: unavailableWords("flows", h.flows.reason), bold: true });
     if (h.flows.items.length === 0) return doc.para("Your org has no flows: there were none to read, active or not.");
     doc.para(`Your org has ${flowCounts(h.flows.items)}. Active flows come first, then the rest, each in order of its label.`);
     doc.para("Each flow's steps are numbered in the order the flow runs them, from its start, following each path to its end before the next. A flow that starts in more than one way, such as one with a scheduled path, lists its steps path by path: the steps that run straight away first, then each later path's in turn, and the step each path starts at says so. A step no path reaches is listed after the rest and marked. A kind of step we have no plain name for appears under Salesforce's own name for it.");
-    for (const flow of flowOrder(h.flows.items)) writeFlow(doc, flow);
+    for (const flow of flowOrder(h.flows.items)) writeFlow(doc, flow, names);
   },
 };
 
-function writeFlow(doc: Doc, flow: HandbookFlow): void {
+function writeFlow(doc: Doc, flow: HandbookFlowItem, names: Names): void {
   doc.heading(flow.label || flow.name, 3);
   doc.labelled("API name", flow.name);
   doc.labelled("Status", named(STATUS_WORDS, flow.status));
+  for (const line of lastChangedLine(flow.lastChanged, names)) doc.line(line);
   doc.labelled("Type", named(TYPE_WORDS, flow.processType));
   doc.labelled("Description", ...(flow.description === null ? [{ text: "none given", muted: true }] : [flow.description]));
   doc.labelled("What starts it", `${startWords(flow)}.`);
@@ -374,7 +400,8 @@ const VALIDATION_RULES: Part = {
     if (v.status !== "ok") return unavailableWords("validation rules", v.reason);
     return v.items.length ? `Validation rules: ${ruleCounts(v.items)}, on ${coverageWords(v.covers)}.` : `Validation rules: your org has none on ${coverageWords(v.covers)}.`;
   },
-  write: (doc, h) => {
+  alsoCovers: (h) => lastChangedSaid("validation rule", "validation rules", h.validationRules),
+  write: (doc, h, names) => {
     doc.heading("Validation rules", 2);
     const v = h.validationRules;
     if (v.status !== "ok") return doc.para({ text: unavailableWords("validation rules", v.reason), bold: true });
@@ -387,14 +414,15 @@ const VALIDATION_RULES: Part = {
     for (const object of objects) {
       const rules = v.items.filter((r) => r.object === object).sort((a, b) => a.name.localeCompare(b.name, "en-GB"));
       doc.heading(`${object}: ${plural(rules.length, "rule")}`, 3);
-      for (const rule of rules) writeRule(doc, rule);
+      for (const rule of rules) writeRule(doc, rule, names);
     }
   },
 };
 
-function writeRule(doc: Doc, rule: HandbookValidationRule): void {
+function writeRule(doc: Doc, rule: HandbookValidationRuleItem, names: Names): void {
   doc.heading(rule.name, 4);
   doc.labelled("Active", rule.active ? "Yes" : "No");
+  for (const line of lastChangedLine(rule.lastChanged, names)) doc.line(line);
   doc.labelled("Description", ...(rule.description === null ? [{ text: "none given", muted: true }] : [rule.description]));
   if (rule.formula === null) {
     doc.labelled("Formula", { text: "we couldn't read this rule's formula.", bold: true });
@@ -453,8 +481,9 @@ function touchesLines(touches: HandbookApexTouches | null): Run[][] {
 
 /**
  * "Last changed 3 Mar 2026 by Jo Ellis", the date as the recent changes give
- * theirs, without the time (decision 473). Who is restored from the token
- * alone, as a recent change's is; with no user, the date stands alone.
+ * theirs, without the time (decision 473), for a class, trigger, flow or
+ * validation rule (482). Who is restored from the token alone, as a recent
+ * change's is; with no user, the date stands alone.
  */
 function lastChangedLine(change: HandbookLastChange | null, names: Names): Run[][] {
   if (change === null) return [];
@@ -618,7 +647,7 @@ const PARTS: Part[] = [FLOWS, VALIDATION_RULES, APEX_CLASSES, APEX_TRIGGERS, REC
 type HandbookOptions = {
   clientName: string;
   runDate: string;
-  /** The run's pseudonym map, which turns who made each recent change, and who last changed each class and trigger, back into a name. Without it, none is named. */
+  /** The run's pseudonym map, which turns who made each recent change, and who last changed each class, trigger, flow and validation rule, back into a name. Without it, none is named. */
   pseudonyms?: Pseudonymiser | null;
 };
 

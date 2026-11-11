@@ -1,6 +1,6 @@
 import { test, describe, before } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join, sep } from "node:path";
 import { SALES_CLOUD_MODULES } from "../../domains/index.ts";
 import { runHealthCheck } from "../../engine/run.ts";
@@ -11,11 +11,12 @@ import { docxText } from "../../testing/docx-text.ts";
 import { runFromRecording, tempDir } from "../../testing/harness.ts";
 import { loadCalibration, syntheticProvider } from "../../testing/replay.ts";
 import { Simulator, type SimulatorOptions } from "../../testing/simulator.ts";
-import { APEX_OUTSIDE_MODIFIER, AS_OF, userId } from "../../testing/synthetic-org.ts";
+import { APEX_OUTSIDE_MODIFIER, AS_OF, COMPONENT_OUTSIDE_MODIFIER, userId } from "../../testing/synthetic-org.ts";
 import { buildHandbook, HANDBOOK_FILE, labelApexModifiers } from "../build.ts";
 import { renderHandbookDocx } from "../docx.ts";
 import { readHandbook } from "../read.ts";
 import { CHANGES_NOT_KEPT, Handbook, HANDBOOK_VERSION, type HandbookApexClass } from "../schema.ts";
+import { olderComponents } from "./older-files.ts";
 
 // When each Apex class and trigger was last changed, and by whom (DECISIONS.md
 // 473). Who is a token in handbook.json, and a name only in the Word document.
@@ -28,6 +29,8 @@ const REFUSED_SENTENCE = "We couldn't read when your Apex classes and triggers w
 /** Salesforce's own words for a refusal: in the run folder's checkpoints, and in nothing made from them. */
 const REFUSAL = "APEX-REFUSED-0473: you can't see who changed this";
 const refuseLastChange: SimulatorOptions["failQuery"] = (soql) => (/FROM Apex(Class|Trigger)\b/.test(soql) && soql.includes("LastModifiedBy.Name") ? { errorCode: "INSUFFICIENT_ACCESS", message: REFUSAL } : null);
+/** And the flows' and validation rules' too (decision 482), so the run reads no last change at all. */
+const refuseEveryLastChange: SimulatorOptions["failQuery"] = (soql) => (soql.includes("LastModifiedBy.Name") ? { errorCode: "INSUFFICIENT_ACCESS", message: REFUSAL } : null);
 
 async function simulated(options: SimulatorOptions = {}) {
   const transport = new Simulator(options);
@@ -49,6 +52,8 @@ const classesOf = (h: Handbook) => (h.apexClasses.status === "ok" ? h.apexClasse
 const triggersOf = (h: Handbook) => (h.apexTriggers.status === "ok" ? h.apexTriggers : assert.fail("triggers unavailable"));
 const mapOf = (dir: string): PseudonymEntry[] => read<PseudonymEntry[]>(dir, "pseudonym-map.json");
 const textOf = async (dir: string): Promise<string> => docxText(await renderHandbookDocx(handbookOf(dir), { ...OPTIONS, pseudonyms: loadPseudonymMap(dir) }));
+/** The document's Apex parts, where the flows' and validation rules' own lines (decision 482) aren't. */
+const apexText = (text: string): string => text.slice(text.indexOf("\n## Apex classes\n"), text.indexOf("\n## Recent changes\n"));
 /** One class's or trigger's paragraph in the document's text. */
 const entry = (text: string, name: string): string => text.slice(text.indexOf(`\n${name}\n`) + 1).split("\n\n")[0]!;
 
@@ -111,14 +116,14 @@ describe("the recorded synthetic org's Apex", () => {
       assert.ok(item.lastChanged, item.name);
       if (item.lastChanged.by !== null) assert.ok(tokens.has(item.lastChanged.by), item.name);
     }
-    assert.equal(text.match(/\nLast changed /g)?.length, 12);
+    assert.equal(apexText(text).match(/\nLast changed /g)?.length, 12);
     assert.doesNotMatch(text, TOKEN);
   });
 
   test("\"What it covers\" says so once, after the Apex parts' own lines", () => {
     const covers = text.slice(text.indexOf("## What it covers"), text.indexOf("## Flows"));
     assert.match(covers, /\nApex triggers: 5 triggers, 5 of them active\.\n\nEach Apex class and trigger shows when it was last changed and by whom, or the date alone where Salesforce records no user\.\n\nRecent changes: /);
-    assert.equal(text.split("shows when it was last changed").length - 1, 1);
+    assert.equal(text.split("Each Apex class and trigger shows when it was last changed").length - 1, 1);
     assert.ok(!text.includes(REFUSED_SENTENCE));
   });
 
@@ -135,14 +140,18 @@ describe("the recorded synthetic org's Apex", () => {
 });
 
 describe("the run's existing tokens", () => {
-  test("don't move: the map is the one a run that read no last changes makes, and one more, last of the users", async () => {
-    const before = mapOf((await simulated({ failQuery: refuseLastChange })).dir);
+  test("don't move: the map is the one a run that read no last changes makes, and two more, last of the users, Apex's first", async () => {
+    const before = mapOf((await simulated({ failQuery: refuseEveryLastChange })).dir);
     const after = mapOf((await simulated()).dir);
     assert.ok(!before.some((e) => e.id === APEX_OUTSIDE_MODIFIER.id));
     // Every entry the same, token for token, and in the same order.
     const added = after.filter((e) => !before.some((b) => b.id === e.id));
     assert.deepEqual(after.filter((e) => !added.includes(e)), before);
-    assert.deepEqual(added, [{ token: "[[user:U0016]]", id: APEX_OUTSIDE_MODIFIER.id, name: APEX_OUTSIDE_MODIFIER.name, aliases: [APEX_OUTSIDE_MODIFIER.name, APEX_OUTSIDE_MODIFIER.id] }]);
+    // Whoever last changed a validation rule (decision 482) comes after Apex's, whose token doesn't move.
+    assert.deepEqual(added, [
+      { token: "[[user:U0016]]", id: APEX_OUTSIDE_MODIFIER.id, name: APEX_OUTSIDE_MODIFIER.name, aliases: [APEX_OUTSIDE_MODIFIER.name, APEX_OUTSIDE_MODIFIER.id] },
+      { token: "[[user:U0017]]", id: COMPONENT_OUTSIDE_MODIFIER.id, name: COMPONENT_OUTSIDE_MODIFIER.name, aliases: [COMPONENT_OUTSIDE_MODIFIER.name, COMPONENT_OUTSIDE_MODIFIER.id] },
+    ]);
     // The run's users are U0001 to U0015, in id order, as before.
     assert.deepEqual(before.filter((e) => e.token.startsWith("[[user:")).map((e) => [e.token, e.id]), Array.from({ length: 15 }, (_, i) => [`[[user:U${String(i + 1).padStart(4, "0")}]]`, userId(i + 1)]));
   });
@@ -188,7 +197,9 @@ describe("a read Salesforce refuses with the last-changed fields", () => {
     const text = await textOf(refused.dir);
     assert.equal(text.split(REFUSED_SENTENCE).length - 1, 1);
     assert.match(text, new RegExp(`\\nApex triggers: 5 triggers, 5 of them active\\.\\n\\n${REFUSED_SENTENCE.replace(/[.?()]/g, "\\$&")}\\n\\nRecent changes: `));
-    assert.doesNotMatch(text, /Last changed |shows when it was last changed/);
+    // The flows and validation rules were read, and say so in their own words (decision 482).
+    assert.doesNotMatch(apexText(text), /Last changed /);
+    assert.doesNotMatch(text, /Each Apex [a-z ]*shows when it was last changed/);
   });
 
   test("Salesforce's reason stays in the step's checkpoint, and reaches neither handbook.json nor the Word document nor any other file", async () => {
@@ -263,16 +274,19 @@ describe("a run resumed with the step's version 9 checkpoint", () => {
 
     // As a run in flight at deployment left it: the step at version 9, its
     // checkpoint with no last changes and the queries' old text, a version 3
-    // handbook and a map without the user only those would have added.
+    // handbook and a map without the user only those would have added. Nor
+    // had it the flows' and rules' step, or the user only that adds (decision 482).
     type Steps = { steps: Array<{ id: string; version: number }> };
     const run = read<Steps>(first.dir, "run.json");
     run.steps.find((s) => s.id === "apex")!.version = 9;
+    run.steps = run.steps.filter((s) => s.id !== "component-changes");
     writeFileSync(join(first.dir, "run.json"), JSON.stringify(run));
+    rmSync(join(first.dir, "checkpoints", "component-changes.json"));
     const checkpoint = read<ApexData>(join(first.dir, "checkpoints"), "apex.json");
     delete checkpoint.lastChanged;
     writeFileSync(join(first.dir, "checkpoints", "apex.json"), asBefore(JSON.stringify(checkpoint)));
-    writeFileSync(join(first.dir, HANDBOOK_FILE), JSON.stringify(olderApex({ ...read<Record<string, unknown>>(first.dir, HANDBOOK_FILE), version: 3 })));
-    writeFileSync(join(first.dir, "pseudonym-map.json"), JSON.stringify(mapOf(first.dir).filter((e) => e.id !== APEX_OUTSIDE_MODIFIER.id)));
+    writeFileSync(join(first.dir, HANDBOOK_FILE), JSON.stringify(olderApex(olderComponents({ ...read<Record<string, unknown>>(first.dir, HANDBOOK_FILE), version: 3 }))));
+    writeFileSync(join(first.dir, "pseudonym-map.json"), JSON.stringify(mapOf(first.dir).filter((e) => e.id !== APEX_OUTSIDE_MODIFIER.id && e.id !== COMPONENT_OUTSIDE_MODIFIER.id)));
     const older = readHandbook(first.dir);
     assert.ok(older.ok);
     assert.doesNotMatch(docxText(await renderHandbookDocx(older.handbook, { ...OPTIONS, pseudonyms: loadPseudonymMap(first.dir) })), /Last changed /);
@@ -285,7 +299,7 @@ describe("a run resumed with the step's version 9 checkpoint", () => {
     const h = handbookOf(first.dir);
     assert.equal(h.version, HANDBOOK_VERSION);
     assert.deepEqual([classesOf(h).lastChanges, triggersOf(h).lastChanges], ["read", "read"]);
-    assert.equal((await textOf(first.dir)).match(/\nLast changed /g)?.length, 12);
+    assert.equal(apexText(await textOf(first.dir)).match(/\nLast changed /g)?.length, 12);
     assert.equal(mapOf(first.dir).find((e) => e.id === APEX_OUTSIDE_MODIFIER.id)?.token, "[[user:U0016]]");
   });
 });
@@ -311,7 +325,7 @@ describe("a handbook.json from before last changes were kept", () => {
   const write = (file: unknown) => writeFileSync(join(dir, HANDBOOK_FILE), JSON.stringify(file));
 
   test("version 3 still makes its document, with no line and no word of them, and its recent changes whole", async () => {
-    write(olderApex({ ...current, version: 3 }));
+    write(olderApex(olderComponents({ ...current, version: 3 })));
     const handbook = readHandbook(dir);
     assert.ok(handbook.ok);
     assert.equal(handbook.handbook.version, HANDBOOK_VERSION);
@@ -325,7 +339,7 @@ describe("a handbook.json from before last changes were kept", () => {
   });
 
   test("version 2 does too, its recent changes saying they weren't kept", async () => {
-    const { recentChanges: _gone, ...four } = olderApex<Record<string, unknown>>({ ...current, version: 2 });
+    const { recentChanges: _gone, ...four } = olderApex<Record<string, unknown>>(olderComponents({ ...current, version: 2 }));
     write(four);
     const handbook = readHandbook(dir);
     assert.ok(handbook.ok);
@@ -337,7 +351,7 @@ describe("a handbook.json from before last changes were kept", () => {
   });
 
   test("but a file that mixes the versions is read as none of them", () => {
-    // A version 3 file with last changes, and a version 4 file without them.
+    // A version 3 file with last changes, and a version 5 file without Apex's.
     for (const wrong of [{ ...current, version: 3 }, olderApex({ ...current }), { ...current, version: 2 }]) {
       write(wrong);
       assert.deepEqual(readHandbook(dir), { ok: false, why: "format" });

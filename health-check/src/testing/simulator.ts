@@ -257,6 +257,24 @@ function inObjects(rows: Json[], soql: string): Json[] {
   return rows.filter((r) => wanted.has(String((r.EntityDefinition as Json).QualifiedApiName)));
 }
 
+/**
+ * Tooling's Flow and ValidationRule as the list queries with when each was
+ * last changed see them (DECISIONS.md 482): every version of every flow,
+ * managed ones too, each under its definition's id where the org has one.
+ */
+function componentChanges() {
+  let n = 0;
+  const flows = org.FLOW_VERSIONS.flatMap(({ name, namespace, versions }) => {
+    const definition = namespace ? undefined : TOOLING.flowDefinitions.find((d) => d.DeveloperName === name);
+    const definitionId = (definition?.Id as string | undefined) ?? org.sfId("300", 900 + ++n);
+    return versions.map(({ VersionNumber, Status, ...changed }) => ({ Id: org.sfId("301", 900 + ++n), DefinitionId: definitionId, Definition: { DeveloperName: name, NamespacePrefix: namespace }, VersionNumber, Status, ...changed }));
+  });
+  const rules = org.VALIDATION_RULE_CHANGES.map(({ object, name, namespace, ...changed }) => ({ Id: org.sfId("03d", 900 + ++n), ValidationName: name, EntityDefinition: { QualifiedApiName: object }, NamespacePrefix: namespace, ...changed }));
+  return { flows, rules };
+}
+
+const CHANGES = componentChanges();
+
 export class Simulator implements Transport {
   readonly requests: TransportRequest[] = [];
   #used: number;
@@ -551,7 +569,12 @@ export class Simulator implements Transport {
       case "WorkflowOutboundMessage":
         return tooling ? page([]) : unsupported(object);
       case "ValidationRule":
-        return tooling ? page(TOOLING.validationRules) : unsupported("ValidationRule");
+        if (!tooling) return unsupported("ValidationRule");
+        return page(/\bLastModifiedDate\b/.test(soql) ? CHANGES.rules : TOOLING.validationRules);
+      // Only the list with when each version was last changed: one flow's Metadata is the single-row read above.
+      case "Flow":
+        if (!tooling) return unsupported("Flow");
+        return /\bLastModifiedDate\b/.test(soql) ? page(CHANGES.flows) : reject("MALFORMED_QUERY", `The synthetic org doesn't answer this Flow query: ${soql.slice(0, 120)}`);
       case "FieldDefinition":
         if (/\bReferenceTo\b/.test(soql)) return page(inObjects(org.RELATIONSHIP_FIELDS, soql));
         return page(inObjects(TOOLING.fields, soql).map(({ InlineHelpText, ...f }) => f));

@@ -1,4 +1,5 @@
 import { metadataExtractor, apexExtractor } from "../../extract/automation.ts";
+import { componentChangesExtractor } from "../../extract/component-changes.ts";
 import {
   CORE_OBJECTS,
   customObjectsExtractor,
@@ -367,6 +368,7 @@ export const configurationModule: DomainModule = {
     setupAuditExtractor,
     metadataExtractor,
     apexExtractor,
+    componentChangesExtractor,
     stagesExtractor,
     usersExtractor,
     opportunitiesExtractor,
