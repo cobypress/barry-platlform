@@ -1529,6 +1529,42 @@ function buildCases() {
 
 export const supportCases = buildCases();
 
+// Trap: records made after the run's date, as a run resumed, or a step read
+// late, finds them. Every read with a window stops at the run's date
+// (DECISIONS.md 480), so none is read and nothing moves. Each would move a
+// finding if it were: a login by the clean dormant user, a failing job on a
+// class with no other failure, a lead and a task, a meeting next week, and a
+// high-priority case opened and closed since, with its history, milestone,
+// routing, replies and article. Added last, so nothing generated above moves.
+const LATER = asOf + 2 * 3_600_000;
+export const LATER_THAN_THE_RUN = {
+  task: sfId("00T", 900_001),
+  event: sfId("00U", 900_001),
+  email: sfId("02s", 900_001),
+  lead: sfId("00Q", 900_001),
+  leadStatus: sfId("017", 900_001),
+  asyncJob: sfId("707", 900_001),
+  login: { UserId: userId(5), LoginTime: stamp(LATER) },
+  case: sfId("500", 900_001),
+} as const;
+activity.tasks.push({ Id: LATER_THAN_THE_RUN.task, OwnerId: userId(14), WhoId: LATER_THAN_THE_RUN.lead, WhatId: null, CreatedDate: stamp(LATER), TaskSubtype: "Call" });
+activity.events.push({ Id: LATER_THAN_THE_RUN.event, OwnerId: userId(14), WhoId: null, WhatId: null, StartDateTime: stamp(asOf + 7 * DAY) });
+activity.emails.push({ Id: LATER_THAN_THE_RUN.email, RelatedToId: null, ActivityId: null, MessageDate: stamp(LATER), CreatedById: userId(14) });
+leadFunnel.leads.push({ Id: LATER_THAN_THE_RUN.lead, OwnerId: userId(1), LeadSource: "Partner", CreatedDate: stamp(LATER - 3_600_000), IsConverted: false, ConvertedDate: null, ConvertedOpportunityId: null, ConvertedContactId: null });
+leadFunnel.statusChanges.push({ Id: LATER_THAN_THE_RUN.leadStatus, LeadId: LATER_THAN_THE_RUN.lead, CreatedDate: stamp(LATER) });
+ASYNC_JOBS.push({ Id: LATER_THAN_THE_RUN.asyncJob, JobType: "Queueable", Status: "Failed", NumberOfErrors: 0, ApexClass: { Name: "OpportunityHandler" }, CreatedDate: stamp(LATER) });
+LOGIN_HISTORY.push({ ...LATER_THAN_THE_RUN.login, Status: "Success", ApiType: null, Application: "Browser" });
+{
+  const Id = LATER_THAN_THE_RUN.case;
+  const closed = LATER + 3 * 3_600_000;
+  supportCases.cases.push({ Id, Status: "Closed", IsClosed: true, Priority: "High", Origin: "Email", OwnerId: userId(1), CreatedDate: stamp(LATER), ClosedDate: stamp(closed), Type: "Problem", Reason: null, ContactId: sfId("003", 1), AccountId: null });
+  supportCases.history.push({ Id: sfId("017", 900_002), CaseId: Id, Field: "Status", OldValue: "Working", NewValue: "Closed", CreatedDate: stamp(closed) });
+  supportCases.milestones.push({ CaseId: Id, MilestoneTypeId: sfId("557", 1), IsCompleted: true, IsViolated: true, StartDate: stamp(LATER), TargetDate: stamp(LATER + 3_600_000), CompletionDate: stamp(closed) });
+  supportCases.replies.push({ Id: sfId("02s", 900_002), ParentId: Id, MessageDate: stamp(LATER), Incoming: true }, { Id: sfId("02s", 900_003), ParentId: Id, MessageDate: stamp(LATER + 2 * 3_600_000), Incoming: false });
+  supportCases.work.push({ Id: sfId("0Bz", 900_001), UserId: userId(1), Status: "Declined", RequestDateTime: stamp(LATER), AcceptDateTime: null, DeclineDateTime: stamp(LATER + 30_000), SpeedToAnswer: null });
+  supportCases.articles.push({ Id: sfId("0Ar", 900_001), CaseId: Id });
+}
+
 // Salesforce CPQ (DECISIONS.md 216 to 225). Read only when a run includes the
 // "cpq" module.
 
