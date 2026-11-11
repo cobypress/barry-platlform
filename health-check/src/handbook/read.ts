@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { baselineRun } from "../render/baseline.ts";
 import { Run } from "../schemas/index.ts";
 import { HANDBOOK_FILE } from "./build.ts";
-import { CHANGES_NOT_KEPT, Handbook, HANDBOOK_VERSION, HandbookVersion2, HandbookVersion3, HandbookVersion4 } from "./schema.ts";
+import { CHANGES_NOT_KEPT, Handbook, HANDBOOK_VERSION, HandbookVersion2, HandbookVersion3, HandbookVersion4, HandbookVersion5, type HandbookReadBy } from "./schema.ts";
 
 // The one reader of handbook.json (DECISIONS.md 443 and 445). It gives the
 // handbook, or why there isn't one in words fixed here: nothing from the file
@@ -25,6 +25,9 @@ export const HANDBOOK_NOT_MADE = {
   unreadable: "The org handbook wasn't made: its data couldn't be read from the run's folder.",
   render: "The org handbook wasn't made: it couldn't be written as a Word document.",
 } as const;
+
+/** An older file's readings, which it didn't keep (decision 484). */
+const NOT_KNOWN: HandbookReadBy = { metadata: null, apex: null };
 
 /**
  * The run folder's handbook, checked against its schema. A file that doesn't
@@ -48,18 +51,23 @@ export function readHandbook(runDir: string): HandbookRead {
   }
   const parsed = Handbook.safeParse(data);
   if (parsed.success) return { ok: true, handbook: parsed.data };
+  // A run from before which reading made it was kept: neither is known, so a
+  // re-check set against it compares only what was added or removed and when
+  // each was last changed (decision 484). So for every version below.
+  const five = HandbookVersion5.safeParse(data);
+  if (five.success) return { ok: true, handbook: { ...five.data, version: HANDBOOK_VERSION, readBy: NOT_KNOWN } };
   // A run from before the flows' and validation rules' last changes were kept
   // still makes its document, those without them and saying nothing of them
   // (decision 482). Its Apex is whole.
   const four = HandbookVersion4.safeParse(data);
-  if (four.success) return { ok: true, handbook: { ...four.data, version: HANDBOOK_VERSION, flows: notKept(four.data.flows), validationRules: notKept(four.data.validationRules) } };
+  if (four.success) return { ok: true, handbook: { ...four.data, version: HANDBOOK_VERSION, readBy: NOT_KNOWN, flows: notKept(four.data.flows), validationRules: notKept(four.data.validationRules) } };
   // And one from before any were kept, its Apex without them too (decision 473).
   const three = HandbookVersion3.safeParse(data);
-  if (three.success) return { ok: true, handbook: { ...three.data, version: HANDBOOK_VERSION, flows: notKept(three.data.flows), validationRules: notKept(three.data.validationRules), apexClasses: notKept(three.data.apexClasses), apexTriggers: notKept(three.data.apexTriggers) } };
+  if (three.success) return { ok: true, handbook: { ...three.data, version: HANDBOOK_VERSION, readBy: NOT_KNOWN, flows: notKept(three.data.flows), validationRules: notKept(three.data.validationRules), apexClasses: notKept(three.data.apexClasses), apexTriggers: notKept(three.data.apexTriggers) } };
   // And one from before the recent changes were kept, with that part saying so
   // (decision 462). Its other four parts are whole.
   const two = HandbookVersion2.safeParse(data);
-  if (two.success) return { ok: true, handbook: { ...two.data, version: HANDBOOK_VERSION, flows: notKept(two.data.flows), validationRules: notKept(two.data.validationRules), apexClasses: notKept(two.data.apexClasses), apexTriggers: notKept(two.data.apexTriggers), recentChanges: { status: "unavailable", reason: CHANGES_NOT_KEPT } } };
+  if (two.success) return { ok: true, handbook: { ...two.data, version: HANDBOOK_VERSION, readBy: NOT_KNOWN, flows: notKept(two.data.flows), validationRules: notKept(two.data.validationRules), apexClasses: notKept(two.data.apexClasses), apexTriggers: notKept(two.data.apexTriggers), recentChanges: { status: "unavailable", reason: CHANGES_NOT_KEPT } } };
   return { ok: false, why: "format" };
 }
 

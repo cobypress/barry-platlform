@@ -21,7 +21,7 @@ import { buildHandbook, HANDBOOK_FILE, labelComponentModifiers } from "../build.
 import { renderHandbookDocx } from "../docx.ts";
 import { readHandbook } from "../read.ts";
 import { Handbook, HANDBOOK_VERSION, type HandbookFlow, type HandbookValidationRule } from "../schema.ts";
-import { olderComponents } from "./older-files.ts";
+import { olderComponents, withoutReadings } from "./older-files.ts";
 
 // When each flow and validation rule was last changed, and by whom (DECISIONS.md
 // 482). A step of its own reads two Tooling lists; who is a token in
@@ -324,11 +324,22 @@ describe("handbook.json of an earlier version", () => {
   });
   const write = (file: unknown) => writeFileSync(join(dir, HANDBOOK_FILE), JSON.stringify(file));
 
-  test("version 5 reads back exactly as written", () => {
+  test("version 6 reads back exactly as written", () => {
+    assert.equal(current.version, 6);
     write(current);
     const back = readHandbook(dir);
     assert.ok(back.ok);
     assert.deepEqual(back.handbook, current);
+  });
+
+  test("version 5, as an engine at 8344688 wrote it, reads whole, with neither reading known (decision 484)", () => {
+    write(withoutReadings({ ...current, version: 5 }));
+    const back = readHandbook(dir);
+    assert.ok(back.ok);
+    assert.deepEqual(back.handbook, { ...current, readBy: { metadata: null, apex: null } });
+    // But a version 5 file that says which reading made it is no version we wrote.
+    write({ ...current, version: 5 });
+    assert.deepEqual(readHandbook(dir), { ok: false, why: "format" });
   });
 
   test("version 4 still reads, its flows and rules with no line and listed as not kept, its Apex whole", async () => {
@@ -359,7 +370,7 @@ describe("handbook.json of an earlier version", () => {
   }
 
   test("but a version 4 file with the lines, or a version 5 file without them, is read as neither", () => {
-    for (const wrong of [{ ...current, version: 4 }, olderComponents({ ...current })]) {
+    for (const wrong of [withoutReadings({ ...current, version: 4 }), olderComponents({ ...current, version: 5 })]) {
       write(wrong);
       assert.deepEqual(readHandbook(dir), { ok: false, why: "format" });
     }

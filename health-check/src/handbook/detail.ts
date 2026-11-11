@@ -7,6 +7,19 @@ import { MAX_CONDITIONS, MAX_FIELDS, MAX_PATHS, MAX_STEPS, MAX_TEXT, type Handbo
 // empty element; Tooling gives typed values and null for an absent one. Every
 // read below treats the two alike, so the routes give the same detail.
 
+/**
+ * Which reading of the flows and validation rules this is (DECISIONS.md 484),
+ * written into the metadata step's output when it reads, on both routes, and
+ * into handbook.json as `readBy.metadata`. A re-check names which details of a
+ * component differ only when both files hold the same number, so a change in
+ * how we read never reads as a change in the org. Raise it with any change that
+ * moves what the handbook keeps for a flow or rule nobody touched: here, in the
+ * retrieve's parser and its decoding (metadata-parse.ts), in what Tooling hands
+ * over (metadata-tooling.ts), or in the redaction. `pin.test.ts` holds it to a
+ * hash of the synthetic org's detail.
+ */
+export const METADATA_READING = 1;
+
 type Node = Record<string, any>;
 
 const list = (value: unknown): unknown[] => (value == null ? [] : [value].flat().filter((v) => v != null));

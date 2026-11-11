@@ -67,6 +67,18 @@ function queried(code: string, start: number, end: number, into: string[]): void
 
 const byLowerCase = (a: string, b: string): number => (a.toLowerCase() < b.toLowerCase() ? -1 : a.toLowerCase() > b.toLowerCase() ? 1 : 0);
 
+/**
+ * Which reading of the Apex this is (DECISIONS.md 484), written into the apex
+ * step's output when it reads, and into the org's handbook.json as
+ * `readBy.apex`. A re-check names which details of a class or trigger differ
+ * only when both files hold the same number, so a change in how we read never
+ * reads as a change in the org. Raise it with any change that moves what the
+ * handbook keeps for a class or trigger nobody touched: what `readTouches`
+ * finds, the scan's `testClass` (apex-scan.ts), or which events a trigger's
+ * Usage fields give. `pin.test.ts` holds it to a hash of the synthetic org's.
+ */
+export const APEX_READING = 1;
+
 /** Null when the body is hidden or missing: "couldn't be read", never "touches nothing". */
 export function readTouches(body: string | undefined): ApexTouches | null {
   if (!body || body === "(hidden)") return null;

@@ -1,6 +1,6 @@
 import { XMLParser } from "fast-xml-parser";
 import { redactSecrets } from "../privacy/secrets.ts";
-import { flowDetail, validationRuleDetail } from "../handbook/detail.ts";
+import { flowDetail, METADATA_READING, validationRuleDetail } from "../handbook/detail.ts";
 import type { HandbookFlow, HandbookValidationRule, ValidationRuleCoverage } from "../handbook/schema.ts";
 
 export type FlowSummary = {
@@ -50,8 +50,12 @@ export function unreadReason(bundle: MetadataBundle, needs: UnreadKind[]): strin
   return kind ? `${UNREAD_LABELS[kind]} couldn't be read: ${bundle.unread![kind]}` : null;
 }
 
-/** What the handbook keeps of each flow and validation rule, beside the summaries (DECISIONS.md 451). */
-export type HandbookDetail = { flows: HandbookFlow[]; validationRules: HandbookValidationRule[]; validationRulesCover: ValidationRuleCoverage };
+/**
+ * What the handbook keeps of each flow and validation rule, beside the
+ * summaries (DECISIONS.md 451), and which reading made it (484): undefined in
+ * a checkpoint read before that was kept, which the handbook says as null.
+ */
+export type HandbookDetail = { flows: HandbookFlow[]; validationRules: HandbookValidationRule[]; validationRulesCover: ValidationRuleCoverage; handbookReading?: number };
 
 export type MetadataBundle = {
   /** How it was read: one Metadata API retrieve, or Tooling item by item for a connection that can't use the Metadata API. */
@@ -274,7 +278,7 @@ function parseObject(path: string, xml: string, index: ReferenceIndex): { object
  */
 export function parseMetadataBundle(files: Record<string, string>, standardObjects: readonly string[] = [], rulesOnly: readonly string[] = []): MetadataBundle {
   const validationRulesCover: ValidationRuleCoverage = { customObjects: "all", standardObjects: [...standardObjects, ...rulesOnly] };
-  const bundle: MetadataBundle = { route: "retrieve", unsearched: [], flows: [], workflows: [], validationRules: [], customFields: [], recordTypes: [], objects: [], references: { users: {}, fields: {} }, filesRead: 0, handbook: { flows: [], validationRules: [], validationRulesCover } };
+  const bundle: MetadataBundle = { route: "retrieve", unsearched: [], flows: [], workflows: [], validationRules: [], customFields: [], recordTypes: [], objects: [], references: { users: {}, fields: {} }, filesRead: 0, handbook: { flows: [], validationRules: [], validationRulesCover, handbookReading: METADATA_READING } };
   const onlyRules = new Set(rulesOnly);
   for (const [path, raw] of Object.entries(files).sort(([a], [b]) => a.localeCompare(b))) {
     if (path === "package.xml") continue;

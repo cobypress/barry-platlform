@@ -5,7 +5,7 @@ import { unreadReason, type MetadataBundle } from "../extract/metadata-parse.ts"
 import type { Sourced } from "../extract/types.ts";
 import { objectResolver } from "../domains/object-names.ts";
 import { capped as cutText } from "./detail.ts";
-import { CHANGES_NOT_KEPT, Handbook, HANDBOOK_VERSION, HandbookRecentChanges, MAX_APEX_CLASSES, MAX_APEX_TRIGGERS, MAX_CHANGES, TRIGGER_EVENTS, type HandbookApexClass, type HandbookApexTrigger, type HandbookFlow, type HandbookLastChange, type LastChanges } from "./schema.ts";
+import { CHANGES_NOT_KEPT, Handbook, HANDBOOK_VERSION, HandbookRecentChanges, MAX_APEX_CLASSES, MAX_APEX_TRIGGERS, MAX_CHANGES, TRIGGER_EVENTS, type HandbookApexClass, type HandbookApexTrigger, type HandbookFlow, type HandbookReadBy, type HandbookLastChange, type LastChanges } from "./schema.ts";
 
 /**
  * In the run folder, beside the findings: kept by `hc purge`, deleted with the
@@ -17,7 +17,18 @@ const unavailable = (reason: string) => ({ status: "unavailable" as const, reaso
 
 function allUnavailable(reason: string): Handbook {
   const part = unavailable(reason);
-  return { version: HANDBOOK_VERSION, flows: part, validationRules: part, apexClasses: part, apexTriggers: part, recentChanges: part };
+  // No part holds a reading, so none is said.
+  return { version: HANDBOOK_VERSION, readBy: { metadata: null, apex: null }, flows: part, validationRules: part, apexClasses: part, apexTriggers: part, recentChanges: part };
+}
+
+/**
+ * Which reading made the file (decision 484), as each step stamped its own
+ * output when it read, so a checkpoint reused from before the stamp was kept
+ * says null whatever code builds the file now. Null too where the step didn't
+ * run, or its metadata wasn't read; never this code's own number.
+ */
+function readByOf(metadata: Sourced<MetadataBundle> | undefined, apex: ApexData | undefined): HandbookReadBy {
+  return { metadata: (metadata?.status === "ok" ? metadata.data.handbook?.handbookReading : undefined) ?? null, apex: apex?.handbookReading ?? null };
 }
 
 /** A rule's place in the list of changes: its object and name, which a dot can't confuse. */
@@ -201,7 +212,7 @@ export function buildHandbook(
   modifiers: Modifiers = new Map(),
   components?: ComponentChangesData,
 ): Handbook {
-  const handbook = Handbook.safeParse({ version: HANDBOOK_VERSION, ...metadataParts(metadata, components, modifiers), ...apexParts(apex, customObjects, modifiers), recentChanges: changes });
+  const handbook = Handbook.safeParse({ version: HANDBOOK_VERSION, readBy: readByOf(metadata, apex), ...metadataParts(metadata, components, modifiers), ...apexParts(apex, customObjects, modifiers), recentChanges: changes });
   if (handbook.success) return handbook.data;
   const where = handbook.error.issues[0]?.path.join(".") ?? "";
   return allUnavailable(`The handbook's data didn't fit its format${where ? ` at ${where}` : ""}, so it wasn't kept.`);

@@ -118,6 +118,13 @@ function filesIn(dir: string): Map<string, string> {
   return files;
 }
 
+/**
+ * Which reading made the handbook (decision 484): two small numbers, held to
+ * handbook.json and the two steps' own outputs all the same. By their keys,
+ * since a number can't be followed.
+ */
+const READINGS = ["readBy", "handbookReading"];
+
 /** Outputs: everything but the handbook itself and the raw extracts it's made from, which `hc purge` deletes. */
 const isOutput = (path: string): boolean => path !== HANDBOOK_FILE && !path.startsWith("checkpoints/");
 
@@ -205,6 +212,14 @@ describe("the handbook's detail goes nowhere but handbook.json", () => {
     const store = { runs: [...deps.store.runs.values()], writes: deps.store.writes, documents: [...deps.store.documents.values()], benchmark: deps.store.benchmarkRows, scans: [...deps.store.scanResults.values()], pulses: [...deps.store.pulseResults.values()], microsites: [...deps.store.microsites.values()] };
     assert.deepEqual(holding(JSON.stringify(store), [...ROUTED, ...NOWHERE, ...MODIFIERS]), []);
     assert.doesNotMatch(JSON.stringify(store), /"steps":\[\{"kind"/, "no handbook step either");
+  });
+
+  test("which reading made it is in handbook.json and the two steps' checkpoints, and handed to nothing", () => {
+    const files = filesIn(join(deps.runsDir, RUN_ID));
+    assert.deepEqual([...files.keys()].filter((f) => files.get(f)!.includes("readBy")), [HANDBOOK_FILE]);
+    assert.deepEqual([...files.keys()].filter((f) => files.get(f)!.includes("handbookReading")).sort(), ["checkpoints/apex.json", "checkpoints/metadata.json"]);
+    const store = { saved, runs: [...deps.store.runs.values()], writes: deps.store.writes, documents: [...deps.store.documents.values()], benchmark: deps.store.benchmarkRows, scans: [...deps.store.scanResults.values()] };
+    assert.deepEqual(holding(JSON.stringify([store, asked, deps.lines]), READINGS), []);
   });
 
   test("nothing of it is sent to Claude", () => {
@@ -384,6 +399,14 @@ describe("the documents job: handbook.json reaches the Word document and nothing
     }
   });
 
+  test("nor which reading made either file: not in the store, its warnings, the log, the outcome, an upload or another file the make leaves", () => {
+    const made = deps.store.documents.get(RUN_ID)!.made!;
+    const store = { documents: [...deps.store.documents.values()], writes: deps.store.writes, runs: [...deps.store.runs.values()], shares: deps.store.shares, microsites: [...deps.store.microsites.values()], benchmark: deps.store.benchmarkRows };
+    for (const [where, text] of [["store", JSON.stringify(store)], ["warnings", JSON.stringify(made.warnings)], ["log", deps.lines.join("\n")], ["outcome", JSON.stringify(outcome)], ["uploads", uploads.map((u) => u.body.toString("latin1")).join("\n")]] as const) assert.deepEqual(holding(text, READINGS), [], where);
+    const files = filesIn(dir);
+    assert.deepEqual([...files.keys()].filter((f) => isOutput(f) && holding(files.get(f)!, READINGS).length > 0), []);
+  });
+
   test("nor any other file the make leaves in the run folder", () => {
     const files = filesIn(dir);
     const holding = [...files.keys()].filter((f) => isOutput(f) && f !== `documents/${HANDBOOK_DOCX}` && [...PLANTED, SINCE_FLOW, SINCE_NOWHERE].some((p) => files.get(f)!.includes(p)));
@@ -425,6 +448,15 @@ describe("the benchmark", () => {
     assert.ok(written.length > 0);
     assert.deepEqual(holding(JSON.stringify([written, result]), [...ROUTED, ...NOWHERE, ...MODIFIERS]), []);
   });
+
+  test("nor which reading made it, in either", async () => {
+    const store = tempDir();
+    const result = exportBenchmark({ ...options(copy()), storeDir: store });
+    for (const [path, text] of filesIn(store)) assert.deepEqual(holding(text, READINGS), [], path);
+    const written: unknown[] = [];
+    const contributed = await contributeBenchmark(options(copy()), async (rows) => void written.push(...rows));
+    assert.deepEqual(holding(JSON.stringify([result, written, contributed]), READINGS), []);
+  });
 });
 
 describe("what reads it", () => {
@@ -446,6 +478,8 @@ describe("what reads it", () => {
     ["src/testing/fingerprint.ts", "hashes it, in tests only"],
     ["src/testing/synthetic-org.ts", "plants its traps"],
     ["src/facts/questions.ts", "names its section of QUESTIONS.md, and reads no run"],
+    ["src/extract/apex-touches.ts", "holds the number of the Apex reading the apex step stamps on its output, for handbook.json (DECISIONS.md 484)"],
+    ["src/extract/automation.ts", "stamps that number on the apex step's output, and keeps nothing else for the handbook"],
   ]);
   const root = fileURLToPath(new URL("../../../", import.meta.url));
 

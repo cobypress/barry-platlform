@@ -1,6 +1,6 @@
 import { isUnavailable } from "../salesforce/client.ts";
 import { redactSecrets } from "../privacy/secrets.ts";
-import { validationRuleDetail } from "../handbook/detail.ts";
+import { METADATA_READING, validationRuleDetail } from "../handbook/detail.ts";
 import type { HandbookValidationRule } from "../handbook/schema.ts";
 import { flowDetailMetadata, hasText, indexReferences, summariseFlowMetadata, summariseWorkflowRule, type MetadataBundle, type UnreadKind, type WorkflowSummary } from "./metadata-parse.ts";
 import { readableReason } from "./types.ts";
@@ -97,7 +97,7 @@ function markUnread(bundle: MetadataBundle, kind: UnreadKind, reason: string): v
 }
 
 export async function readBundleThroughTooling(ctx: ExtractContext): Promise<MetadataBundle> {
-  const bundle: MetadataBundle = { route: "tooling", unsearched: [], flows: [], workflows: [], validationRules: [], customFields: [], recordTypes: [], objects: [], references: { users: {}, fields: {} }, filesRead: 0, handbook: { flows: [], validationRules: [], validationRulesCover: { customObjects: "all", standardObjects: "all" } } };
+  const bundle: MetadataBundle = { route: "tooling", unsearched: [], flows: [], workflows: [], validationRules: [], customFields: [], recordTypes: [], objects: [], references: { users: {}, fields: {} }, filesRead: 0, handbook: { flows: [], validationRules: [], validationRulesCover: { customObjects: "all", standardObjects: "all" }, handbookReading: METADATA_READING } };
   const reader = new ItemReader(ctx);
   const index = (metadata: Row | null, path: string): void => {
     if (metadata) indexReferences(bundle.references, JSON.stringify(metadata), path);
