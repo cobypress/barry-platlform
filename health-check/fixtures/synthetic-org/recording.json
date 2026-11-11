@@ -554,13 +554,13 @@
    "text": "{\"totalSize\":5,\"done\":true,\"records\":[{\"Id\":\"001000000009001AAA\",\"Name\":\"Synthetic Holdings\",\"OwnerId\":\"005000000000001AAA\"},{\"Id\":\"001000000009002AAA\",\"Name\":\"Synthetic Holdings\",\"OwnerId\":\"005000000000002AAA\"},{\"Id\":\"001000000009003AAA\",\"Name\":\"Synthetic Holdings\",\"OwnerId\":\"005000000000014AAA\"},{\"Id\":\"001000000009004AAA\",\"Name\":\"Example Logistics\",\"OwnerId\":\"005000000000003AAA\"},{\"Id\":\"001000000009005AAA\",\"Name\":\"Example Logistics\",\"OwnerId\":\"005000000000003AAA\"}]}"
   },
   {
-   "key": "GET /services/data/v66.0/query?q=SELECT%20PermissionSet.PermissionsViewAllData%20FROM%20PermissionSetAssignment%20WHERE%20AssigneeId%20%3D%20%27005000000990000AAA%27",
+   "key": "GET /services/data/v66.0/query?q=SELECT%20PermissionSet.PermissionsViewAllData%20FROM%20PermissionSetAssignment%20WHERE%20AssigneeId%20%3D%20%27005000000990000AAA%27%20AND%20PermissionSet.HasActivationRequired%20%3D%20false",
    "status": 200,
    "limitInfo": "api-usage=1090/100000",
    "text": "{\"totalSize\":2,\"done\":true,\"records\":[{\"PermissionSet\":{\"PermissionsViewAllData\":true}},{\"PermissionSet\":{\"PermissionsViewAllData\":false}}]}"
   },
   {
-   "key": "GET /services/data/v66.0/query?q=SELECT%20SobjectType%20FROM%20ObjectPermissions%20WHERE%20PermissionsViewAllRecords%20%3D%20true%20AND%20ParentId%20IN%20(SELECT%20PermissionSetId%20FROM%20PermissionSetAssignment%20WHERE%20AssigneeId%20%3D%20%27005000000990000AAA%27)",
+   "key": "GET /services/data/v66.0/query?q=SELECT%20SobjectType%20FROM%20ObjectPermissions%20WHERE%20PermissionsViewAllRecords%20%3D%20true%20AND%20Parent.HasActivationRequired%20%3D%20false%20AND%20ParentId%20IN%20(SELECT%20PermissionSetId%20FROM%20PermissionSetAssignment%20WHERE%20AssigneeId%20%3D%20%27005000000990000AAA%27)",
    "status": 200,
    "limitInfo": "api-usage=1091/100000",
    "text": "{\"totalSize\":6,\"done\":true,\"records\":[{\"SobjectType\":\"Account\"},{\"SobjectType\":\"Campaign\"},{\"SobjectType\":\"Case\"},{\"SobjectType\":\"Contact\"},{\"SobjectType\":\"Lead\"},{\"SobjectType\":\"Opportunity\"}]}"
