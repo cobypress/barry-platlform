@@ -1,7 +1,8 @@
 import type { ScanResult } from "../scan/result.ts";
 import type { PulseResult } from "../pulse/result.ts";
 import { Run, type BenchmarkRow, type ConnectLink } from "../schemas/index.ts";
-import { ORG_AWAITING_CONNECT, RunClosedError, type ConnectJobInput, type DocumentsJobInput, type DriveShare, type ShareJobInput, type DocumentsMade, type LinkConnected, type LinkState, type PulseRun, type ReleasedRun, type RunJobInput, type RunOutputRecord, type RunProgress, type WorkerStore } from "./types.ts";
+import { storedFromRow, waitingRow, type ConsoleSummariesRow, type SummariesToSave } from "../handbook/summary-row.ts";
+import { ORG_AWAITING_CONNECT, RunClosedError, type ConnectJobInput, type DocumentsJobInput, type DocumentsJobReads, type DriveShare, type ShareJobInput, type DocumentsMade, type LinkConnected, type LinkState, type PulseRun, type ReleasedRun, type RunJobInput, type RunOutputRecord, type RunProgress, type WorkerStore } from "./types.ts";
 
 // The WorkerStore for tests: the console's tables as plain maps, with the same
 // rules a database store must keep. Writes replace; a run in review or
@@ -59,7 +60,34 @@ export class MemoryWorkerStore implements WorkerStore {
     run.run = Run.parse({ ...run.run, ...progress });
     run.runDir = runDir;
     run.output = rest;
+    if (rest.handbookSummaries) this.#saveSummaries(runId, rest.handbookSummaries);
     this.writes.push({ method: "saveRunOutput", id: runId, detail: progress.status });
+  }
+
+  /** The console's HealthCheckHandbookSummaries, keyed by run id (DECISIONS.md 494). */
+  readonly summaries = new Map<string, ConsoleSummariesRow>();
+
+  /** As the Postgres store's one statement: a new row, or a waiting one replaced with nothing struck; a decided row untouched; a row the console couldn't read never written. */
+  #saveSummaries(runId: string, summaries: SummariesToSave): void {
+    const checked = waitingRow(runId, summaries);
+    if (!checked.ok || !checked.row) return;
+    const held = this.summaries.get(runId);
+    if (!held) this.summaries.set(runId, checked.row);
+    else if (held.status === "waiting") this.summaries.set(runId, { ...held, model: checked.row.model, madeAt: checked.row.madeAt, items: checked.row.items, leftOut: checked.row.leftOut });
+  }
+
+  /** As the console strikes a summary out: only while the row waits. */
+  strikeSummary(runId: string, index: number): void {
+    const row = this.summaries.get(runId);
+    if (row?.status !== "waiting" || !row.items[index]) throw new Error(`No waiting summary ${index} for run ${runId}`);
+    row.items[index] = { ...row.items[index]!, struck: true };
+  }
+
+  /** As the console decides: only a waiting row, with who and when. */
+  decideSummaries(runId: string, status: "approved" | "left_out", by = "consultant@example.com", at = "2026-11-05T10:00:00.000Z"): void {
+    const row = this.summaries.get(runId);
+    if (row?.status !== "waiting") throw new Error(`Run ${runId}'s summaries aren't waiting`);
+    this.summaries.set(runId, { ...row, status, decidedBy: by, decidedAt: at });
   }
 
   async recordRunFailure(runId: string, reason: string, at: string): Promise<void> {
@@ -108,9 +136,13 @@ export class MemoryWorkerStore implements WorkerStore {
     this.documents.set(input.run.id, { input: structuredClone(input), made: null, error: null });
   }
 
-  async loadDocumentsJob(runId: string): Promise<DocumentsJobInput | null> {
+  async loadDocumentsJob(runId: string, reads: DocumentsJobReads = {}): Promise<DocumentsJobInput | null> {
     const doc = this.documents.get(runId);
-    return doc ? structuredClone(doc.input) : null;
+    if (!doc) return null;
+    // As the Postgres store reads it: only with the switch on, held to the console's schema, and only what the handbook prints from.
+    const row = reads.handbookSummaries === true ? this.summaries.get(runId) : undefined;
+    const read = row === undefined ? null : storedFromRow((({ decidedBy: _by, decidedAt: _at, model: _model, madeAt: _made, ...rest }) => rest)(row));
+    return structuredClone({ ...doc.input, handbookSummaries: read?.ok ? read.stored : null });
   }
 
   async startDocuments(runId: string, _at: string): Promise<boolean> {

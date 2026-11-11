@@ -12,6 +12,7 @@ import { guardPrompt, holdsNameOrSecret, PromptRefused, sendPrompt } from "../na
 import { extractFigures } from "../numbercheck/index.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { Timestamp } from "../schemas/common.ts";
+import { plainText } from "./plain-text.ts";
 
 // Claude's plain-English summary of each kept Apex class and trigger, for the
 // org handbook (DECISIONS.md 490 and 492). The code kept by the Apex step
@@ -110,6 +111,8 @@ export function replyProblems(summary: string, sent: string, pseudonyms: Pseudon
   // A host with no scheme, or a field path such as Account.Name: a full stop between two letters or digits.
   if (/[A-Za-z0-9]\.[A-Za-z0-9]/.test(summary)) problems.push("It holds a web address, a host or a dotted name such as a field path. Describe it in words, and put a space after every full stop.");
   if (/[\r\n\u2028\u2029]/.test(summary)) problems.push("It has a line break. Write one paragraph.");
+  // A character Word can't hold would print changed, and the database refuses U+0000 and a lone surrogate.
+  if (!plainText(summary)) problems.push("It holds a character that can't be printed, such as a control character. Write plain text.");
   const words = wordCount([summary]);
   if (words > SUMMARY_LIMITS.words || summary.length > SUMMARY_LIMITS.characters) problems.push(`It is too long, at ${words} words. Keep to the word limit.`);
   if (!summary.trim()) problems.push("It is empty.");

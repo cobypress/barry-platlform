@@ -4,15 +4,20 @@ import { longDate } from "../render/format.ts";
 import { UNKNOWN_USER, type Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { compareHandbooks, type Changed, type Compared, type Component, type Detail, type HandbookComparison, type KindComparison, type NotCompared, type Reading } from "./compare.ts";
 import type { EarlierHandbook } from "./read.ts";
+import type { PrintedSummaries } from "./summary-row.ts";
+import { WORD_UNSAFE } from "./plain-text.ts";
+import { APEX_SOURCE_MAX_ITEMS } from "../extract/apex-source.ts";
 import { CHANGES_NOT_KEPT, TRIGGER_EVENTS, type Handbook, type HandbookChange, type HandbookApexClass, type HandbookLastChange, type HandbookApexTouches, type HandbookApexTrigger, type HandbookCondition, type HandbookFlow, type HandbookFlowItem, type HandbookPath, type HandbookStep, type HandbookValidationRule, type HandbookValidationRuleItem, type LastChanges, type ValidationRuleCoverage } from "./schema.ts";
 
 // The org handbook as a Word document (DECISIONS.md 443 and 444): handbook.json
 // made readable, and nothing more. Code alone writes it, from the file: no
-// Claude text, no figure from the value model, and no name added but who made
-// each recent change and who last changed each class, trigger, flow and
-// validation rule, restored from the run's pseudonym map (decisions 421, 461,
-// 473 and 482). The admin's own text prints as written, so a reader can trust
-// that what isn't here doesn't exist, or is said to be missing.
+// figure from the value model, and no name added but who made each recent
+// change and who last changed each class, trigger, flow and validation rule,
+// restored from the run's pseudonym map (decisions 421, 461, 473 and 482). The
+// one Claude text is a class's or trigger's summary that a person approved,
+// labelled as Claude's wherever it prints, and printed as approved (decision
+// 495). The admin's own text prints as written, so a reader can trust that
+// what isn't here doesn't exist, or is said to be missing.
 
 /** The document in the run's documents folder, beside the reports. */
 export const HANDBOOK_DOCX = "org-handbook.docx";
@@ -28,10 +33,11 @@ const CODE = "Courier New";
  * half of a surrogate pair, U+FFFE or U+FFFF, and one of them makes a file Word
  * calls corrupt. The docx package drops the control characters silently but
  * not the rest, so each becomes U+FFFD here: the reader sees something was
- * there. Tab, line feed and carriage return are XML's own and are kept.
+ * there. Tab, line feed and carriage return are XML's own and are kept. The
+ * characters are plain-text.ts's, which a summary is held to as well.
  */
 export function wordSafe(text: string): string {
-  return text.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F￾￿]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "�");
+  return text.replace(WORD_UNSAFE, "\uFFFD");
 }
 
 const count = (n: number): string => n.toLocaleString("en-GB");
@@ -257,7 +263,7 @@ function conditionWords(c: HandbookCondition): Run[] {
  * and the three never look alike (decisions 453 and 454).
  */
 /** `alsoCovers` is a further line for "What it covers", or null when there's nothing to say. */
-type Part = { covers: (h: Handbook) => string; alsoCovers?: (h: Handbook) => string | null; write: (doc: Doc, h: Handbook, names: Names) => void };
+type Part = { covers: (h: Handbook) => string; alsoCovers?: (h: Handbook) => string | null; write: (doc: Doc, h: Handbook, names: Names, summaries: PrintedSummaries | null) => void };
 
 /** A user's name from their token, or null when the run's names can't give it. */
 type Names = (token: string) => string | null;
@@ -498,11 +504,37 @@ function lastChangedWords(change: HandbookLastChange, names: Names): string {
   return `${on}${by}`;
 }
 
-/** One class or trigger as one paragraph: an org can have thousands, and a heading and a paragraph a line each would bury the rest. */
-function writeApex(doc: Doc, item: ApexItem, names: Names, trigger?: Run[][]): void {
+/**
+ * One class or trigger as one paragraph: an org can have thousands, and a
+ * heading and a paragraph a line each would bury the rest. A summary a person
+ * approved goes last, under the label that says who wrote it (decision 495),
+ * as it was approved: never through the run's names.
+ */
+function writeApex(doc: Doc, item: ApexItem, names: Names, trigger?: Run[][], summary?: string): void {
   // A trigger can't be a test, so only a class says whether it is one.
   const test = trigger ? "" : ` Test: ${item.isTest === null ? "couldn't be told: the code couldn't be read" : item.isTest ? "Yes" : "No"}.`;
-  doc.lines([{ text: item.name, bold: true }], [...(trigger ?? []), [{ text: `API version ${apiVersion(item.apiVersion)}. Status: ${item.status}.${test}` }], ...lastChangedLine(item.lastChanged, names), ...touchesLines(item.touches)]);
+  const summarised: Run[][] = summary === undefined ? [] : [[{ text: "Summary (written by Claude, checked by us): ", bold: true }, { text: summary }]];
+  doc.lines([{ text: item.name, bold: true }], [...(trigger ?? []), [{ text: `API version ${apiVersion(item.apiVersion)}. Status: ${item.status}.${test}` }], ...lastChangedLine(item.lastChanged, names), ...touchesLines(item.touches), ...summarised]);
+}
+
+/** Said once, at the top of the Apex classes, in a handbook that prints at least one summary (decision 495). */
+const SUMMARIES_SAID =
+  "Some classes and triggers below carry a short summary. Claude, an AI model, wrote each one from the code, and one of our consultants read and approved it before it reached you. A summary is a guide to what the code does: the code is what runs.";
+
+/** How many carry a summary, and why the others don't, from the row's counts. A reason none had is left out. */
+export function summaryCountWords(printed: PrintedSummaries): string {
+  const { tests, tooLarge, overLimit, rest } = printed.counts;
+  const n = printed.items.length;
+  const others = [
+    tests ? plural(tests, "test class", "test classes") : "",
+    tooLarge ? `${count(tooLarge)} that ${tooLarge === 1 ? "was" : "were"} too large to summarise whole` : "",
+    overLimit ? `${count(overLimit)} beyond the ${count(APEX_SOURCE_MAX_ITEMS)} largest` : "",
+    rest ? `${count(rest)} that we couldn't summarise or chose to leave out` : "",
+  ].filter(Boolean);
+  const carry = `Of the Apex classes and triggers we read, ${count(n)} ${n === 1 ? "carries" : "carry"} a summary`;
+  if (others.length === 0) return `${carry}.`;
+  const total = tests + tooLarge + overLimit + rest;
+  return `${carry}, and the ${total === 1 ? "other is" : "others are"} ${listed(others)}.`;
 }
 
 /** What the reading is and isn't, said once, where the first Apex listed starts. */
@@ -512,27 +544,34 @@ const READING =
 /** A part with Apex listed in it, so the reading has been said. */
 const listsApex = (part: Capped<ApexItem>): boolean => part.status === "ok" && part.items.length > 0;
 
-function apexPart<T extends ApexItem>(what: { title: string; one: string; many: string; get: (h: Handbook) => Capped<T>; intro: (h: Handbook) => string; write: (doc: Doc, item: T, names: Names) => void }): Part {
+function apexPart<T extends ApexItem>(what: { kind: "class" | "trigger"; title: string; one: string; many: string; get: (h: Handbook) => Capped<T>; intro: (h: Handbook) => string; write: (doc: Doc, item: T, names: Names, summary?: string) => void }): Part {
   return {
     covers: (h) => {
       const part = what.get(h);
       if (part.status !== "ok") return unavailableWords(what.title, part.reason);
       return apexTotal(part) ? `${what.title}: ${apexCounts(part, what.one, what.many)}.` : `${what.title}: your org has none.`;
     },
-    write: (doc, h, names) => {
+    write: (doc, h, names, printed) => {
       doc.heading(what.title, 2);
+      // The classes come first, so the summaries are said once, before either list.
+      if (printed && what.kind === "class") {
+        doc.para(SUMMARIES_SAID);
+        doc.para(summaryCountWords(printed));
+      }
       const part = what.get(h);
       if (part.status !== "ok") return doc.para({ text: unavailableWords(what.title, part.reason), bold: true });
       if (apexTotal(part) === 0) return doc.para(`Your org has no ${what.title}: there were none to read.`);
       doc.para(`Your org has ${apexCounts(part, what.one, what.many)}.${apexCut(part) ? " The rest aren't in this handbook." : " They're listed by name."}`);
       doc.para(what.intro(h));
-      for (const item of part.items) what.write(doc, item, names);
+      // Each printable summary names exactly one entry of its kind (summary-row.ts), so none is printed twice.
+      const summaries = new Map((printed?.items ?? []).filter((s) => s.kind === what.kind).map((s) => [s.name, s.summary]));
+      for (const item of part.items) what.write(doc, item, names, summaries.get(item.name));
     },
   };
 }
 
 // In the file's order, which is by name (decision 456).
-const APEX_CLASSES = apexPart<HandbookApexClass>({ title: "Apex classes", one: "class", many: "classes", get: (h) => h.apexClasses, intro: () => READING, write: (doc, item, names) => writeApex(doc, item, names) });
+const APEX_CLASSES = apexPart<HandbookApexClass>({ kind: "class", title: "Apex classes", one: "class", many: "classes", get: (h) => h.apexClasses, intro: () => READING, write: (doc, item, names, summary) => writeApex(doc, item, names, undefined, summary) });
 
 /** Events in Apex's order, whatever order the file has them in. */
 const eventWords = (events: HandbookApexTrigger["events"]): Run =>
@@ -560,12 +599,13 @@ function lastChangedCovers(h: Handbook): string | null {
 
 const APEX_TRIGGERS: Part = {
   ...apexPart<HandbookApexTrigger>({
+    kind: "trigger",
     title: "Apex triggers",
     one: "trigger",
     many: "triggers",
     get: (h) => h.apexTriggers,
     intro: (h) => `Each trigger shows the object it's on and the events it runs on. A custom object we couldn't name shows as the id Salesforce gives it. ${listsApex(h.apexClasses) ? "What it touches is read as the classes' is, with the same limits." : READING}`,
-    write: (doc, item, names) => writeApex(doc, item, names, [[{ text: `On: ${item.object}` }], [eventWords(item.events)]]),
+    write: (doc, item, names, summary) => writeApex(doc, item, names, [[{ text: `On: ${item.object}` }], [eventWords(item.events)]], summary),
   }),
   alsoCovers: lastChangedCovers,
 };
@@ -825,6 +865,11 @@ type HandbookOptions = {
    * handbook to read. Its tokens are never restored: only this run's are.
    */
   earlier?: EarlierHandbook | null;
+  /**
+   * The summaries a person approved that can be printed (printableSummaries,
+   * decision 495). Undefined or null, the document is as it was without them.
+   */
+  summaries?: PrintedSummaries | null;
 };
 
 /** The handbook as its document's blocks. Exported for the tests, which read the words without unzipping. */
@@ -835,10 +880,15 @@ export function handbookBlocks(handbook: Handbook, options: HandbookOptions): Pa
     const name = options.pseudonyms?.restore(token);
     return name && name !== token && name !== UNKNOWN_USER ? name : null;
   };
+  const printed = options.summaries?.items.length ? options.summaries : null;
   const doc = new Doc();
   doc.heading(`Org handbook: ${options.clientName}`, 1);
   doc.para(`This handbook sets out how your Salesforce org is configured: what each flow does, step by step, what each validation rule checks, what each Apex class and trigger touches, and what was changed in Setup recently, and by whom. We read it from your org on ${longDate(options.runDate)}, for your health check, and it describes the org as it was that day.`);
-  doc.para("Everything in it comes from your org's own configuration. Names, descriptions, conditions, formulas and messages are as your admins wrote them, except that anything that looks like a password or a key is replaced with [REDACTED]. We haven't added to it or summarised it, except that what each piece of Apex touches is read from its code, as that part explains. Where we couldn't read something, or list only part of it, we say so.");
+  // Changed only where a summary is printed, so every other handbook is as it was (decision 495).
+  const added = printed
+    ? "We haven't added to it, except that what each piece of Apex touches is read from its code and that some classes and triggers carry a short summary written by Claude and approved by us, as that part explains."
+    : "We haven't added to it or summarised it, except that what each piece of Apex touches is read from its code, as that part explains.";
+  doc.para(`Everything in it comes from your org's own configuration. Names, descriptions, conditions, formulas and messages are as your admins wrote them, except that anything that looks like a password or a key is replaced with [REDACTED]. ${added} Where we couldn't read something, or list only part of it, we say so.`);
   doc.heading("What it covers", 2);
   // A re-check's part comes before the recent changes, the last part.
   const { earlier } = options;
@@ -848,7 +898,7 @@ export function handbookBlocks(handbook: Handbook, options: HandbookOptions): Pa
     const also = part.alsoCovers?.(handbook);
     if (also) doc.para(also);
   }
-  for (const part of parts) part.write(doc, handbook, names);
+  for (const part of parts) part.write(doc, handbook, names, printed);
   return doc.blocks;
 }
 

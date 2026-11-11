@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { cpSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { APEX_SOURCE_FILE, ApexSource } from "../../extract/apex-source.ts";
 import { SUMMARIES_FILE, SUMMARIES_PARTIAL_FILE } from "../../handbook/summaries.ts";
@@ -9,7 +9,8 @@ import type { NarrativeClient, NarrativeRequest } from "../../narrative/client.t
 import type { Transport, TransportRequest, TransportResponse } from "../../salesforce/transport.ts";
 import { loadAnswers, loadRecording, ReplayTransport, type Recording } from "../../testing/replay.ts";
 import { createJobHandler } from "../worker.ts";
-import { baseDeps, RUN_ID, runInput, syntheticConnection, temp } from "./helpers.ts";
+import { baseDeps, consoleRun, RUN_ID, runInput, syntheticConnection, temp } from "./helpers.ts";
+import type { RunOutputRecord } from "../types.ts";
 
 // The worker's side of decisions 491 and 492: where the summaries run, what a
 // job delivered again asks for, and when the kept code is deleted.
@@ -205,5 +206,109 @@ describe("a job delivered again", () => {
     assert.equal(second.client.summaries(), 3);
     const changed = second.client.asked.filter((r) => r.system === APEX_SUMMARY_PROMPT).map((r) => r.prompt.match(/Its name: (\w+)/)![1]);
     assert.equal(changed[0], source.items[0]!.name);
+  });
+});
+
+// Decision 494: the summaries go to the console's table with the run's results,
+// for a person to approve, only with the switch on and a file holding some.
+describe("the summaries reach the console's table", () => {
+  /** Every output the store was given, as it was given. */
+  function saving(deps: Awaited<ReturnType<typeof setup>>["deps"]): RunOutputRecord[] {
+    const saved: RunOutputRecord[] = [];
+    const save = deps.store.saveRunOutput.bind(deps.store);
+    deps.store.saveRunOutput = async (runId, output) => {
+      saved.push(structuredClone(output));
+      return save(runId, output);
+    };
+    return saved;
+  }
+
+  /** The console takes the run back from review, so the job can be delivered again. */
+  const reopen = (deps: Awaited<ReturnType<typeof setup>>["deps"]): void => void (deps.store.runs.get(RUN_ID)!.run.status = "analysing");
+
+  test("with the switch on, the row holds the stub's summaries, waiting, and the file's counts", async () => {
+    const { deps, handle, dir } = await setup({ narrative: claude(), apexSummaries: true });
+    const saved = saving(deps);
+    assert.equal((await handle(job, once)).outcome, "done");
+    const file = JSON.parse(readFileSync(join(dir, SUMMARIES_FILE), "utf8")) as { model: string; madeAt: string; items: Array<{ kind: string; name: string; summary: string }>; leftOut: Record<string, number> };
+    assert.equal(file.items.length, 5);
+    assert.deepEqual(saved[0]!.handbookSummaries, { model: file.model, madeAt: file.madeAt, items: file.items, leftOut: file.leftOut });
+    const row = deps.store.summaries.get(RUN_ID)!;
+    assert.equal(row.status, "waiting");
+    assert.deepEqual([row.decidedBy, row.decidedAt], [null, null]);
+    assert.deepEqual(row.items, file.items.map((i) => ({ ...i, struck: false })));
+    assert.ok(row.items.every((i) => i.summary === `Runs the work of ${i.name} when it is called.`));
+    assert.deepEqual(row.leftOut, file.leftOut);
+  });
+
+  test("with the switch off, no row and nothing in the output", async () => {
+    const { deps, handle } = await setup({ narrative: claude(), apexSummaries: false });
+    const saved = saving(deps);
+    assert.equal((await handle(job, once)).outcome, "done");
+    assert.ok(!("handbookSummaries" in saved[0]!));
+    assert.equal(deps.store.summaries.size, 0);
+  });
+
+  test("the switch turned off before a second delivery sends none, though the file is still there", async () => {
+    const { deps, handle, dir } = await setup({ narrative: claude(), apexSummaries: true });
+    const saved = saving(deps);
+    assert.equal((await handle(job, once)).outcome, "done");
+    assert.ok(has(dir, SUMMARIES_FILE) && "handbookSummaries" in saved[0]!);
+    deps.apexSummaries = false;
+    reopen(deps);
+    assert.equal((await handle(job, once)).outcome, "done");
+    assert.ok(has(dir, SUMMARIES_FILE));
+    assert.ok(!("handbookSummaries" in saved[1]!));
+  });
+
+  test("a scan and a pulse with the switch on: no row", async () => {
+    for (const product of ["scan", "pulse"] as const) {
+      const deps = baseDeps({ dataTransport: new ReplayTransport(fiveRecording()), narrative: claude(), apexSummaries: true });
+      deps.store.addRun(runInput({ run: consoleRun({ scope: "essentials", product, ...(product === "pulse" ? { baselineRunId: "hc-2026-08-31-00000009" } : {}) }) }));
+      await deps.tokens.save(syntheticConnection());
+      const saved = saving(deps);
+      assert.equal((await createJobHandler(deps)(job, once)).outcome, "done", product);
+      assert.ok(saved.length === 1 && !("handbookSummaries" in saved[0]!), product);
+      assert.equal(deps.store.summaries.size, 0, product);
+    }
+  });
+
+  test("a file with no summaries in it sends none", async () => {
+    // Every reply is empty, so nothing is written: the file holds only counts.
+    const empty: NarrativeClient = { complete: async (request) => ({ stopReason: "end_turn", model: request.model, text: request.system === APEX_SUMMARY_PROMPT ? JSON.stringify({ summary: "" }) : JSON.stringify({ paragraphs: [{ text: "We looked at this.", sources: [] }] }) }) };
+    const { deps, handle, dir } = await setup({ narrative: empty, apexSummaries: true });
+    const saved = saving(deps);
+    assert.equal((await handle(job, once)).outcome, "done");
+    assert.equal((JSON.parse(readFileSync(join(dir, SUMMARIES_FILE), "utf8")) as { items: unknown[] }).items.length, 0);
+    assert.ok(!("handbookSummaries" in saved[0]!));
+    assert.equal(deps.store.summaries.size, 0);
+  });
+
+  test("a second delivery with no file sends none and leaves the waiting row; one with a file that doesn't parse sends none and says so without a word of it", async () => {
+    const { deps, handle, dir } = await setup({ narrative: claude(), apexSummaries: true });
+    const saved = saving(deps);
+    assert.equal((await handle(job, once)).outcome, "done");
+    const row = JSON.stringify(deps.store.summaries.get(RUN_ID));
+    rmSync(join(dir, SUMMARIES_FILE));
+    reopen(deps);
+    assert.equal((await handle(job, once)).outcome, "done");
+    assert.ok(!("handbookSummaries" in saved[1]!));
+    assert.equal(JSON.stringify(deps.store.summaries.get(RUN_ID)), row);
+    writeFileSync(join(dir, SUMMARIES_FILE), `{"version":1,"model":"Quokkamodel","items":[{"kind":"class","name":"Quokkaclass"`);
+    reopen(deps);
+    assert.equal((await handle(job, once)).outcome, "done");
+    assert.ok(!("handbookSummaries" in saved[2]!));
+    assert.equal(JSON.stringify(deps.store.summaries.get(RUN_ID)), row);
+    assert.ok(deps.lines.includes(`Run ${RUN_ID}'s file of Claude's summaries didn't parse, so the console gets none of them.`));
+    assert.ok(!deps.lines.some((l) => l.includes("Quokka")));
+  });
+
+  test("a second delivery with the file still there replaces a waiting row with the same summaries, strikes and all", async () => {
+    const { deps, handle } = await setup({ narrative: claude(), apexSummaries: true });
+    assert.equal((await handle(job, once)).outcome, "done");
+    deps.store.strikeSummary(RUN_ID, 0);
+    reopen(deps);
+    assert.equal((await handle(job, once)).outcome, "done");
+    assert.ok(deps.store.summaries.get(RUN_ID)!.items.every((i) => !i.struck));
   });
 });
