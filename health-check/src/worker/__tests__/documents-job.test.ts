@@ -843,6 +843,32 @@ describe("the org handbook", () => {
     assert.deepEqual(readFileSync(onDisk), handbook!.body);
   });
 
+  // Who made each recent change is a token in the file, and a name only here (DECISIONS.md 421 and 461).
+  test("names who made each recent change from the run's pseudonym map, and prints no token", async () => {
+    const drive = new MemoryDrive();
+    const deps = withHandbook(jobInput(), drive);
+    cpSync(join(recorded, "pseudonym-map.json"), join(deps.runsDir, RUN_ID, "pseudonym-map.json"));
+    assert.equal((await processDocumentsJob(RUN_ID, deps, { final: true })).outcome, "done");
+    const text = docxText(handbooks(drive)[0]!.body!);
+    assert.match(text, /, Jo Ellis \(support\.desk@example\.com logged in as them\): Flows/);
+    assert.doesNotMatch(text, /\[\[[a-z]+:[A-Z]\d{4,}\]\]/);
+    assert.ok(!deps.lines.some((l) => /names no one/.test(l)));
+  });
+
+  test("without the run's pseudonym map it's still made, naming no one and printing no token, and the log says why", async () => {
+    for (const map of [undefined, "not json"]) {
+      const drive = new MemoryDrive();
+      const deps = withHandbook(jobInput(), drive);
+      if (map !== undefined) writeFileSync(join(deps.runsDir, RUN_ID, "pseudonym-map.json"), map);
+      assert.equal((await processDocumentsJob(RUN_ID, deps, { final: true })).outcome, "done");
+      const text = docxText(handbooks(drive)[0]!.body!);
+      assert.match(text, /, a user whose name we couldn't look up \(support\.desk@example\.com logged in as them\): Flows/);
+      assert.ok(!text.includes("Jo Ellis"));
+      assert.doesNotMatch(text, /\[\[[a-z]+:[A-Z]\d{4,}\]\]/);
+      assert.ok(deps.lines.some((l) => l === `Run ${RUN_ID}: the org handbook names no one who made a recent change, because the run's pseudonym map couldn't be read.`), map ?? "missing");
+    }
+  });
+
   test("made again, it's replaced in place: one file, its id and link kept, outside the version folders", async () => {
     const drive = new MemoryDrive();
     const deps = withHandbook(jobInput(), drive);
