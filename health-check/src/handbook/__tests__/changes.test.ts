@@ -122,6 +122,47 @@ describe("the recorded synthetic org's recent changes", () => {
   });
 });
 
+describe("a run resumed after the step's version went up", () => {
+  // The step reads the trail again, with the run's own date (DECISIONS.md 463).
+  const LATER = "HB-LATER-0463";
+  const later = { Action: "changedinteractiondef", Section: "Customize Opportunities", Display: `Changed field Stage ${LATER}`, CreatedDate: new Date(new Date(AS_OF).getTime() + 7_200_000).toISOString().replace("Z", "+0000"), CreatedById: userId(9), CreatedBy: { Name: "Kim Fox" }, DelegateUser: null };
+  type Steps = { steps: Array<{ id: string; version: number }> };
+  const summaryOf = (dir: string) => {
+    const audit = read<Sourced<SetupAuditSummary>>(dir, "checkpoints/setup-audit.json");
+    assert.ok(audit.status === "ok");
+    const { changes, ...summary } = audit.data;
+    return { summary, changes };
+  };
+  const factsOf = (dir: string) => read<Finding[]>(dir, "findings.json").find((f) => f.ruleId === "cfg.setup-change-concentration")!.facts;
+
+  test("doesn't take in a change made after the run's date: the summary, the finding and the handbook are as the first read left them", async () => {
+    const first = await simulated();
+    const was = { ...summaryOf(first.dir), facts: factsOf(first.dir), items: changesOf(first.dir).items };
+    assert.ok(was.changes.length > 0);
+
+    // As a run in flight at deployment left it: the step at version 1, whose checkpoint kept no changes.
+    const run = read<Steps>(first.dir, "run.json");
+    run.steps.find((s) => s.id === "setup-audit")!.version = 1;
+    writeFileSync(join(first.dir, "run.json"), JSON.stringify(run));
+    const checkpoint = read<{ data: Partial<SetupAuditSummary> }>(first.dir, "checkpoints/setup-audit.json");
+    delete checkpoint.data.changes;
+    writeFileSync(join(first.dir, "checkpoints/setup-audit.json"), JSON.stringify(checkpoint));
+
+    // The org has since gained a change, two hours after the run's date, and the resume is later still.
+    const transport = new Simulator({ setupAudit: [later, ...SETUP_AUDIT] });
+    await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: join(first.dir, ".."), now: new Date(), transport, log: () => {}, resume: first.run.id });
+    assert.ok(transport.requests.some((r) => decodeURIComponent(r.url).includes("FROM SetupAuditTrail")), "the step read the trail again");
+    assert.equal(read<Steps>(first.dir, "run.json").steps.find((s) => s.id === "setup-audit")!.version, 2);
+
+    const now = summaryOf(first.dir);
+    assert.deepEqual(now.summary, was.summary);
+    assert.deepEqual(now.changes, was.changes);
+    assert.deepEqual(factsOf(first.dir), was.facts);
+    assert.deepEqual(changesOf(first.dir).items, was.items);
+    for (const file of ["checkpoints/setup-audit.json", "findings.json", HANDBOOK_FILE]) assert.ok(!readFileSync(join(first.dir, file), "utf8").includes(LATER), file);
+  });
+});
+
 describe("who made a change", () => {
   const OUTSIDE = userId(990);
   const base = { Action: "changedinteractiondef", Section: "Flows", DelegateUser: null };

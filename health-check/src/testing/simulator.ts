@@ -460,8 +460,14 @@ export class Simulator implements Transport {
         const since = /\bLoginTime\s*>=\s*(\S+)/i.exec(where)?.[1];
         return page(since ? this.#d.loginHistory.filter((r) => new Date(r.LoginTime.replace("+0000", "Z")) >= new Date(since)) : this.#d.loginHistory);
       }
-      case "SetupAuditTrail":
-        return /\b(Section|Display|Action)\s*(=|!=|IN|LIKE)/i.test(where) ? reject("INVALID_FIELD", "field 'Section' can not be filtered in a query call") : page(this.#setupAudit);
+      case "SetupAuditTrail": {
+        if (/\b(Section|Display|Action)\s*(=|!=|IN|LIKE)/i.test(where)) return reject("INVALID_FIELD", "field 'Section' can not be filtered in a query call");
+        // CreatedDate is filterable, at both ends.
+        const from = /\bCreatedDate\s*>=\s*(\S+)/i.exec(where)?.[1];
+        const to = /\bCreatedDate\s*<=\s*(\S+)/i.exec(where)?.[1];
+        const at = (r: Record<string, unknown>) => new Date(String(r.CreatedDate).replace("+0000", "Z"));
+        return page(this.#setupAudit.filter((r) => (!from || at(r) >= new Date(from)) && (!to || at(r) <= new Date(to))));
+      }
       case "SecurityHealthCheck":
         return tooling ? page([{ Score: org.HEALTH_SCORE }]) : unsupported("SecurityHealthCheck");
       case "SecurityHealthCheckRisks":

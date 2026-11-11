@@ -233,14 +233,23 @@ const USER_ADMIN_SECTION = "Manage Users";
 export const SETUP_AUDIT_DAYS = 180;
 const AUDIT_MAX_ROWS = 2000;
 
+/**
+ * SOQL's date-times have no milliseconds, so the end of a read is the run's
+ * instant rounded up to its second. Rounded down, it would cut a change made
+ * earlier in that second, if Salesforce keeps the milliseconds.
+ */
+const upToItsSecond = (date: Date): Date => new Date(Math.ceil(date.getTime() / 1000) * 1000);
+
 export const setupAuditExtractor: Extractor<Sourced<SetupAuditSummary>> = {
   id: "setup-audit",
   version: 2,
   async run(ctx) {
     // Section can't be filtered in SOQL, so the rows are fetched and split here.
+    // The read stops at the run's own date (DECISIONS.md 463): a resumed run
+    // that reads the trail again mustn't take in changes made since.
     const soql =
       `SELECT Action, Section, Display, CreatedDate, CreatedById, CreatedBy.Name, DelegateUser FROM SetupAuditTrail ` +
-      `WHERE CreatedDate >= ${soqlDateTime(daysBefore(ctx.now, SETUP_AUDIT_DAYS))} ORDER BY CreatedDate DESC`;
+      `WHERE CreatedDate >= ${soqlDateTime(daysBefore(ctx.now, SETUP_AUDIT_DAYS))} AND CreatedDate <= ${soqlDateTime(upToItsSecond(ctx.now))} ORDER BY CreatedDate DESC`;
     const rows = await readSoql<SetupAuditRow>(ctx, soql, { maxRecords: AUDIT_MAX_ROWS });
     if (rows.status !== "ok") return rows;
     const summary: SetupAuditSummary = { rows: rows.data.length, earliest: null, bySection: {}, configChangesByUser: {}, excludedUserAdmin: 0, changes: [] };
