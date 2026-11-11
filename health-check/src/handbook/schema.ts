@@ -8,8 +8,9 @@ import { CHANGES, MAX_QUERIED_OBJECTS } from "../extract/apex-touches.ts";
 // console (452).
 
 // Still 2 with each flow's paths added (decision 446): no file of version 2 had
-// left an engine before them, so none in a run folder lacks them.
-export const HANDBOOK_VERSION = 2;
+// left an engine before them, so none in a run folder lacks them. 3 adds the
+// recent changes (decision 461), and a file of version 2 is still read.
+export const HANDBOOK_VERSION = 3;
 
 // The most a flow, step, entry, start and text keep (decision 453). Anything
 // past these is cut, marked as cut, and carries its full count.
@@ -21,6 +22,8 @@ export const MAX_TEXT = 4_000;
 // And the most Apex classes and triggers, by name (decision 456).
 export const MAX_APEX_CLASSES = 5_000;
 export const MAX_APEX_TRIGGERS = 1_000;
+// And the most setup changes: the trail's own read stops at as many (decision 461).
+export const MAX_CHANGES = 2_000;
 
 const Count = z.number().int().nonnegative();
 const Text = z.string().max(MAX_TEXT);
@@ -189,12 +192,63 @@ const Unavailable = z.strictObject({ status: z.literal("unavailable"), reason: z
 const capped = <T extends z.ZodType>(item: T, max: number) =>
   z.discriminatedUnion("status", [z.strictObject({ status: z.literal("ok"), items: z.array(item).max(max), total: Count, cut: z.boolean() }), Unavailable]);
 
-export const Handbook = z.strictObject({
-  version: z.literal(HANDBOOK_VERSION),
+/** A pseudonymiser's token for a user: a name only when the Word document is made (decision 421). */
+export const UserToken = z.string().regex(/^\[\[user:U\d{4,}\]\]$/);
+
+/** One setup change, as the Setup Audit Trail records it (decision 461). */
+export const HandbookChange = z.strictObject({
+  /** CreatedDate, as Salesforce gives it. */
+  at: z.string().min(1),
+  section: z.string().nullable(),
+  action: z.string().nullable(),
+  /** Salesforce's sentence for it, redacted, as written, and cut like a formula. */
+  what: Text.nullable(),
+  whatCut: z.boolean(),
+  whatLength: Count.nullable(),
+  /** Null when the trail names no user. */
+  by: UserToken.nullable(),
+  /** The username someone was logged in as, as the trail has it. */
+  loggedInAs: z.string().nullable(),
+});
+export type HandbookChange = z.infer<typeof HandbookChange>;
+
+export const HandbookRecentChanges = z.discriminatedUnion("status", [
+  z.strictObject({
+    status: z.literal("ok"),
+    /** Newest first. */
+    items: z.array(HandbookChange).max(MAX_CHANGES),
+    total: Count,
+    /** The trail had more rows than the read takes, so the oldest in the window aren't here. */
+    cut: z.boolean(),
+    /** User administration ("Manage Users") rows, counted and not kept. */
+    leftOutUserAdmin: Count,
+    /** How many days back the trail was read. */
+    days: Count,
+  }),
+  Unavailable,
+]);
+export type HandbookRecentChanges = z.infer<typeof HandbookRecentChanges>;
+
+const parts = {
   flows: z.discriminatedUnion("status", [z.strictObject({ status: z.literal("ok"), items: z.array(HandbookFlow) }), Unavailable]),
   // Nor may "no rule on Case" and "we didn't read Case": the list says what it covers.
   validationRules: z.discriminatedUnion("status", [z.strictObject({ status: z.literal("ok"), covers: ValidationRuleCoverage, items: z.array(HandbookValidationRule) }), Unavailable]),
   apexClasses: capped(HandbookApexClass, MAX_APEX_CLASSES),
   apexTriggers: capped(HandbookApexTrigger, MAX_APEX_TRIGGERS),
+};
+
+export const Handbook = z.strictObject({
+  version: z.literal(HANDBOOK_VERSION),
+  ...parts,
+  recentChanges: HandbookRecentChanges,
 });
 export type Handbook = z.infer<typeof Handbook>;
+
+/**
+ * A file from before the recent changes were kept: the same four parts, and
+ * no fifth. It's read as a handbook whose fifth part says so (decision 462).
+ */
+export const HandbookVersion2 = z.strictObject({ version: z.literal(2), ...parts });
+
+/** Why a handbook has no recent changes when its run kept none: the part says only this. */
+export const CHANGES_NOT_KEPT = "This run was read before recent changes were kept.";

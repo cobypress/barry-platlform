@@ -17,6 +17,7 @@ import { Handbook, HANDBOOK_VERSION, MAX_APEX_CLASSES, MAX_APEX_TRIGGERS, MAX_ST
 // What the retrieve reads on the synthetic org: the four, and Case, which its record counts list (decision 460).
 const RETRIEVE = { customObjects: "all" as const, standardObjects: ["Account", "Contact", "Lead", "Opportunity", "Case"] };
 const NO_APEX = { status: "ok" as const, items: [], total: 0, cut: false };
+const NO_CHANGES = { status: "ok" as const, items: [], total: 0, cut: false, leftOutUserAdmin: 0, days: 180 };
 
 function step(name: string, over: Partial<HandbookStep> = {}): HandbookStep {
   return { kind: "assignments", name, label: name.replace(/_/g, " "), object: null, fields: [], fieldsTotal: 0, detail: null, outcomes: [], next: null, fault: null, reached: true, ...over };
@@ -57,7 +58,7 @@ function trigger(name: string, over: Partial<HandbookApexTrigger> = {}): Handboo
 const apex = <T>(items: T[]) => ({ status: "ok" as const, items, total: items.length, cut: false });
 
 function handbook(over: Partial<Handbook> = {}): Handbook {
-  return Handbook.parse({ version: HANDBOOK_VERSION, flows: { status: "ok", items: [] }, validationRules: { status: "ok", covers: RETRIEVE, items: [] }, apexClasses: NO_APEX, apexTriggers: NO_APEX, ...over });
+  return Handbook.parse({ version: HANDBOOK_VERSION, flows: { status: "ok", items: [] }, validationRules: { status: "ok", covers: RETRIEVE, items: [] }, apexClasses: NO_APEX, apexTriggers: NO_APEX, recentChanges: NO_CHANGES, ...over });
 }
 
 const OPTIONS = { clientName: "Synthetic Co", runDate: "2026-10-31T00:00:00.000Z" };
@@ -92,7 +93,7 @@ describe("the handbook as a Word document", () => {
     const h = handbook({ flows: { status: "ok", items: [flow("One"), flow("Two", { status: "Draft" })] }, validationRules: { status: "ok", covers: RETRIEVE, items: [rule("R1"), rule("R2", { active: false }), rule("R3")] } });
     const { paragraphs, text } = await render(h);
     assert.deepEqual(headings(paragraphs, 1), ["Org handbook: Synthetic Co"]);
-    assert.deepEqual(headings(paragraphs, 2), ["What it covers", "Flows", "Validation rules", "Apex classes", "Apex triggers"]);
+    assert.deepEqual(headings(paragraphs, 2), ["What it covers", "Flows", "Validation rules", "Apex classes", "Apex triggers", "Recent changes"]);
     assert.match(text, /We read it from your org on 31 Oct 2026/);
     assert.match(text, /Flows: 2 flows, 1 of them active\./);
     assert.match(text, /Validation rules: 3 validation rules, 2 of them active, on your custom objects and Account, Contact, Lead, Opportunity and Case\./);
@@ -387,7 +388,7 @@ describe("the handbook's Apex", () => {
   test("comes after the validation rules, classes then triggers, each counted on the first page", async () => {
     const h = handbook({ apexClasses: apex([apexClass("Alpha"), apexClass("Beta", { status: "Inactive" }), apexClass("Gamma")]), apexTriggers: apex([trigger("OnDeal")]) });
     const { paragraphs, text } = await render(h);
-    assert.deepEqual(headings(paragraphs, 2), ["What it covers", "Flows", "Validation rules", "Apex classes", "Apex triggers"]);
+    assert.deepEqual(headings(paragraphs, 2), ["What it covers", "Flows", "Validation rules", "Apex classes", "Apex triggers", "Recent changes"]);
     const covers = text.slice(text.indexOf("## What it covers"), text.indexOf("## Flows"));
     assert.match(covers, /Validation rules: your org has none on [^\n]+\n\nApex classes: 3 classes, 2 of them active\.\n\nApex triggers: 1 trigger, 1 of them active\.\n/);
     // In the file's order, which is by name: the document doesn't sort them again.

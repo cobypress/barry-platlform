@@ -20,7 +20,7 @@ import { docxText } from "../../testing/docx-text.ts";
 import { buildHandbook, HANDBOOK_FILE } from "../build.ts";
 import { renderHandbookDocx } from "../docx.ts";
 import { flowDetail, validationRuleDetail } from "../detail.ts";
-import { Handbook, MAX_APEX_CLASSES, MAX_APEX_TRIGGERS, MAX_CONDITIONS, MAX_FIELDS, MAX_PATHS, MAX_STEPS, MAX_TEXT, type HandbookFlow, type ValidationRuleCoverage } from "../schema.ts";
+import { Handbook, HANDBOOK_VERSION, MAX_APEX_CLASSES, MAX_APEX_TRIGGERS, MAX_CONDITIONS, MAX_FIELDS, MAX_PATHS, MAX_STEPS, MAX_TEXT, type HandbookFlow, type ValidationRuleCoverage } from "../schema.ts";
 
 // The org handbook's data (DECISIONS.md 451 to 457).
 
@@ -36,8 +36,8 @@ async function run(options: ConstructorParameters<typeof Simulator>[0] = {}): Pr
 }
 
 const read = (dir: string, file: string): string => readFileSync(join(dir, file), "utf8");
-/** The Apex parts, for a file whose other parts a test is about. */
-const APEX_UNREAD = { apexClasses: { status: "unavailable", reason: "x" }, apexTriggers: { status: "unavailable", reason: "x" } } as const;
+/** The Apex parts and recent changes, for a file whose other parts a test is about. */
+const APEX_UNREAD = { apexClasses: { status: "unavailable", reason: "x" }, apexTriggers: { status: "unavailable", reason: "x" }, recentChanges: { status: "unavailable", reason: "x" } } as const;
 const handbookOf = (r: Run): Handbook => Handbook.parse(JSON.parse(read(r.dir, HANDBOOK_FILE)));
 const flows = (h: Handbook): HandbookFlow[] => (h.flows.status === "ok" ? h.flows.items : assert.fail("flows unavailable"));
 
@@ -238,10 +238,10 @@ describe("the two routes", () => {
       const items = handbookOf(retrieve).validationRules;
       assert.ok(items.status === "ok");
       const { covers: _, ...bare } = items;
-      assert.equal(Handbook.safeParse({ version: 2, flows: { status: "ok", items: [] }, validationRules: bare, ...APEX_UNREAD }).success, false);
-      assert.equal(Handbook.safeParse({ version: 2, flows: { status: "ok", items: [] }, validationRules: items, ...APEX_UNREAD }).success, true);
+      assert.equal(Handbook.safeParse({ version: HANDBOOK_VERSION, flows: { status: "ok", items: [] }, validationRules: bare, ...APEX_UNREAD }).success, false);
+      assert.equal(Handbook.safeParse({ version: HANDBOOK_VERSION, flows: { status: "ok", items: [] }, validationRules: items, ...APEX_UNREAD }).success, true);
       // Unavailable says why instead, with nothing to cover.
-      assert.equal(Handbook.safeParse({ version: 2, flows: { status: "ok", items: [] }, validationRules: { status: "unavailable", reason: "x", covers: items.covers }, ...APEX_UNREAD }).success, false);
+      assert.equal(Handbook.safeParse({ version: HANDBOOK_VERSION, flows: { status: "ok", items: [] }, validationRules: { status: "unavailable", reason: "x", covers: items.covers }, ...APEX_UNREAD }).success, false);
     });
 
     test("a bundle with no checkpointed coverage gives no list rather than one that claims too much", () => {
@@ -396,7 +396,7 @@ describe("the two routes", () => {
     assert.deepEqual([fromXml.start.pathsTotal, fromXml.start.pathsCut], [4, false]);
     // Steps path by path, the immediate path's first.
     assert.deepEqual(fromXml.steps.map((s) => [s.name, s.reached]), [["Set_Flag", true], ["Email_Owner", true], ["Sync_Ledger", true], ["Recalled", true]]);
-    assert.ok(Handbook.safeParse({ version: 2, flows: { status: "ok", items: [fromXml] }, validationRules: { status: "ok", covers: { customObjects: "all", standardObjects: "all" }, items: [] }, ...APEX_UNREAD }).success);
+    assert.ok(Handbook.safeParse({ version: HANDBOOK_VERSION, flows: { status: "ok", items: [fromXml] }, validationRules: { status: "ok", covers: { customObjects: "all", standardObjects: "all" }, items: [] }, ...APEX_UNREAD }).success);
   });
 
   test("a path that runs after the save is committed, with its label as the admin wrote it and no time", () => {
@@ -457,7 +457,7 @@ describe("caps (decision 453)", () => {
     assert.deepEqual([at.steps.length, at.stepsTotal, at.cut], [500, 500, false]);
     const over = flowDetail("Over", steps(501), null);
     assert.deepEqual([over.steps.length, over.stepsTotal, over.cut], [500, 501, true]);
-    assert.ok(Handbook.safeParse({ version: 2, flows: { status: "ok", items: [over] }, validationRules: { status: "ok", covers: { customObjects: "all", standardObjects: "all" }, items: [] }, ...APEX_UNREAD }).success);
+    assert.ok(Handbook.safeParse({ version: HANDBOOK_VERSION, flows: { status: "ok", items: [over] }, validationRules: { status: "ok", covers: { customObjects: "all", standardObjects: "all" }, items: [] }, ...APEX_UNREAD }).success);
   });
 
   test(`a step keeps ${MAX_FIELDS} fields, with the full count beside them`, () => {
@@ -483,7 +483,7 @@ describe("caps (decision 453)", () => {
     assert.deepEqual([at.paths.length, at.pathsTotal, at.pathsCut], [50, 50, false]);
     const over = flowDetail("Over", start(50), null).start;
     assert.deepEqual([over.paths.length, over.pathsTotal, over.pathsCut, over.paths[0]!.kind, over.paths.at(-1)!.label], [50, 51, true, "immediate", "Path 48"]);
-    assert.ok(Handbook.safeParse({ version: 2, flows: { status: "ok", items: [flowDetail("Over", start(50), null)] }, validationRules: { status: "ok", covers: { customObjects: "all", standardObjects: "all" }, items: [] }, ...APEX_UNREAD }).success);
+    assert.ok(Handbook.safeParse({ version: HANDBOOK_VERSION, flows: { status: "ok", items: [flowDetail("Over", start(50), null)] }, validationRules: { status: "ok", covers: { customObjects: "all", standardObjects: "all" }, items: [] }, ...APEX_UNREAD }).success);
   });
 
   test(`a formula or value keeps ${MAX_TEXT} characters, and marks one more as cut with its length`, () => {
@@ -579,7 +579,7 @@ describe("when the metadata couldn't be read (decision 454)", () => {
   test("no metadata step, a failed one, or detail that doesn't fit: both parts say why", () => {
     const source = { kind: "metadata" as const, path: "Flow" };
     const noApex = { status: "unavailable", reason: "This run didn't read the org's Apex." };
-    assert.deepEqual(buildHandbook(undefined), { version: 2, flows: { status: "unavailable", reason: "This run didn't read the org's metadata." }, validationRules: { status: "unavailable", reason: "This run didn't read the org's metadata." }, apexClasses: noApex, apexTriggers: noApex });
+    assert.deepEqual(buildHandbook(undefined), { version: HANDBOOK_VERSION, flows: { status: "unavailable", reason: "This run didn't read the org's metadata." }, validationRules: { status: "unavailable", reason: "This run didn't read the org's metadata." }, apexClasses: noApex, apexTriggers: noApex, recentChanges: { status: "unavailable", reason: "This run didn't read the org's setup audit trail." } });
     const failed = buildHandbook({ status: "unavailable", reason: "Salesforce said no.", source });
     assert.deepEqual(failed.flows, { status: "unavailable", reason: "Metadata couldn't be retrieved: Salesforce said no." });
     const bundle = parseMetadataBundle({});
@@ -640,9 +640,9 @@ describe("Apex (decisions 456 and 457)", () => {
       dir = (await runFromRecording()).dir;
     });
 
-    test("a version 2 file that validates against the schema, with both parts read", () => {
+    test("a version 3 file that validates against the schema, with both parts read", () => {
       const raw = JSON.parse(read(dir, HANDBOOK_FILE));
-      assert.equal(raw.version, 2);
+      assert.equal(raw.version, 3);
       const h = Handbook.parse(raw);
       assert.ok(h.apexClasses.status === "ok" && h.apexTriggers.status === "ok");
       assert.deepEqual([h.apexClasses.total, h.apexClasses.cut, h.apexTriggers.total, h.apexTriggers.cut], [7, false, 5, false]);

@@ -31,7 +31,7 @@ const free = (value: unknown): string | null => {
 type Capped = { text: string | null; cut: boolean; length: number | null };
 
 /** Redacted, then cut at the limit, so a secret is never half kept. */
-function capped(value: unknown): Capped {
+export function capped(value: unknown): Capped {
   const text = free(value);
   if (text === null) return { text: null, cut: false, length: null };
   if (text.length <= MAX_TEXT) return { text, cut: false, length: text.length };

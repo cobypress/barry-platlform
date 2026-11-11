@@ -1,9 +1,10 @@
 import type { ApexClassRow, ApexData, ApexTriggerRow, TriggerUsage } from "../extract/automation.ts";
-import type { CustomObjectRow } from "../extract/configuration.ts";
+import { SETUP_AUDIT_DAYS, type CustomObjectRow, type SetupAuditSummary } from "../extract/configuration.ts";
 import { unreadReason, type MetadataBundle } from "../extract/metadata-parse.ts";
 import type { Sourced } from "../extract/types.ts";
 import { objectResolver } from "../domains/object-names.ts";
-import { Handbook, HANDBOOK_VERSION, MAX_APEX_CLASSES, MAX_APEX_TRIGGERS, TRIGGER_EVENTS, type HandbookApexClass, type HandbookApexTrigger, type HandbookFlow } from "./schema.ts";
+import { capped as cutText } from "./detail.ts";
+import { CHANGES_NOT_KEPT, Handbook, HANDBOOK_VERSION, HandbookRecentChanges, MAX_APEX_CLASSES, MAX_APEX_TRIGGERS, MAX_CHANGES, TRIGGER_EVENTS, type HandbookApexClass, type HandbookApexTrigger, type HandbookFlow } from "./schema.ts";
 
 /**
  * In the run folder, beside the findings: kept by `hc purge`, deleted with the
@@ -15,7 +16,7 @@ const unavailable = (reason: string) => ({ status: "unavailable" as const, reaso
 
 function allUnavailable(reason: string): Handbook {
   const part = unavailable(reason);
-  return { version: HANDBOOK_VERSION, flows: part, validationRules: part, apexClasses: part, apexTriggers: part };
+  return { version: HANDBOOK_VERSION, flows: part, validationRules: part, apexClasses: part, apexTriggers: part, recentChanges: part };
 }
 
 function metadataParts(metadata: Sourced<MetadataBundle> | undefined): Pick<Handbook, "flows" | "validationRules"> {
@@ -72,15 +73,50 @@ function apexParts(apex: ApexData | undefined, customObjects: Sourced<CustomObje
   return { apexClasses: capped(apex.classes, MAX_APEX_CLASSES, apexClass), apexTriggers: capped(apex.triggers, MAX_APEX_TRIGGERS, apexTrigger(objectOf)) };
 }
 
+/** A user's token, from the run's pseudonymiser: the name is the run's user list's, or else the trail's. */
+export type LabelUser = (id: string, trailName: string | null) => string;
+
+const TRAIL_NOT_READ = "This run didn't read the org's setup audit trail.";
+
+const newestFirst = (a: { CreatedDate: string }, b: { CreatedDate: string }): number => (a.CreatedDate < b.CreatedDate ? 1 : a.CreatedDate > b.CreatedDate ? -1 : 0);
+
+/**
+ * The org's recent setup changes, newest first (decisions 461 and 462), from
+ * the setup audit step's output, which keeps no user administration. Who made
+ * each is a token, never a name: their users are labelled in id order, as the
+ * run's own are, so a run analysed again gives each the same token.
+ */
+export function recentChanges(audit: Sourced<SetupAuditSummary> | undefined, label: LabelUser): HandbookRecentChanges {
+  if (!audit) return unavailable(TRAIL_NOT_READ);
+  if (audit.status !== "ok") return unavailable(audit.reason);
+  const { changes, excludedUserAdmin } = audit.data;
+  if (!Array.isArray(changes)) return unavailable(CHANGES_NOT_KEPT);
+  const named = new Map<string, string | null>();
+  for (const c of changes) if (c.CreatedById && !named.get(c.CreatedById)) named.set(c.CreatedById, c.CreatedByName);
+  const tokens = new Map([...named].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([id, name]) => [id, label(id, name)]));
+  // Salesforce gives them newest first; sorted here too, so no other order can print as that.
+  const items = [...changes]
+    .sort(newestFirst)
+    .slice(0, MAX_CHANGES)
+    .map((c) => {
+      const what = cutText(c.Display);
+      return { at: c.CreatedDate, section: c.Section, action: c.Action, what: what.text, whatCut: what.cut, whatLength: what.length, by: c.CreatedById ? tokens.get(c.CreatedById)! : null, loggedInAs: c.DelegateUser };
+    });
+  const part = HandbookRecentChanges.safeParse({ status: "ok", items, total: changes.length, cut: audit.truncated || changes.length > MAX_CHANGES, leftOutUserAdmin: excludedUserAdmin, days: SETUP_AUDIT_DAYS });
+  // One part that doesn't fit says so, and the other four are kept.
+  return part.success ? part.data : unavailable("The recent changes didn't fit their format, so they weren't kept.");
+}
+
 /**
  * The handbook's data from the metadata, apex and custom objects steps' output,
- * any of which is undefined when the run didn't have that step. A part that
+ * any of which is undefined when the run didn't have that step, and the recent
+ * changes made from the setup audit step's. A part that
  * couldn't be read says why, so the documents can tell "no flows" from "we couldn't read them"
  * (decision 454). Checked against the schema here, so a file that doesn't fit is
  * never written: its parts say so instead, and the run carries on.
  */
-export function buildHandbook(metadata: Sourced<MetadataBundle> | undefined, apex?: ApexData, customObjects?: Sourced<CustomObjectRow[]>): Handbook {
-  const handbook = Handbook.safeParse({ version: HANDBOOK_VERSION, ...metadataParts(metadata), ...apexParts(apex, customObjects) });
+export function buildHandbook(metadata: Sourced<MetadataBundle> | undefined, apex?: ApexData, customObjects?: Sourced<CustomObjectRow[]>, changes: HandbookRecentChanges = unavailable(TRAIL_NOT_READ)): Handbook {
+  const handbook = Handbook.safeParse({ version: HANDBOOK_VERSION, ...metadataParts(metadata), ...apexParts(apex, customObjects), recentChanges: changes });
   if (handbook.success) return handbook.data;
   const where = handbook.error.issues[0]?.path.join(".") ?? "";
   return allUnavailable(`The handbook's data didn't fit its format${where ? ` at ${where}` : ""}, so it wasn't kept.`);

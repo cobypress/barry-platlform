@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { HANDBOOK_FILE } from "./build.ts";
-import { Handbook } from "./schema.ts";
+import { CHANGES_NOT_KEPT, Handbook, HANDBOOK_VERSION, HandbookVersion2 } from "./schema.ts";
 
 // The one reader of handbook.json (DECISIONS.md 443 and 445). It gives the
 // handbook, or why there isn't one in words fixed here: nothing from the file
@@ -45,5 +45,10 @@ export function readHandbook(runDir: string): HandbookRead {
     return { ok: false, why: "format" };
   }
   const parsed = Handbook.safeParse(data);
-  return parsed.success ? { ok: true, handbook: parsed.data } : { ok: false, why: "format" };
+  if (parsed.success) return { ok: true, handbook: parsed.data };
+  // A run from before the recent changes were kept still makes its document,
+  // with that part saying so (decision 462). Its other four parts are whole.
+  const older = HandbookVersion2.safeParse(data);
+  if (older.success) return { ok: true, handbook: { ...older.data, version: HANDBOOK_VERSION, recentChanges: { status: "unavailable", reason: CHANGES_NOT_KEPT } } };
+  return { ok: false, why: "format" };
 }

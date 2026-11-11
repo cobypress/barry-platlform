@@ -93,7 +93,12 @@ export function loadRun(dir: string, options: { baseline?: boolean } = {}): { in
     facts: facts ? summariseFacts(FactsFile.parse(facts)) : null,
   };
   if (options.baseline !== false) input.baseline = loadBaseline(dir, input.run);
-  return { input, pseudonyms: new Pseudonymiser(read<PseudonymEntry[]>(join(dir, "pseudonym-map.json"))) };
+  return { input, pseudonyms: loadPseudonymMap(dir) };
+}
+
+/** The run's map from token to name, for rendering only (rule 7). Throws if it's missing or damaged. */
+export function loadPseudonymMap(dir: string): Pseudonymiser {
+  return new Pseudonymiser(read<PseudonymEntry[]>(join(dir, "pseudonym-map.json")));
 }
 
 export type PrintedLayout = { executive: LayoutReport; full: LayoutReport; ceo: LayoutReport };
