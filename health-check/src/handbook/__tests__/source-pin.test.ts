@@ -90,9 +90,9 @@ const SOURCES: Record<"metadata" | "apex" | "build", Source[]> = {
 };
 
 const PINS = {
-  metadata: { number: 1, hash: "0838b8a50807bd43", constant: "METADATA_READING in src/handbook/detail.ts", reading: METADATA_READING, kind: "flow or validation rule" },
-  apex: { number: 1, hash: "8052dd2011545d9b", constant: "APEX_READING in src/extract/apex-touches.ts", reading: APEX_READING, kind: "Apex class or trigger" },
-  build: { number: 1, hash: "e5ea57d0c75a7a52", constant: "BUILD_READING in src/handbook/build.ts", reading: BUILD_READING, kind: "flow, validation rule, Apex class or trigger" },
+  metadata: { number: 1, hash: "0838b8a50807bd43", constant: "METADATA_READING in src/handbook/detail.ts", reading: METADATA_READING, kind: "a flow or validation rule" },
+  apex: { number: 1, hash: "8052dd2011545d9b", constant: "APEX_READING in src/extract/apex-touches.ts", reading: APEX_READING, kind: "an Apex class or trigger" },
+  build: { number: 1, hash: "e5ea57d0c75a7a52", constant: "BUILD_READING in src/handbook/build.ts", reading: BUILD_READING, kind: "a flow, validation rule, Apex class or trigger" },
 };
 
 const hashOf = (sources: Source[]): string =>
@@ -110,7 +110,7 @@ for (const key of ["metadata", "apex", "build"] as const) {
     assert.equal(
       hash,
       pin.hash,
-      `The code that shapes what handbook.json keeps under readBy.${key} changed (hash ${hash}):\n${files}\nCould a handbook now hold something different for a ${pin.kind} nobody touched? If so, raise ${pin.constant} and update this pin's number and hash. If not, update the hash alone.`,
+      `The code that shapes what handbook.json keeps under readBy.${key} changed (hash ${hash}):\n${files}\nCould a handbook now hold something different for ${pin.kind} nobody touched? If so, raise ${pin.constant} and update this pin's number and hash. If not, update the hash alone.`,
     );
   });
 }
