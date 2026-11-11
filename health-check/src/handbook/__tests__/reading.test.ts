@@ -7,6 +7,7 @@ import { runHealthCheck } from "../../engine/run.ts";
 import { readCheckpoint } from "../../engine/checkpoint.ts";
 import { APEX_READING } from "../../extract/apex-touches.ts";
 import type { ApexData } from "../../extract/automation.ts";
+import { customObjectsExtractor, type CustomObjectRow } from "../../extract/configuration.ts";
 import type { MetadataBundle } from "../../extract/metadata-parse.ts";
 import type { Sourced } from "../../extract/types.ts";
 import { loadPseudonymMap } from "../../render/render-run.ts";
@@ -216,5 +217,66 @@ describe("an earlier handbook from before the numbers were kept (decision 486)",
     assert.equal(kindIn(text, "Flows"), `No flows were added, removed or changed.\n\n${UNKNOWN("your earlier health check", "flows", "flow")}`);
     assert.equal(kindIn(text, "Validation rules"), `No validation rules were added, removed or changed.\n\n${UNKNOWN("your earlier health check", "validation rules", "validation rule")}`);
     assert.doesNotMatch(text, OLD_WORDS);
+  });
+});
+
+describe("a run resumed after a change to how custom objects are named (decision 486)", () => {
+  // The custom objects step has no number of its own: its names are held under
+  // the build's, which names a trigger's object from them. A run in flight
+  // reuses the step's checkpoint while its version is unchanged, so a change to
+  // the naming that raises BUILD_READING alone builds the old names under the
+  // new number. The source pin asks for the step's version to be raised too.
+  const RENAMED = "Invoice_Before";
+  /** Tooling's read of the custom objects, the step's one query. */
+  const objectReads = (sim: Simulator): number => sim.requests.filter((r) => /FROM EntityDefinition WHERE IsCustomizable = true AND IsCustomSetting = false/.test(decodeURIComponent(r.url))).length;
+
+  /** A finished run whose custom objects checkpoint names Invoice as older naming code might have, at the step version given. */
+  async function namedBefore(version: number) {
+    const first = await run();
+    assert.equal(objectReads(first.transport), 1, "the step read once");
+    const path = join(first.dir, "checkpoints", "custom-objects.json");
+    const objects = readCheckpoint<Sourced<CustomObjectRow[]>>(path);
+    assert.ok(objects.status === "ok");
+    const invoice = objects.data.find((o) => o.DeveloperName === "Invoice");
+    assert.ok(invoice, "the synthetic org has the Invoice object");
+    invoice.DeveloperName = RENAMED;
+    writeFileSync(path, JSON.stringify(objects));
+    const steps = read<Steps>(first.dir, "run.json");
+    const step = steps.steps.find((s) => s.id === customObjectsExtractor.id)!;
+    assert.equal(step.version, customObjectsExtractor.version, "run.json records the step's version");
+    step.version = version;
+    writeFileSync(join(first.dir, "run.json"), JSON.stringify(steps));
+    const resumed = await run({ outDir: join(first.dir, ".."), resume: first.run.id });
+    assert.ok(resumed.output, "the run finished");
+    const fresh = await run();
+    const [before, after] = [handbookIn(first.dir), handbookIn(fresh.dir)];
+    assert.deepEqual(before.readBy, after.readBy, "both files hold the same numbers, so their details are compared");
+    return { resumed, before, after };
+  }
+
+  const onInvoice = (h: Handbook): string[] => (h.apexTriggers.status === "ok" ? h.apexTriggers.items.filter((t) => /^Invoice/.test(t.name)).map((t) => t.object) : assert.fail("the triggers were read"));
+
+  test("the hazard: the step's version as it was, the old names are reused under the same numbers and a trigger nobody touched reads as moved", async () => {
+    const { resumed, before, after } = await namedBefore(customObjectsExtractor.version);
+    assert.equal(objectReads(resumed.transport), 0, "the step was reused, not read again");
+    assert.deepEqual(onInvoice(before), [`${RENAMED}__c`, `${RENAMED}__c`]);
+    assert.deepEqual(onInvoice(after), ["Invoice__c", "Invoice__c"]);
+    const triggers = compared(compareHandbooks(before, after).apexTriggers);
+    assert.deepEqual(
+      triggers.changed.map((t) => [t.name, t.object, t.details]),
+      [
+        ["InvoiceAudit", "Invoice__c", ["object"]],
+        ["InvoiceTrigger", "Invoice__c", ["object"]],
+      ],
+    );
+  });
+
+  test("the remedy: the step's version raised, the resumed run reads the step again and no trigger reads as changed", async () => {
+    const { resumed, before, after } = await namedBefore(customObjectsExtractor.version - 1);
+    assert.equal(objectReads(resumed.transport), 1, "the step read again");
+    assert.equal(read<Steps>(resumed.dir, "run.json").steps.find((s) => s.id === customObjectsExtractor.id)!.version, customObjectsExtractor.version);
+    assert.deepEqual(onInvoice(before), ["Invoice__c", "Invoice__c"]);
+    assert.deepEqual(onInvoice(after), ["Invoice__c", "Invoice__c"]);
+    assert.deepEqual(compared(compareHandbooks(before, after).apexTriggers).changed, []);
   });
 });

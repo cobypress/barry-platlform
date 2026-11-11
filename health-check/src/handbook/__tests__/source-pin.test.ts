@@ -91,10 +91,12 @@ const SOURCES: Record<"metadata" | "apex" | "build", Source[]> = {
       // The custom objects step has no number of its own, so its names are
       // held under the build's, which names a trigger's object from them
       // (decision 486). A run read before a change here and built after it
-      // carries the old names under the new number: there's no step's number
-      // to tell, and none is invented.
+      // would carry the old names under the new number, since a step is reused
+      // while its version is unchanged (src/engine/run.ts). So an edit that
+      // changes a custom object's name raises the step's version as well as
+      // BUILD_READING, and a run in flight reads the step again.
       what: "src/extract/configuration.ts: the custom objects step",
-      why: "makes each custom object's name, from which the build names a trigger's object",
+      why: "makes each custom object's name, from which the build names a trigger's object. If the edit changes a custom object's name, raise customObjectsExtractor's version in src/extract/configuration.ts as well as BUILD_READING, so a run in flight reads the step again and can't build old names under the new number (DECISIONS.md 486)",
       text: () => region("src/extract/configuration.ts", "export type CustomObjectRow =", "export const customObjectsExtractor", "\n};\n"),
     },
     {
