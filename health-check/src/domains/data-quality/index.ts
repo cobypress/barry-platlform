@@ -534,12 +534,15 @@ const recordTypeUse: Rule = {
     // type deleted since). They're records made on the object, never a type of ours.
     const total = (rows: RecordTypeCount[]): number => rows.reduce((sum, r) => sum + r.c, 0);
     const of = (rows: RecordTypeCount[], id: string): number => rows.filter((r) => r.RecordTypeId === id).reduce((sum, r) => sum + r.c, 0);
-    const why = { activities: [] as string[], under: [] as string[], notRead: [] as string[], refused: [] as string[], truncated: [] as string[] };
+    const why = { activities: [] as string[], notSeenWhole: [] as string[], under: [] as string[], notRead: [] as string[], refused: [] as string[], truncated: [] as string[] };
     const judgedObjects = new Set<string>();
     for (const object of [...new Set(candidates.map((t) => t.SobjectType))].sort()) {
       const counts = use.counted[object];
       // Never judged, whatever a count says: archived activities are out of it (DECISIONS.md 498).
       if (ACTIVITY_OBJECTS.has(object)) why.activities.push(object);
+      // A count sees only what the connected user's sharing shows them, so one
+      // they don't see whole proves nothing about its types (DECISIONS.md 498).
+      else if (use.notSeenWhole.includes(object)) why.notSeenWhole.push(object);
       else if (counts && total(counts.recent) >= RECORD_TYPE_MIN_RECENT) judgedObjects.add(object);
       else if (counts) why.under.push(object);
       else if (use.refused.some((r) => r.object === object)) why.refused.push(object);
@@ -551,6 +554,18 @@ const recordTypeUse: Rule = {
     const noneRecent = judged.filter((t) => of(use.counted[t.SobjectType]!.all, t.Id) > 0 && of(use.counted[t.SobjectType]!.recent, t.Id) === 0);
 
     const objects = (names: string[]): string => `${names.length}${names.length ? ` (${listed(names, LISTED_OBJECTS)})` : ""}`;
+    // The access reads, with the user as a placeholder: never their id or username.
+    const { access } = use;
+    const accessEvidence = ctx.ev(
+      { kind: "soql", api: "rest", query: use.queries.viewAllRecords },
+      {
+        count: access.status === "ok" ? access.viewAllRecords.length : null,
+        note:
+          access.status !== "ok"
+            ? `We couldn't tell which objects the connected user sees every record of. ${access.reason}`
+            : `Objects the connected user holds View All Records on. ${access.viewAllData ? "They hold View All Data, so they see every record in the org." : "They don't hold View All Data, so they see every record only on these objects."} View All Data read with: ${use.queries.viewAllData}`,
+      },
+    );
     const evidence = [
       ctx.ev(types.source, {
         count: types.data.length,
@@ -563,6 +578,7 @@ const recordTypeUse: Rule = {
           count: judged.length ? noRecords.length : null,
           exclusions: [
             `Tasks and events, which we never count, because Salesforce archives older activities out of a count: ${objects(why.activities)}`,
+            `Objects where the connected user can't see every record: ${objects(why.notSeenWhole)}`,
             `Objects with fewer than ${RECORD_TYPE_MIN_RECENT} records made in the last 12 months: ${objects(why.under)}`,
             `Objects past the ${RECORD_TYPE_OBJECTS} with the most active record types: ${objects(why.notRead)}`,
             `Objects whose count Salesforce refused: ${objects(why.refused)}`,
@@ -579,20 +595,29 @@ const recordTypeUse: Rule = {
           note: `Records made in the 12 months to the run's date, by record type. With records, but none made in them: ${noneRecent.map((t) => `${t.SobjectType}.${t.DeveloperName}`).join(", ") || "none"}`,
         },
       ),
+      accessEvidence,
     ];
     const facts = { judged: judged.length, noRecords: noRecords.length, noneRecent: noneRecent.length };
 
     if (candidates.length === 0) {
       return { outcome: "pass", summary: `You have no active record types of your own made more than ${RECORD_TYPE_MIN_AGE_DAYS} days ago, so there are none to judge.`, evidence: [evidence[0]!], segmentExemptReason: "There are no record types to segment.", facts };
     }
+    if (access.status !== "ok") {
+      return {
+        outcome: "not_measurable",
+        reason: `We couldn't tell which records the connected user can see, so finding none on a record type would prove nothing. ${access.reason}`,
+        evidence: [evidence[0]!, accessEvidence],
+      };
+    }
     if (judged.length === 0) {
       const parts = [
         why.activities.length ? `we don't count ${listed(why.activities.map((o) => (o === "Task" ? "tasks" : "events")), 2)}, because Salesforce archives older ones out of a count` : "",
+        why.notSeenWhole.length ? `the connected user can't see every record on ${plural(why.notSeenWhole.length, "object")}` : "",
         why.under.length ? `${plural(why.under.length, "object has", "objects have")} fewer than ${RECORD_TYPE_MIN_RECENT} records made in the last 12 months` : "",
         why.refused.length + why.truncated.length ? `Salesforce refused or cut short the count on ${plural(why.refused.length + why.truncated.length, "object")}` : "",
         why.notRead.length ? `${plural(why.notRead.length, "object is", "objects are")} past the ${RECORD_TYPE_OBJECTS} we count` : "",
       ].filter(Boolean);
-      return { outcome: "not_measurable", reason: `None of your ${plural(candidates.length, "record type")} could be judged: ${parts.join("; ")}.`, evidence: evidence.slice(0, 2) };
+      return { outcome: "not_measurable", reason: `None of your ${plural(candidates.length, "record type")} could be judged: ${parts.join("; ")}.`, evidence: [...evidence.slice(0, 2), accessEvidence] };
     }
     const segments = [{ dimension: "all records", segments: judged.length }, { dimension: "records created in the last 12 months", segments: judged.length }];
     if (noRecords.length + noneRecent.length === 0) {

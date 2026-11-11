@@ -6,7 +6,7 @@ import { SALES_CLOUD_MODULES } from "../../domains/index.ts";
 import { runHealthCheck } from "../../engine/run.ts";
 import { loadCalibration, syntheticProvider } from "../../testing/replay.ts";
 import { Simulator } from "../../testing/simulator.ts";
-import { AS_OF } from "../../testing/synthetic-org.ts";
+import { AS_OF, CONNECTED_USER } from "../../testing/synthetic-org.ts";
 import { tempDir } from "../../testing/harness.ts";
 import { summariseFlowMetadata, type MetadataBundle } from "../metadata-parse.ts";
 import type { ReportScan } from "../report-definitions.ts";
@@ -27,7 +27,7 @@ type Run = { dir: string; findings: Finding[]; requests: Array<{ method: string;
 
 async function run(readOnly: boolean): Promise<Run> {
   const transport = new Simulator({ readOnly });
-  const result = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: new Date(AS_OF), transport, log: () => {} });
+  const result = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: new Date(AS_OF), transport, connectedUser: { id: CONNECTED_USER.id }, log: () => {} });
   return { dir: result.dir, findings: JSON.parse(readFileSync(join(result.dir, "findings.json"), "utf8")) as Finding[], requests: transport.requests };
 }
 
@@ -71,7 +71,10 @@ describe("the read-only route reads what the retrieve reads", () => {
       const other = byId.get(f.id);
       return !other || other.status !== f.status || JSON.stringify(other.facts) !== JSON.stringify(f.facts);
     });
-    // Coverage can't be read by this user, and nor can custom objects' records.
+    // Coverage can't be read by this user, nor can custom objects' records, and
+    // record-type use counts only objects the user sees whole (DECISIONS.md 498):
+    // this user holds View All Records on six standard objects and not View All
+    // Data, so Invoice__c is never counted and its credit note isn't judged.
     assert.deepEqual(changed.map((f) => f.ruleId).sort(), ["aut.apex-coverage", "bp.ownership-skew", "dq.record-type-use"]);
     assert.equal(readOnly.findings.length, admin.findings.length);
   });
@@ -185,7 +188,7 @@ describe("reference guards on the read-only route", () => {
 describe("when the Tooling route fails too", () => {
   test("automation is not measurable, and the reason says both routes were tried", async () => {
     const transport = new Simulator({ readOnly: true, failQuery: (soql) => (/FROM FlowDefinition/.test(soql) ? { errorCode: "INVALID_TYPE", message: "sObject type 'FlowDefinition' is not supported." } : null) });
-    const result = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: new Date(AS_OF), transport, log: () => {} });
+    const result = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: new Date(AS_OF), transport, connectedUser: { id: CONNECTED_USER.id }, log: () => {} });
     const metadata = JSON.parse(readFileSync(join(result.dir, "checkpoints", "metadata.json"), "utf8")) as Sourced<MetadataBundle>;
     assert.equal(metadata.status, "unavailable");
     if (metadata.status !== "unavailable") return;
@@ -199,7 +202,7 @@ describe("a kind the Tooling route couldn't read whole", () => {
   type Metric = { id: string; status: string; reason?: string };
   async function runWith(options: ConstructorParameters<typeof Simulator>[0]): Promise<{ findings: Finding[]; metrics: Metric[]; dir: string }> {
     const transport = new Simulator({ readOnly: true, ...options });
-    const result = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: new Date(AS_OF), transport, log: () => {} });
+    const result = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: new Date(AS_OF), transport, connectedUser: { id: CONNECTED_USER.id }, log: () => {} });
     const metrics = JSON.parse(readFileSync(join(result.dir, "metrics.json"), "utf8")) as Metric[];
     return { findings: JSON.parse(readFileSync(join(result.dir, "findings.json"), "utf8")) as Finding[], metrics, dir: result.dir };
   }

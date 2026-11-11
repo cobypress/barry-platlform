@@ -7,7 +7,7 @@ import { runFromRecording, tempDir } from "../harness.ts";
 import { loadAnswers, loadCalibration, syntheticProvider } from "../replay.ts";
 import { buildScaleOrg, FIVE_HUNDRED_USERS, scaled } from "../scale-org.ts";
 import { Simulator } from "../simulator.ts";
-import { AS_OF } from "../synthetic-org.ts";
+import { AS_OF, CONNECTED_USER } from "../synthetic-org.ts";
 
 // What the engine concludes, held still while how it gets there changes
 // (DECISIONS.md 341). A change made for memory or speed must leave every
@@ -15,13 +15,13 @@ import { AS_OF } from "../synthetic-org.ts";
 // a metric or the raw notes updates these, and says why in its commit.
 
 const GOLDEN: Record<string, Record<string, string>> = {
-  recorded: { "findings.json": "6b50f84e269e37fd", "metrics.json": "7daf36044db95bb4", "scores.json": "17cdb1708449d000", "manual-steps.json": "c4daf1ca86584a33", "action-lists.json": "7018f033c3c80e0a", "raw-notes.md": "b0e8cbc7c33e0966", "handbook.json": "64dcafcf493eef42" },
-  generated: { "findings.json": "aa3aaf9a85213438", "metrics.json": "7010a01f7d925850", "scores.json": "616e42570f940402", "manual-steps.json": "15ae87c4fd76d7b6", "action-lists.json": "8eeb97766d119778", "raw-notes.md": "17b4759b5356b8e4", "handbook.json": "23c075e2337e23a8" },
+  recorded: { "findings.json": "95711b952675d7b8", "metrics.json": "7daf36044db95bb4", "scores.json": "17cdb1708449d000", "manual-steps.json": "c4daf1ca86584a33", "action-lists.json": "7018f033c3c80e0a", "raw-notes.md": "cebea96e46daac52", "handbook.json": "64dcafcf493eef42" },
+  generated: { "findings.json": "2ecd467cb65bfd01", "metrics.json": "7010a01f7d925850", "scores.json": "616e42570f940402", "manual-steps.json": "15ae87c4fd76d7b6", "action-lists.json": "8eeb97766d119778", "raw-notes.md": "05593ab01e5b87df", "handbook.json": "23c075e2337e23a8" },
 };
 
 const recorded = async () => fingerprint((await runFromRecording({ answers: loadAnswers(), modules: ALL_MODULES })).dir);
 const generated = async () =>
-  fingerprint((await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), answers: loadAnswers(), modules: ALL_MODULES, outDir: tempDir(), now: new Date(AS_OF), transport: new Simulator({ records: buildScaleOrg(scaled(FIVE_HUNDRED_USERS, 0.005)), pageSize: 2000 }) })).dir);
+  fingerprint((await runHealthCheck({ provider: syntheticProvider, connectedUser: CONNECTED_USER, calibration: loadCalibration(), answers: loadAnswers(), modules: ALL_MODULES, outDir: tempDir(), now: new Date(AS_OF), transport: new Simulator({ records: buildScaleOrg(scaled(FIVE_HUNDRED_USERS, 0.005)), pageSize: 2000 }) })).dir);
 
 test("the synthetic org's findings, metrics, scores, action lists, raw notes and handbook are as they were", async () => {
   assert.deepEqual(await recorded(), GOLDEN.recorded);
