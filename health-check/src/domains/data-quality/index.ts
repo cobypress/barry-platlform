@@ -5,7 +5,7 @@ import { actionRecordsExtractor } from "../../extract/action-records.ts";
 import { DUPLICATE_GROUPS, duplicateAccountsExtractor } from "../../extract/duplicates.ts";
 import { daysBefore } from "../../extract/types.ts";
 import { ownershipExtractor, usersExtractor } from "../../extract/users.ts";
-import { ACTIVITY_OBJECTS, isPackaged, RECORD_TYPE_OBJECTS, recordTypeUseExtractor, type RecordTypeCount, type RecordTypeRow } from "../../extract/record-types.ts";
+import { isPackaged, isPartlyHidden, RECORD_TYPE_OBJECTS, recordTypeUseExtractor, type RecordTypeCount, type RecordTypeRow } from "../../extract/record-types.ts";
 import { labelsExtractor } from "../../extract/labels.ts";
 import { recordTypeGuard } from "../../guards/record-type-guards.ts";
 import { labelsOf } from "../labels.ts";
@@ -497,6 +497,10 @@ const RECORD_TYPE_MIN_RECENT = 20;
 const LISTED_TYPES = 5;
 const LISTED_OBJECTS = 10;
 
+/** What a customer calls a partly hidden object's records (isPartlyHidden). */
+const KINDS: Record<string, string> = { Task: "tasks", Event: "events", ContentVersion: "files", ContentDocument: "files" };
+const kindOf = (object: string): string => KINDS[object] ?? (/__kav$/i.test(object) ? "article versions" : object);
+
 /** "A, B and C", or the first few and how many more. */
 function listed(names: string[], limit: number): string {
   const shown = names.slice(0, limit);
@@ -534,12 +538,12 @@ const recordTypeUse: Rule = {
     // type deleted since). They're records made on the object, never a type of ours.
     const total = (rows: RecordTypeCount[]): number => rows.reduce((sum, r) => sum + r.c, 0);
     const of = (rows: RecordTypeCount[], id: string): number => rows.filter((r) => r.RecordTypeId === id).reduce((sum, r) => sum + r.c, 0);
-    const why = { activities: [] as string[], notSeenWhole: [] as string[], under: [] as string[], notRead: [] as string[], refused: [] as string[], truncated: [] as string[] };
+    const why = { partlyHidden: [] as string[], notSeenWhole: [] as string[], under: [] as string[], notRead: [] as string[], refused: [] as string[], truncated: [] as string[] };
     const judgedObjects = new Set<string>();
     for (const object of [...new Set(candidates.map((t) => t.SobjectType))].sort()) {
       const counts = use.counted[object];
-      // Never judged, whatever a count says: archived activities are out of it (DECISIONS.md 498).
-      if (ACTIVITY_OBJECTS.has(object)) why.activities.push(object);
+      // Never judged, whatever a count says: it can't see them whole (DECISIONS.md 499).
+      if (isPartlyHidden(object)) why.partlyHidden.push(object);
       // A count sees only what the connected user's sharing shows them, so one
       // they don't see whole proves nothing about its types (DECISIONS.md 498).
       else if (use.notSeenWhole.includes(object)) why.notSeenWhole.push(object);
@@ -563,7 +567,7 @@ const recordTypeUse: Rule = {
         note:
           access.status !== "ok"
             ? `We couldn't tell which objects the connected user sees every record of. ${access.reason}`
-            : `Objects the connected user holds View All Records on. ${access.viewAllData ? "They hold View All Data, so they see every record in the org." : "They don't hold View All Data, so they see every record only on these objects."} View All Data read with: ${use.queries.viewAllData}`,
+            : `Objects the connected user holds View All Records on. ${access.viewAllData ? "They hold View All Data, so they see every record on the objects we count." : "They don't hold View All Data, so we count only objects among these, and they see every record on the objects we count."} View All Data read with: ${use.queries.viewAllData}`,
       },
     );
     const evidence = [
@@ -577,7 +581,7 @@ const recordTypeUse: Rule = {
         {
           count: judged.length ? noRecords.length : null,
           exclusions: [
-            `Tasks and events, which we never count, because Salesforce archives older activities out of a count: ${objects(why.activities)}`,
+            `Objects we never count, because a count can't show every record on them (Salesforce archives older tasks and events, shows a user only the files they own or share, and returns article versions by publish status): ${objects(why.partlyHidden)}`,
             `Objects where the connected user can't see every record: ${objects(why.notSeenWhole)}`,
             `Objects with fewer than ${RECORD_TYPE_MIN_RECENT} records made in the last 12 months: ${objects(why.under)}`,
             `Objects past the ${RECORD_TYPE_OBJECTS} with the most active record types: ${objects(why.notRead)}`,
@@ -611,7 +615,7 @@ const recordTypeUse: Rule = {
     }
     if (judged.length === 0) {
       const parts = [
-        why.activities.length ? `we don't count ${listed(why.activities.map((o) => (o === "Task" ? "tasks" : "events")), 2)}, because Salesforce archives older ones out of a count` : "",
+        why.partlyHidden.length ? `we don't count ${listed([...new Set(why.partlyHidden.map(kindOf))].sort(), 4)}, because a count can't show all of them` : "",
         why.notSeenWhole.length ? `the connected user can't see every record on ${plural(why.notSeenWhole.length, "object")}` : "",
         why.under.length ? `${plural(why.under.length, "object has", "objects have")} fewer than ${RECORD_TYPE_MIN_RECENT} records made in the last 12 months` : "",
         why.refused.length + why.truncated.length ? `Salesforce refused or cut short the count on ${plural(why.refused.length + why.truncated.length, "object")}` : "",

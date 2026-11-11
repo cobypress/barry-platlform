@@ -65,8 +65,11 @@ export type SimulatorOptions = {
    * (DECISIONS.md 498): View All Data, and the objects they hold View All
    * Records on. An admin's by default, or on readOnly Barometer Read Only's six
    * objects and no View All Data. Any other user has no assignments we can see.
+   * `session` is one more set the user holds that has to be activated in a
+   * session (DECISIONS.md 499): a read that doesn't leave out
+   * HasActivationRequired sets gets its permissions too.
    */
-  access?: { viewAllData: boolean; viewAllRecords: string[] };
+  access?: { viewAllData: boolean; viewAllRecords: string[]; session?: { viewAllData: boolean; viewAllRecords: string[] } };
 };
 
 /** The parts of an org that grow with it. A scale test swaps them for a generated org's (src/testing/scale-org.ts). */
@@ -333,7 +336,7 @@ export class Simulator implements Transport {
   #editedAt: Record<string, string>;
   #recordTypes: org.RecordTypeRecord[];
   #recordTypeGroups: Record<string, org.RecordTypeGroup[]> | undefined;
-  #access: { viewAllData: boolean; viewAllRecords: string[] };
+  #access: NonNullable<SimulatorOptions["access"]>;
 
   constructor(options: SimulatorOptions = {}) {
     this.#used = options.used ?? 1000;
@@ -559,14 +562,20 @@ export class Simulator implements Transport {
         if (/IsOwnedByProfile = true/.test(where)) return page(org.PROFILE_SETS);
         if (/PermissionsApiUserOnly = true/.test(where)) return page(org.PERMISSION_SETS.filter((s) => s.PermissionsApiUserOnly));
         return page(/IsOwnedByProfile = false/.test(where) ? org.DOCUMENTED_PERMISSION_SETS : org.PERMISSION_SETS);
-      case "ObjectPermissions":
+      case "ObjectPermissions": {
         if (!/PermissionsViewAllRecords = true/.test(where)) break;
-        return page(this.#isConnected(where) ? this.#access.viewAllRecords.map((SobjectType) => ({ SobjectType })) : []);
+        const session = /\bParent\.HasActivationRequired = false\b/.test(where) ? [] : (this.#access.session?.viewAllRecords ?? []);
+        return page(this.#isConnected(where) ? [...this.#access.viewAllRecords, ...session].map((SobjectType) => ({ SobjectType })) : []);
+      }
       case "PermissionSetGroupComponent":
         return page(org.PERMISSION_SET_GROUP_COMPONENTS);
       case "PermissionSetAssignment": {
-        // The profile's own set and one more, as Barometer Read Only is held.
-        if (/^SELECT PermissionSet\.PermissionsViewAllData FROM\b/.test(soql)) return page(this.#isConnected(where) ? [{ PermissionSet: { PermissionsViewAllData: this.#access.viewAllData } }, { PermissionSet: { PermissionsViewAllData: false } }] : []);
+        // The profile's own set and one more, as Barometer Read Only is held, and
+        // a session-activated set unless the read leaves those out.
+        if (/^SELECT PermissionSet\.PermissionsViewAllData FROM\b/.test(soql)) {
+          const session = this.#access.session && !/\bPermissionSet\.HasActivationRequired = false\b/.test(where) ? [{ PermissionSet: { PermissionsViewAllData: this.#access.session.viewAllData } }] : [];
+          return page(this.#isConnected(where) ? [{ PermissionSet: { PermissionsViewAllData: this.#access.viewAllData } }, { PermissionSet: { PermissionsViewAllData: false } }, ...session] : []);
+        }
         if (/\bPermissionSetGroupId\b/.test(soql)) return page(org.ACCESS_ASSIGNMENTS);
         if (/PermissionsApiUserOnly = true/.test(where)) {
           const sets = new Set(org.PERMISSION_SETS.filter((s) => s.PermissionsApiUserOnly && !s.IsOwnedByProfile).map((s) => s.Id));

@@ -9,9 +9,12 @@ import { monthsBefore, readableReason, readSoql, soqlString, soqlUpTo, soqlWindo
 // at one moment set against counts read at another would call a type made since
 // unused, or count records made since. So there are no partial keys, on purpose.
 //
-// Tasks and events are never counted (DECISIONS.md 498): a plain query leaves
-// out activities Salesforce has archived, after a year by default (decision
-// 35), so a task type last used 14 months ago would read as never used.
+// Some objects are never counted, whatever the user's access (DECISIONS.md 498
+// and 499), because a plain count can't see them whole: Salesforce archives
+// tasks and events after a year by default (decision 35), shows even a user
+// with View All Data only the files they own or share, and returns Knowledge
+// article versions by publish status. Counted, a type in use would read as
+// never used.
 //
 // Only objects whose every record the connected user can see are counted
 // (DECISIONS.md 498): a count sees only what the user's sharing shows them, and
@@ -41,8 +44,8 @@ export type RecordTypeUse = {
   notSeenWhole: string[];
   /** Objects with an active type of their own beyond the ones we count. */
   notRead: string[];
-  /** Tasks and events with an active type of their own, which are never counted. */
-  activities: string[];
+  /** Objects a plain count can't see whole (isPartlyHidden) with an active type of their own, which are never counted. */
+  partlyHidden: string[];
   /** The two counts' queries, with <object> for each object, and the two access reads', with the user as USER_PLACEHOLDER. */
   queries: { all: string; recent: string; viewAllData: string; viewAllRecords: string };
 };
@@ -50,8 +53,15 @@ export type RecordTypeUse = {
 /** How many objects are counted, those with the most active types first. Two counts each, so two composite calls. */
 export const RECORD_TYPE_OBJECTS = 25;
 export const RECENT_MONTHS = 12;
-/** Archived activities are out of a plain count, and queryAll isn't on the allowlist. */
-export const ACTIVITY_OBJECTS: ReadonlySet<string> = new Set(["Task", "Event"]);
+/**
+ * Objects a plain count can't see whole, whatever the user's access. Archived
+ * activities are out of a count (queryAll isn't on the allowlist), and files
+ * need Query All Files, which we don't read. Article versions are matched by
+ * their suffix, below. Not proved complete: QUESTIONS.md asks about the rest.
+ */
+export const PARTLY_HIDDEN_OBJECTS: ReadonlySet<string> = new Set(["Task", "Event", "ContentVersion", "ContentDocument"]);
+/** Whether a plain count can't see every record of `object`: one of the list, or a Knowledge article version object (`Thing__kav`, `ns__Thing__kav`). */
+export const isPartlyHidden = (object: string): boolean => PARTLY_HIDDEN_OBJECTS.has(object) || /__kav$/i.test(object);
 /** Stands for the user in every query the step keeps, so no id or username reaches the run folder. */
 export const USER_PLACEHOLDER = "<the connected user>";
 
@@ -60,9 +70,13 @@ const COUNT = (object: string, where: string): string => `SELECT RecordTypeId, C
 const LOOKUP = (username: string): string => `SELECT Id FROM User WHERE Username = ${soqlString(username)}`;
 // A profile's own permission set is among a user's assignments, as are the sets
 // in a group, so these two cover everything that gives the user access
-// (src/connect/read-only-check.ts). `id` is checked against USER_ID first.
-const VIEW_ALL_DATA = (id: string): string => `SELECT PermissionSet.PermissionsViewAllData FROM PermissionSetAssignment WHERE AssigneeId = '${id}'`;
-const VIEW_ALL_RECORDS = (id: string): string => `SELECT SobjectType FROM ObjectPermissions WHERE PermissionsViewAllRecords = true AND ParentId IN (SELECT PermissionSetId FROM PermissionSetAssignment WHERE AssigneeId = '${id}')`;
+// (src/connect/read-only-check.ts). A set that has to be activated in a session
+// is left out (DECISIONS.md 499): it shows as assigned while an API session has
+// none of its permissions, so a count would run under ordinary sharing. A
+// profile's own set never needs activating. `id` is checked against USER_ID first.
+const VIEW_ALL_DATA = (id: string): string => `SELECT PermissionSet.PermissionsViewAllData FROM PermissionSetAssignment WHERE AssigneeId = '${id}' AND PermissionSet.HasActivationRequired = false`;
+const VIEW_ALL_RECORDS = (id: string): string =>
+  `SELECT SobjectType FROM ObjectPermissions WHERE PermissionsViewAllRecords = true AND Parent.HasActivationRequired = false AND ParentId IN (SELECT PermissionSetId FROM PermissionSetAssignment WHERE AssigneeId = '${id}')`;
 /** A Salesforce id's shape. Nothing else goes into a query between quotes unescaped. */
 const USER_ID = /^[A-Za-z0-9]{15}(?:[A-Za-z0-9]{3})?$/;
 
@@ -98,20 +112,24 @@ async function readHidden<R>(ctx: ExtractContext, soql: string, hide: (text: str
 // keying on View All alone is right (unverified: QUESTIONS.md).
 async function accessOf(ctx: ExtractContext): Promise<RecordAccess> {
   const user = ctx.connectedUser;
-  const hide = hider(user);
+  let hide = hider(user);
   let id = user?.id;
   if (!id && user?.username) {
     const found = await readHidden<{ Id: string }>(ctx, LOOKUP(user.username), hide);
     if (!found.ok) return { status: "unknown", reason: `We couldn't look the connected user up by their username: ${found.reason}` };
     if (found.rows.length !== 1) return { status: "unknown", reason: "We couldn't find the connected user by their username." };
     id = found.rows[0]!.Id;
+    // The id found is as much the user's as one we're given (DECISIONS.md 499),
+    // so the reads that hold it hide it too.
+    hide = hider({ ...user, id });
   }
   if (!id) return { status: "unknown", reason: "The run wasn't told which user connected." };
   if (!USER_ID.test(id)) return { status: "unknown", reason: "The connected user's id isn't the shape of a Salesforce id." };
   const sets = await readHidden<{ PermissionSet: { PermissionsViewAllData: boolean } | null }>(ctx, VIEW_ALL_DATA(id), hide);
   if (!sets.ok) return { status: "unknown", reason: `The connected user's permission set assignments couldn't be read: ${sets.reason}` };
-  // Every user holds at least their profile's set, so none at all means we
-  // can't see their assignments, not that they have no access.
+  // Every user holds at least their profile's set, which never needs
+  // activating, so none at all means we can't see their assignments, not that
+  // they have no access.
   if (sets.rows.length === 0) return { status: "unknown", reason: "No permission set assignments were visible for the connected user." };
   const objects = await readHidden<{ SobjectType: string }>(ctx, VIEW_ALL_RECORDS(id), hide);
   if (!objects.ok) return { status: "unknown", reason: `The connected user's object permissions couldn't be read: ${objects.reason}` };
@@ -124,7 +142,7 @@ async function accessOf(ctx: ExtractContext): Promise<RecordAccess> {
 
 export const recordTypeUseExtractor: Extractor<RecordTypeUse> = {
   id: "record-type-use",
-  version: 3,
+  version: 4,
   // Counts records on every object it reads, so a set-up review never runs it.
   records: true,
   async run(ctx) {
@@ -141,7 +159,7 @@ export const recordTypeUseExtractor: Extractor<RecordTypeUse> = {
       truncated: [],
       notSeenWhole: [],
       notRead: [],
-      activities: [],
+      partlyHidden: [],
       queries: { all: COUNT("<object>", end), recent: COUNT("<object>", recent), viewAllData: VIEW_ALL_DATA(USER_PLACEHOLDER), viewAllRecords: VIEW_ALL_RECORDS(USER_PLACEHOLDER) },
     };
     if (out.types.status !== "ok") return out;
@@ -149,12 +167,12 @@ export const recordTypeUseExtractor: Extractor<RecordTypeUse> = {
     const active = new Map<string, number>();
     for (const type of out.types.data) if (type.IsActive && !isPackaged(type)) active.set(type.SobjectType, (active.get(type.SobjectType) ?? 0) + 1);
     const ordered = [...active].sort(([a, n], [b, m]) => m - n || a.localeCompare(b)).map(([object]) => object);
-    out.activities = ordered.filter((object) => ACTIVITY_OBJECTS.has(object));
+    out.partlyHidden = ordered.filter(isPartlyHidden);
     // Unknown access counts nothing: a count of none would prove nothing.
     if (access.status !== "ok") return out;
-    // Activities first, then access, then the 25, so neither an activity nor an
-    // object we can't see whole takes the place of one we can count.
-    const ranked = ordered.filter((object) => !ACTIVITY_OBJECTS.has(object));
+    // The partly hidden first, then access, then the 25, so no object a count
+    // can't see whole takes the place of one we can count.
+    const ranked = ordered.filter((object) => !isPartlyHidden(object));
     const whole = ranked.filter((object) => access.viewAllData || access.viewAllRecords.includes(object));
     out.notSeenWhole = ranked.filter((object) => !whole.includes(object));
     const objects = whole.slice(0, RECORD_TYPE_OBJECTS);

@@ -7,7 +7,7 @@ import { renderRawNotes } from "../../notes/raw-notes.ts";
 import { applyGuards } from "../../engine/evaluate.ts";
 import type { IssueResult, RuleContext } from "../../engine/rule.ts";
 import { runHealthCheck, type RunOptions } from "../../engine/run.ts";
-import { ACTIVITY_OBJECTS, RECORD_TYPE_OBJECTS, recordTypeUseExtractor, type RecordTypeUse } from "../../extract/record-types.ts";
+import { isPartlyHidden, PARTLY_HIDDEN_OBJECTS, RECORD_TYPE_OBJECTS, recordTypeUseExtractor, type RecordTypeUse } from "../../extract/record-types.ts";
 import { daysBefore, soqlDateTime, upToItsSecond, type ConnectedUser, type ExtractContext, type Extractor, type SourceInfo } from "../../extract/types.ts";
 import { RECORD_TYPE_GUARD } from "../../guards/record-type-guards.ts";
 import { Pseudonymiser, type PseudonymEntry } from "../../privacy/pseudonymiser.ts";
@@ -25,11 +25,12 @@ import { dataQualityModule } from "../data-quality/index.ts";
 import { SALES_CLOUD_MODULES } from "../index.ts";
 import { modulesFor } from "../scope.ts";
 
-// Record-type use (DECISIONS.md 497 and 498): one step that reads the record
+// Record-type use (DECISIONS.md 497 to 499): one step that reads the record
 // types and two counts by type, all to the run's date, and one finding for the
-// org that stays a review until what names a record type can be read. Tasks and
-// events are never counted, only objects the connected user sees whole are, and
-// a temporary failure stops the step.
+// org that stays a review until what names a record type can be read. Objects a
+// count can't see whole (tasks, events, files and article versions) are never
+// counted, only objects the connected user sees whole are, and a temporary
+// failure stops the step.
 
 const RULE = "dq.record-type-use";
 const T = new Date(org.AS_OF);
@@ -65,6 +66,10 @@ const isList = (q: string): boolean => /FROM RecordType WHERE/.test(q);
 const isCount = (q: string): boolean => /GROUP BY RecordTypeId$/.test(q);
 const isLookup = (q: string): boolean => /^SELECT Id FROM User WHERE Username = /.test(q);
 const isViewAllData = (q: string): boolean => /^SELECT PermissionSet\.PermissionsViewAllData FROM PermissionSetAssignment /.test(q);
+/** The two access reads, for a user id or the placeholder (DECISIONS.md 498 and 499). */
+const VIEW_ALL_DATA = (user: string): string => `SELECT PermissionSet.PermissionsViewAllData FROM PermissionSetAssignment WHERE AssigneeId = '${user}' AND PermissionSet.HasActivationRequired = false`;
+const VIEW_ALL_RECORDS = (user: string): string =>
+  `SELECT SobjectType FROM ObjectPermissions WHERE PermissionsViewAllRecords = true AND Parent.HasActivationRequired = false AND ParentId IN (SELECT PermissionSetId FROM PermissionSetAssignment WHERE AssigneeId = '${user}')`;
 const isViewAllRecords = (q: string): boolean => /^SELECT SobjectType FROM ObjectPermissions /.test(q);
 const isAccess = (q: string): boolean => isLookup(q) || isViewAllData(q) || isViewAllRecords(q);
 /** The connected user by id, as the worker and `hc run --connection` give it, or by username, as the `sf` route does. */
@@ -112,6 +117,8 @@ const names = (f: Finding): string[] => f.subjects.map((s) => s.label);
 /** An evidence item's query, or its path for a read that isn't SOQL. */
 const queryOf = (e: Finding["evidence"][number]): string => ("query" in e ? e.query : "path" in e ? e.path : "");
 const exclusion = (f: Finding, starts: string): string => f.evidence.flatMap((e) => e.exclusions).find((x) => x.startsWith(starts))!;
+/** The exclusion for the objects a count can't see whole, before its count (DECISIONS.md 499). */
+const NEVER_COUNTED = "Objects we never count, because a count can't show every record on them (Salesforce archives older tasks and events, shows a user only the files they own or share, and returns article versions by publish status)";
 
 describe("the synthetic org", () => {
   test("names the type with no records and the one with none made in the last 12 months, apart", () => {
@@ -133,12 +140,10 @@ describe("the synthetic org", () => {
     const f = synthetic.findings.find((x) => x.ruleId === RULE)!;
     assert.equal(f.evidence.length, 4);
     const access = f.evidence[3]!;
-    assert.equal(queryOf(access), "SELECT SobjectType FROM ObjectPermissions WHERE PermissionsViewAllRecords = true AND ParentId IN (SELECT PermissionSetId FROM PermissionSetAssignment WHERE AssigneeId = '<the connected user>')");
+    assert.equal(queryOf(access), VIEW_ALL_RECORDS("<the connected user>"));
     assert.equal(access.count, org.READ_ONLY_VIEW_ALL.length);
-    assert.equal(
-      access.note,
-      "Objects the connected user holds View All Records on. They hold View All Data, so they see every record in the org. View All Data read with: SELECT PermissionSet.PermissionsViewAllData FROM PermissionSetAssignment WHERE AssigneeId = '<the connected user>'",
-    );
+    // Not "every record in the org": a user with View All Data still sees only their own files (DECISIONS.md 499).
+    assert.equal(access.note, `Objects the connected user holds View All Records on. They hold View All Data, so they see every record on the objects we count. View All Data read with: ${VIEW_ALL_DATA("<the connected user>")}`);
     assert.equal(exclusion(f, "Objects where the connected user"), "Objects where the connected user can't see every record: 0");
     // The value line is the rule's own, not the guards'.
     assert.deepEqual(f.value, { kind: "not_sized", reason: "We don't put a figure on this: the only one to hand would be a guess at upkeep hours." });
@@ -239,13 +244,13 @@ describe("what isn't judged", () => {
     assert.equal(exclusion(f, "Objects past the 25"), "Objects past the 25 with the most active record types: 1 (Zz_Last__c)");
     assert.equal(exclusion(f, "Objects whose count Salesforce refused"), "Objects whose count Salesforce refused: 1 (Broken__c)");
     assert.equal(exclusion(f, "Objects whose count came back cut short"), "Objects whose count came back cut short: 1 (Cut__c)");
-    assert.equal(exclusion(f, "Tasks and events"), "Tasks and events, which we never count, because Salesforce archives older activities out of a count: 2 (Event and Task)");
+    assert.equal(exclusion(f, "Objects we never count"), `${NEVER_COUNTED}: 2 (Event and Task)`);
     for (const quiet of ["Old Format", "New Type", "Partner", "Billing Run", "Default", "Thing", "Call Log", "Site Visit"]) assert.ok(!names(f).some((s) => s.startsWith(quiet)), quiet);
   });
 
   test("tasks and events are never counted, and don't take the place of an object we can count", () => {
     assert.ok(!queriesOf(traps.sim.requests).some((q) => isCount(q) && /FROM (Task|Event) /.test(q)));
-    assert.deepEqual(traps.out.activities, ["Event", "Task"]);
+    assert.deepEqual(traps.out.partlyHidden, ["Event", "Task"]);
     assert.equal(traps.out.counted.Task, undefined);
     assert.equal(traps.out.counted.Event, undefined);
     // Left out before the 25, so the 26th object is still the only one past it.
@@ -256,8 +261,8 @@ describe("what isn't judged", () => {
     const counted = { ...traps.out.counted, Task: { all: [{ RecordTypeId: null, c: 50 }], recent: [{ RecordTypeId: null, c: 50 }] } };
     const g = judge({ ...traps.out, counted });
     assert.ok(!names(g).some((s) => s.startsWith("Call Log")));
-    assert.match(exclusion(g, "Tasks and events"), /: 2 \(Event and Task\)$/);
-    assert.deepEqual([...ACTIVITY_OBJECTS].sort(), ["Event", "Task"]);
+    assert.match(exclusion(g, "Objects we never count"), /: 2 \(Event and Task\)$/);
+    assert.deepEqual([...PARTLY_HIDDEN_OBJECTS].sort(), ["ContentDocument", "ContentVersion", "Event", "Task"]);
   });
 
   test("an org whose only types are on tasks and events has nothing judged, and says why", async () => {
@@ -265,7 +270,63 @@ describe("what isn't judged", () => {
     assert.ok(!queriesOf(sim.requests).some(isCount));
     const g = judge(out);
     assert.equal(g.status, "not_measurable");
-    assert.equal(g.notMeasurableReason, "None of your 2 record types could be judged: we don't count events and tasks, because Salesforce archives older ones out of a count.");
+    assert.equal(g.notMeasurableReason, "None of your 2 record types could be judged: we don't count events and tasks, because a count can't show all of them.");
+  });
+
+  // A user with View All Data still sees only the files they own or share, and a
+  // plain query returns article versions by publish status (DECISIONS.md 499).
+  describe("files and article versions, with the user holding View All Data", () => {
+    // Active and old, each on an object with 50 recent records and none on it:
+    // counted, each would be "no records at all".
+    const PLANTED = {
+      contentVersion: type("ContentVersion", "Contract_File", daysUntil(T, 800)),
+      contentDocument: type("ContentDocument", "Signed_Copy", daysUntil(T, 800)),
+      kav: type("Thing__kav", "How_To", daysUntil(T, 800)),
+      // Namespaced, and in capitals: still an article version object.
+      namespacedKav: type("acme__Guide__KAV", "FAQ", daysUntil(T, 800)),
+    };
+    const planted: SimulatorOptions = {
+      recordTypes: [TYPES.standard, TYPES.creditNote, TYPES.proForma, ...Object.values(PLANTED)],
+      recordTypeGroups: { Invoice__c: GROUPS.Invoice__c!, ...Object.fromEntries(Object.values(PLANTED).map((t) => [t.SobjectType, [recent(null, 50)]])) },
+    };
+    const OBJECTS = ["ContentDocument", "ContentVersion", "Thing__kav", "acme__Guide__KAV"];
+
+    test("no count is sent for any of them, none is flagged, and each is named in the exclusion", async () => {
+      const { out, sim } = await read(T, planted);
+      assert.equal(out.access.status === "ok" && out.access.viewAllData, true);
+      const counts = queriesOf(sim.requests).filter(isCount);
+      for (const object of OBJECTS) assert.ok(!counts.some((q) => q.includes(`FROM ${object} `)), `${object} counted`);
+      assert.ok(counts.some((q) => /FROM Invoice__c /.test(q)));
+      assert.deepEqual([...out.partlyHidden].sort(), OBJECTS);
+      assert.deepEqual(out.notSeenWhole, []);
+      const f = judge(out);
+      assert.equal(f.status, "issue");
+      assert.deepEqual(names(f), ["Pro Forma on Invoice", "Credit Note on Invoice"]);
+      assert.equal(exclusion(f, "Objects we never count"), `${NEVER_COUNTED}: 4 (ContentDocument, ContentVersion, Thing__kav and acme__Guide__KAV)`);
+      for (const object of OBJECTS) assert.ok(isPartlyHidden(object), object);
+      // A name that only holds "kav" isn't one.
+      assert.ok(!isPartlyHidden("Kavanagh__c") && !isPartlyHidden("Thing__kav__c"));
+    });
+
+    test("their counts, were one ever read, still judge no type of them", async () => {
+      const { out } = await read(T, planted);
+      const counted = { ...out.counted, ...Object.fromEntries(OBJECTS.map((o) => [o, { all: [{ RecordTypeId: null, c: 50 }], recent: [{ RecordTypeId: null, c: 50 }] }])) };
+      const g = judge({ ...out, counted });
+      assert.deepEqual(names(g), ["Pro Forma on Invoice", "Credit Note on Invoice"]);
+    });
+
+    test("an org whose only types are on files and article versions has nothing judged, and says why", async () => {
+      const { out, sim } = await read(T, { ...planted, recordTypes: Object.values(PLANTED) });
+      assert.ok(!queriesOf(sim.requests).some(isCount));
+      const g = judge(out);
+      assert.equal(g.status, "not_measurable");
+      assert.equal(g.notMeasurableReason, "None of your 4 record types could be judged: we don't count article versions and files, because a count can't show all of them.");
+    });
+
+    test("with tasks and events too, the reason names each kind once", async () => {
+      const { out } = await read(T, { recordTypes: [...Object.values(PLANTED), TYPES.task, TYPES.event], recordTypeGroups: {} });
+      assert.equal(judge(out).notMeasurableReason, "None of your 6 record types could be judged: we don't count article versions, events, files and tasks, because a count can't show all of them.");
+    });
   });
 
   test("the step keeps why each object wasn't counted, and reads 25 objects in five calls", () => {
@@ -288,7 +349,7 @@ describe("what isn't judged", () => {
     assert.deepEqual(out.counted, {});
     const g = judge(out);
     assert.equal(g.status, "not_measurable");
-    assert.match(g.notMeasurableReason!, /^None of your \d+ record types could be judged: we don't count events and tasks, because Salesforce archives older ones out of a count; Salesforce refused or cut short the count on 25 objects; 1 object is past the 25 we count\.$/);
+    assert.match(g.notMeasurableReason!, /^None of your \d+ record types could be judged: we don't count events and tasks, because a count can't show all of them; Salesforce refused or cut short the count on 25 objects; 1 object is past the 25 we count\.$/);
   });
 
   test("a whole composite call refused leaves its objects not judged, and the step still finishes", async () => {
@@ -619,7 +680,10 @@ describe("who connected", () => {
     // Not counted, so not refused either.
     assert.equal(exclusion(f, "Objects whose count Salesforce refused"), "Objects whose count Salesforce refused: 0");
     assert.equal(f.evidence[3]!.count, 6);
-    assert.match(f.evidence[3]!.note!, /They don't hold View All Data, so they see every record only on these objects\./);
+    assert.equal(
+      f.evidence[3]!.note,
+      `Objects the connected user holds View All Records on. They don't hold View All Data, so we count only objects among these, and they see every record on the objects we count. View All Data read with: ${VIEW_ALL_DATA("<the connected user>")}`,
+    );
     assert.equal(run.run.steps.find((s) => s.id === recordTypeUseExtractor.id)!.calls, 4);
   });
 
@@ -672,6 +736,111 @@ describe("who connected", () => {
     assert.equal(exclusion(f, "Objects where the connected user"), "Objects where the connected user can't see every record: 1 (Planted__c)");
   });
 
+  /** An access read answered with a fault that quotes the query and the user's id in both its forms, as Salesforce's do. The read is still sent. */
+  const quotingId = (code: string, which: (q: string) => boolean) => (sim: Simulator): Transport => ({
+    async send(request) {
+      const res = await sim.send(request);
+      const q = queriesOf([request])[0] ?? "";
+      if (!which(q)) return res;
+      const id = org.CONNECTED_USER.id;
+      return { status: 400, header: () => null, text: JSON.stringify([{ errorCode: code, message: `\n${q}\n^\nERROR at Row:1:Column:80\nbad value '${id}' or '${id.slice(0, 15)}'` }]) };
+    },
+  });
+
+  // A set that has to be activated in a session shows as assigned while an API
+  // session has none of its permissions (DECISIONS.md 499).
+  describe("a permission set activated in a session", () => {
+    const ONLY_THE_SIX = { viewAllData: false, viewAllRecords: org.READ_ONLY_VIEW_ALL };
+
+    test("both access reads leave such sets out, in exactly these words", async () => {
+      const { sim } = await read(T, { access: { ...ONLY_THE_SIX, session: { viewAllData: true, viewAllRecords: ["Invoice__c"] } } });
+      const queries = queriesOf(sim.requests);
+      assert.deepEqual(queries.filter(isViewAllData), [VIEW_ALL_DATA(org.CONNECTED_USER.id)]);
+      assert.deepEqual(queries.filter(isViewAllRecords), [VIEW_ALL_RECORDS(org.CONNECTED_USER.id)]);
+    });
+
+    test("one that alone gives View All Data doesn't count: the objects it would open aren't counted", async () => {
+      const { out, sim } = await read(T, { access: { ...ONLY_THE_SIX, session: { viewAllData: true, viewAllRecords: [] } } });
+      // What's counted first: a read that let the set in would count both.
+      const counts = queriesOf(sim.requests).filter(isCount);
+      assert.ok(!counts.some((q) => /FROM (Invoice__c|Empty_Object__c) /.test(q)), `counted:\n${counts.join("\n")}`);
+      assert.deepEqual(out.access, { status: "ok", viewAllData: false, viewAllRecords: [...org.READ_ONLY_VIEW_ALL].sort() });
+      assert.deepEqual(out.notSeenWhole, ["Invoice__c", "Empty_Object__c"]);
+      const f = judge(out);
+      assert.deepEqual(names(f), ["Support on Case"]);
+      assert.equal(exclusion(f, "Objects where the connected user"), "Objects where the connected user can't see every record: 2 (Empty_Object__c and Invoice__c)");
+    });
+
+    test("one that alone gives View All Records on an object doesn't count: that object isn't counted", async () => {
+      const { out, sim } = await read(T, { access: { ...ONLY_THE_SIX, session: { viewAllData: false, viewAllRecords: ["Invoice__c"] } } });
+      assert.ok(!queriesOf(sim.requests).some((q) => isCount(q) && /FROM Invoice__c /.test(q)), "Invoice__c counted");
+      assert.ok(out.access.status === "ok" && !out.access.viewAllRecords.includes("Invoice__c"));
+      assert.ok(out.notSeenWhole.includes("Invoice__c"));
+      assert.ok(!names(judge(out)).some((s) => s.endsWith("on Invoice")));
+    });
+
+    for (const [name, fails, reason] of [
+      ["the View All Data read", (q: string) => isViewAllData(q) && /PermissionSet\.HasActivationRequired/.test(q), "The connected user's permission set assignments couldn't be read: PermissionSet.HasActivationRequired isn't in this org."],
+      ["the View All Records read", (q: string) => isViewAllRecords(q) && /Parent\.HasActivationRequired/.test(q), "The connected user's object permissions couldn't be read: PermissionSet.HasActivationRequired isn't in this org."],
+    ] as const) {
+      test(`HasActivationRequired refused on ${name}: access unknown, not measurable, and no count is sent`, async () => {
+        const { out, sim } = await read(T, { failQuery: (soql) => (fails(soql) ? { errorCode: "INVALID_FIELD", message: "No such column 'HasActivationRequired' on entity 'PermissionSet'." } : null) });
+        assert.deepEqual(out.access, { status: "unknown", reason });
+        assert.ok(!queriesOf(sim.requests).some(isCount));
+        const f = judge(out);
+        assert.equal(f.status, "not_measurable");
+        assert.equal(f.notMeasurableReason, `${UNKNOWN} ${reason}`);
+      });
+    }
+  });
+
+  // The id the step looks up from a username is as much the user's as one it's
+  // given, so every reason and fault from the reads that hold it hides it
+  // (DECISIONS.md 499). The fault quotes the query, as Salesforce's do, and the
+  // id in both its forms.
+  describe("the id looked up from a username", () => {
+    const ID = org.CONNECTED_USER.id;
+    const run = (transport: Transport, outDir: string, runId?: string) =>
+      runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), answers: loadAnswers(), modules: SALES_CLOUD_MODULES, outDir, now: T, transport, connectedUser: BY_NAME, log: () => {}, ...(runId ? { runId } : {}) });
+    const holdsId = (text: string): boolean => text.includes(ID) || text.includes(ID.slice(0, 15));
+    const filesIn = (dir: string): string[] => readdirSync(dir).flatMap((name) => (statSync(join(dir, name)).isDirectory() ? filesIn(join(dir, name)) : [join(dir, name)]));
+
+    for (const [name, which, starts] of [
+      ["the View All Data read", isViewAllData, "The connected user's permission set assignments couldn't be read: "],
+      ["the View All Records read", isViewAllRecords, "The connected user's object permissions couldn't be read: "],
+    ] as const) {
+      test(`${name} refused with a reason quoting the id: the reason, the finding and the checkpoint hold the placeholder, never the id`, async () => {
+        const sim = new Simulator();
+        const done = await run(quotingId("INVALID_FIELD", which)(sim), tempDir());
+        // The read did hold the id, so a leak would have something to leak.
+        assert.ok(queriesOf(sim.requests).some((q) => which(q) && q.includes(ID)));
+        const checkpoint = join(done.dir, "checkpoints", `${recordTypeUseExtractor.id}.json`);
+        const use = readCheckpoint(checkpoint) as RecordTypeUse;
+        assert.ok(use.access.status === "unknown");
+        assert.equal(use.access.reason, `${starts}INVALID_FIELD: bad value '<the connected user>' or '<the connected user>'`);
+        assert.ok(!holdsId(readFileSync(checkpoint, "utf8")));
+        const f = done.output!.findings.find((x) => x.ruleId === RULE)!;
+        assert.equal(f.status, "not_measurable");
+        assert.equal(f.notMeasurableReason, `${UNKNOWN} ${use.access.reason}`);
+        assert.ok(f.notMeasurableReason!.includes("<the connected user>"));
+        assert.equal(f.evidence[1]!.note, `We couldn't tell which objects the connected user sees every record of. ${use.access.reason}`);
+        for (const e of f.evidence) assert.ok(!holdsId(JSON.stringify(e)), JSON.stringify(e));
+        for (const path of filesIn(done.dir)) assert.ok(!holdsId(readFileSync(path, "utf8")), path);
+      });
+
+      test(`${name} failing with a code that isn't Salesforce's answer, quoting the id: the step stops, and neither the fault nor run.json holds the id`, async () => {
+        const outDir = tempDir();
+        const runId = `rt-quote-${which === isViewAllData ? "vad" : "var"}`;
+        await assert.rejects(run(quotingId("INVALID_QUERY_FILTER_OPERATOR", which)(new Simulator()), outDir, runId), (err: unknown) => err instanceof SalesforceError && err.code === "INVALID_QUERY_FILTER_OPERATOR" && !holdsId(err.message) && err.message.includes("<the connected user>"));
+        const saved = JSON.parse(readFileSync(join(outDir, runId, "run.json"), "utf8")) as { steps: Array<{ id: string; status: string; error: string | null }> };
+        const step = saved.steps.find((s) => s.id === recordTypeUseExtractor.id)!;
+        assert.equal(step.status, "failed");
+        assert.ok(step.error!.includes("<the connected user>") && !holdsId(step.error!), step.error!);
+        for (const path of filesIn(join(outDir, runId))) assert.ok(!holdsId(readFileSync(path, "utf8")), path);
+      });
+    }
+  });
+
   test("a run told no one: no access read and no count, and not measurable", async () => {
     const { out, sim } = await read(T, {}, undefined, null);
     assert.deepEqual(out.access, { status: "unknown", reason: "The run wasn't told which user connected." });
@@ -686,7 +855,8 @@ describe("who connected", () => {
     const { out, sim } = await read(T, {}, undefined, BY_NAME);
     const queries = queriesOf(sim.requests);
     assert.deepEqual(queries.filter(isLookup), [LOOKUP]);
-    assert.equal(queries.filter(isViewAllData)[0], `SELECT PermissionSet.PermissionsViewAllData FROM PermissionSetAssignment WHERE AssigneeId = '${org.CONNECTED_USER.id}'`);
+    assert.deepEqual(queries.filter(isViewAllData), [VIEW_ALL_DATA(org.CONNECTED_USER.id)]);
+    assert.deepEqual(queries.filter(isViewAllRecords), [VIEW_ALL_RECORDS(org.CONNECTED_USER.id)]);
     assert.deepEqual(out.access, { status: "ok", viewAllData: true, viewAllRecords: [...org.READ_ONLY_VIEW_ALL].sort() });
     assert.deepEqual(judge(out), synthetic.findings.find((x) => x.ruleId === RULE));
     // A username, the list and the counts: five calls, and six at most.
@@ -739,12 +909,21 @@ describe("who connected", () => {
   });
 
   test("the id and the username are nowhere in the run folder, the log, the raw notes or any evidence", async () => {
+    // On the username routes the id is the one the step looked up (DECISIONS.md 499).
     const secrets = [org.CONNECTED_USER.id, org.CONNECTED_USER.id.slice(0, 15), org.CONNECTED_USER.username];
     const files = (dir: string): string[] => readdirSync(dir).flatMap((name) => (statSync(join(dir, name)).isDirectory() ? files(join(dir, name)) : [join(dir, name)]));
-    for (const [route, user, readOnly] of [["by id", BY_ID, false], ["by username", BY_NAME, false], ["read-only, by username", BY_NAME, true]] as const) {
+    const asItIs = (sim: Simulator): Transport => sim;
+    for (const [route, user, readOnly, wrap] of [
+      ["by id", BY_ID, false, asItIs],
+      ["by username", BY_NAME, false, asItIs],
+      ["read-only, by username", BY_NAME, true, asItIs],
+      ["by username, with View All Data refused quoting the looked-up id", BY_NAME, false, quotingId("INSUFFICIENT_ACCESS", isViewAllData)],
+      ["by username, with View All Records refused quoting the looked-up id", BY_NAME, false, quotingId("INSUFFICIENT_ACCESS", isViewAllRecords)],
+    ] as const) {
       const lines: string[] = [];
       const sim = new Simulator({ readOnly });
-      const run = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), answers: loadAnswers(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: T, transport: sim, connectedUser: user, log: (line) => lines.push(line) });
+      const run = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), answers: loadAnswers(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: T, transport: wrap(sim), connectedUser: user, log: (line) => lines.push(line) });
+      if (wrap !== asItIs) assert.match(run.output!.findings.find((x) => x.ruleId === RULE)!.notMeasurableReason!, /couldn't be read: INSUFFICIENT_ACCESS: bad value '<the connected user>' or '<the connected user>'$/, route);
       // The reads did name the user, so a leak would have something to leak.
       assert.ok(queriesOf(sim.requests).some((q) => q.includes(org.CONNECTED_USER.id)), route);
       const written = files(run.dir);
