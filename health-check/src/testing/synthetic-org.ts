@@ -1211,8 +1211,12 @@ export const APEX_TRIGGERS = [
 // Flow and ValidationRule list them (DECISIONS.md 482). Every flow in
 // METADATA_FILES has its versions here, the one its file is (the active
 // version, or the highest when none is active) with the status the file has.
-/** Someone the user list doesn't hold, who last changed a validation rule. */
-export const COMPONENT_OUTSIDE_MODIFIER = { id: userId(965), name: "Tam Okafor" };
+/**
+ * Someone the user list doesn't hold, who last changed a validation rule. Trap:
+ * their id sorts before Apex's outsider's, so labelling them before Apex's
+ * would move Apex's token.
+ */
+export const COMPONENT_OUTSIDE_MODIFIER = { id: userId(955), name: "Tam Okafor" };
 type Version = { VersionNumber: number; Status: string } & ReturnType<typeof changedBy>;
 const version = (n: number, status: string, who: Parameters<typeof changedBy>[0], days: number): Version => ({ VersionNumber: n, Status: status, ...changedBy(who, days) });
 

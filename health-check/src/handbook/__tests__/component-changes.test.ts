@@ -2,7 +2,9 @@ import { test, describe, before } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join, sep } from "node:path";
-import { SALES_CLOUD_MODULES } from "../../domains/index.ts";
+import { ALL_MODULES, SALES_CLOUD_MODULES } from "../../domains/index.ts";
+import { modulesFor } from "../../domains/scope.ts";
+import { metadataExtractor } from "../../extract/automation.ts";
 import { runHealthCheck } from "../../engine/run.ts";
 import { componentChangesExtractor, flowChanges, ruleChanges, type ComponentChangesData, type FlowVersionRow, type RuleChangeRow } from "../../extract/component-changes.ts";
 import type { MetadataBundle } from "../../extract/metadata-parse.ts";
@@ -137,6 +139,17 @@ describe("the recorded synthetic org's flows and validation rules", () => {
     assert.deepEqual(step.validationRules.items.find((r) => r.name === "Old_Check"), { object: "Invoice__c", name: "Old_Check", at: "2025-06-18T12:00:00.000+0000", byId: null, byName: null });
     const files = filesIn(dir);
     assert.deepEqual([...files.keys()].filter((f) => files.get(f)!.includes(COMPONENT_OUTSIDE_MODIFIER.name)).sort(), ["checkpoints/component-changes.json", "pseudonym-map.json"]);
+  });
+
+  test("every module that reads the metadata lists the step after it, and a set-up review keeps it", () => {
+    const listing = (modules: typeof ALL_MODULES) => modules.filter((m) => m.extractors.includes(metadataExtractor));
+    assert.deepEqual(listing(ALL_MODULES).map((m) => m.id).sort(), ["automation", "best_practice", "configuration", "technical_health", "utilisation"]);
+    for (const module of [...listing(ALL_MODULES), ...listing(modulesFor("essentials", ALL_MODULES))]) {
+      const at = module.extractors.indexOf(componentChangesExtractor);
+      assert.ok(at > module.extractors.indexOf(metadataExtractor), module.id);
+    }
+    // It reads set-up, not records.
+    assert.equal(componentChangesExtractor.records, undefined);
   });
 
   test("no rule reads the step: no module's rule or metric names it", () => {
