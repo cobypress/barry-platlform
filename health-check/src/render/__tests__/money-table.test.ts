@@ -8,8 +8,8 @@ import { Pseudonymiser, type PseudonymEntry } from "../../privacy/pseudonymiser.
 import { runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
 import { compactMoney } from "../format.ts";
-import { renderContext } from "../html.ts";
-import { linesToName, moneyPage, moneySlides } from "../money.ts";
+import { printed, renderContext, textLines } from "../html.ts";
+import { linesToName, moneyLabelLines, moneyPage, moneyPageCounted, moneySlides, moneySlidesCounted } from "../money.ts";
 
 // The money table, from the review of night 3's reading passes (docs/overnight/night-3/review-reading.md).
 
@@ -48,6 +48,20 @@ describe("the money table", () => {
     // One line is always named, whatever the room.
     assert.equal(linesToName(2, 8, () => false), 1);
     assert.equal(linesToName(3, 8, () => false), 1);
+  });
+
+  test("a line with no reference in the map prints no tag and is counted with none, as it prints (DECISIONS.md 496)", () => {
+    // The documents number every value group in the notes (references.ts), so this is a
+    // context made without the map, as these tests make them.
+    const report = buildReport(base);
+    const r = renderContext(pseudonyms, "GBP", false);
+    const html = [moneyPage(r, report), ...moneySlides(r, report)].join("");
+    assert.doesNotMatch(html, /class="ref"/);
+    const counted = [moneyPageCounted(r, report), ...moneySlidesCounted(r, report)].flat();
+    assert.ok(counted.length >= 9, `${counted.length} rows`);
+    assert.deepEqual(counted.filter((x) => x.tag !== ""), []);
+    // Without a tag, a label is counted as its words alone.
+    for (const x of counted) for (const width of [120, 240, 480]) assert.equal(moneyLabelLines(x.label, "", width, "page"), textLines(printed(x.label), width, 12.5), `${x.label} at ${width}px`);
   });
 
   test("each line's figure before the share is said in words that fit its kind (DECISIONS.md 395)", () => {

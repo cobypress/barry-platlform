@@ -119,7 +119,8 @@ const figureWidth = (text: string, bold: boolean): number => [...text].reduce((s
 // width every tag used to be counted at, is 42.94px. Each character as Chromium
 // sets it in the tag's type, 0.85 of the label's, with its letter spacing,
 // measured beside a label at 12.5px and rounded up; type at another size scales
-// with it. A character not named here is as wide as the widest we measured, m.
+// with it. A character not named here is as wide as the widest printable one we
+// measured, m.
 const TAG_WIDTHS: Record<string, number> = { R: 6.7, "0": 6.9, "1": 3.65, "2": 6.35, "3": 6.5, "4": 6.95, "5": 6.9, "6": 7, "7": 6.05, "8": 6.95, "9": 6.95, ".": 2.5 };
 const TAG_WIDEST = 11.2;
 const TAG_AT = 12.5;
@@ -311,6 +312,7 @@ export function moneyPageColumn(r: Render, report: BuiltReport): number {
 
 /** Each row's label and tag as the page's estimate counts them, at the cut it prints: for the test that holds them to the rows printed (DECISIONS.md 496). */
 export function moneyPageCounted(r: Render, report: BuiltReport): Array<{ label: string; tag: string }> {
+  if (report.value.total.expected <= 0) return [];
   const parts = moneyParts(r, report);
   const { named } = pagePlan(r, report, parts, `${pageNotes(r, parts)}${seatsOnMoneyPage(r, report)}`);
   return countedRows(r, parts, 0, named, true).map(({ label, tag }) => ({ label, tag }));
@@ -348,6 +350,9 @@ function slidePlan(r: Render, parts: Parts, notes: string, most: 1 | 2): SlidePl
   return { chart: TALL_CHART, first, continued: linesToName(n - first, n - first, continued) };
 }
 
+const SLIDE_HOW = "Not every case will come back, so we count a share of each figure, with a cautious share and all of it either side. Where several issues describe the same money, only the largest counts. The executive summary shows how each line was reached.";
+const slideNotes = (r: Render, parts: Parts) => `${parts.exposureNote}<p class="note">${r.t(SLIDE_HOW)}</p>`;
+
 /**
  * The full report's money (DECISIONS.md 439): one slide where it holds, the
  * figure and the chart beside the table and the notes beneath, the chart at its
@@ -358,9 +363,6 @@ function slidePlan(r: Render, parts: Parts, notes: string, most: 1 | 2): SlidePl
  * hold every line, the last row adds the rest up, as the executive summary's
  * does. Empty when nothing could be given a figure in money.
  */
-const SLIDE_HOW = "Not every case will come back, so we count a share of each figure, with a cautious share and all of it either side. Where several issues describe the same money, only the largest counts. The executive summary shows how each line was reached.";
-const slideNotes = (r: Render, parts: Parts) => `${parts.exposureNote}<p class="note">${r.t(SLIDE_HOW)}</p>`;
-
 export function moneySlides(r: Render, report: BuiltReport, most: 1 | 2 = 2): string[] {
   if (report.value.total.expected <= 0) return [];
   const parts = moneyParts(r, report);
@@ -378,6 +380,7 @@ export function moneySlides(r: Render, report: BuiltReport, most: 1 | 2 = 2): st
 
 /** Each slide's rows, label and tag, as the estimate counts them at the cut the slides print: for the test that holds them to the rows printed (DECISIONS.md 496). */
 export function moneySlidesCounted(r: Render, report: BuiltReport, most: 1 | 2 = 2): Array<Array<{ label: string; tag: string }>> {
+  if (report.value.total.expected <= 0) return [];
   const parts = moneyParts(r, report);
   const { first, continued } = slidePlan(r, parts, slideNotes(r, parts), most);
   const tables = continued === null ? [countedRows(r, parts, 0, first, true)] : [countedRows(r, parts, 0, first, false), countedRows(r, parts, first, first + continued, true)];
