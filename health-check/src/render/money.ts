@@ -24,8 +24,6 @@ export const MONEY_CSS = `
 .money .note.seats { color: var(--carbon); }
 .money .basis { display: block; color: var(--muted); font-size: 0.78em; line-height: 1.3; margin-top: 1px; }
 .money tr.total td { font-weight: 700; border-bottom: none; border-top: 1px solid var(--carbon); }
-/* Over their figures, which are right-aligned: the grid's left-aligned headings would otherwise win. */
-.money table.grid th.num { text-align: right; }
 `;
 
 /** Rows of groups the page has room for, the total row aside. */
@@ -42,16 +40,19 @@ const IN_FULL: Record<Exclude<ValueKind, "exposure">, string> = {
 
 // The page's height, estimated so the chart and the table fit the executive
 // summary's page (DECISIONS.md 435). Measured in Chromium at A4 and 13.5px:
-// 987px between the paddings, 171px from the eyebrow to the chart, the chart
-// drawn 800 wide across 658px with 14px under it, the table's head 31.5px, and a
-// note 10px above and 17.2px a line. A note line is counted at 106 characters:
-// the most that never counted a line too few on the prose was 110.
-const MONEY_ROOM = 986;
-const MONEY_HEAD = 171;
+// 986.45px between the paddings, 170.41px from the eyebrow to the chart, the
+// chart drawn 800 wide across 658px with 14px under it, the table's head 31.25px,
+// and a note 10px above and 17.2px a line. The room is counted a little under
+// what the browser sets and each part at or a little over, so the page fills its
+// room before adding lines up and never runs into the margin (448). A note line
+// is counted at 106 characters: the most that never counted a line too few on
+// the prose was 110.
+const MONEY_ROOM = 986.4;
+const MONEY_HEAD = 170.5;
 const CHART_SCALE = 658 / 800;
 const TALL_CHART = 320;
 const SHORT_CHART = 250;
-const TABLE_HEAD = 32;
+const TABLE_HEAD = 31.3;
 /** A kind's bar where the chart can't be drawn: its name on two lines and the gap under it. */
 const BAR = 49;
 const NOTE_GAP = 10;
@@ -62,8 +63,9 @@ const NOTE_CHARS = 106;
  * How the money table is set, measured in Chromium. `text` is the table's width
  * less its three columns' padding: the label column has what the figures leave.
  * On the page the table is 657.6px wide, a row 13px and 18.75px a line at
- * 12.5px, and its basis 12.7px a line at 9.75px after 1px, counted as 13.7. On a
- * slide a row is 11px and 23.2px a line at 16px, with no basis: in the split
+ * 12.5px, and its basis 1px under the label and 12.672px a line at 9.75px,
+ * counted as 12.68 (DECISIONS.md 448). On a slide a row is 11px and 23.19px a
+ * line at 16px, counted as 23.2, with no basis: in the split
  * beside the figure the table is 611px wide, and on a continued slide the
  * slide's full 1174px. A label and its basis are set a word at a time by the
  * measured width of their letters (`textLines`, DECISIONS.md 438), so the
@@ -71,18 +73,20 @@ const NOTE_CHARS = 106;
  * to be set for the longest words, and counted the engine's labels and bases a
  * line long.
  */
-type TableMeasure = { font: number; text: number; row: number; line: number; basis: { font: number; line: number } | null };
-const PAGE_TABLE: TableMeasure = { font: 12.5, text: 609.6, row: 13, line: 18.75, basis: { font: 9.75, line: 13.7 } };
-const SLIDE_TABLE: TableMeasure = { font: 16, text: 563, row: 11, line: 23.25, basis: null };
+type TableMeasure = { font: number; text: number; row: number; line: number; basis: { font: number; gap: number; line: number } | null };
+const PAGE_TABLE: TableMeasure = { font: 12.5, text: 609.6, row: 13, line: 18.75, basis: { font: 9.75, gap: 1, line: 12.68 } };
+const SLIDE_TABLE: TableMeasure = { font: 16, text: 563, row: 11, line: 23.2, basis: null };
 const CONTINUED_TABLE: TableMeasure = { ...SLIDE_TABLE, text: 1126 };
 // A slide's money starts 137.7px down, under the eyebrow and a one-line heading,
-// and the slide's padding starts at 667.2px: 529.5px, with 525 keeping clear. The
-// table's head is 33.7px. Beside the table the figure's column is 531.3px wide:
-// the figure 52px, the range 4px under it at 29px a line in 20px type, and the
-// chart 10px under that, drawn 560 wide across the column with 14px under it.
+// and the slide's padding starts at 667.2px: 529.47px as Chromium sets them,
+// counted as 529.4, as every row and the head are counted a little over
+// (DECISIONS.md 448). The table's head is 33.69px, counted as 34. Beside the
+// table the figure's column is 531.3px wide: the figure 52px, the range 4px
+// under it at 29px a line in 20px type, and the chart 10px under that, drawn 560
+// wide across the column with 14px under it.
 // The notes are 14px type at 20.3px a line, each 10px under what's above it,
 // across the slide's full width (DECISIONS.md 439).
-const SLIDE_ROOM = 525;
+const SLIDE_ROOM = 529.4;
 const SLIDE_HEAD = 34;
 const SLIDE_FIGURE = 66;
 const SLIDE_RANGE_LINE = 29;
@@ -109,8 +113,13 @@ const FIGURE_WIDTHS: Record<string, [regular: number, bold: number]> = {
 };
 const FIGURE_AT = 12.5;
 const figureWidth = (text: string, bold: boolean): number => [...text].reduce((sum, c) => sum + (FIGURE_WIDTHS[c] ?? [12.2, 13.2])[bold ? 1 : 0], 0);
-/** A reference tag beside a label, counted as a word, as wide as the widest. */
-const REF_WORD = "R00.00";
+/**
+ * A reference tag beside a label, as wide as the widest of two figures and two
+ * ("R66.66"), as it prints: 6px from the label in type 0.85 of the label's, with
+ * its letter spacing. Chromium sets it 42.94px wide at 12.5px and 53.31px at 16px,
+ * counted as 6px and 2.96 a pixel of the label's type (DECISIONS.md 448).
+ */
+const refTag = (font: number): number => 6 + 2.96 * font;
 
 /** The lines past the first `from`, added up: what the money table's last row holds when it can't name them all. */
 export function restOf(lines: ValueModel["groups"], from: number, k: "low" | "expected" | "high"): number {
@@ -196,8 +205,12 @@ function labelColumn(parts: Parts, measure: TableMeasure, from: number, to: numb
   return measure.text - widest(EXPECTED_HEAD, (x) => parts.m(x.expected)) - widest(RANGE_HEAD, (x) => parts.range(x.low, x.high));
 }
 
-/** A label's lines, with its reference, at the table's type. Never calls `r.ref`: on the executive summary that notes a reference as used. */
-const labelLines = (label: string, column: number, measure: TableMeasure): number => textLines(printed(`${label} ${REF_WORD}`), column, measure.font);
+/**
+ * A label's lines, with its reference, at the table's type: the tag follows the
+ * last word with no space, so it goes to the next line with that word. Never
+ * calls `r.ref`: on the executive summary that notes a reference as used.
+ */
+const labelLines = (label: string, column: number, measure: TableMeasure): number => textLines(printed(label), column, measure.font, refTag(measure.font));
 
 /** A money line's label, with its reference, in lines `width` pixels wide on the page or a slide: what the estimate counts (DECISIONS.md 438). */
 export const moneyLabelLines = (label: string, width: number, format: "page" | "slide"): number => labelLines(label, width, format === "page" ? PAGE_TABLE : SLIDE_TABLE);
@@ -206,16 +219,18 @@ export const moneyBasisLines = (basis: string, width: number): number => textLin
 
 /**
  * A table's rows: the lines from `from` to `to`, then, where `last`, the rest
- * added up if any are left and the total with the rule above it. Its label
- * column is the one these rows print in.
+ * added up if any are left and the total with the rule above it. The table's
+ * borders collapse, so a row has half of the rule above it and half of the one
+ * below, and the total, with none below, half a pixel less (DECISIONS.md 448).
+ * Its label column is the one these rows print in.
  */
 function rowsHeight(r: Render, parts: Parts, measure: TableMeasure, from: number, to: number, last: boolean): number {
   const { all } = parts;
   const left = last && to < all.length;
   const column = labelColumn(parts, measure, from, to, last);
   const line = (label: string) => measure.row + measure.line * labelLines(r.t(label), column, measure);
-  const basis = (g: Group) => (measure.basis ? measure.basis.line * textLines(printed(r.t(parts.basis(g))), column, measure.basis.font) : 0);
-  return all.slice(from, to).reduce((sum, g) => sum + line(g.label) + basis(g), 0) + (left ? line(restLabel(all.length - to)) : 0) + (last ? 1 + line("Total, each counted once") : 0);
+  const basis = (g: Group) => (measure.basis ? measure.basis.gap + measure.basis.line * textLines(printed(r.t(parts.basis(g))), column, measure.basis.font) : 0);
+  return all.slice(from, to).reduce((sum, g) => sum + line(g.label) + basis(g), 0) + (left ? line(restLabel(all.length - to)) : 0) + (last ? line("Total, each counted once") - 0.5 : 0);
 }
 
 /** How the page sets its money: the chart's height and how many lines it names (DECISIONS.md 435 and 438). */
@@ -237,19 +252,26 @@ function pagePlan(r: Render, report: BuiltReport, parts: Parts, notes: string): 
 
 const PAGE_HOW = "Not every case will come back, so we count a share of each figure: the expected share, with a cautious one and all of it either side. Where several issues describe the same money, only the largest counts.";
 const pageNotes = (r: Render, parts: Parts) => `${parts.exposureNote}<p class="note">${r.t(PAGE_HOW)}</p>`;
+/** A line's row on the page: its label, its reference and how it was reached beneath. */
+const pageRow = (r: Render, parts: Parts, g: Group) => parts.row(`${r.t(g.label)}${r.ref(valueItemId(g.id))}<span class="basis">${r.t(parts.basis(g))}</span>`, g.counted);
 
 /** The executive summary's page: the figure, the chart, and the table as the page holds it (DECISIONS.md 435 and 438). Empty when nothing could be given a figure in money. */
 export function moneyPage(r: Render, report: BuiltReport): string {
   if (report.value.total.expected <= 0) return "";
   const parts = moneyParts(r, report);
-  const { all, basis, row, restRow, totalRow, table } = parts;
+  const { all, restRow, totalRow, table } = parts;
   const notes = pageNotes(r, parts);
   const seats = seatsOnMoneyPage(r, report);
   const { chart, named } = pagePlan(r, report, parts, `${notes}${seats}`);
-  const label = (g: Group) => `${r.t(g.label)}${r.ref(valueItemId(g.id))}<span class="basis">${r.t(basis(g))}</span>`;
-  const rows = [...all.slice(0, named).map((g) => row(label(g), g.counted)), ...(named < all.length ? [restRow(named)] : []), totalRow].join("");
+  const rows = [...all.slice(0, named).map((g) => pageRow(r, parts, g)), ...(named < all.length ? [restRow(named)] : []), totalRow].join("");
   const head = `<div class="eyebrow">${r.t(EYEBROW)}</div><h2>${TITLE}</h2>`;
   return `<div class="money">${head}${parts.figure(chart)}${table(rows)}${notes}${seats}</div>`;
+}
+
+/** The line at `index`, largest first, in its row as the page prints it: for the test that shows by measure whether a line the last row stands for would fit (DECISIONS.md 448). */
+export function moneyPageRow(r: Render, report: BuiltReport, index: number): string {
+  const parts = moneyParts(r, report);
+  return pageRow(r, parts, parts.all[index]!);
 }
 
 /** The label column the page's estimate sets its lines in, at the cut it prints: for the test that holds it to the browser's (DECISIONS.md 438). */
