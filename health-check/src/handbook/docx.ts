@@ -1,13 +1,15 @@
 import { AlignmentType, Document, Footer, HeadingLevel, Packer, PageNumber, Paragraph, TextRun } from "docx";
 import { colour, font } from "../design/tokens.ts";
 import { longDate } from "../render/format.ts";
-import { TRIGGER_EVENTS, type Handbook, type HandbookApexClass, type HandbookApexTouches, type HandbookApexTrigger, type HandbookCondition, type HandbookFlow, type HandbookPath, type HandbookStep, type HandbookValidationRule, type ValidationRuleCoverage } from "./schema.ts";
+import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
+import { CHANGES_NOT_KEPT, TRIGGER_EVENTS, type Handbook, type HandbookChange, type HandbookApexClass, type HandbookApexTouches, type HandbookApexTrigger, type HandbookCondition, type HandbookFlow, type HandbookPath, type HandbookStep, type HandbookValidationRule, type ValidationRuleCoverage } from "./schema.ts";
 
 // The org handbook as a Word document (DECISIONS.md 443 and 444): handbook.json
 // made readable, and nothing more. Code alone writes it, from the file: no
-// Claude text, no figure from the value model and no name added. The admin's
-// own text prints as written, so a reader can trust that what isn't here
-// doesn't exist, or is said to be missing.
+// Claude text, no figure from the value model, and no name added but who made
+// each recent change, restored from the run's pseudonym map (decisions 421 and
+// 461). The admin's own text prints as written, so a reader can trust that
+// what isn't here doesn't exist, or is said to be missing.
 
 /** The document in the run's documents folder, beside the reports. */
 export const HANDBOOK_DOCX = "org-handbook.docx";
@@ -246,7 +248,10 @@ function conditionWords(c: HandbookCondition): Run[] {
  * itself. Each says "we couldn't read this", "there's none" or what it holds,
  * and the three never look alike (decisions 453 and 454).
  */
-type Part = { covers: (h: Handbook) => string; write: (doc: Doc, h: Handbook) => void };
+type Part = { covers: (h: Handbook) => string; write: (doc: Doc, h: Handbook, names: Names) => void };
+
+/** A user's name from their token, or null when the run's names can't give it. */
+type Names = (token: string) => string | null;
 
 const unavailableWords = (what: string, reason: string): string => `We couldn't read your ${what}, so this handbook doesn't list them. ${sentence(reason)}`;
 
@@ -493,23 +498,112 @@ const APEX_TRIGGERS = apexPart<HandbookApexTrigger>({
   write: (doc, item) => writeApex(doc, item, [[{ text: `On: ${item.object}` }], [eventWords(item.events)]]),
 });
 
+// ─── Recent changes ───────────────────────────────────────────────────────────
+
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+/** "28 Nov 2026 at 14:05 UTC", or the date alone when the time isn't in UTC as Salesforce gives it. */
+function changedAt(at: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}/.test(at)) return at;
+  const time = /^\d{4}-\d{2}-\d{2}T(\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?(?:Z|\+0000|\+00:00)$/.exec(at);
+  return time ? `${longDate(at)} at ${time[1]}:${time[2]} UTC` : longDate(at);
+}
+
+/**
+ * Who made a change. The file holds a token, never a name, and only the token
+ * is restored (decision 421): a name the run can't give is "a user", never the
+ * token, which means nothing to a reader.
+ */
+function changedBy(change: HandbookChange, names: Names): string {
+  const who = change.by === null ? "no user recorded" : (names(change.by) ?? "a user whose name we couldn't look up");
+  return change.loggedInAs === null ? who : `${who} (${change.loggedInAs} logged in as them)`;
+}
+
+type Changes = Extract<Handbook["recentChanges"], { status: "ok" }>;
+
+const changeCount = (part: Changes): number => Math.max(part.total, part.items.length);
+const changesCut = (part: Changes): boolean => part.cut || part.total > part.items.length;
+
+/** "from 3 Jun 2026 to 28 Nov 2026", newest last, from the items' own dates. */
+function changeSpan(items: HandbookChange[]): string {
+  const days = items.map((c) => c.at.slice(0, 10)).sort();
+  const first = days[0]!;
+  const last = days.at(-1)!;
+  return first === last ? `on ${longDate(first)}` : `from ${longDate(first)} to ${longDate(last)}`;
+}
+
+const userAdmin = (n: number): string => `${plural(n, "change")} to users`;
+
+const RECENT_CHANGES: Part = {
+  covers: (h) => {
+    const part = h.recentChanges;
+    if (part.status !== "ok") return part.reason === CHANGES_NOT_KEPT ? `Recent changes: ${CHANGES_NOT_KEPT.replace(/^T/, "t")}` : unavailableWords("recent setup changes", part.reason);
+    const kept = `Salesforce keeps this trail for ${plural(part.days, "day")}.`;
+    if (part.items.length === 0) return `Recent changes: none in the last ${plural(part.days, "day")}${part.leftOutUserAdmin ? `, apart from ${userAdmin(part.leftOutUserAdmin)}` : ""}. ${kept}`;
+    const n = plural(changeCount(part), "setup change");
+    return changesCut(part) ? `Recent changes: the newest ${n} we read, ${changeSpan(part.items)}. ${kept}` : `Recent changes: ${n} ${changeSpan(part.items)}. ${kept}`;
+  },
+  write: (doc, h, names) => {
+    doc.heading("Recent changes", 2);
+    const part = h.recentChanges;
+    if (part.status !== "ok") return doc.para({ text: part.reason === CHANGES_NOT_KEPT ? CHANGES_NOT_KEPT : unavailableWords("recent setup changes", part.reason), bold: true });
+    const leftOut = part.leftOutUserAdmin
+      ? ` We left out ${userAdmin(part.leftOutUserAdmin)}, such as password resets and email changes, because they're about people rather than how the org is set up.`
+      : "";
+    if (part.items.length === 0) return doc.para(`No setup changes were recorded in the last ${plural(part.days, "day")}${part.leftOutUserAdmin ? `, apart from ${userAdmin(part.leftOutUserAdmin)}, which this handbook leaves out` : ""}.`);
+    doc.para(`These are the changes made in Setup over the last ${plural(part.days, "day")}, as Salesforce's Setup Audit Trail records them, newest first, under a heading for each month. Each gives who made it and Salesforce's own description of the change.${leftOut}`);
+    if (changesCut(part)) doc.para({ text: `Salesforce had more changes than we read: we read the newest ${count(part.total + part.leftOutUserAdmin)}, so older ones from the ${plural(part.days, "day")} aren't here.`, bold: true });
+    let month = "";
+    for (const change of part.items) {
+      const m = /^(\d{4})-(\d{2})/.exec(change.at);
+      const heading = m ? `${MONTHS[Number(m[2]) - 1] ?? m[2]} ${m[1]}` : "Date not recorded";
+      if (heading !== month) doc.heading((month = heading), 3);
+      writeChange(doc, change, names);
+    }
+  },
+};
+
+/** One change as one paragraph: when and who, the section, then Salesforce's sentence as written. */
+function writeChange(doc: Doc, change: HandbookChange, names: Names): void {
+  const first: Run[] = [{ text: changedAt(change.at), bold: true }, { text: `, ${changedBy(change, names)}: ${change.section ?? "section not recorded"}` }];
+  if (change.action !== null) first.push({ text: `  ${change.action}`, muted: true });
+  const total = change.whatLength ?? change.what?.length ?? 0;
+  const what: Run[] =
+    change.what === null
+      ? [{ text: "Salesforce gave no description of this change.", muted: true }]
+      : [{ text: change.what }, ...(change.whatCut || total > change.what.length ? [{ text: ` [cut: ${firstOf(change.what.length, total, "characters")}]`, bold: true }] : [])];
+  doc.lines(first, [what]);
+}
+
 /** The parts, in the order the handbook runs. */
-const PARTS: Part[] = [FLOWS, VALIDATION_RULES, APEX_CLASSES, APEX_TRIGGERS];
+const PARTS: Part[] = [FLOWS, VALIDATION_RULES, APEX_CLASSES, APEX_TRIGGERS, RECENT_CHANGES];
+
+type HandbookOptions = {
+  clientName: string;
+  runDate: string;
+  /** The run's pseudonym map, which turns who made each recent change back into a name. Without it, none is named. */
+  pseudonyms?: Pseudonymiser | null;
+};
 
 /** The handbook as its document's blocks. Exported for the tests, which read the words without unzipping. */
-export function handbookBlocks(handbook: Handbook, options: { clientName: string; runDate: string }): Paragraph[] {
+export function handbookBlocks(handbook: Handbook, options: HandbookOptions): Paragraph[] {
+  // The token alone, so text in the file that looks like one prints as written.
+  const names: Names = (token) => {
+    const name = options.pseudonyms?.restore(token);
+    return name && name !== token ? name : null;
+  };
   const doc = new Doc();
   doc.heading(`Org handbook: ${options.clientName}`, 1);
-  doc.para(`This handbook sets out how your Salesforce org is configured: what each flow does, step by step, what each validation rule checks, and what each Apex class and trigger touches. We read it from your org on ${longDate(options.runDate)}, for your health check, and it describes the org as it was that day.`);
+  doc.para(`This handbook sets out how your Salesforce org is configured: what each flow does, step by step, what each validation rule checks, what each Apex class and trigger touches, and what was changed in Setup recently, and by whom. We read it from your org on ${longDate(options.runDate)}, for your health check, and it describes the org as it was that day.`);
   doc.para("Everything in it comes from your org's own configuration. Names, descriptions, conditions, formulas and messages are as your admins wrote them, except that anything that looks like a password or a key is replaced with [REDACTED]. We haven't added to it or summarised it, except that what each piece of Apex touches is read from its code, as that part explains. Where we couldn't read something, or list only part of it, we say so.");
   doc.heading("What it covers", 2);
   for (const part of PARTS) doc.para(part.covers(handbook));
-  for (const part of PARTS) part.write(doc, handbook);
+  for (const part of PARTS) part.write(doc, handbook, names);
   return doc.blocks;
 }
 
 /** The handbook as a Word document, from a parsed `Handbook`. */
-export async function renderHandbookDocx(handbook: Handbook, options: { clientName: string; runDate: string }): Promise<Buffer> {
+export async function renderHandbookDocx(handbook: Handbook, options: HandbookOptions): Promise<Buffer> {
   const doc = new Document({
     title: wordSafe(`Org handbook: ${options.clientName}`),
     creator: "Black Cloud",

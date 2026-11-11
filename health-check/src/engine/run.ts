@@ -7,14 +7,14 @@ import { shareRepeatedValues } from "./share-values.ts";
 import { modulesFor } from "../domains/scope.ts";
 import { scoreDomains } from "../domains/scoring.ts";
 import type { DomainModule } from "../domains/types.ts";
-import { customObjectsExtractor, orgExtractor, type CustomObjectRow } from "../extract/configuration.ts";
+import { customObjectsExtractor, orgExtractor, setupAuditExtractor, type CustomObjectRow, type SetupAuditSummary } from "../extract/configuration.ts";
 import { FACTS_FILE, factsExtractor, type Facts } from "../extract/facts.ts";
 import { apexExtractor, metadataExtractor, type ApexData } from "../extract/automation.ts";
 import type { MetadataBundle } from "../extract/metadata-parse.ts";
 import { fieldDescribeExtractor } from "../extract/fields.ts";
 import { summariseFacts } from "../facts/summary.ts";
 import { monthsBefore, type ExtractContext, type Extractor, type PartialStore, type Sourced } from "../extract/types.ts";
-import { buildHandbook, HANDBOOK_FILE } from "../handbook/build.ts";
+import { buildHandbook, HANDBOOK_FILE, recentChanges } from "../handbook/build.ts";
 import type { UserRow } from "../extract/users.ts";
 import { usersExtractor } from "../extract/users.ts";
 import { renderRawNotes } from "../notes/raw-notes.ts";
@@ -267,12 +267,6 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
 
   // Names, booleans and types only, so it's kept as long as the findings (DECISIONS.md 288).
   writeJson(join(dir, FACTS_FILE), extracts.get(factsExtractor.id));
-  // The customer's own configuration, for their handbook: kept as long as the
-  // findings, and read by nothing else here (DECISIONS.md 451 to 457).
-  writeJson(
-    join(dir, HANDBOOK_FILE),
-    buildHandbook(extracts.get(metadataExtractor.id) as Sourced<MetadataBundle> | undefined, extracts.get(apexExtractor.id) as ApexData | undefined, extracts.get(customObjectsExtractor.id) as Sourced<CustomObjectRow[]> | undefined),
-  );
   // Which objects' rules weren't read, for the raw notes. Render reads only the run folder (DECISIONS.md 425).
   const bundle = extracts.get(metadataExtractor.id) as Sourced<MetadataBundle> | undefined;
   run.retrieveFallback = bundle?.status === "ok" ? bundle.data.retrieveFallback : undefined;
@@ -300,6 +294,11 @@ function analyseRun(dir: string, run: Run, calibration: Calibration, modules: Do
   // Registering everyone up front, in id order, keeps tokens stable and scrubs
   // a name even if no finding set out to mention that user.
   for (const [id, entry] of [...directory].sort(([a], [b]) => a.localeCompare(b))) pseudonyms.label("user", id, entry.name, entry.aliases);
+  // Then whoever made a setup change the user list doesn't hold, named as the
+  // trail names them (DECISIONS.md 461): before the analysis, so a rule that
+  // names the same person gives the same token, and before the map is saved,
+  // so every token in handbook.json can be restored.
+  const changes = recentChanges(extracts.get(setupAuditExtractor.id) as Sourced<SetupAuditSummary> | undefined, (id, trailName) => pseudonyms.label("user", id, directory.get(id)?.name ?? trailName ?? "Unknown user"));
   if (run.customerRef) pseudonyms.label("customer", run.orgId, run.customerRef);
   // A first name two people share gets its own token, saved with the map so a
   // report rendered later can restore it.
@@ -317,6 +316,12 @@ function analyseRun(dir: string, run: Run, calibration: Calibration, modules: Do
     scope: run.scope,
   });
   writeJson(join(dir, "pseudonym-map.json"), pseudonyms.entries());
+  // The customer's own configuration, for their handbook: kept as long as the
+  // findings, and read by nothing else here (DECISIONS.md 451 to 457).
+  writeJson(
+    join(dir, HANDBOOK_FILE),
+    buildHandbook(extracts.get(metadataExtractor.id) as Sourced<MetadataBundle> | undefined, extracts.get(apexExtractor.id) as ApexData | undefined, extracts.get(customObjectsExtractor.id) as Sourced<CustomObjectRow[]> | undefined, changes),
+  );
   renderOutputs(dir, run, calibration, output);
   return output;
 }

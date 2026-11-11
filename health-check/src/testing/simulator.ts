@@ -46,6 +46,8 @@ export type SimulatorOptions = {
    * Left out, every query is answered in one page, as the recordings were made.
    */
   pageSize?: number;
+  /** The Setup Audit Trail's rows: the synthetic org's by default, or a test's own, such as a change no user made. */
+  setupAudit?: Array<Record<string, unknown>>;
 };
 
 /** The parts of an org that grow with it. A scale test swaps them for a generated org's (src/testing/scale-org.ts). */
@@ -252,6 +254,7 @@ export class Simulator implements Transport {
   #retrieving: Record<string, string> = org.METADATA_FILES;
   #d: OrgRecords;
   #pageSize: number | null;
+  #setupAudit: Array<Record<string, unknown>>;
   /** The rest of each query answered in pages, by its locator. */
   #cursors = new Map<string, Json[]>();
   /** Rows in Id order, sorted once per list: a big org's keyset reads would otherwise sort it on every page. */
@@ -274,6 +277,7 @@ export class Simulator implements Transport {
     // A read-only connection can't see AuthProvider (DECISIONS.md 60).
     this.#d = options.records ?? SYNTHETIC_RECORDS;
     this.#pageSize = options.pageSize ?? null;
+    this.#setupAudit = options.setupAudit ?? org.SETUP_AUDIT;
     this.#unlicensed = new Set(options.unlicensed ?? []);
     this.#missing = new Set([...(options.missingObjects ?? []), ...(this.#readOnly ? ["AuthProvider"] : [])]);
     if (!this.#pardot) this.#dropFields = { ...this.#dropFields, Lead: [...(this.#dropFields.Lead ?? []), "pi__url__c", "pi__score__c", "pi__grade__c"] };
@@ -456,8 +460,14 @@ export class Simulator implements Transport {
         const since = /\bLoginTime\s*>=\s*(\S+)/i.exec(where)?.[1];
         return page(since ? this.#d.loginHistory.filter((r) => new Date(r.LoginTime.replace("+0000", "Z")) >= new Date(since)) : this.#d.loginHistory);
       }
-      case "SetupAuditTrail":
-        return /\b(Section|Display|Action)\s*(=|!=|IN|LIKE)/i.test(where) ? reject("INVALID_FIELD", "field 'Section' can not be filtered in a query call") : page(org.SETUP_AUDIT);
+      case "SetupAuditTrail": {
+        if (/\b(Section|Display|Action)\s*(=|!=|IN|LIKE)/i.test(where)) return reject("INVALID_FIELD", "field 'Section' can not be filtered in a query call");
+        // CreatedDate is filterable, at both ends.
+        const from = /\bCreatedDate\s*>=\s*(\S+)/i.exec(where)?.[1];
+        const to = /\bCreatedDate\s*<=\s*(\S+)/i.exec(where)?.[1];
+        const at = (r: Record<string, unknown>) => new Date(String(r.CreatedDate).replace("+0000", "Z"));
+        return page(this.#setupAudit.filter((r) => (!from || at(r) >= new Date(from)) && (!to || at(r) <= new Date(to))));
+      }
       case "SecurityHealthCheck":
         return tooling ? page([{ Score: org.HEALTH_SCORE }]) : unsupported("SecurityHealthCheck");
       case "SecurityHealthCheckRisks":

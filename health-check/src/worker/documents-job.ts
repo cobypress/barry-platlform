@@ -12,10 +12,11 @@ import { syncShares } from "./share-job.ts";
 import { sealPages } from "../microsite/seal.ts";
 import { addMonths } from "./retention.ts";
 import type { DocumentFile, DocumentsJobInput } from "./types.ts";
-import { SURVEY_FILE, write } from "../render/render-run.ts";
+import { loadPseudonymMap, SURVEY_FILE, write } from "../render/render-run.ts";
 import { HANDBOOK_DOCX, renderHandbookDocx } from "../handbook/docx.ts";
 import { HANDBOOK_NOT_MADE, readHandbook } from "../handbook/read.ts";
 import { Survey } from "../survey/questions.ts";
+import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 
 // A documents job: once the console has released a run, print its three
 // documents in the approved wording and put them in Google Drive, as
@@ -144,14 +145,23 @@ async function putReadoutKit(drive: DocumentDrive, clientName: string, folderNam
  * Without one, the other documents are made as before and the warnings say
  * why; nothing here fails the make.
  */
-async function makeHandbook(dir: string, out: string, clientName: string, runDate: string): Promise<{ ok: true; path: string } | { ok: false; warning: string }> {
+async function makeHandbook(dir: string, out: string, clientName: string, runDate: string): Promise<{ ok: true; path: string; unnamed: boolean } | { ok: false; warning: string }> {
   const read = readHandbook(dir);
   if (!read.ok) return { ok: false, warning: HANDBOOK_NOT_MADE[read.why] };
+  // Who made each recent change is a token in the file, named from the run's
+  // map as the reports are (DECISIONS.md 421). Without the map the handbook is
+  // still made, naming no one: a token never reaches the customer.
+  let pseudonyms: Pseudonymiser | null = null;
+  try {
+    pseudonyms = loadPseudonymMap(dir);
+  } catch {
+    pseudonyms = null;
+  }
   try {
     const path = join(out, HANDBOOK_DOCX);
     mkdirSync(out, { recursive: true, mode: 0o700 });
-    write(path, await renderHandbookDocx(read.handbook, { clientName, runDate }));
-    return { ok: true, path };
+    write(path, await renderHandbookDocx(read.handbook, { clientName, runDate, pseudonyms }));
+    return { ok: true, path, unnamed: pseudonyms === null };
   } catch {
     // The error could quote the handbook, so it isn't kept.
     return { ok: false, warning: HANDBOOK_NOT_MADE.render };
@@ -343,6 +353,7 @@ async function documentsLocked(runId: string, deps: WorkerDeps, attempt: Attempt
     }
     const handbook = await makeHandbook(dir, join(dir, "documents"), clientName, input.run.asOf);
     if (!handbook.ok) log(`Run ${runId}: ${handbook.warning}`);
+    else if (handbook.unnamed) log(`Run ${runId}: the org handbook names no one who made a recent change, because the run's pseudonym map couldn't be read.`);
     const folder = await folderFor(deps.drive, clientName, input.driveFolderId);
     const nameOf = (output: keyof typeof FILES): string => `${clientName} - ${FILES[output].title}.${FILES[output].ext}`;
     // Also by name, for a make from before the console was told of these three.

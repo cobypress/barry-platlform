@@ -1,3 +1,4 @@
+import { redactSecrets } from "../privacy/secrets.ts";
 import { isUnavailable } from "../salesforce/client.ts";
 import { daysBefore, monthsBefore, readSoql, soqlDateTime, unavailable, type Extractor, type Sourced, type SourceInfo } from "./types.ts";
 
@@ -198,35 +199,80 @@ export const duplicateRulesExtractor: Extractor<Sourced<Array<{ DeveloperName: s
   run: (ctx) => readSoql(ctx, "SELECT DeveloperName, SobjectType, IsActive FROM DuplicateRule"),
 };
 
+/**
+ * One setup change that isn't user administration, as the trail records it
+ * (DECISIONS.md 461). For the customer's own documents only: no rule reads it.
+ */
+export type SetupAuditChange = {
+  CreatedDate: string;
+  Section: string | null;
+  Action: string | null;
+  /** Salesforce's sentence for the change, redacted as it's read, so a key isn't kept even in the checkpoint. */
+  Display: string | null;
+  CreatedById: string | null;
+  /** CreatedBy.Name: who made it, for a user the run's user list doesn't hold. */
+  CreatedByName: string | null;
+  /** The username someone was logged in as when they made it. */
+  DelegateUser: string | null;
+};
+
 export type SetupAuditSummary = {
   rows: number;
   earliest: string | null;
   bySection: Record<string, number>;
   configChangesByUser: Record<string, number>;
   excludedUserAdmin: number;
+  /** In the order Salesforce gave them, newest first. Missing from a checkpoint made before version 2. */
+  changes: SetupAuditChange[];
 };
 
+type SetupAuditRow = Omit<SetupAuditChange, "CreatedByName"> & { CreatedBy: { Name: string | null } | null };
+
 const USER_ADMIN_SECTION = "Manage Users";
-const AUDIT_DAYS = 180;
+/** How far back the trail is read: Salesforce keeps it for 180 days (DECISIONS.md 421). */
+export const SETUP_AUDIT_DAYS = 180;
 const AUDIT_MAX_ROWS = 2000;
+
+/**
+ * SOQL's date-times have no milliseconds, so the end of a read is the run's
+ * instant rounded up to its second. Rounded down, it would cut a change made
+ * earlier in that second, if Salesforce keeps the milliseconds.
+ */
+const upToItsSecond = (date: Date): Date => new Date(Math.ceil(date.getTime() / 1000) * 1000);
 
 export const setupAuditExtractor: Extractor<Sourced<SetupAuditSummary>> = {
   id: "setup-audit",
-  version: 1,
+  version: 2,
   async run(ctx) {
     // Section can't be filtered in SOQL, so the rows are fetched and split here.
+    // The read stops at the run's own date (DECISIONS.md 463): a resumed run
+    // that reads the trail again mustn't take in changes made since.
     const soql =
-      `SELECT Section, CreatedDate, CreatedById FROM SetupAuditTrail ` +
-      `WHERE CreatedDate >= ${soqlDateTime(daysBefore(ctx.now, AUDIT_DAYS))} ORDER BY CreatedDate DESC`;
-    const rows = await readSoql<{ Section: string | null; CreatedDate: string; CreatedById: string | null }>(ctx, soql, { maxRecords: AUDIT_MAX_ROWS });
+      `SELECT Action, Section, Display, CreatedDate, CreatedById, CreatedBy.Name, DelegateUser FROM SetupAuditTrail ` +
+      `WHERE CreatedDate >= ${soqlDateTime(daysBefore(ctx.now, SETUP_AUDIT_DAYS))} AND CreatedDate <= ${soqlDateTime(upToItsSecond(ctx.now))} ORDER BY CreatedDate DESC`;
+    const rows = await readSoql<SetupAuditRow>(ctx, soql, { maxRecords: AUDIT_MAX_ROWS });
     if (rows.status !== "ok") return rows;
-    const summary: SetupAuditSummary = { rows: rows.data.length, earliest: null, bySection: {}, configChangesByUser: {}, excludedUserAdmin: 0 };
+    const summary: SetupAuditSummary = { rows: rows.data.length, earliest: null, bySection: {}, configChangesByUser: {}, excludedUserAdmin: 0, changes: [] };
     for (const row of rows.data) {
       const section = row.Section ?? "Unknown";
       summary.bySection[section] = (summary.bySection[section] ?? 0) + 1;
       if (!summary.earliest || row.CreatedDate < summary.earliest) summary.earliest = row.CreatedDate;
-      if (section === USER_ADMIN_SECTION) summary.excludedUserAdmin++;
-      else if (row.CreatedById) summary.configChangesByUser[row.CreatedById] = (summary.configChangesByUser[row.CreatedById] ?? 0) + 1;
+      // User administration is mostly about people (password resets, who was
+      // given what), so it's counted and its rows go no further.
+      if (section === USER_ADMIN_SECTION) {
+        summary.excludedUserAdmin++;
+        continue;
+      }
+      if (row.CreatedById) summary.configChangesByUser[row.CreatedById] = (summary.configChangesByUser[row.CreatedById] ?? 0) + 1;
+      summary.changes.push({
+        CreatedDate: row.CreatedDate,
+        Section: row.Section ?? null,
+        Action: row.Action ?? null,
+        Display: row.Display == null ? null : redactSecrets(row.Display),
+        CreatedById: row.CreatedById ?? null,
+        CreatedByName: row.CreatedBy?.Name ?? null,
+        DelegateUser: row.DelegateUser ?? null,
+      });
     }
     return { ...rows, data: summary };
   },

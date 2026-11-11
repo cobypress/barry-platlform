@@ -7,7 +7,7 @@ import { contributeBenchmark, exportBenchmark } from "../../benchmark/export.ts"
 import type { NarrativeClient, NarrativeRequest } from "../../narrative/client.ts";
 import { runFromRecording, tempDir } from "../../testing/harness.ts";
 import { loadAnswers, loadRecording, ReplayTransport, type Recording } from "../../testing/replay.ts";
-import { HANDBOOK_CASE_MARKER, HANDBOOK_CASE_PLANTED, HANDBOOK_MARKER, HANDBOOK_PLANTED } from "../../testing/synthetic-org.ts";
+import { CHANGES_DELEGATE, CHANGES_MARKER, CHANGES_PLANTED, HANDBOOK_CASE_MARKER, HANDBOOK_CASE_PLANTED, HANDBOOK_MARKER, HANDBOOK_PLANTED, USER_ADMIN_MARKER } from "../../testing/synthetic-org.ts";
 import type { RunOutputRecord } from "../../worker/types.ts";
 import { createJobHandler } from "../../worker/worker.ts";
 import { baseDeps, consoleRun, RUN_ID, runInput, syntheticConnection } from "../../worker/__tests__/helpers.ts";
@@ -29,16 +29,24 @@ import type { DocumentKey } from "../../render/render-released.ts";
 // So with Apex (decisions 456 and 457): an object named only in a class's
 // query reaches handbook.json and nowhere else, and a string and a comment
 // from the same class reach nothing at all, the handbook included.
+//
+// And with the recent changes (decision 461): a marker in a setup change's
+// sentence, and the username someone was logged in as, reach handbook.json and
+// nowhere else; a key in the same sentence reaches no file but as [REDACTED];
+// and a user administration change, with its person's email, reaches no file
+// at all, the step's checkpoint included.
 
 const APEX_OBJECT = "Zebra_Ledger__c";
 // Each written as a query, so a reading that let either through would keep it.
 const APEX_LITERAL = "ZebraLiteral0457";
 const APEX_COMMENT = "ZebraComment0457";
 // The Case pair is in a rule on a standard object read for its rules only (decision 460).
+/** The person a planted user administration change names. */
+const USER_ADMIN_EMAIL = "pat.quinn@example.com";
 /** In handbook.json and nowhere else. */
-const ROUTED = [HANDBOOK_MARKER, HANDBOOK_CASE_MARKER, APEX_OBJECT];
+const ROUTED = [HANDBOOK_MARKER, HANDBOOK_CASE_MARKER, APEX_OBJECT, CHANGES_MARKER, CHANGES_DELEGATE];
 /** Nowhere at all. */
-const NOWHERE = [HANDBOOK_PLANTED, HANDBOOK_CASE_PLANTED, APEX_LITERAL, APEX_COMMENT];
+const NOWHERE = [HANDBOOK_PLANTED, HANDBOOK_CASE_PLANTED, APEX_LITERAL, APEX_COMMENT, CHANGES_PLANTED, USER_ADMIN_MARKER, USER_ADMIN_EMAIL];
 
 /** The recorded synthetic org, with one more class whose body holds all three. */
 function plantedRecording(): Recording {
@@ -117,6 +125,9 @@ describe("the handbook's detail goes nowhere but handbook.json", () => {
   test("and the made-up key in the same formula, and the Apex body's string and comment, reach no file at all, checkpoints included", () => {
     const files = filesIn(join(deps.runsDir, RUN_ID));
     assert.ok(files.has(HANDBOOK_FILE) && files.has("checkpoints/apex.json"));
+    // The setup audit step's checkpoint holds the changes it kept, with the key redacted.
+    assert.ok(files.get("checkpoints/setup-audit.json")!.includes(CHANGES_MARKER));
+    assert.ok(files.get(HANDBOOK_FILE)!.includes(`Sync to ${CHANGES_MARKER}\\" api_key = \\"[REDACTED]\\"`));
     assert.deepEqual([...files.keys()].filter((f) => holding(files.get(f)!, NOWHERE).length > 0), []);
   });
 
@@ -155,7 +166,7 @@ describe("the documents job: handbook.json reaches the Word document and nothing
   const CLASS_OBJECT = "Hbdoc_Class_Ledger_0443__c";
   const TRIGGER_OBJECT = "Hbdoc_Trigger_Ledger_0443__c";
   /** In the Word document and nowhere else the make leaves. */
-  const PLANTED = [LITERAL, HANDBOOK_MARKER, HANDBOOK_CASE_MARKER, CLASS_OBJECT, TRIGGER_OBJECT];
+  const PLANTED = [LITERAL, HANDBOOK_MARKER, HANDBOOK_CASE_MARKER, CLASS_OBJECT, TRIGGER_OBJECT, CHANGES_MARKER, CHANGES_DELEGATE];
   const uploads: Array<{ parent: string; name: string; body: Buffer }> = [];
   let deps: ReturnType<typeof baseDeps>;
   let outcome: Awaited<ReturnType<typeof processDocumentsJob>>;
@@ -225,6 +236,10 @@ describe("the documents job: handbook.json reaches the Word document and nothing
     for (const bytes of [readFileSync(join(dir, "documents", HANDBOOK_DOCX)), uploads.find((u) => u.name.endsWith(" - Org handbook.docx"))!.body]) {
       const text = docxText(bytes);
       for (const planted of [`CONTAINS(Notes__c, "${LITERAL}")`, `StageName equals ${LITERAL}`, `Description ${LITERAL}`, `Message ${LITERAL}`, HANDBOOK_MARKER, HANDBOOK_CASE_MARKER]) assert.ok(text.includes(planted), planted);
+      // A recent change's sentence, its key redacted, and who was logged in as the user who made the newest.
+      assert.ok(text.includes(`Sync to ${CHANGES_MARKER}" api_key = "[REDACTED]"`), CHANGES_MARKER);
+      assert.ok(text.includes(`(${CHANGES_DELEGATE} logged in as them)`), CHANGES_DELEGATE);
+      for (const nowhere of [CHANGES_PLANTED, USER_ADMIN_MARKER, USER_ADMIN_EMAIL]) assert.ok(!text.includes(nowhere), nowhere);
       // The path's label, under what starts the flow and on the step it starts at.
       assert.ok(text.includes(`\n'Remind ${LITERAL}': 30 days before CloseDate: step 9, Flag Stale\n`), "the path's label");
       assert.ok(text.includes(`Flag_Stale\nStarts the path 'Remind ${LITERAL}': 30 days before CloseDate\n`), "on its step");
@@ -237,7 +252,7 @@ describe("the documents job: handbook.json reaches the Word document and nothing
   test("no other upload holds it", () => {
     const others = uploads.filter((u) => !u.name.endsWith(" - Org handbook.docx"));
     assert.equal(others.length, 7, "the six documents and the readout kit");
-    for (const u of others) assert.deepEqual(PLANTED.filter((p) => u.body.includes(p)), [], u.name);
+    for (const u of others) assert.deepEqual([...PLANTED, CHANGES_PLANTED, USER_ADMIN_MARKER, USER_ADMIN_EMAIL].filter((p) => u.body.includes(p)), [], u.name);
   });
 
   test("nor the store's record, its warnings, the log or the queue's outcome", () => {

@@ -799,11 +799,43 @@ export const DUPLICATE_RULES = [
   { DeveloperName: "Contact_Rule", SobjectType: "Contact", IsActive: false },
 ];
 
+// Traps for the handbook's recent changes (DECISIONS.md 461), planted in the
+// rows' text so the rule's counts don't move: a marker that must reach
+// handbook.json and its document and no other output, a made-up key beside it
+// that must reach no file but as [REDACTED], and a marker in a user
+// administration row, with a person's name and email, that must reach no file.
+export const CHANGES_MARKER = "HB-MARKER-0461";
+export const CHANGES_PLANTED = "SYNTHETIC-FAKE-0461-NOT-REAL";
+export const USER_ADMIN_MARKER = "HB-USERADMIN-0461";
+/** Someone logged in as the user who made the newest change. */
+export const CHANGES_DELEGATE = "support.desk@example.com";
+
+const userName = (n: number): string => USERS.find((u) => u.n === n)!.name;
+const auditRow = (n: number, Section: string, days: number, Action: string, Display: string, DelegateUser: string | null = null) =>
+  ({ Action, Section, Display, CreatedDate: daysAgo(days), CreatedById: userId(n), CreatedBy: { Name: userName(n) }, DelegateUser });
+const FLOW_CHANGE: Array<[string, (i: number) => string]> = [
+  ["activatedinteractiondefversion", (i) => `Activated flow version #${i + 2} of Lead Router`],
+  ["changedinteractiondef", (i) => `Changed flow Opportunity Stage Review, version #${i + 1}`],
+  ["createdinteractiondefversion", (i) => `Created flow version #${i + 1} of Invoice Reminder`],
+];
+
 export const SETUP_AUDIT = [
-  ...Array.from({ length: 27 }, (_, i) => ({ Section: "Flows", CreatedDate: daysAgo(i * 5 + 1), CreatedById: userId(4) })),
-  ...Array.from({ length: 3 }, (_, i) => ({ Section: "Customize Opportunities", CreatedDate: daysAgo(i * 7 + 2), CreatedById: userId(9) })),
+  ...Array.from({ length: 27 }, (_, i) => {
+    const [action, display] = FLOW_CHANGE[i % 3]!;
+    // Trap: the newest change was made while someone was logged in as Jo.
+    if (i === 0) return auditRow(4, "Flows", 1, action, display(i), CHANGES_DELEGATE);
+    if (i === 1) return auditRow(4, "Flows", 6, action, `Changed flow description to "Sync to ${CHANGES_MARKER}" api_key = "${CHANGES_PLANTED}"`);
+    // Trap: a sentence longer than the handbook keeps (decision 453).
+    if (i === 2) return auditRow(4, "Flows", 11, action, `Changed flow formula to ${"AND(ISCHANGED(StageName), Amount > 0) ".repeat(120).trim()}`);
+    return auditRow(4, "Flows", i * 5 + 1, action, display(i));
+  }),
+  ...Array.from({ length: 3 }, (_, i) => auditRow(9, "Customize Opportunities", i * 7 + 2, "picklistValuesChanged", `Changed picklist values for Opportunity field Stage: added Proposal ${i + 1}`)),
   // Trap: user admin isn't configuration work, and Section can't be filtered in SOQL.
-  ...Array.from({ length: 8 }, (_, i) => ({ Section: "Manage Users", CreatedDate: daysAgo(i * 4 + 1), CreatedById: userId(1) })),
+  ...Array.from({ length: 8 }, (_, i) =>
+    i === 0
+      ? auditRow(1, "Manage Users", 1, "changedemail", `Changed email for user Pat Quinn (pat.quinn@example.com) from pq@example.com to pat.quinn@example.com ${USER_ADMIN_MARKER}`)
+      : auditRow(1, "Manage Users", i * 4 + 1, "resetpassword", `Reset password for user ${String(i).padStart(4, "0")}`),
+  ),
 ];
 
 const loginRows = (user: number, count: number, status = "Success", api: { ApiType: string; Application: string } | null = null) =>
