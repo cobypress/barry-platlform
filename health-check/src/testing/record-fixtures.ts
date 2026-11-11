@@ -5,7 +5,7 @@ import { ALL_MODULES } from "../domains/index.ts";
 import { runHealthCheck } from "../engine/run.ts";
 import { FIXTURE_DIR, loadCalibration, RecordingTransport, syntheticProvider, type Recording } from "./replay.ts";
 import { Simulator } from "./simulator.ts";
-import { AS_OF } from "./synthetic-org.ts";
+import { AS_OF, CONNECTED_USER } from "./synthetic-org.ts";
 
 /**
  * Runs the real engine against the simulator and captures every exchange. Every
@@ -16,7 +16,7 @@ export async function recordFixtures(): Promise<Recording> {
   const out = mkdtempSync(join(tmpdir(), "hc-record-"));
   const transport = new RecordingTransport(new Simulator());
   try {
-    await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: ALL_MODULES, outDir: out, now: new Date(AS_OF), transport });
+    await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: ALL_MODULES, outDir: out, now: new Date(AS_OF), transport, connectedUser: CONNECTED_USER });
   } finally {
     rmSync(out, { recursive: true, force: true });
   }

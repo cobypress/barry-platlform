@@ -17,7 +17,7 @@ import type { Calibration, Finding, Metric, MetricSegment } from "../../schemas/
 import { analyseExtracts, clone, loadExtracts, runFromRecording, tempDir } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration, syntheticProvider } from "../../testing/replay.ts";
 import { Simulator } from "../../testing/simulator.ts";
-import { AS_OF } from "../../testing/synthetic-org.ts";
+import { AS_OF, CONNECTED_USER } from "../../testing/synthetic-org.ts";
 import { SALES_CLOUD_MODULES } from "../index.ts";
 import { modulesFor } from "../scope.ts";
 import { causesOf, DRIVER_GAP, driverMetrics, driverSentence, FACTORS, readDrivers, WIN_DRIVERS, type FactorKey } from "../historic-pipeline/drivers.ts";
@@ -361,7 +361,7 @@ describe("a set-up review", () => {
   test("never computes it: the pipeline area isn't run, and it reads deal records", async () => {
     for (const m of modulesFor("essentials", SALES_CLOUD_MODULES)) assert.ok(!(m.metrics ?? []).includes(driverMetrics), m.id);
     assert.ok(modulesFor("complete", SALES_CLOUD_MODULES).some((m) => (m.metrics ?? []).includes(driverMetrics)));
-    const { output: essentials } = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: new Date(AS_OF), answers: loadAnswers(), scope: "essentials", transport: new Simulator() });
+    const { output: essentials } = await runHealthCheck({ provider: syntheticProvider, connectedUser: CONNECTED_USER, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: new Date(AS_OF), answers: loadAnswers(), scope: "essentials", transport: new Simulator() });
     assert.ok(!essentials!.metrics.some((m) => m.id === WIN_DRIVERS));
     const report = buildReport({ run: { ...run, scope: "essentials" }, calibration, findings: essentials!.findings, metrics: essentials!.metrics, manualSteps: essentials!.manualSteps, intake: null });
     assert.deepEqual(report.causes, []);

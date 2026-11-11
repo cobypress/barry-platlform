@@ -8,7 +8,7 @@ import type { Finding } from "../../schemas/index.ts";
 import { analyseExtracts, clone, loadExtracts, runFromRecording, tempDir } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration, syntheticProvider } from "../../testing/replay.ts";
 import { Simulator } from "../../testing/simulator.ts";
-import { AS_OF } from "../../testing/synthetic-org.ts";
+import { AS_OF, CONNECTED_USER } from "../../testing/synthetic-org.ts";
 
 const { output, dir } = await runFromRecording({ answers: loadAnswers() });
 const extracts = loadExtracts(dir);
@@ -91,7 +91,7 @@ describe("remote sites that allow plain HTTP", () => {
 });
 
 describe("in a set-up review", async () => {
-  const { output: essentials } = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: new Date(AS_OF), answers: loadAnswers(), scope: "essentials", transport: new Simulator() });
+  const { output: essentials } = await runHealthCheck({ provider: syntheticProvider, connectedUser: CONNECTED_USER, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: new Date(AS_OF), answers: loadAnswers(), scope: "essentials", transport: new Simulator() });
 
   test("both rules run and fire, from set-up alone", () => {
     // In the integrations area since roadmap 3.2 (DECISIONS.md 170).

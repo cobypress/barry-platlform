@@ -8,7 +8,7 @@ import type { Finding } from "../../schemas/index.ts";
 import { analyseExtracts, clone, loadExtracts, runFromRecording, tempDir } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration, syntheticProvider } from "../../testing/replay.ts";
 import { Simulator } from "../../testing/simulator.ts";
-import { AS_OF, CASE_QUEUES, sfId, userId, usersTable } from "../../testing/synthetic-org.ts";
+import { AS_OF, CASE_QUEUES, CONNECTED_USER, sfId, userId, usersTable } from "../../testing/synthetic-org.ts";
 import { ALL_MODULES, knownModuleIds, modulesForRun, SALES_CLOUD_MODULES, SERVICE_CLOUD_MODULES } from "../index.ts";
 import { AREA_WEIGHTS } from "../scoring.ts";
 import { recordAreasLine } from "../../narrative/select.ts";
@@ -222,7 +222,7 @@ describe("Service Cloud where a feature is off", () => {
   test("says so, and doesn't score it as a pass", async () => {
     const off = /\bFROM (CaseMilestone|KnowledgeArticleVersion|ServiceChannel|MacroUsage)\b/;
     const transport = new Simulator({ failQuery: (soql) => (off.test(soql) ? { errorCode: "INVALID_TYPE", message: `sObject type '${off.exec(soql)![1]}' is not supported.` } : null) });
-    const { output: out } = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: ALL_MODULES, outDir: tempDir(), now: new Date(AS_OF), answers: loadAnswers(), transport });
+    const { output: out } = await runHealthCheck({ provider: syntheticProvider, connectedUser: CONNECTED_USER, calibration: loadCalibration(), modules: ALL_MODULES, outDir: tempDir(), now: new Date(AS_OF), answers: loadAnswers(), transport });
     const list = out!.findings;
     assert.equal(one(list, "svc.milestone-breaches").status, "not_measurable");
     assert.match(one(list, "svc.milestone-breaches").notMeasurableReason!, /CaseMilestone isn't available.*Entitlement management may not be turned on/);
@@ -233,7 +233,7 @@ describe("Service Cloud where a feature is off", () => {
   });
 
   test("a read-only connection can't read escalation rules, and the entitlement process still counts", async () => {
-    const { output: out } = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: ALL_MODULES, outDir: tempDir(), now: new Date(AS_OF), answers: loadAnswers(), transport: new Simulator({ readOnly: true }) });
+    const { output: out } = await runHealthCheck({ provider: syntheticProvider, connectedUser: CONNECTED_USER, calibration: loadCalibration(), modules: ALL_MODULES, outDir: tempDir(), now: new Date(AS_OF), answers: loadAnswers(), transport: new Simulator({ readOnly: true }) });
     assert.equal(one(out!.findings, "svc.escalation-rules").status, "passed");
     assert.match(one(out!.findings, "svc.escalation-rules").summary, /couldn't be read .*entitlement process/);
     assert.equal(one(out!.findings, "svc.escalation-targets").status, "not_measurable");

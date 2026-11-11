@@ -11,7 +11,7 @@ import type { Finding } from "../../schemas/index.ts";
 import { tempDir } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration, syntheticProvider } from "../../testing/replay.ts";
 import { Simulator, type SimulatorOptions } from "../../testing/simulator.ts";
-import { AS_OF, ORG_ID, USERS } from "../../testing/synthetic-org.ts";
+import { AS_OF, CONNECTED_USER, ORG_ID, USERS } from "../../testing/synthetic-org.ts";
 import { ASSUMPTIONS } from "../assumptions.ts";
 import { answerQuestions, parseQuestions, questionsReport, SECTION_IDS } from "../questions.ts";
 import { runFacts } from "../run-facts.ts";
@@ -22,7 +22,7 @@ import { FactsFile, factsReport } from "../summary.ts";
 const QUESTIONS = readFileSync(join(import.meta.dirname, "..", "..", "..", "docs", "QUESTIONS.md"), "utf8");
 
 async function run(options: SimulatorOptions = {}, scope?: "essentials") {
-  const result = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: ALL_MODULES, outDir: tempDir(), now: new Date(AS_OF), answers: loadAnswers(), transport: new Simulator(options), ...(scope ? { scope } : {}) });
+  const result = await runHealthCheck({ provider: syntheticProvider, connectedUser: CONNECTED_USER, calibration: loadCalibration(), modules: ALL_MODULES, outDir: tempDir(), now: new Date(AS_OF), answers: loadAnswers(), transport: new Simulator(options), ...(scope ? { scope } : {}) });
   const text = readFileSync(join(result.dir, FACTS_FILE), "utf8");
   return { ...result, text, facts: FactsFile.parse(JSON.parse(text)) as Facts };
 }
@@ -199,7 +199,7 @@ describe("hc facts", () => {
 });
 
 test("the Sales Cloud modules alone still check the facts a set-up retrieve gives", async () => {
-  const { dir } = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: new Date(AS_OF), answers: loadAnswers(), transport: new Simulator() });
+  const { dir } = await runHealthCheck({ provider: syntheticProvider, connectedUser: CONNECTED_USER, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: new Date(AS_OF), answers: loadAnswers(), transport: new Simulator() });
   const facts = FactsFile.parse(JSON.parse(readFileSync(join(dir, FACTS_FILE), "utf8")));
   assert.equal(facts.facts.find((f) => f.id === "settings.ai")!.outcome, "confirmed");
   assert.equal(facts.facts.find((f) => f.id === "settings.campaign")!.outcome, "not_checked");

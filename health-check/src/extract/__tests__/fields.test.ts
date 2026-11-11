@@ -9,12 +9,12 @@ import { SalesforceClient } from "../../salesforce/client.ts";
 import { tempDir } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration, syntheticProvider } from "../../testing/replay.ts";
 import { Simulator } from "../../testing/simulator.ts";
-import { AS_OF } from "../../testing/synthetic-org.ts";
+import { AS_OF, CONNECTED_USER } from "../../testing/synthetic-org.ts";
 import { fieldDescribeExtractor, planFields, FIELD_SPECS } from "../fields.ts";
 import type { ExtractContext, Sourced } from "../types.ts";
 
 const run = (sim: Simulator) =>
-  runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: new Date(AS_OF), transport: sim, answers: loadAnswers() });
+  runHealthCheck({ provider: syntheticProvider, connectedUser: CONNECTED_USER, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: new Date(AS_OF), transport: sim, answers: loadAnswers() });
 
 const queries = (sim: Simulator, object: string): string[] =>
   sim.requests.map((r) => new URL(r.url).searchParams.get("q") ?? "").filter((q) => new RegExp(`\\bFROM ${object}\\b`).test(q));

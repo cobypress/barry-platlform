@@ -198,9 +198,14 @@ async function main(argv: string[]): Promise<number> {
     ? new OAuthConnectionProvider(values.connection, { store: connectionStore(), client: optionalClient() })
     : new SfCliConnectionProvider(values.org!);
   const target = values.connection ? `--connection ${values.connection}` : `--org ${values.org}`;
+  // Who connected, for record-type use (DECISIONS.md 498), read here on a resume
+  // too: the user id kept with the token, or the `sf` login's username, which
+  // the step looks the id up from.
+  const connectedUser = values.connection ? { id: (await connectionStore().load(values.connection)).userId } : { username: (await provider.connect()).username };
 
   const { run, dir, output } = await runHealthCheck({
     provider,
+    connectedUser,
     calibration,
     modules: [...SALES_CLOUD_MODULES, ...(values.service ? SERVICE_CLOUD_MODULES : []), ...(values.cpq ? CPQ_MODULES : []), ...(values.pardot ? ACCOUNT_ENGAGEMENT_MODULES : [])],
     outDir: values.out ?? join(homedir(), ".barometer", "runs"),

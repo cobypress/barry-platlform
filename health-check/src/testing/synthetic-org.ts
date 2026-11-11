@@ -1678,6 +1678,14 @@ export const RECORD_TYPE_GROUPS: Record<string, RecordTypeGroup[]> = {
   ],
 };
 
+/**
+ * The user a run connects as (DECISIONS.md 498): made up, and in no list of the
+ * org's users, so a search of a run folder for either finds only a leak.
+ */
+export const CONNECTED_USER = { id: sfId("005", 990_000), username: "barometer.reader@example.com" };
+/** The objects Barometer Read Only gives View All Records on (DECISIONS.md 59). */
+export const READ_ONLY_VIEW_ALL = ["Account", "Campaign", "Case", "Contact", "Lead", "Opportunity"];
+
 /** A deal's record type id, from its type's name. None for a name the list doesn't have, as a bigger org's "Standard". */
 export const recordTypeOfDeal = (o: { RecordType: { DeveloperName: string } }): string | null => RECORD_TYPES.find((t) => t.SobjectType === "Opportunity" && t.DeveloperName === o.RecordType.DeveloperName)?.Id ?? null;
 /** None for every case but the one made after the run's date, which is the only one on Support. */

@@ -81,7 +81,7 @@ function laterOrg(options: { unwindable?: boolean } = {}): { records: OrgRecords
 }
 
 const run = (simulator: SimulatorOptions, overrides: Partial<RunOptions> = {}) =>
-  runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), answers: loadAnswers(), modules: ALL_MODULES, outDir: tempDir(), now: T, transport: new Simulator(simulator), log: () => {}, ...overrides });
+  runHealthCheck({ provider: syntheticProvider, connectedUser: org.CONNECTED_USER, calibration: loadCalibration(), answers: loadAnswers(), modules: ALL_MODULES, outDir: tempDir(), now: T, transport: new Simulator(simulator), log: () => {}, ...overrides });
 
 const checkpoint = <T>(dir: string, id: string): T => readCheckpoint(join(dir, "checkpoints", `${id}.json`)) as T;
 const ok = <T>(s: Sourced<T>): T => (s.status === "ok" ? s.data : assert.fail(`unavailable: ${s.reason}`));
@@ -340,12 +340,12 @@ describe("read late, every figure is what it was at the run's date, but the Comm
 
 describe("a run stopped part-way through the deals and resumed after the org changed", () => {
   const simulatorRun = (records: OrgRecords, outDir: string, used: number, overrides: Partial<RunOptions> = {}, simulator: SimulatorOptions = {}) =>
-    runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir, now: T, transport: new Simulator({ records, used, ...simulator }), pageSize: 50, log: () => {}, ...overrides });
+    runHealthCheck({ provider: syntheticProvider, connectedUser: org.CONNECTED_USER, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir, now: T, transport: new Simulator({ records, used, ...simulator }), pageSize: 50, log: () => {}, ...overrides });
 
   /** A run on the org at its date stopped by the budget just before the request `at` picks out of an uninterrupted run's, as run.test.ts stops one. */
   async function stoppedAt(at: (requests: Simulator["requests"]) => number): Promise<{ out: string; id: string; dir: string }> {
     const probe = new Simulator();
-    await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: T, transport: probe, pageSize: 50 });
+    await runHealthCheck({ provider: syntheticProvider, connectedUser: org.CONNECTED_USER, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: T, transport: probe, pageSize: 50 });
     const billable = probe.requests.slice(0, at(probe.requests)).filter((r) => !r.url.endsWith("/limits") && !r.url.endsWith("/services/data/")).length;
     const out = tempDir();
     const stopped = await simulatorRun(SYNTHETIC_RECORDS, out, 50_000 - billable);
@@ -604,7 +604,7 @@ describe("a run in flight with a deals checkpoint from version 4", () => {
     });
 
     const sim = new Simulator({ records: later.records });
-    const resumed = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), answers: loadAnswers(), modules: ALL_MODULES, outDir: dirname(first.dir), now: new Date(), transport: sim, resume: first.run.id, log: () => {} });
+    const resumed = await runHealthCheck({ provider: syntheticProvider, connectedUser: org.CONNECTED_USER, calibration: loadCalibration(), answers: loadAnswers(), modules: ALL_MODULES, outDir: dirname(first.dir), now: new Date(), transport: sim, resume: first.run.id, log: () => {} });
     assert.ok(sim.requests.some((r) => decodeURIComponent(r.url).includes("FROM Opportunity WHERE (CreatedDate")), "the deals were read again");
     assert.equal(resumed.run.steps.find((s) => s.id === "opportunities")?.version, 5);
 
@@ -764,7 +764,7 @@ describe("the Commit figures read late, after a deal in Commit at the run's date
     writeCheckpoint(join(first.dir, "checkpoints", "forecast.json"), { ...v3, facts: { ...v3.facts, data: ok(v3.facts).map((f) => (f.OpportunityId === later.id ? { ...f, ForecastCategoryName: "Closed" } : f)) } });
 
     const sim = new Simulator({ records: later.records });
-    const resumed = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), answers: loadAnswers(), modules: ALL_MODULES, outDir: dirname(first.dir), now: new Date(), transport: sim, resume: first.run.id, log: () => {} });
+    const resumed = await runHealthCheck({ provider: syntheticProvider, connectedUser: org.CONNECTED_USER, calibration: loadCalibration(), answers: loadAnswers(), modules: ALL_MODULES, outDir: dirname(first.dir), now: new Date(), transport: sim, resume: first.run.id, log: () => {} });
     const queries = sim.requests.map((r) => new URL(r.url).searchParams.get("q") ?? "");
     assert.ok(queries.some((q) => /NextStep != null/.test(q)) && queries.some((q) => CLOSED_SINCE.test(q)), "both were read again");
     assert.ok(queries.some((q) => /FROM ForecastingFact/.test(q)));
@@ -797,7 +797,7 @@ describe("the Commit figures read late, after a deal in Commit at the run's date
     const old = join(first.dir, "checkpoints", "next-steps.partial.jsonl");
     writeFileSync(old, `${v1.map((Id) => JSON.stringify({ Id })).join("\n")}\n`);
 
-    const resumed = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), answers: loadAnswers(), modules: ALL_MODULES, outDir: dirname(first.dir), now: new Date(), transport: new Simulator({ records: later.records }), resume: first.run.id, log: () => {} });
+    const resumed = await runHealthCheck({ provider: syntheticProvider, connectedUser: org.CONNECTED_USER, calibration: loadCalibration(), answers: loadAnswers(), modules: ALL_MODULES, outDir: dirname(first.dir), now: new Date(), transport: new Simulator({ records: later.records }), resume: first.run.id, log: () => {} });
     assert.ok(ok(checkpoint<Sourced<string[]>>(first.dir, "next-steps")).includes(later.id));
     assert.deepEqual(finding(resumed.output!.findings, NEXT_STEPS), finding(first.output!.findings, NEXT_STEPS));
     assert.ok(!existsSync(old));

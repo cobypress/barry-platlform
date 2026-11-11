@@ -13,7 +13,7 @@ import type { Finding } from "../../schemas/index.ts";
 import { analyseExtracts, clone, loadExtracts, runFromRecording, tempDir } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration, syntheticProvider } from "../../testing/replay.ts";
 import { Simulator } from "../../testing/simulator.ts";
-import { AS_OF, userId } from "../../testing/synthetic-org.ts";
+import { AS_OF, CONNECTED_USER, userId } from "../../testing/synthetic-org.ts";
 
 // Marketing Cloud Account Engagement (roadmap Stage 6, DECISIONS.md 261 to 274).
 
@@ -34,7 +34,7 @@ const edited = <T>(id: string, edit: (data: T) => void): Finding[] => {
 };
 const openRows = (l: PardotLeads): SyncedLeadRow[] => (l.open as { data: SyncedLeadRow[] }).data;
 const AE_RULES = ACCOUNT_ENGAGEMENT_MODULES.flatMap((m) => m.rules.map((r) => r.id));
-const live = (transport: Simulator) => runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules, outDir: tempDir(), now: new Date(AS_OF), answers: loadAnswers(), transport });
+const live = (transport: Simulator) => runHealthCheck({ provider: syntheticProvider, connectedUser: CONNECTED_USER, calibration: loadCalibration(), modules, outDir: tempDir(), now: new Date(AS_OF), answers: loadAnswers(), transport });
 
 describe("Account Engagement as a module", () => {
   test("switched on by its own id, which is its one area, and off unless named", () => {

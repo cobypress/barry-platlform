@@ -54,7 +54,7 @@ describe("a full synthetic run's queries", () => {
   let findings: Finding[];
   before(async () => {
     const sim = new Simulator();
-    const run = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), answers: loadAnswers(), modules: ALL_MODULES, outDir: tempDir(), now: new Date(org.AS_OF), transport: sim, log: () => {} });
+    const run = await runHealthCheck({ provider: syntheticProvider, connectedUser: org.CONNECTED_USER, calibration: loadCalibration(), answers: loadAnswers(), modules: ALL_MODULES, outDir: tempDir(), now: new Date(org.AS_OF), transport: sim, log: () => {} });
     ({ dir } = run);
     findings = run.output!.findings;
     queries = queriesOf(sim);

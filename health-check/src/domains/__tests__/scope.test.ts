@@ -10,7 +10,7 @@ import { Run } from "../../schemas/index.ts";
 import { runFromRecording, tempDir } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration, syntheticProvider } from "../../testing/replay.ts";
 import { Simulator } from "../../testing/simulator.ts";
-import { AS_OF } from "../../testing/synthetic-org.ts";
+import { AS_OF, CONNECTED_USER } from "../../testing/synthetic-org.ts";
 import { ALL_MODULES } from "../index.ts";
 import { ESSENTIALS_DOMAINS, modulesFor } from "../scope.ts";
 
@@ -91,7 +91,7 @@ describe("an essentials run", async () => {
       return isCrmObject(object) ? { errorCode: "INSUFFICIENT_ACCESS", message: `A set-up review read ${object}` } : null;
     },
   });
-  const { run, output } = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: ALL_MODULES, outDir: tempDir(), now: new Date(AS_OF), answers: loadAnswers(), scope: "essentials", transport });
+  const { run, output } = await runHealthCheck({ provider: syntheticProvider, connectedUser: CONNECTED_USER, calibration: loadCalibration(), modules: ALL_MODULES, outDir: tempDir(), now: new Date(AS_OF), answers: loadAnswers(), scope: "essentials", transport });
 
   test("never queries an object that holds CRM records", () => {
     assert.ok(objects.size > 10);

@@ -10,7 +10,7 @@ import type { Transport, TransportRequest, TransportResponse } from "../../sales
 import { Run } from "../../schemas/index.ts";
 import { FAKE } from "../../testing/fake-oauth.ts";
 import { loadCalibration } from "../../testing/replay.ts";
-import { AS_OF, ORG_ID } from "../../testing/synthetic-org.ts";
+import { AS_OF, CONNECTED_USER, ORG_ID } from "../../testing/synthetic-org.ts";
 import type { WorkerDeps } from "../deps.ts";
 import { MemoryWorkerStore } from "../memory-store.ts";
 import type { RunJobInput } from "../types.ts";
@@ -33,7 +33,8 @@ export function syntheticConnection(overrides: Partial<StoredConnection> = {}): 
     clientId: FAKE.clientId,
     instanceUrl: "https://synthetic.example.com",
     orgId: ORG_ID,
-    userId: "005000000000001AAA",
+    // The synthetic org's connected user, whose access the recording holds (DECISIONS.md 498).
+    userId: CONNECTED_USER.id,
     scope: ["api", "refresh_token"],
     accessToken: ACCESS,
     refreshToken: REFRESH,

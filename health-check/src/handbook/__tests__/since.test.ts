@@ -12,7 +12,7 @@ import { EARLIER_AS_OF, plantEarlier, REMOVED_FLOW, withEarlier } from "../../te
 import { runFromRecording, tempDir } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration, syntheticProvider } from "../../testing/replay.ts";
 import { Simulator } from "../../testing/simulator.ts";
-import { AS_OF } from "../../testing/synthetic-org.ts";
+import { AS_OF, CONNECTED_USER } from "../../testing/synthetic-org.ts";
 import { BUILD_READING, HANDBOOK_FILE } from "../build.ts";
 import { compareHandbooks, routeOf, type Compared, type KindComparison } from "../compare.ts";
 import { METADATA_READING } from "../detail.ts";
@@ -576,7 +576,7 @@ describe("never guessed", () => {
 describe("the two metadata routes", () => {
   type Built = { dir: string; handbook: Handbook };
   async function built(options: ConstructorParameters<typeof Simulator>[0] = {}): Promise<Built> {
-    const result = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: new Date(AS_OF), transport: new Simulator(options), log: () => {} });
+    const result = await runHealthCheck({ provider: syntheticProvider, connectedUser: CONNECTED_USER, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: new Date(AS_OF), transport: new Simulator(options), log: () => {} });
     return { dir: result.dir, handbook: handbookIn(result.dir) };
   }
   let retrieve: Built;

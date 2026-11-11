@@ -14,7 +14,7 @@ import { docxText } from "../../testing/docx-text.ts";
 import { tempDir, WINDOW } from "../../testing/harness.ts";
 import { loadCalibration, syntheticProvider } from "../../testing/replay.ts";
 import { Simulator, type SimulatorOptions } from "../../testing/simulator.ts";
-import { APEX_CLASSES, APEX_OUTSIDE_MODIFIER, AS_OF, userId } from "../../testing/synthetic-org.ts";
+import { APEX_CLASSES, APEX_OUTSIDE_MODIFIER, AS_OF, CONNECTED_USER, userId } from "../../testing/synthetic-org.ts";
 import { HANDBOOK_FILE } from "../build.ts";
 import { renderHandbookDocx } from "../docx.ts";
 import { Handbook } from "../schema.ts";
@@ -45,7 +45,7 @@ const apexClasses = APEX_CLASSES.map((c) => (c.Name === "FinanceSync" ? { ...c, 
 const OPTIONS_SIM: SimulatorOptions = { setupAudit, apexClasses };
 
 async function simulated(outDir = tempDir(), resume?: string) {
-  return runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir, now: new Date(AS_OF), transport: new Simulator(OPTIONS_SIM), log: () => {}, resume });
+  return runHealthCheck({ provider: syntheticProvider, connectedUser: CONNECTED_USER, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir, now: new Date(AS_OF), transport: new Simulator(OPTIONS_SIM), log: () => {}, resume });
 }
 
 describe("a user the engine has no name for", () => {

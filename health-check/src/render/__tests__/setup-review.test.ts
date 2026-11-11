@@ -9,7 +9,7 @@ import { domainLabel, recordAreasLine } from "../../narrative/select.ts";
 import { tempDir, runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration, syntheticProvider } from "../../testing/replay.ts";
 import { Simulator } from "../../testing/simulator.ts";
-import { AS_OF } from "../../testing/synthetic-org.ts";
+import { AS_OF, CONNECTED_USER } from "../../testing/synthetic-org.ts";
 import { executiveHtml } from "../executive.ts";
 import { DECK_RANGE, deckRangeFor, fullReportHtml, SETUP_REVIEW_DECK_RANGE } from "../full-report.ts";
 import { plainWords } from "../format.ts";
@@ -20,7 +20,7 @@ import { loadRun, renderRun } from "../render-run.ts";
 
 const INTAKE = { customerName: "Synthetic Co", summary: "Synthetic.", statedProblems: [], capturedBy: "Synthetic Consultant", capturedAt: "2026-10-30T09:00:00.000Z" };
 
-const { dir } = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: new Date(AS_OF), answers: loadAnswers(), scope: "essentials", transport: new Simulator() });
+const { dir } = await runHealthCheck({ provider: syntheticProvider, connectedUser: CONNECTED_USER, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: new Date(AS_OF), answers: loadAnswers(), scope: "essentials", transport: new Simulator() });
 writeFileSync(join(dir, "intake.json"), JSON.stringify(INTAKE));
 const { input, pseudonyms } = loadRun(dir);
 const report = buildReport(input);

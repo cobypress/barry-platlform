@@ -5,7 +5,7 @@ import { analyseExtracts, clone, loadExtracts, runFromRecording, tempDir } from 
 import { loadAnswers, loadCalibration, syntheticProvider } from "../../testing/replay.ts";
 import { buildScaleOrg, FIVE_HUNDRED_USERS, scaled } from "../../testing/scale-org.ts";
 import { Simulator } from "../../testing/simulator.ts";
-import { AS_OF } from "../../testing/synthetic-org.ts";
+import { AS_OF, CONNECTED_USER } from "../../testing/synthetic-org.ts";
 import { ALL_MODULES } from "../index.ts";
 
 // Hard rule 5 at scale (docs/overnight/night-3/scale.md): a read that stopped
@@ -36,7 +36,7 @@ function cappedReads(id: string, value: unknown, path: string[] = [], out: Array
 
 const recorded = loadExtracts((await runFromRecording({ answers: loadAnswers(), modules: ALL_MODULES })).dir);
 const generated = loadExtracts(
-  (await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), answers: loadAnswers(), modules: ALL_MODULES, outDir: tempDir(), now: new Date(AS_OF), transport: new Simulator({ records: buildScaleOrg(scaled(FIVE_HUNDRED_USERS, 0.005)), pageSize: 2000 }) })).dir,
+  (await runHealthCheck({ provider: syntheticProvider, connectedUser: CONNECTED_USER, calibration: loadCalibration(), answers: loadAnswers(), modules: ALL_MODULES, outDir: tempDir(), now: new Date(AS_OF), transport: new Simulator({ records: buildScaleOrg(scaled(FIVE_HUNDRED_USERS, 0.005)), pageSize: 2000 }) })).dir,
 );
 
 /** Each check that passes with one capped read marked as cut off, and which read. */

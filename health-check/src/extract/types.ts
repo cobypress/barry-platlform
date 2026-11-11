@@ -37,7 +37,15 @@ export type ExtractContext = {
    * extractor never reads the environment, and the command line never keeps code.
    */
   apexSource?: ApexSourceStore;
+  /**
+   * Who connected, where the caller knows (DECISIONS.md 498): the id kept with
+   * an OAuth token, or the username of an `sf` login. Given afresh on every
+   * start and resume, and never written into the run folder.
+   */
+  connectedUser?: ConnectedUser;
 };
+
+export type ConnectedUser = { id?: string; username?: string };
 
 // One extractor is one step: resumable alone, and one BullMQ job in Milestone 5.
 // Bump `version` when its output changes, so a resumed run doesn't reuse old data.
@@ -109,6 +117,11 @@ export function soqlWindow(field: string, from: Date, now: Date): string {
  */
 export function soqlUpTo(field: string, now: Date): string {
   return `${field} <= ${soqlDateTime(upToItsSecond(now))}`;
+}
+
+/** A SOQL string literal, quotes and all: a backslash or quote in the value can't end it early. */
+export function soqlString(value: string): string {
+  return `'${value.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
 }
 
 export function soqlDate(date: Date): string {
