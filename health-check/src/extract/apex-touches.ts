@@ -1,4 +1,4 @@
-import { closing, codeOnly, DATABASE_DML, DML, withoutInlineQueries } from "./apex-scan.ts";
+import { closing, codeOnly, DATABASE_DML, DATABASE_QUERY_METHOD, DML, withoutInlineQueries } from "./apex-scan.ts";
 
 // What an Apex class or trigger works on, read from its text while the body is
 // in hand (DECISIONS.md 456 and 457). Comments go and every string is blanked
@@ -25,10 +25,9 @@ export type ApexTouches = {
   searches: boolean;
 };
 
-// Every Database method that runs a query string, WithBinds forms included, and
-// a search built at run time. Wider than the scan's DATABASE_QUERY, whose count
-// feeds a rule's figures.
-const RUN_TIME_QUERY = /\b(?:Database\s*\.\s*(?:query|countQuery|getQueryLocator|getCursor)\w*|Search\s*\.\s*query)\s*\(/gi;
+// The scan's Database query methods, and a search built at run time, which the
+// scan's loop count leaves out: a search counts against a different limit.
+const RUN_TIME_QUERY = new RegExp(String.raw`\b(?:${DATABASE_QUERY_METHOD}|Search\s*\.\s*query)\s*\(`, "gi");
 const SEARCH = /\[\s*FIND\b|\bSearch\s*\.\s*(?:query|find)\s*\(/i;
 
 const FROM = /\bFROM\s+([A-Za-z]\w*)/iy;

@@ -136,3 +136,44 @@ describe("secrets", () => {
     assert.equal(count("<recordUpdates><name>A</name><object>Account</object></recordUpdates>"), 0);
   });
 });
+
+describe("character references in a value (DECISIONS.md 471)", () => {
+  // The same text as a validation rule's formula and as a flow's filter value, read back from each.
+  const read = (text: string): [string | null, string | null] => {
+    const { handbook } = parseMetadataBundle({
+      "objects/A__c.object": `<CustomObject><validationRules><fullName>R</fullName><active>true</active><errorConditionFormula>${text}</errorConditionFormula></validationRules></CustomObject>`,
+      "flows/F.flow": `<Flow><label>F</label><status>Active</status><start><object>A__c</object><filters><field>Name</field><operator>EqualTo</operator><value><stringValue>${text}</stringValue></value></filters></start></Flow>`,
+    });
+    return [handbook!.validationRules[0]!.formula, handbook!.flows[0]!.start.entry.conditions[0]!.value];
+  };
+  const both = (text: string, expected: string, message?: string) => assert.deepEqual(read(text), [expected, expected], message ?? text);
+
+  test("numeric references decode, in decimal and in hex, and the five named entities as before", () => {
+    both("a&#34;b&#x22;c&#39;d&#x27;e&#38;f&#60;g&#62;h", `a"b"c'd'e&f<g>h`);
+    both("a&quot;b&apos;c&amp;d&lt;e&gt;f", `a"b'c&d<e>f`);
+    both("&#X22;", "&#X22;", "XML writes a hex reference with a small x");
+    both("<![CDATA[&#34;&quot;]]>", "&#34;&quot;", "nothing in a CDATA section is a reference");
+  });
+
+  test("each is decoded exactly once, so an escaped ampersand stays an ampersand", () => {
+    both("&amp;#34;", "&#34;");
+    both("&amp;quot;", "&quot;");
+    both("&amp;amp;", "&amp;");
+    both("&#38;quot;", "&quot;");
+    both("&#38;#34;", "&#34;");
+    both("&#x26;#x22;", "&#x22;");
+  });
+
+  test("a reference beyond the basic plane decodes, and one that isn't a character stays as text, without throwing or making a NUL", () => {
+    both("&#x1F600;&#128512;", "😀😀");
+    for (const text of ["&#0;", "&#x0;", "&#xFFFFFFFF;", "&#99999999999999999999;", "&#xD800;", "&#1;", "&#;", "&#x;", "&#x22", "&# 34;"]) {
+      const out = read(`a${text}b`);
+      assert.deepEqual(out, [`a${text}b`, `a${text}b`], text);
+      assert.ok(!out.some((v) => v!.includes("\u0000")), text);
+    }
+  });
+
+  test("HTML's names aren't XML's, so they stay as text", () => {
+    both("&nbsp;&copy;&eacute;&euro;", "&nbsp;&copy;&eacute;&euro;");
+  });
+});

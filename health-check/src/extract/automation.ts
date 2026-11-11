@@ -53,7 +53,8 @@ export const metadataExtractor: Extractor<Sourced<MetadataBundle>> = {
   id: "metadata",
   // 8: each flow keeps every way it starts (DECISIONS.md 446).
   // 9: validation rules on the further standard objects the org has (DECISIONS.md 460).
-  version: 9,
+  // 10: numeric character references decoded, as the named entities are (DECISIONS.md 471).
+  version: 10,
   partialKeys: [...TOOLING_PARTIAL_KEYS, FALLBACK_PARTIAL],
   async run(ctx) {
     const further = furtherObjects(ctx.get(recordCountsExtractor));
@@ -141,7 +142,8 @@ function stripBodies<R extends { Name: string; Body?: string }>(rows: Sourced<R[
 
 export const apexExtractor: Extractor<ApexData> = {
   id: "apex",
-  version: 8,
+  // 9: queries in loops count the WithBinds forms and cursors (DECISIONS.md 470).
+  version: 9,
   async run(ctx) {
     const references: ReferenceIndex = { users: {}, fields: {} };
     // Through REST, not Tooling: a user with View Setup but not Author Apex gets
