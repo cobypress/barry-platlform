@@ -21,8 +21,9 @@ export const tokenSource = (kinds = "[a-z]+", letter?: string): string => String
 
 /**
  * The name the engine labels a user id with when it has none. It's a word for
- * "no name", not a name: the handbook prints it as a user we couldn't look up
- * (decision 474). Pseudonym maps already saved hold it, so it never changes.
+ * "no name", not a name, so it isn't printed as one where a sentence says we
+ * couldn't look them up (decision 474). Pseudonym maps already saved hold it,
+ * so it never changes.
  */
 export const UNKNOWN_USER = "Unknown user";
 
