@@ -1572,7 +1572,10 @@ export const CPQ_DESCRIBES: Record<string, { fields: unknown[] }> = {
 // A primary quote on each closed deal with an amount. Trap: user 1 discounts
 // about 30% where their team-mate gives about 9%, and wins less often.
 // Most of user 1's deep discounts had no approval, and one won quote in seven
-// was never ordered.
+// was never ordered. A quote is made ten days before its deal's close date, or
+// the day before the org's date if that's later: a few closed deals have a
+// close date still to come, and no quote can have been made after the date
+// the org is read as of (DECISIONS.md 480).
 export const CPQ_QUOTES = pipeline.opportunities
   .filter((o) => o.IsClosed && o.Amount !== null && o.Amount > 0)
   .map((o, i) => {
@@ -1586,7 +1589,7 @@ export const CPQ_QUOTES = pipeline.opportunities
       SBQQ__ListAmount__c: Math.round((o.Amount! / (1 - discount / 100)) * 100) / 100,
       SBQQ__NetAmount__c: o.Amount,
       SBQQ__Ordered__c: o.IsWon && i % 7 !== 3,
-      CreatedDate: new Date(Date.parse(`${o.CloseDate}T12:00:00Z`) - 10 * DAY).toISOString().replace("Z", "+0000"),
+      CreatedDate: new Date(Math.min(Date.parse(`${o.CloseDate}T12:00:00Z`) - 10 * DAY, asOf - DAY)).toISOString().replace("Z", "+0000"),
     };
   });
 export const CPQ_APPROVALS = CPQ_QUOTES.filter((q, i) => q.OwnerId === userId(1) && i % 4 === 0).map((q, i) => ({ Id: sfId("04g", i + 1), TargetObjectId: q.Id, Status: "Approved", CreatedDate: q.CreatedDate }));
