@@ -37,6 +37,15 @@ export type RunBudget = z.infer<typeof RunBudget>;
 export const RunScope = z.enum(["complete", "essentials"]);
 export type RunScope = z.infer<typeof RunScope>;
 
+/**
+ * The wider metadata retrieve failed and the four standard objects were read
+ * instead (DECISIONS.md 460): the objects it also named, and Salesforce's
+ * reason. Object API names and an error, never a record, so the raw notes can
+ * say so (DECISIONS.md 425).
+ */
+export const RetrieveFallback = z.object({ named: z.array(z.string()), reason: z.string() });
+export type RetrieveFallback = z.infer<typeof RetrieveFallback>;
+
 export const Run = z.object({
   id: z.string().min(1),
   // A scan is the free set-up teaser (roadmap Stage 5): never reviewed, released or made into documents.
@@ -62,5 +71,7 @@ export const Run = z.object({
   createdBy: z.string().min(1),
   startedAt: Timestamp,
   finishedAt: Timestamp.nullable(),
+  // Absent when the wider retrieve worked, or wasn't tried.
+  retrieveFallback: RetrieveFallback.optional(),
 });
 export type Run = z.infer<typeof Run>;

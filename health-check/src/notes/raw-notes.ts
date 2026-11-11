@@ -3,6 +3,7 @@ import { factsText, type FactsSummary } from "../facts/summary.ts";
 import type { Calibration, Evidence, Finding, ManualStep, Metric, Run, Score } from "../schemas/index.ts";
 import { domainLabel } from "../narrative/select.ts";
 import { automationOf, INVENTORY_COLUMNS, inventoryRows, OBJECT_INVENTORY } from "../domains/configuration/inventory.ts";
+import { RETRIEVED_STANDARD_OBJECTS } from "../extract/automation.ts";
 
 // The Markdown forerunner of the Word raw notes. This is the one place tokens
 // become names, because this document is what the customer's admin reads.
@@ -76,24 +77,51 @@ export function inventoryLine(m: Metric | undefined): string | null {
   return `Object inventory: ${m.value} objects counted, carrying ${m.stats.automation} rules, flows and triggers, of which ${m.stats.undocumented} have no description.${top}`;
 }
 
+const listed = (items: readonly string[]): string => (items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`);
+
+/**
+ * When the wider retrieve failed and only the four standard objects were read
+ * (DECISIONS.md 425): which objects' rules weren't read, and Salesforce's reason.
+ * Null when there was no fallback, so those notes print as they always have.
+ * This markdown stays in the run folder; the Word version goes to the customer
+ * and uses retrieveFallbackForCustomer, which leaves the reason out.
+ */
+export function retrieveFallbackLine(run: Pick<Run, "retrieveFallback">): string | null {
+  const fallback = run.retrieveFallback;
+  if (!fallback) return null;
+  return `Validation rules on ${listed(fallback.named)} weren't read: the wider retrieve failed (${fallback.reason}), so the engine read the four standard objects it always names, ${listed(RETRIEVED_STANDARD_OBJECTS)}.`;
+}
+
+/**
+ * The same fact for the Word raw notes, which go to the customer's folder: what
+ * wasn't covered, without Salesforce's error text, which is unreviewed and of no
+ * use to them (DECISIONS.md 425). Null when there was no fallback.
+ */
+export function retrieveFallbackForCustomer(run: Pick<Run, "retrieveFallback">): string | null {
+  const fallback = run.retrieveFallback;
+  if (!fallback) return null;
+  return `We didn't read the validation rules on ${listed(fallback.named)}: Salesforce refused the wider read, so the validation rules we checked are those on your custom objects and ${listed(RETRIEVED_STANDARD_OBJECTS)}.`;
+}
+
 function metricBlock(m: Metric): string {
   if (m.status === "not_measurable") {
     return [`### ${m.label}`, "", `**Not measurable.** ${m.reason}`, "", `*Definition:* ${m.definition}`, ""].join("\n");
   }
   const unit = m.unit === "percent" ? "%" : m.unit === "days" ? " days" : "";
-  const sample = m.id === OBJECT_INVENTORY ? `${m.n} objects` : `${m.n} deals`;
+  // A measure doesn't say what its sample counts, so only the inventory names it (DECISIONS.md 449).
+  const sample = m.id === OBJECT_INVENTORY ? `${m.n} objects` : `${m.n}`;
   const lines = [`### ${m.label}: ${m.value}${unit}`, "", `*Definition:* ${m.definition}`, "", `**Sample:** ${sample}${m.dateRange ? `, ${m.dateRange.from} to ${m.dateRange.to}` : ""}`, ""];
   if (Object.keys(m.stats).length) lines.push(`**Detail:** ${Object.entries(m.stats).map(([k, v]) => `${k} ${v}`).join(", ")}`, "");
   if (m.exclusions.length) lines.push(`**Excludes:** ${m.exclusions.join("; ")}`, "");
   if (m.assumptions.length) lines.push(`**Assumptions:** ${m.assumptions.join("; ")}`, "");
   if (m.id === OBJECT_INVENTORY) lines.push(...inventoryTable(m));
   else if (m.segments.length) {
-    lines.push("| Segment | Key | Deals | Value |", "| --- | --- | --- | --- |");
+    lines.push("| Segment | Key | Sample | Value |", "| --- | --- | --- | --- |");
     for (const s of m.segments) lines.push(`| ${s.dimension} | ${s.key} | ${s.n} | ${s.value ?? s.notMeasurableReason ?? "not measurable"} |`);
     lines.push("");
   }
   if (m.series.length) {
-    lines.push("| Month end | Value | Deals |", "| --- | --- | --- |");
+    lines.push("| Month end | Value | Sample |", "| --- | --- | --- |");
     for (const p of m.series) lines.push(`| ${p.date} | ${p.value ?? p.notMeasurableReason} | ${p.n} |`);
     lines.push("");
   }
@@ -164,6 +192,7 @@ export function renderRawNotes(input: { run: Run; calibration: Calibration; find
     "",
     "We report these rather than estimate them.",
     "",
+    ...[retrieveFallbackLine(run)].flatMap((line) => (line ? [line, ""] : [])),
     ...(notMeasurable.length ? notMeasurable.map(findingBlock) : ["Nothing.", ""]),
     "## Checks passed",
     "",

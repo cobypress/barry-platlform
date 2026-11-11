@@ -1,7 +1,8 @@
 import { money } from "../../render/format.ts";
 import { fieldDescribeExtractor } from "../../extract/fields.ts";
 import { apexExtractor, metadataExtractor, scheduledJobsExtractor } from "../../extract/automation.ts";
-import { orgExtractor, recordCountsExtractor } from "../../extract/configuration.ts";
+import { orgExtractor, recordCountsExtractor, schemaExtractor } from "../../extract/configuration.ts";
+import { opportunitiesExtractor } from "../../extract/opportunities.ts";
 import { daysBefore } from "../../extract/types.ts";
 import {
   activityCaptureExtractor,
@@ -542,10 +543,14 @@ export const utilisationModule: DomainModule = {
   id: "utilisation",
   cloud: "sales",
   label: "Utilisation",
+  // The investment metrics gate on the opportunities read (DECISIONS.md 37), which
+  // plans its SELECT from the schema, so both are listed and this module runs alone.
   extractors: [
     labelsExtractor,
     usersExtractor,
     licencesExtractor,
+    schemaExtractor,
+    opportunitiesExtractor,
     fieldDescribeExtractor,
     loginsExtractor,
     recordCountsExtractor,
