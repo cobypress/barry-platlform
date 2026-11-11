@@ -11,6 +11,7 @@ import { runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
 import { plainWords, ukDates } from "../format.ts";
 import { renderRawNotesDocx } from "../raw-notes-docx.ts";
+import { renderRawNotes } from "../../notes/raw-notes.ts";
 
 const { output, run, dir } = await runFromRecording({ answers: loadAnswers() });
 const pseudonyms = new Pseudonymiser(JSON.parse(readFileSync(join(dir, "pseudonym-map.json"), "utf8")) as PseudonymEntry[]);
@@ -183,5 +184,36 @@ describe("how you compare, in the full report", async () => {
     const html = fullReportHtml(report, pseudonyms);
     assert.match(html, /<h2>How you compare<\/h2>/);
     assert.match(html, /<li>How you compare<span class="pg" data-ref data-goto="\d+">\d+<\/span><\/li>/);
+  });
+});
+
+// The wider retrieve failed and only the four standard objects were read (DECISIONS.md 425).
+describe("a retrieve that fell back to the four standard objects, in the raw notes", () => {
+  const fellBack: ReportInput = { ...base, run: { ...run, retrieveFallback: { named: ["Case", "Quote"], reason: "X" } } };
+  const SAID = /Validation rules on Case and Quote weren't read: the wider retrieve failed \(X\), so the engine read the four standard objects it always names, Account, Contact, Lead and Opportunity\./;
+  const markdown = (input: ReportInput): string => renderRawNotes({ ...input, pseudonyms });
+
+  test("names the objects and Salesforce's reason in the markdown, under what we couldn't measure", () => {
+    const notes = markdown(fellBack);
+    assert.match(notes, SAID);
+    const at = notes.search(SAID);
+    assert.ok(notes.lastIndexOf("## Not measurable", at) > notes.lastIndexOf("## Pipeline metrics", at), "in the not measurable section");
+    assert.ok(notes.indexOf("## Checks passed") > at, "before the checks passed");
+  });
+
+  test("and in the Word version, with the exclusions and limits", async () => {
+    const { text } = await render(fellBack);
+    assert.match(text, /Case and Quote weren't read/);
+    assert.match(text, /\(X\)/);
+    // The section titles are in the contents first, so it's their last place that counts.
+    const at = text.search(/Case and Quote weren't read/);
+    assert.ok(text.lastIndexOf("Exclusions and limits", at) > text.lastIndexOf("Queries", at), "in the exclusions and limits");
+    assert.ok(text.indexOf("Overrides", at) > at, "before the overrides");
+  });
+
+  test("a run with no fallback says nothing of it, in either", async () => {
+    assert.equal(run.retrieveFallback, undefined);
+    assert.doesNotMatch(markdown(base), /wider retrieve/);
+    assert.doesNotMatch(notes.text, /wider retrieve/);
   });
 });

@@ -5,7 +5,7 @@ import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { canRelease, type Calibration, type Evidence, type Finding, type ManualStep, type Metric, type NumberOverride } from "../schemas/index.ts";
 import { longDate, money, plainWords, ukDates } from "./format.ts";
 import { INVENTORY_COLUMNS, inventoryRows, OBJECT_INVENTORY } from "../domains/configuration/inventory.ts";
-import { inventoryLine } from "../notes/raw-notes.ts";
+import { inventoryLine, retrieveFallbackLine } from "../notes/raw-notes.ts";
 import { noteSections, rawNotesOrder, valueItemId } from "./references.ts";
 import { KIND_LABELS, type ValueGroup } from "../value/model.ts";
 import { comparisonId, comparisonNotes, formatFigure, type Comparison } from "../benchmark/compare.ts";
@@ -315,6 +315,11 @@ export function buildRawNotes(report: BuiltReport, pseudonyms: Pseudonymiser): N
     if (s.key === "comparisons") report.comparisons.forEach((c) => addComparison(notes, c, ref(comparisonId(c.metric.key))));
     if (s.key === "queries") addQueries(notes, findings, metrics);
     if (s.key === "overrides") addOverrides(notes, overrides);
+    // Beside what we couldn't measure: whose rules the fallback left unread (DECISIONS.md 425).
+    if (s.key === "exclusions_limits") {
+      const fallback = retrieveFallbackLine(run);
+      if (fallback) notes.para(fallback);
+    }
   }
   return notes;
 }

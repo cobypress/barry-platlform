@@ -3,6 +3,7 @@ import { factsText, type FactsSummary } from "../facts/summary.ts";
 import type { Calibration, Evidence, Finding, ManualStep, Metric, Run, Score } from "../schemas/index.ts";
 import { domainLabel } from "../narrative/select.ts";
 import { automationOf, INVENTORY_COLUMNS, inventoryRows, OBJECT_INVENTORY } from "../domains/configuration/inventory.ts";
+import { RETRIEVED_STANDARD_OBJECTS } from "../extract/automation.ts";
 
 // The Markdown forerunner of the Word raw notes. This is the one place tokens
 // become names, because this document is what the customer's admin reads.
@@ -74,6 +75,19 @@ export function inventoryLine(m: Metric | undefined): string | null {
   const [busiest] = inventoryRows(m);
   const top = busiest && automationOf(busiest) > 0 ? ` The busiest is ${busiest.object}, with ${automationOf(busiest)} rules, flows and triggers.` : "";
   return `Object inventory: ${m.value} objects counted, carrying ${m.stats.automation} rules, flows and triggers, of which ${m.stats.undocumented} have no description.${top}`;
+}
+
+const listed = (items: readonly string[]): string => (items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`);
+
+/**
+ * When the wider retrieve failed and only the four standard objects were read
+ * (DECISIONS.md 425): which objects' rules weren't read, and Salesforce's reason.
+ * Null when there was no fallback, so those notes print as they always have.
+ */
+export function retrieveFallbackLine(run: Pick<Run, "retrieveFallback">): string | null {
+  const fallback = run.retrieveFallback;
+  if (!fallback) return null;
+  return `Validation rules on ${listed(fallback.named)} weren't read: the wider retrieve failed (${fallback.reason}), so the engine read the four standard objects it always names, ${listed(RETRIEVED_STANDARD_OBJECTS)}.`;
 }
 
 function metricBlock(m: Metric): string {
@@ -165,6 +179,7 @@ export function renderRawNotes(input: { run: Run; calibration: Calibration; find
     "",
     "We report these rather than estimate them.",
     "",
+    ...[retrieveFallbackLine(run)].flatMap((line) => (line ? [line, ""] : [])),
     ...(notMeasurable.length ? notMeasurable.map(findingBlock) : ["Nothing.", ""]),
     "## Checks passed",
     "",
