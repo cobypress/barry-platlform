@@ -196,6 +196,7 @@ describe("the opportunities read on an org changed since the run's date (DECISIO
 const NEXT_STEPS = "cur.missing-next-steps";
 const COMMIT_SHARES = ["fct.commit-at-risk", "fct.early-stage-commits"];
 const AGAINST_QUOTA = "forecast.commit_against_quota";
+const QUOTA_HOLDERS = new Set(org.QUOTAS.filter((q) => q.ForecastingTypeId === org.sfId("0Db", 1)).map((q) => q.QuotaOwnerId));
 const finding = (findings: Finding[], ruleId: string) => findings.filter((f) => f.ruleId === ruleId);
 const metric = (metrics: Metric[], id: string) => metrics.filter((m) => m.id === id);
 const listed = (dir: string, ruleId: string): string[] =>
@@ -289,21 +290,21 @@ describe("read late, every figure is what it was at the run's date, but the Comm
     assert.ok(!now.summary.includes("closed since"));
   });
 
-  test("the Commit figures leave out the two deals open at the run's date and won since, and say so, where the org's facts have moved them", () => {
+  test("the org's forecast facts follow it: the deal in Commit at the run's date and won since is Closed now, so without the list it would fall out of Commit", () => {
     const { wonSince, wonNoStep } = later.planted;
-    // The org is truthful: the deal in Commit at the run's date is Closed now, so without the list it would fall out of Commit.
     assert.deepEqual([factsOf(atT.dir).get(wonSince), factsOf(late.dir).get(wonSince)], ["Commit", "Closed"]);
-    // Both owned by quota holders.
-    leavesOut(late, atT, [wonSince, wonNoStep], 2);
+    assert.deepEqual([wonSince, wonNoStep].map((id) => QUOTA_HOLDERS.has(later.records.pipeline.opportunities.find((o) => o.Id === id)!.OwnerId)), [true, true]);
   });
 
-  test("and every other finding and metric on this org is what it was", () => {
+  test("and every other finding and metric on this org is what it was, the Commit figures leaving out the two deals won since and saying so", () => {
     const others = (findings: Finding[]) => findings.filter((f) => !COMMIT_SHARES.includes(f.ruleId));
     assert.deepEqual(others(late.findings), others(atT.findings));
     assert.equal(late.findings.length, atT.findings.length);
     const otherMetrics = (metrics: Metric[]) => metrics.filter((m) => m.id !== AGAINST_QUOTA);
     assert.deepEqual(otherMetrics(late.metrics), otherMetrics(atT.metrics));
     assert.equal(late.metrics.length, atT.metrics.length);
+    // Both owned by quota holders.
+    leavesOut(late, atT, [later.planted.wonSince, later.planted.wonNoStep], 2);
   });
 
   test("they would move, read late, without the wind-back or the end: the planted changes reach these figures", () => {
@@ -558,7 +559,6 @@ describe("a run in flight with a deals checkpoint from version 4", () => {
 // and won since has the category Closed when they're read late. The deals read
 // winds it back to open, so it would fall out of won and Commit both
 // (DECISIONS.md 466). Each org here has that one change and nothing else.
-const QUOTA_HOLDERS = new Set(org.QUOTAS.filter((q) => q.ForecastingTypeId === org.sfId("0Db", 1)).map((q) => q.QuotaOwnerId));
 const CLOSED_SINCE = /^SELECT Id FROM Opportunity WHERE IsClosed = true AND LastModifiedDate >= /;
 
 /** The synthetic org a day after its date, with one deal in Commit at it, whose last history row matches it, won since. */
