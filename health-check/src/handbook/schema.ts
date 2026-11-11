@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { CHANGES, MAX_QUERIED_OBJECTS } from "../extract/apex-touches.ts";
+import { tokenSource } from "../privacy/pseudonymiser.ts";
 
 // The org handbook's data (DECISIONS.md 451 to 457): what each flow, validation
 // rule, Apex class and trigger does, written to handbook.json in the run folder.
@@ -193,7 +194,7 @@ const capped = <T extends z.ZodType>(item: T, max: number) =>
   z.discriminatedUnion("status", [z.strictObject({ status: z.literal("ok"), items: z.array(item).max(max), total: Count, cut: z.boolean() }), Unavailable]);
 
 /** A pseudonymiser's token for a user: a name only when the Word document is made (decision 421). */
-export const UserToken = z.string().regex(/^\[\[user:U\d{4,}\]\]$/);
+export const UserToken = z.string().regex(new RegExp(`^${tokenSource("user", "U")}$`));
 
 /** One setup change, as the Setup Audit Trail records it (decision 461). */
 export const HandbookChange = z.strictObject({

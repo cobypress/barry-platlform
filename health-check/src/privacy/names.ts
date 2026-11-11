@@ -1,4 +1,4 @@
-import type { PseudonymEntry, Pseudonymiser } from "./pseudonymiser.ts";
+import { tokenCode, type PseudonymEntry, type Pseudonymiser } from "./pseudonymiser.ts";
 
 // Rule 7, for free text. scrub() replaces whole names, usernames, emails and
 // ids. People write "Sam said the forecast is a guess", so this replaces the
@@ -98,7 +98,7 @@ export const isStrictWord = (key: string): boolean => key.length <= 2 || COMMON_
 
 const WORD = /\p{L}+(?:['-]\p{L}+)*/gu;
 const NAME_WORD = /[\p{L}\p{M}]+(?:['’ʼ‐‑-][\p{L}\p{M}]+)*/gu;
-const TOKEN = /\[\[[a-z]+(?::[A-Z]\d{4})?\]\]/g;
+const TOKEN = new RegExp(String.raw`\[\[[a-z]+(?::${tokenCode()})?\]\]`, "g");
 const capitalised = (word: string): boolean => /^\p{Lu}/u.test(word);
 
 // ---------------------------------------------------------------------------
