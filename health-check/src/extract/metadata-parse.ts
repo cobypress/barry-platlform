@@ -90,7 +90,27 @@ export type MetadataBundle = {
 
 // Arrays are forced so one child element parses the same as many.
 const ARRAY_TAGS = new Set(["rules", "actions", "workflowTimeTriggers", "validationRules", "fields", "recordCreates", "recordUpdates", "recordDeletes", "actionCalls", "loops", "recordTypes"]);
-const parser = new XMLParser({ ignoreAttributes: true, parseTagValue: false, isArray: (name) => ARRAY_TAGS.has(name) });
+
+// The parser's own decoder takes the five named entities and leaves a numeric
+// reference such as &#34; as text, which would hide a quoted value from the
+// handbook's redaction and from a formula's references (DECISIONS.md 471). This
+// takes both in one pass, so each is decoded exactly once: &amp;#34; is the text
+// &#34;, never a quote. HTML's names, such as &nbsp;, aren't XML's and stay as
+// text, as does a reference to anything that isn't an XML character, such as
+// &#0;. The parser hands it text outside CDATA only, as XML reads references.
+// Entities a document declares for itself aren't taken: metadata declares none.
+const NAMED: Record<string, string> = { lt: "<", gt: ">", amp: "&", quot: '"', apos: "'" };
+const REFERENCE = /&(?:#(\d+)|#x([\dA-Fa-f]+)|(lt|gt|amp|quot|apos));/g;
+const xmlCharacter = (n: number): boolean => n === 0x9 || n === 0xa || n === 0xd || (n >= 0x20 && n <= 0xd7ff) || (n >= 0xe000 && n <= 0xfffd) || (n >= 0x10000 && n <= 0x10ffff);
+function decodeReferences(text: string): string {
+  return text.replace(REFERENCE, (reference, decimal: string | undefined, hex: string | undefined, name: string | undefined) => {
+    if (name) return NAMED[name]!;
+    const code = decimal === undefined ? parseInt(hex!, 16) : Number(decimal);
+    return xmlCharacter(code) ? String.fromCodePoint(code) : reference;
+  });
+}
+const entityDecoder = { decode: decodeReferences, reset() {}, setXmlVersion() {}, setExternalEntities() {}, addInputEntities() {} };
+const parser = new XMLParser({ ignoreAttributes: true, parseTagValue: false, isArray: (name) => ARRAY_TAGS.has(name), entityDecoder });
 
 const USER_ID = /\b005[A-Za-z0-9]{12}(?:[A-Za-z0-9]{3})?\b/g;
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+/g;

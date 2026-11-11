@@ -53,7 +53,8 @@ export const metadataExtractor: Extractor<Sourced<MetadataBundle>> = {
   id: "metadata",
   // 8: each flow keeps every way it starts (DECISIONS.md 446).
   // 9: validation rules on the further standard objects the org has (DECISIONS.md 460).
-  version: 9,
+  // 10: numeric character references decoded, as the named entities are (DECISIONS.md 471).
+  version: 10,
   partialKeys: [...TOOLING_PARTIAL_KEYS, FALLBACK_PARTIAL],
   async run(ctx) {
     const further = furtherObjects(ctx.get(recordCountsExtractor));
