@@ -19,7 +19,7 @@ import { scoreDomains } from "../../domains/scoring.ts";
 import { syntheticInterviews } from "../../testing/interviews.ts";
 import { compactMoney, plainWords, ukDates } from "../format.ts";
 import { yearlyByFinding } from "../../value/model.ts";
-import { DECK_RANGE, fullReportHtml, fullReportHtmlAt, INVENTORY_SLIDE_ROWS, slideCounts } from "../full-report.ts";
+import { DECK_RANGE, deckRangeFor, fullReportHtml, fullReportHtmlAt, INVENTORY_SLIDE_ROWS, slideCounts } from "../full-report.ts";
 import { INVENTORY_COLUMNS, OBJECT_INVENTORY } from "../../domains/configuration/inventory.ts";
 import { document } from "../html.ts";
 import { layoutOf, launchBrowser, pdfPageCount, renderPdf } from "../pdf.ts";
@@ -384,6 +384,60 @@ describe("a re-check with an intake and interviews (DECISIONS.md 418)", () => {
     const deck = await renderPdf(browser, fullReportHtml(report, pseudonyms), { ...deckRange, dataset: report.dataset });
     assert.deepEqual(deck.layout.problems, [], describeProblems(deck.layout.problems));
   });
+});
+
+describe("the progress page at its fullest (DECISIONS.md 501)", () => {
+  // The longest titles the synthetic run has, six in each of the three lists the
+  // page names (each longer than it names), one rule that can't be told, area
+  // scores that move, and both storage sentences at their longest: six-digit
+  // figures, allowances that differ between the runs, a rise with an average.
+  const STORAGE = "tech.storage-use";
+  const longest = [...new Map(output!.findings.filter((f) => f.status === "issue" && f.ruleId !== STORAGE).map((f) => [f.ruleId, f])).values()].sort((a, b) => b.title.length - a.title.length);
+  const fixed = new Set(longest.filter((_, i) => i % 3 === 0).slice(0, 6).map((f) => f.ruleId));
+  const added = new Set(longest.filter((_, i) => i % 3 === 1).slice(0, 6).map((f) => f.ruleId));
+  const unknown = longest.filter((_, i) => i % 3 === 2)[6]!.ruleId;
+  // Issues first, longest title first, so the titles the page names are the longest.
+  const ordered = (findings: Finding[]): Finding[] => [...findings].sort((a, b) => (b.status === "issue" ? b.title.length : 0) - (a.status === "issue" ? a.title.length : 0));
+  const passed = (f: Finding): Finding => ({ ...f, status: "passed", value: { kind: "not_sized", reason: "Passed." } });
+  const limitsAt = (iso: string, extra: Partial<typeof run> = {}) => ({ ...run, ...extra, steps: run.steps.map((s) => (s.id === "api-limits" ? { ...s, finishedAt: iso } : s)) });
+  const storage = (then: Record<string, number>, now: Record<string, number>): BuiltReport => {
+    const input: ReportInput = { ...full, interviews: syntheticInterviews() };
+    const before = ordered(output!.findings.map((f) => (f.ruleId === STORAGE ? { ...f, facts: then } : added.has(f.ruleId) && f.status === "issue" ? passed(f) : f)));
+    const later = ordered(
+      output!.findings.map((f): Finding =>
+        f.ruleId === STORAGE ? { ...f, facts: now } : fixed.has(f.ruleId) && f.status === "issue" ? passed(f) : f.ruleId === unknown && f.status === "issue" ? { ...f, status: "not_measurable", notMeasurableReason: "Couldn't be read this time.", value: { kind: "not_sized", reason: "Not measured." } } : f,
+      ),
+    );
+    const earlier: ReportInput = { ...input, run: limitsAt("2026-07-14T12:00:00.000Z"), findings: before, scores: scoreDomains(run.modules, before) };
+    return buildReport({ ...input, run: limitsAt("2026-11-09T12:00:00.000Z", { id: `${run.id}-recheck`, baselineRunId: run.id }), findings: later, scores: scoreDomains(run.modules, later), baseline: earlier });
+  };
+  const kinds = (data: [number, number], file: [number, number]) => ({
+    DataStorageMBUsed: data[0], DataStorageMBMax: data[1], DataStorageMBShare: Math.round((data[0] / data[1]) * 1000) / 10,
+    FileStorageMBUsed: file[0], FileStorageMBMax: file[1], FileStorageMBShare: Math.round((file[0] / file[1]) * 1000) / 10,
+  });
+  const cases: Array<[string, BuiltReport, RegExp]> = [
+    ["a rise in both, with allowances that changed", storage(kinds([812_345, 900_000], [712_345, 800_000]), kinds([912_345, 950_000], [812_345, 850_000])), /Data storage: 812,345 of 900,000 MB used then, 912,345 of 950,000 MB now, up 100,000 MB in 118 days \(an average of 25,424 MB every 30 days\)\. File storage: /],
+    ["both past their allowance now", storage(kinds([812_345, 900_000], [712_345, 800_000]), kinds([962_345, 950_000], [862_345, 850_000])), /Data storage: 812,345 of 900,000 MB used then, 962,345 MB used now, over the 950,000 MB allowance, up 150,000 MB in 118 days \(an average of 38,136 MB every 30 days\)\. File storage: /],
+  ];
+
+  for (const [name, report, sentences] of cases) {
+    test(`${name}: both decks fit as printDocuments renders them, with nothing carried onto a continued page`, async () => {
+      const p = report.progress!;
+      for (const list of [p.fixed, p.remaining, p.added]) assert.ok(list.length > 5, "each list is longer than the page names");
+      assert.ok(p.unknown.length > 0);
+      assert.ok(p.areas.filter((a) => a.before !== null && a.after !== null && a.before !== a.after).length >= 4, "four area moves");
+      const range = deckRangeFor(report.input.run);
+      for (const [deck, html, pages] of [["executive", executiveHtml(report, pseudonyms), { minPages: EXECUTIVE_PAGES.min, maxPages: executiveMaxPages(report) }], ["full report", fullReportHtml(report, pseudonyms), { minPages: range.min, maxPages: range.max }]] as const) {
+        assert.match(html, sentences, deck);
+        const printed = await renderPdf(browser, html, { ...pages, dataset: report.dataset, carryOver: true });
+        assert.deepEqual(printed.layout.problems, [], `${deck}: ${describeProblems(printed.layout.problems)}`);
+        // Laid out with nothing carried over, the progress page still fits: the slide holds it all.
+        const alone = await layoutOf(browser, html, { ...pages, dataset: report.dataset });
+        assert.deepEqual(alone.problems, [], `${deck}: ${describeProblems(alone.problems)}`);
+        assert.equal(alone.pages, printed.layout.pages, deck);
+      }
+    });
+  }
 });
 
 describe("a thin org", () => {

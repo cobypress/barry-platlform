@@ -27,7 +27,7 @@ export type Progress = {
 };
 
 export type StorageReading = { used: number; max: number };
-/** One kind of storage, read by both runs. The average is set only for a rise over 30 days or more. */
+/** One kind of storage, read by both runs. The average is set only for a rise over 30 days or more that comes to 1 MB or more. */
 export type StorageChange = { label: string; then: StorageReading; now: StorageReading; days: number; average: number | null };
 export type StorageNotCompared = "not_read_then" | "unreadable_now" | "unreadable_then" | "not_alike";
 export type StorageProgress = { compared: StorageChange[] } | { notCompared: StorageNotCompared };
@@ -128,11 +128,15 @@ function compareStorage(baseline: ProgressSide, current: ProgressSide): StorageP
   const to = Date.parse(current.limitsReadAt ?? "");
   if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) return notAlike;
   const days = Math.floor((to - from) / DAY_MS);
+  // "Up 470 MB in 0 days" isn't true as printed, so readings under a whole day apart aren't set side by side (DECISIONS.md 501).
+  if (days < 1) return notAlike;
   const compared = STORAGE_KINDS.flatMap(([key, label]): StorageChange[] => {
     const [a, b] = [readingOf(then, key), readingOf(now, key)];
     if (!a || !b) return [];
     const rise = b.used - a.used;
-    return [{ label, then: a, now: b, days, average: rise > 0 && days >= STORAGE_AVERAGE_DAYS ? Math.round((rise / days) * STORAGE_AVERAGE_DAYS) : null }];
+    const average = rise > 0 && days >= STORAGE_AVERAGE_DAYS ? Math.round((rise / days) * STORAGE_AVERAGE_DAYS) : 0;
+    // "An average of 0 MB" says nothing grew, so an average that rounds to nothing isn't given (DECISIONS.md 501).
+    return [{ label, then: a, now: b, days, average: average >= 1 ? average : null }];
   });
   return compared.length ? { compared } : notAlike;
 }
@@ -146,6 +150,13 @@ const NOT_COMPARED: Record<StorageNotCompared, string> = {
 
 const mb = (n: number): string => n.toLocaleString("en-GB");
 const dayCount = (n: number): string => `${n} ${n === 1 ? "day" : "days"}`;
+/**
+ * One side's reading. Past the allowance it isn't "10,500 of 10,240 MB": that
+ * reads as a part larger than its whole, which the number check refuses
+ * (DECISIONS.md 501).
+ */
+const reading = (r: StorageReading, when: "then" | "now"): string =>
+  r.used > r.max ? `${mb(r.used)} MB used ${when}, over the ${mb(r.max)} MB allowance` : `${mb(r.used)} of ${mb(r.max)} MB ${when === "then" ? "used then" : "now"}`;
 
 /** What every page about progress says about storage, one sentence a kind, so they can't differ. Empty when there's nothing to say. */
 export function storageSentences(p: Progress): string[] {
@@ -156,23 +167,30 @@ export function storageSentences(p: Progress): string[] {
     const change = k.now.used - k.then.used;
     const average = k.average === null ? "" : ` (an average of ${mb(k.average)} MB every ${STORAGE_AVERAGE_DAYS} days)`;
     const moved = change === 0 ? `the same as ${dayCount(k.days)} ago` : `${change > 0 ? "up" : "down"} ${mb(Math.abs(change))} MB in ${dayCount(k.days)}${average}`;
-    return `${k.label}: ${mb(k.then.used)} of ${mb(k.then.max)} MB used then, ${mb(k.now.used)} of ${mb(k.now.max)} MB now, ${moved}.`;
+    return `${k.label}: ${reading(k.then, "then")}, ${reading(k.now, "now")}, ${moved}.`;
   });
 }
 
 const comparedStorage = (p: Progress): StorageChange[] => (p.storage && "compared" in p.storage ? p.storage.compared : []);
 
-/** Every figure a page about progress quotes, for the number check. */
 /** How many of each list the progress page names. The rest are counted, so the count is a figure too. */
 export const PROGRESS_LISTED = 5;
+/**
+ * How many a deck's progress page names in this report. Its storage sentences
+ * take the room of a rule a list, so the full report's slide holds its fullest
+ * case (DECISIONS.md 501): what is left out is counted and in the raw notes.
+ */
+export const progressListed = (p: Progress): number => (p.storage ? PROGRESS_LISTED - 1 : PROGRESS_LISTED);
 
+/** Every figure a page about progress quotes, for the number check. */
 export function progressFigures(p: Progress): number[] {
   const pairs = [p.score.before, p.score.after, ...p.areas.flatMap((a) => [a.before, a.after])].filter((n): n is number => n !== null);
   const changes = [
     p.score.before !== null && p.score.after !== null ? Math.abs(p.score.after - p.score.before) : null,
     ...p.areas.map((a) => (a.before !== null && a.after !== null ? Math.abs(a.after - a.before) : null)),
   ].filter((n): n is number => n !== null);
-  const overflow = [p.fixed, p.remaining, p.added].filter((l) => l.length > PROGRESS_LISTED).map((l) => l.length - PROGRESS_LISTED);
+  const listed = progressListed(p);
+  const overflow = [p.fixed, p.remaining, p.added].filter((l) => l.length > listed).map((l) => l.length - listed);
   const storage = comparedStorage(p).flatMap((k) => [k.then.used, k.then.max, k.now.used, k.now.max, Math.abs(k.now.used - k.then.used), ...(k.average === null ? [] : [k.average])]);
   // "The two health checks'" reads as a figure, so the sentence that says it carries its 2.
   const notCompared = p.storage && "notCompared" in p.storage && p.storage.notCompared === "not_alike" ? [2] : [];

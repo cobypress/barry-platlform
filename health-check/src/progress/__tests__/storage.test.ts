@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { cpSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { tmpdir } from "node:os";
-import { buildReport, currentBody, type BuiltReport, type ReportInput } from "../../narrative/sections.ts";
+import { buildReport, currentBody, PROGRESS as PROGRESS_SOURCE, type BuiltReport, type ReportInput } from "../../narrative/sections.ts";
 import { Pseudonymiser, type PseudonymEntry } from "../../privacy/pseudonymiser.ts";
 import { scoreDomains } from "../../domains/scoring.ts";
 import { technicalHealthModule } from "../../domains/technical-health/index.ts";
@@ -19,7 +19,7 @@ import { loadRun } from "../../render/render-run.ts";
 import { buildMicrositePages } from "../../microsite/pages.ts";
 import { buildPulseResult } from "../../pulse/result.ts";
 import { checkNumbers, scopeDataset } from "../../numbercheck/index.ts";
-import { limitsReadAt, STORAGE_READ_ALIKE, STORAGE_RULE, storageSentences } from "../compare.ts";
+import { limitsReadAt, progressFigures, PROGRESS_LISTED, STORAGE_READ_ALIKE, STORAGE_RULE, storageSentences } from "../compare.ts";
 import type { Finding, NumberOverride, Run } from "../../schemas/index.ts";
 
 // Storage growth on a re-check (DECISIONS.md 500): the synthetic org's storage
@@ -218,6 +218,97 @@ describe("storage on a re-check (DECISIONS.md 500)", () => {
   });
 });
 
+describe("storage on a re-check, corrected after review (DECISIONS.md 501 and 502)", () => {
+  const HOUR = 1 / 24;
+  const section = (report: BuiltReport) => report.outputs.raw_notes.sections.find((s) => s.key === "progress")!;
+  const sectionScope = (report: BuiltReport) => scopeDataset(report.dataset, report.scopes.get(section(report).id)!);
+
+  for (const [name, days] of [["5 hours", 5 * HOUR], ["23 hours 59 minutes", (23 * 60 + 59) / (24 * 60)]] as const) {
+    test(`readings ${name} apart aren't compared: the side by side sentence and nothing else about storage`, () => {
+      const report = recheck({}, { at: at(days) });
+      assert.deepEqual(storageSentences(report.progress!), [NOT_ALIKE]);
+      for (const text of [notes(report), decoded(deckPage(report)), decoded(micrositePage(report))]) {
+        assert.equal(text.split(NOT_ALIKE).length - 1, 1, text);
+        assert.doesNotMatch(text.replace(NOT_ALIKE, "").replaceAll(storageFinding.title, ""), /storage|in 0 days|0 days ago/i, text);
+      }
+    });
+  }
+
+  test("each sentence saying why storage isn't compared passes the section's number check", () => {
+    // "The two health checks'" reads as a figure: the side by side sentence, now also under a day apart, carries it.
+    for (const [then, now, sentence] of [[{ edit: gone }, {}, NOT_READ_THEN], [{ edit: notMeasurable }, {}, UNREADABLE_THEN], [{}, { edit: notMeasurable }, UNREADABLE_NOW], [{}, { at: at(5 * HOUR) }, NOT_ALIKE]] as Array<[Side, Side, string]>) {
+      const report = recheck(then, now);
+      assert.ok(notes(report).includes(sentence));
+      assert.deepEqual(checkNumbers(sentence, sectionScope(report)).unmatched, [], sentence);
+      assert.equal(section(report).status, "draft", sentence);
+    }
+  });
+
+  test("exactly 24 hours apart is 1 day", () => {
+    const report = recheck({}, { at: at(1) });
+    assert.equal(storageSentences(report.progress!)[0], "Data storage: 8,940 of 10,240 MB used then, 9,410 of 10,240 MB now, up 470 MB in 1 day.");
+  });
+
+  const pastNow = "Data storage: 9,000 of 10,240 MB used then, 10,500 MB used now, over the 10,240 MB allowance, up 1,500 MB in 118 days (an average of 381 MB every 30 days).";
+  const pastThen = "Data storage: 10,500 MB used then, over the 10,240 MB allowance, 9,000 of 10,240 MB now, down 1,500 MB in 118 days.";
+  const pastBoth = "Data storage: 10,500 MB used then, over the 10,240 MB allowance, 10,700 MB used now, over the 10,240 MB allowance, up 200 MB in 118 days (an average of 51 MB every 30 days).";
+  const past: Array<[string, Kind, Kind, string, Array<[string, string]>]> = [
+    ["now", [9_000, 10_240], [10_500, 10_240], pastNow, [["10,500 MB used now", "10,600 MB used now"], ["over the 10,240 MB allowance", "over the 10,250 MB allowance"]]],
+    ["then", [10_500, 10_240], [9_000, 10_240], pastThen, [["10,500 MB used then", "10,400 MB used then"], ["over the 10,240 MB allowance", "over the 10,340 MB allowance"]]],
+    ["both", [10_500, 10_240], [10_700, 10_240], pastBoth, [["10,700 MB used now", "10,800 MB used now"], ["10,500 MB used then", "10,600 MB used then"]]],
+  ];
+  for (const [when, then, now, sentence, alterations] of past) {
+    test(`past the allowance ${when}: that side isn't written as X of Y, and every check passes it`, () => {
+      const report = recheck({ edit: kinds(then, null) }, { edit: kinds(now, null) });
+      assert.deepEqual(storageSentences(report.progress!), [sentence]);
+      // The section as a whole passes, so it's a draft, not waiting for input.
+      const version = report.outputs.raw_notes.versions.find((v) => v.id === section(report).currentVersionId)!;
+      assert.ok(version.body.includes(sentence));
+      assert.deepEqual(version.numberCheck.unmatched, []);
+      assert.equal(section(report).status, "draft");
+      assert.deepEqual(checkNumbers(sentence, sectionScope(report)).unmatched, []);
+      assert.deepEqual(checkNumbers(sentence, report.dataset).unmatched, []);
+      // The microsite checks every page against the whole dataset and throws on a miss.
+      assert.ok(decoded(micrositePage(report)).includes(`<p>${sentence}</p>`));
+      for (const [from, to] of alterations) {
+        const altered = sentence.replace(from, to);
+        assert.notEqual(altered, sentence, from);
+        assert.equal(checkNumbers(altered, sectionScope(report)).passed, false, `${to} passed`);
+      }
+    });
+  }
+
+  test("an average that rounds to nothing isn't printed; one that rounds to 1 MB is", () => {
+    const slow = recheck({ edit: kinds([8_940, 10_240], null) }, { edit: kinds([8_941, 10_240], null), at: at(400) });
+    assert.deepEqual(storageSentences(slow.progress!), ["Data storage: 8,940 of 10,240 MB used then, 8,941 of 10,240 MB now, up 1 MB in 400 days."]);
+    const one = recheck({ edit: kinds([8_940, 10_240], null) }, { edit: kinds([8_942, 10_240], null) });
+    assert.deepEqual(storageSentences(one.progress!), ["Data storage: 8,940 of 10,240 MB used then, 8,942 of 10,240 MB now, up 2 MB in 118 days (an average of 1 MB every 30 days)."]);
+    assert.equal(section(one).status, "draft");
+  });
+
+  test("with a storage sentence the deck's lists name four, and the count left to the raw notes is the number checked", () => {
+    const report = recheck();
+    const p = report.progress!;
+    assert.ok(p.remaining.length > PROGRESS_LISTED, "a list longer than it names");
+    const rest = p.remaining.length - (PROGRESS_LISTED - 1);
+    const page = decoded(deckPage(report));
+    const still = page.split("Still open")[1]!.split("</ul>")[0]!;
+    assert.equal(still.split("<li>").length - 1, PROGRESS_LISTED, "four titles and the count");
+    assert.ok(still.includes(`<li>And ${rest} more in the raw notes.</li>`), still);
+    assert.ok(progressFigures(p).includes(rest));
+    const scope = scopeDataset(report.dataset, [PROGRESS_SOURCE]);
+    assert.ok(scope.figures.some((f) => f.kind === "number" && f.value === rest));
+    // Without storage the page names five, as before, and that count is the one checked.
+    const without: BuiltReport = { ...report, progress: { ...p, storage: null } };
+    const plain = decoded(deckPage(without)).split("Still open")[1]!.split("</ul>")[0]!;
+    assert.equal(plain.split("<li>").length - 1, PROGRESS_LISTED + 1);
+    assert.ok(plain.includes(`<li>And ${rest - 1} more in the raw notes.</li>`), plain);
+    assert.ok(progressFigures(without.progress!).includes(rest - 1));
+    // The microsite lists every one.
+    assert.equal(decoded(micrositePage(report)).split("<li>").length - 1, p.fixed.length + p.remaining.length + p.added.length + p.unknown.length);
+  });
+});
+
 describe("storage on a re-check made on disk", () => {
   test("the deck, the microsite and the raw notes print the same sentences", () => {
     const root = mkdtempSync(join(tmpdir(), "hc-storage-"));
@@ -242,8 +333,11 @@ describe("storage on a re-check made on disk", () => {
     ]);
     // The microsite refuses a page whose figures the number check can't trace, so making it is a check too.
     const page = buildMicrositePages(report, names).pages.find((p) => p.slug === "progress")!.html;
-    for (const [where, text] of [["executive", executiveHtml(report, names)], ["full report", fullReportHtml(report, names)], ["microsite", page], ["raw notes", notes(report)]] as const) {
-      for (const sentence of sentences) assert.ok(decoded(text).includes(sentence), `${where}: ${sentence}`);
+    // The decks set both in one paragraph, a space between (DECISIONS.md 501); the microsite and the raw notes keep one a line.
+    for (const [where, text] of [["executive", executiveHtml(report, names)], ["full report", fullReportHtml(report, names)]] as const) {
+      assert.ok(decoded(text).includes(`<p class="note">${sentences.join(" ")}</p>`), where);
     }
+    assert.ok(decoded(page).includes(sentences.map((s) => `<p>${s}</p>`).join("")), "microsite");
+    assert.ok(notes(report).includes(sentences.join("\n")), "raw notes");
   });
 });
