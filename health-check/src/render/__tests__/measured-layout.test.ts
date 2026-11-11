@@ -215,8 +215,9 @@ describe("an estimate never counts a line too few", () => {
   });
 
   test("the money table's label and basis, on the page and on the slides, on labels of every length to sixteen words (DECISIONS.md 438)", async () => {
-    // Each draft set as a line's label, its reference beside it, in the column the page
-    // or the slide gives it there; and every basis the samples print, where it prints.
+    // Each draft set as a line's label, its reference beside it and counted as the tag it
+    // prints (DECISIONS.md 496), in the column the page or the slide gives it there; and
+    // every basis the samples print, where it prints.
     const drafts = windows(16);
     /** Each draft's lines in the first row of the given table, with the width it was set at, and every basis's. */
     const measure = async (html: string, which: (page: string) => boolean, index: number) => {
@@ -238,7 +239,7 @@ describe("an estimate never counts a line too few", () => {
             const labels = drafts.map((text) => {
               td.replaceChildren(document.createTextNode(text), ref, ...(basis ? [basis] : []));
               const height = td.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom) - (basis ? basis.getBoundingClientRect().height + 1 : 0);
-              return { text, width: inner(), lines: Math.round(height / parseFloat(style.lineHeight)) };
+              return { text, tag: ref.textContent ?? "", width: inner(), lines: Math.round(height / parseFloat(style.lineHeight)) };
             });
             return { labels, bases };
           },
@@ -257,8 +258,8 @@ describe("an estimate never counts a line too few", () => {
     const beside = await measure(full, isMoney, 0);
     const continued = await measure(full, isMoney, 1);
     const under = [
-      ...[...onPage.labels, ...onWorst.labels].filter((x) => moneyLabelLines(x.text, x.width, "page") < x.lines).map((x) => `page, ${x.lines} lines at ${x.width}px: ${x.text}`),
-      ...[...beside.labels, ...continued.labels].filter((x) => moneyLabelLines(x.text, x.width, "slide") < x.lines).map((x) => `slide, ${x.lines} lines at ${x.width}px: ${x.text}`),
+      ...[...onPage.labels, ...onWorst.labels].filter((x) => moneyLabelLines(x.text, x.tag, x.width, "page") < x.lines).map((x) => `page, ${x.lines} lines at ${x.width}px: ${x.text}`),
+      ...[...beside.labels, ...continued.labels].filter((x) => moneyLabelLines(x.text, x.tag, x.width, "slide") < x.lines).map((x) => `slide, ${x.lines} lines at ${x.width}px: ${x.text}`),
       ...[...onPage.bases, ...onWorst.bases].filter((x) => moneyBasisLines(x.text, x.width) < x.lines).map((x) => `basis, ${x.lines} lines at ${x.width}px: ${x.text}`),
     ];
     assert.ok(onPage.labels.length === drafts.length && onPage.bases.length >= 7 && continued.labels[0]!.width > 2 * beside.labels[0]!.width, "measured on the page, beside the figure and across a continued slide");

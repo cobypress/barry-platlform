@@ -113,13 +113,22 @@ const FIGURE_WIDTHS: Record<string, [regular: number, bold: number]> = {
 };
 const FIGURE_AT = 12.5;
 const figureWidth = (text: string, bold: boolean): number => [...text].reduce((sum, c) => sum + (FIGURE_WIDTHS[c] ?? [12.2, 13.2])[bold ? 1 : 0], 0);
-/**
- * A reference tag beside a label, as wide as the widest of two figures and two
- * ("R66.66"), as it prints: 6px from the label in type 0.85 of the label's, with
- * its letter spacing. Chromium sets it 42.94px wide at 12.5px and 53.31px at 16px,
- * counted as 6px and 2.96 a pixel of the label's type (DECISIONS.md 448).
- */
-const refTag = (font: number): number => 6 + 2.96 * font;
+// A line's reference tag is counted as wide as the tag it prints, not as one width
+// for every tag (DECISIONS.md 496): "R5.3" is 28.47px beside a label at 12.5px,
+// and nothing bounds the numbering, so "R88.888" is 49.69px where "R66.66", the
+// width every tag used to be counted at, is 42.94px. Each character as Chromium
+// sets it in the tag's type, 0.85 of the label's, with its letter spacing,
+// measured beside a label at 12.5px and rounded up; type at another size scales
+// with it. A character not named here is as wide as the widest we measured, m.
+const TAG_WIDTHS: Record<string, number> = { R: 6.7, "0": 6.9, "1": 3.65, "2": 6.35, "3": 6.5, "4": 6.95, "5": 6.9, "6": 7, "7": 6.05, "8": 6.95, "9": 6.95, ".": 2.5 };
+const TAG_WIDEST = 11.2;
+const TAG_AT = 12.5;
+/** The margin between a label and its tag, in pixels at any size. */
+const TAG_GAP = 6;
+/** A reference tag beside a label in `font` type, as wide as it prints with the gap before it: none where the row prints none. */
+const tagWidth = (tag: string, font: number): number => (tag ? TAG_GAP + ([...tag].reduce((sum, c) => sum + (TAG_WIDTHS[c] ?? TAG_WIDEST), 0) * font) / TAG_AT : 0);
+/** A tag's width beside a label on the page or a slide: for the test that holds it to the browser's. */
+export const moneyTagWidth = (tag: string, format: "page" | "slide"): number => tagWidth(tag, format === "page" ? PAGE_TABLE.font : SLIDE_TABLE.font);
 
 /** The lines past the first `from`, added up: what the money table's last row holds when it can't name them all. */
 export function restOf(lines: ValueModel["groups"], from: number, k: "low" | "expected" | "high"): number {
@@ -144,6 +153,7 @@ type Figures = { expected: number; low: number; high: number };
 
 /** The last row's words, for the lines it adds up. */
 const restLabel = (rest: number): string => `And ${rest} smaller ${rest === 1 ? "line" : "lines"}, in the raw notes.`;
+const TOTAL_LABEL = "Total, each counted once";
 
 /** What the money page and the slides share: every line, largest first, and how each is said. */
 function moneyParts(r: Render, report: BuiltReport) {
@@ -181,10 +191,12 @@ function moneyParts(r: Render, report: BuiltReport) {
   const rest = (from: number): Figures => ({ expected: restOf(all, from, "expected"), low: restOf(all, from, "low"), high: restOf(all, from, "high") });
   const row = (label: string, g: Figures, cls = "") => `<tr${cls ? ` class="${cls}"` : ""}><td>${label}</td><td class="num">${m(g.expected)}</td><td class="num">${range(g.low, g.high)}</td></tr>`;
   // With their amount, so the rows add up to the total beneath them (night 3 review), and the first's reference.
-  const restRow = (from: number) => row(`${r.t(restLabel(all.length - from))}${r.ref(valueItemId(all[from]!.id))}`, rest(from));
-  const totalRow = row(r.t("Total, each counted once"), total, "total");
+  const restRef = (from: number) => valueItemId(all[from]!.id);
+  const restRow = (from: number) => row(`${r.t(restLabel(all.length - from))}${r.ref(restRef(from))}`, rest(from));
+  // The total has no reference of its own.
+  const totalRow = row(r.t(TOTAL_LABEL), total, "total");
   const table = (rows: string) => `<table class="grid"><thead><tr><th>Where it comes from</th><th class="num">Expected</th><th class="num">Range</th></tr></thead><tbody>${rows}</tbody></table>`;
-  return { value, total, m, kinds, all, basis, range, exposureNote, drawn, ranged, figure, rest, row, restRow, totalRow, table };
+  return { value, total, m, kinds, all, basis, range, exposureNote, drawn, ranged, figure, rest, row, restRef, restRow, totalRow, table };
 }
 type Parts = ReturnType<typeof moneyParts>;
 
@@ -206,14 +218,32 @@ function labelColumn(parts: Parts, measure: TableMeasure, from: number, to: numb
 }
 
 /**
- * A label's lines, with its reference, at the table's type: the tag follows the
- * last word with no space, so it goes to the next line with that word. Never
- * calls `r.ref`: on the executive summary that notes a reference as used.
+ * A label's lines, with the tag it prints, at the table's type: the tag follows
+ * the last word with no space, so it goes to the next line with that word.
  */
-const labelLines = (label: string, column: number, measure: TableMeasure): number => textLines(printed(label), column, measure.font, refTag(measure.font));
+const labelLines = (label: string, tag: string, column: number, measure: TableMeasure): number => textLines(printed(label), column, measure.font, tagWidth(tag, measure.font));
 
-/** A money line's label, with its reference, in lines `width` pixels wide on the page or a slide: what the estimate counts (DECISIONS.md 438). */
-export const moneyLabelLines = (label: string, width: number, format: "page" | "slide"): number => labelLines(label, width, format === "page" ? PAGE_TABLE : SLIDE_TABLE);
+/** A money line's label, with its reference's tag, in lines `width` pixels wide on the page or a slide: what the estimate counts (DECISIONS.md 438 and 496). */
+export const moneyLabelLines = (label: string, tag: string, width: number, format: "page" | "slide"): number => labelLines(label, tag, width, format === "page" ? PAGE_TABLE : SLIDE_TABLE);
+
+/** A row as the estimate counts it: its label as it prints, the words of the tag beside it or none, and the line whose basis it has on the page. */
+type CountedRow = { label: string; tag: string; group: Group | null };
+
+/**
+ * The rows a table prints from line `from` to `to` and, where `last`, the rest
+ * added up if any are left and the total, each with the tag it prints: a line
+ * its own, the rest the first of the lines it adds up, and the total none
+ * (DECISIONS.md 496). Each tag is read with `r.refText`, never `r.ref`: on the
+ * executive summary a reference asked for is listed as used, and the estimate
+ * tries cuts the page never prints.
+ */
+function countedRows(r: Render, parts: Parts, from: number, to: number, last: boolean): CountedRow[] {
+  const { all } = parts;
+  const lines = all.slice(from, to).map((g): CountedRow => ({ label: r.t(g.label), tag: r.refText(valueItemId(g.id)), group: g }));
+  const rest: CountedRow[] = last && to < all.length ? [{ label: r.t(restLabel(all.length - to)), tag: r.refText(parts.restRef(to)), group: null }] : [];
+  const total: CountedRow[] = last ? [{ label: r.t(TOTAL_LABEL), tag: "", group: null }] : [];
+  return [...lines, ...rest, ...total];
+}
 /** A basis under a label on the page, in lines `width` pixels wide. */
 export const moneyBasisLines = (basis: string, width: number): number => textLines(printed(basis), width, PAGE_TABLE.basis!.font);
 
@@ -225,12 +255,10 @@ export const moneyBasisLines = (basis: string, width: number): number => textLin
  * Its label column is the one these rows print in.
  */
 function rowsHeight(r: Render, parts: Parts, measure: TableMeasure, from: number, to: number, last: boolean): number {
-  const { all } = parts;
-  const left = last && to < all.length;
   const column = labelColumn(parts, measure, from, to, last);
-  const line = (label: string) => measure.row + measure.line * labelLines(r.t(label), column, measure);
   const basis = (g: Group) => (measure.basis ? measure.basis.gap + measure.basis.line * textLines(printed(r.t(parts.basis(g))), column, measure.basis.font) : 0);
-  return all.slice(from, to).reduce((sum, g) => sum + line(g.label) + basis(g), 0) + (left ? line(restLabel(all.length - to)) : 0) + (last ? line("Total, each counted once") - 0.5 : 0);
+  const height = (x: CountedRow) => measure.row + measure.line * labelLines(x.label, x.tag, column, measure) + (x.group ? basis(x.group) : 0);
+  return countedRows(r, parts, from, to, last).reduce((sum, x) => sum + height(x), 0) - (last ? 0.5 : 0);
 }
 
 /** How the page sets its money: the chart's height and how many lines it names (DECISIONS.md 435 and 438). */
@@ -281,6 +309,13 @@ export function moneyPageColumn(r: Render, report: BuiltReport): number {
   return labelColumn(parts, PAGE_TABLE, 0, named, true);
 }
 
+/** Each row's label and tag as the page's estimate counts them, at the cut it prints: for the test that holds them to the rows printed (DECISIONS.md 496). */
+export function moneyPageCounted(r: Render, report: BuiltReport): Array<{ label: string; tag: string }> {
+  const parts = moneyParts(r, report);
+  const { named } = pagePlan(r, report, parts, `${pageNotes(r, parts)}${seatsOnMoneyPage(r, report)}`);
+  return countedRows(r, parts, 0, named, true).map(({ label, tag }) => ({ label, tag }));
+}
+
 /**
  * How the full report sets its money (DECISIONS.md 439): `chart` beside the
  * table, `first` lines on the first slide, the rest added up in its last row if
@@ -323,12 +358,14 @@ function slidePlan(r: Render, parts: Parts, notes: string, most: 1 | 2): SlidePl
  * hold every line, the last row adds the rest up, as the executive summary's
  * does. Empty when nothing could be given a figure in money.
  */
+const SLIDE_HOW = "Not every case will come back, so we count a share of each figure, with a cautious share and all of it either side. Where several issues describe the same money, only the largest counts. The executive summary shows how each line was reached.";
+const slideNotes = (r: Render, parts: Parts) => `${parts.exposureNote}<p class="note">${r.t(SLIDE_HOW)}</p>`;
+
 export function moneySlides(r: Render, report: BuiltReport, most: 1 | 2 = 2): string[] {
   if (report.value.total.expected <= 0) return [];
   const parts = moneyParts(r, report);
-  const { all, row, restRow, totalRow, table, exposureNote } = parts;
-  const how = "Not every case will come back, so we count a share of each figure, with a cautious share and all of it either side. Where several issues describe the same money, only the largest counts. The executive summary shows how each line was reached.";
-  const notes = `${exposureNote}<p class="note">${r.t(how)}</p>`;
+  const { all, row, restRow, totalRow, table } = parts;
+  const notes = slideNotes(r, parts);
   const { chart, first, continued } = slidePlan(r, parts, notes, most);
   const head = (more: boolean) => `<div class="eyebrow">${r.t(EYEBROW)}</div><h2>${TITLE}${more ? ", continued" : ""}</h2>`;
   const lines = (from: number, to: number) => all.slice(from, to).map((g) => row(`${r.t(g.label)}${r.ref(valueItemId(g.id))}`, g.counted)).join("");
@@ -337,6 +374,14 @@ export function moneySlides(r: Render, report: BuiltReport, most: 1 | 2 = 2): st
   const split = (rows: string) => `<div class="split"><div>${parts.figure(chart, HALF_WIDTH)}</div><div>${table(rows)}</div></div>`;
   if (continued === null) return [`<div class="money">${head(false)}${split(last(0, first))}${notes}</div>`];
   return [`<div class="money">${head(false)}${split(lines(0, first))}</div>`, `<div class="money">${head(true)}${table(last(first, first + continued))}${notes}</div>`];
+}
+
+/** Each slide's rows, label and tag, as the estimate counts them at the cut the slides print: for the test that holds them to the rows printed (DECISIONS.md 496). */
+export function moneySlidesCounted(r: Render, report: BuiltReport, most: 1 | 2 = 2): Array<Array<{ label: string; tag: string }>> {
+  const parts = moneyParts(r, report);
+  const { first, continued } = slidePlan(r, parts, slideNotes(r, parts), most);
+  const tables = continued === null ? [countedRows(r, parts, 0, first, true)] : [countedRows(r, parts, 0, first, false), countedRows(r, parts, first, first + continued, true)];
+  return tables.map((rows) => rows.map(({ label, tag }) => ({ label, tag })));
 }
 
 /** What fixing it is worth against what they pay a year, to one decimal place. Null without both. */
