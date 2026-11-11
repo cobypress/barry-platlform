@@ -222,9 +222,9 @@ describe("the documents job: handbook.json reaches the Word document and nothing
     const scheduled = flow.start.paths.find((p) => p.kind === "scheduled")!;
     scheduled.label = `Remind ${LITERAL}`;
     const touches = (object: string) => ({ queries: [object], queriesTotal: 1, changes: ["update" as const], dynamicQueries: false, searches: false });
-    handbook.apexClasses.items.push({ name: "PlantedLedgerSync", apiVersion: 62, status: "Active", isTest: false, touches: touches(CLASS_OBJECT) });
+    handbook.apexClasses.items.push({ name: "PlantedLedgerSync", apiVersion: 62, status: "Active", isTest: false, touches: touches(CLASS_OBJECT), lastChanged: null });
     handbook.apexClasses.total += 1;
-    handbook.apexTriggers.items.push({ name: "PlantedLedgerTrigger", apiVersion: 62, status: "Active", isTest: false, touches: touches(TRIGGER_OBJECT), object: "Account", events: ["after update"] });
+    handbook.apexTriggers.items.push({ name: "PlantedLedgerTrigger", apiVersion: 62, status: "Active", isTest: false, touches: touches(TRIGGER_OBJECT), lastChanged: null, object: "Account", events: ["after update"] });
     handbook.apexTriggers.total += 1;
     writeFileSync(join(dir, HANDBOOK_FILE), JSON.stringify(handbook));
     deps.store.addDocumentsJob({ run: consoleRun({ status: "released" }), intake: null, sections: [], versions: [], overrides: [], preparedBy: null, state: "queued", driveFolderId: null, files: [] });

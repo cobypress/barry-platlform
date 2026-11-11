@@ -9,14 +9,14 @@ import { documentXml, docxParagraphs, docxText } from "../../testing/docx-text.t
 import { HANDBOOK_FILE } from "../build.ts";
 import { renderHandbookDocx, STEP_WORDS, whenWords, wordSafe } from "../docx.ts";
 import { readHandbook } from "../read.ts";
-import { Handbook, HANDBOOK_VERSION, MAX_APEX_CLASSES, MAX_APEX_TRIGGERS, MAX_STEPS, type HandbookApexClass, type HandbookPath, type HandbookApexTouches, type HandbookApexTrigger, type HandbookFlow, type HandbookStep, type HandbookValidationRule } from "../schema.ts";
+import { Handbook, HANDBOOK_VERSION, MAX_APEX_CLASSES, MAX_APEX_TRIGGERS, MAX_STEPS, type HandbookApexClass, type HandbookPath, type HandbookApexTouches, type HandbookApexTrigger, type HandbookFlow, type HandbookStep, type HandbookValidationRule, type LastChanges } from "../schema.ts";
 
 // The org handbook as a Word document (DECISIONS.md 443 to 445). The file is
 // made up here, so every route through the document is seen.
 
 // What the retrieve reads on the synthetic org: the four, and Case, which its record counts list (decision 460).
 const RETRIEVE = { customObjects: "all" as const, standardObjects: ["Account", "Contact", "Lead", "Opportunity", "Case"] };
-const NO_APEX = { status: "ok" as const, items: [], total: 0, cut: false };
+const NO_APEX = { status: "ok" as const, items: [], total: 0, cut: false, lastChanges: "read" as const };
 const NO_CHANGES = { status: "ok" as const, items: [], total: 0, cut: false, leftOutUserAdmin: 0, days: 180 };
 
 function step(name: string, over: Partial<HandbookStep> = {}): HandbookStep {
@@ -47,15 +47,15 @@ function touches(over: Partial<HandbookApexTouches> = {}): HandbookApexTouches {
 }
 
 function apexClass(name: string, over: Partial<HandbookApexClass> = {}): HandbookApexClass {
-  return { name, apiVersion: 62, status: "Active", isTest: false, touches: touches(), ...over };
+  return { name, apiVersion: 62, status: "Active", isTest: false, touches: touches(), lastChanged: null, ...over };
 }
 
 function trigger(name: string, over: Partial<HandbookApexTrigger> = {}): HandbookApexTrigger {
   return { ...apexClass(name), object: "Opportunity", events: ["before insert"], ...over };
 }
 
-/** An ok Apex part holding these, uncut. */
-const apex = <T>(items: T[]) => ({ status: "ok" as const, items, total: items.length, cut: false });
+/** An ok Apex part holding these, uncut, from a run that kept no last changes unless it says so. */
+const apex = <T>(items: T[], lastChanges: LastChanges = "not_kept") => ({ status: "ok" as const, items, total: items.length, cut: false, lastChanges });
 
 function handbook(over: Partial<Handbook> = {}): Handbook {
   return Handbook.parse({ version: HANDBOOK_VERSION, flows: { status: "ok", items: [] }, validationRules: { status: "ok", covers: RETRIEVE, items: [] }, apexClasses: NO_APEX, apexTriggers: NO_APEX, recentChanges: NO_CHANGES, ...over });
@@ -478,8 +478,8 @@ describe("the handbook's Apex", () => {
   });
 
   test("a cut part says how many it lists of how many, by name, on the first page and in the part", async () => {
-    const classes = { status: "ok" as const, items: Array.from({ length: 3 }, (_, i) => apexClass(`C${i}`)), total: 6_200, cut: true };
-    const triggers = { status: "ok" as const, items: [trigger("T0")], total: 1_042, cut: true };
+    const classes = { status: "ok" as const, items: Array.from({ length: 3 }, (_, i) => apexClass(`C${i}`)), total: 6_200, cut: true, lastChanges: "not_kept" as const };
+    const triggers = { status: "ok" as const, items: [trigger("T0")], total: 1_042, cut: true, lastChanges: "not_kept" as const };
     const { text } = await render(handbook({ apexClasses: classes, apexTriggers: triggers }));
     assert.match(text, /Apex classes: 6,200 classes\. This handbook lists the first 3 of 6,200 classes, by name\./);
     assert.match(text, /Apex triggers: 1,042 triggers\. This handbook lists the first 1 of 1,042 triggers, by name\./);

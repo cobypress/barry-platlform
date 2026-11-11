@@ -9,8 +9,9 @@ import { CHANGES, MAX_QUERIED_OBJECTS } from "../extract/apex-touches.ts";
 
 // Still 2 with each flow's paths added (decision 446): no file of version 2 had
 // left an engine before them, so none in a run folder lacks them. 3 adds the
-// recent changes (decision 461), and a file of version 2 is still read.
-export const HANDBOOK_VERSION = 3;
+// recent changes (decision 461), and 4 when each class and trigger was last
+// changed and by whom (decision 473). Files of versions 2 and 3 are still read.
+export const HANDBOOK_VERSION = 4;
 
 // The most a flow, step, entry, start and text keep (decision 453). Anything
 // past these is cut, marked as cut, and carries its full count.
@@ -160,7 +161,20 @@ export const HandbookApexTouches = z.strictObject({
 });
 export type HandbookApexTouches = z.infer<typeof HandbookApexTouches>;
 
-const apexItem = {
+/** A pseudonymiser's token for a user: a name only when the Word document is made (decision 421). */
+export const UserToken = z.string().regex(/^\[\[user:U\d{4,}\]\]$/);
+
+/** When a class or trigger was last changed, and by whom (decision 473). */
+export const HandbookLastChange = z.strictObject({
+  /** LastModifiedDate, as Salesforce gave it when the step read: it can be after the run's date. */
+  at: z.string().min(1),
+  /** Null when Salesforce names no user. */
+  by: UserToken.nullable(),
+});
+export type HandbookLastChange = z.infer<typeof HandbookLastChange>;
+
+/** A class or trigger as a file of version 3 or before holds it. */
+const olderApexItem = {
   name: z.string(),
   apiVersion: z.number(),
   status: z.string(),
@@ -170,19 +184,26 @@ const apexItem = {
   touches: HandbookApexTouches.nullable(),
 };
 
+const apexItem = {
+  ...olderApexItem,
+  /** Null when it wasn't read, which the part says, or Salesforce gave no date. */
+  lastChanged: HandbookLastChange.nullable(),
+};
+
 export const HandbookApexClass = z.strictObject(apexItem);
 export type HandbookApexClass = z.infer<typeof HandbookApexClass>;
 
 /** Trigger events in a fixed order, by the names Apex gives them. */
 export const TRIGGER_EVENTS = ["before insert", "before update", "before delete", "after insert", "after update", "after delete", "after undelete"] as const;
 
-export const HandbookApexTrigger = z.strictObject({
-  ...apexItem,
+const triggerItem = {
   /** TableEnumOrId, a custom object's id given as its API name when the run could name it, and as Salesforce gives it when not. */
   object: z.string().min(1),
   /** Null when the run didn't read them, never an empty list. */
   events: z.array(z.enum(TRIGGER_EVENTS)).min(1).nullable(),
-});
+};
+
+export const HandbookApexTrigger = z.strictObject({ ...apexItem, ...triggerItem });
 export type HandbookApexTrigger = z.infer<typeof HandbookApexTrigger>;
 
 // "We couldn't read it" and "there's none" must never look alike (decision 454, rule 5).
@@ -192,8 +213,18 @@ const Unavailable = z.strictObject({ status: z.literal("unavailable"), reason: z
 const capped = <T extends z.ZodType>(item: T, max: number) =>
   z.discriminatedUnion("status", [z.strictObject({ status: z.literal("ok"), items: z.array(item).max(max), total: Count, cut: z.boolean() }), Unavailable]);
 
-/** A pseudonymiser's token for a user: a name only when the Word document is made (decision 421). */
-export const UserToken = z.string().regex(/^\[\[user:U\d{4,}\]\]$/);
+/**
+ * Whether this run read when each was last changed: "refused" when Salesforce
+ * refused the fields and the list was read without them, "not_kept" when the
+ * run was read before they were kept (decision 473). Salesforce's reason is
+ * never here: it stays in the run folder.
+ */
+export const LAST_CHANGES = ["read", "refused", "not_kept"] as const;
+export type LastChanges = (typeof LAST_CHANGES)[number];
+
+/** An Apex list as `capped` makes it, saying whether the last changes were read. */
+const cappedApex = <T extends z.ZodType>(item: T, max: number) =>
+  z.discriminatedUnion("status", [z.strictObject({ status: z.literal("ok"), items: z.array(item).max(max), total: Count, cut: z.boolean(), lastChanges: z.enum(LAST_CHANGES) }), Unavailable]);
 
 /** One setup change, as the Setup Audit Trail records it (decision 461). */
 export const HandbookChange = z.strictObject({
@@ -229,26 +260,36 @@ export const HandbookRecentChanges = z.discriminatedUnion("status", [
 ]);
 export type HandbookRecentChanges = z.infer<typeof HandbookRecentChanges>;
 
-const parts = {
+const metadataParts = {
   flows: z.discriminatedUnion("status", [z.strictObject({ status: z.literal("ok"), items: z.array(HandbookFlow) }), Unavailable]),
   // Nor may "no rule on Case" and "we didn't read Case": the list says what it covers.
   validationRules: z.discriminatedUnion("status", [z.strictObject({ status: z.literal("ok"), covers: ValidationRuleCoverage, items: z.array(HandbookValidationRule) }), Unavailable]),
-  apexClasses: capped(HandbookApexClass, MAX_APEX_CLASSES),
-  apexTriggers: capped(HandbookApexTrigger, MAX_APEX_TRIGGERS),
 };
 
 export const Handbook = z.strictObject({
   version: z.literal(HANDBOOK_VERSION),
-  ...parts,
+  ...metadataParts,
+  apexClasses: cappedApex(HandbookApexClass, MAX_APEX_CLASSES),
+  apexTriggers: cappedApex(HandbookApexTrigger, MAX_APEX_TRIGGERS),
   recentChanges: HandbookRecentChanges,
 });
 export type Handbook = z.infer<typeof Handbook>;
+
+/** The four parts as a file of version 3 or before has them: no class or trigger says when it was last changed. */
+const olderParts = {
+  ...metadataParts,
+  apexClasses: capped(z.strictObject(olderApexItem), MAX_APEX_CLASSES),
+  apexTriggers: capped(z.strictObject({ ...olderApexItem, ...triggerItem }), MAX_APEX_TRIGGERS),
+};
+
+/** A file from before the last changes were kept. It's read as a handbook whose Apex says so (decision 473). */
+export const HandbookVersion3 = z.strictObject({ version: z.literal(3), ...olderParts, recentChanges: HandbookRecentChanges });
 
 /**
  * A file from before the recent changes were kept: the same four parts, and
  * no fifth. It's read as a handbook whose fifth part says so (decision 462).
  */
-export const HandbookVersion2 = z.strictObject({ version: z.literal(2), ...parts });
+export const HandbookVersion2 = z.strictObject({ version: z.literal(2), ...olderParts });
 
 /** Why a handbook has no recent changes when its run kept none: the part says only this. */
 export const CHANGES_NOT_KEPT = "This run was read before recent changes were kept.";

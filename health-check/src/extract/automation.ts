@@ -5,7 +5,7 @@ import { readTouches, type ApexTouches } from "./apex-touches.ts";
 import { orgExtractor, recordCountsExtractor } from "./configuration.ts";
 import { indexReferences, parseMetadataBundle, type MetadataBundle, type ReferenceIndex } from "./metadata-parse.ts";
 import { readBundleThroughTooling, ToolingGapError, TOOLING_PARTIAL_KEYS } from "./metadata-tooling.ts";
-import { readableReason, readSoql, unavailable, type Extractor, type Sourced, type SourceInfo } from "./types.ts";
+import { readableReason, readSoql, unavailable, type ExtractContext, type Extractor, type Sourced, type SourceInfo } from "./types.ts";
 
 // Salesforce's wildcard for CustomObject brings custom objects only, so a standard
 // object's rules are read only where the retrieve names it (DECISIONS.md 455).
@@ -118,12 +118,34 @@ export type TriggerUsage = { UsageBeforeInsert?: boolean; UsageBeforeUpdate?: bo
 export type ApexTriggerRow = { Id: string; Name: string; TableEnumOrId: string; ApiVersion: number; Status: string; LengthWithoutComments?: number } & TriggerUsage & CodeFacts;
 export type ClassCoverage = { name: string; covered: number; uncovered: number };
 
+/** When a class or trigger was last changed and by whom, as Salesforce held it when the step read (DECISIONS.md 473). */
+export type LastChange = {
+  /** LastModifiedDate, as Salesforce gives it. */
+  at: string | null;
+  byId: string | null;
+  /** LastModifiedBy.Name: who changed it, for a user the run's user list doesn't hold. */
+  byName: string | null;
+};
+
+/**
+ * Each class's or trigger's last change, by its Id, or why it wasn't read:
+ * Salesforce refused the read with these fields, and the step read once more
+ * without them. The reason is Salesforce's, and stays in the run folder.
+ */
+export type LastChanged = { status: "read"; byRow: Record<string, LastChange> } | { status: "refused"; reason: string };
+
 export type ApexData = {
   classes: Sourced<ApexClassRow[]>;
   triggers: Sourced<ApexTriggerRow[]>;
   orgCoverage: Sourced<Array<{ PercentCovered: number | null }>>;
   classCoverage: Sourced<ClassCoverage[]>;
   references: ReferenceIndex;
+  /**
+   * For the customer's own documents only. Kept apart from the rows, so no rule
+   * can read a date or a name from what it scans. Undefined in a checkpoint
+   * from before version 10.
+   */
+  lastChanged?: { classes: LastChanged; triggers: LastChanged };
 };
 
 // Bodies are scanned for references here and then dropped, so code never sits
@@ -140,24 +162,65 @@ function stripBodies<R extends { Name: string; Body?: string }>(rows: Sourced<R[
   return { ...rows, data };
 }
 
+const LAST_CHANGE_FIELDS = "LastModifiedDate, LastModifiedById, LastModifiedBy.Name";
+type LastChangeFields = { LastModifiedDate?: string | null; LastModifiedById?: string | null; LastModifiedBy?: { Name?: string | null } | null };
+
+// Which reads Salesforce refused with the last-changed fields, kept before the
+// read without them starts, so a run stopped at the budget during that one
+// doesn't make the refused read again when it resumes. It holds the object and
+// Salesforce's reason, nothing read from the org.
+const REFUSED_PARTIAL = "apex-last-changed-refused";
+type Refused = { object: string; reason: string };
+
+/** The rows as they were before the fields were read, so the rules and the scan see exactly what they did. */
+function withoutLastChange<R extends LastChangeFields>(rows: Sourced<R[]>): Sourced<Array<Omit<R, keyof LastChangeFields>>> {
+  if (rows.status !== "ok") return rows;
+  return { ...rows, data: rows.data.map(({ LastModifiedDate: _at, LastModifiedById: _by, LastModifiedBy: _name, ...row }) => row) };
+}
+
+/**
+ * Reads the classes or the triggers with when each was last changed and by
+ * whom (DECISIONS.md 473), or once more without those if Salesforce refuses
+ * them: the Apex findings must never be lost for a line in a document.
+ * `fields` are the read's own, and Body comes last, as it always has.
+ */
+async function readApex<R extends { Id: string }>(ctx: ExtractContext, object: "ApexClass" | "ApexTrigger", fields: string): Promise<{ rows: Sourced<Array<R & { Body?: string }>>; lastChanged: LastChanged }> {
+  const query = (withLastChange: boolean): string => `SELECT ${fields}${withLastChange ? `, ${LAST_CHANGE_FIELDS}` : ""}, Body FROM ${object} WHERE NamespacePrefix = null`;
+  // A resumed run whose read was refused goes straight to the read without them.
+  let refused = ctx.partial.read<Refused>(REFUSED_PARTIAL).find((r) => r.object === object);
+  if (!refused) {
+    const read = await readSoql<R & { Body?: string } & LastChangeFields>(ctx, query(true));
+    if (read.status === "ok") {
+      const byRow: Record<string, LastChange> = {};
+      for (const row of read.data) byRow[row.Id] = { at: row.LastModifiedDate ?? null, byId: row.LastModifiedById ?? null, byName: row.LastModifiedBy?.Name ?? null };
+      return { rows: withoutLastChange(read) as Sourced<Array<R & { Body?: string }>>, lastChanged: { status: "read", byRow } };
+    }
+    refused = { object, reason: read.reason };
+    ctx.partial.append(REFUSED_PARTIAL, [refused]);
+  }
+  // Stripped here too, so the step's output is the same whatever a refusing org sends.
+  const rows = withoutLastChange(await readSoql<R & { Body?: string } & LastChangeFields>(ctx, query(false))) as Sourced<Array<R & { Body?: string }>>;
+  return { rows, lastChanged: { status: "refused", reason: refused.reason } };
+}
+
 export const apexExtractor: Extractor<ApexData> = {
   id: "apex",
   // 9: queries in loops count the WithBinds forms and cursors (DECISIONS.md 470).
-  version: 9,
+  // 10: when each class and trigger was last changed, and by whom (DECISIONS.md 473).
+  version: 10,
+  partialKeys: [REFUSED_PARTIAL],
   async run(ctx) {
     const references: ReferenceIndex = { users: {}, fields: {} };
     // Through REST, not Tooling: a user with View Setup but not Author Apex gets
     // INVALID_TYPE from Tooling's ApexClass, and reads REST's with the same
     // fields, body included (DECISIONS.md 73).
-    const classes = await readSoql<Omit<ApexClassRow, keyof CodeFacts> & { Body?: string }>(
-      ctx,
-      "SELECT Id, Name, ApiVersion, Status, LengthWithoutComments, Body FROM ApexClass WHERE NamespacePrefix = null",
-    );
+    const classes = await readApex<Omit<ApexClassRow, keyof CodeFacts>>(ctx, "ApexClass", "Id, Name, ApiVersion, Status, LengthWithoutComments");
     // Through REST, not Tooling: the Tooling reference doesn't list Name,
     // TableEnumOrId or NamespacePrefix on ApexTrigger, and the Object Reference does.
-    const triggers = await readSoql<Omit<ApexTriggerRow, keyof CodeFacts> & { Body?: string }>(
+    const triggers = await readApex<Omit<ApexTriggerRow, keyof CodeFacts>>(
       ctx,
-      "SELECT Id, Name, TableEnumOrId, ApiVersion, Status, LengthWithoutComments, UsageBeforeInsert, UsageBeforeUpdate, UsageBeforeDelete, UsageAfterInsert, UsageAfterUpdate, UsageAfterDelete, UsageAfterUndelete, Body FROM ApexTrigger WHERE NamespacePrefix = null",
+      "ApexTrigger",
+      "Id, Name, TableEnumOrId, ApiVersion, Status, LengthWithoutComments, UsageBeforeInsert, UsageBeforeUpdate, UsageBeforeDelete, UsageAfterInsert, UsageAfterUpdate, UsageAfterDelete, UsageAfterUndelete",
     );
     const orgCoverage = await readSoql<{ PercentCovered: number | null }>(ctx, "SELECT PercentCovered FROM ApexOrgWideCoverage", { api: "tooling" });
     const rawCoverage = await readSoql<{ ApexClassOrTrigger: { Name: string } | null; NumLinesCovered: number; NumLinesUncovered: number }>(
@@ -179,11 +242,12 @@ export const apexExtractor: Extractor<ApexData> = {
     const noApex = <T>(rows: Sourced<T>): Sourced<T> =>
       rows.status === "unavailable" && edition === "Professional Edition" && /isn't available in this org/.test(rows.reason) ? { ...rows, reason: "Professional Edition has no Apex, so there's no code to check." } : rows;
     return {
-      classes: noApex(stripBodies(classes, "ApexClass", references)) as Sourced<ApexClassRow[]>,
-      triggers: noApex(stripBodies(triggers, "ApexTrigger", references)) as Sourced<ApexTriggerRow[]>,
+      classes: noApex(stripBodies(classes.rows, "ApexClass", references)) as Sourced<ApexClassRow[]>,
+      triggers: noApex(stripBodies(triggers.rows, "ApexTrigger", references)) as Sourced<ApexTriggerRow[]>,
       orgCoverage,
       classCoverage,
       references,
+      lastChanged: { classes: classes.lastChanged, triggers: triggers.lastChanged },
     };
   },
 };

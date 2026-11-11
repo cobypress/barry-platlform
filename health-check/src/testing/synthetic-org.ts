@@ -1164,36 +1164,47 @@ const contactRow = (n: number) => ({ Id: sfId("003", n), Name: `Synthetic contac
 export const CONTACTS_NO_ACCOUNT = Array.from({ length: CONTACTS.noAccount }, (_, i) => contactRow(i + 1));
 export const CONTACTS_NO_EMAIL = Array.from({ length: CONTACTS.noEmail }, (_, i) => contactRow(i + 11));
 
+// When each class and trigger was last changed and by whom (DECISIONS.md 473):
+// mostly by the org's own users, one by someone the run's user list doesn't
+// hold, named only by Salesforce beside the class, and one by no user at all.
+/** Someone the user list doesn't hold, who last changed a class and a trigger. */
+export const APEX_OUTSIDE_MODIFIER = { id: userId(960), name: "Ash Rowe" };
+const changedBy = (who: number | typeof APEX_OUTSIDE_MODIFIER | null, days: number) => ({
+  LastModifiedDate: daysAgo(days),
+  LastModifiedById: who === null ? null : typeof who === "number" ? userId(who) : who.id,
+  LastModifiedBy: who === null ? null : { Name: typeof who === "number" ? userName(who) : who.name },
+});
+
 export const APEX_CLASSES = [
   // Trap: a SOQL for loop queries once, so it isn't a query in a loop.
-  { Id: sfId("01p", 1), Name: "OpportunityHandler", ApiVersion: 60, Status: "Active", LengthWithoutComments: 1200, Body: "public class OpportunityHandler { /* uses Competitor__c */ public void close() { List<Opportunity> opps = new List<Opportunity>(); for (Opportunity o : [SELECT Id FROM Opportunity WHERE IsClosed = false]) { opps.add(o); } update opps; } }" },
+  { Id: sfId("01p", 1), Name: "OpportunityHandler", ApiVersion: 60, Status: "Active", LengthWithoutComments: 1200, ...changedBy(4, 40), Body: "public class OpportunityHandler { /* uses Competitor__c */ public void close() { List<Opportunity> opps = new List<Opportunity>(); for (Opportunity o : [SELECT Id FROM Opportunity WHERE IsClosed = false]) { opps.add(o); } update opps; } }" },
   // Trap: a query and a save inside a loop.
-  { Id: sfId("01p", 2), Name: "LeadRouter", ApiVersion: 62, Status: "Active", LengthWithoutComments: 800, Body: "public class LeadRouter { public void route(List<Lead> leads) { for (Lead l : leads) { Account a = [SELECT Id FROM Account WHERE Name = :l.Company LIMIT 1]; l.Description = a.Id; update l; } } }" },
+  { Id: sfId("01p", 2), Name: "LeadRouter", ApiVersion: 62, Status: "Active", LengthWithoutComments: 800, ...changedBy(2, 95), Body: "public class LeadRouter { public void route(List<Lead> leads) { for (Lead l : leads) { Account a = [SELECT Id FROM Account WHERE Name = :l.Company LIMIT 1]; l.Description = a.Id; update l; } } }" },
   // Trap: a callout address written into the code.
-  { Id: sfId("01p", 3), Name: "LegacySync", ApiVersion: 38, Status: "Active", LengthWithoutComments: 400, Body: "public class LegacySync { public void send() { HttpRequest req = new HttpRequest(); req.setEndpoint('https://legacy.example.com/api'); req.setMethod('POST'); new Http().send(req); } }" },
+  { Id: sfId("01p", 3), Name: "LegacySync", ApiVersion: 38, Status: "Active", LengthWithoutComments: 400, ...changedBy(9, 610), Body: "public class LegacySync { public void send() { HttpRequest req = new HttpRequest(); req.setEndpoint('https://legacy.example.com/api'); req.setMethod('POST'); new Http().send(req); } }" },
   // Trap: a test that runs the code and checks nothing.
-  { Id: sfId("01p", 4), Name: "OpportunityHandlerTest", ApiVersion: 60, Status: "Active", LengthWithoutComments: 300, Body: "@isTest class OpportunityHandlerTest { @isTest static void closes() { new OpportunityHandler().close(); } }" },
+  { Id: sfId("01p", 4), Name: "OpportunityHandlerTest", ApiVersion: 60, Status: "Active", LengthWithoutComments: 300, ...changedBy(4, 40), Body: "@isTest class OpportunityHandlerTest { @isTest static void closes() { new OpportunityHandler().close(); } }" },
   // Clean: a callout through a named credential. The old address is in a comment, so it doesn't count.
-  { Id: sfId("01p", 5), Name: "FinanceSync", ApiVersion: 62, Status: "Active", LengthWithoutComments: 350, Body: "// Sends invoices to the finance system. Was req.setEndpoint('https://old.example.com').\npublic class FinanceSync { @InvocableMethod(label='Send invoices') public static void sendAll(List<Id> ids) { new FinanceSync().send(); } public void send() { HttpRequest req = new HttpRequest(); req.setEndpoint('callout:Finance_API/invoices'); new Http().send(req); } }" },
+  { Id: sfId("01p", 5), Name: "FinanceSync", ApiVersion: 62, Status: "Active", LengthWithoutComments: 350, ...changedBy(APEX_OUTSIDE_MODIFIER, 18), Body: "// Sends invoices to the finance system. Was req.setEndpoint('https://old.example.com').\npublic class FinanceSync { @InvocableMethod(label='Send invoices') public static void sendAll(List<Id> ids) { new FinanceSync().send(); } public void send() { HttpRequest req = new HttpRequest(); req.setEndpoint('callout:Finance_API/invoices'); new Http().send(req); } }" },
   // Trap: reads the org's live data, and does check its result.
-  { Id: sfId("01p", 6), Name: "LeadRouterTest", ApiVersion: 62, Status: "Active", LengthWithoutComments: 250, Body: "@isTest(SeeAllData=true) private class LeadRouterTest { @isTest static void routes() { new LeadRouter().route(new List<Lead>()); System.assertEquals(0, Limits.getDmlStatements()); } }" },
+  { Id: sfId("01p", 6), Name: "LeadRouterTest", ApiVersion: 62, Status: "Active", LengthWithoutComments: 250, ...changedBy(2, 95), Body: "@isTest(SeeAllData=true) private class LeadRouterTest { @isTest static void routes() { new LeadRouter().route(new List<Lead>()); System.assertEquals(0, Limits.getDmlStatements()); } }" },
   // Trap: a test data factory has no test methods, so it has nothing to assert.
-  { Id: sfId("01p", 7), Name: "TestDataFactory", ApiVersion: 62, Status: "Active", LengthWithoutComments: 150, Body: "@isTest public class TestDataFactory { public static Lead lead() { return new Lead(LastName = 'Test', Company = 'Test'); } }" },
+  { Id: sfId("01p", 7), Name: "TestDataFactory", ApiVersion: 62, Status: "Active", LengthWithoutComments: 150, ...changedBy(null, 300), Body: "@isTest public class TestDataFactory { public static Lead lead() { return new Lead(LastName = 'Test', Company = 'Test'); } }" },
 ];
 
 const TRIGGER_EVENTS = ["BeforeInsert", "BeforeUpdate", "BeforeDelete", "AfterInsert", "AfterUpdate", "AfterDelete", "AfterUndelete"] as const;
 const usage = (...on: Array<(typeof TRIGGER_EVENTS)[number]>): Record<string, boolean> => Object.fromEntries(TRIGGER_EVENTS.map((e) => [`Usage${e}`, on.includes(e)]));
 
 export const APEX_TRIGGERS = [
-  { Id: sfId("01q", 1), Name: "OpportunityTrigger", TableEnumOrId: "Opportunity", ApiVersion: 60, LengthWithoutComments: 180, Status: "Active", ...usage("BeforeInsert"), Body: "trigger OpportunityTrigger on Opportunity (before insert) { }" },
-  { Id: sfId("01q", 2), Name: "OpportunitySplitTrigger", TableEnumOrId: "Opportunity", ApiVersion: 60, LengthWithoutComments: 220, Status: "Active", ...usage("AfterUpdate"), Body: "trigger OpportunitySplitTrigger on Opportunity (after update) { }" },
-  { Id: sfId("01q", 3), Name: "AccountTrigger", TableEnumOrId: "Account", ApiVersion: 60, LengthWithoutComments: 150, Status: "Active", ...usage("BeforeUpdate"), Body: "trigger AccountTrigger on Account (before update) { }" },
+  { Id: sfId("01q", 1), Name: "OpportunityTrigger", TableEnumOrId: "Opportunity", ApiVersion: 60, LengthWithoutComments: 180, Status: "Active", ...usage("BeforeInsert"), ...changedBy(4, 220), Body: "trigger OpportunityTrigger on Opportunity (before insert) { }" },
+  { Id: sfId("01q", 2), Name: "OpportunitySplitTrigger", TableEnumOrId: "Opportunity", ApiVersion: 60, LengthWithoutComments: 220, Status: "Active", ...usage("AfterUpdate"), ...changedBy(4, 150), Body: "trigger OpportunitySplitTrigger on Opportunity (after update) { }" },
+  { Id: sfId("01q", 3), Name: "AccountTrigger", TableEnumOrId: "Account", ApiVersion: 60, LengthWithoutComments: 150, Status: "Active", ...usage("BeforeUpdate"), ...changedBy(9, 400), Body: "trigger AccountTrigger on Account (before update) { }" },
   // Trap: a trigger on a custom object names it by id, not by name.
-  { Id: sfId("01q", 4), Name: "InvoiceTrigger", TableEnumOrId: sfId("01I", 1), ApiVersion: 62, LengthWithoutComments: 260, Status: "Active", ...usage("BeforeInsert", "BeforeUpdate"), Body: "// Totals each invoice from its lines.\ntrigger InvoiceTrigger on Invoice__c (before insert, before update) { }" },
+  { Id: sfId("01q", 4), Name: "InvoiceTrigger", TableEnumOrId: sfId("01I", 1), ApiVersion: 62, LengthWithoutComments: 260, Status: "Active", ...usage("BeforeInsert", "BeforeUpdate"), ...changedBy(APEX_OUTSIDE_MODIFIER, 18), Body: "// Totals each invoice from its lines.\ntrigger InvoiceTrigger on Invoice__c (before insert, before update) { }" },
   // Trap: a second trigger on the same custom object, by its 15-character id. With
   // the flow and Workflow Rule on Invoice__c, that's three tools and two triggers
   // on one object, which raw ids would split across three objects.
-  { Id: sfId("01q", 5), Name: "InvoiceAudit", TableEnumOrId: sfId("01I", 1).slice(0, 15), ApiVersion: 62, LengthWithoutComments: 140, Status: "Active", ...usage("AfterUpdate"), Body: "// Records who changed an invoice's total.\ntrigger InvoiceAudit on Invoice__c (after update) { }" },
+  { Id: sfId("01q", 5), Name: "InvoiceAudit", TableEnumOrId: sfId("01I", 1).slice(0, 15), ApiVersion: 62, LengthWithoutComments: 140, Status: "Active", ...usage("AfterUpdate"), ...changedBy(4, 7), Body: "// Records who changed an invoice's total.\ntrigger InvoiceAudit on Invoice__c (after update) { }" },
 ];
 
 export const ORG_COVERAGE = [{ PercentCovered: 82 }];
