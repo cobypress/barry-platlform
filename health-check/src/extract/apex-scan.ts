@@ -31,7 +31,11 @@ export type ApexScan = {
 export const DML = /(?<=(?:^|[;{})]|\belse)\s*)\b(insert|update|upsert|delete|undelete|merge)\s+[\w(\[]/gi;
 export const DATABASE_DML = /\bDatabase\s*\.\s*(insert|update|upsert|delete|undelete|merge|convertLead)\s*\(/gi;
 const SOQL = /\[\s*SELECT\b/gi;
-const DATABASE_QUERY = /\bDatabase\s*\.\s*(?:query|queryWithBinds|countQuery|getQueryLocator)\s*\(/gi;
+// Every Database method that runs a query string, WithBinds forms and cursors
+// included. What a class touches (apex-touches.ts) reads the same set, so a loop
+// the handbook marks is one this counts (DECISIONS.md 470).
+export const DATABASE_QUERY_METHOD = String.raw`Database\s*\.\s*(?:query|countQuery|getQueryLocator|getCursor)\w*`;
+const DATABASE_QUERY = new RegExp(String.raw`\b${DATABASE_QUERY_METHOD}\s*\(`, "gi");
 
 const count = (text: string, pattern: RegExp): number => text.match(pattern)?.length ?? 0;
 
