@@ -1,15 +1,16 @@
 import { AlignmentType, Document, Footer, HeadingLevel, Packer, PageNumber, Paragraph, TextRun } from "docx";
 import { colour, font } from "../design/tokens.ts";
 import { longDate } from "../render/format.ts";
-import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
-import { CHANGES_NOT_KEPT, TRIGGER_EVENTS, type Handbook, type HandbookChange, type HandbookApexClass, type HandbookApexTouches, type HandbookApexTrigger, type HandbookCondition, type HandbookFlow, type HandbookPath, type HandbookStep, type HandbookValidationRule, type ValidationRuleCoverage } from "./schema.ts";
+import { UNKNOWN_USER, type Pseudonymiser } from "../privacy/pseudonymiser.ts";
+import { CHANGES_NOT_KEPT, TRIGGER_EVENTS, type Handbook, type HandbookChange, type HandbookApexClass, type HandbookLastChange, type HandbookApexTouches, type HandbookApexTrigger, type HandbookCondition, type HandbookFlow, type HandbookPath, type HandbookStep, type HandbookValidationRule, type ValidationRuleCoverage } from "./schema.ts";
 
 // The org handbook as a Word document (DECISIONS.md 443 and 444): handbook.json
 // made readable, and nothing more. Code alone writes it, from the file: no
 // Claude text, no figure from the value model, and no name added but who made
-// each recent change, restored from the run's pseudonym map (decisions 421 and
-// 461). The admin's own text prints as written, so a reader can trust that
-// what isn't here doesn't exist, or is said to be missing.
+// each recent change and who last changed each class and trigger, restored
+// from the run's pseudonym map (decisions 421, 461 and 473). The admin's own
+// text prints as written, so a reader can trust that what isn't here doesn't
+// exist, or is said to be missing.
 
 /** The document in the run's documents folder, beside the reports. */
 export const HANDBOOK_DOCX = "org-handbook.docx";
@@ -248,7 +249,8 @@ function conditionWords(c: HandbookCondition): Run[] {
  * itself. Each says "we couldn't read this", "there's none" or what it holds,
  * and the three never look alike (decisions 453 and 454).
  */
-type Part = { covers: (h: Handbook) => string; write: (doc: Doc, h: Handbook, names: Names) => void };
+/** `alsoCovers` is a further line for "What it covers", or null when there's nothing to say. */
+type Part = { covers: (h: Handbook) => string; alsoCovers?: (h: Handbook) => string | null; write: (doc: Doc, h: Handbook, names: Names) => void };
 
 /** A user's name from their token, or null when the run's names can't give it. */
 type Names = (token: string) => string | null;
@@ -449,11 +451,23 @@ function touchesLines(touches: HandbookApexTouches | null): Run[][] {
   return lines;
 }
 
+/**
+ * "Last changed 3 Mar 2026 by Jo Ellis", the date as the recent changes give
+ * theirs, without the time (decision 473). Who is restored from the token
+ * alone, as a recent change's is; with no user, the date stands alone.
+ */
+function lastChangedLine(change: HandbookLastChange | null, names: Names): Run[][] {
+  if (change === null) return [];
+  const on = /^\d{4}-\d{2}-\d{2}/.test(change.at) ? longDate(change.at) : change.at;
+  const by = change.by === null ? "" : ` by ${names(change.by) ?? "a user whose name we couldn't look up"}`;
+  return [[{ text: `Last changed ${on}${by}` }]];
+}
+
 /** One class or trigger as one paragraph: an org can have thousands, and a heading and a paragraph a line each would bury the rest. */
-function writeApex(doc: Doc, item: ApexItem, trigger?: Run[][]): void {
+function writeApex(doc: Doc, item: ApexItem, names: Names, trigger?: Run[][]): void {
   // A trigger can't be a test, so only a class says whether it is one.
   const test = trigger ? "" : ` Test: ${item.isTest === null ? "couldn't be told: the code couldn't be read" : item.isTest ? "Yes" : "No"}.`;
-  doc.lines([{ text: item.name, bold: true }], [...(trigger ?? []), [{ text: `API version ${apiVersion(item.apiVersion)}. Status: ${item.status}.${test}` }], ...touchesLines(item.touches)]);
+  doc.lines([{ text: item.name, bold: true }], [...(trigger ?? []), [{ text: `API version ${apiVersion(item.apiVersion)}. Status: ${item.status}.${test}` }], ...lastChangedLine(item.lastChanged, names), ...touchesLines(item.touches)]);
 }
 
 /** What the reading is and isn't, said once, where the first Apex listed starts. */
@@ -463,40 +477,63 @@ const READING =
 /** A part with Apex listed in it, so the reading has been said. */
 const listsApex = (part: Capped<ApexItem>): boolean => part.status === "ok" && part.items.length > 0;
 
-function apexPart<T extends ApexItem>(what: { title: string; one: string; many: string; get: (h: Handbook) => Capped<T>; intro: (h: Handbook) => string; write: (doc: Doc, item: T) => void }): Part {
+function apexPart<T extends ApexItem>(what: { title: string; one: string; many: string; get: (h: Handbook) => Capped<T>; intro: (h: Handbook) => string; write: (doc: Doc, item: T, names: Names) => void }): Part {
   return {
     covers: (h) => {
       const part = what.get(h);
       if (part.status !== "ok") return unavailableWords(what.title, part.reason);
       return apexTotal(part) ? `${what.title}: ${apexCounts(part, what.one, what.many)}.` : `${what.title}: your org has none.`;
     },
-    write: (doc, h) => {
+    write: (doc, h, names) => {
       doc.heading(what.title, 2);
       const part = what.get(h);
       if (part.status !== "ok") return doc.para({ text: unavailableWords(what.title, part.reason), bold: true });
       if (apexTotal(part) === 0) return doc.para(`Your org has no ${what.title}: there were none to read.`);
       doc.para(`Your org has ${apexCounts(part, what.one, what.many)}.${apexCut(part) ? " The rest aren't in this handbook." : " They're listed by name."}`);
       doc.para(what.intro(h));
-      for (const item of part.items) what.write(doc, item);
+      for (const item of part.items) what.write(doc, item, names);
     },
   };
 }
 
 // In the file's order, which is by name (decision 456).
-const APEX_CLASSES = apexPart<HandbookApexClass>({ title: "Apex classes", one: "class", many: "classes", get: (h) => h.apexClasses, intro: () => READING, write: (doc, item) => writeApex(doc, item) });
+const APEX_CLASSES = apexPart<HandbookApexClass>({ title: "Apex classes", one: "class", many: "classes", get: (h) => h.apexClasses, intro: () => READING, write: (doc, item, names) => writeApex(doc, item, names) });
 
 /** Events in Apex's order, whatever order the file has them in. */
 const eventWords = (events: HandbookApexTrigger["events"]): Run =>
   events === null ? { text: "The events weren't read.", bold: true } : { text: `Runs: ${[...events].sort((a, b) => TRIGGER_EVENTS.indexOf(a) - TRIGGER_EVENTS.indexOf(b)).join(", ")}` };
 
-const APEX_TRIGGERS = apexPart<HandbookApexTrigger>({
-  title: "Apex triggers",
-  one: "trigger",
-  many: "triggers",
-  get: (h) => h.apexTriggers,
-  intro: (h) => `Each trigger shows the object it's on and the events it runs on. A custom object we couldn't name shows as the id Salesforce gives it. ${listsApex(h.apexClasses) ? "What it touches is read as the classes' is, with the same limits." : READING}`,
-  write: (doc, item) => writeApex(doc, item, [[{ text: `On: ${item.object}` }], [eventWords(item.events)]]),
-});
+/**
+ * Said once, under the Apex parts' own lines in "What it covers" (decision
+ * 473): that each listed class and trigger shows its last change, or that this
+ * run couldn't read them. A file from before they were kept says nothing.
+ */
+function lastChangedCovers(h: Handbook): string | null {
+  const listed = [
+    { what: "class", whose: "classes", part: h.apexClasses },
+    { what: "trigger", whose: "triggers", part: h.apexTriggers },
+  ].flatMap(({ what, whose, part }) => (part.status === "ok" && part.items.length > 0 ? [{ what, whose, lastChanges: part.lastChanges, noUser: (part.items as ApexItem[]).some((i) => i.lastChanged?.by === null) }] : []));
+  const read = listed.filter((p) => p.lastChanges === "read");
+  const refused = listed.filter((p) => p.lastChanges === "refused");
+  const said: string[] = [];
+  // A date alone would otherwise read as a name left off.
+  const dateAlone = read.some((p) => p.noUser) ? ", or the date alone where Salesforce records no user" : "";
+  if (read.length) said.push(`Each Apex ${read.map((p) => p.what).join(" and ")} shows when it was last changed and by whom${dateAlone}.`);
+  if (refused.length) said.push(`We couldn't read when your Apex ${refused.map((p) => p.whose).join(" and ")} were last changed, or by whom, so this handbook doesn't say.`);
+  return said.length ? said.join(" ") : null;
+}
+
+const APEX_TRIGGERS: Part = {
+  ...apexPart<HandbookApexTrigger>({
+    title: "Apex triggers",
+    one: "trigger",
+    many: "triggers",
+    get: (h) => h.apexTriggers,
+    intro: (h) => `Each trigger shows the object it's on and the events it runs on. A custom object we couldn't name shows as the id Salesforce gives it. ${listsApex(h.apexClasses) ? "What it touches is read as the classes' is, with the same limits." : READING}`,
+    write: (doc, item, names) => writeApex(doc, item, names, [[{ text: `On: ${item.object}` }], [eventWords(item.events)]]),
+  }),
+  alsoCovers: lastChangedCovers,
+};
 
 // ─── Recent changes ───────────────────────────────────────────────────────────
 
@@ -581,23 +618,28 @@ const PARTS: Part[] = [FLOWS, VALIDATION_RULES, APEX_CLASSES, APEX_TRIGGERS, REC
 type HandbookOptions = {
   clientName: string;
   runDate: string;
-  /** The run's pseudonym map, which turns who made each recent change back into a name. Without it, none is named. */
+  /** The run's pseudonym map, which turns who made each recent change, and who last changed each class and trigger, back into a name. Without it, none is named. */
   pseudonyms?: Pseudonymiser | null;
 };
 
 /** The handbook as its document's blocks. Exported for the tests, which read the words without unzipping. */
 export function handbookBlocks(handbook: Handbook, options: HandbookOptions): Paragraph[] {
   // The token alone, so text in the file that looks like one prints as written.
+  // The engine's placeholder for an id with no name isn't a name (decision 474).
   const names: Names = (token) => {
     const name = options.pseudonyms?.restore(token);
-    return name && name !== token ? name : null;
+    return name && name !== token && name !== UNKNOWN_USER ? name : null;
   };
   const doc = new Doc();
   doc.heading(`Org handbook: ${options.clientName}`, 1);
   doc.para(`This handbook sets out how your Salesforce org is configured: what each flow does, step by step, what each validation rule checks, what each Apex class and trigger touches, and what was changed in Setup recently, and by whom. We read it from your org on ${longDate(options.runDate)}, for your health check, and it describes the org as it was that day.`);
   doc.para("Everything in it comes from your org's own configuration. Names, descriptions, conditions, formulas and messages are as your admins wrote them, except that anything that looks like a password or a key is replaced with [REDACTED]. We haven't added to it or summarised it, except that what each piece of Apex touches is read from its code, as that part explains. Where we couldn't read something, or list only part of it, we say so.");
   doc.heading("What it covers", 2);
-  for (const part of PARTS) doc.para(part.covers(handbook));
+  for (const part of PARTS) {
+    doc.para(part.covers(handbook));
+    const also = part.alsoCovers?.(handbook);
+    if (also) doc.para(also);
+  }
   for (const part of PARTS) part.write(doc, handbook, names);
   return doc.blocks;
 }

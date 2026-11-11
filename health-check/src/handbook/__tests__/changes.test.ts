@@ -17,7 +17,7 @@ import { AS_OF, CHANGES_DELEGATE, CHANGES_MARKER, CHANGES_PLANTED, SETUP_AUDIT, 
 import { HANDBOOK_FILE, recentChanges } from "../build.ts";
 import { renderHandbookDocx } from "../docx.ts";
 import { readHandbook } from "../read.ts";
-import { CHANGES_NOT_KEPT, Handbook, MAX_TEXT, type HandbookChange } from "../schema.ts";
+import { CHANGES_NOT_KEPT, Handbook, HANDBOOK_VERSION, MAX_TEXT, type HandbookChange } from "../schema.ts";
 
 // The handbook's recent changes, from the Setup Audit Trail (DECISIONS.md 461
 // and 462). Who made each is a token in handbook.json, and a name only in the
@@ -243,7 +243,7 @@ describe("the part on its own", () => {
   });
   const label = (id: string) => `[[user:U${id.slice(-7, -3)}]]`;
   const bare = { flows: { status: "unavailable", reason: "x" }, validationRules: { status: "unavailable", reason: "x" }, apexClasses: { status: "unavailable", reason: "x" }, apexTriggers: { status: "unavailable", reason: "x" } } as const;
-  const doc = async (recent: Handbook["recentChanges"]) => docxText(await renderHandbookDocx(Handbook.parse({ version: 3, ...bare, recentChanges: recent }), OPTIONS));
+  const doc = async (recent: Handbook["recentChanges"]) => docxText(await renderHandbookDocx(Handbook.parse({ version: HANDBOOK_VERSION, ...bare, recentChanges: recent }), OPTIONS));
 
   test("says it's cut when the trail had more than the read takes", async () => {
     const part = recentChanges(audit([change(2), change(1)], true, 1_998), label);
@@ -299,7 +299,7 @@ describe("the part on its own", () => {
     assert.equal(token, "[[user:U10000]]");
     const part = recentChanges(audit([change(1)]), () => token);
     assert.ok(part.status === "ok" && part.items[0]!.by === token);
-    const text = docxText(await renderHandbookDocx(Handbook.parse({ version: 3, ...bare, recentChanges: part }), { ...OPTIONS, pseudonyms }));
+    const text = docxText(await renderHandbookDocx(Handbook.parse({ version: HANDBOOK_VERSION, ...bare, recentChanges: part }), { ...OPTIONS, pseudonyms }));
     assert.match(text, /\n1 Oct 2026 at 08:00 UTC, Jo Ellis: Flows {2}changedinteractiondef\nChange 1(\n|$)/);
     assert.ok(!text.includes(token) && !text.includes("U10000"));
   });
@@ -309,7 +309,7 @@ describe("the part on its own", () => {
     const token = "[[user:U10001]]";
     const part = recentChanges(audit([change(1)]), () => token);
     assert.ok(part.status === "ok" && part.items[0]!.by === token);
-    const text = docxText(await renderHandbookDocx(Handbook.parse({ version: 3, ...bare, recentChanges: part }), { ...OPTIONS, pseudonyms }));
+    const text = docxText(await renderHandbookDocx(Handbook.parse({ version: HANDBOOK_VERSION, ...bare, recentChanges: part }), { ...OPTIONS, pseudonyms }));
     assert.match(text, /\n1 Oct 2026 at 08:00 UTC, a user whose name we couldn't look up: Flows {2}changedinteractiondef\nChange 1(\n|$)/);
     assert.ok(!text.includes(token) && !text.includes("U10001"));
   });
@@ -323,11 +323,22 @@ describe("the part on its own", () => {
   });
 });
 
+/** A file's Apex parts as a version 3 or 2 file has them: no last change on any class or trigger, and no word of them on the part. */
+function olderApex<T extends Record<string, unknown>>(file: T): T {
+  const older = (part: { status: string; items?: Array<Record<string, unknown>>; lastChanges?: string }) => {
+    if (part.status !== "ok") return part;
+    const { lastChanges: _said, ...rest } = part;
+    return { ...rest, items: part.items!.map(({ lastChanged: _gone, ...item }) => item) };
+  };
+  return { ...file, apexClasses: older(file.apexClasses as never), apexTriggers: older(file.apexTriggers as never) };
+}
+
 describe("a handbook.json from before recent changes were kept", () => {
   test("still makes its document, whose last part says the run was read before they were kept", async () => {
-    // A version 2 file as runs wrote it: the synthetic org's, without the fifth part.
+    // A version 2 file as runs wrote it: the synthetic org's, without the fifth
+    // part, or any class's or trigger's last change (decision 473).
     const { dir: source } = await runFromRecording();
-    const { recentChanges: _gone, ...four } = read<Record<string, unknown>>(source, HANDBOOK_FILE);
+    const { recentChanges: _gone, ...four } = olderApex(read<Record<string, unknown>>(source, HANDBOOK_FILE));
     const dir = join(tempDir(), "run");
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, HANDBOOK_FILE), JSON.stringify({ ...four, version: 2 }));
