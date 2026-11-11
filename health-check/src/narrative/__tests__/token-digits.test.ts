@@ -136,14 +136,29 @@ describe("a roles-only draft and a five-digit token", () => {
 });
 
 describe("one definition of a token's digits", () => {
-  // A token's code spelled out in a regex: a letter, or [A-Z], then \d with a count;
-  // or any counted \d on the same line as an escaped "[[". Doubled backslashes are
-  // folded first so a pattern in an ordinary string counts too.
-  const SPELLED = /(?:\[A-Z\]|(?<![A-Za-z])[A-Z])\\d(?:\{\d|[+*])/;
-  const DIGITS = /\\d(?:\{\d|[+*])/;
+  // A token's code spelled out in a regex: its letter, then a digit (\d, [0-9] or
+  // [\d]) with a count or a repeat, or written out four times or more; or the same
+  // digits on a line with an escaped "[[" (decision 475). The letter is a bare
+  // capital, a class holding a capital ([UPC], [A-Za-z]), a group of those
+  // ((?:U|P|C), ([A-Z])) or an interpolation (${letter}), and the digits may open
+  // their own group. Any file is read, not only one that writes "[[" itself, since
+  // a token's brackets can come from elsewhere. Doubled backslashes are folded
+  // first so a pattern in an ordinary string counts too.
+  const DIGIT = String.raw`(?:\\d|\[0-9\]|\[\\d\])`;
+  const COUNTED = `${DIGIT}(?:\\{\\d|[+*]|${DIGIT}{3})`;
+  // Only a count that can reach four, for a bare capital opening a group: a
+  // time's T(\d{2}) is never a token's code.
+  const REACHES = `${DIGIT}(?:\\{(?:[4-9]|\\d\\d|\\d+,)|[+*]|${DIGIT}{3})`;
+  const OPEN = String.raw`(?:\((?:\?:|\?<\w+>)?)?`;
+  // A negated class ([^A-Z]) is anything but a letter, so it doesn't count.
+  const CLASS = String.raw`\[(?!\^)(?:[^\]\\]|\\.)*[A-Z](?:[^\]\\]|\\.)*\]`;
+  const GROUP = String.raw`\((?:\?:|\?<\w+>)?(?:[A-Z]|${CLASS})(?:\|(?:[A-Z]|${CLASS}))*\)`;
+  const INTERPOLATED = String.raw`\$\{[^}]*\}`;
+  const BARE = String.raw`(?<![A-Za-z])[A-Z]`;
+  const SPELLED = new RegExp(`(?:${BARE}|(?:${CLASS}|${GROUP}|${INTERPOLATED})${OPEN})${COUNTED}|${BARE}\\((?:\\?:|\\?<\\w+>)?${REACHES}`);
+  const DIGITS = new RegExp(COUNTED);
   const spellsDigits = (source: string): number[] => {
     const text = source.replace(/\\\\/g, "\\");
-    if (!text.includes(String.raw`\[\[`)) return [];
     return text.split("\n").flatMap((line, i) => (SPELLED.test(line) || (line.includes(String.raw`\[\[`) && DIGITS.test(line)) ? [i + 1] : []));
   };
   const DEFINES = join(SRC, "privacy", "pseudonymiser.ts");
@@ -169,6 +184,80 @@ describe("one definition of a token's digits", () => {
     ];
     for (const line of old) assert.deepEqual(spellsDigits(line), [1], line);
     assert.deepEqual(spellsDigits(String.raw`const ISO = /\d{4}-\d{2}/;` + "\n" + String.raw`const T = /\[\[[^\]]*\]\]/g;`), [], "a date or an any-content token is fine");
+  });
+
+  test("the check catches the other spellings of the same digits (decision 475)", () => {
+    // Each beside a token letter, on its own in a file and below a line holding an
+    // escaped "[["; then without the letter, on the "[[" line itself.
+    const OTHER = String.raw`const T = /\[\[[^\]]*\]\]/g;`;
+    const spellings = [
+      String.raw`const C = /[A-Z][0-9]{4}/;`,
+      String.raw`const C = /U[0-9]{4,}/;`,
+      String.raw`const C = /[A-Z][0-9]+/;`,
+      String.raw`const C = /U[0-9]*/;`,
+      String.raw`const C = /[A-Z][\d]{4}/;`,
+      String.raw`const C = /U[\d]+/;`,
+      String.raw`const C = /[A-Z][\d]*/;`,
+      String.raw`const C = /[A-Z]\d\d\d\d/;`,
+      String.raw`const C = /U\d\d\d\d\d?/;`,
+      String.raw`const C = /[A-Z][0-9][0-9][0-9][0-9]/;`,
+      String.raw`const C = /U[0-9]\d[0-9]\d/;`,
+      String.raw`const C = new RegExp("[A-Z][0-9]{4}");`,
+      String.raw`const C = new RegExp("U\\d\\d\\d\\d");`,
+    ];
+    for (const line of spellings) {
+      assert.deepEqual(spellsDigits(line), [1], line);
+      assert.deepEqual(spellsDigits(`${OTHER}\n${line}`), [2], line);
+    }
+    const onTheLine = [String.raw`/\[\[user:[A-Z][0-9]{4}\]\]/`, String.raw`/\[\[user:\w[\d]+\]\]/`, String.raw`/\[\[user:\w\d\d\d\d\]\]/`, String.raw`/\[\[user:\w[0-9][0-9][0-9][0-9]\]\]/`];
+    for (const line of onTheLine) assert.deepEqual(spellsDigits(line), [1], line);
+  });
+
+  test("the check catches a token's letter written as a class, a group or an interpolation (decision 475)", () => {
+    // Each alone in a file with no "[[", as written, then with each spelling of
+    // the digits in place of its own.
+    const letters = (digits: string) => [
+      String.raw`const code = String.raw${"`"}${"${letter}"}${digits}${"`"};`,
+      String.raw`const CODE = /^([A-Z])(${digits})$/;`,
+      String.raw`const CODE = /^[UPC]${digits}$/;`,
+      String.raw`const CODE = /^(?:U|P|C)${digits}$/;`,
+      String.raw`const CODE = /^[A-Za-z]${digits}$/;`,
+      String.raw`const CODE = new RegExp(${"`"}${"${kind}"}:${"${letter}"}${digits}${"`"});`,
+      String.raw`const CODE = /^U(${digits})$/;`,
+    ];
+    const asWritten = [...letters(String.raw`\d{4,}`).slice(0, 5), letters(String.raw`[0-9]{4,}`)[5]!, letters(String.raw`\d{4,}`)[6]!];
+    assert.equal(asWritten[0], String.raw`const code = String.raw${"`"}${"${letter}"}\d{4,}${"`"};`, "the pseudonymiser's own line");
+    for (const line of asWritten) assert.deepEqual(spellsDigits(line), [1], line);
+    const spellings = [String.raw`\d{4}`, String.raw`\d{4,}`, String.raw`\d+`, String.raw`\d*`, String.raw`\d\d\d\d`, String.raw`[0-9]{4,}`, String.raw`[\d]+`, String.raw`[0-9][0-9][0-9][0-9]`];
+    for (const digits of spellings) for (const line of letters(digits)) assert.deepEqual(spellsDigits(line), [1], line);
+  });
+
+  test("digits that can't be a token's code stay quiet", () => {
+    const OTHER = String.raw`const T = /\[\[[^\]]*\]\]/g;`;
+    const quiet = [
+      String.raw`const ISO = /\d{4}-\d{2}/;`,
+      String.raw`const YEAR = /^\d\d\d\d-\d\d$/;`,
+      String.raw`const ID = /^[0-9]{15}$/;`,
+      String.raw`const ID = /^[a-zA-Z0-9]{15}(?:[a-zA-Z0-9]{3})?$/;`,
+      String.raw`const RUN = /^hc-[0-9]{4}-[0-9]{2}-[\d]{2}$/;`,
+      String.raw`const FY = /FY\d{4}/;`,
+      String.raw`const Q = /Q[0-9]/;`,
+      // Three written out is short of any token, which has four digits or more.
+      String.raw`const CODE = /^R\d\d\d$/;`,
+      // The nearest shapes src holds: a time's T(\d{2}), dates and years in groups,
+      // money, and digits after a class with no capital or a negated one.
+      String.raw`const time = /^\d{4}-\d{2}-\d{2}T(\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?(?:Z|\+0000|\+00:00)$/;`,
+      String.raw`const DATE = /\b(\d{4})-(\d{2})-(\d{2})(?:T[\d:.]+(?:Z|[+-]\d{2}:?\d{2})?)?(?![\w-])/g;`,
+      String.raw`const MONTH = /(?<![\w-])(\d{4})-(0[1-9]|1[0-2])(?![\w-])/g;`,
+      String.raw`const YEAR = /(?<![\w.,£$€-])(?:19|20)\d{2}(?![\w%])/g;`,
+      String.raw`const FIGURE = String.raw${"`"}[-+\u2212]?[£$€]?[-\u2212]?(?:[1-9]\d{0,2}(?:,\d{3})+|[1-9]\d{0,8}|0)${"`"};`,
+      String.raw`const SLASHED = /\d{2}[-/]\d{4}/;`,
+      String.raw`const AFTER = /[^A-Z]\d{4}/;`,
+    ];
+    for (const line of quiet) {
+      assert.deepEqual(spellsDigits(line), [], line);
+      assert.deepEqual(spellsDigits(`${OTHER}\n${line}`), [], line);
+    }
   });
 
   test("no source file but the pseudonymiser spells a token's digits", () => {

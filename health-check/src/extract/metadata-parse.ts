@@ -109,7 +109,8 @@ function decodeReferences(text: string): string {
     return xmlCharacter(code) ? String.fromCodePoint(code) : reference;
   });
 }
-const entityDecoder = { decode: decodeReferences, reset() {}, setXmlVersion() {}, setExternalEntities() {}, addInputEntities() {} };
+/** Exported so the simulator's Tooling view decodes as a retrieve does (DECISIONS.md 476). */
+export const entityDecoder = { decode: decodeReferences, reset() {}, setXmlVersion() {}, setExternalEntities() {}, addInputEntities() {} };
 const parser = new XMLParser({ ignoreAttributes: true, parseTagValue: false, isArray: (name) => ARRAY_TAGS.has(name), entityDecoder });
 
 const USER_ID = /\b005[A-Za-z0-9]{12}(?:[A-Za-z0-9]{3})?\b/g;
