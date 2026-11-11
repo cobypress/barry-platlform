@@ -6,9 +6,10 @@ import { CHANGES_NOT_KEPT, TRIGGER_EVENTS, type Handbook, type HandbookChange, t
 
 // The org handbook as a Word document (DECISIONS.md 443 and 444): handbook.json
 // made readable, and nothing more. Code alone writes it, from the file: no
-// Claude text, no figure from the value model and no name added. The admin's
-// own text prints as written, so a reader can trust that what isn't here
-// doesn't exist, or is said to be missing.
+// Claude text, no figure from the value model, and no name added but who made
+// each recent change, restored from the run's pseudonym map (decisions 421 and
+// 461). The admin's own text prints as written, so a reader can trust that
+// what isn't here doesn't exist, or is said to be missing.
 
 /** The document in the run's documents folder, beside the reports. */
 export const HANDBOOK_DOCX = "org-handbook.docx";
