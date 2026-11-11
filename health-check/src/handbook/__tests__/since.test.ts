@@ -5,6 +5,7 @@ import { chmodSync, cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } fro
 import { basename, join } from "node:path";
 import { SALES_CLOUD_MODULES } from "../../domains/index.ts";
 import { runHealthCheck } from "../../engine/run.ts";
+import { APEX_READING } from "../../extract/apex-touches.ts";
 import { loadPseudonymMap, loadRun } from "../../render/render-run.ts";
 import { docxText } from "../../testing/docx-text.ts";
 import { EARLIER_AS_OF, plantEarlier, REMOVED_FLOW, withEarlier } from "../../testing/earlier-handbook.ts";
@@ -14,6 +15,7 @@ import { Simulator } from "../../testing/simulator.ts";
 import { AS_OF } from "../../testing/synthetic-org.ts";
 import { HANDBOOK_FILE } from "../build.ts";
 import { compareHandbooks, routeOf, type Compared, type KindComparison } from "../compare.ts";
+import { METADATA_READING } from "../detail.ts";
 import { NO_EARLIER, renderHandbookDocx, SINCE_TITLE } from "../docx.ts";
 import { readEarlierHandbook, readHandbook, type EarlierHandbook } from "../read.ts";
 import { Handbook, type HandbookFlowItem, type HandbookStep } from "../schema.ts";
@@ -69,6 +71,55 @@ const names = (c: KindComparison) => {
 const ok = <P extends { status: string }>(part: P): Extract<P, { status: "ok" }> => (part.status === "ok" ? (part as Extract<P, { status: "ok" }>) : assert.fail("unavailable"));
 
 const NOTHING = { added: [], removed: [], changed: [] };
+
+/**
+ * The synthetic org as an earlier health check that a later reading would see
+ * otherwise (decision 484): a flow's step, a formula written with `&#34;` for a
+ * quote (decision 471), what a class touches and a trigger's events, each
+ * differing with nothing in the org changed; and beside those, a flow, a rule
+ * and a class only it had, a flow only this run has, and three components whose
+ * last-changed date moved.
+ */
+function plantReadings(h: Handbook): void {
+  const flows = ok(h.flows);
+  ok(h.flows).items.find((f) => f.name === "Opportunity_Stage_Review")!.steps[0]!.label = "Read otherwise";
+  ok(h.flows).items.find((f) => f.name === "Invoice_Set_Status")!.lastChanged!.at = "2026-03-01T09:00:00.000+0000";
+  flows.items = [...flows.items.filter((f) => f.name !== "Draft_Idea"), { ...structuredClone(flows.items[0]!), name: REMOVED_FLOW, label: "Lead Nurture (old)" }];
+  const rules = ok(h.validationRules);
+  const escalated = rules.items.find((r) => r.name === "Reason_When_Escalated")!;
+  escalated.formula = escalated.formula!.replaceAll('"', "&#34;");
+  const old = rules.items.find((r) => r.name === "Old_Check")!;
+  old.formula = old.formula!.replaceAll('"', "&#34;");
+  old.lastChanged!.at = "2024-01-01T09:00:00.000+0000";
+  rules.items.push({ ...structuredClone(rules.items.find((r) => r.name === "Needs_Competitor")!), name: "Old_Discount_Check" });
+  const classes = ok(h.apexClasses);
+  classes.items.find((k) => k.name === "LeadRouter")!.touches!.queries = [];
+  classes.items.find((k) => k.name === "FinanceSync")!.lastChanged = { at: "2026-05-02T09:30:00.000+0000", by: "[[user:U0001]]" };
+  classes.items = [...classes.items, { ...structuredClone(classes.items[0]!), name: "QuoteSync" }].sort((a, b) => (a.name < b.name ? -1 : 1));
+  classes.total = classes.items.length;
+  ok(h.apexTriggers).items.find((t) => t.name === "InvoiceTrigger")!.events = ["before insert"];
+}
+
+/** A version 6 file as an engine of an earlier version wrote it: no readings, and what each version before didn't keep. */
+function asVersion(file: Handbook, version: number): Record<string, unknown> {
+  const { readBy: _none, ...five } = { ...file, version } as Record<string, unknown>;
+  if (version === 5) return five;
+  const older = (part: { status: string; items?: Array<Record<string, unknown>>; lastChanges?: string }) => {
+    if (part.status !== "ok") return part;
+    const { lastChanges: _said, ...rest } = part;
+    return { ...rest, items: part.items!.map(({ lastChanged: _gone, ...item }) => item) };
+  };
+  const four = olderComponents<Record<string, unknown>>(five);
+  if (version === 4) return four;
+  const three: Record<string, unknown> = { ...four, apexClasses: older(four.apexClasses as never), apexTriggers: older(four.apexTriggers as never) };
+  if (version === 3) return three;
+  const { recentChanges: _gone, ...two } = three;
+  return two;
+}
+
+/** The sentence for a kind whose earlier file says no reading. */
+const unrecorded = (many: string, one: string): string =>
+  `Your earlier health check read your ${many} before we began to record which version of our reader read them, and two versions can read the same ${one} differently, so we've compared only which were added or removed and when each was last changed.`;
 
 describe("no baseline", () => {
   // The synthetic org's handbook as an engine at 17586d0, before decision 483,
@@ -129,7 +180,7 @@ describe("the synthetic org since its earlier health check", () => {
     // Never the earlier text: not the old formula, message or step's field.
     for (const old of ["OR(ISBLANK(Due_Date__c), ISBLANK(Amount__c))", "Check the invoice.", "OwnerId"]) assert.ok(!part.includes(old), old);
     // And "What it covers" says what the part is and what it leaves out.
-    assert.match(text, /\nChanged since your last health check: what was added, removed or changed in your flows, validation rules, Apex classes and Apex triggers since your health check of 14 Jul 2026\.\n\nIt compares every detail this handbook keeps of each one, apart from who last changed it, which we don't match from one health check to the next\. It doesn't compare the order of steps no path reaches, the part of a formula or a condition's value past the 4,000 characters this handbook keeps, or the recent changes, which have their own part\. Where the two health checks can't be compared fairly, because one couldn't read something or read less of it, the part says so rather than call anything added, removed or changed\.\n\nRecent changes: /);
+    assert.match(text, /\nChanged since your last health check: what was added, removed or changed in your flows, validation rules, Apex classes and Apex triggers since your health check of 14 Jul 2026\.\n\nWhere both health checks read them the same way, it compares every detail this handbook keeps of each one, apart from who last changed it, which we don't match from one health check to the next\. It doesn't compare the order of steps no path reaches, the part of a formula or a condition's value past the 4,000 characters this handbook keeps, or the recent changes, which have their own part\. Where the two health checks can't be compared fairly, because one couldn't read something or read less of it, or the two read it in different ways, the part says so and compares only what it can, rather than call anything added, removed or changed that it can't show\.\n\nRecent changes: /);
   });
 
   test("two identical files: every kind says nothing changed, and nothing more", async () => {
@@ -183,13 +234,65 @@ describe("never guessed", () => {
     assert.deepEqual(names(c), { added: ["Due_Date_Required"], removed: [], changed: [] });
     assert.deepEqual(c.leftOutObjects, ["Case"]);
     const words = kindIn(partOf(await textOf(earlier)), "Validation rules");
-    assert.equal(words, "Added: 1 validation rule\nDue_Date_Required on Invoice__c\n\nRemoved: none\n\nChanged: none\n\nWe left out the rules on Case: only one of the two health checks read the rules on that object, so a rule there isn't called added or removed.");
+    assert.equal(words, "Added: 1 validation rule\nDue_Date_Required on Invoice__c\n\nRemoved: none\n\nChanged: none\n\nWe left out the rules on Case: we can't be sure both health checks read the rules on that object, so a rule there isn't called added or removed.");
     // The other way about, this run reading less: Case's rule isn't removed either.
     const back = compared(compareHandbooks(after, earlier.handbook).validationRules);
     assert.deepEqual([back.removed.map((r) => r.name), back.leftOutObjects], [["Due_Date_Required"], ["Case"]]);
     // Tooling reads every object, so against a retrieve that read Case too, Case is compared.
     const tooling = earlierOf((h) => (ok(h.validationRules).covers = { customObjects: "all", standardObjects: "all" }));
     assert.deepEqual(compared(compareHandbooks(tooling.handbook, after).validationRules).leftOutObjects, []);
+  });
+
+  describe("a rule on a custom object of another kind than __c (decision 484)", () => {
+    /** A rule on a custom metadata type, or another custom object, as the synthetic org's rules are kept. */
+    const ruleOn = (object: string, name = "Key_Required") => ({ ...structuredClone(ok(after.validationRules).items.find((r) => r.name === "Needs_Competitor")!), object, name });
+    const withRules = (h: Handbook, ...rules: ReturnType<typeof ruleOn>[]) => ok(h.validationRules).items.push(...rules);
+    const asTooling = (h: Handbook) => (ok(h.validationRules).covers = { customObjects: "all", standardObjects: "all" });
+
+    test("by the same route, one removed or added there is listed, with no note", async () => {
+      const earlier = earlierOf((h) => withRules(h, ruleOn("Setting__mdt")));
+      const c = compared(compareHandbooks(earlier.handbook, after).validationRules);
+      assert.deepEqual([names(c), c.leftOutObjects], [{ added: [], removed: ["Key_Required"], changed: [] }, []]);
+      assert.equal(kindIn(partOf(await textOf(earlier)), "Validation rules"), "Added: none\n\nRemoved: 1 validation rule\nKey_Required on Setting__mdt\n\nChanged: none");
+      const now = earlierOf((h) => withRules(h, ruleOn("Setting__mdt"))).handbook;
+      assert.deepEqual(names(compareHandbooks(after, now).validationRules), { added: ["Key_Required"], removed: [], changed: [] });
+      assert.equal(kindIn(partOf(await textOf({ handbook: after, asOf: EARLIER_AS_OF }, now)), "Validation rules"), "Added: 1 validation rule\nKey_Required on Setting__mdt\n\nRemoved: none\n\nChanged: none");
+      // Tooling to Tooling too, and every kind of custom object.
+      const suffixes = ["Setting__mdt", "Alert__e", "Archive__b", "Remote__x", "Article__kav"];
+      const tooling = earlierOf((h) => {
+        asTooling(h);
+        withRules(h, ...suffixes.map((o) => ruleOn(o)));
+      });
+      const toolingNow = earlierOf(asTooling).handbook;
+      assert.deepEqual(compared(compareHandbooks(tooling.handbook, toolingNow).validationRules).removed.map((r) => r.object), [...suffixes].sort((a, b) => a.localeCompare(b, "en-GB")));
+    });
+
+    test("across routes it's left out, and the sentence says we can't be sure; __c is still compared", async () => {
+      const earlier = earlierOf((h) => {
+        asTooling(h);
+        withRules(h, ruleOn("Setting__mdt"), ruleOn("Invoice__c", "New_On_Custom"));
+      });
+      const c = compared(compareHandbooks(earlier.handbook, after).validationRules);
+      assert.deepEqual([names(c), c.leftOutObjects], [{ added: [], removed: ["New_On_Custom"], changed: [] }, ["Setting__mdt"]]);
+      assert.equal(
+        kindIn(partOf(await textOf(earlier)), "Validation rules"),
+        "Added: none\n\nRemoved: 1 validation rule\nNew_On_Custom on Invoice__c\n\nChanged: none\n\nWe left out the rules on Setting__mdt: we can't be sure both health checks read the rules on that object, so a rule there isn't called added or removed.",
+      );
+      // Two objects, and the other way about: the later file the Tooling one.
+      const two = earlierOf((h) => {
+        asTooling(h);
+        withRules(h, ruleOn("Setting__mdt"), ruleOn("Alert__e"));
+      }).handbook;
+      assert.match(kindIn(partOf(await textOf({ handbook: after, asOf: EARLIER_AS_OF }, two)), "Validation rules"), /^No validation rules were added, removed or changed\.\n\nWe left out the rules on Alert__e and Setting__mdt: we can't be sure both health checks read the rules on those objects, so a rule there isn't called added or removed\.$/);
+    });
+
+    test("a file that says it read less than every custom object is taken at its word", () => {
+      // Never written today: the schema holds "all". Built by hand, as a later version might write it.
+      const earlier = earlierOf((h) => withRules(h, ruleOn("Setting__mdt"), ruleOn("Invoice__c", "New_On_Custom")));
+      (ok(earlier.handbook.validationRules).covers as { customObjects: string }).customObjects = "some";
+      const c = compared(compareHandbooks(earlier.handbook, after).validationRules);
+      assert.deepEqual([names(c).removed, c.leftOutObjects], [[], ["Invoice__c", "Setting__mdt"]]);
+    });
   });
 
   test("a cut Apex list: names are compared only as far as both lists go, and none past it is added or removed", async () => {
@@ -227,31 +330,127 @@ describe("never guessed", () => {
     assert.deepEqual([names(back), back.range], [NOTHING, { upTo: "LeadRouter", leftOut: 5 }]);
   });
 
-  for (const version of [4, 3, 2]) {
-    test(`an earlier version ${version} file: what its version didn't keep is never a change`, async () => {
-      // The file as an engine of that version wrote it, read back through the one reader.
-      const current = JSON.parse(readFileSync(join(recorded, HANDBOOK_FILE), "utf8")) as Record<string, unknown>;
-      const older = (part: { status: string; items?: Array<Record<string, unknown>>; lastChanges?: string }) => {
-        if (part.status !== "ok") return part;
-        const { lastChanges: _said, ...rest } = part;
-        return { ...rest, items: part.items!.map(({ lastChanged: _gone, ...item }) => item) };
-      };
-      const four = olderComponents<Record<string, unknown>>({ ...current, version });
-      const three = version === 4 ? four : { ...four, apexClasses: older(four.apexClasses as never), apexTriggers: older(four.apexTriggers as never) };
-      const { recentChanges: _gone, ...two } = three;
+  for (const version of [5, 4, 3, 2]) {
+    test(`an earlier version ${version} file, which says no reading: only what was added or removed and when each was last changed, with the sentence`, async () => {
+      // As an engine at 8344688 (version 5) or before wrote it, planted with a
+      // change of each kind that a parser fix alone can make, and read back
+      // through the one reader (decision 484).
+      const current = structuredClone(JSON.parse(readFileSync(join(recorded, HANDBOOK_FILE), "utf8"))) as Handbook;
+      plantReadings(current);
       const dir = join(tempDir(), "earlier");
       mkdirSync(dir);
-      writeFileSync(join(dir, HANDBOOK_FILE), JSON.stringify(version === 2 ? two : three));
+      writeFileSync(join(dir, HANDBOOK_FILE), JSON.stringify(asVersion(current, version)));
       const earlier = handbookIn(dir);
+      assert.deepEqual(earlier.readBy, { metadata: null, apex: null });
       const c = compareHandbooks(earlier, after);
-      for (const kind of Object.values(c)) assert.deepEqual(names(kind), NOTHING, `version ${version}`);
+      // Flows' and rules' dates are kept from version 5, Apex's from 4.
+      const flowsDated = version >= 5;
+      const apexDated = version >= 4;
+      assert.deepEqual(names(c.flows), { added: ["Draft_Idea"], removed: [REMOVED_FLOW], changed: flowsDated ? [["Invoice_Set_Status", ["lastChanged"]]] : [] });
+      assert.deepEqual(names(c.validationRules), { added: [], removed: ["Old_Discount_Check"], changed: flowsDated ? [["Old_Check", ["lastChanged"]]] : [] });
+      assert.deepEqual(names(c.apexClasses), { added: [], removed: ["QuoteSync"], changed: apexDated ? [["FinanceSync", ["lastChanged"]]] : [] });
+      assert.deepEqual(names(c.apexTriggers), NOTHING);
+      for (const kind of Object.values(c)) assert.deepEqual([compared(kind).reading, compared(kind).unread, compared(kind).stepsCut], ["unknownBefore", 0, 0]);
+
       const part = partOf(await textOf({ handbook: earlier, asOf: EARLIER_AS_OF }));
-      assert.equal(kindIn(part, "Flows"), "No flows were added, removed or changed.\n\nYour earlier health check doesn't say when each flow was last changed, so that isn't compared.");
-      assert.equal(kindIn(part, "Validation rules"), "No validation rules were added, removed or changed.\n\nYour earlier health check doesn't say when each validation rule was last changed, so that isn't compared.");
-      const apex = version === 4 ? "" : "\n\nYour earlier health check doesn't say when each Apex class was last changed, so that isn't compared.";
-      assert.equal(kindIn(part, "Apex classes"), `No Apex classes were added, removed or changed.${apex}`);
+      const notKept = (one: string, dated: boolean) => (dated ? "" : `\n\nYour earlier health check doesn't say when each ${one} was last changed, so that isn't compared.`);
+      const set = ok(after.flows).items.find((f) => f.name === "Invoice_Set_Status")!;
+      // The date and who are this run's, the name restored from this run's map.
+      assert.equal(
+        kindIn(part, "Flows"),
+        `Added: 1 flow\nDraft (Draft_Idea)\n\nRemoved: 1 flow\nLead Nurture (old) (Lead_Nurture_Old)\n\n${flowsDated ? `Changed: 1 flow\n${set.label} (Invoice_Set_Status): last changed 13 Oct 2026 by Ash Rowe` : "Changed: none"}\n\n${unrecorded("flows", "flow")}${notKept("flow", flowsDated)}`,
+      );
+      assert.equal(
+        kindIn(part, "Validation rules"),
+        `Added: none\n\nRemoved: 1 validation rule\nOld_Discount_Check on Opportunity\n\n${flowsDated ? "Changed: 1 validation rule\nOld_Check on Invoice__c: last changed 18 Jun 2025" : "Changed: none"}\n\n${unrecorded("validation rules", "validation rule")}${notKept("validation rule", flowsDated)}`,
+      );
+      assert.equal(
+        kindIn(part, "Apex classes"),
+        `Added: none\n\nRemoved: 1 Apex class\nQuoteSync\n\n${apexDated ? "Changed: 1 Apex class\nFinanceSync: last changed 13 Oct 2026 by Ash Rowe" : "Changed: none"}\n\n${unrecorded("Apex classes", "Apex class")}${notKept("Apex class", apexDated)}`,
+      );
+      assert.equal(kindIn(part, "Apex triggers"), `No Apex triggers were added, removed or changed.\n\n${unrecorded("Apex triggers", "Apex trigger")}${notKept("Apex trigger", apexDated)}`);
+      // Nothing derived is named, nor the notes about details that weren't compared.
+      assert.doesNotMatch(part, /what it touches|formula|steps|events|whether it's a test|couldn't read the code|had more steps/);
     });
   }
+
+  test("stamps that differ for the flows and rules only: those two compared by their dates, Apex in full; and the other way about", async () => {
+    const planted = earlierOf(plantReadings);
+    const metadataOlder = earlierOf((h) => {
+      plantReadings(h);
+      h.readBy = { metadata: 1, apex: 1 };
+    });
+    const now = Handbook.parse({ ...after, readBy: { metadata: 2, apex: 1 } });
+    const c = compareHandbooks(metadataOlder.handbook, now);
+    assert.deepEqual([compared(c.flows).reading, compared(c.validationRules).reading, compared(c.apexClasses).reading, compared(c.apexTriggers).reading], ["older", "older", null, null]);
+    assert.deepEqual(names(c.flows).changed, [["Invoice_Set_Status", ["lastChanged"]]]);
+    assert.deepEqual(names(c.validationRules).changed, [["Old_Check", ["lastChanged"]]]);
+    // Apex in full: what it touches, its events and its date.
+    assert.deepEqual(names(c.apexClasses).changed, [["FinanceSync", ["lastChanged"]], ["LeadRouter", ["touches"]]]);
+    assert.deepEqual(names(c.apexTriggers).changed, [["InvoiceTrigger", ["events"]]]);
+    const part = partOf(await textOf(metadataOlder, now));
+    assert.match(kindIn(part, "Flows"), /\n\nYour earlier health check read your flows with an earlier version of our reader, which can read the same flow differently, so we've compared only which were added or removed and when each was last changed\.$/);
+    assert.match(kindIn(part, "Validation rules"), /\n\nYour earlier health check read your validation rules with an earlier version of our reader, which can read the same validation rule differently, so we've compared only which were added or removed and when each was last changed\.$/);
+    assert.match(kindIn(part, "Apex classes"), /\nLeadRouter: what it touches$/);
+    assert.doesNotMatch(kindIn(part, "Apex classes") + kindIn(part, "Apex triggers"), /reader/);
+
+    // The other way about: Apex by its dates, flows and rules in full.
+    const apexOlder = earlierOf((h) => {
+      plantReadings(h);
+      h.readBy = { metadata: 1, apex: 1 };
+    });
+    const apexNow = Handbook.parse({ ...after, readBy: { metadata: 1, apex: 2 } });
+    const back = compareHandbooks(apexOlder.handbook, apexNow);
+    assert.deepEqual([compared(back.flows).reading, compared(back.validationRules).reading, compared(back.apexClasses).reading, compared(back.apexTriggers).reading], [null, null, "older", "older"]);
+    assert.deepEqual(names(back.flows).changed, [["Invoice_Set_Status", ["lastChanged"]], ["Opportunity_Stage_Review", ["steps"]]]);
+    assert.deepEqual(names(back.validationRules).changed, [["Reason_When_Escalated", ["formula"]], ["Old_Check", ["formula", "lastChanged"]]]);
+    assert.deepEqual([names(back.apexClasses).changed, names(back.apexTriggers).changed], [[["FinanceSync", ["lastChanged"]]], []]);
+    const backPart = partOf(await textOf(apexOlder, apexNow));
+    assert.match(kindIn(backPart, "Apex triggers"), /^No Apex triggers were added, removed or changed\.\n\nYour earlier health check read your Apex triggers with an earlier version of our reader, which can read the same Apex trigger differently, so we've compared only which were added or removed and when each was last changed\.$/);
+    // A higher number in the earlier file says only that the two differ.
+    const higher = compareHandbooks(Handbook.parse({ ...planted.handbook, readBy: { metadata: 3, apex: 1 } }), Handbook.parse({ ...after, readBy: { metadata: 2, apex: 1 } }));
+    assert.equal(compared(higher.flows).reading, "differs");
+    const higherPart = partOf(await textOf({ handbook: Handbook.parse({ ...planted.handbook, readBy: { metadata: 3, apex: 1 } }), asOf: EARLIER_AS_OF }, Handbook.parse({ ...after, readBy: { metadata: 2, apex: 1 } })));
+    assert.match(kindIn(higherPart, "Flows"), /\n\nYour earlier health check read your flows with a different version of our reader from this one, which can read the same flow differently, so we've compared only which were added or removed and when each was last changed\.$/);
+  });
+
+  test("this health check's reading not known, or neither's: the sentence names the right one", async () => {
+    const earlier = earlierOf((h) => {
+      plantReadings(h);
+      h.readBy = { metadata: 1, apex: 1 };
+    });
+    const unknownNow = Handbook.parse({ ...after, readBy: { metadata: null, apex: 1 } });
+    assert.match(kindIn(partOf(await textOf(earlier, unknownNow)), "Validation rules"), /\n\nThis health check read your validation rules before we began to record which version of our reader read them, and two versions can read the same validation rule differently, so we've compared only which were added or removed and when each was last changed\.$/);
+    const neither = earlierOf((h) => {
+      plantReadings(h);
+      h.readBy = { metadata: null, apex: null };
+    });
+    const both = compareHandbooks(neither.handbook, Handbook.parse({ ...after, readBy: { metadata: null, apex: null } }));
+    for (const kind of Object.values(both)) assert.equal(compared(kind).reading, "unknownBoth");
+    assert.match(kindIn(partOf(await textOf(neither, Handbook.parse({ ...after, readBy: { metadata: null, apex: null } }))), "Apex classes"), /\n\nBoth health checks read your Apex classes before we began to record which version of our reader read them, and two versions can read the same Apex class differently, so we've compared only which were added or removed and when each was last changed\.$/);
+  });
+
+  test("flows by another route and another reading: one sentence gives both reasons and says what follows once", async () => {
+    // The earlier run's route is the Tooling route's, told from its rules' cover.
+    const earlier = earlierOf((h) => {
+      ok(h.validationRules).covers = { customObjects: "all", standardObjects: "all" };
+      h.readBy = { metadata: null, apex: 1 };
+    });
+    const c = compared(compareHandbooks(earlier.handbook, after).flows);
+    assert.deepEqual([c.routes, c.reading], ["differ", "unknownBefore"]);
+    const words = kindIn(partOf(await textOf(earlier)), "Flows");
+    assert.equal(
+      words,
+      "No flows were added, removed or changed.\n\nWe've compared only which flows were added or removed and when each was last changed, for two reasons: your earlier health check read your flows by a different route from this one, and the two routes can give a different version of a flow; and your earlier health check read your flows before we began to record which version of our reader read them, and two versions can read the same flow differently.",
+    );
+    assert.equal(words.match(/we've compared only/gi)?.length, 1);
+  });
+
+  test("the same reading both sides: nothing is said of it, and every detail is compared", () => {
+    const c = compareHandbooks(earlierOf(plantReadings).handbook, after);
+    for (const kind of Object.values(c)) assert.equal(compared(kind).reading, null);
+    assert.deepEqual(names(c.apexClasses).changed, [["FinanceSync", ["lastChanged"]], ["LeadRouter", ["touches"]]]);
+  });
 
   test("a class or trigger whose code one run couldn't read isn't changed in what it touches, its test or its events", async () => {
     const earlier = earlierOf((h) => {
@@ -343,6 +542,11 @@ describe("the two metadata routes", () => {
     }
     return Object.is(a, b) ? [] : [path];
   }
+
+  test("a fresh run on either route records the reading of each half it read", () => {
+    for (const { handbook } of [retrieve, tooling]) assert.deepEqual(handbook.readBy, { metadata: METADATA_READING, apex: APEX_READING });
+    assert.deepEqual([METADATA_READING, APEX_READING], [1, 1]);
+  });
 
   test("measured on the synthetic org: the two files differ only in which objects' rules they cover", () => {
     assert.deepEqual([routeOf(retrieve.handbook), routeOf(tooling.handbook)], ["retrieve", "tooling"]);

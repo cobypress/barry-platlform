@@ -45,6 +45,15 @@ export type Changed = Component & { details: Detail[]; lastChanged: HandbookLast
 /** How each file's metadata was read, told from what its validation rules cover; null when it can't be told. */
 export type Route = "retrieve" | "tooling";
 
+/**
+ * Why a kind's details weren't compared, from the two files' `readBy` for it
+ * (decision 484): the earlier file's reading is older than this one's, the two
+ * differ some other way, or the earlier file, this one or both don't say,
+ * which a file from before the readings were kept, or a run that reused a
+ * step read before then, doesn't.
+ */
+export type Reading = "older" | "differs" | "unknownBefore" | "unknownNow" | "unknownBoth";
+
 export type Compared = {
   status: "compared";
   added: Component[];
@@ -56,7 +65,7 @@ export type Compared = {
   lastChanges: { before: LastChanges; after: LastChanges };
   /** In both, with a detail one of the runs couldn't read, which is left out rather than called a change. */
   unread: number;
-  /** Validation rules: objects only one run read the rules on, whose rules are neither added nor removed. */
+  /** Validation rules: objects we can't be sure both runs read the rules on, whose rules are neither added nor removed. */
   leftOutObjects: string[];
   /** Validation rules left out because one run could name their object only by its id. */
   unnamed: number;
@@ -66,6 +75,8 @@ export type Compared = {
   stepsCut: number;
   /** Flows: the two runs read them by different routes, or one route can't be told, so only last-changed dates are compared. */
   routes: "differ" | "unknown" | null;
+  /** The two files weren't made by the same reading of this kind, or one doesn't say, so only last-changed dates are compared. */
+  reading: Reading | null;
 };
 
 /** A kind one of the runs couldn't read: "now" is this run, "before" the earlier one. */
@@ -94,10 +105,21 @@ type Kind<T> = {
 };
 
 /** The notes one kind's comparison has, empty for the kinds it doesn't apply to. */
-type Notes = Pick<Compared, "leftOutObjects" | "unnamed" | "range" | "stepsCut" | "routes">;
-const none = (): Notes => ({ leftOutObjects: [], unnamed: 0, range: null, stepsCut: 0, routes: null });
+type Notes = Pick<Compared, "leftOutObjects" | "unnamed" | "range" | "stepsCut" | "routes" | "reading">;
+const none = (): Notes => ({ leftOutObjects: [], unnamed: 0, range: null, stepsCut: 0, routes: null, reading: null });
 
-function compareKind<T>(before: T[], after: T[], kind: Kind<T>, lastChanges: Compared["lastChanges"]): Omit<Compared, keyof Notes> {
+type Dated = { lastChanged: HandbookLastChange | null };
+
+/**
+ * A component compared only in when it was last changed, where the two files
+ * can't be compared detail by detail (decisions 483 and 484): nothing a reading
+ * works out, and nothing another reading or route could give differently, so
+ * not even its status. Nothing is unread, since nothing else was compared.
+ */
+const datesOnly = (before: Dated, after: Dated): Difference => ({ details: lastChangedDiffers(before.lastChanged, after.lastChanged) ? ["lastChanged"] : [], unread: false });
+
+/** `full` false compares only last-changed dates: see `datesOnly`. */
+function compareKind<T extends Dated>(before: T[], after: T[], kind: Kind<T>, lastChanges: Compared["lastChanges"], full: boolean): Omit<Compared, keyof Notes> {
   const earlier = new Map(before.filter(kind.inScope).map((i) => [kind.key(i), i]));
   const now = new Map(after.filter(kind.inScope).map((i) => [kind.key(i), i]));
   const added = [...now].filter(([k]) => !earlier.has(k)).map(([, i]) => kind.component(i));
@@ -109,9 +131,9 @@ function compareKind<T>(before: T[], after: T[], kind: Kind<T>, lastChanges: Com
     const was = earlier.get(k);
     if (was === undefined) continue;
     common++;
-    const d = kind.differ(was, item);
+    const d = full ? kind.differ(was, item) : datesOnly(was, item);
     if (d.unread) unread++;
-    if (d.details.length) changed.push({ ...kind.component(item), details: d.details, lastChanged: (item as { lastChanged: HandbookLastChange | null }).lastChanged });
+    if (d.details.length) changed.push({ ...kind.component(item), details: d.details, lastChanged: item.lastChanged });
   }
   return { status: "compared", added, removed, changed, common, lastChanges, unread };
 }
@@ -129,6 +151,17 @@ function lastChangedDiffers(before: HandbookLastChange | null, after: HandbookLa
 }
 
 const differs = (a: unknown, b: unknown): boolean => !isDeepStrictEqual(a, b);
+
+/**
+ * Whether both files were made by the same reading of a kind (decision 484):
+ * null when they were, so its details can be compared. A file that doesn't say
+ * is never taken to be the same reading as one that does, or as another that
+ * doesn't: a parser fix can move a detail of a component nobody touched.
+ */
+export function readingOf(before: number | null, after: number | null): Reading | null {
+  if (before === null || after === null) return before === null && after === null ? "unknownBoth" : before === null ? "unknownBefore" : "unknownNow";
+  return before === after ? null : before < after ? "older" : "differs";
+}
 
 // ─── Flows ────────────────────────────────────────────────────────────────────
 
@@ -161,25 +194,21 @@ function stepsDiffer(before: HandbookFlowItem, after: HandbookFlowItem): boolean
   return now.size !== earlier.size || [...now.keys()].some((name) => !earlier.has(name));
 }
 
-function flowDiffer(sameRoute: boolean) {
-  return (before: HandbookFlowItem, after: HandbookFlowItem): Difference => {
-    const details: Detail[] = [];
-    if (sameRoute) {
-      if (before.label !== after.label) details.push("label");
-      if (before.status !== after.status) details.push("status");
-      if (before.processType !== after.processType) details.push("type");
-      if (before.description !== after.description) details.push("description");
-      const start = (f: HandbookFlowItem) => [f.start.object, f.start.triggerType, f.start.recordTriggerType];
-      if (differs(start(before), start(after))) details.push("start");
-      if (differs(before.start.schedule, after.start.schedule)) details.push("schedule");
-      if (differs(before.start.entry, after.start.entry)) details.push("entry");
-      const paths = (f: HandbookFlowItem) => [f.start.paths, f.start.pathsTotal, f.start.pathsCut];
-      if (differs(paths(before), paths(after))) details.push("paths");
-      if (stepsDiffer(before, after)) details.push("steps");
-    }
-    if (lastChangedDiffers(before.lastChanged, after.lastChanged)) details.push("lastChanged");
-    return { details, unread: false };
-  };
+function flowDiffer(before: HandbookFlowItem, after: HandbookFlowItem): Difference {
+  const details: Detail[] = [];
+  if (before.label !== after.label) details.push("label");
+  if (before.status !== after.status) details.push("status");
+  if (before.processType !== after.processType) details.push("type");
+  if (before.description !== after.description) details.push("description");
+  const start = (f: HandbookFlowItem) => [f.start.object, f.start.triggerType, f.start.recordTriggerType];
+  if (differs(start(before), start(after))) details.push("start");
+  if (differs(before.start.schedule, after.start.schedule)) details.push("schedule");
+  if (differs(before.start.entry, after.start.entry)) details.push("entry");
+  const paths = (f: HandbookFlowItem) => [f.start.paths, f.start.pathsTotal, f.start.pathsCut];
+  if (differs(paths(before), paths(after))) details.push("paths");
+  if (stepsDiffer(before, after)) details.push("steps");
+  if (lastChangedDiffers(before.lastChanged, after.lastChanged)) details.push("lastChanged");
+  return { details, unread: false };
 }
 
 const byLabel = (a: Component, b: Component): number => (a.label || a.name).localeCompare(b.label || b.name, "en-GB") || a.name.localeCompare(b.name, "en-GB");
@@ -189,11 +218,14 @@ function compareFlows(before: Handbook, after: Handbook): KindComparison {
   if (skip || before.flows.status !== "ok" || after.flows.status !== "ok") return skip!;
   const [was, now] = [routeOf(before), routeOf(after)];
   const routes = was === null || now === null ? "unknown" : was !== now ? "differ" : null;
-  const kind: Kind<HandbookFlowItem> = { key: (f) => f.name, component: (f) => ({ name: f.name, label: f.label || null, object: null }), differ: flowDiffer(routes === null), inScope: () => true };
-  const result = compareKind(before.flows.items, after.flows.items, kind, { before: before.flows.lastChanges, after: after.flows.lastChanges });
+  // The same route and the same reading, or only the dates.
+  const reading = readingOf(before.readBy.metadata, after.readBy.metadata);
+  const full = routes === null && reading === null;
+  const kind: Kind<HandbookFlowItem> = { key: (f) => f.name, component: (f) => ({ name: f.name, label: f.label || null, object: null }), differ: flowDiffer, inScope: () => true };
+  const result = compareKind(before.flows.items, after.flows.items, kind, { before: before.flows.lastChanges, after: after.flows.lastChanges }, full);
   const earlier = new Map(before.flows.items.map((f) => [f.name, f]));
-  const stepsCut = routes === null ? after.flows.items.filter((f) => earlier.has(f.name) && (stepsCutIn(f) || stepsCutIn(earlier.get(f.name)!))).length : 0;
-  return { ...result, ...none(), added: result.added.sort(byLabel), removed: result.removed.sort(byLabel), changed: result.changed.sort(byLabel), stepsCut, routes };
+  const stepsCut = full ? after.flows.items.filter((f) => earlier.has(f.name) && (stepsCutIn(f) || stepsCutIn(earlier.get(f.name)!))).length : 0;
+  return { ...result, ...none(), added: result.added.sort(byLabel), removed: result.removed.sort(byLabel), changed: result.changed.sort(byLabel), stepsCut, routes, reading };
 }
 
 // ─── Validation rules ─────────────────────────────────────────────────────────
@@ -201,14 +233,23 @@ function compareFlows(before: Handbook, after: Handbook): KindComparison {
 /** A custom object's id, as the Tooling route keeps it when it can't name the object. */
 const OBJECT_ID = /^01I[0-9A-Za-z]{12}(?:[0-9A-Za-z]{3})?$/;
 
+/** A custom object of any kind (decision 484): `__c`, `__mdt`, `__e`, `__b`, `__x`, `__kav` and the like, or one known only by its id. */
+const isCustom = (object: string): boolean => /__[A-Za-z]+$/.test(object) || OBJECT_ID.test(object);
+
 /**
- * Whether a run read the rules on an object (decision 455): every custom
- * object, the standard objects its list names, or all of them on Tooling. One
- * it holds a rule on was read, whatever its list says.
+ * Whether a run read the rules on an object (decisions 455 and 484): every
+ * custom object, the standard objects its list names, or all of them on
+ * Tooling. One it holds a rule on was read, whatever its list says. Both routes
+ * read every custom object, but whether the retrieve's wildcard and Tooling's
+ * list bring the same kinds isn't verified (QUESTIONS.md, the handbook's x), so
+ * across routes, or where a route can't be told, only `__c` and an id count:
+ * a rule on a custom metadata type, say, is left out rather than called added
+ * or removed. A file that ever said it read less than every custom object is
+ * taken at its word.
  */
-function covered(covers: ValidationRuleCoverage, items: HandbookValidationRuleItem[], object: string): boolean {
+function covered(covers: ValidationRuleCoverage, items: HandbookValidationRuleItem[], object: string, sameRoute: boolean): boolean {
+  if (isCustom(object)) return covers.customObjects === "all" && (sameRoute || /__c$/.test(object) || OBJECT_ID.test(object));
   if (covers.standardObjects === "all" || covers.standardObjects.includes(object)) return true;
-  if (/__c$/.test(object) || OBJECT_ID.test(object)) return true;
   return items.some((r) => r.object === object);
 }
 
@@ -239,9 +280,11 @@ function compareRules(before: Handbook, after: Handbook): KindComparison {
   const skip = notCompared(before.validationRules, after.validationRules);
   if (skip || before.validationRules.status !== "ok" || after.validationRules.status !== "ok") return skip!;
   const [was, now] = [before.validationRules, after.validationRules];
-  // An object only one run read: a rule on it is neither added nor removed.
+  // An object one of the runs may not have read: a rule on it is neither added nor removed.
+  const route = routeOf(before);
+  const sameRoute = route !== null && route === routeOf(after);
   const objects = new Set([...was.items, ...now.items].map((r) => r.object));
-  const leftOut = [...objects].filter((o) => !covered(was.covers, was.items, o) || !covered(now.covers, now.items, o)).sort((a, b) => a.localeCompare(b, "en-GB"));
+  const leftOut = [...objects].filter((o) => !covered(was.covers, was.items, o, sameRoute) || !covered(now.covers, now.items, o, sameRoute)).sort((a, b) => a.localeCompare(b, "en-GB"));
   // A rule whose object one run named only by its id, and the rule of that name
   // the other run named, can't be told the same or different: left out, unless
   // both runs kept it under the same id.
@@ -256,10 +299,11 @@ function compareRules(before: Handbook, after: Handbook): KindComparison {
     differ: ruleDiffer,
     inScope: (r) => !skipped.has(r.object) && !unnamed(r),
   };
-  const result = compareKind(was.items, now.items, kind, { before: was.lastChanges, after: now.lastChanges });
+  const reading = readingOf(before.readBy.metadata, after.readBy.metadata);
+  const result = compareKind(was.items, now.items, kind, { before: was.lastChanges, after: now.lastChanges }, reading === null);
   // By name: one rule seen under its id in one run and its name in the other is one.
   const unnamedCount = new Set([...was.items, ...now.items].filter((r) => !skipped.has(r.object) && unnamed(r)).map((r) => r.name)).size;
-  return { ...result, ...none(), added: result.added.sort(byObject), removed: result.removed.sort(byObject), changed: result.changed.sort(byObject), leftOutObjects: leftOut, unnamed: unnamedCount };
+  return { ...result, ...none(), added: result.added.sort(byObject), removed: result.removed.sort(byObject), changed: result.changed.sort(byObject), leftOutObjects: leftOut, unnamed: unnamedCount, reading };
 }
 
 // ─── Apex ─────────────────────────────────────────────────────────────────────
@@ -306,23 +350,25 @@ function triggerDiffer(before: HandbookApexTrigger, after: HandbookApexTrigger):
   return { details, unread: apex.unread || objectUnread || eventsUnread };
 }
 
-function compareApex<T extends HandbookApexClass>(before: ApexPart<T>, after: ApexPart<T>, differ: (b: T, a: T) => Difference, object: (item: T) => string | null): KindComparison {
+function compareApex<T extends HandbookApexClass>(before: ApexPart<T>, after: ApexPart<T>, readBy: [number | null, number | null], differ: (b: T, a: T) => Difference, object: (item: T) => string | null): KindComparison {
   const skip = notCompared(before, after);
   if (skip || before.status !== "ok" || after.status !== "ok") return skip!;
   const upTo = rangeOf(before, after);
   const inRange = (item: T): boolean => upTo === null || item.name <= upTo;
   const kind: Kind<T> = { key: (i) => i.name, component: (i) => ({ name: i.name, label: null, object: object(i) }), differ, inScope: inRange };
-  const result = compareKind(before.items, after.items, kind, { before: before.lastChanges, after: after.lastChanges });
+  const reading = readingOf(...readBy);
+  const result = compareKind(before.items, after.items, kind, { before: before.lastChanges, after: after.lastChanges }, reading === null);
   const range = upTo === null ? null : { upTo, leftOut: Math.max(after.total, after.items.length) - after.items.filter(inRange).length };
-  return { ...result, ...none(), added: result.added.sort(byName), removed: result.removed.sort(byName), changed: result.changed.sort(byName), range };
+  return { ...result, ...none(), added: result.added.sort(byName), removed: result.removed.sort(byName), changed: result.changed.sort(byName), range, reading };
 }
 
 /** The two handbooks side by side, each kind on its own. `before` is the earlier health check's. */
 export function compareHandbooks(before: Handbook, after: Handbook): HandbookComparison {
+  const apex: [number | null, number | null] = [before.readBy.apex, after.readBy.apex];
   return {
     flows: compareFlows(before, after),
     validationRules: compareRules(before, after),
-    apexClasses: compareApex<HandbookApexClass>(before.apexClasses, after.apexClasses, apexDiffer, () => null),
-    apexTriggers: compareApex<HandbookApexTrigger>(before.apexTriggers, after.apexTriggers, triggerDiffer, (t) => t.object),
+    apexClasses: compareApex<HandbookApexClass>(before.apexClasses, after.apexClasses, apex, apexDiffer, () => null),
+    apexTriggers: compareApex<HandbookApexTrigger>(before.apexTriggers, after.apexTriggers, apex, triggerDiffer, (t) => t.object),
   };
 }

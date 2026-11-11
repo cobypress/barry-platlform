@@ -29,6 +29,17 @@ export function withEarlier(dir: string, edit: (h: Handbook) => unknown = plantE
   return earlier;
 }
 
+/**
+ * The earlier health check as one read before which reading made its file was
+ * kept (decision 484), as every handbook made before then is: a re-check set
+ * against it compares only what was added or removed and when each was last
+ * changed. Without this, the earlier file holds this run's readings, so the
+ * part names which details changed.
+ */
+export function olderReading(h: Handbook): void {
+  h.readBy = { metadata: null, apex: null };
+}
+
 /** A flow the synthetic org had at its earlier health check and has since removed. */
 export const REMOVED_FLOW = "Lead_Nurture_Old";
 

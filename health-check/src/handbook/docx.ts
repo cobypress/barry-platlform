@@ -2,7 +2,7 @@ import { AlignmentType, Document, Footer, HeadingLevel, Packer, PageNumber, Para
 import { colour, font } from "../design/tokens.ts";
 import { longDate } from "../render/format.ts";
 import { UNKNOWN_USER, type Pseudonymiser } from "../privacy/pseudonymiser.ts";
-import { compareHandbooks, type Changed, type Compared, type Component, type Detail, type HandbookComparison, type KindComparison, type NotCompared } from "./compare.ts";
+import { compareHandbooks, type Changed, type Compared, type Component, type Detail, type HandbookComparison, type KindComparison, type NotCompared, type Reading } from "./compare.ts";
 import type { EarlierHandbook } from "./read.ts";
 import { CHANGES_NOT_KEPT, TRIGGER_EVENTS, type Handbook, type HandbookChange, type HandbookApexClass, type HandbookLastChange, type HandbookApexTouches, type HandbookApexTrigger, type HandbookCondition, type HandbookFlow, type HandbookFlowItem, type HandbookPath, type HandbookStep, type HandbookValidationRule, type HandbookValidationRuleItem, type LastChanges, type ValidationRuleCoverage } from "./schema.ts";
 
@@ -696,14 +696,42 @@ function changedWords(change: Changed, names: Names): string {
   return listed(words);
 }
 
+/** What follows from comparing a kind only by its dates, said once however many reasons there are. */
+const DATES_ONLY = "we've compared only which were added or removed and when each was last changed";
+
+/**
+ * Why a kind was compared only by its dates (decision 484), as a clause that
+ * ends before the consequence. Each is true of every case its key covers: a
+ * file with no reading recorded was read before we kept one, whichever run it
+ * is, a resumed run's reused step included.
+ */
+function readingWords(kind: SinceKind, reading: Reading): string {
+  const same = `the same ${kind.one} differently`;
+  if (reading === "older") return `Your earlier health check read your ${kind.many} with an earlier version of our reader, which can read ${same}`;
+  if (reading === "differs") return `Your earlier health check read your ${kind.many} with a different version of our reader from this one, which can read ${same}`;
+  const who = { unknownBefore: "Your earlier health check", unknownNow: "This health check", unknownBoth: "Both health checks" }[reading];
+  return `${who} read your ${kind.many} before we began to record which version of our reader read them, and two versions can read ${same}`;
+}
+
+/** Why flows were compared only by their dates, by route: a clause that ends before the consequence. */
+function routeWords(kind: SinceKind, routes: "differ" | "unknown"): string {
+  return routes === "differ"
+    ? `Your earlier health check read your ${kind.many} by a different route from this one, and the two routes can give a different version of a flow`
+    : `We can't tell whether your earlier health check read your ${kind.many} the same way as this one, and two ways of reading them can give a different version of a flow`;
+}
+
+const lowerFirst = (text: string): string => `${text[0]!.toLowerCase()}${text.slice(1)}`;
+
 /** What one kind's comparison left out, and why, each in a sentence of its own. */
 function sinceNotes(kind: SinceKind, c: Compared): string[] {
   const notes: string[] = [];
   const these = (n: number): string => (n === 1 ? "that one" : "those");
-  if (c.routes === "differ") notes.push(`Your earlier health check read your ${kind.many} by a different route from this one, and the two routes can give a different version of a flow, so we've compared only which were added or removed and when each was last changed.`);
-  if (c.routes === "unknown") notes.push(`We can't tell whether your earlier health check read your ${kind.many} the same way as this one, and two ways of reading them can give a different version of a flow, so we've compared only which were added or removed and when each was last changed.`);
+  // Compared only by dates: one sentence, its consequence said once, with both reasons where a flow has two.
+  const reasons = [...(c.routes ? [routeWords(kind, c.routes)] : []), ...(c.reading ? [readingWords(kind, c.reading)] : [])];
+  if (reasons.length === 1) notes.push(`${reasons[0]}, so ${DATES_ONLY}.`);
+  if (reasons.length > 1) notes.push(`${upperFirst(DATES_ONLY.replace("which were", `which ${kind.many} were`))}, for two reasons: ${reasons.map(lowerFirst).join("; and ")}.`);
   if (c.stepsCut) notes.push(`${upperFirst(plural(c.stepsCut, kind.one, kind.many))} had more steps than this handbook keeps in one of the two health checks, so for ${these(c.stepsCut)} we compared how many steps each has and the steps both kept.`);
-  if (c.leftOutObjects.length) notes.push(`We left out the rules on ${listed(c.leftOutObjects)}: only one of the two health checks read the rules on ${c.leftOutObjects.length === 1 ? "that object" : "those objects"}, so a rule there isn't called added or removed.`);
+  if (c.leftOutObjects.length) notes.push(`We left out the rules on ${listed(c.leftOutObjects)}: we can't be sure both health checks read the rules on ${c.leftOutObjects.length === 1 ? "that object" : "those objects"}, so a rule there isn't called added or removed.`);
   if (c.unnamed) notes.push(`We left out ${plural(c.unnamed, kind.one, kind.many)} whose object one of the two health checks could name only by its id, so ${c.unnamed === 1 ? "it isn't" : "they aren't"} called added, removed or changed.`);
   if (c.range) {
     const after = c.range.leftOut ? ` This health check's ${plural(c.range.leftOut, kind.one, kind.many)} after that ${c.range.leftOut === 1 ? "isn't" : "aren't"} compared, so none is called added or removed.` : "";
@@ -752,7 +780,7 @@ function sincePart(earlier: EarlierHandbook | null, comparison: HandbookComparis
     covers: () => (earlier ? `${SINCE_TITLE}: what was added, removed or changed in your flows, validation rules, Apex classes and Apex triggers ${since}.` : `${SINCE_TITLE}: there was no earlier handbook to compare with.`),
     alsoCovers: () =>
       earlier
-        ? "It compares every detail this handbook keeps of each one, apart from who last changed it, which we don't match from one health check to the next. It doesn't compare the order of steps no path reaches, the part of a formula or a condition's value past the 4,000 characters this handbook keeps, or the recent changes, which have their own part. Where the two health checks can't be compared fairly, because one couldn't read something or read less of it, the part says so rather than call anything added, removed or changed."
+        ? "Where both health checks read them the same way, it compares every detail this handbook keeps of each one, apart from who last changed it, which we don't match from one health check to the next. It doesn't compare the order of steps no path reaches, the part of a formula or a condition's value past the 4,000 characters this handbook keeps, or the recent changes, which have their own part. Where the two health checks can't be compared fairly, because one couldn't read something or read less of it, or the two read it in different ways, the part says so and compares only what it can, rather than call anything added, removed or changed that it can't show."
         : null,
     write: (doc, _h, names) => {
       doc.heading(SINCE_TITLE, 2);
