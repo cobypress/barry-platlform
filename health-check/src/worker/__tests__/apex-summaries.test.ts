@@ -249,6 +249,18 @@ describe("the summaries reach the console's table", () => {
     assert.equal(deps.store.summaries.size, 0);
   });
 
+  test("the switch turned off before a second delivery sends none, though the file is still there", async () => {
+    const { deps, handle, dir } = await setup({ narrative: claude(), apexSummaries: true });
+    const saved = saving(deps);
+    assert.equal((await handle(job, once)).outcome, "done");
+    assert.ok(has(dir, SUMMARIES_FILE) && "handbookSummaries" in saved[0]!);
+    deps.apexSummaries = false;
+    reopen(deps);
+    assert.equal((await handle(job, once)).outcome, "done");
+    assert.ok(has(dir, SUMMARIES_FILE));
+    assert.ok(!("handbookSummaries" in saved[1]!));
+  });
+
   test("a scan and a pulse with the switch on: no row", async () => {
     for (const product of ["scan", "pulse"] as const) {
       const deps = baseDeps({ dataTransport: new ReplayTransport(fiveRecording()), narrative: claude(), apexSummaries: true });

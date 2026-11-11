@@ -2,7 +2,9 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { MODELS } from "../../config.ts";
 import { APEX_SOURCE_MAX_ITEMS } from "../../extract/apex-source.ts";
-import { summaryCountWords } from "../docx.ts";
+import { renderHandbookDocx, summaryCountWords } from "../docx.ts";
+import { Pseudonymiser } from "../../privacy/pseudonymiser.ts";
+import { docxText } from "../../testing/docx-text.ts";
 import { Handbook, HANDBOOK_VERSION, type HandbookApexClass, type HandbookApexTrigger } from "../schema.ts";
 import { HandbookSummaries, SUMMARY_LIMITS } from "../summaries.ts";
 import { CONSOLE_SUMMARY_LIMITS, ConsoleSummariesRow, PRINT_MAX, printableSummaries, printableText, storedFromRow, waitingRow, type StoredSummaries, type SummariesToSave } from "../summary-row.ts";
@@ -184,5 +186,23 @@ describe("the counts, in words", () => {
     assert.equal(words(2, { tooLarge: 1, rest: 1 }), "Of the Apex classes and triggers we read, 2 carry a summary, and the others are 1 that was too large to summarise whole and 1 that we couldn't summarise or chose to leave out.");
     assert.equal(words(1, { overLimit: 1 }), `Of the Apex classes and triggers we read, 1 carries a summary, and the other is 1 beyond the ${APEX_SOURCE_MAX_ITEMS} largest.`);
     assert.equal(words(1, { rest: 1 }), "Of the Apex classes and triggers we read, 1 carries a summary, and the other is 1 that we couldn't summarise or chose to leave out.");
+  });
+});
+
+describe("the renderer and a summary", () => {
+  test("prints a summary exactly as it's given: never through the run's names, even a token the map knows", async () => {
+    // printableSummaries never lets a token through; this holds the renderer to its own side of that.
+    const pseudonyms = new Pseudonymiser();
+    const token = pseudonyms.label("user", "005000000000001AAA", "Robin Synthetic");
+    const summary = `Hands each lead to ${token}, as the code spells it.`;
+    const text = docxText(await renderHandbookDocx(handbook(), { clientName: "Synthetic Co", runDate: "2026-10-31T00:00:00.000Z", pseudonyms, summaries: { items: [{ kind: "class", name: "LeadRouter", summary }], counts: { tests: 0, tooLarge: 0, overLimit: 0, rest: 0 } } }));
+    assert.ok(text.includes(`Summary (written by Claude, checked by us): ${summary}`));
+    assert.ok(!text.includes("Robin Synthetic"));
+  });
+
+  test("an empty set of summaries is no summaries", async () => {
+    const options = { clientName: "Synthetic Co", runDate: "2026-10-31T00:00:00.000Z" };
+    const text = docxText(await renderHandbookDocx(handbook(), { ...options, summaries: { items: [], counts: { tests: 1, tooLarge: 0, overLimit: 0, rest: 0 } } }));
+    assert.equal(text, docxText(await renderHandbookDocx(handbook(), options)));
   });
 });
