@@ -1,5 +1,6 @@
 import type { Calibration } from "../schemas/index.ts";
 import { isUnavailable, type QueryApi, type QueryOptions, type SalesforceClient } from "../salesforce/client.ts";
+import type { ApexSourceStore } from "./apex-source.ts";
 
 export type SourceInfo =
   | { kind: "soql"; api: QueryApi; query: string }
@@ -30,6 +31,12 @@ export type ExtractContext = {
   pageSize: number;
   /** The output of an extractor that ran earlier in this run. */
   get<T>(extractor: Extractor<T>): T;
+  /**
+   * Where the Apex step keeps the redacted code of what Claude may summarise
+   * (DECISIONS.md 491). Only the worker gives one, with its switch on: an
+   * extractor never reads the environment, and the command line never keeps code.
+   */
+  apexSource?: ApexSourceStore;
 };
 
 // One extractor is one step: resumable alone, and one BullMQ job in Milestone 5.

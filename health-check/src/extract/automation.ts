@@ -1,6 +1,7 @@
 import { isUnavailable, SalesforceError, type MetadataMember } from "../salesforce/client.ts";
 import { redactSecrets } from "../privacy/secrets.ts";
 import { scanApex, type ApexScan } from "./apex-scan.ts";
+import { selectApexSource, type SourceRow } from "./apex-source.ts";
 import { APEX_READING, readTouches, type ApexTouches } from "./apex-touches.ts";
 import { orgExtractor, recordCountsExtractor } from "./configuration.ts";
 import { indexReferences, parseMetadataBundle, type MetadataBundle, type ReferenceIndex } from "./metadata-parse.ts";
@@ -168,6 +169,12 @@ function stripBodies<R extends { Name: string; Body?: string }>(rows: Sourced<R[
   return { ...rows, data };
 }
 
+/** Each row's body beside the scan stripBodies made from it, row for row, for the code kept for Claude's summaries. */
+function sourceRows(kind: SourceRow["kind"], read: Sourced<Array<{ Name: string; Body?: string; LengthWithoutComments?: number }>>, stripped: Sourced<Array<CodeFacts>>): SourceRow[] {
+  if (read.status !== "ok" || stripped.status !== "ok") return [];
+  return read.data.map((row, i) => ({ kind, name: row.Name, length: row.LengthWithoutComments, body: row.Body, scan: stripped.data[i]!.scan }));
+}
+
 const LAST_CHANGE_FIELDS = "LastModifiedDate, LastModifiedById, LastModifiedBy.Name";
 type LastChangeFields = { LastModifiedDate?: string | null; LastModifiedById?: string | null; LastModifiedBy?: { Name?: string | null } | null };
 
@@ -216,6 +223,8 @@ export const apexExtractor: Extractor<ApexData> = {
   version: 10,
   partialKeys: [REFUSED_PARTIAL],
   async run(ctx) {
+    // With the switch on, a step that runs again never leaves an earlier read's code behind.
+    ctx.apexSource?.clear();
     const references: ReferenceIndex = { users: {}, fields: {} };
     // Through REST, not Tooling: a user with View Setup but not Author Apex gets
     // INVALID_TYPE from Tooling's ApexClass, and reads REST's with the same
@@ -247,9 +256,14 @@ export const apexExtractor: Extractor<ApexData> = {
     const edition = org?.status === "ok" ? org.data[0]?.OrganizationType : undefined;
     const noApex = <T>(rows: Sourced<T>): Sourced<T> =>
       rows.status === "unavailable" && edition === "Professional Edition" && /isn't available in this org/.test(rows.reason) ? { ...rows, reason: "Professional Edition has no Apex, so there's no code to check." } : rows;
+    const classRows = stripBodies(classes.rows, "ApexClass", references);
+    const triggerRows = stripBodies(triggers.rows, "ApexTrigger", references);
+    // Kept only once every page of both is read, so a step stopped part way and
+    // resumed keeps exactly what an unstopped one would (DECISIONS.md 491).
+    ctx.apexSource?.keep(selectApexSource([...sourceRows("class", classes.rows, classRows), ...sourceRows("trigger", triggers.rows, triggerRows)]));
     return {
-      classes: noApex(stripBodies(classes.rows, "ApexClass", references)) as Sourced<ApexClassRow[]>,
-      triggers: noApex(stripBodies(triggers.rows, "ApexTrigger", references)) as Sourced<ApexTriggerRow[]>,
+      classes: noApex(classRows) as Sourced<ApexClassRow[]>,
+      triggers: noApex(triggerRows) as Sourced<ApexTriggerRow[]>,
       orgCoverage,
       classCoverage,
       references,
