@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { schemaExtractor } from "./configuration.ts";
-import { daysBefore, readSoql, soqlDate, soqlDateTime, unavailable, type ExtractContext, type Extractor, type Sourced, type SourceInfo } from "./types.ts";
+import { daysBefore, readSoql, soqlDate, soqlDateTime, soqlUpTo, unavailable, upToItsSecond, type ExtractContext, type Extractor, type Sourced, type SourceInfo } from "./types.ts";
 
 export type StageRow = { ApiName: string; MasterLabel: string; IsActive: boolean; IsClosed: boolean; IsWon: boolean; SortOrder: number };
 
@@ -88,7 +88,60 @@ export type OpportunityExtract = {
   multiCurrency: boolean;
   lossReasonField: string | null;
   windowFrom: string;
+  /**
+   * Deals with a history row made after the run's date (DECISIONS.md 465): how
+   * many were wound back to how they stood at it, and how many couldn't be and
+   * are as read. Undefined where the history couldn't be read, so nothing is
+   * known, and in a checkpoint from before it was counted.
+   */
+  sinceTheRun?: { woundBack: number; asRead: number };
 };
+
+/** By time, then id, as the pipeline sorts each deal's history (historic-pipeline/cohort.ts). */
+function byTimeThenId(a: HistoryRow, b: HistoryRow): number {
+  const [x, y] = [`${a.CreatedDate}|${a.Id}`, `${b.CreatedDate}|${b.Id}`];
+  return x < y ? -1 : x > y ? 1 : 0;
+}
+
+/**
+ * Each deal as it stood at the run's date (DECISIONS.md 465). The scope already
+ * leaves out deals made since, but a deal changed since is read as it is now,
+ * beside a history that shows the change. A history row made after the end is
+ * dropped, and a deal that had one takes its stage, amount and close date from
+ * its last row at or before the end, and IsClosed and IsWon from that stage.
+ * A deal with no later row is left exactly as read, so a run where nothing has
+ * happened since gives what it always did. One that can't be wound back (no
+ * row by the end, or a stage the stages read doesn't hold) is kept as read,
+ * with all its history, and counted.
+ */
+export function asAtTheRun(opportunities: OpportunityRow[], history: HistoryRow[], stages: Sourced<StageRow[]>, now: Date): { opportunities: OpportunityRow[]; history: HistoryRow[]; woundBack: number; asRead: number } {
+  const end = upToItsSecond(now).getTime();
+  const later = (h: HistoryRow): boolean => Date.parse(h.CreatedDate) > end;
+  const changed = new Set(history.filter(later).map((h) => h.OpportunityId));
+  if (changed.size === 0) return { opportunities, history, woundBack: 0, asRead: 0 };
+
+  const lastByTheEnd = new Map<string, HistoryRow>();
+  for (const h of history) {
+    if (!changed.has(h.OpportunityId) || later(h)) continue;
+    const last = lastByTheEnd.get(h.OpportunityId);
+    if (!last || byTimeThenId(last, h) < 0) lastByTheEnd.set(h.OpportunityId, h);
+  }
+  const byStage = new Map(stages.status === "ok" ? stages.data.map((s) => [s.ApiName, s]) : []);
+  const asRead = new Set<string>();
+  let woundBack = 0;
+  const deals = opportunities.map((o) => {
+    if (!changed.has(o.Id)) return o;
+    const last = lastByTheEnd.get(o.Id);
+    const stage = last ? byStage.get(last.StageName) : undefined;
+    if (!last || !stage) {
+      asRead.add(o.Id);
+      return o;
+    }
+    woundBack++;
+    return { ...o, StageName: last.StageName, Amount: last.Amount, CloseDate: last.CloseDate, IsClosed: stage.IsClosed, IsWon: stage.IsWon };
+  });
+  return { opportunities: deals, history: history.filter((h) => !later(h) || asRead.has(h.OpportunityId)), woundBack, asRead: asRead.size };
+}
 
 function calibratedOpenStages(ctx: ExtractContext): string {
   const open = ctx.calibration.stages.filter((s) => s.category === "open").map((s) => `'${s.name.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`);
@@ -100,8 +153,10 @@ function scopeClause(ctx: ExtractContext): string {
   const closed = soqlDate(ctx.windowStart);
   // LastModifiedDate catches a deal closed in the window with an old CloseDate,
   // such as a bulk tidy-up. The stage list keeps "open" in the calibration's
-  // hands, because IsClosed is Salesforce's opinion, not the customer's.
-  return `(CreatedDate >= ${created} OR CloseDate >= ${closed} OR LastModifiedDate >= ${created} OR IsClosed = false${calibratedOpenStages(ctx)})`;
+  // hands, because IsClosed is Salesforce's opinion, not the customer's. The
+  // end leaves out a deal made after the run's date (DECISIONS.md 465); one
+  // changed since is wound back from its history (asAtTheRun).
+  return `(CreatedDate >= ${created} OR CloseDate >= ${closed} OR LastModifiedDate >= ${created} OR IsClosed = false${calibratedOpenStages(ctx)}) AND ${soqlUpTo("CreatedDate", ctx.now)}`;
 }
 
 export const opportunitiesExtractor: Extractor<OpportunityExtract> = {
@@ -111,6 +166,9 @@ export const opportunitiesExtractor: Extractor<OpportunityExtract> = {
   partialKeys: ["opportunities", "opportunity-history"],
   async run(ctx) {
     const schema = ctx.get(schemaExtractor).Opportunity!;
+    // What a stage wound back to means for IsClosed and IsWon. Asked for on
+    // every run, so a module that doesn't list it first fails on clean data too.
+    const stages = ctx.get(stagesExtractor);
     const windowFrom = soqlDate(ctx.windowStart);
     const scope = scopeClause(ctx);
     const historyFields = "Id, OpportunityId, StageName, Amount, CloseDate, CreatedDate";
@@ -170,31 +228,44 @@ export const opportunitiesExtractor: Extractor<OpportunityExtract> = {
       return { ...base, opportunities: failed, history: { status: "unavailable", reason: "Opportunity couldn't be read", source: historySource } };
     }
 
-    const ok = { status: "ok", source: opportunitySource, truncated: false, data: opportunities } as const;
     const named = { ...base, names };
+    let history: HistoryRow[];
     try {
-      const history = await readKeyset<HistoryRow>(
+      const raw = await readKeyset<HistoryRow>(
         ctx,
         "opportunity-history",
         historyFields,
         "OpportunityHistory",
         historyWhere,
       );
-      return { ...named, opportunities: ok, history: { status: "ok", data: history.map((h) => HistoryRow.parse(h)), source: historySource, truncated: false } };
+      history = raw.map((h) => HistoryRow.parse(h));
     } catch (err) {
-      return { ...named, opportunities: ok, history: unavailable(historySource, err) };
+      // With no history, nothing can be wound back, so every deal is as read.
+      return { ...named, opportunities: { status: "ok", source: opportunitySource, truncated: false, data: opportunities }, history: unavailable(historySource, err) };
     }
+    // The history read keeps no end of its own: a row made since is how a deal
+    // that changed since is found, and it's dropped here (DECISIONS.md 465).
+    const atTheRun = asAtTheRun(opportunities, history, stages, ctx.now);
+    return {
+      ...named,
+      opportunities: { status: "ok", source: opportunitySource, truncated: false, data: atTheRun.opportunities },
+      history: { status: "ok", data: atTheRun.history, source: historySource, truncated: false },
+      sinceTheRun: { woundBack: atTheRun.woundBack, asRead: atTheRun.asRead },
+    };
   },
 };
 
 // NextStep is free text, so the rule only ever needs to know whether it's filled.
 // Filtering means the text is never selected, so it can't reach a checkpoint.
+// It ends where the deals do (DECISIONS.md 465), as cur.missing-next-steps sets
+// the two against each other. It reads next steps as they stand: a deal closed
+// since isn't listed, though the deals read winds it back to open.
 export const nextStepsExtractor: Extractor<Sourced<string[]>> = {
   id: "next-steps",
   version: 1,
   partialKeys: ["next-steps"],
   async run(ctx) {
-    const where = `(IsClosed = false${calibratedOpenStages(ctx)}) AND NextStep != null`;
+    const where = `(IsClosed = false${calibratedOpenStages(ctx)}) AND NextStep != null AND ${soqlUpTo("CreatedDate", ctx.now)}`;
     const source: SourceInfo = { kind: "soql", api: "rest", query: `SELECT Id FROM Opportunity WHERE ${where}` };
     try {
       const rows = await readKeyset<{ Id: string }>(ctx, "next-steps", "Id", "Opportunity", where);

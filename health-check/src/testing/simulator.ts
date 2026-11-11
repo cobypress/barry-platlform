@@ -608,9 +608,11 @@ export class Simulator implements Transport {
           const earlier = () => [...this.#d.priorWins, ...this.#d.pipeline.opportunities.filter((o) => o.IsWon && o.CloseDate < before)];
           return this.#keyset(this.#derive(`prior ${before}`, () => earlier().map(({ Id, AccountId, CloseDate }) => ({ Id, AccountId, CloseDate }))), soql);
         }
-        if (/NextStep != null/.test(soql)) return this.#keyset(this.#derive("next steps", () => this.#d.pipeline.opportunities.filter((o) => !o.IsClosed && o.NextStep !== null).map((o) => ({ Id: o.Id }))), soql);
+        // Both end on the deal's CreatedDate (DECISIONS.md 465). The scope's OR isn't
+        // applied, as it never was: every synthetic deal is in it.
+        if (/NextStep != null/.test(soql)) return this.#keyset(this.#derive(`next steps to ${until(where, "CreatedDate")}`, () => upTo(this.#d.pipeline.opportunities, where, "CreatedDate").filter((o) => !o.IsClosed && o.NextStep !== null).map((o) => ({ Id: o.Id }))), soql);
         // Free text the query didn't ask for mustn't come back, as on a real org.
-        return this.#keyset(this.#derive("opportunities", () => this.#d.pipeline.opportunities.map(({ NextStep, ...o }) => ({ ...o, Name: org.dealName(o.Id) }))), soql);
+        return this.#keyset(this.#derive(`opportunities to ${until(where, "CreatedDate")}`, () => upTo(this.#d.pipeline.opportunities, where, "CreatedDate").map(({ NextStep, ...o }) => ({ ...o, Name: org.dealName(o.Id) }))), soql);
       case "ForecastingType":
         return page(org.FORECAST_TYPES);
       case "ForecastingQuota":
@@ -629,8 +631,19 @@ export class Simulator implements Transport {
         return page(this.#d.forecastItems);
       case "ForecastingFact":
         return page(this.#d.forecastFacts);
-      case "OpportunityHistory":
-        return this.#keyset(this.#d.pipeline.history, soql);
+      case "OpportunityHistory": {
+        // The end is on the deal, in the subquery: a deal's rows are read whatever
+        // their own date, as the later ones are how a change since is found.
+        const end = until(where, "CreatedDate");
+        if (end === "￿") return this.#keyset(this.#d.pipeline.history, soql);
+        return this.#keyset(
+          this.#derive(`history of deals to ${end}`, () => {
+            const deals = new Set(upTo(this.#d.pipeline.opportunities, where, "CreatedDate").map((o) => o.Id));
+            return this.#d.pipeline.history.filter((h) => deals.has(h.OpportunityId));
+          }),
+          soql,
+        );
+      }
       case "Account": {
         if (/GROUP BY Name/i.test(soql)) {
           const sizes = new Map<string, number>();
