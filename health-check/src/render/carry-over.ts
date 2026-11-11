@@ -134,7 +134,11 @@ export async function carryOver(browserPage: Page): Promise<number> {
         const heading = kids.slice(0, at).filter(visible).reverse().find(isHeading);
         if (!heading || !LABELS.has(heading.tagName)) return;
         const copy = heading.cloneNode(true) as HTMLElement;
+        // A reference tag that ends a heading stays at its end, after the mark.
+        const ref = copy.lastElementChild?.hasAttribute("data-ref") ? copy.lastElementChild : null;
+        ref?.remove();
         if (!/, continued$/.test(copy.textContent ?? "")) copy.append(", continued");
+        if (ref) copy.append(ref);
         dest.prepend(copy);
       };
       const moveFrom = (i: number): void => {

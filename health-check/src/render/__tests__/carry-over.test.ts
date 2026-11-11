@@ -218,6 +218,17 @@ describe("carry-over: a list split across pages keeps its label (DECISIONS.md 50
     }
   });
 
+  test("a heading that ends in a reference tag is marked before the tag, once, over three pages", async () => {
+    const { pages, page } = await split(`<div><h3>Label<span class="ref" data-ref>R4.1</span></h3>${items("A", 30)}</div>`);
+    try {
+      assert.equal(pages.length, 3);
+      const labels = await page.evaluate(() => [...document.querySelectorAll(".page")].map((p) => p.querySelector("h3")!.innerHTML));
+      assert.deepEqual(labels, ['Label<span class="ref" data-ref="">R4.1</span>', 'Label, continued<span class="ref" data-ref="">R4.1</span>', 'Label, continued<span class="ref" data-ref="">R4.1</span>']);
+    } finally {
+      await page.close();
+    }
+  });
+
   test("three columns side by side, one split: only that one is labelled, and the empty shell of another gains nothing", async () => {
     const { pages, page } = await split(`${gap(100)}<div class="lists"><div>${part("Left (3)", "L", 3)}</div><div>${part("Middle (12)", "M", 12)}</div><div>${part("Right (3)", "R", 3)}</div></div>`);
     try {
