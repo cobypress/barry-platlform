@@ -146,7 +146,7 @@ async function putReadoutKit(drive: DocumentDrive, clientName: string, folderNam
  * Without one, the other documents are made as before and the warnings say
  * why; nothing here fails the make.
  */
-async function makeHandbook(dir: string, out: string, clientName: string, runDate: string, stored: StoredSummaries | null): Promise<{ ok: true; path: string; unnamed: boolean; noEarlier: boolean } | { ok: false; warning: string }> {
+async function makeHandbook(dir: string, out: string, clientName: string, runDate: string, stored: StoredSummaries | null, render: typeof renderHandbookDocx = renderHandbookDocx): Promise<{ ok: true; path: string; unnamed: boolean; noEarlier: boolean } | { ok: false; warning: string }> {
   const read = readHandbook(dir);
   if (!read.ok) return { ok: false, warning: HANDBOOK_NOT_MADE[read.why] };
   // Only what a person approved, checked again as it's printed (decision 495). The row's text, never the run folder's file.
@@ -167,7 +167,7 @@ async function makeHandbook(dir: string, out: string, clientName: string, runDat
     const earlier = readEarlierHandbook(dir);
     const path = join(out, HANDBOOK_DOCX);
     mkdirSync(out, { recursive: true, mode: 0o700 });
-    write(path, await renderHandbookDocx(read.handbook, { clientName, runDate, pseudonyms, earlier, summaries }));
+    write(path, await render(read.handbook, { clientName, runDate, pseudonyms, earlier, summaries }));
     return { ok: true, path, unnamed: pseudonyms === null, noEarlier: earlier === null };
   } catch {
     // The error could quote the handbook, so it isn't kept.
@@ -374,7 +374,7 @@ async function documentsLocked(runId: string, deps: WorkerDeps, attempt: Attempt
       log(`Run ${runId}'s documents weren't uploaded. ${summary}`);
       return fail(heldBackReason(printed.held), summary);
     }
-    const handbook = await makeHandbook(dir, join(dir, "documents"), clientName, input.run.asOf, summariesOn ? (handbookSummaries ?? null) : null);
+    const handbook = await makeHandbook(dir, join(dir, "documents"), clientName, input.run.asOf, summariesOn ? (handbookSummaries ?? null) : null, deps.renderHandbook);
     if (!handbook.ok) log(`Run ${runId}: ${handbook.warning}`);
     else if (handbook.unnamed) log(`Run ${runId}: the org handbook names no one who made a recent change, because the run's pseudonym map couldn't be read.`);
     // Fixed words: nothing from either folder, and not which check it failed, since one is that it's another org's.

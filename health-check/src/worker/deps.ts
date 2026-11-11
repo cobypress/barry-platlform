@@ -4,6 +4,7 @@ import type { OAuthClient } from "../salesforce/oauth.ts";
 import type { TokenStore } from "../salesforce/token-store.ts";
 import type { OAuthTransport, Transport } from "../salesforce/transport.ts";
 import type { renderReleased } from "../render/render-released.ts";
+import type { renderHandbookDocx } from "../handbook/docx.ts";
 import type { DocumentDrive, FolderSharing } from "./drive.ts";
 import type { WorkerStore } from "./types.ts";
 
@@ -38,6 +39,8 @@ export type WorkerDeps = {
   apexSummaries?: boolean;
   /** Tests only: prints without a browser. */
   renderReleased?: typeof renderReleased;
+  /** Tests only: stands in for the org handbook's renderer, so a failing render can be seen. */
+  renderHandbook?: typeof renderHandbookDocx;
   /** Tests only: fakes for Salesforce's data API and its token endpoint. */
   dataTransport?: Transport;
   oauthTransport?: OAuthTransport;

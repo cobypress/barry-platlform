@@ -13,7 +13,7 @@ import type { RunOutputRecord } from "../../worker/types.ts";
 import { createJobHandler } from "../../worker/worker.ts";
 import { baseDeps, consoleRun, RUN_ID, runInput, syntheticConnection } from "../../worker/__tests__/helpers.ts";
 import { HANDBOOK_FILE } from "../build.ts";
-import { HANDBOOK_DOCX } from "../docx.ts";
+import { HANDBOOK_DOCX, type renderHandbookDocx } from "../docx.ts";
 import { Handbook } from "../schema.ts";
 import { docxText } from "../../testing/docx-text.ts";
 import { withEarlier } from "../../testing/earlier-handbook.ts";
@@ -514,6 +514,7 @@ describe("what reads it", () => {
     ["src/handbook/summary-row.ts", "holds the console's limits and row for Claude's summaries, and which approved ones the Word document prints; reads no file (DECISIONS.md 494 and 495)"],
     ["src/worker/postgres-store.ts", "writes Claude's summaries to the console's table while they wait, and reads the row back for the documents job, never who decided it (DECISIONS.md 494 and 495)"],
     ["src/worker/memory-store.ts", "keeps the Postgres store's rules for the summaries' row, for the tests"],
+    ["src/worker/deps.ts", "lets a test stand in for the handbook's renderer, and reads no file"],
     ["src/extract/metadata-parse.ts", "keeps the detail on the retrieve route"],
     ["src/extract/metadata-tooling.ts", "keeps the detail on the Tooling route"],
     ["src/engine/run.ts", "writes handbook.json"],
@@ -721,9 +722,11 @@ describe("with the summaries' switch on, Apex code goes to Claude by the summary
     assert.deepEqual(holding(JSON.stringify(store), [...APEX_MARKERS, PASTED_CREDENTIAL, SUMMARY_MARKER, LONGEST_NAME, "ZebraKeyHolder"]), []);
   });
 
-  /** A documents make of the run with its summaries approved. `before` runs on the copied run folder first. */
-  async function approvedMake(before: (dir: string) => void = () => {}) {
+  /** A documents make of the run with its summaries approved. `before` runs on the copied run folder first; `renderHandbook` stands in for the handbook's renderer. */
+  async function approvedMake(before: (dir: string) => void = () => {}, renderHandbook?: typeof renderHandbookDocx) {
     const asked: NarrativeRequest[] = [];
+    /** What the reports' renderer was given, as it was given. */
+    const given: unknown[] = [];
     const uploads: Array<{ name: string; body: Buffer }> = [];
     const drive: DocumentDrive = {
       rootFolderId: "root-folder-0001",
@@ -738,12 +741,14 @@ describe("with the summaries' switch on, Apex code goes to Claude by the summary
       drive,
       apexSummaries: true,
       narrative: { complete: async (request) => (asked.push(request), { stopReason: "end_turn", model: request.model, text: "{}" }) },
-      renderReleased: async (_dir, _approved, out) => {
+      renderReleased: async (_dir, approved, out) => {
+        given.push(structuredClone(approved));
         mkdirSync(out, { recursive: true });
         const files = {} as Record<DocumentKey, string>;
         for (const key of ["raw_notes", "executive_summary", "full_health_check", "ceo_one_pager", "action_lists", "tickets", "readout_kit"] as DocumentKey[]) writeFileSync((files[key] = join(out, `${key}.bin`)), `synthetic ${key}`);
         return { files, warnings: [], held: [] };
       },
+      ...(renderHandbook ? { renderHandbook } : {}),
     });
     const dir = join(deps.runsDir, RUN_ID);
     cpSync(on.dir, dir, { recursive: true });
@@ -751,7 +756,7 @@ describe("with the summaries' switch on, Apex code goes to Claude by the summary
     deps.store.summaries.set(RUN_ID, { ...on.deps.store.summaries.get(RUN_ID)!, status: "approved", decidedBy: "consultant@example.com", decidedAt: "2026-11-05T10:00:00.000Z" });
     deps.store.addDocumentsJob({ run: consoleRun({ status: "released" }), intake: null, sections: [], versions: [], overrides: [], preparedBy: null, state: "queued", driveFolderId: null, files: [] });
     const outcome = await processDocumentsJob(RUN_ID, deps, { final: true });
-    return { deps, uploads, asked, outcome };
+    return { deps, uploads, asked, outcome, given };
   }
   /** The summaries' own text: the stub's word and the classes it names. */
   const SUMMARY_TEXT = [SUMMARY_MARKER, LONGEST_NAME, "ZebraKeyHolder"];
@@ -765,9 +770,30 @@ describe("with the summaries' switch on, Apex code goes to Claude by the summary
     assert.ok(handbook.includes(`Summary (written by Claude, checked by us): Keeps the ${SUMMARY_MARKER} ledger in step when ZebraKeyHolder runs.`), "it printed them");
     assert.deepEqual(make.asked, []);
     assert.deepEqual(holding(leftBy(make), SUMMARY_TEXT), []);
+    // The reports' route itself: their renderer is given nothing of the summaries, so no report can print them.
+    assert.equal(make.given.length, 1);
+    assert.ok(!("handbookSummaries" in (make.given[0] as object)));
+    assert.deepEqual(holding(JSON.stringify(make.given), SUMMARY_TEXT), []);
+    // The other uploads are the stub's placeholders, so this sees only what the job itself adds to Drive, not what a real renderer would print.
     const others = make.uploads.filter((u) => !u.name.endsWith(" - Org handbook.docx"));
     assert.ok(others.length >= 7);
     for (const upload of others) assert.deepEqual(holding(upload.body.toString("latin1"), SUMMARY_TEXT), [], upload.name);
+  });
+
+  test("a handbook renderer that fails with an error quoting the approved summaries leaves none of their text in the log, the outcome, the warnings or the writes", async () => {
+    let quoted = "";
+    const make = await approvedMake(undefined, async (_handbook, options) => {
+      // The summaries were in scope: the error quotes them, as a real one could.
+      quoted = JSON.stringify(options.summaries?.items ?? []);
+      throw new Error(`Couldn't lay out ${quoted}`);
+    });
+    assert.ok(holding(quoted, SUMMARY_TEXT).length === SUMMARY_TEXT.length, "the renderer was given the approved summaries");
+    assert.equal(make.outcome.outcome, "done");
+    assert.ok(!make.uploads.some((u) => u.name.endsWith(" - Org handbook.docx")), "no handbook was made");
+    const warnings = [...make.deps.store.documents.values()][0]!.made!.warnings;
+    assert.ok(warnings.length > 0, "the warnings say why");
+    assert.deepEqual(holding(JSON.stringify(warnings), SUMMARY_TEXT), []);
+    assert.deepEqual(holding(leftBy(make), SUMMARY_TEXT), []);
   });
 
   test("a handbook make that fails with summaries approved leaves none of their text in the log or the documents row's warnings", async () => {
