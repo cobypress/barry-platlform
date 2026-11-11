@@ -10,6 +10,7 @@ import type { DomainModule } from "../domains/types.ts";
 import { customObjectsExtractor, orgExtractor, setupAuditExtractor, type CustomObjectRow, type SetupAuditSummary } from "../extract/configuration.ts";
 import { FACTS_FILE, factsExtractor, type Facts } from "../extract/facts.ts";
 import { apexExtractor, metadataExtractor, type ApexData } from "../extract/automation.ts";
+import { apexSourceStore } from "../extract/apex-source.ts";
 import { componentChangesExtractor, type ComponentChangesData } from "../extract/component-changes.ts";
 import type { MetadataBundle } from "../extract/metadata-parse.ts";
 import { fieldDescribeExtractor } from "../extract/fields.ts";
@@ -59,6 +60,12 @@ export type RunOptions = {
   product?: "barometer" | "scan" | "pulse";
   /** The run this one re-checks: its first health check, whose findings the report compares against. */
   baselineRunId?: string | null;
+  /**
+   * The worker's HC_HANDBOOK_SUMMARIES switch: the Apex step keeps the redacted
+   * code Claude may summarise in apex-source.json (DECISIONS.md 491). Off unless
+   * the worker says so, so the command line never keeps code.
+   */
+  keepApexSource?: boolean;
 };
 
 export type RunResult = { run: Run; dir: string; output: AnalysisOutput | null };
@@ -211,6 +218,7 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
       if (!extracts.has(extractor.id)) throw new Error(`Extractor "${extractor.id}" must run first`);
       return extracts.get(extractor.id) as T;
     },
+    ...(options.keepApexSource === true ? { apexSource: apexSourceStore(dir) } : {}),
   };
 
   let callsCounted = 0;

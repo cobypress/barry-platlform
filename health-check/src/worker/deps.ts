@@ -30,6 +30,12 @@ export type WorkerDeps = {
   queueRun?: (runId: string) => Promise<void>;
   /** Seals the customer microsite. Without it, released runs get documents and no microsite. */
   micrositeKey?: Buffer | null;
+  /**
+   * The worker's switch for Claude's summaries of Apex code, read in env.ts:
+   * a health check's Apex step keeps the redacted code, and Claude summarises
+   * it after the analysis (DECISIONS.md 490 to 492). Off when absent.
+   */
+  apexSummaries?: boolean;
   /** Tests only: prints without a browser. */
   renderReleased?: typeof renderReleased;
   /** Tests only: fakes for Salesforce's data API and its token endpoint. */

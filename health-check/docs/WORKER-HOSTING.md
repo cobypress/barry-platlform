@@ -55,6 +55,12 @@ For Claude's drafts of the report sections (DECISIONS.md 76). Without it the wor
 | `ANTHROPIC_FEDERATION_RULE_ID`, `ANTHROPIC_ORGANIZATION_ID`, `ANTHROPIC_SERVICE_ACCOUNT_ID`, `ANTHROPIC_WORKSPACE_ID` | How the worker signs in to Claude, which drafts the report sections: Render's OIDC, with no key stored anywhere (render.com/docs/oidc). Render then sets `ANTHROPIC_IDENTITY_TOKEN_FILE` itself; don't set it by hand. The Anthropic side needs a Custom OIDC issuer `https://oidc.render.com/<the tea- workspace id>` (OIDC Discovery) and a federation rule for this service with audience `api.anthropic.com` and a token lifetime of at least 30 minutes. Set up this way on 2026-11-05 |
 | `ANTHROPIC_API_KEY` | Not with OIDC: a key on the service wins over federation, as it does in the SDK. Use it only instead of the four above |
 
+For Claude's summaries of each health check's Apex classes and triggers (DECISIONS.md 490 to 492). Leave it unset until the privacy notice says Apex code is sent to Claude to write the documentation.
+
+| Variable | Value |
+| --- | --- |
+| `HC_HANDBOOK_SUMMARIES` | `on`, exactly, to turn them on: the Apex step keeps the redacted code in the run folder until Claude has summarised it, and then deletes it. Anything else, or unset, is off. It needs Claude set up as above: without Claude no code is kept. The log says at every start which of the three it is: off, on, or on with Claude not set up. Kept code is deleted after seven days by the daily retention sweep even when `HC_CLEANUP_DRY_RUN` is 1: the dry run doesn't cover it |
+
 Keep `HC_TOKEN_KEY` somewhere safe as well. Without it the stored tokens can't be opened, and every customer would have to connect again.
 
 When it starts, the log says `Taking jobs from health-check-jobs, 2 at a time.`, then whether Claude drafts the sections. If a variable is missing it stops and names it.
