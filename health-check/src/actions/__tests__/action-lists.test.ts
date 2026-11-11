@@ -17,7 +17,7 @@ import type { Finding } from "../../schemas/index.ts";
 import { analyseExtracts, clone, loadExtracts, runFromRecording, tempDir } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration, syntheticProvider } from "../../testing/replay.ts";
 import { Simulator } from "../../testing/simulator.ts";
-import { AS_OF, LEADS, CONTACTS, USERS } from "../../testing/synthetic-org.ts";
+import { AS_OF, CONNECTED_USER, CONTACTS, LEADS, USERS } from "../../testing/synthetic-org.ts";
 
 const { output, dir } = await runFromRecording({ answers: loadAnswers() });
 const lists = loadActionLists(dir)!;
@@ -147,7 +147,7 @@ describe("where the action lists are mentioned", () => {
 
 describe("in a set-up review", async () => {
   const outDir = tempDir();
-  const { dir: essentials, run } = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir, now: new Date(AS_OF), answers: loadAnswers(), scope: "essentials", transport: new Simulator() });
+  const { dir: essentials, run } = await runHealthCheck({ provider: syntheticProvider, connectedUser: CONNECTED_USER, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir, now: new Date(AS_OF), answers: loadAnswers(), scope: "essentials", transport: new Simulator() });
 
   test("only users are listed, and no record list is read", () => {
     const own = JSON.parse(readFileSync(join(essentials, ACTION_LISTS_FILE), "utf8")) as ActionLists;

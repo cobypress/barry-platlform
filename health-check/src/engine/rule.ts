@@ -36,6 +36,12 @@ export type IssueResult = {
   recommendationType: RecommendationType;
   /** What to say instead if a guard blocks a destructive recommendation. Required with guards. */
   blockedRecommendation?: string;
+  /**
+   * The finding is sized as a saving when it can be, so a reason it has no
+   * figure (a price or time not agreed) gives way to the guards' reason when
+   * they block it. Without this, a blocked finding keeps its own reason.
+   */
+  sizesASaving?: true;
   severity: Severity;
   confidence: Confidence;
   evidence: Evidence[];

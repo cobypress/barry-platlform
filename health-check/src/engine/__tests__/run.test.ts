@@ -9,7 +9,7 @@ import { SALES_CLOUD_MODULES } from "../../domains/index.ts";
 import { runFromRecording, tempDir } from "../../testing/harness.ts";
 import { FIXTURE_DIR, loadAnswers, loadCalibration, loadRecording, ReplayTransport, syntheticProvider } from "../../testing/replay.ts";
 import { Simulator } from "../../testing/simulator.ts";
-import { AS_OF, usersTable } from "../../testing/synthetic-org.ts";
+import { AS_OF, CONNECTED_USER, usersTable } from "../../testing/synthetic-org.ts";
 import { Finding, ManualStep, Metric, Run } from "../../schemas/index.ts";
 import { z } from "zod";
 
@@ -150,7 +150,7 @@ describe("safety checks at the start of a run", () => {
 
 describe("budget and resume (rule 9)", () => {
   const simulatorRun = (transport: Simulator, outDir: string, overrides = {}) =>
-    runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir, now: new Date(AS_OF), transport, ...overrides });
+    runHealthCheck({ provider: syntheticProvider, connectedUser: CONNECTED_USER, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir, now: new Date(AS_OF), transport, ...overrides });
 
   test("an org already over the share stops cleanly, with its place saved", async () => {
     const result = await simulatorRun(new Simulator({ used: 60_000 }), tempDir());
@@ -235,7 +235,7 @@ describe("budget and resume (rule 9)", () => {
 
 describe("extraction failures", () => {
   const run = (failQuery: ConstructorParameters<typeof Simulator>[0]) =>
-    runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: new Date(AS_OF), transport: new Simulator(failQuery) });
+    runHealthCheck({ provider: syntheticProvider, connectedUser: CONNECTED_USER, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: new Date(AS_OF), transport: new Simulator(failQuery) });
 
   test("an object we can't read becomes not measurable, and the run finishes", async () => {
     const { output, run: finished } = await run({ failQuery: (soql) => (soql.includes("FROM UserLicense") ? { errorCode: "INSUFFICIENT_ACCESS", message: "no" } : null) });
@@ -252,12 +252,12 @@ describe("extraction failures", () => {
   });
 
   test("a failed ownership object blocks removal rather than reading as nothing owned", async () => {
-    const { output } = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: new Date(AS_OF), answers: loadAnswers(), transport: new Simulator({ failQuery: (soql) => (soql.startsWith("SELECT OwnerId") && soql.includes("Project__c") ? { errorCode: "QUERY_TIMEOUT", message: "slow" } : null) }) });
+    const { output } = await runHealthCheck({ provider: syntheticProvider, connectedUser: CONNECTED_USER, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: new Date(AS_OF), answers: loadAnswers(), transport: new Simulator({ failQuery: (soql) => (soql.startsWith("SELECT OwnerId") && soql.includes("Project__c") ? { errorCode: "QUERY_TIMEOUT", message: "slow" } : null) }) });
     assert.deepEqual(output!.findings.filter((f) => f.recommendationType === "deactivate"), []);
   });
 
   test("a detail object with no owner field isn't a gap in the scan", async () => {
-    const { output } = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: new Date(AS_OF), answers: loadAnswers(), transport: new Simulator() });
+    const { output } = await runHealthCheck({ provider: syntheticProvider, connectedUser: CONNECTED_USER, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: new Date(AS_OF), answers: loadAnswers(), transport: new Simulator() });
     assert.ok(output!.findings.some((f) => f.recommendationType === "deactivate"));
   });
 });

@@ -11,7 +11,7 @@ import { docxText } from "../../testing/docx-text.ts";
 import { runFromRecording, tempDir } from "../../testing/harness.ts";
 import { loadCalibration, syntheticProvider } from "../../testing/replay.ts";
 import { Simulator, type SimulatorOptions } from "../../testing/simulator.ts";
-import { APEX_OUTSIDE_MODIFIER, AS_OF, COMPONENT_OUTSIDE_MODIFIER, userId } from "../../testing/synthetic-org.ts";
+import { APEX_OUTSIDE_MODIFIER, AS_OF, COMPONENT_OUTSIDE_MODIFIER, CONNECTED_USER, userId } from "../../testing/synthetic-org.ts";
 import { buildHandbook, HANDBOOK_FILE, labelApexModifiers } from "../build.ts";
 import { renderHandbookDocx } from "../docx.ts";
 import { readHandbook } from "../read.ts";
@@ -34,7 +34,7 @@ const refuseEveryLastChange: SimulatorOptions["failQuery"] = (soql) => (soql.inc
 
 async function simulated(options: SimulatorOptions = {}) {
   const transport = new Simulator(options);
-  const result = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: new Date(AS_OF), transport, log: () => {} });
+  const result = await runHealthCheck({ provider: syntheticProvider, connectedUser: CONNECTED_USER, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: new Date(AS_OF), transport, log: () => {} });
   return { ...result, transport };
 }
 
@@ -243,7 +243,7 @@ describe("a read Salesforce refuses with the last-changed fields", () => {
 describe("a run stopped between the refused read and the one without the fields", () => {
   test("resumes with the read without them, and never makes the refused read again", async () => {
     const outDir = tempDir();
-    const options = { provider: syntheticProvider, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir, now: new Date(AS_OF), log: () => {} };
+    const options = { provider: syntheticProvider, connectedUser: CONNECTED_USER, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir, now: new Date(AS_OF), log: () => {} };
     // The classes' read with the fields is refused, and the budget runs out on the read that follows.
     const first = new Simulator({
       failQuery: (soql) => (!soql.includes("FROM ApexClass WHERE") ? null : soql.includes("LastModifiedBy") ? { errorCode: "INSUFFICIENT_ACCESS", message: REFUSAL } : { errorCode: "REQUEST_LIMIT_EXCEEDED", message: "TotalRequests Limit exceeded." }),
@@ -292,7 +292,7 @@ describe("a run resumed with the step's version 9 checkpoint", () => {
     assert.doesNotMatch(docxText(await renderHandbookDocx(older.handbook, { ...OPTIONS, pseudonyms: loadPseudonymMap(first.dir) })), /Last changed /);
 
     const transport = new Simulator();
-    await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: join(first.dir, ".."), now: new Date(), transport, log: () => {}, resume: first.run.id });
+    await runHealthCheck({ provider: syntheticProvider, connectedUser: CONNECTED_USER, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: join(first.dir, ".."), now: new Date(), transport, log: () => {}, resume: first.run.id });
     assert.equal(apexQueries(transport, "ApexClass").length, 1, "the step read Apex again");
     assert.equal(read<Steps>(first.dir, "run.json").steps.find((s) => s.id === "apex")!.version, 10);
     for (const [file, text] of Object.entries(was)) assert.equal(asBefore(readFileSync(join(first.dir, file), "utf8")), text, file);

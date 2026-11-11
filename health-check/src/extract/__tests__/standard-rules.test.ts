@@ -10,7 +10,7 @@ import { loadRun } from "../../render/render-run.ts";
 import { renderRawNotesDocx } from "../../render/raw-notes-docx.ts";
 import { docxText } from "../../testing/docx-text.ts";
 import { loadCalibration } from "../../testing/replay.ts";
-import { AS_OF } from "../../testing/synthetic-org.ts";
+import { AS_OF, CONNECTED_USER } from "../../testing/synthetic-org.ts";
 import { ApiBudget, BudgetStopError } from "../../salesforce/budget.ts";
 import { SalesforceClient } from "../../salesforce/client.ts";
 import { syntheticProvider } from "../../testing/replay.ts";
@@ -126,7 +126,7 @@ describe("when a retrieve naming further objects fails", () => {
 
   test("a run stopped at the budget during the retrieve of the four resumes with that retrieve, never the one that failed", async () => {
     const outDir = tempDir();
-    const options = { provider: syntheticProvider, calibration: loadCalibration(), modules: [automationModule], outDir, now: new Date(AS_OF), log: () => {} };
+    const options = { provider: syntheticProvider, connectedUser: CONNECTED_USER, calibration: loadCalibration(), modules: [automationModule], outDir, now: new Date(AS_OF), log: () => {} };
     const wider = (body: string) => body.includes("<met:name>CustomObject</met:name>") && customObjects(body).includes("Case");
     const four = (body: string) => body.includes("<met:name>CustomObject</met:name>") && !customObjects(body).includes("Case");
     // The wider retrieve fails, and the budget runs out during the one that follows.
@@ -165,7 +165,7 @@ describe("when a retrieve naming further objects fails", () => {
 // Render reads only the run folder, so the fallback travels in run.json (DECISIONS.md 425).
 describe("a fallback to the four, in the raw notes", () => {
   const wider = (body: string) => body.includes("<met:name>CustomObject</met:name>") && customObjects(body).includes("Case");
-  const run = (sim: Simulator) => runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: [automationModule], outDir: tempDir(), now: new Date(AS_OF), log: () => {}, transport: sim });
+  const run = (sim: Simulator) => runHealthCheck({ provider: syntheticProvider, connectedUser: CONNECTED_USER, calibration: loadCalibration(), modules: [automationModule], outDir: tempDir(), now: new Date(AS_OF), log: () => {}, transport: sim });
   const said = (reason: string) => `Validation rules on Case weren't read: the wider retrieve failed (${reason}), so the engine read the four standard objects it always names, Account, Contact, Lead and Opportunity.`;
   const told = "We didn't read the validation rules on Case: Salesforce refused the wider read, so the validation rules we checked are those on your custom objects and Account, Contact, Lead and Opportunity.";
 

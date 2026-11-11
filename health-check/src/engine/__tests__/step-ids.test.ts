@@ -53,6 +53,7 @@ const STEP_IDS = [
   "leads",
   "action-records",
   "duplicate-accounts",
+  "record-type-use",
   "prior-wins",
   "security-health-check",
   "privileged-permissions",

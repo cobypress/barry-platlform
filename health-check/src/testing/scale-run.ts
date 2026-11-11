@@ -10,7 +10,7 @@ import { fingerprint } from "./fingerprint.ts";
 import { loadAnswers, loadCalibration, syntheticProvider } from "./replay.ts";
 import type { ChildReply, ChildRequest, ChildStart } from "./scale-sim-child.ts";
 import { FIVE_HUNDRED_USERS, scaled } from "./scale-org.ts";
-import { AS_OF } from "./synthetic-org.ts";
+import { AS_OF, CONNECTED_USER } from "./synthetic-org.ts";
 
 // The scale test (docs/overnight/night-3/scale.md): the whole engine, every
 // module, against a generated org the size of our largest first customers,
@@ -154,6 +154,7 @@ async function runJob() {
     outDir: outDir!,
     now: new Date(AS_OF),
     transport,
+    connectedUser: CONNECTED_USER,
     log: (line) => {
       const done = /^\s+([\w-]+): (done|failed)/.exec(line);
       if (done) mark(done[1]!);
@@ -180,7 +181,7 @@ const others = await Promise.all(
 const [result, ...alongside] = await Promise.all([
   runJob(),
   ...others.map(async ({ other, folder }) => {
-    const done = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), answers: loadAnswers(), modules: ALL_MODULES, outDir: folder, now: new Date(AS_OF), transport: other });
+    const done = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), answers: loadAnswers(), modules: ALL_MODULES, outDir: folder, now: new Date(AS_OF), transport: other, connectedUser: CONNECTED_USER });
     other.child.kill();
     return fingerprint(done.dir);
   }),

@@ -15,7 +15,7 @@ import type { Finding } from "../../schemas/index.ts";
 import { analyseExtracts, clone, loadExtracts, runFromRecording, tempDir } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration, syntheticProvider } from "../../testing/replay.ts";
 import { Simulator } from "../../testing/simulator.ts";
-import { AS_OF, userId } from "../../testing/synthetic-org.ts";
+import { AS_OF, CONNECTED_USER, userId } from "../../testing/synthetic-org.ts";
 
 // Salesforce CPQ (roadmap Stage 6, DECISIONS.md 216 to 225).
 
@@ -60,7 +60,7 @@ describe("CPQ as a module", () => {
 
 describe("an org without CPQ, with the module switched on", async () => {
   const transport = new Simulator({ cpq: false });
-  const { output: without } = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules, outDir: tempDir(), now: new Date(AS_OF), answers: loadAnswers(), transport });
+  const { output: without } = await runHealthCheck({ provider: syntheticProvider, connectedUser: CONNECTED_USER, calibration: loadCalibration(), modules, outDir: tempDir(), now: new Date(AS_OF), answers: loadAnswers(), transport });
 
   test("every CPQ check is not measurable, saying CPQ isn't installed", () => {
     for (const id of CPQ_RULES) {

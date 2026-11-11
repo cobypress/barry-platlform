@@ -7,7 +7,7 @@ import { APEX_READING } from "../../extract/apex-touches.ts";
 import { tempDir } from "../../testing/harness.ts";
 import { loadCalibration, syntheticProvider } from "../../testing/replay.ts";
 import { Simulator, type SimulatorOptions } from "../../testing/simulator.ts";
-import { AS_OF } from "../../testing/synthetic-org.ts";
+import { AS_OF, CONNECTED_USER } from "../../testing/synthetic-org.ts";
 import { METADATA_READING } from "../detail.ts";
 import { readHandbook } from "../read.ts";
 import type { Handbook } from "../schema.ts";
@@ -58,7 +58,7 @@ const ROUTES: Array<[string, SimulatorOptions]> = [
 const handbooks = new Map<string, Handbook>();
 before(async () => {
   for (const [route, options] of ROUTES) {
-    const result = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: new Date(AS_OF), transport: new Simulator(options), log: () => {} });
+    const result = await runHealthCheck({ provider: syntheticProvider, connectedUser: CONNECTED_USER, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: new Date(AS_OF), transport: new Simulator(options), log: () => {} });
     const read = readHandbook(result.dir);
     handbooks.set(route, read.ok ? read.handbook : assert.fail(read.why));
   }

@@ -16,7 +16,7 @@ import { docxText } from "../../testing/docx-text.ts";
 import { runFromRecording, tempDir } from "../../testing/harness.ts";
 import { loadCalibration, syntheticProvider } from "../../testing/replay.ts";
 import { Simulator, type SimulatorOptions } from "../../testing/simulator.ts";
-import { APEX_OUTSIDE_MODIFIER, AS_OF, COMPONENT_OUTSIDE_MODIFIER, METADATA_FILES, userId } from "../../testing/synthetic-org.ts";
+import { APEX_OUTSIDE_MODIFIER, AS_OF, COMPONENT_OUTSIDE_MODIFIER, CONNECTED_USER, METADATA_FILES, userId } from "../../testing/synthetic-org.ts";
 import { buildHandbook, HANDBOOK_FILE, labelComponentModifiers } from "../build.ts";
 import { renderHandbookDocx } from "../docx.ts";
 import { readHandbook } from "../read.ts";
@@ -42,7 +42,7 @@ const PARTIAL = "component-changes-refused.partial.jsonl";
 
 async function simulated(options: SimulatorOptions = {}) {
   const transport = new Simulator(options);
-  const result = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: new Date(AS_OF), transport, log: () => {} });
+  const result = await runHealthCheck({ provider: syntheticProvider, connectedUser: CONNECTED_USER, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: new Date(AS_OF), transport, log: () => {} });
   return { ...result, transport };
 }
 
@@ -221,7 +221,7 @@ describe("the step's reads", () => {
     const sim = new Simulator();
     const transport: Transport = { send: (request) => (decodeURIComponent(request.url).endsWith(FLOW_QUERY) ? Promise.reject(new TypeError("fetch failed")) : sim.send(request)) };
     const outDir = tempDir();
-    await assert.rejects(runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir, now: new Date(AS_OF), transport, log: () => {}, runId: "hc-network" }), /fetch failed/);
+    await assert.rejects(runHealthCheck({ provider: syntheticProvider, connectedUser: CONNECTED_USER, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir, now: new Date(AS_OF), transport, log: () => {}, runId: "hc-network" }), /fetch failed/);
     const run = read<{ status: string; steps: Array<{ id: string; status: string }> }>(join(outDir, "hc-network"), "run.json");
     assert.equal(run.status, "failed");
     assert.equal(run.steps.find((s) => s.id === componentChangesExtractor.id)!.status, "failed");
@@ -231,7 +231,7 @@ describe("the step's reads", () => {
 describe("a run stopped at the budget after the flows' list was refused", () => {
   test("resumes without asking for the flows again, and reads the rules", async () => {
     const outDir = tempDir();
-    const options = { provider: syntheticProvider, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir, now: new Date(AS_OF), log: () => {} };
+    const options = { provider: syntheticProvider, connectedUser: CONNECTED_USER, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir, now: new Date(AS_OF), log: () => {} };
     // The flows' list is refused, and the budget runs out on the rules' list that follows.
     const first = new Simulator({ failQuery: (soql) => refuse("Flow")!(soql) ?? (soql === RULE_QUERY ? { errorCode: "REQUEST_LIMIT_EXCEEDED", message: "TotalRequests Limit exceeded." } : null) });
     const stopped = await runHealthCheck({ ...options, transport: first });
@@ -269,7 +269,7 @@ describe("a run in flight when this is deployed", () => {
   }
   const resume = async (id: string, outDir: string) => {
     const transport = new Simulator();
-    await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir, now: new Date(), transport, log: () => {}, resume: id });
+    await runHealthCheck({ provider: syntheticProvider, connectedUser: CONNECTED_USER, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir, now: new Date(), transport, log: () => {}, resume: id });
     return transport;
   };
 

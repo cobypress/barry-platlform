@@ -15,7 +15,7 @@ import type { Transport } from "../../salesforce/transport.ts";
 import { runFromRecording, tempDir } from "../../testing/harness.ts";
 import { loadCalibration, syntheticProvider } from "../../testing/replay.ts";
 import { Simulator } from "../../testing/simulator.ts";
-import { AS_OF, HANDBOOK_CASE_MARKER, HANDBOOK_CASE_PLANTED, HANDBOOK_MARKER, HANDBOOK_PLANTED, METADATA_FILES } from "../../testing/synthetic-org.ts";
+import { AS_OF, CONNECTED_USER, HANDBOOK_CASE_MARKER, HANDBOOK_CASE_PLANTED, HANDBOOK_MARKER, HANDBOOK_PLANTED, METADATA_FILES } from "../../testing/synthetic-org.ts";
 import { docxText } from "../../testing/docx-text.ts";
 import { BUILD_READING, buildHandbook, HANDBOOK_FILE } from "../build.ts";
 import { renderHandbookDocx } from "../docx.ts";
@@ -28,7 +28,7 @@ type Run = { dir: string; runId: string; calls: number; itemReads: number; retri
 
 async function run(options: ConstructorParameters<typeof Simulator>[0] = {}): Promise<Run> {
   const transport = new Simulator(options);
-  const result = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: new Date(AS_OF), transport, log: () => {} });
+  const result = await runHealthCheck({ provider: syntheticProvider, connectedUser: CONNECTED_USER, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: new Date(AS_OF), transport, log: () => {} });
   const step = result.run.steps.find((s) => s.id === "metadata")!;
   const itemReads = transport.requests.filter((r) => decodeURIComponent(r.url).includes("SELECT Id, FullName, Metadata")).length;
   const retrieves = transport.requests.map((r) => r.body ?? "").filter((body) => body.includes("<met:retrieve>") && body.includes("<met:name>CustomObject</met:name>"));
@@ -192,7 +192,7 @@ describe("the Tooling route's item reads", () => {
       send: (request) => (decodeURIComponent(request.url).includes("FROM FieldDefinition") ? Promise.reject(new Error("socket hang up")) : simulator.send(request)),
     };
     const outDir = tempDir();
-    await assert.rejects(runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir, now: new Date(AS_OF), transport: dropping, log: () => {} }), /socket hang up/);
+    await assert.rejects(runHealthCheck({ provider: syntheticProvider, connectedUser: CONNECTED_USER, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir, now: new Date(AS_OF), transport: dropping, log: () => {} }), /socket hang up/);
     const [runId] = readdirSync(outDir);
     const partial = readFileSync(join(outDir, runId!, "checkpoints", "metadata-tooling.partial.jsonl"), "utf8");
     assert.ok(partial.includes(HANDBOOK_MARKER), "the formula was read");
@@ -570,7 +570,7 @@ describe("when the metadata couldn't be read (decision 454)", () => {
 
   test("a run with no metadata step writes it too, saying so", async () => {
     const modules = SALES_CLOUD_MODULES.filter((m) => m.id === "current_pipeline");
-    const result = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules, outDir: tempDir(), now: new Date(AS_OF), transport: new Simulator(), log: () => {} });
+    const result = await runHealthCheck({ provider: syntheticProvider, connectedUser: CONNECTED_USER, calibration: loadCalibration(), modules, outDir: tempDir(), now: new Date(AS_OF), transport: new Simulator(), log: () => {} });
     assert.ok(!result.run.steps.some((s) => s.id === "metadata"));
     assert.deepEqual(handbookOf({ dir: result.dir, runId: result.run.id, calls: 0, itemReads: 0, retrieves: [] }), buildHandbook(undefined));
   });
@@ -810,7 +810,7 @@ describe("Apex (decisions 456 and 457)", () => {
         return decodeURIComponent(request.url).includes("FROM Organization") ? { ...response, text: response.text.replace("Enterprise Edition", "Professional Edition") } : response;
       },
     };
-    const result = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: new Date(AS_OF), transport: professional, log: () => {} });
+    const result = await runHealthCheck({ provider: syntheticProvider, connectedUser: CONNECTED_USER, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: new Date(AS_OF), transport: professional, log: () => {} });
     const h = Handbook.parse(JSON.parse(read(result.dir, HANDBOOK_FILE)));
     for (const part of [h.apexClasses, h.apexTriggers]) assert.deepEqual(part, { status: "unavailable", reason: "Professional Edition has no Apex, so there's no code to check." });
     assert.equal(h.flows.status, "ok");

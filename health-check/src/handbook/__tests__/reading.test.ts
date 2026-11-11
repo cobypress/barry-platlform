@@ -17,7 +17,7 @@ import { tempDir } from "../../testing/harness.ts";
 import { loadCalibration, syntheticProvider } from "../../testing/replay.ts";
 import { Simulator } from "../../testing/simulator.ts";
 import type { Transport } from "../../salesforce/transport.ts";
-import { AS_OF } from "../../testing/synthetic-org.ts";
+import { AS_OF, CONNECTED_USER } from "../../testing/synthetic-org.ts";
 import { BUILD_READING, HANDBOOK_FILE } from "../build.ts";
 import { compareHandbooks, type KindComparison } from "../compare.ts";
 import { METADATA_READING } from "../detail.ts";
@@ -36,7 +36,7 @@ type Steps = { steps: Array<{ id: string; version: number; status: string; calls
 const read = <T>(dir: string, file: string): T => JSON.parse(readFileSync(join(dir, file), "utf8")) as T;
 const run = (options: { outDir?: string; resume?: string } = {}) => {
   const transport = new Simulator();
-  const done = runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: options.outDir ?? tempDir(), now: new Date(AS_OF), transport, log: () => {}, resume: options.resume });
+  const done = runHealthCheck({ provider: syntheticProvider, connectedUser: CONNECTED_USER, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: options.outDir ?? tempDir(), now: new Date(AS_OF), transport, log: () => {}, resume: options.resume });
   return done.then((result) => ({ ...result, transport }));
 };
 
@@ -163,7 +163,7 @@ describe("a Tooling read stopped part way and resumed (decision 485)", () => {
     // The flows and rules are read and kept; the custom fields after them never come.
     const dropping: Transport = { send: (request) => (decodeURIComponent(request.url).includes("FROM FieldDefinition") ? Promise.reject(new Error("socket hang up")) : simulator.send(request)) };
     const outDir = tempDir();
-    await assert.rejects(runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir, now: new Date(AS_OF), transport: dropping, log: () => {} }), /socket hang up/);
+    await assert.rejects(runHealthCheck({ provider: syntheticProvider, connectedUser: CONNECTED_USER, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir, now: new Date(AS_OF), transport: dropping, log: () => {} }), /socket hang up/);
     const [runId] = readdirSync(outDir);
     const checkpoints = join(outDir, runId!, "checkpoints");
     assert.ok(flowReads(simulator) > 0 && readFileSync(join(checkpoints, ITEMS_KEPT), "utf8").includes('"key":"Flow/'), "flows were read and kept part way");
@@ -182,7 +182,7 @@ describe("a Tooling read stopped part way and resumed (decision 485)", () => {
       const { outDir, runId, checkpoints } = await stoppedPartWay();
       edit(checkpoints);
       const transport = new Simulator({ readOnly: true });
-      const resumed = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir, now: new Date(AS_OF), transport, log: () => {}, resume: runId });
+      const resumed = await runHealthCheck({ provider: syntheticProvider, connectedUser: CONNECTED_USER, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir, now: new Date(AS_OF), transport, log: () => {}, resume: runId });
       assert.ok(resumed.output, "the run finished");
       // Resumed from the kept items: the step ran again, and read no flow again.
       assert.ok(reads(transport).metadata > 0, "the metadata step ran");
@@ -195,7 +195,7 @@ describe("a Tooling read stopped part way and resumed (decision 485)", () => {
       // Set against a run read afresh by the same route, the part says we
       // can't tell which version read this one, which is true whether a number
       // was never kept or another was (decision 486).
-      const fresh = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: new Date(AS_OF), transport: new Simulator({ readOnly: true }), log: () => {} });
+      const fresh = await runHealthCheck({ provider: syntheticProvider, connectedUser: CONNECTED_USER, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: new Date(AS_OF), transport: new Simulator({ readOnly: true }), log: () => {} });
       const text = await documentText(handbookIn(fresh.dir), resumed.dir);
       assert.equal(kindIn(text, "Flows"), `No flows were added, removed or changed.\n\n${UNKNOWN("this health check", "flows", "flow")}`);
       assert.equal(kindIn(text, "Validation rules"), `No validation rules were added, removed or changed.\n\n${UNKNOWN("this health check", "validation rules", "validation rule")}`);

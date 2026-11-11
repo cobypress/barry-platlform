@@ -147,6 +147,8 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
       product: input.run.product,
       baselineRunId: input.run.baselineRunId,
       keepApexSource: apexSummaries,
+      // Who connected, from the token loaded above on every delivery, resumes too (DECISIONS.md 498).
+      connectedUser: { id: stored.userId },
       stopAtShare: deps.stopAtShare,
       transport: deps.dataTransport,
       apiVersion: deps.apiVersion,

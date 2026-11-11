@@ -17,7 +17,7 @@ import { deckRangeFor, fullReportHtml } from "../full-report.ts";
 import { launchBrowser, layoutOf } from "../pdf.ts";
 
 // DECISIONS.md 450: an org with many checks not measurable hears it once, at the front, not
-// area by area. The base sample has 2 of 102 checks not measurable; the thin copy
+// area by area. The base sample has 2 of 103 checks not measurable; the thin copy
 // turns whole areas, and part of others, not measurable to pass a third.
 
 const { output, run, dir } = await runFromRecording({ answers: loadAnswers() });
@@ -65,7 +65,7 @@ describe("a thin org", () => {
   const full = fullReportHtml(report, pseudonyms);
 
   test("is past the threshold, and the base sample isn't", () => {
-    assert.equal(checks, 102);
+    assert.equal(checks, 103);
     assert.equal(open, 35);
     assert.ok(open / checks > THIN_DATA_SHARE);
     assert.ok(isThinData(report.teamFindings));
@@ -209,7 +209,7 @@ describe("the base sample, below the threshold", () => {
   const full = fullReportHtml(report, pseudonyms);
 
   test("keeps the Verdict page's line naming each check", () => {
-    assert.deepEqual(counts(report), { checks: 102, open: 2 });
+    assert.deepEqual(counts(report), { checks: 103, open: 2 });
     const verdict = decode(pageWith(exec, '<div class="eyebrow">Verdict</div>'));
     assert.ok(verdict.includes("Not measurable: Forecast accuracy; Dashboard use. The full report's appendix says why for each."), verdict);
     assert.ok(!verdict.includes("says less than a full report would"));

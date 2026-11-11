@@ -10,7 +10,7 @@ import { runHealthCheck, type RunOptions, type RunResult } from "../engine/run.t
 import { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import type { Calibration, DateRange, ManualAnswer } from "../schemas/index.ts";
 import { loadCalibration, loadRecording, ReplayTransport, syntheticProvider } from "./replay.ts";
-import { AS_OF } from "./synthetic-org.ts";
+import { AS_OF, CONNECTED_USER } from "./synthetic-org.ts";
 
 export const tempDir = (): string => mkdtempSync(join(tmpdir(), "hc-test-"));
 
@@ -25,6 +25,7 @@ export function runFromRecording(overrides: Partial<RunOptions> = {}): Promise<R
     outDir: tempDir(),
     now: new Date(AS_OF),
     transport: new ReplayTransport(loadRecording()),
+    connectedUser: CONNECTED_USER,
     ...overrides,
   });
 }

@@ -15,7 +15,7 @@ import { componentChangesExtractor, type ComponentChangesData } from "../extract
 import type { MetadataBundle } from "../extract/metadata-parse.ts";
 import { fieldDescribeExtractor } from "../extract/fields.ts";
 import { summariseFacts } from "../facts/summary.ts";
-import { monthsBefore, type ExtractContext, type Extractor, type PartialStore, type Sourced } from "../extract/types.ts";
+import { monthsBefore, type ConnectedUser, type ExtractContext, type Extractor, type PartialStore, type Sourced } from "../extract/types.ts";
 import { buildHandbook, HANDBOOK_FILE, labelApexModifiers, labelComponentModifiers, recentChanges } from "../handbook/build.ts";
 import type { UserRow } from "../extract/users.ts";
 import { usersExtractor } from "../extract/users.ts";
@@ -66,6 +66,12 @@ export type RunOptions = {
    * the worker says so, so the command line never keeps code.
    */
   keepApexSource?: boolean;
+  /**
+   * Who connected (DECISIONS.md 498), for record-type use, which counts only
+   * what that user sees whole. The caller gives it on a resume too, from the
+   * same place: it's never kept in the run folder.
+   */
+  connectedUser?: ConnectedUser;
 };
 
 export type RunResult = { run: Run; dir: string; output: AnalysisOutput | null };
@@ -219,6 +225,7 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
       return extracts.get(extractor.id) as T;
     },
     ...(options.keepApexSource === true ? { apexSource: apexSourceStore(dir) } : {}),
+    ...(options.connectedUser ? { connectedUser: options.connectedUser } : {}),
   };
 
   let callsCounted = 0;

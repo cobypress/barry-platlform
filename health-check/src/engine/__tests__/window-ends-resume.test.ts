@@ -7,7 +7,7 @@ import { fingerprint } from "../../testing/fingerprint.ts";
 import { tempDir } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration, syntheticProvider } from "../../testing/replay.ts";
 import { Simulator, SYNTHETIC_RECORDS, type OrgRecords } from "../../testing/simulator.ts";
-import { AS_OF } from "../../testing/synthetic-org.ts";
+import { AS_OF, CONNECTED_USER } from "../../testing/synthetic-org.ts";
 import { runHealthCheck } from "../run.ts";
 
 // A step read again on a resumed run gives what it gave the first time, though
@@ -51,7 +51,7 @@ const concluded = (dir: string) => {
 
 test("a resumed run that reads its windowed steps again, after the org has gained records, gives the same steps, findings and metrics", async () => {
   const outDir = tempDir();
-  const options = { provider: syntheticProvider, calibration: loadCalibration(), answers: loadAnswers(), modules: ALL_MODULES, outDir, log: () => {} };
+  const options = { provider: syntheticProvider, connectedUser: CONNECTED_USER, calibration: loadCalibration(), answers: loadAnswers(), modules: ALL_MODULES, outDir, log: () => {} };
   assert.ok(lateCases.size > 0 && AT_THE_RUN.activity.tasks.length < SYNTHETIC_RECORDS.activity.tasks.length, "the org has gained records since");
   assert.ok(AT_THE_RUN.supportCases.cases.some((c) => !c.IsClosed) && supportCases.cases.some((c) => lateCases.has(c.Id) && !c.IsClosed), "an open case since");
   assert.ok(AT_THE_RUN.supportCases.replies.length < onEarlier(supportCases.replies).length, "a reply since on an earlier case");

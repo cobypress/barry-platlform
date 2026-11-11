@@ -36,17 +36,24 @@ export function findingId(ruleId: string, key: string): string {
  * Rule 3's safety net, independent of how a rule is written. A destructive
  * recommendation with a guard that didn't pass is rewritten to "investigate"
  * and its saving dropped, so it can't reach a report in that form.
+ *
+ * A finding the rule gave no figure keeps its own reason (DECISIONS.md 498):
+ * "not counted as a saving" would say a saving was waiting where none ever is.
+ * One that sizes a saving and lacks a figure only for want of an agreed price
+ * or time says the guards' reason, as one with a figure does: agreeing a price
+ * wouldn't size a finding its guards hold back.
  */
 export function applyGuards(result: IssueResult): IssueResult {
   if (!DESTRUCTIVE_RECOMMENDATIONS.has(result.recommendationType)) return result;
   const guards = result.guards ?? [];
   const clear = guards.length > 0 && guards.every((g) => g.status === "passed");
   if (clear) return result;
+  const ownReason = result.value.kind === "not_sized" && !result.sizesASaving;
   return {
     ...result,
     recommendationType: "investigate",
     recommendation: result.blockedRecommendation ?? "Check this by hand before changing anything: not every guard passed.",
-    value: { kind: "not_sized", reason: "Not counted as a saving, because not every guard passed." },
+    value: ownReason ? result.value : { kind: "not_sized", reason: "Not counted as a saving, because not every guard passed." },
   };
 }
 

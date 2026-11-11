@@ -105,6 +105,9 @@ function reclaimFindings(ctx: RuleContext, candidates: UserRow[], describe: { ke
       recommendation: `Deactivate ${plural(clear.length, "user")} and release the ${clear.length === 1 ? "licence" : "licences"}.`,
       blockedRecommendation: "Check these users by hand before changing anything.",
       recommendationType: "deactivate",
+      // The seats' cost when the calibration prices them: with no price and a
+      // guard blocking, it's the guard that keeps a figure off (DECISIONS.md 498).
+      sizesASaving: true,
       severity: "medium",
       confidence: "high",
       evidence: [usersEvidence],

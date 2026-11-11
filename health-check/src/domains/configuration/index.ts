@@ -131,6 +131,9 @@ const unusedCustomFields: Rule = {
         recommendation: `Remove ${plural(unused.length, "field")} from ${named} once the data is archived.`,
         blockedRecommendation: `Review ${plural(unused.length, "field")} with the people who own ${named}. We aren't recommending removal, because not every dependency check could pass.`,
         recommendationType: "remove",
+        // Hours of upkeep when the calibration agrees a time: with none agreed and
+        // a guard blocking, it's the guard that keeps a figure off (DECISIONS.md 498).
+        sizesASaving: true,
         severity: "low",
         confidence: "medium",
         evidence: [ctx.ev(scan.source, { count: unused.length, dateRange: range, exclusions, note: `Fields: ${unused.map((u) => `${object}.${u.field}`).join(", ")}` })],

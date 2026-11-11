@@ -56,6 +56,20 @@ export type SimulatorOptions = {
    * by id, with when (in the synthetic org's "+0000" text). None by default.
    */
   editedAt?: Record<string, string>;
+  /** The record types the data API lists: the synthetic org's by default, or a test's own. */
+  recordTypes?: org.RecordTypeRecord[];
+  /** Every object's records by type and when they were made, for a test. By default deals and cases are counted from their rows, and the rest from the synthetic org's groups. */
+  recordTypeGroups?: Record<string, org.RecordTypeGroup[]>;
+  /**
+   * The connected user's (org.CONNECTED_USER's) access, for record-type use
+   * (DECISIONS.md 498): View All Data, and the objects they hold View All
+   * Records on. An admin's by default, or on readOnly Barometer Read Only's six
+   * objects and no View All Data. Any other user has no assignments we can see.
+   * `session` is one more set the user holds that has to be activated in a
+   * session (DECISIONS.md 499): a read that doesn't leave out
+   * HasActivationRequired sets gets its permissions too.
+   */
+  access?: { viewAllData: boolean; viewAllRecords: string[]; session?: { viewAllData: boolean; viewAllRecords: string[] } };
 };
 
 /** The parts of an org that grow with it. A scale test swaps them for a generated org's (src/testing/scale-org.ts). */
@@ -320,6 +334,9 @@ export class Simulator implements Transport {
   #modified: Map<string, string> | undefined;
   #closedFacts: typeof org.FORECAST_FACTS | undefined;
   #editedAt: Record<string, string>;
+  #recordTypes: org.RecordTypeRecord[];
+  #recordTypeGroups: Record<string, org.RecordTypeGroup[]> | undefined;
+  #access: NonNullable<SimulatorOptions["access"]>;
 
   constructor(options: SimulatorOptions = {}) {
     this.#used = options.used ?? 1000;
@@ -339,6 +356,9 @@ export class Simulator implements Transport {
     this.#setupAudit = options.setupAudit ?? org.SETUP_AUDIT;
     this.#apexClasses = options.apexClasses ?? org.APEX_CLASSES;
     this.#editedAt = options.editedAt ?? {};
+    this.#recordTypes = options.recordTypes ?? org.RECORD_TYPES;
+    this.#recordTypeGroups = options.recordTypeGroups;
+    this.#access = options.access ?? { viewAllData: !this.#readOnly, viewAllRecords: org.READ_ONLY_VIEW_ALL };
     this.#unlicensed = new Set(options.unlicensed ?? []);
     this.#missing = new Set([...(options.missingObjects ?? []), ...(this.#readOnly ? ["AuthProvider"] : [])]);
     if (!this.#pardot) this.#dropFields = { ...this.#dropFields, Lead: [...(this.#dropFields.Lead ?? []), "pi__url__c", "pi__score__c", "pi__grade__c"] };
@@ -472,6 +492,7 @@ export class Simulator implements Transport {
 
     if (/^SELECT COUNT\(Id\) total,/i.test(soql)) return this.#fieldUsage(soql, object, where);
     if (/^SELECT OwnerId, COUNT\(Id\) c FROM/i.test(soql)) return this.#ownership(object);
+    if (/^SELECT RecordTypeId, COUNT\(Id\) c FROM \w+ (WHERE .* )?GROUP BY RecordTypeId$/i.test(soql)) return this.#recordTypeCounts(soql, object);
     const readOnlyGap = this.#readOnly && (tooling ? ["ApexClass", "ApexTrigger", "ApexOrgWideCoverage", "ApexCodeCoverageAggregate", "CustomObject", "CustomField"] : ["ApexOrgWideCoverage", "ApexCodeCoverageAggregate", "AuthProvider"]).includes(object);
     if (readOnlyGap) return unsupported(object);
     // Tooling returns Metadata and FullName for one row per query.
@@ -485,8 +506,12 @@ export class Simulator implements Transport {
     switch (object) {
       case "Organization":
         return page([{ Id: org.ORG_ID, Name: "Synthetic Co", OrganizationType: "Enterprise Edition", IsSandbox: false, TimeZoneSidKey: "Europe/London", FiscalYearStartMonth: 1, ...org.SHARING_DEFAULTS }]);
-      case "User":
+      case "User": {
+        // The connected user, looked up by a username in a SOQL string literal.
+        const username = /^SELECT Id FROM User WHERE Username = '((?:[^'\\]|\\.)*)'$/.exec(soql)?.[1];
+        if (username !== undefined) return page(username.replace(/\\(.)/g, "$1") === org.CONNECTED_USER.username ? [{ Id: org.CONNECTED_USER.id }] : []);
         return page(/UserPermissionsSupportUser/.test(soql) ? this.#d.supportUsers : this.#d.users);
+      }
       case "UserLicense":
         return page(org.USER_LICENSES);
       case "PermissionSetLicense":
@@ -537,9 +562,20 @@ export class Simulator implements Transport {
         if (/IsOwnedByProfile = true/.test(where)) return page(org.PROFILE_SETS);
         if (/PermissionsApiUserOnly = true/.test(where)) return page(org.PERMISSION_SETS.filter((s) => s.PermissionsApiUserOnly));
         return page(/IsOwnedByProfile = false/.test(where) ? org.DOCUMENTED_PERMISSION_SETS : org.PERMISSION_SETS);
+      case "ObjectPermissions": {
+        if (!/PermissionsViewAllRecords = true/.test(where)) break;
+        const session = /\bParent\.HasActivationRequired = false\b/.test(where) ? [] : (this.#access.session?.viewAllRecords ?? []);
+        return page(this.#isConnected(where) ? [...this.#access.viewAllRecords, ...session].map((SobjectType) => ({ SobjectType })) : []);
+      }
       case "PermissionSetGroupComponent":
         return page(org.PERMISSION_SET_GROUP_COMPONENTS);
       case "PermissionSetAssignment": {
+        // The profile's own set and one more, as Barometer Read Only is held, and
+        // a session-activated set unless the read leaves those out.
+        if (/^SELECT PermissionSet\.PermissionsViewAllData FROM\b/.test(soql)) {
+          const session = this.#access.session && !/\bPermissionSet\.HasActivationRequired = false\b/.test(where) ? [{ PermissionSet: { PermissionsViewAllData: this.#access.session.viewAllData } }] : [];
+          return page(this.#isConnected(where) ? [{ PermissionSet: { PermissionsViewAllData: this.#access.viewAllData } }, { PermissionSet: { PermissionsViewAllData: false } }, ...session] : []);
+        }
         if (/\bPermissionSetGroupId\b/.test(soql)) return page(org.ACCESS_ASSIGNMENTS);
         if (/PermissionsApiUserOnly = true/.test(where)) {
           const sets = new Set(org.PERMISSION_SETS.filter((s) => s.PermissionsApiUserOnly && !s.IsOwnedByProfile).map((s) => s.Id));
@@ -597,7 +633,9 @@ export class Simulator implements Transport {
       case "EntityParticle":
         return page(inObjects(TOOLING.fields, soql).map(({ Description, ...f }) => f));
       case "RecordType":
-        return tooling ? page(TOOLING.recordTypes) : unsupported("RecordType");
+        if (tooling) return page(TOOLING.recordTypes);
+        // The data API's list, with ids and when each was made, to its end if it has one (DECISIONS.md 497).
+        return /^SELECT Id, DeveloperName, Name, SobjectType, IsActive, NamespacePrefix, CreatedDate FROM RecordType\b/.test(soql) ? page(upTo(this.#recordTypes, where, "CreatedDate")) : unsupported("RecordType");
       case "ProcessDefinition":
         return page(TOOLING.approvals);
       case "AssignmentRule":
@@ -896,6 +934,28 @@ export class Simulator implements Transport {
     const row: Record<string, number> = { total: recent ? totals.recent : totals.total };
     for (const match of soql.matchAll(/COUNT\(([A-Za-z0-9_]+__c)\) (f\d+)/g)) row[match[2]!] = org.fieldFilled(object, match[1]!, recent, this.#d.recordTotals);
     return page([row]);
+  }
+
+  /** Whether a query's filter names the connected user, and no one else. */
+  #isConnected(where: string): boolean {
+    const ids = [...where.matchAll(/AssigneeId = '([^']*)'/g)].map((m) => m[1]);
+    return ids.length > 0 && ids.every((id) => id === org.CONNECTED_USER.id);
+  }
+
+  /** Records by record type in the query's window on CreatedDate, at both ends, as one group for each type and one for none. */
+  #recordTypeCounts(soql: string, object: string): Json | { error: { errorCode: string; message: string } } {
+    // The read-only user has no access to custom objects' records.
+    if (this.#readOnly && object.endsWith("__c")) return unsupported(object);
+    const rows: org.RecordTypeGroup[] = this.#recordTypeGroups
+      ? (this.#recordTypeGroups[object] ?? [])
+      : object === "Opportunity"
+        ? this.#d.pipeline.opportunities.map((o) => ({ RecordTypeId: org.recordTypeOfDeal(o), CreatedDate: o.CreatedDate, n: 1 }))
+        : object === "Case"
+          ? this.#d.supportCases.cases.map((c) => ({ RecordTypeId: org.recordTypeOfCase(c), CreatedDate: c.CreatedDate, n: 1 }))
+          : (org.RECORD_TYPE_GROUPS[object] ?? []);
+    const counts = new Map<string | null, number>();
+    for (const row of rows) if (within(row.CreatedDate, soql, "CreatedDate")) counts.set(row.RecordTypeId, (counts.get(row.RecordTypeId) ?? 0) + row.n);
+    return page([...counts].sort(([a], [b]) => (a ?? "").localeCompare(b ?? "")).map(([RecordTypeId, c]) => ({ RecordTypeId, c })));
   }
 
   #ownership(object: string): Json | { error: { errorCode: string; message: string } } {

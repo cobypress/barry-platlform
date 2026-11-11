@@ -13,7 +13,7 @@ import { docxText } from "../../testing/docx-text.ts";
 import { runFromRecording, tempDir } from "../../testing/harness.ts";
 import { loadCalibration, syntheticProvider } from "../../testing/replay.ts";
 import { Simulator, type SimulatorOptions } from "../../testing/simulator.ts";
-import { AS_OF, CHANGES_DELEGATE, CHANGES_MARKER, CHANGES_PLANTED, SETUP_AUDIT, userId } from "../../testing/synthetic-org.ts";
+import { AS_OF, CHANGES_DELEGATE, CHANGES_MARKER, CHANGES_PLANTED, CONNECTED_USER, SETUP_AUDIT, userId } from "../../testing/synthetic-org.ts";
 import { HANDBOOK_FILE, recentChanges } from "../build.ts";
 import { renderHandbookDocx } from "../docx.ts";
 import { readHandbook } from "../read.ts";
@@ -33,7 +33,7 @@ const OPTIONS = { clientName: "Synthetic Co", runDate: AS_OF };
 const TOKEN = /\[\[[a-z]+:[A-Z]\d{4,}\]\]/;
 
 async function simulated(options: SimulatorOptions = {}, outDir = tempDir(), resume?: string) {
-  return runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir, now: new Date(AS_OF), transport: new Simulator(options), log: () => {}, resume });
+  return runHealthCheck({ provider: syntheticProvider, connectedUser: CONNECTED_USER, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir, now: new Date(AS_OF), transport: new Simulator(options), log: () => {}, resume });
 }
 
 /** Every token handbook.json holds, and the run's map. */
@@ -151,7 +151,7 @@ describe("a run resumed after the step's version went up", () => {
 
     // The org has since gained a change, two hours after the run's date, and the resume is later still.
     const transport = new Simulator({ setupAudit: [later, ...SETUP_AUDIT] });
-    await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: join(first.dir, ".."), now: new Date(), transport, log: () => {}, resume: first.run.id });
+    await runHealthCheck({ provider: syntheticProvider, connectedUser: CONNECTED_USER, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: join(first.dir, ".."), now: new Date(), transport, log: () => {}, resume: first.run.id });
     assert.ok(transport.requests.some((r) => decodeURIComponent(r.url).includes("FROM SetupAuditTrail")), "the step read the trail again");
     assert.equal(read<Steps>(first.dir, "run.json").steps.find((s) => s.id === "setup-audit")!.version, 2);
 

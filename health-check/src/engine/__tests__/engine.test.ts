@@ -54,6 +54,24 @@ describe("guards are enforced by the engine, whatever a rule does (rule 3)", () 
     assert.equal(out.value.kind, "licence_cost");
   });
   test("non-destructive findings aren't touched", () => assert.equal(applyGuards(issue({ recommendationType: "change" })).recommendationType, "change"));
+
+  // What a blocked finding says about its figure (DECISIONS.md 498).
+  const ENGINE = { kind: "not_sized", reason: "Not counted as a saving, because not every guard passed." };
+  test("a figure held back by a guard gives way to the engine's reason", () => assert.deepEqual(applyGuards(issue({ guards: [guard("unknown")] })).value, ENGINE));
+  test("a finding the rule gave no figure keeps its own reason when blocked", () => {
+    const own = { kind: "not_sized" as const, reason: "We don't put a figure on this." };
+    assert.deepEqual(applyGuards(issue({ guards: [guard("failed")], value: own })).value, own);
+    assert.deepEqual(applyGuards(issue({ guards: [], value: own })).value, own);
+  });
+  test("one that sizes a saving and has no figure only for want of a price says the guards' reason", () => {
+    const unpriced = { kind: "not_sized" as const, reason: "The calibration has no cost for: Salesforce." };
+    assert.deepEqual(applyGuards(issue({ guards: [guard("unknown")], value: unpriced, sizesASaving: true })).value, ENGINE);
+  });
+  test("every guard passing leaves the value as the rule gave it, figure or not", () => {
+    const own = { kind: "not_sized" as const, reason: "The calibration has no cost for: Salesforce." };
+    assert.deepEqual(applyGuards(issue({ guards: [guard("passed")], value: own, sizesASaving: true })).value, own);
+    assert.deepEqual(applyGuards(issue({ guards: [guard("passed")] })).value, issue().value);
+  });
   test("a rule that tries to skip its guards can't get through", () => {
     const [finding] = runRule(() => issue({ recommendationType: "deactivate", guards: [guard("failed")] }));
     assert.equal(finding?.recommendationType, "investigate");

@@ -8,7 +8,7 @@ import { contributeBenchmark, exportBenchmark } from "../../benchmark/export.ts"
 import type { NarrativeClient, NarrativeRequest } from "../../narrative/client.ts";
 import { runFromRecording, tempDir } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration, loadRecording, ReplayTransport, syntheticProvider, type Recording } from "../../testing/replay.ts";
-import { APEX_OUTSIDE_MODIFIER, AS_OF, CHANGES_DELEGATE, COMPONENT_OUTSIDE_MODIFIER, CHANGES_MARKER, CHANGES_PLANTED, HANDBOOK_CASE_MARKER, HANDBOOK_CASE_PLANTED, HANDBOOK_MARKER, HANDBOOK_PLANTED, USER_ADMIN_MARKER } from "../../testing/synthetic-org.ts";
+import { APEX_OUTSIDE_MODIFIER, AS_OF, CHANGES_DELEGATE, CHANGES_MARKER, CHANGES_PLANTED, COMPONENT_OUTSIDE_MODIFIER, CONNECTED_USER, HANDBOOK_CASE_MARKER, HANDBOOK_CASE_PLANTED, HANDBOOK_MARKER, HANDBOOK_PLANTED, USER_ADMIN_MARKER } from "../../testing/synthetic-org.ts";
 import type { RunOutputRecord } from "../../worker/types.ts";
 import { createJobHandler } from "../../worker/worker.ts";
 import { baseDeps, consoleRun, RUN_ID, runInput, syntheticConnection } from "../../worker/__tests__/helpers.ts";
@@ -255,7 +255,7 @@ describe("the number a Tooling read was started under (decision 485)", () => {
     const simulator = new Simulator({ readOnly: true });
     const dropping: Transport = { send: (request) => (decodeURIComponent(request.url).includes("FROM FieldDefinition") ? Promise.reject(new Error("socket hang up")) : simulator.send(request)) };
     const outDir = tempDir();
-    const options = { provider: syntheticProvider, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir, now: new Date(AS_OF), log: () => {} };
+    const options = { provider: syntheticProvider, connectedUser: CONNECTED_USER, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir, now: new Date(AS_OF), log: () => {} };
     await assert.rejects(runHealthCheck({ ...options, transport: dropping }), /socket hang up/);
     const [runId] = readdirSync(outDir);
     const stopped = filesIn(join(outDir, runId!));

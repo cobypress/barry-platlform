@@ -12,7 +12,7 @@ import { loadAnswers, loadCalibration, syntheticProvider } from "../../testing/r
 import { runHealthCheck } from "../../engine/run.ts";
 import { SALES_CLOUD_MODULES } from "../index.ts";
 import { Simulator } from "../../testing/simulator.ts";
-import { AS_OF, userId } from "../../testing/synthetic-org.ts";
+import { AS_OF, CONNECTED_USER, userId } from "../../testing/synthetic-org.ts";
 
 const { output, dir } = await runFromRecording({ answers: loadAnswers() });
 const extracts = loadExtracts(dir);
@@ -128,7 +128,7 @@ describe("daily allowances", () => {
   });
 
   test("read on connecting, before the check spends its own calls", async () => {
-    const { output: busy } = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: new Date(AS_OF), answers: loadAnswers(), transport: new Simulator({ asyncApex: { Max: 250_000, Remaining: 200_000 } }) });
+    const { output: busy } = await runHealthCheck({ provider: syntheticProvider, connectedUser: CONNECTED_USER, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: new Date(AS_OF), answers: loadAnswers(), transport: new Simulator({ asyncApex: { Max: 250_000, Remaining: 200_000 } }) });
     const f = one(busy!.findings, "int.api-usage");
     assert.equal(f.status, "passed");
     // The simulator starts at 1,000 API calls used; the run's own calls come after.

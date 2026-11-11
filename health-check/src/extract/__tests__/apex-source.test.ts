@@ -8,7 +8,7 @@ import type { Transport, TransportRequest, TransportResponse } from "../../sales
 import { tempDir } from "../../testing/harness.ts";
 import { loadCalibration, syntheticProvider } from "../../testing/replay.ts";
 import { Simulator } from "../../testing/simulator.ts";
-import { APEX_CLASSES, AS_OF, sfId } from "../../testing/synthetic-org.ts";
+import { APEX_CLASSES, AS_OF, CONNECTED_USER, sfId } from "../../testing/synthetic-org.ts";
 import { scanApex } from "../apex-scan.ts";
 import { APEX_SOURCE_FILE, APEX_SOURCE_MAX_BODY, ApexSource, selectApexSource, type SourceRow } from "../apex-source.ts";
 
@@ -114,7 +114,7 @@ class Watching implements Transport {
 }
 
 const options = (outDir: string, extra: Partial<RunOptions> = {}): RunOptions => ({
-  provider: syntheticProvider,
+  provider: syntheticProvider, connectedUser: CONNECTED_USER,
   calibration: loadCalibration(),
   modules: [technicalHealthModule],
   outDir,
