@@ -1,6 +1,6 @@
 import { FIELD_SPECS, planFields } from "./fields.ts";
 import { readCapped } from "./opportunities.ts";
-import { readSoql, soqlDateTime, type Extractor, type Sourced } from "./types.ts";
+import { readSoql, soqlWindow, type Extractor, type Sourced } from "./types.ts";
 
 // No names, emails, phone numbers or company names: a funnel is counts and dates.
 export type LeadRow = {
@@ -23,7 +23,7 @@ export const leadsExtractor: Extractor<LeadExtract> = {
   version: 3,
   partialKeys: ["leads", "lead-status", "campaign-members"],
   async run(ctx) {
-    const since = `CreatedDate >= ${soqlDateTime(ctx.windowStart)}`;
+    const since = soqlWindow("CreatedDate", ctx.windowStart, ctx.now);
     const campaignPlan = planFields(ctx, FIELD_SPECS.campaign);
     return {
       leads: await readCapped<LeadRow>(ctx, "leads", "Id, OwnerId, LeadSource, CreatedDate, IsConverted, ConvertedDate, ConvertedOpportunityId, ConvertedContactId", "Lead", since),

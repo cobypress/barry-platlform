@@ -1,6 +1,6 @@
 import { redactSecrets } from "../privacy/secrets.ts";
 import { isUnavailable } from "../salesforce/client.ts";
-import { daysBefore, monthsBefore, readSoql, soqlDateTime, unavailable, type Extractor, type Sourced, type SourceInfo } from "./types.ts";
+import { daysBefore, monthsBefore, readSoql, soqlWindow, unavailable, type Extractor, type Sourced, type SourceInfo } from "./types.ts";
 
 export const CORE_OBJECTS = ["Account", "Contact", "Lead", "Opportunity"] as const;
 
@@ -104,7 +104,7 @@ export const fieldUsageExtractor: Extractor<Record<string, Sourced<ObjectFieldUs
         const columns = chunk.map((f, j) => `COUNT(${f.name}) f${j}`).join(", ");
         const [all, recent] = await ctx.client.queryBatch<Record<string, number>>([
           `SELECT COUNT(Id) total, ${columns} FROM ${object}`,
-          `SELECT COUNT(Id) total, ${columns} FROM ${object} WHERE CreatedDate >= ${soqlDateTime(recentFrom)}`,
+          `SELECT COUNT(Id) total, ${columns} FROM ${object} WHERE ${soqlWindow("CreatedDate", recentFrom, ctx.now)}`,
         ]);
         if (!all?.ok || !recent?.ok) {
           const failed = !all?.ok ? all : recent;
@@ -233,13 +233,6 @@ const USER_ADMIN_SECTION = "Manage Users";
 export const SETUP_AUDIT_DAYS = 180;
 const AUDIT_MAX_ROWS = 2000;
 
-/**
- * SOQL's date-times have no milliseconds, so the end of a read is the run's
- * instant rounded up to its second. Rounded down, it would cut a change made
- * earlier in that second, if Salesforce keeps the milliseconds.
- */
-const upToItsSecond = (date: Date): Date => new Date(Math.ceil(date.getTime() / 1000) * 1000);
-
 export const setupAuditExtractor: Extractor<Sourced<SetupAuditSummary>> = {
   id: "setup-audit",
   version: 2,
@@ -249,7 +242,7 @@ export const setupAuditExtractor: Extractor<Sourced<SetupAuditSummary>> = {
     // that reads the trail again mustn't take in changes made since.
     const soql =
       `SELECT Action, Section, Display, CreatedDate, CreatedById, CreatedBy.Name, DelegateUser FROM SetupAuditTrail ` +
-      `WHERE CreatedDate >= ${soqlDateTime(daysBefore(ctx.now, SETUP_AUDIT_DAYS))} AND CreatedDate <= ${soqlDateTime(upToItsSecond(ctx.now))} ORDER BY CreatedDate DESC`;
+      `WHERE ${soqlWindow("CreatedDate", daysBefore(ctx.now, SETUP_AUDIT_DAYS), ctx.now)} ORDER BY CreatedDate DESC`;
     const rows = await readSoql<SetupAuditRow>(ctx, soql, { maxRecords: AUDIT_MAX_ROWS });
     if (rows.status !== "ok") return rows;
     const summary: SetupAuditSummary = { rows: rows.data.length, earliest: null, bySection: {}, configChangesByUser: {}, excludedUserAdmin: 0, changes: [] };

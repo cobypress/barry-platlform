@@ -2,7 +2,7 @@ import { XMLParser } from "fast-xml-parser";
 import { isUnavailable } from "../salesforce/client.ts";
 import { schemaExtractor } from "./configuration.ts";
 import { readKeyset } from "./opportunities.ts";
-import { daysBefore, soqlDateTime, unavailable, type ExtractContext, type Extractor, type Sourced, type SourceInfo } from "./types.ts";
+import { daysBefore, soqlWindow, unavailable, type ExtractContext, type Extractor, type Sourced, type SourceInfo } from "./types.ts";
 import { licencesExtractor } from "./users.ts";
 
 // Marketing Cloud Account Engagement, formerly Pardot (roadmap Stage 6,
@@ -96,7 +96,7 @@ export const pardotLeadsExtractor: Extractor<PardotLeads> = {
   partialKeys: ["pardot-open-leads"],
   async run(ctx) {
     const { presence } = ctx.get(pardotSetupExtractor);
-    const window = `${PI_FIELDS.url} != null AND CreatedDate >= ${soqlDateTime(ctx.windowStart)}`;
+    const window = `${PI_FIELDS.url} != null AND ${soqlWindow("CreatedDate", ctx.windowStart, ctx.now)}`;
     const queries = {
       synced: `SELECT COUNT() FROM Lead WHERE ${window}`,
       ungraded: `SELECT COUNT() FROM Lead WHERE ${window} AND ${PI_FIELDS.grade} = null`,

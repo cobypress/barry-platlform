@@ -80,6 +80,22 @@ export function soqlDateTime(date: Date): string {
   return date.toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
+/**
+ * SOQL's date-times have no milliseconds, so the end of a read is the run's
+ * instant rounded up to its second. Rounded down, it would cut a record made
+ * earlier in that second, if Salesforce keeps the milliseconds.
+ */
+export const upToItsSecond = (date: Date): Date => new Date(Math.ceil(date.getTime() / 1000) * 1000);
+
+/**
+ * A window on when something happened, from `from` to the run's own date, on
+ * one field (DECISIONS.md 463 and 480). Without the end, a step read late, or
+ * again on a resumed run, would take in records made after the run's date.
+ */
+export function soqlWindow(field: string, from: Date, now: Date): string {
+  return `${field} >= ${soqlDateTime(from)} AND ${field} <= ${soqlDateTime(upToItsSecond(now))}`;
+}
+
 export function soqlDate(date: Date): string {
   return date.toISOString().slice(0, 10);
 }

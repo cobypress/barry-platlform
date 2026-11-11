@@ -1,7 +1,7 @@
 import { isUnavailable } from "../salesforce/client.ts";
 import { isNoOwnerField, recordCountsExtractor } from "./configuration.ts";
 import { FIELD_SPECS, planFields } from "./fields.ts";
-import { daysBefore, readSoql, soqlDateTime, type ExtractContext, type Extractor, type Sourced, type SourceInfo } from "./types.ts";
+import { daysBefore, readSoql, soqlWindow, type ExtractContext, type Extractor, type Sourced, type SourceInfo } from "./types.ts";
 
 export type UserRow = {
   Id: string;
@@ -71,7 +71,7 @@ export const loginsExtractor: Extractor<Sourced<LoginSummary>> = {
     // login inside it is seen and its user isn't counted as dormant (DECISIONS.md 361, 393).
     const from = daysBefore(ctx.now, Math.max(LOGIN_DAYS, ctx.calibration.dormantDays));
     const plan = planFields(ctx, FIELD_SPECS.loginHistory);
-    const where = `WHERE LoginTime >= ${soqlDateTime(from)} ORDER BY LoginTime DESC`;
+    const where = `WHERE ${soqlWindow("LoginTime", from, ctx.now)} ORDER BY LoginTime DESC`;
     if (!plan.ok) return { status: "unavailable", reason: plan.reason, source: { kind: "soql", api: "rest", query: `SELECT ${FIELD_SPECS.loginHistory.required.join(", ")} FROM LoginHistory ${where}` } };
     // Status can't be filtered in SOQL, so failures are split out here.
     const rows = await readSoql<{ UserId: string; LoginTime: string; Status: string; ApiType?: string | null; Application?: string | null }>(

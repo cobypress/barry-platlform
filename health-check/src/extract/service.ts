@@ -1,7 +1,7 @@
 import { XMLParser } from "fast-xml-parser";
 import { isUnavailable } from "../salesforce/client.ts";
 import { describeObject, planFrom, type FieldSpec } from "./fields.ts";
-import { monthsBefore, readSoql, soqlDateTime, unavailable, type ExtractContext, type Extractor, type SourceInfo, type Sourced } from "./types.ts";
+import { monthsBefore, readSoql, soqlWindow, unavailable, type ExtractContext, type Extractor, type SourceInfo, type Sourced } from "./types.ts";
 
 // Service Cloud's reads (roadmap Stage 6, DECISIONS.md 155). Four steps, so a
 // run stopped at the budget picks up where it left off: the set-up, which a
@@ -22,7 +22,8 @@ export const SERVICE_MONTHS = 12;
  */
 export const CASE_ROW_CAP = 200_000;
 
-const since = (ctx: ExtractContext): string => soqlDateTime(monthsBefore(ctx.now, SERVICE_MONTHS));
+/** The year before the run, on one field, to the run's own date (DECISIONS.md 480). */
+const inYear = (ctx: ExtractContext, field: string): string => soqlWindow(field, monthsBefore(ctx.now, SERVICE_MONTHS), ctx.now);
 
 export type CaseStatusRow = { ApiName: string; MasterLabel: string | null; IsClosed: boolean };
 export type QueueRow = { Id: string; Name: string; DeveloperName: string; QueueRoutingConfigId?: string | null };
@@ -72,7 +73,6 @@ export const serviceSetupExtractor: Extractor<ServiceSetup> = {
   async run(ctx) {
     const group = planFrom(await describeObject(ctx, "Group"), GROUP);
     const queueSoql = `SELECT ${group.ok ? group.select : GROUP.required.join(", ")} FROM Group WHERE Type = 'Queue'`;
-    const after = since(ctx);
     return {
       statuses: await readSoql(ctx, "SELECT ApiName, MasterLabel, IsClosed FROM CaseStatus"),
       queues: group.ok ? await readSoql(ctx, queueSoql, { missingFields: group.missing }) : { status: "unavailable", reason: group.reason, source: { kind: "soql", api: "rest", query: queueSoql } },
@@ -86,9 +86,9 @@ export const serviceSetupExtractor: Extractor<ServiceSetup> = {
       routingConfigs: await readSoql(ctx, "SELECT Id, DeveloperName, RoutingModel, PushTimeout FROM QueueRoutingConfig"),
       supportUsers: await readSoql(ctx, "SELECT Id, LastLoginDate, Profile.UserLicense.Name FROM User WHERE IsActive = true AND UserPermissionsSupportUser = true"),
       macros: await readSoql(ctx, "SELECT Id, Name, IsLightningSupported FROM Macro"),
-      macroUsage: await readSoql(ctx, `SELECT MacroID, COUNT(Id) n FROM MacroUsage WHERE CreatedDate >= ${after} GROUP BY MacroID`),
+      macroUsage: await readSoql(ctx, `SELECT MacroID, COUNT(Id) n FROM MacroUsage WHERE ${inYear(ctx, "CreatedDate")} GROUP BY MacroID`),
       quickText: await readSoql(ctx, "SELECT Id, Name FROM QuickText"),
-      quickTextUsage: await readSoql(ctx, `SELECT QuickTextID, COUNT(Id) n FROM QuickTextUsage WHERE LoggedTime >= ${after} GROUP BY QuickTextID`),
+      quickTextUsage: await readSoql(ctx, `SELECT QuickTextID, COUNT(Id) n FROM QuickTextUsage WHERE ${inYear(ctx, "LoggedTime")} GROUP BY QuickTextID`),
       // The page says article queries must name PublishStatus or Id.
       articles: await readSoql(ctx, "SELECT Id, KnowledgeArticleId, LastPublishedDate FROM KnowledgeArticleVersion WHERE PublishStatus = 'Online' AND IsLatestVersion = true"),
       articleViews: await readSoql(ctx, "SELECT ParentId, ViewCount, Channel FROM KnowledgeArticleViewStat"),
@@ -118,15 +118,14 @@ export const serviceCasesExtractor: Extractor<ServiceCases> = {
   version: 2,
   records: true,
   async run(ctx) {
-    const after = since(ctx);
     const plan = planFrom(await describeObject(ctx, "Case"), CLOSED_CASE);
-    const closedSoql = `SELECT ${plan.ok ? plan.select : CLOSED_CASE.required.join(", ")} FROM Case WHERE IsClosed = true AND ClosedDate >= ${after}`;
+    const closedSoql = `SELECT ${plan.ok ? plan.select : CLOSED_CASE.required.join(", ")} FROM Case WHERE IsClosed = true AND ${inYear(ctx, "ClosedDate")}`;
     const month = (field: string) => `CALENDAR_YEAR(convertTimezone(${field})) y, CALENDAR_MONTH(convertTimezone(${field})) m, Priority, COUNT(Id) n`;
     const by = (field: string) => `GROUP BY CALENDAR_YEAR(convertTimezone(${field})), CALENDAR_MONTH(convertTimezone(${field})), Priority`;
     return {
-      created: await readSoql(ctx, `SELECT ${month("CreatedDate")} FROM Case WHERE CreatedDate >= ${after} ${by("CreatedDate")}`),
-      closed: await readSoql(ctx, `SELECT ${month("ClosedDate")} FROM Case WHERE IsClosed = true AND ClosedDate >= ${after} ${by("ClosedDate")}`),
-      origins: await readSoql(ctx, `SELECT Origin, COUNT(Id) n FROM Case WHERE CreatedDate >= ${after} GROUP BY Origin`),
+      created: await readSoql(ctx, `SELECT ${month("CreatedDate")} FROM Case WHERE ${inYear(ctx, "CreatedDate")} ${by("CreatedDate")}`),
+      closed: await readSoql(ctx, `SELECT ${month("ClosedDate")} FROM Case WHERE IsClosed = true AND ${inYear(ctx, "ClosedDate")} ${by("ClosedDate")}`),
+      origins: await readSoql(ctx, `SELECT Origin, COUNT(Id) n FROM Case WHERE ${inYear(ctx, "CreatedDate")} GROUP BY Origin`),
       open: await readSoql(ctx, "SELECT Id, Status, Priority, Origin, OwnerId, CreatedDate, ContactId, AccountId FROM Case WHERE IsClosed = false", { maxRecords: CASE_ROW_CAP }),
       closedCases: plan.ok ? await readSoql(ctx, closedSoql, { maxRecords: CASE_ROW_CAP, missingFields: plan.missing }) : { status: "unavailable", reason: plan.reason, source: { kind: "soql", api: "rest", query: closedSoql } },
     };
@@ -165,19 +164,18 @@ export const serviceActivityExtractor: Extractor<ServiceActivity> = {
   version: 2,
   records: true,
   async run(ctx) {
-    const after = since(ctx);
-    const recentCases = `SELECT Id FROM Case WHERE CreatedDate >= ${after}`;
+    const recentCases = `SELECT Id FROM Case WHERE ${inYear(ctx, "CreatedDate")}`;
     return {
-      statusChanges: await readSoql(ctx, `SELECT CaseId, OldValue, NewValue, CreatedDate FROM CaseHistory WHERE Field = 'Status' AND CreatedDate >= ${after}`, { maxRecords: CASE_ROW_CAP }),
-      milestones: await readSoql(ctx, `SELECT CaseId, MilestoneTypeId, IsCompleted, IsViolated, StartDate, TargetDate, CompletionDate FROM CaseMilestone WHERE StartDate >= ${after}`, { maxRecords: CASE_ROW_CAP }),
+      statusChanges: await readSoql(ctx, `SELECT CaseId, OldValue, NewValue, CreatedDate FROM CaseHistory WHERE Field = 'Status' AND ${inYear(ctx, "CreatedDate")}`, { maxRecords: CASE_ROW_CAP }),
+      milestones: await readSoql(ctx, `SELECT CaseId, MilestoneTypeId, IsCompleted, IsViolated, StartDate, TargetDate, CompletionDate FROM CaseMilestone WHERE ${inYear(ctx, "StartDate")}`, { maxRecords: CASE_ROW_CAP }),
       replies: await readSoql(ctx, `SELECT ParentId, MessageDate FROM EmailMessage WHERE Incoming = false AND ParentId IN (${recentCases})`, { maxRecords: CASE_ROW_CAP }),
-      agentWork: await readSoql(ctx, `SELECT UserId, Status, RequestDateTime, AcceptDateTime, DeclineDateTime, SpeedToAnswer FROM AgentWork WHERE RequestDateTime >= ${after}`, { maxRecords: CASE_ROW_CAP }),
-      caseArticles: await readSoql(ctx, `SELECT CaseId FROM CaseArticle WHERE CaseId IN (SELECT Id FROM Case WHERE IsClosed = true AND ClosedDate >= ${after})`, { maxRecords: CASE_ROW_CAP }),
+      agentWork: await readSoql(ctx, `SELECT UserId, Status, RequestDateTime, AcceptDateTime, DeclineDateTime, SpeedToAnswer FROM AgentWork WHERE ${inYear(ctx, "RequestDateTime")}`, { maxRecords: CASE_ROW_CAP }),
+      caseArticles: await readSoql(ctx, `SELECT CaseId FROM CaseArticle WHERE CaseId IN (SELECT Id FROM Case WHERE IsClosed = true AND ${inYear(ctx, "ClosedDate")})`, { maxRecords: CASE_ROW_CAP }),
       channels: [
         { channel: "Email", count: await countOf(ctx, `SELECT COUNT() FROM EmailMessage WHERE Incoming = true AND ParentId IN (${recentCases})`) },
-        { channel: "Messaging", count: await countOf(ctx, `SELECT COUNT() FROM MessagingSession WHERE StartTime >= ${after}`) },
-        { channel: "Chat", count: await countOf(ctx, `SELECT COUNT() FROM LiveChatTranscript WHERE StartTime >= ${after}`) },
-        { channel: "Voice", count: await countOf(ctx, `SELECT COUNT() FROM VoiceCall WHERE CallStartDateTime >= ${after}`) },
+        { channel: "Messaging", count: await countOf(ctx, `SELECT COUNT() FROM MessagingSession WHERE ${inYear(ctx, "StartTime")}`) },
+        { channel: "Chat", count: await countOf(ctx, `SELECT COUNT() FROM LiveChatTranscript WHERE ${inYear(ctx, "StartTime")}`) },
+        { channel: "Voice", count: await countOf(ctx, `SELECT COUNT() FROM VoiceCall WHERE ${inYear(ctx, "CallStartDateTime")}`) },
       ],
     };
   },
