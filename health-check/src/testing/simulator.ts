@@ -152,6 +152,9 @@ const upTo = <T>(rows: T[], soql: string, field: string): T[] => {
   });
 };
 
+/** The quoted names in a SOQL list, unescaped. */
+const quoted = (list: string | undefined): Set<string> => new Set([...(list ?? "").matchAll(/'((?:[^'\\]|\\.)*)'/g)].map((m) => m[1]!.replace(/\\(.)/g, "$1")));
+
 const LONDON = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", year: "numeric", month: "numeric" });
 /** Year and month in the synthetic org's zone, as CALENDAR_MONTH(convertTimezone(...)) gives them. */
 function londonMonth(value: string): [number, number] {
@@ -308,6 +311,9 @@ export class Simulator implements Transport {
   #sorted = new WeakMap<object, Array<{ Id: string }>>();
   /** Lists derived from the records for one kind of query, made once. */
   #derived = new Map<string, Array<{ Id: string }>>();
+  /** Each deal's latest history row, by id, and the facts as they stand: made once. */
+  #modified: Map<string, string> | undefined;
+  #closedFacts: typeof org.FORECAST_FACTS | undefined;
 
   constructor(options: SimulatorOptions = {}) {
     this.#used = options.used ?? 1000;
@@ -634,9 +640,19 @@ export class Simulator implements Transport {
           const earlier = () => [...this.#d.priorWins, ...this.#d.pipeline.opportunities.filter((o) => o.IsWon && o.CloseDate < before)];
           return this.#keyset(this.#derive(`prior ${before}`, () => earlier().map(({ Id, AccountId, CloseDate }) => ({ Id, AccountId, CloseDate }))), soql);
         }
-        // Both end on the deal's CreatedDate (DECISIONS.md 465). The scope's OR isn't
-        // applied, as it never was: every synthetic deal is in it.
-        if (/NextStep != null/.test(soql)) return this.#keyset(this.#derive(`next steps to ${until(where, "CreatedDate")}`, () => upTo(this.#d.pipeline.opportunities, where, "CreatedDate").filter((o) => !o.IsClosed && o.NextStep !== null).map((o) => ({ Id: o.Id }))), soql);
+        // Each ends on the deal's CreatedDate (DECISIONS.md 465). The deals scope's
+        // OR isn't applied, as it never was: every synthetic deal is in it. The
+        // next-steps read's and the closed-since read's are (DECISIONS.md 466).
+        if (/NextStep != null/.test(soql)) {
+          const changed = since(where, "LastModifiedDate");
+          const open = quoted(/\bStageName IN \(([^)]*)\)/.exec(where)?.[1]);
+          const listed = (o: org.SyntheticOpportunity): boolean => !o.IsClosed || open.has(o.StageName) || (changed !== "" && this.#lastModified(o) >= changed);
+          return this.#keyset(this.#derive(`next steps ${[...open].join("|")} ${changed} to ${until(where, "CreatedDate")}`, () => upTo(this.#d.pipeline.opportunities, where, "CreatedDate").filter((o) => o.NextStep !== null && listed(o)).map((o) => ({ Id: o.Id }))), soql);
+        }
+        if (/^IsClosed = true\b/.test(where.trim())) {
+          const changed = since(where, "LastModifiedDate");
+          return this.#keyset(this.#derive(`closed since ${changed} to ${until(where, "CreatedDate")}`, () => upTo(this.#d.pipeline.opportunities, where, "CreatedDate").filter((o) => o.IsClosed && (changed === "" || this.#lastModified(o) >= changed)).map((o) => ({ Id: o.Id }))), soql);
+        }
         // Free text the query didn't ask for mustn't come back, as on a real org.
         return this.#keyset(this.#derive(`opportunities to ${until(where, "CreatedDate")}`, () => upTo(this.#d.pipeline.opportunities, where, "CreatedDate").map(({ NextStep, ...o }) => ({ ...o, Name: org.dealName(o.Id) }))), soql);
       case "ForecastingType":
@@ -656,7 +672,7 @@ export class Simulator implements Transport {
       case "ForecastingItem":
         return page(this.#d.forecastItems);
       case "ForecastingFact":
-        return page(this.#d.forecastFacts);
+        return page(this.#facts());
       case "OpportunityHistory": {
         // The end is on the deal, in the subquery: a deal's rows are read whatever
         // their own date, as the later ones are how a change since is found.
@@ -827,6 +843,34 @@ export class Simulator implements Transport {
   #upTo<T extends { Id: string }>(name: string, rows: T[], where: string, field: string): T[] {
     const end = until(where, field);
     return end === "\uffff" ? rows : this.#derive(`${name} to ${end}`, () => upTo(rows, where, field));
+  }
+
+  /**
+   * A synthetic deal keeps no LastModifiedDate. Every change a test makes to a
+   * deal writes a history row, as a stage, amount or close date change does in
+   * Salesforce, so it's the latest of the deal's CreatedDate and its rows'.
+   */
+  #lastModified(o: org.SyntheticOpportunity): string {
+    if (!this.#modified) {
+      this.#modified = new Map();
+      for (const h of this.#d.pipeline.history) if (h.CreatedDate > (this.#modified.get(h.OpportunityId) ?? "")) this.#modified.set(h.OpportunityId, h.CreatedDate);
+    }
+    const row = this.#modified.get(o.Id) ?? "";
+    return row > o.CreatedDate ? row : o.CreatedDate;
+  }
+
+  /**
+   * The facts as they stand: a deal closed in the pipeline the simulator holds
+   * is in its closed category, as Salesforce moves it, never in the open one it
+   * had. The synthetic org's facts are of open deals only, so it answers as it
+   * always did; a test's later org with a deal closed since doesn't.
+   */
+  #facts(): typeof org.FORECAST_FACTS {
+    if (!this.#closedFacts) {
+      const closed = new Map(this.#d.pipeline.opportunities.filter((o) => o.IsClosed).map((o) => [o.Id, o.IsWon ? "Closed" : "Omitted"]));
+      this.#closedFacts = closed.size === 0 ? this.#d.forecastFacts : this.#d.forecastFacts.map((f) => (closed.has(f.OpportunityId) ? { ...f, ForecastCategoryName: closed.get(f.OpportunityId)! } : f));
+    }
+    return this.#closedFacts;
   }
 
   /** A list derived from the records for one kind of query, made the first time it's asked for. */
