@@ -1015,17 +1015,20 @@ describe("the money names at least as many lines as before decision 448, and sta
     // from the same samples, extra lines and cases, in order no survey and no spend,
     // spend, a survey, both. Small lines are £900 and £470 more each, so most come last
     // and the cut decides them; large ones £31,000 and £4,700 more, so they come first.
+    // A comment marked 184b55b holds what was named there, where decision 496 names
+    // more, each tag counted as wide as it prints; every other count is also what
+    // 184b55b named.
     const NAMED: Array<["page" | "slides", number, number, number, "small" | "large", number[]]> = [
       ["page", 0, 0, 0, "small", [7, 7, 7, 7]], ["page", 0, 1, 4, "small", [8, 8, 7, 8]], ["page", 0, 1, 16, "small", [7, 8, 7, 8]], ["page", 0, 2, 4, "small", [7, 7, 7, 7]], ["page", 0, 2, 16, "small", [7, 7, 7, 7]], ["page", 0, 9, 4, "small", [7, 7, 7, 7]], ["page", 0, 9, 16, "small", [7, 7, 7, 7]] /* [6, 7, 7, 7] */, ["page", 0, 2, 16, "large", [7, 7, 7, 7]] /* [6, 7, 6, 7] */, ["page", 0, 10, 16, "large", [6, 7, 6, 7]], ["page", 0, 33, 16, "large", [6, 6, 6, 6]],
       ["slides", 0, 0, 4, "large", [7, 7, 7, 7]], ["slides", 0, 1, 4, "large", [8, 8, 8, 8]], ["slides", 0, 2, 4, "large", [9, 9, 9, 9]] /* [7, 7, 9, 9] */, ["slides", 0, 9, 4, "large", [16, 16, 16, 16]], ["slides", 0, 8, 16, "large", [15, 15, 15, 15]], ["slides", 0, 12, 16, "large", [13, 13, 13, 13]] /* [11, 11, 11, 11] */, ["slides", 0, 16, 16, "large", [12, 12, 12, 12]] /* [11, 11, 11, 11] */, ["slides", 0, 40, 16, "large", [13, 13, 5, 5]],
       ["page", 1, 0, 0, "small", [7, 7, 7, 7]], ["page", 1, 1, 4, "small", [8, 8, 7, 8]], ["page", 1, 1, 16, "small", [7, 8, 7, 8]], ["page", 1, 2, 4, "small", [7, 7, 7, 7]], ["page", 1, 2, 16, "small", [7, 7, 7, 7]], ["page", 1, 9, 4, "small", [7, 7, 7, 7]], ["page", 1, 9, 16, "small", [7, 7, 7, 7]] /* [6, 7, 7, 7] */,
       ["slides", 1, 0, 4, "large", [7, 7, 7, 7]], ["slides", 1, 1, 4, "large", [8, 8, 8, 8]], ["slides", 1, 2, 4, "large", [9, 9, 9, 9]], ["slides", 1, 9, 4, "large", [16, 16, 16, 16]],
-      ["page", 2, 0, 0, "small", [8, 8, 7, 8]], ["page", 2, 1, 4, "small", [7, 7, 7, 7]], ["page", 2, 1, 16, "small", [7, 7, 7, 7]], ["page", 2, 2, 4, "small", [7, 7, 7, 7]], ["page", 2, 2, 16, "small", [7, 7, 7, 7]], ["page", 2, 9, 4, "small", [7, 7, 7, 7]], ["page", 2, 9, 16, "small", [7, 7, 7, 7]], ["page", 2, 1, 16, "large", [7, 7, 7, 7]], ["page", 2, 9, 16, "large", [7, 7, 7, 7]] /* [6, 7, 6, 7] */, ["page", 2, 32, 16, "large", [6, 6, 6, 6]] /* [5, 6, 6, 6] */,
-      ["slides", 2, 0, 4, "large", [8, 8, 8, 8]], ["slides", 2, 1, 4, "large", [9, 9, 9, 9]] /* [7, 7, 9, 9] */, ["slides", 2, 2, 4, "large", [10, 10, 10, 10]], ["slides", 2, 9, 4, "large", [17, 17, 17, 17]],
-      ["page", 3, 0, 0, "small", [8, 8, 7, 8]], ["page", 3, 1, 4, "small", [7, 7, 7, 7]], ["page", 3, 1, 16, "small", [7, 7, 7, 7]], ["page", 3, 2, 4, "small", [7, 7, 7, 7]], ["page", 3, 2, 16, "small", [7, 7, 7, 7]], ["page", 3, 9, 4, "small", [7, 7, 7, 7]], ["page", 3, 9, 16, "small", [7, 7, 7, 7]],
-      ["slides", 3, 0, 4, "large", [8, 8, 8, 8]], ["slides", 3, 1, 4, "large", [9, 9, 9, 9]], ["slides", 3, 2, 4, "large", [10, 10, 10, 10]], ["slides", 3, 9, 4, "large", [17, 17, 17, 17]],
+      ["page", 2, 0, 0, "small", [8, 8, 7, 8]], ["page", 2, 1, 4, "small", [7, 7, 7, 7]], ["page", 2, 1, 16, "small", [7, 7, 7, 7]], ["page", 2, 2, 4, "small", [7, 7, 7, 7]], ["page", 2, 2, 16, "small", [7, 7, 7, 7]], ["page", 2, 9, 4, "small", [7, 7, 7, 7]], ["page", 2, 9, 16, "small", [7, 7, 7, 7]], ["page", 2, 1, 16, "large", [7, 7, 7, 7]], ["page", 2, 9, 16, "large", [7, 7, 7, 7]] /* [6, 7, 6, 7] */, ["page", 2, 32, 16, "large", [6, 6, 6, 6]] /* [5, 6, 6, 6] */, ["page", 2, 10, 16, "large", [7, 7, 7, 7]] /* 184b55b: [6, 7, 6, 7] */,
+      ["slides", 2, 0, 4, "large", [8, 8, 8, 8]], ["slides", 2, 1, 4, "large", [9, 9, 9, 9]] /* [7, 7, 9, 9] */, ["slides", 2, 2, 4, "large", [10, 10, 10, 10]], ["slides", 2, 9, 4, "large", [17, 17, 17, 17]], ["slides", 2, 1, 4, "small", [9, 9, 9, 9]] /* 184b55b: [7, 7, 9, 9] */,
+      ["page", 3, 0, 0, "small", [8, 8, 7, 8]], ["page", 3, 1, 4, "small", [7, 7, 7, 7]], ["page", 3, 1, 16, "small", [7, 7, 7, 7]], ["page", 3, 2, 4, "small", [7, 7, 7, 7]], ["page", 3, 2, 16, "small", [7, 7, 7, 7]], ["page", 3, 9, 4, "small", [7, 7, 7, 7]], ["page", 3, 9, 16, "small", [7, 7, 7, 7]], ["page", 3, 10, 16, "large", [7, 7, 7, 7]] /* 184b55b: [6, 7, 6, 7] */,
+      ["slides", 3, 0, 4, "large", [8, 8, 8, 8]], ["slides", 3, 1, 4, "large", [9, 9, 9, 9]], ["slides", 3, 2, 4, "large", [10, 10, 10, 10]], ["slides", 3, 9, 4, "large", [17, 17, 17, 17]], ["slides", 3, 10, 16, "large", [6, 6, 14, 14]] /* 184b55b: [5, 5, 14, 14] */,
       ["page", 4, 0, 0, "small", [3, 3, 3, 3]], ["page", 4, 1, 4, "small", [4, 4, 4, 4]], ["page", 4, 1, 16, "small", [4, 4, 4, 4]], ["page", 4, 2, 4, "small", [5, 5, 5, 5]], ["page", 4, 2, 16, "small", [5, 5, 5, 5]], ["page", 4, 9, 4, "small", [7, 7, 7, 7]], ["page", 4, 9, 16, "small", [6, 7, 6, 7]],
-      ["slides", 4, 0, 4, "large", [3, 3, 3, 3]], ["slides", 4, 1, 4, "large", [4, 4, 4, 4]], ["slides", 4, 2, 4, "large", [5, 5, 5, 5]], ["slides", 4, 9, 4, "large", [10, 10, 12, 12]],
+      ["slides", 4, 0, 4, "large", [3, 3, 3, 3]], ["slides", 4, 1, 4, "large", [4, 4, 4, 4]], ["slides", 4, 2, 4, "large", [5, 5, 5, 5]], ["slides", 4, 9, 4, "large", [12, 12, 12, 12]] /* 184b55b: [10, 10, 12, 12] */, ["slides", 4, 9, 4, "small", [12, 12, 12, 12]] /* 184b55b: [9, 9, 12, 12] */, ["slides", 4, 9, 16, "large", [4, 4, 12, 12]] /* 184b55b: [3, 3, 12, 12] */, ["slides", 4, 10, 16, "large", [4, 4, 13, 13]] /* 184b55b: [3, 3, 13, 13] */, ["slides", 4, 40, 4, "small", [24, 24, 24, 24]] /* 184b55b: [23, 23, 23, 23] */,
     ];
     const fewer: string[] = [];
     const past: string[] = [];
@@ -1061,7 +1064,7 @@ describe("the money names at least as many lines as before decision 448, and sta
         }
       }
     }
-    assert.equal(NAMED.length, 65);
+    assert.equal(NAMED.length, 73);
     assert.deepEqual(fewer, []);
     assert.deepEqual(past, []);
   });
