@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FACTS_FILE } from "../../extract/facts.ts";
@@ -49,6 +49,19 @@ describe("a run job", () => {
     assert.ok(run.output!.sections.every((s) => s.runId === RUN_ID));
     assert.equal(run.runDir, join(deps.runsDir, RUN_ID));
     for (const file of ["run.json", "findings.json", "intake.json", SECTIONS_FILE]) assert.ok(existsSync(join(run.runDir!, file)), file);
+  });
+
+  test("tells the run who connected, from the stored token's user id, and writes it nowhere in the folder (DECISIONS.md 498)", async () => {
+    const transport = new ReplayTransport(loadRecording());
+    const { deps, handle } = await setup({ dataTransport: transport });
+    await handle(job, once);
+    const run = stored(deps);
+    const { userId } = syntheticConnection();
+    // The access reads went out for that user, so record-type use could judge.
+    assert.ok(transport.requests.some((r) => decodeURIComponent(r.url).includes(`AssigneeId = '${userId}'`)));
+    assert.equal(run.output!.findings.find((f) => f.ruleId === "dq.record-type-use")!.status, "issue");
+    const files = (dir: string): string[] => readdirSync(dir).flatMap((name) => (statSync(join(dir, name)).isDirectory() ? files(join(dir, name)) : [join(dir, name)]));
+    for (const file of files(run.runDir!)) assert.ok(!readFileSync(file, "utf8").includes(userId.slice(0, 15)), file);
   });
 
   test("keeps the survey it built the sections from in the run's folder, without a word of any comment", async () => {
