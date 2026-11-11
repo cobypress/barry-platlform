@@ -418,6 +418,14 @@ describe("the earlier handbook's folder", () => {
     assert.equal(loadRun(dir).input.baseline?.run.asOf, EARLIER_AS_OF);
   });
 
+  test("needs only the earlier run.json and handbook.json, not its findings", () => {
+    const { dir, earlier } = recheck();
+    for (const file of ["findings.json", "metrics.json", "pseudonym-map.json", "checkpoints"]) rmSync(join(earlier, file), { recursive: true });
+    assert.equal(readEarlierHandbook(dir)?.asOf, EARLIER_AS_OF);
+    // The report needs its findings, and has no comparison without them, as before.
+    assert.equal(loadRun(dir).input.baseline, null);
+  });
+
   test("an org id that differs only after its 15th character is the same org", () => {
     const { dir } = recheck({ orgId: `${run.orgId.slice(0, 15)}XYZ` });
     assert.ok(readEarlierHandbook(dir));
