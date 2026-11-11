@@ -1,6 +1,7 @@
 import { test, describe, before } from "node:test";
 import assert from "node:assert/strict";
 import { cpSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { contributeBenchmark, exportBenchmark } from "../../benchmark/export.ts";
@@ -15,6 +16,7 @@ import { HANDBOOK_FILE } from "../build.ts";
 import { HANDBOOK_DOCX } from "../docx.ts";
 import { Handbook } from "../schema.ts";
 import { docxText } from "../../testing/docx-text.ts";
+import { withEarlier } from "../../testing/earlier-handbook.ts";
 import { processDocumentsJob } from "../../worker/documents-job.ts";
 import type { DocumentDrive, DriveItem } from "../../worker/drive.ts";
 import type { DocumentKey } from "../../render/render-released.ts";
@@ -230,12 +232,32 @@ describe("the documents job: handbook.json reaches the Word document and nothing
   const LITERAL = "HB-DOC-LITERAL-0443";
   const CLASS_OBJECT = "Hbdoc_Class_Ledger_0443__c";
   const TRIGGER_OBJECT = "Hbdoc_Trigger_Ledger_0443__c";
+  // And a re-check's earlier handbook (decision 483): a flow only the earlier
+  // health check had, so it's in the part's "Removed" list, reaches the Word
+  // document and nothing else; the earlier text of a rule's formula, which the
+  // part says only differs, reaches nothing at all; and the earlier folder is
+  // only read.
+  const SINCE_MARKER = "HB-SINCE-MARKER-0483";
+  const SINCE_FLOW = "Hb_Since_Removed_0483";
+  const SINCE_NOWHERE = "HB-SINCE-NOWHERE-0483";
   /** In the Word document and nowhere else the make leaves. */
-  const PLANTED = [LITERAL, HANDBOOK_MARKER, HANDBOOK_CASE_MARKER, CLASS_OBJECT, TRIGGER_OBJECT, CHANGES_MARKER, CHANGES_DELEGATE];
+  const PLANTED = [LITERAL, HANDBOOK_MARKER, HANDBOOK_CASE_MARKER, CLASS_OBJECT, TRIGGER_OBJECT, CHANGES_MARKER, CHANGES_DELEGATE, SINCE_MARKER];
   const uploads: Array<{ parent: string; name: string; body: Buffer }> = [];
   let deps: ReturnType<typeof baseDeps>;
   let outcome: Awaited<ReturnType<typeof processDocumentsJob>>;
   let dir: string;
+  let earlier: string;
+  let earlierBefore: Map<string, string>;
+  const asked: NarrativeRequest[] = [];
+
+  /** Each file in a folder, by its path, with its size, time and hash: what a write would move. */
+  const snapshot = (folder: string): Map<string, string> =>
+    new Map(
+      (readdirSync(folder, { recursive: true }) as string[]).sort().map((name) => {
+        const s = statSync(join(folder, name));
+        return [name, s.isFile() ? `${s.size} ${s.mtimeMs} ${s.mode} ${createHash("sha256").update(readFileSync(join(folder, name))).digest("hex")}` : `dir ${s.mtimeMs} ${s.mode}`];
+      }),
+    );
 
   /** Drive as the job sees it, keeping every upload. */
   class KeptDrive implements DocumentDrive {
@@ -269,6 +291,8 @@ describe("the documents job: handbook.json reaches the Word document and nothing
     const { dir: source } = await runFromRecording({ answers: loadAnswers() });
     deps = baseDeps({
       drive: new KeptDrive(),
+      // Nothing in a documents make goes to Claude: anything that did would be seen here.
+      narrative: { complete: async (request) => (asked.push(request), { stopReason: "end_turn", model: request.model, text: "{}" }) },
       // The reports are placeholders: the handbook is made by the job itself, from the run folder, whatever renders them.
       renderReleased: async (_dir, _approved, out) => {
         mkdirSync(out, { recursive: true });
@@ -292,6 +316,12 @@ describe("the documents job: handbook.json reaches the Word document and nothing
     handbook.apexTriggers.items.push({ name: "PlantedLedgerTrigger", apiVersion: 62, status: "Active", isTest: false, touches: touches(TRIGGER_OBJECT), lastChanged: null, object: "Account", events: ["after update"] });
     handbook.apexTriggers.total += 1;
     writeFileSync(join(dir, HANDBOOK_FILE), JSON.stringify(handbook));
+    earlier = withEarlier(dir, (h) => {
+      assert.ok(h.flows.status === "ok" && h.validationRules.status === "ok");
+      h.flows.items.push({ ...structuredClone(h.flows.items[0]!), name: SINCE_FLOW, label: SINCE_MARKER, description: `Description ${SINCE_NOWHERE}` });
+      h.validationRules.items.find((r) => r.name === "Needs_Competitor")!.formula = `CONTAINS(Notes__c, "${SINCE_NOWHERE}")`;
+    });
+    earlierBefore = snapshot(earlier);
     deps.store.addDocumentsJob({ run: consoleRun({ status: "released" }), intake: null, sections: [], versions: [], overrides: [], preparedBy: null, state: "queued", driveFolderId: null, files: [] });
     outcome = await processDocumentsJob(RUN_ID, deps, { final: true });
     assert.equal(outcome.outcome, "done", outcome.detail);
@@ -318,10 +348,31 @@ describe("the documents job: handbook.json reaches the Word document and nothing
     }
   });
 
+  test("a flow only the earlier health check had is in the part's Removed list, and the earlier text of a changed formula is nowhere in it", () => {
+    for (const bytes of [readFileSync(join(dir, "documents", HANDBOOK_DOCX)), uploads.find((u) => u.name.endsWith(" - Org handbook.docx"))!.body]) {
+      const text = docxText(bytes);
+      const part = text.slice(text.indexOf("\n## Changed since your last health check\n"), text.indexOf("\n## Recent changes\n"));
+      assert.match(part, new RegExp(`\\n### Flows\\n\\nAdded: none\\n\\nRemoved: 1 flow\\n${SINCE_MARKER} \\(${SINCE_FLOW}\\)\\n`));
+      assert.match(part, /\nNeeds_Competitor on Opportunity: formula\n/);
+      assert.ok(!text.includes(SINCE_NOWHERE), "only that it differs");
+      // Only in the part: the flow's own entry is this run's, which hasn't it.
+      assert.equal(text.split(SINCE_MARKER).length, 2);
+    }
+  });
+
+  test("the earlier health check's folder is only read: no file in it written, added or touched", () => {
+    assert.deepEqual(snapshot(earlier), earlierBefore);
+    assert.ok(earlierBefore.has(HANDBOOK_FILE) && earlierBefore.has("pseudonym-map.json"));
+  });
+
+  test("nothing of either handbook is sent to Claude by a documents make", () => {
+    assert.deepEqual(holding(JSON.stringify(asked), [...PLANTED, SINCE_NOWHERE, SINCE_FLOW]), []);
+  });
+
   test("no other upload holds it", () => {
     const others = uploads.filter((u) => !u.name.endsWith(" - Org handbook.docx"));
     assert.equal(others.length, 7, "the six documents and the readout kit");
-    for (const u of others) assert.deepEqual([...PLANTED, CHANGES_PLANTED, USER_ADMIN_MARKER, USER_ADMIN_EMAIL, APEX_OUTSIDE_MODIFIER.name, COMPONENT_OUTSIDE_MODIFIER.name].filter((p) => u.body.includes(p)), [], u.name);
+    for (const u of others) assert.deepEqual([...PLANTED, SINCE_FLOW, SINCE_NOWHERE, CHANGES_PLANTED, USER_ADMIN_MARKER, USER_ADMIN_EMAIL, APEX_OUTSIDE_MODIFIER.name, COMPONENT_OUTSIDE_MODIFIER.name].filter((p) => u.body.includes(p)), [], u.name);
   });
 
   test("nor the store's record, its warnings, the log or the queue's outcome", () => {
@@ -329,13 +380,13 @@ describe("the documents job: handbook.json reaches the Word document and nothing
     assert.ok(made.files.length === 6 && !made.files.some((f) => /handbook/i.test(f.name)));
     const store = { documents: [...deps.store.documents.values()], writes: deps.store.writes, runs: [...deps.store.runs.values()], shares: deps.store.shares, microsites: [...deps.store.microsites.values()], benchmark: deps.store.benchmarkRows };
     for (const [where, text] of [["store", JSON.stringify(store)], ["warnings", JSON.stringify(made.warnings)], ["log", deps.lines.join("\n")], ["outcome", JSON.stringify(outcome)]] as const) {
-      for (const planted of [...PLANTED, "Planted_Rule", "Opportunity_Stage_Review", "PlantedLedgerSync", "PlantedLedgerTrigger", APEX_OUTSIDE_MODIFIER.name, COMPONENT_OUTSIDE_MODIFIER.name]) assert.ok(!text.includes(planted), `${planted} in the ${where}`);
+      for (const planted of [...PLANTED, SINCE_FLOW, SINCE_NOWHERE, "Planted_Rule", "Opportunity_Stage_Review", "PlantedLedgerSync", "PlantedLedgerTrigger", APEX_OUTSIDE_MODIFIER.name, COMPONENT_OUTSIDE_MODIFIER.name]) assert.ok(!text.includes(planted), `${planted} in the ${where}`);
     }
   });
 
   test("nor any other file the make leaves in the run folder", () => {
     const files = filesIn(dir);
-    const holding = [...files.keys()].filter((f) => isOutput(f) && f !== `documents/${HANDBOOK_DOCX}` && PLANTED.some((p) => files.get(f)!.includes(p)));
+    const holding = [...files.keys()].filter((f) => isOutput(f) && f !== `documents/${HANDBOOK_DOCX}` && [...PLANTED, SINCE_FLOW, SINCE_NOWHERE].some((p) => files.get(f)!.includes(p)));
     assert.deepEqual(holding, []);
     // The names, as before the make: in the run's map alone.
     for (const name of [APEX_OUTSIDE_MODIFIER.name, COMPONENT_OUTSIDE_MODIFIER.name]) assert.deepEqual([...files.keys()].filter((f) => isOutput(f) && files.get(f)!.includes(name)), ["pseudonym-map.json"], name);
@@ -385,6 +436,8 @@ describe("what reads it", () => {
     ["src/handbook/build.ts", "builds the file"],
     ["src/handbook/read.ts", "the one reader of the file (DECISIONS.md 443)"],
     ["src/handbook/docx.ts", "makes the Word document from it"],
+    ["src/handbook/compare.ts", "sets a re-check's file beside its earlier health check's, for the Word document alone, keeping nothing (DECISIONS.md 483)"],
+    ["src/testing/earlier-handbook.ts", "makes up a synthetic earlier health check beside a synthetic run, for the tests and the sample"],
     ["src/handbook/sample.ts", "writes the synthetic org's document outside the repo, for a person to read"],
     ["src/worker/documents-job.ts", "puts the Word document in the customer's Drive folder, and lists it nowhere"],
     ["src/extract/metadata-parse.ts", "keeps the detail on the retrieve route"],

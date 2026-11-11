@@ -1,5 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { baselineRun } from "../render/baseline.ts";
+import { Run } from "../schemas/index.ts";
 import { HANDBOOK_FILE } from "./build.ts";
 import { CHANGES_NOT_KEPT, Handbook, HANDBOOK_VERSION, HandbookVersion2, HandbookVersion3, HandbookVersion4 } from "./schema.ts";
 
@@ -59,6 +61,34 @@ export function readHandbook(runDir: string): HandbookRead {
   const two = HandbookVersion2.safeParse(data);
   if (two.success) return { ok: true, handbook: { ...two.data, version: HANDBOOK_VERSION, flows: notKept(two.data.flows), validationRules: notKept(two.data.validationRules), apexClasses: notKept(two.data.apexClasses), apexTriggers: notKept(two.data.apexTriggers), recentChanges: { status: "unavailable", reason: CHANGES_NOT_KEPT } } };
   return { ok: false, why: "format" };
+}
+
+/** A re-check's earlier handbook, and the day its health check read the org. */
+export type EarlierHandbook = { handbook: Handbook; asOf: string };
+
+/**
+ * The handbook of the health check this run is a re-check of (decision 483),
+ * from the folder beside the run's own, by the route the report's comparison
+ * takes (render/baseline.ts): the id's shape checked and the same org. Read by
+ * `readHandbook`, so an earlier version is upgraded as this run's would be.
+ * Only run.json and handbook.json are opened there: never its pseudonym map,
+ * since its tokens mean nothing in this run. Undefined when the run names no
+ * baseline, so its handbook has no such part; null when it names one and
+ * there's no handbook to read, gone, unreadable or another org's, which the
+ * part says in one sentence, the same for each.
+ */
+export function readEarlierHandbook(runDir: string): EarlierHandbook | null | undefined {
+  let run: Run;
+  try {
+    run = Run.parse(JSON.parse(readFileSync(join(runDir, "run.json"), "utf8")));
+  } catch {
+    return undefined;
+  }
+  if (!run.baselineRunId) return undefined;
+  const baseline = baselineRun(runDir, run);
+  if (!baseline) return null;
+  const read = readHandbook(baseline.dir);
+  return read.ok ? { handbook: read.handbook, asOf: baseline.run.asOf } : null;
 }
 
 /** An older file's list, each item with no last change and the list saying they weren't kept. */

@@ -2,6 +2,8 @@ import { AlignmentType, Document, Footer, HeadingLevel, Packer, PageNumber, Para
 import { colour, font } from "../design/tokens.ts";
 import { longDate } from "../render/format.ts";
 import { UNKNOWN_USER, type Pseudonymiser } from "../privacy/pseudonymiser.ts";
+import { compareHandbooks, type Changed, type Compared, type Component, type Detail, type HandbookComparison, type KindComparison, type NotCompared } from "./compare.ts";
+import type { EarlierHandbook } from "./read.ts";
 import { CHANGES_NOT_KEPT, TRIGGER_EVENTS, type Handbook, type HandbookChange, type HandbookApexClass, type HandbookLastChange, type HandbookApexTouches, type HandbookApexTrigger, type HandbookCondition, type HandbookFlow, type HandbookFlowItem, type HandbookPath, type HandbookStep, type HandbookValidationRule, type HandbookValidationRuleItem, type LastChanges, type ValidationRuleCoverage } from "./schema.ts";
 
 // The org handbook as a Word document (DECISIONS.md 443 and 444): handbook.json
@@ -486,9 +488,14 @@ function touchesLines(touches: HandbookApexTouches | null): Run[][] {
  */
 function lastChangedLine(change: HandbookLastChange | null, names: Names): Run[][] {
   if (change === null) return [];
+  return [[{ text: `Last changed ${lastChangedWords(change, names)}` }]];
+}
+
+/** "3 Mar 2026 by Jo Ellis", from this run's token alone. */
+function lastChangedWords(change: HandbookLastChange, names: Names): string {
   const on = /^\d{4}-\d{2}-\d{2}/.test(change.at) ? longDate(change.at) : change.at;
   const by = change.by === null ? "" : ` by ${names(change.by) ?? "a user whose name we couldn't look up"}`;
-  return [[{ text: `Last changed ${on}${by}` }]];
+  return `${on}${by}`;
 }
 
 /** One class or trigger as one paragraph: an org can have thousands, and a heading and a paragraph a line each would bury the rest. */
@@ -640,6 +647,122 @@ function writeChange(doc: Doc, change: HandbookChange, names: Names): void {
   doc.lines(first, [what]);
 }
 
+// ─── Changed since your last health check ─────────────────────────────────────
+
+export const SINCE_TITLE = "Changed since your last health check";
+
+/** Said for every baseline there's no handbook to read from: gone, unreadable or another org's alike (decision 483). */
+export const NO_EARLIER = "There was no earlier handbook to compare with, so this handbook doesn't say what changed since your last health check.";
+
+/** Our words for each detail a change names. When it was last changed has words of its own. */
+const CHANGED_WORDS: Readonly<Record<Exclude<Detail, "lastChanged">, string>> = {
+  label: "label",
+  status: "status",
+  type: "type",
+  description: "description",
+  start: "what starts it",
+  schedule: "schedule",
+  entry: "entry conditions",
+  paths: "the ways it starts",
+  steps: "steps",
+  active: "whether it's active",
+  formula: "formula",
+  message: "error message",
+  messageField: "where the message shows",
+  apiVersion: "API version",
+  isTest: "whether it's a test",
+  touches: "what it touches",
+  object: "the object it's on",
+  events: "events",
+};
+
+type SinceKind = { key: keyof HandbookComparison; title: string; one: string; many: string; name: (c: Component) => string };
+
+const SINCE_KINDS: SinceKind[] = [
+  { key: "flows", title: "Flows", one: "flow", many: "flows", name: (c) => (c.label && c.label !== c.name ? `${c.label} (${c.name})` : c.name) },
+  { key: "validationRules", title: "Validation rules", one: "validation rule", many: "validation rules", name: (c) => `${c.name} on ${c.object}` },
+  { key: "apexClasses", title: "Apex classes", one: "Apex class", many: "Apex classes", name: (c) => c.name },
+  { key: "apexTriggers", title: "Apex triggers", one: "Apex trigger", many: "Apex triggers", name: (c) => (c.object ? `${c.name} on ${c.object}` : c.name) },
+];
+
+const notComparedWords = (kind: SinceKind, unreadIn: NotCompared["unreadIn"]): string =>
+  unreadIn === "now" ? `We couldn't read your ${kind.many} in this health check, so we haven't compared them with your earlier one.`
+  : unreadIn === "before" ? `We couldn't read your ${kind.many} in your earlier health check, so we haven't compared them.`
+  : `We couldn't read your ${kind.many} in either health check, so we haven't compared them.`;
+
+/** "status, steps and last changed 3 Mar 2026 by Jo Ellis": the details, never what they were. */
+function changedWords(change: Changed, names: Names): string {
+  const words = change.details.map((d) => (d === "lastChanged" ? (change.lastChanged ? `last changed ${lastChangedWords(change.lastChanged, names)}` : "when it was last changed") : CHANGED_WORDS[d]));
+  return listed(words);
+}
+
+/** What one kind's comparison left out, and why, each in a sentence of its own. */
+function sinceNotes(kind: SinceKind, c: Compared): string[] {
+  const notes: string[] = [];
+  const these = (n: number): string => (n === 1 ? "that one" : "those");
+  if (c.routes === "differ") notes.push(`Your earlier health check read your ${kind.many} by a different route from this one, and the two routes can give a different version of a flow, so we've compared only which were added or removed and when each was last changed.`);
+  if (c.routes === "unknown") notes.push(`We can't tell whether your earlier health check read your ${kind.many} the same way as this one, and two ways of reading them can give a different version of a flow, so we've compared only which were added or removed and when each was last changed.`);
+  if (c.stepsCut) notes.push(`${upperFirst(plural(c.stepsCut, kind.one, kind.many))} had more steps than this handbook keeps in one of the two health checks, so for ${these(c.stepsCut)} we compared how many steps each has and the steps both kept.`);
+  if (c.leftOutObjects.length) notes.push(`We left out the rules on ${listed(c.leftOutObjects)}: only one of the two health checks read the rules on ${c.leftOutObjects.length === 1 ? "that object" : "those objects"}, so a rule there isn't called added or removed.`);
+  if (c.unnamed) notes.push(`We left out ${plural(c.unnamed, kind.one, kind.many)} whose object one of the two health checks could name only by its id, so ${c.unnamed === 1 ? "it isn't" : "they aren't"} called added, removed or changed.`);
+  if (c.range) {
+    const after = c.range.leftOut ? ` This health check's ${plural(c.range.leftOut, kind.one, kind.many)} after that ${c.range.leftOut === 1 ? "isn't" : "aren't"} compared, so none is called added or removed.` : "";
+    notes.push(`One of the two health checks had more ${kind.many} than this handbook keeps, so we compared them only as far as both lists go, up to ${c.range.upTo}.${after}`);
+  }
+  if (c.unread) {
+    const which = { flows: "some of their details", validationRules: "the formula", apexClasses: "the code", apexTriggers: "the code or the events, or could name the object only by its id" }[kind.key];
+    const what = { flows: "those details aren't", validationRules: `${c.unread === 1 ? "its" : "their"} formula, error message and where the message shows aren't`, apexClasses: "whether it's a test and what it touches aren't", apexTriggers: "those details aren't" }[kind.key];
+    notes.push(`For ${plural(c.unread, kind.one, kind.many)}, one of the two health checks couldn't read ${which}, so ${what} compared.`);
+  }
+  const { before, after } = c.lastChanges;
+  if (c.common > 0 && (before !== "read" || after !== "read")) {
+    const who = before !== "read" && after !== "read" ? "Neither health check says" : before !== "read" ? "Your earlier health check doesn't say" : "This health check doesn't say";
+    notes.push(`${who} when each ${kind.one} was last changed, so that isn't compared.`);
+  }
+  return notes;
+}
+
+/** "Added: 2 flows", then one line each, or "none". */
+function sinceList(doc: Doc, label: string, kind: SinceKind, lines: string[]): void {
+  doc.lines([{ text: `${label}: `, bold: true }, { text: lines.length ? plural(lines.length, kind.one, kind.many) : "none" }], lines.map((text) => [{ text }]));
+}
+
+function writeSinceKind(doc: Doc, kind: SinceKind, c: KindComparison, names: Names): void {
+  doc.heading(kind.title, 3);
+  if (c.status !== "compared") return doc.para({ text: notComparedWords(kind, c.unreadIn), bold: true });
+  if (c.added.length + c.removed.length + c.changed.length === 0) {
+    doc.para(`No ${kind.many} were added, removed or changed.`);
+  } else {
+    sinceList(doc, "Added", kind, c.added.map(kind.name));
+    sinceList(doc, "Removed", kind, c.removed.map(kind.name));
+    sinceList(doc, "Changed", kind, c.changed.map((change) => `${kind.name(change)}: ${changedWords(change, names)}`));
+  }
+  for (const note of sinceNotes(kind, c)) doc.para(note);
+}
+
+/**
+ * The part a re-check's handbook gains (decision 483), before the recent
+ * changes: what was added, removed and changed since the earlier health check,
+ * from the two files and nothing else. With a baseline named and no handbook
+ * to read, one sentence. Every count is the comparison's own.
+ */
+function sincePart(earlier: EarlierHandbook | null, comparison: HandbookComparison | null, runDate: string): Part {
+  const since = earlier ? `since your health check of ${longDate(earlier.asOf)}` : "";
+  return {
+    covers: () => (earlier ? `${SINCE_TITLE}: what was added, removed or changed in your flows, validation rules, Apex classes and Apex triggers ${since}.` : `${SINCE_TITLE}: there was no earlier handbook to compare with.`),
+    alsoCovers: () =>
+      earlier
+        ? "It compares every detail this handbook keeps of each one, apart from who last changed it, which we don't match from one health check to the next. It doesn't compare the order of steps no path reaches, the part of a formula or a condition's value past the 4,000 characters this handbook keeps, or the recent changes, which have their own part. Where the two health checks can't be compared fairly, because one couldn't read something or read less of it, the part says so rather than call anything added, removed or changed."
+        : null,
+    write: (doc, _h, names) => {
+      doc.heading(SINCE_TITLE, 2);
+      if (!earlier || !comparison) return doc.para(NO_EARLIER);
+      doc.para(`This compares your org on ${longDate(runDate)} with your health check of ${longDate(earlier.asOf)}. For your flows, validation rules, Apex classes and Apex triggers, it lists what was added, what was removed and what changed, and for each one that changed, which of its details differ, not what they were before. One that was renamed shows as one removed and one added.`);
+      for (const kind of SINCE_KINDS) writeSinceKind(doc, kind, comparison[kind.key], names);
+    },
+  };
+}
+
 /** The parts, in the order the handbook runs. */
 const PARTS: Part[] = [FLOWS, VALIDATION_RULES, APEX_CLASSES, APEX_TRIGGERS, RECENT_CHANGES];
 
@@ -648,6 +771,12 @@ type HandbookOptions = {
   runDate: string;
   /** The run's pseudonym map, which turns who made each recent change, and who last changed each class, trigger, flow and validation rule, back into a name. Without it, none is named. */
   pseudonyms?: Pseudonymiser | null;
+  /**
+   * A re-check's earlier handbook (decision 483). Undefined with no baseline,
+   * and the document is as it was; null when one was named and there's no
+   * handbook to read. Its tokens are never restored: only this run's are.
+   */
+  earlier?: EarlierHandbook | null;
 };
 
 /** The handbook as its document's blocks. Exported for the tests, which read the words without unzipping. */
@@ -663,12 +792,15 @@ export function handbookBlocks(handbook: Handbook, options: HandbookOptions): Pa
   doc.para(`This handbook sets out how your Salesforce org is configured: what each flow does, step by step, what each validation rule checks, what each Apex class and trigger touches, and what was changed in Setup recently, and by whom. We read it from your org on ${longDate(options.runDate)}, for your health check, and it describes the org as it was that day.`);
   doc.para("Everything in it comes from your org's own configuration. Names, descriptions, conditions, formulas and messages are as your admins wrote them, except that anything that looks like a password or a key is replaced with [REDACTED]. We haven't added to it or summarised it, except that what each piece of Apex touches is read from its code, as that part explains. Where we couldn't read something, or list only part of it, we say so.");
   doc.heading("What it covers", 2);
-  for (const part of PARTS) {
+  // A re-check's part comes before the recent changes, the last part.
+  const { earlier } = options;
+  const parts = earlier === undefined ? PARTS : [...PARTS.slice(0, -1), sincePart(earlier, earlier ? compareHandbooks(earlier.handbook, handbook) : null, options.runDate), ...PARTS.slice(-1)];
+  for (const part of parts) {
     doc.para(part.covers(handbook));
     const also = part.alsoCovers?.(handbook);
     if (also) doc.para(also);
   }
-  for (const part of PARTS) part.write(doc, handbook, names);
+  for (const part of parts) part.write(doc, handbook, names);
   return doc.blocks;
 }
 
