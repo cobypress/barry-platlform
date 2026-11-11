@@ -14,7 +14,7 @@ import { ApiBudget, BudgetStopError } from "../../salesforce/budget.ts";
 import { SalesforceClient } from "../../salesforce/client.ts";
 import type { Transport, TransportRequest } from "../../salesforce/transport.ts";
 import type { Finding } from "../../schemas/index.ts";
-import { analyseExtracts, clone, loadExtracts, runFromRecording, tempDir } from "../../testing/harness.ts";
+import { analyseExtracts, clone, loadExtracts, tempDir } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration, syntheticProvider } from "../../testing/replay.ts";
 import { Simulator, type SimulatorOptions } from "../../testing/simulator.ts";
 import * as org from "../../testing/synthetic-org.ts";
@@ -79,12 +79,14 @@ const editComposite = (edit: (soql: string, item: { statusCode: number; result: 
   },
 });
 
+// The synthetic org through the simulator, not the recording: a change to a
+// query then shows here as what it reads, not as a request the recording lacks.
 let base: Map<string, unknown>;
-let recorded: { findings: Finding[]; dir: string; calls: number };
+let synthetic: { findings: Finding[]; dir: string; calls: number };
 before(async () => {
-  const run = await runFromRecording({ answers: loadAnswers() });
+  const run = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), answers: loadAnswers(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: T, transport: new Simulator(), log: () => {} });
   base = loadExtracts(run.dir);
-  recorded = { findings: run.output!.findings, dir: run.dir, calls: run.run.steps.find((s) => s.id === recordTypeUseExtractor.id)!.calls };
+  synthetic = { findings: run.output!.findings, dir: run.dir, calls: run.run.steps.find((s) => s.id === recordTypeUseExtractor.id)!.calls };
 });
 
 /** The finding, from the synthetic run's other extracts with this step in place of its own. */
@@ -99,7 +101,7 @@ const exclusion = (f: Finding, starts: string): string => f.evidence.flatMap((e)
 
 describe("the synthetic org", () => {
   test("names the type with no records and the one with none made in the last 12 months, apart", () => {
-    const f = recorded.findings.find((x) => x.ruleId === RULE)!;
+    const f = synthetic.findings.find((x) => x.ruleId === RULE)!;
     assert.equal(f.status, "issue");
     assert.equal(f.title, "Some record types have no records, or none made in the last 12 months");
     assert.deepEqual(names(f), ["Support on Case", "Credit Note on Invoice"]);
@@ -114,14 +116,14 @@ describe("the synthetic org", () => {
   });
 
   test("leaves out the inactive type and the object with no records, and counts each", () => {
-    const f = recorded.findings.find((x) => x.ruleId === RULE)!;
+    const f = synthetic.findings.find((x) => x.ruleId === RULE)!;
     assert.ok(!names(f).some((s) => /Old Format|Default/.test(s)));
     assert.equal(exclusion(f, "Inactive record types"), "Inactive record types: 1");
     assert.equal(exclusion(f, "Objects with fewer than 20"), "Objects with fewer than 20 records made in the last 12 months: 1 (Empty_Object__c)");
   });
 
   test("the type made since the run's date isn't listed, and the records made since are in neither count", () => {
-    const use = readCheckpoint(join(recorded.dir, "checkpoints", `${recordTypeUseExtractor.id}.json`)) as RecordTypeUse;
+    const use = readCheckpoint(join(synthetic.dir, "checkpoints", `${recordTypeUseExtractor.id}.json`)) as RecordTypeUse;
     assert.ok(use.types.status === "ok");
     const later = org.RECORD_TYPES.find((t) => t.DeveloperName === "Pro_Forma")!;
     assert.ok(later.CreatedDate > stamp(T.getTime()));
@@ -136,8 +138,8 @@ describe("the synthetic org", () => {
   });
 
   test("the step makes at most three calls", () => {
-    assert.ok(recorded.calls >= 1 && recorded.calls <= 3, `${recorded.calls} calls`);
-    assert.equal(recorded.calls, 2);
+    assert.ok(synthetic.calls >= 1 && synthetic.calls <= 3, `${synthetic.calls} calls`);
+    assert.equal(synthetic.calls, 2);
   });
 });
 
@@ -150,6 +152,8 @@ const TYPES = {
   // Made 30 days before the run, with no records: too new to judge.
   newType: type("Invoice__c", "New_Type", daysUntil(T, 30)),
   packaged: type("Opportunity", "Partner", daysUntil(T, 800), { NamespacePrefix: "acmecpq" }),
+  // On an object we count, with no records: only being packaged keeps it out.
+  packagedHere: type("Invoice__c", "Billing_Run", daysUntil(T, 800), { NamespacePrefix: "acmecpq" }),
   emptyDefault: type("Empty_Object__c", "Default", daysUntil(T, 300)),
   broken: type("Broken__c", "Thing", daysUntil(T, 300)),
   cut: type("Cut__c", "Thing", daysUntil(T, 300)),
@@ -193,14 +197,14 @@ describe("what isn't judged", () => {
 
   test("each quiet case is counted in its own exclusion", () => {
     assert.equal(exclusion(f, "Inactive record types"), "Inactive record types: 1");
-    assert.equal(exclusion(f, "Record types from installed packages"), "Record types from installed packages: 1");
+    assert.equal(exclusion(f, "Record types from installed packages"), "Record types from installed packages: 2");
     assert.equal(exclusion(f, "Record types made in the 90 days"), "Record types made in the 90 days before the run: 1");
     // The empty object and the fillers, which have no records.
     assert.match(exclusion(f, "Objects with fewer than 20"), new RegExp(`: ${FILLERS.length + 1} \\(Empty_Object__c, Filler_01__c, `));
     assert.equal(exclusion(f, "Objects past the 25"), "Objects past the 25 with the most active record types: 1 (Zz_Last__c)");
     assert.equal(exclusion(f, "Objects whose count Salesforce refused"), "Objects whose count Salesforce refused: 1 (Broken__c)");
     assert.equal(exclusion(f, "Objects whose count came back cut short"), "Objects whose count came back cut short: 1 (Cut__c)");
-    for (const quiet of ["Old Format", "New Type", "Partner", "Default", "Thing"]) assert.ok(!names(f).some((s) => s.startsWith(quiet)), quiet);
+    for (const quiet of ["Old Format", "New Type", "Partner", "Billing Run", "Default", "Thing"]) assert.ok(!names(f).some((s) => s.startsWith(quiet)), quiet);
   });
 
   test("the step keeps why each object wasn't counted, and reads 25 objects in three calls", () => {
@@ -385,7 +389,7 @@ describe("a run stopped between the reads", () => {
 
 describe("the guard", () => {
   test("the finding the engine prints is a review, never an instruction to deactivate", () => {
-    const f = recorded.findings.find((x) => x.ruleId === RULE)!;
+    const f = synthetic.findings.find((x) => x.ruleId === RULE)!;
     assert.equal(f.recommendationType, "investigate");
     assert.equal(f.recommendation, "Review 2 record types with the people who own Case and Invoice; we aren't recommending deactivating them, because we can't see which profiles default to them or which flows, Apex and integrations name them.");
     assert.doesNotMatch(f.recommendation, /\bDeactivate\b/);
