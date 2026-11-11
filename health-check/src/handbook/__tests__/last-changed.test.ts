@@ -202,6 +202,13 @@ describe("a read Salesforce refuses with the last-changed fields", () => {
     assert.ok(!existsSync(join(refused.dir, "checkpoints", "apex-last-changed-refused.partial.jsonl")));
   });
 
+  test("the step keeps none of the fields, though the simulator, unlike Salesforce, sends them with every row", () => {
+    // So a refusing org that sent them anyway would leave no name in the checkpoint either.
+    assert.ok(apexQueries(refused.transport, "ApexClass").length === 2);
+    const checkpoint = readFileSync(join(refused.dir, "checkpoints", "apex.json"), "utf8");
+    for (const kept of ["LastModified", APEX_OUTSIDE_MODIFIER.name, APEX_OUTSIDE_MODIFIER.id, "Jo Ellis"]) assert.ok(!checkpoint.includes(kept), kept);
+  });
+
   test("an org without the fields, which refuses them by name, is read the same way", async () => {
     const missing = ["LastModifiedDate", "LastModifiedById", "LastModifiedBy"];
     const run = await simulated({ dropFields: { ApexClass: missing, ApexTrigger: missing } });
