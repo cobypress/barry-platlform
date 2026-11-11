@@ -16,17 +16,6 @@ import { Simulator } from "../../testing/simulator.ts";
 // every module that lists it: a run of one module alone has nothing else to
 // bring it in, and ctx.get throws "must run first".
 
-/**
- * Modules whose metrics read a step the module doesn't list, so a complete run
- * of the module alone stops in the analysis: the investment and adoption
- * metrics gate on Opportunity (DECISIONS.md 37), and neither module reads it.
- * Whether they should is a question of API budget, so it's reported, not fixed here.
- */
-const ANALYSIS_GAPS: Record<string, string> = {
-  utilisation: "its investment metrics gate on opportunities, which it doesn't list",
-  adoption: "its metrics gate on opportunities, which it doesn't list",
-};
-
 const RUN_ID = "hc-alone";
 
 /** The run as its run.json has it, whether or not the run got to the end. */
@@ -76,8 +65,8 @@ describe("a run of one module alone", () => {
       assert.ok(run.steps.every((s) => s.status === "done"), `${module.id}: ${unfinished(run)}`);
     });
 
-    const gap = ANALYSIS_GAPS[module.id];
-    test(`${module.id} alone runs to the end`, gap ? { todo: gap } : {}, async () => {
+    // Utilisation and adoption gate their metrics on the opportunities read, so they list it (DECISIONS.md 426).
+    test(`${module.id} alone runs to the end`, async () => {
       const { run, error } = await runAlone([module]);
       assert.equal(error, null);
       assert.notEqual(run.status, "failed");
