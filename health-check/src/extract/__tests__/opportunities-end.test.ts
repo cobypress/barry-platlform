@@ -465,6 +465,15 @@ describe("a deal made since on a page kept from a read without the end", () => {
     assert.deepEqual([out.woundBack, out.asRead, out.madeSince], [0, 0, 1]);
   });
 
+  test("is left out with every history row of its own, even one dated by the run's date", () => {
+    // A deal loaded with its created date set (Salesforce's audit fields) can
+    // carry history rows dated before it, which no later-row test would catch.
+    const early = { ...madeRow, CreatedDate: stamp(T.getTime() - HOUR) };
+    const out = asAtTheRun([kept, made], [keptRow, early], STAGES, T, { names });
+    assert.deepEqual(out.history, [keptRow]);
+    assert.equal(out.madeSince, 1);
+  });
+
   test("is left out where a deal beside it is wound back", () => {
     const moved = dealRow(org.sfId("006", 3), "Negotiation", 1000, "2026-12-01", false, false);
     const rows = [keptRow, madeRow, historyRow(3, moved.Id, "Proposal", 1000, "2026-12-01", T.getTime() - HOUR), historyRow(4, moved.Id, "Negotiation", 1000, "2026-12-01", T.getTime() + HOUR)];
