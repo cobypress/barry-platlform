@@ -1,6 +1,5 @@
 import { FIELD_SPECS, planFields } from "./fields.ts";
-import { readKeyset } from "./opportunities.ts";
-import { monthsBefore, readSoql, soqlDate, soqlDateTime, soqlUpTo, unavailable, type Extractor, type SourceInfo, type Sourced } from "./types.ts";
+import { monthsBefore, readSoql, soqlDate, soqlDateTime, soqlUpTo, type Extractor, type SourceInfo, type Sourced } from "./types.ts";
 
 export type ForecastTypeRow = { Id: string; DeveloperName: string; IsActive: boolean; IsAmount: boolean };
 export type QuotaRow = { QuotaOwnerId: string; QuotaAmount: number | null; StartDate: string; ForecastingTypeId: string | null };
@@ -50,7 +49,8 @@ export type ForecastData = {
    * Deals closed now and changed since the run's start, read after the facts
    * (DECISIONS.md 466). A deal the deals read holds as open that is here closed
    * after the run's date, so its fact gives the category it has now, not the
-   * one it had then. Ids only.
+   * one it had then. Ids only. `truncated` means it stopped at its row limit,
+   * and a part of it can't be used (decision 467).
    */
   closedSinceTheRun: Sourced<string[]>;
 };
@@ -71,6 +71,8 @@ export const forecastExtractor: Extractor<ForecastData> = {
   // (DECISIONS.md 466). A version 3 checkpoint has no such list, and its facts
   // may have been read after a deal open at the run's date had closed.
   version: 4,
+  // Nothing is kept under this key now. It's declared only so pages a run
+  // stopped on the earlier keyset read left behind are cleared (decision 467).
   partialKeys: ["closed-since-the-run"],
   async run(ctx) {
     const today = soqlDate(ctx.now);
@@ -84,7 +86,8 @@ export const forecastExtractor: Extractor<ForecastData> = {
     // is closed now and changed since its start. Read after the facts, so a deal
     // closed while they were read is here too.
     const closedWhere = `IsClosed = true AND LastModifiedDate >= ${soqlDateTime(ctx.now)} AND ${soqlUpTo("CreatedDate", ctx.now)}`;
-    const closedSource: SourceInfo = { kind: "soql", api: "rest", query: `SELECT Id FROM Opportunity WHERE ${closedWhere}` };
+    const closedSoql = `SELECT Id FROM Opportunity WHERE ${closedWhere}`;
+    const closedSource: SourceInfo = { kind: "soql", api: "rest", query: closedSoql };
     if (!ids) {
       const reason = periods.status === "ok" ? "Salesforce returned no period holding today." : `Periods couldn't be read: ${periods.reason}`;
       return {
@@ -98,13 +101,11 @@ export const forecastExtractor: Extractor<ForecastData> = {
       ? await readSoql(ctx, `${itemSoql} WHERE ${inPeriods}`, { maxRecords: FORECAST_MAX_ROWS, missingFields: plan.missing })
       : { status: "unavailable", reason: plan.reason, source: { kind: "soql", api: "rest", query: `${itemSoql} WHERE ${inPeriods}` } };
     const facts = await readSoql<ForecastFactRow>(ctx, `${factSoql} WHERE ${inPeriods}`, { maxRecords: FORECAST_MAX_ROWS });
-    let closedSinceTheRun: Sourced<string[]>;
-    try {
-      const rows = await readKeyset<{ Id: string }>(ctx, "closed-since-the-run", "Id", "Opportunity", closedWhere);
-      closedSinceTheRun = { status: "ok", data: rows.map((r) => r.Id), source: closedSource, truncated: false };
-    } catch (err) {
-      closedSinceTheRun = unavailable(closedSource, err);
-    }
+    // Read whole, from its first row, every time the step runs: set against facts
+    // read afresh, pages kept from before a stop would miss a deal closed since
+    // the stop (DECISIONS.md 467).
+    const closed = await readSoql<{ Id: string }>(ctx, closedSoql, { maxRecords: FORECAST_MAX_ROWS });
+    const closedSinceTheRun: Sourced<string[]> = closed.status === "ok" ? { ...closed, data: closed.data.map((r) => r.Id) } : closed;
     return { periods, items, facts, closedSinceTheRun };
   },
 };
