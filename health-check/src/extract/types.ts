@@ -93,7 +93,15 @@ export const upToItsSecond = (date: Date): Date => new Date(Math.ceil(date.getTi
  * again on a resumed run, would take in records made after the run's date.
  */
 export function soqlWindow(field: string, from: Date, now: Date): string {
-  return `${field} >= ${soqlDateTime(from)} AND ${field} <= ${soqlDateTime(upToItsSecond(now))}`;
+  return `${field} >= ${soqlDateTime(from)} AND ${soqlUpTo(field, now)}`;
+}
+
+/**
+ * The end alone, for a read bounded at its start by something else: open cases,
+ * or an email or article link read through its case (DECISIONS.md 481).
+ */
+export function soqlUpTo(field: string, now: Date): string {
+  return `${field} <= ${soqlDateTime(upToItsSecond(now))}`;
 }
 
 export function soqlDate(date: Date): string {

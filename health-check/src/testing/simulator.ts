@@ -671,7 +671,8 @@ export class Simulator implements Transport {
         return page(org.CASE_STATUSES);
       case "CaseArticle": {
         const closed = new Set(this.#d.supportCases.cases.filter((c) => c.IsClosed && within(c.ClosedDate, soql, "ClosedDate")).map((c) => c.Id));
-        return page(this.#d.supportCases.articles.filter((a) => closed.has(a.CaseId)).map(({ CaseId }) => ({ CaseId })));
+        // The link's own date ends the read too, as an article can be attached after its case closed (DECISIONS.md 481).
+        return page(upTo(this.#d.supportCases.articles, soql, "CreatedDate").filter((a) => closed.has(a.CaseId)).map(({ CaseId }) => ({ CaseId })));
       }
       case "Group":
         if (!/Type = 'Queue'/.test(soql)) break;
@@ -739,18 +740,18 @@ export class Simulator implements Transport {
       for (const c of all.filter((x) => within(x.CreatedDate, soql, "CreatedDate"))) counts.set(c.Origin, (counts.get(c.Origin) ?? 0) + 1);
       return page([...counts].map(([Origin, n]) => ({ Origin, n })));
     }
-    if (/WHERE IsClosed = false/.test(soql)) return page(all.filter((c) => !c.IsClosed).map(({ Id, Status, Priority, Origin, OwnerId, CreatedDate, ContactId, AccountId }) => ({ Id, Status, Priority, Origin, OwnerId, CreatedDate, ContactId, AccountId })));
+    if (/WHERE IsClosed = false/.test(soql)) return page(upTo(all, soql, "CreatedDate").filter((c) => !c.IsClosed).map(({ Id, Status, Priority, Origin, OwnerId, CreatedDate, ContactId, AccountId }) => ({ Id, Status, Priority, Origin, OwnerId, CreatedDate, ContactId, AccountId })));
     if (/WHERE IsClosed = true AND ClosedDate >=/.test(soql)) {
       return page(all.filter((c) => c.IsClosed && within(c.ClosedDate, soql, "ClosedDate")).map(({ Id, CreatedDate, ClosedDate, Priority, Origin, OwnerId, Type, Reason }) => ({ Id, CreatedDate, ClosedDate, Priority, Origin, OwnerId, Type, Reason })));
     }
     return reject("MALFORMED_QUERY", `The synthetic org doesn't answer this case query: ${soql.slice(0, 120)}`);
   }
 
-  /** Emails on cases: the first replies, or a count of those coming in. */
+  /** Emails on cases: the first replies, or a count of those coming in, each to its own end as well as its case's. */
   #caseEmails(soql: string): Json {
     const recent = new Set(this.#d.supportCases.cases.filter((c) => within(c.CreatedDate, soql, "CreatedDate")).map((c) => c.Id));
     const incoming = /Incoming = true/.test(soql);
-    const rows = this.#d.supportCases.replies.filter((r) => r.Incoming === incoming && recent.has(r.ParentId));
+    const rows = upTo(this.#d.supportCases.replies, soql, "MessageDate").filter((r) => r.Incoming === incoming && recent.has(r.ParentId));
     if (/^SELECT COUNT\(\)/i.test(soql)) return { totalSize: rows.length, done: true, records: [] };
     return page(rows.map(({ ParentId, MessageDate }) => ({ ParentId, MessageDate })));
   }

@@ -1,7 +1,7 @@
 import { XMLParser } from "fast-xml-parser";
 import { isUnavailable } from "../salesforce/client.ts";
 import { describeObject, planFrom, type FieldSpec } from "./fields.ts";
-import { monthsBefore, readSoql, soqlWindow, unavailable, type ExtractContext, type Extractor, type SourceInfo, type Sourced } from "./types.ts";
+import { monthsBefore, readSoql, soqlUpTo, soqlWindow, unavailable, type ExtractContext, type Extractor, type SourceInfo, type Sourced } from "./types.ts";
 
 // Service Cloud's reads (roadmap Stage 6, DECISIONS.md 155). Four steps, so a
 // run stopped at the budget picks up where it left off: the set-up, which a
@@ -24,6 +24,12 @@ export const CASE_ROW_CAP = 200_000;
 
 /** The year before the run, on one field, to the run's own date (DECISIONS.md 480). */
 const inYear = (ctx: ExtractContext, field: string): string => soqlWindow(field, monthsBefore(ctx.now, SERVICE_MONTHS), ctx.now);
+/**
+ * To the run's own date alone (DECISIONS.md 481). A figure built from two reads
+ * needs both to stop there: an email case opened since, or a reply sent since,
+ * would otherwise be set against a read that cut it.
+ */
+const toTheRun = (ctx: ExtractContext, field: string): string => soqlUpTo(field, ctx.now);
 
 export type CaseStatusRow = { ApiName: string; MasterLabel: string | null; IsClosed: boolean };
 export type QueueRow = { Id: string; Name: string; DeveloperName: string; QueueRoutingConfigId?: string | null };
@@ -126,7 +132,7 @@ export const serviceCasesExtractor: Extractor<ServiceCases> = {
       created: await readSoql(ctx, `SELECT ${month("CreatedDate")} FROM Case WHERE ${inYear(ctx, "CreatedDate")} ${by("CreatedDate")}`),
       closed: await readSoql(ctx, `SELECT ${month("ClosedDate")} FROM Case WHERE IsClosed = true AND ${inYear(ctx, "ClosedDate")} ${by("ClosedDate")}`),
       origins: await readSoql(ctx, `SELECT Origin, COUNT(Id) n FROM Case WHERE ${inYear(ctx, "CreatedDate")} GROUP BY Origin`),
-      open: await readSoql(ctx, "SELECT Id, Status, Priority, Origin, OwnerId, CreatedDate, ContactId, AccountId FROM Case WHERE IsClosed = false", { maxRecords: CASE_ROW_CAP }),
+      open: await readSoql(ctx, `SELECT Id, Status, Priority, Origin, OwnerId, CreatedDate, ContactId, AccountId FROM Case WHERE IsClosed = false AND ${toTheRun(ctx, "CreatedDate")}`, { maxRecords: CASE_ROW_CAP }),
       closedCases: plan.ok ? await readSoql(ctx, closedSoql, { maxRecords: CASE_ROW_CAP, missingFields: plan.missing }) : { status: "unavailable", reason: plan.reason, source: { kind: "soql", api: "rest", query: closedSoql } },
     };
   },
@@ -168,11 +174,11 @@ export const serviceActivityExtractor: Extractor<ServiceActivity> = {
     return {
       statusChanges: await readSoql(ctx, `SELECT CaseId, OldValue, NewValue, CreatedDate FROM CaseHistory WHERE Field = 'Status' AND ${inYear(ctx, "CreatedDate")}`, { maxRecords: CASE_ROW_CAP }),
       milestones: await readSoql(ctx, `SELECT CaseId, MilestoneTypeId, IsCompleted, IsViolated, StartDate, TargetDate, CompletionDate FROM CaseMilestone WHERE ${inYear(ctx, "StartDate")}`, { maxRecords: CASE_ROW_CAP }),
-      replies: await readSoql(ctx, `SELECT ParentId, MessageDate FROM EmailMessage WHERE Incoming = false AND ParentId IN (${recentCases})`, { maxRecords: CASE_ROW_CAP }),
+      replies: await readSoql(ctx, `SELECT ParentId, MessageDate FROM EmailMessage WHERE Incoming = false AND ${toTheRun(ctx, "MessageDate")} AND ParentId IN (${recentCases})`, { maxRecords: CASE_ROW_CAP }),
       agentWork: await readSoql(ctx, `SELECT UserId, Status, RequestDateTime, AcceptDateTime, DeclineDateTime, SpeedToAnswer FROM AgentWork WHERE ${inYear(ctx, "RequestDateTime")}`, { maxRecords: CASE_ROW_CAP }),
-      caseArticles: await readSoql(ctx, `SELECT CaseId FROM CaseArticle WHERE CaseId IN (SELECT Id FROM Case WHERE IsClosed = true AND ${inYear(ctx, "ClosedDate")})`, { maxRecords: CASE_ROW_CAP }),
+      caseArticles: await readSoql(ctx, `SELECT CaseId FROM CaseArticle WHERE ${toTheRun(ctx, "CreatedDate")} AND CaseId IN (SELECT Id FROM Case WHERE IsClosed = true AND ${inYear(ctx, "ClosedDate")})`, { maxRecords: CASE_ROW_CAP }),
       channels: [
-        { channel: "Email", count: await countOf(ctx, `SELECT COUNT() FROM EmailMessage WHERE Incoming = true AND ParentId IN (${recentCases})`) },
+        { channel: "Email", count: await countOf(ctx, `SELECT COUNT() FROM EmailMessage WHERE Incoming = true AND ${toTheRun(ctx, "MessageDate")} AND ParentId IN (${recentCases})`) },
         { channel: "Messaging", count: await countOf(ctx, `SELECT COUNT() FROM MessagingSession WHERE ${inYear(ctx, "StartTime")}`) },
         { channel: "Chat", count: await countOf(ctx, `SELECT COUNT() FROM LiveChatTranscript WHERE ${inYear(ctx, "StartTime")}`) },
         { channel: "Voice", count: await countOf(ctx, `SELECT COUNT() FROM VoiceCall WHERE ${inYear(ctx, "CallStartDateTime")}`) },
