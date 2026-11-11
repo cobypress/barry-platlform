@@ -721,7 +721,8 @@ describe("with the summaries' switch on, Apex code goes to Claude by the summary
     assert.deepEqual(holding(JSON.stringify(store), [...APEX_MARKERS, PASTED_CREDENTIAL, SUMMARY_MARKER, LONGEST_NAME, "ZebraKeyHolder"]), []);
   });
 
-  test("a documents make that prints the approved summaries sends Claude nothing", async () => {
+  /** A documents make of the run with its summaries approved. `before` runs on the copied run folder first. */
+  async function approvedMake(before: (dir: string) => void = () => {}) {
     const asked: NarrativeRequest[] = [];
     const uploads: Array<{ name: string; body: Buffer }> = [];
     const drive: DocumentDrive = {
@@ -744,13 +745,41 @@ describe("with the summaries' switch on, Apex code goes to Claude by the summary
         return { files, warnings: [], held: [] };
       },
     });
-    cpSync(on.dir, join(deps.runsDir, RUN_ID), { recursive: true });
+    const dir = join(deps.runsDir, RUN_ID);
+    cpSync(on.dir, dir, { recursive: true });
+    before(dir);
     deps.store.summaries.set(RUN_ID, { ...on.deps.store.summaries.get(RUN_ID)!, status: "approved", decidedBy: "consultant@example.com", decidedAt: "2026-11-05T10:00:00.000Z" });
     deps.store.addDocumentsJob({ run: consoleRun({ status: "released" }), intake: null, sections: [], versions: [], overrides: [], preparedBy: null, state: "queued", driveFolderId: null, files: [] });
-    assert.equal((await processDocumentsJob(RUN_ID, deps, { final: true })).outcome, "done");
-    const handbook = docxText(uploads.find((u) => u.name.endsWith(" - Org handbook.docx"))!.body);
+    const outcome = await processDocumentsJob(RUN_ID, deps, { final: true });
+    return { deps, uploads, asked, outcome };
+  }
+  /** The summaries' own text: the stub's word and the classes it names. */
+  const SUMMARY_TEXT = [SUMMARY_MARKER, LONGEST_NAME, "ZebraKeyHolder"];
+  /** Everything a make leaves but the handbook itself: the log, the outcome, the console's documents row and every write. */
+  const leftBy = (make: Awaited<ReturnType<typeof approvedMake>>) => JSON.stringify({ lines: make.deps.lines, outcome: make.outcome, documents: [...make.deps.store.documents.values()], writes: make.deps.store.writes });
+
+  test("a documents make that prints the approved summaries sends Claude nothing, and they're in the handbook and nowhere else it leaves", async () => {
+    const make = await approvedMake();
+    assert.equal(make.outcome.outcome, "done");
+    const handbook = docxText(make.uploads.find((u) => u.name.endsWith(" - Org handbook.docx"))!.body);
     assert.ok(handbook.includes(`Summary (written by Claude, checked by us): Keeps the ${SUMMARY_MARKER} ledger in step when ZebraKeyHolder runs.`), "it printed them");
-    assert.deepEqual(asked, []);
+    assert.deepEqual(make.asked, []);
+    assert.deepEqual(holding(leftBy(make), SUMMARY_TEXT), []);
+    const others = make.uploads.filter((u) => !u.name.endsWith(" - Org handbook.docx"));
+    assert.ok(others.length >= 7);
+    for (const upload of others) assert.deepEqual(holding(upload.body.toString("latin1"), SUMMARY_TEXT), [], upload.name);
+  });
+
+  test("a handbook make that fails with summaries approved leaves none of their text in the log or the documents row's warnings", async () => {
+    // The handbook's own file can't be written: a folder stands where it goes.
+    const make = await approvedMake((dir) => mkdirSync(join(dir, "documents", HANDBOOK_DOCX), { recursive: true }));
+    assert.equal(make.outcome.outcome, "done");
+    assert.ok(!make.uploads.some((u) => u.name.endsWith(" - Org handbook.docx")), "no handbook was made");
+    const warnings = [...make.deps.store.documents.values()][0]!.made!.warnings;
+    assert.ok(warnings.length > 0, "the warnings say why");
+    assert.deepEqual(holding(JSON.stringify(warnings), SUMMARY_TEXT), []);
+    assert.deepEqual(holding(leftBy(make), SUMMARY_TEXT), []);
+    assert.deepEqual(make.asked, []);
   });
 
   test("the log holds nothing of the code or the summaries, and the benchmark none of either", async () => {
