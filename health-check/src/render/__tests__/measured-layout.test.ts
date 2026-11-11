@@ -494,7 +494,8 @@ describe("with both a survey and interviews, what people say takes the page afte
   test("with one or neither, the Verdict page is as it was, byte for byte", async () => {
     // Hashes of the Verdict page before decision 442, on the Sales Cloud sample. With
     // interviews alone, each theme became its own spaced paragraph, the heading above
-    // them giving the gap back (DECISIONS.md 437).
+    // them giving the gap back (DECISIONS.md 437). Recomputed for decision 497,
+    // whose check moved only the page's counts: 103 checks run, 94 issues found.
     const { input, names } = await sampleOf(SAMPLES[0]![1]);
     const survey = syntheticSurvey(12);
     const cases = { neither: { interviews: undefined }, survey: { interviews: undefined, survey }, interviews: {} };
@@ -508,7 +509,7 @@ describe("with both a survey and interviews, what people say takes the page afte
     // Each case prints what it's named for, so the hashes hold the voice beside the verdict.
     assert.match(verdicts.survey!, /<h3 class="sub">What your team says/);
     assert.match(verdicts.interviews!, /<h3 class="sub">What your people told us<\/h3>/);
-    assert.deepEqual(Object.fromEntries(Object.entries(verdicts).map(([key, page]) => [key, sha(page)])), { neither: "3e24b50f30626758", survey: "d6592a20fda36044", interviews: "fc49259b482d76bf" });
+    assert.deepEqual(Object.fromEntries(Object.entries(verdicts).map(([key, page]) => [key, sha(page)])), { neither: "5c8cf25506b823e7", survey: "ea6d09aafb07d7ec", interviews: "92f7c287af8be8bf" });
   });
 });
 

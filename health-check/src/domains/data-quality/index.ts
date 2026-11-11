@@ -5,6 +5,10 @@ import { actionRecordsExtractor } from "../../extract/action-records.ts";
 import { DUPLICATE_GROUPS, duplicateAccountsExtractor } from "../../extract/duplicates.ts";
 import { daysBefore } from "../../extract/types.ts";
 import { ownershipExtractor, usersExtractor } from "../../extract/users.ts";
+import { isPackaged, RECORD_TYPE_OBJECTS, recordTypeUseExtractor, type RecordTypeCount, type RecordTypeRow } from "../../extract/record-types.ts";
+import { labelsExtractor } from "../../extract/labels.ts";
+import { recordTypeGuard } from "../../guards/record-type-guards.ts";
+import { labelsOf } from "../labels.ts";
 import { notSized, pct, plural, segmentRate, type RecordList, type Rule, type RuleContext, type RuleResult } from "../../engine/rule.ts";
 import { localDay, todayIn, zoneOf } from "../time-zone.ts";
 import { atOwnLeadReturn } from "../value.ts";
@@ -485,6 +489,150 @@ const contactGaps: Rule = {
   },
 };
 
+// Record-type use (DECISIONS.md 497). Both lines are our judgement: a type made
+// in the last 90 days hasn't had time to be used, and on an object nobody adds
+// to, every type would look unused, which is a finding about the object.
+const RECORD_TYPE_MIN_AGE_DAYS = 90;
+const RECORD_TYPE_MIN_RECENT = 20;
+const LISTED_TYPES = 5;
+const LISTED_OBJECTS = 10;
+
+/** "A, B and C", or the first few and how many more. */
+function listed(names: string[], limit: number): string {
+  const shown = names.slice(0, limit);
+  const rest = names.length - shown.length;
+  if (rest > 0) return `${shown.join(", ")} and ${rest} more`;
+  return shown.length > 1 ? `${shown.slice(0, -1).join(", ")} and ${shown.at(-1)}` : (shown[0] ?? "");
+}
+
+const recordTypeUse: Rule = {
+  id: "dq.record-type-use",
+  version: 1,
+  records: true,
+  domain: "data_quality",
+  title: "Record types with no records, or none made in the last 12 months",
+  evaluate(ctx): RuleResult | RuleResult[] {
+    const use = ctx.data(recordTypeUseExtractor);
+    const { types } = use;
+    if (types.status !== "ok") return { outcome: "not_measurable", reason: `Record types couldn't be read: ${types.reason}`, evidence: [ctx.ev(types.source, { count: null })] };
+    const labels = labelsOf(ctx);
+    const youngFrom = daysBefore(ctx.now, RECORD_TYPE_MIN_AGE_DAYS).getTime();
+    let inactive = 0;
+    let packaged = 0;
+    let young = 0;
+    const candidates: RecordTypeRow[] = [];
+    for (const type of types.data) {
+      if (!type.IsActive) inactive++;
+      else if (isPackaged(type)) packaged++;
+      // A date we can't read counts as new: it's never judged on a guess.
+      else if (!(Date.parse(type.CreatedDate) < youngFrom)) young++;
+      else candidates.push(type);
+    }
+
+    // Every group counts towards an object's records: the one with no type, and
+    // any id the list doesn't hold too (Master's, if Salesforce gives it one, or a
+    // type deleted since). They're records made on the object, never a type of ours.
+    const total = (rows: RecordTypeCount[]): number => rows.reduce((sum, r) => sum + r.c, 0);
+    const of = (rows: RecordTypeCount[], id: string): number => rows.filter((r) => r.RecordTypeId === id).reduce((sum, r) => sum + r.c, 0);
+    const why = { under: [] as string[], notRead: [] as string[], refused: [] as string[], truncated: [] as string[] };
+    const judgedObjects = new Set<string>();
+    for (const object of [...new Set(candidates.map((t) => t.SobjectType))].sort()) {
+      const counts = use.counted[object];
+      if (counts && total(counts.recent) >= RECORD_TYPE_MIN_RECENT) judgedObjects.add(object);
+      else if (counts) why.under.push(object);
+      else if (use.refused.some((r) => r.object === object)) why.refused.push(object);
+      else if (use.truncated.includes(object)) why.truncated.push(object);
+      else why.notRead.push(object);
+    }
+    const judged = candidates.filter((t) => judgedObjects.has(t.SobjectType)).sort((a, b) => a.SobjectType.localeCompare(b.SobjectType) || a.Name.localeCompare(b.Name));
+    const noRecords = judged.filter((t) => of(use.counted[t.SobjectType]!.all, t.Id) === 0);
+    const noneRecent = judged.filter((t) => of(use.counted[t.SobjectType]!.all, t.Id) > 0 && of(use.counted[t.SobjectType]!.recent, t.Id) === 0);
+
+    const objects = (names: string[]): string => `${names.length}${names.length ? ` (${listed(names, LISTED_OBJECTS)})` : ""}`;
+    const evidence = [
+      ctx.ev(types.source, {
+        count: types.data.length,
+        exclusions: [`Inactive record types: ${inactive}`, `Record types from installed packages: ${packaged}`, `Record types made in the ${RECORD_TYPE_MIN_AGE_DAYS} days before the run: ${young}`],
+        note: "Record types made by the run's date",
+      }),
+      ctx.ev(
+        { kind: "soql", api: "rest", query: use.queries.all },
+        {
+          count: judged.length ? noRecords.length : null,
+          exclusions: [
+            `Objects with fewer than ${RECORD_TYPE_MIN_RECENT} records made in the last 12 months: ${objects(why.under)}`,
+            `Objects past the ${RECORD_TYPE_OBJECTS} with the most active record types: ${objects(why.notRead)}`,
+            `Objects whose count Salesforce refused: ${objects(why.refused)}`,
+            `Objects whose count came back cut short: ${objects(why.truncated)}`,
+          ],
+          note: `Every record made by the run's date, by record type. With no records: ${noRecords.map((t) => `${t.SobjectType}.${t.DeveloperName}`).join(", ") || "none"}`,
+        },
+      ),
+      ctx.ev(
+        { kind: "soql", api: "rest", query: use.queries.recent },
+        {
+          count: judged.length ? noneRecent.length : null,
+          dateRange: { from: use.recentFrom.slice(0, 10), to: ctx.window.to },
+          note: `Records made in the 12 months to the run's date, by record type. With records, but none made in them: ${noneRecent.map((t) => `${t.SobjectType}.${t.DeveloperName}`).join(", ") || "none"}`,
+        },
+      ),
+    ];
+    const facts = { judged: judged.length, noRecords: noRecords.length, noneRecent: noneRecent.length };
+
+    if (candidates.length === 0) {
+      return { outcome: "pass", summary: `You have no active record types of your own made more than ${RECORD_TYPE_MIN_AGE_DAYS} days ago, so there are none to judge.`, evidence: [evidence[0]!], segmentExemptReason: "There are no record types to segment.", facts };
+    }
+    if (judged.length === 0) {
+      const parts = [
+        why.under.length ? `${plural(why.under.length, "object has", "objects have")} fewer than ${RECORD_TYPE_MIN_RECENT} records made in the last 12 months` : "",
+        why.refused.length + why.truncated.length ? `Salesforce refused or cut short the count on ${plural(why.refused.length + why.truncated.length, "object")}` : "",
+        why.notRead.length ? `${plural(why.notRead.length, "object is", "objects are")} past the ${RECORD_TYPE_OBJECTS} we count` : "",
+      ].filter(Boolean);
+      return { outcome: "not_measurable", reason: `None of your ${plural(candidates.length, "record type")} could be judged: ${parts.join("; ")}.`, evidence: evidence.slice(0, 2) };
+    }
+    const segments = [{ dimension: "all records", segments: judged.length }, { dimension: "records created in the last 12 months", segments: judged.length }];
+    if (noRecords.length + noneRecent.length === 0) {
+      return {
+        outcome: "pass",
+        summary: `Each of the ${plural(judged.length, "record type")} we could judge has records made in the last 12 months.`,
+        evidence,
+        segmentsChecked: segments,
+        facts,
+      };
+    }
+
+    const flagged = [...noRecords, ...noneRecent];
+    const named = (t: RecordTypeRow): string => `${t.Name} on ${labels.object(t.SobjectType)}`;
+    const has = (n: number): string => (n === 1 ? "1 has" : `${n} have`);
+    const sentences = [
+      noRecords.length ? `${has(noRecords.length)} no records at all: ${listed(noRecords.map(named), LISTED_TYPES)}.` : "",
+      noneRecent.length ? `${has(noneRecent.length)} records, but none made in the last 12 months: ${listed(noneRecent.map(named), LISTED_TYPES)}.` : "",
+    ].filter(Boolean);
+    const one = flagged.length === 1;
+    const title = noRecords.length && noneRecent.length ? "Some record types have no records, or none made in the last 12 months" : noRecords.length ? (one ? "A record type has no records" : "Some record types have no records") : one ? "A record type has had no records made in the last 12 months" : "Some record types have had no records made in the last 12 months";
+    const owners = listed([...new Set(flagged.map((t) => labels.object(t.SobjectType)))].sort(), LISTED_OBJECTS);
+    return {
+      outcome: "issue",
+      title,
+      summary: `We could judge ${plural(judged.length, "record type")} of your own, on objects with at least ${RECORD_TYPE_MIN_RECENT} records made in the last 12 months. ${sentences.join(" ")} An active record type is still offered to anyone whose profile has it, and its page layouts and picklist values still have to be kept up.`,
+      recommendation: `Deactivate ${plural(flagged.length, "record type")} once you've checked that no profile defaults to ${one ? "it" : "them"} and no flow, Apex or integration names ${one ? "it" : "them"}.`,
+      blockedRecommendation: `Review ${plural(flagged.length, "record type")} with the people who own ${owners}; we aren't recommending deactivating ${one ? "it" : "them"}, because we can't see which profiles default to ${one ? "it" : "them"} or which flows, Apex and integrations name ${one ? "it" : "them"}.`,
+      recommendationType: "deactivate",
+      severity: "low",
+      confidence: "medium",
+      evidence,
+      value: notSized("We don't put a figure on this: the only one to hand would be a guess at upkeep hours."),
+      effort: { size: "S" },
+      owner: "Salesforce admin",
+      dependencies: ["Check which profiles default to each record type", "Check which flows, Apex and integrations name each record type"],
+      guards: flagged.map((t) => recordTypeGuard(ctx, t, types.source)),
+      segmentsChecked: segments,
+      subjects: flagged.map((t) => ({ type: "record type", label: named(t) })),
+      facts,
+    };
+  },
+};
+
 // The lists behind the two counts, read with the counts' own filters
 // (src/extract/action-records.ts). A list that stopped at its ceiling says it's
 // a part, with how to see the rest in Salesforce.
@@ -536,6 +684,6 @@ export const dataQualityModule: DomainModule = {
   label: "Data quality",
   // The opportunities read plans its SELECT from the schema and winds deals back
   // with the stages (DECISIONS.md 465), so both go before it.
-  extractors: [usersExtractor, recordCountsExtractor, ownershipExtractor, duplicateRulesExtractor, schemaExtractor, stagesExtractor, opportunitiesExtractor, crmHealthExtractor, leadsExtractor, actionRecordsExtractor, duplicateAccountsExtractor],
-  rules: [pastCloseDate, inactiveOwner, missingAmount, noRecentActivity, noAccount, lossReasonMissing, inactiveRecordOwners, duplicateRulesMissing, duplicateAccounts, staleLeads, contactGaps],
+  extractors: [usersExtractor, recordCountsExtractor, ownershipExtractor, duplicateRulesExtractor, schemaExtractor, stagesExtractor, opportunitiesExtractor, crmHealthExtractor, leadsExtractor, actionRecordsExtractor, duplicateAccountsExtractor, labelsExtractor, recordTypeUseExtractor],
+  rules: [pastCloseDate, inactiveOwner, missingAmount, noRecentActivity, noAccount, lossReasonMissing, inactiveRecordOwners, duplicateRulesMissing, duplicateAccounts, staleLeads, contactGaps, recordTypeUse],
 };

@@ -72,7 +72,7 @@ describe("the read-only route reads what the retrieve reads", () => {
       return !other || other.status !== f.status || JSON.stringify(other.facts) !== JSON.stringify(f.facts);
     });
     // Coverage can't be read by this user, and nor can custom objects' records.
-    assert.deepEqual(changed.map((f) => f.ruleId).sort(), ["aut.apex-coverage", "bp.ownership-skew"]);
+    assert.deepEqual(changed.map((f) => f.ruleId).sort(), ["aut.apex-coverage", "bp.ownership-skew", "dq.record-type-use"]);
     assert.equal(readOnly.findings.length, admin.findings.length);
   });
 

@@ -124,7 +124,10 @@ describe("a full synthetic run's queries", () => {
       ["ownership count", /^SELECT OwnerId, COUNT\(Id\) c FROM Opportunity GROUP BY OwnerId$/],
       ["field usage, all time", /^SELECT COUNT\(Id\) total, .* FROM Opportunity$/],
     ];
-    const unended = queries.filter((q) => /\bFROM Opportunity(History)?\b/.test(q) && !q.includes(end));
+    // Record-type use's count of every deal made by the run's date has that end as its only filter (DECISIONS.md 497).
+    const endedAlone = new RegExp(`^SELECT RecordTypeId, COUNT\\(Id\\) c FROM Opportunity WHERE CreatedDate <= ${RUN_END} GROUP BY RecordTypeId$`);
+    assert.ok(queries.some((q) => endedAlone.test(q)), "record-type use counted the deals");
+    const unended = queries.filter((q) => /\bFROM Opportunity(History)?\b/.test(q) && !q.includes(end) && !endedAlone.test(q));
     assert.deepEqual(unended.filter((q) => !left.some(([, read]) => read.test(q))), []);
     assert.deepEqual([...new Set(unended.flatMap((q) => left.filter(([, read]) => read.test(q)).map(([name]) => name)))].sort(), left.map(([name]) => name).sort());
   });

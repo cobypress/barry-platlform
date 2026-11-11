@@ -56,6 +56,10 @@ export type SimulatorOptions = {
    * by id, with when (in the synthetic org's "+0000" text). None by default.
    */
   editedAt?: Record<string, string>;
+  /** The record types the data API lists: the synthetic org's by default, or a test's own. */
+  recordTypes?: org.RecordTypeRecord[];
+  /** Every object's records by type and when they were made, for a test. By default deals and cases are counted from their rows, and the rest from the synthetic org's groups. */
+  recordTypeGroups?: Record<string, org.RecordTypeGroup[]>;
 };
 
 /** The parts of an org that grow with it. A scale test swaps them for a generated org's (src/testing/scale-org.ts). */
@@ -320,6 +324,8 @@ export class Simulator implements Transport {
   #modified: Map<string, string> | undefined;
   #closedFacts: typeof org.FORECAST_FACTS | undefined;
   #editedAt: Record<string, string>;
+  #recordTypes: org.RecordTypeRecord[];
+  #recordTypeGroups: Record<string, org.RecordTypeGroup[]> | undefined;
 
   constructor(options: SimulatorOptions = {}) {
     this.#used = options.used ?? 1000;
@@ -339,6 +345,8 @@ export class Simulator implements Transport {
     this.#setupAudit = options.setupAudit ?? org.SETUP_AUDIT;
     this.#apexClasses = options.apexClasses ?? org.APEX_CLASSES;
     this.#editedAt = options.editedAt ?? {};
+    this.#recordTypes = options.recordTypes ?? org.RECORD_TYPES;
+    this.#recordTypeGroups = options.recordTypeGroups;
     this.#unlicensed = new Set(options.unlicensed ?? []);
     this.#missing = new Set([...(options.missingObjects ?? []), ...(this.#readOnly ? ["AuthProvider"] : [])]);
     if (!this.#pardot) this.#dropFields = { ...this.#dropFields, Lead: [...(this.#dropFields.Lead ?? []), "pi__url__c", "pi__score__c", "pi__grade__c"] };
@@ -472,6 +480,7 @@ export class Simulator implements Transport {
 
     if (/^SELECT COUNT\(Id\) total,/i.test(soql)) return this.#fieldUsage(soql, object, where);
     if (/^SELECT OwnerId, COUNT\(Id\) c FROM/i.test(soql)) return this.#ownership(object);
+    if (/^SELECT RecordTypeId, COUNT\(Id\) c FROM \w+ WHERE .* GROUP BY RecordTypeId$/i.test(soql)) return this.#recordTypeCounts(soql, object);
     const readOnlyGap = this.#readOnly && (tooling ? ["ApexClass", "ApexTrigger", "ApexOrgWideCoverage", "ApexCodeCoverageAggregate", "CustomObject", "CustomField"] : ["ApexOrgWideCoverage", "ApexCodeCoverageAggregate", "AuthProvider"]).includes(object);
     if (readOnlyGap) return unsupported(object);
     // Tooling returns Metadata and FullName for one row per query.
@@ -597,7 +606,9 @@ export class Simulator implements Transport {
       case "EntityParticle":
         return page(inObjects(TOOLING.fields, soql).map(({ Description, ...f }) => f));
       case "RecordType":
-        return tooling ? page(TOOLING.recordTypes) : unsupported("RecordType");
+        if (tooling) return page(TOOLING.recordTypes);
+        // The data API's list, with ids and when each was made, to its end (DECISIONS.md 497).
+        return /^SELECT Id, DeveloperName, Name, SobjectType, IsActive, NamespacePrefix, CreatedDate FROM RecordType WHERE CreatedDate <= /.test(soql) ? page(upTo(this.#recordTypes, where, "CreatedDate")) : unsupported("RecordType");
       case "ProcessDefinition":
         return page(TOOLING.approvals);
       case "AssignmentRule":
@@ -896,6 +907,22 @@ export class Simulator implements Transport {
     const row: Record<string, number> = { total: recent ? totals.recent : totals.total };
     for (const match of soql.matchAll(/COUNT\(([A-Za-z0-9_]+__c)\) (f\d+)/g)) row[match[2]!] = org.fieldFilled(object, match[1]!, recent, this.#d.recordTotals);
     return page([row]);
+  }
+
+  /** Records by record type in the query's window on CreatedDate, at both ends, as one group for each type and one for none. */
+  #recordTypeCounts(soql: string, object: string): Json | { error: { errorCode: string; message: string } } {
+    // The read-only user has no access to custom objects' records.
+    if (this.#readOnly && object.endsWith("__c")) return unsupported(object);
+    const rows: org.RecordTypeGroup[] = this.#recordTypeGroups
+      ? (this.#recordTypeGroups[object] ?? [])
+      : object === "Opportunity"
+        ? this.#d.pipeline.opportunities.map((o) => ({ RecordTypeId: org.recordTypeOfDeal(o), CreatedDate: o.CreatedDate, n: 1 }))
+        : object === "Case"
+          ? this.#d.supportCases.cases.map((c) => ({ RecordTypeId: org.recordTypeOfCase(c), CreatedDate: c.CreatedDate, n: 1 }))
+          : (org.RECORD_TYPE_GROUPS[object] ?? []);
+    const counts = new Map<string | null, number>();
+    for (const row of rows) if (within(row.CreatedDate, soql, "CreatedDate")) counts.set(row.RecordTypeId, (counts.get(row.RecordTypeId) ?? 0) + row.n);
+    return page([...counts].sort(([a], [b]) => (a ?? "").localeCompare(b ?? "")).map(([RecordTypeId, c]) => ({ RecordTypeId, c })));
   }
 
   #ownership(object: string): Json | { error: { errorCode: string; message: string } } {

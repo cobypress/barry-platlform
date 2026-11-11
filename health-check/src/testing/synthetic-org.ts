@@ -1639,6 +1639,50 @@ supportCases.replies.push(
 );
 supportCases.articles.push({ Id: LATER_THAN_THE_RUN.article, CaseId: LATER_THAN_THE_RUN.closedCase, CreatedDate: stamp(LATER) });
 
+// Record types as the data API lists them, for record-type use (DECISIONS.md
+// 497): the types the describes and the metadata files hold, each with its id
+// and when it was made, and the records on each by when they were made.
+export type RecordTypeRecord = { Id: string; DeveloperName: string; Name: string; SobjectType: string; IsActive: boolean; NamespacePrefix: string | null; CreatedDate: string };
+const recordType = (n: number, SobjectType: string, DeveloperName: string, Name: string, IsActive: boolean, CreatedDate: string): RecordTypeRecord => ({ Id: sfId("012", 500 + n), DeveloperName, Name, SobjectType, IsActive, NamespacePrefix: null, CreatedDate });
+export const RECORD_TYPES: RecordTypeRecord[] = [
+  recordType(1, "Opportunity", "New_Business", "New Business", true, daysAgo(900)),
+  recordType(2, "Opportunity", "Renewal", "Renewal", true, daysAgo(900)),
+  // Trap: an active type nobody was given, so every case has none. Its only
+  // case was made after the run's date, so at it there are none.
+  recordType(3, "Case", "Support", "Support", true, daysAgo(400)),
+  recordType(4, "Invoice__c", "Standard", "Standard", true, daysAgo(800)),
+  // Trap: in use once, with nothing made in the 12 months to the run's date, and one invoice since.
+  recordType(5, "Invoice__c", "Credit_Note", "Credit Note", true, daysAgo(700)),
+  // Inactive, so never judged, whatever its records.
+  recordType(6, "Invoice__c", "Old_Format", "Old Format", false, daysAgo(1000)),
+  // On an object with no records, so it's the object nobody uses, not the type.
+  recordType(7, "Empty_Object__c", "Default", "Default", true, daysAgo(300)),
+  // Trap: made after the run's date, so a read that ends at it doesn't list it.
+  recordType(8, "Invoice__c", "Pro_Forma", "Pro Forma", true, stamp(LATER)),
+];
+const typeId = (object: string, name: string): string => RECORD_TYPES.find((t) => t.SobjectType === object && t.DeveloperName === name)!.Id;
+
+/** Records by type and when they were made, in groups, for an object with no rows of its own here. Deals and cases are counted from their rows. */
+export type RecordTypeGroup = { RecordTypeId: string | null; CreatedDate: string; n: number };
+export const RECORD_TYPE_GROUPS: Record<string, RecordTypeGroup[]> = {
+  // The 12,000 invoices the record count gives, the oldest from before record types and on none.
+  Invoice__c: [
+    { RecordTypeId: typeId("Invoice__c", "Standard"), CreatedDate: daysAgo(30), n: 3_600 },
+    { RecordTypeId: typeId("Invoice__c", "Standard"), CreatedDate: daysAgo(500), n: 7_200 },
+    { RecordTypeId: typeId("Invoice__c", "Credit_Note"), CreatedDate: daysAgo(420), n: 140 },
+    { RecordTypeId: typeId("Invoice__c", "Old_Format"), CreatedDate: daysAgo(900), n: 60 },
+    { RecordTypeId: null, CreatedDate: daysAgo(1000), n: 1_000 },
+    // After the run's date: a credit note, and an invoice on the type made since.
+    { RecordTypeId: typeId("Invoice__c", "Credit_Note"), CreatedDate: stamp(LATER), n: 1 },
+    { RecordTypeId: typeId("Invoice__c", "Pro_Forma"), CreatedDate: stamp(LATER), n: 1 },
+  ],
+};
+
+/** A deal's record type id, from its type's name. None for a name the list doesn't have, as a bigger org's "Standard". */
+export const recordTypeOfDeal = (o: { RecordType: { DeveloperName: string } }): string | null => RECORD_TYPES.find((t) => t.SobjectType === "Opportunity" && t.DeveloperName === o.RecordType.DeveloperName)?.Id ?? null;
+/** None for every case but the one made after the run's date, which is the only one on Support. */
+export const recordTypeOfCase = (c: { Id: string }): string | null => (c.Id === LATER_THAN_THE_RUN.case ? typeId("Case", "Support") : null);
+
 // Salesforce CPQ (DECISIONS.md 216 to 225). Read only when a run includes the
 // "cpq" module.
 
