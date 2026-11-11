@@ -503,6 +503,11 @@ describe("what reads it", () => {
     ["src/facts/questions.ts", "names its section of QUESTIONS.md, and reads no run"],
     ["src/extract/apex-touches.ts", "holds the number of the Apex reading the apex step stamps on its output, for handbook.json (DECISIONS.md 484)"],
     ["src/extract/automation.ts", "stamps that number on the apex step's output, and keeps nothing else for the handbook"],
+    ["src/handbook/summaries.ts", "writes Claude's summaries of the kept Apex code to a file of their own, never into handbook.json (DECISIONS.md 492)"],
+    ["src/worker/run-job.ts", "runs those summaries after the analysis, and deletes the kept code when a run fails for good"],
+    ["src/worker/retention.ts", "deletes the kept code and partial summaries after seven days, by their names"],
+    ["src/worker/env.ts", "reads the switch, HC_HANDBOOK_SUMMARIES"],
+    ["src/config.ts", "names the summaries' model"],
   ]);
   const root = fileURLToPath(new URL("../../../", import.meta.url));
 

@@ -2,6 +2,7 @@ import { findNames, maskNames } from "../privacy/names.ts";
 import { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { redactSecrets } from "../privacy/secrets.ts";
 import type { NarrativeClient, NarrativeReply, NarrativeRequest } from "./client.ts";
+import { APEX_SUMMARY_PROMPT } from "./apex-prompt.ts";
 import { SYSTEM_PROMPT } from "./prompt.ts";
 
 // Rule 7: nothing that leaves for Claude may hold a real name. Findings already
@@ -36,7 +37,8 @@ export function holdsNameOrSecret(text: string, pseudonyms: Pseudonymiser): bool
 // System prompts are our own constants. Customer text goes in the prompt, where
 // it's guarded; a system prompt built from anything else is refused, so nobody
 // can route around the guard by putting text there.
-export const SYSTEM_PROMPTS: ReadonlySet<string> = new Set([SYSTEM_PROMPT]);
+// The second is the Apex summaries' own (DECISIONS.md 492), the only one Apex code goes with.
+export const SYSTEM_PROMPTS: ReadonlySet<string> = new Set([SYSTEM_PROMPT, APEX_SUMMARY_PROMPT]);
 
 /** A prompt the last check wouldn't send. The message names tokens, never the text it found. */
 export class PromptRefused extends Error {

@@ -1,5 +1,7 @@
-import { existsSync, lstatSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, rmSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { APEX_SOURCE_FILE } from "../extract/apex-source.ts";
+import { SUMMARIES_PARTIAL_FILE } from "../handbook/summaries.ts";
 import { deleteRunFolder, isPurged, purgeRun } from "../retention/purge.ts";
 import { JobBusyError, withJobLock } from "./lock.ts";
 import type { FolderSharing } from "./drive.ts";
@@ -100,10 +102,54 @@ async function accessLeft(runId: string, deps: RetentionDeps, now: Date): Promis
   return result.failed;
 }
 
+/** How long the Apex code kept for Claude's summaries, and summaries made from it, may sit in a run folder. */
+export const KEPT_CODE_DAYS = 7;
+/** The only files the code sweep deletes, by name. */
+export const KEPT_CODE_FILES: readonly string[] = [APEX_SOURCE_FILE, SUMMARIES_PARTIAL_FILE];
+
+/**
+ * Deletes the Apex code a run kept for Claude's summaries, and the partial
+ * summaries beside it, once either is more than seven days old, whatever the
+ * run's state in the database (DECISIONS.md 491): a run stopped on the API
+ * budget and never resumed mustn't keep code. Only those two names, only
+ * directly inside a run's folder, never through a link, and never outside the
+ * runs folder. Returns how many it deleted, or would have.
+ */
+export function sweepKeptCode(runsDir: string, now: Date, dryRun: boolean): number {
+  const root = resolve(runsDir);
+  if (!existsSync(root)) return 0;
+  let deleted = 0;
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    // A link to a folder is neither a directory nor followed.
+    if (!entry.isDirectory() || !RUN_ID.test(entry.name)) continue;
+    for (const name of KEPT_CODE_FILES) {
+      const path = join(root, entry.name, name);
+      if (dirname(dirname(resolve(path))) !== root) continue;
+      let stat;
+      try {
+        stat = lstatSync(path);
+      } catch {
+        continue;
+      }
+      if (!stat.isFile() || now.getTime() - stat.mtimeMs <= KEPT_CODE_DAYS * DAY) continue;
+      if (!dryRun) rmSync(path);
+      deleted++;
+    }
+  }
+  return deleted;
+}
+
 /** One pass over every released run. Logs counts and run ids only, never a path or a name. */
 export async function retentionSweep(deps: RetentionDeps): Promise<RetentionOutcome[]> {
   const now = deps.now ?? new Date();
   const root = resolve(deps.runsDir);
+  // First, and on its own: it looks at every run folder, released or not.
+  try {
+    const kept = sweepKeptCode(root, now, deps.dryRun);
+    if (kept) deps.log(`Retention: ${deps.dryRun ? "would delete" : "deleted"} ${kept} ${kept === 1 ? "file" : "files"} of Apex code or summaries kept for Claude for more than ${KEPT_CODE_DAYS} days.`);
+  } catch {
+    deps.log("Retention: the sweep of Apex code kept for Claude's summaries failed, and will run again in a day.");
+  }
   // A pulse's date is when it finished. One the console lists both ways is swept once, by its release.
   const released = await deps.store.listReleasedRuns();
   const pulses = (await deps.store.listPulseRuns()).filter((p) => !released.some((r) => r.runId === p.runId));

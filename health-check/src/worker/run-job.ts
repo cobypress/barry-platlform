@@ -19,6 +19,8 @@ import { withJobLock } from "./lock.ts";
 import { progressOf, RunClosedError, type RunJobInput } from "./types.ts";
 import { withoutComments } from "../survey/questions.ts";
 import { FACTS_FILE } from "../extract/facts.ts";
+import { APEX_SOURCE_FILE } from "../extract/apex-source.ts";
+import { summariseApex, SUMMARIES_PARTIAL_FILE } from "../handbook/summaries.ts";
 import { FactsFile, factsReport, type FactsReport } from "../facts/summary.ts";
 import { ASSUMPTIONS } from "../facts/assumptions.ts";
 import { Timestamp } from "../schemas/common.ts";
@@ -98,6 +100,8 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
   if (CLOSED.has(input.run.status)) return { outcome: "skipped", detail: `Run ${runId} is ${input.run.status.replace("_", " ")}, so there's nothing for the worker to do` };
 
   const fail = async (reason: string): Promise<JobOutcome> => {
+    // Failed for good: nothing will resume to use the Apex code kept for Claude's summaries (DECISIONS.md 491).
+    forgetApexSource(join(deps.runsDir, runId), runId, log);
     await deps.store.recordRunFailure(runId, reason, now().toISOString());
     return { outcome: "failed", detail: reason };
   };
@@ -121,6 +125,8 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
   const modules = modulesForRun(input.run.modules, deps.modules ?? ALL_MODULES);
   const provider = new OAuthConnectionProvider(name, { store: deps.tokens, client: deps.oauthClient, transport: deps.oauthTransport, env: approvedFromConsole(name) });
   const secrets = [stored.accessToken, stored.refreshToken];
+  // A health check or essentials run only: a scan and a pulse never keep code (DECISIONS.md 492).
+  const apexSummaries = deps.apexSummaries === true && input.run.product === "barometer";
 
   let result: Awaited<ReturnType<typeof runHealthCheck>>;
   try {
@@ -138,6 +144,7 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
       scope: input.run.scope,
       product: input.run.product,
       baselineRunId: input.run.baselineRunId,
+      keepApexSource: apexSummaries,
       stopAtShare: deps.stopAtShare,
       transport: deps.dataTransport,
       apiVersion: deps.apiVersion,
@@ -181,6 +188,12 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
     if (input.interviews?.length) writeFileSync(join(dir, INTERVIEWS_FILE), `${JSON.stringify({ version: INTERVIEW_VERSION, interviews: input.interviews }, null, 2)}\n`, { mode: 0o600 });
     else rmSync(join(dir, INTERVIEWS_FILE), { force: true });
     const { input: reportInput, pseudonyms } = loadRun(dir);
+    // Before the sections, because these are kept as they're made and the
+    // sections aren't: a job stopped part way through picks the summaries up
+    // where they were and drafts the sections once, where the other order would
+    // pay for every section again on each delivery. Each catches its own
+    // failures, so neither costs the other. With no code kept, nothing is asked.
+    await summariseApex({ dir, runId, enabled: apexSummaries, client: deps.narrative, pseudonyms, now: now(), log });
     // A scan and a pulse are never reviewed, so Claude has nothing to draft for either.
     const unreviewed = input.run.product === "scan" || input.run.product === "pulse";
     const report = deps.narrative && !unreviewed ? await draftSections(runId, dir, reportInput, deps.narrative, pseudonyms, now(), log) : buildReport(reportInput);
@@ -214,6 +227,15 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
   if (input.run.product === "scan") await finishScan(runId, dir, name, deps, now().toISOString(), log);
   if (input.run.product === "pulse") await finishPulse(runId, dir, deps, now().toISOString(), log);
   return { outcome: "done", detail: `Run ${runId} is ${result.run.status.replace("_", " ")}` };
+}
+
+/** Deletes the Apex code kept for Claude's summaries, and any summaries made from it. Logs a sentence, never a path. */
+function forgetApexSource(dir: string, runId: string, log: (line: string) => void): void {
+  try {
+    for (const name of [APEX_SOURCE_FILE, SUMMARIES_PARTIAL_FILE]) rmSync(join(dir, name), { force: true });
+  } catch {
+    log(`The Apex code kept for run ${runId}'s summaries couldn't be deleted. The retention sweep deletes it within seven days.`);
+  }
 }
 
 /** The most of facts.json the worker sends. A real one is a few kilobytes; more means the step changed. */
