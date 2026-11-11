@@ -480,7 +480,7 @@ export class Simulator implements Transport {
 
     if (/^SELECT COUNT\(Id\) total,/i.test(soql)) return this.#fieldUsage(soql, object, where);
     if (/^SELECT OwnerId, COUNT\(Id\) c FROM/i.test(soql)) return this.#ownership(object);
-    if (/^SELECT RecordTypeId, COUNT\(Id\) c FROM \w+ WHERE .* GROUP BY RecordTypeId$/i.test(soql)) return this.#recordTypeCounts(soql, object);
+    if (/^SELECT RecordTypeId, COUNT\(Id\) c FROM \w+ (WHERE .* )?GROUP BY RecordTypeId$/i.test(soql)) return this.#recordTypeCounts(soql, object);
     const readOnlyGap = this.#readOnly && (tooling ? ["ApexClass", "ApexTrigger", "ApexOrgWideCoverage", "ApexCodeCoverageAggregate", "CustomObject", "CustomField"] : ["ApexOrgWideCoverage", "ApexCodeCoverageAggregate", "AuthProvider"]).includes(object);
     if (readOnlyGap) return unsupported(object);
     // Tooling returns Metadata and FullName for one row per query.
@@ -607,8 +607,8 @@ export class Simulator implements Transport {
         return page(inObjects(TOOLING.fields, soql).map(({ Description, ...f }) => f));
       case "RecordType":
         if (tooling) return page(TOOLING.recordTypes);
-        // The data API's list, with ids and when each was made, to its end (DECISIONS.md 497).
-        return /^SELECT Id, DeveloperName, Name, SobjectType, IsActive, NamespacePrefix, CreatedDate FROM RecordType WHERE CreatedDate <= /.test(soql) ? page(upTo(this.#recordTypes, where, "CreatedDate")) : unsupported("RecordType");
+        // The data API's list, with ids and when each was made, to its end if it has one (DECISIONS.md 497).
+        return /^SELECT Id, DeveloperName, Name, SobjectType, IsActive, NamespacePrefix, CreatedDate FROM RecordType\b/.test(soql) ? page(upTo(this.#recordTypes, where, "CreatedDate")) : unsupported("RecordType");
       case "ProcessDefinition":
         return page(TOOLING.approvals);
       case "AssignmentRule":
