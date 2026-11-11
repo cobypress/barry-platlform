@@ -7,8 +7,8 @@ import { fileURLToPath } from "node:url";
 import { contributeBenchmark, exportBenchmark } from "../../benchmark/export.ts";
 import type { NarrativeClient, NarrativeRequest } from "../../narrative/client.ts";
 import { runFromRecording, tempDir } from "../../testing/harness.ts";
-import { loadAnswers, loadRecording, ReplayTransport, type Recording } from "../../testing/replay.ts";
-import { APEX_OUTSIDE_MODIFIER, CHANGES_DELEGATE, COMPONENT_OUTSIDE_MODIFIER, CHANGES_MARKER, CHANGES_PLANTED, HANDBOOK_CASE_MARKER, HANDBOOK_CASE_PLANTED, HANDBOOK_MARKER, HANDBOOK_PLANTED, USER_ADMIN_MARKER } from "../../testing/synthetic-org.ts";
+import { loadAnswers, loadCalibration, loadRecording, ReplayTransport, syntheticProvider, type Recording } from "../../testing/replay.ts";
+import { APEX_OUTSIDE_MODIFIER, AS_OF, CHANGES_DELEGATE, COMPONENT_OUTSIDE_MODIFIER, CHANGES_MARKER, CHANGES_PLANTED, HANDBOOK_CASE_MARKER, HANDBOOK_CASE_PLANTED, HANDBOOK_MARKER, HANDBOOK_PLANTED, USER_ADMIN_MARKER } from "../../testing/synthetic-org.ts";
 import type { RunOutputRecord } from "../../worker/types.ts";
 import { createJobHandler } from "../../worker/worker.ts";
 import { baseDeps, consoleRun, RUN_ID, runInput, syntheticConnection } from "../../worker/__tests__/helpers.ts";
@@ -20,6 +20,10 @@ import { withEarlier } from "../../testing/earlier-handbook.ts";
 import { processDocumentsJob } from "../../worker/documents-job.ts";
 import type { DocumentDrive, DriveItem } from "../../worker/drive.ts";
 import type { DocumentKey } from "../../render/render-released.ts";
+import { SALES_CLOUD_MODULES } from "../../domains/index.ts";
+import { runHealthCheck } from "../../engine/run.ts";
+import type { Transport } from "../../salesforce/transport.ts";
+import { Simulator } from "../../testing/simulator.ts";
 
 // handbook.json is the customer's own configuration, and goes nowhere but the
 // documents made for them (DECISIONS.md 452). A marker planted in a validation
@@ -119,9 +123,10 @@ function filesIn(dir: string): Map<string, string> {
 }
 
 /**
- * Which reading made the handbook (decision 484): two small numbers, held to
- * handbook.json and the two steps' own outputs all the same. By their keys,
- * since a number can't be followed.
+ * Which reading made the handbook (decision 484): small numbers, held to
+ * handbook.json and the two steps' own outputs all the same, with the build's
+ * in handbook.json and the number a Tooling read was started under in its kept
+ * file while it's part way (485). By their keys, since a number can't be followed.
  */
 const READINGS = ["readBy", "handbookReading"];
 
@@ -235,6 +240,24 @@ describe("the handbook's detail goes nowhere but handbook.json", () => {
     assert.ok(scan.store.scanResults.get(RUN_ID), "the teaser is saved");
     assert.ok(scan.store.runs.get(RUN_ID)!.run.steps.some((s) => s.id === "metadata"), "the scan read the metadata");
     assert.deepEqual(holding(JSON.stringify({ runs: [...scan.store.runs.values()], scans: [...scan.store.scanResults.values()], writes: scan.store.writes }), [...ROUTED, ...NOWHERE, ...MODIFIERS]), []);
+  });
+});
+
+describe("the number a Tooling read was started under (decision 485)", () => {
+  test("is kept beside its items while the read is part way, holds nothing else, and is gone with them; no output holds a reading", async () => {
+    const simulator = new Simulator({ readOnly: true });
+    const dropping: Transport = { send: (request) => (decodeURIComponent(request.url).includes("FROM FieldDefinition") ? Promise.reject(new Error("socket hang up")) : simulator.send(request)) };
+    const outDir = tempDir();
+    const options = { provider: syntheticProvider, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir, now: new Date(AS_OF), log: () => {} };
+    await assert.rejects(runHealthCheck({ ...options, transport: dropping }), /socket hang up/);
+    const [runId] = readdirSync(outDir);
+    const stopped = filesIn(join(outDir, runId!));
+    assert.equal(stopped.get("checkpoints/metadata-tooling-reading.partial.jsonl"), '{"handbookReading":1}\n');
+    assert.deepEqual([...stopped.keys()].filter((f) => holding(stopped.get(f)!, READINGS).length > 0), ["checkpoints/metadata-tooling-reading.partial.jsonl"]);
+    await runHealthCheck({ ...options, transport: new Simulator({ readOnly: true }), resume: runId });
+    const files = filesIn(join(outDir, runId!));
+    assert.ok(!files.has("checkpoints/metadata-tooling-reading.partial.jsonl"));
+    assert.deepEqual([...files.keys()].filter((f) => holding(files.get(f)!, READINGS).length > 0).sort(), ["checkpoints/apex.json", "checkpoints/metadata.json", HANDBOOK_FILE]);
   });
 });
 

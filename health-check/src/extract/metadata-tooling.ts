@@ -25,10 +25,16 @@ const OWN_FIELD = /^[A-Za-z][A-Za-z0-9_]*__c$/;
 const NAMESPACED_FIELD = /__.*__c$/;
 const ID = /^[A-Za-z0-9]{15,18}$/;
 
-export const TOOLING_PARTIAL_KEYS = ["metadata-tooling"];
+// The items kept as they're read, and the number of the reading they were
+// started under (DECISIONS.md 485), each cleared when the step's output is saved.
+const ITEMS_PARTIAL = "metadata-tooling";
+const READING_PARTIAL = "metadata-tooling-reading";
+export const TOOLING_PARTIAL_KEYS = [ITEMS_PARTIAL, READING_PARTIAL];
 
 type Row = Record<string, any>;
 type ItemRead = { key: string; fullName: string | null; metadata: Row | null };
+/** The number alone: nothing read from the org. */
+type StartedUnder = { handbookReading: number };
 
 const own = (row: Row): boolean => !row.NamespacePrefix;
 const quote = (values: string[]): string => values.map((v) => `'${v.replace(/'/g, "\\'")}'`).join(", ");
@@ -42,10 +48,23 @@ class ItemReader {
   readonly #ctx: ExtractContext;
   readonly #done: Map<string, ItemRead>;
   reads = 0;
+  /**
+   * Whether every item kept so far was redacted under this reading's number
+   * (DECISIONS.md 485). A read resumed from items kept with no number, or
+   * another, holds what older code redacted, so the step stamps no number.
+   */
+  readonly sameReading: boolean;
 
   constructor(ctx: ExtractContext) {
     this.#ctx = ctx;
-    this.#done = new Map(ctx.partial.read<ItemRead>(TOOLING_PARTIAL_KEYS[0]!).map((r) => [r.key, r]));
+    this.#done = new Map(ctx.partial.read<ItemRead>(ITEMS_PARTIAL).map((r) => [r.key, r]));
+    // Nothing kept, so this read starts now, under this number, and the kept
+    // file says so before its first item is kept.
+    if (this.#done.size === 0) {
+      ctx.partial.clear(READING_PARTIAL);
+      ctx.partial.append<StartedUnder>(READING_PARTIAL, [{ handbookReading: METADATA_READING }]);
+    }
+    this.sameReading = this.#done.size === 0 || ctx.partial.read<StartedUnder>(READING_PARTIAL)[0]?.handbookReading === METADATA_READING;
   }
 
   /** One item's Metadata, redacted before it's kept anywhere. Resumes from the checkpoint. */
@@ -67,7 +86,7 @@ class ItemReader {
     }
     const item: ItemRead = { key, fullName: rows[0]?.FullName ?? null, metadata };
     this.#done.set(key, item);
-    this.#ctx.partial.append(TOOLING_PARTIAL_KEYS[0]!, [item]);
+    this.#ctx.partial.append(ITEMS_PARTIAL, [item]);
     return item;
   }
 }
@@ -97,8 +116,10 @@ function markUnread(bundle: MetadataBundle, kind: UnreadKind, reason: string): v
 }
 
 export async function readBundleThroughTooling(ctx: ExtractContext): Promise<MetadataBundle> {
-  const bundle: MetadataBundle = { route: "tooling", unsearched: [], flows: [], workflows: [], validationRules: [], customFields: [], recordTypes: [], objects: [], references: { users: {}, fields: {} }, filesRead: 0, handbook: { flows: [], validationRules: [], validationRulesCover: { customObjects: "all", standardObjects: "all" }, handbookReading: METADATA_READING } };
   const reader = new ItemReader(ctx);
+  // Stamped only where every item was redacted under this number (DECISIONS.md 485).
+  const reading = reader.sameReading ? { handbookReading: METADATA_READING } : {};
+  const bundle: MetadataBundle = { route: "tooling", unsearched: [], flows: [], workflows: [], validationRules: [], customFields: [], recordTypes: [], objects: [], references: { users: {}, fields: {} }, filesRead: 0, handbook: { flows: [], validationRules: [], validationRulesCover: { customObjects: "all", standardObjects: "all" }, ...reading } };
   const index = (metadata: Row | null, path: string): void => {
     if (metadata) indexReferences(bundle.references, JSON.stringify(metadata), path);
   };

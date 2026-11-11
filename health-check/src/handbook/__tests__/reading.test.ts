@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { SALES_CLOUD_MODULES } from "../../domains/index.ts";
 import { runHealthCheck } from "../../engine/run.ts";
@@ -15,6 +15,7 @@ import { EARLIER_AS_OF } from "../../testing/earlier-handbook.ts";
 import { tempDir } from "../../testing/harness.ts";
 import { loadCalibration, syntheticProvider } from "../../testing/replay.ts";
 import { Simulator } from "../../testing/simulator.ts";
+import type { Transport } from "../../salesforce/transport.ts";
 import { AS_OF } from "../../testing/synthetic-org.ts";
 import { BUILD_READING, HANDBOOK_FILE } from "../build.ts";
 import { compareHandbooks, type KindComparison } from "../compare.ts";
@@ -126,4 +127,49 @@ describe("a run resumed with a step's checkpoint from before the readings were k
     assert.equal(asked.apex, 0, "the Apex wasn't read again");
     assert.deepEqual(read<{ readBy: unknown }>(first.dir, HANDBOOK_FILE).readBy, { metadata: METADATA_READING, apex: null, build: BUILD_READING });
   });
+});
+
+describe("a Tooling read stopped part way and resumed (decision 485)", () => {
+  // The items kept part way through were redacted by the code that read them,
+  // so a read resumed from them stamps the number only where the kept file says
+  // they were read under it.
+  const READING_KEPT = "metadata-tooling-reading.partial.jsonl";
+  const ITEMS_KEPT = "metadata-tooling.partial.jsonl";
+  /** Tooling's reads of one flow's definition each. */
+  const flowReads = (sim: Simulator): number => sim.requests.filter((r) => /FROM Flow WHERE Id/.test(decodeURIComponent(r.url))).length;
+
+  async function stoppedPartWay(): Promise<{ outDir: string; runId: string; checkpoints: string }> {
+    const simulator = new Simulator({ readOnly: true });
+    // The flows and rules are read and kept; the custom fields after them never come.
+    const dropping: Transport = { send: (request) => (decodeURIComponent(request.url).includes("FROM FieldDefinition") ? Promise.reject(new Error("socket hang up")) : simulator.send(request)) };
+    const outDir = tempDir();
+    await assert.rejects(runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir, now: new Date(AS_OF), transport: dropping, log: () => {} }), /socket hang up/);
+    const [runId] = readdirSync(outDir);
+    const checkpoints = join(outDir, runId!, "checkpoints");
+    assert.ok(flowReads(simulator) > 0 && readFileSync(join(checkpoints, ITEMS_KEPT), "utf8").includes('"key":"Flow/'), "flows were read and kept part way");
+    // The number alone, nothing read from the org.
+    assert.equal(readFileSync(join(checkpoints, READING_KEPT), "utf8"), `${JSON.stringify({ handbookReading: METADATA_READING })}\n`);
+    return { outDir, runId: runId!, checkpoints };
+  }
+
+  const cases: Array<[string, (checkpoints: string) => void, number | null]> = [
+    ["a kept file that records no number, as one an engine before this kept", (c) => rmSync(join(c, READING_KEPT)), null],
+    ["a kept file that records another number", (c) => writeFileSync(join(c, READING_KEPT), `${JSON.stringify({ handbookReading: METADATA_READING + 1 })}\n`), null],
+    ["a kept file that records this number", () => {}, METADATA_READING],
+  ];
+  for (const [what, edit, expected] of cases) {
+    test(`${what}: the flows' and rules' reading is ${expected === null ? "null" : "the number"}`, async () => {
+      const { outDir, runId, checkpoints } = await stoppedPartWay();
+      edit(checkpoints);
+      const transport = new Simulator({ readOnly: true });
+      const resumed = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir, now: new Date(AS_OF), transport, log: () => {}, resume: runId });
+      assert.ok(resumed.output, "the run finished");
+      // Resumed from the kept items: the step ran again, and read no flow again.
+      assert.ok(reads(transport).metadata > 0, "the metadata step ran");
+      assert.equal(flowReads(transport), 0, "no flow read again");
+      assert.deepEqual(read<{ readBy: unknown }>(resumed.dir, HANDBOOK_FILE).readBy, { metadata: expected, apex: APEX_READING, build: BUILD_READING });
+      // Both kept files are cleared once the step's output is saved.
+      assert.ok(!existsSync(join(checkpoints, READING_KEPT)) && !existsSync(join(checkpoints, ITEMS_KEPT)));
+    });
+  }
 });
