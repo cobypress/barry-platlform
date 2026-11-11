@@ -1552,7 +1552,7 @@ export const LATER_THAN_THE_RUN = {
   login: { UserId: userId(5), LoginTime: stamp(LATER) },
   case: sfId("500", 900_001),
   openCase: sfId("500", 900_002),
-  /** The latest email case in the year with no reply sent by the run's date. */
+  /** The latest email case in the year with no reply sent at all, so none by the run's date. */
   unansweredCase: generatedCases.findLast((c) => c.Origin === "Email" && !supportCases.replies.some((r) => r.ParentId === c.Id && !r.Incoming))!.Id,
   /** The latest case closed in the year with no article attached by the run's date. */
   closedCase: generatedCases.findLast((c) => c.IsClosed && !supportCases.articles.some((a) => a.CaseId === c.Id))!.Id,
