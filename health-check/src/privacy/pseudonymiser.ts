@@ -19,6 +19,13 @@ export const tokenCode = (letter = "[A-Z]"): string => String.raw`${letter}\d{4,
 /** A whole token as a regex source. `kinds` is an alternation such as "user" or "user|person|contact". */
 export const tokenSource = (kinds = "[a-z]+", letter?: string): string => String.raw`\[\[(?:${kinds}):${tokenCode(letter)}\]\]`;
 
+/**
+ * The name the engine labels a user id with when it has none. It's a word for
+ * "no name", not a name: the handbook prints it as a user we couldn't look up
+ * (decision 474). Pseudonym maps already saved hold it, so it never changes.
+ */
+export const UNKNOWN_USER = "Unknown user";
+
 const TOKEN = new RegExp(tokenSource(), "g");
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+/g;
 

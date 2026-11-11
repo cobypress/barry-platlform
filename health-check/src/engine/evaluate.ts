@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { DomainModule } from "../domains/types.ts";
 import type { Extractor } from "../extract/types.ts";
-import { Pseudonymiser } from "../privacy/pseudonymiser.ts";
+import { Pseudonymiser, UNKNOWN_USER } from "../privacy/pseudonymiser.ts";
 import { DESTRUCTIVE_RECOMMENDATIONS, Finding, Metric, type Calibration, type DateRange, type Evidence, type ManualAnswer, type ManualStep, type RunScope } from "../schemas/index.ts";
 import { MANUAL_STEPS } from "./manual-steps.ts";
 import type { IssueResult, ManualState, RecordList, Rule, RuleContext, RuleResult } from "./rule.ts";
@@ -204,7 +204,7 @@ export function analyse(input: AnalysisInput): AnalysisOutput {
     }),
     userLabel: (userId) => {
       const known = userDirectory.get(userId);
-      return known ? pseudonyms.label("user", userId, known.name, known.aliases) : pseudonyms.label("user", userId, "Unknown user");
+      return known ? pseudonyms.label("user", userId, known.name, known.aliases) : pseudonyms.label("user", userId, UNKNOWN_USER);
     },
   };
 

@@ -1,7 +1,7 @@
 import { AlignmentType, Document, Footer, HeadingLevel, Packer, PageNumber, Paragraph, TextRun } from "docx";
 import { colour, font } from "../design/tokens.ts";
 import { longDate } from "../render/format.ts";
-import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
+import { UNKNOWN_USER, type Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { CHANGES_NOT_KEPT, TRIGGER_EVENTS, type Handbook, type HandbookChange, type HandbookApexClass, type HandbookLastChange, type HandbookApexTouches, type HandbookApexTrigger, type HandbookCondition, type HandbookFlow, type HandbookPath, type HandbookStep, type HandbookValidationRule, type ValidationRuleCoverage } from "./schema.ts";
 
 // The org handbook as a Word document (DECISIONS.md 443 and 444): handbook.json
@@ -625,9 +625,10 @@ type HandbookOptions = {
 /** The handbook as its document's blocks. Exported for the tests, which read the words without unzipping. */
 export function handbookBlocks(handbook: Handbook, options: HandbookOptions): Paragraph[] {
   // The token alone, so text in the file that looks like one prints as written.
+  // The engine's placeholder for an id with no name isn't a name (decision 474).
   const names: Names = (token) => {
     const name = options.pseudonyms?.restore(token);
-    return name && name !== token ? name : null;
+    return name && name !== token && name !== UNKNOWN_USER ? name : null;
   };
   const doc = new Doc();
   doc.heading(`Org handbook: ${options.clientName}`, 1);
