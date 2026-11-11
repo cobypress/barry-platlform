@@ -1,6 +1,6 @@
 import { test, describe, before } from "node:test";
 import assert from "node:assert/strict";
-import { cpSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,6 +24,13 @@ import { SALES_CLOUD_MODULES } from "../../domains/index.ts";
 import { runHealthCheck } from "../../engine/run.ts";
 import type { Transport } from "../../salesforce/transport.ts";
 import { Simulator } from "../../testing/simulator.ts";
+import { MODELS } from "../../config.ts";
+import { APEX_SOURCE_FILE } from "../../extract/apex-source.ts";
+import { APEX_SUMMARY_PROMPT } from "../../narrative/apex-prompt.ts";
+import { tokenSource } from "../../privacy/pseudonymiser.ts";
+import { fingerprint } from "../../testing/fingerprint.ts";
+import { usersTable } from "../../testing/synthetic-org.ts";
+import { SUMMARIES_FILE, SUMMARIES_PARTIAL_FILE } from "../summaries.ts";
 
 // handbook.json is the customer's own configuration, and goes nowhere but the
 // documents made for them (DECISIONS.md 452). A marker planted in a validation
@@ -523,5 +530,190 @@ describe("what reads it", () => {
     assert.deepEqual(naming.filter((p) => !ALLOWED.has(p)), []);
     // The scan finds what it should, so an empty answer above means something.
     assert.ok(naming.includes("src/engine/run.ts") && naming.includes("src/handbook/build.ts"));
+  });
+});
+
+// Decision 490 (a): with HC_HANDBOOK_SUMMARIES on, Apex code reaches Claude by
+// the summary route alone, and nothing else of the handbook does; with it off,
+// as in every test above, none of it does, and no code is ever kept.
+
+/** A credential a developer pasted into a class: redacted before the code is kept, so in no file and no request. */
+const PASTED_CREDENTIAL = "zqSyntheticKey0491notreal";
+/** A synthetic user named in a comment: masked as their token on the way to Claude. */
+const COMMENTER = usersTable.find((u) => /^\w+ \w+$/.test(u.Name) && !/Shared|Integration/.test(u.Name))!;
+/** The longest name Salesforce allows a class, forty characters (QUESTIONS.md). */
+const LONGEST_NAME = `ZebraLongest${"x".repeat(28)}`;
+/** A word only the stub's summaries hold. */
+const SUMMARY_MARKER = "Quokkasummary";
+const APEX_MARKERS = [APEX_OBJECT, APEX_LITERAL, APEX_COMMENT];
+
+/** The planted recording, with a class holding a pasted credential and a comment naming a user, and one with the longest name. */
+function summaryRecording(): Recording {
+  const recording = plantedRecording();
+  const classes = recording.exchanges.find((e) => decodeURIComponent(e.key).includes("FROM ApexClass WHERE"))!;
+  const page = JSON.parse(classes.text) as { totalSize: number; records: Array<Record<string, unknown>> };
+  const changed = { LastModifiedDate: "2026-10-02T09:00:00.000+0000", LastModifiedById: COMMENTER.Id, LastModifiedBy: { Name: COMMENTER.Name } };
+  page.records.push(
+    { Id: "01p000000000098AAA", Name: "ZebraKeyHolder", ApiVersion: 62, Status: "Active", LengthWithoutComments: 180, ...changed, Body: `public class ZebraKeyHolder { // ${COMMENTER.Name} asked for this\n String api_key = '${PASTED_CREDENTIAL}'; }` },
+    { Id: "01p000000000097AAA", Name: LONGEST_NAME, ApiVersion: 62, Status: "Active", LengthWithoutComments: 90, ...changed, Body: `public class ${LONGEST_NAME} { }` },
+  );
+  page.totalSize = page.records.length;
+  classes.text = JSON.stringify(page);
+  return recording;
+}
+
+/** A stub Claude: a summary for the summary prompt, a paragraph for a section. Keeps every request, and calls `look` before each answer. */
+function summaryClaude(look: (request: NarrativeRequest) => void = () => {}): { asked: NarrativeRequest[]; narrative: NarrativeClient } {
+  const asked: NarrativeRequest[] = [];
+  return {
+    asked,
+    narrative: {
+      complete: async (request) => {
+        look(request);
+        asked.push(request);
+        const text =
+          request.system === APEX_SUMMARY_PROMPT
+            ? JSON.stringify({ summary: `Keeps the ${SUMMARY_MARKER} ledger in step when ${request.prompt.match(/Its name: (\w+)/)![1]} runs.` })
+            : JSON.stringify({ paragraphs: [{ text: "We looked closely at this area.", sources: [] }] });
+        return { stopReason: "end_turn", model: request.model, text };
+      },
+    },
+  };
+}
+
+/** A run job on the summaries' recording. `look` is called before each request to Claude, and with null before each to Salesforce. */
+async function summaryJob(on: boolean, look?: (request: NarrativeRequest | null, dir: string) => void, input = runInput({ answers: loadAnswers() })) {
+  let deps!: ReturnType<typeof baseDeps>;
+  const dir = (): string => join(deps.runsDir, input.run.id);
+  const claude = summaryClaude((request) => look?.(request, dir()));
+  const replay = new ReplayTransport(summaryRecording());
+  deps = baseDeps({ dataTransport: { send: (request) => (look?.(null, dir()), replay.send(request)) }, narrative: claude.narrative, apexSummaries: on });
+  const saved: RunOutputRecord[] = [];
+  const save = deps.store.saveRunOutput.bind(deps.store);
+  deps.store.saveRunOutput = async (runId, output) => {
+    saved.push(structuredClone(output));
+    return save(runId, output);
+  };
+  deps.store.addRun(input);
+  await deps.tokens.save(syntheticConnection());
+  const outcome = await createJobHandler(deps)({ kind: "run", runId: input.run.id }, { final: true });
+  return { deps, saved, outcome, asked: claude.asked, dir: join(deps.runsDir, input.run.id) };
+}
+
+describe("with the summaries' switch off, no Apex code is ever kept", () => {
+  test("no apex-source.json at any request to Salesforce or to Claude, nor at the end, and no summaries file", async () => {
+    const seen: string[] = [];
+    let dir = "";
+    const replay = new ReplayTransport(summaryRecording());
+    const deps = baseDeps({ dataTransport: { send: (request) => (dir && existsSync(join(dir, APEX_SOURCE_FILE)) && seen.push("salesforce"), replay.send(request)) } });
+    dir = join(deps.runsDir, RUN_ID);
+    const claude = summaryClaude(() => existsSync(join(dir, APEX_SOURCE_FILE)) && seen.push("claude"));
+    deps.narrative = claude.narrative;
+    deps.store.addRun(runInput({ answers: loadAnswers() }));
+    await deps.tokens.save(syntheticConnection());
+    assert.equal((await createJobHandler(deps)({ kind: "run", runId: RUN_ID }, { final: true })).outcome, "done");
+    assert.ok(replay.requests.length > 10 && claude.asked.length > 10, "it was looked for at each request");
+    assert.deepEqual(seen, []);
+    assert.ok(!existsSync(join(dir, APEX_SOURCE_FILE)) && !existsSync(join(dir, SUMMARIES_FILE)) && !existsSync(join(dir, SUMMARIES_PARTIAL_FILE)));
+    assert.ok(claude.asked.every((r) => r.system !== APEX_SUMMARY_PROMPT));
+    assert.deepEqual(holding(JSON.stringify(claude.asked), [...ROUTED, ...NOWHERE, ...MODIFIERS, PASTED_CREDENTIAL, COMMENTER.Name]), []);
+  });
+});
+
+describe("with the summaries' switch on, Apex code goes to Claude by the summary route alone", () => {
+  let on: Awaited<ReturnType<typeof summaryJob>>;
+  let off: Awaited<ReturnType<typeof summaryJob>>;
+  /** apex-source.json as it stood when Claude was first asked for a summary. */
+  let kept = "";
+
+  before(async () => {
+    on = await summaryJob(true, (request, dir) => {
+      if (request?.system === APEX_SUMMARY_PROMPT && !kept) kept = readFileSync(join(dir, APEX_SOURCE_FILE), "latin1");
+    });
+    assert.equal(on.outcome.outcome, "done");
+    off = await summaryJob(false);
+    assert.equal(off.outcome.outcome, "done");
+  });
+
+  const summaryRequests = () => on.asked.filter((r) => r.system === APEX_SUMMARY_PROMPT);
+
+  test("the Apex markers are only in requests with the summary prompt and the Haiku model, and every other request holds none", () => {
+    const summaries = summaryRequests();
+    assert.equal(summaries.length, 12, "the synthetic org's nine, the planted three");
+    assert.ok(summaries.every((r) => r.model === MODELS.handbookSummaries && r.model === "claude-haiku-5-5"));
+    assert.deepEqual(holding(JSON.stringify(summaries), APEX_MARKERS), APEX_MARKERS, "the route was taken");
+    const others = on.asked.filter((r) => r.system !== APEX_SUMMARY_PROMPT);
+    assert.ok(others.length > 10);
+    assert.deepEqual(holding(JSON.stringify(others), APEX_MARKERS), []);
+  });
+
+  test("the flows', validation rules' and every other handbook marker, and who changed anything, are in no request at all", () => {
+    const rest = [...ROUTED, ...NOWHERE, ...MODIFIERS].filter((m) => !APEX_MARKERS.includes(m));
+    assert.deepEqual(holding(JSON.stringify(on.asked), rest), []);
+  });
+
+  test("the pasted credential is in no request, and wasn't in apex-source.json while it existed", () => {
+    assert.ok(kept.includes("ZebraKeyHolder") && kept.includes("api_key = '[REDACTED]'"), "the file was seen");
+    assert.ok(!kept.includes(PASTED_CREDENTIAL));
+    assert.ok(!JSON.stringify(on.asked).includes(PASTED_CREDENTIAL));
+  });
+
+  test("a user named in a comment is masked as their token in the request", () => {
+    const request = summaryRequests().find((r) => r.prompt.includes("Its name: ZebraKeyHolder"))!;
+    for (const part of [COMMENTER.Name, ...COMMENTER.Name.split(" ")]) assert.ok(!request.prompt.includes(part), part);
+    assert.match(request.prompt, new RegExp(`// ${tokenSource("user")} asked for this`));
+  });
+
+  test("at the end neither the code nor the partial is left, and only handbook-summaries.json holds the summaries", () => {
+    const files = filesIn(on.dir);
+    assert.ok(!files.has(APEX_SOURCE_FILE) && !files.has(SUMMARIES_PARTIAL_FILE));
+    assert.deepEqual([...files.keys()].filter((f) => files.get(f)!.includes(SUMMARY_MARKER)), [SUMMARIES_FILE]);
+    const summaries = JSON.parse(files.get(SUMMARIES_FILE)!) as { items: Array<{ name: string }>; leftOut: Record<string, number> };
+    assert.equal(summaries.items.length, 12);
+    assert.ok(summaries.items.some((i) => i.name === LONGEST_NAME && i.name.length === 40));
+    assert.equal(summaries.items.length + Object.values(summaries.leftOut).reduce((a, b) => a + b, 0), 15, "every class and trigger the step read");
+  });
+
+  test("handbook-summaries.json holds no Apex literal, comment or object, since the stub didn't echo one, nor the credential", () => {
+    assert.deepEqual(holding(readFileSync(join(on.dir, SUMMARIES_FILE), "utf8"), [...APEX_MARKERS, PASTED_CREDENTIAL, COMMENTER.Name]), []);
+  });
+
+  test("the store, the console's writes, the benchmark and the log hold nothing of the code or the summaries", async () => {
+    const markers = [...APEX_MARKERS, PASTED_CREDENTIAL, SUMMARY_MARKER, LONGEST_NAME, "ZebraKeyHolder"];
+    assert.equal(on.saved.length, 1);
+    const store = { saved: on.saved, runs: [...on.deps.store.runs.values()], writes: on.deps.store.writes, documents: [...on.deps.store.documents.values()], benchmark: on.deps.store.benchmarkRows, scans: [...on.deps.store.scanResults.values()], pulses: [...on.deps.store.pulseResults.values()] };
+    assert.deepEqual(holding(JSON.stringify(store), markers), []);
+    assert.deepEqual(holding(on.deps.lines.join("\n"), markers), []);
+    assert.ok(on.deps.lines.some((l) => /^Claude summarised 12 of the 12 Apex classes and triggers kept for run /.test(l)));
+    const copy = join(tempDir(), "run");
+    cpSync(on.dir, copy, { recursive: true });
+    const written: unknown[] = [];
+    const result = await contributeBenchmark({ runDir: copy, industry: "technology", headcount: "51-200", consent: "Synthetic Person agreed by email", now: new Date("2026-11-03T10:00:00.000Z") }, async (rows) => void written.push(...rows));
+    assert.ok(written.length > 0);
+    assert.deepEqual(holding(JSON.stringify([written, result]), markers), []);
+  });
+
+  test("handbook.json, findings.json, metrics.json and the fingerprint are byte for byte the same with the switch on and off", () => {
+    for (const file of [HANDBOOK_FILE, "findings.json", "metrics.json"]) assert.equal(readFileSync(join(on.dir, file), "utf8"), readFileSync(join(off.dir, file), "utf8"), file);
+    assert.deepEqual(fingerprint(on.dir), fingerprint(off.dir));
+  });
+
+  test("a scan and a pulse with the switch on keep nothing and ask nothing", async () => {
+    for (const product of ["scan", "pulse"] as const) {
+      const seen: string[] = [];
+      let looked = 0;
+      const run = await summaryJob(true, (request, dir) => {
+        looked++;
+        if (existsSync(join(dir, APEX_SOURCE_FILE))) seen.push("kept");
+        if (request?.system === APEX_SUMMARY_PROMPT) seen.push("asked");
+      }, runInput({ run: consoleRun({ scope: "essentials", product, ...(product === "pulse" ? { baselineRunId: "hc-2026-08-31-00000009" } : {}) }) }));
+      assert.equal(run.outcome.outcome, "done", product);
+      assert.ok(looked > 10, `${product}: looked for at each request`);
+      assert.deepEqual(seen, [], product);
+      assert.ok(!run.asked.some((r) => r.system === APEX_SUMMARY_PROMPT), product);
+      if (existsSync(run.dir)) for (const file of [APEX_SOURCE_FILE, SUMMARIES_FILE, SUMMARIES_PARTIAL_FILE]) assert.ok(!existsSync(join(run.dir, file)), `${product} ${file}`);
+      const store = { runs: [...run.deps.store.runs.values()], scans: [...run.deps.store.scanResults.values()], pulses: [...run.deps.store.pulseResults.values()], writes: run.deps.store.writes };
+      assert.deepEqual(holding(JSON.stringify([store, run.deps.lines]), [...APEX_MARKERS, PASTED_CREDENTIAL, SUMMARY_MARKER]), [], product);
+    }
   });
 });
