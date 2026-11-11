@@ -1474,6 +1474,18 @@ describe("Claude's summaries in the org handbook", () => {
     assert.ok(text.includes(`${LABEL}${GOOD.summary}`));
   });
 
+  test("the job asks the store for the row only with the switch on", async () => {
+    for (const on of [false, true]) {
+      const deps = setup(jobInput(), new MemoryDrive());
+      deps.apexSummaries = on;
+      const asked: unknown[] = [];
+      const load = deps.store.loadDocumentsJob.bind(deps.store);
+      deps.store.loadDocumentsJob = async (runId, reads) => (asked.push(reads), load(runId, reads));
+      await processDocumentsJob(RUN_ID, deps, { final: true });
+      assert.deepEqual(asked, [{ handbookSummaries: on }]);
+    }
+  });
+
   test("the reports are never given the summaries", async () => {
     const drive = new MemoryDrive();
     const given: unknown[] = [];
