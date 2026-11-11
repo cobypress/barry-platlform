@@ -18,9 +18,10 @@ import { syntheticSurvey } from "../../testing/survey.ts";
 import { EXECUTIVE_PAGES } from "../render-run.ts";
 import { EXECUTIVE_MAX_PAGES, executiveHtml, executiveMaxPages, hasBothVoices, introLines, planIntroHeight, RECHECK_EXECUTIVE_MAX_PAGES } from "../executive.ts";
 import { deckRangeFor, fullReportHtml, fullReportHtmlAt, slideCounts, threeColumnItemHeight } from "../full-report.ts";
-import { estimateLines, paginateColumns, printed, renderContext } from "../html.ts";
+import { estimateLines, paginateColumns, printed, renderContext, textLines, type Render } from "../html.ts";
 import { compactMoney } from "../format.ts";
-import { moneyBasisLines, moneyLabelLines, moneyPageColumn, moneyPageRow, restOf } from "../money.ts";
+import { moneyBasisLines, moneyLabelLines, moneyPage, moneyPageColumn, moneyPageCounted, moneyPageRow, moneySlides, moneySlidesCounted, moneyTagWidth, restOf } from "../money.ts";
+import { noteSections, referenceMap, valueItemId } from "../references.ts";
 import { launchBrowser, layoutOf } from "../pdf.ts";
 
 // DECISIONS.md 442: a page laid out by estimate is held to measured text. Each
@@ -1134,5 +1135,224 @@ describe("each theme under \"What your people told us\" is its own paragraph (DE
         await page.close();
       }
     }
+  });
+});
+
+// DECISIONS.md 496: a money line's reference tag is counted as wide as the tag it
+// prints, where every tag was counted as wide as "R66.66". The table's estimate
+// reads each tag without noting it as used, so the executive summary's list of
+// references is what it was.
+/**
+ * The planted seven-character line's label, in letters the estimate counts close to
+ * their width, so its tag decides its line: on the page its last word fits beside
+ * "R66.66" and not beside its own tag. Most labels' letters are counted over by
+ * more than the 3.4px the tag was counted short, and of every draft below only
+ * labels in lower case, on the slide, came a line short.
+ */
+const PLANTED = Array(9).fill("before").join(" ");
+
+describe("a money line's tag is counted as wide as the tag it prints (DECISIONS.md 496)", () => {
+  /** Each tag as Chromium sets it after the first label of the document's money table, the gap before it included. */
+  const tagsSet = async (html: string, tags: string[]) => {
+    const page = await opened(html);
+    try {
+      return await page.evaluate((tags) => {
+        const ref = document.querySelector<HTMLElement>("table.grid tbody td .ref")!;
+        const gap = parseFloat(getComputedStyle(ref).marginLeft);
+        return tags.map((tag) => {
+          ref.textContent = tag;
+          return { tag, width: gap + ref.getBoundingClientRect().width };
+        });
+      }, tags);
+    } finally {
+      await page.close();
+    }
+  };
+
+  test("never under the browser's and within 1px over, from \"R1.1\" to \"R88.888\" and with characters it has no width for, on the page and the slides", async () => {
+    const { input, names } = await sampleOf(SAMPLES[2]![1]);
+    const report = buildReport(input);
+    const executive = executiveHtml(report, names);
+    const full = fullReportHtml(report, names);
+    // From the narrowest to wider than "R66.66", seven characters among them, and two with a
+    // character the widths don't name: the widest we measured, and a capital narrower than it.
+    const tags = ["R1.1", "R5.3", "R9.12", "R12.7", "R12.40", "R66.66", "R5.100", "R12.100", "R88.888", "R5.1013", "R9.3m", "RW.1"];
+    // Every printable character after a reference, which may be counted over but never under.
+    const every = Array.from({ length: 94 }, (_, i) => `R5.${String.fromCharCode(33 + i)}`);
+    const off: string[] = [];
+    let set = 0;
+    for (const [format, html, pages] of [["page", executive, [moneyPageOf(executive)!]], ["slide", full, moneySlidesOf(full).slice(0, 1)]] as const) {
+      for (const { tag, width } of await tagsSet(documentOf(html, [...pages]), [...tags, ...every])) {
+        const counted = moneyTagWidth(tag, format);
+        set += 1;
+        if (counted < width || (tags.includes(tag) && counted - width > 1)) off.push(`${format}, ${tag}: counted ${counted.toFixed(3)}px, set ${width.toFixed(3)}px`);
+      }
+    }
+    assert.equal(set, 2 * (tags.length + every.length));
+    assert.deepEqual(off, []);
+    // A row that prints no tag counts none.
+    assert.deepEqual([moneyTagWidth("", "page"), moneyTagWidth("", "slide")], [0, 0]);
+  });
+
+  test("a line whose tag is seven characters, past a thousand lines, is counted on the lines it takes on the page and the slide, where \"R66.66\" counted it short", async () => {
+    // The money is the notes' fifth section, or the sixth after a first check, so a line's
+    // tag reaches seven characters only past its thousandth line: here small lines of
+    // seats, and one of hours, the largest, numbered after them and every other kind's but
+    // its own, as hours come last.
+    // Enough of them that its tag is "R5.1088", 3.4px wider than "R66.66" beside the page's
+    // label: a 1 is narrow, so "R5.1013" is about as wide as "R66.66".
+    const { input, names } = await sampleOf(SAMPLES[0]![1]);
+    const template = input.findings.find((f) => f.status === "issue")!;
+    const before = buildReport(input).value.groups.filter((g) => g.kind !== "time_cost").length;
+    const small = Array.from({ length: 1087 - before }, (_, i): Finding => ({ ...template, id: `f-${String(10_000 + i).padStart(12, "0")}`, ruleId: `synthetic.seats_${i}`, title: `Seats on a small licence, number ${i + 1}`, severity: "low", value: { kind: "licence_cost", amount: 100 + i, unit: "GBP", period: "per year", assumptions: ["A synthetic line for the money page."] } }));
+    const hours: Finding = { ...template, id: `f-${String(20_000).padStart(12, "0")}`, ruleId: "synthetic.hours", title: PLANTED, severity: "low", value: { kind: "hours", amount: 90_000, unit: "hours", period: "per year", assumptions: ["A synthetic line for the money page."] } };
+    const report = buildReport({ ...input, findings: [...input.findings, ...small, hours] });
+    const refs = referenceMap(noteSections(report));
+    const largest = moneyOf(report)[0]!;
+    const tag = refs.get(valueItemId(largest.id))!;
+    assert.ok(largest.lines.some((l) => l.findingId === hours.id) && tag === "R5.1088", `${largest.id}: ${tag}`);
+    // The money as each document prints it, in place of the sample's own: the whole
+    // documents would set a thousand findings more, which the money doesn't need.
+    const plain = buildReport(input);
+    const plainRefs = renderContext(names, plain.value.currency, false, referenceMap(noteSections(plain)));
+    const r = renderContext(names, report.value.currency, false, refs);
+    const executive = executiveHtml(plain, names);
+    const onPage = moneyPageOf(executive)!;
+    assert.ok(onPage.includes(moneyPage(plainRefs, plain)));
+    const full = fullReportHtml(plain, names);
+    const [onSlide] = moneySlidesOf(full);
+    assert.ok(onSlide!.includes(moneySlides(plainRefs, plain)[0]!));
+    const pageDoc = documentOf(executive, [onPage.replace(moneyPage(plainRefs, plain), moneyPage(r, report))]);
+    const slideDoc = documentOf(full, moneySlides(r, report).map((money) => onSlide!.replace(moneySlides(plainRefs, plain)[0]!, money)));
+    // Its own label, and every draft to sixteen words in its place, as written and in lower case, set with its tag.
+    const drafts = [PLANTED, ...windows(16), ...windows(16).map((text) => text.toLowerCase().replace(/[.,']/g, ""))];
+    const under: string[] = [];
+    const short: string[] = [];
+    for (const [format, html, font] of [["page", pageDoc, 12.5], ["slide", slideDoc, 16]] as const) {
+      const page = await opened(html);
+      try {
+        const set = await page.evaluate(
+          ({ drafts, tag }) => {
+            const ref = [...document.querySelectorAll<HTMLElement>("table.grid tbody td .ref")].find((x) => x.textContent === tag)!;
+            const td = ref.closest("td")!;
+            const style = getComputedStyle(td);
+            const basis = td.querySelector<HTMLElement>(".basis");
+            const width = td.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+            return drafts.map((text) => {
+              td.replaceChildren(document.createTextNode(text), ref, ...(basis ? [basis] : []));
+              const height = td.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom) - (basis ? basis.getBoundingClientRect().height + 1 : 0);
+              return { text, width, lines: Math.round(height / parseFloat(style.lineHeight)) };
+            });
+          },
+          { drafts, tag },
+        );
+        for (const x of set) {
+          if (moneyLabelLines(x.text, tag, x.width, format) < x.lines) under.push(`${format}, ${x.lines} lines at ${x.width}px: ${x.text}`);
+          // What the tag was counted as before decision 496: 6px and 2.96 a pixel of the label's type.
+          if (textLines(x.text, x.width, font, 6 + 2.96 * font) < x.lines) short.push(`${format}${x.text === PLANTED ? ", its own label" : ""}`);
+        }
+      } finally {
+        await page.close();
+      }
+    }
+    assert.deepEqual(under, []);
+    // Counted as "R66.66", its own label and others came a line short on the page and on the slide.
+    assert.ok(short.includes("page, its own label") && short.includes("slide"), `${tag}: ${short.join("; ")}`);
+  });
+
+  test("each row is counted with the tag it prints: a line its own, the rest the first of its lines', and the total none, on every sample, on the page and the slides", async () => {
+    const wrong: string[] = [];
+    const seen = { lines: 0, rests: 0, totals: 0 };
+    for (const [name, options] of SAMPLES) {
+      const { input, names } = await sampleOf(options);
+      const reports: Array<[string, BuiltReport]> = [
+        ...MONEY_CASES.map(([kind, extra]): [string, BuiltReport] => [kind, buildReport({ ...input, ...extra(input) })]),
+        ["the most lines", buildReport(withManyLines(input))],
+        ["40 lines more and a survey", buildReport({ ...withMoneyLines(input, 40, 16), survey: syntheticSurvey(12) })],
+      ];
+      for (const doc of ["page", "slides"] as const) {
+        const pages: string[] = [];
+        const counted: Array<{ label: string; rows: Array<{ label: string; tag: string }> }> = [];
+        let head = "";
+        for (const [kind, report] of reports) {
+          // As the documents look each line's reference up, in the notes' numbering.
+          const r = renderContext(names, report.value.currency, false, referenceMap(noteSections(report)));
+          const html = doc === "page" ? executiveHtml(report, names) : fullReportHtml(report, names);
+          const printedPages = doc === "page" ? [moneyPageOf(html)!] : moneySlidesOf(html);
+          // A deck at its ceiling holds its money to one slide.
+          const tables = doc === "page" ? [moneyPageCounted(r, report)] : [moneySlidesCounted(r, report), moneySlidesCounted(r, report, 1)].find((x) => x.length === printedPages.length)!;
+          head = html;
+          pages.push(...printedPages);
+          counted.push(...tables.map((rows, i) => ({ label: `${name}, ${kind}, the ${doc} ${i + 1}`, rows })));
+        }
+        const page = await opened(documentOf(head, pages));
+        try {
+          const rows = await page.evaluate(() =>
+            [...document.querySelectorAll<HTMLElement>(".money table.grid")].map((table) =>
+              [...table.querySelectorAll<HTMLElement>("tbody tr")].map((tr) => {
+                const cell = tr.querySelector("td")!.cloneNode(true) as HTMLElement;
+                const ref = cell.querySelector(".ref");
+                for (const x of cell.querySelectorAll(".ref, .basis")) x.remove();
+                return { label: cell.textContent ?? "", tag: ref ? (ref.textContent ?? "") : "", total: tr.classList.contains("total") };
+              }),
+            ),
+          );
+          assert.equal(rows.length, counted.length, `${name}, the ${doc}: ${rows.length} tables printed, ${counted.length} counted`);
+          rows.forEach((table, t) => {
+            const want = counted[t]!.rows.map((x) => `${printed(x.label)} [${x.tag}]`);
+            const got = table.map((x) => `${x.label} [${x.tag}]`);
+            if (want.join("\n") !== got.join("\n")) wrong.push(`${counted[t]!.label}: counted ${want.join("; ")}, printed ${got.join("; ")}`);
+            for (const x of table) {
+              if (x.total) seen.totals += 1;
+              else if (/smaller lines?, in the raw notes/.test(x.label)) seen.rests += x.tag ? 1 : 0;
+              else seen.lines += 1;
+            }
+          });
+        } finally {
+          await page.close();
+        }
+      }
+    }
+    assert.deepEqual(wrong, []);
+    // The rest's row and the total's printed and checked on the page and the slides of every sample.
+    assert.ok(seen.rests >= 2 * SAMPLES.length && seen.totals >= 2 * SAMPLES.length * 6 && seen.lines > 100, JSON.stringify(seen));
+  });
+
+  test("the executive summary lists the references it prints, as it did before, and the estimate asks for none", async () => {
+    // Each sample's list of references at 184b55b, before decision 496, by case (no
+    // survey and no spend, spend, a survey, both), then with the most lines.
+    const BEFORE: Record<string, string[]> = {
+      [SAMPLES[0]![0]]: ["ac1f2e0e140d0f60", "be5271b33b1a60c5", "03ee7a8ece47dd1e", "e5f76cc9af28ae01", "7c7da39515a1a818"],
+      [SAMPLES[1]![0]]: ["a950d3ec1d0f80db", "d5f689afe7c93bf8", "a9954f5f7109746b", "3a37528926c04eb7", "57cfd637ad9f32b4"],
+      [SAMPLES[2]![0]]: ["a31649e03ba7ac10", "b9cccdf3ffca073b", "5702a5e7326395ef", "61427e6831d027d7", "c90dcc7a20770fd9"],
+      [SAMPLES[3]![0]]: ["46d2848c0e5e6a42", "18483d7be2fc6867", "5b1e17bacdb82ca5", "515f47f29c4f3173", "55d488f87923ef5f"],
+      [SAMPLES[4]![0]]: ["545cc2b24362cf85", "f3d0cda1d25d7ae2", "7f359a5916623695", "83dd89c499ed56a7", "81647e8ca5017679"],
+    };
+    const lists: Record<string, string[]> = {};
+    const wrong: string[] = [];
+    for (const [name, options] of SAMPLES) {
+      const { input, names } = await sampleOf(options);
+      lists[name] = [];
+      const reports = [...MONEY_CASES.map(([kind, extra]): [string, BuiltReport] => [kind, buildReport({ ...input, ...extra(input) })]), ["the most lines", buildReport(withManyLines(input))] as [string, BuiltReport]];
+      for (const [kind, report] of reports) {
+        const pages = pagesOf(executiveHtml(report, names));
+        const detail = pages.find((p) => p.includes("<h2>How we worked it out</h2>"))!;
+        lists[name]!.push(sha(detail));
+        // Every reference listed is one a page prints: one the estimate asked for would be listed and not printed.
+        const listed = [...detail.matchAll(/<b data-ref>([^<]*)<\/b>/g)].map((x) => x[1]!).sort();
+        const shown = new Set(pages.filter((p) => p !== detail).flatMap((p) => [...p.matchAll(/data-ref>([^<]*)</g)].map((x) => x[1]!)));
+        const unprinted = listed.filter((ref) => !shown.has(ref));
+        if (unprinted.length) wrong.push(`${name}, ${kind}: ${unprinted.join(", ")} listed and not printed`);
+        // The money asks for a reference only to print it, on the page and the slides.
+        const base = renderContext(names, report.value.currency, false, referenceMap(noteSections(report)));
+        const asked: string[] = [];
+        const r: Render = { ...base, ref: (id) => (asked.push(id), base.ref(id)) };
+        const money = [moneyPage(r, report), ...moneySlides(r, report)].join("");
+        const tags = [...money.matchAll(/<span class="ref" data-ref>[^<]*<\/span>/g)].map((x) => x[0]).sort();
+        if (asked.map((id) => base.ref(id)).filter(Boolean).sort().join() !== tags.join()) wrong.push(`${name}, ${kind}: asked for ${asked.length} references, printed ${tags.length}`);
+      }
+    }
+    assert.deepEqual(wrong, []);
+    assert.deepEqual(lists, BEFORE);
   });
 });
