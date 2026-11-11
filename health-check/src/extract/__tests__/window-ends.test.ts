@@ -112,7 +112,8 @@ describe("a full synthetic run's queries", () => {
     // The history's own rows have no end in the query: the later ones are how a deal changed since is found.
     const history = queries.filter((q) => new RegExp(`FROM OpportunityHistory WHERE OpportunityId IN \\(SELECT Id FROM Opportunity WHERE ${SCOPE}${end}\\)( AND Id > '\\w+')? ORDER BY Id`).test(q));
     const steps = queries.filter((q) => new RegExp(`^SELECT Id FROM Opportunity WHERE \\(IsClosed = false(?: OR StageName IN \\([^)]*\\))? OR LastModifiedDate >= ${RUN_START}\\) AND NextStep != null${end}( AND Id > '\\w+')? ORDER BY Id`).test(q));
-    const closedSince = queries.filter((q) => new RegExp(`^SELECT Id FROM Opportunity WHERE IsClosed = true AND LastModifiedDate >= ${RUN_START}${end}( AND Id > '\\w+')? ORDER BY Id`).test(q));
+    // Read whole each time, never a keyset (DECISIONS.md 467).
+    const closedSince = queries.filter((q) => new RegExp(`^SELECT Id FROM Opportunity WHERE IsClosed = true AND LastModifiedDate >= ${RUN_START}${end}$`).test(q));
     assert.ok(deals.length > 0 && history.length > 0 && steps.length > 0 && closedSince.length > 0, `deals ${deals.length}, history ${history.length}, next steps ${steps.length}, closed since ${closedSince.length}`);
     // Every other read of a deal is left without the end on purpose, and named:
     // the wins before the window, and reads of how things stand with no window
