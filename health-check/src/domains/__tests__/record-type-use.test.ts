@@ -1,8 +1,8 @@
 import { before, describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
-import { readCheckpoint } from "../../engine/checkpoint.ts";
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { readCheckpoint, writeCheckpoint } from "../../engine/checkpoint.ts";
 import { renderRawNotes } from "../../notes/raw-notes.ts";
 import { applyGuards } from "../../engine/evaluate.ts";
 import type { IssueResult, RuleContext } from "../../engine/rule.ts";
@@ -579,6 +579,37 @@ describe("a run stopped between the reads", () => {
     assert.equal(finding(untold.output!.findings).status, "not_measurable");
     assert.match(finding(untold.output!.findings).notMeasurableReason!, /The run wasn't told which user connected\.$/);
   });
+
+  // The step went to version 4 when activities became partlyHidden (DECISIONS.md 499).
+  test("a run in flight with a version 3 checkpoint of the step reads it again on resume, to the run's own date", async () => {
+    const straight = await simulatorRun(new Simulator(), tempDir());
+    const first = await simulatorRun(new Simulator(), tempDir());
+    // As a run in flight before this change left it: the step done at version
+    // 3, its checkpoint in the old shape and holding nothing counted, then
+    // stopped later on.
+    const path = join(first.dir, "run.json");
+    const state = JSON.parse(readFileSync(path, "utf8")) as { status: string; steps: Array<{ id: string; version: number }> };
+    state.status = "stopped_budget";
+    state.steps.find((s) => s.id === recordTypeUseExtractor.id)!.version = 3;
+    writeFileSync(path, JSON.stringify(state));
+    const checkpoint = join(first.dir, "checkpoints", `${recordTypeUseExtractor.id}.json`);
+    const { partlyHidden: _p, ...shape } = readCheckpoint(checkpoint) as RecordTypeUse;
+    writeCheckpoint(checkpoint, { ...shape, activities: [], counted: {}, queries: { ...shape.queries, viewAllData: VIEW_ALL_DATA("<the connected user>").replace(" AND PermissionSet.HasActivationRequired = false", "") } });
+
+    const second = new Simulator();
+    // A day after the run's date: the reads still end at the run's own.
+    const resumed = await simulatorRun(second, dirname(first.dir), { resume: first.run.id, now: new Date(T.getTime() + DAY) });
+    const again = queriesOf(second.requests);
+    assert.deepEqual(again.filter(isViewAllData), [VIEW_ALL_DATA(org.CONNECTED_USER.id)], "the access is read again");
+    assert.deepEqual(again.filter(isList), [`SELECT Id, DeveloperName, Name, SobjectType, IsActive, NamespacePrefix, CreatedDate FROM RecordType WHERE CreatedDate <= ${soqlDateTime(upToItsSecond(T))}`]);
+    assert.equal(again.filter(isCount).length, 2 * 4, "both counts on each object are read again");
+    assert.equal(resumed.run.steps.find((s) => s.id === recordTypeUseExtractor.id)!.version, 4);
+    const use = readCheckpoint(checkpoint) as RecordTypeUse & { activities?: unknown };
+    assert.equal(use.activities, undefined);
+    assert.deepEqual(use.partlyHidden, []);
+    assert.equal(use.queries.viewAllData, VIEW_ALL_DATA("<the connected user>"));
+    assert.deepEqual(finding(resumed.output!.findings), finding(straight.output!.findings));
+  });
 });
 
 describe("a run whose counts fail for a moment", () => {
@@ -777,6 +808,15 @@ describe("who connected", () => {
       assert.ok(out.access.status === "ok" && !out.access.viewAllRecords.includes("Invoice__c"));
       assert.ok(out.notSeenWhole.includes("Invoice__c"));
       assert.ok(!names(judge(out)).some((s) => s.endsWith("on Invoice")));
+    });
+
+    // Every user holds their profile's own set, which never needs activating, so
+    // no assignments at all still means we can't see them, not that there are none.
+    test("a user with no assignments visible is access unknown, not no access: not measurable, and no count is sent", async () => {
+      const { out, sim } = await read(T, {}, undefined, { id: org.sfId("005", 990001) });
+      assert.deepEqual(out.access, { status: "unknown", reason: "No permission set assignments were visible for the connected user." });
+      assert.ok(!queriesOf(sim.requests).some(isCount));
+      assert.equal(judge(out).notMeasurableReason, `${UNKNOWN} No permission set assignments were visible for the connected user.`);
     });
 
     for (const [name, fails, reason] of [
