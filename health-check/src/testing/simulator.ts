@@ -51,6 +51,11 @@ export type SimulatorOptions = {
   setupAudit?: Array<Record<string, unknown>>;
   /** The Apex classes: the synthetic org's by default, or a test's own, such as one changed by a user nobody can name. */
   apexClasses?: Array<Record<string, unknown>>;
+  /**
+   * Deals edited since in a field no history row tracks, such as a description,
+   * by id, with when (in the synthetic org's "+0000" text). None by default.
+   */
+  editedAt?: Record<string, string>;
 };
 
 /** The parts of an org that grow with it. A scale test swaps them for a generated org's (src/testing/scale-org.ts). */
@@ -311,9 +316,10 @@ export class Simulator implements Transport {
   #sorted = new WeakMap<object, Array<{ Id: string }>>();
   /** Lists derived from the records for one kind of query, made once. */
   #derived = new Map<string, Array<{ Id: string }>>();
-  /** Each deal's latest history row, by id, and the facts as they stand: made once. */
+  /** Each deal's latest change, by id, and the facts as they stand: made once. */
   #modified: Map<string, string> | undefined;
   #closedFacts: typeof org.FORECAST_FACTS | undefined;
+  #editedAt: Record<string, string>;
 
   constructor(options: SimulatorOptions = {}) {
     this.#used = options.used ?? 1000;
@@ -332,6 +338,7 @@ export class Simulator implements Transport {
     this.#pageSize = options.pageSize ?? null;
     this.#setupAudit = options.setupAudit ?? org.SETUP_AUDIT;
     this.#apexClasses = options.apexClasses ?? org.APEX_CLASSES;
+    this.#editedAt = options.editedAt ?? {};
     this.#unlicensed = new Set(options.unlicensed ?? []);
     this.#missing = new Set([...(options.missingObjects ?? []), ...(this.#readOnly ? ["AuthProvider"] : [])]);
     if (!this.#pardot) this.#dropFields = { ...this.#dropFields, Lead: [...(this.#dropFields.Lead ?? []), "pi__url__c", "pi__score__c", "pi__grade__c"] };
@@ -846,13 +853,13 @@ export class Simulator implements Transport {
   }
 
   /**
-   * A synthetic deal keeps no LastModifiedDate. Every change a test makes to a
-   * deal writes a history row, as a stage, amount or close date change does in
-   * Salesforce, so it's the latest of the deal's CreatedDate and its rows'.
+   * A synthetic deal keeps no LastModifiedDate. A stage, amount or close date
+   * change writes a history row, as in Salesforce, and any other edit is in
+   * `editedAt`, so it's the latest of the deal's CreatedDate, its rows' and that.
    */
   #lastModified(o: org.SyntheticOpportunity): string {
     if (!this.#modified) {
-      this.#modified = new Map();
+      this.#modified = new Map(Object.entries(this.#editedAt));
       for (const h of this.#d.pipeline.history) if (h.CreatedDate > (this.#modified.get(h.OpportunityId) ?? "")) this.#modified.set(h.OpportunityId, h.CreatedDate);
     }
     const row = this.#modified.get(o.Id) ?? "";

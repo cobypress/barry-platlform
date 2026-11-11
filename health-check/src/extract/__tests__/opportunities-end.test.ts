@@ -1,6 +1,6 @@
 import { before, describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { ALL_MODULES, SALES_CLOUD_MODULES } from "../../domains/index.ts";
 import { readCheckpoint, writeCheckpoint } from "../../engine/checkpoint.ts";
@@ -10,7 +10,8 @@ import { analyseExtracts, clone, loadExtracts, runFromRecording, tempDir } from 
 import { loadAnswers, loadCalibration, syntheticProvider } from "../../testing/replay.ts";
 import { Simulator, SYNTHETIC_RECORDS, type OrgRecords, type SimulatorOptions } from "../../testing/simulator.ts";
 import * as org from "../../testing/synthetic-org.ts";
-import type { ForecastData } from "../forecast.ts";
+import type { Transport } from "../../salesforce/transport.ts";
+import { FORECAST_MAX_ROWS, type ForecastData } from "../forecast.ts";
 import { asAtTheRun, OpportunityRow, type HistoryRow, type OpportunityExtract, type StageRow } from "../opportunities.ts";
 import type { Sourced } from "../types.ts";
 
@@ -222,10 +223,10 @@ const LEFT_OUT: Record<number, { exclusion: string; sentence: string; reason: st
  * worked out from that run's own extracts by the rules as they were before the
  * list, so apart from it.
  */
-function withoutThem(dir: string, ids: string[], modules = ALL_MODULES): Finding[] {
+function withoutThem(dir: string, ids: string[], modules = ALL_MODULES, calibration = loadCalibration()): Finding[] {
   const extracts = loadExtracts(dir);
   for (const f of ok((extracts.get("forecast") as ForecastData).facts)) if (ids.includes(f.OpportunityId)) f.ForecastCategoryName = "Pipeline";
-  return analyseExtracts(extracts, { modules, answers: loadAnswers() }).findings;
+  return analyseExtracts(extracts, { modules, answers: loadAnswers(), calibration }).findings;
 }
 
 /**
@@ -233,9 +234,9 @@ function withoutThem(dir: string, ids: string[], modules = ALL_MODULES): Finding
  * since: each share is the run's date's without them, and says so word for
  * word; the figure against quota has no value where a quota holder owns one.
  */
-function leavesOut(late: { findings: Finding[]; metrics: Metric[] }, atT: { dir: string; findings: Finding[]; metrics: Metric[] }, ids: string[], owned: number, modules = ALL_MODULES): void {
+function leavesOut(late: { findings: Finding[]; metrics: Metric[] }, atT: { dir: string; findings: Finding[]; metrics: Metric[] }, ids: string[], owned: number, modules = ALL_MODULES, calibration = loadCalibration()): void {
   const words = LEFT_OUT[ids.length]!;
-  const minus = withoutThem(atT.dir, ids, modules);
+  const minus = withoutThem(atT.dir, ids, modules, calibration);
   for (const id of COMMIT_SHARES) {
     const [then, now, without] = [atT.findings, late.findings, minus].map((f) => (assert.equal(finding(f, id).length, 1, id), finding(f, id)[0]!));
     assert.deepEqual({ n: now.facts.n, hits: now.facts.hits, count: now.evidence[0]!.count }, { n: without.facts.n, hits: without.facts.hits, count: without.evidence[0]!.count }, id);
@@ -490,6 +491,76 @@ describe("a run stopped part-way through the deals and resumed after the org cha
     sameFigures(resumed, straight, [later.planted.wonSince, later.planted.wonNoStep]);
   });
 
+  // The list of deals closed since is set against facts read afresh each time
+  // the forecast step runs, so it's read whole each time too. Resumed from pages
+  // kept before a stop, it missed a deal with a lower id that closed after the
+  // stop, and the figure against quota was measured and low (DECISIONS.md 467).
+  describe("the forecast step stopped after the facts and before the list, and resumed after a deal in Commit was won (DECISIONS.md 467)", () => {
+    const OLD_PAGES = "closed-since-the-run.partial.jsonl";
+    const LIST = /IsClosed = true AND LastModifiedDate >= /;
+
+    /** A quota holder's deal in Commit won since, and a deal closed at the run's date, with a later id, edited since in a field no history row tracks. */
+    function wonAndEdited() {
+      const later = oneWonSince((o) => QUOTA_HOLDERS.has(o.OwnerId) && (o.Amount ?? 0) > 0);
+      const edited = later.records.pipeline.opportunities.find((o) => o.IsClosed && o.Id > later.id && !after(o))!;
+      assert.ok(SYNTHETIC_RECORDS.pipeline.opportunities.find((o) => o.Id === edited.Id)!.IsClosed, "closed at the run's date");
+      return { ...later, edited: edited.Id, editedAt: { [edited.Id]: stamp(T.getTime() + 2 * HOUR) } };
+    }
+
+    async function stoppedBeforeTheList(): Promise<{ out: string; id: string; dir: string }> {
+      const stopped = await stoppedAt((requests) => {
+        const list = query(LIST)(requests);
+        assert.ok(list > 0 && query(/FROM ForecastingFact/)(requests) < list, "the facts are read before the list");
+        return list;
+      });
+      const state = JSON.parse(readFileSync(join(stopped.dir, "run.json"), "utf8")) as { steps: Array<{ id: string; status: string }> };
+      assert.notEqual(state.steps.find((s) => s.id === "forecast")?.status, "done");
+      // Nothing of the step is kept to resume from: no checkpoint, and no pages of the list.
+      const checkpoints = join(stopped.dir, "checkpoints");
+      assert.ok(!existsSync(join(checkpoints, "forecast.json")));
+      assert.deepEqual(readdirSync(checkpoints).filter((f) => f.endsWith(".partial.jsonl")), []);
+      return stopped;
+    }
+
+    /**
+     * Resumed at the run's date on the later org: both deals are on the list,
+     * and every figure is the uninterrupted run's but the Commit figures, which
+     * leave the one won since out, one deal fewer in each share's Commit.
+     */
+    async function resumedAsAtTheRun(stopped: { out: string; id: string }, later: ReturnType<typeof wonAndEdited>): Promise<void> {
+      const resumed = await simulatorRun(later.records, stopped.out, 1000, { resume: stopped.id, answers: loadAnswers() }, { editedAt: later.editedAt });
+      assert.equal(resumed.run.status, "in_review");
+      assert.deepEqual([...ok(checkpoint<ForecastData>(resumed.dir, "forecast").closedSinceTheRun)].sort(), [later.id, later.edited].sort());
+      const straight = await uninterrupted();
+      const quota = metric(resumed.output!.metrics, AGAINST_QUOTA)[0]!;
+      assert.deepEqual([quota.status, quota.status === "not_measurable" && quota.reason], ["not_measurable", LEFT_OUT[1]!.reason]);
+      for (const id of COMMIT_SHARES) {
+        const [now, then] = [finding(resumed.output!.findings, id)[0]!, finding(straight.findings, id)[0]!];
+        assert.ok(now.summary.includes(LEFT_OUT[1]!.sentence), id);
+        assert.equal(then.facts.n! - now.facts.n!, 1, id);
+      }
+      // The API limits were read before the stop, at half the day's allowance, so only the Commit figures are set against the straight run's.
+      leavesOut(resumed.output!, straight, [later.id], 1, SALES_CLOUD_MODULES);
+    }
+
+    test("reads the facts and the list again, so the deal won since is on the list and the figure against quota has none", async () => {
+      const later = wonAndEdited();
+      const stopped = await stoppedBeforeTheList();
+      await resumedAsAtTheRun(stopped, later);
+    });
+
+    test("doesn't use pages kept under the list's old key, and clears them", async () => {
+      const later = wonAndEdited();
+      const stopped = await stoppedBeforeTheList();
+      // As a stop on the keyset read left them: a page holding the deal edited
+      // since, whose id is after the one won, so the old read went on from there.
+      const old = join(stopped.dir, "checkpoints", OLD_PAGES);
+      writeFileSync(old, `${JSON.stringify({ Id: later.edited })}\n`);
+      await resumedAsAtTheRun(stopped, later);
+      assert.ok(!existsSync(old));
+    });
+  });
+
   test("leaves it out where the history read then fails, though nothing can be wound back", async () => {
     const { made, records, out, id } = await keptMadeSince();
     const failQuery = (soql: string) => (/FROM OpportunityHistory/.test(soql) ? { errorCode: "INSUFFICIENT_ACCESS", message: "Not today" } : null);
@@ -561,8 +632,8 @@ describe("a run in flight with a deals checkpoint from version 4", () => {
 // (DECISIONS.md 466). Each org here has that one change and nothing else.
 const CLOSED_SINCE = /^SELECT Id FROM Opportunity WHERE IsClosed = true AND LastModifiedDate >= /;
 
-/** The synthetic org a day after its date, with one deal in Commit at it, whose last history row matches it, won since. */
-function oneWonSince(match: (o: org.SyntheticOpportunity) => boolean): { records: OrgRecords; id: string; was: org.SyntheticOpportunity } {
+/** The synthetic org a day after its date, with one deal in Commit at it, whose last history row matches it, won since (or moved since into another closed stage). */
+function oneWonSince(match: (o: org.SyntheticOpportunity) => boolean, stage = "Closed Won"): { records: OrgRecords; id: string; was: org.SyntheticOpportunity } {
   const pipeline = clone(org.pipeline);
   const committed = new Set(org.FORECAST_FACTS.filter((f) => f.ForecastCategoryName === "Commit").map((f) => f.OpportunityId));
   const last = (id: string) => pipeline.history.filter((h) => h.OpportunityId === id).sort(byTime).at(-1);
@@ -572,7 +643,7 @@ function oneWonSince(match: (o: org.SyntheticOpportunity) => boolean): { records
   })!;
   const was = clone(deal);
   const at = T.getTime() + 24 * HOUR;
-  Object.assign(deal, { StageName: "Closed Won", IsClosed: true, IsWon: true, CloseDate: stamp(at).slice(0, 10) });
+  Object.assign(deal, { StageName: stage, IsClosed: true, IsWon: stage === "Closed Won", CloseDate: stamp(at).slice(0, 10) });
   pipeline.history.push({ Id: org.sfId("008", 900_201), OpportunityId: deal.Id, StageName: deal.StageName, Amount: deal.Amount, CloseDate: deal.CloseDate, CreatedDate: stamp(at) });
   pipeline.history.sort((a, b) => a.Id.localeCompare(b.Id));
   return { records: { ...SYNTHETIC_RECORDS, pipeline }, id: deal.Id, was };
@@ -639,6 +710,37 @@ describe("the Commit figures read late, after a deal in Commit at the run's date
     othersAsAtT(read.output!);
   });
 
+  test("where the list stops at its row limit, the three figures are not measurable and say so, and nothing else moves (DECISIONS.md 467)", async () => {
+    // Salesforce's answer to the list cut at the forecast's row limit with more
+    // to come: as many deals as the limit, beyond the org's own.
+    const sim = new Simulator();
+    const transport: Transport = {
+      async send(request) {
+        const res = await sim.send(request);
+        if (!CLOSED_SINCE.test(new URL(request.url).searchParams.get("q") ?? "")) return res;
+        const records = Array.from({ length: FORECAST_MAX_ROWS }, (_, k) => ({ Id: org.sfId("006", 5_000_000 + k) }));
+        return { ...res, text: JSON.stringify({ totalSize: FORECAST_MAX_ROWS + 1, done: false, records, nextRecordsUrl: `/services/data/v${org.API_VERSION}/query/01g000000000001-${FORECAST_MAX_ROWS}` }) };
+      },
+    };
+    const read = await run({}, { transport });
+    const list = checkpoint<ForecastData>(read.dir, "forecast").closedSinceTheRun;
+    assert.ok(list.status === "ok" && list.truncated && list.data.length === FORECAST_MAX_ROWS);
+    // Read once, and not past the limit.
+    assert.equal(sim.requests.filter((r) => CLOSED_SINCE.test(new URL(r.url).searchParams.get("q") ?? "")).length, 1);
+    assert.ok(!sim.requests.some((r) => r.url.includes(`-${FORECAST_MAX_ROWS}`)));
+    const reason = "The read of deals closed since this run's date stopped at its row limit after 100,000 rows, so the rest weren't read.";
+    const query = (e: { kind: string; query?: string }) => (e.kind === "soql" ? e.query : undefined);
+    for (const id of COMMIT_SHARES) {
+      const f = finding(read.output!.findings, id)[0]!;
+      assert.deepEqual([f.status, f.summary], ["not_measurable", reason], id);
+      assert.ok(f.evidence.some((e) => CLOSED_SINCE.test(query(e) ?? "") && e.count === FORECAST_MAX_ROWS), id);
+    }
+    const quota = metric(read.output!.metrics, AGAINST_QUOTA)[0]!;
+    assert.deepEqual([quota.status, quota.status === "not_measurable" && quota.reason], ["not_measurable", reason]);
+    assert.ok(CLOSED_SINCE.test(query(quota.evidence[0]!) ?? "") && quota.evidence[0]!.count === FORECAST_MAX_ROWS);
+    othersAsAtT(read.output!);
+  });
+
   test("a run in flight with next steps done at version 1 and the forecast at version 3, both read late, reads both again at the run's date", async () => {
     const later = oneWonSince((o) => QUOTA_HOLDERS.has(o.OwnerId) && o.NextStep !== null && o.StageName === "Prospecting");
     const first = await run({});
@@ -699,6 +801,57 @@ describe("the Commit figures read late, after a deal in Commit at the run's date
     assert.ok(ok(checkpoint<Sourced<string[]>>(first.dir, "next-steps")).includes(later.id));
     assert.deepEqual(finding(resumed.output!.findings, NEXT_STEPS), finding(first.output!.findings, NEXT_STEPS));
     assert.ok(!existsSync(old));
+  });
+});
+
+// The list goes by Salesforce's flag and the deals' open by the calibration's
+// stages, and the two can disagree (pipe.calibration-contradicts-org). Here the
+// calibration calls Closed No Decision open, which Salesforce flags closed.
+describe("the deals closed since, where the calibration calls open a stage Salesforce flags closed (DECISIONS.md 467)", () => {
+  const STAGE = "Closed No Decision";
+  const calibration = loadCalibration();
+  calibration.stages = calibration.stages.map((s) => (s.name === STAGE ? { ...s, category: "open" as const, order: 7 } : s));
+  let atT: { dir: string; findings: Finding[]; metrics: Metric[] };
+  before(async () => {
+    const straight = await run({}, { calibration });
+    atT = { dir: straight.dir, ...straight.output! };
+  });
+
+  test("the org and calibration disagree, and the figure against quota is measured at the run's date, so the tests aren't empty", () => {
+    assert.ok(org.STAGES.find((s) => s.ApiName === STAGE)!.IsClosed);
+    assert.ok(finding(atT.findings, "pipe.calibration-contradicts-org")[0]!.summary.includes(`${STAGE} is calibrated as open, but Salesforce flags it as closed`));
+    assert.equal(metric(atT.metrics, AGAINST_QUOTA)[0]!.status, "measured");
+  });
+
+  test("a quota holder's deal in it at the run's date, edited since with no history row, is on the list and moves no figure", async () => {
+    const deal = org.pipeline.opportunities.find((o) => o.StageName === STAGE && QUOTA_HOLDERS.has(o.OwnerId) && !after(o))!;
+    assert.ok(!org.pipeline.history.some((h) => h.OpportunityId === deal.Id && after(h)));
+    const read = await run({ editedAt: { [deal.Id]: stamp(T.getTime() + 2 * HOUR) } }, { calibration });
+    // On the list, and closed by Salesforce's flag at the run's date as the deals read holds it, in a stage the calibration calls open.
+    assert.deepEqual(ok(checkpoint<ForecastData>(read.dir, "forecast").closedSinceTheRun), [deal.Id]);
+    assert.equal(ok(checkpoint<OpportunityExtract>(read.dir, "opportunities").opportunities).find((o) => o.Id === deal.Id)?.IsClosed, true);
+    for (const id of COMMIT_SHARES) {
+      assert.deepEqual(finding(read.output!.findings, id), finding(atT.findings, id), id);
+      assert.ok(!finding(read.output!.findings, id)[0]!.summary.includes("closed since"), id);
+    }
+    assert.deepEqual(metric(read.output!.metrics, AGAINST_QUOTA), metric(atT.metrics, AGAINST_QUOTA));
+    assert.deepEqual(read.output!.findings, atT.findings);
+    assert.deepEqual(read.output!.metrics, atT.metrics);
+  });
+
+  test("a quota holder's deal in Commit, open by both at the run's date and moved into it since, is closed since: the figure against quota has none and the shares leave it out", async () => {
+    const later = oneWonSince((o) => QUOTA_HOLDERS.has(o.OwnerId) && (o.Amount ?? 0) > 0, STAGE);
+    assert.ok(calibration.stages.some((s) => s.name === later.was.StageName && s.category === "open") && !later.was.IsClosed);
+    const read = await run({ records: later.records }, { calibration });
+    const late = { dir: read.dir, ...read.output! };
+    assert.deepEqual(ok(checkpoint<ForecastData>(read.dir, "forecast").closedSinceTheRun), [later.id]);
+    // Wound back to its stage then, open by Salesforce's flag.
+    assert.equal(ok(checkpoint<OpportunityExtract>(read.dir, "opportunities").opportunities).find((o) => o.Id === later.id)?.IsClosed, false);
+    leavesOut(late, atT, [later.id], 1, ALL_MODULES, calibration);
+    for (const id of COMMIT_SHARES) assert.equal(finding(atT.findings, id)[0]!.facts.n! - finding(late.findings, id)[0]!.facts.n!, 1, id);
+    const others = (findings: Finding[]) => findings.filter((f) => !COMMIT_SHARES.includes(f.ruleId));
+    assert.deepEqual(others(late.findings), others(atT.findings));
+    assert.deepEqual(late.metrics.filter((m) => m.id !== AGAINST_QUOTA), atT.metrics.filter((m) => m.id !== AGAINST_QUOTA));
   });
 });
 
