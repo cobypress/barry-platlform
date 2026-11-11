@@ -74,8 +74,11 @@ const byLowerCase = (a: string, b: string): number => (a.toLowerCase() < b.toLow
  * only when both files hold the same number, so a change in how we read never
  * reads as a change in the org. Raise it with any change that moves what the
  * handbook keeps for a class or trigger nobody touched: what `readTouches`
- * finds, the scan's `testClass` (apex-scan.ts), or which events a trigger's
- * Usage fields give. `pin.test.ts` holds it to a hash of the synthetic org's.
+ * finds, the scan's `testClass` (apex-scan.ts), or what the apex step keeps
+ * of each body (automation.ts). Which events a trigger's Usage fields give is
+ * worked out when the file is built, under its own number (build.ts, 485).
+ * `source-pin.test.ts` holds it to a hash of the text of those files, and
+ * `pin.test.ts` to a hash of the synthetic org's.
  */
 export const APEX_READING = 1;
 

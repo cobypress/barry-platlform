@@ -17,7 +17,9 @@ import type { Handbook } from "../schema.ts";
 // files hold the same number, so a change to how we read that leaves the number
 // alone would show every component it moves as changed in the org. Only what
 // the reading works out is hashed: not when each was last changed, not readBy,
-// not the recent changes, so nothing else moves a pin.
+// not the recent changes, so nothing else moves a pin. The second of two
+// checks: source-pin.test.ts holds each number to the text of its code
+// (decision 485), which catches what the synthetic org doesn't hold.
 
 const PINS = {
   metadata: { reading: 1, hash: "78228ad58aa193a2" },
@@ -25,7 +27,7 @@ const PINS = {
 };
 
 const fix = (half: keyof typeof PINS, route: string, hash: string): string =>
-  `The ${half} reading of the synthetic org moved on the ${route} route (hash ${hash}). If how we read changed, raise ${half === "metadata" ? "METADATA_READING in src/handbook/detail.ts" : "APEX_READING in src/extract/apex-touches.ts"} and update this pin's number and hash; if only the synthetic org changed, update the hash alone.`;
+  `The ${half} reading of the synthetic org moved on the ${route} route (hash ${hash}). If how we read changed, raise ${half === "metadata" ? "METADATA_READING in src/handbook/detail.ts" : "APEX_READING in src/extract/apex-touches.ts, or BUILD_READING in src/handbook/build.ts if only a trigger's events moved,"} and update this pin's number and hash; if only the synthetic org changed, update the hash alone.`;
 
 const hashOf = (value: unknown): string => createHash("sha256").update(JSON.stringify(value)).digest("hex").slice(0, 16);
 

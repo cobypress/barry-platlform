@@ -15,8 +15,9 @@ import { MAX_CONDITIONS, MAX_FIELDS, MAX_PATHS, MAX_STEPS, MAX_TEXT, type Handbo
  * how we read never reads as a change in the org. Raise it with any change that
  * moves what the handbook keeps for a flow or rule nobody touched: here, in the
  * retrieve's parser and its decoding (metadata-parse.ts), in what Tooling hands
- * over (metadata-tooling.ts), or in the redaction. `pin.test.ts` holds it to a
- * hash of the synthetic org's detail.
+ * over (metadata-tooling.ts), or in the redaction. `source-pin.test.ts` holds
+ * it to a hash of the text of those files (485), and `pin.test.ts` to a hash
+ * of the synthetic org's detail.
  */
 export const METADATA_READING = 1;
 
