@@ -12,7 +12,7 @@ import { runFromRecording, tempDir } from "../../testing/harness.ts";
 import { loadCalibration, syntheticProvider } from "../../testing/replay.ts";
 import { Simulator, type SimulatorOptions } from "../../testing/simulator.ts";
 import { APEX_OUTSIDE_MODIFIER, AS_OF, userId } from "../../testing/synthetic-org.ts";
-import { buildHandbook, HANDBOOK_FILE } from "../build.ts";
+import { buildHandbook, HANDBOOK_FILE, labelApexModifiers } from "../build.ts";
 import { renderHandbookDocx } from "../docx.ts";
 import { readHandbook } from "../read.ts";
 import { CHANGES_NOT_KEPT, Handbook, HANDBOOK_VERSION, type HandbookApexClass } from "../schema.ts";
@@ -374,6 +374,27 @@ describe("the line on its own", () => {
     assert.match(text, /\nLast changed 3 Mar 2026 by Jo Ellis\n/);
     assert.match(text, /\nOnAccount\nOn: Account\nRuns: before insert\nAPI version 62\.0\. Status: Active\.\nLast changed 30 Oct 2026 by Jo Ellis\n/);
     assert.doesNotMatch(text, TOKEN);
+  });
+
+  test("everyone is labelled once, in id order, whatever order Salesforce gives the classes and triggers in", () => {
+    // The query has no ORDER BY, so a read made again can give the rows in another order.
+    const at = "2026-03-03T09:15:00.000+0000";
+    const labelled: string[] = [];
+    const tokens = labelApexModifiers(
+      apex([row(1, "Alpha"), row(2, "Beta")], [trigger(1, "OnAccount")], {
+        classes: read({ [row(1, "Alpha").Id]: { at, byId: userId(962), byName: "Later Id" }, [row(2, "Beta").Id]: { at, byId: userId(961), byName: null } }),
+        triggers: read({ [trigger(1, "OnAccount").Id]: { at, byId: userId(961), byName: "Earlier Id" } }),
+      }),
+      (id, name) => {
+        labelled.push(`${id} ${name}`);
+        return `[[user:U${String(labelled.length).padStart(4, "0")}]]`;
+      },
+    );
+    assert.deepEqual(labelled, [`${userId(961)} Earlier Id`, `${userId(962)} Later Id`]);
+    assert.deepEqual([...tokens], [[userId(961), "[[user:U0001]]"], [userId(962), "[[user:U0002]]"]]);
+    // A list that wasn't read labels no one.
+    assert.equal(labelApexModifiers(apex([row(1, "Alpha")], [], { classes: { status: "refused", reason: REFUSAL }, triggers: read({}) }), () => assert.fail("labelled")).size, 0);
+    assert.equal(labelApexModifiers(undefined, () => assert.fail("labelled")).size, 0);
   });
 
   test("a change after the run's date is printed as Salesforce gave it", async () => {
