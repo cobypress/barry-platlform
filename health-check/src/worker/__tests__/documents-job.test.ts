@@ -1474,6 +1474,21 @@ describe("Claude's summaries in the org handbook", () => {
     assert.ok(text.includes(`${LABEL}${GOOD.summary}`));
   });
 
+  test("a row read back without its model or time prints its summaries: the job reads only what it prints from", async () => {
+    const { model: _model, madeAt: _made, ...bare } = row("approved", [GOOD]);
+    const { text } = await make(bare);
+    assert.ok(text.includes(`${LABEL}${GOOD.summary}`));
+  });
+
+  test("a summary holding a character printing would change or the database refuse isn't printed, and is counted with the rest", async () => {
+    for (const [what, c] of [["U+0000", "\u0000"], ["U+000B", "\u000B"], ["U+0001", "\u0001"], ["U+FFFF", "\uFFFF"], ["a lone high surrogate", "\uD800"], ["a lone low surrogate", "\uDC00"]] as const) {
+      const { text } = await make(row("approved", [GOOD, item("class", "FinanceSync", `Zebrachar copies${c} invoices.`)]));
+      assert.ok(!text.includes("Zebrachar") && !text.includes("\uFFFD"), what);
+      assert.ok(text.includes(`${LABEL}${GOOD.summary}`), what);
+      assert.ok(text.includes("Of the Apex classes and triggers we read, 1 carries a summary, and the other is 1 that we couldn't summarise or chose to leave out."), what);
+    }
+  });
+
   test("the job asks the store for the row only with the switch on", async () => {
     for (const on of [false, true]) {
       const deps = setup(jobInput(), new MemoryDrive());

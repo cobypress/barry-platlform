@@ -70,7 +70,7 @@ export class MemoryWorkerStore implements WorkerStore {
   /** As the Postgres store's one statement: a new row, or a waiting one replaced with nothing struck; a decided row untouched; a row the console couldn't read never written. */
   #saveSummaries(runId: string, summaries: SummariesToSave): void {
     const checked = waitingRow(runId, summaries);
-    if (!checked.ok) return;
+    if (!checked.ok || !checked.row) return;
     const held = this.summaries.get(runId);
     if (!held) this.summaries.set(runId, checked.row);
     else if (held.status === "waiting") this.summaries.set(runId, { ...held, model: checked.row.model, madeAt: checked.row.madeAt, items: checked.row.items, leftOut: checked.row.leftOut });
@@ -139,9 +139,9 @@ export class MemoryWorkerStore implements WorkerStore {
   async loadDocumentsJob(runId: string, reads: DocumentsJobReads = {}): Promise<DocumentsJobInput | null> {
     const doc = this.documents.get(runId);
     if (!doc) return null;
-    // As the Postgres store reads it: only with the switch on, held to the console's schema, and never who decided it.
+    // As the Postgres store reads it: only with the switch on, held to the console's schema, and only what the handbook prints from.
     const row = reads.handbookSummaries === true ? this.summaries.get(runId) : undefined;
-    const read = row === undefined ? null : storedFromRow((({ decidedBy: _by, decidedAt: _at, ...rest }) => rest)(row));
+    const read = row === undefined ? null : storedFromRow((({ decidedBy: _by, decidedAt: _at, model: _model, madeAt: _made, ...rest }) => rest)(row));
     return structuredClone({ ...doc.input, handbookSummaries: read?.ok ? read.stored : null });
   }
 

@@ -232,10 +232,11 @@ export const DOCUMENTS: Columns = {
 /**
  * blackcloud-next migrations/20261122_health_check_handbook_summaries.sql
  * (DECISIONS.md 494). The worker writes every column of a waiting row; the
- * documents job reads all but who decided it and when (495).
+ * documents job reads only the status, items and counts (495).
  */
 export const HANDBOOK_SUMMARIES: Columns = { runId: "text", status: "text", model: "text", madeAt: "ts", items: "json", leftOut: "json", decidedBy: "text", decidedAt: "ts" };
-const HANDBOOK_SUMMARIES_READ: Columns = { runId: "text", status: "text", model: "text", madeAt: "ts", items: "json", leftOut: "json" };
+// Only what the handbook prints from: not the model or the time, nor who decided it or when.
+const HANDBOOK_SUMMARIES_READ: Columns = { runId: "text", status: "text", items: "json", leftOut: "json" };
 export const HANDBOOK_SUMMARIES_MIGRATION = "20261122_health_check_handbook_summaries.sql";
 export const BENCHMARK_ROW: Columns = {
   id: "text", metricKey: "text", ruleSetVersion: "text", value: "num", unit: "text", industry: "text", headcountBand: "text", userBand: "text", dealSizeBand: "text", period: "text",
@@ -398,6 +399,8 @@ export function versionRow(v: SectionVersion): Record<string, unknown> {
 
 const CLOSED = new Set(["in_review", "released"]);
 const one = (r: SqlResult): Record<string, unknown> | undefined => r.rows[0];
+/** An error's SQLSTATE, and nothing else of it: five characters, or a word saying there was none. */
+const sqlState = (code: unknown): string => (typeof code === "string" && /^[0-9A-Z]{5}$/.test(code) ? code : "with no code");
 
 export class PostgresWorkerStore implements WorkerStore {
   readonly #pool: SqlPool;
@@ -546,6 +549,7 @@ export class PostgresWorkerStore implements WorkerStore {
     // Held to the console's schema before any SQL: a row it can't read would hold the run's release.
     const summaries = output.handbookSummaries ? waitingRow(runId, output.handbookSummaries) : null;
     if (summaries && !summaries.ok) this.#log(`Claude's summaries for run ${runId} don't fit the console's limits (${summaries.issues} problems), so they aren't saved with its results.`);
+    if (summaries?.ok && summaries.dropped) this.#log(`${summaries.dropped} of Claude's summaries for run ${runId} hold something that can't be stored or printed as it stands, so they're counted as not written.`);
     return this.#transaction(async (client) => {
       await this.#openRun(client, runId);
       await this.#writeProgress(client, runId, output.progress, output.runDir);
@@ -561,7 +565,7 @@ export class PostgresWorkerStore implements WorkerStore {
       for (const s of output.sections) await this.#insert(client, "HealthCheckSection", SECTION, sectionRow(s));
       for (const v of output.versions) await this.#insert(client, "HealthCheckSectionVersion", VERSION, versionRow(v));
       await this.#writeFacts(client, runId, output.facts, output.factsFile);
-      if (summaries?.ok) await this.#writeSummaries(client, summaries.row);
+      if (summaries?.ok && summaries.row) await this.#writeSummaries(client, summaries.row);
     });
   }
 
@@ -570,8 +574,12 @@ export class PostgresWorkerStore implements WorkerStore {
    * statement so nothing can decide the row between a check and the write: a
    * new row, or a waiting row's text and counts replaced, its strikes with
    * them. A row a person has decided is left as it is. Nothing is deleted:
-   * a delivery with no summaries leaves an earlier waiting row alone. Without
-   * the table (42P01) the rest of the run still saves, inside a savepoint.
+   * a delivery with no summaries leaves an earlier waiting row alone. The
+   * summaries never cost a run its results: any error on the statement goes
+   * back to the savepoint and the rest of the run saves. A console without
+   * the table (42P01) is said once; any other error each time, by its
+   * SQLSTATE alone, since its message can quote a value. If going back to the
+   * savepoint fails too, the connection is gone and the whole save with it.
    */
   async #writeSummaries(client: SqlClient, row: ConsoleSummariesRow): Promise<void> {
     const { text, values } = insertSql("HealthCheckHandbookSummaries", HANDBOOK_SUMMARIES, row);
@@ -582,9 +590,10 @@ export class PostgresWorkerStore implements WorkerStore {
         values,
       );
     } catch (err) {
-      if ((err as { code?: string }).code !== "42P01") throw err;
       await client.query("ROLLBACK TO SAVEPOINT handbook_summaries");
-      this.#noSummariesTable();
+      const code = (err as { code?: unknown }).code;
+      if (code === "42P01") this.#noSummariesTable();
+      else this.#log(`Claude's summaries for run ${row.runId} couldn't be saved (Postgres error ${sqlState(code)}), so they aren't saved with its results.`);
       return;
     }
     await client.query("RELEASE SAVEPOINT handbook_summaries");

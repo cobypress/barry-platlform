@@ -669,19 +669,66 @@ describe("PostgresWorkerStore, Claude's summaries on save", () => {
     assert.deepEqual(lines, [`The console's database has no HealthCheckHandbookSummaries table yet, so Claude's summaries are neither saved nor printed. Apply the console's migration 20261122_health_check_handbook_summaries.sql.`]);
   });
 
-  test("any other error rolls the whole save back and is thrown: a missing run, or a check the console's table makes", async () => {
-    for (const code of ["23503", "23514"]) {
+  test("any other error on the statement goes back to the savepoint, and the run's other rows commit; the log gives the run and the SQLSTATE, never the message", async () => {
+    // A refused character, a missing run, a check the console's table makes: each message quotes a value.
+    for (const code of ["22P05", "23503", "23514"]) {
       const pool = openRunPool();
       pool.handlers.push((text) => {
-        if (text.includes(SUMMARIES_TABLE)) throw Object.assign(new Error(`violates constraint ${code}`), { code });
+        if (text.includes(SUMMARIES_TABLE)) throw Object.assign(new Error(`Failing row contains (Sends each new lead to the right queue.) ${code}`), { code });
         return undefined;
       });
       const lines: string[] = [];
-      await assert.rejects(save(new PostgresWorkerStore(pool, { log: (l) => lines.push(l) }), { handbookSummaries: SUMMARIES }), new RegExp(code));
-      assert.equal(pool.texts().at(-1), "ROLLBACK", code);
-      assert.ok(!pool.texts().includes("COMMIT"), code);
-      assert.ok(!pool.texts().includes("ROLLBACK TO SAVEPOINT handbook_summaries"), code);
-      assert.deepEqual(lines, [], code);
+      const store = new PostgresWorkerStore(pool, { log: (l) => lines.push(l) });
+      await save(store, { handbookSummaries: SUMMARIES });
+      const texts = pool.texts();
+      assert.deepEqual(texts.slice(texts.indexOf("SAVEPOINT handbook_summaries")), ["SAVEPOINT handbook_summaries", SUMMARIES_SQL, "ROLLBACK TO SAVEPOINT handbook_summaries", "COMMIT"], code);
+      assert.ok(texts.some((t) => t.startsWith(`INSERT INTO "HealthCheckRunFacts"`)) && texts.some((t) => t.startsWith(`UPDATE "HealthCheckRun"`)), code);
+      assert.ok(!texts.includes("ROLLBACK"), code);
+      assert.deepEqual(lines, [`Claude's summaries for run ${run.id} couldn't be saved (Postgres error ${code}), so they aren't saved with its results.`], code);
+      // Said every time, unlike the missing table.
+      await save(store, { handbookSummaries: SUMMARIES });
+      assert.equal(lines.length, 2, code);
+      assert.ok(!lines.join("\n").includes("Sends each new lead") && !lines.join("\n").includes("Failing row"), code);
+    }
+    // An error with no SQLSTATE, or one that isn't five characters, says so and nothing of it.
+    const odd = openRunPool();
+    odd.handlers.push((text) => {
+      if (text.includes(SUMMARIES_TABLE)) throw Object.assign(new Error("Sends each new lead"), { code: "Sends each new lead" });
+      return undefined;
+    });
+    const said: string[] = [];
+    await save(new PostgresWorkerStore(odd, { log: (l) => said.push(l) }), { handbookSummaries: SUMMARIES });
+    assert.deepEqual(said, [`Claude's summaries for run ${run.id} couldn't be saved (Postgres error with no code), so they aren't saved with its results.`]);
+  });
+
+  test("if going back to the savepoint fails too, the whole save rolls back and the error is thrown", async () => {
+    const pool = openRunPool();
+    pool.handlers.push((text) => {
+      if (text.includes(SUMMARIES_TABLE)) throw Object.assign(new Error("server closed the connection"), { code: "57P01" });
+      if (text === "ROLLBACK TO SAVEPOINT handbook_summaries") throw Object.assign(new Error("Connection terminated"), { code: "08006" });
+      return undefined;
+    });
+    await assert.rejects(save(new PostgresWorkerStore(pool), { handbookSummaries: SUMMARIES }), /Connection terminated/);
+    assert.equal(pool.texts().at(-1), "ROLLBACK");
+    assert.ok(!pool.texts().includes("COMMIT"));
+  });
+
+  test("a summary holding a character the database refuses or printing would change is left out, counted as not written, and the others written", async () => {
+    for (const [what, c] of [["U+0000", "\u0000"], ["U+000B", "\u000B"], ["U+0001", "\u0001"], ["U+FFFF", "\uFFFF"], ["a lone high surrogate", "\uD800"], ["a lone low surrogate", "\uDC00"]] as const) {
+      const pool = openRunPool();
+      const lines: string[] = [];
+      await save(new PostgresWorkerStore(pool, { log: (l) => lines.push(l) }), { handbookSummaries: { ...SUMMARIES, items: [{ ...SUMMARIES.items[0]!, summary: `Sends each lead${c} on.` }, SUMMARIES.items[1]!] } });
+      const statement = pool.statements.find((st) => st.text.includes(SUMMARIES_TABLE))!;
+      const items = statement.values[4] as string;
+      assert.deepEqual(JSON.parse(items), [{ ...SUMMARIES.items[1]!, struck: false }], what);
+      assert.ok(!items.includes(c) && !/\\u0000|\\ud800|\\udc00/i.test(items), what);
+      assert.equal(JSON.parse(statement.values[5] as string).notWritten, SUMMARIES.leftOut.notWritten + 1, what);
+      assert.deepEqual(lines, [`1 of Claude's summaries for run ${run.id} hold something that can't be stored or printed as it stands, so they're counted as not written.`], what);
+      // Alone, no row and no statement.
+      const alone = openRunPool();
+      await save(new PostgresWorkerStore(alone), { handbookSummaries: { ...SUMMARIES, items: [{ ...SUMMARIES.items[0]!, name: `Lead${c}Router` }] } });
+      assert.deepEqual(naming(alone), [], what);
+      assert.equal(alone.texts().at(-1), "COMMIT", what);
     }
   });
 
@@ -698,7 +745,6 @@ describe("PostgresWorkerStore, Claude's summaries on save", () => {
     const over: Array<NonNullable<RunOutputRecord["handbookSummaries"]>> = [
       { ...SUMMARIES, items: Array.from({ length: 251 }, (_, i) => ({ kind: "class" as const, name: `Synthetic${i}`, summary: "Quokkatext keeps it in step." })) },
       { ...SUMMARIES, items: [{ kind: "class", name: "Q".repeat(256), summary: "Quokkatext keeps it in step." }] },
-      { ...SUMMARIES, items: [{ kind: "class", name: "LeadRouter", summary: `Quokkatext ${"s".repeat(1_190)}` }] },
       { ...SUMMARIES, model: "m".repeat(101) },
     ];
     for (const handbookSummaries of over) {
@@ -710,6 +756,13 @@ describe("PostgresWorkerStore, Claude's summaries on save", () => {
       assert.equal(lines.length, 1);
       assert.match(lines[0]!, /^Claude's summaries for run hc-2026-10-31-00000001 don't fit the console's limits \(\d+ problems?\), so they aren't saved with its results\.$/);
     }
+    // A summary over 1,200 characters could never be printed, so it's left out as not written: alone, no row.
+    const pool = openRunPool();
+    const lines: string[] = [];
+    await save(new PostgresWorkerStore(pool, { log: (l) => lines.push(l) }), { handbookSummaries: { ...SUMMARIES, items: [{ kind: "class", name: "LeadRouter", summary: `Quokkatext ${"s".repeat(1_190)}` }] } });
+    assert.deepEqual(naming(pool), []);
+    assert.equal(pool.texts().at(-1), "COMMIT");
+    assert.deepEqual(lines, [`1 of Claude's summaries for run hc-2026-10-31-00000001 hold something that can't be stored or printed as it stands, so they're counted as not written.`]);
   });
 });
 
@@ -718,7 +771,8 @@ describe("PostgresWorkerStore, Claude's summaries for the documents", () => {
     pool.handlers.push((text) => (text.includes(`FROM "HealthCheckRun" WHERE`) ? { rows: [{ ...RUN_ROW, status: "released" }], rowCount: 1 } : undefined));
     if (summaries) pool.handlers.push((text) => (text.includes(SUMMARIES_TABLE) ? summaries(text) : undefined));
   };
-  const ROW = { runId: RUN_ROW.id, status: "approved", model: MODELS.handbookSummaries, madeAt: "2026-11-03T10:00:00.000Z", items: [{ ...SUMMARIES.items[0]!, struck: false }, { ...SUMMARIES.items[1]!, struck: true }], leftOut: SUMMARIES.leftOut };
+  // As the read returns it: no model, no time, nobody.
+  const ROW = { runId: RUN_ROW.id, status: "approved", items: [{ ...SUMMARIES.items[0]!, struck: false }, { ...SUMMARIES.items[1]!, struck: true }], leftOut: SUMMARIES.leftOut };
 
   test("with the switch off, nothing reads the table", async () => {
     for (const reads of [undefined, {}, { handbookSummaries: false }]) {
@@ -730,11 +784,11 @@ describe("PostgresWorkerStore, Claude's summaries for the documents", () => {
     }
   });
 
-  test("with it on, reads the row's status, items and counts, and never who decided it or when", async () => {
+  test("with it on, reads the row's status, items and counts only: never who decided it or when, nor the model or the time", async () => {
     const pool = new FakePool();
     released(pool, () => ({ rows: [ROW], rowCount: 1 }));
     const job = (await new PostgresWorkerStore(pool).loadDocumentsJob(RUN_ROW.id, { handbookSummaries: true }))!;
-    assert.deepEqual(naming(pool), [`SELECT "runId", "status", "model", to_char("madeAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "madeAt", "items", "leftOut" FROM "HealthCheckHandbookSummaries" WHERE "runId" = $1`]);
+    assert.deepEqual(naming(pool), [`SELECT "runId", "status", "items", "leftOut" FROM "HealthCheckHandbookSummaries" WHERE "runId" = $1`]);
     assert.deepEqual(pool.statements.find((s) => s.text.includes(SUMMARIES_TABLE))!.values, [RUN_ROW.id]);
     assert.deepEqual(job.handbookSummaries, { status: "approved", items: ROW.items, leftOut: ROW.leftOut });
   });
