@@ -116,12 +116,12 @@ function metricBlock(m: Metric): string {
   if (m.assumptions.length) lines.push(`**Assumptions:** ${m.assumptions.join("; ")}`, "");
   if (m.id === OBJECT_INVENTORY) lines.push(...inventoryTable(m));
   else if (m.segments.length) {
-    lines.push("| Segment | Key | Deals | Value |", "| --- | --- | --- | --- |");
+    lines.push("| Segment | Key | Sample | Value |", "| --- | --- | --- | --- |");
     for (const s of m.segments) lines.push(`| ${s.dimension} | ${s.key} | ${s.n} | ${s.value ?? s.notMeasurableReason ?? "not measurable"} |`);
     lines.push("");
   }
   if (m.series.length) {
-    lines.push("| Month end | Value | Deals |", "| --- | --- | --- |");
+    lines.push("| Month end | Value | Sample |", "| --- | --- | --- |");
     for (const p of m.series) lines.push(`| ${p.date} | ${p.value ?? p.notMeasurableReason} | ${p.n} |`);
     lines.push("");
   }

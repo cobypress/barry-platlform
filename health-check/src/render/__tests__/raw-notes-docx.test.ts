@@ -224,3 +224,25 @@ describe("a retrieve that fell back to the four standard objects, in the raw not
   });
 });
 
+// Every measure's count column is its sample, in both versions (DECISIONS.md 449).
+describe("the raw notes' table headings", () => {
+  const md = readFileSync(join(dir, "raw-notes.md"), "utf8");
+  const mdHeaders = md.split("\n").flatMap((line, i, all) => (line.startsWith("| ") && all[i + 1]?.startsWith("| --- ") ? [line.slice(2, -2).split(" | ")] : []));
+  const wordHeaders = [...strFromU8(unzipSync(new Uint8Array(notes.bytes))["word/document.xml"]!).matchAll(/<w:tbl>[\s\S]*?<w:tr[ >][\s\S]*?<\/w:tr>/g)].map((t) =>
+    [...t[0].slice(t[0].lastIndexOf("<w:tr")).matchAll(/<w:tc>([\s\S]*?)<\/w:tc>/g)].map((c) => [...c[1]!.matchAll(/<w:t(?: [^>]*)?>([^<]*)<\/w:t>/g)].map((m) => decode(m[1]!)).join("")),
+  );
+
+  test("no header cell in the synthetic run's markdown says Deals", () => {
+    assert.ok(mdHeaders.length > 0);
+    for (const cells of mdHeaders) assert.ok(!cells.includes("Deals"), cells.join(" | "));
+  });
+
+  test("the segment and month-end tables read as the Word version's", () => {
+    for (const first of ["Segment", "Month end"]) {
+      const inMarkdown = mdHeaders.find((cells) => cells[0] === first);
+      const inWord = wordHeaders.find((cells) => cells[0] === first);
+      assert.ok(inMarkdown && inWord, first);
+      assert.deepEqual(inMarkdown, inWord);
+    }
+  });
+});
