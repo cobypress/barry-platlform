@@ -132,8 +132,12 @@ export type LinkConnected = {
  */
 export type DocumentsState = "queued" | "making" | "done" | "failed";
 
-/** The console's DocumentOutput: the three reviewed outputs and the one page summary (DECISIONS 137, 139). */
-export type DocumentFile = { output: ReportSection["output"] | "ceo_one_pager" | "action_lists" | "tickets"; name: string; driveFileId: string; url: string };
+/**
+ * The console's DocumentOutput: the three reviewed outputs, the one page summary
+ * (DECISIONS 137, 139), the action lists and tickets (197) and the org handbook
+ * (477). A kind the console doesn't know makes it refuse the whole documents row.
+ */
+export type DocumentFile = { output: ReportSection["output"] | "ceo_one_pager" | "action_lists" | "tickets" | "org_handbook"; name: string; driveFileId: string; url: string };
 
 export type DocumentsJobInput = {
   run: Run;

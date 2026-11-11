@@ -52,9 +52,9 @@ const FILES: Record<Exclude<DocumentKey, "readout_kit">, { title: string; ext: s
  * lists and tickets, which its DocumentOutput accepts from hc/action-docs
  * (DECISIONS.md 197). That console must be live before this worker: an output it
  * doesn't know makes it refuse the whole documents row. The readout kit is never
- * listed: it's for Black Cloud only. Nor is the org handbook, which isn't a
- * DocumentKey at all: it's made and uploaded on its own (putHandbook) until a
- * console that knows the kind is live (DECISIONS.md 443).
+ * listed: it's for Black Cloud only. The org handbook isn't a DocumentKey: it's
+ * made and uploaded on its own (putHandbook) and listed after these, once the
+ * console knew the kind (DECISIONS.md 443, 477).
  */
 const LISTED_TO_CONSOLE: ReadonlySet<DocumentKey> = new Set<DocumentKey>(["executive_summary", "full_health_check", "raw_notes", "ceo_one_pager", "action_lists", "tickets"]);
 
@@ -179,9 +179,9 @@ const HANDBOOK_SUFFIX = " - Org handbook.docx";
  * version folders, since it's the same for every make. It replaces the one
  * there whose name ends as a handbook's, whatever the client was called when it
  * was made, so a remake leaves one, with the same id and link; Drive renames it
- * to the client's name now (DECISIONS.md 446). It's never in `files`: the
- * console doesn't know the kind yet and would refuse the whole row (443).
- * Shared with the folder, as everything in it is.
+ * to the client's name now (DECISIONS.md 446). The console is told of it, last
+ * in `files`, by what Drive returns here (477). Shared with the folder, as
+ * everything in it is.
  */
 async function putHandbook(drive: DocumentDrive, folder: DriveItem, clientName: string, path: string, runId: string, log: (line: string) => void): Promise<DriveItem> {
   const handbooks = (await drive.files(folder.id)).filter((f) => f.name.trim().toLowerCase().endsWith(HANDBOOK_SUFFIX.toLowerCase()));
@@ -193,6 +193,18 @@ async function putHandbook(drive: DocumentDrive, folder: DriveItem, clientName: 
   if (handbooks.length > 1) log(`Run ${runId}'s Drive folder held ${handbooks.length} org handbooks, so the first one made was replaced and the other ${handbooks.length - 1} left as they were.`);
   const ours = [...handbooks].sort(oldestFirst)[0];
   return drive.putFile(folder.id, `${clientName}${HANDBOOK_SUFFIX}`, DOCX, readFileSync(path), ours?.id);
+}
+
+/**
+ * Whether the console can read an entry: a name, an id and a link it can open
+ * (its DocumentFile, lib/health-check/schemas.ts in the console). Drive is
+ * asked for the link but the client doesn't insist on it (drive.ts, item), and
+ * one entry the console can't read makes it refuse the whole row, the six
+ * reports' links with it.
+ */
+function listable(item: DriveItem): boolean {
+  const url = typeof item.url === "string" && URL.canParse(item.url) ? new URL(item.url) : null;
+  return typeof item.name === "string" && item.name.length > 0 && typeof item.id === "string" && item.id.length > 0 && (url?.protocol === "https:" || url?.protocol === "http:");
 }
 
 /**
@@ -363,7 +375,10 @@ async function documentsLocked(runId: string, deps: WorkerDeps, attempt: Attempt
     const folder = await folderFor(deps.drive, clientName, input.driveFolderId);
     const nameOf = (output: keyof typeof FILES): string => `${clientName} - ${FILES[output].title}.${FILES[output].ext}`;
     // Also by name, for a make from before the console was told of these three.
-    const target = await versionFolderFor(deps.drive, folder, input.files, now(), [nameOf("ceo_one_pager"), nameOf("action_lists"), nameOf("tickets")]);
+    // Never the handbook: it stays loose in the run's folder, replaced in place,
+    // so it neither moves into a version nor decides whether one is made.
+    const reports = input.files.filter((f) => f.output !== "org_handbook");
+    const target = await versionFolderFor(deps.drive, folder, reports, now(), [nameOf("ceo_one_pager"), nameOf("action_lists"), nameOf("tickets")]);
     const existing = await deps.drive.files(target.id);
     const files: DocumentFile[] = [];
     for (const output of Object.keys(FILES) as Array<keyof typeof FILES>) {
@@ -375,7 +390,12 @@ async function documentsLocked(runId: string, deps: WorkerDeps, attempt: Attempt
       const item = await deps.drive.putFile(target.id, name, mime, readFileSync(printed.files[output]), replaceId);
       if (LISTED_TO_CONSOLE.has(output)) files.push({ output: output as DocumentFile["output"], name: item.name, driveFileId: item.id, url: item.url });
     }
-    if (handbook.ok) await putHandbook(deps.drive, folder, clientName, handbook.path, runId, log);
+    if (handbook.ok) {
+      // Listed last, by what Drive returned, so a remake lists the same file and link.
+      const item = await putHandbook(deps.drive, folder, clientName, handbook.path, runId, log);
+      if (listable(item)) files.push({ output: "org_handbook", name: item.name, driveFileId: item.id, url: item.url });
+      else log(`Run ${runId}: the org handbook is in Drive but isn't listed to the console, because Drive didn't return a name, id and link it can use.`);
+    }
     await putReadoutKit(deps.drive, clientName, folder.name, printed.files.readout_kit);
     // Only a re-check whose customer agreed to be a case study has one, and it's a draft for us to finish with them.
     if (printed.caseStudy) await putInternal(deps.drive, clientName, folder.name, `${clientName} - Case study draft.docx`, printed.caseStudy);
