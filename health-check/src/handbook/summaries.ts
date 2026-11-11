@@ -66,9 +66,6 @@ const keyOf = (kind: string, name: string, hash: string): string => JSON.stringi
 const RECORD_ID = /(?<![A-Za-z0-9_])(?=[A-Za-z]*\d)[A-Za-z0-9]{15}(?:[A-Za-z0-9]{3})?(?![A-Za-z0-9_])/g;
 export const maskRecordIds = (code: string): string => code.replace(RECORD_ID, "[[id]]");
 
-/** Placeholders the guard and this route put in the code for Claude. Anything else in double brackets must be a token the map holds. */
-const PLACEHOLDERS: ReadonlySet<string> = new Set(["[[id]]", "[[email]]"]);
-
 /** The user turn: what it is, its name, and the code fenced as data. A marker inside the code can't close the fence early. */
 export function summaryPrompt(item: Pick<ApexSourceItem, "kind" | "name">, code: string): string {
   const fenced = code.replace(/<\/?apex_code/gi, "[apex_code");
@@ -93,14 +90,16 @@ function inCode(sent: string, word: string): boolean {
  * `sent` is the user turn as the guard sent it, so a name from the code may
  * hold a digit only if Claude was shown that very name. Figures are read by
  * the number check's own extractor, which accounts for every digit and for
- * numbers written as words: only a token, or a name with a digit that the
- * code holds word for word, gets through.
+ * numbers written as words: only a name with a digit that the code holds word
+ * for word gets through. holdsNameOrSecret runs first.
  */
 export function replyProblems(summary: string, sent: string, pseudonyms: Pseudonymiser): string[] {
   const problems: string[] = [];
   if (holdsNameOrSecret(summary, pseudonyms)) problems.push("It names a person, an email address or a secret. Leave them out.");
-  const known = new Set(pseudonyms.entries().map((e) => e.token));
-  if ([...summary.matchAll(/\[\[[^\]\n]*\]\]/g)].some((m) => !known.has(m[0]) && !PLACEHOLDERS.has(m[0]))) problems.push("It holds a token in double square brackets that wasn't in the code. Use only those you were given.");
+  // Nothing in double square brackets at all (DECISIONS.md 492): a person's
+  // token is printed as their name, even one the code held, and [[id]] and
+  // [[email]] stand for values we took out.
+  if (summary.includes("[[")) problems.push('It holds something in double square brackets. Write none: say "a user" or "a record" instead.');
   if (/[^\P{Nd}0-9]/u.test(summary)) problems.push("It holds a digit that isn't 0 to 9. Use no figures.");
   for (const figure of extractFigures(summary).figures) {
     if (figure.kind === "token") continue;
@@ -108,6 +107,8 @@ export function replyProblems(summary: string, sent: string, pseudonyms: Pseudon
     problems.push(`"${figure.raw}" is a figure, or a name the code doesn't hold. Use no figures, and names only as the code writes them.`);
   }
   if (/\bhttps?:|\bwww\./i.test(summary)) problems.push("It holds a link. Leave links out.");
+  // A host with no scheme, or a field path such as Account.Name: a full stop between two letters or digits.
+  if (/[A-Za-z0-9]\.[A-Za-z0-9]/.test(summary)) problems.push("It holds a web address, a host or a dotted name such as a field path. Describe it in words, and put a space after every full stop.");
   if (/[\r\n\u2028\u2029]/.test(summary)) problems.push("It has a line break. Write one paragraph.");
   const words = wordCount([summary]);
   if (words > SUMMARY_LIMITS.words || summary.length > SUMMARY_LIMITS.characters) problems.push(`It is too long, at ${words} words. Keep to the word limit.`);
@@ -210,6 +211,8 @@ export async function summariseApex(phase: SummaryPhase): Promise<HandbookSummar
       return null;
     }
     const source = ApexSource.parse(JSON.parse(readFileSync(sourcePath, "utf8")));
+    // Nothing was read (no Apex, or the reads unavailable): a file of zeros would say nothing.
+    if (source.counts.read === 0) return null;
     const cached = readCached(partialPath);
     const items: HandbookSummaries["items"] = [];
     let refused = 0;

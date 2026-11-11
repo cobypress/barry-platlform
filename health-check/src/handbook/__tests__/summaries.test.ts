@@ -21,7 +21,7 @@ const pseudonyms = (): Pseudonymiser => {
   p.label("user", NAME_ID, NAME, ["wren.quillfeather@example.com"]);
   return p;
 };
-const TOKEN = pseudonyms().entries()[0]!.token;
+const WREN_LABEL = pseudonyms().entries()[0]!.token;
 const CLEAN = "Closes each open opportunity when its handler runs, and saves them together.";
 
 const item = (name: string, body = `public class ${name} { public void run() {} }`, kind: ApexSourceItem["kind"] = "class"): ApexSourceItem => ({ kind, name, body });
@@ -93,7 +93,7 @@ describe("the summary route", () => {
     const prompt = client.asked[0]!.prompt;
     for (const gone of ["001000000000123AAA", "0015g00000AbCdE", NAME_ID, "Wren", "Quillfeather"]) assert.ok(!prompt.includes(gone), gone);
     assert.equal(prompt.split("[[id]]").length - 1, 3);
-    assert.ok(prompt.includes(TOKEN), "the name in the comment is masked as its token");
+    assert.ok(prompt.includes(WREN_LABEL), "the name in the comment is masked as its token");
     assert.ok(prompt.includes("'OpportunityLineItem'"), "a name with no digit is left alone");
     assert.equal(written(dir).items.length, 1, "and it's summarised");
     assert.equal(maskRecordIds("Account2Opportunity"), "Account2Opportunity", "nineteen characters isn't an id");
@@ -166,6 +166,24 @@ describe("the summary route", () => {
     }
   });
 
+  test("kept code with nothing read at all: no file, and the code file deleted", async () => {
+    const dir = folder([], { tests: 0, tooLarge: 0, overLimit: 0, unreadable: 0 });
+    const client = stub();
+    assert.equal(await summariseApex(phase(dir, client)), null);
+    assert.equal(client.asked.length, 0);
+    assert.ok(!existsSync(join(dir, SUMMARIES_FILE)));
+    assert.deepEqual(leftOver(dir), []);
+  });
+
+  test("kept code with no item but something read: the file says what was left out", async () => {
+    const dir = folder([], { tests: 3, tooLarge: 0, overLimit: 0, unreadable: 1 });
+    const client = stub();
+    await summariseApex(phase(dir, client));
+    assert.equal(client.asked.length, 0);
+    const file = written(dir);
+    assert.deepEqual([file.items, file.leftOut], [[], { tests: 3, tooLarge: 0, overLimit: 0, unreadable: 1, refused: 0, notWritten: 0 }]);
+  });
+
   test("no kept code: nothing asked, no file written, and a file already written is untouched", async () => {
     const dir = tempDir();
     writeFileSync(join(dir, SUMMARIES_FILE), "as it was\n");
@@ -227,12 +245,23 @@ describe("what a reply may hold", () => {
   test("a clean reply has no problems", () => assert.deepEqual(problems(CLEAN), []));
   test("no name or secret", () => {
     assert.equal(problems(`${NAME} asked for it.`).length, 1);
-    assert.equal(problems("Sends it to wren.quillfeather@example.com.").length, 1);
+    assert.match(problems("Sends it to wren.quillfeather@example.com.")[0]!, /names a person, an email address or a secret/);
     assert.match(problems("Uses api_key = 'abcd1234efgh' to sign in.").join(" "), /secret/);
   });
-  test("no token the map doesn't know; one it knows, and the placeholders, are fine", () => {
-    assert.match(problems("Assigns it to [[user:U0099]].").join(" "), /token/);
-    assert.deepEqual(problems(`Assigns it to ${TOKEN} and checks [[id]] and [[email]].`), []);
+  test("nothing in double square brackets: a token the map knows is refused", () => {
+    assert.match(problems(`Assigns it to ${WREN_LABEL}.`).join(" "), /double square brackets/);
+  });
+  test("a token that was in the code that was sent is refused too", () => {
+    const withToken = sent.replace("{ Field3__c }", `{ // ${WREN_LABEL} wrote this\n Field3__c }`);
+    assert.ok(withToken.includes(WREN_LABEL));
+    assert.match(replyProblems(`Written by ${WREN_LABEL} to set a field.`, withToken, pseudonyms()).join(" "), /double square brackets/);
+  });
+  test("[[id]] is refused", () => assert.match(problems("Checks [[id]] before it saves.").join(" "), /double square brackets/));
+  test("[[email]] is refused", () => assert.match(problems("Sends a message to [[email]] when saved.").join(" "), /double square brackets/));
+  test("any other double square brackets are refused, and the name check still comes first", () => {
+    assert.match(problems("Assigns it to [[user:U0099]].").join(" "), /double square brackets/);
+    assert.match(problems("Marks it [[done").join(" "), /double square brackets/);
+    assert.match(problems(`${NAME} checks [[id]].`)[0]!, /names a person/);
   });
   test("no figure: digits, number words and dates, unless a name the code sent holds the digit", () => {
     for (const bad of ["It runs 3 times.", "It retries three times.", "It runs at 9am.", "It handles Handler9 records.", "It started in March 2024."]) assert.ok(problems(bad).length > 0, bad);
@@ -243,6 +272,12 @@ describe("what a reply may hold", () => {
     assert.ok(problems("Posts to https://example.com when saved.").length > 0);
     assert.ok(problems("Posts to www.example.com when saved.").length > 0);
     assert.deepEqual(problems("Sends an HTTP request to the finance system."), []);
+  });
+  test("no host without a scheme, and no dotted field path", () => {
+    for (const bad of ["Sends each order to orders.acme-logistics.co.uk when it is saved.", "Posts to acme.my.salesforce.com/services/apexrest/orders on save.", "Copies Account.Name onto the case."]) assert.match(problems(bad).join(" "), /web address, a host or a dotted name/, bad);
+  });
+  test("an ordinary two-sentence summary passes, and so does HTTP as a word", () => {
+    assert.deepEqual(problems("Runs when an opportunity is saved. It sends an HTTP request to the finance system."), []);
   });
   test("no line break", () => assert.match(problems("One.\nTwo.").join(" "), /line break/));
   test("at most 80 words and 1,200 characters", () => {
