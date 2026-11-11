@@ -1,13 +1,15 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, lstatSync, lutimesSync, mkdirSync, readdirSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { PURGE_FILE } from "../../retention/purge.ts";
 import type { BenchmarkRow } from "../../schemas/index.ts";
 import { withJobLock } from "../lock.ts";
 import { MemoryWorkerStore } from "../memory-store.ts";
 import { PostgresWorkerStore, type SqlPool, type SqlResult } from "../postgres-store.ts";
-import { addMonths, dueFor, retentionSweep, type RetentionOutcome } from "../retention.ts";
+import { addMonths, dueFor, KEPT_CODE_FILES, retentionSweep, type RetentionOutcome } from "../retention.ts";
+import { APEX_SOURCE_FILE } from "../../extract/apex-source.ts";
+import { SUMMARIES_FILE, SUMMARIES_PARTIAL_FILE } from "../../handbook/summaries.ts";
 import { consoleRun, runInput, temp } from "./helpers.ts";
 
 const DAY = 86_400_000;
@@ -298,3 +300,59 @@ describe("the retention sweep and the customer's Drive access", () => {
   });
 });
 
+describe("the Apex code kept for Claude's summaries (decision 491)", () => {
+  const NOW = new Date("2026-11-20T10:00:00.000Z");
+  /** A file in a run folder, last changed `days` before NOW. */
+  const plant = (dir: string, name: string, days: number): string => {
+    mkdirSync(dir, { recursive: true });
+    const path = join(dir, name);
+    writeFileSync(path, "kept\n");
+    const at = new Date(NOW.getTime() - days * DAY);
+    utimesSync(path, at, at);
+    return path;
+  };
+
+  test("is deleted after seven days, whatever the run's state in the database, and kept until then", async () => {
+    const { runs, sweep, lines } = setup();
+    // No run in the store at all: stopped on the budget and never resumed.
+    const old = plant(join(runs, "hc-2026-11-01-00000001"), APEX_SOURCE_FILE, 7.01);
+    const oldPartial = plant(join(runs, "hc-2026-11-01-00000001"), SUMMARIES_PARTIAL_FILE, 30);
+    const fresh = plant(join(runs, "hc-2026-11-01-00000002"), APEX_SOURCE_FILE, 6.99);
+    await sweep(NOW);
+    assert.deepEqual([existsSync(old), existsSync(oldPartial), existsSync(fresh)], [false, false, true]);
+    assert.ok(lines.includes("Retention: deleted 2 files of Apex code or summaries kept for Claude for more than 7 days."));
+  });
+
+  test("deletes those two names only, never through a link, and never outside the runs folder", async () => {
+    const { root, runs, sweep } = setup();
+    const dir = join(runs, "hc-2026-11-01-00000003");
+    const others = ["run.json", "findings.json", SUMMARIES_FILE, "handbook.json", "apex-source.json.tmp", "checkpoints/apex-source.json"].map((name) => {
+      mkdirSync(dirname(join(dir, name)), { recursive: true });
+      return plant(dirname(join(dir, name)), name.split("/").pop()!, 400);
+    });
+    // A run folder that is a link to somewhere else, and a file that is a link.
+    const outside = join(root, "elsewhere");
+    const outsideFile = plant(outside, APEX_SOURCE_FILE, 400);
+    symlinkSync(outside, join(runs, "hc-2026-11-01-00000004"));
+    const target = plant(join(root, "target"), "real.json", 400);
+    mkdirSync(join(runs, "hc-2026-11-01-00000005"));
+    symlinkSync(target, join(runs, "hc-2026-11-01-00000005", SUMMARIES_PARTIAL_FILE));
+    // The link itself as old as the rest, so only its being a link keeps it.
+    const longAgo = new Date(NOW.getTime() - 400 * DAY);
+    lutimesSync(join(runs, "hc-2026-11-01-00000005", SUMMARIES_PARTIAL_FILE), longAgo, longAgo);
+    // And the same names directly in the runs folder and above it.
+    const loose = [plant(runs, APEX_SOURCE_FILE, 400), plant(root, APEX_SOURCE_FILE, 400)];
+    await sweep(NOW);
+    for (const path of [...others, outsideFile, target, ...loose]) assert.ok(existsSync(path), path);
+    assert.ok(lstatSync(join(runs, "hc-2026-11-01-00000005", SUMMARIES_PARTIAL_FILE)).isSymbolicLink(), "the link itself is left");
+    assert.deepEqual(KEPT_CODE_FILES, [APEX_SOURCE_FILE, SUMMARIES_PARTIAL_FILE]);
+  });
+
+  test("a dry run deletes nothing, and says what it would", async () => {
+    const { runs, sweep, lines } = setup();
+    const old = plant(join(runs, "hc-2026-11-01-00000006"), APEX_SOURCE_FILE, 10);
+    await sweep(NOW, true);
+    assert.ok(existsSync(old));
+    assert.ok(lines.includes("Retention: would delete 1 file of Apex code or summaries kept for Claude for more than 7 days."));
+  });
+});

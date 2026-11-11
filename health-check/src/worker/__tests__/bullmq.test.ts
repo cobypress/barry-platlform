@@ -147,6 +147,17 @@ describe("the worker's environment", () => {
     assert.match(String(dry("yes")), /HC_CLEANUP_DRY_RUN must be 1, 0 or unset/);
   });
 
+  test("Claude's summaries of Apex code are on only for the exact value on, and off for anything else or nothing", () => {
+    const on = (value?: string) => {
+      const read = readWorkerEnv({ ...goodEnv(), ...(value === undefined ? {} : { HC_HANDBOOK_SUMMARIES: value }) });
+      assert.ok(read.ok);
+      return read.config.apexSummaries;
+    };
+    assert.equal(on("on"), true);
+    for (const value of [undefined, "", "ON", "On", " on", "on ", "1", "true", "yes", "off"]) assert.equal(on(value), false, JSON.stringify(value));
+    assert.ok("HC_HANDBOOK_SUMMARIES" in WORKER_ENV.optional, "listed with the worker's variables");
+  });
+
   test("Claude is optional: a key, or OIDC federation with an identity token", () => {
     const FEDERATION = { ANTHROPIC_FEDERATION_RULE_ID: "fdrl_synthetic", ANTHROPIC_ORGANIZATION_ID: "00000000-0000-4000-8000-000000000001", ANTHROPIC_SERVICE_ACCOUNT_ID: "svac_synthetic" };
     const claude = (extra: Record<string, string>) => {
