@@ -7,7 +7,7 @@ import type { NarrativeClient } from "../narrative/client.ts";
 import { buildReport, type BuiltReport, type ReportInput } from "../narrative/sections.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { BASELINE_OVERRIDES_FILE, INTERVIEWS_FILE, loadRun, OUTPUT_FILES, SURVEY_FILE, writeRows } from "../render/render-run.ts";
-import { baselineRefusedSummary } from "../render/render-released.ts";
+import { BASELINE_ROWS_UNREAD, baselineRefusedSummary } from "../render/render-released.ts";
 import { INTERVIEW_VERSION } from "../interviews/questions.ts";
 import { OAuthConnectionProvider, revokeConnection } from "../salesforce/oauth-provider.ts";
 import { OAuthError } from "../salesforce/oauth.ts";
@@ -200,8 +200,10 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
     // only by a delivery whose three writes all happened, and every delivery
     // drafts again, so a half-done one never stands (DECISIONS.md 529). A scan
     // and a pulse are never reviewed or printed, so neither keeps any.
-    const { input: reportInput, pseudonyms } = loadRun(dir, { baselineRows: "live" });
+    const { input: reportInput, pseudonyms, baselineRowsUnread } = loadRun(dir, { baselineRows: "live" });
     if (input.run.product !== "scan" && input.run.product !== "pulse") {
+      // Read as none, so the draft holds the figures as read, as its documents will (DECISIONS.md 531). A pulse says so when it's built.
+      if (baselineRowsUnread) log(`Run ${runId}: ${BASELINE_ROWS_UNREAD}`);
       const kept = join(dir, BASELINE_OVERRIDES_FILE);
       const rows = reportInput.baseline?.overrides ?? [];
       if (rows.length > 0) writeRows(kept, rows);
@@ -407,7 +409,8 @@ async function finishPulse(runId: string, dir: string, deps: WorkerDeps, at: str
   try {
     // loadRun reads the baseline from the folder beside this one, if it's there and readable.
     // The earlier folder's corrections as they stand: a pulse is built once, here, and never printed (DECISIONS.md 528).
-    const { input } = loadRun(dir, { baselineRows: "live" });
+    const { input, baselineRowsUnread } = loadRun(dir, { baselineRows: "live" });
+    if (baselineRowsUnread) log(`Pulse ${runId}: ${BASELINE_ROWS_UNREAD}`);
     const report = buildReport(input);
     // The baseline is read as its documents showed it, where that can still be carried (DECISIONS.md 522).
     if (report.baselineRefused) log(`Pulse ${runId}: ${baselineRefusedSummary(report.baselineRefused)}`);

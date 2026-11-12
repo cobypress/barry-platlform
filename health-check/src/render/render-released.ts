@@ -154,6 +154,9 @@ export function baselineRefusedSummary(n: number): string {
     : `${n} corrected figures of the earlier health check can't be carried, so the comparison shows them as read.`;
 }
 
+/** For the worker's log when a re-check is drafted, or a pulse built, without its earlier health check's corrections (DECISIONS.md 531). No path, error or figure. */
+export const BASELINE_ROWS_UNREAD = "the earlier health check's corrections couldn't be read, so the comparison shows its figures as read.";
+
 /** The run's report with the console's approved sections in place of the engine's drafts. */
 export function approvedReport(dir: string, approved: ApprovedRun): { report: BuiltReport; pseudonyms: Pseudonymiser } {
   const { input, pseudonyms } = loadRun(dir);

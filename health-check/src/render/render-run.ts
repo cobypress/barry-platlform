@@ -71,16 +71,28 @@ export type BaselineRows = "kept" | "live";
 /**
  * A re-check's first health check, from the folder beside it, as the report
  * compares against it. Null if it's gone (retention), unreadable, or another
- * org's, or the rows it's to be read with can't be read.
+ * org's. Read live, corrections that can't be read count as none and say so
+ * (`rowsUnread`): the draft then holds the figures as read, as the documents
+ * will with no kept file (DECISIONS.md 531). Kept rows that can't be read
+ * leave no baseline: they're the ones the drafts were made with, and nothing
+ * else is (528).
  */
-function loadBaseline(dir: string, run: Run, rows: BaselineRows): ReportInput | null {
+function loadBaseline(dir: string, run: Run, rows: BaselineRows): { baseline: ReportInput | null; rowsUnread: boolean } {
   const baseline = baselineRun(dir, run);
-  if (!baseline || !existsSync(join(baseline.dir, "findings.json"))) return null;
+  if (!baseline || !existsSync(join(baseline.dir, "findings.json"))) return { baseline: null, rowsUnread: false };
+  let overrides: NumberOverride[];
+  let rowsUnread = false;
   try {
-    const overrides = rows === "live" ? readOverrides(baseline.dir) : readBaselineOverrides(dir);
-    return loadRun(baseline.dir, { baseline: false, overrides }).input;
+    overrides = rows === "live" ? readOverrides(baseline.dir) : readBaselineOverrides(dir);
   } catch {
-    return null;
+    if (rows === "kept") return { baseline: null, rowsUnread: false };
+    overrides = [];
+    rowsUnread = true;
+  }
+  try {
+    return { baseline: loadRun(baseline.dir, { baseline: false, overrides }).input, rowsUnread };
+  } catch {
+    return { baseline: null, rowsUnread: false };
   }
 }
 
@@ -89,8 +101,10 @@ function loadBaseline(dir: string, run: Run, rows: BaselineRows): ReportInput | 
  * `overrides` stands in for the folder's own overrides.json, which is then not
  * read; `baselineRows` says which corrections a re-check's earlier health
  * check is read with, by default the ones kept with its drafts.
+ * `baselineRowsUnread` is for the worker's log alone, and nothing built reads
+ * it: the earlier folder's corrections, read live, couldn't be read.
  */
-export function loadRun(dir: string, options: { baseline?: boolean; baselineRows?: BaselineRows; overrides?: NumberOverride[] } = {}): { input: ReportInput; pseudonyms: Pseudonymiser } {
+export function loadRun(dir: string, options: { baseline?: boolean; baselineRows?: BaselineRows; overrides?: NumberOverride[] } = {}): { input: ReportInput; pseudonyms: Pseudonymiser; baselineRowsUnread: boolean } {
   const intake = readOptional<unknown>(join(dir, "intake.json"));
   const survey = readOptional<unknown>(join(dir, SURVEY_FILE));
   const interviews = readOptional<unknown>(join(dir, INTERVIEWS_FILE));
@@ -109,8 +123,13 @@ export function loadRun(dir: string, options: { baseline?: boolean; baselineRows
     interviews: interviews ? Interviews.parse(interviews).interviews : null,
     facts: facts ? summariseFacts(FactsFile.parse(facts)) : null,
   };
-  if (options.baseline !== false) input.baseline = loadBaseline(dir, input.run, options.baselineRows ?? "kept");
-  return { input, pseudonyms: loadPseudonymMap(dir) };
+  let baselineRowsUnread = false;
+  if (options.baseline !== false) {
+    const loaded = loadBaseline(dir, input.run, options.baselineRows ?? "kept");
+    input.baseline = loaded.baseline;
+    baselineRowsUnread = loaded.rowsUnread;
+  }
+  return { input, pseudonyms: loadPseudonymMap(dir), baselineRowsUnread };
 }
 
 /**

@@ -155,6 +155,20 @@ describe("a pulse whose baseline's documents kept their corrections (decision 52
   });
 });
 
+describe("a pulse whose baseline's corrections can't be read (decision 531)", async () => {
+  const plain = await pulseRun({ baseline: true });
+  const { deps } = await pulseRun({ baseline: true, edit: (dir) => writeFileSync(join(dir, "overrides.json"), "[{") });
+
+  test("is built against the baseline as read, and the log says so once", () => {
+    const r = deps.store.pulseResults.get(PULSE)!.result;
+    assert.equal(r.baselineRunId, BASELINE);
+    assert.equal(r.worth.before, plain.deps.store.pulseResults.get(PULSE)!.result.worth.before);
+    assert.deepEqual(deps.lines.filter((l) => /corrections couldn't be read/.test(l)), [`Pulse ${PULSE}: the earlier health check's corrections couldn't be read, so the comparison shows its figures as read.`]);
+    assert.deepEqual(plain.deps.lines.filter((l) => /corrections couldn't be read/.test(l)), []);
+    assert.equal(existsSync(join(deps.runsDir, PULSE, "baseline-overrides.json")), false);
+  });
+});
+
 describe("a pulse without a baseline it can read", async () => {
   const { deps, outcome } = await pulseRun({ baseline: false });
 

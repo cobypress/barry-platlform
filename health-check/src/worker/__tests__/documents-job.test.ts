@@ -1,7 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
-import fs, { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import fs, { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
 import { buildReport, currentBody, type ReportOutputKey } from "../../narrative/sections.ts";
@@ -1836,10 +1836,14 @@ describe("a re-check reads its earlier health check with the corrections it was 
     writeFileSync(join(dir, BASELINE_OVERRIDES_FILE), JSON.stringify([rows.titled]));
     assert.deepEqual(loadRun(dir).input.baseline!.overrides, [rows.titled]);
     assert.deepEqual(loadRun(dir, { baselineRows: "kept" }).input.baseline!.overrides, [rows.titled]);
-    // A damaged earlier file is no matter to a build from the kept rows.
+    // A damaged earlier file is no matter to a build from the kept rows; read live, it counts as none and says so (decision 531).
     writeFileSync(join(earlier, "overrides.json"), "[{");
     assert.deepEqual(loadRun(dir).input.baseline!.overrides, [rows.titled]);
-    assert.equal(loadRun(dir, { baselineRows: "live" }).input.baseline, null);
+    assert.equal(loadRun(dir).baselineRowsUnread, false);
+    const live = loadRun(dir, { baselineRows: "live" });
+    assert.deepEqual([live.input.baseline!.overrides, live.baselineRowsUnread], [[], true]);
+    rmSync(join(earlier, "overrides.json"));
+    assert.equal(loadRun(dir, { baselineRows: "live" }).baselineRowsUnread, false, "absent isn't unreadable");
   });
 
   test("two refused: the log counts both, in the plural", async () => {
@@ -1953,7 +1957,8 @@ describe("a re-check is built from the corrections it was drafted with, whatever
       };
     };
     const drafts = (): string => JSON.stringify(deps.store.runs.get(RUN_ID)!.output!.versions.map((v) => v.body));
-    return { deps, drive, dir, earlier, rows, draft, makeEarlier, makeRecheck, drafts };
+    const draftHasProgress = (): boolean => deps.store.runs.get(RUN_ID)!.output!.sections.some((s) => s.output === "raw_notes" && s.key === "progress");
+    return { deps, drive, dir, earlier, rows, draft, makeEarlier, makeRecheck, drafts, draftHasProgress };
   }
 
   /** Every document prints the same "then" figures, these. */
@@ -2010,6 +2015,11 @@ describe("a re-check is built from the corrections it was drafted with, whatever
       ["a file before the draft", async (w) => (await w.makeEarlier(all(w)), void (await w.draft())), CORRECTED],
       ["a file after the draft", async (w) => (await w.draft(), await w.makeEarlier(all(w))), AS_READ],
       ["a file before the draft, removed after", async (w) => (await w.makeEarlier(all(w)), await w.draft(), rmSync(join(w.earlier, "overrides.json"))), CORRECTED],
+      // The second adversary pass's orders (decision 531).
+      ["a file before the draft, changed after", async (w) => (await w.makeEarlier(all(w)), await w.draft(), writeFileSync(join(w.earlier, "overrides.json"), JSON.stringify([w.rows.storage]))), CORRECTED],
+      ["a file damaged at the draft, still damaged", async (w) => (await w.makeEarlier(all(w)), writeFileSync(join(w.earlier, "overrides.json"), "[{"), void (await w.draft())), AS_READ],
+      ["a file damaged at the draft, repaired after", async (w) => (await w.makeEarlier(all(w)), writeFileSync(join(w.earlier, "overrides.json"), "[{"), await w.draft(), writeFileSync(join(w.earlier, "overrides.json"), JSON.stringify(all(w)))), AS_READ],
+      ["a file unreadable at the draft, readable after", async (w) => (await w.makeEarlier(all(w)), chmodSync(join(w.earlier, "overrides.json"), 0), await w.draft(), chmodSync(join(w.earlier, "overrides.json"), 0o600)), AS_READ],
     ];
     for (const [order, steps, expected] of orders) {
       const w = await worker();
@@ -2017,8 +2027,68 @@ describe("a re-check is built from the corrections it was drafted with, whatever
       const { outcome, result, texts } = await w.makeRecheck();
       assert.equal(outcome.outcome, "done", `${order}: ${outcome.detail}`);
       assert.deepEqual(result.held, [], order);
+      // Drafts and documents agree there is a comparison, and on every figure in it.
+      assert.ok(w.draftHasProgress(), order);
+      for (const [name, text] of Object.entries(texts)) assert.ok(/Since your last health check|since your first health check/.test(text), `${order}: ${name}`);
+      assert.deepEqual(thenOf(w.drafts(), "raw"), expected.raw, `${order}: the drafts`);
       printsThen(texts, expected);
     }
+  });
+
+  test("the earlier corrections can't be read when the re-check is drafted: it's drafted against them as read, keeps nothing, says so once, and its documents agree (decision 531)", async () => {
+    const LINE = `Run ${RUN_ID}: the earlier health check's corrections couldn't be read, so the comparison shows its figures as read.`;
+    const damage: Array<[string, (path: string) => void]> = [
+      ["damaged", (path) => writeFileSync(path, "[{")],
+      ["unreadable", (path) => chmodSync(path, 0)],
+      ["a row with a field missing", (path) => writeFileSync(path, JSON.stringify([{ ...JSON.parse(readFileSync(path, "utf8"))[0], reason: undefined }]))],
+    ];
+    for (const [what, spoil] of damage) {
+      const w = await worker();
+      const rows = [w.rows.storage, w.rows.sized, w.rows.titled];
+      await w.makeEarlier(rows);
+      const path = join(w.earlier, "overrides.json");
+      spoil(path);
+      assert.equal((await w.draft()).outcome, "done", what);
+      assert.ok(w.draftHasProgress(), `${what}: the drafts have the comparison`);
+      assert.deepEqual(thenOf(w.drafts(), "raw"), AS_READ.raw, what);
+      assert.equal(existsSync(join(w.dir, KEPT)), false, what);
+      assert.deepEqual(w.deps.lines.filter((l) => /corrections couldn't be read/.test(l)), [LINE], what);
+      for (const line of w.deps.lines) assert.ok(!line.includes(w.earlier) && !line.includes("8,200") && !line.includes("JSON"), line);
+      const made = await w.makeRecheck();
+      assert.equal(made.outcome.outcome, "done", `${what}: ${made.outcome.detail}`);
+      assert.deepEqual(made.result.held, [], what);
+      printsThen(made.texts, AS_READ);
+      // Repaired before the documents are made again: they don't move.
+      chmodSync(path, 0o600);
+      writeFileSync(path, JSON.stringify(rows));
+      const again = await w.makeRecheck();
+      assert.deepEqual(again.texts, made.texts, what);
+    }
+  });
+
+  test("the kept rows are written before the sections file and the console's save (decision 529)", async () => {
+    const w = await worker();
+    await w.makeEarlier([w.rows.storage]);
+    await w.draft();
+    rmSync(join(w.dir, "report-sections.json"));
+    const seen: Array<{ sections: boolean; saved: boolean }> = [];
+    let saved = false;
+    const save = w.deps.store.saveRunOutput.bind(w.deps.store);
+    w.deps.store.saveRunOutput = async (id, output) => ((saved = true), save(id, output));
+    const real = fs.renameSync;
+    fs.renameSync = ((from: fs.PathLike, to: fs.PathLike) => {
+      if (String(to).endsWith(KEPT)) seen.push({ sections: existsSync(join(w.dir, "report-sections.json")), saved });
+      return real(from, to);
+    }) as typeof fs.renameSync;
+    syncBuiltinESMExports();
+    try {
+      assert.equal((await w.draft()).outcome, "done");
+    } finally {
+      fs.renameSync = real;
+      syncBuiltinESMExports();
+    }
+    assert.deepEqual(seen, [{ sections: false, saved: false }]);
+    assert.ok(existsSync(join(w.dir, "report-sections.json")) && saved);
   });
 
   test("drafted again after the earlier file changed, the kept rows and the drafts both follow; drafted again with none, the kept file goes", async () => {
