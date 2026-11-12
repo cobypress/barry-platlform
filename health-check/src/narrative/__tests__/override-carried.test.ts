@@ -851,6 +851,48 @@ describe("a measure's figure another of its figures holds, each where in the row
   });
 });
 
+// Decision 479: an evidence count is printed nowhere, so its refusal says what is true of it, and every other where keeps 517's sentence.
+describe("a measure's figure an evidence count holds says what is true of it (decision 479)", () => {
+  const PART_517 = /^"[^"]*", [^:]+: [\d,.]+ as read, corrected to [\d,.]+, but another figure of this measure \(([^)]+)\) is also [\d,.]+, and a chart, table or sentence prints it as read\.$/;
+  const lineOf = (r: OverrideRefusal): string => refusalReason([r]).split("\n")[1]!;
+
+  test("a planted measure, value 1,200, equalled only by an evidence count: the reason line whole", () => {
+    const r = refusedOf(measure({ value: 1200, evidence: [{ ...evidence, count: 1200 }] }), onMeasure("value", 1200, 1250));
+    assert.deepEqual(r.why, { kind: "part", where: "an evidence count" });
+    assert.equal(lineOf(r), `"A planted measure", value: 1,200 as read, corrected to 1,250, but the number of records this measure was read from is also 1,200, and our check of printed figures would go on passing the figure as read.`);
+  });
+
+  test("current.open_pipeline, n 76 to 80, whose n only an evidence count also holds: the reason line whole, the metrics as read", () => {
+    const report = built(onMetricOf("current.open_pipeline", "n", 76, 80));
+    assert.deepEqual(report.refused.map((r) => [r.metricId, r.why]), [["current.open_pipeline", { kind: "part", where: "an evidence count" }]]);
+    assert.deepEqual(report.metrics, asBuilt.metrics);
+    assert.equal(lineOf(report.refused[0]!), `"Open pipeline", n: 76 as read, corrected to 80, but the number of records this measure was read from is also 76, and our check of printed figures would go on passing the figure as read.`);
+  });
+
+  test("each where, planted and on every figure of the synthetic run's measures: no reason says an evidence count, and every other where reads 517's sentence", () => {
+    const all: Partial<Measured> = { value: 47, n: 47, stats: { moves: 47 }, segments: [segment({ n: 47 })], series: [point({ n: 47 })], evidence: [{ ...evidence, count: 47 }] };
+    const planted = [
+      ...[{}, { n: 100 }, { n: 100, stats: {} }, { n: 100, stats: {}, segments: [] }, { n: 100, stats: {}, segments: [], series: [] }].map((less) => refusedOf(measure({ ...all, ...less }), onMeasure("value", 47, 52))),
+      refusedOf(measure({ value: 100, n: 100 }), onMeasure("n", 100, 90)),
+    ];
+    const synthetic = input.metrics.flatMap((m) => {
+      if (m.status !== "measured") return [];
+      const figures: Array<[string, number]> = [["value", m.value], ["n", m.n], ...Object.entries(m.stats).map(([k, v]): [string, number] => [`stats.${k}`, v])];
+      return figures.flatMap(([field, v]) => applyOverrides([], [m], [onMetricOf(m.id, field, v, v + 1)]).refused);
+    });
+    for (const r of [...planted, ...synthetic]) assert.ok(!refusalReason([r]).includes("an evidence count"), lineOf(r));
+    const parts = [...planted, ...synthetic].filter((r) => r.why.kind === "part");
+    const seen = new Set(parts.map((r) => (r.why as { where: string }).where.replace(/^the stat .*/, "the stat")));
+    assert.deepEqual([...seen].sort(), ["a point in its series", "a segment", "an evidence count", "n", "the stat", "value"]);
+    for (const r of parts) {
+      const where = (r.why as { where: string }).where;
+      const line = lineOf(r);
+      if (where === "an evidence count") assert.ok(!PART_517.test(line) && line.includes("the number of records this measure was read from"), line);
+      else assert.equal(PART_517.exec(line)?.[1], where, line);
+    }
+  });
+});
+
 describe("a measure's own wording that prints its value (decision 517, item 4)", () => {
   const worded = `"A planted measure", value: 5 as read, corrected to 6, but the measure's own wording has 5, which a correction doesn't rewrite.`;
   const lineOf = (m: Measured, last = 6): string => refusalReason([refusedOf(m, onMeasure("value", m.value, last))]).split("\n")[1]!;
@@ -952,6 +994,7 @@ describe("a measure's refusal beside a finding's, as the console lists them (dec
       assert.deepEqual(read, reason.split("\n"), "no line empty or padded");
       assert.ok(read[0]!.startsWith("Held back: ") && read.length >= 3 && read.at(-1) === CLOSE, reason);
     }
+    assert.equal(reasons[3]!.split("\n")[1], `"Measure 1", value: 47 as read, corrected to 52, but the number of records this measure was read from is also 47, and our check of printed figures would go on passing the figure as read.`);
     assert.equal(reasons[5]!.split("\n")[1], `"Measure 1", value: 47 as read, corrected to 52, but the measure's own wording doesn't print 47 itself and has 36, which may be this figure rounded.`);
   });
 });

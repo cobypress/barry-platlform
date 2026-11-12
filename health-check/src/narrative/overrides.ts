@@ -403,6 +403,9 @@ function why(r: OverrideRefusal): string {
   const measure = r.metricId !== undefined;
   switch (r.why.kind) {
     case "part":
+      // An evidence count is printed nowhere: its only reader is the number
+      // check's data, which would pass the figure as read (DECISIONS.md 479).
+      if (r.why.where === "an evidence count") return `the number of records this measure was read from is also ${grouped(r.asRead)}, and our check of printed figures would go on passing the figure as read`;
       return `another figure of this measure (${r.why.where}) is also ${grouped(r.asRead)}, and a chart, table or sentence prints it as read`;
     case "worded":
       return `the measure's own wording has ${grouped(r.asRead)}, which a correction doesn't rewrite`;
