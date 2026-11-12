@@ -8,6 +8,7 @@ import { buildReport, type BuiltReport, type ReportInput } from "../sections.ts"
 import { Pseudonymiser, type PseudonymEntry } from "../../privacy/pseudonymiser.ts";
 import { printDocuments, OUTPUT_FILES } from "../../render/render-run.ts";
 import { heldFigures } from "../../render/render-released.ts";
+import type { FigureSet } from "../../numbercheck/index.ts";
 import type { Finding, NumberOverride } from "../../schemas/index.ts";
 import { runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
@@ -188,5 +189,94 @@ describe("a figure put back clears the documents (decision 514, item 1)", () => 
       assert.deepEqual(report.refused, []);
       assert.deepEqual(await printed(report), [], `${overrides.length} rows`);
     }
+  });
+});
+
+const asBuilt = built();
+/** A dataset without the raw notes' overrides section, the one source rows may change. */
+const sansOverrides = (set: FigureSet): FigureSet => ({ figures: set.figures.filter((f) => f.source !== "overrides"), dates: set.dates.filter((f) => f.source !== "overrides"), identifiers: set.identifiers.filter((f) => f.source !== "overrides"), tokens: set.tokens.filter((f) => f.source !== "overrides"), labels: set.labels.filter((f) => f.source !== "overrides") });
+/** The raw notes' overrides section, a line a row. */
+const rawNotesRows = (report: BuiltReport): string[] => {
+  const notes = report.outputs.raw_notes;
+  const section = notes.sections.find((s) => s.key === "overrides")!;
+  return notes.versions.find((v) => v.id === section.currentVersionId)!.body.split("\n");
+};
+const rowLine = (o: NumberOverride): string => `${o.target.type} ${o.target.id}, ${o.target.field}: changed from ${o.previousValue} to ${o.newValue} by ${o.overriddenBy} on ${o.overriddenAt.slice(0, 10)}. Reason: ${o.reason}`;
+/** What the number check's data was given. */
+const given = (...overrides: NumberOverride[]): NumberOverride[] => applyOverrides(input.findings, input.metrics, overrides).carried;
+
+describe("the rows the number check's data is given (decision 514, item 1)", () => {
+  test("a figure put back: the raw notes still list every row, in order", () => {
+    const rows = [onRun(divergence, "facts.deals", 43, 33), onRun(divergence, "facts.deals", 33, 43), onRun(divergence, "facts.gap", 33, 34), onRun(divergence, "facts.gap", 34, 33)];
+    assert.deepEqual(given(...rows), []);
+    assert.deepEqual(rawNotesRows(built(...rows)), rows.map(rowLine));
+  });
+
+  test("a refused figure beside a carried one in another finding: a row for the carried one only, from the value as read", () => {
+    const storage = output!.findings.find((f) => f.ruleId === "tech.storage-use" && f.status === "issue")!;
+    const coverage = output!.findings.find((f) => f.ruleId === "cur.coverage" && f.status === "issue")!;
+    const remaining = coverage.facts.remaining!;
+    const rows = [onRun(coverage, "facts.remaining", remaining, remaining - 100000), onRun(storage, "facts.DataStorageMBUsed", 8940, 8500), onRun(storage, "facts.DataStorageMBUsed", 8500, 8200)];
+    assert.deepEqual(given(...rows), [{ ...rows[2]!, previousValue: 8940 }]);
+    const report = built(...rows);
+    assert.deepEqual(report.refused.map((r) => r.findingId), [coverage.id]);
+    const of = (set: FigureSet, id: string): number[] => set.figures.filter((f) => f.source === id).map((f) => f.value).sort((a, b) => a - b);
+    assert.deepEqual(of(report.dataset, coverage.id), of(asBuilt.dataset, coverage.id), "the refused finding's figures as read");
+    assert.ok(of(report.dataset, storage.id).includes(8200) && !of(report.dataset, storage.id).includes(8940) && !of(report.dataset, storage.id).includes(8500));
+  });
+
+  test("a stale row, then a row back to the value as read: no row given, and the documents are made", async () => {
+    const storage = output!.findings.find((f) => f.ruleId === "tech.storage-use" && f.status === "issue")!;
+    const rows = [onRun(storage, "facts.DataStorageMBUsed", 11000, 9800), onRun(storage, "facts.DataStorageMBUsed", 9800, 8940)];
+    assert.deepEqual(given(...rows), []);
+    const report = built(...rows);
+    assert.deepEqual(report.refused, []);
+    assert.deepEqual(sansOverrides(report.dataset), sansOverrides(asBuilt.dataset));
+    assert.deepEqual(await printed(report), []);
+  });
+});
+
+describe("a metric's rows, collapsed field by field (decision 514, item 1)", () => {
+  // The win rate of 47 is printed as a number and a percentage; 45 is another figure of the same metric.
+  const onMetric = (field: string, previousValue: number, newValue: number): NumberOverride => ({ ...onRun(divergence, field, previousValue, newValue), target: { type: "metric", id: "historic.win_rate", field } });
+  const of = (set: FigureSet): string[] => set.figures.filter((f) => f.source === "historic.win_rate").map((f) => `${f.kind} ${f.value}`).sort();
+
+  test("the run prints the figures these tests use", () => {
+    assert.ok(of(asBuilt.dataset).includes("number 45") && of(asBuilt.dataset).includes("number 47") && of(asBuilt.dataset).includes("percent 47"));
+  });
+
+  test("A to B to A: no row, and the report is the report of no override. The rows given in turn dropped the metric's own 45", () => {
+    const rows = [onMetric("value", 47, 45), onMetric("value", 45, 47)];
+    assert.deepEqual(given(...rows), []);
+    const report = built(...rows);
+    assert.deepEqual(report.metrics, asBuilt.metrics);
+    assert.deepEqual(sansOverrides(report.dataset), sansOverrides(asBuilt.dataset));
+    assert.deepEqual(rawNotesRows(report), rows.map(rowLine));
+  });
+
+  test("A to B to C: one row, A to C, with the last row's other fields. The rows given in turn dropped the metric's own 45 too", () => {
+    const rows = [onMetric("value", 47, 45), onMetric("value", 45, 52)];
+    assert.deepEqual(given(...rows), [{ ...rows[1]!, previousValue: 47 }]);
+    const report = built(...rows);
+    assert.equal((report.metrics.find((m) => m.id === "historic.win_rate") as { value: number }).value, 52);
+    assert.deepEqual(of(report.dataset), of(asBuilt.dataset).map((f) => f.replace(/ 47$/, " 52")).sort());
+    assert.deepEqual(rawNotesRows(report), rows.map(rowLine));
+  });
+
+  test("a metric the run doesn't hold, or a field it doesn't have, gives no row", () => {
+    assert.deepEqual(given({ ...onMetric("value", 47, 45), target: { type: "metric", id: "historic.nothing", field: "value" } }), []);
+    assert.deepEqual(given(onMetric("label", 47, 45)), []);
+  });
+});
+
+describe("bp.users-without-role on the synthetic run (decision 514, item 2)", () => {
+  test("n of 11, checked 2026-11-02: carried, 2 of 12, the date as read", () => {
+    const f = output!.findings.find((x) => x.ruleId === "bp.users-without-role" && x.status === "issue")!;
+    assert.ok(f.summary.includes("2 of 11 (18.2%)") && f.summary.includes("checked 2026-11-02"), f.summary);
+    const report = built(onRun(f, "facts.n", 11, 12));
+    assert.deepEqual(report.refused, []);
+    const shown = report.teamFindings.find((x) => x.id === f.id)!;
+    assert.equal(shown.summary, f.summary.replace("2 of 11 (18.2%)", "2 of 12 (18.2%)"));
+    assert.equal(shown.facts.n, 12);
   });
 });
