@@ -84,8 +84,6 @@ function spansInText(text: string, normalised: string, spans: Array<[number, num
   if (normalised === text) return spans;
   const cuts: Array<{ at: number; to: number }> = [{ at: 0, to: 0 }];
   for (let at = 1; at < text.length; at++) {
-    // Never between the halves of a surrogate pair.
-    if (text.codePointAt(at - 1)! > 0xffff) continue;
     const before = normalise(text.slice(0, at));
     if (before + normalise(text.slice(at)) === normalised) cuts.push({ at, to: before.length });
   }
