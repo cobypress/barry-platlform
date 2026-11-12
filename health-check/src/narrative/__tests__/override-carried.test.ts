@@ -51,7 +51,8 @@ function finding(summary: string, facts: Record<string, number>, edit: Partial<F
     dependencies: [],
     guards: [],
     segmentsChecked: [],
-    segmentExemptReason: "One org-wide figure.",
+    // No figure in words either: "One" is a 1 to the number check's reader (decision 520).
+    segmentExemptReason: "A single org-wide figure.",
     subjects: [],
     facts,
     notMeasurableReason: null,
@@ -174,7 +175,7 @@ describe("digits joined by a colon are never rewritten and never passed over (de
     assert.deepEqual(result.refused.map((r) => r.why), [{ kind, found }], `${summary} ${value}`);
     assert.deepEqual(result.findings[0], f, `${summary} ${value}`);
     const [shown, to] = [value.toLocaleString("en-GB"), last.toLocaleString("en-GB")];
-    const why = kind === "unsure" ? `the wording has ${shown} only as ${found}, which may be this figure or a date, a time or a ratio, and we can't tell` : `the wording doesn't print ${shown} itself and has ${found}, which may be this figure rounded`;
+    const why = kind === "unsure" ? `the wording has ${shown} only as ${found}, which we can't be sure is this figure and can't rewrite` : `the wording doesn't print ${shown} itself and has ${found}, which may be this figure rounded`;
     assert.equal(refusalReason(result.refused).split("\n")[1], `"A planted finding", x: ${shown} as read, corrected to ${to}, but ${why}.`);
   }
 
@@ -234,7 +235,7 @@ describe("a form that may or may not be the figure is a place that can't be rewr
     return refusalReason(result.refused).split("\n")[1]!;
   };
   const onlyAs = (value: string, last: string, form: string, field = "x"): string =>
-    `"A planted finding", ${field}: ${value} as read, corrected to ${last}, but the wording has ${value} only as ${form}, which may be this figure or a date, a time or a ratio, and we can't tell.`;
+    `"A planted finding", ${field}: ${value} as read, corrected to ${last}, but the wording has ${value} only as ${form}, which we can't be sure is this figure and can't rewrite.`;
   const inPlaces = (value: string, last: string, places: number, field = "x"): string => `"A planted finding", ${field}: ${value} as read, corrected to ${last}, but the wording has ${value} in ${places} places, and we can't tell which of them are this figure.`;
   const rounded = (value: string, last: string, found: string): string => `"A planted finding", x: ${value} as read, corrected to ${last}, but the wording doesn't print ${value} itself and has ${found}, which may be this figure rounded.`;
 
@@ -468,9 +469,14 @@ describe("every overridable figure of the synthetic run, put back (decision 514,
 // Measured on the synthetic run (session 22, lane A, round 4): of every pair of
 // figures of one finding, A to B's value as read and B to B plus 1, the pairs
 // both carried, and the figures the number check then refuses, each an
-// impossible "X of Y" such as "7 of 6".
-const CARRIED_PAIRS = 634;
-const IMPOSSIBLE_PAIRS = 49;
+// impossible "X of Y" such as "7 of 6". Decision 520 takes 36 pairs out, each
+// with a figure of 1 beside "one" in its finding's wording (dq.duplicate-accounts,
+// sec.modify-all-data, bp.ownership-skew, act.rep-activity-spread, int.api-usage)
+// or int.api-usage's 1,000 requests, which the 5% test reads as "one" in thousands.
+const CARRIED_PAIRS = 598;
+// Three of the 49 were among those pairs, now refused: int.api-usage's "220,000 of 1" and "220,000 of 1,000",
+// and sec.modify-all-data's "3 of 1".
+const IMPOSSIBLE_PAIRS = 46;
 
 const byId = (id: string): Finding => output!.findings.find((f) => f.id === id)!;
 
@@ -648,7 +654,7 @@ describe("the number check's data is the findings as corrected, with no rows (de
 // Decision 518: a date the number check's reader finds by a word is a guess, and its digits standing by themselves are unsure.
 describe("a date read by a word is a guess, and its own digits are unsure (decision 518)", () => {
   const onlyAs = (value: string, last: string, form: string): string =>
-    `"A planted finding", x: ${value} as read, corrected to ${last}, but the wording has ${value} only as ${form}, which may be this figure or a date, a time or a ratio, and we can't tell.`;
+    `"A planted finding", x: ${value} as read, corrected to ${last}, but the wording has ${value} only as ${form}, which we can't be sure is this figure and can't rewrite.`;
   const lineOf = (summary: string, value: number, last: number): string => {
     const f = finding(summary, { x: value });
     const result = applyOverrides([f], [], [override("facts.x", value, last)]);
@@ -797,7 +803,7 @@ type Measured = Extract<Metric, { status: "measured" }>;
 const MID = "historic.planted";
 /** A planted measure whose only figures are the ones a test puts in it: the evidence's count is 900. */
 function measure(edit: Partial<Measured> = {}): Measured {
-  return { id: MID, domain: "historic_pipeline", status: "measured", label: "A planted measure", definition: "Won deals over closed deals.", unit: "percent", evidence: [{ ...evidence, count: 900 }], exclusions: [], assumptions: [], value: 37, n: 100, dateRange: null, segments: [], segmentExemptReason: "One org-wide figure.", series: [], stats: {}, ...edit };
+  return { id: MID, domain: "historic_pipeline", status: "measured", label: "A planted measure", definition: "Won deals over closed deals.", unit: "percent", evidence: [{ ...evidence, count: 900 }], exclusions: [], assumptions: [], value: 37, n: 100, dateRange: null, segments: [], segmentExemptReason: "A single org-wide figure.", series: [], stats: {}, ...edit };
 }
 const onMeasure = (field: string, previousValue: number, newValue: number, id = "m1"): NumberOverride => ({ ...override(field, previousValue, newValue, id), target: { type: "metric", id: MID, field } });
 const segment = (edit: Partial<Measured["segments"][number]> = {}): Measured["segments"][number] => ({ dimension: "stage", key: "Negotiation", n: 10, value: 12, notMeasurableReason: null, ...edit });
@@ -1008,7 +1014,7 @@ describe("a guessed date's own digits, and digits joined to a letter (decision 5
     return refusalReason(result.refused).split("\n")[1]!;
   };
   const g = (n: number): string => n.toLocaleString("en-GB");
-  const onlyAs = (value: number, last: number, form: string): string => `"A planted finding", x: ${g(value)} as read, corrected to ${g(last)}, but the wording has ${g(value)} only as ${form}, which may be this figure or a date, a time or a ratio, and we can't tell.`;
+  const onlyAs = (value: number, last: number, form: string): string => `"A planted finding", x: ${g(value)} as read, corrected to ${g(last)}, but the wording has ${g(value)} only as ${form}, which we can't be sure is this figure and can't rewrite.`;
   const rounded = (value: number, last: number, found: string): string => `"A planted finding", x: ${g(value)} as read, corrected to ${g(last)}, but the wording doesn't print ${g(value)} itself and has ${found}, which may be this figure rounded.`;
   const inTwo = (value: number, last: number): string => `"A planted finding", x: ${g(value)} as read, corrected to ${g(last)}, but the wording has ${g(value)} in 2 places, and we can't tell which of them are this figure.`;
 
@@ -1243,5 +1249,83 @@ describe("the raw notes' sections read the findings as corrected (decision 489)"
     assert.ok(!paragraphs.some((p) => p.startsWith("3 report folders couldn't be read:")), "no line of the body as read");
     assert.ok(paragraphs.some((p) => /^R\d+\.\d+ 3 report folders couldn't be read$/.test(p)), "the finding's own item, as read");
     for (const cell of [`finding ${notMeasured.id}`, "facts.folders", "3", "4"]) assert.ok(paragraphs.includes(cell), cell);
+  });
+});
+
+// Decision 520: a figure written as a word is an unsure form, for a finding and a measure alike. The number check's
+// reader reads "five" as 5, "twice" as a ratio of 2, "a dozen" as 12, "half" as 50 and "one in three" as 1 and 3,
+// and a correction that leaves the word printed would pass its check of the page.
+describe("a figure written as a word is an unsure form (decision 520, item 1)", () => {
+  const g = (n: number): string => n.toLocaleString("en-GB", { maximumFractionDigits: 100 });
+  /** The finding's one refusal's line, the finding as read beside it. */
+  const lineOf = (summary: string, value: number, last: number): string => {
+    const f = finding(summary, { x: value });
+    const result = applyOverrides([f], [], [override("facts.x", value, last)]);
+    assert.deepEqual(result.findings[0], f, summary);
+    assert.equal(result.refused.length, 1, summary);
+    return refusalReason(result.refused).split("\n")[1]!;
+  };
+  const onlyAs = (value: number, last: number, form: string, field = "x"): string =>
+    `"A planted finding", ${field}: ${g(value)} as read, corrected to ${g(last)}, but the wording has ${g(value)} only as ${form}, which we can't be sure is this figure and can't rewrite.`;
+
+  test("a fact of 5 beside Five open deals have no account: refused, the reason line whole, where the fourth review found it carried with Five printed", () => {
+    const f = finding("Five open deals have no account.", { hits: 5 });
+    const result = applyOverrides([f], [], [override("facts.hits", 5, 7)]);
+    assert.deepEqual(result.findings[0], f);
+    assert.equal(refusalReason(result.refused).split("\n")[1], onlyAs(5, 7, "Five", "hits"));
+  });
+
+  test("5 accounts and five deals with a fact of 5: in 2 places", () => {
+    assert.equal(lineOf("5 accounts and five deals have no owner.", 5, 7), `"A planted finding", x: 5 as read, corrected to 7, but the wording has 5 in 2 places, and we can't tell which of them are this figure.`);
+  });
+
+  test("an unprinted fact of 12 beside a dozen, 2 beside twice, 50 beside half, and 3 or 1 beside one in three: each refused, naming the word as written", () => {
+    assert.equal(lineOf("We found a dozen deals with no owner.", 12, 13), onlyAs(12, 13, "a dozen"));
+    assert.equal(lineOf("Close dates were pushed twice.", 2, 3), onlyAs(2, 3, "twice"));
+    assert.equal(lineOf("Half of the open deals have no activity.", 50, 55), onlyAs(50, 55, "Half"));
+    assert.equal(lineOf("One in three deals has no owner.", 3, 4), onlyAs(3, 4, "three"));
+    assert.equal(lineOf("One in three deals has no owner.", 1, 2), onlyAs(1, 2, "One"));
+  });
+
+  test("a word near the figure and not it, five with an unprinted fact of 5.1: refused as rounded, naming five", () => {
+    assert.equal(lineOf("Fewer than five people are left out.", 5.1, 6), `"A planted finding", x: 5.1 as read, corrected to 6, but the wording doesn't print 5.1 itself and has five, which may be this figure rounded.`);
+  });
+
+  test("a word far from the figure, five with an unprinted fact of 40: carried, the text as read", () => {
+    untouched("Fewer than five people are left out.", 40);
+  });
+
+  test("no one, each one and one of the, which the reader doesn't read as 1, with an unprinted fact of 1: carried, the text as read; One account, which it does, refused", () => {
+    const f = finding("No one logged in, each one is idle, and one of the accounts is new.", { x: 1 });
+    const result = applyOverrides([f], [], [override("facts.x", 1, 2)]);
+    assert.deepEqual(result.refused, []);
+    assert.deepEqual(textsOf(result.findings[0]!), textsOf(f));
+    assert.equal(lineOf("One account is idle.", 1, 2), onlyAs(1, 2, "One"));
+  });
+
+  test("a measure whose definition says fewer than five people, value 5 to 7: refused as worded, the reason whole, and the data as with no override", () => {
+    const m = measure({ value: 5, definition: "Active users, where fewer than five people are left out." });
+    const result = applyOverrides([], [m], [onMeasure("value", 5, 7)]);
+    assert.deepEqual(result.metrics, [m]);
+    assert.deepEqual(result.refused.map((r) => r.why), [{ kind: "worded" }]);
+    assert.equal(refusalReason(result.refused).split("\n")[1], `"A planted measure", value: 5 as read, corrected to 7, but the measure's own wording has 5, which a correction doesn't rewrite.`);
+    assert.deepEqual(buildDataset({ findings: [], metrics: result.metrics }), buildDataset({ findings: [], metrics: [m] }));
+    assert.ok(valuesFrom(buildDataset({ findings: [], metrics: result.metrics }), MID).includes(5));
+  });
+
+  test("a measure's word near its value and not it, five with a value of 5.1: refused as rounded, naming five; far from it, 40: carried", () => {
+    const near = measure({ value: 5.1, definition: "Active users, where fewer than five people are left out." });
+    assert.equal(refusalReason([refusedOf(near, onMeasure("value", 5.1, 6))]).split("\n")[1], `"A planted measure", value: 5.1 as read, corrected to 6, but the measure's own wording doesn't print 5.1 itself and has five, which may be this figure rounded.`);
+    const far = measure({ value: 40, definition: "Active users, where fewer than five people are left out." });
+    assert.deepEqual(applyOverrides([], [far], [onMeasure("value", 40, 45)]), { findings: [], metrics: [{ ...far, value: 45 }], refused: [] });
+  });
+
+  test("historic.win_drivers, stats.activityWithoutWon 2 to 3 on the synthetic run: refused as worded, its assumptions saying pushed twice, where the fourth review found it carried", () => {
+    const m = input.metrics.find((x) => x.id === "historic.win_drivers") as Measured;
+    assert.ok(m.stats.activityWithoutWon === 2 && m.assumptions.some((a) => a.includes("close date pushed twice or more")));
+    const report = built(onMetricOf("historic.win_drivers", "stats.activityWithoutWon", 2, 3));
+    assert.deepEqual(report.refused.map((r) => [r.metricId, r.field, r.why]), [["historic.win_drivers", "stats.activityWithoutWon", { kind: "worded" }]]);
+    assert.deepEqual(report.metrics, asBuilt.metrics);
+    assert.equal(refusalReason(report.refused).split("\n")[1], `"${m.label}", activityWithoutWon: 2 as read, corrected to 3, but the measure's own wording has 2, which a correction doesn't rewrite.`);
   });
 });

@@ -102,11 +102,19 @@ const LETTER = /\p{L}/u;
 // "1.5:1" or "1,000:1" is left over to be read as a figure.
 const COLON = /(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?::(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)+/g;
 
+// A figure the reader finds with no digit in it as written, "five", "twice", "a
+// dozen", "half", or the "one" and the "three" of "one in three", is a figure to
+// it and to the printed-page check, which our own patterns never find
+// (DECISIONS.md 520). Only digits 0 to 9 count: a full-width "５" is 5 to the
+// reader and nothing to our patterns.
+const DIGIT = /[0-9]/;
+
 /**
- * A form that may or may not be the figure: a colon form or a guessed date, as
- * written, and its parts. It is never rewritten, and is never passed over: a
- * part equal to the value as read is a place that can't be rewritten, and one
- * near it is the figure perhaps rounded (DECISIONS.md 516, 518).
+ * A form that may or may not be the figure: a colon form, a guessed date or a
+ * figure in words, as written, and its parts. It is never rewritten, and is
+ * never passed over: a part equal to the value as read is a place that can't
+ * be rewritten, and one near it is the figure perhaps rounded (DECISIONS.md
+ * 516, 518, 520).
  */
 type Unsure = { form: string; parts: number[] };
 
@@ -145,8 +153,6 @@ function spansInText(text: string, normalised: string, spans: Array<[number, num
  */
 function masked(text: string): Read {
   const chars = text.replace(TOKEN, (token) => "#".repeat(token.length)).split("");
-  // No digit, nothing to find a figure in.
-  if (!/\d/.test(text)) return { text: chars.join(""), unsure: [] };
   const { normalised, figures } = extractFigures(text);
   const shapes = spansInText(text, normalised, figures.filter((f) => notFigure(f) && !bareYear(f)).map((f): [number, number] => [f.start, f.end]));
   for (const m of text.matchAll(YEAR_MONTH)) shapes.push([m.index, m.index + m[0].length]);
@@ -172,6 +178,20 @@ function masked(text: string): Read {
       chars.fill("#", from, to);
     }
     if (parts.length > 0) unsure.push({ form: text.slice(start, end), parts, at: start });
+  }
+  // A figure in words: its one part is the value the reader gives it, whatever
+  // its kind ("twice" a ratio of 2, "half" a fraction of 50, "five per cent" a
+  // percent of 5, "a dozen" a number of 12). A figure the reader gives no value,
+  // "hundreds" or a malformed run of words, can be no figure's value or near it.
+  for (const word of figures) {
+    if (typeof word.value !== "number") continue;
+    const pieces = spansInText(text, normalised, [[word.start, word.end]]);
+    if (pieces.length === 0) continue;
+    const [start, end] = [Math.min(...pieces.map(([a]) => a)), Math.max(...pieces.map(([, b]) => b))];
+    const form = text.slice(start, end);
+    if (DIGIT.test(form)) continue;
+    unsure.push({ form, parts: [word.value], at: start });
+    chars.fill("#", start, end);
   }
   return { text: chars.join(""), unsure: unsure.sort((a, b) => a.at - b.at).map(({ form, parts }) => ({ form, parts })) };
 }
@@ -416,7 +436,7 @@ function why(r: OverrideRefusal): string {
     case "rounded":
       return `${measure ? "the measure's own wording" : "the wording"} doesn't print ${grouped(r.asRead)} itself and has ${r.why.found}, which may be this figure rounded`;
     case "unsure":
-      return `the wording has ${grouped(r.asRead)} only as ${r.why.found}, which may be this figure or a date, a time or a ratio, and we can't tell`;
+      return `the wording has ${grouped(r.asRead)} only as ${r.why.found}, which we can't be sure is this figure and can't rewrite`;
     case "stale":
       return `the correction was made from ${grouped(r.why.from)}, which this run no longer reads`;
   }

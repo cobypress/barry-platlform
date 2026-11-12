@@ -360,8 +360,8 @@ describe("the reason a refusal holds the documents (decision 512)", () => {
       '"B", annualSaving: 1,200 as read, corrected to 1,100.5, but another figure of this finding (the sized amount) is also 1,200, so we can\'t tell which one the wording prints.',
       '"C", the sized amount: 1,200 as read, corrected to 1,100.5, but the wording doesn\'t print 1,200 itself and has £1.2m, which may be this figure rounded.',
       '"D", hits: 1,200 as read, corrected to 1,100.5, but the correction was made from 1,250, which this run no longer reads.',
-      // DECISIONS.md 516: a form that may be the figure or a date, a time or a ratio.
-      '"E", hits: 1,200 as read, corrected to 1,100.5, but the wording has 1,200 only as 1200, which may be this figure or a date, a time or a ratio, and we can\'t tell.',
+      // DECISIONS.md 516 and 520: a form that may or may not be the figure.
+      '"E", hits: 1,200 as read, corrected to 1,100.5, but the wording has 1,200 only as 1200, which we can\'t be sure is this figure and can\'t rewrite.',
     ]);
   });
 
@@ -377,11 +377,13 @@ describe("the reason a refusal holds the documents (decision 512)", () => {
   });
 
   test("the console lists it: three lines or more, the first starting Held back:, the last the close, none empty, whatever the reasons", () => {
-    // Every reason in turn, the one decision 516 added first, so a single refusal is that one.
-    const whys: OverrideRefusal["why"][] = [{ kind: "unsure", found: "3:9" }, { kind: "repeated", places: 2 }, { kind: "shared", other: "quota" }, { kind: "rounded", found: "£1.2m" }, { kind: "stale", from: 1250 }];
+    // Every reason in turn, the one decision 516 added first, so a single refusal is that one; then
+    // decision 520's figure in words, so two refusals hold both unsure lines.
+    const whys: OverrideRefusal["why"][] = [{ kind: "unsure", found: "3:9" }, { kind: "unsure", found: "a dozen" }, { kind: "repeated", places: 2 }, { kind: "shared", other: "quota" }, { kind: "rounded", found: "£1.2m" }, { kind: "stale", from: 1250 }];
     for (const n of [1, 2, 10, 11, 12]) {
       const reason = refusalReason(Array.from({ length: n }, (_, i) => refusal(`Finding\n\n${i}\r\n  title\n`, whys[i % whys.length])));
-      assert.ok(reason.includes("only as 3:9, which may be this figure or a date, a time or a ratio, and we can't tell."));
+      assert.ok(reason.includes("only as 3:9, which we can't be sure is this figure and can't rewrite."));
+      if (n > 1) assert.ok(reason.split("\n")[2]!.endsWith("but the wording has 1,200 only as a dozen, which we can't be sure is this figure and can't rewrite."), reason);
       // As documentsErrorView reads it: split on newlines, trimmed, blanks dropped.
       const read = reason.split("\n").map((l) => l.trim()).filter(Boolean);
       assert.deepEqual(read, reason.split("\n"), "no line empty or padded");
@@ -536,7 +538,12 @@ describe("every overridable figure of the synthetic run, each alone (decision 51
       // Decision 516 moves none: no text on the run holds a colon form, and the one bare year its reader finds,
       // adp.falling-adoption's "2026" of "in 2026-02", is part of a year and month. A refusal for a figure
       // printed only as one would be counted as "refused, unsure".
-      assert.deepEqual(counts, { "rewritten in one place": 173, "changed with no text": 74, "refused, repeated": 39, "refused, shared": 51, "refused, rounded": 6 });
+      // Decision 520 makes a figure in words an unsure form. A fact of 1 beside "one" in its wording: rewritten to repeated for
+      // dq.duplicate-accounts' share ("at least one other"), sec.modify-all-data's unexpected ("one compromised or careless login"),
+      // bp.ownership-skew's pairs and act.rep-activity-spread's low; changed with no text to unsure for int.api-usage's
+      // DailyApiRequestsShare ("which one reading can't size"), and adp.low-engagement-group's groups of 2 ("count them twice").
+      // int.api-usage's DailyApiRequestsUsed of 1,000 is near "one" in thousands, so changed with no text to rounded.
+      assert.deepEqual(counts, { "rewritten in one place": 169, "changed with no text": 71, "refused, repeated": 43, "refused, shared": 51, "refused, rounded": 7, "refused, unsure": 2 });
     });
   }
 });
