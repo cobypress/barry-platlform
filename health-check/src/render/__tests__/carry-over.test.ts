@@ -418,6 +418,15 @@ describe("carry-over: a label only over what it heads (DECISIONS.md 510)", () =>
     }
   });
 
+  test("a page's own title over a block moved whole keeps the rule it had before 507: it goes with the block when content stays above it", async () => {
+    const { pages, page } = await split(`${gap(300)}<h2>Second</h2><figure style="margin:20px 0 0;height:200px"></figure>`, "h2, h3, figure");
+    try {
+      assert.deepEqual(pages, [["h2:Title"], ["h2:Title, continued", "h2:Second", "figure:"]]);
+    } finally {
+      await page.close();
+    }
+  });
+
   test("a list split after a note under the same heading goes without a label: the list isn't the first thing it heads", async () => {
     const { pages, page } = await split(`${gap(100)}<div><h3>Label</h3>${note}${items("A", 10)}</div>`, "h2, h3, li, p");
     try {
