@@ -8,7 +8,7 @@ import { buildReport, type BuiltReport, type ReportInput } from "../sections.ts"
 import { Pseudonymiser, type PseudonymEntry } from "../../privacy/pseudonymiser.ts";
 import { printDocuments, OUTPUT_FILES } from "../../render/render-run.ts";
 import { heldFigures } from "../../render/render-released.ts";
-import type { FigureSet } from "../../numbercheck/index.ts";
+import { extractFigures, type FigureSet } from "../../numbercheck/index.ts";
 import type { Finding, NumberOverride } from "../../schemas/index.ts";
 import { runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
@@ -278,5 +278,39 @@ describe("bp.users-without-role on the synthetic run (decision 514, item 2)", ()
     const shown = report.teamFindings.find((x) => x.id === f.id)!;
     assert.equal(shown.summary, f.summary.replace("2 of 11 (18.2%)", "2 of 12 (18.2%)"));
     assert.equal(shown.facts.n, 12);
+  });
+});
+
+// Every overridable figure, put back. A figure's other values are every other
+// number its finding prints (an override to one of them is the case the rows
+// given in turn got wrong) and its value plus 7. Rows for different findings,
+// and for different figures of one finding, are judged apart, so each round
+// puts back one value a figure, across the run: every pair is in one round.
+describe("every overridable figure of the synthetic run, put back (decision 514, item 1)", () => {
+  const values = (f: Finding): number[] => [...new Set(textsOf(f).flatMap((t) => extractFigures(t).figures.flatMap((x) => (typeof x.value === "number" ? [x.value] : []))))];
+  const figures = output!.findings.flatMap((f) => {
+    const printedValues = values(f);
+    return [...Object.entries(f.facts).map(([key, value]) => ({ f, field: `facts.${key}`, value })), ...(f.value.kind === "not_sized" ? [] : [{ f, field: "value.amount", value: f.value.amount }])].map((figure) => ({
+      ...figure,
+      others: [...printedValues.filter((x) => x !== figure.value), figure.value + 7],
+    }));
+  });
+
+  test("A to X to A, for every number X its finding prints, and A to A+7 to A: the dataset, findings, metrics and value model are the run's with no override", () => {
+    const rounds = Math.max(...figures.map((x) => x.others.length));
+    let pairs = 0;
+    for (let round = 0; round < rounds; round++) {
+      const rows = figures.flatMap(({ f, field, value, others }) => (round < others.length ? [onRun(f, field, value, others[round]!), onRun(f, field, others[round]!, value)] : []));
+      pairs += rows.length / 2;
+      const report = built(...rows);
+      assert.deepEqual(report.refused, [], `round ${round}`);
+      assert.deepEqual(given(...rows), [], `round ${round}`);
+      assert.deepEqual(sansOverrides(report.dataset), sansOverrides(asBuilt.dataset), `round ${round}`);
+      assert.deepEqual(report.teamFindings, asBuilt.teamFindings, `round ${round}`);
+      assert.deepEqual(report.metrics, asBuilt.metrics, `round ${round}`);
+      assert.deepEqual(report.value, asBuilt.value, `round ${round}`);
+    }
+    assert.equal(figures.length, 343, "319 facts and 24 sized amounts");
+    assert.equal(pairs, 1414 + 343, "each figure against every other number its finding prints, and plus 7");
   });
 });
