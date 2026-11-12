@@ -17,7 +17,7 @@ import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
 // so a figure put back clears; and a date, an identifier and a clock time are
 // not figures.
 // DECISIONS.md 515: digits joined by a colon are never rewritten and never
-// passed over.
+// passed over; a metric's row runs from its value as read.
 
 const AT = "2026-10-31T13:00:00.000Z";
 const evidence = { kind: "soql", api: "rest", query: "SELECT Id FROM User LIMIT 2000", count: 11, dateRange: { from: "2024-10-31", to: "2026-10-31" }, exclusions: [], capturedAt: AT } as Finding["evidence"][number];
@@ -313,6 +313,24 @@ describe("a metric's rows, collapsed field by field (decision 514, item 1)", () 
     const report = built(...rows);
     assert.equal((report.metrics.find((m) => m.id === "historic.win_rate") as { value: number }).value, 52);
     assert.deepEqual(of(report.dataset), of(asBuilt.dataset).map((f) => f.replace(/ 47$/, " 52")).sort());
+    assert.deepEqual(rawNotesRows(report), rows.map(rowLine));
+  });
+
+  test("A as read, then a stale B to C and C to B: the rows apply in order, so the metric ends at B, and the one row runs from A to B. The first row's old value to the last's new gave none", () => {
+    const rows = [onMetric("value", 45, 52), onMetric("value", 52, 45)];
+    assert.deepEqual(given(...rows), [{ ...rows[1]!, previousValue: 47, newValue: 45 }]);
+    const report = built(...rows);
+    assert.equal((report.metrics.find((m) => m.id === "historic.win_rate") as { value: number }).value, 45);
+    assert.deepEqual(of(report.dataset), of(asBuilt.dataset).map((f) => f.replace(/ 47$/, " 45")).sort());
+    assert.deepEqual(rawNotesRows(report), rows.map(rowLine));
+  });
+
+  test("a stale row, then a row back to A: no row, and the report is the report of no override. The first row's old value to the last's new gave a row that dropped the metric's own 45", () => {
+    const rows = [onMetric("value", 45, 52), onMetric("value", 52, 47)];
+    assert.deepEqual(given(...rows), []);
+    const report = built(...rows);
+    assert.deepEqual(report.metrics, asBuilt.metrics);
+    assert.deepEqual(sansOverrides(report.dataset), sansOverrides(asBuilt.dataset));
     assert.deepEqual(rawNotesRows(report), rows.map(rowLine));
   });
 

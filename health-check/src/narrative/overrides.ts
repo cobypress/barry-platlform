@@ -242,12 +242,23 @@ function overrideMetric(m: Metric, o: NumberOverride): Metric {
   return { ...m, stats: { ...m.stats, [o.target.field.slice("stats.".length)]: o.newValue } };
 }
 
+/** A measured metric's figure an override names, or undefined for a stat it doesn't have. */
+function metricValue(m: Metric, field: string): number | undefined {
+  if (m.status !== "measured") return undefined;
+  if (field === "value") return m.value;
+  if (field === "n") return m.n;
+  return m.stats[field.slice("stats.".length)];
+}
+
 /**
- * A row a metric's field, for the number check: from the first row's old value
- * to the last row's new value, and none when they're equal (DECISIONS.md 514).
- * A metric the run doesn't hold, or doesn't measure, carries nothing.
+ * A row a metric's field, for the number check: from the metric's value as
+ * read to its value once every row is applied, and none when they're equal
+ * (DECISIONS.md 515). The rows apply in order whatever their old values say,
+ * so a stale row put back can leave the metric away from what was read. A
+ * metric the run doesn't hold, or doesn't measure, carries nothing, nor does a
+ * stat it didn't have as read: there is no figure as read to replace.
  */
-function metricRows(metrics: Metric[], overrides: NumberOverride[]): NumberOverride[] {
+function metricRows(metrics: Metric[], after: Metric[], overrides: NumberOverride[]): NumberOverride[] {
   const fields = new Map<string, NumberOverride[]>();
   for (const o of overrides) {
     const m = o.target.type === "metric" ? metrics.find((x) => x.id === o.target.id) : undefined;
@@ -255,7 +266,12 @@ function metricRows(metrics: Metric[], overrides: NumberOverride[]): NumberOverr
     const key = JSON.stringify([o.target.id, o.target.field]);
     fields.set(key, [...(fields.get(key) ?? []), o]);
   }
-  return [...fields.values()].flatMap((rows) => (rows[0]!.previousValue === rows.at(-1)!.newValue ? [] : [{ ...rows.at(-1)!, previousValue: rows[0]!.previousValue }]));
+  return [...fields.values()].flatMap((rows) => {
+    const { id, field } = rows[0]!.target;
+    const asRead = metricValue(metrics.find((m) => m.id === id)!, field);
+    const last = metricValue(after.find((m) => m.id === id)!, field);
+    return asRead === undefined || last === undefined || asRead === last ? [] : [{ ...rows.at(-1)!, previousValue: asRead, newValue: last }];
+  });
 }
 
 /**
@@ -279,7 +295,7 @@ export function applyOverrides(findings: Finding[], metrics: Metric[], overrides
   });
   let outM = metrics;
   for (const o of overrides) if (o.target.type === "metric") outM = outM.map((m) => (m.id === o.target.id ? overrideMetric(m, o) : m));
-  return { findings: outF, metrics: outM, refused, carried: [...carried, ...metricRows(metrics, overrides)] };
+  return { findings: outF, metrics: outM, refused, carried: [...carried, ...metricRows(metrics, outM, overrides)] };
 }
 
 // The reason a refusal holds the documents, in the shape the console lists
