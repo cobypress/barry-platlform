@@ -5,7 +5,7 @@ import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Browser } from "playwright";
+import type { Browser, Page } from "playwright";
 import type { NarrativeClient } from "../../narrative/client.ts";
 import { Intake } from "../../narrative/intake.ts";
 import { buildReport, currentBody, type BuiltReport, type ReportInput } from "../../narrative/sections.ts";
@@ -17,6 +17,7 @@ import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
 import { EXECUTIVE_PLAN_ITEMS, executiveHtml, executiveMaxPages } from "../executive.ts";
 import { scoreDomains } from "../../domains/scoring.ts";
 import { syntheticInterviews } from "../../testing/interviews.ts";
+import { syntheticSurvey } from "../../testing/survey.ts";
 import { compactMoney, plainWords, ukDates } from "../format.ts";
 import { yearlyByFinding } from "../../value/model.ts";
 import { DECK_RANGE, deckRangeFor, fullReportHtml, fullReportHtmlAt, INVENTORY_SLIDE_ROWS, slideCounts } from "../full-report.ts";
@@ -433,15 +434,15 @@ describe("the progress page at its fullest with the engine's own titles, and pas
   const ordered = (findings: Finding[]): Finding[] => [...findings].sort((a, b) => (b.status === "issue" ? b.title.length : 0) - (a.status === "issue" ? a.title.length : 0));
   const passed = (f: Finding): Finding => ({ ...f, status: "passed", value: { kind: "not_sized", reason: "Passed." } });
   const limitsAt = (iso: string, extra: Partial<typeof run> = {}) => ({ ...run, ...extra, steps: run.steps.map((s) => (s.id === "api-limits" ? { ...s, finishedAt: iso } : s)) });
-  /** `planted`: a rule fixed since the earlier check, one of its issues then (titled `replacing`) titled in the customer's words. */
-  const storage = (then: Record<string, number>, now: Record<string, number>, planted?: { ruleId: string; replacing: string; title: string }): BuiltReport => {
+  /** `planted`: a rule fixed since the earlier check, one of its issues then (titled `replacing`) titled in the customer's words. `retitle`: this check's findings as worded. */
+  const storage = (then: Record<string, number>, now: Record<string, number>, planted?: { ruleId: string; replacing: string; title: string }, retitle: (f: Finding) => Finding = (f) => f): BuiltReport => {
     const input: ReportInput = { ...full, interviews: syntheticInterviews() };
     const fixedNow = planted ? new Set([...fixed, planted.ruleId]) : fixed;
     const first = planted && output!.findings.find((f) => f.ruleId === planted.ruleId && f.status === "issue" && f.title === planted.replacing);
     assert.ok(!planted || first, "the planted title replaces one the synthetic run has");
     const before = ordered(output!.findings.map((f) => (f.ruleId === STORAGE ? { ...f, facts: then } : f === first ? { ...f, title: planted!.title } : added.has(f.ruleId) && f.status === "issue" ? passed(f) : f)));
     const later = ordered(
-      output!.findings.map((f): Finding =>
+      output!.findings.map(retitle).map((f): Finding =>
         f.ruleId === STORAGE ? { ...f, facts: now } : fixedNow.has(f.ruleId) && f.status === "issue" ? passed(f) : f.ruleId === unknown && f.status === "issue" ? { ...f, status: "not_measurable", notMeasurableReason: "Couldn't be read this time.", value: { kind: "not_sized", reason: "Not measured." } } : f,
       ),
     );
@@ -486,7 +487,7 @@ describe("the progress page at its fullest with the engine's own titles, and pas
   const customer: BuiltReport = { ...planted, progress: { ...planted.progress!, fixed: [...planted.progress!.fixed].sort((a, b) => Number(b.ruleId === SEGMENT) - Number(a.ruleId === SEGMENT)) } };
 
   /** Each slide of the progress page once carried over as printDocuments does: its eyebrow, heading, and the text under them. */
-  async function progressSlides(html: string): Promise<{ pages: number; slides: Array<{ eyebrow: string; heading: string; notes: string[] }> }> {
+  async function progressSlides(html: string): Promise<{ pages: number; slides: Array<{ eyebrow: string; heading: string; notes: string[]; block: string }> }> {
     const context = await browser.newContext({ offline: true });
     try {
       const page = await context.newPage();
@@ -503,7 +504,7 @@ describe("the progress page at its fullest with the engine's own titles, and pas
           const p = pages[i]!;
           const heading = p.querySelector("h2")?.textContent ?? "";
           if (i > first && heading && !/, continued$/.test(heading)) break;
-          slides.push({ eyebrow: p.querySelector(".eyebrow")?.textContent ?? "", heading, notes: [...p.querySelectorAll(".progress > p.note")].map((n) => n.textContent ?? "") });
+          slides.push({ eyebrow: p.querySelector(".eyebrow")?.textContent ?? "", heading, notes: [...p.querySelectorAll(".progress > p.note")].map((n) => n.textContent ?? ""), block: p.querySelector(".progress")!.innerHTML });
         }
         return { pages: pages.length, slides };
       });
@@ -629,7 +630,7 @@ describe("the progress page at its fullest with the engine's own titles, and pas
     assertLabelled(carried, [1]);
   });
 
-  test("all three split, with every optional part at its longest: labelled, and no further slide on either document (DECISIONS.md 507 and 508)", async () => {
+  test("all three split at the planted length, every optional part at its longest: labelled, and the engine's own fullest case needs no further slide on either document (DECISIONS.md 507, 508 and 510)", async () => {
     const report = longer(["fixed", "remaining", "added"], 2 * TEAMS.length);
     const range = deckRangeFor(report.input.run);
     const html = fullReportHtml(report, pseudonyms);
@@ -648,6 +649,25 @@ describe("the progress page at its fullest with the engine's own titles, and pas
     for (const slide of (await carriedLists(executive)).slides) for (const col of slide.columns) if (col.items.length) assert.equal(col.first, "H3", JSON.stringify(col));
   });
 
+  test("longer than the planted length, the three labels cost one further slide, which carries only the closing note under the slide's heading (DECISIONS.md 510)", async () => {
+    // From about 260 characters more a title, the labels' lines push the closing note on.
+    const report = longer(["fixed", "remaining", "added"], 300);
+    const range = deckRangeFor(report.input.run);
+    const html = fullReportHtml(report, pseudonyms);
+    const pdf = await renderPdf(browser, html, { minPages: range.min, maxPages: range.max, dataset: report.dataset, carryOver: true });
+    assert.deepEqual(pdf.layout.problems, [], describeProblems(pdf.layout.problems));
+    // Rendered the same way with fe5b440's carry-over.ts (before the labels; nothing else it prints has changed since), this case printed 114 slides.
+    assert.equal(pdf.layout.pages, 114 + 1);
+    const carried = await progressSlides(html);
+    assert.equal(carried.pages, pdf.layout.pages);
+    assert.deepEqual(carried.slides.map((x) => [x.eyebrow, x.heading]), [
+      ["Since your last health check", "What has changed"],
+      ["Since your last health check", "What has changed, continued"],
+      ["Since your last health check", "What has changed, continued"],
+    ]);
+    assert.equal(carried.slides[2]!.block, `<p class="note">${CLOSING}</p>`);
+  });
+
   test("on the executive summary too, once titles are long enough to split its lists (DECISIONS.md 507 and 508)", async () => {
     // Measured: its lists split only once every title is about 380 characters longer than the
     // engine's own, after every note has already gone over. No title the engine writes is that
@@ -658,6 +678,35 @@ describe("the progress page at its fullest with the engine's own titles, and pas
     assert.equal(printed.layout.passed, true);
     assert.deepEqual(printed.layout.problems, [], describeProblems(printed.layout.problems));
     assertLabelled(await carriedLists(html), [0, 1, 2]);
+  });
+
+  test("a part's heading goes over with what it heads, never the slide's eyebrow or title: no blank slide and no title twice (DECISIONS.md 510)", async () => {
+    // The adversary's case: the 505 report with every integrations issue title 220 characters
+    // longer. The interviews table's bottom margin alone crosses the footer on its continued slide.
+    const TEAMS = " for the Enterprise Sales North America and Asia Pacific Partner Channel teams";
+    const integrations = storage(kinds([812_345, 900_000], [712_345, 800_000]), kinds([962_345, 950_000], [862_345, 850_000]), { ruleId: SEGMENT, replacing: "Win rate for the Sales EU team is well below the overall figure", title: TEAM_TITLE }, (f) =>
+      f.status === "issue" && f.domain === "integrations" ? { ...f, title: f.title + TEAMS.repeat(3).slice(0, 220) } : f,
+    );
+    const report: BuiltReport = { ...integrations, progress: { ...integrations.progress!, fixed: [...integrations.progress!.fixed].sort((a, b) => Number(b.ruleId === SEGMENT) - Number(a.ruleId === SEGMENT)) } };
+    const { page, close } = await printed(fullReportHtml(report, pseudonyms));
+    try {
+      // The run ends. Measured: 318 pages, held for its page count and an overflow, as it was at
+      // fe5b440: the table moves on whole from every slide it lands on, up to the carry-over's
+      // limit. That older fault is not 510's; 508's pull-back had printed 124 pages instead,
+      // with a blank slide and the next carrying its eyebrow and title twice.
+      assert.equal(typeof (await carryOver(page)), "number");
+      const odd = await page.evaluate(() =>
+        [...window.document.querySelectorAll<HTMLElement>(".page")].flatMap((p, i) => {
+          if (p.classList.contains("cover")) return [];
+          const kids = [...p.children].filter((c) => !c.hasAttribute("data-chrome"));
+          const blank = kids.every((c) => !(c.textContent ?? "").trim() && !c.querySelector("svg, img, figure"));
+          return blank || p.querySelectorAll(".eyebrow").length > 1 || p.querySelectorAll("h1, h2").length > 1 ? [`page ${i + 1}: ${kids.map((k) => k.textContent).join(" / ").slice(0, 120)}`] : [];
+        }),
+      );
+      assert.deepEqual(odd, []);
+    } finally {
+      await close();
+    }
   });
 
   test("the 505 case's continued slide is as it was before the labels, character for character", async () => {
@@ -715,9 +764,24 @@ describe("a list split across a chapter slide keeps the label it sits under (DEC
           return [{ area: pages[i - 1]!.querySelector(".chapter > .eyebrow")?.textContent ?? "", groups }];
         });
         const stacked = [...window.document.querySelectorAll("h3, h4, h5")].filter((h) => /, continued$/.test(h.textContent ?? "") && /^H[1-5]$/.test(h.nextElementSibling?.tagName ?? "")).map((h) => h.textContent);
-        return { carried, stacked };
+        // The copy's mark doesn't change how it looks (DECISIONS.md 510): its style with and without the mark.
+        const style = (el: Element): string => {
+          const computed = getComputedStyle(el);
+          return [...computed].map((name) => `${name}:${computed.getPropertyValue(name)}`).join(";");
+        };
+        const marked = [...window.document.querySelectorAll("[data-carried-label]")];
+        const restyled = marked.filter((h) => {
+          const was = style(h);
+          h.removeAttribute("data-carried-label");
+          const plain = style(h);
+          h.setAttribute("data-carried-label", "");
+          return was !== plain;
+        });
+        return { carried, stacked, marked: marked.length, restyled: restyled.map((h) => h.textContent) };
       });
       assert.deepEqual(facts.stacked, []);
+      assert.equal(facts.marked, 2);
+      assert.deepEqual(facts.restyled, []);
       assert.deepEqual(facts.carried.map((c) => [c.area, c.groups[0]!.label]), [
         ["Configuration", "What's below par, continued"],
         ["Automation", "What's below par, continued"],
@@ -737,6 +801,142 @@ describe("a list split across a chapter slide keeps the label it sits under (DEC
       }
     } finally {
       await context.close();
+    }
+  });
+});
+
+/** Opens a document as the documents job prints it, carried over. */
+async function printed(html: string): Promise<{ page: Page; close: () => Promise<void> }> {
+  const context = await browser.newContext({ offline: true });
+  const page = await context.newPage();
+  await page.setContent(html, { waitUntil: "load" });
+  await page.evaluate(() => window.document.fonts.ready.then(() => undefined));
+  await page.emulateMedia({ media: "print" });
+  return { page, close: () => context.close() };
+}
+
+/**
+ * What each copied label stands over, against what its heading heads where it was
+ * built: the tag of the element after it, by the heading's words (references left out).
+ */
+async function labelsOver(page: Page): Promise<{ heads: Record<string, string[]>; copies: Array<{ page: number; label: string; over: string }> }> {
+  const words = () =>
+    page.evaluate(() => {
+      const text = (el: Element): string => {
+        const copy = el.cloneNode(true) as Element;
+        for (const ref of copy.querySelectorAll("[data-ref]")) ref.remove();
+        return (copy.textContent ?? "").replace(/, continued$/, "");
+      };
+      const heads: Record<string, string[]> = {};
+      for (const h of window.document.querySelectorAll("h3:not([data-carried-label]), h4:not([data-carried-label]), h5:not([data-carried-label])")) (heads[text(h)] ??= []).push(h.nextElementSibling?.tagName ?? "");
+      const pages = [...window.document.querySelectorAll(".page")];
+      const copies = [...window.document.querySelectorAll("[data-carried-label]")].map((h) => ({ page: pages.indexOf(h.closest(".page")!) + 1, label: text(h), over: h.nextElementSibling?.tagName ?? "" }));
+      return { heads, copies };
+    });
+  const { heads } = await words();
+  await carryOver(page);
+  return { heads, copies: (await words()).copies };
+}
+
+/** Every copied label stands over the kind of thing its heading heads. */
+function assertOverWhatItHeads({ heads, copies }: Awaited<ReturnType<typeof labelsOver>>): void {
+  for (const c of copies) assert.ok(heads[c.label]?.includes(c.over), `page ${c.page}: "${c.label}, continued" over a ${c.over}, but it heads ${JSON.stringify(heads[c.label])}`);
+}
+
+describe("a split list's label is copied only over what it heads, and isn't a slide's content (DECISIONS.md 510)", () => {
+  // The verdict page's closing sources sentence sits after the last part and belongs to
+  // none. A draft at its allowed length, with interviews or a survey beside the verdict,
+  // carries it onto a continued slide on its own.
+  const LONG = "Considerable organisational inconsistencies undermine forecasting dependability throughout commercial operations".split(" ");
+  const SOURCES_END = "Where we couldn't measure something, we say so rather than estimate it.";
+  const verdictOf = (extra: Partial<ReportInput>, words: number): BuiltReport => {
+    const report = buildReport({ ...full, ...extra });
+    const built = report.outputs.executive_summary;
+    const section = built.sections.find((x) => x.key === "verdict")!;
+    const version = built.versions.find((v) => v.id === section.currentVersionId)!;
+    version.body = `${version.body.split("\n\n")[0]}\n\n${Array.from({ length: words }, (_, i) => LONG[i % LONG.length]).join(" ")}.`;
+    return report;
+  };
+  const verdicts: Array<[string, Partial<ReportInput>, number]> = [
+    ["interviews", { interviews: syntheticInterviews() }, 35],
+    ["interviews", { interviews: syntheticInterviews() }, 40],
+    ["interviews", { interviews: syntheticInterviews() }, 43],
+    ["a survey", { survey: syntheticSurvey(12) }, 40],
+    ["a survey", { survey: syntheticSurvey(12) }, 43],
+  ];
+
+  for (const [voice, extra, words] of verdicts) {
+    test(`the verdict at ${words} words with ${voice}: the sources sentence goes over under no label`, async () => {
+      const report = verdictOf(extra, words);
+      const html = executiveHtml(report, pseudonyms);
+      const pdf = await renderPdf(browser, html, { minPages: EXECUTIVE_PAGES.min, maxPages: executiveMaxPages(report), dataset: report.dataset, carryOver: true });
+      assert.equal(pdf.layout.passed, true, describeProblems(pdf.layout.problems));
+      const { page, close } = await printed(html);
+      try {
+        const over = await labelsOver(page);
+        assertOverWhatItHeads(over);
+        const continued = await page.evaluate(() => {
+          const pages = [...window.document.querySelectorAll<HTMLElement>(".page")];
+          const at = pages.findIndex((p) => p.querySelector(":scope > .eyebrow")?.textContent === "Verdict");
+          return [...pages[at + 1]!.children].filter((c) => !c.hasAttribute("data-chrome")).map((c) => `${c.tagName}${c.className ? `.${c.className}` : ""}:${c.textContent}`);
+        });
+        assert.equal(continued.length, 2, JSON.stringify(continued));
+        assert.equal(continued[0], "DIV.eyebrow:Verdict");
+        assert.ok(continued[1]!.startsWith("P:") && continued[1]!.endsWith(SOURCES_END), JSON.stringify(continued));
+      } finally {
+        await close();
+      }
+    });
+  }
+
+  test("a chapter panel's note about checks that couldn't be measured goes over under no label", async () => {
+    // Each utilisation issue's recommendation, the first thing "What to do first" lists, 520 characters longer.
+    const TEAMS = " for the Enterprise Sales North America and Asia Pacific Partner Channel teams";
+    const findings = output!.findings.map((f) => (f.status === "issue" && f.domain === "utilisation" ? { ...f, recommendation: f.recommendation.replace(/[.!?](\s|$)/, `${TEAMS.repeat(8).slice(0, 520)}.$1`) } : f));
+    const report = buildReport({ ...base, findings });
+    const html = fullReportHtml(report, pseudonyms);
+    const range = deckRangeFor(report.input.run);
+    const pdf = await renderPdf(browser, html, { minPages: range.min, maxPages: range.max, dataset: report.dataset, carryOver: true });
+    assert.equal(pdf.layout.passed, true, describeProblems(pdf.layout.problems));
+    const { page, close } = await printed(html);
+    try {
+      const over = await labelsOver(page);
+      assertOverWhatItHeads(over);
+      assert.ok(!over.copies.some((c) => c.label === "What good looks like"), JSON.stringify(over.copies));
+      // The note did go over, alone in its panel.
+      const panel = await page.evaluate(() => [...window.document.querySelectorAll(".chapter .panel")].filter((p) => !p.closest(".page")!.querySelector(".chapter > h2")).map((p) => p.innerHTML));
+      assert.deepEqual(panel, ['<p class="note" style="font-size:13.5px;color:var(--muted)">1 more check couldn\'t be measured here. The appendix says why.</p>']);
+    } finally {
+      await close();
+    }
+  });
+
+  test("a continued slide holding only a copied label and one short line is held as an empty section, as before the labels", async () => {
+    // Every data quality issue's title 120 characters longer: the chapter's last list item goes over alone.
+    const TEAMS = " for the Enterprise Sales North America and Asia Pacific Partner Channel teams";
+    const findings = output!.findings.map((f) => (f.status === "issue" && f.domain === "data_quality" ? { ...f, title: f.title + TEAMS.repeat(3).slice(0, 120) } : f));
+    const report = buildReport({ ...base, findings });
+    const html = fullReportHtml(report, pseudonyms);
+    const range = deckRangeFor(report.input.run);
+    const pdf = await renderPdf(browser, html, { minPages: range.min, maxPages: range.max, dataset: report.dataset, carryOver: true });
+    assert.equal(pdf.layout.passed, false);
+    assert.deepEqual(pdf.layout.problems.map((p) => p.check), ["empty section"], describeProblems(pdf.layout.problems));
+    const { page, close } = await printed(html);
+    try {
+      await carryOver(page);
+      const held = await page.evaluate((at) => {
+        const slide = window.document.querySelectorAll(".page")[at - 1]!;
+        const parts: string[] = [];
+        const walker = window.document.createTreeWalker(slide, NodeFilter.SHOW_TEXT);
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+          if (node.parentElement?.closest("[data-chrome], [data-ref], [data-carried-label]")) continue;
+          if ((node.textContent ?? "").trim()) parts.push((node.textContent ?? "").trim());
+        }
+        return { unmarked: parts, labels: [...slide.querySelectorAll("[data-carried-label]")].map((h) => h.textContent) };
+      }, pdf.layout.problems[0]!.page);
+      assert.deepEqual(held, { unmarked: ["And 5 more on the pages that follow."], labels: ["What's below par, continued"] });
+    } finally {
+      await close();
     }
   });
 });
@@ -804,6 +1004,13 @@ describe("the layout checks fire", () => {
 
   test("an empty section", async () => {
     assert.ok((await checks(doc(page(ok), page("<h2>Title only</h2>", 2)))).includes("empty section"));
+  });
+
+  test("a label the carry-over copied isn't counted as a page's content (DECISIONS.md 510)", async () => {
+    const carried = (marker: string) => page(`<h3${marker}>What's below par, continued</h3><ul><li>And 5 more on the pages that follow.</li></ul>`, 2);
+    assert.deepEqual(await checks(doc(page(ok), carried(" data-carried-label"))), ["empty section"]);
+    // The same words as the page's own heading are content.
+    assert.deepEqual(await checks(doc(page(ok), carried(""))), []);
   });
 
   test("a page holding only its footer", async () => {
