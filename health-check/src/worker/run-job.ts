@@ -6,7 +6,7 @@ import { applyNarrative, type Rejection } from "../narrative/apply.ts";
 import type { NarrativeClient } from "../narrative/client.ts";
 import { buildReport, type BuiltReport, type ReportInput } from "../narrative/sections.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
-import { BASELINE_OVERRIDES_FILE, INTERVIEWS_FILE, loadRun, OUTPUT_FILES, SURVEY_FILE, writeRows } from "../render/render-run.ts";
+import { BASELINE_OVERRIDES_FILE, BASELINE_READ_FILE, INTERVIEWS_FILE, loadRun, OUTPUT_FILES, SURVEY_FILE, writeBaselineRead, writeRows } from "../render/render-run.ts";
 import { BASELINE_ROWS_UNREAD, baselineRefusedSummary } from "../render/render-released.ts";
 import { INTERVIEW_VERSION } from "../interviews/questions.ts";
 import { OAuthConnectionProvider, revokeConnection } from "../salesforce/oauth-provider.ts";
@@ -195,11 +195,13 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
     // A re-check is drafted from its earlier health check's corrections as they
     // stand now, and keeps them, so its documents are built from the same rows
     // whatever is made again later (DECISIONS.md 528). None, or no baseline: the
-    // file goes, so a re-draft always matches its drafts. Written before the
-    // sections file and the console's save, in that order: a run reaches review
-    // only by a delivery whose three writes all happened, and every delivery
-    // drafts again, so a half-done one never stands (DECISIONS.md 529). A scan
-    // and a pulse are never reviewed or printed, so neither keeps any.
+    // file goes, so a re-draft always matches its drafts. It records too whether
+    // it read the earlier health check at all, so its documents compare with it
+    // only if the drafts do (534). Written before the sections file and the
+    // console's save, in that order: a run reaches review only by a delivery
+    // whose writes all happened, and every delivery drafts again, so a half-done
+    // one never stands (DECISIONS.md 529). A scan and a pulse are never reviewed
+    // or printed, so neither keeps any.
     const { input: reportInput, pseudonyms, baselineRowsUnread } = loadRun(dir, { baselineRows: "live" });
     if (input.run.product !== "scan" && input.run.product !== "pulse") {
       // Read as none, so the draft holds the figures as read, as its documents will (DECISIONS.md 531). A pulse says so when it's built.
@@ -208,6 +210,8 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
       const rows = reportInput.baseline?.overrides ?? [];
       if (rows.length > 0) writeRows(kept, rows);
       else rmSync(kept, { force: true });
+      // Only a re-check: a first health check's folder is left as it was.
+      if (reportInput.run.baselineRunId) writeBaselineRead(join(dir, BASELINE_READ_FILE), reportInput.baseline != null);
     }
     // Before the sections, because these are kept as they're made and the
     // sections aren't: a job stopped part way through picks the summaries up

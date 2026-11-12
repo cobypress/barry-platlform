@@ -178,7 +178,7 @@ async function main(argv: string[]): Promise<number> {
 
   if (positionals[0] === "render" && values.run) {
     // Loaded here so `hc run` never needs Chromium or the Claude SDK.
-    const { OverridesRefused, renderRun } = await import("../render/render-run.ts");
+    const { BASELINE_GONE, OverridesRefused, renderRun } = await import("../render/render-run.ts");
     const client = values.narrative ? (await import("../narrative/client.ts")).anthropicClient() : undefined;
     const result = await renderRun(values.run, { client }).catch((err: unknown) => {
       if (err instanceof OverridesRefused) return err;
@@ -194,6 +194,8 @@ async function main(argv: string[]): Promise<number> {
       for (const p of layout.problems) console.log(`  page ${p.page}, ${p.check}: ${p.detail}`);
     }
     for (const r of result.rejections) console.log(`Kept the engine's text for ${r.sectionId}: ${r.reasons.join(" ")}`);
+    // As the worker's log says it (DECISIONS.md 534): the documents are still written.
+    if (result.baselineGone) console.error(`Run ${result.report.input.run.id}: ${BASELINE_GONE}`);
     console.log(`Written to ${values.run}`);
     return result.passed ? EXIT.ok : EXIT.failed;
   }

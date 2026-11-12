@@ -48,6 +48,8 @@ export type ReleasedDocuments = {
   caseStudy?: string;
   /** How many of the earlier health check's corrected figures a re-check shows as read, for the log (DECISIONS.md 522). Left out by renderers that don't compare. */
   baselineRefused?: number;
+  /** The earlier health check the re-check's draft read can't be read now, so nothing compares with it, for the log (DECISIONS.md 534). */
+  baselineGone?: boolean;
 };
 
 /**
@@ -158,8 +160,8 @@ export function baselineRefusedSummary(n: number): string {
 export const BASELINE_ROWS_UNREAD = "the earlier health check's corrections couldn't be read, so the comparison shows its figures as read.";
 
 /** The run's report with the console's approved sections in place of the engine's drafts. */
-export function approvedReport(dir: string, approved: ApprovedRun): { report: BuiltReport; pseudonyms: Pseudonymiser } {
-  const { input, pseudonyms } = loadRun(dir);
+export function approvedReport(dir: string, approved: ApprovedRun): { report: BuiltReport; pseudonyms: Pseudonymiser; baselineGone: boolean } {
+  const { input, pseudonyms, baselineGone } = loadRun(dir);
   const report = buildReport({ ...input, overrides: approved.overrides, intake: approved.intake ?? input.intake, preparedBy: approved.preparedBy ?? null, benchmark: approved.benchmark ?? null });
   for (const built of Object.values(report.outputs)) {
     const sections = approved.sections.filter((s) => s.output === built.output).sort((a, b) => a.order - b.order);
@@ -170,7 +172,7 @@ export function approvedReport(dir: string, approved: ApprovedRun): { report: Bu
     built.sections = sections;
     built.versions = versions;
   }
-  return { report, pseudonyms };
+  return { report, pseudonyms, baselineGone };
 }
 
 export async function renderReleased(dir: string, approved: ApprovedRun, outDir: string): Promise<ReleasedDocuments | RefusedDocuments> {
@@ -178,7 +180,7 @@ export async function renderReleased(dir: string, approved: ApprovedRun, outDir:
   const out = resolve(outDir);
   assertOutsideGit(folder);
   assertOutsideGit(out);
-  const { report, pseudonyms } = approvedReport(folder, approved);
+  const { report, pseudonyms, baselineGone } = approvedReport(folder, approved);
   // Before anything is written: a refused make never leaves documents in the folder beside its failed row.
   if (report.refused.length > 0) return { refused: report.refused };
   mkdirSync(out, { recursive: true, mode: 0o700 });
@@ -210,5 +212,5 @@ export async function renderReleased(dir: string, approved: ApprovedRun, outDir:
   const study = await renderCaseStudyDocx(report, pseudonyms);
   const caseStudy = study ? join(out, "case-study-draft.docx") : undefined;
   if (study && caseStudy) writeFileSync(caseStudy, study, { mode: 0o600 });
-  return { files, warnings: layoutWarnings(layout), held: heldFigures(layout), microsite, ...(caseStudy ? { caseStudy } : {}), baselineRefused: report.baselineRefused };
+  return { files, warnings: layoutWarnings(layout), held: heldFigures(layout), microsite, ...(caseStudy ? { caseStudy } : {}), baselineRefused: report.baselineRefused, baselineGone };
 }
