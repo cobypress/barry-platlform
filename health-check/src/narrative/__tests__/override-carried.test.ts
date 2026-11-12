@@ -1,16 +1,16 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { applyOverrides, refusalReason } from "../overrides.ts";
 import { buildReport, type BuiltReport, type ReportInput } from "../sections.ts";
 import { Pseudonymiser, type PseudonymEntry } from "../../privacy/pseudonymiser.ts";
-import { printDocuments, OUTPUT_FILES } from "../../render/render-run.ts";
-import { heldFigures } from "../../render/render-released.ts";
+import { loadRun, printDocuments, OUTPUT_FILES } from "../../render/render-run.ts";
+import { heldFigures, renderReleased, type ApprovedRun } from "../../render/render-released.ts";
 import { buildDataset, checkNumbers, extractFigures, scopeDataset, type FigureSet } from "../../numbercheck/index.ts";
 import { fullReportHtml } from "../../render/full-report.ts";
-import type { Finding, NumberOverride } from "../../schemas/index.ts";
+import type { Finding, NumberOverride, ReportSection, SectionVersion } from "../../schemas/index.ts";
 import { runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
 
@@ -100,11 +100,7 @@ describe("a date, an identifier and a clock time are not figures (decision 514, 
     untouched("Monthly active users fell from 8 in 2026-02 to 5 in 2026-09.", 2026);
     untouched("Monthly active users fell from 8 in 2026-02 to 5 in 2026-09.", 2030);
   });
-  test("the day and the year of 31 December 2025", () => {
-    untouched("Closed by 31 December 2025.", 31);
-    untouched("Closed by 31 December 2025.", 2025);
-  });
-  test("the year of December 2025", () => untouched("Closed in December 2025.", 2025));
+  // Decision 518: a date read by a word is a guess, so these are refused as unsure, below, where round 4 masked them.
   test("the quarter of Q3 and of Q3 2026", () => {
     untouched("Closing in Q3.", 3);
     untouched("Closing in Q3 2026.", 3);
@@ -172,7 +168,7 @@ describe("digits joined by a colon are never rewritten and never passed over (de
     assert.deepEqual(result.refused.map((r) => r.why), [{ kind, found }], `${summary} ${value}`);
     assert.deepEqual(result.findings[0], f, `${summary} ${value}`);
     const [shown, to] = [value.toLocaleString("en-GB"), last.toLocaleString("en-GB")];
-    const why = kind === "unsure" ? `the wording has ${shown} only as ${found}, which may be this figure or a year, a time or a ratio, and we can't tell` : `the wording doesn't print ${shown} itself and has ${found}, which may be this figure rounded`;
+    const why = kind === "unsure" ? `the wording has ${shown} only as ${found}, which may be this figure or a date, a time or a ratio, and we can't tell` : `the wording doesn't print ${shown} itself and has ${found}, which may be this figure rounded`;
     assert.equal(refusalReason(result.refused).split("\n")[1], `"A planted finding", x: ${shown} as read, corrected to ${to}, but ${why}.`);
   }
 
@@ -232,7 +228,7 @@ describe("a form that may or may not be the figure is a place that can't be rewr
     return refusalReason(result.refused).split("\n")[1]!;
   };
   const onlyAs = (value: string, last: string, form: string, field = "x"): string =>
-    `"A planted finding", ${field}: ${value} as read, corrected to ${last}, but the wording has ${value} only as ${form}, which may be this figure or a year, a time or a ratio, and we can't tell.`;
+    `"A planted finding", ${field}: ${value} as read, corrected to ${last}, but the wording has ${value} only as ${form}, which may be this figure or a date, a time or a ratio, and we can't tell.`;
   const inPlaces = (value: string, last: string, places: number, field = "x"): string => `"A planted finding", ${field}: ${value} as read, corrected to ${last}, but the wording has ${value} in ${places} places, and we can't tell which of them are this figure.`;
   const rounded = (value: string, last: string, found: string): string => `"A planted finding", x: ${value} as read, corrected to ${last}, but the wording doesn't print ${value} itself and has ${found}, which may be this figure rounded.`;
 
@@ -382,20 +378,23 @@ describe("a metric's rows: the data holds the metric as the rows leave it (decis
     assert.deepEqual(rawNotesRows(report), rows.map(rowLine));
   });
 
-  test("A to B to C: the data holds C and not A as the metric's value, and keeps its own 45 and its segment's 47. The rows given in turn dropped the metric's own 45 too", () => {
+  // Decision 517: the win rate's 47 is also its FY2025-Q3 segment's n, so a correction that doesn't end at 47 is
+  // refused and the metric is as read everywhere, where round 4 carried it beside the segment's 47.
+  test("A to B to C: refused, since a segment is also 47, and the report's metrics and data are the run's with no override", () => {
     const rows = [onMetric("value", 47, 45), onMetric("value", 45, 52)];
     const report = built(...rows);
-    assert.equal((report.metrics.find((m) => m.id === "historic.win_rate") as { value: number }).value, 52);
-    assert.deepEqual(of(report.dataset), of(asBuilt.dataset).map((f) => f.replace(/^percent 47$/, "percent 52")).sort());
+    assert.deepEqual(report.refused.map((r) => [r.metricId, r.field, r.asRead, r.last, r.why]), [["historic.win_rate", "value", 47, 52, { kind: "part", where: "a segment" }]]);
+    assert.deepEqual(report.metrics, asBuilt.metrics);
+    assert.deepEqual(sansOverrides(report.dataset), sansOverrides(asBuilt.dataset));
     assert.deepEqual(rawNotesRows(report), rows.map(rowLine));
   });
 
-  test("A as read, then a stale B to C and C to B: the rows apply in order, so the metric ends at B, and the data holds B and not A as the metric's value. The first row's old value to the last's new gave no row", () => {
+  test("A as read, then a stale B to C and C to B: refused as stale, where round 4 applied the rows in order and ended at B", () => {
     const rows = [onMetric("value", 45, 52), onMetric("value", 52, 45)];
     const report = built(...rows);
-    assert.equal((report.metrics.find((m) => m.id === "historic.win_rate") as { value: number }).value, 45);
-    assert.deepEqual(of(report.dataset), of(asBuilt.dataset).map((f) => f.replace(/^percent 47$/, "percent 45")).sort());
-    assert.deepEqual(rawNotesRows(report), rows.map(rowLine));
+    assert.deepEqual(report.refused.map((r) => r.why), [{ kind: "stale", from: 45 }]);
+    assert.match(refusalReason(report.refused), /^"Win rate", value: 47 as read, corrected to 45, but the correction was made from 45, which this run no longer reads\.$/m);
+    assert.deepEqual(report.metrics, asBuilt.metrics);
   });
 
   test("a stale row, then a row back to A: the report is the report of no override. The first row's old value to the last's new gave a row that dropped the metric's own 45", () => {
@@ -638,4 +637,77 @@ describe("the number check's data is the findings as corrected, with no rows (de
       assert.deepEqual(await printed(report), []);
     });
   }
+});
+
+// Decision 518: a date the number check's reader finds by a word is a guess, and its digits standing by themselves are unsure.
+describe("a date read by a word is a guess, and its own digits are unsure (decision 518)", () => {
+  const onlyAs = (value: string, last: string, form: string): string =>
+    `"A planted finding", x: ${value} as read, corrected to ${last}, but the wording has ${value} only as ${form}, which may be this figure or a date, a time or a ratio, and we can't tell.`;
+  const lineOf = (summary: string, value: number, last: number): string => {
+    const f = finding(summary, { x: value });
+    const result = applyOverrides([f], [], [override("facts.x", value, last)]);
+    assert.deepEqual(result.findings[0], f, summary);
+    return refusalReason(result.refused).split("\n")[1]!;
+  };
+
+  test("the third review's four sentences, each with the count corrected: refused, naming the date as written, where round 4 rewrote nothing and left the count printed", () => {
+    assert.equal(lineOf("3 may lose access when the licences lapse.", 3, 4), onlyAs("3", "4", "3 may"));
+    assert.equal(lineOf("12 of March's deals closed late.", 12, 13), onlyAs("12", "13", "12 of March"));
+    assert.equal(lineOf("In March, 2000 deals were opened.", 2000, 2100), onlyAs("2,000", "2,100", "March, 2000"));
+    assert.equal(lineOf("In Q3 12 deals slipped.", 12, 13), onlyAs("12", "13", "Q3 12"));
+    assert.equal(lineOf("FY 2000 deals were opened.", 2000, 2100), onlyAs("2,000", "2,100", "FY 2000"));
+  });
+});
+
+/** Every section approved as the engine drafted it, as the console holds a released run, with the overrides given. */
+function approvedWith(overrides: NumberOverride[]): ApprovedRun {
+  const report = buildReport(loadRun(dir).input);
+  const sections: ReportSection[] = [];
+  const versions: SectionVersion[] = [];
+  for (const b of Object.values(report.outputs)) {
+    for (const s of b.sections) {
+      sections.push({ ...s, status: "approved", approval: { approvedBy: "consultant@example.com", approvedAt: AT } });
+      versions.push(b.versions.find((v) => v.id === s.currentVersionId)!);
+    }
+  }
+  return { intake: null, sections, versions, overrides };
+}
+
+const onMetricOf = (id: string, field: string, previousValue: number, newValue: number): NumberOverride => ({ ...onRun(divergence, field, previousValue, newValue), target: { type: "metric", id, field } });
+const CLOSE = "Override each one back to its figure as read, then make the documents again. A finding's wording and a measure's chart or table can't be edited, so a figure we can't carry changes only with a new health check.";
+
+// Decision 517: the third review's metrics, each printed corrected beside a chart, table or series as read with nothing held on round 4.
+describe("a metric's figure another of its figures also holds is refused (decision 517)", () => {
+  for (const [id, asRead, last, where] of [
+    ["historic.top_account_share", 32.1, 39.1, "a segment"],
+    ["adoption.mobile_login_share", 2.1, 2.8, "a segment"],
+    ["historic.quarterly_won_value", 803000, 850000, "a point in its series"],
+  ] as const) {
+    test(`${id}, ${asRead} to ${last}: refused naming ${where}, and the documents job's make stops before a file is written`, async () => {
+      const report = built(onMetricOf(id, "value", asRead, last));
+      assert.deepEqual(report.refused.map((r) => [r.metricId, r.why]), [[id, { kind: "part", where }]]);
+      assert.deepEqual(report.metrics, asBuilt.metrics);
+      const out = join(mkdtempSync(join(tmpdir(), "hc-metric-")), "documents");
+      const result = await renderReleased(dir, approvedWith([onMetricOf(id, "value", asRead, last)]), out);
+      assert.ok("refused" in result);
+      assert.equal(existsSync(out) && readdirSync(out).length > 0, false, "no file written");
+      const label = input.metrics.find((m) => m.id === id)!.label;
+      const g = (n: number): string => n.toLocaleString("en-GB", { maximumFractionDigits: 100 });
+      assert.equal(
+        refusalReason(result.refused),
+        [
+          "Held back: 1 corrected figure can't be carried into the documents.",
+          `"${label}", value: ${g(asRead)} as read, corrected to ${g(last)}, but another figure of this measure (${where}) is also ${g(asRead)}, and a chart, table or sentence prints it as read.`,
+          CLOSE,
+        ].join("\n"),
+      );
+    });
+  }
+
+  test("historic.top_account_share's reason, whole, as the row has it", () => {
+    assert.equal(
+      refusalReason(built(onMetricOf("historic.top_account_share", "value", 32.1, 39.1)).refused).split("\n")[1],
+      `"Won value from the top 10 accounts", value: 32.1 as read, corrected to 39.1, but another figure of this measure (a segment) is also 32.1, and a chart, table or sentence prints it as read.`,
+    );
+  });
 });

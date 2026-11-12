@@ -346,7 +346,8 @@ describe("a corrected figure that can't be carried (decision 512)", () => {
   const { input: recordedInput } = loadRun(recorded);
   const skew = recordedInput.findings.find((f) => f.ruleId === "bp.ownership-skew" && f.status === "issue")!;
   const corrected = (f: Finding, field: string, previousValue: number, newValue: number, id: string): NumberOverride => ({ id, runId: RUN_ID, target: { type: "finding", id: f.id, field }, previousValue, newValue, reason: "Checked with the customer.", overriddenBy: "Synthetic Consultant", overriddenAt: "2026-11-04T17:00:00.000Z" });
-  const CLOSE = "Override each one back to its figure as read, then make the documents again. A finding's own wording can't be edited, so a figure we can't carry changes only with a new health check.";
+  // Decision 517 changed the first and last lines for every refusal, a finding's too.
+  const CLOSE = "Override each one back to its figure as read, then make the documents again. A finding's wording and a measure's chart or table can't be edited, so a figure we can't carry changes only with a new health check.";
   // Twelve figures of the run, each refused alone, for the reason that lists ten and counts the rest.
   const twelve = recordedInput.findings
     .flatMap((f) => Object.entries(f.facts).map(([key, value]) => corrected(f, `facts.${key}`, value, value + 7, `ov-${f.id}-${key}`)))
@@ -384,7 +385,7 @@ describe("a corrected figure that can't be carried (decision 512)", () => {
   test("holds the make before a file is written: failed, not thrown, with the reason whole, and nothing leaves the worker", async () => {
     const { result, deps, runDir, calls, failed, saved, taken, given } = await make([corrected(skew, "facts.limit", 10000, 9000, "ov-0001")]);
     const reason = [
-      "Held back: 1 corrected figure can't be carried into its finding's wording.",
+      "Held back: 1 corrected figure can't be carried into the documents.",
       `"${skew.title}", limit: 10,000 as read, corrected to 9,000, but the wording has 10,000 in 2 places, and we can't tell which of them are this figure.`,
       CLOSE,
     ].join("\n");
@@ -417,7 +418,7 @@ describe("a corrected figure that can't be carried (decision 512)", () => {
     const lines = failed[0]!.split("\n");
     assert.equal(failed.length, 1);
     assert.equal(lines.length, 13);
-    assert.equal(lines[0], "Held back: 12 corrected figures can't be carried into their findings' wording.");
+    assert.equal(lines[0], "Held back: 12 corrected figures can't be carried into the documents.");
     for (let i = 0; i < 10; i++) assert.ok(lines[i + 1]!.startsWith(line(i)) && lines[i + 1]!.endsWith("."), lines[i + 1]);
     assert.equal(lines[11], "And 2 more.");
     assert.equal(lines[12], CLOSE);

@@ -299,8 +299,9 @@ describe("a row the run doesn't hold (decision 511, item 5)", () => {
     unchanged(override("facts", 9800, 9000));
   });
   test("the sized amount of a finding that isn't sized", () => unchanged(override("value.amount", 9800, 9000)));
-  test("a metric's override still applies as before", () => {
-    const metric = { id: "historic.win_rate", status: "measured", value: 47, n: 100, stats: {} } as unknown as Parameters<typeof applyOverrides>[1][number];
+  // Decision 517 judges a metric's figure against its parts and texts, so the planted metric has them all; none holds 47.
+  test("a metric's override whose value as read no part or text of the metric holds still applies", () => {
+    const metric: Parameters<typeof applyOverrides>[1][number] = { id: "historic.win_rate", domain: "historic", status: "measured", label: "Win rate", definition: "Won deals over closed deals.", unit: "percent", evidence: [evidence], exclusions: [], assumptions: [], value: 47, n: 100, dateRange: null, segments: [], segmentExemptReason: "One org-wide figure.", series: [], stats: {} };
     const result = applyOverrides([f], [metric], [{ ...override("value", 47, 45), target: { type: "metric", id: "historic.win_rate", field: "value" } }]);
     assert.equal((result.metrics[0] as { value: number }).value, 45);
     assert.deepEqual(result.refused, []);
@@ -328,7 +329,8 @@ describe("the admitted limits of decision 511, as the customer then reads them",
 // The reason the documents are held, in the shape the console's reader lists
 // (decision 512; console lib/health-check/documents-error.ts).
 
-const CLOSE = "Override each one back to its figure as read, then make the documents again. A finding's own wording can't be edited, so a figure we can't carry changes only with a new health check.";
+// Decision 517: the first and last lines name the documents and a measure's chart or table, for every refusal.
+const CLOSE = "Override each one back to its figure as read, then make the documents again. A finding's wording and a measure's chart or table can't be edited, so a figure we can't carry changes only with a new health check.";
 const refusal = (title: string, why: OverrideRefusal["why"] = { kind: "repeated", places: 2 }): OverrideRefusal => ({ findingId: ID, title, field: "facts.hits", asRead: 1200, last: 1100.5, why });
 
 describe("the reason a refusal holds the documents (decision 512)", () => {
@@ -336,7 +338,7 @@ describe("the reason a refusal holds the documents (decision 512)", () => {
     assert.equal(
       refusalReason([refusal("Deals that should have closed")]),
       [
-        "Held back: 1 corrected figure can't be carried into its finding's wording.",
+        "Held back: 1 corrected figure can't be carried into the documents.",
         '"Deals that should have closed", hits: 1,200 as read, corrected to 1,100.5, but the wording has 1,200 in 2 places, and we can\'t tell which of them are this figure.',
         CLOSE,
       ].join("\n"),
@@ -353,13 +355,13 @@ describe("the reason a refusal holds the documents (decision 512)", () => {
       refusal("E", { kind: "unsure", found: "1200" }),
     ]).split("\n");
     assert.deepEqual(lines.slice(0, 6), [
-      "Held back: 5 corrected figures can't be carried into their findings' wording.",
+      "Held back: 5 corrected figures can't be carried into the documents.",
       '"A", hits: 1,200 as read, corrected to 1,100.5, but another figure of this finding (quota) is also 1,200, so we can\'t tell which one the wording prints.',
       '"B", annualSaving: 1,200 as read, corrected to 1,100.5, but another figure of this finding (the sized amount) is also 1,200, so we can\'t tell which one the wording prints.',
       '"C", the sized amount: 1,200 as read, corrected to 1,100.5, but the wording doesn\'t print 1,200 itself and has £1.2m, which may be this figure rounded.',
       '"D", hits: 1,200 as read, corrected to 1,100.5, but the correction was made from 1,250, which this run no longer reads.',
-      // DECISIONS.md 516: a form that may be the figure or a year, a time or a ratio.
-      '"E", hits: 1,200 as read, corrected to 1,100.5, but the wording has 1,200 only as 1200, which may be this figure or a year, a time or a ratio, and we can\'t tell.',
+      // DECISIONS.md 516: a form that may be the figure or a date, a time or a ratio.
+      '"E", hits: 1,200 as read, corrected to 1,100.5, but the wording has 1,200 only as 1200, which may be this figure or a date, a time or a ratio, and we can\'t tell.',
     ]);
   });
 
@@ -367,7 +369,7 @@ describe("the reason a refusal holds the documents (decision 512)", () => {
     const twelve = Array.from({ length: 12 }, (_, i) => refusal(`Finding ${i + 1}`));
     const lines = refusalReason(twelve).split("\n");
     assert.equal(lines.length, 13);
-    assert.equal(lines[0], "Held back: 12 corrected figures can't be carried into their findings' wording.");
+    assert.equal(lines[0], "Held back: 12 corrected figures can't be carried into the documents.");
     assert.ok(lines[10]!.startsWith('"Finding 10", '));
     assert.equal(lines[11], "And 2 more.");
     assert.equal(lines[12], CLOSE);
@@ -379,7 +381,7 @@ describe("the reason a refusal holds the documents (decision 512)", () => {
     const whys: OverrideRefusal["why"][] = [{ kind: "unsure", found: "3:9" }, { kind: "repeated", places: 2 }, { kind: "shared", other: "quota" }, { kind: "rounded", found: "£1.2m" }, { kind: "stale", from: 1250 }];
     for (const n of [1, 2, 10, 11, 12]) {
       const reason = refusalReason(Array.from({ length: n }, (_, i) => refusal(`Finding\n\n${i}\r\n  title\n`, whys[i % whys.length])));
-      assert.ok(reason.includes("only as 3:9, which may be this figure or a year, a time or a ratio, and we can't tell."));
+      assert.ok(reason.includes("only as 3:9, which may be this figure or a date, a time or a ratio, and we can't tell."));
       // As documentsErrorView reads it: split on newlines, trimmed, blanks dropped.
       const read = reason.split("\n").map((l) => l.trim()).filter(Boolean);
       assert.deepEqual(read, reason.split("\n"), "no line empty or padded");
@@ -613,7 +615,7 @@ describe("the command line's render (decision 512)", () => {
       (err: unknown) => {
         assert.ok(err instanceof OverridesRefused);
         assert.equal(err.message, refusalReason(built(onRun(skew, "facts.limit", 9000)).refused));
-        assert.match(err.message, /^Held back: 1 corrected figure can't be carried into its finding's wording\.\n".+", limit: 10,000 as read, corrected to 9,000, but the wording has 10,000 in 2 places/);
+        assert.match(err.message, /^Held back: 1 corrected figure can't be carried into the documents\.\n".+", limit: 10,000 as read, corrected to 9,000, but the wording has 10,000 in 2 places/);
         return true;
       },
     );
