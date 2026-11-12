@@ -1,18 +1,23 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readdirSync, readFileSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { applyOverrides, refusalReason, type OverrideRefusal } from "../overrides.ts";
 import { buildReport, type BuiltReport, type ReportInput } from "../sections.ts";
 import { Pseudonymiser, type PseudonymEntry } from "../../privacy/pseudonymiser.ts";
-import { loadRun, printDocuments, OUTPUT_FILES } from "../../render/render-run.ts";
+import { loadRun, printDocuments, OUTPUT_FILES, OverridesRefused, renderRun } from "../../render/render-run.ts";
 import { heldFigures, renderReleased, type ApprovedRun } from "../../render/render-released.ts";
 import { buildDataset, checkNumbers, extractFigures, scopeDataset, type FigureSet } from "../../numbercheck/index.ts";
 import { fullReportHtml } from "../../render/full-report.ts";
 import { executiveHtml } from "../../render/executive.ts";
 import type { Finding, Metric, NumberOverride, ReportSection, SectionVersion } from "../../schemas/index.ts";
+import { docxParagraphs } from "../../testing/docx-text.ts";
 import { runFromRecording } from "../../testing/harness.ts";
+import { buildPulseResult } from "../../pulse/result.ts";
+import { buildScanResult } from "../../scan/result.ts";
 import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
 
 // DECISIONS.md 514: the number check is told what was carried, not the rows,
@@ -1028,5 +1033,91 @@ describe("the two automation findings that print 31 December 2025, on the synthe
         assert.deepEqual(result.refused.map((r) => r.why), [{ kind: "unsure", found: "31 December 2025" }], `${f.ruleId} ${value}`);
       }
     }
+  });
+});
+
+// Decision 517 on the synthetic run, printed as the documents job prints it.
+describe("a measure's figure carried, printed, and put back (decision 517, items 1, 2 and 5)", () => {
+  const metricOf = (id: string): Measured => input.metrics.find((m) => m.id === id) as Measured;
+  const page = (html: string): string => decoded(html).replace(/\s+/g, " ");
+
+  test("a percent, a count and a currency, each printed on a deck page: the corrected value printed, nothing held, the value as read in the data from the measure nowhere; a refused measure's still there", async () => {
+    assert.deepEqual([metricOf("historic.slippage_rate").value, metricOf("current.open_past_close").value, metricOf("current.weighted_pipeline").value], [79.8, 21, 1551731]);
+    const report = built(onMetricOf("historic.slippage_rate", "value", 79.8, 71.8), onMetricOf("current.open_past_close", "value", 21, 19), onMetricOf("current.weighted_pipeline", "value", 1551731, 1396558), onMetricOf("historic.top_account_share", "value", 32.1, 39.1));
+    assert.deepEqual(report.refused.map((r) => r.metricId), ["historic.top_account_share"]);
+    const [executive, full] = [page(executiveHtml(report, pseudonyms)), page(fullReportHtml(report, pseudonyms))];
+    const [executiveAsRead, fullAsRead] = [page(executiveHtml(asBuilt, pseudonyms)), page(fullReportHtml(asBuilt, pseudonyms))];
+    assert.ok(fullAsRead.includes("Slippage rate R22.9 79.8%") && full.includes("Slippage rate R22.9 71.8%") && !full.includes("79.8%"), "the percent");
+    assert.ok(fullAsRead.includes("101.5 21 39%") && full.includes("101.5 19 39%"), "the count");
+    assert.ok(executiveAsRead.includes("£1.55m Weighted by") && executive.includes("£1.4m Weighted by") && !executive.includes("£1.55m") && !full.includes("£1.55m"), "the currency");
+    for (const [id, asRead, last] of [["historic.slippage_rate", 79.8, 71.8], ["current.open_past_close", 21, 19], ["current.weighted_pipeline", 1551731, 1396558]] as const) {
+      assert.ok(!valuesFrom(report.dataset, id).includes(asRead) && valuesFrom(report.dataset, id).includes(last), id);
+    }
+    assert.ok(valuesFrom(report.dataset, "historic.top_account_share").includes(32.1), "the refused measure's value as read");
+    const held = built(onMetricOf("historic.slippage_rate", "value", 79.8, 71.8), onMetricOf("current.open_past_close", "value", 21, 19), onMetricOf("current.weighted_pipeline", "value", 1551731, 1396558));
+    assert.deepEqual(held.refused, []);
+    assert.deepEqual(await printed(held), []);
+  });
+
+  const weighted = (previousValue: number, newValue: number): NumberOverride => onMetricOf("current.weighted_pipeline", "value", previousValue, newValue);
+
+  test("A to B to A, and a refused correction put back: the findings, metrics, data and printed pages of no override, nothing held", async () => {
+    for (const rows of [[weighted(1551731, 1396558), weighted(1396558, 1551731)], [onMetricOf("historic.top_account_share", "value", 32.1, 39.1), onMetricOf("historic.top_account_share", "value", 39.1, 32.1)]]) {
+      const report = built(...rows);
+      assert.deepEqual(report.refused, []);
+      assert.deepEqual(report.teamFindings, asBuilt.teamFindings);
+      assert.deepEqual(report.metrics, asBuilt.metrics);
+      assert.deepEqual(sansOverrides(report.dataset), sansOverrides(asBuilt.dataset));
+      assert.equal(executiveHtml(report, pseudonyms), executiveHtml(asBuilt, pseudonyms));
+      assert.equal(fullReportHtml(report, pseudonyms), fullReportHtml(asBuilt, pseudonyms));
+      assert.deepEqual(await printed(report), []);
+    }
+  });
+
+  test("A to B to C: C printed, A not in the data from the measure, nothing held", async () => {
+    const report = built(weighted(1551731, 1396558), weighted(1396558, 1300000));
+    assert.deepEqual(report.refused, []);
+    assert.ok(page(executiveHtml(report, pseudonyms)).includes("£1.3m Weighted by"));
+    assert.ok(!valuesFrom(report.dataset, "current.weighted_pipeline").includes(1551731) && !valuesFrom(report.dataset, "current.weighted_pipeline").includes(1396558));
+    assert.deepEqual(await printed(report), []);
+  });
+
+  test("a stale first row ending elsewhere: refused as stale, the reason whole; ending at the value as read: nothing", () => {
+    const stale = built(weighted(1500000, 1400000));
+    assert.equal(refusalReason(stale.refused), ["Held back: 1 corrected figure can't be carried into the documents.", `"${metricOf("current.weighted_pipeline").label}", value: 1,551,731 as read, corrected to 1,400,000, but the correction was made from 1,500,000, which this run no longer reads.`, CLOSE].join("\n"));
+    assert.deepEqual(stale.metrics, asBuilt.metrics);
+    const back = built(weighted(1500000, 1400000), weighted(1400000, 1551731));
+    assert.deepEqual(back.refused, []);
+    assert.deepEqual(back.metrics, asBuilt.metrics);
+    assert.deepEqual(sansOverrides(back.dataset), sansOverrides(asBuilt.dataset));
+  });
+});
+
+describe("a folder's overrides.json with a refused measure (decisions 512 and 517)", () => {
+  const row = onMetricOf("historic.top_account_share", "value", 32.1, 39.1);
+  const folder = join(mkdtempSync(join(tmpdir(), "hc-refused-metric-")), "run");
+  cpSync(dir, folder, { recursive: true });
+  writeFileSync(join(folder, "overrides.json"), JSON.stringify([row]));
+
+  test("the command line's render fails with the reason's lines, writes nothing, and hc render prints the same and nothing else", async () => {
+    const before = readdirSync(folder).sort();
+    const reason = refusalReason(built(row).refused);
+    assert.match(reason, /^Held back: 1 corrected figure can't be carried into the documents\.\n"Won value from the top 10 accounts", value: 32\.1 as read, corrected to 39\.1, but another figure of this measure \(a segment\)/);
+    await assert.rejects(() => renderRun(folder), (err: unknown) => err instanceof OverridesRefused && err.message === reason);
+    assert.deepEqual(readdirSync(folder).sort(), before, "no document, sections or layout file written");
+    const cli = spawnSync(process.execPath, [fileURLToPath(new URL("../../cli/hc.ts", import.meta.url)), "render", "--run", folder], { encoding: "utf8" });
+    assert.equal(cli.status, 2, cli.stderr);
+    assert.equal(cli.stdout, `${reason}\n`);
+    assert.deepEqual(readdirSync(folder).sort(), before);
+  });
+
+  test("the run job's report, a pulse's result and a scan's, from the folder: the measure as read, as with no overrides.json", () => {
+    const withRow = buildReport(loadRun(folder).input);
+    const without = buildReport(loadRun(dir).input);
+    assert.deepEqual(withRow.refused.map((r) => r.metricId), ["historic.top_account_share"]);
+    assert.deepEqual(withRow.metrics, without.metrics);
+    assert.deepEqual(sansOverrides(withRow.dataset), sansOverrides(without.dataset));
+    assert.deepEqual(buildPulseResult(withRow), buildPulseResult(without));
+    assert.deepEqual(buildScanResult(withRow), buildScanResult(without));
   });
 });
