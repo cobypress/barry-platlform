@@ -665,9 +665,9 @@ describe("a date read by a word is a guess, and its own digits are unsure (decis
   });
 });
 
-/** Every section approved as the engine drafted it, as the console holds a released run, with the overrides given. */
-function approvedWith(overrides: NumberOverride[]): ApprovedRun {
-  const report = buildReport(loadRun(dir).input);
+/** Every section approved as the engine drafted it, as the console holds a released run, with the overrides given. The drafts are made from `folder` with `drafted`. */
+function approvedWith(overrides: NumberOverride[], folder = dir, drafted: NumberOverride[] = []): ApprovedRun {
+  const report = buildReport({ ...loadRun(folder).input, overrides: drafted });
   const sections: ReportSection[] = [];
   const versions: SectionVersion[] = [];
   for (const b of Object.values(report.outputs)) {
@@ -1119,5 +1119,86 @@ describe("a folder's overrides.json with a refused measure (decisions 512 and 51
     assert.deepEqual(sansOverrides(withRow.dataset), sansOverrides(without.dataset));
     assert.deepEqual(buildPulseResult(withRow), buildPulseResult(without));
     assert.deepEqual(buildScanResult(withRow), buildScanResult(without));
+  });
+});
+
+// Decision 489: every section buildReport writes is written from the findings as corrected; the Word notes' own
+// item for each finding stays the record as read. Planted on the synthetic run: a figure printed only in a title.
+describe("the raw notes' sections read the findings as corrected (decision 489)", () => {
+  const notMeasured = output!.findings.find((f) => f.ruleId === "utl.dashboard-usage" && f.status === "not_measurable")!;
+  const behindCause = ruleOf("pipe.going-backwards");
+  const behindPillar = output!.findings.find((f) => f.ruleId === "dq.open-opps-past-close")!;
+  const plants = new Map<string, Finding>([
+    [notMeasured.id, { ...notMeasured, title: "3 report folders couldn't be read", facts: { folders: 3 } }],
+    [behindCause.id, { ...behindCause, title: "4,321 deals went back a stage", facts: { ...behindCause.facts, planted: 4321 } }],
+    [behindPillar.id, { ...behindPillar, title: "6,543 open deals should have closed", facts: { ...behindPillar.facts, planted: 6543 } }],
+  ]);
+  const findings = output!.findings.map((f) => plants.get(f.id) ?? f);
+  // The facts step's sentence names the check resting on a fact by its finding's title.
+  const facts = { checked: 2, differed: [{ detail: "A planted fact differed from what we expected.", affects: [behindPillar.ruleId] }] };
+  const planted = (...overrides: NumberOverride[]): BuiltReport => buildReport({ ...input, findings, facts, overrides });
+  const rows = (stale = false): NumberOverride[] => [
+    onRun(plants.get(notMeasured.id)!, "facts.folders", stale ? 2 : 3, 4),
+    onRun(behindCause, "facts.planted", stale ? 4000 : 4321, 4400),
+    onRun(behindPillar, "facts.planted", stale ? 6000 : 6543, 6600),
+  ];
+  const body = (report: BuiltReport, key: string): string => {
+    const notes = report.outputs.raw_notes;
+    return notes.versions.find((v) => v.id === notes.sections.find((s) => s.key === key)!.currentVersionId)!.body;
+  };
+
+  test("the run has the places these tests use", () => {
+    const asRead = planted();
+    assert.ok(asRead.causes.some((c) => c.findingIds.includes(behindCause.id)), "a cause");
+    assert.ok(asRead.readiness.pillars.some((p) => p.findingIds.includes(behindPillar.id)) && asRead.readiness.fixes.some((f) => f.id === behindPillar.id), "a pillar and its fixes");
+    assert.equal(output!.findings.find((f) => f.ruleId === behindPillar.ruleId), behindPillar, "the first finding of its rule, which the facts step names");
+  });
+
+  test("a corrected title in Exclusions and limits, the win drivers, a pillar's Behind it and What to fix: each reads the corrected title", () => {
+    const report = planted(...rows());
+    assert.deepEqual(report.refused, []);
+    const limits = body(report, "exclusions_limits");
+    assert.ok(limits.includes(`4 report folders couldn't be read: ${notMeasured.notMeasurableReason}`) && !limits.includes("3 report folders"), limits);
+    const drivers = body(report, "win_drivers");
+    assert.ok(drivers.includes("4,400 deals went back a stage: ") && !drivers.includes("4,321"), drivers);
+    const readiness = body(report, "ai_readiness");
+    const behind = readiness.split("\n\n").find((l) => l.startsWith("Data."))!;
+    const fix = readiness.split("\n\n").find((l) => l.startsWith("What to fix"))!;
+    assert.ok(behind.includes("6,600 open deals should have closed") && fix.includes("6,600 open deals should have closed"), readiness);
+    assert.ok(!readiness.includes("6,543"), readiness);
+  });
+
+  test("the facts step's sentence names the corrected title, in the Assumptions body and in the number check's data under the calibration", () => {
+    const report = planted(...rows());
+    assert.ok(body(report, "assumptions").includes('The check that rests on it says so: "6,600 open deals should have closed".'), body(report, "assumptions"));
+    assert.ok(valuesFrom(report.dataset, "calibration").includes(6600) && !valuesFrom(report.dataset, "calibration").includes(6543));
+  });
+
+  test("a refused correction in each of those places: as read, in the bodies and the data", () => {
+    const report = planted(...rows(true));
+    assert.deepEqual(report.refused.map((r) => r.why.kind), ["stale", "stale", "stale"]);
+    assert.ok(body(report, "exclusions_limits").includes("3 report folders couldn't be read: "));
+    assert.ok(body(report, "win_drivers").includes("4,321 deals went back a stage: "));
+    // The pillar's reason, which readiness writes from the findings as corrected, Behind it and What to fix.
+    assert.equal(body(report, "ai_readiness").split("6,543 open deals should have closed").length, 4, body(report, "ai_readiness"));
+    assert.ok(body(report, "assumptions").includes('"6,543 open deals should have closed"'));
+    assert.ok(valuesFrom(report.dataset, "calibration").includes(6543) && !valuesFrom(report.dataset, "calibration").includes(6600));
+    assert.deepEqual(report.outputs.raw_notes.sections.map((s) => body(report, s.key)).filter((b) => /4,400 deals went|6,600 open deals|4 report folders/.test(b)), []);
+  });
+
+  test("through the documents job: the Word notes' Exclusions and limits read 4 folders, and the finding's own item still 3, with the override listed beside it", async () => {
+    const folder = join(mkdtempSync(join(tmpdir(), "hc-489-")), "run");
+    cpSync(dir, folder, { recursive: true });
+    writeFileSync(join(folder, "findings.json"), JSON.stringify(output!.findings.map((f) => (f.id === notMeasured.id ? plants.get(f.id)! : f))));
+    const row = onRun(plants.get(notMeasured.id)!, "facts.folders", 3, 4);
+    const out = join(mkdtempSync(join(tmpdir(), "hc-489-out-")), "documents");
+    const result = await renderReleased(folder, approvedWith([row], folder, [row]), out);
+    assert.ok("files" in result, JSON.stringify(result));
+    assert.deepEqual(result.held, []);
+    const paragraphs = docxParagraphs(readFileSync(result.files.raw_notes)).map((p) => p.text);
+    assert.ok(paragraphs.includes(`4 report folders couldn't be read: ${notMeasured.notMeasurableReason}`), "the section's body");
+    assert.ok(!paragraphs.some((p) => p.startsWith("3 report folders couldn't be read:")), "no line of the body as read");
+    assert.ok(paragraphs.some((p) => /^R\d+\.\d+ 3 report folders couldn't be read$/.test(p)), "the finding's own item, as read");
+    for (const cell of [`finding ${notMeasured.id}`, "facts.folders", "3", "4"]) assert.ok(paragraphs.includes(cell), cell);
   });
 });
