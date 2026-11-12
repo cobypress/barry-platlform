@@ -1,8 +1,10 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { cpSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { applyOverrides, refusalReason, refusalSummary, type OverrideRefusal } from "../overrides.ts";
 import { buildReport, type BuiltReport, type ReportInput } from "../sections.ts";
 import { Pseudonymiser, type PseudonymEntry } from "../../privacy/pseudonymiser.ts";
@@ -604,5 +606,10 @@ describe("the command line's render (decision 512)", () => {
       },
     );
     assert.deepEqual(readdirSync(folder).sort(), before, "no document, sections or layout file written");
+    // `hc render` prints the same lines, and nothing else, and fails.
+    const cli = spawnSync(process.execPath, [fileURLToPath(new URL("../../cli/hc.ts", import.meta.url)), "render", "--run", folder], { encoding: "utf8" });
+    assert.equal(cli.status, 2, cli.stderr);
+    assert.equal(cli.stdout, `${refusalReason(built(onRun(skew, "facts.limit", 9000)).refused)}\n`);
+    assert.deepEqual(readdirSync(folder).sort(), before);
   });
 });
