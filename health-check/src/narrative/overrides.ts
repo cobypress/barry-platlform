@@ -127,21 +127,27 @@ type Read = { text: string; unsure: Unsure[] };
  * " one half "), so the text is cut only where normalising each side alone gives
  * the reader's text: a piece between two cuts is masked whole if any of what it
  * became is masked. Characters that normalise together ("ㄱㅏ" is "가") are one piece.
+ *
+ * Finding the cuts normalises the text on each side of every place in it, so
+ * they're found once for a text and every span of it is mapped through them: a
+ * summary that joins every falling profile's name is thousands of characters.
  */
-function spansInText(text: string, normalised: string, spans: Array<[number, number]>): Array<[number, number]> {
-  if (normalised === text) return spans;
+function spansInText(text: string, normalised: string): (spans: Array<[number, number]>) => Array<[number, number]> {
+  if (normalised === text) return (spans) => spans;
   const cuts: Array<{ at: number; to: number }> = [{ at: 0, to: 0 }];
   for (let at = 1; at < text.length; at++) {
     const before = normalise(text.slice(0, at));
     if (before + normalise(text.slice(at)) === normalised) cuts.push({ at, to: before.length });
   }
   cuts.push({ at: text.length, to: normalised.length });
-  const pieces: Array<[number, number]> = [];
-  for (let i = 0; i + 1 < cuts.length; i++) {
-    const [from, to] = [cuts[i]!, cuts[i + 1]!];
-    if (spans.some(([start, end]) => from.to < end && to.to > start)) pieces.push([from.at, to.at]);
-  }
-  return pieces;
+  return (spans) => {
+    const pieces: Array<[number, number]> = [];
+    for (let i = 0; i + 1 < cuts.length; i++) {
+      const [from, to] = [cuts[i]!, cuts[i + 1]!];
+      if (spans.some(([start, end]) => from.to < end && to.to > start)) pieces.push([from.at, to.at]);
+    }
+    return pieces;
+  };
 }
 
 /**
@@ -149,12 +155,13 @@ function spansInText(text: string, normalised: string, spans: Array<[number, num
  * length, so a place found in it is its place in the text. Colon forms are
  * looked for once the rest but guessed dates is masked: a time inside an ISO
  * date and time is the date's, and is neither found nor tested, while "2000:1"
- * is one colon form, not a year and a 1.
+ * is one colon form, not a year and a 1. Exported for its tests.
  */
-function masked(text: string): Read {
+export function masked(text: string): Read {
   const chars = text.replace(TOKEN, (token) => "#".repeat(token.length)).split("");
   const { normalised, figures } = extractFigures(text);
-  const shapes = spansInText(text, normalised, figures.filter((f) => notFigure(f) && !bareYear(f)).map((f): [number, number] => [f.start, f.end]));
+  const inText = spansInText(text, normalised);
+  const shapes = inText(figures.filter((f) => notFigure(f) && !bareYear(f)).map((f): [number, number] => [f.start, f.end]));
   for (const m of text.matchAll(YEAR_MONTH)) shapes.push([m.index, m.index + m[0].length]);
   for (const [start, end] of shapes) chars.fill("#", start, end);
   const unsure: Array<Unsure & { at: number }> = [];
@@ -166,7 +173,7 @@ function masked(text: string): Read {
   // is the date as written: "3 may", "March, 2000", "Q3 12". Digits joined to a
   // letter ("Q3", "FY26", "3rd") are never a count, and stay masked untested.
   for (const date of figures.filter(guessedDate)) {
-    const pieces = spansInText(text, normalised, [[date.start, date.end]]);
+    const pieces = inText([[date.start, date.end]]);
     const [start, end] = [Math.min(...pieces.map(([a]) => a)), Math.max(...pieces.map(([, b]) => b))];
     const parts: number[] = [];
     for (const run of text.slice(start, end).matchAll(/\d+/g)) {
@@ -185,7 +192,7 @@ function masked(text: string): Read {
   // "hundreds" or a malformed run of words, can be no figure's value or near it.
   for (const word of figures) {
     if (typeof word.value !== "number") continue;
-    const pieces = spansInText(text, normalised, [[word.start, word.end]]);
+    const pieces = inText([[word.start, word.end]]);
     if (pieces.length === 0) continue;
     const [start, end] = [Math.min(...pieces.map(([a]) => a)), Math.max(...pieces.map(([, b]) => b))];
     const form = text.slice(start, end);

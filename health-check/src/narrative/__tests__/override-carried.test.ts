@@ -1,16 +1,17 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { applyOverrides, refusalReason, type OverrideRefusal } from "../overrides.ts";
+import { applyOverrides, masked, refusalReason, type OverrideRefusal } from "../overrides.ts";
 import { buildReport, type BuiltReport, type ReportInput } from "../sections.ts";
 import { Pseudonymiser, type PseudonymEntry } from "../../privacy/pseudonymiser.ts";
 import { loadRun, printDocuments, OUTPUT_FILES, OverridesRefused, renderRun } from "../../render/render-run.ts";
 import { heldFigures, renderReleased, type ApprovedRun } from "../../render/render-released.ts";
-import { buildDataset, checkNumbers, extractFigures, scopeDataset, type FigureSet } from "../../numbercheck/index.ts";
+import { buildDataset, checkNumbers, extractFigures, normalise, scopeDataset, type FigureSet } from "../../numbercheck/index.ts";
 import { fullReportHtml } from "../../render/full-report.ts";
 import { executiveHtml } from "../../render/executive.ts";
 import type { Finding, Metric, NumberOverride, ReportSection, SectionVersion } from "../../schemas/index.ts";
@@ -1328,6 +1329,7 @@ describe("a figure written as a word is an unsure form (decision 520, item 1)", 
     assert.deepEqual(report.metrics, asBuilt.metrics);
     assert.equal(refusalReason(report.refused).split("\n")[1], `"${m.label}", activityWithoutWon: 2 as read, corrected to 3, but the measure's own wording has 2, which a correction doesn't rewrite.`);
   });
+
 });
 
 // Decision 520 (4): buildReport hands the raw notes' sections the metrics as corrected (sections.ts, rawNotesSpecs).
@@ -1351,5 +1353,81 @@ describe("the raw notes' sections read the metrics as corrected (decision 520, i
     assert.deepEqual(report.refused, []);
     const readiness = body(report, "ai_readiness");
     assert.ok(readiness.includes("33.5") && !readiness.includes("30.8"), readiness);
+  });
+});
+
+// The fifth review: masked found where the text can be cut once for every span, and normalising a prefix and a
+// suffix at each place of a summary thousands of characters long took seconds. The cuts are now found once for a
+// text. The made texts are each changed by normalise, and their results are pinned from 7680932's masked, compared
+// by a script against the new one over these and every finding and measure text of the synthetic run.
+describe("masked finds where a text can be cut once (decision 520, the fifth review)", () => {
+  const CHANGERS = ["Note…", "Acme™ Cloud", "re­opened", "zero​width", "ｶﾞｲﾄﾞ", "ﾃｽﾄ 3", "½", "¼ of", "１２ deals", "５", "７ users", "ｱﾌﾟﾘ 2026"];
+  const PIECES = [
+    ...CHANGERS,
+    ...["12 deals", "5", "40 seats", "3.5%", "£1,200", "10,500", "7 users idle", "2000 active users"],
+    ...["31 December 2025", "December 2025", "2026-03-12", "12/03/2026", "2026-03-12T10:30:00Z", "3 May", "In Q3 12 deals slipped", "FY26", "March 3rd", "in 2026-02"],
+    ...["10:30", "3:1", "1.5:1", "09:00", "1,000:1", "[[user:U0001]]", "[[person:P00012]]"],
+    ...["five", "a dozen", "twice", "half", "one in three", "ten days", "Fifty percent", "Five pounds", "One account", "no one", "Twelve"],
+    "profile Team Five has 7 users idle",
+  ];
+  const SEPARATORS = [" ", ", ", "; ", ". ", " and ", "\n"];
+  /** 240 texts from a seeded generator, each opening its pieces with one that normalise changes, then shuffled. */
+  const madeTexts = (): string[] => {
+    let seed = 520;
+    const random = (): number => {
+      seed = (seed + 0x6d2b79f5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    const pick = <T>(xs: T[]): T => xs[Math.floor(random() * xs.length)]!;
+    return Array.from({ length: 240 }, () => {
+      const pieces = [pick(CHANGERS), ...Array.from({ length: 2 + Math.floor(random() * 7) }, () => pick(PIECES))];
+      for (let i = pieces.length - 1; i > 0; i--) {
+        const j = Math.floor(random() * (i + 1));
+        [pieces[i], pieces[j]] = [pieces[j]!, pieces[i]!];
+      }
+      return pieces.map((p, i) => (i === 0 ? p : `${pick(SEPARATORS)}${p}`)).join("") + ".";
+    });
+  };
+  const digest = (value: unknown): string => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+
+  test("240 made texts, each changed by normalise, holding every piece: the masked text and unsure forms 7680932's masked gave, pinned", () => {
+    const texts = madeTexts();
+    assert.equal(digest(texts), "99693d5eadcfb08701aa8140746ecc0c94e97d6a16ad1de833e479405965d7a3", "the texts the script compared");
+    assert.ok(texts.every((t) => normalise(t) !== t));
+    assert.ok(PIECES.every((p) => texts.some((t) => t.includes(p))));
+    const results = texts.map((t) => {
+      const read = masked(t);
+      return [t, read.text, read.unsure];
+    });
+    assert.equal(results.reduce((n, [, , unsure]) => n + (unsure as unknown[]).length, 0), 742);
+    assert.equal(digest(results), "76126918480b669564e6055f91b7120e976c107998061f5ddca2075d9c6bbe88");
+  });
+
+  test("two texts in full: each span mapped through its own text's cuts, the unsure forms as written and in the order they stand", () => {
+    assert.deepEqual(masked("Note… ½ of ５ deals, five at 10:30 on 3 May."), {
+      text: "Note… # of # deals, #### at ##### on # May.",
+      unsure: [
+        { form: "½", parts: [50] },
+        { form: "５", parts: [5] },
+        { form: "five", parts: [5] },
+        { form: "10:30", parts: [10, 30] },
+        { form: "3 May", parts: [3] },
+      ],
+    });
+    assert.deepEqual(masked("Five deals stall at a ratio of 5.09:1."), { text: "#### deals stall at a ratio of ######.", unsure: [{ form: "Five", parts: [5] }, { form: "5.09:1", parts: [5.09, 1] }] });
+  });
+
+  test("one override on a summary of Note… and 20, 60 and 120 profiles with a number word each: carried, each under 2 s, where 120 took 21 s", () => {
+    for (const n of [20, 60, 120]) {
+      const summary = `Note… ${Array.from({ length: n }, (_, i) => `profile Team ${["Five", "Twelve", "Twenty"][i % 3]} has 7 users idle`).join("; ")}.`;
+      const f = finding(summary, { x: 4 });
+      const started = performance.now();
+      const result = applyOverrides([f], [], [override("facts.x", 4, 6)]);
+      const took = performance.now() - started;
+      assert.deepEqual(result.refused, [], `${n}`);
+      assert.ok(took < 2_000, `${n} profiles, ${summary.length} characters: ${Math.round(took)} ms`);
+    }
   });
 });
