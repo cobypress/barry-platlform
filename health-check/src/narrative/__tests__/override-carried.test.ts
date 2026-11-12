@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { applyOverrides, refusalReason } from "../overrides.ts";
+import { applyOverrides, refusalReason, type OverrideRefusal } from "../overrides.ts";
 import { buildReport, type BuiltReport, type ReportInput } from "../sections.ts";
 import { Pseudonymiser, type PseudonymEntry } from "../../privacy/pseudonymiser.ts";
 import { loadRun, printDocuments, OUTPUT_FILES } from "../../render/render-run.ts";
@@ -11,7 +11,7 @@ import { heldFigures, renderReleased, type ApprovedRun } from "../../render/rend
 import { buildDataset, checkNumbers, extractFigures, scopeDataset, type FigureSet } from "../../numbercheck/index.ts";
 import { fullReportHtml } from "../../render/full-report.ts";
 import { executiveHtml } from "../../render/executive.ts";
-import type { Finding, NumberOverride, ReportSection, SectionVersion } from "../../schemas/index.ts";
+import type { Finding, Metric, NumberOverride, ReportSection, SectionVersion } from "../../schemas/index.ts";
 import { runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
 
@@ -784,5 +784,169 @@ describe("the executive Pipeline section reads the metrics as corrected (decisio
         CLOSE,
       ].join("\n"),
     );
+  });
+});
+
+// Decision 517 on planted measures: each part and text of a measure, alone, against its value as read.
+type Measured = Extract<Metric, { status: "measured" }>;
+const MID = "historic.planted";
+/** A planted measure whose only figures are the ones a test puts in it: the evidence's count is 900. */
+function measure(edit: Partial<Measured> = {}): Measured {
+  return { id: MID, domain: "historic_pipeline", status: "measured", label: "A planted measure", definition: "Won deals over closed deals.", unit: "percent", evidence: [{ ...evidence, count: 900 }], exclusions: [], assumptions: [], value: 37, n: 100, dateRange: null, segments: [], segmentExemptReason: "One org-wide figure.", series: [], stats: {}, ...edit };
+}
+const onMeasure = (field: string, previousValue: number, newValue: number, id = "m1"): NumberOverride => ({ ...override(field, previousValue, newValue, id), target: { type: "metric", id: MID, field } });
+const segment = (edit: Partial<Measured["segments"][number]> = {}): Measured["segments"][number] => ({ dimension: "stage", key: "Negotiation", n: 10, value: 12, notMeasurableReason: null, ...edit });
+const point = (edit: Partial<Measured["series"][number]> = {}): Measured["series"][number] => ({ date: "2026-07-01", n: 10, value: 12, notMeasurableReason: null, ...edit });
+/** The measure's one refusal, and the measure as read beside it. */
+function refusedOf(m: Measured, ...rows: NumberOverride[]): OverrideRefusal {
+  const result = applyOverrides([], [m], rows);
+  assert.deepEqual(result.metrics, [m], "the measure as read");
+  assert.equal(result.refused.length, 1);
+  return result.refused[0]!;
+}
+
+describe("a measure's figure another of its figures holds, each where in the row's order (decision 517, item 3)", () => {
+  test("value equal to n; to a stat; to a segment's n; to a series point's n; to an evidence count only: each named", () => {
+    const where = (m: Measured): unknown => refusedOf(m, onMeasure("value", 47, 52)).why;
+    assert.deepEqual(where(measure({ value: 47, n: 47 })), { kind: "part", where: "n" });
+    assert.deepEqual(where(measure({ value: 47, stats: { moves: 47 } })), { kind: "part", where: "the stat moves" });
+    assert.deepEqual(where(measure({ value: 47, segments: [segment({ n: 47 })] })), { kind: "part", where: "a segment" });
+    assert.deepEqual(where(measure({ value: 47, series: [point({ n: 47 })] })), { kind: "part", where: "a point in its series" });
+    assert.deepEqual(where(measure({ value: 47, evidence: [{ ...evidence, count: 47 }] })), { kind: "part", where: "an evidence count" });
+    // A segment's or a point's value counts as well as its n.
+    assert.deepEqual(where(measure({ value: 47, segments: [segment({ value: 47 })] })), { kind: "part", where: "a segment" });
+    assert.deepEqual(where(measure({ value: 47, series: [point({ value: 47 })] })), { kind: "part", where: "a point in its series" });
+  });
+
+  test("an override of n equal to the value names value; an override of a stat equal to another stat names that stat", () => {
+    assert.deepEqual(refusedOf(measure({ value: 100, n: 100 }), onMeasure("n", 100, 90)).why, { kind: "part", where: "value" });
+    const stat = refusedOf(measure({ stats: { won: 12, lost: 12 } }), onMeasure("stats.won", 12, 13));
+    assert.deepEqual(stat.why, { kind: "part", where: "the stat lost" });
+    assert.equal(refusalReason([stat]).split("\n")[1], `"A planted measure", won: 12 as read, corrected to 13, but another figure of this measure (the stat lost) is also 12, and a chart, table or sentence prints it as read.`);
+  });
+
+  test("when several hold it, the first in the row's order is named: n, a stat, a segment, a point, an evidence count", () => {
+    const all: Partial<Measured> = { value: 47, n: 47, stats: { moves: 47 }, segments: [segment({ n: 47 })], series: [point({ n: 47 })], evidence: [{ ...evidence, count: 47 }] };
+    const order: Array<[Partial<Measured>, string]> = [
+      [{}, "n"],
+      [{ n: 100 }, "the stat moves"],
+      [{ n: 100, stats: {} }, "a segment"],
+      [{ n: 100, stats: {}, segments: [] }, "a point in its series"],
+      [{ n: 100, stats: {}, segments: [], series: [] }, "an evidence count"],
+    ];
+    for (const [less, where] of order) assert.deepEqual(refusedOf(measure({ ...all, ...less }), onMeasure("value", 47, 52)).why, { kind: "part", where }, where);
+  });
+
+  test("a segment's key, a person's token or the customer's own stage name, is in the reason nowhere", () => {
+    for (const key of ["[[user:U0047]]", "Negotiation/Review"]) {
+      const reason = refusalReason([refusedOf(measure({ value: 47, segments: [segment({ dimension: "owner", key, n: 47 })] }), onMeasure("value", 47, 52))]);
+      assert.ok(!reason.includes(key) && !reason.includes("U0047") && !reason.includes("Negotiation"), reason);
+      assert.ok(reason.includes("another figure of this measure (a segment) is also 47"), reason);
+    }
+  });
+});
+
+describe("a measure's own wording that prints its value (decision 517, item 4)", () => {
+  const worded = `"A planted measure", value: 5 as read, corrected to 6, but the measure's own wording has 5, which a correction doesn't rewrite.`;
+  const lineOf = (m: Measured, last = 6): string => refusalReason([refusedOf(m, onMeasure("value", m.value, last))]).split("\n")[1]!;
+
+  test("the value standing once in the label, the definition, an assumption, an exclusion, the reason it isn't segmented, a segment's reason or a point's: refused, the texts as read", () => {
+    const places: Array<[string, Partial<Measured>]> = [
+      ["label", { label: "Deals over 5 stages" }],
+      ["definition", { definition: "Deals that moved through 5 stages." }],
+      ["an assumption", { assumptions: ["Fewer than 5 people logged in."] }],
+      ["an exclusion", { exclusions: ["Deals with 5 owners or more."] }],
+      ["the segment exempt reason", { segmentExemptReason: "Fewer than 5 people, so one org-wide figure." }],
+      ["a segment's reason", { segments: [segment({ value: null, notMeasurableReason: "Fewer than 5 people." })] }],
+      ["a point's reason", { series: [point({ value: null, notMeasurableReason: "Fewer than 5 people." })] }],
+    ];
+    for (const [where, edit] of places) {
+      const m = measure({ value: 5, ...edit });
+      const line = lineOf(m);
+      assert.equal(line.replace(/^"[^"]*"/, '"A planted measure"'), worded, where);
+      assert.deepEqual(refusedOf(m, onMeasure("value", 5, 6)).why, { kind: "worded" }, where);
+    }
+  });
+
+  test("the value only as 3 may in an assumption: refused the same way", () => {
+    assert.deepEqual(refusedOf(measure({ value: 3, assumptions: ["Users who left 3 may still hold a licence."] }), onMeasure("value", 3, 4)).why, { kind: "worded" });
+  });
+
+  test("a number near it and not it: refused with the row's rounded wording", () => {
+    const line = lineOf(measure({ value: 37, definition: "About 36 deals a quarter." }), 40);
+    assert.equal(line, `"A planted measure", value: 37 as read, corrected to 40, but the measure's own wording doesn't print 37 itself and has 36, which may be this figure rounded.`);
+  });
+
+  test("the value only inside an ISO date or a person's token in its texts: carried, the texts as read", () => {
+    for (const [value, edit] of [
+      [12, { definition: "Read on 2026-03-12." }],
+      [3, { assumptions: ["Read on 2026-03-12."] }],
+      [12, { label: "Deals owned by [[user:U0012]]" }],
+    ] as Array<[number, Partial<Measured>]>) {
+      const m = measure({ value, ...edit });
+      const result = applyOverrides([], [m], [onMeasure("value", value, value + 7)]);
+      assert.deepEqual(result.refused, [], JSON.stringify(edit));
+      assert.deepEqual(result.metrics, [{ ...m, value: value + 7 }], JSON.stringify(edit));
+    }
+  });
+});
+
+describe("one measure, several figures, and rows that change nothing (decision 517)", () => {
+  test("two figures of one measure, one refused and one carriable: the whole measure as read, one refusal listed", () => {
+    const m = measure({ n: 100, segments: [segment({ n: 100 })] });
+    const result = applyOverrides([], [m], [onMeasure("value", 37, 40, "m1"), onMeasure("n", 100, 110, "m2")]);
+    assert.deepEqual(result.metrics, [m]);
+    assert.deepEqual(result.refused.map((r) => [r.metricId, r.field, r.why]), [[MID, "n", { kind: "part", where: "a segment" }]]);
+    assert.equal(refusalReason(result.refused).split("\n").length, 3);
+  });
+
+  test("a row for a measure the run doesn't hold, one not measured, or a field it doesn't have: nothing changes, nothing refused", () => {
+    const notMeasured: Metric = { id: MID, domain: "historic_pipeline", status: "not_measurable", label: "A planted measure", definition: "Won deals over closed deals.", unit: "percent", evidence: [evidence], exclusions: [], assumptions: [], reason: "Fewer than 5 deals closed." };
+    for (const [m, row] of [
+      [measure(), { ...onMeasure("value", 37, 40), target: { type: "metric" as const, id: "historic.nothing", field: "value" } }],
+      [notMeasured, onMeasure("value", 37, 40)],
+      [measure(), onMeasure("stats.nothing", 37, 40)],
+      [measure(), onMeasure("label", 37, 40)],
+    ] as Array<[Metric, NumberOverride]>) {
+      const result = applyOverrides([], [m], [row]);
+      assert.deepEqual(result, { findings: [], metrics: [m], refused: [] }, row.target.field);
+    }
+  });
+});
+
+describe("a measure's refusal beside a finding's, as the console lists them (decisions 512 and 517)", () => {
+  const ofFinding = (i: number): OverrideRefusal => ({ findingId: `f-${i}`, title: `Finding ${i}`, field: "facts.hits", asRead: 1200, last: 1100, why: { kind: "repeated", places: 2 } });
+  const ofMeasure = (i: number, why: OverrideRefusal["why"] = { kind: "part", where: "a segment" }, title = `Measure ${i}`): OverrideRefusal => ({ metricId: `m-${i}`, title, field: "value", asRead: 47, last: 52, why });
+
+  test("a finding's refusal and a measure's together: the finding's line first, whichever came first, and through applyOverrides", () => {
+    const lines = refusalReason([ofMeasure(1), ofFinding(1)]).split("\n");
+    assert.deepEqual([lines[0], lines[1]!.slice(0, 11), lines[2]!.slice(0, 11), lines[3]], ["Held back: 2 corrected figures can't be carried into the documents.", '"Finding 1"', '"Measure 1"', CLOSE]);
+    const f = finding("3 admins and 3 users.", { admins: 3 });
+    const result = applyOverrides([f], [measure({ n: 37 })], [onMeasure("value", 37, 40, "m1"), override("facts.admins", 3, 4, "o1")]);
+    assert.deepEqual(result.refused.map((r) => r.findingId ?? r.metricId), [ID, MID]);
+  });
+
+  test("eleven refusals across both: ten lines, the findings' first, then And 1 more.", () => {
+    const lines = refusalReason([...Array.from({ length: 5 }, (_, i) => ofMeasure(i)), ...Array.from({ length: 6 }, (_, i) => ofFinding(i))]).split("\n");
+    assert.equal(lines.length, 13);
+    assert.equal(lines[0], "Held back: 11 corrected figures can't be carried into the documents.");
+    assert.deepEqual(lines.slice(1, 11).map((l) => l.split('"')[1]), [...Array.from({ length: 6 }, (_, i) => `Finding ${i}`), ...Array.from({ length: 4 }, (_, i) => `Measure ${i}`)]);
+    assert.deepEqual(lines.slice(11), ["And 1 more.", CLOSE]);
+  });
+
+  test("a measure's label holding a person's token prints a named person", () => {
+    const line = refusalReason([ofMeasure(1, { kind: "worded" }, "Deals owned by [[user:U0047]]")]).split("\n")[1]!;
+    assert.equal(line, `"Deals owned by a named person", value: 47 as read, corrected to 52, but the measure's own wording has 47, which a correction doesn't rewrite.`);
+  });
+
+  test("the console's reader over a measure-only reason, a mixed one and each of a measure's whys: Held back: first, three lines or more, none empty, the close last", () => {
+    const whys: OverrideRefusal["why"][] = [{ kind: "part", where: "n" }, { kind: "part", where: "an evidence count" }, { kind: "worded" }, { kind: "rounded", found: "36" }, { kind: "unsure", found: "3 may" }, { kind: "stale", from: 45 }];
+    const reasons = [refusalReason([ofMeasure(1)]), refusalReason([ofMeasure(1), ofFinding(1)]), ...whys.map((why) => refusalReason([ofMeasure(1, why)]))];
+    for (const reason of reasons) {
+      const read = reason.split("\n").map((l) => l.trim()).filter(Boolean);
+      assert.deepEqual(read, reason.split("\n"), "no line empty or padded");
+      assert.ok(read[0]!.startsWith("Held back: ") && read.length >= 3 && read.at(-1) === CLOSE, reason);
+    }
+    assert.equal(reasons[5]!.split("\n")[1], `"Measure 1", value: 47 as read, corrected to 52, but the measure's own wording doesn't print 47 itself and has 36, which may be this figure rounded.`);
   });
 });
