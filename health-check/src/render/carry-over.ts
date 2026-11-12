@@ -24,6 +24,10 @@ export async function carryOver(browserPage: Page): Promise<number> {
     const SPLITTABLE_TAGS = new Set(["DIV", "SECTION", "OL", "UL", "TABLE", "TBODY"]);
     const TEXT_TAGS = new Set(["P", "LI"]);
     const HEADINGS = new Set(["H1", "H2", "H3", "H4", "H5"]);
+    // A part's own heading, which a split part carries on with. A page's title and eyebrow are the continued page's.
+    const LABELS = new Set(["H3", "H4", "H5"]);
+    // What a part's heading heads and can be split in two: a list, a table, a paragraph.
+    const CARRIES_ON = new Set(["UL", "OL", "TABLE", "TBODY", "P"]);
 
     const isChrome = (el: Element): boolean => el.hasAttribute("data-chrome");
     const kidsOf = (el: Element): HTMLElement[] => [...el.children].filter((c): c is HTMLElement => c instanceof HTMLElement && !isChrome(c) && c.tagName !== "STYLE" && c.tagName !== "THEAD");
@@ -54,6 +58,7 @@ export async function carryOver(browserPage: Page): Promise<number> {
     /** Children laid out side by side, as in a grid of cards, rather than one under another. */
     const sideBySide = (kids: HTMLElement[]): boolean => kids.some((k, i) => i > 0 && box(k).top < box(kids[i - 1]!).bottom - 1 && box(k).left > box(kids[i - 1]!).left + 1);
     const isHeading = (el: Element): boolean => HEADINGS.has(el.tagName) || el.classList.contains("eyebrow");
+    const isLabel = (el: Element): boolean => LABELS.has(el.tagName) && !el.classList.contains("eyebrow");
 
     /** A copy without its children: the wrapper the moved content goes into. A table keeps its head. */
     const shell = (el: HTMLElement): HTMLElement => {
@@ -104,9 +109,43 @@ export async function carryOver(browserPage: Page): Promise<number> {
      */
     const breakAt = (container: HTMLElement, dest: HTMLElement, limit: number, state: State): void => {
       const kids = kidsOf(container);
+      /**
+       * Where what goes from kid i starts. A part's heading doesn't stay at the foot
+       * of a page without what it heads, so the part's headings straight above it go
+       * too, as long as something else stays on the page (DECISIONS.md 508). Only a
+       * part's own (H3 to H5): the page's eyebrow and title keep their rule (510).
+       */
+      const headedFrom = (i: number): number => {
+        let from = i;
+        while (from > 0 && state.placed && isLabel(kids[from - 1]!)) from--;
+        return from;
+      };
+      /**
+       * Kid `at` was split in two and its rest opens what goes on. If it is a list,
+       * a table or a paragraph and the first thing under its heading, the rest
+       * starts with a copy of that heading marked as continued, as the page's title
+       * is. Anything else goes on unlabelled: a wrapper (whose rest can start with a
+       * heading of its own, or be an empty column), a note after a list, a block
+       * moved whole. No label is better than one over what it doesn't head
+       * (DECISIONS.md 507, 508 and 510).
+       */
+      const label = (at: number): void => {
+        if (!CARRIES_ON.has(kids[at]!.tagName)) return;
+        const heading = kids.slice(0, at).filter(visible).at(-1);
+        if (!heading || !isLabel(heading)) return;
+        const copy = heading.cloneNode(true) as HTMLElement;
+        // Ours, not the slide's: the layout check doesn't count it as content.
+        copy.setAttribute("data-carried-label", "");
+        // A reference tag that ends a heading stays at its end, after the mark.
+        const ref = copy.lastElementChild?.hasAttribute("data-ref") ? copy.lastElementChild : null;
+        ref?.remove();
+        if (!/, continued$/.test(copy.textContent ?? "")) copy.append(", continued");
+        if (ref) copy.append(ref);
+        dest.prepend(copy);
+      };
       const moveFrom = (i: number): void => {
         // A heading doesn't stay at the foot of a page without what it heads.
-        let from = i;
+        let from = headedFrom(i);
         while (from > 0 && isHeading(kids[from - 1]!) && kids.slice(0, from - 1).some((k) => !isHeading(k))) from--;
         for (const k of kids.slice(from)) dest.appendChild(k);
         if (kids.slice(from).length) state.moved = true;
@@ -147,8 +186,12 @@ export async function carryOver(browserPage: Page): Promise<number> {
             if (state.placed) moveFrom(i);
             return;
           }
-          if (kidsOf(kid).length === 0) kid.remove();
           for (const k of kids.slice(i + 1)) dest.appendChild(k);
+          if (kidsOf(kid).length === 0) {
+            // None of it stayed, so it went whole, and the headings over it go with it.
+            kid.remove();
+            for (const k of kids.slice(headedFrom(i), i)) dest.insertBefore(k, inner);
+          } else label(i);
           return;
         }
         if (TEXT_TAGS.has(kid.tagName) && box(kid).top < limit) {
@@ -158,6 +201,7 @@ export async function carryOver(browserPage: Page): Promise<number> {
             state.moved = true;
             state.placed = true;
             for (const k of kids.slice(i + 1)) dest.appendChild(k);
+            label(i);
             return;
           }
         }
