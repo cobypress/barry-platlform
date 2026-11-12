@@ -950,3 +950,83 @@ describe("a measure's refusal beside a finding's, as the console lists them (dec
     assert.equal(reasons[5]!.split("\n")[1], `"Measure 1", value: 47 as read, corrected to 52, but the measure's own wording doesn't print 47 itself and has 36, which may be this figure rounded.`);
   });
 });
+
+// Decision 518, the rest: what stays a figure beside a guessed date, and the full dates round 4 masked whole.
+describe("a guessed date's own digits, and digits joined to a letter (decision 518)", () => {
+  const lineOf = (summary: string, value: number, last: number): string => {
+    const f = finding(summary, { x: value });
+    const result = applyOverrides([f], [], [override("facts.x", value, last)]);
+    assert.deepEqual(result.findings[0], f, summary);
+    return refusalReason(result.refused).split("\n")[1]!;
+  };
+  const g = (n: number): string => n.toLocaleString("en-GB");
+  const onlyAs = (value: number, last: number, form: string): string => `"A planted finding", x: ${g(value)} as read, corrected to ${g(last)}, but the wording has ${g(value)} only as ${form}, which may be this figure or a date, a time or a ratio, and we can't tell.`;
+  const rounded = (value: number, last: number, found: string): string => `"A planted finding", x: ${g(value)} as read, corrected to ${g(last)}, but the wording doesn't print ${g(value)} itself and has ${found}, which may be this figure rounded.`;
+  const inTwo = (value: number, last: number): string => `"A planted finding", x: ${g(value)} as read, corrected to ${g(last)}, but the wording has ${g(value)} in 2 places, and we can't tell which of them are this figure.`;
+
+  test("the third review's four sentences and FY 2000, each with the figure also printed plainly: refused, in 2 places, where round 4 rewrote the plain one and left the other", () => {
+    assert.equal(lineOf("3 may lose access; 3 accounts in all.", 3, 4), inTwo(3, 4));
+    assert.equal(lineOf("12 of March's deals closed late, 12 in all.", 12, 13), inTwo(12, 13));
+    assert.equal(lineOf("In March, 2000 deals were opened: 2,000 in all.", 2000, 2100), inTwo(2000, 2100));
+    assert.equal(lineOf("In Q3 12 deals slipped, 12 of 40.", 12, 13), inTwo(12, 13));
+    assert.equal(lineOf("FY 2000 deals were opened: 2,000 in all.", 2000, 2100), inTwo(2000, 2100));
+  });
+
+  test("In Q3, 3 deals slipped, with a fact of 3 to 4: rewritten at its one place, since Q3's 3 is joined to a letter", () => {
+    assert.equal(carried("In Q3, 3 deals slipped.", { x: 3 }, "x", 4), "In Q3, 4 deals slipped.");
+  });
+
+  test("FY26, March 3rd and the 3rd of March with an unprinted fact of 26 or 3: carried, the text as read", () => {
+    untouched("Set in the FY26 plan.", 26);
+    untouched("Agreed on March 3rd.", 3);
+    untouched("Agreed on the 3rd of March.", 3);
+  });
+
+  // Round 4 masked these whole (its "the day and the year of 31 December 2025" and "the year of December 2025").
+  test("31 December 2025 with an unprinted fact of 31 or 2025, and December 2025 with 2025: refused as unsure, naming the date as written; with 7: carried", () => {
+    assert.equal(lineOf("Closed by 31 December 2025.", 31, 38), onlyAs(31, 38, "31 December 2025"));
+    assert.equal(lineOf("Closed by 31 December 2025.", 2025, 2032), onlyAs(2025, 2032, "31 December 2025"));
+    assert.equal(lineOf("Closed in December 2025.", 2025, 2030), onlyAs(2025, 2030, "December 2025"));
+    untouched("Closed by 31 December 2025.", 7);
+  });
+
+  test("31 December 2025 and the 5% test: 30 is near 31, 20 near 2025 as a percentage (2,000), and 2,000 near 2025, so each is refused as rounded, naming the date", () => {
+    for (const value of [30, 20, 2000]) assert.equal(lineOf("Closed by 31 December 2025.", value, value + 7), rounded(value, value + 7, "31 December 2025"));
+  });
+
+  test("12/03/2026 and 2026-03-12T10:30:00Z, digits and separators only, with an unprinted fact of 12, 3 or 10: carried, the text as read", () => {
+    for (const value of [12, 3, 10]) {
+      untouched("Checked on 12/03/2026.", value);
+      untouched("Checked at 2026-03-12T10:30:00Z.", value);
+    }
+  });
+});
+
+describe("the two automation findings that print 31 December 2025, on the synthetic run (decision 518)", () => {
+  // Measured before and after 518 (bdf574b and this branch): every figure of both, plus 7, times 2 plus 0.5 and
+  // times 0.9, has the same verdict, since none is 31, 2025 or near either. What moved is an unprinted figure of 31 or 2025.
+  const rules = ["aut.legacy-workflow-rules", "aut.legacy-process-builder"].map(ruleOf);
+
+  test("each figure's verdict, unchanged by 518", () => {
+    const verdicts = rules.flatMap((f) => figuresOf(f).map(({ field, value }) => {
+      const result = applyOverrides([f], [], [onRun(f, field, value, value + 7)]);
+      return [f.ruleId, field, value, result.refused[0]?.why ?? (result.findings[0]!.summary === f.summary ? "changed with no text" : "rewritten")];
+    }));
+    assert.deepEqual(verdicts, [
+      ["aut.legacy-workflow-rules", "facts.activeRules", 3, { kind: "shared", other: "objects" }],
+      ["aut.legacy-workflow-rules", "facts.objects", 3, { kind: "shared", other: "activeRules" }],
+      ["aut.legacy-process-builder", "facts.activeProcesses", 1, "rewritten"],
+    ]);
+  });
+
+  test("their wording with an unprinted figure of 31 or 2025: refused naming 31 December 2025, where round 4 carried it", () => {
+    for (const f of rules) {
+      assert.ok(f.summary.includes("on 31 December 2025."), f.summary);
+      for (const value of [31, 2025]) {
+        const planted = { ...f, facts: { ...f.facts, planted: value } };
+        const result = applyOverrides([planted], [], [onRun(planted, "facts.planted", value, value + 7)]);
+        assert.deepEqual(result.refused.map((r) => r.why), [{ kind: "unsure", found: "31 December 2025" }], `${f.ruleId} ${value}`);
+      }
+    }
+  });
+});
