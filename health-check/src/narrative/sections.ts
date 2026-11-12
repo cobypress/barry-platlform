@@ -561,11 +561,15 @@ function statedVsActualSpec(intake: Intake | null | undefined, team: Finding[]):
   };
 }
 
-/** The executive pipeline page: what's open, what it's likely to be worth, and the potential revenue in deals that have stalled. */
-function pipelineSpec(input: ReportInput, team: Finding[]): Spec {
-  const metrics = input.metrics.filter((m) => PIPELINE_TODAY_METRICS.includes(m.id));
+/**
+ * The executive pipeline page: what's open, what it's likely to be worth, and the
+ * potential revenue in deals that have stalled. From the metrics as corrected, as
+ * every other section, tile and chart is (DECISIONS.md 519).
+ */
+function pipelineSpec(input: ReportInput, team: Finding[], corrected: Metric[]): Spec {
+  const metrics = corrected.filter((m) => PIPELINE_TODAY_METRICS.includes(m.id));
   const potential = POTENTIAL_REVENUE_RULES.flatMap((id) => team.find((f) => f.ruleId === id && f.status === "issue") ?? []);
-  const today = pipelineTodayText(input.metrics, input.calibration.currency);
+  const today = pipelineTodayText(corrected, input.calibration.currency);
   const sized = potential.filter((f) => f.value.kind === "revenue");
   return {
     key: "pipeline",
@@ -645,7 +649,7 @@ function interviewSpec(input: ReportInput, view: InterviewView): Spec {
   };
 }
 
-function executiveSpecs(input: ReportInput, team: Finding[], survey: SurveyView | null, interviews: InterviewView | null = null, added?: Added): Spec[] {
+function executiveSpecs(input: ReportInput, team: Finding[], metrics: Metric[], survey: SurveyView | null, interviews: InterviewView | null = null, added?: Added): Spec[] {
   const verdict = verdictOf(team);
   const top = topIssues(team, TOP_ISSUE_COUNT, added);
   const plan = buildPlan(team, added);
@@ -670,7 +674,7 @@ function executiveSpecs(input: ReportInput, team: Finding[], survey: SurveyView 
     ...(executiveThemes(interviews).length ? [{ key: "interviews", title: "What your people told us", body: lines(...executiveThemes(interviews).map((t) => t.sentence)), ...interviewScope(interviews!) }] : []),
     { key: "scorecard", title: "Scorecard", body: "Each area of your Salesforce, scored out of 100. Where an area can't be scored fairly, we say why rather than guess.", findingIds: team.map((f) => f.id), sources: [...SUMMARY_SOURCES, ...scoreSources] },
     // A set-up review reads no deals, so there's no pipeline to describe.
-    ...(isSetupReview(input.run) ? [] : [pipelineSpec(input, team)]),
+    ...(isSetupReview(input.run) ? [] : [pipelineSpec(input, team, metrics)]),
     {
       key: "top_issues",
       title: `Top ${TOP_ISSUE_COUNT} issues`,
@@ -977,7 +981,7 @@ export function buildReport(given: ReportInput): BuiltReport {
     readiness,
     outputs: {
       raw_notes: build("raw_notes", rawNotesSpecs(input, overall, comparisons, value, investment, effective.metrics, progress, survey, causes, interviews, readiness)),
-      executive_summary: build("executive_summary", executiveSpecs(input, team, survey, interviews, added)),
+      executive_summary: build("executive_summary", executiveSpecs(input, team, effective.metrics, survey, interviews, added)),
       full_health_check: build("full_health_check", fullSpecs(input, team, effective.metrics, survey, interviews, readiness, added)),
     },
     briefs,

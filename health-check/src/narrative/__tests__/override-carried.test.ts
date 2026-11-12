@@ -10,6 +10,7 @@ import { loadRun, printDocuments, OUTPUT_FILES } from "../../render/render-run.t
 import { heldFigures, renderReleased, type ApprovedRun } from "../../render/render-released.ts";
 import { buildDataset, checkNumbers, extractFigures, scopeDataset, type FigureSet } from "../../numbercheck/index.ts";
 import { fullReportHtml } from "../../render/full-report.ts";
+import { executiveHtml } from "../../render/executive.ts";
 import type { Finding, NumberOverride, ReportSection, SectionVersion } from "../../schemas/index.ts";
 import { runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
@@ -708,6 +709,80 @@ describe("a metric's figure another of its figures also holds is refused (decisi
     assert.equal(
       refusalReason(built(onMetricOf("historic.top_account_share", "value", 32.1, 39.1)).refused).split("\n")[1],
       `"Won value from the top 10 accounts", value: 32.1 as read, corrected to 39.1, but another figure of this measure (a segment) is also 32.1, and a chart, table or sentence prints it as read.`,
+    );
+  });
+});
+
+// Decision 519: the executive summary's Pipeline section is written from the metrics as corrected, as every other section, tile and chart is.
+describe("the executive Pipeline section reads the metrics as corrected (decision 519)", () => {
+  /** The executive Pipeline page as a reader sees it: from its heading to the next page's. */
+  const pipelinePage = (report: BuiltReport): string => {
+    const html = executiveHtml(report, pseudonyms);
+    const from = html.indexOf("<h2>Your pipeline today</h2>");
+    return decoded(html.slice(from, html.indexOf('class="eyebrow"', from))).replace(/\s+/g, " ");
+  };
+  const briefOf = (report: BuiltReport) => report.briefs.get(`${run.id}:executive_summary:pipeline`)!;
+  const valueIn = (report: BuiltReport, id: string): unknown => (briefOf(report).sources.find((s) => s.id === id) as { value?: number } | undefined)?.value;
+
+  test("current.open_pipeline 3,047,000 to 2,742,300 and current.delivery_outlook_deals 31 to 28: the sentence and the tile read £2.74m, across about 28 deals, the brief's sources hold both, nothing held", async () => {
+    const asRead = pipelinePage(asBuilt);
+    assert.ok(asRead.includes("worth £3.05m") && asRead.includes("£3.05m Open pipeline") && asRead.includes("across about 31 deals"), asRead);
+    const report = built(onMetricOf("current.open_pipeline", "value", 3047000, 2742300), onMetricOf("current.delivery_outlook_deals", "value", 31, 28));
+    assert.deepEqual(report.refused, []);
+    const page = pipelinePage(report);
+    assert.ok(page.includes("You have 76 open deals worth £2.74m.") && page.includes("£2.74m Open pipeline"), page);
+    assert.ok(page.includes("across about 28 deals"), page);
+    assert.ok(!page.includes("£3.05m") && !page.includes("31 deals"), page);
+    assert.equal(valueIn(report, "current.open_pipeline"), 2742300);
+    assert.equal(valueIn(report, "current.delivery_outlook_deals"), 28);
+    assert.deepEqual(await printed(report), []);
+  });
+
+  test("current.weighted_pipeline and current.delivery_outlook_value, each times 0.9: carried, nothing held, where the section from the metrics as read had them held", async () => {
+    for (const id of ["current.weighted_pipeline", "current.delivery_outlook_value"]) {
+      const metric = input.metrics.find((m) => m.id === id)!;
+      assert.ok(metric.status === "measured");
+      const report = built(onMetricOf(id, "value", metric.value, metric.value * 0.9));
+      assert.deepEqual(report.refused, [], id);
+      assert.equal(valueIn(report, id), metric.value * 0.9, id);
+      assert.deepEqual(await printed(report), [], id);
+    }
+  });
+
+  // The admitted limit of 519: two metrics hold the same quantity, and a correction to one leaves the other's chart as read.
+  test("current.open_pipeline corrected: the pipeline-over-time chart's last label still reads £3.05m, nothing held; historic.pipeline_point_in_time_value corrected too is refused naming a point in its series", async () => {
+    const chart = (report: BuiltReport): string => decoded(fullReportHtml(report, pseudonyms)).replace(/\s+/g, " ");
+    assert.ok(chart(asBuilt).includes("£3.05m Nov 2024 Oct 2026"));
+    const open = onMetricOf("current.open_pipeline", "value", 3047000, 2742300);
+    const report = built(open);
+    assert.deepEqual(report.refused, []);
+    assert.ok(chart(report).includes("£3.05m Nov 2024 Oct 2026"), "the chart's last label as read");
+    assert.deepEqual(await printed(report), []);
+    const both = built(open, onMetricOf("historic.pipeline_point_in_time_value", "value", 3047000, 2742300));
+    assert.deepEqual(both.refused.map((r) => r.metricId), ["historic.pipeline_point_in_time_value"]);
+    assert.equal(
+      refusalReason(both.refused).split("\n")[1],
+      `"Open pipeline at each month end", value: 3,047,000 as read, corrected to 2,742,300, but another figure of this measure (a point in its series) is also 3,047,000, and a chart, table or sentence prints it as read.`,
+    );
+  });
+
+  test("current.open_deals 76 to 80, whose n is also 76: refused, the Pipeline section as read, and the documents job's make held with 517's reason", async () => {
+    const row = onMetricOf("current.open_deals", "value", 76, 80);
+    const report = built(row);
+    assert.deepEqual(report.refused.map((r) => [r.metricId, r.why]), [["current.open_deals", { kind: "part", where: "n" }]]);
+    assert.equal(pipelinePage(report), pipelinePage(asBuilt));
+    assert.equal(valueIn(report, "current.open_deals"), 76);
+    const out = join(mkdtempSync(join(tmpdir(), "hc-metric-")), "documents");
+    const result = await renderReleased(dir, approvedWith([row]), out);
+    assert.ok("refused" in result);
+    assert.equal(existsSync(out) && readdirSync(out).length > 0, false, "no file written");
+    assert.equal(
+      refusalReason(result.refused),
+      [
+        "Held back: 1 corrected figure can't be carried into the documents.",
+        `"Open deals", value: 76 as read, corrected to 80, but another figure of this measure (n) is also 76, and a chart, table or sentence prints it as read.`,
+        CLOSE,
+      ].join("\n"),
     );
   });
 });
