@@ -100,6 +100,26 @@ describe("carry-over: nothing runs past a footer", () => {
     });
   }
 
+  test("the executive summary, several times longer: a part's heading goes over with the table it heads (DECISIONS.md 508 and 510)", async () => {
+    // Before the labels (fe5b440), "Potential revenue in open deals" sat alone at the foot of the
+    // pipeline's first continued page and its table opened the next. It is a part's own heading (an
+    // H3), so 508 takes it over with its table, and 510 leaves that as it is.
+    const page = await open(executiveHtml(verbose(buildReport(input)), pseudonyms));
+    try {
+      await carryOver(page);
+      const heading = await page.evaluate(() => {
+        const pages = [...document.querySelectorAll(".page")];
+        const h = [...document.querySelectorAll("h3, h4, h5")].find((x) => x.textContent === "Potential revenue in open deals")!;
+        const at = pages.indexOf(h.closest(".page")!);
+        const before = [...pages[at - 1]!.querySelectorAll("h2, h3, figure, table, p")].at(-1);
+        return { tag: h.tagName, next: h.nextElementSibling?.tagName, page: at + 1, title: pages[at]!.querySelector("h2")?.textContent, endsBefore: before?.tagName };
+      });
+      assert.deepEqual(heading, { tag: "H3", next: "TABLE", page: 9, title: "Your pipeline today, continued", endsBefore: "FIGURE" });
+    } finally {
+      await page.close();
+    }
+  });
+
   test("the contents page points at where each part starts after pages are added", async () => {
     const page = await open(fullReportHtml(verbose(buildReport(input)), pseudonyms));
     try {
@@ -147,6 +167,9 @@ h2, h3 { height: 30px; line-height: 30px; font-size: 16px; overflow: hidden; whi
 ul { margin: 0; padding: 0 0 0 18px; }
 li { height: 40px; }
 .lists { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+p { margin: 0; line-height: 20px; white-space: pre-line; }
+table { border-collapse: collapse; }
+td { height: 40px; padding: 0; }
 `;
 const gap = (px: number): string => `<div style="height:${px}px"></div>`;
 const lis = (name: string, n: number): string => Array.from({ length: n }, (_, i) => `<li>${name}${i + 1}</li>`).join("");
@@ -154,11 +177,11 @@ const items = (name: string, n: number): string => `<ul>${lis(name, n)}</ul>`;
 const part = (label: string, name: string, n: number): string => `<h3>${label}</h3>${items(name, n)}`;
 const sheet = (body: string): string => htmlDocument("Test", "a4", SPLIT_CSS, [`<section class="page" data-page="1"><h2>Title</h2>${body}<div class="footer" data-chrome><span>Footer</span><span>1</span></div></section>`]);
 
-/** Each page's headings and list items in order, as "h3:Label" and "li:A1", once carried over. */
-async function split(body: string): Promise<{ added: number; pages: string[][]; page: Page }> {
+/** Each page's headings and list items in order, as "h3:Label" and "li:A1", once carried over. `shown` adds paragraphs or cells. */
+async function split(body: string, shown = "h2, h3, li"): Promise<{ added: number; pages: string[][]; page: Page }> {
   const page = await open(sheet(body));
   const added = await carryOver(page);
-  const pages = await page.evaluate(() => [...document.querySelectorAll(".page")].map((p) => [...p.querySelectorAll("h2, h3, li")].map((e) => `${e.tagName.toLowerCase()}:${e.textContent}`)));
+  const pages = await page.evaluate((selector) => [...document.querySelectorAll(".page")].map((p) => [...p.querySelectorAll(selector)].map((e) => `${e.tagName.toLowerCase()}:${e.textContent}`)), shown);
   return { added, pages, page };
 }
 const li = (name: string, from: number, to: number): string[] => Array.from({ length: to - from + 1 }, (_, i) => `li:${name}${from + i}`);
@@ -234,7 +257,7 @@ describe("carry-over: a list split across pages keeps its label (DECISIONS.md 50
     try {
       assert.deepEqual(pages[1], ["h2:Title, continued", "h3:Middle (12), continued", ...li("M", 9, 12)]);
       // The left column still crossed (the row was as tall as the middle one) when its turn came, so its shell went over empty.
-      assert.match(await page.evaluate(() => document.querySelectorAll(".page")[1]!.querySelector(".lists")!.innerHTML), /^<div><\/div><div><h3>Middle \(12\), continued<\/h3><ul>/);
+      assert.match(await page.evaluate(() => document.querySelectorAll(".page")[1]!.querySelector(".lists")!.innerHTML), /^<div><\/div><div><h3 data-carried-label="">Middle \(12\), continued<\/h3><ul>/);
     } finally {
       await page.close();
     }
@@ -294,6 +317,114 @@ describe("carry-over: a list split across pages keeps its label (DECISIONS.md 50
       assert.deepEqual(pages, [["h2:Title", "h3:Label", ...li("A", 1, 3)]]);
       const layout = await checkLayout(page, { minPages: 1, maxPages: 1 });
       assert.ok(layout.problems.some((p) => p.page === 1 && p.check === "overflow"), JSON.stringify(layout.problems));
+    } finally {
+      await page.close();
+    }
+  });
+});
+
+// A label is copied only over the rest of the thing it heads (DECISIONS.md 510): a
+// list, a table or a paragraph split in two that is the first thing under its heading.
+// Whatever else goes over (a note after the list, a paragraph after another block)
+// goes unlabelled. A paragraph's line is 20px, one sentence a line.
+
+const sentences = (...words: string[]): string => words.map((w) => `${w}.`).join("\n");
+const note = "<p>Note.</p>";
+
+/** The copies the carry-over made on each page, by their text, and whether any original heading was marked. */
+const marks = (page: Page): Promise<{ copies: string[][]; originals: number }> =>
+  page.evaluate(() => ({
+    copies: [...document.querySelectorAll(".page")].map((p) => [...p.querySelectorAll("[data-carried-label]")].map((h) => h.textContent ?? "")),
+    originals: [...document.querySelectorAll("[data-carried-label]")].filter((h) => !/, continued$/.test(h.textContent ?? "")).length,
+  }));
+
+describe("carry-over: a label only over what it heads (DECISIONS.md 510)", () => {
+  test("a note after a list, carried alone, goes without a label", async () => {
+    // The list fits; its note is the first thing past the footer.
+    const { pages, page } = await split(`${gap(110)}<div>${part("Label", "A", 8)}${note}</div>`, "h2, h3, li, p");
+    try {
+      assert.deepEqual(pages, [
+        ["h2:Title", "h3:Label", ...li("A", 1, 8)],
+        ["h2:Title, continued", "p:Note."],
+      ]);
+      assert.deepEqual((await marks(page)).copies, [[], []]);
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("the list split and its note carried after it: one label, over the list, marked as a copy", async () => {
+    const { pages, page } = await split(`${gap(100)}<div>${part("Label", "A", 10)}${note}</div>`, "h2, h3, li, p");
+    try {
+      assert.deepEqual(pages, [
+        ["h2:Title", "h3:Label", ...li("A", 1, 8)],
+        ["h2:Title, continued", "h3:Label, continued", ...li("A", 9, 10), "p:Note."],
+      ]);
+      // The copy is marked, so the layout check can leave it out; the heading it copies isn't.
+      assert.deepEqual(await marks(page), { copies: [[], ["Label, continued"]], originals: 0 });
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("a paragraph after another block, cut by sentence, goes without a label (the verdict page's shape)", async () => {
+    // The heading heads the block; the closing paragraph after it belongs to no part.
+    const { pages, page } = await split(`<h3>Label</h3>${gap(380)}<p>${sentences("One", "Two", "Three", "Four")}</p>`, "h2, h3, li, p");
+    try {
+      assert.deepEqual(pages, [
+        ["h2:Title", "h3:Label", "p:One.\nTwo.\nThree."],
+        ["h2:Title, continued", "p:Four."],
+      ]);
+      assert.deepEqual((await marks(page)).copies, [[], []]);
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("a paragraph that is the first thing under its heading, cut by sentence, is labelled", async () => {
+    const { pages, page } = await split(`${gap(330)}<div><h3>Label</h3><p>${sentences("One", "Two", "Three", "Four", "Five", "Six")}</p></div>`, "h2, h3, li, p");
+    try {
+      assert.deepEqual(pages, [
+        ["h2:Title", "h3:Label", "p:One.\nTwo.\nThree.\nFour.\nFive."],
+        ["h2:Title, continued", "h3:Label, continued", "p:Six."],
+      ]);
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("a table split by its rows is labelled", async () => {
+    const rows = Array.from({ length: 10 }, (_, i) => `<tr><td>R${i + 1}</td></tr>`).join("");
+    const { pages, page } = await split(`${gap(100)}<div><h3>Label</h3><table><tbody>${rows}</tbody></table></div>`, "h2, h3, td");
+    try {
+      assert.deepEqual(pages, [
+        ["h2:Title", "h3:Label", ...Array.from({ length: 8 }, (_, i) => `td:R${i + 1}`)],
+        ["h2:Title, continued", "h3:Label, continued", "td:R9", "td:R10"],
+      ]);
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("a wrapper split between its parts goes without the label above it: the next part starts with its own heading", async () => {
+    const { pages, page } = await split(`<div><h3>Outer</h3><div>${part("A", "A", 6)}${part("B", "B", 3)}${part("C", "C", 3)}</div></div>`);
+    try {
+      assert.deepEqual(pages, [
+        ["h2:Title", "h3:Outer", "h3:A", ...li("A", 1, 6), "h3:B", ...li("B", 1, 3)],
+        ["h2:Title, continued", "h3:C", ...li("C", 1, 3)],
+      ]);
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("a list split after a note under the same heading goes without a label: the list isn't the first thing it heads", async () => {
+    const { pages, page } = await split(`${gap(100)}<div><h3>Label</h3>${note}${items("A", 10)}</div>`, "h2, h3, li, p");
+    try {
+      assert.deepEqual(pages, [
+        ["h2:Title", "h3:Label", "p:Note.", ...li("A", 1, 8)],
+        ["h2:Title, continued", "li:A9", "li:A10"],
+      ]);
     } finally {
       await page.close();
     }

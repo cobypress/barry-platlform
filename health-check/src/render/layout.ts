@@ -28,6 +28,8 @@ type PageFacts = {
   outside: string[];
   cover: boolean;
   text: string;
+  /** The text less the labels the carry-over copied: what counts as the page's content. */
+  content: string;
   emptyCharts: string[];
   hasChart: boolean;
 };
@@ -68,12 +70,16 @@ async function pageFacts(browserPage: Page): Promise<PageFacts[]> {
       }
       // Node by node: textContent would run neighbouring cells into one figure.
       const parts: string[] = [];
+      // A label the carry-over copied over a split list is ours, so it can't make a nearly empty page count as full (DECISIONS.md 510).
+      const own: string[] = [];
       const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
       for (let node = walker.nextNode(); node; node = walker.nextNode()) {
         const parent = node.parentElement;
         if (!parent || parent.closest("[data-chrome], [data-ref], .tick")) continue;
         const value = (node.textContent ?? "").trim();
-        if (value) parts.push(value);
+        if (!value) continue;
+        parts.push(value);
+        if (!parent.closest("[data-carried-label]")) own.push(value);
       }
       const emptyCharts = [...el.querySelectorAll<HTMLElement>("[data-expect-chart]")]
         .filter((slot) => {
@@ -94,6 +100,7 @@ async function pageFacts(browserPage: Page): Promise<PageFacts[]> {
         outside,
         cover: el.classList.contains("cover"),
         text: parts.join(" | ").replace(/\s+/g, " "),
+        content: own.join(" | ").replace(/\s+/g, " "),
         hasChart: el.querySelector("[data-expect-chart]") !== null,
         emptyCharts,
       };
@@ -120,7 +127,7 @@ export async function checkLayout(browserPage: Page, expectation: LayoutExpectat
     for (const detail of f.outside.slice(0, 3)) push(f.page, "overflow", detail);
     if (first && (Math.abs(f.width - first.width) > 1 || Math.abs(f.height - first.height) > 1)) push(f.page, "page size", `${f.width} by ${f.height}`);
     for (const chart of f.emptyCharts) push(f.page, "missing chart", chart);
-    if (!f.cover && !f.hasChart && f.text.length < MIN_TEXT) push(f.page, "empty section", `only "${f.text}"`);
+    if (!f.cover && !f.hasChart && f.content.length < MIN_TEXT) push(f.page, "empty section", `only "${f.content}"`);
     const leftover = LEFTOVERS.exec(f.text);
     if (leftover) push(f.page, "leftover", leftover[0]);
     const rawDate = RAW_DATE.exec(f.text);
