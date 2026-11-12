@@ -1330,6 +1330,24 @@ describe("a figure written as a word is an unsure form (decision 520, item 1)", 
     assert.equal(refusalReason(report.refused).split("\n")[1], `"${m.label}", activityWithoutWon: 2 as read, corrected to 3, but the measure's own wording has 2, which a correction doesn't rewrite.`);
   });
 
+  // The fifth review: no test held a word of each kind the reader gives a value, the form as written, or the order.
+  test("Fifty percent with a fact of 50, ten days with 10 and Five pounds with 5, a percent, a duration and a currency to the reader: each refused, naming the words as written", () => {
+    assert.equal(lineOf("Fifty percent of deals stall.", 50, 60), onlyAs(50, 60, "Fifty percent"));
+    assert.equal(lineOf("Leads wait ten days.", 10, 12), onlyAs(10, 12, "ten days"));
+    assert.equal(lineOf("Five pounds a seat.", 5, 7), onlyAs(5, 7, "Five pounds"));
+  });
+
+  test("a full-width ５ beside an unprinted fact of 5: refused, naming ５, since the reader reads it as 5 and our patterns don't", () => {
+    assert.equal(lineOf("５ deals have no owner.", 5, 7), onlyAs(5, 7, "５"));
+  });
+
+  test("½ beside an unprinted fact of 50, which the reader reads as one half: refused, naming ½ as written", () => {
+    assert.equal(lineOf("½ of deals stall.", 50, 55), onlyAs(50, 55, "½"));
+  });
+
+  test("Five and then 5.09:1, the nearer second, with an unprinted fact of 5.1: refused as rounded, naming Five, the first as they stand", () => {
+    assert.equal(lineOf("Five deals stall at a ratio of 5.09:1.", 5.1, 6), `"A planted finding", x: 5.1 as read, corrected to 6, but the wording doesn't print 5.1 itself and has Five, which may be this figure rounded.`);
+  });
 });
 
 // Decision 520 (4): buildReport hands the raw notes' sections the metrics as corrected (sections.ts, rawNotesSpecs).
