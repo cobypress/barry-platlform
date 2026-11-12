@@ -7,11 +7,12 @@ import { loadPipeline } from "../domains/historic-pipeline/cohort.ts";
 import { closedInWindow } from "../domains/historic-pipeline/metrics.ts";
 import { assertOutsideGit } from "../engine/run.ts";
 import { Intake } from "../narrative/intake.ts";
+import { applyOverrides, refusalSummary } from "../narrative/overrides.ts";
 import type { RuleContext } from "../engine/rule.ts";
 import type { Extractor } from "../extract/types.ts";
 import { usersExtractor } from "../extract/users.ts";
 import { Pseudonymiser } from "../privacy/pseudonymiser.ts";
-import { BenchmarkRow, Calibration, Finding, HeadcountBand, Industry, Metric, Run, SALES_CLOUD_DOMAINS, Score } from "../schemas/index.ts";
+import { BenchmarkRow, Calibration, Finding, HeadcountBand, Industry, Metric, Run, SALES_CLOUD_DOMAINS, Score, type NumberOverride } from "../schemas/index.ts";
 
 // Rule 11. One org's figures go into the benchmark set only with the customer's
 // consent, and nothing written there leads back to them: no run id, org id, name,
@@ -69,63 +70,72 @@ export const BENCHMARK_METRICS: BenchmarkMetric[] = [
 export type Figure = { metricKey: string; unit: Unit; value: number };
 export type Skipped = { metricKey: string; reason: string };
 
-/** The allowlisted figures this run measured, rounded to whole units. Anything not measurable is skipped, never filled in. */
-export function benchmarkFigures(input: { metrics: Metric[]; scores: Score[]; findings: Finding[] }): { figures: Figure[]; skipped: Skipped[] } {
+type Read = { metrics: Metric[]; scores: Score[]; findings: Finding[] };
+
+/** One allowlisted figure as the run holds it, or why there isn't one. */
+function figureOf(input: Read, unit: Unit, source: Source): { value: number } | { reason: string } {
+  if (source.from === "score") {
+    const score = input.scores.find((s) => s.domain === source.domain);
+    if (!score) return { reason: "This domain wasn't in the run." };
+    if (score.status !== "measured") return { reason: score.reason };
+    return { value: score.score };
+  }
+  if (source.from === "metric") {
+    const metric = input.metrics.find((m) => m.id === source.id);
+    if (!metric) return { reason: "The run has no such metric." };
+    if (metric.status !== "measured") return { reason: metric.reason };
+    // A changed unit would put a figure in the wrong comparison, so it's left out.
+    if (metric.unit !== unit) return { reason: `The run measured this in ${metric.unit}, not ${unit}.` };
+    return { value: metric.value };
+  }
+  const results = input.findings.filter((f) => f.ruleId === source.ruleId);
+  const measured = results.filter((f) => f.status !== "not_measurable");
+  if (measured.length === 0) return { reason: results[0]?.notMeasurableReason ?? "The run has no result for this check." };
+  // These rules give one org-wide result. More than one would mean the
+  // figure is per subject, which doesn't belong here.
+  if (measured.length > 1) return { reason: `The check gave ${measured.length} results, so there's no single org-wide figure.` };
+  const fact = measured[0]!.facts[source.fact];
+  if (fact === undefined) return { reason: "The check didn't record this figure, usually because there was nothing to check." };
+  return { value: fact };
+}
+
+/** What a figure in each unit can hold. A percentage and a score are out of 100; days can't be fewer than none. */
+const RANGE: Record<Unit, { min: number; max: number; what: string }> = {
+  percent: { min: 0, max: 100, what: "a percentage" },
+  score: { min: 0, max: 100, what: "a score" },
+  days: { min: 0, max: Infinity, what: "a number of days" },
+};
+
+/**
+ * The allowlisted figures this run measured, rounded to whole units. Anything
+ * not measurable is skipped, never filled in. Given the figures as read beside
+ * them, a figure a consultant corrected to one its unit can't hold is skipped
+ * too: an override takes any finite number, and once in the set a row can't be
+ * taken out (DECISIONS.md 521). A figure as read is taken as it always was.
+ */
+export function benchmarkFigures(input: Read & { asRead?: Omit<Read, "scores"> }): { figures: Figure[]; skipped: Skipped[] } {
   const figures: Figure[] = [];
   const skipped: Skipped[] = [];
   for (const { key, unit, source } of BENCHMARK_METRICS) {
     const skip = (reason: string): void => void skipped.push({ metricKey: key, reason });
-    let value: number;
-    if (source.from === "score") {
-      const score = input.scores.find((s) => s.domain === source.domain);
-      if (!score) {
-        skip("This domain wasn't in the run.");
-        continue;
-      }
-      if (score.status !== "measured") {
-        skip(score.reason);
-        continue;
-      }
-      value = score.score;
-    } else if (source.from === "metric") {
-      const metric = input.metrics.find((m) => m.id === source.id);
-      if (!metric) {
-        skip("The run has no such metric.");
-        continue;
-      }
-      if (metric.status !== "measured") {
-        skip(metric.reason);
-        continue;
-      }
-      // A changed unit would put a figure in the wrong comparison, so it's left out.
-      if (metric.unit !== unit) {
-        skip(`The run measured this in ${metric.unit}, not ${unit}.`);
-        continue;
-      }
-      value = metric.value;
-    } else {
-      const results = input.findings.filter((f) => f.ruleId === source.ruleId);
-      const measured = results.filter((f) => f.status !== "not_measurable");
-      if (measured.length === 0) {
-        skip(results[0]?.notMeasurableReason ?? "The run has no result for this check.");
-        continue;
-      }
-      // These rules give one org-wide result. More than one would mean the
-      // figure is per subject, which doesn't belong here.
-      if (measured.length > 1) {
-        skip(`The check gave ${measured.length} results, so there's no single org-wide figure.`);
-        continue;
-      }
-      const fact = measured[0]!.facts[source.fact];
-      if (fact === undefined) {
-        skip("The check didn't record this figure, usually because there was nothing to check.");
-        continue;
-      }
-      value = fact;
+    const found = figureOf(input, unit, source);
+    if ("reason" in found) {
+      skip(found.reason);
+      continue;
     }
+    const value = found.value;
     if (!Number.isFinite(value)) {
       skip("The figure isn't a number.");
       continue;
+    }
+    if (input.asRead) {
+      const read = figureOf({ ...input.asRead, scores: input.scores }, unit, source);
+      const range = RANGE[unit];
+      const corrected = !("value" in read) || read.value !== value;
+      if (corrected && (value < range.min || value > range.max)) {
+        skip(`The figure as corrected is outside what ${range.what} can be, so it's left out.`);
+        continue;
+      }
     }
     // Whole units, as the row format requires. Math.round(-0.4) is -0, which is still an integer.
     figures.push({ metricKey: key, unit, value: Math.round(value) || 0 });
@@ -243,6 +253,12 @@ export function appendRows(path: string, rows: unknown[]): BenchmarkRow[] {
 
 export type BenchmarkOptions = {
   runDir: string;
+  /**
+   * The run's override rows: the figures are read as corrected (DECISIONS.md
+   * 521). The worker passes those it made the documents with; `hc benchmark`
+   * the run folder's overrides.json. Default: none, so the figures as read.
+   */
+  overrides?: NumberOverride[];
   industry: string | undefined;
   headcount: string | undefined;
   consent: string | undefined;
@@ -291,10 +307,18 @@ function prepareBenchmark(options: Omit<BenchmarkOptions, "storeDir">): Prepared
     throw new AlreadyContributed(`This org is already in the benchmark set from run ${earlier.runId} (${earlier.period}). An org goes in once in any ${BENCHMARK_WINDOW_QUARTERS} quarters, so it can't count twice towards a group.`);
   }
   const calibration = Calibration.parse(readJson(join(dir, "calibration.json")));
+  const metrics = z.array(Metric).parse(readJson(join(dir, "metrics.json")));
+  const findings = z.array(Finding).parse(readJson(join(dir, "findings.json")));
+  // As the documents print them. A row we can't carry leaves the documents as
+  // read, so neither reading is certain: nothing is added. The count only,
+  // since a title or a figure is the customer's.
+  const effective = applyOverrides(findings, metrics, options.overrides ?? []);
+  if (effective.refused.length > 0) throw new Error(refusalSummary(effective.refused));
   const { figures, skipped } = benchmarkFigures({
-    metrics: z.array(Metric).parse(readJson(join(dir, "metrics.json"))),
+    metrics: effective.metrics,
     scores: z.array(Score).parse(readJson(join(dir, "scores.json"))),
-    findings: z.array(Finding).parse(readJson(join(dir, "findings.json"))),
+    findings: effective.findings,
+    asRead: { metrics, findings },
   });
   if (figures.length === 0) throw new Error("Nothing in this run was measurable, so there's nothing to export.");
 

@@ -7,7 +7,8 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { runFromRecording, tempDir } from "../../testing/harness.ts";
 import { loadAnswers } from "../../testing/replay.ts";
-import { BENCHMARK_MIN_GROUP, BenchmarkRow, Finding, Metric, Score } from "../../schemas/index.ts";
+import { BENCHMARK_MIN_GROUP, BenchmarkRow, Finding, Metric, Score, type NumberOverride } from "../../schemas/index.ts";
+import { applyOverrides, refusalSummary } from "../../narrative/overrides.ts";
 import type { PseudonymEntry } from "../../privacy/pseudonymiser.ts";
 import {
   appendRows,
@@ -187,6 +188,107 @@ describe("hc benchmark", () => {
     const run = freshRun();
     assert.throws(() => exportBenchmark(options(run, join(repo, "benchmarks"))), /Refusing to write/);
     assert.ok(!existsSync(join(run, CONSENT_FILE)));
+  });
+});
+
+describe("hc benchmark reads the figures as corrected (decision 521)", () => {
+  const metrics = z.array(Metric).parse(read(source, "metrics.json"));
+  const findings = z.array(Finding).parse(read(source, "findings.json"));
+  const measured = (id: string) => {
+    const m = metrics.find((x) => x.id === id);
+    assert.ok(m?.status === "measured", id);
+    return m;
+  };
+  const single = (ruleId: string) => findings.find((f) => f.ruleId === ruleId && f.status !== "not_measurable")!;
+  const onMetric = (id: string, newValue: number, rowId = `ov-${id}`): NumberOverride => ({ id: rowId, runId: "r", target: { type: "metric", id, field: "value" }, previousValue: measured(id).value, newValue, reason: "Checked with the customer.", overriddenBy: "Synthetic Consultant", overriddenAt: "2026-11-04T17:00:00.000Z" });
+  const onFact = (ruleId: string, fact: string, newValue: number): NumberOverride => ({ id: `ov-${ruleId}`, runId: "r", target: { type: "finding", id: single(ruleId).id, field: `facts.${fact}` }, previousValue: single(ruleId).facts[fact]!, newValue, reason: "Checked with the customer.", overriddenBy: "Synthetic Consultant", overriddenAt: "2026-11-04T17:00:00.000Z" });
+  const valueOf = (rows: BenchmarkRow[], key: string) => rows.find((r) => r.metricKey === key)?.value;
+  // Each carried alone by applyOverrides on the synthetic run (measured in session 24): the wording never prints the value as read.
+  const BY_VALUE = "historic.win_rate_by_value";
+  const PAST_CLOSE = { key: "dq.open_deals_past_close_rate", ruleId: "dq.open-opps-past-close", fact: "rate" };
+
+  test("a metric on the list, corrected and carried: its row holds the corrected value, rounded", () => {
+    assert.equal(measured(BY_VALUE).value, 45.1);
+    const rows = [onMetric(BY_VALUE, 48.6)];
+    assert.deepEqual(applyOverrides(findings, metrics, rows).refused, []);
+    const result = exportBenchmark(options(freshRun(), tempDir(), { overrides: rows }));
+    assert.equal(valueOf(result.rows, BY_VALUE), 49);
+  });
+
+  test("a fact on the list, the same", () => {
+    assert.equal(single(PAST_CLOSE.ruleId).facts.rate, 27.6);
+    const rows = [onFact(PAST_CLOSE.ruleId, PAST_CLOSE.fact, 31.4)];
+    assert.deepEqual(applyOverrides(findings, metrics, rows).refused, []);
+    const result = exportBenchmark(options(freshRun(), tempDir(), { overrides: rows }));
+    assert.equal(valueOf(result.rows, PAST_CLOSE.key), 31);
+    assert.equal(valueOf(result.rows, BY_VALUE), 45, "the rest as read");
+  });
+
+  test("with no override, the rows and what's skipped are those of the figures as read, as before", () => {
+    const asRead = benchmarkFigures({ metrics, findings, scores: z.array(Score).parse(read(source, "scores.json")) });
+    for (const overrides of [undefined, []]) {
+      const run = freshRun();
+      const store = tempDir();
+      const result = exportBenchmark(options(run, store, overrides ? { overrides } : {}));
+      assert.deepEqual(result.rows.map((r) => [r.metricKey, r.unit, r.value]), asRead.figures.map((f) => [f.metricKey, f.unit, f.value]));
+      assert.deepEqual(result.skipped, asRead.skipped);
+    }
+  });
+
+  test("a row that can't be carried: nothing added, no consent left, and the reason holds no title and no figure", () => {
+    // historic.win_rate's value as read, 47, is also one of its segments' (decision 517).
+    const refusedRow = onMetric("historic.win_rate", 50.3);
+    const refused = applyOverrides(findings, metrics, [refusedRow]).refused;
+    assert.equal(refused.length, 1);
+    for (const rows of [[refusedRow], [onMetric(BY_VALUE, 48.6), refusedRow]]) {
+      const run = freshRun();
+      const store = tempDir();
+      assert.throws(
+        () => exportBenchmark(options(run, store, { overrides: rows })),
+        (err: unknown) => {
+          assert.ok(err instanceof Error);
+          assert.equal(err.message, refusalSummary(refused));
+          for (const part of [measured("historic.win_rate").label, "47", "50.3", "48.6", "Win rate"]) assert.ok(!err.message.includes(part), part);
+          return true;
+        },
+      );
+      assert.ok(!existsSync(join(store, BENCHMARK_FILE)), "nothing added");
+      assert.ok(!existsSync(join(run, CONSENT_FILE)), "no consent record");
+    }
+  });
+
+  test("a figure corrected past what its unit can hold is left out, as one not measured is; the rest go in", () => {
+    const rows = [
+      onMetric(BY_VALUE, 250),
+      onFact(PAST_CLOSE.ruleId, PAST_CLOSE.fact, -5),
+      onFact("sec.health-check-score", "score", 140),
+      onMetric("historic.slippage_days", -3),
+      // Inside the range at the edges: kept.
+      onMetric("historic.no_decision_rate", 100),
+      onMetric("current.median_days_in_stage", 0),
+    ];
+    assert.deepEqual(applyOverrides(findings, metrics, rows).refused, []);
+    const plain = exportBenchmark(options(freshRun(), tempDir()));
+    const result = exportBenchmark(options(freshRun(), tempDir(), { overrides: rows }));
+    const left = ["historic.win_rate_by_value", "dq.open_deals_past_close_rate", "sec.health_check_score", "historic.slippage_days"];
+    for (const key of left) {
+      assert.equal(valueOf(result.rows, key), undefined, key);
+      assert.match(result.skipped.find((s) => s.metricKey === key)!.reason, /^The figure as corrected is outside what (a percentage|a score|a number of days) can be, so it's left out\.$/, key);
+    }
+    assert.equal(valueOf(result.rows, "historic.no_decision_rate"), 100);
+    assert.equal(valueOf(result.rows, "current.median_days_in_stage"), 0);
+    assert.equal(result.rows.length, plain.rows.length - left.length);
+    assert.equal(result.skipped.length, plain.skipped.length + left.length);
+    for (const row of plain.rows) if (![...left, "historic.no_decision_rate", "current.median_days_in_stage"].includes(row.metricKey)) assert.deepEqual(result.rows.find((r) => r.metricKey === row.metricKey), row);
+  });
+
+  test("a figure as read outside the range goes in as it always did", () => {
+    const outside = metrics.map((m) => (m.id === BY_VALUE && m.status === "measured" ? { ...m, value: 250 } : m.id === "historic.slippage_days" && m.status === "measured" ? { ...m, value: -3 } : m));
+    const input = { metrics: outside, findings, scores: z.array(Score).parse(read(source, "scores.json")) };
+    for (const figures of [benchmarkFigures(input).figures, benchmarkFigures({ ...input, asRead: { metrics: outside, findings } }).figures]) {
+      assert.equal(figures.find((f) => f.metricKey === BY_VALUE)?.value, 250);
+      assert.equal(figures.find((f) => f.metricKey === "historic.slippage_days")?.value, -3);
+    }
   });
 });
 
@@ -373,6 +475,31 @@ describe("the command line", () => {
     const summary = hc(["benchmark", "--summary", "--out", store]);
     assert.equal(summary.status, 0);
     assert.match(summary.stdout, /score\.security: 1 row\n {2}retail, headcount 11-50, users 1-50, deal size 25k-100k: 1 row, below 10/);
+  });
+
+  test("hc benchmark reads the folder's overrides.json, and a damaged one adds nothing (decision 521)", () => {
+    const metrics = z.array(Metric).parse(read(source, "metrics.json"));
+    const byValue = metrics.find((m) => m.id === "historic.win_rate_by_value")!;
+    assert.equal(byValue.status, "measured");
+    const row: NumberOverride = { id: "ov-0001", runId: "r", target: { type: "metric", id: byValue.id, field: "value" }, previousValue: 45.1, newValue: 48.6, reason: "Checked with the customer.", overriddenBy: "Synthetic Consultant", overriddenAt: "2026-11-04T17:00:00.000Z" };
+    const run = freshRun();
+    const store = tempDir();
+    write(run, "overrides.json", [row]);
+    const result = hc(["benchmark", "--run", run, "--industry", "retail", "--headcount", "11-50", "--consent", CONSENT, "--out", store]);
+    assert.equal(result.status, 0, result.stderr);
+    const rows = readFileSync(join(store, BENCHMARK_FILE), "utf8").trim().split("\n").map((l) => BenchmarkRow.parse(JSON.parse(l)));
+    assert.equal(rows.find((r) => r.metricKey === byValue.id)?.value, 49);
+
+    for (const damaged of ['[{"id":"ov-0001","runId":"r","target":{"type":"metric","id":"historic.win_rate_by_value","field":"value"},"previousValue":45.1,"newVa', "[{}]"]) {
+      const other = freshRun();
+      const otherStore = tempDir();
+      writeFileSync(join(other, "overrides.json"), damaged);
+      const failed = hc(["benchmark", "--run", other, "--industry", "retail", "--headcount", "11-50", "--consent", CONSENT, "--out", otherStore]);
+      assert.equal(failed.status, 2);
+      assert.equal(failed.stderr, "Failed: The run folder's overrides.json can't be read, so nothing was added to the benchmark set.\n");
+      assert.ok(!existsSync(join(otherStore, BENCHMARK_FILE)));
+      assert.ok(!existsSync(join(other, CONSENT_FILE)));
+    }
   });
 
   test("the help lists both new commands", () => {

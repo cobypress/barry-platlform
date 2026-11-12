@@ -123,7 +123,15 @@ async function main(argv: string[]): Promise<number> {
       console.log(USAGE);
       return EXIT.failed;
     }
-    const result = exportBenchmark({ runDir: values.run, industry: values.industry, headcount: values.headcount, consent: values.consent, storeDir: values.out });
+    // The rows the documents were last made with, kept in the folder by the worker (DECISIONS.md 521, 522).
+    const { OVERRIDES_FILE, readOverrides } = await import("../render/render-run.ts");
+    let overrides: ReturnType<typeof readOverrides>;
+    try {
+      overrides = readOverrides(values.run);
+    } catch {
+      throw new Error(`The run folder's ${OVERRIDES_FILE} can't be read, so nothing was added to the benchmark set.`);
+    }
+    const result = exportBenchmark({ runDir: values.run, industry: values.industry, headcount: values.headcount, consent: values.consent, storeDir: values.out, overrides });
     const band = result.rows[0]!;
     console.log(`Added ${result.rows.length} rows to ${result.storePath}: users ${band.userBand}, deal size ${band.dealSizeBand}, ${band.period}.`);
     for (const s of result.skipped) console.log(`  Left out ${s.metricKey}: ${s.reason}`);

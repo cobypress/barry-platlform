@@ -85,7 +85,7 @@ export function loadRun(dir: string, options: { baseline?: boolean } = {}): { in
     metrics: z.array(Metric).parse(read(join(dir, "metrics.json"))),
     manualSteps: z.array(ManualStep).parse(read(join(dir, "manual-steps.json"))),
     scores: z.array(Score).parse(readOptional(join(dir, "scores.json")) ?? []),
-    overrides: z.array(NumberOverride).parse(readOptional(join(dir, "overrides.json")) ?? []),
+    overrides: readOverrides(dir),
     intake: intake ? Intake.parse(intake) : null,
     survey: survey ? Survey.parse(survey) : null,
     recordCounts: recordCounts(loadActionLists(dir)),
@@ -94,6 +94,16 @@ export function loadRun(dir: string, options: { baseline?: boolean } = {}): { in
   };
   if (options.baseline !== false) input.baseline = loadBaseline(dir, input.run);
   return { input, pseudonyms: loadPseudonymMap(dir) };
+}
+
+/**
+ * The override rows the documents were last made with, which the documents job
+ * keeps in the run folder (DECISIONS.md 522). None when there's no file; a
+ * damaged one throws, so nothing is read from half a file.
+ */
+export const OVERRIDES_FILE = "overrides.json";
+export function readOverrides(dir: string): NumberOverride[] {
+  return z.array(NumberOverride).parse(readOptional(join(dir, OVERRIDES_FILE)) ?? []);
 }
 
 /** The run's map from token to name, for rendering only (rule 7). Throws if it's missing or damaged. */
