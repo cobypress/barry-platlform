@@ -4,11 +4,12 @@ import { generateKeyPairSync } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { buildReport, currentBody, type ReportOutputKey } from "../../narrative/sections.ts";
+import { applyOverrides } from "../../narrative/overrides.ts";
 import { approvedReport, heldFigures, isPlainFigure, layoutWarnings, renderReleased, type ApprovedRun, type DocumentKey, type HeldFigure } from "../../render/render-released.ts";
-import { loadRun, SURVEY_FILE } from "../../render/render-run.ts";
+import { loadRun, OUTPUT_FILES, SURVEY_FILE } from "../../render/render-run.ts";
 import { withoutComments } from "../../survey/questions.ts";
 import { syntheticSurvey } from "../../testing/survey.ts";
-import { ReportOutput, type ReportSection, type SectionVersion } from "../../schemas/index.ts";
+import { ReportOutput, type Finding, type NumberOverride, type ReportSection, type SectionVersion } from "../../schemas/index.ts";
 import { runFromRecording } from "../../testing/harness.ts";
 import { docxParagraphs, docxText } from "../../testing/docx-text.ts";
 import { strFromU8, unzipSync } from "fflate";
@@ -341,6 +342,98 @@ describe("a documents job", () => {
   });
 });
 
+describe("a corrected figure that can't be carried (decision 512)", () => {
+  const { input: recordedInput } = loadRun(recorded);
+  const skew = recordedInput.findings.find((f) => f.ruleId === "bp.ownership-skew" && f.status === "issue")!;
+  const corrected = (f: Finding, field: string, previousValue: number, newValue: number, id: string): NumberOverride => ({ id, runId: RUN_ID, target: { type: "finding", id: f.id, field }, previousValue, newValue, reason: "Checked with the customer.", overriddenBy: "Synthetic Consultant", overriddenAt: "2026-11-04T17:00:00.000Z" });
+  // Decision 517 changed the first and last lines for every refusal, a finding's too.
+  const CLOSE = "Override each one back to its figure as read, then make the documents again. A finding's wording and a measure's chart or table can't be edited, so a figure we can't carry changes only with a new health check.";
+  // Twelve figures of the run, each refused alone, for the reason that lists ten and counts the rest.
+  const twelve = recordedInput.findings
+    .flatMap((f) => Object.entries(f.facts).map(([key, value]) => corrected(f, `facts.${key}`, value, value + 7, `ov-${f.id}-${key}`)))
+    .filter((o) => applyOverrides(recordedInput.findings, [], [o]).refused.length === 1)
+    .slice(0, 12);
+
+  /** A released, opted-in run whose make gets as far as the real renderer, with every way out of the worker watched. */
+  async function make(overrides: NumberOverride[]) {
+    const calls: string[] = [];
+    const memory = new MemoryDrive();
+    const drive = new Proxy(memory, { get: (target, key) => (typeof Reflect.get(target, key) === "function" ? (...args: unknown[]) => (calls.push(String(key)), Reflect.get(target, key).apply(target, args)) : Reflect.get(target, key)) });
+    const folder = "folder-0000000001";
+    const deps = baseDeps({ drive });
+    const input = jobInput({ overrides, driveFolderId: folder, intake: { ...INTAKE, customerName: "Synthetic Co", industry: "technology", headcountBand: "51-200" }, run: consoleRun({ status: "released", customerRef: "SYN-0001", benchmarkOptIn: true }) });
+    const runDir = join(deps.runsDir, input.run.id);
+    cpSync(recorded, runDir, { recursive: true });
+    deps.store.addDocumentsJob(input);
+    deps.micrositeKey = Buffer.alloc(32, 9);
+    deps.store.readers.set(RUN_ID, ["new@customer.example.com"]);
+    deps.store.shares = [{ runId: RUN_ID, email: "gone@customer.example.com", folderId: folder, permissionId: "perm-0001", state: "shared", sharedAt: "2026-11-01T09:00:00.000Z", removedAt: null, removedWhy: null, error: null, updatedAt: "2026-11-01T09:00:00.000Z" }];
+    const taken: string[] = [];
+    const given: string[] = [];
+    deps.sharing = { share: async (_f, email) => (given.push(email), "perm-0002"), findReader: async () => null, unshare: async (_f, id) => void taken.push(id) };
+    const failed: string[] = [];
+    const fail = deps.store.failDocuments.bind(deps.store);
+    deps.store.failDocuments = async (id, reason, at) => (failed.push(reason), fail(id, reason, at));
+    let saved = 0;
+    const save = deps.store.saveDocuments.bind(deps.store);
+    deps.store.saveDocuments = async (...args) => (saved++, save(...args));
+    // Not the queue's last try, and still no throw: the same overrides would fail again.
+    const result = await processDocumentsJob(RUN_ID, deps, { final: false });
+    return { result, deps, runDir, calls, failed, saved, taken, given };
+  }
+
+  test("holds the make before a file is written: failed, not thrown, with the reason whole, and nothing leaves the worker", async () => {
+    const { result, deps, runDir, calls, failed, saved, taken, given } = await make([corrected(skew, "facts.limit", 10000, 9000, "ov-0001")]);
+    const reason = [
+      "Held back: 1 corrected figure can't be carried into the documents.",
+      `"${skew.title}", limit: 10,000 as read, corrected to 9,000, but the wording has 10,000 in 2 places, and we can't tell which of them are this figure.`,
+      CLOSE,
+    ].join("\n");
+    assert.equal(result.outcome, "failed");
+    assert.deepEqual(failed, [reason]);
+    assert.equal(deps.store.documents.get(RUN_ID)!.error, reason);
+    assert.equal(existsSync(join(runDir, "documents")), false, "no file in documents/");
+    assert.deepEqual(calls, [], "no Drive call");
+    assert.equal(saved, 0, "no documents saved");
+    assert.equal(deps.store.microsites.size, 0, "no microsite");
+    assert.equal(deps.store.benchmarkRows.length, 0, "nothing added to the benchmark set");
+    assert.deepEqual(taken, ["perm-0001"], "sharing only takes away");
+    assert.deepEqual(given, []);
+    // The log and the queue get the count only: neither a title nor a figure.
+    assert.equal(result.detail, "1 corrected figure can't be carried. See the run's Release tab.");
+    assert.ok(deps.lines.some((l) => l === `Run ${RUN_ID}'s documents weren't made. ${result.detail}`), deps.lines.join("\n"));
+    for (const line of [...deps.lines, result.detail!]) for (const part of [skew.title, "10,000", "9,000", "10000", "9000"]) assert.ok(!line.includes(part), line);
+  });
+
+  test("twelve refused: ten listed, then how many more, whole", async () => {
+    assert.equal(twelve.length, 12);
+    const { result, failed } = await make(twelve);
+    const refused = applyOverrides(recordedInput.findings, [], twelve).refused;
+    assert.equal(refused.length, 12);
+    const line = (i: number): string => {
+      const r = refused[i]!;
+      const g = (n: number): string => n.toLocaleString("en-GB", { maximumFractionDigits: 100 });
+      return `"${r.title.replace(/\[\[user:U\d+\]\]/g, "a named person")}", ${r.field.slice(6)}: ${g(r.asRead)} as read, corrected to ${g(r.last)}, but `;
+    };
+    const lines = failed[0]!.split("\n");
+    assert.equal(failed.length, 1);
+    assert.equal(lines.length, 13);
+    assert.equal(lines[0], "Held back: 12 corrected figures can't be carried into the documents.");
+    for (let i = 0; i < 10; i++) assert.ok(lines[i + 1]!.startsWith(line(i)) && lines[i + 1]!.endsWith("."), lines[i + 1]);
+    assert.equal(lines[11], "And 2 more.");
+    assert.equal(lines[12], CLOSE);
+    assert.equal(result.detail, "12 corrected figures can't be carried. See the run's Release tab.");
+  });
+
+  test("put back by a further row, the documents are made", async () => {
+    const { result, runDir, failed, saved } = await make([corrected(skew, "facts.limit", 10000, 9000, "ov-0001"), corrected(skew, "facts.limit", 9000, 10000, "ov-0002")]);
+    assert.equal(result.outcome, "done", result.detail);
+    assert.deepEqual(failed, []);
+    assert.equal(saved, 1);
+    assert.ok(existsSync(join(runDir, "documents", OUTPUT_FILES.executive)));
+  });
+});
+
 describe("the released documents", () => {
   test("carry the console's approved wording, not the engine's draft", () => {
     const { report } = approvedReport(recorded, approvedRun("Reworded in the console for this test."));
@@ -357,6 +450,7 @@ describe("the released documents", () => {
     const dir = join(temp(), RUN_ID);
     cpSync(recorded, dir, { recursive: true });
     const result = await renderReleased(dir, { ...approvedRun(), preparedBy: "Synthetic Consultant" }, join(dir, "documents"));
+    assert.ok(!("refused" in result), "no override, so nothing refused");
     for (const file of Object.values(result.files)) assert.ok(existsSync(file) && statSync(file).size > 1000, file);
     // Every figure on the approved pages traces to the data, so nothing holds them back, and no warning carries a detail.
     assert.deepEqual(result.held, []);

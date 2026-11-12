@@ -155,11 +155,13 @@ describe("overrides", () => {
     const sized = base.findings.find((x) => x.value.kind !== "not_sized")!;
     const amount = sized.value.kind === "not_sized" ? 0 : sized.value.amount;
     const onValue: NumberOverride = { ...override, target: { type: "finding", id: sized.id, field: "value.amount" }, previousValue: amount, newValue: 1000 };
-    const onMetric: NumberOverride = { ...override, target: { type: "metric", id: "historic.win_rate", field: "value" }, previousValue: 47, newValue: 45 };
+    // Decision 517 refuses the win rate's 47, which a segment's n also is, so the metric is one no part or text of which holds its value.
+    const onMetric: NumberOverride = { ...override, target: { type: "metric", id: "historic.win_rate_by_value", field: "value" }, previousValue: 45.1, newValue: 45 };
     const { report } = all({ ...base, overrides: [onValue, onMetric] });
+    assert.deepEqual(report.refused, []);
     const value = report.teamFindings.find((x) => x.id === sized.id)!.value;
     assert.equal(value.kind !== "not_sized" && value.amount, 1000);
-    const m = report.metrics.find((x) => x.id === "historic.win_rate")!;
+    const m = report.metrics.find((x) => x.id === "historic.win_rate_by_value")!;
     assert.equal(m.status === "measured" && m.value, 45);
   });
 

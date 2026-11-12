@@ -18,7 +18,7 @@ import { BENCHMARK_MIN_GROUP, type Calibration, type Finding, type ManualStep, t
 import { ReportSection as ReportSectionSchema, SectionVersion as SectionVersionSchema } from "../schemas/index.ts";
 import type { SectionBrief } from "./draft.ts";
 import type { Intake } from "./intake.ts";
-import { applyOverrides } from "./overrides.ts";
+import { applyOverrides, type OverrideRefusal } from "./overrides.ts";
 import { assumptionsSource, findingSource, metricSource, planSource, statedProblemsSource, type PromptSource } from "./prompt.ts";
 import { areasOf, buildPlan, bySeverity, domainLabel, domainsInOrder, isSetupReview, isThinData, issuesOf, rankBy, scorecard, teamLevelFinding, topIssues, verdictOf, type Added, type Plan } from "./select.ts";
 import { chapterFigures } from "../render/chapter.ts";
@@ -71,6 +71,8 @@ export type BuiltReport = {
   teamFindings: Finding[];
   /** Metrics with overrides applied. */
   metrics: Metric[];
+  /** Each corrected figure that couldn't be carried into its finding's wording, which then stays as read. Any at all holds the documents (DECISIONS.md 511, 512). */
+  refused: OverrideRefusal[];
   /** The Barometer score: one figure for the org, from the area scores. */
   overall: OverallScore;
   /** What the issues are worth over the next 12 months (roadmap 1.4). */
@@ -236,9 +238,9 @@ function calibrationText(run: Run, c: Calibration, facts: string[] = []): string
   ].join("\n");
 }
 
-/** The facts step's sentences, naming each affected check by its finding's title. */
-function factsLines(input: ReportInput): string[] {
-  return input.facts ? factsText(input.facts, (ruleId) => input.findings.find((f) => f.ruleId === ruleId)?.title) : [];
+/** The facts step's sentences, naming each affected check by its finding's title as corrected (DECISIONS.md 489). */
+function factsLines(input: ReportInput, findings: Finding[]): string[] {
+  return input.facts ? factsText(input.facts, (ruleId) => findings.find((f) => f.ruleId === ruleId)?.title) : [];
 }
 
 function overrideText(overrides: NumberOverride[]): string {
@@ -328,8 +330,13 @@ function progressText(p: Progress, currency: string): string {
   );
 }
 
-function rawNotesSpecs(input: ReportInput, overall: OverallScore, comparisons: Comparison[], value: ValueModel, investment: Investment, effectiveMetrics: Metric[], progress: Progress | null, survey: SurveyView | null, causes: Cause[], interviews: InterviewView | null, readiness: Readiness): Spec[] {
-  const { run, calibration, findings, metrics, manualSteps, intake, overrides = [] } = input;
+/**
+ * The raw notes' sections, from the findings and metrics as corrected, as every
+ * other section is (DECISIONS.md 489). The Word notes' own item for each finding
+ * and metric is the record as read, with every override listed beside it.
+ */
+function rawNotesSpecs(input: ReportInput, overall: OverallScore, comparisons: Comparison[], value: ValueModel, investment: Investment, findings: Finding[], metrics: Metric[], progress: Progress | null, survey: SurveyView | null, causes: Cause[], interviews: InterviewView | null, readiness: Readiness): Spec[] {
+  const { run, calibration, manualSteps, intake, overrides = [] } = input;
   const exclusions = [...new Set([...findings.flatMap((f) => f.evidence.flatMap((e) => e.exclusions)), ...metrics.flatMap((m) => m.exclusions)])];
   const notMeasurable = findings.filter((f) => f.status === "not_measurable");
   const domains = domainsInOrder(findings).filter((d) => findings.some((f) => f.domain === d));
@@ -337,14 +344,13 @@ function rawNotesSpecs(input: ReportInput, overall: OverallScore, comparisons: C
     intake
       ? { key: "intake_summary", title: "Intake summary", body: intakeText(intake), sources: [INTAKE] }
       : { key: "intake_summary", title: "Intake summary", body: "No intake has been recorded for this run.", needsInput: true },
-    { key: "assumptions", title: "Assumptions", body: calibrationText(run, calibration, factsLines(input)), sources: [SOURCE.run, CALIBRATION] },
+    { key: "assumptions", title: "Assumptions", body: calibrationText(run, calibration, factsLines(input, findings)), sources: [SOURCE.run, CALIBRATION] },
     ...(progress ? [{ key: "progress", title: "Since your last health check", body: progressText(progress, calibration.currency), sources: [PROGRESS] }] : []),
     { key: "barometer_score", title: "Barometer score", body: overallText(overall), sources: [OVERALL] },
     {
       key: "investment",
       title: "Investment",
-      // With overrides applied, as the dataset has them: this text quotes the figures.
-      body: investmentText(investment, effectiveMetrics).join("\n\n"),
+      body: investmentText(investment, metrics).join("\n\n"),
       metricIds: metrics.filter((m) => INVESTMENT_METRIC_IDS.includes(m.id)).map((m) => m.id),
       sources: [INVESTMENT_SOURCE],
     },
@@ -559,11 +565,15 @@ function statedVsActualSpec(intake: Intake | null | undefined, team: Finding[]):
   };
 }
 
-/** The executive pipeline page: what's open, what it's likely to be worth, and the potential revenue in deals that have stalled. */
-function pipelineSpec(input: ReportInput, team: Finding[]): Spec {
-  const metrics = input.metrics.filter((m) => PIPELINE_TODAY_METRICS.includes(m.id));
+/**
+ * The executive pipeline page: what's open, what it's likely to be worth, and the
+ * potential revenue in deals that have stalled. From the metrics as corrected, as
+ * every other section, tile and chart is (DECISIONS.md 519).
+ */
+function pipelineSpec(input: ReportInput, team: Finding[], corrected: Metric[]): Spec {
+  const metrics = corrected.filter((m) => PIPELINE_TODAY_METRICS.includes(m.id));
   const potential = POTENTIAL_REVENUE_RULES.flatMap((id) => team.find((f) => f.ruleId === id && f.status === "issue") ?? []);
-  const today = pipelineTodayText(input.metrics, input.calibration.currency);
+  const today = pipelineTodayText(corrected, input.calibration.currency);
   const sized = potential.filter((f) => f.value.kind === "revenue");
   return {
     key: "pipeline",
@@ -643,7 +653,7 @@ function interviewSpec(input: ReportInput, view: InterviewView): Spec {
   };
 }
 
-function executiveSpecs(input: ReportInput, team: Finding[], survey: SurveyView | null, interviews: InterviewView | null = null, added?: Added): Spec[] {
+function executiveSpecs(input: ReportInput, team: Finding[], metrics: Metric[], survey: SurveyView | null, interviews: InterviewView | null = null, added?: Added): Spec[] {
   const verdict = verdictOf(team);
   const top = topIssues(team, TOP_ISSUE_COUNT, added);
   const plan = buildPlan(team, added);
@@ -668,7 +678,7 @@ function executiveSpecs(input: ReportInput, team: Finding[], survey: SurveyView 
     ...(executiveThemes(interviews).length ? [{ key: "interviews", title: "What your people told us", body: lines(...executiveThemes(interviews).map((t) => t.sentence)), ...interviewScope(interviews!) }] : []),
     { key: "scorecard", title: "Scorecard", body: "Each area of your Salesforce, scored out of 100. Where an area can't be scored fairly, we say why rather than guess.", findingIds: team.map((f) => f.id), sources: [...SUMMARY_SOURCES, ...scoreSources] },
     // A set-up review reads no deals, so there's no pipeline to describe.
-    ...(isSetupReview(input.run) ? [] : [pipelineSpec(input, team)]),
+    ...(isSetupReview(input.run) ? [] : [pipelineSpec(input, team, metrics)]),
     {
       key: "top_issues",
       title: `Top ${TOP_ISSUE_COUNT} issues`,
@@ -880,17 +890,20 @@ export function buildReport(given: ReportInput): BuiltReport {
     benchmark: input.benchmark ?? null,
   });
   const investment = buildInvestment(effective.metrics, intake, calibration.currency);
+  // The findings and metrics as corrected, and no override rows: the data already
+  // holds each corrected figure, so a row could only drop one, and a refused
+  // finding is as read here as everywhere (DECISIONS.md 516).
   const dataset = buildDataset({
-    findings: [...findings, ...team],
+    findings: [...effective.findings, ...team],
     metrics: effective.metrics,
     manualSteps,
     scores,
     run,
     currency: calibration.currency,
-    overrides,
+    overrides: [],
     structural: STRUCTURE,
     extraText: [
-      { source: CALIBRATION, text: calibrationText(run, calibration, factsLines(input)) },
+      { source: CALIBRATION, text: calibrationText(run, calibration, factsLines(input, effective.findings)) },
       ...(intake ? [{ source: INTAKE, text: intakeText(intake) }] : []),
       // The cover's customer name, which can be a reference such as "ACME-02", and
       // the consultant's, which can read as a number ("Ten Eyck"). No section's scope includes it.
@@ -960,6 +973,7 @@ export function buildReport(given: ReportInput): BuiltReport {
     teamFindings: team.slice().sort(rankBy(added)),
     added,
     metrics: effective.metrics,
+    refused: effective.refused,
     overall,
     value,
     progress,
@@ -970,8 +984,8 @@ export function buildReport(given: ReportInput): BuiltReport {
     causes,
     readiness,
     outputs: {
-      raw_notes: build("raw_notes", rawNotesSpecs(input, overall, comparisons, value, investment, effective.metrics, progress, survey, causes, interviews, readiness)),
-      executive_summary: build("executive_summary", executiveSpecs(input, team, survey, interviews, added)),
+      raw_notes: build("raw_notes", rawNotesSpecs(input, overall, comparisons, value, investment, effective.findings, effective.metrics, progress, survey, causes, interviews, readiness)),
+      executive_summary: build("executive_summary", executiveSpecs(input, team, effective.metrics, survey, interviews, added)),
       full_health_check: build("full_health_check", fullSpecs(input, team, effective.metrics, survey, interviews, readiness, added)),
     },
     briefs,

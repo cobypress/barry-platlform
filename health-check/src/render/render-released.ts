@@ -4,6 +4,7 @@ import { assertOutsideGit } from "../engine/run.ts";
 import type { BenchmarkInput } from "../benchmark/compare.ts";
 import { buildMicrositePages, type MicrositePages } from "../microsite/pages.ts";
 import type { Intake } from "../narrative/intake.ts";
+import type { OverrideRefusal } from "../narrative/overrides.ts";
 import { buildReport, type BuiltReport, type ReportOutputKey } from "../narrative/sections.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { canRelease, type NumberOverride, type ReportSection, type SectionVersion } from "../schemas/index.ts";
@@ -46,6 +47,12 @@ export type ReleasedDocuments = {
   /** A case study draft, only for a re-check whose customer agreed to be one. For Black Cloud's own folder. */
   caseStudy?: string;
 };
+
+/**
+ * What a make returns instead when a corrected figure can't be carried into its
+ * finding's wording: nothing was written (DECISIONS.md 512).
+ */
+export type RefusedDocuments = { refused: OverrideRefusal[] };
 
 /**
  * A figure on a printed page that doesn't trace to the run's data. `masked`
@@ -150,12 +157,14 @@ export function approvedReport(dir: string, approved: ApprovedRun): { report: Bu
   return { report, pseudonyms };
 }
 
-export async function renderReleased(dir: string, approved: ApprovedRun, outDir: string): Promise<ReleasedDocuments> {
+export async function renderReleased(dir: string, approved: ApprovedRun, outDir: string): Promise<ReleasedDocuments | RefusedDocuments> {
   const folder = resolve(dir);
   const out = resolve(outDir);
   assertOutsideGit(folder);
   assertOutsideGit(out);
   const { report, pseudonyms } = approvedReport(folder, approved);
+  // Before anything is written: a refused make never leaves documents in the folder beside its failed row.
+  if (report.refused.length > 0) return { refused: report.refused };
   mkdirSync(out, { recursive: true, mode: 0o700 });
   const files = {
     raw_notes: join(out, OUTPUT_FILES.rawNotes),

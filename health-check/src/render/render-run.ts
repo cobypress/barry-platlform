@@ -8,6 +8,7 @@ import { baselineRun } from "./baseline.ts";
 import { applyNarrative, type Rejection } from "../narrative/apply.ts";
 import type { NarrativeClient } from "../narrative/client.ts";
 import { Intake } from "../narrative/intake.ts";
+import { refusalReason, type OverrideRefusal } from "../narrative/overrides.ts";
 import { buildReport, type BuiltReport, type ReportInput } from "../narrative/sections.ts";
 import { Pseudonymiser, type PseudonymEntry } from "../privacy/pseudonymiser.ts";
 import { Calibration, Finding, ManualStep, Metric, NumberOverride, Run, Score } from "../schemas/index.ts";
@@ -100,15 +101,35 @@ export function loadPseudonymMap(dir: string): Pseudonymiser {
   return new Pseudonymiser(read<PseudonymEntry[]>(join(dir, "pseudonym-map.json")));
 }
 
+/**
+ * A corrected figure in the folder's `overrides.json` couldn't be carried into
+ * its finding's wording. The message is the reason the documents job gives,
+ * line by line (DECISIONS.md 512), and holds no token.
+ */
+export class OverridesRefused extends Error {
+  readonly refused: OverrideRefusal[];
+  constructor(refused: OverrideRefusal[]) {
+    super(refusalReason(refused));
+    this.name = "OverridesRefused";
+    this.refused = refused;
+  }
+}
+
 export type PrintedLayout = { executive: LayoutReport; full: LayoutReport; ceo: LayoutReport };
 export type RenderResult = { report: BuiltReport; layout: PrintedLayout; rejections: Rejection[]; passed: boolean; files: string[] };
 
-/** With a client, sections are drafted by Claude first. Without one, they're the engine's own text. */
+/**
+ * With a client, sections are drafted by Claude first. Without one, they're the
+ * engine's own text. Throws `OverridesRefused`, having written nothing, when an
+ * override can't be carried.
+ */
 export async function renderRun(dir: string, options: { client?: NarrativeClient } = {}): Promise<RenderResult> {
   const folder = resolve(dir);
   assertOutsideGit(folder);
   const { input, pseudonyms } = loadRun(folder);
   const report = buildReport(input);
+  // Before Claude is asked or a file is written, as the documents job stops.
+  if (report.refused.length > 0) throw new OverridesRefused(report.refused);
   const rejections = options.client ? await applyNarrative(report, options.client, pseudonyms) : [];
 
   const paths = {

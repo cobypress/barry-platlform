@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ReportOutputKey } from "../narrative/sections.ts";
+import { refusalReason, refusalSummary } from "../narrative/overrides.ts";
 import type { BenchmarkInput } from "../benchmark/compare.ts";
 import { AlreadyContributed, CONSENT_FILE, contributeBenchmark } from "../benchmark/export.ts";
 import { longDate } from "../render/format.ts";
@@ -367,6 +368,13 @@ async function documentsLocked(runId: string, deps: WorkerDeps, attempt: Attempt
     if (later) log(`${later} survey answers came in after the sections were built, so the documents leave them out, as approved`);
     // The summaries are the handbook's alone: the reports are never given them.
     const printed = await (deps.renderReleased ?? renderReleased)(dir, { ...job, benchmark }, join(dir, "documents"));
+    // A correction we can't carry stops the make before a file is written, and so before Drive, sharing, the
+    // microsite and the benchmark. Not thrown, as for a held figure: the same overrides would fail the same way.
+    if ("refused" in printed) {
+      const summary = refusalSummary(printed.refused);
+      log(`Run ${runId}'s documents weren't made. ${summary}`);
+      return fail(refusalReason(printed.refused), summary);
+    }
     // A figure we can't trace stops everything before Drive: nothing uploaded, shared anew, published or contributed.
     // Not thrown, so the queue doesn't retry: the same wording would fail the same way.
     if (printed.held.length > 0) {
