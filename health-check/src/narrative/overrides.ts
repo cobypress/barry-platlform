@@ -67,11 +67,22 @@ const NUMBER = /(?<![\d.])[£$€]?(\d{1,3}(?:,\d{3})+|\d+)(\.\d+)?(?:%|(?:k|m|b
 // token itself is never rewritten.
 const TOKEN = new RegExp(tokenSource(), "g");
 
-// Nor are a date's, an identifier's or a clock time's (DECISIONS.md 514): the
-// number check's own reader says which spans those are, so there is one
-// definition of a date. It doesn't take a year and month, "2026-02", as one.
+// Nor are a date's or an identifier's (DECISIONS.md 514): the number check's
+// own reader says which spans those are, so there is one definition of a date.
+// It doesn't take a year and month, "2026-02", as one.
 const YEAR_MONTH = /(?<![\w.,-])(?:19|20)\d{2}-(?:0[1-9]|1[0-2])(?!\d|[.,]\d|-\d)/g;
-const notFigure = (f: ReadFigure): boolean => f.kind === "date" || f.kind === "identifier" || (f.kind === "ratio" && f.raw.includes(":"));
+const notFigure = (f: ReadFigure): boolean => f.kind === "date" || f.kind === "identifier";
+
+// Digits joined by a colon, a clock time, a ratio or "10:30:15", found by our
+// own pattern whatever the reader calls them, since it calls "09:00" malformed
+// (DECISIONS.md 515). Such a form is never a place a figure is found, and is
+// never passed over for a figure not printed itself: a part equal or near it
+// refuses. A part may be grouped or have decimals, so no digit of "1.5:1" or
+// "1,000:1" is left over to be read as a figure.
+const COLON = /(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?::(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)+/g;
+
+/** A text as `judge` reads it: masked, and the colon forms taken out of it, as written. */
+type Read = { text: string; colons: string[] };
 
 /**
  * Where each span of the reader's text starts and ends in the text as given.
@@ -96,16 +107,26 @@ function spansInText(text: string, normalised: string, spans: Array<[number, num
   return pieces;
 }
 
-/** The text with every token, date, identifier and clock time masked at its own length, so a place found in it is its place in the text. */
-function masked(text: string): string {
+/**
+ * The text with every token, date, identifier and colon form masked at its own
+ * length, so a place found in it is its place in the text. Colon forms are
+ * looked for once the rest is masked: a time inside an ISO date and time is
+ * the date's, and is neither found nor tested.
+ */
+function masked(text: string): Read {
   const chars = text.replace(TOKEN, (token) => "#".repeat(token.length)).split("");
   // No digit, nothing to find a figure in.
-  if (!/\d/.test(text)) return chars.join("");
+  if (!/\d/.test(text)) return { text: chars.join(""), colons: [] };
   const { normalised, figures } = extractFigures(text);
   const shapes = spansInText(text, normalised, figures.filter(notFigure).map((f): [number, number] => [f.start, f.end]));
   for (const m of text.matchAll(YEAR_MONTH)) shapes.push([m.index, m.index + m[0].length]);
   for (const [start, end] of shapes) chars.fill("#", start, end);
-  return chars.join("");
+  const colons: string[] = [];
+  for (const m of chars.join("").matchAll(COLON)) {
+    colons.push(m[0]);
+    chars.fill("#", m.index, m.index + m[0].length);
+  }
+  return { text: chars.join(""), colons };
 }
 
 /** Every text of the finding a document prints, in a fixed order, for `withTexts` to put back. A text the finding leaves out is "". */
@@ -154,21 +175,29 @@ function near(found: number, value: number): boolean {
 type Place = { text: number; index: number; length: number; grouped: boolean };
 type Verdict = { kind: "unchanged" } | { kind: "carried"; place: Place | null } | { kind: "refused"; why: OverrideRefusal["why"] };
 
-/** One figure, against the finding as read (DECISIONS.md 511, items 1 to 3). `read` is each text masked. */
-function judge(f: Finding, read: string[], figure: Figure, rows: NumberOverride[]): Verdict {
+/** A part of a colon form as a number: "09" is 9, "1,000" is 1000. */
+const partValue = (part: string): number => Number(part.replace(/,/g, ""));
+
+/** One figure, against the finding as read (DECISIONS.md 511, items 1 to 3, and 515). `read` is each text masked. */
+function judge(f: Finding, read: Read[], figure: Figure, rows: NumberOverride[]): Verdict {
   if (rows.at(-1)!.newValue === figure.asRead) return { kind: "unchanged" };
   if (rows[0]!.previousValue !== figure.asRead) return { kind: "refused", why: { kind: "stale", from: rows[0]!.previousValue } };
   const asPlain = plain(figure.asRead);
-  const places: Place[] = read.flatMap((text, at) =>
+  const places: Place[] = read.flatMap(({ text }, at) =>
     [...text.matchAll(valuePattern(figure.asRead))].map((m) => ({ text: at, index: m.index, length: m[0].length, grouped: m[0] !== asPlain || asPlain === grouped(figure.asRead) })),
   );
   if (places.length > 0) {
     const shared = figuresOf(f).find((other) => other.field !== figure.field && other.asRead === figure.asRead);
     if (shared) return { kind: "refused", why: { kind: "shared", other: nameOf(shared.field) } };
     if (places.length > 1) return { kind: "refused", why: { kind: "repeated", places: places.length } };
+    // A colon form beside the one place is passed over as any other number is: a
+    // second figure worked out from the first stays as read (DECISIONS.md 511).
     return { kind: "carried", place: places[0]! };
   }
-  for (const text of read) {
+  // Not printed itself: a colon form with a part equal or near it may be this figure, and can't be rewritten (DECISIONS.md 515).
+  const colon = read.flatMap(({ colons }) => colons).find((form) => form.split(":").some((part) => near(partValue(part), figure.asRead)));
+  if (colon) return { kind: "refused", why: { kind: "rounded", found: colon } };
+  for (const { text } of read) {
     for (const m of text.matchAll(NUMBER)) {
       if (near(Number(`${m[1]!.replace(/,/g, "")}${m[2] ?? ""}`), figure.asRead)) return { kind: "refused", why: { kind: "rounded", found: m[0] } };
     }

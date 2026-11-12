@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { applyOverrides } from "../overrides.ts";
+import { applyOverrides, refusalReason } from "../overrides.ts";
 import { buildReport, type BuiltReport, type ReportInput } from "../sections.ts";
 import { Pseudonymiser, type PseudonymEntry } from "../../privacy/pseudonymiser.ts";
 import { printDocuments, OUTPUT_FILES } from "../../render/render-run.ts";
@@ -16,6 +16,8 @@ import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
 // DECISIONS.md 514: the number check is told what was carried, not the rows,
 // so a figure put back clears; and a date, an identifier and a clock time are
 // not figures.
+// DECISIONS.md 515: digits joined by a colon are never rewritten and never
+// passed over.
 
 const AT = "2026-10-31T13:00:00.000Z";
 const evidence = { kind: "soql", api: "rest", query: "SELECT Id FROM User LIMIT 2000", count: 11, dateRange: { from: "2024-10-31", to: "2026-10-31" }, exclusions: [], capturedAt: AT } as Finding["evidence"][number];
@@ -105,10 +107,8 @@ describe("a date, an identifier and a clock time are not figures (decision 514, 
   test("the day of 04/10/2026, which was read as a figure printed rounded", () => untouched("Checked on 04/10/2026.", 4));
   test("58 in v58", () => untouched("Called through API v58.", 58));
   test("5 in R5.100, which was read as a figure printed rounded", () => untouched("Rule R5.100 applies.", 5));
-  test("the hour of 09:30, and of 2026-10-04T09:30", () => {
-    untouched("Runs at 09:30 each day.", 9);
-    untouched("Last ran 2026-10-04T09:30.", 9);
-  });
+  // "09:30" on its own is a colon form, refused when a part is the fact (decision 515, below).
+  test("the hour of 2026-10-04T09:30", () => untouched("Last ran 2026-10-04T09:30.", 9));
 
   test("a figure and a date with the same digits in one sentence: rewritten at the figure, the date untouched", () => {
     assert.equal(carried("10 people logged in since 2026-10-04.", { n: 10 }, "n", 12), "12 people logged in since 2026-10-04.");
@@ -152,6 +152,59 @@ describe("a text the number check's reader normalises to another length (decisio
     // Cut at the reader's indices, one place early, the day's 4 would be left unmasked.
     untouched("ㄱㅏ 2026-10-04.", 4);
     assert.equal(carried("ㄱㅏ 10 since 2026-10-04.", { n: 10 }, "n", 12), "ㄱㅏ 12 since 2026-10-04.");
+  });
+});
+
+describe("digits joined by a colon are never rewritten and never passed over (decision 515, item 1)", () => {
+  /** An unprinted fact refused as the colon form `found`, the finding as read, and the reason's line naming the form whole. */
+  function refusedAs(summary: string, value: number, found: string, last = value + 1): void {
+    const f = finding(summary, { x: value });
+    const result = applyOverrides([f], [], [override("facts.x", value, last)]);
+    assert.deepEqual(result.refused.map((r) => r.why), [{ kind: "rounded", found }], `${summary} ${value}`);
+    assert.deepEqual(result.findings[0], f, `${summary} ${value}`);
+    assert.equal(refusalReason(result.refused).split("\n")[1], `"A planted finding", x: ${value.toLocaleString("en-GB")} as read, corrected to ${last.toLocaleString("en-GB")}, but the wording doesn't print ${value.toLocaleString("en-GB")} itself and has ${found}, which may be this figure rounded.`);
+  }
+
+  test("a fact of 10, unprinted, beside at 10:00, which the number check's reader calls malformed: refused, the line naming 10:00", () => {
+    refusedAs("The job runs at 10:00 each day.", 10, "10:00");
+  });
+
+  test("09:30 with a fact of 9 and of 30: refused naming 09:30. A part with a leading zero is compared as its value, 09 as 9, and by the 5% test, so 9.2 is refused too", () => {
+    refusedAs("The job runs at 09:30 each day.", 9, "09:30");
+    refusedAs("The job runs at 09:30 each day.", 30, "09:30");
+    refusedAs("The job runs at 09:30 each day.", 9.2, "09:30");
+  });
+
+  test("09:30 and 10:00 with a fact of 7, near neither part: carried, the text as read", () => {
+    untouched("The job runs at 09:30 each day.", 7);
+    untouched("The job runs at 10:00 each day.", 7);
+  });
+
+  test("a fact of 3, or of 1, printed only as 1:3: refused naming 1:3", () => {
+    refusedAs("Admins to users are 1:3.", 3, "1:3");
+    refusedAs("Admins to users are 1:3.", 1, "1:3");
+  });
+
+  test("511's limit, a second figure worked out from the first: a fact of 3 printed once as 3 accounts beside 1:3 is rewritten at the figure, never in the ratio, and the ratio stays as read", () => {
+    // Found once as a figure, so carried by 511 (3) as any figure beside a number worked out from it is; the colon part is never a place.
+    assert.equal(carried("3 accounts, admins to users 1:3.", { n: 3 }, "n", 4), "4 accounts, admins to users 1:3.");
+  });
+
+  test("2026-10-04T09:30 with a fact of 9 or of 30: carried, the text as read, since the time is the date's", () => {
+    untouched("Last ran 2026-10-04T09:30.", 9);
+    untouched("Last ran 2026-10-04T09:30.", 30);
+  });
+
+  test("10:30:15 with a fact of 15, or of 10: refused naming the whole form", () => {
+    refusedAs("Logged at 10:30:15.", 15, "10:30:15");
+    refusedAs("Logged at 10:30:15.", 10, "10:30:15");
+  });
+
+  test("a part with decimals or groups is the form's, so no digit of it is left to be found as a figure", () => {
+    refusedAs("Admins to users are 1.5:1.", 1, "1.5:1");
+    refusedAs("Admins to users are 1.5:1.", 1.5, "1.5:1");
+    refusedAs("Admins to users are 1,000:1.", 1000, "1,000:1");
+    refusedAs("Admins to users are 1,000:1.", 1, "1,000:1");
   });
 });
 
