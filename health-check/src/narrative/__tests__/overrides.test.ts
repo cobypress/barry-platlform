@@ -383,6 +383,12 @@ describe("the reason a refusal holds the documents (decision 512)", () => {
     }
   });
 
+  test("a newline anywhere in a line, such as in a fact's key, can't start a line of its own", () => {
+    const reason = refusalReason([{ ...refusal("A"), field: "facts.odd\nkey", why: { kind: "shared", other: "other\r\n  key" } }]);
+    assert.equal(reason.split("\n").length, 3);
+    assert.ok(reason.split("\n")[1]!.startsWith('"A", odd key: 1,200 as read, corrected to 1,100.5, but another figure of this finding (other key) is also 1,200'), reason);
+  });
+
   test("a title's person token prints as a named person, never the token", () => {
     const line = refusalReason([refusal("Worst by rep: [[user:U0009]] and [[user:U10000]]")]).split("\n")[1]!;
     assert.ok(line.startsWith('"Worst by rep: a named person and a named person", '), line);
