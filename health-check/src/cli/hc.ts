@@ -170,9 +170,17 @@ async function main(argv: string[]): Promise<number> {
 
   if (positionals[0] === "render" && values.run) {
     // Loaded here so `hc run` never needs Chromium or the Claude SDK.
-    const { renderRun } = await import("../render/render-run.ts");
+    const { OverridesRefused, renderRun } = await import("../render/render-run.ts");
     const client = values.narrative ? (await import("../narrative/client.ts")).anthropicClient() : undefined;
-    const result = await renderRun(values.run, { client });
+    const result = await renderRun(values.run, { client }).catch((err: unknown) => {
+      if (err instanceof OverridesRefused) return err;
+      throw err;
+    });
+    // The same lines the console's Release tab shows, and nothing written.
+    if (result instanceof OverridesRefused) {
+      console.log(result.message);
+      return EXIT.failed;
+    }
     for (const [name, layout] of Object.entries(result.layout)) {
       console.log(`${name}: ${layout.pages} pages`);
       for (const p of layout.problems) console.log(`  page ${p.page}, ${p.check}: ${p.detail}`);

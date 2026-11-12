@@ -357,6 +357,7 @@ describe("the released documents", () => {
     const dir = join(temp(), RUN_ID);
     cpSync(recorded, dir, { recursive: true });
     const result = await renderReleased(dir, { ...approvedRun(), preparedBy: "Synthetic Consultant" }, join(dir, "documents"));
+    assert.ok(!("refused" in result), "no override, so nothing refused");
     for (const file of Object.values(result.files)) assert.ok(existsSync(file) && statSync(file).size > 1000, file);
     // Every figure on the approved pages traces to the data, so nothing holds them back, and no warning carries a detail.
     assert.deepEqual(result.held, []);
