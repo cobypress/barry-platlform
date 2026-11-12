@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ReportOutputKey } from "../narrative/sections.ts";
 import { refusalReason, refusalSummary } from "../narrative/overrides.ts";
@@ -13,13 +13,13 @@ import { syncShares } from "./share-job.ts";
 import { sealPages } from "../microsite/seal.ts";
 import { addMonths } from "./retention.ts";
 import type { DocumentFile, DocumentsJobInput } from "./types.ts";
-import { loadPseudonymMap, OVERRIDES_FILE, SURVEY_FILE, write } from "../render/render-run.ts";
+import { loadPseudonymMap, OVERRIDES_FILE, SURVEY_FILE, write, writeRows } from "../render/render-run.ts";
 import { HANDBOOK_DOCX, renderHandbookDocx } from "../handbook/docx.ts";
 import { HANDBOOK_NOT_MADE, readEarlierHandbook, readHandbook } from "../handbook/read.ts";
 import { printableSummaries, type StoredSummaries } from "../handbook/summary-row.ts";
 import { Survey } from "../survey/questions.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
-import { NumberOverride } from "../schemas/index.ts";
+import type { NumberOverride } from "../schemas/index.ts";
 
 // A documents job: once the console has released a run, print its three
 // documents in the approved wording and put them in Google Drive, as
@@ -258,23 +258,12 @@ async function contribute(runId: string, dir: string, input: DocumentsJobInput, 
 }
 
 /**
- * The rows a make printed with, kept in the run folder for a later re-check to
- * read its baseline as the customer's documents showed it (DECISIONS.md 522).
- * Only the rows' own fields, private to the worker, and by a rename so a reader
- * never meets half a file: an unreadable one would leave the re-check with no
- * baseline. The temporary name is fixed, not the process's: the run's lock is
- * held, so no other make writes here, and one a crash left is overwritten.
- * Nothing lists a run folder to send it, and it goes with the folder.
+ * The rows a make printed with, kept in the run folder for a later re-check's
+ * draft to read its baseline as the customer's documents showed it (DECISIONS.md
+ * 522, 528). Nothing lists a run folder to send it, and it goes with the folder.
  */
 function keepOverrides(dir: string, rows: NumberOverride[]): void {
-  const path = join(dir, OVERRIDES_FILE);
-  const writing = `${path}.writing`;
-  try {
-    writeFileSync(writing, JSON.stringify(rows.map((row) => NumberOverride.parse(row))), { mode: 0o600 });
-    renameSync(writing, path);
-  } finally {
-    rmSync(writing, { force: true });
-  }
+  writeRows(join(dir, OVERRIDES_FILE), rows);
 }
 
 export async function processDocumentsJob(runId: string, deps: WorkerDeps, attempt: Attempt): Promise<JobOutcome> {

@@ -99,11 +99,16 @@ function figureOf(input: Read, unit: Unit, source: Source): { value: number } | 
   return { value: fact };
 }
 
-/** What a figure in each unit can hold. A percentage and a score are out of 100; days can't be fewer than none. */
+/**
+ * What a corrected figure in each unit can be. A percentage and a score are out
+ * of 100. Days can't be fewer than none, and ten years is far past any sales
+ * cycle or time in stage we compare (DECISIONS.md 528): a ceiling on what the
+ * set can hold for good, not a guard against a slip of the keyboard.
+ */
 const RANGE: Record<Unit, { min: number; max: number; what: string }> = {
-  percent: { min: 0, max: 100, what: "a percentage" },
-  score: { min: 0, max: 100, what: "a score" },
-  days: { min: 0, max: Infinity, what: "a number of days" },
+  percent: { min: 0, max: 100, what: "0 to 100 for a percentage" },
+  score: { min: 0, max: 100, what: "0 to 100 for a score" },
+  days: { min: 0, max: 3_650, what: "0 to 3,650 for days" },
 };
 
 /**
@@ -133,7 +138,7 @@ export function benchmarkFigures(input: Read & { asRead?: Omit<Read, "scores"> }
       const range = RANGE[unit];
       const corrected = !("value" in read) || read.value !== value;
       if (corrected && (value < range.min || value > range.max)) {
-        skip(`The figure as corrected is outside what ${range.what} can be, so it's left out.`);
+        skip(`The figure as corrected is outside ${range.what}, so it's left out.`);
         continue;
       }
     }

@@ -273,7 +273,7 @@ describe("hc benchmark reads the figures as corrected (decision 521)", () => {
     const left = ["historic.win_rate_by_value", "dq.open_deals_past_close_rate", "sec.health_check_score", "historic.slippage_days"];
     for (const key of left) {
       assert.equal(valueOf(result.rows, key), undefined, key);
-      assert.match(result.skipped.find((s) => s.metricKey === key)!.reason, /^The figure as corrected is outside what (a percentage|a score|a number of days) can be, so it's left out\.$/, key);
+      assert.match(result.skipped.find((s) => s.metricKey === key)!.reason, /^The figure as corrected is outside 0 to (100 for a percentage|100 for a score|3,650 for days), so it's left out\.$/, key);
     }
     assert.equal(valueOf(result.rows, "historic.no_decision_rate"), 100);
     assert.equal(valueOf(result.rows, "current.median_days_in_stage"), 0);
@@ -282,12 +282,28 @@ describe("hc benchmark reads the figures as corrected (decision 521)", () => {
     for (const row of plain.rows) if (![...left, "historic.no_decision_rate", "current.median_days_in_stage"].includes(row.metricKey)) assert.deepEqual(result.rows.find((r) => r.metricKey === row.metricKey), row);
   });
 
+  test("days corrected past ten years are left out, and nothing short of that, so a run never loses its whole contribution to one (decision 528)", () => {
+    const plain = exportBenchmark(options(freshRun(), tempDir()));
+    const others = plain.rows.filter((r) => r.metricKey !== "historic.slippage_days");
+    // 1,200 typed for 12 is under the ceiling: it isn't a guard against a slip of the keyboard.
+    for (const [value, expected] of [[3_650, 3_650], [1_200, 1_200], [3_650.5, undefined], [1e9, undefined], [1e21, undefined]] as const) {
+      const run = freshRun();
+      const store = tempDir();
+      const result = exportBenchmark(options(run, store, { overrides: [onMetric("historic.slippage_days", value)] }));
+      assert.equal(valueOf(result.rows, "historic.slippage_days"), expected, String(value));
+      if (expected === undefined) assert.equal(result.skipped.find((s) => s.metricKey === "historic.slippage_days")?.reason, "The figure as corrected is outside 0 to 3,650 for days, so it's left out.", String(value));
+      assert.deepEqual(result.rows.filter((r) => r.metricKey !== "historic.slippage_days"), others, String(value));
+      assert.equal(readFileSync(join(store, BENCHMARK_FILE), "utf8").trim().split("\n").length, result.rows.length);
+    }
+  });
+
   test("a figure as read outside the range goes in as it always did", () => {
-    const outside = metrics.map((m) => (m.id === BY_VALUE && m.status === "measured" ? { ...m, value: 250 } : m.id === "historic.slippage_days" && m.status === "measured" ? { ...m, value: -3 } : m));
+    const outside = metrics.map((m) => (m.id === BY_VALUE && m.status === "measured" ? { ...m, value: 250 } : m.id === "historic.slippage_days" && m.status === "measured" ? { ...m, value: -3 } : m.id === "current.median_days_in_stage" && m.status === "measured" ? { ...m, value: 9_000 } : m));
     const input = { metrics: outside, findings, scores: z.array(Score).parse(read(source, "scores.json")) };
     for (const figures of [benchmarkFigures(input).figures, benchmarkFigures({ ...input, asRead: { metrics: outside, findings } }).figures]) {
       assert.equal(figures.find((f) => f.metricKey === BY_VALUE)?.value, 250);
       assert.equal(figures.find((f) => f.metricKey === "historic.slippage_days")?.value, -3);
+      assert.equal(figures.find((f) => f.metricKey === "current.median_days_in_stage")?.value, 9_000);
     }
   });
 });

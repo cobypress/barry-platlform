@@ -150,6 +150,8 @@ describe("a pulse whose baseline's documents kept their corrections (decision 52
     assert.equal(deps.store.pulseResults.get(PULSE)!.result.score.before, plain.deps.store.pulseResults.get(PULSE)!.result.score.before);
     assert.deepEqual(deps.lines.filter((l) => /earlier health check/.test(l)), [`Pulse ${PULSE}: 1 corrected figure of the earlier health check can't be carried, so the comparison shows it as read.`]);
     assert.deepEqual(plain.deps.lines.filter((l) => /earlier health check/.test(l)), []);
+    // Built once and never printed, so it keeps nothing of the baseline's (DECISIONS.md 528).
+    assert.equal(existsSync(join(deps.runsDir, PULSE, "baseline-overrides.json")), false);
   });
 });
 

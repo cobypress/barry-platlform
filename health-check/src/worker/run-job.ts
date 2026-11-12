@@ -6,7 +6,7 @@ import { applyNarrative, type Rejection } from "../narrative/apply.ts";
 import type { NarrativeClient } from "../narrative/client.ts";
 import { buildReport, type BuiltReport, type ReportInput } from "../narrative/sections.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
-import { INTERVIEWS_FILE, loadRun, OUTPUT_FILES, SURVEY_FILE } from "../render/render-run.ts";
+import { BASELINE_OVERRIDES_FILE, INTERVIEWS_FILE, loadRun, OUTPUT_FILES, SURVEY_FILE, writeRows } from "../render/render-run.ts";
 import { baselineRefusedSummary } from "../render/render-released.ts";
 import { INTERVIEW_VERSION } from "../interviews/questions.ts";
 import { OAuthConnectionProvider, revokeConnection } from "../salesforce/oauth-provider.ts";
@@ -192,7 +192,21 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
     // The interviews as they stand now, likewise. One deleted since an earlier delivery goes from the folder too.
     if (input.interviews?.length) writeFileSync(join(dir, INTERVIEWS_FILE), `${JSON.stringify({ version: INTERVIEW_VERSION, interviews: input.interviews }, null, 2)}\n`, { mode: 0o600 });
     else rmSync(join(dir, INTERVIEWS_FILE), { force: true });
-    const { input: reportInput, pseudonyms } = loadRun(dir);
+    // A re-check is drafted from its earlier health check's corrections as they
+    // stand now, and keeps them, so its documents are built from the same rows
+    // whatever is made again later (DECISIONS.md 528). None, or no baseline: the
+    // file goes, so a re-draft always matches its drafts. Written before the
+    // sections file and the console's save, in that order: a run reaches review
+    // only by a delivery whose three writes all happened, and every delivery
+    // drafts again, so a half-done one never stands (DECISIONS.md 529). A scan
+    // and a pulse are never reviewed or printed, so neither keeps any.
+    const { input: reportInput, pseudonyms } = loadRun(dir, { baselineRows: "live" });
+    if (input.run.product !== "scan" && input.run.product !== "pulse") {
+      const kept = join(dir, BASELINE_OVERRIDES_FILE);
+      const rows = reportInput.baseline?.overrides ?? [];
+      if (rows.length > 0) writeRows(kept, rows);
+      else rmSync(kept, { force: true });
+    }
     // Before the sections, because these are kept as they're made and the
     // sections aren't: a job stopped part way through picks the summaries up
     // where they were and drafts the sections once, where the other order would
@@ -392,7 +406,8 @@ function holdsNul(value: unknown): boolean {
 async function finishPulse(runId: string, dir: string, deps: WorkerDeps, at: string, log: (line: string) => void): Promise<void> {
   try {
     // loadRun reads the baseline from the folder beside this one, if it's there and readable.
-    const { input } = loadRun(dir);
+    // The earlier folder's corrections as they stand: a pulse is built once, here, and never printed (DECISIONS.md 528).
+    const { input } = loadRun(dir, { baselineRows: "live" });
     const report = buildReport(input);
     // The baseline is read as its documents showed it, where that can still be carried (DECISIONS.md 522).
     if (report.baselineRefused) log(`Pulse ${runId}: ${baselineRefusedSummary(report.baselineRefused)}`);
