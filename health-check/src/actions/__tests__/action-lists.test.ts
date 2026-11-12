@@ -157,19 +157,48 @@ describe("in a set-up review", async () => {
   });
 });
 
-describe("approved number overrides (night 3 review)", () => {
-  test("the tickets and the workbook carry the corrected figure, as the decks do", () => {
+describe("approved number overrides (night 3 review; decision 511)", () => {
+  const AT = "2026-11-01T09:00:00.000Z";
+  const corrected = (f: Finding, field: string, previousValue: number, newValue: number, id = "ov-0001") => ({ id, runId: input.run.id, target: { type: "finding" as const, id: f.id, field }, previousValue, newValue, reason: "Two were test deals", overriddenBy: "Synthetic Consultant", overriddenAt: AT });
+  // This issue's own ticket: another issue can quote the same figure for its own reasons.
+  const ticketOf = (csv: string, title: string): string => csv.split("\r\n").find((line) => line.startsWith(`"${title}",`))!;
+
+  test("the tickets carry a figure the wording prints once, as the decks do", () => {
     const f = finding("dq.open-opps-past-close");
-    const hits = f.facts.hits!;
-    const override = { id: "ov-0001", runId: input.run.id, target: { type: "finding" as const, id: f.id, field: "facts.hits" }, previousValue: hits, newValue: hits - 2, reason: "Two were test deals", overriddenBy: "Synthetic Consultant", overriddenAt: "2026-11-01T09:00:00.000Z" };
-    const report = buildReport({ ...input, intake: null, overrides: [override] });
-    const corrected = report.teamFindings.find((x) => x.id === f.id)!;
-    assert.match(corrected.summary, new RegExp(`\\b${hits - 2} of\\b`), "the decks' wording has the corrected figure");
-    // This issue's own ticket: another issue can quote the same figure for its own reasons.
-    const row = buildTickets(report, pseudonyms, lists).split("\r\n").find((line) => line.startsWith(`"${corrected.title}",`))!;
-    assert.ok(row, "the issue has a ticket");
-    assert.ok(row.includes(`${hits - 2} of`), "the ticket has the corrected figure");
-    assert.ok(!row.includes(`${hits} of`), "the ticket still has the figure the consultant corrected");
+    assert.ok(f.summary.includes("21 of 76 ("), f.summary);
+    const report = buildReport({ ...input, intake: null, overrides: [corrected(f, "facts.n", 76, 80)] });
+    assert.deepEqual(report.refused, []);
+    assert.ok(report.teamFindings.find((x) => x.id === f.id)!.summary.includes("21 of 80 ("), "the decks' wording has the corrected figure");
+    const row = ticketOf(buildTickets(report, pseudonyms, lists), f.title);
+    assert.ok(row.includes("21 of 80 ("), "the ticket has the corrected figure");
+    assert.ok(!row.includes("of 76"), "the ticket still has the figure the consultant corrected");
+  });
+
+  test("the tickets print a finding whose figure can't be carried as read, as the decks do", () => {
+    // Its hits are in the summary and again in the money working ("2 of the 21 affected deals").
+    const f = finding("dq.open-opps-past-close");
+    const report = buildReport({ ...input, intake: null, overrides: [corrected(f, "facts.hits", 21, 19)] });
+    assert.deepEqual(report.refused.map((r) => [r.findingId, r.field, r.why]), [[f.id, "facts.hits", { kind: "repeated", places: 2 }]]);
+    assert.deepEqual(report.teamFindings.find((x) => x.id === f.id)!.facts, f.facts);
+    const row = ticketOf(buildTickets(report, pseudonyms, lists), f.title);
+    assert.ok(row.includes("21 of 76 (27.6%)"), row);
+    assert.ok(!/\b19 of\b/.test(row));
+  });
+
+  test("the workbook carries a figure its recommendation prints once, and prints a refused finding's recommendation as read", () => {
+    // Planted: the coverage finding's open pipeline, moved from its summary to its recommendation.
+    const coverage = finding("cur.coverage");
+    const planted = { ...coverage, summary: coverage.summary.replace(", open £815,000", ""), recommendation: "Build on the £815,000 open this quarter." };
+    // The dormant users finding prints its count in the summary, the recommendation and the money working.
+    const dormant = finding("utl.dormant-licensed-users");
+    assert.match(dormant.recommendation, /^Deactivate 1 user\b/);
+    const report = buildReport({ ...input, intake: null, findings: input.findings.map((f) => (f.id === coverage.id ? planted : f)), overrides: [corrected(coverage, "facts.openThisQuarter", 815000, 790000, "ov-0001"), corrected(dormant, "facts.users", 1, 2, "ov-0002")] });
+    assert.deepEqual(report.refused.map((r) => r.findingId), [dormant.id]);
+    const xml = sheetsOf(buildWorkbook(report, pseudonyms, lists).bytes);
+    assert.ok(xml.includes("Build on the £790,000 open this quarter."), "the corrected figure");
+    assert.ok(!xml.includes("£815,000"));
+    assert.ok(xml.includes("Deactivate 1 user and release the licence."), "the refused finding as read");
+    assert.ok(!xml.includes("Deactivate 2 user"));
   });
 });
 

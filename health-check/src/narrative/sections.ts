@@ -18,7 +18,7 @@ import { BENCHMARK_MIN_GROUP, type Calibration, type Finding, type ManualStep, t
 import { ReportSection as ReportSectionSchema, SectionVersion as SectionVersionSchema } from "../schemas/index.ts";
 import type { SectionBrief } from "./draft.ts";
 import type { Intake } from "./intake.ts";
-import { applyOverrides } from "./overrides.ts";
+import { applyOverrides, type OverrideRefusal } from "./overrides.ts";
 import { assumptionsSource, findingSource, metricSource, planSource, statedProblemsSource, type PromptSource } from "./prompt.ts";
 import { areasOf, buildPlan, bySeverity, domainLabel, domainsInOrder, isSetupReview, isThinData, issuesOf, rankBy, scorecard, teamLevelFinding, topIssues, verdictOf, type Added, type Plan } from "./select.ts";
 import { chapterFigures } from "../render/chapter.ts";
@@ -71,6 +71,8 @@ export type BuiltReport = {
   teamFindings: Finding[];
   /** Metrics with overrides applied. */
   metrics: Metric[];
+  /** Each corrected figure that couldn't be carried into its finding's wording, which then stays as read. Any at all holds the documents (DECISIONS.md 511, 512). */
+  refused: OverrideRefusal[];
   /** The Barometer score: one figure for the org, from the area scores. */
   overall: OverallScore;
   /** What the issues are worth over the next 12 months (roadmap 1.4). */
@@ -960,6 +962,7 @@ export function buildReport(given: ReportInput): BuiltReport {
     teamFindings: team.slice().sort(rankBy(added)),
     added,
     metrics: effective.metrics,
+    refused: effective.refused,
     overall,
     value,
     progress,
