@@ -238,9 +238,9 @@ function calibrationText(run: Run, c: Calibration, facts: string[] = []): string
   ].join("\n");
 }
 
-/** The facts step's sentences, naming each affected check by its finding's title. */
-function factsLines(input: ReportInput): string[] {
-  return input.facts ? factsText(input.facts, (ruleId) => input.findings.find((f) => f.ruleId === ruleId)?.title) : [];
+/** The facts step's sentences, naming each affected check by its finding's title as corrected (DECISIONS.md 489). */
+function factsLines(input: ReportInput, findings: Finding[]): string[] {
+  return input.facts ? factsText(input.facts, (ruleId) => findings.find((f) => f.ruleId === ruleId)?.title) : [];
 }
 
 function overrideText(overrides: NumberOverride[]): string {
@@ -330,8 +330,13 @@ function progressText(p: Progress, currency: string): string {
   );
 }
 
-function rawNotesSpecs(input: ReportInput, overall: OverallScore, comparisons: Comparison[], value: ValueModel, investment: Investment, effectiveMetrics: Metric[], progress: Progress | null, survey: SurveyView | null, causes: Cause[], interviews: InterviewView | null, readiness: Readiness): Spec[] {
-  const { run, calibration, findings, metrics, manualSteps, intake, overrides = [] } = input;
+/**
+ * The raw notes' sections, from the findings and metrics as corrected, as every
+ * other section is (DECISIONS.md 489). The Word notes' own item for each finding
+ * and metric is the record as read, with every override listed beside it.
+ */
+function rawNotesSpecs(input: ReportInput, overall: OverallScore, comparisons: Comparison[], value: ValueModel, investment: Investment, findings: Finding[], metrics: Metric[], progress: Progress | null, survey: SurveyView | null, causes: Cause[], interviews: InterviewView | null, readiness: Readiness): Spec[] {
+  const { run, calibration, manualSteps, intake, overrides = [] } = input;
   const exclusions = [...new Set([...findings.flatMap((f) => f.evidence.flatMap((e) => e.exclusions)), ...metrics.flatMap((m) => m.exclusions)])];
   const notMeasurable = findings.filter((f) => f.status === "not_measurable");
   const domains = domainsInOrder(findings).filter((d) => findings.some((f) => f.domain === d));
@@ -339,14 +344,13 @@ function rawNotesSpecs(input: ReportInput, overall: OverallScore, comparisons: C
     intake
       ? { key: "intake_summary", title: "Intake summary", body: intakeText(intake), sources: [INTAKE] }
       : { key: "intake_summary", title: "Intake summary", body: "No intake has been recorded for this run.", needsInput: true },
-    { key: "assumptions", title: "Assumptions", body: calibrationText(run, calibration, factsLines(input)), sources: [SOURCE.run, CALIBRATION] },
+    { key: "assumptions", title: "Assumptions", body: calibrationText(run, calibration, factsLines(input, findings)), sources: [SOURCE.run, CALIBRATION] },
     ...(progress ? [{ key: "progress", title: "Since your last health check", body: progressText(progress, calibration.currency), sources: [PROGRESS] }] : []),
     { key: "barometer_score", title: "Barometer score", body: overallText(overall), sources: [OVERALL] },
     {
       key: "investment",
       title: "Investment",
-      // With overrides applied, as the dataset has them: this text quotes the figures.
-      body: investmentText(investment, effectiveMetrics).join("\n\n"),
+      body: investmentText(investment, metrics).join("\n\n"),
       metricIds: metrics.filter((m) => INVESTMENT_METRIC_IDS.includes(m.id)).map((m) => m.id),
       sources: [INVESTMENT_SOURCE],
     },
@@ -899,7 +903,7 @@ export function buildReport(given: ReportInput): BuiltReport {
     overrides: [],
     structural: STRUCTURE,
     extraText: [
-      { source: CALIBRATION, text: calibrationText(run, calibration, factsLines(input)) },
+      { source: CALIBRATION, text: calibrationText(run, calibration, factsLines(input, effective.findings)) },
       ...(intake ? [{ source: INTAKE, text: intakeText(intake) }] : []),
       // The cover's customer name, which can be a reference such as "ACME-02", and
       // the consultant's, which can read as a number ("Ten Eyck"). No section's scope includes it.
@@ -980,7 +984,7 @@ export function buildReport(given: ReportInput): BuiltReport {
     causes,
     readiness,
     outputs: {
-      raw_notes: build("raw_notes", rawNotesSpecs(input, overall, comparisons, value, investment, effective.metrics, progress, survey, causes, interviews, readiness)),
+      raw_notes: build("raw_notes", rawNotesSpecs(input, overall, comparisons, value, investment, effective.findings, effective.metrics, progress, survey, causes, interviews, readiness)),
       executive_summary: build("executive_summary", executiveSpecs(input, team, effective.metrics, survey, interviews, added)),
       full_health_check: build("full_health_check", fullSpecs(input, team, effective.metrics, survey, interviews, readiness, added)),
     },
