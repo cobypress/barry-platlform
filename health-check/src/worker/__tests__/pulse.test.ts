@@ -3,7 +3,11 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { NarrativeClient, NarrativeRequest } from "../../narrative/client.ts";
-import type { Finding, Score } from "../../schemas/index.ts";
+import type { Finding, NumberOverride, Score } from "../../schemas/index.ts";
+import { applyOverrides } from "../../narrative/overrides.ts";
+import { buildReport } from "../../narrative/sections.ts";
+import { loadRun } from "../../render/render-run.ts";
+import { SIZED_RULE } from "../../testing/recheck.ts";
 import { loadRecording, ReplayTransport } from "../../testing/replay.ts";
 import { PostgresWorkerStore, type SqlPool, type SqlResult } from "../postgres-store.ts";
 import { createJobHandler } from "../worker.ts";
@@ -43,7 +47,7 @@ function ageBaseline(dir: string): { fixedRules: string[]; newRules: string[] } 
   return { fixedRules, newRules };
 }
 
-async function pulseRun(options: { baseline: boolean }) {
+async function pulseRun(options: { baseline: boolean; edit?: (baselineDir: string) => void }) {
   const { asked, narrative } = refusingClaude();
   const deps = baseDeps({ dataTransport: new ReplayTransport(loadRecording()), narrative });
   await deps.tokens.save(syntheticConnection());
@@ -53,6 +57,7 @@ async function pulseRun(options: { baseline: boolean }) {
     deps.store.addRun(runInput({ run: consoleRun({ id: BASELINE }) }));
     await handle({ kind: "run", runId: BASELINE }, last);
     aged = ageBaseline(join(deps.runsDir, BASELINE));
+    options.edit?.(join(deps.runsDir, BASELINE));
     asked.length = 0;
   }
   // A replay plays through once, so the pulse reads its own, as a month later's run would read the org afresh.
@@ -112,6 +117,55 @@ describe("a monthly pulse", async () => {
   test("keeps its connection and its run folder, for next month", () => {
     assert.equal(deps.tokens.has(CONNECTION), true);
     assert.ok(existsSync(join(deps.runsDir, PULSE, "findings.json")));
+  });
+});
+
+describe("a pulse whose baseline's documents kept their corrections (decision 522)", async () => {
+  // As read, from the pulse above's twin: the same recording, so the same figures.
+  const plain = await pulseRun({ baseline: true });
+  const row = (f: Finding, newValue: number, id: string): NumberOverride => ({ id, runId: BASELINE, target: { type: "finding", id: f.id, field: "value.amount" }, previousValue: f.value.kind === "not_sized" ? NaN : f.value.amount, newValue, reason: "Checked with the customer.", overriddenBy: "Synthetic Consultant", overriddenAt: "2026-10-01T12:00:00.000Z" });
+  let rows: NumberOverride[] = [];
+  const { deps } = await pulseRun({
+    baseline: true,
+    edit: (dir) => {
+      const findings = JSON.parse(readFileSync(join(dir, "findings.json"), "utf8")) as Finding[];
+      const sized = findings.find((f) => f.ruleId === SIZED_RULE && f.status === "issue")!;
+      // One carried, and one refused: a sized amount the finding's wording or facts also hold.
+      const refused = findings.filter((f) => f.status === "issue" && f.value.kind !== "not_sized").map((f) => row(f, 900, "ov-0002")).find((r) => applyOverrides(findings, [], [r]).refused.length === 1)!;
+      rows = [row(sized, 250_000, "ov-0001"), refused];
+      assert.deepEqual(applyOverrides(findings, [], [rows[0]!]).refused, []);
+      writeFileSync(join(dir, "overrides.json"), JSON.stringify(rows));
+    },
+  });
+
+  test("its 'before' worth is the earlier health check's as corrected, and the log counts the figure it can't carry", () => {
+    const before = deps.store.pulseResults.get(PULSE)!.result.worth.before;
+    const asRead = plain.deps.store.pulseResults.get(PULSE)!.result.worth.before;
+    const corrected = buildReport(loadRun(join(deps.runsDir, BASELINE)).input);
+    assert.equal(corrected.refused.length, 1);
+    assert.equal(before, corrected.value.total.expected);
+    assert.notEqual(before, asRead);
+    assert.ok(before! < asRead!, `${before} against ${asRead}`);
+    // Never a score.
+    assert.equal(deps.store.pulseResults.get(PULSE)!.result.score.before, plain.deps.store.pulseResults.get(PULSE)!.result.score.before);
+    assert.deepEqual(deps.lines.filter((l) => /earlier health check/.test(l)), [`Pulse ${PULSE}: 1 corrected figure of the earlier health check can't be carried, so the comparison shows it as read.`]);
+    assert.deepEqual(plain.deps.lines.filter((l) => /earlier health check/.test(l)), []);
+    // Built once and never printed, so it keeps nothing of the baseline's (DECISIONS.md 528).
+    assert.equal(existsSync(join(deps.runsDir, PULSE, "baseline-overrides.json")), false);
+  });
+});
+
+describe("a pulse whose baseline's corrections can't be read (decision 531)", async () => {
+  const plain = await pulseRun({ baseline: true });
+  const { deps } = await pulseRun({ baseline: true, edit: (dir) => writeFileSync(join(dir, "overrides.json"), "[{") });
+
+  test("is built against the baseline as read, and the log says so once", () => {
+    const r = deps.store.pulseResults.get(PULSE)!.result;
+    assert.equal(r.baselineRunId, BASELINE);
+    assert.equal(r.worth.before, plain.deps.store.pulseResults.get(PULSE)!.result.worth.before);
+    assert.deepEqual(deps.lines.filter((l) => /corrections couldn't be read/.test(l)), [`Pulse ${PULSE}: the earlier health check's corrections couldn't be read, so the comparison shows its figures as read.`]);
+    assert.deepEqual(plain.deps.lines.filter((l) => /corrections couldn't be read/.test(l)), []);
+    assert.equal(existsSync(join(deps.runsDir, PULSE, "baseline-overrides.json")), false);
   });
 });
 

@@ -73,6 +73,12 @@ export type BuiltReport = {
   metrics: Metric[];
   /** Each corrected figure that couldn't be carried into its finding's wording, which then stays as read. Any at all holds the documents (DECISIONS.md 511, 512). */
   refused: OverrideRefusal[];
+  /**
+   * How many of a re-check's earlier health check's corrected figures couldn't
+   * be carried, so the comparison shows them as read (DECISIONS.md 522, item 3).
+   * Never a hold: the earlier documents went out long ago. Zero without a baseline.
+   */
+  baselineRefused: number;
   /** The Barometer score: one figure for the org, from the area scores. */
   overall: OverallScore;
   /** What the issues are worth over the next 12 months (roadmap 1.4). */
@@ -872,8 +878,10 @@ export function buildReport(given: ReportInput): BuiltReport {
   const readiness = readinessOf(run, team, effective.metrics);
   // A re-check compares with its first health check, built the same way, overrides and all.
   let progress: Progress | null = null;
+  let baselineRefused = 0;
   if (input.baseline) {
     const first = buildReport({ ...input.baseline, baseline: null });
+    baselineRefused = first.refused.length;
     progress = compareWithBaseline(
       { runId: first.input.run.id, asOf: first.input.run.asOf, findings: first.teamFindings, scores: first.input.scores ?? [], overall: first.overall, value: first.value, limitsReadAt: limitsReadAt(first.input.run) },
       { runId: run.id, asOf: run.asOf, findings: team, scores, overall, value, limitsReadAt: limitsReadAt(run) },
@@ -974,6 +982,7 @@ export function buildReport(given: ReportInput): BuiltReport {
     added,
     metrics: effective.metrics,
     refused: effective.refused,
+    baselineRefused,
     overall,
     value,
     progress,

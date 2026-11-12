@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { FACTS_FILE } from "../extract/facts.ts";
 import { FactsFile, summariseFacts } from "../facts/summary.ts";
 import { join, resolve } from "node:path";
@@ -59,21 +59,52 @@ const readOptional = <T>(path: string): T | null => (existsSync(path) ? read<T>(
 export const write = (path: string, data: string | Buffer): void => writeFileSync(path, data, { mode: 0o600 });
 
 /**
- * A re-check's first health check, from the folder beside it, as the report
- * compares against it. Null if it's gone (retention), unreadable, or another org's.
+ * Which corrections of a re-check's earlier health check it is built with
+ * (DECISIONS.md 528). "kept": the rows the re-check's sections were drafted
+ * with, kept in its own folder; none when there's no file, so a re-check
+ * drafted before then is built as read. "live": the earlier folder's
+ * overrides.json as it stands, read only where the report is built from
+ * nothing else: the run job's draft, which then keeps them, and a pulse.
  */
-function loadBaseline(dir: string, run: Run): ReportInput | null {
+export type BaselineRows = "kept" | "live";
+
+/**
+ * A re-check's first health check, from the folder beside it, as the report
+ * compares against it. Null if it's gone (retention), unreadable, or another
+ * org's. Read live, corrections that can't be read count as none and say so
+ * (`rowsUnread`): the draft then holds the figures as read, as the documents
+ * will with no kept file (DECISIONS.md 531). Kept rows that can't be read
+ * leave no baseline: they're the ones the drafts were made with, and nothing
+ * else is (528).
+ */
+function loadBaseline(dir: string, run: Run, rows: BaselineRows): { baseline: ReportInput | null; rowsUnread: boolean } {
   const baseline = baselineRun(dir, run);
-  if (!baseline || !existsSync(join(baseline.dir, "findings.json"))) return null;
+  if (!baseline || !existsSync(join(baseline.dir, "findings.json"))) return { baseline: null, rowsUnread: false };
+  let overrides: NumberOverride[];
+  let rowsUnread = false;
   try {
-    return loadRun(baseline.dir, { baseline: false }).input;
+    overrides = rows === "live" ? readOverrides(baseline.dir) : readBaselineOverrides(dir);
   } catch {
-    return null;
+    if (rows === "kept") return { baseline: null, rowsUnread: false };
+    overrides = [];
+    rowsUnread = true;
+  }
+  try {
+    return { baseline: loadRun(baseline.dir, { baseline: false, overrides }).input, rowsUnread };
+  } catch {
+    return { baseline: null, rowsUnread: false };
   }
 }
 
-/** Loads a run folder. Everything is validated, so a damaged file stops here. */
-export function loadRun(dir: string, options: { baseline?: boolean } = {}): { input: ReportInput; pseudonyms: Pseudonymiser } {
+/**
+ * Loads a run folder. Everything is validated, so a damaged file stops here.
+ * `overrides` stands in for the folder's own overrides.json, which is then not
+ * read; `baselineRows` says which corrections a re-check's earlier health
+ * check is read with, by default the ones kept with its drafts.
+ * `baselineRowsUnread` is for the worker's log alone, and nothing built reads
+ * it: the earlier folder's corrections, read live, couldn't be read.
+ */
+export function loadRun(dir: string, options: { baseline?: boolean; baselineRows?: BaselineRows; overrides?: NumberOverride[] } = {}): { input: ReportInput; pseudonyms: Pseudonymiser; baselineRowsUnread: boolean } {
   const intake = readOptional<unknown>(join(dir, "intake.json"));
   const survey = readOptional<unknown>(join(dir, SURVEY_FILE));
   const interviews = readOptional<unknown>(join(dir, INTERVIEWS_FILE));
@@ -85,15 +116,56 @@ export function loadRun(dir: string, options: { baseline?: boolean } = {}): { in
     metrics: z.array(Metric).parse(read(join(dir, "metrics.json"))),
     manualSteps: z.array(ManualStep).parse(read(join(dir, "manual-steps.json"))),
     scores: z.array(Score).parse(readOptional(join(dir, "scores.json")) ?? []),
-    overrides: z.array(NumberOverride).parse(readOptional(join(dir, "overrides.json")) ?? []),
+    overrides: options.overrides ?? readOverrides(dir),
     intake: intake ? Intake.parse(intake) : null,
     survey: survey ? Survey.parse(survey) : null,
     recordCounts: recordCounts(loadActionLists(dir)),
     interviews: interviews ? Interviews.parse(interviews).interviews : null,
     facts: facts ? summariseFacts(FactsFile.parse(facts)) : null,
   };
-  if (options.baseline !== false) input.baseline = loadBaseline(dir, input.run);
-  return { input, pseudonyms: loadPseudonymMap(dir) };
+  let baselineRowsUnread = false;
+  if (options.baseline !== false) {
+    const loaded = loadBaseline(dir, input.run, options.baselineRows ?? "kept");
+    input.baseline = loaded.baseline;
+    baselineRowsUnread = loaded.rowsUnread;
+  }
+  return { input, pseudonyms: loadPseudonymMap(dir), baselineRowsUnread };
+}
+
+/**
+ * The override rows the documents were last made with, which the documents job
+ * keeps in the run folder (DECISIONS.md 522). None when there's no file; a
+ * damaged one throws, so nothing is read from half a file.
+ */
+export const OVERRIDES_FILE = "overrides.json";
+export function readOverrides(dir: string): NumberOverride[] {
+  return z.array(NumberOverride).parse(readOptional(join(dir, OVERRIDES_FILE)) ?? []);
+}
+
+/**
+ * A re-check's earlier health check's corrections as its sections were drafted
+ * with them, kept in the re-check's folder by the run job (DECISIONS.md 528).
+ * Absent: none.
+ */
+export const BASELINE_OVERRIDES_FILE = "baseline-overrides.json";
+export function readBaselineOverrides(dir: string): NumberOverride[] {
+  return z.array(NumberOverride).parse(readOptional(join(dir, BASELINE_OVERRIDES_FILE)) ?? []);
+}
+
+/**
+ * Override rows written to a run folder, only their own fields, private to
+ * the worker, and by a rename so a reader never meets half a file: an
+ * unreadable one leaves a re-check with no baseline. The temporary name is
+ * fixed: both writers hold the run's lock, and one a crash left is overwritten.
+ */
+export function writeRows(path: string, rows: NumberOverride[]): void {
+  const writing = `${path}.writing`;
+  try {
+    writeFileSync(writing, JSON.stringify(rows.map((row) => NumberOverride.parse(row))), { mode: 0o600 });
+    renameSync(writing, path);
+  } finally {
+    rmSync(writing, { force: true });
+  }
 }
 
 /** The run's map from token to name, for rendering only (rule 7). Throws if it's missing or damaged. */

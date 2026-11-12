@@ -1,15 +1,16 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import fs, { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
 import { buildReport, currentBody, type ReportOutputKey } from "../../narrative/sections.ts";
 import { applyOverrides } from "../../narrative/overrides.ts";
 import { approvedReport, heldFigures, isPlainFigure, layoutWarnings, renderReleased, type ApprovedRun, type DocumentKey, type HeldFigure } from "../../render/render-released.ts";
-import { loadRun, OUTPUT_FILES, SURVEY_FILE } from "../../render/render-run.ts";
+import { BASELINE_OVERRIDES_FILE, loadRun, OUTPUT_FILES, SURVEY_FILE } from "../../render/render-run.ts";
 import { withoutComments } from "../../survey/questions.ts";
 import { syntheticSurvey } from "../../testing/survey.ts";
-import { ReportOutput, type Finding, type NumberOverride, type ReportSection, type SectionVersion } from "../../schemas/index.ts";
+import { NumberOverride, ReportOutput, type Finding, type ReportSection, type SectionVersion } from "../../schemas/index.ts";
 import { runFromRecording } from "../../testing/harness.ts";
 import { docxParagraphs, docxText } from "../../testing/docx-text.ts";
 import { strFromU8, unzipSync } from "fflate";
@@ -18,6 +19,11 @@ import type { ConsoleSummariesRow } from "../../handbook/summary-row.ts";
 import { HANDBOOK_FILE } from "../../handbook/build.ts";
 import { HANDBOOK_DOCX, NO_EARLIER, SINCE_TITLE } from "../../handbook/docx.ts";
 import { withEarlier } from "../../testing/earlier-handbook.ts";
+import { plantEarlier, plantRecheck } from "../../testing/recheck.ts";
+import { processRunJob } from "../run-job.ts";
+import { loadRecording, ReplayTransport } from "../../testing/replay.ts";
+import { fullReportHtml } from "../../render/full-report.ts";
+import { executiveHtml } from "../../render/executive.ts";
 import { HANDBOOK_NOT_MADE } from "../../handbook/read.ts";
 import { HANDBOOK_MARKER } from "../../testing/synthetic-org.ts";
 import { loadAnswers } from "../../testing/replay.ts";
@@ -25,7 +31,7 @@ import { clientNameOf, folderFor, heldBackReason, heldBackSummary, INTERNAL_FOLD
 import { DriveError, GoogleDrive, type DocumentDrive, type DriveItem } from "../drive.ts";
 import { z } from "zod";
 import type { DocumentFile, DocumentsJobInput } from "../types.ts";
-import { baseDeps, consoleRun, INTAKE, RUN_ID, temp } from "./helpers.ts";
+import { baseDeps, consoleRun, INTAKE, RUN_ID, runInput, syntheticConnection, temp } from "./helpers.ts";
 
 // The synthetic org's run folder, recorded once, stands in for one on the worker's disk.
 const { dir: recorded } = await runFromRecording({ answers: loadAnswers() });
@@ -1607,5 +1613,558 @@ describe("Claude's summaries in the org handbook", () => {
     assert.equal((await processDocumentsJob(RUN_ID, deps, { final: true })).outcome, "done");
     assert.equal(given.length, 1);
     assert.ok(!("handbookSummaries" in (given[0] as object)) && !JSON.stringify(given[0]).includes("Quokka"));
+  });
+});
+
+/** Every section of the folder's own report approved, as the console holds them after release. */
+function approvedFrom(dir: string, overrides: NumberOverride[] = []): Pick<ApprovedRun, "sections" | "versions"> {
+  const report = buildReport({ ...loadRun(dir).input, overrides });
+  const sections: ReportSection[] = [];
+  const versions: SectionVersion[] = [];
+  for (const built of Object.values(report.outputs)) {
+    for (const s of built.sections) {
+      sections.push({ ...s, status: "approved", approval: { approvedBy: "consultant@example.com", approvedAt: "2026-11-04T18:00:00.000Z" } });
+      versions.push(built.versions.find((v) => v.id === s.currentVersionId)!);
+    }
+  }
+  return { sections, versions };
+}
+
+describe("the overrides a make printed with are kept in the run folder (decisions 521 and 522)", () => {
+  const { input: recordedInput } = loadRun(recorded);
+  const byValue = recordedInput.metrics.find((m) => m.id === "historic.win_rate_by_value")!;
+  assert.equal(byValue.status, "measured");
+  // Carried by applyOverrides on the synthetic run: the measure's wording never prints 45.1. Marked so a copy anywhere shows.
+  const ROW: NumberOverride = { id: "ov-ZQX-0001", runId: RUN_ID, target: { type: "metric", id: byValue.id, field: "value" }, previousValue: 45.1, newValue: 48.6, reason: "Checked with the customer ZQX-REASON.", overriddenBy: "Synthetic Consultant ZQX", overriddenAt: "2026-11-04T17:00:00.000Z" };
+  const KEPT = "overrides.json";
+  const PAGES = { pages: [{ slug: "overview", title: "Overview", html: "<p>Synthetic.</p>" }] };
+
+  /** The recorded run folder, released and opted in, made with placeholder files and a microsite. */
+  function keepSetup(overrides: NumberOverride[], extra: Partial<DocumentsJobInput> = {}) {
+    const drive = new MemoryDrive();
+    const deps = baseDeps({ drive, renderReleased: async (dir, approved, out) => ({ ...(await fakeRender(dir, approved, out)), microsite: { ok: true as const, pages: PAGES } }) });
+    const input = jobInput({ overrides, intake: { ...INTAKE, customerName: "Synthetic Co", industry: "technology", headcountBand: "51-200" }, run: consoleRun({ status: "released", customerRef: "SYN-0001", benchmarkOptIn: true }), ...extra });
+    const dir = join(deps.runsDir, input.run.id);
+    cpSync(recorded, dir, { recursive: true });
+    deps.store.addDocumentsJob(input);
+    deps.micrositeKey = Buffer.alloc(32, 9);
+    const added: unknown[] = [];
+    const add = deps.store.addBenchmarkRows.bind(deps.store);
+    deps.store.addBenchmarkRows = async (rows) => (added.push(...rows), add(rows));
+    const sealed: string[] = [];
+    const seal = deps.store.saveMicrosite.bind(deps.store);
+    deps.store.saveMicrosite = async (...args) => (sealed.push(args[1]), seal(...args));
+    const saved: unknown[] = [];
+    const save = deps.store.saveDocuments.bind(deps.store);
+    deps.store.saveDocuments = async (...args) => (saved.push(args[1]), save(...args));
+    return { deps, drive, dir, input, added, sealed, saved };
+  }
+  const remake = (deps: ReturnType<typeof keepSetup>["deps"], runId = RUN_ID) => {
+    deps.store.documents.get(runId)!.input.state = "queued";
+    return processDocumentsJob(runId, deps, { final: true });
+  };
+
+  test("an opted-in run with a carried override hands the benchmark set the corrected figure, rounded", async () => {
+    assert.deepEqual(applyOverrides(recordedInput.findings, recordedInput.metrics, [ROW]).refused, []);
+    const { deps, added } = keepSetup([ROW]);
+    assert.equal((await processDocumentsJob(RUN_ID, deps, { final: true })).outcome, "done");
+    assert.equal((added as Array<{ metricKey: string; value: number }>).find((r) => r.metricKey === byValue.id)?.value, 49);
+  });
+
+  test("the rows are kept as parsed, private to the worker, by a rename, and in nothing that leaves it", async () => {
+    // A field the row format doesn't have is left out of the file.
+    const { deps, drive, dir, added, sealed, saved } = keepSetup([{ ...ROW, extra: "ZQX-EXTRA" } as NumberOverride]);
+    const result = await processDocumentsJob(RUN_ID, deps, { final: true });
+    assert.equal(result.outcome, "done", result.detail);
+    const text = readFileSync(join(dir, KEPT), "utf8");
+    assert.deepEqual(z.array(NumberOverride).parse(JSON.parse(text)), [ROW]);
+    assert.equal(text, JSON.stringify([ROW]));
+    assert.equal(statSync(join(dir, KEPT)).mode & 0o777, 0o600);
+    assert.deepEqual(readdirSync(dir).filter((f) => f.endsWith(".writing")), []);
+    // Nowhere else: Drive, the console's documents row, the microsite, the benchmark set or the log.
+    for (const item of drive.items.values()) {
+      assert.doesNotMatch(item.name, /overrides/i);
+      assert.ok(!item.body?.toString("utf8").includes("ZQX"), item.name);
+    }
+    const out = JSON.stringify([saved, added, sealed, deps.lines, result, [...deps.store.microsites.values()]]);
+    for (const part of ["overrides.json", "ZQX", ROW.id, ROW.reason, ROW.overriddenBy]) assert.ok(!out.includes(part), part);
+    assert.equal(saved.length, 1);
+    assert.equal(sealed.length, 1);
+  });
+
+  test("with no rows, nothing is written and nothing removed: the folder is as before", async () => {
+    const { deps, dir } = keepSetup([], { run: consoleRun({ status: "released", customerRef: "SYN-0001", benchmarkOptIn: false }) });
+    const before = readdirSync(dir).sort();
+    assert.equal((await processDocumentsJob(RUN_ID, deps, { final: true })).outcome, "done");
+    assert.deepEqual(readdirSync(dir).sort(), [...before, "documents"].sort());
+    // One already there, from an earlier make, stays as it was.
+    writeFileSync(join(dir, KEPT), JSON.stringify([ROW]), { mode: 0o600 });
+    assert.equal((await remake(deps)).outcome, "done");
+    assert.equal(readFileSync(join(dir, KEPT), "utf8"), JSON.stringify([ROW]));
+  });
+
+  test("a refused make and a held make keep no rows", async () => {
+    const refusal = { refused: applyOverrides(recordedInput.findings, recordedInput.metrics, [{ ...ROW, target: { ...ROW.target, id: "historic.win_rate" }, previousValue: 47, newValue: 50.3 }]).refused };
+    assert.equal(refusal.refused.length, 1);
+    const refused = keepSetup([ROW]);
+    refused.deps.renderReleased = async () => refusal;
+    assert.equal((await processDocumentsJob(RUN_ID, refused.deps, { final: true })).outcome, "failed");
+    assert.equal(existsSync(join(refused.dir, KEPT)), false);
+    const held = keepSetup([ROW]);
+    held.deps.renderReleased = async (dir, approved, out) => ({ ...(await fakeRender(dir, approved, out)), held: [{ document: "The full health check", page: 12, figure: "£1.99m", reason: "not in the data" }] });
+    assert.equal((await processDocumentsJob(RUN_ID, held.deps, { final: true })).outcome, "failed");
+    assert.equal(existsSync(join(held.dir, KEPT)), false);
+    for (const { added } of [refused, held]) assert.deepEqual(added, []);
+  });
+
+  test("made again with the same rows, the file is the same", async () => {
+    const { deps, dir } = keepSetup([ROW]);
+    await processDocumentsJob(RUN_ID, deps, { final: true });
+    const first = readFileSync(join(dir, KEPT));
+    assert.equal((await remake(deps)).outcome, "done");
+    assert.deepEqual(readFileSync(join(dir, KEPT)), first);
+    assert.deepEqual(readdirSync(dir).filter((f) => f.endsWith(".writing")), []);
+  });
+
+  test("a crash between the write and the rename leaves no file, and the next make writes it", async () => {
+    const { deps, dir } = keepSetup([ROW]);
+    const real = fs.renameSync;
+    fs.renameSync = ((from: fs.PathLike, to: fs.PathLike) => {
+      if (String(to).endsWith(KEPT)) throw new Error("The worker stopped.");
+      return real(from, to);
+    }) as typeof fs.renameSync;
+    syncBuiltinESMExports();
+    try {
+      // Not the last try: thrown, so the queue delivers it again.
+      await assert.rejects(() => processDocumentsJob(RUN_ID, deps, { final: false }), /The worker stopped/);
+    } finally {
+      fs.renameSync = real;
+      syncBuiltinESMExports();
+    }
+    assert.equal(existsSync(join(dir, KEPT)), false);
+    assert.deepEqual(readdirSync(dir).filter((f) => f.endsWith(".writing")), []);
+    assert.equal(deps.store.documents.get(RUN_ID)!.made, null, "nothing uploaded: the rows are kept before Drive");
+    assert.equal((await processDocumentsJob(RUN_ID, deps, { final: true })).outcome, "done");
+    assert.deepEqual(JSON.parse(readFileSync(join(dir, KEPT), "utf8")), [ROW]);
+  });
+});
+
+describe("a re-check reads its earlier health check with the corrections it was drafted with (decisions 522 and 528)", () => {
+  const STORAGE = { asRead: "Data storage: 8,940 of 10,240 MB used then", corrected: "Data storage: 8,200 of 10,240 MB used then" };
+  const WORTH = { asRead: "£829k to £829k", corrected: "£704k to £829k" };
+  const TITLE = { asRead: "(4,321 records)", corrected: "(4,123 records)" };
+  const PROGRESS_HEAD = "Since your last health check";
+  const approved = (dir: string): ApprovedRun => ({ intake: { ...INTAKE, customerName: "Synthetic Co" }, ...approvedFrom(dir), overrides: [], preparedBy: null });
+
+  /** The re-check's documents as the documents job prints them, and the pages a customer reads. The rows are kept in its folder, as its draft keeps them. */
+  async function printRecheck(rows: NumberOverride[] | null) {
+    const dir = join(temp(), "runs", RUN_ID);
+    const { rows: planted } = plantRecheck(recorded, dir);
+    if (rows) writeFileSync(join(dir, BASELINE_OVERRIDES_FILE), JSON.stringify(rows));
+    const run = approved(dir);
+    const printed = await renderReleased(dir, run, join(dir, "documents"));
+    assert.ok(!("refused" in printed));
+    const { report, pseudonyms } = approvedReport(dir, run);
+    const layout = JSON.parse(readFileSync(join(dir, "documents", OUTPUT_FILES.layout), "utf8")) as Record<"executive" | "full" | "ceo", { passed: boolean; problems: unknown[] }>;
+    const site = printed.microsite?.ok ? printed.microsite.pages.pages.find((p) => p.slug === "progress")?.html ?? "" : "";
+    return { report, printed, layout, planted, pages: { full: fullReportHtml(report, pseudonyms), executive: executiveHtml(report, pseudonyms), microsite: site } };
+  }
+
+  test("each figure an override moves prints corrected on the full report, the executive summary and the microsite, and the number check passes", async () => {
+    const { rows } = plantRecheck(recorded, join(temp(), "runs", RUN_ID));
+    const { report, printed, layout, pages } = await printRecheck([rows.storage, rows.sized, rows.titled]);
+    assert.equal(report.baselineRefused, 0);
+    assert.equal(printed.baselineRefused, 0);
+    for (const [name, html] of Object.entries(pages)) {
+      assert.ok(html.includes(PROGRESS_HEAD), name);
+      for (const figure of [STORAGE, WORTH, TITLE]) {
+        assert.ok(html.includes(figure.corrected), `${name}: ${figure.corrected}`);
+        assert.ok(!html.includes(figure.asRead), `${name}: ${figure.asRead}`);
+      }
+    }
+    for (const doc of ["executive", "full", "ceo"] as const) {
+      assert.equal(layout[doc].passed, true, `${doc}: ${JSON.stringify(layout[doc].problems)}`);
+      assert.deepEqual(layout[doc].problems, []);
+    }
+    assert.deepEqual(printed.held, []);
+    // Never a score: the earlier one is the same as read and corrected.
+    assert.equal(report.progress!.score.before, (await printRecheck(null)).report.progress!.score.before);
+  });
+
+  test("with no file, the earlier figures are as read", async () => {
+    const { report, layout, pages } = await printRecheck(null);
+    assert.equal(report.baselineRefused, 0);
+    for (const [name, html] of Object.entries(pages)) for (const figure of [STORAGE, WORTH, TITLE]) assert.ok(html.includes(figure.asRead), `${name}: ${figure.asRead}`);
+    for (const doc of ["executive", "full", "ceo"] as const) assert.deepEqual(layout[doc].problems, [], doc);
+  });
+
+  test("a row today's reader refuses leaves its figure as read beside one carried, the documents are made, and the log counts it", async () => {
+    const drive = new MemoryDrive();
+    const deps = baseDeps({ drive });
+    const dir = join(deps.runsDir, RUN_ID);
+    const { rows } = plantRecheck(recorded, dir);
+    writeFileSync(join(dir, BASELINE_OVERRIDES_FILE), JSON.stringify([rows.storage, rows.refused]));
+    const results: Awaited<ReturnType<typeof renderReleased>>[] = [];
+    deps.renderReleased = async (...args) => {
+      const result = await renderReleased(...args);
+      results.push(result);
+      return result;
+    };
+    deps.store.addDocumentsJob(jobInput(approvedFrom(dir)));
+    const outcome = await processDocumentsJob(RUN_ID, deps, { final: true });
+    assert.equal(outcome.outcome, "done", outcome.detail);
+    const printed = results[0]!;
+    assert.ok(!("refused" in printed));
+    assert.equal(printed.baselineRefused, 1);
+    const line = `Run ${RUN_ID}: 1 corrected figure of the earlier health check can't be carried, so the comparison shows it as read.`;
+    assert.deepEqual(deps.lines.filter((l) => /earlier health check/.test(l)), [line]);
+    const site = printed.microsite?.ok ? printed.microsite.pages.pages.find((p) => p.slug === "progress")!.html : "";
+    // Carried: storage. Refused: the sized amount it shares with a fact, so the earlier worth is as read.
+    assert.ok(site.includes(STORAGE.corrected) && site.includes(WORTH.asRead), site);
+    const { report } = approvedReport(dir, approved(dir));
+    const shared = report.input.baseline!.findings.find((f) => f.id === rows.refused.target.id)!;
+    assert.equal(shared.value.kind !== "not_sized" && shared.value.amount, rows.refused.previousValue);
+    for (const part of [shared.title, String(rows.refused.previousValue), "1,200", "900"]) assert.ok(!line.includes(part), part);
+  });
+
+  test("hc render and the documents read the kept rows, else none; only a draft or a pulse reads the earlier folder's file", () => {
+    const dir = join(temp(), "runs", RUN_ID);
+    const { earlier, rows } = plantRecheck(recorded, dir);
+    writeFileSync(join(earlier, "overrides.json"), JSON.stringify([rows.storage, rows.sized]));
+    assert.deepEqual(loadRun(dir).input.baseline!.overrides, [], "no kept file: as read");
+    assert.deepEqual(loadRun(dir, { baselineRows: "live" }).input.baseline!.overrides, [rows.storage, rows.sized]);
+    writeFileSync(join(dir, BASELINE_OVERRIDES_FILE), JSON.stringify([rows.titled]));
+    assert.deepEqual(loadRun(dir).input.baseline!.overrides, [rows.titled]);
+    assert.deepEqual(loadRun(dir, { baselineRows: "kept" }).input.baseline!.overrides, [rows.titled]);
+    // A damaged earlier file is no matter to a build from the kept rows; read live, it counts as none and says so (decision 531).
+    writeFileSync(join(earlier, "overrides.json"), "[{");
+    assert.deepEqual(loadRun(dir).input.baseline!.overrides, [rows.titled]);
+    assert.equal(loadRun(dir).baselineRowsUnread, false);
+    const live = loadRun(dir, { baselineRows: "live" });
+    assert.deepEqual([live.input.baseline!.overrides, live.baselineRowsUnread], [[], true]);
+    rmSync(join(earlier, "overrides.json"));
+    assert.equal(loadRun(dir, { baselineRows: "live" }).baselineRowsUnread, false, "absent isn't unreadable");
+  });
+
+  test("two refused: the log counts both, in the plural", async () => {
+    const deps = baseDeps({ drive: new MemoryDrive() });
+    const dir = join(deps.runsDir, RUN_ID);
+    const { rows } = plantRecheck(recorded, dir);
+    writeFileSync(join(dir, BASELINE_OVERRIDES_FILE), JSON.stringify([rows.storage, rows.refused, rows.refusedToo]));
+    const results: Awaited<ReturnType<typeof renderReleased>>[] = [];
+    deps.renderReleased = async (...args) => {
+      const result = await renderReleased(...args);
+      results.push(result);
+      return result;
+    };
+    deps.store.addDocumentsJob(jobInput(approvedFrom(dir)));
+    assert.equal((await processDocumentsJob(RUN_ID, deps, { final: true })).outcome, "done");
+    const printed = results[0]!;
+    assert.ok(!("refused" in printed));
+    assert.equal(printed.baselineRefused, 2);
+    assert.deepEqual(deps.lines.filter((l) => /earlier health check/.test(l)), [`Run ${RUN_ID}: 2 corrected figures of the earlier health check can't be carried, so the comparison shows them as read.`]);
+  });
+
+  test("a kept file that can't be read leaves the re-check with no baseline, as any unreadable earlier file does, and the documents are made", async () => {
+    const drive = new MemoryDrive();
+    const deps = baseDeps({ drive });
+    const dir = join(deps.runsDir, RUN_ID);
+    const { earlier, rows } = plantRecheck(recorded, dir);
+    writeFileSync(join(dir, BASELINE_OVERRIDES_FILE), JSON.stringify([rows.storage]).slice(0, 40));
+    // The earlier folder's own file, readable, is never the fallback.
+    writeFileSync(join(earlier, "overrides.json"), JSON.stringify([rows.storage]));
+    const results: Awaited<ReturnType<typeof renderReleased>>[] = [];
+    deps.renderReleased = async (...args) => {
+      const result = await renderReleased(...args);
+      results.push(result);
+      return result;
+    };
+    deps.store.addDocumentsJob(jobInput(approvedFrom(dir)));
+    assert.equal((await processDocumentsJob(RUN_ID, deps, { final: true })).outcome, "done");
+    const printed = results[0]!;
+    assert.ok(!("refused" in printed) && printed.microsite?.ok);
+    assert.equal(printed.microsite.pages.pages.some((p) => p.slug === "progress"), false);
+    const { report, pseudonyms } = approvedReport(dir, approved(dir));
+    assert.equal(report.input.baseline, null);
+    assert.equal(report.progress, null);
+    assert.ok(!fullReportHtml(report, pseudonyms).includes(PROGRESS_HEAD) && !executiveHtml(report, pseudonyms).includes(PROGRESS_HEAD));
+  });
+});
+
+describe("a re-check is built from the corrections it was drafted with, whatever is made again later (decisions 528 and 529)", () => {
+  type Then = { storage: string | undefined; worth: string | undefined; title: string | undefined };
+  // The earlier health check's figures as read, and as its three carried rows correct them.
+  const AS_READ = { raw: { storage: "8,940", worth: "828,879", title: "4,321" }, deck: { storage: "8,940", worth: "829k", title: "4,321" } };
+  const CORRECTED = { raw: { storage: "8,200", worth: "704,113", title: "4,123" }, deck: { storage: "8,200", worth: "704k", title: "4,123" } };
+  const EARLIER_ID = `${RUN_ID}-earlier`;
+  const KEPT = BASELINE_OVERRIDES_FILE;
+
+  /** The "then" figures a text prints: the storage reading, the earlier worth and the planted title's figure. */
+  function thenOf(text: string, kind: "raw" | "deck"): Then {
+    return {
+      storage: /Data storage: ([\d,]+) of 10,240 MB used then/.exec(text)?.[1],
+      worth: (kind === "raw" ? /has gone from £([\d,]+) to/ : /£([\d.]+[km]?) to £/).exec(text)?.[1],
+      title: /stage flags \(([\d,]+) records\)/.exec(text)?.[1],
+    };
+  }
+
+  /** The re-check drafted by the run job from the synthetic org's recording, its earlier health check planted beside it. */
+  async function worker() {
+    const drive = new MemoryDrive();
+    const deps = baseDeps({ drive, dataTransport: new ReplayTransport(loadRecording()) });
+    await deps.tokens.save(syntheticConnection());
+    const earlier = join(deps.runsDir, EARLIER_ID);
+    const { rows } = plantEarlier(recorded, earlier);
+    const dir = join(deps.runsDir, RUN_ID);
+    deps.store.addRun(runInput({ run: consoleRun({ baselineRunId: EARLIER_ID }) }));
+    const printed: Awaited<ReturnType<typeof renderReleased>>[] = [];
+    deps.renderReleased = async (...args) => {
+      const result = await renderReleased(...args);
+      printed.push(result);
+      return result;
+    };
+    /** The run job's delivery: a run not yet in review, so it drafts. */
+    const draft = async (final = true) => {
+      deps.dataTransport = new ReplayTransport(loadRecording());
+      deps.store.runs.get(RUN_ID)!.run.status = "extracting";
+      return processRunJob(RUN_ID, deps, { final });
+    };
+    /** The earlier health check's documents made (again) with these rows, which keeps them in its folder. */
+    const makeEarlier = async (overrides: NumberOverride[]) => {
+      deps.store.addDocumentsJob(jobInput({ run: consoleRun({ id: EARLIER_ID, status: "released", customerRef: "SYN-0001" }), overrides, ...approvedFrom(earlier, overrides) }));
+      assert.equal((await processDocumentsJob(EARLIER_ID, deps, { final: true })).outcome, "done");
+    };
+    /** The re-check released with the drafts the console holds, approved as they are, and its documents made. */
+    const makeRecheck = async (edit?: (s: ReportSection, v: SectionVersion) => SectionVersion) => {
+      const output = deps.store.runs.get(RUN_ID)!.output!;
+      const sections = output.sections.map((s) => ({ ...s, status: "approved" as const, approval: { approvedBy: "consultant@example.com", approvedAt: "2026-11-04T18:00:00.000Z" } }));
+      const versions = sections.map((s) => {
+        const v = output.versions.find((x) => x.id === s.currentVersionId)!;
+        return edit ? edit(s, v) : v;
+      });
+      const current = sections.map((s) => ({ ...s, currentVersionId: versions.find((v) => v.sectionId === s.id)!.id }));
+      deps.store.addDocumentsJob(jobInput({ sections: current, versions }));
+      const outcome = await processDocumentsJob(RUN_ID, deps, { final: true });
+      const result = printed.at(-1)!;
+      assert.ok(!("refused" in result));
+      const approved: ApprovedRun = { intake: { ...INTAKE, customerName: "Synthetic Co" }, sections: current, versions, overrides: [], preparedBy: null };
+      const { report, pseudonyms } = approvedReport(dir, approved);
+      const site = result.microsite?.ok ? result.microsite.pages.pages.find((p) => p.slug === "progress")?.html ?? "" : "";
+      return {
+        outcome,
+        result,
+        texts: { raw: docxText(readFileSync(result.files.raw_notes)), full: fullReportHtml(report, pseudonyms), executive: executiveHtml(report, pseudonyms), microsite: site },
+      };
+    };
+    const drafts = (): string => JSON.stringify(deps.store.runs.get(RUN_ID)!.output!.versions.map((v) => v.body));
+    const draftHasProgress = (): boolean => deps.store.runs.get(RUN_ID)!.output!.sections.some((s) => s.output === "raw_notes" && s.key === "progress");
+    return { deps, drive, dir, earlier, rows, draft, makeEarlier, makeRecheck, drafts, draftHasProgress };
+  }
+
+  /** Every document prints the same "then" figures, these. */
+  function printsThen(texts: Record<"raw" | "full" | "executive" | "microsite", string>, expected: typeof AS_READ) {
+    assert.deepEqual(thenOf(texts.raw, "raw"), expected.raw, "the raw notes");
+    for (const name of ["full", "executive", "microsite"] as const) assert.deepEqual(thenOf(texts[name], "deck"), expected.deck, name);
+  }
+
+  test("drafted while the earlier folder has no file, then the earlier documents made again: the re-check's documents are made, not held, and every 'then' is as read", async () => {
+    const w = await worker();
+    assert.equal((await w.draft()).outcome, "done");
+    assert.equal(existsSync(join(w.dir, KEPT)), false);
+    await w.makeEarlier([w.rows.storage, w.rows.sized, w.rows.titled]);
+    assert.ok(existsSync(join(w.earlier, "overrides.json")));
+    // The adversary's case: a consultant's sentence quoting the earlier figure as the draft showed it.
+    const { outcome, result, texts } = await w.makeRecheck((s, v) => (s.output === "full_health_check" && s.key === "overview" ? { ...v, id: `${v.id}-2`, version: 2, body: `${v.body}\n\nAt the last health check, 4,321 records were affected by calendar sync.` } : v));
+    assert.equal(outcome.outcome, "done", outcome.detail);
+    assert.ok(!("refused" in result));
+    assert.deepEqual(result.held, []);
+    printsThen(texts, AS_READ);
+    assert.equal(existsSync(join(w.dir, KEPT)), false, "the documents job keeps nothing of the earlier run's");
+  });
+
+  test("drafted after the earlier folder has its file: the rows are kept, and the drafts and every document print the corrected 'then', however the earlier file changes after", async () => {
+    const w = await worker();
+    const rows = [w.rows.storage, w.rows.sized, w.rows.titled];
+    await w.makeEarlier(rows);
+    assert.equal((await w.draft()).outcome, "done");
+    const kept = join(w.dir, KEPT);
+    assert.equal(readFileSync(kept, "utf8"), JSON.stringify(rows));
+    assert.equal(statSync(kept).mode & 0o777, 0o600);
+    assert.deepEqual(readdirSync(w.dir).filter((f) => f.endsWith(".writing")), []);
+    assert.deepEqual(thenOf(w.drafts(), "raw"), CORRECTED.raw, "the drafts the console holds");
+    const first = await w.makeRecheck();
+    assert.equal(first.outcome.outcome, "done", first.outcome.detail);
+    printsThen(first.texts, CORRECTED);
+    // The earlier file gone, then changed: the re-check's documents don't move.
+    rmSync(join(w.earlier, "overrides.json"));
+    const second = await w.makeRecheck();
+    writeFileSync(join(w.earlier, "overrides.json"), JSON.stringify([w.rows.storage]));
+    const third = await w.makeRecheck();
+    for (const again of [second, third]) {
+      assert.equal(again.outcome.outcome, "done");
+      assert.deepEqual(again.texts, first.texts);
+      assert.equal(again.result.microsite?.ok && JSON.stringify(again.result.microsite.pages), first.result.microsite?.ok && JSON.stringify(first.result.microsite.pages));
+    }
+    assert.equal(readFileSync(kept, "utf8"), JSON.stringify(rows), "the documents job leaves the kept rows as drafted");
+  });
+
+  test("in every order, the raw notes' progress and the decks print the same 'then' figures", async () => {
+    const all = (w: Awaited<ReturnType<typeof worker>>) => [w.rows.storage, w.rows.sized, w.rows.titled];
+    const orders: Array<[string, (w: Awaited<ReturnType<typeof worker>>) => Promise<void>, typeof AS_READ]> = [
+      ["no file", async (w) => void (await w.draft()), AS_READ],
+      ["a file before the draft", async (w) => (await w.makeEarlier(all(w)), void (await w.draft())), CORRECTED],
+      ["a file after the draft", async (w) => (await w.draft(), await w.makeEarlier(all(w))), AS_READ],
+      ["a file before the draft, removed after", async (w) => (await w.makeEarlier(all(w)), await w.draft(), rmSync(join(w.earlier, "overrides.json"))), CORRECTED],
+      // The second adversary pass's orders (decision 531).
+      ["a file before the draft, changed after", async (w) => (await w.makeEarlier(all(w)), await w.draft(), writeFileSync(join(w.earlier, "overrides.json"), JSON.stringify([w.rows.storage]))), CORRECTED],
+      ["a file damaged at the draft, still damaged", async (w) => (await w.makeEarlier(all(w)), writeFileSync(join(w.earlier, "overrides.json"), "[{"), void (await w.draft())), AS_READ],
+      ["a file damaged at the draft, repaired after", async (w) => (await w.makeEarlier(all(w)), writeFileSync(join(w.earlier, "overrides.json"), "[{"), await w.draft(), writeFileSync(join(w.earlier, "overrides.json"), JSON.stringify(all(w)))), AS_READ],
+      ["a file unreadable at the draft, readable after", async (w) => (await w.makeEarlier(all(w)), chmodSync(join(w.earlier, "overrides.json"), 0), await w.draft(), chmodSync(join(w.earlier, "overrides.json"), 0o600)), AS_READ],
+    ];
+    for (const [order, steps, expected] of orders) {
+      const w = await worker();
+      await steps(w);
+      const { outcome, result, texts } = await w.makeRecheck();
+      assert.equal(outcome.outcome, "done", `${order}: ${outcome.detail}`);
+      assert.deepEqual(result.held, [], order);
+      // Drafts and documents agree there is a comparison, and on every figure in it.
+      assert.ok(w.draftHasProgress(), order);
+      for (const [name, text] of Object.entries(texts)) assert.ok(/Since your last health check|since your first health check/.test(text), `${order}: ${name}`);
+      assert.deepEqual(thenOf(w.drafts(), "raw"), expected.raw, `${order}: the drafts`);
+      printsThen(texts, expected);
+    }
+  });
+
+  test("the earlier corrections can't be read when the re-check is drafted: it's drafted against them as read, keeps nothing, says so once, and its documents agree (decision 531)", async () => {
+    const LINE = `Run ${RUN_ID}: the earlier health check's corrections couldn't be read, so the comparison shows its figures as read.`;
+    const damage: Array<[string, (path: string) => void]> = [
+      ["damaged", (path) => writeFileSync(path, "[{")],
+      ["unreadable", (path) => chmodSync(path, 0)],
+      ["a row with a field missing", (path) => writeFileSync(path, JSON.stringify([{ ...JSON.parse(readFileSync(path, "utf8"))[0], reason: undefined }]))],
+    ];
+    for (const [what, spoil] of damage) {
+      const w = await worker();
+      const rows = [w.rows.storage, w.rows.sized, w.rows.titled];
+      await w.makeEarlier(rows);
+      const path = join(w.earlier, "overrides.json");
+      spoil(path);
+      assert.equal((await w.draft()).outcome, "done", what);
+      assert.ok(w.draftHasProgress(), `${what}: the drafts have the comparison`);
+      assert.deepEqual(thenOf(w.drafts(), "raw"), AS_READ.raw, what);
+      assert.equal(existsSync(join(w.dir, KEPT)), false, what);
+      assert.deepEqual(w.deps.lines.filter((l) => /corrections couldn't be read/.test(l)), [LINE], what);
+      for (const line of w.deps.lines) assert.ok(!line.includes(w.earlier) && !line.includes("8,200") && !line.includes("JSON"), line);
+      const made = await w.makeRecheck();
+      assert.equal(made.outcome.outcome, "done", `${what}: ${made.outcome.detail}`);
+      assert.deepEqual(made.result.held, [], what);
+      printsThen(made.texts, AS_READ);
+      // Repaired before the documents are made again: they don't move.
+      chmodSync(path, 0o600);
+      writeFileSync(path, JSON.stringify(rows));
+      const again = await w.makeRecheck();
+      assert.deepEqual(again.texts, made.texts, what);
+    }
+  });
+
+  test("the kept rows are written before the sections file and the console's save (decision 529)", async () => {
+    const w = await worker();
+    await w.makeEarlier([w.rows.storage]);
+    await w.draft();
+    rmSync(join(w.dir, "report-sections.json"));
+    const seen: Array<{ sections: boolean; saved: boolean }> = [];
+    let saved = false;
+    const save = w.deps.store.saveRunOutput.bind(w.deps.store);
+    w.deps.store.saveRunOutput = async (id, output) => ((saved = true), save(id, output));
+    const real = fs.renameSync;
+    fs.renameSync = ((from: fs.PathLike, to: fs.PathLike) => {
+      if (String(to).endsWith(KEPT)) seen.push({ sections: existsSync(join(w.dir, "report-sections.json")), saved });
+      return real(from, to);
+    }) as typeof fs.renameSync;
+    syncBuiltinESMExports();
+    try {
+      assert.equal((await w.draft()).outcome, "done");
+    } finally {
+      fs.renameSync = real;
+      syncBuiltinESMExports();
+    }
+    assert.deepEqual(seen, [{ sections: false, saved: false }]);
+    assert.ok(existsSync(join(w.dir, "report-sections.json")) && saved);
+  });
+
+  test("drafted again after the earlier file changed, the kept rows and the drafts both follow; drafted again with none, the kept file goes", async () => {
+    const w = await worker();
+    await w.makeEarlier([w.rows.storage]);
+    await w.draft();
+    const kept = join(w.dir, KEPT);
+    assert.deepEqual(JSON.parse(readFileSync(kept, "utf8")), [w.rows.storage]);
+    assert.deepEqual(thenOf(w.drafts(), "raw"), { ...AS_READ.raw, storage: "8,200" });
+    await w.makeEarlier([w.rows.storage, w.rows.sized, w.rows.titled]);
+    await w.draft();
+    assert.deepEqual(JSON.parse(readFileSync(kept, "utf8")), [w.rows.storage, w.rows.sized, w.rows.titled]);
+    assert.deepEqual(thenOf(w.drafts(), "raw"), CORRECTED.raw);
+    assert.deepEqual(thenOf(readFileSync(join(w.dir, "report-sections.json"), "utf8"), "raw"), CORRECTED.raw);
+    rmSync(join(w.earlier, "overrides.json"));
+    await w.draft();
+    assert.equal(existsSync(kept), false);
+    assert.deepEqual(thenOf(w.drafts(), "raw"), AS_READ.raw);
+  });
+
+  test("a delivery that fails at the console's save after keeping the rows marks the run failed, and the next one rewrites the kept rows and the sections to match (decision 529)", async () => {
+    const w = await worker();
+    await w.makeEarlier([w.rows.storage]);
+    const save = w.deps.store.saveRunOutput.bind(w.deps.store);
+    w.deps.store.saveRunOutput = async () => Promise.reject(new Error("connection reset"));
+    const failures: string[] = [];
+    const record = w.deps.store.recordRunFailure.bind(w.deps.store);
+    w.deps.store.recordRunFailure = async (id, reason, at) => (failures.push(id), record(id, reason, at));
+    assert.equal((await w.draft(true)).outcome, "failed");
+    assert.deepEqual(failures, [RUN_ID]);
+    assert.equal(w.deps.store.runs.get(RUN_ID)!.run.status, "failed");
+    assert.deepEqual(JSON.parse(readFileSync(join(w.dir, KEPT), "utf8")), [w.rows.storage], "kept before the save");
+    // The console queues a failed run again; the earlier documents were made again meanwhile.
+    w.deps.store.saveRunOutput = save;
+    await w.makeEarlier([w.rows.storage, w.rows.sized, w.rows.titled]);
+    assert.equal((await w.draft()).outcome, "done");
+    assert.deepEqual(JSON.parse(readFileSync(join(w.dir, KEPT), "utf8")), [w.rows.storage, w.rows.sized, w.rows.titled]);
+    assert.deepEqual(thenOf(w.drafts(), "raw"), CORRECTED.raw);
+    assert.deepEqual(thenOf(readFileSync(join(w.dir, "report-sections.json"), "utf8"), "raw"), CORRECTED.raw);
+  });
+
+  test("the kept rows go nowhere but the folder, and a crash before the rename leaves no kept file", async () => {
+    const w = await worker();
+    await w.makeEarlier([w.rows.storage]);
+    const real = fs.renameSync;
+    fs.renameSync = ((from: fs.PathLike, to: fs.PathLike) => {
+      if (String(to).endsWith(KEPT)) throw new Error("The worker stopped.");
+      return real(from, to);
+    }) as typeof fs.renameSync;
+    syncBuiltinESMExports();
+    try {
+      await assert.rejects(() => w.draft(false), /The worker stopped/);
+    } finally {
+      fs.renameSync = real;
+      syncBuiltinESMExports();
+    }
+    assert.equal(existsSync(join(w.dir, KEPT)), false);
+    assert.deepEqual(readdirSync(w.dir).filter((f) => f.endsWith(".writing")), []);
+    assert.equal(w.deps.store.runs.get(RUN_ID)!.output, null, "nothing sent before the rows are kept");
+    // Delivered again, with every way out of the worker watched.
+    const sent: unknown[] = [];
+    const saveRun = w.deps.store.saveRunOutput.bind(w.deps.store);
+    w.deps.store.saveRunOutput = async (id, output) => (sent.push(output), saveRun(id, output));
+    assert.equal((await w.draft()).outcome, "done");
+    assert.ok(existsSync(join(w.dir, KEPT)));
+    const saved: unknown[] = [];
+    const saveDocs = w.deps.store.saveDocuments.bind(w.deps.store);
+    w.deps.store.saveDocuments = async (...args) => (saved.push(args[1]), saveDocs(...args));
+    w.deps.micrositeKey = Buffer.alloc(32, 9);
+    const { outcome, result } = await w.makeRecheck();
+    assert.equal(outcome.outcome, "done");
+    for (const item of w.drive.items.values()) {
+      assert.doesNotMatch(item.name, /overrides/i);
+      assert.ok(!item.body?.includes(readFileSync(join(w.dir, KEPT))), item.name);
+    }
+    const out = JSON.stringify([sent, saved, w.deps.lines, w.deps.store.benchmarkRows, result.microsite, [...w.deps.store.microsites.values()]]);
+    for (const part of [KEPT, w.rows.storage.id, w.rows.storage.reason, w.rows.storage.overriddenBy]) assert.ok(!out.includes(part), part);
   });
 });
