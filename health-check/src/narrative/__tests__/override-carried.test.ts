@@ -1329,3 +1329,27 @@ describe("a figure written as a word is an unsure form (decision 520, item 1)", 
     assert.equal(refusalReason(report.refused).split("\n")[1], `"${m.label}", activityWithoutWon: 2 as read, corrected to 3, but the measure's own wording has 2, which a correction doesn't rewrite.`);
   });
 });
+
+// Decision 520 (4): buildReport hands the raw notes' sections the metrics as corrected (sections.ts, rawNotesSpecs).
+describe("the raw notes' sections read the metrics as corrected (decision 520, item 4)", () => {
+  const body = (report: BuiltReport, key: string): string => {
+    const notes = report.outputs.raw_notes;
+    return notes.versions.find((v) => v.id === notes.sections.find((s) => s.key === key)!.currentVersionId)!.body;
+  };
+
+  test("investment.seats_paid 40 to 45, carried: the raw notes' Investment section reads 45 seats, where it read 40 as read", () => {
+    assert.ok(body(asBuilt, "investment").includes("You pay for 40 Salesforce seats."), body(asBuilt, "investment"));
+    const report = built(onMetricOf("investment.seats_paid", "value", 40, 45));
+    assert.deepEqual(report.refused, []);
+    const investment = body(report, "investment");
+    assert.ok(investment.includes("You pay for 45 Salesforce seats.") && !investment.includes("40 Salesforce"), investment);
+  });
+
+  test("ai.legacy_share 30.8 to 33.5, carried: the raw notes' AI readiness section reads 33.5, and not 30.8", () => {
+    assert.ok(body(asBuilt, "ai_readiness").includes("30.8"), body(asBuilt, "ai_readiness"));
+    const report = built(onMetricOf("ai.legacy_share", "value", 30.8, 33.5));
+    assert.deepEqual(report.refused, []);
+    const readiness = body(report, "ai_readiness");
+    assert.ok(readiness.includes("33.5") && !readiness.includes("30.8"), readiness);
+  });
+});
