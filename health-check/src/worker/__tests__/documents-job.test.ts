@@ -1,7 +1,8 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import fs, { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
 import { buildReport, currentBody, type ReportOutputKey } from "../../narrative/sections.ts";
 import { applyOverrides } from "../../narrative/overrides.ts";
@@ -9,7 +10,7 @@ import { approvedReport, heldFigures, isPlainFigure, layoutWarnings, renderRelea
 import { loadRun, OUTPUT_FILES, SURVEY_FILE } from "../../render/render-run.ts";
 import { withoutComments } from "../../survey/questions.ts";
 import { syntheticSurvey } from "../../testing/survey.ts";
-import { ReportOutput, type Finding, type NumberOverride, type ReportSection, type SectionVersion } from "../../schemas/index.ts";
+import { NumberOverride, ReportOutput, type Finding, type ReportSection, type SectionVersion } from "../../schemas/index.ts";
 import { runFromRecording } from "../../testing/harness.ts";
 import { docxParagraphs, docxText } from "../../testing/docx-text.ts";
 import { strFromU8, unzipSync } from "fflate";
@@ -18,6 +19,9 @@ import type { ConsoleSummariesRow } from "../../handbook/summary-row.ts";
 import { HANDBOOK_FILE } from "../../handbook/build.ts";
 import { HANDBOOK_DOCX, NO_EARLIER, SINCE_TITLE } from "../../handbook/docx.ts";
 import { withEarlier } from "../../testing/earlier-handbook.ts";
+import { plantRecheck } from "../../testing/recheck.ts";
+import { fullReportHtml } from "../../render/full-report.ts";
+import { executiveHtml } from "../../render/executive.ts";
 import { HANDBOOK_NOT_MADE } from "../../handbook/read.ts";
 import { HANDBOOK_MARKER } from "../../testing/synthetic-org.ts";
 import { loadAnswers } from "../../testing/replay.ts";
@@ -1607,5 +1611,270 @@ describe("Claude's summaries in the org handbook", () => {
     assert.equal((await processDocumentsJob(RUN_ID, deps, { final: true })).outcome, "done");
     assert.equal(given.length, 1);
     assert.ok(!("handbookSummaries" in (given[0] as object)) && !JSON.stringify(given[0]).includes("Quokka"));
+  });
+});
+
+/** Every section of the folder's own report approved, as the console holds them after release. */
+function approvedFrom(dir: string, overrides: NumberOverride[] = []): Pick<ApprovedRun, "sections" | "versions"> {
+  const report = buildReport({ ...loadRun(dir).input, overrides });
+  const sections: ReportSection[] = [];
+  const versions: SectionVersion[] = [];
+  for (const built of Object.values(report.outputs)) {
+    for (const s of built.sections) {
+      sections.push({ ...s, status: "approved", approval: { approvedBy: "consultant@example.com", approvedAt: "2026-11-04T18:00:00.000Z" } });
+      versions.push(built.versions.find((v) => v.id === s.currentVersionId)!);
+    }
+  }
+  return { sections, versions };
+}
+
+describe("the overrides a make printed with are kept in the run folder (decisions 521 and 522)", () => {
+  const { input: recordedInput } = loadRun(recorded);
+  const byValue = recordedInput.metrics.find((m) => m.id === "historic.win_rate_by_value")!;
+  assert.equal(byValue.status, "measured");
+  // Carried by applyOverrides on the synthetic run: the measure's wording never prints 45.1. Marked so a copy anywhere shows.
+  const ROW: NumberOverride = { id: "ov-ZQX-0001", runId: RUN_ID, target: { type: "metric", id: byValue.id, field: "value" }, previousValue: 45.1, newValue: 48.6, reason: "Checked with the customer ZQX-REASON.", overriddenBy: "Synthetic Consultant ZQX", overriddenAt: "2026-11-04T17:00:00.000Z" };
+  const KEPT = "overrides.json";
+  const PAGES = { pages: [{ slug: "overview", title: "Overview", html: "<p>Synthetic.</p>" }] };
+
+  /** The recorded run folder, released and opted in, made with placeholder files and a microsite. */
+  function keepSetup(overrides: NumberOverride[], extra: Partial<DocumentsJobInput> = {}) {
+    const drive = new MemoryDrive();
+    const deps = baseDeps({ drive, renderReleased: async (dir, approved, out) => ({ ...(await fakeRender(dir, approved, out)), microsite: { ok: true as const, pages: PAGES } }) });
+    const input = jobInput({ overrides, intake: { ...INTAKE, customerName: "Synthetic Co", industry: "technology", headcountBand: "51-200" }, run: consoleRun({ status: "released", customerRef: "SYN-0001", benchmarkOptIn: true }), ...extra });
+    const dir = join(deps.runsDir, input.run.id);
+    cpSync(recorded, dir, { recursive: true });
+    deps.store.addDocumentsJob(input);
+    deps.micrositeKey = Buffer.alloc(32, 9);
+    const added: unknown[] = [];
+    const add = deps.store.addBenchmarkRows.bind(deps.store);
+    deps.store.addBenchmarkRows = async (rows) => (added.push(...rows), add(rows));
+    const sealed: string[] = [];
+    const seal = deps.store.saveMicrosite.bind(deps.store);
+    deps.store.saveMicrosite = async (...args) => (sealed.push(args[1]), seal(...args));
+    const saved: unknown[] = [];
+    const save = deps.store.saveDocuments.bind(deps.store);
+    deps.store.saveDocuments = async (...args) => (saved.push(args[1]), save(...args));
+    return { deps, drive, dir, input, added, sealed, saved };
+  }
+  const remake = (deps: ReturnType<typeof keepSetup>["deps"], runId = RUN_ID) => {
+    deps.store.documents.get(runId)!.input.state = "queued";
+    return processDocumentsJob(runId, deps, { final: true });
+  };
+
+  test("an opted-in run with a carried override hands the benchmark set the corrected figure, rounded", async () => {
+    assert.deepEqual(applyOverrides(recordedInput.findings, recordedInput.metrics, [ROW]).refused, []);
+    const { deps, added } = keepSetup([ROW]);
+    assert.equal((await processDocumentsJob(RUN_ID, deps, { final: true })).outcome, "done");
+    assert.equal((added as Array<{ metricKey: string; value: number }>).find((r) => r.metricKey === byValue.id)?.value, 49);
+  });
+
+  test("the rows are kept as parsed, private to the worker, by a rename, and in nothing that leaves it", async () => {
+    // A field the row format doesn't have is left out of the file.
+    const { deps, drive, dir, added, sealed, saved } = keepSetup([{ ...ROW, extra: "ZQX-EXTRA" } as NumberOverride]);
+    const result = await processDocumentsJob(RUN_ID, deps, { final: true });
+    assert.equal(result.outcome, "done", result.detail);
+    const text = readFileSync(join(dir, KEPT), "utf8");
+    assert.deepEqual(z.array(NumberOverride).parse(JSON.parse(text)), [ROW]);
+    assert.equal(text, JSON.stringify([ROW]));
+    assert.equal(statSync(join(dir, KEPT)).mode & 0o777, 0o600);
+    assert.deepEqual(readdirSync(dir).filter((f) => f.endsWith(".writing")), []);
+    // Nowhere else: Drive, the console's documents row, the microsite, the benchmark set or the log.
+    for (const item of drive.items.values()) {
+      assert.doesNotMatch(item.name, /overrides/i);
+      assert.ok(!item.body?.toString("utf8").includes("ZQX"), item.name);
+    }
+    const out = JSON.stringify([saved, added, sealed, deps.lines, result, [...deps.store.microsites.values()]]);
+    for (const part of ["overrides.json", "ZQX", ROW.id, ROW.reason, ROW.overriddenBy]) assert.ok(!out.includes(part), part);
+    assert.equal(saved.length, 1);
+    assert.equal(sealed.length, 1);
+  });
+
+  test("with no rows, nothing is written and nothing removed: the folder is as before", async () => {
+    const { deps, dir } = keepSetup([], { run: consoleRun({ status: "released", customerRef: "SYN-0001", benchmarkOptIn: false }) });
+    const before = readdirSync(dir).sort();
+    assert.equal((await processDocumentsJob(RUN_ID, deps, { final: true })).outcome, "done");
+    assert.deepEqual(readdirSync(dir).sort(), [...before, "documents"].sort());
+    // One already there, from an earlier make, stays as it was.
+    writeFileSync(join(dir, KEPT), JSON.stringify([ROW]), { mode: 0o600 });
+    assert.equal((await remake(deps)).outcome, "done");
+    assert.equal(readFileSync(join(dir, KEPT), "utf8"), JSON.stringify([ROW]));
+  });
+
+  test("a refused make and a held make keep no rows", async () => {
+    const refusal = { refused: applyOverrides(recordedInput.findings, recordedInput.metrics, [{ ...ROW, target: { ...ROW.target, id: "historic.win_rate" }, previousValue: 47, newValue: 50.3 }]).refused };
+    assert.equal(refusal.refused.length, 1);
+    const refused = keepSetup([ROW]);
+    refused.deps.renderReleased = async () => refusal;
+    assert.equal((await processDocumentsJob(RUN_ID, refused.deps, { final: true })).outcome, "failed");
+    assert.equal(existsSync(join(refused.dir, KEPT)), false);
+    const held = keepSetup([ROW]);
+    held.deps.renderReleased = async (dir, approved, out) => ({ ...(await fakeRender(dir, approved, out)), held: [{ document: "The full health check", page: 12, figure: "£1.99m", reason: "not in the data" }] });
+    assert.equal((await processDocumentsJob(RUN_ID, held.deps, { final: true })).outcome, "failed");
+    assert.equal(existsSync(join(held.dir, KEPT)), false);
+    for (const { added } of [refused, held]) assert.deepEqual(added, []);
+  });
+
+  test("made again with the same rows, the file is the same", async () => {
+    const { deps, dir } = keepSetup([ROW]);
+    await processDocumentsJob(RUN_ID, deps, { final: true });
+    const first = readFileSync(join(dir, KEPT));
+    assert.equal((await remake(deps)).outcome, "done");
+    assert.deepEqual(readFileSync(join(dir, KEPT)), first);
+    assert.deepEqual(readdirSync(dir).filter((f) => f.endsWith(".writing")), []);
+  });
+
+  test("a crash between the write and the rename leaves no file, and the next make writes it", async () => {
+    const { deps, dir } = keepSetup([ROW]);
+    const real = fs.renameSync;
+    fs.renameSync = ((from: fs.PathLike, to: fs.PathLike) => {
+      if (String(to).endsWith(KEPT)) throw new Error("The worker stopped.");
+      return real(from, to);
+    }) as typeof fs.renameSync;
+    syncBuiltinESMExports();
+    try {
+      // Not the last try: thrown, so the queue delivers it again.
+      await assert.rejects(() => processDocumentsJob(RUN_ID, deps, { final: false }), /The worker stopped/);
+    } finally {
+      fs.renameSync = real;
+      syncBuiltinESMExports();
+    }
+    assert.equal(existsSync(join(dir, KEPT)), false);
+    assert.deepEqual(readdirSync(dir).filter((f) => f.endsWith(".writing")), []);
+    assert.equal(deps.store.documents.get(RUN_ID)!.made, null, "nothing uploaded: the rows are kept before Drive");
+    assert.equal((await processDocumentsJob(RUN_ID, deps, { final: true })).outcome, "done");
+    assert.deepEqual(JSON.parse(readFileSync(join(dir, KEPT), "utf8")), [ROW]);
+  });
+});
+
+describe("a re-check reads its earlier health check as that make's documents showed it (decision 522)", () => {
+  const STORAGE = { asRead: "Data storage: 8,940 of 10,240 MB used then", corrected: "Data storage: 8,200 of 10,240 MB used then" };
+  const WORTH = { asRead: "£829k to £829k", corrected: "£704k to £829k" };
+  const TITLE = { asRead: "(4,321 records)", corrected: "(4,123 records)" };
+  const PROGRESS_HEAD = "Since your last health check";
+  const approved = (dir: string): ApprovedRun => ({ intake: { ...INTAKE, customerName: "Synthetic Co" }, ...approvedFrom(dir), overrides: [], preparedBy: null });
+
+  /** The re-check's documents as the documents job prints them, and the pages a customer reads. */
+  async function printRecheck(rows: NumberOverride[] | null) {
+    const dir = join(temp(), "runs", RUN_ID);
+    const { earlier, rows: planted } = plantRecheck(recorded, dir);
+    if (rows) writeFileSync(join(earlier, "overrides.json"), JSON.stringify(rows));
+    const run = approved(dir);
+    const printed = await renderReleased(dir, run, join(dir, "documents"));
+    assert.ok(!("refused" in printed));
+    const { report, pseudonyms } = approvedReport(dir, run);
+    const layout = JSON.parse(readFileSync(join(dir, "documents", OUTPUT_FILES.layout), "utf8")) as Record<"executive" | "full" | "ceo", { passed: boolean; problems: unknown[] }>;
+    const site = printed.microsite?.ok ? printed.microsite.pages.pages.find((p) => p.slug === "progress")?.html ?? "" : "";
+    return { report, printed, layout, planted, pages: { full: fullReportHtml(report, pseudonyms), executive: executiveHtml(report, pseudonyms), microsite: site } };
+  }
+
+  test("each figure an override moves prints corrected on the full report, the executive summary and the microsite, and the number check passes", async () => {
+    const { rows } = plantRecheck(recorded, join(temp(), "runs", RUN_ID));
+    const { report, printed, layout, pages } = await printRecheck([rows.storage, rows.sized, rows.titled]);
+    assert.equal(report.baselineRefused, 0);
+    assert.equal(printed.baselineRefused, 0);
+    for (const [name, html] of Object.entries(pages)) {
+      assert.ok(html.includes(PROGRESS_HEAD), name);
+      for (const figure of [STORAGE, WORTH, TITLE]) {
+        assert.ok(html.includes(figure.corrected), `${name}: ${figure.corrected}`);
+        assert.ok(!html.includes(figure.asRead), `${name}: ${figure.asRead}`);
+      }
+    }
+    for (const doc of ["executive", "full", "ceo"] as const) {
+      assert.equal(layout[doc].passed, true, `${doc}: ${JSON.stringify(layout[doc].problems)}`);
+      assert.deepEqual(layout[doc].problems, []);
+    }
+    assert.deepEqual(printed.held, []);
+    // Never a score: the earlier one is the same as read and corrected.
+    assert.equal(report.progress!.score.before, (await printRecheck(null)).report.progress!.score.before);
+  });
+
+  test("with no file, the earlier figures are as read", async () => {
+    const { report, layout, pages } = await printRecheck(null);
+    assert.equal(report.baselineRefused, 0);
+    for (const [name, html] of Object.entries(pages)) for (const figure of [STORAGE, WORTH, TITLE]) assert.ok(html.includes(figure.asRead), `${name}: ${figure.asRead}`);
+    for (const doc of ["executive", "full", "ceo"] as const) assert.deepEqual(layout[doc].problems, [], doc);
+  });
+
+  test("a row today's reader refuses leaves its figure as read beside one carried, the documents are made, and the log counts it", async () => {
+    const drive = new MemoryDrive();
+    const deps = baseDeps({ drive });
+    const dir = join(deps.runsDir, RUN_ID);
+    const { earlier, rows } = plantRecheck(recorded, dir);
+    writeFileSync(join(earlier, "overrides.json"), JSON.stringify([rows.storage, rows.refused]));
+    const results: Awaited<ReturnType<typeof renderReleased>>[] = [];
+    deps.renderReleased = async (...args) => {
+      const result = await renderReleased(...args);
+      results.push(result);
+      return result;
+    };
+    deps.store.addDocumentsJob(jobInput(approvedFrom(dir)));
+    const outcome = await processDocumentsJob(RUN_ID, deps, { final: true });
+    assert.equal(outcome.outcome, "done", outcome.detail);
+    const printed = results[0]!;
+    assert.ok(!("refused" in printed));
+    assert.equal(printed.baselineRefused, 1);
+    const line = `Run ${RUN_ID}: 1 corrected figure of the earlier health check can't be carried, so the comparison shows it as read.`;
+    assert.deepEqual(deps.lines.filter((l) => /earlier health check/.test(l)), [line]);
+    const site = printed.microsite?.ok ? printed.microsite.pages.pages.find((p) => p.slug === "progress")!.html : "";
+    // Carried: storage. Refused: the sized amount it shares with a fact, so the earlier worth is as read.
+    assert.ok(site.includes(STORAGE.corrected) && site.includes(WORTH.asRead), site);
+    const { report } = approvedReport(dir, approved(dir));
+    const shared = report.input.baseline!.findings.find((f) => f.id === rows.refused.target.id)!;
+    assert.equal(shared.value.kind !== "not_sized" && shared.value.amount, rows.refused.previousValue);
+    for (const part of [shared.title, String(rows.refused.previousValue), "1,200", "900"]) assert.ok(!line.includes(part), part);
+  });
+
+  test("an overrides.json that can't be read leaves the re-check with no baseline, as any unreadable earlier file does, and the documents are made", async () => {
+    const drive = new MemoryDrive();
+    const deps = baseDeps({ drive });
+    const dir = join(deps.runsDir, RUN_ID);
+    const { earlier, rows } = plantRecheck(recorded, dir);
+    writeFileSync(join(earlier, "overrides.json"), JSON.stringify([rows.storage]).slice(0, 40));
+    const results: Awaited<ReturnType<typeof renderReleased>>[] = [];
+    deps.renderReleased = async (...args) => {
+      const result = await renderReleased(...args);
+      results.push(result);
+      return result;
+    };
+    deps.store.addDocumentsJob(jobInput(approvedFrom(dir)));
+    assert.equal((await processDocumentsJob(RUN_ID, deps, { final: true })).outcome, "done");
+    const printed = results[0]!;
+    assert.ok(!("refused" in printed) && printed.microsite?.ok);
+    assert.equal(printed.microsite.pages.pages.some((p) => p.slug === "progress"), false);
+    const { report, pseudonyms } = approvedReport(dir, approved(dir));
+    assert.equal(report.input.baseline, null);
+    assert.equal(report.progress, null);
+    assert.ok(!fullReportHtml(report, pseudonyms).includes(PROGRESS_HEAD) && !executiveHtml(report, pseudonyms).includes(PROGRESS_HEAD));
+  });
+
+  test("end to end: the first health check's documents keep their rows, and its re-check's 'then' is the figure those documents printed", async () => {
+    const drive = new MemoryDrive();
+    const deps = baseDeps({ drive });
+    const dir = join(deps.runsDir, RUN_ID);
+    const { earlier, earlierId, rows } = plantRecheck(recorded, dir);
+    const results: Awaited<ReturnType<typeof renderReleased>>[] = [];
+    deps.renderReleased = async (...args) => {
+      const result = await renderReleased(...args);
+      results.push(result);
+      return result;
+    };
+    // The first health check, released with one correction.
+    deps.store.addDocumentsJob(jobInput({ run: consoleRun({ id: earlierId, status: "released", customerRef: "SYN-0001" }), overrides: [rows.storage], ...approvedFrom(earlier, [rows.storage]) }));
+    assert.equal((await processDocumentsJob(earlierId, deps, { final: true })).outcome, "done");
+    assert.deepEqual(JSON.parse(readFileSync(join(earlier, "overrides.json"), "utf8")), [rows.storage]);
+    const first = results[0]!;
+    assert.ok(!("refused" in first) && first.microsite?.ok);
+    const firstPages = JSON.stringify(first.microsite.pages);
+    assert.ok(firstPages.includes("8,200 of 10,240 MB") && !firstPages.includes("8,940 of 10,240 MB"), "the first documents print the corrected reading");
+    // Its re-check, months later, with no corrections of its own.
+    deps.store.addDocumentsJob(jobInput(approvedFrom(dir)));
+    assert.equal((await processDocumentsJob(RUN_ID, deps, { final: true })).outcome, "done");
+    assert.equal(existsSync(join(dir, "overrides.json")), false);
+    const recheck = results[1]!;
+    assert.ok(!("refused" in recheck) && recheck.microsite?.ok);
+    const then = /Data storage: ([\d,]+) of 10,240 MB used then/.exec(recheck.microsite.pages.pages.find((p) => p.slug === "progress")!.html)?.[1];
+    assert.equal(then, "8,200");
+    assert.ok(firstPages.includes(`${then} of 10,240 MB`));
   });
 });

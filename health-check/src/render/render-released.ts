@@ -46,6 +46,8 @@ export type ReleasedDocuments = {
   microsite?: { ok: true; pages: MicrositePages } | { ok: false; reason: string };
   /** A case study draft, only for a re-check whose customer agreed to be one. For Black Cloud's own folder. */
   caseStudy?: string;
+  /** How many of the earlier health check's corrected figures a re-check shows as read, for the log (DECISIONS.md 522). Left out by renderers that don't compare. */
+  baselineRefused?: number;
 };
 
 /**
@@ -141,6 +143,17 @@ export function describeHeld(held: HeldFigure): string {
   return `${where(held.document, held.page)}: ${held.figure}${held.reason ? `: ${held.reason}` : ""}`;
 }
 
+/**
+ * For the worker's log when a re-check's earlier health check has corrected
+ * figures today's reader can't carry (DECISIONS.md 522, item 3): the count
+ * only, since a title or a figure is the customer's.
+ */
+export function baselineRefusedSummary(n: number): string {
+  return n === 1
+    ? "1 corrected figure of the earlier health check can't be carried, so the comparison shows it as read."
+    : `${n} corrected figures of the earlier health check can't be carried, so the comparison shows them as read.`;
+}
+
 /** The run's report with the console's approved sections in place of the engine's drafts. */
 export function approvedReport(dir: string, approved: ApprovedRun): { report: BuiltReport; pseudonyms: Pseudonymiser } {
   const { input, pseudonyms } = loadRun(dir);
@@ -194,5 +207,5 @@ export async function renderReleased(dir: string, approved: ApprovedRun, outDir:
   const study = await renderCaseStudyDocx(report, pseudonyms);
   const caseStudy = study ? join(out, "case-study-draft.docx") : undefined;
   if (study && caseStudy) writeFileSync(caseStudy, study, { mode: 0o600 });
-  return { files, warnings: layoutWarnings(layout), held: heldFigures(layout), microsite, ...(caseStudy ? { caseStudy } : {}) };
+  return { files, warnings: layoutWarnings(layout), held: heldFigures(layout), microsite, ...(caseStudy ? { caseStudy } : {}), baselineRefused: report.baselineRefused };
 }

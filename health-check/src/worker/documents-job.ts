@@ -1,11 +1,11 @@
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ReportOutputKey } from "../narrative/sections.ts";
 import { refusalReason, refusalSummary } from "../narrative/overrides.ts";
 import type { BenchmarkInput } from "../benchmark/compare.ts";
 import { AlreadyContributed, CONSENT_FILE, contributeBenchmark } from "../benchmark/export.ts";
 import { longDate } from "../render/format.ts";
-import { describeHeld, renderReleased, type DocumentKey, type HeldFigure, type ReleasedDocuments } from "../render/render-released.ts";
+import { baselineRefusedSummary, describeHeld, renderReleased, type DocumentKey, type HeldFigure, type ReleasedDocuments } from "../render/render-released.ts";
 import { safeReason, type Attempt, type JobOutcome, type WorkerDeps } from "./deps.ts";
 import type { DocumentDrive, DriveItem } from "./drive.ts";
 import { withJobLock } from "./lock.ts";
@@ -13,12 +13,13 @@ import { syncShares } from "./share-job.ts";
 import { sealPages } from "../microsite/seal.ts";
 import { addMonths } from "./retention.ts";
 import type { DocumentFile, DocumentsJobInput } from "./types.ts";
-import { loadPseudonymMap, SURVEY_FILE, write } from "../render/render-run.ts";
+import { loadPseudonymMap, OVERRIDES_FILE, SURVEY_FILE, write } from "../render/render-run.ts";
 import { HANDBOOK_DOCX, renderHandbookDocx } from "../handbook/docx.ts";
 import { HANDBOOK_NOT_MADE, readEarlierHandbook, readHandbook } from "../handbook/read.ts";
 import { printableSummaries, type StoredSummaries } from "../handbook/summary-row.ts";
 import { Survey } from "../survey/questions.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
+import { NumberOverride } from "../schemas/index.ts";
 
 // A documents job: once the console has released a run, print its three
 // documents in the approved wording and put them in Google Drive, as
@@ -245,13 +246,34 @@ async function putInternal(drive: DocumentDrive, clientName: string, folderName:
 async function contribute(runId: string, dir: string, input: DocumentsJobInput, deps: WorkerDeps, log: (line: string) => void): Promise<void> {
   try {
     const { rows } = await contributeBenchmark(
-      { runDir: dir, industry: input.intake?.industry, headcount: input.intake?.headcountBand, consent: `Opted in at intake by ${input.run.createdBy}; added when the run was released`, now: (deps.now ?? (() => new Date()))() },
+      // The rows the documents were made with, so the set reads what the customer does (DECISIONS.md 521).
+      { runDir: dir, industry: input.intake?.industry, headcount: input.intake?.headcountBand, consent: `Opted in at intake by ${input.run.createdBy}; added when the run was released`, now: (deps.now ?? (() => new Date()))(), overrides: input.overrides },
       (rows) => deps.store.addBenchmarkRows(rows),
     );
     log(`Run ${runId} added ${rows.length} figures to the benchmark set.`);
   } catch (err) {
     if (err instanceof AlreadyContributed) return;
     log(`Run ${runId} didn't add to the benchmark set: ${safeReason(err)}`);
+  }
+}
+
+/**
+ * The rows a make printed with, kept in the run folder for a later re-check to
+ * read its baseline as the customer's documents showed it (DECISIONS.md 522).
+ * Only the rows' own fields, private to the worker, and by a rename so a reader
+ * never meets half a file: an unreadable one would leave the re-check with no
+ * baseline. The temporary name is fixed, not the process's: the run's lock is
+ * held, so no other make writes here, and one a crash left is overwritten.
+ * Nothing lists a run folder to send it, and it goes with the folder.
+ */
+function keepOverrides(dir: string, rows: NumberOverride[]): void {
+  const path = join(dir, OVERRIDES_FILE);
+  const writing = `${path}.writing`;
+  try {
+    writeFileSync(writing, JSON.stringify(rows.map((row) => NumberOverride.parse(row))), { mode: 0o600 });
+    renameSync(writing, path);
+  } finally {
+    rmSync(writing, { force: true });
   }
 }
 
@@ -375,6 +397,7 @@ async function documentsLocked(runId: string, deps: WorkerDeps, attempt: Attempt
       log(`Run ${runId}'s documents weren't made. ${summary}`);
       return fail(refusalReason(printed.refused), summary);
     }
+    if (printed.baselineRefused) log(`Run ${runId}: ${baselineRefusedSummary(printed.baselineRefused)}`);
     // A figure we can't trace stops everything before Drive: nothing uploaded, shared anew, published or contributed.
     // Not thrown, so the queue doesn't retry: the same wording would fail the same way.
     if (printed.held.length > 0) {
@@ -382,6 +405,8 @@ async function documentsLocked(runId: string, deps: WorkerDeps, attempt: Attempt
       log(`Run ${runId}'s documents weren't uploaded. ${summary}`);
       return fail(heldBackReason(printed.held), summary);
     }
+    // Neither refused nor held: these rows are the ones the documents print. None, and nothing is written or removed.
+    if (input.overrides.length > 0) keepOverrides(dir, input.overrides);
     const handbook = await makeHandbook(dir, join(dir, "documents"), clientName, input.run.asOf, summariesOn ? (handbookSummaries ?? null) : null, deps.renderHandbook);
     if (!handbook.ok) log(`Run ${runId}: ${handbook.warning}`);
     else if (handbook.unnamed) log(`Run ${runId}: the org handbook names no one who made a recent change, because the run's pseudonym map couldn't be read.`);

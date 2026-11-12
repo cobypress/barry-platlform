@@ -7,6 +7,7 @@ import type { NarrativeClient } from "../narrative/client.ts";
 import { buildReport, type BuiltReport, type ReportInput } from "../narrative/sections.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { INTERVIEWS_FILE, loadRun, OUTPUT_FILES, SURVEY_FILE } from "../render/render-run.ts";
+import { baselineRefusedSummary } from "../render/render-released.ts";
 import { INTERVIEW_VERSION } from "../interviews/questions.ts";
 import { OAuthConnectionProvider, revokeConnection } from "../salesforce/oauth-provider.ts";
 import { OAuthError } from "../salesforce/oauth.ts";
@@ -392,7 +393,10 @@ async function finishPulse(runId: string, dir: string, deps: WorkerDeps, at: str
   try {
     // loadRun reads the baseline from the folder beside this one, if it's there and readable.
     const { input } = loadRun(dir);
-    const result = buildPulseResult(buildReport(input));
+    const report = buildReport(input);
+    // The baseline is read as its documents showed it, where that can still be carried (DECISIONS.md 522).
+    if (report.baselineRefused) log(`Pulse ${runId}: ${baselineRefusedSummary(report.baselineRefused)}`);
+    const result = buildPulseResult(report);
     await deps.store.savePulseResult(runId, result, at);
     log(`Pulse ${runId}'s result is ready${result.baselineRunId ? `, against ${result.baselineRunId}` : ", with no baseline we could read"}.`);
   } catch (err) {
