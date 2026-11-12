@@ -8,7 +8,7 @@ import { buildReport, type BuiltReport, type ReportInput } from "../sections.ts"
 import { Pseudonymiser, type PseudonymEntry } from "../../privacy/pseudonymiser.ts";
 import { printDocuments, OUTPUT_FILES } from "../../render/render-run.ts";
 import { heldFigures } from "../../render/render-released.ts";
-import { extractFigures, type FigureSet } from "../../numbercheck/index.ts";
+import { buildDataset, extractFigures, type FigureSet } from "../../numbercheck/index.ts";
 import type { Finding, NumberOverride } from "../../schemas/index.ts";
 import { runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
@@ -313,4 +313,73 @@ describe("every overridable figure of the synthetic run, put back (decision 514,
     assert.equal(figures.length, 343, "319 facts and 24 sized amounts");
     assert.equal(pairs, 1414 + 343, "each figure against every other number its finding prints, and plus 7");
   });
+});
+
+const byId = (id: string): Finding => output!.findings.find((f) => f.id === id)!;
+
+// Ten of the figures put back that held the printed documents when the rows
+// were given in turn, one a rule: the first ten a scan of every pair above
+// found held, run on round 1's code and printed (session 22, lane A, round 2).
+const HELD_WHEN_GIVEN_IN_TURN: Array<[string, string, number]> = [
+  ["f-adfc6c7e6577", "facts.changes", 90],
+  ["f-ab135b76f2a7", "facts.used", 0.1],
+  ["f-d3e294671df9", "facts.DataStorageMBUsed", 87.3],
+  ["f-2652164f9e06", "facts.unused", 74.7],
+  ["f-10a29aeb78f5", "facts.months", 37.5],
+  ["f-9f32364f9405", "facts.hits", 807000],
+  ["f-a12d5a82a197", "facts.hits", 103000],
+  ["f-2ec6b13fd974", "facts.hits", 9.2],
+  ["f-dd5bb22bc57f", "facts.hits", 23.7],
+  ["f-21634974044e", "facts.hits", 6.6],
+];
+
+describe("figures put back that the rows given in turn held, printed (decision 514, item 1)", () => {
+  for (const [id, field, x] of HELD_WHEN_GIVEN_IN_TURN) {
+    test(`${byId(id).ruleId} ${field} to ${x} and back: the rows given in turn drop a figure; given what was carried, nothing is held`, async () => {
+      const f = byId(id);
+      const value = f.facts[field.slice("facts.".length)]!;
+      const rows = [onRun(f, field, value, x), onRun(f, field, x, value)];
+      // The old path, on this finding alone: the number check's data given the rows themselves.
+      const figuresOf = (set: FigureSet): string[] => set.figures.map((g) => `${g.kind} ${g.value} ${g.currency ?? ""}`).sort();
+      assert.notDeepEqual(figuresOf(buildDataset({ findings: [f], metrics: [], overrides: rows })), figuresOf(buildDataset({ findings: [f], metrics: [] })));
+      const report = built(...rows);
+      assert.deepEqual(given(...rows), []);
+      assert.deepEqual(await printed(report), []);
+    });
+  }
+});
+
+// Measured on the synthetic run (session 22, lane A, round 2): every figure
+// carried alone, as read plus 7, times 2 plus 0.5 and times 0.9, 730 printed.
+// These are all that held a page the run with no override doesn't: each makes
+// "X of Y" with X past Y, a sentence the rule never writes and the number check
+// is right to refuse (DECISIONS.md 514, item 3). The row back clears each one.
+const HELD_WHEN_CARRIED: Array<[string, string, number, string]> = [
+  ["f-50346da1a6a4", "facts.bare", 13, "13 of 8"],
+  ["f-10b47c476984", "facts.affected", 8, "8 of 3"],
+  ["f-af6e09f0342c", "facts.broken", 8, "8 of 4"],
+  ["f-004401da42bd", "facts.jobs", 8, "8 of 3"],
+  ["f-bb3a02927e55", "facts.hits", 8, "8 of 4"],
+  ["f-50346da1a6a4", "facts.bare", 12.5, "12.5 of 8"],
+  ["f-ca58d782d405", "facts.missing", 24.5, "24.5 of 20"],
+  ["f-d3e294671df9", "facts.DataStorageMBUsed", 17880.5, "17,880.5 of 10,240"],
+  ["f-49f3f62d89cb", "facts.DailyAsyncApexExecutionsUsed", 440000.5, "440,000.5 of 250,000"],
+];
+
+describe("a carried figure the number check is right to hold (decision 514, item 3)", () => {
+  for (const [id, field, last, sentence] of HELD_WHEN_CARRIED) {
+    test(`${byId(id).ruleId} ${field} to ${last} prints "${sentence}", held as impossible, and the row back clears it`, async () => {
+      const f = byId(id);
+      const value = f.facts[field.slice("facts.".length)]!;
+      const report = built(onRun(f, field, value, last));
+      assert.deepEqual(report.refused, []);
+      assert.ok(report.teamFindings.find((x) => x.id === id)!.summary.includes(sentence));
+      const [figure] = sentence.split(" of ");
+      assert.deepEqual(
+        (await printed(report)).map((h) => [h.figure, h.reason]),
+        [[figure, `can't be ${sentence}`]],
+      );
+      assert.deepEqual(await printed(built(onRun(f, field, value, last), onRun(f, field, last, value))), []);
+    });
+  }
 });
