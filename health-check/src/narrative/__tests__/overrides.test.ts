@@ -249,7 +249,7 @@ describe("only the value as read and the last value count (decision 511, items 1
   test("a figure overridden and put back changes nothing, whether it would carry or not", () => {
     for (const f of [finding("10,500 of 10,240 MB.", { used: 10500 }), finding("10,500 of 10,240 MB, and 10,500 again.", { used: 10500 })]) {
       const result = applyOverrides([f], [], [override("facts.used", 10500, 9800, "o1"), override("facts.used", 9800, 10500, "o2")]);
-      assert.deepEqual(result, { findings: [f], metrics: [], refused: [], carried: [] });
+      assert.deepEqual(result, { findings: [f], metrics: [], refused: [] });
     }
   });
 
@@ -290,7 +290,7 @@ describe("only the value as read and the last value count (decision 511, items 1
 describe("a row the run doesn't hold (decision 511, item 5)", () => {
   // The words hold the row's previous value, as if an earlier swap had rewritten them: they're left alone.
   const f = finding("Data storage is 9,800 of 10,240 MB.", { used: 10500 });
-  const unchanged = (o: NumberOverride): void => assert.deepEqual(applyOverrides([f], [], [o]), { findings: [f], metrics: [], refused: [], carried: [] });
+  const unchanged = (o: NumberOverride): void => assert.deepEqual(applyOverrides([f], [], [o]), { findings: [f], metrics: [], refused: [] });
 
   test("a finding id the run doesn't hold", () => unchanged(override("facts.used", 9800, 9000, "o1", "f-000000000999")));
   test("a fact key the finding doesn't have, or one only its prototype has", () => {
@@ -350,13 +350,16 @@ describe("the reason a refusal holds the documents (decision 512)", () => {
       { ...refusal("B", { kind: "shared", other: "the sized amount" }), field: "facts.annualSaving" },
       { ...refusal("C", { kind: "rounded", found: "£1.2m" }), field: "value.amount" },
       refusal("D", { kind: "stale", from: 1250 }),
+      refusal("E", { kind: "unsure", found: "1200" }),
     ]).split("\n");
-    assert.deepEqual(lines.slice(0, 5), [
-      "Held back: 4 corrected figures can't be carried into their findings' wording.",
+    assert.deepEqual(lines.slice(0, 6), [
+      "Held back: 5 corrected figures can't be carried into their findings' wording.",
       '"A", hits: 1,200 as read, corrected to 1,100.5, but another figure of this finding (quota) is also 1,200, so we can\'t tell which one the wording prints.',
       '"B", annualSaving: 1,200 as read, corrected to 1,100.5, but another figure of this finding (the sized amount) is also 1,200, so we can\'t tell which one the wording prints.',
       '"C", the sized amount: 1,200 as read, corrected to 1,100.5, but the wording doesn\'t print 1,200 itself and has £1.2m, which may be this figure rounded.',
       '"D", hits: 1,200 as read, corrected to 1,100.5, but the correction was made from 1,250, which this run no longer reads.',
+      // DECISIONS.md 516: a form that may be the figure or a year, a time or a ratio.
+      '"E", hits: 1,200 as read, corrected to 1,100.5, but the wording has 1,200 only as 1200, which may be this figure or a year, a time or a ratio, and we can\'t tell.',
     ]);
   });
 
@@ -371,9 +374,12 @@ describe("the reason a refusal holds the documents (decision 512)", () => {
     assert.equal(refusalSummary(twelve), "12 corrected figures can't be carried. See the run's Release tab.");
   });
 
-  test("the console lists it: three lines or more, the first starting Held back:, the last the close, none empty", () => {
+  test("the console lists it: three lines or more, the first starting Held back:, the last the close, none empty, whatever the reasons", () => {
+    // Every reason in turn, the one decision 516 added first, so a single refusal is that one.
+    const whys: OverrideRefusal["why"][] = [{ kind: "unsure", found: "3:9" }, { kind: "repeated", places: 2 }, { kind: "shared", other: "quota" }, { kind: "rounded", found: "£1.2m" }, { kind: "stale", from: 1250 }];
     for (const n of [1, 2, 10, 11, 12]) {
-      const reason = refusalReason(Array.from({ length: n }, (_, i) => refusal(`Finding\n\n${i}\r\n  title\n`)));
+      const reason = refusalReason(Array.from({ length: n }, (_, i) => refusal(`Finding\n\n${i}\r\n  title\n`, whys[i % whys.length])));
+      assert.ok(reason.includes("only as 3:9, which may be this figure or a year, a time or a ratio, and we can't tell."));
       // As documentsErrorView reads it: split on newlines, trimmed, blanks dropped.
       const read = reason.split("\n").map((l) => l.trim()).filter(Boolean);
       assert.deepEqual(read, reason.split("\n"), "no line empty or padded");
@@ -525,6 +531,9 @@ describe("every overridable figure of the synthetic run, each alone (decision 51
       // Decision 514 masks dates: bp.users-without-role's n of 11 is no longer also read in "2026-11-02" (repeated to rewritten);
       // sec.personal-integration-accounts' peopleShare of 8.3 isn't near "08" in "2026-08-02", nor
       // dq.open-opps-no-activity's sized amount near "2024" in "2024-10-31" (rounded to changed with no text).
+      // Decision 516 moves none: no text on the run holds a colon form, and the one bare year its reader finds,
+      // adp.falling-adoption's "2026" of "in 2026-02", is part of a year and month. A refusal for a figure
+      // printed only as one would be counted as "refused, unsure".
       assert.deepEqual(counts, { "rewritten in one place": 173, "changed with no text": 74, "refused, repeated": 39, "refused, shared": 51, "refused, rounded": 6 });
     });
   }

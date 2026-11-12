@@ -882,15 +882,17 @@ export function buildReport(given: ReportInput): BuiltReport {
     benchmark: input.benchmark ?? null,
   });
   const investment = buildInvestment(effective.metrics, intake, calibration.currency);
+  // The findings and metrics as corrected, and no override rows: the data already
+  // holds each corrected figure, so a row could only drop one, and a refused
+  // finding is as read here as everywhere (DECISIONS.md 516).
   const dataset = buildDataset({
-    findings: [...findings, ...team],
+    findings: [...effective.findings, ...team],
     metrics: effective.metrics,
     manualSteps,
     scores,
     run,
     currency: calibration.currency,
-    // What was carried, a row a figure, never the rows between: a figure put back is told nothing (DECISIONS.md 514).
-    overrides: effective.carried,
+    overrides: [],
     structural: STRUCTURE,
     extraText: [
       { source: CALIBRATION, text: calibrationText(run, calibration, factsLines(input)) },

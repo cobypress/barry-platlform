@@ -26,6 +26,7 @@ export type OverrideRefusal = {
     | { kind: "shared"; other: string }
     | { kind: "repeated"; places: number }
     | { kind: "rounded"; found: string }
+    | { kind: "unsure"; found: string }
     | { kind: "stale"; from: number };
 };
 
@@ -69,20 +70,31 @@ const TOKEN = new RegExp(tokenSource(), "g");
 
 // Nor are a date's or an identifier's (DECISIONS.md 514): the number check's
 // own reader says which spans those are, so there is one definition of a date.
-// It doesn't take a year and month, "2026-02", as one.
+// It doesn't take a year and month, "2026-02", as one. A date with a separator
+// or a month's name, an identifier, a year and month and a token hold digits
+// that are never a count, so they're masked and never tested.
 const YEAR_MONTH = /(?<![\w.,-])(?:19|20)\d{2}-(?:0[1-9]|1[0-2])(?!\d|[.,]\d|-\d)/g;
 const notFigure = (f: ReadFigure): boolean => f.kind === "date" || f.kind === "identifier";
+// But a date the reader reads from digits alone is a bare year, which it guesses
+// from the word before: "12 of 2000 active users" is a year to it (DECISIONS.md 516).
+const bareYear = (f: ReadFigure): boolean => f.kind === "date" && /^\d+$/.test(f.raw);
 
 // Digits joined by a colon, a clock time, a ratio or "10:30:15", found by our
 // own pattern whatever the reader calls them, since it calls "09:00" malformed
-// (DECISIONS.md 515). Such a form is never a place a figure is found, and is
-// never passed over for a figure not printed itself: a part equal or near it
-// refuses. A part may be grouped or have decimals, so no digit of "1.5:1" or
-// "1,000:1" is left over to be read as a figure.
+// (DECISIONS.md 515). A part may be grouped or have decimals, so no digit of
+// "1.5:1" or "1,000:1" is left over to be read as a figure.
 const COLON = /(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?::(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)+/g;
 
-/** A text as `judge` reads it: masked, and the colon forms taken out of it, as written. */
-type Read = { text: string; colons: string[] };
+/**
+ * A form that may or may not be the figure: a colon form or a bare year, as
+ * written, and its parts. It is never rewritten, and is never passed over: a
+ * part equal to the value as read is a place that can't be rewritten, and one
+ * near it is the figure perhaps rounded (DECISIONS.md 516).
+ */
+type Unsure = { form: string; parts: number[] };
+
+/** A text as `judge` reads it: masked, and the unsure forms taken out of it, in the order they stand. */
+type Read = { text: string; unsure: Unsure[] };
 
 /**
  * Where each span of the reader's text starts and ends in the text as given.
@@ -108,25 +120,35 @@ function spansInText(text: string, normalised: string, spans: Array<[number, num
 }
 
 /**
- * The text with every token, date, identifier and colon form masked at its own
+ * The text with every token, date, identifier and unsure form masked at its own
  * length, so a place found in it is its place in the text. Colon forms are
- * looked for once the rest is masked: a time inside an ISO date and time is
- * the date's, and is neither found nor tested.
+ * looked for once the rest but bare years is masked: a time inside an ISO date
+ * and time is the date's, and is neither found nor tested, while "2000:1" is
+ * one colon form, not a year and a 1.
  */
 function masked(text: string): Read {
   const chars = text.replace(TOKEN, (token) => "#".repeat(token.length)).split("");
   // No digit, nothing to find a figure in.
-  if (!/\d/.test(text)) return { text: chars.join(""), colons: [] };
+  if (!/\d/.test(text)) return { text: chars.join(""), unsure: [] };
   const { normalised, figures } = extractFigures(text);
-  const shapes = spansInText(text, normalised, figures.filter(notFigure).map((f): [number, number] => [f.start, f.end]));
+  const shapes = spansInText(text, normalised, figures.filter((f) => notFigure(f) && !bareYear(f)).map((f): [number, number] => [f.start, f.end]));
   for (const m of text.matchAll(YEAR_MONTH)) shapes.push([m.index, m.index + m[0].length]);
   for (const [start, end] of shapes) chars.fill("#", start, end);
-  const colons: string[] = [];
+  const unsure: Array<Unsure & { at: number }> = [];
   for (const m of chars.join("").matchAll(COLON)) {
-    colons.push(m[0]);
+    unsure.push({ form: m[0], parts: m[0].split(":").map(partValue), at: m.index });
     chars.fill("#", m.index, m.index + m[0].length);
   }
-  return { text: chars.join(""), colons };
+  for (const year of figures.filter(bareYear)) {
+    const pieces = spansInText(text, normalised, [[year.start, year.end]]);
+    const [start, end] = [Math.min(...pieces.map(([a]) => a)), Math.max(...pieces.map(([, b]) => b))];
+    // Inside a colon form it is that form's part, and inside a year and month,
+    // "in 2026-02", it is part of a date, never tested.
+    if (chars.slice(start, end).includes("#")) continue;
+    unsure.push({ form: text.slice(start, end), parts: [Number(year.raw)], at: start });
+    chars.fill("#", start, end);
+  }
+  return { text: chars.join(""), unsure: unsure.sort((a, b) => a.at - b.at).map(({ form, parts }) => ({ form, parts })) };
 }
 
 /** Every text of the finding a document prints, in a fixed order, for `withTexts` to put back. A text the finding leaves out is "". */
@@ -178,7 +200,7 @@ type Verdict = { kind: "unchanged" } | { kind: "carried"; place: Place | null } 
 /** A part of a colon form as a number: "09" is 9, "1,000" is 1000. */
 const partValue = (part: string): number => Number(part.replace(/,/g, ""));
 
-/** One figure, against the finding as read (DECISIONS.md 511, items 1 to 3, and 515). `read` is each text masked. */
+/** One figure, against the finding as read (DECISIONS.md 511, items 1 to 3, 515 and 516). `read` is each text masked. */
 function judge(f: Finding, read: Read[], figure: Figure, rows: NumberOverride[]): Verdict {
   if (rows.at(-1)!.newValue === figure.asRead) return { kind: "unchanged" };
   if (rows[0]!.previousValue !== figure.asRead) return { kind: "refused", why: { kind: "stale", from: rows[0]!.previousValue } };
@@ -186,17 +208,19 @@ function judge(f: Finding, read: Read[], figure: Figure, rows: NumberOverride[])
   const places: Place[] = read.flatMap(({ text }, at) =>
     [...text.matchAll(valuePattern(figure.asRead))].map((m) => ({ text: at, index: m.index, length: m[0].length, grouped: m[0] !== asPlain || asPlain === grouped(figure.asRead) })),
   );
-  if (places.length > 0) {
+  // Each part of an unsure form equal to the value as read is a place too, one that can't be rewritten (DECISIONS.md 516).
+  const unsure = read.flatMap(({ unsure }) => unsure);
+  const fixed = unsure.flatMap(({ form, parts }) => parts.filter((part) => part === figure.asRead).map(() => form));
+  if (places.length + fixed.length > 0) {
     const shared = figuresOf(f).find((other) => other.field !== figure.field && other.asRead === figure.asRead);
     if (shared) return { kind: "refused", why: { kind: "shared", other: nameOf(shared.field) } };
-    if (places.length > 1) return { kind: "refused", why: { kind: "repeated", places: places.length } };
-    // A colon form beside the one place is passed over as any other number is: a
-    // second figure worked out from the first stays as read (DECISIONS.md 511).
+    if (places.length + fixed.length > 1) return { kind: "refused", why: { kind: "repeated", places: places.length + fixed.length } };
+    if (fixed.length > 0) return { kind: "refused", why: { kind: "unsure", found: fixed[0]! } };
     return { kind: "carried", place: places[0]! };
   }
-  // Not printed itself: a colon form with a part equal or near it may be this figure, and can't be rewritten (DECISIONS.md 515).
-  const colon = read.flatMap(({ colons }) => colons).find((form) => form.split(":").some((part) => near(partValue(part), figure.asRead)));
-  if (colon) return { kind: "refused", why: { kind: "rounded", found: colon } };
+  // Not printed itself: an unsure form with a part near it may be this figure rounded, and can't be rewritten (DECISIONS.md 515, 516).
+  const close = unsure.find(({ parts }) => parts.some((part) => near(part, figure.asRead)));
+  if (close) return { kind: "refused", why: { kind: "rounded", found: close.form } };
   for (const { text } of read) {
     for (const m of text.matchAll(NUMBER)) {
       if (near(Number(`${m[1]!.replace(/,/g, "")}${m[2] ?? ""}`), figure.asRead)) return { kind: "refused", why: { kind: "rounded", found: m[0] } };
@@ -205,17 +229,17 @@ function judge(f: Finding, read: Read[], figure: Figure, rows: NumberOverride[])
   return { kind: "carried", place: null };
 }
 
-/** The finding as reports show it, or the refusals that keep it as read (DECISIONS.md 511, item 4), and a row a figure carried. */
-function overrideFinding(f: Finding, overrides: NumberOverride[]): { finding: Finding; refused: OverrideRefusal[]; carried: NumberOverride[] } {
+/** The finding as reports show it, or the refusals that keep it as read (DECISIONS.md 511, item 4). */
+function overrideFinding(f: Finding, overrides: NumberOverride[]): { finding: Finding; refused: OverrideRefusal[] } {
   const texts = textsOf(f);
   const read = texts.map(masked);
   const judged = figuresOf(f).flatMap((figure) => {
     const rows = overrides.filter((o) => o.target.field === figure.field);
-    return rows.length ? [{ figure, row: rows.at(-1)!, last: rows.at(-1)!.newValue, verdict: judge(f, read, figure, rows) }] : [];
+    return rows.length ? [{ figure, last: rows.at(-1)!.newValue, verdict: judge(f, read, figure, rows) }] : [];
   });
   const refused = judged.flatMap(({ figure, last, verdict }) => (verdict.kind === "refused" ? [{ findingId: f.id, title: f.title, field: figure.field, asRead: figure.asRead, last, why: verdict.why }] : []));
-  if (refused.length > 0) return { finding: f, refused, carried: [] };
-  const carried = judged.flatMap(({ figure, row, last, verdict }) => (verdict.kind === "carried" ? [{ figure, row, last, place: verdict.place }] : []));
+  if (refused.length > 0) return { finding: f, refused };
+  const carried = judged.flatMap(({ figure, last, verdict }) => (verdict.kind === "carried" ? [{ figure, last, place: verdict.place }] : []));
   // One pass over the texts as read, the last place first so no place moves: a new value is never matched again.
   const rewritten = texts.slice();
   const places = carried.flatMap(({ last, place }) => (place ? [{ last, place }] : [])).sort((a, b) => b.place.text - a.place.text || b.place.index - a.place.index);
@@ -228,8 +252,7 @@ function overrideFinding(f: Finding, overrides: NumberOverride[]): { finding: Fi
     if (figure.field === "value.amount") finding.value = finding.value.kind === "not_sized" ? finding.value : { ...finding.value, amount: last };
     else finding.facts[nameOf(figure.field)] = last;
   }
-  // The number check is told what was carried, from the value as read, never the rows between (DECISIONS.md 514).
-  return { finding, refused: [], carried: carried.map(({ figure, row, last }) => ({ ...row, previousValue: figure.asRead, newValue: last })) };
+  return { finding, refused: [] };
 }
 
 /** Whether a row names a figure the metric has: a measured metric's value, n, or one of its stats. */
@@ -242,60 +265,26 @@ function overrideMetric(m: Metric, o: NumberOverride): Metric {
   return { ...m, stats: { ...m.stats, [o.target.field.slice("stats.".length)]: o.newValue } };
 }
 
-/** A measured metric's figure an override names, or undefined for a stat it doesn't have. */
-function metricValue(m: Metric, field: string): number | undefined {
-  if (m.status !== "measured") return undefined;
-  if (field === "value") return m.value;
-  if (field === "n") return m.n;
-  return m.stats[field.slice("stats.".length)];
-}
-
 /**
- * A row a metric's field, for the number check: from the metric's value as
- * read to its value once every row is applied, and none when they're equal
- * (DECISIONS.md 515). The rows apply in order whatever their old values say,
- * so a stale row put back can leave the metric away from what was read. A
- * metric the run doesn't hold, or doesn't measure, carries nothing, nor does a
- * stat it didn't have as read: there is no figure as read to replace.
+ * The findings and metrics as reports show them, and each figure that couldn't
+ * be carried. The number check's data is built from these, with no rows: every
+ * row stays history for the raw notes (DECISIONS.md 516). A row naming a
+ * finding, metric or figure the run doesn't hold changes nothing (DECISIONS.md
+ * 511, item 5). A metric has no text of its own, so its overrides apply in
+ * order, as before.
  */
-function metricRows(metrics: Metric[], after: Metric[], overrides: NumberOverride[]): NumberOverride[] {
-  const fields = new Map<string, NumberOverride[]>();
-  for (const o of overrides) {
-    const m = o.target.type === "metric" ? metrics.find((x) => x.id === o.target.id) : undefined;
-    if (!m || !metricField(m, o.target.field)) continue;
-    const key = JSON.stringify([o.target.id, o.target.field]);
-    fields.set(key, [...(fields.get(key) ?? []), o]);
-  }
-  return [...fields.values()].flatMap((rows) => {
-    const { id, field } = rows[0]!.target;
-    const asRead = metricValue(metrics.find((m) => m.id === id)!, field);
-    const last = metricValue(after.find((m) => m.id === id)!, field);
-    return asRead === undefined || last === undefined || asRead === last ? [] : [{ ...rows.at(-1)!, previousValue: asRead, newValue: last }];
-  });
-}
-
-/**
- * The findings and metrics as reports show them, each figure that couldn't be
- * carried, and what was carried, a row a figure, for the number check's data:
- * the rows between are history for the raw notes (DECISIONS.md 514). A row
- * naming a finding, metric or figure the run doesn't hold changes nothing
- * (DECISIONS.md 511, item 5). A metric has no text of its own, so its overrides
- * apply in order, as before.
- */
-export function applyOverrides(findings: Finding[], metrics: Metric[], overrides: NumberOverride[]): { findings: Finding[]; metrics: Metric[]; refused: OverrideRefusal[]; carried: NumberOverride[] } {
+export function applyOverrides(findings: Finding[], metrics: Metric[], overrides: NumberOverride[]): { findings: Finding[]; metrics: Metric[]; refused: OverrideRefusal[] } {
   const refused: OverrideRefusal[] = [];
-  const carried: NumberOverride[] = [];
   const outF = findings.map((f) => {
     const own = overrides.filter((o) => o.target.type === "finding" && o.target.id === f.id);
     if (own.length === 0) return f;
     const result = overrideFinding(f, own);
     refused.push(...result.refused);
-    carried.push(...result.carried);
     return result.finding;
   });
   let outM = metrics;
   for (const o of overrides) if (o.target.type === "metric") outM = outM.map((m) => (m.id === o.target.id ? overrideMetric(m, o) : m));
-  return { findings: outF, metrics: outM, refused, carried: [...carried, ...metricRows(metrics, outM, overrides)] };
+  return { findings: outF, metrics: outM, refused };
 }
 
 // The reason a refusal holds the documents, in the shape the console lists
@@ -321,6 +310,8 @@ function why(r: OverrideRefusal): string {
       return `the wording has ${grouped(r.asRead)} in ${r.why.places} places, and we can't tell which of them are this figure`;
     case "rounded":
       return `the wording doesn't print ${grouped(r.asRead)} itself and has ${r.why.found}, which may be this figure rounded`;
+    case "unsure":
+      return `the wording has ${grouped(r.asRead)} only as ${r.why.found}, which may be this figure or a year, a time or a ratio, and we can't tell`;
     case "stale":
       return `the correction was made from ${grouped(r.why.from)}, which this run no longer reads`;
   }
