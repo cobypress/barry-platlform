@@ -1,3 +1,4 @@
+import { extractFigures, normalise, type Figure as ReadFigure } from "../numbercheck/index.ts";
 import { tokenSource } from "../privacy/pseudonymiser.ts";
 import type { Finding, Metric, NumberOverride } from "../schemas/index.ts";
 
@@ -65,7 +66,49 @@ const NUMBER = /(?<![\d.])[£$€]?(\d{1,3}(?:,\d{3})+|\d+)(\.\d+)?(?:%|(?:k|m|b
 // so a match's place in the masked text is its place in the text, and the
 // token itself is never rewritten.
 const TOKEN = new RegExp(tokenSource(), "g");
-const masked = (text: string): string => text.replace(TOKEN, (token) => "#".repeat(token.length));
+
+// Nor are a date's, an identifier's or a clock time's (DECISIONS.md 514): the
+// number check's own reader says which spans those are, so there is one
+// definition of a date. It doesn't take a year and month, "2026-02", as one.
+const YEAR_MONTH = /(?<![\w.,-])(?:19|20)\d{2}-(?:0[1-9]|1[0-2])(?!\d|[.,]\d|-\d)/g;
+const notFigure = (f: ReadFigure): boolean => f.kind === "date" || f.kind === "identifier" || (f.kind === "ratio" && f.raw.includes(":"));
+
+/**
+ * Where each span of the reader's text starts and ends in the text as given.
+ * The reader works on `normalise(text)`, which can be longer or shorter ("½" is
+ * " one half "), so the text is cut only where normalising each side alone gives
+ * the reader's text: a piece between two cuts is masked whole if any of what it
+ * became is masked. Characters that normalise together ("ㄱㅏ" is "가") are one piece.
+ */
+function spansInText(text: string, normalised: string, spans: Array<[number, number]>): Array<[number, number]> {
+  if (normalised === text) return spans;
+  const cuts: Array<{ at: number; to: number }> = [{ at: 0, to: 0 }];
+  for (let at = 1; at < text.length; at++) {
+    // Never between the halves of a surrogate pair.
+    if (text.codePointAt(at - 1)! > 0xffff) continue;
+    const before = normalise(text.slice(0, at));
+    if (before + normalise(text.slice(at)) === normalised) cuts.push({ at, to: before.length });
+  }
+  cuts.push({ at: text.length, to: normalised.length });
+  const pieces: Array<[number, number]> = [];
+  for (let i = 0; i + 1 < cuts.length; i++) {
+    const [from, to] = [cuts[i]!, cuts[i + 1]!];
+    if (spans.some(([start, end]) => from.to < end && to.to > start)) pieces.push([from.at, to.at]);
+  }
+  return pieces;
+}
+
+/** The text with every token, date, identifier and clock time masked at its own length, so a place found in it is its place in the text. */
+function masked(text: string): string {
+  const chars = text.replace(TOKEN, (token) => "#".repeat(token.length)).split("");
+  // No digit, nothing to find a figure in.
+  if (!/\d/.test(text)) return chars.join("");
+  const { normalised, figures } = extractFigures(text);
+  const shapes = spansInText(text, normalised, figures.filter(notFigure).map((f): [number, number] => [f.start, f.end]));
+  for (const m of text.matchAll(YEAR_MONTH)) shapes.push([m.index, m.index + m[0].length]);
+  for (const [start, end] of shapes) chars.fill("#", start, end);
+  return chars.join("");
+}
 
 /** Every text of the finding a document prints, in a fixed order, for `withTexts` to put back. A text the finding leaves out is "". */
 function textsOf(f: Finding): string[] {
@@ -113,13 +156,13 @@ function near(found: number, value: number): boolean {
 type Place = { text: number; index: number; length: number; grouped: boolean };
 type Verdict = { kind: "unchanged" } | { kind: "carried"; place: Place | null } | { kind: "refused"; why: OverrideRefusal["why"] };
 
-/** One figure, against the finding as read (DECISIONS.md 511, items 1 to 3). */
-function judge(f: Finding, texts: string[], figure: Figure, rows: NumberOverride[]): Verdict {
+/** One figure, against the finding as read (DECISIONS.md 511, items 1 to 3). `read` is each text masked. */
+function judge(f: Finding, read: string[], figure: Figure, rows: NumberOverride[]): Verdict {
   if (rows.at(-1)!.newValue === figure.asRead) return { kind: "unchanged" };
   if (rows[0]!.previousValue !== figure.asRead) return { kind: "refused", why: { kind: "stale", from: rows[0]!.previousValue } };
   const asPlain = plain(figure.asRead);
-  const places: Place[] = texts.flatMap((text, at) =>
-    [...masked(text).matchAll(valuePattern(figure.asRead))].map((m) => ({ text: at, index: m.index, length: m[0].length, grouped: m[0] !== asPlain || asPlain === grouped(figure.asRead) })),
+  const places: Place[] = read.flatMap((text, at) =>
+    [...text.matchAll(valuePattern(figure.asRead))].map((m) => ({ text: at, index: m.index, length: m[0].length, grouped: m[0] !== asPlain || asPlain === grouped(figure.asRead) })),
   );
   if (places.length > 0) {
     const shared = figuresOf(f).find((other) => other.field !== figure.field && other.asRead === figure.asRead);
@@ -127,24 +170,25 @@ function judge(f: Finding, texts: string[], figure: Figure, rows: NumberOverride
     if (places.length > 1) return { kind: "refused", why: { kind: "repeated", places: places.length } };
     return { kind: "carried", place: places[0]! };
   }
-  for (const text of texts) {
-    for (const m of masked(text).matchAll(NUMBER)) {
+  for (const text of read) {
+    for (const m of text.matchAll(NUMBER)) {
       if (near(Number(`${m[1]!.replace(/,/g, "")}${m[2] ?? ""}`), figure.asRead)) return { kind: "refused", why: { kind: "rounded", found: m[0] } };
     }
   }
   return { kind: "carried", place: null };
 }
 
-/** The finding as reports show it, or the refusals that keep it as read (DECISIONS.md 511, item 4). */
-function overrideFinding(f: Finding, overrides: NumberOverride[]): { finding: Finding; refused: OverrideRefusal[] } {
+/** The finding as reports show it, or the refusals that keep it as read (DECISIONS.md 511, item 4), and a row a figure carried. */
+function overrideFinding(f: Finding, overrides: NumberOverride[]): { finding: Finding; refused: OverrideRefusal[]; carried: NumberOverride[] } {
   const texts = textsOf(f);
+  const read = texts.map(masked);
   const judged = figuresOf(f).flatMap((figure) => {
     const rows = overrides.filter((o) => o.target.field === figure.field);
-    return rows.length ? [{ figure, last: rows.at(-1)!.newValue, verdict: judge(f, texts, figure, rows) }] : [];
+    return rows.length ? [{ figure, row: rows.at(-1)!, last: rows.at(-1)!.newValue, verdict: judge(f, read, figure, rows) }] : [];
   });
   const refused = judged.flatMap(({ figure, last, verdict }) => (verdict.kind === "refused" ? [{ findingId: f.id, title: f.title, field: figure.field, asRead: figure.asRead, last, why: verdict.why }] : []));
-  if (refused.length > 0) return { finding: f, refused };
-  const carried = judged.flatMap(({ figure, last, verdict }) => (verdict.kind === "carried" ? [{ figure, last, place: verdict.place }] : []));
+  if (refused.length > 0) return { finding: f, refused, carried: [] };
+  const carried = judged.flatMap(({ figure, row, last, verdict }) => (verdict.kind === "carried" ? [{ figure, row, last, place: verdict.place }] : []));
   // One pass over the texts as read, the last place first so no place moves: a new value is never matched again.
   const rewritten = texts.slice();
   const places = carried.flatMap(({ last, place }) => (place ? [{ last, place }] : [])).sort((a, b) => b.place.text - a.place.text || b.place.index - a.place.index);
@@ -157,35 +201,58 @@ function overrideFinding(f: Finding, overrides: NumberOverride[]): { finding: Fi
     if (figure.field === "value.amount") finding.value = finding.value.kind === "not_sized" ? finding.value : { ...finding.value, amount: last };
     else finding.facts[nameOf(figure.field)] = last;
   }
-  return { finding, refused: [] };
+  // The number check is told what was carried, from the value as read, never the rows between (DECISIONS.md 514).
+  return { finding, refused: [], carried: carried.map(({ figure, row, last }) => ({ ...row, previousValue: figure.asRead, newValue: last })) };
 }
 
+/** Whether a row names a figure the metric has: a measured metric's value, n, or one of its stats. */
+const metricField = (m: Metric, field: string): boolean => m.status === "measured" && (field === "value" || field === "n" || /^stats\..+$/.test(field));
+
 function overrideMetric(m: Metric, o: NumberOverride): Metric {
-  if (m.status !== "measured") return m;
-  const stat = /^stats\.(.+)$/.exec(o.target.field)?.[1];
+  if (!metricField(m, o.target.field) || m.status !== "measured") return m;
   if (o.target.field === "value") return { ...m, value: o.newValue };
   if (o.target.field === "n") return { ...m, n: o.newValue };
-  return stat ? { ...m, stats: { ...m.stats, [stat]: o.newValue } } : m;
+  return { ...m, stats: { ...m.stats, [o.target.field.slice("stats.".length)]: o.newValue } };
 }
 
 /**
- * The findings and metrics as reports show them, and each figure that couldn't
- * be carried. A row naming a finding, metric or figure the run doesn't hold
- * changes nothing (DECISIONS.md 511, item 5). A metric has no text of its own,
- * so its overrides apply in order, as before.
+ * A row a metric's field, for the number check: from the first row's old value
+ * to the last row's new value, and none when they're equal (DECISIONS.md 514).
+ * A metric the run doesn't hold, or doesn't measure, carries nothing.
  */
-export function applyOverrides(findings: Finding[], metrics: Metric[], overrides: NumberOverride[]): { findings: Finding[]; metrics: Metric[]; refused: OverrideRefusal[] } {
+function metricRows(metrics: Metric[], overrides: NumberOverride[]): NumberOverride[] {
+  const fields = new Map<string, NumberOverride[]>();
+  for (const o of overrides) {
+    const m = o.target.type === "metric" ? metrics.find((x) => x.id === o.target.id) : undefined;
+    if (!m || !metricField(m, o.target.field)) continue;
+    const key = JSON.stringify([o.target.id, o.target.field]);
+    fields.set(key, [...(fields.get(key) ?? []), o]);
+  }
+  return [...fields.values()].flatMap((rows) => (rows[0]!.previousValue === rows.at(-1)!.newValue ? [] : [{ ...rows.at(-1)!, previousValue: rows[0]!.previousValue }]));
+}
+
+/**
+ * The findings and metrics as reports show them, each figure that couldn't be
+ * carried, and what was carried, a row a figure, for the number check's data:
+ * the rows between are history for the raw notes (DECISIONS.md 514). A row
+ * naming a finding, metric or figure the run doesn't hold changes nothing
+ * (DECISIONS.md 511, item 5). A metric has no text of its own, so its overrides
+ * apply in order, as before.
+ */
+export function applyOverrides(findings: Finding[], metrics: Metric[], overrides: NumberOverride[]): { findings: Finding[]; metrics: Metric[]; refused: OverrideRefusal[]; carried: NumberOverride[] } {
   const refused: OverrideRefusal[] = [];
+  const carried: NumberOverride[] = [];
   const outF = findings.map((f) => {
     const own = overrides.filter((o) => o.target.type === "finding" && o.target.id === f.id);
     if (own.length === 0) return f;
     const result = overrideFinding(f, own);
     refused.push(...result.refused);
+    carried.push(...result.carried);
     return result.finding;
   });
   let outM = metrics;
   for (const o of overrides) if (o.target.type === "metric") outM = outM.map((m) => (m.id === o.target.id ? overrideMetric(m, o) : m));
-  return { findings: outF, metrics: outM, refused };
+  return { findings: outF, metrics: outM, refused, carried: [...carried, ...metricRows(metrics, overrides)] };
 }
 
 // The reason a refusal holds the documents, in the shape the console lists

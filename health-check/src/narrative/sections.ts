@@ -889,7 +889,8 @@ export function buildReport(given: ReportInput): BuiltReport {
     scores,
     run,
     currency: calibration.currency,
-    overrides,
+    // What was carried, a row a figure, never the rows between: a figure put back is told nothing (DECISIONS.md 514).
+    overrides: effective.carried,
     structural: STRUCTURE,
     extraText: [
       { source: CALIBRATION, text: calibrationText(run, calibration, factsLines(input)) },

@@ -249,7 +249,7 @@ describe("only the value as read and the last value count (decision 511, items 1
   test("a figure overridden and put back changes nothing, whether it would carry or not", () => {
     for (const f of [finding("10,500 of 10,240 MB.", { used: 10500 }), finding("10,500 of 10,240 MB, and 10,500 again.", { used: 10500 })]) {
       const result = applyOverrides([f], [], [override("facts.used", 10500, 9800, "o1"), override("facts.used", 9800, 10500, "o2")]);
-      assert.deepEqual(result, { findings: [f], metrics: [], refused: [] });
+      assert.deepEqual(result, { findings: [f], metrics: [], refused: [], carried: [] });
     }
   });
 
@@ -290,7 +290,7 @@ describe("only the value as read and the last value count (decision 511, items 1
 describe("a row the run doesn't hold (decision 511, item 5)", () => {
   // The words hold the row's previous value, as if an earlier swap had rewritten them: they're left alone.
   const f = finding("Data storage is 9,800 of 10,240 MB.", { used: 10500 });
-  const unchanged = (o: NumberOverride): void => assert.deepEqual(applyOverrides([f], [], [o]), { findings: [f], metrics: [], refused: [] });
+  const unchanged = (o: NumberOverride): void => assert.deepEqual(applyOverrides([f], [], [o]), { findings: [f], metrics: [], refused: [], carried: [] });
 
   test("a finding id the run doesn't hold", () => unchanged(override("facts.used", 9800, 9000, "o1", "f-000000000999")));
   test("a fact key the finding doesn't have, or one only its prototype has", () => {
@@ -522,7 +522,10 @@ describe("every overridable figure of the synthetic run, each alone (decision 51
         counts[outcome] = (counts[outcome] ?? 0) + 1;
       }
       assert.equal(figures.length, 343, "319 facts and 24 sized amounts");
-      assert.deepEqual(counts, { "rewritten in one place": 172, "changed with no text": 72, "refused, repeated": 40, "refused, shared": 51, "refused, rounded": 8 });
+      // Decision 514 masks dates: bp.users-without-role's n of 11 is no longer also read in "2026-11-02" (repeated to rewritten);
+      // sec.personal-integration-accounts' peopleShare of 8.3 isn't near "08" in "2026-08-02", nor
+      // dq.open-opps-no-activity's sized amount near "2024" in "2024-10-31" (rounded to changed with no text).
+      assert.deepEqual(counts, { "rewritten in one place": 173, "changed with no text": 74, "refused, repeated": 39, "refused, shared": 51, "refused, rounded": 6 });
     });
   }
 });
