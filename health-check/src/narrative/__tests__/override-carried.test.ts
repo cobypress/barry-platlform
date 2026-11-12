@@ -687,7 +687,8 @@ function approvedWith(overrides: NumberOverride[], folder = dir, drafted: Number
 }
 
 const onMetricOf = (id: string, field: string, previousValue: number, newValue: number): NumberOverride => ({ ...onRun(divergence, field, previousValue, newValue), target: { type: "metric", id, field } });
-const CLOSE = "Override each one back to its figure as read, then make the documents again. A finding's wording and a measure's chart or table can't be edited, so a figure we can't carry changes only with a new health check.";
+// Decision 532: the close says who to tell, since the worker holds documents only for a released run.
+const CLOSE = "A finding's wording and a measure's chart or table can't be edited, so a figure we can't carry changes only with a new health check. The console refuses a correction like this before it is saved and holds a release while one stands. If this run is already released its corrections can no longer be changed there, so tell whoever looks after the health check.";
 
 // Decision 517: the third review's metrics, each printed corrected beside a chart, table or series as read with nothing held on round 4.
 describe("a metric's figure another of its figures also holds is refused (decision 517)", () => {
@@ -1169,6 +1170,25 @@ describe("a folder's overrides.json with a refused measure (decisions 512 and 51
     assert.deepEqual(sansOverrides(withRow.dataset), sansOverrides(without.dataset));
     assert.deepEqual(buildPulseResult(withRow), buildPulseResult(without));
     assert.deepEqual(buildScanResult(withRow), buildScanResult(without));
+  });
+});
+
+describe("the command line's render prints the close that says who to tell (decision 532)", () => {
+  test("hc render prints each line and the close, a title only as a line prints it: no token, no id", () => {
+    const rep = output!.findings.find((f) => f.ruleId === "pipe.segment-divergence" && f.title.includes("[[user:U0003]]"))!;
+    const folder = join(mkdtempSync(join(tmpdir(), "hc-refused-close-")), "run");
+    cpSync(dir, folder, { recursive: true });
+    writeFileSync(join(folder, "overrides.json"), JSON.stringify([onRun(rep, "facts.deals", 43, 44), onMetricOf("historic.top_account_share", "value", 32.1, 39.1)]));
+    const cli = spawnSync(process.execPath, [fileURLToPath(new URL("../../cli/hc.ts", import.meta.url)), "render", "--run", folder], { encoding: "utf8" });
+    assert.equal(cli.status, 2, cli.stderr);
+    const reason = [
+      "Held back: 2 corrected figures can't be carried into the documents.",
+      `"Win rate for rep a named person is well below the overall figure", deals: 43 as read, corrected to 44, but the wording has 43 in 2 places, and we can't tell which of them are this figure.`,
+      `"Won value from the top 10 accounts", value: 32.1 as read, corrected to 39.1, but another figure of this measure (a segment) is also 32.1, and a chart, table or sentence prints it as read.`,
+      "A finding's wording and a measure's chart or table can't be edited, so a figure we can't carry changes only with a new health check. The console refuses a correction like this before it is saved and holds a release while one stands. If this run is already released its corrections can no longer be changed there, so tell whoever looks after the health check.",
+    ].join("\n");
+    assert.equal(cli.stdout, `${reason}\n`);
+    for (const part of ["[[", "U0003", rep.id, "historic.top_account_share", rep.title, "f-"]) assert.ok(!cli.stdout.includes(part), part);
   });
 });
 
