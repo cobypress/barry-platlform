@@ -127,9 +127,9 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
   // first reading doesn't matter, as the claim has settled it. A run gone in
   // between has nothing left to fail, so it's skipped with nothing written.
   // The claim may have turned awaiting manual steps to analysing, so an error
-  // here is the engine's: back to the queue, or on the last attempt the run
-  // fails rather than stay analysing with no reason (548). No token is loaded
-  // yet, so there's no secret to take out of the text.
+  // here is handled as the engine's are: back to the queue, or on the last
+  // attempt the run fails rather than stay analysing with no reason (548). No
+  // token is loaded yet, so there's no secret to take out of the text.
   let second: RunJobInput | null;
   try {
     second = await deps.store.loadRunJob(runId);
