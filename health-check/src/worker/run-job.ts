@@ -101,6 +101,18 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
   if (!input) return { outcome: "skipped", detail: `No run ${runId}` };
   if (CLOSED.has(input.run.status)) return { outcome: "skipped", detail: `Run ${runId} is ${input.run.status.replace("_", " ")}, so there's nothing for the worker to do` };
 
+  // The run is this delivery's before anything is written, to the folder or the
+  // store, a failure's included: the console's move to review, landing after the
+  // read above, refuses the claim here rather than the save once the folder is
+  // rewritten (DECISIONS.md 537, 538, 540). Every skip is above, so a claimed
+  // run is worked on or failed. Any other error goes back to the queue.
+  try {
+    await deps.store.claimRun(runId);
+  } catch (err) {
+    if (err instanceof RunClosedError) return { outcome: "skipped", detail: err.message };
+    throw err;
+  }
+
   const fail = async (reason: string): Promise<JobOutcome> => {
     // Failed for good: nothing will resume to use the Apex code kept for Claude's summaries (DECISIONS.md 491).
     forgetApexSource(join(deps.runsDir, runId), runId, log);
