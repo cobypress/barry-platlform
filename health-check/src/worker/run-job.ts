@@ -104,8 +104,8 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
   // The run is this delivery's before anything is written, to the folder or the
   // store, a failure's included: the console's move to review, landing after the
   // read above, refuses the claim here rather than the save once the folder is
-  // rewritten (DECISIONS.md 537, 538, 540). Every skip is above, so a claimed
-  // run is worked on or failed. Any other error goes back to the queue.
+  // rewritten (DECISIONS.md 537, 538, 540). Every skip is above, so a job that
+  // claims goes on to work or to fail. Any other error goes back to the queue.
   try {
     await deps.store.claimRun(runId);
   } catch (err) {

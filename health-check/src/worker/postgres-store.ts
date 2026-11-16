@@ -400,7 +400,7 @@ export function versionRow(v: SectionVersion): Record<string, unknown> {
 const CLOSED = new Set(["in_review", "released"]);
 /** A delivery's claim on its run (DECISIONS.md 538), word for word as the console's side of it is written against. */
 const CLAIM_RUN_SQL = `UPDATE "HealthCheckRun" SET "status" = CASE WHEN "status" = 'awaiting_manual' THEN 'analysing' ELSE "status" END WHERE "id" = $1 AND "status" NOT IN ('in_review', 'released') RETURNING "status"`;
-const one =(r: SqlResult): Record<string, unknown> | undefined => r.rows[0];
+const one = (r: SqlResult): Record<string, unknown> | undefined => r.rows[0];
 /** An error's SQLSTATE, and nothing else of it: five characters, or a word saying there was none. */
 const sqlState = (code: unknown): string => (typeof code === "string" && /^[0-9A-Z]{5}$/.test(code) ? code : "with no code");
 
