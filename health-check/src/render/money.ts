@@ -13,6 +13,8 @@ import { valueItemId } from "./references.ts";
 export const MONEY_CSS = `
 .money .headline-figure { font-size: 3.4em; font-weight: 700; line-height: 1; }
 .money .range { color: var(--muted); margin: 6px 0 18px; }
+/* Opening the block (the investment page with no figure for the bill), its top margin used to fold into the title's; the title now sits beside the block (DECISIONS.md 570 and 572). */
+.money > .range:first-child { margin-top: 0; }
 .money .kinds { margin: 0 0 16px; }
 .money .kind { display: grid; grid-template-columns: 38% 1fr 14%; gap: 12px; align-items: center; margin-bottom: 8px; }
 .money .bar { height: 14px; background: var(--chartreuse); border-radius: 3px; min-width: 3px; }
@@ -294,7 +296,8 @@ export function moneyPage(r: Render, report: BuiltReport): string {
   const { chart, named } = pagePlan(r, report, parts, `${notes}${seats}`);
   const rows = [...all.slice(0, named).map((g) => pageRow(r, parts, g)), ...(named < all.length ? [restRow(named)] : []), totalRow].join("");
   const head = `<div class="eyebrow">${r.t(EYEBROW)}</div><h2>${TITLE}</h2>`;
-  return `<div class="money">${head}${parts.figure(chart)}${table(rows)}${notes}${seats}</div>`;
+  // The eyebrow and heading sit on the page itself, so a continued page carries them (DECISIONS.md 570).
+  return `${head}<div class="money">${parts.figure(chart)}${table(rows)}${notes}${seats}</div>`;
 }
 
 /** The line at `index`, largest first, in its row as the page prints it: for the test that shows by measure whether a line the last row stands for would fit (DECISIONS.md 448). */
@@ -460,5 +463,6 @@ export function investmentPage(r: Render, report: BuiltReport): string {
         `<p class="range">${r.t("We don't have a figure for your whole Salesforce bill, so this page shows your seats rather than what they all cost.")}</p>`;
   const ratio = returnOnSpend(report);
   const lines = [seats.line ?? "", ratio !== null ? `What fixing the issues is worth, ${m(report.value.total.expected)} over 12 months, is ${ratio} times what you pay for Salesforce a year.` : ""].filter(Boolean);
-  return `<div class="money"><div class="eyebrow">Your investment</div><h2>What you pay, and what you use</h2>${headline}<div class="stat-row" style="margin:6px 0 16px">${seats.stats}</div>${lines.map((l) => `<p style="margin-bottom:8px">${r.t(l)}</p>`).join("")}</div>`;
+  // On the page itself, as the money page's (DECISIONS.md 570).
+  return `<div class="eyebrow">Your investment</div><h2>What you pay, and what you use</h2><div class="money">${headline}<div class="stat-row" style="margin:6px 0 16px">${seats.stats}</div>${lines.map((l) => `<p style="margin-bottom:8px">${r.t(l)}</p>`).join("")}</div>`;
 }

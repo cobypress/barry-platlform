@@ -89,6 +89,9 @@ export async function carryOver(browserPage: Page): Promise<number> {
         const rest = range.extractContents();
         if (bottomOf(el) <= limit) {
           const tail = el.cloneNode(false) as HTMLElement;
+          // The rest of a list item is the item going on, not a new one: it prints with no
+          // marker (DECISIONS.md 571). A copy of a rest is still a rest.
+          if (el.tagName === "LI") tail.setAttribute("data-carried-rest", "");
           tail.appendChild(rest);
           // The space after the sentence end opens the new paragraph.
           if (tail.firstChild?.nodeType === Node.TEXT_NODE) tail.firstChild.textContent = (tail.firstChild.textContent ?? "").replace(/^\s+/, "");
@@ -226,13 +229,21 @@ export async function carryOver(browserPage: Page): Promise<number> {
       }
     };
 
-    /** The continued page: the same kind of page, its eyebrow and title marked as continued, then the moved content. */
+    /**
+     * The continued page: the same kind of page, its eyebrow and title marked as
+     * continued, then the moved content. The copies are ours, as a copied label is,
+     * so the layout check doesn't count them as the page's content (DECISIONS.md 570).
+     */
     const continuation = (page: HTMLElement): HTMLElement => {
       const next = shell(page);
       for (const kid of kidsOf(page)) {
-        if (kid.classList.contains("eyebrow")) next.appendChild(kid.cloneNode(true));
-        else if (kid.tagName === "H1" || kid.tagName === "H2") {
+        if (kid.classList.contains("eyebrow")) {
+          const eyebrow = kid.cloneNode(true) as HTMLElement;
+          eyebrow.setAttribute("data-carried-label", "");
+          next.appendChild(eyebrow);
+        } else if (kid.tagName === "H1" || kid.tagName === "H2") {
           const title = kid.cloneNode(true) as HTMLElement;
+          title.setAttribute("data-carried-label", "");
           if (!/, continued$/.test(title.textContent ?? "")) title.append(", continued");
           next.appendChild(title);
           break;
@@ -265,10 +276,13 @@ export async function carryOver(browserPage: Page): Promise<number> {
       while (body.firstChild) next.appendChild(body.firstChild);
       const footer = page.querySelector(":scope > [data-chrome]");
       if (footer) next.appendChild(footer.cloneNode(true));
-      // A list that carries on keeps counting.
+      // A list that carries on keeps counting. One that opens with the rest of a cut
+      // item starts one lower: the rest holds, unseen, the number of the item it
+      // belongs to, so the item after it keeps its own (DECISIONS.md 572).
       for (const list of next.querySelectorAll<HTMLOListElement>("ol")) {
         const source = [...page.querySelectorAll<HTMLOListElement>("ol")].find((o) => o.className === list.className);
-        if (source) list.start = (source.start || 1) + source.querySelectorAll(":scope > li").length;
+        const rest = list.firstElementChild?.hasAttribute("data-carried-rest") ? 1 : 0;
+        if (source) list.start = (source.start || 1) + source.querySelectorAll(":scope > li").length - rest;
       }
       if (next.children.length <= headed) next.remove();
       else added++;

@@ -126,5 +126,7 @@ export function chapterSlide(r: Render, report: BuiltReport, domain: string): st
     note ? `<p class="note" style="font-size:13.5px;color:var(--muted)">${r.t(note)}</p>` : "",
   ].join("");
 
-  return `<div class="chapter"><div class="eyebrow">${r.t(domainLabel(domain))}</div><h2>${r.t("At a glance")}</h2>${counts}<div class="cols"><div>${left}</div><div class="panel">${right}</div></div></div>`;
+  // The eyebrow and heading sit on the page itself, as on every other slide, so a
+  // continued slide carries them (DECISIONS.md 570, as 505 did for the progress slide).
+  return `<div class="eyebrow">${r.t(domainLabel(domain))}</div><h2>${r.t("At a glance")}</h2><div class="chapter">${counts}<div class="cols"><div>${left}</div><div class="panel">${right}</div></div></div>`;
 }
