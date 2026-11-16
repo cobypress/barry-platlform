@@ -660,10 +660,13 @@ describe("carry-over: a continued page's heading is a copy, and a cut item goes 
     }
   });
 
-  test("the full report's agent-readiness fixes, one cut across two slides: the numbers printed run 1 to N, none missing and none twice", async () => {
+  test("the full report's agent-readiness list with one fix, cut across two slides: the first slide prints 1., the rest goes on marked and with no number", async () => {
     // Two or more fixes sit side by side in two columns, where the carry-over moves an item
     // whole; a single fix is one column, and a title with sentences in it is cut there.
     // The title's sentences are a team's words, as "Licences you can release: dormant users" has a part of its own.
+    // With one fix nothing follows the rest, so this doesn't hold 572's `start` (no deck
+    // reaches it today, DECISIONS.md 573): "a numbered list of five, its third item cut…"
+    // and "an item taller than a page, cut twice…" above hold that.
     const first = buildReport(input).readiness;
     const linked = new Set(first.pillars.flatMap((p) => p.findingIds));
     const kept = first.fixes[0]!.id;
@@ -675,15 +678,22 @@ describe("carry-over: a continued page's heading is a copy, and a cut item goes 
     const page = await open(fullReportHtml(report, pseudonyms));
     try {
       await carryOver(page);
+      assert.equal(report.readiness.fixes.length, 1);
       const shown = await markers(page, "ol.readiness-fixes > li");
-      assert.ok((await page.evaluate(() => document.querySelectorAll("ol.readiness-fixes > li[data-carried-rest]").length)) > 0, JSON.stringify(shown));
-      // Across the slides it is printed on.
-      const on = await page.evaluate(() => [...document.querySelectorAll("ol.readiness-fixes")].map((ol) => [...document.querySelectorAll(".page")].indexOf(ol.closest(".page")!)));
-      assert.equal(new Set(on).size, 2, JSON.stringify(on));
+      // Each item of the list: the slide it is on, whether it is the marked rest, and the number printed.
+      const items = await page.evaluate(() => {
+        const pages = [...document.querySelectorAll(".page")];
+        return [...document.querySelectorAll("ol.readiness-fixes > li")].map((li) => ({ slide: pages.indexOf(li.closest(".page")!), rest: li.hasAttribute("data-carried-rest") }));
+      });
+      const printed = items.map((item, i) => ({ ...item, marker: shown[i]!.marker }));
+      assert.equal(printed.length, 2, JSON.stringify(printed));
+      assert.equal(printed[1]!.slide, printed[0]!.slide + 1, JSON.stringify(printed));
       assert.deepEqual(
-        shown.filter((m) => m.marker !== null).map((m) => m.marker),
-        report.readiness.fixes.map((_, i) => `${i + 1}.`),
-        JSON.stringify(shown),
+        printed.map(({ rest, marker }) => ({ rest, marker })),
+        [
+          { rest: false, marker: "1." },
+          { rest: true, marker: null },
+        ],
       );
     } finally {
       await page.close();
