@@ -13,7 +13,7 @@ import { syncShares } from "./share-job.ts";
 import { sealPages } from "../microsite/seal.ts";
 import { addMonths } from "./retention.ts";
 import type { DocumentFile, DocumentsJobInput } from "./types.ts";
-import { BASELINE_GONE, loadPseudonymMap, OVERRIDES_FILE, SURVEY_FILE, write, writeRows } from "../render/render-run.ts";
+import { BASELINE_GONE, BASELINE_UNAPPROVED, loadPseudonymMap, OVERRIDES_FILE, SURVEY_FILE, write, writeRows } from "../render/render-run.ts";
 import { HANDBOOK_DOCX, renderHandbookDocx } from "../handbook/docx.ts";
 import { HANDBOOK_NOT_MADE, readEarlierHandbook, readHandbook } from "../handbook/read.ts";
 import { printableSummaries, type StoredSummaries } from "../handbook/summary-row.ts";
@@ -389,6 +389,8 @@ async function documentsLocked(runId: string, deps: WorkerDeps, attempt: Attempt
     if (printed.baselineRefused) log(`Run ${runId}: ${baselineRefusedSummary(printed.baselineRefused)}`);
     // Built with no comparison, where its approved sections may hold one (DECISIONS.md 534). Not held: once the earlier folder is gone, nothing could clear it.
     if (printed.baselineGone) log(`Run ${runId}: ${BASELINE_GONE}`);
+    // Built with no comparison because no approved section holds one, whatever the folder gives (DECISIONS.md 535).
+    if (printed.baselineUnapproved) log(`Run ${runId}: ${BASELINE_UNAPPROVED}`);
     // A figure we can't trace stops everything before Drive: nothing uploaded, shared anew, published or contributed.
     // Not thrown, so the queue doesn't retry: the same wording would fail the same way.
     if (printed.held.length > 0) {

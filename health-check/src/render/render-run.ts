@@ -233,6 +233,8 @@ export class OverridesRefused extends Error {
 export type PrintedLayout = { executive: LayoutReport; full: LayoutReport; ceo: LayoutReport };
 /** For the log, and `hc render`'s errors, when a re-check's draft read its earlier health check and a later build can't (DECISIONS.md 534). No path or error. */
 export const BASELINE_GONE = "the earlier health check can't be read now, so the documents have no comparison with it.";
+/** For the log when a re-check's folder gives an earlier health check and its approved Word notes hold no comparison with it, so the documents have none (DECISIONS.md 535). No path, id or error. */
+export const BASELINE_UNAPPROVED = "the approved sections hold no comparison with the earlier health check, so the documents have none.";
 
 /** `baselineGone`: the earlier health check its draft read can't be read now, for the caller to say (DECISIONS.md 534). */
 export type RenderResult = { report: BuiltReport; layout: PrintedLayout; rejections: Rejection[]; passed: boolean; files: string[]; baselineGone: boolean };

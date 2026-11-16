@@ -50,6 +50,8 @@ export type ReleasedDocuments = {
   baselineRefused?: number;
   /** The earlier health check the re-check's draft read can't be read now, so nothing compares with it, for the log (DECISIONS.md 534). */
   baselineGone?: boolean;
+  /** The run folder gives an earlier health check and the approved sections hold no comparison with it, so the documents have none, for the log (DECISIONS.md 535). */
+  baselineUnapproved?: boolean;
 };
 
 /**
@@ -159,10 +161,23 @@ export function baselineRefusedSummary(n: number): string {
 /** For the worker's log when a re-check is drafted, or a pulse built, without its earlier health check's corrections (DECISIONS.md 531). No path, error or figure. */
 export const BASELINE_ROWS_UNREAD = "the earlier health check's corrections couldn't be read, so the comparison shows its figures as read.";
 
-/** The run's report with the console's approved sections in place of the engine's drafts. */
-export function approvedReport(dir: string, approved: ApprovedRun): { report: BuiltReport; pseudonyms: Pseudonymiser; baselineGone: boolean } {
-  const { input, pseudonyms, baselineGone } = loadRun(dir);
-  const report = buildReport({ ...input, overrides: approved.overrides, intake: approved.intake ?? input.intake, preparedBy: approved.preparedBy ?? null, benchmark: approved.benchmark ?? null });
+/**
+ * The run's report with the console's approved sections in place of the
+ * engine's drafts. A re-check compares with its earlier health check only if
+ * the approved Word notes hold the progress section (DECISIONS.md 535): a draft
+ * holds it exactly when it had an earlier health check, and the console can't
+ * remove one, so without it no draft a person approved held a comparison,
+ * whatever the folder's record says. Then the report is built with none, and
+ * `baselineUnapproved` says so for the log. `baselineGone` (534) only where the
+ * section is held: with none approved, nothing is lost.
+ */
+export function approvedReport(dir: string, approved: ApprovedRun): { report: BuiltReport; pseudonyms: Pseudonymiser; baselineGone: boolean; baselineUnapproved: boolean } {
+  const loaded = loadRun(dir);
+  const { input, pseudonyms } = loaded;
+  const held = approved.sections.some((s) => s.output === "raw_notes" && s.key === "progress");
+  const baselineUnapproved = input.baseline != null && !held;
+  const baselineGone = loaded.baselineGone && held;
+  const report = buildReport({ ...input, ...(baselineUnapproved ? { baseline: null } : {}), overrides: approved.overrides, intake: approved.intake ?? input.intake, preparedBy: approved.preparedBy ?? null, benchmark: approved.benchmark ?? null });
   for (const built of Object.values(report.outputs)) {
     const sections = approved.sections.filter((s) => s.output === built.output).sort((a, b) => a.order - b.order);
     if (!canRelease(sections).ok) throw new Error(`Not every section of the ${built.output.replace(/_/g, " ")} is approved, so no documents were made`);
@@ -172,7 +187,7 @@ export function approvedReport(dir: string, approved: ApprovedRun): { report: Bu
     built.sections = sections;
     built.versions = versions;
   }
-  return { report, pseudonyms, baselineGone };
+  return { report, pseudonyms, baselineGone, baselineUnapproved };
 }
 
 export async function renderReleased(dir: string, approved: ApprovedRun, outDir: string): Promise<ReleasedDocuments | RefusedDocuments> {
@@ -180,7 +195,7 @@ export async function renderReleased(dir: string, approved: ApprovedRun, outDir:
   const out = resolve(outDir);
   assertOutsideGit(folder);
   assertOutsideGit(out);
-  const { report, pseudonyms, baselineGone } = approvedReport(folder, approved);
+  const { report, pseudonyms, baselineGone, baselineUnapproved } = approvedReport(folder, approved);
   // Before anything is written: a refused make never leaves documents in the folder beside its failed row.
   if (report.refused.length > 0) return { refused: report.refused };
   mkdirSync(out, { recursive: true, mode: 0o700 });
@@ -212,5 +227,5 @@ export async function renderReleased(dir: string, approved: ApprovedRun, outDir:
   const study = await renderCaseStudyDocx(report, pseudonyms);
   const caseStudy = study ? join(out, "case-study-draft.docx") : undefined;
   if (study && caseStudy) writeFileSync(caseStudy, study, { mode: 0o600 });
-  return { files, warnings: layoutWarnings(layout), held: heldFigures(layout), microsite, ...(caseStudy ? { caseStudy } : {}), baselineRefused: report.baselineRefused, baselineGone };
+  return { files, warnings: layoutWarnings(layout), held: heldFigures(layout), microsite, ...(caseStudy ? { caseStudy } : {}), baselineRefused: report.baselineRefused, baselineGone, baselineUnapproved };
 }

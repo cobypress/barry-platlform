@@ -2,19 +2,28 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import fs, { chmodSync, existsSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import fs, { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { unzipSync } from "fflate";
-import { approvedReport, renderReleased, type ApprovedRun } from "../../render/render-released.ts";
-import { BASELINE_OVERRIDES_FILE, BASELINE_READ_FILE, loadRun } from "../../render/render-run.ts";
+import { writeActionFiles } from "../../actions/index.ts";
+import { HANDBOOK_FILE } from "../../handbook/build.ts";
+import { HANDBOOK_DOCX, SINCE_TITLE } from "../../handbook/docx.ts";
+import { Handbook } from "../../handbook/schema.ts";
+import { buildMicrositePages } from "../../microsite/pages.ts";
+import type { Intake } from "../../narrative/intake.ts";
+import { buildReport } from "../../narrative/sections.ts";
+import { approvedReport, BASELINE_ROWS_UNREAD, baselineRefusedSummary, renderReleased, type ApprovedRun } from "../../render/render-released.ts";
+import { BASELINE_GONE, BASELINE_OVERRIDES_FILE, BASELINE_READ_FILE, BASELINE_UNAPPROVED, loadRun, OUTPUT_FILES, printDocuments } from "../../render/render-run.ts";
+import { renderCaseStudyDocx } from "../../render/case-study.ts";
 import { fullReportHtml } from "../../render/full-report.ts";
 import { executiveHtml } from "../../render/executive.ts";
 import { onePagerHtml } from "../../render/one-pager.ts";
 import type { NumberOverride, ReportSection, SectionVersion } from "../../schemas/index.ts";
 import { runFromRecording } from "../../testing/harness.ts";
 import { docxText } from "../../testing/docx-text.ts";
+import { plantEarlier as earlierHandbook, REMOVED_FLOW } from "../../testing/earlier-handbook.ts";
 import { plantEarlier } from "../../testing/recheck.ts";
 import { loadAnswers, loadRecording, ReplayTransport } from "../../testing/replay.ts";
 import { processDocumentsJob } from "../documents-job.ts";
@@ -84,7 +93,10 @@ async function worker(options: { baselineRunId?: string | null } = {}) {
   const dir = join(deps.runsDir, RUN_ID);
   deps.store.addRun(runInput({ run: consoleRun({ baselineRunId: options.baselineRunId === undefined ? EARLIER_ID : options.baselineRunId }) }));
   const printed: Awaited<ReturnType<typeof renderReleased>>[] = [];
+  /** What the documents job handed each make, the benchmark it read included. */
+  const handed: ApprovedRun[] = [];
   deps.renderReleased = async (...args) => {
+    handed.push(args[1]);
     const result = await renderReleased(...args);
     printed.push(result);
     return result;
@@ -96,35 +108,64 @@ async function worker(options: { baselineRunId?: string | null } = {}) {
     const outcome = await processRunJob(RUN_ID, deps, { final: true });
     assert.equal(outcome.outcome, "done", outcome.detail);
   };
-  /** The re-check released with the drafts the console holds, approved as they are, and its documents made. */
-  const make = async () => {
+  /**
+   * A delivery started while the run awaited manual steps, whose save the
+   * console refused because it had moved the run to review meanwhile: skipped,
+   * with its files written and the console's sections those of the delivery
+   * before (DECISIONS.md 535).
+   */
+  const refused = async () => {
+    deps.dataTransport = new ReplayTransport(loadRecording());
+    const stored = deps.store.runs.get(RUN_ID)!;
+    stored.run.status = "awaiting_manual";
+    const save = deps.store.saveRunOutput;
+    deps.store.saveRunOutput = async (id, output) => {
+      stored.run.status = "in_review";
+      return save.call(deps.store, id, output);
+    };
+    try {
+      const outcome = await processRunJob(RUN_ID, deps, { final: true });
+      assert.equal(outcome.outcome, "skipped", outcome.detail);
+    } finally {
+      deps.store.saveRunOutput = save;
+    }
+  };
+  /**
+   * The re-check released with the drafts the console holds, approved as they
+   * are, and its documents made. `plant` changes the approved set first.
+   */
+  const make = async (options: { intake?: Intake; plant?: (sections: ReportSection[], versions: SectionVersion[]) => void } = {}) => {
     const output = deps.store.runs.get(RUN_ID)!.output!;
     const sections: ReportSection[] = output.sections.map((s) => ({ ...s, status: "approved" as const, approval: { approvedBy: "consultant@example.com", approvedAt: "2026-11-04T18:00:00.000Z" } }));
-    const versions: SectionVersion[] = output.versions;
-    deps.store.addDocumentsJob(jobInput({ sections, versions }));
+    const versions: SectionVersion[] = [...output.versions];
+    options.plant?.(sections, versions);
+    const intake = options.intake ?? { ...INTAKE, customerName: "Synthetic Co" };
+    deps.store.addDocumentsJob(jobInput({ sections, versions, intake }));
     const from = deps.lines.length;
     const outcome = await processDocumentsJob(RUN_ID, deps, { final: true });
     assert.equal(outcome.outcome, "done", outcome.detail);
     const result = printed.at(-1)!;
     assert.ok(!("refused" in result));
     assert.deepEqual(result.held, []);
-    const approved: ApprovedRun = { intake: { ...INTAKE, customerName: "Synthetic Co" }, sections, versions, overrides: [], preparedBy: null };
+    const approved: ApprovedRun = { intake, sections, versions, overrides: [], preparedBy: null };
     const { report, pseudonyms } = approvedReport(dir, approved);
+    const files = fileParts(result.files, result.microsite?.ok ? result.microsite.pages : null, result.caseStudy);
     // What each document was printed from, and the files themselves where they're the same bytes each make.
     const texts = {
       "full health check": fullReportHtml(report, pseudonyms),
       "executive summary": executiveHtml(report, pseudonyms),
       "one page summary": onePagerHtml(report, pseudonyms),
       "readout kit": docxText(readFileSync(result.files.readout_kit)),
-      microsite: result.microsite?.ok ? JSON.stringify(result.microsite.pages) : "",
+      microsite: files.microsite,
       "raw notes": docxText(readFileSync(result.files.raw_notes)),
-      "full health check file": pdfParts(result.files.full_health_check),
-      "executive summary file": pdfParts(result.files.executive_summary),
-      "one page summary file": pdfParts(result.files.ceo_one_pager),
-      "raw notes file": zipParts(result.files.raw_notes),
-      "readout kit file": zipParts(result.files.readout_kit),
-      "action lists": readFileSync(result.files.action_lists).toString("base64"),
-      tickets: readFileSync(result.files.tickets, "utf8"),
+      "full health check file": files["full health check"],
+      "executive summary file": files["executive summary"],
+      "one page summary file": files["one page summary"],
+      "raw notes file": files["raw notes"],
+      "readout kit file": files["readout kit"],
+      "action lists": files["action lists"],
+      tickets: files.tickets,
+      "case study draft": files["case study draft"],
     };
     const progress: Record<Document, boolean> = {
       "full health check": texts["full health check"].includes("<h2>What has changed</h2>"),
@@ -134,11 +175,12 @@ async function worker(options: { baselineRunId?: string | null } = {}) {
       microsite: Boolean(result.microsite?.ok && result.microsite.pages.pages.some((p) => p.slug === "progress")),
       "raw notes": /^#+ R\d+ Since your last health check$/m.test(texts["raw notes"]),
     };
-    return { progress, texts, report, lines: deps.lines.slice(from) };
+    const handbook = join(dir, "documents", HANDBOOK_DOCX);
+    return { progress, texts, files, report, approved, caseStudy: result.caseStudy !== undefined, handbook: existsSync(handbook) ? docxText(readFileSync(handbook)) : "", lines: deps.lines.slice(from) };
   };
   const record = (): string | null => (existsSync(join(dir, BASELINE_READ_FILE)) ? readFileSync(join(dir, BASELINE_READ_FILE), "utf8") : null);
   const draftHasProgress = (): boolean => deps.store.runs.get(RUN_ID)!.output!.sections.some((s) => s.output === "raw_notes" && s.key === "progress");
-  return { deps, drive, dir, earlier, rows, draft, make, record, draftHasProgress };
+  return { deps, drive, dir, earlier, rows, draft, refused, make, record, draftHasProgress, handed };
 }
 
 function jobInput(overrides: Partial<DocumentsJobInput> = {}): DocumentsJobInput {
@@ -174,7 +216,56 @@ const pdfParts = (path: string): string =>
     .update(readFileSync(path).toString("latin1").replace(/\/(CreationDate|ModDate) \([^)]*\)/g, ""))
     .digest("hex");
 
+/** Every file a make writes but the handbook, byte for byte as `texts` compares them, and the microsite's pages. */
+function fileParts(files: Record<"raw_notes" | "executive_summary" | "full_health_check" | "ceo_one_pager" | "readout_kit" | "action_lists" | "tickets", string>, microsite: unknown, caseStudy: string | undefined) {
+  return {
+    "full health check": pdfParts(files.full_health_check),
+    "executive summary": pdfParts(files.executive_summary),
+    "one page summary": pdfParts(files.ceo_one_pager),
+    "raw notes": zipParts(files.raw_notes),
+    "readout kit": zipParts(files.readout_kit),
+    "action lists": readFileSync(files.action_lists).toString("base64"),
+    tickets: readFileSync(files.tickets, "utf8"),
+    microsite: microsite ? JSON.stringify(microsite) : "",
+    "case study draft": caseStudy ? zipParts(caseStudy) : "",
+  };
+}
+
+/**
+ * The documents as f208173 built them, with no check of the approved sections
+ * (DECISIONS.md 535): `approvedReport` and `renderReleased` as they were, the
+ * earlier health check read as the record says, for a byte comparison.
+ */
+async function uncheckedBuild(dir: string, approved: ApprovedRun, out: string) {
+  const { input, pseudonyms } = loadRun(dir);
+  const report = buildReport({ ...input, overrides: approved.overrides, intake: approved.intake ?? input.intake, preparedBy: approved.preparedBy ?? null, benchmark: approved.benchmark ?? null });
+  for (const built of Object.values(report.outputs)) {
+    built.sections = approved.sections.filter((s) => s.output === built.output).sort((a, b) => a.order - b.order);
+    const current = new Set(built.sections.map((s) => s.currentVersionId));
+    built.versions = approved.versions.filter((v) => current.has(v.id));
+  }
+  mkdirSync(out, { recursive: true });
+  const files = {
+    raw_notes: join(out, OUTPUT_FILES.rawNotes),
+    executive_summary: join(out, OUTPUT_FILES.executive),
+    full_health_check: join(out, OUTPUT_FILES.full),
+    ceo_one_pager: join(out, OUTPUT_FILES.ceo),
+    readout_kit: join(out, OUTPUT_FILES.kit),
+    action_lists: join(out, OUTPUT_FILES.actionLists),
+    tickets: join(out, OUTPUT_FILES.tickets),
+  };
+  await printDocuments(report, pseudonyms, { rawNotes: files.raw_notes, executive: files.executive_summary, full: files.full_health_check, ceo: files.ceo_one_pager, kit: files.readout_kit, layout: join(out, OUTPUT_FILES.layout) });
+  writeActionFiles(report, pseudonyms, dir, { workbook: files.action_lists, tickets: files.tickets });
+  const study = await renderCaseStudyDocx(report, pseudonyms);
+  const caseStudy = study ? join(out, "case-study-draft.docx") : undefined;
+  if (study && caseStudy) writeFileSync(caseStudy, study);
+  return fileParts(files, buildMicrositePages(report, pseudonyms), caseStudy);
+}
+
 const gone = (lines: string[]): string[] => lines.filter((l) => /can't be read now/.test(l));
+const UNAPPROVED = `Run ${RUN_ID}: the approved sections hold no comparison with the earlier health check, so the documents have none.`;
+/** Every sentence the worker's log has of the earlier health check or a comparison with it: decisions 522, 531, 534 and 535's. */
+const said = (lines: string[]): string[] => lines.filter((l) => /earlier health check|comparison/.test(l));
 type Worker = Awaited<ReturnType<typeof worker>>;
 
 /** The earlier folder can't be read at the draft, in each of the ways measured, and is readable again after. */
@@ -249,18 +340,22 @@ describe("a re-check records whether its draft read the earlier health check, an
   });
 
   for (const [what, spoil] of UNREADABLE_AT_DRAFT) {
-    test(`no record (drafted before this deploys), drafted while ${what}: built as before, the comparison where the drafts had none`, async () => {
+    test(`no record (drafted before this deploys), drafted while ${what}: no comparison, since the approved sections hold none, and the log says so once a make (decision 535)`, async () => {
       const w = await worker();
       const restore = spoil(w);
       await w.draft();
       restore();
       rmSync(join(w.dir, BASELINE_READ_FILE));
       const made = await w.make();
-      // The old fault, left for a re-check drafted before the record, as the row says.
-      assert.deepEqual(made.progress, { ...EVERY, "raw notes": false });
-      // Built as the earlier health check reads now, as a record that says it was read is: byte for byte.
+      // 534 left the old fault here for a re-check drafted before the record; 535 mends it from the approved sections.
+      assert.deepEqual(made.progress, NONE);
+      assert.equal(made.report.input.baseline, null);
+      assert.deepEqual(said(made.lines), [UNAPPROVED]);
+      // The same as a record that says it was read: byte for byte.
       writeFileSync(join(w.dir, BASELINE_READ_FILE), '{"read":true}');
-      assert.deepEqual((await w.make()).texts, made.texts);
+      const read = await w.make();
+      assert.deepEqual(read.texts, made.texts);
+      assert.deepEqual(said(read.lines), [UNAPPROVED]);
       assert.deepEqual(gone(w.deps.lines), []);
     });
   }
@@ -449,5 +544,158 @@ describe("the kept corrections of decision 528 beside the record", () => {
     assert.deepEqual(made.progress, NONE);
     assert.equal(made.report.input.baseline, null);
     for (const [name, text] of Object.entries(made.texts)) for (const figure of CORRECTED) assert.ok(!text.includes(figure), `${name}: ${figure}`);
+  });
+});
+
+describe("a re-check's documents compare with its earlier health check only if the approved Word notes hold the progress section (decision 535)", () => {
+  /** Drafted with the earlier folder unreadable, then a second delivery that read it, refused at the console's save: the record is ahead of the approved sections. */
+  async function ahead(): Promise<Worker> {
+    const w = await worker();
+    const restore = UNREADABLE_AT_DRAFT[0]![1](w);
+    await w.draft();
+    restore();
+    assert.equal(w.record(), '{"read":false}');
+    await w.refused();
+    assert.equal(w.record(), '{"read":true}');
+    assert.equal(w.draftHasProgress(), false, "the console holds the first delivery's sections");
+    return w;
+  }
+
+  test("the record ahead of the approved sections (a second delivery refused at the console's save): no document compares, and the log says so once a make", async () => {
+    // The sentence is the exported one, and `said` sees every other sentence of the earlier health check: 522's, 531's and 534's.
+    assert.equal(UNAPPROVED, `Run ${RUN_ID}: ${BASELINE_UNAPPROVED}`);
+    for (const other of [BASELINE_GONE, BASELINE_ROWS_UNREAD, baselineRefusedSummary(1), baselineRefusedSummary(2)]) assert.deepEqual(said([other]), [other]);
+    const w = await ahead();
+    const first = await w.make();
+    assert.deepEqual(first.progress, NONE);
+    assert.equal(first.report.input.baseline, null);
+    assert.deepEqual(said(first.lines), [UNAPPROVED]);
+    // Nothing held or refused (make asserts both), and no case study draft.
+    assert.equal(first.caseStudy, false);
+    const second = await w.make();
+    assert.deepEqual(second.progress, NONE);
+    assert.deepEqual(said(second.lines), [UNAPPROVED]);
+    assert.deepEqual(said(w.deps.lines), [UNAPPROVED, UNAPPROVED]);
+    // Fixed words: no path, run id of the earlier one, name or error.
+    for (const line of said(w.deps.lines)) for (const leak of [w.dir, w.earlier, EARLIER_ID, "Synthetic", "ENOENT", "Error"]) assert.ok(!line.includes(leak), leak);
+    // Every document, the printed decks, action lists and tickets too, as with no earlier health check at all.
+    rmSync(w.earlier, { recursive: true });
+    assert.deepEqual((await w.make()).texts, first.texts);
+  });
+
+  test("the same with the record deleted (a re-check drafted before decision 534): no document compares, and the log says so once a make", async () => {
+    const w = await ahead();
+    rmSync(join(w.dir, BASELINE_READ_FILE));
+    const first = await w.make();
+    assert.deepEqual(first.progress, NONE);
+    assert.equal(first.report.input.baseline, null);
+    assert.deepEqual(said(first.lines), [UNAPPROVED]);
+    const second = await w.make();
+    assert.deepEqual(second.progress, NONE);
+    assert.deepEqual(said(w.deps.lines), [UNAPPROVED, UNAPPROVED]);
+    rmSync(w.earlier, { recursive: true });
+    assert.deepEqual((await w.make()).texts, first.texts);
+  });
+
+  test("record true, the progress section approved, the earlier folder readable: every file byte for byte as a build with no check of the approved sections, and nothing logged", async () => {
+    const w = await worker();
+    await w.draft();
+    assert.ok(w.draftHasProgress());
+    const made = await w.make();
+    assert.deepEqual(made.progress, EVERY);
+    assert.ok(made.report.input.baseline);
+    assert.deepEqual(said(made.lines), []);
+    const unchecked = await uncheckedBuild(w.dir, w.handed.at(-1)!, join(w.deps.runsDir, "unchecked"));
+    assert.deepEqual(unchecked, made.files);
+  });
+
+  test("record true, the progress section approved, the earlier folder gone: decision 534's sentence once a make, and not this one", async () => {
+    const w = await worker();
+    await w.draft();
+    rmSync(w.earlier, { recursive: true });
+    const first = await w.make();
+    assert.deepEqual(first.progress, ONLY_THE_NOTES);
+    assert.deepEqual(said(first.lines), [GONE]);
+    const second = await w.make();
+    assert.deepEqual(said(second.lines), [GONE]);
+  });
+
+  test("record true, no progress section approved, the earlier folder gone: neither sentence, and no progress page", async () => {
+    const w = await ahead();
+    rmSync(w.earlier, { recursive: true });
+    const made = await w.make();
+    assert.deepEqual(made.progress, NONE);
+    assert.equal(made.report.input.baseline, null);
+    assert.deepEqual(said(made.lines), []);
+  });
+
+  test("record false with the progress section approved (the first delivery read it, a second refused at the save didn't): no comparison, the decks have no progress page, the Word notes hold the approved section, and nothing of either is logged", async () => {
+    const w = await worker();
+    await w.draft();
+    assert.ok(w.draftHasProgress());
+    const whole = await w.make();
+    const restore = UNREADABLE_AT_DRAFT[0]![1](w);
+    await w.refused();
+    restore();
+    assert.equal(w.record(), '{"read":false}');
+    assert.ok(w.draftHasProgress(), "the console holds the first delivery's sections");
+    const made = await w.make();
+    // The record wins (decision 534): what was approved, and no comparison printed.
+    assert.deepEqual(made.progress, ONLY_THE_NOTES);
+    assert.equal(made.report.input.baseline, null);
+    assert.equal(made.texts["raw notes"], whole.texts["raw notes"]);
+    assert.deepEqual(said(made.lines), []);
+  });
+
+  test("a progress section of another output is not the Word notes' comparison: no document compares, and the log says so", async () => {
+    const w = await ahead();
+    const made = await w.make({
+      plant: (sections, versions) => {
+        const like = sections.find((s) => s.output === "executive_summary")!;
+        const version = versions.find((v) => v.id === like.currentVersionId)!;
+        sections.push({ ...like, id: "planted-progress-0001", key: "progress", title: "Since your last health check", order: 999, currentVersionId: "planted-progress-0001-v1" });
+        versions.push({ ...version, id: "planted-progress-0001-v1", sectionId: "planted-progress-0001", body: "Planted." });
+      },
+    });
+    assert.ok(made.approved.sections.some((s) => s.output === "executive_summary" && s.key === "progress"));
+    assert.deepEqual(made.progress, NONE);
+    assert.equal(made.report.input.baseline, null);
+    assert.deepEqual(said(made.lines), [UNAPPROVED]);
+  });
+
+  test("the org handbook's change log follows neither the record nor the approved sections: read false, the earlier folder readable at the make, it still compares while no report does", async () => {
+    const w = await worker();
+    const path = join(w.earlier, HANDBOOK_FILE);
+    const handbook = Handbook.parse(JSON.parse(readFileSync(path, "utf8")));
+    earlierHandbook(handbook);
+    writeFileSync(path, JSON.stringify(handbook));
+    const restore = UNREADABLE_AT_DRAFT[0]![1](w);
+    await w.draft();
+    restore();
+    assert.equal(w.record(), '{"read":false}');
+    const made = await w.make();
+    assert.deepEqual(made.progress, NONE);
+    assert.match(made.handbook, new RegExp(`\\n## ${SINCE_TITLE}\\n\\nThis compares your org on `));
+    assert.match(made.handbook, new RegExp(`\\nRemoved: 1 flow\\nLead Nurture \\(old\\) \\(${REMOVED_FLOW}\\)\\n`));
+    assert.deepEqual(said(made.lines), []);
+  });
+
+  test("the benchmark contribution and the case study draft hold nothing of the earlier health check the approved sections don't", async () => {
+    const consenting = { ...INTAKE, customerName: "Synthetic Co", industry: "technology" as const, headcountBand: "51-200" as const, caseStudyConsent: true };
+    const w = await ahead();
+    const made = await w.make({ intake: consenting });
+    assert.deepEqual(made.progress, NONE);
+    assert.equal(made.caseStudy, false, "no case study draft without a comparison");
+    assert.ok(w.deps.store.benchmarkRows.length > 0);
+    // As for a re-check with no earlier health check at all.
+    const none = await worker();
+    rmSync(none.earlier, { recursive: true });
+    await none.draft();
+    assert.equal((await none.make({ intake: consenting })).caseStudy, false);
+    assert.deepEqual(w.deps.store.benchmarkRows, none.deps.store.benchmarkRows);
+    // And the consent is enough for one where the approved sections compare.
+    const compared = await worker();
+    await compared.draft();
+    assert.equal((await compared.make({ intake: consenting })).caseStudy, true);
   });
 });
