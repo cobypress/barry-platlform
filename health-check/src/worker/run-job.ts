@@ -97,21 +97,29 @@ export async function processRunJob(runId: string, deps: WorkerDeps, attempt: At
 async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Promise<JobOutcome> {
   const log = deps.log ?? (() => {});
   const now = () => (deps.now ?? (() => new Date()))();
-  const input = await deps.store.loadRunJob(runId);
-  if (!input) return { outcome: "skipped", detail: `No run ${runId}` };
-  if (CLOSED.has(input.run.status)) return { outcome: "skipped", detail: `Run ${runId} is ${input.run.status.replace("_", " ")}, so there's nothing for the worker to do` };
+  const first = await deps.store.loadRunJob(runId);
+  if (!first) return { outcome: "skipped", detail: `No run ${runId}` };
+  if (CLOSED.has(first.run.status)) return { outcome: "skipped", detail: `Run ${runId} is ${first.run.status.replace("_", " ")}, so there's nothing for the worker to do` };
 
   // The run is this delivery's before anything is written, to the folder or the
   // store, a failure's included: the console's move to review, landing after the
   // read above, refuses the claim here rather than the save once the folder is
-  // rewritten (DECISIONS.md 537, 538, 540). Every skip is above, so a job that
-  // claims goes on to work or to fail. Any other error goes back to the queue.
+  // rewritten (DECISIONS.md 537, 538, 540). Every skip but a run gone since is
+  // above, so a job that claims goes on to work or to fail. Any other error goes back to the queue.
   try {
     await deps.store.claimRun(runId);
   } catch (err) {
     if (err instanceof RunClosedError) return { outcome: "skipped", detail: err.message };
     throw err;
   }
+
+  // Read again now the run is this delivery's, and worked only from this
+  // reading: an answer the console saved just before the claim is in it, and
+  // none is saved after (DECISIONS.md 542, 545). A status changed since the
+  // first reading doesn't matter, as the claim has settled it. A run gone in
+  // between has nothing left to fail, so it's skipped with nothing written.
+  const input = await deps.store.loadRunJob(runId);
+  if (!input) return { outcome: "skipped", detail: `No run ${runId}` };
 
   const fail = async (reason: string): Promise<JobOutcome> => {
     // Failed for good: nothing will resume to use the Apex code kept for Claude's summaries (DECISIONS.md 491).
@@ -233,7 +241,12 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
     await summariseApex({ dir, runId, enabled: apexSummaries, client: deps.narrative, pseudonyms, now: now(), log });
     // A scan and a pulse are never reviewed, so Claude has nothing to draft for either.
     const unreviewed = input.run.product === "scan" || input.run.product === "pulse";
-    const report = deps.narrative && !unreviewed ? await draftSections(runId, dir, reportInput, deps.narrative, pseudonyms, now(), log) : buildReport(reportInput);
+    // A run awaiting manual steps is analysed again once the last answer is in,
+    // and that delivery drafts: nobody can edit or approve these sections before
+    // then, so Claude's wording now would be paid for and thrown away (DECISIONS.md 543).
+    const awaiting = result.run.status === "awaiting_manual";
+    if (deps.narrative && !unreviewed && awaiting) log(`Run ${runId} is awaiting manual steps, so its sections are the engine's own text until the answers are in.`);
+    const report = deps.narrative && !unreviewed && !awaiting ? await draftSections(runId, dir, reportInput, deps.narrative, pseudonyms, now(), log) : buildReport(reportInput);
     const outputs = Object.values(report.outputs);
     writeFileSync(join(dir, SECTIONS_FILE), `${JSON.stringify(outputs, null, 2)}\n`, { mode: 0o600 });
     const facts = factsOf(dir, log);

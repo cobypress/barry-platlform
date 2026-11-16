@@ -327,9 +327,10 @@ describe("Claude's drafts", () => {
     return client;
   };
 
+  // Every step answered, so each run ends in review: one awaiting manual steps isn't drafted (DECISIONS.md 543).
   test("with a client, each briefed section gets a claude_draft version, saved with the results", async () => {
     const client = writing(() => "We looked closely at this area.");
-    const { deps, handle } = await setup({ narrative: client });
+    const { deps, handle } = await setup({ narrative: client }, runInput({ answers: loadAnswers() }));
     assert.equal((await handle(job, once)).outcome, "done");
     const output = stored(deps).output!;
     const drafts = output.versions.filter((v) => v.source === "claude_draft");
@@ -361,8 +362,8 @@ describe("Claude's drafts", () => {
   test("when Claude can't be reached, the run still finishes with the engine's text", async () => {
     let calls = 0;
     const down: NarrativeClient = { complete: async () => (calls++, Promise.reject(new Error("Connection error."))) };
-    const { deps, handle } = await setup({ narrative: down });
-    const plain = await setup();
+    const { deps, handle } = await setup({ narrative: down }, runInput({ answers: loadAnswers() }));
+    const plain = await setup({}, runInput({ answers: loadAnswers() }));
     assert.equal((await handle(job, once)).outcome, "done");
     await plain.handle(job, once);
     assert.equal(calls, 1, "it stops asking after the first failure");
@@ -375,8 +376,8 @@ describe("Claude's drafts", () => {
 
   test("if drafting breaks in a way nobody expected, the run still finishes with the engine's text", async () => {
     const broken = { complete: async () => undefined } as unknown as NarrativeClient;
-    const { deps, handle } = await setup({ narrative: broken });
-    const plain = await setup();
+    const { deps, handle } = await setup({ narrative: broken }, runInput({ answers: loadAnswers() }));
+    const plain = await setup({}, runInput({ answers: loadAnswers() }));
     assert.equal((await handle(job, once)).outcome, "done");
     await plain.handle(job, once);
     assert.deepEqual(stored(deps).output, stored(plain.deps).output);
