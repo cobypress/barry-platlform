@@ -690,10 +690,10 @@ describe("the progress page at its fullest with the engine's own titles, and pas
     const report: BuiltReport = { ...integrations, progress: { ...integrations.progress!, fixed: [...integrations.progress!.fixed].sort((a, b) => Number(b.ruleId === SEGMENT) - Number(a.ruleId === SEGMENT)) } };
     const { page, close } = await printed(fullReportHtml(report, pseudonyms));
     try {
-      // The run ends. Measured: 318 pages, held for its page count and an overflow, as it was at
-      // fe5b440: the table moves on whole from every slide it lands on, up to the carry-over's
-      // limit. That older fault is not 510's; 508's pull-back had printed 124 pages instead,
-      // with a blank slide and the next carrying its eyebrow and title twice.
+      // The run ends. Measured: 122 pages, held for its page count, the table staying on the slide
+      // it crosses with an overflow (DECISIONS.md 574). Until 574 it moved on whole from every slide
+      // it landed on, up to the carry-over's limit: 318 pages, as at fe5b440. 508's pull-back had
+      // printed 124 pages instead, with a blank slide and the next carrying its eyebrow and title twice.
       assert.equal(typeof (await carryOver(page)), "number");
       const odd = await page.evaluate(() =>
         [...window.document.querySelectorAll<HTMLElement>(".page")].flatMap((p, i) => {
