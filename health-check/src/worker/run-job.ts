@@ -104,8 +104,9 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
   // The run is this delivery's before anything is written, to the folder or the
   // store, a failure's included: the console's move to review, landing after the
   // read above, refuses the claim here rather than the save once the folder is
-  // rewritten (DECISIONS.md 537, 538, 540). Every skip but a run gone since is
-  // above, so a job that claims goes on to work or to fail. Any other error goes back to the queue.
+  // rewritten (DECISIONS.md 537, 538, 540). A job that claims goes on to work or
+  // to fail; it skips only for a run gone since, or a save the store still
+  // refuses (538 (4)). Any other error from the claim goes back to the queue.
   try {
     await deps.store.claimRun(runId);
   } catch (err) {
@@ -113,20 +114,32 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
     throw err;
   }
 
-  // Read again now the run is this delivery's, and worked only from this
-  // reading: an answer the console saved just before the claim is in it, and
-  // none is saved after (DECISIONS.md 542, 545). A status changed since the
-  // first reading doesn't matter, as the claim has settled it. A run gone in
-  // between has nothing left to fail, so it's skipped with nothing written.
-  const input = await deps.store.loadRunJob(runId);
-  if (!input) return { outcome: "skipped", detail: `No run ${runId}` };
-
   const fail = async (reason: string): Promise<JobOutcome> => {
     // Failed for good: nothing will resume to use the Apex code kept for Claude's summaries (DECISIONS.md 491).
     forgetApexSource(join(deps.runsDir, runId), runId, log);
     await deps.store.recordRunFailure(runId, reason, now().toISOString());
     return { outcome: "failed", detail: reason };
   };
+
+  // Read again now the run is this delivery's, and worked only from this
+  // reading: an answer the console saved just before the claim is in it, and
+  // none is saved after (DECISIONS.md 542, 545). A status changed since the
+  // first reading doesn't matter, as the claim has settled it. A run gone in
+  // between has nothing left to fail, so it's skipped with nothing written.
+  // The claim may have turned awaiting manual steps to analysing, so an error
+  // here is the engine's: back to the queue, or on the last attempt the run
+  // fails rather than stay analysing with no reason (548). No token is loaded
+  // yet, so there's no secret to take out of the text.
+  let second: RunJobInput | null;
+  try {
+    second = await deps.store.loadRunJob(runId);
+  } catch (err) {
+    const reason = safeReason(err);
+    if (!attempt.final) throw new Error(reason);
+    return fail(`The run stopped with an error: ${reason}`);
+  }
+  if (!second) return { outcome: "skipped", detail: `No run ${runId}` };
+  const input = second;
 
   const problem = problemWith(input, deps);
   if (problem) return fail(problem);

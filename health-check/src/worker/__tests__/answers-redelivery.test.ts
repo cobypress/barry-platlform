@@ -7,20 +7,21 @@ import { SUMMARIES_FILE } from "../../handbook/summaries.ts";
 import { APEX_SUMMARY_PROMPT } from "../../narrative/apex-prompt.ts";
 import type { NarrativeClient, NarrativeRequest } from "../../narrative/client.ts";
 import { renderReleased, type ReleasedDocuments } from "../../render/render-released.ts";
-import { INTERVIEWS_FILE, SURVEY_FILE } from "../../render/render-run.ts";
+import { BASELINE_READ_FILE, INTERVIEWS_FILE, SURVEY_FILE } from "../../render/render-run.ts";
 import type { ManualAnswer, ManualStep } from "../../schemas/index.ts";
 import { FAKE, FakeTokenEndpoint } from "../../testing/fake-oauth.ts";
 import { docxText } from "../../testing/docx-text.ts";
 import { syntheticInterviews } from "../../testing/interviews.ts";
 import { loadAnswers, loadCalibration, loadRecording, ReplayTransport } from "../../testing/replay.ts";
+import { sfId } from "../../testing/synthetic-org.ts";
 import { syntheticSurvey } from "../../testing/survey.ts";
 import type { Transport, TransportRequest, TransportResponse } from "../../salesforce/transport.ts";
 import type { DocumentDrive, DriveItem } from "../drive.ts";
 import { processDocumentsJob } from "../documents-job.ts";
 import { MemoryWorkerStore } from "../memory-store.ts";
 import { processRunJob } from "../run-job.ts";
-import type { RunJobInput, RunOutputRecord } from "../types.ts";
-import { baseDeps, CONNECTION, INTAKE, RUN_ID, runInput, syntheticConnection } from "./helpers.ts";
+import type { RunJobInput, RunOutputRecord, RunProgress } from "../types.ts";
+import { baseDeps, CONNECTION, consoleRun, INTAKE, RUN_ID, runInput, syntheticConnection } from "./helpers.ts";
 
 // A manual answer reaches the findings, the sections and the Word notes
 // (DECISIONS.md 541): the console saves it while the run awaits manual steps
@@ -371,5 +372,115 @@ describe("the second reading (DECISIONS.md 542)", () => {
     const outcome = await w.deliver();
     assert.equal(outcome.outcome, "failed");
     assert.match(outcome.detail, /^The run stopped with an error: The calibration has changed since this run started\./);
+  });
+});
+
+/** A second reading that throws as a dropped database connection does. */
+const dropped = (n: number, input: RunJobInput | null): RunJobInput | null => {
+  if (n === 2) throw new Error("Connection terminated unexpectedly");
+  return input;
+};
+
+describe("an error from the second reading (DECISIONS.md 548 (1))", () => {
+  test("before the last attempt it goes back to the queue with the run analysing, and the next delivery claims and finishes as any does", async () => {
+    const w = await setup();
+    await w.deliver();
+    assert.equal(w.stored().run.status, "awaiting_manual");
+    w.store.readings = 0;
+    w.store.reading = dropped;
+    await assert.rejects(w.deliver(false), (err: Error) => err.message === "Connection terminated unexpectedly");
+    assert.equal(w.stored().run.status, "analysing");
+    w.store.readings = 0;
+    w.store.reading = (_n, input) => input;
+    const writes = w.store.writes.length;
+    assert.deepEqual(await w.deliver(false), { outcome: "done", detail: `Run ${RUN_ID} is awaiting manual` });
+    assert.equal(w.store.readings, 2);
+    assert.equal(w.store.writes[writes]!.method, "claimRun");
+    assert.equal(w.stored().run.status, "awaiting_manual");
+  });
+
+  test("on the last attempt the run fails with the reason, and the kept Apex code goes as any failure deletes it", async () => {
+    const w = await setup();
+    await w.deliver();
+    writeFileSync(join(w.dir, APEX_SOURCE_FILE), '{"planted":true}\n', { mode: 0o600 });
+    w.store.readings = 0;
+    w.store.reading = dropped;
+    const reason = "The run stopped with an error: Connection terminated unexpectedly";
+    assert.deepEqual(await w.deliver(true), { outcome: "failed", detail: reason });
+    assert.equal(w.stored().run.status, "failed");
+    assert.equal(w.stored().run.steps.find((s) => s.id === "worker")!.error, reason);
+    assert.equal(existsSync(join(w.dir, APEX_SOURCE_FILE)), false);
+  });
+});
+
+describe("every field the job takes from the run is the second reading's (DECISIONS.md 548 (4))", () => {
+  /** A setup whose second reading changes the run job input as given. */
+  async function changed(change: (input: RunJobInput) => RunJobInput, first: RunJobInput = runInput(), overrides: Parameters<typeof baseDeps>[0] = {}) {
+    const w = await setup(first, overrides);
+    w.store.reading = (n, input) => (n === 2 && input ? change(structuredClone(input)) : input);
+    return w;
+  }
+  const withRun = (input: RunJobInput, run: Partial<RunJobInput["run"]>): RunJobInput => ({ ...input, run: consoleRun({ ...input.run, ...run }) });
+
+  test("the intake written to the folder", async () => {
+    const w = await changed((input) => ({ ...input, intake: { ...INTAKE, summary: "Renewals are missed." } }));
+    assert.equal((await w.deliver()).outcome, "done");
+    assert.equal(JSON.parse(readFileSync(join(w.dir, "intake.json"), "utf8")).summary, "Renewals are missed.");
+  });
+
+  test("the connection loaded", async () => {
+    const w = await changed((input) => ({ ...input, connectionName: "synthetic-co-later" }));
+    assert.deepEqual(await w.deliver(), { outcome: "failed", detail: `The connection "synthetic-co-later" couldn't be loaded: No stored connection called "synthetic-co-later"` });
+  });
+
+  test("what's checked before the run starts: a calibration since withdrawn", async () => {
+    const w = await changed((input) => ({ ...input, calibration: null }));
+    assert.deepEqual(await w.deliver(), { outcome: "failed", detail: "The calibration hasn't been confirmed, so the run can't start." });
+  });
+
+  test("the org the connection must match", async () => {
+    const w = await changed((input) => withRun(input, { orgId: sfId("00D", 2) }));
+    assert.deepEqual(await w.deliver(), { outcome: "failed", detail: `The connection "${CONNECTION}" is for a different org from this run, so nothing was read.` });
+  });
+
+  test("the modules run", async () => {
+    const w = await changed((input) => withRun(input, { modules: ["configuration"] }));
+    assert.equal((await w.deliver()).outcome, "done");
+    assert.deepEqual(JSON.parse(readFileSync(join(w.dir, "run.json"), "utf8")).modules, ["configuration"]);
+  });
+
+  test("the product: a scan on the second reading keeps no Apex code, drafts nothing, and is finished as a scan", async () => {
+    const client = claude();
+    const w = await changed((input) => withRun(input, { product: "scan", scope: "essentials" }), runInput({ answers: loadAnswers() }), { narrative: client, apexSummaries: true });
+    assert.deepEqual(await w.deliver(), { outcome: "done", detail: `Run ${RUN_ID} is in review` });
+    assert.equal(w.stored().run.status, "in_review");
+    assert.equal(client.summaries, 0);
+    assert.equal(client.sections, 0);
+    assert.ok(w.store.scanResults.has(RUN_ID));
+  });
+
+  test("the baseline a re-check names", async () => {
+    const w = await changed((input) => withRun(input, { baselineRunId: "hc-2026-09-30-00000001" }));
+    assert.equal((await w.deliver()).outcome, "done");
+    assert.equal(JSON.parse(readFileSync(join(w.dir, "run.json"), "utf8")).baselineRunId, "hc-2026-09-30-00000001");
+    assert.deepEqual(JSON.parse(readFileSync(join(w.dir, BASELINE_READ_FILE), "utf8")), { read: false });
+  });
+
+  test("whether the org is a sandbox, in every progress saved", async () => {
+    const w = await changed((input) => withRun(input, { isSandbox: true }));
+    const progress: RunProgress[] = [];
+    const save = w.store.saveRunProgress.bind(w.store);
+    w.store.saveRunProgress = async (id, p, dir) => (progress.push(structuredClone(p)), save(id, p, dir));
+    assert.equal((await w.deliver()).outcome, "done");
+    assert.ok(progress.length > 0);
+    assert.ok(progress.every((p) => p.isSandbox === true));
+  });
+
+  test("who created the run and the customer's reference, in run.json on a first delivery", async () => {
+    const w = await changed((input) => withRun(input, { createdBy: "second-consultant@example.com", customerRef: "SYN-0002" }));
+    assert.equal((await w.deliver()).outcome, "done");
+    const run = JSON.parse(readFileSync(join(w.dir, "run.json"), "utf8"));
+    assert.equal(run.createdBy, "second-consultant@example.com");
+    assert.equal(run.customerRef, "SYN-0002");
   });
 });
