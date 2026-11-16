@@ -68,6 +68,8 @@ export const write = (path: string, data: string | Buffer): void => writeFileSyn
  */
 export type BaselineRows = "kept" | "live";
 
+type LoadedBaseline = { baseline: ReportInput | null; rowsUnread: boolean; gone: boolean };
+
 /**
  * A re-check's first health check, from the folder beside it, as the report
  * compares against it. Null if it's gone (retention), unreadable, or another
@@ -75,24 +77,39 @@ export type BaselineRows = "kept" | "live";
  * (`rowsUnread`): the draft then holds the figures as read, as the documents
  * will with no kept file (DECISIONS.md 531). Kept rows that can't be read
  * leave no baseline: they're the ones the drafts were made with, and nothing
- * else is (528).
+ * else is (528). A later build follows the draft's record of whether it read
+ * the earlier health check (534): not read, there's none, and the earlier
+ * folder isn't opened; a record that can't be read, none either; read but
+ * unreadable now, none, and `gone` says so for the log.
  */
-function loadBaseline(dir: string, run: Run, rows: BaselineRows): { baseline: ReportInput | null; rowsUnread: boolean } {
+function loadBaseline(dir: string, run: Run, rows: BaselineRows): LoadedBaseline {
+  const none: LoadedBaseline = { baseline: null, rowsUnread: false, gone: false };
+  let record: boolean | null = null;
+  if (rows === "kept") {
+    try {
+      record = readBaselineRead(dir);
+    } catch {
+      return none;
+    }
+    if (record === false) return none;
+  }
+  // Only a draft that read it can have printed a comparison the documents now lack.
+  const lost: LoadedBaseline = { ...none, gone: record === true };
   const baseline = baselineRun(dir, run);
-  if (!baseline || !existsSync(join(baseline.dir, "findings.json"))) return { baseline: null, rowsUnread: false };
+  if (!baseline || !existsSync(join(baseline.dir, "findings.json"))) return lost;
   let overrides: NumberOverride[];
   let rowsUnread = false;
   try {
     overrides = rows === "live" ? readOverrides(baseline.dir) : readBaselineOverrides(dir);
   } catch {
-    if (rows === "kept") return { baseline: null, rowsUnread: false };
+    if (rows === "kept") return none;
     overrides = [];
     rowsUnread = true;
   }
   try {
-    return { baseline: loadRun(baseline.dir, { baseline: false, overrides }).input, rowsUnread };
+    return { baseline: loadRun(baseline.dir, { baseline: false, overrides }).input, rowsUnread, gone: false };
   } catch {
-    return { baseline: null, rowsUnread: false };
+    return lost;
   }
 }
 
@@ -101,10 +118,11 @@ function loadBaseline(dir: string, run: Run, rows: BaselineRows): { baseline: Re
  * `overrides` stands in for the folder's own overrides.json, which is then not
  * read; `baselineRows` says which corrections a re-check's earlier health
  * check is read with, by default the ones kept with its drafts.
- * `baselineRowsUnread` is for the worker's log alone, and nothing built reads
- * it: the earlier folder's corrections, read live, couldn't be read.
+ * `baselineRowsUnread` and `baselineGone` are for the log alone, and nothing
+ * built reads them: the earlier folder's corrections, read live, couldn't be
+ * read; the earlier health check the draft read can't be read now.
  */
-export function loadRun(dir: string, options: { baseline?: boolean; baselineRows?: BaselineRows; overrides?: NumberOverride[] } = {}): { input: ReportInput; pseudonyms: Pseudonymiser; baselineRowsUnread: boolean } {
+export function loadRun(dir: string, options: { baseline?: boolean; baselineRows?: BaselineRows; overrides?: NumberOverride[] } = {}): { input: ReportInput; pseudonyms: Pseudonymiser; baselineRowsUnread: boolean; baselineGone: boolean } {
   const intake = readOptional<unknown>(join(dir, "intake.json"));
   const survey = readOptional<unknown>(join(dir, SURVEY_FILE));
   const interviews = readOptional<unknown>(join(dir, INTERVIEWS_FILE));
@@ -124,12 +142,14 @@ export function loadRun(dir: string, options: { baseline?: boolean; baselineRows
     facts: facts ? summariseFacts(FactsFile.parse(facts)) : null,
   };
   let baselineRowsUnread = false;
+  let baselineGone = false;
   if (options.baseline !== false) {
     const loaded = loadBaseline(dir, input.run, options.baselineRows ?? "kept");
     input.baseline = loaded.baseline;
     baselineRowsUnread = loaded.rowsUnread;
+    baselineGone = loaded.gone;
   }
-  return { input, pseudonyms: loadPseudonymMap(dir), baselineRowsUnread };
+  return { input, pseudonyms: loadPseudonymMap(dir), baselineRowsUnread, baselineGone };
 }
 
 /**
@@ -153,15 +173,38 @@ export function readBaselineOverrides(dir: string): NumberOverride[] {
 }
 
 /**
+ * Whether a re-check's draft read its earlier health check, which the run job
+ * records in the re-check's folder at each draft (DECISIONS.md 534), so every
+ * later build reads what the draft read. Null with no file: drafted before
+ * then, built as before. Anything but `{"read":true}` or `{"read":false}`
+ * throws, so a damaged record is never taken for either.
+ */
+export const BASELINE_READ_FILE = "baseline-read.json";
+const BaselineRead = z.object({ read: z.boolean() }).strict();
+export function readBaselineRead(dir: string): boolean | null {
+  const path = join(dir, BASELINE_READ_FILE);
+  return existsSync(path) ? BaselineRead.parse(read(path)).read : null;
+}
+
+/** The record, written as the kept rows are. */
+export function writeBaselineRead(path: string, wasRead: boolean): void {
+  writeByRename(path, JSON.stringify(BaselineRead.parse({ read: wasRead })));
+}
+
+/**
  * Override rows written to a run folder, only their own fields, private to
  * the worker, and by a rename so a reader never meets half a file: an
  * unreadable one leaves a re-check with no baseline. The temporary name is
  * fixed: both writers hold the run's lock, and one a crash left is overwritten.
  */
 export function writeRows(path: string, rows: NumberOverride[]): void {
+  writeByRename(path, JSON.stringify(rows.map((row) => NumberOverride.parse(row))));
+}
+
+function writeByRename(path: string, text: string): void {
   const writing = `${path}.writing`;
   try {
-    writeFileSync(writing, JSON.stringify(rows.map((row) => NumberOverride.parse(row))), { mode: 0o600 });
+    writeFileSync(writing, text, { mode: 0o600 });
     renameSync(writing, path);
   } finally {
     rmSync(writing, { force: true });
@@ -188,7 +231,13 @@ export class OverridesRefused extends Error {
 }
 
 export type PrintedLayout = { executive: LayoutReport; full: LayoutReport; ceo: LayoutReport };
-export type RenderResult = { report: BuiltReport; layout: PrintedLayout; rejections: Rejection[]; passed: boolean; files: string[] };
+/** For the log, and `hc render`'s errors, when a re-check's draft read its earlier health check and a later build can't (DECISIONS.md 534). No path or error. */
+export const BASELINE_GONE = "the earlier health check can't be read now, so the documents have no comparison with it.";
+/** For the log when a re-check's folder gives an earlier health check and its approved Word notes hold no comparison with it, so the documents have none (DECISIONS.md 535). No path, id or error. */
+export const BASELINE_UNAPPROVED = "the approved sections hold no comparison with the earlier health check, so the documents have none.";
+
+/** `baselineGone`: the earlier health check its draft read can't be read now, for the caller to say (DECISIONS.md 534). */
+export type RenderResult = { report: BuiltReport; layout: PrintedLayout; rejections: Rejection[]; passed: boolean; files: string[]; baselineGone: boolean };
 
 /**
  * With a client, sections are drafted by Claude first. Without one, they're the
@@ -198,7 +247,7 @@ export type RenderResult = { report: BuiltReport; layout: PrintedLayout; rejecti
 export async function renderRun(dir: string, options: { client?: NarrativeClient } = {}): Promise<RenderResult> {
   const folder = resolve(dir);
   assertOutsideGit(folder);
-  const { input, pseudonyms } = loadRun(folder);
+  const { input, pseudonyms, baselineGone } = loadRun(folder);
   const report = buildReport(input);
   // Before Claude is asked or a file is written, as the documents job stops.
   if (report.refused.length > 0) throw new OverridesRefused(report.refused);
@@ -220,7 +269,7 @@ export async function renderRun(dir: string, options: { client?: NarrativeClient
   writeActionFiles(report, pseudonyms, folder, { workbook: paths.actionLists, tickets: paths.tickets });
   write(paths.sections, `${JSON.stringify(Object.values(report.outputs), null, 2)}\n`);
   write(paths.rejections, `${JSON.stringify(rejections, null, 2)}\n`);
-  return { report, layout, rejections, passed: layout.executive.passed && layout.full.passed && layout.ceo.passed, files: Object.values(paths) };
+  return { report, layout, rejections, passed: layout.executive.passed && layout.full.passed && layout.ceo.passed, files: Object.values(paths), baselineGone };
 }
 
 /** Prints the three PDFs, the Word notes and the readout kit from a built report, and writes what the layout checks found. */
