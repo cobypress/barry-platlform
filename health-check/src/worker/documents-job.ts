@@ -387,7 +387,7 @@ async function documentsLocked(runId: string, deps: WorkerDeps, attempt: Attempt
       return fail(refusalReason(printed.refused), summary);
     }
     if (printed.baselineRefused) log(`Run ${runId}: ${baselineRefusedSummary(printed.baselineRefused)}`);
-    // Built with no comparison, where its approved sections may hold one (DECISIONS.md 534). Not held: once the earlier folder is gone, nothing could clear it.
+    // Built with no comparison, where its approved sections hold one (DECISIONS.md 534, 535). Not held: once the earlier folder is gone, nothing could clear it.
     if (printed.baselineGone) log(`Run ${runId}: ${BASELINE_GONE}`);
     // Built with no comparison because no approved section holds one, whatever the folder gives (DECISIONS.md 535).
     if (printed.baselineUnapproved) log(`Run ${runId}: ${BASELINE_UNAPPROVED}`);

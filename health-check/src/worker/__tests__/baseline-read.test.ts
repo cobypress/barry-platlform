@@ -548,9 +548,13 @@ describe("the kept corrections of decision 528 beside the record", () => {
 });
 
 describe("a re-check's documents compare with its earlier health check only if the approved Word notes hold the progress section (decision 535)", () => {
+  /** For the benchmark set and a case study draft. */
+  const CONSENTING: Intake = { ...INTAKE, customerName: "Synthetic Co", industry: "technology", headcountBand: "51-200", caseStudyConsent: true };
+
   /** Drafted with the earlier folder unreadable, then a second delivery that read it, refused at the console's save: the record is ahead of the approved sections. */
-  async function ahead(): Promise<Worker> {
+  async function ahead(before: (w: Worker) => void = () => {}): Promise<Worker> {
     const w = await worker();
+    before(w);
     const restore = UNREADABLE_AT_DRAFT[0]![1](w);
     await w.draft();
     restore();
@@ -601,8 +605,10 @@ describe("a re-check's documents compare with its earlier health check only if t
     const w = await worker();
     await w.draft();
     assert.ok(w.draftHasProgress());
-    const made = await w.make();
+    // With a case study draft, so it's compared too.
+    const made = await w.make({ intake: CONSENTING });
     assert.deepEqual(made.progress, EVERY);
+    assert.equal(made.caseStudy, true);
     assert.ok(made.report.input.baseline);
     assert.deepEqual(said(made.lines), []);
     const unchecked = await uncheckedBuild(w.dir, w.handed.at(-1)!, join(w.deps.runsDir, "unchecked"));
@@ -663,27 +669,38 @@ describe("a re-check's documents compare with its earlier health check only if t
     assert.deepEqual(said(made.lines), [UNAPPROVED]);
   });
 
-  test("the org handbook's change log follows neither the record nor the approved sections: read false, the earlier folder readable at the make, it still compares while no report does", async () => {
+  test("the org handbook's change log follows neither the record nor the approved sections: read false, the earlier folder readable at the make, it still compares while no report does; the same with the record ahead of the sections", async () => {
+    /** The earlier handbook as the synthetic org stood then, so the change log has something to say. */
+    const changed = (w: Worker): void => {
+      const path = join(w.earlier, HANDBOOK_FILE);
+      const handbook = Handbook.parse(JSON.parse(readFileSync(path, "utf8")));
+      earlierHandbook(handbook);
+      writeFileSync(path, JSON.stringify(handbook));
+    };
+    const compares = (text: string): void => {
+      assert.match(text, new RegExp(`\\n## ${SINCE_TITLE}\\n\\nThis compares your org on `));
+      assert.match(text, new RegExp(`\\nRemoved: 1 flow\\nLead Nurture \\(old\\) \\(${REMOVED_FLOW}\\)\\n`));
+    };
     const w = await worker();
-    const path = join(w.earlier, HANDBOOK_FILE);
-    const handbook = Handbook.parse(JSON.parse(readFileSync(path, "utf8")));
-    earlierHandbook(handbook);
-    writeFileSync(path, JSON.stringify(handbook));
+    changed(w);
     const restore = UNREADABLE_AT_DRAFT[0]![1](w);
     await w.draft();
     restore();
     assert.equal(w.record(), '{"read":false}');
     const made = await w.make();
     assert.deepEqual(made.progress, NONE);
-    assert.match(made.handbook, new RegExp(`\\n## ${SINCE_TITLE}\\n\\nThis compares your org on `));
-    assert.match(made.handbook, new RegExp(`\\nRemoved: 1 flow\\nLead Nurture \\(old\\) \\(${REMOVED_FLOW}\\)\\n`));
+    compares(made.handbook);
     assert.deepEqual(said(made.lines), []);
+
+    const unapproved = await (await ahead(changed)).make();
+    assert.deepEqual(unapproved.progress, NONE);
+    compares(unapproved.handbook);
+    assert.deepEqual(said(unapproved.lines), [UNAPPROVED]);
   });
 
   test("the benchmark contribution and the case study draft hold nothing of the earlier health check the approved sections don't", async () => {
-    const consenting = { ...INTAKE, customerName: "Synthetic Co", industry: "technology" as const, headcountBand: "51-200" as const, caseStudyConsent: true };
     const w = await ahead();
-    const made = await w.make({ intake: consenting });
+    const made = await w.make({ intake: CONSENTING });
     assert.deepEqual(made.progress, NONE);
     assert.equal(made.caseStudy, false, "no case study draft without a comparison");
     assert.ok(w.deps.store.benchmarkRows.length > 0);
@@ -691,11 +708,11 @@ describe("a re-check's documents compare with its earlier health check only if t
     const none = await worker();
     rmSync(none.earlier, { recursive: true });
     await none.draft();
-    assert.equal((await none.make({ intake: consenting })).caseStudy, false);
+    assert.equal((await none.make({ intake: CONSENTING })).caseStudy, false);
     assert.deepEqual(w.deps.store.benchmarkRows, none.deps.store.benchmarkRows);
     // And the consent is enough for one where the approved sections compare.
     const compared = await worker();
     await compared.draft();
-    assert.equal((await compared.make({ intake: consenting })).caseStudy, true);
+    assert.equal((await compared.make({ intake: CONSENTING })).caseStudy, true);
   });
 });
