@@ -331,12 +331,16 @@ describe("carry-over: a list split across pages keeps its label (DECISIONS.md 50
 const sentences = (...words: string[]): string => words.map((w) => `${w}.`).join("\n");
 const note = "<p>Note.</p>";
 
-/** The copies the carry-over made on each page, by their text, and whether any original heading was marked. */
+/**
+ * The labels the carry-over copied on each page, by their text, and whether any original heading was marked.
+ * A part's labels only (H3 to H5): the page's own eyebrow and title are marked as copies too (DECISIONS.md 570), and have tests of their own.
+ */
+const PART_COPIES = "h3[data-carried-label], h4[data-carried-label], h5[data-carried-label]";
 const marks = (page: Page): Promise<{ copies: string[][]; originals: number }> =>
-  page.evaluate(() => ({
-    copies: [...document.querySelectorAll(".page")].map((p) => [...p.querySelectorAll("[data-carried-label]")].map((h) => h.textContent ?? "")),
-    originals: [...document.querySelectorAll("[data-carried-label]")].filter((h) => !/, continued$/.test(h.textContent ?? "")).length,
-  }));
+  page.evaluate((selector) => ({
+    copies: [...document.querySelectorAll(".page")].map((p) => [...p.querySelectorAll(selector)].map((h) => h.textContent ?? "")),
+    originals: [...document.querySelectorAll(selector)].filter((h) => !/, continued$/.test(h.textContent ?? "")).length,
+  }), PART_COPIES);
 
 describe("carry-over: a label only over what it heads (DECISIONS.md 510)", () => {
   test("a note after a list, carried alone, goes without a label", async () => {
@@ -434,6 +438,89 @@ describe("carry-over: a label only over what it heads (DECISIONS.md 510)", () =>
         ["h2:Title", "h3:Label", "p:Note.", ...li("A", 1, 8)],
         ["h2:Title, continued", "li:A9", "li:A10"],
       ]);
+    } finally {
+      await page.close();
+    }
+  });
+});
+
+// A continued page's eyebrow and title are copies, marked as a copied label is, so
+// they never count as its content (DECISIONS.md 570).
+
+const ITEM_CSS = `
+.eyebrow { height: 20px; line-height: 20px; }
+`;
+/** A page with an eyebrow over its title, as every slide has. */
+const headed = (body: string): string => htmlDocument("Test", "a4", `${SPLIT_CSS}${ITEM_CSS}`, [`<section class="page" data-page="1"><div class="eyebrow">Area</div><h2>Title</h2>${body}<div class="footer" data-chrome><span>Footer</span><span>1</span></div></section>`]);
+const listed = (names: string[]): string => names.map((n) => `<li>${n}</li>`).join("");
+
+describe("carry-over: a continued page's heading is a copy (DECISIONS.md 570)", () => {
+  test("the continued page's eyebrow and title are marked as copies; the page's own are not", async () => {
+    const page = await open(headed(`<div class="chapter">${items("A", 14)}</div>`));
+    try {
+      assert.equal(await carryOver(page), 1);
+      const heads = await page.evaluate(() => [...document.querySelectorAll(".page")].map((p) => [...p.children].slice(0, 2).map((c) => `${c.tagName}${c.hasAttribute("data-carried-label") ? "[marked]" : ""}:${c.textContent}`)));
+      assert.deepEqual(heads, [
+        ["DIV:Area", "H2:Title"],
+        ["DIV[marked]:Area", "H2[marked]:Title, continued"],
+      ]);
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("a continued slide holding only 'And 5 more' under the copied heading is an empty section; one holding a list is not", async () => {
+    const emptyOn = async (body: string): Promise<number[]> => {
+      const page = await open(headed(body));
+      try {
+        assert.equal(await carryOver(page), 1);
+        return (await checkLayout(page, { minPages: 1, maxPages: 9 })).problems.filter((p) => p.check === "empty section").map((p) => p.page);
+      } finally {
+        await page.close();
+      }
+    };
+    // The list starts past the footer, below content that stays: it goes over whole.
+    const stays = `<p style="height:420px">Words of the slide's own that stay on the first page.</p>`;
+    assert.deepEqual(await emptyOn(`<div class="chapter">${stays}<ul><li>And 5 more on the pages that follow.</li></ul></div>`), [2]);
+    assert.deepEqual(await emptyOn(`<div class="chapter">${stays.replace("420", "300")}<ul>${listed(Array.from({ length: 8 }, (_, i) => `An issue that is on the list, number ${i + 1}`))}</ul></div>`), []);
+  });
+
+  test("the executive summary's value and investment pages, made to split, carry their eyebrow and title onto the continued page", async () => {
+    // Neither splits on anything a run holds: the value page names as many lines as the
+    // room it measures, and the investment page holds our own sentences and figures (issue
+    // titles 1,200 characters longer, with and without the customer's spend, split neither).
+    // So each page as built is pushed down by a block that stays, and what's below it goes on.
+    const report = buildReport({ ...input, intake: { ...input.intake!, salesforceSpendAnnual: 250_000 } });
+    const html = executiveHtml(report, pseudonyms);
+    assert.equal(html.split('<div class="money">').length - 1, 2, "both pages");
+    const page = await open(html.replaceAll('<div class="money">', '<div class="money"><div style="height:640px"></div>'));
+    try {
+      await carryOver(page);
+      const continued = await page.evaluate(() =>
+        [...document.querySelectorAll(".page")].filter((p) => p.querySelector(".money") && p.querySelector(":scope > h2[data-carried-label]")).map((p) => [...p.children].slice(0, 2).map((c) => `${c.hasAttribute("data-carried-label") ? "[marked]" : ""}${c.textContent}`)),
+      );
+      assert.deepEqual(continued, [
+        ["[marked]What it's worth", "[marked]What fixing this is worth, continued"],
+        ["[marked]Your investment", "[marked]What you pay, and what you use, continued"],
+      ]);
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("the investment page with no figure for the bill: its line sits the title's own margin below it, as before the title left the block (DECISIONS.md 572)", async () => {
+    // No money figure and no spend: the page opens with the line saying there's no figure.
+    const findings = input.findings.map((f) => (f.status === "issue" ? { ...f, value: { kind: "not_sized" as const, reason: "Synthetic: no figure." } } : f));
+    const html = executiveHtml(buildReport({ ...input, findings }), pseudonyms);
+    assert.match(html, /<h2>What you pay, and what you use<\/h2><div class="money"><p class="range">/);
+    const page = await open(html);
+    try {
+      const gap = await page.evaluate(() => {
+        const h2 = [...document.querySelectorAll("h2")].find((h) => h.textContent === "What you pay, and what you use")!;
+        const line = h2.nextElementSibling!.firstElementChild!;
+        return { gap: line.getBoundingClientRect().top - h2.getBoundingClientRect().bottom, margin: parseFloat(getComputedStyle(h2).marginBottom) };
+      });
+      assert.ok(Math.abs(gap.gap - gap.margin) < 0.01, JSON.stringify(gap));
     } finally {
       await page.close();
     }

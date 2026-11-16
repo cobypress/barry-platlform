@@ -709,12 +709,12 @@ describe("the progress page at its fullest with the engine's own titles, and pas
     }
   });
 
-  test("the 505 case's continued slide is as it was before the labels, character for character", async () => {
+  test("the 505 case's continued slide is as it was before the labels, character for character, its copied eyebrow and title marked as copies (DECISIONS.md 570)", async () => {
     const html = fullReportHtml(customer, pseudonyms);
     const { continued } = await carriedLists(html);
     assert.equal(
       continued.replace(/<div class="footer"[\s\S]*$/, ""),
-      '<section class="page tight" style="justify-content: flex-start;" data-page="8"><div class="eyebrow">Since your last health check</div><h2>What has changed, continued</h2><div class="progress"><p class="note">Some of the change in money can come from the business itself, not only from fixes.</p></div>',
+      '<section class="page tight" style="justify-content: flex-start;" data-page="8"><div class="eyebrow" data-carried-label="">Since your last health check</div><h2 data-carried-label="">What has changed, continued</h2><div class="progress"><p class="note">Some of the change in money can come from the business itself, not only from fixes.</p></div>',
     );
   });
 });
@@ -751,9 +751,10 @@ describe("a list split across a chapter slide keeps the label it sits under (DEC
           for (const ref of copy.querySelectorAll("[data-ref]")) ref.remove();
           return copy.textContent ?? "";
         };
-        // A chapter's continued slide has no title of its own (listed for later in 508): the area is the slide before's.
+        // A chapter's continued slide carries the chapter's eyebrow and title, copied and marked
+        // (DECISIONS.md 570): its first two children, the area the slide before's.
         const carried = pages.flatMap((p, i) => {
-          if (!p.querySelector(".chapter") || p.querySelector(".chapter > h2")) return [];
+          if (!p.querySelector(".chapter") || !p.querySelector(":scope > h2[data-carried-label]")) return [];
           const left = p.querySelector(".cols > div:first-child");
           const groups: Array<{ label: string; items: string[] }> = [];
           for (const el of left ? [...left.children] : []) {
@@ -761,7 +762,8 @@ describe("a list split across a chapter slide keeps the label it sits under (DEC
             else if (groups.length) groups.at(-1)!.items.push(...[...el.querySelectorAll("li")].map(text));
             else groups.push({ label: "", items: [...el.querySelectorAll("li")].map(text) });
           }
-          return [{ area: pages[i - 1]!.querySelector(".chapter > .eyebrow")?.textContent ?? "", groups }];
+          const opens = [...p.children].slice(0, 2).map((c) => `${c.tagName}${c.className ? `.${c.className}` : ""}${c.hasAttribute("data-carried-label") ? "[marked]" : ""}:${c.textContent}`);
+          return [{ area: pages[i - 1]!.querySelector(":scope > .eyebrow")?.textContent ?? "", opens, groups }];
         });
         const stacked = [...window.document.querySelectorAll("h3, h4, h5")].filter((h) => /, continued$/.test(h.textContent ?? "") && /^H[1-5]$/.test(h.nextElementSibling?.tagName ?? "")).map((h) => h.textContent);
         // The copy's mark doesn't change how it looks (DECISIONS.md 510): its style with and without the mark.
@@ -777,15 +779,23 @@ describe("a list split across a chapter slide keeps the label it sits under (DEC
           h.setAttribute("data-carried-label", "");
           return was !== plain;
         });
-        return { carried, stacked, marked: marked.length, restyled: restyled.map((h) => h.textContent) };
+        // A part's labels apart from the page's own eyebrow and title, which are marked too (DECISIONS.md 570).
+        const parts = marked.filter((h) => /^H[3-5]$/.test(h.tagName));
+        return { carried, stacked, marked: parts.length, headings: marked.length - parts.length, restyled: restyled.map((h) => h.textContent) };
       });
       assert.deepEqual(facts.stacked, []);
       assert.equal(facts.marked, 2);
+      // Both continued slides are chapters', each with its eyebrow and title.
+      assert.equal(facts.headings, 4);
       assert.deepEqual(facts.restyled, []);
       assert.deepEqual(facts.carried.map((c) => [c.area, c.groups[0]!.label]), [
         ["Configuration", "What's below par, continued"],
         ["Automation", "What's below par, continued"],
       ]);
+      assert.deepEqual(
+        facts.carried.map((c) => c.opens),
+        facts.carried.map((c) => [`DIV.eyebrow[marked]:${c.area}`, "H2[marked]:At a glance, continued"]),
+      );
       // Each carried title's finding is in the band its label names.
       const band = (f: Finding): string => (f.status === "passed" ? "Checked and fine" : f.severity === "critical" || f.severity === "high" ? "What's broken" : "What's below par");
       const domainOf = (area: string): string => report.teamFindings.find((f) => domainLabel(f.domain) === area)!.domain;
@@ -830,7 +840,8 @@ async function labelsOver(page: Page): Promise<{ heads: Record<string, string[]>
       const heads: Record<string, string[]> = {};
       for (const h of window.document.querySelectorAll("h3:not([data-carried-label]), h4:not([data-carried-label]), h5:not([data-carried-label])")) (heads[text(h)] ??= []).push(h.nextElementSibling?.tagName ?? "");
       const pages = [...window.document.querySelectorAll(".page")];
-      const copies = [...window.document.querySelectorAll("[data-carried-label]")].map((h) => ({ page: pages.indexOf(h.closest(".page")!) + 1, label: text(h), over: h.nextElementSibling?.tagName ?? "" }));
+      // A part's labels: the page's own eyebrow and title are copied and marked too (DECISIONS.md 570), under the page's rule.
+      const copies = [...window.document.querySelectorAll("h3[data-carried-label], h4[data-carried-label], h5[data-carried-label]")].map((h) => ({ page: pages.indexOf(h.closest(".page")!) + 1, label: text(h), over: h.nextElementSibling?.tagName ?? "" }));
       return { heads, copies };
     });
   const { heads } = await words();
@@ -904,14 +915,15 @@ describe("a split list's label is copied only over what it heads, and isn't a sl
       assertOverWhatItHeads(over);
       assert.ok(!over.copies.some((c) => c.label === "What good looks like"), JSON.stringify(over.copies));
       // The note did go over, alone in its panel.
-      const panel = await page.evaluate(() => [...window.document.querySelectorAll(".chapter .panel")].filter((p) => !p.closest(".page")!.querySelector(".chapter > h2")).map((p) => p.innerHTML));
+      // On the continued slide: its title is the copy (DECISIONS.md 570).
+      const panel = await page.evaluate(() => [...window.document.querySelectorAll(".chapter .panel")].filter((p) => p.closest(".page")!.querySelector(":scope > h2[data-carried-label]")).map((p) => p.innerHTML));
       assert.deepEqual(panel, ['<p class="note" style="font-size:13.5px;color:var(--muted)">1 more check couldn\'t be measured here. The appendix says why.</p>']);
     } finally {
       await close();
     }
   });
 
-  test("a continued slide holding only a copied label and one short line is held as an empty section, as before the labels", async () => {
+  test("a continued slide holding only a copied label and one short line is held as an empty section, as before the labels, with the chapter's heading now over it (DECISIONS.md 570)", async () => {
     // Every data quality issue's title 120 characters longer: the chapter's last list item goes over alone.
     const TEAMS = " for the Enterprise Sales North America and Asia Pacific Partner Channel teams";
     const findings = output!.findings.map((f) => (f.status === "issue" && f.domain === "data_quality" ? { ...f, title: f.title + TEAMS.repeat(3).slice(0, 120) } : f));
@@ -934,7 +946,8 @@ describe("a split list's label is copied only over what it heads, and isn't a sl
         }
         return { unmarked: parts, labels: [...slide.querySelectorAll("[data-carried-label]")].map((h) => h.textContent) };
       }, pdf.layout.problems[0]!.page);
-      assert.deepEqual(held, { unmarked: ["And 5 more on the pages that follow."], labels: ["What's below par, continued"] });
+      // The eyebrow and title are copies, so they don't lift the slide over the line either.
+      assert.deepEqual(held, { unmarked: ["And 5 more on the pages that follow."], labels: ["Data quality", "At a glance, continued", "What's below par, continued"] });
     } finally {
       await close();
     }

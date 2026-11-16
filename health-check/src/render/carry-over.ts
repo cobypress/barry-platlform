@@ -226,13 +226,21 @@ export async function carryOver(browserPage: Page): Promise<number> {
       }
     };
 
-    /** The continued page: the same kind of page, its eyebrow and title marked as continued, then the moved content. */
+    /**
+     * The continued page: the same kind of page, its eyebrow and title marked as
+     * continued, then the moved content. The copies are ours, as a copied label is,
+     * so the layout check doesn't count them as the page's content (DECISIONS.md 570).
+     */
     const continuation = (page: HTMLElement): HTMLElement => {
       const next = shell(page);
       for (const kid of kidsOf(page)) {
-        if (kid.classList.contains("eyebrow")) next.appendChild(kid.cloneNode(true));
-        else if (kid.tagName === "H1" || kid.tagName === "H2") {
+        if (kid.classList.contains("eyebrow")) {
+          const eyebrow = kid.cloneNode(true) as HTMLElement;
+          eyebrow.setAttribute("data-carried-label", "");
+          next.appendChild(eyebrow);
+        } else if (kid.tagName === "H1" || kid.tagName === "H2") {
           const title = kid.cloneNode(true) as HTMLElement;
+          title.setAttribute("data-carried-label", "");
           if (!/, continued$/.test(title.textContent ?? "")) title.append(", continued");
           next.appendChild(title);
           break;
