@@ -235,6 +235,14 @@ export class RunClosedError extends Error {
  */
 export interface WorkerStore {
   loadRunJob(runId: string): Promise<RunJobInput | null>;
+  /**
+   * Takes the run for this delivery before anything is written (DECISIONS.md
+   * 538, 540): in one step, a run awaiting manual steps becomes analysing and
+   * any other open status stays as it is. Throws RunClosedError once the run is
+   * in review or released, so the console can't move a run to review between a
+   * delivery's first write and its save.
+   */
+  claimRun(runId: string): Promise<void>;
   /** Status, steps and budget as the engine has them now. Throws RunClosedError once the run is in review or released. */
   saveRunProgress(runId: string, progress: RunProgress, runDir: string): Promise<void>;
   /** Everything the console reads from a finished run, in one transaction, replacing what was there. Throws RunClosedError like saveRunProgress. */

@@ -47,6 +47,13 @@ export class MemoryWorkerStore implements WorkerStore {
     return input;
   }
 
+  /** As the Postgres store's one statement: only awaiting manual steps changes, and a closed run refuses. */
+  async claimRun(runId: string): Promise<void> {
+    const run = this.#open(runId);
+    if (run.run.status === "awaiting_manual") run.run = Run.parse({ ...run.run, status: "analysing" });
+    this.writes.push({ method: "claimRun", id: runId, detail: run.run.status });
+  }
+
   async saveRunProgress(runId: string, progress: RunProgress, runDir: string): Promise<void> {
     const run = this.#open(runId);
     run.run = Run.parse({ ...run.run, ...structuredClone(progress) });
