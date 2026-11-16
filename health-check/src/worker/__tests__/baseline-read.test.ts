@@ -1,6 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs, { chmodSync, existsSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
@@ -117,6 +118,9 @@ async function worker(options: { baselineRunId?: string | null } = {}) {
       "readout kit": docxText(readFileSync(result.files.readout_kit)),
       microsite: result.microsite?.ok ? JSON.stringify(result.microsite.pages) : "",
       "raw notes": docxText(readFileSync(result.files.raw_notes)),
+      "full health check file": pdfParts(result.files.full_health_check),
+      "executive summary file": pdfParts(result.files.executive_summary),
+      "one page summary file": pdfParts(result.files.ceo_one_pager),
       "raw notes file": zipParts(result.files.raw_notes),
       "readout kit file": zipParts(result.files.readout_kit),
       "action lists": readFileSync(result.files.action_lists).toString("base64"),
@@ -160,6 +164,16 @@ function jobInput(overrides: Partial<DocumentsJobInput> = {}): DocumentsJobInput
 const zipParts = (path: string): string =>
   JSON.stringify(Object.entries(unzipSync(new Uint8Array(readFileSync(path)))).map(([name, bytes]) => [name, name === "docProps/core.xml" ? Buffer.from(bytes).toString().replace(/(<dcterms:(?:created|modified)[^>]*>)[^<]*/g, "$1") : Buffer.from(bytes).toString("base64")]));
 
+/**
+ * A PDF's bytes but for the two dates Chromium stamps it with, which differ
+ * between two makes on the tip as here (measured), as a hash: the printed
+ * decks themselves, not only the HTML they're printed from.
+ */
+const pdfParts = (path: string): string =>
+  createHash("sha256")
+    .update(readFileSync(path).toString("latin1").replace(/\/(CreationDate|ModDate) \([^)]*\)/g, ""))
+    .digest("hex");
+
 const gone = (lines: string[]): string[] => lines.filter((l) => /can't be read now/.test(l));
 type Worker = Awaited<ReturnType<typeof worker>>;
 
@@ -193,6 +207,9 @@ describe("a re-check records whether its draft read the earlier health check, an
       const made = await w.make();
       assert.deepEqual(made.progress, NONE);
       assert.equal(made.report.input.baseline, null);
+      // Every document, the printed decks too, as with no earlier health check at all.
+      rmSync(w.earlier, { recursive: true });
+      assert.deepEqual((await w.make()).texts, made.texts);
       assert.deepEqual(gone(w.deps.lines), [], "not read at the draft: nothing to say");
     });
   }
@@ -215,14 +232,18 @@ describe("a re-check records whether its draft read the earlier health check, an
     const w = await worker();
     await w.draft();
     assert.equal(w.record(), '{"read":true}');
+    const whole = await w.make();
     rmSync(w.earlier, { recursive: true });
     const first = await w.make();
     assert.deepEqual(first.progress, ONLY_THE_NOTES);
+    // The section drafted and approved, word for word as when the earlier health check could be read.
+    assert.equal(first.texts["raw notes"], whole.texts["raw notes"]);
     assert.deepEqual(gone(first.lines), [GONE]);
     const second = await w.make();
     assert.deepEqual(second.progress, ONLY_THE_NOTES);
     assert.deepEqual(gone(second.lines), [GONE]);
     assert.deepEqual(gone(w.deps.lines), [GONE, GONE]);
+    assert.deepEqual(gone(whole.lines), []);
     // Fixed words: no path, run id of the earlier one, or error.
     for (const line of gone(w.deps.lines)) assert.ok(!line.includes(w.earlier) && !line.includes(EARLIER_ID) && !/ENOENT|JSON/.test(line), line);
   });
@@ -237,6 +258,9 @@ describe("a re-check records whether its draft read the earlier health check, an
       const made = await w.make();
       // The old fault, left for a re-check drafted before the record, as the row says.
       assert.deepEqual(made.progress, { ...EVERY, "raw notes": false });
+      // Built as the earlier health check reads now, as a record that says it was read is: byte for byte.
+      writeFileSync(join(w.dir, BASELINE_READ_FILE), '{"read":true}');
+      assert.deepEqual((await w.make()).texts, made.texts);
       assert.deepEqual(gone(w.deps.lines), []);
     });
   }
@@ -352,6 +376,12 @@ describe("a re-check records whether its draft read the earlier health check, an
     assert.ok(!docxText(readFileSync(join(notRead.dir, "readout-kit.docx"))).includes("Since the last health check"));
     assert.equal(loadRun(notRead.dir).input.baseline, null);
     assert.ok(!/can't be read now/.test(quiet.stderr + quiet.stdout));
+    // The printed decks, as with no earlier health check at all.
+    const decks = () => ["full-health-check.pdf", "executive-summary.pdf", "ceo-one-pager.pdf"].map((f) => pdfParts(join(notRead.dir, f)));
+    const printed = decks();
+    rmSync(notRead.earlier, { recursive: true });
+    assert.equal(cli(notRead.dir).status, 0);
+    assert.deepEqual(decks(), printed);
 
     const read = await worker();
     await read.draft();
@@ -360,6 +390,9 @@ describe("a re-check records whether its draft read the earlier health check, an
     assert.equal(said.status, 0, said.stdout + said.stderr);
     assert.deepEqual(said.stderr.split("\n").filter((l) => /can't be read now/.test(l)), [GONE]);
     assert.ok(!said.stdout.includes("can't be read now"));
+    // The run's own id from its run.json and fixed words: no folder, error or name on stderr at all.
+    assert.deepEqual(said.stderr.split("\n").filter(Boolean), [GONE]);
+    for (const leak of [read.dir, read.earlier, EARLIER_ID, "Synthetic", "ENOENT", "Error"]) assert.ok(!said.stderr.includes(leak), leak);
   });
 });
 
@@ -381,6 +414,25 @@ describe("the kept corrections of decision 528 beside the record", () => {
     assert.ok(kept.texts["raw notes"].includes(`Data storage: ${STORAGE} of 10,240 MB used then`));
     rmSync(join(w.dir, BASELINE_READ_FILE));
     assert.deepEqual((await w.make()).texts, kept.texts);
+  });
+
+  test("read true and the kept corrections unreadable: no earlier health check, the Word notes hold the approved section, and the log says nothing of the earlier one (528's case)", async () => {
+    const spoils: Array<[string, (path: string) => void]> = [
+      ["half a file", (path) => writeFileSync(path, "[{")],
+      ["unreadable", (path) => chmodSync(path, 0)],
+    ];
+    for (const [what, spoil] of spoils) {
+      const w = await worker();
+      keepEarlier(w, [w.rows.storage, w.rows.sized, w.rows.titled]);
+      await w.draft();
+      assert.equal(w.record(), '{"read":true}');
+      spoil(join(w.dir, BASELINE_OVERRIDES_FILE));
+      const made = await w.make();
+      // The reverse case's shape: what was approved, and no comparison printed that nobody drafted.
+      assert.deepEqual(made.progress, ONLY_THE_NOTES, what);
+      assert.equal(made.report.input.baseline, null, what);
+      assert.deepEqual(made.lines.filter((l) => /earlier|comparison|baseline/i.test(l)), [], what);
+    }
   });
 
   test("read false with a stale kept file planted: no earlier health check, and none of its figures anywhere", async () => {
