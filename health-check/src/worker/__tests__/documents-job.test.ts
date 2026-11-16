@@ -352,8 +352,8 @@ describe("a corrected figure that can't be carried (decision 512)", () => {
   const { input: recordedInput } = loadRun(recorded);
   const skew = recordedInput.findings.find((f) => f.ruleId === "bp.ownership-skew" && f.status === "issue")!;
   const corrected = (f: Finding, field: string, previousValue: number, newValue: number, id: string): NumberOverride => ({ id, runId: RUN_ID, target: { type: "finding", id: f.id, field }, previousValue, newValue, reason: "Checked with the customer.", overriddenBy: "Synthetic Consultant", overriddenAt: "2026-11-04T17:00:00.000Z" });
-  // Decision 517 changed the first and last lines for every refusal, a finding's too.
-  const CLOSE = "Override each one back to its figure as read, then make the documents again. A finding's wording and a measure's chart or table can't be edited, so a figure we can't carry changes only with a new health check.";
+  // Decision 517 changed the first and last lines for every refusal, a finding's too, and 532 the close.
+  const CLOSE = "A finding's wording and a measure's chart or table can't be edited, so a figure we can't carry changes only with a new health check. The console refuses a correction like this before it is saved and holds a release while one stands. If this run is already released its corrections can no longer be changed there, so tell whoever looks after the health check.";
   // Twelve figures of the run, each refused alone, for the reason that lists ten and counts the rest.
   const twelve = recordedInput.findings
     .flatMap((f) => Object.entries(f.facts).map(([key, value]) => corrected(f, `facts.${key}`, value, value + 7, `ov-${f.id}-${key}`)))
@@ -429,6 +429,23 @@ describe("a corrected figure that can't be carried (decision 512)", () => {
     assert.equal(lines[11], "And 2 more.");
     assert.equal(lines[12], CLOSE);
     assert.equal(result.detail, "12 corrected figures can't be carried. See the run's Release tab.");
+  });
+
+  test("a released run's failed row ends with who to tell, and prints a title only as a line does: no token, no id (decision 532)", async () => {
+    const rep = recordedInput.findings.find((f) => f.ruleId === "pipe.segment-divergence" && f.title.includes("[[user:U0003]]"))!;
+    const share = recordedInput.metrics.find((m) => m.id === "historic.top_account_share")!;
+    const onShare: NumberOverride = { ...corrected(rep, "value", 32.1, 39.1, "ov-0002"), target: { type: "metric", id: share.id, field: "value" } };
+    const { result, deps, failed } = await make([corrected(rep, "facts.deals", 43, 44, "ov-0001"), onShare]);
+    const reason = [
+      "Held back: 2 corrected figures can't be carried into the documents.",
+      `"Win rate for rep a named person is well below the overall figure", deals: 43 as read, corrected to 44, but the wording has 43 in 2 places, and we can't tell which of them are this figure.`,
+      `"Won value from the top 10 accounts", value: 32.1 as read, corrected to 39.1, but another figure of this measure (a segment) is also 32.1, and a chart, table or sentence prints it as read.`,
+      "A finding's wording and a measure's chart or table can't be edited, so a figure we can't carry changes only with a new health check. The console refuses a correction like this before it is saved and holds a release while one stands. If this run is already released its corrections can no longer be changed there, so tell whoever looks after the health check.",
+    ].join("\n");
+    assert.equal(result.outcome, "failed");
+    assert.deepEqual(failed, [reason]);
+    assert.equal(deps.store.documents.get(RUN_ID)!.error, reason);
+    for (const part of ["[[", "U0003", rep.id, share.id, rep.title, "f-", "ov-"]) assert.ok(!reason.includes(part), part);
   });
 
   test("put back by a further row, the documents are made", async () => {

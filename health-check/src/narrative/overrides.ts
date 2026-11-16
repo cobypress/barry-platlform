@@ -414,7 +414,9 @@ export function applyOverrides(findings: Finding[], metrics: Metric[], overrides
 // The reason a refusal holds the documents, in the shape the console lists
 // (DECISIONS.md 512): the count, a line a refusal up to ten, then what to do.
 // Whitespace is collapsed within each line, so nothing a title holds can start
-// a line of its own.
+// a line of its own. The console runs a copy of this file, and prints the same
+// lines with its own close when it refuses a correction before it is saved or
+// a release while one stands (DECISIONS.md 532, 533).
 
 const REFUSALS_LISTED = 10;
 const TITLE_MAX = 120;
@@ -449,14 +451,28 @@ function why(r: OverrideRefusal): string {
   }
 }
 
-/** Why the documents were held back, for the console's Release tab and the command line. Findings' refusals are listed first, then measures'. */
-export function refusalReason(refused: OverrideRefusal[]): string {
+/**
+ * The count, then a line a refusal up to ten, findings' first, then measures',
+ * then how many more: everything but what to do, which depends on where it is
+ * printed. For one refusal, the second line is that refusal's.
+ */
+export function refusalLines(refused: OverrideRefusal[]): string[] {
   const ordered = [...refused.filter((r) => r.metricId === undefined), ...refused.filter((r) => r.metricId !== undefined)];
   const head = `Held back: ${countOf(refused.length)} can't be carried into the documents.`;
   const listed = ordered.slice(0, REFUSALS_LISTED).map((r) => `"${shownTitle(r.title)}", ${r.metricId === undefined ? nameOf(r.field) : metricNameOf(r.field)}: ${grouped(r.asRead)} as read, corrected to ${grouped(r.last)}, but ${why(r)}.`);
   const more = refused.length > REFUSALS_LISTED ? [`And ${refused.length - REFUSALS_LISTED} more.`] : [];
-  const close = "Override each one back to its figure as read, then make the documents again. A finding's wording and a measure's chart or table can't be edited, so a figure we can't carry changes only with a new health check.";
-  return [head, ...listed, ...more, close].map((line) => line.replace(/\s+/g, " ").trim()).join("\n");
+  return [head, ...listed, ...more].map((line) => line.replace(/\s+/g, " ").trim());
+}
+
+// The worker makes documents only for a released run, where the console takes
+// no correction, so the close can't tell the consultant to put one back: the
+// console refuses it before it is saved, and a run released with one needs
+// whoever looks after the health check (DECISIONS.md 532).
+const CLOSE = "A finding's wording and a measure's chart or table can't be edited, so a figure we can't carry changes only with a new health check. The console refuses a correction like this before it is saved and holds a release while one stands. If this run is already released its corrections can no longer be changed there, so tell whoever looks after the health check.";
+
+/** Why the documents were held back, for the console's Release tab and the command line. */
+export function refusalReason(refused: OverrideRefusal[]): string {
+  return [...refusalLines(refused), CLOSE].join("\n");
 }
 
 /** The same, for the worker's log and the job's outcome: the count only, since a title or a figure is the customer's. */

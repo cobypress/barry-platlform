@@ -330,7 +330,8 @@ describe("the admitted limits of decision 511, as the customer then reads them",
 // (decision 512; console lib/health-check/documents-error.ts).
 
 // Decision 517: the first and last lines name the documents and a measure's chart or table, for every refusal.
-const CLOSE = "Override each one back to its figure as read, then make the documents again. A finding's wording and a measure's chart or table can't be edited, so a figure we can't carry changes only with a new health check.";
+// Decision 532: the close says who to tell, since the worker holds documents only for a released run.
+const CLOSE = "A finding's wording and a measure's chart or table can't be edited, so a figure we can't carry changes only with a new health check. The console refuses a correction like this before it is saved and holds a release while one stands. If this run is already released its corrections can no longer be changed there, so tell whoever looks after the health check.";
 const refusal = (title: string, why: OverrideRefusal["why"] = { kind: "repeated", places: 2 }): OverrideRefusal => ({ findingId: ID, title, field: "facts.hits", asRead: 1200, last: 1100.5, why });
 
 describe("the reason a refusal holds the documents (decision 512)", () => {
