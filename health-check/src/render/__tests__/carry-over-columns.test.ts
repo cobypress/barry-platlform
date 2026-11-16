@@ -199,9 +199,10 @@ describe("the other lists set in columns go on in order (DECISIONS.md 580)", () 
     });
   }
 
-  // The rest are paginated by the builders with room to spare: issue titles (every finding's)
-  // up to 400 characters longer, recommendations up to 600, owners up to 200, words of wide
-  // capitals, at every density step, split none of them. So each is pushed down its own slide.
+  // The rest are paginated by the builders with room to spare: issue titles up to 400
+  // characters longer (every finding's up to 150), recommendations up to 600, owners up to
+  // 200, words in wide capitals, on the deck as printed and at each density step that sets
+  // lists in columns, split none of them. So each is pushed down its own slide.
 
   for (const columns of [2, 3]) {
     test(`the contents in ${columns} columns, pushed down its slide: in page order across the two, numbered on, each page number pointing at its part's slide`, async () => {
