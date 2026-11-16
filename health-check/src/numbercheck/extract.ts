@@ -152,9 +152,23 @@ class Scanner {
   }
 }
 
+// The two date forms written wholly in digits. extractFigures reads them on their own too, to keep a label from claiming part of one.
+function scanIsoDates(s: Scanner): void {
+  s.each(/\b(\d{4})-(\d{2})-(\d{2})(?:T[\d:.]+(?:Z|[+-]\d{2}:?\d{2})?)?(?![\w-])/g, (m, a, b) => s.add(a, b, { kind: "date", date: { y: +m[1]!, m: +m[2]!, d: +m[3]! } }));
+}
+
+function scanSlashDates(s: Scanner): void {
+  // UK order. "12/31/2025" has no reading in it, so it's blocked rather than guessed.
+  s.each(/\b(\d{1,2})\/(\d{1,2})\/(\d{4}|\d{2})\b/g, (m, a, b) => {
+    const [d, mo] = [+m[1]!, +m[2]!];
+    if (mo > 12 || d > 31 || mo === 0 || d === 0) s.add(a, b, { kind: "malformed" });
+    else s.add(a, b, { kind: "date", date: { d, m: mo, y: fullYear(m[3]!) } });
+  });
+}
+
 function scanDates(s: Scanner): void {
   const date = (start: number, end: number, value: PartialDate): void => s.add(start, end, { kind: "date", date: value });
-  s.each(/\b(\d{4})-(\d{2})-(\d{2})(?:T[\d:.]+(?:Z|[+-]\d{2}:?\d{2})?)?(?![\w-])/g, (m, a, b) => date(a, b, { y: +m[1]!, m: +m[2]!, d: +m[3]! }));
+  scanIsoDates(s);
   s.each(new RegExp(String.raw`\b(\d{1,2})(?:st|nd|rd|th)? (?:of )?(${MONTH})\.?,? (\d{4})\b`, "gi"), (m, a, b) => date(a, b, { d: +m[1]!, m: monthNumber(m[2]!), y: +m[3]! }));
   s.each(new RegExp(String.raw`\b(${MONTH})\.? (\d{1,2})(?:st|nd|rd|th)?,? (\d{4})\b`, "gi"), (m, a, b) => date(a, b, { m: monthNumber(m[1]!), d: +m[2]!, y: +m[3]! }));
   s.each(new RegExp(String.raw`\b(\d{1,2})(?:st|nd|rd|th)? (?:of )?(${MONTH})\b(?![\w-])`, "gi"), (m, a, b) => date(a, b, { d: +m[1]!, m: monthNumber(m[2]!) }));
@@ -162,12 +176,7 @@ function scanDates(s: Scanner): void {
   s.each(new RegExp(String.raw`\b(${MONTH})\.?,? (\d{4})\b`, "gi"), (m, a, b) => date(a, b, { m: monthNumber(m[1]!), y: +m[2]! }));
   s.each(/\bQ([1-4])(?: ?(?:FY)? ?(\d{4}|\d{2}))?\b/gi, (m, a, b) => date(a, b, { q: +m[1]!, ...(m[2] ? { y: fullYear(m[2]) } : {}) }));
   s.each(/\bFY ?(\d{4}|\d{2})\b/gi, (m, a, b) => date(a, b, { y: fullYear(m[1]!) }));
-  // UK order. "12/31/2025" has no reading in it, so it's blocked rather than guessed.
-  s.each(/\b(\d{1,2})\/(\d{1,2})\/(\d{4}|\d{2})\b/g, (m, a, b) => {
-    const [d, mo] = [+m[1]!, +m[2]!];
-    if (mo > 12 || d > 31 || mo === 0 || d === 0) s.add(a, b, { kind: "malformed" });
-    else date(a, b, { d, m: mo, y: fullYear(m[3]!) });
-  });
+  scanSlashDates(s);
 }
 
 const fullYear = (raw: string): number => (raw.length === 2 ? 2000 + Number(raw) : Number(raw));
@@ -320,13 +329,19 @@ export type ExtractOptions = {
 export function extractFigures(text: string, options: ExtractOptions = {}): { normalised: string; figures: Figure[] } {
   const s = new Scanner(normalise(text));
   scanIdentifiers(s);
+  // A label is claimed whole or not at all inside a date in digits: a month key "2026-08"
+  // claimed out of "2026-08-18" would leave -18 to be read as a figure (DECISIONS.md 551, 553).
+  const dates = new Scanner(s.work);
+  scanIsoDates(dates);
+  scanSlashDates(dates);
+  const splits = (start: number, end: number): boolean => dates.figures.some((d) => start < d.end && end > d.start && (start > d.start || end < d.end));
   for (const label of [...(options.labels ?? [])].sort((a, b) => b.length - a.length)) {
     const norm = normalise(label);
     if (!norm.trim()) continue;
     let at = s.work.indexOf(norm);
     while (at !== -1) {
       const end = at + norm.length;
-      if (!/[\w]/.test(s.work[at - 1] ?? "") && !/[\w]/.test(s.work[end] ?? "")) s.claim(at, end);
+      if (!/[\w]/.test(s.work[at - 1] ?? "") && !/[\w]/.test(s.work[end] ?? "") && !splits(at, end)) s.claim(at, end);
       at = s.work.indexOf(norm, end);
     }
   }
