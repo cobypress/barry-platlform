@@ -813,6 +813,35 @@ describe("a list split across a chapter slide keeps the label it sits under (DEC
       await context.close();
     }
   });
+
+  test("an issue title with sentences in it, cut across the chapter's two slides: its rest goes on with no bullet (DECISIONS.md 571)", async () => {
+    // Automation's titles three sentences longer, a team's words in each: one is cut at a sentence end.
+    const MORE = " It holds for the Enterprise Sales North America teams. It holds for the Asia Pacific Partner Channel teams. It holds for the teams that sell through partners";
+    const cut = buildReport({ ...base, findings: output!.findings.map((f) => (f.status === "issue" && f.domain === "automation" ? { ...f, title: `${f.title}.${MORE}` } : f)) });
+    const { page, close } = await printed(fullReportHtml(cut, pseudonyms));
+    try {
+      await carryOver(page);
+      const rests = await page.evaluate(() => {
+        const pages = [...window.document.querySelectorAll(".page")];
+        return [...window.document.querySelectorAll("li[data-carried-rest]")].map((li) => {
+          const at = pages.indexOf(li.closest(".page")!);
+          // The item's first half: the last item of the left column's lists on the slide before.
+          const half = [...pages[at - 1]!.querySelectorAll(".cols > div:first-child li")].at(-1)!;
+          return {
+            slide: [...pages[at]!.children].slice(0, 2).map((c) => `${c.hasAttribute("data-carried-label") ? "[marked]" : ""}${c.textContent}`),
+            style: getComputedStyle(li).listStyleType,
+            half: `${getComputedStyle(half).listStyleType}${half.hasAttribute("data-carried-rest") ? " rest" : ""}${/\.$/.test((half.textContent ?? "").replace(/R[\d.]+$/, "").trim()) ? " ends a sentence" : ""}`,
+            first: li.parentElement!.firstElementChild === li,
+            words: (li.textContent ?? "").slice(0, 20),
+          };
+        });
+      });
+      assert.ok(rests.length > 0, "an item is cut");
+      for (const rest of rests) assert.deepEqual({ ...rest, words: rest.words.startsWith("It holds for the") }, { slide: ["[marked]Automation", "[marked]At a glance, continued"], style: "none", half: "disc ends a sentence", first: true, words: true }, JSON.stringify(rest));
+    } finally {
+      await close();
+    }
+  });
 });
 
 /** Opens a document as the documents job prints it, carried over. */

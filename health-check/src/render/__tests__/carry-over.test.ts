@@ -445,16 +445,57 @@ describe("carry-over: a label only over what it heads (DECISIONS.md 510)", () =>
 });
 
 // A continued page's eyebrow and title are copies, marked as a copied label is, so
-// they never count as its content (DECISIONS.md 570).
+// they never count as its content (DECISIONS.md 570). The rest of a cut list item
+// is the item going on: no bullet, and in a numbered list no number of its own
+// (571 and 572). A long item's line is 20px, one sentence a line.
 
 const ITEM_CSS = `
 .eyebrow { height: 20px; line-height: 20px; }
+ol { margin: 0; padding: 0 0 0 24px; }
+li.long { height: auto; line-height: 20px; white-space: pre-line; }
 `;
 /** A page with an eyebrow over its title, as every slide has. */
 const headed = (body: string): string => htmlDocument("Test", "a4", `${SPLIT_CSS}${ITEM_CSS}`, [`<section class="page" data-page="1"><div class="eyebrow">Area</div><h2>Title</h2>${body}<div class="footer" data-chrome><span>Footer</span><span>1</span></div></section>`]);
+/** As `sheet`, with long items' styles. */
+const listSheet = (body: string): string => htmlDocument("Test", "a4", `${SPLIT_CSS}${ITEM_CSS}`, [`<section class="page" data-page="1"><h2>Title</h2>${body}<div class="footer" data-chrome><span>Footer</span><span>1</span></div></section>`]);
+const longItem = (name: string, n: number): string => `<li class="long">${sentences(...Array.from({ length: n }, (_, i) => `${name}s${i + 1}`))}</li>`;
 const listed = (names: string[]): string => names.map((n) => `<li>${n}</li>`).join("");
 
-describe("carry-over: a continued page's heading is a copy (DECISIONS.md 570)", () => {
+/**
+ * The marker the browser prints for each list item the selector finds, by the item's own
+ * words: "4." in a numbered list, "•" in a bulleted one, null for none. Read from
+ * Chromium's accessibility tree, where the marker is a node of its own.
+ */
+async function markers(page: Page, selector: string): Promise<Array<{ text: string; marker: string | null }>> {
+  const cdp = await page.context().newCDPSession(page);
+  try {
+    const texts = await page.evaluate((s) => {
+      const found = [...document.querySelectorAll(s)];
+      (window as unknown as { found: Element[] }).found = found;
+      return found.map((li) => (li.textContent ?? "").replace(/\s+/g, " ").trim());
+    }, selector);
+    const out = [];
+    for (const [i, text] of texts.entries()) {
+      const { result } = await cdp.send("Runtime.evaluate", { expression: `window.found[${i}]` });
+      const { nodes } = await cdp.send("Accessibility.queryAXTree", { objectId: result.objectId!, role: "ListMarker" });
+      const name = nodes[0]?.name?.value;
+      out.push({ text, marker: typeof name === "string" ? name.trim() : null });
+    }
+    return out;
+  } finally {
+    await cdp.detach();
+  }
+}
+
+/** Each page's list items: words, whether marked as a rest, and the marker the browser draws. */
+const itemsOn = (page: Page): Promise<Array<Array<{ text: string; rest: boolean; style: string }>>> =>
+  page.evaluate(() =>
+    [...document.querySelectorAll(".page")].map((p) =>
+      [...p.querySelectorAll("li")].map((li) => ({ text: (li.textContent ?? "").replace(/\s+/g, " ").trim(), rest: li.hasAttribute("data-carried-rest"), style: getComputedStyle(li).listStyleType })),
+    ),
+  );
+
+describe("carry-over: a continued page's heading is a copy, and a cut item goes on without a marker (DECISIONS.md 570, 571 and 572)", () => {
   test("the continued page's eyebrow and title are marked as copies; the page's own are not", async () => {
     const page = await open(headed(`<div class="chapter">${items("A", 14)}</div>`));
     try {
@@ -483,6 +524,99 @@ describe("carry-over: a continued page's heading is a copy (DECISIONS.md 570)", 
     const stays = `<p style="height:420px">Words of the slide's own that stay on the first page.</p>`;
     assert.deepEqual(await emptyOn(`<div class="chapter">${stays}<ul><li>And 5 more on the pages that follow.</li></ul></div>`), [2]);
     assert.deepEqual(await emptyOn(`<div class="chapter">${stays.replace("420", "300")}<ul>${listed(Array.from({ length: 8 }, (_, i) => `An issue that is on the list, number ${i + 1}`))}</ul></div>`), []);
+  });
+
+  test("a bulleted item cut at a sentence end: the rest is marked, has no bullet and starts at the item's own text edge", async () => {
+    const page = await open(listSheet(`${gap(370)}<ul><li>A1</li>${longItem("B", 4)}<li>A3</li></ul>`));
+    try {
+      assert.equal(await carryOver(page), 1);
+      assert.deepEqual(await itemsOn(page), [
+        [
+          { text: "A1", rest: false, style: "disc" },
+          { text: "Bs1. Bs2. Bs3.", rest: false, style: "disc" },
+        ],
+        [
+          { text: "Bs4.", rest: true, style: "none" },
+          { text: "A3", rest: false, style: "disc" },
+        ],
+      ]);
+      assert.deepEqual(await markers(page, "li"), [
+        { text: "A1", marker: "•" },
+        { text: "Bs1. Bs2. Bs3.", marker: "•" },
+        { text: "Bs4.", marker: null },
+        { text: "A3", marker: "•" },
+      ]);
+      // Where each half's words begin on its page.
+      const edges = await page.evaluate(() =>
+        [...document.querySelectorAll("li.long")].map((li) => {
+          const range = document.createRange();
+          range.selectNodeContents(li);
+          return range.getClientRects()[0]!.left - li.closest(".page")!.getBoundingClientRect().left;
+        }),
+      );
+      assert.equal(edges.length, 2);
+      assert.ok(Math.abs(edges[0]! - edges[1]!) <= 1, JSON.stringify(edges));
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("a paragraph cut at a sentence end gains nothing", async () => {
+    const page = await open(sheet(`${gap(330)}<div><h3>Label</h3><p>${sentences("One", "Two", "Three", "Four", "Five", "Six")}</p></div>`));
+    try {
+      assert.equal(await carryOver(page), 1);
+      const rest = await page.evaluate(() => ({ marked: document.querySelectorAll("[data-carried-rest]").length, attributes: [...document.querySelectorAll(".page")[1]!.querySelector("p")!.attributes].map((a) => a.name) }));
+      assert.deepEqual(rest, { marked: 0, attributes: [] });
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("a numbered list of five, its third item cut: the rest holds the third's number unseen, and the fourth still prints 4", async () => {
+    const page = await open(listSheet(`${gap(330)}<ol>${listed(["N1", "N2"])}${longItem("N3", 4)}${listed(["N4", "N5"])}</ol>`));
+    try {
+      assert.equal(await carryOver(page), 1);
+      assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll("ol")].map((ol) => ol.start)), [1, 3]);
+      assert.deepEqual(await markers(page, "li"), [
+        { text: "N1", marker: "1." },
+        { text: "N2", marker: "2." },
+        { text: "N3s1. N3s2. N3s3.", marker: "3." },
+        { text: "N3s4.", marker: null },
+        { text: "N4", marker: "4." },
+        { text: "N5", marker: "5." },
+      ]);
+      assert.deepEqual((await itemsOn(page))[1]![0], { text: "N3s4.", rest: true, style: "none" });
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("a numbered list split between whole items keeps counting as before", async () => {
+    const page = await open(listSheet(`${gap(330)}<ol>${listed(["N1", "N2", "N3", "N4", "N5"])}</ol>`));
+    try {
+      assert.equal(await carryOver(page), 1);
+      assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll("ol")].map((ol) => ol.start)), [1, 4]);
+      assert.deepEqual((await markers(page, "li")).map((m) => m.marker), ["1.", "2.", "3.", "4.", "5."]);
+      assert.equal(await page.evaluate(() => document.querySelectorAll("[data-carried-rest]").length), 0);
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("an item taller than a page, cut twice: the third page's list starts at the same number, and the next item is one more", async () => {
+    const page = await open(listSheet(`<ol>${listed(["N1", "N2"])}${longItem("N3", 50)}${listed(["N4"])}</ol>`));
+    try {
+      assert.equal(await carryOver(page), 2);
+      assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll("ol")].map((ol) => ol.start)), [1, 3, 3]);
+      const shown = await markers(page, "li");
+      assert.deepEqual(
+        shown.map((m) => m.marker),
+        ["1.", "2.", "3.", null, null, "4."],
+      );
+      assert.deepEqual((await itemsOn(page)).map((p) => p.map((i) => i.rest)), [[false, false, false], [true], [true, false]]);
+    } finally {
+      await page.close();
+    }
   });
 
   test("the executive summary's value and investment pages, made to split, carry their eyebrow and title onto the continued page", async () => {
@@ -521,6 +655,36 @@ describe("carry-over: a continued page's heading is a copy (DECISIONS.md 570)", 
         return { gap: line.getBoundingClientRect().top - h2.getBoundingClientRect().bottom, margin: parseFloat(getComputedStyle(h2).marginBottom) };
       });
       assert.ok(Math.abs(gap.gap - gap.margin) < 0.01, JSON.stringify(gap));
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("the full report's agent-readiness fixes, one cut across two slides: the numbers printed run 1 to N, none missing and none twice", async () => {
+    // Two or more fixes sit side by side in two columns, where the carry-over moves an item
+    // whole; a single fix is one column, and a title with sentences in it is cut there.
+    // The title's sentences are a team's words, as "Licences you can release: dormant users" has a part of its own.
+    const first = buildReport(input).readiness;
+    const linked = new Set(first.pillars.flatMap((p) => p.findingIds));
+    const kept = first.fixes[0]!.id;
+    const MORE = [" It holds for the Enterprise Sales North America teams.", " It holds for the Asia Pacific Partner Channel teams.", " It holds for the teams that sell through partners.", " It holds for the renewals desk as well."];
+    const findings = input.findings.map((f) =>
+      f.id === kept ? { ...f, title: `${f.title}.${[...MORE, ...MORE].join("")}`.replace(/\.$/, "") } : linked.has(f.id) && f.status === "issue" ? { ...f, status: "passed" as const } : f,
+    );
+    const report = buildReport({ ...input, findings });
+    const page = await open(fullReportHtml(report, pseudonyms));
+    try {
+      await carryOver(page);
+      const shown = await markers(page, "ol.readiness-fixes > li");
+      assert.ok((await page.evaluate(() => document.querySelectorAll("ol.readiness-fixes > li[data-carried-rest]").length)) > 0, JSON.stringify(shown));
+      // Across the slides it is printed on.
+      const on = await page.evaluate(() => [...document.querySelectorAll("ol.readiness-fixes")].map((ol) => [...document.querySelectorAll(".page")].indexOf(ol.closest(".page")!)));
+      assert.equal(new Set(on).size, 2, JSON.stringify(on));
+      assert.deepEqual(
+        shown.filter((m) => m.marker !== null).map((m) => m.marker),
+        report.readiness.fixes.map((_, i) => `${i + 1}.`),
+        JSON.stringify(shown),
+      );
     } finally {
       await page.close();
     }

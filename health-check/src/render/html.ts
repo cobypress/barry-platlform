@@ -253,6 +253,8 @@ table.grid th.num { text-align: right; }
 .cover-score .grade { font-weight: 600; margin-top: 4px; }
 .ref { color: var(--muted); font-size: 0.85em; font-weight: 400; letter-spacing: 0.02em; margin-left: 6px; white-space: nowrap; }
 .dark .ref { color: var(--panelMuted); }
+/* The rest of a list item the carry-over cut across two pages: the same item going on, so no bullet or number (DECISIONS.md 571 and 572). */
+li[data-carried-rest] { list-style-type: none; }
 `;
 
 export function document(title: string, size: "a4" | "slide", css: string, pages: string[]): string {
