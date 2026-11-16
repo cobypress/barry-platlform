@@ -444,6 +444,18 @@ describe("a free scan's run job", () => {
     assert.equal(existsSync(join(deps.runsDir, RUN_ID)), false, "nothing of the org stays on the worker");
   });
 
+  test("with both steps answered, so it ends in review where a health check would draft, still asks Claude for nothing (DECISIONS.md 548 (4))", async () => {
+    // A client that answers, so a draft asked of it would be made and counted.
+    let calls = 0;
+    const narrative: NarrativeClient = { complete: async (request: NarrativeRequest) => (calls++, { stopReason: "end_turn", model: request.model, text: JSON.stringify({ paragraphs: [{ text: "We looked closely at this area.", sources: [] }] }) }) };
+    const { deps, handle } = await setup({ narrative }, runInput({ run: consoleRun({ scope: "essentials", product: "scan" }), answers: loadAnswers() }));
+    assert.deepEqual(await handle(job, last), { outcome: "done", detail: `Run ${RUN_ID} is in review` });
+    assert.equal(stored(deps).run.status, "in_review");
+    assert.ok(deps.store.scanResults.has(RUN_ID));
+    assert.equal(calls, 0);
+    assert.ok(stored(deps).output!.versions.every((v) => v.source === "engine"));
+  });
+
   test("sends the facts summary with its results, as an ordinary run does, though its folder is then deleted (DECISIONS.md 324)", async () => {
     const { deps, handle } = await setup({}, runInput({ run: consoleRun({ scope: "essentials", product: "scan" }) }));
     await handle(job, last);

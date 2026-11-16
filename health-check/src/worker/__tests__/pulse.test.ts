@@ -8,7 +8,7 @@ import { applyOverrides } from "../../narrative/overrides.ts";
 import { buildReport } from "../../narrative/sections.ts";
 import { loadRun } from "../../render/render-run.ts";
 import { SIZED_RULE } from "../../testing/recheck.ts";
-import { loadRecording, ReplayTransport } from "../../testing/replay.ts";
+import { loadAnswers, loadRecording, ReplayTransport } from "../../testing/replay.ts";
 import { PostgresWorkerStore, type SqlPool, type SqlResult } from "../postgres-store.ts";
 import { createJobHandler } from "../worker.ts";
 import { processDocumentsJob } from "../documents-job.ts";
@@ -166,6 +166,22 @@ describe("a pulse whose baseline's corrections can't be read (decision 531)", as
     assert.deepEqual(deps.lines.filter((l) => /corrections couldn't be read/.test(l)), [`Pulse ${PULSE}: the earlier health check's corrections couldn't be read, so the comparison shows its figures as read.`]);
     assert.deepEqual(plain.deps.lines.filter((l) => /corrections couldn't be read/.test(l)), []);
     assert.equal(existsSync(join(deps.runsDir, PULSE, "baseline-overrides.json")), false);
+  });
+});
+
+describe("a pulse whose steps are both answered (DECISIONS.md 548 (4))", () => {
+  test("ends in review, where a health check would draft, and still never asks Claude", async () => {
+    // A client that answers, so a draft asked of it would be made and counted.
+    let calls = 0;
+    const narrative: NarrativeClient = { complete: async (request: NarrativeRequest) => (calls++, { stopReason: "end_turn", model: request.model, text: JSON.stringify({ paragraphs: [{ text: "We looked closely at this area.", sources: [] }] }) }) };
+    const deps = baseDeps({ dataTransport: new ReplayTransport(loadRecording()), narrative });
+    await deps.tokens.save(syntheticConnection());
+    deps.store.addRun(runInput({ run: consoleRun({ id: PULSE, product: "pulse", baselineRunId: "hc-2026-08-31-00000009" }), answers: loadAnswers() }));
+    assert.deepEqual(await createJobHandler(deps)({ kind: "run", runId: PULSE }, last), { outcome: "done", detail: `Run ${PULSE} is in review` });
+    assert.ok(deps.store.pulseResults.has(PULSE));
+    assert.equal(calls, 0);
+    assert.ok(deps.store.runs.get(PULSE)!.output!.versions.every((v) => v.source === "engine"));
+    assert.ok(!existsSync(join(deps.runsDir, PULSE, "narrative-rejections.json")));
   });
 });
 
