@@ -207,6 +207,175 @@ function handCases(): HandCase[] {
     metrics: [worded],
     overrides: [onMetric(worded, "value", 5, 6, 1), ...many.map((f, i) => onFinding(f, "facts.seats", 7, 8, i + 2))],
   });
+
+  // Where the engine isn't beside it, the console's copy of the judgement is
+  // held by this file alone (DECISIONS.md 532, 533). Each case from here fails
+  // a slip in the copy that the cases above let through: a branch swapped or
+  // dropped, a text or part not read, a mask left out.
+  for (const c of slipCases()) add(c);
+  return cases;
+}
+
+/** The cases that hold each branch of the judgement, so a wrong copy fails one by itself. */
+function slipCases(): HandCase[] {
+  const cases: HandCase[] = [];
+  const add = (c: HandCase): void => void cases.push(c);
+
+  // A put-back always saves (DECISIONS.md 533, item 2): the last row decides
+  // "unchanged" before the first row is tested for "stale". The measure prints
+  // its value, so any other path refuses it.
+  const reopened = finding(40, "Open deals", "30 deals are open.", { open: 30 });
+  add({ name: "a finding: put back over a stale first row, nothing refused and nothing changes", findings: [reopened], overrides: [onFinding(reopened, "facts.open", 31, 29, 1), onFinding(reopened, "facts.open", 29, 30, 2)] });
+  const quiet = measure(12, "People who log in less than weekly", 5, { definition: "Fewer than 5 people log in in a typical week." });
+  add({ name: "a measure: put back after two rows from its value as read, nothing refused and nothing changes", metrics: [quiet], overrides: [onMetric(quiet, "value", 5, 6, 1), onMetric(quiet, "value", 6, 5, 2)] });
+  add({ name: "a measure: put back over a stale first row, nothing refused and nothing changes", metrics: [quiet], overrides: [onMetric(quiet, "value", 4, 6, 1), onMetric(quiet, "value", 6, 5, 2)] });
+
+  // Corrected twice: the first row is tested against the value as read, the
+  // last row's value is carried, and a stale refusal names the first row's
+  // value. Rows are judged in the order given, never sorted.
+  const bought = finding(41, "Seats bought", "60 seats are bought.", { seats: 60 });
+  add({ name: "a finding: corrected twice, the last value is carried", findings: [bought], overrides: [onFinding(bought, "facts.seats", 60, 58, 1), onFinding(bought, "facts.seats", 58, 55, 2)] });
+  add({ name: "a finding: corrected twice from a stale first row, the refusal names the first row's value (stale)", findings: [bought], overrides: [onFinding(bought, "facts.seats", 61, 58, 1), onFinding(bought, "facts.seats", 58, 55, 2)] });
+  const rate = measure(13, "Win rate", 72.5);
+  add({ name: "a measure: corrected twice, the last value is carried", metrics: [rate], overrides: [onMetric(rate, "value", 72.5, 71, 1), onMetric(rate, "value", 71, 70, 2)] });
+  add({ name: "a measure: corrected twice from a stale first row, the refusal names the first row's value (stale)", metrics: [rate], overrides: [onMetric(rate, "value", 72, 71, 1), onMetric(rate, "value", 71, 70, 2)] });
+
+  // A measure's texts are its label, definition, assumptions, exclusions, its
+  // reason for no segments, and each segment's and point's reason (DECISIONS.md 517).
+  const thinTeam = measure(14, "Win rate", 20, { segments: [{ dimension: "team", key: "Team B", n: 3, value: null, notMeasurableReason: "Fewer than 20 closed deals in this team." }], segmentExemptReason: null });
+  add({ name: "a measure: its value printed only in a segment's reason (worded)", metrics: [thinTeam], overrides: [onMetric(thinTeam, "value", 20, 22)] });
+  const thinMonth = measure(15, "Win rate", 20, { series: [{ date: "2026-09-30", value: null, n: 4, notMeasurableReason: "Fewer than 20 deals closed this month." }] });
+  add({ name: "a measure: its value printed only in a series point's reason (worded)", metrics: [thinMonth], overrides: [onMetric(thinMonth, "value", 20, 22)] });
+  const texts = [
+    measure(16, "Share of the 30 largest deals won", 30),
+    measure(17, "Win rate", 30, { segmentExemptReason: "Too few deals in any team: under 30 each." }),
+    measure(18, "Win rate", 30, { assumptions: ["A deal counts once it is 30 days old."] }),
+    measure(19, "Win rate", 30, { exclusions: ["Deals under 30 days old."] }),
+  ];
+  add({ name: "a measure: its value printed in its label, its reason for no segments, an assumption or an exclusion (worded, each)", metrics: texts, overrides: texts.map((m, i) => onMetric(m, "value", 30, 31, i + 1)) });
+  const fewer = measure(20, "People who never log in", 5, { definition: "Fewer than five people never log in." });
+  add({ name: "a measure: its value printed as a number word (worded)", metrics: [fewer], overrides: [onMetric(fewer, "value", 5, 6)] });
+
+  // A measure's n and stats are judged and carried as its value is, and which
+  // part a refusal names follows the order: another figure (value, n, then the
+  // stats), a segment, a point in its series, an evidence count.
+  const days = measure(21, "Days to close", 41.5, { unit: "days", n: 52, stats: { median: 39 } });
+  add({ name: "a measure: its n and a stat that no part or text holds are carried", metrics: [days], overrides: [onMetric(days, "n", 52, 50, 1), onMetric(days, "stats.median", 39, 37, 2)] });
+  const won = measure(22, "Deals won", 12, { n: 12, stats: { median: 12 } });
+  add({ name: "a measure: of n and a stat that hold the value, n is named (part)", metrics: [won], overrides: [onMetric(won, "value", 12, 13)] });
+  const held = [
+    measure(23, "Win rate", 64, { segments: [{ dimension: "team", key: "Team C", n: 20, value: 64, notMeasurableReason: null }], series: [{ date: "2026-09-30", value: 64, n: 30, notMeasurableReason: null }], evidence: [{ ...EVIDENCE, count: 64 }] }),
+    measure(24, "Win rate", 66, { series: [{ date: "2026-09-30", value: 50, n: 66, notMeasurableReason: null }], evidence: [{ ...EVIDENCE, count: 66 }] }),
+    measure(25, "Win rate", 68, { stats: { p90: 68 }, segments: [{ dimension: "team", key: "Team D", n: 68, value: 70, notMeasurableReason: null }] }),
+  ];
+  add({ name: "a measure: of parts that hold the value, the first in order is named (part, each)", metrics: held, overrides: held.map((m, i) => onMetric(m, "value", m.value, m.value + 1, i + 1)) });
+
+  // A year and month is never a figure (DECISIONS.md 514): the month that
+  // equals the value as read is masked, so only the figure itself is found
+  // and rewritten, and the date stands as written.
+  const month = finding(42, "Deals closed in a month", "10 deals closed in 2026-10.", { closed: 10 });
+  add({ name: "a finding: its value as read also the month of a year and month, which is masked: carried, the date untouched", findings: [month], overrides: [onFinding(month, "facts.closed", 10, 11)] });
+  const counted = finding(43, "Deals counted", "Deals are counted from 2026-12.", { months: 12 });
+  add({ name: "a finding: its value as read only the month of a year and month: carried with no text rewritten, the date untouched", findings: [counted], overrides: [onFinding(counted, "facts.months", 12, 13)] });
+  // But not one joined to a longer form, before or after: its month is a place.
+  const range = finding(44, "Deals that slipped", "Deals from 2025-12-2026-10: 10 slipped.", { slipped: 10 });
+  add({ name: "a finding: a year and month joined to a form before it is not masked, so its month is a place (repeated)", findings: [range], overrides: [onFinding(range, "facts.slipped", 10, 11)] });
+  const since = finding(45, "Deals that slipped since a day", "Since 2026-10-5, 10 deals slipped.", { slipped: 10 });
+  add({ name: "a finding: a year and month joined to a form after it is not masked, so its month is a place (repeated)", findings: [since], overrides: [onFinding(since, "facts.slipped", 10, 11)] });
+
+  // How a found figure is written back: in the form found, grouped from 1,000
+  // when it was found grouped or under 1,000, and digits written out in full.
+  const owners = finding(46, "Records with no owner", "950 records have no owner.", { records: 950 });
+  add({ name: "a finding: a figure under 1,000 corrected to over it is written grouped (carried)", findings: [owners], overrides: [onFinding(owners, "facts.records", 950, 1050)] });
+  const read = finding(47, "Records read", "10500 records were read.", { records: 10500 });
+  add({ name: "a finding: a figure found ungrouped is written ungrouped (carried)", findings: [read], overrides: [onFinding(read, "facts.records", 10500, 9800)] });
+  const rows = finding(48, "Rows counted", "1000000000000000000000 rows were counted.", { rows: 1e21 });
+  add({ name: "a finding: a figure of 10^21, which String writes with an exponent, is found and written in full (carried)", findings: [rows], overrides: [onFinding(rows, "facts.rows", 1e21, 2e21)] });
+
+  // Never inside a longer number, and what the 5% test reads.
+  const pipeline = finding(49, "Deals with no next step", "£12,500 of pipeline sits in 500 open deals.", { deals: 500 });
+  add({ name: "a finding: a value as read inside a grouped number is not a place (carried)", findings: [pipeline], overrides: [onFinding(pipeline, "facts.deals", 500, 480)] });
+  const stale = finding(50, "Stale pipeline", "About £12,500 of pipeline is stale.", { pipeline: 12400 });
+  add({ name: "a finding: a grouped number near the value as read is read whole (rounded)", findings: [stale], overrides: [onFinding(stale, "facts.pipeline", 12400, 11000)] });
+  const apps = finding(51, "Apps on an old version", "Each app runs version 4.5.6.", { apps: 6 });
+  add({ name: "a finding: the last digit of a dotted form is not a number of its own (carried)", findings: [apps], overrides: [onFinding(apps, "facts.apps", 6, 7)] });
+  const about = finding(52, "Open deals", "About 105 deals are open.", { open: 100 });
+  add({ name: "a finding: a number exactly 5% from the value as read may be it rounded (rounded)", findings: [about], overrides: [onFinding(about, "facts.open", 100, 90)] });
+  const fell = finding(53, "Change in win rate", "The win rate fell by 12 points this year.", { change: -12 });
+  add({ name: "a finding: a negative value as read is near its size printed unsigned (rounded)", findings: [fell], overrides: [onFinding(fell, "facts.change", -12, -10)] });
+
+  // What is masked, never a place: a token's digits, a date with its time, an
+  // identifier, and digits joined to a letter in a guessed date.
+  const owned = finding(54, "Deals with an owner", "Some deals are owned by [[user:U0003]].", { owners: 3 });
+  add({ name: "a finding: a token's digits are not the value as read (carried)", findings: [owned], overrides: [onFinding(owned, "facts.owners", 3, 4)] });
+  const at = finding(55, "Open deals at the read", "Read at 2026-10-31T13:00:00Z, 10 deals were open.", { open: 10 });
+  add({ name: "a finding: an ISO date with its time is masked whole (carried)", findings: [at], overrides: [onFinding(at, "facts.open", 10, 11)] });
+  const field = finding(56, "Deals using a field", "42 deals use the field Score_42__c.", { deals: 42 });
+  add({ name: "a finding: an identifier's digits are not a place (carried)", findings: [field], overrides: [onFinding(field, "facts.deals", 42, 43)] });
+  const jobs = finding(57, "Jobs that stop", "By 3rd May 2026 the 3 jobs stop.", { jobs: 3 });
+  add({ name: "a finding: a guessed date's digits joined to a letter after are masked (carried)", findings: [jobs], overrides: [onFinding(jobs, "facts.jobs", 3, 4)] });
+  const teams = finding(58, "Deals that slipped in a quarter", "In Q3 12 deals slipped across the sales teams.", { teams: 3 });
+  add({ name: "a finding: a guessed date's digits joined to a letter before are masked (carried)", findings: [teams], overrides: [onFinding(teams, "facts.teams", 3, 4)] });
+  const logged = finding(59, "Deals logged in a month", "Deals logged in 2026-02 number 2,026.", { deals: 2026 });
+  add({ name: "a finding: a guessed year inside a year and month is not a part (carried)", findings: [logged], overrides: [onFinding(logged, "facts.deals", 2026, 2027)] });
+
+  // What is unsure: a guessed year, a colon form with a grouped or a decimal
+  // part, and with a place beside it, both counted.
+  const users = finding(60, "Active users", "12 of 2000 active users log in.", { users: 2000 });
+  add({ name: "a finding: a bare year guessed from the word before is unsure (unsure)", findings: [users], overrides: [onFinding(users, "facts.users", 2000, 2100)] });
+  const thousand = finding(61, "Admins to users", "Admins to users are 1,000:1.", { users: 1000 });
+  add({ name: "a finding: a colon form with a grouped part (unsure)", findings: [thousand], overrides: [onFinding(thousand, "facts.users", 1000, 1100)] });
+  const half = finding(62, "Admins to users", "Admins to users are 1.5:1.", { ratio: 1.5 });
+  add({ name: "a finding: a colon form with a decimal part (unsure)", findings: [half], overrides: [onFinding(half, "facts.ratio", 1.5, 2)] });
+  const both = finding(63, "Admins to users", "Admins to users are 1:40, across 40 users.", { users: 40 });
+  add({ name: "a finding: a place and an unsure form are counted together (repeated)", findings: [both], overrides: [onFinding(both, "facts.users", 40, 44)] });
+  const meetings = finding(64, "Meetings a team holds", "Five teams meet at 5:00 each day.", { meetings: 5.1 });
+  add({ name: "a finding: of two unsure forms near the value as read, the first in the text is named (rounded)", findings: [meetings], overrides: [onFinding(meetings, "facts.meetings", 5.1, 6)] });
+  // A digit outside the basic plane is two UTF-16 units that normalise to one
+  // "5": the text is cut only where each side normalises alone, so the form is named whole.
+  const bold = finding(65, "Admins who log in each week", "Only 𝟓 admins log in each week.", { active: 5 });
+  add({ name: "a finding: a figure written as a digit outside the basic plane is unsure, and named whole (unsure)", findings: [bold], overrides: [onFinding(bold, "facts.active", 5, 6)] });
+
+  // The rewrite: two places in one text whose lengths change, and a figure in
+  // each text a finding has, each judged and rewritten where it stands.
+  const active = finding(66, "Users who logged in", "9 of 90 users logged in this month.", { active: 9, users: 90 });
+  add({ name: "a finding: two places in one text whose lengths change are rewritten last first (carried)", findings: [active], overrides: [onFinding(active, "facts.active", 9, 10, 1), onFinding(active, "facts.users", 90, 95, 2)] });
+  const everywhere = finding(
+    67,
+    "Integrations that run as 17 users",
+    "They make 230 calls a day.",
+    { users: 17, calls: 230, jobs: 31, licences: 6, months: 12, days: 3, developers: 2, tickets: 47, archived: 58, allJobs: 81, idle: 96 },
+    {
+      recommendation: "Move the 31 jobs to their own users.",
+      value: { kind: "licence_cost", amount: 4200, unit: "GBP", period: "over 12 months", assumptions: ["Each of the 6 licences costs £700 a year."] },
+      effort: { size: "M", note: "About 3 days of work." },
+      owner: "Salesforce admin and 2 developers",
+      dependencies: ["Close the 47 open tickets first."],
+      notMeasurableReason: "The 58 archived jobs could not be read.",
+      segmentExemptReason: "One org-wide figure across 81 jobs.",
+      guards: [{ guardId: "int.planted.guard", subject: "jobs", status: "passed", detail: "The 96 jobs have not run in the last week.", evidence: [EVIDENCE] }],
+    },
+  );
+  const unsized = finding(68, "Hours spent on manual exports", "Exports are made by hand.", { hours: 14 }, { value: { kind: "not_sized", reason: "Not sized: the 14 hours a week are an estimate." } });
+  add({
+    name: "a finding: a figure printed once in each text a finding has is rewritten there (carried)",
+    findings: [everywhere, unsized],
+    overrides: [...Object.entries(everywhere.facts).map(([key, value], i) => onFinding(everywhere, `facts.${key}`, value, value + 100, i + 1)), onFinding(everywhere, "value.amount", 4200, 3600, 20), onFinding(unsized, "facts.hours", 14, 16, 21)],
+  });
+
+  // A fact and the sized amount that share a value: each names the other, the fact first.
+  const managed = finding(69, "Seats with no manager", "8 seats need a manager.", { seats: 8 }, { value: { kind: "hours", amount: 8, unit: "hours", period: "per week", assumptions: ["Each seat takes time to manage."] } });
+  add({ name: "a finding: a fact and the sized amount share a value, the fact's refusal first (shared)", findings: [managed], overrides: [onFinding(managed, "value.amount", 8, 9, 1), onFinding(managed, "facts.seats", 8, 9, 2)] });
+
+  // A row's type is part of what it names.
+  const seats = finding(70, "Seats held", "Seats are held.", { seats: 9 });
+  const winRate = measure(26, "Win rate", 44);
+  add({
+    name: "rows naming a finding's id as a measure's, or a measure's as a finding's, are ignored",
+    findings: [seats],
+    metrics: [winRate],
+    overrides: [correction({ type: "metric", id: seats.id, field: "facts.seats" }, 9, 8, 1), correction({ type: "finding", id: winRate.id, field: "value" }, 44, 45, 2)],
+  });
   return cases;
 }
 

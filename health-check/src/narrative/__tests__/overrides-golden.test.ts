@@ -52,11 +52,17 @@ describe("the golden overrides file shared with the console (decision 532, item 
     assert.deepEqual(verdictsOf(golden.synthetic.findings, golden.synthetic.metrics), verdictsOf(memory.synthetic.findings, memory.synthetic.metrics));
   });
 
-  for (const c of golden.cases) {
+  // Each case is judged on its own copy, and set against a parse of the file
+  // that nothing judges, so a judgement that writes to the findings or measures
+  // it is given is seen here and not hidden by another test judging them first.
+  const asGiven = JSON.parse(text) as OverridesGolden;
+  for (const c of asGiven.cases) {
     test(`case: ${c.name}`, () => {
-      const result = judged(c);
+      const given = structuredClone(c);
+      const result = judged(given);
       assert.deepEqual({ findings: result.findings, metrics: result.metrics, refused: result.refused }, { findings: c.expected.findings, metrics: c.expected.metrics, refused: c.expected.refused });
       assert.deepEqual(linesOf(result.refused), c.expected.lines);
+      assert.deepEqual([given.findings, given.metrics], [c.findings, c.metrics], "the findings and measures given are left as they were");
     });
   }
 
@@ -89,7 +95,7 @@ describe("the golden overrides file shared with the console (decision 532, item 
     assert.deepEqual(kinds(false), ["repeated", "rounded", "shared", "stale", "unsure"]);
     assert.deepEqual(kinds(true), ["part", "rounded", "stale", "worded"]);
     const where = [...new Set(refused.flatMap((r) => (r.why.kind === "part" ? [r.why.where] : [])))].sort();
-    assert.deepEqual(where, ["a point in its series", "a segment", "an evidence count", "n", "the stat median", "the stat upper", "value"]);
+    assert.deepEqual(where, ["a point in its series", "a segment", "an evidence count", "n", "the stat median", "the stat p90", "the stat upper", "value"]);
   });
 
   // Each hand case's refusals by kind, so a case that stops doing what its name says fails here, not only in the console.
@@ -123,6 +129,49 @@ describe("the golden overrides file shared with the console (decision 532, item 
     "a measure: the correction was made from another value (stale)": ["measure:stale"],
     "a measure: a value no part or text holds changes (carried)": [],
     "twelve refusals: findings' first, ten listed, then how many more": [...Array<string>(11).fill("finding:repeated"), "measure:worded"],
+    // The cases that hold each branch, so a wrong copy fails one by itself (session 26).
+    "a finding: put back over a stale first row, nothing refused and nothing changes": [],
+    "a measure: put back after two rows from its value as read, nothing refused and nothing changes": [],
+    "a measure: put back over a stale first row, nothing refused and nothing changes": [],
+    "a finding: corrected twice, the last value is carried": [],
+    "a finding: corrected twice from a stale first row, the refusal names the first row's value (stale)": ["finding:stale"],
+    "a measure: corrected twice, the last value is carried": [],
+    "a measure: corrected twice from a stale first row, the refusal names the first row's value (stale)": ["measure:stale"],
+    "a measure: its value printed only in a segment's reason (worded)": ["measure:worded"],
+    "a measure: its value printed only in a series point's reason (worded)": ["measure:worded"],
+    "a measure: its value printed in its label, its reason for no segments, an assumption or an exclusion (worded, each)": Array<string>(4).fill("measure:worded"),
+    "a measure: its value printed as a number word (worded)": ["measure:worded"],
+    "a measure: its n and a stat that no part or text holds are carried": [],
+    "a measure: of n and a stat that hold the value, n is named (part)": ["measure:part"],
+    "a measure: of parts that hold the value, the first in order is named (part, each)": Array<string>(3).fill("measure:part"),
+    "a finding: its value as read also the month of a year and month, which is masked: carried, the date untouched": [],
+    "a finding: its value as read only the month of a year and month: carried with no text rewritten, the date untouched": [],
+    "a finding: a year and month joined to a form before it is not masked, so its month is a place (repeated)": ["finding:repeated"],
+    "a finding: a year and month joined to a form after it is not masked, so its month is a place (repeated)": ["finding:repeated"],
+    "a finding: a figure under 1,000 corrected to over it is written grouped (carried)": [],
+    "a finding: a figure found ungrouped is written ungrouped (carried)": [],
+    "a finding: a figure of 10^21, which String writes with an exponent, is found and written in full (carried)": [],
+    "a finding: a value as read inside a grouped number is not a place (carried)": [],
+    "a finding: a grouped number near the value as read is read whole (rounded)": ["finding:rounded"],
+    "a finding: the last digit of a dotted form is not a number of its own (carried)": [],
+    "a finding: a number exactly 5% from the value as read may be it rounded (rounded)": ["finding:rounded"],
+    "a finding: a negative value as read is near its size printed unsigned (rounded)": ["finding:rounded"],
+    "a finding: a token's digits are not the value as read (carried)": [],
+    "a finding: an ISO date with its time is masked whole (carried)": [],
+    "a finding: an identifier's digits are not a place (carried)": [],
+    "a finding: a guessed date's digits joined to a letter after are masked (carried)": [],
+    "a finding: a guessed date's digits joined to a letter before are masked (carried)": [],
+    "a finding: a guessed year inside a year and month is not a part (carried)": [],
+    "a finding: a bare year guessed from the word before is unsure (unsure)": ["finding:unsure"],
+    "a finding: a colon form with a grouped part (unsure)": ["finding:unsure"],
+    "a finding: a colon form with a decimal part (unsure)": ["finding:unsure"],
+    "a finding: a place and an unsure form are counted together (repeated)": ["finding:repeated"],
+    "a finding: of two unsure forms near the value as read, the first in the text is named (rounded)": ["finding:rounded"],
+    "a finding: a figure written as a digit outside the basic plane is unsure, and named whole (unsure)": ["finding:unsure"],
+    "a finding: two places in one text whose lengths change are rewritten last first (carried)": [],
+    "a finding: a figure printed once in each text a finding has is rewritten there (carried)": [],
+    "a finding: a fact and the sized amount share a value, the fact's refusal first (shared)": ["finding:shared", "finding:shared"],
+    "rows naming a finding's id as a measure's, or a measure's as a finding's, are ignored": [],
   };
 
   test("each hand case does what its name says", () => {
@@ -157,6 +206,89 @@ describe("the golden overrides file shared with the console (decision 532, item 
     assert.equal(twelve.overrides[0]!.target.type, "metric");
     assert.deepEqual([twelve.expected.lines.length, twelve.expected.lines[0], twelve.expected.lines[11]], [12, "Held back: 12 corrected figures can't be carried into the documents.", "And 2 more."]);
     assert.ok(twelve.expected.lines.slice(1, 11).every((line) => line.startsWith('"Seats on team ')));
+  });
+
+  // The cases that hold each branch of the judgement (session 26), named for the
+  // record with what each shows: each refusal as `<field> refused` and its why,
+  // and each field of a finding or measure that the corrections change.
+  const SHOWS: Record<string, Array<[string, unknown]>> = {
+    "a finding: put back over a stale first row, nothing refused and nothing changes": [],
+    "a measure: put back after two rows from its value as read, nothing refused and nothing changes": [],
+    "a measure: put back over a stale first row, nothing refused and nothing changes": [],
+    "a finding: corrected twice, the last value is carried": [["summary", "55 seats are bought."], ["facts", { seats: 55 }]],
+    "a finding: corrected twice from a stale first row, the refusal names the first row's value (stale)": [["facts.seats refused", { kind: "stale", from: 61 }]],
+    "a measure: corrected twice, the last value is carried": [["value", 70]],
+    "a measure: corrected twice from a stale first row, the refusal names the first row's value (stale)": [["value refused", { kind: "stale", from: 72 }]],
+    "a measure: its value printed only in a segment's reason (worded)": [["value refused", { kind: "worded" }]],
+    "a measure: its value printed only in a series point's reason (worded)": [["value refused", { kind: "worded" }]],
+    "a measure: its value printed in its label, its reason for no segments, an assumption or an exclusion (worded, each)": [["value refused", { kind: "worded" }], ["value refused", { kind: "worded" }], ["value refused", { kind: "worded" }], ["value refused", { kind: "worded" }]],
+    "a measure: its value printed as a number word (worded)": [["value refused", { kind: "worded" }]],
+    "a measure: its n and a stat that no part or text holds are carried": [["n", 50], ["stats", { median: 37 }]],
+    "a measure: of n and a stat that hold the value, n is named (part)": [["value refused", { kind: "part", where: "n" }]],
+    "a measure: of parts that hold the value, the first in order is named (part, each)": [["value refused", { kind: "part", where: "a segment" }], ["value refused", { kind: "part", where: "a point in its series" }], ["value refused", { kind: "part", where: "the stat p90" }]],
+    "a finding: its value as read also the month of a year and month, which is masked: carried, the date untouched": [["summary", "11 deals closed in 2026-10."], ["facts", { closed: 11 }]],
+    "a finding: its value as read only the month of a year and month: carried with no text rewritten, the date untouched": [["facts", { months: 13 }]],
+    "a finding: a year and month joined to a form before it is not masked, so its month is a place (repeated)": [["facts.slipped refused", { kind: "repeated", places: 2 }]],
+    "a finding: a year and month joined to a form after it is not masked, so its month is a place (repeated)": [["facts.slipped refused", { kind: "repeated", places: 2 }]],
+    "a finding: a figure under 1,000 corrected to over it is written grouped (carried)": [["summary", "1,050 records have no owner."], ["facts", { records: 1050 }]],
+    "a finding: a figure found ungrouped is written ungrouped (carried)": [["summary", "9800 records were read."], ["facts", { records: 9800 }]],
+    "a finding: a figure of 10^21, which String writes with an exponent, is found and written in full (carried)": [["summary", "2000000000000000000000 rows were counted."], ["facts", { rows: 2e21 }]],
+    "a finding: a value as read inside a grouped number is not a place (carried)": [["summary", "£12,500 of pipeline sits in 480 open deals."], ["facts", { deals: 480 }]],
+    "a finding: a grouped number near the value as read is read whole (rounded)": [["facts.pipeline refused", { kind: "rounded", found: "£12,500" }]],
+    "a finding: the last digit of a dotted form is not a number of its own (carried)": [["facts", { apps: 7 }]],
+    "a finding: a number exactly 5% from the value as read may be it rounded (rounded)": [["facts.open refused", { kind: "rounded", found: "105" }]],
+    "a finding: a negative value as read is near its size printed unsigned (rounded)": [["facts.change refused", { kind: "rounded", found: "12" }]],
+    "a finding: a token's digits are not the value as read (carried)": [["facts", { owners: 4 }]],
+    "a finding: an ISO date with its time is masked whole (carried)": [["summary", "Read at 2026-10-31T13:00:00Z, 11 deals were open."], ["facts", { open: 11 }]],
+    "a finding: an identifier's digits are not a place (carried)": [["summary", "43 deals use the field Score_42__c."], ["facts", { deals: 43 }]],
+    "a finding: a guessed date's digits joined to a letter after are masked (carried)": [["summary", "By 3rd May 2026 the 4 jobs stop."], ["facts", { jobs: 4 }]],
+    "a finding: a guessed date's digits joined to a letter before are masked (carried)": [["facts", { teams: 4 }]],
+    "a finding: a guessed year inside a year and month is not a part (carried)": [["summary", "Deals logged in 2026-02 number 2,027."], ["facts", { deals: 2027 }]],
+    "a finding: a bare year guessed from the word before is unsure (unsure)": [["facts.users refused", { kind: "unsure", found: "2000" }]],
+    "a finding: a colon form with a grouped part (unsure)": [["facts.users refused", { kind: "unsure", found: "1,000:1" }]],
+    "a finding: a colon form with a decimal part (unsure)": [["facts.ratio refused", { kind: "unsure", found: "1.5:1" }]],
+    "a finding: a place and an unsure form are counted together (repeated)": [["facts.users refused", { kind: "repeated", places: 2 }]],
+    "a finding: of two unsure forms near the value as read, the first in the text is named (rounded)": [["facts.meetings refused", { kind: "rounded", found: "Five" }]],
+    "a finding: a figure written as a digit outside the basic plane is unsure, and named whole (unsure)": [["facts.active refused", { kind: "unsure", found: "𝟓" }]],
+    "a finding: two places in one text whose lengths change are rewritten last first (carried)": [["summary", "10 of 95 users logged in this month."], ["facts", { active: 10, users: 95 }]],
+    "a finding: a figure printed once in each text a finding has is rewritten there (carried)": [["title", "Integrations that run as 117 users"], ["summary", "They make 330 calls a day."], ["recommendation", "Move the 131 jobs to their own users."], ["value", { kind: "licence_cost", amount: 3600, unit: "GBP", period: "over 112 months", assumptions: ["Each of the 106 licences costs £700 a year."] }], ["effort", { size: "M", note: "About 103 days of work." }], ["owner", "Salesforce admin and 102 developers"], ["dependencies", ["Close the 147 open tickets first."]], ["guards", ["The 196 jobs have not run in the last week."]], ["segmentExemptReason", "One org-wide figure across 181 jobs."], ["facts", { users: 117, calls: 330, jobs: 131, licences: 106, months: 112, days: 103, developers: 102, tickets: 147, archived: 158, allJobs: 181, idle: 196 }], ["notMeasurableReason", "The 158 archived jobs could not be read."], ["value", { kind: "not_sized", reason: "Not sized: the 16 hours a week are an estimate." }], ["facts", { hours: 16 }]],
+    "a finding: a fact and the sized amount share a value, the fact's refusal first (shared)": [["facts.seats refused", { kind: "shared", other: "the sized amount" }], ["value.amount refused", { kind: "shared", other: "seats" }]],
+    "rows naming a finding's id as a measure's, or a measure's as a finding's, are ignored": [],
+  };
+  const shows = (c: GoldenCase): Array<[string, unknown]> => [
+    ...c.expected.refused.map((r): [string, unknown] => [`${r.field} refused`, r.why]),
+    ...c.findings.flatMap((f, i) => {
+      const out = c.expected.findings[i]! as Record<string, unknown>;
+      return Object.entries(f).flatMap(([key, was]): Array<[string, unknown]> => (JSON.stringify(was) === JSON.stringify(out[key]) ? [] : [[key, key === "guards" ? (out[key] as Finding["guards"]).map((g) => g.detail) : out[key]]]));
+    }),
+    ...c.metrics.flatMap((m, i) => {
+      const out = c.expected.metrics[i]! as Record<string, unknown>;
+      return Object.entries(m).flatMap(([key, was]): Array<[string, unknown]> => (JSON.stringify(was) === JSON.stringify(out[key]) ? [] : [[key, out[key]]]));
+    }),
+  ];
+
+  test("the cases that hold each branch of the judgement, each by name, show what they say (session 26)", () => {
+    const of = (name: string): GoldenCase => golden.cases.find((c) => c.name === name)!;
+    for (const [name, shown] of Object.entries(SHOWS)) assert.deepEqual(shows(of(name)), shown, name);
+    // A put-back always saves (decision 533, item 2): nothing refused, and the findings and measures as given.
+    for (const name of [
+      "a finding: put back over a stale first row, nothing refused and nothing changes",
+      "a measure: put back after two rows from its value as read, nothing refused and nothing changes",
+      "a measure: put back over a stale first row, nothing refused and nothing changes",
+    ]) {
+      const c = of(name);
+      assert.deepEqual(c.expected.refused, [], name);
+      assert.deepEqual([c.expected.findings, c.expected.metrics], [c.findings, c.metrics], name);
+    }
+    // A segment's and a series point's reason are the measure's own wording.
+    for (const name of ["a measure: its value printed only in a segment's reason (worded)", "a measure: its value printed only in a series point's reason (worded)"]) {
+      assert.deepEqual(of(name).expected.refused.map((r) => r.why.kind), ["worded"], name);
+    }
+    // A year and month is masked: the figure beside it is rewritten and the date stands as written.
+    const month = of("a finding: its value as read also the month of a year and month, which is masked: carried, the date untouched");
+    assert.deepEqual([month.findings[0]!.summary, month.expected.refused, month.expected.findings[0]!.summary], ["10 deals closed in 2026-10.", [], "11 deals closed in 2026-10."]);
+    const counted = of("a finding: its value as read only the month of a year and month: carried with no text rewritten, the date untouched");
+    assert.deepEqual([counted.expected.refused, counted.expected.findings[0]!.summary, counted.expected.findings[0]!.facts], [[], "Deals are counted from 2026-12.", { months: 13 }]);
   });
 });
 
@@ -220,7 +352,7 @@ describe("refusalLines (decision 532, item 1)", () => {
   });
 
   test("the listed lines are the old function's, by the character, for every refusal of the synthetic run and the hand cases, alone and together", () => {
-    assert.deepEqual([runFigures.length, runRefusals.length, handRefusals.length], [603, 237, 33]);
+    assert.deepEqual([runFigures.length, runRefusals.length, handRefusals.length], [603, 237, 59]);
     for (const r of [...runRefusals, ...handRefusals]) {
       assert.deepEqual(refusalLines([r]), oldLines([r]));
       assert.equal(refusalLines([r])[1], oldLines([r])[1]);

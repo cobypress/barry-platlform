@@ -4799,6 +4799,6117 @@
      "And 2 more."
     ]
    }
+  },
+  {
+   "name": "a finding: put back over a stale first row, nothing refused and nothing changes",
+   "findings": [
+    {
+     "id": "f-000000000040",
+     "ruleId": "int.planted",
+     "ruleVersion": 1,
+     "domain": "integrations",
+     "status": "issue",
+     "title": "Open deals",
+     "summary": "30 deals are open.",
+     "recommendation": "Look into it.",
+     "recommendationType": "change",
+     "severity": "medium",
+     "confidence": "high",
+     "evidence": [
+      {
+       "kind": "soql",
+       "api": "rest",
+       "query": "SELECT Id FROM User",
+       "count": 11,
+       "dateRange": {
+        "from": "2024-10-31",
+        "to": "2026-10-31"
+       },
+       "exclusions": [],
+       "capturedAt": "2026-10-31T13:00:00.000Z"
+      }
+     ],
+     "value": {
+      "kind": "not_sized",
+      "reason": "Not sized."
+     },
+     "effort": {
+      "size": "S"
+     },
+     "owner": "Salesforce admin",
+     "dependencies": [],
+     "guards": [],
+     "segmentsChecked": [],
+     "segmentExemptReason": "A single org-wide figure.",
+     "subjects": [],
+     "facts": {
+      "open": 30
+     },
+     "notMeasurableReason": null,
+     "manualStepIds": []
+    }
+   ],
+   "metrics": [],
+   "overrides": [
+    {
+     "id": "ov-0001",
+     "runId": "run-0001",
+     "target": {
+      "type": "finding",
+      "id": "f-000000000040",
+      "field": "facts.open"
+     },
+     "previousValue": 31,
+     "newValue": 29,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    },
+    {
+     "id": "ov-0002",
+     "runId": "run-0001",
+     "target": {
+      "type": "finding",
+      "id": "f-000000000040",
+      "field": "facts.open"
+     },
+     "previousValue": 29,
+     "newValue": 30,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    }
+   ],
+   "expected": {
+    "findings": [
+     {
+      "id": "f-000000000040",
+      "ruleId": "int.planted",
+      "ruleVersion": 1,
+      "domain": "integrations",
+      "status": "issue",
+      "title": "Open deals",
+      "summary": "30 deals are open.",
+      "recommendation": "Look into it.",
+      "recommendationType": "change",
+      "severity": "medium",
+      "confidence": "high",
+      "evidence": [
+       {
+        "kind": "soql",
+        "api": "rest",
+        "query": "SELECT Id FROM User",
+        "count": 11,
+        "dateRange": {
+         "from": "2024-10-31",
+         "to": "2026-10-31"
+        },
+        "exclusions": [],
+        "capturedAt": "2026-10-31T13:00:00.000Z"
+       }
+      ],
+      "value": {
+       "kind": "not_sized",
+       "reason": "Not sized."
+      },
+      "effort": {
+       "size": "S"
+      },
+      "owner": "Salesforce admin",
+      "dependencies": [],
+      "guards": [],
+      "segmentsChecked": [],
+      "segmentExemptReason": "A single org-wide figure.",
+      "subjects": [],
+      "facts": {
+       "open": 30
+      },
+      "notMeasurableReason": null,
+      "manualStepIds": []
+     }
+    ],
+    "metrics": [],
+    "refused": [],
+    "lines": []
+   }
+  },
+  {
+   "name": "a measure: put back after two rows from its value as read, nothing refused and nothing changes",
+   "findings": [],
+   "metrics": [
+    {
+     "status": "measured",
+     "id": "planted.measure_12",
+     "domain": "historic_pipeline",
+     "label": "People who log in less than weekly",
+     "definition": "Fewer than 5 people log in in a typical week.",
+     "unit": "percent",
+     "evidence": [
+      {
+       "kind": "soql",
+       "api": "rest",
+       "query": "SELECT Id FROM User",
+       "count": 11,
+       "dateRange": {
+        "from": "2024-10-31",
+        "to": "2026-10-31"
+       },
+       "exclusions": [],
+       "capturedAt": "2026-10-31T13:00:00.000Z"
+      }
+     ],
+     "exclusions": [],
+     "assumptions": [],
+     "value": 5,
+     "n": 40,
+     "dateRange": null,
+     "segments": [],
+     "segmentExemptReason": "A single org-wide figure.",
+     "series": [],
+     "stats": {}
+    }
+   ],
+   "overrides": [
+    {
+     "id": "ov-0001",
+     "runId": "run-0001",
+     "target": {
+      "type": "metric",
+      "id": "planted.measure_12",
+      "field": "value"
+     },
+     "previousValue": 5,
+     "newValue": 6,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    },
+    {
+     "id": "ov-0002",
+     "runId": "run-0001",
+     "target": {
+      "type": "metric",
+      "id": "planted.measure_12",
+      "field": "value"
+     },
+     "previousValue": 6,
+     "newValue": 5,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    }
+   ],
+   "expected": {
+    "findings": [],
+    "metrics": [
+     {
+      "status": "measured",
+      "id": "planted.measure_12",
+      "domain": "historic_pipeline",
+      "label": "People who log in less than weekly",
+      "definition": "Fewer than 5 people log in in a typical week.",
+      "unit": "percent",
+      "evidence": [
+       {
+        "kind": "soql",
+        "api": "rest",
+        "query": "SELECT Id FROM User",
+        "count": 11,
+        "dateRange": {
+         "from": "2024-10-31",
+         "to": "2026-10-31"
+        },
+        "exclusions": [],
+        "capturedAt": "2026-10-31T13:00:00.000Z"
+       }
+      ],
+      "exclusions": [],
+      "assumptions": [],
+      "value": 5,
+      "n": 40,
+      "dateRange": null,
+      "segments": [],
+      "segmentExemptReason": "A single org-wide figure.",
+      "series": [],
+      "stats": {}
+     }
+    ],
+    "refused": [],
+    "lines": []
+   }
+  },
+  {
+   "name": "a measure: put back over a stale first row, nothing refused and nothing changes",
+   "findings": [],
+   "metrics": [
+    {
+     "status": "measured",
+     "id": "planted.measure_12",
+     "domain": "historic_pipeline",
+     "label": "People who log in less than weekly",
+     "definition": "Fewer than 5 people log in in a typical week.",
+     "unit": "percent",
+     "evidence": [
+      {
+       "kind": "soql",
+       "api": "rest",
+       "query": "SELECT Id FROM User",
+       "count": 11,
+       "dateRange": {
+        "from": "2024-10-31",
+        "to": "2026-10-31"
+       },
+       "exclusions": [],
+       "capturedAt": "2026-10-31T13:00:00.000Z"
+      }
+     ],
+     "exclusions": [],
+     "assumptions": [],
+     "value": 5,
+     "n": 40,
+     "dateRange": null,
+     "segments": [],
+     "segmentExemptReason": "A single org-wide figure.",
+     "series": [],
+     "stats": {}
+    }
+   ],
+   "overrides": [
+    {
+     "id": "ov-0001",
+     "runId": "run-0001",
+     "target": {
+      "type": "metric",
+      "id": "planted.measure_12",
+      "field": "value"
+     },
+     "previousValue": 4,
+     "newValue": 6,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    },
+    {
+     "id": "ov-0002",
+     "runId": "run-0001",
+     "target": {
+      "type": "metric",
+      "id": "planted.measure_12",
+      "field": "value"
+     },
+     "previousValue": 6,
+     "newValue": 5,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    }
+   ],
+   "expected": {
+    "findings": [],
+    "metrics": [
+     {
+      "status": "measured",
+      "id": "planted.measure_12",
+      "domain": "historic_pipeline",
+      "label": "People who log in less than weekly",
+      "definition": "Fewer than 5 people log in in a typical week.",
+      "unit": "percent",
+      "evidence": [
+       {
+        "kind": "soql",
+        "api": "rest",
+        "query": "SELECT Id FROM User",
+        "count": 11,
+        "dateRange": {
+         "from": "2024-10-31",
+         "to": "2026-10-31"
+        },
+        "exclusions": [],
+        "capturedAt": "2026-10-31T13:00:00.000Z"
+       }
+      ],
+      "exclusions": [],
+      "assumptions": [],
+      "value": 5,
+      "n": 40,
+      "dateRange": null,
+      "segments": [],
+      "segmentExemptReason": "A single org-wide figure.",
+      "series": [],
+      "stats": {}
+     }
+    ],
+    "refused": [],
+    "lines": []
+   }
+  },
+  {
+   "name": "a finding: corrected twice, the last value is carried",
+   "findings": [
+    {
+     "id": "f-000000000041",
+     "ruleId": "int.planted",
+     "ruleVersion": 1,
+     "domain": "integrations",
+     "status": "issue",
+     "title": "Seats bought",
+     "summary": "60 seats are bought.",
+     "recommendation": "Look into it.",
+     "recommendationType": "change",
+     "severity": "medium",
+     "confidence": "high",
+     "evidence": [
+      {
+       "kind": "soql",
+       "api": "rest",
+       "query": "SELECT Id FROM User",
+       "count": 11,
+       "dateRange": {
+        "from": "2024-10-31",
+        "to": "2026-10-31"
+       },
+       "exclusions": [],
+       "capturedAt": "2026-10-31T13:00:00.000Z"
+      }
+     ],
+     "value": {
+      "kind": "not_sized",
+      "reason": "Not sized."
+     },
+     "effort": {
+      "size": "S"
+     },
+     "owner": "Salesforce admin",
+     "dependencies": [],
+     "guards": [],
+     "segmentsChecked": [],
+     "segmentExemptReason": "A single org-wide figure.",
+     "subjects": [],
+     "facts": {
+      "seats": 60
+     },
+     "notMeasurableReason": null,
+     "manualStepIds": []
+    }
+   ],
+   "metrics": [],
+   "overrides": [
+    {
+     "id": "ov-0001",
+     "runId": "run-0001",
+     "target": {
+      "type": "finding",
+      "id": "f-000000000041",
+      "field": "facts.seats"
+     },
+     "previousValue": 60,
+     "newValue": 58,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    },
+    {
+     "id": "ov-0002",
+     "runId": "run-0001",
+     "target": {
+      "type": "finding",
+      "id": "f-000000000041",
+      "field": "facts.seats"
+     },
+     "previousValue": 58,
+     "newValue": 55,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    }
+   ],
+   "expected": {
+    "findings": [
+     {
+      "id": "f-000000000041",
+      "ruleId": "int.planted",
+      "ruleVersion": 1,
+      "domain": "integrations",
+      "status": "issue",
+      "title": "Seats bought",
+      "summary": "55 seats are bought.",
+      "recommendation": "Look into it.",
+      "recommendationType": "change",
+      "severity": "medium",
+      "confidence": "high",
+      "evidence": [
+       {
+        "kind": "soql",
+        "api": "rest",
+        "query": "SELECT Id FROM User",
+        "count": 11,
+        "dateRange": {
+         "from": "2024-10-31",
+         "to": "2026-10-31"
+        },
+        "exclusions": [],
+        "capturedAt": "2026-10-31T13:00:00.000Z"
+       }
+      ],
+      "value": {
+       "kind": "not_sized",
+       "reason": "Not sized."
+      },
+      "effort": {
+       "size": "S"
+      },
+      "owner": "Salesforce admin",
+      "dependencies": [],
+      "guards": [],
+      "segmentsChecked": [],
+      "segmentExemptReason": "A single org-wide figure.",
+      "subjects": [],
+      "facts": {
+       "seats": 55
+      },
+      "notMeasurableReason": null,
+      "manualStepIds": []
+     }
+    ],
+    "metrics": [],
+    "refused": [],
+    "lines": []
+   }
+  },
+  {
+   "name": "a finding: corrected twice from a stale first row, the refusal names the first row's value (stale)",
+   "findings": [
+    {
+     "id": "f-000000000041",
+     "ruleId": "int.planted",
+     "ruleVersion": 1,
+     "domain": "integrations",
+     "status": "issue",
+     "title": "Seats bought",
+     "summary": "60 seats are bought.",
+     "recommendation": "Look into it.",
+     "recommendationType": "change",
+     "severity": "medium",
+     "confidence": "high",
+     "evidence": [
+      {
+       "kind": "soql",
+       "api": "rest",
+       "query": "SELECT Id FROM User",
+       "count": 11,
+       "dateRange": {
+        "from": "2024-10-31",
+        "to": "2026-10-31"
+       },
+       "exclusions": [],
+       "capturedAt": "2026-10-31T13:00:00.000Z"
+      }
+     ],
+     "value": {
+      "kind": "not_sized",
+      "reason": "Not sized."
+     },
+     "effort": {
+      "size": "S"
+     },
+     "owner": "Salesforce admin",
+     "dependencies": [],
+     "guards": [],
+     "segmentsChecked": [],
+     "segmentExemptReason": "A single org-wide figure.",
+     "subjects": [],
+     "facts": {
+      "seats": 60
+     },
+     "notMeasurableReason": null,
+     "manualStepIds": []
+    }
+   ],
+   "metrics": [],
+   "overrides": [
+    {
+     "id": "ov-0001",
+     "runId": "run-0001",
+     "target": {
+      "type": "finding",
+      "id": "f-000000000041",
+      "field": "facts.seats"
+     },
+     "previousValue": 61,
+     "newValue": 58,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    },
+    {
+     "id": "ov-0002",
+     "runId": "run-0001",
+     "target": {
+      "type": "finding",
+      "id": "f-000000000041",
+      "field": "facts.seats"
+     },
+     "previousValue": 58,
+     "newValue": 55,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    }
+   ],
+   "expected": {
+    "findings": [
+     {
+      "id": "f-000000000041",
+      "ruleId": "int.planted",
+      "ruleVersion": 1,
+      "domain": "integrations",
+      "status": "issue",
+      "title": "Seats bought",
+      "summary": "60 seats are bought.",
+      "recommendation": "Look into it.",
+      "recommendationType": "change",
+      "severity": "medium",
+      "confidence": "high",
+      "evidence": [
+       {
+        "kind": "soql",
+        "api": "rest",
+        "query": "SELECT Id FROM User",
+        "count": 11,
+        "dateRange": {
+         "from": "2024-10-31",
+         "to": "2026-10-31"
+        },
+        "exclusions": [],
+        "capturedAt": "2026-10-31T13:00:00.000Z"
+       }
+      ],
+      "value": {
+       "kind": "not_sized",
+       "reason": "Not sized."
+      },
+      "effort": {
+       "size": "S"
+      },
+      "owner": "Salesforce admin",
+      "dependencies": [],
+      "guards": [],
+      "segmentsChecked": [],
+      "segmentExemptReason": "A single org-wide figure.",
+      "subjects": [],
+      "facts": {
+       "seats": 60
+      },
+      "notMeasurableReason": null,
+      "manualStepIds": []
+     }
+    ],
+    "metrics": [],
+    "refused": [
+     {
+      "findingId": "f-000000000041",
+      "title": "Seats bought",
+      "field": "facts.seats",
+      "asRead": 60,
+      "last": 55,
+      "why": {
+       "kind": "stale",
+       "from": 61
+      }
+     }
+    ],
+    "lines": [
+     "Held back: 1 corrected figure can't be carried into the documents.",
+     "\"Seats bought\", seats: 60 as read, corrected to 55, but the correction was made from 61, which this run no longer reads."
+    ]
+   }
+  },
+  {
+   "name": "a measure: corrected twice, the last value is carried",
+   "findings": [],
+   "metrics": [
+    {
+     "status": "measured",
+     "id": "planted.measure_13",
+     "domain": "historic_pipeline",
+     "label": "Win rate",
+     "definition": "The share of closed deals that were won.",
+     "unit": "percent",
+     "evidence": [
+      {
+       "kind": "soql",
+       "api": "rest",
+       "query": "SELECT Id FROM User",
+       "count": 11,
+       "dateRange": {
+        "from": "2024-10-31",
+        "to": "2026-10-31"
+       },
+       "exclusions": [],
+       "capturedAt": "2026-10-31T13:00:00.000Z"
+      }
+     ],
+     "exclusions": [],
+     "assumptions": [],
+     "value": 72.5,
+     "n": 40,
+     "dateRange": null,
+     "segments": [],
+     "segmentExemptReason": "A single org-wide figure.",
+     "series": [],
+     "stats": {}
+    }
+   ],
+   "overrides": [
+    {
+     "id": "ov-0001",
+     "runId": "run-0001",
+     "target": {
+      "type": "metric",
+      "id": "planted.measure_13",
+      "field": "value"
+     },
+     "previousValue": 72.5,
+     "newValue": 71,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    },
+    {
+     "id": "ov-0002",
+     "runId": "run-0001",
+     "target": {
+      "type": "metric",
+      "id": "planted.measure_13",
+      "field": "value"
+     },
+     "previousValue": 71,
+     "newValue": 70,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    }
+   ],
+   "expected": {
+    "findings": [],
+    "metrics": [
+     {
+      "status": "measured",
+      "id": "planted.measure_13",
+      "domain": "historic_pipeline",
+      "label": "Win rate",
+      "definition": "The share of closed deals that were won.",
+      "unit": "percent",
+      "evidence": [
+       {
+        "kind": "soql",
+        "api": "rest",
+        "query": "SELECT Id FROM User",
+        "count": 11,
+        "dateRange": {
+         "from": "2024-10-31",
+         "to": "2026-10-31"
+        },
+        "exclusions": [],
+        "capturedAt": "2026-10-31T13:00:00.000Z"
+       }
+      ],
+      "exclusions": [],
+      "assumptions": [],
+      "value": 70,
+      "n": 40,
+      "dateRange": null,
+      "segments": [],
+      "segmentExemptReason": "A single org-wide figure.",
+      "series": [],
+      "stats": {}
+     }
+    ],
+    "refused": [],
+    "lines": []
+   }
+  },
+  {
+   "name": "a measure: corrected twice from a stale first row, the refusal names the first row's value (stale)",
+   "findings": [],
+   "metrics": [
+    {
+     "status": "measured",
+     "id": "planted.measure_13",
+     "domain": "historic_pipeline",
+     "label": "Win rate",
+     "definition": "The share of closed deals that were won.",
+     "unit": "percent",
+     "evidence": [
+      {
+       "kind": "soql",
+       "api": "rest",
+       "query": "SELECT Id FROM User",
+       "count": 11,
+       "dateRange": {
+        "from": "2024-10-31",
+        "to": "2026-10-31"
+       },
+       "exclusions": [],
+       "capturedAt": "2026-10-31T13:00:00.000Z"
+      }
+     ],
+     "exclusions": [],
+     "assumptions": [],
+     "value": 72.5,
+     "n": 40,
+     "dateRange": null,
+     "segments": [],
+     "segmentExemptReason": "A single org-wide figure.",
+     "series": [],
+     "stats": {}
+    }
+   ],
+   "overrides": [
+    {
+     "id": "ov-0001",
+     "runId": "run-0001",
+     "target": {
+      "type": "metric",
+      "id": "planted.measure_13",
+      "field": "value"
+     },
+     "previousValue": 72,
+     "newValue": 71,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    },
+    {
+     "id": "ov-0002",
+     "runId": "run-0001",
+     "target": {
+      "type": "metric",
+      "id": "planted.measure_13",
+      "field": "value"
+     },
+     "previousValue": 71,
+     "newValue": 70,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    }
+   ],
+   "expected": {
+    "findings": [],
+    "metrics": [
+     {
+      "status": "measured",
+      "id": "planted.measure_13",
+      "domain": "historic_pipeline",
+      "label": "Win rate",
+      "definition": "The share of closed deals that were won.",
+      "unit": "percent",
+      "evidence": [
+       {
+        "kind": "soql",
+        "api": "rest",
+        "query": "SELECT Id FROM User",
+        "count": 11,
+        "dateRange": {
+         "from": "2024-10-31",
+         "to": "2026-10-31"
+        },
+        "exclusions": [],
+        "capturedAt": "2026-10-31T13:00:00.000Z"
+       }
+      ],
+      "exclusions": [],
+      "assumptions": [],
+      "value": 72.5,
+      "n": 40,
+      "dateRange": null,
+      "segments": [],
+      "segmentExemptReason": "A single org-wide figure.",
+      "series": [],
+      "stats": {}
+     }
+    ],
+    "refused": [
+     {
+      "metricId": "planted.measure_13",
+      "title": "Win rate",
+      "field": "value",
+      "asRead": 72.5,
+      "last": 70,
+      "why": {
+       "kind": "stale",
+       "from": 72
+      }
+     }
+    ],
+    "lines": [
+     "Held back: 1 corrected figure can't be carried into the documents.",
+     "\"Win rate\", value: 72.5 as read, corrected to 70, but the correction was made from 72, which this run no longer reads."
+    ]
+   }
+  },
+  {
+   "name": "a measure: its value printed only in a segment's reason (worded)",
+   "findings": [],
+   "metrics": [
+    {
+     "status": "measured",
+     "id": "planted.measure_14",
+     "domain": "historic_pipeline",
+     "label": "Win rate",
+     "definition": "The share of closed deals that were won.",
+     "unit": "percent",
+     "evidence": [
+      {
+       "kind": "soql",
+       "api": "rest",
+       "query": "SELECT Id FROM User",
+       "count": 11,
+       "dateRange": {
+        "from": "2024-10-31",
+        "to": "2026-10-31"
+       },
+       "exclusions": [],
+       "capturedAt": "2026-10-31T13:00:00.000Z"
+      }
+     ],
+     "exclusions": [],
+     "assumptions": [],
+     "value": 20,
+     "n": 40,
+     "dateRange": null,
+     "segments": [
+      {
+       "dimension": "team",
+       "key": "Team B",
+       "n": 3,
+       "value": null,
+       "notMeasurableReason": "Fewer than 20 closed deals in this team."
+      }
+     ],
+     "segmentExemptReason": null,
+     "series": [],
+     "stats": {}
+    }
+   ],
+   "overrides": [
+    {
+     "id": "ov-0001",
+     "runId": "run-0001",
+     "target": {
+      "type": "metric",
+      "id": "planted.measure_14",
+      "field": "value"
+     },
+     "previousValue": 20,
+     "newValue": 22,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    }
+   ],
+   "expected": {
+    "findings": [],
+    "metrics": [
+     {
+      "status": "measured",
+      "id": "planted.measure_14",
+      "domain": "historic_pipeline",
+      "label": "Win rate",
+      "definition": "The share of closed deals that were won.",
+      "unit": "percent",
+      "evidence": [
+       {
+        "kind": "soql",
+        "api": "rest",
+        "query": "SELECT Id FROM User",
+        "count": 11,
+        "dateRange": {
+         "from": "2024-10-31",
+         "to": "2026-10-31"
+        },
+        "exclusions": [],
+        "capturedAt": "2026-10-31T13:00:00.000Z"
+       }
+      ],
+      "exclusions": [],
+      "assumptions": [],
+      "value": 20,
+      "n": 40,
+      "dateRange": null,
+      "segments": [
+       {
+        "dimension": "team",
+        "key": "Team B",
+        "n": 3,
+        "value": null,
+        "notMeasurableReason": "Fewer than 20 closed deals in this team."
+       }
+      ],
+      "segmentExemptReason": null,
+      "series": [],
+      "stats": {}
+     }
+    ],
+    "refused": [
+     {
+      "metricId": "planted.measure_14",
+      "title": "Win rate",
+      "field": "value",
+      "asRead": 20,
+      "last": 22,
+      "why": {
+       "kind": "worded"
+      }
+     }
+    ],
+    "lines": [
+     "Held back: 1 corrected figure can't be carried into the documents.",
+     "\"Win rate\", value: 20 as read, corrected to 22, but the measure's own wording has 20, which a correction doesn't rewrite."
+    ]
+   }
+  },
+  {
+   "name": "a measure: its value printed only in a series point's reason (worded)",
+   "findings": [],
+   "metrics": [
+    {
+     "status": "measured",
+     "id": "planted.measure_15",
+     "domain": "historic_pipeline",
+     "label": "Win rate",
+     "definition": "The share of closed deals that were won.",
+     "unit": "percent",
+     "evidence": [
+      {
+       "kind": "soql",
+       "api": "rest",
+       "query": "SELECT Id FROM User",
+       "count": 11,
+       "dateRange": {
+        "from": "2024-10-31",
+        "to": "2026-10-31"
+       },
+       "exclusions": [],
+       "capturedAt": "2026-10-31T13:00:00.000Z"
+      }
+     ],
+     "exclusions": [],
+     "assumptions": [],
+     "value": 20,
+     "n": 40,
+     "dateRange": null,
+     "segments": [],
+     "segmentExemptReason": "A single org-wide figure.",
+     "series": [
+      {
+       "date": "2026-09-30",
+       "value": null,
+       "n": 4,
+       "notMeasurableReason": "Fewer than 20 deals closed this month."
+      }
+     ],
+     "stats": {}
+    }
+   ],
+   "overrides": [
+    {
+     "id": "ov-0001",
+     "runId": "run-0001",
+     "target": {
+      "type": "metric",
+      "id": "planted.measure_15",
+      "field": "value"
+     },
+     "previousValue": 20,
+     "newValue": 22,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    }
+   ],
+   "expected": {
+    "findings": [],
+    "metrics": [
+     {
+      "status": "measured",
+      "id": "planted.measure_15",
+      "domain": "historic_pipeline",
+      "label": "Win rate",
+      "definition": "The share of closed deals that were won.",
+      "unit": "percent",
+      "evidence": [
+       {
+        "kind": "soql",
+        "api": "rest",
+        "query": "SELECT Id FROM User",
+        "count": 11,
+        "dateRange": {
+         "from": "2024-10-31",
+         "to": "2026-10-31"
+        },
+        "exclusions": [],
+        "capturedAt": "2026-10-31T13:00:00.000Z"
+       }
+      ],
+      "exclusions": [],
+      "assumptions": [],
+      "value": 20,
+      "n": 40,
+      "dateRange": null,
+      "segments": [],
+      "segmentExemptReason": "A single org-wide figure.",
+      "series": [
+       {
+        "date": "2026-09-30",
+        "value": null,
+        "n": 4,
+        "notMeasurableReason": "Fewer than 20 deals closed this month."
+       }
+      ],
+      "stats": {}
+     }
+    ],
+    "refused": [
+     {
+      "metricId": "planted.measure_15",
+      "title": "Win rate",
+      "field": "value",
+      "asRead": 20,
+      "last": 22,
+      "why": {
+       "kind": "worded"
+      }
+     }
+    ],
+    "lines": [
+     "Held back: 1 corrected figure can't be carried into the documents.",
+     "\"Win rate\", value: 20 as read, corrected to 22, but the measure's own wording has 20, which a correction doesn't rewrite."
+    ]
+   }
+  },
+  {
+   "name": "a measure: its value printed in its label, its reason for no segments, an assumption or an exclusion (worded, each)",
+   "findings": [],
+   "metrics": [
+    {
+     "status": "measured",
+     "id": "planted.measure_16",
+     "domain": "historic_pipeline",
+     "label": "Share of the 30 largest deals won",
+     "definition": "The share of closed deals that were won.",
+     "unit": "percent",
+     "evidence": [
+      {
+       "kind": "soql",
+       "api": "rest",
+       "query": "SELECT Id FROM User",
+       "count": 11,
+       "dateRange": {
+        "from": "2024-10-31",
+        "to": "2026-10-31"
+       },
+       "exclusions": [],
+       "capturedAt": "2026-10-31T13:00:00.000Z"
+      }
+     ],
+     "exclusions": [],
+     "assumptions": [],
+     "value": 30,
+     "n": 40,
+     "dateRange": null,
+     "segments": [],
+     "segmentExemptReason": "A single org-wide figure.",
+     "series": [],
+     "stats": {}
+    },
+    {
+     "status": "measured",
+     "id": "planted.measure_17",
+     "domain": "historic_pipeline",
+     "label": "Win rate",
+     "definition": "The share of closed deals that were won.",
+     "unit": "percent",
+     "evidence": [
+      {
+       "kind": "soql",
+       "api": "rest",
+       "query": "SELECT Id FROM User",
+       "count": 11,
+       "dateRange": {
+        "from": "2024-10-31",
+        "to": "2026-10-31"
+       },
+       "exclusions": [],
+       "capturedAt": "2026-10-31T13:00:00.000Z"
+      }
+     ],
+     "exclusions": [],
+     "assumptions": [],
+     "value": 30,
+     "n": 40,
+     "dateRange": null,
+     "segments": [],
+     "segmentExemptReason": "Too few deals in any team: under 30 each.",
+     "series": [],
+     "stats": {}
+    },
+    {
+     "status": "measured",
+     "id": "planted.measure_18",
+     "domain": "historic_pipeline",
+     "label": "Win rate",
+     "definition": "The share of closed deals that were won.",
+     "unit": "percent",
+     "evidence": [
+      {
+       "kind": "soql",
+       "api": "rest",
+       "query": "SELECT Id FROM User",
+       "count": 11,
+       "dateRange": {
+        "from": "2024-10-31",
+        "to": "2026-10-31"
+       },
+       "exclusions": [],
+       "capturedAt": "2026-10-31T13:00:00.000Z"
+      }
+     ],
+     "exclusions": [],
+     "assumptions": [
+      "A deal counts once it is 30 days old."
+     ],
+     "value": 30,
+     "n": 40,
+     "dateRange": null,
+     "segments": [],
+     "segmentExemptReason": "A single org-wide figure.",
+     "series": [],
+     "stats": {}
+    },
+    {
+     "status": "measured",
+     "id": "planted.measure_19",
+     "domain": "historic_pipeline",
+     "label": "Win rate",
+     "definition": "The share of closed deals that were won.",
+     "unit": "percent",
+     "evidence": [
+      {
+       "kind": "soql",
+       "api": "rest",
+       "query": "SELECT Id FROM User",
+       "count": 11,
+       "dateRange": {
+        "from": "2024-10-31",
+        "to": "2026-10-31"
+       },
+       "exclusions": [],
+       "capturedAt": "2026-10-31T13:00:00.000Z"
+      }
+     ],
+     "exclusions": [
+      "Deals under 30 days old."
+     ],
+     "assumptions": [],
+     "value": 30,
+     "n": 40,
+     "dateRange": null,
+     "segments": [],
+     "segmentExemptReason": "A single org-wide figure.",
+     "series": [],
+     "stats": {}
+    }
+   ],
+   "overrides": [
+    {
+     "id": "ov-0001",
+     "runId": "run-0001",
+     "target": {
+      "type": "metric",
+      "id": "planted.measure_16",
+      "field": "value"
+     },
+     "previousValue": 30,
+     "newValue": 31,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    },
+    {
+     "id": "ov-0002",
+     "runId": "run-0001",
+     "target": {
+      "type": "metric",
+      "id": "planted.measure_17",
+      "field": "value"
+     },
+     "previousValue": 30,
+     "newValue": 31,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    },
+    {
+     "id": "ov-0003",
+     "runId": "run-0001",
+     "target": {
+      "type": "metric",
+      "id": "planted.measure_18",
+      "field": "value"
+     },
+     "previousValue": 30,
+     "newValue": 31,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    },
+    {
+     "id": "ov-0004",
+     "runId": "run-0001",
+     "target": {
+      "type": "metric",
+      "id": "planted.measure_19",
+      "field": "value"
+     },
+     "previousValue": 30,
+     "newValue": 31,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    }
+   ],
+   "expected": {
+    "findings": [],
+    "metrics": [
+     {
+      "status": "measured",
+      "id": "planted.measure_16",
+      "domain": "historic_pipeline",
+      "label": "Share of the 30 largest deals won",
+      "definition": "The share of closed deals that were won.",
+      "unit": "percent",
+      "evidence": [
+       {
+        "kind": "soql",
+        "api": "rest",
+        "query": "SELECT Id FROM User",
+        "count": 11,
+        "dateRange": {
+         "from": "2024-10-31",
+         "to": "2026-10-31"
+        },
+        "exclusions": [],
+        "capturedAt": "2026-10-31T13:00:00.000Z"
+       }
+      ],
+      "exclusions": [],
+      "assumptions": [],
+      "value": 30,
+      "n": 40,
+      "dateRange": null,
+      "segments": [],
+      "segmentExemptReason": "A single org-wide figure.",
+      "series": [],
+      "stats": {}
+     },
+     {
+      "status": "measured",
+      "id": "planted.measure_17",
+      "domain": "historic_pipeline",
+      "label": "Win rate",
+      "definition": "The share of closed deals that were won.",
+      "unit": "percent",
+      "evidence": [
+       {
+        "kind": "soql",
+        "api": "rest",
+        "query": "SELECT Id FROM User",
+        "count": 11,
+        "dateRange": {
+         "from": "2024-10-31",
+         "to": "2026-10-31"
+        },
+        "exclusions": [],
+        "capturedAt": "2026-10-31T13:00:00.000Z"
+       }
+      ],
+      "exclusions": [],
+      "assumptions": [],
+      "value": 30,
+      "n": 40,
+      "dateRange": null,
+      "segments": [],
+      "segmentExemptReason": "Too few deals in any team: under 30 each.",
+      "series": [],
+      "stats": {}
+     },
+     {
+      "status": "measured",
+      "id": "planted.measure_18",
+      "domain": "historic_pipeline",
+      "label": "Win rate",
+      "definition": "The share of closed deals that were won.",
+      "unit": "percent",
+      "evidence": [
+       {
+        "kind": "soql",
+        "api": "rest",
+        "query": "SELECT Id FROM User",
+        "count": 11,
+        "dateRange": {
+         "from": "2024-10-31",
+         "to": "2026-10-31"
+        },
+        "exclusions": [],
+        "capturedAt": "2026-10-31T13:00:00.000Z"
+       }
+      ],
+      "exclusions": [],
+      "assumptions": [
+       "A deal counts once it is 30 days old."
+      ],
+      "value": 30,
+      "n": 40,
+      "dateRange": null,
+      "segments": [],
+      "segmentExemptReason": "A single org-wide figure.",
+      "series": [],
+      "stats": {}
+     },
+     {
+      "status": "measured",
+      "id": "planted.measure_19",
+      "domain": "historic_pipeline",
+      "label": "Win rate",
+      "definition": "The share of closed deals that were won.",
+      "unit": "percent",
+      "evidence": [
+       {
+        "kind": "soql",
+        "api": "rest",
+        "query": "SELECT Id FROM User",
+        "count": 11,
+        "dateRange": {
+         "from": "2024-10-31",
+         "to": "2026-10-31"
+        },
+        "exclusions": [],
+        "capturedAt": "2026-10-31T13:00:00.000Z"
+       }
+      ],
+      "exclusions": [
+       "Deals under 30 days old."
+      ],
+      "assumptions": [],
+      "value": 30,
+      "n": 40,
+      "dateRange": null,
+      "segments": [],
+      "segmentExemptReason": "A single org-wide figure.",
+      "series": [],
+      "stats": {}
+     }
+    ],
+    "refused": [
+     {
+      "metricId": "planted.measure_16",
+      "title": "Share of the 30 largest deals won",
+      "field": "value",
+      "asRead": 30,
+      "last": 31,
+      "why": {
+       "kind": "worded"
+      }
+     },
+     {
+      "metricId": "planted.measure_17",
+      "title": "Win rate",
+      "field": "value",
+      "asRead": 30,
+      "last": 31,
+      "why": {
+       "kind": "worded"
+      }
+     },
+     {
+      "metricId": "planted.measure_18",
+      "title": "Win rate",
+      "field": "value",
+      "asRead": 30,
+      "last": 31,
+      "why": {
+       "kind": "worded"
+      }
+     },
+     {
+      "metricId": "planted.measure_19",
+      "title": "Win rate",
+      "field": "value",
+      "asRead": 30,
+      "last": 31,
+      "why": {
+       "kind": "worded"
+      }
+     }
+    ],
+    "lines": [
+     "Held back: 4 corrected figures can't be carried into the documents.",
+     "\"Share of the 30 largest deals won\", value: 30 as read, corrected to 31, but the measure's own wording has 30, which a correction doesn't rewrite.",
+     "\"Win rate\", value: 30 as read, corrected to 31, but the measure's own wording has 30, which a correction doesn't rewrite.",
+     "\"Win rate\", value: 30 as read, corrected to 31, but the measure's own wording has 30, which a correction doesn't rewrite.",
+     "\"Win rate\", value: 30 as read, corrected to 31, but the measure's own wording has 30, which a correction doesn't rewrite."
+    ]
+   }
+  },
+  {
+   "name": "a measure: its value printed as a number word (worded)",
+   "findings": [],
+   "metrics": [
+    {
+     "status": "measured",
+     "id": "planted.measure_20",
+     "domain": "historic_pipeline",
+     "label": "People who never log in",
+     "definition": "Fewer than five people never log in.",
+     "unit": "percent",
+     "evidence": [
+      {
+       "kind": "soql",
+       "api": "rest",
+       "query": "SELECT Id FROM User",
+       "count": 11,
+       "dateRange": {
+        "from": "2024-10-31",
+        "to": "2026-10-31"
+       },
+       "exclusions": [],
+       "capturedAt": "2026-10-31T13:00:00.000Z"
+      }
+     ],
+     "exclusions": [],
+     "assumptions": [],
+     "value": 5,
+     "n": 40,
+     "dateRange": null,
+     "segments": [],
+     "segmentExemptReason": "A single org-wide figure.",
+     "series": [],
+     "stats": {}
+    }
+   ],
+   "overrides": [
+    {
+     "id": "ov-0001",
+     "runId": "run-0001",
+     "target": {
+      "type": "metric",
+      "id": "planted.measure_20",
+      "field": "value"
+     },
+     "previousValue": 5,
+     "newValue": 6,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    }
+   ],
+   "expected": {
+    "findings": [],
+    "metrics": [
+     {
+      "status": "measured",
+      "id": "planted.measure_20",
+      "domain": "historic_pipeline",
+      "label": "People who never log in",
+      "definition": "Fewer than five people never log in.",
+      "unit": "percent",
+      "evidence": [
+       {
+        "kind": "soql",
+        "api": "rest",
+        "query": "SELECT Id FROM User",
+        "count": 11,
+        "dateRange": {
+         "from": "2024-10-31",
+         "to": "2026-10-31"
+        },
+        "exclusions": [],
+        "capturedAt": "2026-10-31T13:00:00.000Z"
+       }
+      ],
+      "exclusions": [],
+      "assumptions": [],
+      "value": 5,
+      "n": 40,
+      "dateRange": null,
+      "segments": [],
+      "segmentExemptReason": "A single org-wide figure.",
+      "series": [],
+      "stats": {}
+     }
+    ],
+    "refused": [
+     {
+      "metricId": "planted.measure_20",
+      "title": "People who never log in",
+      "field": "value",
+      "asRead": 5,
+      "last": 6,
+      "why": {
+       "kind": "worded"
+      }
+     }
+    ],
+    "lines": [
+     "Held back: 1 corrected figure can't be carried into the documents.",
+     "\"People who never log in\", value: 5 as read, corrected to 6, but the measure's own wording has 5, which a correction doesn't rewrite."
+    ]
+   }
+  },
+  {
+   "name": "a measure: its n and a stat that no part or text holds are carried",
+   "findings": [],
+   "metrics": [
+    {
+     "status": "measured",
+     "id": "planted.measure_21",
+     "domain": "historic_pipeline",
+     "label": "Days to close",
+     "definition": "The share of closed deals that were won.",
+     "unit": "days",
+     "evidence": [
+      {
+       "kind": "soql",
+       "api": "rest",
+       "query": "SELECT Id FROM User",
+       "count": 11,
+       "dateRange": {
+        "from": "2024-10-31",
+        "to": "2026-10-31"
+       },
+       "exclusions": [],
+       "capturedAt": "2026-10-31T13:00:00.000Z"
+      }
+     ],
+     "exclusions": [],
+     "assumptions": [],
+     "value": 41.5,
+     "n": 52,
+     "dateRange": null,
+     "segments": [],
+     "segmentExemptReason": "A single org-wide figure.",
+     "series": [],
+     "stats": {
+      "median": 39
+     }
+    }
+   ],
+   "overrides": [
+    {
+     "id": "ov-0001",
+     "runId": "run-0001",
+     "target": {
+      "type": "metric",
+      "id": "planted.measure_21",
+      "field": "n"
+     },
+     "previousValue": 52,
+     "newValue": 50,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    },
+    {
+     "id": "ov-0002",
+     "runId": "run-0001",
+     "target": {
+      "type": "metric",
+      "id": "planted.measure_21",
+      "field": "stats.median"
+     },
+     "previousValue": 39,
+     "newValue": 37,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    }
+   ],
+   "expected": {
+    "findings": [],
+    "metrics": [
+     {
+      "status": "measured",
+      "id": "planted.measure_21",
+      "domain": "historic_pipeline",
+      "label": "Days to close",
+      "definition": "The share of closed deals that were won.",
+      "unit": "days",
+      "evidence": [
+       {
+        "kind": "soql",
+        "api": "rest",
+        "query": "SELECT Id FROM User",
+        "count": 11,
+        "dateRange": {
+         "from": "2024-10-31",
+         "to": "2026-10-31"
+        },
+        "exclusions": [],
+        "capturedAt": "2026-10-31T13:00:00.000Z"
+       }
+      ],
+      "exclusions": [],
+      "assumptions": [],
+      "value": 41.5,
+      "n": 50,
+      "dateRange": null,
+      "segments": [],
+      "segmentExemptReason": "A single org-wide figure.",
+      "series": [],
+      "stats": {
+       "median": 37
+      }
+     }
+    ],
+    "refused": [],
+    "lines": []
+   }
+  },
+  {
+   "name": "a measure: of n and a stat that hold the value, n is named (part)",
+   "findings": [],
+   "metrics": [
+    {
+     "status": "measured",
+     "id": "planted.measure_22",
+     "domain": "historic_pipeline",
+     "label": "Deals won",
+     "definition": "The share of closed deals that were won.",
+     "unit": "percent",
+     "evidence": [
+      {
+       "kind": "soql",
+       "api": "rest",
+       "query": "SELECT Id FROM User",
+       "count": 11,
+       "dateRange": {
+        "from": "2024-10-31",
+        "to": "2026-10-31"
+       },
+       "exclusions": [],
+       "capturedAt": "2026-10-31T13:00:00.000Z"
+      }
+     ],
+     "exclusions": [],
+     "assumptions": [],
+     "value": 12,
+     "n": 12,
+     "dateRange": null,
+     "segments": [],
+     "segmentExemptReason": "A single org-wide figure.",
+     "series": [],
+     "stats": {
+      "median": 12
+     }
+    }
+   ],
+   "overrides": [
+    {
+     "id": "ov-0001",
+     "runId": "run-0001",
+     "target": {
+      "type": "metric",
+      "id": "planted.measure_22",
+      "field": "value"
+     },
+     "previousValue": 12,
+     "newValue": 13,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    }
+   ],
+   "expected": {
+    "findings": [],
+    "metrics": [
+     {
+      "status": "measured",
+      "id": "planted.measure_22",
+      "domain": "historic_pipeline",
+      "label": "Deals won",
+      "definition": "The share of closed deals that were won.",
+      "unit": "percent",
+      "evidence": [
+       {
+        "kind": "soql",
+        "api": "rest",
+        "query": "SELECT Id FROM User",
+        "count": 11,
+        "dateRange": {
+         "from": "2024-10-31",
+         "to": "2026-10-31"
+        },
+        "exclusions": [],
+        "capturedAt": "2026-10-31T13:00:00.000Z"
+       }
+      ],
+      "exclusions": [],
+      "assumptions": [],
+      "value": 12,
+      "n": 12,
+      "dateRange": null,
+      "segments": [],
+      "segmentExemptReason": "A single org-wide figure.",
+      "series": [],
+      "stats": {
+       "median": 12
+      }
+     }
+    ],
+    "refused": [
+     {
+      "metricId": "planted.measure_22",
+      "title": "Deals won",
+      "field": "value",
+      "asRead": 12,
+      "last": 13,
+      "why": {
+       "kind": "part",
+       "where": "n"
+      }
+     }
+    ],
+    "lines": [
+     "Held back: 1 corrected figure can't be carried into the documents.",
+     "\"Deals won\", value: 12 as read, corrected to 13, but another figure of this measure (n) is also 12, and a chart, table or sentence prints it as read."
+    ]
+   }
+  },
+  {
+   "name": "a measure: of parts that hold the value, the first in order is named (part, each)",
+   "findings": [],
+   "metrics": [
+    {
+     "status": "measured",
+     "id": "planted.measure_23",
+     "domain": "historic_pipeline",
+     "label": "Win rate",
+     "definition": "The share of closed deals that were won.",
+     "unit": "percent",
+     "evidence": [
+      {
+       "kind": "soql",
+       "api": "rest",
+       "query": "SELECT Id FROM User",
+       "count": 64,
+       "dateRange": {
+        "from": "2024-10-31",
+        "to": "2026-10-31"
+       },
+       "exclusions": [],
+       "capturedAt": "2026-10-31T13:00:00.000Z"
+      }
+     ],
+     "exclusions": [],
+     "assumptions": [],
+     "value": 64,
+     "n": 40,
+     "dateRange": null,
+     "segments": [
+      {
+       "dimension": "team",
+       "key": "Team C",
+       "n": 20,
+       "value": 64,
+       "notMeasurableReason": null
+      }
+     ],
+     "segmentExemptReason": "A single org-wide figure.",
+     "series": [
+      {
+       "date": "2026-09-30",
+       "value": 64,
+       "n": 30,
+       "notMeasurableReason": null
+      }
+     ],
+     "stats": {}
+    },
+    {
+     "status": "measured",
+     "id": "planted.measure_24",
+     "domain": "historic_pipeline",
+     "label": "Win rate",
+     "definition": "The share of closed deals that were won.",
+     "unit": "percent",
+     "evidence": [
+      {
+       "kind": "soql",
+       "api": "rest",
+       "query": "SELECT Id FROM User",
+       "count": 66,
+       "dateRange": {
+        "from": "2024-10-31",
+        "to": "2026-10-31"
+       },
+       "exclusions": [],
+       "capturedAt": "2026-10-31T13:00:00.000Z"
+      }
+     ],
+     "exclusions": [],
+     "assumptions": [],
+     "value": 66,
+     "n": 40,
+     "dateRange": null,
+     "segments": [],
+     "segmentExemptReason": "A single org-wide figure.",
+     "series": [
+      {
+       "date": "2026-09-30",
+       "value": 50,
+       "n": 66,
+       "notMeasurableReason": null
+      }
+     ],
+     "stats": {}
+    },
+    {
+     "status": "measured",
+     "id": "planted.measure_25",
+     "domain": "historic_pipeline",
+     "label": "Win rate",
+     "definition": "The share of closed deals that were won.",
+     "unit": "percent",
+     "evidence": [
+      {
+       "kind": "soql",
+       "api": "rest",
+       "query": "SELECT Id FROM User",
+       "count": 11,
+       "dateRange": {
+        "from": "2024-10-31",
+        "to": "2026-10-31"
+       },
+       "exclusions": [],
+       "capturedAt": "2026-10-31T13:00:00.000Z"
+      }
+     ],
+     "exclusions": [],
+     "assumptions": [],
+     "value": 68,
+     "n": 40,
+     "dateRange": null,
+     "segments": [
+      {
+       "dimension": "team",
+       "key": "Team D",
+       "n": 68,
+       "value": 70,
+       "notMeasurableReason": null
+      }
+     ],
+     "segmentExemptReason": "A single org-wide figure.",
+     "series": [],
+     "stats": {
+      "p90": 68
+     }
+    }
+   ],
+   "overrides": [
+    {
+     "id": "ov-0001",
+     "runId": "run-0001",
+     "target": {
+      "type": "metric",
+      "id": "planted.measure_23",
+      "field": "value"
+     },
+     "previousValue": 64,
+     "newValue": 65,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    },
+    {
+     "id": "ov-0002",
+     "runId": "run-0001",
+     "target": {
+      "type": "metric",
+      "id": "planted.measure_24",
+      "field": "value"
+     },
+     "previousValue": 66,
+     "newValue": 67,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    },
+    {
+     "id": "ov-0003",
+     "runId": "run-0001",
+     "target": {
+      "type": "metric",
+      "id": "planted.measure_25",
+      "field": "value"
+     },
+     "previousValue": 68,
+     "newValue": 69,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    }
+   ],
+   "expected": {
+    "findings": [],
+    "metrics": [
+     {
+      "status": "measured",
+      "id": "planted.measure_23",
+      "domain": "historic_pipeline",
+      "label": "Win rate",
+      "definition": "The share of closed deals that were won.",
+      "unit": "percent",
+      "evidence": [
+       {
+        "kind": "soql",
+        "api": "rest",
+        "query": "SELECT Id FROM User",
+        "count": 64,
+        "dateRange": {
+         "from": "2024-10-31",
+         "to": "2026-10-31"
+        },
+        "exclusions": [],
+        "capturedAt": "2026-10-31T13:00:00.000Z"
+       }
+      ],
+      "exclusions": [],
+      "assumptions": [],
+      "value": 64,
+      "n": 40,
+      "dateRange": null,
+      "segments": [
+       {
+        "dimension": "team",
+        "key": "Team C",
+        "n": 20,
+        "value": 64,
+        "notMeasurableReason": null
+       }
+      ],
+      "segmentExemptReason": "A single org-wide figure.",
+      "series": [
+       {
+        "date": "2026-09-30",
+        "value": 64,
+        "n": 30,
+        "notMeasurableReason": null
+       }
+      ],
+      "stats": {}
+     },
+     {
+      "status": "measured",
+      "id": "planted.measure_24",
+      "domain": "historic_pipeline",
+      "label": "Win rate",
+      "definition": "The share of closed deals that were won.",
+      "unit": "percent",
+      "evidence": [
+       {
+        "kind": "soql",
+        "api": "rest",
+        "query": "SELECT Id FROM User",
+        "count": 66,
+        "dateRange": {
+         "from": "2024-10-31",
+         "to": "2026-10-31"
+        },
+        "exclusions": [],
+        "capturedAt": "2026-10-31T13:00:00.000Z"
+       }
+      ],
+      "exclusions": [],
+      "assumptions": [],
+      "value": 66,
+      "n": 40,
+      "dateRange": null,
+      "segments": [],
+      "segmentExemptReason": "A single org-wide figure.",
+      "series": [
+       {
+        "date": "2026-09-30",
+        "value": 50,
+        "n": 66,
+        "notMeasurableReason": null
+       }
+      ],
+      "stats": {}
+     },
+     {
+      "status": "measured",
+      "id": "planted.measure_25",
+      "domain": "historic_pipeline",
+      "label": "Win rate",
+      "definition": "The share of closed deals that were won.",
+      "unit": "percent",
+      "evidence": [
+       {
+        "kind": "soql",
+        "api": "rest",
+        "query": "SELECT Id FROM User",
+        "count": 11,
+        "dateRange": {
+         "from": "2024-10-31",
+         "to": "2026-10-31"
+        },
+        "exclusions": [],
+        "capturedAt": "2026-10-31T13:00:00.000Z"
+       }
+      ],
+      "exclusions": [],
+      "assumptions": [],
+      "value": 68,
+      "n": 40,
+      "dateRange": null,
+      "segments": [
+       {
+        "dimension": "team",
+        "key": "Team D",
+        "n": 68,
+        "value": 70,
+        "notMeasurableReason": null
+       }
+      ],
+      "segmentExemptReason": "A single org-wide figure.",
+      "series": [],
+      "stats": {
+       "p90": 68
+      }
+     }
+    ],
+    "refused": [
+     {
+      "metricId": "planted.measure_23",
+      "title": "Win rate",
+      "field": "value",
+      "asRead": 64,
+      "last": 65,
+      "why": {
+       "kind": "part",
+       "where": "a segment"
+      }
+     },
+     {
+      "metricId": "planted.measure_24",
+      "title": "Win rate",
+      "field": "value",
+      "asRead": 66,
+      "last": 67,
+      "why": {
+       "kind": "part",
+       "where": "a point in its series"
+      }
+     },
+     {
+      "metricId": "planted.measure_25",
+      "title": "Win rate",
+      "field": "value",
+      "asRead": 68,
+      "last": 69,
+      "why": {
+       "kind": "part",
+       "where": "the stat p90"
+      }
+     }
+    ],
+    "lines": [
+     "Held back: 3 corrected figures can't be carried into the documents.",
+     "\"Win rate\", value: 64 as read, corrected to 65, but another figure of this measure (a segment) is also 64, and a chart, table or sentence prints it as read.",
+     "\"Win rate\", value: 66 as read, corrected to 67, but another figure of this measure (a point in its series) is also 66, and a chart, table or sentence prints it as read.",
+     "\"Win rate\", value: 68 as read, corrected to 69, but another figure of this measure (the stat p90) is also 68, and a chart, table or sentence prints it as read."
+    ]
+   }
+  },
+  {
+   "name": "a finding: its value as read also the month of a year and month, which is masked: carried, the date untouched",
+   "findings": [
+    {
+     "id": "f-000000000042",
+     "ruleId": "int.planted",
+     "ruleVersion": 1,
+     "domain": "integrations",
+     "status": "issue",
+     "title": "Deals closed in a month",
+     "summary": "10 deals closed in 2026-10.",
+     "recommendation": "Look into it.",
+     "recommendationType": "change",
+     "severity": "medium",
+     "confidence": "high",
+     "evidence": [
+      {
+       "kind": "soql",
+       "api": "rest",
+       "query": "SELECT Id FROM User",
+       "count": 11,
+       "dateRange": {
+        "from": "2024-10-31",
+        "to": "2026-10-31"
+       },
+       "exclusions": [],
+       "capturedAt": "2026-10-31T13:00:00.000Z"
+      }
+     ],
+     "value": {
+      "kind": "not_sized",
+      "reason": "Not sized."
+     },
+     "effort": {
+      "size": "S"
+     },
+     "owner": "Salesforce admin",
+     "dependencies": [],
+     "guards": [],
+     "segmentsChecked": [],
+     "segmentExemptReason": "A single org-wide figure.",
+     "subjects": [],
+     "facts": {
+      "closed": 10
+     },
+     "notMeasurableReason": null,
+     "manualStepIds": []
+    }
+   ],
+   "metrics": [],
+   "overrides": [
+    {
+     "id": "ov-0001",
+     "runId": "run-0001",
+     "target": {
+      "type": "finding",
+      "id": "f-000000000042",
+      "field": "facts.closed"
+     },
+     "previousValue": 10,
+     "newValue": 11,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    }
+   ],
+   "expected": {
+    "findings": [
+     {
+      "id": "f-000000000042",
+      "ruleId": "int.planted",
+      "ruleVersion": 1,
+      "domain": "integrations",
+      "status": "issue",
+      "title": "Deals closed in a month",
+      "summary": "11 deals closed in 2026-10.",
+      "recommendation": "Look into it.",
+      "recommendationType": "change",
+      "severity": "medium",
+      "confidence": "high",
+      "evidence": [
+       {
+        "kind": "soql",
+        "api": "rest",
+        "query": "SELECT Id FROM User",
+        "count": 11,
+        "dateRange": {
+         "from": "2024-10-31",
+         "to": "2026-10-31"
+        },
+        "exclusions": [],
+        "capturedAt": "2026-10-31T13:00:00.000Z"
+       }
+      ],
+      "value": {
+       "kind": "not_sized",
+       "reason": "Not sized."
+      },
+      "effort": {
+       "size": "S"
+      },
+      "owner": "Salesforce admin",
+      "dependencies": [],
+      "guards": [],
+      "segmentsChecked": [],
+      "segmentExemptReason": "A single org-wide figure.",
+      "subjects": [],
+      "facts": {
+       "closed": 11
+      },
+      "notMeasurableReason": null,
+      "manualStepIds": []
+     }
+    ],
+    "metrics": [],
+    "refused": [],
+    "lines": []
+   }
+  },
+  {
+   "name": "a finding: its value as read only the month of a year and month: carried with no text rewritten, the date untouched",
+   "findings": [
+    {
+     "id": "f-000000000043",
+     "ruleId": "int.planted",
+     "ruleVersion": 1,
+     "domain": "integrations",
+     "status": "issue",
+     "title": "Deals counted",
+     "summary": "Deals are counted from 2026-12.",
+     "recommendation": "Look into it.",
+     "recommendationType": "change",
+     "severity": "medium",
+     "confidence": "high",
+     "evidence": [
+      {
+       "kind": "soql",
+       "api": "rest",
+       "query": "SELECT Id FROM User",
+       "count": 11,
+       "dateRange": {
+        "from": "2024-10-31",
+        "to": "2026-10-31"
+       },
+       "exclusions": [],
+       "capturedAt": "2026-10-31T13:00:00.000Z"
+      }
+     ],
+     "value": {
+      "kind": "not_sized",
+      "reason": "Not sized."
+     },
+     "effort": {
+      "size": "S"
+     },
+     "owner": "Salesforce admin",
+     "dependencies": [],
+     "guards": [],
+     "segmentsChecked": [],
+     "segmentExemptReason": "A single org-wide figure.",
+     "subjects": [],
+     "facts": {
+      "months": 12
+     },
+     "notMeasurableReason": null,
+     "manualStepIds": []
+    }
+   ],
+   "metrics": [],
+   "overrides": [
+    {
+     "id": "ov-0001",
+     "runId": "run-0001",
+     "target": {
+      "type": "finding",
+      "id": "f-000000000043",
+      "field": "facts.months"
+     },
+     "previousValue": 12,
+     "newValue": 13,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    }
+   ],
+   "expected": {
+    "findings": [
+     {
+      "id": "f-000000000043",
+      "ruleId": "int.planted",
+      "ruleVersion": 1,
+      "domain": "integrations",
+      "status": "issue",
+      "title": "Deals counted",
+      "summary": "Deals are counted from 2026-12.",
+      "recommendation": "Look into it.",
+      "recommendationType": "change",
+      "severity": "medium",
+      "confidence": "high",
+      "evidence": [
+       {
+        "kind": "soql",
+        "api": "rest",
+        "query": "SELECT Id FROM User",
+        "count": 11,
+        "dateRange": {
+         "from": "2024-10-31",
+         "to": "2026-10-31"
+        },
+        "exclusions": [],
+        "capturedAt": "2026-10-31T13:00:00.000Z"
+       }
+      ],
+      "value": {
+       "kind": "not_sized",
+       "reason": "Not sized."
+      },
+      "effort": {
+       "size": "S"
+      },
+      "owner": "Salesforce admin",
+      "dependencies": [],
+      "guards": [],
+      "segmentsChecked": [],
+      "segmentExemptReason": "A single org-wide figure.",
+      "subjects": [],
+      "facts": {
+       "months": 13
+      },
+      "notMeasurableReason": null,
+      "manualStepIds": []
+     }
+    ],
+    "metrics": [],
+    "refused": [],
+    "lines": []
+   }
+  },
+  {
+   "name": "a finding: a year and month joined to a form before it is not masked, so its month is a place (repeated)",
+   "findings": [
+    {
+     "id": "f-000000000044",
+     "ruleId": "int.planted",
+     "ruleVersion": 1,
+     "domain": "integrations",
+     "status": "issue",
+     "title": "Deals that slipped",
+     "summary": "Deals from 2025-12-2026-10: 10 slipped.",
+     "recommendation": "Look into it.",
+     "recommendationType": "change",
+     "severity": "medium",
+     "confidence": "high",
+     "evidence": [
+      {
+       "kind": "soql",
+       "api": "rest",
+       "query": "SELECT Id FROM User",
+       "count": 11,
+       "dateRange": {
+        "from": "2024-10-31",
+        "to": "2026-10-31"
+       },
+       "exclusions": [],
+       "capturedAt": "2026-10-31T13:00:00.000Z"
+      }
+     ],
+     "value": {
+      "kind": "not_sized",
+      "reason": "Not sized."
+     },
+     "effort": {
+      "size": "S"
+     },
+     "owner": "Salesforce admin",
+     "dependencies": [],
+     "guards": [],
+     "segmentsChecked": [],
+     "segmentExemptReason": "A single org-wide figure.",
+     "subjects": [],
+     "facts": {
+      "slipped": 10
+     },
+     "notMeasurableReason": null,
+     "manualStepIds": []
+    }
+   ],
+   "metrics": [],
+   "overrides": [
+    {
+     "id": "ov-0001",
+     "runId": "run-0001",
+     "target": {
+      "type": "finding",
+      "id": "f-000000000044",
+      "field": "facts.slipped"
+     },
+     "previousValue": 10,
+     "newValue": 11,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    }
+   ],
+   "expected": {
+    "findings": [
+     {
+      "id": "f-000000000044",
+      "ruleId": "int.planted",
+      "ruleVersion": 1,
+      "domain": "integrations",
+      "status": "issue",
+      "title": "Deals that slipped",
+      "summary": "Deals from 2025-12-2026-10: 10 slipped.",
+      "recommendation": "Look into it.",
+      "recommendationType": "change",
+      "severity": "medium",
+      "confidence": "high",
+      "evidence": [
+       {
+        "kind": "soql",
+        "api": "rest",
+        "query": "SELECT Id FROM User",
+        "count": 11,
+        "dateRange": {
+         "from": "2024-10-31",
+         "to": "2026-10-31"
+        },
+        "exclusions": [],
+        "capturedAt": "2026-10-31T13:00:00.000Z"
+       }
+      ],
+      "value": {
+       "kind": "not_sized",
+       "reason": "Not sized."
+      },
+      "effort": {
+       "size": "S"
+      },
+      "owner": "Salesforce admin",
+      "dependencies": [],
+      "guards": [],
+      "segmentsChecked": [],
+      "segmentExemptReason": "A single org-wide figure.",
+      "subjects": [],
+      "facts": {
+       "slipped": 10
+      },
+      "notMeasurableReason": null,
+      "manualStepIds": []
+     }
+    ],
+    "metrics": [],
+    "refused": [
+     {
+      "findingId": "f-000000000044",
+      "title": "Deals that slipped",
+      "field": "facts.slipped",
+      "asRead": 10,
+      "last": 11,
+      "why": {
+       "kind": "repeated",
+       "places": 2
+      }
+     }
+    ],
+    "lines": [
+     "Held back: 1 corrected figure can't be carried into the documents.",
+     "\"Deals that slipped\", slipped: 10 as read, corrected to 11, but the wording has 10 in 2 places, and we can't tell which of them are this figure."
+    ]
+   }
+  },
+  {
+   "name": "a finding: a year and month joined to a form after it is not masked, so its month is a place (repeated)",
+   "findings": [
+    {
+     "id": "f-000000000045",
+     "ruleId": "int.planted",
+     "ruleVersion": 1,
+     "domain": "integrations",
+     "status": "issue",
+     "title": "Deals that slipped since a day",
+     "summary": "Since 2026-10-5, 10 deals slipped.",
+     "recommendation": "Look into it.",
+     "recommendationType": "change",
+     "severity": "medium",
+     "confidence": "high",
+     "evidence": [
+      {
+       "kind": "soql",
+       "api": "rest",
+       "query": "SELECT Id FROM User",
+       "count": 11,
+       "dateRange": {
+        "from": "2024-10-31",
+        "to": "2026-10-31"
+       },
+       "exclusions": [],
+       "capturedAt": "2026-10-31T13:00:00.000Z"
+      }
+     ],
+     "value": {
+      "kind": "not_sized",
+      "reason": "Not sized."
+     },
+     "effort": {
+      "size": "S"
+     },
+     "owner": "Salesforce admin",
+     "dependencies": [],
+     "guards": [],
+     "segmentsChecked": [],
+     "segmentExemptReason": "A single org-wide figure.",
+     "subjects": [],
+     "facts": {
+      "slipped": 10
+     },
+     "notMeasurableReason": null,
+     "manualStepIds": []
+    }
+   ],
+   "metrics": [],
+   "overrides": [
+    {
+     "id": "ov-0001",
+     "runId": "run-0001",
+     "target": {
+      "type": "finding",
+      "id": "f-000000000045",
+      "field": "facts.slipped"
+     },
+     "previousValue": 10,
+     "newValue": 11,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    }
+   ],
+   "expected": {
+    "findings": [
+     {
+      "id": "f-000000000045",
+      "ruleId": "int.planted",
+      "ruleVersion": 1,
+      "domain": "integrations",
+      "status": "issue",
+      "title": "Deals that slipped since a day",
+      "summary": "Since 2026-10-5, 10 deals slipped.",
+      "recommendation": "Look into it.",
+      "recommendationType": "change",
+      "severity": "medium",
+      "confidence": "high",
+      "evidence": [
+       {
+        "kind": "soql",
+        "api": "rest",
+        "query": "SELECT Id FROM User",
+        "count": 11,
+        "dateRange": {
+         "from": "2024-10-31",
+         "to": "2026-10-31"
+        },
+        "exclusions": [],
+        "capturedAt": "2026-10-31T13:00:00.000Z"
+       }
+      ],
+      "value": {
+       "kind": "not_sized",
+       "reason": "Not sized."
+      },
+      "effort": {
+       "size": "S"
+      },
+      "owner": "Salesforce admin",
+      "dependencies": [],
+      "guards": [],
+      "segmentsChecked": [],
+      "segmentExemptReason": "A single org-wide figure.",
+      "subjects": [],
+      "facts": {
+       "slipped": 10
+      },
+      "notMeasurableReason": null,
+      "manualStepIds": []
+     }
+    ],
+    "metrics": [],
+    "refused": [
+     {
+      "findingId": "f-000000000045",
+      "title": "Deals that slipped since a day",
+      "field": "facts.slipped",
+      "asRead": 10,
+      "last": 11,
+      "why": {
+       "kind": "repeated",
+       "places": 2
+      }
+     }
+    ],
+    "lines": [
+     "Held back: 1 corrected figure can't be carried into the documents.",
+     "\"Deals that slipped since a day\", slipped: 10 as read, corrected to 11, but the wording has 10 in 2 places, and we can't tell which of them are this figure."
+    ]
+   }
+  },
+  {
+   "name": "a finding: a figure under 1,000 corrected to over it is written grouped (carried)",
+   "findings": [
+    {
+     "id": "f-000000000046",
+     "ruleId": "int.planted",
+     "ruleVersion": 1,
+     "domain": "integrations",
+     "status": "issue",
+     "title": "Records with no owner",
+     "summary": "950 records have no owner.",
+     "recommendation": "Look into it.",
+     "recommendationType": "change",
+     "severity": "medium",
+     "confidence": "high",
+     "evidence": [
+      {
+       "kind": "soql",
+       "api": "rest",
+       "query": "SELECT Id FROM User",
+       "count": 11,
+       "dateRange": {
+        "from": "2024-10-31",
+        "to": "2026-10-31"
+       },
+       "exclusions": [],
+       "capturedAt": "2026-10-31T13:00:00.000Z"
+      }
+     ],
+     "value": {
+      "kind": "not_sized",
+      "reason": "Not sized."
+     },
+     "effort": {
+      "size": "S"
+     },
+     "owner": "Salesforce admin",
+     "dependencies": [],
+     "guards": [],
+     "segmentsChecked": [],
+     "segmentExemptReason": "A single org-wide figure.",
+     "subjects": [],
+     "facts": {
+      "records": 950
+     },
+     "notMeasurableReason": null,
+     "manualStepIds": []
+    }
+   ],
+   "metrics": [],
+   "overrides": [
+    {
+     "id": "ov-0001",
+     "runId": "run-0001",
+     "target": {
+      "type": "finding",
+      "id": "f-000000000046",
+      "field": "facts.records"
+     },
+     "previousValue": 950,
+     "newValue": 1050,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    }
+   ],
+   "expected": {
+    "findings": [
+     {
+      "id": "f-000000000046",
+      "ruleId": "int.planted",
+      "ruleVersion": 1,
+      "domain": "integrations",
+      "status": "issue",
+      "title": "Records with no owner",
+      "summary": "1,050 records have no owner.",
+      "recommendation": "Look into it.",
+      "recommendationType": "change",
+      "severity": "medium",
+      "confidence": "high",
+      "evidence": [
+       {
+        "kind": "soql",
+        "api": "rest",
+        "query": "SELECT Id FROM User",
+        "count": 11,
+        "dateRange": {
+         "from": "2024-10-31",
+         "to": "2026-10-31"
+        },
+        "exclusions": [],
+        "capturedAt": "2026-10-31T13:00:00.000Z"
+       }
+      ],
+      "value": {
+       "kind": "not_sized",
+       "reason": "Not sized."
+      },
+      "effort": {
+       "size": "S"
+      },
+      "owner": "Salesforce admin",
+      "dependencies": [],
+      "guards": [],
+      "segmentsChecked": [],
+      "segmentExemptReason": "A single org-wide figure.",
+      "subjects": [],
+      "facts": {
+       "records": 1050
+      },
+      "notMeasurableReason": null,
+      "manualStepIds": []
+     }
+    ],
+    "metrics": [],
+    "refused": [],
+    "lines": []
+   }
+  },
+  {
+   "name": "a finding: a figure found ungrouped is written ungrouped (carried)",
+   "findings": [
+    {
+     "id": "f-000000000047",
+     "ruleId": "int.planted",
+     "ruleVersion": 1,
+     "domain": "integrations",
+     "status": "issue",
+     "title": "Records read",
+     "summary": "10500 records were read.",
+     "recommendation": "Look into it.",
+     "recommendationType": "change",
+     "severity": "medium",
+     "confidence": "high",
+     "evidence": [
+      {
+       "kind": "soql",
+       "api": "rest",
+       "query": "SELECT Id FROM User",
+       "count": 11,
+       "dateRange": {
+        "from": "2024-10-31",
+        "to": "2026-10-31"
+       },
+       "exclusions": [],
+       "capturedAt": "2026-10-31T13:00:00.000Z"
+      }
+     ],
+     "value": {
+      "kind": "not_sized",
+      "reason": "Not sized."
+     },
+     "effort": {
+      "size": "S"
+     },
+     "owner": "Salesforce admin",
+     "dependencies": [],
+     "guards": [],
+     "segmentsChecked": [],
+     "segmentExemptReason": "A single org-wide figure.",
+     "subjects": [],
+     "facts": {
+      "records": 10500
+     },
+     "notMeasurableReason": null,
+     "manualStepIds": []
+    }
+   ],
+   "metrics": [],
+   "overrides": [
+    {
+     "id": "ov-0001",
+     "runId": "run-0001",
+     "target": {
+      "type": "finding",
+      "id": "f-000000000047",
+      "field": "facts.records"
+     },
+     "previousValue": 10500,
+     "newValue": 9800,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    }
+   ],
+   "expected": {
+    "findings": [
+     {
+      "id": "f-000000000047",
+      "ruleId": "int.planted",
+      "ruleVersion": 1,
+      "domain": "integrations",
+      "status": "issue",
+      "title": "Records read",
+      "summary": "9800 records were read.",
+      "recommendation": "Look into it.",
+      "recommendationType": "change",
+      "severity": "medium",
+      "confidence": "high",
+      "evidence": [
+       {
+        "kind": "soql",
+        "api": "rest",
+        "query": "SELECT Id FROM User",
+        "count": 11,
+        "dateRange": {
+         "from": "2024-10-31",
+         "to": "2026-10-31"
+        },
+        "exclusions": [],
+        "capturedAt": "2026-10-31T13:00:00.000Z"
+       }
+      ],
+      "value": {
+       "kind": "not_sized",
+       "reason": "Not sized."
+      },
+      "effort": {
+       "size": "S"
+      },
+      "owner": "Salesforce admin",
+      "dependencies": [],
+      "guards": [],
+      "segmentsChecked": [],
+      "segmentExemptReason": "A single org-wide figure.",
+      "subjects": [],
+      "facts": {
+       "records": 9800
+      },
+      "notMeasurableReason": null,
+      "manualStepIds": []
+     }
+    ],
+    "metrics": [],
+    "refused": [],
+    "lines": []
+   }
+  },
+  {
+   "name": "a finding: a figure of 10^21, which String writes with an exponent, is found and written in full (carried)",
+   "findings": [
+    {
+     "id": "f-000000000048",
+     "ruleId": "int.planted",
+     "ruleVersion": 1,
+     "domain": "integrations",
+     "status": "issue",
+     "title": "Rows counted",
+     "summary": "1000000000000000000000 rows were counted.",
+     "recommendation": "Look into it.",
+     "recommendationType": "change",
+     "severity": "medium",
+     "confidence": "high",
+     "evidence": [
+      {
+       "kind": "soql",
+       "api": "rest",
+       "query": "SELECT Id FROM User",
+       "count": 11,
+       "dateRange": {
+        "from": "2024-10-31",
+        "to": "2026-10-31"
+       },
+       "exclusions": [],
+       "capturedAt": "2026-10-31T13:00:00.000Z"
+      }
+     ],
+     "value": {
+      "kind": "not_sized",
+      "reason": "Not sized."
+     },
+     "effort": {
+      "size": "S"
+     },
+     "owner": "Salesforce admin",
+     "dependencies": [],
+     "guards": [],
+     "segmentsChecked": [],
+     "segmentExemptReason": "A single org-wide figure.",
+     "subjects": [],
+     "facts": {
+      "rows": 1e+21
+     },
+     "notMeasurableReason": null,
+     "manualStepIds": []
+    }
+   ],
+   "metrics": [],
+   "overrides": [
+    {
+     "id": "ov-0001",
+     "runId": "run-0001",
+     "target": {
+      "type": "finding",
+      "id": "f-000000000048",
+      "field": "facts.rows"
+     },
+     "previousValue": 1e+21,
+     "newValue": 2e+21,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    }
+   ],
+   "expected": {
+    "findings": [
+     {
+      "id": "f-000000000048",
+      "ruleId": "int.planted",
+      "ruleVersion": 1,
+      "domain": "integrations",
+      "status": "issue",
+      "title": "Rows counted",
+      "summary": "2000000000000000000000 rows were counted.",
+      "recommendation": "Look into it.",
+      "recommendationType": "change",
+      "severity": "medium",
+      "confidence": "high",
+      "evidence": [
+       {
+        "kind": "soql",
+        "api": "rest",
+        "query": "SELECT Id FROM User",
+        "count": 11,
+        "dateRange": {
+         "from": "2024-10-31",
+         "to": "2026-10-31"
+        },
+        "exclusions": [],
+        "capturedAt": "2026-10-31T13:00:00.000Z"
+       }
+      ],
+      "value": {
+       "kind": "not_sized",
+       "reason": "Not sized."
+      },
+      "effort": {
+       "size": "S"
+      },
+      "owner": "Salesforce admin",
+      "dependencies": [],
+      "guards": [],
+      "segmentsChecked": [],
+      "segmentExemptReason": "A single org-wide figure.",
+      "subjects": [],
+      "facts": {
+       "rows": 2e+21
+      },
+      "notMeasurableReason": null,
+      "manualStepIds": []
+     }
+    ],
+    "metrics": [],
+    "refused": [],
+    "lines": []
+   }
+  },
+  {
+   "name": "a finding: a value as read inside a grouped number is not a place (carried)",
+   "findings": [
+    {
+     "id": "f-000000000049",
+     "ruleId": "int.planted",
+     "ruleVersion": 1,
+     "domain": "integrations",
+     "status": "issue",
+     "title": "Deals with no next step",
+     "summary": "£12,500 of pipeline sits in 500 open deals.",
+     "recommendation": "Look into it.",
+     "recommendationType": "change",
+     "severity": "medium",
+     "confidence": "high",
+     "evidence": [
+      {
+       "kind": "soql",
+       "api": "rest",
+       "query": "SELECT Id FROM User",
+       "count": 11,
+       "dateRange": {
+        "from": "2024-10-31",
+        "to": "2026-10-31"
+       },
+       "exclusions": [],
+       "capturedAt": "2026-10-31T13:00:00.000Z"
+      }
+     ],
+     "value": {
+      "kind": "not_sized",
+      "reason": "Not sized."
+     },
+     "effort": {
+      "size": "S"
+     },
+     "owner": "Salesforce admin",
+     "dependencies": [],
+     "guards": [],
+     "segmentsChecked": [],
+     "segmentExemptReason": "A single org-wide figure.",
+     "subjects": [],
+     "facts": {
+      "deals": 500
+     },
+     "notMeasurableReason": null,
+     "manualStepIds": []
+    }
+   ],
+   "metrics": [],
+   "overrides": [
+    {
+     "id": "ov-0001",
+     "runId": "run-0001",
+     "target": {
+      "type": "finding",
+      "id": "f-000000000049",
+      "field": "facts.deals"
+     },
+     "previousValue": 500,
+     "newValue": 480,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    }
+   ],
+   "expected": {
+    "findings": [
+     {
+      "id": "f-000000000049",
+      "ruleId": "int.planted",
+      "ruleVersion": 1,
+      "domain": "integrations",
+      "status": "issue",
+      "title": "Deals with no next step",
+      "summary": "£12,500 of pipeline sits in 480 open deals.",
+      "recommendation": "Look into it.",
+      "recommendationType": "change",
+      "severity": "medium",
+      "confidence": "high",
+      "evidence": [
+       {
+        "kind": "soql",
+        "api": "rest",
+        "query": "SELECT Id FROM User",
+        "count": 11,
+        "dateRange": {
+         "from": "2024-10-31",
+         "to": "2026-10-31"
+        },
+        "exclusions": [],
+        "capturedAt": "2026-10-31T13:00:00.000Z"
+       }
+      ],
+      "value": {
+       "kind": "not_sized",
+       "reason": "Not sized."
+      },
+      "effort": {
+       "size": "S"
+      },
+      "owner": "Salesforce admin",
+      "dependencies": [],
+      "guards": [],
+      "segmentsChecked": [],
+      "segmentExemptReason": "A single org-wide figure.",
+      "subjects": [],
+      "facts": {
+       "deals": 480
+      },
+      "notMeasurableReason": null,
+      "manualStepIds": []
+     }
+    ],
+    "metrics": [],
+    "refused": [],
+    "lines": []
+   }
+  },
+  {
+   "name": "a finding: a grouped number near the value as read is read whole (rounded)",
+   "findings": [
+    {
+     "id": "f-000000000050",
+     "ruleId": "int.planted",
+     "ruleVersion": 1,
+     "domain": "integrations",
+     "status": "issue",
+     "title": "Stale pipeline",
+     "summary": "About £12,500 of pipeline is stale.",
+     "recommendation": "Look into it.",
+     "recommendationType": "change",
+     "severity": "medium",
+     "confidence": "high",
+     "evidence": [
+      {
+       "kind": "soql",
+       "api": "rest",
+       "query": "SELECT Id FROM User",
+       "count": 11,
+       "dateRange": {
+        "from": "2024-10-31",
+        "to": "2026-10-31"
+       },
+       "exclusions": [],
+       "capturedAt": "2026-10-31T13:00:00.000Z"
+      }
+     ],
+     "value": {
+      "kind": "not_sized",
+      "reason": "Not sized."
+     },
+     "effort": {
+      "size": "S"
+     },
+     "owner": "Salesforce admin",
+     "dependencies": [],
+     "guards": [],
+     "segmentsChecked": [],
+     "segmentExemptReason": "A single org-wide figure.",
+     "subjects": [],
+     "facts": {
+      "pipeline": 12400
+     },
+     "notMeasurableReason": null,
+     "manualStepIds": []
+    }
+   ],
+   "metrics": [],
+   "overrides": [
+    {
+     "id": "ov-0001",
+     "runId": "run-0001",
+     "target": {
+      "type": "finding",
+      "id": "f-000000000050",
+      "field": "facts.pipeline"
+     },
+     "previousValue": 12400,
+     "newValue": 11000,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    }
+   ],
+   "expected": {
+    "findings": [
+     {
+      "id": "f-000000000050",
+      "ruleId": "int.planted",
+      "ruleVersion": 1,
+      "domain": "integrations",
+      "status": "issue",
+      "title": "Stale pipeline",
+      "summary": "About £12,500 of pipeline is stale.",
+      "recommendation": "Look into it.",
+      "recommendationType": "change",
+      "severity": "medium",
+      "confidence": "high",
+      "evidence": [
+       {
+        "kind": "soql",
+        "api": "rest",
+        "query": "SELECT Id FROM User",
+        "count": 11,
+        "dateRange": {
+         "from": "2024-10-31",
+         "to": "2026-10-31"
+        },
+        "exclusions": [],
+        "capturedAt": "2026-10-31T13:00:00.000Z"
+       }
+      ],
+      "value": {
+       "kind": "not_sized",
+       "reason": "Not sized."
+      },
+      "effort": {
+       "size": "S"
+      },
+      "owner": "Salesforce admin",
+      "dependencies": [],
+      "guards": [],
+      "segmentsChecked": [],
+      "segmentExemptReason": "A single org-wide figure.",
+      "subjects": [],
+      "facts": {
+       "pipeline": 12400
+      },
+      "notMeasurableReason": null,
+      "manualStepIds": []
+     }
+    ],
+    "metrics": [],
+    "refused": [
+     {
+      "findingId": "f-000000000050",
+      "title": "Stale pipeline",
+      "field": "facts.pipeline",
+      "asRead": 12400,
+      "last": 11000,
+      "why": {
+       "kind": "rounded",
+       "found": "£12,500"
+      }
+     }
+    ],
+    "lines": [
+     "Held back: 1 corrected figure can't be carried into the documents.",
+     "\"Stale pipeline\", pipeline: 12,400 as read, corrected to 11,000, but the wording doesn't print 12,400 itself and has £12,500, which may be this figure rounded."
+    ]
+   }
+  },
+  {
+   "name": "a finding: the last digit of a dotted form is not a number of its own (carried)",
+   "findings": [
+    {
+     "id": "f-000000000051",
+     "ruleId": "int.planted",
+     "ruleVersion": 1,
+     "domain": "integrations",
+     "status": "issue",
+     "title": "Apps on an old version",
+     "summary": "Each app runs version 4.5.6.",
+     "recommendation": "Look into it.",
+     "recommendationType": "change",
+     "severity": "medium",
+     "confidence": "high",
+     "evidence": [
+      {
+       "kind": "soql",
+       "api": "rest",
+       "query": "SELECT Id FROM User",
+       "count": 11,
+       "dateRange": {
+        "from": "2024-10-31",
+        "to": "2026-10-31"
+       },
+       "exclusions": [],
+       "capturedAt": "2026-10-31T13:00:00.000Z"
+      }
+     ],
+     "value": {
+      "kind": "not_sized",
+      "reason": "Not sized."
+     },
+     "effort": {
+      "size": "S"
+     },
+     "owner": "Salesforce admin",
+     "dependencies": [],
+     "guards": [],
+     "segmentsChecked": [],
+     "segmentExemptReason": "A single org-wide figure.",
+     "subjects": [],
+     "facts": {
+      "apps": 6
+     },
+     "notMeasurableReason": null,
+     "manualStepIds": []
+    }
+   ],
+   "metrics": [],
+   "overrides": [
+    {
+     "id": "ov-0001",
+     "runId": "run-0001",
+     "target": {
+      "type": "finding",
+      "id": "f-000000000051",
+      "field": "facts.apps"
+     },
+     "previousValue": 6,
+     "newValue": 7,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    }
+   ],
+   "expected": {
+    "findings": [
+     {
+      "id": "f-000000000051",
+      "ruleId": "int.planted",
+      "ruleVersion": 1,
+      "domain": "integrations",
+      "status": "issue",
+      "title": "Apps on an old version",
+      "summary": "Each app runs version 4.5.6.",
+      "recommendation": "Look into it.",
+      "recommendationType": "change",
+      "severity": "medium",
+      "confidence": "high",
+      "evidence": [
+       {
+        "kind": "soql",
+        "api": "rest",
+        "query": "SELECT Id FROM User",
+        "count": 11,
+        "dateRange": {
+         "from": "2024-10-31",
+         "to": "2026-10-31"
+        },
+        "exclusions": [],
+        "capturedAt": "2026-10-31T13:00:00.000Z"
+       }
+      ],
+      "value": {
+       "kind": "not_sized",
+       "reason": "Not sized."
+      },
+      "effort": {
+       "size": "S"
+      },
+      "owner": "Salesforce admin",
+      "dependencies": [],
+      "guards": [],
+      "segmentsChecked": [],
+      "segmentExemptReason": "A single org-wide figure.",
+      "subjects": [],
+      "facts": {
+       "apps": 7
+      },
+      "notMeasurableReason": null,
+      "manualStepIds": []
+     }
+    ],
+    "metrics": [],
+    "refused": [],
+    "lines": []
+   }
+  },
+  {
+   "name": "a finding: a number exactly 5% from the value as read may be it rounded (rounded)",
+   "findings": [
+    {
+     "id": "f-000000000052",
+     "ruleId": "int.planted",
+     "ruleVersion": 1,
+     "domain": "integrations",
+     "status": "issue",
+     "title": "Open deals",
+     "summary": "About 105 deals are open.",
+     "recommendation": "Look into it.",
+     "recommendationType": "change",
+     "severity": "medium",
+     "confidence": "high",
+     "evidence": [
+      {
+       "kind": "soql",
+       "api": "rest",
+       "query": "SELECT Id FROM User",
+       "count": 11,
+       "dateRange": {
+        "from": "2024-10-31",
+        "to": "2026-10-31"
+       },
+       "exclusions": [],
+       "capturedAt": "2026-10-31T13:00:00.000Z"
+      }
+     ],
+     "value": {
+      "kind": "not_sized",
+      "reason": "Not sized."
+     },
+     "effort": {
+      "size": "S"
+     },
+     "owner": "Salesforce admin",
+     "dependencies": [],
+     "guards": [],
+     "segmentsChecked": [],
+     "segmentExemptReason": "A single org-wide figure.",
+     "subjects": [],
+     "facts": {
+      "open": 100
+     },
+     "notMeasurableReason": null,
+     "manualStepIds": []
+    }
+   ],
+   "metrics": [],
+   "overrides": [
+    {
+     "id": "ov-0001",
+     "runId": "run-0001",
+     "target": {
+      "type": "finding",
+      "id": "f-000000000052",
+      "field": "facts.open"
+     },
+     "previousValue": 100,
+     "newValue": 90,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    }
+   ],
+   "expected": {
+    "findings": [
+     {
+      "id": "f-000000000052",
+      "ruleId": "int.planted",
+      "ruleVersion": 1,
+      "domain": "integrations",
+      "status": "issue",
+      "title": "Open deals",
+      "summary": "About 105 deals are open.",
+      "recommendation": "Look into it.",
+      "recommendationType": "change",
+      "severity": "medium",
+      "confidence": "high",
+      "evidence": [
+       {
+        "kind": "soql",
+        "api": "rest",
+        "query": "SELECT Id FROM User",
+        "count": 11,
+        "dateRange": {
+         "from": "2024-10-31",
+         "to": "2026-10-31"
+        },
+        "exclusions": [],
+        "capturedAt": "2026-10-31T13:00:00.000Z"
+       }
+      ],
+      "value": {
+       "kind": "not_sized",
+       "reason": "Not sized."
+      },
+      "effort": {
+       "size": "S"
+      },
+      "owner": "Salesforce admin",
+      "dependencies": [],
+      "guards": [],
+      "segmentsChecked": [],
+      "segmentExemptReason": "A single org-wide figure.",
+      "subjects": [],
+      "facts": {
+       "open": 100
+      },
+      "notMeasurableReason": null,
+      "manualStepIds": []
+     }
+    ],
+    "metrics": [],
+    "refused": [
+     {
+      "findingId": "f-000000000052",
+      "title": "Open deals",
+      "field": "facts.open",
+      "asRead": 100,
+      "last": 90,
+      "why": {
+       "kind": "rounded",
+       "found": "105"
+      }
+     }
+    ],
+    "lines": [
+     "Held back: 1 corrected figure can't be carried into the documents.",
+     "\"Open deals\", open: 100 as read, corrected to 90, but the wording doesn't print 100 itself and has 105, which may be this figure rounded."
+    ]
+   }
+  },
+  {
+   "name": "a finding: a negative value as read is near its size printed unsigned (rounded)",
+   "findings": [
+    {
+     "id": "f-000000000053",
+     "ruleId": "int.planted",
+     "ruleVersion": 1,
+     "domain": "integrations",
+     "status": "issue",
+     "title": "Change in win rate",
+     "summary": "The win rate fell by 12 points this year.",
+     "recommendation": "Look into it.",
+     "recommendationType": "change",
+     "severity": "medium",
+     "confidence": "high",
+     "evidence": [
+      {
+       "kind": "soql",
+       "api": "rest",
+       "query": "SELECT Id FROM User",
+       "count": 11,
+       "dateRange": {
+        "from": "2024-10-31",
+        "to": "2026-10-31"
+       },
+       "exclusions": [],
+       "capturedAt": "2026-10-31T13:00:00.000Z"
+      }
+     ],
+     "value": {
+      "kind": "not_sized",
+      "reason": "Not sized."
+     },
+     "effort": {
+      "size": "S"
+     },
+     "owner": "Salesforce admin",
+     "dependencies": [],
+     "guards": [],
+     "segmentsChecked": [],
+     "segmentExemptReason": "A single org-wide figure.",
+     "subjects": [],
+     "facts": {
+      "change": -12
+     },
+     "notMeasurableReason": null,
+     "manualStepIds": []
+    }
+   ],
+   "metrics": [],
+   "overrides": [
+    {
+     "id": "ov-0001",
+     "runId": "run-0001",
+     "target": {
+      "type": "finding",
+      "id": "f-000000000053",
+      "field": "facts.change"
+     },
+     "previousValue": -12,
+     "newValue": -10,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    }
+   ],
+   "expected": {
+    "findings": [
+     {
+      "id": "f-000000000053",
+      "ruleId": "int.planted",
+      "ruleVersion": 1,
+      "domain": "integrations",
+      "status": "issue",
+      "title": "Change in win rate",
+      "summary": "The win rate fell by 12 points this year.",
+      "recommendation": "Look into it.",
+      "recommendationType": "change",
+      "severity": "medium",
+      "confidence": "high",
+      "evidence": [
+       {
+        "kind": "soql",
+        "api": "rest",
+        "query": "SELECT Id FROM User",
+        "count": 11,
+        "dateRange": {
+         "from": "2024-10-31",
+         "to": "2026-10-31"
+        },
+        "exclusions": [],
+        "capturedAt": "2026-10-31T13:00:00.000Z"
+       }
+      ],
+      "value": {
+       "kind": "not_sized",
+       "reason": "Not sized."
+      },
+      "effort": {
+       "size": "S"
+      },
+      "owner": "Salesforce admin",
+      "dependencies": [],
+      "guards": [],
+      "segmentsChecked": [],
+      "segmentExemptReason": "A single org-wide figure.",
+      "subjects": [],
+      "facts": {
+       "change": -12
+      },
+      "notMeasurableReason": null,
+      "manualStepIds": []
+     }
+    ],
+    "metrics": [],
+    "refused": [
+     {
+      "findingId": "f-000000000053",
+      "title": "Change in win rate",
+      "field": "facts.change",
+      "asRead": -12,
+      "last": -10,
+      "why": {
+       "kind": "rounded",
+       "found": "12"
+      }
+     }
+    ],
+    "lines": [
+     "Held back: 1 corrected figure can't be carried into the documents.",
+     "\"Change in win rate\", change: -12 as read, corrected to -10, but the wording doesn't print -12 itself and has 12, which may be this figure rounded."
+    ]
+   }
+  },
+  {
+   "name": "a finding: a token's digits are not the value as read (carried)",
+   "findings": [
+    {
+     "id": "f-000000000054",
+     "ruleId": "int.planted",
+     "ruleVersion": 1,
+     "domain": "integrations",
+     "status": "issue",
+     "title": "Deals with an owner",
+     "summary": "Some deals are owned by [[user:U0003]].",
+     "recommendation": "Look into it.",
+     "recommendationType": "change",
+     "severity": "medium",
+     "confidence": "high",
+     "evidence": [
+      {
+       "kind": "soql",
+       "api": "rest",
+       "query": "SELECT Id FROM User",
+       "count": 11,
+       "dateRange": {
+        "from": "2024-10-31",
+        "to": "2026-10-31"
+       },
+       "exclusions": [],
+       "capturedAt": "2026-10-31T13:00:00.000Z"
+      }
+     ],
+     "value": {
+      "kind": "not_sized",
+      "reason": "Not sized."
+     },
+     "effort": {
+      "size": "S"
+     },
+     "owner": "Salesforce admin",
+     "dependencies": [],
+     "guards": [],
+     "segmentsChecked": [],
+     "segmentExemptReason": "A single org-wide figure.",
+     "subjects": [],
+     "facts": {
+      "owners": 3
+     },
+     "notMeasurableReason": null,
+     "manualStepIds": []
+    }
+   ],
+   "metrics": [],
+   "overrides": [
+    {
+     "id": "ov-0001",
+     "runId": "run-0001",
+     "target": {
+      "type": "finding",
+      "id": "f-000000000054",
+      "field": "facts.owners"
+     },
+     "previousValue": 3,
+     "newValue": 4,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    }
+   ],
+   "expected": {
+    "findings": [
+     {
+      "id": "f-000000000054",
+      "ruleId": "int.planted",
+      "ruleVersion": 1,
+      "domain": "integrations",
+      "status": "issue",
+      "title": "Deals with an owner",
+      "summary": "Some deals are owned by [[user:U0003]].",
+      "recommendation": "Look into it.",
+      "recommendationType": "change",
+      "severity": "medium",
+      "confidence": "high",
+      "evidence": [
+       {
+        "kind": "soql",
+        "api": "rest",
+        "query": "SELECT Id FROM User",
+        "count": 11,
+        "dateRange": {
+         "from": "2024-10-31",
+         "to": "2026-10-31"
+        },
+        "exclusions": [],
+        "capturedAt": "2026-10-31T13:00:00.000Z"
+       }
+      ],
+      "value": {
+       "kind": "not_sized",
+       "reason": "Not sized."
+      },
+      "effort": {
+       "size": "S"
+      },
+      "owner": "Salesforce admin",
+      "dependencies": [],
+      "guards": [],
+      "segmentsChecked": [],
+      "segmentExemptReason": "A single org-wide figure.",
+      "subjects": [],
+      "facts": {
+       "owners": 4
+      },
+      "notMeasurableReason": null,
+      "manualStepIds": []
+     }
+    ],
+    "metrics": [],
+    "refused": [],
+    "lines": []
+   }
+  },
+  {
+   "name": "a finding: an ISO date with its time is masked whole (carried)",
+   "findings": [
+    {
+     "id": "f-000000000055",
+     "ruleId": "int.planted",
+     "ruleVersion": 1,
+     "domain": "integrations",
+     "status": "issue",
+     "title": "Open deals at the read",
+     "summary": "Read at 2026-10-31T13:00:00Z, 10 deals were open.",
+     "recommendation": "Look into it.",
+     "recommendationType": "change",
+     "severity": "medium",
+     "confidence": "high",
+     "evidence": [
+      {
+       "kind": "soql",
+       "api": "rest",
+       "query": "SELECT Id FROM User",
+       "count": 11,
+       "dateRange": {
+        "from": "2024-10-31",
+        "to": "2026-10-31"
+       },
+       "exclusions": [],
+       "capturedAt": "2026-10-31T13:00:00.000Z"
+      }
+     ],
+     "value": {
+      "kind": "not_sized",
+      "reason": "Not sized."
+     },
+     "effort": {
+      "size": "S"
+     },
+     "owner": "Salesforce admin",
+     "dependencies": [],
+     "guards": [],
+     "segmentsChecked": [],
+     "segmentExemptReason": "A single org-wide figure.",
+     "subjects": [],
+     "facts": {
+      "open": 10
+     },
+     "notMeasurableReason": null,
+     "manualStepIds": []
+    }
+   ],
+   "metrics": [],
+   "overrides": [
+    {
+     "id": "ov-0001",
+     "runId": "run-0001",
+     "target": {
+      "type": "finding",
+      "id": "f-000000000055",
+      "field": "facts.open"
+     },
+     "previousValue": 10,
+     "newValue": 11,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    }
+   ],
+   "expected": {
+    "findings": [
+     {
+      "id": "f-000000000055",
+      "ruleId": "int.planted",
+      "ruleVersion": 1,
+      "domain": "integrations",
+      "status": "issue",
+      "title": "Open deals at the read",
+      "summary": "Read at 2026-10-31T13:00:00Z, 11 deals were open.",
+      "recommendation": "Look into it.",
+      "recommendationType": "change",
+      "severity": "medium",
+      "confidence": "high",
+      "evidence": [
+       {
+        "kind": "soql",
+        "api": "rest",
+        "query": "SELECT Id FROM User",
+        "count": 11,
+        "dateRange": {
+         "from": "2024-10-31",
+         "to": "2026-10-31"
+        },
+        "exclusions": [],
+        "capturedAt": "2026-10-31T13:00:00.000Z"
+       }
+      ],
+      "value": {
+       "kind": "not_sized",
+       "reason": "Not sized."
+      },
+      "effort": {
+       "size": "S"
+      },
+      "owner": "Salesforce admin",
+      "dependencies": [],
+      "guards": [],
+      "segmentsChecked": [],
+      "segmentExemptReason": "A single org-wide figure.",
+      "subjects": [],
+      "facts": {
+       "open": 11
+      },
+      "notMeasurableReason": null,
+      "manualStepIds": []
+     }
+    ],
+    "metrics": [],
+    "refused": [],
+    "lines": []
+   }
+  },
+  {
+   "name": "a finding: an identifier's digits are not a place (carried)",
+   "findings": [
+    {
+     "id": "f-000000000056",
+     "ruleId": "int.planted",
+     "ruleVersion": 1,
+     "domain": "integrations",
+     "status": "issue",
+     "title": "Deals using a field",
+     "summary": "42 deals use the field Score_42__c.",
+     "recommendation": "Look into it.",
+     "recommendationType": "change",
+     "severity": "medium",
+     "confidence": "high",
+     "evidence": [
+      {
+       "kind": "soql",
+       "api": "rest",
+       "query": "SELECT Id FROM User",
+       "count": 11,
+       "dateRange": {
+        "from": "2024-10-31",
+        "to": "2026-10-31"
+       },
+       "exclusions": [],
+       "capturedAt": "2026-10-31T13:00:00.000Z"
+      }
+     ],
+     "value": {
+      "kind": "not_sized",
+      "reason": "Not sized."
+     },
+     "effort": {
+      "size": "S"
+     },
+     "owner": "Salesforce admin",
+     "dependencies": [],
+     "guards": [],
+     "segmentsChecked": [],
+     "segmentExemptReason": "A single org-wide figure.",
+     "subjects": [],
+     "facts": {
+      "deals": 42
+     },
+     "notMeasurableReason": null,
+     "manualStepIds": []
+    }
+   ],
+   "metrics": [],
+   "overrides": [
+    {
+     "id": "ov-0001",
+     "runId": "run-0001",
+     "target": {
+      "type": "finding",
+      "id": "f-000000000056",
+      "field": "facts.deals"
+     },
+     "previousValue": 42,
+     "newValue": 43,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    }
+   ],
+   "expected": {
+    "findings": [
+     {
+      "id": "f-000000000056",
+      "ruleId": "int.planted",
+      "ruleVersion": 1,
+      "domain": "integrations",
+      "status": "issue",
+      "title": "Deals using a field",
+      "summary": "43 deals use the field Score_42__c.",
+      "recommendation": "Look into it.",
+      "recommendationType": "change",
+      "severity": "medium",
+      "confidence": "high",
+      "evidence": [
+       {
+        "kind": "soql",
+        "api": "rest",
+        "query": "SELECT Id FROM User",
+        "count": 11,
+        "dateRange": {
+         "from": "2024-10-31",
+         "to": "2026-10-31"
+        },
+        "exclusions": [],
+        "capturedAt": "2026-10-31T13:00:00.000Z"
+       }
+      ],
+      "value": {
+       "kind": "not_sized",
+       "reason": "Not sized."
+      },
+      "effort": {
+       "size": "S"
+      },
+      "owner": "Salesforce admin",
+      "dependencies": [],
+      "guards": [],
+      "segmentsChecked": [],
+      "segmentExemptReason": "A single org-wide figure.",
+      "subjects": [],
+      "facts": {
+       "deals": 43
+      },
+      "notMeasurableReason": null,
+      "manualStepIds": []
+     }
+    ],
+    "metrics": [],
+    "refused": [],
+    "lines": []
+   }
+  },
+  {
+   "name": "a finding: a guessed date's digits joined to a letter after are masked (carried)",
+   "findings": [
+    {
+     "id": "f-000000000057",
+     "ruleId": "int.planted",
+     "ruleVersion": 1,
+     "domain": "integrations",
+     "status": "issue",
+     "title": "Jobs that stop",
+     "summary": "By 3rd May 2026 the 3 jobs stop.",
+     "recommendation": "Look into it.",
+     "recommendationType": "change",
+     "severity": "medium",
+     "confidence": "high",
+     "evidence": [
+      {
+       "kind": "soql",
+       "api": "rest",
+       "query": "SELECT Id FROM User",
+       "count": 11,
+       "dateRange": {
+        "from": "2024-10-31",
+        "to": "2026-10-31"
+       },
+       "exclusions": [],
+       "capturedAt": "2026-10-31T13:00:00.000Z"
+      }
+     ],
+     "value": {
+      "kind": "not_sized",
+      "reason": "Not sized."
+     },
+     "effort": {
+      "size": "S"
+     },
+     "owner": "Salesforce admin",
+     "dependencies": [],
+     "guards": [],
+     "segmentsChecked": [],
+     "segmentExemptReason": "A single org-wide figure.",
+     "subjects": [],
+     "facts": {
+      "jobs": 3
+     },
+     "notMeasurableReason": null,
+     "manualStepIds": []
+    }
+   ],
+   "metrics": [],
+   "overrides": [
+    {
+     "id": "ov-0001",
+     "runId": "run-0001",
+     "target": {
+      "type": "finding",
+      "id": "f-000000000057",
+      "field": "facts.jobs"
+     },
+     "previousValue": 3,
+     "newValue": 4,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    }
+   ],
+   "expected": {
+    "findings": [
+     {
+      "id": "f-000000000057",
+      "ruleId": "int.planted",
+      "ruleVersion": 1,
+      "domain": "integrations",
+      "status": "issue",
+      "title": "Jobs that stop",
+      "summary": "By 3rd May 2026 the 4 jobs stop.",
+      "recommendation": "Look into it.",
+      "recommendationType": "change",
+      "severity": "medium",
+      "confidence": "high",
+      "evidence": [
+       {
+        "kind": "soql",
+        "api": "rest",
+        "query": "SELECT Id FROM User",
+        "count": 11,
+        "dateRange": {
+         "from": "2024-10-31",
+         "to": "2026-10-31"
+        },
+        "exclusions": [],
+        "capturedAt": "2026-10-31T13:00:00.000Z"
+       }
+      ],
+      "value": {
+       "kind": "not_sized",
+       "reason": "Not sized."
+      },
+      "effort": {
+       "size": "S"
+      },
+      "owner": "Salesforce admin",
+      "dependencies": [],
+      "guards": [],
+      "segmentsChecked": [],
+      "segmentExemptReason": "A single org-wide figure.",
+      "subjects": [],
+      "facts": {
+       "jobs": 4
+      },
+      "notMeasurableReason": null,
+      "manualStepIds": []
+     }
+    ],
+    "metrics": [],
+    "refused": [],
+    "lines": []
+   }
+  },
+  {
+   "name": "a finding: a guessed date's digits joined to a letter before are masked (carried)",
+   "findings": [
+    {
+     "id": "f-000000000058",
+     "ruleId": "int.planted",
+     "ruleVersion": 1,
+     "domain": "integrations",
+     "status": "issue",
+     "title": "Deals that slipped in a quarter",
+     "summary": "In Q3 12 deals slipped across the sales teams.",
+     "recommendation": "Look into it.",
+     "recommendationType": "change",
+     "severity": "medium",
+     "confidence": "high",
+     "evidence": [
+      {
+       "kind": "soql",
+       "api": "rest",
+       "query": "SELECT Id FROM User",
+       "count": 11,
+       "dateRange": {
+        "from": "2024-10-31",
+        "to": "2026-10-31"
+       },
+       "exclusions": [],
+       "capturedAt": "2026-10-31T13:00:00.000Z"
+      }
+     ],
+     "value": {
+      "kind": "not_sized",
+      "reason": "Not sized."
+     },
+     "effort": {
+      "size": "S"
+     },
+     "owner": "Salesforce admin",
+     "dependencies": [],
+     "guards": [],
+     "segmentsChecked": [],
+     "segmentExemptReason": "A single org-wide figure.",
+     "subjects": [],
+     "facts": {
+      "teams": 3
+     },
+     "notMeasurableReason": null,
+     "manualStepIds": []
+    }
+   ],
+   "metrics": [],
+   "overrides": [
+    {
+     "id": "ov-0001",
+     "runId": "run-0001",
+     "target": {
+      "type": "finding",
+      "id": "f-000000000058",
+      "field": "facts.teams"
+     },
+     "previousValue": 3,
+     "newValue": 4,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    }
+   ],
+   "expected": {
+    "findings": [
+     {
+      "id": "f-000000000058",
+      "ruleId": "int.planted",
+      "ruleVersion": 1,
+      "domain": "integrations",
+      "status": "issue",
+      "title": "Deals that slipped in a quarter",
+      "summary": "In Q3 12 deals slipped across the sales teams.",
+      "recommendation": "Look into it.",
+      "recommendationType": "change",
+      "severity": "medium",
+      "confidence": "high",
+      "evidence": [
+       {
+        "kind": "soql",
+        "api": "rest",
+        "query": "SELECT Id FROM User",
+        "count": 11,
+        "dateRange": {
+         "from": "2024-10-31",
+         "to": "2026-10-31"
+        },
+        "exclusions": [],
+        "capturedAt": "2026-10-31T13:00:00.000Z"
+       }
+      ],
+      "value": {
+       "kind": "not_sized",
+       "reason": "Not sized."
+      },
+      "effort": {
+       "size": "S"
+      },
+      "owner": "Salesforce admin",
+      "dependencies": [],
+      "guards": [],
+      "segmentsChecked": [],
+      "segmentExemptReason": "A single org-wide figure.",
+      "subjects": [],
+      "facts": {
+       "teams": 4
+      },
+      "notMeasurableReason": null,
+      "manualStepIds": []
+     }
+    ],
+    "metrics": [],
+    "refused": [],
+    "lines": []
+   }
+  },
+  {
+   "name": "a finding: a guessed year inside a year and month is not a part (carried)",
+   "findings": [
+    {
+     "id": "f-000000000059",
+     "ruleId": "int.planted",
+     "ruleVersion": 1,
+     "domain": "integrations",
+     "status": "issue",
+     "title": "Deals logged in a month",
+     "summary": "Deals logged in 2026-02 number 2,026.",
+     "recommendation": "Look into it.",
+     "recommendationType": "change",
+     "severity": "medium",
+     "confidence": "high",
+     "evidence": [
+      {
+       "kind": "soql",
+       "api": "rest",
+       "query": "SELECT Id FROM User",
+       "count": 11,
+       "dateRange": {
+        "from": "2024-10-31",
+        "to": "2026-10-31"
+       },
+       "exclusions": [],
+       "capturedAt": "2026-10-31T13:00:00.000Z"
+      }
+     ],
+     "value": {
+      "kind": "not_sized",
+      "reason": "Not sized."
+     },
+     "effort": {
+      "size": "S"
+     },
+     "owner": "Salesforce admin",
+     "dependencies": [],
+     "guards": [],
+     "segmentsChecked": [],
+     "segmentExemptReason": "A single org-wide figure.",
+     "subjects": [],
+     "facts": {
+      "deals": 2026
+     },
+     "notMeasurableReason": null,
+     "manualStepIds": []
+    }
+   ],
+   "metrics": [],
+   "overrides": [
+    {
+     "id": "ov-0001",
+     "runId": "run-0001",
+     "target": {
+      "type": "finding",
+      "id": "f-000000000059",
+      "field": "facts.deals"
+     },
+     "previousValue": 2026,
+     "newValue": 2027,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    }
+   ],
+   "expected": {
+    "findings": [
+     {
+      "id": "f-000000000059",
+      "ruleId": "int.planted",
+      "ruleVersion": 1,
+      "domain": "integrations",
+      "status": "issue",
+      "title": "Deals logged in a month",
+      "summary": "Deals logged in 2026-02 number 2,027.",
+      "recommendation": "Look into it.",
+      "recommendationType": "change",
+      "severity": "medium",
+      "confidence": "high",
+      "evidence": [
+       {
+        "kind": "soql",
+        "api": "rest",
+        "query": "SELECT Id FROM User",
+        "count": 11,
+        "dateRange": {
+         "from": "2024-10-31",
+         "to": "2026-10-31"
+        },
+        "exclusions": [],
+        "capturedAt": "2026-10-31T13:00:00.000Z"
+       }
+      ],
+      "value": {
+       "kind": "not_sized",
+       "reason": "Not sized."
+      },
+      "effort": {
+       "size": "S"
+      },
+      "owner": "Salesforce admin",
+      "dependencies": [],
+      "guards": [],
+      "segmentsChecked": [],
+      "segmentExemptReason": "A single org-wide figure.",
+      "subjects": [],
+      "facts": {
+       "deals": 2027
+      },
+      "notMeasurableReason": null,
+      "manualStepIds": []
+     }
+    ],
+    "metrics": [],
+    "refused": [],
+    "lines": []
+   }
+  },
+  {
+   "name": "a finding: a bare year guessed from the word before is unsure (unsure)",
+   "findings": [
+    {
+     "id": "f-000000000060",
+     "ruleId": "int.planted",
+     "ruleVersion": 1,
+     "domain": "integrations",
+     "status": "issue",
+     "title": "Active users",
+     "summary": "12 of 2000 active users log in.",
+     "recommendation": "Look into it.",
+     "recommendationType": "change",
+     "severity": "medium",
+     "confidence": "high",
+     "evidence": [
+      {
+       "kind": "soql",
+       "api": "rest",
+       "query": "SELECT Id FROM User",
+       "count": 11,
+       "dateRange": {
+        "from": "2024-10-31",
+        "to": "2026-10-31"
+       },
+       "exclusions": [],
+       "capturedAt": "2026-10-31T13:00:00.000Z"
+      }
+     ],
+     "value": {
+      "kind": "not_sized",
+      "reason": "Not sized."
+     },
+     "effort": {
+      "size": "S"
+     },
+     "owner": "Salesforce admin",
+     "dependencies": [],
+     "guards": [],
+     "segmentsChecked": [],
+     "segmentExemptReason": "A single org-wide figure.",
+     "subjects": [],
+     "facts": {
+      "users": 2000
+     },
+     "notMeasurableReason": null,
+     "manualStepIds": []
+    }
+   ],
+   "metrics": [],
+   "overrides": [
+    {
+     "id": "ov-0001",
+     "runId": "run-0001",
+     "target": {
+      "type": "finding",
+      "id": "f-000000000060",
+      "field": "facts.users"
+     },
+     "previousValue": 2000,
+     "newValue": 2100,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    }
+   ],
+   "expected": {
+    "findings": [
+     {
+      "id": "f-000000000060",
+      "ruleId": "int.planted",
+      "ruleVersion": 1,
+      "domain": "integrations",
+      "status": "issue",
+      "title": "Active users",
+      "summary": "12 of 2000 active users log in.",
+      "recommendation": "Look into it.",
+      "recommendationType": "change",
+      "severity": "medium",
+      "confidence": "high",
+      "evidence": [
+       {
+        "kind": "soql",
+        "api": "rest",
+        "query": "SELECT Id FROM User",
+        "count": 11,
+        "dateRange": {
+         "from": "2024-10-31",
+         "to": "2026-10-31"
+        },
+        "exclusions": [],
+        "capturedAt": "2026-10-31T13:00:00.000Z"
+       }
+      ],
+      "value": {
+       "kind": "not_sized",
+       "reason": "Not sized."
+      },
+      "effort": {
+       "size": "S"
+      },
+      "owner": "Salesforce admin",
+      "dependencies": [],
+      "guards": [],
+      "segmentsChecked": [],
+      "segmentExemptReason": "A single org-wide figure.",
+      "subjects": [],
+      "facts": {
+       "users": 2000
+      },
+      "notMeasurableReason": null,
+      "manualStepIds": []
+     }
+    ],
+    "metrics": [],
+    "refused": [
+     {
+      "findingId": "f-000000000060",
+      "title": "Active users",
+      "field": "facts.users",
+      "asRead": 2000,
+      "last": 2100,
+      "why": {
+       "kind": "unsure",
+       "found": "2000"
+      }
+     }
+    ],
+    "lines": [
+     "Held back: 1 corrected figure can't be carried into the documents.",
+     "\"Active users\", users: 2,000 as read, corrected to 2,100, but the wording has 2,000 only as 2000, which we can't be sure is this figure and can't rewrite."
+    ]
+   }
+  },
+  {
+   "name": "a finding: a colon form with a grouped part (unsure)",
+   "findings": [
+    {
+     "id": "f-000000000061",
+     "ruleId": "int.planted",
+     "ruleVersion": 1,
+     "domain": "integrations",
+     "status": "issue",
+     "title": "Admins to users",
+     "summary": "Admins to users are 1,000:1.",
+     "recommendation": "Look into it.",
+     "recommendationType": "change",
+     "severity": "medium",
+     "confidence": "high",
+     "evidence": [
+      {
+       "kind": "soql",
+       "api": "rest",
+       "query": "SELECT Id FROM User",
+       "count": 11,
+       "dateRange": {
+        "from": "2024-10-31",
+        "to": "2026-10-31"
+       },
+       "exclusions": [],
+       "capturedAt": "2026-10-31T13:00:00.000Z"
+      }
+     ],
+     "value": {
+      "kind": "not_sized",
+      "reason": "Not sized."
+     },
+     "effort": {
+      "size": "S"
+     },
+     "owner": "Salesforce admin",
+     "dependencies": [],
+     "guards": [],
+     "segmentsChecked": [],
+     "segmentExemptReason": "A single org-wide figure.",
+     "subjects": [],
+     "facts": {
+      "users": 1000
+     },
+     "notMeasurableReason": null,
+     "manualStepIds": []
+    }
+   ],
+   "metrics": [],
+   "overrides": [
+    {
+     "id": "ov-0001",
+     "runId": "run-0001",
+     "target": {
+      "type": "finding",
+      "id": "f-000000000061",
+      "field": "facts.users"
+     },
+     "previousValue": 1000,
+     "newValue": 1100,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    }
+   ],
+   "expected": {
+    "findings": [
+     {
+      "id": "f-000000000061",
+      "ruleId": "int.planted",
+      "ruleVersion": 1,
+      "domain": "integrations",
+      "status": "issue",
+      "title": "Admins to users",
+      "summary": "Admins to users are 1,000:1.",
+      "recommendation": "Look into it.",
+      "recommendationType": "change",
+      "severity": "medium",
+      "confidence": "high",
+      "evidence": [
+       {
+        "kind": "soql",
+        "api": "rest",
+        "query": "SELECT Id FROM User",
+        "count": 11,
+        "dateRange": {
+         "from": "2024-10-31",
+         "to": "2026-10-31"
+        },
+        "exclusions": [],
+        "capturedAt": "2026-10-31T13:00:00.000Z"
+       }
+      ],
+      "value": {
+       "kind": "not_sized",
+       "reason": "Not sized."
+      },
+      "effort": {
+       "size": "S"
+      },
+      "owner": "Salesforce admin",
+      "dependencies": [],
+      "guards": [],
+      "segmentsChecked": [],
+      "segmentExemptReason": "A single org-wide figure.",
+      "subjects": [],
+      "facts": {
+       "users": 1000
+      },
+      "notMeasurableReason": null,
+      "manualStepIds": []
+     }
+    ],
+    "metrics": [],
+    "refused": [
+     {
+      "findingId": "f-000000000061",
+      "title": "Admins to users",
+      "field": "facts.users",
+      "asRead": 1000,
+      "last": 1100,
+      "why": {
+       "kind": "unsure",
+       "found": "1,000:1"
+      }
+     }
+    ],
+    "lines": [
+     "Held back: 1 corrected figure can't be carried into the documents.",
+     "\"Admins to users\", users: 1,000 as read, corrected to 1,100, but the wording has 1,000 only as 1,000:1, which we can't be sure is this figure and can't rewrite."
+    ]
+   }
+  },
+  {
+   "name": "a finding: a colon form with a decimal part (unsure)",
+   "findings": [
+    {
+     "id": "f-000000000062",
+     "ruleId": "int.planted",
+     "ruleVersion": 1,
+     "domain": "integrations",
+     "status": "issue",
+     "title": "Admins to users",
+     "summary": "Admins to users are 1.5:1.",
+     "recommendation": "Look into it.",
+     "recommendationType": "change",
+     "severity": "medium",
+     "confidence": "high",
+     "evidence": [
+      {
+       "kind": "soql",
+       "api": "rest",
+       "query": "SELECT Id FROM User",
+       "count": 11,
+       "dateRange": {
+        "from": "2024-10-31",
+        "to": "2026-10-31"
+       },
+       "exclusions": [],
+       "capturedAt": "2026-10-31T13:00:00.000Z"
+      }
+     ],
+     "value": {
+      "kind": "not_sized",
+      "reason": "Not sized."
+     },
+     "effort": {
+      "size": "S"
+     },
+     "owner": "Salesforce admin",
+     "dependencies": [],
+     "guards": [],
+     "segmentsChecked": [],
+     "segmentExemptReason": "A single org-wide figure.",
+     "subjects": [],
+     "facts": {
+      "ratio": 1.5
+     },
+     "notMeasurableReason": null,
+     "manualStepIds": []
+    }
+   ],
+   "metrics": [],
+   "overrides": [
+    {
+     "id": "ov-0001",
+     "runId": "run-0001",
+     "target": {
+      "type": "finding",
+      "id": "f-000000000062",
+      "field": "facts.ratio"
+     },
+     "previousValue": 1.5,
+     "newValue": 2,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    }
+   ],
+   "expected": {
+    "findings": [
+     {
+      "id": "f-000000000062",
+      "ruleId": "int.planted",
+      "ruleVersion": 1,
+      "domain": "integrations",
+      "status": "issue",
+      "title": "Admins to users",
+      "summary": "Admins to users are 1.5:1.",
+      "recommendation": "Look into it.",
+      "recommendationType": "change",
+      "severity": "medium",
+      "confidence": "high",
+      "evidence": [
+       {
+        "kind": "soql",
+        "api": "rest",
+        "query": "SELECT Id FROM User",
+        "count": 11,
+        "dateRange": {
+         "from": "2024-10-31",
+         "to": "2026-10-31"
+        },
+        "exclusions": [],
+        "capturedAt": "2026-10-31T13:00:00.000Z"
+       }
+      ],
+      "value": {
+       "kind": "not_sized",
+       "reason": "Not sized."
+      },
+      "effort": {
+       "size": "S"
+      },
+      "owner": "Salesforce admin",
+      "dependencies": [],
+      "guards": [],
+      "segmentsChecked": [],
+      "segmentExemptReason": "A single org-wide figure.",
+      "subjects": [],
+      "facts": {
+       "ratio": 1.5
+      },
+      "notMeasurableReason": null,
+      "manualStepIds": []
+     }
+    ],
+    "metrics": [],
+    "refused": [
+     {
+      "findingId": "f-000000000062",
+      "title": "Admins to users",
+      "field": "facts.ratio",
+      "asRead": 1.5,
+      "last": 2,
+      "why": {
+       "kind": "unsure",
+       "found": "1.5:1"
+      }
+     }
+    ],
+    "lines": [
+     "Held back: 1 corrected figure can't be carried into the documents.",
+     "\"Admins to users\", ratio: 1.5 as read, corrected to 2, but the wording has 1.5 only as 1.5:1, which we can't be sure is this figure and can't rewrite."
+    ]
+   }
+  },
+  {
+   "name": "a finding: a place and an unsure form are counted together (repeated)",
+   "findings": [
+    {
+     "id": "f-000000000063",
+     "ruleId": "int.planted",
+     "ruleVersion": 1,
+     "domain": "integrations",
+     "status": "issue",
+     "title": "Admins to users",
+     "summary": "Admins to users are 1:40, across 40 users.",
+     "recommendation": "Look into it.",
+     "recommendationType": "change",
+     "severity": "medium",
+     "confidence": "high",
+     "evidence": [
+      {
+       "kind": "soql",
+       "api": "rest",
+       "query": "SELECT Id FROM User",
+       "count": 11,
+       "dateRange": {
+        "from": "2024-10-31",
+        "to": "2026-10-31"
+       },
+       "exclusions": [],
+       "capturedAt": "2026-10-31T13:00:00.000Z"
+      }
+     ],
+     "value": {
+      "kind": "not_sized",
+      "reason": "Not sized."
+     },
+     "effort": {
+      "size": "S"
+     },
+     "owner": "Salesforce admin",
+     "dependencies": [],
+     "guards": [],
+     "segmentsChecked": [],
+     "segmentExemptReason": "A single org-wide figure.",
+     "subjects": [],
+     "facts": {
+      "users": 40
+     },
+     "notMeasurableReason": null,
+     "manualStepIds": []
+    }
+   ],
+   "metrics": [],
+   "overrides": [
+    {
+     "id": "ov-0001",
+     "runId": "run-0001",
+     "target": {
+      "type": "finding",
+      "id": "f-000000000063",
+      "field": "facts.users"
+     },
+     "previousValue": 40,
+     "newValue": 44,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    }
+   ],
+   "expected": {
+    "findings": [
+     {
+      "id": "f-000000000063",
+      "ruleId": "int.planted",
+      "ruleVersion": 1,
+      "domain": "integrations",
+      "status": "issue",
+      "title": "Admins to users",
+      "summary": "Admins to users are 1:40, across 40 users.",
+      "recommendation": "Look into it.",
+      "recommendationType": "change",
+      "severity": "medium",
+      "confidence": "high",
+      "evidence": [
+       {
+        "kind": "soql",
+        "api": "rest",
+        "query": "SELECT Id FROM User",
+        "count": 11,
+        "dateRange": {
+         "from": "2024-10-31",
+         "to": "2026-10-31"
+        },
+        "exclusions": [],
+        "capturedAt": "2026-10-31T13:00:00.000Z"
+       }
+      ],
+      "value": {
+       "kind": "not_sized",
+       "reason": "Not sized."
+      },
+      "effort": {
+       "size": "S"
+      },
+      "owner": "Salesforce admin",
+      "dependencies": [],
+      "guards": [],
+      "segmentsChecked": [],
+      "segmentExemptReason": "A single org-wide figure.",
+      "subjects": [],
+      "facts": {
+       "users": 40
+      },
+      "notMeasurableReason": null,
+      "manualStepIds": []
+     }
+    ],
+    "metrics": [],
+    "refused": [
+     {
+      "findingId": "f-000000000063",
+      "title": "Admins to users",
+      "field": "facts.users",
+      "asRead": 40,
+      "last": 44,
+      "why": {
+       "kind": "repeated",
+       "places": 2
+      }
+     }
+    ],
+    "lines": [
+     "Held back: 1 corrected figure can't be carried into the documents.",
+     "\"Admins to users\", users: 40 as read, corrected to 44, but the wording has 40 in 2 places, and we can't tell which of them are this figure."
+    ]
+   }
+  },
+  {
+   "name": "a finding: of two unsure forms near the value as read, the first in the text is named (rounded)",
+   "findings": [
+    {
+     "id": "f-000000000064",
+     "ruleId": "int.planted",
+     "ruleVersion": 1,
+     "domain": "integrations",
+     "status": "issue",
+     "title": "Meetings a team holds",
+     "summary": "Five teams meet at 5:00 each day.",
+     "recommendation": "Look into it.",
+     "recommendationType": "change",
+     "severity": "medium",
+     "confidence": "high",
+     "evidence": [
+      {
+       "kind": "soql",
+       "api": "rest",
+       "query": "SELECT Id FROM User",
+       "count": 11,
+       "dateRange": {
+        "from": "2024-10-31",
+        "to": "2026-10-31"
+       },
+       "exclusions": [],
+       "capturedAt": "2026-10-31T13:00:00.000Z"
+      }
+     ],
+     "value": {
+      "kind": "not_sized",
+      "reason": "Not sized."
+     },
+     "effort": {
+      "size": "S"
+     },
+     "owner": "Salesforce admin",
+     "dependencies": [],
+     "guards": [],
+     "segmentsChecked": [],
+     "segmentExemptReason": "A single org-wide figure.",
+     "subjects": [],
+     "facts": {
+      "meetings": 5.1
+     },
+     "notMeasurableReason": null,
+     "manualStepIds": []
+    }
+   ],
+   "metrics": [],
+   "overrides": [
+    {
+     "id": "ov-0001",
+     "runId": "run-0001",
+     "target": {
+      "type": "finding",
+      "id": "f-000000000064",
+      "field": "facts.meetings"
+     },
+     "previousValue": 5.1,
+     "newValue": 6,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    }
+   ],
+   "expected": {
+    "findings": [
+     {
+      "id": "f-000000000064",
+      "ruleId": "int.planted",
+      "ruleVersion": 1,
+      "domain": "integrations",
+      "status": "issue",
+      "title": "Meetings a team holds",
+      "summary": "Five teams meet at 5:00 each day.",
+      "recommendation": "Look into it.",
+      "recommendationType": "change",
+      "severity": "medium",
+      "confidence": "high",
+      "evidence": [
+       {
+        "kind": "soql",
+        "api": "rest",
+        "query": "SELECT Id FROM User",
+        "count": 11,
+        "dateRange": {
+         "from": "2024-10-31",
+         "to": "2026-10-31"
+        },
+        "exclusions": [],
+        "capturedAt": "2026-10-31T13:00:00.000Z"
+       }
+      ],
+      "value": {
+       "kind": "not_sized",
+       "reason": "Not sized."
+      },
+      "effort": {
+       "size": "S"
+      },
+      "owner": "Salesforce admin",
+      "dependencies": [],
+      "guards": [],
+      "segmentsChecked": [],
+      "segmentExemptReason": "A single org-wide figure.",
+      "subjects": [],
+      "facts": {
+       "meetings": 5.1
+      },
+      "notMeasurableReason": null,
+      "manualStepIds": []
+     }
+    ],
+    "metrics": [],
+    "refused": [
+     {
+      "findingId": "f-000000000064",
+      "title": "Meetings a team holds",
+      "field": "facts.meetings",
+      "asRead": 5.1,
+      "last": 6,
+      "why": {
+       "kind": "rounded",
+       "found": "Five"
+      }
+     }
+    ],
+    "lines": [
+     "Held back: 1 corrected figure can't be carried into the documents.",
+     "\"Meetings a team holds\", meetings: 5.1 as read, corrected to 6, but the wording doesn't print 5.1 itself and has Five, which may be this figure rounded."
+    ]
+   }
+  },
+  {
+   "name": "a finding: a figure written as a digit outside the basic plane is unsure, and named whole (unsure)",
+   "findings": [
+    {
+     "id": "f-000000000065",
+     "ruleId": "int.planted",
+     "ruleVersion": 1,
+     "domain": "integrations",
+     "status": "issue",
+     "title": "Admins who log in each week",
+     "summary": "Only 𝟓 admins log in each week.",
+     "recommendation": "Look into it.",
+     "recommendationType": "change",
+     "severity": "medium",
+     "confidence": "high",
+     "evidence": [
+      {
+       "kind": "soql",
+       "api": "rest",
+       "query": "SELECT Id FROM User",
+       "count": 11,
+       "dateRange": {
+        "from": "2024-10-31",
+        "to": "2026-10-31"
+       },
+       "exclusions": [],
+       "capturedAt": "2026-10-31T13:00:00.000Z"
+      }
+     ],
+     "value": {
+      "kind": "not_sized",
+      "reason": "Not sized."
+     },
+     "effort": {
+      "size": "S"
+     },
+     "owner": "Salesforce admin",
+     "dependencies": [],
+     "guards": [],
+     "segmentsChecked": [],
+     "segmentExemptReason": "A single org-wide figure.",
+     "subjects": [],
+     "facts": {
+      "active": 5
+     },
+     "notMeasurableReason": null,
+     "manualStepIds": []
+    }
+   ],
+   "metrics": [],
+   "overrides": [
+    {
+     "id": "ov-0001",
+     "runId": "run-0001",
+     "target": {
+      "type": "finding",
+      "id": "f-000000000065",
+      "field": "facts.active"
+     },
+     "previousValue": 5,
+     "newValue": 6,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    }
+   ],
+   "expected": {
+    "findings": [
+     {
+      "id": "f-000000000065",
+      "ruleId": "int.planted",
+      "ruleVersion": 1,
+      "domain": "integrations",
+      "status": "issue",
+      "title": "Admins who log in each week",
+      "summary": "Only 𝟓 admins log in each week.",
+      "recommendation": "Look into it.",
+      "recommendationType": "change",
+      "severity": "medium",
+      "confidence": "high",
+      "evidence": [
+       {
+        "kind": "soql",
+        "api": "rest",
+        "query": "SELECT Id FROM User",
+        "count": 11,
+        "dateRange": {
+         "from": "2024-10-31",
+         "to": "2026-10-31"
+        },
+        "exclusions": [],
+        "capturedAt": "2026-10-31T13:00:00.000Z"
+       }
+      ],
+      "value": {
+       "kind": "not_sized",
+       "reason": "Not sized."
+      },
+      "effort": {
+       "size": "S"
+      },
+      "owner": "Salesforce admin",
+      "dependencies": [],
+      "guards": [],
+      "segmentsChecked": [],
+      "segmentExemptReason": "A single org-wide figure.",
+      "subjects": [],
+      "facts": {
+       "active": 5
+      },
+      "notMeasurableReason": null,
+      "manualStepIds": []
+     }
+    ],
+    "metrics": [],
+    "refused": [
+     {
+      "findingId": "f-000000000065",
+      "title": "Admins who log in each week",
+      "field": "facts.active",
+      "asRead": 5,
+      "last": 6,
+      "why": {
+       "kind": "unsure",
+       "found": "𝟓"
+      }
+     }
+    ],
+    "lines": [
+     "Held back: 1 corrected figure can't be carried into the documents.",
+     "\"Admins who log in each week\", active: 5 as read, corrected to 6, but the wording has 5 only as 𝟓, which we can't be sure is this figure and can't rewrite."
+    ]
+   }
+  },
+  {
+   "name": "a finding: two places in one text whose lengths change are rewritten last first (carried)",
+   "findings": [
+    {
+     "id": "f-000000000066",
+     "ruleId": "int.planted",
+     "ruleVersion": 1,
+     "domain": "integrations",
+     "status": "issue",
+     "title": "Users who logged in",
+     "summary": "9 of 90 users logged in this month.",
+     "recommendation": "Look into it.",
+     "recommendationType": "change",
+     "severity": "medium",
+     "confidence": "high",
+     "evidence": [
+      {
+       "kind": "soql",
+       "api": "rest",
+       "query": "SELECT Id FROM User",
+       "count": 11,
+       "dateRange": {
+        "from": "2024-10-31",
+        "to": "2026-10-31"
+       },
+       "exclusions": [],
+       "capturedAt": "2026-10-31T13:00:00.000Z"
+      }
+     ],
+     "value": {
+      "kind": "not_sized",
+      "reason": "Not sized."
+     },
+     "effort": {
+      "size": "S"
+     },
+     "owner": "Salesforce admin",
+     "dependencies": [],
+     "guards": [],
+     "segmentsChecked": [],
+     "segmentExemptReason": "A single org-wide figure.",
+     "subjects": [],
+     "facts": {
+      "active": 9,
+      "users": 90
+     },
+     "notMeasurableReason": null,
+     "manualStepIds": []
+    }
+   ],
+   "metrics": [],
+   "overrides": [
+    {
+     "id": "ov-0001",
+     "runId": "run-0001",
+     "target": {
+      "type": "finding",
+      "id": "f-000000000066",
+      "field": "facts.active"
+     },
+     "previousValue": 9,
+     "newValue": 10,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    },
+    {
+     "id": "ov-0002",
+     "runId": "run-0001",
+     "target": {
+      "type": "finding",
+      "id": "f-000000000066",
+      "field": "facts.users"
+     },
+     "previousValue": 90,
+     "newValue": 95,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    }
+   ],
+   "expected": {
+    "findings": [
+     {
+      "id": "f-000000000066",
+      "ruleId": "int.planted",
+      "ruleVersion": 1,
+      "domain": "integrations",
+      "status": "issue",
+      "title": "Users who logged in",
+      "summary": "10 of 95 users logged in this month.",
+      "recommendation": "Look into it.",
+      "recommendationType": "change",
+      "severity": "medium",
+      "confidence": "high",
+      "evidence": [
+       {
+        "kind": "soql",
+        "api": "rest",
+        "query": "SELECT Id FROM User",
+        "count": 11,
+        "dateRange": {
+         "from": "2024-10-31",
+         "to": "2026-10-31"
+        },
+        "exclusions": [],
+        "capturedAt": "2026-10-31T13:00:00.000Z"
+       }
+      ],
+      "value": {
+       "kind": "not_sized",
+       "reason": "Not sized."
+      },
+      "effort": {
+       "size": "S"
+      },
+      "owner": "Salesforce admin",
+      "dependencies": [],
+      "guards": [],
+      "segmentsChecked": [],
+      "segmentExemptReason": "A single org-wide figure.",
+      "subjects": [],
+      "facts": {
+       "active": 10,
+       "users": 95
+      },
+      "notMeasurableReason": null,
+      "manualStepIds": []
+     }
+    ],
+    "metrics": [],
+    "refused": [],
+    "lines": []
+   }
+  },
+  {
+   "name": "a finding: a figure printed once in each text a finding has is rewritten there (carried)",
+   "findings": [
+    {
+     "id": "f-000000000067",
+     "ruleId": "int.planted",
+     "ruleVersion": 1,
+     "domain": "integrations",
+     "status": "issue",
+     "title": "Integrations that run as 17 users",
+     "summary": "They make 230 calls a day.",
+     "recommendation": "Move the 31 jobs to their own users.",
+     "recommendationType": "change",
+     "severity": "medium",
+     "confidence": "high",
+     "evidence": [
+      {
+       "kind": "soql",
+       "api": "rest",
+       "query": "SELECT Id FROM User",
+       "count": 11,
+       "dateRange": {
+        "from": "2024-10-31",
+        "to": "2026-10-31"
+       },
+       "exclusions": [],
+       "capturedAt": "2026-10-31T13:00:00.000Z"
+      }
+     ],
+     "value": {
+      "kind": "licence_cost",
+      "amount": 4200,
+      "unit": "GBP",
+      "period": "over 12 months",
+      "assumptions": [
+       "Each of the 6 licences costs £700 a year."
+      ]
+     },
+     "effort": {
+      "size": "M",
+      "note": "About 3 days of work."
+     },
+     "owner": "Salesforce admin and 2 developers",
+     "dependencies": [
+      "Close the 47 open tickets first."
+     ],
+     "guards": [
+      {
+       "guardId": "int.planted.guard",
+       "subject": "jobs",
+       "status": "passed",
+       "detail": "The 96 jobs have not run in the last week.",
+       "evidence": [
+        {
+         "kind": "soql",
+         "api": "rest",
+         "query": "SELECT Id FROM User",
+         "count": 11,
+         "dateRange": {
+          "from": "2024-10-31",
+          "to": "2026-10-31"
+         },
+         "exclusions": [],
+         "capturedAt": "2026-10-31T13:00:00.000Z"
+        }
+       ]
+      }
+     ],
+     "segmentsChecked": [],
+     "segmentExemptReason": "One org-wide figure across 81 jobs.",
+     "subjects": [],
+     "facts": {
+      "users": 17,
+      "calls": 230,
+      "jobs": 31,
+      "licences": 6,
+      "months": 12,
+      "days": 3,
+      "developers": 2,
+      "tickets": 47,
+      "archived": 58,
+      "allJobs": 81,
+      "idle": 96
+     },
+     "notMeasurableReason": "The 58 archived jobs could not be read.",
+     "manualStepIds": []
+    },
+    {
+     "id": "f-000000000068",
+     "ruleId": "int.planted",
+     "ruleVersion": 1,
+     "domain": "integrations",
+     "status": "issue",
+     "title": "Hours spent on manual exports",
+     "summary": "Exports are made by hand.",
+     "recommendation": "Look into it.",
+     "recommendationType": "change",
+     "severity": "medium",
+     "confidence": "high",
+     "evidence": [
+      {
+       "kind": "soql",
+       "api": "rest",
+       "query": "SELECT Id FROM User",
+       "count": 11,
+       "dateRange": {
+        "from": "2024-10-31",
+        "to": "2026-10-31"
+       },
+       "exclusions": [],
+       "capturedAt": "2026-10-31T13:00:00.000Z"
+      }
+     ],
+     "value": {
+      "kind": "not_sized",
+      "reason": "Not sized: the 14 hours a week are an estimate."
+     },
+     "effort": {
+      "size": "S"
+     },
+     "owner": "Salesforce admin",
+     "dependencies": [],
+     "guards": [],
+     "segmentsChecked": [],
+     "segmentExemptReason": "A single org-wide figure.",
+     "subjects": [],
+     "facts": {
+      "hours": 14
+     },
+     "notMeasurableReason": null,
+     "manualStepIds": []
+    }
+   ],
+   "metrics": [],
+   "overrides": [
+    {
+     "id": "ov-0001",
+     "runId": "run-0001",
+     "target": {
+      "type": "finding",
+      "id": "f-000000000067",
+      "field": "facts.users"
+     },
+     "previousValue": 17,
+     "newValue": 117,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    },
+    {
+     "id": "ov-0002",
+     "runId": "run-0001",
+     "target": {
+      "type": "finding",
+      "id": "f-000000000067",
+      "field": "facts.calls"
+     },
+     "previousValue": 230,
+     "newValue": 330,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    },
+    {
+     "id": "ov-0003",
+     "runId": "run-0001",
+     "target": {
+      "type": "finding",
+      "id": "f-000000000067",
+      "field": "facts.jobs"
+     },
+     "previousValue": 31,
+     "newValue": 131,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    },
+    {
+     "id": "ov-0004",
+     "runId": "run-0001",
+     "target": {
+      "type": "finding",
+      "id": "f-000000000067",
+      "field": "facts.licences"
+     },
+     "previousValue": 6,
+     "newValue": 106,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    },
+    {
+     "id": "ov-0005",
+     "runId": "run-0001",
+     "target": {
+      "type": "finding",
+      "id": "f-000000000067",
+      "field": "facts.months"
+     },
+     "previousValue": 12,
+     "newValue": 112,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    },
+    {
+     "id": "ov-0006",
+     "runId": "run-0001",
+     "target": {
+      "type": "finding",
+      "id": "f-000000000067",
+      "field": "facts.days"
+     },
+     "previousValue": 3,
+     "newValue": 103,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    },
+    {
+     "id": "ov-0007",
+     "runId": "run-0001",
+     "target": {
+      "type": "finding",
+      "id": "f-000000000067",
+      "field": "facts.developers"
+     },
+     "previousValue": 2,
+     "newValue": 102,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    },
+    {
+     "id": "ov-0008",
+     "runId": "run-0001",
+     "target": {
+      "type": "finding",
+      "id": "f-000000000067",
+      "field": "facts.tickets"
+     },
+     "previousValue": 47,
+     "newValue": 147,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    },
+    {
+     "id": "ov-0009",
+     "runId": "run-0001",
+     "target": {
+      "type": "finding",
+      "id": "f-000000000067",
+      "field": "facts.archived"
+     },
+     "previousValue": 58,
+     "newValue": 158,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    },
+    {
+     "id": "ov-0010",
+     "runId": "run-0001",
+     "target": {
+      "type": "finding",
+      "id": "f-000000000067",
+      "field": "facts.allJobs"
+     },
+     "previousValue": 81,
+     "newValue": 181,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    },
+    {
+     "id": "ov-0011",
+     "runId": "run-0001",
+     "target": {
+      "type": "finding",
+      "id": "f-000000000067",
+      "field": "facts.idle"
+     },
+     "previousValue": 96,
+     "newValue": 196,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    },
+    {
+     "id": "ov-0020",
+     "runId": "run-0001",
+     "target": {
+      "type": "finding",
+      "id": "f-000000000067",
+      "field": "value.amount"
+     },
+     "previousValue": 4200,
+     "newValue": 3600,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    },
+    {
+     "id": "ov-0021",
+     "runId": "run-0001",
+     "target": {
+      "type": "finding",
+      "id": "f-000000000068",
+      "field": "facts.hours"
+     },
+     "previousValue": 14,
+     "newValue": 16,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    }
+   ],
+   "expected": {
+    "findings": [
+     {
+      "id": "f-000000000067",
+      "ruleId": "int.planted",
+      "ruleVersion": 1,
+      "domain": "integrations",
+      "status": "issue",
+      "title": "Integrations that run as 117 users",
+      "summary": "They make 330 calls a day.",
+      "recommendation": "Move the 131 jobs to their own users.",
+      "recommendationType": "change",
+      "severity": "medium",
+      "confidence": "high",
+      "evidence": [
+       {
+        "kind": "soql",
+        "api": "rest",
+        "query": "SELECT Id FROM User",
+        "count": 11,
+        "dateRange": {
+         "from": "2024-10-31",
+         "to": "2026-10-31"
+        },
+        "exclusions": [],
+        "capturedAt": "2026-10-31T13:00:00.000Z"
+       }
+      ],
+      "value": {
+       "kind": "licence_cost",
+       "amount": 3600,
+       "unit": "GBP",
+       "period": "over 112 months",
+       "assumptions": [
+        "Each of the 106 licences costs £700 a year."
+       ]
+      },
+      "effort": {
+       "size": "M",
+       "note": "About 103 days of work."
+      },
+      "owner": "Salesforce admin and 102 developers",
+      "dependencies": [
+       "Close the 147 open tickets first."
+      ],
+      "guards": [
+       {
+        "guardId": "int.planted.guard",
+        "subject": "jobs",
+        "status": "passed",
+        "detail": "The 196 jobs have not run in the last week.",
+        "evidence": [
+         {
+          "kind": "soql",
+          "api": "rest",
+          "query": "SELECT Id FROM User",
+          "count": 11,
+          "dateRange": {
+           "from": "2024-10-31",
+           "to": "2026-10-31"
+          },
+          "exclusions": [],
+          "capturedAt": "2026-10-31T13:00:00.000Z"
+         }
+        ]
+       }
+      ],
+      "segmentsChecked": [],
+      "segmentExemptReason": "One org-wide figure across 181 jobs.",
+      "subjects": [],
+      "facts": {
+       "users": 117,
+       "calls": 330,
+       "jobs": 131,
+       "licences": 106,
+       "months": 112,
+       "days": 103,
+       "developers": 102,
+       "tickets": 147,
+       "archived": 158,
+       "allJobs": 181,
+       "idle": 196
+      },
+      "notMeasurableReason": "The 158 archived jobs could not be read.",
+      "manualStepIds": []
+     },
+     {
+      "id": "f-000000000068",
+      "ruleId": "int.planted",
+      "ruleVersion": 1,
+      "domain": "integrations",
+      "status": "issue",
+      "title": "Hours spent on manual exports",
+      "summary": "Exports are made by hand.",
+      "recommendation": "Look into it.",
+      "recommendationType": "change",
+      "severity": "medium",
+      "confidence": "high",
+      "evidence": [
+       {
+        "kind": "soql",
+        "api": "rest",
+        "query": "SELECT Id FROM User",
+        "count": 11,
+        "dateRange": {
+         "from": "2024-10-31",
+         "to": "2026-10-31"
+        },
+        "exclusions": [],
+        "capturedAt": "2026-10-31T13:00:00.000Z"
+       }
+      ],
+      "value": {
+       "kind": "not_sized",
+       "reason": "Not sized: the 16 hours a week are an estimate."
+      },
+      "effort": {
+       "size": "S"
+      },
+      "owner": "Salesforce admin",
+      "dependencies": [],
+      "guards": [],
+      "segmentsChecked": [],
+      "segmentExemptReason": "A single org-wide figure.",
+      "subjects": [],
+      "facts": {
+       "hours": 16
+      },
+      "notMeasurableReason": null,
+      "manualStepIds": []
+     }
+    ],
+    "metrics": [],
+    "refused": [],
+    "lines": []
+   }
+  },
+  {
+   "name": "a finding: a fact and the sized amount share a value, the fact's refusal first (shared)",
+   "findings": [
+    {
+     "id": "f-000000000069",
+     "ruleId": "int.planted",
+     "ruleVersion": 1,
+     "domain": "integrations",
+     "status": "issue",
+     "title": "Seats with no manager",
+     "summary": "8 seats need a manager.",
+     "recommendation": "Look into it.",
+     "recommendationType": "change",
+     "severity": "medium",
+     "confidence": "high",
+     "evidence": [
+      {
+       "kind": "soql",
+       "api": "rest",
+       "query": "SELECT Id FROM User",
+       "count": 11,
+       "dateRange": {
+        "from": "2024-10-31",
+        "to": "2026-10-31"
+       },
+       "exclusions": [],
+       "capturedAt": "2026-10-31T13:00:00.000Z"
+      }
+     ],
+     "value": {
+      "kind": "hours",
+      "amount": 8,
+      "unit": "hours",
+      "period": "per week",
+      "assumptions": [
+       "Each seat takes time to manage."
+      ]
+     },
+     "effort": {
+      "size": "S"
+     },
+     "owner": "Salesforce admin",
+     "dependencies": [],
+     "guards": [],
+     "segmentsChecked": [],
+     "segmentExemptReason": "A single org-wide figure.",
+     "subjects": [],
+     "facts": {
+      "seats": 8
+     },
+     "notMeasurableReason": null,
+     "manualStepIds": []
+    }
+   ],
+   "metrics": [],
+   "overrides": [
+    {
+     "id": "ov-0001",
+     "runId": "run-0001",
+     "target": {
+      "type": "finding",
+      "id": "f-000000000069",
+      "field": "value.amount"
+     },
+     "previousValue": 8,
+     "newValue": 9,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    },
+    {
+     "id": "ov-0002",
+     "runId": "run-0001",
+     "target": {
+      "type": "finding",
+      "id": "f-000000000069",
+      "field": "facts.seats"
+     },
+     "previousValue": 8,
+     "newValue": 9,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    }
+   ],
+   "expected": {
+    "findings": [
+     {
+      "id": "f-000000000069",
+      "ruleId": "int.planted",
+      "ruleVersion": 1,
+      "domain": "integrations",
+      "status": "issue",
+      "title": "Seats with no manager",
+      "summary": "8 seats need a manager.",
+      "recommendation": "Look into it.",
+      "recommendationType": "change",
+      "severity": "medium",
+      "confidence": "high",
+      "evidence": [
+       {
+        "kind": "soql",
+        "api": "rest",
+        "query": "SELECT Id FROM User",
+        "count": 11,
+        "dateRange": {
+         "from": "2024-10-31",
+         "to": "2026-10-31"
+        },
+        "exclusions": [],
+        "capturedAt": "2026-10-31T13:00:00.000Z"
+       }
+      ],
+      "value": {
+       "kind": "hours",
+       "amount": 8,
+       "unit": "hours",
+       "period": "per week",
+       "assumptions": [
+        "Each seat takes time to manage."
+       ]
+      },
+      "effort": {
+       "size": "S"
+      },
+      "owner": "Salesforce admin",
+      "dependencies": [],
+      "guards": [],
+      "segmentsChecked": [],
+      "segmentExemptReason": "A single org-wide figure.",
+      "subjects": [],
+      "facts": {
+       "seats": 8
+      },
+      "notMeasurableReason": null,
+      "manualStepIds": []
+     }
+    ],
+    "metrics": [],
+    "refused": [
+     {
+      "findingId": "f-000000000069",
+      "title": "Seats with no manager",
+      "field": "facts.seats",
+      "asRead": 8,
+      "last": 9,
+      "why": {
+       "kind": "shared",
+       "other": "the sized amount"
+      }
+     },
+     {
+      "findingId": "f-000000000069",
+      "title": "Seats with no manager",
+      "field": "value.amount",
+      "asRead": 8,
+      "last": 9,
+      "why": {
+       "kind": "shared",
+       "other": "seats"
+      }
+     }
+    ],
+    "lines": [
+     "Held back: 2 corrected figures can't be carried into the documents.",
+     "\"Seats with no manager\", seats: 8 as read, corrected to 9, but another figure of this finding (the sized amount) is also 8, so we can't tell which one the wording prints.",
+     "\"Seats with no manager\", the sized amount: 8 as read, corrected to 9, but another figure of this finding (seats) is also 8, so we can't tell which one the wording prints."
+    ]
+   }
+  },
+  {
+   "name": "rows naming a finding's id as a measure's, or a measure's as a finding's, are ignored",
+   "findings": [
+    {
+     "id": "f-000000000070",
+     "ruleId": "int.planted",
+     "ruleVersion": 1,
+     "domain": "integrations",
+     "status": "issue",
+     "title": "Seats held",
+     "summary": "Seats are held.",
+     "recommendation": "Look into it.",
+     "recommendationType": "change",
+     "severity": "medium",
+     "confidence": "high",
+     "evidence": [
+      {
+       "kind": "soql",
+       "api": "rest",
+       "query": "SELECT Id FROM User",
+       "count": 11,
+       "dateRange": {
+        "from": "2024-10-31",
+        "to": "2026-10-31"
+       },
+       "exclusions": [],
+       "capturedAt": "2026-10-31T13:00:00.000Z"
+      }
+     ],
+     "value": {
+      "kind": "not_sized",
+      "reason": "Not sized."
+     },
+     "effort": {
+      "size": "S"
+     },
+     "owner": "Salesforce admin",
+     "dependencies": [],
+     "guards": [],
+     "segmentsChecked": [],
+     "segmentExemptReason": "A single org-wide figure.",
+     "subjects": [],
+     "facts": {
+      "seats": 9
+     },
+     "notMeasurableReason": null,
+     "manualStepIds": []
+    }
+   ],
+   "metrics": [
+    {
+     "status": "measured",
+     "id": "planted.measure_26",
+     "domain": "historic_pipeline",
+     "label": "Win rate",
+     "definition": "The share of closed deals that were won.",
+     "unit": "percent",
+     "evidence": [
+      {
+       "kind": "soql",
+       "api": "rest",
+       "query": "SELECT Id FROM User",
+       "count": 11,
+       "dateRange": {
+        "from": "2024-10-31",
+        "to": "2026-10-31"
+       },
+       "exclusions": [],
+       "capturedAt": "2026-10-31T13:00:00.000Z"
+      }
+     ],
+     "exclusions": [],
+     "assumptions": [],
+     "value": 44,
+     "n": 40,
+     "dateRange": null,
+     "segments": [],
+     "segmentExemptReason": "A single org-wide figure.",
+     "series": [],
+     "stats": {}
+    }
+   ],
+   "overrides": [
+    {
+     "id": "ov-0001",
+     "runId": "run-0001",
+     "target": {
+      "type": "metric",
+      "id": "f-000000000070",
+      "field": "facts.seats"
+     },
+     "previousValue": 9,
+     "newValue": 8,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    },
+    {
+     "id": "ov-0002",
+     "runId": "run-0001",
+     "target": {
+      "type": "finding",
+      "id": "planted.measure_26",
+      "field": "value"
+     },
+     "previousValue": 44,
+     "newValue": 45,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    }
+   ],
+   "expected": {
+    "findings": [
+     {
+      "id": "f-000000000070",
+      "ruleId": "int.planted",
+      "ruleVersion": 1,
+      "domain": "integrations",
+      "status": "issue",
+      "title": "Seats held",
+      "summary": "Seats are held.",
+      "recommendation": "Look into it.",
+      "recommendationType": "change",
+      "severity": "medium",
+      "confidence": "high",
+      "evidence": [
+       {
+        "kind": "soql",
+        "api": "rest",
+        "query": "SELECT Id FROM User",
+        "count": 11,
+        "dateRange": {
+         "from": "2024-10-31",
+         "to": "2026-10-31"
+        },
+        "exclusions": [],
+        "capturedAt": "2026-10-31T13:00:00.000Z"
+       }
+      ],
+      "value": {
+       "kind": "not_sized",
+       "reason": "Not sized."
+      },
+      "effort": {
+       "size": "S"
+      },
+      "owner": "Salesforce admin",
+      "dependencies": [],
+      "guards": [],
+      "segmentsChecked": [],
+      "segmentExemptReason": "A single org-wide figure.",
+      "subjects": [],
+      "facts": {
+       "seats": 9
+      },
+      "notMeasurableReason": null,
+      "manualStepIds": []
+     }
+    ],
+    "metrics": [
+     {
+      "status": "measured",
+      "id": "planted.measure_26",
+      "domain": "historic_pipeline",
+      "label": "Win rate",
+      "definition": "The share of closed deals that were won.",
+      "unit": "percent",
+      "evidence": [
+       {
+        "kind": "soql",
+        "api": "rest",
+        "query": "SELECT Id FROM User",
+        "count": 11,
+        "dateRange": {
+         "from": "2024-10-31",
+         "to": "2026-10-31"
+        },
+        "exclusions": [],
+        "capturedAt": "2026-10-31T13:00:00.000Z"
+       }
+      ],
+      "exclusions": [],
+      "assumptions": [],
+      "value": 44,
+      "n": 40,
+      "dateRange": null,
+      "segments": [],
+      "segmentExemptReason": "A single org-wide figure.",
+      "series": [],
+      "stats": {}
+     }
+    ],
+    "refused": [],
+    "lines": []
+   }
   }
  ],
  "synthetic": {
