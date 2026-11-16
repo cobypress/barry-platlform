@@ -398,6 +398,8 @@ export function versionRow(v: SectionVersion): Record<string, unknown> {
 // ─── The store ────────────────────────────────────────────────────────────────
 
 const CLOSED = new Set(["in_review", "released"]);
+/** A delivery's claim on its run (DECISIONS.md 538), word for word as the console's side of it is written against. */
+const CLAIM_RUN_SQL = `UPDATE "HealthCheckRun" SET "status" = CASE WHEN "status" = 'awaiting_manual' THEN 'analysing' ELSE "status" END WHERE "id" = $1 AND "status" NOT IN ('in_review', 'released') RETURNING "status"`;
 const one = (r: SqlResult): Record<string, unknown> | undefined => r.rows[0];
 /** An error's SQLSTATE, and nothing else of it: five characters, or a word saying there was none. */
 const sqlState = (code: unknown): string => (typeof code === "string" && /^[0-9A-Z]{5}$/.test(code) ? code : "with no code");
@@ -515,6 +517,22 @@ export class PostgresWorkerStore implements WorkerStore {
       survey,
       interviews,
     };
+  }
+
+  /**
+   * One statement, not a read and a write: the console's move to review isn't in
+   * the worker's transaction, and a row lock would be gone before the folder is
+   * written anyway. Only awaiting manual steps changes, the one status the
+   * console moves to review from; a fresh run keeps its status until its first
+   * progress write, so its progress reads as it did (DECISIONS.md 538).
+   */
+  async claimRun(runId: string): Promise<void> {
+    const claimed = await this.#pool.query(CLAIM_RUN_SQL, [runId]);
+    if (claimed.rows.length > 0) return;
+    // No row: closed, or gone. Read afterwards only to say which.
+    const row = one(await this.#pool.query(`SELECT "status" FROM "HealthCheckRun" WHERE "id" = $1`, [runId]));
+    if (!row) throw new Error(`No run ${runId}`);
+    throw new RunClosedError(runId, String(row.status));
   }
 
   /** Locks the run's row for the transaction, and refuses one the console has moved on. */

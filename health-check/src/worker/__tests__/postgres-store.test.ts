@@ -828,3 +828,48 @@ describe("PostgresWorkerStore, Claude's summaries for the documents", () => {
     await assert.rejects(new PostgresWorkerStore(pool).loadDocumentsJob(RUN_ROW.id, { handbookSummaries: true }), /connection reset/);
   });
 });
+
+describe("PostgresWorkerStore, a delivery's claim on its run (DECISIONS.md 538)", () => {
+  // Word for word the statement both repos' lanes were given: the console's move to review is written against it.
+  const CLAIM = `UPDATE "HealthCheckRun" SET "status" = CASE WHEN "status" = 'awaiting_manual' THEN 'analysing' ELSE "status" END WHERE "id" = $1 AND "status" NOT IN ('in_review', 'released') RETURNING "status"`;
+  const claiming = (claimed: string | null, after: string | null): FakePool => {
+    const pool = new FakePool();
+    pool.handlers.push((text) => {
+      if (text.startsWith(`UPDATE "HealthCheckRun"`)) return { rows: claimed === null ? [] : [{ status: claimed }], rowCount: claimed === null ? 0 : 1 };
+      if (text.startsWith(`SELECT "status"`)) return { rows: after === null ? [] : [{ status: after }], rowCount: after === null ? 0 : 1 };
+      return undefined;
+    });
+    return pool;
+  };
+
+  test("is the one statement, through the pool, with the run's id and nothing else", async () => {
+    const pool = claiming("analysing", null);
+    await new PostgresWorkerStore(pool).claimRun(RUN_ROW.id);
+    assert.deepEqual(pool.statements, [{ text: CLAIM, values: [RUN_ROW.id] }]);
+    assert.equal(pool.released, 0, "no transaction");
+  });
+
+  for (const status of ["in_review", "released"]) {
+    test(`no row back and the run ${status}: refuses with the refused save's sentence, read afterwards with a plain select`, async () => {
+      const pool = claiming(null, status);
+      await assert.rejects(new PostgresWorkerStore(pool).claimRun(RUN_ROW.id), (err: unknown) => err instanceof RunClosedError && err.message === `Run ${RUN_ROW.id} is ${status.replace("_", " ")}, so the worker leaves it alone`);
+      assert.deepEqual(pool.statements, [
+        { text: CLAIM, values: [RUN_ROW.id] },
+        { text: `SELECT "status" FROM "HealthCheckRun" WHERE "id" = $1`, values: [RUN_ROW.id] },
+      ]);
+    });
+  }
+
+  test("no row back and no run: the store's own error, not a refusal", async () => {
+    const pool = claiming(null, null);
+    await assert.rejects(new PostgresWorkerStore(pool).claimRun(RUN_ROW.id), (err: unknown) => !(err instanceof RunClosedError) && (err as Error).message === `No run ${RUN_ROW.id}`);
+  });
+
+  test("an error from the database goes back to the job as it came", async () => {
+    const pool = new FakePool();
+    pool.handlers.push(() => {
+      throw Object.assign(new Error("connection reset"), { code: "08006" });
+    });
+    await assert.rejects(new PostgresWorkerStore(pool).claimRun(RUN_ROW.id), (err: unknown) => !(err instanceof RunClosedError) && /connection reset/.test((err as Error).message));
+  });
+});
