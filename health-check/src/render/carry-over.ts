@@ -182,12 +182,21 @@ export async function carryOver(browserPage: Page): Promise<number> {
           const inner = shell(kid);
           dest.appendChild(inner);
           const was = state.moved;
+          // Whether anything stays above it, before its own children are counted.
+          const above = state.placed;
           breakAt(kid, inner, limit, state);
-          // Nothing inside it crossed: its own margin or padding did. It moves whole.
+          // Nothing inside it crossed: its own margin or padding did. It moves whole when
+          // something stays above it. With nothing above, the next slide would be this one
+          // again, so it stays as the slide's content and what follows goes on (DECISIONS.md 574).
           if (state.moved === was && kidsOf(inner).length === 0) {
             inner.remove();
-            if (state.placed) moveFrom(i);
-            return;
+            state.placed = above;
+            if (state.placed) {
+              moveFrom(i);
+              return;
+            }
+            state.placed = true;
+            continue;
           }
           for (const k of kids.slice(i + 1)) dest.appendChild(k);
           if (kidsOf(kid).length === 0) {
