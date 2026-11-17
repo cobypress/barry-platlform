@@ -105,9 +105,12 @@ function checkOne(figure: Figure, figures: Figure[], set: FigureSet): string | n
     default: {
       const linked = figure.linkedTo === undefined ? undefined : figures[figure.linkedTo];
       if (linked) {
-        // "1 in 5" also reads as 20%, which is how the engine usually holds it.
+        // "1 in 5" also reads as 20%, which is how the engine usually holds it. The
+        // 20% has to come from a finding the 5 comes from: a share from another
+        // finding says nothing about these 5 (DECISIONS.md 595).
         const share = (figure.value! / linked.value!) * 100;
-        if (Number.isFinite(share) && share <= 100 && set.figures.some((f) => f.kind === "percent" && Math.abs(f.value - share) <= FRACTION_TOLERANCE)) return null;
+        const whole = sourcesFor(linked, set);
+        if (Number.isFinite(share) && share <= 100 && set.figures.some((f) => f.kind === "percent" && Math.abs(f.value - share) <= FRACTION_TOLERANCE && whole.has(f.source))) return null;
       }
       const sources = sourcesFor(figure, set);
       if (sources.size === 0) {

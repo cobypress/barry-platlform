@@ -112,12 +112,37 @@
       "text": "1 in 5 deals is pushed at least once.",
       "dataset": { "figures": [{ "source": "f1", "kind": "percent", "value": 20 }] },
       "expected": "fail",
-      "unmatched": ["5"]
+      "unmatched": ["1", "5"]
     },
     {
       "name": "one in five passes when the whole is in the data",
       "text": "1 in 5 deals is pushed at least once.",
       "dataset": { "figures": [{ "source": "f1", "kind": "percent", "value": 20 }, { "source": "f1", "kind": "number", "value": 5 }] },
+      "expected": "pass"
+    },
+    {
+      "name": "a pair across two findings fails on the part: the percentage and the whole must share a finding",
+      "text": "2 of the 5 integrations have no owner.",
+      "dataset": { "figures": [{ "source": "f1", "kind": "percent", "value": 40 }, { "source": "f2", "kind": "number", "value": 5 }] },
+      "expected": "fail",
+      "unmatched": ["2"]
+    },
+    {
+      "name": "a pair within one finding passes through its percentage",
+      "text": "2 of the 5 integrations have no owner.",
+      "dataset": { "figures": [{ "source": "f1", "kind": "percent", "value": 40 }, { "source": "f1", "kind": "number", "value": 5 }] },
+      "expected": "pass"
+    },
+    {
+      "name": "a whole two findings hold passes when the percentage is in one of them",
+      "text": "2 in 5 integrations run as admins.",
+      "dataset": { "figures": [{ "source": "f1", "kind": "number", "value": 5 }, { "source": "f2", "kind": "percent", "value": 40 }, { "source": "f2", "kind": "number", "value": 5 }] },
+      "expected": "pass"
+    },
+    {
+      "name": "a share near two percentages passes when either shares the whole's finding, not only the first",
+      "text": "2 of the 5 integrations have no owner.",
+      "dataset": { "figures": [{ "source": "f1", "kind": "percent", "value": 39.6 }, { "source": "f2", "kind": "percent", "value": 40.4 }, { "source": "f2", "kind": "number", "value": 5 }] },
       "expected": "pass"
     },
     {
