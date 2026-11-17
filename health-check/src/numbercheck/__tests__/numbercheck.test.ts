@@ -433,6 +433,20 @@ describe("a pair's percentage comes from a finding its whole comes from (DECISIO
     assert.deepEqual(misses("2 of the 5 integrations have no owner.", three), ["2: 2 and 5 don't come from the same finding"]);
   });
 
+  test("the whole's finding is the one its own figure comes from, not one with any count or the part in it (DECISIONS.md 597)", () => {
+    // A 40% beside a 7 in f1 says nothing about the 5 in f2, though both are counts.
+    assert.deepEqual(misses("2 of the 5 integrations have no owner.", setOf(["f1", "40% of leads across 7 teams have no owner"], ["f2", "5 integrations run as admins"])), ["2: not in the data"]);
+    // A 40% beside the 2 in f1 still isn't the 5's: the part can't bring its own finding to the whole.
+    assert.deepEqual(misses("2 of the 5 integrations have no owner.", setOf(["f1", "40% of leads have no owner, and 2 admins"], ["f2", "5 integrations run as admins"])), ["2: 2 and 5 don't come from the same finding"]);
+  });
+
+  test("only a percentage stands for a share, and only up to 100 (DECISIONS.md 597)", () => {
+    // 40 points is a change in a percentage, not a share of anything.
+    assert.deepEqual(misses("2 of the 5 integrations have no owner.", setOf(["f1", "up 40 points across the 5 integrations"])), ["2: not in the data"]);
+    // 201 of 200 is 100.5%, within a point of 100%, but no part is larger than its whole.
+    assert.deepEqual(misses("201 of the 200 integrations have no owner.", setOf(["f1", "100% of the 200 integrations have no owner"])), ["201: not in the data"]);
+  });
+
   test("a part is refused as well as a whole that isn't in the data", () => {
     assert.deepEqual(misses("2 of the 5 integrations have no owner.", setOf(["f1", "40% of leads have no owner"])), ["2: not in the data", "5: not in the data"]);
   });

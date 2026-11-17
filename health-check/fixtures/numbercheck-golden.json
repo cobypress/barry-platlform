@@ -108,7 +108,7 @@
       "unmatched": ["half"]
     },
     {
-      "name": "one in five reads as twenty per cent, but the whole must also be in the data",
+      "name": "one in five with no five in the data fails on both: nothing vouches for the part",
       "text": "1 in 5 deals is pushed at least once.",
       "dataset": { "figures": [{ "source": "f1", "kind": "percent", "value": 20 }] },
       "expected": "fail",
@@ -171,6 +171,47 @@
       "dataset": { "figures": [{ "source": "f1", "kind": "number", "value": 40 }, { "source": "f1", "kind": "number", "value": 5 }] },
       "expected": "fail",
       "unmatched": ["2"]
+    },
+    {
+      "name": "a percentage beside some other count doesn't share a finding with the whole",
+      "text": "2 of the 5 integrations have no owner.",
+      "dataset": { "figures": [{ "source": "f1", "kind": "percent", "value": 40 }, { "source": "f1", "kind": "number", "value": 7 }, { "source": "f2", "kind": "number", "value": 5 }] },
+      "expected": "fail",
+      "unmatched": ["2"]
+    },
+    {
+      "name": "a percentage beside the part doesn't share a finding with the whole",
+      "text": "2 of the 5 integrations have no owner.",
+      "dataset": { "figures": [{ "source": "f1", "kind": "percent", "value": 40 }, { "source": "f1", "kind": "number", "value": 2 }, { "source": "f2", "kind": "number", "value": 5 }] },
+      "expected": "fail",
+      "unmatched": ["2"]
+    },
+    {
+      "name": "a share more than a point above the percentage fails on the part",
+      "text": "2 of the 5 integrations have no owner.",
+      "dataset": { "figures": [{ "source": "f1", "kind": "percent", "value": 38.5 }, { "source": "f1", "kind": "number", "value": 5 }] },
+      "expected": "fail",
+      "unmatched": ["2"]
+    },
+    {
+      "name": "percentage points aren't a percentage a share can stand on",
+      "text": "2 of the 5 integrations have no owner.",
+      "dataset": { "figures": [{ "source": "f1", "kind": "points", "value": 40 }, { "source": "f1", "kind": "number", "value": 5 }] },
+      "expected": "fail",
+      "unmatched": ["2"]
+    },
+    {
+      "name": "a part just over its whole doesn't pass through a percentage of 100",
+      "text": "201 of the 200 integrations have no owner.",
+      "dataset": { "figures": [{ "source": "f1", "kind": "percent", "value": 100 }, { "source": "f1", "kind": "number", "value": 200 }] },
+      "expected": "fail",
+      "unmatched": ["201"]
+    },
+    {
+      "name": "a percentage only someone said stands for the part when the whole is in the same source",
+      "text": "2 of the 5 integrations have no owner.",
+      "dataset": { "figures": [{ "source": "f1", "kind": "percent", "value": 40, "said": "said in interview, Sales director" }, { "source": "f1", "kind": "number", "value": 5 }] },
+      "expected": "pass"
     },
     {
       "name": "money in full passes",
