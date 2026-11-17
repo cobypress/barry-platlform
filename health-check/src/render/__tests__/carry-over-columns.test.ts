@@ -61,11 +61,25 @@ const words = (page: Page): Promise<string[]> =>
     return out.sort();
   });
 
-/** Carries over, and checks that nothing was dropped or doubled. Returns how many slides it added. */
+/** Words held by an element that isn't painted, each with its slide: the layout check would read them. */
+const hiddenWords = (page: Page): Promise<string[]> =>
+  page.evaluate(() => {
+    const pages = [...document.querySelectorAll(".page")];
+    const out: string[] = [];
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      const el = n.parentElement;
+      if (el && (n.textContent ?? "").trim() && getComputedStyle(el).visibility !== "visible") out.push(`slide ${pages.indexOf(el.closest(".page")!) + 1}: ${n.textContent}`);
+    }
+    return out;
+  });
+
+/** Carries over, and checks that nothing was dropped or doubled, and that nothing hidden holds words (DECISIONS.md 579). Returns how many slides it added. */
 async function carried(page: Page): Promise<number> {
   const was = await words(page);
   const added = await carryOver(page);
   assert.deepEqual(await words(page), was, "every word once, before and after the carry-over");
+  assert.deepEqual(await hiddenWords(page), [], "words in what isn't printed");
   return added;
 }
 

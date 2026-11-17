@@ -108,9 +108,18 @@ async function carry(page: Page): Promise<Carried> {
       }
       if (rest) dropped.push(text);
     }
-    return { pages: pages.length, headingOnly, dropped, doubled: fresh.filter((f) => !used.has(f)).map((f) => f.textContent ?? "") };
+    // Nothing the carry-over hides holds words: the layout check reads every word, printed or not (DECISIONS.md 579).
+    const hidden: string[] = [];
+    const all = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    for (let n = all.nextNode(); n; n = all.nextNode()) {
+      const el = n.parentElement;
+      if (el && (n.textContent ?? "").trim() && getComputedStyle(el).visibility !== "visible") hidden.push(`slide ${pages.indexOf(el.closest<HTMLElement>(".page")!) + 1}: ${n.textContent}`);
+    }
+    return { pages: pages.length, headingOnly, dropped, doubled: fresh.filter((f) => !used.has(f)).map((f) => f.textContent ?? ""), hidden };
   });
-  return { added, ...facts };
+  const { hidden, ...held } = facts;
+  assert.deepEqual(hidden, [], "words in what isn't printed");
+  return { added, ...held };
 }
 
 /** Renders and carries over a whole document, as the documents job does. */
@@ -634,8 +643,8 @@ describe("carry-over: an emptied copy holds its place and nothing else (DECISION
     const cell = "padding:0;border-bottom:9px solid #000";
     const { result, page } = await slides(`<div class="cols"><table style="border-collapse:collapse;width:100%"><thead><tr><th style="height:30px;${cell}">Head cell</th></tr></thead><tbody><tr><td style="height:439px;${cell}">Row</td></tr></tbody></table><div>${words("Right above.", 20)}${words("Right one long sentence", 480)}</div></div>`);
     try {
-      // The copied head's words are still there to read, unprinted.
-      assert.deepEqual(await reading(page), ["Title Head cell Row Right above.", "Head cell Right one long sentence"]);
+      // The copied head's words are taken out of its unprinted copy (DECISIONS.md 579).
+      assert.deepEqual(await reading(page), ["Title Head cell Row Right above.", "Right one long sentence"]);
       assertHolds("the table's head", result);
       const held = await heldPlace(page, ".cols > table:first-child", ".cols > :last-child");
       assert.equal(held.left[1], held.left[0], "the column beside it where it was");
@@ -727,6 +736,102 @@ describe("carry-over: the lines of 576 that only a built shape needs (DECISIONS.
       assert.deepEqual(pages, [["h2:Title", "p:Above."], ["h2:Title, continued", "p:After."]]);
       assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll(".page")].map((p) => p.querySelectorAll(".mark").length)), [0, 1]);
       assertHolds("the anchored box", result);
+    } finally {
+      await page.close();
+    }
+  });
+});
+
+// A copy the carry-over hides holds no words, so the layout check warns of a nearly empty slide
+// as it would without it; and a child with no box of its own whose children are shown takes room
+// (DECISIONS.md 579).
+
+/**
+ * Slide `n`'s "empty section" warnings, and what that slide prints which the layout check counts
+ * as its content: words that show, outside its footer, references and copied headings, a node each.
+ */
+async function emptySection(page: Page, n: number): Promise<{ warned: string[]; printed: string[] }> {
+  const warned = (await checkLayout(page, { minPages: 1, maxPages: 10 })).problems.filter((p) => p.page === n && p.check === "empty section").map((p) => p.detail);
+  const printed = await page.evaluate((n) => {
+    const out: string[] = [];
+    const walker = document.createTreeWalker(document.querySelectorAll(".page")[n - 1]!, NodeFilter.SHOW_TEXT);
+    for (let t = walker.nextNode(); t; t = walker.nextNode()) {
+      const el = t.parentElement!;
+      if ((t.textContent ?? "").trim() && !el.closest("[data-chrome], [data-ref], .tick, [data-carried-label]") && getComputedStyle(el).visibility === "visible") out.push((t.textContent ?? "").trim());
+    }
+    return out;
+  }, n);
+  return { warned, printed };
+}
+
+describe("carry-over: nothing hidden holds words (DECISIONS.md 579)", () => {
+  const cell = "padding:0;border-bottom:9px solid #000";
+  /** A table whose one row fits and whose last collapsed border crosses, first in a grid. */
+  const table = (head: string, th = `height:30px;${cell}`): string =>
+    `<table style="border-collapse:collapse;width:100%"><thead><tr><th style="${th}">${head}</th></tr></thead><tbody><tr><td style="height:439px;${cell}">Row</td></tr></tbody></table>`;
+
+  for (const head of ["Kind of storage and share used", "Kind"]) {
+    test(`a table first in a grid beside a short note that goes on, its head "${head}": the continued slide is warned as nearly empty, quoting only what it prints`, async () => {
+      // The copy of the head was hidden with its words in it: with the long head the slide went
+      // unwarned, and with the short one the warning quoted a word it doesn't print.
+      const { result, page } = await slides(`<div class="cols">${table(head)}<div>${words("Right above.", 20)}${words("And 2 more.", 480)}</div></div>`);
+      try {
+        assert.equal(result.pages, 2);
+        assertHolds(head, result);
+        assert.deepEqual(await reading(page), [`Title ${head} Row Right above.`, "And 2 more."]);
+        const { warned, printed } = await emptySection(page, 2);
+        assert.deepEqual(printed, ["And 2 more."]);
+        assert.deepEqual(warned, [`only "${printed.join(" | ")}"`]);
+        const held = await heldPlace(page, ".cols > table:first-child", ".cols > :last-child");
+        assert.equal(held.left[1], held.left[0], "the column beside it where it was");
+        assert.equal(held.visibility, "hidden");
+      } finally {
+        await page.close();
+      }
+    });
+  }
+
+  for (const head of ["Quarter on quarter change in pipeline value by team", "Head cell"]) {
+    test(`a table first in a grid beside an empty tall box that goes on, its head "${head}": the continued slide is warned as empty`, async () => {
+      const { result, page } = await slides(`<div class="cols">${table(head)}<div>${words("Right above.", 20)}<div class="box" style="height:480px;background:#ddd"></div></div></div>`);
+      try {
+        assert.equal(result.pages, 2);
+        assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll(".page")].map((p) => p.querySelectorAll(".box").length)), [0, 1]);
+        // The slide holds a box and no words, which the heading-only reading, by words alone,
+        // can't tell from nothing: the layout check's warning is what says so.
+        assert.deepEqual(result.dropped, []);
+        assert.deepEqual(result.doubled, []);
+        const { warned, printed } = await emptySection(page, 2);
+        assert.deepEqual(printed, []);
+        assert.deepEqual(warned, ['only ""']);
+      } finally {
+        await page.close();
+      }
+    });
+  }
+
+  test("a copied head with no height of its own set keeps the height it had, its words taken out", async () => {
+    const { result, page } = await slides(`<div class="cols">${table("Kind of storage and share used", "padding:4px;border-bottom:9px solid #000")}<div>${words("Right above.", 20)}${words("And 2 more.", 480)}</div></div>`);
+    try {
+      assert.equal(result.pages, 2);
+      const heads = await page.evaluate(() => [...document.querySelectorAll(".page")].map((p) => p.querySelector(".cols > table > thead")!.getBoundingClientRect().height));
+      assert.equal(heads[1], heads[0], "the copy's head as tall as the head it copies");
+      assert.equal((await heldPlace(page, ".cols > table:first-child", ".cols > :last-child")).visibility, "hidden");
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("a real table head whose rows stay on its slide keeps its words: the table copied from, and a table that went on whole beside the hidden copy", async () => {
+    const REAL = `<table class="real" style="border-collapse:collapse;width:100%"><thead><tr><th style="height:30px;padding:0">Real head</th></tr></thead><tbody><tr><td style="height:30px;padding:0">Real row</td></tr></tbody></table>`;
+    const { result, page } = await slides(`<div class="cols">${table("Kind of storage and share used")}<div>${words("Right above.", 20)}${words("Middle.", 300)}${words("Moved.", 200)}</div></div>${REAL}`);
+    try {
+      assert.deepEqual(await reading(page), ["Title Kind of storage and share used Row Right above. Middle.", "Moved. Real head Real row"]);
+      assertHolds("the real heads", result);
+      assert.equal((await heldPlace(page, ".cols > table:first-child", ".cols > :last-child")).visibility, "hidden");
+      // Each slide's heads that show, by their words.
+      const shown = await page.evaluate(() => [...document.querySelectorAll(".page")].map((p) => [...p.querySelectorAll("thead")].filter((h) => getComputedStyle(h).visibility === "visible").map((h) => (h.textContent ?? "").trim())));
+      assert.deepEqual(shown, [["Kind of storage and share used"], ["Real head"]]);
     } finally {
       await page.close();
     }

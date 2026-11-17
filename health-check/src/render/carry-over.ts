@@ -361,7 +361,21 @@ export async function carryOver(browserPage: Page): Promise<number> {
     // A copy nothing went into would print an empty panel or box, or a table's head over no rows.
     // It is hidden, not removed: it holds its column's place, and the column beside it would move
     // left (DECISIONS.md 577). One that prints nothing of its own is left as it is.
-    for (const el of document.querySelectorAll<HTMLElement>(".page *")) if (made.has(el) && onlyShells(el) && marks(el)) el.style.visibility = "hidden";
+    for (const el of document.querySelectorAll<HTMLElement>(".page *")) {
+      if (!made.has(el) || !onlyShells(el) || !marks(el)) continue;
+      // The layout check reads every word, printed or not: a copied head's words left here would
+      // count as the slide's content (DECISIONS.md 579). The rows and cells stay, each row held
+      // at its height, so the copy keeps its size and nothing under it moves. A copy holds only
+      // what we made, so every head in it is a copy.
+      for (const head of el.querySelectorAll("thead")) {
+        for (const row of head.querySelectorAll<HTMLElement>(":scope > tr")) row.style.height = `${box(row).height}px`;
+        const walker = document.createTreeWalker(head, NodeFilter.SHOW_TEXT);
+        const texts: Node[] = [];
+        for (let n = walker.nextNode(); n; n = walker.nextNode()) texts.push(n);
+        for (const n of texts) n.parentNode!.removeChild(n);
+      }
+      el.style.visibility = "hidden";
+    }
 
     // Number every page again, and point the contents at where each part now starts.
     const all = pages();
