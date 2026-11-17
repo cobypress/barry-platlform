@@ -355,6 +355,10 @@ describe("attempts to hide a figure", () => {
     passes("1 in 2 of them.");
     blocks("One in four open deals.");
     blocks("Nine in ten open deals.");
+    // In `data` the 2 is a summary count and the 50% the second finding's, so the two above pass on
+    // their counts alone, 1 and 2 both being summary counts. Here the 2 is the 50%'s finding's and the 1 isn't.
+    const own = buildDataset({ findings: [{ ...half, facts: { ...half.facts, teams: 2 } }], metrics: [] });
+    for (const text of ["One in two open deals.", "1 in 2 of them."]) assert.deepEqual(checkNumbers(text, own).unmatched, [], text);
   });
 
   test("every digit is accounted for, whatever surrounds it", () => {
@@ -381,6 +385,89 @@ describe("attempts to hide a figure", () => {
       for (const figure of [...figures].reverse()) masked = masked.slice(0, figure.start) + " ".repeat(figure.end - figure.start) + masked.slice(figure.end);
       assert.doesNotMatch(masked, /\d/, JSON.stringify(text));
     }
+  });
+});
+
+describe("a pair's percentage comes from a finding its whole comes from (DECISIONS.md 595)", () => {
+  const ADMIN = "said in interview, Sales director";
+  const setOf = (...texts: Array<[source: string, text: string, said?: string]>) =>
+    buildDataset({ findings: [], metrics: [], extraText: texts.map(([source, text, said]) => ({ source, text, ...(said ? { said } : {}) })) });
+  const misses = (text: string, set: ReturnType<typeof buildDataset>): string[] => checkNumbers(text, set).unmatched.map((u) => `${u.raw}: ${u.reason}`);
+  const apart = setOf(["f1", "40% of leads have no owner"], ["f2", "5 integrations run as admins"]);
+
+  test("a share from one finding doesn't make a pair with a count from another", () => {
+    assert.deepEqual(misses("2 of the 5 integrations have no owner.", apart), ["2: not in the data"]);
+    assert.deepEqual(misses("2 in 5 integrations run as admins.", apart), ["2: not in the data"]);
+  });
+
+  test("within one finding the share stands for the part", () => {
+    const together = setOf(["f1", "40% of leads have no owner, and 5 integrations run as admins"]);
+    assert.deepEqual(misses("2 of the 5 integrations have no owner.", together), []);
+    assert.deepEqual(misses("2 in 5 integrations run as admins.", together), []);
+  });
+
+  test("a whole two findings hold is enough when the share is in one of them", () => {
+    assert.deepEqual(misses("2 of the 5 integrations have no owner.", setOf(["f1", "40% of the 5 integrations have no owner"], ["f2", "5 integrations run as admins"])), []);
+    assert.deepEqual(misses("2 of the 5 integrations have no owner.", setOf(["f2", "5 integrations run as admins"], ["f1", "40% of the 5 integrations have no owner"])), []);
+  });
+
+  test("any share near enough will do, not only the first", () => {
+    const near = setOf(["f1", "39.6% of leads have no owner"], ["f2", "40.4% of the 5 integrations have no owner"]);
+    assert.deepEqual(misses("2 of the 5 integrations have no owner.", near), []);
+  });
+
+  test("a share is near only within a point", () => {
+    assert.deepEqual(misses("2 of the 5 integrations have no owner.", setOf(["f1", "41.1% of the 5 integrations have no owner"])), ["2: not in the data"]);
+    assert.deepEqual(misses("2 of the 5 integrations have no owner.", setOf(["f1", "38.9% of the 5 integrations have no owner"])), ["2: not in the data"]);
+  });
+
+  test("a part above its whole, a whole of nothing and a share over 100 are as before", () => {
+    assert.deepEqual(misses("6 of the 5 integrations.", setOf(["f1", "6 leads and 5 integrations"])), ["6: can't be 6 of 5"]);
+    assert.deepEqual(misses("6 of the 5 integrations.", setOf(["f1", "120% of the 5 integrations"])), ["6: not in the data"]);
+    assert.deepEqual(misses("3 of 0 integrations.", setOf(["f1", "3 leads, 0 integrations, 40% of them"])), ["3: can't be 3 of 0"]);
+  });
+
+  test("a part that is in the data goes on to the pair rule", () => {
+    assert.deepEqual(misses("2 of the 5 integrations have no owner.", setOf(["f1", "2 of the 5 integrations have no owner"])), []);
+    const three = setOf(["f1", "40% of leads have no owner"], ["f2", "5 integrations run as admins"], ["f3", "2 admins"]);
+    assert.deepEqual(misses("2 of the 5 integrations have no owner.", three), ["2: 2 and 5 don't come from the same finding"]);
+  });
+
+  test("the whole's finding is the one its own figure comes from, not one with any count or the part in it (DECISIONS.md 597)", () => {
+    // A 40% beside a 7 in f1 says nothing about the 5 in f2, though both are counts.
+    assert.deepEqual(misses("2 of the 5 integrations have no owner.", setOf(["f1", "40% of leads across 7 teams have no owner"], ["f2", "5 integrations run as admins"])), ["2: not in the data"]);
+    // A 40% beside the 2 in f1 still isn't the 5's: the part can't bring its own finding to the whole.
+    assert.deepEqual(misses("2 of the 5 integrations have no owner.", setOf(["f1", "40% of leads have no owner, and 2 admins"], ["f2", "5 integrations run as admins"])), ["2: 2 and 5 don't come from the same finding"]);
+  });
+
+  test("only a percentage stands for a share, and only up to 100 (DECISIONS.md 597)", () => {
+    // 40 points is a change in a percentage, not a share of anything.
+    assert.deepEqual(misses("2 of the 5 integrations have no owner.", setOf(["f1", "up 40 points across the 5 integrations"])), ["2: not in the data"]);
+    // 201 of 200 is 100.5%, within a point of 100%, but no part is larger than its whole.
+    assert.deepEqual(misses("201 of the 200 integrations have no owner.", setOf(["f1", "100% of the 200 integrations have no owner"])), ["201: not in the data"]);
+  });
+
+  test("a part is refused as well as a whole that isn't in the data", () => {
+    assert.deepEqual(misses("2 of the 5 integrations have no owner.", setOf(["f1", "40% of leads have no owner"])), ["2: not in the data", "5: not in the data"]);
+  });
+
+  test("a share only someone told us pairs only with a whole from what they said", () => {
+    // Before 595 a said 40% let "2 in 5" pass with no attribution against a measured 5 from elsewhere.
+    assert.deepEqual(misses("They told us 2 in 5 integrations have no owner.", setOf(["i1", "40% of leads have no owner", ADMIN], ["f2", "5 integrations run as admins"])), ["2: not in the data"]);
+    const said = setOf(["i1", "40% of the 5 integrations have no owner", ADMIN]);
+    const told = checkNumbers("They told us 2 in 5 integrations have no owner.", said);
+    assert.deepEqual([told.unmatched, told.said], [[], [{ raw: "5", source: ADMIN }]]);
+    assert.deepEqual(misses("2 in 5 integrations have no owner.", said), [`5: this is only what was ${ADMIN}, so write it as what they told us, not as a figure we measured`]);
+  });
+
+  test("in words, and with out of and a slash", () => {
+    assert.deepEqual(misses("One in two teams.", setOf(["f1", "50% of the 2 teams"])), []);
+    assert.deepEqual(misses("One in two teams.", setOf(["f1", "50% of leads"], ["f2", "2 teams"])), ["One: not in the data"]);
+    assert.deepEqual(misses("Two of the five integrations have no owner.", apart), ["Two: not in the data"]);
+    assert.deepEqual(misses("2 out of 5 integrations have no owner.", apart), ["2: not in the data"]);
+    assert.deepEqual(misses("2/5 integrations have no owner.", apart), ["2: not in the data"]);
+    const together = setOf(["f1", "40% of the 5 integrations have no owner"]);
+    for (const text of ["Two of the five integrations have no owner.", "2 out of 5 integrations have no owner.", "2/5 integrations have no owner."]) assert.deepEqual(misses(text, together), [], text);
   });
 });
 
