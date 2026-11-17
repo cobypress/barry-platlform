@@ -530,6 +530,209 @@ describe("carry-over: nothing a slide gives up is thrown away, and what takes no
   });
 });
 
+// A copy the carry-over made that nothing went into takes no room, whatever its padding or
+// border: it neither stays nor goes, and it holds its place unpainted. A block with words of
+// its own beside its child blocks isn't looked into (DECISIONS.md 577).
+
+/** Each slide's words in the order they print, past the footers and the copied headings (so a continued slide's title too). */
+const reading = (page: Page): Promise<string[]> =>
+  page.evaluate(() =>
+    [...document.querySelectorAll(".page")].map((p) => {
+      const out: string[] = [];
+      const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT);
+      for (let n = walker.nextNode(); n; n = walker.nextNode()) if (!n.parentElement!.closest("[data-chrome], [data-carried-label], style")) out.push(n.textContent ?? "");
+      return out.join(" ").replace(/\s+/g, " ").trim();
+    }),
+  );
+
+/**
+ * On the continued slide: the copy at `copy` there, whether it paints and how tall it is ("gone"
+ * and 0 if it isn't there); and the left edge of the column at `beside`, on each slide, from the
+ * slide's own edge.
+ */
+const heldPlace = (page: Page, copy: string, beside: string): Promise<{ visibility: string; height: number; left: number[] }> =>
+  page.evaluate(
+    ([copy, beside]) => {
+      const pages = [...document.querySelectorAll(".page")];
+      const shell = pages[1]!.querySelector(copy);
+      return {
+        visibility: shell ? getComputedStyle(shell).visibility : "gone",
+        height: shell?.getBoundingClientRect().height ?? 0,
+        left: pages.map((p) => Math.round((p.querySelector(beside)!.getBoundingClientRect().left - p.getBoundingClientRect().left) * 100) / 100),
+      };
+    },
+    [copy, beside] as const,
+  );
+
+/** Every element inside `within` on the continued slide that isn't painted. */
+const unpainted = (page: Page, within: string): Promise<string[]> =>
+  page.evaluate((within) => [...document.querySelectorAll(".page")[1]!.querySelectorAll(`${within}, ${within} *`)].filter((e) => getComputedStyle(e).visibility !== "visible").map((e) => e.outerHTML.slice(0, 60)), within);
+
+// A grid on the first slide that stacks on the slides after it, or sets its columns in CSS
+// columns there: no builder does either, and it is the shape that puts a copy left empty
+// beside a column under the vertical loop or the columns rule on the continued slide.
+const RESTACKED = `<style>.restack { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; } .page:not(:first-of-type) .restack { display: block; } .page:not(:first-of-type) .restack.folded { columns: 2; column-gap: 16px; } .restack.folded > * { break-inside: avoid; }</style>`;
+
+describe("carry-over: an emptied copy holds its place and nothing else (DECISIONS.md 577)", () => {
+  test("a padded column whose words stay beside a column whose padded block goes on: two slides, the copy left on the second holding its place unpainted", async () => {
+    // The first column crosses by its padding and leaves its copy, padding and all, on the
+    // continued slide. Taken for content there, it let the block beside it go on again: three
+    // slides, the second holding only its copied heading and an empty box.
+    const { pages, result, page } = await slides(`<div class="cols"><div class="padded">${words("Left.", 460)}</div><div>${words("Right above.", 20)}${padded("Right.")}</div></div>`);
+    try {
+      assert.deepEqual(pages, [["h2:Title", "p:Left.", "p:Right above."], ["h2:Title, continued", "p:Right."]]);
+      assertHolds("the padded column", result);
+      const held = await heldPlace(page, ".cols > .padded:first-child", ".cols > :last-child");
+      assert.equal(held.left[1], held.left[0], "the column beside it where it was");
+      assert.equal(held.visibility, "hidden");
+      assert.ok(held.height >= 30, `the copy is ${held.height}px tall`);
+      assert.deepEqual(await unpainted(page, ".cols > :last-child"), [], "what went on is printed");
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("a bordered column beside a column whose last words can't be cut: two slides, the copy left on the second holding its place unpainted", async () => {
+    const { pages, result, page } = await slides(`<style>.boxed { padding: 10px; border: 1px solid #000; }</style><div class="cols"><div class="boxed">${words("Left.", 450)}</div><div>${words("Right above.", 20)}${words("Right one long sentence", 480)}</div></div>`);
+    try {
+      assert.deepEqual(pages, [["h2:Title", "p:Left.", "p:Right above."], ["h2:Title, continued", "p:Right one long sentence"]]);
+      assertHolds("the bordered column", result);
+      const held = await heldPlace(page, ".cols > .boxed:first-child", ".cols > :last-child");
+      assert.equal(held.left[1], held.left[0], "the column beside it where it was");
+      assert.equal(held.visibility, "hidden");
+      assert.ok(held.height >= 20, `the copy is ${held.height}px tall`);
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("a copy that holds what went on is printed: a padded column's carried words, and a table's copy with its rows", async () => {
+    // The padded column itself is cut: its second paragraph goes on inside its copy, background and all.
+    let { pages, result, page } = await slides(`<div class="cols"><div class="padded">${words("Left one.", 20)}${words("Left two, which can't be cut", 480)}</div><div>${words("Right.", 20)}</div></div>`);
+    try {
+      assert.deepEqual(pages, [["h2:Title", "p:Left one.", "p:Right."], ["h2:Title, continued", "p:Left two, which can't be cut"]]);
+      assertHolds("the carried column", result);
+      assert.deepEqual(await unpainted(page, ".cols"), []);
+    } finally {
+      await page.close();
+    }
+    // A table cut between its rows: its copy holds its head and the rows that went on.
+    const rows = Array.from({ length: 8 }, (_, i) => `<tr><td style="height:40px;padding:0">Row ${i + 1}</td></tr>`).join("");
+    ({ pages, result, page } = await slides(`${words("Above.", 300)}<table style="border-collapse:collapse"><thead><tr><th style="height:30px;padding:0">Head</th></tr></thead><tbody>${rows}</tbody></table>`));
+    try {
+      assert.deepEqual(await reading(page), ["Title Above. Head Row 1 Row 2 Row 3", "Head Row 4 Row 5 Row 6 Row 7 Row 8"]);
+      assertHolds("the table", result);
+      assert.deepEqual(await unpainted(page, "table"), []);
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("a table first in a grid, its rows fitting and its last collapsed border crossing, beside words that go on: two slides, the copy of its head left unprinted in its place", async () => {
+    // The table's copy holds only the head we copied. Taken for content, it printed "Head cell"
+    // alone on a slide of its own, and the words beside it went on to a third.
+    const cell = "padding:0;border-bottom:9px solid #000";
+    const { result, page } = await slides(`<div class="cols"><table style="border-collapse:collapse;width:100%"><thead><tr><th style="height:30px;${cell}">Head cell</th></tr></thead><tbody><tr><td style="height:439px;${cell}">Row</td></tr></tbody></table><div>${words("Right above.", 20)}${words("Right one long sentence", 480)}</div></div>`);
+    try {
+      // The copied head's words are still there to read, unprinted.
+      assert.deepEqual(await reading(page), ["Title Head cell Row Right above.", "Head cell Right one long sentence"]);
+      assertHolds("the table's head", result);
+      const held = await heldPlace(page, ".cols > table:first-child", ".cols > :last-child");
+      assert.equal(held.left[1], held.left[0], "the column beside it where it was");
+      assert.equal(held.visibility, "hidden");
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("a block that stacks on the continued slide: an emptied copy above the column that went on isn't content above it, two slides", async () => {
+    // Stacked, the copy is the first thing on the continued slide. Counted as staying there,
+    // it let the block under it go on again, alone.
+    const { pages, result, page } = await slides(`${RESTACKED}<div class="restack"><div class="padded">${words("Left.", 460)}</div><div>${words("Right above.", 20)}${padded("Right.", 440)}</div></div>`);
+    try {
+      assert.deepEqual(pages, [["h2:Title", "p:Left.", "p:Right above."], ["h2:Title, continued", "p:Right."]]);
+      assertHolds("stacked, the copy first", result);
+      assert.equal((await heldPlace(page, ".restack > .padded:first-child", ".restack > :last-child")).visibility, "hidden");
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("a block that stacks on the continued slide: an emptied copy that crosses under the column that went on isn't moved alone, two slides", async () => {
+    const { pages, result, page } = await slides(`${RESTACKED}<div class="restack"><div>${words("Left above.", 20)}${words("Left words", 460)}</div><div class="padded">${words("Right.", 460)}</div></div>`);
+    try {
+      assert.deepEqual(pages, [["h2:Title", "p:Left above.", "p:Right."], ["h2:Title, continued", "p:Left words"]]);
+      assertHolds("stacked, the copy crossing", result);
+      assert.equal((await heldPlace(page, ".restack > .padded:last-child", ".restack > :first-child")).visibility, "hidden");
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("a block set in CSS columns on the continued slide: an emptied copy is not the item that stays, two slides", async () => {
+    // With nothing else on the slide, the one item that stays is the first that takes room:
+    // the column beside the copy stays, crossing, and is reported, as an item taller than a slide is (580).
+    const { pages, result, page } = await slides(`${RESTACKED}<div class="restack folded"><div class="padded">${words("Left.", 460)}</div><div>${words("Right above.", 20)}${padded("Right.")}</div></div>`);
+    try {
+      assert.deepEqual(pages, [["h2:Title", "p:Left.", "p:Right above."], ["h2:Title, continued", "p:Right."]]);
+      assertHolds("in columns", result);
+      assert.equal(await page.evaluate(() => parseInt(getComputedStyle(document.querySelectorAll(".page")[1]!.querySelector(".restack")!).columnCount, 10)), 2);
+    } finally {
+      await page.close();
+    }
+  });
+});
+
+describe("carry-over: a block with words of its own beside its child blocks goes whole (DECISIONS.md 577)", () => {
+  const LOOSE = "Loose words in the block itself.";
+  const INNER = "Inner block that crosses";
+  for (const [name, body, expected] of [
+    ["under a paragraph, the words before the inner block", `${words("Above.", 380)}<div class="wrap">${LOOSE} ${words(INNER, 100)}</div>`, ["Title Above.", `${LOOSE} ${INNER}`]],
+    ["under a paragraph, the words after the inner block", `${words("Above.", 380)}<div class="wrap">${words(INNER, 100)} ${LOOSE}</div>`, ["Title Above.", `${INNER} ${LOOSE}`]],
+    ["a grid's column, the words before the inner block", `${words("Above.", 100)}<div class="cols"><div>${words("Left.", 20)}</div><div class="wrap">${LOOSE} ${words(INNER, 400)}</div></div>`, ["Title Above. Left.", `${LOOSE} ${INNER}`]],
+    ["a grid's column, the words after the inner block", `${words("Above.", 100)}<div class="cols"><div>${words("Left.", 20)}</div><div class="wrap">${words(INNER, 400)} ${LOOSE}</div></div>`, ["Title Above. Left.", `${INNER} ${LOOSE}`]],
+  ] as const) {
+    test(`${name}: every word once, in the order written`, async () => {
+      // Looked into, the inner block went on and the block, empty of elements, was removed with its words.
+      const { result, page } = await slides(body);
+      try {
+        assert.deepEqual(await reading(page), expected);
+        assertHolds(name, result);
+      } finally {
+        await page.close();
+      }
+    });
+  }
+});
+
+describe("carry-over: the lines of 576 that only a built shape needs (DECISIONS.md 577)", () => {
+  test("a table whose rows fit and whose last collapsed border crosses, then a paragraph: the table goes on whole with its head, and no copied head is left over the paragraph", async () => {
+    // The copied head is ours, so the table's copy holds only copies and the table moves whole.
+    const rows = Array.from({ length: 5 }, (_, i) => `<tr><td style="height:30px;padding:0;border-bottom:9px solid #000">Row${i + 1}</td></tr>`).join("");
+    for (const above of [288, 291]) {
+      const { result, page } = await slides(`${words("Spacer words.", above)}<table style="border-collapse:collapse;width:100%"><thead><tr><th style="height:30px;padding:0;border-bottom:9px solid #000">Head cell</th></tr></thead><tbody>${rows}</tbody></table>${words("After words close the slide.", 20)}`);
+      try {
+        assert.deepEqual(await reading(page), ["Title Spacer words.", "Head cell Row1 Row2 Row3 Row4 Row5 After words close the slide."], `above ${above}px`);
+        assertHolds("the table", result);
+      } finally {
+        await page.close();
+      }
+    }
+  });
+
+  test("a block of no height holding a box placed over it that crosses, then a paragraph: the box goes on with what follows", async () => {
+    // The anchor has no height, but what it holds does: it is not a thing that takes no room.
+    const { pages, result, page } = await slides(`${words("Above.", 450)}<div class="anchor" style="position:relative"><div class="mark" style="position:absolute;top:0;left:0;width:100px;height:60px;background:#000"></div></div>${words("After.", 20)}`);
+    try {
+      assert.deepEqual(pages, [["h2:Title", "p:Above."], ["h2:Title, continued", "p:After."]]);
+      assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll(".page")].map((p) => p.querySelectorAll(".mark").length)), [0, 1]);
+      assertHolds("the anchored box", result);
+    } finally {
+      await page.close();
+    }
+  });
+});
+
 // The decks. The synthetic run as the suites build it, and with every issue's title longer
 // by a team's name, as a customer's own words make it.
 
@@ -794,5 +997,40 @@ describe("the real builders' grids: every word after the grid is printed once (D
     assert.equal(after.length, 1);
     assert.deepEqual(times(printed, after[0]!), [1, 1]);
     assertHolds("the wins slide", result);
+  });
+});
+
+describe("the real builders: blank text between tags isn't words of a block's own (DECISIONS.md 577)", () => {
+  test("the full report's ratings table, written over several lines, pushed down its slide: it is cut between its rows, as any table is", async () => {
+    // The one block on the decks with blank text beside its children: the builder writes this
+    // table's rows a line each. Taken for words, it would make the table move whole.
+    const context = await browser.newContext({ offline: true });
+    try {
+      const page = await context.newPage();
+      await page.setContent(fullReportHtml(buildReport(full), pseudonyms), { waitUntil: "load" });
+      await page.evaluate(() => window.document.fonts.ready.then(() => undefined));
+      await page.emulateMedia({ media: "print" });
+      const built = await page.evaluate(() => {
+        const slide = [...document.querySelectorAll<HTMLElement>(".page")].find((p) => p.querySelector(":scope > h2")?.textContent === "What the ratings mean")!;
+        for (const p of document.querySelectorAll(".page")) if (p !== slide) p.remove();
+        const table = slide.querySelector("table")!;
+        const body = table.tBodies[0]!;
+        // A spacer above it, so that about half its rows fit.
+        const footer = slide.querySelector(":scope > [data-chrome]")!;
+        const spacer = document.createElement("div");
+        spacer.style.height = `${footer.getBoundingClientRect().top - table.getBoundingClientRect().top - table.getBoundingClientRect().height / 2}px`;
+        table.before(spacer);
+        return { rows: body.rows.length, blank: [...body.childNodes].some((n) => n.nodeType === Node.TEXT_NODE && !(n.textContent ?? "").trim()) };
+      });
+      assert.ok(built.blank, "the rows are written a line each");
+      const result = await carry(page);
+      const rows = await page.evaluate(() => [...document.querySelectorAll(".page")].map((p) => p.querySelectorAll("tbody > tr").length));
+      assert.equal(rows.length, 2, JSON.stringify(rows));
+      assert.ok(rows.every((n) => n > 0), JSON.stringify(rows));
+      assert.equal(rows[0]! + rows[1]!, built.rows);
+      assertHolds("the ratings table", result);
+    } finally {
+      await context.close();
+    }
   });
 });

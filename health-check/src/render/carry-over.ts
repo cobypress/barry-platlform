@@ -59,7 +59,11 @@ export async function carryOver(browserPage: Page): Promise<number> {
     };
     const overflows = (page: HTMLElement): boolean =>
       page.scrollHeight > page.clientHeight + TOLERANCE || kidsOf(page).some((k) => visible(k) && (bottomOf(k) > limitOf(page) || box(k).top < box(page).top - TOLERANCE));
-    const splittable = (el: HTMLElement): boolean => SPLITTABLE_TAGS.has(el.tagName) && !el.matches(ATOMIC) && kidsOf(el).length > 0;
+    /** Words that sit directly in a block, beside its child blocks: kidsOf doesn't see them. */
+    const ownWords = (el: Element): boolean => [...el.childNodes].some((n) => n.nodeType === Node.TEXT_NODE && !!(n.textContent ?? "").trim());
+    // A block with words of its own beside its children stays or goes whole: looked into, its
+    // words were left behind or removed with it when its children went (DECISIONS.md 577).
+    const splittable = (el: HTMLElement): boolean => SPLITTABLE_TAGS.has(el.tagName) && !el.matches(ATOMIC) && kidsOf(el).length > 0 && !ownWords(el);
     /** Children laid out side by side, as in a grid of cards, rather than one under another. */
     const sideBySide = (kids: HTMLElement[]): boolean => kids.some((k, i) => i > 0 && box(k).top < box(kids[i - 1]!).bottom - 1 && box(k).left > box(kids[i - 1]!).left + 1);
     /** Set in CSS columns: one list folded, read down one column and then the next, unlike a grid's blocks side by side. */
@@ -85,6 +89,21 @@ export async function carryOver(browserPage: Page): Promise<number> {
     /** Holds anything printed: words, or a chart, a picture or a table row. A table's copied head is ours. */
     const printed = (el: Element): boolean =>
       [...el.childNodes].some((n) => (n instanceof Element ? n.tagName !== "THEAD" && n.tagName !== "STYLE" && (n.matches(ATOMIC) || printed(n)) : !!(n.textContent ?? "").trim()));
+    /**
+     * Takes no room: not shown, roomless, or a copy we made that nothing went into, whatever
+     * height its padding or border gives it. It neither stays nor goes (DECISIONS.md 576, 577).
+     * A copy is filled only while the block it copies is looked into, and what is moved goes
+     * to the next slide, never into the slide being read: a copy judged empty here stays so.
+     */
+    const noRoom = (el: Element): boolean => !visible(el) || roomless(el) || (made.has(el) && onlyShells(el));
+    /** Prints something of its own: words (a copied table head), a background, a border, an outline, a shadow, a ::before or ::after. */
+    const marks = (el: Element): boolean => {
+      const s = getComputedStyle(el);
+      // A line with no style has a width all the same, so both are read.
+      const edges = ["border-top", "border-right", "border-bottom", "border-left", "outline"].some((p) => s.getPropertyValue(`${p}-style`) !== "none" && parseFloat(s.getPropertyValue(`${p}-width`)) > 0);
+      const pseudo = ["::before", "::after"].some((p) => !["none", "normal"].includes(getComputedStyle(el, p).content));
+      return !!(el.textContent ?? "").trim() || edges || pseudo || s.backgroundImage !== "none" || s.boxShadow !== "none" || !/^(transparent|rgba\(0, 0, 0, 0\))$/.test(s.backgroundColor);
+    };
 
     /**
      * Keeps the sentences of a paragraph that fit and moves the rest into a new
@@ -172,20 +191,21 @@ export async function carryOver(browserPage: Page): Promise<number> {
         // Taking each crossing item on alone would leave those between behind, out of
         // order. Items go from the end, whole and kept in order, until what is left fits:
         // the browser balances it and we ask whether it does. One stays when nothing else
-        // has stayed on the page (DECISIONS.md 580).
+        // has stayed on the page (DECISIONS.md 580), and an item that takes no room is never
+        // the one that stays (577).
         let keep = kids.length;
         while (keep > 0 && kids.slice(0, keep).some((k) => bottomOf(k) > limit)) {
-          if (keep === 1 && !state.placed) break;
+          if (!state.placed && kids.slice(0, keep - 1).every(noRoom)) break;
           dest.prepend(kids[--keep]!);
           state.moved = true;
         }
-        if (kids.slice(0, keep).some((k) => !isHeading(k))) state.placed = true;
+        if (kids.slice(0, keep).some((k) => !isHeading(k) && !noRoom(k))) state.placed = true;
         return;
       }
       if (sideBySide(kids)) {
         // Each crossing child goes on alone; the others in its row stay.
         for (const kid of kids) {
-          if (roomless(kid)) continue;
+          if (noRoom(kid)) continue;
           if (bottomOf(kid) <= limit) {
             if (!isHeading(kid)) state.placed = true;
             continue;
@@ -205,11 +225,11 @@ export async function carryOver(browserPage: Page): Promise<number> {
       for (let i = 0; i < kids.length; i++) {
         const kid = kids[i]!;
         if (!visible(kid) || bottomOf(kid) <= limit) {
-          if (visible(kid) && !isHeading(kid) && !roomless(kid)) state.placed = true;
+          if (!isHeading(kid) && !noRoom(kid)) state.placed = true;
           continue;
         }
         // Moved alone, it would make a slide of only its heading (DECISIONS.md 576).
-        if (roomless(kid)) continue;
+        if (noRoom(kid)) continue;
         if (splittable(kid) && box(kid).top < limit) {
           const inner = shell(kid);
           dest.appendChild(inner);
@@ -337,6 +357,11 @@ export async function carryOver(browserPage: Page): Promise<number> {
       if (next.children.length <= headed) next.remove();
       else added++;
     }
+
+    // A copy nothing went into would print an empty panel or box, or a table's head over no rows.
+    // It is hidden, not removed: it holds its column's place, and the column beside it would move
+    // left (DECISIONS.md 577). One that prints nothing of its own is left as it is.
+    for (const el of document.querySelectorAll<HTMLElement>(".page *")) if (made.has(el) && onlyShells(el) && marks(el)) el.style.visibility = "hidden";
 
     // Number every page again, and point the contents at where each part now starts.
     const all = pages();
