@@ -682,7 +682,8 @@ describe("the progress page at its fullest with the engine's own titles, and pas
 
   test("a part's heading goes over with what it heads, never the slide's eyebrow or title: no blank slide and no title twice (DECISIONS.md 510)", async () => {
     // The adversary's case: the 505 report with every integrations issue title 220 characters
-    // longer. The interviews table's bottom margin alone crosses the footer on its continued slide.
+    // longer. On its continued slide the interviews table's rows all fit, and half its last row's
+    // collapsed border, which the table's own box takes in, crosses the limit (DECISIONS.md 575).
     const TEAMS = " for the Enterprise Sales North America and Asia Pacific Partner Channel teams";
     const integrations = storage(kinds([812_345, 900_000], [712_345, 800_000]), kinds([962_345, 950_000], [862_345, 850_000]), { ruleId: SEGMENT, replacing: "Win rate for the Sales EU team is well below the overall figure", title: TEAM_TITLE }, (f) =>
       f.status === "issue" && f.domain === "integrations" ? { ...f, title: f.title + TEAMS.repeat(3).slice(0, 220) } : f,
