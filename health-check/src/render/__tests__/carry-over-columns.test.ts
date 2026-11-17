@@ -189,6 +189,27 @@ describe("the agent-readiness fixes in two columns go on in order, under the num
   }
 });
 
+describe("the agent-readiness slide's continued title after its question mark (DECISIONS.md 584)", () => {
+  // At 80 and 120 characters longer the fixes split across two slides (above).
+  for (const n of [80, 120]) {
+    test(`issue titles ${n} characters longer: "Could an AI agent work safely here? (continued)", its label "…, continued"`, async () => {
+      const page = await open(fullReportHtml(buildReport(lengthened(n)), pseudonyms));
+      try {
+        await carried(page);
+        const slides = await page.evaluate(() =>
+          [...document.querySelectorAll("ol.readiness-fixes")].map((ol) => [...ol.closest(".page")!.querySelectorAll(":scope > .eyebrow, :scope > h2, :scope > h3")].map((h) => h.textContent)),
+        );
+        assert.deepEqual(slides, [
+          ["AI readiness", "Could an AI agent work safely here?", "What to fix before an agent goes live, in order"],
+          ["AI readiness", "Could an AI agent work safely here? (continued)", "What to fix before an agent goes live, in order, continued"],
+        ]);
+      } finally {
+        await page.close();
+      }
+    });
+  }
+});
+
 describe("the other lists set in columns go on in order (DECISIONS.md 580)", () => {
   // The executive summary's references split on a run: from about 120 characters more an issue title.
   for (const [n, slides] of [

@@ -916,13 +916,20 @@ describe("a split list's label is copied only over what it heads, and isn't a sl
       try {
         const over = await labelsOver(page);
         assertOverWhatItHeads(over);
-        const continued = await page.evaluate(() => {
+        const { first, continued } = await page.evaluate(() => {
           const pages = [...window.document.querySelectorAll<HTMLElement>(".page")];
           const at = pages.findIndex((p) => p.querySelector(":scope > .eyebrow")?.textContent === "Verdict");
-          return [...pages[at + 1]!.children].filter((c) => !c.hasAttribute("data-chrome")).map((c) => `${c.tagName}${c.className ? `.${c.className}` : ""}:${c.textContent}`);
+          const own = [...pages[at]!.children].filter((c) => !c.hasAttribute("data-chrome")).slice(0, 2);
+          return {
+            first: own.map((c) => `${c.tagName}${c.className ? `.${c.className}` : ""}${c.hasAttribute("data-carried-label") ? "[marked]" : ""}`),
+            continued: [...pages[at + 1]!.children].filter((c) => !c.hasAttribute("data-chrome")).map((c) => `${c.tagName}${c.className ? `.${c.className}` : ""}:${c.textContent}`),
+          };
         });
+        // The Verdict page keeps its own eyebrow and headline; its continued slide has no title, so
+        // the eyebrow says it goes on (DECISIONS.md 585), and the headline isn't repeated.
+        assert.deepEqual(first, ["DIV.eyebrow", "DIV.headline"]);
         assert.equal(continued.length, 2, JSON.stringify(continued));
-        assert.equal(continued[0], "DIV.eyebrow:Verdict");
+        assert.equal(continued[0], "DIV.eyebrow:Verdict, continued");
         assert.ok(continued[1]!.startsWith("P:") && continued[1]!.endsWith(SOURCES_END), JSON.stringify(continued));
       } finally {
         await close();

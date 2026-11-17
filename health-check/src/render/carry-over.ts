@@ -70,6 +70,22 @@ export async function carryOver(browserPage: Page): Promise<number> {
     const inColumns = (el: HTMLElement): boolean => (parseInt(getComputedStyle(el).columnCount, 10) || 1) > 1;
     const isHeading = (el: Element): boolean => HEADINGS.has(el.tagName) || el.classList.contains("eyebrow");
     const isLabel = (el: Element): boolean => LABELS.has(el.tagName) && !el.classList.contains("eyebrow");
+    /** Words that end in a sentence mark, and a heading already marked either way. */
+    const SENTENCE_END = /[.?!:;…]$/;
+    const CONTINUED = /(, continued| \(continued\))$/;
+    /**
+     * Marks a copied heading as continued: ", continued", or " (continued)" after words that
+     * end in a sentence mark, as "?, continued" is not English. A reference tag that ends the
+     * heading stays at its end, after the mark, and a heading already marked gains nothing
+     * (DECISIONS.md 507 and 584).
+     */
+    const markContinued = (copy: HTMLElement): void => {
+      const ref = copy.lastElementChild?.hasAttribute("data-ref") ? copy.lastElementChild : null;
+      ref?.remove();
+      const words = (copy.textContent ?? "").trim();
+      if (!CONTINUED.test(words)) copy.append(SENTENCE_END.test(words) ? " (continued)" : ", continued");
+      if (ref) copy.append(ref);
+    };
 
     /** The shells made below, so one left holding only shells can be told from one holding what moved. */
     const made = new WeakSet<Node>();
@@ -178,11 +194,7 @@ export async function carryOver(browserPage: Page): Promise<number> {
         const copy = heading.cloneNode(true) as HTMLElement;
         // Ours, not the slide's: the layout check doesn't count it as content.
         copy.setAttribute("data-carried-label", "");
-        // A reference tag that ends a heading stays at its end, after the mark.
-        const ref = copy.lastElementChild?.hasAttribute("data-ref") ? copy.lastElementChild : null;
-        ref?.remove();
-        if (!/, continued$/.test(copy.textContent ?? "")) copy.append(", continued");
-        if (ref) copy.append(ref);
+        markContinued(copy);
         dest.prepend(copy);
       };
       const moveFrom = (i: number): void => {
@@ -306,22 +318,28 @@ export async function carryOver(browserPage: Page): Promise<number> {
      * The continued page: the same kind of page, its eyebrow and title marked as
      * continued, then the moved content. The copies are ours, as a copied label is,
      * so the layout check doesn't count them as the page's content (DECISIONS.md 570).
+     * A page with an eyebrow and no title, as the Verdict page, has its eyebrow marked
+     * instead, or the continued page reads as a second one (585).
      */
     const continuation = (page: HTMLElement): HTMLElement => {
       const next = shell(page);
+      let eyebrow: HTMLElement | null = null;
+      let titled = false;
       for (const kid of kidsOf(page)) {
         if (kid.classList.contains("eyebrow")) {
-          const eyebrow = kid.cloneNode(true) as HTMLElement;
+          eyebrow = kid.cloneNode(true) as HTMLElement;
           eyebrow.setAttribute("data-carried-label", "");
           next.appendChild(eyebrow);
         } else if (kid.tagName === "H1" || kid.tagName === "H2") {
           const title = kid.cloneNode(true) as HTMLElement;
           title.setAttribute("data-carried-label", "");
-          if (!/, continued$/.test(title.textContent ?? "")) title.append(", continued");
+          markContinued(title);
           next.appendChild(title);
+          titled = true;
           break;
         } else break;
       }
+      if (eyebrow && !titled) markContinued(eyebrow);
       return next;
     };
 

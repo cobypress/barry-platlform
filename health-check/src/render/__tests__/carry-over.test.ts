@@ -701,6 +701,173 @@ describe("carry-over: a continued page's heading is a copy, and a cut item goes 
   });
 });
 
+// A copied heading whose own words end in a sentence mark carries on in brackets,
+// "Could an AI agent work safely here? (continued)", and any other as before (DECISIONS.md
+// 584). A page with an eyebrow and no title has its eyebrow marked instead (585).
+
+/** A page opening with `head` (an eyebrow, a title, both or neither) over n list items of 40px. */
+const opening = (head: string, n: number): string =>
+  htmlDocument("Test", "a4", `${SPLIT_CSS}${ITEM_CSS}`, [`<section class="page" data-page="1">${head}<div>${items("A", n)}</div><div class="footer" data-chrome><span>Footer</span><span>1</span></div></section>`]);
+
+/** Each page's eyebrows and title once carried over, as "H2[marked]:Title, continued" ("[marked]" for a copy), and their HTML. */
+async function headsOf(html: string): Promise<{ heads: string[][]; html: string[][] }> {
+  const page = await open(html);
+  try {
+    await carryOver(page);
+    return await page.evaluate(() => {
+      const heads = [...document.querySelectorAll(".page")].map((p) => [...p.querySelectorAll<HTMLElement>(":scope > .eyebrow, :scope > h1, :scope > h2")]);
+      return {
+        heads: heads.map((hs) => hs.map((h) => `${h.tagName}${h.hasAttribute("data-carried-label") ? "[marked]" : ""}:${h.textContent}`)),
+        html: heads.map((hs) => hs.map((h) => h.innerHTML)),
+      };
+    });
+  } finally {
+    await page.close();
+  }
+}
+
+describe("carry-over: a continued heading after a sentence mark, and an eyebrow with no title (DECISIONS.md 584 and 585)", () => {
+  for (const [title, continued] of [
+    ["Could an agent work here?", "Could an agent work here? (continued)"],
+    ["The checks we ran.", "The checks we ran. (continued)"],
+    ["Fix this first!", "Fix this first! (continued)"],
+    ["Days 1 to 30:", "Days 1 to 30: (continued)"],
+    ["What we found;", "What we found; (continued)"],
+    ["And then…", "And then… (continued)"],
+    ["What has changed", "What has changed, continued"],
+    ["The top 5", "The top 5, continued"],
+    ["Still open (6)", "Still open (6), continued"],
+    ["Fields named “Stage”", "Fields named “Stage”, continued"],
+    ['Fields named "Stage"', 'Fields named "Stage", continued'],
+  ]) {
+    test(`a title ending "${title.slice(-1)}": "${continued}"`, async () => {
+      const { heads } = await headsOf(opening(`<h2>${title}</h2>`, 14));
+      assert.deepEqual(heads, [[`H2:${title}`], [`H2[marked]:${continued}`]]);
+    });
+  }
+
+  test("split across three slides, a title is marked once on the second and on the third, either way", async () => {
+    for (const [title, continued] of [
+      ["Could an agent work here?", "Could an agent work here? (continued)"],
+      ["Title", "Title, continued"],
+    ]) {
+      const { heads } = await headsOf(opening(`<h2>${title}</h2>`, 30));
+      assert.deepEqual(heads, [[`H2:${title}`], [`H2[marked]:${continued}`], [`H2[marked]:${continued}`]]);
+    }
+  });
+
+  test("a title built already marked either way gains nothing on its continued slides", async () => {
+    for (const title of ["What fixing this is worth, continued", "Could an agent work here? (continued)"]) {
+      const { heads } = await headsOf(opening(`<h2>${title}</h2>`, 30));
+      assert.deepEqual(heads, [[`H2:${title}`], [`H2[marked]:${title}`], [`H2[marked]:${title}`]]);
+    }
+  });
+
+  test("a title that ends in a reference tag is marked before the tag, by its own words", async () => {
+    const ref = '<span class="ref" data-ref="">R5.1</span>';
+    for (const [title, continued] of [
+      ["Could an agent work here?", "Could an agent work here? (continued)"],
+      ["The data model", "The data model, continued"],
+    ]) {
+      const { html } = await headsOf(opening(`<h2>${title}${ref}</h2>`, 30));
+      assert.deepEqual(html, [[`${title}${ref}`], [`${continued}${ref}`], [`${continued}${ref}`]]);
+    }
+  });
+
+  test("a title whose words end in a question mark and then white space is read as ending in the mark", async () => {
+    const { heads } = await headsOf(opening("<h2>Could an agent work here?  \n </h2>", 14));
+    assert.equal(heads[1]!.length, 1);
+    assert.equal(heads[1]![0]!.replace(/\s+/g, " "), "H2[marked]:Could an agent work here? (continued)");
+  });
+
+  test("a split list's copied label: in brackets after a question mark, after a comma after a letter", async () => {
+    for (const [label, continued] of [
+      ["What could go wrong?", "What could go wrong? (continued)"],
+      ["Label", "Label, continued"],
+    ]) {
+      const { pages, page } = await split(`${gap(100)}<div>${part(label, "A", 10)}</div>`);
+      await page.close();
+      assert.deepEqual(pages, [
+        ["h2:Title", `h3:${label}`, ...li("A", 1, 8)],
+        ["h2:Title, continued", `h3:${continued}`, ...li("A", 9, 10)],
+      ]);
+    }
+    // Over three pages, once on each.
+    const { pages, page } = await split(`<div>${part("What could go wrong?", "A", 30)}</div>`);
+    await page.close();
+    assert.deepEqual(
+      pages.map((p) => p.slice(0, 2)),
+      [
+        ["h2:Title", "h3:What could go wrong?"],
+        ["h2:Title, continued", "h3:What could go wrong? (continued)"],
+        ["h2:Title, continued", "h3:What could go wrong? (continued)"],
+      ],
+    );
+  });
+
+  test("an eyebrow and then no title, as the Verdict page: the continued slide's eyebrow is marked, as a copy, once over three slides", async () => {
+    const { heads } = await headsOf(opening('<div class="eyebrow">Verdict</div><div class="headline">The verdict itself.</div>', 30));
+    assert.deepEqual(heads, [["DIV:Verdict"], ["DIV[marked]:Verdict, continued"], ["DIV[marked]:Verdict, continued"]]);
+  });
+
+  test("an eyebrow that ends in a sentence mark and no title: in brackets", async () => {
+    const { heads } = await headsOf(opening('<div class="eyebrow">Ready?</div><div>Words.</div>', 14));
+    assert.deepEqual(heads, [["DIV:Ready?"], ["DIV[marked]:Ready? (continued)"]]);
+  });
+
+  test("an eyebrow and then a title: the eyebrow is copied with no mark, the title marked, as before", async () => {
+    const { heads } = await headsOf(opening('<div class="eyebrow">Area</div><h2>Title</h2>', 14));
+    assert.deepEqual(heads, [
+      ["DIV:Area", "H2:Title"],
+      ["DIV[marked]:Area", "H2[marked]:Title, continued"],
+    ]);
+  });
+
+  test("two eyebrows and no title: the last takes the mark", async () => {
+    const { heads } = await headsOf(opening('<div class="eyebrow">One</div><div class="eyebrow">Two</div><div class="headline">Words.</div>', 14));
+    assert.deepEqual(heads, [
+      ["DIV:One", "DIV:Two"],
+      ["DIV[marked]:One", "DIV[marked]:Two, continued"],
+    ]);
+  });
+
+  test("no eyebrow and no title: nothing is copied", async () => {
+    const page = await open(opening('<div class="headline">Words.</div>', 14));
+    try {
+      assert.equal(await carryOver(page), 1);
+      const second = await page.evaluate(() => {
+        const p = document.querySelectorAll(".page")[1]!;
+        return { copies: p.querySelectorAll("[data-carried-label]").length, first: p.firstElementChild!.tagName, items: p.querySelectorAll("li").length };
+      });
+      // The slide opens with what went on: the list's wrapper.
+      assert.ok(second.items > 0, JSON.stringify(second));
+      assert.deepEqual([second.copies, second.first], [0, "DIV"]);
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("an eyebrow alone over a continued slide holding only a short line is still an empty section: the mark is ours, not content", async () => {
+    // "Verdict, continued | And 5 more on the pages that follow." would pass the 40 characters if the copy counted.
+    const page = await open(
+      htmlDocument("Test", "a4", `${SPLIT_CSS}${ITEM_CSS}`, [
+        `<section class="page" data-page="1"><div class="eyebrow">Verdict</div><div class="headline">The verdict itself.</div><div class="chapter"><p style="height:440px">Words of the slide's own that stay on the first page.</p><ul><li>And 5 more on the pages that follow.</li></ul></div><div class="footer" data-chrome><span>Footer</span><span>1</span></div></section>`,
+      ]),
+    );
+    try {
+      assert.equal(await carryOver(page), 1);
+      assert.equal(await page.evaluate(() => document.querySelectorAll(".page")[1]!.querySelector(":scope > .eyebrow")!.textContent), "Verdict, continued");
+      const empty = (await checkLayout(page, { minPages: 1, maxPages: 9 })).problems.filter((p) => p.check === "empty section");
+      assert.deepEqual(
+        empty.map((p) => p.page),
+        [2],
+      );
+    } finally {
+      await page.close();
+    }
+  });
+});
+
 // Each section Claude drafts has a word target, set by the room its page gives
 // it (DECISIONS.md 440). This holds the target to the page: a draft of exactly
 // that many words, in long words with no figures, fits every sample with no
