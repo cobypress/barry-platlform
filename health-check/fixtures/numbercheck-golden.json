@@ -1,6 +1,6 @@
 {
   "about": "Shared golden cases for the number check. The same file must sit in the engine (health-check) and the console (blackcloud-next), and both test suites run every case through checkNumbers(text, dataset). A dataset is a FigureSet: any list left out is empty. expected is pass or fail. unmatched, when given, lists the raw figures that must be reported, in order. Synthetic figures only.",
-  "source": "health-check/src/numbercheck at engine commit 1973ae2",
+  "source": "health-check/src/numbercheck at engine commit 7d60762",
   "cases": [
     {
       "name": "exact figures from one finding pass",
