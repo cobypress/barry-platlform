@@ -146,6 +146,8 @@ ul { margin: 0; padding: 0 0 0 18px; }
 li { height: 40px; }
 p { margin: 0; line-height: 20px; }
 .padded { padding: 0 0 30px; background: #eee; }
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+.cols3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; align-items: start; }
 `;
 const sheet = (body: string): string => htmlDocument("Test", "a4", CSS, [`<section class="page" data-page="1"><h2>Title</h2>${body}<div class="footer" data-chrome><span>Footer</span><span>1</span></div></section>`]);
 const words = (text: string, height: number): string => `<p style="height:${height}px">${text}</p>`;
@@ -320,6 +322,210 @@ describe("carry-over: a block that fits but for its own padding or margin (DECIS
       } finally {
         await page.close();
       }
+    }
+  });
+});
+
+// Columns side by side leave the shell of a column whose content stays. A block holding only
+// such shells stays, and what follows it goes on recorded; carried words are never thrown away;
+// and what takes no room neither stays nor goes (DECISIONS.md 576).
+
+/** What every slide holds at its top level, past its footer: the shells a block left show here. */
+const tops = (page: Page): Promise<string[][]> =>
+  page.evaluate(() => [...document.querySelectorAll(".page")].map((p) => [...p.children].filter((c) => !c.hasAttribute("data-chrome")).map((c) => `${c.tagName.toLowerCase()}${c.className ? `.${c.className}` : ""}`)));
+const A = "The first column's words fit above the footer.";
+const B = "The second column's words.";
+const AFTER = "The closing paragraph under the columns.";
+
+describe("carry-over: nothing a slide gives up is thrown away, and what takes no room neither stays nor goes (DECISIONS.md 576)", () => {
+  // The adversary's three shapes. The panel's words run to 530px and its padding to 560px.
+  for (const [name, body, expected, shape] of [
+    [
+      "a column holding a padded block, then a paragraph",
+      `<div class="cols"><div>${padded(A)}</div><div>${words(B, 20)}</div></div>${words(AFTER, 20)}`,
+      [["h2:Title", `p:${A}`, `p:${B}`], ["h2:Title, continued", `p:${AFTER}`]],
+      [["h2", "div.cols"], ["h2", "p"]],
+    ],
+    [
+      // Lost at 0bb998e too.
+      "the padded block as the column itself, then a paragraph",
+      `<div class="cols"><div class="padded">${words(A, 460)}</div><div>${words(B, 20)}</div></div>${words(AFTER, 20)}`,
+      [["h2:Title", `p:${A}`, `p:${B}`], ["h2:Title, continued", `p:${AFTER}`]],
+      [["h2", "div.cols"], ["h2", "p"]],
+    ],
+    [
+      // The first column's words stay, so the panel beside them goes on whole, then stays alone.
+      "a column holding a padded block second, then a paragraph",
+      `<div class="cols"><div>${words(B, 20)}</div><div>${padded(A)}</div></div>${words(AFTER, 20)}`,
+      [["h2:Title", `p:${B}`], ["h2:Title, continued", `p:${A}`], ["h2:Title, continued", `p:${AFTER}`]],
+      [["h2", "div.cols"], ["h2", "div.cols"], ["h2", "p"]],
+    ],
+  ] as const) {
+    test(`${name}: the paragraph prints once, on the continued slide, with no empty shell above it`, async () => {
+      const { pages, result, page } = await slides(body);
+      try {
+        assert.deepEqual(pages, expected);
+        assert.equal(pages.flat().filter((x) => x === `p:${AFTER}`).length, 1);
+        assert.deepEqual(await tops(page), shape);
+        assertHolds(name, result);
+      } finally {
+        await page.close();
+      }
+    });
+  }
+
+  test("two columns each crossing by words that can't be cut, then a paragraph: the columns stay, counted as the slide's content, and the paragraph goes on", async () => {
+    // A single sentence can't be split and has nothing above it, so neither column places anything:
+    // the grid that stays is what counts as the slide's content.
+    const { pages, result, page } = await slides(`<div class="cols"><div>${words("Left words", 480)}</div><div>${words("Right words", 480)}</div></div>${words(AFTER, 20)}`);
+    try {
+      assert.deepEqual(pages, [["h2:Title", "p:Left words", "p:Right words"], ["h2:Title, continued", `p:${AFTER}`]]);
+      assertHolds("unsplit columns", result);
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("words that leave a slide are printed on the next, whatever was recorded: a wrapper holding a grid and a paragraph, then a paragraph after it", async () => {
+    // The grid one level down: the paragraph inside the wrapper and the one after it both go on.
+    const INSIDE = "The paragraph inside the wrapper.";
+    const { pages, result, page } = await slides(`<div class="wrap"><div class="cols"><div>${padded(A)}</div><div>${words(B, 20)}</div></div>${words(INSIDE, 20)}</div>${words(AFTER, 20)}`);
+    try {
+      assert.deepEqual(pages, [["h2:Title", `p:${A}`, `p:${B}`], ["h2:Title, continued", `p:${INSIDE}`, `p:${AFTER}`]]);
+      assertHolds("the wrapper", result);
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("a block with height and no words that goes on beside a column that went on first is kept: only the shells made are taken for shells", async () => {
+    // The first column's words go on, so something has moved before the second column is looked
+    // into; there a rule crosses and goes on inside its wrapper's shell. Holding nothing printed,
+    // that shell is still not one of empty shells, and the rule is printed on the continued slide.
+    const { added, pages, result, page } = await slides(
+      `<div class="cols"><div>${words("Left above.", 20)}${words("Left words", 480)}</div><div>${words("Right above.", 20)}<div class="wrap">${words("Inner.", 20)}<div class="rule" style="height:460px;background:#000"></div></div></div></div>`,
+    );
+    try {
+      assert.equal(added, 1);
+      assert.deepEqual(pages, [["h2:Title", "p:Left above.", "p:Right above.", "p:Inner."], ["h2:Title, continued", "p:Left words"]]);
+      assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll(".page")].map((p) => p.querySelectorAll(".rule").length)), [0, 1]);
+      assertHolds("the rule", result);
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("a body of empty shells is still thrown away: a column holding a padded block and nothing after the grid adds no slide", async () => {
+    const { added, pages, result, page } = await slides(`<div class="cols"><div>${padded(A)}</div><div>${words(B, 20)}</div></div>`);
+    try {
+      assert.equal(added, 0);
+      assert.deepEqual(pages, [["h2:Title", `p:${A}`, `p:${B}`]]);
+      assertHolds("shells only", result);
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("a grid with a paragraph above whose column crosses by its padding alone, nothing after it, prints as at 0bb998e", async () => {
+    // Run on both: at 0bb998e and here the panel goes on whole in its column's shell, and the
+    // panel that is the column itself stays with the grid.
+    for (const [body, expected, shape] of [
+      [`${words("Above.", 20)}<div class="cols"><div>${padded(A, 440)}</div><div>${words(B, 20)}</div></div>`, [["h2:Title", "p:Above.", `p:${B}`], ["h2:Title, continued", `p:${A}`]], [["h2", "p", "div.cols"], ["h2", "div.cols"]]],
+      [`${words("Above.", 20)}<div class="cols"><div class="padded">${words(A, 440)}</div><div>${words(B, 20)}</div></div>`, [["h2:Title", "p:Above.", `p:${A}`, `p:${B}`]], [["h2", "p", "div.cols"]]],
+    ] as const) {
+      const { pages, result, page } = await slides(body);
+      try {
+        assert.deepEqual(pages, expected);
+        assert.deepEqual(await tops(page), shape);
+        assertHolds("above the grid", result);
+      } finally {
+        await page.close();
+      }
+    }
+  });
+
+  test("an empty element after a block that stays isn't moved alone: one slide", async () => {
+    for (const empty of ['<div class="spacer"></div>', '<p class="note"></p>']) {
+      const { added, pages, result, page } = await slides(`${padded("Words.")}${empty}`);
+      try {
+        assert.equal(added, 0, empty);
+        assert.deepEqual(pages, [["h2:Title", "p:Words.", ...(empty.startsWith("<p") ? ["p:"] : [])]]);
+        assertHolds(empty, result);
+      } finally {
+        await page.close();
+      }
+    }
+  });
+
+  test("an emptied column's shell on a continued slide doesn't count as content: the panel beside it stays there, two slides", async () => {
+    // The second column's panel crosses by its words and goes on; on the continued slide the first
+    // column's shell has no height, and the panel, crossing by its padding alone, stays.
+    const { added, pages, result, page } = await slides(`<div class="cols"><div>${padded("Left.")}</div><div>${words("Right above.", 20)}${padded("Right.")}</div></div>`);
+    try {
+      assert.equal(added, 1);
+      assert.deepEqual(pages, [["h2:Title", "p:Left.", "p:Right above."], ["h2:Title, continued", "p:Right."]]);
+      assertHolds("the emptied column", result);
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("three columns side by side, two going on: the emptied shells on each continued slide count for nothing, and no slide holds only its heading", async () => {
+    const { added, pages, result, page } = await slides(`<div class="cols3"><div>${padded("One.")}</div><div>${words("Two above.", 20)}${padded("Two.")}</div><div>${words("Three above.", 20)}${padded("Three.")}</div></div>`);
+    try {
+      assert.equal(added, 2);
+      assert.deepEqual(pages, [["h2:Title", "p:One.", "p:Two above.", "p:Three above."], ["h2:Title, continued", "p:Two."], ["h2:Title, continued", "p:Three."]]);
+      assertHolds("three columns", result);
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("an empty block before the first content isn't content above: a padded block after it, alone, stays", async () => {
+    const { added, pages, result, page } = await slides(`<div class="spacer"></div>${padded("Words.")}`);
+    try {
+      assert.equal(added, 0);
+      assert.deepEqual(pages, [["h2:Title", "p:Words."]]);
+      assert.deepEqual(await tops(page), [["h2", "div.spacer", "div.padded"]]);
+      assertHolds("empty first", result);
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("an empty block between a paragraph that stays and a block that moves whole: as at 2bf07e9, the empty block stays with the paragraph", async () => {
+    const { added, pages, result, page } = await slides(`${words("Above.", 20)}<div class="spacer"></div>${padded("Words.", 440)}`);
+    try {
+      assert.equal(added, 1);
+      assert.deepEqual(pages, [["h2:Title", "p:Above."], ["h2:Title, continued", "p:Words."]]);
+      assert.deepEqual(await tops(page), [["h2", "p", "div.spacer"], ["h2", "div.padded"]]);
+      assertHolds("empty between", result);
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("a block with height and no words is content: a chart stays as content above, and a chart that crosses goes on", async () => {
+    // A chart above a block that fits but for its padding: the block moves whole, as under any content.
+    const chart = (height: number): string => `<figure><svg width="300" height="${height}" style="display:block"><rect width="300" height="${height}"></rect></svg></figure>`;
+    let { added, pages, result, page } = await slides(`${chart(100)}${padded("Words.", 370)}`);
+    try {
+      assert.equal(added, 1);
+      assert.deepEqual(pages, [["h2:Title"], ["h2:Title, continued", "p:Words."]]);
+      assert.deepEqual(await tops(page), [["h2", "figure"], ["h2", "div.padded"]]);
+      assertHolds("a chart above", result);
+    } finally {
+      await page.close();
+    }
+    // A chart under a paragraph, crossing the footer by its own height: it goes on whole.
+    ({ added, pages, result, page } = await slides(`${words("Above.", 200)}${chart(300)}`));
+    try {
+      assert.equal(added, 1);
+      assert.deepEqual(pages, [["h2:Title", "p:Above."], ["h2:Title, continued"]]);
+      assert.deepEqual(await tops(page), [["h2", "p"], ["h2", "figure"]]);
+      assertHolds("a chart", result);
+    } finally {
+      await page.close();
     }
   });
 });
@@ -502,4 +708,91 @@ describe("the other suites' decks: no slide holds only its heading, and every wo
       }
     });
   }
+});
+
+// The real builders' grids with content after them, in the decks' own CSS (DECISIONS.md 576).
+
+/**
+ * One slide of a real deck, alone, its grid lowered by padding over its columns until the lowest
+ * column's own edge, past the last thing printed in it, is all that crosses the limit; or, where
+ * a column has no such edge, until it crosses by a hair. Returns the edge it measured.
+ */
+async function lowered(html: string, grid: string): Promise<{ result: Carried; after: string[]; printed: string; edge: number; lowered: number }> {
+  const context = await browser.newContext({ offline: true });
+  try {
+    const page = await context.newPage();
+    await page.setContent(html, { waitUntil: "load" });
+    await page.evaluate(() => window.document.fonts.ready.then(() => undefined));
+    await page.emulateMedia({ media: "print" });
+    const shape = await page.evaluate((grid) => {
+      const g = document.querySelector<HTMLElement>(grid)!;
+      const slide = g.closest<HTMLElement>(".page")!;
+      for (const p of document.querySelectorAll(".page")) if (p !== slide) p.remove();
+      // The carry-over's limit: the footer's top or the slide's padding, whichever is higher, and its tolerance of 1.5px.
+      const footer = slide.querySelector<HTMLElement>(":scope > [data-chrome]")!;
+      const limit = Math.min(footer.getBoundingClientRect().top, slide.getBoundingClientRect().bottom - parseFloat(getComputedStyle(slide).paddingBottom)) + 1.5;
+      const cols = [...g.children];
+      const outer = Math.max(...cols.map((c) => c.getBoundingClientRect().bottom + parseFloat(getComputedStyle(c).marginBottom)));
+      const inner = Math.max(...cols.flatMap((c) => [...c.querySelectorAll("*")].map((d) => d.getBoundingClientRect().bottom)));
+      const edge = outer - inner;
+      const lowered = limit - outer + (edge > 0 ? edge / 2 : 1);
+      g.style.paddingTop = `${lowered}px`;
+      const after = [...g.parentElement!.children].filter((e) => g.compareDocumentPosition(e) & Node.DOCUMENT_POSITION_FOLLOWING && !e.hasAttribute("data-chrome"));
+      return { edge, lowered, after: after.map((e) => (e.textContent ?? "").replace(/\s+/g, " ").trim()) };
+    }, grid);
+    const result = await carry(page);
+    const printed = await page.evaluate(() => {
+      const out: string[] = [];
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      for (let n = walker.nextNode(); n; n = walker.nextNode()) if (n.parentElement?.closest(".page") && !n.parentElement.closest("[data-chrome], [data-carried-label], style")) out.push(n.textContent ?? "");
+      return out.join("").replace(/\s+/g, "");
+    });
+    return { result, printed, ...shape };
+  } finally {
+    await context.close();
+  }
+}
+
+/**
+ * How often a block's words show, spaces aside: its opening and its close, each counted beyond
+ * what the block itself repeats, so a paragraph cut across two slides still counts once.
+ */
+function times(printed: string, block: string): [number, number] {
+  const text = block.replace(/\s+/g, "");
+  const count = (s: string, part: string): number => s.split(part).length - 1;
+  return [text.slice(0, 30), text.slice(-30)].map((part) => count(printed, part) - count(text, part) + 1) as [number, number];
+}
+
+describe("the real builders' grids: every word after the grid is printed once (DECISIONS.md 576)", () => {
+  test("the progress slide's lists, a column's list fitting but for its last item's margin: the areas and notes after them print once, on the continued slide", async () => {
+    // Lost at 0bb998e and 2bf07e9: the lists' columns left only their shells, the notes went into
+    // the block's shell unrecorded, and the slide's carried body was thrown away.
+    const { result, after, printed, edge, lowered: by } = await lowered(fullReportHtml(customer, pseudonyms), ".progress > .lists");
+    assert.ok(edge > 0 && by >= 0, `the edge ${edge}px, lowered by ${by}px`);
+    assert.equal(after.length, 4);
+    for (const text of after) assert.deepEqual(times(printed, text), [1, 1], text);
+    assert.equal(result.added, 1);
+    assertHolds("the progress slide", result);
+  });
+
+  test("the money slide's split, its figure's column fitting but for the chart's margin: the notes after it print once", async () => {
+    // The table's column has no edge of its own (the total row has no bottom rule), so the chart's
+    // column crosses instead; the headline figure stays above the chart, which goes on whole and is
+    // recorded, at 0bb998e and 2bf07e9 alike. The shape can't lose its notes; this holds that it doesn't.
+    const { result, after, printed, edge, lowered: by } = await lowered(fullReportHtml(buildReport(full), pseudonyms), ".money > .split");
+    assert.ok(edge > 0 && by >= 0, `the edge ${edge}px, lowered by ${by}px`);
+    assert.ok(after.length > 0);
+    for (const text of after) assert.deepEqual(times(printed, text), [1, 1], text);
+    assertHolds("the money slide", result);
+  });
+
+  test("the wins slide's chart pair, a chart crossing by a hair: the small note after it prints once", async () => {
+    // Its columns are the charts themselves, which have no margin or padding and are never looked
+    // into, so no column can cross by its own edge or leave a shell: a chart crossing goes on whole.
+    const { result, after, printed, edge, lowered: by } = await lowered(fullReportHtml(buildReport(full), pseudonyms), ".chart-pair:has(~ .small-note)");
+    assert.ok(edge === 0 && by >= 0, `the edge ${edge}px, lowered by ${by}px`);
+    assert.equal(after.length, 1);
+    assert.deepEqual(times(printed, after[0]!), [1, 1]);
+    assertHolds("the wins slide", result);
+  });
 });

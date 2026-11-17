@@ -36,6 +36,11 @@ export async function carryOver(browserPage: Page): Promise<number> {
       const r = box(el);
       return r.width > 0 || r.height > 0;
     };
+    /**
+     * Takes no room: no height, no words, and nothing inside with any height, as an empty
+     * block or the shell an emptied column leaves. It neither stays nor goes (DECISIONS.md 576).
+     */
+    const roomless = (el: Element): boolean => box(el).height === 0 && !(el.textContent ?? "").trim() && [...el.querySelectorAll("*")].every((d) => box(d).height === 0);
     /** The lowest a page's content may reach: the footer's top, or the page's bottom less its padding. */
     const limitOf = (page: HTMLElement): number => {
       const footer = page.querySelector<HTMLElement>(":scope > [data-chrome]");
@@ -60,16 +65,24 @@ export async function carryOver(browserPage: Page): Promise<number> {
     const isHeading = (el: Element): boolean => HEADINGS.has(el.tagName) || el.classList.contains("eyebrow");
     const isLabel = (el: Element): boolean => LABELS.has(el.tagName) && !el.classList.contains("eyebrow");
 
+    /** The shells made below, so one left holding only shells can be told from one holding what moved. */
+    const made = new WeakSet<Node>();
     /** A copy without its children: the wrapper the moved content goes into. A table keeps its head. */
     const shell = (el: HTMLElement): HTMLElement => {
       const copy = el.cloneNode(false) as HTMLElement;
       copy.removeAttribute("data-page");
       if (el.tagName === "TABLE") {
         const head = el.querySelector(":scope > thead");
-        if (head) copy.appendChild(head.cloneNode(true));
+        if (head) made.add(copy.appendChild(head.cloneNode(true)));
       }
+      made.add(copy);
       return copy;
     };
+    /** Holds nothing but shells, at any depth: nothing that was on the page has gone into it. */
+    const onlyShells = (el: Element): boolean => [...el.childNodes].every((n) => made.has(n) && (n.nodeName === "THEAD" || onlyShells(n as Element)));
+    /** Holds anything printed: words, or a chart, a picture or a table row. A table's copied head is ours. */
+    const printed = (el: Element): boolean =>
+      [...el.childNodes].some((n) => (n instanceof Element ? n.tagName !== "THEAD" && n.tagName !== "STYLE" && (n.matches(ATOMIC) || printed(n)) : !!(n.textContent ?? "").trim()));
 
     /**
      * Keeps the sentences of a paragraph that fit and moves the rest into a new
@@ -156,6 +169,7 @@ export async function carryOver(browserPage: Page): Promise<number> {
       if (sideBySide(kids)) {
         // Each crossing child goes on alone; the others in its row stay.
         for (const kid of kids) {
+          if (roomless(kid)) continue;
           if (bottomOf(kid) <= limit) {
             if (!isHeading(kid)) state.placed = true;
             continue;
@@ -175,9 +189,11 @@ export async function carryOver(browserPage: Page): Promise<number> {
       for (let i = 0; i < kids.length; i++) {
         const kid = kids[i]!;
         if (!visible(kid) || bottomOf(kid) <= limit) {
-          if (visible(kid) && !isHeading(kid)) state.placed = true;
+          if (visible(kid) && !isHeading(kid) && !roomless(kid)) state.placed = true;
           continue;
         }
+        // Moved alone, it would make a slide of only its heading (DECISIONS.md 576).
+        if (roomless(kid)) continue;
         if (splittable(kid) && box(kid).top < limit) {
           const inner = shell(kid);
           dest.appendChild(inner);
@@ -188,12 +204,18 @@ export async function carryOver(browserPage: Page): Promise<number> {
           // Nothing inside it crossed: its own margin or padding did. It moves whole when
           // something stays above it. With nothing above, the next slide would be this one
           // again, so it stays as the slide's content and what follows goes on (DECISIONS.md 574).
-          if (state.moved === was && kidsOf(inner).length === 0) {
+          // Nothing moved but its columns left their empty shells: it stays as a grid always
+          // did, whatever is above it, the shells go, and what follows goes on by the rules
+          // below, which record what they move. Moved unrecorded, it was lost (576).
+          if (state.moved === was && onlyShells(inner)) {
+            const shells = kidsOf(inner).length > 0;
             inner.remove();
-            state.placed = above;
-            if (state.placed) {
-              moveFrom(i);
-              return;
+            if (!shells) {
+              state.placed = above;
+              if (state.placed) {
+                moveFrom(i);
+                return;
+              }
             }
             state.placed = true;
             continue;
@@ -277,7 +299,10 @@ export async function carryOver(browserPage: Page): Promise<number> {
       page.after(next);
       const body = document.createElement("div");
       breakAt(page, body, limit, state);
-      if (!state.moved || body.children.length === 0) {
+      // With nothing recorded as moved the body is only empty shells, copies of what stays.
+      // Anything printed in it has left the slide, so it goes on, recorded or not: a slide
+      // gives up nothing that isn't printed somewhere (DECISIONS.md 576).
+      if (body.children.length === 0 || (!state.moved && !printed(body))) {
         next.remove();
         page.style.justifyContent = "";
         continue;
