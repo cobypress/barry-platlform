@@ -838,6 +838,39 @@ describe("carry-over: nothing hidden holds words (DECISIONS.md 579)", () => {
   });
 });
 
+describe("carry-over: a child that isn't shown takes no room only when nothing inside it is shown (DECISIONS.md 579)", () => {
+  test("a grid of three, its third column a display: contents block whose paragraphs cross: a second slide holds the ones that cross, every word once and in order", async () => {
+    // With no box of its own, the block was passed over side by side as if it took no room: no
+    // slide was added and the paragraphs past the footer were cut off by the slide's own edge.
+    const c = Array.from({ length: 14 }, (_, i) => `C${i + 1}.`);
+    const { added, pages, result, page } = await slides(`<div class="cols3"><div>${words("A.", 20)}</div><div>${words("B.", 20)}</div><div style="display:contents"><div>${c.map((x) => words(x, 40)).join("")}</div></div></div>`);
+    try {
+      assert.equal(added, 1);
+      assert.deepEqual(pages, [
+        ["h2:Title", "p:A.", "p:B.", ...c.slice(0, 11).map((x) => `p:${x}`)],
+        ["h2:Title, continued", ...c.slice(11).map((x) => `p:${x}`)],
+      ]);
+      assert.deepEqual(await reading(page), [`Title A. B. ${c.slice(0, 11).join(" ")}`, c.slice(11).join(" ")]);
+      assertHolds("display: contents", result);
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("one under another, a display: contents block is passed over and never counted, as on 32159c1: a padded block after it, crossing by its padding alone, stays", async () => {
+    // 579 is about side by side and columns; the list of blocks keeps its own rule for a child
+    // with no box of its own, which never took it for content above.
+    const { added, pages, result, page } = await slides(`<div style="display:contents">${words("Above.", 20)}</div>${padded("Words.", 440)}`);
+    try {
+      assert.equal(added, 0);
+      assert.deepEqual(pages, [["h2:Title", "p:Above.", "p:Words."]]);
+      assertHolds("display: contents above", result);
+    } finally {
+      await page.close();
+    }
+  });
+});
+
 // The decks. The synthetic run as the suites build it, and with every issue's title longer
 // by a team's name, as a customer's own words make it.
 

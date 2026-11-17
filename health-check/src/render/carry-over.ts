@@ -90,12 +90,17 @@ export async function carryOver(browserPage: Page): Promise<number> {
     const printed = (el: Element): boolean =>
       [...el.childNodes].some((n) => (n instanceof Element ? n.tagName !== "THEAD" && n.tagName !== "STYLE" && (n.matches(ATOMIC) || printed(n)) : !!(n.textContent ?? "").trim()));
     /**
+     * Nothing of it is on the slide: no box of its own and none inside it, as with display: none.
+     * A display: contents block has no box, but its children are shown (DECISIONS.md 579).
+     */
+    const unshown = (el: Element): boolean => !visible(el) && ![...el.querySelectorAll("*")].some(visible);
+    /**
      * Takes no room: not shown, roomless, or a copy we made that nothing went into, whatever
      * height its padding or border gives it. It neither stays nor goes (DECISIONS.md 576, 577).
      * A copy is filled only while the block it copies is looked into, and what is moved goes
      * to the next slide, never into the slide being read: a copy judged empty here stays so.
      */
-    const noRoom = (el: Element): boolean => !visible(el) || roomless(el) || (made.has(el) && onlyShells(el));
+    const noRoom = (el: Element): boolean => unshown(el) || roomless(el) || (made.has(el) && onlyShells(el));
     /** Prints something of its own: words (a copied table head), a background, a border, an outline, a shadow, a ::before or ::after. */
     const marks = (el: Element): boolean => {
       const s = getComputedStyle(el);
@@ -225,7 +230,8 @@ export async function carryOver(browserPage: Page): Promise<number> {
       for (let i = 0; i < kids.length; i++) {
         const kid = kids[i]!;
         if (!visible(kid) || bottomOf(kid) <= limit) {
-          if (!isHeading(kid) && !noRoom(kid)) state.placed = true;
+          // A child with no box of its own is passed over and never counted, as it always was here.
+          if (visible(kid) && !isHeading(kid) && !noRoom(kid)) state.placed = true;
           continue;
         }
         // Moved alone, it would make a slide of only its heading (DECISIONS.md 576).
