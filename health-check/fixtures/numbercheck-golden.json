@@ -146,6 +146,33 @@
       "expected": "pass"
     },
     {
+      "name": "a share a point from the percentage still passes",
+      "text": "1 in 4 deals is pushed at least once.",
+      "dataset": { "figures": [{ "source": "f1", "kind": "percent", "value": 26 }, { "source": "f1", "kind": "number", "value": 4 }] },
+      "expected": "pass"
+    },
+    {
+      "name": "a share more than a point from the percentage fails on the part",
+      "text": "2 of the 5 integrations have no owner.",
+      "dataset": { "figures": [{ "source": "f1", "kind": "percent", "value": 41.5 }, { "source": "f1", "kind": "number", "value": 5 }] },
+      "expected": "fail",
+      "unmatched": ["2"]
+    },
+    {
+      "name": "a part larger than its whole doesn't pass through a percentage over 100",
+      "text": "6 of the 5 integrations have no owner.",
+      "dataset": { "figures": [{ "source": "f1", "kind": "percent", "value": 120 }, { "source": "f1", "kind": "number", "value": 5 }] },
+      "expected": "fail",
+      "unmatched": ["6"]
+    },
+    {
+      "name": "a plain count that equals the share isn't a percentage",
+      "text": "2 of the 5 integrations have no owner.",
+      "dataset": { "figures": [{ "source": "f1", "kind": "number", "value": 40 }, { "source": "f1", "kind": "number", "value": 5 }] },
+      "expected": "fail",
+      "unmatched": ["2"]
+    },
+    {
       "name": "money in full passes",
       "text": "Around £240,000 a year is at stake.",
       "dataset": { "figures": [{ "source": "f1", "kind": "currency", "currency": "GBP", "value": 240000 }] },
