@@ -682,7 +682,8 @@ describe("the progress page at its fullest with the engine's own titles, and pas
 
   test("a part's heading goes over with what it heads, never the slide's eyebrow or title: no blank slide and no title twice (DECISIONS.md 510)", async () => {
     // The adversary's case: the 505 report with every integrations issue title 220 characters
-    // longer. The interviews table's bottom margin alone crosses the footer on its continued slide.
+    // longer. On its continued slide the interviews table's rows all fit, and half its last row's
+    // collapsed border, which the table's own box takes in, crosses the limit (DECISIONS.md 575).
     const TEAMS = " for the Enterprise Sales North America and Asia Pacific Partner Channel teams";
     const integrations = storage(kinds([812_345, 900_000], [712_345, 800_000]), kinds([962_345, 950_000], [862_345, 850_000]), { ruleId: SEGMENT, replacing: "Win rate for the Sales EU team is well below the overall figure", title: TEAM_TITLE }, (f) =>
       f.status === "issue" && f.domain === "integrations" ? { ...f, title: f.title + TEAMS.repeat(3).slice(0, 220) } : f,
@@ -690,10 +691,10 @@ describe("the progress page at its fullest with the engine's own titles, and pas
     const report: BuiltReport = { ...integrations, progress: { ...integrations.progress!, fixed: [...integrations.progress!.fixed].sort((a, b) => Number(b.ruleId === SEGMENT) - Number(a.ruleId === SEGMENT)) } };
     const { page, close } = await printed(fullReportHtml(report, pseudonyms));
     try {
-      // The run ends. Measured: 318 pages, held for its page count and an overflow, as it was at
-      // fe5b440: the table moves on whole from every slide it lands on, up to the carry-over's
-      // limit. That older fault is not 510's; 508's pull-back had printed 124 pages instead,
-      // with a blank slide and the next carrying its eyebrow and title twice.
+      // The run ends. Measured: 122 pages, held for its page count, the table staying on the slide
+      // it crosses with an overflow (DECISIONS.md 574). Until 574 it moved on whole from every slide
+      // it landed on, up to the carry-over's limit: 318 pages, as at fe5b440. 508's pull-back had
+      // printed 124 pages instead, with a blank slide and the next carrying its eyebrow and title twice.
       assert.equal(typeof (await carryOver(page)), "number");
       const odd = await page.evaluate(() =>
         [...window.document.querySelectorAll<HTMLElement>(".page")].flatMap((p, i) => {

@@ -36,6 +36,11 @@ export async function carryOver(browserPage: Page): Promise<number> {
       const r = box(el);
       return r.width > 0 || r.height > 0;
     };
+    /**
+     * Takes no room: no height, no words, and nothing inside with any height, as an empty
+     * block or the shell an emptied column leaves. It neither stays nor goes (DECISIONS.md 576).
+     */
+    const roomless = (el: Element): boolean => box(el).height === 0 && !(el.textContent ?? "").trim() && [...el.querySelectorAll("*")].every((d) => box(d).height === 0);
     /** The lowest a page's content may reach: the footer's top, or the page's bottom less its padding. */
     const limitOf = (page: HTMLElement): number => {
       const footer = page.querySelector<HTMLElement>(":scope > [data-chrome]");
@@ -54,21 +59,55 @@ export async function carryOver(browserPage: Page): Promise<number> {
     };
     const overflows = (page: HTMLElement): boolean =>
       page.scrollHeight > page.clientHeight + TOLERANCE || kidsOf(page).some((k) => visible(k) && (bottomOf(k) > limitOf(page) || box(k).top < box(page).top - TOLERANCE));
-    const splittable = (el: HTMLElement): boolean => SPLITTABLE_TAGS.has(el.tagName) && !el.matches(ATOMIC) && kidsOf(el).length > 0;
+    /** Words that sit directly in a block, beside its child blocks: kidsOf doesn't see them. */
+    const ownWords = (el: Element): boolean => [...el.childNodes].some((n) => n.nodeType === Node.TEXT_NODE && !!(n.textContent ?? "").trim());
+    // A block with words of its own beside its children stays or goes whole: looked into, its
+    // words were left behind or removed with it when its children went (DECISIONS.md 577).
+    const splittable = (el: HTMLElement): boolean => SPLITTABLE_TAGS.has(el.tagName) && !el.matches(ATOMIC) && kidsOf(el).length > 0 && !ownWords(el);
     /** Children laid out side by side, as in a grid of cards, rather than one under another. */
     const sideBySide = (kids: HTMLElement[]): boolean => kids.some((k, i) => i > 0 && box(k).top < box(kids[i - 1]!).bottom - 1 && box(k).left > box(kids[i - 1]!).left + 1);
+    /** Set in CSS columns: one list folded, read down one column and then the next, unlike a grid's blocks side by side. */
+    const inColumns = (el: HTMLElement): boolean => (parseInt(getComputedStyle(el).columnCount, 10) || 1) > 1;
     const isHeading = (el: Element): boolean => HEADINGS.has(el.tagName) || el.classList.contains("eyebrow");
     const isLabel = (el: Element): boolean => LABELS.has(el.tagName) && !el.classList.contains("eyebrow");
 
+    /** The shells made below, so one left holding only shells can be told from one holding what moved. */
+    const made = new WeakSet<Node>();
     /** A copy without its children: the wrapper the moved content goes into. A table keeps its head. */
     const shell = (el: HTMLElement): HTMLElement => {
       const copy = el.cloneNode(false) as HTMLElement;
       copy.removeAttribute("data-page");
       if (el.tagName === "TABLE") {
         const head = el.querySelector(":scope > thead");
-        if (head) copy.appendChild(head.cloneNode(true));
+        if (head) made.add(copy.appendChild(head.cloneNode(true)));
       }
+      made.add(copy);
       return copy;
+    };
+    /** Holds nothing but shells, at any depth: nothing that was on the page has gone into it. */
+    const onlyShells = (el: Element): boolean => [...el.childNodes].every((n) => made.has(n) && (n.nodeName === "THEAD" || onlyShells(n as Element)));
+    /** Holds anything printed: words, or a chart, a picture or a table row. A table's copied head is ours. */
+    const printed = (el: Element): boolean =>
+      [...el.childNodes].some((n) => (n instanceof Element ? n.tagName !== "THEAD" && n.tagName !== "STYLE" && (n.matches(ATOMIC) || printed(n)) : !!(n.textContent ?? "").trim()));
+    /**
+     * Nothing of it is on the slide: no box of its own and none inside it, as with display: none.
+     * A display: contents block has no box, but its children are shown (DECISIONS.md 579).
+     */
+    const unshown = (el: Element): boolean => !visible(el) && ![...el.querySelectorAll("*")].some(visible);
+    /**
+     * Takes no room: not shown, roomless, or a copy we made that nothing went into, whatever
+     * height its padding or border gives it. It neither stays nor goes (DECISIONS.md 576, 577).
+     * A copy is filled only while the block it copies is looked into, and what is moved goes
+     * to the next slide, never into the slide being read: a copy judged empty here stays so.
+     */
+    const noRoom = (el: Element): boolean => unshown(el) || roomless(el) || (made.has(el) && onlyShells(el));
+    /** Prints something of its own: words (a copied table head), a background, a border, an outline, a shadow, a ::before or ::after. */
+    const marks = (el: Element): boolean => {
+      const s = getComputedStyle(el);
+      // A line with no style has a width all the same, so both are read.
+      const edges = ["border-top", "border-right", "border-bottom", "border-left", "outline"].some((p) => s.getPropertyValue(`${p}-style`) !== "none" && parseFloat(s.getPropertyValue(`${p}-width`)) > 0);
+      const pseudo = ["::before", "::after"].some((p) => !["none", "normal"].includes(getComputedStyle(el, p).content));
+      return !!(el.textContent ?? "").trim() || edges || pseudo || s.backgroundImage !== "none" || s.boxShadow !== "none" || !/^(transparent|rgba\(0, 0, 0, 0\))$/.test(s.backgroundColor);
     };
 
     /**
@@ -153,9 +192,25 @@ export async function carryOver(browserPage: Page): Promise<number> {
         for (const k of kids.slice(from)) dest.appendChild(k);
         if (kids.slice(from).length) state.moved = true;
       };
+      if (inColumns(container) && sideBySide(kids)) {
+        // Taking each crossing item on alone would leave those between behind, out of
+        // order. Items go from the end, whole and kept in order, until what is left fits:
+        // the browser balances it and we ask whether it does. One stays when nothing else
+        // has stayed on the page (DECISIONS.md 580), and an item that takes no room is never
+        // the one that stays (577).
+        let keep = kids.length;
+        while (keep > 0 && kids.slice(0, keep).some((k) => bottomOf(k) > limit)) {
+          if (!state.placed && kids.slice(0, keep - 1).every(noRoom)) break;
+          dest.prepend(kids[--keep]!);
+          state.moved = true;
+        }
+        if (kids.slice(0, keep).some((k) => !isHeading(k) && !noRoom(k))) state.placed = true;
+        return;
+      }
       if (sideBySide(kids)) {
         // Each crossing child goes on alone; the others in its row stay.
         for (const kid of kids) {
+          if (noRoom(kid)) continue;
           if (bottomOf(kid) <= limit) {
             if (!isHeading(kid)) state.placed = true;
             continue;
@@ -175,19 +230,37 @@ export async function carryOver(browserPage: Page): Promise<number> {
       for (let i = 0; i < kids.length; i++) {
         const kid = kids[i]!;
         if (!visible(kid) || bottomOf(kid) <= limit) {
-          if (visible(kid) && !isHeading(kid)) state.placed = true;
+          // A child with no box of its own is passed over and never counted, as it always was here.
+          if (visible(kid) && !isHeading(kid) && !noRoom(kid)) state.placed = true;
           continue;
         }
+        // Moved alone, it would make a slide of only its heading (DECISIONS.md 576).
+        if (noRoom(kid)) continue;
         if (splittable(kid) && box(kid).top < limit) {
           const inner = shell(kid);
           dest.appendChild(inner);
           const was = state.moved;
+          // Whether anything stays above it, before its own children are counted.
+          const above = state.placed;
           breakAt(kid, inner, limit, state);
-          // Nothing inside it crossed: its own margin or padding did. It moves whole.
-          if (state.moved === was && kidsOf(inner).length === 0) {
+          // Nothing inside it crossed: its own margin or padding did. It moves whole when
+          // something stays above it. With nothing above, the next slide would be this one
+          // again, so it stays as the slide's content and what follows goes on (DECISIONS.md 574).
+          // Nothing moved but its columns left their empty shells: it stays as a grid always
+          // did, whatever is above it, the shells go, and what follows goes on by the rules
+          // below, which record what they move. Moved unrecorded, it was lost (576).
+          if (state.moved === was && onlyShells(inner)) {
+            const shells = kidsOf(inner).length > 0;
             inner.remove();
-            if (state.placed) moveFrom(i);
-            return;
+            if (!shells) {
+              state.placed = above;
+              if (state.placed) {
+                moveFrom(i);
+                return;
+              }
+            }
+            state.placed = true;
+            continue;
           }
           for (const k of kids.slice(i + 1)) dest.appendChild(k);
           if (kidsOf(kid).length === 0) {
@@ -268,7 +341,10 @@ export async function carryOver(browserPage: Page): Promise<number> {
       page.after(next);
       const body = document.createElement("div");
       breakAt(page, body, limit, state);
-      if (!state.moved || body.children.length === 0) {
+      // With nothing recorded as moved the body is only empty shells, copies of what stays.
+      // Anything printed in it has left the slide, so it goes on, recorded or not: a slide
+      // gives up nothing that isn't printed somewhere (DECISIONS.md 576).
+      if (body.children.length === 0 || (!state.moved && !printed(body))) {
         next.remove();
         page.style.justifyContent = "";
         continue;
@@ -287,6 +363,37 @@ export async function carryOver(browserPage: Page): Promise<number> {
       if (next.children.length <= headed) next.remove();
       else added++;
     }
+
+    // A copy nothing went into would print an empty panel or box, or a table's head over no rows.
+    // It is hidden, not removed: it holds its column's place, and the column beside it would move
+    // left (DECISIONS.md 577). One that prints nothing of its own is left as it is.
+    const hidden = [...document.querySelectorAll<HTMLElement>(".page *")].filter((el) => made.has(el) && onlyShells(el) && marks(el));
+    // The layout check reads every word, printed or not: a copied head's words left here would
+    // count as the slide's content (DECISIONS.md 579), so they are taken out. A copy holds only
+    // what we made, so every head in it is a copy. The slide was judged with the words in, and
+    // a copy's width can come from them (a column sized to its head, one long word in a shared
+    // column), so each copy that loses words is first held at the box it was measured with, and
+    // nothing printed moves or changes size (581). Every one is measured before any changes.
+    const emptied = hidden.filter((el) => el.querySelector("thead"));
+    const sizes = emptied.map(box);
+    emptied.forEach((el, i) => {
+      // The measured box is the border box, padding and border in it. Its least and most are held
+      // with it: a most set by the content (max-content) would take it in once the words are out,
+      // and a flexible item would grow or shrink from the held size as it did from its content's.
+      el.style.boxSizing = "border-box";
+      for (const [side, size] of [["width", sizes[i]!.width], ["height", sizes[i]!.height]] as const) {
+        for (const property of [side, `min-${side}`, `max-${side}`]) el.style.setProperty(property, `${size}px`);
+      }
+    });
+    for (const el of emptied) {
+      for (const head of el.querySelectorAll("thead")) {
+        const walker = document.createTreeWalker(head, NodeFilter.SHOW_TEXT);
+        const texts: Node[] = [];
+        for (let n = walker.nextNode(); n; n = walker.nextNode()) texts.push(n);
+        for (const n of texts) n.parentNode!.removeChild(n);
+      }
+    }
+    for (const el of hidden) el.style.visibility = "hidden";
 
     // Number every page again, and point the contents at where each part now starts.
     const all = pages();
