@@ -482,4 +482,54 @@ describe("a list in columns goes on from the end, whole and in order (DECISIONS.
       await page.close();
     }
   });
+
+  test("(k) an item that takes no room first, then one taller than the room: the tall one is the item that stays, and the slide isn't left with only its heading (DECISIONS.md 577)", async () => {
+    // The hidden item was kept as the one that stays and counted as content: the first slide
+    // printed only its heading, and the tall item went on alone to a slide of its own.
+    const { added, slides, page } = await split(`<h3>Label</h3><ol class="cols"><li style="display:none">Hidden</li><li style="height:520px">A1</li>${lis("A", 4, 2)}</ol>`);
+    try {
+      assert.equal(added, 1);
+      // Read without numbers or the hidden item, which prints neither.
+      assert.deepEqual(
+        slides.map((s) => s.map((x) => x.replace(/^li:\d+\./, "li:")).filter((x) => x !== "li:Hidden")),
+        [
+          ["h2:Title", "h3:Label", "li:A1"],
+          ["h2:Title, continued", "h3:Label, continued", "li:A2", "li:A3", "li:A4", "li:A5"],
+        ],
+      );
+      // A1 is taller than the room under the label: it stays and is reported, as a block alone is.
+      assert.deepEqual(await crossing(page, "li"), ["slide 1: A1"]);
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("(l) a grid with nothing above it, a list in columns that splits in its first column and a card past the footer in its second: the items that stay are content, so the card goes on", async () => {
+    // The card's margin keeps it past the footer on every slide: it goes on to the last and is reported there.
+    const { added, slides, page } = await split(`<div class="two-up"><div><h3>Left</h3>${cols("A", 30)}</div><article style="height:150px;margin-top:400px"><p>Card</p></article></div>`);
+    try {
+      assert.equal(added, 2);
+      assert.deepEqual(slides, [
+        ["h2:Title", "h3:Left", ...nums("A", 1, 22)],
+        ["h2:Title, continued", "h3:Left, continued", ...nums("A", 23, 30)],
+        ["h2:Title, continued", "p:Card"],
+      ]);
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("(m) a heading in columns, the block beside it going on: a heading kept alone isn't content, so a card crossing beside the columns stays with it", async () => {
+    // Nothing above. Counted as content, the heading let the card go on and was left alone on the slide.
+    const { added, slides, page } = await split(`<div class="two-up"><div style="columns:2;column-gap:10px"><h3>Group</h3><p style="height:480px;break-inside:avoid">Words that can't be cut</p></div><article style="height:480px"><p>Card</p></article></div>`);
+    try {
+      assert.equal(added, 1);
+      assert.deepEqual(slides, [
+        ["h2:Title", "h3:Group", "p:Card"],
+        ["h2:Title, continued", "p:Words that can't be cut"],
+      ]);
+    } finally {
+      await page.close();
+    }
+  });
 });
