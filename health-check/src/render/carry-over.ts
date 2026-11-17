@@ -62,6 +62,8 @@ export async function carryOver(browserPage: Page): Promise<number> {
     const splittable = (el: HTMLElement): boolean => SPLITTABLE_TAGS.has(el.tagName) && !el.matches(ATOMIC) && kidsOf(el).length > 0;
     /** Children laid out side by side, as in a grid of cards, rather than one under another. */
     const sideBySide = (kids: HTMLElement[]): boolean => kids.some((k, i) => i > 0 && box(k).top < box(kids[i - 1]!).bottom - 1 && box(k).left > box(kids[i - 1]!).left + 1);
+    /** Set in CSS columns: one list folded, read down one column and then the next, unlike a grid's blocks side by side. */
+    const inColumns = (el: HTMLElement): boolean => (parseInt(getComputedStyle(el).columnCount, 10) || 1) > 1;
     const isHeading = (el: Element): boolean => HEADINGS.has(el.tagName) || el.classList.contains("eyebrow");
     const isLabel = (el: Element): boolean => LABELS.has(el.tagName) && !el.classList.contains("eyebrow");
 
@@ -166,6 +168,20 @@ export async function carryOver(browserPage: Page): Promise<number> {
         for (const k of kids.slice(from)) dest.appendChild(k);
         if (kids.slice(from).length) state.moved = true;
       };
+      if (inColumns(container) && sideBySide(kids)) {
+        // Taking each crossing item on alone would leave those between behind, out of
+        // order. Items go from the end, whole and kept in order, until what is left fits:
+        // the browser balances it and we ask whether it does. One stays when nothing else
+        // has stayed on the page (DECISIONS.md 580).
+        let keep = kids.length;
+        while (keep > 0 && kids.slice(0, keep).some((k) => bottomOf(k) > limit)) {
+          if (keep === 1 && !state.placed) break;
+          dest.prepend(kids[--keep]!);
+          state.moved = true;
+        }
+        if (kids.slice(0, keep).some((k) => !isHeading(k))) state.placed = true;
+        return;
+      }
       if (sideBySide(kids)) {
         // Each crossing child goes on alone; the others in its row stay.
         for (const kid of kids) {
