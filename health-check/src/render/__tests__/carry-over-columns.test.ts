@@ -7,6 +7,7 @@ import { buildReport, type ReportInput } from "../../narrative/sections.ts";
 import { Pseudonymiser, type PseudonymEntry } from "../../privacy/pseudonymiser.ts";
 import { runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
+import { syntheticSurvey } from "../../testing/survey.ts";
 import { carryOver } from "../carry-over.ts";
 import { executiveHtml } from "../executive.ts";
 import { fullReportHtml, fullReportHtmlAt } from "../full-report.ts";
@@ -187,6 +188,72 @@ describe("the agent-readiness fixes in two columns go on in order, under the num
       }
     });
   }
+});
+
+describe("the agent-readiness slide's continued title after its question mark (DECISIONS.md 584)", () => {
+  // At 80 and 120 characters longer the fixes split across two slides (above).
+  for (const n of [80, 120]) {
+    test(`issue titles ${n} characters longer: "Could an AI agent work safely here? (continued)", its label "…, continued"`, async () => {
+      const page = await open(fullReportHtml(buildReport(lengthened(n)), pseudonyms));
+      try {
+        await carried(page);
+        const slides = await page.evaluate(() =>
+          [...document.querySelectorAll("ol.readiness-fixes")].map((ol) => [...ol.closest(".page")!.querySelectorAll(":scope > .eyebrow, :scope > h2, :scope > h3")].map((h) => h.textContent)),
+        );
+        assert.deepEqual(slides, [
+          ["AI readiness", "Could an AI agent work safely here?", "What to fix before an agent goes live, in order"],
+          ["AI readiness", "Could an AI agent work safely here? (continued)", "What to fix before an agent goes live, in order, continued"],
+        ]);
+      } finally {
+        await page.close();
+      }
+    });
+  }
+});
+
+describe("the full report's sub-headings are 18px, the quick wins panel's size, on every slide (DECISIONS.md 586)", () => {
+  /** Each h3.sub's words, slide, size and weight as the browser prints them. */
+  const subs = (page: Page) =>
+    page.evaluate(() => {
+      const pages = [...document.querySelectorAll(".page")];
+      return [...document.querySelectorAll("h3.sub")].map((h) => ({ text: h.textContent, slide: pages.indexOf(h.closest(".page")!) + 1, size: getComputedStyle(h).fontSize, weight: getComputedStyle(h).fontWeight }));
+    });
+
+  test("the readiness list's label and the survey's, with a survey of 12", async () => {
+    const page = await open(fullReportHtml(buildReport({ ...input, survey: syntheticSurvey(12) }), pseudonyms));
+    try {
+      const found = await subs(page);
+      assert.deepEqual(
+        found.map((s) => [s.text, s.size, s.weight]),
+        [
+          ["What gets in the way mostR7.7", "18px", "700"],
+          ["What to fix before an agent goes live, in order", "18px", "700"],
+        ],
+      );
+      // As 18px as the quick wins panel's heading, the size the deck uses over an action list.
+      assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector(".quick-panel h3")!).fontSize), "18px");
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("the readiness list's copied label on its continued slide, issue titles 80 characters longer", async () => {
+    const page = await open(fullReportHtml(buildReport(lengthened(80)), pseudonyms));
+    try {
+      await carried(page);
+      const found = await subs(page);
+      assert.deepEqual(
+        found.map((s) => [s.text, s.size]),
+        [
+          ["What to fix before an agent goes live, in order", "18px"],
+          ["What to fix before an agent goes live, in order, continued", "18px"],
+        ],
+      );
+      assert.equal(found[1]!.slide, found[0]!.slide + 1);
+    } finally {
+      await page.close();
+    }
+  });
 });
 
 describe("the other lists set in columns go on in order (DECISIONS.md 580)", () => {
