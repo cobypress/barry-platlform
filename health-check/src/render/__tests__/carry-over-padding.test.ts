@@ -871,6 +871,247 @@ describe("carry-over: a child that isn't shown takes no room only when nothing i
   });
 });
 
+// A hidden copy keeps the box it was measured with: taking a copied head's words out moves
+// nothing that is printed and changes the size of nothing (DECISIONS.md 581).
+
+type Box = [number, number, number, number];
+
+/**
+ * Carries a shape over and reads every box on its slides, from the slide's edge: each element
+ * that is printed, and each copy the carry-over hid. Then it puts back what the slides were
+ * judged with, in the same page: each hidden head's words, from the head it copies, and each
+ * copy's own style as the block it copies has it, so a hold is taken off. Read again, whatever
+ * moved or changed size by more than half a pixel is in `moved`. `restored` is the words put
+ * back, so a reading with none put back can't pass for one that holds. `judged` reads the slides
+ * as the carry-over leaves them, before anything is put back.
+ */
+async function held(body: string, judged: (page: Page) => Promise<void> = async () => {}): Promise<{ moved: string[]; restored: string[]; result: Carried; page: Page }> {
+  const page = await open(sheet(body));
+  await page.evaluate(() => document.querySelectorAll(".page *").forEach((el, i) => el.setAttribute("data-held", String(i))));
+  const result = await carry(page);
+  await judged(page);
+  const read = (): Promise<Record<string, Box>> =>
+    page.evaluate(() => {
+      const out: Record<string, [number, number, number, number]> = {};
+      document.querySelectorAll(".page").forEach((p, n) => {
+        const edge = p.getBoundingClientRect();
+        const seen = new Map<string, number>();
+        for (const el of p.querySelectorAll<HTMLElement>("*")) {
+          if (getComputedStyle(el).visibility !== "visible" && el.style.visibility !== "hidden") continue;
+          const id = el.getAttribute("data-held") ?? "new";
+          const k = seen.get(id) ?? 0;
+          seen.set(id, k + 1);
+          const r = el.getBoundingClientRect();
+          out[`slide ${n + 1} ${el.tagName.toLowerCase()}${el.className ? `.${el.className}` : ""} ${id}${k ? ` (${k + 1})` : ""}${el.style.visibility === "hidden" ? " hidden" : ""}`] = [r.left - edge.left, r.top - edge.top, r.width, r.height];
+        }
+      });
+      return out;
+    });
+  const out = await read();
+  const restored = await page.evaluate(() => {
+    const source = (el: Element): Element => document.querySelector(`[data-held="${el.getAttribute("data-held")}"]`)!;
+    const hidden = new Set([...document.querySelectorAll<HTMLElement>(".page *")].filter((el) => el.style.visibility === "hidden"));
+    const words: string[] = [];
+    for (const head of document.querySelectorAll(".page thead")) {
+      if (source(head) === head || getComputedStyle(head).visibility === "visible") continue;
+      head.innerHTML = source(head).innerHTML;
+      words.push((head.textContent ?? "").trim());
+    }
+    for (const el of document.querySelectorAll<HTMLElement>(".page [data-held]")) {
+      const from = source(el);
+      if (from === el) continue;
+      const style = from.getAttribute("style");
+      if (style === null) el.removeAttribute("style");
+      else el.setAttribute("style", style);
+      if (hidden.has(el)) el.style.visibility = "hidden";
+    }
+    return words;
+  });
+  const within = await read();
+  const shown = (b: Box | undefined): string => (b ? `${b[0].toFixed(1)},${b[1].toFixed(1)} ${b[2].toFixed(1)}x${b[3].toFixed(1)}` : "none");
+  const moved = [...new Set([...Object.keys(within), ...Object.keys(out)])]
+    .filter((k) => !within[k] || !out[k] || within[k]!.some((v, i) => Math.abs(v - out[k]![i]!) > 0.5))
+    .map((k) => `${k}: ${shown(within[k])} as the slide was judged, ${shown(out[k])} as it is left`);
+  return { moved, restored, result, page };
+}
+
+/** The box of `selector` on slide `n`, from the slide's edge, to a tenth of a pixel. */
+const place = (page: Page, n: number, selector: string): Promise<{ x: number; width: number; height: number }> =>
+  page.evaluate(
+    ([n, selector]) => {
+      const slide = document.querySelectorAll(".page")[n - 1]!;
+      const r = slide.querySelector(selector)!.getBoundingClientRect();
+      const tenth = (v: number): number => Math.round(v * 10) / 10;
+      return { x: tenth(r.left - slide.getBoundingClientRect().left), width: tenth(r.width), height: tenth(r.height) };
+    },
+    [n, selector] as const,
+  );
+
+describe("carry-over: a hidden copy keeps the box it was measured with (DECISIONS.md 581)", () => {
+  const LONG_WORD = "Opportunity.Forecast_Category_Name__c.LastModifiedDate";
+  const KIND = "Kind of storage and share used";
+  const COLLAPSED = "border-collapse:collapse";
+  const cell = "padding:0;border-bottom:9px solid #000";
+  /** A table whose one row fits and whose last collapsed border crosses: its copy on the continued slide holds only its head. */
+  const headed = (head: string, style: string, th = `height:30px;${cell}`): string =>
+    `<table style="${style}"><thead><tr><th style="${th}">${head}</th></tr></thead><tbody><tr><td style="height:439px;${cell}">Row</td></tr></tbody></table>`;
+  const beside = `<div class="beside">${words("Right above.", 20)}${words("And 2 more.", 480)}</div>`;
+
+  // The adversary's shapes. The figures are the column beside the copy on the continued slide as
+  // 6eea6e0 printed it, its copy hidden with the head's words still in, and as the first slide has it.
+  for (const [name, head, body, expected] of [
+    ["(a1) a grid of 1fr 1fr, the table as wide as its column and its head one word that can't break", LONG_WORD, `<div class="cols">${headed(LONG_WORD, `${COLLAPSED};width:100%`)}${beside}</div>`, { x: 504.5, width: 55.5 }],
+    ["(a2) a grid of auto 1fr, the table as wide as its head", KIND, `<div class="cols" style="grid-template-columns:auto 1fr">${headed(KIND, COLLAPSED)}${beside}</div>`, { x: 278.9, width: 281.1 }],
+    ["(a3) a grid of max-content 1fr, the table as wide as its head", KIND, `<div class="cols" style="grid-template-columns:max-content 1fr">${headed(KIND, COLLAPSED)}${beside}</div>`, { x: 278.9, width: 281.1 }],
+    ["(a4) a flex row, the table as wide as its head", KIND, `<div class="cols" style="display:flex">${headed(KIND, COLLAPSED)}${beside}</div>`, { x: 278.9, width: 83.6 }],
+  ] as const) {
+    test(`${name}: the column beside the hidden copy is where it was and as wide, and the slide is warned of only what it prints`, async () => {
+      // The copy's width came from its head's words: emptied, it shrank after the slide was judged,
+      // and the column beside it moved left and widened (on be6e1a9, to x=308.0 or 56.0).
+      let left: { beside: { x: number; width: number }; visibility: string; section: { warned: string[]; printed: string[] } } | undefined;
+      const { moved, restored, result, page } = await held(body, async (page) => {
+        const { x, width } = await place(page, 2, ".beside");
+        left = { beside: { x, width }, visibility: (await heldPlace(page, ".cols > table:first-child", ".beside")).visibility, section: await emptySection(page, 2) };
+      });
+      try {
+        assert.equal(result.pages, 2);
+        assertHolds(name, result);
+        assert.deepEqual(restored, [head]);
+        assert.deepEqual(moved, []);
+        assert.deepEqual(left!.beside, expected);
+        assert.equal(left!.visibility, "hidden");
+        assert.deepEqual(left!.section, { printed: ["And 2 more."], warned: [`only "And 2 more."`] });
+      } finally {
+        await page.close();
+      }
+    });
+  }
+
+  test("(b) a grid of auto 1fr, a chart as wide as its column beside the hidden copy: the chart keeps its size and the slide doesn't run into its footer", async () => {
+    // On be6e1a9 the column widened to 504px and the square chart with it, past the footer: a slide
+    // that fitted when it was judged no longer did.
+    const chart = `<figure style="margin:0"><svg viewBox="0 0 100 100" style="width:100%;height:auto;display:block"><rect width="100" height="100"></rect></svg></figure>`;
+    let left: { figure: { x: number; width: number; height: number }; problems: unknown[] } | undefined;
+    const { moved, restored, result, page } = await held(`<div class="cols" style="grid-template-columns:auto 1fr">${headed(KIND, COLLAPSED)}<div class="beside">${words("Right above.", 200)}${chart}</div></div>`, async (page) => {
+      left = { figure: await place(page, 2, ".beside figure"), problems: (await checkLayout(page, { minPages: 1, maxPages: 10 })).problems.filter((p) => p.page === 2) };
+    });
+    try {
+      assert.equal(result.pages, 2);
+      assertHolds("(b)", result);
+      assert.deepEqual(restored, [KIND]);
+      assert.deepEqual(moved, []);
+      assert.deepEqual(left!.figure, { x: 278.9, width: 281.1, height: 281.1 });
+      // The slide prints the chart and no words, which is all the layout check says of it.
+      assert.deepEqual(left!.problems, [{ page: 2, check: "empty section", detail: 'only ""' }]);
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("two hidden copies on one slide, two table columns emptied beside a third column that goes on: both keep their boxes, and so does the column", async () => {
+    // As measured on 6eea6e0, and as the first slide has them: the tables 222.9 and 93.6 wide.
+    let left: Array<{ x: number; width: number; height: number }> = [];
+    const { moved, restored, result, page } = await held(`<div class="cols" style="grid-template-columns:auto auto 1fr">${headed(KIND, COLLAPSED)}${headed("Second head", COLLAPSED)}${beside}</div>`, async (page) => {
+      left = [await place(page, 2, ".cols > table:nth-child(1)"), await place(page, 2, ".cols > table:nth-child(2)"), await place(page, 2, ".beside")];
+    });
+    try {
+      assert.equal(result.pages, 2);
+      assertHolds("two copies", result);
+      assert.deepEqual(restored, [KIND, "Second head"]);
+      assert.deepEqual(moved, []);
+      assert.deepEqual(left, [
+        { x: 40, width: 222.9, height: 34.5 },
+        { x: 278.9, width: 93.6, height: 34.5 },
+        { x: 388.5, width: 171.5, height: 480 },
+      ]);
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("two hidden copies on one slide, each table first in a small grid of its own: every copy is measured before any is emptied", async () => {
+    // Each column's copy holds its table's copy, and emptying the column empties the table in it:
+    // measured after that, the table was held at no width at all.
+    const PAIR = `<style>.pair { display: grid; grid-template-columns: auto 1fr; gap: 8px; align-items: start; }</style>`;
+    const { moved, restored, result, page } = await held(`${PAIR}<div class="cols3"><div class="pair">${headed("Storage used", COLLAPSED)}${words("Beside.", 20)}</div><div class="pair">${headed("Second head", COLLAPSED)}${words("Beside two.", 20)}</div>${beside}</div>`);
+    try {
+      assert.equal(result.pages, 2);
+      assertHolds("two small grids", result);
+      assert.deepEqual(restored, ["Storage used", "Second head"]);
+      assert.deepEqual(moved, []);
+      assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll(".page")[1]!.querySelectorAll<HTMLElement>(".pair, .pair > table")].map((e) => e.style.visibility)), ["hidden", "hidden", "hidden", "hidden"]);
+    } finally {
+      await page.close();
+    }
+  });
+
+  // Each part of the hold, and the shape that needs it.
+  for (const [name, head, body] of [
+    [
+      // Stacked on the continued slide, the copy sits above the column that went on.
+      "the height: a grid that stacks on the continued slide, the copied head with no height of its own over the column that went on",
+      KIND,
+      `${RESTACKED}<div class="restack">${headed(KIND, `${COLLAPSED};width:100%`, "padding:4px;border-bottom:9px solid #000")}<div class="beside">${words("Right above.", 200)}${words("And 2 more.", 300)}</div></div>`,
+    ],
+    [
+      "the least width: a flex row whose items shrink to share it",
+      KIND,
+      `<div class="cols" style="display:flex">${headed(KIND, COLLAPSED)}<div class="beside">${words("Right above.", 20)}${words("And 2 more words, ".repeat(6).trim(), 480)}</div></div>`,
+    ],
+    ["the most width: a flex row whose items grow to fill it", KIND, `<div class="cols" style="display:flex">${headed(KIND, `${COLLAPSED};flex:1 1 auto`)}<div class="beside" style="flex:1 1 auto">${words("Right above.", 20)}${words("And 2 more.", 480)}</div></div>`],
+    [
+      "the border box: a padded column sized by its content box, holding a table in a small grid",
+      "Storage used",
+      `<style>.boxed { display: grid; grid-template-columns: auto 1fr; gap: 8px; align-items: start; padding: 0 10px; background: #eee; box-sizing: content-box; }</style><div class="cols3"><div class="boxed">${headed("Storage used", COLLAPSED)}${words("Beside.", 20)}</div><div>${words("Middle.", 20)}</div>${beside}</div>`,
+    ],
+  ] as const) {
+    test(`the hold: ${name}`, async () => {
+      const { moved, restored, result, page } = await held(body);
+      try {
+        assert.equal(result.pages, 2);
+        assertHolds(name, result);
+        assert.deepEqual(restored, [head]);
+        assert.deepEqual(moved, []);
+      } finally {
+        await page.close();
+      }
+    });
+  }
+
+  test("only a hidden copy is held: a table cut between its rows, in a grid whose columns share what is left over, lays out on the continued slide as it always did", async () => {
+    // Held at its width, the table's copy would take a second share, and the paragraph that went
+    // on beside it would move right and narrow.
+    const rows = Array.from({ length: 14 }, (_, i) => `<tr><td style="height:40px;padding:0">Row ${i + 1}</td></tr>`).join("");
+    const { moved, restored, result, page } = await held(
+      `${words("Above.", 20)}<div class="cols" style="grid-template-columns:auto auto"><table style="${COLLAPSED}"><thead><tr><th style="height:30px;padding:0">Head of the carried table</th></tr></thead><tbody>${rows}</tbody></table><p class="beside" style="height:460px">Words beside, which go on whole.</p></div>`,
+    );
+    try {
+      assert.equal(result.pages, 2);
+      assertHolds("the carried table", result);
+      assert.deepEqual(restored, []);
+      assert.deepEqual(moved, []);
+      assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll(".page")].map((p) => [p.querySelectorAll("tbody > tr").length, p.querySelectorAll(".beside").length])), [[10, 0], [4, 1]]);
+      assert.deepEqual(await unpainted(page, ".cols"), []);
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("only a copy that loses words is held: a hidden padded column in a grid whose columns share what is left over lays out as it always did", async () => {
+    // Nothing is taken out of it, so nothing of it changes; held, it would take a second share.
+    const { moved, restored, result, page } = await held(`<div class="cols" style="grid-template-columns:auto auto"><div class="padded">${words("Left.", 460)}</div><div class="beside">${words("Right above.", 20)}${padded("Right.")}</div></div>`);
+    try {
+      assert.equal(result.pages, 2);
+      assertHolds("the padded column", result);
+      assert.deepEqual(restored, []);
+      assert.deepEqual(moved, []);
+      assert.equal((await heldPlace(page, ".cols > .padded:first-child", ".beside")).visibility, "hidden");
+    } finally {
+      await page.close();
+    }
+  });
+});
+
 // The decks. The synthetic run as the suites build it, and with every issue's title longer
 // by a team's name, as a customer's own words make it.
 

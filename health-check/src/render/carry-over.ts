@@ -367,21 +367,33 @@ export async function carryOver(browserPage: Page): Promise<number> {
     // A copy nothing went into would print an empty panel or box, or a table's head over no rows.
     // It is hidden, not removed: it holds its column's place, and the column beside it would move
     // left (DECISIONS.md 577). One that prints nothing of its own is left as it is.
-    for (const el of document.querySelectorAll<HTMLElement>(".page *")) {
-      if (!made.has(el) || !onlyShells(el) || !marks(el)) continue;
-      // The layout check reads every word, printed or not: a copied head's words left here would
-      // count as the slide's content (DECISIONS.md 579). The rows and cells stay, each row held
-      // at its height, so the copy keeps its size and nothing under it moves. A copy holds only
-      // what we made, so every head in it is a copy.
+    const hidden = [...document.querySelectorAll<HTMLElement>(".page *")].filter((el) => made.has(el) && onlyShells(el) && marks(el));
+    // The layout check reads every word, printed or not: a copied head's words left here would
+    // count as the slide's content (DECISIONS.md 579), so they are taken out. A copy holds only
+    // what we made, so every head in it is a copy. The slide was judged with the words in, and
+    // a copy's width can come from them (a column sized to its head, one long word in a shared
+    // column), so each copy that loses words is first held at the box it was measured with, and
+    // nothing printed moves or changes size (581). Every one is measured before any changes.
+    const emptied = hidden.filter((el) => el.querySelector("thead"));
+    const sizes = emptied.map(box);
+    emptied.forEach((el, i) => {
+      // The measured box is the border box, padding and border in it. Its least and most are held
+      // with it: a most set by the content (max-content) would take it in once the words are out,
+      // and a flexible item would grow or shrink from the held size as it did from its content's.
+      el.style.boxSizing = "border-box";
+      for (const [side, size] of [["width", sizes[i]!.width], ["height", sizes[i]!.height]] as const) {
+        for (const property of [side, `min-${side}`, `max-${side}`]) el.style.setProperty(property, `${size}px`);
+      }
+    });
+    for (const el of emptied) {
       for (const head of el.querySelectorAll("thead")) {
-        for (const row of head.querySelectorAll<HTMLElement>(":scope > tr")) row.style.height = `${box(row).height}px`;
         const walker = document.createTreeWalker(head, NodeFilter.SHOW_TEXT);
         const texts: Node[] = [];
         for (let n = walker.nextNode(); n; n = walker.nextNode()) texts.push(n);
         for (const n of texts) n.parentNode!.removeChild(n);
       }
-      el.style.visibility = "hidden";
     }
+    for (const el of hidden) el.style.visibility = "hidden";
 
     // Number every page again, and point the contents at where each part now starts.
     const all = pages();
