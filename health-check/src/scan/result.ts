@@ -65,7 +65,7 @@ function foundInOrg(report: BuiltReport, held: OrgCount[]): OrgCount[] {
   const out = [...held];
   // Users are read in one query with no cap, so a measured count is every active user (src/extract/users.ts).
   const users = report.input.metrics.find((m) => m.id === DOCUMENTED.access);
-  if (users?.status === "measured" && Number.isInteger(users.value) && users.value >= 0) out.push({ id: "activeUsers", label: "Active users", count: users.value });
+  if (users?.status === "measured" && Number.isInteger(users.value) && users.value >= 0) out.push({ id: "activeUsers", label: "Active internal users", count: users.value });
   return out;
 }
 
@@ -93,6 +93,7 @@ export function buildScanResult(report: BuiltReport, held: OrgCount[] = []): Sca
     if (shown.some((s) => s.domain === f.domain) && issues.some((g) => !shown.some((s) => s.domain === g.domain) && !TOKEN.test(g.title) && !TOKEN.test(g.summary))) continue;
     shown.push(f);
   }
+  const found = foundInOrg(report, held);
   return {
     score: o.status === "measured" ? o.score : null,
     grade: o.status === "measured" ? o.grade : null,
@@ -104,6 +105,7 @@ export function buildScanResult(report: BuiltReport, held: OrgCount[] = []): Sca
       return { title: plainWords(ukDates(f.title)), summary: plainWords(ukDates(f.summary)), severity: f.severity, area: domainLabel(f.domain), ...(fix ? { fix } : {}), ...(where ? { where: [...where] } : {}) };
     }),
     lockedIssues: issues.length - shown.length,
-    foundInOrg: foundInOrg(report, held),
+    // Absent, not empty, when nothing is held: an empty row would read as an org with nothing in it.
+    ...(found.length ? { foundInOrg: found } : {}),
   };
 }

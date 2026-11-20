@@ -128,11 +128,11 @@ describe("the synthetic org's scan result (decision 623)", () => {
     // 4 Apex classes that aren't tests, 3 installed packages and 14 active standard users.
     assert.deepEqual(result.foundInOrg, [
       { id: "customObjects", label: "Custom objects of your own", count: 4 },
-      { id: "customFields", label: "Custom fields of your own, on core and custom objects", count: 8 },
-      { id: "flows", label: "Active flows", count: 4 },
+      { id: "customFields", label: "Custom fields of your own on custom objects, accounts, contacts, leads and opportunities", count: 8 },
+      { id: "flows", label: "Active flows of your own", count: 4 },
       { id: "apexClasses", label: "Apex classes, not counting tests", count: 4 },
-      { id: "packages", label: "Installed packages", count: 3 },
-      { id: "activeUsers", label: "Active users", count: 14 },
+      { id: "packages", label: "Installed packages with a namespace", count: 3 },
+      { id: "activeUsers", label: "Active internal users", count: 14 },
     ]);
     assert.equal(usersTable.filter((u) => u.IsActive).length, 14);
   });
@@ -182,7 +182,7 @@ describe("where a finding is in Setup", () => {
 
   test("every Setup location is plain labels from Setup: no address, no id, no punctuation a name would bring", () => {
     const rules = ALL_MODULES.flatMap((m) => m.rules).filter((r) => r.where);
-    assert.ok(rules.length >= 30, `${rules.length} rules have one`);
+    assert.ok(rules.length >= 29, `${rules.length} rules have one`);
     for (const r of rules) {
       assert.equal(r.where![0], "Setup", r.id);
       assert.ok(r.where!.length >= 2, r.id);
@@ -195,7 +195,6 @@ describe("where a finding is in Setup", () => {
     assert.deepEqual(scan.filter((r) => r.where).map((r) => r.id).sort(), [
       "aut.apex-coverage",
       "aut.flows-without-fault-paths",
-      "aut.hardcoded-ids-in-flows",
       "aut.legacy-process-builder",
       "aut.legacy-workflow-rules",
       "aut.multiple-triggers",
@@ -225,6 +224,11 @@ describe("where a finding is in Setup", () => {
       "utl.unassigned-licence-seats",
     ]);
     assert.equal(scan.length, 61);
+  });
+
+  test("hardcoded ids in flows has none: its subjects include active Process Builders, which aren't under Flows", () => {
+    const rule = ALL_MODULES.flatMap((m) => m.rules).find((r) => r.id === "aut.hardcoded-ids-in-flows")!;
+    assert.equal(rule.where, undefined);
   });
 });
 
@@ -272,7 +276,14 @@ describe("what the org holds", () => {
     const notRead: Complexity = clone(complexity!);
     notRead.components = notRead.components.map((c) => (c.id === "code" ? { status: "not_read", id: c.id, label: c.label, weight: c.weight, reason: "The size of some code wasn't read." } : c));
     assert.deepEqual(buildScanResult(report, heldCounts(notRead)).foundInOrg!.map((c) => c.id), ["customObjects", "customFields", "flows", "packages", "activeUsers"]);
-    assert.deepEqual(buildScanResult(report).foundInOrg, [{ id: "activeUsers", label: "Active users", count: 14 }]);
+    assert.deepEqual(buildScanResult(report).foundInOrg, [{ id: "activeUsers", label: "Active internal users", count: 14 }]);
+  });
+
+  test("with nothing held, there is no foundInOrg at all, not an empty list", () => {
+    const metrics = report.input.metrics.filter((m) => m.id !== DOCUMENTED.access);
+    const none = buildScanResult({ ...report, input: { ...report.input, metrics } }, []);
+    assert.equal("foundInOrg" in none, false);
+    assert.deepEqual(before623(none), before623(result));
   });
 
   test("active users only when the users were read", () => {

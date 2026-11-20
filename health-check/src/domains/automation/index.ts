@@ -147,7 +147,6 @@ const hardcodedIds: Rule = {
   version: 1,
   domain: "automation",
   title: "Record ids or emails hardcoded in flows",
-  where: WHERE.flows,
   evaluate(ctx): RuleResult | RuleResult[] {
     const result = metadataOr(ctx);
     if ("outcome" in result) return result;
