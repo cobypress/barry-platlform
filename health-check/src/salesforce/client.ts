@@ -213,7 +213,8 @@ export class SalesforceClient {
       this.budget.assertCanSpend();
     }
 
-    let refreshed = false;
+    // One refresh per request, and one more if the first only found another process's tokens (DECISIONS.md 631).
+    let refreshes = 1;
     for (let attempt = 0; ; attempt++) {
       if (!options.free) {
         this.budget.recordCall();
@@ -231,9 +232,9 @@ export class SalesforceClient {
       });
       this.budget.observeHeader(res.header("sforce-limit-info"));
 
-      if (res.status === 401 && !refreshed && !options.soapOperation) {
-        refreshed = true;
-        await this.#refreshConnection();
+      if (res.status === 401 && refreshes > 0 && !options.soapOperation) {
+        refreshes--;
+        if (await this.#refreshConnection()) refreshes++;
         continue;
       }
       if ((res.status === 429 || res.status >= 500) && !options.soapOperation && attempt < SF_DEFAULTS.maxRetries) {
@@ -340,9 +341,11 @@ export class SalesforceClient {
     return JSON.parse((await this.#send({ method: "GET", path: this.#data(`/analytics/reports/${reportId}/describe`) })).text) as T;
   }
 
-  async #refreshConnection(): Promise<void> {
-    const fresh = await this.#provider.refresh();
+  /** True if the provider found another process's tokens rather than refreshing (DECISIONS.md 631). */
+  async #refreshConnection(): Promise<boolean> {
+    const { fromStore, ...fresh } = await this.#provider.refresh();
     this.#connection = { ...fresh, instanceUrl: instanceOrigin(fresh.instanceUrl, this.#checkHost) };
+    return fromStore === true;
   }
 
   async #soap(operation: string, body: string): Promise<Record<string, unknown>> {
@@ -363,8 +366,17 @@ export class SalesforceClient {
     } catch (err) {
       // A session can expire during a long retrieve, and SOAP reports that as a fault, not a 401.
       if (!(err instanceof SalesforceError) || err.code !== "INVALID_SESSION_ID") throw err;
-      await this.#refreshConnection();
-      res = await send();
+      if (!(await this.#refreshConnection())) res = await send();
+      else {
+        // Another process's tokens: their session may have ended too, so one more refresh (DECISIONS.md 631).
+        try {
+          res = await send();
+        } catch (again) {
+          if (!(again instanceof SalesforceError) || again.code !== "INVALID_SESSION_ID") throw again;
+          await this.#refreshConnection();
+          res = await send();
+        }
+      }
     }
     const parsed = xml.parse(res.text) as { Envelope?: { Body?: Record<string, { result?: Record<string, unknown> }> } };
     const result = parsed.Envelope?.Body?.[`${operation}Response`]?.result;

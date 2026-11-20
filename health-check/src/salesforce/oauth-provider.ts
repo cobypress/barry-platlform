@@ -32,12 +32,15 @@ export class OAuthConnectionProvider implements ConnectionProvider {
   readonly #client?: Pick<OAuthClient, "clientId" | "clientSecret">;
   readonly #transport: OAuthTransport;
   readonly #now: () => number;
+  readonly #log: (line: string) => void;
   #current?: StoredConnection;
   #lostAccess = false;
+  /** The tokens held came from the store after a refusal, not from a refresh of this provider's own. */
+  #adopted = false;
 
   constructor(
     name: string,
-    options: { store: TokenStore; client?: Pick<OAuthClient, "clientId" | "clientSecret">; transport?: OAuthTransport; env?: NodeJS.ProcessEnv; now?: () => number },
+    options: { store: TokenStore; client?: Pick<OAuthClient, "clientId" | "clientSecret">; transport?: OAuthTransport; env?: NodeJS.ProcessEnv; now?: () => number; log?: (line: string) => void },
   ) {
     if (!approvedAliases(options.env ?? process.env).includes(name)) throw new OrgNotApprovedError(name);
     this.#name = name;
@@ -45,6 +48,7 @@ export class OAuthConnectionProvider implements ConnectionProvider {
     this.#client = options.client;
     this.#transport = options.transport ?? fetchOAuthTransport;
     this.#now = options.now ?? Date.now;
+    this.#log = options.log ?? (() => {});
   }
 
   /**
@@ -64,7 +68,29 @@ export class OAuthConnectionProvider implements ConnectionProvider {
   /** Called by the client after a 401, or an expired session in SOAP. */
   async refresh(): Promise<OrgConnection> {
     const stored = this.#current ?? (await this.#store.load(this.#name));
-    const fresh = stored.grant === "jwt-bearer" ? await this.#reassert(stored) : await this.#rotate(stored);
+    let fresh: TokenSet;
+    if (stored.grant === "jwt-bearer") fresh = await this.#reassert(stored);
+    else {
+      try {
+        fresh = await this.#rotate(stored);
+      } catch (err) {
+        if (!(err instanceof OAuthError && err.code === "invalid_grant")) throw err;
+        // Another worker process may have refreshed first: with rotation, its
+        // refresh ended the token this one holds, and the newer one is in the
+        // store. Look once, unless what was refused is already what the store
+        // held, so two processes can't hand the connection back and forth (DECISIONS.md 631).
+        const newer = this.#adopted ? undefined : await this.#newerInStore(stored);
+        if (!newer) {
+          this.#lostAccess = true;
+          throw new ReconnectionNeeded(this.#name);
+        }
+        this.#current = newer;
+        this.#adopted = true;
+        this.#log(`A newer token for the connection "${this.#name}" was found in the store and used.`);
+        // Its access token is tried first. Refused too, the client asks again, and that refresh uses its refresh token.
+        return { ...toConnection(newer), fromStore: true };
+      }
+    }
     // A refresh must come back for the same org and user. Anything else is
     // refused before the new token is stored or used.
     if (fresh.orgId !== stored.orgId || fresh.userId !== stored.userId) {
@@ -81,19 +107,30 @@ export class OAuthConnectionProvider implements ConnectionProvider {
     // Stored before it's used: with rotation, the old refresh token is already dead.
     await this.#store.save(next);
     this.#current = next;
+    this.#adopted = false;
     return toConnection(next);
+  }
+
+  /**
+   * The stored connection, if it holds a different refresh token from the one
+   * Salesforce just refused, for the same name, app, org and user. Anything
+   * else, or a store that can't be read, is not used: the refusal stands.
+   */
+  async #newerInStore(refused: StoredConnection): Promise<StoredConnection | undefined> {
+    let latest: StoredConnection;
+    try {
+      latest = await this.#store.load(this.#name);
+    } catch {
+      return undefined;
+    }
+    const same = latest.name === this.#name && latest.grant === "web-server" && latest.clientId === refused.clientId && latest.orgId === refused.orgId && latest.userId === refused.userId;
+    return same && latest.refreshToken !== undefined && latest.refreshToken !== refused.refreshToken ? latest : undefined;
   }
 
   #rotate(stored: StoredConnection): Promise<TokenSet> {
     if (!stored.refreshToken) throw new Error(`The connection "${this.#name}" has no refresh token. Connect it again`);
     if (!this.#client || this.#client.clientId !== stored.clientId) throw new Error("The OAuth client doesn't match the one this connection was made with");
-    return refreshTokens({ transport: this.#transport, instanceUrl: stored.instanceUrl, client: this.#client, refreshToken: stored.refreshToken }).catch((err: unknown) => {
-      if (err instanceof OAuthError && err.code === "invalid_grant") {
-        this.#lostAccess = true;
-        throw new ReconnectionNeeded(this.#name);
-      }
-      throw err;
-    });
+    return refreshTokens({ transport: this.#transport, instanceUrl: stored.instanceUrl, client: this.#client, refreshToken: stored.refreshToken });
   }
 
   #reassert(stored: StoredConnection): Promise<TokenSet> {
