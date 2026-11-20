@@ -150,6 +150,7 @@ describe("each value a real org can give is saved, the bad part marked and the r
         { NamespacePrefix: "bb", AllowedLicenses: 10, UsedLicenses: null, Status: "Active", ExpirationDate: null },
         { NamespacePrefix: "cc", AllowedLicenses: -1, UsedLicenses: -1, Status: "Active", ExpirationDate: null },
         { NamespacePrefix: "dd", AllowedLicenses: null, UsedLicenses: 2, Status: "Active", ExpirationDate: null },
+        { NamespacePrefix: "ee", AllowedLicenses: -2, UsedLicenses: 0, Status: "Active", ExpirationDate: null },
       ]),
     });
     const { inventory } = saved(buildInventory(e, "complete", AS_OF));
@@ -159,9 +160,10 @@ describe("each value a real org can give is saved, the bad part marked and the r
       ["bb", 10, false, null],
       ["cc", null, true, null],
       ["dd", null, false, 2],
+      ["ee", null, false, 0],
     ]);
     assert.ok(notesOf(inventory.packages).includes("2 licences gave no count of seats used, so their use isn't shown."), notesOf(inventory.packages).join("\n"));
-    assert.ok(notesOf(inventory.packages).includes("One licence gave no number of seats allowed, so its allowance isn't shown."));
+    assert.ok(notesOf(inventory.packages).includes("2 licences gave no number of seats allowed, so their allowance isn't shown."));
   });
 
   test("an object with no records has a null share and is saved", () => {
