@@ -356,7 +356,7 @@ describe("PostgresWorkerStore", () => {
     assert.deepEqual(pool.statements.at(-3)!.values, [run.id, FACTS.checkedAt, JSON.stringify(FACTS)]);
   });
 
-  test("an error on the facts row that isn't a missing column isn't retried without the file: the whole run rolls back", async () => {
+  test("a deadlock on the facts row (class 40) isn't retried without the file: the whole run rolls back (DECISIONS.md 615)", async () => {
     const pool = new FakePool();
     pool.handlers.push((text) => (text.includes("FOR UPDATE") ? { rows: [{ status: "extracting" }], rowCount: 1 } : undefined));
     let thrown = false;
@@ -389,7 +389,7 @@ describe("PostgresWorkerStore", () => {
     assert.equal(texts.at(-1), "COMMIT");
   });
 
-  test("any other error with the facts still rolls the whole run back", async () => {
+  test("a deadlock with the facts (class 40), as any error outside classes 42 and 23, still rolls the whole run back (DECISIONS.md 615)", async () => {
     const pool = new FakePool();
     pool.handlers.push((text) => (text.includes("FOR UPDATE") ? { rows: [{ status: "extracting" }], rowCount: 1 } : undefined));
     pool.handlers.push((text) => {

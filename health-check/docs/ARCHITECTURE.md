@@ -165,6 +165,7 @@ The benchmark set is kept apart, in `~/.barometer/benchmarks/rows.jsonl` (folder
 | `findings.json`, `metrics.json`, `manual-steps.json` | Aggregates, metadata names and tokens | Yes |
 | `facts.json` | Whether the Salesforce names we assume exist: names, booleans and field types only. Kept with the findings | No: our own record |
 | `inventory.json` | The org's inventory, when the worker runs it (DECISIONS.md 603 to 605): each field's fill rate from counts, packages, connected apps, risky permissions and limits. Set-up names and counts only, never a value or who. Kept with the findings, and sent to the console's `HealthCheckInventory` | No |
+| `complexity.json` | The org's complexity score from 0 to 100 and its band, with each component's counts, points and share (DECISIONS.md 614): counts of set-up only, on every run, beside the health score and never part of it. Kept with the findings, and sent to the console's `HealthCheckComplexity` | No |
 | `raw-notes.md` | Real names | Never: customer deliverable |
 | `raw-notes.docx`, `executive-summary.pdf`, `full-health-check.pdf` | Real names in the notes, team level in the PDFs | Never: customer deliverables |
 | `report-sections.json`, `layout-report.json`, `narrative-rejections.json` | Section text, tokens and check results | No: review records |

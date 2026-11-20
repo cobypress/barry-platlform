@@ -15,6 +15,7 @@ import { componentChangesExtractor, type ComponentChangesData } from "../extract
 import type { MetadataBundle } from "../extract/metadata-parse.ts";
 import { fieldDescribeExtractor } from "../extract/fields.ts";
 import { buildInventory, INVENTORY_FILE, inventoryExtractorsFor } from "../extract/inventory.ts";
+import { buildComplexity, COMPLEXITY_FILE } from "../complexity/read.ts";
 import { summariseFacts } from "../facts/summary.ts";
 import { monthsBefore, type ConnectedUser, type ExtractContext, type Extractor, type PartialStore, type Sourced } from "../extract/types.ts";
 import { buildHandbook, HANDBOOK_FILE, labelApexModifiers, labelComponentModifiers, recentChanges } from "../handbook/build.ts";
@@ -304,6 +305,15 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
   // Names and counts only, so it's kept as long as the findings (DECISIONS.md 605).
   // Dated as the run reads the org, as the facts are, so every delivery writes the same file.
   if (options.inventory) writeJson(join(dir, INVENTORY_FILE), buildInventory(extracts, scope, asOf, new Map(run.steps.flatMap((s) => (s.status === "failed" && s.error ? [[s.id, s.error]] : [])))));
+  // How big and tangled the build is, beside the health score and never part
+  // of it (DECISIONS.md 614). Counts of set-up only, so on every run. Nothing
+  // reads it back, so a fault here costs only the file, never the run.
+  try {
+    writeJson(join(dir, COMPLEXITY_FILE), buildComplexity(extracts, asOf));
+  } catch (err) {
+    rmSync(join(dir, COMPLEXITY_FILE), { force: true });
+    log(`  The complexity score couldn't be worked out, so the run has none: ${err instanceof Error ? err.message : String(err)}`);
+  }
   // Which objects' rules weren't read, for the raw notes. Render reads only the run folder (DECISIONS.md 425).
   const bundle = extracts.get(metadataExtractor.id) as Sourced<MetadataBundle> | undefined;
   run.retrieveFallback = bundle?.status === "ok" ? bundle.data.retrieveFallback : undefined;
