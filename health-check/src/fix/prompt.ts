@@ -1,7 +1,8 @@
 import { DESTRUCTIVE_RECOMMENDATIONS, FIX_PROMPT_MAX, type Finding, type Subject } from "../schemas/index.ts";
 import { holdsNameOrSecret } from "../narrative/guard.ts";
 import { teamLevelText } from "../narrative/select.ts";
-import { tokenCode, type Pseudonymiser } from "../privacy/pseudonymiser.ts";
+import { ORDINARY, PERSON_KINDS, SHARED_NAME_PREFIX } from "../privacy/names.ts";
+import { isSalesforceUserName, tokenCode, UNKNOWN_USER, type Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import type { PromptRule } from "./types.ts";
 
 // A fix prompt: plain text a customer pastes into an AI assistant that can read
@@ -35,7 +36,64 @@ export type PromptFinding = Pick<Finding, "title" | "summary" | "recommendation"
  * or a record, a token, or a label holding a part of a person's name ("Sam's
  * Escalations"), which the same check that guards Claude's prompts finds.
  */
-const unnameable = (s: Subject, pseudonyms?: Pseudonymiser): boolean => PERSON_OR_RECORD.has(s.type) || TOKEN.test(s.label) || (pseudonyms !== undefined && holdsName(s.label, pseudonyms));
+const unnameable = (s: Subject, pseudonyms?: Pseudonymiser): boolean => PERSON_OR_RECORD.has(s.type) || TOKEN.test(s.label) || (pseudonyms !== undefined && (holdsName(s.label, pseudonyms) || labelHoldsPersonName(s.label, pseudonyms)));
+
+/**
+ * The shortest word a set-up label is matched on, in letters. Shorter name parts
+ * ("Jo", "Al") would swallow ordinary abbreviations in API names, so they're left
+ * to the guard, which sees them only with a capital.
+ */
+export const MIN_NAME_PART = 3;
+
+const foldLower = (word: string): string => word.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase();
+
+/** A label's words, split on case changes, digits, underscores, hyphens, spaces and apostrophes of either kind. */
+export const labelWords = (label: string): string[] =>
+  label
+    .replace(/(\p{Ll})(\p{Lu})/gu, "$1 $2")
+    .replace(/(\p{Lu})(\p{Lu}\p{Ll})/gu, "$1 $2")
+    .split(/[^\p{L}\p{M}]+/u)
+    .filter(Boolean)
+    .map(foldLower);
+
+const FORMS = new WeakMap<Pseudonymiser, { size: number; forms: Set<string> }>();
+
+/**
+ * Every form of a known person's name an admin might put in an API name: each
+ * first name and surname, with or without a trailing "s", initial and surname
+ * ("sreed"), and first name and initial ("samr"). Shared and system users' names
+ * ("Shared Sales Desk", "Integration User") are ordinary words, not people's.
+ */
+function nameForms(pseudonyms: Pseudonymiser): Set<string> {
+  const entries = pseudonyms.entries();
+  const hit = FORMS.get(pseudonyms);
+  if (hit && hit.size === entries.length) return hit.forms;
+  const forms = new Set<string>();
+  const add = (form: string): void => void (form.length >= MIN_NAME_PART && forms.add(form));
+  for (const entry of entries) {
+    const kind = entry.token.slice(2, entry.token.indexOf(":"));
+    if (!PERSON_KINDS.has(kind) || entry.id.startsWith(SHARED_NAME_PREFIX) || entry.name === UNKNOWN_USER || isSalesforceUserName(entry.name)) continue;
+    const parts = entry.name.split(/[^\p{L}\p{M}]+/u).filter(Boolean).map(foldLower);
+    for (const part of parts) {
+      if (ORDINARY.has(part) || part.length < MIN_NAME_PART) continue;
+      add(part);
+      add(`${part}s`);
+    }
+    if (parts.length >= 2) {
+      const [first, last] = [parts[0]!, parts.at(-1)!];
+      if (!ORDINARY.has(last)) add(`${first[0]}${last}`);
+      if (!ORDINARY.has(first)) add(`${first}${last[0]}`);
+    }
+  }
+  FORMS.set(pseudonyms, { size: entries.length, forms });
+  return forms;
+}
+
+/** True when any word of a set-up label is a form of a known person's name. A false alarm only costs the name. */
+export function labelHoldsPersonName(label: string, pseudonyms: Pseudonymiser): boolean {
+  const forms = nameForms(pseudonyms);
+  return labelWords(label).some((w) => w.length >= MIN_NAME_PART && forms.has(w));
+}
 
 /** Words run together in an API name, apart: "ReedExportJob" as "Reed Export Job", so a name inside one is seen. */
 const camelApart = (text: string): string => text.replace(/(\p{Ll})(\p{Lu})/gu, "$1 $2").replace(/(\p{Lu})(\p{Lu}\p{Ll})/gu, "$1 $2");
@@ -75,9 +133,12 @@ function itemsLine(f: PromptFinding, items: string, withheld: ReadonlySet<string
   return nameable ? `Work on the ${items} this finding is about. Named in it: ${listed(names)}.` : `Work on the ${items} listed in this finding.`;
 }
 
-/** How the finding's recommendation is introduced: it says what the owners end up with, never a step for the assistant. */
-export const RECOMMEND_FOR_OWNERS = "What we recommend, for the people who own it to decide and carry out:";
-export const RECOMMEND_WITH_STEPS = "What we recommend (your part is the steps below, in their order):";
+/**
+ * How the finding's recommendation is introduced, in every prompt: it is the
+ * report's advice to the people who own the org, often a record change or an
+ * order the steps reverse, and never the assistant's job.
+ */
+export const FRAMING = "What our report recommends, for the people who own this to decide and carry out. It is not your task: your task is only the steps below.";
 
 /** The task when a rule that can remove, deactivate or merge is held back: a review that ends with the owners. */
 const REVIEW_STEPS: readonly string[] = [
@@ -121,8 +182,8 @@ export function assemblePrompt(f: PromptFinding, rule: PromptRule, pseudonyms?: 
   const build = (summary: string): string => [
     "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.",
     `What we found: ${title}. ${summary}`,
-    // The recommendation is the finding's own, worded for the people who own the org; the steps are the assistant's part.
-    analysis ? `${RECOMMEND_FOR_OWNERS} ${good}` : `${RECOMMEND_WITH_STEPS} ${good}`,
+    // The recommendation is the finding's own, worded for the people who own the org; only the steps are the assistant's.
+    `${FRAMING}\nThe report says: ${good}`,
     itemsLine(f, rule.items, withheldSet),
     ...(analysis ? ["This is for people to decide, not a change to the org. Do not change the org: prepare the analysis, the list and the options so the people who own it can decide."] : []),
     `Steps:\n${steps.map((s, i) => `${i + 1}. ${s}`).join("\n")}`,

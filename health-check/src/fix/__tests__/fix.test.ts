@@ -21,7 +21,7 @@ import { buildScaleOrg, FIVE_HUNDRED_USERS, scaled } from "../../testing/scale-o
 import { Simulator, SYNTHETIC_RECORDS, type OrgRecords } from "../../testing/simulator.ts";
 import { AS_OF, CONNECTED_USER, ORG_ID } from "../../testing/synthetic-org.ts";
 import { effortHours } from "../hours.ts";
-import { assemblePrompt, fixPrompt, isHeldBack, promptIsSafe, RECOMMEND_FOR_OWNERS, RECOMMEND_WITH_STEPS, withheldLabels, type PromptFinding } from "../prompt.ts";
+import { assemblePrompt, fixPrompt, FRAMING, isHeldBack, labelHoldsPersonName, labelWords, MIN_NAME_PART, promptIsSafe, withheldLabels, type PromptFinding } from "../prompt.ts";
 import { FIX_TABLE, NEVER_RAISES } from "../table.ts";
 
 // Every issue carries hours to fix and a fix prompt (DECISIONS.md 628). The hours
@@ -78,14 +78,14 @@ function planted(records: OrgRecords): string[] {
 const word = (s: string): RegExp => new RegExp(`(?<![\\w@.])${s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w@])`);
 
 /**
- * The parts of a prompt that are the assistant's own instructions: everything
- * but what we found and the recommendation (the finding's own words, shown to
- * the same reader and introduced as the owners' to carry out) and the "Do not" list.
+ * The whole prompt but three parts: what we found, the one framed line holding
+ * the report's recommendation (the finding's own words, for the owners, framed
+ * as not the assistant's task), and the "Do not" list.
  */
 function instructions(prompt: string): string {
   return prompt
     .split("\n\n")
-    .filter((s) => !s.startsWith("What we found: ") && !s.startsWith(RECOMMEND_FOR_OWNERS) && !s.startsWith(RECOMMEND_WITH_STEPS) && !s.startsWith("Do not:"))
+    .filter((s) => !s.startsWith("What we found: ") && !s.startsWith(FRAMING) && !s.startsWith("Do not:"))
     .join("\n\n");
 }
 
@@ -135,7 +135,7 @@ const ANALYSIS_ONLY = [
   "dq.opps-inactive-owner", "dq.record-type-use", "dq.records-inactive-owner", "dq.stale-leads", "fct.manager-adjustments", "fct.quota-gaps",
   "int.api-usage", "int.integration-user-licences", "lead.campaign-return", "lead.conversion-by-source", "lead.converted-no-opportunity", "lead.source-return",
   "mkt.scoring-grading", "mkt.unowned-prospects", "mkt.unworked-handovers", "pipe.calibration-contradicts-org", "pipe.going-backwards", "pipe.segment-divergence",
-  "pipe.skipped-stages", "pipe.unmapped-stages", "rev.dormant-accounts", "rev.stalled-deals", "rev.win-backs", "sec.peer-outlier-access",
+  "pipe.skipped-stages", "pipe.unmapped-stages", "rev.dormant-accounts", "rev.stalled-deals", "rev.win-backs", "sec.health-check-risks", "sec.health-check-score", "sec.peer-outlier-access",
   "sec.personal-integration-accounts", "sec.sharing-defaults", "sec.unused-access", "svc.agent-licences", "svc.backlog-growth", "svc.knowledge-current",
   "svc.macros-and-quick-text", "svc.queue-sprawl", "svc.unassigned-cases", "tech.apex-code-size", "tech.storage-use", "utl.dashboards-inactive-running-user",
   "utl.dormant-licensed-users", "utl.eac-connections", "utl.never-logged-in", "utl.package-seats", "utl.unassigned-licence-seats", "utl.unused-reports",
@@ -161,8 +161,15 @@ describe("hours to fix", () => {
     assert.deepEqual(effortHours(fields, { unusedFields: 16 }), { low: 8, high: 16, basis: "About 30 to 60 minutes for each field almost never filled in, for 16 fields almost never filled in." });
   });
 
-  test("the cap where the work truly stops growing: held at the cap, with why", () => {
-    assert.deepEqual(effortHours(reports, { unused: 300 }), { low: 8, high: 8, basis: "About 2 to 5 minutes for each unused report, for 300 unused reports, held at 8 hours at most: the list comes from one report of report use, so it stops growing with the count." });
+  test("no rule holds its range at the cap: every per-item rule says how many items its range covers (round 3, finding 5)", () => {
+    const held = Object.entries(FIX_TABLE).filter(([, r]) => r.hours.kind === "each" && r.hours.bulk !== undefined).map(([id]) => id);
+    assert.deepEqual(held, []);
+    assert.deepEqual(effortHours(reports, { unused: 300 }), { low: 4, high: 8, basis: "About 2 to 5 minutes for each unused report, for 300 unused reports. This range covers the first 96 unused reports; the other 204 are scoped separately." });
+    // Rates a consultant would quote, production hand-over included.
+    assert.deepEqual(effortHours(FIX_TABLE["sec.modify-all-data"]!.hours, { unexpected: 1 }), { low: 3, high: 6, basis: "About 3 to 6 hours for each person outside the admin team who holds it, for 1 person outside the admin team who holds it." });
+    assert.deepEqual(effortHours(FIX_TABLE["sec.view-all-data"]!.hours, { unexpected: 10 })!.basis, "About 3 to 6 hours for each person outside the admin team who holds it, for 10 people outside the admin team who hold it. This range covers the first 4 people outside the admin team who hold it; the other 6 are scoped separately.");
+    assert.deepEqual(effortHours(FIX_TABLE["sec.self-authorised-connected-apps"]!.hours, { open: 1 }), { low: 2, high: 4, basis: "About 2 to 4 hours for each connected app users can authorise, for 1 connected app users can authorise." });
+    assert.deepEqual(effortHours(FIX_TABLE["svc.escalation-targets"]!.hours, { dead: 2 }), { low: 2, high: 4, basis: "About 1 to 2 hours for each escalation action with no one to act, for 2 escalation actions with no one to act." });
   });
 
   test("no count the finding holds, no range: never a guess", () => {
@@ -184,7 +191,7 @@ describe("hours to fix", () => {
 
   test("integration hours count what the change touches (finding 6c)", () => {
     // 1 of 4 accounts isn't API only: one account's work, not four.
-    assert.equal(effortHours(FIX_TABLE["int.integration-users-interactive"]!.hours, { accounts: 4, open: 1, loggedInByHand: 0 })!.basis, "About 30 to 60 minutes for each integration account not set to API only, for 1 integration account not set to API only.");
+    assert.equal(effortHours(FIX_TABLE["int.integration-users-interactive"]!.hours, { accounts: 4, open: 1, loggedInByHand: 0 })!.basis, "About 1 to 3 hours for each integration account not set to API only, for 1 integration account not set to API only.");
     // 3 accounts on full licences and none spare: still the work for all 3.
     assert.deepEqual(effortHours(FIX_TABLE["int.integration-user-licences"]!.hours, { accounts: 3, onFull: 3, spare: 0, movable: 0 }), { low: 3, high: 6, basis: "About 1 to 2 hours for each integration account on a full licence, for 3 integration accounts on a full licence." });
     assert.match(effortHours(FIX_TABLE["sec.personal-integration-accounts"]!.hours, { accounts: 2 })!.basis, /for each personal account used for an integration, for 2 personal accounts/);
@@ -220,7 +227,7 @@ describe("the synthetic org's findings carry both", () => {
     for (const f of allPrompts) {
       const p = f.fixPrompt!;
       assert.ok(p.length <= FIX_PROMPT_MAX, `${f.ruleId}: ${p.length}`);
-      const at = ["What we found: ", "What we recommend", "Steps:\n1. ", "Do not:\n- ", "To check it worked:\n- "].map((h) => p.indexOf(h));
+      const at = ["What we found: ", FRAMING, "Steps:\n1. ", "Do not:\n- ", "To check it worked:\n- "].map((h) => p.indexOf(h));
       assert.ok(at.every((i, n) => i > 0 && (n === 0 || i > at[n - 1]!)), f.ruleId);
       assert.ok(p.includes("use a sandbox, test, then deploy"), f.ruleId);
       assert.ok(p.includes("Switch anything off before checking what depends on it"), f.ruleId);
@@ -238,7 +245,7 @@ describe("the synthetic org's findings carry both", () => {
     const p = one("cfg.stage-sprawl").fixPrompt!;
     assert.match(p, /This is for people to decide, not a change to the org\. Do not change the org/);
     assert.match(p, /- Change any setting, metadata or record: this task is analysis only\./);
-    assert.ok(p.includes(RECOMMEND_FOR_OWNERS));
+    assert.ok(p.includes(FRAMING));
     assert.doesNotMatch(one("aut.hardcoded-ids-in-flows").fixPrompt!, /for people to decide/);
   });
 });
@@ -321,7 +328,7 @@ describe("a security fix grants before it tightens (principle B, finding 5)", ()
   test("every other access change grants first: Modify and View All Data, personal integration accounts, licences and remote sites", () => {
     for (const id of ["sec.modify-all-data", "sec.view-all-data"]) {
       const s = steps(id);
-      assert.ok(at(s, /Assign it first/) < at(s, /Only then take/), id);
+      assert.ok(at(s, /assign it first/) < at(s, /Only then take/), id);
       assert.match(s.join(" "), /Taking it away first/, id);
     }
     assert.match(steps("sec.personal-integration-accounts").join(" "), /only then the personal account's API access taken away\. Taking it away first stops the integration\./);
@@ -487,8 +494,91 @@ describe("nothing is printed: every document and figure is as it was (decision 6
     const a = printed(withFix);
     const b = printed(before);
     for (const key of Object.keys(a) as Array<keyof typeof a>) assert.ok(a[key] === b[key], `${key} moved`);
-    for (const [key, text] of Object.entries(a)) assert.doesNotMatch(text, /What we recommend|About \d+ to \d+ (minutes|hours) for each/, key);
+    for (const [key, text] of Object.entries(a)) assert.doesNotMatch(text, /What our report recommends|About \d+ to \d+ (minutes|hours) for each/, key);
     const notes = (findings: Finding[]) => renderRawNotes({ run, calibration: loadCalibration(), findings, metrics: output!.metrics, manualSteps: output!.manualSteps, pseudonyms });
     assert.equal(notes(output!.findings), notes(without));
+  });
+});
+
+describe("round 3: the second reviewer's findings (decision 628)", () => {
+  test("[1] every prompt of both runs frames the report's recommendation as the owners' and not the assistant's task, in one line", () => {
+    assert.equal(FRAMING, "What our report recommends, for the people who own this to decide and carry out. It is not your task: your task is only the steps below.");
+    for (const f of allPrompts) {
+      const framed = f.fixPrompt!.split("\n\n").filter((s) => s.startsWith(FRAMING));
+      assert.equal(framed.length, 1, f.ruleId);
+      assert.match(framed[0]!, /\nThe report says: /, f.ruleId);
+    }
+    // The recommendations the reviewer quoted sit only inside that line.
+    for (const [rule, words] of [["cpq.renewals-not-started", "Create each renewal opportunity now"], ["dq.opps-without-account", "Link each deal to its account"], ["sec.self-authorised-connected-apps", "Set each app to admin-approved users only, then give access"]] as const) {
+      const p = one(rule).fixPrompt!;
+      assert.ok(p.includes(words), rule);
+      assert.ok(!instructions(p).includes(words), rule);
+    }
+  });
+
+  test("[2] Modify and View All Data never move a person to another profile: shared profiles are listed for an admin with what else they give", () => {
+    for (const id of ["sec.modify-all-data", "sec.view-all-data"]) {
+      const steps = FIX_TABLE[id]!.prompt.steps.join(" ");
+      assert.doesNotMatch(steps, /move the person to a profile|to a profile without it|change (?:the|their|a) user's profile/i, id);
+      assert.match(steps, /Never change a profile or a user's profile: where a person holds it through a profile others share, list for an admin each such person, with what else that profile gives them, so the owners can decide\./, id);
+      assert.match(steps, /Hand the tested change, and its order, to the admin who owns access, to make in production in the same order\./, id);
+    }
+  });
+
+  const VALIDATION = Object.entries(FIX_TABLE).filter(([, r]) => r.prompt.steps.some((s) => /build a validation rule that/.test(s))).map(([id]) => id).sort();
+
+  test("[3] a validation rule is built in a sandbox for new records or a changed field only, and handed to the owners, never turned on by the assistant", () => {
+    assert.deepEqual(VALIDATION, ["cur.missing-next-steps", "dq.loss-reason-missing", "dq.open-opps-missing-amount", "dq.open-opps-past-close", "dq.opps-without-account", "fct.early-stage-commits", "svc.case-classification", "svc.origin-missing"]);
+    for (const id of VALIDATION) {
+      const steps = FIX_TABLE[id]!.prompt.steps;
+      const build = steps.find((s) => /build a validation rule that/.test(s))!;
+      assert.match(build, /In (?:a|the) sandbox/, id);
+      assert.match(build, /written so it applies only when .+, never to an edit of a record that already lacks the value/, id);
+      assert.match(steps.join(" "), /Hand the owners the tested rule and a report of the existing records that would fail it; they decide when it is turned on in production\./, id);
+    }
+    // Nothing that changes what users can save or sign in to is switched on in production by the assistant.
+    for (const [id, r] of Object.entries(FIX_TABLE)) {
+      const steps = r.prompt.steps.join(" ");
+      if (/validation rule that|approval process|permission set|admin-approved|mix HTTPS|duplicate rule/.test(steps)) assert.doesNotMatch(steps, /(?:then do the same|turn (?:it|them) on|then) in production(?! in alert mode)|do the same in production/i, id);
+    }
+    for (const id of ["sec.health-check-score", "sec.health-check-risks"]) assert.ok(FIX_TABLE[id]!.prompt.decision, id);
+    assert.match(one("dq.open-opps-missing-amount").fixPrompt!, /written so it applies only when a deal is created or moves into that stage/);
+  });
+
+  test(`[4] a set-up label holding a known person's name in the forms admins use is never named; the shortest word matched is ${MIN_NAME_PART} letters`, () => {
+    const p = new Pseudonymiser();
+    p.label("user", "005000000000005AAA", "Sam Reed", ["sam.reed@example.com"]);
+    p.label("user", "005000000000006AAA", "Priya Natarajan", ["priya@example.com"]);
+    p.label("user", "005000000000007AAA", "Mark Bishop", ["mbishop@example.com"]);
+    p.label("user", "005000000000008AAA", "Grace Hall", ["ghall@example.com"]);
+    p.label("user", "005000000000009AAA", "Shared Sales Desk", ["sales@example.com"]);
+    p.label("account", "001000000000001AAA", "001000000000001AAA");
+    // The reviewer's planted labels: those that came out named before this round, then those already caught.
+    const throughBefore = ["sreed_nightly_sync", "pnatarajan_admin", "Reeds Escalations"];
+    const caughtBefore = ["Priya_Lead_Router", "reed_nightly_sync", "NATARAJAN_SYNC", "Natarajan-Sync", "SReedExport", "Sam’s Escalations", "Bishop Approval", "Mark Approval", "Hall Booking", "grace_hall_flow", "GHall_Flow", "PS_Priya", "Natarajan Admin", "Sam Reed Profile", "Team Sam", "Priya Group", "Sam Reed Reports"];
+    for (const label of [...throughBefore, ...caughtBefore]) {
+      const f: PromptFinding = { title: `One item has a problem: ${label}`, summary: `${label} was found. ${label} matters.`, recommendation: `Look at ${label}.`, subjects: [{ type: "flow", label }], recommendationType: "investigate" };
+      const out = fixPrompt(f, FIX_TABLE["aut.flows-without-fault-paths"]!.prompt, p);
+      assert.ok(out, `${label}: the prompt is kept`);
+      assert.ok(!out.includes(label), `${label} is named`);
+      assert.match(out, /the flow listed in this finding/, label);
+    }
+    for (const label of throughBefore) assert.ok(labelHoldsPersonName(label, p), label);
+    assert.deepEqual(labelWords("SReedExport_v2-Sam’s"), ["s", "reed", "export", "v", "sam", "s"]);
+    // Ordinary words in set-up names, and shared users' words, stay nameable.
+    for (const label of ["Opportunity_Route_Deal", "Renewal_Notice", "Sales EU", "Lead Source on Lead", "Support Tier 1"]) assert.equal(labelHoldsPersonName(label, p), false, label);
+    // Accepted limit: a customer's or account's name can't be known to the run, so it stays, as the finding's own title shows it.
+    const globex = fixPrompt({ title: "One item: Globex Integration", summary: "Globex Integration was found.", recommendation: "Look.", subjects: [{ type: "connected app", label: "Globex Integration" }], recommendationType: "change" }, FIX_TABLE["sec.self-authorised-connected-apps"]!.prompt, p)!;
+    assert.ok(globex.includes("Globex Integration"));
+  });
+
+  test("[6] instructions name only what exists: flows look up queues and groups by developer name, never a user's; quotes to order is a report", () => {
+    const flows = FIX_TABLE["aut.hardcoded-ids-in-flows"]!.prompt.steps.join(" ");
+    assert.match(flows, /replace a queue's or public group's id with a lookup of it by its developer name/);
+    assert.match(flows, /for a person, use a custom setting, a custom metadata record or a role instead of a user id, and never type a username into the flow/);
+    assert.doesNotMatch(flows, /user by its developer name/);
+    const orders = FIX_TABLE["cpq.quote-to-order"]!.prompt.steps.join(" ");
+    assert.match(orders, /Build a report of won quotes with no order, for their owners\./);
+    assert.doesNotMatch(orders, /validation rule|build the check/);
   });
 });

@@ -62,7 +62,7 @@ export const FIX_TABLE: Readonly<Record<string, FixRule>> = {
   },
   "cfg.undocumented-fields": {
     hours: each(["bare"], "field with no description or help text", "fields with no description or help text", [10, 20], 24),
-    prompt: change("fields", ["List the custom fields with no description or help text on the objects named.", "Draft a description of what each field holds and why, and help text for the ones people fill in, from its label, type, values and where it's used.", "Mark any field whose purpose you can't work out for its owner to explain.", "Add the agreed text in a sandbox, then in production."], ["Every custom field on these objects has a description, and every field on a page layout has help text."]),
+    prompt: change("fields", ["List the custom fields with no description or help text on the objects named.", "Draft a description of what each field holds and why, and help text for the ones people fill in, from its label, type, values and where it's used.", "Flag any field whose purpose you can't work out for its owner to explain.", "Add the agreed text in a sandbox, then in production."], ["Every custom field on these objects has a description, and every field on a page layout has help text."]),
   },
   "cfg.stage-sprawl": {
     hours: fixed(4, 8, PROCESS),
@@ -92,15 +92,16 @@ export const FIX_TABLE: Readonly<Record<string, FixRule>> = {
   },
   "aut.hardcoded-ids-in-flows": {
     hours: each(["affected"], "flow with hardcoded values", "flows with hardcoded values", [60, 120], 16),
-    prompt: change("flows", ["Open each flow and list every record id and email address typed into it.", "In a sandbox, replace each with a custom metadata record, a custom label, or a lookup of the queue or user by its developer name, as a new flow version.", "Test each path that used a replaced value."], ["No flow version that is active holds a typed record id or email, and each path still reaches the same record or person."]),
+    prompt: change("flows", ["Open each flow and list every record id and email address typed into it.", "In a sandbox, replace a queue's or public group's id with a lookup of it by its developer name; for a person, use a custom setting, a custom metadata record or a role instead of a user id, and never type a username into the flow; put any other value in a custom label or custom metadata record. Save each as a new flow version.", "Test each path that used a replaced value."], ["No flow version that is active holds a typed record id or email, and each path still reaches the same record, group or person."]),
   },
+
   "aut.flows-without-fault-paths": {
     hours: each(["affected"], "flow with no fault path", "flows with no fault path", [60, 120], 24),
     prompt: change("flows", ["In a sandbox, build one subflow that records a failure (the flow, the element and the error message) and tells an admin.", "In each flow, add a fault path from every element that creates, updates or removes records, leading to that subflow, as a new flow version.", "Test by making each save fail, for example with a validation rule in the sandbox."], ["Every data element in these flows has a fault path, and a forced failure is recorded and reaches an admin."]),
   },
   "aut.undocumented-automation": {
     hours: each(["missing"], "flow, rule or class with no description", "flows, rules and classes with no description", [10, 20], 24),
-    prompt: change("flows, rules and classes", ["List the flows, workflow rules, processes and Apex classes with no description, busiest objects first.", "Draft a description of what each does and why, from its trigger, criteria and actions or code.", "Mark any you can't explain for its owner, and add the agreed descriptions in a sandbox, then in production."], ["Every active flow, rule and class has a description."]),
+    prompt: change("flows, rules and classes", ["List the flows, workflow rules, processes and Apex classes with no description, busiest objects first.", "Draft a description of what each does and why, from its trigger, criteria and actions or code.", "Flag any you can't explain for its owner, and add the agreed descriptions in a sandbox, then in production."], ["Every active flow, rule and class has a description."]),
   },
   "aut.apex-coverage": {
     hours: each(["weakClasses"], "class below the coverage line", "classes below the coverage line", [120, 240], 40),
@@ -116,7 +117,7 @@ export const FIX_TABLE: Readonly<Record<string, FixRule>> = {
   },
   "tech.apex-code-size": {
     hours: fixed(8, 24, "Finding the Apex nobody calls and preparing the plan for its owners; rewriting code is more"),
-    prompt: decide("Apex classes", ["List Apex classes by size, with whether each is referenced, run or covered by tests.", "Mark classes and test classes nobody calls as candidates to retire.", "Prepare the list for each class's owner to decide."], ["Each candidate has its references listed and an owner's decision."]),
+    prompt: decide("Apex classes", ["List Apex classes by size, with whether each is referenced, run or covered by tests.", "Flag classes and test classes nobody calls as candidates to retire.", "Prepare the list for each class's owner to decide."], ["Each candidate has its references listed and an owner's decision."]),
   },
   "tech.storage-use": {
     hours: fixed(4, 16, "Preparing the plan for what can leave Salesforce and what must be kept; carrying it out is more"),
@@ -165,9 +166,10 @@ export const FIX_TABLE: Readonly<Record<string, FixRule>> = {
     },
   },
   "utl.unused-reports": {
-    hours: each(["unused"], "unused report", "unused reports", [2, 5], 8, "the list comes from one report of report use, so it stops growing with the count"),
+    hours: each(["unused"], "unused report", "unused reports", [2, 5], 8),
     prompt: decide("reports", ["List reports not run in the period, with their folder and last change.", "Propose a core report set for each team.", "List the rest for their owners to decide on, checking none feeds a dashboard or a subscription."], ["The proposal lists the core set and the reports for their owners, with none in use on a dashboard."]),
   },
+
   "utl.dashboards-inactive-running-user": {
     hours: each(["affected"], "dashboard", "dashboards", [15, 30], 8),
     prompt: decide("dashboards", ["For each dashboard listed, set out who views it and what data they should see.", "Propose a running user for each: a current user with that access, a dedicated reporting user, or a dynamic dashboard.", "Prepare the proposal for each dashboard's owner."], ["Each dashboard has a proposed running user its owner has agreed."]),
@@ -196,46 +198,51 @@ export const FIX_TABLE: Readonly<Record<string, FixRule>> = {
   // Data quality
   "dq.open-opps-past-close": {
     hours: fixed(2, 4, REPORT),
-    prompt: change("deals", ["Build a report of open deals with a close date in the past, grouped by owner.", "In a sandbox, build a validation rule that stops an open deal being saved with a past close date, and test it; turn it on only once owners have updated their deals.", "Share the report for the weekly pipeline review, where each owner decides on their own deals."], ["The report shows no open deal with a close date in the past after the next review."]),
+    prompt: change("deals", ["Build a report of open deals with a close date in the past, grouped by owner, for the weekly pipeline review, where each owner decides on their own deals.", "In a sandbox, build a validation rule that stops an open deal being saved with a past close date, written so it applies only when a deal is created or its close date or stage changes, never to an edit of a record that already lacks the value, and test it." , "Hand the owners the tested rule and a report of the existing records that would fail it; they decide when it is turned on in production."], ["The report shows no open deal with a close date in the past after the next review, and the owners have the tested rule."]),
   },
+
   "dq.opps-inactive-owner": {
     hours: fixed(1, 3, PLAN),
     prompt: decide("deals", ["List open deals owned by inactive users, with the team each sat in.", "Prepare the list for the sales manager to name a new owner for each.", "Draft a step for the leaver checklist so this is handled when someone leaves."], ["Each deal has a proposed new owner for the sales manager to confirm."]),
   },
   "dq.open-opps-missing-amount": {
     hours: fixed(2, 4, REPORT),
-    prompt: change("deals", ["Build a report of open deals with no amount, by stage and owner.", "In a sandbox, build a validation rule that requires an amount from the stage where a price is known, and test it.", "Share the report so owners can fill their own gaps."], ["No open deal past that stage has an empty amount."]),
+    prompt: change("deals", ["Build a report of open deals with no amount, by stage and owner, so owners can fill their own gaps.", "In a sandbox, build a validation rule that requires an amount from the stage where a price is known, written so it applies only when a deal is created or moves into that stage, never to an edit of a record that already lacks the value, and test it.", "Hand the owners the tested rule and a report of the existing records that would fail it; they decide when it is turned on in production."], ["The report shrinks at each review, and the owners have the tested rule."]),
   },
+
   "dq.open-opps-no-activity": {
     hours: fixed(2, 4, REPORT),
     prompt: change("deals", ["Check activity capture works first: email and calendar sync, and whether tasks are logged against deals.", "Build a report of open deals with no activity in 90 days, by owner.", "Share it for each owner to decide on their own deals."], ["The report shrinks at each pipeline review."]),
   },
   "dq.opps-without-account": {
     hours: fixed(2, 4, REPORT),
-    prompt: change("deals", ["Build a report of open deals with no account, for owners to link their own.", "In a sandbox, build a validation rule that requires an account on new deals, and test it; turn it on only once the existing deals have accounts, or it will stop people saving them."], ["No open deal lacks an account."]),
+    prompt: change("deals", ["Build a report of open deals with no account, for owners to link their own.", "In a sandbox, build a validation rule that requires an account, written so it applies only when a deal is created, never to an edit of a record that already lacks the value, and test it.", "Hand the owners the tested rule and a report of the existing records that would fail it; they decide when it is turned on in production."], ["The report shrinks, and the owners have the tested rule."]),
   },
+
   "dq.loss-reason-missing": {
-    hours: fixed(2, 4, "Agreeing a short list of reasons and adding the rule; past deals aren't filled in"),
-    prompt: change("lost deals", ["List the loss reason values and how often each is used, and propose a short list for sales to agree.", "In a sandbox, build a validation rule that requires a reason when a deal is closed lost.", "Test closing a test deal with and without a reason."], ["A deal can't be closed lost without a reason."]),
+    hours: fixed(2, 4, "Proposing a short list of reasons and building the rule for the owners to turn on; past deals aren't filled in"),
+    prompt: change("lost deals", ["List the loss reason values and how often each is used, and propose a short list for sales to agree.", "In a sandbox, build a validation rule that requires a reason, written so it applies only when a deal's stage changes to closed lost, never to an edit of a record that already lacks the value, and test closing a test deal with and without one.", "Hand the owners the tested rule and a report of the existing records that would fail it; they decide when it is turned on in production."], ["The owners have the agreed list and the tested rule."]),
   },
+
   "dq.records-inactive-owner": {
     hours: fixed(2, 6, PLAN),
     prompt: decide("records", ["Count accounts, contacts and leads owned by inactive users, by object.", "Prepare the list for the business to name new owners.", "Draft a step for the leaver checklist so this is handled when someone leaves."], ["Each group of records has a proposed new owner for the business to confirm."]),
   },
   "dq.duplicate-rules-missing": {
-    hours: each(["missing"], "object with no duplicate rule", "objects with no duplicate rule", [120, 240], 12, "the rules share one matching approach"),
-    prompt: change("objects", ["In a sandbox, for each object named, build a matching rule on the fields that identify a record, such as name and email.", "Build a duplicate rule that uses it, in alert mode only, so nothing is blocked.", "Test with a known duplicate, then turn it on in production in alert mode and watch the alerts for a few weeks."], ["Each object has an active duplicate rule, and entering a known duplicate shows an alert."]),
+    hours: each(["missing"], "object with no duplicate rule", "objects with no duplicate rule", [120, 240], 12),
+    prompt: change("objects", ["In a sandbox, for each object named, build a matching rule on the fields that identify a record, such as name and email.", "Build a duplicate rule that uses it, in alert mode only, so nothing is blocked.", "Test with a known duplicate, then hand the tested rules to the data's owners, who decide when they are turned on in production, in alert mode."], ["In the sandbox, entering a known duplicate shows an alert, and the owners have the tested rules."]),
   },
+
   "dq.duplicate-accounts": {
     hours: each(["groups"], "group of accounts that share a name", "groups of accounts that share a name", [15, 30], 24),
     prompt: {
       items: "accounts",
       decision: true,
       removes: true,
-      steps: ["For each group of accounts that share a name, compare their addresses, contacts, deals and owners.", "Mark which look like true duplicates and which record has the most history.", "List the integrations that hold an account's id.", "Prepare the list for the accounts' owners to decide on each group."],
+      steps: ["For each group of accounts that share a name, compare their addresses, contacts, deals and owners.", "Flag which look like true duplicates and which record has the most history.", "List the integrations that hold an account's id.", "Prepare the list for the accounts' owners to decide on each group."],
       verify: ["Each group has a comparison and an owner's decision."],
       review: {
-        steps: ["This task is a review for the accounts' owners.", "For each group of accounts that share a name, compare their addresses, contacts, deals and owners, and mark which look like true duplicates and which record has the most history.", "List the integrations that hold an account's id, and anything that would be lost if two records became one.", "Bring the list to the accounts' owners, so they can decide on each group."],
+        steps: ["This task is a review for the accounts' owners.", "For each group of accounts that share a name, compare their addresses, contacts, deals and owners, and flag which look like true duplicates and which record has the most history.", "List the integrations that hold an account's id, and anything that would be lost if two records became one.", "Bring the list to the accounts' owners, so they can decide on each group."],
         verify: ["Each group has a comparison and an owner's decision."],
       },
     },
@@ -287,21 +294,25 @@ export const FIX_TABLE: Readonly<Record<string, FixRule>> = {
 
   // Security, integrations and best practice
   "sec.health-check-score": {
-    hours: fixed(8, 16, "Working through the high-risk settings and planning the rest, whatever their number"),
-    prompt: change("security settings", ["Open Security Health Check and list the settings marked high risk, then medium.", "For each, describe the standard value, what changes for users if it's applied, and any integration or login that could stop working (IP ranges, session length, password rules).", "Give notice to the people affected, then apply the agreed changes in a sandbox, test logins and integrations, and only then in production.", "Applying a stricter setting before checking who it affects can lock out users or integrations."], ["The Health Check score rises, and no user or integration is locked out."]),
+    hours: fixed(8, 16, "Preparing, for each high and medium risk setting, who and what a change affects and the order to make them in"),
+    prompt: decide("security settings", ["Open Security Health Check and list the settings marked high risk, then medium.", "For each, set out the standard value, what changes for users if it's applied, and any login or integration that could stop working (IP ranges, session length, password rules).", "Propose the order to make them in, and the notice people would need, for the people who own security to decide."], ["Each setting has who and what it affects, and a proposed order, ready for the owners."]),
   },
+
   "sec.health-check-risks": {
-    hours: fixed(4, 8, "Bringing the high-risk settings up to standard and planning the medium ones"),
-    prompt: change("security settings", ["For each setting named, set out its current and standard values, and who and what it affects, integrations included.", "Plan the change, with notice for users where it changes how they log in.", "Apply it in a sandbox, test logins and integrations, and only then in production. Applying it first can lock out users or integrations."], ["Each setting matches Salesforce's standard value, or has a recorded reason not to."]),
+    hours: fixed(4, 8, "Preparing, for each setting named, who and what a change affects and the order to make them in"),
+    prompt: decide("security settings", ["For each setting named, set out its current and standard values, and who and what a change affects, integrations included.", "Propose the order to make them in, and the notice people would need, for the people who own security to decide."], ["Each setting has who and what it affects, and a proposed order, ready for the owners."]),
   },
+
   "sec.modify-all-data": {
-    hours: each(["unexpected"], "person outside the admin team who holds it", "people outside the admin team who hold it", [60, 120], 8, "people with the same work share one permission set"),
-    prompt: change("people", ["List the profiles and permission sets that grant Modify All Data to people outside the admin team, and anything that runs as them: flows, scheduled jobs and integrations.", "For each person, find which objects they really need to edit, and in a sandbox build a permission set with only that access.", "Assign it first, and confirm the person, and anything that runs as them, can still do the work.", "Only then take Modify All Data away. Where it comes from a profile others hold, move the person to a profile without it rather than changing the shared one. Taking it away first stops their work and anything that runs as them.", "Then do the same in production, in the same order."], ["Only admins and agreed system accounts hold Modify All Data, and the others can still do their work."]),
+    hours: each(["unexpected"], "person outside the admin team who holds it", "people outside the admin team who hold it", [180, 360], 24),
+    prompt: change("people", ["List the profiles and permission sets that grant Modify All Data to people outside the admin team, and anything that runs as them: flows, scheduled jobs and integrations.", "For each person, find which objects they really need to edit, and in a sandbox build a permission set with only that access.", "In the sandbox, assign it first, and confirm the person, and anything that runs as them, can still do the work.", "Only then take Modify All Data away, and only from a permission set that nobody who needs it holds. Never change a profile or a user's profile: where a person holds it through a profile others share, list for an admin each such person, with what else that profile gives them, so the owners can decide.", "Taking it away first stops their work and anything that runs as them.", "Hand the tested change, and its order, to the admin who owns access, to make in production in the same order."], ["Only admins and agreed system accounts hold Modify All Data, or each remaining holder is on the list for the owners, and the others can still do their work."]),
   },
+
   "sec.view-all-data": {
-    hours: each(["unexpected"], "person outside the admin team who holds it", "people outside the admin team who hold it", [60, 120], 8, "people with the same work share one permission set"),
-    prompt: change("people", ["List the profiles and permission sets that grant View All Data to people outside the admin team, and anything that runs as them: reports, dashboards, scheduled jobs and integrations.", "For each person, find which objects they really need to read, and in a sandbox build a permission set with only that access.", "Assign it first, and confirm the person, and anything that runs as them, can still see what they need.", "Only then take View All Data away. Where it comes from a profile others hold, move the person to a profile without it rather than changing the shared one. Taking it away first hides data their work and reports rely on.", "Then do the same in production, in the same order."], ["Only admins and agreed system accounts hold View All Data, and the others can still see what they need."]),
+    hours: each(["unexpected"], "person outside the admin team who holds it", "people outside the admin team who hold it", [180, 360], 24),
+    prompt: change("people", ["List the profiles and permission sets that grant View All Data to people outside the admin team, and anything that runs as them: reports, dashboards, scheduled jobs and integrations.", "For each person, find which objects they really need to read, and in a sandbox build a permission set with only that access.", "In the sandbox, assign it first, and confirm the person, and anything that runs as them, can still do the work.", "Only then take View All Data away, and only from a permission set that nobody who needs it holds. Never change a profile or a user's profile: where a person holds it through a profile others share, list for an admin each such person, with what else that profile gives them, so the owners can decide.", "Taking it away first hides data their work and reports rely on.", "Hand the tested change, and its order, to the admin who owns access, to make in production in the same order."], ["Only admins and agreed system accounts hold View All Data, or each remaining holder is on the list for the owners, and the others can still do their work."]),
   },
+
   "sec.sharing-defaults": {
     hours: each(["openObjects"], "object with an open default", "objects with an open default", [240, 480], 24),
     prompt: decide("objects", ["For each object named, set out its default access and who needs to edit its records.", "Draft the sharing rules, roles or teams that would give that access if the default were tightened.", "Note that tightening recalculates sharing and can change what people see, and prepare the options."], ["Each object has an agreed default, or a recorded reason to keep it open."]),
@@ -319,21 +330,24 @@ export const FIX_TABLE: Readonly<Record<string, FixRule>> = {
     prompt: decide("integrations", ["Find which integrations log in through the personal accounts listed, from login history and connected apps.", "For each, set out an integration user on the Salesforce Integration licence, with an API-only profile and a permission set holding only the access it needs.", "Prepare the plan for the integration's owner: the new account is set up and tested in a sandbox first, the integration moved to it and tested, and only then the personal account's API access taken away. Taking it away first stops the integration."], ["Each integration has a plan its owner has agreed."]),
   },
   "int.integration-users-interactive": {
-    hours: each(["open"], "integration account not set to API only", "integration accounts not set to API only", [30, 60], 4, "the same permission set serves every account"),
-    prompt: change("integration accounts", ["For each integration account listed, check first whether anyone signs in to it through the browser, from login history; if anyone does, find out why before going on.", "In a sandbox, build a permission set holding only the API Only User permission, and assign it to that integration account alone. Never change a profile other users hold.", "Test that the integration still connects, then do the same in production."], ["The accounts can't log in through the browser, and the integrations still run."]),
+    hours: each(["open"], "integration account not set to API only", "integration accounts not set to API only", [60, 180], 8),
+    prompt: change("integration accounts", ["For each integration account listed, check first whether anyone signs in to it through the browser, from login history; if anyone does, find out why before going on.", "In a sandbox, build a permission set holding only the API Only User permission, and assign it to that integration account alone. Never change a profile other users hold.", "Test that the integration still connects.", "Hand the tested change to the admin who owns access, to make in production once the integration's owner agrees."], ["In the sandbox the accounts can't log in through the browser and the integrations still run, and the admin has the change."]),
   },
+
   "int.integration-user-licences": {
     hours: each(["onFull"], "integration account on a full licence", "integration accounts on a full licence", [60, 120], 16),
     prompt: decide("integration accounts", ["For each account listed, set out an integration user on the Salesforce Integration licence, with an API-only profile and a permission set holding only the access it needs.", "Note how many Salesforce Integration licences are free and how many would have to be bought.", "Prepare the plan for each integration's owner: the new account tested in a sandbox first, the integration moved and tested, and only then the full seat given up at renewal."], ["Each integration has a plan its owner has agreed."]),
   },
   "sec.self-authorised-connected-apps": {
-    hours: each(["open"], "connected app users can authorise", "connected apps users can authorise", [60, 120], 8),
-    prompt: change("connected apps", ["For each app named, list who and what uses it today, from its OAuth usage and login history: people and integration accounts. The finding says when an app carries data now.", "In a sandbox, build a permission set that gives access to the app, and assign it to every person and integration account on that list.", "Only then set the app to admin-approved users are pre-authorised, and test that each of them, and each integration, still connects.", "Switching the policy first cuts off everyone using the app now, integrations included.", "Then do the same in production, in the same order."], ["Only assigned users can use the apps, and every integration still runs."]),
+    hours: each(["open"], "connected app users can authorise", "connected apps users can authorise", [120, 240], 16),
+    prompt: change("connected apps", ["For each app named, list who and what uses it today, from its OAuth usage and login history: people and integration accounts. The finding says when an app carries data now.", "In a sandbox, build a permission set that gives access to the app, and assign it to every person and integration account on that list.", "Only then set the app to admin-approved users are pre-authorised, and test that each of them, and each integration, still connects.", "Switching the policy first cuts off everyone using the app now, integrations included.", "Hand the tested change, and its order, to the admin who owns access, to make in production in the same order."], ["In the sandbox only assigned users can use the apps and every integration still runs, and the admin has the change and its order."]),
   },
+
   "sec.insecure-remote-sites": {
-    hours: fixed(1, 4, "Moving each site to HTTPS and then turning off the mixed-protocol setting"),
-    prompt: change("remote sites", ["For each remote site named, check whether the address works over HTTPS, and which callouts use it.", "In a sandbox, change it to HTTPS and test every callout to it.", "Only then turn off the setting that lets code mix HTTPS and HTTP. Turning it off first stops any callout still on HTTP.", "Then do the same in production, in the same order."], ["Every remote site uses HTTPS and callouts still work."]),
+    hours: fixed(1, 4, "Moving each site to HTTPS and turning off the mixed-protocol setting, in a sandbox, for the admin to repeat"),
+    prompt: change("remote sites", ["For each remote site named, check whether the address works over HTTPS, and which callouts use it.", "In a sandbox, change it to HTTPS and test every callout to it.", "Only then turn off the setting that lets code mix HTTPS and HTTP, in the sandbox. Turning it off first stops any callout still on HTTP.", "Hand the tested change, and its order, to the admin, to make in production in the same order."], ["Every remote site uses HTTPS in the sandbox, callouts still work, and the admin has the change."]),
   },
+
   "int.hardcoded-endpoints": {
     hours: each(["addresses"], "address written into code", "addresses written into code", [120, 240], 24),
     prompt: change("Apex classes", ["Find each callout address written into the code named.", "In a sandbox, set up a named credential for it, with its authentication in an external credential.", "Change the code to call it with callout: and the credential's name, and test each callout."], ["No callout address is written into code, and each callout still works."]),
@@ -378,8 +392,9 @@ export const FIX_TABLE: Readonly<Record<string, FixRule>> = {
   },
   "cur.missing-next-steps": {
     hours: fixed(2, 4, REPORT),
-    prompt: change("deals", ["Build a report of open deals with an empty next step, for the pipeline review.", "In a sandbox, build a validation rule that requires a next step from an agreed stage, and test it; turn it on once owners have filled their own."], ["No open deal past that stage lacks a next step."]),
+    prompt: change("deals", ["Build a report of open deals with an empty next step, for the pipeline review.", "In a sandbox, build a validation rule that requires a next step from an agreed stage, written so it applies only when a deal is created or moves into that stage, never to an edit of a record that already lacks the value, and test it.", "Hand the owners the tested rule and a report of the existing records that would fail it; they decide when it is turned on in production."], ["The report shrinks at each review, and the owners have the tested rule."]),
   },
+
   "cur.account-concentration": {
     hours: fixed(2, 4, PROCESS),
     prompt: decide("pipeline", ["Show how open pipeline splits across accounts, and how much the largest holds by stage and close date.", "Set out how much of it is likely, from stage and history.", "Prepare options for building pipeline elsewhere."], ["The analysis shows the exposure and the options."]),
@@ -406,8 +421,9 @@ export const FIX_TABLE: Readonly<Record<string, FixRule>> = {
   },
   "fct.early-stage-commits": {
     hours: fixed(1, 3, REPORT),
-    prompt: change("deals", ["Build a report of Commit deals in early stages, for the forecast call.", "In a sandbox, build a validation rule that stops early-stage deals being marked Commit, and test it; turn it on once owners have updated their own."], ["No deal in an early stage is in Commit."]),
+    prompt: change("deals", ["Build a report of Commit deals in early stages, for the forecast call.", "In a sandbox, build a validation rule that stops an early-stage deal being marked Commit, written so it applies only when a deal's forecast category or stage changes, never to an edit of a record that already lacks the value, and test it.", "Hand the owners the tested rule and a report of the existing records that would fail it; they decide when it is turned on in production."], ["The report is in the forecast call, and the owners have the tested rule."]),
   },
+
 
   // Activity and leads
   "act.event-link-collapse": {
@@ -491,36 +507,41 @@ export const FIX_TABLE: Readonly<Record<string, FixRule>> = {
     prompt: change("email cases", ["Show time to first reply on email cases, by queue.", "In a sandbox, set up an auto-response and routing so a person replies within the target, and test it with test emails."], ["Email cases get a first reply within the target."]),
   },
   "svc.reopened-cases": {
-    hours: fixed(2, 6, "Finding which case types reopen and changing how they're closed"),
-    prompt: change("cases", ["Show reopened cases by type, reason and queue.", "Propose a confirmation step before closing for the types that reopen most, for the service leaders to agree.", "Build it in a sandbox and test it."], ["The reopen rate falls below the line."]),
+    hours: fixed(2, 6, "Finding which case types reopen and preparing a confirmation step for the service leaders"),
+    prompt: change("cases", ["Show reopened cases by type, reason and queue.", "Propose a confirmation step before closing for the types that reopen most, for the service leaders to agree.", "Build it in a sandbox and test it, and hand it to the service leaders, who decide when it is turned on in production."], ["The service leaders have the analysis and the tested step."]),
   },
+
   "svc.unassigned-cases": {
     hours: fixed(2, 6, PROCESS),
     prompt: decide("queues", ["List each case queue with its members and its oldest open case.", "Propose members for each queue that has none, and routing from busy queues, for the service leaders to agree."], ["Every queue has proposed members the service leaders have agreed."]),
   },
   "svc.origin-missing": {
-    hours: fixed(2, 4, "Setting Origin automatically for each channel and requiring it by hand"),
-    prompt: change("cases", ["List each channel cases come in through.", "In a sandbox, set Origin automatically for each new case: Email-to-Case, web forms, messaging and phone.", "Require Origin when an agent makes a case by hand, and test each channel."], ["New cases all have an Origin."]),
+    hours: fixed(2, 4, "Setting Origin automatically for each channel and building the rule for the owners to turn on"),
+    prompt: change("cases", ["List each channel cases come in through, and how Origin is set for each.", "In a sandbox, set Origin automatically for new cases from each channel (in the Email-to-Case routing address, the web form's hidden Origin field, and the messaging channel's settings), and test each.", "In the sandbox, build a validation rule that requires Origin, written so it applies only when a case is created, never to an edit of a record that already lacks the value, and test it.", "Hand the owners the tested rule and a report of the existing records that would fail it; they decide when it is turned on in production."], ["New cases in the sandbox all get an Origin, and the owners have the tested rule."]),
   },
+
   "svc.case-classification": {
-    hours: fixed(2, 4, "Agreeing a short list of types or reasons and requiring one on closing"),
-    prompt: change("cases", ["Show how Type and Reason are used, and their values, and propose a short list for the service leaders to agree.", "Once it's agreed, in a sandbox require one on closing, and test it."], ["Closed cases all record why the customer got in touch."]),
+    hours: fixed(2, 4, "Proposing a short list of types or reasons and building the rule for the owners to turn on"),
+    prompt: change("cases", ["Show how Type and Reason are used, and their values, and propose a short list for the service leaders to agree.", "In a sandbox, build a validation rule that requires one, written so it applies only when a case's status changes to closed, never to an edit of a record that already lacks the value, and test it.", "Hand the owners the tested rule and a report of the existing records that would fail it; they decide when it is turned on in production."], ["The service leaders have the agreed list and the tested rule."]),
   },
+
   "svc.case-customer": {
-    hours: fixed(2, 6, "Matching incoming cases to contacts automatically"),
-    prompt: change("cases", ["Show open cases with no contact or account, by channel.", "In a sandbox, set up matching of new incoming email and web cases to contacts, and test it with test cases."], ["New cases are linked to a customer."]),
+    hours: fixed(2, 6, "Checking how incoming cases are matched to contacts and building the matching that's missing"),
+    prompt: change("cases", ["Show open cases with no contact or account, by channel.", "Check whether Email-to-Case and Web-to-Case find the contact from the sender's email, and where they don't, set out why.", "In a sandbox, build what's missing, for example a flow on new cases that looks up the contact by the sender's email, and test it with test cases."], ["New test cases in the sandbox are linked to a customer."]),
   },
+
   "svc.escalation-rules": {
     hours: fixed(2, 6, "Adding one escalation rule or an entitlement process"),
     prompt: change("escalation rules", ["Propose the time after which an open case should escalate, by priority, for the service leaders to agree.", "In a sandbox, add an escalation rule that sends those cases to a team lead's queue and tells them, and test it."], ["A test case left open past the time escalates."]),
   },
   "svc.escalation-targets": {
-    hours: each(["dead"], "escalation action with no one to act", "escalation actions with no one to act", [30, 60], 4, "one queue serves them all"),
-    prompt: change("escalation actions", ["List escalation actions that point at an inactive user or an empty queue.", "Propose a queue with members for each, for the service leaders to agree.", "In a sandbox, point each at the agreed queue and test it; add escalation targets to the leaver checklist."], ["Every escalation reaches someone who can act."]),
+    hours: each(["dead"], "escalation action with no one to act", "escalation actions with no one to act", [60, 120], 8),
+    prompt: change("escalation actions", ["List escalation actions that point at an inactive user or an empty queue.", "Propose a queue with members for each, for the service leaders to agree.", "In a sandbox, point each at the agreed queue and test it, and draft a line on escalation targets for the leaver checklist."], ["Every escalation in the sandbox reaches someone who can act."]),
   },
+
   "svc.queue-sprawl": {
     hours: fixed(2, 4, PROCESS),
-    prompt: decide("queues", ["List each case queue with its members, open cases and the routing and rules that use it.", "Mark queues nobody works and what routes to them.", "Propose which to keep, which to fold together and who should be a member, for the service leaders to decide."], ["Every queue has a decision from the service leaders."]),
+    prompt: decide("queues", ["List each case queue with its members, open cases and the routing and rules that use it.", "Flag queues nobody works and what routes to them.", "Propose which to keep, which to fold together and who should be a member, for the service leaders to decide."], ["Every queue has a decision from the service leaders."]),
   },
   "svc.omni-routing": {
     hours: each(["unrouted"], "case queue Omni-Channel doesn't route", "case queues Omni-Channel doesn't route", [60, 120], 8),
@@ -536,11 +557,11 @@ export const FIX_TABLE: Readonly<Record<string, FixRule>> = {
   },
   "svc.knowledge-current": {
     hours: each(["stale"], "article not reviewed in the period", "articles not reviewed in the period", [15, 30], 24),
-    prompt: decide("knowledge articles", ["List articles not reviewed in the period, with their views and case types.", "Propose an owner and a review date for each.", "Mark those nobody reads, and those behind common case types, for their owners to decide on first."], ["Every article has a proposed owner and review date."]),
+    prompt: decide("knowledge articles", ["List articles not reviewed in the period, with their views and case types.", "Propose an owner and a review date for each.", "Flag those nobody reads, and those behind common case types, for their owners to decide on first."], ["Every article has a proposed owner and review date."]),
   },
   "svc.macros-and-quick-text": {
     hours: fixed(2, 6, PROCESS),
-    prompt: decide("macros and quick text", ["List macros and quick text with when each was last used.", "Mark those unused in a year, and the Classic-only macros that would need rebuilding for Lightning.", "Propose an owner for each, and prepare the list for them to decide."], ["Every macro and quick text has an owner and a decision."]),
+    prompt: decide("macros and quick text", ["List macros and quick text with when each was last used.", "Flag those unused in a year, and the Classic-only macros that would need rebuilding for Lightning.", "Propose an owner for each, and prepare the list for them to decide."], ["Every macro and quick text has an owner and a decision."]),
   },
   "aut.case-routing-overlap": {
     hours: fixed(4, 8, "Separating assignment rules and Omni-Channel so each case is routed once"),
@@ -569,13 +590,15 @@ export const FIX_TABLE: Readonly<Record<string, FixRule>> = {
     prompt: change("contracts", ["List contracts ending soon with no renewal opportunity.", "In a sandbox, find the setting on the contract that has CPQ produce its renewal opportunity (in Salesforce CPQ this is the contract's renewal forecast; check its label in your org), set it on a test contract, and check the renewal CPQ produces.", "Look in CPQ's package settings for the option that sets this on new contracts, and set out what it would change.", "Prepare the list of contracts for their owners, who set it on each in production."], ["A test contract in the sandbox gets its renewal from CPQ, and each contract on the list has an owner."]),
   },
   "cpq.discount-approvals": {
-    hours: fixed(8, 16, "Building an approval process on the quote for the agreed discount levels"),
-    prompt: change("quotes", ["Propose the discount levels that need sign-off, for the sales leaders to agree.", "In a sandbox, build an approval process on the quote for the agreed levels, and test it with test quotes.", "Prepare a report of past deep discounts and who agreed them."], ["A test quote over the level needs approval."]),
+    hours: fixed(8, 16, "Building an approval process on the quote for the agreed discount levels, for the owners to turn on"),
+    prompt: change("quotes", ["Propose the discount levels that need sign-off, for the sales leaders to agree.", "In a sandbox, build an approval process on the quote for the agreed levels, and test it with test quotes.", "Hand the tested process to the sales leaders, who decide when it is turned on in production, and prepare a report of past deep discounts and whether each went through approval."], ["The sales leaders have the tested process and the report."]),
   },
+
   "cpq.quote-to-order": {
     hours: fixed(2, 4, REPORT),
-    prompt: change("quotes", ["Build a report of won quotes with no order, for their owners.", "Propose how ordering becomes part of closing a deal, and build the check in a sandbox and test it."], ["New won quotes become orders."]),
+    prompt: change("quotes", ["Build a report of won quotes with no order, for their owners.", "Propose how ordering becomes part of closing a deal, for the sales and finance owners to agree."], ["The owners have the report and the proposal."]),
   },
+
 
   // Marketing handover
   "mkt.unworked-handovers": {

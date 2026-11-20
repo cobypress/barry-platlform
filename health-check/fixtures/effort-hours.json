@@ -242,7 +242,7 @@
     "cpq.discount-approvals": {
       "low": 8,
       "high": 16,
-      "basis": "Building an approval process on the quote for the agreed discount levels"
+      "basis": "Building an approval process on the quote for the agreed discount levels, for the owners to turn on"
     },
     "cpq.discount-leakage": {
       "low": 4,
@@ -347,12 +347,12 @@
       "minutesLow": 120,
       "minutesHigh": 240,
       "capHours": 12,
-      "pastTheCap": "held at the cap: the rules share one matching approach"
+      "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "dq.loss-reason-missing": {
       "low": 2,
       "high": 4,
-      "basis": "Agreeing a short list of reasons and adding the rule; past deals aren't filled in"
+      "basis": "Proposing a short list of reasons and building the rule for the owners to turn on; past deals aren't filled in"
     },
     "dq.open-opps-missing-amount": {
       "low": 2,
@@ -459,10 +459,10 @@
         "open"
       ],
       "each": "integration account not set to API only",
-      "minutesLow": 30,
-      "minutesHigh": 60,
-      "capHours": 4,
-      "pastTheCap": "held at the cap: the same permission set serves every account"
+      "minutesLow": 60,
+      "minutesHigh": 180,
+      "capHours": 8,
+      "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "lead.campaign-return": {
       "low": 2,
@@ -562,27 +562,27 @@
     "sec.health-check-risks": {
       "low": 4,
       "high": 8,
-      "basis": "Bringing the high-risk settings up to standard and planning the medium ones"
+      "basis": "Preparing, for each setting named, who and what a change affects and the order to make them in"
     },
     "sec.health-check-score": {
       "low": 8,
       "high": 16,
-      "basis": "Working through the high-risk settings and planning the rest, whatever their number"
+      "basis": "Preparing, for each high and medium risk setting, who and what a change affects and the order to make them in"
     },
     "sec.insecure-remote-sites": {
       "low": 1,
       "high": 4,
-      "basis": "Moving each site to HTTPS and then turning off the mixed-protocol setting"
+      "basis": "Moving each site to HTTPS and turning off the mixed-protocol setting, in a sandbox, for the admin to repeat"
     },
     "sec.modify-all-data": {
       "facts": [
         "unexpected"
       ],
       "each": "person outside the admin team who holds it",
-      "minutesLow": 60,
-      "minutesHigh": 120,
-      "capHours": 8,
-      "pastTheCap": "held at the cap: people with the same work share one permission set"
+      "minutesLow": 180,
+      "minutesHigh": 360,
+      "capHours": 24,
+      "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "sec.peer-outlier-access": {
       "facts": [
@@ -609,9 +609,9 @@
         "open"
       ],
       "each": "connected app users can authorise",
-      "minutesLow": 60,
-      "minutesHigh": 120,
-      "capHours": 8,
+      "minutesLow": 120,
+      "minutesHigh": 240,
+      "capHours": 16,
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "sec.sharing-defaults": {
@@ -640,10 +640,10 @@
         "unexpected"
       ],
       "each": "person outside the admin team who holds it",
-      "minutesLow": 60,
-      "minutesHigh": 120,
-      "capHours": 8,
-      "pastTheCap": "held at the cap: people with the same work share one permission set"
+      "minutesLow": 180,
+      "minutesHigh": 360,
+      "capHours": 24,
+      "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "svc.agent-licences": {
       "facts": [
@@ -668,12 +668,12 @@
     "svc.case-classification": {
       "low": 2,
       "high": 4,
-      "basis": "Agreeing a short list of types or reasons and requiring one on closing"
+      "basis": "Proposing a short list of types or reasons and building the rule for the owners to turn on"
     },
     "svc.case-customer": {
       "low": 2,
       "high": 6,
-      "basis": "Matching incoming cases to contacts automatically"
+      "basis": "Checking how incoming cases are matched to contacts and building the matching that's missing"
     },
     "svc.escalation-rules": {
       "low": 2,
@@ -685,10 +685,10 @@
         "dead"
       ],
       "each": "escalation action with no one to act",
-      "minutesLow": 30,
-      "minutesHigh": 60,
-      "capHours": 4,
-      "pastTheCap": "held at the cap: one queue serves them all"
+      "minutesLow": 60,
+      "minutesHigh": 120,
+      "capHours": 8,
+      "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "svc.first-reply-email": {
       "low": 2,
@@ -733,7 +733,7 @@
     "svc.origin-missing": {
       "low": 2,
       "high": 4,
-      "basis": "Setting Origin automatically for each channel and requiring it by hand"
+      "basis": "Setting Origin automatically for each channel and building the rule for the owners to turn on"
     },
     "svc.priority-resolution": {
       "low": 4,
@@ -748,7 +748,7 @@
     "svc.reopened-cases": {
       "low": 2,
       "high": 6,
-      "basis": "Finding which case types reopen and changing how they're closed"
+      "basis": "Finding which case types reopen and preparing a confirmation step for the service leaders"
     },
     "svc.unassigned-cases": {
       "low": 2,
@@ -861,7 +861,7 @@
       "minutesLow": 2,
       "minutesHigh": 5,
       "capHours": 8,
-      "pastTheCap": "held at the cap: the list comes from one report of report use, so it stops growing with the count"
+      "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     }
   }
 }
