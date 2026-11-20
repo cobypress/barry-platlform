@@ -50,8 +50,10 @@ export const PackageRow = z
         status: z.string().max(100).nullable(),
         /** Seats allowed, or null on a site licence, which Salesforce gives as -1. */
         allowed: Count.nullable(),
+        /** True only where Salesforce gives -1 seats allowed. */
         siteWide: z.boolean(),
-        used: Count,
+        /** Seats in use, or null where Salesforce gave no count (DECISIONS.md 618). */
+        used: Count.nullable(),
         expiresOn: CalendarDate.nullable(),
       })
       .strict()

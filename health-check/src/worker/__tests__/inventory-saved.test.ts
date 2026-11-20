@@ -141,6 +141,29 @@ describe("each value a real org can give is saved, the bad part marked and the r
     assert.deepEqual(licence, { status: null, allowed: null, siteWide: true, used: 3, expiresOn: "2027-01-31" });
   });
 
+  test("a licence's seats are kept only as Salesforce counted them: no count is null with a note, never 0, and only -1 allowed is site-wide (rule 5)", () => {
+    const e = extracts();
+    e.set(packagesExtractor.id, {
+      installed: ok([]),
+      licences: ok([
+        { NamespacePrefix: "aa", AllowedLicenses: 10, UsedLicenses: 4, Status: "Active", ExpirationDate: null },
+        { NamespacePrefix: "bb", AllowedLicenses: 10, UsedLicenses: null, Status: "Active", ExpirationDate: null },
+        { NamespacePrefix: "cc", AllowedLicenses: -1, UsedLicenses: -1, Status: "Active", ExpirationDate: null },
+        { NamespacePrefix: "dd", AllowedLicenses: null, UsedLicenses: 2, Status: "Active", ExpirationDate: null },
+      ]),
+    });
+    const { inventory } = saved(buildInventory(e, "complete", AS_OF));
+    const seats = rowsOf(inventory.packages).map((r) => [r.namespace, r.licence!.allowed, r.licence!.siteWide, r.licence!.used]);
+    assert.deepEqual(seats, [
+      ["aa", 10, false, 4],
+      ["bb", 10, false, null],
+      ["cc", null, true, null],
+      ["dd", null, false, 2],
+    ]);
+    assert.ok(notesOf(inventory.packages).includes("2 licences gave no count of seats used, so their use isn't shown."), notesOf(inventory.packages).join("\n"));
+    assert.ok(notesOf(inventory.packages).includes("One licence gave no number of seats allowed, so its allowance isn't shown."));
+  });
+
   test("an object with no records has a null share and is saved", () => {
     const { inventory } = saved(clean);
     assert.deepEqual(rowsOf(inventory.fillRates)[1], { object: "Empty__c", records: 0, fields: [{ field: "Code__c", filled: 0, share: null }], skipped: [] });
@@ -204,6 +227,17 @@ describe("each value a real org can give is saved, the bad part marked and the r
     assert.deepEqual(inventory.limits, { unavailable: NOT_PUT_TOGETHER });
     assert.deepEqual(sectionsOf(inventory).slice(0, 4), sectionsOf(clean).slice(0, 4));
   });
+
+  test("a null row in the installed packages costs packages alone, and one log line names the section and the error's class, nothing from the org", () => {
+    const e = extracts();
+    e.set(packagesExtractor.id, { installed: ok([null, { SubscriberPackageId: "033000000000009AAA", SubscriberPackage: { Name: "PLANTED_PACKAGE", NamespacePrefix: "PLANTED" } }]), licences: ok([]) });
+    const logs: string[] = [];
+    const inventory = buildInventory(e, "complete", AS_OF, new Map(), (l) => void logs.push(l));
+    assert.deepEqual(inventory.packages, { unavailable: NOT_PUT_TOGETHER });
+    for (const k of SECTIONS.filter((k) => k !== "packages")) assert.deepEqual(inventory[k], clean[k]);
+    assert.deepEqual(logs, ["  The inventory's packages couldn't be put together (TypeError), so it's saved as unavailable."]);
+    assert.ok(Inventory.safeParse(saved(inventory).inventory).success);
+  });
 });
 
 describe("one section failing leaves the other four saved", () => {
@@ -215,6 +249,25 @@ describe("one section failing leaves the other four saved", () => {
     assert.deepEqual(inventory.packages, { unavailable: SECTION_MISFIT });
     for (const k of SECTIONS.filter((k) => k !== "packages")) assert.deepEqual(inventory[k], clean[k]);
     assert.deepEqual(logs, [`Run ${RUN_ID}'s inventory: packages held a NUL character at rows.0.name, so it's saved as unavailable.`]);
+  });
+});
+
+describe("a lone half of a UTF-16 pair, which Postgres's jsonb refuses (class 22) and would roll back the whole save on every retry", () => {
+  test("costs only its section, or only its object in fill rates, and the log never quotes it", () => {
+    const clean = buildInventory(extracts(), "complete", AS_OF);
+    const inv = structuredClone(clean);
+    rowsOf(inv.connectedApps)[0]!.name = "PLANTED\ud83dX";
+    const objects = rowsOf(inv.fillRates) as Array<{ object: string; fields: Array<{ field: string }> }>;
+    objects[1]!.fields[0]!.field = "PLANTED\ude00";
+    const { inventory, logs } = saved(inv);
+    assert.deepEqual(inventory.connectedApps, { unavailable: SECTION_MISFIT });
+    assert.deepEqual(rowsOf(inventory.fillRates), [rowsOf(clean.fillRates)[0], { object: "Empty__c", unavailable: OBJECT_MISFIT }]);
+    for (const k of ["packages", "riskyPermissions", "limits"] as const) assert.deepEqual(inventory[k], clean[k]);
+    assert.ok(!/\\ud[89a-f][0-9a-f]{2}/i.test(JSON.stringify(inventory)), "no surrogate escape left to store");
+    assert.deepEqual(logs, [
+      `Run ${RUN_ID}'s inventory: fillRates object 1 held a broken character (half of a UTF-16 pair) at fields.0.field, so it's saved as unavailable.`,
+      `Run ${RUN_ID}'s inventory: connectedApps held a broken character (half of a UTF-16 pair) at rows.0.name, so it's saved as unavailable.`,
+    ]);
   });
 });
 
@@ -334,6 +387,9 @@ describe("every delivery saves the same inventory (the real run job, the synthet
     assert.equal((await w.deliver()).outcome, "done");
     assert.ok(sectionsOf(w.inventory()).every((s) => "unavailable" in s && s.unavailable === NO_FILE));
     assert.ok(w.deps.lines.some((l) => l === `Run ${RUN_ID}'s inventory: there's no inventory.json, so every section is saved as unavailable.`), w.deps.lines.join("\n"));
+    // The engine's line names the error's class, never its message, which here would hold the folder's path.
+    assert.ok(w.deps.lines.includes("  The inventory couldn't be written (Error), so the run has none."), w.deps.lines.join("\n"));
+    assert.ok(!w.deps.lines.some((l) => l.includes(w.dir)));
   });
 
   test("nothing from the org's data reaches a log line: a limit holding planted values costs its section alone", async () => {

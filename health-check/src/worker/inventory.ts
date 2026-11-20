@@ -74,7 +74,9 @@ const SECTION_SCHEMA: Record<Section, z.ZodType> = {
 
 /**
  * Each section checked on its own (DECISIONS.md 618): one that doesn't fit, or
- * holds a NUL Postgres's jsonb refuses, is `{ unavailable }`; within fill
+ * holds a character Postgres's jsonb refuses (a NUL, or half of a UTF-16
+ * pair, which jsonb refuses with a class 22 error that would roll back the
+ * whole save on every retry), is `{ unavailable }`; within fill
  * rates, the object is. Then the whole is held under the cap by keeping fill
  * rates for the objects with the most records.
  */
@@ -93,8 +95,8 @@ export function settleInventory(raw: unknown, say: (line: string) => void, made:
   for (const key of SECTIONS) {
     const value = file[key];
     const parsed = SECTION_SCHEMA[key].safeParse(value);
-    const nul = parsed.success ? nulAt(parsed.data) : null;
-    if (parsed.success && nul === null) {
+    const bad = parsed.success ? unstorableAt(parsed.data) : null;
+    if (parsed.success && bad === null) {
       sections[key] = parsed.data;
       continue;
     }
@@ -105,7 +107,7 @@ export function settleInventory(raw: unknown, say: (line: string) => void, made:
         continue;
       }
     }
-    say(`${key} ${parsed.success ? `held a NUL character at ${nul}` : `didn't fit its shape (${issuesOf(parsed.error)})`}, so it's saved as unavailable.`);
+    say(`${key} ${parsed.success ? `held ${bad!.what} at ${bad!.at}` : `didn't fit its shape (${issuesOf(parsed.error)})`}, so it's saved as unavailable.`);
     sections[key] = { unavailable: SECTION_MISFIT };
   }
   const inventory = { version: INVENTORY_VERSION, madeAt, scope, ...sections } as Inventory;
@@ -120,22 +122,22 @@ export function settleInventory(raw: unknown, say: (line: string) => void, made:
 function fillRatesByObject(value: unknown, say: (line: string) => void): Inventory["fillRates"] | null {
   if (value === null || typeof value !== "object" || !Array.isArray((value as { rows?: unknown }).rows)) return null;
   const { rows, notes } = value as { rows: unknown[]; notes?: unknown };
-  if (!Array.isArray(notes) || !notes.every((n) => typeof n === "string" && n.length > 0 && !n.includes("\u0000"))) return null;
+  if (!Array.isArray(notes) || !notes.every((n) => typeof n === "string" && n.length > 0 && storable(n))) return null;
   if (Object.keys(value).some((k) => k !== "rows" && k !== "notes")) return null;
   const kept: FillRateObject[] = [];
   let misfits = 0;
   let unnamed = 0;
   rows.forEach((row, i) => {
     const parsed = FillRateObject.safeParse(row);
-    const nul = parsed.success ? nulAt(parsed.data) : null;
-    if (parsed.success && nul === null) {
+    const bad = parsed.success ? unstorableAt(parsed.data) : null;
+    if (parsed.success && bad === null) {
       kept.push(parsed.data);
       return;
     }
-    say(`fillRates object ${i} ${parsed.success ? `held a NUL character at ${nul}` : `didn't fit its shape (${issuesOf(parsed.error)})`}, so it's saved as unavailable.`);
+    say(`fillRates object ${i} ${parsed.success ? `held ${bad!.what} at ${bad!.at}` : `didn't fit its shape (${issuesOf(parsed.error)})`}, so it's saved as unavailable.`);
     misfits++;
     const name = (row as { object?: unknown } | null)?.object;
-    if (typeof name === "string" && name.trim() && !name.includes("\u0000")) kept.push({ object: cut(name), unavailable: OBJECT_MISFIT });
+    if (typeof name === "string" && name.trim() && storable(name)) kept.push({ object: cut(name), unavailable: OBJECT_MISFIT });
     else unnamed++;
   });
   const added: string[] = [];
@@ -228,21 +230,27 @@ function issuesOf(error: z.ZodError): string {
   return `${issues.join(", ")}${all.length > 5 ? ` and ${all.length - 5} more` : ""}`;
 }
 
-/** The path of the first NUL character, in a key or a value, or null. Postgres's jsonb refuses one. */
-function nulAt(value: unknown, path: PropertyKey[] = []): string | null {
-  if (typeof value === "string") return value.includes("\u0000") ? pathOf(path) : null;
+/** A string Postgres's jsonb takes: no NUL, and no half of a UTF-16 pair, which JSON.stringify writes as an escape jsonb refuses. */
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+// String.prototype.isWellFormed, which the project's TypeScript library doesn't yet name.
+const storable = (s: string): boolean => !s.includes("\u0000") && !LONE_SURROGATE.test(s);
+const what = (s: string): string => (s.includes("\u0000") ? "a NUL character" : "a broken character (half of a UTF-16 pair)");
+
+/** Where the first string Postgres's jsonb would refuse is, in a key or a value, and what's wrong with it; or null. */
+function unstorableAt(value: unknown, path: PropertyKey[] = []): { at: string; what: string } | null {
+  if (typeof value === "string") return storable(value) ? null : { at: pathOf(path), what: what(value) };
   if (Array.isArray(value)) {
     for (let i = 0; i < value.length; i++) {
-      const at = nulAt(value[i], [...path, i]);
-      if (at !== null) return at;
+      const found = unstorableAt(value[i], [...path, i]);
+      if (found) return found;
     }
     return null;
   }
   if (value && typeof value === "object") {
     for (const [k, v] of Object.entries(value)) {
-      if (k.includes("\u0000")) return pathOf([...path, k]);
-      const at = nulAt(v, [...path, k]);
-      if (at !== null) return at;
+      if (!storable(k)) return { at: pathOf([...path, k]), what: what(k) };
+      const found = unstorableAt(v, [...path, k]);
+      if (found) return found;
     }
   }
   return null;

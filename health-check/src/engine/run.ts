@@ -14,7 +14,7 @@ import { apexSourceStore } from "../extract/apex-source.ts";
 import { componentChangesExtractor, type ComponentChangesData } from "../extract/component-changes.ts";
 import type { MetadataBundle } from "../extract/metadata-parse.ts";
 import { fieldDescribeExtractor } from "../extract/fields.ts";
-import { buildInventory, INVENTORY_FILE, inventoryExtractorsFor } from "../extract/inventory.ts";
+import { buildInventory, errorClass, INVENTORY_FILE, inventoryExtractorsFor } from "../extract/inventory.ts";
 import { buildComplexity, COMPLEXITY_FILE } from "../complexity/read.ts";
 import { summariseFacts } from "../facts/summary.ts";
 import { monthsBefore, type ConnectedUser, type ExtractContext, type Extractor, type PartialStore, type Sourced } from "../extract/types.ts";
@@ -308,10 +308,11 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
   // row whose every section says it wasn't written (DECISIONS.md 618).
   if (options.inventory) {
     try {
-      writeJson(join(dir, INVENTORY_FILE), buildInventory(extracts, scope, asOf, new Map(run.steps.flatMap((s) => (s.status === "failed" && s.error ? [[s.id, s.error]] : [])))));
-    } catch {
+      writeJson(join(dir, INVENTORY_FILE), buildInventory(extracts, scope, asOf, new Map(run.steps.flatMap((s) => (s.status === "failed" && s.error ? [[s.id, s.error]] : []))), log));
+    } catch (err) {
       rmSync(join(dir, INVENTORY_FILE), { force: true, recursive: true });
-      log("  The inventory couldn't be written, so the run has none.");
+      // The error's class alone: its message could name a path or quote what the org gave.
+      log(`  The inventory couldn't be written (${errorClass(err)}), so the run has none.`);
     }
   }
   // How big and tangled the build is, beside the health score and never part

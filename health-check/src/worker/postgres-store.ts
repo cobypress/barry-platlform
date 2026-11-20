@@ -422,8 +422,6 @@ export class PostgresWorkerStore implements WorkerStore {
   readonly #log: (line: string) => void;
   /** Said once: a console without the summaries' table says so on every save and every make otherwise. */
   #saidNoSummariesTable = false;
-  /** The side tables that have refused a row this process, each said once (DECISIONS.md 615). */
-  readonly #saidSideTable = new Set<string>();
   #saidNoOrgStagesTable = false;
 
   constructor(pool: SqlPool, options: { log?: (line: string) => void } = {}) {
@@ -674,14 +672,14 @@ export class PostgresWorkerStore implements WorkerStore {
     } catch (err) {
       const code = this.#sideTableFault(err);
       await client.query("ROLLBACK TO SAVEPOINT run_facts");
-      if (code !== "42703") return this.#sideTableSkipped("HealthCheckRunFacts", code, "facts");
+      if (code !== "42703") return this.#sideTableSkipped(runId, "HealthCheckRunFacts", code, "facts");
       // A console without the file column: the summary as before.
       try {
         await write(false);
       } catch (again) {
         const retried = this.#sideTableFault(again);
         await client.query("ROLLBACK TO SAVEPOINT run_facts");
-        return this.#sideTableSkipped("HealthCheckRunFacts", retried, "facts");
+        return this.#sideTableSkipped(runId, "HealthCheckRunFacts", retried, "facts");
       }
     }
     await client.query("RELEASE SAVEPOINT run_facts");
@@ -701,7 +699,7 @@ export class PostgresWorkerStore implements WorkerStore {
     } catch (err) {
       const code = this.#sideTableFault(err);
       await client.query("ROLLBACK TO SAVEPOINT run_inventory");
-      return this.#sideTableSkipped("HealthCheckInventory", code, "inventory");
+      return this.#sideTableSkipped(runId, "HealthCheckInventory", code, "inventory");
     }
     await client.query("RELEASE SAVEPOINT run_inventory");
   }
@@ -720,7 +718,7 @@ export class PostgresWorkerStore implements WorkerStore {
     } catch (err) {
       const code = this.#sideTableFault(err);
       await client.query("ROLLBACK TO SAVEPOINT run_complexity");
-      return this.#sideTableSkipped("HealthCheckComplexity", code, "complexity");
+      return this.#sideTableSkipped(runId, "HealthCheckComplexity", code, "complexity");
     }
     await client.query("RELEASE SAVEPOINT run_complexity");
   }
@@ -737,14 +735,17 @@ export class PostgresWorkerStore implements WorkerStore {
     throw err;
   }
 
-  /** Said once a process for each table, by its name and the SQLSTATE alone: the message can quote a value. */
-  #sideTableSkipped(table: string, code: string, migration: string): void {
-    if (this.#saidSideTable.has(table)) return;
-    this.#saidSideTable.add(table);
+  /**
+   * Said for every run it happens to, with the run's id, the table and the
+   * SQLSTATE alone: the message can quote a value. Once a process (615) hid
+   * every refusal after the first, so a run's missing row couldn't be traced
+   * (DECISIONS.md 618).
+   */
+  #sideTableSkipped(runId: string, table: string, code: string, migration: string): void {
     this.#log(
       code === "42P01"
-        ? `The console's database has no ${table} table yet, so the run's ${migration} isn't saved. Apply the console's ${migration} migration.`
-        : `The console's ${table} table refused the run's row with SQLSTATE ${code}, so the run's ${migration} isn't saved; its results are. Check the table against the console's ${migration} migration.`,
+        ? `Run ${runId}: the console's database has no ${table} table yet, so the run's ${migration} isn't saved. Apply the console's ${migration} migration.`
+        : `Run ${runId}: the console's ${table} table refused the run's row with SQLSTATE ${code}, so the run's ${migration} isn't saved; its results are. Check the table against the console's ${migration} migration.`,
     );
   }
 

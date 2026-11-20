@@ -295,12 +295,22 @@ function packageRows(data: PackagesData): Inventory["packages"] {
       licence: null,
     });
   }
+  // A seat count is kept only as Salesforce gave it: no count is null, never 0 (rule 5, DECISIONS.md 618).
+  const seats = (n: number | null | undefined): number | null => (typeof n === "number" && Number.isInteger(n) && n >= 0 ? n : null);
+  let noUsed = 0;
+  let noAllowed = 0;
   for (const l of licences.status === "ok" ? licences.data : []) {
+    // Salesforce gives a site licence as -1 seats allowed; anything else that isn't a count is unknown, not site-wide.
+    const siteWide = l.AllowedLicenses === -1;
+    const allowed = siteWide ? null : seats(l.AllowedLicenses);
+    const used = seats(l.UsedLicenses);
+    if (!siteWide && allowed === null) noAllowed++;
+    if (used === null) noUsed++;
     const licence = {
       status: fit(l.Status, 100),
-      allowed: l.AllowedLicenses < 0 ? null : l.AllowedLicenses,
-      siteWide: l.AllowedLicenses < 0,
-      used: Math.max(0, l.UsedLicenses),
+      allowed,
+      siteWide,
+      used,
       expiresOn: l.ExpirationDate ? l.ExpirationDate.slice(0, 10) : null,
     };
     // Licences only name a namespace, so they match by it; one without a namespace stands alone.
@@ -309,6 +319,8 @@ function packageRows(data: PackagesData): Inventory["packages"] {
     else byPackage.set(`licence:${byPackage.size}`, { packageId: null, namespace: fit(l.NamespacePrefix), name: null, version: null, versionName: null, installed: false, deprecated: null, managed: null, licence });
   }
   const rows = [...byPackage.values()].sort((a, b) => (a.namespace ?? "").localeCompare(b.namespace ?? "") || (a.name ?? "").localeCompare(b.name ?? "") || (a.packageId ?? "").localeCompare(b.packageId ?? ""));
+  if (noUsed) notes.push(`${noUsed === 1 ? "One licence gave" : `${noUsed} licences gave`} no count of seats used, so ${noUsed === 1 ? "its use isn't" : "their use isn't"} shown.`);
+  if (noAllowed) notes.push(`${noAllowed === 1 ? "One licence gave" : `${noAllowed} licences gave`} no number of seats allowed, so ${noAllowed === 1 ? "its allowance isn't" : "their allowance isn't"} shown.`);
   if (longIds) notes.push(`${longIds === 1 ? "One package's id was" : `${longIds} packages' ids were`} longer than a Salesforce id, so ${longIds === 1 ? "it isn't" : "they aren't"} shown.`);
   return { rows, notes: [...notes, ...names.notes()] };
 }
@@ -530,30 +542,35 @@ export function inventoryExtractorsFor(scope: RunScope): Extractor[] {
 
 export const SETUP_ONLY_FILL_RATES = "A set-up only scan doesn't count records, so fill rates weren't read.";
 
+/** An error's class name, for a log line: never its message. */
+export const errorClass = (err: unknown): string => (err !== null && typeof err === "object" ? (err.constructor?.name ?? "Object") : typeof err);
+
 export const NOT_PUT_TOGETHER = "This part of the inventory couldn't be put together from what was read, so it isn't shown.";
 
 /**
  * The inventory from the run's extracts. A step that didn't run makes its
  * section unavailable, with why. Each section is put together on its own, so
- * a fault in one costs only that one (DECISIONS.md 618); what went wrong is
- * left to the worker's check, which names the section, never a value.
+ * a fault in one costs only that one (DECISIONS.md 618), and is logged by the
+ * section's key and the error's class name: never its message, which can
+ * quote what the org gave.
  */
-export function buildInventory(extracts: Map<string, unknown>, scope: RunScope, madeAt: Date, failed: Map<string, string> = new Map()): Inventory {
+export function buildInventory(extracts: Map<string, unknown>, scope: RunScope, madeAt: Date, failed: Map<string, string> = new Map(), log: (line: string) => void = () => {}): Inventory {
   const got = <T>(e: Extractor<T>): T | undefined => extracts.get(e.id) as T | undefined;
   // A step that failed says why, with any secret in Salesforce's or the network's message taken out.
   const notRunOf = (e: Extractor): { unavailable: string } => {
     const reason = failed.get(e.id);
     return { unavailable: reason ? `This part of the inventory couldn't be read: ${redactSecrets(reason)}` : "This step didn't run." };
   };
-  const apart = <S>(make: () => S): S | { unavailable: string } => {
+  const apart = <S>(key: string, make: () => S): S | { unavailable: string } => {
     try {
       return make();
-    } catch {
+    } catch (err) {
+      log(`  The inventory's ${key} couldn't be put together (${errorClass(err)}), so it's saved as unavailable.`);
       return { unavailable: NOT_PUT_TOGETHER };
     }
   };
   const fill = got(fillRatesExtractor);
-  const fillRates = apart((): Inventory["fillRates"] =>
+  const fillRates = apart("fillRates", (): Inventory["fillRates"] =>
     !fill
       ? scope === "complete"
         ? notRunOf(fillRatesExtractor)
@@ -577,9 +594,9 @@ export function buildInventory(extracts: Map<string, unknown>, scope: RunScope, 
     madeAt: madeAt.toISOString(),
     scope,
     fillRates,
-    packages: apart(() => (packages ? packageRows(packages) : notRunOf(packagesExtractor))),
-    connectedApps: apart(() => (apps ? connectedAppRows(apps) : notRunOf(connectedAppsExtractor))),
-    riskyPermissions: apart(() => (risky ? riskyRows(risky) : notRunOf(riskyPermissionsExtractor))),
-    limits: apart(() => (limits ? limitRows(limits) : notRunOf(limitsExtractor))),
+    packages: apart("packages", () => (packages ? packageRows(packages) : notRunOf(packagesExtractor))),
+    connectedApps: apart("connectedApps", () => (apps ? connectedAppRows(apps) : notRunOf(connectedAppsExtractor))),
+    riskyPermissions: apart("riskyPermissions", () => (risky ? riskyRows(risky) : notRunOf(riskyPermissionsExtractor))),
+    limits: apart("limits", () => (limits ? limitRows(limits) : notRunOf(limitsExtractor))),
   };
 }
