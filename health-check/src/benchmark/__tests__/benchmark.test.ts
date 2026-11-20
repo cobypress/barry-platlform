@@ -422,6 +422,21 @@ describe("bands", () => {
     assert.throws(() => exportBenchmark(options(run, tempDir())), /multi-currency/);
   });
 
+  test("a run that took a stage's meaning from Salesforce's flags is refused, and writes nothing (DECISIONS.md 600)", () => {
+    const run = freshRun();
+    const store = tempDir();
+    const calibration = read<{ stages: Array<{ name: string }> }>(run, "calibration.json");
+    write(run, "calibration.json", { ...calibration, stages: calibration.stages.filter((s) => s.name !== "Discovery") });
+    assert.throws(() => exportBenchmark(options(run, store)), /took their meaning from Salesforce's own settings: Discovery\. Add them to the calibration and run the health check again/);
+    assert.ok(!existsSync(join(store, BENCHMARK_FILE)));
+    assert.ok(!existsSync(join(run, CONSENT_FILE)));
+  });
+
+  test("a fully calibrated run exports as before", () => {
+    const result = exportBenchmark(options(freshRun(), tempDir()));
+    assert.ok(result.rows.length >= 30, `${result.rows.length} rows`);
+  });
+
   test("aren't guessed from too few won deals", () => {
     const run = freshRun();
     write(run, "calibration.json", { ...read<object>(run, "calibration.json"), minSample: 999 });

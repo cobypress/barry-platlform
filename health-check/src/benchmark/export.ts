@@ -233,6 +233,12 @@ export function orgProfile(dir: string, run: Run, calibration: Calibration): Org
 
   const pipeline = loadPipeline(ctx);
   if (pipeline.status !== "ok") throw new Error(`${pipeline.reason} So the deal size band can't be worked out.`);
+  // A benchmark row carries no note, so a figure resting on a stage whose
+  // meaning came from Salesforce's flags would go in unmarked (DECISIONS.md 600).
+  if (pipeline.inferred.length > 0) {
+    const stages = pipeline.inferred.map((s) => s.stage).join(", ");
+    throw new Error(`The calibration doesn't name these stages, so this run took their meaning from Salesforce's own settings: ${stages}. Add them to the calibration and run the health check again before exporting to the benchmark set.`);
+  }
   if (pipeline.multiCurrency) throw new Error("The org is multi-currency, so won amounts can't be compared and the deal size band can't be worked out.");
   // The median won amount, not the mean, for the reason in decision 16: one
   // unusually large deal shouldn't move the org into another band. Deals with no
