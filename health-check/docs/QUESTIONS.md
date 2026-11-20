@@ -343,3 +343,11 @@ a) Process Automation: Workflow Rules, Process Builder and Flows. Custom Code: A
 b) Apps: Packaging, Installed Packages; and Apps: Connected Apps, Manage Connected Apps (is it still there on an org made after September 2025, beside External Client Apps?).
 c) Users: Users and Queues. Security: Health Check, Sharing Settings, Remote Site Settings and View Setup Audit Trail.
 d) Environments: Jobs, Apex Jobs and Scheduled Jobs. Feature Settings: Service, Escalation Rules; and Feature Settings: Marketing, Campaign Influence (present on an org without Account Engagement?).
+
+## The org's address for links into Setup (DECISIONS.md 626)
+
+The worker keeps a used connect link's host only when it ends `.my.salesforce.com`, as the console's check constraint allows, so the customer portal can link into Setup on the customer's own My Domain. To check, not on a customer's org:
+
+a) Is the instance URL Salesforce's token response gives always the org's My Domain (`<name>.my.salesforce.com`, or `<name>--<sandbox>.sandbox.my.salesforce.com`), with enhanced domains on, or can it still be an instance server such as `na1.salesforce.com` on an older org? An instance server is not kept, so that customer's portal shows the Setup labels without links.
+b) Which other My Domain forms should be kept: Government Cloud (`.my.salesforce.mil`), Hyperforce in another region, or `.my.salesforce.com` with a `.cn` or another suffix? Each would need the console's constraint and `src/connect/instance-host.ts` widened together.
+c) Does `https://<host>/lightning/setup/<Node>/home` open the right page for a signed-in user on a sandbox's My Domain as it does on production?

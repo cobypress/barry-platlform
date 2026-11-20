@@ -1,4 +1,5 @@
 import type { OrgStage } from "../connect/org-stages.ts";
+import type { OverallScore } from "../domains/scoring.ts";
 import type { Inventory } from "../schemas/inventory.ts";
 import type { Complexity } from "../schemas/complexity.ts";
 import type { ScanResult } from "../scan/result.ts";
@@ -116,7 +117,27 @@ export type RunOutputRecord = {
    * set-up, never a record. Only when the run folder has a complexity.json that parses.
    */
   complexity?: Complexity;
+  /**
+   * The run's overall score and grade as its report has them (DECISIONS.md
+   * 626), from the engine's own `overallScore`, so the console never copies the
+   * formula; null where the engine gives none. Left out, the console's columns
+   * aren't written at all.
+   */
+  overall?: RunOverall | null;
 };
+
+/** What the console's HealthCheckRun keeps of a run's overall score (DECISIONS.md 626): a whole number from 0 to 100, and its grade. */
+export type RunOverall = { score: number; grade: "A" | "B" | "C" | "D" | "E" };
+
+const GRADE_LETTERS: ReadonlySet<string> = new Set(["A", "B", "C", "D", "E"]);
+
+/** The engine's overall score as the console keeps it, or null where there's none, or one its check constraints would refuse. */
+export function runOverall(overall: OverallScore): RunOverall | null {
+  if (overall.status !== "measured") return null;
+  const { score, grade } = overall;
+  if (!Number.isInteger(score) || score < 0 || score > 100 || !GRADE_LETTERS.has(grade)) return null;
+  return { score, grade: grade as RunOverall["grade"] };
+}
 
 /**
  * The org id the console gives a run before its customer connects. The worker
@@ -266,8 +287,14 @@ export interface WorkerStore {
   recordRunFailure(runId: string, reason: string, at: string): Promise<void>;
 
   loadConnectJob(linkId: string): Promise<ConnectJobInput | null>;
-  /** Moves a pending link to used, records who connected, and clears its sealed secrets. A run still awaiting its org takes the connected one. */
-  markLinkUsed(linkId: string, connected: LinkConnected): Promise<void>;
+  /**
+   * Moves a pending link to used, records who connected, and clears its sealed
+   * secrets. A run still awaiting its org takes the connected one. With a My
+   * Domain host (`myDomainHost`), the link keeps it too, for the portal's links
+   * into Setup (DECISIONS.md 626); a database without that column marks the link
+   * used as before. The host is never logged.
+   */
+  markLinkUsed(linkId: string, connected: LinkConnected, instanceHost?: string | null): Promise<void>;
   /** Moves a pending link to refused with a reason the console can show, and clears its sealed secrets. Never a token. */
   refuseLink(linkId: string, reason: string, at: string): Promise<void>;
   /**

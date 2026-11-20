@@ -1,3 +1,4 @@
+import { isMyDomainHost } from "../connect/instance-host.ts";
 import { StoreError, type OrgStage } from "../connect/org-stages.ts";
 import type { ScanResult } from "../scan/result.ts";
 import type { PulseResult } from "../pulse/result.ts";
@@ -9,12 +10,25 @@ import { ORG_AWAITING_CONNECT, RunClosedError, type ConnectJobInput, type Docume
 // rules a database store must keep. Writes replace; a run in review or
 // released refuses the worker; only a pending link can be settled.
 
-export type StoredRun = RunJobInput & { runDir: string | null; output: Omit<RunOutputRecord, "progress" | "runDir"> | null };
-export type StoredLink = Omit<ConnectJobInput, "runOrgId" | "runId"> & { runId: string | null; reason: string | null; connected: LinkConnected | null; refusedAt: string | null };
+/** The run's overall score and grade are the console's columns (DECISIONS.md 626), kept beside the output, never in it, and only once written. */
+export type StoredRun = RunJobInput & { runDir: string | null; output: Omit<RunOutputRecord, "progress" | "runDir" | "overall"> | null; overallScore?: number | null; overallGrade?: string | null };
+/** `instanceHost` is the console's column (DECISIONS.md 626), there only once written. */
+export type StoredLink = Omit<ConnectJobInput, "runOrgId" | "runId"> & { runId: string | null; reason: string | null; connected: LinkConnected | null; refusedAt: string | null; instanceHost?: string };
 
 const CLOSED = new Set(["in_review", "released"]);
 
 export class MemoryWorkerStore implements WorkerStore {
+  /**
+   * As a console database without the migration that adds the run's overall
+   * score and grade and the link's host (DECISIONS.md 626): every save and
+   * every link is as it was before those columns, which are never written.
+   */
+  readonly #withoutNewerColumns: boolean;
+
+  constructor(options: { withoutNewerColumns?: boolean } = {}) {
+    this.#withoutNewerColumns = options.withoutNewerColumns ?? false;
+  }
+
   readonly runs = new Map<string, StoredRun>();
   readonly links = new Map<string, StoredLink>();
   /** Every write, in order, so tests can see what a job did. */
@@ -64,10 +78,12 @@ export class MemoryWorkerStore implements WorkerStore {
 
   async saveRunOutput(runId: string, output: RunOutputRecord): Promise<void> {
     const run = this.#open(runId);
-    const { progress, runDir, ...rest } = structuredClone(output);
+    const { progress, runDir, overall, ...rest } = structuredClone(output);
     run.run = Run.parse({ ...run.run, ...progress });
     run.runDir = runDir;
     run.output = rest;
+    // As the Postgres store's own statements: null where there's no score, untouched where none was given.
+    if (overall !== undefined && !this.#withoutNewerColumns) Object.assign(run, { overallScore: overall?.score ?? null, overallGrade: overall?.grade ?? null });
     if (rest.handbookSummaries) this.#saveSummaries(runId, rest.handbookSummaries);
     this.writes.push({ method: "saveRunOutput", id: runId, detail: progress.status });
   }
@@ -153,9 +169,10 @@ export class MemoryWorkerStore implements WorkerStore {
     return link;
   }
 
-  async markLinkUsed(linkId: string, connected: LinkConnected): Promise<void> {
+  async markLinkUsed(linkId: string, connected: LinkConnected, instanceHost?: string | null): Promise<void> {
     const link = this.#pending(linkId);
     Object.assign(link, { state: "used", sealedPending: null, sealedCode: null, connected: structuredClone(connected), reason: connected.note });
+    if (isMyDomainHost(instanceHost) && !this.#withoutNewerColumns) link.instanceHost = instanceHost;
     link.link.usedAt = connected.at;
     const run = link.runId ? this.runs.get(link.runId) : undefined;
     if (run?.run.orgId === ORG_AWAITING_CONNECT) run.run.orgId = connected.orgId;

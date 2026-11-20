@@ -18,7 +18,7 @@ import type { StoredConnection } from "../salesforce/token-store.ts";
 import { safeReason, type Attempt, type JobOutcome, type WorkerDeps } from "./deps.ts";
 import { appFor, appNotSetUp, needsReconnection } from "./apps.ts";
 import { withJobLock } from "./lock.ts";
-import { progressOf, RunClosedError, type RunJobInput } from "./types.ts";
+import { progressOf, RunClosedError, runOverall, type RunJobInput } from "./types.ts";
 import { withoutComments } from "../survey/questions.ts";
 import { FACTS_FILE } from "../extract/facts.ts";
 import { inventoryOf } from "./inventory.ts";
@@ -302,6 +302,8 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
       ...(handbookSummaries ? { handbookSummaries } : {}),
       inventory,
       ...(complexity ? { complexity } : {}),
+      // The score and grade the report gives, pulses' and scans' too, for the portal (DECISIONS.md 626).
+      overall: runOverall(report.overall),
     });
   } catch (err) {
     if (err instanceof RunClosedError) return { outcome: "skipped", detail: err.message };

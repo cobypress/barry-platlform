@@ -1,3 +1,4 @@
+import { isMyDomainHost } from "../connect/instance-host.ts";
 import { StoreError, type OrgStage } from "../connect/org-stages.ts";
 import type { Inventory } from "../schemas/inventory.ts";
 import type { Complexity } from "../schemas/complexity.ts";
@@ -241,6 +242,8 @@ export const HANDBOOK_SUMMARIES: Columns = { runId: "text", status: "text", mode
 // Only what the handbook prints from: not the model or the time, nor who decided it or when.
 const HANDBOOK_SUMMARIES_READ: Columns = { runId: "text", status: "text", items: "json", leftOut: "json" };
 export const HANDBOOK_SUMMARIES_MIGRATION = "20261122_health_check_handbook_summaries.sql";
+/** The console's migration that adds the run's overall score and grade and the link's host (DECISIONS.md 626). */
+export const RUN_SCORE_AND_HOST_MIGRATION = "20261128_health_check_run_score_and_host.sql";
 export const BENCHMARK_ROW: Columns = {
   id: "text", metricKey: "text", ruleSetVersion: "text", value: "num", unit: "text", industry: "text", headcountBand: "text", userBand: "text", dealSizeBand: "text", period: "text",
 };
@@ -600,7 +603,35 @@ export class PostgresWorkerStore implements WorkerStore {
       if (summaries?.ok && summaries.row) await this.#writeSummaries(client, summaries.row);
       if (output.inventory) await this.#writeInventory(client, runId, output.inventory);
       if (output.complexity) await this.#writeComplexity(client, runId, output.complexity);
+      // Last, and each alone, so a console without the columns saves as before (DECISIONS.md 626).
+      if (output.overall !== undefined) {
+        const said = { subject: `Run ${runId}`, table: "HealthCheckRun", kept: "its results are" };
+        await this.#newerColumn(client, "run_overall_score", { ...said, column: "overallScore", lost: "the run's overall score" }, `UPDATE "HealthCheckRun" SET "overallScore" = $2 WHERE "id" = $1`, [runId, output.overall?.score ?? null]);
+        await this.#newerColumn(client, "run_overall_grade", { ...said, column: "overallGrade", lost: "the run's grade" }, `UPDATE "HealthCheckRun" SET "overallGrade" = $2 WHERE "id" = $1`, [runId, output.overall?.grade ?? null]);
+      }
     });
+  }
+
+  /**
+   * One of the console's newer columns (DECISIONS.md 626), written by a
+   * statement of its own inside a savepoint of its own, after every write the
+   * save made before it, none of which names it. A database without the column
+   * (class 42, 42703 among them) or whose check refuses the value (class 23)
+   * goes back to the savepoint and says so by the id, the table, the column and
+   * the SQLSTATE alone, never a value, and the rest commits as before. Anything
+   * else is thrown, so the whole save rolls back as it does today (615).
+   */
+  async #newerColumn(client: SqlClient, savepoint: string, said: { subject: string; table: string; column: string; lost: string; kept: string }, text: string, values: unknown[]): Promise<void> {
+    await client.query(`SAVEPOINT ${savepoint}`);
+    try {
+      await client.query(text, values);
+    } catch (err) {
+      const code = this.#sideTableFault(err);
+      await client.query(`ROLLBACK TO SAVEPOINT ${savepoint}`);
+      this.#log(`${said.subject}: the console's ${said.table} table refused its "${said.column}" column with SQLSTATE ${code}, so ${said.lost} isn't saved; ${said.kept}. Check the table against the console's ${RUN_SCORE_AND_HOST_MIGRATION} migration.`);
+      return;
+    }
+    await client.query(`RELEASE SAVEPOINT ${savepoint}`);
   }
 
   /**
@@ -798,7 +829,7 @@ export class PostgresWorkerStore implements WorkerStore {
     }
   }
 
-  markLinkUsed(linkId: string, c: LinkConnected): Promise<void> {
+  markLinkUsed(linkId: string, c: LinkConnected, instanceHost?: string | null): Promise<void> {
     return this.#transaction(async (client) => {
       const result = await client.query(
         `UPDATE "HealthCheckConnectLink" SET "state" = 'used', "usedAt" = $2::timestamp(3), "connectedOrgId" = $3, "connectedUserId" = $4, "checkNote" = $5, "sealedPending" = NULL, "sealedCode" = NULL WHERE "id" = $1 AND "state" = 'pending'`,
@@ -810,6 +841,11 @@ export class PostgresWorkerStore implements WorkerStore {
         `UPDATE "HealthCheckRun" SET "orgId" = $2 WHERE "id" = (SELECT "runId" FROM "HealthCheckConnectLink" WHERE "id" = $1) AND "orgId" = $3`,
         [linkId, c.orgId, ORG_AWAITING_CONNECT],
       );
+      // The org's My Domain, last and alone (DECISIONS.md 626): only one the console's check takes, and never logged.
+      if (isMyDomainHost(instanceHost)) {
+        const said = { subject: `Link ${linkId}`, table: "HealthCheckConnectLink", column: "instanceHost", lost: "the org's address", kept: "the link is marked used" };
+        await this.#newerColumn(client, "link_instance_host", said, `UPDATE "HealthCheckConnectLink" SET "instanceHost" = $2 WHERE "id" = $1`, [linkId, instanceHost]);
+      }
     });
   }
 

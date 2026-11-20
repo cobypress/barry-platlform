@@ -31,6 +31,7 @@ export const SECTION_IDS: Record<string, string> = {
   "Record-type use": "record-types",
   "The org's inventory": "inventory",
   "Where a finding is in Setup": "setup-paths",
+  "The org's address for links into Setup": "setup-host",
 };
 
 export type QuestionItem = { id: string; section: string; text: string };

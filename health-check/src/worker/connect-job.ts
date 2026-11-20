@@ -1,5 +1,6 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { myDomainHost } from "../connect/instance-host.ts";
 import { readOrgStages } from "../connect/org-stages.ts";
 import { checkReadOnlyUser, permissionNote, type ReadOnlyCheck } from "../connect/read-only-check.ts";
 import { ApiBudget } from "../salesforce/budget.ts";
@@ -226,8 +227,12 @@ async function connectLocked(linkId: string, deps: WorkerDeps, attempt: Attempt)
       check = { status: "unknown", reason: `the check failed (${safeReason(err, secrets)})` };
     }
     const note = permissionNote(check);
+    // The org's My Domain, for the portal's links into Setup (DECISIONS.md 626),
+    // or null. It can't throw, and a database without its column marks the link
+    // used as before, so it adds no way for a connect to fail. Never logged.
+    const instanceHost = myDomainHost(stored.instanceUrl);
     try {
-      await deps.store.markLinkUsed(linkId, { at: at(), orgId: stored.orgId, userId: stored.userId, note });
+      await deps.store.markLinkUsed(linkId, { at: at(), orgId: stored.orgId, userId: stored.userId, note }, instanceHost);
     } catch {
       // Tokens for a link that isn't marked used must not stay usable, so they
       // go first, before anything that could fail or be retried.
