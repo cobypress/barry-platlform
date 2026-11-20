@@ -1,6 +1,6 @@
 import { notSized, pct, plural, segmentRate, type Rule, type RuleContext, type RuleResult, type SegmentedRate } from "../../engine/rule.ts";
 import type { Calibration, Metric, MetricSegment } from "../../schemas/index.ts";
-import { loadPipeline, unorderedReason, type Deal, type PipelineData } from "./cohort.ts";
+import { loadPipeline, unorderedReason, unsplitLostReason, type Deal, type PipelineData } from "./cohort.ts";
 import { daysByStage, stageLeftFrom } from "./deep-dive.ts";
 import { base, dimensions, groupBy, measured, median, notMeasurable, quantile, round1, segment, unmappedReason, type Base } from "./metrics.ts";
 import { closedFromOpen } from "./outcomes.ts";
@@ -139,6 +139,9 @@ function skipped(ctx: Ctx, data: Ready, p: Process): Metric {
 
 function backwards(ctx: Ctx, data: Ready, p: Process): Metric {
   const definition = base(ctx, data, { ...DEF.backwards, assumptions: ["Earlier means earlier in the calibration's order of open stages"] });
+  // Split by outcome, lost apart from no decision (DECISIONS.md 600).
+  const unsplit = unsplitLostReason(data);
+  if (unsplit) return notMeasurable(definition, unsplit);
   const back = (d: Deal): number => backwardMoves(p.paths.get(d.Id)!, data.stages.orderOf);
   const rate = (group: Deal[]): number => pct(group.filter((d) => back(d) > 0).length, group.length);
   const outcome = (d: Deal): string => (isWon(d) ? "Won" : d.category === "lost" ? "Lost" : "No decision");

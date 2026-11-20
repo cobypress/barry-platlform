@@ -46,6 +46,25 @@ export function stageMap(calibration: Calibration, flags: StageRow[] | null = nu
   };
 }
 
+/**
+ * Where the run's documents keep the meaning each stage the calibration doesn't
+ * name took from Salesforce's flags, so a chart drawn after the raw extracts are
+ * purged still knows a won stage from a lost one (DECISIONS.md 600). Written
+ * only when there's one; names and categories, nothing about a record.
+ */
+export const STAGE_MEANINGS_FILE = "stage-meanings.json";
+
+/** Each stage's inferred category, for every flagged stage the calibration doesn't name. */
+export function inferredMeanings(calibration: Calibration, flags: StageRow[] | null): Record<string, "open" | "won" | "lost"> {
+  const map = stageMap(calibration, flags);
+  const out: Record<string, "open" | "won" | "lost"> = {};
+  for (const f of [...(flags ?? [])].sort((a, b) => (a.ApiName < b.ApiName ? -1 : 1))) {
+    const category = map.categoryOf(f.ApiName);
+    if (map.isInferred(f.ApiName) && (category === "open" || category === "won" || category === "lost")) out[f.ApiName] = category;
+  }
+  return out;
+}
+
 const CATEGORY_WORDS: Partial<Record<StageCategory, string>> = { open: "open", won: "won", lost: "lost" };
 
 /** The sentence every finding and metric that leaned on an inferred stage carries (DECISIONS.md 598). */
@@ -54,6 +73,9 @@ export function inferredStagesNote(inferred: Array<{ stage: string; category: St
   const list = items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
   return `We haven't yet agreed with you what ${inferred.length === 1 ? "one stage means" : "some stages mean"}, so we used Salesforce's own setting for ${inferred.length === 1 ? "it" : "each"}: ${list}.`;
 }
+
+/** Why a figure that splits lost from no decision can't be had from inferred lost stages (DECISIONS.md 600). */
+export const unsplitReason = (stages: string[]): string => `Salesforce's setting can't tell lost from no decision for: ${stages.join(", ")}.`;
 
 /** Why a check that needs the sales order can't place an inferred open stage. */
 export const unorderedReason = (stages: string[]): string => `The calibration doesn't say where these open stages come in the sales order: ${stages.join(", ")}.`;
@@ -99,6 +121,12 @@ export type PipelineData =
       unmapped: { finalStages: string[]; historyStages: string[]; unordered: string[] };
       /** Stages those deals used whose category came from Salesforce's flags, with it. */
       inferred: Array<{ stage: string; category: StageCategory }>;
+      /**
+       * Inferred lost stages that an in-scope deal closed in the window ends
+       * in. Salesforce's flags can't tell lost from no decision, so anything
+       * that separates the two isn't measured while there are any (DECISIONS.md 600).
+       */
+      unsplitLost: string[];
     };
 
 /**
@@ -208,5 +236,11 @@ function buildPipeline(ctx: Omit<RuleContext, "metrics">): PipelineData {
       unordered: inferred.filter((s) => s.category === "open").map((s) => s.stage),
     },
     inferred,
+    unsplitLost: [...new Set(deals.filter((d) => stages.isInferred(d.StageName) && d.category === "lost" && d.closedDay >= ctx.window.from && d.closedDay <= ctx.window.to).map((d) => d.StageName))].sort(),
   };
+}
+
+/** The reason a split of lost from no decision isn't measured, or null when it can be (DECISIONS.md 600). */
+export function unsplitLostReason(data: { unsplitLost: string[] }): string | null {
+  return data.unsplitLost.length > 0 ? unsplitReason(data.unsplitLost) : null;
 }

@@ -12,7 +12,7 @@ import { labelsOf } from "../labels.ts";
 import { notSized, pct, plural, segmentRate, type RecordList, type Rule, type RuleContext, type RuleResult } from "../../engine/rule.ts";
 import { localDay, todayIn, zoneOf } from "../time-zone.ts";
 import { atOwnLeadReturn } from "../value.ts";
-import { loadPipeline, type Deal } from "../historic-pipeline/cohort.ts";
+import { loadPipeline, unsplitLostReason, type Deal } from "../historic-pipeline/cohort.ts";
 import { potentialRevenue, SITUATIONS, type Situation } from "../historic-pipeline/potential.ts";
 import type { Value } from "../../schemas/index.ts";
 import type { DomainModule } from "../types.ts";
@@ -286,6 +286,9 @@ const lossReasonMissing: Rule = {
     if (!extract.lossReasonField) {
       return { outcome: "not_measurable", reason: "The calibration doesn't name a loss reason field that exists on Opportunity, so we can't tell a blank reason from a missing field.", evidence: data.evidence };
     }
+    // Lost only, with no decision left out (DECISIONS.md 600).
+    const unsplit = unsplitLostReason(data);
+    if (unsplit) return { outcome: "not_measurable", reason: unsplit, evidence: data.evidence };
     const lost = data.deals.filter((d) => d.category === "lost" && d.CloseDate >= ctx.window.from);
     if (lost.length === 0) return { outcome: "pass", summary: "No deals were lost in the window.", evidence: data.evidence, segmentExemptReason: "There are no lost deals to segment." };
     const result = segmentRate(lost, (d) => !d.LossReason, dealDimensions(ctx), { segmentLimit: 40, minSegment: MIN_SEGMENT });

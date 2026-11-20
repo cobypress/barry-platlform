@@ -5,7 +5,7 @@ import { daysBefore } from "../../extract/types.ts";
 import { activityCaptureExtractor, usersExtractor } from "../../extract/users.ts";
 import { notSized, plural, segmentRate, type NotMeasurableResult, type Rule, type RuleContext, type RuleResult } from "../../engine/rule.ts";
 import { shareRule } from "../current-pipeline/index.ts";
-import { loadPipeline, type Deal } from "../historic-pipeline/cohort.ts";
+import { loadPipeline, unsplitLostReason, type Deal } from "../historic-pipeline/cohort.ts";
 import { closedInWindow, groupBy, median, segment } from "../historic-pipeline/metrics.ts";
 import { localDay, todayIn, zoneNote, zoneOf } from "../time-zone.ts";
 import type { Evidence, Metric, SeriesPoint } from "../../schemas/index.ts";
@@ -157,6 +157,9 @@ const dealsWithoutActivity = shareRule({
   severity: "medium",
   scopeLabel: "won and lost deals created in the last year",
   scope(ctx, pipeline) {
+    // Won and lost, with no decision left out (DECISIONS.md 600).
+    const unsplit = unsplitLostReason(pipeline);
+    if (unsplit) return { reason: unsplit };
     const data = loadActivity(ctx);
     if (data.status !== "ok") return { reason: data.reason, evidence: data.evidence };
     const touches = touchesByDeal(data);
@@ -180,6 +183,8 @@ const wonAgainstLost: Rule = {
     if ("outcome" in data) return data;
     const pipeline = loadPipeline(ctx);
     if (pipeline.status !== "ok") return { outcome: "not_measurable", reason: pipeline.reason, evidence: pipeline.evidence };
+    const unsplit = unsplitLostReason(pipeline);
+    if (unsplit) return { outcome: "not_measurable", reason: unsplit, evidence: pipeline.evidence };
     const touches = touchesByDeal(data);
     const count = (d: Deal): number => touches.get(d.Id)?.length ?? 0;
     const deals = closedThisYear(ctx, pipeline.deals, data.from);
@@ -322,9 +327,12 @@ function activityMetrics(ctx: Ctx): Metric[] {
   const count = (d: Deal): number => touches.get(d.Id)?.length ?? 0;
   const deals = closedThisYear(ctx, pipeline.deals, data.from);
   const dims: Record<string, (d: Deal) => string> = { team: (d) => d.team, rep: (d) => ctx.userLabel(d.OwnerId) };
+  const unsplit = unsplitLostReason(pipeline);
   for (const [category, definition] of [["won", definitions.won], ["lost", definitions.lost]] as const) {
     const rows = deals.filter((d) => d.category === category);
-    if (rows.length < minSample) metrics.push({ ...definition, ...common, status: "not_measurable", reason: `${rows.length} ${category} deals is below the calibrated minimum of ${minSample}.` });
+    // Lost leaves no decision out (DECISIONS.md 600).
+    if (unsplit && category === "lost") metrics.push({ ...definition, ...common, status: "not_measurable", reason: unsplit });
+    else if (rows.length < minSample) metrics.push({ ...definition, ...common, status: "not_measurable", reason: `${rows.length} ${category} deals is below the calibrated minimum of ${minSample}.` });
     else metrics.push({ ...definition, ...common, status: "measured", value: median(rows.map(count)), n: rows.length, dateRange: { from: data.from, to: ctx.window.to }, segments: segment(rows, dims, minSample, (group) => median(group.map(count))), segmentExemptReason: null, series: [], stats: {} });
   }
   return metrics;

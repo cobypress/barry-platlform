@@ -59,7 +59,7 @@ const CLOSED = [
 ];
 
 type Ready = Parameters<typeof potentialRevenue>[1];
-const ready = (deals: Deal[], options: { multiCurrency?: boolean } = {}, c = calibration()): Ready => ({ status: "ok", deals, stages: stageMap(c), evidence: [], multiCurrency: options.multiCurrency ?? false, exclusions: [], historyStart: null, unmapped: { finalStages: [], historyStages: [], unordered: [] }, inferred: [] });
+const ready = (deals: Deal[], options: { multiCurrency?: boolean } = {}, c = calibration()): Ready => ({ status: "ok", deals, stages: stageMap(c), evidence: [], multiCurrency: options.multiCurrency ?? false, exclusions: [], historyStart: null, unmapped: { finalStages: [], historyStages: [], unordered: [] }, inferred: [], unsplitLost: [] });
 const winRate = (value: number, n: number): Metric[] => [{ id: "historic.win_rate", status: "measured", value, n } as Metric];
 const ctx = (metrics: Metric[] = [], c = calibration()) => ({ calibration: c, window: WINDOW, metrics, data: (() => ({ status: "unavailable", reason: "no", source: { kind: "rest", path: "x" } })) as never });
 const open = (Id: string, Amount: number | null, stage = "A"): Deal => deal(Id, stage, Amount, [row(stage, "2026-01-01", "2026-02-01")]);

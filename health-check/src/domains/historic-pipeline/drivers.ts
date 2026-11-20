@@ -1,6 +1,6 @@
 import { pct, type RuleContext } from "../../engine/rule.ts";
 import type { Finding, Metric, MetricSegment } from "../../schemas/index.ts";
-import type { Deal } from "./cohort.ts";
+import { unsplitLostReason, type Deal } from "./cohort.ts";
 import { base, dimensions, fiscalStartOf, groupBy, measured, notMeasurable, pushesOf, quantile, round1 } from "./metrics.ts";
 import { backwardMoves, expectedNote, load as loadProcess } from "./process.ts";
 
@@ -80,6 +80,8 @@ export function driverMetrics(ctx: Ctx): Metric[] {
   const loaded = loadProcess(ctx);
   if (loaded.status !== "ok") return [notMeasurable(base(ctx, loaded.data, definition), loaded.reason)];
   const { data, process: p } = loaded;
+  const unsplit = unsplitLostReason(data);
+  if (unsplit) return [notMeasurable(base(ctx, data, definition), unsplit)];
   const { minSample } = ctx.calibration;
   // Lost here is lost only, as the headline win rate has it. No decision deals are counted and set aside.
   const deals = p.closed.filter((d) => d.category === "won" || d.category === "lost");
