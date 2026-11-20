@@ -174,7 +174,7 @@ function withinCap(inventory: Inventory, say: (line: string) => void): Inventory
       if (size(inventory) < INVENTORY_MAX_BYTES) return inventory;
     }
   }
-  if (!("unavailable" in inventory.fillRates && inventory.fillRates.unavailable === FILL_RATES_TOO_BIG)) {
+  if ("rows" in inventory.fillRates) {
     say("the inventory is larger than the worker sends, so fillRates is saved as unavailable.");
     inventory = { ...inventory, fillRates: { unavailable: FILL_RATES_TOO_BIG } };
   }

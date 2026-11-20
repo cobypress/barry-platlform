@@ -255,6 +255,20 @@ describe("an inventory larger than the worker sends", () => {
   });
 });
 
+describe("an inventory too large for a reason other than fill rates", () => {
+  test("fill rates already unavailable keep their own reason, and the largest other section gives way", () => {
+    const inv = buildInventory(extracts(), "complete", AS_OF);
+    const notes = Array.from({ length: 150_000 }, (_, i) => `Made-up note number ${i} about a package, long enough to add up.`);
+    const big = { ...inv, fillRates: { unavailable: "Made up reason." }, packages: { rows: rowsOf(inv.packages), notes } };
+    const logs: string[] = [];
+    const settled = settleInventory(big, (l) => void logs.push(l), MADE);
+    assert.deepEqual(settled.fillRates, { unavailable: "Made up reason." });
+    assert.ok("unavailable" in settled.packages && /too large to store/.test(settled.packages.unavailable));
+    for (const k of ["connectedApps", "riskyPermissions", "limits"] as const) assert.deepEqual(settled[k], inv[k]);
+    assert.ok(logs.some((l) => /so packages is saved as unavailable/.test(l)));
+  });
+});
+
 describe("a run with no inventory file", () => {
   test("still gets a row whose five sections each say why", () => {
     const logs: string[] = [];
