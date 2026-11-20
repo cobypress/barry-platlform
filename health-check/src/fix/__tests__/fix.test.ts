@@ -166,7 +166,12 @@ describe("the synthetic org's findings carry both", () => {
   test("a remove that a guard held back says not to remove anything", () => {
     const blocked = issues.filter((f) => f.ruleId === "cfg.unused-custom-fields");
     assert.ok(blocked.length > 0 && blocked.every((f) => f.recommendationType === "investigate"));
-    for (const f of blocked) assert.match(f.fixPrompt!, /1\. Not every safety check passed, so do not remove, deactivate or merge anything/);
+    for (const f of blocked) {
+      assert.match(f.fixPrompt!, /1\. Not every safety check passed, so do not remove, deactivate or merge anything: this task is a review\./);
+      // The rule's own steps end in a deletion, so none of them is given.
+      for (const step of FIX_TABLE["cfg.unused-custom-fields"]!.prompt.steps) assert.ok(!f.fixPrompt!.includes(step), step);
+      assert.doesNotMatch(f.fixPrompt!, /delete the field|Deleted fields/i);
+    }
     // A deactivation every guard cleared has no such line.
     const clear = one("utl.never-logged-in");
     assert.equal(clear.recommendationType, "deactivate");

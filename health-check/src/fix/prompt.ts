@@ -58,6 +58,15 @@ function itemsLine(f: PromptFinding, items: string, withheld: ReadonlySet<string
   return nameable ? `The ${items} involved: ${listed(names)}.` : `Work on the ${items} listed in this finding.`;
 }
 
+/** The task when a guard held back a remove, deactivate or merge: a review, never the change. */
+const BLOCKED_STEPS: readonly string[] = [
+  "Not every safety check passed, so do not remove, deactivate or merge anything: this task is a review.",
+  "For each item, list everything that depends on it or that it depends on: records, flows, Apex, validation rules, page layouts, reports, list views, sharing, assignment and approval rules, scheduled jobs and integrations.",
+  "Note which checks you couldn't complete, and what a person would have to confirm.",
+  "Bring the list to the people who own these items, so they can decide what happens to each.",
+];
+const BLOCKED_VERIFY: readonly string[] = ["Each item has a list of what depends on it, and its owner's decision."];
+
 export type PromptOptions = {
   /** A guard held back a remove, deactivate or merge, so the finding now says to investigate. */
   blocked?: boolean;
@@ -72,10 +81,10 @@ export function assemblePrompt(f: PromptFinding, rule: PromptRule, options: Prom
   const title = neutral(f.title, personal);
   const summary = neutral(f.summary, personal);
   const good = neutral(f.recommendation, withheld);
-  const steps = [
-    ...(options.blocked ? ["Not every safety check passed, so do not remove, deactivate or merge anything: check what depends on each item and bring the list to the people who own them."] : []),
-    ...rule.steps,
-  ];
+  // A guard held back the remove, deactivate or merge, so the rule's own steps,
+  // which end in one, give way to a review that ends with the owners.
+  const steps = options.blocked ? BLOCKED_STEPS : rule.steps;
+  const verify = options.blocked ? BLOCKED_VERIFY : rule.verify;
   const dont = [
     ...(rule.decision ? ["Change any setting, metadata or record in the org: this task is analysis only."] : []),
     "Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.",
@@ -91,7 +100,7 @@ export function assemblePrompt(f: PromptFinding, rule: PromptRule, options: Prom
     ...(rule.decision ? ["This is a decision for people, not a change to the org. Do not change the org: prepare the analysis and the options so the people who own it can decide."] : []),
     `Steps:\n${steps.map((s, i) => `${i + 1}. ${s}`).join("\n")}`,
     `Do not:\n${dont.map((d) => `- ${d}`).join("\n")}`,
-    `To check it worked:\n${rule.verify.map((v) => `- ${v}`).join("\n")}`,
+    `To check it worked:\n${verify.map((v) => `- ${v}`).join("\n")}`,
   ].join("\n\n");
 }
 
