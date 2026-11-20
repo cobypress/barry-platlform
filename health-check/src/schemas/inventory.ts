@@ -8,7 +8,9 @@ import { CalendarDate, Timestamp } from "./common.ts";
 export const INVENTORY_VERSION = 1;
 
 const Count = z.number().int().nonnegative();
-const Name = z.string().min(1).max(255);
+/** The longest name kept. A longer one is cut to it and the section's notes say so (DECISIONS.md 618). */
+export const NAME_MAX = 255;
+const Name = z.string().min(1).max(NAME_MAX);
 const Unavailable = z.object({ unavailable: z.string().min(1) }).strict();
 
 /** A section holds its rows, with notes on anything capped, skipped or not read, or says why it couldn't be read. */
@@ -44,7 +46,8 @@ export const PackageRow = z
     managed: z.boolean().nullable(),
     licence: z
       .object({
-        status: z.string().max(100),
+        /** Null where Salesforce gave none (DECISIONS.md 618). */
+        status: z.string().max(100).nullable(),
         /** Seats allowed, or null on a site licence, which Salesforce gives as -1. */
         allowed: Count.nullable(),
         siteWide: z.boolean(),
@@ -85,7 +88,12 @@ export const RiskyPermissionRow = z
   })
   .strict();
 
-export const LimitRow = z.object({ name: Name, max: z.number().int(), used: z.number().int() }).strict();
+/**
+ * As Salesforce reports it: `used` is the maximum less what remains, so it is
+ * below zero where Salesforce reports more remaining than the maximum, and
+ * either can be a fraction. The section's notes name any such limit (DECISIONS.md 618).
+ */
+export const LimitRow = z.object({ name: Name, max: z.number(), used: z.number() }).strict();
 
 export const Inventory = z
   .object({

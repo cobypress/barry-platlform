@@ -304,7 +304,16 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
   writeJson(join(dir, FACTS_FILE), extracts.get(factsExtractor.id));
   // Names and counts only, so it's kept as long as the findings (DECISIONS.md 605).
   // Dated as the run reads the org, as the facts are, so every delivery writes the same file.
-  if (options.inventory) writeJson(join(dir, INVENTORY_FILE), buildInventory(extracts, scope, asOf, new Map(run.steps.flatMap((s) => (s.status === "failed" && s.error ? [[s.id, s.error]] : [])))));
+  // A fault here costs only the file, never the run: the worker then saves a
+  // row whose every section says it wasn't written (DECISIONS.md 618).
+  if (options.inventory) {
+    try {
+      writeJson(join(dir, INVENTORY_FILE), buildInventory(extracts, scope, asOf, new Map(run.steps.flatMap((s) => (s.status === "failed" && s.error ? [[s.id, s.error]] : [])))));
+    } catch {
+      rmSync(join(dir, INVENTORY_FILE), { force: true, recursive: true });
+      log("  The inventory couldn't be written, so the run has none.");
+    }
+  }
   // How big and tangled the build is, beside the health score and never part
   // of it (DECISIONS.md 614). Counts of set-up only, so on every run. Nothing
   // reads it back, so a fault here costs only the file, never the run.
