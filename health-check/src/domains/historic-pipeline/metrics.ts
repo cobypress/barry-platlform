@@ -3,7 +3,7 @@ import { pct } from "../../engine/rule.ts";
 import { orgExtractor } from "../../extract/configuration.ts";
 import type { DateRange, Evidence, Metric, MetricSegment, SeriesPoint } from "../../schemas/index.ts";
 import { localDay, zoneNote, zoneOf } from "../time-zone.ts";
-import { loadPipeline, type Deal, type PipelineData } from "./cohort.ts";
+import { loadPipeline, unorderedReason, unsplitLostReason, type Deal, type PipelineData } from "./cohort.ts";
 
 type Ctx = Omit<RuleContext, "metrics">;
 type Ready = Extract<PipelineData, { status: "ok" }>;
@@ -58,7 +58,8 @@ export function fiscalStartOf(ctx: Ctx): number | null {
   return org.status === "ok" ? (org.data[0]?.FiscalYearStartMonth ?? null) : null;
 }
 
-export const hasOpenStage = (d: Deal, data: Ready): boolean => d.history.some((h) => data.stages.orderOf(h.StageName) !== null);
+// By category, so a stage whose meaning came from Salesforce's flags counts (DECISIONS.md 598).
+export const hasOpenStage = (d: Deal, data: Ready): boolean => d.history.some((h) => data.stages.categoryOf(h.StageName) === "open");
 
 export function dimensions(ctx: Ctx): Record<string, (d: Deal) => string> {
   const fiscalStart = fiscalStartOf(ctx);
@@ -129,17 +130,22 @@ function winRate(ctx: Ctx, data: Ready): Metric[] {
   }
   const closed = data.deals.filter((d) => closedInWindow(d, ctx.window) && (d.category === "won" || d.category === "lost" || d.category === "no_decision"));
   const decided = closed.filter((d) => d.category !== "no_decision");
+  // Each of these but the rate including no decision leaves no decision out, or
+  // reports it, and Salesforce's flags can't tell it from lost (DECISIONS.md 600).
+  const unsplit = unsplitLostReason(data);
   const won = decided.filter((d) => d.category === "won");
   const rate = (group: Deal[]): number => pct(group.filter((d) => d.category === "won").length, group.length);
   const thin = (n: number): string => `${n} closed deals is below the calibrated minimum of ${minSample}.`;
   const dims = dimensions(ctx);
   const metrics: Metric[] = [];
 
-  if (decided.length < minSample) metrics.push(notMeasurable(definitions.count, thin(decided.length)));
+  if (unsplit) metrics.push(notMeasurable(definitions.count, unsplit));
+  else if (decided.length < minSample) metrics.push(notMeasurable(definitions.count, thin(decided.length)));
   else metrics.push(measured(definitions.count, { value: rate(decided), n: decided.length, dateRange: ctx.window, segments: segment(decided, dims, minSample, rate), stats: { won: won.length, lost: decided.length - won.length } }));
 
   const missingAmount = decided.filter((d) => d.Amount === null).length;
-  if (data.multiCurrency) metrics.push(notMeasurable(definitions.value, "The org is multi-currency, and amounts can't be added until historic rates are supplied."));
+  if (unsplit) metrics.push(notMeasurable(definitions.value, unsplit));
+  else if (data.multiCurrency) metrics.push(notMeasurable(definitions.value, "The org is multi-currency, and amounts can't be added until historic rates are supplied."));
   else if (decided.length < minSample) metrics.push(notMeasurable(definitions.value, thin(decided.length)));
   else if (pct(missingAmount, decided.length) > MAX_MISSING_AMOUNT_PCT) metrics.push(notMeasurable(definitions.value, `${pct(missingAmount, decided.length)}% of closed deals have no amount, so a value-weighted rate would mislead.`));
   else {
@@ -162,7 +168,7 @@ function winRate(ctx: Ctx, data: Ready): Metric[] {
     const noDecisionRate = (group: Deal[]): number => pct(group.filter((d) => d.category === "no_decision").length, group.length);
     metrics.push(
       measured(definitions.withNoDecision, { value: rate(closed), n: closed.length, dateRange: ctx.window, segments: segment(closed, dims, minSample, rate) }),
-      measured(definitions.noDecision, { value: noDecisionRate(closed), n: closed.length, dateRange: ctx.window, segments: segment(closed, dims, minSample, noDecisionRate) }),
+      unsplit ? notMeasurable(definitions.noDecision, unsplit) : measured(definitions.noDecision, { value: noDecisionRate(closed), n: closed.length, dateRange: ctx.window, segments: segment(closed, dims, minSample, noDecisionRate) }),
     );
   }
   return metrics;
@@ -178,6 +184,8 @@ function stageConversion(ctx: Ctx, data: Ready): Metric[] {
   });
   const gaps = [...data.unmapped.finalStages, ...data.unmapped.historyStages];
   if (gaps.length > 0) return [notMeasurable(definition, unmappedReason("stages", [...new Set(gaps)].sort()))];
+  // Each step is a place in the sales order, which Salesforce's flags don't give (DECISIONS.md 598).
+  if (data.unmapped.unordered.length > 0) return [notMeasurable(definition, unorderedReason(data.unmapped.unordered))];
   const { openStages, orderOf } = data.stages;
   if (openStages.length < 2) return [notMeasurable(definition, "The calibration needs at least two ordered open stages.")];
 
@@ -241,6 +249,9 @@ function salesCycle(ctx: Ctx, data: Ready): Metric[] {
       assumptions: salesCycleAssumptionDays ? [`The calibration assumes a sales cycle of ${salesCycleAssumptionDays} days`] : [],
     });
     if (data.unmapped.finalStages.length > 0) return notMeasurable(definition, unmappedReason("stages", data.unmapped.finalStages));
+    // Lost deals here leave no decision out (DECISIONS.md 600).
+    const unsplit = outcome === "lost" ? unsplitLostReason(data) : null;
+    if (unsplit) return notMeasurable(definition, unsplit);
     const rawDays = (d: Deal): number => (d.closedAt.getTime() - new Date(d.CreatedDate).getTime()) / DAY;
     const inWindow = data.deals.filter((d) => d.category === outcome && closedInWindow(d, ctx.window));
     // A deal created already closed, or closed before it was created, has no cycle

@@ -29,6 +29,8 @@ import { SalesforceClient } from "../salesforce/client.ts";
 import type { ConnectionProvider } from "../salesforce/connection.ts";
 import type { Transport } from "../salesforce/transport.ts";
 import { analyse, type AnalysisOutput } from "./evaluate.ts";
+import { stagesExtractor, type StageRow } from "../extract/opportunities.ts";
+import { inferredMeanings, STAGE_MEANINGS_FILE } from "../domains/historic-pipeline/cohort.ts";
 
 export type RunOptions = {
   provider: ConnectionProvider;
@@ -349,6 +351,14 @@ function analyseRun(dir: string, run: Run, calibration: Calibration, modules: Do
     join(dir, HANDBOOK_FILE),
     buildHandbook(extracts.get(metadataExtractor.id) as Sourced<MetadataBundle> | undefined, apex, extracts.get(customObjectsExtractor.id) as Sourced<CustomObjectRow[]> | undefined, changes, modifiers, components),
   );
+  // The documents read only the run folder, and the raw extracts are purged, so
+  // what a stage the calibration doesn't name was taken to mean is kept beside
+  // the findings (DECISIONS.md 600).
+  const flags = extracts.get(stagesExtractor.id) as Sourced<StageRow[]> | undefined;
+  const meanings = inferredMeanings(calibration, flags?.status === "ok" ? flags.data : null);
+  const meaningsPath = join(dir, STAGE_MEANINGS_FILE);
+  if (Object.keys(meanings).length > 0) writeJson(meaningsPath, meanings);
+  else rmSync(meaningsPath, { force: true });
   renderOutputs(dir, run, calibration, output);
   return output;
 }

@@ -1,6 +1,6 @@
 import { notSized, pct, plural, segmentRate, type Rule, type RuleContext, type RuleResult, type SegmentedRate } from "../../engine/rule.ts";
 import type { Calibration, Metric, MetricSegment } from "../../schemas/index.ts";
-import { loadPipeline, type Deal, type PipelineData } from "./cohort.ts";
+import { loadPipeline, unorderedReason, unsplitLostReason, type Deal, type PipelineData } from "./cohort.ts";
 import { daysByStage, stageLeftFrom } from "./deep-dive.ts";
 import { base, dimensions, groupBy, measured, median, notMeasurable, quantile, round1, segment, unmappedReason, type Base } from "./metrics.ts";
 import { closedFromOpen } from "./outcomes.ts";
@@ -67,6 +67,8 @@ export function load(ctx: Ctx): { status: "ok"; data: Ready; process: Process } 
   if (data.status !== "ok") return { status: "not_measurable", reason: data.reason, data };
   const gaps = [...new Set([...data.unmapped.finalStages, ...data.unmapped.historyStages])].sort();
   if (gaps.length > 0) return { status: "not_measurable", reason: unmappedReason("stages", gaps), data };
+  // Skips and backward moves need every open stage's place in the order, and Salesforce's flags don't give one (DECISIONS.md 598).
+  if (data.unmapped.unordered.length > 0) return { status: "not_measurable", reason: unorderedReason(data.unmapped.unordered), data };
   const closed = closedFromOpen(ctx, data);
   const { minSample } = ctx.calibration;
   if (closed.length < minSample) return { status: "not_measurable", reason: `${closed.length} closed deals with stage history is below the calibrated minimum of ${minSample}.`, data };
@@ -137,6 +139,9 @@ function skipped(ctx: Ctx, data: Ready, p: Process): Metric {
 
 function backwards(ctx: Ctx, data: Ready, p: Process): Metric {
   const definition = base(ctx, data, { ...DEF.backwards, assumptions: ["Earlier means earlier in the calibration's order of open stages"] });
+  // Split by outcome, lost apart from no decision (DECISIONS.md 600).
+  const unsplit = unsplitLostReason(data);
+  if (unsplit) return notMeasurable(definition, unsplit);
   const back = (d: Deal): number => backwardMoves(p.paths.get(d.Id)!, data.stages.orderOf);
   const rate = (group: Deal[]): number => pct(group.filter((d) => back(d) > 0).length, group.length);
   const outcome = (d: Deal): string => (isWon(d) ? "Won" : d.category === "lost" ? "Lost" : "No decision");

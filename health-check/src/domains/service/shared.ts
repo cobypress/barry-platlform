@@ -1,5 +1,6 @@
 import type { RuleContext } from "../../engine/rule.ts";
 import type { ClosedCaseRow, OpenCaseRow, QueueRow, ServiceSetup } from "../../extract/service.ts";
+import type { Sourced } from "../../extract/types.ts";
 import type { Calibration } from "../../schemas/index.ts";
 
 // What both Service Cloud areas share: the calibrated limits, and how a case's
@@ -32,7 +33,15 @@ export const DAY = 24 * HOUR;
 export const queueOwned = (ownerId: string): boolean => ownerId.startsWith("00G");
 export const ownerType = (c: { OwnerId: string }): string => (queueOwned(c.OwnerId) ? "Queue" : "Person");
 export const priorityOf = (c: { Priority: string | null }): string => c.Priority ?? "No priority";
-export const originOf = (c: { Origin: string | null }): string => c.Origin ?? "No origin";
+export const originOf = (c: { Origin?: string | null }): string => c.Origin ?? "No origin";
+
+/**
+ * Origin as a segment, only where the cases' read has the field. Without it
+ * every case would sit in one "No origin" segment, which segments nothing
+ * (DECISIONS.md 599).
+ */
+export const byOrigin = (...sources: Array<Sourced<unknown>>): { origin?: (c: { Origin?: string | null }) => string } =>
+  sources.some((s) => s.status === "ok" && s.missingFields?.includes("Case.Origin")) ? {} : { origin: originOf };
 export const ageDays = (created: string, now: Date): number => (now.getTime() - Date.parse(created)) / DAY;
 
 /** Case queues: queues that take cases. */

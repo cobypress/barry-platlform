@@ -7,14 +7,17 @@ import type { Metric, Value } from "../schemas/index.ts";
 // here is a benchmark or a typical figure, because Claude may not introduce one
 // and neither may we.
 
-export const measuredRate = (ctx: Pick<RuleContext, "metrics">, id: string): Extract<Metric, { status: "measured" }> | { reason: string } => {
+export const measuredRate = (ctx: Pick<RuleContext, "metrics" | "leanOn">, id: string): Extract<Metric, { status: "measured" }> | { reason: string } => {
   const metric = ctx.metrics.find((m) => m.id === id);
   if (!metric) return { reason: `${id} wasn't calculated.` };
-  return metric.status === "measured" ? metric : { reason: metric.reason };
+  if (metric.status !== "measured") return { reason: metric.reason };
+  // A figure sized from this rate rests on whatever the rate rested on (DECISIONS.md 598).
+  ctx.leanOn?.(id);
+  return metric;
 };
 
 /** A sum of deal amounts, weighted by the org's own win rate. */
-export function atOwnWinRate(ctx: Pick<RuleContext, "metrics" | "calibration">, amount: number, options: { multiCurrency: boolean; period: string; basis: string; caveat: string }): Value {
+export function atOwnWinRate(ctx: Pick<RuleContext, "metrics" | "calibration" | "leanOn">, amount: number, options: { multiCurrency: boolean; period: string; basis: string; caveat: string }): Value {
   if (options.multiCurrency) return notSized("The org is multi-currency, so these amounts can't be added.");
   if (amount <= 0) return notSized("These records have no amounts to size.");
   const rate = measuredRate(ctx, "historic.win_rate");
@@ -29,7 +32,7 @@ export function atOwnWinRate(ctx: Pick<RuleContext, "metrics" | "calibration">, 
 }
 
 /** Leads priced at what the org's own leads have returned on average. */
-export function atOwnLeadReturn(ctx: Pick<RuleContext, "metrics" | "calibration">, leads: number, options: { period: string; caveat: string }): Value {
+export function atOwnLeadReturn(ctx: Pick<RuleContext, "metrics" | "calibration" | "leanOn">, leads: number, options: { period: string; caveat: string }): Value {
   const rate = measuredRate(ctx, "lead.won_per_lead");
   if ("reason" in rate) return notSized(`We won't size this without your own return per lead, which isn't measurable: ${rate.reason}`);
   if (rate.value <= 0 || leads <= 0) return notSized("Your leads haven't produced won revenue to size this from.");

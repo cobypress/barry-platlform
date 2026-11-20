@@ -59,7 +59,7 @@ const CLOSED = [
 ];
 
 type Ready = Parameters<typeof potentialRevenue>[1];
-const ready = (deals: Deal[], options: { multiCurrency?: boolean } = {}, c = calibration()): Ready => ({ status: "ok", deals, stages: stageMap(c), evidence: [], multiCurrency: options.multiCurrency ?? false, exclusions: [], historyStart: null, unmapped: { finalStages: [], historyStages: [] } });
+const ready = (deals: Deal[], options: { multiCurrency?: boolean } = {}, c = calibration()): Ready => ({ status: "ok", deals, stages: stageMap(c), evidence: [], multiCurrency: options.multiCurrency ?? false, exclusions: [], historyStart: null, unmapped: { finalStages: [], historyStages: [], unordered: [] }, inferred: [], unsplitLost: [] });
 const winRate = (value: number, n: number): Metric[] => [{ id: "historic.win_rate", status: "measured", value, n } as Metric];
 const ctx = (metrics: Metric[] = [], c = calibration()) => ({ calibration: c, window: WINDOW, metrics, data: (() => ({ status: "unavailable", reason: "no", source: { kind: "rest", path: "x" } })) as never });
 const open = (Id: string, Amount: number | null, stage = "A"): Deal => deal(Id, stage, Amount, [row(stage, "2026-01-01", "2026-02-01")]);
@@ -263,9 +263,11 @@ describe("on the synthetic org", () => {
     assert.equal(metric("current.delivery_outlook_value", extracts, { calibration: c }).status, "not_measurable");
   });
 
-  test("an unmapped stage stops the history-based figures", () => {
+  test("an unmapped stage stops the history-based figures where Salesforce's stage flags can't be read (DECISIONS.md 598)", () => {
     const c = loadCalibration();
     c.stages = c.stages.filter((s) => s.name !== "Closed Lost - No Budget");
-    for (const id of ["historic.stage_win_rate", "historic.lost_by_stage", "historic.close_days_late", "current.delivery_outlook_value"]) assert.equal(metric(id, extracts, { calibration: c }).status, "not_measurable", id);
+    const noFlags = clone(extracts);
+    noFlags.set("opportunity-stages", { status: "unavailable", reason: "INVALID_TYPE: no", source: { kind: "soql", api: "rest", query: "x" } });
+    for (const id of ["historic.stage_win_rate", "historic.lost_by_stage", "historic.close_days_late", "current.delivery_outlook_value"]) assert.equal(metric(id, noFlags, { calibration: c }).status, "not_measurable", id);
   });
 });

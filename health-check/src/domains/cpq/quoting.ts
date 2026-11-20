@@ -5,7 +5,7 @@ import { schemaExtractor } from "../../extract/configuration.ts";
 import { opportunitiesExtractor, stagesExtractor } from "../../extract/opportunities.ts";
 import { licencesExtractor, usersExtractor } from "../../extract/users.ts";
 import type { Value } from "../../schemas/index.ts";
-import { loadPipeline, type Deal } from "../historic-pipeline/cohort.ts";
+import { loadPipeline, unsplitLostReason, type Deal } from "../historic-pipeline/cohort.ts";
 import { groupBy, median } from "../historic-pipeline/metrics.ts";
 import type { DomainModule } from "../types.ts";
 import { discountOf, listed, presenceGap } from "./shared.ts";
@@ -36,6 +36,9 @@ function quotedDeals(ctx: RuleContext): { rows: Quoted[]; multiCurrency: boolean
   // A deal whose quote is past the cut-off would look unquoted, and the part read is in id order, not a sample (rule 5).
   if (quotes.truncated) return { reason: cutOff("quotes", quotes.data.length), evidence: [ctx.ev(quotes.source, { count: quotes.data.length })] };
   if (data.status !== "ok") return { reason: data.reason, evidence: data.evidence };
+  // Won against lost, with no decision left out (DECISIONS.md 600).
+  const unsplit = unsplitLostReason(data);
+  if (unsplit) return { reason: unsplit, evidence: data.evidence };
   const byDeal = new Map(quotes.data.filter((q) => q.SBQQ__Opportunity2__c).map((q) => [q.SBQQ__Opportunity2__c!, q]));
   const rows = data.deals.flatMap((deal): Quoted[] => {
     if ((deal.category !== "won" && deal.category !== "lost") || deal.CloseDate < ctx.window.from) return [];

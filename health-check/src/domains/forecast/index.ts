@@ -6,7 +6,7 @@ import { daysBefore, type SourceInfo } from "../../extract/types.ts";
 import { usersExtractor } from "../../extract/users.ts";
 import { notSized, pct, plural, segmentRate, type NotMeasurableResult, type Rule, type RuleContext, type RuleResult } from "../../engine/rule.ts";
 import { coverageOf, shareRule, type Scoped } from "../current-pipeline/index.ts";
-import { loadPipeline, type Deal } from "../historic-pipeline/cohort.ts";
+import { loadPipeline, unorderedReason, type Deal } from "../historic-pipeline/cohort.ts";
 import { fiscalStartOf, pushesOf } from "../historic-pipeline/metrics.ts";
 import { localDay, todayIn, zoneNote, zoneOf } from "../time-zone.ts";
 import type { Evidence, Metric } from "../../schemas/index.ts";
@@ -255,6 +255,8 @@ const earlyStageCommits = shareRule({
   severity: "medium",
   scopeLabel: "deals in Commit",
   scope(ctx, data, open) {
+    // Which stages are early is the sales order's to say, and Salesforce's flags don't give one (DECISIONS.md 598).
+    if (data.unmapped.unordered.length > 0) return { reason: unorderedReason(data.unmapped.unordered) };
     const early = new Set(data.stages.openStages.slice(0, EARLY_STAGES));
     return commitScope(ctx, open, (d) => early.has(d.StageName));
   },

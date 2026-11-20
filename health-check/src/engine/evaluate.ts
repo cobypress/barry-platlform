@@ -57,7 +57,7 @@ export function applyGuards(result: IssueResult): IssueResult {
   };
 }
 
-function toFinding(rule: Rule, result: RuleResult, pseudonyms: Pseudonymiser): Finding {
+function toFinding(rule: Rule, result: RuleResult, pseudonyms: Pseudonymiser, assumed = false): Finding {
   const shared = {
     id: findingId(rule.id, result.key ?? ""),
     ruleId: rule.id,
@@ -102,7 +102,8 @@ function toFinding(rule: Rule, result: RuleResult, pseudonyms: Pseudonymiser): F
       recommendation: "",
       recommendationType: "none",
       severity: "info",
-      confidence: "high",
+      // A pass that leaned on an assumption is no surer than medium (DECISIONS.md 598).
+      confidence: assumed && result.outcome === "pass" ? "medium" : "high",
       evidence: result.evidence,
       value: NOT_SIZED,
       effort: { size: "XS" },
@@ -126,10 +127,24 @@ function engineEvidence(ruleId: string, note: string, now: Date): Evidence {
   return { kind: "engine", path: ruleId, count: null, dateRange: null, exclusions: [], capturedAt: now.toISOString(), note };
 }
 
-function runRule(rule: Rule, ctx: RuleContext, pseudonyms: Pseudonymiser, records: FindingRecords[]): Finding[] {
+const CONFIDENCE_RANK = { low: 0, medium: 1, high: 2 } as const;
+
+/**
+ * What a result says once the assumptions its rule leaned on are added
+ * (DECISIONS.md 598): each one in its text, and a finding's confidence no
+ * higher than medium. A not measurable result leaned on nothing.
+ */
+export function withAssumptions(result: RuleResult, notes: string[]): RuleResult {
+  if (notes.length === 0 || result.outcome === "not_measurable") return result;
+  const summary = [result.summary, ...notes].join(" ");
+  if (result.outcome === "pass") return { ...result, summary };
+  return { ...result, summary, confidence: CONFIDENCE_RANK[result.confidence] > CONFIDENCE_RANK.medium ? "medium" : result.confidence };
+}
+
+function runRule(rule: Rule, ctx: RuleContext, pseudonyms: Pseudonymiser, records: FindingRecords[], assumed: Set<string>): Finding[] {
   try {
     const raw = rule.evaluate(ctx);
-    const results = Array.isArray(raw) ? raw : [raw];
+    const results = (Array.isArray(raw) ? raw : [raw]).map((r) => withAssumptions(r, [...assumed]));
     for (const result of results) {
       if (result.outcome !== "issue" || !result.records?.rows.length) continue;
       // The same last pass as the finding's text, for the words a rule wrote. Not
@@ -149,7 +164,7 @@ function runRule(rule: Rule, ctx: RuleContext, pseudonyms: Pseudonymiser, record
       if (result.outcome === "pass" && !result.segmentsChecked?.length && !result.segmentExemptReason) {
         return toFinding(rule, { outcome: "not_measurable", key: result.key, reason: "The rule passed without segmenting its data, so the result can't be trusted.", evidence: result.evidence }, pseudonyms);
       }
-      return toFinding(rule, result, pseudonyms);
+      return toFinding(rule, result, pseudonyms, assumed.size > 0);
     });
   } catch (err) {
     // One broken rule shouldn't lose the rest of the run, and it must show up.
@@ -163,6 +178,8 @@ export function analyse(input: AnalysisInput): AnalysisOutput {
   const { modules, extracts, calibration, now, window, answers, pseudonyms, userDirectory, scope = "complete" } = input;
   const raised = new Map<string, ManualStep>();
   let currentRule: string | null = null;
+  // What the rule or metric builder running now has leaned on (DECISIONS.md 598).
+  let assumed = new Set<string>();
 
   const data = <T>(extractor: Extractor<T>): T => {
     if (!extracts.has(extractor.id)) throw new Error(`Extractor "${extractor.id}" didn't run`);
@@ -213,19 +230,38 @@ export function analyse(input: AnalysisInput): AnalysisOutput {
       const known = userDirectory.get(userId);
       return known ? pseudonyms.label("user", userId, known.name, known.aliases) : pseudonyms.label("user", userId, UNKNOWN_USER);
     },
+    assume: (note) => {
+      assumed.add(note);
+    },
+    leanOn: (metricId) => {
+      for (const note of leanedOn.get(metricId) ?? []) assumed.add(note);
+    },
   };
+  const leanedOn = new Map<string, string[]>();
 
-  const metrics = modules.flatMap((m) => (m.metrics ?? []).flatMap((build) => build(base))).map((m) => Metric.parse(pseudonyms.scrubDeep(m)));
+  const metrics = modules
+    .flatMap((m) => (m.metrics ?? []).flatMap((build) => {
+      assumed = new Set();
+      const built = build(base);
+      const notes = [...assumed];
+      for (const metric of built) if (metric.status === "measured" && notes.length > 0) leanedOn.set(metric.id, notes);
+      // A measured figure that leaned on an assumption says so among its own.
+      return notes.length === 0 ? built : built.map((metric) => (metric.status === "measured" ? { ...metric, assumptions: [...metric.assumptions, ...notes.filter((n) => !metric.assumptions.includes(n))] } : metric));
+    }))
+    .map((m) => Metric.parse(pseudonyms.scrubDeep(m)));
+  assumed = new Set();
   const ctx: RuleContext = { ...base, metrics };
   const findings: Finding[] = [];
   const records: FindingRecords[] = [];
   for (const module of modules) {
     for (const rule of module.rules) {
       currentRule = rule.id;
-      findings.push(...runRule(rule, ctx, pseudonyms, records));
+      assumed = new Set();
+      findings.push(...runRule(rule, ctx, pseudonyms, records, assumed));
     }
   }
   currentRule = null;
+  assumed = new Set();
   // Only what ended as an issue keeps its records, so a list never outlives its finding.
   const issues = new Set(findings.filter((f) => f.status === "issue").map((f) => f.id));
   return { findings, metrics, manualSteps: [...raised.values()], records: records.filter((r) => issues.has(r.findingId)) };

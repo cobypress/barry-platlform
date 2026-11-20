@@ -135,7 +135,7 @@ function stageLines(ctx: RuleContext, data: Ready): Map<string, number> {
   const byStage = new Map<string, number[]>();
   for (const deal of data.deals.filter((d) => d.category === "won")) {
     for (const run of stageRuns(deal)) {
-      if (data.stages.orderOf(run.stage) === null) continue;
+      if (data.stages.categoryOf(run.stage) !== "open") continue;
       const days = byStage.get(run.stage);
       if (days) days.push(run.days);
       else byStage.set(run.stage, [run.days]);

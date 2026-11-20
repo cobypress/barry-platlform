@@ -501,7 +501,24 @@ function adoptionSlide(r: Render, metric: (id: string) => Metric | undefined): s
   return `<div class="eyebrow">Adoption and usage${refs}</div><h2>Who uses Salesforce, and how</h2><div class="chart-pair"><div><h3 class="cap">Monthly active users</h3>${chartSlot(active)}</div><div class="stack">${chartSlot(channels)}${chartSlot(lightning)}</div></div>`;
 }
 
-function processSlide(r: Render, metric: (id: string) => Metric | undefined, calibration: Calibration): Slide {
+/**
+ * Each stage as the engine used it, for the flow: the calibration's, then what
+ * Salesforce's flags said of a stage it doesn't name (DECISIONS.md 600). The
+ * calibration always wins. An inferred open stage has no order, so it sorts
+ * after the calibrated ones.
+ */
+export function flowStages(calibration: Calibration, meanings: Record<string, "open" | "won" | "lost"> = {}): Array<{ name: string; category: "open" | "won" | "lost" }> {
+  const named = new Set(calibration.stages.map((s) => s.name));
+  return [
+    ...calibration.stages
+      .filter((s) => s.category !== "excluded")
+      .sort((a, b) => (a.order ?? 99) - (b.order ?? 99))
+      .map((s) => ({ name: s.name, category: s.category === "open" ? ("open" as const) : s.category === "won" ? ("won" as const) : ("lost" as const) })),
+    ...Object.entries(meanings).filter(([name]) => !named.has(name)).map(([name, category]) => ({ name, category })),
+  ];
+}
+
+function processSlide(r: Render, metric: (id: string) => Metric | undefined, calibration: Calibration, meanings: Record<string, "open" | "won" | "lost"> = {}): Slide {
   const head = `<div class="eyebrow">Pipeline</div><h2>How your sales process really runs</h2>`;
   const path = (id: string, noun: string): string => {
     const m = asMeasured(metric(id));
@@ -510,11 +527,7 @@ function processSlide(r: Render, metric: (id: string) => Metric | undefined, cal
   };
   // The flow takes the room. The table of every move is in the raw notes.
   const moves = metric("historic.stage_transitions");
-  const stages = calibration.stages
-    .filter((s) => s.category !== "excluded")
-    .sort((a, b) => (a.order ?? 99) - (b.order ?? 99))
-    .map((s) => ({ name: s.name, category: s.category === "open" ? ("open" as const) : s.category === "won" ? ("won" as const) : ("lost" as const) }));
-  const flow = `<h3 class="cap">Moves between stages${r.ref("historic.stage_transitions")}</h3>${chartSlot(processFlowChart(moves, stages))}`;
+  const flow = `<h3 class="cap">Moves between stages${r.ref("historic.stage_transitions")}</h3>${chartSlot(processFlowChart(moves, flowStages(calibration, meanings)))}`;
   return { classes: "tight compact-rows", html: `${head}<div class="process"><div class="paths">${path("historic.path_to_won", "won deals")}${path("historic.path_to_lost", "lost and no decision deals")}</div><div>${flow}</div></div>` };
 }
 
@@ -812,7 +825,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null, mo
     page("Close dates and stage speed", speed, () => closeDatesSlide(r, metric, calibration));
     page("Sales cycle and slippage", [...cycle, ...slippage], () => ({ classes: "tight", html: `<div class="eyebrow">Pipeline</div><h2>Sales cycle and slippage</h2>${metricRows(r, rowsOf([...cycle, ...slippage]), r.currency)}` }));
   }
-  page("How your sales process really runs", ["historic.path_to_won", "historic.path_to_lost", "historic.stage_transitions"], () => processSlide(r, metric, calibration));
+  page("How your sales process really runs", ["historic.path_to_won", "historic.path_to_lost", "historic.stage_transitions"], () => processSlide(r, metric, calibration, report.input.stageMeanings ?? {}));
   page("What separates your wins from your losses", [WIN_DRIVERS], () => driversSlide(r, metric));
   page("Pipeline over time", ["historic.pipeline_point_in_time_value"], () => ({ html: `<div class="eyebrow">Pipeline</div><h2>Pipeline over time</h2><p class="lede">${r.t("The value of your open pipeline at the end of each month.")}</p><div class="chart-wrap" style="max-width:1000px">${chartSlot(pipelineOverTime(metric("historic.pipeline_point_in_time_value"), r.currency))}</div>` }));
 

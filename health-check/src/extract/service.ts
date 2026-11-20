@@ -104,8 +104,9 @@ export const serviceSetupExtractor: Extractor<ServiceSetup> = {
 
 export type CaseVolumeRow = { y: number; m: number; Priority: string | null; n: number };
 export type OriginRow = { Origin: string | null; n: number };
-export type OpenCaseRow = { Id: string; Status: string; Priority: string | null; Origin: string | null; OwnerId: string; CreatedDate: string; ContactId: string | null; AccountId: string | null };
-export type ClosedCaseRow = { Id: string; CreatedDate: string; ClosedDate: string; Priority: string | null; Origin: string | null; OwnerId: string; Type?: string | null; Reason?: string | null };
+// Origin is absent where the org doesn't have the field: the source names it in `missingFields` (DECISIONS.md 599).
+export type OpenCaseRow = { Id: string; Status: string; Priority: string | null; Origin?: string | null; OwnerId: string; CreatedDate: string; ContactId: string | null; AccountId: string | null };
+export type ClosedCaseRow = { Id: string; CreatedDate: string; ClosedDate: string; Priority: string | null; Origin?: string | null; OwnerId: string; Type?: string | null; Reason?: string | null };
 
 export type ServiceCases = {
   created: Sourced<CaseVolumeRow[]>;
@@ -115,24 +116,38 @@ export type ServiceCases = {
   closedCases: Sourced<ClosedCaseRow[]>;
 };
 
-// Type and Reason are standard, but an org can take them off; the rest every org has.
-const CLOSED_CASE: FieldSpec = { object: "Case", required: ["Id", "CreatedDate", "ClosedDate", "Priority", "Origin", "OwnerId"], optional: ["Type", "Reason"] };
+// Type, Reason and Origin are standard, but an org can take them off or hide
+// them; a real org without Origin lost eight checks to it (DECISIONS.md 599).
+const CLOSED_CASE: FieldSpec = { object: "Case", required: ["Id", "CreatedDate", "ClosedDate", "Priority", "OwnerId"], optional: ["Origin", "Type", "Reason"] };
+const OPEN_CASE: FieldSpec = { object: "Case", required: ["Id", "Status", "Priority", "OwnerId", "CreatedDate", "ContactId", "AccountId"], optional: ["Origin"] };
+// The SELECT order the reads always had, so an org with every field sends the same query.
+const CLOSED_ORDER = ["Id", "CreatedDate", "ClosedDate", "Priority", "Origin", "OwnerId", "Type", "Reason"];
+const OPEN_ORDER = ["Id", "Status", "Priority", "Origin", "OwnerId", "CreatedDate", "ContactId", "AccountId"];
+const inOrder = (order: string[], missing: string[]): string => order.filter((f) => !missing.includes(`Case.${f}`)).join(", ");
 
 /** Case volumes, as counts by month in the org's time zone, and the cases open now or closed in the last year. */
 export const serviceCasesExtractor: Extractor<ServiceCases> = {
   id: "service-cases",
+  // Still 2 with Origin optional (DECISIONS.md 599): with the field there the
+  // rows are the same, so a run in flight keeps its checkpoint.
   version: 2,
   records: true,
   async run(ctx) {
-    const plan = planFrom(await describeObject(ctx, "Case"), CLOSED_CASE);
-    const closedSoql = `SELECT ${plan.ok ? plan.select : CLOSED_CASE.required.join(", ")} FROM Case WHERE IsClosed = true AND ${inYear(ctx, "ClosedDate")}`;
+    const described = await describeObject(ctx, "Case");
+    const plan = planFrom(described, CLOSED_CASE);
+    const openPlan = planFrom(described, OPEN_CASE);
+    const closedSoql = `SELECT ${inOrder(CLOSED_ORDER, plan.ok ? plan.missing : [])} FROM Case WHERE IsClosed = true AND ${inYear(ctx, "ClosedDate")}`;
+    const openSoql = `SELECT ${inOrder(OPEN_ORDER, openPlan.ok ? openPlan.missing : [])} FROM Case WHERE IsClosed = false AND ${toTheRun(ctx, "CreatedDate")}`;
+    const originSoql = `SELECT Origin, COUNT(Id) n FROM Case WHERE ${inYear(ctx, "CreatedDate")} GROUP BY Origin`;
+    // Without the field there's nothing to count, so the query isn't spent.
+    const noOrigin = openPlan.ok && openPlan.missing.includes("Case.Origin");
     const month = (field: string) => `CALENDAR_YEAR(convertTimezone(${field})) y, CALENDAR_MONTH(convertTimezone(${field})) m, Priority, COUNT(Id) n`;
     const by = (field: string) => `GROUP BY CALENDAR_YEAR(convertTimezone(${field})), CALENDAR_MONTH(convertTimezone(${field})), Priority`;
     return {
       created: await readSoql(ctx, `SELECT ${month("CreatedDate")} FROM Case WHERE ${inYear(ctx, "CreatedDate")} ${by("CreatedDate")}`),
       closed: await readSoql(ctx, `SELECT ${month("ClosedDate")} FROM Case WHERE IsClosed = true AND ${inYear(ctx, "ClosedDate")} ${by("ClosedDate")}`),
-      origins: await readSoql(ctx, `SELECT Origin, COUNT(Id) n FROM Case WHERE ${inYear(ctx, "CreatedDate")} GROUP BY Origin`),
-      open: await readSoql(ctx, `SELECT Id, Status, Priority, Origin, OwnerId, CreatedDate, ContactId, AccountId FROM Case WHERE IsClosed = false AND ${toTheRun(ctx, "CreatedDate")}`, { maxRecords: CASE_ROW_CAP }),
+      origins: noOrigin ? { status: "unavailable", reason: "Case.Origin isn't in this org, so there's no channel to count cases by.", source: { kind: "soql", api: "rest", query: originSoql } } : await readSoql(ctx, originSoql),
+      open: openPlan.ok ? await readSoql(ctx, openSoql, { maxRecords: CASE_ROW_CAP, missingFields: openPlan.missing }) : { status: "unavailable", reason: openPlan.reason, source: { kind: "soql", api: "rest", query: openSoql } },
       closedCases: plan.ok ? await readSoql(ctx, closedSoql, { maxRecords: CASE_ROW_CAP, missingFields: plan.missing }) : { status: "unavailable", reason: plan.reason, source: { kind: "soql", api: "rest", query: closedSoql } },
     };
   },

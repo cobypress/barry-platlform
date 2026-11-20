@@ -97,6 +97,22 @@ export const STAGES = [
   { ApiName: "Qualified", MasterLabel: "Qualified", IsActive: false, IsClosed: false, IsWon: false, SortOrder: 10 },
 ];
 
+/**
+ * Trap (DECISIONS.md 598): a calibration that leaves out stages, as the first
+ * real run's did. Tests take these out of the calibration over the recorded
+ * run, so the synthetic run itself is unchanged. Discovery and Negotiation are
+ * open in Salesforce's flags and Closed Won is won, so each takes its meaning
+ * from them; Legal Review, which nobody uses, is given to the open deals of
+ * the record type the trap's scope leaves out, so it is used, but never in scope.
+ */
+export const UNCALIBRATED_STAGES = {
+  open: ["Discovery", "Negotiation"],
+  won: "Closed Won",
+  outOfScope: "Legal Review",
+  scope: ["New_Business"],
+  outOfScopeType: "Renewal",
+} as const;
+
 const OPEN_PATH = ["Prospecting", "Discovery", "Proposal", "Negotiation"];
 const SOURCES = ["Web", "Referral", "Partner", "Event"];
 

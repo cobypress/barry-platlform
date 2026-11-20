@@ -5,7 +5,8 @@ import { monthsBefore, type Sourced } from "../../extract/types.ts";
 import type { Evidence, Metric, MetricSegment, SegmentCheck } from "../../schemas/index.ts";
 import type { DomainModule } from "../types.ts";
 import { localDay, zoneOf } from "../time-zone.ts";
-import { ageDays, caseQueues, HOUR, limitsOf, median, MIN_SEGMENT, originOf, ownerType, priorityOf, quantile, queueOwned, round1, yearRange, yearsCases } from "./shared.ts";
+import { missingFieldReason } from "../../extract/fields.ts";
+import { ageDays, byOrigin, caseQueues, HOUR, limitsOf, median, MIN_SEGMENT, originOf, ownerType, priorityOf, quantile, queueOwned, round1, yearRange, yearsCases } from "./shared.ts";
 
 // How cases are handled (roadmap Stage 6): the backlog, how long cases take,
 // whether promises are kept, and whether cases say where they came from and
@@ -155,7 +156,7 @@ const backlogAge: Rule = {
     const days = limitsOf(ctx.calibration).backlogAgeDays;
     return caseRate(ctx, read.rows, read.evidence, {
       hit: (c) => ageDays(c.CreatedDate, ctx.now) > days,
-      dimensions: { priority: priorityOf, origin: originOf, "owner type": ownerType },
+      dimensions: { priority: priorityOf, ...byOrigin(cases(ctx).open), "owner type": ownerType },
       totalLimit: 25,
       segmentLimit: 50,
       scope: "open cases",
@@ -190,8 +191,8 @@ const priorityResolution: Rule = {
     }
     const highMedian = round1(median(high.map(hours)));
     const restMedian = round1(median(rest.map(hours)));
-    const origins = new Set(read.rows.map(originOf)).size;
-    const segmentsChecked: SegmentCheck[] = [{ dimension: "priority", segments: new Set(read.rows.map(priorityOf)).size }, { dimension: "origin", segments: origins }];
+    const withOrigin = "origin" in byOrigin(cases(ctx).closedCases);
+    const segmentsChecked: SegmentCheck[] = [{ dimension: "priority", segments: new Set(read.rows.map(priorityOf)).size }, ...(withOrigin ? [{ dimension: "origin", segments: new Set(read.rows.map(originOf)).size }] : [])];
     const facts = { highMedianHours: highMedian, otherMedianHours: restMedian, high: high.length, other: rest.length };
     // A median from part of the cases, in id order, isn't the cases' median.
     if (read.truncated) return nm(cutOff(read.rows.length, "closed cases"), read.evidence);
@@ -268,6 +269,9 @@ const firstReply: Rule = {
       const bad = data.open.status !== "ok" ? data.open : data.closedCases;
       return nm(`Cases couldn't be read: ${bad.status === "ok" ? "" : bad.reason}`, [ctx.ev(bad.source, { count: null })]);
     }
+    // Which cases came by email is Origin's to say (DECISIONS.md 599).
+    const noOrigin = missingFieldReason(data.open, "Case.Origin") ?? missingFieldReason(data.closedCases, "Case.Origin");
+    if (noOrigin) return nm(`${noOrigin} Origin is how we tell which cases came in by email.`, [ctx.ev(data.open.source, { count: data.open.data.length })]);
     const since = monthsBefore(ctx.now, SERVICE_MONTHS);
     const emailCases = yearsCases(data.open.data, data.closedCases.data, since).filter((c) => /^e-?mail$/i.test(c.Origin ?? ""));
     const first = new Map<string, number>();
@@ -335,7 +339,7 @@ const reopened: Rule = {
     const reopenedIds = new Set(history.rows.filter((h) => isClosed(h.OldValue) && !isClosed(h.NewValue)).map((h) => h.CaseId));
     return caseRate(ctx, closedRead.rows, evidence, {
       hit: (c) => reopenedIds.has(c.Id),
-      dimensions: { priority: priorityOf, origin: originOf },
+      dimensions: { priority: priorityOf, ...byOrigin(data.closedCases) },
       totalLimit: REOPEN_LIMIT,
       segmentLimit: 25,
       scope: "cases closed in the last year",
@@ -392,6 +396,9 @@ const originMissing: Rule = {
     if ("reason" in open) return nm(open.reason, open.evidence);
     const closed = rowsOf<ClosedCaseRow>(ctx, data.closedCases, "Closed cases");
     if ("reason" in closed) return nm(closed.reason, closed.evidence);
+    // Without the field every case would read as blank (DECISIONS.md 599).
+    const noOrigin = missingFieldReason(data.open, "Case.Origin") ?? missingFieldReason(data.closedCases, "Case.Origin");
+    if (noOrigin) return nm(noOrigin, [...open.evidence, ...closed.evidence]);
     const share = limitsOf(ctx.calibration).originBlankShare;
     const rows = yearsCases(open.rows, closed.rows, monthsBefore(ctx.now, SERVICE_MONTHS));
     return caseRate(ctx, rows, [...open.evidence, ...closed.evidence], {
@@ -428,7 +435,7 @@ const classification: Rule = {
     if (!hasType && !hasReason) return nm("Case.Type and Case.Reason aren't in this org, so there's nothing to say why a case came in.", closed.evidence);
     return caseRate(ctx, closed.rows, closed.evidence, {
       hit: (c) => (!hasType || !c.Type) && (!hasReason || !c.Reason),
-      dimensions: { priority: priorityOf, origin: originOf },
+      dimensions: { priority: priorityOf, ...byOrigin(data.closedCases) },
       totalLimit: 25,
       segmentLimit: 50,
       scope: "cases closed in the last year",
@@ -454,7 +461,7 @@ const customerLinked: Rule = {
     if ("reason" in open) return nm(open.reason, open.evidence);
     return caseRate(ctx, open.rows, open.evidence, {
       hit: (c) => !c.ContactId && !c.AccountId,
-      dimensions: { origin: originOf, "owner type": ownerType },
+      dimensions: { ...byOrigin(cases(ctx).open), "owner type": ownerType },
       totalLimit: 10,
       segmentLimit: 25,
       scope: "open cases",

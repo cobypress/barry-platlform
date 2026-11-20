@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { FACTS_FILE } from "../extract/facts.ts";
+import { STAGE_MEANINGS_FILE } from "../domains/historic-pipeline/cohort.ts";
 import { FactsFile, summariseFacts } from "../facts/summary.ts";
 import { join, resolve } from "node:path";
 import { z } from "zod";
@@ -22,6 +23,9 @@ import { renderReadoutKitDocx } from "./readout-kit.ts";
 import { Survey } from "../survey/questions.ts";
 import { loadActionLists, recordCounts, writeActionFiles } from "../actions/index.ts";
 import { Interviews } from "../interviews/questions.ts";
+
+// What each stage the calibration doesn't name was taken to mean (DECISIONS.md 600).
+const StageMeanings = z.record(z.string(), z.enum(["open", "won", "lost"]));
 
 /** The team survey as it stood when the sections were built, comments left out (DECISIONS.md 147). */
 export const SURVEY_FILE = "survey.json";
@@ -127,6 +131,7 @@ export function loadRun(dir: string, options: { baseline?: boolean; baselineRows
   const survey = readOptional<unknown>(join(dir, SURVEY_FILE));
   const interviews = readOptional<unknown>(join(dir, INTERVIEWS_FILE));
   const facts = readOptional<unknown>(join(dir, FACTS_FILE));
+  const stageMeanings = readOptional<unknown>(join(dir, STAGE_MEANINGS_FILE));
   const input: ReportInput = {
     run: Run.parse(read(join(dir, "run.json"))),
     calibration: Calibration.parse(read(join(dir, "calibration.json"))),
@@ -140,6 +145,7 @@ export function loadRun(dir: string, options: { baseline?: boolean; baselineRows
     recordCounts: recordCounts(loadActionLists(dir)),
     interviews: interviews ? Interviews.parse(interviews).interviews : null,
     facts: facts ? summariseFacts(FactsFile.parse(facts)) : null,
+    stageMeanings: stageMeanings ? StageMeanings.parse(stageMeanings) : null,
   };
   let baselineRowsUnread = false;
   let baselineGone = false;

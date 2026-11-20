@@ -67,6 +67,7 @@ const PLAIN: Array<[RegExp, string | ((...groups: string[]) => string)]> = [
   [/The calibration agrees with/g, "Your stage meanings agree with"],
   [/The calibration doesn't say what these stages mean/g, "We haven't yet agreed with you what these stages mean"],
   [/The calibration doesn't say whether these stages are open/g, "We haven't yet agreed with you whether these stages are open"],
+  [/The calibration doesn't say where these open stages come in the sales order/g, "We haven't yet agreed with you where these open stages come in the sales order"],
   [/The calibration doesn't name a loss reason field that exists on Opportunity/g, "We haven't yet agreed with you which field holds the loss reason"],
   [/and the calibration doesn't set one/g, "and we haven't yet agreed one with you"],
   // Engine words a customer would stumble on (night 3 reading pass).
