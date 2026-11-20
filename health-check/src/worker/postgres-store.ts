@@ -4,6 +4,7 @@ import type { Inventory } from "../schemas/inventory.ts";
 import type { Complexity } from "../schemas/complexity.ts";
 import type { ScanResult } from "../scan/result.ts";
 import type { PulseResult } from "../pulse/result.ts";
+import type { RunDigest } from "../schemas/digest.ts";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { Intake } from "../narrative/intake.ts";
@@ -242,6 +243,10 @@ export const HANDBOOK_SUMMARIES: Columns = { runId: "text", status: "text", mode
 // Only what the handbook prints from: not the model or the time, nor who decided it or when.
 const HANDBOOK_SUMMARIES_READ: Columns = { runId: "text", status: "text", items: "json", leftOut: "json" };
 export const HANDBOOK_SUMMARIES_MIGRATION = "20261122_health_check_handbook_summaries.sql";
+/** The console's migration that adds the run digest (DECISIONS.md 632). */
+export const RUN_DIGEST_MIGRATION = "20261201_health_check_run_digest.sql";
+/** One statement, so a second delivery or a remake replaces the row rather than failing on its key. */
+export const RUN_DIGEST_SQL = `INSERT INTO "HealthCheckRunDigest" ("runId", "madeAt", "version", "digest") VALUES ($1, $2::timestamp(3), $3, $4::jsonb) ON CONFLICT ("runId") DO UPDATE SET "madeAt" = EXCLUDED."madeAt", "version" = EXCLUDED."version", "digest" = EXCLUDED."digest"`;
 /** The console's migration that adds the run's overall score and grade and the link's host (DECISIONS.md 626). */
 export const RUN_SCORE_AND_HOST_MIGRATION = "20261128_health_check_run_score_and_host.sql";
 export const BENCHMARK_ROW: Columns = {
@@ -603,6 +608,7 @@ export class PostgresWorkerStore implements WorkerStore {
       if (summaries?.ok && summaries.row) await this.#writeSummaries(client, summaries.row);
       if (output.inventory) await this.#writeInventory(client, runId, output.inventory);
       if (output.complexity) await this.#writeComplexity(client, runId, output.complexity);
+      if (output.digest) await this.#writeDigest(client, runId, output.digest);
       // Last, and each alone, so a console without the columns saves as before (DECISIONS.md 626).
       if (output.overall !== undefined) {
         const said = { subject: `Run ${runId}`, table: "HealthCheckRun", kept: "its results are" };
@@ -755,6 +761,25 @@ export class PostgresWorkerStore implements WorkerStore {
   }
 
   /**
+   * The run's digest for the customer's connector (DECISIONS.md 632), as the
+   * side tables are written (615, 618): its own savepoint, so a console
+   * without the table or column (class 42) or one that refuses the row (class
+   * 23) costs the digest only, said for the run by its id, the table and the
+   * SQLSTATE; anything else rolls the whole save back to be tried again.
+   */
+  async #writeDigest(client: SqlClient, runId: string, digest: RunDigest): Promise<void> {
+    await client.query("SAVEPOINT run_digest");
+    try {
+      await client.query(RUN_DIGEST_SQL, [runId, digest.madeAt, digest.version, JSON.stringify(digest)]);
+    } catch (err) {
+      const code = this.#sideTableFault(err);
+      await client.query("ROLLBACK TO SAVEPOINT run_digest");
+      return this.#sideTableSkipped(runId, "HealthCheckRunDigest", code, "digest");
+    }
+    await client.query("RELEASE SAVEPOINT run_digest");
+  }
+
+  /**
    * A side table's error that means the console's table doesn't match what we
    * write (class 42) or refuses the row (class 23), as its SQLSTATE; anything
    * else, a lost connection or a deadlock among them, is thrown again so the
@@ -897,11 +922,20 @@ export class PostgresWorkerStore implements WorkerStore {
     return result.rowCount === 1;
   }
 
-  async saveDocuments(runId: string, made: DocumentsMade): Promise<void> {
-    await this.#pool.query(
-      `UPDATE "HealthCheckDocuments" SET "status" = 'done', "finishedAt" = $2::timestamp(3), "error" = NULL, "warnings" = $3::jsonb, "clientName" = $4, "folderName" = $5, "driveFolderId" = $6, "driveFolderUrl" = $7, "files" = $8::jsonb WHERE "runId" = $1 AND "status" = 'making'`,
-      [runId, made.at, JSON.stringify(made.warnings), made.clientName, made.folderName, made.driveFolderId, made.driveFolderUrl, JSON.stringify(made.files)],
-    );
+  async saveDocuments(runId: string, made: DocumentsMade, digest?: RunDigest): Promise<void> {
+    const text = `UPDATE "HealthCheckDocuments" SET "status" = 'done', "finishedAt" = $2::timestamp(3), "error" = NULL, "warnings" = $3::jsonb, "clientName" = $4, "folderName" = $5, "driveFolderId" = $6, "driveFolderUrl" = $7, "files" = $8::jsonb WHERE "runId" = $1 AND "status" = 'making'`;
+    const values = [runId, made.at, JSON.stringify(made.warnings), made.clientName, made.folderName, made.driveFolderId, made.driveFolderUrl, JSON.stringify(made.files)];
+    if (!digest) {
+      await this.#pool.query(text, values);
+      return;
+    }
+    // The documents' row and the digest commit together, so a lost connection
+    // leaves the make to be tried again with both. Only a make that marked the
+    // row done writes one: the console may have moved the row on meanwhile.
+    await this.#transaction(async (client) => {
+      const done = await client.query(text, values);
+      if (done.rowCount === 1) await this.#writeDigest(client, runId, digest);
+    });
   }
 
   addBenchmarkRows(rows: BenchmarkRow[]): Promise<void> {
