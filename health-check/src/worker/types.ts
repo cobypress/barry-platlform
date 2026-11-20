@@ -1,3 +1,4 @@
+import type { Inventory } from "../schemas/inventory.ts";
 import type { ScanResult } from "../scan/result.ts";
 import type { PulseResult } from "../pulse/result.ts";
 import type { FactsFile, FactsReport } from "../facts/summary.ts";
@@ -103,6 +104,11 @@ export type RunOutputRecord = {
    * switch on and a handbook-summaries.json holding at least one. Never the code.
    */
   handbookSummaries?: SummariesToSave;
+  /**
+   * The org's inventory (DECISIONS.md 605): set-up names and counts, never a
+   * record or who. Only when the run folder has an inventory.json that parses.
+   */
+  inventory?: Inventory;
 };
 
 /**
