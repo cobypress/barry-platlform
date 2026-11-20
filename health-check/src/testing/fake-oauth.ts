@@ -28,8 +28,10 @@ export class FakeTokenEndpoint implements OAuthTransport {
   /** JWT bearer: the public key that signs assertions, and who is pre-authorised. */
   jwtPublicKey?: string;
   preAuthorised = new Map<string, string>();
+  /** The apps Salesforce knows, by client id and secret. A code or refresh token works only with the app it was issued to. */
+  readonly apps = new Map<string, string>([[FAKE.clientId, FAKE.clientSecret]]);
   readonly #codes = new Map<string, Code>();
-  readonly #live = new Map<string, { family: string; userId: string }>();
+  readonly #live = new Map<string, { family: string; userId: string; clientId?: string }>();
   readonly #used = new Map<string, string>();
   readonly #revokedFamilies = new Set<string>();
   readonly #accessTokens = new Map<string, string>();
@@ -69,7 +71,8 @@ export class FakeTokenEndpoint implements OAuthTransport {
   }
 
   #secretOk(form: URLSearchParams): boolean {
-    return form.get("client_id") === FAKE.clientId && form.get("client_secret") === FAKE.clientSecret;
+    const secret = this.apps.get(form.get("client_id") ?? "");
+    return secret !== undefined && form.get("client_secret") === secret;
   }
 
   #exchange(form: URLSearchParams): TransportResponse {
@@ -77,11 +80,12 @@ export class FakeTokenEndpoint implements OAuthTransport {
     const code = this.#codes.get(form.get("code") ?? "");
     this.#codes.delete(form.get("code") ?? "");
     if (!code) return error(400, "invalid_grant", "invalid authorization code");
+    if (form.get("client_id") !== code.clientId) return error(400, "invalid_grant", "authorization code issued to another client");
     if (form.get("redirect_uri") !== code.redirectUri) return error(400, "invalid_grant", "redirect_uri mismatch");
     const challenge = createHash("sha256").update(form.get("code_verifier") ?? "").digest("base64url");
     if (challenge !== code.challenge) return error(400, "invalid_grant", "invalid code verifier");
     const family = randomBytes(4).toString("hex");
-    return this.#tokens(code.userId, family, true);
+    return this.#tokens(code.userId, family, true, code.clientId);
   }
 
   #refresh(form: URLSearchParams): TransportResponse {
@@ -94,11 +98,12 @@ export class FakeTokenEndpoint implements OAuthTransport {
     }
     const live = this.#live.get(token);
     if (!live || this.#revokedFamilies.has(live.family)) return error(400, "invalid_grant", "expired access/refresh token");
+    if (live.clientId !== undefined && form.get("client_id") !== live.clientId) return error(400, "invalid_grant", "refresh token issued to another client");
     if (this.rotation) {
       this.#live.delete(token);
       this.#used.set(token, live.family);
     }
-    return this.#tokens(live.userId, live.family, this.rotation);
+    return this.#tokens(live.userId, live.family, this.rotation, live.clientId);
   }
 
   #jwt(form: URLSearchParams): TransportResponse {
@@ -120,13 +125,18 @@ export class FakeTokenEndpoint implements OAuthTransport {
     return { status: 200, header: () => null, text: "" };
   }
 
-  #tokens(userId: string, family: string, withRefresh: boolean): TransportResponse {
+  /** Salesforce ends a refresh token: it expired after 30 days unused, or someone revoked it. */
+  expireAll(): void {
+    for (const { family } of this.#live.values()) this.#revokedFamilies.add(family);
+  }
+
+  #tokens(userId: string, family: string, withRefresh: boolean, clientId?: string): TransportResponse {
     const access = `${this.orgId.slice(0, 15)}!${randomBytes(16).toString("hex")}`;
     this.#accessTokens.set(access, family);
     let refresh: string | undefined;
     if (withRefresh) {
       refresh = `5Aep${randomBytes(16).toString("hex")}`;
-      this.#live.set(refresh, { family, userId });
+      this.#live.set(refresh, { family, userId, clientId });
     }
     const body = {
       access_token: access,

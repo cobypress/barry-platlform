@@ -28,6 +28,12 @@ export const PendingAuthorisation = z.object({
   linkId: z.string().uuid(),
   stateHash: Hash,
   codeVerifier: z.string().min(43).max(128),
+  /**
+   * The client id of the app the authorise URL was built with (DECISIONS.md
+   * 616), so the worker exchanges the code with that app and no other. Absent
+   * from an older console: the package app.
+   */
+  clientId: z.string().min(1).max(255).optional(),
   createdAt: Timestamp,
   expiresAt: Timestamp,
 });

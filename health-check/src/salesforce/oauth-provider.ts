@@ -13,6 +13,18 @@ import { fetchOAuthTransport, type OAuthTransport } from "./transport.ts";
 // The name must still be in HC_APPROVED_ORG_ALIASES, as for the CLI provider:
 // this machine can hold connections to customer orgs, and a typo mustn't reach one.
 
+/**
+ * Salesforce refused the refresh token: it expired (30 days unused in a
+ * production org) or was revoked. It never works again, with any app, so the
+ * worker ends the run as needs reconnection rather than retrying (DECISIONS.md 617).
+ */
+export class ReconnectionNeeded extends OAuthError {
+  constructor(name: string) {
+    super("invalid_grant", `The connection "${name}" was revoked or expired. The customer's admin needs to connect again`);
+    this.name = "ReconnectionNeeded";
+  }
+}
+
 export class OAuthConnectionProvider implements ConnectionProvider {
   readonly kind = "oauth";
   readonly #name: string;
@@ -21,6 +33,7 @@ export class OAuthConnectionProvider implements ConnectionProvider {
   readonly #transport: OAuthTransport;
   readonly #now: () => number;
   #current?: StoredConnection;
+  #lostAccess = false;
 
   constructor(
     name: string,
@@ -32,6 +45,15 @@ export class OAuthConnectionProvider implements ConnectionProvider {
     this.#client = options.client;
     this.#transport = options.transport ?? fetchOAuthTransport;
     this.#now = options.now ?? Date.now;
+  }
+
+  /**
+   * True once Salesforce has refused this connection's refresh token. A read
+   * turns the error into an unread source, so the run asks here as well as
+   * looking at what was thrown.
+   */
+  get lostAccess(): boolean {
+    return this.#lostAccess;
   }
 
   async connect(): Promise<OrgConnection> {
@@ -67,7 +89,8 @@ export class OAuthConnectionProvider implements ConnectionProvider {
     if (!this.#client || this.#client.clientId !== stored.clientId) throw new Error("The OAuth client doesn't match the one this connection was made with");
     return refreshTokens({ transport: this.#transport, instanceUrl: stored.instanceUrl, client: this.#client, refreshToken: stored.refreshToken }).catch((err: unknown) => {
       if (err instanceof OAuthError && err.code === "invalid_grant") {
-        throw new OAuthError("invalid_grant", `The connection "${this.#name}" was revoked or expired. The customer's admin needs to connect again`);
+        this.#lostAccess = true;
+        throw new ReconnectionNeeded(this.#name);
       }
       throw err;
     });

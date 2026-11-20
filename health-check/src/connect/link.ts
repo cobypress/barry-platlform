@@ -107,6 +107,8 @@ export function beginAuthorisation(link: ConnectLink, client: OAuthClient, now: 
     linkId: link.id,
     stateHash: sha256(state),
     codeVerifier: verifier,
+    // The app this trip uses travels sealed with the verifier, so the exchange can't pick another (DECISIONS.md 616).
+    clientId: client.clientId,
     createdAt: now.toISOString(),
     expiresAt: new Date(now.getTime() + PENDING_TTL_MS).toISOString(),
   });

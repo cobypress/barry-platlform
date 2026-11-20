@@ -15,7 +15,10 @@ export type WorkerDeps = {
   /** Parent of every run folder. Outside any git work tree (rule 8). */
   runsDir: string;
   locksDir: string;
+  /** The package app, and the app of any link or connection that names none. */
   oauthClient: OAuthClient;
+  /** The sign-in app, when it's set up (DECISIONS.md 616). A connection only ever uses the app it was made with. */
+  signinClient?: OAuthClient | null;
   /** HC_CONNECT_KEY, for the console's sealed link secrets. */
   connectKey: Buffer;
   modules?: DomainModule[];
