@@ -240,6 +240,33 @@ describe("Service Cloud where a feature is off", () => {
   });
 });
 
+describe("Service Cloud where the org has no Case.Origin (DECISIONS.md 599)", () => {
+  test("the checks that don't need Origin are measured without it, and the two that do say why not", async () => {
+    const transport = new Simulator({ dropFields: { Case: ["Origin"] } });
+    const { output: out } = await runHealthCheck({ provider: syntheticProvider, connectedUser: CONNECTED_USER, calibration: loadCalibration(), modules: ALL_MODULES, outDir: tempDir(), now: new Date(AS_OF), answers: loadAnswers(), transport });
+    const list = out!.findings;
+    for (const ruleId of ["svc.origin-missing", "svc.first-reply-email"]) {
+      assert.equal(one(list, ruleId).status, "not_measurable", ruleId);
+      assert.match(one(list, ruleId).notMeasurableReason!, /^Case\.Origin isn't in this org/, ruleId);
+    }
+    // Every other service check comes out as it does with the field there.
+    const withOrigin = new Map(findings.filter((f) => SERVICE_RULES.includes(f.ruleId)).map((f) => [f.id, f.status]));
+    const others = list.filter((f) => SERVICE_RULES.includes(f.ruleId) && !["svc.origin-missing", "svc.first-reply-email"].includes(f.ruleId));
+    assert.ok(others.length >= 10);
+    assert.deepEqual(others.filter((f) => f.status === "not_measurable").map((f) => [f.ruleId, f.notMeasurableReason]), []);
+    for (const f of others) assert.equal(f.status, withOrigin.get(f.id), f.ruleId);
+    // Origin isn't a segment where there's no Origin.
+    assert.ok(!list.some((f) => f.segmentsChecked.some((s) => s.dimension === "origin")));
+    assert.ok(findings.some((f) => SERVICE_RULES.includes(f.ruleId) && f.segmentsChecked.some((s) => s.dimension === "origin")));
+    const byChannel = out!.metrics.find((m) => m.id === "service.cases_by_origin")!;
+    assert.equal(byChannel.status, "not_measurable");
+    assert.match(byChannel.status === "not_measurable" ? byChannel.reason : "", /Case\.Origin isn't in this org/);
+    assert.equal(out!.metrics.find((m) => m.id === "service.open_cases")!.status, "measured");
+    // No query names a field the org doesn't have, so none is spent failing.
+    assert.ok(!transport.requests.some((r) => /FROM%20Case\b|FROM Case\b/.test(decodeURIComponent(r.url)) && /\bOrigin\b/.test(decodeURIComponent(r.url))));
+  });
+});
+
 describe("escalation rules from the Metadata API", () => {
   test("parse as the Metadata API guide's sample has them", () => {
     const xml = `<EscalationRules xmlns="http://soap.sforce.com/2006/04/metadata"><escalationRule><fullName>samplerule</fullName><active>false</active><ruleEntry><businessHoursSource>Static</businessHoursSource><escalationAction><assignedTo>someuser@example.com</assignedTo><assignedToType>User</assignedToType><minutesToEscalation>1440</minutesToEscalation><notifyCaseOwner>false</notifyCaseOwner></escalationAction><escalationStartTime>CaseLastModified</escalationStartTime></ruleEntry></escalationRule></EscalationRules>`;

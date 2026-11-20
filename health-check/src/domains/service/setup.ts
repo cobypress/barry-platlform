@@ -7,7 +7,7 @@ import { costPerSeat, isPriced } from "../../money/seat-cost.ts";
 import type { Evidence, SegmentCheck, Value } from "../../schemas/index.ts";
 import { judged, lapse } from "../logins.ts";
 import type { DomainModule } from "../types.ts";
-import { caseQueues, limitsOf, MIN_SEGMENT, originOf, priorityOf } from "./shared.ts";
+import { byOrigin, caseQueues, limitsOf, MIN_SEGMENT, priorityOf } from "./shared.ts";
 
 // How the org is set up to handle cases: escalation, queues, routing,
 // licences, knowledge, macros. Most of it reads no case, so a set-up review
@@ -299,7 +299,7 @@ const knowledgeUse: Rule = {
     const closed = cases.closedCases.data;
     const evidence = [...read.evidence, ctx.ev(caseArticles.source, { count: caseArticles.data.length })];
     if (closed.length === 0) return { outcome: "pass", summary: "No case was closed in the last year, so there's no use to check.", evidence, segmentExemptReason: "There are no closed cases" };
-    const result = segmentRate(closed, (c) => withArticle.has(c.Id), { priority: priorityOf, origin: originOf }, { segmentLimit: 100, minSegment: MIN_SEGMENT });
+    const result = segmentRate(closed, (c) => withArticle.has(c.Id), { priority: priorityOf, ...byOrigin(cases.closedCases) }, { segmentLimit: 100, minSegment: MIN_SEGMENT });
     const facts = { attached: result.hits, closed: result.n, rate: result.rate, articles: read.rows.length, limit: ATTACH_SHARE };
     if (result.rate >= ATTACH_SHARE) return { outcome: "pass", summary: `${result.hits} of ${result.n} cases closed in the last year (${result.rate}%) have an article attached.`, evidence, segmentsChecked: result.segmentsChecked, facts };
     return {
