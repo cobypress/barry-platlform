@@ -110,7 +110,7 @@ async function readHidden<R>(ctx: ExtractContext, soql: string, hide: (text: str
 // run they show the user's access at the moment the counts are made, which is
 // the pair that must agree. Salesforce sets View All when Modify All is set, so
 // keying on View All alone is right (unverified: QUESTIONS.md).
-async function accessOf(ctx: ExtractContext): Promise<RecordAccess> {
+export async function accessOf(ctx: ExtractContext): Promise<RecordAccess> {
   const user = ctx.connectedUser;
   let hide = hider(user);
   let id = user?.id;

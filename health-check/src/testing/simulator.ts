@@ -394,7 +394,7 @@ export class Simulator implements Transport {
     const describe = path.match(/\/sobjects\/([A-Za-z0-9_]+)\/describe$/);
     if (describe) {
       const name = describe[1]!;
-      const d = this.#missing.has(name) ? undefined : (org.DESCRIBES[name] ?? org.FIELD_DESCRIBES[name] ?? org.FACT_DESCRIBES[name] ?? (this.#cpq ? org.CPQ_DESCRIBES[name] : undefined));
+      const d = this.#missing.has(name) ? undefined : (org.DESCRIBES[name] ?? org.FIELD_DESCRIBES[name] ?? org.FACT_DESCRIBES[name] ?? org.INVENTORY_DESCRIBES[name] ?? (this.#cpq ? org.CPQ_DESCRIBES[name] : undefined));
       if (!d) return jsonResponse(404, [{ errorCode: "NOT_FOUND", message: "The requested resource does not exist" }], this.#limitInfo);
       const dropped = new Set(this.#dropFields[name] ?? []);
       return jsonResponse(200, { name, ...d, fields: d.fields.filter((f) => !dropped.has((f as { name: string }).name)) }, this.#limitInfo);
@@ -491,6 +491,7 @@ export class Simulator implements Transport {
     const where = soql.match(/\bWHERE\b(.*)$/is)?.[1] ?? "";
 
     if (/^SELECT COUNT\(Id\) total,/i.test(soql)) return this.#fieldUsage(soql, object, where);
+    if (/^SELECT COUNT\(Id\) n,/i.test(soql)) return this.#fillCounts(soql, object);
     if (/^SELECT OwnerId, COUNT\(Id\) c FROM/i.test(soql)) return this.#ownership(object);
     if (/^SELECT RecordTypeId, COUNT\(Id\) c FROM \w+ (WHERE .* )?GROUP BY RecordTypeId$/i.test(soql)) return this.#recordTypeCounts(soql, object);
     const readOnlyGap = this.#readOnly && (tooling ? ["ApexClass", "ApexTrigger", "ApexOrgWideCoverage", "ApexCodeCoverageAggregate", "CustomObject", "CustomField"] : ["ApexOrgWideCoverage", "ApexCodeCoverageAggregate", "AuthProvider"]).includes(object);
@@ -517,7 +518,13 @@ export class Simulator implements Transport {
       case "PermissionSetLicense":
         return page(org.PERMISSION_SET_LICENSES);
       case "InstalledSubscriberPackage":
-        return tooling ? page(org.INSTALLED_PACKAGES.filter((p) => (this.#cpq || p.SubscriberPackage.NamespacePrefix !== "SBQQ") && (this.#pardot || p.SubscriberPackage.NamespacePrefix !== "pi"))) : unsupported(object);
+      {
+        if (!tooling) return unsupported(object);
+        const installed = org.INSTALLED_PACKAGES.filter((p) => (this.#cpq || p.SubscriberPackage.NamespacePrefix !== "SBQQ") && (this.#pardot || p.SubscriberPackage.NamespacePrefix !== "pi"));
+        // The version only when it's asked for, as the inventory asks (DECISIONS.md 603).
+        if (!/\bSubscriberPackageVersion\./.test(soql)) return page(installed);
+        return page(installed.map((p) => ({ SubscriberPackageId: org.sfId("033", org.INSTALLED_PACKAGES.indexOf(p) + 1), ...p, SubscriberPackageVersion: org.PACKAGE_VERSIONS[p.SubscriberPackage.NamespacePrefix] ?? null })));
+      }
       case "PackageLicense":
         return page(org.PACKAGE_LICENSES.filter((p) => (this.#cpq || p.NamespacePrefix !== "SBQQ") && (this.#pardot || p.NamespacePrefix !== "pi") && !this.#unlicensed.has(p.NamespacePrefix ?? "")));
       case "SBQQ__PriceRule__c":
@@ -559,6 +566,11 @@ export class Simulator implements Transport {
       case "SecurityHealthCheckRisks":
         return tooling ? page(org.HEALTH_RISKS) : unsupported("SecurityHealthCheckRisks");
       case "PermissionSet":
+        // The inventory's risky permissions: every set granting any permission the filter names.
+        if (/^SELECT Id, Name, Label, IsOwnedByProfile, Profile\.Name, NamespacePrefix, Permissions/.test(soql)) {
+          const asked = [...where.matchAll(/\b(Permissions[A-Za-z]+) = true/g)].map((m) => m[1]!);
+          return page(org.RISKY_PERMISSION_SETS.filter((set) => asked.some((f) => (set as Record<string, unknown>)[f] === true)));
+        }
         if (/IsOwnedByProfile = true/.test(where)) return page(org.PROFILE_SETS);
         if (/PermissionsApiUserOnly = true/.test(where)) return page(org.PERMISSION_SETS.filter((s) => s.PermissionsApiUserOnly));
         return page(/IsOwnedByProfile = false/.test(where) ? org.DOCUMENTED_PERMISSION_SETS : org.PERMISSION_SETS);
@@ -598,6 +610,8 @@ export class Simulator implements Transport {
         return page(org.ROLES);
       case "ConnectedApplication":
         return page(org.CONNECTED_APPS);
+      case "OauthToken":
+        return page(org.OAUTH_TOKENS);
       case "NamedCredential":
         return page(org.NAMED_CREDENTIALS);
       case "RemoteProxy":
@@ -933,6 +947,16 @@ export class Simulator implements Transport {
     const totals = this.#d.recordTotals[object]!;
     const row: Record<string, number> = { total: recent ? totals.recent : totals.total };
     for (const match of soql.matchAll(/COUNT\(([A-Za-z0-9_]+__c)\) (f\d+)/g)) row[match[2]!] = org.fieldFilled(object, match[1]!, recent, this.#d.recordTotals);
+    return page([row]);
+  }
+
+  /** The inventory's fill rates: records and each field's filled count, for one object (DECISIONS.md 604). */
+  #fillCounts(soql: string, object: string): Json | { error: { errorCode: string; message: string } } {
+    // The read-only user has no access to custom objects' records.
+    if (this.#readOnly && object.endsWith("__c")) return unsupported(object);
+    const total = org.inventoryTotal(object);
+    const row: Record<string, number> = { n: total };
+    for (const match of soql.matchAll(/COUNT\(([A-Za-z0-9_]+)\) (f\d+)/g)) row[match[2]!] = org.inventoryFilled(object, match[1]!, total);
     return page([row]);
   }
 

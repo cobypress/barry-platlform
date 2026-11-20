@@ -1,3 +1,4 @@
+import type { Inventory } from "../schemas/inventory.ts";
 import type { ScanResult } from "../scan/result.ts";
 import type { PulseResult } from "../pulse/result.ts";
 import { randomUUID } from "node:crypto";
@@ -409,6 +410,7 @@ export class PostgresWorkerStore implements WorkerStore {
   readonly #log: (line: string) => void;
   /** Said once: a console without the summaries' table says so on every save and every make otherwise. */
   #saidNoSummariesTable = false;
+  #saidNoInventoryTable = false;
 
   constructor(pool: SqlPool, options: { log?: (line: string) => void } = {}) {
     this.#pool = pool;
@@ -584,6 +586,7 @@ export class PostgresWorkerStore implements WorkerStore {
       for (const v of output.versions) await this.#insert(client, "HealthCheckSectionVersion", VERSION, versionRow(v));
       await this.#writeFacts(client, runId, output.facts, output.factsFile);
       if (summaries?.ok && summaries.row) await this.#writeSummaries(client, summaries.row);
+      if (output.inventory) await this.#writeInventory(client, runId, output.inventory);
     });
   }
 
@@ -662,6 +665,29 @@ export class PostgresWorkerStore implements WorkerStore {
       await write(false);
     }
     await client.query("RELEASE SAVEPOINT run_facts");
+  }
+
+  /**
+   * The org's inventory, replaced whole (DECISIONS.md 605), as the facts are:
+   * DELETE then INSERT inside a savepoint, so a console without the table
+   * (42P01) still gets the run's results, and says so once a process. Any
+   * other error rolls the whole save back, as the facts' does.
+   */
+  async #writeInventory(client: SqlClient, runId: string, inventory: Inventory): Promise<void> {
+    await client.query("SAVEPOINT run_inventory");
+    try {
+      await client.query(`DELETE FROM "HealthCheckInventory" WHERE "runId" = $1`, [runId]);
+      await client.query(`INSERT INTO "HealthCheckInventory" ("runId", "madeAt", "inventory") VALUES ($1, $2::timestamp(3), $3::jsonb)`, [runId, inventory.madeAt, JSON.stringify(inventory)]);
+    } catch (err) {
+      if ((err as { code?: string }).code !== "42P01") throw err;
+      await client.query("ROLLBACK TO SAVEPOINT run_inventory");
+      if (!this.#saidNoInventoryTable) {
+        this.#saidNoInventoryTable = true;
+        this.#log("The console's database has no HealthCheckInventory table yet, so the org's inventory isn't saved. Apply the console's inventory migration.");
+      }
+      return;
+    }
+    await client.query("RELEASE SAVEPOINT run_inventory");
   }
 
   recordRunFailure(runId: string, reason: string, at: string): Promise<void> {

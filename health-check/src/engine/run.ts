@@ -14,6 +14,7 @@ import { apexSourceStore } from "../extract/apex-source.ts";
 import { componentChangesExtractor, type ComponentChangesData } from "../extract/component-changes.ts";
 import type { MetadataBundle } from "../extract/metadata-parse.ts";
 import { fieldDescribeExtractor } from "../extract/fields.ts";
+import { buildInventory, INVENTORY_FILE, inventoryExtractorsFor } from "../extract/inventory.ts";
 import { summariseFacts } from "../facts/summary.ts";
 import { monthsBefore, type ConnectedUser, type ExtractContext, type Extractor, type PartialStore, type Sourced } from "../extract/types.ts";
 import { buildHandbook, HANDBOOK_FILE, labelApexModifiers, labelComponentModifiers, recentChanges } from "../handbook/build.ts";
@@ -74,6 +75,11 @@ export type RunOptions = {
    * same place: it's never kept in the run folder.
    */
   connectedUser?: ConnectedUser;
+  /**
+   * Reads the org's inventory too, and writes inventory.json (DECISIONS.md 605).
+   * The worker turns it on; off, a run reads and writes exactly what it did before.
+   */
+  inventory?: boolean;
 };
 
 export type RunResult = { run: Run; dir: string; output: AnalysisOutput | null };
@@ -125,13 +131,15 @@ export class FilePartialStore implements PartialStore {
   }
 }
 
-export function collectExtractors(modules: DomainModule[]): Extractor[] {
+/** `extra` are steps no module owns, such as the inventory's: after the modules', before the facts. */
+export function collectExtractors(modules: DomainModule[], extra: Extractor[] = []): Extractor[] {
   // Field describes go first, because other reads plan their SELECT from them.
   const seen = new Map<string, Extractor>([
     [orgExtractor.id, orgExtractor],
     [fieldDescribeExtractor.id, fieldDescribeExtractor],
   ]);
   for (const module of modules) for (const extractor of module.extractors) if (!seen.has(extractor.id)) seen.set(extractor.id, extractor);
+  for (const extractor of extra) if (!seen.has(extractor.id)) seen.set(extractor.id, extractor);
   // The facts step goes last on every run, so it can see which settings the modules retrieved.
   seen.delete(factsExtractor.id);
   return [...seen.values(), factsExtractor];
@@ -172,7 +180,8 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
   const scope: RunScope = options.resume && existsSync(runPath) ? Run.parse(readJson(runPath)).scope : (options.scope ?? "complete");
   if (options.resume && options.scope && options.scope !== scope) throw new Error(`This run is ${scope}, so it can't be resumed as ${options.scope}.`);
   const modules = modulesFor(scope, options.modules);
-  const extractors = collectExtractors(modules);
+  const inventorySteps = options.inventory ? inventoryExtractorsFor(scope) : [];
+  const extractors = collectExtractors(modules, inventorySteps);
   const hash = calibrationHash(calibration);
   const windowEnd = now;
   const windowStart = monthsBefore(windowEnd, calibration.analysisWindowMonths);
@@ -277,6 +286,13 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
       }
       step.status = "failed";
       step.error = err instanceof Error ? err.message : String(err);
+      // No finding reads the inventory, so its step failing costs only its own
+      // section, and the run goes on; a later delivery tries it again (DECISIONS.md 609).
+      if (inventorySteps.includes(extractor)) {
+        await saveRun();
+        log(`  ${extractor.id}: failed, and the run carries on without it`);
+        continue;
+      }
       run.status = "failed";
       await saveRun();
       throw err;
@@ -285,6 +301,9 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
 
   // Names, booleans and types only, so it's kept as long as the findings (DECISIONS.md 288).
   writeJson(join(dir, FACTS_FILE), extracts.get(factsExtractor.id));
+  // Names and counts only, so it's kept as long as the findings (DECISIONS.md 605).
+  // Dated as the run reads the org, as the facts are, so every delivery writes the same file.
+  if (options.inventory) writeJson(join(dir, INVENTORY_FILE), buildInventory(extracts, scope, asOf, new Map(run.steps.flatMap((s) => (s.status === "failed" && s.error ? [[s.id, s.error]] : [])))));
   // Which objects' rules weren't read, for the raw notes. Render reads only the run folder (DECISIONS.md 425).
   const bundle = extracts.get(metadataExtractor.id) as Sourced<MetadataBundle> | undefined;
   run.retrieveFallback = bundle?.status === "ok" ? bundle.data.retrieveFallback : undefined;
