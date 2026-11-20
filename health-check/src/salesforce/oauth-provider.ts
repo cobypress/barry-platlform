@@ -35,7 +35,12 @@ export class OAuthConnectionProvider implements ConnectionProvider {
   readonly #log: (line: string) => void;
   #current?: StoredConnection;
   #lostAccess = false;
-  /** The tokens held came from the store after a refusal, not from a refresh of this provider's own. */
+  /**
+   * The tokens held came from the store after a refusal, and Salesforce hasn't
+   * yet accepted their access token. While set, a refusal doesn't re-load
+   * again: that is the same refresh attempt, and looking again could hand the
+   * connection back and forth between two processes.
+   */
   #adopted = false;
 
   constructor(
@@ -65,6 +70,15 @@ export class OAuthConnectionProvider implements ConnectionProvider {
     return toConnection(this.#current);
   }
 
+  /**
+   * The client says a request succeeded with the token last returned. Adopted
+   * tokens that worked are this provider's own from now on, so a later,
+   * separate rotation by another process may be looked for again (DECISIONS.md 631).
+   */
+  accepted(): void {
+    this.#adopted = false;
+  }
+
   /** Called by the client after a 401, or an expired session in SOAP. */
   async refresh(): Promise<OrgConnection> {
     const stored = this.#current ?? (await this.#store.load(this.#name));
@@ -77,8 +91,8 @@ export class OAuthConnectionProvider implements ConnectionProvider {
         if (!(err instanceof OAuthError && err.code === "invalid_grant")) throw err;
         // Another worker process may have refreshed first: with rotation, its
         // refresh ended the token this one holds, and the newer one is in the
-        // store. Look once, unless what was refused is already what the store
-        // held, so two processes can't hand the connection back and forth (DECISIONS.md 631).
+        // store. Look once per refresh attempt: not again while adopted tokens
+        // are still unproven, so two processes can't hand the connection back and forth (DECISIONS.md 631).
         const newer = this.#adopted ? undefined : await this.#newerInStore(stored);
         if (!newer) {
           this.#lostAccess = true;
@@ -86,7 +100,7 @@ export class OAuthConnectionProvider implements ConnectionProvider {
         }
         this.#current = newer;
         this.#adopted = true;
-        this.#log(`A newer token for the connection "${this.#name}" was found in the store and used.`);
+        this.#log(`A newer token for the connection "${this.#name}" was found in the store; trying it.`);
         // Its access token is tried first. Refused too, the client asks again, and that refresh uses its refresh token.
         return { ...toConnection(newer), fromStore: true };
       }

@@ -71,6 +71,20 @@ const QUERY_MORE = /\/query\/[A-Za-z0-9]{15,18}-\d+$/;
 
 export { instanceOrigin };
 
+/** Refreshes per request at most: one, and one more after tokens found in the store (DECISIONS.md 631). */
+export const MAX_REFRESHES = 2;
+
+/**
+ * The connection the client keeps: the named fields only, so a flag such as
+ * `fromStore`, which describes one refresh, never travels with the token.
+ */
+export function keptConnection(connection: OrgConnection, checkHost: boolean): OrgConnection {
+  const kept: OrgConnection = { instanceUrl: instanceOrigin(connection.instanceUrl, checkHost), accessToken: connection.accessToken };
+  if (connection.orgId !== undefined) kept.orgId = connection.orgId;
+  if (connection.username !== undefined) kept.username = connection.username;
+  return kept;
+}
+
 type SendOptions = { soapOperation?: string; contentType?: string };
 
 // The whole read surface. There's deliberately no generic request method, and a
@@ -136,7 +150,7 @@ export class SalesforceClient {
     this.orgId = connection.orgId ?? "";
     this.#provider = provider;
     this.#checkHost = !options.transport;
-    this.#connection = { ...connection, instanceUrl: instanceOrigin(connection.instanceUrl, this.#checkHost) };
+    this.#connection = keptConnection(connection, this.#checkHost);
     this.#transport = options.transport ?? fetchTransport;
     this.#sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
     this.#retrievePollMs = options.retrievePollMs ?? SF_DEFAULTS.retrievePollMs;
@@ -213,8 +227,11 @@ export class SalesforceClient {
       this.budget.assertCanSpend();
     }
 
-    // One refresh per request, and one more if the first only found another process's tokens (DECISIONS.md 631).
-    let refreshes = 1;
+    // One refresh per request, and a second only if the first found another
+    // process's tokens rather than refreshing. Never more than two, whatever the provider says (DECISIONS.md 631).
+    let refreshes = 0;
+    let allowed = 1;
+    let adopted = false;
     for (let attempt = 0; ; attempt++) {
       if (!options.free) {
         this.budget.recordCall();
@@ -232,9 +249,10 @@ export class SalesforceClient {
       });
       this.budget.observeHeader(res.header("sforce-limit-info"));
 
-      if (res.status === 401 && refreshes > 0 && !options.soapOperation) {
-        refreshes--;
-        if (await this.#refreshConnection()) refreshes++;
+      if (res.status === 401 && refreshes < allowed && !options.soapOperation) {
+        refreshes++;
+        adopted = await this.#refreshConnection();
+        if (adopted && refreshes === 1) allowed = MAX_REFRESHES;
         continue;
       }
       if ((res.status === 429 || res.status >= 500) && !options.soapOperation && attempt < SF_DEFAULTS.maxRetries) {
@@ -242,6 +260,7 @@ export class SalesforceClient {
         continue;
       }
       if (res.status >= 400) throw this.#toError(res);
+      if (adopted) this.#provider.accepted?.();
       return res;
     }
   }
@@ -343,9 +362,9 @@ export class SalesforceClient {
 
   /** True if the provider found another process's tokens rather than refreshing (DECISIONS.md 631). */
   async #refreshConnection(): Promise<boolean> {
-    const { fromStore, ...fresh } = await this.#provider.refresh();
-    this.#connection = { ...fresh, instanceUrl: instanceOrigin(fresh.instanceUrl, this.#checkHost) };
-    return fromStore === true;
+    const fresh = await this.#provider.refresh();
+    this.#connection = keptConnection(fresh, this.#checkHost);
+    return fresh.fromStore === true;
   }
 
   async #soap(operation: string, body: string): Promise<Record<string, unknown>> {
@@ -368,9 +387,11 @@ export class SalesforceClient {
       if (!(err instanceof SalesforceError) || err.code !== "INVALID_SESSION_ID") throw err;
       if (!(await this.#refreshConnection())) res = await send();
       else {
-        // Another process's tokens: their session may have ended too, so one more refresh (DECISIONS.md 631).
+        // Another process's tokens: their session may have ended too, so one
+        // more refresh, and no more, whatever the provider says (DECISIONS.md 631).
         try {
           res = await send();
+          this.#provider.accepted?.();
         } catch (again) {
           if (!(again instanceof SalesforceError) || again.code !== "INVALID_SESSION_ID") throw again;
           await this.#refreshConnection();

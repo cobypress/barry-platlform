@@ -19,4 +19,6 @@ export interface ConnectionProvider {
   connect(): Promise<OrgConnection>;
   /** Called once after a 401, then the request is retried. Twice if the first came back `fromStore`. */
   refresh(): Promise<OrgConnection>;
+  /** Told when a request succeeds on a token a refresh returned `fromStore`. */
+  accepted?(): void;
 }
