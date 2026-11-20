@@ -43,6 +43,20 @@ export const Effort = z.object({
 });
 export type Effort = z.infer<typeof Effort>;
 
+// Hours to fix an issue, as a range in whole hours with what it covers (DECISIONS.md
+// 628). Estimates awaiting the owner's review: data only, printed in no document yet.
+export const EffortHours = z
+  .object({
+    low: z.number().int().min(1),
+    high: z.number().int().min(1),
+    basis: z.string().min(1),
+  })
+  .refine((h) => h.high >= h.low, { message: "The high end of an hours range can't be below the low end", path: ["high"] });
+export type EffortHours = z.infer<typeof EffortHours>;
+
+/** The longest a fix prompt may be, in characters (DECISIONS.md 628). */
+export const FIX_PROMPT_MAX = 2500;
+
 // Labels are pseudonymised tokens (see src/privacy). A real name in a finding is a bug.
 export const Subject = z.object({ type: z.string().min(1), label: z.string().min(1) });
 export type Subject = z.infer<typeof Subject>;
@@ -77,6 +91,11 @@ export const Finding = z
     // Which of the four kinds the reason is (DECISIONS.md 627). Only on a not measurable finding.
     notMeasurableKind: NotMeasurableKind.optional(),
     manualStepIds: z.array(z.string()),
+    // The engine sets these on an issue only, where the rule declares them (DECISIONS.md 628).
+    // Not enforced here, so a stored result read back is never refused for them.
+    effortHours: EffortHours.optional(),
+    // Made by code from fixed text and the finding's own facts, never by Claude, and never naming a person or a record.
+    fixPrompt: z.string().min(1).max(FIX_PROMPT_MAX).optional(),
   })
   .superRefine((f, ctx) => {
     if (f.status === "not_measurable" && !f.notMeasurableReason) {

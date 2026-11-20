@@ -1,0 +1,757 @@
+{
+  "status": "Estimates awaiting the owner's review. Hours for a fix led by a consultant who knows Salesforce, as a range in whole hours. A fixed range covers the work whatever the size of the org; a range for each unit is multiplied by the count the finding holds, rounded up to whole hours, and held under its cap. Printed in no document until approved.",
+  "rules": {
+    "act.deals-without-activity": {
+      "low": 4,
+      "high": 8,
+      "basis": "Agreeing what's worth recording and setting up capture or the steps to log it"
+    },
+    "act.event-link-collapse": {
+      "low": 2,
+      "high": 6,
+      "basis": "Finding what changed when the drop began and correcting the set-up"
+    },
+    "act.rep-activity-spread": {
+      "low": 1,
+      "high": 3,
+      "basis": "Checking the email and calendar connections and preparing the comparison"
+    },
+    "act.unlinked-tasks": {
+      "low": 2,
+      "high": 4,
+      "basis": "Finding which tools create unlinked tasks and fixing them"
+    },
+    "act.won-vs-lost-activity": {
+      "low": 2,
+      "high": 4,
+      "basis": "Preparing the analysis and options for the people who decide, and making the agreed change; their time deciding isn't counted"
+    },
+    "adp.classic-users": {
+      "fact": "users",
+      "each": "user",
+      "minutesLow": 30,
+      "minutesHigh": 60,
+      "capHours": 16,
+      "capReason": "past that users move in groups with one round of training"
+    },
+    "adp.falling-adoption": {
+      "low": 8,
+      "high": 16,
+      "basis": "Interviews with the teams, an analysis of what gets in their way, and a plan; the fixes it finds are their own work"
+    },
+    "adp.low-engagement-group": {
+      "fact": "groups",
+      "each": "team",
+      "minutesLow": 240,
+      "minutesHigh": 480,
+      "capHours": 24,
+      "capReason": "past that the teams share most of the findings, so each further one is quicker"
+    },
+    "aut.apex-coverage": {
+      "fact": "weakClasses",
+      "each": "class",
+      "minutesLow": 120,
+      "minutesHigh": 240,
+      "capHours": 40,
+      "capReason": "past that shared test data factories make each further class quicker"
+    },
+    "aut.case-routing-overlap": {
+      "low": 4,
+      "high": 8,
+      "basis": "Separating assignment rules and Omni-Channel so each case is routed once"
+    },
+    "aut.flows-without-fault-paths": {
+      "fact": "affected",
+      "each": "flow",
+      "minutesLow": 60,
+      "minutesHigh": 120,
+      "capHours": 24,
+      "capReason": "past that a shared fault-handling subflow makes each further flow quicker"
+    },
+    "aut.hardcoded-ids-in-flows": {
+      "fact": "affected",
+      "each": "flow",
+      "minutesLow": 60,
+      "minutesHigh": 120,
+      "capHours": 16,
+      "capReason": "past that the same custom metadata or label serves many flows"
+    },
+    "aut.legacy-process-builder": {
+      "fact": "activeProcesses",
+      "each": "process",
+      "minutesLow": 120,
+      "minutesHigh": 240,
+      "capHours": 60,
+      "capReason": "past that the move is planned as a project of its own, object by object"
+    },
+    "aut.legacy-workflow-rules": {
+      "fact": "activeRules",
+      "each": "workflow rule",
+      "minutesLow": 60,
+      "minutesHigh": 180,
+      "capHours": 60,
+      "capReason": "past that the move is planned as a project of its own, object by object"
+    },
+    "aut.mixed-automation-on-object": {
+      "fact": "objects",
+      "each": "object",
+      "minutesLow": 240,
+      "minutesHigh": 480,
+      "capHours": 40,
+      "capReason": "past that the objects share one agreed pattern, so each further one is quicker"
+    },
+    "aut.multiple-triggers": {
+      "fact": "objects",
+      "each": "object",
+      "minutesLow": 240,
+      "minutesHigh": 480,
+      "capHours": 40,
+      "capReason": "past that the objects share one handler pattern, so each further one is quicker"
+    },
+    "aut.old-api-versions": {
+      "fact": "total",
+      "each": "component",
+      "minutesLow": 30,
+      "minutesHigh": 60,
+      "capHours": 24,
+      "capReason": "past that the components are tested together in one release"
+    },
+    "aut.undocumented-automation": {
+      "fact": "missing",
+      "each": "item",
+      "minutesLow": 10,
+      "minutesHigh": 20,
+      "capHours": 24,
+      "capReason": "past that the work is done in bulk, so it stops growing with the count"
+    },
+    "bp.after-save-same-record-updates": {
+      "fact": "flows",
+      "each": "flow",
+      "minutesLow": 120,
+      "minutesHigh": 240,
+      "capHours": 24,
+      "capReason": "past that the work is done in bulk, so it stops growing with the count"
+    },
+    "bp.jobs-on-inactive-owners": {
+      "fact": "jobs",
+      "each": "job",
+      "minutesLow": 30,
+      "minutesHigh": 60,
+      "capHours": 8,
+      "capReason": "past that the work is done in bulk, so it stops growing with the count"
+    },
+    "bp.ownership-skew": {
+      "fact": "pairs",
+      "each": "owner and object",
+      "minutesLow": 240,
+      "minutesHigh": 480,
+      "capHours": 24,
+      "capReason": "past that the same spreading approach serves each pair"
+    },
+    "bp.users-without-role": {
+      "fact": "hits",
+      "each": "user",
+      "minutesLow": 10,
+      "minutesHigh": 20,
+      "capHours": 8,
+      "capReason": "past that the work is done in bulk, so it stops growing with the count"
+    },
+    "cfg.custom-field-sprawl": {
+      "low": 4,
+      "high": 8,
+      "basis": "A review of each object's fields with its owners, whatever the number of fields; removing fields afterwards is its own finding"
+    },
+    "cfg.picklist-sprawl": {
+      "low": 2,
+      "high": 6,
+      "basis": "Consolidating each list named, with a mapping of old values to new ones and an update of existing records"
+    },
+    "cfg.setup-change-concentration": {
+      "low": 4,
+      "high": 8,
+      "basis": "Writing down how the org is changed and handing the work to a second person, whatever the size of the org"
+    },
+    "cfg.stage-sprawl": {
+      "low": 4,
+      "high": 8,
+      "basis": "Preparing the analysis and options for the people who decide, and making the agreed change; their time deciding isn't counted"
+    },
+    "cfg.unassigned-layouts": {
+      "fact": "unassigned",
+      "each": "layout",
+      "minutesLow": 15,
+      "minutesHigh": 30,
+      "capHours": 8,
+      "capReason": "past that the work is done in bulk, so it stops growing with the count"
+    },
+    "cfg.undocumented-fields": {
+      "fact": "bare",
+      "each": "field",
+      "minutesLow": 10,
+      "minutesHigh": 20,
+      "capHours": 24,
+      "capReason": "past that the work is done in bulk, so it stops growing with the count"
+    },
+    "cfg.unused-custom-fields": {
+      "fact": "unusedFields",
+      "each": "field",
+      "minutesLow": 30,
+      "minutesHigh": 60,
+      "capHours": 16,
+      "capReason": "past that the work is done in bulk, so it stops growing with the count"
+    },
+    "cpq.discount-approvals": {
+      "low": 8,
+      "high": 16,
+      "basis": "Building an approval process on the quote for the agreed discount levels"
+    },
+    "cpq.discount-leakage": {
+      "low": 4,
+      "high": 8,
+      "basis": "Preparing the analysis and options for the people who decide, and making the agreed change; their time deciding isn't counted"
+    },
+    "cpq.inactive-rules": {
+      "fact": "inactive",
+      "each": "rule",
+      "minutesLow": 15,
+      "minutesHigh": 30,
+      "capHours": 8,
+      "capReason": "past that the work is done in bulk, so it stops growing with the count"
+    },
+    "cpq.price-rule-conflicts": {
+      "fact": "pairs",
+      "each": "pair",
+      "minutesLow": 120,
+      "minutesHigh": 240,
+      "capHours": 16,
+      "capReason": "past that the work is done in bulk, so it stops growing with the count"
+    },
+    "cpq.quote-to-order": {
+      "low": 2,
+      "high": 4,
+      "basis": "Building the report and the check that keeps it clean; the owners' time updating each record isn't counted"
+    },
+    "cpq.renewals-not-started": {
+      "low": 2,
+      "high": 6,
+      "basis": "Creating the renewals due and setting CPQ to create them automatically"
+    },
+    "cpq.twin-field-mismatch": {
+      "fact": "mismatches",
+      "each": "pair",
+      "minutesLow": 60,
+      "minutesHigh": 120,
+      "capHours": 8,
+      "capReason": "past that the work is done in bulk, so it stops growing with the count"
+    },
+    "cur.account-concentration": {
+      "low": 2,
+      "high": 4,
+      "basis": "Preparing the analysis and options for the people who decide, and making the agreed change; their time deciding isn't counted"
+    },
+    "cur.close-date-pushes": {
+      "low": 2,
+      "high": 4,
+      "basis": "Building the report or alert that flags a second push for a manager"
+    },
+    "cur.coverage": {
+      "low": 2,
+      "high": 4,
+      "basis": "Preparing the analysis and options for the people who decide, and making the agreed change; their time deciding isn't counted"
+    },
+    "cur.missing-next-steps": {
+      "low": 2,
+      "high": 4,
+      "basis": "Building the report and the check that keeps it clean; the owners' time updating each record isn't counted"
+    },
+    "cur.rep-concentration": {
+      "low": 2,
+      "high": 4,
+      "basis": "Preparing the analysis and options for the people who decide, and making the agreed change; their time deciding isn't counted"
+    },
+    "cur.stale-deals": {
+      "low": 2,
+      "high": 4,
+      "basis": "Building the report and the check that keeps it clean; the owners' time updating each record isn't counted"
+    },
+    "cur.stuck-in-stage": {
+      "low": 2,
+      "high": 4,
+      "basis": "Building the report and the check that keeps it clean; the owners' time updating each record isn't counted"
+    },
+    "dq.contact-completeness": {
+      "low": 3,
+      "high": 6,
+      "basis": "Building the report and the check that keeps it clean; the owners' time updating each record isn't counted"
+    },
+    "dq.duplicate-accounts": {
+      "fact": "groups",
+      "each": "group",
+      "minutesLow": 15,
+      "minutesHigh": 30,
+      "capHours": 24,
+      "capReason": "past that a deduplication tool merges in bulk"
+    },
+    "dq.duplicate-rules-missing": {
+      "fact": "missing",
+      "each": "object",
+      "minutesLow": 120,
+      "minutesHigh": 240,
+      "capHours": 12,
+      "capReason": "past that the rules share one matching approach"
+    },
+    "dq.loss-reason-missing": {
+      "low": 2,
+      "high": 4,
+      "basis": "Adding the rule and agreeing a short list of reasons; past deals aren't filled in"
+    },
+    "dq.open-opps-missing-amount": {
+      "low": 2,
+      "high": 4,
+      "basis": "Building the report and the check that keeps it clean; the owners' time updating each record isn't counted"
+    },
+    "dq.open-opps-no-activity": {
+      "low": 2,
+      "high": 4,
+      "basis": "Building the report and the check that keeps it clean; the owners' time updating each record isn't counted"
+    },
+    "dq.open-opps-past-close": {
+      "low": 2,
+      "high": 4,
+      "basis": "Building the report and the check that keeps it clean; the owners' time updating each record isn't counted"
+    },
+    "dq.opps-inactive-owner": {
+      "low": 1,
+      "high": 3,
+      "basis": "Moving the deals with Salesforce's mass transfer and adding a step to the leaver process"
+    },
+    "dq.opps-without-account": {
+      "low": 2,
+      "high": 4,
+      "basis": "Building the report and the check that keeps it clean; the owners' time updating each record isn't counted"
+    },
+    "dq.record-type-use": {
+      "low": 1,
+      "high": 4,
+      "basis": "Checking each record type's dependencies and deactivating the ones nobody needs"
+    },
+    "dq.records-inactive-owner": {
+      "low": 2,
+      "high": 6,
+      "basis": "Moving the records in bulk and adding a step to the leaver process"
+    },
+    "dq.stale-leads": {
+      "low": 3,
+      "high": 6,
+      "basis": "Agreeing a follow-up rule by source and setting up the archive; the reps' follow-up time isn't counted"
+    },
+    "fct.commit-at-risk": {
+      "low": 1,
+      "high": 3,
+      "basis": "Building the report and the check that keeps it clean; the owners' time updating each record isn't counted"
+    },
+    "fct.early-stage-commits": {
+      "low": 1,
+      "high": 3,
+      "basis": "Building the report and the check that keeps it clean; the owners' time updating each record isn't counted"
+    },
+    "fct.manager-adjustments": {
+      "low": 2,
+      "high": 4,
+      "basis": "Preparing the analysis and options for the people who decide, and making the agreed change; their time deciding isn't counted"
+    },
+    "fct.quota-gaps": {
+      "fact": "hits",
+      "each": "owner",
+      "minutesLow": 15,
+      "minutesHigh": 30,
+      "capHours": 8,
+      "capReason": "past that quotas are loaded in bulk"
+    },
+    "int.api-usage": {
+      "low": 4,
+      "high": 16,
+      "basis": "Finding which integrations and jobs use the most and planning the cuts; changing them is more"
+    },
+    "int.failed-async-jobs": {
+      "fact": "classes",
+      "each": "class",
+      "minutesLow": 120,
+      "minutesHigh": 240,
+      "capHours": 16,
+      "capReason": "past that the work is done in bulk, so it stops growing with the count"
+    },
+    "int.hardcoded-endpoints": {
+      "fact": "addresses",
+      "each": "address",
+      "minutesLow": 120,
+      "minutesHigh": 240,
+      "capHours": 24,
+      "capReason": "past that the named credentials share one pattern"
+    },
+    "int.integration-user-licences": {
+      "fact": "movable",
+      "each": "account",
+      "minutesLow": 60,
+      "minutesHigh": 120,
+      "capHours": 8,
+      "capReason": "past that the work is done in bulk, so it stops growing with the count"
+    },
+    "int.integration-users-interactive": {
+      "fact": "accounts",
+      "each": "account",
+      "minutesLow": 30,
+      "minutesHigh": 60,
+      "capHours": 4,
+      "capReason": "past that the work is done in bulk, so it stops growing with the count"
+    },
+    "lead.campaign-return": {
+      "low": 2,
+      "high": 4,
+      "basis": "Preparing the analysis and options for the people who decide, and making the agreed change; their time deciding isn't counted"
+    },
+    "lead.conversion-by-source": {
+      "low": 2,
+      "high": 4,
+      "basis": "Preparing the analysis and options for the people who decide, and making the agreed change; their time deciding isn't counted"
+    },
+    "lead.converted-no-opportunity": {
+      "low": 1,
+      "high": 3,
+      "basis": "Preparing the analysis and options for the people who decide, and making the agreed change; their time deciding isn't counted"
+    },
+    "lead.no-first-response": {
+      "low": 2,
+      "high": 4,
+      "basis": "Checking routing and fixing the rules that leave leads unworked"
+    },
+    "lead.response-time": {
+      "low": 2,
+      "high": 6,
+      "basis": "Setting a response rule by source and the routing or alert behind it"
+    },
+    "lead.source-return": {
+      "low": 2,
+      "high": 4,
+      "basis": "Preparing the analysis and options for the people who decide, and making the agreed change; their time deciding isn't counted"
+    },
+    "mkt.campaign-influence": {
+      "low": 1,
+      "high": 2,
+      "basis": "Turning on one setting and choosing the model to report on"
+    },
+    "mkt.scoring-grading": {
+      "low": 4,
+      "high": 8,
+      "basis": "Setting up grading against the ideal customer profile and checking scoring"
+    },
+    "mkt.unowned-prospects": {
+      "low": 1,
+      "high": 3,
+      "basis": "Reassigning the leads and fixing the assignment rules"
+    },
+    "mkt.unworked-handovers": {
+      "low": 2,
+      "high": 4,
+      "basis": "Building the report and the check that keeps it clean; the owners' time updating each record isn't counted"
+    },
+    "pipe.calibration-contradicts-org": {
+      "low": 1,
+      "high": 3,
+      "basis": "Agreeing which is right, the calibration or the stage set-up, and correcting the other"
+    },
+    "pipe.dead-end-stage": {
+      "low": 2,
+      "high": 4,
+      "basis": "Setting a time limit for the stage and the report or alert that enforces it"
+    },
+    "pipe.going-backwards": {
+      "low": 4,
+      "high": 8,
+      "basis": "Preparing the analysis and options for the people who decide, and making the agreed change; their time deciding isn't counted"
+    },
+    "pipe.segment-divergence": {
+      "low": 2,
+      "high": 4,
+      "basis": "Preparing the analysis and options for the people who decide, and making the agreed change; their time deciding isn't counted"
+    },
+    "pipe.skipped-stages": {
+      "low": 4,
+      "high": 8,
+      "basis": "Preparing the analysis and options for the people who decide, and making the agreed change; their time deciding isn't counted"
+    },
+    "pipe.unmapped-stages": {
+      "low": 1,
+      "high": 2,
+      "basis": "Adding each stage to the health check's calibration"
+    },
+    "rev.dormant-accounts": {
+      "low": 2,
+      "high": 4,
+      "basis": "Preparing the analysis and options for the people who decide, and making the agreed change; their time deciding isn't counted"
+    },
+    "rev.stalled-deals": {
+      "low": 2,
+      "high": 4,
+      "basis": "Preparing the analysis and options for the people who decide, and making the agreed change; their time deciding isn't counted"
+    },
+    "rev.win-backs": {
+      "low": 2,
+      "high": 4,
+      "basis": "Preparing the analysis and options for the people who decide, and making the agreed change; their time deciding isn't counted"
+    },
+    "sec.health-check-risks": {
+      "low": 4,
+      "high": 8,
+      "basis": "Bringing the high-risk settings up to standard and planning the medium ones"
+    },
+    "sec.health-check-score": {
+      "low": 8,
+      "high": 16,
+      "basis": "Working through the high-risk settings and planning the rest, whatever their number"
+    },
+    "sec.insecure-remote-sites": {
+      "low": 1,
+      "high": 4,
+      "basis": "Moving each site to HTTPS and turning off the mixed-protocol setting"
+    },
+    "sec.modify-all-data": {
+      "fact": "unexpected",
+      "each": "person",
+      "minutesLow": 60,
+      "minutesHigh": 120,
+      "capHours": 8,
+      "capReason": "past that people share the same access, so one permission set serves them"
+    },
+    "sec.peer-outlier-access": {
+      "fact": "people",
+      "each": "person",
+      "minutesLow": 30,
+      "minutesHigh": 60,
+      "capHours": 8,
+      "capReason": "past that the work is done in bulk, so it stops growing with the count"
+    },
+    "sec.personal-integration-accounts": {
+      "fact": "accounts",
+      "each": "integration",
+      "minutesLow": 240,
+      "minutesHigh": 480,
+      "capHours": 24,
+      "capReason": "past that the integrations share one account pattern"
+    },
+    "sec.self-authorised-connected-apps": {
+      "fact": "open",
+      "each": "app",
+      "minutesLow": 60,
+      "minutesHigh": 120,
+      "capHours": 8,
+      "capReason": "past that the work is done in bulk, so it stops growing with the count"
+    },
+    "sec.sharing-defaults": {
+      "fact": "openObjects",
+      "each": "object",
+      "minutesLow": 240,
+      "minutesHigh": 480,
+      "capHours": 24,
+      "capReason": "past that the objects share one sharing design"
+    },
+    "sec.unused-access": {
+      "low": 2,
+      "high": 4,
+      "basis": "Checking each unused profile and permission set and deleting the ones nobody needs"
+    },
+    "sec.view-all-data": {
+      "fact": "unexpected",
+      "each": "person",
+      "minutesLow": 60,
+      "minutesHigh": 120,
+      "capHours": 8,
+      "capReason": "past that people share the same access, so one permission set serves them"
+    },
+    "svc.agent-licences": {
+      "fact": "wasted",
+      "each": "licence",
+      "minutesLow": 15,
+      "minutesHigh": 30,
+      "capHours": 4,
+      "capReason": "past that the work is done in bulk, so it stops growing with the count"
+    },
+    "svc.backlog-age": {
+      "low": 2,
+      "high": 4,
+      "basis": "Building the report and the check that keeps it clean; the owners' time updating each record isn't counted"
+    },
+    "svc.backlog-growth": {
+      "low": 4,
+      "high": 8,
+      "basis": "Preparing the analysis and options for the people who decide, and making the agreed change; their time deciding isn't counted"
+    },
+    "svc.case-classification": {
+      "low": 2,
+      "high": 4,
+      "basis": "Agreeing a short list of types or reasons and requiring one on closing"
+    },
+    "svc.case-customer": {
+      "low": 2,
+      "high": 6,
+      "basis": "Matching incoming cases to contacts automatically"
+    },
+    "svc.escalation-rules": {
+      "low": 2,
+      "high": 6,
+      "basis": "Adding one escalation rule or an entitlement process"
+    },
+    "svc.escalation-targets": {
+      "fact": "dead",
+      "each": "escalation action",
+      "minutesLow": 30,
+      "minutesHigh": 60,
+      "capHours": 4,
+      "capReason": "past that the work is done in bulk, so it stops growing with the count"
+    },
+    "svc.first-reply-email": {
+      "low": 2,
+      "high": 6,
+      "basis": "Setting up an acknowledgement and routing so email cases get a timely first reply"
+    },
+    "svc.knowledge-current": {
+      "fact": "stale",
+      "each": "article",
+      "minutesLow": 15,
+      "minutesHigh": 30,
+      "capHours": 24,
+      "capReason": "past that articles are reviewed in batches by owner"
+    },
+    "svc.knowledge-use": {
+      "low": 2,
+      "high": 6,
+      "basis": "Putting Knowledge on the case page and setting up the reporting"
+    },
+    "svc.macros-and-quick-text": {
+      "low": 2,
+      "high": 6,
+      "basis": "Removing unused macros and quick text and rebuilding Classic-only macros"
+    },
+    "svc.milestone-breaches": {
+      "low": 4,
+      "high": 8,
+      "basis": "Reviewing the milestones missed most and adding warning actions"
+    },
+    "svc.omni-routing": {
+      "fact": "unrouted",
+      "each": "queue",
+      "minutesLow": 60,
+      "minutesHigh": 120,
+      "capHours": 8,
+      "capReason": "past that the work is done in bulk, so it stops growing with the count"
+    },
+    "svc.origin-missing": {
+      "low": 2,
+      "high": 4,
+      "basis": "Setting Origin automatically for each channel and requiring it by hand"
+    },
+    "svc.priority-resolution": {
+      "low": 4,
+      "high": 8,
+      "basis": "Routing high-priority cases to their own queue or routing priority, with a visible target"
+    },
+    "svc.queue-sprawl": {
+      "low": 2,
+      "high": 4,
+      "basis": "Merging or removing queues nobody works and giving the rest members"
+    },
+    "svc.reopened-cases": {
+      "low": 2,
+      "high": 6,
+      "basis": "Finding which case types reopen and changing how they're closed"
+    },
+    "svc.unassigned-cases": {
+      "low": 2,
+      "high": 6,
+      "basis": "Giving queues members and routing work from busy queues"
+    },
+    "tech.apex-code-size": {
+      "low": 8,
+      "high": 24,
+      "basis": "Finding and retiring unused Apex, and planning what's left; more where code has to be rewritten"
+    },
+    "tech.classic-leftovers": {
+      "low": 4,
+      "high": 16,
+      "basis": "Replacing the JavaScript buttons, s-controls and Classic-only pages found; depends on what each does"
+    },
+    "tech.governor-limit-risk": {
+      "fact": "risky",
+      "each": "class or trigger",
+      "minutesLow": 120,
+      "minutesHigh": 240,
+      "capHours": 40,
+      "capReason": "past that the same pattern repeats, so each further one is quicker"
+    },
+    "tech.storage-use": {
+      "low": 4,
+      "high": 16,
+      "basis": "A plan for what to archive or delete, and setting it up; more where data has to move to another store"
+    },
+    "tech.test-quality": {
+      "low": 4,
+      "high": 16,
+      "basis": "Adding assertions and test data to the flawed test classes; more for a large set"
+    },
+    "utl.dashboards-inactive-running-user": {
+      "fact": "affected",
+      "each": "dashboard",
+      "minutesLow": 15,
+      "minutesHigh": 30,
+      "capHours": 8,
+      "capReason": "past that the work is done in bulk, so it stops growing with the count"
+    },
+    "utl.dormant-licensed-users": {
+      "fact": "users",
+      "each": "user",
+      "minutesLow": 15,
+      "minutesHigh": 30,
+      "capHours": 8,
+      "capReason": "past that confirmed users are deactivated in bulk"
+    },
+    "utl.eac-advanced-sync": {
+      "low": 1,
+      "high": 2,
+      "basis": "Turning on one setting and checking that new events link to records"
+    },
+    "utl.eac-connections": {
+      "fact": "broken",
+      "each": "connection",
+      "minutesLow": 15,
+      "minutesHigh": 30,
+      "capHours": 8,
+      "capReason": "past that the work is done in bulk, so it stops growing with the count"
+    },
+    "utl.never-logged-in": {
+      "fact": "users",
+      "each": "user",
+      "minutesLow": 15,
+      "minutesHigh": 30,
+      "capHours": 8,
+      "capReason": "past that confirmed users are deactivated in bulk"
+    },
+    "utl.package-seats": {
+      "low": 1,
+      "high": 3,
+      "basis": "Checking each installed app with its owner and preparing the change for the renewal"
+    },
+    "utl.unassigned-licence-seats": {
+      "low": 1,
+      "high": 2,
+      "basis": "Confirming headroom with the hiring plan and preparing the change for the renewal"
+    },
+    "utl.unused-reports": {
+      "fact": "unused",
+      "each": "report",
+      "minutesLow": 2,
+      "minutesHigh": 5,
+      "capHours": 8,
+      "capReason": "past that reports are moved to an archive folder in bulk"
+    }
+  }
+}

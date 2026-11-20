@@ -10986,7 +10986,13 @@
      "Account": 156
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 4,
+     "high": 8,
+     "basis": "A review of each object's fields with its owners, whatever the number of fields; removing fields afterwards is its own finding."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Core objects carry a heavy custom field load. Account has 156 custom fields. We use 150 as a working limit: past it, page layouts and reports get harder to keep clean and users stop filling fields in.\n\nWhat good looks like: Review these objects with the field usage findings and agree which fields still earn their place.\n\nWork on the objects this finding describes.\n\nThis is a decision for people, not a change to the org. Do not change the org: prepare the analysis and the options so the people who own it can decide.\n\nSteps:\n1. For each object named, list its custom fields with their fill rate, when each was created and last changed, and where each is used (layouts, flows, Apex, reports, validation rules).\n2. Group the fields into keep, review and candidate to retire, with the reason for each.\n3. Prepare the list for the object's owners to agree.\n\nDo not:\n- Change any setting, metadata or record in the org: this task is analysis only.\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the objects this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- Every custom field on the objects named is in one of the three groups, with a reason."
    },
    {
     "id": "f-cda5bbfc3dbd",
@@ -11103,7 +11109,13 @@
      "scannedFields": 156
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 1,
+     "high": 1,
+     "basis": "About 30 to 60 minutes for each field, for 1 field."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Custom fields on Account are almost never filled in. Of 156 scanned custom fields on Account, 1 is filled on under 1% of records, both overall and on records from the last 12 months.\n\nWhat good looks like: Review 1 field with the people who own Account. We aren't recommending removal, because not every dependency check could pass.\n\nWork on the fields listed in this finding.\n\nSteps:\n1. Not every safety check passed, so do not remove, deactivate or merge anything: check what depends on each item and bring the list to the people who own them.\n2. For each field, list everything that references it: page layouts, flows, Apex, formulas, validation rules, reports, list views and integrations.\n3. Export any data in it that must be kept.\n4. Remove the field from page layouts first and wait an agreed period for anyone who misses it.\n5. Only when nothing references it and its owner agrees, delete the field in a sandbox, run the tests, then do the same in production.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the fields this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- The deleted fields no longer appear in Object Manager, and every flow, Apex test and report that ran before still runs."
    },
    {
     "id": "f-acd918e24fa4",
@@ -11272,7 +11284,13 @@
      "scannedFields": 2
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 1,
+     "high": 1,
+     "basis": "About 30 to 60 minutes for each field, for 1 field."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Custom fields on Lead are almost never filled in. Of 2 scanned custom fields on Lead, 1 is filled on under 1% of records, both overall and on records from the last 12 months.\n\nWhat good looks like: Review 1 field with the people who own Lead. We aren't recommending removal, because not every dependency check could pass.\n\nWork on the fields listed in this finding.\n\nSteps:\n1. Not every safety check passed, so do not remove, deactivate or merge anything: check what depends on each item and bring the list to the people who own them.\n2. For each field, list everything that references it: page layouts, flows, Apex, formulas, validation rules, reports, list views and integrations.\n3. Export any data in it that must be kept.\n4. Remove the field from page layouts first and wait an agreed period for anyone who misses it.\n5. Only when nothing references it and its owner agrees, delete the field in a sandbox, run the tests, then do the same in production.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the fields this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- The deleted fields no longer appear in Object Manager, and every flow, Apex test and report that ran before still runs."
    },
    {
     "id": "f-6cc32bfaf582",
@@ -11443,7 +11461,13 @@
      "scannedFields": 4
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 1,
+     "high": 2,
+     "basis": "About 30 to 60 minutes for each field, for 2 fields."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Custom fields on Opportunity are almost never filled in. Of 4 scanned custom fields on Opportunity, 2 are filled on under 1% of records, both overall and on records from the last 12 months.\n\nWhat good looks like: Review 2 fields with the people who own Opportunity. We aren't recommending removal, because not every dependency check could pass.\n\nWork on the fields listed in this finding.\n\nSteps:\n1. Not every safety check passed, so do not remove, deactivate or merge anything: check what depends on each item and bring the list to the people who own them.\n2. For each field, list everything that references it: page layouts, flows, Apex, formulas, validation rules, reports, list views and integrations.\n3. Export any data in it that must be kept.\n4. Remove the field from page layouts first and wait an agreed period for anyone who misses it.\n5. Only when nothing references it and its owner agrees, delete the field in a sandbox, run the tests, then do the same in production.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the fields this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- The deleted fields no longer appear in Object Manager, and every flow, Apex test and report that ran before still runs."
    },
    {
     "id": "f-9d395824b4bc",
@@ -11509,7 +11533,13 @@
      "layouts": 9
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 1,
+     "high": 1,
+     "basis": "About 15 to 30 minutes for each layout, for 2 layouts."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Some page layouts aren't assigned to any profile. Of 9 page layouts, 2 aren't assigned to any profile, so nobody sees them.\n\nWhat good looks like: Review the unassigned layouts and retire the ones nobody needs.\n\nWork on the page layouts listed in this finding.\n\nSteps:\n1. For each layout, confirm in the page layout assignment that no profile and record type uses it.\n2. Check it isn't named in a deployment, a managed package or documentation people rely on.\n3. Delete the ones nobody needs, in a sandbox first.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the page layouts this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- The page layout assignment shows every profile on a layout that still exists, and the deleted layouts are gone."
    },
    {
     "id": "f-50346da1a6a4",
@@ -11574,7 +11604,13 @@
      "noHelpText": 7
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 1,
+     "high": 2,
+     "basis": "About 10 to 20 minutes for each field, for 6 fields."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Most custom fields don't say what they're for. Custom fields with neither help text nor a description: 6 of 8 (75%), most on Opportunity (3), Invoice (2), Project (1). Users see no explanation when they fill these in, and whoever maintains the org can't tell what each one is for.\n\nWhat good looks like: Add help text to the fields people fill in and a description to every field you keep, and retire the ones nobody can explain.\n\nThe fields involved: Opportunity, Invoice and Project.\n\nSteps:\n1. List the custom fields with no description or help text on the objects named.\n2. Draft a description of what each field holds and why, and help text for the ones people fill in, from its label, type, values and where it's used.\n3. Mark any field whose purpose you can't work out for its owner to explain or retire.\n4. Apply the agreed text in a sandbox, then in production.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the fields this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- Every custom field on these objects has a description, and every field on a page layout has help text."
    },
    {
     "id": "f-503098f54a3e",
@@ -11642,7 +11678,13 @@
      "unusedStages": 1
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 4,
+     "high": 8,
+     "basis": "Preparing the analysis and options for the people who decide, and making the agreed change; their time deciding isn't counted."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: The sales process has more stages than deals really use. 1 active stage with no deals in the analysis window. Extra stages blur conversion figures and make forecasting harder.\n\nWhat good looks like: Agree the stages that mark real buyer progress, then map the rest to them.\n\nWork on the opportunity stages listed in this finding.\n\nThis is a decision for people, not a change to the org. Do not change the org: prepare the analysis and the options so the people who own it can decide.\n\nSteps:\n1. List each opportunity stage with its probability, forecast category, how many open and closed deals sit in it, and which sales processes use it.\n2. Propose a shorter set of stages that each mark real buyer progress, with exit criteria for each.\n3. Map every current stage to one in the proposal, and list what depends on stage names: flows, validation rules, reports and paths.\n\nDo not:\n- Change any setting, metadata or record in the org: this task is analysis only.\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the opportunity stages this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- The proposal covers every stage in use, and every dependency on a stage name is listed."
    },
    {
     "id": "f-0378abf86bbf",
@@ -11712,7 +11754,13 @@
      "Lead.LeadSource": 30
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 2,
+     "high": 6,
+     "basis": "Consolidating each list named, with a mapping of old values to new ones and an update of existing records."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Reporting picklists have grown too long. Lead Source on Lead has 30 active values. Long lists split the same answer across several values, which weakens every report built on them.\n\nWhat good looks like: Consolidate these lists and move old values out of use.\n\nThe picklists involved: Lead Source on Lead.\n\nSteps:\n1. For each picklist named, count how often each value is used on records made in the last 12 months.\n2. Propose a shorter list, and map each old value to a new one.\n3. Check flows, validation rules, reports and integrations that name a value.\n4. In a sandbox, update records to the new values, then deactivate the old ones rather than deleting them.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the picklists this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- New records can only pick the agreed values, and reports on the field show no old values for new records."
    },
    {
     "id": "f-adfc6c7e6577",
@@ -11770,7 +11818,13 @@
      "byInactive": 3
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 4,
+     "high": 8,
+     "basis": "Writing down how the org is changed and handing the work to a second person, whatever the size of the org."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Org knowledge is concentrated. One person made 90% of 30 setup changes in the period, so what they know about the org isn't shared.\n\nWhat good looks like: Document how the org is changed, and make sure a second person can do the work.\n\nWork on the setup changes this finding describes.\n\nThis is a decision for people, not a change to the org. Do not change the org: prepare the analysis and the options so the people who own it can decide.\n\nSteps:\n1. From the Setup Audit Trail, summarise the kinds of change made in the period by area (users, fields, flows, security), without naming anyone.\n2. Draft a short change process: who can change what, where changes are tested, and how they're recorded.\n3. List what a second person needs to learn to cover the work.\n\nDo not:\n- Change any setting, metadata or record in the org: this task is analysis only.\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the setup changes this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- The change process and the list of skills are ready for the business to agree."
    },
    {
     "id": "f-38d691856ea4",
@@ -11834,7 +11888,13 @@
      "objects": 3
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 3,
+     "high": 9,
+     "basis": "About 1 to 3 hours for each workflow rule, for 3 workflow rules."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Automation still runs on Workflow Rules. 3 active Workflow Rules across 3 objects. Salesforce ended support for Workflow Rules and Process Builder on 31 December 2025. They keep running, but any bug is yours to work around.\n\nWhat good looks like: Plan the move from Workflow Rules to Flow, starting with the objects that have the most rules. Salesforce's Migrate to Flow tool handles the simple cases, but it isn't always a like-for-like move.\n\nWork on the workflow rules listed in this finding.\n\nSteps:\n1. Group the active workflow rules by object, and for each list its criteria, field updates, emails, tasks and time-based actions.\n2. For each object, build one record-triggered flow that does the same work, using Migrate to Flow where it gives a like-for-like result.\n3. In a sandbox, activate the flow, deactivate the rules it replaces, and test each path with records that meet and miss the criteria.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the workflow rules this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- On each object, the flow produces the same field updates, emails and tasks as the rules did, and the rules are inactive."
    },
    {
     "id": "f-5b62acdd8719",
@@ -11889,7 +11949,13 @@
      "activeProcesses": 1
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 2,
+     "high": 4,
+     "basis": "About 2 to 4 hours for each process, for 1 process."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Automation still runs on Process Builder. 1 active Process Builder. Salesforce ended support for Workflow Rules and Process Builder on 31 December 2025. They keep running, but any bug is yours to work around.\n\nWhat good looks like: Move each Process Builder to Flow in the same piece of work as any Workflow Rules on its object, so each object is migrated once. Salesforce's Migrate to Flow tool handles the simple cases, but it isn't always a like-for-like move.\n\nWork on the processes listed in this finding.\n\nSteps:\n1. List each active Process Builder process with its object, criteria and actions.\n2. Move each to a record-triggered flow on the same object, together with any workflow rules on it, so each object is migrated once.\n3. In a sandbox, activate the flow, deactivate the process, and test every criteria node.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the processes this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- Each object's flow does what its process did, and the process is inactive."
    },
    {
     "id": "f-2fcc9fedf8f2",
@@ -11964,7 +12030,13 @@
      "unnamedTriggers": 0
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 8,
+     "high": 16,
+     "basis": "About 4 to 8 hours for each object, for 2 objects."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Automation on some objects is split across several tools. Invoice runs Apex trigger, Record-triggered flow, Workflow Rule; Opportunity runs Apex trigger, Process Builder, Record-triggered flow, Workflow Rule. Salesforce runs these at different points when a record saves, so the outcome can be hard to predict.\n\nWhat good looks like: Decide for each object what belongs in Apex and what in Flow, then retire the older tools into that split.\n\nThe objects involved: Invoice and Opportunity.\n\nSteps:\n1. For each object named, list every trigger, flow, process and workflow rule that runs on it, with when it runs and what it changes.\n2. Propose which work belongs in Apex and which in Flow, and the order they run in.\n3. In a sandbox, move the older tools' work into that split one object at a time, and run the Apex tests and a test of each path.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the objects this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- Each object's automation runs in the agreed tools only, and records save with the same results as before."
    },
    {
     "id": "f-c3e609035831",
@@ -12022,7 +12094,13 @@
      "activeFlows": 5
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 2,
+     "high": 4,
+     "basis": "About 1 to 2 hours for each flow, for 2 flows."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Flows depend on hardcoded ids or email addresses. Of 5 active flows, 2 contain hardcoded user ids, record ids or email addresses. These break when someone leaves or when the flow moves between orgs.\n\nWhat good looks like: Replace them with custom metadata, custom labels or queue lookups.\n\nWork on the flows listed in this finding.\n\nSteps:\n1. Open each flow and list every record id and email address typed into it.\n2. Replace each with a custom metadata record, a custom label, or a lookup of the queue or user by its developer name.\n3. Save a new version in a sandbox and test each path that used a replaced value.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the flows this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- No flow version that is active holds a typed record id or email, and each path still reaches the same record or person."
    },
    {
     "id": "f-c88326d52630",
@@ -12082,7 +12160,13 @@
      "missingFaultPaths": 2
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 2,
+     "high": 4,
+     "basis": "About 1 to 2 hours for each flow, for 2 flows."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Flow failures aren't handled. Of 3 active flows that write data, 2 are missing fault paths on 2 elements. When one of those fails, the user sees a generic error and the failure isn't logged anywhere useful.\n\nWhat good looks like: Add a fault path to each element, with a shared way of logging failures.\n\nWork on the flows listed in this finding.\n\nSteps:\n1. Build one subflow that records a failure (the flow, the element and the error message) and tells an admin.\n2. In each flow, add a fault path from every element that creates, updates or deletes records, leading to that subflow.\n3. Test in a sandbox by making each save fail, for example with a validation rule.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the flows this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- Every data element in these flows has a fault path, and a forced failure is recorded and reaches an admin."
    },
    {
     "id": "f-ca58d782d405",
@@ -12146,7 +12230,13 @@
      "rate": 60
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 2,
+     "high": 4,
+     "basis": "About 10 to 20 minutes for each item, for 12 items."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Most automation has no description of what it does. Active automation with no description or comment: 12 of 20 (60%). Flows: 3 of 4, Process Builders: 1 of 1, Workflow Rules: 2 of 3, Validation rules: 1 of 3, Apex classes and triggers: 5 of 9. Without one, anyone new has to read each component to learn what it does and why, and changing it safely depends on whoever built it.\n\nWhat good looks like: Describe what each flow, rule and class does and why, starting with your busiest objects, and require it for anything new.\n\nWork on the flows, rules and classes this finding describes.\n\nSteps:\n1. List the flows, workflow rules, processes and Apex classes with no description, busiest objects first.\n2. Draft a description of what each does and why, from its trigger, criteria and actions or code.\n3. Mark any you can't explain for its owner, and add the agreed descriptions in a sandbox, then in production.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the flows, rules and classes this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- Every active flow, rule and class has a description."
    },
    {
     "id": "f-e3e6b1e75972",
@@ -12211,7 +12301,13 @@
      "measuredClasses": 3
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 2,
+     "high": 4,
+     "basis": "About 2 to 4 hours for each class, for 1 class."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: A healthy coverage total is hiding weak classes. Org-wide coverage is 82%, but of 3 classes we can measure, 1 is below 50%.\n\nWhat good looks like: Add meaningful tests to the weakest classes first.\n\nWork on the Apex classes listed in this finding.\n\nSteps:\n1. List the classes below the coverage line, weakest first, and the lines each test doesn't reach.\n2. Write tests that create their own data and assert the outcome of each path, not just run the code.\n3. Run all tests in a sandbox.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the Apex classes this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- Each class named is above the coverage line, every test asserts something, and the whole test run passes."
    },
    {
     "id": "f-2702f03a8145",
@@ -12273,7 +12369,13 @@
      "seeAllData": 1
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 4,
+     "high": 16,
+     "basis": "Adding assertions and test data to the flawed test classes; more for a large set."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Some Apex tests run code without checking what it does. 1 of 2 test classes has no assertion, so it raises coverage without proving the code does what it should. 1 test class reads the org's live data (SeeAllData=true), so it can pass or fail depending on what's in the org.\n\nWhat good looks like: Add assertions that check each test's outcome, and have tests create the data they need rather than read the org's.\n\nWork on the test classes listed in this finding.\n\nSteps:\n1. List the test classes with no assertion and those that read the org's data.\n2. Add assertions that check each test's outcome, and have each test create the records it needs instead of reading the org's.\n3. Run all tests in a sandbox.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the test classes this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- No test class lacks an assertion or reads the org's own data, and the test run passes."
    },
    {
     "id": "f-2d637ace6a04",
@@ -12353,7 +12455,13 @@
      "dmlLimit": 150
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 2,
+     "high": 4,
+     "basis": "About 2 to 4 hours for each class or trigger, for 1 class or trigger."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Some code queries or saves records inside loops. 1 of 9 active classes and triggers runs a query or a save inside a loop: 1 query and 1 save in all. Salesforce allows 100 queries and 150 saves in one transaction, so code like this fails once enough records arrive together, as they do in a data load or an integration's batch.\n\nWhat good looks like: Move each query and save out of the loop: gather what the loop needs first, query once, and save the records together.\n\nWork on the Apex classes and triggers listed in this finding.\n\nSteps:\n1. Find each query and save made inside a loop in the code named.\n2. Rewrite it to gather what the loop needs first, query once, and save the records together.\n3. Test with a bulk load of at least 200 records in a sandbox.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the Apex classes and triggers this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- The bulk test runs within the query and save limits, and the existing tests pass."
    },
    {
     "id": "f-ab135b76f2a7",
@@ -12477,7 +12585,13 @@
      "FileStorageMBShare": 21.9
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 4,
+     "high": 16,
+     "basis": "A plan for what to archive or delete, and setting it up; more where data has to move to another store."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Storage is close to the allowance. Data storage is 87.3% used (8,940 of 10,240 MB) and file storage is 21.9% used (4,480 of 20,480 MB). Past the allowance, Salesforce can stop new records or files being saved until space is freed or more is bought. The objects with the most records: Invoice (12,000), Account (500), Project Line (40), Project (20).\n\nWhat good looks like: Archive or delete what you no longer need, starting with the largest objects and old files, and plan any extra storage before you reach the limit.\n\nWork on the objects and files listed in this finding.\n\nSteps:\n1. List the objects and files using the most storage, with how much of each is old or closed.\n2. Propose what to archive or delete, what must be kept and for how long, and where archived data goes.\n3. Set up the agreed archive in a sandbox first.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the objects and files this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- Storage use is below the warning line, and nothing kept by policy was lost."
    },
    {
     "id": "f-4f1d505e674d",
@@ -12548,7 +12662,13 @@
      "Active flows": 1
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 1,
+     "high": 2,
+     "basis": "About 30 to 60 minutes for each component, for 2 components."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Some automation is on very old API versions. Components on an API version older than 47, more than 15 versions behind the newest used here: Apex classes: 1, Active flows: 1. Salesforce retires old versions over time.\n\nWhat good looks like: Bring these components forward as part of your next release cycle.\n\nWork on the components this finding describes.\n\nSteps:\n1. List the Apex classes, triggers and flows on old API versions.\n2. Raise each to the current version in a sandbox, reading the release notes for behaviour that changed between the two.\n3. Run all tests and test each flow.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the components this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- None of these components is below the agreed version, and the tests pass."
    },
    {
     "id": "f-4df2bf8a9f4e",
@@ -12618,7 +12738,13 @@
      "unnamedTriggers": 0
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 8,
+     "high": 16,
+     "basis": "About 4 to 8 hours for each object, for 2 objects."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Some objects have several triggers. Invoice has 2; Opportunity has 2. Salesforce doesn't guarantee the order they run in.\n\nWhat good looks like: Move to one trigger per object, calling a handler class.\n\nThe objects involved: Invoice and Opportunity.\n\nSteps:\n1. For each object, list its triggers and the order of what they do.\n2. Combine them into one trigger per object that calls a handler class, keeping the order of the logic.\n3. Test in a sandbox with single and bulk saves.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the objects this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- Each object has one trigger, and records save with the same results as before."
    },
    {
     "id": "f-1c95b736d7cd",
@@ -12703,7 +12829,13 @@
      "pages": 2
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 4,
+     "high": 16,
+     "basis": "Replacing the JavaScript buttons, s-controls and Classic-only pages found; depends on what each does."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Parts of the org still depend on Salesforce Classic. 1 JavaScript button or link and 1 Visualforce page not marked available in Lightning Experience. Lightning Experience doesn't run JavaScript buttons or s-controls, so anyone who works in it can't use them.\n\nWhat good looks like: Replace JavaScript buttons and s-controls with quick actions, flows or Lightning components, and check whether each Classic-only Visualforce page is still used before moving or retiring it.\n\nWork on the buttons and pages listed in this finding.\n\nSteps:\n1. List each JavaScript button, s-control and Classic-only Visualforce page, what it does and whether it's still used.\n2. Replace the ones still needed with a quick action, flow or Lightning component, and retire the rest.\n3. Test in Lightning Experience in a sandbox.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the buttons and pages this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- Nothing in use depends on Classic, and users in Lightning Experience can do the same work."
    },
    {
     "id": "f-99d533cdca53",
@@ -12766,7 +12898,13 @@
      "annualSaving": 18000
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 1,
+     "high": 2,
+     "basis": "Confirming headroom with the hiring plan and preparing the change for the renewal."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: You're paying for seats nobody holds. Unassigned seats: 15. 15 of 30 Salesforce.\n\nWhat good looks like: Reduce these seats at your next renewal, keeping whatever headroom your hiring plan needs.\n\nThe licences involved: Salesforce.\n\nThis is a decision for people, not a change to the org. Do not change the org: prepare the analysis and the options so the people who own it can decide.\n\nSteps:\n1. From Company Information, list each licence type with its total and used seats.\n2. Set out the spare seats against the hiring plan the business gives you.\n3. Prepare the reduction to ask for at renewal.\n\nDo not:\n- Change any setting, metadata or record in the org: this task is analysis only.\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the licences this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- The renewal request names each licence and the seats to keep."
    },
    {
     "id": "f-814e0e340d1c",
@@ -12827,7 +12965,13 @@
      "apps": 1
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 1,
+     "high": 3,
+     "basis": "Checking each installed app with its owner and preparing the change for the renewal."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: You're paying for app seats nobody holds. Acme CPQ has 8 of 20 seats unassigned.\n\nWhat good looks like: Ask each app's owner whether it's still needed. Cancel the apps nobody uses, and reduce spare seats at renewal.\n\nThe installed apps involved: Acme CPQ.\n\nThis is a decision for people, not a change to the org. Do not change the org: prepare the analysis and the options so the people who own it can decide.\n\nSteps:\n1. List each installed app with its seats, how many are assigned, and when its users last logged in.\n2. Prepare questions for each app's owner on whether it's still needed.\n3. Draft the cancellations and seat reductions to ask for at renewal.\n\nDo not:\n- Change any setting, metadata or record in the org: this task is analysis only.\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the installed apps this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- Each app has an owner's decision: keep, reduce or cancel."
    },
    {
     "id": "f-53b92130cb3d",
@@ -13033,7 +13177,13 @@
     "notMeasurableReason": null,
     "manualStepIds": [
      "ms-default-workflow-user"
-    ]
+    ],
+    "effortHours": {
+     "low": 1,
+     "high": 1,
+     "basis": "About 15 to 30 minutes for each user, for 1 user."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Licences you can release: dormant users. Active users who haven't logged in for 90 days: 1. Every guard passed: no owned records, no references in automation, and nothing runs as them. One more user's last-login date is over 90 days old, but the login log shows them logging in since, so they aren't counted.\n\nWhat good looks like: Deactivate 1 user and release the licence.\n\nWork on the users listed in this finding.\n\nSteps:\n1. For each user listed, confirm with their manager that they've left or moved role.\n2. Check they own no records, aren't named in flows, approval processes, assignment rules or scheduled jobs, and that nothing runs as them; move anything that does to an active user first.\n3. Only then deactivate the user and release the licence.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the users this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- The users are inactive, nothing they owned or ran has stopped, and the licences show as free."
    },
    {
     "id": "f-e0cd28ae5116",
@@ -13789,7 +13939,13 @@
     "notMeasurableReason": null,
     "manualStepIds": [
      "ms-default-workflow-user"
-    ]
+    ],
+    "effortHours": {
+     "low": 2,
+     "high": 3,
+     "basis": "About 15 to 30 minutes for each user, for 5 users."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Licences that look unused but can't be released yet: dormant users. Active users who haven't logged in for 90 days: 5. We aren't recommending removal yet. What's in the way: may be the Default Workflow User (1), other users report to them (1), is named in automation (1), may be a shared or system account (1), still owns records (1), automation runs as them (1). One more user's last-login date is over 90 days old, but the login log shows them logging in since, so they aren't counted.\n\nWhat good looks like: Work through each user's blockers. Reassign what they own and finish any open manual step before changing the account.\n\nWork on the users listed in this finding.\n\nSteps:\n1. For each user listed, confirm with their manager that they've left or moved role.\n2. Check they own no records, aren't named in flows, approval processes, assignment rules or scheduled jobs, and that nothing runs as them; move anything that does to an active user first.\n3. Only then deactivate the user and release the licence.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the users this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- The users are inactive, nothing they owned or ran has stopped, and the licences show as free."
    },
    {
     "id": "f-7ca2cf590b5a",
@@ -13995,7 +14151,13 @@
     "notMeasurableReason": null,
     "manualStepIds": [
      "ms-default-workflow-user"
-    ]
+    ],
+    "effortHours": {
+     "low": 1,
+     "high": 1,
+     "basis": "About 15 to 30 minutes for each user, for 1 user."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Licences you can release: users who've never logged in. Active users who have never logged in: 1. Every guard passed: no owned records, no references in automation, and nothing runs as them.\n\nWhat good looks like: Deactivate 1 user and release the licence.\n\nWork on the users listed in this finding.\n\nSteps:\n1. For each user listed, confirm with their manager whether they still need access.\n2. Check they own no records, aren't named in automation, and that nothing runs as them.\n3. Deactivate those who don't need access and release the licence; help the rest to log in.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the users this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- Each user is either active and logging in, or inactive with the licence free."
    },
    {
     "id": "f-2652164f9e06",
@@ -14055,7 +14217,13 @@
      "share": 74.7
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 2,
+     "high": 5,
+     "basis": "About 2 to 5 minutes for each report, for 59 reports."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Most reports aren't being used. 59 of 79 reports (74.7%) haven't been run in 90 days, so people will struggle to find the ones that matter.\n\nWhat good looks like: Agree a core report set by team and archive the rest to a clearly labelled folder.\n\nWork on the reports this finding describes.\n\nThis is a decision for people, not a change to the org. Do not change the org: prepare the analysis and the options so the people who own it can decide.\n\nSteps:\n1. List reports not run in the period, with their folder and last change.\n2. Propose a core report set for each team.\n3. Prepare the move of the rest to a clearly labelled archive folder, checking none feeds a dashboard or a subscription.\n\nDo not:\n- Change any setting, metadata or record in the org: this task is analysis only.\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the reports this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- The proposal lists the core set and the reports to archive, with none in use on a dashboard."
    },
    {
     "id": "f-10b47c476984",
@@ -14108,7 +14276,13 @@
      "dashboards": 3
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 1,
+     "high": 1,
+     "basis": "About 15 to 30 minutes for each dashboard, for 1 dashboard."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Dashboards are running as people who've left. Dashboards running as an inactive user: 1 of 3. They may show stale data or stop refreshing.\n\nWhat good looks like: Give these dashboards a current running user, or a dedicated reporting user.\n\nWork on the dashboards listed in this finding.\n\nSteps:\n1. For each dashboard listed, check who should see its data.\n2. Set its running user to a current user with that access, or a dedicated reporting user, or make it a dynamic dashboard.\n3. Refresh it and compare the figures.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the dashboards this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- Each dashboard refreshes, and shows the data its viewers should see."
    },
    {
     "id": "f-eeb5eb454db0",
@@ -14202,7 +14376,13 @@
      "connected": 4
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 1,
+     "high": 1,
+     "basis": "About 15 to 30 minutes for each connection, for 1 connection."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Some users' email and calendar aren't syncing. Connected users in a state that stops activity being captured: 1 of 4.\n\nWhat good looks like: Reconnect these users. Salesforce shows a recommended action against each one.\n\nWork on the users listed in this finding.\n\nSteps:\n1. In Einstein Activity Capture's settings, list the connections in an error state and the action Salesforce recommends for each.\n2. Ask each person to reconnect, or fix the connection as Salesforce recommends.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the users this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- Every connection shows as healthy, and new emails and events appear on records."
    },
    {
     "id": "f-de2c43f0a5b6",
@@ -14253,7 +14433,13 @@
     "notMeasurableReason": null,
     "manualStepIds": [
      "ms-eac-advanced-sync"
-    ]
+    ],
+    "effortHours": {
+     "low": 1,
+     "high": 2,
+     "basis": "Turning on one setting and checking that new events link to records."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Synced calendar events may not be reaching your deals. Relate Synced Events is off, so events can sync without being related to the records they belong to. Total event volume can look normal while the link to deals is missing.\n\nWhat good looks like: Turn Relate Synced Events on, then check that new events link to records.\n\nWork on the settings this finding describes.\n\nSteps:\n1. In Einstein Activity Capture's settings, turn on Relate Synced Events, in a sandbox first if the org has one with the feature.\n2. Create a test meeting with a contact on a deal.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the settings this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- New synced events show on the related records."
    },
    {
     "id": "f-10a29aeb78f5",
@@ -14325,7 +14511,13 @@
      "drop": 37.5
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 8,
+     "high": 16,
+     "basis": "Interviews with the teams, an analysis of what gets in their way, and a plan; the fixes it finds are their own work."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Fewer people are using Salesforce. Monthly active users have fallen 20% or more from their peak: the whole org, from 8 in 2026-02 to 5 in 2026-09 (down 37.5%); profile Standard User, from 7 in 2026-02 to 4 in 2026-09 (down 42.9%).\n\nWhat good looks like: Ask the people who've stopped why. Fix what gets in their way, and make Salesforce the place the team's meetings and figures come from.\n\nWork on the teams listed in this finding.\n\nThis is a decision for people, not a change to the org. Do not change the org: prepare the analysis and the options so the people who own it can decide.\n\nSteps:\n1. From login history, show how logins and active days changed by month for the groups named.\n2. List what changed in the org over the same months: new fields, validation rules, page layouts or automation.\n3. Prepare questions to ask the people who've stopped, and options to fix what they report.\n\nDo not:\n- Change any setting, metadata or record in the org: this task is analysis only.\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the teams this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- The analysis shows when the fall began and what changed then."
    },
    {
     "id": "f-2d5d416565cb",
@@ -14398,7 +14590,13 @@
      "barelyDays": 4
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 8,
+     "high": 16,
+     "basis": "About 4 to 8 hours for each team, for 2 teams."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Some teams barely use Salesforce. In these groups, most people logged in on fewer than 4 of the last 28 days: profile Standard User, 7 of 11; role Sales UK, 4 of 6.\n\nWhat good looks like: Find out what these teams use instead of Salesforce, and bring that work into it: their pipeline, their reports, and their next steps.\n\nWork on the teams listed in this finding.\n\nThis is a decision for people, not a change to the org. Do not change the org: prepare the analysis and the options so the people who own it can decide.\n\nSteps:\n1. For each group named, summarise how often its members log in and what they create or update.\n2. List the reports, dashboards and page layouts they have.\n3. Prepare questions about what they use instead, and options to bring that work into Salesforce.\n\nDo not:\n- Change any setting, metadata or record in the org: this task is analysis only.\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the teams this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- The analysis shows each group's use against the rest of the org."
    },
    {
     "id": "f-94998a92d2c5",
@@ -14455,7 +14653,13 @@
      "share": 16.7
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 1,
+     "high": 2,
+     "basis": "About 30 to 60 minutes for each user, for 2 users."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Some people still use Salesforce Classic. 2 of 12 active users (16.7%) aren't set to use Lightning Experience: Standard User (2).\n\nWhat good looks like: Move these users to Lightning Experience, and find out first what keeps them on Classic, such as a page, button or tool that only works there.\n\nWork on the users listed in this finding.\n\nSteps:\n1. Find what keeps each user on Classic: a page, a button or a tool that only works there.\n2. Replace or fix those, then switch the users to Lightning Experience, with the option to switch back removed once they're settled.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the users this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- The users work in Lightning Experience and can do what they did in Classic."
    },
    {
     "id": "f-9f32364f9405",
@@ -14546,7 +14750,13 @@
      "worstSegmentRate": 50
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 2,
+     "high": 4,
+     "basis": "Building the report and the check that keeps it clean; the owners' time updating each record isn't counted."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Your pipeline includes deals that should already have closed. Open deals with a close date in the past: 21 of 76 (27.6%). The forecast is counting them when it shouldn't. The worst rep is at 50%.\n\nWhat good looks like: Have each owner close the deal or give it a real date, then add a weekly check to pipeline reviews.\n\nWork on the deals listed in this finding.\n\nSteps:\n1. Build a report of open deals with a close date in the past, grouped by owner.\n2. Add it to the weekly pipeline review, and consider a validation rule that stops an open deal being saved with a past close date.\n3. Share the report with each owner to close the deal or give it a real date.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the deals this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- The report shows no open deal with a close date in the past after the next review."
    },
    {
     "id": "f-a12d5a82a197",
@@ -14618,7 +14828,13 @@
      "rate": 15.8
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 1,
+     "high": 3,
+     "basis": "Moving the deals with Salesforce's mass transfer and adding a step to the leaver process."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Open deals have no active owner. Open deals owned by inactive users: 12 of 76 (15.8%). Nobody is working them.\n\nWhat good looks like: Reassign these deals now, and add reassignment to your leaver process.\n\nWork on the deals this finding describes.\n\nSteps:\n1. List open deals owned by inactive users, with the team each sat in.\n2. Agree a new owner for each with the sales manager, then transfer them.\n3. Add reassigning open deals to the leaver checklist.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the deals this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- No open deal is owned by an inactive user."
    },
    {
     "id": "f-2ec6b13fd974",
@@ -14689,7 +14905,13 @@
      "worstSegmentRate": 45.5
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 2,
+     "high": 4,
+     "basis": "Building the report and the check that keeps it clean; the owners' time updating each record isn't counted."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Open deals are missing an amount. Open deals with no amount: 7 of 76 (9.2%). These deals count for nothing in your pipeline value, so it looks smaller than it is, and you can't see what work is coming or weigh one deal against another. When enough are blank, nobody can tell how much of the pipeline rests on a few accounts or people. The total looks acceptable, but by record type, Renewal is at 45.5% (5 of 11).\n\nWhat good looks like: Require an amount, even an estimate, once a price is known, and fill in the gaps.\n\nWork on the deals listed in this finding.\n\nSteps:\n1. Build a report of open deals with no amount, by stage and owner.\n2. Add a validation rule that requires an amount from the stage where a price is known, in a sandbox first.\n3. Share the report so owners fill the gaps.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the deals this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- No open deal past that stage has an empty amount."
    },
    {
     "id": "f-dd5bb22bc57f",
@@ -14764,7 +14986,13 @@
      "worstSegmentRate": 66.7
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 2,
+     "high": 4,
+     "basis": "Building the report and the check that keeps it clean; the owners' time updating each record isn't counted."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Open deals with no activity in 90 days. Open deals with no logged activity in 90 days: 18 of 76 (23.7%). The total looks acceptable, but by rep, one person is at 66.7% (10 of 15).\n\nWhat good looks like: Review each quiet deal: either re-engage it or close it. Check that activity is being captured before treating this as a rep problem.\n\nWork on the deals listed in this finding.\n\nSteps:\n1. Check activity capture works first: email and calendar sync, and whether tasks are logged against deals.\n2. Build a report of open deals with no activity in 90 days, by owner.\n3. Share it for each owner to re-engage the deal or close it.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the deals this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- The report shrinks at each pipeline review."
    },
    {
     "id": "f-21634974044e",
@@ -14825,7 +15053,13 @@
      "rate": 6.6
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 2,
+     "high": 4,
+     "basis": "Building the report and the check that keeps it clean; the owners' time updating each record isn't counted."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Some open deals aren't linked to a customer. Open deals with no account: 5 of 76 (6.6%). Nobody looking at the customer sees them, and they're left out of every account-level report and figure.\n\nWhat good looks like: Link each deal to its account, and make the account required on new deals.\n\nWork on the deals this finding describes.\n\nSteps:\n1. Build a report of open deals with no account.\n2. Make the account required on the deal page layout and with a validation rule, in a sandbox first.\n3. Share the report for owners to link each deal.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the deals this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- No open deal lacks an account."
    },
    {
     "id": "f-25b0f97d807f",
@@ -14886,7 +15120,13 @@
      "rate": 44.1
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 2,
+     "high": 4,
+     "basis": "Adding the rule and agreeing a short list of reasons; past deals aren't filled in."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: You can't see why deals are being lost. Lost deals with no loss reason: 83 of 188 (44.1%). The worst rep is at 47.5%.\n\nWhat good looks like: Make a reason required when a deal is lost, and keep the list short enough to be used honestly.\n\nWork on the lost deals this finding describes.\n\nSteps:\n1. List the loss reason values and how often each is used.\n2. Propose a short list of reasons, and a validation rule that requires one when a deal is closed lost.\n3. Build it in a sandbox and test closing a deal with and without a reason.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the lost deals this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- A deal can't be closed lost without a reason."
    },
    {
     "id": "f-c18265b58f85",
@@ -14936,7 +15176,13 @@
      "worstObjectRate": 20
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 2,
+     "high": 6,
+     "basis": "Moving the records in bulk and adding a step to the leaver process."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Customer records belong to people who've left. Accounts, contacts and leads with an inactive owner: 190 of 1500 (Account: 50 of 500, Contact: 100 of 500, Lead: 40 of 500).\n\nWhat good looks like: Reassign these records in bulk, and make reassignment part of your leaver process.\n\nWork on the records this finding describes.\n\nSteps:\n1. Count accounts, contacts and leads owned by inactive users, by object.\n2. Agree new owners with the business, then transfer them in bulk.\n3. Add reassigning records to the leaver checklist.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the records this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- No account, contact or lead is owned by an inactive user."
    },
    {
     "id": "f-d025dd5a7154",
@@ -14992,7 +15238,13 @@
      "missing": 2
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 4,
+     "high": 8,
+     "basis": "About 2 to 4 hours for each object, for 2 objects."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Nothing stops duplicates on some core objects. Account and Contact have no active duplicate rule, so the same customer can be entered more than once.\n\nWhat good looks like: Turn on matching and duplicate rules, starting in alert mode so you can see the effect.\n\nThe objects involved: Account and Contact.\n\nSteps:\n1. For each object named, create a matching rule on the fields that identify a record, such as name and email.\n2. Create a duplicate rule that uses it, in alert mode, in a sandbox first.\n3. Watch the alerts for a few weeks before blocking.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the objects this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- Each object has an active duplicate rule, and creating a known duplicate shows an alert."
    },
    {
     "id": "f-285de8ff85a9",
@@ -15053,7 +15305,13 @@
      "total": 500
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 1,
+     "high": 1,
+     "basis": "About 15 to 30 minutes for each group, for 2 groups."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Some accounts look like duplicates. 5 accounts share their exact name with at least one other, in 2 groups: 1% of 500 accounts. Deals, contacts and activity split across the copies, so no one record shows the whole customer.\n\nWhat good looks like: Check each group, merge the true duplicates into the record with the most history, then turn on duplicate rules so new ones are caught.\n\nWork on the accounts this finding describes.\n\nSteps:\n1. For each group of accounts that share a name, compare their addresses, contacts, deals and owners.\n2. Mark the true duplicates and which record has the most history.\n3. Check integrations that hold the account's id before merging.\n4. Merge only the confirmed duplicates, then turn on a duplicate rule for accounts.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the accounts this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- The confirmed groups have one account each, and a new duplicate shows an alert."
    },
    {
     "id": "f-fbe95caa0dfa",
@@ -15125,7 +15383,13 @@
      "rate": 22
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 3,
+     "high": 6,
+     "basis": "Agreeing a follow-up rule by source and setting up the archive; the reps' follow-up time isn't counted."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Leads are going unworked. Open leads older than 90 days with no logged activity: 110 of 500 (22%). The worst source is Partner, at 83.3%.\n\nWhat good looks like: Agree a follow-up rule by source, and archive what's too old to work.\n\nWork on the leads listed in this finding.\n\nThis is a decision for people, not a change to the org. Do not change the org: prepare the analysis and the options so the people who own it can decide.\n\nSteps:\n1. Count open leads with no activity, by source and age.\n2. Propose a follow-up rule for each source and an age past which leads are archived or sent back to marketing.\n3. Prepare the list view or report that shows leads breaking the rule.\n\nDo not:\n- Change any setting, metadata or record in the org: this task is analysis only.\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the leads this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- The proposal covers every lead source."
    },
    {
     "id": "f-11b49e2f2c96",
@@ -15191,7 +15455,13 @@
      "emailRate": 16
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 3,
+     "high": 6,
+     "basis": "Building the report and the check that keeps it clean; the owners' time updating each record isn't counted."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Contact records are incomplete. Of 500 contacts, 20 (4%) have no account and 80 (16%) have no email address.\n\nWhat good looks like: Link orphaned contacts to accounts, and decide how missing emails get filled.\n\nWork on the contacts this finding describes.\n\nSteps:\n1. Build reports of contacts with no account and contacts with no email.\n2. Propose how orphaned contacts are matched to accounts, for example by email domain.\n3. Agree how missing emails get filled, and require an email on new contacts where that fits.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the contacts this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- The share of contacts with no account or email falls."
    },
    {
     "id": "f-affa5b9747b1",
@@ -15338,7 +15608,13 @@
      "noneRecent": 1
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 1,
+     "high": 4,
+     "basis": "Checking each record type's dependencies and deactivating the ones nobody needs."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Some record types have no records, or none made in the last 12 months. We could judge 5 record types of your own, on objects with at least 20 records made in the last 12 months. 1 has no records at all: Support on Case. 1 has records, but none made in the last 12 months: Credit Note on Invoice. An active record type is still offered to anyone whose profile has it, and its page layouts and picklist values still have to be kept up.\n\nWhat good looks like: Review 2 record types with the people who own Case and Invoice; we aren't recommending deactivating them, because we can't see which profiles default to them or which flows, Apex and integrations name them.\n\nThe record types involved: Support on Case and Credit Note on Invoice.\n\nSteps:\n1. Not every safety check passed, so do not remove, deactivate or merge anything: check what depends on each item and bring the list to the people who own them.\n2. For each record type, check which profiles and permission sets give it, which default to it, and which flows, Apex, validation rules and integrations name it.\n3. Confirm with the object's owner that it's no longer needed.\n4. Only when nothing depends on it, deactivate it in a sandbox, then in production.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the record types this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- The record types left active are the ones in use, and nothing that named a deactivated one fails."
    },
    {
     "id": "f-a97253b19335",
@@ -15525,7 +15801,13 @@
      "deals": 45
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 2,
+     "high": 4,
+     "basis": "Preparing the analysis and options for the people who decide, and making the agreed change; their time deciding isn't counted."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Win rate for one rep is well below the overall figure. Win rate is 8.9% for one rep (45 deals), against 47% overall, a gap of 38.1 points. This rep sells in the Sales EU team, which is also listed, so the two figures share deals.\n\nWhat good looks like: Look at what's different about these deals before drawing a conclusion: sample size, deal type and who's working them.\n\nWork on the deals listed in this finding.\n\nThis is a decision for people, not a change to the org. Do not change the org: prepare the analysis and the options so the people who own it can decide.\n\nSteps:\n1. For the segment named, compare its deals with the rest: deal size, type, record type, source and stage history.\n2. Check whether the sample is large enough to draw a conclusion.\n3. Prepare what's different and the options, without naming anyone.\n\nDo not:\n- Change any setting, metadata or record in the org: this task is analysis only.\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the deals this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- The analysis explains the gap or shows the sample is too small."
    },
    {
     "id": "f-98ad166c85f5",
@@ -15622,7 +15904,13 @@
      "deals": 88
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 2,
+     "high": 4,
+     "basis": "Preparing the analysis and options for the people who decide, and making the agreed change; their time deciding isn't counted."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Win rate for the Sales EU team is well below the overall figure. Win rate is 11.4% for the Sales EU team (88 deals), against 47% overall, a gap of 35.6 points.\n\nWhat good looks like: Look at what's different about these deals before drawing a conclusion: sample size, deal type and who's working them.\n\nWork on the deals listed in this finding.\n\nThis is a decision for people, not a change to the org. Do not change the org: prepare the analysis and the options so the people who own it can decide.\n\nSteps:\n1. For the segment named, compare its deals with the rest: deal size, type, record type, source and stage history.\n2. Check whether the sample is large enough to draw a conclusion.\n3. Prepare what's different and the options, without naming anyone.\n\nDo not:\n- Change any setting, metadata or record in the org: this task is analysis only.\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the deals this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- The analysis explains the gap or shows the sample is too small."
    },
    {
     "id": "f-895873994a98",
@@ -15719,7 +16007,13 @@
      "deals": 43
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 2,
+     "high": 4,
+     "basis": "Preparing the analysis and options for the people who decide, and making the agreed change; their time deciding isn't counted."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Win rate for one rep is well below the overall figure. Win rate is 14% for one rep (43 deals), against 47% overall, a gap of 33 points. This rep sells in the Sales EU team, which is also listed, so the two figures share deals.\n\nWhat good looks like: Look at what's different about these deals before drawing a conclusion: sample size, deal type and who's working them.\n\nWork on the deals listed in this finding.\n\nThis is a decision for people, not a change to the org. Do not change the org: prepare the analysis and the options so the people who own it can decide.\n\nSteps:\n1. For the segment named, compare its deals with the rest: deal size, type, record type, source and stage history.\n2. Check whether the sample is large enough to draw a conclusion.\n3. Prepare what's different and the options, without naming anyone.\n\nDo not:\n- Change any setting, metadata or record in the org: this task is analysis only.\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the deals this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- The analysis explains the gap or shows the sample is too small."
    },
    {
     "id": "f-6db7057c9087",
@@ -15829,7 +16123,13 @@
      "stages": 1
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 4,
+     "high": 8,
+     "basis": "Preparing the analysis and options for the people who decide, and making the agreed change; their time deciding isn't counted."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Won deals skip stages your process expects. 164 of 164 won deals we can follow through their stages (100%) never entered a stage we'd expect them to: Legal Review (164). The expected stages are the ones the calibration marks as required: Legal Review.\n\nWhat good looks like: Ask the teams that skip these stages why. Either the stage isn't part of how they sell, and it can go from their path, or it's being skipped in Salesforce, and the stage's exit criteria need agreeing.\n\nWork on the stages listed in this finding.\n\nThis is a decision for people, not a change to the org. Do not change the org: prepare the analysis and the options so the people who own it can decide.\n\nSteps:\n1. For each stage named, count won deals that skipped it, by team and record type.\n2. Set out whether it's part of how those teams sell.\n3. Prepare the options: remove the stage from their path, or agree its exit criteria.\n\nDo not:\n- Change any setting, metadata or record in the org: this task is analysis only.\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the stages this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- Each skipped stage has an agreed answer."
    },
    {
     "id": "f-e8e22d19763c",
@@ -15935,7 +16235,13 @@
      "twiceOrMore": 0
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 4,
+     "high": 8,
+     "basis": "Preparing the analysis and options for the people who decide, and making the agreed change; their time deciding isn't counted."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Deals often go back a stage. 118 of 421 deals that closed in the window (28%) went back to an earlier stage at least once. Highest: one rep, 37 of 55 (67.3%); team Sales EU, 73 of 110 (66.4%); another rep, 36 of 55 (65.5%). A deal moved forward too early makes the open pipeline look further on than it is.\n\nWhat good looks like: Agree what has to be true for a deal to leave each stage, and check new moves against it in pipeline reviews.\n\nWork on the stages listed in this finding.\n\nThis is a decision for people, not a change to the org. Do not change the org: prepare the analysis and the options so the people who own it can decide.\n\nSteps:\n1. From opportunity history, count moves back to an earlier stage, by stage and team.\n2. Draft exit criteria for each stage: what must be true before a deal moves on.\n3. Prepare a report that shows backward moves for pipeline reviews.\n\nDo not:\n- Change any setting, metadata or record in the org: this task is analysis only.\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the stages this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- The exit criteria and the report are ready for the sales leaders to agree."
    },
    {
     "id": "f-35c5621c736f",
@@ -16046,7 +16352,13 @@
      "waitedLonger": 63
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 2,
+     "high": 4,
+     "basis": "Setting a time limit for the stage and the report or alert that enforces it."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Lost deals wait in Prospecting before they're closed. 107 of 257 lost and no decision deals (41.6%) were last open in Prospecting, and spent a median of 47.8 days there. Three quarters of won deals left Prospecting within 23 days. 63 of these lost deals (58.9%) waited longer than that. Highest: lead source No lead source, 22 of 22 (100%); one rep, 29 of 38 (76.3%); team Sales UK, 61 of 80 (76.3%).\n\nWhat good looks like: Set a time limit for Prospecting from your won deals: past it, a deal is reviewed and either moved on with a dated next step or closed, so lost deals stop sitting in the pipeline.\n\nWork on the stage listed in this finding.\n\nSteps:\n1. From won deals, find how long three quarters of them spent in the stage named.\n2. Build a report or a scheduled flow that flags open deals in that stage past the limit for review.\n3. Test the flow in a sandbox.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the stage this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- Deals past the limit are flagged each week."
    },
    {
     "id": "f-0f0dc602129d",
@@ -16097,7 +16409,13 @@
      "target": 80
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 8,
+     "high": 16,
+     "basis": "Working through the high-risk settings and planning the rest, whatever their number."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Salesforce rates your security settings below target. Your Health Check score is 62. We use 80 as a working target, which is our judgement rather than a Salesforce threshold.\n\nWhat good looks like: Work through the high-risk settings first, because they carry the most weight in the score.\n\nWork on the security settings this finding describes.\n\nSteps:\n1. Open Security Health Check and list the settings marked high risk, then medium.\n2. For each, describe the standard value, what changes for users if it's applied, and any integration that could break.\n3. Apply the agreed changes in a sandbox first.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the security settings this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- The Health Check score rises, and no user or integration is locked out."
    },
    {
     "id": "f-6d2121b1992f",
@@ -16165,7 +16483,13 @@
      "settings": 5
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 4,
+     "high": 8,
+     "basis": "Bringing the high-risk settings up to standard and planning the medium ones."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: High-risk security settings need changing. Of 5 settings Salesforce checks, 2 are rated high risk and 1 medium risk.\n\nWhat good looks like: Bring the high-risk settings up to Salesforce's standard value, then plan the medium-risk ones.\n\nWork on the security settings listed in this finding.\n\nSteps:\n1. For each setting named, set out its current and standard values and who it affects.\n2. Plan the change, with notice for users where it changes how they log in.\n3. Apply it in a sandbox first.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the security settings this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- Each setting matches Salesforce's standard value, or has a recorded reason not to."
    },
    {
     "id": "f-f16b008899d5",
@@ -16238,7 +16562,13 @@
      "rate": 21.4
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 1,
+     "high": 2,
+     "basis": "About 1 to 2 hours for each person, for 1 person."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Modify All Data is held by people outside your admin team. Modify All Data: 3 of 14 active users (21.4%), 1 of them outside the admin profile and the accounts calibrated as admin or system. This overrides sharing, so one compromised or careless login can change or delete anything.\n\nWhat good looks like: Remove Modify All Data from anyone who doesn't need it, and give them the specific object access they do need.\n\nWork on the people listed in this finding.\n\nSteps:\n1. List the profiles and permission sets that grant Modify All Data to people outside the admin team.\n2. For each, find which objects they really need to edit.\n3. Build a permission set with only that access, assign it, and remove Modify All Data, in a sandbox first.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the people this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- Only admins and agreed system accounts hold Modify All Data, and the others can still do their work."
    },
    {
     "id": "f-120bb2725fdd",
@@ -16315,7 +16645,13 @@
      "rate": 28.6
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 2,
+     "high": 4,
+     "basis": "About 1 to 2 hours for each person, for 2 people."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: View All Data is held by people outside your admin team. View All Data: 4 of 14 active users (28.6%), 2 of them outside the admin profile and the accounts calibrated as admin or system. This overrides sharing, so these people can read and export every record.\n\nWhat good looks like: Remove View All Data from anyone who doesn't need it, and give them the specific object access they do need.\n\nWork on the people listed in this finding.\n\nSteps:\n1. List the profiles and permission sets that grant View All Data to people outside the admin team.\n2. For each, find which objects they really need to read.\n3. Build a permission set with only that access, assign it, and remove View All Data, in a sandbox first.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the people this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- Only admins and agreed system accounts hold View All Data, and the others can still see what they need."
    },
    {
     "id": "f-c23ade2bae1c",
@@ -16378,7 +16714,13 @@
      "objects": 4
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 8,
+     "high": 16,
+     "basis": "About 4 to 8 hours for each object, for 2 objects."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Everyone can edit some core records by default. Opportunity, Lead are public read/write, so every internal user can change those records. Salesforce's guidance is to set defaults at the most restrictive level the business can work with, then open access up with roles and sharing rules.\n\nWhat good looks like: Decide with the business who needs to edit these records. Small teams may choose this on purpose, and if so, record that decision.\n\nThe objects involved: Opportunity and Lead.\n\nThis is a decision for people, not a change to the org. Do not change the org: prepare the analysis and the options so the people who own it can decide.\n\nSteps:\n1. For each object named, set out its default access and who needs to edit its records.\n2. Draft the sharing rules, roles or teams that would give that access if the default were tightened.\n3. Note that tightening recalculates sharing and can change what people see, and prepare the options.\n\nDo not:\n- Change any setting, metadata or record in the org: this task is analysis only.\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the objects this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- Each object has an agreed default, or a recorded reason to keep it open."
    },
    {
     "id": "f-1b197375cbe7",
@@ -16470,7 +16812,13 @@
      "ownSets": 5
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 2,
+     "high": 4,
+     "basis": "Checking each unused profile and permission set and deleting the ones nobody needs."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Some profiles and permission sets aren't used by anyone. 1 of 2 custom profiles has no active users, and 1 of 5 permission sets of your own is held by nobody, directly or through a group. Each one is more to review whenever access changes, and an unused one can be given out again without anyone checking what it grants.\n\nWhat good looks like: Check each with whoever set it up, then delete the ones nobody needs, starting with any that grant wide access.\n\nWork on the profiles and permission sets listed in this finding.\n\nSteps:\n1. For each profile and permission set named, confirm no user holds it, and check it isn't named in flows, Apex or deployments.\n2. Check with whoever set it up.\n3. Delete the agreed ones, widest access first, in a sandbox first.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the profiles and permission sets this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- None of the agreed profiles or permission sets remains."
    },
    {
     "id": "f-32ac6d89f706",
@@ -16543,7 +16891,13 @@
      "profiles": 1
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 1,
+     "high": 1,
+     "basis": "About 30 to 60 minutes for each person, for 1 person."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Some people hold access nobody else on their profile has. 1 person holds a permission set that nobody else on their profile does: Report Builder (Standard User). Access given to one person for one job tends to stay after the job is done.\n\nWhat good looks like: Check with each person's manager whether they still need it, and remove it if not. If they do, write down why.\n\nWork on the access grants listed in this finding.\n\nSteps:\n1. For each grant listed, find the permission set or setting that gives it.\n2. Ask the person's manager whether it's still needed.\n3. Remove it where it isn't, and record why where it is.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the access grants this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- Every grant listed is removed or has a recorded reason."
    },
    {
     "id": "f-15fecea311de",
@@ -16622,7 +16976,13 @@
      "peopleShare": 8.3
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 4,
+     "high": 8,
+     "basis": "About 4 to 8 hours for each integration, for 1 integration."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Integrations look to be running on personal logins. 1 personal account made 6 API logins since 2026-08-02, through Partner Portal Sync. If that person leaves and the account is deactivated, the integration stops.\n\nWhat good looks like: Move each integration to its own integration account, with an API-only profile and only the access it needs.\n\nWork on the integrations listed in this finding.\n\nSteps:\n1. Find which integrations log in through the personal accounts listed, from login history and connected apps.\n2. For each, create an integration user with the Salesforce Integration licence, an API-only profile and a permission set with only the access it needs.\n3. Move the integration's credentials to it, in a sandbox first, and test every data flow.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the integrations this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- The integrations log in as their own accounts and no personal account has API logins."
    },
    {
     "id": "f-6cbf585d1f73",
@@ -16705,7 +17065,13 @@
      "loggedInByHand": 0
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 1,
+     "high": 1,
+     "basis": "About 30 to 60 minutes for each account, for 1 account."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Integration accounts can log in like a person. 1 of 1 integration account isn't set to API only, so anyone with the password can log in through the browser.\n\nWhat good looks like: Give each integration account the API Only User permission, through its profile or a permission set, so it can reach Salesforce only through the API.\n\nWork on the integration accounts listed in this finding.\n\nSteps:\n1. For each integration account listed, add the API Only User permission through its profile or a permission set.\n2. Test that the integration still connects.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the integration accounts this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- The accounts can't log in through the browser, and the integrations still run."
    },
    {
     "id": "f-4743a6b3d62e",
@@ -16792,7 +17158,13 @@
      "annualSaving": 1200
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 1,
+     "high": 2,
+     "basis": "About 1 to 2 hours for each account, for 1 account."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Integration accounts are using full Salesforce licences. 1 of 1 integration account holds a full Salesforce licence. The org has 5 Salesforce Integration licences unassigned, so it could move now and free the full seat. Salesforce's guidance for new integrations is an API-only profile on the Salesforce Integration licence.\n\nWhat good looks like: Move each integration account to the Salesforce Integration licence with an API-only profile, give it a permission set with only the access it needs, then reduce the full seats at renewal.\n\nWork on the integration accounts listed in this finding.\n\nSteps:\n1. For each account listed, create or convert an integration user on the Salesforce Integration licence with an API-only profile.\n2. Give it a permission set with only the access it needs.\n3. Move the integration in a sandbox first, test it, then reduce the full seats at renewal.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the integration accounts this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- The integrations run on integration licences, and the full seats are free."
    },
    {
     "id": "f-14c6f0fd6c9b",
@@ -16892,7 +17264,13 @@
      "withApiLogins": 1
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 1,
+     "high": 2,
+     "basis": "About 1 to 2 hours for each app, for 1 app."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Any user can authorise some connected apps. 1 of 2 connected apps let users authorise them for themselves, without an admin approving who can: Data Loader. Data Loader has had API logins since 2026-08-02, so it carries data now.\n\nWhat good looks like: Set each app to admin-approved users only, then give access through a permission set to the people and integration accounts that need it.\n\nThe connected apps involved: Data Loader.\n\nSteps:\n1. For each app named, list who has used it, from its OAuth usage.\n2. Set it to admin-approved users are pre-authorised.\n3. Give access through a permission set to the people and integration accounts that need it.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the connected apps this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- Only assigned users can use the apps, and the integrations still run."
    },
    {
     "id": "f-e2efe696aa92",
@@ -16952,7 +17330,13 @@
      "active": 1
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 1,
+     "high": 4,
+     "basis": "Moving each site to HTTPS and turning off the mixed-protocol setting."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Some remote sites can send data over plain HTTP. 1 active remote site is set to let code pass data between HTTPS and HTTP: api.finance.example.com. Data sent over HTTP isn't encrypted on the way.\n\nWhat good looks like: Move each site to HTTPS and turn off the setting that lets code mix HTTPS and HTTP. If a site can't do HTTPS, ask whether Salesforce should be calling it at all.\n\nThe remote sites involved: api.finance.example.com.\n\nSteps:\n1. For each remote site named, check whether the address works over HTTPS.\n2. Change it to HTTPS and turn off the setting that lets code mix HTTPS and HTTP.\n3. Test every callout to it in a sandbox.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the remote sites this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- Every remote site uses HTTPS and callouts still work."
    },
    {
     "id": "f-ba051e2b4a1b",
@@ -17023,7 +17407,13 @@
      "addresses": 1
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 2,
+     "high": 4,
+     "basis": "About 2 to 4 hours for each address, for 1 address."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Some code calls other systems at addresses written into it. 1 of 2 classes that set a callout address writes it into the code rather than using a named credential, 1 address in all. Each change of address then needs a code release, and the login for the other system has to be kept somewhere else. Salesforce's guidance is to manage callouts' authentication centrally through named credentials.\n\nWhat good looks like: Move each address into a named credential, with its authentication in an external credential, and call it with callout: in the code.\n\nWork on the Apex classes listed in this finding.\n\nSteps:\n1. Find each callout address written into the code named.\n2. Create a named credential for it, with its authentication in an external credential.\n3. Change the code to call it with callout: and the credential's name, and test in a sandbox.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the Apex classes this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- No callout address is written into code, and each callout still works."
    },
    {
     "id": "f-49f3f62d89cb",
@@ -17080,7 +17470,13 @@
      "DailyAsyncApexExecutionsShare": 88
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 4,
+     "high": 16,
+     "basis": "Finding which integrations and jobs use the most and planning the cuts; changing them is more."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: The org is using up most of a daily allowance. When we connected, the org had used 88% of its daily asynchronous Apex runs (220,000 of 250,000). Past an allowance, Salesforce can refuse further calls or jobs until use falls back, and the integrations that depend on them stop.\n\nWhat good looks like: Find which integrations and jobs use the most, then cut repeats: combine calls, and use bulk loads or change events for large volumes.\n\nWork on the integrations and jobs listed in this finding.\n\nSteps:\n1. From the API usage and event logs you can see, list which users, apps and jobs make the most calls.\n2. Find repeats: calls that could be combined, polled less often, or moved to bulk loads or change events.\n3. Propose the changes with their owners.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the integrations and jobs this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- Daily use falls below the warning line."
    },
    {
     "id": "f-fc01ab6a9fcf",
@@ -17151,7 +17547,13 @@
      "days": 7
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 4,
+     "high": 8,
+     "basis": "About 2 to 4 hours for each class, for 2 classes."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Background jobs are failing. 3 of 7 asynchronous Apex jobs failed in the last 7 days, and 1 batch job finished with errors in some of its records: LegacySync 3, FinanceSync 1. The work these jobs should have done didn't happen, and failures like these often go unnoticed until someone finds the data wrong.\n\nWhat good looks like: Find out why each job failed and fix the cause, then send failures to someone who will act on them.\n\nThe Apex classes involved: LegacySync and FinanceSync.\n\nSteps:\n1. For each class named, read the failed jobs' errors.\n2. Find and fix the cause in a sandbox, with a test that reproduces it.\n3. Send future failures to someone who will act on them.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the Apex classes this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- The jobs run without failing, and a failure reaches a person."
    },
    {
     "id": "f-f406fade1c57",
@@ -17220,7 +17622,13 @@
      "rate": 18.2
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 1,
+     "high": 1,
+     "basis": "About 10 to 20 minutes for each user, for 2 users."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Some people sit outside the role hierarchy. People with no role: 2 of 11 (18.2%). Their deals won't roll up to a manager's forecast. Salesforce's position: The forecast hierarchy is generated from the role hierarchy, and role-based sharing and reporting rely on it too. Source: Salesforce Forecasts documentation, checked 2026-11-02.\n\nWhat good looks like: Give each of these people a role, or confirm with the business that they don't sell or need to see team data.\n\nWork on the users listed in this finding.\n\nSteps:\n1. List active users with no role, with their profile.\n2. Agree a role for each with the business, or confirm they don't need one.\n3. Assign the agreed roles.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the users this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- Every user who sells or needs team data has a role."
    },
    {
     "id": "f-4f363abaa18a",
@@ -17281,7 +17689,13 @@
      "limit": 10000
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 4,
+     "high": 8,
+     "basis": "About 4 to 8 hours for each owner and object, for 1 owner and object."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: A few owners hold enough records to slow sharing changes. 1 owner and object pair above 10,000 records. The largest is 12,000 Invoice records. Salesforce's position: A single user or queue owning more than 10,000 records of one object is ownership data skew, which can cause long-running sharing recalculations. Spread ownership across more users. Source: Designing Record Access for Enterprise Scale, checked 2026-11-02.\n\nWhat good looks like: Spread these records across more owners. If one owner has to stay, keep it out of the role hierarchy's lower levels and out of public groups used in sharing rules.\n\nWork on the records listed in this finding.\n\nSteps:\n1. For each owner and object named, find why one owner holds so many records.\n2. Propose how to spread them across more owners, or where to place the owner in the role hierarchy and sharing groups if it has to stay.\n3. Make the change in a sandbox first, at a quiet time.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the records this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- No owner holds more than 10,000 records of one object, or the owner is placed as Salesforce advises."
    },
    {
     "id": "f-c36f89339e68",
@@ -17339,7 +17753,13 @@
      "afterSaveFlows": 1
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 2,
+     "high": 4,
+     "basis": "About 2 to 4 hours for each flow, for 1 flow."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Flows are doing same-record updates the slow way. 1 active after-save flow of 1 updates the record that triggered it. Salesforce's position: Same-record field updates belong in a before-save flow or trigger. They're much faster there, and Salesforce most strongly recommends keeping them out of after-save automation. Source: Salesforce Architects, Record-Triggered Automation decision guide, checked 2026-11-02.\n\nWhat good looks like: Move the same-record updates to a before-save flow. Keep the rest of the flow where it is if it needs after-save actions.\n\nWork on the flows listed in this finding.\n\nSteps:\n1. In each flow named, find the updates to the record that started it.\n2. Move them to a before-save flow on the same object, leaving after-save actions where they are.\n3. Test in a sandbox with single and bulk saves.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the flows this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- The flows no longer update their own record after save, and records end up the same."
    },
    {
     "id": "f-004401da42bd",
@@ -17395,7 +17815,13 @@
      "total": 3
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 1,
+     "high": 1,
+     "basis": "About 30 to 60 minutes for each job, for 1 job."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Scheduled jobs belong to people who've left. Scheduled jobs owned by an inactive user: 1 of 3. Salesforce's position: A scheduled job runs as the user who scheduled it, so a job left on a deactivated user can fail. Source: Salesforce community and vendor support articles, checked 2026-11-02, from secondary sources.\n\nWhat good looks like: Check each job is still running, then reschedule it under a dedicated account.\n\nWork on the scheduled jobs listed in this finding.\n\nSteps:\n1. List scheduled jobs owned by inactive users, with what each runs and when.\n2. Check each is still running and still needed.\n3. Reschedule the needed ones under a dedicated account, then remove the old schedule.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the scheduled jobs this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- No scheduled job belongs to an inactive user, and each runs on time."
    },
    {
     "id": "f-3681950f1587",
@@ -17490,7 +17916,13 @@
      "worstSegmentRate": 100
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 2,
+     "high": 4,
+     "basis": "Building the report and the check that keeps it clean; the owners' time updating each record isn't counted."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Deals are sitting in stages for longer than your wins do. Open deals that have been in their stage longer than three quarters of your won deals took: 59 of 70 (84.3%). 6 more open deals couldn't be compared, as they're in stages with too few won deals to set a line. The worst rep is at 100%.\n\nWhat good looks like: Go through these in pipeline reviews, and either move each deal on with a dated next step or close it.\n\nWork on the deals listed in this finding.\n\nSteps:\n1. Build a report of open deals in their stage longer than three quarters of won deals took, by stage and owner.\n2. Add it to the pipeline review, where each deal is moved on with a dated next step or closed.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the deals this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- The report shrinks at each review."
    },
    {
     "id": "f-95bb8063e304",
@@ -17569,7 +18001,13 @@
      "worstSegmentRate": 60
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 2,
+     "high": 4,
+     "basis": "Building the report and the check that keeps it clean; the owners' time updating each record isn't counted."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Open deals with no stage change or activity in 30 days. Open deals with no stage change and no logged activity in 30 days: 16 of 76 (21.1%). The total looks acceptable, but by rep, one person is at 60% (9 of 15).\n\nWhat good looks like: Check that activity is being captured, then re-engage these deals or close them.\n\nWork on the deals listed in this finding.\n\nSteps:\n1. Check activity capture works first.\n2. Build a report of open deals with no stage change and no activity in 30 days, by owner.\n3. Share it for owners to re-engage each deal or close it.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the deals this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- The report shrinks at each review."
    },
    {
     "id": "f-c1ff66b9d5b8",
@@ -17640,7 +18078,13 @@
      "rate": 18.4
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 2,
+     "high": 4,
+     "basis": "Building the report or alert that flags a second push for a manager."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Close dates are being pushed again and again. Open deals whose close date has moved later 2 or more times: 14 of 76 (18.4%). A date that keeps moving usually means the deal isn't really on track.\n\nWhat good looks like: Treat a second push as a trigger for a manager to review the deal.\n\nWork on the deals this finding describes.\n\nSteps:\n1. From opportunity field history, find deals whose close date moved more than once.\n2. Build a report, or a flow that alerts the manager, when a close date is pushed a second time.\n3. Test the flow in a sandbox.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the deals this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- A second push reaches a manager."
    },
    {
     "id": "f-c22921b39a0c",
@@ -17721,7 +18165,13 @@
      "worstSegmentRate": 100
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 2,
+     "high": 4,
+     "basis": "Building the report and the check that keeps it clean; the owners' time updating each record isn't counted."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Deals are missing a next step. Open deals with an empty next step: 21 of 76 (27.6%). The total looks acceptable, but by rep, one person is at 100% (15 of 15).\n\nWhat good looks like: Make a next step part of how a deal stays in the forecast, and check it in pipeline reviews.\n\nWork on the deals listed in this finding.\n\nSteps:\n1. Build a report of open deals with an empty next step.\n2. Consider a validation rule that requires a next step from an agreed stage, in a sandbox first.\n3. Add the report to pipeline reviews.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the deals this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- No open deal past that stage lacks a next step."
    },
    {
     "id": "f-bc8418edfdf5",
@@ -17788,7 +18238,13 @@
      "keys": 56
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 2,
+     "high": 4,
+     "basis": "Preparing the analysis and options for the people who decide, and making the agreed change; their time deciding isn't counted."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Too much of your pipeline rests on one account. One account holds 26.1% of open pipeline. If that relationship stalls, the number goes with it.\n\nWhat good looks like: Check how much of this is real, then build pipeline elsewhere so one account can't decide the quarter.\n\nWork on the pipeline listed in this finding.\n\nThis is a decision for people, not a change to the org. Do not change the org: prepare the analysis and the options so the people who own it can decide.\n\nSteps:\n1. Show how open pipeline splits across accounts, and how much the largest holds by stage and close date.\n2. Set out how much of it is likely, from stage and history.\n3. Prepare options for building pipeline elsewhere.\n\nDo not:\n- Change any setting, metadata or record in the org: this task is analysis only.\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the pipeline this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- The analysis shows the exposure and the options."
    },
    {
     "id": "f-b09ed6241d31",
@@ -17934,7 +18390,13 @@
      "shortfall": 2785000
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 2,
+     "high": 4,
+     "basis": "Preparing the analysis and options for the people who decide, and making the agreed change; their time deciding isn't counted."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: There isn't enough pipeline to cover this quarter's quota. Open pipeline closing this quarter is 0.68 times what's left of quota, against our working target of 3. Quota £1,200,000, won £0, open £815,000.\n\nWhat good looks like: Decide this month whether to build more pipeline or reset the number. Coverage can't be fixed in the last weeks of a quarter.\n\nWork on the pipeline listed in this finding.\n\nThis is a decision for people, not a change to the org. Do not change the org: prepare the analysis and the options so the people who own it can decide.\n\nSteps:\n1. Show this quarter's quota, won and open pipeline by team.\n2. Set out the shortfall against the coverage target.\n3. Prepare the options: build more pipeline, or reset the number.\n\nDo not:\n- Change any setting, metadata or record in the org: this task is analysis only.\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the pipeline this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- The leaders have the figures and options to decide this month."
    },
    {
     "id": "f-daec419b19ed",
@@ -18084,7 +18546,13 @@
      "limit": 20
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 2,
+     "high": 4,
+     "basis": "Preparing the analysis and options for the people who decide, and making the agreed change; their time deciding isn't counted."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Much of the Commit forecast comes from hand adjustments. Hand adjustments move the Commit forecast by 50% of its unadjusted amount, across 1 person. The difference is judgement that isn't backed by a deal in Salesforce.\n\nWhat good looks like: Ask for a reason behind each large adjustment, and check whether the deals should be recorded differently.\n\nWork on the forecast adjustments listed in this finding.\n\nThis is a decision for people, not a change to the org. Do not change the org: prepare the analysis and the options so the people who own it can decide.\n\nSteps:\n1. Summarise the size of hand adjustments to the Commit forecast by period, without naming anyone.\n2. Compare the adjusted figures with what closed.\n3. Prepare a simple way to record the reason behind each large adjustment.\n\nDo not:\n- Change any setting, metadata or record in the org: this task is analysis only.\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the forecast adjustments this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- The analysis and the proposal are ready for the sales leaders."
    },
    {
     "id": "f-bb3a02927e55",
@@ -18140,7 +18608,13 @@
      "rate": 25
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 1,
+     "high": 1,
+     "basis": "About 15 to 30 minutes for each owner, for 1 owner."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Some deal owners have no quota. Active users who own open deals but have no quota this period: 1 of 4 (25%). Their deals count towards the forecast with nothing to measure them against.\n\nWhat good looks like: Load a quota for each person who carries a number, or move their deals to someone who does.\n\nWork on the deal owners listed in this finding.\n\nSteps:\n1. List active users who own open deals but have no quota this period.\n2. Agree with sales leadership who carries a number.\n3. Load their quotas, or move their deals to someone who does.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the deal owners this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- Every owner of an open deal has a quota, or their deals have moved."
    },
    {
     "id": "f-be443039ef97",
@@ -18221,7 +18695,13 @@
      "rate": 22.2
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 1,
+     "high": 3,
+     "basis": "Building the report and the check that keeps it clean; the owners' time updating each record isn't counted."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Your Commit forecast includes deals showing warning signs. Deals in Commit that are past their close date, quiet for 30 days, or pushed 2 or more times: 2 of 9 (22.2%).\n\nWhat good looks like: Review each one before the next forecast call, and move it out of Commit unless there's a dated reason to keep it.\n\nWork on the deals this finding describes.\n\nSteps:\n1. Build a report of Commit deals with warning signs: a past or pushed close date, no recent activity or no next step.\n2. Add it to the forecast call for each deal to keep a dated reason or leave Commit.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the deals this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- Each committed deal has a dated reason or has left Commit."
    },
    {
     "id": "f-0bc8c0f09ddf",
@@ -18302,7 +18782,13 @@
      "rate": 11.1
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 1,
+     "high": 3,
+     "basis": "Building the report and the check that keeps it clean; the owners' time updating each record isn't counted."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Early-stage deals are being counted as Commit. Deals in Commit that are still in the first 2 open stages: 1 of 9 (11.1%).\n\nWhat good looks like: Check whether these are real commitments. If they are, the stage is out of date. If not, take them out of Commit.\n\nWork on the deals this finding describes.\n\nSteps:\n1. Build a report of Commit deals in early stages.\n2. Consider a validation rule that stops early-stage deals being marked Commit, in a sandbox first.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the deals this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- No deal in an early stage is in Commit."
    },
    {
     "id": "f-0fd6ec761434",
@@ -18399,7 +18885,13 @@
     "notMeasurableReason": null,
     "manualStepIds": [
      "ms-eac-advanced-sync"
-    ]
+    ],
+    "effortHours": {
+     "low": 2,
+     "high": 6,
+     "basis": "Finding what changed when the drop began and correcting the set-up."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Events have stopped being linked to your deals. Events linked to a record fell from 73.6% to 5.6% in the last 3 whole months. Total events held steady, so a monthly total won't show this: events are still arriving, but they aren't reaching the records they belong to.\n\nWhat good looks like: Find what changed when the drop began. Check Einstein Activity Capture's Relate Synced Events setting, and any change to how calendars sync.\n\nWork on the events listed in this finding.\n\nSteps:\n1. Find what changed when the drop began: Einstein Activity Capture settings, calendar sync, or a new tool.\n2. Check the Relate Synced Events setting.\n3. Correct the set-up in a sandbox first where you can.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the events this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- New events link to records at the rate they did before the drop."
    },
    {
     "id": "f-082e574e640b",
@@ -18494,7 +18986,13 @@
      "worstSegmentRate": 84.2
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 4,
+     "high": 8,
+     "basis": "Agreeing what's worth recording and setting up capture or the steps to log it."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Deals are closing with nothing logged against them. Won and lost deals with no task, event or email against them: 24 of 133 (18%). This usually reflects process rather than effort: when logging isn't expected and nothing captures email or meetings automatically, the work happens but Salesforce never sees it. The cost is that nobody can look back at how a deal was won or why it was lost. The total looks acceptable, but by rep, one person is at 84.2% (16 of 19).\n\nWhat good looks like: Agree the few moments worth recording on a deal, such as the first meeting and the proposal going out, or turn on automatic capture.\n\nWork on the deals listed in this finding.\n\nThis is a decision for people, not a change to the org. Do not change the org: prepare the analysis and the options so the people who own it can decide.\n\nSteps:\n1. Show the share of won and lost deals with no activity, by team.\n2. Propose the few moments worth recording on a deal, or automatic capture of email and calendar.\n3. Prepare how each would be set up.\n\nDo not:\n- Change any setting, metadata or record in the org: this task is analysis only.\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the deals this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- The proposal is ready for the sales leaders."
    },
    {
     "id": "f-927b79b90213",
@@ -18616,7 +19114,13 @@
      "low": 1
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 1,
+     "high": 3,
+     "basis": "Checking the email and calendar connections and preparing the comparison."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Some reps are logging far less than their peers. 1 rep logged under 25% of the typical 9.435 activities per open deal in the last 90 days. This may be a logging gap rather than a performance one.\n\nWhat good looks like: Check their email and calendar connections first, then look at how they're working these deals.\n\nWork on the reps listed in this finding.\n\nSteps:\n1. Check each listed user's email and calendar connection and activity capture settings.\n2. Fix any broken connection.\n3. Prepare a comparison of logged activity by deal, without naming anyone, for the manager.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the reps this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- Connections are healthy, and the gap is explained."
    },
    {
     "id": "f-ce0d6183e490",
@@ -18680,7 +19184,13 @@
      "rate": 2.9
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 2,
+     "high": 4,
+     "basis": "Finding which tools create unlinked tasks and fixing them."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Tasks are being logged against nothing. Tasks linked to no record: 32 of 1117 (2.9%). The worst rep is at 80%. This work won't show on any deal, contact or account.\n\nWhat good looks like: Show these people how to log against the deal, and check any tool that's creating tasks automatically.\n\nWork on the tasks listed in this finding.\n\nSteps:\n1. Find which tools or automations create tasks with no related record.\n2. Fix those that can link to the right record.\n3. Prepare a short note on logging against the deal.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the tasks this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- The share of unlinked tasks falls."
    },
    {
     "id": "f-175abb4a45c6",
@@ -18739,7 +19249,13 @@
      "worstLeads": 60
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 2,
+     "high": 4,
+     "basis": "Preparing the analysis and options for the people who decide, and making the agreed change; their time deciding isn't counted."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Some lead sources barely convert. 26.7% of leads convert overall, but Partner converts 5% of 60 leads.\n\nWhat good looks like: Find out whether these leads are poor or just poorly handled before changing what you spend on the source.\n\nWork on the lead sources listed in this finding.\n\nThis is a decision for people, not a change to the org. Do not change the org: prepare the analysis and the options so the people who own it can decide.\n\nSteps:\n1. For the source named, compare conversion, response time and follow-up with other sources.\n2. Set out whether the leads are poor or poorly handled.\n3. Prepare the options.\n\nDo not:\n- Change any setting, metadata or record in the org: this task is analysis only.\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the lead sources this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- The analysis is ready for marketing and sales."
    },
    {
     "id": "f-c2f23b35c18a",
@@ -18808,7 +19324,13 @@
      "worstHours": 166
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 2,
+     "high": 6,
+     "basis": "Setting a response rule by source and the routing or alert behind it."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Some leads wait days for a first response. The median first response is 13 hours. Partner leads wait 166 hours. Our working targets are 24 hours overall and 72 for any segment.\n\nWhat good looks like: Set a response rule by source, and route the slow ones to someone who can meet it.\n\nWork on the lead sources listed in this finding.\n\nSteps:\n1. Show the median time to first response by source.\n2. Propose a response target for each source.\n3. Set up routing or an alert so slow sources reach someone who can meet it, in a sandbox first.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the lead sources this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- Response time for each source is within its target."
    },
    {
     "id": "f-400eb5ce6f9e",
@@ -18881,7 +19403,13 @@
      "rate": 7.4
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 2,
+     "high": 4,
+     "basis": "Checking routing and fixing the rules that leave leads unworked."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Leads are going unanswered. Leads with no logged response after 7 days: 15 of 202 (7.4%). Worst by source: Event, at 41.4%.\n\nWhat good looks like: Check routing first: unassigned or queue-held leads are the usual cause.\n\nWork on the leads listed in this finding.\n\nSteps:\n1. List leads with no response, by source, owner type and queue.\n2. Check the lead assignment rules and queues that hold them.\n3. Fix the routing in a sandbox first.\n\nDo not:\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the leads this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- New leads are assigned to someone and get a response."
    },
    {
     "id": "f-fd8341508b1e",
@@ -18951,7 +19479,13 @@
      "rate": 20.8
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 1,
+     "high": 3,
+     "basis": "Preparing the analysis and options for the people who decide, and making the agreed change; their time deciding isn't counted."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Converted leads aren't becoming opportunities. Converted with no opportunity: 20 of 96 (20.8%). Worst by source: Referral, at 77.8%. Conversion looks better than the pipeline it produced.\n\nWhat good looks like: Agree when a lead should be converted. If it's only to tidy up, take these out of your conversion figures.\n\nWork on the leads listed in this finding.\n\nThis is a decision for people, not a change to the org. Do not change the org: prepare the analysis and the options so the people who own it can decide.\n\nSteps:\n1. Show converted leads with no opportunity, by source and owner type.\n2. Propose when a lead should be converted, and how tidy-up conversions are kept out of conversion figures.\n\nDo not:\n- Change any setting, metadata or record in the org: this task is analysis only.\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the leads this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- The rule is ready for sales and marketing to agree."
    },
    {
     "id": "f-715dff963bf8",
@@ -19011,7 +19545,13 @@
      "wonFromLeads": 2561000
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 2,
+     "high": 4,
+     "basis": "Preparing the analysis and options for the people who decide, and making the agreed change; their time deciding isn't counted."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Some lead sources have produced no wins. Partner brought in 60 leads and no won deals, against £2,561,000 won from other sources.\n\nWhat good looks like: Check how these leads are handled, then decide whether the source is worth keeping.\n\nWork on the lead sources listed in this finding.\n\nThis is a decision for people, not a change to the org. Do not change the org: prepare the analysis and the options so the people who own it can decide.\n\nSteps:\n1. For the source named, show leads, conversions and won value.\n2. Check how its leads are handled.\n3. Prepare the options for keeping or dropping it.\n\nDo not:\n- Change any setting, metadata or record in the org: this task is analysis only.\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the lead sources this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- The analysis is ready for marketing."
    },
    {
     "id": "f-be343cc685b7",
@@ -19085,7 +19625,13 @@
      "types": 1
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 2,
+     "high": 4,
+     "basis": "Preparing the analysis and options for the people who decide, and making the agreed change; their time deciding isn't counted."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Some campaign spend isn't coming back. Trade Show cost £900,000 and returned £585,000 in won deals from its leads.\n\nWhat good looks like: Check the attribution first, because deals with contacts on a campaign aren't counted here. Then decide whether to keep this spend.\n\nWork on the campaign types listed in this finding.\n\nThis is a decision for people, not a change to the org. Do not change the org: prepare the analysis and the options so the people who own it can decide.\n\nSteps:\n1. For the campaign type named, show spend against won value.\n2. Check the attribution: contacts on a campaign whose deals aren't counted.\n3. Prepare the options for the spend.\n\nDo not:\n- Change any setting, metadata or record in the org: this task is analysis only.\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the campaign types this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- The analysis is ready for marketing."
    },
    {
     "id": "f-1c492eee16b7",
@@ -19155,7 +19701,13 @@
      "sized": 54991
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 2,
+     "high": 4,
+     "basis": "Preparing the analysis and options for the people who decide, and making the agreed change; their time deciding isn't counted."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Open deals with no stage change or activity in 60 days. 11 open deals of 76 (14.5%) haven't changed stage or had activity in 60 days.\n\nWhat good looks like: Give each owner a date to re-engage or close these. The ones that come back are the cheapest revenue you have.\n\nWork on the deals this finding describes.\n\nThis is a decision for people, not a change to the org. Do not change the org: prepare the analysis and the options so the people who own it can decide.\n\nSteps:\n1. List the stalled open deals, by owner and amount, without naming anyone.\n2. Prepare a plan to give each owner a date to re-engage or close them.\n\nDo not:\n- Change any setting, metadata or record in the org: this task is analysis only.\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the deals this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- Each stalled deal has a date."
    },
    {
     "id": "f-ae46e1f2d773",
@@ -19230,7 +19782,13 @@
      "sized": 811690
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 2,
+     "high": 4,
+     "basis": "Preparing the analysis and options for the people who decide, and making the agreed change; their time deciding isn't counted."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: You have past deals worth going back to. 48 deals lost or left undecided 6 to 18 months ago sit on accounts with nothing open and no win since. 12 of them never reached a decision.\n\nWhat good looks like: Start with the no decision deals, where nothing was lost to a competitor, and check why each one stopped.\n\nWork on the lost deals this finding describes.\n\nThis is a decision for people, not a change to the org. Do not change the org: prepare the analysis and the options so the people who own it can decide.\n\nSteps:\n1. List the lost and no decision deals worth another look, no decision first.\n2. Summarise why each group stopped, from loss reasons and history.\n3. Prepare a plan for checking each one.\n\nDo not:\n- Change any setting, metadata or record in the org: this task is analysis only.\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the lost deals this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- The plan is ready for the sales leaders."
    },
    {
     "id": "f-eb4696bec671",
@@ -19295,7 +19853,13 @@
      "sized": 655180
     },
     "notMeasurableReason": null,
-    "manualStepIds": []
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 2,
+     "high": 4,
+     "basis": "Preparing the analysis and options for the people who decide, and making the agreed change; their time deciding isn't counted."
+    },
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Past customers have gone quiet. 41 accounts of 80 that have bought from you have nothing open and no activity in 90 days. 9 of them belong to inactive users, so nobody owns the relationship.\n\nWhat good looks like: Agree who owns these accounts, and start with a light check-in rather than a pitch.\n\nWork on the accounts this finding describes.\n\nThis is a decision for people, not a change to the org. Do not change the org: prepare the analysis and the options so the people who own it can decide.\n\nSteps:\n1. List past customers with no recent activity, with their last deal and whether their owner is active.\n2. Prepare a plan for who owns them and how to check in.\n\nDo not:\n- Change any setting, metadata or record in the org: this task is analysis only.\n- Delete or deactivate anything until you have checked what depends on it: flows, Apex, validation rules, page layouts, reports, list views, sharing rules and integrations.\n- Make a change in production first: work in a sandbox, test it, then deploy.\n- Change anything outside the accounts this finding is about.\n- Put anyone's name, email or record details in what you write back.\n\nTo check it worked:\n- Each account has an owner and a next step."
    }
   ],
   "metrics": [

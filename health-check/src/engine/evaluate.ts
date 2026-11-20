@@ -3,6 +3,7 @@ import type { DomainModule } from "../domains/types.ts";
 import type { Extractor } from "../extract/types.ts";
 import { Pseudonymiser, UNKNOWN_USER } from "../privacy/pseudonymiser.ts";
 import { DESTRUCTIVE_RECOMMENDATIONS, Finding, Metric, type Calibration, type DateRange, type Evidence, type ManualAnswer, type ManualStep, type RunScope } from "../schemas/index.ts";
+import { fixFields } from "../fix/index.ts";
 import { MANUAL_STEPS } from "./manual-steps.ts";
 import { notMeasurableKind } from "./not-measurable.ts";
 import type { IssueResult, ManualState, RecordList, Rule, RuleContext, RuleResult } from "./rule.ts";
@@ -121,7 +122,12 @@ function toFinding(rule: Rule, result: RuleResult, pseudonyms: Pseudonymiser, as
     };
   }
   // A last pass over the text, in case a rule let a name through.
-  return Finding.parse(pseudonyms.scrubDeep(draft));
+  const scrubbed = pseudonyms.scrubDeep(draft) as Finding;
+  if (result.outcome !== "issue") return Finding.parse(scrubbed);
+  // Hours to fix and a fix prompt (DECISIONS.md 628), from the scrubbed text, so a
+  // prompt is built from what the finding says and nothing the scrub took out.
+  const blocked = DESTRUCTIVE_RECOMMENDATIONS.has(result.recommendationType) && scrubbed.recommendationType !== result.recommendationType;
+  return Finding.parse({ ...scrubbed, ...fixFields(rule.id, scrubbed, pseudonyms, { blocked }) });
 }
 
 function engineEvidence(ruleId: string, note: string, now: Date): Evidence {
