@@ -9,13 +9,14 @@ import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { BASELINE_OVERRIDES_FILE, BASELINE_READ_FILE, INTERVIEWS_FILE, loadRun, OUTPUT_FILES, SURVEY_FILE, writeBaselineRead, writeRows } from "../render/render-run.ts";
 import { BASELINE_ROWS_UNREAD, baselineRefusedSummary } from "../render/render-released.ts";
 import { INTERVIEW_VERSION } from "../interviews/questions.ts";
-import { OAuthConnectionProvider, revokeConnection } from "../salesforce/oauth-provider.ts";
+import { OAuthConnectionProvider, ReconnectionNeeded, revokeConnection } from "../salesforce/oauth-provider.ts";
 import { OAuthError } from "../salesforce/oauth.ts";
 import { buildScanResult } from "../scan/result.ts";
 import { buildPulseResult } from "../pulse/result.ts";
 import { deleteRunFolder } from "../retention/purge.ts";
 import type { StoredConnection } from "../salesforce/token-store.ts";
 import { safeReason, type Attempt, type JobOutcome, type WorkerDeps } from "./deps.ts";
+import { appFor, appNotSetUp, needsReconnection } from "./apps.ts";
 import { withJobLock } from "./lock.ts";
 import { progressOf, RunClosedError, type RunJobInput } from "./types.ts";
 import { withoutComments } from "../survey/questions.ts";
@@ -162,7 +163,11 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
   const dir = join(deps.runsDir, runId);
   const resume = existsSync(join(dir, "run.json")) ? runId : undefined;
   const modules = modulesForRun(input.run.modules, deps.modules ?? ALL_MODULES);
-  const provider = new OAuthConnectionProvider(name, { store: deps.tokens, client: deps.oauthClient, transport: deps.oauthTransport, env: approvedFromConsole(name) });
+  // The app the connection was made with, and no other (DECISIONS.md 616). One the worker no
+  // longer has fails now, before anything is sent: no retry could bring it back.
+  const app = stored.grant === "web-server" ? appFor(stored.clientId, deps) : deps.oauthClient;
+  if (!app) return fail(appNotSetUp(name));
+  const provider = new OAuthConnectionProvider(name, { store: deps.tokens, client: app, transport: deps.oauthTransport, env: approvedFromConsole(name) });
   const secrets = [stored.accessToken, stored.refreshToken];
   // A health check or essentials run only, with Claude to ask: a scan and a
   // pulse never keep code, and nor does a worker that can't send it anywhere (DECISIONS.md 492).
@@ -210,11 +215,16 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
       },
     });
   } catch (err) {
+    // Salesforce has ended the connection: only the admin signing in again helps, so no retry (DECISIONS.md 617).
+    if (err instanceof ReconnectionNeeded || provider.lostAccess) return fail(needsReconnection(name));
     const reason = safeReason(err, secrets);
     // The engine resumes from its checkpoints, so another delivery is cheap and safe.
     if (!attempt.final) throw new Error(reason);
     return fail(`The run stopped with an error: ${reason}`);
   }
+
+  // Refused part way through: the reads after it came back unread, so these results aren't the org's.
+  if (provider.lostAccess) return fail(needsReconnection(name));
 
   if (result.run.status === "stopped_budget") {
     return { outcome: "stopped_budget", detail: result.run.budget.stoppedReason ?? "Stopped at the API budget" };

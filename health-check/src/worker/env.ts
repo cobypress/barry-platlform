@@ -35,6 +35,9 @@ export const WORKER_ENV = {
     ANTHROPIC_WORKSPACE_ID: "The workspace Claude's usage is billed to (wrkspc_...)",
     HC_CLEANUP_DRY_RUN: "1 to log what the daily retention sweep would delete, and delete nothing of released runs and pulses. It doesn't cover Apex code kept for Claude's summaries, which is deleted after seven days whatever this says. 0 or unset: it deletes",
     HC_HANDBOOK_SUMMARIES: "on, exactly, and Claude summarises each health check's Apex classes and triggers for the org handbook, from code the run keeps until then. Anything else, or unset, is off. Leave it unset until the privacy notice says Apex code is sent to Claude",
+    HC_SF_SIGNIN_CLIENT_ID: "The sign-in app's consumer key: a classic connected app a customer's admin can authorise with nothing installed (DECISIONS.md 616). Set all three HC_SF_SIGNIN_ variables or none. Without them, every connection uses the package app",
+    HC_SF_SIGNIN_CLIENT_SECRET: "Its secret, needed for the code exchange and refresh",
+    HC_SF_SIGNIN_REDIRECT_URI: "The console's OAuth callback, exactly as registered on the sign-in app",
     HC_MICROSITE_KEY: "The customer microsite: 32 bytes, base64 (openssl rand -base64 32), the same value as the console's, and different from HC_CONNECT_KEY and HC_TOKEN_KEY. Without it, released runs get documents but no microsite",
   },
 } as const;
@@ -49,6 +52,9 @@ const FEDERATION_VARS = ["ANTHROPIC_FEDERATION_RULE_ID", "ANTHROPIC_ORGANIZATION
 export type ClaudeAccess = { kind: "key"; apiKey: string } | { kind: "federation" } | { kind: "none"; reason: string };
 
 const DRIVE_VARS = ["HC_DRIVE_SA_EMAIL", "HC_DRIVE_SA_KEY", "HC_DRIVE_FOLDER_ID"] as const;
+const SIGNIN_VARS = ["HC_SF_SIGNIN_CLIENT_ID", "HC_SF_SIGNIN_CLIENT_SECRET", "HC_SF_SIGNIN_REDIRECT_URI"] as const;
+
+const callbackOk = (uri: string): boolean => /^https:\/\//.test(uri) || /^http:\/\/(localhost|127\.0\.0\.1)[:/]/.test(uri);
 
 export type WorkerConfig = {
   redisUrl: string;
@@ -56,7 +62,10 @@ export type WorkerConfig = {
   connectKey: Buffer;
   connectionsDir: string;
   runsDir: string;
+  /** The package app: the External Client App customers install. */
   oauthClient: OAuthClient;
+  /** The sign-in app, a classic connected app needing no install (DECISIONS.md 616). Null when it isn't set up. */
+  signinClient: OAuthClient | null;
   concurrency: number;
   stopAtShare: number;
   apiVersion?: string;
@@ -92,9 +101,14 @@ export function readWorkerEnv(env: NodeJS.ProcessEnv): { ok: true; config: Worke
   // The console holds one; only the worker holds the other. One key for both would hand the console the tokens.
   if (connectKey && tokenKey && connectKey.equals(tokenKey)) problems.push("HC_CONNECT_KEY and HC_TOKEN_KEY must be different keys");
   for (const name of ["HC_CONNECTIONS_DIR", "HC_RUNS_DIR"]) if (!isAbsolute(get(name))) problems.push(`${name} must be an absolute path`);
-  if (!/^https:\/\//.test(get("HC_SF_REDIRECT_URI")) && !/^http:\/\/(localhost|127\.0\.0\.1)[:/]/.test(get("HC_SF_REDIRECT_URI"))) {
+  if (!callbackOk(get("HC_SF_REDIRECT_URI"))) {
     problems.push("HC_SF_REDIRECT_URI must be https, or http on localhost");
   }
+  const signinSet = SIGNIN_VARS.filter((name) => get(name));
+  if (signinSet.length > 0 && signinSet.length < SIGNIN_VARS.length) problems.push(`Set all of ${SIGNIN_VARS.join(", ")} or none: ${SIGNIN_VARS.filter((n) => !get(n)).join(", ")} missing`);
+  if (get("HC_SF_SIGNIN_REDIRECT_URI") && !callbackOk(get("HC_SF_SIGNIN_REDIRECT_URI"))) problems.push("HC_SF_SIGNIN_REDIRECT_URI must be https, or http on localhost");
+  // A connection finds its app by client id, so two apps with one id couldn't be told apart.
+  if (get("HC_SF_SIGNIN_CLIENT_ID") && get("HC_SF_SIGNIN_CLIENT_ID") === get("HC_SF_CLIENT_ID")) problems.push("HC_SF_SIGNIN_CLIENT_ID must be a different app from HC_SF_CLIENT_ID");
   const concurrency = get("HC_WORKER_CONCURRENCY") ? Number(get("HC_WORKER_CONCURRENCY")) : 2;
   if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 8) problems.push("HC_WORKER_CONCURRENCY must be a whole number from 1 to 8");
   const stopAtShare = get("HC_API_BUDGET_SHARE") ? Number(get("HC_API_BUDGET_SHARE")) : BUDGET_DEFAULTS.stopAtShare;
@@ -143,6 +157,10 @@ export function readWorkerEnv(env: NodeJS.ProcessEnv): { ok: true; config: Worke
       connectionsDir: get("HC_CONNECTIONS_DIR"),
       runsDir: get("HC_RUNS_DIR"),
       oauthClient: { clientId: get("HC_SF_CLIENT_ID"), clientSecret: get("HC_SF_CLIENT_SECRET"), redirectUri: get("HC_SF_REDIRECT_URI") },
+      signinClient:
+        signinSet.length === SIGNIN_VARS.length
+          ? { clientId: get("HC_SF_SIGNIN_CLIENT_ID"), clientSecret: get("HC_SF_SIGNIN_CLIENT_SECRET"), redirectUri: get("HC_SF_SIGNIN_REDIRECT_URI") }
+          : null,
       concurrency,
       stopAtShare,
       apiVersion: get("HC_SF_API_VERSION") || undefined,

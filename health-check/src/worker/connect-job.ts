@@ -4,12 +4,13 @@ import { readOrgStages } from "../connect/org-stages.ts";
 import { checkReadOnlyUser, permissionNote, type ReadOnlyCheck } from "../connect/read-only-check.ts";
 import { ApiBudget } from "../salesforce/budget.ts";
 import { SalesforceClient } from "../salesforce/client.ts";
-import { exchangeCode, OAuthError, revokeToken, type TokenSet } from "../salesforce/oauth.ts";
+import { exchangeCode, OAuthError, revokeToken, type OAuthClient, type TokenSet } from "../salesforce/oauth.ts";
 import { OAuthConnectionProvider, revokeConnection } from "../salesforce/oauth-provider.ts";
 import { StoredConnection } from "../salesforce/token-store.ts";
 import { fetchOAuthTransport } from "../salesforce/transport.ts";
 import { longDate } from "../render/format.ts";
 import { PendingAuthorisation, type ConnectLink } from "../schemas/connect.ts";
+import { APP_NOT_SET_UP_AT_CONNECT, appFor, appForPending } from "./apps.ts";
 import { openConnectSecret } from "./connect-crypto.ts";
 import { safeReason, type Attempt, type JobOutcome, type WorkerDeps } from "./deps.ts";
 import { withJobLock } from "./lock.ts";
@@ -144,6 +145,9 @@ async function connectLocked(linkId: string, deps: WorkerDeps, attempt: Attempt)
       throw new Refusal(`We couldn't read the saved sign-in. ${START_AGAIN}`);
     }
     if (pending.linkId !== link.id) throw new Refusal(`The saved sign-in belongs to a different link. ${START_AGAIN}`);
+    // The app the authorise URL used, and only that one (DECISIONS.md 616). Not set up here: nothing is sent.
+    const app = appForPending(pending, deps);
+    if (!app) throw new Refusal(APP_NOT_SET_UP_AT_CONNECT);
 
     // A connection under this name already? If it's bound to this link and this
     // sign-in, it's ours from an earlier delivery that stopped after storing it:
@@ -161,7 +165,7 @@ async function connectLocked(linkId: string, deps: WorkerDeps, attempt: Attempt)
     holding = ours;
 
     if (!ours) {
-      const tokens = await exchange(link, code, pending.codeVerifier, deps, secrets);
+      const tokens = await exchange(link, app, code, pending.codeVerifier, deps, secrets);
       // One free scan per org every 30 days (DECISIONS.md 610), decided before the tokens are kept.
       if (job.scanRunId) {
         const refusal = await scanCap(tokens.orgId, job.scanRunId, deps, log);
@@ -189,7 +193,7 @@ async function connectLocked(linkId: string, deps: WorkerDeps, attempt: Attempt)
           name,
           grant: "web-server",
           loginUrl: link.loginUrl,
-          clientId: deps.oauthClient.clientId,
+          clientId: app.clientId,
           instanceUrl: tokens.instanceUrl,
           orgId: tokens.orgId,
           userId: tokens.userId,
@@ -211,7 +215,8 @@ async function connectLocked(linkId: string, deps: WorkerDeps, attempt: Attempt)
     // Kept for the stage read after the link is marked used: no second connect, one budget.
     let client: SalesforceClient | undefined;
     try {
-      const provider = new OAuthConnectionProvider(name, { store: deps.tokens, client: deps.oauthClient, transport: deps.oauthTransport, env: approvedFromConsole(name) });
+      // The connection's own app: a delivery that found its tokens stored earlier made them with the app it holds.
+      const provider = new OAuthConnectionProvider(name, { store: deps.tokens, client: appFor(stored.clientId, deps) ?? undefined, transport: deps.oauthTransport, env: approvedFromConsole(name) });
       client = await SalesforceClient.connect(provider, { budget: new ApiBudget({ stopAtShare: 0.5 }), transport: deps.dataTransport, sleep: deps.dataTransport ? async () => {} : undefined });
       check = await checkReadOnlyUser(client, stored.userId);
     } catch (err) {
@@ -286,8 +291,8 @@ async function scanCap(orgId: string, scanRunId: string, deps: WorkerDeps, log: 
   return `This Salesforce org had a free Barometer Scan in the last 30 days. You can run another after ${after}, or talk to us about a plan that scans every month.`;
 }
 
-async function exchange(link: ConnectLink, code: string, codeVerifier: string, deps: WorkerDeps, secrets: Array<string | undefined>): Promise<TokenSet> {
-  const tokens = await exchangeCode({ transport: deps.oauthTransport ?? fetchOAuthTransport, loginUrl: link.loginUrl, client: deps.oauthClient, code, codeVerifier });
+async function exchange(link: ConnectLink, app: OAuthClient, code: string, codeVerifier: string, deps: WorkerDeps, secrets: Array<string | undefined>): Promise<TokenSet> {
+  const tokens = await exchangeCode({ transport: deps.oauthTransport ?? fetchOAuthTransport, loginUrl: link.loginUrl, client: app, code, codeVerifier });
   secrets.push(tokens.accessToken, tokens.refreshToken);
   return tokens;
 }

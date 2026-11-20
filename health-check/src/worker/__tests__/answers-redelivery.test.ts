@@ -19,6 +19,7 @@ import type { Transport, TransportRequest, TransportResponse } from "../../sales
 import type { DocumentDrive, DriveItem } from "../drive.ts";
 import { processDocumentsJob } from "../documents-job.ts";
 import { MemoryWorkerStore } from "../memory-store.ts";
+import { needsReconnection } from "../apps.ts";
 import { processRunJob } from "../run-job.ts";
 import type { RunJobInput, RunOutputRecord, RunProgress } from "../types.ts";
 import { baseDeps, CONNECTION, consoleRun, INTAKE, RUN_ID, runInput, syntheticConnection } from "./helpers.ts";
@@ -306,8 +307,8 @@ describe("Claude drafts only a delivery that will reach review (DECISIONS.md 543
 /** Every data request refused as an expired session. */
 const expired: Transport = { send: async (): Promise<TransportResponse> => ({ status: 401, header: () => null, text: JSON.stringify([{ errorCode: "INVALID_SESSION_ID", message: "Session expired or invalid" }]) }) };
 
-describe("a connection revoked between the first delivery and the answers (DECISIONS.md 547 (2))", () => {
-  test("throws for the queue, then fails the run with the connection's sentence, keeping the checkpoints and the answers; a new connection then finishes it", async () => {
+describe("a connection revoked between the first delivery and the answers (DECISIONS.md 547 (2), 617)", () => {
+  test("fails the run at once as needs reconnection, keeping the checkpoints and the answers; a new connection then finishes it", async () => {
     const w = await setup();
     await w.deliver();
     assert.ok(consoleAnswers(w.store, [answer(EAC), answer(DWU)]));
@@ -319,13 +320,11 @@ describe("a connection revoked between the first delivery and the answers (DECIS
     await w.deps.tokens.save(syntheticConnection({ instanceUrl: FAKE.instanceUrl }));
     const endpoint = new FakeTokenEndpoint();
     w.deps.oauthTransport = endpoint;
-    // An OAuthError's message starts with Salesforce's code (oauth.ts), so the reason does too.
-    const sentence = `invalid_grant: The connection "${CONNECTION}" was revoked or expired. The customer's admin needs to connect again`;
-    await assert.rejects(w.deliver(false, expired), (err: Error) => err.message === sentence);
-    assert.deepEqual(await w.deliver(true, expired), { outcome: "failed", detail: `The run stopped with an error: ${sentence}` });
-    assert.deepEqual(endpoint.requests.map((r) => r.form.get("grant_type")), ["refresh_token", "refresh_token"], "one refused refresh on each delivery");
+    // No retry: such a token never works again, so the first delivery ends it (DECISIONS.md 617).
+    assert.deepEqual(await w.deliver(false, expired), { outcome: "failed", detail: needsReconnection(CONNECTION) });
+    assert.deepEqual(endpoint.requests.map((r) => r.form.get("grant_type")), ["refresh_token"], "one refused refresh");
     assert.equal(w.stored().run.status, "failed");
-    assert.equal(w.stored().run.steps.find((s) => s.id === "worker")!.error, `The run stopped with an error: ${sentence}`);
+    assert.equal(w.stored().run.steps.find((s) => s.id === "worker")!.error, needsReconnection(CONNECTION));
     assert.deepEqual(listing(join(w.dir, "checkpoints")), checkpoints);
     assert.deepEqual(w.stored().answers.map((a) => a.stepKey).sort(), [DWU, EAC]);
 

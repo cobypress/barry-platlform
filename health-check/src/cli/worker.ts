@@ -84,6 +84,7 @@ export async function workerCommand(
     // Beside the runs folder, not in it, so `hc purge --older-than` doesn't trip over it.
     locksDir,
     oauthClient: config.oauthClient,
+    signinClient: config.signinClient,
     connectKey: config.connectKey,
     stopAtShare: config.stopAtShare,
     apiVersion: config.apiVersion,
