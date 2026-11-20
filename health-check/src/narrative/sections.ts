@@ -57,6 +57,8 @@ export type ReportInput = {
   facts?: FactsSummary | null;
   /** How many records each issue's action list holds, by finding id. Counts only: the names stay in the run folder. */
   recordCounts?: Record<string, { rows: number; total: number }>;
+  /** What each stage the calibration doesn't name was taken to mean, from Salesforce's flags (DECISIONS.md 600). The calibration's own stages aren't here. */
+  stageMeanings?: Record<string, "open" | "won" | "lost"> | null;
   now?: Date;
 };
 

@@ -1,9 +1,17 @@
 import { test, describe, before } from "node:test";
 import assert from "node:assert/strict";
-import { analyseExtracts, clone, loadExtracts, runFromRecording } from "../../testing/harness.ts";
-import { loadCalibration } from "../../testing/replay.ts";
-import { STAGES, UNCALIBRATED_STAGES } from "../../testing/synthetic-org.ts";
-import { stageMap } from "../historic-pipeline/cohort.ts";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { analyseExtracts, clone, loadExtracts, runFromRecording, tempDir } from "../../testing/harness.ts";
+import { loadAnswers, loadCalibration, syntheticProvider } from "../../testing/replay.ts";
+import { AS_OF, CONNECTED_USER, STAGES, UNCALIBRATED_STAGES } from "../../testing/synthetic-org.ts";
+import { inferredMeanings, STAGE_MEANINGS_FILE, stageMap } from "../historic-pipeline/cohort.ts";
+import { ALL_MODULES, SALES_CLOUD_MODULES } from "../index.ts";
+import { runHealthCheck } from "../../engine/run.ts";
+import { Simulator } from "../../testing/simulator.ts";
+import { loadRun } from "../../render/render-run.ts";
+import { flowStages } from "../../render/full-report.ts";
+import { processFlowChart } from "../../render/charts.ts";
 import type { OpportunityExtract } from "../../extract/opportunities.ts";
 import type { Calibration, Finding, Metric } from "../../schemas/index.ts";
 
@@ -150,27 +158,107 @@ describe("the calibration's word wins over Salesforce's flags (DECISIONS.md 598)
     assert.equal(stageMap(scoped(TRAP), STAGES).orderOf("Discovery"), null);
   });
 
-  test("so a run that names the stage counts it as the calibration says, and one that doesn't follows the flag", () => {
-    const named = analyseExtracts(extracts);
-    const c = loadCalibration();
-    c.stages = c.stages.filter((s) => s.name !== "Closed No Decision");
-    const flagged = analyseExtracts(extracts, { calibration: c });
-    const won = (m: Metric) => (m.status === "measured" ? m.stats : null);
-    const a = metricOf(named.metrics, "historic.win_rate");
-    const b = metricOf(flagged.metrics, "historic.win_rate");
-    assert.equal(a.status, "measured");
-    assert.equal(b.status, "measured");
-    // As lost, the no decision deals now count against the win rate.
-    assert.ok(a.status === "measured" && b.status === "measured" && b.n > a.n, `${JSON.stringify(won(a))} ${JSON.stringify(won(b))}`);
-    assert.ok(b.status === "measured" && b.value < (a.status === "measured" ? a.value : 0));
-    assert.ok(b.assumptions.some((x) => x.includes("Closed No Decision as lost")));
-  });
-
   test("won and lost follow IsWon, and open follows IsClosed", () => {
     const c = loadCalibration();
     c.stages = c.stages.filter((s) => !["Closed Won", "Closed Lost", "Discovery"].includes(s.name));
     const map = stageMap(c, STAGES);
     assert.deepEqual(["Closed Won", "Closed Lost", "Discovery"].map((s) => map.categoryOf(s)), ["won", "lost", "open"]);
     assert.equal(stageMap(c, null).categoryOf("Closed Won"), null);
+  });
+});
+
+// Salesforce's flags can't tell lost from no decision, so nothing that splits
+// the two is measured from an inferred lost stage (DECISIONS.md 600).
+describe("a stage inferred as lost (DECISIONS.md 600)", () => {
+  const UNSPLIT = "Salesforce's setting can't tell lost from no decision for: Closed No Decision.";
+  // Every figure and check whose definition leaves no decision out or reports it on its own.
+  const METRICS = ["historic.win_rate", "historic.win_rate_by_value", "historic.no_decision_rate", "historic.quarterly_win_rate", "historic.sales_cycle_lost", "historic.lost_by_stage", "historic.lost_value_by_stage", "historic.went_backwards", "historic.win_drivers", "activity.per_lost_deal"];
+  const RULES = ["act.deals-without-activity", "act.won-vs-lost-activity", "dq.loss-reason-missing", "rev.win-backs", "cpq.discount-leakage", "cpq.quote-to-order"];
+  let named: ReturnType<typeof analyseExtracts>;
+  let flagged: ReturnType<typeof analyseExtracts>;
+  before(async () => {
+    const all = loadExtracts((await runFromRecording({ answers: loadAnswers(), modules: ALL_MODULES })).dir);
+    const c = loadCalibration();
+    c.stages = c.stages.filter((s) => s.name !== "Closed No Decision");
+    named = analyseExtracts(all, { modules: ALL_MODULES, answers: loadAnswers() });
+    flagged = analyseExtracts(all, { modules: ALL_MODULES, answers: loadAnswers(), calibration: c });
+  });
+
+  test("is never reported as a no decision rate, or a win rate that leaves no decision out", () => {
+    for (const id of METRICS) {
+      assert.equal(metricOf(named.metrics, id)?.status, "measured", `${id} is measured when every stage is named`);
+      const m = metricOf(flagged.metrics, id);
+      assert.equal(m.status, "not_measurable", id);
+      assert.equal(m.status === "not_measurable" ? m.reason : "", UNSPLIT, id);
+    }
+  });
+
+  test("the checks that leave no decision out, or report it, say why they can't run", () => {
+    for (const ruleId of RULES) {
+      const was = named.findings.filter((f) => f.ruleId === ruleId);
+      assert.ok(was.length > 0 && was.every((f) => f.status !== "not_measurable"), `${ruleId} runs when every stage is named`);
+      const now = flagged.findings.filter((f) => f.ruleId === ruleId);
+      assert.ok(now.length > 0, ruleId);
+      for (const f of now) {
+        assert.equal(f.status, "not_measurable", ruleId);
+        assert.equal(f.notMeasurableReason, UNSPLIT, ruleId);
+      }
+    }
+  });
+
+  test("the win rate including no decision stays measured, with the same figure, and says why", () => {
+    const a = metricOf(named.metrics, "historic.win_rate_including_no_decision");
+    const b = metricOf(flagged.metrics, "historic.win_rate_including_no_decision");
+    assert.ok(a.status === "measured" && b.status === "measured");
+    assert.equal(b.value, a.value);
+    assert.equal(b.n, a.n);
+    assert.ok(b.assumptions.some((x) => x.includes("Closed No Decision as lost")));
+  });
+
+  test("an inferred won or open stage leaves the win rate measured", () => {
+    const c = loadCalibration();
+    c.stages = c.stages.filter((s) => s.name !== "Closed Won" && s.name !== "Discovery");
+    const out = analyseExtracts(extracts, { calibration: c });
+    for (const id of ["historic.win_rate", "historic.no_decision_rate"]) {
+      const m = metricOf(out.metrics, id);
+      const was = metricOf(named.metrics, id);
+      assert.equal(m.status, "measured", id);
+      assert.ok(m.status === "measured" && was.status === "measured" && m.value === was.value, id);
+    }
+  });
+});
+
+// The deck's flow draws each stage as the engine used it (DECISIONS.md 600).
+describe("the \"How deals move\" flow with a stage the calibration leaves out (DECISIONS.md 600)", () => {
+  test("still draws the moves into Won when Closed Won isn't named", () => {
+    const full = loadCalibration();
+    const c = loadCalibration();
+    c.stages = c.stages.filter((s) => s.name !== "Closed Won");
+    const transitionsOf = (out: ReturnType<typeof analyseExtracts>) => out.metrics.find((m) => m.id === "historic.stage_transitions");
+    const asNamed = processFlowChart(transitionsOf(analyseExtracts(extracts)), flowStages(full));
+    const left = transitionsOf(analyseExtracts(extracts, { calibration: c }));
+    const meanings = inferredMeanings(c, STAGES);
+    assert.deepEqual(meanings, { "Closed Won": "won" });
+    // The same chart as when the calibration names it.
+    assert.deepEqual(JSON.stringify(processFlowChart(left, flowStages(c, meanings))), JSON.stringify(asNamed));
+    // Without the engine's meanings, the arrows into Won are lost: the fault this mends.
+    assert.notDeepEqual(JSON.stringify(processFlowChart(left, flowStages(c))), JSON.stringify(asNamed));
+  });
+
+  test("the calibration's word wins in the flow too", () => {
+    const c = loadCalibration();
+    assert.deepEqual(flowStages(c, { "Closed Won": "lost" }).filter((s) => s.name === "Closed Won"), [{ name: "Closed Won", category: "won" }]);
+  });
+
+  test("a run keeps the meanings beside its findings, and the documents read them", async () => {
+    const c = loadCalibration();
+    c.stages = c.stages.filter((s) => s.name !== "Closed Won");
+    const { dir } = await runHealthCheck({ provider: syntheticProvider, connectedUser: CONNECTED_USER, calibration: c, modules: SALES_CLOUD_MODULES, answers: loadAnswers(), outDir: tempDir(), now: new Date(AS_OF), transport: new Simulator() });
+    assert.deepEqual(JSON.parse(readFileSync(join(dir, STAGE_MEANINGS_FILE), "utf8")), { "Closed Won": "won" });
+    assert.deepEqual(loadRun(dir).input.stageMeanings, { "Closed Won": "won" });
+    // A fully calibrated run writes none, and reads none.
+    const { dir: plain } = await runHealthCheck({ provider: syntheticProvider, connectedUser: CONNECTED_USER, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, answers: loadAnswers(), outDir: tempDir(), now: new Date(AS_OF), transport: new Simulator() });
+    assert.ok(!existsSync(join(plain, STAGE_MEANINGS_FILE)));
+    assert.equal(loadRun(plain).input.stageMeanings, null);
   });
 });
