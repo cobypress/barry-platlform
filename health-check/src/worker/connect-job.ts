@@ -164,7 +164,7 @@ async function connectLocked(linkId: string, deps: WorkerDeps, attempt: Attempt)
       const tokens = await exchange(link, code, pending.codeVerifier, deps, secrets);
       // One free scan per org every 30 days (DECISIONS.md 610), decided before the tokens are kept.
       if (job.scanRunId) {
-        const refusal = await scanCap(tokens.orgId, job.scanRunId, deps);
+        const refusal = await scanCap(tokens.orgId, job.scanRunId, deps, log);
         if (refusal) {
           await revokeQuietly(tokens, deps, log);
           throw new Refusal(refusal);
@@ -270,12 +270,15 @@ const DAY_MS = 86_400_000;
  * own earlier attempts never count. If the store can't say, the scan is refused
  * too: the code is spent, so the tokens can't wait for a retry.
  */
-async function scanCap(orgId: string, scanRunId: string, deps: WorkerDeps): Promise<string | null> {
+async function scanCap(orgId: string, scanRunId: string, deps: WorkerDeps, log: (line: string) => void): Promise<string | null> {
   const now = (deps.now ?? (() => new Date()))();
   let last: string | null;
   try {
     last = await deps.store.lastScanOfOrg(orgId.slice(0, 15), scanRunId, new Date(now.getTime() - SCAN_EVERY_DAYS * DAY_MS).toISOString());
-  } catch {
+  } catch (err) {
+    // Said, or a renamed console column would refuse every scan in silence. The SQLSTATE only: a driver's message can quote a value.
+    const code = (err as { code?: unknown } | null)?.code;
+    log(`The free-scan cap couldn't be checked: SQLSTATE ${typeof code === "string" && /^[0-9A-Z]{5}$/.test(code) ? code : "no code"}`);
     return `We couldn't check whether this Salesforce org has had a free scan recently, so we disconnected it and read nothing. ${START_AGAIN}`;
   }
   if (!last) return null;

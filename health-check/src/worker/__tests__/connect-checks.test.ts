@@ -172,6 +172,30 @@ describe("one free scan per Salesforce org every 30 days (DECISIONS.md 610)", ()
   });
 });
 
+describe("review fix: a cap that can't be checked is said (DECISIONS.md 610)", () => {
+  test("a store rejecting with a SQLSTATE refuses the scan, revokes the tokens and logs the code and nothing else", async () => {
+    const f = await flow();
+    f.deps.store.lastScanOfOrg = async () => Promise.reject(Object.assign(new Error(`column "connectedOrgId" does not exist near ${FAKE.orgId}`), { code: "42703" }));
+    assert.equal((await f.handle(f.job, once)).outcome, "refused");
+    assert.match(stored(f).reason!, /^We couldn't check whether this Salesforce org has had a free scan recently/);
+    assert.equal(f.deps.tokens.has(NAME), false);
+    assert.equal(f.fake.liveRefreshTokens(), 0, "revoked at Salesforce");
+    const said = f.deps.lines.filter((l) => /free-scan cap/.test(l));
+    assert.deepEqual(said, ["The free-scan cap couldn't be checked: SQLSTATE 42703"]);
+    for (const line of f.deps.lines) {
+      assert.doesNotMatch(line, /connectedOrgId|does not exist/);
+      assert.ok(!line.includes(ORG15), "no org id");
+    }
+  });
+
+  test("an error with no SQLSTATE says no code", async () => {
+    const f = await flow();
+    f.deps.store.lastScanOfOrg = async () => Promise.reject(new Error("connection terminated"));
+    assert.equal((await f.handle(f.job, once)).outcome, "refused");
+    assert.ok(f.deps.lines.includes("The free-scan cap couldn't be checked: SQLSTATE no code"));
+  });
+});
+
 describe("the org's opportunity stages read at connect (DECISIONS.md 611)", () => {
   test("one read, written as one row in sort order, with no sort order last", async () => {
     const f = await flow({ product: "barometer" });
