@@ -54,10 +54,10 @@ class PermissionsOrg implements Transport {
 type Flow = Awaited<ReturnType<typeof flow>>;
 
 /** The console's half: a link, the admin's trip to Salesforce, and the sealed code and pending authorisation. */
-async function flow(options: { state?: LinkState; link?: (l: ConnectLink) => ConnectLink; sealFor?: string; key?: Buffer; consoleNow?: Date; runOrgId?: string; product?: "barometer" | "scan" } = {}) {
+async function flow(options: { state?: LinkState; link?: (l: ConnectLink) => ConnectLink; sealFor?: string; key?: Buffer; consoleNow?: Date; runOrgId?: string; product?: "barometer" | "scan"; store?: MemoryWorkerStore } = {}) {
   const fake = new FakeTokenEndpoint();
   const org = new PermissionsOrg();
-  const deps = baseDeps({ oauthTransport: fake, dataTransport: org, now: () => new Date() });
+  const deps = baseDeps({ oauthTransport: fake, dataTransport: org, now: () => new Date(), ...(options.store ? { store: options.store } : {}) });
   const created = createConnectLink({ baseUrl: "https://console.example.com", customerRef: "SYN-0001", connectionName: NAME, createdBy: "consultant@example.com", now: options.consoleNow });
   const link = options.link ? options.link(created.link) : created.link;
   const begun = beginAuthorisation(link, oauthClient, options.consoleNow);
@@ -439,5 +439,46 @@ describe("a free scan's connect job", () => {
     down.deps.queueRun = async () => Promise.reject(new Error("redis is down"));
     assert.equal((await down.handle(down.job, once)).outcome, "connected");
     assert.ok(down.deps.lines.some((l) => /waits for "Start the scan"/.test(l)));
+  });
+});
+
+// The org's My Domain on the used link, for the portal's links into Setup (DECISIONS.md 626).
+describe("a connect job and the org's address", () => {
+  test("a used link records the bare My Domain host and nothing else", async () => {
+    const f = await flow({ runOrgId: ORG_AWAITING_CONNECT });
+    f.fake.instanceUrl = "https://Acme--UAT.sandbox.my.salesforce.com";
+    assert.equal((await f.handle(f.job, once)).outcome, "connected");
+    assert.equal(stored(f).instanceHost, "acme--uat.sandbox.my.salesforce.com");
+    assert.ok(f.deps.lines.every((l) => !/acme/i.test(l)), "the host is never logged");
+  });
+
+  for (const url of ["https://na1.salesforce.com", "https://acme.lightning.force.com", "https://acme.my.salesforce.com:8443"]) {
+    test(`a host that isn't a Salesforce My Domain (${url}) is not written, and the connect is as before`, async () => {
+      const f = await flow({ runOrgId: ORG_AWAITING_CONNECT });
+      f.fake.instanceUrl = url;
+      const outcome = await f.handle(f.job, once);
+      assert.equal(outcome.outcome, "connected");
+      assert.equal(stored(f).state, "used");
+      assert.equal("instanceHost" in stored(f), false);
+      assert.equal(f.deps.store.runs.get(RUN_ID)!.run.orgId, FAKE.orgId);
+    });
+  }
+
+  test("on a store without the column, the connect's outcome, writes, log and clock reads are exactly as on one that has it", async () => {
+    const seen = [];
+    for (const store of [new MemoryWorkerStore(), new MemoryWorkerStore({ withoutNewerColumns: true })]) {
+      const f = await flow({ runOrgId: ORG_AWAITING_CONNECT, store });
+      let reads = 0;
+      const clock = f.deps.now!;
+      f.deps.now = () => (reads++, clock());
+      const outcome = await f.handle(f.job, once);
+      const { instanceHost, ...link } = stored(f);
+      seen.push({ instanceHost, outcome, state: link.state, connected: { ...link.connected!, at: "-" }, writes: store.writes.map((w) => w.method), lines: f.deps.lines, reads, run: store.runs.get(RUN_ID)!.run.orgId });
+    }
+    const [having, without] = seen;
+    assert.equal(having!.instanceHost, "acme.my.salesforce.com");
+    assert.equal(without!.instanceHost, undefined);
+    assert.deepEqual({ ...without, instanceHost: null }, { ...having, instanceHost: null });
+    assert.equal(having!.outcome.outcome, "connected");
   });
 });

@@ -13,6 +13,7 @@
     "fixtures": "node src/testing/record-fixtures.ts",
     "sample": "node src/render/sample.ts",
     "questions": "node src/facts/questions-report.ts",
+    "rule-where": "node scripts/rule-where.ts",
     "scale": "node --max-old-space-size=1536 src/testing/scale-run.ts"
   },
   "dependencies": {

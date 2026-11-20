@@ -1,0 +1,531 @@
+{
+  "act.deals-without-activity": {
+    "version": 1
+  },
+  "act.event-link-collapse": {
+    "version": 1
+  },
+  "act.rep-activity-spread": {
+    "version": 1
+  },
+  "act.unlinked-tasks": {
+    "version": 1
+  },
+  "act.won-vs-lost-activity": {
+    "version": 1
+  },
+  "adp.classic-users": {
+    "version": 1
+  },
+  "adp.falling-adoption": {
+    "version": 1
+  },
+  "adp.low-engagement-group": {
+    "version": 1
+  },
+  "aut.apex-coverage": {
+    "version": 2,
+    "where": [
+      "Setup",
+      "Custom Code",
+      "Apex Classes"
+    ]
+  },
+  "aut.case-routing-overlap": {
+    "version": 1
+  },
+  "aut.flows-without-fault-paths": {
+    "version": 1,
+    "where": [
+      "Setup",
+      "Process Automation",
+      "Flows"
+    ]
+  },
+  "aut.hardcoded-ids-in-flows": {
+    "version": 1
+  },
+  "aut.legacy-process-builder": {
+    "version": 1,
+    "where": [
+      "Setup",
+      "Process Automation",
+      "Process Builder"
+    ]
+  },
+  "aut.legacy-workflow-rules": {
+    "version": 3,
+    "where": [
+      "Setup",
+      "Process Automation",
+      "Workflow Rules"
+    ]
+  },
+  "aut.mixed-automation-on-object": {
+    "version": 4
+  },
+  "aut.multiple-triggers": {
+    "version": 3,
+    "where": [
+      "Setup",
+      "Custom Code",
+      "Apex Triggers"
+    ]
+  },
+  "aut.old-api-versions": {
+    "version": 1
+  },
+  "aut.undocumented-automation": {
+    "version": 2
+  },
+  "bp.after-save-same-record-updates": {
+    "version": 1,
+    "where": [
+      "Setup",
+      "Process Automation",
+      "Flows"
+    ]
+  },
+  "bp.jobs-on-inactive-owners": {
+    "version": 1,
+    "where": [
+      "Setup",
+      "Environments",
+      "Jobs",
+      "Scheduled Jobs"
+    ]
+  },
+  "bp.ownership-skew": {
+    "version": 2
+  },
+  "bp.users-without-role": {
+    "version": 1,
+    "where": [
+      "Setup",
+      "Users",
+      "Users"
+    ]
+  },
+  "cfg.custom-field-sprawl": {
+    "version": 1,
+    "where": [
+      "Setup",
+      "Object Manager"
+    ]
+  },
+  "cfg.picklist-sprawl": {
+    "version": 2
+  },
+  "cfg.setup-change-concentration": {
+    "version": 1,
+    "where": [
+      "Setup",
+      "Security",
+      "View Setup Audit Trail"
+    ]
+  },
+  "cfg.stage-sprawl": {
+    "version": 1
+  },
+  "cfg.unassigned-layouts": {
+    "version": 1,
+    "where": [
+      "Setup",
+      "Object Manager"
+    ]
+  },
+  "cfg.undocumented-fields": {
+    "version": 2,
+    "where": [
+      "Setup",
+      "Object Manager"
+    ]
+  },
+  "cfg.unused-custom-fields": {
+    "version": 3
+  },
+  "cpq.discount-approvals": {
+    "version": 3
+  },
+  "cpq.discount-leakage": {
+    "version": 1
+  },
+  "cpq.inactive-rules": {
+    "version": 1
+  },
+  "cpq.price-rule-conflicts": {
+    "version": 2
+  },
+  "cpq.quote-to-order": {
+    "version": 1
+  },
+  "cpq.renewals-not-started": {
+    "version": 1
+  },
+  "cpq.twin-field-mismatch": {
+    "version": 2,
+    "where": [
+      "Setup",
+      "Object Manager"
+    ]
+  },
+  "cur.account-concentration": {
+    "version": 1
+  },
+  "cur.close-date-pushes": {
+    "version": 1
+  },
+  "cur.coverage": {
+    "version": 1
+  },
+  "cur.missing-next-steps": {
+    "version": 1
+  },
+  "cur.rep-concentration": {
+    "version": 1
+  },
+  "cur.stale-deals": {
+    "version": 2
+  },
+  "cur.stuck-in-stage": {
+    "version": 2
+  },
+  "dq.contact-completeness": {
+    "version": 1
+  },
+  "dq.duplicate-accounts": {
+    "version": 1
+  },
+  "dq.duplicate-rules-missing": {
+    "version": 1
+  },
+  "dq.loss-reason-missing": {
+    "version": 1
+  },
+  "dq.open-opps-missing-amount": {
+    "version": 1
+  },
+  "dq.open-opps-no-activity": {
+    "version": 2
+  },
+  "dq.open-opps-past-close": {
+    "version": 1
+  },
+  "dq.opps-inactive-owner": {
+    "version": 1
+  },
+  "dq.opps-without-account": {
+    "version": 1
+  },
+  "dq.record-type-use": {
+    "version": 1
+  },
+  "dq.records-inactive-owner": {
+    "version": 1
+  },
+  "dq.stale-leads": {
+    "version": 2
+  },
+  "fct.commit-at-risk": {
+    "version": 1
+  },
+  "fct.early-stage-commits": {
+    "version": 1
+  },
+  "fct.forecast-accuracy": {
+    "version": 1
+  },
+  "fct.forecasting-in-use": {
+    "version": 1
+  },
+  "fct.manager-adjustments": {
+    "version": 1
+  },
+  "fct.quota-gaps": {
+    "version": 1
+  },
+  "int.api-usage": {
+    "version": 2
+  },
+  "int.failed-async-jobs": {
+    "version": 2,
+    "where": [
+      "Setup",
+      "Environments",
+      "Jobs",
+      "Apex Jobs"
+    ]
+  },
+  "int.hardcoded-endpoints": {
+    "version": 1
+  },
+  "int.integration-user-licences": {
+    "version": 1
+  },
+  "int.integration-users-interactive": {
+    "version": 1
+  },
+  "lead.campaign-return": {
+    "version": 1
+  },
+  "lead.conversion-by-source": {
+    "version": 1
+  },
+  "lead.converted-no-opportunity": {
+    "version": 1
+  },
+  "lead.no-first-response": {
+    "version": 2
+  },
+  "lead.response-time": {
+    "version": 1
+  },
+  "lead.source-return": {
+    "version": 1
+  },
+  "mkt.campaign-influence": {
+    "version": 1,
+    "where": [
+      "Setup",
+      "Feature Settings",
+      "Marketing",
+      "Campaign Influence"
+    ]
+  },
+  "mkt.scoring-grading": {
+    "version": 1
+  },
+  "mkt.unowned-prospects": {
+    "version": 2
+  },
+  "mkt.unworked-handovers": {
+    "version": 2
+  },
+  "pipe.calibration-contradicts-org": {
+    "version": 1
+  },
+  "pipe.dead-end-stage": {
+    "version": 1
+  },
+  "pipe.going-backwards": {
+    "version": 1
+  },
+  "pipe.segment-divergence": {
+    "version": 2
+  },
+  "pipe.skipped-stages": {
+    "version": 1
+  },
+  "pipe.unmapped-stages": {
+    "version": 1
+  },
+  "rev.dormant-accounts": {
+    "version": 1
+  },
+  "rev.stalled-deals": {
+    "version": 3
+  },
+  "rev.win-backs": {
+    "version": 1
+  },
+  "sec.health-check-risks": {
+    "version": 1,
+    "where": [
+      "Setup",
+      "Security",
+      "Health Check"
+    ]
+  },
+  "sec.health-check-score": {
+    "version": 1,
+    "where": [
+      "Setup",
+      "Security",
+      "Health Check"
+    ]
+  },
+  "sec.insecure-remote-sites": {
+    "version": 1,
+    "where": [
+      "Setup",
+      "Security",
+      "Remote Site Settings"
+    ]
+  },
+  "sec.modify-all-data": {
+    "version": 1
+  },
+  "sec.peer-outlier-access": {
+    "version": 2
+  },
+  "sec.personal-integration-accounts": {
+    "version": 4
+  },
+  "sec.self-authorised-connected-apps": {
+    "version": 2,
+    "where": [
+      "Setup",
+      "Apps",
+      "Connected Apps",
+      "Manage Connected Apps"
+    ]
+  },
+  "sec.sharing-defaults": {
+    "version": 1,
+    "where": [
+      "Setup",
+      "Security",
+      "Sharing Settings"
+    ]
+  },
+  "sec.unused-access": {
+    "version": 1
+  },
+  "sec.view-all-data": {
+    "version": 1
+  },
+  "svc.agent-licences": {
+    "version": 3
+  },
+  "svc.backlog-age": {
+    "version": 1
+  },
+  "svc.backlog-growth": {
+    "version": 1
+  },
+  "svc.case-classification": {
+    "version": 1
+  },
+  "svc.case-customer": {
+    "version": 1
+  },
+  "svc.escalation-rules": {
+    "version": 1,
+    "where": [
+      "Setup",
+      "Feature Settings",
+      "Service",
+      "Escalation Rules"
+    ]
+  },
+  "svc.escalation-targets": {
+    "version": 1,
+    "where": [
+      "Setup",
+      "Feature Settings",
+      "Service",
+      "Escalation Rules"
+    ]
+  },
+  "svc.first-reply-email": {
+    "version": 1
+  },
+  "svc.knowledge-current": {
+    "version": 1
+  },
+  "svc.knowledge-use": {
+    "version": 1
+  },
+  "svc.macros-and-quick-text": {
+    "version": 1
+  },
+  "svc.milestone-breaches": {
+    "version": 1
+  },
+  "svc.omni-routing": {
+    "version": 1
+  },
+  "svc.origin-missing": {
+    "version": 1
+  },
+  "svc.priority-resolution": {
+    "version": 1
+  },
+  "svc.queue-sprawl": {
+    "version": 1,
+    "where": [
+      "Setup",
+      "Users",
+      "Queues"
+    ]
+  },
+  "svc.reopened-cases": {
+    "version": 1
+  },
+  "svc.unassigned-cases": {
+    "version": 1
+  },
+  "tech.apex-code-size": {
+    "version": 1
+  },
+  "tech.classic-leftovers": {
+    "version": 2
+  },
+  "tech.governor-limit-risk": {
+    "version": 1
+  },
+  "tech.storage-use": {
+    "version": 3,
+    "where": [
+      "Setup",
+      "Data",
+      "Storage Usage"
+    ]
+  },
+  "tech.test-quality": {
+    "version": 1,
+    "where": [
+      "Setup",
+      "Custom Code",
+      "Apex Classes"
+    ]
+  },
+  "utl.dashboard-usage": {
+    "version": 1
+  },
+  "utl.dashboards-inactive-running-user": {
+    "version": 1
+  },
+  "utl.dormant-licensed-users": {
+    "version": 2,
+    "where": [
+      "Setup",
+      "Users",
+      "Users"
+    ]
+  },
+  "utl.eac-advanced-sync": {
+    "version": 1
+  },
+  "utl.eac-connections": {
+    "version": 1
+  },
+  "utl.never-logged-in": {
+    "version": 2,
+    "where": [
+      "Setup",
+      "Users",
+      "Users"
+    ]
+  },
+  "utl.package-seats": {
+    "version": 2,
+    "where": [
+      "Setup",
+      "Apps",
+      "Packaging",
+      "Installed Packages"
+    ]
+  },
+  "utl.unassigned-licence-seats": {
+    "version": 1,
+    "where": [
+      "Setup",
+      "Company Settings",
+      "Company Information"
+    ]
+  },
+  "utl.unused-reports": {
+    "version": 3
+  }
+}
