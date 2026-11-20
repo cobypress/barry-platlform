@@ -12,8 +12,11 @@ import { runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers } from "../../testing/replay.ts";
 import { processDocumentsJob } from "../documents-job.ts";
 import type { DocumentDrive, DriveItem } from "../drive.ts";
-import { PostgresWorkerStore, RUN_DIGEST_SQL, type SqlClient, type SqlPool, type SqlResult } from "../postgres-store.ts";
+import { PostgresWorkerStore, RUN_DIGEST_DELETE_SQL, RUN_DIGEST_SQL, type SqlClient, type SqlPool, type SqlResult } from "../postgres-store.ts";
 import { digestOf } from "../run-job.ts";
+import { MemoryWorkerStore } from "../memory-store.ts";
+import type { ApprovedRun, DocumentKey } from "../../render/render-released.ts";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { progressOf, type DocumentsMade, type RunOutputRecord } from "../types.ts";
 import { createJobHandler } from "../worker.ts";
 import { baseDeps, consoleRun, INTAKE, RUN_ID, runInput, syntheticConnection } from "./helpers.ts";
@@ -260,5 +263,114 @@ describe("where the worker writes the digest (DECISIONS.md 632)", () => {
     }, (l) => void lines.push(l));
     assert.equal(made, null);
     assert.deepEqual(lines, [`Run ${RUN_ID}'s digest couldn't be made (TypeError), so the connector has none for it.`]);
+  });
+});
+
+/** The digest with one string Postgres's jsonb refuses. */
+function unstorable(kind: "nul" | "surrogate"): RunDigest {
+  const d = structuredClone(DIGEST);
+  const bad = kind === "nul" ? "A summary with a \u0000 in it" : "A label with half a pair \uD83D in it";
+  if (kind === "nul") d.findings[0]!.summary = bad;
+  else d.metrics[0]!.label = bad;
+  return d;
+}
+
+describe("a digest the console's jsonb would refuse (DECISIONS.md 632, fix round)", () => {
+  for (const kind of ["nul", "surrogate"] as const) {
+    test(`a ${kind === "nul" ? "NUL" : "lone surrogate"} is caught before the statement: no INSERT, any earlier row deleted, the results commit, and the log names the run and the path, never the text`, async () => {
+      const pool = new FakePool();
+      const logs: string[] = [];
+      await new PostgresWorkerStore(pool, { log: (l) => void logs.push(l) }).saveRunOutput(RUN_ID, { progress: progressOf(consoleRun()), runDir: "/runs/x", ...OUTPUT, digest: unstorable(kind) });
+      const texts = pool.texts();
+      assert.ok(!texts.includes(RUN_DIGEST_SQL));
+      assert.ok(texts.includes(RUN_DIGEST_DELETE_SQL));
+      assert.equal(texts.at(-1), "COMMIT");
+      const at = kind === "nul" ? "findings.0.summary" : "metrics.0.label";
+      assert.deepEqual(logs.filter((l) => l.includes("digest")), [`Run ${RUN_ID}: its digest holds ${kind === "nul" ? "a NUL character" : "a broken character (half of a UTF-16 pair)"} at ${at}, which the console's database can't store, so the digest isn't saved; its results are.`]);
+    });
+  }
+
+  for (const code of ["22P05", "22021"]) {
+    test(`a ${code} from the jsonb inside the savepoint is skipped and said, and the results commit`, async () => {
+      const pool = new FakePool();
+      pool.handlers.unshift(failing(code));
+      const logs: string[] = [];
+      await save(new PostgresWorkerStore(pool, { log: (l) => void logs.push(l) }));
+      assert.equal(pool.texts().at(-1), "COMMIT");
+      assert.ok(pool.texts().includes("ROLLBACK TO SAVEPOINT run_digest"));
+      assert.equal(logs.filter((l) => l.startsWith(`Run ${RUN_ID}: `) && l.includes(`SQLSTATE ${code}`)).length, 1);
+      assert.ok(logs.every((l) => !l.includes(PLANTED)));
+    });
+  }
+
+  test("the memory store keeps the same rule: the refused digest isn't kept, an earlier one goes, and the results are saved", async () => {
+    const store = new MemoryWorkerStore();
+    store.addRun(runInput());
+    await store.saveRunOutput(RUN_ID, { progress: progressOf(consoleRun()), runDir: "/runs/x", ...OUTPUT });
+    assert.ok(store.getRunDigest(RUN_ID));
+    await store.saveRunOutput(RUN_ID, { progress: progressOf(consoleRun()), runDir: "/runs/x", ...OUTPUT, digest: unstorable("nul") });
+    assert.equal(store.getRunDigest(RUN_ID), null);
+    assert.ok(store.runs.get(RUN_ID)!.output);
+  });
+});
+
+describe("a stale digest is never served (DECISIONS.md 632, fix round)", () => {
+  test("a make with no digest deletes the run's row with the documents' row, in its own savepoint", async () => {
+    const pool = new FakePool();
+    await new PostgresWorkerStore(pool).saveDocuments(RUN_ID, MADE, null);
+    assert.deepEqual(pool.texts().map((t) => (t.startsWith(`UPDATE "HealthCheckDocuments"`) ? "documents" : t === RUN_DIGEST_DELETE_SQL ? "delete" : t)), ["BEGIN", "documents", "SAVEPOINT run_digest", "delete", "RELEASE SAVEPOINT run_digest", "COMMIT"]);
+  });
+
+  test("a delete a console without the table refuses costs nothing; a lost connection rolls the make back", async () => {
+    const missing = new FakePool();
+    missing.handlers.unshift((text) => {
+      if (text === RUN_DIGEST_DELETE_SQL) throw Object.assign(new Error(PLANTED), { code: "42P01" });
+      return undefined;
+    });
+    await new PostgresWorkerStore(missing).saveDocuments(RUN_ID, MADE, null);
+    assert.equal(missing.texts().at(-1), "COMMIT");
+    const lost = new FakePool();
+    lost.handlers.unshift((text) => {
+      if (text === RUN_DIGEST_DELETE_SQL) throw Object.assign(new Error(PLANTED), { code: "08006" });
+      return undefined;
+    });
+    await assert.rejects(new PostgresWorkerStore(lost).saveDocuments(RUN_ID, MADE, null), new RegExp(PLANTED));
+    assert.equal(lost.texts().at(-1), "ROLLBACK");
+  });
+
+  test("make, correct, remake with the digest's build failing: the earlier digest is gone, not served beside the corrected documents", async () => {
+    let build: "ok" | "fails" = "ok";
+    const render = async (_dir: string, _approved: ApprovedRun, out: string) => {
+      mkdirSync(out, { recursive: true });
+      const files = {} as Record<DocumentKey, string>;
+      for (const output of ["raw_notes", "executive_summary", "full_health_check", "ceo_one_pager", "action_lists", "tickets", "readout_kit"] as DocumentKey[]) {
+        files[output] = join(out, `${output}.bin`);
+        writeFileSync(files[output], `synthetic ${output}`);
+      }
+      return { files, warnings: [], held: [], digest: build === "ok" ? { ok: true as const, digest: DIGEST } : { ok: false as const, error: "TypeError" } };
+    };
+    const deps = baseDeps({ drive: new StubDrive(), renderReleased: render });
+    mkdirSync(join(deps.runsDir, RUN_ID), { recursive: true });
+    writeFileSync(join(deps.runsDir, RUN_ID, "run.json"), "{}");
+    deps.store.addDocumentsJob({ run: consoleRun({ status: "released" }), intake: { ...INTAKE, customerName: "Synthetic Co" }, sections: [], versions: [], overrides: [], preparedBy: null, state: "queued", driveFolderId: null, files: [] });
+    assert.equal((await processDocumentsJob(RUN_ID, deps, last)).outcome, "done");
+    assert.ok(deps.store.getRunDigest(RUN_ID), "the first make's digest");
+    // A consultant corrects a figure and asks for the documents again; this time the digest can't be built.
+    const doc = deps.store.documents.get(RUN_ID)!;
+    doc.input.state = "queued";
+    doc.input.overrides = [{ id: "o-1", runId: RUN_ID, target: { type: "finding", id: DIGEST.findings[0]!.id, field: "value.amount" }, previousValue: 1, newValue: 2, reason: "Checked with the customer.", overriddenBy: "Synthetic Consultant", overriddenAt: "2026-11-05T12:00:00.000Z" }];
+    build = "fails";
+    assert.equal((await processDocumentsJob(RUN_ID, deps, last)).outcome, "done");
+    assert.equal(deps.store.getRunDigest(RUN_ID), null);
+    assert.ok(deps.lines.includes(`Run ${RUN_ID}'s digest couldn't be made (TypeError), so the connector has none for it.`));
+    assert.ok(deps.store.writes.some((w) => w.method === "deleteRunDigest"));
+  });
+
+  test("a pulse delivered again whose digest can't be made takes the earlier one away", async () => {
+    const store = new MemoryWorkerStore();
+    store.addRun(runInput());
+    await store.saveRunOutput(RUN_ID, { progress: progressOf(consoleRun()), runDir: "/runs/x", ...OUTPUT });
+    await store.saveRunOutput(RUN_ID, { progress: progressOf(consoleRun()), runDir: "/runs/x", ...OUTPUT, digest: null });
+    assert.equal(store.getRunDigest(RUN_ID), null);
   });
 });

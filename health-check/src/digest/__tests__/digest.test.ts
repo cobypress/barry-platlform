@@ -12,6 +12,8 @@ import { runFromRecording } from "../../testing/harness.ts";
 import { SIZED_RULE } from "../../testing/recheck.ts";
 import { loadAnswers } from "../../testing/replay.ts";
 import { HEADLINE_KINDS } from "../../value/model.ts";
+import { executiveHtml } from "../../render/executive.ts";
+import { compactMoney, money } from "../../render/format.ts";
 
 // The run digest (DECISIONS.md 632): made by code from the built report the
 // documents print, every figure under what it traces to. These are the
@@ -109,7 +111,9 @@ describe("the run digest (DECISIONS.md 632)", () => {
     assert.deepEqual(digest.metrics.map((m) => m.id), report.metrics.map((m) => m.id));
   });
 
-  test("every number traces: each figure equals the stored or built figure its path and id name, and the totals equal the lines they list", () => {
+  // This reads the same report fields the builder copies, so it proves each figure sits under the right id and each total adds up the lines it lists,
+  // not that the report is right. The next test reads the rendered documents instead.
+  test("every number traces to the built report it was copied from: each figure equals the built or stored figure its path and id name, and the totals equal the lines they list", () => {
     const all = numbers(digest);
     assert.ok(all.length > 300, `${all.length} figures`);
     const untraced = all.filter(({ path, value }) => {
@@ -124,6 +128,16 @@ describe("the run digest (DECISIONS.md 632)", () => {
     const line = moved.value.lines.find((l) => l.annual > 0)!;
     line.annual += 1;
     assert.notEqual(resolve(moved, report, ["value", "lines", moved.value.lines.indexOf(line), "annual"]), line.annual);
+  });
+
+  test("independently of the report object: the value total, a finding's value and an area's score are the figures the rendered executive summary prints", () => {
+    const text = executiveHtml(report, pseudonyms).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+    assert.ok(text.includes(compactMoney(digest.value.total.expected, digest.value.currency)), compactMoney(digest.value.total.expected, digest.value.currency));
+    const f = digest.findings.find((x) => x.ruleId === SIZED_RULE && x.status === "issue")!;
+    assert.ok(f.value.kind !== "not_sized" && text.includes(money(f.value.amount, digest.value.currency)), f.id);
+    const area = digest.areas.find((a) => a.status === "measured")!;
+    // The scorecard prints each area as its label, its weight, its score and its issues.
+    assert.ok(area.status === "measured" && new RegExp(`${area.label} [\\d.]+ ${area.score} \\d+ issues?`).test(text), area.label);
   });
 
   test("its text is the report's team-level text, or the one fixed sentence, so its figures are the documents' own", () => {

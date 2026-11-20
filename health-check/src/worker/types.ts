@@ -127,10 +127,11 @@ export type RunOutputRecord = {
   overall?: RunOverall | null;
   /**
    * A pulse's digest for the customer's connector (DECISIONS.md 632), from the
-   * report its result is made from. Left out for every other run: a check's is
-   * written when its documents are made.
+   * report its result is made from; null for a pulse whose digest couldn't be
+   * made, which takes away any earlier row so a stale one is never served.
+   * Left out for every other run: a check's is written when its documents are made.
    */
-  digest?: RunDigest;
+  digest?: RunDigest | null;
 };
 
 /** What the console's HealthCheckRun keeps of a run's overall score (DECISIONS.md 626): a whole number from 0 to 100, and its grade. */
@@ -325,9 +326,12 @@ export interface WorkerStore {
   /**
    * With a digest (DECISIONS.md 632), it's written in the same transaction, in
    * a savepoint of its own: a console without the table, or one that refuses
-   * the row, costs the digest only, never the documents' row.
+   * the row, costs the digest only, never the documents' row. With null (a
+   * make whose digest couldn't be made) any earlier row is deleted the same
+   * way, so the connector never serves figures the documents no longer print.
+   * Left out, the table isn't named.
    */
-  saveDocuments(runId: string, made: DocumentsMade, digest?: RunDigest): Promise<void>;
+  saveDocuments(runId: string, made: DocumentsMade, digest?: RunDigest | null): Promise<void>;
   /** A reason the console can show. Never a token or a name. */
   failDocuments(runId: string, reason: string, at: string): Promise<void>;
 

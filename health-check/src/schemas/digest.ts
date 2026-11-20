@@ -23,7 +23,8 @@ export const DIGEST_VERSION = 1;
 export const NAMED_PEOPLE_SENTENCE = "This issue involves named people. It's described in full in your report.";
 
 const Text = z.string().min(1);
-const Id = z.string().min(1).max(200);
+/** An engine id: a finding, rule, metric, group or run id. Letters, digits and . _ : - only, so no sentence fits. */
+const Id = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}$/);
 const Amount = z.number().finite();
 const Ids = z.array(Id);
 const Severity = z.enum(["critical", "high", "medium", "low", "info"]);
@@ -163,3 +164,13 @@ export const RunDigest = z.object({
   withheldNames: z.array(z.string().regex(/^[0-9a-f]{64}$/)),
 });
 export type RunDigest = z.infer<typeof RunDigest>;
+
+/** The schema's own keys, so a path into a digest can be logged by these and indices alone, never by a key read from it. */
+export const DIGEST_KEYS: ReadonlySet<string> = new Set([
+  "version", "runId", "product", "reviewed", "asOf", "madeAt", "baselineRunId", "overall", "areas", "findings", "metrics", "value", "plan", "withheldNames",
+  "status", "score", "grade", "areaDomains", "reason", "domain", "label", "findingIds", "notMeasurableKind", "id", "ruleId", "severity", "confidence",
+  "title", "summary", "recommendation", "recommendationType", "kind", "amount", "unit", "period", "assumptions", "effortSize", "notMeasurableReason",
+  "definition", "n", "dateRange", "from", "to", "exclusions", "currency", "total", "byKind", "revenue_recoverable", "conversion_uplift", "licence_waste",
+  "time_cost", "exposure", "groups", "lines", "leftOut", "realisation", "counted", "lineIds", "low", "expected", "high", "group", "annual", "added",
+  "phases", "later", "quickWins", "alsoFor", "key",
+]);

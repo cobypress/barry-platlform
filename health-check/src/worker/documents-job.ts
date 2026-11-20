@@ -437,7 +437,8 @@ async function documentsLocked(runId: string, deps: WorkerDeps, attempt: Attempt
     if (printed.caseStudy) await putInternal(deps.drive, clientName, folder.name, `${clientName} - Case study draft.docx`, printed.caseStudy);
     // The digest goes with the documents' row, once they're in Drive: a make held or refused above writes none (DECISIONS.md 632).
     if (printed.digest && !printed.digest.ok) log(`Run ${runId}'s digest couldn't be made (${printed.digest.error}), so the connector has none for it.`);
-    const digest = printed.digest?.ok ? printed.digest.digest : undefined;
+    // None to write takes away an earlier make's, whose figures these documents may have corrected.
+    const digest = printed.digest?.ok ? printed.digest.digest : null;
     await deps.store.saveDocuments(runId, { at: now(), clientName, folderName: folder.name, driveFolderId: folder.id, driveFolderUrl: folder.url, files, warnings: [...printed.warnings, ...(handbook.ok ? [] : [handbook.warning])] }, digest);
     log(`Documents for ${runId} are in Drive${printed.warnings.length ? `, with ${printed.warnings.length} layout warnings` : ""}.`);
     // The folder is now the run's: share it with its readers (DECISIONS.md 253). The documents are made either way.

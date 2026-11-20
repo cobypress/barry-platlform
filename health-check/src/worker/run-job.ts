@@ -308,7 +308,8 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
       ...(complexity ? { complexity } : {}),
       // The score and grade the report gives, pulses' and scans' too, for the portal (DECISIONS.md 626).
       overall: runOverall(report.overall),
-      ...(digest ? { digest } : {}),
+      // A pulse's whatever it is: null takes away an earlier delivery's, so a stale digest is never served.
+      ...(input.run.product === "pulse" ? { digest } : {}),
     });
   } catch (err) {
     if (err instanceof RunClosedError) return { outcome: "skipped", detail: err.message };

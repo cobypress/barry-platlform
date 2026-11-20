@@ -209,7 +209,7 @@ const KNOWN_KEYS = new Set([
   "kind", "apiName", "grants", "activeUsers", "max",
 ]);
 
-const pathOf = (path: ReadonlyArray<PropertyKey>): string => path.map((p) => (typeof p === "number" ? String(p) : KNOWN_KEYS.has(String(p)) ? String(p) : "?")).join(".") || "(top)";
+const pathOf = (path: ReadonlyArray<PropertyKey>, keys: ReadonlySet<string> = KNOWN_KEYS): string => path.map((p) => (typeof p === "number" ? String(p) : keys.has(String(p)) ? String(p) : "?")).join(".") || "(top)";
 
 type Issue = { code: string; path: ReadonlyArray<PropertyKey>; errors?: Issue[][] };
 
@@ -236,20 +236,24 @@ const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[
 const storable = (s: string): boolean => !s.includes("\u0000") && !LONE_SURROGATE.test(s);
 const what = (s: string): string => (s.includes("\u0000") ? "a NUL character" : "a broken character (half of a UTF-16 pair)");
 
-/** Where the first string Postgres's jsonb would refuse is, in a key or a value, and what's wrong with it; or null. */
-function unstorableAt(value: unknown, path: PropertyKey[] = []): { at: string; what: string } | null {
-  if (typeof value === "string") return storable(value) ? null : { at: pathOf(path), what: what(value) };
+/**
+ * Where the first string Postgres's jsonb would refuse is, in a key or a value,
+ * and what's wrong with it; or null. The path names `keys` and indices only.
+ * The run digest uses it too, with its own keys (DECISIONS.md 632).
+ */
+export function unstorableAt(value: unknown, path: PropertyKey[] = [], keys: ReadonlySet<string> = KNOWN_KEYS): { at: string; what: string } | null {
+  if (typeof value === "string") return storable(value) ? null : { at: pathOf(path, keys), what: what(value) };
   if (Array.isArray(value)) {
     for (let i = 0; i < value.length; i++) {
-      const found = unstorableAt(value[i], [...path, i]);
+      const found = unstorableAt(value[i], [...path, i], keys);
       if (found) return found;
     }
     return null;
   }
   if (value && typeof value === "object") {
     for (const [k, v] of Object.entries(value)) {
-      if (!storable(k)) return { at: pathOf([...path, k]), what: what(k) };
-      const found = unstorableAt(v, [...path, k]);
+      if (!storable(k)) return { at: pathOf([...path, k], keys), what: what(k) };
+      const found = unstorableAt(v, [...path, k], keys);
       if (found) return found;
     }
   }

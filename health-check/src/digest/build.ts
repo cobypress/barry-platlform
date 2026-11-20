@@ -6,7 +6,7 @@ import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { DIGEST_VERSION, NAMED_PEOPLE_SENTENCE, RunDigest, type DigestArea, type DigestFinding, type DigestMetric, type DigestTotal, type DigestValueModel } from "../schemas/digest.ts";
 import type { Finding, Metric } from "../schemas/index.ts";
 import type { Inventory } from "../schemas/inventory.ts";
-import { HEADLINE_KINDS, type ValueKind } from "../value/model.ts";
+import { GROUPS, HEADLINE_KINDS, type ValueKind } from "../value/model.ts";
 
 // The run digest (DECISIONS.md 632): made by code, with no Claude, from the
 // built report the documents are made from, so a consultant's corrections are
@@ -62,8 +62,9 @@ export function withheldNames(inventory: Inventory | null, pseudonyms: Pseudonym
   return [...new Set(inventoryNames(inventory).filter((n) => holdsPersonOrSecret(n, pseudonyms)).map(sha256))].sort();
 }
 
-function digestFinding(f: Finding, pseudonyms: Pseudonymiser): DigestFinding {
-  const text = (t: string) => digestText(t, pseudonyms);
+// Each part is put together from the report as it stands; guardDigest then takes every string in it through the guard.
+
+function digestFinding(f: Finding): DigestFinding {
   const v = f.value;
   return {
     id: f.id,
@@ -72,27 +73,29 @@ function digestFinding(f: Finding, pseudonyms: Pseudonymiser): DigestFinding {
     status: f.status,
     severity: f.severity,
     confidence: f.confidence,
-    title: text(f.title),
-    summary: text(f.summary),
-    recommendation: text(f.recommendation),
+    title: f.title,
+    summary: f.summary,
+    recommendation: f.recommendation,
     recommendationType: f.recommendationType,
-    value: v.kind === "not_sized" ? { kind: "not_sized", reason: text(v.reason) } : { kind: v.kind, amount: v.amount, unit: v.unit, period: text(v.period), assumptions: v.assumptions.map(text) },
+    value: v.kind === "not_sized" ? { kind: "not_sized", reason: v.reason } : { kind: v.kind, amount: v.amount, unit: v.unit, period: v.period, assumptions: [...v.assumptions] },
     effortSize: f.effort.size,
-    notMeasurableReason: f.notMeasurableReason === null ? null : text(f.notMeasurableReason),
+    notMeasurableReason: f.notMeasurableReason,
     ...(f.notMeasurableKind ? { notMeasurableKind: f.notMeasurableKind } : {}),
   };
 }
 
-function digestMetric(m: Metric, pseudonyms: Pseudonymiser): DigestMetric {
-  const text = (t: string) => digestText(t, pseudonyms);
-  const base = { id: m.id, domain: m.domain, label: text(m.label), definition: text(m.definition), unit: m.unit };
-  if (m.status === "measured") return { status: "measured", ...base, value: m.value, n: m.n, dateRange: m.dateRange, assumptions: m.assumptions.map(text), exclusions: m.exclusions.map(text) };
-  return { status: "not_measurable", ...base, reason: text(m.reason), ...(m.notMeasurableKind ? { notMeasurableKind: m.notMeasurableKind } : {}) };
+function digestMetric(m: Metric): DigestMetric {
+  const base = { id: m.id, domain: m.domain, label: m.label, definition: m.definition, unit: m.unit };
+  if (m.status === "measured") return { status: "measured", ...base, value: m.value, n: m.n, dateRange: m.dateRange, assumptions: [...m.assumptions], exclusions: [...m.exclusions] };
+  return { status: "not_measurable", ...base, reason: m.reason, ...(m.notMeasurableKind ? { notMeasurableKind: m.notMeasurableKind } : {}) };
 }
 
 /** The value model as the report has it, every total with the lines it adds up. */
 function digestValue(report: BuiltReport): DigestValueModel {
   const { value, added } = report;
+  // A group with no fixed label is named after its counted finding, by the title as the executive report says it, never as read.
+  const teamTitle = new Map(report.teamFindings.map((f) => [f.id, f.title]));
+  const labelOf = (g: (typeof value.groups)[number]): string => GROUPS[g.id]?.label ?? teamTitle.get(g.counted.findingId) ?? g.label;
   const lines = value.groups.flatMap((g) => g.lines.map((l) => ({ id: l.findingId, ruleId: l.ruleId, kind: l.kind, group: g.id, annual: l.annual, low: l.low, expected: l.expected, high: l.high, added: added.get(l.findingId) ?? 0 })));
   const totalOf = (kind: ValueKind): DigestTotal => ({ ...value.byKind[kind], lineIds: value.groups.filter((g) => g.kind === kind).map((g) => g.counted.findingId) });
   // As buildValueModel picks it: the first group whose counted line is strictly larger than any before.
@@ -104,17 +107,17 @@ function digestValue(report: BuiltReport): DigestValueModel {
     total: { ...value.total, lineIds: HEADLINE_KINDS.flatMap((k) => byKind[k as keyof typeof byKind].lineIds) },
     byKind,
     exposure: { ...value.byKind.exposure, lineIds: largest ? [largest.counted.findingId] : [] },
-    groups: value.groups.map((g) => ({ id: g.id, kind: g.kind, label: g.label, realisation: { ...g.realisation }, counted: g.counted.findingId, lineIds: g.lines.map((l) => l.findingId) })),
+    groups: value.groups.map((g) => ({ id: g.id, kind: g.kind, label: labelOf(g), realisation: { ...g.realisation }, counted: g.counted.findingId, lineIds: g.lines.map((l) => l.findingId) })),
     lines,
     leftOut: value.left.map((l) => l.findingId),
   };
 }
 
-function digestAreas(report: BuiltReport, pseudonyms: Pseudonymiser): DigestArea[] {
+function digestAreas(report: BuiltReport): DigestArea[] {
   return (report.input.scores ?? []).map((s): DigestArea =>
     s.status === "measured"
       ? { status: "measured", domain: s.domain, label: domainLabel(s.domain), score: s.score, findingIds: [...s.findingIds] }
-      : { status: "not_measurable", domain: s.domain, label: domainLabel(s.domain), reason: digestText(s.reason, pseudonyms), ...(s.notMeasurableKind ? { notMeasurableKind: s.notMeasurableKind } : {}) },
+      : { status: "not_measurable", domain: s.domain, label: domainLabel(s.domain), reason: s.reason, ...(s.notMeasurableKind ? { notMeasurableKind: s.notMeasurableKind } : {}) },
   );
 }
 
@@ -140,7 +143,8 @@ export function buildDigest({ report, pseudonyms, inventory, madeAt }: DigestFor
   const plan = buildPlan(report.teamFindings, report.added);
   const ids = (fs: Finding[]) => fs.map((f) => f.id);
   const overall = report.overall;
-  return RunDigest.parse({
+  // Typed by the parse below, which holds every id and code to its shape.
+  const raw = {
     version: DIGEST_VERSION,
     runId: run.id,
     product: run.product,
@@ -151,10 +155,10 @@ export function buildDigest({ report, pseudonyms, inventory, madeAt }: DigestFor
     overall:
       overall.status === "measured" && Number.isInteger(overall.score) && GRADE.test(overall.grade)
         ? { status: "measured", score: overall.score, grade: overall.grade, areaDomains: overall.areas.map((a) => a.domain) }
-        : { status: "not_measurable", reason: overall.status === "not_measurable" ? digestText(overall.reason, pseudonyms) : "The overall score couldn't be kept." },
-    areas: digestAreas(report, pseudonyms),
-    findings: report.teamFindings.map((f) => digestFinding(f, pseudonyms)),
-    metrics: report.metrics.map((m) => digestMetric(m, pseudonyms)),
+        : { status: "not_measurable", reason: overall.status === "not_measurable" ? overall.reason : "The overall score couldn't be kept." },
+    areas: digestAreas(report),
+    findings: report.teamFindings.map(digestFinding),
+    metrics: report.metrics.map(digestMetric),
     value: digestValue(report),
     plan: {
       phases: plan.phases.map((p) => ({ key: p.key, title: p.title, from: p.from, to: p.to, findingIds: ids(p.findings) })),
@@ -163,5 +167,29 @@ export function buildDigest({ report, pseudonyms, inventory, madeAt }: DigestFor
       alsoFor: Object.fromEntries(Object.entries(plan.alsoFor).map(([id, fs]) => [id, ids(fs)])),
     },
     withheldNames: withheldNames(inventory, pseudonyms),
-  });
+  };
+  return RunDigest.parse(guardDigest(raw, pseudonyms));
+}
+
+/**
+ * The keys whose values are an id, a code from a fixed list, a timestamp, a
+ * hash or a currency code, each held to its shape by the schema, so no text
+ * can sit there. Everything else is text, and goes through the guard. A key
+ * added later is text until it's listed here, so it can't be missed.
+ */
+export const STRUCTURAL_KEYS: ReadonlySet<string> = new Set([
+  "version", "runId", "product", "reviewed", "asOf", "madeAt", "baselineRunId", "status", "domain", "areaDomains", "findingIds", "id", "ruleId",
+  "severity", "confidence", "recommendationType", "kind", "effortSize", "notMeasurableKind", "from", "to", "currency", "group", "counted",
+  "lineIds", "leftOut", "later", "quickWins", "key", "grade", "withheldNames",
+]);
+/** Keyed by finding id, each holding finding ids: ids all the way down. */
+export const ID_MAPS: ReadonlySet<string> = new Set(["alsoFor"]);
+
+/** Every string in the digest outside STRUCTURAL_KEYS, through digestText: the one route text takes into a digest. */
+export function guardDigest<T>(value: T, pseudonyms: Pseudonymiser, key = ""): T {
+  if (STRUCTURAL_KEYS.has(key) || ID_MAPS.has(key)) return value;
+  if (typeof value === "string") return digestText(value, pseudonyms) as T;
+  if (Array.isArray(value)) return value.map((v) => guardDigest(v, pseudonyms, key)) as T;
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, guardDigest(v, pseudonyms, k)])) as T;
+  return value;
 }

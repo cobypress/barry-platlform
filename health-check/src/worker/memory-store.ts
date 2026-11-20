@@ -2,7 +2,8 @@ import { isMyDomainHost } from "../connect/instance-host.ts";
 import { StoreError, type OrgStage } from "../connect/org-stages.ts";
 import type { ScanResult } from "../scan/result.ts";
 import type { PulseResult } from "../pulse/result.ts";
-import type { RunDigest } from "../schemas/digest.ts";
+import { DIGEST_KEYS, type RunDigest } from "../schemas/digest.ts";
+import { unstorableAt } from "./inventory.ts";
 import { Run, type BenchmarkRow, type ConnectLink } from "../schemas/index.ts";
 import { storedFromRow, waitingRow, type ConsoleSummariesRow, type SummariesToSave } from "../handbook/summary-row.ts";
 import { ORG_AWAITING_CONNECT, RunClosedError, type ConnectJobInput, type DocumentsJobInput, type DocumentsJobReads, type DriveShare, type ShareJobInput, type DocumentsMade, type LinkConnected, type LinkState, type PulseRun, type ReleasedRun, type RunJobInput, type RunOutputRecord, type RunProgress, type WorkerStore } from "./types.ts";
@@ -86,7 +87,7 @@ export class MemoryWorkerStore implements WorkerStore {
     // As the Postgres store's own statements: null where there's no score, untouched where none was given.
     if (overall !== undefined && !this.#withoutNewerColumns) Object.assign(run, { overallScore: overall?.score ?? null, overallGrade: overall?.grade ?? null });
     if (rest.handbookSummaries) this.#saveSummaries(runId, rest.handbookSummaries);
-    if (digest) this.#saveDigest(runId, digest);
+    if (digest !== undefined) this.#saveDigest(runId, digest);
     this.writes.push({ method: "saveRunOutput", id: runId, detail: progress.status });
   }
 
@@ -95,11 +96,19 @@ export class MemoryWorkerStore implements WorkerStore {
   /** False stands in for a console without the digest's table: the digest is left out and everything else saves. */
   digestTable = true;
 
-  /** As the Postgres store's savepoint: replaced whole, or, without the table, left out with the rest saved. */
-  #saveDigest(runId: string, digest: RunDigest): void {
+  /**
+   * As the Postgres store's savepoint: replaced whole; without the table, left
+   * out with the rest saved; and with none to write, or one holding a string
+   * jsonb refuses, any earlier row deleted, so a stale digest is never served.
+   */
+  #saveDigest(runId: string, digest: RunDigest | null): void {
     if (!this.digestTable) return;
-    this.digests.set(runId, structuredClone({ madeAt: digest.madeAt, version: digest.version, digest }));
-    this.writes.push({ method: "saveRunDigest", id: runId });
+    if (digest && !unstorableAt(digest, [], DIGEST_KEYS)) {
+      this.digests.set(runId, structuredClone({ madeAt: digest.madeAt, version: digest.version, digest }));
+      this.writes.push({ method: "saveRunDigest", id: runId });
+      return;
+    }
+    if (this.digests.delete(runId)) this.writes.push({ method: "deleteRunDigest", id: runId });
   }
 
   /** The digest a run has, or null: what the console's tolerant reader returns. */
@@ -228,13 +237,13 @@ export class MemoryWorkerStore implements WorkerStore {
     return true;
   }
 
-  async saveDocuments(runId: string, made: DocumentsMade, digest?: RunDigest): Promise<void> {
+  async saveDocuments(runId: string, made: DocumentsMade, digest?: RunDigest | null): Promise<void> {
     const doc = this.documents.get(runId);
     if (doc?.input.state !== "making") return;
     Object.assign(doc, { made: structuredClone(made), error: null });
     Object.assign(doc.input, { state: "done", driveFolderId: made.driveFolderId, files: structuredClone(made.files) });
     this.writes.push({ method: "saveDocuments", id: runId, detail: made.folderName });
-    if (digest) this.#saveDigest(runId, digest);
+    if (digest !== undefined) this.#saveDigest(runId, digest);
   }
 
   /** The benchmark table. */

@@ -1,6 +1,7 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { buildDigest, holdsPersonOrSecret } from "../build.ts";
+import { buildDigest, guardDigest, holdsPersonOrSecret, ID_MAPS, STRUCTURAL_KEYS } from "../build.ts";
+import { GROUPS } from "../../value/model.ts";
 import { holdsNameOrSecret } from "../../narrative/guard.ts";
 import { buildReport } from "../../narrative/sections.ts";
 import { findNames } from "../../privacy/names.ts";
@@ -104,5 +105,80 @@ describe("the run digest holds no name, email, id, token or secret (DECISIONS.md
   test("the guard is the engine's own, with the shapes it leaves to scrub", () => {
     for (const text of Object.values(PLANTED)) assert.ok(holdsPersonOrSecret(text, pseudonyms), text);
     assert.ok(!holdsPersonOrSecret("Add a weekly check to pipeline reviews.", pseudonyms));
+  });
+});
+
+/** Every string leaf, with the key it sits under (an array's items under the array's key). */
+function leaves(value: unknown, key = "", path: string[] = []): Array<{ key: string; path: string }> {
+  if (typeof value === "string") return [{ key, path: path.join(".") }];
+  if (Array.isArray(value)) return value.flatMap((v, i) => leaves(v, key, [...path, String(i)]));
+  if (value && typeof value === "object") return Object.entries(value).flatMap(([k, v]) => leaves(v, ID_MAPS.has(key) ? key : k, [...path, k]));
+  return [];
+}
+
+/** The same value with every string outside the structural keys replaced by `text`. */
+function plantEverywhere(value: unknown, text: string, key = ""): unknown {
+  if (STRUCTURAL_KEYS.has(key) || ID_MAPS.has(key)) return value;
+  if (typeof value === "string") return text;
+  if (Array.isArray(value)) return value.map((v) => plantEverywhere(v, text, key));
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, plantEverywhere(v, text, k)]));
+  return value;
+}
+
+describe("every string the digest can hold goes through the guard (DECISIONS.md 632, fix round)", () => {
+  const plain = buildDigest({ report: buildReport(input), pseudonyms, inventory: null, madeAt: "2026-11-21T09:00:00.000Z" });
+
+  test("a name planted in every text field of the whole built digest is replaced, so a field added later can't be missed", () => {
+    const text = `${person.name} holds most of these`;
+    const guarded = guardDigest(plantEverywhere(plain, text), pseudonyms);
+    const all = leaves(guarded);
+    const textLeaves = all.filter((l) => !STRUCTURAL_KEYS.has(l.key) && !ID_MAPS.has(l.key));
+    assert.ok(textLeaves.length > 500, `${textLeaves.length} text fields`);
+    assert.ok(!JSON.stringify(guarded).includes(person.name));
+    // Every text field the digest holds today, among them the reviewer's: a group's label, a value's period and unit, a not-sized reason, a measure's exclusions and assumptions, a phase's title and an area's reason.
+    const keys = new Set(textLeaves.map((l) => l.key));
+    for (const key of ["label", "period", "unit", "reason", "exclusions", "assumptions", "title", "summary", "recommendation", "definition", "notMeasurableReason"]) assert.ok(keys.has(key), key);
+  });
+
+  test("the structural keys hold only ids, codes, timestamps and hashes, never a sentence", () => {
+    const structural = leaves(plain).filter((l) => STRUCTURAL_KEYS.has(l.key) || ID_MAPS.has(l.key));
+    const values = structural.map((l) => l.path.split(".").reduce<unknown>((v, k) => (v as Record<string, unknown>)[k], plain) as string);
+    for (const v of values) assert.match(v, /^(?:[A-Za-z0-9][A-Za-z0-9_.:-]*|\d{4}-\d{2}-\d{2}T[\d:.]+Z)$/, v);
+    // And alsoFor's keys, which are finding ids.
+    for (const k of Object.keys(plain.plan.alsoFor)) assert.match(k, /^f-[0-9a-f]+$/);
+  });
+
+  test("planted in a group's label, a value's period, a not-sized reason and a measure's exclusions and assumptions, through the builder, none reaches the digest", () => {
+    // A group the model names after its finding: one with no label of its own.
+    const named = buildReport(input).value.groups.find((g) => !GROUPS[g.id] && g.kind !== "exposure") ?? buildReport(input).value.groups.find((g) => !GROUPS[g.id])!;
+    const sized = input.findings.find((f) => f.status === "issue" && f.value.kind !== "not_sized" && f.id !== named.counted.findingId)!;
+    const unsized = input.findings.find((f) => f.value.kind === "not_sized")!;
+    const metric = input.metrics.find((m) => m.status === "measured")!;
+    const token = person.token;
+    const findings = input.findings.map((f): Finding => {
+      if (f.id === named.counted.findingId) return { ...f, title: `${person.name} holds most of these` };
+      if (f.id === sized.id && f.value.kind !== "not_sized") return { ...f, value: { ...f.value, period: `${f.value.period}, as ${first} counts it` } };
+      if (f.id === unsized.id) return { ...f, value: { kind: "not_sized", reason: `Only ${EMAIL} knows` } };
+      return f;
+    });
+    const metrics = input.metrics.map((m): Metric => (m.id === metric.id ? { ...m, exclusions: [`Deals ${surname} owns`], assumptions: [`${token} set the targets`] } : m));
+    const digest = buildDigest({ report: buildReport({ ...input, findings, metrics }), pseudonyms, inventory: null, madeAt: "2026-11-21T09:00:00.000Z" });
+    const group = digest.value.groups.find((g) => g.id === named.id)!;
+    assert.equal(group.label, NAMED_PEOPLE_SENTENCE);
+    const v = digest.findings.find((f) => f.id === sized.id)!.value;
+    assert.ok(v.kind !== "not_sized" && v.period === NAMED_PEOPLE_SENTENCE);
+    const u = digest.findings.find((f) => f.id === unsized.id)!.value;
+    assert.ok(u.kind === "not_sized" && u.reason === NAMED_PEOPLE_SENTENCE);
+    const m = digest.metrics.find((x) => x.id === metric.id)!;
+    assert.ok(m.status === "measured" && m.exclusions[0] === NAMED_PEOPLE_SENTENCE && m.assumptions[0] === NAMED_PEOPLE_SENTENCE);
+    const text = JSON.stringify(digest);
+    for (const part of [person.name, first, surname, EMAIL, token]) assert.ok(!text.includes(part), part);
+  });
+
+  test("a group named after its finding takes the title as the executive report says it, not as read", () => {
+    const named = buildReport(input).value.groups.find((g) => !GROUPS[g.id])!;
+    const findings = input.findings.map((f): Finding => (f.id === named.counted.findingId ? { ...f, title: `${person.token} holds most of these deals` } : f));
+    const digest = buildDigest({ report: buildReport({ ...input, findings }), pseudonyms, inventory: null, madeAt: "2026-11-21T09:00:00.000Z" });
+    assert.equal(digest.value.groups.find((g) => g.id === named.id)!.label, "A single person holds most of these deals");
   });
 });
