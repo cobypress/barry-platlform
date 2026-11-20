@@ -1,3 +1,4 @@
+import { StoreError, type OrgStage } from "../connect/org-stages.ts";
 import type { ScanResult } from "../scan/result.ts";
 import type { PulseResult } from "../pulse/result.ts";
 import { Run, type BenchmarkRow, type ConnectLink } from "../schemas/index.ts";
@@ -9,7 +10,7 @@ import { ORG_AWAITING_CONNECT, RunClosedError, type ConnectJobInput, type Docume
 // released refuses the worker; only a pending link can be settled.
 
 export type StoredRun = RunJobInput & { runDir: string | null; output: Omit<RunOutputRecord, "progress" | "runDir"> | null };
-export type StoredLink = Omit<ConnectJobInput, "runOrgId"> & { runId: string | null; reason: string | null; connected: LinkConnected | null; refusedAt: string | null };
+export type StoredLink = Omit<ConnectJobInput, "runOrgId" | "runId"> & { runId: string | null; reason: string | null; connected: LinkConnected | null; refusedAt: string | null };
 
 const CLOSED = new Set(["in_review", "released"]);
 
@@ -111,7 +112,38 @@ export class MemoryWorkerStore implements WorkerStore {
     const run = link.runId ? this.runs.get(link.runId) : undefined;
     const runOrgId = run?.run.orgId || ORG_AWAITING_CONNECT;
     const job: ConnectJobInput = { link: link.link, state: link.state, runOrgId, sealedPending: link.sealedPending, sealedCode: link.sealedCode };
-    return structuredClone(run?.run.product === "scan" ? { ...job, scanRunId: run.run.id } : job);
+    const withRun = run ? { ...job, runId: run.run.id } : job;
+    return structuredClone(run?.run.product === "scan" ? { ...withRun, scanRunId: run.run.id } : withRun);
+  }
+
+  /** As the Postgres store's one statement: another scan made for the org, or connected to it, after `since`. */
+  async lastScanOfOrg(orgId15: string, exceptRunId: string, since: string): Promise<string | null> {
+    const after = Date.parse(since);
+    const scan = (runId: string | null | undefined) => {
+      const run = runId ? this.runs.get(runId) : undefined;
+      return run?.run.product === "scan" && run.run.id !== exceptRunId ? run : undefined;
+    };
+    const moments: number[] = [];
+    for (const run of this.runs.values()) {
+      if (scan(run.run.id) && run.run.orgId.slice(0, 15) === orgId15 && Date.parse(run.run.startedAt) > after) moments.push(Date.parse(run.run.startedAt));
+    }
+    for (const link of this.links.values()) {
+      if (scan(link.runId) && link.connected && link.connected.orgId.slice(0, 15) === orgId15 && Date.parse(link.connected.at) > after) moments.push(Date.parse(link.connected.at));
+    }
+    return moments.length ? new Date(Math.max(...moments)).toISOString() : null;
+  }
+
+  /** The console's HealthCheckOrgStages, keyed by run id (DECISIONS.md 611). False as a console without the table. */
+  readonly orgStages = new Map<string, { readAt: string; stages: OrgStage[] }>();
+  orgStagesTable = true;
+
+  async saveOrgStages(runId: string, stages: OrgStage[], readAt: string): Promise<boolean> {
+    if (!this.orgStagesTable) return false;
+    if (!this.runs.has(runId)) throw new StoreError("the console's database refused it (SQLSTATE 23503)");
+    this.orgStages.set(runId, structuredClone({ readAt, stages }));
+    // No detail: the stage names are the org's own and stay in the one row.
+    this.writes.push({ method: "saveOrgStages", id: runId });
+    return true;
   }
 
   #pending(linkId: string): StoredLink {

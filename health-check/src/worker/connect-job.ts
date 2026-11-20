@@ -1,5 +1,6 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { readOrgStages } from "../connect/org-stages.ts";
 import { checkReadOnlyUser, permissionNote, type ReadOnlyCheck } from "../connect/read-only-check.ts";
 import { ApiBudget } from "../salesforce/budget.ts";
 import { SalesforceClient } from "../salesforce/client.ts";
@@ -7,6 +8,7 @@ import { exchangeCode, OAuthError, revokeToken, type TokenSet } from "../salesfo
 import { OAuthConnectionProvider, revokeConnection } from "../salesforce/oauth-provider.ts";
 import { StoredConnection } from "../salesforce/token-store.ts";
 import { fetchOAuthTransport } from "../salesforce/transport.ts";
+import { longDate } from "../render/format.ts";
 import { PendingAuthorisation, type ConnectLink } from "../schemas/connect.ts";
 import { openConnectSecret } from "./connect-crypto.ts";
 import { safeReason, type Attempt, type JobOutcome, type WorkerDeps } from "./deps.ts";
@@ -160,6 +162,14 @@ async function connectLocked(linkId: string, deps: WorkerDeps, attempt: Attempt)
 
     if (!ours) {
       const tokens = await exchange(link, code, pending.codeVerifier, deps, secrets);
+      // One free scan per org every 30 days (DECISIONS.md 610), decided before the tokens are kept.
+      if (job.scanRunId) {
+        const refusal = await scanCap(tokens.orgId, job.scanRunId, deps, log);
+        if (refusal) {
+          await revokeQuietly(tokens, deps, log);
+          throw new Refusal(refusal);
+        }
+      }
       // Caught here, before anything is read, rather than when the run starts.
       if (job.runOrgId !== ORG_AWAITING_CONNECT && job.runOrgId.slice(0, 15) !== tokens.orgId.slice(0, 15)) {
         await revokeQuietly(tokens, deps, log);
@@ -198,9 +208,11 @@ async function connectLocked(linkId: string, deps: WorkerDeps, attempt: Attempt)
     secrets.push(stored.accessToken, stored.refreshToken);
     // What the user can do is read for the consultant, and never refuses them.
     let check: ReadOnlyCheck;
+    // Kept for the stage read after the link is marked used: no second connect, one budget.
+    let client: SalesforceClient | undefined;
     try {
       const provider = new OAuthConnectionProvider(name, { store: deps.tokens, client: deps.oauthClient, transport: deps.oauthTransport, env: approvedFromConsole(name) });
-      const client = await SalesforceClient.connect(provider, { budget: new ApiBudget({ stopAtShare: 0.5 }), transport: deps.dataTransport, sleep: deps.dataTransport ? async () => {} : undefined });
+      client = await SalesforceClient.connect(provider, { budget: new ApiBudget({ stopAtShare: 0.5 }), transport: deps.dataTransport, sleep: deps.dataTransport ? async () => {} : undefined });
       check = await checkReadOnlyUser(client, stored.userId);
     } catch (err) {
       // A retry finds the stored connection and reads again. On the last try,
@@ -234,6 +246,12 @@ async function connectLocked(linkId: string, deps: WorkerDeps, attempt: Attempt)
         log(`Scan ${job.scanRunId} couldn't be queued, so it waits for "Start the scan": ${safeReason(err)}`);
       }
     }
+    // The org's stages for the calibration screen (DECISIONS.md 611). It can't throw, and has its own time limit.
+    if (job.runId) {
+      const runId = job.runId;
+      if (client) await readOrgStages(client, (stages, readAt) => deps.store.saveOrgStages(runId, stages, readAt), { log, now: at, timeoutMs: deps.stagesTimeoutMs });
+      else log("The org's opportunity stages weren't saved for the calibration: the connection couldn't be opened to read them.");
+    }
     return { outcome: "connected", detail: `Connected "${name}" to org ${stored.orgId}. ${note}` };
   } catch (err) {
     if (err instanceof Refusal) return refuse(err.message);
@@ -241,6 +259,31 @@ async function connectLocked(linkId: string, deps: WorkerDeps, attempt: Attempt)
     if (err instanceof OAuthError) return refuse(exchangeReason(err));
     return refuse(`Something went wrong connecting: ${safeReason(err, secrets)}. ${START_AGAIN}`);
   }
+}
+
+export const SCAN_EVERY_DAYS = 30;
+const DAY_MS = 86_400_000;
+
+/**
+ * The customer's refusal when another free scan was made for or connected to
+ * this org in the last 30 days, or null. The scan asking is left out, so its
+ * own earlier attempts never count. If the store can't say, the scan is refused
+ * too: the code is spent, so the tokens can't wait for a retry.
+ */
+async function scanCap(orgId: string, scanRunId: string, deps: WorkerDeps, log: (line: string) => void): Promise<string | null> {
+  const now = (deps.now ?? (() => new Date()))();
+  let last: string | null;
+  try {
+    last = await deps.store.lastScanOfOrg(orgId.slice(0, 15), scanRunId, new Date(now.getTime() - SCAN_EVERY_DAYS * DAY_MS).toISOString());
+  } catch (err) {
+    // Said, or a renamed console column would refuse every scan in silence. The SQLSTATE only: a driver's message can quote a value.
+    const code = (err as { code?: unknown } | null)?.code;
+    log(`The free-scan cap couldn't be checked: SQLSTATE ${typeof code === "string" && /^[0-9A-Z]{5}$/.test(code) ? code : "no code"}`);
+    return `We couldn't check whether this Salesforce org has had a free scan recently, so we disconnected it and read nothing. ${START_AGAIN}`;
+  }
+  if (!last) return null;
+  const after = longDate(new Date(Date.parse(last) + SCAN_EVERY_DAYS * DAY_MS).toISOString());
+  return `This Salesforce org had a free Barometer Scan in the last 30 days. You can run another after ${after}, or talk to us about a plan that scans every month.`;
 }
 
 async function exchange(link: ConnectLink, code: string, codeVerifier: string, deps: WorkerDeps, secrets: Array<string | undefined>): Promise<TokenSet> {
