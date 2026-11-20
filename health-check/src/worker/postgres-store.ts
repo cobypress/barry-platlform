@@ -1,3 +1,4 @@
+import { StoreError, type OrgStage } from "../connect/org-stages.ts";
 import type { Inventory } from "../schemas/inventory.ts";
 import type { ScanResult } from "../scan/result.ts";
 import type { PulseResult } from "../pulse/result.ts";
@@ -401,6 +402,16 @@ export function versionRow(v: SectionVersion): Record<string, unknown> {
 const CLOSED = new Set(["in_review", "released"]);
 /** A delivery's claim on its run (DECISIONS.md 538), word for word as the console's side of it is written against. */
 const CLAIM_RUN_SQL = `UPDATE "HealthCheckRun" SET "status" = CASE WHEN "status" = 'awaiting_manual' THEN 'analysing' ELSE "status" END WHERE "id" = $1 AND "status" NOT IN ('in_review', 'released') RETURNING "status"`;
+/**
+ * DECISIONS.md 610: the latest moment another free scan was made for the org
+ * (its orgId, set at connect or by the console) or connected to it (a link's
+ * connectedOrgId), after $3. Org ids compare on 15 characters, so either form matches.
+ */
+export const LAST_SCAN_SQL = `SELECT to_char(MAX("at"), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "at" FROM (` +
+  `SELECT r."startedAt" AS "at" FROM "HealthCheckRun" r WHERE r."product" = 'scan' AND r."id" <> $2 AND LEFT(r."orgId", 15) = $1 AND r."startedAt" > $3::timestamp(3)` +
+  ` UNION ALL ` +
+  `SELECT l."usedAt" AS "at" FROM "HealthCheckConnectLink" l JOIN "HealthCheckRun" r ON r."id" = l."runId" WHERE r."product" = 'scan' AND r."id" <> $2 AND LEFT(l."connectedOrgId", 15) = $1 AND l."usedAt" > $3::timestamp(3)` +
+  `) AS "scans"`;
 const one = (r: SqlResult): Record<string, unknown> | undefined => r.rows[0];
 /** An error's SQLSTATE, and nothing else of it: five characters, or a word saying there was none. */
 const sqlState = (code: unknown): string => (typeof code === "string" && /^[0-9A-Z]{5}$/.test(code) ? code : "with no code");
@@ -411,6 +422,7 @@ export class PostgresWorkerStore implements WorkerStore {
   /** Said once: a console without the summaries' table says so on every save and every make otherwise. */
   #saidNoSummariesTable = false;
   #saidNoInventoryTable = false;
+  #saidNoOrgStagesTable = false;
 
   constructor(pool: SqlPool, options: { log?: (line: string) => void } = {}) {
     this.#pool = pool;
@@ -704,8 +716,39 @@ export class PostgresWorkerStore implements WorkerStore {
     if (!row) return null;
     const run = one(await this.#pool.query(`SELECT "orgId", "id", "product" FROM "HealthCheckRun" WHERE "id" = (SELECT "runId" FROM "HealthCheckConnectLink" WHERE "id" = $1)`, [linkId]));
     if (typeof run?.orgId !== "string") return null;
-    const job = linkFromRow(row, run.orgId);
+    const linked = linkFromRow(row, run.orgId);
+    const job = typeof run.id === "string" ? { ...linked, runId: run.id } : linked;
     return run.product === "scan" && typeof run.id === "string" ? { ...job, scanRunId: run.id } : job;
+  }
+
+  /** DECISIONS.md 610: the columns that exist, so no migration. Both halves leave out the scan asking. */
+  async lastScanOfOrg(orgId15: string, exceptRunId: string, since: string): Promise<string | null> {
+    const row = one(await this.#pool.query(LAST_SCAN_SQL, [orgId15, exceptRunId, since]));
+    return typeof row?.at === "string" ? row.at : null;
+  }
+
+  /**
+   * The org's stages, replaced whole (DECISIONS.md 611): DELETE then INSERT
+   * in a transaction of their own, outside every other write. A console
+   * without the table (42P01) says so once a process; any other error is
+   * thrown by its SQLSTATE alone, because a driver's message can quote a value.
+   */
+  async saveOrgStages(runId: string, stages: OrgStage[], readAt: string): Promise<boolean> {
+    try {
+      await this.#transaction(async (client) => {
+        await client.query(`DELETE FROM "HealthCheckOrgStages" WHERE "runId" = $1`, [runId]);
+        await client.query(`INSERT INTO "HealthCheckOrgStages" ("runId", "readAt", "stages") VALUES ($1, $2::timestamp(3), $3::jsonb)`, [runId, readAt, JSON.stringify(stages)]);
+      });
+      return true;
+    } catch (err) {
+      const code = (err as { code?: unknown }).code;
+      if (code !== "42P01") throw new StoreError(`the console's database refused it (SQLSTATE ${sqlState(code)})`);
+      if (!this.#saidNoOrgStagesTable) {
+        this.#saidNoOrgStagesTable = true;
+        this.#log("The console's database has no HealthCheckOrgStages table yet, so the org's stages aren't saved for the calibration. Apply the console's org stages migration.");
+      }
+      return false;
+    }
   }
 
   markLinkUsed(linkId: string, c: LinkConnected): Promise<void> {

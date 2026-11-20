@@ -4,10 +4,13 @@ import { daysBefore, readSoql, soqlDate, soqlDateTime, soqlUpTo, unavailable, up
 
 export type StageRow = { ApiName: string; MasterLabel: string; IsActive: boolean; IsClosed: boolean; IsWon: boolean; SortOrder: number };
 
+/** The stage read, shared with the connect job's read for the calibration screen (DECISIONS.md 611). */
+export const STAGES_SOQL = "SELECT ApiName, MasterLabel, IsActive, IsClosed, IsWon, SortOrder FROM OpportunityStage";
+
 export const stagesExtractor: Extractor<Sourced<StageRow[]>> = {
   id: "opportunity-stages",
   version: 1,
-  run: (ctx) => readSoql<StageRow>(ctx, "SELECT ApiName, MasterLabel, IsActive, IsClosed, IsWon, SortOrder FROM OpportunityStage"),
+  run: (ctx) => readSoql<StageRow>(ctx, STAGES_SOQL),
 };
 
 // Every pipeline number comes from these two rows, so they're validated on the

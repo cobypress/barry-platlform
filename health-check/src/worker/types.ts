@@ -1,3 +1,4 @@
+import type { OrgStage } from "../connect/org-stages.ts";
 import type { Inventory } from "../schemas/inventory.ts";
 import type { ScanResult } from "../scan/result.ts";
 import type { PulseResult } from "../pulse/result.ts";
@@ -128,6 +129,8 @@ export type ConnectJobInput = {
   sealedCode: string | null;
   /** Set when the link's run is a free scan: once connected, the worker queues it itself. */
   scanRunId?: string;
+  /** The link's run, whatever its product: where the org's stages are written (DECISIONS.md 611). */
+  runId?: string;
 };
 
 export type LinkConnected = {
@@ -261,6 +264,19 @@ export interface WorkerStore {
   markLinkUsed(linkId: string, connected: LinkConnected): Promise<void>;
   /** Moves a pending link to refused with a reason the console can show, and clears its sealed secrets. Never a token. */
   refuseLink(linkId: string, reason: string, at: string): Promise<void>;
+  /**
+   * The latest moment, ISO UTC, after `since` that a free scan other than
+   * `exceptRunId` was made for or connected to the org whose id starts with
+   * `orgId15`, or null (DECISIONS.md 610). Made is the run's startedAt with its
+   * orgId matching; connected is a link's usedAt with its connectedOrgId matching.
+   */
+  lastScanOfOrg(orgId15: string, exceptRunId: string, since: string): Promise<string | null>;
+  /**
+   * The org's opportunity stages for the run's calibration screen, replacing
+   * any row the run had (DECISIONS.md 611). False when the console has no
+   * table for them yet. Throws StoreError, never naming a stage.
+   */
+  saveOrgStages(runId: string, stages: OrgStage[], readAt: string): Promise<boolean>;
 
   /** With `handbookSummaries` unset or false, nothing reads the summaries' table. */
   loadDocumentsJob(runId: string, reads?: DocumentsJobReads): Promise<DocumentsJobInput | null>;
