@@ -1,5 +1,6 @@
 import { StoreError, type OrgStage } from "../connect/org-stages.ts";
 import type { Inventory } from "../schemas/inventory.ts";
+import type { Complexity } from "../schemas/complexity.ts";
 import type { ScanResult } from "../scan/result.ts";
 import type { PulseResult } from "../pulse/result.ts";
 import { randomUUID } from "node:crypto";
@@ -422,6 +423,7 @@ export class PostgresWorkerStore implements WorkerStore {
   /** Said once: a console without the summaries' table says so on every save and every make otherwise. */
   #saidNoSummariesTable = false;
   #saidNoInventoryTable = false;
+  #saidNoComplexityTable = false;
   #saidNoOrgStagesTable = false;
 
   constructor(pool: SqlPool, options: { log?: (line: string) => void } = {}) {
@@ -599,6 +601,7 @@ export class PostgresWorkerStore implements WorkerStore {
       await this.#writeFacts(client, runId, output.facts, output.factsFile);
       if (summaries?.ok && summaries.row) await this.#writeSummaries(client, summaries.row);
       if (output.inventory) await this.#writeInventory(client, runId, output.inventory);
+      if (output.complexity) await this.#writeComplexity(client, runId, output.complexity);
     });
   }
 
@@ -700,6 +703,28 @@ export class PostgresWorkerStore implements WorkerStore {
       return;
     }
     await client.query("RELEASE SAVEPOINT run_inventory");
+  }
+
+  /**
+   * The org's complexity score (DECISIONS.md 614), replaced whole as the
+   * inventory is: a console without the table (42P01) still gets the run's
+   * results, and says so once a process. Any other error rolls the save back.
+   */
+  async #writeComplexity(client: SqlClient, runId: string, complexity: Complexity): Promise<void> {
+    await client.query("SAVEPOINT run_complexity");
+    try {
+      await client.query(`DELETE FROM "HealthCheckComplexity" WHERE "runId" = $1`, [runId]);
+      await client.query(`INSERT INTO "HealthCheckComplexity" ("runId", "madeAt", "complexity") VALUES ($1, $2::timestamp(3), $3::jsonb)`, [runId, complexity.madeAt, JSON.stringify(complexity)]);
+    } catch (err) {
+      if ((err as { code?: string }).code !== "42P01") throw err;
+      await client.query("ROLLBACK TO SAVEPOINT run_complexity");
+      if (!this.#saidNoComplexityTable) {
+        this.#saidNoComplexityTable = true;
+        this.#log("The console's database has no HealthCheckComplexity table yet, so the org's complexity score isn't saved. Apply the console's complexity migration.");
+      }
+      return;
+    }
+    await client.query("RELEASE SAVEPOINT run_complexity");
   }
 
   recordRunFailure(runId: string, reason: string, at: string): Promise<void> {

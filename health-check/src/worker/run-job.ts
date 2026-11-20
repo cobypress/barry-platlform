@@ -22,6 +22,8 @@ import { withoutComments } from "../survey/questions.ts";
 import { FACTS_FILE } from "../extract/facts.ts";
 import { INVENTORY_FILE } from "../extract/inventory.ts";
 import { Inventory } from "../schemas/inventory.ts";
+import { COMPLEXITY_FILE } from "../complexity/read.ts";
+import { Complexity } from "../schemas/complexity.ts";
 import { APEX_SOURCE_FILE } from "../extract/apex-source.ts";
 import { HandbookSummaries, summariseApex, SUMMARIES_FILE, SUMMARIES_PARTIAL_FILE } from "../handbook/summaries.ts";
 import type { SummariesToSave } from "../handbook/summary-row.ts";
@@ -270,6 +272,7 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
     // Only with the switch on, as it stands now: off, the console's table is never named.
     const handbookSummaries = apexSummaries ? summariesOf(dir, runId, log) : null;
     const inventory = inventoryOf(dir, log);
+    const complexity = complexityOf(dir, log);
     await deps.store.saveRunOutput(runId, {
       progress: progressOf(result.run),
       runDir: dir,
@@ -287,6 +290,7 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
       factsFile: facts.file,
       ...(handbookSummaries ? { handbookSummaries } : {}),
       ...(inventory ? { inventory } : {}),
+      ...(complexity ? { complexity } : {}),
     });
   } catch (err) {
     if (err instanceof RunClosedError) return { outcome: "skipped", detail: err.message };
@@ -365,6 +369,39 @@ export function inventoryOf(dir: string, log: (line: string) => void): Inventory
   const parsed = Inventory.safeParse(raw);
   if (!parsed.success || holdsNul(parsed.data)) {
     log("The run's inventory.json doesn't fit the inventory's shape, so the console gets no inventory.");
+    return null;
+  }
+  return parsed.data;
+}
+
+/** The most of complexity.json the worker sends. Seven components of a few counts each is a few kilobytes. */
+export const COMPLEXITY_MAX_BYTES = 256 * 1024;
+
+/**
+ * The org's complexity for the console (DECISIONS.md 614), read before a scan's
+ * folder is deleted, as the inventory is. None from a run without the file, or
+ * one that doesn't parse, is too big or doesn't fit its shape: the results save
+ * without it, and the log says which, never quoting the file.
+ */
+export function complexityOf(dir: string, log: (line: string) => void): Complexity | null {
+  const path = join(dir, COMPLEXITY_FILE);
+  if (!existsSync(path)) return null;
+  let text: string;
+  let raw: unknown;
+  try {
+    text = readFileSync(path, "utf8");
+    raw = JSON.parse(text);
+  } catch {
+    log("The run's complexity.json didn't parse, so the console gets no complexity score.");
+    return null;
+  }
+  if (Buffer.byteLength(text, "utf8") >= COMPLEXITY_MAX_BYTES) {
+    log("The run's complexity.json is larger than the worker sends, so the console gets no complexity score.");
+    return null;
+  }
+  const parsed = Complexity.safeParse(raw);
+  if (!parsed.success || holdsNul(parsed.data)) {
+    log("The run's complexity.json doesn't fit the complexity score's shape, so the console gets no complexity score.");
     return null;
   }
   return parsed.data;

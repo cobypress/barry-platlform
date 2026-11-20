@@ -1,5 +1,6 @@
 import type { OrgStage } from "../connect/org-stages.ts";
 import type { Inventory } from "../schemas/inventory.ts";
+import type { Complexity } from "../schemas/complexity.ts";
 import type { ScanResult } from "../scan/result.ts";
 import type { PulseResult } from "../pulse/result.ts";
 import type { FactsFile, FactsReport } from "../facts/summary.ts";
@@ -110,6 +111,11 @@ export type RunOutputRecord = {
    * record or who. Only when the run folder has an inventory.json that parses.
    */
   inventory?: Inventory;
+  /**
+   * The org's complexity score and its working (DECISIONS.md 614): counts of
+   * set-up, never a record. Only when the run folder has a complexity.json that parses.
+   */
+  complexity?: Complexity;
 };
 
 /**
