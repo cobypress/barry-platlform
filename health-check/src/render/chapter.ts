@@ -1,5 +1,6 @@
 import type { BuiltReport } from "../narrative/sections.ts";
 import { bySeverity, domainLabel, isThinData, issuesOf, type Added } from "../narrative/select.ts";
+import { kindTallies, noteCounts } from "../narrative/unmeasured.ts";
 import type { Finding } from "../schemas/index.ts";
 import { compactMoney } from "./format.ts";
 import { estimateLines, type Render } from "./html.ts";
@@ -86,7 +87,7 @@ export function chapterFigures(own: Finding[]): number[] {
   const { issues, broken, belowPar, passed, open } = groups(own);
   const cap = listCap([passed, broken, belowPar]);
   const overflow = [passed, broken, belowPar].filter((l) => l.length > cap).map((l) => l.length - cap);
-  return [own.length, passed.length, issues.length, open.length, ...overflow];
+  return [own.length, passed.length, issues.length, open.length, ...overflow, ...kindTallies(open)];
 }
 
 /** The chapter's opening slide for one area. Empty for an area with nothing assessed. */
@@ -117,7 +118,9 @@ export function chapterSlide(r: Render, report: BuiltReport, domain: string): st
 
   const good = practiceFor(domain).slice(0, PRACTICE_ON_SLIDE);
   // A thin org is told once, at the front, so its areas don't each say it again (DECISIONS.md 450).
-  const note = open.length && !isThinData(report.teamFindings) ? `${open.length} more ${open.length === 1 ? "check" : "checks"} couldn't be measured here. The appendix says why.` : null;
+  // By kind where any of them isn't simply unreadable (DECISIONS.md 627).
+  const kinds = noteCounts(open);
+  const note = open.length && !isThinData(report.teamFindings) ? `${open.length} more ${open.length === 1 ? "check" : "checks"} couldn't be measured here${kinds ? `: ${kinds}` : ""}. The appendix says why.` : null;
   const steps = firstSteps(issues, good.map((p) => `${p.text} ${sourceLabel(p)}`), note);
   const right = [
     `<h3>What it costs</h3><p>${worth > 0 ? r.t(`About ${compactMoney(worth, report.value.currency)} of the money page's total: a share of the figures that follow.`) : r.t("We haven't put a money figure on these. They matter for the risk they carry.")}</p>`,

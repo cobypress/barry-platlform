@@ -60,7 +60,7 @@ export function surveyMetrics(survey: Survey | null | undefined, capturedAt: str
   const base = { domain: DOMAIN, evidence, exclusions: [...(dropped ? ["Answers that don't fit this version of the questions"] : []), "Comments, which never go in the documents"], assumptions: [] as string[] };
   if (answers.length < MIN_RESPONSES) {
     // No figure at all, not even how many answered: a line saying so is all.
-    return [{ ...DEFS.responses, ...base, status: "not_measurable", reason: `Fewer than ${MIN_RESPONSES} people answered the team survey, so we don't show its results.` }];
+    return [{ ...DEFS.responses, ...base, status: "not_measurable", reason: `Fewer than ${MIN_RESPONSES} people answered the team survey, so we don't show its results.`, notMeasurableKind: "too_little_data" as const }];
   }
   const n = answers.length;
   const measured = (key: keyof typeof SURVEY, value: number, segments: MetricSegment[], stats: Record<string, number> = {}, exempt?: string): Metric => ({

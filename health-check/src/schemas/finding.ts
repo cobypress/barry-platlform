@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { DomainId, SegmentCheck } from "./common.ts";
+import { DomainId, NotMeasurableKind, SegmentCheck } from "./common.ts";
 import { Evidence } from "./evidence.ts";
 
 export const Severity = z.enum(["critical", "high", "medium", "low", "info"]);
@@ -74,11 +74,16 @@ export const Finding = z
     // Every figure in the summary, by name. The Milestone 3 number check reads these.
     facts: z.record(z.string(), z.number()),
     notMeasurableReason: z.string().nullable(),
+    // Which of the four kinds the reason is (DECISIONS.md 627). Only on a not measurable finding.
+    notMeasurableKind: NotMeasurableKind.optional(),
     manualStepIds: z.array(z.string()),
   })
   .superRefine((f, ctx) => {
     if (f.status === "not_measurable" && !f.notMeasurableReason) {
       ctx.addIssue({ code: "custom", path: ["notMeasurableReason"], message: "A not measurable finding must give the reason" });
+    }
+    if (f.status !== "not_measurable" && f.notMeasurableKind !== undefined) {
+      ctx.addIssue({ code: "custom", path: ["notMeasurableKind"], message: "Only a not measurable finding has a kind" });
     }
     if (DESTRUCTIVE_RECOMMENDATIONS.has(f.recommendationType)) {
       if (f.status !== "issue") {

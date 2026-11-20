@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CalendarDate, DateRange, DomainId } from "./common.ts";
+import { CalendarDate, DateRange, DomainId, NotMeasurableKind } from "./common.ts";
 import { Evidence } from "./evidence.ts";
 
 export const MetricUnit = z.enum(["percent", "days", "count", "currency", "ratio"]);
@@ -47,7 +47,8 @@ export const Metric = z
       stats: z.record(z.string(), z.number()),
     }),
     // A distinct shape on purpose: there's no value field to fill with a guess.
-    z.object({ status: z.literal("not_measurable"), ...base, reason: z.string().min(1) }),
+    // The kind is optional (DECISIONS.md 627): a metric written before it has none.
+    z.object({ status: z.literal("not_measurable"), ...base, reason: z.string().min(1), notMeasurableKind: NotMeasurableKind.optional() }),
   ])
   .superRefine((m, ctx) => {
     if (m.status === "measured" && m.segments.length === 0 && !m.segmentExemptReason) {

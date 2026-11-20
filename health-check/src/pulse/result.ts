@@ -1,6 +1,7 @@
 import type { BuiltReport } from "../narrative/sections.ts";
 import { areasOf, bySeverity, domainLabel, issuesOf, scorecard } from "../narrative/select.ts";
-import type { Finding } from "../schemas/index.ts";
+import type { Finding, NotMeasurableKind } from "../schemas/index.ts";
+import type { RuleChange } from "../progress/compare.ts";
 
 // The monthly pulse (roadmap Stage 5, Barometer Ongoing): a lighter re-check
 // that nobody reviews. Its result is what changed since the baseline the
@@ -20,14 +21,22 @@ export type PulseResult = {
   score: { now: number | null; before: number | null };
   worth: { currency: string; now: number; before: number | null };
   /** Rules with an issue now, whatever the baseline. The rest are against the baseline, null without one. */
-  counts: { openNow: number; fixed: number | null; stillOpen: number | null; new: number | null; cantTell: number | null };
-  areas: Array<{ domain: string; label: string; now: number | null; before: number | null }>;
+  /** `cantTellByKind`: of `cantTell`, how many of each kind, where this run gave one (DECISIONS.md 627). Optional, as is an area's kind. */
+  counts: { openNow: number; fixed: number | null; stillOpen: number | null; new: number | null; cantTell: number | null; cantTellByKind?: Partial<Record<NotMeasurableKind, number>> };
+  areas: Array<{ domain: string; label: string; now: number | null; before: number | null; notMeasurableKind?: NotMeasurableKind }>;
   newIssues: Array<{ title: string; severity: Finding["severity"]; area: string }>;
   fixed: Array<{ title: string; area: string }>;
 };
 
 // A pseudonym token means a name was meant to go back in, which never happens here.
 const TOKEN = /\[\[[a-z]+:/;
+
+/** How many changes we can't tell about are of each kind, or nothing where none carries one. */
+function cantTellByKind(unknown: RuleChange[]): { cantTellByKind?: Partial<Record<NotMeasurableKind, number>> } {
+  const out: Partial<Record<NotMeasurableKind, number>> = {};
+  for (const c of unknown) if (c.notMeasurableKind) out[c.notMeasurableKind] = (out[c.notMeasurableKind] ?? 0) + 1;
+  return Object.keys(out).length ? { cantTellByKind: out } : {};
+}
 
 export function buildPulseResult(report: BuiltReport): PulseResult {
   const { run } = report.input;
@@ -59,8 +68,8 @@ export function buildPulseResult(report: BuiltReport): PulseResult {
     baselineAsOf: p?.baselineAsOf ?? null,
     score: { now: report.overall.status === "measured" ? report.overall.score : null, before: p?.score.before ?? null },
     worth: { currency: report.value.currency, now: report.value.total.expected, before: p ? p.worth.before : null },
-    counts: { openNow, fixed: p ? p.fixed.length : null, stillOpen: p ? p.remaining.length : null, new: p ? p.added.length : null, cantTell: p ? p.unknown.length : null },
-    areas: rows.map((r) => ({ domain: r.domain, label: r.label, now: r.score, before: before.get(r.domain) ?? null })),
+    counts: { openNow, fixed: p ? p.fixed.length : null, stillOpen: p ? p.remaining.length : null, new: p ? p.added.length : null, cantTell: p ? p.unknown.length : null, ...cantTellByKind(p?.unknown ?? []) },
+    areas: rows.map((r) => ({ domain: r.domain, label: r.label, now: r.score, before: before.get(r.domain) ?? null, ...(r.notMeasurableKind ? { notMeasurableKind: r.notMeasurableKind } : {}) })),
     newIssues,
     fixed,
   };

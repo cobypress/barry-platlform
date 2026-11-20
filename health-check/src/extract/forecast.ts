@@ -21,10 +21,17 @@ export const quotasExtractor: Extractor<QuotaData> = {
 };
 
 /** The one revenue forecast type to read, or why there isn't one. Adding two types together would double count. */
-export function revenueForecastType(types: ForecastTypeRow[]): { id: string } | { reason: string } {
+/**
+ * The revenue forecast type, or why there isn't one to read. `switchedOff` is
+ * set only when Salesforce listed forecast types and none is an active revenue
+ * one: a fact about the org's set-up, not about what the connection can see
+ * (DECISIONS.md 627). No types at all could be either, so it isn't set then.
+ */
+export function revenueForecastType(types: ForecastTypeRow[]): { id: string } | { reason: string; switchedOff?: true } {
+  if (types.length === 0) return { reason: "Salesforce returned no forecast types, so we can't tell whether Forecasting is in use." };
   const amount = types.filter((t) => t.IsActive && t.IsAmount);
   if (amount.length === 1) return { id: amount[0]!.Id };
-  if (amount.length === 0) return { reason: "No revenue forecast type is active, so Forecasting isn't in use for revenue." };
+  if (amount.length === 0) return { reason: "No revenue forecast type is active, so Forecasting isn't in use for revenue.", switchedOff: true };
   const standard = amount.find((t) => t.DeveloperName === "OpportunityRevenue");
   return standard ? { id: standard.Id } : { reason: `${amount.length} revenue forecast types are active, and none is the standard one, so we can't tell which to read.` };
 }

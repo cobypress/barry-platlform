@@ -37,6 +37,9 @@ function forecastInUse(ctx: Ctx): { inUse: true; typeId: string; items: Forecast
   const off = (reason: string, evidence: Evidence[]): InUse => ({ inUse: false, outcome: "not_measurable", reason: `Forecasting isn't in use, or can't be read, so we don't report a forecast figure. ${reason}`, evidence });
   if (types.status !== "ok") return off(types.reason, [ctx.ev(types.source, { count: null })]);
   const type = revenueForecastType(types.data);
+  // Only an org whose forecast types were read, with no revenue one active, is said not to use it (DECISIONS.md 627):
+  // the other ways here can't tell "not in use" from "can't be read by this user", so they keep saying both.
+  if ("switchedOff" in type) return { inUse: false, outcome: "not_measurable", reason: "No revenue forecast type is active, so Forecasting isn't in use for revenue, and we don't report a forecast figure.", evidence: [ctx.ev(types.source, { count: types.data.length })] };
   if ("reason" in type) return off(type.reason, [ctx.ev(types.source, { count: types.data.length })]);
   if (items.status !== "ok") return off(items.reason, [ctx.ev(items.source, { count: null })]);
   const rows = items.data.filter((i) => i.ForecastingTypeId === type.id);

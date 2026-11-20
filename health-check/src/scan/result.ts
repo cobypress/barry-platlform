@@ -3,7 +3,7 @@ import type { BuiltReport } from "../narrative/sections.ts";
 import { areasOf, bySeverity, domainLabel, issuesOf, scorecard } from "../narrative/select.ts";
 import { ALL_MODULES } from "../domains/index.ts";
 import { DOCUMENTED } from "../domains/configuration/documented.ts";
-import type { Finding } from "../schemas/index.ts";
+import type { Finding, NotMeasurableKind } from "../schemas/index.ts";
 
 // The free Barometer Scan's teaser (roadmap Stage 5): the score, each area's
 // score and issue count, and a few real findings in full. Every other issue is
@@ -26,7 +26,8 @@ export type OrgCountId = "customObjects" | "customFields" | "flows" | "apexClass
 export type ScanResult = {
   score: number | null;
   grade: string | null;
-  areas: Array<{ domain: string; label: string; score: number | null; issues: number; high: number; bySeverity?: SeverityCounts }>;
+  /** `notMeasurableKind` only on an area with no score whose score says why (DECISIONS.md 627): "not_in_use" for an area the org doesn't use. */
+  areas: Array<{ domain: string; label: string; score: number | null; issues: number; high: number; bySeverity?: SeverityCounts; notMeasurableKind?: NotMeasurableKind }>;
   shown: Array<{
     title: string;
     summary: string;
@@ -97,7 +98,7 @@ export function buildScanResult(report: BuiltReport, held: OrgCount[] = []): Sca
   return {
     score: o.status === "measured" ? o.score : null,
     grade: o.status === "measured" ? o.grade : null,
-    areas: rows.map((r) => ({ domain: r.domain, label: r.label, score: r.score, issues: r.issues, high: r.high, bySeverity: severities(issues.filter((f) => f.domain === r.domain)) })),
+    areas: rows.map((r) => ({ domain: r.domain, label: r.label, score: r.score, issues: r.issues, high: r.high, bySeverity: severities(issues.filter((f) => f.domain === r.domain)), ...(r.notMeasurableKind ? { notMeasurableKind: r.notMeasurableKind } : {}) })),
     // In the reports' words: UK dates and plain terms, as every other page has them (night 3 reading pass).
     shown: shown.map((f) => {
       const fix = fixOf(f);

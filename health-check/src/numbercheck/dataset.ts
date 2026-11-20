@@ -1,5 +1,6 @@
 import type { Finding, ManualStep, Metric, NumberOverride, Run, Score } from "../schemas/index.ts";
 import { extractFigures, type Figure, type PartialDate } from "./extract.ts";
+import { kindTallies } from "../narrative/unmeasured.ts";
 
 // Everything a report is allowed to say, with where each figure came from. Facts
 // are named numbers with no unit, so their unit comes from how the engine's own
@@ -202,6 +203,8 @@ function addSummary(set: FigureSet, all: Finding[], metrics: Metric[], manualSte
   c.number(issues.length);
   c.number(findings.filter((f) => f.status === "passed").length);
   c.number(findings.filter((f) => f.status === "not_measurable").length);
+  // What couldn't be measured, by kind (DECISIONS.md 627).
+  for (const n of kindTallies(findings)) c.number(n);
   c.number(metrics.length);
   c.number(metrics.filter((m) => m.status === "measured").length);
   c.number(manualSteps.length);
@@ -213,6 +216,7 @@ function addSummary(set: FigureSet, all: Finding[], metrics: Metric[], manualSte
   for (const group of byDomain.values()) {
     c.number(group.length);
     c.number(group.filter((f) => f.status === "issue").length);
+    for (const n of kindTallies(group)) c.number(n);
   }
 }
 

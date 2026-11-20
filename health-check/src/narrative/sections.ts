@@ -23,6 +23,7 @@ import { assumptionsSource, findingSource, metricSource, planSource, statedProbl
 import { areasOf, buildPlan, bySeverity, domainLabel, domainsInOrder, isSetupReview, isThinData, issuesOf, rankBy, scorecard, teamLevelFinding, topIssues, verdictOf, type Added, type Plan } from "./select.ts";
 import { chapterFigures } from "../render/chapter.ts";
 import { restOf } from "../render/money.ts";
+import { byKind, hasKinds, kindCounts } from "./unmeasured.ts";
 import { MIN_RESPONSES, SURVEY, SURVEY_METRIC_IDS, surveyHours, surveyMetrics } from "../survey/summary.ts";
 import type { Survey } from "../survey/questions.ts";
 import { buildSurveyView, surveyViewFigures, type SurveyView } from "../survey/view.ts";
@@ -441,7 +442,7 @@ function rawNotesSpecs(input: ReportInput, overall: OverallScore, comparisons: C
     {
       key: "exclusions_limits",
       title: "Exclusions and limits",
-      body: lines(exclusions.length ? `What the checks left out:\n${exclusions.join("\n")}` : "No exclusions were applied.", notMeasurable.length ? `What we couldn't measure:\n${notMeasurable.map((f) => `${f.title}: ${f.notMeasurableReason}`).join("\n")}` : null),
+      body: lines(exclusions.length ? `What the checks left out:\n${exclusions.join("\n")}` : "No exclusions were applied.", notMeasurable.length ? `What we couldn't measure:\n${unmeasuredLines(notMeasurable)}` : null),
       findingIds: findings.map((f) => f.id),
       metricIds: metrics.map((m) => m.id),
     },
@@ -496,6 +497,13 @@ function deepDiveText(metrics: Metric[], currency: string): string {
     repeat ? `${repeat.value}% of won value came from customers who had bought before.${top ? ` Your top ${top.stats.top} accounts brought in ${top.value}% of it.` : ""}` : null,
     reliable && late ? `${reliable.value}% of won deals closed in the quarter they were first forecast for, and the median won deal closed ${late.value} days after its first close date.` : null,
   );
+}
+
+/** Each check we couldn't measure with its reason, under its kind's heading when the run has kinds (DECISIONS.md 627). */
+function unmeasuredLines(notMeasurable: Finding[]): string {
+  const line = (f: Finding): string => `${f.title}: ${f.notMeasurableReason}`;
+  if (!hasKinds(notMeasurable)) return notMeasurable.map(line).join("\n");
+  return byKind(notMeasurable).map((g) => `${g.heading}:\n${g.findings.map(line).join("\n")}`).join("\n");
 }
 
 function summaryCounts(findings: Finding[]): PromptSource {
@@ -816,7 +824,7 @@ function fullSpecs(input: ReportInput, team: Finding[], metrics: Metric[], surve
     {
       key: "appendix",
       title: "Appendix",
-      body: lines("This part sets out how we worked, what we couldn't measure, and what passed.", notMeasurable.length ? `We couldn't measure ${plural(notMeasurable.length, "check")}. We report these rather than estimate them.` : null, passed.length ? `${plural(passed.length, "check")} passed.` : null),
+      body: lines("This part sets out how we worked, what we couldn't measure, and what passed.", notMeasurable.length ? `We couldn't measure ${plural(notMeasurable.length, "check")}${hasKinds(notMeasurable) ? `: ${kindCounts(notMeasurable)}` : ""}. We report these rather than estimate them.` : null, passed.length ? `${plural(passed.length, "check")} passed.` : null),
       findingIds: [...notMeasurable, ...passed].map((f) => f.id),
       sources: [...SUMMARY_SOURCES, CALIBRATION],
       brief: {

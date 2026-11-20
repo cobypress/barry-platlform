@@ -195,7 +195,7 @@ describe("coverage", () => {
     assert.ok(f.facts.coverage! >= 3);
   });
 
-  for (const [source, match] of [["none", /no targets/], ["spreadsheet", /spreadsheet/], ["custom_object", /custom object/]] as const) {
+  for (const [source, match] of [["none", /^No targets were given in the calibration\. Tell us your targets/], ["spreadsheet", /spreadsheet/], ["custom_object", /custom object/]] as const) {
     test(`targets in ${source} are not measurable, never estimated`, () => {
       const calibration = loadCalibration();
       calibration.targets = { source };

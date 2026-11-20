@@ -14148,6 +14148,7 @@
     "subjects": [],
     "facts": {},
     "notMeasurableReason": "We can't yet see how often your team opens dashboards. Salesforce only tells us when the person running the check last opened each one, which says nothing about anyone else.",
+    "notMeasurableKind": "unreadable",
     "manualStepIds": []
    },
    {
@@ -18024,6 +18025,7 @@
     "subjects": [],
     "facts": {},
     "notMeasurableReason": "Forecast rows show today's position, not what was called at the time, so accuracy can't be measured from them. It needs a snapshot taken each period.",
+    "notMeasurableKind": "unreadable",
     "manualStepIds": []
    },
    {
@@ -21690,7 +21692,8 @@
     ],
     "exclusions": [],
     "assumptions": [],
-    "reason": "The seats can't be priced, because Salesforce Platform has no cost per seat (The calibration has no cost for it, and there's no list price: We haven't confirmed which of Salesforce's current plans Enterprise Edition is priced as.)."
+    "reason": "The seats can't be priced, because Salesforce Platform has no cost per seat (The calibration has no cost for it, and there's no list price: We haven't confirmed which of Salesforce's current plans Enterprise Edition is priced as.).",
+    "notMeasurableKind": "needs_input"
    },
    {
     "status": "measured",
@@ -21775,7 +21778,8 @@
     ],
     "exclusions": [],
     "assumptions": [],
-    "reason": "At list price, the seats can't be priced, because Salesforce has no cost per seat (The calibration has no cost for it, and there's no list price: We haven't confirmed which of Salesforce's current plans Enterprise Edition is priced as.); Salesforce Platform has no cost per seat (The calibration has no cost for it, and there's no list price: We haven't confirmed which of Salesforce's current plans Enterprise Edition is priced as.)."
+    "reason": "At list price, the seats can't be priced, because Salesforce has no cost per seat (The calibration has no cost for it, and there's no list price: We haven't confirmed which of Salesforce's current plans Enterprise Edition is priced as.); Salesforce Platform has no cost per seat (The calibration has no cost for it, and there's no list price: We haven't confirmed which of Salesforce's current plans Enterprise Edition is priced as.).",
+    "notMeasurableKind": "unreadable"
    },
    {
     "status": "measured",

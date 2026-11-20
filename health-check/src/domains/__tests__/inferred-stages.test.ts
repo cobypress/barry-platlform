@@ -170,7 +170,7 @@ describe("the calibration's word wins over Salesforce's flags (DECISIONS.md 598)
 // Salesforce's flags can't tell lost from no decision, so nothing that splits
 // the two is measured from an inferred lost stage (DECISIONS.md 600).
 describe("a stage inferred as lost (DECISIONS.md 600)", () => {
-  const UNSPLIT = "Salesforce's setting can't tell lost from no decision for: Closed No Decision.";
+  const UNSPLIT = "Salesforce's setting can't tell lost from no decision for: Closed No Decision. The calibration can say which each is.";
   // Every figure and check whose definition leaves no decision out or reports it on its own.
   const METRICS = ["historic.win_rate", "historic.win_rate_by_value", "historic.no_decision_rate", "historic.quarterly_win_rate", "historic.sales_cycle_lost", "historic.lost_by_stage", "historic.lost_value_by_stage", "historic.went_backwards", "historic.win_drivers", "activity.per_lost_deal"];
   const RULES = ["act.deals-without-activity", "act.won-vs-lost-activity", "dq.loss-reason-missing", "rev.win-backs", "cpq.discount-leakage", "cpq.quote-to-order"];
