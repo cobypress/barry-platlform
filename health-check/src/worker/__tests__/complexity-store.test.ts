@@ -85,7 +85,7 @@ describe("the Postgres store's complexity row", () => {
     assert.equal(logs.filter((l) => /no HealthCheckComplexity table/.test(l)).length, 1);
   });
 
-  test("any other error rolls the whole save back", async () => {
+  test("a deadlock (class 40), as any error outside classes 42 and 23, still rolls the whole save back (DECISIONS.md 615)", async () => {
     const pool = new FakePool();
     pool.handlers.unshift((text) => {
       if (text.startsWith(`INSERT INTO "HealthCheckComplexity"`)) throw Object.assign(new Error("deadlock detected"), { code: "40P01" });

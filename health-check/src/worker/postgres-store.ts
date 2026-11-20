@@ -422,8 +422,8 @@ export class PostgresWorkerStore implements WorkerStore {
   readonly #log: (line: string) => void;
   /** Said once: a console without the summaries' table says so on every save and every make otherwise. */
   #saidNoSummariesTable = false;
-  #saidNoInventoryTable = false;
-  #saidNoComplexityTable = false;
+  /** The side tables that have refused a row this process, each said once (DECISIONS.md 615). */
+  readonly #saidSideTable = new Set<string>();
   #saidNoOrgStagesTable = false;
 
   constructor(pool: SqlPool, options: { log?: (line: string) => void } = {}) {
@@ -672,21 +672,26 @@ export class PostgresWorkerStore implements WorkerStore {
     try {
       await write(true);
     } catch (err) {
-      const code = (err as { code?: string }).code;
-      if (code !== "42P01" && code !== "42703") throw err;
+      const code = this.#sideTableFault(err);
       await client.query("ROLLBACK TO SAVEPOINT run_facts");
-      if (code === "42P01") return;
-      // A console without the file column: the summary as before. Any error now is a real one.
-      await write(false);
+      if (code !== "42703") return this.#sideTableSkipped("HealthCheckRunFacts", code, "facts");
+      // A console without the file column: the summary as before.
+      try {
+        await write(false);
+      } catch (again) {
+        const retried = this.#sideTableFault(again);
+        await client.query("ROLLBACK TO SAVEPOINT run_facts");
+        return this.#sideTableSkipped("HealthCheckRunFacts", retried, "facts");
+      }
     }
     await client.query("RELEASE SAVEPOINT run_facts");
   }
 
   /**
    * The org's inventory, replaced whole (DECISIONS.md 605), as the facts are:
-   * DELETE then INSERT inside a savepoint, so a console without the table
-   * (42P01) still gets the run's results, and says so once a process. Any
-   * other error rolls the whole save back, as the facts' does.
+   * DELETE then INSERT inside a savepoint, so a console whose table is missing
+   * or doesn't match (615) still gets the run's results, and says so once a
+   * process. Any other error rolls the whole save back, as the facts' does.
    */
   async #writeInventory(client: SqlClient, runId: string, inventory: Inventory): Promise<void> {
     await client.query("SAVEPOINT run_inventory");
@@ -694,21 +699,18 @@ export class PostgresWorkerStore implements WorkerStore {
       await client.query(`DELETE FROM "HealthCheckInventory" WHERE "runId" = $1`, [runId]);
       await client.query(`INSERT INTO "HealthCheckInventory" ("runId", "madeAt", "inventory") VALUES ($1, $2::timestamp(3), $3::jsonb)`, [runId, inventory.madeAt, JSON.stringify(inventory)]);
     } catch (err) {
-      if ((err as { code?: string }).code !== "42P01") throw err;
+      const code = this.#sideTableFault(err);
       await client.query("ROLLBACK TO SAVEPOINT run_inventory");
-      if (!this.#saidNoInventoryTable) {
-        this.#saidNoInventoryTable = true;
-        this.#log("The console's database has no HealthCheckInventory table yet, so the org's inventory isn't saved. Apply the console's inventory migration.");
-      }
-      return;
+      return this.#sideTableSkipped("HealthCheckInventory", code, "inventory");
     }
     await client.query("RELEASE SAVEPOINT run_inventory");
   }
 
   /**
    * The org's complexity score (DECISIONS.md 614), replaced whole as the
-   * inventory is: a console without the table (42P01) still gets the run's
-   * results, and says so once a process. Any other error rolls the save back.
+   * inventory is: a console whose table is missing or doesn't match (615)
+   * still gets the run's results, and says so once a process. Any other error
+   * rolls the save back.
    */
   async #writeComplexity(client: SqlClient, runId: string, complexity: Complexity): Promise<void> {
     await client.query("SAVEPOINT run_complexity");
@@ -716,15 +718,34 @@ export class PostgresWorkerStore implements WorkerStore {
       await client.query(`DELETE FROM "HealthCheckComplexity" WHERE "runId" = $1`, [runId]);
       await client.query(`INSERT INTO "HealthCheckComplexity" ("runId", "madeAt", "complexity") VALUES ($1, $2::timestamp(3), $3::jsonb)`, [runId, complexity.madeAt, JSON.stringify(complexity)]);
     } catch (err) {
-      if ((err as { code?: string }).code !== "42P01") throw err;
+      const code = this.#sideTableFault(err);
       await client.query("ROLLBACK TO SAVEPOINT run_complexity");
-      if (!this.#saidNoComplexityTable) {
-        this.#saidNoComplexityTable = true;
-        this.#log("The console's database has no HealthCheckComplexity table yet, so the org's complexity score isn't saved. Apply the console's complexity migration.");
-      }
-      return;
+      return this.#sideTableSkipped("HealthCheckComplexity", code, "complexity");
     }
     await client.query("RELEASE SAVEPOINT run_complexity");
+  }
+
+  /**
+   * A side table's error that means the console's table doesn't match what we
+   * write (class 42) or refuses the row (class 23), as its SQLSTATE; anything
+   * else, a lost connection or a deadlock among them, is thrown again so the
+   * whole save rolls back and the delivery is tried again (DECISIONS.md 615).
+   */
+  #sideTableFault(err: unknown): string {
+    const code = (err as { code?: unknown } | null)?.code;
+    if (typeof code === "string" && /^(42|23)[0-9A-Z]{3}$/.test(code)) return code;
+    throw err;
+  }
+
+  /** Said once a process for each table, by its name and the SQLSTATE alone: the message can quote a value. */
+  #sideTableSkipped(table: string, code: string, migration: string): void {
+    if (this.#saidSideTable.has(table)) return;
+    this.#saidSideTable.add(table);
+    this.#log(
+      code === "42P01"
+        ? `The console's database has no ${table} table yet, so the run's ${migration} isn't saved. Apply the console's ${migration} migration.`
+        : `The console's ${table} table refused the run's row with SQLSTATE ${code}, so the run's ${migration} isn't saved; its results are. Check the table against the console's ${migration} migration.`,
+    );
   }
 
   recordRunFailure(runId: string, reason: string, at: string): Promise<void> {
