@@ -8,6 +8,7 @@ import type { Evidence, SegmentCheck, Value } from "../../schemas/index.ts";
 import { judged, lapse } from "../logins.ts";
 import type { DomainModule } from "../types.ts";
 import { byOrigin, caseQueues, limitsOf, MIN_SEGMENT, priorityOf } from "./shared.ts";
+import { WHERE } from "../where.ts";
 
 // How the org is set up to handle cases: escalation, queues, routing,
 // licences, knowledge, macros. Most of it reads no case, so a set-up review
@@ -50,6 +51,7 @@ const escalation: Rule = {
   version: 1,
   domain: DOMAIN,
   title: "Cases escalate when they stall",
+  where: WHERE.escalationRules,
   evaluate(ctx) {
     const rules = ctx.data(escalationRulesExtractor);
     const sla = setupOf(ctx).slaProcesses;
@@ -86,6 +88,7 @@ const escalationTargets: Rule = {
   version: 1,
   domain: DOMAIN,
   title: "Escalations go to someone who can act",
+  where: WHERE.escalationRules,
   evaluate(ctx) {
     const rules = ctx.data(escalationRulesExtractor);
     if (rules.status !== "ok") return nm(`Escalation rules couldn't be read: ${rules.reason}`, [ctx.ev(rules.source, { count: null })]);
@@ -121,6 +124,7 @@ const queueSprawl: Rule = {
   version: 1,
   domain: DOMAIN,
   title: "Case queues have members, and agents aren't spread too thin",
+  where: WHERE.queues,
   evaluate(ctx) {
     const setup = setupOf(ctx);
     const queues = caseQueues(setup);

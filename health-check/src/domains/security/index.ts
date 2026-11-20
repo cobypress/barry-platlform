@@ -5,6 +5,7 @@ import { orgDocumentationExtractor } from "../../extract/documentation.ts";
 import { accessExtractor, holdersOf, privilegedPermissionsExtractor, securityHealthExtractor, type AccessData, type HealthRiskRow } from "../../extract/security.ts";
 import { notSized, plural, segmentRate, type NotMeasurableResult, type Rule, type RuleContext, type RuleResult } from "../../engine/rule.ts";
 import type { DomainModule } from "../types.ts";
+import { WHERE } from "../where.ts";
 
 // Working limits, stated in findings as our judgement rather than Salesforce's.
 const HEALTH_SCORE_TARGET = 80;
@@ -28,6 +29,7 @@ const healthScore: Rule = {
   version: 1,
   domain: "security",
   title: "Salesforce Security Health Check score",
+  where: WHERE.securityHealthCheck,
   evaluate(ctx): RuleResult | RuleResult[] {
     const { score, risks } = ctx.data(securityHealthExtractor);
     if (score.status !== "ok") return { outcome: "not_measurable", reason: `The Health Check score couldn't be read: ${score.reason}`, evidence: [ctx.ev(score.source, { count: null })] };
@@ -64,6 +66,7 @@ const healthRisks: Rule = {
   version: 1,
   domain: "security",
   title: "Security settings below Salesforce's standard",
+  where: WHERE.securityHealthCheck,
   evaluate(ctx): RuleResult | RuleResult[] {
     const { risks } = ctx.data(securityHealthExtractor);
     if (risks.status !== "ok") return { outcome: "not_measurable", reason: `Health Check settings couldn't be read: ${risks.reason}`, evidence: [ctx.ev(risks.source, { count: null })] };
@@ -176,6 +179,7 @@ const sharingDefaults: Rule = {
   version: 1,
   domain: "security",
   title: "Organisation-wide sharing defaults",
+  where: WHERE.sharingSettings,
   evaluate(ctx): RuleResult | RuleResult[] {
     const sharing = ctx.data(orgExtractor);
     if (sharing.status !== "ok") return { outcome: "not_measurable", reason: `Sharing defaults couldn't be read: ${sharing.reason}`, evidence: [ctx.ev(sharing.source, { count: null })] };

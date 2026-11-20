@@ -8,6 +8,7 @@ import { notSized, plural, segmentRate, type IssueResult, type Rule, type RuleRe
 import type { DomainModule } from "../types.ts";
 import { labelsOf } from "../labels.ts";
 import { labelsExtractor } from "../../extract/labels.ts";
+import { WHERE } from "../where.ts";
 
 // Rules that compare the org with something Salesforce itself says. The checks
 // in other domains are mostly ours: these quote the position, name where it came
@@ -42,6 +43,7 @@ const usersWithoutRole: Rule = {
   version: 1,
   domain: "best_practice",
   title: "People with no role",
+  where: WHERE.users,
   evaluate(ctx): RuleResult | RuleResult[] {
     const users = ctx.data(usersExtractor);
     if (users.status !== "ok") return { outcome: "not_measurable", reason: `Users couldn't be read: ${users.reason}`, evidence: [ctx.ev(users.source, { count: null })] };
@@ -140,6 +142,7 @@ const afterSaveSameRecord: Rule = {
   version: 1,
   domain: "best_practice",
   title: "After-save flows updating their own record",
+  where: WHERE.flows,
   evaluate(ctx): RuleResult | RuleResult[] {
     const metadata = ctx.data(metadataExtractor);
     if (metadata.status !== "ok") return { outcome: "not_measurable", reason: `Metadata couldn't be retrieved: ${metadata.reason}`, evidence: [ctx.ev(metadata.source, { count: null })] };
@@ -181,6 +184,7 @@ const jobsOnInactiveOwners: Rule = {
   version: 1,
   domain: "best_practice",
   title: "Scheduled jobs owned by inactive users",
+  where: WHERE.scheduledJobs,
   evaluate(ctx): RuleResult | RuleResult[] {
     const jobs = ctx.data(scheduledJobsExtractor);
     const users = ctx.data(usersExtractor);

@@ -8,6 +8,7 @@ import { labelsOf } from "../labels.ts";
 import { labelsExtractor } from "../../extract/labels.ts";
 import type { DomainModule } from "../types.ts";
 import { objectResolver } from "../object-names.ts";
+import { WHERE } from "../where.ts";
 
 // Apex coverage, API versions and trigger counts moved to technical health
 // (DECISIONS.md 169). This area keeps how the automation is built.
@@ -21,6 +22,7 @@ const legacyWorkflowRules: Rule = {
   version: 3,
   domain: "automation",
   title: "Workflow Rules still active",
+  where: WHERE.workflowRules,
   evaluate(ctx): RuleResult | RuleResult[] {
     const result = metadataOr(ctx, ["workflowRules"]);
     if ("outcome" in result) return result;
@@ -55,6 +57,7 @@ const legacyProcessBuilder: Rule = {
   version: 1,
   domain: "automation",
   title: "Process Builders still active",
+  where: WHERE.processBuilder,
   evaluate(ctx): RuleResult | RuleResult[] {
     const result = metadataOr(ctx);
     if ("outcome" in result) return result;
@@ -144,6 +147,7 @@ const hardcodedIds: Rule = {
   version: 1,
   domain: "automation",
   title: "Record ids or emails hardcoded in flows",
+  where: WHERE.flows,
   evaluate(ctx): RuleResult | RuleResult[] {
     const result = metadataOr(ctx);
     if ("outcome" in result) return result;
@@ -176,6 +180,7 @@ const missingFaultPaths: Rule = {
   version: 1,
   domain: "automation",
   title: "Flows that write data without handling failure",
+  where: WHERE.flows,
   evaluate(ctx): RuleResult | RuleResult[] {
     const result = metadataOr(ctx);
     if ("outcome" in result) return result;

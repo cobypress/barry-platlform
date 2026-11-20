@@ -6,6 +6,7 @@ import type { DomainModule } from "../types.ts";
 import { labelsOf } from "../labels.ts";
 import { labelsExtractor } from "../../extract/labels.ts";
 import { listed, presenceGap } from "./shared.ts";
+import { WHERE } from "../where.ts";
 
 // How CPQ is set up: its price and product rules, and the twin fields that carry
 // values from quote lines to opportunity and order products. None of it reads a
@@ -134,6 +135,7 @@ const twinFieldMismatch: Rule = {
   version: 2,
   domain: DOMAIN,
   title: "Twin fields whose types don't match",
+  where: WHERE.objectManager,
   evaluate(ctx): RuleResult {
     const gap = presenceGap(ctx);
     if (gap) return gap;

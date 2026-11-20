@@ -27,6 +27,7 @@ import { accessExtractor } from "../../extract/security.ts";
 import { aiSignalsExtractor } from "../../extract/ai.ts";
 import { aiMetrics } from "./ai.ts";
 import { loginActivityExtractor } from "../../extract/adoption.ts";
+import { WHERE } from "../where.ts";
 
 const FIELD_SPRAWL_LIMIT = 150;
 const UNUSED_FILL_LIMIT = 1;
@@ -44,6 +45,7 @@ const customFieldSprawl: Rule = {
   version: 1,
   domain: "configuration",
   title: "Too many custom fields on core objects",
+  where: WHERE.objectManager,
   evaluate(ctx): RuleResult | RuleResult[] {
     const schema = ctx.data(schemaExtractor);
     const results: RuleResult[] = [];
@@ -156,6 +158,7 @@ const unassignedLayouts: Rule = {
   version: 1,
   domain: "configuration",
   title: "Page layouts no profile uses",
+  where: WHERE.objectManager,
   evaluate(ctx): RuleResult | RuleResult[] {
     const { layouts, assignments } = ctx.data(layoutsExtractor);
     if (layouts.status !== "ok") return { outcome: "not_measurable", reason: `Layouts couldn't be read: ${layouts.reason}`, evidence: [ctx.ev(layouts.source, { count: null })] };
@@ -189,6 +192,7 @@ const undocumentedFields: Rule = {
   version: 2,
   domain: "configuration",
   title: "Custom fields with no help text or description",
+  where: WHERE.objectManager,
   evaluate(ctx): RuleResult | RuleResult[] {
     const metadata = ctx.data(metadataExtractor);
     const source = { kind: "metadata", path: "objects/*.object" } as const;
@@ -314,6 +318,7 @@ const setupChangeConcentration: Rule = {
   version: 1,
   domain: "configuration",
   title: "Setup changes rest on one person or on people who have left",
+  where: WHERE.setupAuditTrail,
   evaluate(ctx): RuleResult | RuleResult[] {
     const audit = ctx.data(setupAuditExtractor);
     const users = ctx.data(usersExtractor);
