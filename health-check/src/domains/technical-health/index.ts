@@ -9,6 +9,7 @@ import type { DomainModule } from "../types.ts";
 import { labelsOf } from "../labels.ts";
 import { labelsExtractor } from "../../extract/labels.ts";
 import { isObjectId, objectResolver } from "../object-names.ts";
+import { WHERE } from "../where.ts";
 
 // Technical health (roadmap 3.2): how sound the code is, read from set-up only.
 // Coverage, API versions and trigger counts moved here from automation with
@@ -91,6 +92,7 @@ const apexCoverage: Rule = {
   version: 2,
   domain: DOMAIN,
   title: "Apex test coverage",
+  where: WHERE.apexClasses,
   evaluate(ctx): RuleResult | RuleResult[] {
     const { classes, orgCoverage, classCoverage } = ctx.data(apexExtractor);
     if (classes.status !== "ok") return { outcome: "not_measurable", reason: apexGap("classes", classes.reason), evidence: [ctx.ev(classes.source, { count: null })] };
@@ -147,6 +149,7 @@ const multipleTriggers: Rule = {
   version: 3,
   domain: DOMAIN,
   title: "More than one trigger on an object",
+  where: WHERE.apexTriggers,
   evaluate(ctx): RuleResult | RuleResult[] {
     const { triggers } = ctx.data(apexExtractor);
     if (triggers.status !== "ok") return { outcome: "not_measurable", reason: apexGap("triggers", triggers.reason), evidence: [ctx.ev(triggers.source, { count: null })] };
@@ -202,6 +205,7 @@ const testQuality: Rule = {
   version: 1,
   domain: DOMAIN,
   title: "Apex tests that check nothing",
+  where: WHERE.apexClasses,
   evaluate(ctx): RuleResult | RuleResult[] {
     const { classes } = ctx.data(apexExtractor);
     if (classes.status !== "ok") return { outcome: "not_measurable", reason: apexGap("classes", classes.reason), evidence: [ctx.ev(classes.source, { count: null })] };
@@ -399,6 +403,7 @@ const storageUse: Rule = {
   version: 3,
   domain: DOMAIN,
   title: "Data and file storage against the allowance",
+  where: WHERE.storage,
   evaluate(ctx): RuleResult | RuleResult[] {
     const limits = ctx.data(apiLimitsExtractor);
     if (limits.status !== "ok") return { outcome: "not_measurable", reason: `The org's limits couldn't be read: ${limits.reason}`, evidence: [ctx.ev(limits.source, { count: null })] };

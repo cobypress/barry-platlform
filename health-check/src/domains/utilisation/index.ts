@@ -26,6 +26,7 @@ import { labelsOf } from "../labels.ts";
 import { labelsExtractor } from "../../extract/labels.ts";
 import { COMPLIMENTARY_LICENCES } from "../../money/licences.ts";
 import { investmentMetrics } from "./investment.ts";
+import { WHERE } from "../where.ts";
 
 const MIN_SPARE_SEATS = 2;
 // API-only licences. Their users never log in by design, so not logging in says nothing.
@@ -190,6 +191,7 @@ const unassignedSeats: Rule = {
   version: 1,
   domain: "utilisation",
   title: "Licences paid for but not assigned",
+  where: WHERE.companyInformation,
   evaluate(ctx): RuleResult | RuleResult[] {
     const { userLicenses } = ctx.data(licencesExtractor);
     if (userLicenses.status !== "ok") return { outcome: "not_measurable", reason: `Licences couldn't be read: ${userLicenses.reason}`, evidence: [ctx.ev(userLicenses.source, { count: null })] };
@@ -255,6 +257,7 @@ const packageSeats: Rule = {
   version: 2,
   domain: "utilisation",
   title: "Installed apps' seats nobody holds",
+  where: WHERE.installedPackages,
   evaluate(ctx): RuleResult | RuleResult[] {
     const { packageLicenses } = ctx.data(licencesExtractor);
     if (packageLicenses.status !== "ok") return { outcome: "not_measurable", reason: `Installed packages' licences couldn't be read: ${packageLicenses.reason}`, evidence: [ctx.ev(packageLicenses.source, { count: null })] };
@@ -323,6 +326,7 @@ function dormantRule(
     version: 2,
     domain: "utilisation",
     title,
+    where: WHERE.users,
     evaluate(ctx): RuleResult | RuleResult[] {
       const users = ctx.data(usersExtractor);
       if (users.status !== "ok") return { outcome: "not_measurable", reason: `Users couldn't be read: ${users.reason}`, evidence: [ctx.ev(users.source, { count: null })] };

@@ -121,6 +121,12 @@ export type Rule = {
   title: string;
   /** Needs an extract that reads CRM records, so a set-up review leaves the rule out rather than report it not measurable. */
   records?: true;
+  /**
+   * Where the rule's subject is in Setup, as the menu's labels in order, for
+   * the free scan (DECISIONS.md 623). Only for a rule whose subject is in that
+   * one place in every org: never a guess, a URL, an id or a name the org chose.
+   */
+  where?: readonly string[];
   evaluate(ctx: RuleContext): RuleResult | RuleResult[];
 };
 

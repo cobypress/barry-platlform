@@ -469,6 +469,15 @@ describe("a free scan's run job", () => {
     assert.ok(stored(ordinary).output!.facts?.counts.confirmed, "an ordinary run's too");
   });
 
+  test("its teaser counts what the org holds from the run's complexity file, read before the folder goes (DECISIONS.md 623)", async () => {
+    const { deps, handle } = await setup({}, runInput({ run: consoleRun({ scope: "essentials", product: "scan" }) }));
+    await handle(job, last);
+    const { result } = deps.store.scanResults.get(RUN_ID)!;
+    assert.deepEqual(result.foundInOrg?.map((c) => c.id), ["customObjects", "customFields", "flows", "apexClasses", "packages", "activeUsers"]);
+    assert.ok(result.shown.every((f) => typeof f.fix === "string" && f.fix.length > 0));
+    assert.ok(result.areas.every((a) => a.bySeverity && a.bySeverity.critical + a.bySeverity.high === a.high));
+  });
+
   test("an ordinary run keeps its connection and writes no teaser", async () => {
     const { deps, handle } = await setup();
     await handle(job, last);

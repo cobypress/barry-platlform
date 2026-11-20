@@ -11,6 +11,7 @@ import { notSized, pct, plural, type Rule, type RuleContext, type RuleResult } f
 import type { Value } from "../../schemas/index.ts";
 import { apexGap } from "../automation/shared.ts";
 import type { DomainModule } from "../types.ts";
+import { WHERE } from "../where.ts";
 
 // Integrations (roadmap 3.2): who and what connects to the org, and whether it
 // works. The three checks that were in security moved here with their ids, so a
@@ -108,6 +109,7 @@ const selfAuthorisedApps: Rule = {
   version: 2,
   domain: DOMAIN,
   title: "Connected apps anyone can authorise",
+  where: WHERE.connectedApps,
   evaluate(ctx): RuleResult {
     const { connectedApps } = ctx.data(orgDocumentationExtractor);
     const logins = ctx.data(loginsExtractor);
@@ -153,6 +155,7 @@ const insecureRemoteSites: Rule = {
   version: 1,
   domain: DOMAIN,
   title: "Remote sites that allow plain HTTP",
+  where: WHERE.remoteSites,
   evaluate(ctx): RuleResult {
     const { remoteSites } = ctx.data(orgDocumentationExtractor);
     const evidence = [ctx.ev(remoteSites.source, { count: remoteSites.status === "ok" ? remoteSites.data.length : null, exclusions: ["Inactive remote sites", "Installed packages' remote sites"], note: "Shown by host only" })];
@@ -382,6 +385,7 @@ const failedJobs: Rule = {
   version: 2,
   domain: DOMAIN,
   title: "Background jobs that failed",
+  where: WHERE.apexJobs,
   evaluate(ctx): RuleResult | RuleResult[] {
     const jobs = ctx.data(asyncJobsExtractor);
     if (jobs.status !== "ok") return { outcome: "not_measurable", reason: `Asynchronous Apex jobs couldn't be read: ${jobs.reason}`, evidence: [ctx.ev(jobs.source, { count: null })] };

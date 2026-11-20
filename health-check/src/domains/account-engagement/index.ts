@@ -5,6 +5,7 @@ import { daysBefore } from "../../extract/types.ts";
 import { licencesExtractor, usersExtractor } from "../../extract/users.ts";
 import type { DomainModule } from "../types.ts";
 import { atOwnLeadReturn } from "../value.ts";
+import { WHERE } from "../where.ts";
 
 // Marketing Cloud Account Engagement (roadmap Stage 6, DECISIONS.md 261 to 274):
 // is marketing handing sales good leads, and is what it hands over worked? One
@@ -179,6 +180,7 @@ const campaignInfluence: Rule = {
   version: 1,
   domain: DOMAIN,
   title: "Campaign influence set up",
+  where: WHERE.campaignInfluence,
   evaluate(ctx): RuleResult {
     const gap = presenceGap(ctx);
     if (gap) return gap;

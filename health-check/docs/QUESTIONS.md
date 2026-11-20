@@ -334,3 +334,12 @@ a) Does Tooling's `InstalledSubscriberPackage` give `SubscriberPackageVersion.Is
 b) Barometer Read Only holds API Enabled, View Setup and Configuration, View All Users, Monitor Login History, View Health Check, View Roles and Role Hierarchy, Run Reports, View Public Reports and Dashboards and Access Activities, and not Manage Users. With only those, does a query of `OauthToken` return every user's tokens, or only the connected user's own (and is it refused outright)? We assume only their own, and when every row is theirs, or the run wasn't told who connected, each app's use reads unavailable (DECISIONS.md 609). If View All Users or View Setup is enough to see everyone's, the use is shown for a connection with only Barometer Read Only too. Also: does `AppName` match `ConnectedApplication.Name`, which the inventory uses to tell an installed app from one only users authorised?
 c) What is the `PermissionSet` field for Approve Uninstalled Connected Apps? We assume `PermissionsApproveUninstalledApps`, and match on the label "Approve Uninstalled Connected Apps" as well. And is Weekly Data Export `PermissionsDataExport`?
 d) Does `SELECT COUNT(Id) n, COUNT(<field>) f0 … FROM <object>` time out on an object of several million records? A timeout makes that object unavailable, not the section.
+
+## Where a finding is in Setup (DECISIONS.md 623)
+
+The free scan names where a finding's subject is in Setup (`src/domains/where.ts`), as the Lightning Setup menu's labels without its three group headings. They are written from what we know of Salesforce's Setup menu, not read from an org or checked against one. On a Developer Edition org, check that each path exists under these labels:
+
+a) Process Automation: Workflow Rules, Process Builder and Flows. Custom Code: Apex Classes and Apex Triggers. Data: Storage Usage. Company Settings: Company Information.
+b) Apps: Packaging, Installed Packages; and Apps: Connected Apps, Manage Connected Apps (is it still there on an org made after September 2025, beside External Client Apps?).
+c) Users: Users and Queues. Security: Health Check, Sharing Settings, Remote Site Settings and View Setup Audit Trail.
+d) Environments: Jobs, Apex Jobs and Scheduled Jobs. Feature Settings: Service, Escalation Rules; and Feature Settings: Marketing, Campaign Influence (present on an org without Account Engagement?).
