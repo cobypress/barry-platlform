@@ -70,7 +70,7 @@ async function saveTwice(pool: FakePool, logs: string[]): Promise<void> {
 for (const { table, savepoint } of TABLES) {
   describe(`the ${table} row`, () => {
     for (const code of ["42703", "23502", "42804"]) {
-      test(`a ${code} from a table that doesn't match leaves the run's results saved, and says the table and code once`, async () => {
+      test(`a ${code} from a table that doesn't match leaves the run's results saved, and says the run, the table and the code for every save it happens to (DECISIONS.md 618)`, async () => {
         const pool = new FakePool();
         pool.handlers.unshift(failing(table, code));
         const logs: string[] = [];
@@ -83,8 +83,8 @@ for (const { table, savepoint } of TABLES) {
         // The other side tables are still written.
         for (const other of TABLES.filter((t) => t.table !== table)) assert.ok(texts.includes(`RELEASE SAVEPOINT ${other.savepoint}`), other.table);
         const said = logs.filter((l) => l.includes(table));
-        assert.equal(said.length, 1);
-        assert.match(said[0]!, new RegExp(`SQLSTATE ${code}`));
+        assert.equal(said.length, 2);
+        for (const line of said) assert.match(line, new RegExp(`^Run ${consoleRun().id}: the console's ${table} table refused the run's row with SQLSTATE ${code},`));
         assert.ok(logs.every((l) => !l.includes(PLANTED)));
       });
     }
@@ -132,7 +132,7 @@ describe("the facts' retry without the file column", () => {
     const logs: string[] = [];
     await saveTwice(retried, logs);
     assert.equal(retried.texts().at(-1), "COMMIT");
-    assert.deepEqual(logs.filter((l) => l.includes("HealthCheckRunFacts")).map((l) => /SQLSTATE (\w+)/.exec(l)?.[1]), ["23502"]);
+    assert.deepEqual(logs.filter((l) => l.includes("HealthCheckRunFacts")).map((l) => /SQLSTATE (\w+)/.exec(l)?.[1]), ["23502", "23502"]);
 
     const deadlock = new FakePool();
     deadlock.handlers.unshift((text) => {

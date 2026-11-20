@@ -1,7 +1,7 @@
 import { redactSecrets } from "../privacy/secrets.ts";
 import { BudgetStopError } from "../salesforce/budget.ts";
 import { isUnavailable, type OrgLimit } from "../salesforce/client.ts";
-import { INVENTORY_VERSION, type ConnectedAppRow, type FillRateObject, type Inventory, type LimitRow, type PackageRow, type RiskyPermissionRow } from "../schemas/inventory.ts";
+import { INVENTORY_VERSION, NAME_MAX, type ConnectedAppRow, type FillRateObject, type Inventory, type LimitRow, type PackageRow, type RiskyPermissionRow } from "../schemas/inventory.ts";
 import type { RunScope } from "../schemas/index.ts";
 import { CORE_OBJECTS, recordCountsExtractor } from "./configuration.ts";
 import { orgDocumentationExtractor, type ConnectedAppRow as AppSetting } from "./documentation.ts";
@@ -33,6 +33,28 @@ const iso = (value: string | null | undefined): string | null => {
   const date = new Date(value.replace(/\+0000$/, "Z"));
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 };
+
+/**
+ * Names held to what the console keeps (DECISIONS.md 618): a longer one is cut
+ * whole characters at a time and ends in "…", and the section's notes count
+ * them, so a long name costs neither its row nor the section.
+ */
+function namer(): { fit: (value: string, max?: number) => string; notes: () => string[] } {
+  let cut = 0;
+  return {
+    fit(value, max = NAME_MAX) {
+      if (value.length <= max) return value;
+      cut++;
+      let out = "";
+      for (const ch of value) {
+        if (out.length + ch.length > max - 1) break;
+        out += ch;
+      }
+      return `${out}…`;
+    },
+    notes: () => (cut === 0 ? [] : [`${cut === 1 ? "One name was" : `${cut} names were`} longer than we keep, so ${cut === 1 ? "it's" : "they're"} cut short and end in "…".`]),
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Field fill rates (DECISIONS.md 604 and 609)
@@ -251,38 +273,56 @@ function packageRows(data: PackagesData): Inventory["packages"] {
   const byPackage = new Map<string, PackageRow>();
   const ns = (value: string | null | undefined): string | null => (value ? value.toLowerCase() : null);
   const number = (v: number | null | undefined): string => (typeof v === "number" ? String(v) : "?");
+  const names = namer();
+  const fit = (value: string | null | undefined, max?: number): string | null => (value ? names.fit(value, max) : null);
+  let longIds = 0;
   // Read without the flags, nothing that came back is taken for them.
   const flagsRead = installed.status === "ok" && !installed.missingFields?.length;
   for (const p of installed.status === "ok" ? installed.data : []) {
     const v = p.SubscriberPackageVersion ?? null;
     const flag = (value: boolean | null | undefined): boolean | null => (flagsRead && typeof value === "boolean" ? value : null);
+    // An id is never cut: one longer than Salesforce's 18 characters isn't an id we know, so it isn't kept.
+    const id = p.SubscriberPackageId && p.SubscriberPackageId.length > 18 ? (longIds++, null) : (p.SubscriberPackageId ?? null);
     byPackage.set(p.SubscriberPackageId ?? `row:${byPackage.size}`, {
-      packageId: p.SubscriberPackageId ?? null,
-      namespace: p.SubscriberPackage?.NamespacePrefix ?? null,
-      name: p.SubscriberPackage?.Name ?? null,
-      version: v && typeof v.MajorVersion === "number" ? [v.MajorVersion, v.MinorVersion, v.PatchVersion, v.BuildNumber].map(number).join(".") : null,
-      versionName: v?.Name ?? null,
+      packageId: id,
+      namespace: fit(p.SubscriberPackage?.NamespacePrefix),
+      name: fit(p.SubscriberPackage?.Name),
+      version: v && typeof v.MajorVersion === "number" ? fit([v.MajorVersion, v.MinorVersion, v.PatchVersion, v.BuildNumber].map(number).join("."), 100) : null,
+      versionName: fit(v?.Name),
       installed: true,
       deprecated: flag(v?.IsDeprecated),
       managed: flag(v?.IsManaged),
       licence: null,
     });
   }
+  // A seat count is kept only as Salesforce gave it: no count is null, never 0 (rule 5, DECISIONS.md 618).
+  const seats = (n: number | null | undefined): number | null => (typeof n === "number" && Number.isInteger(n) && n >= 0 ? n : null);
+  let noUsed = 0;
+  let noAllowed = 0;
   for (const l of licences.status === "ok" ? licences.data : []) {
+    // Salesforce gives a site licence as -1 seats allowed; anything else that isn't a count is unknown, not site-wide.
+    const siteWide = l.AllowedLicenses === -1;
+    const allowed = siteWide ? null : seats(l.AllowedLicenses);
+    const used = seats(l.UsedLicenses);
+    if (!siteWide && allowed === null) noAllowed++;
+    if (used === null) noUsed++;
     const licence = {
-      status: l.Status,
-      allowed: l.AllowedLicenses < 0 ? null : l.AllowedLicenses,
-      siteWide: l.AllowedLicenses < 0,
-      used: Math.max(0, l.UsedLicenses),
+      status: fit(l.Status, 100),
+      allowed,
+      siteWide,
+      used,
       expiresOn: l.ExpirationDate ? l.ExpirationDate.slice(0, 10) : null,
     };
     // Licences only name a namespace, so they match by it; one without a namespace stands alone.
     const row = ns(l.NamespacePrefix) ? [...byPackage.values()].find((p) => ns(p.namespace) === ns(l.NamespacePrefix)) : undefined;
     if (row) row.licence = licence;
-    else byPackage.set(`licence:${byPackage.size}`, { packageId: null, namespace: l.NamespacePrefix, name: null, version: null, versionName: null, installed: false, deprecated: null, managed: null, licence });
+    else byPackage.set(`licence:${byPackage.size}`, { packageId: null, namespace: fit(l.NamespacePrefix), name: null, version: null, versionName: null, installed: false, deprecated: null, managed: null, licence });
   }
   const rows = [...byPackage.values()].sort((a, b) => (a.namespace ?? "").localeCompare(b.namespace ?? "") || (a.name ?? "").localeCompare(b.name ?? "") || (a.packageId ?? "").localeCompare(b.packageId ?? ""));
-  return { rows, notes };
+  if (noUsed) notes.push(`${noUsed === 1 ? "One licence gave" : `${noUsed} licences gave`} no count of seats used, so ${noUsed === 1 ? "its use isn't" : "their use isn't"} shown.`);
+  if (noAllowed) notes.push(`${noAllowed === 1 ? "One licence gave" : `${noAllowed} licences gave`} no number of seats allowed, so ${noAllowed === 1 ? "its allowance isn't" : "their allowance isn't"} shown.`);
+  if (longIds) notes.push(`${longIds === 1 ? "One package's id was" : `${longIds} packages' ids were`} longer than a Salesforce id, so ${longIds === 1 ? "it isn't" : "they aren't"} shown.`);
+  return { rows, notes: [...notes, ...names.notes()] };
 }
 
 // ---------------------------------------------------------------------------
@@ -337,14 +377,18 @@ function connectedAppRows(data: ConnectedAppsData): Inventory["connectedApps"] {
   if (use.status === "ok" && use.truncated) notes.push(`More than ${OAUTH_TOKEN_MAX_ROWS.toLocaleString("en-GB")} OAuth tokens: we read that many, so each app's users and uses are at least what's shown.`);
   const used = new Map(use.status === "ok" ? use.data.map((u) => [u.name, u]) : []);
   const rows = new Map<string, ConnectedAppRow>();
+  const names = namer();
   const blank = (name: string, installed: boolean | null, adminApprovedOnly: boolean | null): ConnectedAppRow => {
     const u = used.get(name);
-    return { name, installed, adminApprovedOnly, firstAuthorised: u?.firstAuthorised ?? null, lastUsed: u?.lastUsed ?? null, users: use.status === "ok" ? (u?.users ?? 0) : null, uses: u?.uses ?? (use.status === "ok" ? 0 : null) };
+    return { name: names.fit(name), installed, adminApprovedOnly, firstAuthorised: u?.firstAuthorised ?? null, lastUsed: u?.lastUsed ?? null, users: use.status === "ok" ? (u?.users ?? 0) : null, uses: u?.uses ?? (use.status === "ok" ? 0 : null) };
   };
-  for (const a of apps.status === "ok" ? apps.data : []) rows.set(a.Name, blank(a.Name, true, typeof a.OptionsAllowAdminApprovedUsersOnly === "boolean" ? a.OptionsAllowAdminApprovedUsersOnly : null));
+  // An app Salesforce gave without a name can't be listed by one: it's counted in the notes instead.
+  const unnamed = apps.status === "ok" ? apps.data.filter((a) => !a.Name?.trim()).length : 0;
+  for (const a of apps.status === "ok" ? apps.data.filter((a) => a.Name?.trim()) : []) rows.set(a.Name, blank(a.Name, true, typeof a.OptionsAllowAdminApprovedUsersOnly === "boolean" ? a.OptionsAllowAdminApprovedUsersOnly : null));
   // An app only users authorised has tokens and no entry of its own.
   for (const name of used.keys()) if (!rows.has(name)) rows.set(name, blank(name, apps.status === "ok" ? false : null, null));
-  return { rows: [...rows.values()].sort((a, b) => a.name.localeCompare(b.name)), notes };
+  if (unnamed) notes.push(`${unnamed === 1 ? "One connected app has" : `${unnamed} connected apps have`} no name in Salesforce, so ${unnamed === 1 ? "it isn't" : "they aren't"} listed.`);
+  return { rows: [...rows.values()].sort((a, b) => a.name.localeCompare(b.name)), notes: [...notes, ...names.notes()] };
 }
 
 // ---------------------------------------------------------------------------
@@ -441,12 +485,24 @@ function riskyRows(data: RiskyPermissionsData): Inventory["riskyPermissions"] {
   const notes: string[] = [];
   if (data.notInOrg.length) notes.push(`Not in this org's permissions, so not checked: ${data.notInOrg.join(", ")}.`);
   if (data.holdersGap) notes.push(`Who holds each profile and permission set couldn't be read: ${data.holdersGap}`);
-  const rows = [...data.sets.data].sort((a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name) || a.apiName.localeCompare(b.apiName));
+  const names = namer();
+  const fit = (value: string | null | undefined): string | null => (value ? names.fit(value) : null);
+  // A set with no API name can't be told apart from another: counted in the notes instead.
+  const unnamed = data.sets.data.filter((r) => !r.apiName).length;
+  const rows = data.sets.data
+    .filter((r) => r.apiName)
+    .map((r) => ({ ...r, name: names.fit(r.name || r.apiName), apiName: names.fit(r.apiName), namespace: fit(r.namespace) }))
+    .sort((a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name) || a.apiName.localeCompare(b.apiName));
+  if (unnamed) notes.push(`${unnamed === 1 ? "One profile or permission set has" : `${unnamed} profiles and permission sets have`} no API name in Salesforce, so ${unnamed === 1 ? "it isn't" : "they aren't"} listed.`);
+  notes.push(...names.notes());
   return { rows, notes, checked: data.checked.map((c) => c.label), notInOrg: data.notInOrg };
 }
 
 // ---------------------------------------------------------------------------
 // Org limits
+
+/** The client keeps only a limit Salesforce gives a maximum and a remaining figure, so one without either isn't listed. */
+export const LIMITS_LISTED = "Only limits Salesforce gives both a maximum and a remaining figure are listed.";
 
 /** Every limit /limits gave as the connection first read it, which costs no call. */
 export const limitsExtractor: Extractor<Sourced<Record<string, OrgLimit>>> = {
@@ -462,10 +518,16 @@ export const limitsExtractor: Extractor<Sourced<Record<string, OrgLimit>>> = {
 
 function limitRows(data: Sourced<Record<string, OrgLimit>>): Inventory["limits"] {
   if (data.status !== "ok") return { unavailable: data.reason };
+  const names = namer();
+  // As Salesforce reports them (DECISIONS.md 618): more remaining than the maximum is shown below zero and named, never clamped.
   const rows: LimitRow[] = Object.entries(data.data)
-    .map(([name, l]) => ({ name, max: l.Max, used: l.Max - l.Remaining }))
+    .filter(([name, l]) => name && Number.isFinite(l.Max) && Number.isFinite(l.Remaining))
+    .map(([name, l]) => ({ name: names.fit(name), max: l.Max, used: l.Max - l.Remaining }))
     .sort((a, b) => a.name.localeCompare(b.name));
-  return { rows, notes: [] };
+  const over = rows.filter((r) => r.used < 0).map((r) => r.name);
+  const notes = [LIMITS_LISTED];
+  if (over.length) notes.push(`Salesforce reported more remaining than the maximum for ${over.join(", ")}, so ${over.length === 1 ? "its" : "their"} use is shown below zero, as reported.`);
+  return { rows, notes: [...notes, ...names.notes()] };
 }
 
 // ---------------------------------------------------------------------------
@@ -480,28 +542,49 @@ export function inventoryExtractorsFor(scope: RunScope): Extractor[] {
 
 export const SETUP_ONLY_FILL_RATES = "A set-up only scan doesn't count records, so fill rates weren't read.";
 
-/** The inventory from the run's extracts. A step that didn't run makes its section unavailable, with why. */
-export function buildInventory(extracts: Map<string, unknown>, scope: RunScope, madeAt: Date, failed: Map<string, string> = new Map()): Inventory {
+/** An error's class name, for a log line: never its message. */
+export const errorClass = (err: unknown): string => (err !== null && typeof err === "object" ? (err.constructor?.name ?? "Object") : typeof err);
+
+export const NOT_PUT_TOGETHER = "This part of the inventory couldn't be put together from what was read, so it isn't shown.";
+
+/**
+ * The inventory from the run's extracts. A step that didn't run makes its
+ * section unavailable, with why. Each section is put together on its own, so
+ * a fault in one costs only that one (DECISIONS.md 618), and is logged by the
+ * section's key and the error's class name: never its message, which can
+ * quote what the org gave.
+ */
+export function buildInventory(extracts: Map<string, unknown>, scope: RunScope, madeAt: Date, failed: Map<string, string> = new Map(), log: (line: string) => void = () => {}): Inventory {
   const got = <T>(e: Extractor<T>): T | undefined => extracts.get(e.id) as T | undefined;
   // A step that failed says why, with any secret in Salesforce's or the network's message taken out.
   const notRunOf = (e: Extractor): { unavailable: string } => {
     const reason = failed.get(e.id);
     return { unavailable: reason ? `This part of the inventory couldn't be read: ${redactSecrets(reason)}` : "This step didn't run." };
   };
+  const apart = <S>(key: string, make: () => S): S | { unavailable: string } => {
+    try {
+      return make();
+    } catch (err) {
+      log(`  The inventory's ${key} couldn't be put together (${errorClass(err)}), so it's saved as unavailable.`);
+      return { unavailable: NOT_PUT_TOGETHER };
+    }
+  };
   const fill = got(fillRatesExtractor);
-  const fillRates: Inventory["fillRates"] = !fill
-    ? scope === "complete"
-      ? notRunOf(fillRatesExtractor)
-      : { unavailable: SETUP_ONLY_FILL_RATES }
-    : fill.status !== "ok"
-      ? { unavailable: fill.reason }
-      : {
-          rows: fill.data.objects,
-          notes: [
-            ...(fill.data.scopeNote ? [fill.data.scopeNote] : []),
-            ...(fill.data.leftOut ? [`${fill.data.leftOut} more objects with records weren't counted: we count the ${FILL_RATE_MAX_OBJECTS} with the most records.`] : []),
-          ],
-        };
+  const fillRates = apart("fillRates", (): Inventory["fillRates"] =>
+    !fill
+      ? scope === "complete"
+        ? notRunOf(fillRatesExtractor)
+        : { unavailable: SETUP_ONLY_FILL_RATES }
+      : fill.status !== "ok"
+        ? { unavailable: fill.reason }
+        : {
+            rows: fill.data.objects,
+            notes: [
+              ...(fill.data.scopeNote ? [fill.data.scopeNote] : []),
+              ...(fill.data.leftOut ? [`${fill.data.leftOut} more objects with records weren't counted: we count the ${FILL_RATE_MAX_OBJECTS} with the most records.`] : []),
+            ],
+          },
+  );
   const packages = got(packagesExtractor);
   const apps = got(connectedAppsExtractor);
   const risky = got(riskyPermissionsExtractor);
@@ -511,9 +594,9 @@ export function buildInventory(extracts: Map<string, unknown>, scope: RunScope, 
     madeAt: madeAt.toISOString(),
     scope,
     fillRates,
-    packages: packages ? packageRows(packages) : notRunOf(packagesExtractor),
-    connectedApps: apps ? connectedAppRows(apps) : notRunOf(connectedAppsExtractor),
-    riskyPermissions: risky ? riskyRows(risky) : notRunOf(riskyPermissionsExtractor),
-    limits: limits ? limitRows(limits) : notRunOf(limitsExtractor),
+    packages: apart("packages", () => (packages ? packageRows(packages) : notRunOf(packagesExtractor))),
+    connectedApps: apart("connectedApps", () => (apps ? connectedAppRows(apps) : notRunOf(connectedAppsExtractor))),
+    riskyPermissions: apart("riskyPermissions", () => (risky ? riskyRows(risky) : notRunOf(riskyPermissionsExtractor))),
+    limits: apart("limits", () => (limits ? limitRows(limits) : notRunOf(limitsExtractor))),
   };
 }

@@ -21,8 +21,7 @@ import { withJobLock } from "./lock.ts";
 import { progressOf, RunClosedError, type RunJobInput } from "./types.ts";
 import { withoutComments } from "../survey/questions.ts";
 import { FACTS_FILE } from "../extract/facts.ts";
-import { INVENTORY_FILE } from "../extract/inventory.ts";
-import { Inventory } from "../schemas/inventory.ts";
+import { inventoryOf } from "./inventory.ts";
 import { COMPLEXITY_FILE } from "../complexity/read.ts";
 import { Complexity } from "../schemas/complexity.ts";
 import { APEX_SOURCE_FILE } from "../extract/apex-source.ts";
@@ -281,7 +280,8 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
     const facts = factsOf(dir, log);
     // Only with the switch on, as it stands now: off, the console's table is never named.
     const handbookSummaries = apexSummaries ? summariesOf(dir, runId, log) : null;
-    const inventory = inventoryOf(dir, log);
+    // Always a row, so the console never has to guess why there's none (DECISIONS.md 618).
+    const inventory = inventoryOf(dir, log, { runId, madeAt: result.run.asOf, scope: result.run.scope });
     const complexity = complexityOf(dir, log);
     await deps.store.saveRunOutput(runId, {
       progress: progressOf(result.run),
@@ -299,7 +299,7 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
       facts: facts.summary,
       factsFile: facts.file,
       ...(handbookSummaries ? { handbookSummaries } : {}),
-      ...(inventory ? { inventory } : {}),
+      inventory,
       ...(complexity ? { complexity } : {}),
     });
   } catch (err) {
@@ -349,39 +349,6 @@ function summariesOf(dir: string, runId: string, log: (line: string) => void): S
   if (parsed.data.items.length === 0) return null;
   const { model, madeAt, items, leftOut } = parsed.data;
   return { model, madeAt, items, leftOut };
-}
-
-/** The most of inventory.json the worker sends. A big org's is a few hundred kilobytes; more means the step changed. */
-export const INVENTORY_MAX_BYTES = 8 * 1024 * 1024;
-
-/**
- * The org's inventory for the console (DECISIONS.md 605), read before a scan's
- * folder is deleted. None from a run without the file, or one that doesn't
- * parse, is too big, or holds a character Postgres's jsonb refuses: the
- * results save without it, and the log says which, never quoting the file.
- */
-export function inventoryOf(dir: string, log: (line: string) => void): Inventory | null {
-  const path = join(dir, INVENTORY_FILE);
-  if (!existsSync(path)) return null;
-  let text: string;
-  let raw: unknown;
-  try {
-    text = readFileSync(path, "utf8");
-    raw = JSON.parse(text);
-  } catch {
-    log("The run's inventory.json didn't parse, so the console gets no inventory.");
-    return null;
-  }
-  if (Buffer.byteLength(text, "utf8") >= INVENTORY_MAX_BYTES) {
-    log("The run's inventory.json is larger than the worker sends, so the console gets no inventory.");
-    return null;
-  }
-  const parsed = Inventory.safeParse(raw);
-  if (!parsed.success || holdsNul(parsed.data)) {
-    log("The run's inventory.json doesn't fit the inventory's shape, so the console gets no inventory.");
-    return null;
-  }
-  return parsed.data;
 }
 
 /** The most of complexity.json the worker sends. Seven components of a few counts each is a few kilobytes. */

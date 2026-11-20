@@ -8,7 +8,7 @@ import { Inventory } from "../../schemas/inventory.ts";
 import { loadRecording, ReplayTransport } from "../../testing/replay.ts";
 import { MemoryWorkerStore } from "../memory-store.ts";
 import { PostgresWorkerStore, type SqlClient, type SqlPool, type SqlResult } from "../postgres-store.ts";
-import { inventoryOf, INVENTORY_MAX_BYTES } from "../run-job.ts";
+import { inventoryOf, NO_FILE, SECTION_MISFIT, UNREADABLE } from "../inventory.ts";
 import { progressOf } from "../types.ts";
 import { createJobHandler } from "../worker.ts";
 import { baseDeps, consoleRun, RUN_ID, runInput, syntheticConnection } from "./helpers.ts";
@@ -76,7 +76,7 @@ describe("the Postgres store's inventory row", () => {
     assert.equal(pool.texts().at(-1), "COMMIT");
   });
 
-  test("a console without the table still gets the run's results, and says so once", async () => {
+  test("a console without the table still gets the run's results, and says so with the run's id on every save (DECISIONS.md 618)", async () => {
     const pool = new FakePool();
     pool.handlers.unshift((text) => {
       if (text.includes(`"HealthCheckInventory"`)) throw Object.assign(new Error(`relation "HealthCheckInventory" does not exist`), { code: "42P01" });
@@ -90,7 +90,7 @@ describe("the Postgres store's inventory row", () => {
     assert.ok(texts.indexOf("ROLLBACK TO SAVEPOINT run_inventory") > texts.indexOf("SAVEPOINT run_inventory"));
     assert.equal(texts.at(-1), "COMMIT");
     assert.ok(!texts.includes("ROLLBACK"));
-    assert.equal(logs.filter((l) => /no HealthCheckInventory table/.test(l)).length, 1);
+    assert.deepEqual(logs.filter((l) => /no HealthCheckInventory table/.test(l)).map((l) => l.startsWith(`Run ${run.id}: `)), [true, true]);
   });
 
   test("a deadlock (class 40), as any error outside classes 42 and 23, still rolls the whole save back (DECISIONS.md 615)", async () => {
@@ -112,22 +112,29 @@ describe("the inventory a run job sends", () => {
     return dir;
   };
 
+  const made = { runId: RUN_ID, madeAt: INVENTORY.madeAt, scope: "complete" as const };
+
   test("is the file as it parses", () => {
     const logs: string[] = [];
-    assert.deepEqual(inventoryOf(folder(JSON.stringify(INVENTORY)), (l) => void logs.push(l)), INVENTORY);
+    assert.deepEqual(inventoryOf(folder(JSON.stringify(INVENTORY)), (l) => void logs.push(l), made), INVENTORY);
     assert.deepEqual(logs, []);
   });
 
-  test("is none without a file, or with one that doesn't parse, doesn't fit, holds a NUL or is over the cap, and the log never quotes it", () => {
+  // Changed on purpose by DECISIONS.md 618: these used to send no inventory at all.
+  test("without a file, or with one that doesn't parse, is a row saying so in every section; a NUL costs only its section; and the log never quotes it", () => {
     const logs: string[] = [];
     const log = (l: string) => void logs.push(l);
-    assert.equal(inventoryOf(mkdtempSync(join(tmpdir(), "hc-inventory-")), log), null);
-    assert.equal(inventoryOf(folder("{ not json"), log), null);
-    assert.equal(inventoryOf(folder(JSON.stringify({ ...INVENTORY, version: 2 })), log), null);
-    assert.equal(inventoryOf(folder(JSON.stringify({ ...INVENTORY, limits: { rows: [{ name: "Daily\u0000", max: 1, used: 0 }], notes: [] } })), log), null);
-    assert.equal(inventoryOf(folder(JSON.stringify({ ...INVENTORY, packages: { rows: [], notes: ["x".repeat(INVENTORY_MAX_BYTES)] } })), log), null);
+    const none = inventoryOf(mkdtempSync(join(tmpdir(), "hc-inventory-")), log, made);
+    assert.ok([none.fillRates, none.packages, none.connectedApps, none.riskyPermissions, none.limits].every((s) => "unavailable" in s && s.unavailable === NO_FILE));
+    const broken = inventoryOf(folder("{ not json"), log, made);
+    assert.ok("unavailable" in broken.limits && broken.limits.unavailable === UNREADABLE);
+    const later = inventoryOf(folder(JSON.stringify({ ...INVENTORY, version: 2 })), log, made);
+    assert.ok("unavailable" in later.packages && later.packages.unavailable === UNREADABLE);
+    const nul = inventoryOf(folder(JSON.stringify({ ...INVENTORY, limits: { rows: [{ name: "Daily\u0000", max: 1, used: 0 }], notes: [] } })), log, made);
+    assert.deepEqual(nul.limits, { unavailable: SECTION_MISFIT });
+    assert.deepEqual(nul.fillRates, INVENTORY.fillRates);
     assert.equal(logs.length, 4);
-    assert.ok(logs.every((l) => !l.includes("Daily") && !l.includes("xxx")));
+    assert.ok(logs.every((l) => !l.includes("Daily") && l.startsWith(`Run ${RUN_ID}'s inventory: `)));
   });
 
   test("a worker's run reads the inventory and hands it over with the results", async () => {

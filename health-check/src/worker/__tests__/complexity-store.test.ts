@@ -68,7 +68,7 @@ describe("the Postgres store's complexity row", () => {
     assert.equal(pool.texts().at(-1), "COMMIT");
   });
 
-  test("a console without the table still gets the run's results, and says so once", async () => {
+  test("a console without the table still gets the run's results, and says so with the run's id on every save (DECISIONS.md 618)", async () => {
     const pool = new FakePool();
     pool.handlers.unshift((text) => {
       if (text.includes(`"HealthCheckComplexity"`)) throw Object.assign(new Error(`relation "HealthCheckComplexity" does not exist`), { code: "42P01" });
@@ -82,7 +82,7 @@ describe("the Postgres store's complexity row", () => {
     assert.ok(texts.indexOf("ROLLBACK TO SAVEPOINT run_complexity") > texts.indexOf("SAVEPOINT run_complexity"));
     assert.equal(texts.at(-1), "COMMIT");
     assert.ok(!texts.includes("ROLLBACK"));
-    assert.equal(logs.filter((l) => /no HealthCheckComplexity table/.test(l)).length, 1);
+    assert.deepEqual(logs.filter((l) => /no HealthCheckComplexity table/.test(l)).map((l) => l.startsWith(`Run ${run.id}: `)), [true, true]);
   });
 
   test("a deadlock (class 40), as any error outside classes 42 and 23, still rolls the whole save back (DECISIONS.md 615)", async () => {
