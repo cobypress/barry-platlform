@@ -6,6 +6,7 @@ import { modulesFor } from "../../domains/scope.ts";
 import { DOCUMENTED } from "../../domains/configuration/documented.ts";
 import { customObjectsExtractor } from "../../extract/configuration.ts";
 import { buildComplexity } from "../../complexity/read.ts";
+import { heldCounts } from "../../complexity/held.ts";
 import { loadRun } from "../../render/render-run.ts";
 import { buildReport, type BuiltReport } from "../../narrative/sections.ts";
 import { clone, loadExtracts, runFromRecording } from "../../testing/harness.ts";
@@ -28,7 +29,7 @@ before(async () => {
   dir = (await runFromRecording({ scope: "essentials", inventory: true, modules: ALL_MODULES })).dir;
   report = buildReport(loadRun(dir).input);
   complexity = complexityOf(dir, () => {});
-  result = buildScanResult(report, complexity);
+  result = buildScanResult(report, heldCounts(complexity));
 });
 
 /** The result with only the fields it had before decision 623. */
@@ -157,12 +158,22 @@ describe("the synthetic org's scan result (decision 623)", () => {
   });
 });
 
+describe("an area's issues by severity", () => {
+  test("a critical issue counts as critical, not high, while `high` still counts both", () => {
+    const changed = buildScanResult(withFindings((fs) => fs.map((f) => (f.status === "issue" && f.ruleId === "aut.legacy-workflow-rules" ? { ...f, severity: "critical" as const } : f))), heldCounts(complexity));
+    const automation = changed.areas.find((a) => a.domain === "automation")!;
+    assert.deepEqual(automation.bySeverity, { critical: 1, high: 2, medium: 4, low: 0 });
+    assert.equal(automation.high, 3);
+    assert.equal(automation.issues, 7);
+  });
+});
+
 describe("where a finding is in Setup", () => {
   test("a finding whose rule has no Setup location has none", () => {
     const first = result.shown[0]!;
     const changed = buildScanResult(
       withFindings((fs) => fs.map((f) => (f.title === first.title ? { ...f, ruleId: "utl.eac-connections" } : f))),
-      complexity,
+      heldCounts(complexity),
     );
     assert.equal(changed.shown[0]!.title, first.title);
     assert.equal("where" in changed.shown[0]!, false);
@@ -220,7 +231,7 @@ describe("where a finding is in Setup", () => {
 describe("a fix that could name someone or something is left out", () => {
   const shownWith = (recommendation: string, subjects: Finding["subjects"] = []) => {
     const first = result.shown[0]!;
-    return buildScanResult(withFindings((fs) => fs.map((f) => (f.title === first.title ? { ...f, recommendation, subjects } : f))), complexity).shown[0]!;
+    return buildScanResult(withFindings((fs) => fs.map((f) => (f.title === first.title ? { ...f, recommendation, subjects } : f))), heldCounts(complexity)).shown[0]!;
   };
 
   test("a token, an email, an id or a subject's name: no fix, and the rest of the finding as before", () => {
@@ -252,7 +263,7 @@ describe("what the org holds", () => {
     const extracts = loadExtracts(dir);
     const objects = extracts.get(customObjectsExtractor.id) as { truncated: boolean };
     objects.truncated = true;
-    const cut = buildScanResult(report, buildComplexity(extracts, new Date(AS_OF)));
+    const cut = buildScanResult(report, heldCounts(buildComplexity(extracts, new Date(AS_OF))));
     // The data model's counts go together: the custom objects were cut short, so neither is shown.
     assert.deepEqual(cut.foundInOrg!.map((c) => c.id), ["flows", "apexClasses", "packages", "activeUsers"]);
   });
@@ -260,13 +271,13 @@ describe("what the org holds", () => {
   test("a component not read, or no complexity file at all, leaves its counts out", () => {
     const notRead: Complexity = clone(complexity!);
     notRead.components = notRead.components.map((c) => (c.id === "code" ? { status: "not_read", id: c.id, label: c.label, weight: c.weight, reason: "The size of some code wasn't read." } : c));
-    assert.deepEqual(buildScanResult(report, notRead).foundInOrg!.map((c) => c.id), ["customObjects", "customFields", "flows", "packages", "activeUsers"]);
+    assert.deepEqual(buildScanResult(report, heldCounts(notRead)).foundInOrg!.map((c) => c.id), ["customObjects", "customFields", "flows", "packages", "activeUsers"]);
     assert.deepEqual(buildScanResult(report).foundInOrg, [{ id: "activeUsers", label: "Active users", count: 14 }]);
   });
 
   test("active users only when the users were read", () => {
     const metrics = report.input.metrics.map((m) => (m.id === DOCUMENTED.access ? { ...m, status: "not_measurable" as const, value: null, reason: "Users couldn't be read: refused." } : m));
-    const noUsers = buildScanResult({ ...report, input: { ...report.input, metrics: metrics as typeof report.input.metrics } }, complexity);
+    const noUsers = buildScanResult({ ...report, input: { ...report.input, metrics: metrics as typeof report.input.metrics } }, heldCounts(complexity));
     assert.equal(noUsers.foundInOrg!.some((c) => c.id === "activeUsers"), false);
     assert.equal(noUsers.foundInOrg!.length, 5);
   });

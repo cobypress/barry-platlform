@@ -30,6 +30,7 @@ export const SECTION_IDS: Record<string, string> = {
   "Claude's summaries of Apex code": "summaries",
   "Record-type use": "record-types",
   "The org's inventory": "inventory",
+  "Where a finding is in Setup": "setup-paths",
 };
 
 export type QuestionItem = { id: string; section: string; text: string };

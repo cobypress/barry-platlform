@@ -23,6 +23,7 @@ import { withoutComments } from "../survey/questions.ts";
 import { FACTS_FILE } from "../extract/facts.ts";
 import { inventoryOf } from "./inventory.ts";
 import { COMPLEXITY_FILE } from "../complexity/read.ts";
+import { heldCounts } from "../complexity/held.ts";
 import { Complexity } from "../schemas/complexity.ts";
 import { APEX_SOURCE_FILE } from "../extract/apex-source.ts";
 import { HandbookSummaries, summariseApex, SUMMARIES_FILE, SUMMARIES_PARTIAL_FILE } from "../handbook/summaries.ts";
@@ -527,7 +528,7 @@ async function finishScan(runId: string, dir: string, name: string, deps: Worker
     const { input } = loadRun(dir);
     // The org's counts come from the complexity score, which has checked each was read whole
     // (DECISIONS.md 623). Silent here: the results' own save has already logged any fault in the file.
-    await deps.store.saveScanResult(runId, buildScanResult(buildReport(input), complexityOf(dir, () => {})), at);
+    await deps.store.saveScanResult(runId, buildScanResult(buildReport(input), heldCounts(complexityOf(dir, () => {}))), at);
     log(`Scan ${runId}'s result is ready.`);
   } catch (err) {
     log(`Scan ${runId}'s result couldn't be saved: ${safeReason(err)}`);

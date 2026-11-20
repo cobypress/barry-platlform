@@ -3,7 +3,6 @@ import type { BuiltReport } from "../narrative/sections.ts";
 import { areasOf, bySeverity, domainLabel, issuesOf, scorecard } from "../narrative/select.ts";
 import { ALL_MODULES } from "../domains/index.ts";
 import { DOCUMENTED } from "../domains/configuration/documented.ts";
-import type { Complexity } from "../schemas/complexity.ts";
 import type { Finding } from "../schemas/index.ts";
 
 // The free Barometer Scan's teaser (roadmap Stage 5): the score, each area's
@@ -62,24 +61,8 @@ function fixOf(f: Finding): string | null {
 /** Each rule's Setup location, by rule id. */
 const WHERE_BY_RULE: ReadonlyMap<string, readonly string[]> = new Map(ALL_MODULES.flatMap((m) => m.rules.flatMap((r) => (r.where ? [[r.id, r.where] as const] : []))));
 
-/** The complexity score's counts we show, by component: it has already checked each component was read whole (DECISIONS.md 614). */
-const FROM_COMPLEXITY: Array<{ id: OrgCountId; label: string; component: string; counts: string[] }> = [
-  { id: "customObjects", label: "Custom objects of your own", component: "dataModel", counts: ["customObjects"] },
-  { id: "customFields", label: "Custom fields of your own, on core and custom objects", component: "dataModel", counts: ["customFields"] },
-  { id: "flows", label: "Active flows", component: "declarativeAutomation", counts: ["recordTriggeredFlows", "otherFlows"] },
-  { id: "apexClasses", label: "Apex classes, not counting tests", component: "code", counts: ["apexClasses"] },
-  { id: "packages", label: "Installed packages", component: "integrations", counts: ["packages"] },
-];
-
-function foundInOrg(report: BuiltReport, complexity: Complexity | null): OrgCount[] {
-  const out: OrgCount[] = [];
-  for (const c of FROM_COMPLEXITY) {
-    const component = complexity?.components.find((x) => x.id === c.component);
-    if (component?.status !== "measured") continue;
-    const counts = c.counts.map((id) => component.counts.find((n) => n.id === id)?.count);
-    if (counts.some((n) => n === undefined)) continue;
-    out.push({ id: c.id, label: c.label, count: counts.reduce((a: number, n) => a + n!, 0) });
-  }
+function foundInOrg(report: BuiltReport, held: OrgCount[]): OrgCount[] {
+  const out = [...held];
   // Users are read in one query with no cap, so a measured count is every active user (src/extract/users.ts).
   const users = report.input.metrics.find((m) => m.id === DOCUMENTED.access);
   if (users?.status === "measured" && Number.isInteger(users.value) && users.value >= 0) out.push({ id: "activeUsers", label: "Active users", count: users.value });
@@ -93,8 +76,11 @@ const severities = (issues: Finding[]): SeverityCounts => ({
   low: issues.filter((f) => f.severity === "low").length,
 });
 
-/** `complexity` is the run's complexity.json, where it has one; without it, only the users are counted. */
-export function buildScanResult(report: BuiltReport, complexity: Complexity | null = null): ScanResult {
+/**
+ * `held` is what the org holds, from the run's complexity score through
+ * `heldCounts`, read whole; without it, only the users are counted.
+ */
+export function buildScanResult(report: BuiltReport, held: OrgCount[] = []): ScanResult {
   const team = report.teamFindings;
   const o = report.overall;
   const rows = scorecard(team, report.input.scores ?? [], areasOf(report.input.run, team)).filter((r) => r.assessed);
@@ -118,6 +104,6 @@ export function buildScanResult(report: BuiltReport, complexity: Complexity | nu
       return { title: plainWords(ukDates(f.title)), summary: plainWords(ukDates(f.summary)), severity: f.severity, area: domainLabel(f.domain), ...(fix ? { fix } : {}), ...(where ? { where: [...where] } : {}) };
     }),
     lockedIssues: issues.length - shown.length,
-    foundInOrg: foundInOrg(report, complexity),
+    foundInOrg: foundInOrg(report, held),
   };
 }
