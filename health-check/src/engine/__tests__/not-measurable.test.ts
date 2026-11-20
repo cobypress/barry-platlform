@@ -33,10 +33,34 @@ describe("the kind of a reason", () => {
     // Not in use: the four families' first, from the real run's reasons as the engine words them.
     ["No revenue forecast type is active, so Forecasting isn't in use for revenue, and we don't report a forecast figure.", "not_in_use"],
     ["Salesforce Knowledge is switched off in this org, so there are no articles to check.", "not_in_use"],
-    ["No case milestone started in the last year, so response and resolution targets aren't set up as entitlements.", "not_in_use"],
-    ["Case.Origin isn't in this org, so this can't be measured. Origin is how we tell which cases came in by email.", "not_in_use"],
-    ["Case.Type and Case.Reason aren't in this org, so there's nothing to say why a case came in.", "not_in_use"],
-    ["Salesforce CPQ (the SBQQ package) isn't installed in this org, so there's nothing of it to check.", "not_in_use"],
+    ["Professional Edition has no Apex, so there's no code to check.", "not_in_use"],
+    // Round 2: a field a describe leaves out, in the old words and the new, is something we couldn't see.
+    ["Case.Origin couldn't be seen in this org: it may not exist, or the connected user may not have access to it, so this can't be measured. Origin is how we tell which cases came in by email.", "unreadable"],
+    ["Case.Origin isn't in this org, so this can't be measured. Origin is how we tell which cases came in by email.", "unreadable"],
+    ["SBQQ__Quote__c.SBQQ__Ordered__c isn't in this org, so this can't be measured.", "unreadable"],
+    ["LoginHistory.ApiType isn't in this org, so this can't be measured.", "unreadable"],
+    ["Campaign.ActualCost isn't in this org, so this can't be measured.", "unreadable"],
+    ["Case.Priority isn't in this org, and the read needs it, so it wasn't run.", "unreadable"],
+    ["Case.Type and Case.Reason aren't in this org, so there's nothing to say why a case came in.", "unreadable"],
+    ["Group.QueueRoutingConfigId isn't in this org, so we can't tell which queues Omni-Channel routes.", "unreadable"],
+    // A package said absent from a describe alone (no licence isn't proof for a free package).
+    ["Salesforce CPQ (the SBQQ package) isn't installed in this org, so there's nothing of it to check.", "unreadable"],
+    ["Account Engagement (the Pardot package, namespace pi) isn't installed in this org, so there's nothing of it to check.", "unreadable"],
+    // Round 2: a read that found nothing is too little to judge from, never "not in use".
+    ["No case milestone started in the last year, so response and resolution targets aren't set up as entitlements.", "too_little_data"],
+    ["No case was closed in the last year.", "too_little_data"],
+    ["Omni-Channel offered no work in the last year.", "too_little_data"],
+    ["No tasks were logged in the last year, so we can't tell a clean record from an unused one.", "too_little_data"],
+    ["No account has a won deal, so there are no past customers to check.", "too_little_data"],
+    ["None of the 12 won deals with a primary quote was ordered in Salesforce, so orders don't look to be part of how you close, and we can't judge the handover.", "too_little_data"],
+    ["No leads were created in the window, so there's no funnel to measure.", "too_little_data"],
+    ["Knowledge is on, but no article is published.", "too_little_data"],
+    // Round 2: targets the calibration doesn't give in a form we can read are asked for.
+    ["No targets were given in the calibration. Tell us your targets to see pipeline coverage.", "needs_input"],
+    ["The calibration keeps targets in Forecasting quotas, but no revenue forecast type is active, so there is no quota to read. Tell us where targets are kept.", "needs_input"],
+    // A read cut short is unreadable, whatever else the words say.
+    ["Only 12 of the deals could be read before the read stopped at its row limit, and we need 30.", "unreadable"],
+    ["1,200 deals is too few to compare because the read stopped at its row limit", "unreadable"],
     // Needs input: what to give, and where.
     ["The calibration doesn't name a loss reason field that exists on Opportunity, so we can't tell a blank reason from a missing field.", "needs_input"],
     ["The calibration doesn't say what these stages mean: Stage 9.", "needs_input"],
@@ -229,6 +253,74 @@ describe("every score is as it was", () => {
       const shape = (s: Score) => [s.domain, s.status, s.status === "measured" ? s.score : null];
       assert.deepEqual(scoreDomains(domains, findings).map(shape), scoreDomains(domains, without).map(shape));
       assert.deepEqual(overallScore(scoreDomains(domains, findings), findings), overallScore(scoreDomains(domains, without), without));
+    }
+  });
+});
+
+describe("round 2: what may be called not in use", () => {
+  const recordedFindings = JSON.parse(readFileSync(join(dir, "findings.json"), "utf8")) as Finding[];
+  const PE = "Professional Edition has no Apex, so there's no code to check.";
+  const asOpen = (f: Finding, reason: string, kind: Finding["notMeasurableKind"]): Finding => ({ ...f, status: "not_measurable", severity: "info", recommendationType: "none", recommendation: "", guards: [], notMeasurableReason: reason, notMeasurableKind: kind });
+  const reasonOf = (s: Score) => (s.status === "not_measurable" ? [s.reason, s.notMeasurableKind] : ["measured"]);
+  // The reviewer's case: on Professional Edition the Apex rules are not in use, and two rules still find issues.
+  const APEX = new Set(["aut.old-api-versions", "aut.apex-coverage", "aut.multiple-triggers", "tech.test-quality", "tech.governor-limit-risk", "tech.apex-code-size"]);
+  const tech = recordedFindings.filter((f) => f.domain === "technical_health");
+
+  test("Professional Edition with two measured issues keeps the old reason, with no kind", () => {
+    const seen = new Set<string>();
+    const findings = tech.flatMap((f) => (APEX.has(f.ruleId) ? (seen.has(f.ruleId) ? [] : (seen.add(f.ruleId), [asOpen(f, PE, "not_in_use")])) : [f]));
+    assert.ok(findings.some((f) => f.status === "issue"));
+    assert.deepEqual(reasonOf(scoreDomain("technical_health", findings)), ["Too little of this area could be measured to score it fairly.", undefined]);
+  });
+
+  test("the rest unreadable keeps the old reason, with no kind", () => {
+    const rules = [...new Set(tech.map((f) => f.ruleId))];
+    const findings = tech.map((f) => (f.ruleId === rules[0] ? asOpen(f, PE, "not_in_use") : asOpen(f, "Users couldn't be read: INSUFFICIENT_ACCESS", "unreadable")));
+    assert.deepEqual(reasonOf(scoreDomain("technical_health", findings)), ["We couldn't measure this area.", undefined]);
+  });
+
+  test("the rest too little data or needing something keeps the old reason too", () => {
+    const rules = [...new Set(tech.map((f) => f.ruleId))];
+    for (const kind of ["too_little_data", "needs_input"] as const) {
+      const findings = tech.map((f) => (rules.indexOf(f.ruleId) < rules.length - 1 ? asOpen(f, PE, "not_in_use") : asOpen(f, "Something else.", kind)));
+      assert.equal(reasonOf(scoreDomain("technical_health", findings))[1], undefined, kind);
+    }
+  });
+
+  test("every rule not in use, or the rest passed: the area says so, with the kind", () => {
+    const all = tech.map((f) => asOpen(f, PE, "not_in_use"));
+    assert.deepEqual(reasonOf(scoreDomain("technical_health", all)), ["Nothing this area checks is in use in your org, so there is nothing to score.", "not_in_use"]);
+    const passed = tech.find((f) => f.status === "passed") ?? { ...tech[0]!, status: "passed" as const, severity: "info" as const, recommendationType: "none" as const, recommendation: "", guards: [], segmentExemptReason: "test" };
+    const onePass = [...all.filter((f) => f.ruleId !== passed.ruleId), { ...passed, notMeasurableKind: undefined }];
+    assert.deepEqual(reasonOf(scoreDomain("technical_health", onePass)), ["Most of what this area checks isn't in use in your org, and the rest passed, so there is too little to score.", "not_in_use"]);
+  });
+
+  test("a field a describe leaves out is something we couldn't see, in its words and its kind", () => {
+    const changed = edit<{ open: { missingFields?: string[] }; closedCases: { missingFields?: string[] } }>("service-cases", (c) => {
+      c.open.missingFields = [...(c.open.missingFields ?? []), "Case.Origin"];
+      c.closedCases.missingFields = [...(c.closedCases.missingFields ?? []), "Case.Origin"];
+    });
+    const origin = open(analyse(changed).findings).filter((f) => f.notMeasurableReason!.startsWith("Case.Origin"));
+    assert.ok(origin.length > 0);
+    for (const f of origin) {
+      assert.match(f.notMeasurableReason!, /^Case\.Origin couldn't be seen in this org: it may not exist, or the connected user may not have access to it, so this can't be measured\./);
+      assert.equal(f.notMeasurableKind, "unreadable", f.ruleId);
+    }
+  });
+
+  test("targets: \"none\" in the calibration, and quotas with no revenue type, ask for the targets", () => {
+    const none = open(analyse(extracts, { calibration: { ...loadCalibration(), targets: { source: "none" } } }).findings).filter((f) => f.notMeasurableReason!.startsWith("No targets were given"));
+    assert.ok(none.length > 0);
+    for (const f of none) {
+      assert.equal(f.notMeasurableReason, "No targets were given in the calibration. Tell us your targets to see pipeline coverage.");
+      assert.equal(f.notMeasurableKind, "needs_input");
+    }
+    const off = edit<{ types: { data: Array<{ IsActive: boolean }> } }>("forecast-quotas", (q) => q.types.data.forEach((t) => (t.IsActive = false)));
+    const quota = open(analyse(off, { calibration: { ...loadCalibration(), targets: { source: "forecasting_quota" } } }).findings).filter((f) => f.domain === "current_pipeline" && /Forecasting quotas/.test(f.notMeasurableReason!));
+    assert.ok(quota.length > 0);
+    for (const f of quota) {
+      assert.equal(f.notMeasurableReason, "The calibration keeps targets in Forecasting quotas, but no revenue forecast type is active, so there is no quota to read. Tell us where targets are kept.");
+      assert.equal(f.notMeasurableKind, "needs_input");
     }
   });
 });

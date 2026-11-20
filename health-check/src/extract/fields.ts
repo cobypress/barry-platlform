@@ -120,10 +120,16 @@ export function planFrom(described: DescribedObject | undefined, spec: FieldSpec
   return { ok: true, select: [...spec.required, ...present].join(", "), missing: optional.filter((f) => !present.includes(f)).map((f) => `${spec.object}.${f}`) };
 }
 
-/** Why a rule can't run, if a field it needs was dropped from its source. Null when everything is there. */
+/**
+ * Why a rule can't run, if a field it needs was dropped from its source. Null
+ * when everything is there. A describe leaves out a field the connected user
+ * can't see as well as one the org doesn't have, so the reason says either may
+ * be true (DECISIONS.md 627).
+ */
 export function missingFieldReason(source: Sourced<unknown>, ...fields: string[]): string | null {
   if (source.status !== "ok") return null;
   const gone = fields.filter((f) => source.missingFields?.includes(f));
   if (gone.length === 0) return null;
-  return `${listOf(gone)} ${gone.length === 1 ? "isn't" : "aren't"} in this org, so this can't be measured.`;
+  const one = gone.length === 1;
+  return `${listOf(gone)} couldn't be seen in this org: ${one ? "it" : "they"} may not exist, or the connected user may not have access to ${one ? "it" : "them"}, so this can't be measured.`;
 }

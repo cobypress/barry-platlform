@@ -247,7 +247,7 @@ describe("Service Cloud where the org has no Case.Origin (DECISIONS.md 599)", ()
     const list = out!.findings;
     for (const ruleId of ["svc.origin-missing", "svc.first-reply-email"]) {
       assert.equal(one(list, ruleId).status, "not_measurable", ruleId);
-      assert.match(one(list, ruleId).notMeasurableReason!, /^Case\.Origin isn't in this org/, ruleId);
+      assert.match(one(list, ruleId).notMeasurableReason!, /^Case\.Origin couldn't be seen in this org: it may not exist, or the connected user may not have access to it/, ruleId);
     }
     // Every other service check comes out as it does with the field there.
     const withOrigin = new Map(findings.filter((f) => SERVICE_RULES.includes(f.ruleId)).map((f) => [f.id, f.status]));

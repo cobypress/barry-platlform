@@ -54,13 +54,17 @@ export function scoreDomain(domain: string, findings: Finding[], ruleSetVersion:
     earned += issues.length > 0 ? RULE_MAXIMUM - Math.max(...issues.map(issueWeight)) : RULE_MAXIMUM;
     counted.push(...issues.map((f) => f.id), ...passes.map((f) => f.id));
   }
-  // An area left unscored because most of it isn't in use says that, not that
-  // we failed (DECISIONS.md 627). Only the words and the kind change: whether
-  // an area is scored, and its score, are decided above and below as before.
+  // An area left unscored because it isn't in use says that, not that we
+  // failed (DECISIONS.md 627), but only when that's the whole truth: every rule
+  // is not in use, or every other one passed. An issue, or anything we couldn't
+  // read, was given too little data for or need something for, keeps the
+  // reason as it was. Only the words and the kind change: whether an area is
+  // scored, and its score, are decided above and below as before.
   const unscored = (reason: string): Score => {
     const notInUse = [...rules].filter(([, group]) => group.every((f) => f.status === "not_measurable" && f.notMeasurableKind === "not_in_use")).map(([ruleId]) => ruleId);
-    if (notInUse.length * 2 <= rules.size) return notMeasurable(reason);
-    const words = NOTHING_IN_USE[domain]?.(notInUse) ?? "Most of what this area checks isn't in use in your org, so there is nothing to score.";
+    const rest = [...rules].filter(([ruleId]) => !notInUse.includes(ruleId));
+    if (notInUse.length === 0 || !rest.every(([, group]) => group.every((f) => f.status === "passed"))) return notMeasurable(reason);
+    const words = NOTHING_IN_USE[domain]?.(notInUse) ?? (rest.length === 0 ? "Nothing this area checks is in use in your org, so there is nothing to score." : "Most of what this area checks isn't in use in your org, and the rest passed, so there is too little to score.");
     return Score.parse({ status: "not_measurable", domain, ruleSetVersion, reason: words, notMeasurableKind: "not_in_use" });
   };
   if (rulesCounted === 0) return unscored("We couldn't measure this area.");

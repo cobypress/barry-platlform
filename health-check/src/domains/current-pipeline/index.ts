@@ -342,11 +342,15 @@ export function coverageOf(ctx: RuleContext | Omit<RuleContext, "metrics">, deal
   const { source } = ctx.calibration.targets;
   const { quotas, types } = ctx.data(quotasExtractor);
   const noTarget = [ctx.ev(quotas.source, { count: null })];
-  if (source === "none") return { reason: "The calibration says there are no targets, so coverage can't be worked out.", evidence: noTarget };
+  // "None" is the console's preselected answer, so it may be a default nobody
+  // chose: we ask for targets rather than report the org has none (DECISIONS.md 627).
+  if (source === "none") return { reason: "No targets were given in the calibration. Tell us your targets to see pipeline coverage.", evidence: noTarget };
   if (source !== "forecasting_quota") return { reason: `The calibration keeps targets in ${source === "custom_object" ? "a custom object" : "a spreadsheet"}, and we don't read that yet.`, evidence: noTarget };
   if (types.status !== "ok") return { reason: `Forecast types couldn't be read: ${types.reason}`, evidence: [ctx.ev(types.source, { count: null })] };
   if (quotas.status !== "ok") return { reason: `Quotas couldn't be read: ${quotas.reason}`, evidence: noTarget };
   const type = revenueForecastType(types.data);
+  // Quotas belong to a revenue forecast type, so with none active the calibration's answer can't be right as given.
+  if ("switchedOff" in type) return { reason: "The calibration keeps targets in Forecasting quotas, but no revenue forecast type is active, so there is no quota to read. Tell us where targets are kept.", evidence: noTarget };
   if ("reason" in type) return { reason: type.reason, evidence: noTarget };
   const fiscal = fiscalStartOf(ctx);
   if (!fiscal) return { reason: "The org's fiscal year couldn't be read, and the calibration doesn't set one.", evidence: noTarget };
