@@ -1,5 +1,6 @@
 import { yearlyByFinding } from "../value/model.ts";
 import { readinessLine } from "../narrative/readiness.ts";
+import { byKind, hasKinds, kindCounts } from "../narrative/unmeasured.ts";
 import { currentBody, POTENTIAL_REVENUE_RULES, TOP_ISSUE_COUNT, type BuiltReport } from "../narrative/sections.ts";
 import { areasOf, buildPlan, isSetupReview, isThinData, isUnpricedSaving, QUICK_WINS_HEADING, scorecard, thinDataLine, topIssues, UNPRICED, verdictOf, type PlanPhase } from "../narrative/select.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
@@ -204,9 +205,14 @@ function unmeasuredLine(r: Render, report: BuiltReport): string {
   // A thin org hears it once, here, rather than area by area (DECISIONS.md 450).
   const text = isThinData(report.teamFindings)
     ? thinDataLine(report.teamFindings, "The full report's appendix")
-    : open.length <= 3
-      ? `Not measurable: ${open.map((f) => f.title).join("; ")}. The full report's appendix says why for each.`
-      : "The full report's appendix names each check we couldn't measure, and why.";
+    : !hasKinds(open)
+      ? open.length <= 3
+        ? `Not measurable: ${open.map((f) => f.title).join("; ")}. The full report's appendix says why for each.`
+        : "The full report's appendix names each check we couldn't measure, and why."
+      : // By kind (DECISIONS.md 627): named up to three, counted past that.
+        open.length <= 3
+        ? `${byKind(open).map((g) => `${g.heading}: ${g.findings.map((f) => f.title).join("; ")}.`).join(" ")} The full report's appendix says why for each.`
+        : `Of the ${open.length} checks we couldn't measure, ${kindCounts(open)}. The full report's appendix names each, and why.`;
   return `<p style="margin-top:8px;color:var(--muted);font-size:0.85em">${r.t(text)}</p>`;
 }
 

@@ -1,6 +1,7 @@
 import { yearlyByFinding } from "../value/model.ts";
 import { currentBody, TOP_ISSUE_COUNT, type BuiltOutput, type BuiltReport } from "../narrative/sections.ts";
 import { VERDICT_WORDS, type ReadinessVerdict } from "../narrative/readiness.ts";
+import { byKind, hasKinds, KIND_HEADINGS, kindOf, noteCounts } from "../narrative/unmeasured.ts";
 import { areasOf, buildPlan, domainLabel, isSetupReview, issuesOf, isThinData, isUnpricedSaving, QUICK_WINS_HEADING, recordAreasLine, scorecard, thinDataLine, topIssues, UNPRICED, verdictOf } from "../narrative/select.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { ACCOUNT_ENGAGEMENT_DOMAINS, canRelease, CPQ_DOMAINS, SERVICE_CLOUD_DOMAINS, type Finding, type Metric, type Run } from "../schemas/index.ts";
@@ -947,7 +948,8 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null, mo
       const own = team.filter((f) => f.domain === d);
       const passed = own.filter((f) => f.status === "passed").length;
       const open = own.filter((f) => f.status === "not_measurable").length;
-      return { title: domainLabel(d), detail: `No issues ${passed === 1 ? "in the one check" : `across the ${passed} checks`} we could make here.${open && !thin ? ` ${open} more couldn't be measured, and the appendix lists them.` : ""}` };
+      const kinds = noteCounts(own);
+      return { title: domainLabel(d), detail: `No issues ${passed === 1 ? "in the one check" : `across the ${passed} checks`} we could make here.${open && !thin ? ` ${open} more couldn't be measured${kinds ? `: ${kinds}` : ""}, and the appendix lists them.` : ""}` };
     }), compact));
   }
   const recordLine = recordAreasLine(run);
@@ -1036,11 +1038,19 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null, mo
   slides.push(...(compact ? listSlides(r, "Appendix", "Metric definitions", definitions, compact) : dense ? threeColumnList(r, "Appendix", "Metric definitions", definitions) : twoColumnList(r, "Appendix", "Metric definitions", definitions)));
   // Reference, so two to a line like the definitions.
   const reference = (title: string, items: ListItem[]): Slide[] => (compact || items.length === 0 ? listSlides(r, "Appendix", title, items, compact) : twoColumnList(r, "Appendix", title, items));
-  const unmeasured = team.filter((f) => f.status === "not_measurable").map((f) => ({ title: f.title, detail: f.notMeasurableReason ?? f.summary }));
+  const open = team.filter((f) => f.status === "not_measurable");
+  // By kind when the run has kinds (DECISIONS.md 627): in that order, and each list headed by its kind.
+  const kinded = hasKinds(open);
+  const unmeasuredItem = (f: Finding): ListItem => ({ title: f.title, detail: f.notMeasurableReason ?? f.summary });
+  const unmeasured = (kinded ? byKind(open).flatMap((g) => g.findings) : open).map(unmeasuredItem);
   const passing = team.filter((f) => f.status === "passed").map((f) => ({ title: f.title, detail: f.summary }));
   // At the three-column step the two lists share three columns, each item saying which it is (DECISIONS.md 244).
   if (density?.threeColumnLists && unmeasured.length && passing.length) {
-    slides.push(...threeColumnList(r, "Appendix", "What we couldn't measure, and what passed", [...unmeasured.map((x) => ({ ...x, title: `Not measurable: ${x.title}` })), ...passing.map((x) => ({ ...x, title: `Passed: ${x.title}` }))]));
+    const labelled = kinded ? byKind(open).flatMap((g) => g.findings.map((f) => ({ ...unmeasuredItem(f), title: `${KIND_HEADINGS[kindOf(f)]}: ${f.title}` }))) : unmeasured.map((x) => ({ ...x, title: `Not measurable: ${x.title}` }));
+    slides.push(...threeColumnList(r, "Appendix", "What we couldn't measure, and what passed", [...labelled, ...passing.map((x) => ({ ...x, title: `Passed: ${x.title}` }))]));
+  } else if (kinded) {
+    for (const g of byKind(open)) slides.push(...reference(g.heading, g.findings.map(unmeasuredItem)));
+    slides.push(...reference("Checks that passed", passing));
   } else {
     slides.push(...reference("What we couldn't measure", unmeasured));
     slides.push(...reference("Checks that passed", passing));

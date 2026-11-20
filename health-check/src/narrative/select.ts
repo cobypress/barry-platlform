@@ -1,6 +1,7 @@
-import { SALES_CLOUD_DOMAINS, type Finding, type Run, type Score } from "../schemas/index.ts";
+import { SALES_CLOUD_DOMAINS, type Finding, type NotMeasurableKind, type Run, type Score } from "../schemas/index.ts";
 import { NOT_MONEY_RULES } from "../value/model.ts";
 import { tokenSource } from "../privacy/pseudonymiser.ts";
+import { hasKinds, kindCounts } from "./unmeasured.ts";
 
 // The choices a report makes about its findings: what's top, what goes when, and
 // what an executive reader sees. All of it is code, so it's repeatable and Claude
@@ -229,17 +230,20 @@ export function isThinData(findings: Finding[]): boolean {
 /**
  * The one sentence a thin report carries at the front. Both counts are in the
  * dataset's summary source; how many we could measure isn't, so it isn't given.
- * No cause: code doesn't know why each check couldn't be measured, and the
- * appendix gives each its own reason. With nothing measured there are no pages
- * of findings to point to, so it says only that.
+ * The cause is given only as each kind's count (DECISIONS.md 627), also in the
+ * summary source; the appendix gives each check its own reason. With nothing
+ * measured there are no pages of findings to point to, so it says only that.
  */
 export function thinDataLine(findings: Finding[], appendix: "The full report's appendix" | "The appendix"): string {
   const open = findings.filter((f) => f.status === "not_measurable").length;
-  if (open === findings.length) return `We couldn't measure any of the ${findings.length} checks. ${appendix} names each, with the reason.`;
-  return `We couldn't measure ${open} of the ${findings.length} checks, so this report says less than a full report would. ${appendix} names each, with the reason. The pages that follow cover the ones we could.`;
+  // Of what, by kind (DECISIONS.md 627), so "couldn't measure" isn't read as the check failing where most of it doesn't apply.
+  const kinds = hasKinds(findings) ? ` Of those, ${kindCounts(findings)}.` : "";
+  if (open === findings.length) return `We couldn't measure any of the ${findings.length} checks.${kinds} ${appendix} names each, with the reason.`;
+  return `We couldn't measure ${open} of the ${findings.length} checks, so this report says less than a full report would.${kinds} ${appendix} names each, with the reason. The pages that follow cover the ones we could.`;
 }
 
-export type ScorecardRow = { domain: string; label: string; score: number | null; note: string; assessed: boolean; issues: number; high: number };
+/** `notMeasurableKind` is the unscored area's, when its score has one (DECISIONS.md 627). */
+export type ScorecardRow = { domain: string; label: string; score: number | null; note: string; assessed: boolean; issues: number; high: number; notMeasurableKind?: NotMeasurableKind };
 
 /** A set-up review (roadmap 2.2): set-up only, and no CRM records. */
 export const isSetupReview = (run: Pick<Run, "scope">): boolean => run.scope === "essentials";
@@ -273,7 +277,7 @@ export function scorecard(findings: Finding[], scores: Score[], areas: string[] 
     const score = scores.find((s) => s.domain === domain);
     const base = { domain, label: domainLabel(domain), assessed: own.length > 0, issues: issues.length, high: issues.filter((f) => f.severity === "critical" || f.severity === "high").length };
     if (score?.status === "measured") return { ...base, score: score.score, note: "" };
-    if (score) return { ...base, score: null, note: score.reason };
+    if (score) return { ...base, score: null, note: score.reason, ...(score.notMeasurableKind ? { notMeasurableKind: score.notMeasurableKind } : {}) };
     return { ...base, score: null, note: own.length ? "Not scored in this run" : "Not assessed in this run" };
   });
 }
