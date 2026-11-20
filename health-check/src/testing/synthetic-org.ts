@@ -1813,11 +1813,25 @@ export const PARDOT_OPEN_LEADS = [
   prospect(30, userId(2), 120, null),
 ];
 
+// The permissions the inventory checks beyond Modify All Data and View All Data (DECISIONS.md 603).
+export const INVENTORY_PERMISSION_FIELDS = [
+  "PermissionsAuthorApex", "PermissionsCustomizeApplication", "PermissionsManageUsers", "PermissionsManageProfilesPermissionsets", "PermissionsManageSharing",
+  "PermissionsManagePasswordPolicies", "PermissionsManageLoginAccessPolicies", "PermissionsEditReadonlyFields", "PermissionsExportReport", "PermissionsDataExport",
+  "PermissionsApiEnabled", "PermissionsModifyMetadata",
+];
+
 // The facts step (DECISIONS.md 287 to 295). PermissionSet, described for the
 // permission fields we filter on, and the objects describe-global lists: every
 // object the simulator answers through REST. CPQ's are added only with CPQ.
 export const FACT_DESCRIBES: Record<string, { fields: unknown[] }> = {
-  PermissionSet: { fields: ["Id", "Label", "Name", "IsOwnedByProfile", "PermissionsModifyAllData", "PermissionsViewAllData", "PermissionsApiUserOnly"].map((f) => standardField(f, f.startsWith("Permissions") || f.startsWith("Is") ? "boolean" : "string")) },
+  // The inventory's risky permissions are described here too (DECISIONS.md 603).
+  // Trap: Approve Uninstalled Connected Apps isn't among them, as on an org whose
+  // release doesn't have it, so the inventory says it wasn't checked.
+  PermissionSet: {
+    fields: ["Id", "Label", "Name", "IsOwnedByProfile", "PermissionsModifyAllData", "PermissionsViewAllData", "PermissionsApiUserOnly", "NamespacePrefix", ...INVENTORY_PERMISSION_FIELDS].map((f) =>
+      standardField(f, f.startsWith("Permissions") || f.startsWith("Is") ? "boolean" : "string"),
+    ),
+  },
 };
 export const SOBJECTS: readonly string[] = [
   "Account", "ActivityUsrConnectionStatus", "AgentWork", "ApexClass", "ApexPage", "ApexTrigger", "AssignmentRule", "AsyncApexJob", "AuthProvider", "BotDefinition", "BusinessHours",
@@ -1827,4 +1841,89 @@ export const SOBJECTS: readonly string[] = [
   "NamedCredential", "Opportunity", "OpportunityHistory", "OpportunityLineItem", "OpportunityStage", "OrderItem", "Organization", "PackageLicense", "Period", "PermissionSet",
   "PermissionSetAssignment", "PermissionSetGroupComponent", "PermissionSetLicense", "ProcessDefinition", "ProcessInstance", "QueueRoutingConfig", "QueueSobject", "QuickText",
   "QuickTextUsage", "RecordType", "Report", "Scontrol", "ServiceChannel", "SetupAuditTrail", "Site", "SlaProcess", "Task", "User", "UserLicense", "UserRole", "VoiceCall", "WebLink",
+];
+
+// The org's inventory (DECISIONS.md 603 to 605): what the inventory steps read
+// beyond the rest. None of it is read by a check, so no finding moves with it.
+
+// Field fill rates. The custom objects with records are described for the
+// inventory only. Traps: a field nobody has ever filled, and one of each kind
+// Salesforce can't count or that can't be empty: a long text area, a formula
+// and a checkbox. Project_Line__c has no describe, so its read is unavailable.
+export const INVENTORY_DESCRIBES: Record<string, { fields: unknown[] }> = {
+  Invoice__c: {
+    fields: [
+      standardField("Id", "id"),
+      standardField("Name"),
+      customField("Amount__c", { type: "currency" }),
+      customField("Dispute_Reason__c"),
+      customField("Notes__c", { type: "textarea", aggregatable: false }),
+      customField("Total_With_Tax__c", { type: "currency", calculated: true }),
+      customField("Paid__c", { type: "boolean" }),
+    ],
+  },
+  Project__c: { fields: [standardField("Id", "id"), standardField("Name"), customField("Stage__c", { type: "picklist" })] },
+};
+export const INVENTORY_FILLED: Record<string, number> = { Dispute_Reason__c: 0, Amount__c: 11_400, Stage__c: 20 };
+
+/** What COUNT(field) gives for the inventory: planted, a name always there, otherwise six in ten. */
+export function inventoryFilled(object: string, field: string, total: number): number {
+  const planted = INVENTORY_FILLED[field] ?? FILLED[field];
+  if (planted !== undefined) return Math.min(Array.isArray(planted) ? planted[0] : planted, total);
+  return field === "Name" ? total : Math.round(total * 0.6);
+}
+
+/** Each object's records for the inventory's counts: the field usage totals, then the record count resource. */
+export const inventoryTotal = (object: string): number => RECORD_TOTALS[object]?.total ?? RECORD_COUNTS.find((c) => c.name === object)?.count ?? 0;
+
+// Installed packages: each one's version, as Tooling gives it through
+// InstalledSubscriberPackage. Trap: the version of Acme CPQ installed is deprecated.
+export const PACKAGE_VERSIONS: Record<string, { Name: string; MajorVersion: number; MinorVersion: number; PatchVersion: number; BuildNumber: number; IsDeprecated: boolean; IsManaged: boolean }> = {
+  acmecpq: { Name: "Spring", MajorVersion: 3, MinorVersion: 1, PatchVersion: 0, BuildNumber: 4, IsDeprecated: true, IsManaged: true },
+  SBQQ: { Name: "Winter", MajorVersion: 250, MinorVersion: 2, PatchVersion: 0, BuildNumber: 1, IsDeprecated: false, IsManaged: true },
+  pi: { Name: "Account Engagement", MajorVersion: 5, MinorVersion: 0, PatchVersion: 1, BuildNumber: 2, IsDeprecated: false, IsManaged: true },
+};
+
+// Connected apps' OAuth tokens: one row per user and app. Trap: Notes Helper
+// isn't installed, and three people authorised it for themselves.
+const token = (app: string, user: number, createdDaysAgo: number, usedDaysAgo: number | null, uses: number | null) => ({
+  AppName: app,
+  UserId: userId(user),
+  CreatedDate: daysAgo(createdDaysAgo),
+  LastUsedDate: usedDaysAgo === null ? null : daysAgo(usedDaysAgo),
+  UseCount: uses,
+});
+export const OAUTH_TOKENS = [
+  token("Data Loader", 1, 400, 30, 12),
+  token("Data Loader", 2, 200, 3, 40),
+  token("Data Loader", 2, 90, 90, 1),
+  token("Finance Sync", 11, 700, 0, 9_000),
+  token("Notes Helper", 3, 60, 2, 25),
+  token("Notes Helper", 5, 45, null, null),
+  token("Notes Helper", 7, 30, 10, 4),
+];
+
+// Risky permissions, by permission set. Profiles' own sets, and sets of others.
+// Trap: Sales Console User, which five active people hold, grants Author Apex.
+const grants = (id: string, name: string, label: string, profile: string | null, namespace: string | null, granted: string[]) => ({
+  Id: id,
+  Name: name,
+  Label: label,
+  IsOwnedByProfile: profile !== null,
+  Profile: profile ? { Name: profile } : null,
+  NamespacePrefix: namespace,
+  ...Object.fromEntries(["PermissionsModifyAllData", "PermissionsViewAllData", ...INVENTORY_PERMISSION_FIELDS].map((f) => [f, granted.includes(f)])),
+});
+export const RISKY_PERMISSION_SETS = [
+  grants(sfId("0PS", 1), "X00eSystemAdmin", "00eSystemAdmin", "System Administrator", null, ["PermissionsModifyAllData", "PermissionsViewAllData", ...INVENTORY_PERMISSION_FIELDS]),
+  grants(sfId("0PS", 2), "X00eApiOnly", "00eApiOnly", "API Only", null, ["PermissionsModifyAllData", "PermissionsViewAllData", "PermissionsApiEnabled"]),
+  grants(sfId("0PS", 101), "X00eStandardUser", "00eStandardUser", "Standard User", null, ["PermissionsApiEnabled", "PermissionsExportReport"]),
+  grants(sfId("0PS", 102), "X00eOldSales", "00eOldSales", "Old Sales Profile", null, ["PermissionsApiEnabled"]),
+  grants(sfId("0PS", 3), "Data_Fix_Temporary", "Data Fix Temporary", null, null, ["PermissionsModifyAllData", "PermissionsViewAllData"]),
+  grants(sfId("0PS", 4), "Reporting_Everything", "Reporting Everything", null, null, ["PermissionsViewAllData", "PermissionsExportReport"]),
+  grants(sfId("0PS", 5), "Sales_Console_User", "Sales Console User", null, null, ["PermissionsAuthorApex"]),
+  grants(sfId("0PS", 6), "CPQ_User", "CPQ User", null, "acmecpq", ["PermissionsEditReadonlyFields"]),
+  grants(sfId("0PS", 8), "Report_Builder", "Report Builder", null, null, ["PermissionsExportReport"]),
+  // Grants nothing on the list, so the read leaves it out.
+  grants(sfId("0PS", 7), "Old_Territory_Access", "Old Territory Access", null, null, []),
 ];

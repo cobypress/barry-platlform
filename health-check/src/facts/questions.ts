@@ -29,6 +29,7 @@ export const SECTION_IDS: Record<string, string> = {
   "The org handbook's data": "handbook",
   "Claude's summaries of Apex code": "summaries",
   "Record-type use": "record-types",
+  "The org's inventory": "inventory",
 };
 
 export type QuestionItem = { id: string; section: string; text: string };

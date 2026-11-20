@@ -16,7 +16,7 @@ export async function recordFixtures(): Promise<Recording> {
   const out = mkdtempSync(join(tmpdir(), "hc-record-"));
   const transport = new RecordingTransport(new Simulator());
   try {
-    await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: ALL_MODULES, outDir: out, now: new Date(AS_OF), transport, connectedUser: CONNECTED_USER });
+    await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: ALL_MODULES, outDir: out, now: new Date(AS_OF), transport, connectedUser: CONNECTED_USER, inventory: true });
   } finally {
     rmSync(out, { recursive: true, force: true });
   }

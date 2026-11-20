@@ -85,6 +85,8 @@ export const CLIENT_METHODS = [
   "limitsAtConnect",
   // The names /limits reported, for the facts step. It sends nothing.
   "limitNames",
+  // Every limit /limits reported as first read, for the inventory (DECISIONS.md 603). It sends nothing.
+  "allLimitsAtConnect",
   // The org's own domain, for the action lists' links. It sends nothing.
   "instanceUrl",
   "query",
@@ -125,6 +127,7 @@ export class SalesforceClient {
   #sinceLimitsRead = 0;
   #limitsAtConnect: Record<string, OrgLimit> | null = null;
   #limitNames: string[] = [];
+  #allLimitsAtConnect: Record<string, OrgLimit> | null = null;
 
   private constructor(provider: ConnectionProvider, connection: OrgConnection, options: ClientOptions) {
     this.budget = options.budget;
@@ -181,11 +184,20 @@ export class SalesforceClient {
     return [...this.#limitNames];
   }
 
+  /**
+   * Every limit as first read on connecting, by its name: each top-level entry
+   * with a maximum and what remains. The per-app entries some limits nest are left out.
+   */
+  get allLimitsAtConnect(): Record<string, OrgLimit> {
+    return { ...this.#allLimitsAtConnect };
+  }
+
   /** Doesn't count against the daily limit. Also how the budget learns the limit. */
   async refreshLimits(): Promise<void> {
     const res = await this.#send({ method: "GET", path: this.#data("/limits") }, { free: true });
     const limits = JSON.parse(res.text) as Record<string, OrgLimit | undefined>;
     if (this.#limitNames.length === 0) this.#limitNames = Object.keys(limits).sort();
+    this.#allLimitsAtConnect ??= Object.fromEntries(Object.entries(limits).flatMap(([name, limit]) => (isLimit(limit) ? [[name, { Max: limit.Max, Remaining: limit.Remaining }]] : [])));
     this.#limitsAtConnect ??= Object.fromEntries(REPORTED_LIMITS.flatMap((name) => (isLimit(limits[name]) ? [[name, { Max: limits[name].Max, Remaining: limits[name].Remaining }]] : [])));
     const daily = limits.DailyApiRequests;
     if (!daily) throw new Error("The org didn't report a daily API limit");
