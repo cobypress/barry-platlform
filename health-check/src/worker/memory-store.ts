@@ -2,6 +2,8 @@ import { isMyDomainHost } from "../connect/instance-host.ts";
 import { StoreError, type OrgStage } from "../connect/org-stages.ts";
 import type { ScanResult } from "../scan/result.ts";
 import type { PulseResult } from "../pulse/result.ts";
+import { DIGEST_KEYS, type RunDigest } from "../schemas/digest.ts";
+import { unstorableAt } from "./inventory.ts";
 import { Run, type BenchmarkRow, type ConnectLink } from "../schemas/index.ts";
 import { storedFromRow, waitingRow, type ConsoleSummariesRow, type SummariesToSave } from "../handbook/summary-row.ts";
 import { ORG_AWAITING_CONNECT, RunClosedError, type ConnectJobInput, type DocumentsJobInput, type DocumentsJobReads, type DriveShare, type ShareJobInput, type DocumentsMade, type LinkConnected, type LinkState, type PulseRun, type ReleasedRun, type RunJobInput, type RunOutputRecord, type RunProgress, type WorkerStore } from "./types.ts";
@@ -11,7 +13,7 @@ import { ORG_AWAITING_CONNECT, RunClosedError, type ConnectJobInput, type Docume
 // released refuses the worker; only a pending link can be settled.
 
 /** The run's overall score and grade are the console's columns (DECISIONS.md 626), kept beside the output, never in it, and only once written. */
-export type StoredRun = RunJobInput & { runDir: string | null; output: Omit<RunOutputRecord, "progress" | "runDir" | "overall"> | null; overallScore?: number | null; overallGrade?: string | null };
+export type StoredRun = RunJobInput & { runDir: string | null; output: Omit<RunOutputRecord, "progress" | "runDir" | "overall" | "digest"> | null; overallScore?: number | null; overallGrade?: string | null };
 /** `instanceHost` is the console's column (DECISIONS.md 626), there only once written. */
 export type StoredLink = Omit<ConnectJobInput, "runOrgId" | "runId"> & { runId: string | null; reason: string | null; connected: LinkConnected | null; refusedAt: string | null; instanceHost?: string };
 
@@ -78,14 +80,40 @@ export class MemoryWorkerStore implements WorkerStore {
 
   async saveRunOutput(runId: string, output: RunOutputRecord): Promise<void> {
     const run = this.#open(runId);
-    const { progress, runDir, overall, ...rest } = structuredClone(output);
+    const { progress, runDir, overall, digest, ...rest } = structuredClone(output);
     run.run = Run.parse({ ...run.run, ...progress });
     run.runDir = runDir;
     run.output = rest;
     // As the Postgres store's own statements: null where there's no score, untouched where none was given.
     if (overall !== undefined && !this.#withoutNewerColumns) Object.assign(run, { overallScore: overall?.score ?? null, overallGrade: overall?.grade ?? null });
     if (rest.handbookSummaries) this.#saveSummaries(runId, rest.handbookSummaries);
+    if (digest !== undefined) this.#saveDigest(runId, digest);
     this.writes.push({ method: "saveRunOutput", id: runId, detail: progress.status });
+  }
+
+  /** The console's HealthCheckRunDigest, keyed by run id (DECISIONS.md 632). */
+  readonly digests = new Map<string, { madeAt: string; version: number; digest: RunDigest }>();
+  /** False stands in for a console without the digest's table: the digest is left out and everything else saves. */
+  digestTable = true;
+
+  /**
+   * As the Postgres store's savepoint: replaced whole; without the table, left
+   * out with the rest saved; and with none to write, or one holding a string
+   * jsonb refuses, any earlier row deleted, so a stale digest is never served.
+   */
+  #saveDigest(runId: string, digest: RunDigest | null): void {
+    if (!this.digestTable) return;
+    if (digest && !unstorableAt(digest, [], DIGEST_KEYS)) {
+      this.digests.set(runId, structuredClone({ madeAt: digest.madeAt, version: digest.version, digest }));
+      this.writes.push({ method: "saveRunDigest", id: runId });
+      return;
+    }
+    if (this.digests.delete(runId)) this.writes.push({ method: "deleteRunDigest", id: runId });
+  }
+
+  /** The digest a run has, or null: what the console's tolerant reader returns. */
+  getRunDigest(runId: string): RunDigest | null {
+    return structuredClone(this.digests.get(runId)?.digest ?? null);
   }
 
   /** The console's HealthCheckHandbookSummaries, keyed by run id (DECISIONS.md 494). */
@@ -209,12 +237,13 @@ export class MemoryWorkerStore implements WorkerStore {
     return true;
   }
 
-  async saveDocuments(runId: string, made: DocumentsMade): Promise<void> {
+  async saveDocuments(runId: string, made: DocumentsMade, digest?: RunDigest | null): Promise<void> {
     const doc = this.documents.get(runId);
     if (doc?.input.state !== "making") return;
     Object.assign(doc, { made: structuredClone(made), error: null });
     Object.assign(doc.input, { state: "done", driveFolderId: made.driveFolderId, files: structuredClone(made.files) });
     this.writes.push({ method: "saveDocuments", id: runId, detail: made.folderName });
+    if (digest !== undefined) this.#saveDigest(runId, digest);
   }
 
   /** The benchmark table. */

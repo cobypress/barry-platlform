@@ -13,6 +13,8 @@ import { OAuthConnectionProvider, ReconnectionNeeded, revokeConnection } from ".
 import { OAuthError } from "../salesforce/oauth.ts";
 import { buildScanResult } from "../scan/result.ts";
 import { buildPulseResult } from "../pulse/result.ts";
+import { buildDigest } from "../digest/build.ts";
+import type { RunDigest } from "../schemas/digest.ts";
 import { deleteRunFolder } from "../retention/purge.ts";
 import type { StoredConnection } from "../salesforce/token-store.ts";
 import { safeReason, type Attempt, type JobOutcome, type WorkerDeps } from "./deps.ts";
@@ -284,6 +286,8 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
     // Always a row, so the console never has to guess why there's none (DECISIONS.md 618).
     const inventory = inventoryOf(dir, log, { runId, madeAt: result.run.asOf, scope: result.run.scope });
     const complexity = complexityOf(dir, log);
+    // A pulse's digest, from the report its result is made from, with its results (DECISIONS.md 632). A check's waits for its documents.
+    const digest = input.run.product === "pulse" ? digestOf(runId, () => buildDigest({ report, pseudonyms, inventory, madeAt: now().toISOString() }), log) : null;
     await deps.store.saveRunOutput(runId, {
       progress: progressOf(result.run),
       runDir: dir,
@@ -304,6 +308,8 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
       ...(complexity ? { complexity } : {}),
       // The score and grade the report gives, pulses' and scans' too, for the portal (DECISIONS.md 626).
       overall: runOverall(report.overall),
+      // A pulse's whatever it is: null takes away an earlier delivery's, so a stale digest is never served.
+      ...(input.run.product === "pulse" ? { digest } : {}),
     });
   } catch (err) {
     if (err instanceof RunClosedError) return { outcome: "skipped", detail: err.message };
@@ -316,6 +322,20 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
   if (input.run.product === "scan") await finishScan(runId, dir, name, deps, now().toISOString(), log);
   if (input.run.product === "pulse") await finishPulse(runId, dir, deps, now().toISOString(), log);
   return { outcome: "done", detail: `Run ${runId} is ${result.run.status.replace("_", " ")}` };
+}
+
+/**
+ * A run's digest (DECISIONS.md 632), or null: one that can't be made never
+ * costs the run its results or its documents. Logged by the error's class
+ * alone, since its message could quote the report's text.
+ */
+export function digestOf(runId: string, make: () => RunDigest, log: (line: string) => void): RunDigest | null {
+  try {
+    return make();
+  } catch (err) {
+    log(`Run ${runId}'s digest couldn't be made (${err instanceof Error ? err.name : "error"}), so the connector has none for it.`);
+    return null;
+  }
 }
 
 /** Deletes the Apex code kept for Claude's summaries, and any summaries made from it. Logs a sentence, never a path. */

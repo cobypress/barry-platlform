@@ -4,6 +4,8 @@ import type { Inventory } from "../schemas/inventory.ts";
 import type { Complexity } from "../schemas/complexity.ts";
 import type { ScanResult } from "../scan/result.ts";
 import type { PulseResult } from "../pulse/result.ts";
+import { DIGEST_KEYS, type RunDigest } from "../schemas/digest.ts";
+import { unstorableAt } from "./inventory.ts";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { Intake } from "../narrative/intake.ts";
@@ -242,6 +244,11 @@ export const HANDBOOK_SUMMARIES: Columns = { runId: "text", status: "text", mode
 // Only what the handbook prints from: not the model or the time, nor who decided it or when.
 const HANDBOOK_SUMMARIES_READ: Columns = { runId: "text", status: "text", items: "json", leftOut: "json" };
 export const HANDBOOK_SUMMARIES_MIGRATION = "20261122_health_check_handbook_summaries.sql";
+/** The console's migration that adds the run digest (DECISIONS.md 632). */
+export const RUN_DIGEST_MIGRATION = "20261201_health_check_run_digest.sql";
+/** One statement, so a second delivery or a remake replaces the row rather than failing on its key. */
+export const RUN_DIGEST_DELETE_SQL = `DELETE FROM "HealthCheckRunDigest" WHERE "runId" = $1`;
+export const RUN_DIGEST_SQL = `INSERT INTO "HealthCheckRunDigest" ("runId", "madeAt", "version", "digest") VALUES ($1, $2::timestamp(3), $3, $4::jsonb) ON CONFLICT ("runId") DO UPDATE SET "madeAt" = EXCLUDED."madeAt", "version" = EXCLUDED."version", "digest" = EXCLUDED."digest"`;
 /** The console's migration that adds the run's overall score and grade and the link's host (DECISIONS.md 626). */
 export const RUN_SCORE_AND_HOST_MIGRATION = "20261128_health_check_run_score_and_host.sql";
 export const BENCHMARK_ROW: Columns = {
@@ -603,6 +610,7 @@ export class PostgresWorkerStore implements WorkerStore {
       if (summaries?.ok && summaries.row) await this.#writeSummaries(client, summaries.row);
       if (output.inventory) await this.#writeInventory(client, runId, output.inventory);
       if (output.complexity) await this.#writeComplexity(client, runId, output.complexity);
+      if (output.digest !== undefined) await this.#writeDigest(client, runId, output.digest);
       // Last, and each alone, so a console without the columns saves as before (DECISIONS.md 626).
       if (output.overall !== undefined) {
         const said = { subject: `Run ${runId}`, table: "HealthCheckRun", kept: "its results are" };
@@ -755,6 +763,47 @@ export class PostgresWorkerStore implements WorkerStore {
   }
 
   /**
+   * The run's digest for the customer's connector (DECISIONS.md 632), as the
+   * side tables are written (615, 618): its own savepoint, so a console
+   * without the table or column (class 42), one that refuses the row (class
+   * 23) or a value its jsonb refuses (class 22) costs the digest only, said for
+   * the run by its id, the table and the SQLSTATE; anything else rolls the
+   * whole save back to be tried again. A string jsonb would refuse (a NUL, half
+   * of a UTF-16 pair) is caught before the statement, as the inventory's is,
+   * and said by its path alone. With no digest to write, or one that wasn't
+   * written, any earlier row is deleted the same way, so the connector never
+   * serves figures the run's results or documents no longer hold.
+   */
+  async #writeDigest(client: SqlClient, runId: string, digest: RunDigest | null): Promise<void> {
+    if (digest) {
+      const bad = unstorableAt(digest, [], DIGEST_KEYS);
+      if (bad) this.#log(`Run ${runId}: its digest holds ${bad.what} at ${bad.at}, which the console's database can't store, so the digest isn't saved; its results are.`);
+      else {
+        const code = await this.#digestStatement(client, runId, RUN_DIGEST_SQL, [runId, digest.madeAt, digest.version, JSON.stringify(digest)]);
+        // Written, or no table to hold an earlier one.
+        if (code === null || code === "42P01") return;
+      }
+    }
+    await this.#digestStatement(client, runId, RUN_DIGEST_DELETE_SQL, [runId]);
+  }
+
+  /** One digest statement in its own savepoint: null when it ran, else the SQLSTATE it was skipped for. */
+  async #digestStatement(client: SqlClient, runId: string, text: string, values: unknown[]): Promise<string | null> {
+    await client.query("SAVEPOINT run_digest");
+    try {
+      await client.query(text, values);
+    } catch (err) {
+      const code = (err as { code?: unknown } | null)?.code;
+      if (typeof code !== "string" || !/^(42|23|22)[0-9A-Z]{3}$/.test(code)) throw err;
+      await client.query("ROLLBACK TO SAVEPOINT run_digest");
+      this.#sideTableSkipped(runId, "HealthCheckRunDigest", code, "digest");
+      return code;
+    }
+    await client.query("RELEASE SAVEPOINT run_digest");
+    return null;
+  }
+
+  /**
    * A side table's error that means the console's table doesn't match what we
    * write (class 42) or refuses the row (class 23), as its SQLSTATE; anything
    * else, a lost connection or a deadlock among them, is thrown again so the
@@ -897,11 +946,20 @@ export class PostgresWorkerStore implements WorkerStore {
     return result.rowCount === 1;
   }
 
-  async saveDocuments(runId: string, made: DocumentsMade): Promise<void> {
-    await this.#pool.query(
-      `UPDATE "HealthCheckDocuments" SET "status" = 'done', "finishedAt" = $2::timestamp(3), "error" = NULL, "warnings" = $3::jsonb, "clientName" = $4, "folderName" = $5, "driveFolderId" = $6, "driveFolderUrl" = $7, "files" = $8::jsonb WHERE "runId" = $1 AND "status" = 'making'`,
-      [runId, made.at, JSON.stringify(made.warnings), made.clientName, made.folderName, made.driveFolderId, made.driveFolderUrl, JSON.stringify(made.files)],
-    );
+  async saveDocuments(runId: string, made: DocumentsMade, digest?: RunDigest | null): Promise<void> {
+    const text = `UPDATE "HealthCheckDocuments" SET "status" = 'done', "finishedAt" = $2::timestamp(3), "error" = NULL, "warnings" = $3::jsonb, "clientName" = $4, "folderName" = $5, "driveFolderId" = $6, "driveFolderUrl" = $7, "files" = $8::jsonb WHERE "runId" = $1 AND "status" = 'making'`;
+    const values = [runId, made.at, JSON.stringify(made.warnings), made.clientName, made.folderName, made.driveFolderId, made.driveFolderUrl, JSON.stringify(made.files)];
+    if (digest === undefined) {
+      await this.#pool.query(text, values);
+      return;
+    }
+    // The documents' row and the digest commit together, so a lost connection
+    // leaves the make to be tried again with both. Only a make that marked the
+    // row done writes one, or deletes one: the console may have moved the row on meanwhile.
+    await this.#transaction(async (client) => {
+      const done = await client.query(text, values);
+      if (done.rowCount === 1) await this.#writeDigest(client, runId, digest);
+    });
   }
 
   addBenchmarkRows(rows: BenchmarkRow[]): Promise<void> {
