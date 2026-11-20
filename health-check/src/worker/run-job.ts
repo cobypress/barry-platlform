@@ -167,7 +167,7 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
   // longer has fails now, before anything is sent: no retry could bring it back.
   const app = stored.grant === "web-server" ? appFor(stored.clientId, deps) : deps.oauthClient;
   if (!app) return fail(appNotSetUp(name));
-  const provider = new OAuthConnectionProvider(name, { store: deps.tokens, client: app, transport: deps.oauthTransport, env: approvedFromConsole(name) });
+  const provider = new OAuthConnectionProvider(name, { store: deps.tokens, client: app, transport: deps.oauthTransport, env: approvedFromConsole(name), log });
   const secrets = [stored.accessToken, stored.refreshToken];
   // A health check or essentials run only, with Claude to ask: a scan and a
   // pulse never keep code, and nor does a worker that can't send it anywhere (DECISIONS.md 492).
