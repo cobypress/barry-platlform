@@ -104,6 +104,14 @@ export type RuleContext = {
   manual(key: string): ManualState;
   /** A user's token. Never put a real name in a finding. */
   userLabel(userId: string): string;
+  /**
+   * Records an assumption the current rule or metric leaned on, in words for
+   * the report. The engine adds it to what that rule or metric gives, and caps
+   * a finding's confidence at medium (DECISIONS.md 598). Absent outside a run.
+   */
+  assume?(note: string): void;
+  /** Says the current rule reads this metric, so it carries whatever the metric leaned on. */
+  leanOn?(metricId: string): void;
 };
 
 export type Rule = {

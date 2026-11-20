@@ -3,7 +3,7 @@ import { pct } from "../../engine/rule.ts";
 import { orgExtractor } from "../../extract/configuration.ts";
 import type { DateRange, Evidence, Metric, MetricSegment, SeriesPoint } from "../../schemas/index.ts";
 import { localDay, zoneNote, zoneOf } from "../time-zone.ts";
-import { loadPipeline, type Deal, type PipelineData } from "./cohort.ts";
+import { loadPipeline, unorderedReason, type Deal, type PipelineData } from "./cohort.ts";
 
 type Ctx = Omit<RuleContext, "metrics">;
 type Ready = Extract<PipelineData, { status: "ok" }>;
@@ -58,7 +58,8 @@ export function fiscalStartOf(ctx: Ctx): number | null {
   return org.status === "ok" ? (org.data[0]?.FiscalYearStartMonth ?? null) : null;
 }
 
-export const hasOpenStage = (d: Deal, data: Ready): boolean => d.history.some((h) => data.stages.orderOf(h.StageName) !== null);
+// By category, so a stage whose meaning came from Salesforce's flags counts (DECISIONS.md 598).
+export const hasOpenStage = (d: Deal, data: Ready): boolean => d.history.some((h) => data.stages.categoryOf(h.StageName) === "open");
 
 export function dimensions(ctx: Ctx): Record<string, (d: Deal) => string> {
   const fiscalStart = fiscalStartOf(ctx);
@@ -178,6 +179,8 @@ function stageConversion(ctx: Ctx, data: Ready): Metric[] {
   });
   const gaps = [...data.unmapped.finalStages, ...data.unmapped.historyStages];
   if (gaps.length > 0) return [notMeasurable(definition, unmappedReason("stages", [...new Set(gaps)].sort()))];
+  // Each step is a place in the sales order, which Salesforce's flags don't give (DECISIONS.md 598).
+  if (data.unmapped.unordered.length > 0) return [notMeasurable(definition, unorderedReason(data.unmapped.unordered))];
   const { openStages, orderOf } = data.stages;
   if (openStages.length < 2) return [notMeasurable(definition, "The calibration needs at least two ordered open stages.")];
 

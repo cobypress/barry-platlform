@@ -33,10 +33,16 @@ const unmappedStages: Rule = {
     const missing = [...seen].filter((s) => !known.has(s)).sort();
     const evidence = [ctx.ev(stages.source, { count: stages.data.length })];
     if (missing.length === 0) return { outcome: "pass", summary: `The calibration covers all ${seen.size} stages seen in the org.`, evidence, segmentsChecked: [{ dimension: "stage", segments: seen.size }] };
+    // Salesforce's flags stand in where a deal relies on one of them (DECISIONS.md 598), so the gap is still a gap to close.
+    const flagged = new Set(stages.data.map((s) => s.ApiName));
+    const unflagged = missing.filter((s) => !flagged.has(s));
+    const consequence = unflagged.length === 0
+      ? "Where a deal in scope is in one, we've used Salesforce's own setting for whether it's open, won or lost, and said so; a check that needs its place in the sales order is reported as not measurable."
+      : `Where a deal in scope is in one, we've used Salesforce's own setting for whether it's open, won or lost, and said so, except for ${unflagged.join(", ")}, which Salesforce's stage settings don't hold; checks that depend on ${unflagged.length === 1 ? "that one" : "those"}, or on a stage's place in the sales order, are reported as not measurable.`;
     return {
       outcome: "issue",
       title: "The calibration is missing stages",
-      summary: `${missing.length} stages in the org aren't in the calibration: ${missing.join(", ")}. Metrics that depend on them are reported as not measurable.`,
+      summary: `${missing.length} stages in the org aren't in the calibration: ${missing.join(", ")}. ${consequence}`,
       recommendation: "Add these stages to the calibration, then re-run.",
       recommendationType: "change",
       severity: "high",
@@ -148,6 +154,7 @@ const segmentDivergence: Rule = {
   evaluate(ctx): RuleResult | RuleResult[] {
     const watched = ctx.metrics.filter((m) => WATCHED_METRICS.includes(m.id));
     const measured = watched.filter((m): m is Extract<Metric, { status: "measured" }> => m.status === "measured");
+    for (const m of measured) ctx.leanOn?.(m.id);
     if (measured.length === 0) {
       const first = watched[0];
       const reason = first?.status === "not_measurable" ? first.reason : "No pipeline metric could be measured.";

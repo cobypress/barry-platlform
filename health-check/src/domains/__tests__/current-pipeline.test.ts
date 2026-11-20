@@ -136,10 +136,12 @@ describe("share rules", () => {
     for (const file of ["findings.json", "metrics.json", "raw-notes.md"]) assert.doesNotMatch(readFileSync(join(runDir, file), "utf8"), /Call the buyer/, file);
   });
 
-  test("an unmapped stage stops them, because we can't say what's open", () => {
+  test("an unmapped stage stops them where Salesforce's stage flags can't be read, because we can't say what's open (DECISIONS.md 598)", () => {
     const calibration = loadCalibration();
     calibration.stages = calibration.stages.filter((s) => s.name !== "Proposal");
-    assert.equal(analyseExtracts(extracts, { calibration }).findings.find((f) => f.ruleId === "cur.stale-deals")!.status, "not_measurable");
+    const changed = clone(extracts);
+    changed.set("opportunity-stages", gone);
+    assert.equal(analyseExtracts(changed, { calibration }).findings.find((f) => f.ruleId === "cur.stale-deals")!.status, "not_measurable");
   });
 });
 
