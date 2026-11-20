@@ -26,6 +26,14 @@ const WEIGHTS: Record<string, number> = {
   ...Object.fromEntries(Object.entries(CONFIDENCE_FACTORS).map(([k, v]) => [`confidence.${k}`, v])),
 };
 
+/**
+ * An area's own words for "nothing here is in use", where one check settles it:
+ * forecasting is named only when the check that it's in use found it isn't.
+ */
+const NOTHING_IN_USE: Record<string, (notInUse: string[]) => string | null> = {
+  forecast: (notInUse) => (notInUse.includes("fct.forecasting-in-use") ? "You don't use forecasting, so there is nothing to score." : null),
+};
+
 const issueWeight = (f: Finding): number => SEVERITY_WEIGHTS[f.severity] * CONFIDENCE_FACTORS[f.confidence];
 
 export function scoreDomain(domain: string, findings: Finding[], ruleSetVersion: string = RULE_SET_VERSION): Score {
@@ -46,10 +54,19 @@ export function scoreDomain(domain: string, findings: Finding[], ruleSetVersion:
     earned += issues.length > 0 ? RULE_MAXIMUM - Math.max(...issues.map(issueWeight)) : RULE_MAXIMUM;
     counted.push(...issues.map((f) => f.id), ...passes.map((f) => f.id));
   }
-  if (rulesCounted === 0) return notMeasurable("We couldn't measure this area.");
+  // An area left unscored because most of it isn't in use says that, not that
+  // we failed (DECISIONS.md 627). Only the words and the kind change: whether
+  // an area is scored, and its score, are decided above and below as before.
+  const unscored = (reason: string): Score => {
+    const notInUse = [...rules].filter(([, group]) => group.every((f) => f.status === "not_measurable" && f.notMeasurableKind === "not_in_use")).map(([ruleId]) => ruleId);
+    if (notInUse.length * 2 <= rules.size) return notMeasurable(reason);
+    const words = NOTHING_IN_USE[domain]?.(notInUse) ?? "Most of what this area checks isn't in use in your org, so there is nothing to score.";
+    return Score.parse({ status: "not_measurable", domain, ruleSetVersion, reason: words, notMeasurableKind: "not_in_use" });
+  };
+  if (rulesCounted === 0) return unscored("We couldn't measure this area.");
   // Rule 5 for scores. On a real org, one calibration check scored historic
   // pipeline 100 while every pipeline metric was not measurable.
-  if (rulesCounted < MIN_RULES_SCORED || rulesCounted * 2 < rules.size) return notMeasurable("Too little of this area could be measured to score it fairly.");
+  if (rulesCounted < MIN_RULES_SCORED || rulesCounted * 2 < rules.size) return unscored("Too little of this area could be measured to score it fairly.");
   return Score.parse({ status: "measured", domain, score: Math.round((earned / (RULE_MAXIMUM * rulesCounted)) * 100), ruleSetVersion, weights: WEIGHTS, findingIds: counted });
 }
 

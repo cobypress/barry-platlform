@@ -74,8 +74,12 @@ export function inferredStagesNote(inferred: Array<{ stage: string; category: St
   return `We haven't yet agreed with you what ${inferred.length === 1 ? "one stage means" : "some stages mean"}, so we used Salesforce's own setting for ${inferred.length === 1 ? "it" : "each"}: ${list}.`;
 }
 
-/** Why a figure that splits lost from no decision can't be had from inferred lost stages (DECISIONS.md 600). */
-export const unsplitReason = (stages: string[]): string => `Salesforce's setting can't tell lost from no decision for: ${stages.join(", ")}.`;
+/**
+ * Why a figure that splits lost from no decision can't be had from inferred
+ * lost stages (DECISIONS.md 600), ending with what to give us and where, as a
+ * reason that needs something from the customer does (627).
+ */
+export const unsplitReason = (stages: string[]): string => `Salesforce's setting can't tell lost from no decision for: ${stages.join(", ")}. The calibration can say which each is.`;
 
 /** Why a check that needs the sales order can't place an inferred open stage. */
 export const unorderedReason = (stages: string[]): string => `The calibration doesn't say where these open stages come in the sales order: ${stages.join(", ")}.`;

@@ -1,4 +1,5 @@
 import { notSized, pct, plural, segmentRate, type Rule, type RuleContext, type RuleResult } from "../../engine/rule.ts";
+import { aiSignalsExtractor, SETTINGS_SOURCE } from "../../extract/ai.ts";
 import { orgExtractor } from "../../extract/configuration.ts";
 import { escalationRulesExtractor, serviceActivityExtractor, serviceCasesExtractor, serviceSetupExtractor, type ArticleRow, type EscalationRule, type ServiceSetup } from "../../extract/service.ts";
 import { daysBefore, monthsBefore } from "../../extract/types.ts";
@@ -276,9 +277,26 @@ const agentLicences: Rule = {
   },
 };
 
+/**
+ * Whether the org's own Knowledge setting, read for AI readiness, says it's off
+ * (DECISIONS.md 627). Only that setting tells "not turned on" from "not readable
+ * by this user"; it's read by the configuration area, so a run without that area
+ * hasn't it, and this says nothing rather than ask for a new read.
+ */
+function knowledgeSwitchedOff(ctx: RuleContext): boolean {
+  let settings;
+  try {
+    settings = ctx.data(aiSignalsExtractor).settings;
+  } catch {
+    return false;
+  }
+  return settings.status === "ok" && settings.data.knowledge === false;
+}
+
 /** Published articles, or why there's nothing to check. */
 function publishedArticles(ctx: RuleContext): { rows: ArticleRow[]; evidence: Evidence[] } | RuleResult {
   const { articles } = setupOf(ctx);
+  if (articles.status !== "ok" && knowledgeSwitchedOff(ctx)) return nm("Salesforce Knowledge is switched off in this org, so there are no articles to check.", [...unavailableEvidence(ctx, articles.source), ctx.ev(SETTINGS_SOURCE, { count: null, note: "KnowledgeSettings.enableKnowledge is false" })]);
   if (articles.status !== "ok") return nm(`Knowledge articles couldn't be read: ${articles.reason} Knowledge may not be turned on.`, unavailableEvidence(ctx, articles.source));
   const evidence = [ctx.ev(articles.source, { count: articles.data.length, note: "Published articles, latest versions" })];
   if (articles.data.length === 0) return nm("Knowledge is on, but no article is published.", evidence);

@@ -1,4 +1,4 @@
-import type { Finding, Run, Score } from "../schemas/index.ts";
+import type { Finding, NotMeasurableKind, Run, Score } from "../schemas/index.ts";
 import type { OverallScore } from "../domains/scoring.ts";
 import type { ValueModel } from "../value/model.ts";
 import { apiLimitsExtractor } from "../extract/integrations.ts";
@@ -9,7 +9,13 @@ import { apiLimitsExtractor } from "../extract/integrations.ts";
 // is fixed only if it ran now and passed; if it couldn't be measured now, we
 // say we can't tell rather than claim it.
 
-export type RuleChange = { ruleId: string; title: string; findingIds: string[] };
+/**
+ * `notMeasurableKind` is set only on a change we can't tell about, when this
+ * run's check couldn't be measured and said why (DECISIONS.md 627): one kind
+ * for all its findings, or unreadable where they differ. Optional, so a
+ * comparison stored before it reads as before.
+ */
+export type RuleChange = { ruleId: string; title: string; findingIds: string[]; notMeasurableKind?: NotMeasurableKind };
 
 export type Progress = {
   baselineRunId: string;
@@ -43,6 +49,12 @@ const byRule = (findings: Finding[]): Map<string, Finding[]> => {
 
 const change = (ruleId: string, findings: Finding[]): RuleChange => ({ ruleId, title: findings[0]!.title, findingIds: findings.map((f) => f.id) });
 
+function kindNow(findings: Finding[]): { notMeasurableKind?: NotMeasurableKind } {
+  const kinds = new Set(findings.filter((f) => f.status === "not_measurable").map((f) => f.notMeasurableKind));
+  if (kinds.size === 0 || kinds.has(undefined)) return {};
+  return { notMeasurableKind: kinds.size === 1 ? [...kinds][0]! : "unreadable" };
+}
+
 export function compareWithBaseline(baseline: ProgressSide, current: ProgressSide): Progress {
   const before = byRule(baseline.findings);
   const now = byRule(current.findings);
@@ -57,7 +69,7 @@ export function compareWithBaseline(baseline: ProgressSide, current: ProgressSid
     const nowIssues = nowFindings.filter((f) => f.status === "issue");
     if (nowIssues.length) remaining.push(change(ruleId, nowIssues));
     else if (nowFindings.some((f) => f.status === "passed")) fixed.push(change(ruleId, thenIssues));
-    else unknown.push(change(ruleId, thenIssues));
+    else unknown.push({ ...change(ruleId, thenIssues), ...kindNow(nowFindings) });
   }
   for (const [ruleId, nowFindings] of now) {
     const nowIssues = nowFindings.filter((f) => f.status === "issue");

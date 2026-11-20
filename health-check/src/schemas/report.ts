@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { DomainId, Timestamp } from "./common.ts";
+import { DomainId, NotMeasurableKind, Timestamp } from "./common.ts";
 
 // Everything here is built in Milestones 3 to 5. The shapes are fixed now so
 // the review console doesn't force a change to how findings are stored.
@@ -13,7 +13,8 @@ export const Score = z.discriminatedUnion("status", [
     weights: z.record(z.string(), z.number()),
     findingIds: z.array(z.string()),
   }),
-  z.object({ status: z.literal("not_measurable"), domain: DomainId, ruleSetVersion: z.string().min(1), reason: z.string().min(1) }),
+  // The kind only when most of the area doesn't apply to the org (DECISIONS.md 627), and optional, so a score written before it reads as before.
+  z.object({ status: z.literal("not_measurable"), domain: DomainId, ruleSetVersion: z.string().min(1), reason: z.string().min(1), notMeasurableKind: NotMeasurableKind.optional() }),
 ]);
 export type Score = z.infer<typeof Score>;
 

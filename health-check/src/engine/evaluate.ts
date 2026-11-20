@@ -4,6 +4,7 @@ import type { Extractor } from "../extract/types.ts";
 import { Pseudonymiser, UNKNOWN_USER } from "../privacy/pseudonymiser.ts";
 import { DESTRUCTIVE_RECOMMENDATIONS, Finding, Metric, type Calibration, type DateRange, type Evidence, type ManualAnswer, type ManualStep, type RunScope } from "../schemas/index.ts";
 import { MANUAL_STEPS } from "./manual-steps.ts";
+import { notMeasurableKind } from "./not-measurable.ts";
 import type { IssueResult, ManualState, RecordList, Rule, RuleContext, RuleResult } from "./rule.ts";
 
 export type AnalysisInput = {
@@ -116,7 +117,7 @@ function toFinding(rule: Rule, result: RuleResult, pseudonyms: Pseudonymiser, as
             segmentExemptReason: result.segmentExemptReason ?? null,
             facts: result.facts ?? {},
           }
-        : { status: "not_measurable", summary: result.reason, notMeasurableReason: result.reason }),
+        : { status: "not_measurable", summary: result.reason, notMeasurableReason: result.reason, notMeasurableKind: notMeasurableKind(result.reason) }),
     };
   }
   // A last pass over the text, in case a rule let a name through.
@@ -248,6 +249,8 @@ export function analyse(input: AnalysisInput): AnalysisOutput {
       // A measured figure that leaned on an assumption says so among its own.
       return notes.length === 0 ? built : built.map((metric) => (metric.status === "measured" ? { ...metric, assumptions: [...metric.assumptions, ...notes.filter((n) => !metric.assumptions.includes(n))] } : metric));
     }))
+    // Every metric that couldn't be measured says which kind of reason it is (DECISIONS.md 627).
+    .map((m) => (m.status === "not_measurable" && m.notMeasurableKind === undefined ? { ...m, notMeasurableKind: notMeasurableKind(m.reason) } : m))
     .map((m) => Metric.parse(pseudonyms.scrubDeep(m)));
   assumed = new Set();
   const ctx: RuleContext = { ...base, metrics };

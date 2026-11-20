@@ -32,6 +32,14 @@ export const CPQ_DOMAINS = ["cpq_quoting", "cpq_setup"] as const;
 /** Marketing Cloud Account Engagement's area (roadmap Stage 6). A run has it only when its modules include it. */
 export const ACCOUNT_ENGAGEMENT_DOMAINS = ["account_engagement"] as const;
 
+// Why something couldn't be measured (DECISIONS.md 627). It sits beside a not
+// measurable status and never replaces it, so nothing that counts or scores
+// findings changes. Optional wherever it's carried: a result written before it
+// has none and reads as before. "unreadable" is also what any reason not yet
+// sorted gets, so nothing is ever called benign by default.
+export const NotMeasurableKind = z.enum(["not_in_use", "needs_input", "too_little_data", "unreadable"]);
+export type NotMeasurableKind = z.infer<typeof NotMeasurableKind>;
+
 export const Timestamp = z.iso.datetime();
 export const CalendarDate = z.iso.date();
 
