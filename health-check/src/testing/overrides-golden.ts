@@ -152,6 +152,17 @@ function handCases(): HandCase[] {
   const sized = finding(10, "Licences no one uses", "4 licences are unused.", { unused: 4 }, { value: { kind: "licence_cost", amount: 3600, unit: "GBP", period: "per year", assumptions: ["Each licence costs £900 a year."] } });
   add({ name: "a finding: the sized amount in no text changes (carried)", findings: [sized], overrides: [onFinding(sized, "value.amount", 3600, 2700)] });
 
+  // Hours to fix and a fix prompt (DECISIONS.md 628) are made from the figures as
+  // read, so a carried correction drops both, and a refused one or one put back keeps them.
+  const fix = { effortHours: { low: 2, high: 4, basis: "About 1 to 2 hours for each flow, for 2 flows." }, fixPrompt: "What we found: Flows are failing. 2 flows have no fault path." };
+  const flows = finding(13, "Flows are failing", "2 flows have no fault path.", { affected: 2 }, fix);
+  add({ name: "a finding with hours and a prompt: a carried correction drops both", findings: [flows], overrides: [onFinding(flows, "facts.affected", 2, 5)] });
+  const hiddenFix = finding(14, "Flows are failing", "Some flows have no fault path.", { affected: 2 }, fix);
+  add({ name: "a finding with hours and a prompt: a carried correction in no text drops both", findings: [hiddenFix], overrides: [onFinding(hiddenFix, "facts.affected", 2, 3)] });
+  const twiceFix = finding(15, "Flows are failing", "2 flows have no fault path, and 2 more are slow.", { affected: 2 }, fix);
+  add({ name: "a finding with hours and a prompt: a refused correction keeps both", findings: [twiceFix], overrides: [onFinding(twiceFix, "facts.affected", 2, 3)] });
+  add({ name: "a finding with hours and a prompt: put back to the value as read keeps both", findings: [flows], overrides: [onFinding(flows, "facts.affected", 2, 5, 1), onFinding(flows, "facts.affected", 5, 2, 2)] });
+
   // How a refusal's line prints a title.
   const rep = finding(11, "Win rate for rep [[user:U0003]] is well below the overall figure", "Rep [[user:U0003]] won 14% of 43 deals, against 47% for the team.", { deals: 43, segmentValue: 14, overallValue: 47 }, { recommendation: "Look at the 43 deals with the rep's manager." });
   add({ name: "a title holding a person's token prints it as a named person", findings: [rep], overrides: [onFinding(rep, "facts.deals", 43, 44)] });

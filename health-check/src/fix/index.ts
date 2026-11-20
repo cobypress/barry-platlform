@@ -13,13 +13,12 @@ export { FIX_TABLE, NEVER_RAISES } from "./table.ts";
  */
 export function fixFields(
   ruleId: string,
-  f: Pick<Finding, "title" | "summary" | "recommendation" | "subjects" | "facts">,
+  f: Pick<Finding, "title" | "summary" | "recommendation" | "recommendationType" | "subjects" | "facts">,
   pseudonyms: Pseudonymiser,
-  options: { blocked?: boolean } = {},
 ): { effortHours?: EffortHours; fixPrompt?: string } {
   const rule = FIX_TABLE[ruleId];
   if (!rule) return {};
   const hours = effortHours(rule.hours, f.facts);
-  const prompt = fixPrompt(f, rule.prompt, pseudonyms, options);
+  const prompt = fixPrompt(f, rule.prompt, pseudonyms);
   return { ...(hours ? { effortHours: hours } : {}), ...(prompt ? { fixPrompt: prompt } : {}) };
 }

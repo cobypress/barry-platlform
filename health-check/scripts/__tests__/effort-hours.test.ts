@@ -32,7 +32,7 @@ describe("the hours table exported for the owner's review (decision 628)", () =>
       } else {
         assert.ok(Number.isInteger(entry.minutesLow) && entry.minutesLow >= 1 && Number.isInteger(entry.minutesHigh) && entry.minutesHigh >= entry.minutesLow, id);
         assert.ok(Number.isInteger(entry.capHours) && entry.capHours >= 1, id);
-        assert.ok(entry.capReason.trim().length > 10 && entry.fact.length > 0 && entry.each.length > 0, id);
+        assert.ok(entry.pastTheCap.trim().length > 10 && entry.facts.length > 0 && entry.each.length > 0, id);
       }
     }
   });

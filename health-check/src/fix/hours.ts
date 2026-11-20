@@ -14,14 +14,33 @@ export function durationText([low, high]: readonly [number, number]): string {
   return `${a} to ${b} hours`;
 }
 
+/** The count a per-unit declaration multiplies: the sum of the facts it names that the finding holds, or null. */
+export function countOf(rule: Extract<HoursRule, { kind: "each" }>, facts: Readonly<Record<string, number>>): number | null {
+  const keys = rule.facts === "all" ? Object.keys(facts) : rule.facts.filter((k) => Object.hasOwn(facts, k));
+  if (keys.length === 0) return null;
+  const values = keys.map((k) => facts[k]!);
+  if (values.some((v) => !Number.isInteger(v) || v < 0)) return null;
+  const count = values.reduce((a, b) => a + b, 0);
+  return count >= 1 ? count : null;
+}
+
+const hoursFor = (units: number, minutes: number): number => Math.ceil((units * minutes) / 60);
+
 export function effortHours(rule: HoursRule, facts: Readonly<Record<string, number>>): EffortHours | null {
   if (rule.kind === "fixed") return { low: rule.low, high: rule.high, basis: `${rule.basis}.` };
-  const count = facts[rule.fact];
-  if (count === undefined || !Number.isInteger(count) || count < 1) return null;
-  const low = Math.max(1, Math.ceil((count * rule.minutes[0]) / 60));
-  const high = Math.max(low, Math.ceil((count * rule.minutes[1]) / 60));
-  const capped = high > rule.cap;
-  const unit = count === 1 ? rule.one : rule.many;
-  const basis = `About ${durationText(rule.minutes)} for each ${rule.one}, for ${count} ${unit}${capped ? `, held at ${rule.cap} hours at most: ${rule.capReason}` : ""}.`;
-  return { low: Math.min(low, rule.cap), high: capped ? rule.cap : high, basis };
+  const count = countOf(rule, facts);
+  if (count === null) return null;
+  const each = `About ${durationText(rule.minutes)} for each ${rule.one}, for ${count} ${count === 1 ? rule.one : rule.many}`;
+  const low = Math.max(1, hoursFor(count, rule.minutes[0]));
+  const high = Math.max(low, hoursFor(count, rule.minutes[1]));
+  if (high <= rule.cap) return { low, high, basis: `${each}.` };
+  if (rule.bulk) return { low: Math.min(low, rule.cap), high: rule.cap, basis: `${each}, held at ${rule.cap} hours at most: ${rule.bulk}.` };
+  // The work grows with every unit, so the range says how many it covers and claims nothing for the rest.
+  const covered = Math.max(1, Math.floor((rule.cap * 60) / rule.minutes[1]));
+  const coveredLow = Math.max(1, hoursFor(covered, rule.minutes[0]));
+  return {
+    low: coveredLow,
+    high: Math.max(coveredLow, hoursFor(covered, rule.minutes[1])),
+    basis: `${each}. This range covers the first ${covered} ${covered === 1 ? rule.one : rule.many}; the other ${count - covered} are scoped separately.`,
+  };
 }

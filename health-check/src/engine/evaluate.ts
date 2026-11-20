@@ -126,8 +126,8 @@ function toFinding(rule: Rule, result: RuleResult, pseudonyms: Pseudonymiser, as
   if (result.outcome !== "issue") return Finding.parse(scrubbed);
   // Hours to fix and a fix prompt (DECISIONS.md 628), from the scrubbed text, so a
   // prompt is built from what the finding says and nothing the scrub took out.
-  const blocked = DESTRUCTIVE_RECOMMENDATIONS.has(result.recommendationType) && scrubbed.recommendationType !== result.recommendationType;
-  return Finding.parse({ ...scrubbed, ...fixFields(rule.id, scrubbed, pseudonyms, { blocked }) });
+  // A remove, deactivate or merge a guard held back is now "investigate", which the prompt reads as held back.
+  return Finding.parse({ ...scrubbed, ...fixFields(rule.id, scrubbed, pseudonyms) });
 }
 
 function engineEvidence(ruleId: string, note: string, now: Date): Evidence {
