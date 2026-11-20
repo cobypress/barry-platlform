@@ -72,7 +72,7 @@ describe("the inventory of the synthetic org, from the recording", async () => {
   test("packages: the deprecated version is marked, with its seats, and a namespace with only a licence is listed as not installed", () => {
     const packages = rows(inventory.packages);
     const acme = packages.find((p) => p.namespace === "acmecpq")!;
-    assert.deepEqual(acme, { namespace: "acmecpq", name: "Acme CPQ", version: "3.1.0.4", versionName: "Spring", installed: true, deprecated: true, managed: true, licence: { status: "Active", allowed: 20, siteWide: false, used: 12, expiresOn: null } });
+    assert.deepEqual(acme, { packageId: "033000000000001AAA", namespace: "acmecpq", name: "Acme CPQ", version: "3.1.0.4", versionName: "Spring", installed: true, deprecated: true, managed: true, licence: { status: "Active", allowed: 20, siteWide: false, used: 12, expiresOn: null } });
     assert.equal(packages.find((p) => p.namespace === "SBQQ")!.deprecated, false);
     assert.deepEqual(packages.find((p) => p.namespace === "sitewide")!.licence, { status: "Active", allowed: null, siteWide: true, used: 40, expiresOn: null });
     assert.equal(packages.find((p) => p.namespace === "oldapp")!.installed, false);
@@ -163,7 +163,7 @@ function soqlOf(request: { url: string; body?: string }): string[] {
 }
 
 // Set-up objects: what they hold is how the org is built, not a customer's business records.
-const SETUP_OBJECTS = new Set(["InstalledSubscriberPackage", "PackageLicense", "ConnectedApplication", "OauthToken", "PermissionSet", "PermissionSetAssignment", "PermissionSetGroupComponent", "Organization"]);
+const SETUP_OBJECTS = new Set(["InstalledSubscriberPackage", "PackageLicense", "ConnectedApplication", "OauthToken", "PermissionSet", "PermissionSetAssignment", "PermissionSetGroupComponent", "Organization", "ObjectPermissions", "User"]);
 
 describe("what the inventory reads", () => {
   test("no query selects a field's value from a business record: from those, only COUNT", async () => {

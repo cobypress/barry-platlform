@@ -180,7 +180,8 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
   const scope: RunScope = options.resume && existsSync(runPath) ? Run.parse(readJson(runPath)).scope : (options.scope ?? "complete");
   if (options.resume && options.scope && options.scope !== scope) throw new Error(`This run is ${scope}, so it can't be resumed as ${options.scope}.`);
   const modules = modulesFor(scope, options.modules);
-  const extractors = collectExtractors(modules, options.inventory ? inventoryExtractorsFor(scope) : []);
+  const inventorySteps = options.inventory ? inventoryExtractorsFor(scope) : [];
+  const extractors = collectExtractors(modules, inventorySteps);
   const hash = calibrationHash(calibration);
   const windowEnd = now;
   const windowStart = monthsBefore(windowEnd, calibration.analysisWindowMonths);
@@ -285,6 +286,13 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
       }
       step.status = "failed";
       step.error = err instanceof Error ? err.message : String(err);
+      // No finding reads the inventory, so its step failing costs only its own
+      // section, and the run goes on; a later delivery tries it again (DECISIONS.md 609).
+      if (inventorySteps.includes(extractor)) {
+        await saveRun();
+        log(`  ${extractor.id}: failed, and the run carries on without it`);
+        continue;
+      }
       run.status = "failed";
       await saveRun();
       throw err;
@@ -295,7 +303,7 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
   writeJson(join(dir, FACTS_FILE), extracts.get(factsExtractor.id));
   // Names and counts only, so it's kept as long as the findings (DECISIONS.md 605).
   // Dated as the run reads the org, as the facts are, so every delivery writes the same file.
-  if (options.inventory) writeJson(join(dir, INVENTORY_FILE), buildInventory(extracts, scope, asOf));
+  if (options.inventory) writeJson(join(dir, INVENTORY_FILE), buildInventory(extracts, scope, asOf, new Map(run.steps.flatMap((s) => (s.status === "failed" && s.error ? [[s.id, s.error]] : [])))));
   // Which objects' rules weren't read, for the raw notes. Render reads only the run folder (DECISIONS.md 425).
   const bundle = extracts.get(metadataExtractor.id) as Sourced<MetadataBundle> | undefined;
   run.retrieveFallback = bundle?.status === "ok" ? bundle.data.retrieveFallback : undefined;

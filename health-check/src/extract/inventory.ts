@@ -1,9 +1,12 @@
+import { redactSecrets } from "../privacy/secrets.ts";
+import { BudgetStopError } from "../salesforce/budget.ts";
 import { isUnavailable, type OrgLimit } from "../salesforce/client.ts";
 import { INVENTORY_VERSION, type ConnectedAppRow, type FillRateObject, type Inventory, type LimitRow, type PackageRow, type RiskyPermissionRow } from "../schemas/inventory.ts";
 import type { RunScope } from "../schemas/index.ts";
 import { CORE_OBJECTS, recordCountsExtractor } from "./configuration.ts";
 import { orgDocumentationExtractor, type ConnectedAppRow as AppSetting } from "./documentation.ts";
 import { accessExtractor, holdersOf, type AccessData, type AccessAssignment } from "./security.ts";
+import { accessOf, isPartlyHidden, recordTypeUseExtractor } from "./record-types.ts";
 import { licencesExtractor, type PackageLicenseRow } from "./users.ts";
 import { readableReason, readSoql, type ExtractContext, type Extractor, type Sourced, type SourceInfo } from "./types.ts";
 
@@ -32,14 +35,22 @@ const iso = (value: string | null | undefined): string | null => {
 };
 
 // ---------------------------------------------------------------------------
-// Field fill rates (DECISIONS.md 604)
+// Field fill rates (DECISIONS.md 604 and 609)
 
 /** The most objects counted. A big org's smaller objects beyond it are named as a count, not read. */
 export const FILL_RATE_MAX_OBJECTS = 300;
 /** Fields counted in one query, as the field usage step counts them. */
 export const FILL_RATE_FIELDS_PER_QUERY = 50;
-/** Subrequests in one composite call: Salesforce's most. */
-const BATCH = 25;
+/** Counts in one composite call: few, so one slow count can't time out many (DECISIONS.md 609). */
+export const FILL_RATE_BATCH = 5;
+/** An object with more records than this is counted in calls of its own. */
+export const FILL_RATE_BIG_OBJECT = 1_000_000;
+/** How far the record count resource and COUNT(Id) may differ before neither is trusted: a tenth, and more than this many records. */
+const COUNTS_DIFFER_BY = 100;
+
+export const NOT_SEEN_WHOLE = "The connected user can't see every record, so a count would show only part.";
+export const COUNT_TOO_SLOW = "The count took too long.";
+export const COUNTS_DISAGREE = "Salesforce's record count and the records the connected user can count differ by more than a tenth, so some records may be hidden from them.";
 
 type DescribeField = { name: string; type: string; calculated: boolean; aggregatable: boolean };
 
@@ -53,12 +64,27 @@ export function skipReason(f: DescribeField): string | null {
 }
 
 /** Counts only: the records, and how many hold a value in each field. Never a field's value. */
-export const fillRateQuery = (object: string, fields: string[]): string => `SELECT COUNT(Id) n, ${fields.map((f, i) => `COUNT(${f}) f${i}`).join(", ")} FROM ${object}`;
+export const fillRateQuery = (object: string, fields: string[]): string =>
+  fields.length ? `SELECT COUNT(Id) n, ${fields.map((f, i) => `COUNT(${f}) f${i}`).join(", ")} FROM ${object}` : `SELECT COUNT(Id) n FROM ${object}`;
+
+/** Why a count failed, in a sentence: a budget stop isn't a failure and goes up. */
+function failedCount(err: unknown): string {
+  if (err instanceof BudgetStopError) throw err;
+  if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) return COUNT_TOO_SLOW;
+  if (err instanceof Error) return readableReason(err.message);
+  return "The count couldn't be read.";
+}
 
 export type FillRateData = { objects: FillRateObject[]; leftOut: number; scopeNote: string | null };
 
-/** The objects counted: the core four, then every object with records, most first, up to the cap. */
-async function fillRateObjects(ctx: ExtractContext): Promise<{ objects: string[]; leftOut: number; scopeNote: string | null }> {
+type Scope = { objects: string[]; hidden: FillRateObject[]; leftOut: number; scopeNote: string | null; counts: Map<string, number> };
+
+/**
+ * The objects counted: the core four, then every object with records, most
+ * first, up to the cap, of those the connected user sees whole. The others
+ * are listed unavailable, at no cost (DECISIONS.md 609).
+ */
+async function fillRateScope(ctx: ExtractContext): Promise<Scope> {
   let counts = earlier(ctx, recordCountsExtractor);
   if (!counts) {
     const source: SourceInfo = { kind: "rest", path: "limits/recordCount" };
@@ -69,30 +95,61 @@ async function fillRateObjects(ctx: ExtractContext): Promise<{ objects: string[]
       counts = { status: "unavailable", reason: readableReason(err.message), source };
     }
   }
-  if (counts.status !== "ok") return { objects: [...CORE_OBJECTS], leftOut: 0, scopeNote: `Only ${CORE_OBJECTS.join(", ")} were counted: the record count of each object couldn't be read (${counts.reason}).` };
-  const withRecords = counts.data.filter((c) => c.count > 0).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)).map((c) => c.name);
+  const byObject = new Map(counts.status === "ok" ? counts.data.map((c) => [c.name, c.count]) : []);
+  const scopeNote = counts.status === "ok" ? null : `Only ${CORE_OBJECTS.join(", ")} were counted: the record count of each object couldn't be read (${counts.reason}).`;
+  const withRecords = counts.status === "ok" ? counts.data.filter((c) => c.count > 0).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)).map((c) => c.name) : [];
   const all = [...new Set([...CORE_OBJECTS, ...withRecords])];
-  return { objects: all.slice(0, FILL_RATE_MAX_OBJECTS), leftOut: Math.max(0, all.length - FILL_RATE_MAX_OBJECTS), scopeNote: null };
+
+  // Record-type use's reading of the user's access when that step ran, so the two agree.
+  const access = earlier(ctx, recordTypeUseExtractor)?.access ?? (await accessOf(ctx));
+  if (access.status !== "ok") {
+    const reason = `We couldn't tell whether the connected user sees every record: ${access.reason}`;
+    const shown = all.slice(0, FILL_RATE_MAX_OBJECTS);
+    return { objects: [], hidden: shown.map((object) => ({ object, unavailable: reason })), leftOut: all.length - shown.length, scopeNote, counts: byObject };
+  }
+  const whole = (object: string): boolean => !isPartlyHidden(object) && (access.viewAllData || access.viewAllRecords.includes(object));
+  const seen = all.filter(whole);
+  const hidden = all.filter((o) => !whole(o)).map((object): FillRateObject => ({ object, unavailable: NOT_SEEN_WHOLE }));
+  return { objects: seen.slice(0, FILL_RATE_MAX_OBJECTS), hidden, leftOut: Math.max(0, seen.length - FILL_RATE_MAX_OBJECTS), scopeNote, counts: byObject };
 }
 
-type Planned = { object: string; records?: number; fields: string[]; skipped: Array<{ field: string; reason: string }>; queries: string[] };
+type Planned = { object: string; fields: string[]; skipped: Array<{ field: string; reason: string }>; queries: string[] };
 
 export const fillRatesExtractor: Extractor<Sourced<FillRateData>> = {
   id: "inventory-fill-rates",
-  version: 1,
+  version: 2,
   // Counts of records: a set-up only scan never runs it (DECISIONS.md 604).
   records: true,
   partialKeys: ["inventory-fill-rates"],
   async run(ctx) {
     const source: SourceInfo = { kind: "soql", api: "rest", query: fillRateQuery("<object>", ["<field>"]) };
-    const { objects, leftOut, scopeNote } = await fillRateObjects(ctx);
-    // Each object is kept as it's finished, so a run stopped at the budget picks up where it was.
+    const { objects, hidden, leftOut, scopeNote, counts } = await fillRateScope(ctx);
+    // Each object is kept as it's finished, failed counts included, so a resumed run moves past it.
     const done = new Map(ctx.partial.read<FillRateObject>("inventory-fill-rates").map((o) => [o.object, o]));
+    const keep = (rows: FillRateObject[]): void => {
+      ctx.partial.append("inventory-fill-rates", rows);
+      for (const o of rows) done.set(o.object, o);
+    };
     const pending: Planned[] = [];
 
     const flush = async (): Promise<void> => {
       const queries = pending.flatMap((p) => p.queries);
-      const results = queries.length ? await ctx.client.queryBatch<Record<string, number>>(queries) : [];
+      const results: Array<{ ok: true; row: Record<string, number> } | { ok: false; reason: string }> = [];
+      for (let i = 0; i < queries.length; i += FILL_RATE_BATCH) {
+        const chunk = queries.slice(i, i + FILL_RATE_BATCH);
+        // Each count is an API call in the budget, not each composite call (DECISIONS.md 609).
+        ctx.client.budget.assertCanSpend(chunk.length);
+        try {
+          const answers = await ctx.client.queryBatch<Record<string, number>>(chunk);
+          results.push(...answers.map((a) => (a.ok ? { ok: true as const, row: a.result.records[0] ?? {} } : { ok: false as const, reason: readableReason(a.error.message) })));
+        } catch (err) {
+          // A budget stop sent nothing, and goes up from here.
+          const reason = failedCount(err);
+          results.push(...chunk.map(() => ({ ok: false as const, reason })));
+        }
+        // The call went out, and the client recorded it once; the rest of its counts are recorded here.
+        if (chunk.length > 1) ctx.client.budget.recordCall(chunk.length - 1);
+      }
       let at = 0;
       const finished: FillRateObject[] = [];
       for (const plan of pending) {
@@ -100,19 +157,26 @@ export const fillRatesExtractor: Extractor<Sourced<FillRateData>> = {
         at += plan.queries.length;
         const failed = own.find((r) => !r.ok);
         if (failed && !failed.ok) {
-          finished.push({ object: plan.object, unavailable: readableReason(failed.error.message) });
+          finished.push({ object: plan.object, unavailable: failed.reason });
           continue;
         }
-        const rows = own.map((r) => (r.ok ? r.result.records[0]! : {}));
-        const records = rows.length ? Number(rows[0]!.n ?? 0) : (plan.records ?? 0);
+        const rows = own.map((r) => (r.ok ? r.row : {}));
+        const records = Number(rows[0]?.n ?? 0);
+        const listed = counts.get(plan.object);
+        if (listed !== undefined && Math.abs(listed - records) > Math.max(COUNTS_DIFFER_BY, Math.max(listed, records) / 10)) {
+          finished.push({ object: plan.object, unavailable: COUNTS_DISAGREE });
+          continue;
+        }
         const fields = plan.fields.map((field, i) => {
-          const filled = Number(rows[Math.floor(i / FILL_RATE_FIELDS_PER_QUERY)]![`f${i % FILL_RATE_FIELDS_PER_QUERY}`] ?? 0);
-          return { field, filled, share: records > 0 ? Math.round((filled / records) * 10_000) / 10_000 : null };
+          // Each field against its own query's records: a record added between two queries moves only that one's.
+          const row = rows[Math.floor(i / FILL_RATE_FIELDS_PER_QUERY)]!;
+          const n = Number(row.n ?? 0);
+          const filled = Math.min(Number(row[`f${i % FILL_RATE_FIELDS_PER_QUERY}`] ?? 0), n);
+          return { field, filled, share: n > 0 ? Math.round((filled / n) * 10_000) / 10_000 : null };
         });
         finished.push({ object: plan.object, records, fields, skipped: plan.skipped });
       }
-      ctx.partial.append("inventory-fill-rates", finished);
-      for (const o of finished) done.set(o.object, o);
+      keep(finished);
       pending.length = 0;
     };
 
@@ -122,10 +186,7 @@ export const fillRatesExtractor: Extractor<Sourced<FillRateData>> = {
       try {
         described = await ctx.client.describe<{ fields: DescribeField[] }>(object);
       } catch (err) {
-        if (!isUnavailable(err)) throw err;
-        const row: FillRateObject = { object, unavailable: readableReason(err.message) };
-        ctx.partial.append("inventory-fill-rates", [row]);
-        done.set(object, row);
+        keep([{ object, unavailable: failedCount(err) }]);
         continue;
       }
       const counted = described.fields.filter((f) => skipReason(f) === null).map((f) => f.name);
@@ -136,12 +197,16 @@ export const fillRatesExtractor: Extractor<Sourced<FillRateData>> = {
       const queries: string[] = [];
       for (let i = 0; i < counted.length; i += FILL_RATE_FIELDS_PER_QUERY) queries.push(fillRateQuery(object, counted.slice(i, i + FILL_RATE_FIELDS_PER_QUERY)));
       // An object with no field to count still has its records counted.
-      if (queries.length === 0) queries.push(`SELECT COUNT(Id) n FROM ${object}`);
-      if (pending.reduce((sum, p) => sum + p.queries.length, 0) + queries.length > BATCH) await flush();
+      if (queries.length === 0) queries.push(fillRateQuery(object, []));
+      const big = (counts.get(object) ?? 0) > FILL_RATE_BIG_OBJECT;
+      // A big object goes alone, and nothing joins it.
+      if (pending.length && (big || pending.reduce((sum, p) => sum + p.queries.length, 0) + queries.length > FILL_RATE_BATCH)) await flush();
       pending.push({ object, fields: counted, skipped, queries });
+      if (big) await flush();
     }
     await flush();
-    return { status: "ok", source, truncated: leftOut > 0, data: { objects: objects.map((o) => done.get(o)!), leftOut, scopeNote } };
+    const counted = objects.map((o) => done.get(o)!);
+    return { status: "ok", source, truncated: leftOut > 0, data: { objects: [...counted, ...hidden], leftOut, scopeNote } };
   },
 };
 
@@ -149,20 +214,21 @@ export const fillRatesExtractor: Extractor<Sourced<FillRateData>> = {
 // Installed packages
 
 type InstalledRow = {
+  SubscriberPackageId?: string | null;
   SubscriberPackage: { Name: string | null; NamespacePrefix: string | null } | null;
   SubscriberPackageVersion?: { Name?: string | null; MajorVersion?: number | null; MinorVersion?: number | null; PatchVersion?: number | null; BuildNumber?: number | null; IsDeprecated?: boolean | null; IsManaged?: boolean | null } | null;
 };
 export type PackagesData = { installed: Sourced<InstalledRow[]>; licences: Sourced<PackageLicenseRow[]> };
 
 const VERSION_FIELDS = "SubscriberPackageVersion.Name, SubscriberPackageVersion.MajorVersion, SubscriberPackageVersion.MinorVersion, SubscriberPackageVersion.PatchVersion, SubscriberPackageVersion.BuildNumber";
-export const PACKAGES_QUERY = `SELECT SubscriberPackage.Name, SubscriberPackage.NamespacePrefix, ${VERSION_FIELDS}, SubscriberPackageVersion.IsDeprecated, SubscriberPackageVersion.IsManaged FROM InstalledSubscriberPackage`;
+export const PACKAGES_QUERY = `SELECT SubscriberPackageId, SubscriberPackage.Name, SubscriberPackage.NamespacePrefix, ${VERSION_FIELDS}, SubscriberPackageVersion.IsDeprecated, SubscriberPackageVersion.IsManaged FROM InstalledSubscriberPackage`;
 /** Without the two flags, which we haven't confirmed Tooling gives through the relationship (QUESTIONS.md). */
-export const PACKAGES_QUERY_PLAIN = `SELECT SubscriberPackage.Name, SubscriberPackage.NamespacePrefix, ${VERSION_FIELDS} FROM InstalledSubscriberPackage`;
+export const PACKAGES_QUERY_PLAIN = `SELECT SubscriberPackageId, SubscriberPackage.Name, SubscriberPackage.NamespacePrefix, ${VERSION_FIELDS} FROM InstalledSubscriberPackage`;
 const LICENCES_QUERY = "SELECT NamespacePrefix, AllowedLicenses, UsedLicenses, Status, ExpirationDate FROM PackageLicense";
 
 export const packagesExtractor: Extractor<PackagesData> = {
   id: "inventory-packages",
-  version: 1,
+  version: 2,
   async run(ctx) {
     let installed = await readSoql<InstalledRow>(ctx, PACKAGES_QUERY, { api: "tooling" });
     if (installed.status !== "ok") {
@@ -181,15 +247,17 @@ function packageRows(data: PackagesData): Inventory["packages"] {
   if (installed.status !== "ok") notes.push(`The installed packages couldn't be read, so only packages with a licence are listed: ${installed.reason}`);
   if (licences.status !== "ok") notes.push(`The packages' licences couldn't be read: ${licences.reason}`);
   if (installed.status === "ok" && installed.missingFields?.length) notes.push("Salesforce didn't say whether each version is deprecated or managed.");
-  const byNamespace = new Map<string, PackageRow>();
-  const key = (ns: string | null | undefined): string => (ns ?? "").toLowerCase();
+  // Each installed package by its id, so packages without a namespace are each listed (DECISIONS.md 609).
+  const byPackage = new Map<string, PackageRow>();
+  const ns = (value: string | null | undefined): string | null => (value ? value.toLowerCase() : null);
   const number = (v: number | null | undefined): string => (typeof v === "number" ? String(v) : "?");
   // Read without the flags, nothing that came back is taken for them.
   const flagsRead = installed.status === "ok" && !installed.missingFields?.length;
   for (const p of installed.status === "ok" ? installed.data : []) {
     const v = p.SubscriberPackageVersion ?? null;
     const flag = (value: boolean | null | undefined): boolean | null => (flagsRead && typeof value === "boolean" ? value : null);
-    byNamespace.set(key(p.SubscriberPackage?.NamespacePrefix), {
+    byPackage.set(p.SubscriberPackageId ?? `row:${byPackage.size}`, {
+      packageId: p.SubscriberPackageId ?? null,
       namespace: p.SubscriberPackage?.NamespacePrefix ?? null,
       name: p.SubscriberPackage?.Name ?? null,
       version: v && typeof v.MajorVersion === "number" ? [v.MajorVersion, v.MinorVersion, v.PatchVersion, v.BuildNumber].map(number).join(".") : null,
@@ -208,11 +276,12 @@ function packageRows(data: PackagesData): Inventory["packages"] {
       used: Math.max(0, l.UsedLicenses),
       expiresOn: l.ExpirationDate ? l.ExpirationDate.slice(0, 10) : null,
     };
-    const row = byNamespace.get(key(l.NamespacePrefix));
+    // Licences only name a namespace, so they match by it; one without a namespace stands alone.
+    const row = ns(l.NamespacePrefix) ? [...byPackage.values()].find((p) => ns(p.namespace) === ns(l.NamespacePrefix)) : undefined;
     if (row) row.licence = licence;
-    else byNamespace.set(key(l.NamespacePrefix), { namespace: l.NamespacePrefix, name: null, version: null, versionName: null, installed: false, deprecated: null, managed: null, licence });
+    else byPackage.set(`licence:${byPackage.size}`, { packageId: null, namespace: l.NamespacePrefix, name: null, version: null, versionName: null, installed: false, deprecated: null, managed: null, licence });
   }
-  const rows = [...byNamespace.values()].sort((a, b) => (a.namespace ?? "").localeCompare(b.namespace ?? ""));
+  const rows = [...byPackage.values()].sort((a, b) => (a.namespace ?? "").localeCompare(b.namespace ?? "") || (a.name ?? "").localeCompare(b.name ?? "") || (a.packageId ?? "").localeCompare(b.packageId ?? ""));
   return { rows, notes };
 }
 
@@ -221,6 +290,8 @@ function packageRows(data: PackagesData): Inventory["packages"] {
 
 /** The most tokens read. Past it, every count is a floor, and a note says so. */
 export const OAUTH_TOKEN_MAX_ROWS = 50_000;
+export const ONLY_OWN_TOKENS = "The connected user can only see its own authorisations.";
+export const NOT_TOLD_WHO = "The run wasn't told which user connected, so we can't tell whether it sees everyone's authorisations.";
 export const OAUTH_TOKEN_QUERY = "SELECT AppName, UserId, CreatedDate, LastUsedDate, UseCount FROM OauthToken";
 const APPS_QUERY = "SELECT Name, OptionsAllowAdminApprovedUsersOnly FROM ConnectedApplication";
 
@@ -230,11 +301,16 @@ export type ConnectedAppsData = { apps: Sourced<AppSetting[]>; use: Sourced<AppU
 
 export const connectedAppsExtractor: Extractor<ConnectedAppsData> = {
   id: "inventory-connected-apps",
-  version: 1,
+  version: 2,
   async run(ctx) {
     const apps = earlier(ctx, orgDocumentationExtractor)?.connectedApps ?? (await readSoql<AppSetting>(ctx, APPS_QUERY));
     const tokens = await readSoql<{ AppName: string | null; UserId: string | null; CreatedDate: string | null; LastUsedDate: string | null; UseCount: number | null }>(ctx, OAUTH_TOKEN_QUERY, { maxRecords: OAUTH_TOKEN_MAX_ROWS });
     if (tokens.status !== "ok") return { apps, use: tokens };
+    // A user without Manage Users sees only their own tokens, which would show
+    // every app as theirs alone (DECISIONS.md 609). Without their id we can't tell.
+    const own = ctx.connectedUser?.id?.slice(0, 15);
+    if (!own) return { apps, use: { status: "unavailable", reason: NOT_TOLD_WHO, source: tokens.source } };
+    if (tokens.data.every((t) => t.UserId?.slice(0, 15) === own)) return { apps, use: { status: "unavailable", reason: ONLY_OWN_TOKENS, source: tokens.source } };
     const byApp = new Map<string, { users: Set<string>; first: string | null; last: string | null; uses: number | null }>();
     for (const t of tokens.data) {
       const name = t.AppName?.trim();
@@ -257,7 +333,7 @@ function connectedAppRows(data: ConnectedAppsData): Inventory["connectedApps"] {
   if (apps.status !== "ok" && use.status !== "ok") return { unavailable: `Neither the connected apps nor their OAuth tokens could be read: ${apps.reason}` };
   const notes: string[] = [];
   if (apps.status !== "ok") notes.push(`The org's connected apps couldn't be read, so we can't say which are installed: ${apps.reason}`);
-  if (use.status !== "ok") notes.push(`The OAuth tokens couldn't be read, so no app's use is shown: ${use.reason}`);
+  if (use.status !== "ok") notes.push(use.reason === ONLY_OWN_TOKENS || use.reason === NOT_TOLD_WHO ? `No app's use is shown: ${use.reason}` : `The OAuth tokens couldn't be read, so no app's use is shown: ${use.reason}`);
   if (use.status === "ok" && use.truncated) notes.push(`More than ${OAUTH_TOKEN_MAX_ROWS.toLocaleString("en-GB")} OAuth tokens: we read that many, so each app's users and uses are at least what's shown.`);
   const used = new Map(use.status === "ok" ? use.data.map((u) => [u.name, u]) : []);
   const rows = new Map<string, ConnectedAppRow>();
@@ -405,12 +481,18 @@ export function inventoryExtractorsFor(scope: RunScope): Extractor[] {
 export const SETUP_ONLY_FILL_RATES = "A set-up only scan doesn't count records, so fill rates weren't read.";
 
 /** The inventory from the run's extracts. A step that didn't run makes its section unavailable, with why. */
-export function buildInventory(extracts: Map<string, unknown>, scope: RunScope, madeAt: Date): Inventory {
+export function buildInventory(extracts: Map<string, unknown>, scope: RunScope, madeAt: Date, failed: Map<string, string> = new Map()): Inventory {
   const got = <T>(e: Extractor<T>): T | undefined => extracts.get(e.id) as T | undefined;
-  const notRun = { unavailable: "This step didn't run." };
+  // A step that failed says why, with any secret in Salesforce's or the network's message taken out.
+  const notRunOf = (e: Extractor): { unavailable: string } => {
+    const reason = failed.get(e.id);
+    return { unavailable: reason ? `This part of the inventory couldn't be read: ${redactSecrets(reason)}` : "This step didn't run." };
+  };
   const fill = got(fillRatesExtractor);
   const fillRates: Inventory["fillRates"] = !fill
-    ? { unavailable: scope === "complete" ? notRun.unavailable : SETUP_ONLY_FILL_RATES }
+    ? scope === "complete"
+      ? notRunOf(fillRatesExtractor)
+      : { unavailable: SETUP_ONLY_FILL_RATES }
     : fill.status !== "ok"
       ? { unavailable: fill.reason }
       : {
@@ -429,9 +511,9 @@ export function buildInventory(extracts: Map<string, unknown>, scope: RunScope, 
     madeAt: madeAt.toISOString(),
     scope,
     fillRates,
-    packages: packages ? packageRows(packages) : notRun,
-    connectedApps: apps ? connectedAppRows(apps) : notRun,
-    riskyPermissions: risky ? riskyRows(risky) : notRun,
-    limits: limits ? limitRows(limits) : notRun,
+    packages: packages ? packageRows(packages) : notRunOf(packagesExtractor),
+    connectedApps: apps ? connectedAppRows(apps) : notRunOf(connectedAppsExtractor),
+    riskyPermissions: risky ? riskyRows(risky) : notRunOf(riskyPermissionsExtractor),
+    limits: limits ? limitRows(limits) : notRunOf(limitsExtractor),
   };
 }

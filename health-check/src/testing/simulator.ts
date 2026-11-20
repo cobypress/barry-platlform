@@ -523,7 +523,7 @@ export class Simulator implements Transport {
         const installed = org.INSTALLED_PACKAGES.filter((p) => (this.#cpq || p.SubscriberPackage.NamespacePrefix !== "SBQQ") && (this.#pardot || p.SubscriberPackage.NamespacePrefix !== "pi"));
         // The version only when it's asked for, as the inventory asks (DECISIONS.md 603).
         if (!/\bSubscriberPackageVersion\./.test(soql)) return page(installed);
-        return page(installed.map((p) => ({ ...p, SubscriberPackageVersion: org.PACKAGE_VERSIONS[p.SubscriberPackage.NamespacePrefix] ?? null })));
+        return page(installed.map((p) => ({ SubscriberPackageId: org.sfId("033", org.INSTALLED_PACKAGES.indexOf(p) + 1), ...p, SubscriberPackageVersion: org.PACKAGE_VERSIONS[p.SubscriberPackage.NamespacePrefix] ?? null })));
       }
       case "PackageLicense":
         return page(org.PACKAGE_LICENSES.filter((p) => (this.#cpq || p.NamespacePrefix !== "SBQQ") && (this.#pardot || p.NamespacePrefix !== "pi") && !this.#unlicensed.has(p.NamespacePrefix ?? "")));

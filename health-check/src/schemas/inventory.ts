@@ -30,6 +30,8 @@ export const FillRateObject = z.union([
 
 export const PackageRow = z
   .object({
+    /** SubscriberPackageId: what an installed package is listed by. Null for a namespace with only a licence row. */
+    packageId: z.string().max(18).nullable(),
     namespace: z.string().max(255).nullable(),
     name: z.string().max(255).nullable(),
     /** Major.minor.patch.build, as Salesforce numbers the installed version. */
