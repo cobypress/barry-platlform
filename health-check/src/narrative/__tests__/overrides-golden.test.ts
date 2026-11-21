@@ -172,6 +172,11 @@ describe("the golden overrides file shared with the console (decision 532, item 
     "a finding: a figure printed once in each text a finding has is rewritten there (carried)": [],
     "a finding: a fact and the sized amount share a value, the fact's refusal first (shared)": ["finding:shared", "finding:shared"],
     "rows naming a finding's id as a measure's, or a measure's as a finding's, are ignored": [],
+    // Decision 628: a carried correction drops a finding's hours and prompt, a refused one or one put back keeps them.
+    "a finding with hours and a prompt: a carried correction drops both": [],
+    "a finding with hours and a prompt: a carried correction in no text drops both": [],
+    "a finding with hours and a prompt: a refused correction keeps both": ["finding:repeated"],
+    "a finding with hours and a prompt: put back to the value as read keeps both": [],
   };
 
   test("each hand case does what its name says", () => {
@@ -254,6 +259,11 @@ describe("the golden overrides file shared with the console (decision 532, item 
     "a finding: a figure printed once in each text a finding has is rewritten there (carried)": [["title", "Integrations that run as 117 users"], ["summary", "They make 330 calls a day."], ["recommendation", "Move the 131 jobs to their own users."], ["value", { kind: "licence_cost", amount: 3600, unit: "GBP", period: "over 112 months", assumptions: ["Each of the 106 licences costs £700 a year."] }], ["effort", { size: "M", note: "About 103 days of work." }], ["owner", "Salesforce admin and 102 developers"], ["dependencies", ["Close the 147 open tickets first."]], ["guards", ["The 196 jobs have not run in the last week."]], ["segmentExemptReason", "One org-wide figure across 181 jobs."], ["facts", { users: 117, calls: 330, jobs: 131, licences: 106, months: 112, days: 103, developers: 102, tickets: 147, archived: 158, allJobs: 181, idle: 196 }], ["notMeasurableReason", "The 158 archived jobs could not be read."], ["value", { kind: "not_sized", reason: "Not sized: the 16 hours a week are an estimate." }], ["facts", { hours: 16 }]],
     "a finding: a fact and the sized amount share a value, the fact's refusal first (shared)": [["facts.seats refused", { kind: "shared", other: "the sized amount" }], ["value.amount refused", { kind: "shared", other: "seats" }]],
     "rows naming a finding's id as a measure's, or a measure's as a finding's, are ignored": [],
+    // Decision 628: a carried correction drops a finding's hours and prompt, a refused one or one put back keeps them.
+    "a finding with hours and a prompt: a carried correction drops both": [["summary", "5 flows have no fault path."], ["facts", { affected: 5 }], ["effortHours", undefined], ["timeBand", undefined], ["fixPrompt", undefined]],
+    "a finding with hours and a prompt: a carried correction in no text drops both": [["facts", { affected: 3 }], ["effortHours", undefined], ["timeBand", undefined], ["fixPrompt", undefined]],
+    "a finding with hours and a prompt: a refused correction keeps both": [["facts.affected refused", { kind: "repeated", places: 2 }]],
+    "a finding with hours and a prompt: put back to the value as read keeps both": [],
   };
   const shows = (c: GoldenCase): Array<[string, unknown]> => [
     ...c.expected.refused.map((r): [string, unknown] => [`${r.field} refused`, r.why]),
@@ -352,7 +362,7 @@ describe("refusalLines (decision 532, item 1)", () => {
   });
 
   test("the listed lines are the old function's, by the character, for every refusal of the synthetic run and the hand cases, alone and together", () => {
-    assert.deepEqual([runFigures.length, runRefusals.length, handRefusals.length], [603, 237, 59]);
+    assert.deepEqual([runFigures.length, runRefusals.length, handRefusals.length], [603, 237, 60]);
     for (const r of [...runRefusals, ...handRefusals]) {
       assert.deepEqual(refusalLines([r]), oldLines([r]));
       assert.equal(refusalLines([r])[1], oldLines([r])[1]);

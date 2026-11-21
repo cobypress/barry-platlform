@@ -3,6 +3,7 @@ import { holdsNameOrSecret } from "../narrative/guard.ts";
 import type { BuiltReport } from "../narrative/sections.ts";
 import { buildPlan, domainLabel } from "../narrative/select.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
+import { knownPeople } from "../fix/prompt.ts";
 import { DIGEST_VERSION, NAMED_PEOPLE_SENTENCE, RunDigest, type DigestArea, type DigestFinding, type DigestMetric, type DigestTotal, type DigestValueModel } from "../schemas/digest.ts";
 import type { Finding, Metric } from "../schemas/index.ts";
 import type { Inventory } from "../schemas/inventory.ts";
@@ -56,10 +57,47 @@ export function inventoryNames(inventory: Inventory): string[] {
   return names.filter((n): n is string => typeof n === "string" && n.length > 0);
 }
 
+/** A name's words as written, split on underscores, spaces, punctuation, digits and case changes. */
+const wordsAsWritten = (name: string): string[] =>
+  name
+    .replace(/(\p{Ll})(\p{Lu})/gu, "$1 $2")
+    .replace(/(\p{Lu})(\p{Lu}\p{Ll})/gu, "$1 $2")
+    .split(/[^\p{L}\p{M}]+/u)
+    .filter(Boolean);
+
+const fold = (word: string): string => word.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase();
+
+/**
+ * Whether an inventory name names a known person in a way no ordinary field name
+ * does (DECISIONS.md 636): the first name and surname as whole words side by side
+ * in either order ("Sam_Reed_Queue"), or run together as one whole word
+ * ("samreed_export", "reedsam"), or initial and surname as one whole word written
+ * in one case ("sreed", "SREED"). Never a first name or surname alone, never a
+ * part of a longer word, and never a capitalised word ("Amount" is a word, not
+ * A. Mount), so Amount__c, Unit_Price__c, Response_Time__c and Days_Open__c stay.
+ */
+export function inventoryNameNamesPerson(name: string, pseudonyms: Pseudonymiser): boolean {
+  const written = wordsAsWritten(name);
+  const words = written.map(fold);
+  for (const parts of knownPeople(pseudonyms)) {
+    if (parts.length < 2) continue;
+    const [first, last] = [parts[0]!, parts.at(-1)!];
+    for (let i = 0; i < words.length; i++) {
+      const w = words[i]!;
+      if ((w === first && words[i + 1] === last) || (w === last && words[i + 1] === first)) return true;
+      if (w === `${first}${last}` || w === `${last}${first}`) return true;
+      const oneCase = written[i] === written[i]!.toLowerCase() || written[i] === written[i]!.toUpperCase();
+      if (oneCase && last.length >= 3 && w === `${first[0]}${last}`) return true;
+    }
+  }
+  return false;
+}
+
 /** The hashes of the inventory's names that hold a known person's name, sorted, each once. The names themselves never leave. */
 export function withheldNames(inventory: Inventory | null, pseudonyms: Pseudonymiser): string[] {
   if (!inventory) return [];
-  return [...new Set(inventoryNames(inventory).filter((n) => holdsPersonOrSecret(n, pseudonyms)).map(sha256))].sort();
+  // And a whole-word match on people's names (DECISIONS.md 636), so a lower-case run-together name ("sreed_sync") is caught.
+  return [...new Set(inventoryNames(inventory).filter((n) => holdsPersonOrSecret(n, pseudonyms) || inventoryNameNamesPerson(n, pseudonyms)).map(sha256))].sort();
 }
 
 // Each part is put together from the report as it stands; guardDigest then takes every string in it through the guard.
@@ -81,6 +119,30 @@ function digestFinding(f: Finding): DigestFinding {
     effortSize: f.effort.size,
     notMeasurableReason: f.notMeasurableReason,
     ...(f.notMeasurableKind ? { notMeasurableKind: f.notMeasurableKind } : {}),
+    ...(f.effortHours ? { effortHours: { low: f.effortHours.low, high: f.effortHours.high, basis: f.effortHours.basis, ...(f.effortHours.partial ? { partial: true as const } : {}) } } : {}),
+    ...(f.timeBand ? { timeBand: f.timeBand } : {}),
+    ...(f.fixComplexity ? { fixComplexity: f.fixComplexity } : {}),
+  };
+}
+
+/**
+ * The hours to fix everything the plan holds (DECISIONS.md 636): its quick wins,
+ * the findings in its phases and later list, and the other issues each action
+ * also covers, each once. The total adds those with hours; the ones whose hours
+ * cover only part, and the ones with none, are listed beside it, so the total is
+ * never read as the whole. Null when no finding in the plan has hours.
+ */
+export function planHours(plan: ReturnType<typeof buildPlan>): { low: number; high: number; findingIds: string[]; partialFindingIds: string[]; withoutHoursFindingIds: string[] } | null {
+  const seen = new Map<string, Finding>();
+  for (const f of [...plan.quickWins, ...plan.phases.flatMap((p) => p.findings), ...plan.later].flatMap((f) => [f, ...(plan.alsoFor[f.id] ?? [])])) if (!seen.has(f.id)) seen.set(f.id, f);
+  const held = [...seen.values()].filter((f) => f.effortHours);
+  if (held.length === 0) return null;
+  return {
+    low: held.reduce((s, f) => s + f.effortHours!.low, 0),
+    high: held.reduce((s, f) => s + f.effortHours!.high, 0),
+    findingIds: held.map((f) => f.id),
+    partialFindingIds: held.filter((f) => f.effortHours!.partial).map((f) => f.id),
+    withoutHoursFindingIds: [...seen.values()].filter((f) => !f.effortHours).map((f) => f.id),
   };
 }
 
@@ -143,6 +205,7 @@ export function buildDigest({ report, pseudonyms, inventory, madeAt }: DigestFor
   const plan = buildPlan(report.teamFindings, report.added);
   const ids = (fs: Finding[]) => fs.map((f) => f.id);
   const overall = report.overall;
+  const hoursTotal = planHours(plan);
   // Typed by the parse below, which holds every id and code to its shape.
   const raw = {
     version: DIGEST_VERSION,
@@ -165,6 +228,7 @@ export function buildDigest({ report, pseudonyms, inventory, madeAt }: DigestFor
       later: ids(plan.later),
       quickWins: ids(plan.quickWins),
       alsoFor: Object.fromEntries(Object.entries(plan.alsoFor).map(([id, fs]) => [id, ids(fs)])),
+      ...(hoursTotal ? { hoursTotal } : {}),
     },
     withheldNames: withheldNames(inventory, pseudonyms),
   };
@@ -179,8 +243,8 @@ export function buildDigest({ report, pseudonyms, inventory, madeAt }: DigestFor
  */
 export const STRUCTURAL_KEYS: ReadonlySet<string> = new Set([
   "version", "runId", "product", "reviewed", "asOf", "madeAt", "baselineRunId", "status", "domain", "areaDomains", "findingIds", "id", "ruleId",
-  "severity", "confidence", "recommendationType", "kind", "effortSize", "notMeasurableKind", "from", "to", "currency", "group", "counted",
-  "lineIds", "leftOut", "later", "quickWins", "key", "grade", "withheldNames",
+  "severity", "confidence", "recommendationType", "kind", "effortSize", "notMeasurableKind", "timeBand", "fixComplexity", "from", "to", "currency", "group", "counted",
+  "lineIds", "leftOut", "later", "quickWins", "key", "grade", "withheldNames", "partialFindingIds", "withoutHoursFindingIds",
 ]);
 /** Keyed by finding id, each holding finding ids: ids all the way down. */
 export const ID_MAPS: ReadonlySet<string> = new Set(["alsoFor"]);

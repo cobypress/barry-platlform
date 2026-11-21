@@ -13,9 +13,10 @@ import { CalendarDate, DomainId, NotMeasurableKind, Timestamp } from "./common.t
 // replaced by NAMED_PEOPLE_SENTENCE. Nothing record-level is kept: no subjects,
 // evidence, guards, segments, record ids, tokens or the pseudonym map.
 //
-// Objects are not strict, so a later engine can add optional fields (the
-// hours and fix prompts of decision 628 among them) and a console still on
-// this copy reads the row, dropping what it doesn't know.
+// Objects are not strict, so a later engine can add optional fields and a
+// console still on this copy reads the row, dropping what it doesn't know. The
+// hours and bands of decisions 628 and 636 are here; the fix prompts are not,
+// since the connector never serves a prompt as plain data.
 
 export const DIGEST_VERSION = 1;
 
@@ -39,6 +40,9 @@ export const DigestValue = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("not_sized"), reason: Text }),
 ]);
 
+/** A finding's hours to fix (DECISIONS.md 628), whole hours, with what the range covers. */
+export const DigestHours = z.object({ low: z.number().int().min(1), high: z.number().int().min(1), basis: Text, partial: z.literal(true).optional() });
+
 export const DigestFinding = z.object({
   id: Id,
   ruleId: Id,
@@ -55,6 +59,11 @@ export const DigestFinding = z.object({
   effortSize: z.enum(["XS", "S", "M", "L", "XL"]),
   notMeasurableReason: Text.nullable(),
   notMeasurableKind: NotMeasurableKind.optional(),
+  /** An issue's hours to fix, and the band worked out from their high end (DECISIONS.md 628, 636). */
+  effortHours: DigestHours.optional(),
+  timeBand: z.enum(["small", "medium", "large"]).optional(),
+  /** How risky or skilled the fix is, by rule (DECISIONS.md 636). Not the org's complexity score. */
+  fixComplexity: z.enum(["simple", "moderate", "complex"]).optional(),
 });
 export type DigestFinding = z.infer<typeof DigestFinding>;
 
@@ -137,6 +146,15 @@ export const DigestPlan = z.object({
   quickWins: Ids,
   /** By an action's finding id, the other issues from the same rule the same action covers. */
   alsoFor: z.record(Id, Ids),
+  /**
+   * The hours to fix every finding the plan holds (its quick wins, phases and
+   * later list, and the issues each action also covers), each once, summed by
+   * code, with the finding ids it adds (DECISIONS.md 636). Never the whole on its
+   * own: `partialFindingIds` are those whose hours cover only part of their work,
+   * and `withoutHoursFindingIds` the plan's issues with no hours at all, both
+   * always listed, empty or not. Absent when no finding in the plan has hours.
+   */
+  hoursTotal: z.object({ low: z.number().int().nonnegative(), high: z.number().int().nonnegative(), findingIds: Ids, partialFindingIds: Ids, withoutHoursFindingIds: Ids }).optional(),
 });
 export type DigestPlan = z.infer<typeof DigestPlan>;
 
@@ -172,5 +190,5 @@ export const DIGEST_KEYS: ReadonlySet<string> = new Set([
   "title", "summary", "recommendation", "recommendationType", "kind", "amount", "unit", "period", "assumptions", "effortSize", "notMeasurableReason",
   "definition", "n", "dateRange", "from", "to", "exclusions", "currency", "total", "byKind", "revenue_recoverable", "conversion_uplift", "licence_waste",
   "time_cost", "exposure", "groups", "lines", "leftOut", "realisation", "counted", "lineIds", "low", "expected", "high", "group", "annual", "added",
-  "phases", "later", "quickWins", "alsoFor", "key",
+  "phases", "later", "quickWins", "alsoFor", "key", "effortHours", "basis", "partial", "timeBand", "fixComplexity", "hoursTotal", "partialFindingIds", "withoutHoursFindingIds",
 ]);

@@ -14,6 +14,7 @@
     "sample": "node src/render/sample.ts",
     "questions": "node src/facts/questions-report.ts",
     "rule-where": "node scripts/rule-where.ts",
+    "effort-hours": "node scripts/effort-hours.ts",
     "scale": "node --max-old-space-size=1536 src/testing/scale-run.ts"
   },
   "dependencies": {

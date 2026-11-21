@@ -1,0 +1,549 @@
+{
+  "note": "The hours table as it stood before the owner's trim of 21 November 2026 (DECISIONS.md 636): every high end, per-unit high rate and cap was taken to about 88% of these. Recorded once, by hand from fixtures/effort-hours.json at 5e9805f, so a test can hold each current figure to the trim. Never made again.",
+  "rules": {
+    "act.deals-without-activity": {
+      "low": 4,
+      "high": 8
+    },
+    "act.event-link-collapse": {
+      "low": 2,
+      "high": 6
+    },
+    "act.rep-activity-spread": {
+      "low": 1,
+      "high": 3
+    },
+    "act.unlinked-tasks": {
+      "low": 2,
+      "high": 4
+    },
+    "act.won-vs-lost-activity": {
+      "low": 2,
+      "high": 4
+    },
+    "adp.classic-users": {
+      "minutesLow": 30,
+      "minutesHigh": 60,
+      "capHours": 16
+    },
+    "adp.falling-adoption": {
+      "low": 8,
+      "high": 16
+    },
+    "adp.low-engagement-group": {
+      "minutesLow": 240,
+      "minutesHigh": 480,
+      "capHours": 24
+    },
+    "aut.apex-coverage": {
+      "minutesLow": 120,
+      "minutesHigh": 240,
+      "capHours": 40
+    },
+    "aut.case-routing-overlap": {
+      "low": 4,
+      "high": 8
+    },
+    "aut.flows-without-fault-paths": {
+      "minutesLow": 60,
+      "minutesHigh": 120,
+      "capHours": 24
+    },
+    "aut.hardcoded-ids-in-flows": {
+      "minutesLow": 60,
+      "minutesHigh": 120,
+      "capHours": 16
+    },
+    "aut.legacy-process-builder": {
+      "minutesLow": 120,
+      "minutesHigh": 240,
+      "capHours": 60
+    },
+    "aut.legacy-workflow-rules": {
+      "minutesLow": 60,
+      "minutesHigh": 180,
+      "capHours": 60
+    },
+    "aut.mixed-automation-on-object": {
+      "minutesLow": 240,
+      "minutesHigh": 480,
+      "capHours": 40
+    },
+    "aut.multiple-triggers": {
+      "minutesLow": 240,
+      "minutesHigh": 480,
+      "capHours": 40
+    },
+    "aut.old-api-versions": {
+      "minutesLow": 30,
+      "minutesHigh": 60,
+      "capHours": 24
+    },
+    "aut.undocumented-automation": {
+      "minutesLow": 10,
+      "minutesHigh": 20,
+      "capHours": 24
+    },
+    "bp.after-save-same-record-updates": {
+      "minutesLow": 120,
+      "minutesHigh": 240,
+      "capHours": 24
+    },
+    "bp.jobs-on-inactive-owners": {
+      "minutesLow": 30,
+      "minutesHigh": 60,
+      "capHours": 8
+    },
+    "bp.ownership-skew": {
+      "minutesLow": 240,
+      "minutesHigh": 480,
+      "capHours": 24
+    },
+    "bp.users-without-role": {
+      "minutesLow": 10,
+      "minutesHigh": 20,
+      "capHours": 8
+    },
+    "cfg.custom-field-sprawl": {
+      "minutesLow": 5,
+      "minutesHigh": 10,
+      "capHours": 40
+    },
+    "cfg.picklist-sprawl": {
+      "low": 2,
+      "high": 6
+    },
+    "cfg.setup-change-concentration": {
+      "low": 4,
+      "high": 8
+    },
+    "cfg.stage-sprawl": {
+      "low": 4,
+      "high": 8
+    },
+    "cfg.unassigned-layouts": {
+      "minutesLow": 15,
+      "minutesHigh": 30,
+      "capHours": 8
+    },
+    "cfg.undocumented-fields": {
+      "minutesLow": 10,
+      "minutesHigh": 20,
+      "capHours": 24
+    },
+    "cfg.unused-custom-fields": {
+      "minutesLow": 30,
+      "minutesHigh": 60,
+      "capHours": 16
+    },
+    "cpq.discount-approvals": {
+      "low": 8,
+      "high": 16
+    },
+    "cpq.discount-leakage": {
+      "low": 4,
+      "high": 8
+    },
+    "cpq.inactive-rules": {
+      "minutesLow": 15,
+      "minutesHigh": 30,
+      "capHours": 8
+    },
+    "cpq.price-rule-conflicts": {
+      "minutesLow": 120,
+      "minutesHigh": 240,
+      "capHours": 16
+    },
+    "cpq.quote-to-order": {
+      "low": 2,
+      "high": 4
+    },
+    "cpq.renewals-not-started": {
+      "low": 2,
+      "high": 6
+    },
+    "cpq.twin-field-mismatch": {
+      "minutesLow": 60,
+      "minutesHigh": 120,
+      "capHours": 8
+    },
+    "cur.account-concentration": {
+      "low": 2,
+      "high": 4
+    },
+    "cur.close-date-pushes": {
+      "low": 2,
+      "high": 4
+    },
+    "cur.coverage": {
+      "low": 2,
+      "high": 4
+    },
+    "cur.missing-next-steps": {
+      "low": 2,
+      "high": 4
+    },
+    "cur.rep-concentration": {
+      "low": 2,
+      "high": 4
+    },
+    "cur.stale-deals": {
+      "low": 2,
+      "high": 4
+    },
+    "cur.stuck-in-stage": {
+      "low": 2,
+      "high": 4
+    },
+    "dq.contact-completeness": {
+      "low": 3,
+      "high": 6
+    },
+    "dq.duplicate-accounts": {
+      "minutesLow": 15,
+      "minutesHigh": 30,
+      "capHours": 24
+    },
+    "dq.duplicate-rules-missing": {
+      "minutesLow": 120,
+      "minutesHigh": 240,
+      "capHours": 12
+    },
+    "dq.loss-reason-missing": {
+      "low": 2,
+      "high": 4
+    },
+    "dq.open-opps-missing-amount": {
+      "low": 2,
+      "high": 4
+    },
+    "dq.open-opps-no-activity": {
+      "low": 2,
+      "high": 4
+    },
+    "dq.open-opps-past-close": {
+      "low": 2,
+      "high": 4
+    },
+    "dq.opps-inactive-owner": {
+      "low": 1,
+      "high": 3
+    },
+    "dq.opps-without-account": {
+      "low": 2,
+      "high": 4
+    },
+    "dq.record-type-use": {
+      "low": 1,
+      "high": 4
+    },
+    "dq.records-inactive-owner": {
+      "low": 2,
+      "high": 6
+    },
+    "dq.stale-leads": {
+      "low": 3,
+      "high": 6
+    },
+    "fct.commit-at-risk": {
+      "low": 1,
+      "high": 3
+    },
+    "fct.early-stage-commits": {
+      "low": 1,
+      "high": 3
+    },
+    "fct.manager-adjustments": {
+      "low": 2,
+      "high": 4
+    },
+    "fct.quota-gaps": {
+      "minutesLow": 15,
+      "minutesHigh": 30,
+      "capHours": 8
+    },
+    "int.api-usage": {
+      "low": 4,
+      "high": 16
+    },
+    "int.failed-async-jobs": {
+      "minutesLow": 120,
+      "minutesHigh": 240,
+      "capHours": 16
+    },
+    "int.hardcoded-endpoints": {
+      "minutesLow": 120,
+      "minutesHigh": 240,
+      "capHours": 24
+    },
+    "int.integration-user-licences": {
+      "minutesLow": 60,
+      "minutesHigh": 120,
+      "capHours": 16
+    },
+    "int.integration-users-interactive": {
+      "minutesLow": 60,
+      "minutesHigh": 180,
+      "capHours": 8
+    },
+    "lead.campaign-return": {
+      "low": 2,
+      "high": 4
+    },
+    "lead.conversion-by-source": {
+      "low": 2,
+      "high": 4
+    },
+    "lead.converted-no-opportunity": {
+      "low": 1,
+      "high": 3
+    },
+    "lead.no-first-response": {
+      "low": 2,
+      "high": 4
+    },
+    "lead.response-time": {
+      "low": 2,
+      "high": 6
+    },
+    "lead.source-return": {
+      "low": 2,
+      "high": 4
+    },
+    "mkt.campaign-influence": {
+      "low": 1,
+      "high": 2
+    },
+    "mkt.scoring-grading": {
+      "low": 4,
+      "high": 8
+    },
+    "mkt.unowned-prospects": {
+      "low": 1,
+      "high": 3
+    },
+    "mkt.unworked-handovers": {
+      "low": 2,
+      "high": 4
+    },
+    "pipe.calibration-contradicts-org": {
+      "low": 1,
+      "high": 3
+    },
+    "pipe.dead-end-stage": {
+      "low": 2,
+      "high": 4
+    },
+    "pipe.going-backwards": {
+      "low": 4,
+      "high": 8
+    },
+    "pipe.segment-divergence": {
+      "low": 2,
+      "high": 4
+    },
+    "pipe.skipped-stages": {
+      "low": 4,
+      "high": 8
+    },
+    "pipe.unmapped-stages": {
+      "low": 1,
+      "high": 2
+    },
+    "rev.dormant-accounts": {
+      "low": 2,
+      "high": 4
+    },
+    "rev.stalled-deals": {
+      "low": 2,
+      "high": 4
+    },
+    "rev.win-backs": {
+      "low": 2,
+      "high": 4
+    },
+    "sec.health-check-risks": {
+      "low": 4,
+      "high": 8
+    },
+    "sec.health-check-score": {
+      "low": 8,
+      "high": 16
+    },
+    "sec.insecure-remote-sites": {
+      "low": 1,
+      "high": 4
+    },
+    "sec.modify-all-data": {
+      "minutesLow": 180,
+      "minutesHigh": 360,
+      "capHours": 24
+    },
+    "sec.peer-outlier-access": {
+      "minutesLow": 30,
+      "minutesHigh": 60,
+      "capHours": 8
+    },
+    "sec.personal-integration-accounts": {
+      "minutesLow": 240,
+      "minutesHigh": 480,
+      "capHours": 24
+    },
+    "sec.self-authorised-connected-apps": {
+      "minutesLow": 120,
+      "minutesHigh": 240,
+      "capHours": 16
+    },
+    "sec.sharing-defaults": {
+      "minutesLow": 240,
+      "minutesHigh": 480,
+      "capHours": 24
+    },
+    "sec.unused-access": {
+      "minutesLow": 15,
+      "minutesHigh": 30,
+      "capHours": 8
+    },
+    "sec.view-all-data": {
+      "minutesLow": 180,
+      "minutesHigh": 360,
+      "capHours": 24
+    },
+    "svc.agent-licences": {
+      "minutesLow": 15,
+      "minutesHigh": 30,
+      "capHours": 4
+    },
+    "svc.backlog-age": {
+      "low": 2,
+      "high": 4
+    },
+    "svc.backlog-growth": {
+      "low": 4,
+      "high": 8
+    },
+    "svc.case-classification": {
+      "low": 2,
+      "high": 4
+    },
+    "svc.case-customer": {
+      "low": 2,
+      "high": 6
+    },
+    "svc.escalation-rules": {
+      "low": 2,
+      "high": 6
+    },
+    "svc.escalation-targets": {
+      "minutesLow": 60,
+      "minutesHigh": 120,
+      "capHours": 8
+    },
+    "svc.first-reply-email": {
+      "low": 2,
+      "high": 6
+    },
+    "svc.knowledge-current": {
+      "minutesLow": 15,
+      "minutesHigh": 30,
+      "capHours": 24
+    },
+    "svc.knowledge-use": {
+      "low": 2,
+      "high": 6
+    },
+    "svc.macros-and-quick-text": {
+      "low": 2,
+      "high": 6
+    },
+    "svc.milestone-breaches": {
+      "low": 4,
+      "high": 8
+    },
+    "svc.omni-routing": {
+      "minutesLow": 60,
+      "minutesHigh": 120,
+      "capHours": 8
+    },
+    "svc.origin-missing": {
+      "low": 2,
+      "high": 4
+    },
+    "svc.priority-resolution": {
+      "low": 4,
+      "high": 8
+    },
+    "svc.queue-sprawl": {
+      "low": 2,
+      "high": 4
+    },
+    "svc.reopened-cases": {
+      "low": 2,
+      "high": 6
+    },
+    "svc.unassigned-cases": {
+      "low": 2,
+      "high": 6
+    },
+    "tech.apex-code-size": {
+      "low": 8,
+      "high": 24
+    },
+    "tech.classic-leftovers": {
+      "minutesLow": 120,
+      "minutesHigh": 360,
+      "capHours": 40
+    },
+    "tech.governor-limit-risk": {
+      "minutesLow": 120,
+      "minutesHigh": 240,
+      "capHours": 40
+    },
+    "tech.storage-use": {
+      "low": 4,
+      "high": 16
+    },
+    "tech.test-quality": {
+      "minutesLow": 60,
+      "minutesHigh": 180,
+      "capHours": 40
+    },
+    "utl.dashboards-inactive-running-user": {
+      "minutesLow": 15,
+      "minutesHigh": 30,
+      "capHours": 8
+    },
+    "utl.dormant-licensed-users": {
+      "minutesLow": 15,
+      "minutesHigh": 30,
+      "capHours": 8
+    },
+    "utl.eac-advanced-sync": {
+      "low": 1,
+      "high": 2
+    },
+    "utl.eac-connections": {
+      "minutesLow": 15,
+      "minutesHigh": 30,
+      "capHours": 8
+    },
+    "utl.never-logged-in": {
+      "minutesLow": 15,
+      "minutesHigh": 30,
+      "capHours": 8
+    },
+    "utl.package-seats": {
+      "low": 1,
+      "high": 3
+    },
+    "utl.unassigned-licence-seats": {
+      "low": 1,
+      "high": 2
+    },
+    "utl.unused-reports": {
+      "minutesLow": 2,
+      "minutesHigh": 5,
+      "capHours": 8
+    }
+  }
+}

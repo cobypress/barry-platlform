@@ -313,6 +313,16 @@ function overrideFinding(f: Finding, overrides: NumberOverride[]): { finding: Fi
     if (figure.field === "value.amount") finding.value = finding.value.kind === "not_sized" ? finding.value : { ...finding.value, amount: last };
     else finding.facts[nameOf(figure.field)] = last;
   }
+  // A finding's hours to fix and fix prompt were made from its figures and words as
+  // read (DECISIONS.md 628). Nothing here can make them again, so a correction that
+  // changes a figure drops both rather than leave them stale; one put back to the
+  // value as read changes nothing and keeps them.
+  if (carried.some(({ figure, last }) => last !== figure.asRead)) {
+    delete finding.effortHours;
+    // The band is the hours' own (DECISIONS.md 636), so it goes with them; the rule's fix complexity stands.
+    delete finding.timeBand;
+    delete finding.fixPrompt;
+  }
   return { finding, refused: [] };
 }
 
