@@ -3,7 +3,6 @@
 // may only shrink, as rules are converted.
 
 export const UNCONVERTED_RULES: ReadonlySet<string> = new Set<string>([
-  "aut.apex-coverage", "aut.old-api-versions", "cpq.discount-approvals", "cpq.discount-leakage", "cpq.inactive-rules",
-  "cpq.price-rule-conflicts", "cpq.quote-to-order", "cpq.renewals-not-started", "cpq.twin-field-mismatch", "tech.apex-code-size",
-  "tech.classic-leftovers", "tech.governor-limit-risk", "tech.storage-use", "tech.test-quality",
+  "cpq.discount-approvals", "cpq.discount-leakage", "cpq.inactive-rules", "cpq.price-rule-conflicts", "cpq.quote-to-order",
+  "cpq.renewals-not-started", "cpq.twin-field-mismatch",
 ]);
