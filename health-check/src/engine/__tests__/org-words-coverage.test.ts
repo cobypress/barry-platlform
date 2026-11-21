@@ -130,7 +130,7 @@ describe("rules writing their sentences with said (decisions 655 and 657)", () =
       for (const { key, text, spans } of sentencesOf(f)) {
         if (!spans) continue;
         for (const s of spans) assert.ok(fromOrg(text.slice(s.start, s.end)), `${f.ruleId} ${key}: span "${text.slice(s.start, s.end)}" is text the org's data holds`);
-        for (const name of [...planted, ...PLANTED_NAMES]) {
+        for (const name of [...planted, ...PLANTED_NAMES, CURRENCY]) {
           for (let at = text.indexOf(name); at !== -1; at = text.indexOf(name, at + 1)) {
             seen.add(name);
             assert.ok(spans.some((s) => s.start <= at && at + name.length <= s.end), `${f.ruleId} ${key}: "${name}" at ${at} is inside a span`);
@@ -141,6 +141,8 @@ describe("rules writing their sentences with said (decisions 655 and 657)", () =
     // Each planted name is quoted in a sentence a converted rule wrote, so the check bites on every kind.
     assert.deepEqual([...PLANTED_NAMES].filter((n) => !seen.has(n) && !quotedOnlyByUnconverted(n)), []);
     assert.ok(planted.some((n) => seen.has(n)), "the planted object labels are quoted");
+    // The calibration's currency code, too short for the inverse check, is quoted in seat assumptions (DECISIONS.md 663).
+    assert.ok(seen.has(CURRENCY), "the currency is quoted");
   });
 
   test("outside its spans, no marked sentence holds a name the org's data holds, or a person's token (found in review)", () => {
@@ -183,6 +185,9 @@ describe("rules writing their sentences with said (decisions 655 and 657)", () =
     }
   });
 });
+
+/** The calibration's currency code: the org's words where a sentence prints it as a code. */
+const CURRENCY = loadCalibration().currency;
 
 /** An org's name worded as an instruction to whoever reads the sentence. */
 function HOSTILE(name: string): string {

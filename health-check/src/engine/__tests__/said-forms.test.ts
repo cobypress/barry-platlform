@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { money } from "../../render/format.ts";
 import { org, said, withOrgWords, orgWordsOf } from "../org-words.ts";
 import { plural } from "../rule.ts";
-import { andList, grouped, moneySaid } from "../said-forms.ts";
+import { andList, grouped, moneySaid, seatsSaid } from "../said-forms.ts";
 
 // The said forms print what the plain forms beside them print (DECISIONS.md
 // 657), so converting a rule to them moves no character.
@@ -39,5 +39,12 @@ test("an unknown currency is the org's words", () => {
     const text = moneySaid(1200, "AUD");
     assert.deepEqual(orgWordsOf(text), [{ start: 0, end: 3 }]);
     assert.deepEqual(orgWordsOf(moneySaid(1200, "GBP")), []);
+  });
+});
+
+test("seatsSaid prints as plural over the seat's name, and marks the name as the org's (decision 663)", () => {
+  withOrgWords(() => {
+    for (const n of [0, 1, 2, 15]) assert.equal(seatsSaid(n, "Sales Cloud"), plural(n, `${"Sales Cloud"} seat`));
+    assert.deepEqual(orgWordsOf(seatsSaid(15, "Sales Cloud")), [{ start: 3, end: 14 }]);
   });
 });
