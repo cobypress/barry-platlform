@@ -18,7 +18,9 @@ import { CalendarDate, DomainId, NotMeasurableKind, Timestamp } from "./common.t
 // hours and bands of decisions 628 and 636 are here; the fix prompts are not,
 // since the connector never serves a prompt as plain data. A finding's
 // `orgWords` (DECISIONS.md 655) marks which characters of its sentences the org
-// chose: positions, not figures, so nothing traces them.
+// chose: positions, not figures, so nothing traces them. Its value's reason and
+// assumptions, its hours' basis, a plan phase's title, an area's label and a
+// value group's label are marked the same way (DECISIONS.md 663).
 
 export const DIGEST_VERSION = 1;
 
@@ -69,6 +71,13 @@ export function spansFitSentence(text: string, spans: readonly DigestSpan[]): bo
 
 const MARKED_SENTENCES = ["title", "summary", "recommendation", "notMeasurableReason"] as const;
 
+/** A sentence's marks, when it has them, fit it. */
+const fits = (text: string | undefined, marked: SentenceOrgWords | undefined): boolean => !marked || (typeof text === "string" && spansFitSentence(text, marked.orgWords));
+
+/** A label or a title marked (DECISIONS.md 663): absent, it is unknown. */
+const LabelOrgWords = z.object({ label: SentenceOrgWords.optional() });
+const TitleOrgWords = z.object({ title: SentenceOrgWords.optional() });
+
 export const DigestFinding = z.object({
   id: Id,
   ruleId: Id,
@@ -92,7 +101,18 @@ export const DigestFinding = z.object({
   fixComplexity: z.enum(["simple", "moderate", "complex"]).optional(),
   /** By sentence, the ones the engine can vouch for, with the org's characters marked (DECISIONS.md 655). */
   orgWords: z
-    .object({ title: SentenceOrgWords.optional(), summary: SentenceOrgWords.optional(), recommendation: SentenceOrgWords.optional(), notMeasurableReason: SentenceOrgWords.optional() })
+    .object({
+      title: SentenceOrgWords.optional(),
+      summary: SentenceOrgWords.optional(),
+      recommendation: SentenceOrgWords.optional(),
+      notMeasurableReason: SentenceOrgWords.optional(),
+      /** A not sized value's reason (DECISIONS.md 663). */
+      valueReason: SentenceOrgWords.optional(),
+      /** A sized value's assumptions, one marking each in order, present only when every one is marked (DECISIONS.md 663). */
+      valueAssumptions: z.array(SentenceOrgWords).optional(),
+      /** The hours' basis (DECISIONS.md 663). */
+      hoursBasis: SentenceOrgWords.optional(),
+    })
     .optional(),
 }).superRefine((f, ctx) => {
   for (const key of MARKED_SENTENCES) {
@@ -101,6 +121,16 @@ export const DigestFinding = z.object({
     const text = f[key];
     if (typeof text !== "string" || !spansFitSentence(text, marked.orgWords)) ctx.addIssue({ code: "custom", path: ["orgWords", key], message: "Spans must fit their sentence" });
   }
+  const marks = f.orgWords;
+  if (!marks) return;
+  const v = f.value;
+  if (marks.valueReason && (v.kind !== "not_sized" || !fits(v.reason, marks.valueReason))) ctx.addIssue({ code: "custom", path: ["orgWords", "valueReason"], message: "Spans must fit a not sized value's reason" });
+  if (marks.valueAssumptions) {
+    const held = v.kind === "not_sized" ? null : v.assumptions;
+    if (!held || held.length !== marks.valueAssumptions.length || !marks.valueAssumptions.every((m, i) => fits(held[i], m)))
+      ctx.addIssue({ code: "custom", path: ["orgWords", "valueAssumptions"], message: "One marking for each assumption, each fitting it" });
+  }
+  if (marks.hoursBasis && !fits(f.effortHours?.basis, marks.hoursBasis)) ctx.addIssue({ code: "custom", path: ["orgWords", "hoursBasis"], message: "Spans must fit the hours' basis" });
 });
 export type DigestFinding = z.infer<typeof DigestFinding>;
 
@@ -132,10 +162,15 @@ export const DigestMetric = z.discriminatedUnion("status", [
 ]);
 export type DigestMetric = z.infer<typeof DigestMetric>;
 
-export const DigestArea = z.discriminatedUnion("status", [
-  z.object({ status: z.literal("measured"), domain: DomainId, label: Text, score: z.number().min(0).max(100), findingIds: Ids }),
-  z.object({ status: z.literal("not_measurable"), domain: DomainId, label: Text, reason: Text, notMeasurableKind: NotMeasurableKind.optional() }),
-]);
+export const DigestArea = z
+  .discriminatedUnion("status", [
+    z.object({ status: z.literal("measured"), domain: DomainId, label: Text, score: z.number().min(0).max(100), findingIds: Ids, orgWords: LabelOrgWords.optional() }),
+    // The reason is unknown, never marked.
+    z.object({ status: z.literal("not_measurable"), domain: DomainId, label: Text, reason: Text, notMeasurableKind: NotMeasurableKind.optional(), orgWords: LabelOrgWords.optional() }),
+  ])
+  .superRefine((a, ctx) => {
+    if (!fits(a.label, a.orgWords?.label)) ctx.addIssue({ code: "custom", path: ["orgWords", "label"], message: "Spans must fit the label" });
+  });
 export type DigestArea = z.infer<typeof DigestArea>;
 
 const ValueKind = z.enum(["revenue_recoverable", "conversion_uplift", "licence_waste", "time_cost", "exposure"]);
@@ -149,14 +184,19 @@ const ValueKind = z.enum(["revenue_recoverable", "conversion_uplift", "licence_w
 export const DigestValueLine = z.object({ id: Id, ruleId: Id, kind: ValueKind, group: Id, annual: Amount, low: Amount, expected: Amount, high: Amount, added: Amount });
 
 /** A group of figures that describe the same money: only `counted` is added, at the group's realisation rates. */
-export const DigestValueGroup = z.object({
-  id: Id,
-  kind: ValueKind,
-  label: Text,
-  realisation: DigestRange,
-  counted: Id,
-  lineIds: Ids,
-});
+export const DigestValueGroup = z
+  .object({
+    id: Id,
+    kind: ValueKind,
+    label: Text,
+    realisation: DigestRange,
+    counted: Id,
+    lineIds: Ids,
+    orgWords: LabelOrgWords.optional(),
+  })
+  .superRefine((g, ctx) => {
+    if (!fits(g.label, g.orgWords?.label)) ctx.addIssue({ code: "custom", path: ["orgWords", "label"], message: "Spans must fit the label" });
+  });
 
 /** A total and the value lines it adds up (each the counted line of its group). */
 export const DigestTotal = DigestRange.extend({ lineIds: Ids });
@@ -178,7 +218,13 @@ export type DigestValueModel = z.infer<typeof DigestValueModel>;
 
 /** The engine's own 90-day plan, by finding id, in its order. */
 export const DigestPlan = z.object({
-  phases: z.array(z.object({ key: z.enum(["stabilise", "fix", "build"]), title: Text, from: z.number().int().positive(), to: z.number().int().positive(), findingIds: Ids })),
+  phases: z.array(
+    z
+      .object({ key: z.enum(["stabilise", "fix", "build"]), title: Text, from: z.number().int().positive(), to: z.number().int().positive(), findingIds: Ids, orgWords: TitleOrgWords.optional() })
+      .superRefine((p, ctx) => {
+        if (!fits(p.title, p.orgWords?.title)) ctx.addIssue({ code: "custom", path: ["orgWords", "title"], message: "Spans must fit the title" });
+      }),
+  ),
   later: Ids,
   quickWins: Ids,
   /** By an action's finding id, the other issues from the same rule the same action covers. */
@@ -228,5 +274,5 @@ export const DIGEST_KEYS: ReadonlySet<string> = new Set([
   "definition", "n", "dateRange", "from", "to", "exclusions", "currency", "total", "byKind", "revenue_recoverable", "conversion_uplift", "licence_waste",
   "time_cost", "exposure", "groups", "lines", "leftOut", "realisation", "counted", "lineIds", "low", "expected", "high", "group", "annual", "added",
   "phases", "later", "quickWins", "alsoFor", "key", "effortHours", "basis", "partial", "timeBand", "fixComplexity", "hoursTotal", "partialFindingIds", "withoutHoursFindingIds",
-  "orgWords", "orgWordsMarked", "start", "end",
+  "orgWords", "orgWordsMarked", "start", "end", "valueReason", "valueAssumptions", "hoursBasis",
 ]);

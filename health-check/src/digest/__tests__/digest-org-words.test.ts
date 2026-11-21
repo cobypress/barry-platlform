@@ -27,6 +27,12 @@ const strip = <T extends { orgWords?: unknown }>(x: T): Omit<T, "orgWords"> => {
   return rest;
 };
 
+/** Every marking taken out, at any depth. */
+const unmarked = (value: unknown): unknown =>
+  Array.isArray(value) ? value.map(unmarked) : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).filter(([k]) => k !== "orgWords").map(([k, v]) => [k, unmarked(v)])) : value;
+/** A digest's areas, plan and value as it has them, marks and all. */
+const unmarkedParts = (d: RunDigest) => ({ areas: d.areas, plan: d.plan, value: d.value });
+
 describe("the digest marks the org's words (decision 655)", () => {
   test("worked by hand: the object labels in two rules' summaries, and every other sentence of theirs the engine's alone", () => {
     const mixed = byRule(digest, "aut.mixed-automation-on-object");
@@ -102,7 +108,9 @@ describe("the digest marks the org's words (decision 655)", () => {
     const bare = loaded.input.findings.map((f) => strip(f) as Finding);
     assert.ok(loaded.input.findings.some((f) => f.orgWords));
     const before = digestOf(bare);
-    assert.deepEqual({ ...digest, findings: digest.findings.map(strip) }, before);
+    // The areas', plan's and value groups' marks (DECISIONS.md 663) come from the engine's own tables, not the findings, so they are taken out of both.
+    assert.deepEqual(unmarked(digest), unmarked(before));
+    assert.deepEqual({ ...digest, findings: digest.findings.map(strip) }, { ...before, ...unmarkedParts(digest) });
     assert.ok(before.findings.every((f) => f.orgWords === undefined));
     const marked = buildReport({ ...loaded.input });
     const plain = buildReport({ ...loaded.input, findings: bare });

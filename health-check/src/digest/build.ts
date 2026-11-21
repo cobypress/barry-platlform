@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
 import { holdsNameOrSecret } from "../narrative/guard.ts";
 import type { BuiltReport } from "../narrative/sections.ts";
-import { buildPlan, domainLabel } from "../narrative/select.ts";
+import { buildPlan, DOMAIN_LABELS, domainLabel, PHASE_TITLES } from "../narrative/select.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { knownPeople } from "../fix/prompt.ts";
-import { spansIfCurrent } from "../engine/org-words.ts";
-import { DIGEST_VERSION, NAMED_PEOPLE_SENTENCE, RunDigest, type DigestArea, type DigestFinding, type DigestMetric, type DigestTotal, type DigestValueModel } from "../schemas/digest.ts";
+import { spansIfCurrent, type OrgSpan } from "../engine/org-words.ts";
+import { DIGEST_VERSION, NAMED_PEOPLE_SENTENCE, RunDigest, type DigestArea, type DigestFinding, type DigestMetric, type DigestTotal, type DigestValueModel, type SentenceOrgWords } from "../schemas/digest.ts";
 import type { Finding, Metric } from "../schemas/index.ts";
 import type { Inventory } from "../schemas/inventory.ts";
 import { GROUPS, HEADLINE_KINDS, type ValueKind } from "../value/model.ts";
@@ -142,6 +142,21 @@ function orgWordsOf(f: Finding): Pick<DigestFinding, "orgWords"> {
     const spans = typeof text === "string" ? spansIfCurrent(text, f.orgWords?.[key]) : null;
     if (spans) out[key] = { orgWordsMarked: true, orgWords: spans };
   }
+  // A value's reason, its assumptions all together or none, and the hours' basis (DECISIONS.md 663).
+  const marks = f.orgWords;
+  const v = f.value;
+  if (v.kind === "not_sized") {
+    const spans = spansIfCurrent(v.reason, marks?.valueReason);
+    if (spans) out.valueReason = { orgWordsMarked: true, orgWords: spans };
+  } else if (marks?.valueAssumptions) {
+    const held = marks.valueAssumptions;
+    const each = v.assumptions.map((a, i) => spansIfCurrent(a, held[i])).filter((s): s is OrgSpan[] => s !== null);
+    if (held.length === v.assumptions.length && each.length === v.assumptions.length) out.valueAssumptions = each.map((s) => ({ orgWordsMarked: true, orgWords: s }));
+  }
+  if (f.effortHours) {
+    const spans = spansIfCurrent(f.effortHours.basis, marks?.hoursBasis);
+    if (spans) out.hoursBasis = { orgWordsMarked: true, orgWords: spans };
+  }
   return Object.keys(out).length > 0 ? { orgWords: out } : {};
 }
 
@@ -157,6 +172,18 @@ function afterGuard(before: DigestFinding, after: DigestFinding): DigestFinding 
     if (after[key] === NAMED_PEOPLE_SENTENCE) marks[key] = { orgWordsMarked: true, orgWords: [] };
     else delete marks[key];
   }
+  // The same for the value and the hours (DECISIONS.md 663): the fixed sentence is the engine's, any other change unknown.
+  const replaced = (was: string | undefined, now: string | undefined, held: SentenceOrgWords | undefined): SentenceOrgWords | undefined =>
+    was === now ? held : now === NAMED_PEOPLE_SENTENCE ? { orgWordsMarked: true, orgWords: [] } : undefined;
+  const [vb, va] = [before.value, after.value];
+  if (vb.kind === "not_sized" && va.kind === "not_sized") marks.valueReason = replaced(vb.reason, va.reason, marks.valueReason);
+  if (vb.kind !== "not_sized" && va.kind !== "not_sized" && marks.valueAssumptions) {
+    const held = marks.valueAssumptions;
+    const each = va.assumptions.map((a, i) => replaced(vb.assumptions[i], a, held[i])).filter((m): m is SentenceOrgWords => m !== undefined);
+    marks.valueAssumptions = each.length === va.assumptions.length && va.assumptions.length === vb.assumptions.length ? each : undefined;
+  }
+  if (before.effortHours && after.effortHours) marks.hoursBasis = replaced(before.effortHours.basis, after.effortHours.basis, marks.hoursBasis);
+  for (const key of ["valueReason", "valueAssumptions", "hoursBasis"] as const) if (marks[key] === undefined) delete marks[key];
   const { orgWords: _was, ...rest } = after;
   return Object.keys(marks).length > 0 ? { ...rest, orgWords: marks } : rest;
 }
@@ -269,7 +296,37 @@ export function buildDigest({ report, pseudonyms, inventory, madeAt }: DigestFor
     withheldNames: withheldNames(inventory, pseudonyms),
   };
   const guarded = guardDigest(raw, pseudonyms);
-  return RunDigest.parse({ ...guarded, findings: guarded.findings.map((f, i) => afterGuard(raw.findings[i]!, f)) });
+  const findings = guarded.findings.map((f, i) => afterGuard(raw.findings[i]!, f));
+  return RunDigest.parse({ ...guarded, findings, ...fixedWords(guarded, findings) });
+}
+
+const ENGINE_WORDS: SentenceOrgWords = { orgWordsMarked: true, orgWords: [] };
+
+/**
+ * The labels and titles the engine takes from its own tables (DECISIONS.md 663),
+ * marked as its words only while each, as the digest holds it, is still the
+ * table's word for its key. A value group named after its counted finding takes
+ * that finding's title marks while the two read the same. Anything else is unknown.
+ */
+export function fixedWords<P extends { phases: Array<{ key: string; title: string }> }>(d: { areas: DigestArea[]; plan: P; value: DigestValueModel }, findings: DigestFinding[]) {
+  const titleOf = (key: string): string | undefined => Object.entries(PHASE_TITLES).find(([k]) => k === key)?.[1];
+  const byId = new Map(findings.map((f) => [f.id, f]));
+  const groupMarks = (g: DigestValueModel["groups"][number]): SentenceOrgWords | undefined => {
+    if (Object.hasOwn(GROUPS, g.id) && g.label === GROUPS[g.id]!.label) return ENGINE_WORDS;
+    const counted = byId.get(g.counted);
+    return counted && counted.title === g.label ? counted.orgWords?.title : undefined;
+  };
+  return {
+    areas: d.areas.map((a) => (Object.hasOwn(DOMAIN_LABELS, a.domain) && a.label === DOMAIN_LABELS[a.domain] ? { ...a, orgWords: { label: ENGINE_WORDS } } : a)),
+    plan: { ...d.plan, phases: d.plan.phases.map((p) => (titleOf(p.key) === p.title ? { ...p, orgWords: { title: ENGINE_WORDS } } : p)) },
+    value: {
+      ...d.value,
+      groups: d.value.groups.map((g) => {
+        const label = groupMarks(g);
+        return label ? { ...g, orgWords: { label } } : g;
+      }),
+    },
+  };
 }
 
 /**

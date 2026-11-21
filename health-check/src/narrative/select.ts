@@ -109,6 +109,9 @@ export function topIssues(findings: Finding[], count: number, added?: Added): Fi
 }
 
 export type PlanPhase = { key: string; title: string; from: number; to: number; findings: Finding[] };
+
+/** Each phase's title: the engine's own words, which the digest marks as such (DECISIONS.md 663). */
+export const PHASE_TITLES = { stabilise: "Stabilise", fix: "Fix", build: "Build" } as const;
 /**
  * `alsoFor` holds, by an action's finding id, the other issues from the same rule
  * that the same action covers. `quickWins` is days 1 to 30's short list beside
@@ -176,9 +179,9 @@ export function buildPlan(findings: Finding[], added?: Added): Plan {
     return true;
   });
   const phases: PlanPhase[] = [
-    { key: "stabilise", title: "Stabilise", from: 1, to: 30, findings: [] },
-    { key: "fix", title: "Fix", from: 31, to: 60, findings: [] },
-    { key: "build", title: "Build", from: 61, to: 90, findings: [] },
+    { key: "stabilise", title: PHASE_TITLES.stabilise, from: 1, to: 30, findings: [] },
+    { key: "fix", title: PHASE_TITLES.fix, from: 31, to: 60, findings: [] },
+    { key: "build", title: PHASE_TITLES.build, from: 61, to: 90, findings: [] },
   ];
   // Days 1 to 30's quick wins: the most money first, then the most serious, at most
   // QUICK_WINS. The rest are planned as any other action (DECISIONS.md 366).
