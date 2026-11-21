@@ -1,3 +1,4 @@
+import { withheldLines } from "../render/survey.ts";
 import { comparisonId, formatFigure } from "../benchmark/compare.ts";
 import { checkNumbers } from "../numbercheck/index.ts";
 import type { BuiltReport } from "../narrative/sections.ts";
@@ -137,7 +138,8 @@ function teamSays(r: Render, report: BuiltReport): string {
   const pairs = view.pairings.length
     ? `<table><thead><tr><th>Your team says</th><th>We found</th><th>Together</th></tr></thead><tbody>${view.pairings.map((p) => `<tr><td>${r.t(p.said)}</td><td>${r.t(p.found)}</td><td>${r.t(p.reading)}</td></tr>`).join("")}</tbody></table>`
     : "";
-  return `${text}${stats}${pairs}`;
+  const withheld = withheldLines(view).map((line) => `<p class="muted">${r.t(line)}</p>`).join("");
+  return `${text}${stats}${withheld}${pairs}`;
 }
 
 /** Adoption's charts, inline: they load nothing. Only the ones that could be drawn. */

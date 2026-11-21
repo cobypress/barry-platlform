@@ -31,6 +31,14 @@ export function surveyStats(r: Render, view: SurveyView): string {
   ].join("")}</div>`;
 }
 
+/**
+ * The figures held back because they'd count fewer than five people (DECISIONS.md
+ * 648), said plainly, so a missing figure isn't read as one we forgot. Empty when none is.
+ */
+export function withheldLines(view: SurveyView): string[] {
+  return view.metrics.filter((m) => m.id !== SURVEY.responses && m.status === "not_measurable").map((m) => `${m.label}: ${m.status === "not_measurable" ? m.reason : ""}`);
+}
+
 /** What gets in the way, most named first. Empty when nobody named anything. */
 function blockerList(r: Render, view: SurveyView): string {
   const m = measured(view, SURVEY.blockers);
@@ -57,7 +65,8 @@ export function pairingTable(r: Render, view: SurveyView): string {
 export function surveySlides(r: Render, report: BuiltReport, body: string): Array<{ html: string; classes?: string }> {
   const view = report.survey;
   if (!view?.shown) return [];
-  const slides = [{ classes: "tight", html: `<div class="eyebrow">Your team</div><h2>What your team says</h2>${body}${surveyStats(r, view)}${blockerList(r, view)}` }];
+  const withheld = withheldLines(view).map((line) => `<p class="note">${r.t(line)}</p>`).join("");
+  const slides = [{ classes: "tight", html: `<div class="eyebrow">Your team</div><h2>What your team says</h2>${body}${surveyStats(r, view)}${blockerList(r, view)}${withheld}` }];
   if (view.pairings.length) slides.push({ classes: "tight", html: `<div class="eyebrow">Your team</div><h2>What your team says, against what we found</h2>${pairingTable(r, view)}` });
   return slides;
 }
