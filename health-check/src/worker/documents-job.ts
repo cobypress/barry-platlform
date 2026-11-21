@@ -13,7 +13,7 @@ import { syncShares } from "./share-job.ts";
 import { sealPages } from "../microsite/seal.ts";
 import { addMonths } from "./retention.ts";
 import type { DocumentFile, DocumentsJobInput } from "./types.ts";
-import { BASELINE_GONE, BASELINE_UNAPPROVED, loadPseudonymMap, OVERRIDES_FILE, SURVEY_FILE, write, writeRows } from "../render/render-run.ts";
+import { BASELINE_GONE, BASELINE_UNAPPROVED, keepSurveyMetrics, loadPseudonymMap, OVERRIDES_FILE, SURVEY_FILE, write, writeRows } from "../render/render-run.ts";
 import { HANDBOOK_DOCX, renderHandbookDocx } from "../handbook/docx.ts";
 import { HANDBOOK_NOT_MADE, readEarlierHandbook, readHandbook } from "../handbook/read.ts";
 import { printableSummaries, type StoredSummaries } from "../handbook/summary-row.ts";
@@ -439,7 +439,9 @@ async function documentsLocked(runId: string, deps: WorkerDeps, attempt: Attempt
     if (printed.digest && !printed.digest.ok) log(`Run ${runId}'s digest couldn't be made (${printed.digest.error}), so the connector has none for it.`);
     // None to write takes away an earlier make's, whose figures these documents may have corrected.
     const digest = printed.digest?.ok ? printed.digest.digest : null;
-    await deps.store.saveDocuments(runId, { at: now(), clientName, folderName: folder.name, driveFolderId: folder.id, driveFolderUrl: folder.url, files, warnings: [...printed.warnings, ...(handbook.ok ? [] : [handbook.warning])] }, digest);
+    // The survey's metrics as these documents print them, with their row: a run drafted before the run's results held them gets them now (DECISIONS.md 645).
+    if (printed.surveyMetrics) keepSurveyMetrics(dir, printed.surveyMetrics);
+    await deps.store.saveDocuments(runId, { at: now(), clientName, folderName: folder.name, driveFolderId: folder.id, driveFolderUrl: folder.url, files, warnings: [...printed.warnings, ...(handbook.ok ? [] : [handbook.warning])] }, digest, printed.surveyMetrics);
     log(`Documents for ${runId} are in Drive${printed.warnings.length ? `, with ${printed.warnings.length} layout warnings` : ""}.`);
     // The folder is now the run's: share it with its readers (DECISIONS.md 253). The documents are made either way.
     await share();

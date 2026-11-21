@@ -50,17 +50,16 @@ describe("the worker's citation log (decision 643)", () => {
     assert.deepEqual(saved.sections.flatMap((s) => s.metricIds.filter((id) => id.startsWith("historic."))), []);
   });
 
-  test("through the run job: a run with interviews logs nothing; with a survey, whose figures the run's metrics never hold, it logs and still saves its results", async () => {
+  test("through the run job: a run with interviews logs nothing, and with a survey, whose figures the run now holds (decision 645), nothing either", async () => {
     const plain = await deliver(runInput({ interviews: syntheticInterviews() }));
     assert.equal(plain.outcome.outcome, "done");
     assert.deepEqual(plain.deps.lines.filter((l) => l.includes("not in the run")), []);
 
     const surveyed = await deliver(runInput({ survey: syntheticSurvey(12) }));
     assert.equal(surveyed.outcome.outcome, "done");
-    const logged = surveyed.deps.lines.filter((l) => l.includes("not in the run"));
-    assert.ok(logged.length > 0);
-    for (const l of logged) assert.match(l, new RegExp(`^Run ${RUN_ID}: section [a-z_]+:[a-z_]+ cites \\d+ ids? not in the run, kept as they are: \\d+ metrics? \\((survey\\.[a-z_]+(, )?)+\\)\\.$`));
+    assert.deepEqual(surveyed.deps.lines.filter((l) => l.includes("not in the run")), []);
     const saved = surveyed.deps.store.runs.get(RUN_ID)!.output!;
-    assert.ok(saved.sections.some((s) => s.key === "team_survey"), "the sections were stored all the same");
+    assert.ok(saved.sections.some((s) => s.key === "team_survey"), "the sections were stored");
+    assert.ok(saved.sections.some((s) => s.metricIds.some((id) => id.startsWith("survey."))), "and they cite the survey's metrics");
   });
 });

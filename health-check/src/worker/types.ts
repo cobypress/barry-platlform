@@ -90,6 +90,14 @@ export type RunOutputRecord = {
   runDir: string;
   findings: Finding[];
   metrics: Metric[];
+  /**
+   * The team survey's metrics, as the run's report made them (DECISIONS.md
+   * 645): stored beside the org's, in their own domain, so the sections that
+   * cite them cite rows the run holds. Written after every other metric, in a
+   * savepoint of their own, so a refusal costs these alone. Empty or left out
+   * when the run has no survey; under five answers, the one saying so.
+   */
+  surveyMetrics?: Metric[];
   scores: Score[];
   manualSteps: ManualStep[];
   sections: ReportSection[];
@@ -329,9 +337,12 @@ export interface WorkerStore {
    * the row, costs the digest only, never the documents' row. With null (a
    * make whose digest couldn't be made) any earlier row is deleted the same
    * way, so the connector never serves figures the documents no longer print.
-   * Left out, the table isn't named.
+   * Left out, the table isn't named. With `surveyMetrics` (DECISIONS.md 645),
+   * the run's `survey.*` metric rows are replaced by the printed report's, in
+   * the same transaction and only when the row was marked done, in a savepoint
+   * of their own; left out, they're left alone.
    */
-  saveDocuments(runId: string, made: DocumentsMade, digest?: RunDigest | null): Promise<void>;
+  saveDocuments(runId: string, made: DocumentsMade, digest?: RunDigest | null, surveyMetrics?: Metric[]): Promise<void>;
   /** A reason the console can show. Never a token or a name. */
   failDocuments(runId: string, reason: string, at: string): Promise<void>;
 

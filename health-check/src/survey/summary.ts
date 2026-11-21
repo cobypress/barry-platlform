@@ -37,7 +37,9 @@ const DEFS: Record<keyof typeof SURVEY, Pick<Metric, "id" | "label" | "unit" | "
   recommend: { id: SURVEY.recommend, label: "Would recommend Salesforce as it's set up", unit: "percent", definition: "The share answering 9 or 10, from 0 to 10, to how likely they are to recommend Salesforce as it's set up here to a colleague. The would recommend score is that share less the share answering 0 to 6. It's in the style of a net promoter score, and isn't one." },
 };
 
-const evidenceOf = (n: number, capturedAt: string): Evidence[] => [{ kind: "engine", path: "HealthCheckSurveyResponse", count: n, dateRange: null, exclusions: [], capturedAt, note: "Anonymous answers to the team survey, with comments left out" }];
+// Under five answers even the count is left out: it's a figure from fewer people
+// than the survey shows, and the run's stored metrics hold it as the report does (DECISIONS.md 645).
+const evidenceOf = (n: number, capturedAt: string): Evidence[] => [{ kind: "engine", path: "HealthCheckSurveyResponse", count: n < MIN_RESPONSES ? null : n, dateRange: null, exclusions: [], capturedAt, note: "Anonymous answers to the team survey, with comments left out" }];
 
 /** Each role with five or more answers, on its own. Smaller ones are left out, not shown as too few. */
 function byRole(answers: Answer[], value: (group: Answer[]) => number): MetricSegment[] {

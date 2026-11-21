@@ -1012,6 +1012,16 @@ export function buildReport(given: ReportInput): BuiltReport {
   };
 }
 
+/**
+ * The team survey's metrics exactly as `buildReport` made them for this report,
+ * before any correction, for the run's stored metrics (DECISIONS.md 645). The
+ * only code that makes them is `surveyMetrics`, called once above, so what a
+ * run stores is what its documents print. None when the run has no survey.
+ */
+export function surveyMetricsOf(report: Pick<BuiltReport, "input">): Metric[] {
+  return report.input.metrics.filter((m) => SURVEY_METRIC_IDS.includes(m.id));
+}
+
 /** The text of a section's current version. */
 export function currentBody(built: BuiltOutput, key: string): string {
   const section = built.sections.find((s) => s.key === key);

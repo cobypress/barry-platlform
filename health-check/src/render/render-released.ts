@@ -5,9 +5,9 @@ import type { BenchmarkInput } from "../benchmark/compare.ts";
 import { buildMicrositePages, type MicrositePages } from "../microsite/pages.ts";
 import type { Intake } from "../narrative/intake.ts";
 import type { OverrideRefusal } from "../narrative/overrides.ts";
-import { buildReport, type BuiltReport, type ReportOutputKey } from "../narrative/sections.ts";
+import { buildReport, surveyMetricsOf, type BuiltReport, type ReportOutputKey } from "../narrative/sections.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
-import { canRelease, type NumberOverride, type ReportSection, type SectionVersion } from "../schemas/index.ts";
+import { canRelease, type Metric, type NumberOverride, type ReportSection, type SectionVersion } from "../schemas/index.ts";
 import type { LayoutProblem, LayoutReport } from "./layout.ts";
 import { renderCaseStudyDocx } from "./case-study.ts";
 import { writeFileSync } from "node:fs";
@@ -63,6 +63,8 @@ export type ReleasedDocuments = {
   baselineUnapproved?: boolean;
   /** The run's digest, or the class of the error that stopped it, only when asked for. Left out by renderers that don't make one. */
   digest?: { ok: true; digest: RunDigest } | { ok: false; error: string };
+  /** The team survey's metrics as the printed report made them, for the run's stored metrics (DECISIONS.md 645). Left out by renderers that don't say. */
+  surveyMetrics?: Metric[];
 };
 
 /**
@@ -247,5 +249,5 @@ export async function renderReleased(dir: string, approved: ApprovedRun, outDir:
       digest = { ok: false, error: err instanceof Error ? err.name : "Error" };
     }
   }
-  return { files, warnings: layoutWarnings(layout), held: heldFigures(layout), microsite, ...(caseStudy ? { caseStudy } : {}), ...(digest ? { digest } : {}), baselineRefused: report.baselineRefused, baselineGone, baselineUnapproved };
+  return { files, warnings: layoutWarnings(layout), held: heldFigures(layout), microsite, ...(caseStudy ? { caseStudy } : {}), ...(digest ? { digest } : {}), surveyMetrics: surveyMetricsOf(report), baselineRefused: report.baselineRefused, baselineGone, baselineUnapproved };
 }
