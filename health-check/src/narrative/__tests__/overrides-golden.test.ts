@@ -93,7 +93,7 @@ describe("the golden overrides file shared with the console (decision 532, item 
     const kinds = (measure: boolean): string[] =>
       [...new Set([...refused.filter((r) => (r.metricId !== undefined) === measure).map((r) => r.why.kind), ...golden.synthetic.verdicts.filter((v) => (v.type === "metric") === measure).flatMap((v) => (v.refused ? [v.refused] : []))])].sort();
     assert.deepEqual(kinds(false), ["repeated", "rounded", "shared", "stale", "unsure"]);
-    assert.deepEqual(kinds(true), ["part", "rounded", "stale", "worded"]);
+    assert.deepEqual(kinds(true), ["part", "rounded", "stale", "survey", "worded"]);
     const where = [...new Set(refused.flatMap((r) => (r.why.kind === "part" ? [r.why.where] : [])))].sort();
     assert.deepEqual(where, ["a point in its series", "a segment", "an evidence count", "n", "the stat median", "the stat p90", "the stat upper", "value"]);
   });
@@ -177,6 +177,11 @@ describe("the golden overrides file shared with the console (decision 532, item 
     "a finding with hours and a prompt: a carried correction in no text drops both": [],
     "a finding with hours and a prompt: a refused correction keeps both": ["finding:repeated"],
     "a finding with hours and a prompt: put back to the value as read keeps both": [],
+    // Decision 649: a team survey's figure is never carried, and an org measure beside it is judged as ever.
+    "a survey measure: its value corrected is refused (survey)": ["measure:survey"],
+    "a survey measure: a segment's figure corrected is refused (survey)": ["measure:survey"],
+    "a survey measure and an org measure corrected in one run: the survey's refused, the org's carried": ["measure:survey"],
+    "a survey measure that isn't measured: a row on it is ignored, as on any such measure": [],
   };
 
   test("each hand case does what its name says", () => {
@@ -329,6 +334,9 @@ function oldWhy(r: OverrideRefusal): string {
       return `the wording has ${grouped(r.asRead)} only as ${r.why.found}, which we can't be sure is this figure and can't rewrite`;
     case "stale":
       return `the correction was made from ${grouped(r.why.from)}, which this run no longer reads`;
+    // Not in the old function: decision 649 made it, and its lines are tested on their own below.
+    case "survey":
+      throw new Error("a survey refusal has no old line");
   }
 }
 function oldRefusalReason(refused: OverrideRefusal[]): string {
@@ -352,17 +360,20 @@ const { findings: runFindings, metrics: runMetrics } = golden.synthetic;
 const runFigures = engineFigures(runFindings, runMetrics);
 const alone = (findings: Finding[], metrics: Metric[], x: Overridable): OverrideRefusal | undefined => applyOverrides(findings, metrics, [correction(x, x.asRead, x.asRead + 1)]).refused[0];
 const runRefusals = runFigures.flatMap((x) => alone(runFindings, runMetrics, x) ?? []);
-const handRefusals = golden.cases.flatMap((c) => c.expected.refused);
+const allHandRefusals = golden.cases.flatMap((c) => c.expected.refused);
+// Every kind the old function had; a survey refusal's line is decision 649's, held by its own test.
+const handRefusals = allHandRefusals.filter((r) => r.why.kind !== "survey");
 
 describe("refusalLines (decision 532, item 1)", () => {
   test("refusalReason is the lines, then the close", () => {
+    // The old kinds only: a survey refusal adds its own close (decision 649), held in survey-overrides.test.ts.
     for (const refused of [runRefusals.slice(0, 1), runRefusals.slice(0, 10), runRefusals, handRefusals, [...handRefusals].reverse()]) {
       assert.equal(refusalReason(refused), [...refusalLines(refused), CLOSE].join("\n"));
     }
   });
 
   test("the listed lines are the old function's, by the character, for every refusal of the synthetic run and the hand cases, alone and together", () => {
-    assert.deepEqual([runFigures.length, runRefusals.length, handRefusals.length], [603, 237, 60]);
+    assert.deepEqual([runFigures.length, runRefusals.length, handRefusals.length, allHandRefusals.length], [603, 237, 60, 63]);
     for (const r of [...runRefusals, ...handRefusals]) {
       assert.deepEqual(refusalLines([r]), oldLines([r]));
       assert.equal(refusalLines([r])[1], oldLines([r])[1]);
@@ -370,6 +381,14 @@ describe("refusalLines (decision 532, item 1)", () => {
     // Together, and in reverse, so a measure's refusal given before a finding's is still listed after it.
     for (const refused of [runRefusals, [...runRefusals].reverse(), handRefusals, [...handRefusals].reverse(), [...runRefusals.filter((r) => r.metricId !== undefined).slice(0, 3), ...runRefusals.slice(0, 3)]]) {
       assert.deepEqual(refusalLines(refused), oldLines(refused));
+    }
+  });
+
+  test("a survey refusal's line names the measure and why, and no figure (decision 649)", () => {
+    const survey = allHandRefusals.filter((r) => r.why.kind === "survey");
+    assert.equal(survey.length, 3);
+    for (const r of survey) {
+      assert.equal(refusalLines([r])[1], `"${r.title}": A team survey figure is what people answered, so it can't be corrected.`);
     }
   });
 
