@@ -21,8 +21,13 @@ export type LetGo = "nothing_held" | "revoked" | "not_confirmed";
 
 type ReleaseDeps = Pick<WorkerDeps, "tokens" | "store" | "oauthTransport" | "now" | "log" | "sleep">;
 
-/** Worth trying again: no answer, a timeout, or Salesforce's own fault. A 4xx is its answer, and won't change. */
-const passing = (err: unknown): boolean => !(err instanceof OAuthError) || /^HTTP_5\d\d$/.test(err.code);
+/**
+ * Worth trying again: no answer (fetch's TypeError), a timeout, or Salesforce's
+ * own fault (a 5xx, or OAuth's server_error or temporarily_unavailable). A 4xx is its answer, and our own refusal to send (a host that
+ * isn't Salesforce's, say) is ours: neither changes by waiting.
+ */
+const passing = (err: unknown): boolean =>
+  err instanceof OAuthError ? /^HTTP_5\d\d$|^server_error$|^temporarily_unavailable$/.test(err.code) : err instanceof TypeError || (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError"));
 
 /** What a log line may say of a failure: an OAuth code, or an error's class. Never its message, which could quote a value. */
 const errorClass = (err: unknown): string => (err instanceof OAuthError ? err.code : err instanceof Error ? err.name : "error");
