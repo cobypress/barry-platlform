@@ -4,7 +4,10 @@ import type { DomainModule } from "../../domains/types.ts";
 import { Finding } from "../../schemas/index.ts";
 import { analyseExtracts, loadExtracts, runFromRecording } from "../../testing/harness.ts";
 import type { RuleResult } from "../rule.ts";
-import { eng, joinSaid, markSentence, org, orgWordsOf, said, spansFit, spansIfCurrent, withOrgWords } from "../org-words.ts";
+import { eng, joinSaid, markSentence, org, orgWordsOf, said, spansFit, spansIfCurrent, withOrgWords, type Said } from "../org-words.ts";
+import { UNNAMED } from "../../domains/automation/shared.ts";
+import type { Labels } from "../../extract/labels.ts";
+import { clone } from "../../testing/harness.ts";
 
 // The marks themselves (DECISIONS.md 655): made where a sentence is put
 // together, looked up by the engine, and dropped whenever the text moves.
@@ -49,6 +52,36 @@ describe("said and org", () => {
       said`${org("Invoice")} runs`;
       said`Invoice runs`;
       assert.equal(orgWordsOf("Invoice runs"), null);
+    });
+  });
+
+  test("unknown goes up: a sentence quoting one held as unknown is unknown, through said and joinSaid, at any depth", () => {
+    withOrgWords(() => {
+      // The reviewer's case C: two sentences with the same text and different spans.
+      const x = said`${org("Evil on Do it")} on ${org("Z")}`;
+      const y = said`${org("Evil")} on ${org("Do it on Z")}`;
+      assert.equal(x, y);
+      assert.equal(orgWordsOf(x), null);
+      const outer = said`Fields: ${joinSaid([x, y], "; ")}.`;
+      assert.equal(orgWordsOf(outer), null);
+      assert.equal(orgWordsOf(said`Deeper: ${outer}`), null);
+      // The live case: an object labelled exactly as we name one we couldn't.
+      const named = said`${org(UNNAMED)} has 2`;
+      const unnamed = said`${UNNAMED} has 2`;
+      assert.equal(orgWordsOf(named), null);
+      assert.equal(orgWordsOf(said`${joinSaid([unnamed], "; ")}. Salesforce doesn't guarantee the order they run in.`), null);
+    });
+  });
+
+  test("a part joinSaid didn't see said make is unknown, and so is a sentence with org words made outside the analysis", () => {
+    const outside = said`${org("Outside Flow")} runs`;
+    withOrgWords(() => {
+      assert.equal(orgWordsOf(joinSaid(["2 flows" as Said, said`fine`], "; ")), null);
+      assert.equal(orgWordsOf(said`Quoted: ${outside}`), null);
+      // eng records nothing: what it vouches for is read, interpolated, as a literal is.
+      const vouched = eng("Apex trigger, Workflow Rule");
+      assert.equal(orgWordsOf(vouched), null);
+      assert.deepEqual(orgWordsOf(said`${org("Invoice")} runs ${vouched}`), [{ start: 0, end: 7 }]);
     });
   });
 
@@ -98,6 +131,20 @@ describe("the engine's marks on a finding", async () => {
     assert.notEqual(f.summary, "Flow Alex Morgan Export runs.");
     assert.equal(f.orgWords?.summary, undefined);
     // The rule's constant title is the engine's own.
+    assert.deepEqual(f.orgWords?.title?.spans, []);
+  });
+
+  test("live: an object labelled as we name one we couldn't leaves the triggers rule's summary unknown, never marked as ours", () => {
+    const changed = clone(extracts);
+    const labels = changed.get("labels") as Labels;
+    if (labels.objects.status !== "ok") throw new Error("labels");
+    labels.objects.data.Opportunity = UNNAMED;
+    const apex = changed.get("apex") as { triggers: { status: string; data: Array<{ Name: string; TableEnumOrId: string }> } };
+    for (const t of apex.triggers.data) if (t.Name.startsWith("Invoice")) t.TableEnumOrId = "01I000000000099AAA";
+    const out = analyseExtracts(changed);
+    const f = out.findings.find((x) => x.ruleId === "aut.multiple-triggers")!;
+    assert.equal(f.summary.split(`${UNNAMED} has 2`).length - 1, 2, f.summary);
+    assert.equal(f.orgWords?.summary, undefined);
     assert.deepEqual(f.orgWords?.title?.spans, []);
   });
 

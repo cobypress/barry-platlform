@@ -31,15 +31,21 @@ export const org = (text: string): OrgWords => ({ [ORG]: text });
  * words, such as `plural(3, "flow")` or a list of fixed tool names. Never for
  * anything read from the org: that is `org`.
  */
-export const eng = (text: string): Said => {
-  ledger?.note(text, []);
-  return text as Said;
-};
+// It records nothing: interpolated, a string `said` didn't make is read as the
+// engine's words, which is what eng vouches for, so a record would add nothing
+// but a way for its text to be reused as a vouched sentence elsewhere. Every
+// call is listed, and signed off, in src/engine/__tests__/org-words-eng.test.ts.
+export const eng = (text: string): Said => text as Said;
 
-/** A string literal type, refusing `string` itself, so a value read at run time can't pass as the engine's words. */
-type Literal<T> = T extends string ? (string extends T ? never : T) : never;
-/** What `said` takes: a number, org words, a sentence already made, or a literal. */
-type Piece<T> = T extends number | OrgWords | Said ? T : Literal<T>;
+/**
+ * A string literal type only. `string`, a pattern such as `${string}!` (a
+ * template or `as const` around a value read at run time) and an intrinsic such
+ * as `Uppercase<string>` all have infinitely many members, so a record keyed by
+ * them is an index signature `{}` fits; a literal's record has a required key.
+ */
+type Literal<T> = T extends string ? ({} extends Record<T, 1> ? never : T) : never;
+/** What `said` takes: a number, org words, a sentence already made, or a literal. Never `any`. */
+type Piece<T> = 0 extends 1 & T ? never : T extends number | OrgWords | Said ? T : Literal<T>;
 
 /**
  * One analysis's sentences and their spans. A text made twice with different
@@ -47,18 +53,38 @@ type Piece<T> = T extends number | OrgWords | Said ? T : Literal<T>;
  */
 class Ledger {
   readonly #spans = new Map<string, OrgSpan[] | null>();
-  note(text: string, spans: OrgSpan[]): void {
+  /** Spans, or null for a sentence that can't be vouched for (one with an unknown part). */
+  note(text: string, spans: OrgSpan[] | null): void {
     if (!this.#spans.has(text)) {
       this.#spans.set(text, spans);
       return;
     }
     const held = this.#spans.get(text);
-    if (held && !sameSpans(held, spans)) this.#spans.set(text, null);
+    if (held && (!spans || !sameSpans(held, spans))) this.#spans.set(text, null);
   }
-  /** The spans of a sentence `said` made, or null: never made, or made twice differently. */
+  has(text: string): boolean {
+    return this.#spans.has(text);
+  }
+  /** The spans of a sentence `said` made, or null: never made, or made twice differently, or with an unknown part. */
   get(text: string): OrgSpan[] | null {
     return this.#spans.get(text) ?? null;
   }
+}
+
+/**
+ * Sentences with org words that `said` made outside any analysis (a test calling
+ * a rule directly; the engine never does). Not in a ledger, so one reused inside
+ * an analysis would read as a literal: it's held here and reads as unknown.
+ * Bounded, and kept whole: past the bound nothing more is added, and every
+ * string a ledger doesn't hold is then unknown, the safe side.
+ */
+const OUTSIDE_LIMIT = 10_000;
+const madeOutside = new Set<string>();
+let outsideFull = false;
+function noteOutside(text: string, spans: OrgSpan[] | null): void {
+  if (spans && spans.length === 0) return;
+  if (madeOutside.size >= OUTSIDE_LIMIT) outsideFull = true;
+  else madeOutside.add(text);
 }
 
 const sameSpans = (a: OrgSpan[], b: OrgSpan[]): boolean => a.length === b.length && a.every((s, i) => s.start === b[i]!.start && s.end === b[i]!.end);
@@ -89,9 +115,16 @@ function push(spans: OrgSpan[], start: number, end: number): void {
   else spans.push({ start, end });
 }
 
-function piecesOf(strings: readonly string[], pieces: readonly unknown[]): { text: string; spans: OrgSpan[] } {
+/**
+ * The text and its spans, or null spans when any part can't be vouched for: a
+ * sentence the ledger holds as unknown, one made outside the analysis with org
+ * words, or (where `sentences` says every string part is one `said` made) a part
+ * the ledger doesn't hold. Unknown goes up through every level that quotes it.
+ */
+function piecesOf(strings: readonly string[], pieces: readonly unknown[], sentences = false): { text: string; spans: OrgSpan[] | null } {
   let text = strings[0]!;
   const spans: OrgSpan[] = [];
+  let known = true;
   pieces.forEach((piece, i) => {
     const at = text.length;
     if (piece !== null && typeof piece === "object" && ORG in piece) {
@@ -100,8 +133,15 @@ function piecesOf(strings: readonly string[], pieces: readonly unknown[]): { tex
       push(spans, at, text.length);
     } else if (typeof piece === "string") {
       text += piece;
-      // A sentence made by `said` brings its own spans. A literal (all the types let through) is the engine's.
-      for (const s of ledger?.get(piece) ?? []) push(spans, at + s.start, at + s.end);
+      if (ledger?.has(piece)) {
+        // A sentence made by `said` brings its own spans, or its unknown.
+        const held = ledger.get(piece);
+        if (held) for (const s of held) push(spans, at + s.start, at + s.end);
+        else known = false;
+      } else if (sentences || madeOutside.has(piece) || outsideFull) {
+        known = false;
+      }
+      // Otherwise a literal, all the types let through: the engine's.
     } else if (typeof piece === "number") {
       text += String(piece);
     } else {
@@ -109,22 +149,28 @@ function piecesOf(strings: readonly string[], pieces: readonly unknown[]): { tex
     }
     text += strings[i + 1]!;
   });
-  return { text, spans };
+  return { text, spans: known ? spans : null };
+}
+
+function record(text: string, spans: OrgSpan[] | null): void {
+  if (ledger) ledger.note(text, spans);
+  else noteOutside(text, spans);
 }
 
 /** A sentence with the characters it took from the org marked. Returns the plain string. */
 export function said<const P extends readonly unknown[]>(strings: TemplateStringsArray, ...pieces: P & { readonly [K in keyof P]: Piece<P[K]> }): Said {
   const { text, spans } = piecesOf(strings, pieces);
-  ledger?.note(text, spans);
+  record(text, spans);
   return text as Said;
 }
 
-/** Sentences joined, as `Array.join` would, keeping their spans. Every part must be one `said` made. */
-export function joinSaid(parts: readonly Said[], separator: Said | "" | " " | ", " | "; " | ". "): Said {
-  const pieces = parts.flatMap((p, i) => (i > 0 ? [separator, p] : [p]));
-  // Every piece is interpolated, so the fixed strings around them are all empty.
-  const { text, spans } = piecesOf(Array<string>(pieces.length + 1).fill(""), pieces);
-  ledger?.note(text, spans);
+/** Sentences joined, as `Array.join` would, keeping their spans. Every part must be one `said` made in this analysis, or the whole is unknown. */
+export function joinSaid(parts: readonly Said[], separator: "" | " " | ", " | "; " | ". "): Said {
+  // The separator is a fixed string; every part is interpolated, so the fixed strings around them are all empty.
+  const strings = [""];
+  for (let i = 0; i < parts.length; i++) strings.push(i < parts.length - 1 ? separator : "");
+  const { text, spans } = piecesOf(strings, parts, true);
+  record(text, spans);
   return text as Said;
 }
 
