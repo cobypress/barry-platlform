@@ -11,6 +11,7 @@ import { Simulator } from "../../testing/simulator.ts";
 import { lostRecorder } from "../bullmq.ts";
 import { sealConnectSecret } from "../connect-crypto.ts";
 import { withJobLock } from "../lock.ts";
+import { PostgresWorkerStore, type SqlClient, type SqlPool, type SqlResult } from "../postgres-store.ts";
 import { letGoOfLostRun, letGoOfScan, REVOKE_TRIES, REVOKE_WAITS_MS, SCAN_CONNECTION_MAX_MS, SCAN_SWEEP_MAX, sweepScanConnections } from "../scan-release.ts";
 import { DISCONNECT_STEP, ORG_AWAITING_CONNECT, SCAN_REVOKE_NOT_CONFIRMED, type RunJobInput } from "../types.ts";
 import { createJobHandler } from "../worker.ts";
@@ -356,5 +357,35 @@ describe("the connect job marks a scan's connection, and only a scan's", () => {
 
   test("a health check's link: no mark", async () => {
     assert.equal(await connect("barometer"), undefined);
+  });
+});
+
+describe("the Postgres store's mark of a revoke not confirmed", () => {
+  class Pool implements SqlPool {
+    readonly statements: Array<{ text: string; values: unknown[] }> = [];
+    async query(text: string, values: unknown[] = []): Promise<SqlResult> {
+      this.statements.push({ text, values });
+      return { rows: [], rowCount: 1 };
+    }
+    async connect(): Promise<SqlClient & { release(): void }> {
+      return { query: (t, v) => this.query(t, v), release: () => {} };
+    }
+  }
+
+  test("not confirmed: the run's disconnect step, replaced, with the fixed sentence, whatever the run's status", async () => {
+    const pool = new Pool();
+    await new PostgresWorkerStore(pool).noteScanRevoke("r1", false, "2026-11-21T12:00:00.000Z");
+    const texts = pool.statements.map((s) => s.text);
+    assert.ok(!texts.some((t) => t.includes("FOR UPDATE")), "not held to an open run: a scan lets go after its results");
+    assert.ok(texts.includes(`DELETE FROM "HealthCheckRunStep" WHERE "runId" = $1 AND "id" = $2`));
+    const insert = pool.statements.find((s) => s.text.startsWith(`INSERT INTO "HealthCheckRunStep"`))!;
+    assert.deepEqual(insert.values, ["r1", DISCONNECT_STEP, 1, "failed", 0, "2026-11-21T12:00:00.000Z", SCAN_REVOKE_NOT_CONFIRMED]);
+  });
+
+  test("confirmed: the step taken away, nothing put in", async () => {
+    const pool = new Pool();
+    await new PostgresWorkerStore(pool).noteScanRevoke("r1", true, "2026-11-21T12:00:00.000Z");
+    assert.ok(pool.statements.some((s) => s.text.startsWith(`DELETE FROM "HealthCheckRunStep"`) && s.values[1] === DISCONNECT_STEP));
+    assert.ok(!pool.statements.some((s) => s.text.startsWith("INSERT")));
   });
 });

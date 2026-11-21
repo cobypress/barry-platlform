@@ -278,6 +278,31 @@ describe("hc worker", () => {
     assert.ok(lines.some((l) => /Retention sweep failed, and will run again in a day: the database is down/.test(l)), lines.join("\n"));
   });
 
+  test("sweeps free scans' connections at start, with the worker's own token store and locks, and carries on if it fails (DECISIONS.md 652)", async () => {
+    class FakePool {
+      async query(): Promise<never> {
+        throw new Error("no database in tests");
+      }
+      async connect(): Promise<never> {
+        throw new Error("no database in tests");
+      }
+      async end(): Promise<void> {}
+    }
+    const modules: WorkerModules = { bull, pg: { Pool: FakePool as unknown as WorkerModules["pg"]["Pool"] } };
+    const env = goodEnv();
+    const calls: Array<{ tokensDir: string; locksDir: string }> = [];
+    const lines: string[] = [];
+    const scanSweep = async (deps: { tokens: { dir: string }; locksDir: string }) => {
+      calls.push({ tokensDir: deps.tokens.dir, locksDir: deps.locksDir });
+      throw new Error("a disk error quoting /secret/path");
+    };
+    const sweep = async () => [];
+    assert.equal(await workerCommand(env, { load: async () => modules, until: new Promise((r) => setTimeout(r, 10)), log: (l) => lines.push(l), sweep, scanSweep: scanSweep as never }), 0);
+    assert.deepEqual(calls, [{ tokensDir: env.HC_CONNECTIONS_DIR!, locksDir: `${env.HC_RUNS_DIR}-locks` }]);
+    assert.ok(lines.includes("Scan sweep failed, and will run again in an hour: Error"), lines.join("\n"));
+    assert.ok(!lines.join("\n").includes("/secret/path"));
+  });
+
   test("with ANTHROPIC_API_KEY, says Claude drafts the sections, and never prints the key", async () => {
     FakeWorker.made = [];
     class FakePool {
