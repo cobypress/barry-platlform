@@ -474,6 +474,33 @@ const SIGNED_OFF: string[] = [
   "src/domains/historic-pipeline/index.ts: metricWords(metric.label)",
   "src/domains/historic-pipeline/index.ts: metricWords(metric.label)",
   "src/domains/historic-pipeline/process.ts: dimensionWords(h.dimension)",
+  // revenue opportunities (DECISIONS.md 657).
+  // Numbers: counts, rates, limits and constants the rule works out (each typed number).
+  "src/domains/revenue-opportunities/index.ts: MIN_DEALS",
+  "src/domains/revenue-opportunities/index.ts: MIN_DEALS",
+  "src/domains/revenue-opportunities/index.ts: MIN_DEALS",
+  "src/domains/revenue-opportunities/index.ts: STALLED_DAYS",
+  "src/domains/revenue-opportunities/index.ts: STALLED_DAYS",
+  "src/domains/revenue-opportunities/index.ts: STALLED_DAYS",
+  "src/domains/revenue-opportunities/index.ts: WIN_BACK_MAX_MONTHS",
+  "src/domains/revenue-opportunities/index.ts: WIN_BACK_MAX_MONTHS",
+  "src/domains/revenue-opportunities/index.ts: WIN_BACK_MIN_MONTHS",
+  "src/domains/revenue-opportunities/index.ts: WIN_BACK_MIN_MONTHS",
+  "src/domains/revenue-opportunities/index.ts: accounts.data.length",
+  "src/domains/revenue-opportunities/index.ts: accounts.data.length",
+  "src/domains/revenue-opportunities/index.ts: dormantDays",
+  "src/domains/revenue-opportunities/index.ts: noDecision",
+  "src/domains/revenue-opportunities/index.ts: open.length",
+  "src/domains/revenue-opportunities/index.ts: open.length",
+  "src/domains/revenue-opportunities/index.ts: pct(stalled.length, open.length)",
+  "src/domains/revenue-opportunities/index.ts: stranded",
+  // Sentences said made: a said or joinSaid result held in a variable, a helper or option returning one, plural over literal nouns, or a said form (each typed Said).
+  "src/domains/revenue-opportunities/index.ts: plural(candidates.length, \"deal\")",
+  "src/domains/revenue-opportunities/index.ts: plural(candidates.length, \"lost deal\")",
+  "src/domains/revenue-opportunities/index.ts: plural(dormant.length, \"account\")",
+  "src/domains/revenue-opportunities/index.ts: plural(dormant.length, \"past customer\")",
+  "src/domains/revenue-opportunities/index.ts: plural(stalled.length, \"open deal\")",
+  "src/domains/revenue-opportunities/index.ts: plural(stalled.length, \"open deal\")",
 ];
 
 const ROOT = join(import.meta.dirname, "../../..");
