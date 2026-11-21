@@ -11,6 +11,7 @@ import type { BenchmarkRow, Calibration, ConnectLink, Finding, ManualAnswer, Man
 import type { Survey } from "../survey/questions.ts";
 import type { Interview } from "../interviews/questions.ts";
 import type { StoredSummaries, SummariesToSave } from "../handbook/summary-row.ts";
+import type { RunDigest } from "../schemas/digest.ts";
 
 // What the worker takes from the queue, and what it needs from the console's
 // database. Jobs carry ids only (the contract with the console, lane C2), so
@@ -124,6 +125,13 @@ export type RunOutputRecord = {
    * aren't written at all.
    */
   overall?: RunOverall | null;
+  /**
+   * A pulse's digest for the customer's connector (DECISIONS.md 632), from the
+   * report its result is made from; null for a pulse whose digest couldn't be
+   * made, which takes away any earlier row so a stale one is never served.
+   * Left out for every other run: a check's is written when its documents are made.
+   */
+  digest?: RunDigest | null;
 };
 
 /** What the console's HealthCheckRun keeps of a run's overall score (DECISIONS.md 626): a whole number from 0 to 100, and its grade. */
@@ -315,7 +323,15 @@ export interface WorkerStore {
   loadDocumentsJob(runId: string, reads?: DocumentsJobReads): Promise<DocumentsJobInput | null>;
   /** Moves queued (or making, on a second delivery) to making. False if the console hasn't asked, so there's nothing to do. */
   startDocuments(runId: string, at: string): Promise<boolean>;
-  saveDocuments(runId: string, made: DocumentsMade): Promise<void>;
+  /**
+   * With a digest (DECISIONS.md 632), it's written in the same transaction, in
+   * a savepoint of its own: a console without the table, or one that refuses
+   * the row, costs the digest only, never the documents' row. With null (a
+   * make whose digest couldn't be made) any earlier row is deleted the same
+   * way, so the connector never serves figures the documents no longer print.
+   * Left out, the table isn't named.
+   */
+  saveDocuments(runId: string, made: DocumentsMade, digest?: RunDigest | null): Promise<void>;
   /** A reason the console can show. Never a token or a name. */
   failDocuments(runId: string, reason: string, at: string): Promise<void>;
 

@@ -13,6 +13,9 @@ import { renderCaseStudyDocx } from "./case-study.ts";
 import { writeFileSync } from "node:fs";
 import { loadRun, OUTPUT_FILES, printDocuments } from "./render-run.ts";
 import { writeActionFiles } from "../actions/index.ts";
+import { buildDigest } from "../digest/build.ts";
+import type { RunDigest } from "../schemas/digest.ts";
+import type { Inventory } from "../schemas/inventory.ts";
 
 // The documents for a released run, in the wording the console approved. The
 // run folder supplies the findings, metrics and pseudonym map, as for `hc
@@ -31,6 +34,12 @@ export type ApprovedRun = {
   preparedBy?: string | null;
   /** Other customers' benchmark rows. Without them, the run is compared with published research only. */
   benchmark?: BenchmarkInput | null;
+  /**
+   * Given, the make also returns the run's digest (DECISIONS.md 632), from the
+   * same approved report the documents print: the inventory as the console's
+   * row holds it, for the names it withholds, and when it was made.
+   */
+  digest?: { inventory: Inventory | null; madeAt: string };
 };
 
 /** The report's three outputs, then the one-pager and the action lists for the customer, and the kit for Black Cloud only. */
@@ -52,6 +61,8 @@ export type ReleasedDocuments = {
   baselineGone?: boolean;
   /** The run folder gives an earlier health check and the approved sections hold no comparison with it, so the documents have none, for the log (DECISIONS.md 535). */
   baselineUnapproved?: boolean;
+  /** The run's digest, or the class of the error that stopped it, only when asked for. Left out by renderers that don't make one. */
+  digest?: { ok: true; digest: RunDigest } | { ok: false; error: string };
 };
 
 /**
@@ -227,5 +238,14 @@ export async function renderReleased(dir: string, approved: ApprovedRun, outDir:
   const study = await renderCaseStudyDocx(report, pseudonyms);
   const caseStudy = study ? join(out, "case-study-draft.docx") : undefined;
   if (study && caseStudy) writeFileSync(caseStudy, study, { mode: 0o600 });
-  return { files, warnings: layoutWarnings(layout), held: heldFigures(layout), microsite, ...(caseStudy ? { caseStudy } : {}), baselineRefused: report.baselineRefused, baselineGone, baselineUnapproved };
+  // From the report just printed, so its figures are the documents' own. Never a reason to fail the make.
+  let digest: ReleasedDocuments["digest"];
+  if (approved.digest) {
+    try {
+      digest = { ok: true, digest: buildDigest({ report, pseudonyms, inventory: approved.digest.inventory, madeAt: approved.digest.madeAt }) };
+    } catch (err) {
+      digest = { ok: false, error: err instanceof Error ? err.name : "Error" };
+    }
+  }
+  return { files, warnings: layoutWarnings(layout), held: heldFigures(layout), microsite, ...(caseStudy ? { caseStudy } : {}), ...(digest ? { digest } : {}), baselineRefused: report.baselineRefused, baselineGone, baselineUnapproved };
 }

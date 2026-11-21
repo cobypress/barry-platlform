@@ -20,6 +20,7 @@ import { printableSummaries, type StoredSummaries } from "../handbook/summary-ro
 import { Survey } from "../survey/questions.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import type { NumberOverride } from "../schemas/index.ts";
+import { inventoryOf } from "./inventory.ts";
 
 // A documents job: once the console has released a run, print its three
 // documents in the approved wording and put them in Google Drive, as
@@ -378,7 +379,9 @@ async function documentsLocked(runId: string, deps: WorkerDeps, attempt: Attempt
     const later = laterSurveyAnswers(dir, input.survey);
     if (later) log(`${later} survey answers came in after the sections were built, so the documents leave them out, as approved`);
     // The summaries are the handbook's alone: the reports are never given them.
-    const printed = await (deps.renderReleased ?? renderReleased)(dir, { ...job, benchmark }, join(dir, "documents"));
+    // The inventory as the run's results gave it to the console, so the digest withholds the names that row shows (DECISIONS.md 632). Silent: the run's save logged its faults.
+    const inventory = inventoryOf(dir, () => {}, { runId, madeAt: input.run.asOf, scope: input.run.scope });
+    const printed = await (deps.renderReleased ?? renderReleased)(dir, { ...job, benchmark, digest: { inventory, madeAt: now() } }, join(dir, "documents"));
     // A correction we can't carry stops the make before a file is written, and so before Drive, sharing, the
     // microsite and the benchmark. Not thrown, as for a held figure: the same overrides would fail the same way.
     if ("refused" in printed) {
@@ -432,7 +435,11 @@ async function documentsLocked(runId: string, deps: WorkerDeps, attempt: Attempt
     await putReadoutKit(deps.drive, clientName, folder.name, printed.files.readout_kit);
     // Only a re-check whose customer agreed to be a case study has one, and it's a draft for us to finish with them.
     if (printed.caseStudy) await putInternal(deps.drive, clientName, folder.name, `${clientName} - Case study draft.docx`, printed.caseStudy);
-    await deps.store.saveDocuments(runId, { at: now(), clientName, folderName: folder.name, driveFolderId: folder.id, driveFolderUrl: folder.url, files, warnings: [...printed.warnings, ...(handbook.ok ? [] : [handbook.warning])] });
+    // The digest goes with the documents' row, once they're in Drive: a make held or refused above writes none (DECISIONS.md 632).
+    if (printed.digest && !printed.digest.ok) log(`Run ${runId}'s digest couldn't be made (${printed.digest.error}), so the connector has none for it.`);
+    // None to write takes away an earlier make's, whose figures these documents may have corrected.
+    const digest = printed.digest?.ok ? printed.digest.digest : null;
+    await deps.store.saveDocuments(runId, { at: now(), clientName, folderName: folder.name, driveFolderId: folder.id, driveFolderUrl: folder.url, files, warnings: [...printed.warnings, ...(handbook.ok ? [] : [handbook.warning])] }, digest);
     log(`Documents for ${runId} are in Drive${printed.warnings.length ? `, with ${printed.warnings.length} layout warnings` : ""}.`);
     // The folder is now the run's: share it with its readers (DECISIONS.md 253). The documents are made either way.
     await share();

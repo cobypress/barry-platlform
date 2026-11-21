@@ -3,8 +3,10 @@ import type { OAuthTransport, TransportResponse } from "../salesforce/transport.
 
 // A stand-in for Salesforce's token and revoke endpoints, in process. It holds
 // the protocol to account rather than echoing it: PKCE is verified, the secret
-// is required, codes work once, and rotation kills the old refresh token. Using
-// a rotated-out token revokes the whole family, as Salesforce documents.
+// is required, codes work once, and rotation kills the old refresh token. By
+// default, using a rotated-out token also revokes the tokens issued after it.
+// Salesforce hasn't confirmed whether it does that (QUESTIONS.md connection.62),
+// so `reuseRevokesFamily` lets a test have either.
 
 export const FAKE = {
   loginUrl: "https://login.salesforce.com",
@@ -21,6 +23,12 @@ type Code = { challenge: string; clientId: string; redirectUri: string; userId: 
 export class FakeTokenEndpoint implements OAuthTransport {
   readonly requests: Array<{ url: string; form: URLSearchParams }> = [];
   rotation = true;
+  /**
+   * Whether presenting a rotated-out refresh token also ends the tokens issued
+   * after it. Not confirmed for Salesforce either way, so this stays on, the
+   * harsher case, and a test can turn it off (DECISIONS.md 631).
+   */
+  reuseRevokesFamily = true;
   instanceUrl = FAKE.instanceUrl;
   idHost = "login.salesforce.com";
   orgId = FAKE.orgId;
@@ -93,7 +101,7 @@ export class FakeTokenEndpoint implements OAuthTransport {
     const token = form.get("refresh_token") ?? "";
     const reused = this.#used.get(token);
     if (reused) {
-      this.#revokedFamilies.add(reused);
+      if (this.reuseRevokesFamily) this.#revokedFamilies.add(reused);
       return error(400, "invalid_grant", "expired access/refresh token");
     }
     const live = this.#live.get(token);
