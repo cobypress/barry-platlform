@@ -50,6 +50,8 @@ export const EffortHours = z
     low: z.number().int().min(1),
     high: z.number().int().min(1),
     basis: z.string().min(1),
+    // Set when the cap left units to be scoped separately: the range covers only part of the work (DECISIONS.md 636).
+    partial: z.literal(true).optional(),
   })
   .refine((h) => h.high >= h.low, { message: "The high end of an hours range can't be below the low end", path: ["high"] });
 export type EffortHours = z.infer<typeof EffortHours>;

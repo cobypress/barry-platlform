@@ -155,7 +155,7 @@ describe("hours to fix", () => {
 
   test("the cap where work grows with every item: the range covers the first items the cap allows and says the rest is scoped separately (finding 6b)", () => {
     const h = effortHours(fields, { unusedFields: 300 })!;
-    assert.deepEqual(h, { low: 8, high: 14, basis: "About 30 to 55 minutes for each field almost never filled in, for 300 fields almost never filled in. This range covers the first 15 fields almost never filled in; the other 285 are scoped separately." });
+    assert.deepEqual(h, { low: 8, high: 14, basis: "About 30 to 55 minutes for each field almost never filled in, for 300 fields almost never filled in. This range covers the first 15 fields almost never filled in; the other 285 are scoped separately.", partial: true });
     assert.doesNotMatch(JSON.stringify(Object.values(FIX_TABLE).map((r) => r.hours)), /done in bulk, so it stops growing/);
     // Just under the cap, nothing is held.
     assert.deepEqual(effortHours(fields, { unusedFields: 14 }), { low: 7, high: 13, basis: "About 30 to 55 minutes for each field almost never filled in, for 14 fields almost never filled in." });
@@ -164,7 +164,7 @@ describe("hours to fix", () => {
   test("no rule holds its range at the cap: every per-item rule says how many items its range covers (round 3, finding 5)", () => {
     const held = Object.entries(FIX_TABLE).filter(([, r]) => r.hours.kind === "each" && r.hours.bulk !== undefined).map(([id]) => id);
     assert.deepEqual(held, []);
-    assert.deepEqual(effortHours(reports, { unused: 300 }), { low: 3, high: 7, basis: "About 2 to 5 minutes for each unused report, for 300 unused reports. This range covers the first 84 unused reports; the other 216 are scoped separately." });
+    assert.deepEqual(effortHours(reports, { unused: 300 }), { low: 3, high: 7, basis: "About 2 to 5 minutes for each unused report, for 300 unused reports. This range covers the first 84 unused reports; the other 216 are scoped separately.", partial: true });
     // Rates a consultant would quote, production hand-over included.
     assert.deepEqual(effortHours(FIX_TABLE["sec.modify-all-data"]!.hours, { unexpected: 1 }), { low: 3, high: 6, basis: "About 3 hours to 5 hours 15 minutes for each person outside the admin team who holds it, for 1 person outside the admin team who holds it." });
     assert.deepEqual(effortHours(FIX_TABLE["sec.view-all-data"]!.hours, { unexpected: 10 })!.basis, "About 3 hours to 5 hours 15 minutes for each person outside the admin team who holds it, for 10 people outside the admin team who hold it. This range covers the first 4 people outside the admin team who hold it; the other 6 are scoped separately.");
@@ -603,6 +603,23 @@ describe("time band and fix complexity on every issue (decision 636)", () => {
     assert.equal(timeBandOf({ high: 16 }), "medium");
     assert.equal(timeBandOf({ high: 16.01 }), "large");
     assert.equal(timeBandOf({ high: 17 }), "large");
+    // Hours that cover only part of the work are large, whatever the capped figure.
+    assert.equal(timeBandOf({ high: 4, partial: true }), "large");
+    assert.equal(timeBandOf({ high: 1, partial: true }), "large");
+    // Partial is set exactly when the cap left units to scope separately, and then the band is large.
+    const fields = FIX_TABLE["cfg.unused-custom-fields"]!.hours;
+    const capped = effortHours(fields, { unusedFields: 300 })!;
+    assert.equal(capped.partial, true);
+    assert.equal(timeBandOf(capped), "large");
+    const whole = effortHours(fields, { unusedFields: 14 })!;
+    assert.equal(whole.partial, undefined);
+    assert.equal(timeBandOf(whole), "medium");
+    // A partial finding whose capped high is 4 hours is large, not small.
+    const seats = effortHours(FIX_TABLE["svc.agent-licences"]!.hours, { wasted: 30 })!;
+    assert.deepEqual([seats.high, seats.partial, timeBandOf(seats)], [4, true, "large"]);
+    const smallCap = effortHours(FIX_TABLE["int.integration-users-interactive"]!.hours, { open: 9 })!;
+    assert.ok(smallCap.partial && smallCap.high <= 8 && timeBandOf(smallCap) === "large");
+    for (const [id, r] of Object.entries(FIX_TABLE)) if (r.hours.kind === "fixed") assert.equal(effortHours(r.hours, {})!.partial, undefined, id);
   });
 
   test("every issue in both runs has a band that is its own hours' and the rule's complexity; worked by hand: small, medium and large", () => {

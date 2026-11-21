@@ -41,7 +41,7 @@ export const DigestValue = z.discriminatedUnion("kind", [
 ]);
 
 /** A finding's hours to fix (DECISIONS.md 628), whole hours, with what the range covers. */
-export const DigestHours = z.object({ low: z.number().int().min(1), high: z.number().int().min(1), basis: Text });
+export const DigestHours = z.object({ low: z.number().int().min(1), high: z.number().int().min(1), basis: Text, partial: z.literal(true).optional() });
 
 export const DigestFinding = z.object({
   id: Id,
@@ -147,11 +147,14 @@ export const DigestPlan = z.object({
   /** By an action's finding id, the other issues from the same rule the same action covers. */
   alsoFor: z.record(Id, Ids),
   /**
-   * The hours to fix every finding the plan holds (its phases, later, and the
-   * issues each action also covers) that has them, summed by code, with the
-   * finding ids it adds (DECISIONS.md 636). Absent when none has hours.
+   * The hours to fix every finding the plan holds (its quick wins, phases and
+   * later list, and the issues each action also covers), each once, summed by
+   * code, with the finding ids it adds (DECISIONS.md 636). Never the whole on its
+   * own: `partialFindingIds` are those whose hours cover only part of their work,
+   * and `withoutHoursFindingIds` the plan's issues with no hours at all, both
+   * always listed, empty or not. Absent when no finding in the plan has hours.
    */
-  hoursTotal: z.object({ low: z.number().int().nonnegative(), high: z.number().int().nonnegative(), findingIds: Ids }).optional(),
+  hoursTotal: z.object({ low: z.number().int().nonnegative(), high: z.number().int().nonnegative(), findingIds: Ids, partialFindingIds: Ids, withoutHoursFindingIds: Ids }).optional(),
 });
 export type DigestPlan = z.infer<typeof DigestPlan>;
 
@@ -187,5 +190,5 @@ export const DIGEST_KEYS: ReadonlySet<string> = new Set([
   "title", "summary", "recommendation", "recommendationType", "kind", "amount", "unit", "period", "assumptions", "effortSize", "notMeasurableReason",
   "definition", "n", "dateRange", "from", "to", "exclusions", "currency", "total", "byKind", "revenue_recoverable", "conversion_uplift", "licence_waste",
   "time_cost", "exposure", "groups", "lines", "leftOut", "realisation", "counted", "lineIds", "low", "expected", "high", "group", "annual", "added",
-  "phases", "later", "quickWins", "alsoFor", "key", "effortHours", "basis", "timeBand", "fixComplexity", "hoursTotal",
+  "phases", "later", "quickWins", "alsoFor", "key", "effortHours", "basis", "partial", "timeBand", "fixComplexity", "hoursTotal", "partialFindingIds", "withoutHoursFindingIds",
 ]);

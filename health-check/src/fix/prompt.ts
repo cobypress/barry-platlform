@@ -56,6 +56,22 @@ export const labelWords = (label: string): string[] =>
     .filter(Boolean)
     .map(foldLower);
 
+/**
+ * The people a run knows, each name's words folded to lower case: users, contacts
+ * and leads, but not shared or system users, whose names are ordinary words
+ * ("Shared Sales Desk", "Integration User").
+ */
+export function knownPeople(pseudonyms: Pseudonymiser): string[][] {
+  const out: string[][] = [];
+  for (const entry of pseudonyms.entries()) {
+    const kind = entry.token.slice(2, entry.token.indexOf(":"));
+    if (!PERSON_KINDS.has(kind) || entry.id.startsWith(SHARED_NAME_PREFIX) || entry.name === UNKNOWN_USER || isSalesforceUserName(entry.name)) continue;
+    const parts = entry.name.split(/[^\p{L}\p{M}]+/u).filter(Boolean).map(foldLower);
+    if (parts.length > 0 && !parts.every((p) => ORDINARY.has(p))) out.push(parts);
+  }
+  return out;
+}
+
 const FORMS = new WeakMap<Pseudonymiser, { size: number; forms: Set<string> }>();
 
 /**

@@ -32,7 +32,7 @@
       "basis": "Preparing the analysis and the options for the people who decide; their time deciding, and making the change, isn't counted"
     },
     "adp.classic-users": {
-      "fixComplexity": "moderate",
+      "fixComplexity": "complex",
       "facts": [
         "users"
       ],
@@ -143,7 +143,7 @@
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "aut.old-api-versions": {
-      "fixComplexity": "moderate",
+      "fixComplexity": "complex",
       "facts": [
         "total"
       ],
@@ -176,7 +176,7 @@
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "bp.jobs-on-inactive-owners": {
-      "fixComplexity": "moderate",
+      "fixComplexity": "complex",
       "facts": [
         "jobs"
       ],
@@ -198,7 +198,7 @@
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "bp.users-without-role": {
-      "fixComplexity": "simple",
+      "fixComplexity": "complex",
       "facts": [
         "hits"
       ],
@@ -218,7 +218,7 @@
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "cfg.picklist-sprawl": {
-      "fixComplexity": "moderate",
+      "fixComplexity": "complex",
       "low": 2,
       "high": 5,
       "basis": "Preparing the use of each value, a shorter list and the mapping from old values to new for the list's owners; changing the records isn't counted"
@@ -275,13 +275,13 @@
       "basis": "Building an approval process on the quote for the agreed discount levels, for the owners to turn on"
     },
     "cpq.discount-leakage": {
-      "fixComplexity": "simple",
+      "fixComplexity": "complex",
       "low": 4,
       "high": 7,
       "basis": "Preparing the analysis and the options for the people who decide; their time deciding, and making the change, isn't counted"
     },
     "cpq.inactive-rules": {
-      "fixComplexity": "simple",
+      "fixComplexity": "moderate",
       "facts": [
         "inactive"
       ],
@@ -332,7 +332,7 @@
       "basis": "Preparing the analysis and the options for the people who decide; their time deciding, and making the change, isn't counted"
     },
     "cur.close-date-pushes": {
-      "fixComplexity": "simple",
+      "fixComplexity": "moderate",
       "low": 2,
       "high": 4,
       "basis": "Building the report, or the alert, that flags a second push for a manager"
@@ -368,7 +368,7 @@
       "basis": "Building the report and the check that keeps it current; the owners' time updating their own records isn't counted"
     },
     "dq.contact-completeness": {
-      "fixComplexity": "moderate",
+      "fixComplexity": "complex",
       "low": 3,
       "high": 5,
       "basis": "Preparing the list and the plan for the people who own the records; their time making the change isn't counted"
@@ -420,7 +420,7 @@
       "basis": "Building the report and the check that keeps it current; the owners' time updating their own records isn't counted"
     },
     "dq.opps-inactive-owner": {
-      "fixComplexity": "moderate",
+      "fixComplexity": "complex",
       "low": 1,
       "high": 3,
       "basis": "Preparing the list and the plan for the people who own the records; their time making the change isn't counted"
@@ -438,13 +438,13 @@
       "basis": "Checking each record type's dependencies and preparing the list for its object's owner"
     },
     "dq.records-inactive-owner": {
-      "fixComplexity": "moderate",
+      "fixComplexity": "complex",
       "low": 2,
       "high": 5,
       "basis": "Preparing the list and the plan for the people who own the records; their time making the change isn't counted"
     },
     "dq.stale-leads": {
-      "fixComplexity": "simple",
+      "fixComplexity": "complex",
       "low": 3,
       "high": 5,
       "basis": "Preparing a follow-up rule by source for agreement; the reps' follow-up time isn't counted"
@@ -468,7 +468,7 @@
       "basis": "Preparing the analysis and the options for the people who decide; their time deciding, and making the change, isn't counted"
     },
     "fct.quota-gaps": {
-      "fixComplexity": "simple",
+      "fixComplexity": "complex",
       "facts": [
         "hits"
       ],
@@ -485,7 +485,7 @@
       "basis": "Finding which integrations and jobs use the most and planning the cuts; changing them is more"
     },
     "int.failed-async-jobs": {
-      "fixComplexity": "moderate",
+      "fixComplexity": "complex",
       "facts": [
         "classes"
       ],
@@ -571,31 +571,31 @@
       "basis": "Turning on one setting and choosing the model to report on"
     },
     "mkt.scoring-grading": {
-      "fixComplexity": "moderate",
+      "fixComplexity": "complex",
       "low": 4,
       "high": 7,
       "basis": "Preparing the analysis and the options for the people who decide; their time deciding, and making the change, isn't counted"
     },
     "mkt.unowned-prospects": {
-      "fixComplexity": "moderate",
+      "fixComplexity": "complex",
       "low": 1,
       "high": 3,
       "basis": "Preparing the list and the plan for the people who own the records; their time making the change isn't counted"
     },
     "mkt.unworked-handovers": {
-      "fixComplexity": "simple",
+      "fixComplexity": "complex",
       "low": 2,
       "high": 4,
       "basis": "Preparing the analysis and the options for the people who decide; their time deciding, and making the change, isn't counted"
     },
     "pipe.calibration-contradicts-org": {
-      "fixComplexity": "simple",
+      "fixComplexity": "moderate",
       "low": 1,
       "high": 3,
       "basis": "Preparing the analysis and the options for the people who decide; their time deciding, and making the change, isn't counted"
     },
     "pipe.dead-end-stage": {
-      "fixComplexity": "simple",
+      "fixComplexity": "moderate",
       "low": 2,
       "high": 4,
       "basis": "Setting a time limit for the stage and the report that shows deals past it"
@@ -613,19 +613,19 @@
       "basis": "Preparing the analysis and the options for the people who decide; their time deciding, and making the change, isn't counted"
     },
     "pipe.skipped-stages": {
-      "fixComplexity": "simple",
+      "fixComplexity": "moderate",
       "low": 4,
       "high": 7,
       "basis": "Preparing the analysis and the options for the people who decide; their time deciding, and making the change, isn't counted"
     },
     "pipe.unmapped-stages": {
-      "fixComplexity": "simple",
+      "fixComplexity": "moderate",
       "low": 1,
       "high": 2,
       "basis": "Preparing a mapping of each stage for the health check's calibration"
     },
     "rev.dormant-accounts": {
-      "fixComplexity": "simple",
+      "fixComplexity": "complex",
       "low": 2,
       "high": 4,
       "basis": "Preparing the analysis and the options for the people who decide; their time deciding, and making the change, isn't counted"
@@ -655,7 +655,7 @@
       "basis": "Preparing, for each high and medium risk setting, who and what a change affects and the order to make them in"
     },
     "sec.insecure-remote-sites": {
-      "fixComplexity": "moderate",
+      "fixComplexity": "complex",
       "low": 1,
       "high": 4,
       "basis": "Moving each site to HTTPS and turning off the mixed-protocol setting, in a sandbox, for the admin to repeat"
@@ -672,7 +672,7 @@
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "sec.peer-outlier-access": {
-      "fixComplexity": "moderate",
+      "fixComplexity": "complex",
       "facts": [
         "people"
       ],
@@ -739,7 +739,7 @@
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "svc.agent-licences": {
-      "fixComplexity": "simple",
+      "fixComplexity": "moderate",
       "facts": [
         "wasted"
       ],
@@ -797,7 +797,7 @@
       "basis": "Setting up an acknowledgement and routing so email cases get a timely first reply"
     },
     "svc.knowledge-current": {
-      "fixComplexity": "simple",
+      "fixComplexity": "moderate",
       "facts": [
         "stale"
       ],
@@ -808,13 +808,13 @@
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "svc.knowledge-use": {
-      "fixComplexity": "simple",
+      "fixComplexity": "moderate",
       "low": 2,
       "high": 5,
       "basis": "Putting Knowledge on the case page and setting up the reporting"
     },
     "svc.macros-and-quick-text": {
-      "fixComplexity": "simple",
+      "fixComplexity": "moderate",
       "low": 2,
       "high": 5,
       "basis": "Preparing the analysis and the options for the people who decide; their time deciding, and making the change, isn't counted"
@@ -849,7 +849,7 @@
       "basis": "Routing high-priority cases to their own queue or routing priority, with a visible target"
     },
     "svc.queue-sprawl": {
-      "fixComplexity": "moderate",
+      "fixComplexity": "complex",
       "low": 2,
       "high": 4,
       "basis": "Preparing the analysis and the options for the people who decide; their time deciding, and making the change, isn't counted"
@@ -873,7 +873,7 @@
       "basis": "Finding the Apex nobody calls and preparing the plan for its owners; rewriting code is more"
     },
     "tech.classic-leftovers": {
-      "fixComplexity": "moderate",
+      "fixComplexity": "complex",
       "facts": [
         "javascriptButtons",
         "scontrols",
@@ -915,7 +915,7 @@
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "utl.dashboards-inactive-running-user": {
-      "fixComplexity": "moderate",
+      "fixComplexity": "complex",
       "facts": [
         "affected"
       ],
@@ -926,7 +926,7 @@
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "utl.dormant-licensed-users": {
-      "fixComplexity": "moderate",
+      "fixComplexity": "complex",
       "facts": [
         "users"
       ],
@@ -954,7 +954,7 @@
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "utl.never-logged-in": {
-      "fixComplexity": "moderate",
+      "fixComplexity": "complex",
       "facts": [
         "users"
       ],
@@ -965,19 +965,19 @@
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "utl.package-seats": {
-      "fixComplexity": "simple",
+      "fixComplexity": "moderate",
       "low": 1,
       "high": 3,
       "basis": "Preparing each installed app's use for its owner and the request for the renewal"
     },
     "utl.unassigned-licence-seats": {
-      "fixComplexity": "simple",
+      "fixComplexity": "moderate",
       "low": 1,
       "high": 2,
       "basis": "Setting the spare seats against the hiring plan and preparing the request for the renewal"
     },
     "utl.unused-reports": {
-      "fixComplexity": "simple",
+      "fixComplexity": "moderate",
       "facts": [
         "unused"
       ],

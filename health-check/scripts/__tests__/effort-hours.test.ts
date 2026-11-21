@@ -1,6 +1,7 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { FIX_TABLE } from "../../src/fix/table.ts";
 import { EFFORT_HOURS_FILE, REMAKE, STATUS, effortHoursFile, effortHoursText, type EffortHoursFile } from "../effort-hours.ts";
 
@@ -44,6 +45,33 @@ describe("the hours table exported for the owner's review (decision 628)", () =>
     }
   });
 
+  test("the owner's trim (decision 636): every high end, rate and cap is about 88% of the recorded one, rounded as stated, or named as too small to round down", () => {
+    type Old = { low: number; high: number } | { minutesLow: number; minutesHigh: number; capHours: number };
+    const before = (JSON.parse(readFileSync(fileURLToPath(new URL("../../fixtures/effort-hours-pretrim.json", import.meta.url)), "utf8")) as { rules: Record<string, Old> }).rules;
+    assert.deepEqual(Object.keys(before).sort(), Object.keys(committed.rules).sort());
+    const trimmed = (old: number, floor: number): number => Math.max(floor, Math.round(old * 0.88));
+    const trimmedMinutes = (old: number, floor: number): number => Math.max(floor, 5 * Math.round((old * 0.88) / 5));
+    const unchanged: string[] = [];
+    for (const [id, now] of Object.entries(committed.rules)) {
+      const old = before[id]!;
+      if ("basis" in now) {
+        assert.ok("high" in old && now.low === old.low, id);
+        assert.ok(now.high <= old.high, id);
+        assert.equal(now.high, trimmed(old.high, now.low), id);
+        if (now.high === old.high) unchanged.push(id);
+      } else {
+        assert.ok("minutesHigh" in old && now.minutesLow === old.minutesLow, id);
+        assert.ok(now.minutesHigh <= old.minutesHigh && now.capHours <= old.capHours, id);
+        assert.equal(now.minutesHigh, trimmedMinutes(old.minutesHigh, now.minutesLow), id);
+        assert.equal(now.capHours, trimmed(old.capHours, 1), id);
+        if (now.minutesHigh === old.minutesHigh && now.capHours === old.capHours) unchanged.push(id);
+      }
+    }
+    // Too small to round down: a high of 2, 3 or 4 hours stays where it was.
+    assert.deepEqual(unchanged.sort(), UNCHANGED_BY_ROUNDING);
+    assert.equal(Object.keys(committed.rules).length - unchanged.length, 80);
+  });
+
   test("a changed figure makes the file stale", () => {
     const [first, ...rest] = Object.entries(FIX_TABLE);
     const h = first![1].hours;
@@ -51,3 +79,13 @@ describe("the hours table exported for the owner's review (decision 628)", () =>
     assert.notEqual(effortHoursText(changed), text);
   });
 });
+
+/** The 44 rules whose figures 88% rounds back to themselves (decision 636). */
+const UNCHANGED_BY_ROUNDING = [
+  "act.rep-activity-spread", "act.unlinked-tasks", "act.won-vs-lost-activity", "cpq.quote-to-order", "cur.account-concentration", "cur.close-date-pushes", "cur.coverage", "cur.missing-next-steps",
+  "cur.rep-concentration", "cur.stale-deals", "cur.stuck-in-stage", "dq.loss-reason-missing", "dq.open-opps-missing-amount", "dq.open-opps-no-activity", "dq.open-opps-past-close", "dq.opps-inactive-owner",
+  "dq.opps-without-account", "dq.record-type-use", "fct.commit-at-risk", "fct.early-stage-commits", "fct.manager-adjustments", "lead.campaign-return", "lead.conversion-by-source", "lead.converted-no-opportunity",
+  "lead.no-first-response", "lead.source-return", "mkt.campaign-influence", "mkt.unowned-prospects", "mkt.unworked-handovers", "pipe.calibration-contradicts-org", "pipe.dead-end-stage", "pipe.segment-divergence",
+  "pipe.unmapped-stages", "rev.dormant-accounts", "rev.stalled-deals", "rev.win-backs", "sec.insecure-remote-sites", "svc.backlog-age", "svc.case-classification", "svc.origin-missing",
+  "svc.queue-sprawl", "utl.eac-advanced-sync", "utl.package-seats", "utl.unassigned-licence-seats",
+];

@@ -51,6 +51,8 @@ export function effortHours(rule: HoursRule, facts: Readonly<Record<string, numb
     low: coveredLow,
     high: Math.max(coveredLow, hoursFor(covered, rule.minutes[1])),
     basis: `${each}. This range covers the first ${covered} ${covered === 1 ? rule.one : rule.many}; the other ${count - covered} ${count - covered === 1 ? "is" : "are"} scoped separately.`,
+    // The machine-readable form of "the rest is scoped separately" (DECISIONS.md 636).
+    partial: true,
   };
 }
 
@@ -59,8 +61,13 @@ export const SMALL_MAX_HOURS = 4;
 /** The most hours a medium fix's high end may be; over it, large. */
 export const MEDIUM_MAX_HOURS = 16;
 
-/** A finding's time band, from the high end of its own hours, so the two can never disagree. */
-export function timeBandOf(hours: Pick<EffortHours, "high">): TimeBand {
+/**
+ * A finding's time band, from its own hours, so the two can never disagree. Hours
+ * that cover only part of the work are large whatever the capped figure: work that
+ * needs separate scoping is never small or medium (DECISIONS.md 636).
+ */
+export function timeBandOf(hours: Pick<EffortHours, "high" | "partial">): TimeBand {
+  if (hours.partial) return "large";
   if (hours.high <= SMALL_MAX_HOURS) return "small";
   if (hours.high <= MEDIUM_MAX_HOURS) return "medium";
   return "large";
