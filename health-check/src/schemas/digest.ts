@@ -43,6 +43,30 @@ export const DigestValue = z.discriminatedUnion("kind", [
 /** A finding's hours to fix (DECISIONS.md 628), whole hours, with what the range covers. */
 export const DigestHours = z.object({ low: z.number().int().min(1), high: z.number().int().min(1), basis: Text, partial: z.literal(true).optional() });
 
+/** Characters a sentence took from the org (DECISIONS.md 655): UTF-16 code units into the sentence as the digest holds it, end exclusive. */
+export const DigestSpan = z.object({ start: z.number().int().nonnegative(), end: z.number().int().positive() });
+export type DigestSpan = z.infer<typeof DigestSpan>;
+
+/**
+ * A sentence the engine vouches for: every character the org chose lies in one
+ * of `orgWords`, and every other is the engine's own. No spans: the engine's
+ * words only. A sentence with no marking is unknown, as every one was before.
+ */
+export const SentenceOrgWords = z.object({ orgWordsMarked: z.literal(true), orgWords: z.array(DigestSpan) });
+export type SentenceOrgWords = z.infer<typeof SentenceOrgWords>;
+
+/** Spans each non-empty, inside the sentence, sorted and apart. */
+export function spansFitSentence(text: string, spans: readonly DigestSpan[]): boolean {
+  let from = 0;
+  for (const s of spans) {
+    if (s.start < from || s.end <= s.start || s.end > text.length) return false;
+    from = s.end + 1;
+  }
+  return true;
+}
+
+const MARKED_SENTENCES = ["title", "summary", "recommendation", "notMeasurableReason"] as const;
+
 export const DigestFinding = z.object({
   id: Id,
   ruleId: Id,
@@ -64,6 +88,17 @@ export const DigestFinding = z.object({
   timeBand: z.enum(["small", "medium", "large"]).optional(),
   /** How risky or skilled the fix is, by rule (DECISIONS.md 636). Not the org's complexity score. */
   fixComplexity: z.enum(["simple", "moderate", "complex"]).optional(),
+  /** By sentence, the ones the engine can vouch for, with the org's characters marked (DECISIONS.md 655). */
+  orgWords: z
+    .object({ title: SentenceOrgWords.optional(), summary: SentenceOrgWords.optional(), recommendation: SentenceOrgWords.optional(), notMeasurableReason: SentenceOrgWords.optional() })
+    .optional(),
+}).superRefine((f, ctx) => {
+  for (const key of MARKED_SENTENCES) {
+    const marked = f.orgWords?.[key];
+    if (!marked) continue;
+    const text = f[key];
+    if (typeof text !== "string" || !spansFitSentence(text, marked.orgWords)) ctx.addIssue({ code: "custom", path: ["orgWords", key], message: "Spans must fit their sentence" });
+  }
 });
 export type DigestFinding = z.infer<typeof DigestFinding>;
 
@@ -191,4 +226,5 @@ export const DIGEST_KEYS: ReadonlySet<string> = new Set([
   "definition", "n", "dateRange", "from", "to", "exclusions", "currency", "total", "byKind", "revenue_recoverable", "conversion_uplift", "licence_waste",
   "time_cost", "exposure", "groups", "lines", "leftOut", "realisation", "counted", "lineIds", "low", "expected", "high", "group", "annual", "added",
   "phases", "later", "quickWins", "alsoFor", "key", "effortHours", "basis", "partial", "timeBand", "fixComplexity", "hoursTotal", "partialFindingIds", "withoutHoursFindingIds",
+  "orgWords", "orgWordsMarked", "start", "end",
 ]);

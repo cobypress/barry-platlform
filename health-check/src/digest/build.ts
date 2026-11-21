@@ -4,6 +4,7 @@ import type { BuiltReport } from "../narrative/sections.ts";
 import { buildPlan, domainLabel } from "../narrative/select.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { knownPeople } from "../fix/prompt.ts";
+import { spansIfCurrent } from "../engine/org-words.ts";
 import { DIGEST_VERSION, NAMED_PEOPLE_SENTENCE, RunDigest, type DigestArea, type DigestFinding, type DigestMetric, type DigestTotal, type DigestValueModel } from "../schemas/digest.ts";
 import type { Finding, Metric } from "../schemas/index.ts";
 import type { Inventory } from "../schemas/inventory.ts";
@@ -122,7 +123,42 @@ function digestFinding(f: Finding): DigestFinding {
     ...(f.effortHours ? { effortHours: { low: f.effortHours.low, high: f.effortHours.high, basis: f.effortHours.basis, ...(f.effortHours.partial ? { partial: true as const } : {}) } } : {}),
     ...(f.timeBand ? { timeBand: f.timeBand } : {}),
     ...(f.fixComplexity ? { fixComplexity: f.fixComplexity } : {}),
+    ...orgWordsOf(f),
   };
+}
+
+const MARKED = ["title", "summary", "recommendation", "notMeasurableReason"] as const;
+type Marked = (typeof MARKED)[number];
+
+/**
+ * The sentences the engine vouches for (DECISIONS.md 655), each only while it
+ * still reads as it did when it was marked: a consultant's corrected figure or
+ * the team-level wording changes the text and leaves it unknown.
+ */
+function orgWordsOf(f: Finding): Pick<DigestFinding, "orgWords"> {
+  const out: NonNullable<DigestFinding["orgWords"]> = {};
+  for (const key of MARKED) {
+    const text = f[key];
+    const spans = typeof text === "string" ? spansIfCurrent(text, f.orgWords?.[key]) : null;
+    if (spans) out[key] = { orgWordsMarked: true, orgWords: spans };
+  }
+  return Object.keys(out).length > 0 ? { orgWords: out } : {};
+}
+
+/**
+ * The marks once the text guard has run: a sentence it replaced with the fixed
+ * sentence holds only the engine's words; one it changed any other way (none
+ * does today) is unknown.
+ */
+function afterGuard(before: DigestFinding, after: DigestFinding): DigestFinding {
+  const marks: NonNullable<DigestFinding["orgWords"]> = { ...after.orgWords };
+  for (const key of MARKED) {
+    if (before[key as Marked] === after[key as Marked]) continue;
+    if (after[key] === NAMED_PEOPLE_SENTENCE) marks[key] = { orgWordsMarked: true, orgWords: [] };
+    else delete marks[key];
+  }
+  const { orgWords: _was, ...rest } = after;
+  return Object.keys(marks).length > 0 ? { ...rest, orgWords: marks } : rest;
 }
 
 /**
@@ -232,7 +268,8 @@ export function buildDigest({ report, pseudonyms, inventory, madeAt }: DigestFor
     },
     withheldNames: withheldNames(inventory, pseudonyms),
   };
-  return RunDigest.parse(guardDigest(raw, pseudonyms));
+  const guarded = guardDigest(raw, pseudonyms);
+  return RunDigest.parse({ ...guarded, findings: guarded.findings.map((f, i) => afterGuard(raw.findings[i]!, f)) });
 }
 
 /**

@@ -10,6 +10,7 @@ import { labelsOf } from "../labels.ts";
 import { labelsExtractor } from "../../extract/labels.ts";
 import { isObjectId, objectResolver } from "../object-names.ts";
 import { WHERE } from "../where.ts";
+import { joinSaid, org, said } from "../../engine/org-words.ts";
 
 // Technical health (roadmap 3.2): how sound the code is, read from set-up only.
 // Coverage, API versions and trigger counts moved here from automation with
@@ -170,7 +171,7 @@ const multipleTriggers: Rule = {
     }
     const unnamed = [...byObject.values()].filter((o) => o.label === null).reduce((sum, o) => sum + o.n, 0);
     const multiple = [...byObject.values()].filter((o) => o.n > 1).sort((a, b) => (a.label === null ? 1 : 0) - (b.label === null ? 1 : 0) || (a.label ?? "").localeCompare(b.label ?? ""));
-    const note = unnamedNote(unnamed, ids.status === "ok", unnamed === 1 ? "it's grouped by the object's id instead" : "they're grouped by the object's id instead");
+    const note = unnamedNote(unnamed, ids.status === "ok", unnamed === 1 ? said`it's grouped by the object's id instead` : said`they're grouped by the object's id instead`);
     const evidence = [
       ctx.ev(triggers.source, { count: triggers.data.length, exclusions: ["Inactive triggers", "Packaged triggers"] }),
       ctx.ev(ids.source, { count: ids.status === "ok" ? ids.data.length : null, note: "Names the custom objects triggers refer to by id" }),
@@ -178,14 +179,15 @@ const multipleTriggers: Rule = {
     const segments = [{ dimension: "object", segments: byObject.size }];
     if (multiple.length === 0) {
       return byObject.size === 0
-        ? { outcome: "pass", summary: "This org has no active triggers of its own.", evidence, segmentExemptReason: "There are no triggers to segment." }
-        : { outcome: "pass", summary: `No object has more than one active trigger, across ${byObject.size} objects.${note}`, evidence, segmentsChecked: segments, facts: { unnamedTriggers: unnamed } };
+        ? { outcome: "pass", summary: said`This org has no active triggers of its own.`, evidence, segmentExemptReason: "There are no triggers to segment." }
+        : { outcome: "pass", summary: said`No object has more than one active trigger, across ${byObject.size} objects.${note}`, evidence, segmentsChecked: segments, facts: { unnamedTriggers: unnamed } };
     }
     return {
       outcome: "issue",
-      title: "Some objects have several triggers",
-      summary: `${multiple.map((o) => `${o.label ?? UNNAMED} has ${o.n}`).join("; ")}. Salesforce doesn't guarantee the order they run in.${note}`,
-      recommendation: "Move to one trigger per object, calling a handler class.",
+      // Written with said, the object's label as the org's (DECISIONS.md 655); an object we couldn't name is our own words.
+      title: said`Some objects have several triggers`,
+      summary: said`${joinSaid(multiple.map((o) => said`${o.label === null ? UNNAMED : org(o.label)} has ${o.n}`), "; ")}. Salesforce doesn't guarantee the order they run in.${note}`,
+      recommendation: said`Move to one trigger per object, calling a handler class.`,
       recommendationType: "change",
       severity: "medium",
       confidence: "high",

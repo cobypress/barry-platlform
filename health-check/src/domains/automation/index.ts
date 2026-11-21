@@ -9,9 +9,15 @@ import { labelsExtractor } from "../../extract/labels.ts";
 import type { DomainModule } from "../types.ts";
 import { objectResolver } from "../object-names.ts";
 import { WHERE } from "../where.ts";
+import { eng, joinSaid, org, said } from "../../engine/org-words.ts";
 
 // Apex coverage, API versions and trigger counts moved to technical health
 // (DECISIONS.md 169). This area keeps how the automation is built.
+//
+// Every title, summary and recommendation is written with `said`, and every
+// name the org chose with `org`, so the digest can say which words are the
+// org's (DECISIONS.md 655). A reason passed on from an extract quotes Salesforce
+// and stays plain: unknown.
 
 const MIXED_AUTOMATION_LIMIT = 3;
 // Our judgement: past this, nobody new can tell what the automation does or why.
@@ -29,13 +35,13 @@ const legacyWorkflowRules: Rule = {
     const active = result.bundle.workflows.flatMap((w) => w.rules.filter((r) => r.active).map((r) => ({ object: w.object, ...r })));
     const evidence = [ctx.ev({ kind: "metadata", path: "workflows/*.workflow" }, { count: active.length, exclusions: ["Inactive rules"] })];
     const segments = [{ dimension: "object", segments: result.bundle.workflows.length }];
-    if (active.length === 0) return { outcome: "pass", summary: "No Workflow Rules are active.", evidence, segmentsChecked: segments };
+    if (active.length === 0) return { outcome: "pass", summary: said`No Workflow Rules are active.`, evidence, segmentsChecked: segments };
     const objects = groupCount(active.map((r) => r.object));
     return {
       outcome: "issue",
-      title: "Automation still runs on Workflow Rules",
-      summary: `${plural(active.length, "active Workflow Rule")} across ${plural(objects, "object")}. ${END_OF_SUPPORT}`,
-      recommendation: `Plan the move from Workflow Rules to Flow, starting with the objects that have the most rules. ${MIGRATE_TO_FLOW_NOTE}`,
+      title: said`Automation still runs on Workflow Rules`,
+      summary: said`${eng(plural(active.length, "active Workflow Rule"))} across ${eng(plural(objects, "object"))}. ${END_OF_SUPPORT}`,
+      recommendation: said`Plan the move from Workflow Rules to Flow, starting with the objects that have the most rules. ${MIGRATE_TO_FLOW_NOTE}`,
       recommendationType: "change",
       severity: "high",
       confidence: "high",
@@ -64,12 +70,12 @@ const legacyProcessBuilder: Rule = {
     const active = result.bundle.flows.filter((f) => f.processType === "Workflow" && f.status === "Active");
     const evidence = [ctx.ev({ kind: "metadata", path: "flows/*.flow (processType Workflow)" }, { count: active.length, exclusions: ["Inactive versions"] })];
     const segments = [{ dimension: "process type", segments: groupCount(result.bundle.flows.map((f) => f.processType)) }];
-    if (active.length === 0) return { outcome: "pass", summary: "No Process Builders are active.", evidence, segmentsChecked: segments };
+    if (active.length === 0) return { outcome: "pass", summary: said`No Process Builders are active.`, evidence, segmentsChecked: segments };
     return {
       outcome: "issue",
-      title: "Automation still runs on Process Builder",
-      summary: `${plural(active.length, "active Process Builder")}. ${END_OF_SUPPORT}`,
-      recommendation: `Move each Process Builder to Flow in the same piece of work as any Workflow Rules on its object, so each object is migrated once. ${MIGRATE_TO_FLOW_NOTE}`,
+      title: said`Automation still runs on Process Builder`,
+      summary: said`${eng(plural(active.length, "active Process Builder"))}. ${END_OF_SUPPORT}`,
+      recommendation: said`Move each Process Builder to Flow in the same piece of work as any Workflow Rules on its object, so each object is migrated once. ${MIGRATE_TO_FLOW_NOTE}`,
       recommendationType: "change",
       severity: "high",
       confidence: "high",
@@ -115,19 +121,20 @@ const mixedAutomation: Rule = {
     for (const w of result.bundle.workflows) if (w.rules.some((r) => r.active)) add(w.object, "Workflow Rule");
 
     const mixed = [...tools].filter(([, set]) => set.size >= MIXED_AUTOMATION_LIMIT).sort(([a], [b]) => a.localeCompare(b));
-    const note = unnamedNote(unnamed, ids.status === "ok", unnamed === 1 ? "it isn't counted against any object" : "they aren't counted against any object");
+    const note = unnamedNote(unnamed, ids.status === "ok", unnamed === 1 ? said`it isn't counted against any object` : said`they aren't counted against any object`);
     const evidence = [
       ctx.ev({ kind: "metadata", path: "flows/*.flow, workflows/*.workflow" }, { count: mixed.length }),
       ctx.ev(triggers.source, { count: triggers.data.length, exclusions: unnamed ? [`Active triggers on custom objects we couldn't name: ${unnamed}`] : [] }),
       ctx.ev(ids.source, { count: ids.status === "ok" ? ids.data.length : null, note: "Names the custom objects triggers refer to by id" }),
     ];
     const segments = [{ dimension: "object", segments: tools.size }];
-    if (mixed.length === 0) return { outcome: "pass", summary: `No object runs ${MIXED_AUTOMATION_LIMIT} or more automation tools.${note}`, evidence, segmentsChecked: segments, facts: { unnamedTriggers: unnamed } };
+    if (mixed.length === 0) return { outcome: "pass", summary: said`No object runs ${MIXED_AUTOMATION_LIMIT} or more automation tools.${note}`, evidence, segmentsChecked: segments, facts: { unnamedTriggers: unnamed } };
     return {
       outcome: "issue",
-      title: "Automation on some objects is split across several tools",
-      summary: `${mixed.map(([o, set]) => `${labelsOf(ctx).object(o)} runs ${[...set].sort().join(", ")}`).join("; ")}. Salesforce runs these at different points when a record saves, so the outcome can be hard to predict.${note}`,
-      recommendation: "Decide for each object what belongs in Apex and what in Flow, then retire the older tools into that split.",
+      title: said`Automation on some objects is split across several tools`,
+      // The object's label is the org's; the tool names are our own fixed list.
+      summary: said`${joinSaid(mixed.map(([o, set]) => said`${org(labelsOf(ctx).object(o))} runs ${eng([...set].sort().join(", "))}`), "; ")}. Salesforce runs these at different points when a record saves, so the outcome can be hard to predict.${note}`,
+      recommendation: said`Decide for each object what belongs in Apex and what in Flow, then retire the older tools into that split.`,
       recommendationType: "change",
       severity: "medium",
       confidence: "high",
@@ -154,12 +161,12 @@ const hardcodedIds: Rule = {
     const affected = active.filter((f) => f.hardcodedUserIds + f.hardcodedOtherIds + f.hardcodedEmails > 0);
     const evidence = [ctx.ev({ kind: "metadata", path: "flows/*.flow" }, { count: affected.length, exclusions: ["Inactive versions"] })];
     const segments = [{ dimension: "flow", segments: active.length }];
-    if (affected.length === 0) return { outcome: "pass", summary: `None of the ${active.length} active flows contain hardcoded ids or emails.`, evidence, segmentsChecked: segments };
+    if (affected.length === 0) return { outcome: "pass", summary: said`None of the ${active.length} active flows contain hardcoded ids or emails.`, evidence, segmentsChecked: segments };
     return {
       outcome: "issue",
-      title: "Flows depend on hardcoded ids or email addresses",
-      summary: `Of ${plural(active.length, "active flow")}, ${affected.length} ${affected.length === 1 ? "contains" : "contain"} hardcoded user ids, record ids or email addresses. These break when someone leaves or when the flow moves between orgs.`,
-      recommendation: "Replace them with custom metadata, custom labels or queue lookups.",
+      title: said`Flows depend on hardcoded ids or email addresses`,
+      summary: said`Of ${eng(plural(active.length, "active flow"))}, ${affected.length} ${affected.length === 1 ? "contains" : "contain"} hardcoded user ids, record ids or email addresses. These break when someone leaves or when the flow moves between orgs.`,
+      recommendation: said`Replace them with custom metadata, custom labels or queue lookups.`,
       recommendationType: "change",
       severity: "high",
       confidence: "high",
@@ -188,12 +195,12 @@ const missingFaultPaths: Rule = {
     const missing = affected.reduce((sum, f) => sum + (f.dmlOrActions - f.withFault), 0);
     const evidence = [ctx.ev({ kind: "metadata", path: "flows/*.flow" }, { count: affected.length, exclusions: ["Inactive versions", "Process Builders, which have no fault paths"] })];
     const segments = [{ dimension: "flow", segments: active.length }];
-    if (affected.length === 0) return { outcome: "pass", summary: `All ${active.length} active flows that write data have fault paths.`, evidence, segmentsChecked: segments };
+    if (affected.length === 0) return { outcome: "pass", summary: said`All ${active.length} active flows that write data have fault paths.`, evidence, segmentsChecked: segments };
     return {
       outcome: "issue",
-      title: "Flow failures aren't handled",
-      summary: `Of ${plural(active.length, "active flow")} that write data, ${affected.length} ${affected.length === 1 ? "is" : "are"} missing fault paths on ${plural(missing, "element")}. When one of those fails, the user sees a generic error and the failure isn't logged anywhere useful.`,
-      recommendation: "Add a fault path to each element, with a shared way of logging failures.",
+      title: said`Flow failures aren't handled`,
+      summary: said`Of ${eng(plural(active.length, "active flow"))} that write data, ${affected.length} ${affected.length === 1 ? "is" : "are"} missing fault paths on ${eng(plural(missing, "element"))}. When one of those fails, the user sees a generic error and the failure isn't logged anywhere useful.`,
+      recommendation: said`Add a fault path to each element, with a shared way of logging failures.`,
       recommendationType: "change",
       severity: "medium",
       confidence: "high",
@@ -240,19 +247,20 @@ const undocumentedAutomation: Rule = {
       ctx.ev(classes.source, { count: code.length, exclusions: ["Test classes", "Inactive or hidden code"], note: "Any comment in the code" }),
     ];
     const segments = [{ dimension: "component type", segments: present.length }];
-    if (total === 0) return { outcome: "pass", summary: "There's no active automation to document.", evidence, segmentExemptReason: "Nothing to segment." };
+    if (total === 0) return { outcome: "pass", summary: said`There's no active automation to document.`, evidence, segmentExemptReason: "Nothing to segment." };
     const rate = Math.round((missing / total) * 1000) / 10;
     const worst = [...present].sort((a, b) => b.missing / b.total - a.missing / a.total)[0]!;
     const facts = { total, missing, rate };
-    const breakdown = present.map((g) => `${g.kind}: ${g.missing} of ${g.total}`).join(", ");
+    // The kinds are our own fixed names.
+    const breakdown = joinSaid(present.map((g) => said`${eng(g.kind)}: ${g.missing} of ${g.total}`), ", ");
     if (rate <= UNDOCUMENTED_LIMIT && worst.missing / worst.total <= 0.8) {
-      return { outcome: "pass", summary: `Automation with no description or comment: ${missing} of ${total} (${rate}%). ${breakdown}.`, evidence, segmentsChecked: segments, facts };
+      return { outcome: "pass", summary: said`Automation with no description or comment: ${missing} of ${total} (${rate}%). ${breakdown}.`, evidence, segmentsChecked: segments, facts };
     }
     return {
       outcome: "issue",
-      title: "Most automation has no description of what it does",
-      summary: `Active automation with no description or comment: ${missing} of ${total} (${rate}%). ${breakdown}. Without one, anyone new has to read each component to learn what it does and why, and changing it safely depends on whoever built it.`,
-      recommendation: "Describe what each flow, rule and class does and why, starting with your busiest objects, and require it for anything new.",
+      title: said`Most automation has no description of what it does`,
+      summary: said`Active automation with no description or comment: ${missing} of ${total} (${rate}%). ${breakdown}. Without one, anyone new has to read each component to learn what it does and why, and changing it safely depends on whoever built it.`,
+      recommendation: said`Describe what each flow, rule and class does and why, starting with your busiest objects, and require it for anything new.`,
       recommendationType: "change",
       severity: "medium",
       confidence: "high",

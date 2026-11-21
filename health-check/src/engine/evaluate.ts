@@ -6,6 +6,7 @@ import { DESTRUCTIVE_RECOMMENDATIONS, Finding, Metric, type Calibration, type Da
 import { fixFields } from "../fix/index.ts";
 import { MANUAL_STEPS } from "./manual-steps.ts";
 import { notMeasurableKind } from "./not-measurable.ts";
+import { joinSaid, markSentence, orgWordsOf, said, withOrgWords, type Said } from "./org-words.ts";
 import type { IssueResult, ManualState, RecordList, Rule, RuleContext, RuleResult } from "./rule.ts";
 
 export type AnalysisInput = {
@@ -45,6 +46,9 @@ export function findingId(ruleId: string, key: string): string {
  * or time says the guards' reason, as one with a figure does: agreeing a price
  * wouldn't size a finding its guards hold back.
  */
+/** What a held-back destructive recommendation says when its rule gave nothing else: the engine's own words. */
+const GUARD_HELD = "Check this by hand before changing anything: not every guard passed.";
+
 export function applyGuards(result: IssueResult): IssueResult {
   if (!DESTRUCTIVE_RECOMMENDATIONS.has(result.recommendationType)) return result;
   const guards = result.guards ?? [];
@@ -54,7 +58,7 @@ export function applyGuards(result: IssueResult): IssueResult {
   return {
     ...result,
     recommendationType: "investigate",
-    recommendation: result.blockedRecommendation ?? "Check this by hand before changing anything: not every guard passed.",
+    recommendation: result.blockedRecommendation ?? GUARD_HELD,
     value: ownReason ? result.value : { kind: "not_sized", reason: "Not counted as a saving, because not every guard passed." },
   };
 }
@@ -122,12 +126,34 @@ function toFinding(rule: Rule, result: RuleResult, pseudonyms: Pseudonymiser, as
     };
   }
   // A last pass over the text, in case a rule let a name through.
-  const scrubbed = pseudonyms.scrubDeep(draft) as Finding;
+  const cleaned = pseudonyms.scrubDeep(draft) as Finding;
+  const scrubbed = { ...cleaned, ...orgWordsFor(rule, draft as Finding, cleaned) };
   if (result.outcome !== "issue") return Finding.parse(scrubbed);
   // Hours to fix and a fix prompt (DECISIONS.md 628), from the scrubbed text, so a
   // prompt is built from what the finding says and nothing the scrub took out.
   // A remove, deactivate or merge a guard held back is now "investigate", which the prompt reads as held back.
   return Finding.parse({ ...scrubbed, ...fixFields(rule.id, scrubbed, pseudonyms) });
+}
+
+const MARKED = ["title", "summary", "recommendation", "notMeasurableReason"] as const;
+
+/**
+ * The sentences this analysis can vouch for, each with the characters it took
+ * from the org marked (DECISIONS.md 655): those `said` made, with their spans
+ * from where they were put together. A pass's or not measurable finding's title
+ * is the rule's own constant, and an empty recommendation holds no words. A
+ * sentence the scrub changed loses its marks, so a span can never sit on a token.
+ */
+function orgWordsFor(rule: Rule, before: Finding, after: Finding): { orgWords?: Finding["orgWords"] } {
+  const orgWords: NonNullable<Finding["orgWords"]> = {};
+  for (const key of MARKED) {
+    const text = before[key];
+    if (typeof text !== "string" || text !== after[key]) continue;
+    const ownWords = text === "" || (key === "title" && before.status !== "issue" && text === rule.title) || (key === "recommendation" && text === GUARD_HELD);
+    const marked = markSentence(text, ownWords ? [] : orgWordsOf(text));
+    if (marked) orgWords[key] = marked;
+  }
+  return Object.keys(orgWords).length > 0 ? { orgWords } : {};
 }
 
 function engineEvidence(ruleId: string, note: string, now: Date): Evidence {
@@ -143,7 +169,9 @@ const CONFIDENCE_RANK = { low: 0, medium: 1, high: 2 } as const;
  */
 export function withAssumptions(result: RuleResult, notes: string[]): RuleResult {
   if (notes.length === 0 || result.outcome === "not_measurable") return result;
-  const summary = [result.summary, ...notes].join(" ");
+  // Kept marked only when the summary and every note were made by said (DECISIONS.md 655).
+  const parts = [result.summary, ...notes];
+  const summary = parts.every((p) => orgWordsOf(p) !== null) ? joinSaid(parts as Said[], " ") : parts.join(" ");
   if (result.outcome === "pass") return { ...result, summary };
   return { ...result, summary, confidence: CONFIDENCE_RANK[result.confidence] > CONFIDENCE_RANK.medium ? "medium" : result.confidence };
 }
@@ -169,7 +197,7 @@ function runRule(rule: Rule, ctx: RuleContext, pseudonyms: Pseudonymiser, record
     return results.map((result) => {
       // Rule 4: a rule isn't allowed to report "no problem" from a total alone.
       if (result.outcome === "pass" && !result.segmentsChecked?.length && !result.segmentExemptReason) {
-        return toFinding(rule, { outcome: "not_measurable", key: result.key, reason: "The rule passed without segmenting its data, so the result can't be trusted.", evidence: result.evidence }, pseudonyms);
+        return toFinding(rule, { outcome: "not_measurable", key: result.key, reason: said`The rule passed without segmenting its data, so the result can't be trusted.`, evidence: result.evidence }, pseudonyms);
       }
       return toFinding(rule, result, pseudonyms, assumed.size > 0);
     });
@@ -182,6 +210,11 @@ function runRule(rule: Rule, ctx: RuleContext, pseudonyms: Pseudonymiser, record
 }
 
 export function analyse(input: AnalysisInput): AnalysisOutput {
+  // Each analysis has its own ledger of the sentences said made (DECISIONS.md 655).
+  return withOrgWords(() => analyseWithin(input));
+}
+
+function analyseWithin(input: AnalysisInput): AnalysisOutput {
   const { modules, extracts, calibration, now, window, answers, pseudonyms, userDirectory, scope = "complete" } = input;
   const raised = new Map<string, ManualStep>();
   let currentRule: string | null = null;
