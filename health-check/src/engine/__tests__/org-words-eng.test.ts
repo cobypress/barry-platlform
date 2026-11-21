@@ -22,6 +22,7 @@ const SIGNED_OFF: string[] = [
   "src/engine/rule.ts: `${n} ${n === 1 ? one : many}`",
   // A number the engine formats: digits, commas and a point.
   "src/engine/said-forms.ts: n.toLocaleString(\"en-GB\")",
+
 ];
 
 const ROOT = join(import.meta.dirname, "../../..");

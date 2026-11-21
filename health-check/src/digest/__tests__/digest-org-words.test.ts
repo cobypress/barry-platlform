@@ -9,6 +9,7 @@ import { NAMED_PEOPLE_SENTENCE, RunDigest, type DigestFinding } from "../../sche
 import type { Finding } from "../../schemas/index.ts";
 import { analyseExtracts, clone, loadExtracts, runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers } from "../../testing/replay.ts";
+import { UNCONVERTED_RULES } from "../../engine/__tests__/unconverted-rules.ts";
 
 // The digest says which characters of a finding's sentences the org chose
 // (DECISIONS.md 655), and nothing else about it moves.
@@ -71,10 +72,20 @@ describe("the digest marks the org's words (decision 655)", () => {
     assert.deepEqual(named.orgWords?.title, { orgWordsMarked: true, orgWords: [] });
   });
 
-  test("an unconverted rule's sentences carry no marking", () => {
-    const unmarked = digest.findings.filter((f) => f.status === "issue" && !f.ruleId.startsWith("aut."));
-    assert.ok(unmarked.length > 10);
-    for (const f of unmarked) assert.equal(f.orgWords?.summary, undefined, f.ruleId);
+  test("an unconverted rule's sentences carry no marking, and a converted rule's issue carries its marks (decision 657)", () => {
+    const issues = digest.findings.filter((f) => f.status === "issue");
+    for (const f of issues.filter((f) => UNCONVERTED_RULES.has(f.ruleId))) assert.equal(f.orgWords?.summary, undefined, f.ruleId);
+    // A sentence the digest holds as the finding wrote it is marked; one changed since (a token, the team-level wording) is unknown.
+    const asWritten = new Map(loaded.input.findings.map((f) => [f.id, f]));
+    let marked = 0;
+    for (const f of issues.filter((f) => !UNCONVERTED_RULES.has(f.ruleId))) {
+      for (const key of ["title", "summary", "recommendation"] as const) {
+        if (f[key] !== asWritten.get(f.id)?.[key]) continue;
+        assert.equal(f.orgWords?.[key]?.orgWordsMarked, true, `${f.ruleId} ${key}`);
+        marked++;
+      }
+    }
+    assert.ok(marked > 30, `${marked} sentences marked`);
   });
 
   test("a digest and findings written before this change parse, and the schema refuses spans that don't fit", () => {

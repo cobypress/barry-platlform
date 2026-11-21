@@ -48,6 +48,36 @@ const SIGNED_OFF: string[] = [
   // The said forms (DECISIONS.md 657): a number grouped() formatted.
   "src/engine/said-forms.ts: whole",
   "src/engine/said-forms.ts: whole",
+  // best practice (DECISIONS.md 657).
+  // Numbers: counts, rates, limits and constants the rule works out (each typed number).
+  "src/domains/best-practice/index.ts: OWNER_SKEW_RECORDS",
+  "src/domains/best-practice/index.ts: afterSave.length",
+  "src/domains/best-practice/index.ts: afterSave.length",
+  "src/domains/best-practice/index.ts: hits.length",
+  "src/domains/best-practice/index.ts: jobs.data.length",
+  "src/domains/best-practice/index.ts: jobs.data.length",
+  "src/domains/best-practice/index.ts: result.hits",
+  "src/domains/best-practice/index.ts: result.hits",
+  "src/domains/best-practice/index.ts: result.n",
+  "src/domains/best-practice/index.ts: result.n",
+  "src/domains/best-practice/index.ts: result.rate",
+  "src/domains/best-practice/index.ts: result.rate",
+  // Sentences said made: a said or joinSaid result held in a variable, a helper or option returning one, plural over literal nouns, or a said form (each typed Said).
+  "src/domains/best-practice/index.ts: grouped(OWNER_SKEW_RECORDS)",
+  "src/domains/best-practice/index.ts: grouped(skewed[0]!.records)",
+  "src/domains/best-practice/index.ts: noted(JOB_OWNER_PRACTICE)",
+  "src/domains/best-practice/index.ts: noted(JOB_OWNER_PRACTICE)",
+  "src/domains/best-practice/index.ts: noted(ROLE_PRACTICE)",
+  "src/domains/best-practice/index.ts: noted(ROLE_PRACTICE)",
+  "src/domains/best-practice/index.ts: noted(SAME_RECORD_PRACTICE)",
+  "src/domains/best-practice/index.ts: noted(SAME_RECORD_PRACTICE)",
+  "src/domains/best-practice/index.ts: noted(SKEW_PRACTICE)",
+  "src/domains/best-practice/index.ts: noted(SKEW_PRACTICE)",
+  "src/domains/best-practice/index.ts: plural(hits.length, \"active after-save flow\")",
+  "src/domains/best-practice/index.ts: plural(skewed.length, \"owner and object pair\")",
+  "src/domains/best-practice/index.ts: practice.checkedOn",
+  "src/domains/best-practice/index.ts: practice.position",
+  "src/domains/best-practice/index.ts: practice.source",
 ];
 
 const ROOT = join(import.meta.dirname, "../../..");
