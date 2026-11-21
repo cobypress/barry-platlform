@@ -11,6 +11,14 @@ import { deepDiveMetrics } from "./deep-dive.ts";
 import { PROCESS_RULES, processMetrics } from "./process.ts";
 import { driverMetrics } from "./drivers.ts";
 import { priorWinsExtractor } from "../../extract/prior-wins.ts";
+import { joinSaid, org, said, type Said } from "../../engine/org-words.ts";
+import { andList } from "../../engine/said-forms.ts";
+import { dimensionWords } from "./process.ts";
+
+// The rules' titles, summaries, recommendations and reasons are written with
+// `said`, every stage and segment key with `org`, so the digest can say which
+// words are the org's (DECISIONS.md 655, 657). A reason passed on from an
+// extract or a metric stays plain: unknown.
 
 const DIVERGENCE_POINTS = 15;
 const WATCHED_METRICS = ["historic.win_rate", "historic.slippage_rate"];
@@ -32,18 +40,18 @@ const unmappedStages: Rule = {
     ]);
     const missing = [...seen].filter((s) => !known.has(s)).sort();
     const evidence = [ctx.ev(stages.source, { count: stages.data.length })];
-    if (missing.length === 0) return { outcome: "pass", summary: `The calibration covers all ${seen.size} stages seen in the org.`, evidence, segmentsChecked: [{ dimension: "stage", segments: seen.size }] };
+    if (missing.length === 0) return { outcome: "pass", summary: said`The calibration covers all ${seen.size} stages seen in the org.`, evidence, segmentsChecked: [{ dimension: "stage", segments: seen.size }] };
     // Salesforce's flags stand in where a deal relies on one of them (DECISIONS.md 598), so the gap is still a gap to close.
     const flagged = new Set(stages.data.map((s) => s.ApiName));
     const unflagged = missing.filter((s) => !flagged.has(s));
     const consequence = unflagged.length === 0
-      ? "Where a deal in scope is in one, we've used Salesforce's own setting for whether it's open, won or lost, and said so; a check that needs its place in the sales order is reported as not measurable."
-      : `Where a deal in scope is in one, we've used Salesforce's own setting for whether it's open, won or lost, and said so, except for ${unflagged.join(", ")}, which Salesforce's stage settings don't hold; checks that depend on ${unflagged.length === 1 ? "that one" : "those"}, or on a stage's place in the sales order, are reported as not measurable.`;
+      ? said`Where a deal in scope is in one, we've used Salesforce's own setting for whether it's open, won or lost, and said so; a check that needs its place in the sales order is reported as not measurable.`
+      : said`Where a deal in scope is in one, we've used Salesforce's own setting for whether it's open, won or lost, and said so, except for ${stageList(unflagged)}, which Salesforce's stage settings don't hold; checks that depend on ${unflagged.length === 1 ? "that one" : "those"}, or on a stage's place in the sales order, are reported as not measurable.`;
     return {
       outcome: "issue",
-      title: "The calibration is missing stages",
-      summary: `${missing.length} stages in the org aren't in the calibration: ${missing.join(", ")}. ${consequence}`,
-      recommendation: "Add these stages to the calibration, then re-run.",
+      title: said`The calibration is missing stages`,
+      summary: said`${missing.length} stages in the org aren't in the calibration: ${stageList(missing)}. ${consequence}`,
+      recommendation: said`Add these stages to the calibration, then re-run.`,
       recommendationType: "change",
       severity: "high",
       confidence: "high",
@@ -67,29 +75,30 @@ const calibrationContradiction: Rule = {
     const stages = ctx.data(stagesExtractor);
     if (stages.status !== "ok") return { outcome: "not_measurable", reason: `Opportunity stages couldn't be read: ${stages.reason}`, evidence: [ctx.ev(stages.source, { count: null })] };
     const flags = new Map(stages.data.map((s) => [s.ApiName, s]));
-    const conflicts: string[] = [];
+    // Each stage's name and calibrated category are the org's and the calibration's words.
+    const conflicts: Said[] = [];
     for (const stage of ctx.calibration.stages) {
-      const org = flags.get(stage.name);
-      if (!org) continue;
-      if (stage.category === "won" && !org.IsWon) conflicts.push(`${stage.name} is calibrated as won, but Salesforce doesn't flag it as won`);
-      if (stage.category === "open" && org.IsClosed) conflicts.push(`${stage.name} is calibrated as open, but Salesforce flags it as closed`);
-      if ((stage.category === "lost" || stage.category === "no_decision") && !org.IsClosed) conflicts.push(`${stage.name} is calibrated as ${stage.category}, but Salesforce flags it as open`);
-      if ((stage.category === "lost" || stage.category === "no_decision") && org.IsWon) conflicts.push(`${stage.name} is calibrated as ${stage.category}, but Salesforce flags it as won`);
+      const flag = flags.get(stage.name);
+      if (!flag) continue;
+      if (stage.category === "won" && !flag.IsWon) conflicts.push(said`${org(stage.name)} is calibrated as won, but Salesforce doesn't flag it as won`);
+      if (stage.category === "open" && flag.IsClosed) conflicts.push(said`${org(stage.name)} is calibrated as open, but Salesforce flags it as closed`);
+      if ((stage.category === "lost" || stage.category === "no_decision") && !flag.IsClosed) conflicts.push(said`${org(stage.name)} is calibrated as ${org(stage.category)}, but Salesforce flags it as open`);
+      if ((stage.category === "lost" || stage.category === "no_decision") && flag.IsWon) conflicts.push(said`${org(stage.name)} is calibrated as ${org(stage.category)}, but Salesforce flags it as won`);
     }
-    const org = ctx.data(orgExtractor);
-    const orgFiscal = org.status === "ok" ? org.data[0]?.FiscalYearStartMonth : undefined;
+    const orgRead = ctx.data(orgExtractor);
+    const orgFiscal = orgRead.status === "ok" ? orgRead.data[0]?.FiscalYearStartMonth : undefined;
     const calibratedFiscal = ctx.calibration.fiscalYearStartMonth;
     if (calibratedFiscal && orgFiscal && calibratedFiscal !== orgFiscal) {
-      conflicts.push(`The calibration starts the fiscal year in month ${calibratedFiscal}, but the org starts it in month ${orgFiscal}`);
+      conflicts.push(said`The calibration starts the fiscal year in month ${calibratedFiscal}, but the org starts it in month ${orgFiscal}`);
     }
     const evidence = [ctx.ev(stages.source, { count: stages.data.length })];
     const segments = [{ dimension: "stage", segments: ctx.calibration.stages.length }];
-    if (conflicts.length === 0) return { outcome: "pass", summary: "The calibration agrees with Salesforce's stage flags.", evidence, segmentsChecked: segments };
+    if (conflicts.length === 0) return { outcome: "pass", summary: said`The calibration agrees with Salesforce's stage flags.`, evidence, segmentsChecked: segments };
     return {
       outcome: "issue",
-      title: "How stages are used differs from how they're set up",
-      summary: `${conflicts.join(". ")}. We've followed the calibration, but Salesforce's standard reports won't match these figures.`,
-      recommendation: "Confirm the calibration with the customer. If it's right, fix the stage settings so standard reports agree.",
+      title: said`How stages are used differs from how they're set up`,
+      summary: said`${joinSaid(conflicts, ". ")}. We've followed the calibration, but Salesforce's standard reports won't match these figures.`,
+      recommendation: said`Confirm the calibration with the customer. If it's right, fix the stage settings so standard reports agree.`,
       recommendationType: "investigate",
       severity: "medium",
       confidence: "high",
@@ -123,7 +132,10 @@ function divergenceValue(ctx: RuleContext, metric: Extract<Metric, { status: "me
   };
 }
 
-const listed = (items: string[]): string => (items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`);
+const stageList = (stages: string[]): Said => joinSaid(stages.map((s) => said`${org(s)}`), ", ");
+
+/** A watched metric's label: our own words when it is one of the two we watch, as written in metrics.ts; anything else is treated as the org's. */
+const metricWords = (label: string) => (label === "Win rate" ? "Win rate" : label === "Slippage rate" ? "Slippage rate" : org(label));
 
 /**
  * For a rep, the listed teams their closed deals were sold in: the two figures
@@ -139,10 +151,11 @@ function teamsAlsoListed(ctx: RuleContext, segment: { dimension: string; key: st
 }
 
 /** "the Sales EU team", "the Renewal record type". A rep keeps "rep" so team-level text can say "a single rep", and a default key reads as a group of deals. */
-function segmentPhrase(dimension: string, key: string): string {
-  if (dimension === "rep") return `rep ${key}`;
-  if (/^No /.test(key)) return `deals with ${key.toLowerCase()}`;
-  return `the ${key} ${dimension}`;
+function segmentPhrase(dimension: string, key: string): Said {
+  // The key is the org's (a team, a record type, a person's token), lower-cased or not.
+  if (dimension === "rep") return said`rep ${org(key)}`;
+  if (/^No /.test(key)) return said`deals with ${org(key.toLowerCase())}`;
+  return said`the ${org(key)} ${dimensionWords(dimension)}`;
 }
 
 // Rule 4 for pipeline numbers: a healthy total can hide a team that has collapsed.
@@ -157,7 +170,7 @@ const segmentDivergence: Rule = {
     for (const m of measured) ctx.leanOn?.(m.id);
     if (measured.length === 0) {
       const first = watched[0];
-      const reason = first?.status === "not_measurable" ? first.reason : "No pipeline metric could be measured.";
+      const reason = first?.status === "not_measurable" ? first.reason : said`No pipeline metric could be measured.`;
       return { outcome: "not_measurable", reason, evidence: first?.evidence ?? [ctx.ev({ kind: "rest", path: "pipeline metrics" }, { count: null })] };
     }
     const outliers = measured.flatMap((metric) => {
@@ -171,19 +184,19 @@ const segmentDivergence: Rule = {
     const segmentsChecked = [...dimensions].sort().map((dimension) => ({ dimension, segments: new Set(measured.flatMap((m) => m.segments.filter((s) => s.dimension === dimension).map((s) => s.key))).size }));
     const evidence = measured[0]!.evidence;
     if (outliers.length === 0) {
-      return { outcome: "pass", summary: `No segment is ${DIVERGENCE_POINTS} points worse than the overall figure.`, evidence, segmentsChecked };
+      return { outcome: "pass", summary: said`No segment is ${DIVERGENCE_POINTS} points worse than the overall figure.`, evidence, segmentsChecked };
     }
     outliers.sort((a, b) => b.gap - a.gap);
     const teamsListed = (metricId: string): string[] => outliers.filter((o) => o.metric.id === metricId && o.segment.dimension === "team").map((o) => o.segment.key);
     return outliers.map(({ metric, segment, gap }) => {
       const within = teamsAlsoListed(ctx, segment, teamsListed(metric.id));
-      const overlap = within.length ? ` This rep sells in ${listed(within.map((t) => `the ${t} team`))}, which ${within.length === 1 ? "is" : "are"} also listed, so the two figures share deals.` : "";
+      const overlap = within.length ? said` This rep sells in ${andList(within.map((t) => said`the ${org(t)} team`))}, which ${within.length === 1 ? "is" : "are"} also listed, so the two figures share deals.` : said``;
       return {
         outcome: "issue" as const,
         key: `${metric.id}:${segment.dimension}:${segment.key}`,
-        title: `${metric.label} for ${segmentPhrase(segment.dimension, segment.key)} is well ${(segment.value ?? 0) < (metric.value ?? 0) ? "below" : "above"} the overall figure`,
-        summary: `${metric.label} is ${segment.value}% for ${segmentPhrase(segment.dimension, segment.key)} (${segment.n} deals), against ${metric.value}% overall, a gap of ${gap} points.${overlap}`,
-        recommendation: "Look at what's different about these deals before drawing a conclusion: sample size, deal type and who's working them.",
+        title: said`${metricWords(metric.label)} for ${segmentPhrase(segment.dimension, segment.key)} is well ${(segment.value ?? 0) < (metric.value ?? 0) ? "below" : "above"} the overall figure`,
+        summary: said`${metricWords(metric.label)} is ${segment.value!}% for ${segmentPhrase(segment.dimension, segment.key)} (${segment.n} deals), against ${metric.value}% overall, a gap of ${gap} points.${overlap}`,
+        recommendation: said`Look at what's different about these deals before drawing a conclusion: sample size, deal type and who's working them.`,
         recommendationType: "investigate" as const,
         severity: "high" as const,
         confidence: segment.n >= ctx.calibration.minSample * 2 ? ("high" as const) : ("medium" as const),
