@@ -505,6 +505,15 @@ describe("the Postgres store's mark of a revoke not confirmed", () => {
     assert.deepEqual(insert.values, ["r1", DISCONNECT_STEP, 1, "failed", 0, "2026-11-21T12:00:00.000Z", SCAN_REVOKE_NOT_CONFIRMED]);
   });
 
+  test("a link's run counts as a scan's only when its product reads as scan", async () => {
+    for (const [row, want] of [[{ id: "r1", product: "scan" }, "r1"], [{ id: "r1", product: "barometer" }, null], [undefined, null]] as const) {
+      const pool = new Pool();
+      pool.query = async (text: string, values: unknown[] = []) => (pool.statements.push({ text, values }), { rows: row ? [row] : [], rowCount: row ? 1 : 0 });
+      assert.equal(await new PostgresWorkerStore(pool).scanRunOfLink("l1"), want);
+      assert.match(pool.statements[0]!.text, /JOIN "HealthCheckRun" r ON r."id" = l."runId" WHERE l."id" = \$1/);
+    }
+  });
+
   test("confirmed: the step taken away, nothing put in", async () => {
     const pool = new Pool();
     await new PostgresWorkerStore(pool).noteScanRevoke("r1", true, "2026-11-21T12:00:00.000Z");
