@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { writeFileSync } from "node:fs";
+import { utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { beginAuthorisation, createConnectLink } from "../../connect/link.ts";
 import type { TokenStore } from "../../salesforce/token-store.ts";
@@ -11,8 +11,9 @@ import { Simulator } from "../../testing/simulator.ts";
 import { lostRecorder } from "../bullmq.ts";
 import { sealConnectSecret } from "../connect-crypto.ts";
 import { withJobLock } from "../lock.ts";
+import { MemoryWorkerStore } from "../memory-store.ts";
 import { PostgresWorkerStore, type SqlClient, type SqlPool, type SqlResult } from "../postgres-store.ts";
-import { letGoOfLostRun, letGoOfScan, REVOKE_TRIES, REVOKE_WAITS_MS, SCAN_CONNECTION_MAX_MS, SCAN_SWEEP_MAX, sweepScanConnections } from "../scan-release.ts";
+import { letGoOfLostRun, REVOKE_TRIES, REVOKE_WAITS_MS, SCAN_CONNECTION_HARD_MAX_MS, SCAN_CONNECTION_MAX_MS, SCAN_SWEEP_MAX, SCAN_SWEEP_READS, SCAN_UNREADABLE_MAX_MS, sweepScanConnections } from "../scan-release.ts";
 import { DISCONNECT_STEP, ORG_AWAITING_CONNECT, SCAN_REVOKE_NOT_CONFIRMED, type RunJobInput } from "../types.ts";
 import { createJobHandler } from "../worker.ts";
 import { baseDeps, CONNECTION, consoleRun, oauthClient, RUN_ID, runInput, syntheticConnection } from "./helpers.ts";
@@ -70,6 +71,16 @@ class Dropping implements Transport {
     if (this.#left-- <= 0) throw new Error("fetch failed: ECONNRESET");
     return this.#inner.send(request);
   }
+}
+
+const LINK_ID = "00000000-0000-4000-8000-000000000652";
+const STATE_HASH = "a".repeat(43);
+
+/** A console link whose run is `runId`, added as a run of `product` when it isn't there. */
+function linkTo(s: { deps: { store: MemoryWorkerStore } }, linkId: string, runId: string, product: "scan" | "barometer" = "scan", connectionName = "linked"): void {
+  if (!s.deps.store.runs.has(runId)) s.deps.store.addRun(runInput({ run: consoleRun({ id: runId, product }), connectionName }));
+  const { link } = createConnectLink({ baseUrl: "https://console.example.com", customerRef: "SYN-0001", connectionName, createdBy: "consultant@example.com" });
+  s.deps.store.addLink({ ...link, id: linkId }, "used", { pending: null, code: null }, runId);
 }
 
 const scanRun = (overrides: Parameters<typeof consoleRun>[0] = {}) => consoleRun({ scope: "essentials", product: "scan", ...overrides });
@@ -281,13 +292,44 @@ describe("when Salesforce doesn't confirm the revoke", () => {
     assert.deepEqual(s.deps.store.writes.filter((w) => w.method === "noteScanRevoke").map((w) => w.detail), ["not confirmed", "confirmed"]);
   });
 
-  test("a connection that can't be read is deleted all the same, and marked not confirmed", async () => {
+  test("a connection that can't be read is kept for the sweep, logged by its name and nothing of its content, and nothing revoked or marked", async () => {
     const s = await setup();
-    writeFileSync(join(s.deps.tokens.dir, `${CONNECTION}.json`), "not a connection", { mode: 0o600 });
-    assert.equal(await letGoOfScan(RUN_ID, CONNECTION, s.deps), "not_confirmed");
-    assert.equal(s.deps.tokens.has(CONNECTION), false);
+    writeFileSync(join(s.deps.tokens.dir, `${CONNECTION}.json`), "not a connection PLANTED", { mode: 0o600 });
+    assert.equal((await s.handle(job, once)).outcome, "failed");
+    assert.equal(s.deps.tokens.has(CONNECTION), true, "kept, to try again");
     assert.equal(s.endpoint.revokes.length, 0);
-    assert.ok(s.deps.store.runs.get(RUN_ID)!.run.steps.some((st) => st.id === DISCONNECT_STEP));
+    assert.ok(!s.deps.store.runs.get(RUN_ID)!.run.steps.some((st) => st.id === DISCONNECT_STEP));
+    assert.ok(s.deps.lines.includes(`Scan ${RUN_ID}: the stored connection "${CONNECTION}" couldn't be read, so it is kept for the scan sweep to try again.`));
+    assertNoToken(s);
+  });
+});
+
+describe("the job lets go only of a connection that reads as its own scan's", () => {
+  test("the run names a connection marked for another scan: left, and said", async () => {
+    const s = await setup({ connection: { scan: { runId: "hc-2026-11-21-00000077" } } });
+    await s.handle(job, once);
+    assertKept(s);
+    assert.ok(s.deps.lines.includes(`Scan ${RUN_ID}: the stored connection "${CONNECTION}" isn't marked as this scan's, so it was left alone.`));
+  });
+
+  test("the run names a connection whose link's run is a health check: left", async () => {
+    const s = await setup({ connection: { fromLink: { linkId: LINK_ID, stateHash: STATE_HASH } } });
+    linkTo(s, LINK_ID, "hc-2026-11-21-00000088", "barometer");
+    await s.handle(job, once);
+    assertKept(s);
+  });
+
+  test("the run names a connection stored before marks, whose link's run is this scan: let go", async () => {
+    const s = await setup({ connection: { fromLink: { linkId: LINK_ID, stateHash: STATE_HASH } } });
+    linkTo(s, LINK_ID, RUN_ID);
+    await s.handle(job, once);
+    assertLetGo(s);
+  });
+
+  test("the run names no connection: the ones marked for it go", async () => {
+    const s = await setup({ input: runInput({ run: scanRun(), connectionName: null }), connection: { scan: { runId: RUN_ID } } });
+    assert.equal((await s.handle(job, once)).outcome, "failed");
+    assertLetGo(s);
   });
 });
 
@@ -325,6 +367,85 @@ describe("the sweep of scan connections that slipped through (DECISIONS.md 652)"
     assert.deepEqual({ letGo: outcome.letGo, busy: outcome.busy }, { letGo: 0, busy: 1 });
     assert.deepEqual(s.deps.tokens.list(), ["scan-busy", "scan-young"]);
     assert.equal(s.endpoint.revokes.length, 0);
+  });
+
+  const conn = (name: string, connectedAt: string, extra: Parameters<typeof syntheticConnection>[0] = {}) => syntheticConnection({ instanceUrl: FAKE.instanceUrl, name, connectedAt, ...extra });
+
+  test("a connection stored before marks is a scan's only when its link's run reads as product scan: let go then, and left for a customer's link, a link with no run, or a store that can't say", async () => {
+    const s = await sweepSetup();
+    const link = (n: number) => `00000000-0000-4000-8000-00000000000${n}`;
+    await s.deps.tokens.save(conn("old-scan", OLD, { fromLink: { linkId: link(1), stateHash: STATE_HASH } }));
+    await s.deps.tokens.save(conn("old-customer", OLD, { fromLink: { linkId: link(2), stateHash: STATE_HASH } }));
+    await s.deps.tokens.save(conn("old-nowhere", OLD, { fromLink: { linkId: link(3), stateHash: STATE_HASH } }));
+    linkTo(s, link(1), "hc-2026-11-21-00000101", "scan", "unnamed-a");
+    linkTo(s, link(2), "hc-2026-11-21-00000102", "barometer", "unnamed-b");
+    s.deps.store.runs.get("hc-2026-11-21-00000101")!.run.status = "failed";
+    s.endpoint.name = "old-scan";
+    const outcome = await sweepScanConnections(s.deps);
+    assert.equal(outcome.letGo, 1);
+    assert.deepEqual(s.deps.tokens.list(), ["old-customer", "old-nowhere"]);
+    // A store that throws on the link: nothing is a scan's by it.
+    const t = await sweepSetup();
+    await t.deps.tokens.save(conn("old-scan", OLD, { fromLink: { linkId: link(1), stateHash: STATE_HASH } }));
+    linkTo(t, link(1), "hc-2026-11-21-00000101", "scan", "unnamed-a");
+    t.deps.store.scanRunOfLink = async () => Promise.reject(new Error("the database is down"));
+    assert.equal((await sweepScanConnections(t.deps)).letGo, 0);
+    assert.deepEqual(t.deps.tokens.list(), ["old-scan"]);
+  });
+
+  test("a scan whose run is still queued or running is left until 24 hours; ended, gone or older, it goes; a status that can't be read leaves it", async () => {
+    const s = await sweepSetup();
+    const id = (n: number) => `hc-2026-11-21-0000020${n}`;
+    const add = (n: number, status: "extracting" | "analysing" | "failed" | "in_review", age: number) => {
+      s.deps.store.addRun(runInput({ run: scanRun({ id: id(n), status }), connectionName: `s-${n}` }));
+      return s.deps.tokens.save(conn(`s-${n}`, ago(age), { scan: { runId: id(n) } }));
+    };
+    await add(1, "extracting", SCAN_CONNECTION_MAX_MS + 60_000);
+    await add(2, "analysing", SCAN_CONNECTION_MAX_MS + 60_000);
+    await add(3, "failed", SCAN_CONNECTION_MAX_MS + 60_000);
+    await add(4, "in_review", SCAN_CONNECTION_MAX_MS + 60_000);
+    await add(5, "extracting", SCAN_CONNECTION_HARD_MAX_MS + 60_000);
+    const outcome = await sweepScanConnections(s.deps);
+    assert.deepEqual({ letGo: outcome.letGo, waiting: outcome.waiting }, { letGo: 3, waiting: 2 });
+    assert.deepEqual(s.deps.tokens.list(), ["s-1", "s-2"]);
+    s.deps.store.runState = async () => Promise.reject(new Error("the database is down"));
+    assert.equal((await sweepScanConnections(s.deps)).letGo, 0);
+    assert.deepEqual(s.deps.tokens.list(), ["s-1", "s-2"]);
+  });
+
+  test("a scan's connection that can't be read is kept to try again, and deleted, marked not confirmed, once more than 7 days old; one no scan run names is never touched", async () => {
+    const s = await sweepSetup();
+    s.deps.store.addRun(runInput({ run: scanRun({ id: "hc-2026-11-21-00000301", status: "failed" }), connectionName: "s-young" }));
+    s.deps.store.addRun(runInput({ run: scanRun({ id: "hc-2026-11-21-00000302", status: "failed" }), connectionName: "s-old" }));
+    for (const name of ["s-young", "s-old", "unknown-old"]) {
+      await s.deps.tokens.save(conn(name, OLD));
+      writeFileSync(join(s.deps.tokens.dir, `${name}.json`), "not a connection", { mode: 0o600 });
+    }
+    const weekAgo = (now.getTime() - SCAN_UNREADABLE_MAX_MS - 60_000) / 1000;
+    for (const name of ["s-old", "unknown-old"]) utimesSync(join(s.deps.tokens.dir, `${name}.json`), weekAgo, weekAgo);
+    const outcome = await sweepScanConnections(s.deps);
+    assert.deepEqual({ letGo: outcome.letGo, unreadable: outcome.unreadable }, { letGo: 1, unreadable: 2 });
+    assert.deepEqual(s.deps.tokens.list(), ["s-young", "unknown-old"]);
+    assert.ok(s.deps.store.runs.get("hc-2026-11-21-00000302")!.run.steps.some((st) => st.id === DISCONNECT_STEP));
+    assert.ok(s.deps.lines.some((l) => l.includes(`"s-young" couldn't be read, and is kept to try again`)));
+    assert.equal(s.endpoint.revokes.length, 0);
+  });
+
+  test(`a connection only customers' runs name is never decrypted; those no run names are read ${SCAN_SWEEP_READS} a sweep, in rotation`, async () => {
+    const s = await sweepSetup();
+    s.deps.store.addRun(runInput({ run: consoleRun({ id: "hc-2026-11-21-00000401", product: "barometer" }), connectionName: "customer-co" }));
+    await s.deps.tokens.save(conn("customer-co", OLD));
+    for (let i = 0; i < SCAN_SWEEP_READS + 5; i++) await s.deps.tokens.save(conn(`u-${String(i).padStart(3, "0")}`, OLD));
+    const read: string[] = [];
+    const load = s.deps.tokens.load.bind(s.deps.tokens);
+    s.deps.tokens.load = async (name: string) => (read.push(name), load(name));
+    const state = { cursor: 0 };
+    const first = await sweepScanConnections(s.deps, state);
+    assert.equal(first.customers, 1);
+    assert.equal(first.checked, SCAN_SWEEP_READS);
+    await sweepScanConnections(s.deps, state);
+    assert.ok(!read.includes("customer-co"), "a customer's is never decrypted");
+    assert.equal(new Set(read).size, SCAN_SWEEP_READS + 5, "every other file is reached over two sweeps");
   });
 
   test(`lets go of at most ${SCAN_SWEEP_MAX} a sweep, and the next takes the rest`, async () => {

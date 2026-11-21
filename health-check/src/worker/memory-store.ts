@@ -159,6 +159,26 @@ export class MemoryWorkerStore implements WorkerStore {
     this.writes.push({ method: "noteScanRevoke", id: runId, detail: confirmed ? "confirmed" : "not confirmed" });
   }
 
+  async scanRunOfLink(linkId: string): Promise<string | null> {
+    const runId = this.links.get(linkId)?.runId;
+    const run = runId ? this.runs.get(runId) : undefined;
+    return run?.run.product === "scan" ? run.run.id : null;
+  }
+
+  async runState(runId: string): Promise<{ product: string; status: string } | null> {
+    const run = this.runs.get(runId);
+    return run ? { product: run.run.product, status: run.run.status } : null;
+  }
+
+  async connectionProducts(names: string[]): Promise<Map<string, Array<{ runId: string; product: string }>>> {
+    const found = new Map<string, Array<{ runId: string; product: string }>>();
+    for (const run of this.runs.values()) {
+      if (!run.connectionName || !names.includes(run.connectionName)) continue;
+      found.set(run.connectionName, [...(found.get(run.connectionName) ?? []), { runId: run.run.id, product: run.run.product }]);
+    }
+    return found;
+  }
+
   async loadConnectJob(linkId: string): Promise<ConnectJobInput | null> {
     const link = this.links.get(linkId);
     if (!link) return null;

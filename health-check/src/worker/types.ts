@@ -375,6 +375,20 @@ export interface WorkerStore {
    * Never a token.
    */
   noteScanRevoke(runId: string, confirmed: boolean, at: string): Promise<void>;
+  /**
+   * The run behind a connect link, when the console's run says product scan,
+   * or null for any other product, a link with no run, or no link
+   * (DECISIONS.md 652): only a positive read makes a connection a scan's.
+   */
+  scanRunOfLink(linkId: string): Promise<string | null>;
+  /** A run's product and status, or null when there's no such run (DECISIONS.md 652). */
+  runState(runId: string): Promise<{ product: string; status: string } | null>;
+  /**
+   * For each connection name some run names, the products of the runs naming
+   * it, so the scan sweep needn't decrypt a customer's connection to know it
+   * isn't a scan's (DECISIONS.md 652). Names no run names are left out.
+   */
+  connectionProducts(names: string[]): Promise<Map<string, Array<{ runId: string; product: string }>>>;
 
   /** A free scan's teaser, for the console to show the prospect. One row a run. */
   saveScanResult(runId: string, result: ScanResult, madeAt: string): Promise<void>;

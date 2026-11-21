@@ -877,6 +877,28 @@ export class PostgresWorkerStore implements WorkerStore {
     });
   }
 
+  /** DECISIONS.md 652: the link's run, only when its product reads as scan. As the cap's join (610). */
+  async scanRunOfLink(linkId: string): Promise<string | null> {
+    const row = one(await this.#pool.query(`SELECT r."id", r."product" FROM "HealthCheckConnectLink" l JOIN "HealthCheckRun" r ON r."id" = l."runId" WHERE l."id" = $1`, [linkId]));
+    return row?.product === "scan" && typeof row.id === "string" ? row.id : null;
+  }
+
+  async runState(runId: string): Promise<{ product: string; status: string } | null> {
+    const row = one(await this.#pool.query(`SELECT "product", "status" FROM "HealthCheckRun" WHERE "id" = $1`, [runId]));
+    return row && typeof row.product === "string" && typeof row.status === "string" ? { product: row.product, status: row.status } : null;
+  }
+
+  async connectionProducts(names: string[]): Promise<Map<string, Array<{ runId: string; product: string }>>> {
+    const found = new Map<string, Array<{ runId: string; product: string }>>();
+    if (names.length === 0) return found;
+    const { rows } = await this.#pool.query(`SELECT "connectionName", "id", "product" FROM "HealthCheckRun" WHERE "connectionName" = ANY($1::text[])`, [names]);
+    for (const row of rows) {
+      if (typeof row.connectionName !== "string" || typeof row.id !== "string" || typeof row.product !== "string") continue;
+      found.set(row.connectionName, [...(found.get(row.connectionName) ?? []), { runId: row.id, product: row.product }]);
+    }
+    return found;
+  }
+
   async loadConnectJob(linkId: string): Promise<ConnectJobInput | null> {
     const row = one(await this.#pool.query(selectSql("HealthCheckConnectLink", CONNECT_LINK, `"id" = $1`), [linkId]));
     if (!row) return null;

@@ -141,8 +141,9 @@ export async function workerCommand(
   const sweeping = setInterval(sweep, SWEEP_INTERVAL_MS);
   sweeping.unref();
   // Free scans' connections that slipped past their run job (DECISIONS.md 652): once now, then hourly.
+  const scanSweepState = { cursor: 0 };
   const scanSweep = (): void =>
-    void (options.scanSweep ?? sweepScanConnections)(deps).catch((err: unknown) =>
+    void (options.scanSweep ?? sweepScanConnections)(deps, scanSweepState).catch((err: unknown) =>
       log(`Scan sweep failed, and will run again in an hour: ${err instanceof Error ? err.name : "unknown error"}`),
     );
   scanSweep();
