@@ -16,7 +16,9 @@ import { CalendarDate, DomainId, NotMeasurableKind, Timestamp } from "./common.t
 // Objects are not strict, so a later engine can add optional fields and a
 // console still on this copy reads the row, dropping what it doesn't know. The
 // hours and bands of decisions 628 and 636 are here; the fix prompts are not,
-// since the connector never serves a prompt as plain data.
+// since the connector never serves a prompt as plain data. A finding's
+// `orgWords` (DECISIONS.md 655) marks which characters of its sentences the org
+// chose: positions, not figures, so nothing traces them.
 
 export const DIGEST_VERSION = 1;
 

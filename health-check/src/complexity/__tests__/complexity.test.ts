@@ -182,8 +182,8 @@ describe("the synthetic org", () => {
     // The fingerprint test's golden hashes from before this lane (src/testing/__tests__/fingerprint.test.ts).
     const print = fingerprint(dir);
     assert.equal(print["scores.json"], "17cdb1708449d000");
-    // Moved since by decision 628's hours and prompts alone, which the fingerprint test holds.
-    assert.equal(print["findings.json"], "7f675e15a778749f");
+    // Moved since by decision 628's hours and prompts, then 655's org-word marks, alone, which the fingerprint test holds.
+    assert.equal(print["findings.json"], "ce951fc00054cb75");
     assert.equal(print["metrics.json"], "10d5f5733555b541");
     assert.equal(print["raw-notes.md"], "5e5e3581e490bb64");
     const scores = JSON.parse(readFileSync(join(dir, "scores.json"), "utf8")) as Score[];

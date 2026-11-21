@@ -410,9 +410,14 @@ function assertJsonSafe(value: unknown, path: string): void {
   else if (value !== null && typeof value === "object") for (const [key, x] of Object.entries(value)) assertJsonSafe(x, `${path}.${key}`);
 }
 
+// The marks on a finding's sentences (DECISIONS.md 655) have nothing to do with a
+// correction, and the console's copy of this file reads findings without them.
+const unmarked = (findings: Finding[]): Finding[] => findings.map(({ orgWords: _marks, ...f }) => f);
+
 /** The whole file, from the code and the synthetic run. */
 export async function overridesGolden(): Promise<OverridesGolden> {
-  const cases = handCases().map(({ name, findings = [], metrics = [], overrides }): GoldenCase => {
+  const cases = handCases().map(({ name, findings: given = [], metrics = [], overrides }): GoldenCase => {
+    const findings = unmarked(given);
     for (const f of findings) Finding.parse(f);
     for (const m of metrics) Metric.parse(m);
     for (const o of overrides) NumberOverride.parse(o);
@@ -421,7 +426,8 @@ export async function overridesGolden(): Promise<OverridesGolden> {
   });
   const { output, dir } = await runFromRecording({ answers: loadAnswers() });
   rmSync(dir, { recursive: true, force: true });
-  const { findings, metrics } = output!;
+  const { metrics } = output!;
+  const findings = unmarked(output!.findings);
   const golden: OverridesGolden = { source: "health-check/src/narrative/overrides.ts", cases, synthetic: { findings, metrics, verdicts: verdictsOf(findings, metrics) } };
   assertJsonSafe(golden, "golden");
   return golden;

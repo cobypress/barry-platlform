@@ -32,11 +32,11 @@ const digest = buildDigest({ report, pseudonyms, inventory: null, madeAt: MADE_A
 const round2 = (n: number): number => Math.round(n * 100) / 100;
 const near = (a: number, b: number): boolean => Math.abs(a - b) < 0.011;
 
-/** Every number in a value, with its path. */
+/** Every number in a value, with its path. A sentence's org-word spans are positions in its text, not figures (DECISIONS.md 655). */
 function numbers(value: unknown, path: Array<string | number> = []): Array<{ path: Array<string | number>; value: number }> {
   if (typeof value === "number") return [{ path, value }];
   if (Array.isArray(value)) return value.flatMap((v, i) => numbers(v, [...path, i]));
-  if (value && typeof value === "object") return Object.entries(value).flatMap(([k, v]) => numbers(v, [...path, k]));
+  if (value && typeof value === "object") return Object.entries(value).flatMap(([k, v]) => (k === "orgWords" ? [] : numbers(v, [...path, k])));
   return [];
 }
 
