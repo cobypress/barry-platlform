@@ -379,7 +379,9 @@ describe("the sweep of scan connections that slipped through (DECISIONS.md 652)"
     await s.deps.tokens.save(conn("old-nowhere", OLD, { fromLink: { linkId: link(3), stateHash: STATE_HASH } }));
     linkTo(s, link(1), "hc-2026-11-21-00000101", "scan", "unnamed-a");
     linkTo(s, link(2), "hc-2026-11-21-00000102", "barometer", "unnamed-b");
+    // Both runs ended, so only the product decides.
     s.deps.store.runs.get("hc-2026-11-21-00000101")!.run.status = "failed";
+    s.deps.store.runs.get("hc-2026-11-21-00000102")!.run.status = "in_review";
     s.endpoint.name = "old-scan";
     const outcome = await sweepScanConnections(s.deps);
     assert.equal(outcome.letGo, 1);
