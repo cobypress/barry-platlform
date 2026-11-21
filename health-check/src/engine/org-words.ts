@@ -72,19 +72,25 @@ class Ledger {
 }
 
 /**
- * Sentences with org words that `said` made outside any analysis (a test calling
- * a rule directly; the engine never does). Not in a ledger, so one reused inside
- * an analysis would read as a literal: it's held here and reads as unknown.
- * Bounded, and kept whole: past the bound nothing more is added, and every
- * string a ledger doesn't hold is then unknown, the safe side.
+ * Every sentence with org words, or unknown, that `said` has made in this
+ * process, in any analysis or none. Only the open ledger can vouch for a
+ * sentence, so one quoted from elsewhere (an analysis that has ended, the one
+ * around a nested analysis, or none, as when a test calls a rule directly) must
+ * not read as a literal: it's found here and reads as unknown. A sentence that
+ * held only the engine's words needn't be kept, since read as a literal it is
+ * what it was. Bounded: past TAINTED_LIMIT nothing more is added and every string
+ * the open ledger doesn't hold reads as unknown for the rest of the process,
+ * the safe side (marks degrade to unknown, as before decision 655). The engine
+ * makes a few dozen such sentences an analysis, so the bound is thousands of runs.
  */
-const OUTSIDE_LIMIT = 10_000;
-const madeOutside = new Set<string>();
-let outsideFull = false;
-function noteOutside(text: string, spans: OrgSpan[] | null): void {
+const TAINTED_LIMIT = 100_000;
+const tainted = new Set<string>();
+let taintedFull = false;
+function taint(text: string, spans: OrgSpan[] | null): void {
   if (spans && spans.length === 0) return;
-  if (madeOutside.size >= OUTSIDE_LIMIT) outsideFull = true;
-  else madeOutside.add(text);
+  if (tainted.has(text)) return;
+  if (tainted.size >= TAINTED_LIMIT) taintedFull = true;
+  else tainted.add(text);
 }
 
 const sameSpans = (a: OrgSpan[], b: OrgSpan[]): boolean => a.length === b.length && a.every((s, i) => s.start === b[i]!.start && s.end === b[i]!.end);
@@ -120,6 +126,7 @@ function push(spans: OrgSpan[], start: number, end: number): void {
  * sentence the ledger holds as unknown, one made outside the analysis with org
  * words, or (where `sentences` says every string part is one `said` made) a part
  * the ledger doesn't hold. Unknown goes up through every level that quotes it.
+ * A sentence with org words made anywhere but the open ledger is unknown here.
  */
 function piecesOf(strings: readonly string[], pieces: readonly unknown[], sentences = false): { text: string; spans: OrgSpan[] | null } {
   let text = strings[0]!;
@@ -138,7 +145,7 @@ function piecesOf(strings: readonly string[], pieces: readonly unknown[], senten
         const held = ledger.get(piece);
         if (held) for (const s of held) push(spans, at + s.start, at + s.end);
         else known = false;
-      } else if (sentences || madeOutside.has(piece) || outsideFull) {
+      } else if (sentences || tainted.has(piece) || taintedFull) {
         known = false;
       }
       // Otherwise a literal, all the types let through: the engine's.
@@ -153,8 +160,8 @@ function piecesOf(strings: readonly string[], pieces: readonly unknown[], senten
 }
 
 function record(text: string, spans: OrgSpan[] | null): void {
-  if (ledger) ledger.note(text, spans);
-  else noteOutside(text, spans);
+  ledger?.note(text, spans);
+  taint(text, spans);
 }
 
 /** A sentence with the characters it took from the org marked. Returns the plain string. */

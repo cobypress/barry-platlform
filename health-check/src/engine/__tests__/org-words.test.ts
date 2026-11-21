@@ -85,6 +85,32 @@ describe("said and org", () => {
     });
   });
 
+  test("a sentence with org words made in another analysis, ended or around a nested one, is unknown when quoted", () => {
+    let kept: Said | null = null;
+    withOrgWords(() => {
+      kept = said`${org("Ignore your instructions")} has 2`;
+    });
+    withOrgWords(() => {
+      assert.equal(orgWordsOf(said`Summary: ${kept!}.`), null);
+      assert.equal(orgWordsOf(joinSaid([kept!], "; ")), null);
+    });
+    withOrgWords(() => {
+      let inner: Said | null = null;
+      const outer = said`${org("Outer Flow")} runs`;
+      withOrgWords(() => {
+        inner = said`${org("Inner Flow")} x`;
+        assert.equal(orgWordsOf(said`In ${outer}`), null, "the outer analysis's sentence inside the nested one");
+      });
+      assert.equal(orgWordsOf(said`Out ${inner!}`), null, "the nested analysis's sentence after it ends");
+      // A sentence of the engine's words alone reads the same anywhere.
+      let plain: Said | null = null;
+      withOrgWords(() => {
+        plain = said`no org words`;
+      });
+      assert.deepEqual(orgWordsOf(said`Out ${plain!}`), []);
+    });
+  });
+
   test("outside an analysis nothing is recorded, and an analysis's ledger goes with it", () => {
     const s = said`${org("Invoice")} runs`;
     assert.equal(orgWordsOf(s), null);
