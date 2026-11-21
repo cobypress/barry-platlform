@@ -237,9 +237,9 @@ export class MemoryWorkerStore implements WorkerStore {
     return true;
   }
 
-  async saveDocuments(runId: string, made: DocumentsMade, digest?: RunDigest | null, surveyMetrics?: Metric[]): Promise<void> {
+  async saveDocuments(runId: string, made: DocumentsMade, digest?: RunDigest | null, surveyMetrics?: Metric[]): Promise<boolean> {
     const doc = this.documents.get(runId);
-    if (doc?.input.state !== "making") return;
+    if (doc?.input.state !== "making") return false;
     Object.assign(doc, { made: structuredClone(made), error: null });
     Object.assign(doc.input, { state: "done", driveFolderId: made.driveFolderId, files: structuredClone(made.files) });
     this.writes.push({ method: "saveDocuments", id: runId, detail: made.folderName });
@@ -250,6 +250,7 @@ export class MemoryWorkerStore implements WorkerStore {
       output.surveyMetrics = structuredClone(surveyMetrics);
       this.writes.push({ method: "saveSurveyMetrics", id: runId, detail: surveyMetrics.length });
     }
+    return true;
   }
 
   /** Every metric row the run holds, as the console's HealthCheckMetric would: the org's, then the survey's (DECISIONS.md 645). */

@@ -340,9 +340,11 @@ export interface WorkerStore {
    * Left out, the table isn't named. With `surveyMetrics` (DECISIONS.md 645),
    * the run's `survey.*` metric rows are replaced by the printed report's, in
    * the same transaction and only when the row was marked done, in a savepoint
-   * of their own; left out, they're left alone.
+   * of their own; left out, they're left alone. True when the row was marked
+   * done, so the caller knows these were written (a console that moved the row
+   * on meanwhile gets none of it).
    */
-  saveDocuments(runId: string, made: DocumentsMade, digest?: RunDigest | null, surveyMetrics?: Metric[]): Promise<void>;
+  saveDocuments(runId: string, made: DocumentsMade, digest?: RunDigest | null, surveyMetrics?: Metric[]): Promise<boolean>;
   /** A reason the console can show. Never a token or a name. */
   failDocuments(runId: string, reason: string, at: string): Promise<void>;
 

@@ -975,23 +975,22 @@ export class PostgresWorkerStore implements WorkerStore {
     return result.rowCount === 1;
   }
 
-  async saveDocuments(runId: string, made: DocumentsMade, digest?: RunDigest | null, surveyMetrics?: Metric[]): Promise<void> {
+  async saveDocuments(runId: string, made: DocumentsMade, digest?: RunDigest | null, surveyMetrics?: Metric[]): Promise<boolean> {
     const text = `UPDATE "HealthCheckDocuments" SET "status" = 'done', "finishedAt" = $2::timestamp(3), "error" = NULL, "warnings" = $3::jsonb, "clientName" = $4, "folderName" = $5, "driveFolderId" = $6, "driveFolderUrl" = $7, "files" = $8::jsonb WHERE "runId" = $1 AND "status" = 'making'`;
     const values = [runId, made.at, JSON.stringify(made.warnings), made.clientName, made.folderName, made.driveFolderId, made.driveFolderUrl, JSON.stringify(made.files)];
-    if (digest === undefined && surveyMetrics === undefined) {
-      await this.#pool.query(text, values);
-      return;
-    }
+    if (digest === undefined && surveyMetrics === undefined) return (await this.#pool.query(text, values)).rowCount === 1;
     // The documents' row, the digest and the survey's metrics commit together,
     // so a lost connection leaves the make to be tried again with all of them.
     // Only a make that marked the row done writes them, or deletes the digest:
     // the console may have moved the row on meanwhile.
+    let marked = false;
     await this.#transaction(async (client) => {
-      const done = await client.query(text, values);
-      if (done.rowCount !== 1) return;
+      marked = (await client.query(text, values)).rowCount === 1;
+      if (!marked) return;
       if (digest !== undefined) await this.#writeDigest(client, runId, digest);
       if (surveyMetrics !== undefined) await this.#writeSurveyMetrics(client, runId, surveyMetrics, true);
     });
+    return marked;
   }
 
   addBenchmarkRows(rows: BenchmarkRow[]): Promise<void> {

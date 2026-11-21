@@ -16,7 +16,7 @@ import { loadAnswers, loadRecording, ReplayTransport } from "../../testing/repla
 import { SYNTHETIC_COMMENT, syntheticSurvey } from "../../testing/survey.ts";
 import { processDocumentsJob } from "../documents-job.ts";
 import type { DocumentDrive, DriveItem } from "../drive.ts";
-import { PostgresWorkerStore, type SqlClient, type SqlPool, type SqlResult } from "../postgres-store.ts";
+import { PostgresWorkerStore, SURVEY_METRICS_DELETE_SQL, type SqlClient, type SqlPool, type SqlResult } from "../postgres-store.ts";
 import { processRunJob } from "../run-job.ts";
 import { progressOf, type DocumentsJobInput, type RunJobInput } from "../types.ts";
 import { baseDeps, consoleRun, INTAKE, RUN_ID, runInput, syntheticConnection } from "./helpers.ts";
@@ -177,6 +177,53 @@ describe("a later write replaces the survey's metrics (decision 645)", () => {
     assert.deepEqual(survey(deps.store.storedMetrics(RUN_ID)), printed);
     assert.deepEqual(org(deps.store.storedMetrics(RUN_ID)), none.stored);
     assert.deepEqual(survey(JSON.parse(readFileSync(join(dir, "metrics.json"), "utf8")) as Metric[]), printed);
+
+    // Again, with the console moving the documents' row on before the save: the folder is left as it was.
+    const folderBefore = readFileSync(join(dir, "metrics.json"), "utf8");
+    deps.store.addDocumentsJob(job);
+    deps.renderReleased = async (_dir, _approved, out) => {
+      mkdirSync(out, { recursive: true });
+      const files = Object.fromEntries(["raw_notes", "executive_summary", "full_health_check", "ceo_one_pager", "action_lists", "tickets", "readout_kit"].map((k) => [k, join(out, `${k}.bin`)]));
+      for (const f of Object.values(files)) writeFileSync(f, "synthetic");
+      return { files: files as never, warnings: [], held: [], surveyMetrics: survey(below.stored) };
+    };
+    deps.store.saveDocuments = async () => false;
+    await processDocumentsJob(RUN_ID, deps, { final: true });
+    assert.equal(readFileSync(join(dir, "metrics.json"), "utf8"), folderBefore);
+  });
+});
+
+/** A survey where every figure is safe to show (decision 648), so the documents print them all. */
+const shownSurvey = (n: number) => syntheticSurvey(n, (_a, i) => ({ recommend: i < 6 ? 10 : 3, blockers: i < 6 ? ["data_wrong"] : ["nothing"], comment: i < 6 ? "Synthetic." : null }));
+
+describe("after the documents, the survey's rows and the digest describe the same answers (decisions 645 and 147)", () => {
+  test("a real make stores the run job's own rows, and a later delivery with one more answer changes neither the rows nor the digest", async () => {
+    const deps = baseDeps({ dataTransport: new ReplayTransport(loadRecording()) });
+    const first = await deliver(runInput({ survey: shownSurvey(12) }), deps);
+    const fromRunJob = survey(first.stored);
+    assert.ok(fromRunJob.length === SURVEY_METRIC_IDS.length && fromRunJob.every((m) => m.status === "measured"), "every figure shown");
+    // The console releases it, every section approved as drafted.
+    const run = deps.store.runs.get(RUN_ID)!;
+    run.run = { ...run.run, status: "released" };
+    const sections = run.output!.sections.map((sec) => ({ ...sec, status: "approved" as const, approval: { approvedBy: "consultant@example.com", approvedAt: "2026-11-04T18:00:00.000Z" } }));
+    deps.store.addDocumentsJob({ run: consoleRun({ status: "released", customerRef: "SYN-0001" }), intake: { ...INTAKE, customerName: "Synthetic Co" }, sections, versions: run.output!.versions, overrides: [], preparedBy: null, state: "queued", driveFolderId: null, files: [], survey: shownSurvey(13) });
+    deps.drive = new NoDrive();
+    // The real make, from the folder, as the worker runs it.
+    assert.equal((await processDocumentsJob(RUN_ID, deps, { final: true })).outcome, "done");
+    const afterMake = deps.store.storedMetrics(RUN_ID);
+    assert.deepEqual(survey(afterMake), fromRunJob, "the printed report's are the run job's, for the same survey");
+    assert.deepEqual(org(afterMake), org(first.stored), "the run's own rows untouched");
+    const digest = deps.store.getRunDigest(RUN_ID)!;
+    assert.ok(digest, "the make wrote a digest");
+    const digestSurvey = () => digest.metrics.filter((m) => SURVEY_METRIC_IDS.includes(m.id));
+    assert.deepEqual(digestSurvey().map((m) => [m.id, m.status === "measured" ? m.value : null]), fromRunJob.map((m) => [m.id, m.status === "measured" ? m.value : null]));
+
+    // One more answer, and the console sends the run job again: the released run's save is refused, so nothing moves.
+    run.survey = shownSurvey(13);
+    const again = await processRunJob(RUN_ID, deps, { final: true });
+    assert.equal(again.outcome, "skipped");
+    assert.deepEqual(deps.store.storedMetrics(RUN_ID), afterMake);
+    assert.deepEqual(deps.store.getRunDigest(RUN_ID), digest);
   });
 });
 
@@ -268,6 +315,32 @@ describe("a console that refuses a survey metric never costs the run its results
     await assert.rejects(new PostgresWorkerStore(pool, { log: () => {} }).saveRunOutput(RUN_ID, output()));
     assert.ok(pool.texts().includes("ROLLBACK"));
     assert.ok(!pool.texts().includes("COMMIT"));
+  });
+
+  test("the documents' delete is exactly the survey's eight ids for the run, and leaves every org row in a table holding both", async () => {
+    assert.equal(SURVEY_METRICS_DELETE_SQL, `DELETE FROM "HealthCheckMetric" WHERE "runId" = $1 AND "id" = ANY($2::text[])`);
+    assert.deepEqual(SURVEY_METRIC_IDS.length, 8);
+    assert.ok(SURVEY_METRIC_IDS.every((id) => id.startsWith("survey.")) && org(twelve.stored).every((m) => !m.id.startsWith("survey.")));
+    // A table with the run's rows, org and survey, and another run's: the statements as written, run against it.
+    const table: Array<{ runId: string; id: string }> = [...twelve.stored.map((m) => ({ runId: RUN_ID, id: m.id })), { runId: "hc-2026-11-01-00000002", id: SURVEY.responses }];
+    const pool = new FakePool();
+    pool.handlers.unshift((text, values) => {
+      const del = /^DELETE FROM "HealthCheckMetric" WHERE "runId" = \$1( AND "id" = ANY\(\$2::text\[\]\))?$/.exec(text);
+      if (del) {
+        const before = table.length;
+        for (let i = table.length - 1; i >= 0; i--) if (table[i]!.runId === values[0] && (!del[1] || (values[1] as string[]).includes(table[i]!.id))) table.splice(i, 1);
+        return { rows: [], rowCount: before - table.length };
+      }
+      if (text.startsWith(`DELETE FROM "HealthCheckMetric"`)) throw new Error(`A statement the table doesn't know: ${text}`);
+      if (text.startsWith(`INSERT INTO "HealthCheckMetric"`)) table.push({ runId: String(values[1]), id: String(values[0]) });
+      return undefined;
+    });
+    const made = { at: "2026-11-21T09:00:00.000Z", clientName: "Synthetic Co", folderName: "Synthetic Co", driveFolderId: "fld-1", driveFolderUrl: "https://drive.example.com/1", files: [], warnings: [] };
+    assert.equal(await new PostgresWorkerStore(pool, { log: () => {} }).saveDocuments(RUN_ID, made, null, survey(twelve.stored)), true);
+    const ours = table.filter((r) => r.runId === RUN_ID).map((r) => r.id);
+    assert.deepEqual(ours.filter((id) => !id.startsWith("survey.")), org(twelve.stored).map((m) => m.id), "every org row still there");
+    assert.deepEqual(ours.filter((id) => id.startsWith("survey.")).sort(), survey(twelve.stored).map((m) => m.id).sort(), "each survey row once");
+    assert.ok(table.some((r) => r.runId !== RUN_ID), "another run's rows untouched");
   });
 
   test("the documents' write replaces the run's survey rows after marking the row done, and a refusal costs those rows alone", async () => {

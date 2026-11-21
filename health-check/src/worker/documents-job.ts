@@ -440,8 +440,9 @@ async function documentsLocked(runId: string, deps: WorkerDeps, attempt: Attempt
     // None to write takes away an earlier make's, whose figures these documents may have corrected.
     const digest = printed.digest?.ok ? printed.digest.digest : null;
     // The survey's metrics as these documents print them, with their row: a run drafted before the run's results held them gets them now (DECISIONS.md 645).
-    if (printed.surveyMetrics) keepSurveyMetrics(dir, printed.surveyMetrics);
-    await deps.store.saveDocuments(runId, { at: now(), clientName, folderName: folder.name, driveFolderId: folder.id, driveFolderUrl: folder.url, files, warnings: [...printed.warnings, ...(handbook.ok ? [] : [handbook.warning])] }, digest, printed.surveyMetrics);
+    const saved = await deps.store.saveDocuments(runId, { at: now(), clientName, folderName: folder.name, driveFolderId: folder.id, driveFolderUrl: folder.url, files, warnings: [...printed.warnings, ...(handbook.ok ? [] : [handbook.warning])] }, digest, printed.surveyMetrics);
+    // The folder follows the rows, and only once they're written: a row the console moved on meanwhile changed neither.
+    if (saved && printed.surveyMetrics) keepSurveyMetrics(dir, printed.surveyMetrics);
     log(`Documents for ${runId} are in Drive${printed.warnings.length ? `, with ${printed.warnings.length} layout warnings` : ""}.`);
     // The folder is now the run's: share it with its readers (DECISIONS.md 253). The documents are made either way.
     await share();
