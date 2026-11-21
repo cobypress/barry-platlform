@@ -207,7 +207,10 @@ function readIssues(m: IssueMeasure, value: number, findings: Finding[], metrics
 
 function readMetric(m: MetricMeasure, value: number, metrics: Metric[]): Pick<InterviewTheme, "found" | "reading" | "why" | "metricId"> {
   const measured = valueOf(metrics, m.metric);
-  if (measured === null) return { found: "We couldn't measure this in your org.", reading: "cant_tell", why: "There's no figure from the data to set it against.", metricId: m.metric };
+  // Not measured, or not in the run at all (a set-up only run or a pulse has no
+  // historic.* metric): the reading cites nothing, since a section may cite only
+  // what its own run holds, and its wording states no figure (DECISIONS.md 643).
+  if (measured === null) return { found: "We couldn't measure this in your org.", reading: "cant_tell", why: "There's no figure from the data to set it against.", metricId: null };
   const gap = value - measured;
   const close = m.unit === "percent" ? Math.abs(gap) <= SHARE_WITHIN_POINTS : Math.abs(gap) <= Math.max(COUNT_WITHIN_AT_LEAST, Math.abs(measured) * COUNT_WITHIN_SHARE);
   if (close) return { found: m.found(measured), reading: "agrees", why: "Close to what we measured.", metricId: m.metric };
