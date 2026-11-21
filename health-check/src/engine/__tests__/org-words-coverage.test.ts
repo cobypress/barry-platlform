@@ -7,6 +7,7 @@ import type { Labels } from "../../extract/labels.ts";
 import type { Finding } from "../../schemas/index.ts";
 import { analyseExtracts, clone, loadExtracts, runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
+import { UNCALIBRATED_STAGES } from "../../testing/synthetic-org.ts";
 import { spansIfCurrent } from "../org-words.ts";
 import { UNCONVERTED_RULES } from "./unconverted-rules.ts";
 
@@ -41,6 +42,19 @@ const EMPTY_VALUE_WORDS: ReadonlySet<string> = new Set(["No origin", "No lead so
 /** A span holds text the org's data holds (in any case, or part of it, as a month of a date), a person's token, or our word for an empty value. */
 const fromOrg = (span: string): boolean => /^\[\[user:U\d{4}\]\]$/.test(span) || EMPTY_VALUE_WORDS.has(span) || orgText.some((t) => t.includes(span.toLowerCase()));
 
+/**
+ * The same org with a calibration that leaves out stages the org has (found in
+ * review), so the rules that list stages the calibration lacks, and the note
+ * that says how they were read, run as well.
+ */
+const uncalibrated: Finding[] = (() => {
+  const calibration = loadCalibration();
+  const trap: readonly string[] = [...UNCALIBRATED_STAGES.open, UNCALIBRATED_STAGES.won, UNCALIBRATED_STAGES.outOfScope];
+  calibration.scope.recordTypes = [...UNCALIBRATED_STAGES.scope];
+  calibration.stages = calibration.stages.filter((s) => !trap.includes(s.name));
+  return analyseExtracts(extracts, { modules: ALL_MODULES, answers: loadAnswers(), calibration }).findings;
+})();
+
 const marksOf = (f: Finding, key: (typeof SENTENCES)[number]) => {
   const text = f[key];
   return typeof text === "string" ? spansIfCurrent(text, f.orgWords?.[key]) : null;
@@ -58,7 +72,8 @@ describe("rules writing their sentences with said (decisions 655 and 657)", () =
     // Every converted rule writes at least one finding on the synthetic org, so each is held here.
     const ids = ALL_MODULES.flatMap((m) => m.rules.map((r) => r.id)).filter((id) => !UNCONVERTED_RULES.has(id));
     assert.deepEqual([...new Set(converted.map((f) => f.ruleId))].sort(), ids.sort());
-    for (const f of converted) {
+    assert.ok(uncalibrated.some((f) => f.ruleId === "pipe.unmapped-stages" && f.status === "issue"), "the stages the calibration leaves out are listed");
+    for (const f of [...converted, ...uncalibrated.filter((f) => !UNCONVERTED_RULES.has(f.ruleId))]) {
       for (const key of ["title", "recommendation"] as const) assert.ok(marksOf(f, key), `${f.ruleId} ${key}`);
       if (f.status !== "not_measurable") assert.ok(marksOf(f, "summary"), `${f.ruleId} summary`);
     }
@@ -89,6 +104,24 @@ describe("rules writing their sentences with said (decisions 655 and 657)", () =
     // Each planted name is quoted in a sentence a converted rule wrote, so the check bites on every kind.
     assert.deepEqual([...PLANTED_NAMES].filter((n) => !seen.has(n) && !quotedOnlyByUnconverted(n)), []);
     assert.ok(planted.some((n) => seen.has(n)), "the planted object labels are quoted");
+  });
+
+  test("outside its spans, no marked sentence holds a name the org's data holds, or a person's token (found in review)", () => {
+    const found = new Set<string>();
+    for (const f of [...findings, ...uncalibrated]) {
+      for (const key of SENTENCES) {
+        const text = f[key];
+        const spans = marksOf(f, key);
+        if (!spans || typeof text !== "string") continue;
+        let outside = "";
+        let at = 0;
+        for (const s of spans) [outside, at] = [`${outside}${text.slice(at, s.start)}\u0000`, s.end];
+        outside += text.slice(at);
+        for (const name of NAME_LIKE) if (outside.includes(name) && !ENGINE_WORDS.has(name)) found.add(`${f.ruleId} ${key}: "${name}"`);
+        for (const token of outside.match(/\[\[[a-z]+:[A-Z]\d{4}\]\]/g) ?? []) found.add(`${f.ruleId} ${key}: ${token}`);
+      }
+    }
+    assert.deepEqual([...found], []);
   });
 
   test("a hostile object label, worded as an instruction, lies wholly inside one span in each sentence that quotes it", () => {
@@ -144,9 +177,40 @@ const PLANTED_NAMES: readonly string[] = [
   "LegacySync",
   "FinanceSync",
   "Volume Discount",
+  "Partner Discount",
   "Warranty Term",
   "api.finance.example.com",
 ];
+/**
+ * Every name-like string the org's extracts, calibration and answers hold: five
+ * characters or more, with a letter, and not an id or a date. Outside a span,
+ * a marked sentence may hold one only if it is among ENGINE_WORDS.
+ */
+const NAME_LIKE: string[] = (() => {
+  const all = new Set<string>();
+  const add = (value: unknown): void => {
+    if (typeof value === "string") all.add(value);
+    else if (Array.isArray(value)) value.forEach(add);
+    else if (value && typeof value === "object") Object.values(value).forEach(add);
+  };
+  [...extracts.values(), loadCalibration(), loadAnswers()].forEach(add);
+  return [...all].filter((s) => s.length >= 5 && s.length <= 80 && /[A-Za-z]/.test(s) && !/^[A-Za-z0-9]{15,18}$/.test(s) && !/^\d{4}-\d\d/.test(s));
+})();
+
+/**
+ * Words the engine writes of its own that the synthetic org's data also holds:
+ * Salesforce's own names for objects, products, licences, settings and values
+ * ("Account", "Workflow", "Salesforce Integration", "Commit"), and ordinary
+ * words a field happens to hold ("owner", "email"). None is a name the
+ * synthetic org chose, so a planted name outside a span is still found.
+ */
+const ENGINE_WORDS: ReadonlySet<string> = new Set([
+  "API Only", "Account Engagement", "Account", "Active", "Campaign", "Cases", "Closed", "Commit", "Contact", "Contract", "Dashboard", "Default",
+  "Email", "Event", "Flows", "Macro", "Marketing", "Opportunity", "Report", "Sales", "Salesforce Integration", "Salesforce", "Scheduled", "Service",
+  "Validation", "Workflow", "answered", "cases", "email", "fields", "grade", "integration", "loops", "manager", "metadata", "owner", "period",
+  "picklist", "profile", "reference", "scheduled", "score", "shared", "update", "whole",
+]);
+
 /** On the synthetic org, the name is quoted only in sentences of rules not yet converted. */
 const quotedOnlyByUnconverted = (name: string): boolean => {
   const by = findings.filter((f) => SENTENCES.some((key) => typeof f[key] === "string" && f[key]!.includes(name)));
