@@ -780,6 +780,40 @@ const SIGNED_OFF: string[] = [
   "src/domains/integrations/index.ts: r.label",
   // A choice between those: our literal names, org words, sentences said made or numbers.
   "src/domains/integrations/index.ts: movable === onFull.length ? (movable === 1 ? \"it\" : \"all of them\") : movable",
+  // account engagement (DECISIONS.md 657).
+  // Numbers: counts, rates, limits and constants the rule works out (each typed number).
+  "src/domains/account-engagement/index.ts: STALE_DAYS",
+  "src/domains/account-engagement/index.ts: STALE_DAYS",
+  "src/domains/account-engagement/index.ts: UNWORKED_DAYS",
+  "src/domains/account-engagement/index.ts: UNWORKED_DAYS",
+  "src/domains/account-engagement/index.ts: UNWORKED_DAYS",
+  "src/domains/account-engagement/index.ts: UNWORKED_DAYS",
+  "src/domains/account-engagement/index.ts: facts.ungradedRate",
+  "src/domains/account-engagement/index.ts: facts.ungradedRate",
+  "src/domains/account-engagement/index.ts: facts.unscoredRate",
+  "src/domains/account-engagement/index.ts: facts.unscoredRate",
+  "src/domains/account-engagement/index.ts: inQueue.length",
+  "src/domains/account-engagement/index.ts: leftBehind.length",
+  "src/domains/account-engagement/index.ts: rate",
+  "src/domains/account-engagement/index.ts: rate",
+  "src/domains/account-engagement/index.ts: rate",
+  "src/domains/account-engagement/index.ts: ungraded",
+  "src/domains/account-engagement/index.ts: unscored",
+  "src/domains/account-engagement/index.ts: unworked.length",
+  "src/domains/account-engagement/index.ts: unworked.length",
+  "src/domains/account-engagement/index.ts: worst.n",
+  "src/domains/account-engagement/index.ts: worst.rate",
+  // Sentences said made: a said or joinSaid result held in a variable, a helper or option returning one, plural over literal nouns, or a said form (each typed Said).
+  "src/domains/account-engagement/index.ts: grouped(read)",
+  "src/domains/account-engagement/index.ts: left",
+  "src/domains/account-engagement/index.ts: parts",
+  "src/domains/account-engagement/index.ts: plural(handed.length, \"open lead\")",
+  "src/domains/account-engagement/index.ts: plural(handed.length, \"open lead\")",
+  "src/domains/account-engagement/index.ts: plural(read.rows.length, \"open lead\")",
+  "src/domains/account-engagement/index.ts: plural(read.rows.length, \"open lead\")",
+  "src/domains/account-engagement/index.ts: plural(synced, \"lead\")",
+  "src/domains/account-engagement/index.ts: plural(synced, \"lead\")",
+  "src/domains/account-engagement/index.ts: queued",
 ];
 
 const ROOT = join(import.meta.dirname, "../../..");
