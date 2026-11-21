@@ -160,10 +160,10 @@ describe("a later write replaces the survey's metrics (decision 645)", () => {
     assert.deepEqual(survey(kept.stored).map((m) => m.id), SURVEY_METRIC_IDS, "each once");
   });
 
-  test("the documents job stores the printed report's, replacing the run's, and keeps them in metrics.json", async () => {
+  test("the documents job stores the printed report's, replacing the run's, never the console's answers as they stand now, and keeps them in metrics.json", async () => {
     const { deps, dir } = await deliver(runInput({ survey: syntheticSurvey(MIN_RESPONSES - 1) }));
     const printed = survey(twelve.stored);
-    const job: DocumentsJobInput = { run: consoleRun({ status: "released", customerRef: "SYN-0001" }), intake: { ...INTAKE, customerName: "Synthetic Co" }, sections: [], versions: [], overrides: [], preparedBy: null, state: "queued", driveFolderId: null, files: [] };
+    const job: DocumentsJobInput = { run: consoleRun({ status: "released", customerRef: "SYN-0001" }), intake: { ...INTAKE, customerName: "Synthetic Co" }, sections: [], versions: [], overrides: [], preparedBy: null, state: "queued", driveFolderId: null, files: [], survey: syntheticSurvey(20) };
     deps.store.addDocumentsJob(job);
     deps.drive = new NoDrive();
     deps.renderReleased = async (_dir, _approved, out) => {
