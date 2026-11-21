@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -39,6 +39,12 @@ export const StoredConnection = z.object({
    * same connect job knows its own tokens by this, never by comparing clocks.
    */
   fromLink: z.object({ linkId: z.string().uuid(), stateHash: z.string().regex(/^[A-Za-z0-9_-]{43}$/) }).optional(),
+  /**
+   * Set by the worker only for a free scan's connection, with the scan's run:
+   * the one mark the scan sweep matches, so a customer's connection, which never
+   * has it, can't be let go by it (DECISIONS.md 652).
+   */
+  scan: z.object({ runId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/) }).optional(),
   /** JWT bearer only. The private key stays in its own file, owner-only. */
   jwt: z.object({ username: z.string().min(1), audience: z.string().url(), privateKeyPath: z.string().min(1) }).optional(),
 });
@@ -170,6 +176,16 @@ export class TokenStore {
     const parsed = StoredConnection.parse(value);
     if (parsed.name !== name) throw new Error("The stored connection is for a different name");
     return parsed;
+  }
+
+  /** The name of every stored connection, never a pending authorisation or a file half-written. */
+  list(): string[] {
+    if (!existsSync(this.dir)) return [];
+    return readdirSync(this.dir)
+      .filter((file) => file.endsWith(".json") && !file.endsWith(".pending.json"))
+      .map((file) => file.slice(0, -".json".length))
+      .filter((name) => ConnectionName.safeParse(name).success)
+      .sort();
   }
 
   has(name: string): boolean {

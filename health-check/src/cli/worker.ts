@@ -9,6 +9,9 @@ import { readWorkerEnv, WORKER_ENV } from "../worker/env.ts";
 import { PostgresWorkerStore, type SqlPool } from "../worker/postgres-store.ts";
 import { retentionSweep, SWEEP_INTERVAL_MS } from "../worker/retention.ts";
 import { createJobHandler } from "../worker/worker.ts";
+import type { WorkerDeps } from "../worker/deps.ts";
+import { JobBusyError, withJobLock } from "../worker/lock.ts";
+import { letGoOfLostRun, SCAN_SWEEP_INTERVAL_MS, sweepScanConnections } from "../worker/scan-release.ts";
 
 // `hc worker`: takes run, connect, documents and share jobs from the console's queue until told
 // to stop. It refuses to start without every variable in WORKER_ENV. BullMQ
@@ -56,6 +59,8 @@ export async function workerCommand(
     claudeCheck?: (client: NarrativeClient) => Promise<{ ok: boolean; detail: string }>;
     /** Tests only: stands in for the retention sweep. */
     sweep?: typeof retentionSweep;
+    /** Tests only: stands in for the sweep of free scans' connections. */
+    scanSweep?: typeof sweepScanConnections;
   } = {},
 ): Promise<number> {
   const log = options.log ?? ((line: string) => console.log(`${new Date().toISOString()} ${line}`));
@@ -77,7 +82,7 @@ export async function workerCommand(
   const queue = new bull.Queue(HEALTH_CHECK_QUEUE, { connection: redisConnection(config.redisUrl) });
   // One client for the documents and for sharing their folder (DECISIONS.md 251).
   const google = config.drive ? new GoogleDrive(config.drive) : null;
-  const handler = createJobHandler({
+  const deps: WorkerDeps = {
     store,
     tokens: new TokenStore({ dir: config.connectionsDir, key: tokenKeySource({ env: { HC_TOKEN_KEY: env.HC_TOKEN_KEY } as NodeJS.ProcessEnv, platform: "linux" }) }),
     runsDir: config.runsDir,
@@ -95,8 +100,14 @@ export async function workerCommand(
     queueRun: runQueuer(queue),
     narrative,
     log,
-  });
-  const worker = startQueueWorker(bull, handler, { redisUrl: config.redisUrl, concurrency: config.concurrency, log, onLost: lostRecorder(store) });
+  };
+  const handler = createJobHandler(deps);
+  // A scan's run BullMQ gave up on lets go of its connection, under the run's lock, unless a delivery holds it and will (DECISIONS.md 652).
+  const letGoLost = (runId: string): Promise<void> =>
+    withJobLock(locksDir, `run-${runId}`, () => letGoOfLostRun(runId, deps)).catch((err: unknown) => {
+      if (!(err instanceof JobBusyError)) log(`Run ${runId}'s connection couldn't be checked after BullMQ gave it up; the scan sweep will.`);
+    });
+  const worker = startQueueWorker(bull, handler, { redisUrl: config.redisUrl, concurrency: config.concurrency, log, onLost: lostRecorder(store, undefined, letGoLost) });
   log(`Taking jobs from health-check-jobs, ${config.concurrency} at a time, with runs and documents one at a time in ${HEAVY_QUEUE}.`);
   if (!config.drive) log("Google Drive isn't set up, so released runs' documents can't be made.");
   if (!config.micrositeKey) log("HC_MICROSITE_KEY isn't set, so released runs get documents but no customer microsite.");
@@ -129,8 +140,17 @@ export async function workerCommand(
   sweep();
   const sweeping = setInterval(sweep, SWEEP_INTERVAL_MS);
   sweeping.unref();
+  // Free scans' connections that slipped past their run job (DECISIONS.md 652): once now, then hourly.
+  const scanSweep = (): void =>
+    void (options.scanSweep ?? sweepScanConnections)(deps).catch((err: unknown) =>
+      log(`Scan sweep failed, and will run again in an hour: ${err instanceof Error ? err.name : "unknown error"}`),
+    );
+  scanSweep();
+  const scanSweeping = setInterval(scanSweep, SCAN_SWEEP_INTERVAL_MS);
+  scanSweeping.unref();
   await (options.until ?? untilSignalled());
   clearInterval(sweeping);
+  clearInterval(scanSweeping);
   log("Stopping: finishing the jobs in hand.");
   await worker.close();
   await queue.close();

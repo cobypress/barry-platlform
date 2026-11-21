@@ -204,6 +204,8 @@ async function connectLocked(linkId: string, deps: WorkerDeps, attempt: Attempt)
           issuedAt: tokens.issuedAt,
           connectedAt: at(),
           fromLink: { linkId: link.id, stateHash: pending.stateHash },
+          // A free scan's, and only a scan's: the mark the scan sweep matches (DECISIONS.md 652).
+          ...(job.scanRunId ? { scan: { runId: job.scanRunId } } : {}),
         }),
       );
       holding = true;

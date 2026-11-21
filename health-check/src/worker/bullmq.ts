@@ -138,12 +138,23 @@ export function gatedProcessor(handler: JobHandler, bull: Pick<BullModule, "Unre
  * a run as failed, documents as not made, so the console says so and offers to
  * queue it again. Connect and share jobs have their own retries and the daily sweep.
  */
-export function lostRecorder(store: Pick<WorkerStore, "recordRunFailure" | "failDocuments">, now: () => Date = () => new Date()): (data: unknown, reason: string) => Promise<void> {
+export function lostRecorder(
+  store: Pick<WorkerStore, "recordRunFailure" | "failDocuments">,
+  now: () => Date = () => new Date(),
+  /** A free scan's run lets go of its connection, as every other end of one does (DECISIONS.md 652). */
+  letGo?: (runId: string) => Promise<void>,
+): (data: unknown, reason: string) => Promise<void> {
   return async (data, reason) => {
     const job = data as { kind?: unknown; runId?: unknown };
     if (typeof job?.runId !== "string") return;
-    if (job.kind === "run") await store.recordRunFailure(job.runId, reason, now().toISOString());
-    else if (job.kind === "documents") await store.failDocuments(job.runId, reason, now().toISOString());
+    if (job.kind === "run") {
+      const runId = job.runId;
+      try {
+        await store.recordRunFailure(runId, reason, now().toISOString());
+      } finally {
+        if (letGo) await letGo(runId);
+      }
+    } else if (job.kind === "documents") await store.failDocuments(job.runId, reason, now().toISOString());
   };
 }
 

@@ -9,8 +9,7 @@ import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { BASELINE_OVERRIDES_FILE, BASELINE_READ_FILE, INTERVIEWS_FILE, keepSurveyMetrics, loadRun, OUTPUT_FILES, SURVEY_FILE, writeBaselineRead, writeRows } from "../render/render-run.ts";
 import { BASELINE_ROWS_UNREAD, baselineRefusedSummary } from "../render/render-released.ts";
 import { INTERVIEW_VERSION } from "../interviews/questions.ts";
-import { OAuthConnectionProvider, ReconnectionNeeded, revokeConnection } from "../salesforce/oauth-provider.ts";
-import { OAuthError } from "../salesforce/oauth.ts";
+import { OAuthConnectionProvider, ReconnectionNeeded } from "../salesforce/oauth-provider.ts";
 import { buildScanResult } from "../scan/result.ts";
 import { buildPulseResult } from "../pulse/result.ts";
 import { buildDigest } from "../digest/build.ts";
@@ -21,6 +20,7 @@ import type { StoredConnection } from "../salesforce/token-store.ts";
 import { safeReason, type Attempt, type JobOutcome, type WorkerDeps } from "./deps.ts";
 import { appFor, appNotSetUp, needsReconnection } from "./apps.ts";
 import { withJobLock } from "./lock.ts";
+import { letGoAfterRun, type SeenRun } from "./scan-release.ts";
 import { progressOf, RunClosedError, runOverall, type RunJobInput } from "./types.ts";
 import { withoutComments } from "../survey/questions.ts";
 import { SURVEY_METRIC_IDS } from "../survey/summary.ts";
@@ -100,14 +100,36 @@ async function draftSections(runId: string, dir: string, input: ReportInput, cli
 
 export async function processRunJob(runId: string, deps: WorkerDeps, attempt: Attempt): Promise<JobOutcome> {
   if (!RUN_ID.test(runId)) return { outcome: "failed", detail: "The run id isn't one the worker can use as a folder name" };
-  return withJobLock(deps.locksDir, `run-${runId}`, () => runLocked(runId, deps, attempt));
+  return withJobLock(deps.locksDir, `run-${runId}`, () => runThenLetGo(runId, deps, attempt));
 }
 
-async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Promise<JobOutcome> {
+/**
+ * A free scan gives the org's access back however its run ends (DECISIONS.md
+ * 652), inside the run's lock, once the job has an outcome: done, failed,
+ * stopped at the budget, or skipped as closed or gone. An error going back to
+ * the queue keeps the connection while another delivery will come, since that
+ * one resumes through it; on the last delivery nothing will, so it lets go
+ * first. Only a run the console says is a scan is ever let go.
+ */
+async function runThenLetGo(runId: string, deps: WorkerDeps, attempt: Attempt): Promise<JobOutcome> {
+  const seen: SeenRun = {};
+  let outcome: JobOutcome;
+  try {
+    outcome = await runLocked(runId, deps, attempt, seen);
+  } catch (err) {
+    if (attempt.final) await letGoAfterRun(runId, seen, deps);
+    throw err;
+  }
+  await letGoAfterRun(runId, seen, deps);
+  return outcome;
+}
+
+async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen: SeenRun): Promise<JobOutcome> {
   const log = deps.log ?? (() => {});
   const now = () => (deps.now ?? (() => new Date()))();
   const first = await deps.store.loadRunJob(runId);
   if (!first) return { outcome: "skipped", detail: `No run ${runId}` };
+  Object.assign(seen, { product: first.run.product, connectionName: first.connectionName });
   if (CLOSED.has(first.run.status)) return { outcome: "skipped", detail: `Run ${runId} is ${first.run.status.replace("_", " ")}, so there's nothing for the worker to do` };
 
   // The run is this delivery's before anything is written, to the folder or the
@@ -149,6 +171,7 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
   }
   if (!second) return { outcome: "skipped", detail: `No run ${runId}` };
   const input = second;
+  Object.assign(seen, { product: input.run.product, connectionName: input.connectionName });
 
   const problem = problemWith(input, deps);
   if (problem) return fail(problem);
@@ -331,7 +354,7 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
     if (!attempt.final) throw new Error(reason);
     return fail(`The run finished, but its results couldn't be saved: ${reason}`);
   }
-  if (input.run.product === "scan") await finishScan(runId, dir, name, deps, now().toISOString(), log);
+  if (input.run.product === "scan") await finishScan(runId, dir, deps, now().toISOString(), log);
   if (input.run.product === "pulse") await finishPulse(runId, dir, deps, now().toISOString(), log);
   return { outcome: "done", detail: `Run ${runId} is ${result.run.status.replace("_", " ")}` };
 }
@@ -571,11 +594,12 @@ async function finishPulse(runId: string, dir: string, deps: WorkerDeps, at: str
 }
 
 /**
- * A free scan, once its findings are saved: the teaser for the prospect, then
- * the connection given back, because a scan never reads the org again. A
- * failure here is logged; the console shows "working on it" until the row exists.
+ * A free scan, once its findings are saved: the teaser for the prospect, and
+ * its folder deleted. Its connection is given back once the job returns, as
+ * on every other end of a scan (DECISIONS.md 652). A failure here is logged;
+ * the console shows "working on it" until the row exists.
  */
-async function finishScan(runId: string, dir: string, name: string, deps: WorkerDeps, at: string, log: (line: string) => void): Promise<void> {
+async function finishScan(runId: string, dir: string, deps: WorkerDeps, at: string, log: (line: string) => void): Promise<void> {
   try {
     const { input } = loadRun(dir);
     // The org's counts come from the complexity score, which has checked each was read whole
@@ -592,12 +616,5 @@ async function finishScan(runId: string, dir: string, name: string, deps: Worker
     log(`Scan ${runId}'s run folder is deleted.`);
   } catch (err) {
     log(`Scan ${runId}'s run folder couldn't be deleted: ${safeReason(err)}`);
-  }
-  try {
-    await revokeConnection({ name, store: deps.tokens, transport: deps.oauthTransport });
-    log(`Scan ${runId}'s connection is revoked.`);
-  } catch (err) {
-    deps.tokens.delete(name);
-    log(`Salesforce didn't confirm revoking scan ${runId}'s connection, so the worker deleted its copy: ${err instanceof OAuthError ? err.code : "error"}.`);
   }
 }

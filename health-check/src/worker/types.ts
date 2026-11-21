@@ -162,6 +162,12 @@ export function runOverall(overall: OverallScore): RunOverall | null {
  */
 export const ORG_AWAITING_CONNECT = "awaiting-connect";
 
+/** The run step that says a free scan's revoke wasn't confirmed by Salesforce (DECISIONS.md 652). */
+export const DISCONNECT_STEP = "disconnect";
+/** What that step says, for the console to show. Fixed text: never a token, a code or Salesforce's words. */
+export const SCAN_REVOKE_NOT_CONFIRMED =
+  "Salesforce didn't confirm that it revoked this scan's connection. We deleted our copy, so we can't use it again, but Salesforce may treat it as valid until it expires or someone in the org revokes it.";
+
 export type ConnectJobInput = {
   link: ConnectLink;
   state: LinkState;
@@ -360,6 +366,15 @@ export interface WorkerStore {
 
   /** Records that the worker put a run on the queue itself, as the console does when it queues one. */
   recordRunQueued(runId: string, at: string): Promise<void>;
+
+  /**
+   * Whether Salesforce confirmed revoking a free scan's connection (DECISIONS.md
+   * 652): not confirmed puts the run's `disconnect` step in as failed with
+   * SCAN_REVOKE_NOT_CONFIRMED, replacing any earlier one; confirmed takes it
+   * away. Whatever the run's status, since a scan lets go after its results.
+   * Never a token.
+   */
+  noteScanRevoke(runId: string, confirmed: boolean, at: string): Promise<void>;
 
   /** A free scan's teaser, for the console to show the prospect. One row a run. */
   saveScanResult(runId: string, result: ScanResult, madeAt: string): Promise<void>;

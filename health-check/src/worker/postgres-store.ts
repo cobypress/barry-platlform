@@ -16,9 +16,11 @@ import { BenchmarkRow, HeadcountBand, Industry } from "../schemas/benchmark.ts";
 import { storedFromRow, waitingRow, type ConsoleSummariesRow, type StoredSummaries } from "../handbook/summary-row.ts";
 import { Calibration, ConnectLink, ManualAnswer, NumberOverride, ReportSection, Run, SectionVersion, type Finding, type ManualStep, type Metric, type Score } from "../schemas/index.ts";
 import {
+  DISCONNECT_STEP,
   LinkState,
   ORG_AWAITING_CONNECT,
   RunClosedError,
+  SCAN_REVOKE_NOT_CONFIRMED,
   type ConnectJobInput,
   type DocumentFile,
   type DocumentsJobInput,
@@ -864,6 +866,14 @@ export class PostgresWorkerStore implements WorkerStore {
       await client.query(`UPDATE "HealthCheckRun" SET "status" = 'failed' WHERE "id" = $1`, [runId]);
       await client.query(`DELETE FROM "HealthCheckRunStep" WHERE "runId" = $1 AND "id" = 'worker'`, [runId]);
       await this.#insert(client, "HealthCheckRunStep", RUN_STEP, { runId, id: "worker", version: 1, status: "failed", calls: 0, finishedAt: at, error: reason });
+    });
+  }
+
+  /** DECISIONS.md 652: a step row, so no schema change. Not #openRun: a scan lets go after its results, in review or not. */
+  noteScanRevoke(runId: string, confirmed: boolean, at: string): Promise<void> {
+    return this.#transaction(async (client) => {
+      await client.query(`DELETE FROM "HealthCheckRunStep" WHERE "runId" = $1 AND "id" = $2`, [runId, DISCONNECT_STEP]);
+      if (!confirmed) await this.#insert(client, "HealthCheckRunStep", RUN_STEP, { runId, id: DISCONNECT_STEP, version: 1, status: "failed", calls: 0, finishedAt: at, error: SCAN_REVOKE_NOT_CONFIRMED });
     });
   }
 

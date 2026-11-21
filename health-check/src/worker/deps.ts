@@ -48,6 +48,8 @@ export type WorkerDeps = {
   dataTransport?: Transport;
   oauthTransport?: OAuthTransport;
   now?: () => Date;
+  /** Tests only: stands in for the waits between tries at revoking a scan's connection (DECISIONS.md 652). */
+  sleep?: (ms: number) => Promise<void>;
   /** Tests only: the connect job's time limit on reading the org's stages (DECISIONS.md 611). */
   stagesTimeoutMs?: number;
   log?: (line: string) => void;

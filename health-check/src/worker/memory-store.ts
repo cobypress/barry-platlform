@@ -6,7 +6,7 @@ import { DIGEST_KEYS, type RunDigest } from "../schemas/digest.ts";
 import { unstorableAt } from "./inventory.ts";
 import { Run, type BenchmarkRow, type ConnectLink, type Metric } from "../schemas/index.ts";
 import { storedFromRow, waitingRow, type ConsoleSummariesRow, type SummariesToSave } from "../handbook/summary-row.ts";
-import { ORG_AWAITING_CONNECT, RunClosedError, type ConnectJobInput, type DocumentsJobInput, type DocumentsJobReads, type DriveShare, type ShareJobInput, type DocumentsMade, type LinkConnected, type LinkState, type PulseRun, type ReleasedRun, type RunJobInput, type RunOutputRecord, type RunProgress, type WorkerStore } from "./types.ts";
+import { DISCONNECT_STEP, ORG_AWAITING_CONNECT, RunClosedError, SCAN_REVOKE_NOT_CONFIRMED, type ConnectJobInput, type DocumentsJobInput, type DocumentsJobReads, type DriveShare, type ShareJobInput, type DocumentsMade, type LinkConnected, type LinkState, type PulseRun, type ReleasedRun, type RunJobInput, type RunOutputRecord, type RunProgress, type WorkerStore } from "./types.ts";
 
 // The WorkerStore for tests: the console's tables as plain maps, with the same
 // rules a database store must keep. Writes replace; a run in review or
@@ -148,6 +148,15 @@ export class MemoryWorkerStore implements WorkerStore {
     steps.push({ id: "worker", version: 1, status: "failed", calls: 0, finishedAt: at, error: reason });
     run.run = Run.parse({ ...run.run, status: "failed", steps });
     this.writes.push({ method: "recordRunFailure", id: runId, detail: reason });
+  }
+
+  /** As the Postgres store: the run's disconnect step in or out, whatever the run's status. */
+  async noteScanRevoke(runId: string, confirmed: boolean, at: string): Promise<void> {
+    const run = this.#run(runId);
+    const steps = run.run.steps.filter((s) => s.id !== DISCONNECT_STEP);
+    if (!confirmed) steps.push({ id: DISCONNECT_STEP, version: 1, status: "failed", calls: 0, finishedAt: at, error: SCAN_REVOKE_NOT_CONFIRMED });
+    run.run = Run.parse({ ...run.run, steps });
+    this.writes.push({ method: "noteScanRevoke", id: runId, detail: confirmed ? "confirmed" : "not confirmed" });
   }
 
   async loadConnectJob(linkId: string): Promise<ConnectJobInput | null> {
