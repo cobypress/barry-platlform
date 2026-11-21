@@ -91,9 +91,16 @@ let taintedFull = false;
 function taint(text: string, spans: OrgSpan[] | null): void {
   if (spans && spans.length === 0) return;
   if (tainted.has(text)) return;
-  if (tainted.size >= TAINTED_LIMIT) taintedFull = true;
-  else tainted.add(text);
+  if (tainted.size < TAINTED_LIMIT) tainted.add(text);
+  else if (!taintedFull) {
+    taintedFull = true;
+    // Once, and never with org text: from here every mark degrades to unknown until the worker restarts (DECISIONS.md 663).
+    console.warn(`The org-word store is full (${TAINTED_LIMIT} sentences): sentence marks fall back to unknown until the worker restarts.`);
+  }
 }
+
+/** How full the process's store of org-worded sentences is, for the worker's log line (DECISIONS.md 663). Counts only, never text. */
+export const orgWordsStore = (): { size: number; limit: number; full: boolean } => ({ size: tainted.size, limit: TAINTED_LIMIT, full: taintedFull });
 
 const sameSpans = (a: OrgSpan[], b: OrgSpan[]): boolean => a.length === b.length && a.every((s, i) => s.start === b[i]!.start && s.end === b[i]!.end);
 

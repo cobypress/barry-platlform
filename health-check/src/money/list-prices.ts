@@ -45,7 +45,8 @@ export type ListPriceResult = { status: "priced"; annual: number; price: ListPri
 /** The annual list price of one seat of a licence in an edition, or why there isn't one. */
 export function listPrice(licence: string, edition: string | null, currency: string, prices: ListPrice[] = LIST_PRICES, plans: Record<string, string> = EDITION_PLANS): ListPriceResult {
   if (!edition) return { status: "unpriced", reason: said`The org's edition couldn't be read.` };
-  const plan = plans[edition];
+  // Own keys only, so an edition such as "constructor" can't reach the object's prototype and pass as a plan.
+  const plan = Object.hasOwn(plans, edition) ? plans[edition] : undefined;
   if (!plan) return { status: "unpriced", reason: said`We haven't confirmed which of Salesforce's current plans ${org(edition)} is priced as.` };
   const price = prices.find((p) => p.plan === plan && p.licence === licence && p.currency === currency);
   // The plan is from our own map, marked with the org's words: the safe side (DECISIONS.md 663).

@@ -1,5 +1,6 @@
 import type { JobHandler } from "./worker.ts";
 import { BadJobError, type WorkerStore } from "./types.ts";
+import { orgWordsStore } from "../engine/org-words.ts";
 
 // A thin adapter between BullMQ and the job handler, for the console's
 // "health-check-jobs" queue (blackcloud-next lib/health-check/jobs.ts). BullMQ
@@ -69,7 +70,9 @@ export function processorFor(handler: JobHandler, bull: Pick<BullModule, "Unreco
     const final = job.attemptsMade + 1 >= (job.opts.attempts ?? 1);
     try {
       const result = await handler(job.data, { final });
-      log(`${job.id ?? "?"} ${result.outcome}: ${result.detail}`);
+      // With how full the org-word store is, so a worker whose marks have degraded to unknown is seen (DECISIONS.md 663).
+      const store = orgWordsStore();
+      log(`${job.id ?? "?"} ${result.outcome}: ${result.detail} (org-word store ${store.size} of ${store.limit}${store.full ? ", full: marks are unknown until restart" : ""})`);
       return { outcome: result.outcome };
     } catch (err) {
       if (err instanceof BadJobError) throw new bull.UnrecoverableError(err.message);

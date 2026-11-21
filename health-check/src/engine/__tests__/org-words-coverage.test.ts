@@ -55,6 +55,20 @@ const uncalibrated: Finding[] = (() => {
   return analyseExtracts(extracts, { modules: ALL_MODULES, answers: loadAnswers(), calibration }).findings;
 })();
 
+/**
+ * A licence of the org's own name that the calibration doesn't price (found in
+ * review, decision 663), so the reasons that list unpriced licences, which the
+ * recorded org never reaches, run: the synthetic org's one licence is
+ * "Salesforce", a word the engine also writes, which the inverse check can't see.
+ */
+const UNPRICED_LICENCE = "Northwind Field Seat";
+const unpricedLicence: Finding[] = (() => {
+  const swap = (value: unknown): unknown => JSON.parse(JSON.stringify(value), (k, v: unknown) => (k === "Name" && v === "Salesforce" ? UNPRICED_LICENCE : v));
+  const calibration = loadCalibration();
+  calibration.licenceCosts = {};
+  return analyseExtracts(new Map([...extracts].map(([k, v]) => [k, swap(v)])), { modules: ALL_MODULES, answers: loadAnswers(), calibration }).findings;
+})();
+
 const marksOf = (f: Finding, key: (typeof SENTENCES)[number]) => {
   const text = f[key];
   return typeof text === "string" ? spansIfCurrent(text, f.orgWords?.[key]) : null;
@@ -118,6 +132,16 @@ describe("rules writing their sentences with said (decisions 655 and 657)", () =
     assert.ok(findings.filter((f) => f.effortHours).length >= 30);
   });
 
+  test("a licence the calibration doesn't price is named inside a span in every reason that lists it (found in review)", () => {
+    const quoting = unpricedLicence.flatMap((f) => sentencesOf(f).filter((s) => s.text.includes(UNPRICED_LICENCE)).map((s) => ({ ...s, ruleId: f.ruleId })));
+    assert.ok(quoting.filter((q) => q.key === "valueReason").length >= 3, "the unpriced-licence reasons run");
+    for (const q of quoting) {
+      assert.ok(q.spans, `${q.ruleId} ${q.key} is marked`);
+      const at = q.text.indexOf(UNPRICED_LICENCE);
+      assert.ok(q.spans.some((s) => s.start <= at && at + UNPRICED_LICENCE.length <= s.end), `${q.ruleId} ${q.key}: the licence is inside a span`);
+    }
+  });
+
   test("an unconverted rule's own sentences are left unknown, never guessed", () => {
     const issues = findings.filter((f) => UNCONVERTED_RULES.has(f.ruleId) && f.status === "issue");
     for (const f of issues) assert.equal(f.orgWords?.summary, undefined, f.ruleId);
@@ -147,14 +171,14 @@ describe("rules writing their sentences with said (decisions 655 and 657)", () =
 
   test("outside its spans, no marked sentence holds a name the org's data holds, or a person's token (found in review)", () => {
     const found = new Set<string>();
-    for (const f of [...findings, ...uncalibrated]) {
+    for (const f of [...findings, ...uncalibrated, ...unpricedLicence]) {
       for (const { key, text, spans } of sentencesOf(f)) {
         if (!spans) continue;
         let outside = "";
         let at = 0;
         for (const s of spans) [outside, at] = [`${outside}${text.slice(at, s.start)}\u0000`, s.end];
         outside += text.slice(at);
-        for (const name of NAME_LIKE) if (outside.includes(name) && !ENGINE_WORDS.has(name)) found.add(`${f.ruleId} ${key}: "${name}"`);
+        for (const name of [...NAME_LIKE, UNPRICED_LICENCE]) if (outside.includes(name) && !ENGINE_WORDS.has(name)) found.add(`${f.ruleId} ${key}: "${name}"`);
         for (const token of outside.match(/\[\[[a-z]+:[A-Z]\d{4}\]\]/g) ?? []) found.add(`${f.ruleId} ${key}: ${token}`);
       }
     }
