@@ -70,6 +70,20 @@ export type FixComplexity = z.infer<typeof FixComplexity>;
 /** The longest a fix prompt may be, in characters (DECISIONS.md 628). */
 export const FIX_PROMPT_MAX = 2500;
 
+// Which characters of a sentence were chosen inside the org (DECISIONS.md 655), in
+// UTF-16 code units, end exclusive, kept with the SHA-256 of the sentence they
+// were made for: a marking whose sentence has changed since is never used.
+export const OrgWordSpan = z.object({ start: z.number().int().nonnegative(), end: z.number().int().positive() });
+export type OrgWordSpan = z.infer<typeof OrgWordSpan>;
+export const MarkedSentence = z.object({ spans: z.array(OrgWordSpan), textSha256: z.string().regex(/^[0-9a-f]{64}$/) });
+export const FindingOrgWords = z.object({
+  title: MarkedSentence.optional(),
+  summary: MarkedSentence.optional(),
+  recommendation: MarkedSentence.optional(),
+  notMeasurableReason: MarkedSentence.optional(),
+});
+export type FindingOrgWords = z.infer<typeof FindingOrgWords>;
+
 // Labels are pseudonymised tokens (see src/privacy). A real name in a finding is a bug.
 export const Subject = z.object({ type: z.string().min(1), label: z.string().min(1) });
 export type Subject = z.infer<typeof Subject>;
@@ -113,6 +127,8 @@ export const Finding = z
     fixComplexity: FixComplexity.optional(),
     // Made by code from fixed text and the finding's own facts, never by Claude, and never naming a person or a record.
     fixPrompt: z.string().min(1).max(FIX_PROMPT_MAX).optional(),
+    // The sentences the engine can vouch for, each with the org's characters marked (DECISIONS.md 655). Absent: unknown.
+    orgWords: FindingOrgWords.optional(),
   })
   .superRefine((f, ctx) => {
     if (f.status === "not_measurable" && !f.notMeasurableReason) {

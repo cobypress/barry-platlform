@@ -1,6 +1,7 @@
 import { metadataExtractor } from "../../extract/automation.ts";
 import { unreadReason, type MetadataBundle, type UnreadKind } from "../../extract/metadata-parse.ts";
 import { plural, type NotMeasurableResult, type RuleContext } from "../../engine/rule.ts";
+import { eng, said, type Said } from "../../engine/org-words.ts";
 
 // Shared by the automation area and technical health, which reads the same
 // code (DECISIONS.md 169).
@@ -23,7 +24,7 @@ export const groupCount = (values: string[]): number => new Set(values).size;
 export const UNNAMED = "a custom object we couldn't name";
 
 /** Says which triggers sit on custom objects we couldn't name, and why, or nothing. */
-export function unnamedNote(count: number, idsRead: boolean, consequence: string): string {
-  if (count === 0) return "";
-  return ` ${plural(count, "active Apex trigger")} ${count === 1 ? "is" : "are"} on ${count === 1 ? UNNAMED : "custom objects we couldn't name"}${idsRead ? "" : ", because the list of custom objects couldn't be read"}, so ${consequence}.`;
+export function unnamedNote(count: number, idsRead: boolean, consequence: Said): Said {
+  if (count === 0) return said``;
+  return said` ${eng(plural(count, "active Apex trigger"))} ${count === 1 ? "is" : "are"} on ${count === 1 ? UNNAMED : "custom objects we couldn't name"}${idsRead ? "" : ", because the list of custom objects couldn't be read"}, so ${consequence}.`;
 }
