@@ -4104,7 +4104,7 @@
     ],
     "lines": [
      "Held back: 1 corrected figure can't be carried into the documents.",
-     "\"How easy Salesforce is to use\", value: 3.5 as read, corrected to 4, but a team survey figure is what people answered, so it can't be corrected."
+     "\"How easy Salesforce is to use\": A team survey figure is what people answered, so it can't be corrected."
     ]
    }
   },
@@ -4239,8 +4239,87 @@
     ],
     "lines": [
      "Held back: 1 corrected figure can't be carried into the documents.",
-     "\"How easy Salesforce is to use\", a figure: 3 as read, corrected to 4, but a team survey figure is what people answered, so it can't be corrected."
+     "\"How easy Salesforce is to use\": A team survey figure is what people answered, so it can't be corrected."
     ]
+   }
+  },
+  {
+   "name": "a survey measure that isn't measured: a row on it is ignored, as on any such measure",
+   "findings": [],
+   "metrics": [
+    {
+     "status": "not_measurable",
+     "id": "planted.survey_responses",
+     "domain": "survey",
+     "label": "People who answered the team survey",
+     "definition": "How many people answered the team survey.",
+     "unit": "count",
+     "evidence": [
+      {
+       "kind": "soql",
+       "api": "rest",
+       "query": "SELECT Id FROM User",
+       "count": 11,
+       "dateRange": {
+        "from": "2024-10-31",
+        "to": "2026-10-31"
+       },
+       "exclusions": [],
+       "capturedAt": "2026-10-31T13:00:00.000Z"
+      }
+     ],
+     "exclusions": [],
+     "assumptions": [],
+     "reason": "Fewer than 5 people answered the team survey, so we don't show its results."
+    }
+   ],
+   "overrides": [
+    {
+     "id": "ov-0001",
+     "runId": "run-0001",
+     "target": {
+      "type": "metric",
+      "id": "planted.survey_responses",
+      "field": "value"
+     },
+     "previousValue": 4,
+     "newValue": 5,
+     "reason": "Checked with the customer.",
+     "overriddenBy": "Synthetic Consultant",
+     "overriddenAt": "2026-10-31T13:00:00.000Z"
+    }
+   ],
+   "expected": {
+    "findings": [],
+    "metrics": [
+     {
+      "status": "not_measurable",
+      "id": "planted.survey_responses",
+      "domain": "survey",
+      "label": "People who answered the team survey",
+      "definition": "How many people answered the team survey.",
+      "unit": "count",
+      "evidence": [
+       {
+        "kind": "soql",
+        "api": "rest",
+        "query": "SELECT Id FROM User",
+        "count": 11,
+        "dateRange": {
+         "from": "2024-10-31",
+         "to": "2026-10-31"
+        },
+        "exclusions": [],
+        "capturedAt": "2026-10-31T13:00:00.000Z"
+       }
+      ],
+      "exclusions": [],
+      "assumptions": [],
+      "reason": "Fewer than 5 people answered the team survey, so we don't show its results."
+     }
+    ],
+    "refused": [],
+    "lines": []
    }
   },
   {
@@ -4450,7 +4529,7 @@
     ],
     "lines": [
      "Held back: 1 corrected figure can't be carried into the documents.",
-     "\"How easy Salesforce is to use\", value: 3.5 as read, corrected to 4, but a team survey figure is what people answered, so it can't be corrected."
+     "\"How easy Salesforce is to use\": A team survey figure is what people answered, so it can't be corrected."
     ]
    }
   },

@@ -217,6 +217,8 @@ function handCases(): HandCase[] {
   const ease = measure(27, "How easy Salesforce is to use", 3.5, { domain: "survey", unit: "count", n: 12, definition: "The median answer out of 5.", segments: [{ dimension: "role", key: "Sales rep", n: 7, value: 3, notMeasurableReason: null }, { dimension: "role", key: "Manager", n: 5, value: 4, notMeasurableReason: null }], segmentExemptReason: null });
   add({ name: "a survey measure: its value corrected is refused (survey)", metrics: [ease], overrides: [onMetric(ease, "value", 3.5, 4)] });
   add({ name: "a survey measure: a segment's figure corrected is refused (survey)", metrics: [ease], overrides: [onMetric(ease, "segments.role.Sales rep", 3, 4)] });
+  const unanswered: Metric = { status: "not_measurable", id: "planted.survey_responses", domain: "survey", label: "People who answered the team survey", definition: "How many people answered the team survey.", unit: "count", evidence: [EVIDENCE], exclusions: [], assumptions: [], reason: "Fewer than 5 people answered the team survey, so we don't show its results." };
+  add({ name: "a survey measure that isn't measured: a row on it is ignored, as on any such measure", metrics: [unanswered], overrides: [onMetric(unanswered, "value", 4, 5)] });
   const orgRate = measure(28, "Win rate", 72.5);
   add({ name: "a survey measure and an org measure corrected in one run: the survey's refused, the org's carried", metrics: [ease, orgRate], overrides: [onMetric(ease, "value", 3.5, 4, 1), onMetric(orgRate, "value", 72.5, 70, 2)] });
 

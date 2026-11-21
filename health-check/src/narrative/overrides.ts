@@ -21,7 +21,9 @@ import type { Finding, Metric, NumberOverride } from "../schemas/index.ts";
 // A team survey's figures are what people answered, not a measurement of the
 // org a consultant can know better, and a hand-set one could reveal or misstate
 // what someone said (DECISIONS.md 648). So none is ever carried: every figure
-// of one, its segments' too, is refused unless put back (DECISIONS.md 649).
+// of a measured one, its segments' too, is refused unless put back, and a row
+// on one that isn't measured changes nothing, as on any such metric
+// (DECISIONS.md 649).
 
 /**
  * A figure an override couldn't carry into the documents, and why: a finding's,
@@ -340,12 +342,8 @@ function metricFigures(m: Measured): Figure[] {
   return [{ field: "value", asRead: m.value }, { field: "n", asRead: m.n }, ...Object.entries(m.stats).map(([key, value]) => ({ field: `stats.${key}`, asRead: value }))];
 }
 
-/**
- * A measure's figure's name in a refusal: "value", "n" or the stat's key. Any
- * other field is refused only on a survey measure, and is "a figure": a
- * segment's key is never named (DECISIONS.md 517, 649).
- */
-const metricNameOf = (field: string): string => (field.startsWith("stats.") ? field.slice("stats.".length) : field === "value" || field === "n" ? field : "a figure");
+/** A measure's figure's name in a refusal: "value", "n" or the stat's key. */
+const metricNameOf = (field: string): string => (field.startsWith("stats.") ? field.slice("stats.".length) : field);
 
 /**
  * Every text of the metric a document prints. None is rewritten: on the
@@ -412,13 +410,13 @@ const SURVEY_DOMAIN = "survey";
 export const SURVEY_FIXED = "A team survey figure is what people answered, so it can't be corrected.";
 
 /**
- * A survey measure's rows, measured or not, each figure they name refused
- * unless its last row puts it back. A field the measure has no figure for (a
- * segment's, say) is judged from its first row's old value, so rows that end
- * where they began change nothing here as anywhere. Nothing is ever carried.
+ * A measured survey measure's rows, each figure they name refused unless its
+ * last row puts it back. A field the measure has no figure for (a segment's,
+ * say) is judged from its first row's old value, so rows that end where they
+ * began change nothing here as anywhere. Nothing is ever carried.
  */
-function refuseSurvey(m: Metric, overrides: NumberOverride[]): OverrideRefusal[] {
-  const figures = m.status === "measured" ? metricFigures(m) : [];
+function refuseSurvey(m: Measured, overrides: NumberOverride[]): OverrideRefusal[] {
+  const figures = metricFigures(m);
   return [...new Set(overrides.map((o) => o.target.field))].flatMap((field) => {
     const rows = overrides.filter((o) => o.target.field === field);
     const asRead = figures.find((x) => x.field === field)?.asRead ?? rows[0]!.previousValue;
@@ -434,7 +432,7 @@ function refuseSurvey(m: Metric, overrides: NumberOverride[]): OverrideRefusal[]
  * history for the raw notes (DECISIONS.md 516). A row naming a finding, metric
  * or figure the run doesn't hold, or a metric that isn't measured, changes
  * nothing (DECISIONS.md 511, item 5, and 517). A team survey's measure is never
- * changed, and a row on it is refused unless put back (DECISIONS.md 649).
+ * changed, and a row on a measured one is refused unless put back (DECISIONS.md 649).
  */
 export function applyOverrides(findings: Finding[], metrics: Metric[], overrides: NumberOverride[]): { findings: Finding[]; metrics: Metric[]; refused: OverrideRefusal[] } {
   const refused: OverrideRefusal[] = [];
@@ -447,12 +445,11 @@ export function applyOverrides(findings: Finding[], metrics: Metric[], overrides
   });
   const outM = metrics.map((m) => {
     const own = overrides.filter((o) => o.target.type === "metric" && o.target.id === m.id);
-    if (own.length === 0) return m;
+    if (own.length === 0 || m.status !== "measured") return m;
     if (m.domain === SURVEY_DOMAIN) {
       refused.push(...refuseSurvey(m, own));
       return m;
     }
-    if (m.status !== "measured") return m;
     const result = overrideMetric(m, own);
     refused.push(...result.refused);
     return result.metric;
@@ -497,8 +494,9 @@ function why(r: OverrideRefusal): string {
       return `the wording has ${grouped(r.asRead)} only as ${r.why.found}, which we can't be sure is this figure and can't rewrite`;
     case "stale":
       return `the correction was made from ${grouped(r.why.from)}, which this run no longer reads`;
+    // Never printed after "but": refusalLines gives a survey refusal a line of its own.
     case "survey":
-      return `${SURVEY_FIXED.charAt(0).toLowerCase()}${SURVEY_FIXED.slice(1, -1)}`;
+      return SURVEY_FIXED;
   }
 }
 
@@ -510,7 +508,10 @@ function why(r: OverrideRefusal): string {
 export function refusalLines(refused: OverrideRefusal[]): string[] {
   const ordered = [...refused.filter((r) => r.metricId === undefined), ...refused.filter((r) => r.metricId !== undefined)];
   const head = `Held back: ${countOf(refused.length)} can't be carried into the documents.`;
-  const listed = ordered.slice(0, REFUSALS_LISTED).map((r) => `"${shownTitle(r.title)}", ${r.metricId === undefined ? nameOf(r.field) : metricNameOf(r.field)}: ${grouped(r.asRead)} as read, corrected to ${grouped(r.last)}, but ${why(r)}.`);
+  // A survey refusal names the measure only: its figures are what people
+  // answered, and a row's old and new values are whatever its writer set, so
+  // neither is ever echoed (DECISIONS.md 649).
+  const listed = ordered.slice(0, REFUSALS_LISTED).map((r) => (r.why.kind === "survey" ? `"${shownTitle(r.title)}": ${SURVEY_FIXED}` : `"${shownTitle(r.title)}", ${r.metricId === undefined ? nameOf(r.field) : metricNameOf(r.field)}: ${grouped(r.asRead)} as read, corrected to ${grouped(r.last)}, but ${why(r)}.`));
   const more = refused.length > REFUSALS_LISTED ? [`And ${refused.length - REFUSALS_LISTED} more.`] : [];
   return [head, ...listed, ...more].map((line) => line.replace(/\s+/g, " ").trim());
 }
@@ -521,9 +522,16 @@ export function refusalLines(refused: OverrideRefusal[]): string[] {
 // whoever looks after the health check (DECISIONS.md 532).
 const CLOSE = "A finding's wording and a measure's chart or table can't be edited, so a figure we can't carry changes only with a new health check. The console refuses a correction like this before it is saved and holds a release while one stands. If this run is already released its corrections can no longer be changed there, so tell whoever looks after the health check.";
 
+// A survey figure's way out is to take the correction away, never a new health
+// check, so a survey refusal gets a close of its own; any other refusal keeps
+// the close above (DECISIONS.md 649).
+const SURVEY_CLOSE = "A team survey figure is never corrected, so a correction saved on one is used nowhere: remove it. The console takes no correction of a survey figure, lets one saved before be removed, and holds a release while one stands. If this run is already released its corrections can no longer be changed there, so tell whoever looks after the health check.";
+
 /** Why the documents were held back, for the console's Release tab and the command line. */
 export function refusalReason(refused: OverrideRefusal[]): string {
-  return [...refusalLines(refused), CLOSE].join("\n");
+  const survey = refused.some((r) => r.why.kind === "survey");
+  const other = refused.some((r) => r.why.kind !== "survey");
+  return [...refusalLines(refused), ...(other ? [CLOSE] : []), ...(survey ? [SURVEY_CLOSE] : [])].join("\n");
 }
 
 /** The same, for the worker's log and the job's outcome: the count only, since a title or a figure is the customer's. */

@@ -181,6 +181,7 @@ describe("the golden overrides file shared with the console (decision 532, item 
     "a survey measure: its value corrected is refused (survey)": ["measure:survey"],
     "a survey measure: a segment's figure corrected is refused (survey)": ["measure:survey"],
     "a survey measure and an org measure corrected in one run: the survey's refused, the org's carried": ["measure:survey"],
+    "a survey measure that isn't measured: a row on it is ignored, as on any such measure": [],
   };
 
   test("each hand case does what its name says", () => {
@@ -365,7 +366,8 @@ const handRefusals = allHandRefusals.filter((r) => r.why.kind !== "survey");
 
 describe("refusalLines (decision 532, item 1)", () => {
   test("refusalReason is the lines, then the close", () => {
-    for (const refused of [runRefusals.slice(0, 1), runRefusals.slice(0, 10), runRefusals, allHandRefusals, [...allHandRefusals].reverse()]) {
+    // The old kinds only: a survey refusal adds its own close (decision 649), held in survey-overrides.test.ts.
+    for (const refused of [runRefusals.slice(0, 1), runRefusals.slice(0, 10), runRefusals, handRefusals, [...handRefusals].reverse()]) {
       assert.equal(refusalReason(refused), [...refusalLines(refused), CLOSE].join("\n"));
     }
   });
@@ -382,11 +384,11 @@ describe("refusalLines (decision 532, item 1)", () => {
     }
   });
 
-  test("a survey refusal's line is the old shape with decision 649's reason (decision 649)", () => {
+  test("a survey refusal's line names the measure and why, and no figure (decision 649)", () => {
     const survey = allHandRefusals.filter((r) => r.why.kind === "survey");
     assert.equal(survey.length, 3);
     for (const r of survey) {
-      assert.equal(refusalLines([r])[1], `"${r.title}", ${r.field === "value" ? "value" : "a figure"}: ${grouped(r.asRead)} as read, corrected to ${grouped(r.last)}, but a team survey figure is what people answered, so it can't be corrected.`);
+      assert.equal(refusalLines([r])[1], `"${r.title}": A team survey figure is what people answered, so it can't be corrected.`);
     }
   });
 
