@@ -18,6 +18,10 @@ const SIGNED_OFF: string[] = [
   "src/domains/automation/index.ts: plural(missing, \"element\")",
   "src/domains/automation/index.ts: plural(objects, \"object\")",
   "src/domains/automation/shared.ts: plural(count, \"active Apex trigger\")",
+  // plural's own words: its first overload holds both nouns to literal types, so nothing here is the org's (DECISIONS.md 657).
+  "src/engine/rule.ts: `${n} ${n === 1 ? one : many}`",
+  // A number the engine formats: digits, commas and a point.
+  "src/engine/said-forms.ts: n.toLocaleString(\"en-GB\")",
 ];
 
 const ROOT = join(import.meta.dirname, "../../..");

@@ -45,6 +45,9 @@ const SIGNED_OFF: string[] = [
   // A choice between our fixed name for an object we couldn't name (a string constant) and a literal, or org words.
   `src/domains/automation/shared.ts: count === 1 ? UNNAMED : "custom objects we couldn't name"`,
   "src/domains/technical-health/index.ts: o.label === null ? UNNAMED : org(o.label)",
+  // The said forms (DECISIONS.md 657): a number grouped() formatted.
+  "src/engine/said-forms.ts: whole",
+  "src/engine/said-forms.ts: whole",
 ];
 
 const ROOT = join(import.meta.dirname, "../../..");

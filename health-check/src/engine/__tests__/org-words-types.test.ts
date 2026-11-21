@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import { eng, org, said, type Said } from "../org-words.ts";
+import { plural } from "../rule.ts";
 
 // What the type check lets into `said` (DECISIONS.md 655): `npm run typecheck`
 // holds every line marked below to be refused. A value read at run time passes
@@ -27,6 +28,14 @@ export function typed(): Said[] {
     said`Object ${anything} runs`,
     // @ts-expect-error String(x) is a string
     said`Object ${String(label)} runs`,
+    // Allowed: plural over literal nouns is the engine's words (DECISIONS.md 657).
+    said`${plural(n, "flow")} and ${plural(n, "entry", "entries")} and ${plural(n, n > 1 ? "rule" : "check")}`,
+    // @ts-expect-error plural over a noun read at run time is a plain string
+    said`${plural(n, label)} runs`,
+    // @ts-expect-error the same for the plural form
+    said`${plural(n, "object", label)} runs`,
+    // @ts-expect-error plural over any
+    said`${plural(n, anything)} runs`,
   ];
 }
 
