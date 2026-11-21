@@ -15,6 +15,7 @@ import { buildScanResult } from "../scan/result.ts";
 import { buildPulseResult } from "../pulse/result.ts";
 import { buildDigest } from "../digest/build.ts";
 import type { RunDigest } from "../schemas/digest.ts";
+import type { ReportSection } from "../schemas/index.ts";
 import { deleteRunFolder } from "../retention/purge.ts";
 import type { StoredConnection } from "../salesforce/token-store.ts";
 import { safeReason, type Attempt, type JobOutcome, type WorkerDeps } from "./deps.ts";
@@ -288,6 +289,8 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
     const complexity = complexityOf(dir, log);
     // A pulse's digest, from the report its result is made from, with its results (DECISIONS.md 632). A check's waits for its documents.
     const digest = input.run.product === "pulse" ? digestOf(runId, () => buildDigest({ report, pseudonyms, inventory, madeAt: now().toISOString() }), log) : null;
+    const sections = outputs.flatMap((o) => o.sections);
+    for (const line of danglingCitations(runId, sections, result.output!)) log(line);
     await deps.store.saveRunOutput(runId, {
       progress: progressOf(result.run),
       runDir: dir,
@@ -299,7 +302,7 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
       // sections in review. It has no step that starts review, so a run that's
       // in review hands over its drafts in review, as the console's own import does.
       // A section Claude's draft couldn't settle stays needs_input.
-      sections: outputs.flatMap((o) => o.sections).map((s) => (result.run.status === "in_review" && s.status === "draft" ? { ...s, status: "in_review" as const } : s)),
+      sections: sections.map((s) => (result.run.status === "in_review" && s.status === "draft" ? { ...s, status: "in_review" as const } : s)),
       versions: outputs.flatMap((o) => o.versions),
       facts: facts.summary,
       factsFile: facts.file,
@@ -322,6 +325,24 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
   if (input.run.product === "scan") await finishScan(runId, dir, name, deps, now().toISOString(), log);
   if (input.run.product === "pulse") await finishPulse(runId, dir, deps, now().toISOString(), log);
   return { outcome: "done", detail: `Run ${runId} is ${result.run.status.replace("_", " ")}` };
+}
+
+/**
+ * A log line for each section about to be stored that cites a finding, metric
+ * or manual step its own run doesn't hold (DECISIONS.md 643). Never a refusal:
+ * a dangling citation mustn't cost a run its results. Only counts and metric
+ * ids, which the engine names, are logged: never a section's text.
+ */
+export function danglingCitations(runId: string, sections: ReportSection[], output: { findings: Array<{ id: string }>; metrics: Array<{ id: string }>; manualSteps: Array<{ id: string }> }): string[] {
+  const has = (rows: Array<{ id: string }>) => new Set(rows.map((r) => r.id));
+  const [findings, metrics, steps] = [has(output.findings), has(output.metrics), has(output.manualSteps)];
+  return sections.flatMap((s) => {
+    const lost = { findings: s.findingIds.filter((id) => !findings.has(id)), metrics: s.metricIds.filter((id) => !metrics.has(id)), steps: s.manualStepIds.filter((id) => !steps.has(id)) };
+    const count = lost.findings.length + lost.metrics.length + lost.steps.length;
+    if (count === 0) return [];
+    const parts = [lost.findings.length ? `${lost.findings.length} finding${lost.findings.length === 1 ? "" : "s"}` : "", lost.metrics.length ? `${lost.metrics.length} metric${lost.metrics.length === 1 ? "" : "s"} (${lost.metrics.join(", ")})` : "", lost.steps.length ? `${lost.steps.length} manual step${lost.steps.length === 1 ? "" : "s"}` : ""].filter(Boolean);
+    return [`Run ${runId}: section ${s.output}:${s.key} cites ${count} ${count === 1 ? "id" : "ids"} not in the run, kept as they are: ${parts.join(", ")}.`];
+  });
 }
 
 /**
