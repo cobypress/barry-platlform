@@ -16,7 +16,7 @@ import { syntheticSurvey } from "../../testing/survey.ts";
 // correction already has, unless it is put back, and nothing else changes.
 
 const AT = "2026-10-31T13:00:00.000Z";
-const EVIDENCE = { kind: "engine", source: "HealthCheckSurveyResponse", count: 12, dateRange: null, exclusions: [], capturedAt: AT } as unknown as Metric["evidence"][number];
+const EVIDENCE: Metric["evidence"][number] = { kind: "engine", path: "HealthCheckSurveyResponse", count: 12, dateRange: null, exclusions: [], capturedAt: AT };
 
 type Measured = Extract<Metric, { status: "measured" }>;
 
