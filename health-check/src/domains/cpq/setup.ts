@@ -5,12 +5,18 @@ import { licencesExtractor } from "../../extract/users.ts";
 import type { DomainModule } from "../types.ts";
 import { labelsOf } from "../labels.ts";
 import { labelsExtractor } from "../../extract/labels.ts";
-import { listed, presenceGap } from "./shared.ts";
+import { presenceGap } from "./shared.ts";
+import { org, said, type Said } from "../../engine/org-words.ts";
+import { andList } from "../../engine/said-forms.ts";
 import { WHERE } from "../where.ts";
 
 // How CPQ is set up: its price and product rules, and the twin fields that carry
 // values from quote lines to opportunity and order products. None of it reads a
 // quote, so a set-up review runs it (DECISIONS.md 217).
+//
+// Every title, summary, recommendation and reason is written with `said`, and
+// every name the org chose with `org` (DECISIONS.md 655, 657). A reason passed
+// on from an extract quotes Salesforce and stays plain: unknown.
 
 const DOMAIN = "cpq_setup";
 const OWNER = "Salesforce admin";
@@ -37,14 +43,14 @@ const inactiveRules: Rule = {
     const evidence = [ctx.ev(priceRules.source, { count: priceRules.data.length }), ctx.ev(productRules.source, { count: productRules.data.length })];
     const segments = [{ dimension: "rule type", segments: 2 }];
     const facts = { inactive, total, priceInactive: price.length, productInactive: product.length, share: pct(inactive, total) };
-    if (total === 0) return { outcome: "pass", summary: "There are no price or product rules.", evidence, segmentExemptReason: "There are no rules to segment." };
-    if (inactive < INACTIVE_MIN || facts.share < INACTIVE_SHARE) return { outcome: "pass", summary: `Inactive price and product rules: ${inactive} of ${total} (${facts.share}%).`, evidence, segmentsChecked: segments, facts };
+    if (total === 0) return { outcome: "pass", summary: said`There are no price or product rules.`, evidence, segmentExemptReason: "There are no rules to segment." };
+    if (inactive < INACTIVE_MIN || facts.share < INACTIVE_SHARE) return { outcome: "pass", summary: said`Inactive price and product rules: ${inactive} of ${total} (${facts.share}%).`, evidence, segmentsChecked: segments, facts };
     const names = [...price, ...product].map((r) => r.Name).sort();
     return {
       outcome: "issue",
-      title: "Inactive pricing rules are cluttering the set-up",
-      summary: `${inactive} of ${total} price and product rules are inactive (${facts.share}%): ${plural(price.length, "price rule")} and ${plural(product.length, "product rule")}. Everyone who changes pricing has to work out whether each one still matters, and an inactive rule can be switched back on without anyone knowing why it was off.`,
-      recommendation: "Check each inactive rule with whoever owns pricing, and delete the ones nobody will use again.",
+      title: said`Inactive pricing rules are cluttering the set-up`,
+      summary: said`${inactive} of ${total} price and product rules are inactive (${facts.share}%): ${plural(price.length, "price rule")} and ${plural(product.length, "product rule")}. Everyone who changes pricing has to work out whether each one still matters, and an inactive rule can be switched back on without anyone knowing why it was off.`,
+      recommendation: said`Check each inactive rule with whoever owns pricing, and delete the ones nobody will use again.`,
       recommendationType: "investigate",
       severity: "low",
       confidence: "high",
@@ -76,10 +82,10 @@ const priceRuleConflicts: Rule = {
     const { priceRules, priceActions, twins, quoteFields } = ctx.data(cpqSetupExtractor);
     // A field by its label on the object the action sets, where the describe gave one (DECISIONS.md 414).
     const labels = labelsOf(ctx);
-    const fieldName = (target: string | null | undefined, field: string): string => {
+    const fieldName = (target: string | null | undefined, field: string): Said => {
       const object = /^quote$/i.test(target ?? "") ? "SBQQ__Quote__c" : "SBQQ__QuoteLine__c";
       const fields = object === "SBQQ__Quote__c" ? (quoteFields.status === "ok" ? quoteFields.data : []) : twins.status === "ok" ? twins.data.quoteLine : [];
-      return `${fields.find((f) => f.name.toLowerCase() === field.toLowerCase())?.label ?? field} on ${labels.object(object)}`;
+      return said`${org(fields.find((f) => f.name.toLowerCase() === field.toLowerCase())?.label ?? field)} on ${org(labels.object(object))}`;
     };
     if (priceRules.status !== "ok") return { outcome: "not_measurable", reason: `Price rules couldn't be read: ${priceRules.reason}`, evidence: [ctx.ev(priceRules.source, { count: null })] };
     if (priceActions.status !== "ok") return { outcome: "not_measurable", reason: `Price actions couldn't be read: ${priceActions.reason}`, evidence: [ctx.ev(priceActions.source, { count: null })] };
@@ -88,7 +94,7 @@ const priceRuleConflicts: Rule = {
     const active = priceRules.data.filter((r) => r.SBQQ__Active__c && r.SBQQ__EvaluationOrder__c !== null && r.SBQQ__EvaluationOrder__c !== undefined).sort((a, b) => a.Name.localeCompare(b.Name));
     const fields = new Map<string, Set<string>>();
     for (const a of priceActions.data) if (a.SBQQ__Field__c) fields.set(a.SBQQ__Rule__c, (fields.get(a.SBQQ__Rule__c) ?? new Set()).add(`${(a.SBQQ__TargetObject__c ?? "").toLowerCase()}|${a.SBQQ__Field__c.toLowerCase()}`));
-    const pairs: Array<{ a: string; b: string; field: string; named: string }> = [];
+    const pairs: Array<{ a: string; b: string; field: string; named: Said }> = [];
     for (let i = 0; i < active.length; i++) {
       for (let j = i + 1; j < active.length; j++) {
         const a = active[i]!;
@@ -106,13 +112,13 @@ const priceRuleConflicts: Rule = {
     const evidence = [ctx.ev(priceRules.source, { count: active.length, exclusions: ["Inactive rules", "Rules with no evaluation order"] }), ctx.ev(priceActions.source, { count: priceActions.data.length, ...(pairs.length ? { note: `Fields set by both rules of a pair: ${[...new Set(pairs.map((p) => p.field))].join(", ")}` } : {}) })];
     const segments = [{ dimension: "evaluation order", segments: new Set(active.map((r) => r.SBQQ__EvaluationOrder__c)).size }];
     const facts = { pairs: pairs.length, activeRules: active.length };
-    if (active.length < 2) return { outcome: "pass", summary: `There ${active.length === 1 ? "is one active price rule" : "are no active price rules"} to compare.`, evidence, segmentExemptReason: "There are too few rules to compare.", facts };
-    if (pairs.length === 0) return { outcome: "pass", summary: `No two of the ${active.length} active price rules set the same field at the same evaluation event and order.`, evidence, segmentsChecked: segments, facts };
+    if (active.length < 2) return { outcome: "pass", summary: said`There ${active.length === 1 ? "is one active price rule" : "are no active price rules"} to compare.`, evidence, segmentExemptReason: "There are too few rules to compare.", facts };
+    if (pairs.length === 0) return { outcome: "pass", summary: said`No two of the ${active.length} active price rules set the same field at the same evaluation event and order.`, evidence, segmentsChecked: segments, facts };
     return {
       outcome: "issue",
-      title: "Some price rules compete to set the same field",
-      summary: `${plural(pairs.length, "pair")} of active price rules set the same field, at the same evaluation event and in the same evaluation order: ${listed(pairs.slice(0, MAX_LISTED).map((p) => `${p.a} and ${p.b} (${p.named})`))}${pairs.length > MAX_LISTED ? `, and ${pairs.length - MAX_LISTED} more` : ""}. When both apply, which one wins depends on the order CPQ happens to run them in, so a price can change without anyone changing a rule.`,
-      recommendation: "Give each pair a different evaluation order, or merge them into one rule, and compare quote totals before and after.",
+      title: said`Some price rules compete to set the same field`,
+      summary: said`${plural(pairs.length, "pair")} of active price rules set the same field, at the same evaluation event and in the same evaluation order: ${andList(pairs.slice(0, MAX_LISTED).map((p) => said`${org(p.a)} and ${org(p.b)} (${p.named})`))}${pairs.length > MAX_LISTED ? said`, and ${pairs.length - MAX_LISTED} more` : ""}. When both apply, which one wins depends on the order CPQ happens to run them in, so a price can change without anyone changing a rule.`,
+      recommendation: said`Give each pair a different evaluation order, or merge them into one rule, and compare quote totals before and after.`,
       recommendationType: "change",
       severity: "medium",
       confidence: "medium",
@@ -153,12 +159,12 @@ const twinFieldMismatch: Rule = {
     const evidence = [ctx.ev(twins.source, { count: lines.length, exclusions: ["CPQ's own fields"], note: `Custom fields' names and types, from each object's describe${mismatches.length ? `. Mismatched: ${mismatches.map((m) => m.name).join(", ")}` : ""}` })];
     const segments = [{ dimension: "object", segments: compare.length }];
     const facts = { mismatches: mismatches.length, quoteLineFields: lines.length };
-    if (mismatches.length === 0) return { outcome: "pass", summary: `None of the ${plural(lines.length, "custom field")} on quote lines shares its name with a field of a different type on ${listed(compare.map(([w]) => `${w}s`))}.`, evidence, segmentsChecked: segments, facts };
+    if (mismatches.length === 0) return { outcome: "pass", summary: said`None of the ${plural(lines.length, "custom field")} on quote lines shares its name with a field of a different type on ${andList(compare.map(([w]) => said`${w}s`))}.`, evidence, segmentsChecked: segments, facts };
     return {
       outcome: "issue",
-      title: "Some twin fields won't copy",
-      summary: `${plural(mismatches.length, "custom field")} on quote lines ${mismatches.length === 1 ? "shares" : "share"} an API name with a field of a different type: ${listed(mismatches.slice(0, MAX_LISTED).map((m) => `${m.label} (${m.line} on the quote line, ${m.other} on the ${m.where})`))}. CPQ copies twin fields only when the name and type match, so these values don't carry over.`,
-      recommendation: "Give each pair the same type, or rename one of them if they aren't meant to be twins.",
+      title: said`Some twin fields won't copy`,
+      summary: said`${plural(mismatches.length, "custom field")} on quote lines ${mismatches.length === 1 ? "shares" : "share"} an API name with a field of a different type: ${andList(mismatches.slice(0, MAX_LISTED).map((m) => said`${org(m.label)} (${org(m.line)} on the quote line, ${org(m.other)} on the ${m.where})`))}. CPQ copies twin fields only when the name and type match, so these values don't carry over.`,
+      recommendation: said`Give each pair the same type, or rename one of them if they aren't meant to be twins.`,
       recommendationType: "change",
       severity: "medium",
       confidence: "medium",

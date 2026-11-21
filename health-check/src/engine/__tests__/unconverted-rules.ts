@@ -3,6 +3,5 @@
 // may only shrink, as rules are converted.
 
 export const UNCONVERTED_RULES: ReadonlySet<string> = new Set<string>([
-  "cpq.discount-approvals", "cpq.discount-leakage", "cpq.inactive-rules", "cpq.price-rule-conflicts", "cpq.quote-to-order",
-  "cpq.renewals-not-started", "cpq.twin-field-mismatch",
+  // Every rule is converted (DECISIONS.md 657). A rule added here must say why it can't be.
 ]);
