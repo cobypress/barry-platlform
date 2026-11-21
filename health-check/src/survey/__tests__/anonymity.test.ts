@@ -2,14 +2,18 @@ import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import type { Metric } from "../../schemas/index.ts";
 import { SURVEY_VERSION, type Survey, type SurveyAnswers } from "../questions.ts";
-import { MIN_RESPONSES, safeCount, SURVEY, surveyMetrics } from "../summary.ts";
+import { MIN_RESPONSES, SURVEY, surveyMetrics } from "../summary.ts";
 
 // Decision 648, exhaustively: for every survey of 5 to 14 answers over up to
-// three roles, and every way a yes or no answer can fall between them, the
-// stored figures alone (what the documents, the digest and the console print
-// from) never let a reader work out fewer than five people's answers. Two
-// readers: one who knows only what's printed, and one who also knows exactly
-// how many of each role answered.
+// three roles, and every way a yes or no answer can fall between them, no
+// stored figure (what the documents, the digest and the console print from) is
+// about a group of one to four people a reader can name. Two readers:
+//  - one who knows only what's printed: every group they can name (everyone,
+//    a shown role, everyone outside the shown roles, by subtraction) holds none
+//    or five or more, and every count they can read or work out is of such a group;
+//  - one who also knows exactly how many of each role answered: a role of one
+//    to four has its answer pinned down only when a group of five or more
+//    holding it all answered the same, as any survey's unanimous figure does.
 
 const AS_OF = "2026-11-01T09:00:00.000Z";
 const ROLES = ["sales_rep", "sales_manager", "leadership"] as const;
@@ -85,10 +89,10 @@ describe("no stored survey figure lets a reader work out fewer than five people'
             surveys++;
             const metrics = surveyMetrics(survey(sizes, yes, q), AS_OF);
             const where = `${sizes.join("/")} answering, ${yes.join("/")} yes`;
-            // A reader who knows only what's printed: every group named holds none or five or more, and every count is safe.
+            // A reader who knows only what's printed: every group named holds none or five or more, and every count is of one.
             const { groups, counts } = readable(metrics, q);
             for (const g of groups) assert.ok(g === 0 || g >= MIN_RESPONSES, `${where}: a group of ${g} can be named`);
-            for (const c of counts) assert.ok(safeCount(c.k, c.of), `${where}: ${c.what} counts ${c.k} of ${c.of}`);
+            for (const c of counts) assert.ok(c.of >= MIN_RESPONSES && c.k >= 0 && c.k <= c.of, `${where}: ${c.what} counts ${c.k} of a group of ${c.of}`);
             const key = JSON.stringify(metrics);
             seen.set(key, [...(seen.get(key) ?? []), yes]);
           }
@@ -110,15 +114,13 @@ describe("no stored survey figure lets a reader work out fewer than five people'
     });
   }
 
-  test("the review's probe: 5 sales reps and a manager show no role, and none of the manager's answers", () => {
+  test("the review's probe: 5 sales reps and a manager show no role split, so nothing is about the manager, and every whole-survey figure", () => {
     const answers = (i: number): Partial<SurveyAnswers> => (i < 5 ? { role: "sales_rep", blockers: ["slow"], recommend: 3 } : { role: "sales_manager", blockers: ["data_wrong"], recommend: 10 });
     const s: Survey = { version: SURVEY_VERSION, responses: Array.from({ length: 6 }, (_, i) => ({ id: `sr-${String(i + 1).padStart(10, "0")}`, submittedAt: AS_OF, answers: { role: "sales_rep", ease: 3, trust: 3, admin_hours: 1, rekeying_hours: 1, blockers: ["slow"], recommend: 7, comment: null, ...answers(i) } })) };
     const metrics = surveyMetrics(s, AS_OF);
-    const text = JSON.stringify(metrics);
-    assert.ok(metrics.every((m) => m.status !== "measured" || m.segments.every((x) => x.dimension !== "role")), "no role split");
-    assert.equal(find(metrics, SURVEY.recommend)!.status, "not_measurable");
-    const blockers = find(metrics, SURVEY.blockers)!;
-    assert.ok(blockers.status === "measured" && !blockers.segments.some((x) => /slow|wrong/.test(x.key)));
-    assert.match(text, /Each of these isn't shown, because fewer than 5 people chose it, or fewer than 5 didn't: It's slow, or takes too many clicks; The data in it is wrong or out of date/);
+    assert.ok(metrics.every((m) => m.status === "measured" && m.segments.every((x) => x.dimension !== "role")), "every figure shown, none by role");
+    assert.doesNotMatch(JSON.stringify(metrics), /Sales rep|Sales manager/);
+    const recommend = find(metrics, SURVEY.recommend)!;
+    assert.equal(recommend.status === "measured" && recommend.value, 16.7, "one of six said 9 or 10: who, the figures don't say");
   });
 });

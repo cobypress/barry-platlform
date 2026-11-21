@@ -220,8 +220,7 @@ describe("the full report's sub-headings are 18px, the quick wins panel's size, 
     });
 
   test("the readiness list's label and the survey's, with a survey of 12", async () => {
-    // Six of twelve name a blocker, so the list is shown (DECISIONS.md 648 withholds it when fewer than five do or don't).
-    const page = await open(fullReportHtml(buildReport({ ...input, survey: syntheticSurvey(12, (_a, i) => ({ blockers: i < 6 ? ["data_wrong"] : ["nothing"] })) }), pseudonyms));
+    const page = await open(fullReportHtml(buildReport({ ...input, survey: syntheticSurvey(12) }), pseudonyms));
     try {
       const found = await subs(page);
       assert.deepEqual(

@@ -80,8 +80,7 @@ describe("the survey's metrics", () => {
     assert.deepEqual(metrics.map((m) => m.id), SURVEY_METRIC_IDS);
     assert.ok(metrics.every((m) => m.domain === "survey" && m.evidence[0]!.kind === "engine"));
     assert.equal(measured(metrics, SURVEY.responses).value, 10);
-    // Four of ten left a comment, and six didn't: four is too few to count (DECISIONS.md 648).
-    assert.equal(measured(metrics, SURVEY.responses).stats.comments, undefined);
+    assert.equal(measured(metrics, SURVEY.responses).stats.comments, 4);
     // Ease runs 1 to 5 twice, so the median is 3; trust runs 1,3,5,2,4 twice, also 3.
     assert.equal(measured(metrics, SURVEY.ease).value, 3);
     assert.equal(measured(metrics, SURVEY.trust).value, 3);
@@ -92,25 +91,15 @@ describe("the survey's metrics", () => {
     const totals = Array.from({ length: 10 }, (_, i) => (i % 4) * 1.5 + (i % 3)).sort((a, b) => a - b);
     assert.equal((totals[4]! + totals[5]!) / 2, 2.75);
     assert.equal(measured(metrics, SURVEY.lost).value, 2.8, "rounded to one place");
-    // Recommend is (i * 3) % 11: 0,3,6,9,1,4,7,10,2,5. Two answer 9 or 10: too few to count, so not shown (648).
-    const withheld = metrics.find((m) => m.id === SURVEY.recommend)!;
-    assert.equal(withheld.status, "not_measurable");
-    assert.match(withheld.status === "not_measurable" ? withheld.reason : "", /^We don't show this, because fewer than 5 people answered 9 or 10, or fewer than 5 didn't\.$/);
-    assert.match(withheld.definition, /isn't one/);
+    // Recommend is (i * 3) % 11: 0,3,6,9,1,4,7,10,2,5. Two answer 9 or 10, seven 6 or less.
+    const recommend = measured(metrics, SURVEY.recommend);
+    assert.equal(recommend.value, 20);
+    assert.equal(recommend.stats.score, -50);
+    assert.match(recommend.definition, /isn't one/);
     assert.ok(!/\bNPS\b/.test(JSON.stringify(metrics)));
-    // Two in ten said nothing gets in their way: likewise.
-    assert.equal(metrics.find((m) => m.id === SURVEY.blockers)!.status, "not_measurable");
-
-    // Five and five, so every count is safe: the shares, the split and the score are shown.
-    const even = surveyMetrics(syntheticSurvey(10, (_a, i) => ({ recommend: i < 5 ? 10 : 3, blockers: i < 5 ? ["double_entry"] : ["nothing"], comment: i < 5 ? "Synthetic." : null })), AS_OF);
-    const recommend = measured(even, SURVEY.recommend);
-    assert.equal(recommend.value, 50);
-    assert.equal(recommend.stats.score, 0);
-    assert.deepEqual(recommend.segments.filter((s) => s.dimension === "answer").map((s) => [s.key, s.n]), [["9 or 10", 5], ["7 or 8", 0], ["0 to 6", 5]]);
-    const blockers = measured(even, SURVEY.blockers);
-    assert.equal(blockers.value, 50);
-    assert.equal(blockers.segments.find((s) => s.key.startsWith("Typing the same thing"))!.value, 50);
-    assert.equal(measured(even, SURVEY.responses).stats.comments, 5);
+    const blockers = measured(metrics, SURVEY.blockers);
+    assert.equal(blockers.value, 80, "two in ten said nothing gets in their way");
+    assert.equal(blockers.segments.find((s) => s.key.startsWith("Typing the same thing"))!.value, 40);
   });
 
   test(`show a role on its own only with ${MIN_RESPONSES} or more answers`, () => {

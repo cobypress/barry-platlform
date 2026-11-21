@@ -6,9 +6,9 @@ import { BLOCKERS, readAnswers, ROLE_BANDS, type Survey, type SurveyAnswers } fr
 // What the team survey says, as metrics in their own "survey" domain: they
 // describe the people, not the org, and no area is scored from them. Built when
 // the report is, because answers keep arriving after the org is read. Fewer
-// than five answers and nothing is shown (DECISIONS.md 141), and no figure lets
-// a reader work out fewer than five people's answers, on its own or by
-// subtracting one shown group from another or from the total (648).
+// than five answers and nothing is shown (DECISIONS.md 141), and no figure is
+// about a group of fewer than five people a reader can name, directly or by
+// subtracting one shown group from another or from everyone (648).
 
 export const MIN_RESPONSES = 5;
 const DOMAIN = "survey";
@@ -42,21 +42,16 @@ const DEFS: Record<keyof typeof SURVEY, Pick<Metric, "id" | "label" | "unit" | "
 // than the survey shows, and the run's stored metrics hold it as the report does (DECISIONS.md 645).
 const evidenceOf = (n: number, capturedAt: string): Evidence[] => [{ kind: "engine", path: "HealthCheckSurveyResponse", count: n < MIN_RESPONSES ? null : n, dateRange: null, exclusions: [], capturedAt, note: "Anonymous answers to the team survey, with comments left out" }];
 
-/**
- * k people out of m, safe to show (DECISIONS.md 648): none or five or more, and
- * none or five or more left over, so neither the count nor what's left of the
- * group can be fewer than five people a reader can single out.
- */
-export const safeCount = (k: number, m: number): boolean => (k === 0 || k >= MIN_RESPONSES) && (m - k === 0 || m - k >= MIN_RESPONSES);
-
-type Role = { id: string; label: string; n: number };
+type Role = { id: string; label: string };
 
 /**
- * The roles shown on their own (648): each with five or more answers, largest
- * first, folding the smallest back while the answers outside every shown role
- * number one to four, so whoever is outside them is none or five or more. A
- * group of small roles shown as one could be under five itself, so they're
- * folded back, never merged. None when no split is safe.
+ * The roles shown on their own (DECISIONS.md 648): each with five or more
+ * answers, largest first, folding the smallest back while the answers outside
+ * every shown role number one to four, so whoever is outside them is none or
+ * five or more. Small roles shown together as "other" could be under five
+ * themselves, so they're folded back, never merged. None when no split is safe.
+ * Every group a reader can then name, a shown role, everyone outside them, or
+ * any union or difference, is none or five or more people.
  */
 export function shownRoles(answers: Answer[]): Role[] {
   const roles = ROLE_BANDS.map((b) => ({ id: b.id as string, label: b.label as string, n: answers.filter((a) => a.role === b.id).length }))
@@ -64,7 +59,7 @@ export function shownRoles(answers: Answer[]): Role[] {
     .sort((x, y) => y.n - x.n);
   for (;;) {
     const outside = answers.length - roles.reduce((sum, r) => sum + r.n, 0);
-    if (outside === 0 || outside >= MIN_RESPONSES || roles.length === 0) return roles;
+    if (outside === 0 || outside >= MIN_RESPONSES || roles.length === 0) return roles.map(({ id, label }) => ({ id, label }));
     roles.pop();
   }
 }
@@ -78,8 +73,6 @@ function byRole(answers: Answer[], roles: Role[], value: (group: Answer[]) => nu
 }
 
 const SMALL_ROLES = `A role is shown on its own only where ${MIN_RESPONSES} or more people gave it, and none or ${MIN_RESPONSES} or more gave every other role`;
-/** Why a count isn't shown, in the words a page prints: fewer than five gave the answer, or fewer than five didn't. */
-const fewer = (did: string): string => `fewer than ${MIN_RESPONSES} people ${did}, or fewer than ${MIN_RESPONSES} didn't`;
 
 /**
  * The survey's metrics, or one saying why there are none. Nothing at all when
@@ -96,7 +89,7 @@ export function surveyMetrics(survey: Survey | null | undefined, capturedAt: str
   }
   const n = answers.length;
   const roles = shownRoles(answers);
-  const measured = (key: keyof typeof SURVEY, value: number, segments: MetricSegment[], stats: Record<string, number> = {}, exempt?: string, notShown: string[] = []): Metric => ({
+  const measured = (key: keyof typeof SURVEY, value: number, segments: MetricSegment[], stats: Record<string, number> = {}, exempt?: string): Metric => ({
     ...DEFS[key],
     ...base,
     status: "measured",
@@ -107,67 +100,34 @@ export function surveyMetrics(survey: Survey | null | undefined, capturedAt: str
     segmentExemptReason: segments.length ? null : (exempt ?? SMALL_ROLES),
     series: [],
     stats,
-    assumptions: [...(segments.length ? [SMALL_ROLES] : []), ...notShown],
+    assumptions: segments.length ? [SMALL_ROLES] : [],
   });
-  /** A figure that would let a reader count fewer than five people: its metric says why there's none. */
-  const withheld = (key: keyof typeof SURVEY, what: string): Metric => ({ ...DEFS[key], ...base, status: "not_measurable", reason: `We don't show this, because ${what}.`, notMeasurableKind: "too_little_data" as const });
   const med = (pick: (a: Answer) => number) => (group: Answer[]) => round1(median(group.map(pick)));
   const p75 = (pick: (a: Answer) => number) => round1(quantile(answers.map(pick), 0.75));
   const lost = (a: Answer): number => a.admin_hours + a.rekeying_hours;
-  const count = (group: Answer[], test: (a: Answer) => boolean) => group.filter(test).length;
-  const promoter = (a: Answer) => a.recommend >= 9;
-  const passive = (a: Answer) => a.recommend >= 7 && a.recommend <= 8;
-  const detractor = (a: Answer) => a.recommend <= 6;
-  const isHeld = (a: Answer) => a.blockers.some((b) => b !== "nothing");
-  const commented = count(answers, (a) => a.commented);
-
-  // Each blocker on its own: one that isn't safe is left out and named, never counted.
-  const blockerCounts = BLOCKERS.map((b) => ({ label: b.label, k: count(answers, (a) => a.blockers.includes(b.id)) }));
-  const blockerRows = blockerCounts.filter((b) => safeCount(b.k, n)).map((b) => ({ dimension: "blocker", key: b.label, n: b.k, value: pct(b.k, n), notMeasurableReason: null })).sort((a, b) => (b.value ?? 0) - (a.value ?? 0));
-  const blockersHidden = blockerCounts.filter((b) => !safeCount(b.k, n)).map((b) => b.label);
-  const held = count(answers, isHeld);
-  const blockers = safeCount(held, n)
-    ? measured("blockers", pct(held, n), blockerRows, {}, `None is shown, because for each one ${fewer("chose it")}`, blockersHidden.length ? [`Each of these isn't shown, because ${fewer("chose it")}: ${blockersHidden.join("; ")}`] : [])
-    : withheld("blockers", fewer("named something that gets in their way"));
-
-  // The three answers to recommend add up to everyone, so any two give the third: all three or none.
-  const bands = [promoter, passive, detractor].map((test) => count(answers, test));
-  const bandsSafe = bands.every((k) => safeCount(k, n));
-  const promoters = bands[0]!;
-  // A role's share of 9 or 10 is shown only if every count a reader could work out from it is safe, those outside the shown roles included.
-  const inRoles = roles.reduce((sum, r) => sum + r.n, 0);
-  const roleCells = roles.map((r) => ({ k: count(answers.filter((a) => a.role === r.id), promoter), m: r.n }));
-  const outsideCell = { k: promoters - roleCells.reduce((sum, c) => sum + c.k, 0), m: n - inRoles };
-  const crossSafe = roles.length > 0 && [...roleCells, ...(outsideCell.m > 0 ? [outsideCell] : [])].every((c) => safeCount(c.k, c.m));
-  const recommend = safeCount(promoters, n)
-    ? measured(
-        "recommend",
-        pct(promoters, n),
-        [
-          ...(bandsSafe
-            ? [
-                { dimension: "answer", key: "9 or 10", n: bands[0]!, value: pct(bands[0]!, n), notMeasurableReason: null },
-                { dimension: "answer", key: "7 or 8", n: bands[1]!, value: pct(bands[1]!, n), notMeasurableReason: null },
-                { dimension: "answer", key: "0 to 6", n: bands[2]!, value: pct(bands[2]!, n), notMeasurableReason: null },
-              ]
-            : []),
-          ...(crossSafe ? byRole(answers, roles, (g) => pct(count(g, promoter), g.length)) : []),
-        ],
-        bandsSafe ? { score: round1(pct(bands[0]!, n) - pct(bands[2]!, n)) } : {},
-        `Not split, because for at least one answer ${fewer("gave it")}`,
-        [...(bandsSafe ? [] : [`How the answers split isn't shown, because for at least one answer ${fewer("gave it")}`]), ...(roles.length > 0 && !crossSafe ? [`The share by role isn't shown, because in a role, or outside the roles shown, ${fewer("answered 9 or 10")}`] : [])],
-      )
-    : withheld("recommend", fewer("answered 9 or 10"));
+  const promoters = (group: Answer[]) => pct(group.filter((a) => a.recommend >= 9).length, group.length);
+  const detractors = (group: Answer[]) => pct(group.filter((a) => a.recommend <= 6).length, group.length);
+  const held = (group: Answer[]) => pct(group.filter((a) => a.blockers.some((b) => b !== "nothing")).length, group.length);
+  const commented = answers.filter((a) => a.commented).length;
 
   return [
-    measured("responses", n, byRole(answers, roles, (g) => g.length), safeCount(commented, n) ? { comments: commented } : {}),
+    measured("responses", n, byRole(answers, roles, (g) => g.length), { comments: commented }),
     measured("ease", med((a) => a.ease)(answers), byRole(answers, roles, med((a) => a.ease))),
     measured("trust", med((a) => a.trust)(answers), byRole(answers, roles, med((a) => a.trust))),
     measured("admin", med((a) => a.admin_hours)(answers), byRole(answers, roles, med((a) => a.admin_hours)), { p75: p75((a) => a.admin_hours) }),
     measured("rekeying", med((a) => a.rekeying_hours)(answers), byRole(answers, roles, med((a) => a.rekeying_hours)), { p75: p75((a) => a.rekeying_hours) }),
     measured("lost", med(lost)(answers), byRole(answers, roles, med(lost)), { p75: p75(lost) }),
-    blockers,
-    recommend,
+    measured(
+      "blockers",
+      held(answers),
+      BLOCKERS.map((b) => ({ dimension: "blocker", key: b.label, n: answers.filter((a) => a.blockers.includes(b.id)).length, value: pct(answers.filter((a) => a.blockers.includes(b.id)).length, n), notMeasurableReason: null })).sort((a, b) => (b.value ?? 0) - (a.value ?? 0)),
+    ),
+    measured("recommend", promoters(answers), [
+      { dimension: "answer", key: "9 or 10", n: answers.filter((a) => a.recommend >= 9).length, value: promoters(answers), notMeasurableReason: null },
+      { dimension: "answer", key: "7 or 8", n: answers.filter((a) => a.recommend >= 7 && a.recommend <= 8).length, value: pct(answers.filter((a) => a.recommend >= 7 && a.recommend <= 8).length, n), notMeasurableReason: null },
+      { dimension: "answer", key: "0 to 6", n: answers.filter((a) => a.recommend <= 6).length, value: detractors(answers), notMeasurableReason: null },
+      ...byRole(answers, roles, promoters),
+    ], { score: round1(promoters(answers) - detractors(answers)) }),
   ];
 }
 

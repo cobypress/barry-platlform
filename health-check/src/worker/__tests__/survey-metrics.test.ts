@@ -135,8 +135,7 @@ describe("the survey's privacy in the stored rows (decision 645, rule 7)", () =>
     for (const [{ stored }, n] of [[atMin, MIN_RESPONSES], [twelve, 12]] as const) {
       const rows = survey(stored);
       assert.deepEqual(rows.map((m) => m.id), SURVEY_METRIC_IDS);
-      // Measured from all n, or withheld because a count would be under five (decision 648).
-      assert.ok(rows.every((m) => m.domain === "survey" && (m.status === "measured" ? m.n === n : /^We don't show this, because fewer than 5 people/.test(m.reason))));
+      assert.ok(rows.every((m) => m.status === "measured" && m.n === n && m.domain === "survey"));
       const text = JSON.stringify(rows);
       assert.ok(!text.includes(SYNTHETIC_COMMENT));
       assert.doesNotMatch(text, /sr-\d{10}|2026-11-0\dT09/);
@@ -193,7 +192,7 @@ describe("a later write replaces the survey's metrics (decision 645)", () => {
   });
 });
 
-/** A survey where every figure is safe to show (decision 648), so the documents print them all. */
+/** A survey whose every answer band and blocker is given by several people, so the documents print a full set. */
 const shownSurvey = (n: number) => syntheticSurvey(n, (_a, i) => ({ recommend: i < 6 ? 10 : 3, blockers: i < 6 ? ["data_wrong"] : ["nothing"], comment: i < 6 ? "Synthetic." : null }));
 
 describe("after the documents, the survey's rows and the digest describe the same answers (decisions 645 and 147)", () => {

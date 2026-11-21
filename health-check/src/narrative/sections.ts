@@ -609,14 +609,10 @@ function pipelineSpec(input: ReportInput, team: Finding[], corrected: Metric[]):
 /** How the survey was read, for the raw notes. Under five answers, nothing that counts anyone. */
 function surveyMethod(view: SurveyView): string[] {
   const comments = view.metrics.find((m) => m.id === SURVEY.responses);
-  const left = comments?.status === "measured" ? (comments.stats.comments ?? null) : null;
+  const left = comments?.status === "measured" ? (comments.stats.comments ?? 0) : null;
   return [
-    `The survey is anonymous: it never asks for a name, and no figure here counts fewer than ${MIN_RESPONSES} people. A role is shown on its own only where ${MIN_RESPONSES} or more people gave it and none or ${MIN_RESPONSES} or more gave every other role, and a count of an answer only where ${MIN_RESPONSES} or more people gave it, or none did, and the same of those who didn't.`,
-    comments?.status !== "measured"
-      ? "We don't put the survey's comments in any document."
-      : left === null
-        ? `We don't say how many people left a comment, because fewer than ${MIN_RESPONSES} did, or fewer than ${MIN_RESPONSES} didn't. We don't put comments in any document.`
-        : `${left === 1 ? "1 person" : `${left} people`} left a comment. We don't put comments in any document, so none is quoted here.`,
+    `The survey is anonymous: it never asks for a name, and a role is shown on its own only where ${MIN_RESPONSES} or more people gave it and none or ${MIN_RESPONSES} or more gave every other role, so no figure is about a group of fewer than ${MIN_RESPONSES}.`,
+    left === null ? "We don't put the survey's comments in any document." : `${left === 1 ? "1 person" : `${left} people`} left a comment. We don't put comments in any document, so none is quoted here.`,
     ...(view.shown
       ? [
           `We set each answer against what we found by rule, not judgement. A median of ${CONCERN_AT} or less out of 5, or ${REKEYING_AT} hour or more a week typing data in again, is a problem your team feels. An issue in the checks it's set against is a problem we found.`,
