@@ -135,7 +135,8 @@ describe("the survey's privacy in the stored rows (decision 645, rule 7)", () =>
     for (const [{ stored }, n] of [[atMin, MIN_RESPONSES], [twelve, 12]] as const) {
       const rows = survey(stored);
       assert.deepEqual(rows.map((m) => m.id), SURVEY_METRIC_IDS);
-      assert.ok(rows.every((m) => m.status === "measured" && m.n === n && m.domain === "survey"));
+      // Measured from all n, or withheld because a count would be under five (decision 648).
+      assert.ok(rows.every((m) => m.domain === "survey" && (m.status === "measured" ? m.n === n : /^We don't show this, because fewer than 5 people/.test(m.reason))));
       const text = JSON.stringify(rows);
       assert.ok(!text.includes(SYNTHETIC_COMMENT));
       assert.doesNotMatch(text, /sr-\d{10}|2026-11-0\dT09/);
