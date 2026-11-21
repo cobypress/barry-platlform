@@ -24,6 +24,8 @@ const SIGNED_OFF: string[] = [
   "src/engine/said-forms.ts: n.toLocaleString(\"en-GB\")",
   // The quarter's first day, which quarterBounds works out from the run's date and the fiscal start month, a number.
   "src/domains/current-pipeline/index.ts: quarter.from",
+  // A phrase from USER_GUARD_BLOCKERS, our own table of the guards' words; an id it doesn't know goes through org.
+  "src/domains/utilisation/index.ts: phrase",
 ];
 
 const ROOT = join(import.meta.dirname, "../../..");

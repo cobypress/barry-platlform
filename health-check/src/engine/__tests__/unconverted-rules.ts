@@ -10,7 +10,5 @@ export const UNCONVERTED_RULES: ReadonlySet<string> = new Set<string>([
   "mkt.campaign-influence", "mkt.scoring-grading", "mkt.unowned-prospects", "mkt.unworked-handovers", "sec.health-check-risks",
   "sec.health-check-score", "sec.insecure-remote-sites", "sec.modify-all-data", "sec.peer-outlier-access", "sec.personal-integration-accounts",
   "sec.self-authorised-connected-apps", "sec.sharing-defaults", "sec.unused-access", "sec.view-all-data", "tech.apex-code-size",
-  "tech.classic-leftovers", "tech.governor-limit-risk", "tech.storage-use", "tech.test-quality", "utl.dashboard-usage",
-  "utl.dashboards-inactive-running-user", "utl.dormant-licensed-users", "utl.eac-advanced-sync", "utl.eac-connections", "utl.never-logged-in",
-  "utl.package-seats", "utl.unassigned-licence-seats", "utl.unused-reports",
+  "tech.classic-leftovers", "tech.governor-limit-risk", "tech.storage-use", "tech.test-quality",
 ]);
