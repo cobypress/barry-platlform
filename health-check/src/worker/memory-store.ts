@@ -4,7 +4,7 @@ import type { ScanResult } from "../scan/result.ts";
 import type { PulseResult } from "../pulse/result.ts";
 import { DIGEST_KEYS, type RunDigest } from "../schemas/digest.ts";
 import { unstorableAt } from "./inventory.ts";
-import { Run, type BenchmarkRow, type ConnectLink } from "../schemas/index.ts";
+import { Run, type BenchmarkRow, type ConnectLink, type Metric } from "../schemas/index.ts";
 import { storedFromRow, waitingRow, type ConsoleSummariesRow, type SummariesToSave } from "../handbook/summary-row.ts";
 import { ORG_AWAITING_CONNECT, RunClosedError, type ConnectJobInput, type DocumentsJobInput, type DocumentsJobReads, type DriveShare, type ShareJobInput, type DocumentsMade, type LinkConnected, type LinkState, type PulseRun, type ReleasedRun, type RunJobInput, type RunOutputRecord, type RunProgress, type WorkerStore } from "./types.ts";
 
@@ -237,13 +237,26 @@ export class MemoryWorkerStore implements WorkerStore {
     return true;
   }
 
-  async saveDocuments(runId: string, made: DocumentsMade, digest?: RunDigest | null): Promise<void> {
+  async saveDocuments(runId: string, made: DocumentsMade, digest?: RunDigest | null, surveyMetrics?: Metric[]): Promise<boolean> {
     const doc = this.documents.get(runId);
-    if (doc?.input.state !== "making") return;
+    if (doc?.input.state !== "making") return false;
     Object.assign(doc, { made: structuredClone(made), error: null });
     Object.assign(doc.input, { state: "done", driveFolderId: made.driveFolderId, files: structuredClone(made.files) });
     this.writes.push({ method: "saveDocuments", id: runId, detail: made.folderName });
     if (digest !== undefined) this.#saveDigest(runId, digest);
+    // As the Postgres store's: the run's survey rows replaced by the printed report's (DECISIONS.md 645).
+    const output = this.runs.get(runId)?.output;
+    if (surveyMetrics !== undefined && output) {
+      output.surveyMetrics = structuredClone(surveyMetrics);
+      this.writes.push({ method: "saveSurveyMetrics", id: runId, detail: surveyMetrics.length });
+    }
+    return true;
+  }
+
+  /** Every metric row the run holds, as the console's HealthCheckMetric would: the org's, then the survey's (DECISIONS.md 645). */
+  storedMetrics(runId: string): Metric[] {
+    const output = this.runs.get(runId)?.output;
+    return structuredClone([...(output?.metrics ?? []), ...(output?.surveyMetrics ?? [])]);
   }
 
   /** The benchmark table. */

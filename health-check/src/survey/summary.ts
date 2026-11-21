@@ -6,8 +6,9 @@ import { BLOCKERS, readAnswers, ROLE_BANDS, type Survey, type SurveyAnswers } fr
 // What the team survey says, as metrics in their own "survey" domain: they
 // describe the people, not the org, and no area is scored from them. Built when
 // the report is, because answers keep arriving after the org is read. Fewer
-// than five answers and nothing is shown, and a role is shown on its own only
-// with five or more, so no answer can be traced to a person (DECISIONS.md 141).
+// than five answers and nothing is shown (DECISIONS.md 141), and no figure is
+// about a group of fewer than five people a reader can name, directly or by
+// subtracting one shown group from another or from everyone (648).
 
 export const MIN_RESPONSES = 5;
 const DOMAIN = "survey";
@@ -37,17 +38,41 @@ const DEFS: Record<keyof typeof SURVEY, Pick<Metric, "id" | "label" | "unit" | "
   recommend: { id: SURVEY.recommend, label: "Would recommend Salesforce as it's set up", unit: "percent", definition: "The share answering 9 or 10, from 0 to 10, to how likely they are to recommend Salesforce as it's set up here to a colleague. The would recommend score is that share less the share answering 0 to 6. It's in the style of a net promoter score, and isn't one." },
 };
 
-const evidenceOf = (n: number, capturedAt: string): Evidence[] => [{ kind: "engine", path: "HealthCheckSurveyResponse", count: n, dateRange: null, exclusions: [], capturedAt, note: "Anonymous answers to the team survey, with comments left out" }];
+// Under five answers even the count is left out: it's a figure from fewer people
+// than the survey shows, and the run's stored metrics hold it as the report does (DECISIONS.md 645).
+const evidenceOf = (n: number, capturedAt: string): Evidence[] => [{ kind: "engine", path: "HealthCheckSurveyResponse", count: n < MIN_RESPONSES ? null : n, dateRange: null, exclusions: [], capturedAt, note: "Anonymous answers to the team survey, with comments left out" }];
 
-/** Each role with five or more answers, on its own. Smaller ones are left out, not shown as too few. */
-function byRole(answers: Answer[], value: (group: Answer[]) => number): MetricSegment[] {
-  return ROLE_BANDS.flatMap((band) => {
-    const group = answers.filter((a) => a.role === band.id);
-    return group.length >= MIN_RESPONSES ? [{ dimension: "role", key: band.label, n: group.length, value: value(group), notMeasurableReason: null }] : [];
+type Role = { id: string; label: string };
+
+/**
+ * The roles shown on their own (DECISIONS.md 648): each with five or more
+ * answers, largest first, folding the smallest back while the answers outside
+ * every shown role number one to four, so whoever is outside them is none or
+ * five or more. Small roles shown together as "other" could be under five
+ * themselves, so they're folded back, never merged. None when no split is safe.
+ * Every group a reader can then name, a shown role, everyone outside them, or
+ * any union or difference, is none or five or more people.
+ */
+export function shownRoles(answers: Answer[]): Role[] {
+  const roles = ROLE_BANDS.map((b) => ({ id: b.id as string, label: b.label as string, n: answers.filter((a) => a.role === b.id).length }))
+    .filter((r) => r.n >= MIN_RESPONSES)
+    .sort((x, y) => y.n - x.n);
+  for (;;) {
+    const outside = answers.length - roles.reduce((sum, r) => sum + r.n, 0);
+    if (outside === 0 || outside >= MIN_RESPONSES || roles.length === 0) return roles.map(({ id, label }) => ({ id, label }));
+    roles.pop();
+  }
+}
+
+/** Each shown role, on its own. */
+function byRole(answers: Answer[], roles: Role[], value: (group: Answer[]) => number): MetricSegment[] {
+  return roles.map((role) => {
+    const group = answers.filter((a) => a.role === role.id);
+    return { dimension: "role", key: role.label, n: group.length, value: value(group), notMeasurableReason: null };
   });
 }
 
-const SMALL_ROLES = `Roles with fewer than ${MIN_RESPONSES} answers aren't shown on their own`;
+const SMALL_ROLES = `A role is shown on its own only where ${MIN_RESPONSES} or more people gave it, and none or ${MIN_RESPONSES} or more gave every other role`;
 
 /**
  * The survey's metrics, or one saying why there are none. Nothing at all when
@@ -63,6 +88,7 @@ export function surveyMetrics(survey: Survey | null | undefined, capturedAt: str
     return [{ ...DEFS.responses, ...base, status: "not_measurable", reason: `Fewer than ${MIN_RESPONSES} people answered the team survey, so we don't show its results.`, notMeasurableKind: "too_little_data" as const }];
   }
   const n = answers.length;
+  const roles = shownRoles(answers);
   const measured = (key: keyof typeof SURVEY, value: number, segments: MetricSegment[], stats: Record<string, number> = {}, exempt?: string): Metric => ({
     ...DEFS[key],
     ...base,
@@ -85,12 +111,12 @@ export function surveyMetrics(survey: Survey | null | undefined, capturedAt: str
   const commented = answers.filter((a) => a.commented).length;
 
   return [
-    measured("responses", n, byRole(answers, (g) => g.length), { comments: commented }),
-    measured("ease", med((a) => a.ease)(answers), byRole(answers, med((a) => a.ease))),
-    measured("trust", med((a) => a.trust)(answers), byRole(answers, med((a) => a.trust))),
-    measured("admin", med((a) => a.admin_hours)(answers), byRole(answers, med((a) => a.admin_hours)), { p75: p75((a) => a.admin_hours) }),
-    measured("rekeying", med((a) => a.rekeying_hours)(answers), byRole(answers, med((a) => a.rekeying_hours)), { p75: p75((a) => a.rekeying_hours) }),
-    measured("lost", med(lost)(answers), byRole(answers, med(lost)), { p75: p75(lost) }),
+    measured("responses", n, byRole(answers, roles, (g) => g.length), { comments: commented }),
+    measured("ease", med((a) => a.ease)(answers), byRole(answers, roles, med((a) => a.ease))),
+    measured("trust", med((a) => a.trust)(answers), byRole(answers, roles, med((a) => a.trust))),
+    measured("admin", med((a) => a.admin_hours)(answers), byRole(answers, roles, med((a) => a.admin_hours)), { p75: p75((a) => a.admin_hours) }),
+    measured("rekeying", med((a) => a.rekeying_hours)(answers), byRole(answers, roles, med((a) => a.rekeying_hours)), { p75: p75((a) => a.rekeying_hours) }),
+    measured("lost", med(lost)(answers), byRole(answers, roles, med(lost)), { p75: p75(lost) }),
     measured(
       "blockers",
       held(answers),
@@ -100,7 +126,7 @@ export function surveyMetrics(survey: Survey | null | undefined, capturedAt: str
       { dimension: "answer", key: "9 or 10", n: answers.filter((a) => a.recommend >= 9).length, value: promoters(answers), notMeasurableReason: null },
       { dimension: "answer", key: "7 or 8", n: answers.filter((a) => a.recommend >= 7 && a.recommend <= 8).length, value: pct(answers.filter((a) => a.recommend >= 7 && a.recommend <= 8).length, n), notMeasurableReason: null },
       { dimension: "answer", key: "0 to 6", n: answers.filter((a) => a.recommend <= 6).length, value: detractors(answers), notMeasurableReason: null },
-      ...byRole(answers, promoters),
+      ...byRole(answers, roles, promoters),
     ], { score: round1(promoters(answers) - detractors(answers)) }),
   ];
 }

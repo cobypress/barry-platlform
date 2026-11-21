@@ -10,6 +10,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { Intake } from "../narrative/intake.ts";
 import { SURVEY_VERSION, type Survey } from "../survey/questions.ts";
+import { SURVEY_METRIC_IDS } from "../survey/summary.ts";
 import { Interview } from "../interviews/questions.ts";
 import { BenchmarkRow, HeadcountBand, Industry } from "../schemas/benchmark.ts";
 import { storedFromRow, waitingRow, type ConsoleSummariesRow, type StoredSummaries } from "../handbook/summary-row.ts";
@@ -249,6 +250,8 @@ export const RUN_DIGEST_MIGRATION = "20261201_health_check_run_digest.sql";
 /** One statement, so a second delivery or a remake replaces the row rather than failing on its key. */
 export const RUN_DIGEST_DELETE_SQL = `DELETE FROM "HealthCheckRunDigest" WHERE "runId" = $1`;
 export const RUN_DIGEST_SQL = `INSERT INTO "HealthCheckRunDigest" ("runId", "madeAt", "version", "digest") VALUES ($1, $2::timestamp(3), $3, $4::jsonb) ON CONFLICT ("runId") DO UPDATE SET "madeAt" = EXCLUDED."madeAt", "version" = EXCLUDED."version", "digest" = EXCLUDED."digest"`;
+/** The run's team survey metric rows, by id, before the documents write the printed report's (DECISIONS.md 645). */
+export const SURVEY_METRICS_DELETE_SQL = `DELETE FROM "HealthCheckMetric" WHERE "runId" = $1 AND "id" = ANY($2::text[])`;
 /** The console's migration that adds the run's overall score and grade and the link's host (DECISIONS.md 626). */
 export const RUN_SCORE_AND_HOST_MIGRATION = "20261128_health_check_run_score_and_host.sql";
 export const BENCHMARK_ROW: Columns = {
@@ -602,6 +605,8 @@ export class PostgresWorkerStore implements WorkerStore {
       }
       for (const f of output.findings) await this.#insert(client, "HealthCheckFinding", FINDING, findingRow(runId, f));
       for (const m of output.metrics) await this.#insert(client, "HealthCheckMetric", METRIC, metricRow(runId, m));
+      // The rows were all deleted above, so these need no delete of their own.
+      if (output.surveyMetrics?.length) await this.#writeSurveyMetrics(client, runId, output.surveyMetrics, false);
       for (const s of output.scores) await this.#insert(client, "HealthCheckScore", SCORE, scoreRow(runId, s));
       for (const s of output.manualSteps) await this.#insert(client, "HealthCheckManualStep", MANUAL_STEP, manualStepRow(runId, s));
       for (const s of output.sections) await this.#insert(client, "HealthCheckSection", SECTION, sectionRow(s));
@@ -804,6 +809,30 @@ export class PostgresWorkerStore implements WorkerStore {
   }
 
   /**
+   * The team survey's metrics (DECISIONS.md 645), in a savepoint of their own
+   * after the org's: a console whose metric table refuses one (class 23), or
+   * doesn't match (42), or a value it can't hold (22), costs the survey's rows
+   * alone, said by the run's id, the table and the SQLSTATE, and the run's
+   * results or its documents' row commit. Anything else rolls the save back.
+   * `replace` first deletes the run's survey rows, for a write that comes after
+   * the run's own (the documents'), so the later survey's figures stand.
+   */
+  async #writeSurveyMetrics(client: SqlClient, runId: string, metrics: Metric[], replace: boolean): Promise<void> {
+    await client.query("SAVEPOINT survey_metrics");
+    try {
+      if (replace) await client.query(SURVEY_METRICS_DELETE_SQL, [runId, SURVEY_METRIC_IDS]);
+      for (const m of metrics) await this.#insert(client, "HealthCheckMetric", METRIC, metricRow(runId, m));
+    } catch (err) {
+      const code = (err as { code?: unknown } | null)?.code;
+      if (typeof code !== "string" || !/^(42|23|22)[0-9A-Z]{3}$/.test(code)) throw err;
+      await client.query("ROLLBACK TO SAVEPOINT survey_metrics");
+      this.#log(`Run ${runId}: the console's HealthCheckMetric table refused the team survey's metrics with SQLSTATE ${code}, so they aren't saved; the run's own are.`);
+      return;
+    }
+    await client.query("RELEASE SAVEPOINT survey_metrics");
+  }
+
+  /**
    * A side table's error that means the console's table doesn't match what we
    * write (class 42) or refuses the row (class 23), as its SQLSTATE; anything
    * else, a lost connection or a deadlock among them, is thrown again so the
@@ -946,20 +975,22 @@ export class PostgresWorkerStore implements WorkerStore {
     return result.rowCount === 1;
   }
 
-  async saveDocuments(runId: string, made: DocumentsMade, digest?: RunDigest | null): Promise<void> {
+  async saveDocuments(runId: string, made: DocumentsMade, digest?: RunDigest | null, surveyMetrics?: Metric[]): Promise<boolean> {
     const text = `UPDATE "HealthCheckDocuments" SET "status" = 'done', "finishedAt" = $2::timestamp(3), "error" = NULL, "warnings" = $3::jsonb, "clientName" = $4, "folderName" = $5, "driveFolderId" = $6, "driveFolderUrl" = $7, "files" = $8::jsonb WHERE "runId" = $1 AND "status" = 'making'`;
     const values = [runId, made.at, JSON.stringify(made.warnings), made.clientName, made.folderName, made.driveFolderId, made.driveFolderUrl, JSON.stringify(made.files)];
-    if (digest === undefined) {
-      await this.#pool.query(text, values);
-      return;
-    }
-    // The documents' row and the digest commit together, so a lost connection
-    // leaves the make to be tried again with both. Only a make that marked the
-    // row done writes one, or deletes one: the console may have moved the row on meanwhile.
+    if (digest === undefined && surveyMetrics === undefined) return (await this.#pool.query(text, values)).rowCount === 1;
+    // The documents' row, the digest and the survey's metrics commit together,
+    // so a lost connection leaves the make to be tried again with all of them.
+    // Only a make that marked the row done writes them, or deletes the digest:
+    // the console may have moved the row on meanwhile.
+    let marked = false;
     await this.#transaction(async (client) => {
-      const done = await client.query(text, values);
-      if (done.rowCount === 1) await this.#writeDigest(client, runId, digest);
+      marked = (await client.query(text, values)).rowCount === 1;
+      if (!marked) return;
+      if (digest !== undefined) await this.#writeDigest(client, runId, digest);
+      if (surveyMetrics !== undefined) await this.#writeSurveyMetrics(client, runId, surveyMetrics, true);
     });
+    return marked;
   }
 
   addBenchmarkRows(rows: BenchmarkRow[]): Promise<void> {

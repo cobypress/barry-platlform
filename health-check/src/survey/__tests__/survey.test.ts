@@ -106,12 +106,12 @@ describe("the survey's metrics", () => {
     // Synthetic roles run rep, rep, manager, admin, leadership: 10 people is 4 reps.
     const ten = surveyMetrics(syntheticSurvey(10), AS_OF);
     assert.ok(ten.every((m) => (m.status === "measured" ? m.segments : []).every((s) => s.dimension !== "role")));
-    assert.match(measured(ten, SURVEY.ease).segmentExemptReason ?? "", /fewer than 5 answers/);
+    assert.match(measured(ten, SURVEY.ease).segmentExemptReason ?? "", /^A role is shown on its own only where 5 or more people gave it/);
     // Fifteen is 6 reps and 3 of each other role.
     const fifteen = surveyMetrics(syntheticSurvey(15), AS_OF);
     const roles = measured(fifteen, SURVEY.ease).segments.filter((s) => s.dimension === "role");
     assert.deepEqual(roles.map((s) => [s.key, s.n]), [["Sales rep", 6]]);
-    assert.ok(measured(fifteen, SURVEY.ease).assumptions.some((a) => /fewer than 5 answers aren't shown/.test(a)));
+    assert.ok(measured(fifteen, SURVEY.ease).assumptions.some((a) => /none or 5 or more gave every other role/.test(a)));
     assert.ok(fifteen.every((m) => (m.status === "measured" ? m.segments : []).filter((s) => s.dimension === "role").every((s) => s.n >= MIN_RESPONSES)));
   });
 });

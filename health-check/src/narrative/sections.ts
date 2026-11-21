@@ -611,7 +611,7 @@ function surveyMethod(view: SurveyView): string[] {
   const comments = view.metrics.find((m) => m.id === SURVEY.responses);
   const left = comments?.status === "measured" ? (comments.stats.comments ?? 0) : null;
   return [
-    "The survey is anonymous: it never asks for a name, and a role is shown on its own only where 5 or more people gave it.",
+    `The survey is anonymous: it never asks for a name, and a role is shown on its own only where ${MIN_RESPONSES} or more people gave it and none or ${MIN_RESPONSES} or more gave every other role, so no figure is about a group of fewer than ${MIN_RESPONSES}.`,
     left === null ? "We don't put the survey's comments in any document." : `${left === 1 ? "1 person" : `${left} people`} left a comment. We don't put comments in any document, so none is quoted here.`,
     ...(view.shown
       ? [
@@ -1010,6 +1010,16 @@ export function buildReport(given: ReportInput): BuiltReport {
     briefs,
     scopes,
   };
+}
+
+/**
+ * The team survey's metrics exactly as `buildReport` made them for this report,
+ * before any correction, for the run's stored metrics (DECISIONS.md 645). The
+ * only code that makes them is `surveyMetrics`, called once above, so what a
+ * run stores is what its documents print. None when the run has no survey.
+ */
+export function surveyMetricsOf(report: Pick<BuiltReport, "input">): Metric[] {
+  return report.input.metrics.filter((m) => SURVEY_METRIC_IDS.includes(m.id));
 }
 
 /** The text of a section's current version. */

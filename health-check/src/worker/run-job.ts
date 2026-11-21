@@ -4,9 +4,9 @@ import { ALL_MODULES, knownModuleIds, modulesForRun } from "../domains/index.ts"
 import { runHealthCheck } from "../engine/run.ts";
 import { applyNarrative, type Rejection } from "../narrative/apply.ts";
 import type { NarrativeClient } from "../narrative/client.ts";
-import { buildReport, type BuiltReport, type ReportInput } from "../narrative/sections.ts";
+import { buildReport, surveyMetricsOf, type BuiltReport, type ReportInput } from "../narrative/sections.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
-import { BASELINE_OVERRIDES_FILE, BASELINE_READ_FILE, INTERVIEWS_FILE, loadRun, OUTPUT_FILES, SURVEY_FILE, writeBaselineRead, writeRows } from "../render/render-run.ts";
+import { BASELINE_OVERRIDES_FILE, BASELINE_READ_FILE, INTERVIEWS_FILE, keepSurveyMetrics, loadRun, OUTPUT_FILES, SURVEY_FILE, writeBaselineRead, writeRows } from "../render/render-run.ts";
 import { BASELINE_ROWS_UNREAD, baselineRefusedSummary } from "../render/render-released.ts";
 import { INTERVIEW_VERSION } from "../interviews/questions.ts";
 import { OAuthConnectionProvider, ReconnectionNeeded, revokeConnection } from "../salesforce/oauth-provider.ts";
@@ -23,6 +23,7 @@ import { appFor, appNotSetUp, needsReconnection } from "./apps.ts";
 import { withJobLock } from "./lock.ts";
 import { progressOf, RunClosedError, runOverall, type RunJobInput } from "./types.ts";
 import { withoutComments } from "../survey/questions.ts";
+import { SURVEY_METRIC_IDS } from "../survey/summary.ts";
 import { FACTS_FILE } from "../extract/facts.ts";
 import { inventoryOf } from "./inventory.ts";
 import { COMPLEXITY_FILE } from "../complexity/read.ts";
@@ -280,6 +281,11 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
     if (deps.narrative && !unreviewed && awaiting) log(`Run ${runId} is awaiting manual steps, so its sections are the engine's own text until the answers are in.`);
     const report = deps.narrative && !unreviewed && !awaiting ? await draftSections(runId, dir, reportInput, deps.narrative, pseudonyms, now(), log) : buildReport(reportInput);
     const outputs = Object.values(report.outputs);
+    // The survey's metrics as this report made them, stored with the run's own,
+    // so its sections cite only what the run holds (DECISIONS.md 645). Before the
+    // sections file, as every other write the sections rest on is.
+    const surveyMetrics = surveyMetricsOf(report);
+    keepSurveyMetrics(dir, surveyMetrics);
     writeFileSync(join(dir, SECTIONS_FILE), `${JSON.stringify(outputs, null, 2)}\n`, { mode: 0o600 });
     const facts = factsOf(dir, log);
     // Only with the switch on, as it stands now: off, the console's table is never named.
@@ -290,12 +296,15 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Pro
     // A pulse's digest, from the report its result is made from, with its results (DECISIONS.md 632). A check's waits for its documents.
     const digest = input.run.product === "pulse" ? digestOf(runId, () => buildDigest({ report, pseudonyms, inventory, madeAt: now().toISOString() }), log) : null;
     const sections = outputs.flatMap((o) => o.sections);
-    for (const line of danglingCitations(runId, sections, result.output!)) log(line);
+    // The engine's own, without any survey metric: those go apart, in a savepoint of their own.
+    const metrics = result.output!.metrics.filter((m) => !SURVEY_METRIC_IDS.includes(m.id));
+    for (const line of danglingCitations(runId, sections, { ...result.output!, metrics: [...metrics, ...surveyMetrics] })) log(line);
     await deps.store.saveRunOutput(runId, {
       progress: progressOf(result.run),
       runDir: dir,
       findings: result.output!.findings,
-      metrics: result.output!.metrics,
+      metrics,
+      surveyMetrics,
       scores: reportInput.scores ?? [],
       manualSteps: result.output!.manualSteps,
       // The engine leaves its sections as drafts, and the console approves only

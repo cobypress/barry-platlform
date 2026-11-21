@@ -21,6 +21,7 @@ import { renderRawNotesDocx } from "./raw-notes-docx.ts";
 import { ONE_PAGER_PAGES, onePagerHtml } from "./one-pager.ts";
 import { renderReadoutKitDocx } from "./readout-kit.ts";
 import { Survey } from "../survey/questions.ts";
+import { SURVEY_METRIC_IDS } from "../survey/summary.ts";
 import { loadActionLists, recordCounts, writeActionFiles } from "../actions/index.ts";
 import { Interviews } from "../interviews/questions.ts";
 
@@ -29,6 +30,20 @@ const StageMeanings = z.record(z.string(), z.enum(["open", "won", "lost"]));
 
 /** The team survey as it stood when the sections were built, comments left out (DECISIONS.md 147). */
 export const SURVEY_FILE = "survey.json";
+
+/**
+ * The folder's metrics.json with the team survey's metrics as the report made
+ * them (DECISIONS.md 645): the engine's own as they are, any survey metric an
+ * earlier write left dropped, then these. So the folder holds every metric its
+ * sections cite, as the console's reader checks. None leaves the engine's alone.
+ */
+export function keepSurveyMetrics(dir: string, survey: Metric[]): void {
+  const path = join(dir, "metrics.json");
+  // As written, not through the schema, so the engine's own metrics keep every byte.
+  const own = (JSON.parse(readFileSync(path, "utf8")) as Array<{ id: string }>).filter((m) => !SURVEY_METRIC_IDS.includes(m.id));
+  writeFileSync(path, `${JSON.stringify([...own, ...survey], null, 2)}\n`, { mode: 0o600 });
+}
+
 /**
  * The stakeholder interviews as they stood when the sections were built
  * (DECISIONS.md 180). Kept with the intake, outside the raw extracts, so it goes
