@@ -1,9 +1,8 @@
-import { money } from "../../render/format.ts";
 import { schemaExtractor } from "../../extract/configuration.ts";
 import { opportunitiesExtractor, stagesExtractor, wonAccountsExtractor } from "../../extract/opportunities.ts";
 import { daysBefore, monthsBefore } from "../../extract/types.ts";
 import { usersExtractor } from "../../extract/users.ts";
-import { pct, plural, type NotMeasurableResult, type Rule, type RuleContext, type RuleResult } from "../../engine/rule.ts";
+import { notSized, pct, plural, type NotMeasurableResult, type Rule, type RuleContext, type RuleResult } from "../../engine/rule.ts";
 import { enteredCurrentStage } from "../current-pipeline/stages.ts";
 import { loadPipeline, unsplitLostReason, type Deal } from "../historic-pipeline/cohort.ts";
 import { median } from "../historic-pipeline/metrics.ts";
@@ -13,6 +12,7 @@ import { atOwnWinRate } from "../value.ts";
 import type { Evidence, Value } from "../../schemas/index.ts";
 import type { DomainModule } from "../types.ts";
 import { joinSaid, org, said } from "../../engine/org-words.ts";
+import { moneySaid } from "../../engine/said-forms.ts";
 
 // Every title, summary, recommendation and reason is written with `said`, every
 // stage with `org`, so the digest can say which words are the org's
@@ -107,8 +107,8 @@ const winBacks: Rule = {
     const value = atOwnWinRate(ctx, amount, {
       multiCurrency: data.multiCurrency,
       period: "one-off, if these deals are reopened",
-      basis: `${plural(candidates.length, "deal")} with a total Amount of ${money(amount, ctx.calibration.currency)}, at the amount quoted then`,
-      caveat: "Assumes a win-back wins as often as a new deal. We don't have your win-back history, so treat this as a ceiling, and the reason each deal was lost may still stand",
+      basis: said`${plural(candidates.length, "deal")} with a total Amount of ${moneySaid(amount, ctx.calibration.currency)}, at the amount quoted then`,
+      caveat: said`Assumes a win-back wins as often as a new deal. We don't have your win-back history, so treat this as a ceiling, and the reason each deal was lost may still stand`,
     });
     return {
       outcome: "issue",
@@ -155,12 +155,12 @@ const dormantAccounts: Rule = {
     const typical = wonAmounts.length >= ctx.calibration.minSample ? median(wonAmounts) : null;
     const value: Value =
       typical === null
-        ? { kind: "not_sized", reason: `${wonAmounts.length} won deals with amounts is below the calibrated minimum of ${ctx.calibration.minSample}, so there's no typical deal to size this from.` }
+        ? notSized(said`${wonAmounts.length} won deals with amounts is below the calibrated minimum of ${ctx.calibration.minSample}, so there's no typical deal to size this from.`)
         : atOwnWinRate(ctx, typical * dormant.length, {
             multiCurrency: data.multiCurrency,
             period: "one-off, if each account buys once more",
-            basis: `${plural(dormant.length, "dormant account")} at your median won deal of ${money(Math.round(typical), ctx.calibration.currency)}`,
-            caveat: "Assumes each account has one more deal in it, and buys as often as an average deal wins. Some will have closed or moved on, so treat this as a ceiling",
+            basis: said`${plural(dormant.length, "dormant account")} at your median won deal of ${moneySaid(Math.round(typical), ctx.calibration.currency)}`,
+            caveat: said`Assumes each account has one more deal in it, and buys as often as an average deal wins. Some will have closed or moved on, so treat this as a ceiling`,
           });
     const stranded = dormant.filter((a) => inactive.has(a.OwnerId)).length;
     return {

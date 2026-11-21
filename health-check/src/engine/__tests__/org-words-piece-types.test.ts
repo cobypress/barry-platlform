@@ -66,6 +66,15 @@ const LITERAL_PIECES: string[] = [
   "src/domains/integrations/index.ts: r.label :: \"API requests\" | \"asynchronous Apex runs\"",
   "src/domains/technical-health/index.ts: first ? r.opening : r.label :: \"data storage\" | \"Data storage\" | \"file storage\" | \"File storage\"",
   "src/domains/technical-health/index.ts: k :: \"Apex classes\" | \"Apex triggers\" | \"Active flows\"",
+  // Value reasons and assumptions (DECISIONS.md 663): a fixed sentence and our licence's name, a peer kind, and the
+  // calibration's upkeep keys and the nouns calibratedHours takes, each a literal union in value.ts.
+  `src/domains/adoption/index.ts: RISK :: "We don't put a figure on it. The seats of people who've stopped logging in are already counted as licence waste, so a figure here would count them twice."`,
+  `src/domains/adoption/index.ts: RISK :: "We don't put a figure on it. The seats of people who've stopped logging in are already counted as licence waste, so a figure here would count them twice."`,
+  'src/domains/current-pipeline/index.ts: options.subject :: "rep" | "account"',
+  'src/domains/integrations/index.ts: INTEGRATION_LICENCE :: "Salesforce Integration"',
+  'src/domains/integrations/index.ts: INTEGRATION_LICENCE :: "Salesforce Integration"',
+  'src/domains/value.ts: key :: UpkeepKey',
+  'src/domains/value.ts: noun :: "unused report" | "unused custom field"',
 ];
 
 const ROOT = join(import.meta.dirname, "../../..");

@@ -60,6 +60,30 @@ const marksOf = (f: Finding, key: (typeof SENTENCES)[number]) => {
   return typeof text === "string" ? spansIfCurrent(text, f.orgWords?.[key]) : null;
 };
 
+/**
+ * Every string of a finding the digest serves as a sentence, with its marks or
+ * null: the four sentences, and (DECISIONS.md 663) the value's reason, each of
+ * its assumptions and the hours' basis.
+ */
+function sentencesOf(f: Finding): Array<{ key: string; text: string; spans: ReturnType<typeof spansIfCurrent> }> {
+  const out = SENTENCES.flatMap((key) => {
+    const text = f[key];
+    return typeof text === "string" ? [{ key: key as string, text, spans: marksOf(f, key) }] : [];
+  });
+  const v = f.value;
+  if (v.kind === "not_sized") out.push({ key: "valueReason", text: v.reason, spans: spansIfCurrent(v.reason, f.orgWords?.valueReason) });
+  else v.assumptions.forEach((text, i) => out.push({ key: `valueAssumptions[${i}]`, text, spans: spansIfCurrent(text, f.orgWords?.valueAssumptions?.[i]) }));
+  if (f.effortHours) out.push({ key: "hoursBasis", text: f.effortHours.basis, spans: spansIfCurrent(f.effortHours.basis, f.orgWords?.hoursBasis) });
+  return out;
+}
+
+/**
+ * The value reasons that pass on a reason the engine didn't write with said (an
+ * extract's or a measure's), and so stay unknown, by rule (DECISIONS.md 663).
+ * Each is a not sized value's reason; on the synthetic org, none is reached.
+ */
+const VALUE_REASON_PASSED_ON = (text: string): boolean => /^We won't size this without your own (win rate|return per lead), which isn't measurable: /.test(text);
+
 describe("rules writing their sentences with said (decisions 655 and 657)", () => {
   test("every rule on the unconverted list exists", () => {
     const ids = new Set(ALL_MODULES.flatMap((m) => m.rules.map((r) => r.id)));
@@ -79,6 +103,21 @@ describe("rules writing their sentences with said (decisions 655 and 657)", () =
     }
   });
 
+  test("every finding's value reason or assumptions, and its hours' basis, are marked; only a reason passed on stays unknown (decision 663)", () => {
+    let assumptions = 0;
+    for (const f of [...findings, ...uncalibrated]) {
+      const v = f.value;
+      if (v.kind === "not_sized") assert.ok(f.orgWords?.valueReason || VALUE_REASON_PASSED_ON(v.reason), `${f.ruleId} value reason`);
+      else {
+        assert.equal(f.orgWords?.valueAssumptions?.length, v.assumptions.length, `${f.ruleId} value assumptions`);
+        assumptions += v.assumptions.length;
+      }
+      if (f.effortHours) assert.deepEqual(f.orgWords?.hoursBasis?.spans, [], `${f.ruleId} hours basis, the engine's words alone`);
+    }
+    assert.ok(assumptions >= 20, `${assumptions} assumptions marked`);
+    assert.ok(findings.filter((f) => f.effortHours).length >= 30);
+  });
+
   test("an unconverted rule's own sentences are left unknown, never guessed", () => {
     const issues = findings.filter((f) => UNCONVERTED_RULES.has(f.ruleId) && f.status === "issue");
     for (const f of issues) assert.equal(f.orgWords?.summary, undefined, f.ruleId);
@@ -88,10 +127,8 @@ describe("rules writing their sentences with said (decisions 655 and 657)", () =
     assert.ok(planted.length >= 2);
     const seen = new Set<string>();
     for (const f of findings) {
-      for (const key of SENTENCES) {
-        const spans = marksOf(f, key);
-        const text = f[key];
-        if (!spans || typeof text !== "string") continue;
+      for (const { key, text, spans } of sentencesOf(f)) {
+        if (!spans) continue;
         for (const s of spans) assert.ok(fromOrg(text.slice(s.start, s.end)), `${f.ruleId} ${key}: span "${text.slice(s.start, s.end)}" is text the org's data holds`);
         for (const name of [...planted, ...PLANTED_NAMES]) {
           for (let at = text.indexOf(name); at !== -1; at = text.indexOf(name, at + 1)) {
@@ -109,10 +146,8 @@ describe("rules writing their sentences with said (decisions 655 and 657)", () =
   test("outside its spans, no marked sentence holds a name the org's data holds, or a person's token (found in review)", () => {
     const found = new Set<string>();
     for (const f of [...findings, ...uncalibrated]) {
-      for (const key of SENTENCES) {
-        const text = f[key];
-        const spans = marksOf(f, key);
-        if (!spans || typeof text !== "string") continue;
+      for (const { key, text, spans } of sentencesOf(f)) {
+        if (!spans) continue;
         let outside = "";
         let at = 0;
         for (const s of spans) [outside, at] = [`${outside}${text.slice(at, s.start)}\u0000`, s.end];
@@ -209,6 +244,8 @@ const ENGINE_WORDS: ReadonlySet<string> = new Set([
   "Email", "Event", "Flows", "Macro", "Marketing", "Opportunity", "Report", "Sales", "Salesforce Integration", "Salesforce", "Scheduled", "Service",
   "Validation", "Workflow", "answered", "cases", "email", "fields", "grade", "integration", "loops", "manager", "metadata", "owner", "period",
   "picklist", "profile", "reference", "scheduled", "score", "shared", "update", "whole",
+  // In value reasons and assumptions and hours' bases (DECISIONS.md 663): Salesforce's Amount field and Queue object, a duration, and ordinary words.
+  "2 hours", "Amount", "Queue", "confirmed", "decisions", "installed",
 ]);
 
 /** On the synthetic org, the name is quoted only in sentences of rules not yet converted. */
@@ -221,13 +258,11 @@ const NAMES = new RegExp([...PLANTED_NAMES].sort((a, b) => b.length - a.length).
 /** Every sentence of every finding that quotes `text`, and whether it lies wholly inside one of that sentence's spans. */
 function quotes(all: Finding[], text: string): Array<{ at: string; whole: boolean }> {
   return all.flatMap((f) =>
-    SENTENCES.flatMap((key) => {
-      const sentence = f[key];
+    sentencesOf(f).flatMap(({ key, text: sentence, spans }) => {
       // A rule not yet converted leaves its sentences unknown, which the test above holds.
-      if (typeof sentence !== "string" || !sentence.includes(text) || UNCONVERTED_RULES.has(f.ruleId)) return [];
-      const spans = marksOf(f, key);
-      // An unmarked sentence is unknown, never wrong: only an extract's reason passed on may be one.
-      if (!spans) return [{ at: `${f.ruleId} ${key} (unmarked)`, whole: key === "notMeasurableReason" }];
+      if (!sentence.includes(text) || UNCONVERTED_RULES.has(f.ruleId)) return [];
+      // An unmarked sentence is unknown, never wrong: only an extract's or a measure's reason passed on may be one.
+      if (!spans) return [{ at: `${f.ruleId} ${key} (unmarked)`, whole: key === "notMeasurableReason" || (key === "valueReason" && VALUE_REASON_PASSED_ON(sentence)) }];
       const at = sentence.indexOf(text);
       return [{ at: `${f.ruleId} ${key}`, whole: spans.some((s) => s.start <= at && at + text.length <= s.end) }];
     }),

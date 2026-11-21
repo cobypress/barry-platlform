@@ -131,8 +131,8 @@ export function shareRule(options: ShareRule): Rule {
           typeof options.sized === "function"
             ? potentialRevenue(ctx, data, scoped.deals.filter(scoped.isHit), () => (options.sized as (c: RuleContext, d: Ready) => Situation)(ctx, data))
             : options.sized
-              ? exposure(ctx, scoped.deals.filter(scoped.isHit), data.multiCurrency, `${result.hits} deals affected`)
-              : notSized("This affects how far the pipeline can be trusted, which has no direct figure."),
+              ? exposure(ctx, scoped.deals.filter(scoped.isHit), data.multiCurrency, said`${result.hits} deals affected`)
+              : notSized(said`This affects how far the pipeline can be trusted, which has no direct figure.`),
         effort: { size: "S" },
         owner: options.owner,
         segmentsChecked: result.segmentsChecked,
@@ -312,7 +312,7 @@ function concentrationRule(options: { id: string; title: string; limit: number; 
         severity: "medium",
         confidence: "high",
         evidence,
-        value: { kind: "revenue", amount: Math.round(amount), unit: ctx.calibration.currency, period: "open pipeline today", assumptions: [`The Amount on open deals for the largest ${options.subject}: exposure, not expected loss`, `${options.limit}% is our working limit, not a Salesforce figure`] },
+        value: { kind: "revenue", amount: Math.round(amount), unit: ctx.calibration.currency, period: "open pipeline today", assumptions: [said`The Amount on open deals for the largest ${options.subject}: exposure, not expected loss`, said`${options.limit}% is our working limit, not a Salesforce figure`] },
         effort: { size: "M" },
         owner: "Head of sales",
         segmentsChecked: segments,
@@ -427,7 +427,7 @@ const coverage: Rule = {
       severity: result.coverage < COVERAGE_TARGET / 2 ? "high" : "medium",
       confidence: "medium",
       evidence,
-      value: { kind: "revenue", amount: shortfall, unit: ctx.calibration.currency, period: `more pipeline needed for the quarter starting ${result.quarter.from}`, assumptions: [`A target of ${COVERAGE_TARGET} times the remaining quota, which is our working figure`, "Quota comes from Collaborative Forecasts, for people who own deals", "Open pipeline in the quarter is taken at full Amount, with no stage weighting"] },
+      value: { kind: "revenue", amount: shortfall, unit: ctx.calibration.currency, period: `more pipeline needed for the quarter starting ${result.quarter.from}`, assumptions: [said`A target of ${COVERAGE_TARGET} times the remaining quota, which is our working figure`, said`Quota comes from Collaborative Forecasts, for people who own deals`, said`Open pipeline in the quarter is taken at full Amount, with no stage weighting`] },
       // The decision is the small part, and it's the urgent part. Building pipeline afterwards is the dependency.
       effort: { size: "S" },
       owner: "Head of sales",

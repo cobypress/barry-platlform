@@ -80,7 +80,7 @@ const escalation: Rule = {
       severity: "medium",
       confidence: "high",
       evidence,
-      value: notSized("A stalled case costs customers' patience, which has no honest figure in money."),
+      value: notSized(said`A stalled case costs customers' patience, which has no honest figure in money.`),
       effort: { size: "S" },
       owner: OWNER,
       facts: { rules: rules.data.length, active: 0 },
@@ -115,7 +115,7 @@ const escalationTargets: Rule = {
       severity: "high",
       confidence: "high",
       evidence,
-      value: notSized("An escalation nobody sees costs customers' patience, which has no honest figure in money."),
+      value: notSized(said`An escalation nobody sees costs customers' patience, which has no honest figure in money.`),
       effort: { size: "XS" },
       owner: OWNER,
       segmentsChecked,
@@ -158,7 +158,7 @@ const queueSprawl: Rule = {
       severity: empty.length ? "medium" : "low",
       confidence: "high",
       evidence,
-      value: notSized("Queue set-up decides how fast cases are picked up, which has no honest figure in money."),
+      value: notSized(said`Queue set-up decides how fast cases are picked up, which has no honest figure in money.`),
       effort: { size: "S" },
       owner: OWNER,
       segmentsChecked,
@@ -205,7 +205,7 @@ const omniRouting: Rule = {
       severity: "medium",
       confidence: "high",
       evidence,
-      value: notSized("How work is routed shows in waiting times, which have no honest figure in money."),
+      value: notSized(said`How work is routed shows in waiting times, which have no honest figure in money.`),
       effort: { size: "S" },
       owner: OWNER,
       segmentsChecked,
@@ -261,8 +261,8 @@ const agentLicences: Rule = {
     const edition = org.status === "ok" ? (org.data[0]?.OrganizationType ?? null) : null;
     const price = costPerSeat(SERVICE_SEAT, { calibration: ctx.calibration, edition });
     const value: Value = isPriced(price)
-      ? { kind: "licence_cost", amount: Math.round(price.annual * wasted), unit: price.currency, period: "per year", assumptions: [`${plural(wasted, "Service Cloud seat")} at ${price.note}`] }
-      : notSized(`A Service Cloud seat has no price: ${price.reason}`);
+      ? { kind: "licence_cost", amount: Math.round(price.annual * wasted), unit: price.currency, period: "per year", assumptions: [said`${plural(wasted, "Service Cloud seat")} at ${price.note}`] }
+      : notSized(said`A Service Cloud seat has no price: ${price.reason}`);
     return {
       outcome: "issue",
       title: said`Some Service Cloud licences aren't being used`,
@@ -337,7 +337,7 @@ const knowledgeUse: Rule = {
       severity: "low",
       confidence: "high",
       evidence,
-      value: notSized("Articles save agents' time, but there's no agreed figure for how much here."),
+      value: notSized(said`Articles save agents' time, but there's no agreed figure for how much here.`),
       effort: { size: "S" },
       owner: "Knowledge manager",
       segmentsChecked: result.segmentsChecked,
@@ -379,7 +379,7 @@ const knowledgeCurrent: Rule = {
       severity: "low",
       confidence: "high",
       evidence,
-      value: notSized("Out-of-date articles cost trust, which has no honest figure in money."),
+      value: notSized(said`Out-of-date articles cost trust, which has no honest figure in money.`),
       effort: { size: "M" },
       owner: "Knowledge manager",
       facts,
@@ -426,7 +426,7 @@ const macros: Rule = {
       severity: "low",
       confidence: unusedMacros === null ? "medium" : "high",
       evidence,
-      value: notSized("Tidier macros save agents a little time each, with no agreed figure for it here."),
+      value: notSized(said`Tidier macros save agents a little time each, with no agreed figure for it here.`),
       effort: { size: "S" },
       owner: "Service operations",
       segmentsChecked,
@@ -467,7 +467,7 @@ const caseRoutingOverlap: Rule = {
       severity: "medium",
       confidence: "medium",
       evidence,
-      value: notSized("Routing conflicts show in waiting times, which have no honest figure in money."),
+      value: notSized(said`Routing conflicts show in waiting times, which have no honest figure in money.`),
       effort: { size: "S" },
       owner: OWNER,
       facts,

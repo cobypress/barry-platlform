@@ -1,6 +1,7 @@
 import { test, describe, before } from "node:test";
 import assert from "node:assert/strict";
 import { atOwnLeadReturn, calibratedHours } from "../value.ts";
+import { said } from "../../engine/org-words.ts";
 import { analyseExtracts, clone, loadExtracts, runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
 import type { Finding } from "../../schemas/index.ts";
@@ -81,13 +82,13 @@ describe("leads", () => {
   test("unanswered leads are priced the same way", () => assert.equal(one(analyseExtracts(extracts).findings, "lead.no-first-response").value.kind, "revenue"));
 
   test("no return per lead means not sized, with the reason", () => {
-    const value = atOwnLeadReturn({ metrics: [], calibration: loadCalibration() }, 10, { period: "once", caveat: "c" });
+    const value = atOwnLeadReturn({ metrics: [], calibration: loadCalibration() }, 10, { period: "once", caveat: said`c` });
     assert.ok(value.kind === "not_sized" && value.reason.includes("isn't measurable"));
   });
 
   test("a return of zero isn't sized as zero revenue", () => {
     const metrics = [{ id: "lead.won_per_lead", status: "measured", value: 0, n: 100 }] as never;
-    assert.equal(atOwnLeadReturn({ metrics, calibration: loadCalibration() }, 10, { period: "once", caveat: "c" }).kind, "not_sized");
+    assert.equal(atOwnLeadReturn({ metrics, calibration: loadCalibration() }, 10, { period: "once", caveat: said`c` }).kind, "not_sized");
   });
 
   test("multi-currency reaches the leads figure as not sized", () => {
@@ -113,8 +114,8 @@ describe("hours", () => {
   });
 
   test("the arithmetic", () => {
-    const calibration = { ...loadCalibration(), effortMinutes: { x: 90 } };
-    const value = calibratedHours({ calibration }, "x", 3, "thing");
+    const calibration = { ...loadCalibration(), effortMinutes: { "report-upkeep": 90 } };
+    const value = calibratedHours({ calibration }, "report-upkeep", 3, "unused report");
     assert.ok(value.kind === "hours" && value.amount === 4.5 && value.unit === "hours");
   });
 });

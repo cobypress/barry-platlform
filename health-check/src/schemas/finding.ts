@@ -81,6 +81,11 @@ export const FindingOrgWords = z.object({
   summary: MarkedSentence.optional(),
   recommendation: MarkedSentence.optional(),
   notMeasurableReason: MarkedSentence.optional(),
+  // A value's reason, and its assumptions all together, one marking each in order, or none (DECISIONS.md 663).
+  valueReason: MarkedSentence.optional(),
+  valueAssumptions: z.array(MarkedSentence).optional(),
+  // The hours' basis (DECISIONS.md 628): the fix table's words and counts only, so marked with no spans when made.
+  hoursBasis: MarkedSentence.optional(),
 });
 export type FindingOrgWords = z.infer<typeof FindingOrgWords>;
 

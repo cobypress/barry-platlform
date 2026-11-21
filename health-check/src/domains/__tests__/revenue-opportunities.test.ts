@@ -2,6 +2,7 @@ import { test, describe, before } from "node:test";
 import assert from "node:assert/strict";
 import { revenueOpportunitiesModule } from "../revenue-opportunities/index.ts";
 import { atOwnWinRate } from "../value.ts";
+import { said } from "../../engine/org-words.ts";
 import { analyseExtracts, clone, loadExtracts, runFromRecording } from "../../testing/harness.ts";
 import { loadCalibration } from "../../testing/replay.ts";
 import type { Finding } from "../../schemas/index.ts";
@@ -67,13 +68,13 @@ describe("every revenue figure carries its assumptions", () => {
 
   test("the sum is the amount times the org's own rate, rounded", () => {
     const metrics = [{ id: "historic.win_rate", status: "measured", value: 25, n: 40 }] as never;
-    const value = atOwnWinRate({ metrics, calibration: loadCalibration() }, 1_000, { multiCurrency: false, period: "once", basis: "b", caveat: "c" });
+    const value = atOwnWinRate({ metrics, calibration: loadCalibration() }, 1_000, { multiCurrency: false, period: "once", basis: said`b`, caveat: said`c` });
     assert.ok(value.kind === "revenue" && value.amount === 250 && value.unit === "GBP");
   });
 
   test("nothing to size gives a reason, not a zero", () => {
     const metrics = [{ id: "historic.win_rate", status: "measured", value: 25, n: 40 }] as never;
-    assert.equal(atOwnWinRate({ metrics, calibration: loadCalibration() }, 0, { multiCurrency: false, period: "once", basis: "b", caveat: "c" }).kind, "not_sized");
+    assert.equal(atOwnWinRate({ metrics, calibration: loadCalibration() }, 0, { multiCurrency: false, period: "once", basis: said`b`, caveat: said`c` }).kind, "not_sized");
   });
 });
 

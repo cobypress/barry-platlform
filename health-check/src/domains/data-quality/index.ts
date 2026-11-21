@@ -41,11 +41,11 @@ const dealDimensions = (ctx: RuleContext): Record<string, (d: Deal) => string> =
 const dimensionWords = (dimension: string): Said =>
   dimension === "record type" ? said`record type` : dimension === "team" ? said`team` : dimension === "rep" ? said`rep` : said`${org(dimension)}`;
 
-export function exposure(ctx: RuleContext, deals: Deal[], multiCurrency: boolean, note: string): Value {
-  if (multiCurrency) return notSized("The org is multi-currency, so these amounts can't be added.");
+export function exposure(ctx: RuleContext, deals: Deal[], multiCurrency: boolean, note: Said): Value {
+  if (multiCurrency) return notSized(said`The org is multi-currency, so these amounts can't be added.`);
   const amount = deals.reduce((sum, d) => sum + (d.Amount ?? 0), 0);
-  if (amount === 0) return notSized("These deals have no amounts.");
-  return { kind: "revenue", amount: Math.round(amount), unit: ctx.calibration.currency, period: "open pipeline today", assumptions: [note, "The total of Amount on affected deals: exposure, not expected loss"] };
+  if (amount === 0) return notSized(said`These deals have no amounts.`);
+  return { kind: "revenue", amount: Math.round(amount), unit: ctx.calibration.currency, period: "open pipeline today", assumptions: [note, said`The total of Amount on affected deals: exposure, not expected loss`] };
 }
 
 type DealRuleOptions = {
@@ -122,8 +122,8 @@ function dealRule(options: DealRuleOptions): Rule {
           typeof options.sized === "function"
             ? potentialRevenue(ctx, data, deals.filter(hit), (d) => (options.sized as Exclude<DealRuleOptions["sized"], boolean>)(ctx, data, d))
             : options.sized
-              ? exposure(ctx, deals.filter(hit), data.multiCurrency, `${result.hits} deals affected`)
-              : notSized("This affects how far the pipeline can be trusted, which has no direct figure."),
+              ? exposure(ctx, deals.filter(hit), data.multiCurrency, said`${result.hits} deals affected`)
+              : notSized(said`This affects how far the pipeline can be trusted, which has no direct figure.`),
         effort: { size: options.effort },
         owner: options.owner,
         segmentsChecked: result.segmentsChecked,
@@ -270,7 +270,7 @@ const duplicateAccounts: Rule = {
       severity: share !== null && share >= DUPLICATE_SHARE_MEDIUM ? "medium" : "low",
       confidence: "medium",
       evidence,
-      value: notSized("We can't say what the split history costs from the names alone."),
+      value: notSized(said`We can't say what the split history costs from the names alone.`),
       effort: { size: groups.data.length > 50 ? "L" : "M" },
       owner: "Sales operations",
       dependencies: ["Check that integrations don't hold any of these accounts' ids before merging"],
@@ -322,7 +322,7 @@ const lossReasonMissing: Rule = {
       severity: "medium",
       confidence: "high",
       evidence,
-      value: notSized("Without reasons, the value of fixing losses can't be sized."),
+      value: notSized(said`Without reasons, the value of fixing losses can't be sized.`),
       effort: { size: "XS" },
       owner: "Sales operations",
       segmentsChecked: result.segmentsChecked,
@@ -371,7 +371,7 @@ const inactiveRecordOwners: Rule = {
       severity: "medium",
       confidence: "high",
       evidence,
-      value: notSized("We can't say what these records would be worth with an active owner."),
+      value: notSized(said`We can't say what these records would be worth with an active owner.`),
       effort: { size: "S" },
       owner: "Sales operations",
       segmentsChecked: segments,
@@ -412,7 +412,7 @@ const duplicateRulesMissing: Rule = {
       severity: "medium",
       confidence: "high",
       evidence,
-      value: notSized("We don't yet measure how many duplicates exist."),
+      value: notSized(said`We don't yet measure how many duplicates exist.`),
       effort: { size: "S" },
       owner: "Salesforce admin",
       segmentsChecked: segments,
@@ -458,7 +458,7 @@ const staleLeads: Rule = {
       severity: "medium",
       confidence: "high",
       evidence,
-      value: atOwnLeadReturn(ctx, stale.data, { period: "one-off, if these leads are worked", caveat: "Assumes old, untouched leads return what an average lead does. They usually return less, so treat this as a ceiling" }),
+      value: atOwnLeadReturn(ctx, stale.data, { period: "one-off, if these leads are worked", caveat: said`Assumes old, untouched leads return what an average lead does. They usually return less, so treat this as a ceiling` }),
       effort: { size: "S" },
       owner: "Head of marketing",
       segmentsChecked: segments,
@@ -500,7 +500,7 @@ const contactGaps: Rule = {
       severity: "low",
       confidence: "high",
       evidence,
-      value: notSized("We can't say what a complete record would be worth."),
+      value: notSized(said`We can't say what a complete record would be worth.`),
       effort: { size: "M" },
       owner: "Sales operations",
       segmentsChecked: segments,
@@ -689,7 +689,7 @@ const recordTypeUse: Rule = {
       severity: "low",
       confidence: "medium",
       evidence,
-      value: notSized("We don't put a figure on this: the only one to hand would be a guess at upkeep hours."),
+      value: notSized(said`We don't put a figure on this: the only one to hand would be a guess at upkeep hours.`),
       effort: { size: "S" },
       owner: "Salesforce admin",
       dependencies: ["Check which profiles default to each record type", "Check which flows, Apex and integrations name each record type"],

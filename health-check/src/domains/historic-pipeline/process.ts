@@ -197,7 +197,8 @@ function worst(result: SegmentedRate): Said {
   return worse.length ? said` Highest: ${joinSaid(worse.map((h) => said`${dimensionWords(h.dimension)} ${org(h.key)}, ${h.hits} of ${h.n} (${h.rate}%)`), "; ")}.` : said``;
 }
 
-const NOT_SIZED = "We don't put a figure on it: it shows how far the stages can be trusted, and that has no direct value.";
+/** Said in the analysis, so the reason is marked (DECISIONS.md 663). */
+const notSizedHere = (): ReturnType<typeof notSized> => notSized(said`We don't put a figure on it: it shows how far the stages can be trusted, and that has no direct value.`);
 
 function notMeasurableResult(loaded: Exclude<ReturnType<typeof load>, { status: "ok" }>): RuleResult {
   return { outcome: "not_measurable", reason: loaded.reason, evidence: loaded.data.evidence };
@@ -231,7 +232,7 @@ const skippedStages: Rule = {
       severity: "medium",
       confidence: p.expectedFrom === "calibration" ? "high" : "medium",
       evidence: data.evidence,
-      value: notSized(NOT_SIZED),
+      value: notSizedHere(),
       effort: { size: "S" },
       owner: "Sales operations",
       segmentsChecked: result.segmentsChecked,
@@ -265,7 +266,7 @@ const goingBackwards: Rule = {
       severity: "medium",
       confidence: "high",
       evidence: data.evidence,
-      value: notSized(NOT_SIZED),
+      value: notSizedHere(),
       effort: { size: "S" },
       owner: "Head of sales",
       segmentsChecked: result.segmentsChecked,
@@ -314,7 +315,7 @@ const deadEndStage: Rule = {
       severity: "medium",
       confidence: "high",
       evidence: data.evidence,
-      value: notSized("These deals were lost either way. Closing them sooner makes the pipeline honest, which has no direct figure."),
+      value: notSized(said`These deals were lost either way. Closing them sooner makes the pipeline honest, which has no direct figure.`),
       effort: { size: "S" },
       owner: "Head of sales",
       segmentsChecked: checked,

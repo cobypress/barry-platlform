@@ -23,3 +23,6 @@ export function moneySaid(amount: number, currency: string): Said {
   if (currency === "GBP" || currency === "USD" || currency === "EUR") return said`${currency === "GBP" ? "£" : currency === "USD" ? "$" : "€"}${whole}`;
   return said`${org(currency)} ${whole}`;
 }
+
+/** Seats of a licence or an app, "3 Sales Cloud seats", as `plural(n, \`${name} seat\`)` writes it, with the name the org's words (DECISIONS.md 663). */
+export const seatsSaid = (n: number, name: string): Said => said`${n} ${org(name)} ${n === 1 ? "seat" : "seats"}`;

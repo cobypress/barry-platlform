@@ -6,14 +6,14 @@ import { apiLimitsExtractor, apiOnlyExtractor, ASYNC_JOB_DAYS, asyncJobsExtracto
 import { licencesExtractor, loginsExtractor, usersExtractor, type UserRow } from "../../extract/users.ts";
 import { looksShared } from "../../guards/user-guards.ts";
 import { COMPLIMENTARY_LICENCES } from "../../money/licences.ts";
-import { costPerSeat, isPriced } from "../../money/seat-cost.ts";
+import { costPerSeat, isPriced, type Unpriced } from "../../money/seat-cost.ts";
 import { notSized, pct, plural, type Rule, type RuleContext, type RuleResult } from "../../engine/rule.ts";
 import type { Value } from "../../schemas/index.ts";
 import { apexGap } from "../automation/shared.ts";
 import type { DomainModule } from "../types.ts";
 import { WHERE } from "../where.ts";
 import { joinSaid, org, said, type Said } from "../../engine/org-words.ts";
-import { andList, grouped } from "../../engine/said-forms.ts";
+import { andList, grouped, seatsSaid } from "../../engine/said-forms.ts";
 
 // Integrations (roadmap 3.2): who and what connects to the org, and whether it
 // works. The three checks that were in security moved here with their ids, so a
@@ -96,7 +96,7 @@ const personalIntegrations: Rule = {
       // API logins are a sign, not proof: someone can run a tool by hand under their own login.
       confidence: "medium",
       evidence,
-      value: notSized("The cost of an integration failing depends on what it carries, which we can't see from the login log."),
+      value: notSized(said`The cost of an integration failing depends on what it carries, which we can't see from the login log.`),
       effort: { size: "S" },
       owner: "Salesforce admin",
       dependencies: ["Confirm with each person what these logins are"],
@@ -143,7 +143,7 @@ const selfAuthorisedApps: Rule = {
       severity: busy.length ? "high" : "medium",
       confidence: "high",
       evidence,
-      value: notSized("A security gap is a risk to manage, not a figure we can put in revenue or hours."),
+      value: notSized(said`A security gap is a risk to manage, not a figure we can put in revenue or hours.`),
       effort: { size: "S" },
       owner: "Salesforce admin",
       dependencies: ["Find out who uses each app before changing it, and grant them access first"],
@@ -190,7 +190,7 @@ const insecureRemoteSites: Rule = {
       severity: "medium",
       confidence: "high",
       evidence,
-      value: notSized("A security gap is a risk to manage, not a figure we can put in revenue or hours."),
+      value: notSized(said`A security gap is a risk to manage, not a figure we can put in revenue or hours.`),
       effort: { size: "S" },
       owner: "Salesforce admin",
       dependencies: ["Check that the other end accepts HTTPS before changing the address"],
@@ -265,21 +265,21 @@ const integrationLicences: Rule = {
     const orgRead = ctx.data(orgExtractor);
     const edition = orgRead.status === "ok" ? (orgRead.data[0]?.OrganizationType ?? null) : null;
     const prices = onFull.slice(0, movable).map((u) => costPerSeat(licenceOf(u), { calibration: ctx.calibration, edition }));
-    const unpriced = prices.filter((p) => !isPriced(p));
+    const unpriced = prices.filter((p): p is Unpriced => !isPriced(p));
     const value: Value =
       movable === 0
-        ? notSized(`There's no unassigned ${INTEGRATION_LICENCE} licence to move them to, and we hold no price for buying one.`)
+        ? notSized(said`There's no unassigned ${INTEGRATION_LICENCE} licence to move them to, and we hold no price for buying one.`)
         : unpriced.length > 0
-          ? notSized(`A full seat has no price: ${"reason" in unpriced[0]! ? unpriced[0].reason : ""}`)
+          ? notSized(said`A full seat has no price: ${unpriced[0]!.reason}`)
           : {
               kind: "licence_cost",
               amount: Math.round(prices.reduce((sum, p) => sum + (isPriced(p) ? p.annual : 0), 0)),
               unit: ctx.calibration.currency,
               period: "per year",
               assumptions: [
-                ...[...new Map(prices.filter(isPriced).map((p) => [p.licence, p])).values()].map((p) => `${plural(prices.filter((x) => isPriced(x) && x.licence === p.licence).length, `${p.licence} seat`)} at ${p.note}`),
-                `${plural(spare, `${INTEGRATION_LICENCE} licence`)} unassigned now, so ${movable} of the accounts can move without buying any`,
-                "Assumes the freed seats can be reduced at renewal",
+                ...[...new Map(prices.filter(isPriced).map((p) => [p.licence, p])).values()].map((p) => said`${seatsSaid(prices.filter((x) => isPriced(x) && x.licence === p.licence).length, p.licence)} at ${p.note}`),
+                said`${spare} ${INTEGRATION_LICENCE} ${spare === 1 ? "licence" : "licences"} unassigned now, so ${movable} of the accounts can move without buying any`,
+                said`Assumes the freed seats can be reduced at renewal`,
               ],
             };
     const licences = [...new Set(onFull.map(licenceOf))].sort();
@@ -338,7 +338,7 @@ const interactiveIntegrations: Rule = {
       severity: byHand.length ? "high" : "medium",
       confidence: "high",
       evidence,
-      value: notSized("A security gap is a risk to manage, not a figure we can put in revenue or hours."),
+      value: notSized(said`A security gap is a risk to manage, not a figure we can put in revenue or hours.`),
       effort: { size: "XS" },
       owner: "Salesforce admin",
       dependencies: ["Check that nobody signs in as these accounts to do anything by hand"],
@@ -383,7 +383,7 @@ const apiUsage: Rule = {
       // One reading, at one moment.
       confidence: "medium",
       evidence,
-      value: notSized("The cost is the integrations that stop when an allowance runs out, which one reading can't size."),
+      value: notSized(said`The cost is the integrations that stop when an allowance runs out, which one reading can't size.`),
       effort: { size: "M" },
       owner: "Salesforce developer",
       segmentsChecked: segments,
@@ -428,7 +428,7 @@ const failedJobs: Rule = {
       severity: failed.length + withErrors.length >= FAILURES_MEDIUM ? "medium" : "low",
       confidence: "high",
       evidence,
-      value: notSized("We can't size the work these jobs left undone from the job log."),
+      value: notSized(said`We can't size the work these jobs left undone from the job log.`),
       effort: { size: "S" },
       owner: "Salesforce developer",
       segmentsChecked: segments,
@@ -470,7 +470,7 @@ const hardcodedEndpoints: Rule = {
       severity: "medium",
       confidence: "medium",
       evidence,
-      value: notSized("The cost is slower, riskier changes to integrations, which we can't size from the code."),
+      value: notSized(said`The cost is slower, riskier changes to integrations, which we can't size from the code.`),
       effort: { size: literal.length > 5 ? "M" : "S" },
       owner: "Salesforce developer",
       dependencies: ["Test each callout in a sandbox once it uses the named credential"],

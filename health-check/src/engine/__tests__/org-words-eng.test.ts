@@ -26,6 +26,10 @@ const SIGNED_OFF: string[] = [
   "src/domains/current-pipeline/index.ts: quarter.from",
   // A phrase from USER_GUARD_BLOCKERS, our own table of the guards' words; an id it doesn't know goes through org.
   "src/domains/utilisation/index.ts: phrase",
+  // The analysis window's two dates, which the engine works out from the run's date: digits and dashes (DECISIONS.md 663).
+  "src/domains/historic-pipeline/potential.ts: `${ctx.window.from} to ${ctx.window.to}`",
+  // A list price's plan, figure, billing, link and date, all from our own table in list-prices.ts (DECISIONS.md 663).
+  "src/money/seat-cost.ts: `${p.plan} (${p.monthly} ${p.currency} a user a month, ${p.billing.toLowerCase()}; ${p.url}, read on ${p.checked})`",
 ];
 
 const ROOT = join(import.meta.dirname, "../../..");

@@ -128,9 +128,9 @@ const discountLeakage: Rule = {
     const amount = Math.round([...excess.values()].reduce((sum, e) => sum + (e.points / 100) * (e.row.quote.SBQQ__ListAmount__c ?? 0), 0));
     facts.excessDeals = excess.size;
     const value: Value = read.multiCurrency
-      ? notSized("The org is multi-currency, so these amounts can't be added.")
+      ? notSized(said`The org is multi-currency, so these amounts can't be added.`)
       : amount <= 0
-        ? notSized("The deals in these segments have no discount beyond the median to count.")
+        ? notSized(said`The deals in these segments have no discount beyond the median to count.`)
         : {
             kind: "revenue",
             amount,
@@ -138,9 +138,9 @@ const discountLeakage: Rule = {
             // The value model reads the start of this to put it over 12 months (value/model.ts, OVER_WINDOW).
             period: `in discount beyond what peers gave, ${ctx.window.from} to ${ctx.window.to}, a potential figure`,
             assumptions: [
-              `${plural(excess.size, "won deal")} in the teams and reps named, each counted once, at the most it went past its peers' median`,
-              "Each deal's discount beyond its peers' median, applied to its quote's list amount",
-              "Measured from your own quotes. It's potential: it assumes those deals would still have been won at your median discount, which nobody can know",
+              said`${plural(excess.size, "won deal")} in the teams and reps named, each counted once, at the most it went past its peers' median`,
+              said`Each deal's discount beyond its peers' median, applied to its quote's list amount`,
+              said`Measured from your own quotes. It's potential: it assumes those deals would still have been won at your median discount, which nobody can know`,
             ],
           };
     if (value.kind === "revenue") facts.excess = value.amount;
@@ -214,7 +214,7 @@ const discountApprovals: Rule = {
       // Approval can happen outside Salesforce, by email or in a meeting.
       confidence: "medium",
       evidence,
-      value: notSized("Unapproved discount is a control gap; the leakage check sizes what discounting costs."),
+      value: notSized(said`Unapproved discount is a control gap; the leakage check sizes what discounting costs.`),
       effort: { size: "M" },
       owner: "Head of sales",
       dependencies: ["Agree the discount levels with finance first"],
@@ -256,7 +256,7 @@ const quoteToOrder: Rule = {
       severity: "medium",
       confidence: "medium",
       evidence: read.evidence,
-      value: notSized("We can't tell from Salesforce whether these deals were billed some other way."),
+      value: notSized(said`We can't tell from Salesforce whether these deals were billed some other way.`),
       effort: { size: "S" },
       owner: "Sales operations",
       segmentsChecked: segments,
@@ -291,7 +291,7 @@ const renewalsNotStarted: Rule = {
       severity: "high",
       confidence: "high",
       evidence,
-      value: notSized("We don't read what each contract is worth, so the renewals at stake aren't sized."),
+      value: notSized(said`We don't read what each contract is worth, so the renewals at stake aren't sized.`),
       effort: { size: "S" },
       owner: "Head of sales",
       segmentsChecked: segments,

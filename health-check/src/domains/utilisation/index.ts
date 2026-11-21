@@ -27,7 +27,7 @@ import { COMPLIMENTARY_LICENCES } from "../../money/licences.ts";
 import { investmentMetrics } from "./investment.ts";
 import { WHERE } from "../where.ts";
 import { eng, joinSaid, org, said, type Said } from "../../engine/org-words.ts";
-import { moneySaid } from "../../engine/said-forms.ts";
+import { moneySaid, seatsSaid } from "../../engine/said-forms.ts";
 
 // Every title, summary, recommendation and reason of our own is written with
 // `said`, and every value the org chose (a licence, an installed app's name, a
@@ -46,10 +46,13 @@ const HEALTHY_CONNECTIONS = new Set(["ACTIVE", "PROCESSING", "INITIALIZING"]);
 
 const licenceOf = (user: UserRow): string => user.Profile?.UserLicense?.Name ?? "Unknown";
 
+/** Names in a list, ", " between them, each the org's words. */
+const namesSaid = (names: readonly string[]): Said => joinSaid(names.map((n) => said`${org(n)}`), ", ");
+
 function seatValue(ctx: RuleContext, users: UserRow[]): Value {
   const costs = ctx.calibration.licenceCosts;
   const unpriced = [...new Set(users.map(licenceOf))].filter((l) => costs[l] === undefined);
-  if (unpriced.length > 0) return notSized(`The calibration has no cost for: ${unpriced.sort().join(", ")}.`);
+  if (unpriced.length > 0) return notSized(said`The calibration has no cost for: ${namesSaid(unpriced.sort())}.`);
   const byLicence = new Map<string, number>();
   for (const user of users) byLicence.set(licenceOf(user), (byLicence.get(licenceOf(user)) ?? 0) + 1);
   return {
@@ -57,7 +60,7 @@ function seatValue(ctx: RuleContext, users: UserRow[]): Value {
     amount: users.reduce((sum, u) => sum + costs[licenceOf(u)]!, 0),
     unit: ctx.calibration.currency,
     period: "per year",
-    assumptions: [...byLicence].sort().map(([licence, n]) => `${plural(n, `${licence} seat`)} at ${costs[licence]} ${ctx.calibration.currency} a year, from the calibration`),
+    assumptions: [...byLicence].sort().map(([licence, n]) => said`${seatsSaid(n, licence)} at ${costs[licence]!} ${org(ctx.calibration.currency)} a year, from the calibration`),
   };
 }
 
@@ -148,7 +151,7 @@ function reclaimFindings(ctx: RuleContext, candidates: UserRow[], describe: Recl
       confidence: "medium",
       evidence: [usersEvidence],
       // Not a saving until the check is done: an unread guard never counts as passed (rule 3).
-      value: notSized(`Not counted as a saving until someone has checked by hand that these users own no records.${priced}`),
+      value: notSized(said`Not counted as a saving until someone has checked by hand that these users own no records.${priced}`),
       effort: { size: "S" },
       owner: "Salesforce admin",
       dependencies: ["Confirm with each line manager that the person has left or moved role"],
@@ -183,7 +186,7 @@ function reclaimFindings(ctx: RuleContext, candidates: UserRow[], describe: Recl
       severity: "low",
       confidence: "high",
       evidence: [usersEvidence],
-      value: notSized("These seats can't be counted as savings until their guards pass."),
+      value: notSized(said`These seats can't be counted as savings until their guards pass.`),
       effort: { size: "S" },
       owner: "Salesforce admin",
       guards: blocked.flatMap((a) => a.guards),
@@ -232,13 +235,13 @@ const unassignedSeats: Rule = {
     const unpriced = spare.filter((l) => costs[l.Name] === undefined).map((l) => l.Name);
     const value: Value =
       unpriced.length > 0
-        ? notSized(`The calibration has no cost for: ${unpriced.join(", ")}.`)
+        ? notSized(said`The calibration has no cost for: ${namesSaid(unpriced)}.`)
         : {
             kind: "licence_cost",
             amount: spare.reduce((sum, l) => sum + (l.TotalLicenses - l.UsedLicenses) * costs[l.Name]!, 0),
             unit: ctx.calibration.currency,
             period: "per year",
-            assumptions: spare.map((l) => `${plural(l.TotalLicenses - l.UsedLicenses, `${l.Name} seat`)} at ${costs[l.Name]} ${ctx.calibration.currency} a year, from the calibration`).concat("Assumes seats can be reduced at renewal"),
+            assumptions: spare.map((l) => said`${seatsSaid(l.TotalLicenses - l.UsedLicenses, l.Name)} at ${costs[l.Name]!} ${org(ctx.calibration.currency)} a year, from the calibration`).concat(said`Assumes seats can be reduced at renewal`),
           };
     return {
       outcome: "issue",
@@ -293,16 +296,16 @@ const packageSeats: Rule = {
     const idle = (p: (typeof seated)[number]): number => p.AllowedLicenses - p.UsedLicenses;
     const flagged = [...unused, ...spare];
     // A figure only where the calibration prices the app's seat (DECISIONS.md 203).
-    const unpriced = flagged.filter((p) => !p.NamespacePrefix || ctx.calibration.licenceCosts[packagePriceKey(p.NamespacePrefix)] === undefined).map(name);
+    const unpriced = flagged.filter((p) => !p.NamespacePrefix || ctx.calibration.licenceCosts[packagePriceKey(p.NamespacePrefix)] === undefined).map(named);
     const price = (p: (typeof seated)[number]): number => ctx.calibration.licenceCosts[packagePriceKey(p.NamespacePrefix!)]!;
     const value: Value = unpriced.length
-      ? notSized(`The calibration has no price for a seat of: ${unpriced.join(", ")}.`)
+      ? notSized(said`The calibration has no price for a seat of: ${joinSaid(unpriced, ", ")}.`)
       : {
           kind: "licence_cost",
           amount: flagged.reduce((sum, p) => sum + idle(p) * price(p), 0),
           unit: ctx.calibration.currency,
           period: "per year",
-          assumptions: flagged.map((p) => `${plural(idle(p), `${name(p)} seat`)} at ${price(p)} ${ctx.calibration.currency} a year, from the calibration`).concat("Assumes seats can be reduced, or the app cancelled, at renewal"),
+          assumptions: flagged.map((p) => said`${idle(p)} ${named(p)} ${idle(p) === 1 ? "seat" : "seats"} at ${price(p)} ${org(ctx.calibration.currency)} a year, from the calibration`).concat(said`Assumes seats can be reduced, or the app cancelled, at renewal`),
         };
     const parts = [
       unused.length ? said`${joinSaid(unused.map((p) => said`${named(p)} (${plural(p.AllowedLicenses, "seat")})`), ", ")} ${unused.length === 1 ? "has" : "have"} nobody assigned at all` : null,
@@ -456,7 +459,7 @@ const dashboardsOnInactiveUsers: Rule = {
       severity: "medium",
       confidence: "high",
       evidence,
-      value: notSized("The cost is decisions made on stale figures, which we can't size."),
+      value: notSized(said`The cost is decisions made on stale figures, which we can't size.`),
       effort: { size: "XS" },
       owner: "Salesforce admin",
       segmentsChecked: segments,
@@ -516,7 +519,7 @@ const eacConnections: Rule = {
       severity: "high",
       confidence: "high",
       evidence,
-      value: notSized("Lost activity weakens the pipeline view, and we can't tell which deals it belonged to."),
+      value: notSized(said`Lost activity weakens the pipeline view, and we can't tell which deals it belonged to.`),
       effort: { size: "XS" },
       owner: "Salesforce admin",
       segmentsChecked: segments,
@@ -556,7 +559,7 @@ const eacAdvancedSync: Rule = {
       severity: "high",
       confidence: "high",
       evidence: [manual.evidence],
-      value: notSized("Lost activity weakens the pipeline view, and we can't tell which deals it belonged to."),
+      value: notSized(said`Lost activity weakens the pipeline view, and we can't tell which deals it belonged to.`),
       effort: { size: "XS" },
       owner: "Salesforce admin",
       segmentsChecked: [{ dimension: "configuration", segments: 1, note: "Read by a consultant, for the configuration most sales users are on" }],

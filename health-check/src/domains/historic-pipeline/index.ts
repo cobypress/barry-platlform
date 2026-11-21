@@ -5,14 +5,13 @@ import { notSized, type Rule, type RuleContext, type RuleResult } from "../../en
 import type { DomainModule } from "../types.ts";
 import type { Metric, Value } from "../../schemas/index.ts";
 import { loadPipeline } from "./cohort.ts";
-import { money } from "../../render/format.ts";
 import { closedInWindow, dimensions, pipelineMetrics } from "./metrics.ts";
 import { deepDiveMetrics } from "./deep-dive.ts";
 import { PROCESS_RULES, processMetrics } from "./process.ts";
 import { driverMetrics } from "./drivers.ts";
 import { priorWinsExtractor } from "../../extract/prior-wins.ts";
 import { joinSaid, org, said, type Said } from "../../engine/org-words.ts";
-import { andList } from "../../engine/said-forms.ts";
+import { andList, moneySaid } from "../../engine/said-forms.ts";
 import { dimensionWords } from "./process.ts";
 
 // The rules' titles, summaries, recommendations and reasons are written with
@@ -56,7 +55,7 @@ const unmappedStages: Rule = {
       severity: "high",
       confidence: "high",
       evidence,
-      value: notSized("This is a gap in the check's setup, not in the customer's org."),
+      value: notSized(said`This is a gap in the check's setup, not in the customer's org.`),
       effort: { size: "XS" },
       owner: "Black Cloud consultant",
       segmentsChecked: [{ dimension: "stage", segments: seen.size }],
@@ -103,7 +102,7 @@ const calibrationContradiction: Rule = {
       severity: "medium",
       confidence: "high",
       evidence,
-      value: notSized("The effect depends on which reports people use."),
+      value: notSized(said`The effect depends on which reports people use.`),
       effort: { size: "XS" },
       owner: "Sales operations",
       segmentsChecked: segments,
@@ -113,22 +112,22 @@ const calibrationContradiction: Rule = {
 };
 
 function divergenceValue(ctx: RuleContext, metric: Extract<Metric, { status: "measured" }>, segment: { dimension: string; key: string; value: number | null }): Value {
-  if (metric.id !== "historic.win_rate") return notSized("Slipped deals move revenue later rather than losing it, so this has no revenue figure.");
+  if (metric.id !== "historic.win_rate") return notSized(said`Slipped deals move revenue later rather than losing it, so this has no revenue figure.`);
   const data = loadPipeline(ctx);
   if (data.status !== "ok") return notSized(data.reason);
-  if (data.multiCurrency) return notSized("The org is multi-currency, so these amounts can't be added.");
+  if (data.multiCurrency) return notSized(said`The org is multi-currency, so these amounts can't be added.`);
   const keyOf = dimensions(ctx)[segment.dimension];
-  if (!keyOf) return notSized(`We can't rebuild the ${segment.dimension} segment to size it.`);
+  if (!keyOf) return notSized(said`We can't rebuild the ${org(segment.dimension)} segment to size it.`);
   const deals = data.deals.filter((d) => (d.category === "won" || d.category === "lost") && closedInWindow(d, ctx.window) && keyOf(d) === segment.key);
   const amount = deals.reduce((sum, d) => sum + (d.Amount ?? 0), 0);
   const points = metric.value - segment.value!;
-  if (amount <= 0) return notSized("These deals have no amounts.");
+  if (amount <= 0) return notSized(said`These deals have no amounts.`);
   return {
     kind: "revenue",
     amount: Math.round((amount * points) / 100),
     unit: ctx.calibration.currency,
     period: `in wins the gap may have cost, ${ctx.window.from} to ${ctx.window.to}`,
-    assumptions: [`${deals.length} won and lost deals in this segment, with a total Amount of ${money(amount, ctx.calibration.currency)}`, `The gap of ${Math.round(points * 10) / 10} points to your overall win rate of ${metric.value}%`, "Assumes these deals could win as often as the rest. Deal mix or territory may explain part of the gap, so treat this as a ceiling"],
+    assumptions: [said`${deals.length} won and lost deals in this segment, with a total Amount of ${moneySaid(amount, ctx.calibration.currency)}`, said`The gap of ${Math.round(points * 10) / 10} points to your overall win rate of ${metric.value}%`, said`Assumes these deals could win as often as the rest. Deal mix or territory may explain part of the gap, so treat this as a ceiling`],
   };
 }
 

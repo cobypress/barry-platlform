@@ -1,5 +1,6 @@
 import { notSized, plural, type RuleContext } from "../../engine/rule.ts";
-import { money } from "../../render/format.ts";
+import { eng, joinSaid, org, said, type Said } from "../../engine/org-words.ts";
+import { moneySaid } from "../../engine/said-forms.ts";
 import type { Value } from "../../schemas/index.ts";
 import { zoneOf } from "../time-zone.ts";
 import { measuredRate } from "../value.ts";
@@ -17,8 +18,8 @@ type Ready = Extract<PipelineData, { status: "ok" }>;
 export type Situation = {
   /** Groups affected deals that share a cohort. */
   key: string;
-  /** Reads after "deals that were": "open past their close date". */
-  phrase: string;
+  /** Reads after "deals that were": "open past their close date". A stage's name in it is the org's (DECISIONS.md 663). */
+  phrase: Said;
   /** Whether this situation happened to a closed deal while it was open. */
   matches: (closed: Deal) => boolean;
   /**
@@ -32,11 +33,11 @@ export type Situation = {
 export const SITUATIONS = {
   pastClose: (ctx: Pick<RuleContext, "data">, data: Ready): Situation => {
     const zone = zoneOf(ctx);
-    return { key: "past-close", phrase: "open past their close date", matches: (d) => wasPastClose(d, data.stages, zone), ceiling: true };
+    return { key: "past-close", phrase: said`open past their close date`, matches: (d) => wasPastClose(d, data.stages, zone), ceiling: true };
   },
-  inStageFor: (days: number, data: Ready): Situation => ({ key: `in-stage-${days}`, phrase: `in one stage for ${days} days or more`, matches: (d) => longestInStage(d, data.stages) >= days, ceiling: true }),
-  unchangedFor: (days: number, data: Ready): Situation => ({ key: `unchanged-${days}`, phrase: `open for ${days} days or more with no change to stage, amount or close date`, matches: (d) => longestUnchanged(d, data.stages) >= days, ceiling: true }),
-  inStage: (stage: string): Situation => ({ key: `stage-${stage}`, phrase: `in the ${stage} stage`, matches: (d) => wasInStage(d, stage), ceiling: false }),
+  inStageFor: (days: number, data: Ready): Situation => ({ key: `in-stage-${days}`, phrase: said`in one stage for ${days} days or more`, matches: (d) => longestInStage(d, data.stages) >= days, ceiling: true }),
+  unchangedFor: (days: number, data: Ready): Situation => ({ key: `unchanged-${days}`, phrase: said`open for ${days} days or more with no change to stage, amount or close date`, matches: (d) => longestUnchanged(d, data.stages) >= days, ceiling: true }),
+  inStage: (stage: string): Situation => ({ key: `stage-${stage}`, phrase: said`in the ${org(stage)} stage`, matches: (d) => wasInStage(d, stage), ceiling: false }),
 };
 
 const sum = (deals: Deal[]): number => deals.reduce((total, d) => total + (d.Amount ?? 0), 0);
@@ -47,14 +48,15 @@ const sum = (deals: Deal[]): number => deals.reduce((total, d) => total + (d.Amo
  * amount are stated, and no amount is ever imputed.
  */
 export function potentialRevenue(ctx: Pick<RuleContext, "calibration" | "window" | "metrics" | "data">, data: Ready, affected: Deal[], situationOf: (d: Deal) => Situation): Value {
-  if (data.multiCurrency) return notSized("The org is multi-currency, so these amounts can't be added.");
-  if (affected.length === 0) return notSized("There are no deals to size.");
+  if (data.multiCurrency) return notSized(said`The org is multi-currency, so these amounts can't be added.`);
+  if (affected.length === 0) return notSized(said`There are no deals to size.`);
   const priced = affected.filter((d) => (d.Amount ?? 0) > 0);
   const unpriced = affected.length - priced.length;
-  if (priced.length === 0) return notSized(`None of these ${plural(affected.length, "deal")} has an amount, and we don't impute one.`);
+  if (priced.length === 0) return notSized(said`None of these ${plural(affected.length, "deal")} has an amount, and we don't impute one.`);
 
   const { currency, minSample } = ctx.calibration;
-  const period = `${ctx.window.from} to ${ctx.window.to}`;
+  // The analysis window's two dates, which the engine works out from the run's date: digits and dashes only.
+  const period = eng(`${ctx.window.from} to ${ctx.window.to}`);
   const closed = closedFromOpen(ctx, data);
   const groups = new Map<string, { situation: Situation; deals: Deal[] }>();
   for (const deal of priced) {
@@ -66,7 +68,7 @@ export function potentialRevenue(ctx: Pick<RuleContext, "calibration" | "window"
 
   let amount = 0;
   let sized = 0;
-  const lines: string[] = [];
+  const lines: Said[] = [];
   const fallback: Array<{ situation: Situation; deals: Deal[]; n: number }> = [];
   for (const { situation, deals } of [...groups.values()].sort((a, b) => a.situation.key.localeCompare(b.situation.key))) {
     const cohort = cohortOf(closed.filter(situation.matches), minSample);
@@ -76,22 +78,22 @@ export function potentialRevenue(ctx: Pick<RuleContext, "calibration" | "window"
     }
     amount += (sum(deals) * cohort.rate) / 100;
     sized += deals.length;
-    lines.push(`${plural(deals.length, "deal")} with ${money(sum(deals), currency)} weighted at ${cohort.rate}%: of ${cohort.n} deals closed ${period} that were ${situation.phrase} at some point, ${cohort.won} went on to win`);
+    lines.push(said`${plural(deals.length, "deal")} with ${moneySaid(sum(deals), currency)} weighted at ${cohort.rate}%: of ${cohort.n} deals closed ${period} that were ${situation.phrase} at some point, ${cohort.won} went on to win`);
   }
 
   const overall = measuredRate(ctx, "historic.win_rate");
-  const unsizedNotes: string[] = [];
+  const unsizedNotes: Said[] = [];
   for (const { situation, deals, n } of fallback) {
-    const thin = `only ${n} deals closed ${period} that were ${situation.phrase}, under the calibrated minimum of ${minSample}`;
+    const thin = said`only ${n} deals closed ${period} that were ${situation.phrase}, under the calibrated minimum of ${minSample}`;
     if (situation.ceiling && !("reason" in overall)) {
       amount += (sum(deals) * overall.value) / 100;
       sized += deals.length;
-      lines.push(`${plural(deals.length, "deal")} with ${money(sum(deals), currency)} weighted at your overall win rate of ${overall.value}% on ${overall.n} closed deals, because ${thin}. Deals in this situation usually win less often, so treat this part as a ceiling`);
+      lines.push(said`${plural(deals.length, "deal")} with ${moneySaid(sum(deals), currency)} weighted at your overall win rate of ${overall.value}% on ${overall.n} closed deals, because ${thin}. Deals in this situation usually win less often, so treat this part as a ceiling`);
     } else {
-      unsizedNotes.push(`${plural(deals.length, "deal")} with ${money(sum(deals), currency)} aren't counted, because ${thin}${situation.ceiling ? ", and your overall win rate isn't measurable" : ""}`);
+      unsizedNotes.push(said`${plural(deals.length, "deal")} with ${moneySaid(sum(deals), currency)} aren't counted, because ${thin}${situation.ceiling ? ", and your overall win rate isn't measurable" : ""}`);
     }
   }
-  if (sized === 0) return notSized(`Too few comparable deals have closed to size this: ${unsizedNotes.join("; ")}.`);
+  if (sized === 0) return notSized(said`Too few comparable deals have closed to size this: ${joinSaid(unsizedNotes, "; ")}.`);
 
   return {
     kind: "revenue",
@@ -99,11 +101,11 @@ export function potentialRevenue(ctx: Pick<RuleContext, "calibration" | "window"
     unit: currency,
     period: "potential revenue in deals open today",
     assumptions: [
-      `Raw exposure: ${money(sum(priced), currency)}, the total Amount on ${plural(priced.length, "affected deal")} with an amount`,
-      ...(unpriced ? [`${unpriced} of the ${affected.length} affected deals have no amount, so they add nothing here. We don't impute one`] : []),
+      said`Raw exposure: ${moneySaid(sum(priced), currency)}, the total Amount on ${plural(priced.length, "affected deal")} with an amount`,
+      ...(unpriced ? [said`${unpriced} of the ${affected.length} affected deals have no amount, so they add nothing here. We don't impute one`] : []),
       ...lines,
       ...unsizedNotes,
-      "Lost and no decision deals both count as not won",
+      said`Lost and no decision deals both count as not won`,
     ],
   };
 }

@@ -6,7 +6,7 @@ import { DESTRUCTIVE_RECOMMENDATIONS, Finding, Metric, type Calibration, type Da
 import { fixFields } from "../fix/index.ts";
 import { MANUAL_STEPS } from "./manual-steps.ts";
 import { notMeasurableKind } from "./not-measurable.ts";
-import { joinSaid, markSentence, orgWordsOf, said, withOrgWords, type Said } from "./org-words.ts";
+import { joinSaid, markSentence, orgWordsOf, said, textSha256, withOrgWords, type MarkedSentence, type Said } from "./org-words.ts";
 import type { IssueResult, ManualState, RecordList, Rule, RuleContext, RuleResult } from "./rule.ts";
 
 export type AnalysisInput = {
@@ -48,6 +48,8 @@ export function findingId(ruleId: string, key: string): string {
  */
 /** What a held-back destructive recommendation says when its rule gave nothing else: the engine's own words. */
 const GUARD_HELD = "Check this by hand before changing anything: not every guard passed.";
+/** What a held-back destructive recommendation's value says when its rule sized a saving: the engine's own words. */
+const GUARD_UNSIZED = "Not counted as a saving, because not every guard passed.";
 
 export function applyGuards(result: IssueResult): IssueResult {
   if (!DESTRUCTIVE_RECOMMENDATIONS.has(result.recommendationType)) return result;
@@ -59,7 +61,7 @@ export function applyGuards(result: IssueResult): IssueResult {
     ...result,
     recommendationType: "investigate",
     recommendation: result.blockedRecommendation ?? GUARD_HELD,
-    value: ownReason ? result.value : { kind: "not_sized", reason: "Not counted as a saving, because not every guard passed." },
+    value: ownReason ? result.value : { kind: "not_sized", reason: GUARD_UNSIZED },
   };
 }
 
@@ -132,7 +134,12 @@ function toFinding(rule: Rule, result: RuleResult, pseudonyms: Pseudonymiser, as
   // Hours to fix and a fix prompt (DECISIONS.md 628), from the scrubbed text, so a
   // prompt is built from what the finding says and nothing the scrub took out.
   // A remove, deactivate or merge a guard held back is now "investigate", which the prompt reads as held back.
-  return Finding.parse({ ...scrubbed, ...fixFields(rule.id, scrubbed, pseudonyms) });
+  const fix = fixFields(rule.id, scrubbed, pseudonyms);
+  // The hours' basis is put together from the fix table's fixed words and the
+  // finding's whole-number counts alone (effortHours is given nothing else), so
+  // it holds no word the org chose: marked with no spans as it's made (DECISIONS.md 663).
+  const basis = fix.effortHours ? { orgWords: { ...scrubbed.orgWords, hoursBasis: { spans: [], textSha256: textSha256(fix.effortHours.basis) } } } : {};
+  return Finding.parse({ ...scrubbed, ...fix, ...basis });
 }
 
 const MARKED = ["title", "summary", "recommendation", "notMeasurableReason"] as const;
@@ -153,7 +160,25 @@ function orgWordsFor(rule: Rule, before: Finding, after: Finding): { orgWords?: 
     const marked = markSentence(text, ownWords ? [] : orgWordsOf(text));
     if (marked) orgWords[key] = marked;
   }
+  Object.assign(orgWords, valueOrgWords(before.value, after.value));
   return Object.keys(orgWords).length > 0 ? { orgWords } : {};
+}
+
+/**
+ * A value's reason, or its assumptions, as this analysis can vouch for them
+ * (DECISIONS.md 663). The assumptions are marked all together or not at all, so
+ * a reader never takes one unmarked assumption among marked ones for the
+ * engine's. The two fixed reasons the engine gives itself are its own words.
+ */
+function valueOrgWords(was: Finding["value"], now: Finding["value"]): Pick<NonNullable<Finding["orgWords"]>, "valueReason" | "valueAssumptions"> {
+  if (was.kind === "not_sized") {
+    if (now.kind !== "not_sized" || now.reason !== was.reason) return {};
+    const marked = markSentence(was.reason, was.reason === NOT_SIZED.reason || was.reason === GUARD_UNSIZED ? [] : orgWordsOf(was.reason));
+    return marked ? { valueReason: marked } : {};
+  }
+  if (now.kind === "not_sized" || now.assumptions.length !== was.assumptions.length || now.assumptions.some((a, i) => a !== was.assumptions[i])) return {};
+  const marks = was.assumptions.map((a) => markSentence(a)).filter((m): m is MarkedSentence => m !== null);
+  return marks.length > 0 && marks.length === was.assumptions.length ? { valueAssumptions: marks } : {};
 }
 
 function engineEvidence(ruleId: string, note: string, now: Date): Evidence {

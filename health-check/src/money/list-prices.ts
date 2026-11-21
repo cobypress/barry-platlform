@@ -1,3 +1,4 @@
+import { org, said, type Said } from "../engine/org-words.ts";
 // Salesforce's published list prices, the last resort for what a seat costs
 // (roadmap decision 4). Every price is as Salesforce's own page states it, with
 // the address and the date we read it. A price we couldn't read there isn't here.
@@ -39,14 +40,15 @@ export const LIST_PRICES: ListPrice[] = [
 /** OrganizationType to the plan it's priced as. Empty until a mapping is confirmed: see the note above. */
 export const EDITION_PLANS: Record<string, string> = {};
 
-export type ListPriceResult = { status: "priced"; annual: number; price: ListPrice } | { status: "unpriced"; reason: string };
+export type ListPriceResult = { status: "priced"; annual: number; price: ListPrice } | { status: "unpriced"; reason: Said };
 
 /** The annual list price of one seat of a licence in an edition, or why there isn't one. */
 export function listPrice(licence: string, edition: string | null, currency: string, prices: ListPrice[] = LIST_PRICES, plans: Record<string, string> = EDITION_PLANS): ListPriceResult {
-  if (!edition) return { status: "unpriced", reason: "The org's edition couldn't be read." };
+  if (!edition) return { status: "unpriced", reason: said`The org's edition couldn't be read.` };
   const plan = plans[edition];
-  if (!plan) return { status: "unpriced", reason: `We haven't confirmed which of Salesforce's current plans ${edition} is priced as.` };
+  if (!plan) return { status: "unpriced", reason: said`We haven't confirmed which of Salesforce's current plans ${org(edition)} is priced as.` };
   const price = prices.find((p) => p.plan === plan && p.licence === licence && p.currency === currency);
-  if (!price) return { status: "unpriced", reason: `Salesforce doesn't publish a ${currency} list price for a ${licence} seat on ${plan} that we've read.` };
+  // The plan is from our own map, marked with the org's words: the safe side (DECISIONS.md 663).
+  if (!price) return { status: "unpriced", reason: said`Salesforce doesn't publish a ${org(currency)} list price for a ${org(licence)} seat on ${org(plan)} that we've read.` };
   return { status: "priced", annual: price.monthly * 12, price };
 }
