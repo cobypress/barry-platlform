@@ -44,6 +44,8 @@ export const eng = (text: string): Said => text as Said;
  * them is an index signature `{}` fits; a literal's record has a required key.
  */
 type Literal<T> = T extends string ? ({} extends Record<T, 1> ? never : T) : never;
+/** A string literal type and never `any`: what a helper such as `plural` may take as words of its own (DECISIONS.md 657). */
+export type LiteralText<T> = 0 extends 1 & T ? never : Literal<T>;
 /** What `said` takes: a number, org words, a sentence already made, or a literal. Never `any`. */
 type Piece<T> = 0 extends 1 & T ? never : T extends number | OrgWords | Said ? T : Literal<T>;
 

@@ -28,6 +28,12 @@ import { aiSignalsExtractor } from "../../extract/ai.ts";
 import { aiMetrics } from "./ai.ts";
 import { loginActivityExtractor } from "../../extract/adoption.ts";
 import { WHERE } from "../where.ts";
+import { joinSaid, org, said, type Said } from "../../engine/org-words.ts";
+
+// Every title, summary, recommendation and reason of its own is written with
+// `said`, and every name the org chose with `org`, so the digest can say which
+// words are the org's (DECISIONS.md 655, 657). A reason passed on from an
+// extract quotes Salesforce and stays plain: unknown.
 
 const FIELD_SPRAWL_LIMIT = 150;
 const UNUSED_FILL_LIMIT = 1;
@@ -49,7 +55,7 @@ const customFieldSprawl: Rule = {
   evaluate(ctx): RuleResult | RuleResult[] {
     const schema = ctx.data(schemaExtractor);
     const results: RuleResult[] = [];
-    const counts: Array<[string, number]> = [];
+    const counts: Array<[(typeof CORE_OBJECTS)[number], number]> = [];
     for (const object of CORE_OBJECTS) {
       const summary = schema[object]!;
       if (summary.status !== "ok") {
@@ -63,9 +69,10 @@ const customFieldSprawl: Rule = {
     if (over.length > 0) {
       results.push({
         outcome: "issue",
-        title: "Core objects carry a heavy custom field load",
-        summary: `${over.map(([o, n]) => `${o} has ${n} custom fields`).join("; ")}. We use ${FIELD_SPRAWL_LIMIT} as a working limit: past it, page layouts and reports get harder to keep clean and users stop filling fields in.`,
-        recommendation: "Review these objects with the field usage findings and agree which fields still earn their place.",
+        title: said`Core objects carry a heavy custom field load`,
+        // The objects are our own fixed four, named by API name.
+        summary: said`${joinSaid(over.map(([o, n]) => said`${o} has ${n} custom fields`), "; ")}. We use ${FIELD_SPRAWL_LIMIT} as a working limit: past it, page layouts and reports get harder to keep clean and users stop filling fields in.`,
+        recommendation: said`Review these objects with the field usage findings and agree which fields still earn their place.`,
         recommendationType: "investigate",
         severity: "medium",
         confidence: "high",
@@ -79,7 +86,7 @@ const customFieldSprawl: Rule = {
     } else if (counts.length > 0) {
       results.push({
         outcome: "pass",
-        summary: `All ${counts.length} core objects are under ${FIELD_SPRAWL_LIMIT} custom fields.`,
+        summary: said`All ${counts.length} core objects are under ${FIELD_SPRAWL_LIMIT} custom fields.`,
         evidence,
         segmentsChecked: [{ dimension: "object", segments: counts.length }],
         facts: Object.fromEntries(counts),
@@ -114,24 +121,24 @@ const unusedCustomFields: Rule = {
       const range = { from: scan.data.recentFrom, to: ctx.window.to };
       const exclusions = [`Not scanned, because their type can't be counted: ${scan.data.notScanned.length} fields`, "Packaged and formula fields"];
       if (scan.data.fields.length > 0 && total < MIN_RECORDS_FOR_UNUSED) {
-        results.push({ outcome: "not_measurable", key: object, reason: `${named} has ${total} records, below the ${MIN_RECORDS_FOR_UNUSED} needed to call a field unused.`, evidence: [ctx.ev(scan.source, { count: total, exclusions })] });
+        results.push({ outcome: "not_measurable", key: object, reason: said`${org(named)} has ${total} records, below the ${MIN_RECORDS_FOR_UNUSED} needed to call a field unused.`, evidence: [ctx.ev(scan.source, { count: total, exclusions })] });
         continue;
       }
       // Both tests must agree: a field empty overall but filling up this year is a new field.
       const unused = scan.data.fields.filter((f) => pct(f.filled, f.total) < UNUSED_FILL_LIMIT && pct(f.recentFilled, f.recentTotal) < UNUSED_FILL_LIMIT);
       const segments = [{ dimension: "all records", segments: scan.data.fields.length }, { dimension: "records created in the last 12 months", segments: scan.data.fields.length }];
       if (unused.length === 0) {
-        results.push({ outcome: "pass", key: object, summary: `Every scanned custom field on ${named} is filled on at least ${UNUSED_FILL_LIMIT}% of records.`, evidence: [ctx.ev(scan.source, { count: scan.data.fields.length, exclusions })], segmentsChecked: segments });
+        results.push({ outcome: "pass", key: object, summary: said`Every scanned custom field on ${org(named)} is filled on at least ${UNUSED_FILL_LIMIT}% of records.`, evidence: [ctx.ev(scan.source, { count: scan.data.fields.length, exclusions })], segmentsChecked: segments });
         continue;
       }
       const fields = unused.flatMap((u) => summary?.fields.find((f) => f.name === u.field) ?? []);
       results.push({
         outcome: "issue",
         key: object,
-        title: `Custom fields on ${named} are almost never filled in`,
-        summary: `Of ${plural(scan.data.fields.length, "scanned custom field")} on ${named}, ${unused.length} ${unused.length === 1 ? "is" : "are"} filled on under ${UNUSED_FILL_LIMIT}% of records, both overall and on records from the last 12 months.`,
-        recommendation: `Remove ${plural(unused.length, "field")} from ${named} once the data is archived.`,
-        blockedRecommendation: `Review ${plural(unused.length, "field")} with the people who own ${named}. We aren't recommending removal, because not every dependency check could pass.`,
+        title: said`Custom fields on ${org(named)} are almost never filled in`,
+        summary: said`Of ${plural(scan.data.fields.length, "scanned custom field")} on ${org(named)}, ${unused.length} ${unused.length === 1 ? "is" : "are"} filled on under ${UNUSED_FILL_LIMIT}% of records, both overall and on records from the last 12 months.`,
+        recommendation: said`Remove ${plural(unused.length, "field")} from ${org(named)} once the data is archived.`,
+        blockedRecommendation: said`Review ${plural(unused.length, "field")} with the people who own ${org(named)}. We aren't recommending removal, because not every dependency check could pass.`,
         recommendationType: "remove",
         // Hours of upkeep when the calibration agrees a time: with none agreed and
         // a guard blocking, it's the guard that keeps a figure off (DECISIONS.md 498).
@@ -167,12 +174,12 @@ const unassignedLayouts: Rule = {
     const unused = layouts.data.filter((l) => !assigned.has(l.Id));
     const objects = new Set(layouts.data.map((l) => l.EntityDefinitionId));
     const evidence = [ctx.ev(layouts.source, { count: layouts.data.length }), ctx.ev(assignments.source, { count: assigned.size })];
-    if (unused.length === 0) return { outcome: "pass", summary: `All ${layouts.data.length} page layouts are assigned to a profile.`, evidence, segmentsChecked: [{ dimension: "object", segments: objects.size }] };
+    if (unused.length === 0) return { outcome: "pass", summary: said`All ${layouts.data.length} page layouts are assigned to a profile.`, evidence, segmentsChecked: [{ dimension: "object", segments: objects.size }] };
     return {
       outcome: "issue",
-      title: "Some page layouts aren't assigned to any profile",
-      summary: `Of ${plural(layouts.data.length, "page layout")}, ${unused.length} ${unused.length === 1 ? "isn't" : "aren't"} assigned to any profile, so nobody sees ${unused.length === 1 ? "it" : "them"}.`,
-      recommendation: "Review the unassigned layouts and retire the ones nobody needs.",
+      title: said`Some page layouts aren't assigned to any profile`,
+      summary: said`Of ${plural(layouts.data.length, "page layout")}, ${unused.length} ${unused.length === 1 ? "isn't" : "aren't"} assigned to any profile, so nobody sees ${unused.length === 1 ? "it" : "them"}.`,
+      recommendation: said`Review the unassigned layouts and retire the ones nobody needs.`,
       recommendationType: "investigate",
       severity: "low",
       confidence: "high",
@@ -201,19 +208,19 @@ const undocumentedFields: Rule = {
     const objects = new Set(fields.map((f) => f.object));
     const evidence = [ctx.ev(source, { count: fields.length, exclusions: ["Standard fields", "Fields from installed packages"] })];
     const segments = [{ dimension: "object", segments: objects.size }];
-    if (fields.length === 0) return { outcome: "pass", summary: "There are no custom fields of your own to document.", evidence, segmentExemptReason: "Nothing to segment." };
+    if (fields.length === 0) return { outcome: "pass", summary: said`There are no custom fields of your own to document.`, evidence, segmentExemptReason: "Nothing to segment." };
     const bare = fields.filter((f) => !f.described && !f.helpText);
     const rate = pct(bare.length, fields.length);
     const noHelp = fields.filter((f) => !f.helpText).length;
     const facts = { fields: fields.length, bare: bare.length, rate, noHelpText: noHelp };
-    if (rate <= UNDOCUMENTED_FIELD_LIMIT) return { outcome: "pass", summary: `Custom fields with neither help text nor a description: ${bare.length} of ${fields.length} (${rate}%).`, evidence, segmentsChecked: segments, facts };
+    if (rate <= UNDOCUMENTED_FIELD_LIMIT) return { outcome: "pass", summary: said`Custom fields with neither help text nor a description: ${bare.length} of ${fields.length} (${rate}%).`, evidence, segmentsChecked: segments, facts };
     const byObject = [...objects].map((o) => ({ o, n: bare.filter((f) => f.object === o).length })).filter((x) => x.n > 0).sort((a, b) => b.n - a.n || a.o.localeCompare(b.o));
     const labels = labelsOf(ctx);
     return {
       outcome: "issue",
-      title: "Most custom fields don't say what they're for",
-      summary: `Custom fields with neither help text nor a description: ${bare.length} of ${fields.length} (${rate}%), most on ${byObject.slice(0, 3).map((x) => `${labels.object(x.o)} (${x.n})`).join(", ")}. Users see no explanation when they fill these in, and whoever maintains the org can't tell what each one is for.`,
-      recommendation: "Add help text to the fields people fill in and a description to every field you keep, and retire the ones nobody can explain.",
+      title: said`Most custom fields don't say what they're for`,
+      summary: said`Custom fields with neither help text nor a description: ${bare.length} of ${fields.length} (${rate}%), most on ${joinSaid(byObject.slice(0, 3).map((x) => said`${org(labels.object(x.o))} (${x.n})`), ", ")}. Users see no explanation when they fill these in, and whoever maintains the org can't tell what each one is for.`,
+      recommendation: said`Add help text to the fields people fill in and a description to every field you keep, and retire the ones nobody can explain.`,
       recommendationType: "change",
       severity: "low",
       confidence: "high",
@@ -245,17 +252,17 @@ const stageSprawl: Rule = {
     const evidence = [ctx.ev(stages.source, { count: active.length }), ctx.ev(history.source, { count: history.data.length, dateRange: ctx.window })];
     const segments = [{ dimension: "stage", segments: active.length }];
     if (active.length <= STAGE_LIMIT && unused.length === 0) {
-      return { outcome: "pass", summary: `${active.length} active stages, all used in the analysis window.`, evidence, segmentsChecked: segments, facts: { activeStages: active.length } };
+      return { outcome: "pass", summary: said`${active.length} active stages, all used in the analysis window.`, evidence, segmentsChecked: segments, facts: { activeStages: active.length } };
     }
-    const parts = [
-      active.length > STAGE_LIMIT ? `${plural(active.length, "active stage")}, against our working limit of ${STAGE_LIMIT}` : null,
-      unused.length > 0 ? `${plural(unused.length, "active stage")} with no deals in the analysis window` : null,
-    ].filter(Boolean);
+    const tooMany = active.length > STAGE_LIMIT ? said`${plural(active.length, "active stage")}, against our working limit of ${STAGE_LIMIT}` : null;
+    const idle = unused.length > 0 ? said`${plural(unused.length, "active stage")} with no deals in the analysis window` : null;
+    // The one or two parts, joined with ", and" as before.
+    const parts = tooMany && idle ? said`${tooMany}, and ${idle}` : (tooMany ?? idle ?? said``);
     return {
       outcome: "issue",
-      title: "The sales process has more stages than deals really use",
-      summary: `${parts.join(", and ")}. Extra stages blur conversion figures and make forecasting harder.`,
-      recommendation: "Agree the stages that mark real buyer progress, then map the rest to them.",
+      title: said`The sales process has more stages than deals really use`,
+      summary: said`${parts}. Extra stages blur conversion figures and make forecasting harder.`,
+      recommendation: said`Agree the stages that mark real buyer progress, then map the rest to them.`,
       recommendationType: "change",
       severity: "medium",
       confidence: "high",
@@ -280,25 +287,25 @@ const picklistSprawl: Rule = {
     const schema = ctx.data(schemaExtractor);
     const labels = labelsOf(ctx);
     // The API name for facts and evidence, the labels for what a customer reads (DECISIONS.md 411).
-    const sized: Array<{ api: string; label: string; n: number }> = [];
+    const sized: Array<{ api: string; label: string; words: Said; n: number }> = [];
     const evidence = [];
     for (const [object, name] of PICKLISTS) {
       const summary = schema[object]!;
       if (summary.status !== "ok") continue;
       const field = summary.data.fields.find((f) => f.name === name);
       if (!field) continue;
-      sized.push({ api: `${object}.${name}`, label: `${field.label || name} on ${labels.object(object)}`, n: field.activePicklistValues.length });
+      sized.push({ api: `${object}.${name}`, label: `${field.label || name} on ${labels.object(object)}`, words: said`${org(field.label || name)} on ${org(labels.object(object))}`, n: field.activePicklistValues.length });
       evidence.push(ctx.ev(summary.source, { count: field.activePicklistValues.length, note: `Active values on ${object}.${name}` }));
     }
-    if (sized.length === 0) return { outcome: "not_measurable", reason: "None of the picklists we check could be read.", evidence: [ctx.ev(schema.Lead!.source, { count: null })] };
+    if (sized.length === 0) return { outcome: "not_measurable", reason: said`None of the picklists we check could be read.`, evidence: [ctx.ev(schema.Lead!.source, { count: null })] };
     const over = sized.filter((p) => p.n > PICKLIST_LIMIT);
     const segments = [{ dimension: "picklist", segments: sized.length }];
-    if (over.length === 0) return { outcome: "pass", summary: `All ${sized.length} picklists we check are at or under ${PICKLIST_LIMIT} values.`, evidence, segmentsChecked: segments };
+    if (over.length === 0) return { outcome: "pass", summary: said`All ${sized.length} picklists we check are at or under ${PICKLIST_LIMIT} values.`, evidence, segmentsChecked: segments };
     return {
       outcome: "issue",
-      title: "Reporting picklists have grown too long",
-      summary: `${over.map((p) => `${p.label} has ${p.n} active values`).join("; ")}. Long lists split the same answer across several values, which weakens every report built on them.`,
-      recommendation: "Consolidate these lists and move old values out of use.",
+      title: said`Reporting picklists have grown too long`,
+      summary: said`${joinSaid(over.map((p) => said`${p.words} has ${p.n} active values`), "; ")}. Long lists split the same answer across several values, which weakens every report built on them.`,
+      recommendation: said`Consolidate these lists and move old values out of use.`,
       recommendationType: "change",
       severity: "low",
       confidence: "high",
@@ -331,23 +338,23 @@ const setupChangeConcentration: Rule = {
     const people = Object.keys(configChangesByUser);
     const segments = [{ dimension: "user", segments: people.length }, { dimension: "section", segments: Object.keys(audit.data.bySection).length }];
     if (changes < MIN_CHANGES_FOR_CONCENTRATION) {
-      return { outcome: "not_measurable", reason: `Only ${changes} setup changes in the period, below the ${MIN_CHANGES_FOR_CONCENTRATION} needed to judge who makes them.`, evidence };
+      return { outcome: "not_measurable", reason: said`Only ${changes} setup changes in the period, below the ${MIN_CHANGES_FOR_CONCENTRATION} needed to judge who makes them.`, evidence };
     }
     const inactive = new Set(users.data.filter((u) => !u.IsActive).map((u) => u.Id));
     const byInactive = people.filter((id) => inactive.has(id)).reduce((sum, id) => sum + configChangesByUser[id]!, 0);
     const [topUser, topCount] = Object.entries(configChangesByUser).sort(([, a], [, b]) => b - a)[0]!;
     const topShare = pct(topCount, changes);
     if (topShare < CONCENTRATION_SHARE && byInactive === 0) {
-      return { outcome: "pass", summary: `${people.length} people made the ${changes} setup changes in the period, and the busiest made ${topShare}%.`, evidence, segmentsChecked: segments, facts: { changes, topShare } };
+      return { outcome: "pass", summary: said`${people.length} people made the ${changes} setup changes in the period, and the busiest made ${topShare}%.`, evidence, segmentsChecked: segments, facts: { changes, topShare } };
     }
     return {
       outcome: "issue",
-      title: "Org knowledge is concentrated",
+      title: said`Org knowledge is concentrated`,
       summary:
         topShare >= CONCENTRATION_SHARE
-          ? `${ctx.userLabel(topUser)} made ${topShare}% of ${changes} setup changes in the period, so what they know about the org isn't shared.`
-          : `${byInactive} of ${changes} setup changes in the period were made by users who are now inactive.`,
-      recommendation: "Document how the org is changed, and make sure a second person can do the work.",
+          ? said`${org(ctx.userLabel(topUser))} made ${topShare}% of ${changes} setup changes in the period, so what they know about the org isn't shared.`
+          : said`${byInactive} of ${changes} setup changes in the period were made by users who are now inactive.`,
+      recommendation: said`Document how the org is changed, and make sure a second person can do the work.`,
       recommendationType: "change",
       severity: "medium",
       confidence: "medium",

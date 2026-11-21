@@ -3,6 +3,8 @@ import { usersExtractor } from "../../extract/users.ts";
 import type { RuleContext } from "../../engine/rule.ts";
 import { localDay, zoneOf } from "../time-zone.ts";
 import type { Calibration, Evidence, StageCategory } from "../../schemas/index.ts";
+import { joinSaid, org, said, type Said } from "../../engine/org-words.ts";
+import { andList } from "../../engine/said-forms.ts";
 
 export type Deal = OpportunityRow & {
   category: StageCategory | null;
@@ -65,24 +67,29 @@ export function inferredMeanings(calibration: Calibration, flags: StageRow[] | n
   return out;
 }
 
-const CATEGORY_WORDS: Partial<Record<StageCategory, string>> = { open: "open", won: "won", lost: "lost" };
-
-/** The sentence every finding and metric that leaned on an inferred stage carries (DECISIONS.md 598). */
-export function inferredStagesNote(inferred: Array<{ stage: string; category: StageCategory }>): string {
-  const items = inferred.map((s) => `${s.stage} as ${CATEGORY_WORDS[s.category] ?? s.category}`);
-  const list = items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
-  return `We haven't yet agreed with you what ${inferred.length === 1 ? "one stage means" : "some stages mean"}, so we used Salesforce's own setting for ${inferred.length === 1 ? "it" : "each"}: ${list}.`;
+/**
+ * The sentence every finding and metric that leaned on an inferred stage
+ * carries (DECISIONS.md 598), written with said, each stage as the org's words
+ * (657), so a summary it is added to stays marked. The category is one of ours,
+ * set by stageMap from Salesforce's flags, and printed as it is named.
+ */
+export function inferredStagesNote(inferred: Array<{ stage: string; category: StageCategory }>): Said {
+  const items = inferred.map((s) => said`${org(s.stage)} as ${s.category}`);
+  return said`We haven't yet agreed with you what ${inferred.length === 1 ? "one stage means" : "some stages mean"}, so we used Salesforce's own setting for ${inferred.length === 1 ? "it" : "each"}: ${andList(items)}.`;
 }
+
+/** Stage names, as the org named them, joined with commas. */
+const stageList = (stages: string[]): Said => joinSaid(stages.map((s) => said`${org(s)}`), ", ");
 
 /**
  * Why a figure that splits lost from no decision can't be had from inferred
  * lost stages (DECISIONS.md 600), ending with what to give us and where, as a
  * reason that needs something from the customer does (627).
  */
-export const unsplitReason = (stages: string[]): string => `Salesforce's setting can't tell lost from no decision for: ${stages.join(", ")}. The calibration can say which each is.`;
+export const unsplitReason = (stages: string[]): Said => said`Salesforce's setting can't tell lost from no decision for: ${stageList(stages)}. The calibration can say which each is.`;
 
 /** Why a check that needs the sales order can't place an inferred open stage. */
-export const unorderedReason = (stages: string[]): string => `The calibration doesn't say where these open stages come in the sales order: ${stages.join(", ")}.`;
+export const unorderedReason = (stages: string[]): Said => said`The calibration doesn't say where these open stages come in the sales order: ${stageList(stages)}.`;
 
 const TERMINAL = new Set<StageCategory>(["won", "lost", "no_decision"]);
 
@@ -245,6 +252,6 @@ function buildPipeline(ctx: Omit<RuleContext, "metrics">): PipelineData {
 }
 
 /** The reason a split of lost from no decision isn't measured, or null when it can be (DECISIONS.md 600). */
-export function unsplitLostReason(data: { unsplitLost: string[] }): string | null {
+export function unsplitLostReason(data: { unsplitLost: string[] }): Said | null {
   return data.unsplitLost.length > 0 ? unsplitReason(data.unsplitLost) : null;
 }

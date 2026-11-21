@@ -1,5 +1,4 @@
 import { fieldDescribeExtractor, missingFieldReason } from "../../extract/fields.ts";
-import { money } from "../../render/format.ts";
 import { activityExtractor } from "../../extract/activity.ts";
 import { schemaExtractor } from "../../extract/configuration.ts";
 import { leadsExtractor } from "../../extract/leads.ts";
@@ -14,6 +13,13 @@ import { atOwnLeadReturn } from "../value.ts";
 import type { Metric, MetricSegment } from "../../schemas/index.ts";
 import type { DomainModule } from "../types.ts";
 import { loadLeads, type Lead, type LeadData } from "./load.ts";
+import { joinSaid, org, said, type Said } from "../../engine/org-words.ts";
+import { moneySaid } from "../../engine/said-forms.ts";
+
+// Every title, summary, recommendation and reason of our own is written with
+// `said`, and every value the org chose (a lead source, a campaign type, a
+// team, a person's token) with `org` (DECISIONS.md 655, 657). A reason passed on
+// from an extract quotes Salesforce and stays plain: unknown.
 
 const DOMAIN = "lead_funnel";
 const CONVERSION_AGE_DAYS = 30;
@@ -39,6 +45,8 @@ const dimensions = (ctx: Ctx): Record<string, (l: Lead) => string> => ({ source:
 const hoursToTouch = (l: Lead): number => (l.firstTouch!.getTime() - new Date(l.CreatedDate.replace(/\+0000$/, "Z")).getTime()) / HOUR;
 const created = (l: Lead): Date => new Date(l.CreatedDate.replace(/\+0000$/, "Z"));
 const round1 = (n: number): number => Math.round(n * 10) / 10;
+/** A segment's dimension in words: our own three, and anything else as the org's, to be safe. */
+const dimensionWord = (d: string): Said => said`${d === "source" ? "source" : d === "team" ? "team" : d === "rep" ? "rep" : org(d)}`;
 
 /** Old enough to have had a fair chance of converting. */
 const settled = (ctx: Ctx, data: Ready): Lead[] => data.leads.filter((l) => created(l) < daysBefore(ctx.now, CONVERSION_AGE_DAYS));
@@ -58,19 +66,19 @@ const conversionBySource: Rule = {
     const leads = settled(ctx, data);
     const { minSample } = ctx.calibration;
     const evidence = [{ ...data.evidence[0]!, count: leads.length, exclusions: [...data.exclusions, `Leads created in the last ${CONVERSION_AGE_DAYS} days, which haven't had time to convert`] }];
-    if (leads.length < minSample) return { outcome: "not_measurable", reason: `${leads.length} leads old enough to judge is below the calibrated minimum of ${minSample}.`, evidence };
+    if (leads.length < minSample) return { outcome: "not_measurable", reason: said`${leads.length} leads old enough to judge is below the calibrated minimum of ${minSample}.`, evidence };
     const rate = (group: Lead[]): number => pct(group.filter((l) => l.IsConverted).length, group.length);
     const overall = rate(leads);
     const sources = groupsOf(leads, (l) => l.source);
     const low = sources.filter(([, group]) => group.length >= minSample && rate(group) < overall * CONVERSION_FLOOR).sort(([a, x], [b, y]) => rate(x) - rate(y) || a.localeCompare(b));
     const segments = [{ dimension: "source", segments: sources.length }];
-    if (low.length === 0) return { outcome: "pass", summary: `${overall}% of leads convert, and no source with ${minSample} or more leads is under half of that.`, evidence, segmentsChecked: segments, facts: { overall } };
+    if (low.length === 0) return { outcome: "pass", summary: said`${overall}% of leads convert, and no source with ${minSample} or more leads is under half of that.`, evidence, segmentsChecked: segments, facts: { overall } };
     const [name, group] = low[0]!;
     return {
       outcome: "issue",
-      title: "Some lead sources barely convert",
-      summary: `${overall}% of leads convert overall, but ${name} converts ${rate(group)}% of ${group.length} leads.`,
-      recommendation: "Find out whether these leads are poor or just poorly handled before changing what you spend on the source.",
+      title: said`Some lead sources barely convert`,
+      summary: said`${overall}% of leads convert overall, but ${org(name)} converts ${rate(group)}% of ${group.length} leads.`,
+      recommendation: said`Find out whether these leads are poor or just poorly handled before changing what you spend on the source.`,
       recommendationType: "investigate",
       severity: "medium",
       confidence: "high",
@@ -98,12 +106,12 @@ const responseTime: Rule = {
   evaluate(ctx): RuleResult | RuleResult[] {
     const data = leadsOr(ctx);
     if ("outcome" in data) return data;
-    if (!data.activityReadable) return { outcome: "not_measurable", reason: "Activities couldn't be read in full, so we can't see first responses.", evidence: data.evidence };
+    if (!data.activityReadable) return { outcome: "not_measurable", reason: said`Activities couldn't be read in full, so we can't see first responses.`, evidence: data.evidence };
     const touched = judgeable(ctx, data).filter((l) => l.firstTouch);
     const { minSample } = ctx.calibration;
     const exclusions = [...data.exclusions, "Leads with no response at all, which the next check covers", `Leads created before the readable year or in the last ${RESPONSE_GRACE_DAYS} days`];
     const evidence = [{ ...data.evidence[0]!, count: touched.length, exclusions, note: "First response is the earliest task, event or status change after creation, on the lead or its converted contact" }];
-    if (touched.length < minSample) return { outcome: "not_measurable", reason: `${touched.length} leads with a response is below the calibrated minimum of ${minSample}.`, evidence };
+    if (touched.length < minSample) return { outcome: "not_measurable", reason: said`${touched.length} leads with a response is below the calibrated minimum of ${minSample}.`, evidence };
     const overall = round1(median(touched.map(hoursToTouch)));
     const dims = dimensions(ctx);
     const hotspots = Object.entries(dims).flatMap(([dimension, keyOf]) =>
@@ -114,14 +122,14 @@ const responseTime: Rule = {
     ).sort((a, b) => b.hours - a.hours || a.key.localeCompare(b.key));
     const segmentsChecked = Object.entries(dims).map(([dimension, keyOf]) => ({ dimension, segments: new Set(touched.map(keyOf)).size }));
     if (overall <= RESPONSE_TARGET_HOURS && hotspots.length === 0) {
-      return { outcome: "pass", summary: `The median first response is ${overall} hours, with no segment over ${RESPONSE_SEGMENT_HOURS} hours.`, evidence, segmentsChecked, facts: { medianHours: overall, leads: touched.length } };
+      return { outcome: "pass", summary: said`The median first response is ${overall} hours, with no segment over ${RESPONSE_SEGMENT_HOURS} hours.`, evidence, segmentsChecked, facts: { medianHours: overall, leads: touched.length } };
     }
     const worst = hotspots[0];
     return {
       outcome: "issue",
-      title: "Some leads wait days for a first response",
-      summary: `The median first response is ${overall} hours.${worst ? ` ${worst.dimension === "source" ? `${worst.key} leads wait` : `For ${worst.dimension} ${worst.key} the wait is`} ${worst.hours} hours.` : ""} Our working targets are ${RESPONSE_TARGET_HOURS} hours overall and ${RESPONSE_SEGMENT_HOURS} for any segment.`,
-      recommendation: "Set a response rule by source, and route the slow ones to someone who can meet it.",
+      title: said`Some leads wait days for a first response`,
+      summary: said`The median first response is ${overall} hours.${worst ? said` ${worst.dimension === "source" ? said`${org(worst.key)} leads wait` : said`For ${dimensionWord(worst.dimension)} ${org(worst.key)} the wait is`} ${worst.hours} hours.` : ""} Our working targets are ${RESPONSE_TARGET_HOURS} hours overall and ${RESPONSE_SEGMENT_HOURS} for any segment.`,
+      recommendation: said`Set a response rule by source, and route the slow ones to someone who can meet it.`,
       recommendationType: "change",
       severity: "medium",
       // First response is read from what's logged. Unlogged calls would make this look slower than it is.
@@ -145,19 +153,19 @@ const noResponse: Rule = {
   evaluate(ctx): RuleResult | RuleResult[] {
     const data = leadsOr(ctx);
     if ("outcome" in data) return data;
-    if (!data.activityReadable) return { outcome: "not_measurable", reason: "Activities couldn't be read in full, so we can't see first responses.", evidence: data.evidence };
+    if (!data.activityReadable) return { outcome: "not_measurable", reason: said`Activities couldn't be read in full, so we can't see first responses.`, evidence: data.evidence };
     const leads = judgeable(ctx, data);
     const evidence = [{ ...data.evidence[0]!, count: leads.length, exclusions: [...data.exclusions, `Leads created before the readable year or in the last ${RESPONSE_GRACE_DAYS} days`] }];
-    if (leads.length < ctx.calibration.minSample) return { outcome: "not_measurable", reason: `${leads.length} leads is below the calibrated minimum of ${ctx.calibration.minSample}.`, evidence };
+    if (leads.length < ctx.calibration.minSample) return { outcome: "not_measurable", reason: said`${leads.length} leads is below the calibrated minimum of ${ctx.calibration.minSample}.`, evidence };
     const result = segmentRate(leads, (l) => l.firstTouch === null, dimensions(ctx), { segmentLimit: NO_TOUCH_SEGMENT_LIMIT, minSegment: MIN_SEGMENT });
     const facts = { hits: result.hits, n: result.n, rate: result.rate };
-    if (result.rate <= NO_TOUCH_LIMIT && result.hotspots.length === 0) return { outcome: "pass", summary: `Leads with no logged response: ${result.hits} of ${result.n} (${result.rate}%), with no segment above ${NO_TOUCH_SEGMENT_LIMIT}%.`, evidence, segmentsChecked: result.segmentsChecked, facts };
+    if (result.rate <= NO_TOUCH_LIMIT && result.hotspots.length === 0) return { outcome: "pass", summary: said`Leads with no logged response: ${result.hits} of ${result.n} (${result.rate}%), with no segment above ${NO_TOUCH_SEGMENT_LIMIT}%.`, evidence, segmentsChecked: result.segmentsChecked, facts };
     const worst = result.hotspots[0];
     return {
       outcome: "issue",
-      title: "Leads are going unanswered",
-      summary: `Leads with no logged response after ${RESPONSE_GRACE_DAYS} days: ${result.hits} of ${result.n} (${result.rate}%).${worst ? ` Worst by ${worst.dimension}: ${worst.key}, at ${worst.rate}%.` : ""}`,
-      recommendation: "Check routing first: unassigned or queue-held leads are the usual cause.",
+      title: said`Leads are going unanswered`,
+      summary: said`Leads with no logged response after ${RESPONSE_GRACE_DAYS} days: ${result.hits} of ${result.n} (${result.rate}%).${worst ? said` Worst by ${dimensionWord(worst.dimension)}: ${org(worst.key)}, at ${worst.rate}%.` : ""}`,
+      recommendation: said`Check routing first: unassigned or queue-held leads are the usual cause.`,
       recommendationType: "change",
       severity: "medium",
       confidence: "medium",
@@ -182,16 +190,16 @@ const convertedWithoutOpportunity: Rule = {
     if ("outcome" in data) return data;
     const converted = data.leads.filter((l) => l.IsConverted);
     const evidence = [{ ...data.evidence[0]!, count: converted.length, exclusions: data.exclusions, note: "Converted leads" }];
-    if (converted.length === 0) return { outcome: "pass", summary: "No leads were converted in the window.", evidence, segmentExemptReason: "There are no converted leads to segment." };
+    if (converted.length === 0) return { outcome: "pass", summary: said`No leads were converted in the window.`, evidence, segmentExemptReason: "There are no converted leads to segment." };
     const result = segmentRate(converted, (l) => l.ConvertedOpportunityId === null, dimensions(ctx), { segmentLimit: 40, minSegment: MIN_SEGMENT });
     const facts = { hits: result.hits, n: result.n, rate: result.rate };
-    if (result.rate <= NO_OPPORTUNITY_LIMIT && result.hotspots.length === 0) return { outcome: "pass", summary: `Converted with no opportunity: ${result.hits} of ${result.n} (${result.rate}%), with no segment above 40%.`, evidence, segmentsChecked: result.segmentsChecked, facts };
+    if (result.rate <= NO_OPPORTUNITY_LIMIT && result.hotspots.length === 0) return { outcome: "pass", summary: said`Converted with no opportunity: ${result.hits} of ${result.n} (${result.rate}%), with no segment above 40%.`, evidence, segmentsChecked: result.segmentsChecked, facts };
     const worst = result.hotspots[0];
     return {
       outcome: "issue",
-      title: "Converted leads aren't becoming opportunities",
-      summary: `Converted with no opportunity: ${result.hits} of ${result.n} (${result.rate}%).${worst ? ` Worst by ${worst.dimension}: ${worst.key}, at ${worst.rate}%.` : ""} Conversion looks better than the pipeline it produced.`,
-      recommendation: "Agree when a lead should be converted. If it's only to tidy up, take these out of your conversion figures.",
+      title: said`Converted leads aren't becoming opportunities`,
+      summary: said`Converted with no opportunity: ${result.hits} of ${result.n} (${result.rate}%).${worst ? said` Worst by ${dimensionWord(worst.dimension)}: ${org(worst.key)}, at ${worst.rate}%.` : ""} Conversion looks better than the pipeline it produced.`,
+      recommendation: said`Agree when a lead should be converted. If it's only to tidy up, take these out of your conversion figures.`,
       recommendationType: "investigate",
       severity: "low",
       confidence: "high",
@@ -234,17 +242,17 @@ const sourceReturn: Rule = {
     const { minSample } = ctx.calibration;
     const big = returns.rows.filter((r) => r.leads >= minSample);
     const evidence = [{ ...data.evidence[0]!, exclusions: [...data.exclusions, "Won deals that didn't come from a converted lead"], note: "Won Amount on the opportunity each lead converted to" }];
-    if (big.length === 0) return { outcome: "not_measurable", reason: `No source has the calibrated minimum of ${minSample} leads.`, evidence };
+    if (big.length === 0) return { outcome: "not_measurable", reason: said`No source has the calibrated minimum of ${minSample} leads.`, evidence };
     const dry = big.filter((r) => r.deals === 0).sort((a, b) => b.leads - a.leads || a.source.localeCompare(b.source));
     const segments = [{ dimension: "source", segments: returns.rows.length }];
     const total = returns.rows.reduce((sum, r) => sum + r.won, 0);
-    if (dry.length === 0) return { outcome: "pass", summary: `Every source with ${minSample} or more leads has produced at least one win.`, evidence, segmentsChecked: segments, facts: { wonFromLeads: Math.round(total) } };
+    if (dry.length === 0) return { outcome: "pass", summary: said`Every source with ${minSample} or more leads has produced at least one win.`, evidence, segmentsChecked: segments, facts: { wonFromLeads: Math.round(total) } };
     const leads = dry.reduce((sum, r) => sum + r.leads, 0);
     return {
       outcome: "issue",
-      title: "Some lead sources have produced no wins",
-      summary: `${dry.map((r) => r.source).join(", ")} brought in ${leads} leads and no won deals, against ${money(total, ctx.calibration.currency)} won from other sources.`,
-      recommendation: "Check how these leads are handled, then decide whether the source is worth keeping.",
+      title: said`Some lead sources have produced no wins`,
+      summary: said`${joinSaid(dry.map((r) => said`${org(r.source)}`), ", ")} brought in ${leads} leads and no won deals, against ${moneySaid(total, ctx.calibration.currency)} won from other sources.`,
+      recommendation: said`Check how these leads are handled, then decide whether the source is worth keeping.`,
       recommendationType: "investigate",
       severity: "medium",
       confidence: "high",
@@ -270,17 +278,17 @@ const campaignReturn: Rule = {
     const { campaigns, members } = ctx.data(leadsExtractor);
     if (campaigns.status !== "ok") return { outcome: "not_measurable", reason: `Campaigns couldn't be read: ${campaigns.reason}`, evidence: [ctx.ev(campaigns.source, { count: null })] };
     if (members.status !== "ok") return { outcome: "not_measurable", reason: `Campaign members couldn't be read: ${members.reason}`, evidence: [ctx.ev(members.source, { count: null })] };
-    if (members.truncated) return { outcome: "not_measurable", reason: "There are too many campaign members to read in full.", evidence: [ctx.ev(members.source, { count: members.data.length })] };
+    if (members.truncated) return { outcome: "not_measurable", reason: said`There are too many campaign members to read in full.`, evidence: [ctx.ev(members.source, { count: members.data.length })] };
     const missingCost = missingFieldReason(campaigns, "Campaign.ActualCost");
     if (missingCost) return { outcome: "not_measurable", reason: missingCost, evidence: [ctx.ev(campaigns.source, { count: null })] };
     const costed = campaigns.data.filter((c) => c.ActualCost != null && c.ActualCost > 0);
     const unpriced = campaigns.data.length - costed.length;
     const exclusions = unpriced ? [`${plural(unpriced, "campaign")} with no actual cost recorded`] : [];
     const evidence = [ctx.ev(campaigns.source, { count: campaigns.data.length, exclusions }), ctx.ev(members.source, { count: members.data.length, note: "A deal is credited to every campaign its lead was in, so returns overlap" })];
-    if (costed.length === 0) return { outcome: "not_measurable", reason: "No campaign has an actual cost recorded, so a return can't be worked out.", evidence };
+    if (costed.length === 0) return { outcome: "not_measurable", reason: said`No campaign has an actual cost recorded, so a return can't be worked out.`, evidence };
     const pipeline = loadPipeline(ctx);
     if (pipeline.status !== "ok") return { outcome: "not_measurable", reason: pipeline.reason, evidence };
-    if (pipeline.multiCurrency) return { outcome: "not_measurable", reason: "The org is multi-currency, and amounts can't be added until historic rates are supplied.", evidence };
+    if (pipeline.multiCurrency) return { outcome: "not_measurable", reason: said`The org is multi-currency, and amounts can't be added until historic rates are supplied.`, evidence };
     const won = new Map(pipeline.deals.filter((d) => d.category === "won").map((d) => [d.Id, d.Amount ?? 0]));
     const dealOf = new Map(data.leads.flatMap((l) => (l.ConvertedOpportunityId ? [[l.Id, l.ConvertedOpportunityId] as const] : [])));
     const rows = groupByType(costed).map(([type, group]) => {
@@ -294,13 +302,13 @@ const campaignReturn: Rule = {
     const under = rows.filter((r) => r.returned < r.cost).sort((a, b) => a.returned / a.cost - b.returned / b.cost || a.type.localeCompare(b.type));
     const spend = rows.reduce((sum, r) => sum + r.cost, 0);
     const segments = [{ dimension: "campaign type", segments: rows.length }];
-    if (under.length === 0) return { outcome: "pass", summary: `Every campaign type with a recorded cost returned more than it cost, across ${money(spend, ctx.calibration.currency)} of spend.`, evidence, segmentsChecked: segments, facts: { spend, types: rows.length } };
+    if (under.length === 0) return { outcome: "pass", summary: said`Every campaign type with a recorded cost returned more than it cost, across ${moneySaid(spend, ctx.calibration.currency)} of spend.`, evidence, segmentsChecked: segments, facts: { spend, types: rows.length } };
     const gap = Math.round(under.reduce((sum, r) => sum + r.cost - r.returned, 0));
     return {
       outcome: "issue",
-      title: "Some campaign spend isn't coming back",
-      summary: `${under.map((r) => r.type).join(", ")} cost ${money(under.reduce((sum, r) => sum + r.cost, 0), ctx.calibration.currency)} and returned ${money(under.reduce((sum, r) => sum + r.returned, 0), ctx.calibration.currency)} in won deals from its leads.`,
-      recommendation: "Check the attribution first, because deals with contacts on a campaign aren't counted here. Then decide whether to keep this spend.",
+      title: said`Some campaign spend isn't coming back`,
+      summary: said`${joinSaid(under.map((r) => said`${org(r.type)}`), ", ")} cost ${moneySaid(under.reduce((sum, r) => sum + r.cost, 0), ctx.calibration.currency)} and returned ${moneySaid(under.reduce((sum, r) => sum + r.returned, 0), ctx.calibration.currency)} in won deals from its leads.`,
+      recommendation: said`Check the attribution first, because deals with contacts on a campaign aren't counted here. Then decide whether to keep this spend.`,
       recommendationType: "investigate",
       severity: "medium",
       confidence: "medium",

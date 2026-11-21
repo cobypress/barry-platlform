@@ -1,6 +1,7 @@
 import type { Extractor, SourceInfo } from "../extract/types.ts";
 import type { Calibration, DateRange, RunScope, Effort, Evidence, Guard, ManualAnswer, ManualStep, Metric, RecommendationType, SegmentCheck, Subject, Value } from "../schemas/index.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
+import { eng, type LiteralText, type Said } from "./org-words.ts";
 
 type Severity = "critical" | "high" | "medium" | "low" | "info";
 type Confidence = "high" | "medium" | "low";
@@ -132,8 +133,20 @@ export type Rule = {
 
 export const notSized = (reason: string): Value => ({ kind: "not_sized", reason });
 
-/** "1 stage", "2 stages". Pass `many` where adding an s is wrong. */
-export const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
+/**
+ * "1 stage", "2 stages". Pass `many` where adding an s is wrong. Given literal
+ * nouns it is a sentence of the engine's own words, which `said` takes
+ * (DECISIONS.md 657); given a noun read at run time it is a plain string, which
+ * `said` refuses, so a name the org chose can't pass as ours this way.
+ */
+// Two overloads, not one with an optional plural: an optional parameter's type takes in undefined, which `any` fits, so `many: any` passed.
+export function plural<const O extends string>(n: number, one: O & LiteralText<O>): Said;
+export function plural<const O extends string, const M extends string>(n: number, one: O & LiteralText<O>, many: M & LiteralText<M>): Said;
+export function plural(n: number, one: string, many?: string): string;
+export function plural(n: number, one: string, many = `${one}s`): string {
+  // The first overload holds both nouns to literal types: the only words here are ours.
+  return eng(`${n} ${n === 1 ? one : many}`);
+}
 
 /** A pct with one decimal place, for text. The exact figure stays in `facts`. */
 export const pct = (part: number, whole: number): number => (whole === 0 ? 0 : Math.round((part / whole) * 1000) / 10);

@@ -7,6 +7,7 @@ import { notSized, pct, plural, type Rule, type RuleContext, type RuleResult } f
 import type { Evidence, Metric, MetricSegment, SeriesPoint } from "../../schemas/index.ts";
 import { opportunitiesGate } from "../gate.ts";
 import type { DomainModule } from "../types.ts";
+import { joinSaid, org, said, type Said } from "../../engine/org-words.ts";
 
 // Roadmap 3.2: whether people use Salesforce, and how. Everything here is read
 // from set-up (users, login history, report definitions), never from CRM
@@ -69,10 +70,10 @@ export function coveredMonths(activity: LoginActivity, now: Date): string[] {
   return months;
 }
 
-type Group = { dimension: string; key: string; users: UserRow[] };
+type Group = { dimension: "profile" | "role"; key: string; users: UserRow[] };
 
 function groupsOf(users: UserRow[]): Group[] {
-  const by = (dimension: string, keyOf: (u: UserRow) => string): Group[] => {
+  const by = (dimension: Group["dimension"], keyOf: (u: UserRow) => string): Group[] => {
     const map = new Map<string, UserRow[]>();
     for (const u of users) map.set(keyOf(u), [...(map.get(keyOf(u)) ?? []), u]);
     return [...map].sort(([a], [b]) => a.localeCompare(b)).map(([key, members]) => ({ dimension, key, users: members }));
@@ -89,12 +90,12 @@ const activeOn = (activity: LoginActivity, users: UserRow[], days: (day: string)
  * people Salesforce says logged in during the window have a login in the
  * history, it isn't the whole org's, and nothing is built from it.
  */
-export function partialHistory(users: UserRow[], activity: LoginActivity): string | null {
+export function partialHistory(users: UserRow[], activity: LoginActivity): Said | null {
   const from = new Date(`${activity.from}T00:00:00Z`);
   const expected = users.filter((u) => u.LastLoginDate && new Date(u.LastLoginDate.replace(/\+0000$/, "Z")) >= from).length;
   const seen = users.filter((u) => activity.days[u.Id]).length;
   if (expected === 0 || seen * 2 >= expected) return null;
-  return `The login history shows logins for ${seen} of the ${expected} people who logged in during the window, so the connection can probably see only its own logins. Give the connected user the Monitor Login History permission, then run the check again.`;
+  return said`The login history shows logins for ${seen} of the ${expected} people who logged in during the window, so the connection can probably see only its own logins. Give the connected user the Monitor Login History permission, then run the check again.`;
 }
 
 type Loaded = { status: "ok"; users: UserRow[]; activity: LoginActivity; evidence: Evidence[] } | { status: "not_measurable"; reason: string; evidence: Evidence[] };
@@ -294,40 +295,41 @@ const fallingAdoption: Rule = {
     const { users, activity, evidence } = data;
     const months = coveredMonths(activity, ctx.now);
     if (months.length < FALL_SPAN_MONTHS + 1) {
-      return { outcome: "not_measurable", reason: `The login history covers ${plural(months.length, "whole month")}, and a trend needs ${FALL_SPAN_MONTHS + 1}.`, evidence };
+      return { outcome: "not_measurable", reason: said`The login history covers ${plural(months.length, "whole month")}, and a trend needs ${FALL_SPAN_MONTHS + 1}.`, evidence };
     }
     const last = months.at(-1)!;
     const earlier = months.slice(0, -FALL_SPAN_MONTHS);
     const inMonth = (month: string) => (d: string) => monthKey(d) === month;
-    type Fall = { label: string; peak: number; peakMonth: string; now: number; drop: number };
-    const fallOf = (label: string, who: UserRow[]): Fall | null => {
+    type Fall = { label: string; words: Said; peak: number; peakMonth: string; now: number; drop: number };
+    const fallOf = (label: string, words: Said, who: UserRow[]): Fall | null => {
       const peaks = earlier.map((m) => ({ month: m, active: activeOn(activity, who, inMonth(m)) }));
       const peak = peaks.reduce((best, p) => (p.active > best.active ? p : best), peaks[0]!);
       if (peak.active < MIN_GROUP) return null;
       const now = activeOn(activity, who, inMonth(last));
       const drop = pct(peak.active - now, peak.active);
-      return drop >= FALL_SHARE ? { label, peak: peak.active, peakMonth: peak.month, now, drop } : null;
+      return drop >= FALL_SHARE ? { label, words, peak: peak.active, peakMonth: peak.month, now, drop } : null;
     };
     const groups = groupsOf(users).filter((g) => g.users.length >= MIN_GROUP);
-    const org = fallOf("the whole org", users);
-    const falls = groups.flatMap((g) => fallOf(`${g.dimension} ${g.key}`, g.users) ?? []);
+    const whole = fallOf("the whole org", said`the whole org`, users);
+    // A group's dimension is our word; its name, and the months read from login history, are the org's.
+    const falls = groups.flatMap((g) => fallOf(`${g.dimension} ${g.key}`, said`${g.dimension} ${org(g.key)}`, g.users) ?? []);
     const segments = [
       { dimension: "profile", segments: groups.filter((g) => g.dimension === "profile").length },
       { dimension: "role", segments: groups.filter((g) => g.dimension === "role").length },
     ];
-    const window = `between ${months[0]} and ${last}`;
-    if (!org && falls.length === 0) {
-      return { outcome: "pass", summary: `Monthly active users haven't fallen ${FALL_SHARE}% or more from an earlier peak ${window}, in the org or in any profile or role of ${MIN_GROUP} people or more.`, evidence, segmentsChecked: segments, facts: { months: months.length } };
+    const window = said`between ${org(months[0]!)} and ${org(last)}`;
+    if (!whole && falls.length === 0) {
+      return { outcome: "pass", summary: said`Monthly active users haven't fallen ${FALL_SHARE}% or more from an earlier peak ${window}, in the org or in any profile or role of ${MIN_GROUP} people or more.`, evidence, segmentsChecked: segments, facts: { months: months.length } };
     }
-    const line = (f: Fall): string => `${f.label}, from ${f.peak} in ${f.peakMonth} to ${f.now} in ${last} (down ${f.drop}%)`;
-    const all = [...(org ? [org] : []), ...falls];
+    const line = (f: Fall): Said => said`${f.words}, from ${f.peak} in ${org(f.peakMonth)} to ${f.now} in ${org(last)} (down ${f.drop}%)`;
+    const all = [...(whole ? [whole] : []), ...falls];
     return {
       outcome: "issue",
-      title: org ? "Fewer people are using Salesforce" : "Fewer people are using Salesforce in some teams",
-      summary: `Monthly active users have fallen ${FALL_SHARE}% or more from their peak: ${all.map(line).join("; ")}.`,
-      recommendation: "Ask the people who've stopped why. Fix what gets in their way, and make Salesforce the place the team's meetings and figures come from.",
+      title: whole ? said`Fewer people are using Salesforce` : said`Fewer people are using Salesforce in some teams`,
+      summary: said`Monthly active users have fallen ${FALL_SHARE}% or more from their peak: ${joinSaid(all.map(line), "; ")}.`,
+      recommendation: said`Ask the people who've stopped why. Fix what gets in their way, and make Salesforce the place the team's meetings and figures come from.`,
       recommendationType: "investigate",
-      severity: org ? "high" : "medium",
+      severity: whole ? "high" : "medium",
       // Login history is kept for a limited time, so the earliest months may be thinner than they were.
       confidence: "medium",
       evidence,
@@ -336,7 +338,7 @@ const fallingAdoption: Rule = {
       owner: "Sales leadership",
       segmentsChecked: segments,
       subjects: falls.map((f) => ({ type: "group", label: f.label })),
-      facts: { months: months.length, groupsFalling: falls.length, ...(org ? { peak: org.peak, latest: org.now, drop: org.drop } : {}) },
+      facts: { months: months.length, groupsFalling: falls.length, ...(whole ? { peak: whole.peak, latest: whole.now, drop: whole.drop } : {}) },
     };
   },
 };
@@ -357,14 +359,14 @@ const lowEngagement: Rule = {
       { dimension: "profile", segments: groups.filter((g) => g.dimension === "profile").length },
       { dimension: "role", segments: groups.filter((g) => g.dimension === "role").length },
     ];
-    if (groups.length === 0) return { outcome: "pass", summary: `No profile or role has ${MIN_GROUP} people or more to judge.`, evidence, segmentExemptReason: `No group has ${MIN_GROUP} people.` };
+    if (groups.length === 0) return { outcome: "pass", summary: said`No profile or role has ${MIN_GROUP} people or more to judge.`, evidence, segmentExemptReason: `No group has ${MIN_GROUP} people.` };
     const low = groups.map((g) => ({ g, barely: g.users.filter(barely).length })).filter((x) => pct(x.barely, x.g.users.length) > BARELY_SHARE);
-    if (low.length === 0) return { outcome: "pass", summary: `In every profile and role of ${MIN_GROUP} people or more, most log in at least ${BARELY_DAYS} days in ${RECENT_DAYS}.`, evidence, segmentsChecked: segments };
+    if (low.length === 0) return { outcome: "pass", summary: said`In every profile and role of ${MIN_GROUP} people or more, most log in at least ${BARELY_DAYS} days in ${RECENT_DAYS}.`, evidence, segmentsChecked: segments };
     return {
       outcome: "issue",
-      title: "Some teams barely use Salesforce",
-      summary: `In these groups, most people logged in on fewer than ${BARELY_DAYS} of the last ${RECENT_DAYS} days: ${low.map((x) => `${x.g.dimension} ${x.g.key}, ${x.barely} of ${x.g.users.length}`).join("; ")}.`,
-      recommendation: "Find out what these teams use instead of Salesforce, and bring that work into it: their pipeline, their reports, and their next steps.",
+      title: said`Some teams barely use Salesforce`,
+      summary: said`In these groups, most people logged in on fewer than ${BARELY_DAYS} of the last ${RECENT_DAYS} days: ${joinSaid(low.map((x) => said`${x.g.dimension} ${org(x.g.key)}, ${x.barely} of ${x.g.users.length}`), "; ")}.`,
+      recommendation: said`Find out what these teams use instead of Salesforce, and bring that work into it: their pipeline, their reports, and their next steps.`,
       recommendationType: "investigate",
       severity: "medium",
       confidence: "high",
@@ -388,22 +390,22 @@ const classicUsers: Rule = {
     const users = ctx.data(usersExtractor);
     const evidence = [ctx.ev(users.source, { count: users.status === "ok" ? users.data.length : null })];
     if (users.status !== "ok") return { outcome: "not_measurable", reason: `Users couldn't be read: ${users.reason}`, evidence };
-    if (users.missingFields?.includes("UserPreferencesLightningExperiencePreferred")) return { outcome: "not_measurable", reason: "The user's Lightning Experience setting couldn't be read in this org.", evidence };
+    if (users.missingFields?.includes("UserPreferencesLightningExperiencePreferred")) return { outcome: "not_measurable", reason: said`The user's Lightning Experience setting couldn't be read in this org.`, evidence };
     const everyone = people(ctx, users.data);
     const who = everyone.filter(knowsLightning);
-    if (who.length === 0) return { outcome: "not_measurable", reason: "The Lightning Experience setting came back empty for every user, so it can't be read for other users with this connection.", evidence };
+    if (who.length === 0) return { outcome: "not_measurable", reason: said`The Lightning Experience setting came back empty for every user, so it can't be read for other users with this connection.`, evidence };
     const classic = who.filter((u) => u.UserPreferencesLightningExperiencePreferred === false);
     const profiles = new Set(who.map(profileOf)).size;
     const segments = [{ dimension: "profile", segments: profiles }];
     const unread = everyone.length - who.length;
-    if (classic.length === 0) return { outcome: "pass", summary: `All ${plural(who.length, "active user")}${unread ? ` whose setting we could read` : ""} are set to use Lightning Experience.${unread ? ` The setting couldn't be read for ${plural(unread, "user")}.` : ""}`, evidence, segmentsChecked: segments };
+    if (classic.length === 0) return { outcome: "pass", summary: said`All ${plural(who.length, "active user")}${unread ? said` whose setting we could read` : ""} are set to use Lightning Experience.${unread ? said` The setting couldn't be read for ${plural(unread, "user")}.` : ""}`, evidence, segmentsChecked: segments };
     const share = pct(classic.length, who.length);
-    const byProfile = [...new Set(classic.map(profileOf))].sort().map((p) => `${p} (${classic.filter((u) => profileOf(u) === p).length})`);
+    const byProfile = [...new Set(classic.map(profileOf))].sort().map((p) => said`${org(p)} (${classic.filter((u) => profileOf(u) === p).length})`);
     return {
       outcome: "issue",
-      title: "Some people still use Salesforce Classic",
-      summary: `${classic.length} of ${who.length} active users (${share}%) aren't set to use Lightning Experience: ${byProfile.join(", ")}.`,
-      recommendation: "Move these users to Lightning Experience, and find out first what keeps them on Classic, such as a page, button or tool that only works there.",
+      title: said`Some people still use Salesforce Classic`,
+      summary: said`${classic.length} of ${who.length} active users (${share}%) aren't set to use Lightning Experience: ${joinSaid(byProfile, ", ")}.`,
+      recommendation: said`Move these users to Lightning Experience, and find out first what keeps them on Classic, such as a page, button or tool that only works there.`,
       recommendationType: "change",
       severity: share > 25 ? "medium" : "low",
       confidence: "high",

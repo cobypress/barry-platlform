@@ -12,6 +12,11 @@ import { potentialRevenue, SITUATIONS } from "../historic-pipeline/potential.ts"
 import { atOwnWinRate } from "../value.ts";
 import type { Evidence, Value } from "../../schemas/index.ts";
 import type { DomainModule } from "../types.ts";
+import { joinSaid, org, said } from "../../engine/org-words.ts";
+
+// Every title, summary, recommendation and reason is written with `said`, every
+// stage with `org`, so the digest can say which words are the org's
+// (DECISIONS.md 655, 657). A reason passed on from an extract stays plain.
 
 const DOMAIN = "revenue_opportunities";
 const STALLED_DAYS = 60;
@@ -24,7 +29,7 @@ type Ready = Extract<ReturnType<typeof loadPipeline>, { status: "ok" }>;
 function pipelineOr(ctx: RuleContext): Ready | NotMeasurableResult {
   const data = loadPipeline(ctx);
   if (data.status !== "ok") return { outcome: "not_measurable", reason: data.reason, evidence: data.evidence };
-  if (data.unmapped.finalStages.length > 0) return { outcome: "not_measurable", reason: `The calibration doesn't say what these stages mean: ${data.unmapped.finalStages.join(", ")}.`, evidence: data.evidence };
+  if (data.unmapped.finalStages.length > 0) return { outcome: "not_measurable", reason: said`The calibration doesn't say what these stages mean: ${joinSaid(data.unmapped.finalStages.map((s) => said`${org(s)}`), ", ")}.`, evidence: data.evidence };
   return data;
 }
 
@@ -49,18 +54,18 @@ const stalledDeals: Rule = {
     const open = data.deals.filter((d) => d.category === "open");
     const stalled = open.filter((d) => (enteredCurrentStage(d) ?? new Date(d.CreatedDate)) < cutoff && (d.LastActivityDate === null || d.LastActivityDate < day));
     const evidence: Evidence[] = [{ ...data.evidence[0]!, count: stalled.length, dateRange: { from: ctx.window.to, to: ctx.window.to }, exclusions: data.exclusions, note: `Open deals with no stage change and no activity in ${STALLED_DAYS} days` }];
-    if (open.length === 0) return { outcome: "pass", summary: "There are no open deals to check.", evidence, segmentExemptReason: "There are no deals to segment." };
+    if (open.length === 0) return { outcome: "pass", summary: said`There are no open deals to check.`, evidence, segmentExemptReason: "There are no deals to segment." };
     const segmentsChecked = dealSegments(ctx, open);
-    if (stalled.length < MIN_DEALS) return { outcome: "pass", summary: `${plural(stalled.length, "open deal")} of ${open.length} ${stalled.length === 1 ? "has" : "have"} stalled for ${STALLED_DAYS} days, under the ${MIN_DEALS} we'd call a pattern.`, evidence, segmentsChecked, facts: { stalled: stalled.length, open: open.length } };
+    if (stalled.length < MIN_DEALS) return { outcome: "pass", summary: said`${plural(stalled.length, "open deal")} of ${open.length} ${stalled.length === 1 ? "has" : "have"} stalled for ${STALLED_DAYS} days, under the ${MIN_DEALS} we'd call a pattern.`, evidence, segmentsChecked, facts: { stalled: stalled.length, open: open.length } };
     const amount = total(stalled);
     const situation = SITUATIONS.inStageFor(STALLED_DAYS, data);
     const value = potentialRevenue(ctx, data, stalled, () => situation);
     return {
       outcome: "issue",
       // Titled by its test, as two other checks find quiet deals by theirs (night 3 reading pass, item 16).
-      title: `Open deals with no stage change or activity in ${STALLED_DAYS} days`,
-      summary: `${plural(stalled.length, "open deal")} of ${open.length} (${pct(stalled.length, open.length)}%) haven't changed stage or had activity in ${STALLED_DAYS} days.`,
-      recommendation: "Give each owner a date to re-engage or close these. The ones that come back are the cheapest revenue you have.",
+      title: said`Open deals with no stage change or activity in ${STALLED_DAYS} days`,
+      summary: said`${plural(stalled.length, "open deal")} of ${open.length} (${pct(stalled.length, open.length)}%) haven't changed stage or had activity in ${STALLED_DAYS} days.`,
+      recommendation: said`Give each owner a date to re-engage or close these. The ones that come back are the cheapest revenue you have.`,
       recommendationType: "change",
       severity: "medium",
       confidence: "medium",
@@ -95,8 +100,8 @@ const winBacks: Rule = {
     const exclusions = [...data.exclusions, "Accounts with an open deal, or a win since the deal was lost", ...(noAccount ? [`${plural(noAccount, "deal")} with no account`] : [])];
     const evidence: Evidence[] = [{ ...data.evidence[0]!, count: candidates.length, dateRange: { from: oldest.toISOString().slice(0, 10), to: newest.toISOString().slice(0, 10) }, exclusions, note: `Lost or no decision between ${WIN_BACK_MIN_MONTHS} and ${WIN_BACK_MAX_MONTHS} months ago` }];
     const segmentsChecked = [...dealSegments(ctx, closed), { dimension: "outcome", segments: distinct(closed.map((d) => d.category ?? "Unknown")) }];
-    if (closed.length === 0) return { outcome: "pass", summary: "No deals have been lost in the window.", evidence, segmentExemptReason: "There are no lost deals to segment." };
-    if (candidates.length < MIN_DEALS) return { outcome: "pass", summary: `${plural(candidates.length, "lost deal")} from ${WIN_BACK_MIN_MONTHS} to ${WIN_BACK_MAX_MONTHS} months ago could be revisited, under the ${MIN_DEALS} we'd call a pattern.`, evidence, segmentsChecked, facts: { candidates: candidates.length } };
+    if (closed.length === 0) return { outcome: "pass", summary: said`No deals have been lost in the window.`, evidence, segmentExemptReason: "There are no lost deals to segment." };
+    if (candidates.length < MIN_DEALS) return { outcome: "pass", summary: said`${plural(candidates.length, "lost deal")} from ${WIN_BACK_MIN_MONTHS} to ${WIN_BACK_MAX_MONTHS} months ago could be revisited, under the ${MIN_DEALS} we'd call a pattern.`, evidence, segmentsChecked, facts: { candidates: candidates.length } };
     const amount = total(candidates);
     const noDecision = candidates.filter((d) => d.category === "no_decision").length;
     const value = atOwnWinRate(ctx, amount, {
@@ -107,9 +112,9 @@ const winBacks: Rule = {
     });
     return {
       outcome: "issue",
-      title: "You have past deals worth going back to",
-      summary: `${plural(candidates.length, "deal")} lost or left undecided ${WIN_BACK_MIN_MONTHS} to ${WIN_BACK_MAX_MONTHS} months ago sit on accounts with nothing open and no win since. ${noDecision} of them never reached a decision.`,
-      recommendation: "Start with the no decision deals, where nothing was lost to a competitor, and check why each one stopped.",
+      title: said`You have past deals worth going back to`,
+      summary: said`${plural(candidates.length, "deal")} lost or left undecided ${WIN_BACK_MIN_MONTHS} to ${WIN_BACK_MAX_MONTHS} months ago sit on accounts with nothing open and no win since. ${noDecision} of them never reached a decision.`,
+      recommendation: said`Start with the no decision deals, where nothing was lost to a competitor, and check why each one stopped.`,
       recommendationType: "investigate",
       severity: "medium",
       confidence: "medium",
@@ -133,7 +138,7 @@ const dormantAccounts: Rule = {
     if ("outcome" in data) return data;
     const accounts = ctx.data(wonAccountsExtractor);
     if (accounts.status !== "ok") return { outcome: "not_measurable", reason: `Accounts couldn't be read: ${accounts.reason}`, evidence: [ctx.ev(accounts.source, { count: null })] };
-    if (accounts.truncated) return { outcome: "not_measurable", reason: "There are too many customer accounts to read in full.", evidence: [ctx.ev(accounts.source, { count: accounts.data.length })] };
+    if (accounts.truncated) return { outcome: "not_measurable", reason: said`There are too many customer accounts to read in full.`, evidence: [ctx.ev(accounts.source, { count: accounts.data.length })] };
     const { dormantDays } = ctx.calibration;
     const cutoff = localDay(daysBefore(ctx.now, dormantDays), zoneOf(ctx));
     const openAccounts = new Set(data.deals.filter((d) => d.category === "open" && d.AccountId).map((d) => d.AccountId!));
@@ -144,8 +149,8 @@ const dormantAccounts: Rule = {
     const inactive = new Set(users.status === "ok" ? users.data.filter((u) => !u.IsActive).map((u) => u.Id) : []);
     const evidence = [ctx.ev(accounts.source, { count: dormant.length, exclusions: ["Accounts with an open deal", `Accounts with activity in the last ${dormantDays} days`], note: `Calibrated dormant period of ${dormantDays} days` })];
     const segmentsChecked = [{ dimension: "team", segments: distinct(accounts.data.map((a) => roles.get(a.OwnerId) ?? "No role")) }, { dimension: "owner", segments: distinct(accounts.data.map((a) => a.OwnerId)) }];
-    if (accounts.data.length === 0) return { outcome: "not_measurable", reason: "No account has a won deal, so there are no past customers to check.", evidence };
-    if (dormant.length < MIN_DEALS) return { outcome: "pass", summary: `${plural(dormant.length, "past customer")} of ${accounts.data.length} ${dormant.length === 1 ? "has" : "have"} gone quiet, under the ${MIN_DEALS} we'd call a pattern.`, evidence, segmentsChecked, facts: { dormant: dormant.length, accounts: accounts.data.length } };
+    if (accounts.data.length === 0) return { outcome: "not_measurable", reason: said`No account has a won deal, so there are no past customers to check.`, evidence };
+    if (dormant.length < MIN_DEALS) return { outcome: "pass", summary: said`${plural(dormant.length, "past customer")} of ${accounts.data.length} ${dormant.length === 1 ? "has" : "have"} gone quiet, under the ${MIN_DEALS} we'd call a pattern.`, evidence, segmentsChecked, facts: { dormant: dormant.length, accounts: accounts.data.length } };
     const wonAmounts = wonDeals.flatMap((d) => (d.Amount === null ? [] : [d.Amount]));
     const typical = wonAmounts.length >= ctx.calibration.minSample ? median(wonAmounts) : null;
     const value: Value =
@@ -160,9 +165,9 @@ const dormantAccounts: Rule = {
     const stranded = dormant.filter((a) => inactive.has(a.OwnerId)).length;
     return {
       outcome: "issue",
-      title: "Past customers have gone quiet",
-      summary: `${plural(dormant.length, "account")} of ${accounts.data.length} that have bought from you have nothing open and no activity in ${dormantDays} days.${stranded ? ` ${stranded} of them belong to inactive users, so nobody owns the relationship.` : ""}`,
-      recommendation: "Agree who owns these accounts, and start with a light check-in rather than a pitch.",
+      title: said`Past customers have gone quiet`,
+      summary: said`${plural(dormant.length, "account")} of ${accounts.data.length} that have bought from you have nothing open and no activity in ${dormantDays} days.${stranded ? said` ${stranded} of them belong to inactive users, so nobody owns the relationship.` : ""}`,
+      recommendation: said`Agree who owns these accounts, and start with a light check-in rather than a pitch.`,
       recommendationType: "investigate",
       severity: "medium",
       confidence: "medium",

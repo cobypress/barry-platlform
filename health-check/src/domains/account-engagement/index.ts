@@ -6,10 +6,16 @@ import { licencesExtractor, usersExtractor } from "../../extract/users.ts";
 import type { DomainModule } from "../types.ts";
 import { atOwnLeadReturn } from "../value.ts";
 import { WHERE } from "../where.ts";
+import { said, org, type Said } from "../../engine/org-words.ts";
+import { grouped } from "../../engine/said-forms.ts";
 
 // Marketing Cloud Account Engagement (roadmap Stage 6, DECISIONS.md 261 to 274):
 // is marketing handing sales good leads, and is what it hands over worked? One
 // area, switched on at intake. Read from the Salesforce side only.
+//
+// Every title, summary, recommendation and reason of our own is written with
+// `said`, and every value the org chose with `org` (DECISIONS.md 655, 657). A
+// reason passed on from an extract quotes Salesforce and stays plain: unknown.
 
 const DOMAIN = "account_engagement";
 /** The console's module, and the area's id: one area, so no mapping as for "service" or "cpq". */
@@ -48,14 +54,14 @@ const scoringGrading: Rule = {
     const [synced, ungraded, unscored] = [counts.synced, counts.ungraded, counts.unscored].map((c) => (c.status === "ok" ? c.data : 0)) as [number, number, number];
     const evidence = [ctx.ev(counts.synced.source, { count: synced, dateRange: ctx.window, note: "Leads with an Account Engagement prospect (pi__url__c), created in the window" }), ctx.ev(counts.ungraded.source, { count: ungraded }), ctx.ev(counts.unscored.source, { count: unscored, note: "A score of 0 counts as no score" })];
     const facts = { synced, ungraded, unscored, ungradedRate: pct(ungraded, synced), unscoredRate: pct(unscored, synced) };
-    if (synced === 0) return { outcome: "pass", summary: "No lead synced from Account Engagement was created in the window.", evidence, segmentExemptReason: "There are no synced leads to segment.", facts };
+    if (synced === 0) return { outcome: "pass", summary: said`No lead synced from Account Engagement was created in the window.`, evidence, segmentExemptReason: "There are no synced leads to segment.", facts };
     const segments = [{ dimension: "rating", segments: 2 }];
-    if (facts.ungradedRate < UNRATED_SHARE && facts.unscoredRate < UNRATED_SHARE) return { outcome: "pass", summary: `Of ${plural(synced, "lead")} synced from Account Engagement in the window, ${facts.ungradedRate}% have no grade and ${facts.unscoredRate}% no score.`, evidence, segmentsChecked: segments, facts };
+    if (facts.ungradedRate < UNRATED_SHARE && facts.unscoredRate < UNRATED_SHARE) return { outcome: "pass", summary: said`Of ${plural(synced, "lead")} synced from Account Engagement in the window, ${facts.ungradedRate}% have no grade and ${facts.unscoredRate}% no score.`, evidence, segmentsChecked: segments, facts };
     return {
       outcome: "issue",
-      title: "Marketing isn't rating the leads it hands to sales",
-      summary: `Of ${plural(synced, "lead")} synced from Account Engagement in the window, ${ungraded} (${facts.ungradedRate}%) have no grade and ${unscored} (${facts.unscoredRate}%) no score. Without both, sales can't tell a good fit who's interested from a poor fit who opened one email, so every lead looks the same.`,
-      recommendation: "Grade prospects against your ideal customer profile, check that scoring rewards real buying signals, and hand leads to sales on both.",
+      title: said`Marketing isn't rating the leads it hands to sales`,
+      summary: said`Of ${plural(synced, "lead")} synced from Account Engagement in the window, ${ungraded} (${facts.ungradedRate}%) have no grade and ${unscored} (${facts.unscoredRate}%) no score. Without both, sales can't tell a good fit who's interested from a poor fit who opened one email, so every lead looks the same.`,
+      recommendation: said`Grade prospects against your ideal customer profile, check that scoring rewards real buying signals, and hand leads to sales on both.`,
       recommendationType: "change",
       severity: "medium",
       confidence: "high",
@@ -71,7 +77,7 @@ const scoringGrading: Rule = {
 };
 
 /** Why a check can't pass on open synced leads read only to the row limit (rule 5): the rest weren't seen. */
-const cutOff = (read: number): string => `The read of open synced leads stopped at its row limit, so we checked only the first ${read.toLocaleString("en-GB")} in order of Salesforce id, and can't say the rest are followed up.`;
+const cutOff = (read: number): Said => said`The read of open synced leads stopped at its row limit, so we checked only the first ${grouped(read)} in order of Salesforce id, and can't say the rest are followed up.`;
 
 /** Open synced leads, with the users who own them: or why they can't be read. */
 function openLeads(ctx: RuleContext): { rows: SyncedLeadRow[]; truncated: boolean; active: Set<string>; inactive: Set<string>; evidence: ReturnType<RuleContext["ev"]>[] } | NotMeasurableResult {
@@ -104,18 +110,18 @@ const unworkedHandovers: Rule = {
     const rate = pct(unworked.length, handed.length);
     const facts = { handed: handed.length, unworked: unworked.length, rate, days: UNWORKED_DAYS, staleDays: STALE_DAYS };
     const evidence = read.evidence;
-    if (handed.length === 0) return { outcome: "pass", summary: "No open lead synced from Account Engagement is owned by a salesperson.", evidence, segmentExemptReason: "There are no handed-over leads to segment.", facts };
+    if (handed.length === 0) return { outcome: "pass", summary: said`No open lead synced from Account Engagement is owned by a salesperson.`, evidence, segmentExemptReason: "There are no handed-over leads to segment.", facts };
     // Rule 4: a source nobody works can hide under well-worked ones, so each source is checked before it passes.
     const bySource = segmentRate(handed, isUnworked, { "lead source": (l) => l.LeadSource ?? "No source" }, { segmentLimit: UNWORKED_SHARE, minSegment: MIN_SOURCE });
     const segments = bySource.segmentsChecked;
     const worst = bySource.hotspots[0];
     if ((unworked.length === 0 || (rate < UNWORKED_SHARE && !worst)) && read.truncated) return { outcome: "not_measurable", reason: cutOff(read.rows.length), evidence };
-    if (unworked.length === 0 || (rate < UNWORKED_SHARE && !worst)) return { outcome: "pass", summary: `Of ${plural(handed.length, "open lead")} synced from Account Engagement and owned by a salesperson, ${unworked.length} made ${UNWORKED_DAYS} to ${STALE_DAYS} days ago ${unworked.length === 1 ? "has" : "have"} no activity logged (${rate}%).`, evidence, segmentsChecked: segments, facts };
+    if (unworked.length === 0 || (rate < UNWORKED_SHARE && !worst)) return { outcome: "pass", summary: said`Of ${plural(handed.length, "open lead")} synced from Account Engagement and owned by a salesperson, ${unworked.length} made ${UNWORKED_DAYS} to ${STALE_DAYS} days ago ${unworked.length === 1 ? "has" : "have"} no activity logged (${rate}%).`, evidence, segmentsChecked: segments, facts };
     return {
       outcome: "issue",
-      title: "Leads marketing hands over aren't being followed up",
-      summary: `Of ${plural(handed.length, "open lead")} synced from Account Engagement and owned by a salesperson, ${read.truncated ? "at least " : ""}${unworked.length} (${rate}%) made ${UNWORKED_DAYS} to ${STALE_DAYS} days ago have no activity logged: marketing handed them over, and nobody followed up while they were warm.${worst ? ` Worst by lead source: ${worst.key}, at ${worst.rate}% of ${worst.n}.` : ""}`,
-      recommendation: "Agree how fast sales follows up a marketing lead, make it part of pipeline reviews, and send leads nobody will work back to marketing to nurture.",
+      title: said`Leads marketing hands over aren't being followed up`,
+      summary: said`Of ${plural(handed.length, "open lead")} synced from Account Engagement and owned by a salesperson, ${read.truncated ? "at least " : ""}${unworked.length} (${rate}%) made ${UNWORKED_DAYS} to ${STALE_DAYS} days ago have no activity logged: marketing handed them over, and nobody followed up while they were warm.${worst ? said` Worst by lead source: ${org(worst.key)}, at ${worst.rate}% of ${worst.n}.` : ""}`,
+      recommendation: said`Agree how fast sales follows up a marketing lead, make it part of pipeline reviews, and send leads nobody will work back to marketing to nurture.`,
       recommendationType: "change",
       severity: rate >= 50 ? "high" : "medium",
       confidence: "high",
@@ -150,16 +156,19 @@ const unownedProspects: Rule = {
     const all = [...inQueue, ...leftBehind];
     const rate = pct(all.length, read.rows.length);
     const facts = { open: read.rows.length, inQueue: inQueue.length, inactiveOwner: leftBehind.length, rate, days: UNWORKED_DAYS };
-    if (read.rows.length === 0) return { outcome: "pass", summary: "No lead synced from Account Engagement is open.", evidence: read.evidence, segmentExemptReason: "There are no open synced leads to segment.", facts };
+    if (read.rows.length === 0) return { outcome: "pass", summary: said`No lead synced from Account Engagement is open.`, evidence: read.evidence, segmentExemptReason: "There are no open synced leads to segment.", facts };
     const segments = [{ dimension: "owner type", segments: 2 }];
     if (all.length === 0 && read.truncated) return { outcome: "not_measurable", reason: cutOff(read.rows.length), evidence: read.evidence };
-    if (all.length === 0) return { outcome: "pass", summary: `All ${plural(read.rows.length, "open lead")} synced from Account Engagement are owned by an active person, or have been in a queue for under ${UNWORKED_DAYS} days.`, evidence: read.evidence, segmentsChecked: segments, facts };
-    const parts = [inQueue.length ? `${inQueue.length} ${inQueue.length === 1 ? "has" : "have"} sat untouched in a queue for ${UNWORKED_DAYS} days or more` : "", leftBehind.length ? `${leftBehind.length} ${leftBehind.length === 1 ? "is" : "are"} owned by someone who has left` : ""].filter(Boolean);
+    if (all.length === 0) return { outcome: "pass", summary: said`All ${plural(read.rows.length, "open lead")} synced from Account Engagement are owned by an active person, or have been in a queue for under ${UNWORKED_DAYS} days.`, evidence: read.evidence, segmentsChecked: segments, facts };
+    const queued = inQueue.length ? said`${inQueue.length} ${inQueue.length === 1 ? "has" : "have"} sat untouched in a queue for ${UNWORKED_DAYS} days or more` : null;
+    const left = leftBehind.length ? said`${leftBehind.length} ${leftBehind.length === 1 ? "is" : "are"} owned by someone who has left` : null;
+    // One or both, as the parts joined with ", and " read before.
+    const parts: Said = queued && left ? said`${queued}, and ${left}` : (queued ?? left ?? said``);
     return {
       outcome: "issue",
-      title: "Some synced leads have nobody to work them",
-      summary: `Of ${plural(read.rows.length, "open lead")} synced from Account Engagement, ${parts.join(", and ")} (${rate}% in all). Nobody is going to call these people.`,
-      recommendation: "Assign each to an active salesperson or back to marketing, and check the assignment rules that left them there.",
+      title: said`Some synced leads have nobody to work them`,
+      summary: said`Of ${plural(read.rows.length, "open lead")} synced from Account Engagement, ${parts} (${rate}% in all). Nobody is going to call these people.`,
+      recommendation: said`Assign each to an active salesperson or back to marketing, and check the assignment rules that left them there.`,
       recommendationType: "change",
       severity: rate >= UNWORKED_SHARE ? "medium" : "low",
       confidence: "high",
@@ -188,16 +197,16 @@ const campaignInfluence: Rule = {
     if (influence.status !== "ok") return { outcome: "not_measurable", reason: `The campaign settings couldn't be read: ${influence.reason}`, evidence: [ctx.ev(influence.source, { count: null })] };
     const { customizable, fromAccountEngagement } = influence.data;
     const evidence = [ctx.ev(influence.source, { count: 1, note: "CampaignSettings: enableCampaignInfluence2 and enableB2bmaCampaignInfluence2" })];
-    if (customizable === null) return { outcome: "not_measurable", reason: "Salesforce didn't return whether Customizable Campaign Influence is on.", evidence };
+    if (customizable === null) return { outcome: "not_measurable", reason: said`Salesforce didn't return whether Customizable Campaign Influence is on.`, evidence };
     const exempt = "Campaign influence is one setting for the whole org.";
-    if (customizable && fromAccountEngagement !== false) return { outcome: "pass", summary: `Customizable Campaign Influence is on${fromAccountEngagement ? ", and Account Engagement's influence models can be used in Salesforce" : ""}.`, evidence, segmentExemptReason: exempt };
+    if (customizable && fromAccountEngagement !== false) return { outcome: "pass", summary: said`Customizable Campaign Influence is on${fromAccountEngagement ? ", and Account Engagement's influence models can be used in Salesforce" : ""}.`, evidence, segmentExemptReason: exempt };
     return {
       outcome: "issue",
-      title: customizable ? "Account Engagement's attribution can't be used in Salesforce" : "You can't see which campaigns helped win deals",
+      title: customizable ? said`Account Engagement's attribution can't be used in Salesforce` : said`You can't see which campaigns helped win deals`,
       summary: customizable
-        ? "Customizable Campaign Influence is on, but the org isn't set to use influence models from Account Engagement, so its attribution doesn't reach the opportunities sales and finance look at."
-        : "Customizable Campaign Influence is off, so Salesforce can't show which campaigns played a part in each opportunity, and marketing's contribution to pipeline can't be measured where sales and finance look.",
-      recommendation: customizable ? "Allow influence models from Account Engagement in the campaign settings, then choose the model you'll report on." : "Turn on Customizable Campaign Influence, and agree with sales and finance which influence model you'll report on.",
+        ? said`Customizable Campaign Influence is on, but the org isn't set to use influence models from Account Engagement, so its attribution doesn't reach the opportunities sales and finance look at.`
+        : said`Customizable Campaign Influence is off, so Salesforce can't show which campaigns played a part in each opportunity, and marketing's contribution to pipeline can't be measured where sales and finance look.`,
+      recommendation: customizable ? said`Allow influence models from Account Engagement in the campaign settings, then choose the model you'll report on.` : said`Turn on Customizable Campaign Influence, and agree with sales and finance which influence model you'll report on.`,
       recommendationType: "change",
       severity: customizable ? "low" : "medium",
       confidence: "high",

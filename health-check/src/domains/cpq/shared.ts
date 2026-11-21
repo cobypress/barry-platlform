@@ -21,4 +21,4 @@ export function discountOf(q: { SBQQ__ListAmount__c: number | null; SBQQ__NetAmo
   return Math.round(((list - q.SBQQ__NetAmount__c) / list) * 1000) / 10;
 }
 
-export const listed = (items: string[]): string => (items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`);
+// Lists in sentences use andList (src/engine/said-forms.ts), so they keep their marks (DECISIONS.md 657).

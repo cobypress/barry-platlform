@@ -8,12 +8,18 @@ import type { Value } from "../../schemas/index.ts";
 import { loadPipeline, unsplitLostReason, type Deal } from "../historic-pipeline/cohort.ts";
 import { groupBy, median } from "../historic-pipeline/metrics.ts";
 import type { DomainModule } from "../types.ts";
-import { discountOf, listed, presenceGap } from "./shared.ts";
+import { discountOf, presenceGap } from "./shared.ts";
+import { org, said, type Said } from "../../engine/org-words.ts";
+import { andList, grouped } from "../../engine/said-forms.ts";
 
 // How quotes are priced and handed on: discounts against list price and who
 // approved them, whether won quotes become orders, and whether contracts ending
 // soon have a renewal (DECISIONS.md 218 and 219). Read from records, so a
 // set-up review leaves this area to the full check.
+//
+// Every title, summary, recommendation and reason is written with `said`, and
+// every name the org chose with `org` (DECISIONS.md 655, 657). A reason passed
+// on from an extract quotes Salesforce and stays plain: unknown.
 
 const DOMAIN = "cpq_quoting";
 // Our judgements, each stated in the finding that uses it.
@@ -26,7 +32,7 @@ const MAX_LISTED = 4;
 type Quoted = { deal: Deal; quote: QuoteRow; discount: number };
 
 /** Why a check can't use a read cut off at its row limit. */
-const cutOff = (what: string, read: number): string => `The read of ${what} stopped at its row limit after ${read.toLocaleString("en-GB")}, so the rest weren't read and we can't match every won deal to its ${what === "quotes" ? "quote" : "approval"}.`;
+const cutOff = (what: "quotes" | "approvals", read: number): Said => said`The read of ${what} stopped at its row limit after ${grouped(read)}, so the rest weren't read and we can't match every won deal to its ${what === "quotes" ? "quote" : "approval"}.`;
 
 /** Closed deals in the window with a primary quote that has a list price, each with its discount. */
 function quotedDeals(ctx: RuleContext): { rows: Quoted[]; multiCurrency: boolean; evidence: ReturnType<RuleContext["ev"]>[] } | { reason: string; evidence: ReturnType<RuleContext["ev"]>[] } {
@@ -68,7 +74,7 @@ const discountLeakage: Rule = {
     const { rows, evidence } = read;
     const won = rows.filter((r) => r.deal.category === "won");
     const sample = ctx.calibration.minSample;
-    if (won.length < sample) return { outcome: "not_measurable", reason: `Only ${plural(won.length, "won deal")} in the window ${won.length === 1 ? "has" : "have"} a primary quote with a list price, and we need ${sample} to compare discounts fairly.`, evidence };
+    if (won.length < sample) return { outcome: "not_measurable", reason: said`Only ${plural(won.length, "won deal")} in the window ${won.length === 1 ? "has" : "have"} a primary quote with a list price, and we need ${sample} to compare discounts fairly.`, evidence };
     const norm = Math.round(median(won.map((r) => r.discount)) * 10) / 10;
     const overall = winRate(rows);
     const rep = (r: Quoted): string => ctx.userLabel(r.deal.OwnerId);
@@ -83,10 +89,10 @@ const discountLeakage: Rule = {
     const byOwner = groupBy(rows, (r) => r.deal.OwnerId);
     const teams = [...byTeam.keys()].sort();
     const owners = [...byOwner.keys()].sort().map((owner) => ({ owner, key: rep(byOwner.get(owner)![0]!) }));
-    type Candidate = { dimension: string; key: string; members: Quoted[]; peers: () => Quoted[]; against: string };
+    type Candidate = { dimension: "team" | "rep"; key: string; members: Quoted[]; peers: () => Quoted[]; against: "the other teams" | "their team-mates" };
     const candidates: Candidate[] = [
-      ...teams.map((team) => ({ dimension: "team", key: team, members: byTeam.get(team)!, peers: () => rows.filter((r) => r.deal.team !== team), against: "the other teams" })),
-      ...owners.map(({ owner, key }) => {
+      ...teams.map((team): Candidate => ({ dimension: "team", key: team, members: byTeam.get(team)!, peers: () => rows.filter((r) => r.deal.team !== team), against: "the other teams" })),
+      ...owners.map(({ owner, key }): Candidate => {
         const members = byOwner.get(owner)!;
         const team = members[0]!.deal.team;
         return { dimension: "rep", key, members, peers: () => byTeam.get(team)!.filter((r) => r.deal.OwnerId !== owner), against: "their team-mates" };
@@ -105,12 +111,12 @@ const discountLeakage: Rule = {
     const deeper = rows.filter((r) => r.discount > norm);
     const shallower = rows.filter((r) => r.discount <= norm);
     const compared = deeper.length >= sample && shallower.length >= sample;
-    const depth = compared ? ` Across all ${plural(rows.length, "closed deal")} with a quote, those discounted more than the median won ${winRate(deeper)}% of the time and those discounted less ${winRate(shallower)}%, though that mixes teams selling into different markets.` : "";
+    const depth = compared ? said`Across all ${plural(rows.length, "closed deal")} with a quote, those discounted more than the median won ${winRate(deeper)}% of the time and those discounted less ${winRate(shallower)}%, though that mixes teams selling into different markets.` : null;
     const segments = [{ dimension: "team", segments: new Set(rows.map((r) => r.deal.team)).size }, { dimension: "rep", segments: new Set(rows.map((r) => r.deal.OwnerId)).size }];
     const facts: Record<string, number> = { wonQuoted: won.length, closedQuoted: rows.length, medianDiscount: norm, winRate: overall, gap: DISCOUNT_GAP, sample, ...(compared ? { deeperWinRate: winRate(deeper), shallowerWinRate: winRate(shallower) } : {}) };
     flagged.forEach((f, i) => Object.assign(facts, { [`segment${i + 1}Median`]: f.median, [`segment${i + 1}PeerMedian`]: f.peerMedian, [`segment${i + 1}WinRate`]: f.rate, [`segment${i + 1}PeerWinRate`]: f.peerRate }));
-    const opening = `On ${plural(won.length, "won deal")} with a quote, the median discount off list price is ${norm}%, and ${overall}% of closed deals with a quote were won.`;
-    if (flagged.length === 0) return { outcome: "pass", summary: `${opening} No team discounts ${DISCOUNT_GAP} points deeper than the other teams, and no rep deeper than their team-mates, without winning more often.${depth}`, evidence, segmentsChecked: segments, facts };
+    const opening = said`On ${plural(won.length, "won deal")} with a quote, the median discount off list price is ${norm}%, and ${overall}% of closed deals with a quote were won.`;
+    if (flagged.length === 0) return { outcome: "pass", summary: said`${opening} No team discounts ${DISCOUNT_GAP} points deeper than the other teams, and no rep deeper than their team-mates, without winning more often.${depth ? said` ${depth}` : ""}`, evidence, segmentsChecked: segments, facts };
     // Each won deal once, at the most it went past its peers' median.
     const excess = new Map<string, { row: Quoted; points: number }>();
     for (const f of flagged) {
@@ -141,9 +147,9 @@ const discountLeakage: Rule = {
     return {
       outcome: "issue",
       // Singular when one is named, so the title matches the summary (night 3 reading pass).
-      title: flagged.length === 1 ? `${flagged[0]!.dimension === "rep" ? "One rep discounts" : "One team discounts"} deeper than peers without winning more` : "Some teams and reps discount deeper without winning more",
-      summary: `${opening} ${listed(flagged.slice(0, MAX_LISTED).map((f) => `${f.key} discounts ${f.median}% against ${f.peerMedian}% for ${f.against}, and wins ${f.rate}% of closed deals against ${f.peerRate}%`))}${flagged.length > MAX_LISTED ? `, and ${flagged.length - MAX_LISTED} more` : ""}. That's at least ${DISCOUNT_GAP} points deeper, without winning more often.`,
-      recommendation: "Agree a discount policy with limits by deal size, send anything deeper through approval, and review these deals against it in pipeline meetings.",
+      title: flagged.length === 1 ? said`${flagged[0]!.dimension === "rep" ? "One rep discounts" : "One team discounts"} deeper than peers without winning more` : said`Some teams and reps discount deeper without winning more`,
+      summary: said`${opening} ${andList(flagged.slice(0, MAX_LISTED).map((f) => said`${org(f.key)} discounts ${f.median}% against ${f.peerMedian}% for ${f.against}, and wins ${f.rate}% of closed deals against ${f.peerRate}%`))}${flagged.length > MAX_LISTED ? said`, and ${flagged.length - MAX_LISTED} more` : ""}. That's at least ${DISCOUNT_GAP} points deeper, without winning more often.`,
+      recommendation: said`Agree a discount policy with limits by deal size, send anything deeper through approval, and review these deals against it in pipeline meetings.`,
       recommendationType: "change",
       severity: "high",
       // Discount can follow deal size or product mix, which the quote total doesn't show.
@@ -151,7 +157,7 @@ const discountLeakage: Rule = {
       // The org-wide comparison mixes teams selling into different markets, so it
       // would undercut the named comparison in the summary. It stays in the working
       // (DECISIONS.md 403).
-      evidence: depth ? evidence.map((e, i) => (i === 1 ? { ...e, note: [e.note, depth.trim()].filter(Boolean).join(". ") } : e)) : evidence,
+      evidence: depth ? evidence.map((e, i) => (i === 1 ? { ...e, note: [e.note, depth].filter(Boolean).join(". ") } : e)) : evidence,
       value,
       effort: { size: "M" },
       owner: "Head of sales",
@@ -174,7 +180,7 @@ const discountApprovals: Rule = {
     const { presence } = ctx.data(cpqSetupExtractor);
     const { quotes, approvals } = ctx.data(cpqQuotesExtractor);
     if (quotes.status !== "ok") return { outcome: "not_measurable", reason: `Quotes couldn't be read: ${quotes.reason}`, evidence: [ctx.ev(quotes.source, { count: null })] };
-    if (presence.status === "installed" && presence.advancedApprovals) return { outcome: "not_measurable", reason: "Advanced Approvals is installed, and we don't read its approvals yet, so we can't say which discounts were approved.", evidence: [ctx.ev(quotes.source, { count: quotes.data.length })] };
+    if (presence.status === "installed" && presence.advancedApprovals) return { outcome: "not_measurable", reason: said`Advanced Approvals is installed, and we don't read its approvals yet, so we can't say which discounts were approved.`, evidence: [ctx.ev(quotes.source, { count: quotes.data.length })] };
     if (approvals.status !== "ok") return { outcome: "not_measurable", reason: `Approvals couldn't be read: ${approvals.reason}`, evidence: [ctx.ev(approvals.source, { count: null })] };
     // An approval past the cut-off would make its quote look unapproved.
     const cut = quotes.truncated ? ["quotes", quotes] as const : approvals.truncated ? ["approvals", approvals] as const : null;
@@ -190,19 +196,19 @@ const discountApprovals: Rule = {
     });
     const without = deep.filter(({ q }) => !approved.has(q.Id.slice(0, 15)));
     // A cut-off read can't show a quote had no approval: it may be among the rows not read (DECISIONS.md 325).
-    if (without.length > 0 && approvals.truncated) return { outcome: "not_measurable", reason: `The approvals read stopped at ${approvals.data.length.toLocaleString("en-GB")} rows, so a quote with no approval among them may have one we didn't read.`, evidence: [ctx.ev(approvals.source, { count: approvals.data.length, dateRange: ctx.window, note: "Approval processes started in the window, cut off" })] };
+    if (without.length > 0 && approvals.truncated) return { outcome: "not_measurable", reason: said`The approvals read stopped at ${grouped(approvals.data.length)} rows, so a quote with no approval among them may have one we didn't read.`, evidence: [ctx.ev(approvals.source, { count: approvals.data.length, dateRange: ctx.window, note: "Approval processes started in the window, cut off" })] };
     const anyApproval = quotes.data.some((q) => approved.has(q.Id.slice(0, 15)));
     const evidence = [ctx.ev(quotes.source, { count: deep.length, dateRange: ctx.window, note: `Primary quotes on won deals discounted ${DEEP_DISCOUNT}% or more off list price`, exclusions: ["Quotes on deals still open or lost, whose approval may not have been needed or reached yet"] }), ctx.ev(approvals.source, { count: approvals.data.length, dateRange: ctx.window, note: "Approval processes started in the window, matched to quotes by id" })];
     const share = pct(without.length, deep.length);
     const facts = { deep: deep.length, without: without.length, share, threshold: DEEP_DISCOUNT };
-    if (deep.length === 0) return { outcome: "pass", summary: `No primary quote on a won deal in the window was discounted ${DEEP_DISCOUNT}% or more off list price.`, evidence, segmentExemptReason: "There are no deep discounts to segment.", facts };
+    if (deep.length === 0) return { outcome: "pass", summary: said`No primary quote on a won deal in the window was discounted ${DEEP_DISCOUNT}% or more off list price.`, evidence, segmentExemptReason: "There are no deep discounts to segment.", facts };
     const segments = [{ dimension: "approval", segments: 2 }];
-    if (without.length === 0) return { outcome: "pass", summary: `All ${plural(deep.length, "primary quote")} on won deals discounted ${DEEP_DISCOUNT}% or more went through an approval process.`, evidence, segmentsChecked: segments, facts };
+    if (without.length === 0) return { outcome: "pass", summary: said`All ${plural(deep.length, "primary quote")} on won deals discounted ${DEEP_DISCOUNT}% or more went through an approval process.`, evidence, segmentsChecked: segments, facts };
     return {
       outcome: "issue",
-      title: "Deep discounts aren't going through approval",
-      summary: `Of ${plural(deep.length, "primary quote")} on won deals in the window discounted ${DEEP_DISCOUNT}% or more off list price, ${without.length} (${share}%) never went through an approval process in Salesforce.${anyApproval ? "" : " No quote went through one at all."} We use ${DEEP_DISCOUNT}% as the line, which is our judgement rather than your policy.`,
-      recommendation: "Set the discount levels that need sign-off, build them into an approval process on the quote, and check who agreed the ones listed.",
+      title: said`Deep discounts aren't going through approval`,
+      summary: said`Of ${plural(deep.length, "primary quote")} on won deals in the window discounted ${DEEP_DISCOUNT}% or more off list price, ${without.length} (${share}%) never went through an approval process in Salesforce.${anyApproval ? "" : " No quote went through one at all."} We use ${DEEP_DISCOUNT}% as the line, which is our judgement rather than your policy.`,
+      recommendation: said`Set the discount levels that need sign-off, build them into an approval process on the quote, and check who agreed the ones listed.`,
       recommendationType: "change",
       severity: share >= 50 ? "medium" : "low",
       // Approval can happen outside Salesforce, by email or in a meeting.
@@ -236,16 +242,16 @@ const quoteToOrder: Rule = {
     const ordered = won.filter((r) => r.quote.SBQQ__Ordered__c === true);
     const unordered = won.filter((r) => r.quote.SBQQ__Ordered__c !== true);
     const facts = { won: won.length, ordered: ordered.length, unordered: unordered.length, share: pct(unordered.length, won.length) };
-    if (won.length === 0) return { outcome: "pass", summary: "No deal with a primary quote was won in the window.", evidence: read.evidence, segmentExemptReason: "There are no won deals to segment.", facts };
+    if (won.length === 0) return { outcome: "pass", summary: said`No deal with a primary quote was won in the window.`, evidence: read.evidence, segmentExemptReason: "There are no won deals to segment.", facts };
     // An org that never orders closes some other way, and that's not ours to judge.
-    if (ordered.length === 0) return { outcome: "not_measurable", reason: `None of the ${plural(won.length, "won deal")} with a primary quote was ordered in Salesforce, so orders don't look to be part of how you close, and we can't judge the handover.`, evidence: read.evidence };
+    if (ordered.length === 0) return { outcome: "not_measurable", reason: said`None of the ${plural(won.length, "won deal")} with a primary quote was ordered in Salesforce, so orders don't look to be part of how you close, and we can't judge the handover.`, evidence: read.evidence };
     const segments = [{ dimension: "team", segments: new Set(won.map((r) => r.deal.team)).size }];
-    if (unordered.length === 0) return { outcome: "pass", summary: `All ${plural(won.length, "won deal")} with a primary quote were ordered.`, evidence: read.evidence, segmentsChecked: segments, facts };
+    if (unordered.length === 0) return { outcome: "pass", summary: said`All ${plural(won.length, "won deal")} with a primary quote were ordered.`, evidence: read.evidence, segmentsChecked: segments, facts };
     return {
       outcome: "issue",
-      title: "Some won quotes never became orders",
-      summary: `Of ${plural(won.length, "won deal")} with a primary quote, ${unordered.length} (${facts.share}%) ${unordered.length === 1 ? "hasn't" : "haven't"} been ordered, while ${ordered.length} ${ordered.length === 1 ? "has" : "have"}. If orders are how you bill or deliver, these may not have reached finance or the team that delivers them.`,
-      recommendation: "Order each of these quotes, or record why the deal doesn't need an order, and make ordering part of closing a deal.",
+      title: said`Some won quotes never became orders`,
+      summary: said`Of ${plural(won.length, "won deal")} with a primary quote, ${unordered.length} (${facts.share}%) ${unordered.length === 1 ? "hasn't" : "haven't"} been ordered, while ${ordered.length} ${ordered.length === 1 ? "has" : "have"}. If orders are how you bill or deliver, these may not have reached finance or the team that delivers them.`,
+      recommendation: said`Order each of these quotes, or record why the deal doesn't need an order, and make ordering part of closing a deal.`,
       recommendationType: "change",
       severity: "medium",
       confidence: "medium",
@@ -273,14 +279,14 @@ const renewalsNotStarted: Rule = {
     const pending = contracts.data.filter((c) => !c.SBQQ__RenewalOpportunity__c).sort((a, b) => a.EndDate.localeCompare(b.EndDate));
     const evidence = [ctx.ev(contracts.source, { count: contracts.data.length, note: `Activated contracts ending in the next ${RENEWAL_DAYS} days` })];
     const facts = { contracts: contracts.data.length, pending: pending.length, days: RENEWAL_DAYS };
-    if (contracts.data.length === 0) return { outcome: "pass", summary: `No activated contract ends in the next ${RENEWAL_DAYS} days.`, evidence, segmentExemptReason: "There are no contracts to segment.", facts };
+    if (contracts.data.length === 0) return { outcome: "pass", summary: said`No activated contract ends in the next ${RENEWAL_DAYS} days.`, evidence, segmentExemptReason: "There are no contracts to segment.", facts };
     const segments = [{ dimension: "owner", segments: new Set(contracts.data.map((c) => c.OwnerId)).size }];
-    if (pending.length === 0) return { outcome: "pass", summary: `All ${plural(contracts.data.length, "activated contract")} ending in the next ${RENEWAL_DAYS} days have a renewal opportunity.`, evidence, segmentsChecked: segments, facts };
+    if (pending.length === 0) return { outcome: "pass", summary: said`All ${plural(contracts.data.length, "activated contract")} ending in the next ${RENEWAL_DAYS} days have a renewal opportunity.`, evidence, segmentsChecked: segments, facts };
     return {
       outcome: "issue",
-      title: "Contracts are ending with no renewal opportunity",
-      summary: `${pending.length} of ${plural(contracts.data.length, "activated contract")} ending in the next ${RENEWAL_DAYS} days ${pending.length === 1 ? "has" : "have"} no renewal opportunity, so ${pending.length === 1 ? "it isn't" : "they aren't"} in the pipeline or the forecast. The first ends on ${pending[0]!.EndDate}.`,
-      recommendation: "Create each renewal opportunity now, give it an owner, and have CPQ create renewals automatically from here on.",
+      title: said`Contracts are ending with no renewal opportunity`,
+      summary: said`${pending.length} of ${plural(contracts.data.length, "activated contract")} ending in the next ${RENEWAL_DAYS} days ${pending.length === 1 ? "has" : "have"} no renewal opportunity, so ${pending.length === 1 ? "it isn't" : "they aren't"} in the pipeline or the forecast. The first ends on ${org(pending[0]!.EndDate)}.`,
+      recommendation: said`Create each renewal opportunity now, give it an owner, and have CPQ create renewals automatically from here on.`,
       recommendationType: "change",
       severity: "high",
       confidence: "high",

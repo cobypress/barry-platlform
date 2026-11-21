@@ -10,13 +10,19 @@ import { labelsOf } from "../labels.ts";
 import { labelsExtractor } from "../../extract/labels.ts";
 import { isObjectId, objectResolver } from "../object-names.ts";
 import { WHERE } from "../where.ts";
-import { joinSaid, org, said } from "../../engine/org-words.ts";
+import { joinSaid, org, said, type Said } from "../../engine/org-words.ts";
+import { andList, grouped } from "../../engine/said-forms.ts";
 
 // Technical health (roadmap 3.2): how sound the code is, read from set-up only.
 // Coverage, API versions and trigger counts moved here from automation with
 // their ids, so a re-check still lines them up (DECISIONS.md 169). The new
 // checks read the code as text while the extractor has it (src/extract/apex-scan.ts),
 // so they say so and sit at medium confidence.
+//
+// Every title, summary, recommendation and reason is written with `said`, and
+// every name the org chose with `org`, so the digest can say which words are the
+// org's (DECISIONS.md 655, 657). A reason passed on from an extract quotes
+// Salesforce and stays plain: unknown.
 
 const DOMAIN = "technical_health";
 const COVERAGE_MINIMUM = 75;
@@ -57,6 +63,8 @@ const oldApiVersions: Rule = {
     if (triggers.status !== "ok") return { outcome: "not_measurable", reason: apexGap("triggers", triggers.reason), evidence: [ctx.ev(triggers.source, { count: null })] };
     const newest = Math.max(0, ...classes.data.map((c) => c.ApiVersion), ...triggers.data.map((t) => t.ApiVersion), ...result.bundle.flows.map((f) => f.apiVersion));
     const floor = newest - API_VERSIONS_BEHIND;
+    // Our own names for the kinds, in the order the summary lists them.
+    const KINDS = ["Apex classes", "Apex triggers", "Active flows"] as const;
     const old = {
       "Apex classes": classes.data.filter((c) => c.ApiVersion < floor).length,
       "Apex triggers": triggers.data.filter((t) => t.ApiVersion < floor).length,
@@ -69,12 +77,12 @@ const oldApiVersions: Rule = {
       ctx.ev({ kind: "metadata", path: "flows/*.flow" }, { count: old["Active flows"], note: `Older than version ${floor}` }),
     ];
     const segments = [{ dimension: "component type", segments: 3 }];
-    if (total === 0) return { outcome: "pass", summary: `Nothing is more than ${API_VERSIONS_BEHIND} versions behind the newest in this org.`, evidence, segmentsChecked: segments };
+    if (total === 0) return { outcome: "pass", summary: said`Nothing is more than ${API_VERSIONS_BEHIND} versions behind the newest in this org.`, evidence, segmentsChecked: segments };
     return {
       outcome: "issue",
-      title: "Some automation is on very old API versions",
-      summary: `Components on an API version older than ${floor}, more than ${API_VERSIONS_BEHIND} versions behind the newest used here: ${Object.entries(old).filter(([, n]) => n > 0).map(([k, n]) => `${k}: ${n}`).join(", ")}. Salesforce retires old versions over time.`,
-      recommendation: "Bring these components forward as part of your next release cycle.",
+      title: said`Some automation is on very old API versions`,
+      summary: said`Components on an API version older than ${floor}, more than ${API_VERSIONS_BEHIND} versions behind the newest used here: ${joinSaid(KINDS.filter((k) => old[k] > 0).map((k) => said`${k}: ${old[k]}`), ", ")}. Salesforce retires old versions over time.`,
+      recommendation: said`Bring these components forward as part of your next release cycle.`,
       recommendationType: "change",
       severity: "medium",
       confidence: "high",
@@ -98,20 +106,20 @@ const apexCoverage: Rule = {
     const { classes, orgCoverage, classCoverage } = ctx.data(apexExtractor);
     if (classes.status !== "ok") return { outcome: "not_measurable", reason: apexGap("classes", classes.reason), evidence: [ctx.ev(classes.source, { count: null })] };
     if (classes.data.length === 0) {
-      return { outcome: "pass", summary: "This org has no Apex of its own.", evidence: [ctx.ev(classes.source, { count: 0 })], segmentExemptReason: "There's no code to segment." };
+      return { outcome: "pass", summary: said`This org has no Apex of its own.`, evidence: [ctx.ev(classes.source, { count: 0 })], segmentExemptReason: "There's no code to segment." };
     }
     // A coverage read that failed isn't an org with no figure. A read-only
     // connection reads the classes but not their coverage (DECISIONS.md 73).
     if (orgCoverage.status !== "ok") return { outcome: "not_measurable", reason: apexGap("coverage", orgCoverage.reason), evidence: [ctx.ev(orgCoverage.source, { count: null })] };
     const percent = orgCoverage.data[0]?.PercentCovered;
     if (percent === null || percent === undefined) {
-      return { outcome: "not_measurable", reason: "The org holds no coverage figure, which usually means tests haven't been run recently. We don't run tests, because that would change the org.", evidence: [ctx.ev(orgCoverage.source, { count: null })] };
+      return { outcome: "not_measurable", reason: said`The org holds no coverage figure, which usually means tests haven't been run recently. We don't run tests, because that would change the org.`, evidence: [ctx.ev(orgCoverage.source, { count: null })] };
     }
     // Production refuses Apex below 75% at deploy, so an org with Apex can't really
     // be at 0%: the stored figures were cleared or only part-run. A real org stored
     // coverage for 1 class of 108 and 0% overall.
     if (percent === 0) {
-      return { outcome: "not_measurable", reason: "The org stores 0% coverage overall, which means the stored figures were cleared or only some tests have run since, rather than untested code. We don't run tests, because that would change the org.", evidence: [ctx.ev(orgCoverage.source, { count: 1 })] };
+      return { outcome: "not_measurable", reason: said`The org stores 0% coverage overall, which means the stored figures were cleared or only some tests have run since, rather than untested code. We don't run tests, because that would change the org.`, evidence: [ctx.ev(orgCoverage.source, { count: 1 })] };
     }
     if (classCoverage.status !== "ok") {
       return { outcome: "not_measurable", reason: `The org-wide figure is ${percent}%, but coverage by class couldn't be read, so we can't say the whole is healthy: ${classCoverage.reason}`, evidence: [ctx.ev(classCoverage.source, { count: null })] };
@@ -121,16 +129,16 @@ const apexCoverage: Rule = {
     const evidence = [ctx.ev(orgCoverage.source, { count: 1 }), ctx.ev(classCoverage.source, { count: measured.length, exclusions: [`Classes under ${MIN_CLASS_LINES} lines`] })];
     const segments = [{ dimension: "class", segments: measured.length }];
     if (percent >= COVERAGE_MINIMUM && weak.length === 0) {
-      return { outcome: "pass", summary: `Org-wide coverage is ${percent}%, and no class is below ${CLASS_COVERAGE_FLOOR}%.`, evidence, segmentsChecked: segments, facts: { percent } };
+      return { outcome: "pass", summary: said`Org-wide coverage is ${percent}%, and no class is below ${CLASS_COVERAGE_FLOOR}%.`, evidence, segmentsChecked: segments, facts: { percent } };
     }
     return {
       outcome: "issue",
-      title: percent < COVERAGE_MINIMUM ? "Apex coverage is below what a deployment needs" : "A healthy coverage total is hiding weak classes",
+      title: percent < COVERAGE_MINIMUM ? said`Apex coverage is below what a deployment needs` : said`A healthy coverage total is hiding weak classes`,
       summary:
         percent < COVERAGE_MINIMUM
-          ? `Org-wide coverage is ${percent}%, below the ${COVERAGE_MINIMUM}% Salesforce requires to deploy to production.`
-          : `Org-wide coverage is ${percent}%, but of ${plural(measured.length, "class", "classes")} we can measure, ${weak.length} ${weak.length === 1 ? "is" : "are"} below ${CLASS_COVERAGE_FLOOR}%.`,
-      recommendation: "Add meaningful tests to the weakest classes first.",
+          ? said`Org-wide coverage is ${percent}%, below the ${COVERAGE_MINIMUM}% Salesforce requires to deploy to production.`
+          : said`Org-wide coverage is ${percent}%, but of ${plural(measured.length, "class", "classes")} we can measure, ${weak.length} ${weak.length === 1 ? "is" : "are"} below ${CLASS_COVERAGE_FLOOR}%.`,
+      recommendation: said`Add meaningful tests to the weakest classes first.`,
       recommendationType: "change",
       severity: percent < COVERAGE_MINIMUM ? "high" : "low",
       confidence: "high",
@@ -216,24 +224,22 @@ const testQuality: Rule = {
     const tests = active.filter((c) => c.isTest && c.scan !== null && c.scan.testMethods > 0);
     const hidden = active.filter((c) => c.scan === null).length;
     const evidence = [ctx.ev(classes.source, { count: tests.length, exclusions: ["Test classes with no test methods, such as data factories", "Installed packages' classes", ...hiddenNote(hidden)], note: "Read from the code: test methods, assertions and SeeAllData" })];
-    if (active.length === 0) return { outcome: "pass", summary: "This org has no Apex of its own.", evidence, segmentExemptReason: "There's no code to segment." };
-    if (tests.length === 0) return { outcome: "not_measurable", reason: "We found no test methods we could read, so there's nothing to judge. The coverage check covers whether the code is tested.", evidence };
+    if (active.length === 0) return { outcome: "pass", summary: said`This org has no Apex of its own.`, evidence, segmentExemptReason: "There's no code to segment." };
+    if (tests.length === 0) return { outcome: "not_measurable", reason: said`We found no test methods we could read, so there's nothing to judge. The coverage check covers whether the code is tested.`, evidence };
     const silent = tests.filter((c) => c.scan!.asserts === 0);
     const seeAll = tests.filter((c) => c.scan!.seeAllData);
     const segments = [{ dimension: "test class", segments: tests.length }];
     const facts = { testClasses: tests.length, withoutAssertions: silent.length, seeAllData: seeAll.length };
     if (silent.length === 0 && seeAll.length === 0) {
-      return { outcome: "pass", summary: `All ${plural(tests.length, "test class", "test classes")} check their results, and none reads the org's own data.`, evidence, segmentsChecked: segments, facts };
+      return { outcome: "pass", summary: said`All ${plural(tests.length, "test class", "test classes")} check their results, and none reads the org's own data.`, evidence, segmentsChecked: segments, facts };
     }
-    const parts = [
-      silent.length ? `${silent.length} of ${plural(tests.length, "test class", "test classes")} ${silent.length === 1 ? "has" : "have"} no assertion, so ${silent.length === 1 ? "it raises" : "they raise"} coverage without proving the code does what it should.` : "",
-      seeAll.length ? `${plural(seeAll.length, "test class", "test classes")} ${seeAll.length === 1 ? "reads" : "read"} the org's live data (SeeAllData=true), so ${seeAll.length === 1 ? "it" : "they"} can pass or fail depending on what's in the org.` : "",
-    ];
+    const silentPart = silent.length ? said`${silent.length} of ${plural(tests.length, "test class", "test classes")} ${silent.length === 1 ? "has" : "have"} no assertion, so ${silent.length === 1 ? "it raises" : "they raise"} coverage without proving the code does what it should.` : null;
+    const seeAllPart = seeAll.length ? said`${plural(seeAll.length, "test class", "test classes")} ${seeAll.length === 1 ? "reads" : "read"} the org's live data (SeeAllData=true), so ${seeAll.length === 1 ? "it" : "they"} can pass or fail depending on what's in the org.` : null;
     return {
       outcome: "issue",
-      title: "Some Apex tests run code without checking what it does",
-      summary: parts.filter(Boolean).join(" "),
-      recommendation: "Add assertions that check each test's outcome, and have tests create the data they need rather than read the org's.",
+      title: said`Some Apex tests run code without checking what it does`,
+      summary: silentPart && seeAllPart ? joinSaid([silentPart, seeAllPart], " ") : (silentPart ?? seeAllPart ?? said``),
+      recommendation: said`Add assertions that check each test's outcome, and have tests create the data they need rather than read the org's.`,
       recommendationType: "change",
       severity: pct(silent.length, tests.length) >= SILENT_TEST_SHARE ? "medium" : "low",
       // Read from the text: a helper that asserts under another name would be missed.
@@ -269,13 +275,13 @@ const limitRisk: Rule = {
     ];
     const segments = [{ dimension: "component type", segments: 2 }, { dimension: "class or trigger", segments: code.length }];
     const facts = { risky: risky.length, code: code.length, queries, saves, triggers: inTriggers, soqlLimit: SOQL_LIMIT, dmlLimit: DML_LIMIT };
-    if (code.length === 0) return { outcome: "pass", summary: "There's no active Apex of the org's own to read.", evidence, segmentExemptReason: "There's no code to segment." };
-    if (risky.length === 0) return { outcome: "pass", summary: `None of the ${plural(code.length, "active class or trigger", "active classes and triggers")} we read runs a query or a save inside a loop.`, evidence, segmentsChecked: segments, facts };
+    if (code.length === 0) return { outcome: "pass", summary: said`There's no active Apex of the org's own to read.`, evidence, segmentExemptReason: "There's no code to segment." };
+    if (risky.length === 0) return { outcome: "pass", summary: said`None of the ${plural(code.length, "active class or trigger", "active classes and triggers")} we read runs a query or a save inside a loop.`, evidence, segmentsChecked: segments, facts };
     return {
       outcome: "issue",
-      title: "Some code queries or saves records inside loops",
-      summary: `${risky.length} of ${plural(code.length, "active class or trigger", "active classes and triggers")} ${risky.length === 1 ? "runs" : "run"} a query or a save inside a loop: ${plural(queries, "query", "queries")} and ${plural(saves, "save")} in all${inTriggers ? `, ${inTriggers === 1 ? "one of them a trigger" : `${inTriggers} of them triggers`}` : ""}. Salesforce allows ${SOQL_LIMIT} queries and ${DML_LIMIT} saves in one transaction, so code like this fails once enough records arrive together, as they do in a data load or an integration's batch.`,
-      recommendation: "Move each query and save out of the loop: gather what the loop needs first, query once, and save the records together.",
+      title: said`Some code queries or saves records inside loops`,
+      summary: said`${risky.length} of ${plural(code.length, "active class or trigger", "active classes and triggers")} ${risky.length === 1 ? "runs" : "run"} a query or a save inside a loop: ${plural(queries, "query", "queries")} and ${plural(saves, "save")} in all${inTriggers ? said`, ${inTriggers === 1 ? "one of them a trigger" : said`${inTriggers} of them triggers`}` : ""}. Salesforce allows ${SOQL_LIMIT} queries and ${DML_LIMIT} saves in one transaction, so code like this fails once enough records arrive together, as they do in a data load or an integration's batch.`,
+      recommendation: said`Move each query and save out of the loop: gather what the loop needs first, query once, and save the records together.`,
       recommendationType: "change",
       // A trigger runs for up to 200 records at a time, so its loops are where the limit is met.
       severity: inTriggers ? "high" : "medium",
@@ -303,22 +309,22 @@ const codeSize: Rule = {
     if (triggers.status !== "ok") return { outcome: "not_measurable", reason: apexGap("triggers", triggers.reason), evidence: [ctx.ev(triggers.source, { count: null })] };
     // Only a class marked @isTest is left out. One we can't read is counted, so the figure errs high.
     const counted = [...classes.data.filter((c) => !c.scan?.testClass), ...triggers.data].filter((c) => c.Status === "Active");
-    if (counted.some((c) => typeof c.LengthWithoutComments !== "number")) return { outcome: "not_measurable", reason: "The size of some code wasn't read.", evidence: [ctx.ev(triggers.source, { count: null })] };
+    if (counted.some((c) => typeof c.LengthWithoutComments !== "number")) return { outcome: "not_measurable", reason: said`The size of some code wasn't read.`, evidence: [ctx.ev(triggers.source, { count: null })] };
     const used = counted.reduce((sum, c) => sum + c.LengthWithoutComments!, 0);
     const share = pct(used, APEX_CODE_LIMIT);
     const evidence = [
       ctx.ev(classes.source, { count: counted.length, exclusions: ["Classes marked @isTest, which don't count against the limit", "Inactive code", "Installed packages' code", "Comments"], note: `LengthWithoutComments, against Salesforce's limit of ${APEX_CODE_LIMIT.toLocaleString("en-GB")} characters` }),
     ];
     const facts = { used, limit: APEX_CODE_LIMIT, share };
-    const text = `Your own Apex is ${used.toLocaleString("en-GB")} characters without comments, ${share}% of the ${APEX_CODE_LIMIT.toLocaleString("en-GB")} Salesforce allows an org.`;
+    const text = said`Your own Apex is ${grouped(used)} characters without comments, ${share}% of the ${grouped(APEX_CODE_LIMIT)} Salesforce allows an org.`;
     // The limit is one figure for the org, so the only cut is classes against triggers.
     const segments = [{ dimension: "component type", segments: 2, note: "The limit applies to the org as a whole" }];
     if (share < CODE_SIZE_WARNING) return { outcome: "pass", summary: text, evidence, segmentsChecked: segments, facts };
     return {
       outcome: "issue",
-      title: "Your Apex is close to Salesforce's size limit",
-      summary: `${text} At the limit, no new code can be saved until some is removed.`,
-      recommendation: "Remove classes nobody calls, mark test classes and test helpers @isTest so they don't count, and plan larger features with the limit in mind.",
+      title: said`Your Apex is close to Salesforce's size limit`,
+      summary: said`${text} At the limit, no new code can be saved until some is removed.`,
+      recommendation: said`Remove classes nobody calls, mark test classes and test helpers @isTest so they don't count, and plan larger features with the limit in mind.`,
       recommendationType: "change",
       severity: share >= CODE_SIZE_HIGH ? "high" : "medium",
       confidence: "high",
@@ -355,19 +361,21 @@ const classicLeftovers: Rule = {
     const facts = { javascriptButtons: javascript.length, ...(scontrols.status === "ok" ? { scontrols: controls.length } : {}), classicPages: classicPages.length, pages: pages.data.length };
     if (javascript.length + controls.length + classicPages.length === 0) {
       if (scontrols.status !== "ok") return { outcome: "not_measurable", reason: `There are no JavaScript buttons or Classic-only pages, but s-controls couldn't be read: ${scontrols.reason}`, evidence };
-      return { outcome: "pass", summary: `No JavaScript buttons or s-controls, and all ${plural(pages.data.length, "Visualforce page")} ${pages.data.length === 1 ? "is" : "are"} marked available in Lightning Experience.`, evidence, segmentsChecked: segments, facts };
+      return { outcome: "pass", summary: said`No JavaScript buttons or s-controls, and all ${plural(pages.data.length, "Visualforce page")} ${pages.data.length === 1 ? "is" : "are"} marked available in Lightning Experience.`, evidence, segmentsChecked: segments, facts };
     }
-    const parts = [
-      javascript.length ? plural(javascript.length, "JavaScript button or link", "JavaScript buttons and links") : "",
-      controls.length ? plural(controls.length, "s-control") : "",
-      classicPages.length ? `${plural(classicPages.length, "Visualforce page")} not marked available in Lightning Experience` : "",
-    ].filter(Boolean);
+    const parts: Said[] = [
+      ...(javascript.length ? [said`${plural(javascript.length, "JavaScript button or link", "JavaScript buttons and links")}`] : []),
+      ...(controls.length ? [said`${plural(controls.length, "s-control")}`] : []),
+      ...(classicPages.length ? [said`${plural(classicPages.length, "Visualforce page")} not marked available in Lightning Experience`] : []),
+    ];
     const breaks = javascript.length + controls.length > 0;
+    const told = said`${andList(parts)}.${breaks ? " Lightning Experience doesn't run JavaScript buttons or s-controls, so anyone who works in it can't use them." : ""}`;
     return {
       outcome: "issue",
-      title: "Parts of the org still depend on Salesforce Classic",
-      summary: `${parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`}.${breaks ? " Lightning Experience doesn't run JavaScript buttons or s-controls, so anyone who works in it can't use them." : ""}${scontrols.status !== "ok" ? ` S-controls couldn't be read: ${scontrols.reason}` : ""}`,
-      recommendation: "Replace JavaScript buttons and s-controls with quick actions, flows or Lightning components, and check whether each Classic-only Visualforce page is still used before moving or retiring it.",
+      title: said`Parts of the org still depend on Salesforce Classic`,
+      // Salesforce's reason the s-controls weren't read is passed on, so that summary is plain: unknown.
+      summary: scontrols.status !== "ok" ? `${told} S-controls couldn't be read: ${scontrols.reason}` : told,
+      recommendation: said`Replace JavaScript buttons and s-controls with quick actions, flows or Lightning components, and check whether each Classic-only Visualforce page is still used before moving or retiring it.`,
       recommendationType: "change",
       severity: breaks ? "medium" : "low",
       confidence: "high",
@@ -395,7 +403,8 @@ const classicLeftovers: Rule = {
 // health check's in src/progress/compare.ts (DECISIONS.md 500).
 const STORAGE_WARNING = 80;
 const STORAGE_HIGH = 95;
-const STORAGE: Record<string, string> = { DataStorageMB: "data storage", FileStorageMB: "file storage" };
+// Our own names for each kind, and the same capitalised to open a sentence.
+const STORAGE = [["DataStorageMB", "data storage", "Data storage"], ["FileStorageMB", "file storage", "File storage"]] as const;
 const LARGEST_OBJECTS = 5;
 
 const storageUse: Rule = {
@@ -409,36 +418,35 @@ const storageUse: Rule = {
   evaluate(ctx): RuleResult | RuleResult[] {
     const limits = ctx.data(apiLimitsExtractor);
     if (limits.status !== "ok") return { outcome: "not_measurable", reason: `The org's limits couldn't be read: ${limits.reason}`, evidence: [ctx.ev(limits.source, { count: null })] };
-    const read = Object.entries(STORAGE).flatMap(([key, label]) => {
+    const read = STORAGE.flatMap(([key, label, opening]) => {
       const limit = limits.data[key];
       if (!limit || limit.Max <= 0) return [];
       const used = Math.max(0, limit.Max - limit.Remaining);
-      return [{ key, label, used, max: limit.Max, share: pct(used, limit.Max) }];
+      return [{ key, label, opening, used, max: limit.Max, share: pct(used, limit.Max) }];
     });
     const counts = ctx.data(recordCountsExtractor);
     const evidence = [ctx.ev(limits.source, { count: read.length, note: "In MB, as Salesforce reported them when the connection was made" })];
-    if (read.length === 0) return { outcome: "not_measurable", reason: "The org reported no storage allowance.", evidence };
+    if (read.length === 0) return { outcome: "not_measurable", reason: said`The org reported no storage allowance.`, evidence };
     const largest = counts.status === "ok" ? [...counts.data].sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)).slice(0, LARGEST_OBJECTS).filter((o) => o.count > 0) : [];
     if (counts.status === "ok") evidence.push(ctx.ev(counts.source, { count: counts.data.length, note: "Record counts by object, for the largest" }));
     const segments = [{ dimension: "storage kind", segments: read.length }];
     const facts = Object.fromEntries(read.flatMap((r) => [[`${r.key}Used`, r.used], [`${r.key}Max`, r.max], [`${r.key}Share`, r.share]]));
     // Past the allowance, "10,500 of 10,240 MB" would read as a part larger than its whole, which the number check refuses.
-    const amount = (r: (typeof read)[number]): string => (r.used > r.max ? `${r.used.toLocaleString("en-GB")} MB, over the ${r.max.toLocaleString("en-GB")} MB allowance` : `${r.used.toLocaleString("en-GB")} of ${r.max.toLocaleString("en-GB")} MB`);
-    const text = (r: (typeof read)[number]): string => `${r.label} is ${r.share}% used (${amount(r)})`;
-    const list = (items: string[]): string => (items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`);
-    const opening = list(read.map(text));
-    const sentence = `${opening.charAt(0).toUpperCase()}${opening.slice(1)}.`;
+    const amount = (r: (typeof read)[number]): Said => (r.used > r.max ? said`${grouped(r.used)} MB, over the ${grouped(r.max)} MB allowance` : said`${grouped(r.used)} of ${grouped(r.max)} MB`);
+    // The first kind opens the sentence, so it takes its capitalised name.
+    const text = (r: (typeof read)[number], first: boolean): Said => said`${first ? r.opening : r.label} is ${r.share}% used (${amount(r)})`;
+    const sentence = said`${andList(read.map((r, i) => text(r, i === 0)))}.`;
     const over = read.filter((r) => r.share >= STORAGE_WARNING);
     if (over.length === 0) return { outcome: "pass", summary: sentence, evidence, segmentsChecked: segments, facts };
     // Once a kind is past its allowance, "close to" and "before you reach the limit" are untrue (DECISIONS.md 504).
     const past = read.some((r) => r.used > r.max);
     return {
       outcome: "issue",
-      title: past ? "Storage is past the allowance" : "Storage is close to the allowance",
-      summary: `${sentence} Past the allowance, Salesforce can stop new records or files being saved until space is freed or more is bought.${largest.length ? ` The objects with the most records: ${largest.map((o) => `${labelsOf(ctx).object(o.name)} (${o.count.toLocaleString("en-GB")})`).join(", ")}.` : ""}`,
+      title: past ? said`Storage is past the allowance` : said`Storage is close to the allowance`,
+      summary: said`${sentence} Past the allowance, Salesforce can stop new records or files being saved until space is freed or more is bought.${largest.length ? said` The objects with the most records: ${joinSaid(largest.map((o) => said`${org(labelsOf(ctx).object(o.name))} (${grouped(o.count)})`), ", ")}.` : ""}`,
       recommendation: past
-        ? "Archive or delete what you no longer need, starting with the largest objects and old files, and arrange extra storage now, because you are past the allowance."
-        : "Archive or delete what you no longer need, starting with the largest objects and old files, and plan any extra storage before you reach the limit.",
+        ? said`Archive or delete what you no longer need, starting with the largest objects and old files, and arrange extra storage now, because you are past the allowance.`
+        : said`Archive or delete what you no longer need, starting with the largest objects and old files, and plan any extra storage before you reach the limit.`,
       recommendationType: "change",
       severity: over.some((r) => r.share >= STORAGE_HIGH) ? "high" : "medium",
       confidence: "high",
