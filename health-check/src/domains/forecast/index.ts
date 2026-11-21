@@ -11,6 +11,12 @@ import { fiscalStartOf, pushesOf } from "../historic-pipeline/metrics.ts";
 import { localDay, todayIn, zoneNote, zoneOf } from "../time-zone.ts";
 import type { Evidence, Metric } from "../../schemas/index.ts";
 import type { DomainModule } from "../types.ts";
+import { said, type Said } from "../../engine/org-words.ts";
+import { grouped } from "../../engine/said-forms.ts";
+
+// Every title, summary, recommendation and reason is written with `said`, so
+// the digest can say which words are the org's (DECISIONS.md 655, 657). A
+// reason passed on from an extract quotes Salesforce and stays plain: unknown.
 
 const DOMAIN = "forecast";
 const COMMIT = "Commit";
@@ -28,7 +34,7 @@ type Ctx = Omit<RuleContext, "metrics">;
 type InUse = NotMeasurableResult & { inUse: false };
 
 /** Why a figure can't come from a forecast read cut off at its row limit. */
-const cutOff = (read: number): string => `The forecast read stopped at its row limit after ${read.toLocaleString("en-GB")} rows, so the rest of this period's forecast wasn't read.`;
+const cutOff = (read: number): Said => said`The forecast read stopped at its row limit after ${grouped(read)} rows, so the rest of this period's forecast wasn't read.`;
 
 /** Forecasting counts as in use only if the org has an active revenue type and forecast rows for today. */
 function forecastInUse(ctx: Ctx): { inUse: true; typeId: string; items: ForecastItemRow[] } | InUse {
@@ -39,11 +45,12 @@ function forecastInUse(ctx: Ctx): { inUse: true; typeId: string; items: Forecast
   const type = revenueForecastType(types.data);
   // Only an org whose forecast types were read, with no revenue one active, is said not to use it (DECISIONS.md 627):
   // the other ways here can't tell "not in use" from "can't be read by this user", so they keep saying both.
-  if ("switchedOff" in type) return { inUse: false, outcome: "not_measurable", reason: "No revenue forecast type is active, so Forecasting isn't in use for revenue, and we don't report a forecast figure.", evidence: [ctx.ev(types.source, { count: types.data.length })] };
+  if ("switchedOff" in type) return { inUse: false, outcome: "not_measurable", reason: said`No revenue forecast type is active, so Forecasting isn't in use for revenue, and we don't report a forecast figure.`, evidence: [ctx.ev(types.source, { count: types.data.length })] };
   if ("reason" in type) return off(type.reason, [ctx.ev(types.source, { count: types.data.length })]);
   if (items.status !== "ok") return off(items.reason, [ctx.ev(items.source, { count: null })]);
   const rows = items.data.filter((i) => i.ForecastingTypeId === type.id);
-  if (rows.length === 0) return off("Salesforce holds no forecast rows for this period.", [ctx.ev(items.source, { count: 0 })]);
+  // The same sentence off() would make, written with said, as it quotes no extract.
+  if (rows.length === 0) return { inUse: false, outcome: "not_measurable", reason: said`Forecasting isn't in use, or can't be read, so we don't report a forecast figure. Salesforce holds no forecast rows for this period.`, evidence: [ctx.ev(items.source, { count: 0 })] };
   return { inUse: true, typeId: type.id, items: rows };
 }
 
@@ -58,10 +65,10 @@ const inUseRule: Rule = {
     const { items } = ctx.data(forecastExtractor);
     const rows = state.items;
     // In use is true of any rows at all, so a read cut off at its limit still shows it; the counts then say "at least".
-    const atLeast = items.status === "ok" && items.truncated ? "at least " : "";
+    const cut = items.status === "ok" && items.truncated;
     return {
       outcome: "pass",
-      summary: `Collaborative Forecasts is in use: ${atLeast}${rows.length} forecast rows for ${atLeast}${plural(new Set(rows.map((r) => r.OwnerId)).size, "person", "people")} in the current period.${atLeast ? " The read stopped at its row limit." : ""}`,
+      summary: said`Collaborative Forecasts is in use: ${cut ? "at least " : ""}${rows.length} forecast rows for ${cut ? "at least " : ""}${plural(new Set(rows.map((r) => r.OwnerId)).size, "person", "people")} in the current period.${cut ? " The read stopped at its row limit." : ""}`,
       evidence: [ctx.ev(items.source, { count: rows.length })],
       segmentsChecked: [{ dimension: "forecast owner", segments: new Set(rows.map((r) => r.OwnerId)).size }, { dimension: "forecast category", segments: new Set(rows.map((r) => r.ForecastCategoryName ?? "None")).size }],
       facts: { rows: rows.length },
@@ -83,7 +90,7 @@ const accuracyRule: Rule = {
     const { items } = ctx.data(forecastExtractor);
     return {
       outcome: "not_measurable",
-      reason: "Forecast rows show today's position, not what was called at the time, so accuracy can't be measured from them. It needs a snapshot taken each period.",
+      reason: said`Forecast rows show today's position, not what was called at the time, so accuracy can't be measured from them. It needs a snapshot taken each period.`,
       evidence: [ctx.ev(items.source, { count: state.items.length })],
     };
   },
@@ -104,20 +111,20 @@ const adjustmentsRule: Rule = {
     if (items.status === "ok" && items.truncated) return { outcome: "not_measurable", reason: cutOff(items.data.length), evidence: [ctx.ev(items.source, { count: items.data.length })] };
     const rows = state.items.filter((r) => r.ForecastCategoryName === COMMIT && r.AmountWithoutAdjustments != null && r.ForecastAmount !== null);
     const evidence = [ctx.ev(items.source, { count: rows.length, exclusions: ["Forecast categories other than Commit", "Rows with no amount"] })];
-    if (rows.length === 0) return { outcome: "not_measurable", reason: "There are no Commit forecast rows with amounts to compare.", evidence };
+    if (rows.length === 0) return { outcome: "not_measurable", reason: said`There are no Commit forecast rows with amounts to compare.`, evidence };
     const before = rows.reduce((sum, r) => sum + r.AmountWithoutAdjustments!, 0);
     const moved = rows.reduce((sum, r) => sum + Math.abs(r.ForecastAmount! - r.AmountWithoutAdjustments!), 0);
-    if (before === 0) return { outcome: "not_measurable", reason: "Commit forecast rows are all zero before adjustment.", evidence };
+    if (before === 0) return { outcome: "not_measurable", reason: said`Commit forecast rows are all zero before adjustment.`, evidence };
     const share = pct(moved, before);
     const adjusted = rows.filter((r) => r.HasAdjustment && r.ForecastAmount !== r.AmountWithoutAdjustments);
     const segments = [{ dimension: "forecast owner", segments: new Set(rows.map((r) => r.OwnerId)).size }];
     const facts = { share, adjustedOwners: new Set(adjusted.map((r) => r.OwnerId)).size, owners: new Set(rows.map((r) => r.OwnerId)).size };
-    if (share <= ADJUSTMENT_LIMIT) return { outcome: "pass", summary: `Hand adjustments move the Commit forecast by ${share}%, at or under our working limit of ${ADJUSTMENT_LIMIT}%.`, evidence, segmentsChecked: segments, facts };
+    if (share <= ADJUSTMENT_LIMIT) return { outcome: "pass", summary: said`Hand adjustments move the Commit forecast by ${share}%, at or under our working limit of ${ADJUSTMENT_LIMIT}%.`, evidence, segmentsChecked: segments, facts };
     return {
       outcome: "issue",
-      title: "Much of the Commit forecast comes from hand adjustments",
-      summary: `Hand adjustments move the Commit forecast by ${share}% of its unadjusted amount, across ${plural(facts.adjustedOwners, "person", "people")}. The difference is judgement that isn't backed by a deal in Salesforce.`,
-      recommendation: "Ask for a reason behind each large adjustment, and check whether the deals should be recorded differently.",
+      title: said`Much of the Commit forecast comes from hand adjustments`,
+      summary: said`Hand adjustments move the Commit forecast by ${share}% of its unadjusted amount, across ${plural(facts.adjustedOwners, "person", "people")}. The difference is judgement that isn't backed by a deal in Salesforce.`,
+      recommendation: said`Ask for a reason behind each large adjustment, and check whether the deals should be recorded differently.`,
       recommendationType: "investigate",
       severity: "medium",
       confidence: "high",
@@ -154,16 +161,16 @@ const quotaGaps: Rule = {
     const latest = periods.data.map((p) => p.EndDate).sort().at(-1);
     const holders = new Set(quotas.data.filter((q) => q.ForecastingTypeId === state.typeId && q.QuotaAmount !== null && earliest !== undefined && latest !== undefined && q.StartDate >= earliest && q.StartDate <= latest).map((q) => q.QuotaOwnerId));
     const evidence = [ctx.ev(quotas.source, { count: holders.size, exclusions: ["Inactive deal owners, which the data quality checks cover"] })];
-    if (owners.length === 0) return { outcome: "pass", summary: "No active user owns an open deal.", evidence, segmentExemptReason: "There are no owners to segment." };
+    if (owners.length === 0) return { outcome: "pass", summary: said`No active user owns an open deal.`, evidence, segmentExemptReason: "There are no owners to segment." };
     const result = segmentRate(owners, (id) => !holders.has(id), { team: (id) => active.get(id)!.UserRole?.Name ?? "No role" }, { segmentLimit: 50, minSegment: MIN_TEAM });
     if (result.rate <= QUOTA_GAP_LIMIT && result.hotspots.length === 0) {
-      return { outcome: "pass", summary: `Deal owners with no quota this period: ${result.hits} of ${result.n} (${result.rate}%).`, evidence, segmentsChecked: result.segmentsChecked, facts: { hits: result.hits, n: result.n, rate: result.rate } };
+      return { outcome: "pass", summary: said`Deal owners with no quota this period: ${result.hits} of ${result.n} (${result.rate}%).`, evidence, segmentsChecked: result.segmentsChecked, facts: { hits: result.hits, n: result.n, rate: result.rate } };
     }
     return {
       outcome: "issue",
-      title: "Some deal owners have no quota",
-      summary: `Active users who own open deals but have no quota this period: ${result.hits} of ${result.n} (${result.rate}%). Their deals count towards the forecast with nothing to measure them against.`,
-      recommendation: "Load a quota for each person who carries a number, or move their deals to someone who does.",
+      title: said`Some deal owners have no quota`,
+      summary: said`Active users who own open deals but have no quota this period: ${result.hits} of ${result.n} (${result.rate}%). Their deals count towards the forecast with nothing to measure them against.`,
+      recommendation: said`Load a quota for each person who carries a number, or move their deals to someone who does.`,
       recommendationType: "change",
       severity: "medium",
       confidence: "high",
@@ -188,7 +195,7 @@ function commitDeals(ctx: RuleContext, open: Deal[]): { commit: Deal[]; evidence
   const committed = new Set(facts.data.filter((f) => f.ForecastCategoryName === COMMIT).map((f) => f.OpportunityId));
   const evidence = [ctx.ev(facts.source, { count: committed.size, note: "Deals in the Commit forecast category this period" })];
   // Admins can rename forecast categories, so finding none can't be read as "nothing at risk".
-  if (committed.size === 0) return { reason: "No deal is in a forecast category called Commit this period, so we can't tell a clean Commit from a renamed one.", evidence };
+  if (committed.size === 0) return { reason: said`No deal is in a forecast category called Commit this period, so we can't tell a clean Commit from a renamed one.`, evidence };
   return { commit: open.filter((d) => committed.has(d.Id)), evidence };
 }
 
@@ -201,7 +208,7 @@ function closedSinceTheRun(ctx: Ctx, open: Deal[]): { closed: Deal[]; source: So
   const { closedSinceTheRun: read } = ctx.data(forecastExtractor);
   if (read.status !== "ok") return { reason: `Deals closed since this run's date couldn't be read: ${read.reason}`, evidence: [ctx.ev(read.source, { count: null })] };
   // A part of the list would quietly miss a deal closed since (DECISIONS.md 467).
-  if (read.truncated) return { reason: `The read of deals closed since this run's date stopped at its row limit after ${read.data.length.toLocaleString("en-GB")} rows, so the rest weren't read.`, evidence: [ctx.ev(read.source, { count: read.data.length })] };
+  if (read.truncated) return { reason: said`The read of deals closed since this run's date stopped at its row limit after ${grouped(read.data.length)} rows, so the rest weren't read.`, evidence: [ctx.ev(read.source, { count: read.data.length })] };
   const ids = new Set(read.data);
   // The list goes by Salesforce's flag, not the calibration's open. A deal it
   // already flagged closed at the run's date can't have closed since: an edit
@@ -224,7 +231,7 @@ function commitScope(ctx: RuleContext, open: Deal[], isHit: (d: Deal) => boolean
     isHit,
     evidence: result.evidence,
     exclusions: [`${plural(left, "deal")} closed since this run's date, whose forecast category then can't be read`],
-    leftOut: `${left === 1 ? "One deal open at this run's date and closed since is" : `${left} deals open at this run's date and closed since are`} left out, as we can't read the forecast category ${left === 1 ? "it" : "they"} had then.`,
+    leftOut: said`${left === 1 ? "One deal open at this run's date and closed since is" : said`${left} deals open at this run's date and closed since are`} left out, as we can't read the forecast category ${left === 1 ? "it" : "they"} had then.`,
   };
 }
 
@@ -235,16 +242,16 @@ const commitAtRisk = shareRule({
   totalLimit: AT_RISK_LIMIT,
   segmentLimit: AT_RISK_SEGMENT_LIMIT,
   severity: "high",
-  scopeLabel: "deals in Commit",
+  scopeLabel: said`deals in Commit`,
   scope(ctx, _data, open) {
     const today = todayIn(ctx);
     const quietDay = localDay(daysBefore(ctx.now, QUIET_DAYS), zoneOf(ctx));
     const fiscal = fiscalStartOf(ctx);
     return commitScope(ctx, open, (d) => d.CloseDate < today || d.LastActivityDate === null || d.LastActivityDate < quietDay || pushesOf(d, fiscal).length >= REPEAT_PUSHES);
   },
-  issueTitle: "Your Commit forecast includes deals showing warning signs",
-  sentence: (hits, n, rate) => `Deals in Commit that are past their close date, quiet for ${QUIET_DAYS} days, or pushed ${REPEAT_PUSHES} or more times: ${hits} of ${n} (${rate}%).`,
-  recommendation: "Review each one before the next forecast call, and move it out of Commit unless there's a dated reason to keep it.",
+  issueTitle: said`Your Commit forecast includes deals showing warning signs`,
+  sentence: (hits, n, rate) => said`Deals in Commit that are past their close date, quiet for ${QUIET_DAYS} days, or pushed ${REPEAT_PUSHES} or more times: ${hits} of ${n} (${rate}%).`,
+  recommendation: said`Review each one before the next forecast call, and move it out of Commit unless there's a dated reason to keep it.`,
   owner: "Head of sales",
   sized: true,
 });
@@ -256,16 +263,16 @@ const earlyStageCommits = shareRule({
   totalLimit: 10,
   segmentLimit: 25,
   severity: "medium",
-  scopeLabel: "deals in Commit",
+  scopeLabel: said`deals in Commit`,
   scope(ctx, data, open) {
     // Which stages are early is the sales order's to say, and Salesforce's flags don't give one (DECISIONS.md 598).
     if (data.unmapped.unordered.length > 0) return { reason: unorderedReason(data.unmapped.unordered) };
     const early = new Set(data.stages.openStages.slice(0, EARLY_STAGES));
     return commitScope(ctx, open, (d) => early.has(d.StageName));
   },
-  issueTitle: "Early-stage deals are being counted as Commit",
-  sentence: (hits, n, rate) => `Deals in Commit that are still in the first ${EARLY_STAGES} open stages: ${hits} of ${n} (${rate}%).`,
-  recommendation: "Check whether these are real commitments. If they are, the stage is out of date. If not, take them out of Commit.",
+  issueTitle: said`Early-stage deals are being counted as Commit`,
+  sentence: (hits, n, rate) => said`Deals in Commit that are still in the first ${EARLY_STAGES} open stages: ${hits} of ${n} (${rate}%).`,
+  recommendation: said`Check whether these are real commitments. If they are, the stage is out of date. If not, take them out of Commit.`,
   owner: "Sales operations",
   sized: true,
 });

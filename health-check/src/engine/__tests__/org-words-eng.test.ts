@@ -22,7 +22,8 @@ const SIGNED_OFF: string[] = [
   "src/engine/rule.ts: `${n} ${n === 1 ? one : many}`",
   // A number the engine formats: digits, commas and a point.
   "src/engine/said-forms.ts: n.toLocaleString(\"en-GB\")",
-
+  // The quarter's first day, which quarterBounds works out from the run's date and the fiscal start month, a number.
+  "src/domains/current-pipeline/index.ts: quarter.from",
 ];
 
 const ROOT = join(import.meta.dirname, "../../..");

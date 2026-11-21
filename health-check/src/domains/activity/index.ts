@@ -11,6 +11,16 @@ import { localDay, todayIn, zoneNote, zoneOf } from "../time-zone.ts";
 import type { Evidence, Metric, SeriesPoint } from "../../schemas/index.ts";
 import type { DomainModule } from "../types.ts";
 import { loadActivity, type ActivityData, type Touch } from "./load.ts";
+import { org, said } from "../../engine/org-words.ts";
+
+/** Our name for a segment's dimension: one of the rules' own keys, or, to be safe, the org's words (DECISIONS.md 657). */
+const DIMENSION_WORDS = ["team", "rep", "task type"] as const;
+const dimensionWords = (dimension: string) => DIMENSION_WORDS.find((k) => k === dimension) ?? org(dimension);
+
+// Every title, summary, recommendation and reason is written with `said`, and
+// every value the org chose (a role, a person's token, a task type) with `org`,
+// so the digest can say which words are the org's (DECISIONS.md 655, 657). A
+// reason passed on from a read or the pipeline's loader stays plain: unknown.
 
 const DOMAIN = "activity";
 const RECENT_MONTHS = 3;
@@ -78,16 +88,16 @@ const eventLinkCollapse: Rule = {
     if ("outcome" in data) return data;
     const users = ctx.data(usersExtractor);
     const months = fullMonths(data.from, todayIn(ctx));
-    if (months.length < RECENT_MONTHS + PRIOR_MONTHS) return { outcome: "not_measurable", reason: `${plural(months.length, "whole month")} of events is too few to compare ${RECENT_MONTHS} recent months with the ${PRIOR_MONTHS} before them.`, evidence: data.evidence };
+    if (months.length < RECENT_MONTHS + PRIOR_MONTHS) return { outcome: "not_measurable", reason: said`${plural(months.length, "whole month")} of events is too few to compare ${RECENT_MONTHS} recent months with the ${PRIOR_MONTHS} before them.`, evidence: data.evidence };
     const recent = new Set(months.slice(-RECENT_MONTHS));
     const prior = new Set(months.slice(-(RECENT_MONTHS + PRIOR_MONTHS), -RECENT_MONTHS));
     const overall = compare(data.events, prior, recent);
     const { minSample } = ctx.calibration;
     const evidence = [stamped(ctx, data, overall.prior.total + overall.recent.total, `Linked means the event has a related record. Compares ${[...prior][0]} to ${[...prior].at(-1)} with ${[...recent][0]} to ${[...recent].at(-1)}`)];
-    if (overall.prior.total < minSample) return { outcome: "not_measurable", reason: `${overall.prior.total} events in the comparison months is below the calibrated minimum of ${minSample}.`, evidence };
+    if (overall.prior.total < minSample) return { outcome: "not_measurable", reason: said`${overall.prior.total} events in the comparison months is below the calibrated minimum of ${minSample}.`, evidence };
     // A real org went from 3 linked events to 1, which halves the share and means nothing.
     if (overall.prior.linked < MIN_GROUP_EVENTS) {
-      return { outcome: "not_measurable", reason: `Only ${plural(overall.prior.linked, "event")} in the earlier months ${overall.prior.linked === 1 ? "was" : "were"} linked to a record, too few to call a fall.`, evidence };
+      return { outcome: "not_measurable", reason: said`Only ${plural(overall.prior.linked, "event")} in the earlier months ${overall.prior.linked === 1 ? "was" : "were"} linked to a record, too few to call a fall.`, evidence };
     }
 
     const roles = new Map(users.status === "ok" ? users.data.map((u) => [u.Id, u.UserRole?.Name ?? "No role"]) : []);
@@ -104,18 +114,19 @@ const eventLinkCollapse: Rule = {
     const byMonth = Object.fromEntries(months.map((month) => [`linkedShare ${month}`, compare(data.events, new Set([month]), new Set([month])).prior.share]));
     const facts = { priorShare: overall.prior.share, recentShare: overall.recent.share, priorEvents: overall.prior.total, recentEvents: overall.recent.total, ...byMonth };
     if (!overall.collapsed && hotspots.length === 0) {
-      return { outcome: "pass", summary: `Events linked to a record were ${overall.prior.share}% before and ${overall.recent.share}% in the last ${RECENT_MONTHS} whole months, with no team or rep falling by half.`, evidence, segmentsChecked, facts };
+      return { outcome: "pass", summary: said`Events linked to a record were ${overall.prior.share}% before and ${overall.recent.share}% in the last ${RECENT_MONTHS} whole months, with no team or rep falling by half.`, evidence, segmentsChecked, facts };
     }
-    const volume = overall.volumeFell ? "Total events fell as well, so check whether events are syncing at all." : "Total events held steady, so a monthly total won't show this: events are still arriving, but they aren't reaching the records they belong to.";
+    const volume = overall.volumeFell ? said`Total events fell as well, so check whether events are syncing at all.` : said`Total events held steady, so a monthly total won't show this: events are still arriving, but they aren't reaching the records they belong to.`;
     const capture = ctx.data(activityCaptureExtractor);
     const manualStepIds = capture.status === "ok" && capture.data.length === 0 ? [] : [ctx.manual("eac-advanced-sync").step.id];
     return {
       outcome: "issue",
-      title: overall.collapsed ? "Events have stopped being linked to your deals" : "Some teams' events have stopped being linked to deals",
+      title: overall.collapsed ? said`Events have stopped being linked to your deals` : said`Some teams' events have stopped being linked to deals`,
+      // The dimension is one of our own two names; the team's role name or the rep's token is the org's.
       summary: overall.collapsed
-        ? `Events linked to a record fell from ${overall.prior.share}% to ${overall.recent.share}% in the last ${RECENT_MONTHS} whole months. ${volume}`
-        : `The overall linked share looks fine at ${overall.recent.share}%, but it has fallen by at least half for ${hotspots[0]!.dimension} ${hotspots[0]!.key}, from ${hotspots[0]!.comparison.prior.share}% to ${hotspots[0]!.comparison.recent.share}%.`,
-      recommendation: "Find what changed when the drop began. Check Einstein Activity Capture's Relate Synced Events setting, and any change to how calendars sync.",
+        ? said`Events linked to a record fell from ${overall.prior.share}% to ${overall.recent.share}% in the last ${RECENT_MONTHS} whole months. ${volume}`
+        : said`The overall linked share looks fine at ${overall.recent.share}%, but it has fallen by at least half for ${dimensionWords(hotspots[0]!.dimension)} ${org(hotspots[0]!.key)}, from ${hotspots[0]!.comparison.prior.share}% to ${hotspots[0]!.comparison.recent.share}%.`,
+      recommendation: said`Find what changed when the drop began. Check Einstein Activity Capture's Relate Synced Events setting, and any change to how calendars sync.`,
       recommendationType: "investigate",
       severity: "high",
       confidence: "high",
@@ -155,7 +166,7 @@ const dealsWithoutActivity = shareRule({
   totalLimit: 25,
   segmentLimit: 50,
   severity: "medium",
-  scopeLabel: "won and lost deals created in the last year",
+  scopeLabel: said`won and lost deals created in the last year`,
   scope(ctx, pipeline) {
     // Won and lost, with no decision left out (DECISIONS.md 600).
     const unsplit = unsplitLostReason(pipeline);
@@ -165,10 +176,10 @@ const dealsWithoutActivity = shareRule({
     const touches = touchesByDeal(data);
     return { deals: closedThisYear(ctx, pipeline.deals, data.from), isHit: (d) => !touches.has(d.Id), exclusions: [...data.exclusions, "Deals created before the readable year"], evidence: data.evidence.slice(0, 1) };
   },
-  issueTitle: "Deals are closing with nothing logged against them",
+  issueTitle: said`Deals are closing with nothing logged against them`,
   sentence: (hits, n, rate) =>
-    `Won and lost deals with no task, event or email against them: ${hits} of ${n} (${rate}%). This usually reflects process rather than effort: when logging isn't expected and nothing captures email or meetings automatically, the work happens but Salesforce never sees it. The cost is that nobody can look back at how a deal was won or why it was lost.`,
-  recommendation: "Agree the few moments worth recording on a deal, such as the first meeting and the proposal going out, or turn on automatic capture.",
+    said`Won and lost deals with no task, event or email against them: ${hits} of ${n} (${rate}%). This usually reflects process rather than effort: when logging isn't expected and nothing captures email or meetings automatically, the work happens but Salesforce never sees it. The cost is that nobody can look back at how a deal was won or why it was lost.`,
+  recommendation: said`Agree the few moments worth recording on a deal, such as the first meeting and the proposal going out, or turn on automatic capture.`,
   owner: "Head of sales",
   sized: false,
 });
@@ -192,18 +203,18 @@ const wonAgainstLost: Rule = {
     const lost = deals.filter((d) => d.category === "lost");
     const { minSample } = ctx.calibration;
     const evidence = [stamped(ctx, data, deals.length, "Won and lost deals created in the readable year")];
-    if (won.length < minSample || lost.length < minSample) return { outcome: "not_measurable", reason: `${won.length} won and ${lost.length} lost deals is below the calibrated minimum of ${minSample} each.`, evidence };
+    if (won.length < minSample || lost.length < minSample) return { outcome: "not_measurable", reason: said`${won.length} won and ${lost.length} lost deals is below the calibrated minimum of ${minSample} each.`, evidence };
     const wonMedian = median(won.map(count));
     const lostMedian = median(lost.map(count));
     const teams = new Set(deals.map((d) => d.team)).size;
     const segments = [{ dimension: "outcome", segments: 2 }, { dimension: "team", segments: teams }];
     const facts = { wonMedian, lostMedian, won: won.length, lost: lost.length };
-    if (wonMedian > lostMedian) return { outcome: "pass", summary: `Won deals have a median of ${wonMedian} logged activities against ${lostMedian} on lost deals.`, evidence, segmentsChecked: segments, facts };
+    if (wonMedian > lostMedian) return { outcome: "pass", summary: said`Won deals have a median of ${wonMedian} logged activities against ${lostMedian} on lost deals.`, evidence, segmentsChecked: segments, facts };
     return {
       outcome: "issue",
-      title: "Lost deals get as much logged effort as won ones",
-      summary: `Lost deals have a median of ${lostMedian} logged activities against ${wonMedian} on won deals, so effort isn't going where deals are won, or isn't being logged evenly.`,
-      recommendation: "Look at when deals are qualified out. If they're dropped late, that's where the time goes.",
+      title: said`Lost deals get as much logged effort as won ones`,
+      summary: said`Lost deals have a median of ${lostMedian} logged activities against ${wonMedian} on won deals, so effort isn't going where deals are won, or isn't being logged evenly.`,
+      recommendation: said`Look at when deals are qualified out. If they're dropped late, that's where the time goes.`,
       recommendationType: "investigate",
       severity: "low",
       confidence: "medium",
@@ -234,7 +245,7 @@ const repActivity: Rule = {
     const openByRep = new Map<string, number>();
     for (const deal of pipeline.deals) if (deal.category === "open" && active.has(deal.OwnerId)) openByRep.set(deal.OwnerId, (openByRep.get(deal.OwnerId) ?? 0) + 1);
     const evidence = [stamped(ctx, data, openByRep.size, `Logged in the last ${RECENT_DAYS} days, per open deal`)];
-    if (openByRep.size < MIN_REPS) return { outcome: "not_measurable", reason: `${plural(openByRep.size, "rep")} with open deals is too few to compare.`, evidence };
+    if (openByRep.size < MIN_REPS) return { outcome: "not_measurable", reason: said`${plural(openByRep.size, "rep")} with open deals is too few to compare.`, evidence };
     // Each rep's recent touches, counted in one pass over them all.
     const recentByRep = new Map<string, number>();
     for (const t of data.touches) if (new Date(t.at).toISOString() >= cutoff) recentByRep.set(t.ownerId, (recentByRep.get(t.ownerId) ?? 0) + 1);
@@ -243,12 +254,12 @@ const repActivity: Rule = {
     const low = rates.filter((r) => r.rate < typical * REP_FLOOR_SHARE).sort((a, b) => a.rate - b.rate || a.rep.localeCompare(b.rep));
     const segments = [{ dimension: "rep", segments: rates.length }];
     const facts = { typicalPerDeal: typical, reps: rates.length, low: low.length };
-    if (low.length === 0) return { outcome: "pass", summary: `No rep logs under ${REP_FLOOR_SHARE * 100}% of the typical ${typical} activities per open deal.`, evidence, segmentsChecked: segments, facts };
+    if (low.length === 0) return { outcome: "pass", summary: said`No rep logs under ${REP_FLOOR_SHARE * 100}% of the typical ${typical} activities per open deal.`, evidence, segmentsChecked: segments, facts };
     return {
       outcome: "issue",
-      title: "Some reps are logging far less than their peers",
-      summary: `${plural(low.length, "rep")} logged under ${REP_FLOOR_SHARE * 100}% of the typical ${typical} activities per open deal in the last ${RECENT_DAYS} days. This may be a logging gap rather than a performance one.`,
-      recommendation: "Check their email and calendar connections first, then look at how they're working these deals.",
+      title: said`Some reps are logging far less than their peers`,
+      summary: said`${plural(low.length, "rep")} logged under ${REP_FLOOR_SHARE * 100}% of the typical ${typical} activities per open deal in the last ${RECENT_DAYS} days. This may be a logging gap rather than a performance one.`,
+      recommendation: said`Check their email and calendar connections first, then look at how they're working these deals.`,
       recommendationType: "investigate",
       severity: "medium",
       confidence: confidence(data),
@@ -272,16 +283,17 @@ const unlinkedTasks: Rule = {
     const data = activityOr(ctx);
     if ("outcome" in data) return data;
     const evidence = [{ ...data.evidence[0]!, count: data.tasks.length, exclusions: data.exclusions }];
-    if (data.tasks.length === 0) return { outcome: "not_measurable", reason: "No tasks were logged in the last year, so we can't tell a clean record from an unused one.", evidence };
+    if (data.tasks.length === 0) return { outcome: "not_measurable", reason: said`No tasks were logged in the last year, so we can't tell a clean record from an unused one.`, evidence };
     const result = segmentRate(data.tasks, (t) => t.WhatId === null && t.WhoId === null, { rep: (t) => ctx.userLabel(t.OwnerId), "task type": (t) => t.TaskSubtype ?? "No type" }, { segmentLimit: UNLINKED_SEGMENT_LIMIT, minSegment: MIN_GROUP_EVENTS });
     const facts = { hits: result.hits, n: result.n, rate: result.rate };
-    if (result.rate <= UNLINKED_LIMIT && result.hotspots.length === 0) return { outcome: "pass", summary: `Tasks linked to no record: ${result.hits} of ${result.n} (${result.rate}%), with no rep above ${UNLINKED_SEGMENT_LIMIT}%.`, evidence, segmentsChecked: result.segmentsChecked, facts };
+    if (result.rate <= UNLINKED_LIMIT && result.hotspots.length === 0) return { outcome: "pass", summary: said`Tasks linked to no record: ${result.hits} of ${result.n} (${result.rate}%), with no rep above ${UNLINKED_SEGMENT_LIMIT}%.`, evidence, segmentsChecked: result.segmentsChecked, facts };
     const worst = result.hotspots[0];
     return {
       outcome: "issue",
-      title: "Tasks are being logged against nothing",
-      summary: `Tasks linked to no record: ${result.hits} of ${result.n} (${result.rate}%).${worst ? ` Worst by ${worst.dimension}: ${worst.key}, at ${worst.rate}%.` : ""} This work won't show on any deal, contact or account.`,
-      recommendation: "Show these people how to log against the deal, and check any tool that's creating tasks automatically.",
+      title: said`Tasks are being logged against nothing`,
+      // The dimension is one of our own two names; the rep's token or the task type is the org's.
+      summary: said`Tasks linked to no record: ${result.hits} of ${result.n} (${result.rate}%).${worst ? said` Worst by ${dimensionWords(worst.dimension)}: ${org(worst.key)}, at ${worst.rate}%.` : ""} This work won't show on any deal, contact or account.`,
+      recommendation: said`Show these people how to log against the deal, and check any tool that's creating tasks automatically.`,
       recommendationType: "change",
       severity: "low",
       confidence: "high",
