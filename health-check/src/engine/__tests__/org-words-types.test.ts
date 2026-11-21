@@ -36,6 +36,10 @@ export function typed(): Said[] {
     said`${plural(n, "object", label)} runs`,
     // @ts-expect-error plural over any
     said`${plural(n, anything)} runs`,
+    // @ts-expect-error a plural form that is any (found in review: an optional parameter took it)
+    said`${plural(n, "flow", anything)} runs`,
+    // @ts-expect-error a plural form read at run time, with a literal noun
+    said`${plural(n, "flow", label as string)} runs`,
   ];
 }
 

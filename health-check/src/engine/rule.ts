@@ -139,7 +139,9 @@ export const notSized = (reason: string): Value => ({ kind: "not_sized", reason 
  * (DECISIONS.md 657); given a noun read at run time it is a plain string, which
  * `said` refuses, so a name the org chose can't pass as ours this way.
  */
-export function plural<const O extends string, const M extends string = never>(n: number, one: O & LiteralText<O>, many?: M & LiteralText<M>): Said;
+// Two overloads, not one with an optional plural: an optional parameter's type takes in undefined, which `any` fits, so `many: any` passed.
+export function plural<const O extends string>(n: number, one: O & LiteralText<O>): Said;
+export function plural<const O extends string, const M extends string>(n: number, one: O & LiteralText<O>, many: M & LiteralText<M>): Said;
 export function plural(n: number, one: string, many?: string): string;
 export function plural(n: number, one: string, many = `${one}s`): string {
   // The first overload holds both nouns to literal types: the only words here are ours.

@@ -169,7 +169,8 @@ function reclaimFindings(ctx: RuleContext, candidates: UserRow[], describe: Recl
     for (const a of failed) for (const id of new Set(a.guards.filter((g) => g.status === "failed").map((g) => g.guardId))) blockers.set(id, (blockers.get(id) ?? 0) + 1);
     const named = [...blockers].sort(([a, x], [b, y]) => y - x || a.localeCompare(b)).map(([id, n]) => {
       // The guards' own phrases are ours; an id the table doesn't know is printed as the org's words, to be safe.
-      const phrase: string | undefined = USER_GUARD_BLOCKERS[id as keyof typeof USER_GUARD_BLOCKERS];
+      // Own keys only, so an id such as "constructor" can't reach the object's prototype and pass as ours.
+      const phrase: string | undefined = Object.hasOwn(USER_GUARD_BLOCKERS, id) ? USER_GUARD_BLOCKERS[id as keyof typeof USER_GUARD_BLOCKERS] : undefined;
       return said`${phrase === undefined ? org(id) : eng(phrase)} (${n})`;
     });
     results.push({
