@@ -4,8 +4,6 @@
 
 export const UNCONVERTED_RULES: ReadonlySet<string> = new Set<string>([
   "aut.apex-coverage", "aut.old-api-versions", "cpq.discount-approvals", "cpq.discount-leakage", "cpq.inactive-rules",
-  "cpq.price-rule-conflicts", "cpq.quote-to-order", "cpq.renewals-not-started", "cpq.twin-field-mismatch", "sec.health-check-risks",
-  "sec.health-check-score", "sec.modify-all-data", "sec.peer-outlier-access", "sec.sharing-defaults", "sec.unused-access",
-  "sec.view-all-data", "tech.apex-code-size", "tech.classic-leftovers", "tech.governor-limit-risk", "tech.storage-use",
-  "tech.test-quality",
+  "cpq.price-rule-conflicts", "cpq.quote-to-order", "cpq.renewals-not-started", "cpq.twin-field-mismatch", "tech.apex-code-size",
+  "tech.classic-leftovers", "tech.governor-limit-risk", "tech.storage-use", "tech.test-quality",
 ]);
