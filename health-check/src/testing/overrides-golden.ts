@@ -211,6 +211,15 @@ function handCases(): HandCase[] {
   const carried = measure(10, "Win rate", 72.5);
   add({ name: "a measure: a value no part or text holds changes (carried)", metrics: [carried], overrides: [onMetric(carried, "value", 72.5, 70)] });
 
+  // A team survey's figures are what people answered (DECISIONS.md 649): none is
+  // carried, a segment's no more than its value, and an org measure in the same
+  // run is judged as ever.
+  const ease = measure(27, "How easy Salesforce is to use", 3.5, { domain: "survey", unit: "count", n: 12, definition: "The median answer out of 5.", segments: [{ dimension: "role", key: "Sales rep", n: 7, value: 3, notMeasurableReason: null }, { dimension: "role", key: "Manager", n: 5, value: 4, notMeasurableReason: null }], segmentExemptReason: null });
+  add({ name: "a survey measure: its value corrected is refused (survey)", metrics: [ease], overrides: [onMetric(ease, "value", 3.5, 4)] });
+  add({ name: "a survey measure: a segment's figure corrected is refused (survey)", metrics: [ease], overrides: [onMetric(ease, "segments.role.Sales rep", 3, 4)] });
+  const orgRate = measure(28, "Win rate", 72.5);
+  add({ name: "a survey measure and an org measure corrected in one run: the survey's refused, the org's carried", metrics: [ease, orgRate], overrides: [onMetric(ease, "value", 3.5, 4, 1), onMetric(orgRate, "value", 72.5, 70, 2)] });
+
   // More than ten: a measure's refusal given first is listed after the findings', and two are counted, not listed.
   const many = Array.from("ABCDEFGHIJK", (team, i) => finding(20 + i, `Seats on team ${team}`, "7 seats are free, and 7 more are held.", { seats: 7 }));
   add({
