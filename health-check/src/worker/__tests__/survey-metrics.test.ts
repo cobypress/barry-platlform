@@ -221,9 +221,10 @@ describe("after the documents, the survey's rows and the digest describe the sam
     // One more answer, and the console sends the run job again: the released run's save is refused, so nothing moves.
     run.survey = shownSurvey(13);
     const again = await processRunJob(RUN_ID, deps, { final: true });
-    assert.equal(again.outcome, "skipped");
+    assert.deepEqual(survey(deps.store.storedMetrics(RUN_ID)), survey(afterMake), "the survey's rows still describe the documents' answers");
+    assert.deepEqual(deps.store.getRunDigest(RUN_ID), digest, "and so does the digest");
     assert.deepEqual(deps.store.storedMetrics(RUN_ID), afterMake);
-    assert.deepEqual(deps.store.getRunDigest(RUN_ID), digest);
+    assert.equal(again.outcome, "skipped");
   });
 });
 
