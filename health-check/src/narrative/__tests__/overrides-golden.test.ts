@@ -260,8 +260,8 @@ describe("the golden overrides file shared with the console (decision 532, item 
     "a finding: a fact and the sized amount share a value, the fact's refusal first (shared)": [["facts.seats refused", { kind: "shared", other: "the sized amount" }], ["value.amount refused", { kind: "shared", other: "seats" }]],
     "rows naming a finding's id as a measure's, or a measure's as a finding's, are ignored": [],
     // Decision 628: a carried correction drops a finding's hours and prompt, a refused one or one put back keeps them.
-    "a finding with hours and a prompt: a carried correction drops both": [["summary", "5 flows have no fault path."], ["facts", { affected: 5 }], ["effortHours", undefined], ["fixPrompt", undefined]],
-    "a finding with hours and a prompt: a carried correction in no text drops both": [["facts", { affected: 3 }], ["effortHours", undefined], ["fixPrompt", undefined]],
+    "a finding with hours and a prompt: a carried correction drops both": [["summary", "5 flows have no fault path."], ["facts", { affected: 5 }], ["effortHours", undefined], ["timeBand", undefined], ["fixPrompt", undefined]],
+    "a finding with hours and a prompt: a carried correction in no text drops both": [["facts", { affected: 3 }], ["effortHours", undefined], ["timeBand", undefined], ["fixPrompt", undefined]],
     "a finding with hours and a prompt: a refused correction keeps both": [["facts.affected refused", { kind: "repeated", places: 2 }]],
     "a finding with hours and a prompt: put back to the value as read keeps both": [],
   };

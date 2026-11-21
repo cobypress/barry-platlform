@@ -37,6 +37,13 @@ describe("the hours table exported for the owner's review (decision 628)", () =>
     }
   });
 
+  test("each rule's fix complexity is exported as the table declares it (decision 636)", () => {
+    for (const [id, entry] of Object.entries(committed.rules)) {
+      assert.equal(entry.fixComplexity, FIX_TABLE[id]!.complexity, id);
+      assert.ok(["simple", "moderate", "complex"].includes(entry.fixComplexity), id);
+    }
+  });
+
   test("a changed figure makes the file stale", () => {
     const [first, ...rest] = Object.entries(FIX_TABLE);
     const h = first![1].hours;

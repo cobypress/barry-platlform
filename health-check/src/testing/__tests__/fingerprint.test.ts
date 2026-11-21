@@ -17,11 +17,11 @@ import { AS_OF, CONNECTED_USER } from "../synthetic-org.ts";
 // a metric or the raw notes updates these, and says why in its commit.
 
 const GOLDEN: Record<string, Record<string, string>> = {
-  recorded: { "findings.json": "8e996f6cdb389af5", "metrics.json": "10d5f5733555b541", "scores.json": "17cdb1708449d000", "manual-steps.json": "c4daf1ca86584a33", "action-lists.json": "7018f033c3c80e0a", "raw-notes.md": "5e5e3581e490bb64", "handbook.json": "64dcafcf493eef42" },
-  generated: { "findings.json": "24e1ffe261dc9e36", "metrics.json": "2233e1f04464f5ae", "scores.json": "616e42570f940402", "manual-steps.json": "15ae87c4fd76d7b6", "action-lists.json": "8eeb97766d119778", "raw-notes.md": "9aa44b2002f1740f", "handbook.json": "23c075e2337e23a8" },
+  recorded: { "findings.json": "b68619732451211e", "metrics.json": "10d5f5733555b541", "scores.json": "17cdb1708449d000", "manual-steps.json": "c4daf1ca86584a33", "action-lists.json": "7018f033c3c80e0a", "raw-notes.md": "5e5e3581e490bb64", "handbook.json": "64dcafcf493eef42" },
+  generated: { "findings.json": "864d04deac0fb990", "metrics.json": "2233e1f04464f5ae", "scores.json": "616e42570f940402", "manual-steps.json": "15ae87c4fd76d7b6", "action-lists.json": "8eeb97766d119778", "raw-notes.md": "9aa44b2002f1740f", "handbook.json": "23c075e2337e23a8" },
 };
 
-// findings.json before decision 628 added each issue's hours to fix and fix prompt.
+// findings.json before decisions 628 and 636 added each issue's hours to fix, time band, fix complexity and fix prompt.
 // Those two keys are all that moved it: with them taken out it hashes as it did.
 const BEFORE_628: Record<string, string> = { recorded: "cab19e73c30f30a2", generated: "c71a5352db967288" };
 
@@ -34,7 +34,7 @@ const generated = async () => fingerprint(await generatedDir());
 /** The run's findings.json with every finding's hours and prompt taken out, written as the run writes it. */
 function withoutFixFields(dir: string): void {
   const path = join(dir, "findings.json");
-  const findings = (JSON.parse(readFileSync(path, "utf8")) as Array<Record<string, unknown>>).map(({ effortHours: _h, fixPrompt: _p, ...rest }) => rest);
+  const findings = (JSON.parse(readFileSync(path, "utf8")) as Array<Record<string, unknown>>).map(({ effortHours: _h, timeBand: _b, fixComplexity: _c, fixPrompt: _p, ...rest }) => rest);
   writeFileSync(path, `${JSON.stringify(findings, null, 2)}\n`);
 }
 

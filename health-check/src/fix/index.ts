@@ -1,6 +1,6 @@
-import type { EffortHours, Finding } from "../schemas/index.ts";
+import type { EffortHours, Finding, FixComplexity, TimeBand } from "../schemas/index.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
-import { effortHours } from "./hours.ts";
+import { effortHours, timeBandOf } from "./hours.ts";
 import { fixPrompt } from "./prompt.ts";
 import { FIX_TABLE } from "./table.ts";
 
@@ -15,10 +15,11 @@ export function fixFields(
   ruleId: string,
   f: Pick<Finding, "title" | "summary" | "recommendation" | "recommendationType" | "subjects" | "facts">,
   pseudonyms: Pseudonymiser,
-): { effortHours?: EffortHours; fixPrompt?: string } {
+): { effortHours?: EffortHours; timeBand?: TimeBand; fixComplexity?: FixComplexity; fixPrompt?: string } {
   const rule = FIX_TABLE[ruleId];
   if (!rule) return {};
   const hours = effortHours(rule.hours, f.facts);
   const prompt = fixPrompt(f, rule.prompt, pseudonyms);
-  return { ...(hours ? { effortHours: hours } : {}), ...(prompt ? { fixPrompt: prompt } : {}) };
+  // The band follows the hours, so it's present exactly when they are (DECISIONS.md 636).
+  return { ...(hours ? { effortHours: hours, timeBand: timeBandOf(hours) } : {}), fixComplexity: rule.complexity, ...(prompt ? { fixPrompt: prompt } : {}) };
 }

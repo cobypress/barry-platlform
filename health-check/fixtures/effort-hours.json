@@ -1,766 +1,879 @@
 {
-  "status": "Estimates awaiting the owner's review. Hours for a fix led by a consultant who knows Salesforce, as a range in whole hours. A fixed range covers the work whatever the size of the org. A range for each unit is multiplied by the count the finding holds (the sum of the facts named, or of all its facts), rounded up to whole hours. Past the cap, a rule whose work stops growing says why and holds the range at the cap; every other rule's range covers only the first units the cap allows, and says the rest is scoped separately. Printed in no document until approved.",
+  "status": "Estimates awaiting the owner's review. Hours for a fix led by a consultant who knows Salesforce, as a range in whole hours. A fixed range covers the work whatever the size of the org. A range for each unit is multiplied by the count the finding holds (the sum of the facts named, or of all its facts), rounded up to whole hours. Past the cap, a rule whose work stops growing says why and holds the range at the cap; every other rule's range covers only the first units the cap allows, and says the rest is scoped separately. Each rule's fixComplexity (simple, moderate or complex) says how risky or skilled its fix is, which the hours don't (DECISIONS.md 636); it is not the org's complexity score. Printed in no document until approved.",
   "rules": {
     "act.deals-without-activity": {
+      "fixComplexity": "simple",
       "low": 4,
-      "high": 8,
+      "high": 7,
       "basis": "Preparing the analysis and the options for the people who decide; their time deciding, and making the change, isn't counted"
     },
     "act.event-link-collapse": {
+      "fixComplexity": "simple",
       "low": 2,
-      "high": 6,
+      "high": 5,
       "basis": "Finding what changed when the drop began and correcting the setting"
     },
     "act.rep-activity-spread": {
+      "fixComplexity": "simple",
       "low": 1,
       "high": 3,
       "basis": "Checking the email and calendar connections and preparing the comparison"
     },
     "act.unlinked-tasks": {
+      "fixComplexity": "moderate",
       "low": 2,
       "high": 4,
       "basis": "Finding which tools make unlinked tasks and fixing their set-up"
     },
     "act.won-vs-lost-activity": {
+      "fixComplexity": "simple",
       "low": 2,
       "high": 4,
       "basis": "Preparing the analysis and the options for the people who decide; their time deciding, and making the change, isn't counted"
     },
     "adp.classic-users": {
+      "fixComplexity": "moderate",
       "facts": [
         "users"
       ],
       "each": "user on Classic",
       "minutesLow": 30,
-      "minutesHigh": 60,
-      "capHours": 16,
+      "minutesHigh": 55,
+      "capHours": 14,
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "adp.falling-adoption": {
+      "fixComplexity": "simple",
       "low": 8,
-      "high": 16,
+      "high": 14,
       "basis": "Interviews with the teams, an analysis of what gets in their way, and a plan; the fixes it finds are their own work"
     },
     "adp.low-engagement-group": {
+      "fixComplexity": "simple",
       "facts": [
         "groups"
       ],
       "each": "team",
       "minutesLow": 240,
-      "minutesHigh": 480,
-      "capHours": 24,
+      "minutesHigh": 420,
+      "capHours": 21,
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "aut.apex-coverage": {
+      "fixComplexity": "moderate",
       "facts": [
         "weakClasses"
       ],
       "each": "class below the coverage line",
       "minutesLow": 120,
-      "minutesHigh": 240,
-      "capHours": 40,
+      "minutesHigh": 210,
+      "capHours": 35,
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "aut.case-routing-overlap": {
+      "fixComplexity": "complex",
       "low": 4,
-      "high": 8,
+      "high": 7,
       "basis": "Separating assignment rules and Omni-Channel so each case is routed once"
     },
     "aut.flows-without-fault-paths": {
+      "fixComplexity": "moderate",
       "facts": [
         "affected"
       ],
       "each": "flow with no fault path",
       "minutesLow": 60,
-      "minutesHigh": 120,
-      "capHours": 24,
+      "minutesHigh": 105,
+      "capHours": 21,
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "aut.hardcoded-ids-in-flows": {
+      "fixComplexity": "moderate",
       "facts": [
         "affected"
       ],
       "each": "flow with hardcoded values",
       "minutesLow": 60,
-      "minutesHigh": 120,
-      "capHours": 16,
+      "minutesHigh": 105,
+      "capHours": 14,
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "aut.legacy-process-builder": {
+      "fixComplexity": "complex",
       "facts": [
         "activeProcesses"
       ],
       "each": "active process",
       "minutesLow": 120,
-      "minutesHigh": 240,
-      "capHours": 60,
+      "minutesHigh": 210,
+      "capHours": 53,
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "aut.legacy-workflow-rules": {
+      "fixComplexity": "complex",
       "facts": [
         "activeRules"
       ],
       "each": "active workflow rule",
       "minutesLow": 60,
-      "minutesHigh": 180,
-      "capHours": 60,
+      "minutesHigh": 160,
+      "capHours": 53,
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "aut.mixed-automation-on-object": {
+      "fixComplexity": "complex",
       "facts": [
         "objects"
       ],
       "each": "object with mixed automation",
       "minutesLow": 240,
-      "minutesHigh": 480,
-      "capHours": 40,
+      "minutesHigh": 420,
+      "capHours": 35,
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "aut.multiple-triggers": {
+      "fixComplexity": "complex",
       "facts": [
         "objects"
       ],
       "each": "object with more than one trigger",
       "minutesLow": 240,
-      "minutesHigh": 480,
-      "capHours": 40,
+      "minutesHigh": 420,
+      "capHours": 35,
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "aut.old-api-versions": {
+      "fixComplexity": "moderate",
       "facts": [
         "total"
       ],
       "each": "component on an old API version",
       "minutesLow": 30,
-      "minutesHigh": 60,
-      "capHours": 24,
+      "minutesHigh": 55,
+      "capHours": 21,
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "aut.undocumented-automation": {
+      "fixComplexity": "simple",
       "facts": [
         "missing"
       ],
       "each": "flow, rule or class with no description",
       "minutesLow": 10,
       "minutesHigh": 20,
-      "capHours": 24,
+      "capHours": 21,
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "bp.after-save-same-record-updates": {
+      "fixComplexity": "complex",
       "facts": [
         "flows"
       ],
       "each": "after-save flow updating its own record",
       "minutesLow": 120,
-      "minutesHigh": 240,
-      "capHours": 24,
+      "minutesHigh": 210,
+      "capHours": 21,
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "bp.jobs-on-inactive-owners": {
+      "fixComplexity": "moderate",
       "facts": [
         "jobs"
       ],
       "each": "scheduled job on an inactive owner",
       "minutesLow": 30,
-      "minutesHigh": 60,
-      "capHours": 8,
+      "minutesHigh": 55,
+      "capHours": 7,
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "bp.ownership-skew": {
+      "fixComplexity": "complex",
       "facts": [
         "pairs"
       ],
       "each": "owner and object above the limit",
       "minutesLow": 240,
-      "minutesHigh": 480,
-      "capHours": 24,
+      "minutesHigh": 420,
+      "capHours": 21,
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "bp.users-without-role": {
+      "fixComplexity": "simple",
       "facts": [
         "hits"
       ],
       "each": "user with no role",
       "minutesLow": 10,
       "minutesHigh": 20,
-      "capHours": 8,
+      "capHours": 7,
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "cfg.custom-field-sprawl": {
+      "fixComplexity": "moderate",
       "facts": "all",
       "each": "custom field on the objects named",
       "minutesLow": 5,
       "minutesHigh": 10,
-      "capHours": 40,
+      "capHours": 35,
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "cfg.picklist-sprawl": {
+      "fixComplexity": "moderate",
       "low": 2,
-      "high": 6,
+      "high": 5,
       "basis": "Preparing the use of each value, a shorter list and the mapping from old values to new for the list's owners; changing the records isn't counted"
     },
     "cfg.setup-change-concentration": {
+      "fixComplexity": "simple",
       "low": 4,
-      "high": 8,
+      "high": 7,
       "basis": "Writing down how the org is changed and what a second person needs to learn, whatever the size of the org"
     },
     "cfg.stage-sprawl": {
+      "fixComplexity": "complex",
       "low": 4,
-      "high": 8,
+      "high": 7,
       "basis": "Preparing the analysis and the options for the people who decide; their time deciding, and making the change, isn't counted"
     },
     "cfg.unassigned-layouts": {
+      "fixComplexity": "moderate",
       "facts": [
         "unassigned"
       ],
       "each": "unassigned layout",
       "minutesLow": 15,
-      "minutesHigh": 30,
-      "capHours": 8,
+      "minutesHigh": 25,
+      "capHours": 7,
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "cfg.undocumented-fields": {
+      "fixComplexity": "simple",
       "facts": [
         "bare"
       ],
       "each": "field with no description or help text",
       "minutesLow": 10,
       "minutesHigh": 20,
-      "capHours": 24,
+      "capHours": 21,
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "cfg.unused-custom-fields": {
+      "fixComplexity": "moderate",
       "facts": [
         "unusedFields"
       ],
       "each": "field almost never filled in",
       "minutesLow": 30,
-      "minutesHigh": 60,
-      "capHours": 16,
+      "minutesHigh": 55,
+      "capHours": 14,
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "cpq.discount-approvals": {
+      "fixComplexity": "complex",
       "low": 8,
-      "high": 16,
+      "high": 14,
       "basis": "Building an approval process on the quote for the agreed discount levels, for the owners to turn on"
     },
     "cpq.discount-leakage": {
+      "fixComplexity": "simple",
       "low": 4,
-      "high": 8,
+      "high": 7,
       "basis": "Preparing the analysis and the options for the people who decide; their time deciding, and making the change, isn't counted"
     },
     "cpq.inactive-rules": {
+      "fixComplexity": "simple",
       "facts": [
         "inactive"
       ],
       "each": "inactive rule",
       "minutesLow": 15,
-      "minutesHigh": 30,
-      "capHours": 8,
+      "minutesHigh": 25,
+      "capHours": 7,
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "cpq.price-rule-conflicts": {
+      "fixComplexity": "complex",
       "facts": [
         "pairs"
       ],
       "each": "pair of competing price rules",
       "minutesLow": 120,
-      "minutesHigh": 240,
-      "capHours": 16,
+      "minutesHigh": 210,
+      "capHours": 14,
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "cpq.quote-to-order": {
+      "fixComplexity": "simple",
       "low": 2,
       "high": 4,
       "basis": "Building the report and the check that keeps it current; the owners' time updating their own records isn't counted"
     },
     "cpq.renewals-not-started": {
+      "fixComplexity": "moderate",
       "low": 2,
-      "high": 6,
+      "high": 5,
       "basis": "Checking in a sandbox how CPQ makes renewals, and preparing the list for the contracts' owners"
     },
     "cpq.twin-field-mismatch": {
+      "fixComplexity": "complex",
       "facts": [
         "mismatches"
       ],
       "each": "pair of mismatched twin fields",
       "minutesLow": 60,
-      "minutesHigh": 120,
-      "capHours": 8,
+      "minutesHigh": 105,
+      "capHours": 7,
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "cur.account-concentration": {
+      "fixComplexity": "simple",
       "low": 2,
       "high": 4,
       "basis": "Preparing the analysis and the options for the people who decide; their time deciding, and making the change, isn't counted"
     },
     "cur.close-date-pushes": {
+      "fixComplexity": "simple",
       "low": 2,
       "high": 4,
       "basis": "Building the report, or the alert, that flags a second push for a manager"
     },
     "cur.coverage": {
+      "fixComplexity": "simple",
       "low": 2,
       "high": 4,
       "basis": "Preparing the analysis and the options for the people who decide; their time deciding, and making the change, isn't counted"
     },
     "cur.missing-next-steps": {
+      "fixComplexity": "moderate",
       "low": 2,
       "high": 4,
       "basis": "Building the report and the check that keeps it current; the owners' time updating their own records isn't counted"
     },
     "cur.rep-concentration": {
+      "fixComplexity": "simple",
       "low": 2,
       "high": 4,
       "basis": "Preparing the analysis and the options for the people who decide; their time deciding, and making the change, isn't counted"
     },
     "cur.stale-deals": {
+      "fixComplexity": "simple",
       "low": 2,
       "high": 4,
       "basis": "Building the report and the check that keeps it current; the owners' time updating their own records isn't counted"
     },
     "cur.stuck-in-stage": {
+      "fixComplexity": "simple",
       "low": 2,
       "high": 4,
       "basis": "Building the report and the check that keeps it current; the owners' time updating their own records isn't counted"
     },
     "dq.contact-completeness": {
+      "fixComplexity": "moderate",
       "low": 3,
-      "high": 6,
+      "high": 5,
       "basis": "Preparing the list and the plan for the people who own the records; their time making the change isn't counted"
     },
     "dq.duplicate-accounts": {
+      "fixComplexity": "complex",
       "facts": [
         "groups"
       ],
       "each": "group of accounts that share a name",
       "minutesLow": 15,
-      "minutesHigh": 30,
-      "capHours": 24,
+      "minutesHigh": 25,
+      "capHours": 21,
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "dq.duplicate-rules-missing": {
+      "fixComplexity": "moderate",
       "facts": [
         "missing"
       ],
       "each": "object with no duplicate rule",
       "minutesLow": 120,
-      "minutesHigh": 240,
-      "capHours": 12,
+      "minutesHigh": 210,
+      "capHours": 11,
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "dq.loss-reason-missing": {
+      "fixComplexity": "moderate",
       "low": 2,
       "high": 4,
       "basis": "Proposing a short list of reasons and building the rule for the owners to turn on; past deals aren't filled in"
     },
     "dq.open-opps-missing-amount": {
+      "fixComplexity": "moderate",
       "low": 2,
       "high": 4,
       "basis": "Building the report and the check that keeps it current; the owners' time updating their own records isn't counted"
     },
     "dq.open-opps-no-activity": {
+      "fixComplexity": "simple",
       "low": 2,
       "high": 4,
       "basis": "Building the report and the check that keeps it current; the owners' time updating their own records isn't counted"
     },
     "dq.open-opps-past-close": {
+      "fixComplexity": "moderate",
       "low": 2,
       "high": 4,
       "basis": "Building the report and the check that keeps it current; the owners' time updating their own records isn't counted"
     },
     "dq.opps-inactive-owner": {
+      "fixComplexity": "moderate",
       "low": 1,
       "high": 3,
       "basis": "Preparing the list and the plan for the people who own the records; their time making the change isn't counted"
     },
     "dq.opps-without-account": {
+      "fixComplexity": "moderate",
       "low": 2,
       "high": 4,
       "basis": "Building the report and the check that keeps it current; the owners' time updating their own records isn't counted"
     },
     "dq.record-type-use": {
+      "fixComplexity": "moderate",
       "low": 1,
       "high": 4,
       "basis": "Checking each record type's dependencies and preparing the list for its object's owner"
     },
     "dq.records-inactive-owner": {
+      "fixComplexity": "moderate",
       "low": 2,
-      "high": 6,
+      "high": 5,
       "basis": "Preparing the list and the plan for the people who own the records; their time making the change isn't counted"
     },
     "dq.stale-leads": {
+      "fixComplexity": "simple",
       "low": 3,
-      "high": 6,
+      "high": 5,
       "basis": "Preparing a follow-up rule by source for agreement; the reps' follow-up time isn't counted"
     },
     "fct.commit-at-risk": {
+      "fixComplexity": "simple",
       "low": 1,
       "high": 3,
       "basis": "Building the report and the check that keeps it current; the owners' time updating their own records isn't counted"
     },
     "fct.early-stage-commits": {
+      "fixComplexity": "moderate",
       "low": 1,
       "high": 3,
       "basis": "Building the report and the check that keeps it current; the owners' time updating their own records isn't counted"
     },
     "fct.manager-adjustments": {
+      "fixComplexity": "simple",
       "low": 2,
       "high": 4,
       "basis": "Preparing the analysis and the options for the people who decide; their time deciding, and making the change, isn't counted"
     },
     "fct.quota-gaps": {
+      "fixComplexity": "simple",
       "facts": [
         "hits"
       ],
       "each": "deal owner with no quota",
       "minutesLow": 15,
-      "minutesHigh": 30,
-      "capHours": 8,
+      "minutesHigh": 25,
+      "capHours": 7,
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "int.api-usage": {
+      "fixComplexity": "complex",
       "low": 4,
-      "high": 16,
+      "high": 14,
       "basis": "Finding which integrations and jobs use the most and planning the cuts; changing them is more"
     },
     "int.failed-async-jobs": {
+      "fixComplexity": "moderate",
       "facts": [
         "classes"
       ],
       "each": "class with failed jobs",
       "minutesLow": 120,
-      "minutesHigh": 240,
-      "capHours": 16,
+      "minutesHigh": 210,
+      "capHours": 14,
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "int.hardcoded-endpoints": {
+      "fixComplexity": "complex",
       "facts": [
         "addresses"
       ],
       "each": "address written into code",
       "minutesLow": 120,
-      "minutesHigh": 240,
-      "capHours": 24,
+      "minutesHigh": 210,
+      "capHours": 21,
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "int.integration-user-licences": {
+      "fixComplexity": "complex",
       "facts": [
         "onFull"
       ],
       "each": "integration account on a full licence",
       "minutesLow": 60,
-      "minutesHigh": 120,
-      "capHours": 16,
+      "minutesHigh": 105,
+      "capHours": 14,
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "int.integration-users-interactive": {
+      "fixComplexity": "complex",
       "facts": [
         "open"
       ],
       "each": "integration account not set to API only",
       "minutesLow": 60,
-      "minutesHigh": 180,
-      "capHours": 8,
+      "minutesHigh": 160,
+      "capHours": 7,
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "lead.campaign-return": {
+      "fixComplexity": "simple",
       "low": 2,
       "high": 4,
       "basis": "Preparing the analysis and the options for the people who decide; their time deciding, and making the change, isn't counted"
     },
     "lead.conversion-by-source": {
+      "fixComplexity": "simple",
       "low": 2,
       "high": 4,
       "basis": "Preparing the analysis and the options for the people who decide; their time deciding, and making the change, isn't counted"
     },
     "lead.converted-no-opportunity": {
+      "fixComplexity": "simple",
       "low": 1,
       "high": 3,
       "basis": "Preparing the analysis and the options for the people who decide; their time deciding, and making the change, isn't counted"
     },
     "lead.no-first-response": {
+      "fixComplexity": "moderate",
       "low": 2,
       "high": 4,
       "basis": "Checking routing and correcting the rules that leave leads unworked"
     },
     "lead.response-time": {
+      "fixComplexity": "moderate",
       "low": 2,
-      "high": 6,
+      "high": 5,
       "basis": "Agreeing a response target by source and the routing behind it"
     },
     "lead.source-return": {
+      "fixComplexity": "simple",
       "low": 2,
       "high": 4,
       "basis": "Preparing the analysis and the options for the people who decide; their time deciding, and making the change, isn't counted"
     },
     "mkt.campaign-influence": {
+      "fixComplexity": "simple",
       "low": 1,
       "high": 2,
       "basis": "Turning on one setting and choosing the model to report on"
     },
     "mkt.scoring-grading": {
+      "fixComplexity": "moderate",
       "low": 4,
-      "high": 8,
+      "high": 7,
       "basis": "Preparing the analysis and the options for the people who decide; their time deciding, and making the change, isn't counted"
     },
     "mkt.unowned-prospects": {
+      "fixComplexity": "moderate",
       "low": 1,
       "high": 3,
       "basis": "Preparing the list and the plan for the people who own the records; their time making the change isn't counted"
     },
     "mkt.unworked-handovers": {
+      "fixComplexity": "simple",
       "low": 2,
       "high": 4,
       "basis": "Preparing the analysis and the options for the people who decide; their time deciding, and making the change, isn't counted"
     },
     "pipe.calibration-contradicts-org": {
+      "fixComplexity": "simple",
       "low": 1,
       "high": 3,
       "basis": "Preparing the analysis and the options for the people who decide; their time deciding, and making the change, isn't counted"
     },
     "pipe.dead-end-stage": {
+      "fixComplexity": "simple",
       "low": 2,
       "high": 4,
       "basis": "Setting a time limit for the stage and the report that shows deals past it"
     },
     "pipe.going-backwards": {
+      "fixComplexity": "simple",
       "low": 4,
-      "high": 8,
+      "high": 7,
       "basis": "Preparing the analysis and the options for the people who decide; their time deciding, and making the change, isn't counted"
     },
     "pipe.segment-divergence": {
+      "fixComplexity": "simple",
       "low": 2,
       "high": 4,
       "basis": "Preparing the analysis and the options for the people who decide; their time deciding, and making the change, isn't counted"
     },
     "pipe.skipped-stages": {
+      "fixComplexity": "simple",
       "low": 4,
-      "high": 8,
+      "high": 7,
       "basis": "Preparing the analysis and the options for the people who decide; their time deciding, and making the change, isn't counted"
     },
     "pipe.unmapped-stages": {
+      "fixComplexity": "simple",
       "low": 1,
       "high": 2,
       "basis": "Preparing a mapping of each stage for the health check's calibration"
     },
     "rev.dormant-accounts": {
+      "fixComplexity": "simple",
       "low": 2,
       "high": 4,
       "basis": "Preparing the analysis and the options for the people who decide; their time deciding, and making the change, isn't counted"
     },
     "rev.stalled-deals": {
+      "fixComplexity": "simple",
       "low": 2,
       "high": 4,
       "basis": "Preparing the analysis and the options for the people who decide; their time deciding, and making the change, isn't counted"
     },
     "rev.win-backs": {
+      "fixComplexity": "simple",
       "low": 2,
       "high": 4,
       "basis": "Preparing the analysis and the options for the people who decide; their time deciding, and making the change, isn't counted"
     },
     "sec.health-check-risks": {
+      "fixComplexity": "complex",
       "low": 4,
-      "high": 8,
+      "high": 7,
       "basis": "Preparing, for each setting named, who and what a change affects and the order to make them in"
     },
     "sec.health-check-score": {
+      "fixComplexity": "complex",
       "low": 8,
-      "high": 16,
+      "high": 14,
       "basis": "Preparing, for each high and medium risk setting, who and what a change affects and the order to make them in"
     },
     "sec.insecure-remote-sites": {
+      "fixComplexity": "moderate",
       "low": 1,
       "high": 4,
       "basis": "Moving each site to HTTPS and turning off the mixed-protocol setting, in a sandbox, for the admin to repeat"
     },
     "sec.modify-all-data": {
+      "fixComplexity": "complex",
       "facts": [
         "unexpected"
       ],
       "each": "person outside the admin team who holds it",
       "minutesLow": 180,
-      "minutesHigh": 360,
-      "capHours": 24,
+      "minutesHigh": 315,
+      "capHours": 21,
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "sec.peer-outlier-access": {
+      "fixComplexity": "moderate",
       "facts": [
         "people"
       ],
       "each": "person with access their peers don't have",
       "minutesLow": 30,
-      "minutesHigh": 60,
-      "capHours": 8,
+      "minutesHigh": 55,
+      "capHours": 7,
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "sec.personal-integration-accounts": {
+      "fixComplexity": "complex",
       "facts": [
         "accounts"
       ],
       "each": "personal account used for an integration",
       "minutesLow": 240,
-      "minutesHigh": 480,
-      "capHours": 24,
+      "minutesHigh": 420,
+      "capHours": 21,
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "sec.self-authorised-connected-apps": {
+      "fixComplexity": "complex",
       "facts": [
         "open"
       ],
       "each": "connected app users can authorise",
       "minutesLow": 120,
-      "minutesHigh": 240,
-      "capHours": 16,
+      "minutesHigh": 210,
+      "capHours": 14,
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "sec.sharing-defaults": {
+      "fixComplexity": "complex",
       "facts": [
         "openObjects"
       ],
       "each": "object with an open default",
       "minutesLow": 240,
-      "minutesHigh": 480,
-      "capHours": 24,
+      "minutesHigh": 420,
+      "capHours": 21,
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "sec.unused-access": {
+      "fixComplexity": "moderate",
       "facts": [
         "emptyProfiles",
         "emptySets"
       ],
       "each": "unused profile or permission set",
       "minutesLow": 15,
-      "minutesHigh": 30,
-      "capHours": 8,
+      "minutesHigh": 25,
+      "capHours": 7,
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "sec.view-all-data": {
+      "fixComplexity": "complex",
       "facts": [
         "unexpected"
       ],
       "each": "person outside the admin team who holds it",
       "minutesLow": 180,
-      "minutesHigh": 360,
-      "capHours": 24,
+      "minutesHigh": 315,
+      "capHours": 21,
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "svc.agent-licences": {
+      "fixComplexity": "simple",
       "facts": [
         "wasted"
       ],
       "each": "Service Cloud seat held for no casework",
       "minutesLow": 15,
-      "minutesHigh": 30,
+      "minutesHigh": 25,
       "capHours": 4,
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "svc.backlog-age": {
+      "fixComplexity": "simple",
       "low": 2,
       "high": 4,
       "basis": "Building the report and the check that keeps it current; the owners' time updating their own records isn't counted"
     },
     "svc.backlog-growth": {
+      "fixComplexity": "simple",
       "low": 4,
-      "high": 8,
+      "high": 7,
       "basis": "Preparing the analysis and the options for the people who decide; their time deciding, and making the change, isn't counted"
     },
     "svc.case-classification": {
+      "fixComplexity": "moderate",
       "low": 2,
       "high": 4,
       "basis": "Proposing a short list of types or reasons and building the rule for the owners to turn on"
     },
     "svc.case-customer": {
+      "fixComplexity": "moderate",
       "low": 2,
-      "high": 6,
+      "high": 5,
       "basis": "Checking how incoming cases are matched to contacts and building the matching that's missing"
     },
     "svc.escalation-rules": {
+      "fixComplexity": "moderate",
       "low": 2,
-      "high": 6,
+      "high": 5,
       "basis": "Adding one escalation rule or an entitlement process"
     },
     "svc.escalation-targets": {
+      "fixComplexity": "moderate",
       "facts": [
         "dead"
       ],
       "each": "escalation action with no one to act",
       "minutesLow": 60,
-      "minutesHigh": 120,
-      "capHours": 8,
+      "minutesHigh": 105,
+      "capHours": 7,
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "svc.first-reply-email": {
+      "fixComplexity": "moderate",
       "low": 2,
-      "high": 6,
+      "high": 5,
       "basis": "Setting up an acknowledgement and routing so email cases get a timely first reply"
     },
     "svc.knowledge-current": {
+      "fixComplexity": "simple",
       "facts": [
         "stale"
       ],
       "each": "article not reviewed in the period",
       "minutesLow": 15,
-      "minutesHigh": 30,
-      "capHours": 24,
+      "minutesHigh": 25,
+      "capHours": 21,
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "svc.knowledge-use": {
+      "fixComplexity": "simple",
       "low": 2,
-      "high": 6,
+      "high": 5,
       "basis": "Putting Knowledge on the case page and setting up the reporting"
     },
     "svc.macros-and-quick-text": {
+      "fixComplexity": "simple",
       "low": 2,
-      "high": 6,
+      "high": 5,
       "basis": "Preparing the analysis and the options for the people who decide; their time deciding, and making the change, isn't counted"
     },
     "svc.milestone-breaches": {
+      "fixComplexity": "moderate",
       "low": 4,
-      "high": 8,
+      "high": 7,
       "basis": "Reviewing the milestones missed most and adding warning actions"
     },
     "svc.omni-routing": {
+      "fixComplexity": "moderate",
       "facts": [
         "unrouted"
       ],
       "each": "case queue Omni-Channel doesn't route",
       "minutesLow": 60,
-      "minutesHigh": 120,
-      "capHours": 8,
+      "minutesHigh": 105,
+      "capHours": 7,
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "svc.origin-missing": {
+      "fixComplexity": "moderate",
       "low": 2,
       "high": 4,
       "basis": "Setting Origin automatically for each channel and building the rule for the owners to turn on"
     },
     "svc.priority-resolution": {
+      "fixComplexity": "moderate",
       "low": 4,
-      "high": 8,
+      "high": 7,
       "basis": "Routing high-priority cases to their own queue or routing priority, with a visible target"
     },
     "svc.queue-sprawl": {
+      "fixComplexity": "moderate",
       "low": 2,
       "high": 4,
       "basis": "Preparing the analysis and the options for the people who decide; their time deciding, and making the change, isn't counted"
     },
     "svc.reopened-cases": {
+      "fixComplexity": "moderate",
       "low": 2,
-      "high": 6,
+      "high": 5,
       "basis": "Finding which case types reopen and preparing a confirmation step for the service leaders"
     },
     "svc.unassigned-cases": {
+      "fixComplexity": "moderate",
       "low": 2,
-      "high": 6,
+      "high": 5,
       "basis": "Preparing the analysis and the options for the people who decide; their time deciding, and making the change, isn't counted"
     },
     "tech.apex-code-size": {
+      "fixComplexity": "complex",
       "low": 8,
-      "high": 24,
+      "high": 21,
       "basis": "Finding the Apex nobody calls and preparing the plan for its owners; rewriting code is more"
     },
     "tech.classic-leftovers": {
+      "fixComplexity": "moderate",
       "facts": [
         "javascriptButtons",
         "scontrols",
@@ -768,99 +881,110 @@
       ],
       "each": "JavaScript button, s-control or Classic-only page",
       "minutesLow": 120,
-      "minutesHigh": 360,
-      "capHours": 40,
+      "minutesHigh": 315,
+      "capHours": 35,
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "tech.governor-limit-risk": {
+      "fixComplexity": "complex",
       "facts": [
         "risky"
       ],
       "each": "class or trigger with a query or save in a loop",
       "minutesLow": 120,
-      "minutesHigh": 240,
-      "capHours": 40,
+      "minutesHigh": 210,
+      "capHours": 35,
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "tech.storage-use": {
+      "fixComplexity": "complex",
       "low": 4,
-      "high": 16,
+      "high": 14,
       "basis": "Preparing the plan for what can leave Salesforce and what must be kept; carrying it out is more"
     },
     "tech.test-quality": {
+      "fixComplexity": "moderate",
       "facts": [
         "withoutAssertions",
         "seeAllData"
       ],
       "each": "test class problem (no assertion, or reading the org's data)",
       "minutesLow": 60,
-      "minutesHigh": 180,
-      "capHours": 40,
+      "minutesHigh": 160,
+      "capHours": 35,
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "utl.dashboards-inactive-running-user": {
+      "fixComplexity": "moderate",
       "facts": [
         "affected"
       ],
       "each": "dashboard",
       "minutesLow": 15,
-      "minutesHigh": 30,
-      "capHours": 8,
+      "minutesHigh": 25,
+      "capHours": 7,
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "utl.dormant-licensed-users": {
+      "fixComplexity": "moderate",
       "facts": [
         "users"
       ],
       "each": "dormant user",
       "minutesLow": 15,
-      "minutesHigh": 30,
-      "capHours": 8,
+      "minutesHigh": 25,
+      "capHours": 7,
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "utl.eac-advanced-sync": {
+      "fixComplexity": "simple",
       "low": 1,
       "high": 2,
       "basis": "Turning on one setting and checking that new events link to records"
     },
     "utl.eac-connections": {
+      "fixComplexity": "simple",
       "facts": [
         "broken"
       ],
       "each": "broken connection",
       "minutesLow": 15,
-      "minutesHigh": 30,
-      "capHours": 8,
+      "minutesHigh": 25,
+      "capHours": 7,
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "utl.never-logged-in": {
+      "fixComplexity": "moderate",
       "facts": [
         "users"
       ],
       "each": "user who has never logged in",
       "minutesLow": 15,
-      "minutesHigh": 30,
-      "capHours": 8,
+      "minutesHigh": 25,
+      "capHours": 7,
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
     "utl.package-seats": {
+      "fixComplexity": "simple",
       "low": 1,
       "high": 3,
       "basis": "Preparing each installed app's use for its owner and the request for the renewal"
     },
     "utl.unassigned-licence-seats": {
+      "fixComplexity": "simple",
       "low": 1,
       "high": 2,
       "basis": "Setting the spare seats against the hiring plan and preparing the request for the renewal"
     },
     "utl.unused-reports": {
+      "fixComplexity": "simple",
       "facts": [
         "unused"
       ],
       "each": "unused report",
       "minutesLow": 2,
       "minutesHigh": 5,
-      "capHours": 8,
+      "capHours": 7,
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     }
   }

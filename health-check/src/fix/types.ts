@@ -55,4 +55,7 @@ export type PromptRule = {
   review?: { steps: readonly string[]; verify: readonly string[] };
 };
 
-export type FixRule = { hours: HoursRule; prompt: PromptRule };
+/** How risky or skilled a rule's fix is (DECISIONS.md 636). Not the org's complexity score (614). */
+export type FixComplexity = "simple" | "moderate" | "complex";
+
+export type FixRule = { complexity: FixComplexity; hours: HoursRule; prompt: PromptRule };

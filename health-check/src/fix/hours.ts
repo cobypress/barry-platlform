@@ -1,17 +1,26 @@
-import type { EffortHours } from "../schemas/index.ts";
+import type { EffortHours, TimeBand } from "../schemas/index.ts";
 import type { HoursRule } from "./types.ts";
 
 // Hours to fix one finding, from its rule's declaration and a count the finding
 // already holds (DECISIONS.md 628). Never from a figure the finding doesn't hold:
 // with no such count there's no range.
 
-/** "15 to 30 minutes", "an hour", "1 to 2 hours", "2 to 4 hours". */
+/** "1 hour", "2 hours 15 minutes", "45 minutes". */
+const spoken = (minutes: number): string => {
+  const [h, m] = [Math.floor(minutes / 60), minutes % 60];
+  const hours = h === 0 ? "" : `${h} ${h === 1 ? "hour" : "hours"}`;
+  return m === 0 ? hours : `${hours}${hours ? " " : ""}${m} minutes`;
+};
+
+/** "15 to 30 minutes", "an hour", "1 to 2 hours", "1 hour to 1 hour 45 minutes". */
 export function durationText([low, high]: readonly [number, number]): string {
-  const hours = low % 60 === 0 && high % 60 === 0;
-  if (!hours) return low === high ? `${low} minutes` : `${low} to ${high} minutes`;
-  const [a, b] = [low / 60, high / 60];
-  if (a === b) return a === 1 ? "an hour" : `${a} hours`;
-  return `${a} to ${b} hours`;
+  if (high < 60) return low === high ? `${low} minutes` : `${low} to ${high} minutes`;
+  if (low % 60 === 0 && high % 60 === 0) {
+    const [a, b] = [low / 60, high / 60];
+    if (a === b) return a === 1 ? "an hour" : `${a} hours`;
+    return `${a} to ${b} hours`;
+  }
+  return low === high ? spoken(low) : `${spoken(low)} to ${spoken(high)}`;
 }
 
 /** The count a per-unit declaration multiplies: the sum of the facts it names that the finding holds, or null. */
@@ -41,6 +50,18 @@ export function effortHours(rule: HoursRule, facts: Readonly<Record<string, numb
   return {
     low: coveredLow,
     high: Math.max(coveredLow, hoursFor(covered, rule.minutes[1])),
-    basis: `${each}. This range covers the first ${covered} ${covered === 1 ? rule.one : rule.many}; the other ${count - covered} are scoped separately.`,
+    basis: `${each}. This range covers the first ${covered} ${covered === 1 ? rule.one : rule.many}; the other ${count - covered} ${count - covered === 1 ? "is" : "are"} scoped separately.`,
   };
+}
+
+/** The most hours a small fix's high end may be (DECISIONS.md 636). */
+export const SMALL_MAX_HOURS = 4;
+/** The most hours a medium fix's high end may be; over it, large. */
+export const MEDIUM_MAX_HOURS = 16;
+
+/** A finding's time band, from the high end of its own hours, so the two can never disagree. */
+export function timeBandOf(hours: Pick<EffortHours, "high">): TimeBand {
+  if (hours.high <= SMALL_MAX_HOURS) return "small";
+  if (hours.high <= MEDIUM_MAX_HOURS) return "medium";
+  return "large";
 }

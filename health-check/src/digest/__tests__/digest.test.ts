@@ -76,6 +76,15 @@ function resolve(d: RunDigest, r: BuiltReport, path: Array<string | number>): nu
     return built?.status === "measured" ? built[field] : undefined;
   }
   if (top === "plan" && i === "phases" && (sub === "from" || sub === "to")) return plan.phases[field as number]![sub];
+  // An issue's hours (DECISIONS.md 628, 636): the built finding's own.
+  if (top === "findings" && field === "effortHours" && (sub === "low" || sub === "high")) return r.teamFindings.find((x) => x.id === d.findings[i as number]!.id)?.effortHours?.[sub];
+  // The plan's hours: it lists exactly the plan's findings that have hours, with what each action also covers, and adds up theirs.
+  if (top === "plan" && i === "hoursTotal" && (field === "low" || field === "high")) {
+    const total = d.plan.hoursTotal!;
+    const held = new Set([...plan.phases.flatMap((p) => p.findings), ...plan.later].flatMap((f) => [f, ...(plan.alsoFor[f.id] ?? [])]).filter((f) => f.effortHours).map((f) => f.id));
+    if ([...held].sort().join() !== [...total.findingIds].sort().join()) return undefined;
+    return total.findingIds.reduce((sum, id) => sum + r.teamFindings.find((x) => x.id === id)!.effortHours![field], 0);
+  }
   if (top !== "value") return undefined;
   // value.total.low, value.byKind.<kind>.low, value.exposure.low: the report's own, and the sum of the lines named.
   const c = (top === "value" && typeof field === "string" ? field : sub) as "low" | "expected" | "high";
@@ -229,5 +238,48 @@ describe("the run digest (DECISIONS.md 632)", () => {
     const keys = new Set(strings(digest.findings.map((f) => Object.keys(f))).concat(strings(digest.metrics.map((m) => Object.keys(m)))));
     for (const key of ["subjects", "evidence", "guards", "segments", "series", "stats", "facts", "segmentsChecked"]) assert.ok(!keys.has(key), key);
     assert.ok(report.teamFindings.some((f) => f.subjects.length > 0), "the synthetic run has subjects to leave out");
+  });
+  test("carries each issue's hours, time band and fix complexity, and the plan's hours total, every figure traced (DECISIONS.md 636)", () => {
+    const issues = digest.findings.filter((f) => f.status === "issue");
+    assert.ok(issues.length > 30);
+    for (const f of issues) {
+      const built = report.teamFindings.find((x) => x.id === f.id)!;
+      assert.deepEqual(f.effortHours, built.effortHours, f.id);
+      assert.equal(f.timeBand, built.timeBand, f.id);
+      assert.equal(f.fixComplexity, built.fixComplexity, f.id);
+      assert.ok(f.effortHours && f.timeBand && f.fixComplexity, f.id);
+    }
+    for (const f of digest.findings.filter((x) => x.status !== "issue")) assert.ok(f.effortHours === undefined && f.timeBand === undefined && f.fixComplexity === undefined, f.id);
+    // No fix prompt is served as plain data.
+    assert.ok(!JSON.stringify(digest).includes("fixPrompt") && !JSON.stringify(digest).includes("What our report recommends"));
+    const total = digest.plan.hoursTotal!;
+    assert.ok(total.findingIds.length > 10 && total.high >= total.low && total.low > 0);
+    assert.equal(total.high, total.findingIds.reduce((s, id) => s + digest.findings.find((f) => f.id === id)!.effortHours!.high, 0));
+    // The resolver catches a moved hour, in a finding and in the total.
+    const moved = structuredClone(digest);
+    const at = moved.findings.findIndex((f) => f.effortHours);
+    moved.findings[at]!.effortHours!.high += 1;
+    assert.notEqual(resolve(moved, report, ["findings", at, "effortHours", "high"]), moved.findings[at]!.effortHours!.high);
+    moved.plan.hoursTotal!.findingIds.pop();
+    assert.equal(resolve(moved, report, ["plan", "hoursTotal", "low"]), undefined);
+  });
+
+  test("withheldNames uses decision 628's word match: a lower-case run-together name in an API name is withheld (DECISIONS.md 636)", () => {
+    const person = pseudonyms.entries().find((e) => e.token.startsWith("[[user:") && /^\p{Lu}\p{Ll}+ \p{Lu}\p{Ll}+$/u.test(e.name))!;
+    const [first, surname] = person.name.toLowerCase().split(" ") as [string, string];
+    const named = `${first[0]}${surname}_nightly_sync`;
+    const inventory: Inventory = {
+      version: 1,
+      madeAt: MADE_AT,
+      scope: "complete",
+      fillRates: { rows: [], notes: [] },
+      packages: { rows: [], notes: [] },
+      connectedApps: { rows: [{ name: named, installed: true, adminApprovedOnly: true, firstAuthorised: null, lastUsed: null, users: 1, uses: 1 }, { name: "nightly_sync", installed: true, adminApprovedOnly: true, firstAuthorised: null, lastUsed: null, users: 1, uses: 1 }], notes: [] },
+      riskyPermissions: { rows: [], notes: [], checked: [], notInOrg: [] },
+      limits: { unavailable: "No access" },
+    };
+    const hash = (x: string) => createHash("sha256").update(x, "utf8").digest("hex");
+    assert.deepEqual(withheldNames(inventory, pseudonyms), [hash(named)]);
+    assert.ok(!JSON.stringify(buildDigest({ report, pseudonyms, inventory, madeAt: MADE_AT })).includes(named));
   });
 });

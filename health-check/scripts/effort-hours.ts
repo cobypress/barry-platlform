@@ -17,13 +17,13 @@ export const EFFORT_HOURS_FILE = fileURLToPath(new URL("../fixtures/effort-hours
 export const REMAKE = "npm run effort-hours";
 
 export const STATUS =
-  "Estimates awaiting the owner's review. Hours for a fix led by a consultant who knows Salesforce, as a range in whole hours. A fixed range covers the work whatever the size of the org. A range for each unit is multiplied by the count the finding holds (the sum of the facts named, or of all its facts), rounded up to whole hours. Past the cap, a rule whose work stops growing says why and holds the range at the cap; every other rule's range covers only the first units the cap allows, and says the rest is scoped separately. Printed in no document until approved.";
+  "Estimates awaiting the owner's review. Hours for a fix led by a consultant who knows Salesforce, as a range in whole hours. A fixed range covers the work whatever the size of the org. A range for each unit is multiplied by the count the finding holds (the sum of the facts named, or of all its facts), rounded up to whole hours. Past the cap, a rule whose work stops growing says why and holds the range at the cap; every other rule's range covers only the first units the cap allows, and says the rest is scoped separately. Each rule's fixComplexity (simple, moderate or complex) says how risky or skilled its fix is, which the hours don't (DECISIONS.md 636); it is not the org's complexity score. Printed in no document until approved.";
 
-type PerUnit = { facts: string[] | "all"; each: string; minutesLow: number; minutesHigh: number; capHours: number; pastTheCap: string };
+type PerUnit = { fixComplexity: string; facts: string[] | "all"; each: string; minutesLow: number; minutesHigh: number; capHours: number; pastTheCap: string };
 
 export type EffortHoursFile = {
   status: string;
-  rules: Record<string, { low: number; high: number; basis: string } | PerUnit>;
+  rules: Record<string, { fixComplexity: string; low: number; high: number; basis: string } | PerUnit>;
 };
 
 /** Each rule once, by id in code-point order, so the file is the same bytes wherever it's made. */
@@ -31,7 +31,8 @@ export function effortHoursFile(table: Readonly<Record<string, FixRule>> = FIX_T
   const rules: EffortHoursFile["rules"] = {};
   for (const id of Object.keys(table).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))) {
     const h = table[id]!.hours;
-    rules[id] = h.kind === "fixed" ? { low: h.low, high: h.high, basis: h.basis } : { facts: h.facts === "all" ? "all" : [...h.facts], each: h.one, minutesLow: h.minutes[0], minutesHigh: h.minutes[1], capHours: h.cap, pastTheCap: h.bulk ? `held at the cap: ${h.bulk}` : "covers the first units the cap allows; the rest is scoped separately" };
+    const fixComplexity = table[id]!.complexity;
+    rules[id] = h.kind === "fixed" ? { fixComplexity, low: h.low, high: h.high, basis: h.basis } : { fixComplexity, facts: h.facts === "all" ? "all" : [...h.facts], each: h.one, minutesLow: h.minutes[0], minutesHigh: h.minutes[1], capHours: h.cap, pastTheCap: h.bulk ? `held at the cap: ${h.bulk}` : "covers the first units the cap allows; the rest is scoped separately" };
   }
   return { status: STATUS, rules };
 }

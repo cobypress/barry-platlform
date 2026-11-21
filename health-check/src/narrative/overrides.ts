@@ -319,6 +319,8 @@ function overrideFinding(f: Finding, overrides: NumberOverride[]): { finding: Fi
   // value as read changes nothing and keeps them.
   if (carried.some(({ figure, last }) => last !== figure.asRead)) {
     delete finding.effortHours;
+    // The band is the hours' own (DECISIONS.md 636), so it goes with them; the rule's fix complexity stands.
+    delete finding.timeBand;
     delete finding.fixPrompt;
   }
   return { finding, refused: [] };

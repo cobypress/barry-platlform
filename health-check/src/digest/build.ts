@@ -3,6 +3,7 @@ import { holdsNameOrSecret } from "../narrative/guard.ts";
 import type { BuiltReport } from "../narrative/sections.ts";
 import { buildPlan, domainLabel } from "../narrative/select.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
+import { labelHoldsPersonName } from "../fix/prompt.ts";
 import { DIGEST_VERSION, NAMED_PEOPLE_SENTENCE, RunDigest, type DigestArea, type DigestFinding, type DigestMetric, type DigestTotal, type DigestValueModel } from "../schemas/digest.ts";
 import type { Finding, Metric } from "../schemas/index.ts";
 import type { Inventory } from "../schemas/inventory.ts";
@@ -59,7 +60,8 @@ export function inventoryNames(inventory: Inventory): string[] {
 /** The hashes of the inventory's names that hold a known person's name, sorted, each once. The names themselves never leave. */
 export function withheldNames(inventory: Inventory | null, pseudonyms: Pseudonymiser): string[] {
   if (!inventory) return [];
-  return [...new Set(inventoryNames(inventory).filter((n) => holdsPersonOrSecret(n, pseudonyms)).map(sha256))].sort();
+  // Decision 628's word match too, so a lower-case run-together name ("sreed_sync") is caught (DECISIONS.md 636).
+  return [...new Set(inventoryNames(inventory).filter((n) => holdsPersonOrSecret(n, pseudonyms) || labelHoldsPersonName(n, pseudonyms)).map(sha256))].sort();
 }
 
 // Each part is put together from the report as it stands; guardDigest then takes every string in it through the guard.
@@ -81,7 +83,27 @@ function digestFinding(f: Finding): DigestFinding {
     effortSize: f.effort.size,
     notMeasurableReason: f.notMeasurableReason,
     ...(f.notMeasurableKind ? { notMeasurableKind: f.notMeasurableKind } : {}),
+    ...(f.effortHours ? { effortHours: { low: f.effortHours.low, high: f.effortHours.high, basis: f.effortHours.basis } } : {}),
+    ...(f.timeBand ? { timeBand: f.timeBand } : {}),
+    ...(f.fixComplexity ? { fixComplexity: f.fixComplexity } : {}),
   };
+}
+
+/**
+ * The hours to fix everything the plan holds (DECISIONS.md 636): each finding
+ * in its phases and later list, and the other issues each action also covers,
+ * once each, that has hours. Null when none has.
+ */
+export function planHours(plan: ReturnType<typeof buildPlan>): { low: number; high: number; findingIds: string[] } | null {
+  const seen = new Set<string>();
+  const held: Finding[] = [];
+  for (const f of [...plan.phases.flatMap((p) => p.findings), ...plan.later].flatMap((f) => [f, ...(plan.alsoFor[f.id] ?? [])])) {
+    if (seen.has(f.id) || !f.effortHours) continue;
+    seen.add(f.id);
+    held.push(f);
+  }
+  if (held.length === 0) return null;
+  return { low: held.reduce((s, f) => s + f.effortHours!.low, 0), high: held.reduce((s, f) => s + f.effortHours!.high, 0), findingIds: held.map((f) => f.id) };
 }
 
 function digestMetric(m: Metric): DigestMetric {
@@ -143,6 +165,7 @@ export function buildDigest({ report, pseudonyms, inventory, madeAt }: DigestFor
   const plan = buildPlan(report.teamFindings, report.added);
   const ids = (fs: Finding[]) => fs.map((f) => f.id);
   const overall = report.overall;
+  const hoursTotal = planHours(plan);
   // Typed by the parse below, which holds every id and code to its shape.
   const raw = {
     version: DIGEST_VERSION,
@@ -165,6 +188,7 @@ export function buildDigest({ report, pseudonyms, inventory, madeAt }: DigestFor
       later: ids(plan.later),
       quickWins: ids(plan.quickWins),
       alsoFor: Object.fromEntries(Object.entries(plan.alsoFor).map(([id, fs]) => [id, ids(fs)])),
+      ...(hoursTotal ? { hoursTotal } : {}),
     },
     withheldNames: withheldNames(inventory, pseudonyms),
   };
@@ -179,7 +203,7 @@ export function buildDigest({ report, pseudonyms, inventory, madeAt }: DigestFor
  */
 export const STRUCTURAL_KEYS: ReadonlySet<string> = new Set([
   "version", "runId", "product", "reviewed", "asOf", "madeAt", "baselineRunId", "status", "domain", "areaDomains", "findingIds", "id", "ruleId",
-  "severity", "confidence", "recommendationType", "kind", "effortSize", "notMeasurableKind", "from", "to", "currency", "group", "counted",
+  "severity", "confidence", "recommendationType", "kind", "effortSize", "notMeasurableKind", "timeBand", "fixComplexity", "from", "to", "currency", "group", "counted",
   "lineIds", "leftOut", "later", "quickWins", "key", "grade", "withheldNames",
 ]);
 /** Keyed by finding id, each holding finding ids: ids all the way down. */

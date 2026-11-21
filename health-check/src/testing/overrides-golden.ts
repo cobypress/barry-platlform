@@ -152,9 +152,10 @@ function handCases(): HandCase[] {
   const sized = finding(10, "Licences no one uses", "4 licences are unused.", { unused: 4 }, { value: { kind: "licence_cost", amount: 3600, unit: "GBP", period: "per year", assumptions: ["Each licence costs £900 a year."] } });
   add({ name: "a finding: the sized amount in no text changes (carried)", findings: [sized], overrides: [onFinding(sized, "value.amount", 3600, 2700)] });
 
-  // Hours to fix and a fix prompt (DECISIONS.md 628) are made from the figures as
-  // read, so a carried correction drops both, and a refused one or one put back keeps them.
-  const fix = { effortHours: { low: 2, high: 4, basis: "About 1 to 2 hours for each flow, for 2 flows." }, fixPrompt: "What we found: Flows are failing. 2 flows have no fault path." };
+  // Hours to fix, their time band and a fix prompt (DECISIONS.md 628, 636) are made from the
+  // figures as read, so a carried correction drops them, and a refused one or one put back
+  // keeps them; the rule's fix complexity stands either way.
+  const fix = { effortHours: { low: 2, high: 4, basis: "About 1 to 2 hours for each flow, for 2 flows." }, timeBand: "small" as const, fixComplexity: "moderate" as const, fixPrompt: "What we found: Flows are failing. 2 flows have no fault path." };
   const flows = finding(13, "Flows are failing", "2 flows have no fault path.", { affected: 2 }, fix);
   add({ name: "a finding with hours and a prompt: a carried correction drops both", findings: [flows], overrides: [onFinding(flows, "facts.affected", 2, 5)] });
   const hiddenFix = finding(14, "Flows are failing", "Some flows have no fault path.", { affected: 2 }, fix);

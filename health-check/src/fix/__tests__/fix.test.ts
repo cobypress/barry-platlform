@@ -20,7 +20,7 @@ import { loadAnswers, loadCalibration, syntheticProvider } from "../../testing/r
 import { buildScaleOrg, FIVE_HUNDRED_USERS, scaled } from "../../testing/scale-org.ts";
 import { Simulator, SYNTHETIC_RECORDS, type OrgRecords } from "../../testing/simulator.ts";
 import { AS_OF, CONNECTED_USER, ORG_ID } from "../../testing/synthetic-org.ts";
-import { effortHours } from "../hours.ts";
+import { effortHours, MEDIUM_MAX_HOURS, SMALL_MAX_HOURS, timeBandOf } from "../hours.ts";
 import { assemblePrompt, fixPrompt, FRAMING, isHeldBack, labelHoldsPersonName, labelWords, MIN_NAME_PART, promptIsSafe, withheldLabels, type PromptFinding } from "../prompt.ts";
 import { FIX_TABLE, NEVER_RAISES } from "../table.ts";
 
@@ -147,29 +147,29 @@ describe("hours to fix", () => {
   const reports = FIX_TABLE["utl.unused-reports"]!.hours;
 
   test("a unit rate is the count times the minutes, rounded up to whole hours, with what the count counts in the basis", () => {
-    assert.deepEqual(effortHours(flows, { affected: 6 }), { low: 6, high: 12, basis: "About 1 to 2 hours for each flow with no fault path, for 6 flows with no fault path." });
-    assert.deepEqual(effortHours(flows, { affected: 1 }), { low: 1, high: 2, basis: "About 1 to 2 hours for each flow with no fault path, for 1 flow with no fault path." });
-    // 3 fields at 30 to 60 minutes: 1.5 hours rounds up to 2, and 3 hours.
-    assert.deepEqual(effortHours(fields, { unusedFields: 3 }), { low: 2, high: 3, basis: "About 30 to 60 minutes for each field almost never filled in, for 3 fields almost never filled in." });
+    assert.deepEqual(effortHours(flows, { affected: 6 }), { low: 6, high: 11, basis: "About 1 hour to 1 hour 45 minutes for each flow with no fault path, for 6 flows with no fault path." });
+    assert.deepEqual(effortHours(flows, { affected: 1 }), { low: 1, high: 2, basis: "About 1 hour to 1 hour 45 minutes for each flow with no fault path, for 1 flow with no fault path." });
+    // 3 fields at 30 to 55 minutes: 1.5 hours rounds up to 2, and 2.75 to 3.
+    assert.deepEqual(effortHours(fields, { unusedFields: 3 }), { low: 2, high: 3, basis: "About 30 to 55 minutes for each field almost never filled in, for 3 fields almost never filled in." });
   });
 
   test("the cap where work grows with every item: the range covers the first items the cap allows and says the rest is scoped separately (finding 6b)", () => {
     const h = effortHours(fields, { unusedFields: 300 })!;
-    assert.deepEqual(h, { low: 8, high: 16, basis: "About 30 to 60 minutes for each field almost never filled in, for 300 fields almost never filled in. This range covers the first 16 fields almost never filled in; the other 284 are scoped separately." });
+    assert.deepEqual(h, { low: 8, high: 14, basis: "About 30 to 55 minutes for each field almost never filled in, for 300 fields almost never filled in. This range covers the first 15 fields almost never filled in; the other 285 are scoped separately." });
     assert.doesNotMatch(JSON.stringify(Object.values(FIX_TABLE).map((r) => r.hours)), /done in bulk, so it stops growing/);
     // Just under the cap, nothing is held.
-    assert.deepEqual(effortHours(fields, { unusedFields: 16 }), { low: 8, high: 16, basis: "About 30 to 60 minutes for each field almost never filled in, for 16 fields almost never filled in." });
+    assert.deepEqual(effortHours(fields, { unusedFields: 14 }), { low: 7, high: 13, basis: "About 30 to 55 minutes for each field almost never filled in, for 14 fields almost never filled in." });
   });
 
   test("no rule holds its range at the cap: every per-item rule says how many items its range covers (round 3, finding 5)", () => {
     const held = Object.entries(FIX_TABLE).filter(([, r]) => r.hours.kind === "each" && r.hours.bulk !== undefined).map(([id]) => id);
     assert.deepEqual(held, []);
-    assert.deepEqual(effortHours(reports, { unused: 300 }), { low: 4, high: 8, basis: "About 2 to 5 minutes for each unused report, for 300 unused reports. This range covers the first 96 unused reports; the other 204 are scoped separately." });
+    assert.deepEqual(effortHours(reports, { unused: 300 }), { low: 3, high: 7, basis: "About 2 to 5 minutes for each unused report, for 300 unused reports. This range covers the first 84 unused reports; the other 216 are scoped separately." });
     // Rates a consultant would quote, production hand-over included.
-    assert.deepEqual(effortHours(FIX_TABLE["sec.modify-all-data"]!.hours, { unexpected: 1 }), { low: 3, high: 6, basis: "About 3 to 6 hours for each person outside the admin team who holds it, for 1 person outside the admin team who holds it." });
-    assert.deepEqual(effortHours(FIX_TABLE["sec.view-all-data"]!.hours, { unexpected: 10 })!.basis, "About 3 to 6 hours for each person outside the admin team who holds it, for 10 people outside the admin team who hold it. This range covers the first 4 people outside the admin team who hold it; the other 6 are scoped separately.");
-    assert.deepEqual(effortHours(FIX_TABLE["sec.self-authorised-connected-apps"]!.hours, { open: 1 }), { low: 2, high: 4, basis: "About 2 to 4 hours for each connected app users can authorise, for 1 connected app users can authorise." });
-    assert.deepEqual(effortHours(FIX_TABLE["svc.escalation-targets"]!.hours, { dead: 2 }), { low: 2, high: 4, basis: "About 1 to 2 hours for each escalation action with no one to act, for 2 escalation actions with no one to act." });
+    assert.deepEqual(effortHours(FIX_TABLE["sec.modify-all-data"]!.hours, { unexpected: 1 }), { low: 3, high: 6, basis: "About 3 hours to 5 hours 15 minutes for each person outside the admin team who holds it, for 1 person outside the admin team who holds it." });
+    assert.deepEqual(effortHours(FIX_TABLE["sec.view-all-data"]!.hours, { unexpected: 10 })!.basis, "About 3 hours to 5 hours 15 minutes for each person outside the admin team who holds it, for 10 people outside the admin team who hold it. This range covers the first 4 people outside the admin team who hold it; the other 6 are scoped separately.");
+    assert.deepEqual(effortHours(FIX_TABLE["sec.self-authorised-connected-apps"]!.hours, { open: 1 }), { low: 2, high: 4, basis: "About 2 hours to 3 hours 30 minutes for each connected app users can authorise, for 1 connected app users can authorise." });
+    assert.deepEqual(effortHours(FIX_TABLE["svc.escalation-targets"]!.hours, { dead: 2 }), { low: 2, high: 4, basis: "About 1 hour to 1 hour 45 minutes for each escalation action with no one to act, for 2 escalation actions with no one to act." });
   });
 
   test("no count the finding holds, no range: never a guess", () => {
@@ -181,24 +181,24 @@ describe("hours to fix", () => {
 
   test("a rule holding several counts sums them, and one holding a count per object sums every fact (finding 6a)", () => {
     const classic = FIX_TABLE["tech.classic-leftovers"]!.hours;
-    assert.deepEqual(effortHours(classic, { javascriptButtons: 3, scontrols: 1, classicPages: 2, pages: 40 }), { low: 12, high: 36, basis: "About 2 to 6 hours for each JavaScript button, s-control or Classic-only page, for 6 JavaScript buttons, s-controls and Classic-only pages." });
+    assert.deepEqual(effortHours(classic, { javascriptButtons: 3, scontrols: 1, classicPages: 2, pages: 40 }), { low: 12, high: 32, basis: "About 2 hours to 5 hours 15 minutes for each JavaScript button, s-control or Classic-only page, for 6 JavaScript buttons, s-controls and Classic-only pages." });
     // S-controls not read: the others still count, and the total pages never do.
     assert.equal(effortHours(classic, { javascriptButtons: 1, classicPages: 1, pages: 9 })!.basis.includes("for 2 JavaScript"), true);
     assert.deepEqual(effortHours(FIX_TABLE["tech.test-quality"]!.hours, { testClasses: 40, withoutAssertions: 3, seeAllData: 2 })!.low, 5);
     assert.match(effortHours(FIX_TABLE["sec.unused-access"]!.hours, { emptyProfiles: 3, customProfiles: 9, emptySets: 5, ownSets: 30 })!.basis, /for 8 unused profiles and permission sets\.$/);
-    assert.match(effortHours(FIX_TABLE["cfg.custom-field-sprawl"]!.hours, { Account: 156, Opportunity: 210 })!.basis, /for 366 custom fields on the objects named\. This range covers the first 240/);
+    assert.match(effortHours(FIX_TABLE["cfg.custom-field-sprawl"]!.hours, { Account: 156, Opportunity: 210 })!.basis, /for 366 custom fields on the objects named\. This range covers the first 210/);
   });
 
   test("integration hours count what the change touches (finding 6c)", () => {
     // 1 of 4 accounts isn't API only: one account's work, not four.
-    assert.equal(effortHours(FIX_TABLE["int.integration-users-interactive"]!.hours, { accounts: 4, open: 1, loggedInByHand: 0 })!.basis, "About 1 to 3 hours for each integration account not set to API only, for 1 integration account not set to API only.");
+    assert.equal(effortHours(FIX_TABLE["int.integration-users-interactive"]!.hours, { accounts: 4, open: 1, loggedInByHand: 0 })!.basis, "About 1 hour to 2 hours 40 minutes for each integration account not set to API only, for 1 integration account not set to API only.");
     // 3 accounts on full licences and none spare: still the work for all 3.
-    assert.deepEqual(effortHours(FIX_TABLE["int.integration-user-licences"]!.hours, { accounts: 3, onFull: 3, spare: 0, movable: 0 }), { low: 3, high: 6, basis: "About 1 to 2 hours for each integration account on a full licence, for 3 integration accounts on a full licence." });
+    assert.deepEqual(effortHours(FIX_TABLE["int.integration-user-licences"]!.hours, { accounts: 3, onFull: 3, spare: 0, movable: 0 }), { low: 3, high: 6, basis: "About 1 hour to 1 hour 45 minutes for each integration account on a full licence, for 3 integration accounts on a full licence." });
     assert.match(effortHours(FIX_TABLE["sec.personal-integration-accounts"]!.hours, { accounts: 2 })!.basis, /for each personal account used for an integration, for 2 personal accounts/);
   });
 
   test("a fixed range is the declaration as it stands", () => {
-    assert.deepEqual(effortHours(FIX_TABLE["cfg.stage-sprawl"]!.hours, { activeStages: 40 }), { low: 4, high: 8, basis: "Preparing the analysis and the options for the people who decide; their time deciding, and making the change, isn't counted." });
+    assert.deepEqual(effortHours(FIX_TABLE["cfg.stage-sprawl"]!.hours, { activeStages: 40 }), { low: 4, high: 7, basis: "Preparing the analysis and the options for the people who decide; their time deciding, and making the change, isn't counted." });
   });
 });
 
@@ -216,9 +216,9 @@ describe("the synthetic org's findings carry both", () => {
   });
 
   test("worked by hand: 2 flows, 20 articles, and 59 reports", () => {
-    assert.deepEqual(one("aut.hardcoded-ids-in-flows").effortHours, { low: 2, high: 4, basis: "About 1 to 2 hours for each flow with hardcoded values, for 2 flows with hardcoded values." });
-    // 20 articles at 15 to 30 minutes: 5 to 10 hours.
-    assert.deepEqual(one("svc.knowledge-current").effortHours, { low: 5, high: 10, basis: "About 15 to 30 minutes for each article not reviewed in the period, for 20 articles not reviewed in the period." });
+    assert.deepEqual(one("aut.hardcoded-ids-in-flows").effortHours, { low: 2, high: 4, basis: "About 1 hour to 1 hour 45 minutes for each flow with hardcoded values, for 2 flows with hardcoded values." });
+    // 20 articles at 15 to 25 minutes: 5 hours to 8 hours 20 minutes, rounded up to 9.
+    assert.deepEqual(one("svc.knowledge-current").effortHours, { low: 5, high: 9, basis: "About 15 to 25 minutes for each article not reviewed in the period, for 20 articles not reviewed in the period." });
     // 59 reports at 2 to 5 minutes: 118 minutes rounds up to 2 hours, 295 to 5.
     assert.deepEqual(one("utl.unused-reports").effortHours, { low: 2, high: 5, basis: "About 2 to 5 minutes for each unused report, for 59 unused reports." });
   });
@@ -580,5 +580,57 @@ describe("round 3: the second reviewer's findings (decision 628)", () => {
     const orders = FIX_TABLE["cpq.quote-to-order"]!.prompt.steps.join(" ");
     assert.match(orders, /Build a report of won quotes with no order, for their owners\./);
     assert.doesNotMatch(orders, /validation rule|build the check/);
+  });
+});
+
+describe("time band and fix complexity on every issue (decision 636)", () => {
+  test("every rule that can raise an issue declares a fix complexity, and nothing else does", () => {
+    const missing = rules.filter((r) => !NEVER_RAISES.has(r.id) && !["simple", "moderate", "complex"].includes(FIX_TABLE[r.id]?.complexity as string)).map((r) => r.id);
+    assert.deepEqual(missing, []);
+    // The sort the decision states, held at a few rules either side of each line.
+    for (const id of ["sec.sharing-defaults", "aut.multiple-triggers", "sec.modify-all-data", "dq.duplicate-accounts"]) assert.equal(FIX_TABLE[id]!.complexity, "complex", id);
+    for (const id of ["aut.flows-without-fault-paths", "cfg.unused-custom-fields", "dq.open-opps-missing-amount"]) assert.equal(FIX_TABLE[id]!.complexity, "moderate", id);
+    for (const id of ["cfg.undocumented-fields", "cur.stuck-in-stage", "utl.eac-advanced-sync"]) assert.equal(FIX_TABLE[id]!.complexity, "simple", id);
+  });
+
+  test("the band follows the hours at each boundary: 4 small, just over 4 medium, 16 medium, just over 16 large", () => {
+    assert.equal(SMALL_MAX_HOURS, 4);
+    assert.equal(MEDIUM_MAX_HOURS, 16);
+    assert.equal(timeBandOf({ high: 1 }), "small");
+    assert.equal(timeBandOf({ high: 4 }), "small");
+    assert.equal(timeBandOf({ high: 4.01 }), "medium");
+    assert.equal(timeBandOf({ high: 5 }), "medium");
+    assert.equal(timeBandOf({ high: 16 }), "medium");
+    assert.equal(timeBandOf({ high: 16.01 }), "large");
+    assert.equal(timeBandOf({ high: 17 }), "large");
+  });
+
+  test("every issue in both runs has a band that is its own hours' and the rule's complexity; worked by hand: small, medium and large", () => {
+    for (const f of [...recorded, ...generated].filter((x) => x.status === "issue")) {
+      assert.ok(f.effortHours && f.timeBand === timeBandOf(f.effortHours), f.ruleId);
+      assert.equal(f.fixComplexity, FIX_TABLE[f.ruleId]!.complexity, f.ruleId);
+    }
+    assert.equal(one("aut.hardcoded-ids-in-flows").timeBand, "small"); // 2 to 4 hours
+    assert.equal(one("svc.knowledge-current").timeBand, "medium"); // 5 to 9 hours
+    const sprawl = one("cfg.custom-field-sprawl"); // 156 fields at 5 to 10 minutes: 13 to 26 hours
+    assert.deepEqual([sprawl.effortHours!.low, sprawl.effortHours!.high, sprawl.timeBand], [13, 26, "large"]);
+  });
+
+  test("a pass and a not measurable finding carry neither, and an older result without them parses as before", () => {
+    for (const f of [...recorded, ...generated].filter((x) => x.status !== "issue")) assert.ok(f.timeBand === undefined && f.fixComplexity === undefined, f.ruleId);
+    const { effortHours: _h, timeBand: _b, fixComplexity: _c, fixPrompt: _p, ...older } = issues[0]!;
+    const parsed = Finding.parse(older);
+    assert.ok(parsed.timeBand === undefined && parsed.fixComplexity === undefined);
+    assert.deepEqual(Object.keys(parsed), Object.keys(older));
+    assert.equal(Finding.safeParse({ ...issues[0]!, timeBand: "huge" }).success, false);
+    assert.equal(Finding.safeParse({ ...issues[0]!, fixComplexity: "hard" }).success, false);
+  });
+
+  test("a correction that drops the hours drops the band with them, and the rule's complexity stands", () => {
+    const flows = one("aut.hardcoded-ids-in-flows");
+    const row: NumberOverride = { id: "ov-0001", runId: "run-0001", target: { type: "finding", id: flows.id, field: "facts.affected" }, previousValue: 2, newValue: 3, reason: "Checked with the customer.", overriddenBy: "Synthetic Consultant", overriddenAt: "2026-10-31T13:00:00.000Z" };
+    const after = applyOverrides(recorded, [], [row]).findings.find((f) => f.id === flows.id)!;
+    assert.ok(after.effortHours === undefined && after.timeBand === undefined);
+    assert.equal(after.fixComplexity, flows.fixComplexity);
   });
 });
