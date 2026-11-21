@@ -221,6 +221,38 @@ const SIGNED_OFF: string[] = [
   "src/domains/configuration/index.ts: tooMany",
   // Our own fixed words: literal types from `as const` tables, literal unions or helpers returning literals, none read from the org (each read in review).
   "src/domains/configuration/index.ts: o",
+  // adoption (DECISIONS.md 657).
+  // Numbers: counts, rates, limits and constants the rule works out (each typed number).
+  "src/domains/adoption/index.ts: BARELY_DAYS",
+  "src/domains/adoption/index.ts: BARELY_DAYS",
+  "src/domains/adoption/index.ts: FALL_SHARE",
+  "src/domains/adoption/index.ts: FALL_SHARE",
+  "src/domains/adoption/index.ts: FALL_SPAN_MONTHS + 1",
+  "src/domains/adoption/index.ts: MIN_GROUP",
+  "src/domains/adoption/index.ts: MIN_GROUP",
+  "src/domains/adoption/index.ts: MIN_GROUP",
+  "src/domains/adoption/index.ts: RECENT_DAYS",
+  "src/domains/adoption/index.ts: RECENT_DAYS",
+  "src/domains/adoption/index.ts: classic.filter((u) => profileOf(u) === p).length",
+  "src/domains/adoption/index.ts: classic.length",
+  "src/domains/adoption/index.ts: expected",
+  "src/domains/adoption/index.ts: f.drop",
+  "src/domains/adoption/index.ts: f.now",
+  "src/domains/adoption/index.ts: f.peak",
+  "src/domains/adoption/index.ts: seen",
+  "src/domains/adoption/index.ts: share",
+  "src/domains/adoption/index.ts: who.length",
+  "src/domains/adoption/index.ts: x.barely",
+  "src/domains/adoption/index.ts: x.g.users.length",
+  // Sentences said made: a said or joinSaid result held in a variable, a helper or option returning one, plural over literal nouns, or a said form (each typed Said).
+  "src/domains/adoption/index.ts: f.words",
+  "src/domains/adoption/index.ts: plural(months.length, \"whole month\")",
+  "src/domains/adoption/index.ts: plural(unread, \"user\")",
+  "src/domains/adoption/index.ts: plural(who.length, \"active user\")",
+  "src/domains/adoption/index.ts: window",
+  // Our own fixed words: literal types from `as const` tables, literal unions or helpers returning literals, none read from the org (each read in review).
+  "src/domains/adoption/index.ts: g.dimension",
+  "src/domains/adoption/index.ts: x.g.dimension",
 ];
 
 const ROOT = join(import.meta.dirname, "../../..");
