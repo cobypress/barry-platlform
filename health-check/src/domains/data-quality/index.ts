@@ -16,10 +16,17 @@ import { loadPipeline, unsplitLostReason, type Deal } from "../historic-pipeline
 import { potentialRevenue, SITUATIONS, type Situation } from "../historic-pipeline/potential.ts";
 import type { Value } from "../../schemas/index.ts";
 import type { DomainModule } from "../types.ts";
+import { joinSaid, org, said, type Said } from "../../engine/org-words.ts";
+import { andList, grouped } from "../../engine/said-forms.ts";
+
+// Every title, summary, recommendation and reason of its own is written with
+// `said`, and every name the org chose with `org`, so the digest can say which
+// words are the org's (DECISIONS.md 655, 657). A reason passed on from an extract
+// or the pipeline read stays plain: unknown.
 
 const STALE_ACTIVITY_DAYS = 90;
 const MIN_SEGMENT = 10;
-const DUPLICATE_OBJECTS = ["Account", "Contact", "Lead"];
+const DUPLICATE_OBJECTS = ["Account", "Contact", "Lead"] as const;
 const LEAD_STALE_LIMIT = 30;
 const CONTACT_GAP_LIMIT = 10;
 const OWNER_GAP_LIMIT = 1;
@@ -29,6 +36,10 @@ const dealDimensions = (ctx: RuleContext): Record<string, (d: Deal) => string> =
   team: (d) => d.team,
   rep: (d) => ctx.userLabel(d.OwnerId),
 });
+
+/** A segment's dimension in words: ours for the dimensions we name, the org's for anything else. */
+const dimensionWords = (dimension: string): Said =>
+  dimension === "record type" ? said`record type` : dimension === "team" ? said`team` : dimension === "rep" ? said`rep` : said`${org(dimension)}`;
 
 export function exposure(ctx: RuleContext, deals: Deal[], multiCurrency: boolean, note: string): Value {
   if (multiCurrency) return notSized("The org is multi-currency, so these amounts can't be added.");
@@ -48,11 +59,11 @@ type DealRuleOptions = {
   segmentLimit: number;
   severity: "high" | "medium" | "low";
   scope: (d: Deal, ctx: RuleContext) => boolean;
-  scopeLabel: string;
+  scopeLabel: Said;
   isHit: (d: Deal, ctx: RuleContext) => boolean;
-  issueTitle: string;
-  sentence: (hits: number, n: number, rate: number) => string;
-  recommendation: string;
+  issueTitle: Said;
+  sentence: (hits: number, n: number, rate: number) => Said;
+  recommendation: Said;
   effort: "XS" | "S" | "M";
   owner: string;
   /** True sizes the raw exposure. A situation sizes potential revenue at how often comparable deals still won. */
@@ -71,13 +82,13 @@ function dealRule(options: DealRuleOptions): Rule {
       const data = loadPipeline(ctx);
       if (data.status !== "ok") return { outcome: "not_measurable", reason: data.reason, evidence: data.evidence };
       if (data.unmapped.finalStages.length > 0) {
-        return { outcome: "not_measurable", reason: `The calibration doesn't say whether these stages are open: ${data.unmapped.finalStages.join(", ")}.`, evidence: data.evidence };
+        return { outcome: "not_measurable", reason: said`The calibration doesn't say whether these stages are open: ${joinSaid(data.unmapped.finalStages.map((stage) => said`${org(stage)}`), ", ")}.`, evidence: data.evidence };
       }
       const deals = data.deals.filter((d) => options.scope(d, ctx));
       const today = { from: ctx.window.to, to: ctx.window.to };
       const evidence = [{ ...data.evidence[0]!, count: deals.length, dateRange: today, exclusions: data.exclusions, note: options.scopeLabel }];
       if (deals.length === 0) {
-        return { outcome: "pass", summary: `There are no ${options.scopeLabel} to check.`, evidence, segmentExemptReason: "There are no deals to segment." };
+        return { outcome: "pass", summary: said`There are no ${options.scopeLabel} to check.`, evidence, segmentExemptReason: "There are no deals to segment." };
       }
       const hit = (d: Deal): boolean => options.isHit(d, ctx);
       const result = segmentRate(deals, hit, dealDimensions(ctx), { segmentLimit: options.segmentLimit, minSegment: MIN_SEGMENT });
@@ -85,19 +96,24 @@ function dealRule(options: DealRuleOptions): Rule {
       if (!overLimit && result.hotspots.length === 0) {
         return {
           outcome: "pass",
-          summary: `Affected: ${result.hits} of ${result.n} ${options.scopeLabel} (${result.rate}%), with no segment above ${options.segmentLimit}%.`,
+          summary: said`Affected: ${result.hits} of ${result.n} ${options.scopeLabel} (${result.rate}%), with no segment above ${options.segmentLimit}%.`,
           evidence,
           segmentsChecked: result.segmentsChecked,
           facts: { hits: result.hits, n: result.n, rate: result.rate },
         };
       }
       const worst = result.hotspots[0];
-      const hidden = !overLimit ? ` The total looks acceptable, but by ${worst!.dimension}, ${worst!.key} is at ${worst!.rate}% (${worst!.hits} of ${worst!.n}).` : worst ? ` Worst by ${worst.dimension}: ${worst.key}, at ${worst.rate}%.` : "";
+      const hidden = !overLimit
+        ? said` The total looks acceptable, but by ${dimensionWords(worst!.dimension)}, ${org(worst!.key)} is at ${worst!.rate}% (${worst!.hits} of ${worst!.n}).`
+        : worst
+          ? said` Worst by ${dimensionWords(worst.dimension)}: ${org(worst.key)}, at ${worst.rate}%.`
+          : said``;
       return {
         outcome: "issue",
-        title: options.issueTitle,
-        summary: `${options.sentence(result.hits, result.n, result.rate)}${hidden}`,
-        recommendation: options.recommendation,
+        // Made once when the rule is declared, so said again here, in the analysis, whose ledger vouches for it.
+        title: said`${options.issueTitle}`,
+        summary: said`${options.sentence(result.hits, result.n, result.rate)}${hidden}`,
+        recommendation: said`${options.recommendation}`,
         recommendationType: "change",
         severity: options.severity,
         confidence: "high",
@@ -128,11 +144,11 @@ const pastCloseDate = dealRule({
   segmentLimit: 25,
   severity: "high",
   scope: isOpen,
-  scopeLabel: "open deals",
+  scopeLabel: said`open deals`,
   isHit: (d, ctx) => d.CloseDate < todayIn(ctx),
-  issueTitle: "Your pipeline includes deals that should already have closed",
-  sentence: (hits, n, rate) => `Open deals with a close date in the past: ${hits} of ${n} (${rate}%). The forecast is counting them when it shouldn't.`,
-  recommendation: "Have each owner close the deal or give it a real date, then add a weekly check to pipeline reviews.",
+  issueTitle: said`Your pipeline includes deals that should already have closed`,
+  sentence: (hits, n, rate) => said`Open deals with a close date in the past: ${hits} of ${n} (${rate}%). The forecast is counting them when it shouldn't.`,
+  recommendation: said`Have each owner close the deal or give it a real date, then add a weekly check to pipeline reviews.`,
   effort: "S",
   owner: "Head of sales",
   sized: (ctx, data) => SITUATIONS.pastClose(ctx, data),
@@ -146,14 +162,14 @@ const inactiveOwner = dealRule({
   segmentLimit: 100,
   severity: "high",
   scope: isOpen,
-  scopeLabel: "open deals",
+  scopeLabel: said`open deals`,
   isHit: (d, ctx) => {
     const users = ctx.data(usersExtractor);
     return users.status === "ok" && users.data.some((u) => u.Id === d.OwnerId && !u.IsActive);
   },
-  issueTitle: "Open deals have no active owner",
-  sentence: (hits, n, rate) => `Open deals owned by inactive users: ${hits} of ${n} (${rate}%). Nobody is working them.`,
-  recommendation: "Reassign these deals now, and add reassignment to your leaver process.",
+  issueTitle: said`Open deals have no active owner`,
+  sentence: (hits, n, rate) => said`Open deals owned by inactive users: ${hits} of ${n} (${rate}%). Nobody is working them.`,
+  recommendation: said`Reassign these deals now, and add reassignment to your leaver process.`,
   effort: "XS",
   owner: "Sales operations",
   // When an owner left isn't in stage history, so the comparison is deals that reached the same stage.
@@ -168,12 +184,12 @@ const missingAmount = dealRule({
   segmentLimit: 30,
   severity: "medium",
   scope: isOpen,
-  scopeLabel: "open deals",
+  scopeLabel: said`open deals`,
   isHit: (d) => d.Amount === null || d.Amount === 0,
-  issueTitle: "Open deals are missing an amount",
+  issueTitle: said`Open deals are missing an amount`,
   sentence: (hits, n, rate) =>
-    `Open deals with no amount: ${hits} of ${n} (${rate}%). These deals count for nothing in your pipeline value, so it looks smaller than it is, and you can't see what work is coming or weigh one deal against another. When enough are blank, nobody can tell how much of the pipeline rests on a few accounts or people.`,
-  recommendation: "Require an amount, even an estimate, once a price is known, and fill in the gaps.",
+    said`Open deals with no amount: ${hits} of ${n} (${rate}%). These deals count for nothing in your pipeline value, so it looks smaller than it is, and you can't see what work is coming or weigh one deal against another. When enough are blank, nobody can tell how much of the pipeline rests on a few accounts or people.`,
+  recommendation: said`Require an amount, even an estimate, once a price is known, and fill in the gaps.`,
   effort: "S",
   owner: "Sales operations",
   sized: false,
@@ -188,15 +204,15 @@ const noRecentActivity = dealRule({
   segmentLimit: 50,
   severity: "medium",
   scope: isOpen,
-  scopeLabel: "open deals",
+  scopeLabel: said`open deals`,
   isHit: (d, ctx) => {
     const cutoff = localDay(daysBefore(ctx.now, STALE_ACTIVITY_DAYS), zoneOf(ctx));
     return d.LastActivityDate === null || d.LastActivityDate < cutoff;
   },
   // Titled by its test, as two other checks find quiet deals by theirs (night 3 reading pass, item 16).
-  issueTitle: `Open deals with no activity in ${STALE_ACTIVITY_DAYS} days`,
-  sentence: (hits, n, rate) => `Open deals with no logged activity in ${STALE_ACTIVITY_DAYS} days: ${hits} of ${n} (${rate}%).`,
-  recommendation: "Review each quiet deal: either re-engage it or close it. Check that activity is being captured before treating this as a rep problem.",
+  issueTitle: said`Open deals with no activity in ${STALE_ACTIVITY_DAYS} days`,
+  sentence: (hits, n, rate) => said`Open deals with no logged activity in ${STALE_ACTIVITY_DAYS} days: ${hits} of ${n} (${rate}%).`,
+  recommendation: said`Review each quiet deal: either re-engage it or close it. Check that activity is being captured before treating this as a rep problem.`,
   effort: "S",
   owner: "Head of sales",
   // Past activity isn't in stage history. The nearest it holds is a deal nobody changed in as long.
@@ -211,11 +227,11 @@ const noAccount = dealRule({
   segmentLimit: 20,
   severity: "medium",
   scope: isOpen,
-  scopeLabel: "open deals",
+  scopeLabel: said`open deals`,
   isHit: (d) => !d.AccountId,
-  issueTitle: "Some open deals aren't linked to a customer",
-  sentence: (hits, n, rate) => `Open deals with no account: ${hits} of ${n} (${rate}%). Nobody looking at the customer sees them, and they're left out of every account-level report and figure.`,
-  recommendation: "Link each deal to its account, and make the account required on new deals.",
+  issueTitle: said`Some open deals aren't linked to a customer`,
+  sentence: (hits, n, rate) => said`Open deals with no account: ${hits} of ${n} (${rate}%). Nobody looking at the customer sees them, and they're left out of every account-level report and figure.`,
+  recommendation: said`Link each deal to its account, and make the account required on new deals.`,
   effort: "XS",
   owner: "Sales operations",
   sized: false,
@@ -243,12 +259,12 @@ const duplicateAccounts: Rule = {
     if (counts.status === "ok") evidence.push(ctx.ev(counts.source, { count: total }));
     const share = total ? pct(inGroups, total) : null;
     const facts = { accounts: inGroups, groups: groups.data.length, ...(share !== null && total ? { share, total } : {}) };
-    if (groups.data.length === 0) return { outcome: "pass", summary: "No two accounts share an exact name.", evidence, segmentExemptReason: "Every account is compared with every other at once.", facts };
+    if (groups.data.length === 0) return { outcome: "pass", summary: said`No two accounts share an exact name.`, evidence, segmentExemptReason: "Every account is compared with every other at once.", facts };
     return {
       outcome: "issue",
-      title: "Some accounts look like duplicates",
-      summary: `${plural(inGroups, "account")} share their exact name with at least one other, in ${plural(groups.data.length, "group")}${share !== null && total ? `: ${share}% of ${total.toLocaleString("en-GB")} accounts` : ""}. Deals, contacts and activity split across the copies, so no one record shows the whole customer.`,
-      recommendation: "Check each group, merge the true duplicates into the record with the most history, then turn on duplicate rules so new ones are caught.",
+      title: said`Some accounts look like duplicates`,
+      summary: said`${plural(inGroups, "account")} share their exact name with at least one other, in ${plural(groups.data.length, "group")}${share !== null && total ? said`: ${share}% of ${grouped(total)} accounts` : ""}. Deals, contacts and activity split across the copies, so no one record shows the whole customer.`,
+      recommendation: said`Check each group, merge the true duplicates into the record with the most history, then turn on duplicate rules so new ones are caught.`,
       // Merging is destructive, and some may be different companies or branches that share a name (rule 3).
       recommendationType: "investigate",
       severity: share !== null && share >= DUPLICATE_SHARE_MEDIUM ? "medium" : "low",
@@ -284,24 +300,24 @@ const lossReasonMissing: Rule = {
     const data = loadPipeline(ctx);
     if (data.status !== "ok") return { outcome: "not_measurable", reason: data.reason, evidence: data.evidence };
     if (!extract.lossReasonField) {
-      return { outcome: "not_measurable", reason: "The calibration doesn't name a loss reason field that exists on Opportunity, so we can't tell a blank reason from a missing field.", evidence: data.evidence };
+      return { outcome: "not_measurable", reason: said`The calibration doesn't name a loss reason field that exists on Opportunity, so we can't tell a blank reason from a missing field.`, evidence: data.evidence };
     }
     // Lost only, with no decision left out (DECISIONS.md 600).
     const unsplit = unsplitLostReason(data);
     if (unsplit) return { outcome: "not_measurable", reason: unsplit, evidence: data.evidence };
     const lost = data.deals.filter((d) => d.category === "lost" && d.CloseDate >= ctx.window.from);
-    if (lost.length === 0) return { outcome: "pass", summary: "No deals were lost in the window.", evidence: data.evidence, segmentExemptReason: "There are no lost deals to segment." };
+    if (lost.length === 0) return { outcome: "pass", summary: said`No deals were lost in the window.`, evidence: data.evidence, segmentExemptReason: "There are no lost deals to segment." };
     const result = segmentRate(lost, (d) => !d.LossReason, dealDimensions(ctx), { segmentLimit: 40, minSegment: MIN_SEGMENT });
     const evidence = [{ ...data.evidence[0]!, count: lost.length, exclusions: data.exclusions, note: "Lost deals with a close date in the window" }];
     if (result.rate <= 20 && result.hotspots.length === 0) {
-      return { outcome: "pass", summary: `Lost deals with no reason: ${result.hits} of ${result.n} (${result.rate}%), with no segment above 40%.`, evidence, segmentsChecked: result.segmentsChecked, facts: { hits: result.hits, n: result.n, rate: result.rate } };
+      return { outcome: "pass", summary: said`Lost deals with no reason: ${result.hits} of ${result.n} (${result.rate}%), with no segment above 40%.`, evidence, segmentsChecked: result.segmentsChecked, facts: { hits: result.hits, n: result.n, rate: result.rate } };
     }
     const worst = result.hotspots[0];
     return {
       outcome: "issue",
-      title: "You can't see why deals are being lost",
-      summary: `Lost deals with no loss reason: ${result.hits} of ${result.n} (${result.rate}%).${worst ? ` Worst by ${worst.dimension}: ${worst.key}, at ${worst.rate}%.` : ""}`,
-      recommendation: "Make a reason required when a deal is lost, and keep the list short enough to be used honestly.",
+      title: said`You can't see why deals are being lost`,
+      summary: said`Lost deals with no loss reason: ${result.hits} of ${result.n} (${result.rate}%).${worst ? said` Worst by ${dimensionWords(worst.dimension)}: ${org(worst.key)}, at ${worst.rate}%.` : ""}`,
+      recommendation: said`Make a reason required when a deal is lost, and keep the list short enough to be used honestly.`,
       recommendationType: "change",
       severity: "medium",
       confidence: "high",
@@ -325,9 +341,9 @@ const inactiveRecordOwners: Rule = {
     const users = ctx.data(usersExtractor);
     if (users.status !== "ok") return { outcome: "not_measurable", reason: `Users couldn't be read: ${users.reason}`, evidence: [ctx.ev(users.source, { count: null })] };
     const ownership = ctx.data(ownershipExtractor);
-    const objects = ["Account", "Contact", "Lead"].filter((o) => ownership.scanned.includes(o));
+    const objects = (["Account", "Contact", "Lead"] as const).filter((o) => ownership.scanned.includes(o));
     const source = { kind: "soql", api: "rest", query: ownership.query } as const;
-    if (objects.length === 0) return { outcome: "not_measurable", reason: "Record ownership couldn't be read.", evidence: [ctx.ev(source, { count: null })] };
+    if (objects.length === 0) return { outcome: "not_measurable", reason: said`Record ownership couldn't be read.`, evidence: [ctx.ev(source, { count: null })] };
     const inactive = new Set(users.data.filter((u) => !u.IsActive).map((u) => u.Id));
     const totals = Object.fromEntries(objects.map((o) => [o, 0]));
     const stranded = Object.fromEntries(objects.map((o) => [o, 0]));
@@ -343,13 +359,14 @@ const inactiveRecordOwners: Rule = {
     const evidence = [ctx.ev(source, { count: strandedTotal, note: "Owners that are queues aren't counted as inactive" })];
     const segments = [{ dimension: "object", segments: objects.length }];
     if (worst.rate <= OWNER_GAP_LIMIT) {
-      return { outcome: "pass", summary: `No object has more than ${OWNER_GAP_LIMIT}% of its records with an inactive owner.`, evidence, segmentsChecked: segments, facts: { strandedTotal, total } };
+      return { outcome: "pass", summary: said`No object has more than ${OWNER_GAP_LIMIT}% of its records with an inactive owner.`, evidence, segmentsChecked: segments, facts: { strandedTotal, total } };
     }
     return {
       outcome: "issue",
-      title: "Customer records belong to people who've left",
-      summary: `Accounts, contacts and leads with an inactive owner: ${strandedTotal} of ${total} (${objects.map((o) => `${o}: ${stranded[o]} of ${totals[o]}`).join(", ")}).`,
-      recommendation: "Reassign these records in bulk, and make reassignment part of your leaver process.",
+      title: said`Customer records belong to people who've left`,
+      // The objects are our own fixed three.
+      summary: said`Accounts, contacts and leads with an inactive owner: ${strandedTotal} of ${total} (${joinSaid(objects.map((o) => said`${o}: ${stranded[o]!} of ${totals[o]!}`), ", ")}).`,
+      recommendation: said`Reassign these records in bulk, and make reassignment part of your leaver process.`,
       recommendationType: "change",
       severity: "medium",
       confidence: "high",
@@ -378,18 +395,19 @@ const duplicateRulesMissing: Rule = {
     const unused = new Set(leads.status === "ok" && !leads.truncated && leads.data.length === 0 ? ["Lead"] : []);
     const missing = DUPLICATE_OBJECTS.filter((o) => !active.has(o) && !unused.has(o));
     const skipped = DUPLICATE_OBJECTS.filter((o) => !active.has(o) && unused.has(o));
-    const skippedNote = skipped.length ? ` ${skipped.join(", ")} ${skipped.length === 1 ? "has" : "have"} none either, but no leads were created in the window, so it doesn't matter yet.` : "";
+    // The objects are our own fixed three.
+    const skippedNote = skipped.length ? said` ${joinSaid(skipped.map((o) => said`${o}`), ", ")} ${skipped.length === 1 ? "has" : "have"} none either, but no leads were created in the window, so it doesn't matter yet.` : said``;
     const evidence = [ctx.ev(rules.source, { count: rules.data.length }), ...(skipped.length ? [ctx.ev(leads.source, { count: 0, dateRange: ctx.window, note: "Leads created in the window" })] : [])];
     const segments = [{ dimension: "object", segments: DUPLICATE_OBJECTS.length }];
     if (missing.length === 0) {
-      const summary = skipped.length ? `Every core object in use has an active duplicate rule.${skippedNote}` : "Account, Contact and Lead all have an active duplicate rule.";
+      const summary = skipped.length ? said`Every core object in use has an active duplicate rule.${skippedNote}` : said`Account, Contact and Lead all have an active duplicate rule.`;
       return { outcome: "pass", summary, evidence, segmentsChecked: segments };
     }
     return {
       outcome: "issue",
-      title: "Nothing stops duplicates on some core objects",
-      summary: `${missing.length > 1 ? `${missing.slice(0, -1).join(", ")} and ${missing.at(-1)}` : missing[0]} ${missing.length === 1 ? "has" : "have"} no active duplicate rule, so the same customer can be entered more than once.${skippedNote}`,
-      recommendation: "Turn on matching and duplicate rules, starting in alert mode so you can see the effect.",
+      title: said`Nothing stops duplicates on some core objects`,
+      summary: said`${andList(missing.map((o) => said`${o}`))} ${missing.length === 1 ? "has" : "have"} no active duplicate rule, so the same customer can be entered more than once.${skippedNote}`,
+      recommendation: said`Turn on matching and duplicate rules, starting in alert mode so you can see the effect.`,
       recommendationType: "change",
       severity: "medium",
       confidence: "high",
@@ -417,7 +435,7 @@ const staleLeads: Rule = {
     if (stale.status !== "ok") return { outcome: "not_measurable", reason: `Stale leads couldn't be counted: ${stale.reason}`, evidence: [ctx.ev(stale.source, { count: null })] };
     if (health.staleLeadsBySource.status !== "ok" || health.openLeadsBySource.status !== "ok") {
       // A healthy total proves nothing without its segments (rule 4).
-      return { outcome: "not_measurable", reason: "Leads couldn't be split by source, so we can't say whether the total hides a problem.", evidence: [ctx.ev(stale.source, { count: stale.data })] };
+      return { outcome: "not_measurable", reason: said`Leads couldn't be split by source, so we can't say whether the total hides a problem.`, evidence: [ctx.ev(stale.source, { count: stale.data })] };
     }
     const openBySource = new Map(health.openLeadsBySource.data.map((r) => [r.s ?? "No source", r.c]));
     const hotspots = health.staleLeadsBySource.data
@@ -428,14 +446,14 @@ const staleLeads: Rule = {
     const evidence = [ctx.ev(stale.source, { count: stale.data, exclusions: ["Converted leads", `Leads created since ${health.staleBefore}`] }), ctx.ev(open.source, { count: open.data })];
     const segments = [{ dimension: "lead source", segments: openBySource.size }];
     if (rate <= LEAD_STALE_LIMIT && hotspots.length === 0) {
-      return { outcome: "pass", summary: `Open leads with no activity since ${health.staleBefore}: ${stale.data} of ${open.data} (${rate}%), with no source above 50%.`, evidence, segmentsChecked: segments, facts: { stale: stale.data, open: open.data, rate } };
+      return { outcome: "pass", summary: said`Open leads with no activity since ${org(health.staleBefore)}: ${stale.data} of ${open.data} (${rate}%), with no source above 50%.`, evidence, segmentsChecked: segments, facts: { stale: stale.data, open: open.data, rate } };
     }
     const worst = hotspots[0];
     return {
       outcome: "issue",
-      title: "Leads are going unworked",
-      summary: `Open leads older than ${STALE_ACTIVITY_DAYS} days with no logged activity: ${stale.data} of ${open.data} (${rate}%).${worst ? ` The worst source is ${worst.source}, at ${pct(worst.stale, worst.open)}%.` : ""}`,
-      recommendation: "Agree a follow-up rule by source, and archive what's too old to work.",
+      title: said`Leads are going unworked`,
+      summary: said`Open leads older than ${STALE_ACTIVITY_DAYS} days with no logged activity: ${stale.data} of ${open.data} (${rate}%).${worst ? said` The worst source is ${org(worst.source)}, at ${pct(worst.stale, worst.open)}%.` : ""}`,
+      recommendation: said`Agree a follow-up rule by source, and archive what's too old to work.`,
       recommendationType: "change",
       severity: "medium",
       confidence: "high",
@@ -465,19 +483,19 @@ const contactGaps: Rule = {
       if (count.status !== "ok") return { outcome: "not_measurable", reason: `Contacts couldn't be counted: ${count.reason}`, evidence: [ctx.ev(count.source, { count: null })] };
     }
     if (contacts.status !== "ok" || noAccount.status !== "ok" || noEmail.status !== "ok") throw new Error("unreachable");
-    if (contacts.data === 0) return { outcome: "pass", summary: "There are no contacts to check.", evidence: [ctx.ev(contacts.source, { count: 0 })], segmentExemptReason: "There are no contacts to segment." };
+    if (contacts.data === 0) return { outcome: "pass", summary: said`There are no contacts to check.`, evidence: [ctx.ev(contacts.source, { count: 0 })], segmentExemptReason: "There are no contacts to segment." };
     const accountRate = pct(noAccount.data, contacts.data);
     const emailRate = pct(noEmail.data, contacts.data);
     const evidence = [ctx.ev(noAccount.source, { count: noAccount.data }), ctx.ev(noEmail.source, { count: noEmail.data }), ctx.ev(contacts.source, { count: contacts.data })];
     const segments = [{ dimension: "gap type", segments: 2 }];
     if (accountRate <= CONTACT_GAP_LIMIT && emailRate <= CONTACT_GAP_LIMIT) {
-      return { outcome: "pass", summary: `${accountRate}% of contacts have no account and ${emailRate}% have no email.`, evidence, segmentsChecked: segments, facts: { accountRate, emailRate } };
+      return { outcome: "pass", summary: said`${accountRate}% of contacts have no account and ${emailRate}% have no email.`, evidence, segmentsChecked: segments, facts: { accountRate, emailRate } };
     }
     return {
       outcome: "issue",
-      title: "Contact records are incomplete",
-      summary: `Of ${plural(contacts.data, "contact")}, ${noAccount.data} (${accountRate}%) have no account and ${noEmail.data} (${emailRate}%) have no email address.`,
-      recommendation: "Link orphaned contacts to accounts, and decide how missing emails get filled.",
+      title: said`Contact records are incomplete`,
+      summary: said`Of ${plural(contacts.data, "contact")}, ${noAccount.data} (${accountRate}%) have no account and ${noEmail.data} (${emailRate}%) have no email address.`,
+      recommendation: said`Link orphaned contacts to accounts, and decide how missing emails get filled.`,
       recommendationType: "change",
       severity: "low",
       confidence: "high",
@@ -503,6 +521,9 @@ const LISTED_OBJECTS = 10;
 /** What a customer calls a partly hidden object's records (isPartlyHidden). */
 const KINDS: Record<string, string> = { Task: "tasks", Event: "events", ContentVersion: "files", ContentDocument: "files" };
 const kindOf = (object: string): string => KINDS[object] ?? (/__kav$/i.test(object) ? "article versions" : object);
+/** kindOf for a sentence: our words for the kinds we name, the org's name for any other object. */
+const kindWords = (object: string): Said =>
+  object === "Task" ? said`tasks` : object === "Event" ? said`events` : object === "ContentVersion" || object === "ContentDocument" ? said`files` : /__kav$/i.test(object) ? said`article versions` : said`${org(object)}`;
 
 /** "A, B and C", or the first few and how many more. */
 function listed(names: string[], limit: number): string {
@@ -510,6 +531,14 @@ function listed(names: string[], limit: number): string {
   const rest = names.length - shown.length;
   if (rest > 0) return `${shown.join(", ")} and ${rest} more`;
   return shown.length > 1 ? `${shown.slice(0, -1).join(", ")} and ${shown.at(-1)}` : (shown[0] ?? "");
+}
+
+/** listed for a sentence: each part made by said in place, as joinSaid needs. */
+function listedSaid(names: Said[], limit: number): Said {
+  const shown = names.slice(0, limit);
+  const rest = names.length - shown.length;
+  if (rest > 0) return said`${joinSaid(shown, ", ")} and ${rest} more`;
+  return andList(shown);
 }
 
 const recordTypeUse: Rule = {
@@ -607,7 +636,7 @@ const recordTypeUse: Rule = {
     const facts = { judged: judged.length, noRecords: noRecords.length, noneRecent: noneRecent.length };
 
     if (candidates.length === 0) {
-      return { outcome: "pass", summary: `You have no active record types of your own made more than ${RECORD_TYPE_MIN_AGE_DAYS} days ago, so there are none to judge.`, evidence: [evidence[0]!], segmentExemptReason: "There are no record types to segment.", facts };
+      return { outcome: "pass", summary: said`You have no active record types of your own made more than ${RECORD_TYPE_MIN_AGE_DAYS} days ago, so there are none to judge.`, evidence: [evidence[0]!], segmentExemptReason: "There are no record types to segment.", facts };
     }
     if (access.status !== "ok") {
       return {
@@ -617,20 +646,22 @@ const recordTypeUse: Rule = {
       };
     }
     if (judged.length === 0) {
+      // Deduplicated and sorted by their text, as the plain list was.
+      const kinds = [...new Map(why.partlyHidden.map((o) => [kindOf(o), kindWords(o)] as const)).entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([, words]) => words);
       const parts = [
-        why.partlyHidden.length ? `we don't count ${listed([...new Set(why.partlyHidden.map(kindOf))].sort(), 4)}, because a count can't show all of them` : "",
-        why.notSeenWhole.length ? `the connected user can't see every record on ${plural(why.notSeenWhole.length, "object")}` : "",
-        why.under.length ? `${plural(why.under.length, "object has", "objects have")} fewer than ${RECORD_TYPE_MIN_RECENT} records made in the last 12 months` : "",
-        why.refused.length + why.truncated.length ? `Salesforce refused or cut short the count on ${plural(why.refused.length + why.truncated.length, "object")}` : "",
-        why.notRead.length ? `${plural(why.notRead.length, "object is", "objects are")} past the ${RECORD_TYPE_OBJECTS} we count` : "",
-      ].filter(Boolean);
-      return { outcome: "not_measurable", reason: `None of your ${plural(candidates.length, "record type")} could be judged: ${parts.join("; ")}.`, evidence: [...evidence.slice(0, 2), accessEvidence] };
+        why.partlyHidden.length ? said`we don't count ${listedSaid(kinds, 4)}, because a count can't show all of them` : null,
+        why.notSeenWhole.length ? said`the connected user can't see every record on ${plural(why.notSeenWhole.length, "object")}` : null,
+        why.under.length ? said`${plural(why.under.length, "object has", "objects have")} fewer than ${RECORD_TYPE_MIN_RECENT} records made in the last 12 months` : null,
+        why.refused.length + why.truncated.length ? said`Salesforce refused or cut short the count on ${plural(why.refused.length + why.truncated.length, "object")}` : null,
+        why.notRead.length ? said`${plural(why.notRead.length, "object is", "objects are")} past the ${RECORD_TYPE_OBJECTS} we count` : null,
+      ].filter((p) => p !== null);
+      return { outcome: "not_measurable", reason: said`None of your ${plural(candidates.length, "record type")} could be judged: ${joinSaid(parts, "; ")}.`, evidence: [...evidence.slice(0, 2), accessEvidence] };
     }
     const segments = [{ dimension: "all records", segments: judged.length }, { dimension: "records created in the last 12 months", segments: judged.length }];
     if (noRecords.length + noneRecent.length === 0) {
       return {
         outcome: "pass",
-        summary: `Each of the ${plural(judged.length, "record type")} we could judge has records made in the last 12 months.`,
+        summary: said`Each of the ${plural(judged.length, "record type")} we could judge has records made in the last 12 months.`,
         evidence,
         segmentsChecked: segments,
         facts,
@@ -639,20 +670,21 @@ const recordTypeUse: Rule = {
 
     const flagged = [...noRecords, ...noneRecent];
     const named = (t: RecordTypeRow): string => `${t.Name} on ${labels.object(t.SobjectType)}`;
-    const has = (n: number): string => (n === 1 ? "1 has" : `${n} have`);
+    const namedSaid = (t: RecordTypeRow): Said => said`${org(t.Name)} on ${org(labels.object(t.SobjectType))}`;
+    const has = (n: number): Said => (n === 1 ? said`1 has` : said`${n} have`);
     const sentences = [
-      noRecords.length ? `${has(noRecords.length)} no records at all: ${listed(noRecords.map(named), LISTED_TYPES)}.` : "",
-      noneRecent.length ? `${has(noneRecent.length)} records, but none made in the last 12 months: ${listed(noneRecent.map(named), LISTED_TYPES)}.` : "",
-    ].filter(Boolean);
+      noRecords.length ? said`${has(noRecords.length)} no records at all: ${listedSaid(noRecords.map(namedSaid), LISTED_TYPES)}.` : null,
+      noneRecent.length ? said`${has(noneRecent.length)} records, but none made in the last 12 months: ${listedSaid(noneRecent.map(namedSaid), LISTED_TYPES)}.` : null,
+    ].filter((p) => p !== null);
     const one = flagged.length === 1;
-    const title = noRecords.length && noneRecent.length ? "Some record types have no records, or none made in the last 12 months" : noRecords.length ? (one ? "A record type has no records" : "Some record types have no records") : one ? "A record type has had no records made in the last 12 months" : "Some record types have had no records made in the last 12 months";
-    const owners = listed([...new Set(flagged.map((t) => labels.object(t.SobjectType)))].sort(), LISTED_OBJECTS);
+    const title = noRecords.length && noneRecent.length ? said`Some record types have no records, or none made in the last 12 months` : noRecords.length ? (one ? said`A record type has no records` : said`Some record types have no records`) : one ? said`A record type has had no records made in the last 12 months` : said`Some record types have had no records made in the last 12 months`;
+    const owners = listedSaid([...new Set(flagged.map((t) => labels.object(t.SobjectType)))].sort().map((label) => said`${org(label)}`), LISTED_OBJECTS);
     return {
       outcome: "issue",
       title,
-      summary: `We could judge ${plural(judged.length, "record type")} of your own, on objects with at least ${RECORD_TYPE_MIN_RECENT} records made in the last 12 months. ${sentences.join(" ")} An active record type is still offered to anyone whose profile has it, and its page layouts and picklist values still have to be kept up.`,
-      recommendation: `Deactivate ${plural(flagged.length, "record type")} once you've checked that no profile defaults to ${one ? "it" : "them"} and no flow, Apex or integration names ${one ? "it" : "them"}.`,
-      blockedRecommendation: `Review ${plural(flagged.length, "record type")} with the people who own ${owners}; we aren't recommending deactivating ${one ? "it" : "them"}, because we can't see which profiles default to ${one ? "it" : "them"} or which flows, Apex and integrations name ${one ? "it" : "them"}.`,
+      summary: said`We could judge ${plural(judged.length, "record type")} of your own, on objects with at least ${RECORD_TYPE_MIN_RECENT} records made in the last 12 months. ${joinSaid(sentences, " ")} An active record type is still offered to anyone whose profile has it, and its page layouts and picklist values still have to be kept up.`,
+      recommendation: said`Deactivate ${plural(flagged.length, "record type")} once you've checked that no profile defaults to ${one ? "it" : "them"} and no flow, Apex or integration names ${one ? "it" : "them"}.`,
+      blockedRecommendation: said`Review ${plural(flagged.length, "record type")} with the people who own ${owners}; we aren't recommending deactivating ${one ? "it" : "them"}, because we can't see which profiles default to ${one ? "it" : "them"} or which flows, Apex and integrations name ${one ? "it" : "them"}.`,
       recommendationType: "deactivate",
       severity: "low",
       confidence: "medium",
