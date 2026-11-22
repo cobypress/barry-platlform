@@ -3,7 +3,7 @@ import { MODELS } from "../config.ts";
 import { anthropicClient, anthropicClientWithKey, type NarrativeClient } from "../narrative/client.ts";
 import { checkClaude } from "../narrative/guard.ts";
 import { tokenKeySource, TokenStore } from "../salesforce/token-store.ts";
-import { HEALTH_CHECK_QUEUE, HEAVY_QUEUE, lostRecorder, redisConnection, runQueuer, startQueueWorker, type BullModule } from "../worker/bullmq.ts";
+import { HEALTH_CHECK_QUEUE, HEAVY_QUEUE, lostRecorder, RECYCLE_AT, RECYCLE_EXIT, recycleWatch, redisConnection, runQueuer, startQueueWorker, type BullModule, type StoreFill } from "../worker/bullmq.ts";
 import { GoogleDrive } from "../worker/drive.ts";
 import { readWorkerEnv, WORKER_ENV } from "../worker/env.ts";
 import { PostgresWorkerStore, type SqlPool } from "../worker/postgres-store.ts";
@@ -25,7 +25,9 @@ The worker needs:
 ${Object.entries(WORKER_ENV.required).map(([name, why]) => `  ${name.padEnd(24)} ${why}`).join("\n")}
 and may take:
 ${Object.entries(WORKER_ENV.optional).map(([name, why]) => `  ${name.padEnd(24)} ${why}`).join("\n")}
-It also needs bullmq and pg installed beside the engine.`;
+It also needs bullmq and pg installed beside the engine. It stops itself, finishing the jobs
+in hand, once the store of org-worded sentences is half full, and exits ${RECYCLE_EXIT} so the
+host starts a fresh one (DECISIONS.md 666).`;
 
 export type PgModule = { Pool: new (options: { connectionString: string; max?: number }) => SqlPool & { end(): Promise<void> } };
 export type WorkerModules = { bull: BullModule; pg: PgModule };
@@ -61,6 +63,8 @@ export async function workerCommand(
     sweep?: typeof retentionSweep;
     /** Tests only: stands in for the sweep of free scans' connections. */
     scanSweep?: typeof sweepScanConnections;
+    /** Tests only: stands in for the org-word store's fill (DECISIONS.md 666). */
+    storeFill?: () => StoreFill;
   } = {},
 ): Promise<number> {
   const log = options.log ?? ((line: string) => console.log(`${new Date().toISOString()} ${line}`));
@@ -107,7 +111,9 @@ export async function workerCommand(
     withJobLock(locksDir, `run-${runId}`, () => letGoOfLostRun(runId, deps)).catch((err: unknown) => {
       if (!(err instanceof JobBusyError)) log(`Run ${runId}'s connection couldn't be checked after BullMQ gave it up; the scan sweep will.`);
     });
-  const worker = startQueueWorker(bull, handler, { redisUrl: config.redisUrl, concurrency: config.concurrency, log, onLost: lostRecorder(store, undefined, letGoLost) });
+  // Resolves when a job ends with the org-word store half full; the worker then stops as on SIGTERM (DECISIONS.md 666).
+  const recycle = options.storeFill ? recycleWatch(RECYCLE_AT, options.storeFill) : recycleWatch();
+  const worker = startQueueWorker(bull, handler, { redisUrl: config.redisUrl, concurrency: config.concurrency, log, onLost: lostRecorder(store, undefined, letGoLost), afterJob: recycle.check });
   log(`Taking jobs from health-check-jobs, ${config.concurrency} at a time, with runs and documents one at a time in ${HEAVY_QUEUE}.`);
   if (!config.drive) log("Google Drive isn't set up, so released runs' documents can't be made.");
   if (!config.micrositeKey) log("HC_MICROSITE_KEY isn't set, so released runs get documents but no customer microsite.");
@@ -149,12 +155,13 @@ export async function workerCommand(
   scanSweep();
   const scanSweeping = setInterval(scanSweep, SCAN_SWEEP_INTERVAL_MS);
   scanSweeping.unref();
-  await (options.until ?? untilSignalled());
+  const stop = await Promise.race([(options.until ?? untilSignalled()).then(() => null), recycle.due]);
   clearInterval(sweeping);
   clearInterval(scanSweeping);
-  log("Stopping: finishing the jobs in hand.");
+  // Counts only, never org text. The same path as SIGTERM from here: the jobs in hand finish before each worker closes.
+  log(stop ? `Recycling: the org-word store is at ${stop.size} of ${stop.limit}. Finishing the jobs in hand; the host starts a fresh worker.` : "Stopping: finishing the jobs in hand.");
   await worker.close();
   await queue.close();
   await pool.end();
-  return 0;
+  return stop ? RECYCLE_EXIT : 0;
 }

@@ -17,6 +17,7 @@ import type { ConnectionProvider } from "../salesforce/connection.ts";
 import { OAuthConnectionProvider } from "../salesforce/oauth-provider.ts";
 import { CONNECT_USAGE, connectCommand, connectionStore, oauthClient } from "./connect.ts";
 import { WORKER_USAGE, workerCommand } from "./worker.ts";
+import { RECYCLE_EXIT } from "../worker/bullmq.ts";
 
 const USAGE = `Black Cloud Barometer
 
@@ -157,7 +158,12 @@ async function main(argv: string[]): Promise<number> {
     return EXIT.ok;
   }
 
-  if (positionals[0] === "worker" && !values.help) return workerCommand();
+  if (positionals[0] === "worker" && !values.help) {
+    const code = await workerCommand();
+    // A worker that recycled itself exits now, so nothing left open can keep a process that takes no jobs alive; the host starts a fresh one (DECISIONS.md 666).
+    if (code === RECYCLE_EXIT) process.exit(code);
+    return code;
+  }
 
   if (positionals[0] === "connect") return connectCommand(values.help ? undefined : positionals[1], values);
 

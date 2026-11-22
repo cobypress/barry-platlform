@@ -25,6 +25,8 @@ Set `NODE_VERSION=24` as well as the repo's pin, and `PLAYWRIGHT_BROWSERS_PATH=0
 
 Set up this way on 2026-11-04 as `barometer-worker`.
 
+The worker stops itself now and then, finishing the jobs in hand, and exits 75 so Render starts a fresh one (DECISIONS.md 666). The log says "Recycling: the org-word store is at ..." first. That restart is expected, not a crash.
+
 ## 2. Its environment variables
 
 | Variable | Value |
