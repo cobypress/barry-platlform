@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { accessSync, chmodSync, constants, lstatSync, mkdirSync, readFileSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
+import { accessSync, closeSync, constants, fchmodSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, unlinkSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { isSignInFailure, type ClaudeObserver } from "./client.ts";
 
 // How the worker signs in to Claude by OIDC federation, and how it says in the
@@ -29,20 +29,42 @@ export function federationCachePath(env: NodeJS.ProcessEnv, dir: string): string
  * call, so one found here is deleted rather than left to stop Claude.
  */
 export function prepareSignInCache(dir: string, file: string, log: (line: string) => void): string | null {
+  // A log line that throws (a closed pipe) never makes this throw.
+  const say = (line: string): void => {
+    try {
+      log(line);
+    } catch {
+      // The start matters more than the line.
+    }
+  };
   const uid = typeof process.getuid === "function" ? process.getuid() : null;
   const notKept = (why: string): null => {
-    log(`Claude's access token can't be kept on the disk (${why}), so a worker that starts again in place signs in afresh.`);
+    say(`Claude's access token can't be kept on the disk (${why}), so a worker that starts again in place signs in afresh.`);
     return null;
   };
   try {
+    if (dirname(resolve(file)) !== resolve(dir)) return notKept("its file isn't directly in its folder");
     try {
       mkdirSync(dir, { recursive: true, mode: 0o700 });
     } catch (err) {
       return notKept((err as NodeJS.ErrnoException).code ?? "the folder couldn't be made");
     }
-    const folder = lstatSync(dir);
-    if (folder.isSymbolicLink() || !folder.isDirectory() || (uid !== null && folder.uid !== uid)) return notKept("its folder is a link, not a folder, or another user's");
-    chmodSync(dir, 0o700);
+    // A link anywhere on the way, the folder's parents included: nothing is changed or deleted.
+    if (realpathSync(dir) !== resolve(dir)) return notKept("its path goes through a link");
+    // Through a handle that refuses a link, so a link swapped in after the check is never followed.
+    let fd: number;
+    try {
+      fd = openSync(dir, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+    } catch {
+      return notKept("its folder is a link, or not a folder");
+    }
+    try {
+      const folder = fstatSync(fd);
+      if (!folder.isDirectory() || (uid !== null && folder.uid !== uid)) return notKept("its folder is another user's");
+      fchmodSync(fd, 0o700);
+    } finally {
+      closeSync(fd);
+    }
     let found: ReturnType<typeof lstatSync> | null = null;
     try {
       found = lstatSync(file);
@@ -52,14 +74,14 @@ export function prepareSignInCache(dir: string, file: string, log: (line: string
     // unlink removes a link itself, never what it points at.
     if (found && (found.isSymbolicLink() || !found.isFile() || (uid !== null && found.uid !== uid) || (found.mode & 0o077) !== 0)) {
       unlinkSync(file);
-      log("A kept Claude access token wasn't safe to use (a link, another user's, or readable by others), so it was deleted and the worker signs in afresh.");
+      say("A kept Claude access token wasn't safe to use (a link, another user's, or readable by others), so it was deleted and the worker signs in afresh.");
     }
     try {
       accessSync(dir, constants.W_OK);
     } catch {
       return notKept("its folder isn't writable");
     }
-    log("Claude's access token is kept on the disk, so a worker that starts again in place uses it while it lasts instead of signing in again.");
+    say("Claude's access token is kept on the disk, so a worker that starts again in place uses it while it lasts instead of signing in again.");
     return file;
   } catch (err) {
     return notKept((err as NodeJS.ErrnoException).code ?? "unexpected error");

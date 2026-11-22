@@ -1,7 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
-import { existsSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fakeAnthropic, syntheticJwt } from "../../narrative/__tests__/fake-anthropic.ts";
 import { spawnSync } from "node:child_process";
@@ -442,7 +442,8 @@ describe("hc worker", () => {
       async end(): Promise<void> {}
     }
     const modules: WorkerModules = { bull, pg: { Pool: FakePool as unknown as WorkerModules["pg"]["Pool"] } };
-    const disk = temp();
+    // A real path: on macOS the temporary folder is reached through a link, which the cache refuses.
+    const disk = realpathSync(temp());
     const tokenFile = `${disk}/identity-token`;
     const now = Math.floor(Date.now() / 1000);
     writeFileSync(tokenFile, syntheticJwt({ sub: "srv-synthetic", aud: "api.anthropic.com", iat: now, exp: now + 3600, jti: "synthetic-jti" }));

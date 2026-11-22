@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AnthropicError } from "@anthropic-ai/sdk";
@@ -12,7 +12,8 @@ import { fakeAnthropic, syntheticJwt } from "./fake-anthropic.ts";
 // The worker's Claude sign-in by OIDC federation (DECISIONS.md 667), through the real SDK with a stand-in for
 // Anthropic's token endpoint that, like the real one, takes an identity token with a jti claim once only.
 
-const temp = (): string => mkdtempSync(join(tmpdir(), "hc-sign-in-"));
+// Real paths: on macOS the temporary folder is reached through a link, which the cache refuses.
+const temp = (): string => realpathSync(mkdtempSync(join(tmpdir(), "hc-sign-in-")));
 const NOW = 1_795_000_000;
 
 const ENV = (tokenFile: string): NodeJS.ProcessEnv => ({
@@ -128,6 +129,44 @@ describe("the folder the access token is kept in", () => {
     }
   });
 
+  test("a log line that throws never makes it throw", () => {
+    const broken = (): void => {
+      throw Object.assign(new Error("write EPIPE"), { code: "EPIPE" });
+    };
+    const dir = join(temp(), "claude-sign-in");
+    assert.equal(prepareSignInCache(dir, file(dir), broken), file(dir));
+    const root = temp();
+    chmodSync(root, 0o500);
+    try {
+      assert.equal(prepareSignInCache(join(root, "claude-sign-in"), file(join(root, "claude-sign-in")), broken), null);
+    } finally {
+      chmodSync(root, 0o700);
+    }
+  });
+
+  test("a file that isn't directly in its folder, or a link among the folder's parents, keeps nothing and changes nothing", () => {
+    const root = temp();
+    const dir = join(root, "claude-sign-in");
+    mkdirSync(dir);
+    chmodSync(dir, 0o755);
+    const lines: string[] = [];
+    assert.equal(prepareSignInCache(dir, join(root, "elsewhere", "federation-0000000000000000.json"), (l) => lines.push(l)), null);
+    assert.equal(statSync(dir).mode & 0o777, 0o755);
+    assert.match(lines[0]!, /can't be kept on the disk \(its file isn't directly in its folder\)/);
+
+    const real = join(root, "real");
+    mkdirSync(join(real, "claude-sign-in"), { recursive: true });
+    chmodSync(join(real, "claude-sign-in"), 0o755);
+    writeFileSync(join(real, "claude-sign-in", "federation-0000000000000000.json"), "{}");
+    chmodSync(join(real, "claude-sign-in", "federation-0000000000000000.json"), 0o644);
+    symlinkSync(real, join(root, "linked"));
+    const through = join(root, "linked", "claude-sign-in");
+    assert.equal(prepareSignInCache(through, file(through), (l) => lines.push(l)), null);
+    assert.equal(statSync(join(real, "claude-sign-in")).mode & 0o777, 0o755);
+    assert.ok(existsSync(join(real, "claude-sign-in", "federation-0000000000000000.json")));
+    assert.match(lines[1]!, /can't be kept on the disk \(its path goes through a link\)/);
+  });
+
   test("a folder that is a link isn't used", () => {
     const root = temp();
     const elsewhere = join(root, "elsewhere");
@@ -137,7 +176,7 @@ describe("the folder the access token is kept in", () => {
     const lines: string[] = [];
     assert.equal(prepareSignInCache(dir, file(dir), (l) => lines.push(l)), null);
     assert.ok(lstatSync(dir).isSymbolicLink());
-    assert.match(lines.join("\n"), /can't be kept on the disk \(its folder is a link/);
+    assert.match(lines.join("\n"), /can't be kept on the disk \(its path goes through a link\)/);
   });
 });
 
@@ -174,6 +213,8 @@ describe("what the log says about sign-in", () => {
     assert.equal(isSignInFailure(new AnthropicError("Failed to read identity token file at /x: Error: ENOENT")), true);
     assert.equal(isSignInFailure(new WorkloadIdentityError("Token exchange failed with status 500", 500)), false);
     assert.equal(isSignInFailure(new WorkloadIdentityError("Token exchange failed with status 429", 429)), false);
+    assert.equal(isSignInFailure(new WorkloadIdentityError("Token endpoint returned non-JSON response (status 200)", 200)), false);
+    assert.equal(isSignInFailure(new AnthropicError("Could not resolve authentication method. Expected one of apiKey")), false);
     assert.equal(isSignInFailure(new WorkloadIdentityError("Failed to reach token endpoint https://api.anthropic.com/v1/oauth/token: TypeError: fetch failed")), false);
     assert.equal(isSignInFailure(Object.assign(new Error("x"), { status: 403 })), true);
     assert.equal(isSignInFailure(Object.assign(new Error("x"), { status: 500 })), false);
@@ -225,6 +266,19 @@ describe("what the log says about sign-in", () => {
     await assert.rejects(client.complete(REQUEST));
     assert.equal(lines.length, 1);
     assert.match(lines[0]!, /^Claude sign-in stopped working, so runs use the engine's own text until it works again\. AnthropicError: Failed to read identity token file/);
+  });
+
+  test("an empty identity token file, through the real SDK, is a sign-in failure", async () => {
+    const empty = join(temp(), "identity-token");
+    writeFileSync(empty, "\n");
+    const client = federationClient(ENV(empty), null, { fetch: fakeAnthropic().fetch });
+    await assert.rejects(client.complete(REQUEST), (err: unknown) => err instanceof AnthropicError && isSignInFailure(err));
+  });
+
+  test("a token endpoint that answers 200 with a body that isn't JSON, through the real SDK, isn't a sign-in failure", async () => {
+    const odd = (async () => new Response("<html>maintenance</html>", { status: 200 })) as unknown as typeof fetch;
+    const client = federationClient(ENV(tokenFileIn(temp())), null, { fetch: odd });
+    await assert.rejects(client.complete(REQUEST), (err: unknown) => err instanceof WorkloadIdentityError && /non-JSON/.test(err.message) && !isSignInFailure(err));
   });
 
   test("a log line that throws never stops a call or replaces its error", async () => {

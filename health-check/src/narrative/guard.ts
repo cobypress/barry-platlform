@@ -4,6 +4,7 @@ import { redactSecrets } from "../privacy/secrets.ts";
 import { isSignInFailure, type NarrativeClient, type NarrativeReply, type NarrativeRequest } from "./client.ts";
 import { APEX_SUMMARY_PROMPT } from "./apex-prompt.ts";
 import { SYSTEM_PROMPT } from "./prompt.ts";
+import { safeDetail } from "./sign-in.ts";
 
 // Rule 7: nothing that leaves for Claude may hold a real name. Findings already
 // hold tokens, so this is the backstop, and every prompt passes through it.
@@ -99,9 +100,8 @@ export async function checkClaude(client: NarrativeClient, model: string): Promi
     return { ok: true, detail: `${reply.model} answered` };
   } catch (err) {
     const status = typeof (err as { status?: unknown }).status === "number" ? ` (${(err as { status: number }).status})` : "";
-    const message = err instanceof Error ? err.message.replace(/sk-ant-[A-Za-z0-9_-]+/g, "[removed]").slice(0, 300) : "an unexpected error";
-    // The SDK's classes leave name as "Error", so the class says which it was.
-    const name = err instanceof Error ? (err.constructor?.name && err.constructor.name !== "Error" ? err.constructor.name : err.name) : "Error";
-    return { ok: false, detail: `${name}${status}: ${message}`, signIn: isSignInFailure(err) };
+    // The same token shapes stripped as in every other sign-in line; the status goes after the class name.
+    const [name, ...rest] = safeDetail(err).split(": ");
+    return { ok: false, detail: `${name}${status}: ${rest.join(": ")}`, signIn: isSignInFailure(err) };
   }
 }

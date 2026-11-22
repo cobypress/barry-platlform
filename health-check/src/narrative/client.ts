@@ -61,17 +61,20 @@ function tell(observe: ClaudeObserver | undefined, outcome: Parameters<ClaudeObs
  * A failure that means Claude won't let this worker in, rather than a busy or
  * unreachable API. Checked by class, since the SDK's error classes leave
  * `name` as "Error". A federation error is a sign-in failure unless the token
- * endpoint couldn't be reached or answered 429 or 5xx. A missing, unreadable
+ * endpoint couldn't be reached, or answered 429, 5xx or a 200 the SDK couldn't
+ * use. A missing, unreadable
  * or empty identity token file is a plain AnthropicError from the SDK's file
  * reader, matched by its fixed wording.
  */
 export function isSignInFailure(err: unknown): boolean {
   if (err instanceof WorkloadIdentityError) {
-    if (err.message.startsWith("Failed to reach token endpoint")) return false;
-    return !(err.statusCode !== null && (err.statusCode === 429 || err.statusCode >= 500));
+    // No status: the worker's own side (the token's size, the kept file's safety), unless the endpoint wasn't reached.
+    if (err.statusCode === null) return !err.message.startsWith("Failed to reach token endpoint");
+    // A refusal is a 4xx other than 429; a 200 with a body the SDK can't use, a 429 or a 5xx is the endpoint's trouble.
+    return err.statusCode >= 400 && err.statusCode < 500 && err.statusCode !== 429;
   }
   if (err instanceof Anthropic.AuthenticationError || err instanceof Anthropic.PermissionDeniedError) return true;
-  if (err instanceof AnthropicError && /^(Failed to read identity token file|Identity token file at .* is empty|Identity token value is empty|Could not resolve authentication method)/.test(err.message)) return true;
+  if (err instanceof AnthropicError && /^(Failed to read identity token file|Identity token file at .* is empty|Identity token value is empty)/.test(err.message)) return true;
   // A stand-in client's error in tests, or any other error carrying a status.
   const status = (err as { status?: unknown } | null)?.status;
   return status === 401 || status === 403;
