@@ -1,6 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
+import { writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { workerCommand, type WorkerModules } from "../../cli/worker.ts";
@@ -320,7 +321,7 @@ describe("hc worker", () => {
     const claudeCheck = async () => ({ ok: false, detail: "AuthenticationError (401): invalid x-api-key" });
     assert.equal(await workerCommand(env, { load: async () => modules, until: Promise.resolve(), log: (l) => lines.push(l), claudeCheck }), 0);
     await new Promise((resolve) => setImmediate(resolve));
-    assert.ok(lines.some((l) => /Claude sign-in failed, so runs will use the engine's own text until it's fixed\. AuthenticationError \(401\)/.test(l)), lines.join("\n"));
+    assert.ok(lines.some((l) => /Claude sign-in failed at start, so runs use the engine's own text until it works\. The worker tries again for about an hour and says when it does\. AuthenticationError \(401\)/.test(l)), lines.join("\n"));
     assert.ok(lines.some((l) => /Claude drafts each run's report sections, signed in with ANTHROPIC_API_KEY/.test(l)));
     assert.ok(!lines.join("\n").includes("sk-ant-fake-key-for-tests"));
   });
@@ -344,6 +345,58 @@ describe("hc worker", () => {
     await new Promise((resolve) => setImmediate(resolve));
     assert.ok(lines.some((l) => /signed in through OIDC federation/.test(l)), lines.join("\n"));
     assert.ok(lines.some((l) => /Claude sign-in works: claude-opus-5-5 answered\./.test(l)), lines.join("\n"));
+  });
+
+  test("a sign-in that fails at start is tried again, and the log says when it works, with none of the identity token", async () => {
+    FakeWorker.made = [];
+    class FakePool {
+      async query(): Promise<never> {
+        throw new Error("no database in tests");
+      }
+      async connect(): Promise<never> {
+        throw new Error("no database in tests");
+      }
+      async end(): Promise<void> {}
+    }
+    const modules: WorkerModules = { bull, pg: { Pool: FakePool as unknown as WorkerModules["pg"]["Pool"] } };
+    const tokenFile = `${temp()}/identity-token`;
+    const now = Math.floor(Date.now() / 1000);
+    const part = (o: unknown): string => Buffer.from(JSON.stringify(o)).toString("base64url");
+    const jwt = `${part({ alg: "RS256" })}.${part({ sub: "srv-synthetic", iat: now - 720, exp: now + 2880, jti: "synthetic-jti" })}.c2ln`;
+    writeFileSync(tokenFile, jwt);
+    const env = { ...goodEnv(), ANTHROPIC_FEDERATION_RULE_ID: "fdrl_synthetic", ANTHROPIC_ORGANIZATION_ID: "00000000-0000-4000-8000-000000000001", ANTHROPIC_SERVICE_ACCOUNT_ID: "svac_synthetic", ANTHROPIC_IDENTITY_TOKEN_FILE: tokenFile };
+    const lines: string[] = [];
+    let tries = 0;
+    const claudeCheck = async () => (++tries < 3 ? { ok: false, detail: "WorkloadIdentityError (401): Token exchange failed with status 401" } : { ok: true, detail: "claude-opus-5-5 answered" });
+    assert.equal(await workerCommand(env, { load: async () => modules, until: new Promise((r) => setTimeout(r, 100)), log: (l) => lines.push(l), claudeCheck, signInRetryMs: [5, 5, 5] }), 0);
+    const log = lines.join("\n");
+    assert.equal(tries, 3);
+    assert.match(log, /Claude by OIDC federation: The identity token was issued 12 minutes ago and expires in 48 minutes; it carries a single-use id/);
+    assert.equal(lines.filter((l) => l.startsWith("Claude sign-in failed at start")).length, 1);
+    assert.ok(lines.some((l) => l === "Claude sign-in works again: claude-opus-5-5 answered. Runs from now on get Claude's drafts."), log);
+    for (const piece of [...jwt.split("."), "srv-synthetic", "synthetic-jti"]) assert.ok(!log.includes(piece), piece);
+  });
+
+  test("a sign-in that never works is tried a bounded number of times, then the log says so once", async () => {
+    FakeWorker.made = [];
+    class FakePool {
+      async query(): Promise<never> {
+        throw new Error("no database in tests");
+      }
+      async connect(): Promise<never> {
+        throw new Error("no database in tests");
+      }
+      async end(): Promise<void> {}
+    }
+    const modules: WorkerModules = { bull, pg: { Pool: FakePool as unknown as WorkerModules["pg"]["Pool"] } };
+    const env = { ...goodEnv(), ANTHROPIC_API_KEY: "sk-ant-fake-key-for-tests" };
+    const lines: string[] = [];
+    let tries = 0;
+    const claudeCheck = async () => (tries++, { ok: false, detail: "AuthenticationError (401): invalid x-api-key" });
+    assert.equal(await workerCommand(env, { load: async () => modules, until: new Promise((r) => setTimeout(r, 100)), log: (l) => lines.push(l), claudeCheck, signInRetryMs: [5, 5] }), 0);
+    assert.equal(tries, 3);
+    assert.equal(lines.filter((l) => l.startsWith("Claude sign-in still fails after an hour of tries")).length, 1, lines.join("\n"));
+    assert.ok(!lines.some((l) => l.startsWith("Claude sign-in works again")));
   });
 });
 

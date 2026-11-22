@@ -25,14 +25,18 @@ Set `NODE_VERSION=24` as well as the repo's pin, and `PLAYWRIGHT_BROWSERS_PATH=0
 
 Set up this way on 2026-11-04 as `barometer-worker`.
 
-### Recycling the worker (off until tested)
+### Recycling the worker (off until tested again)
 
-With `HC_WORKER_RECYCLE_AT` set, the worker stops itself once its store of org-worded sentences holds that many: it finishes the run in hand, keeps serving connect jobs meanwhile, and exits 75 for Render to start a fresh one with an empty store (DECISIONS.md 666). Unset, it never does, and once the store is full the report marks for the customer's assistant fall back to unknown until the next deploy or restart. Nobody has yet seen Render restart it after it exits by itself, so test it once before relying on it:
+With `HC_WORKER_RECYCLE_AT` set, the worker stops itself once its store of org-worded sentences holds that many: it finishes the run in hand, keeps serving connect jobs meanwhile, and exits 75 for Render to start a fresh one with an empty store (DECISIONS.md 666). Unset, it never does, and once the store is full the report marks for the customer's assistant fall back to unknown until the next deploy or restart.
 
-1. Set `HC_WORKER_RECYCLE_AT` to `100` on the service and let it redeploy. The log says "Recycling is on: at 100 org-worded sentences …".
-2. Run one health check.
-3. When it finishes, the log says "Recycling: the org-word store is at …", then "Recycled: … in N seconds". Look in the service's Events for the restart, and check the log shows the worker starting again and taking jobs.
-4. If it restarted, set `HC_WORKER_RECYCLE_AT` to `50000`. If it didn't, unset it, start the service by hand, and tell the engine's owner.
+**What happened on 22 Nov 2026.** With it at `100`, the worker recycled after one check and Render restarted the process in the same instance in about 2 seconds, so the restart works. The fresh process then couldn't sign in to Claude ("Token exchange failed with status 401"), so its runs would have had the engine's own text. The likely cause, not yet proven: the new process presented the same Render identity token the first one had already exchanged, and Anthropic takes a token once only. Since DECISIONS.md 667 the worker keeps its Claude access token on the disk (`/var/data/claude-sign-in`, readable by the worker only), so a process that starts again uses it instead of exchanging again. The same applies to any restart in place, a crash included.
+
+Leave it unset until both of these are done:
+
+1. In the Claude Console, open Workload identity, then Authentication history, and find the failed attempt at 08:23:55 UTC on 22 Nov 2026. Its reason should be `jti_reused`. If it is something else (an expired token, a subject or audience that doesn't match), tell the engine's owner before going on: this fix would then not be the whole answer.
+2. Deploy this version, set `HC_WORKER_RECYCLE_AT` to `100` and run one health check. After "Recycled: …", the fresh worker's log should say "Claude sign-in works: …", and the authentication history should show no new exchange at that time. If it does, set it to `50000`. If the log says "Claude sign-in failed at start", unset it and tell the engine's owner; the worker keeps trying for an hour and says "Claude sign-in works again" if it recovers.
+
+**Claude on an ordinary day.** A worker that never restarts also exchanges Render's token again each time its access token runs out, and that only works if Render has written a new token by then. Nobody has yet seen it go past its first refresh. The log now says at start how old Render's token is, how long it has left and whether it is single-use, and says once if Claude's sign-in stops working ("Claude sign-in stopped working …") and once when it works again. After a deploy, look for either line over the next few hours. If "stopped working" appears, check the authentication history's reason for it and tell the engine's owner. Keeping the federation rule's token lifetime at 60 minutes, rather than the Console's 10-minute default, means fewer exchanges, so fewer chances to meet a token Render hasn't rewritten yet.
 
 ## 2. Its environment variables
 
@@ -61,7 +65,7 @@ For Claude's drafts of the report sections (DECISIONS.md 76). Without it the wor
 
 | Variable | Value |
 | --- | --- |
-| `ANTHROPIC_FEDERATION_RULE_ID`, `ANTHROPIC_ORGANIZATION_ID`, `ANTHROPIC_SERVICE_ACCOUNT_ID`, `ANTHROPIC_WORKSPACE_ID` | How the worker signs in to Claude, which drafts the report sections: Render's OIDC, with no key stored anywhere (render.com/docs/oidc). Render then sets `ANTHROPIC_IDENTITY_TOKEN_FILE` itself; don't set it by hand. The Anthropic side needs a Custom OIDC issuer `https://oidc.render.com/<the tea- workspace id>` (OIDC Discovery) and a federation rule for this service with audience `api.anthropic.com` and a token lifetime of at least 30 minutes. Set up this way on 2026-11-05 |
+| `ANTHROPIC_FEDERATION_RULE_ID`, `ANTHROPIC_ORGANIZATION_ID`, `ANTHROPIC_SERVICE_ACCOUNT_ID`, `ANTHROPIC_WORKSPACE_ID` | How the worker signs in to Claude, which drafts the report sections: Render's OIDC, with no key on the service (render.com/docs/oidc). Render then sets `ANTHROPIC_IDENTITY_TOKEN_FILE` itself; don't set it by hand. The Anthropic side needs a Custom OIDC issuer `https://oidc.render.com/<the tea- workspace id>` (OIDC Discovery) and a federation rule for this service with audience `api.anthropic.com` and a token lifetime of at least 30 minutes (60 is better; see Recycling above). The worker keeps the access token it gets in `/var/data/claude-sign-in`, readable by the worker only (DECISIONS.md 667). Set up this way on 2026-11-05 |
 | `ANTHROPIC_API_KEY` | Not with OIDC: a key on the service wins over federation, as it does in the SDK. Use it only instead of the four above |
 
 For Claude's summaries of each health check's Apex classes and triggers (DECISIONS.md 490 to 492). Leave it unset until the privacy notice says Apex code is sent to Claude to write the documentation.
