@@ -82,8 +82,10 @@ class Ledger {
  * held only the engine's words needn't be kept, since read as a literal it is
  * what it was. Bounded: past TAINTED_LIMIT nothing more is added and every string
  * the open ledger doesn't hold reads as unknown for the rest of the process,
- * the safe side (marks degrade to unknown, as before decision 655). The engine
- * makes a few dozen such sentences an analysis, so the bound is thousands of runs.
+ * the safe side (marks degrade to unknown, as before decision 655). One run of
+ * the small synthetic org adds about 160 (a repeat of the same org none), so the
+ * bound is some 600 different orgs' runs, fewer for big orgs. The worker can
+ * recycle itself well before it (HC_WORKER_RECYCLE_AT, DECISIONS.md 666).
  */
 const TAINTED_LIMIT = 100_000;
 const tainted = new Set<string>();

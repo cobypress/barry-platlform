@@ -3,6 +3,10 @@ import { BUDGET_DEFAULTS } from "../config.ts";
 import type { OAuthClient } from "../salesforce/oauth.ts";
 import type { DriveConfig } from "./drive.ts";
 import { MicrositeKeyError, micrositeKey } from "../microsite/seal.ts";
+import { orgWordsStore } from "../engine/org-words.ts";
+
+/** The highest HC_WORKER_RECYCLE_AT takes: half the org-word store's bound (DECISIONS.md 666). */
+export const RECYCLE_AT_LIMIT = Math.floor(orgWordsStore().limit / 2);
 
 // What `hc worker` needs before it starts. Every variable is required except
 // the optional ones, and the worker refuses to start with any missing or wrong,
@@ -38,6 +42,7 @@ export const WORKER_ENV = {
     HC_SF_SIGNIN_CLIENT_ID: "The sign-in app's consumer key: a classic connected app a customer's admin can authorise with nothing installed (DECISIONS.md 616). Set all three HC_SF_SIGNIN_ variables or none. Without them, every connection uses the package app",
     HC_SF_SIGNIN_CLIENT_SECRET: "Its secret, needed for the code exchange and refresh",
     HC_SF_SIGNIN_REDIRECT_URI: "The console's OAuth callback, exactly as registered on the sign-in app",
+    HC_WORKER_RECYCLE_AT: `A whole number from 1 to ${RECYCLE_AT_LIMIT}: once that many org-worded sentences are in the worker's store, it finishes the jobs in hand and exits 75 for Render to start a fresh one (DECISIONS.md 666). Unset: it never recycles itself. Set it low once and watch Render restart it before relying on it`,
     HC_MICROSITE_KEY: "The customer microsite: 32 bytes, base64 (openssl rand -base64 32), the same value as the console's, and different from HC_CONNECT_KEY and HC_TOKEN_KEY. Without it, released runs get documents but no microsite",
   },
 } as const;
@@ -79,6 +84,8 @@ export type WorkerConfig = {
   micrositeKey: Buffer | null;
   /** HC_HANDBOOK_SUMMARIES=on, and only that: Claude summarises the Apex code (DECISIONS.md 490). */
   apexSummaries: boolean;
+  /** HC_WORKER_RECYCLE_AT: the org-word store's size at which the worker recycles itself. Null, the default: it never does (DECISIONS.md 666). */
+  recycleAt: number | null;
 };
 
 const key32 = (raw: string): Buffer | null => {
@@ -119,6 +126,11 @@ export function readWorkerEnv(env: NodeJS.ProcessEnv): { ok: true; config: Worke
   if (get("HC_DRIVE_FOLDER_ID") && !/^[A-Za-z0-9_-]{10,200}$/.test(get("HC_DRIVE_FOLDER_ID"))) problems.push("HC_DRIVE_FOLDER_ID must be a Drive folder id, the last part of the folder's address");
   const federationSet = FEDERATION_VARS.filter((name) => get(name));
   if (federationSet.length > 0 && federationSet.length < FEDERATION_VARS.length) problems.push(`Set all of ${FEDERATION_VARS.join(", ")} or none: ${FEDERATION_VARS.filter((n) => !get(n)).join(", ")} missing`);
+  // Digits only, so "1e3" or "0x10" isn't read as a number nobody typed.
+  const recycleAt = get("HC_WORKER_RECYCLE_AT") ? (/^\d+$/.test(get("HC_WORKER_RECYCLE_AT")) ? Number(get("HC_WORKER_RECYCLE_AT")) : NaN) : null;
+  if (recycleAt !== null && !(Number.isInteger(recycleAt) && recycleAt >= 1 && recycleAt <= RECYCLE_AT_LIMIT)) {
+    problems.push(`HC_WORKER_RECYCLE_AT must be a whole number from 1 to ${RECYCLE_AT_LIMIT}, or unset`);
+  }
   if (!["", "0", "1"].includes(get("HC_CLEANUP_DRY_RUN"))) problems.push("HC_CLEANUP_DRY_RUN must be 1, 0 or unset");
   let siteKey: Buffer | null = null;
   try {
@@ -170,6 +182,7 @@ export function readWorkerEnv(env: NodeJS.ProcessEnv): { ok: true; config: Worke
       micrositeKey: siteKey,
       // Exactly "on", untrimmed: a switch that sends code to Claude doesn't guess.
       apexSummaries: env.HC_HANDBOOK_SUMMARIES === "on",
+      recycleAt,
     },
   };
 }

@@ -25,7 +25,14 @@ Set `NODE_VERSION=24` as well as the repo's pin, and `PLAYWRIGHT_BROWSERS_PATH=0
 
 Set up this way on 2026-11-04 as `barometer-worker`.
 
-The worker stops itself now and then, finishing the jobs in hand, and exits 75 so Render starts a fresh one (DECISIONS.md 666). The log says "Recycling: the org-word store is at ..." first. That restart is expected, not a crash.
+### Recycling the worker (off until tested)
+
+With `HC_WORKER_RECYCLE_AT` set, the worker stops itself once its store of org-worded sentences holds that many: it finishes the run in hand, keeps serving connect jobs meanwhile, and exits 75 for Render to start a fresh one with an empty store (DECISIONS.md 666). Unset, it never does, and once the store is full the report marks for the customer's assistant fall back to unknown until the next deploy or restart. Nobody has yet seen Render restart it after it exits by itself, so test it once before relying on it:
+
+1. Set `HC_WORKER_RECYCLE_AT` to `100` on the service and let it redeploy. The log says "Recycling is on: at 100 org-worded sentences …".
+2. Run one health check.
+3. When it finishes, the log says "Recycling: the org-word store is at …", then "Recycled: … in N seconds". Look in the service's Events for the restart, and check the log shows the worker starting again and taking jobs.
+4. If it restarted, set `HC_WORKER_RECYCLE_AT` to `50000`. If it didn't, unset it, start the service by hand, and tell the engine's owner.
 
 ## 2. Its environment variables
 

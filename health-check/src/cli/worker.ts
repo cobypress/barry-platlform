@@ -3,7 +3,7 @@ import { MODELS } from "../config.ts";
 import { anthropicClient, anthropicClientWithKey, type NarrativeClient } from "../narrative/client.ts";
 import { checkClaude } from "../narrative/guard.ts";
 import { tokenKeySource, TokenStore } from "../salesforce/token-store.ts";
-import { HEALTH_CHECK_QUEUE, HEAVY_QUEUE, lostRecorder, RECYCLE_AT, RECYCLE_EXIT, recycleWatch, redisConnection, runQueuer, startQueueWorker, type BullModule, type StoreFill } from "../worker/bullmq.ts";
+import { HEALTH_CHECK_QUEUE, HEAVY_QUEUE, lostRecorder, RECYCLE_EXIT, RECYCLE_WATCHDOG_MS, recycleWatch, redisConnection, runQueuer, startQueueWorker, type BullModule, type StoreFill } from "../worker/bullmq.ts";
 import { GoogleDrive } from "../worker/drive.ts";
 import { readWorkerEnv, WORKER_ENV } from "../worker/env.ts";
 import { PostgresWorkerStore, type SqlPool } from "../worker/postgres-store.ts";
@@ -25,9 +25,9 @@ The worker needs:
 ${Object.entries(WORKER_ENV.required).map(([name, why]) => `  ${name.padEnd(24)} ${why}`).join("\n")}
 and may take:
 ${Object.entries(WORKER_ENV.optional).map(([name, why]) => `  ${name.padEnd(24)} ${why}`).join("\n")}
-It also needs bullmq and pg installed beside the engine. It stops itself, finishing the jobs
-in hand, once the store of org-worded sentences is half full, and exits ${RECYCLE_EXIT} so the
-host starts a fresh one (DECISIONS.md 666).`;
+It also needs bullmq and pg installed beside the engine. With HC_WORKER_RECYCLE_AT set, it
+stops itself once its store of org-worded sentences holds that many, finishing the jobs in
+hand, and exits ${RECYCLE_EXIT} for the host to start a fresh one (DECISIONS.md 666).`;
 
 export type PgModule = { Pool: new (options: { connectionString: string; max?: number }) => SqlPool & { end(): Promise<void> } };
 export type WorkerModules = { bull: BullModule; pg: PgModule };
@@ -65,6 +65,10 @@ export async function workerCommand(
     scanSweep?: typeof sweepScanConnections;
     /** Tests only: stands in for the org-word store's fill (DECISIONS.md 666). */
     storeFill?: () => StoreFill;
+    /** Tests only: stands in for process.exit, which the recycle's watchdog calls. */
+    exit?: (code: number) => void;
+    /** Tests only: stands in for RECYCLE_WATCHDOG_MS. */
+    watchdogMs?: number;
   } = {},
 ): Promise<number> {
   const log = options.log ?? ((line: string) => console.log(`${new Date().toISOString()} ${line}`));
@@ -111,12 +115,17 @@ export async function workerCommand(
     withJobLock(locksDir, `run-${runId}`, () => letGoOfLostRun(runId, deps)).catch((err: unknown) => {
       if (!(err instanceof JobBusyError)) log(`Run ${runId}'s connection couldn't be checked after BullMQ gave it up; the scan sweep will.`);
     });
-  // Resolves when a job ends with the org-word store half full; the worker then stops as on SIGTERM (DECISIONS.md 666).
-  const recycle = options.storeFill ? recycleWatch(RECYCLE_AT, options.storeFill) : recycleWatch();
-  const worker = startQueueWorker(bull, handler, { redisUrl: config.redisUrl, concurrency: config.concurrency, log, onLost: lostRecorder(store, undefined, letGoLost), afterJob: recycle.check });
+  // Only with HC_WORKER_RECYCLE_AT set: resolves when a job ends with the org-word store at it, or full (DECISIONS.md 666).
+  const recycle = config.recycleAt === null ? null : recycleWatch(config.recycleAt, options.storeFill);
+  const worker = startQueueWorker(bull, handler, { redisUrl: config.redisUrl, concurrency: config.concurrency, log, onLost: lostRecorder(store, undefined, letGoLost), afterJob: recycle?.check });
   log(`Taking jobs from health-check-jobs, ${config.concurrency} at a time, with runs and documents one at a time in ${HEAVY_QUEUE}.`);
   if (!config.drive) log("Google Drive isn't set up, so released runs' documents can't be made.");
   if (!config.micrositeKey) log("HC_MICROSITE_KEY isn't set, so released runs get documents but no customer microsite.");
+  log(
+    config.recycleAt === null
+      ? "Recycling is off: HC_WORKER_RECYCLE_AT isn't set, so once the org-word store is full, marks are unknown until a restart."
+      : `Recycling is on: at ${config.recycleAt} org-worded sentences, the worker finishes the jobs in hand and exits ${RECYCLE_EXIT} for the host to restart it.`,
+  );
   // Said at every start, so a deploy that turns it on or off shows in the log.
   log(
     !config.apexSummaries
@@ -155,13 +164,42 @@ export async function workerCommand(
   scanSweep();
   const scanSweeping = setInterval(scanSweep, SCAN_SWEEP_INTERVAL_MS);
   scanSweeping.unref();
-  const stop = await Promise.race([(options.until ?? untilSignalled()).then(() => null), recycle.due]);
+  const signalled = (options.until ?? untilSignalled()).then(() => null);
+  const stop = await (recycle ? Promise.race([signalled, recycle.due]) : signalled);
   clearInterval(sweeping);
   clearInterval(scanSweeping);
-  // Counts only, never org text. The same path as SIGTERM from here: the jobs in hand finish before each worker closes.
-  log(stop ? `Recycling: the org-word store is at ${stop.size} of ${stop.limit}. Finishing the jobs in hand; the host starts a fresh worker.` : "Stopping: finishing the jobs in hand.");
-  await worker.close();
+  if (!stop) {
+    log("Stopping: finishing the jobs in hand.");
+    await worker.close();
+    await queue.close();
+    await pool.end();
+    return 0;
+  }
+  // Counts only, never org text. The heavy worker closes first, taking no new run, while connect and share jobs carry on.
+  log(`Recycling: the org-word store is at ${stop.size} of ${stop.limit}. Finishing the jobs in hand; the host starts a fresh worker.`);
+  const began = Date.now();
+  const watchdogMs = options.watchdogMs ?? RECYCLE_WATCHDOG_MS;
+  // close() waits without limit for the jobs in hand, so a stuck one would hold a worker that takes no runs. Unref'd: it never keeps a finished process alive.
+  const watchdog = setTimeout(() => {
+    log(`Recycling: the jobs in hand hadn't finished after ${Math.round(watchdogMs / 60_000)} minutes, so the worker exits now. A run cut short resumes from its checkpoints.`);
+    (options.exit ?? process.exit)(RECYCLE_EXIT);
+  }, watchdogMs);
+  watchdog.unref();
+  await worker.closeHeavyFirst();
   await queue.close();
   await pool.end();
-  return stop ? RECYCLE_EXIT : 0;
+  clearTimeout(watchdog);
+  log(`Recycled: the jobs in hand finished and the worker closed in ${Math.round((Date.now() - began) / 1000)} seconds.`);
+  return RECYCLE_EXIT;
+}
+
+/**
+ * `hc worker` itself. A worker that recycled itself exits at once, so nothing
+ * left open can keep alive a process that takes no jobs; the host starts a fresh
+ * one (DECISIONS.md 666). Any other code is left for the CLI to set.
+ */
+export async function runWorker(env: NodeJS.ProcessEnv = process.env, options: Parameters<typeof workerCommand>[1] = {}): Promise<number> {
+  const code = await workerCommand(env, options);
+  if (code === RECYCLE_EXIT) (options.exit ?? process.exit)(code);
+  return code;
 }

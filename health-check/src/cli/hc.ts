@@ -16,8 +16,7 @@ import { SfCliConnectionProvider } from "../salesforce/sf-cli-provider.ts";
 import type { ConnectionProvider } from "../salesforce/connection.ts";
 import { OAuthConnectionProvider } from "../salesforce/oauth-provider.ts";
 import { CONNECT_USAGE, connectCommand, connectionStore, oauthClient } from "./connect.ts";
-import { WORKER_USAGE, workerCommand } from "./worker.ts";
-import { RECYCLE_EXIT } from "../worker/bullmq.ts";
+import { runWorker, WORKER_USAGE } from "./worker.ts";
 
 const USAGE = `Black Cloud Barometer
 
@@ -64,7 +63,7 @@ extracts, so export before the run is purged.
 purge deletes a run's raw extracts (checkpoints/) and keeps findings, metrics,
 scores, reports and the pseudonym map, so reports can still be rendered.
 
-Exit codes: 0 finished, 2 refused or failed, 3 stopped at the API budget.`;
+Exit codes: 0 finished, 2 refused or failed, 3 stopped at the API budget, 75 the worker recycled itself.`;
 
 export const EXIT = { ok: 0, failed: 2, budget: 3 } as const;
 
@@ -158,12 +157,8 @@ async function main(argv: string[]): Promise<number> {
     return EXIT.ok;
   }
 
-  if (positionals[0] === "worker" && !values.help) {
-    const code = await workerCommand();
-    // A worker that recycled itself exits now, so nothing left open can keep a process that takes no jobs alive; the host starts a fresh one (DECISIONS.md 666).
-    if (code === RECYCLE_EXIT) process.exit(code);
-    return code;
-  }
+  // runWorker exits at once after a recycle (DECISIONS.md 666).
+  if (positionals[0] === "worker" && !values.help) return runWorker();
 
   if (positionals[0] === "connect") return connectCommand(values.help ? undefined : positionals[1], values);
 
