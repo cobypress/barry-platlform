@@ -1,7 +1,8 @@
 import { basename, dirname, join } from "node:path";
 import { MODELS } from "../config.ts";
-import { anthropicClient, anthropicClientWithKey, type NarrativeClient } from "../narrative/client.ts";
+import { anthropicClientWithKey, federationClient, type NarrativeClient } from "../narrative/client.ts";
 import { checkClaude } from "../narrative/guard.ts";
+import { ClaudeWatch, federationCachePath, identityTokenFacts, prepareSignInCache, SIGN_IN_RETRY_MINUTES } from "../narrative/sign-in.ts";
 import { tokenKeySource, TokenStore } from "../salesforce/token-store.ts";
 import { HEALTH_CHECK_QUEUE, HEAVY_QUEUE, lostRecorder, RECYCLE_EXIT, RECYCLE_WATCHDOG_MS, recycleWatch, redisConnection, runQueuer, startQueueWorker, type BullModule, type StoreFill } from "../worker/bullmq.ts";
 import { GoogleDrive } from "../worker/drive.ts";
@@ -58,7 +59,11 @@ export async function workerCommand(
     until?: Promise<void>;
     log?: (line: string) => void;
     /** Tests only: stands in for the startup call to Claude. */
-    claudeCheck?: (client: NarrativeClient) => Promise<{ ok: boolean; detail: string }>;
+    claudeCheck?: (client: NarrativeClient) => Promise<{ ok: boolean; detail: string; signIn?: boolean }>;
+    /** Tests only: the fetch the federation client uses, for a stand-in Anthropic. */
+    claudeFetch?: typeof fetch;
+    /** Tests only: the waits between the startup check's tries after a failure, in place of SIGN_IN_RETRY_MINUTES. */
+    signInRetryMs?: readonly number[];
     /** Tests only: stands in for the retention sweep. */
     sweep?: typeof retentionSweep;
     /** Tests only: stands in for the sweep of free scans' connections. */
@@ -80,8 +85,17 @@ export async function workerCommand(
   const { config } = read;
   const { bull, pg } = await (options.load ?? loadWorkerModules)();
 
-  // With no key, the SDK finds the federation variables and the identity token itself, and refreshes its own access token.
-  const narrative = config.claude.kind === "key" ? anthropicClientWithKey(config.claude.apiKey) : config.claude.kind === "federation" ? anthropicClient() : undefined;
+  // With federation the SDK exchanges Render's identity token itself and refreshes its own access token, kept on the disk so a
+  // process that starts again in this instance doesn't exchange an identity token the last one already used (DECISIONS.md 667).
+  const signInFacts = config.claude.kind === "federation" ? () => identityTokenFacts(env) : () => "";
+  const watch = new ClaudeWatch(log, signInFacts);
+  const signInDir = join(dirname(config.runsDir), "claude-sign-in");
+  const narrative =
+    config.claude.kind === "key"
+      ? anthropicClientWithKey(config.claude.apiKey, watch.observe)
+      : config.claude.kind === "federation"
+        ? federationClient(env, prepareSignInCache(signInDir, federationCachePath(env, signInDir), log), { observe: watch.observe, ...(options.claudeFetch ? { fetch: options.claudeFetch } : {}) })
+        : undefined;
   // One more for the heavy slot (DECISIONS.md 371).
   const pool = new pg.Pool({ connectionString: config.databaseUrl, max: config.concurrency + 3 });
   const store = new PostgresWorkerStore(pool, { log });
@@ -141,11 +155,58 @@ export async function workerCommand(
         ? "Claude drafts each run's report sections, signed in through OIDC federation."
         : `${config.claude.reason}, so report sections are the engine's own text.`,
   );
-  // One small call, so the log says now whether Claude answers. It never holds up the queue.
+  if (config.claude.kind === "federation") log(`Claude by OIDC federation: ${signInFacts()}`);
+  // One small call, so the log says now whether Claude answers. It never holds up the queue. A failure is tried
+  // again for about an hour, so a sign-in that comes back shows in the log; every run asks Claude meanwhile anyway.
+  let stopped = false;
+  let signInRetry: ReturnType<typeof setTimeout> | undefined;
   if (narrative) {
-    void (options.claudeCheck ?? ((client) => checkClaude(client, MODELS.synthesis)))(narrative).then((check) =>
-      log(check.ok ? `Claude sign-in works: ${check.detail}.` : `Claude sign-in failed, so runs will use the engine's own text until it's fixed. ${check.detail}`),
-    );
+    const check = options.claudeCheck ?? ((client: NarrativeClient) => checkClaude(client, MODELS.synthesis));
+    const waits = options.signInRetryMs ?? SIGN_IN_RETRY_MINUTES.map((m) => m * 60_000);
+    // A failure that isn't about sign-in (a busy API, a network error) is said as what it was, and recovers as an answer, not a sign-in.
+    let refusedSignIn = false;
+    const step = async (attempt: number): Promise<void> => {
+      try {
+        await tryOnce(attempt);
+      } finally {
+        // The startup line has been said (or the check threw), so the watch says what changes from now on.
+        if (attempt === 0) watch.begin();
+      }
+    };
+    const tryOnce = async (attempt: number): Promise<void> => {
+      const result = await check(narrative);
+      if (stopped) return;
+      const signIn = !result.ok && result.signIn !== false;
+      if (attempt === 0) {
+        log(
+          result.ok
+            ? `Claude sign-in works: ${result.detail}.`
+            : signIn
+              ? `Claude sign-in failed at start, so runs use the engine's own text until it works. The worker tries again for about an hour and says when it does. ${result.detail} ${signInFacts()}`.trim()
+              : `Claude didn't answer the startup check, and it wasn't refused sign-in: ${result.detail}. Runs still ask Claude; the worker tries again for about an hour and says when it answers.`,
+        );
+      }
+      if (result.ok) {
+        watch.note(true, result.detail);
+        // After a refused sign-in, the watch has said "works again".
+        if (attempt > 0 && !refusedSignIn) log(`Claude answered the startup check on a later try: ${result.detail}.`);
+        return;
+      }
+      if (signIn) {
+        refusedSignIn = true;
+        watch.note(false, result.detail);
+      }
+      if (watch.up) return;
+      if (attempt >= waits.length) {
+        log("Claude's startup check still fails after an hour of tries. Every run still asks Claude, and the log says when sign-in works again.");
+        return;
+      }
+      signInRetry = setTimeout(() => tryClaude(attempt + 1), waits[attempt]);
+      signInRetry.unref();
+    };
+    // A throwing check or log line never becomes an unhandled rejection.
+    const tryClaude = (attempt: number): void => void step(attempt).catch(() => {});
+    tryClaude(0);
   }
   // Retention (decision 16): once now, then daily. A failed sweep is logged and tried again tomorrow.
   const sweep = (): void =>
@@ -166,6 +227,8 @@ export async function workerCommand(
   scanSweeping.unref();
   const signalled = (options.until ?? untilSignalled()).then(() => null);
   const stop = await (recycle ? Promise.race([signalled, recycle.due]) : signalled);
+  stopped = true;
+  clearTimeout(signInRetry);
   clearInterval(sweeping);
   clearInterval(scanSweeping);
   if (!stop) {

@@ -1,9 +1,10 @@
 import { findNames, maskNames } from "../privacy/names.ts";
 import { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { redactSecrets } from "../privacy/secrets.ts";
-import type { NarrativeClient, NarrativeReply, NarrativeRequest } from "./client.ts";
+import { isSignInFailure, type NarrativeClient, type NarrativeReply, type NarrativeRequest } from "./client.ts";
 import { APEX_SUMMARY_PROMPT } from "./apex-prompt.ts";
 import { SYSTEM_PROMPT } from "./prompt.ts";
+import { safeDetail } from "./sign-in.ts";
 
 // Rule 7: nothing that leaves for Claude may hold a real name. Findings already
 // hold tokens, so this is the backstop, and every prompt passes through it.
@@ -82,7 +83,7 @@ export async function sendPrompt(client: NarrativeClient, request: NarrativeRequ
  * holds nothing about a customer. The result says which model answered or why
  * the call failed, never a secret.
  */
-export async function checkClaude(client: NarrativeClient, model: string): Promise<{ ok: boolean; detail: string }> {
+export async function checkClaude(client: NarrativeClient, model: string): Promise<{ ok: boolean; detail: string; signIn?: boolean }> {
   try {
     const reply = await sendPrompt(
       client,
@@ -99,7 +100,8 @@ export async function checkClaude(client: NarrativeClient, model: string): Promi
     return { ok: true, detail: `${reply.model} answered` };
   } catch (err) {
     const status = typeof (err as { status?: unknown }).status === "number" ? ` (${(err as { status: number }).status})` : "";
-    const message = err instanceof Error ? err.message.replace(/sk-ant-[A-Za-z0-9_-]+/g, "[removed]").slice(0, 300) : "an unexpected error";
-    return { ok: false, detail: `${err instanceof Error ? err.name : "Error"}${status}: ${message}` };
+    // The same token shapes stripped as in every other sign-in line; the status goes after the class name.
+    const [name, ...rest] = safeDetail(err).split(": ");
+    return { ok: false, detail: `${name}${status}: ${rest.join(": ")}`, signIn: isSignInFailure(err) };
   }
 }
