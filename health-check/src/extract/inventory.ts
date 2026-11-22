@@ -97,6 +97,19 @@ function failedCount(err: unknown): string {
   return "The count couldn't be read.";
 }
 
+export const COUNT_NOT_READ = "Salesforce's count for this field didn't come back as a whole number, so its fill isn't measured.";
+export const RECORDS_NOT_READ = "Salesforce's count of this object's records didn't come back as a whole number, so its fields' fill isn't measured.";
+
+/**
+ * A count as Salesforce gave it, or null when it isn't one: missing, null, a
+ * fraction, below zero, too large, or anything Number() would make NaN. A
+ * count written as digits in a string is read. Never a guess (DECISIONS.md 668).
+ */
+export function countOf(value: unknown): number | null {
+  const n = typeof value === "number" ? value : typeof value === "string" && /^\s*\d+\s*$/.test(value) ? Number(value) : NaN;
+  return Number.isSafeInteger(n) && n >= 0 ? n : null;
+}
+
 export type FillRateData = { objects: FillRateObject[]; leftOut: number; scopeNote: string | null };
 
 type Scope = { objects: string[]; hidden: FillRateObject[]; leftOut: number; scopeNote: string | null; counts: Map<string, number> };
@@ -139,7 +152,8 @@ type Planned = { object: string; fields: string[]; skipped: Array<{ field: strin
 
 export const fillRatesExtractor: Extractor<Sourced<FillRateData>> = {
   id: "inventory-fill-rates",
-  version: 2,
+  // 3: a field whose count isn't a whole number is listed as not measured, never read as 0 (DECISIONS.md 668).
+  version: 3,
   // Counts of records: a set-up only scan never runs it (DECISIONS.md 604).
   records: true,
   partialKeys: ["inventory-fill-rates"],
@@ -183,20 +197,33 @@ export const fillRatesExtractor: Extractor<Sourced<FillRateData>> = {
           continue;
         }
         const rows = own.map((r) => (r.ok ? r.row : {}));
-        const records = Number(rows[0]?.n ?? 0);
+        // A count Salesforce didn't give as a whole number is never read as one: no record count, no object.
+        const records = countOf(rows[0]?.n);
+        if (records === null) {
+          finished.push({ object: plan.object, unavailable: RECORDS_NOT_READ });
+          continue;
+        }
         const listed = counts.get(plan.object);
         if (listed !== undefined && Math.abs(listed - records) > Math.max(COUNTS_DIFFER_BY, Math.max(listed, records) / 10)) {
           finished.push({ object: plan.object, unavailable: COUNTS_DISAGREE });
           continue;
         }
-        const fields = plan.fields.map((field, i) => {
+        const fields: Array<{ field: string; filled: number; share: number | null }> = [];
+        const notMeasured: Array<{ field: string; reason: string }> = [];
+        plan.fields.forEach((field, i) => {
           // Each field against its own query's records: a record added between two queries moves only that one's.
           const row = rows[Math.floor(i / FILL_RATE_FIELDS_PER_QUERY)]!;
-          const n = Number(row.n ?? 0);
-          const filled = Math.min(Number(row[`f${i % FILL_RATE_FIELDS_PER_QUERY}`] ?? 0), n);
-          return { field, filled, share: n > 0 ? Math.round((filled / n) * 10_000) / 10_000 : null };
+          const n = countOf(row.n);
+          const count = countOf(row[`f${i % FILL_RATE_FIELDS_PER_QUERY}`]);
+          // Not measured, said so, and never 0: the field's answer wasn't a count (DECISIONS.md 668).
+          if (n === null || count === null) {
+            notMeasured.push({ field, reason: COUNT_NOT_READ });
+            return;
+          }
+          const filled = Math.min(count, n);
+          fields.push({ field, filled, share: n > 0 ? Math.round((filled / n) * 10_000) / 10_000 : null });
         });
-        finished.push({ object: plan.object, records, fields, skipped: plan.skipped });
+        finished.push({ object: plan.object, records, fields, skipped: [...plan.skipped, ...notMeasured] });
       }
       keep(finished);
       pending.length = 0;
@@ -545,6 +572,18 @@ export const SETUP_ONLY_FILL_RATES = "A set-up only scan doesn't count records, 
 /** An error's class name, for a log line: never its message. */
 export const errorClass = (err: unknown): string => (err !== null && typeof err === "object" ? (err.constructor?.name ?? "Object") : typeof err);
 
+/** The fields listed as not measured because their count wasn't a whole number, and the objects they're in. */
+function notMeasuredIn(objects: FillRateObject[]): { fields: number; objects: number } {
+  let fields = 0;
+  let within = 0;
+  for (const o of objects) {
+    const n = "skipped" in o ? o.skipped.filter((s) => s.reason === COUNT_NOT_READ).length : 0;
+    fields += n;
+    if (n) within++;
+  }
+  return { fields, objects: within };
+}
+
 export const NOT_PUT_TOGETHER = "This part of the inventory couldn't be put together from what was read, so it isn't shown.";
 
 /**
@@ -570,21 +609,21 @@ export function buildInventory(extracts: Map<string, unknown>, scope: RunScope, 
     }
   };
   const fill = got(fillRatesExtractor);
-  const fillRates = apart("fillRates", (): Inventory["fillRates"] =>
-    !fill
-      ? scope === "complete"
-        ? notRunOf(fillRatesExtractor)
-        : { unavailable: SETUP_ONLY_FILL_RATES }
-      : fill.status !== "ok"
-        ? { unavailable: fill.reason }
-        : {
-            rows: fill.data.objects,
-            notes: [
-              ...(fill.data.scopeNote ? [fill.data.scopeNote] : []),
-              ...(fill.data.leftOut ? [`${fill.data.leftOut} more objects with records weren't counted: we count the ${FILL_RATE_MAX_OBJECTS} with the most records.`] : []),
-            ],
-          },
-  );
+  const fillRates = apart("fillRates", (): Inventory["fillRates"] => {
+    if (!fill) return scope === "complete" ? notRunOf(fillRatesExtractor) : { unavailable: SETUP_ONLY_FILL_RATES };
+    if (fill.status !== "ok") return { unavailable: fill.reason };
+    const { fields, objects } = notMeasuredIn(fill.data.objects);
+    // Counts only: how many fields and objects, never which (DECISIONS.md 668).
+    if (fields) log(`  The inventory's fill rates: ${fields} ${fields === 1 ? "field" : "fields"} in ${objects} ${objects === 1 ? "object" : "objects"} came back without a whole-number count, so ${fields === 1 ? "it's" : "they're"} listed as not measured.`);
+    return {
+      rows: fill.data.objects,
+      notes: [
+        ...(fill.data.scopeNote ? [fill.data.scopeNote] : []),
+        ...(fill.data.leftOut ? [`${fill.data.leftOut} more objects with records weren't counted: we count the ${FILL_RATE_MAX_OBJECTS} with the most records.`] : []),
+        ...(fields ? [`${fields === 1 ? "One field's count" : `${fields} fields' counts`} didn't come back from Salesforce as a whole number, so ${fields === 1 ? "it's" : "they're"} listed among the fields not counted, not shown as empty.`] : []),
+      ],
+    };
+  });
   const packages = got(packagesExtractor);
   const apps = got(connectedAppsExtractor);
   const risky = got(riskyPermissionsExtractor);
