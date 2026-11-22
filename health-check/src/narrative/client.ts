@@ -1,4 +1,5 @@
-import Anthropic from "@anthropic-ai/sdk";
+import Anthropic, { AnthropicError } from "@anthropic-ai/sdk";
+import { WorkloadIdentityError } from "@anthropic-ai/sdk/lib/credentials/types";
 
 // The one place this service talks to Claude. Everything else takes a
 // NarrativeClient, so tests use a stub and no key is ever needed to run them.
@@ -47,6 +48,35 @@ export function buildMessageParams(request: NarrativeRequest): Anthropic.Message
 /** Told how each call went, so the worker can say when Claude stops and starts letting it in (DECISIONS.md 667). */
 export type ClaudeObserver = (outcome: { ok: true; model: string } | { ok: false; error: unknown }) => void;
 
+/** An observer that throws (its log, say) never stops a call or replaces the call's own error. */
+function tell(observe: ClaudeObserver | undefined, outcome: Parameters<ClaudeObserver>[0]): void {
+  try {
+    observe?.(outcome);
+  } catch {
+    // Nothing to do: the call's result matters more than the log line.
+  }
+}
+
+/**
+ * A failure that means Claude won't let this worker in, rather than a busy or
+ * unreachable API. Checked by class, since the SDK's error classes leave
+ * `name` as "Error". A federation error is a sign-in failure unless the token
+ * endpoint couldn't be reached or answered 429 or 5xx. A missing, unreadable
+ * or empty identity token file is a plain AnthropicError from the SDK's file
+ * reader, matched by its fixed wording.
+ */
+export function isSignInFailure(err: unknown): boolean {
+  if (err instanceof WorkloadIdentityError) {
+    if (err.message.startsWith("Failed to reach token endpoint")) return false;
+    return !(err.statusCode !== null && (err.statusCode === 429 || err.statusCode >= 500));
+  }
+  if (err instanceof Anthropic.AuthenticationError || err instanceof Anthropic.PermissionDeniedError) return true;
+  if (err instanceof AnthropicError && /^(Failed to read identity token file|Identity token file at .* is empty|Identity token value is empty|Could not resolve authentication method)/.test(err.message)) return true;
+  // A stand-in client's error in tests, or any other error carrying a status.
+  const status = (err as { status?: unknown } | null)?.status;
+  return status === 401 || status === 403;
+}
+
 /**
  * Wraps the SDK. Server-side refusal fallbacks are left off on purpose: they'd
  * send customer metadata to a different model without anyone deciding to, and a
@@ -59,10 +89,10 @@ export function anthropicClient(sdk: MessagesApi = new Anthropic(), observe?: Cl
       try {
         message = await sdk.messages.stream(buildMessageParams(request)).finalMessage();
       } catch (error) {
-        observe?.({ ok: false, error });
+        tell(observe, { ok: false, error });
         throw error;
       }
-      observe?.({ ok: true, model: message.model });
+      tell(observe, { ok: true, model: message.model });
       // Check why it stopped first: a refusal can arrive with no content at all.
       const text = message.content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("");
       return { stopReason: message.stop_reason, text, model: message.model };
@@ -87,7 +117,7 @@ export function anthropicClientWithKey(apiKey: string, observe?: ClaudeObserver)
  * the token file then holds, as in a process that never stopped. A config
  * passed in code means the SDK reads no key from the environment.
  */
-export function federationClient(env: NodeJS.ProcessEnv, credentialsPath: string, options: { fetch?: typeof fetch; observe?: ClaudeObserver } = {}): NarrativeClient {
+export function federationClient(env: NodeJS.ProcessEnv, credentialsPath: string | null, options: { fetch?: typeof fetch; observe?: ClaudeObserver } = {}): NarrativeClient {
   const sdk = new Anthropic({
     ...(options.fetch ? { fetch: options.fetch } : {}),
     config: {
@@ -98,7 +128,8 @@ export function federationClient(env: NodeJS.ProcessEnv, credentialsPath: string
         service_account_id: env.ANTHROPIC_SERVICE_ACCOUNT_ID || undefined,
         // Unset, the SDK falls back to ANTHROPIC_IDENTITY_TOKEN.
         identity_token: env.ANTHROPIC_IDENTITY_TOKEN_FILE ? { source: "file", path: env.ANTHROPIC_IDENTITY_TOKEN_FILE } : undefined,
-        credentials_path: credentialsPath,
+        // Null: in memory only, as with variables alone.
+        credentials_path: credentialsPath ?? undefined,
       },
       organization_id: env.ANTHROPIC_ORGANIZATION_ID,
       workspace_id: env.ANTHROPIC_WORKSPACE_ID || undefined,

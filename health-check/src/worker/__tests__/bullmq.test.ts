@@ -1,7 +1,9 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
-import { writeFileSync } from "node:fs";
+import { existsSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fakeAnthropic, syntheticJwt } from "../../narrative/__tests__/fake-anthropic.ts";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { workerCommand, type WorkerModules } from "../../cli/worker.ts";
@@ -377,6 +379,113 @@ describe("hc worker", () => {
     for (const piece of [...jwt.split("."), "srv-synthetic", "synthetic-jti"]) assert.ok(!log.includes(piece), piece);
   });
 
+  test("a startup check that fails for another reason is said as that, and its recovery as an answer, not a sign-in", async () => {
+    FakeWorker.made = [];
+    class FakePool {
+      async query(): Promise<never> {
+        throw new Error("no database in tests");
+      }
+      async connect(): Promise<never> {
+        throw new Error("no database in tests");
+      }
+      async end(): Promise<void> {}
+    }
+    const modules: WorkerModules = { bull, pg: { Pool: FakePool as unknown as WorkerModules["pg"]["Pool"] } };
+    const env = { ...goodEnv(), ANTHROPIC_API_KEY: "sk-ant-fake-key-for-tests" };
+    const lines: string[] = [];
+    let tries = 0;
+    const claudeCheck = async () => (++tries < 2 ? { ok: false, detail: "InternalServerError (529): Overloaded", signIn: false } : { ok: true, detail: "claude-opus-5-5 answered" });
+    assert.equal(await workerCommand(env, { load: async () => modules, until: new Promise((r) => setTimeout(r, 100)), log: (l) => lines.push(l), claudeCheck, signInRetryMs: [5, 5] }), 0);
+    const log = lines.join("\n");
+    assert.ok(lines.includes("Claude didn't answer the startup check, and it wasn't refused sign-in: InternalServerError (529): Overloaded. Runs still ask Claude; the worker tries again for about an hour and says when it answers."), log);
+    assert.ok(lines.includes("Claude answered the startup check on a later try: claude-opus-5-5 answered."), log);
+    assert.ok(!/sign-in failed|sign-in works again|stopped working/.test(log), log);
+  });
+
+  test("a log line that throws in the startup check never becomes an unhandled rejection", async () => {
+    FakeWorker.made = [];
+    class FakePool {
+      async query(): Promise<never> {
+        throw new Error("no database in tests");
+      }
+      async connect(): Promise<never> {
+        throw new Error("no database in tests");
+      }
+      async end(): Promise<void> {}
+    }
+    const modules: WorkerModules = { bull, pg: { Pool: FakePool as unknown as WorkerModules["pg"]["Pool"] } };
+    const env = { ...goodEnv(), ANTHROPIC_API_KEY: "sk-ant-fake-key-for-tests" };
+    const unhandled: unknown[] = [];
+    const onUnhandled = (err: unknown): void => void unhandled.push(err);
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      const log = (l: string): void => {
+        if (l.startsWith("Claude sign-in") || l.startsWith("Claude's startup")) throw new Error("log broke");
+      };
+      const claudeCheck = async () => ({ ok: false, detail: "AuthenticationError (401): invalid x-api-key" });
+      assert.equal(await workerCommand(env, { load: async () => modules, until: new Promise((r) => setTimeout(r, 60)), log, claudeCheck, signInRetryMs: [5] }), 0);
+      await new Promise((r) => setTimeout(r, 20));
+      assert.deepEqual(unhandled, []);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
+  });
+
+  test("with federation, the worker keeps the access token on its disk, so a second start on the same disk exchanges nothing", async () => {
+    class FakePool {
+      async query(): Promise<never> {
+        throw new Error("no database in tests");
+      }
+      async connect(): Promise<never> {
+        throw new Error("no database in tests");
+      }
+      async end(): Promise<void> {}
+    }
+    const modules: WorkerModules = { bull, pg: { Pool: FakePool as unknown as WorkerModules["pg"]["Pool"] } };
+    const disk = temp();
+    const tokenFile = `${disk}/identity-token`;
+    const now = Math.floor(Date.now() / 1000);
+    writeFileSync(tokenFile, syntheticJwt({ sub: "srv-synthetic", aud: "api.anthropic.com", iat: now, exp: now + 3600, jti: "synthetic-jti" }));
+    const env = {
+      ...goodEnv(),
+      HC_RUNS_DIR: `${disk}/runs`,
+      ANTHROPIC_FEDERATION_RULE_ID: "fdrl_synthetic",
+      ANTHROPIC_ORGANIZATION_ID: "00000000-0000-4000-8000-000000000001",
+      ANTHROPIC_SERVICE_ACCOUNT_ID: "svac_synthetic",
+      ANTHROPIC_IDENTITY_TOKEN_FILE: tokenFile,
+    };
+    const anthropic = fakeAnthropic();
+    // No claudeCheck: the real startup check, through the real SDK, against the stand-in.
+    const start = async (): Promise<string[]> => {
+      FakeWorker.made = [];
+      const lines: string[] = [];
+      let answered: () => void = () => {};
+      const until = new Promise<void>((resolve) => {
+        answered = resolve;
+        setTimeout(resolve, 5000);
+      });
+      const log = (l: string): void => {
+        lines.push(l);
+        if (l.startsWith("Claude sign-in")) answered();
+      };
+      assert.equal(await workerCommand(env, { load: async () => modules, until, log, claudeFetch: anthropic.fetch }), 0);
+      return lines;
+    };
+    const first = await start();
+    assert.ok(first.includes("Claude sign-in works: claude-opus-5-5 answered."), first.join("\n"));
+    assert.ok(first.includes("Claude's access token is kept on the disk, so a worker that starts again in place uses it while it lasts instead of signing in again."), first.join("\n"));
+    const second = await start();
+    assert.ok(second.includes("Claude sign-in works: claude-opus-5-5 answered."), second.join("\n"));
+    assert.equal(anthropic.exchanges, 1);
+    assert.equal(anthropic.refused, 0);
+    const folder = join(dirname(env.HC_RUNS_DIR), "claude-sign-in");
+    const kept = readdirSync(folder);
+    assert.equal(kept.length, 1);
+    assert.match(kept[0]!, /^federation-[0-9a-f]{16}\.json$/);
+    assert.equal(statSync(join(folder, kept[0]!)).mode & 0o777, 0o600);
+    assert.ok(existsSync(tokenFile));
+  });
+
   test("a sign-in that never works is tried a bounded number of times, then the log says so once", async () => {
     FakeWorker.made = [];
     class FakePool {
@@ -395,7 +504,7 @@ describe("hc worker", () => {
     const claudeCheck = async () => (tries++, { ok: false, detail: "AuthenticationError (401): invalid x-api-key" });
     assert.equal(await workerCommand(env, { load: async () => modules, until: new Promise((r) => setTimeout(r, 100)), log: (l) => lines.push(l), claudeCheck, signInRetryMs: [5, 5] }), 0);
     assert.equal(tries, 3);
-    assert.equal(lines.filter((l) => l.startsWith("Claude sign-in still fails after an hour of tries")).length, 1, lines.join("\n"));
+    assert.equal(lines.filter((l) => l.startsWith("Claude's startup check still fails after an hour of tries")).length, 1, lines.join("\n"));
     assert.ok(!lines.some((l) => l.startsWith("Claude sign-in works again")));
   });
 });

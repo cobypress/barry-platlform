@@ -1,7 +1,7 @@
 import { findNames, maskNames } from "../privacy/names.ts";
 import { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { redactSecrets } from "../privacy/secrets.ts";
-import type { NarrativeClient, NarrativeReply, NarrativeRequest } from "./client.ts";
+import { isSignInFailure, type NarrativeClient, type NarrativeReply, type NarrativeRequest } from "./client.ts";
 import { APEX_SUMMARY_PROMPT } from "./apex-prompt.ts";
 import { SYSTEM_PROMPT } from "./prompt.ts";
 
@@ -82,7 +82,7 @@ export async function sendPrompt(client: NarrativeClient, request: NarrativeRequ
  * holds nothing about a customer. The result says which model answered or why
  * the call failed, never a secret.
  */
-export async function checkClaude(client: NarrativeClient, model: string): Promise<{ ok: boolean; detail: string }> {
+export async function checkClaude(client: NarrativeClient, model: string): Promise<{ ok: boolean; detail: string; signIn?: boolean }> {
   try {
     const reply = await sendPrompt(
       client,
@@ -100,6 +100,8 @@ export async function checkClaude(client: NarrativeClient, model: string): Promi
   } catch (err) {
     const status = typeof (err as { status?: unknown }).status === "number" ? ` (${(err as { status: number }).status})` : "";
     const message = err instanceof Error ? err.message.replace(/sk-ant-[A-Za-z0-9_-]+/g, "[removed]").slice(0, 300) : "an unexpected error";
-    return { ok: false, detail: `${err instanceof Error ? err.name : "Error"}${status}: ${message}` };
+    // The SDK's classes leave name as "Error", so the class says which it was.
+    const name = err instanceof Error ? (err.constructor?.name && err.constructor.name !== "Error" ? err.constructor.name : err.name) : "Error";
+    return { ok: false, detail: `${name}${status}: ${message}`, signIn: isSignInFailure(err) };
   }
 }
