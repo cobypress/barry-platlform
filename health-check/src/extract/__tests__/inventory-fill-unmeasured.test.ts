@@ -1,6 +1,6 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DomainModule } from "../../domains/types.ts";
@@ -8,11 +8,12 @@ import { runHealthCheck } from "../../engine/run.ts";
 import { ApiBudget } from "../../salesforce/budget.ts";
 import type { TransportRequest, TransportResponse } from "../../salesforce/transport.ts";
 import { FillRateObject, Inventory } from "../../schemas/inventory.ts";
+import { Run } from "../../schemas/run.ts";
 import { tempDir } from "../../testing/harness.ts";
 import { loadCalibration, syntheticProvider } from "../../testing/replay.ts";
 import { Simulator } from "../../testing/simulator.ts";
 import { AS_OF, CONNECTED_USER } from "../../testing/synthetic-org.ts";
-import { FIELD_MISFIT, inventoryOf, settleInventory } from "../../worker/inventory.ts";
+import { FIELD_ENTRY_MISFIT, FIELD_MISFIT, inventoryOf, OBJECT_LINES_MAX, OBJECT_MISFIT, SECTION_MISFIT, settleInventory } from "../../worker/inventory.ts";
 import { buildInventory, COUNT_NOT_READ, countOf, fillRatesExtractor, INVENTORY_FILE, RECORDS_NOT_READ } from "../inventory.ts";
 
 // DECISIONS.md 668: a real org's run saved one object's fill rates as
@@ -157,7 +158,7 @@ describe("the worker, reading a file that still holds a bad field, costs only th
     assert.equal(object91.records, 191);
     assert.deepEqual(object91.fields, intact[91]!.fields.filter((_, i) => i !== 26));
     assert.deepEqual(object91.skipped, [...intact[91]!.skipped, { field: "F26__c", reason: FIELD_MISFIT }]);
-    assert.deepEqual(saved.fillRates.notes, ["One field's count didn't fit the shape we store, so it's listed among the fields not counted, not shown as empty."]);
+    assert.deepEqual(saved.fillRates.notes, ["One field didn't fit the shape we store, so it's listed among the fields not counted, not shown as empty."]);
     for (const k of ["packages", "connectedApps", "riskyPermissions", "limits"] as const) assert.deepEqual(saved[k], inv[k]);
     assert.deepEqual(logs, [`Run ${MADE.runId}'s inventory: fillRates object 91 didn't fit its shape (fields.26.filled invalid_type), so one field is listed as not measured, and the object's other counts are kept.`]);
   });
@@ -172,10 +173,64 @@ describe("the worker, reading a file that still holds a bad field, costs only th
     const row = saved.fillRates.rows[3]!;
     assert.ok("fields" in row);
     assert.equal(row.fields.length, 30);
-    assert.deepEqual(row.skipped.at(-1), { field: "Made_Up_Text__c", reason: FIELD_MISFIT });
+    // Its reason, not its count, didn't fit, and the reason it's given says so.
+    assert.deepEqual(row.skipped.at(-1), { field: "Made_Up_Text__c", reason: FIELD_ENTRY_MISFIT });
     assert.ok(saved.fillRates.notes.includes("2 fields couldn't be named, so they're left out of their objects."));
     assert.equal(logs.length, 1);
     assert.ok(!logs.some((l) => /PLANTED|Made_Up/.test(l)), logs.join("\n"));
+  });
+
+  test("a field moved for its name or an unknown key, not its count, is given a reason that says so", () => {
+    const inv = file();
+    const fields = inv.fillRates.rows[2]!.fields as unknown[];
+    fields[0] = { field: `Made_Up_${"x".repeat(300)}`, filled: 40, share: 0.4 };
+    fields[1] = { ...(fields[1] as object), PLANTED_key: 1 };
+    fields[2] = { ...(fields[2] as object), filled: 1.5 };
+    const saved = settleInventory(JSON.parse(JSON.stringify(inv)), () => {}, MADE);
+    assert.ok("rows" in saved.fillRates);
+    const row = saved.fillRates.rows[2]!;
+    assert.ok("fields" in row);
+    const moved = row.skipped.slice(1);
+    assert.deepEqual(moved.map((m) => m.reason), [FIELD_ENTRY_MISFIT, FIELD_ENTRY_MISFIT, FIELD_MISFIT]);
+    assert.ok(moved[0]!.field.length <= 255 && moved[0]!.field.endsWith("…"));
+    assert.equal(row.fields.length, 27);
+  });
+
+  test("a field is never both counted and not counted, nor not counted twice: the first is kept, a count before a reason, and the rest counted in the notes", () => {
+    const inv = file();
+    const row4 = inv.fillRates.rows[4]!;
+    (row4.fields as unknown[]).push({ field: "F0__c", filled: null, share: null }, { field: "F1__c", filled: 7, share: 0.07 });
+    (row4.skipped as unknown[]).push({ field: "F2__c", reason: "A made up reason." }, { field: "Id", reason: "Again." }, { field: "New__c", reason: "" }, { field: "New__c", reason: "A made up reason." });
+    const logs: string[] = [];
+    const saved = settleInventory(JSON.parse(JSON.stringify(inv)), (l) => void logs.push(l), MADE);
+    assert.ok("rows" in saved.fillRates);
+    const row = saved.fillRates.rows[4]!;
+    assert.ok("fields" in row);
+    const names = [...row.fields.map((f) => f.field), ...row.skipped.map((f) => f.field)];
+    assert.equal(new Set(names).size, names.length, "a field named twice");
+    assert.deepEqual(row.fields, (inv.fillRates.rows[4]!.fields as unknown[]).slice(0, 30));
+    // A reason read from the file comes before one the worker gave a misfit, so New__c keeps its own reason, and its misfit entry is the repeat.
+    assert.deepEqual(row.skipped, [{ field: "Id", reason: "An id always has a value." }, { field: "New__c", reason: "A made up reason." }]);
+    assert.ok(saved.fillRates.notes.includes("5 fields were listed twice in their objects, so only the first is kept."), saved.fillRates.notes.join("\n"));
+    assert.ok(!logs.some((l) => /Made_Up|New__c|F\d__c/.test(l)), logs.join("\n"));
+  });
+
+  test("an empty note in the section's frame costs the section, as before 668", () => {
+    const inv = file();
+    (inv.fillRates.rows[0]!.fields[0] as { filled: unknown }).filled = null;
+    (inv.fillRates.notes as string[]).push("");
+    const saved = settleInventory(JSON.parse(JSON.stringify(inv)), () => {}, MADE);
+    assert.deepEqual(saved.fillRates, { unavailable: SECTION_MISFIT });
+  });
+
+  test("many objects put right: the first few logged one line each, then one line with counts only", () => {
+    const inv = file();
+    for (const r of inv.fillRates.rows) (r.fields[26] as { filled: unknown }).filled = null;
+    const logs: string[] = [];
+    const saved = settleInventory(JSON.parse(JSON.stringify(inv)), (l) => void logs.push(l), MADE);
+    assert.equal(logs.length, OBJECT_LINES_MAX + 1);
+    assert.equal(logs.at(-1), `fillRates: ${92 - OBJECT_LINES_MAX} more objects didn't fit their shape; in all, 92 kept with 92 fields not measured, 0 unnamed fields left out and 0 repeats kept once, and 0 saved as unavailable.`);
+    assert.ok("rows" in saved.fillRates && saved.fillRates.rows.every((r) => "fields" in r && r.fields.length === 29));
   });
 
   test("an object whose own frame doesn't fit (its records not a count) is still that object's unavailable, as before", () => {
@@ -228,5 +283,68 @@ describe("a whole run on the synthetic org, with one field's count not a number"
     writeFileSync(join(dir, INVENTORY_FILE), JSON.stringify(odd));
     assert.deepEqual(inventoryOf(dir, (l) => void logs.push(l), MADE), odd);
     assert.deepEqual(logs, []);
+  });
+});
+
+describe("the save's last check (DECISIONS.md 668)", () => {
+  const clean = () => buildInventory(new Map(), "complete", new Date(AS_OF));
+  const withFill = () => ({ ...clean(), fillRates: { rows: [{ object: "Made_Up__c", records: 1, fields: [{ field: "F__c", filled: null, share: null }], skipped: [] }], notes: [] } });
+
+  test("an object a repair got wrong is saved as that object's unavailable, and the rest is kept", () => {
+    const logs: string[] = [];
+    const wrong = () => ({ rows: [{ object: "Made_Up__c", records: 1, fields: [{ field: "F__c", filled: Number.NaN, share: null }], skipped: [] }, { object: "Kept__c", records: 2, fields: [], skipped: [] }], notes: [] });
+    const saved = settleInventory(withFill(), (l) => void logs.push(l), MADE, wrong);
+    assert.ok(Inventory.safeParse(saved).success);
+    assert.deepEqual(saved.fillRates, { rows: [{ object: "Made_Up__c", unavailable: OBJECT_MISFIT }, { object: "Kept__c", records: 2, fields: [], skipped: [] }], notes: [] });
+    assert.ok(logs.includes("the last check before saving caught 1 fill-rate object that still didn't fit, so it's saved as unavailable."), logs.join("\n"));
+  });
+
+  test("a section a repair got wrong is saved as unavailable, and the other four are kept", () => {
+    const logs: string[] = [];
+    const saved = settleInventory(withFill(), (l) => void logs.push(l), MADE, () => ({ rows: [], notes: [7] }));
+    assert.ok(Inventory.safeParse(saved).success);
+    assert.deepEqual(saved.fillRates, { unavailable: SECTION_MISFIT });
+    for (const k of ["packages", "connectedApps", "riskyPermissions", "limits"] as const) assert.deepEqual(saved[k], clean()[k]);
+    assert.ok(logs.some((l) => l.startsWith("at the last check before saving, fillRates still didn't fit its shape")), logs.join("\n"));
+  });
+});
+
+describe("a fill-rate step caught part way across a version change", () => {
+  test("starts afresh: its partial rows from the earlier version are cleared, not reused", async () => {
+    const BARE: DomainModule = { id: "configuration", cloud: "sales", label: "Nothing else", extractors: [], rules: [] };
+    const opts = { provider: syntheticProvider, calibration: loadCalibration(), modules: [BARE], now: new Date(AS_OF), connectedUser: CONNECTED_USER, inventory: true };
+    const outDir = tempDir();
+    const first = await runHealthCheck({ ...opts, outDir, transport: new Simulator() });
+    const runPath = join(first.dir, "run.json");
+    const run = Run.parse(JSON.parse(readFileSync(runPath, "utf8")));
+    const step = run.steps.find((s) => s.id === fillRatesExtractor.id)!;
+    // As a run left mid-step by the earlier engine: version 2, not done, with a partial row holding a 0 never counted.
+    step.version = 2;
+    step.status = "pending";
+    writeFileSync(runPath, JSON.stringify(run));
+    const partial = join(first.dir, "checkpoints", `${fillRatesExtractor.id}.partial.jsonl`);
+    writeFileSync(partial, `${JSON.stringify({ object: "Account", records: 1, fields: [{ field: "Made_Up__c", filled: 0, share: 0 }], skipped: [] })}\n`);
+    const again = await runHealthCheck({ ...opts, outDir, transport: new Simulator(), resume: first.run.id });
+    assert.equal(again.run.steps.find((s) => s.id === fillRatesExtractor.id)!.version, fillRatesExtractor.version);
+    const inv = Inventory.parse(JSON.parse(readFileSync(join(again.dir, INVENTORY_FILE), "utf8")));
+    const account = counted(inv, "Account");
+    assert.ok(!account.fields.some((f) => f.field === "Made_Up__c"), "the earlier version's partial row was reused");
+    assert.ok(account.records > 1);
+    assert.ok(!existsSync(partial));
+  });
+
+  test("the same version's partial rows are still reused on a resume", async () => {
+    const BARE: DomainModule = { id: "configuration", cloud: "sales", label: "Nothing else", extractors: [], rules: [] };
+    const opts = { provider: syntheticProvider, calibration: loadCalibration(), modules: [BARE], now: new Date(AS_OF), connectedUser: CONNECTED_USER, inventory: true };
+    const outDir = tempDir();
+    const first = await runHealthCheck({ ...opts, outDir, transport: new Simulator() });
+    const runPath = join(first.dir, "run.json");
+    const run = Run.parse(JSON.parse(readFileSync(runPath, "utf8")));
+    run.steps.find((s) => s.id === fillRatesExtractor.id)!.status = "pending";
+    writeFileSync(runPath, JSON.stringify(run));
+    writeFileSync(join(first.dir, "checkpoints", `${fillRatesExtractor.id}.partial.jsonl`), `${JSON.stringify({ object: "Account", records: 1, fields: [{ field: "Made_Up__c", filled: 0, share: 0 }], skipped: [] })}\n`);
+    const again = await runHealthCheck({ ...opts, outDir, transport: new Simulator(), resume: first.run.id });
+    const inv = Inventory.parse(JSON.parse(readFileSync(join(again.dir, INVENTORY_FILE), "utf8")));
+    assert.ok(counted(inv, "Account").fields.some((f) => f.field === "Made_Up__c"));
   });
 });

@@ -262,6 +262,12 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
       log(`  ${extractor.id}: reused from checkpoint`);
       continue;
     }
+    // A step left part-done by an earlier version of its extractor starts afresh:
+    // its partial rows are that version's, such as fill rates' 0 for a count never read (DECISIONS.md 668).
+    if (step.version !== extractor.version) {
+      for (const key of extractor.partialKeys ?? []) partial.clear(key);
+      step.version = extractor.version;
+    }
     const before = budget.callsMade;
     try {
       // Held for the whole analysis, so each repeated value is held once (DECISIONS.md 346).

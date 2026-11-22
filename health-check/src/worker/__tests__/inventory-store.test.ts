@@ -121,7 +121,7 @@ describe("the inventory a run job sends", () => {
   });
 
   // Changed on purpose by DECISIONS.md 618: these used to send no inventory at all.
-  test("without a file, or with one that doesn't parse, is a row saying so in every section; a NUL costs only its row; and the log never quotes it", () => {
+  test("without a file, or with one that doesn't parse, is a row saying so in every section; a NUL costs only its section; and the log never quotes it", () => {
     const logs: string[] = [];
     const log = (l: string) => void logs.push(l);
     const none = inventoryOf(mkdtempSync(join(tmpdir(), "hc-inventory-")), log, made);
@@ -131,8 +131,7 @@ describe("the inventory a run job sends", () => {
     const later = inventoryOf(folder(JSON.stringify({ ...INVENTORY, version: 2 })), log, made);
     assert.ok("unavailable" in later.packages && later.packages.unavailable === UNREADABLE);
     const nul = inventoryOf(folder(JSON.stringify({ ...INVENTORY, limits: { rows: [{ name: "Daily\u0000", max: 1, used: 0 }], notes: [] } })), log, made);
-    // The row alone is left out, and counted (DECISIONS.md 668).
-    assert.deepEqual(nul.limits, { rows: [], notes: ["One limit didn't fit the shape we store, so it's left out."] });
+    assert.deepEqual(nul.limits, { unavailable: SECTION_MISFIT });
     assert.deepEqual(nul.fillRates, INVENTORY.fillRates);
     assert.equal(logs.length, 4);
     assert.ok(logs.every((l) => !l.includes("Daily") && l.startsWith(`Run ${RUN_ID}'s inventory: `)));

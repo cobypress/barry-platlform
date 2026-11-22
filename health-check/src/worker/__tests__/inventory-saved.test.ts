@@ -211,30 +211,14 @@ describe("each value a real org can give is saved, the bad part marked and the r
     assert.ok(logs.includes(`Run ${RUN_ID}'s inventory: fillRates object 4 didn't fit its shape (object too_big), so it's saved as unavailable.`), logs.join("\n"));
   });
 
-  test("an unknown key in a row of any other section costs that row alone, which the notes count (DECISIONS.md 668)", () => {
+  test("an unknown key in any other section costs that section alone, which says so", () => {
     for (const key of ["packages", "connectedApps", "riskyPermissions", "limits"] as const) {
       const inv = structuredClone(clean) as unknown as Record<string, { rows: Array<Record<string, unknown>> }>;
-      const good = structuredClone(inv[key]!.rows[0]!);
-      inv[key]!.rows.push(good);
       inv[key]!.rows[0]!.PLANTED_key = "PLANTED_value";
-      const { inventory, logs } = saved(inv);
-      const section = inventory[key] as { rows: unknown[]; notes: string[] };
-      assert.deepEqual(section.rows, [good], key);
-      assert.match(section.notes.at(-1)!, /^One .* didn't fit the shape we store, so it's left out\.$/, key);
-      for (const other of SECTIONS.filter((k) => k !== key)) assert.deepEqual(inventory[other], clean[other], `${key} cost ${other}`);
-      assert.ok(logs.includes(`Run ${RUN_ID}'s inventory: ${key}: 1 of 2 rows didn't fit (row 0 didn't fit its shape ((top) unrecognized_keys)), so it's left out and the rest are kept.`), logs.join("\n"));
-    }
-  });
-
-  test("an unknown key in a section's own frame still costs that section alone, which says so", () => {
-    for (const key of ["packages", "connectedApps", "riskyPermissions", "limits"] as const) {
-      const inv = structuredClone(clean) as unknown as Record<string, Record<string, unknown>>;
-      inv[key]!.PLANTED_key = "PLANTED_value";
       const { inventory, logs } = saved(inv);
       assert.deepEqual(inventory[key], { unavailable: SECTION_MISFIT }, key);
       for (const other of SECTIONS.filter((k) => k !== key)) assert.deepEqual(inventory[other], clean[other], `${key} cost ${other}`);
-      assert.ok(logs.some((l) => l.includes(`${key} didn't fit its shape`)), logs.join("\n"));
-      assert.ok(!logs.some((l) => /PLANTED/.test(l)), logs.join("\n"));
+      assert.ok(logs.some((l) => l.includes(`${key} didn't fit its shape (rows.0 unrecognized_keys)`)), logs.join("\n"));
     }
   });
 
@@ -259,26 +243,26 @@ describe("each value a real org can give is saved, the bad part marked and the r
 });
 
 describe("one section failing leaves the other four saved", () => {
-  test("a NUL in a package costs that package alone", () => {
+  test("a NUL in the packages section costs packages alone", () => {
     const clean = buildInventory(extracts(), "complete", AS_OF);
     const inv = structuredClone(clean);
     rowsOf(inv.packages)[0]!.name = "PLANTED\u0000";
     const { inventory, logs } = saved(inv);
-    assert.deepEqual(inventory.packages, { rows: [], notes: [...notesOf(clean.packages), "One package didn't fit the shape we store, so it's left out."] });
+    assert.deepEqual(inventory.packages, { unavailable: SECTION_MISFIT });
     for (const k of SECTIONS.filter((k) => k !== "packages")) assert.deepEqual(inventory[k], clean[k]);
-    assert.deepEqual(logs, [`Run ${RUN_ID}'s inventory: packages: 1 of 1 rows didn't fit (row 0 held a NUL character at name), so it's left out and the rest are kept.`]);
+    assert.deepEqual(logs, [`Run ${RUN_ID}'s inventory: packages held a NUL character at rows.0.name, so it's saved as unavailable.`]);
   });
 });
 
 describe("a lone half of a UTF-16 pair, which Postgres's jsonb refuses (class 22) and would roll back the whole save on every retry", () => {
-  test("costs only its row, its object's name, or its field in fill rates, and the log never quotes it", () => {
+  test("costs only its section, or only its field in fill rates (DECISIONS.md 668), and the log never quotes it", () => {
     const clean = buildInventory(extracts(), "complete", AS_OF);
     const inv = structuredClone(clean);
     rowsOf(inv.connectedApps)[0]!.name = "PLANTED\ud83dX";
     const objects = rowsOf(inv.fillRates) as Array<{ object: string; fields: Array<{ field: string }> }>;
     objects[1]!.fields[0]!.field = "PLANTED\ude00";
     const { inventory, logs } = saved(inv);
-    assert.deepEqual(rowsOf(inventory.connectedApps), []);
+    assert.deepEqual(inventory.connectedApps, { unavailable: SECTION_MISFIT });
     // The field can't be named, so it's left out and counted; the object's records are kept.
     assert.deepEqual(rowsOf(inventory.fillRates), [rowsOf(clean.fillRates)[0], { object: "Empty__c", records: 0, fields: [], skipped: [] }]);
     assert.ok(notesOf(inventory.fillRates).includes("One field couldn't be named, so it's left out of its object."));
@@ -286,7 +270,7 @@ describe("a lone half of a UTF-16 pair, which Postgres's jsonb refuses (class 22
     assert.ok(!/\\ud[89a-f][0-9a-f]{2}/i.test(JSON.stringify(inventory)), "no surrogate escape left to store");
     assert.deepEqual(logs, [
       `Run ${RUN_ID}'s inventory: fillRates object 1 held a broken character (half of a UTF-16 pair) at fields.0.field, so one field that couldn't be named is left out, and the object's other counts are kept.`,
-      `Run ${RUN_ID}'s inventory: connectedApps: 1 of 1 rows didn't fit (row 0 held a broken character (half of a UTF-16 pair) at name), so it's left out and the rest are kept.`,
+      `Run ${RUN_ID}'s inventory: connectedApps held a broken character (half of a UTF-16 pair) at rows.0.name, so it's saved as unavailable.`,
     ]);
   });
 });
@@ -412,7 +396,7 @@ describe("every delivery saves the same inventory (the real run job, the synthet
     assert.ok(!w.deps.lines.some((l) => l.includes(w.dir)));
   });
 
-  test("nothing from the org's data reaches a log line: a limit holding planted values costs its row alone", async () => {
+  test("nothing from the org's data reaches a log line: a limit holding planted values costs its section alone", async () => {
     const w = await setup();
     await w.deliver();
     const first = w.inventory();
@@ -422,10 +406,9 @@ describe("every delivery saves the same inventory (the real run job, the synthet
     writeFileSync(join(w.dir, "checkpoints", `${limitsExtractor.id}.json`), `${JSON.stringify(planted, null, 2)}\n`);
     assert.equal((await w.deliver()).outcome, "done");
     const second = w.inventory();
-    assert.equal(rowsOf(second.limits).length, 1, "the other limit is kept");
-    assert.ok(notesOf(second.limits).includes("One limit didn't fit the shape we store, so it's left out."));
+    assert.deepEqual(second.limits, { unavailable: SECTION_MISFIT });
     for (const k of SECTIONS.filter((k) => k !== "limits")) assert.deepEqual(second[k], first[k]);
-    assert.ok(w.deps.lines.some((l) => l.includes("limits: 1 of 2 rows didn't fit (row 0 held a NUL character at name)")), w.deps.lines.join("\n"));
+    assert.ok(w.deps.lines.some((l) => l.includes("limits held a NUL character at rows.0.name")), w.deps.lines.join("\n"));
     assert.ok(!w.deps.lines.some((l) => /PLANTED/.test(l)), "a planted value reached the log");
   });
 });

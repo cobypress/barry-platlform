@@ -3,14 +3,14 @@ import { join } from "node:path";
 import type { z } from "zod";
 import { INVENTORY_FILE } from "../extract/inventory.ts";
 import { Timestamp } from "../schemas/common.ts";
-import { ConnectedAppRow, FillRateField, FillRateObject, Inventory, INVENTORY_VERSION, LimitRow, NAME_MAX, PackageRow, RiskyPermissionRow } from "../schemas/inventory.ts";
+import { FillRateField, FillRateObject, Inventory, INVENTORY_VERSION, NAME_MAX } from "../schemas/inventory.ts";
 import { RunScope } from "../schemas/run.ts";
 
 // The org's inventory as the worker hands it to the console (DECISIONS.md 605
 // and 618). It is never dropped whole and never silently: each of the five
-// sections is checked on its own, then row by row, and within fill rates each
-// object and each field (DECISIONS.md 668), so only the smallest part that
-// doesn't fit is marked or left out, with why, and the rest is saved as it was. A run with no file at all still gets a row that says so. The log
+// sections is checked on its own, and within fill rates each object and each
+// field (DECISIONS.md 668), so only that part is marked, with why, and the rest
+// is saved as it was. A run with no file at all still gets a row that says so. The log
 // names the section and what failed, by the schema's paths, never a value.
 
 /** The most of the inventory the worker sends, as the JSON the console stores. A big org's is a few megabytes. */
@@ -72,15 +72,19 @@ const SECTION_SCHEMA: Record<Section, z.ZodType> = {
   limits: Inventory.shape.limits,
 };
 
+/** How fill rates are put right object by object; a test may give its own to prove the save's guard catches what it gets wrong. */
+export type FillRatesRepair = (value: unknown, say: (line: string) => void) => unknown;
+
 /**
  * Each section checked on its own (DECISIONS.md 618): one that doesn't fit, or
  * holds a character Postgres's jsonb refuses (a NUL, or half of a UTF-16
  * pair, which jsonb refuses with a class 22 error that would roll back the
- * whole save on every retry), is `{ unavailable }`; within fill
- * rates, the object is. Then the whole is held under the cap by keeping fill
- * rates for the objects with the most records.
+ * whole save on every retry), is `{ unavailable }`; within fill rates, the
+ * field is, or at worst the object (DECISIONS.md 668). Then the whole is held
+ * under the cap by keeping fill rates for the objects with the most records,
+ * and checked once more before it's saved.
  */
-export function settleInventory(raw: unknown, say: (line: string) => void, made: Omit<InventoryFor, "runId">): Inventory {
+export function settleInventory(raw: unknown, say: (line: string) => void, made: Omit<InventoryFor, "runId">, repair: FillRatesRepair = fillRatesByObject): Inventory {
   const file = raw !== null && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : null;
   if (!file || file.version !== INVENTORY_VERSION) {
     say(`inventory.json ${file ? "is a version the worker doesn't store" : "isn't an object"}, so every section is saved as unavailable.`);
@@ -100,27 +104,52 @@ export function settleInventory(raw: unknown, say: (line: string) => void, made:
       sections[key] = parsed.data;
       continue;
     }
-    // A part that doesn't fit costs only itself (DECISIONS.md 668): an object's field, else the object, else the row.
-    const byPart = key === "fillRates" ? fillRatesByObject(value, say) : rowsByRow(key, value, say);
-    if (byPart) {
-      sections[key] = byPart;
-      continue;
+    // Fill rates alone are put right part by part. A list's row that doesn't fit
+    // costs its whole section: the org page counts a list's rows without its
+    // notes, so a list with rows left out would read as complete (DECISIONS.md 668).
+    if (key === "fillRates") {
+      const byObject = repair(value, say);
+      if (byObject) {
+        sections[key] = byObject;
+        continue;
+      }
     }
     say(`${key} ${parsed.success ? `held ${bad!.what} at ${bad!.at}` : `didn't fit its shape (${issuesOf(parsed.error)})`}, so it's saved as unavailable.`);
     sections[key] = { unavailable: SECTION_MISFIT };
   }
   const inventory = { version: INVENTORY_VERSION, madeAt, scope, ...sections } as Inventory;
-  return withinCap(inventory, say);
+  return guarded(withinCap(inventory, say), say);
 }
 
 /**
- * A section's frame, everything but its rows, as the schema has it; or null
- * when it doesn't fit or holds what jsonb refuses, which costs the section.
+ * The last check before the save (DECISIONS.md 668): every fill-rate object,
+ * then every section, against the schema and for what jsonb refuses. A repair
+ * that went wrong costs its object, or its section, never the save.
  */
-function frameOf(key: Section, value: unknown): { rows: unknown[] } | null {
-  if (value === null || typeof value !== "object" || Array.isArray(value) || !Array.isArray((value as { rows?: unknown }).rows)) return null;
-  const parsed = SECTION_SCHEMA[key].safeParse({ ...value, rows: [] });
-  return parsed.success && unstorableAt(parsed.data) === null ? (value as { rows: unknown[] }) : null;
+function guarded(inventory: Inventory, say: (line: string) => void): Inventory {
+  const out = { ...inventory };
+  const fill = out.fillRates as unknown;
+  if (fill && typeof fill === "object" && Array.isArray((fill as { rows?: unknown }).rows)) {
+    const rows = (fill as { rows: unknown[] }).rows;
+    let caught = 0;
+    const kept = rows.flatMap((row): unknown[] => {
+      if (check(FillRateObject, row).ok) return [row];
+      caught++;
+      const name = (row as { object?: unknown } | null)?.object;
+      return nameable(name) ? [{ object: cut(name), unavailable: OBJECT_MISFIT }] : [];
+    });
+    if (caught) {
+      say(`the last check before saving caught ${caught} fill-rate ${caught === 1 ? "object" : "objects"} that still didn't fit, so ${caught === 1 ? "it's" : "they're"} saved as unavailable.`);
+      out.fillRates = { ...(fill as object), rows: kept } as Inventory["fillRates"];
+    }
+  }
+  for (const key of SECTIONS) {
+    const got = check(SECTION_SCHEMA[key], out[key]);
+    if (got.ok) continue;
+    say(`at the last check before saving, ${key} still ${got.why}, so it's saved as unavailable.`);
+    out[key] = { unavailable: SECTION_MISFIT } as never;
+  }
+  return out;
 }
 
 /** Why a part failed, by the schema's paths and Zod's codes: never a value. */
@@ -128,24 +157,33 @@ const whyOf = (parsed: z.ZodSafeParseResult<unknown>, bad: { at: string; what: s
   parsed.success ? `held ${bad!.what} at ${bad!.at}` : `didn't fit its shape (${issuesOf(parsed.error)})`;
 
 /** A value checked against a schema and for what jsonb refuses. */
-function check<T>(schema: z.ZodType<T>, value: unknown): { ok: true; data: T } | { ok: false; why: string } {
+function check<T>(schema: z.ZodType<T>, value: unknown): { ok: true; data: T } | { ok: false; why: string; countOnly: boolean } {
   const parsed = schema.safeParse(value);
   const bad = parsed.success ? unstorableAt(parsed.data) : null;
-  return parsed.success && bad === null ? { ok: true, data: parsed.data } : { ok: false, why: whyOf(parsed, bad) };
+  if (parsed.success && bad === null) return { ok: true, data: parsed.data };
+  // Whether every issue is in a field's count or share, so the reason can say its count didn't fit.
+  const countOnly = !parsed.success && parsed.error.issues.every((i) => i.path.length === 1 && (i.path[0] === "filled" || i.path[0] === "share"));
+  return { ok: false, why: whyOf(parsed, bad), countOnly };
 }
 
 const nameable = (name: unknown): name is string => typeof name === "string" && name.trim().length > 0 && storable(name);
 
-/** A field's fill that couldn't be stored: listed among the fields not counted, with this reason. */
+/** A field whose count or share didn't fit: listed among the fields not counted, with this reason. */
 export const FIELD_MISFIT = "This field's count didn't fit the shape we store, so its fill isn't measured.";
+/** A field whose entry didn't fit for another reason (its name, a key we don't store, a reason not given). */
+export const FIELD_ENTRY_MISFIT = "This field's entry didn't fit the shape we store, so its fill isn't shown.";
+
+type Repaired = { object: FillRateObject; notMeasured: number; unnamed: number; repeated: number };
 
 /**
  * A counted object whose fields don't all fit, kept with those fields moved
  * to its fields not counted (DECISIONS.md 668): one field never costs the
- * object's other counts. A field that can't be named is left out and counted.
- * Null when the object's own frame (its name, records, keys) doesn't fit.
+ * object's other counts. A field that can't be named is left out, and a field
+ * named again is kept once: its first count, else its first reason from the
+ * file, else the first the worker gave it; both are counted. Null when the
+ * object's own frame (its name, records, keys) doesn't fit.
  */
-function repaired(row: unknown): { object: FillRateObject; notMeasured: number; unnamed: number } | null {
+function repaired(row: unknown): Repaired | null {
   if (row === null || typeof row !== "object" || Array.isArray(row)) return null;
   const { fields, skipped } = row as { fields?: unknown; skipped?: unknown };
   if (!Array.isArray(fields) || !Array.isArray(skipped)) return null;
@@ -155,47 +193,65 @@ function repaired(row: unknown): { object: FillRateObject; notMeasured: number; 
   const misfit: Array<{ field: string; reason: string }> = [];
   let notMeasured = 0;
   let unnamed = 0;
-  const instead = (entry: unknown): void => {
+  const instead = (entry: unknown, reason: string): void => {
     const name = (entry as { field?: unknown } | null)?.field;
     if (nameable(name)) {
-      misfit.push({ field: cut(name), reason: FIELD_MISFIT });
+      misfit.push({ field: cut(name), reason });
       notMeasured++;
     } else unnamed++;
   };
   for (const f of fields) {
     const got = check(FillRateField, f);
     if (got.ok) kept.push(got.data);
-    else instead(f);
+    else instead(f, got.countOnly ? FIELD_MISFIT : FIELD_ENTRY_MISFIT);
   }
   for (const s of skipped) {
     // A field not counted is checked as an object holding it alone.
     const got = check(FillRateObject, { object: "x", records: 0, fields: [], skipped: [s] });
     if (got.ok && "skipped" in got.data) notCounted.push(got.data.skipped[0]!);
-    else instead(s);
+    else instead(s, FIELD_ENTRY_MISFIT);
   }
-  const whole = check(FillRateObject, { ...row, fields: kept, skipped: [...notCounted, ...misfit] });
-  return whole.ok ? { object: whole.data, notMeasured, unnamed } : null;
+  // Each field once: the first count, else the first reason.
+  const seen = new Set<string>();
+  const once = <T extends { field: string }>(list: T[]): T[] => list.filter((f) => !seen.has(f.field) && Boolean(seen.add(f.field)));
+  const counted = once(kept);
+  const reasons = once([...notCounted, ...misfit]);
+  const repeated = kept.length + notCounted.length + misfit.length - counted.length - reasons.length;
+  // A misfit dropped as a repeat is counted as a repeat, not as not measured.
+  const movedKept = reasons.filter((r) => misfit.includes(r)).length;
+  const whole = check(FillRateObject, { ...row, fields: counted, skipped: reasons });
+  return whole.ok ? { object: whole.data, notMeasured: movedKept, unnamed, repeated } : null;
 }
 
 const plural = (n: number, one: string, many: string): string => (n === 1 ? one : `${n} ${many}`);
+
+/** Objects logged one line each before the rest are summed in one line. */
+export const OBJECT_LINES_MAX = 5;
 
 /**
  * Fill rates object by object, and within an object field by field: a field
  * that doesn't fit is listed as not measured and the object's other counts
  * kept; an object whose own frame doesn't fit is that object's unavailable.
- * The section's notes count both. Null when the section's own frame (its rows
+ * The section's notes count each. Null when the section's own frame (its rows
  * and notes) doesn't fit, which costs the section.
  */
 function fillRatesByObject(value: unknown, say: (line: string) => void): Inventory["fillRates"] | null {
-  const frame = frameOf("fillRates", value);
-  if (!frame) return null;
-  const notes = (value as { notes: string[] }).notes;
+  if (value === null || typeof value !== "object" || Array.isArray(value) || !Array.isArray((value as { rows?: unknown }).rows)) return null;
+  const { rows, notes } = value as { rows: unknown[]; notes?: unknown };
+  if (!Array.isArray(notes) || !notes.every((n) => typeof n === "string" && n.length > 0 && storable(n))) return null;
+  if (Object.keys(value).some((k) => k !== "rows" && k !== "notes")) return null;
   const kept: FillRateObject[] = [];
   let misfits = 0;
   let unnamed = 0;
   let fieldMisfits = 0;
   let fieldsUnnamed = 0;
-  frame.rows.forEach((row, i) => {
+  let repeats = 0;
+  let lines = 0;
+  let mended = 0;
+  const line = (text: string): void => {
+    if (lines++ < OBJECT_LINES_MAX) say(text);
+  };
+  rows.forEach((row, i) => {
     const got = check(FillRateObject, row);
     if (got.ok) {
       kept.push(got.data);
@@ -204,61 +260,34 @@ function fillRatesByObject(value: unknown, say: (line: string) => void): Invento
     const fixed = repaired(row);
     if (fixed) {
       kept.push(fixed.object);
+      mended++;
       fieldMisfits += fixed.notMeasured;
       fieldsUnnamed += fixed.unnamed;
+      repeats += fixed.repeated;
       const parts = [
         ...(fixed.notMeasured ? [`${plural(fixed.notMeasured, "one field is", "fields are")} listed as not measured`] : []),
         ...(fixed.unnamed ? [`${plural(fixed.unnamed, "one field", "fields")} that couldn't be named ${fixed.unnamed === 1 ? "is" : "are"} left out`] : []),
+        ...(fixed.repeated ? [`${plural(fixed.repeated, "one repeated field is", "repeated fields are")} kept once`] : []),
       ];
-      say(`fillRates object ${i} ${got.why}, so ${parts.join(" and ")}, and the object's other counts are kept.`);
+      line(`fillRates object ${i} ${got.why}, so ${parts.join(" and ") || "it's put right"}, and the object's other counts are kept.`);
       return;
     }
-    say(`fillRates object ${i} ${got.why}, so it's saved as unavailable.`);
+    line(`fillRates object ${i} ${got.why}, so it's saved as unavailable.`);
     misfits++;
     const name = (row as { object?: unknown } | null)?.object;
     if (nameable(name)) kept.push({ object: cut(name), unavailable: OBJECT_MISFIT });
     else unnamed++;
   });
+  // Past the first few, one line with counts only.
+  if (lines > OBJECT_LINES_MAX) say(`fillRates: ${lines - OBJECT_LINES_MAX} more objects didn't fit their shape; in all, ${mended} kept with ${fieldMisfits} fields not measured, ${fieldsUnnamed} unnamed fields left out and ${repeats} repeats kept once, and ${misfits} saved as unavailable.`);
   const added: string[] = [];
   const named = misfits - unnamed;
   if (named > 0) added.push(`${plural(named, "One object's counts", "objects' counts")} didn't fit the shape we store, so ${named === 1 ? "it's" : "they're"} marked unavailable.`);
   if (unnamed) added.push(`${plural(unnamed, "One object", "objects")} couldn't be named, so ${unnamed === 1 ? "it's" : "they're"} left out.`);
-  if (fieldMisfits) added.push(`${plural(fieldMisfits, "One field's count", "fields' counts")} didn't fit the shape we store, so ${fieldMisfits === 1 ? "it's" : "they're"} listed among the fields not counted, not shown as empty.`);
+  if (fieldMisfits) added.push(`${plural(fieldMisfits, "One field", "fields")} didn't fit the shape we store, so ${fieldMisfits === 1 ? "it's" : "they're"} listed among the fields not counted, not shown as empty.`);
   if (fieldsUnnamed) added.push(`${plural(fieldsUnnamed, "One field", "fields")} couldn't be named, so ${fieldsUnnamed === 1 ? "it's" : "they're"} left out of ${fieldsUnnamed === 1 ? "its object" : "their objects"}.`);
-  return { rows: kept, notes: [...notes, ...added] };
-}
-
-/** Each other section's rows, and what a left-out row is called in its notes. */
-const ROWS: Record<Exclude<Section, "fillRates">, { schema: z.ZodType; one: string; many: string }> = {
-  packages: { schema: PackageRow, one: "One package", many: "packages" },
-  connectedApps: { schema: ConnectedAppRow, one: "One connected app", many: "connected apps" },
-  riskyPermissions: { schema: RiskyPermissionRow, one: "One profile or permission set", many: "profiles and permission sets" },
-  limits: { schema: LimitRow, one: "One limit", many: "limits" },
-};
-
-/**
- * Any other section row by row (DECISIONS.md 668): a row that doesn't fit is
- * left out and the notes count it, so one package, app, set or limit never
- * costs the rest. One log line, by row index and the schema's paths. Null
- * when the section's own frame doesn't fit, which costs the section.
- */
-function rowsByRow(key: Exclude<Section, "fillRates">, value: unknown, say: (line: string) => void): object | null {
-  const frame = frameOf(key, value);
-  if (!frame) return null;
-  const { schema, one, many } = ROWS[key];
-  const kept: unknown[] = [];
-  const why: string[] = [];
-  frame.rows.forEach((row, i) => {
-    const got = check(schema, row);
-    if (got.ok) kept.push(got.data);
-    else why.push(`row ${i} ${got.why}`);
-  });
-  const n = why.length;
-  if (n === 0) return null;
-  const shown = why.slice(0, 3).join("; ") + (n > 3 ? `; and ${n - 3} more` : "");
-  say(`${key}: ${n} of ${frame.rows.length} rows didn't fit (${shown}), so ${n === 1 ? "it's" : "they're"} left out and the rest are kept.`);
-  const note = `${n === 1 ? one : `${n} ${many}`} didn't fit the shape we store, so ${n === 1 ? "it's" : "they're"} left out.`;
-  return { ...frame, rows: kept, notes: [...(frame as unknown as { notes: string[] }).notes, note] };
+  if (repeats) added.push(`${plural(repeats, "One field was", "fields were")} listed twice in ${repeats === 1 ? "its object" : "their objects"}, so only the first is kept.`);
+  return { rows: kept, notes: [...(notes as string[]), ...added] };
 }
 
 /**
