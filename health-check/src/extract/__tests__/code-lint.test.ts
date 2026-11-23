@@ -1,6 +1,7 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
+import { spawn, type ChildProcess } from "node:child_process";
+import { existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { technicalHealthModule } from "../../domains/technical-health/index.ts";
 import { runHealthCheck, type RunOptions } from "../../engine/run.ts";
@@ -10,10 +11,10 @@ import { tempDir } from "../../testing/harness.ts";
 import { loadCalibration, syntheticProvider } from "../../testing/replay.ts";
 import { Simulator } from "../../testing/simulator.ts";
 import { AS_OF, CONNECTED_USER } from "../../testing/synthetic-org.ts";
-import { codeLintExtractor, type CodeLintData, type CodeLintTools } from "../code-lint.ts";
+import { codeLintExtractor, LINT_BUDGET_ROOM, type CodeLintData, type CodeLintTools } from "../code-lint.ts";
 import { ESLINT_CONFIG, ESLINT_RULES, ESLINT_VERSION, lintJavaScript, NO_JAVASCRIPT, type JsFile } from "../lint/eslint.ts";
 import { bound, MAX_FINDINGS_PER_COMPONENT, MAX_FINDINGS_PER_RUN, type LintFinding, type ToolRun } from "../lint/findings.ts";
-import { findPmd, LINT_TEMP_PREFIX, PMD_NOT_INSTALLED, PMD_RULES, PMD_RULESET, PMD_VERSION, redactKeepingLines, runPmd, sweepLintTemp, type ApexFile } from "../lint/pmd.ts";
+import { findPmd, LINT_TEMP_PREFIX, livePmdRuns, PMD_NOT_INSTALLED, PMD_WRAPPER, PMD_RULES, PMD_RULESET, PMD_VERSION, redactKeepingLines, runPmd, sweepLintTemp, type ApexFile } from "../lint/pmd.ts";
 import type { ExtractContext } from "../types.ts";
 import {
   APEX_CLEAN,
@@ -221,7 +222,7 @@ describe("PMD: never fails the run, and the temporary folder never outlives it",
   test("a PMD that won't start is not run, and the folder is gone", async () => {
     const { temp, pmd } = setup();
     const reason = notRunReason(await runPmd([apex("A", APEX_CLEAN)], { ...pmd, bin: join(pmd.home, "bin", "missing") }, { tempBase: temp }));
-    assert.match(reason, /PMD couldn't be started \(ENOENT\)/);
+    assert.match(reason, /PMD couldn't be started \(exit code 127\)/);
     assert.deepEqual(lintTemps(temp), []);
   });
 
@@ -323,15 +324,27 @@ describe("ESLint", () => {
     assert.match(result.limits[0]!, /time limit/);
   });
 
+  test("as configured it can't parse a Lightning web component's decorators: counted as unparsable, as row 670 says", async () => {
+    const source = "import { LightningElement, api } from 'lwc';\nexport default class X extends LightningElement {\n  @api recordId;\n}\n";
+    assert.equal(ran(await lintJavaScript([{ kind: "lwc", component: "x", source }])).skipped.unparsable, 1);
+  });
+
   test("handed nothing, it says no JavaScript is read, never no findings", async () => {
     assert.equal(notRunReason(await lintJavaScript([])), NO_JAVASCRIPT);
   });
 });
 
 /** Just enough of a run's context for the step: reads answered from fixtures. */
-function context(rows: { classes: Array<{ Name: string; Body?: string }>; triggers: Array<{ Name: string; Body?: string }> }, codeLint: CodeLintTools | undefined, calls: string[] = [], fail?: (soql: string) => Error | undefined): ExtractContext {
+function context(
+  rows: { classes: Array<{ Name: string; Body?: string }>; triggers: Array<{ Name: string; Body?: string }> },
+  codeLint: CodeLintTools | undefined,
+  calls: string[] = [],
+  fail?: (soql: string) => Error | undefined,
+  room: (cost: number) => void = () => {},
+): ExtractContext {
   return {
     client: {
+      budget: { assertCanSpend: room },
       query: async (soql: string) => {
         calls.push(soql);
         const err = fail?.(soql);
@@ -376,10 +389,27 @@ describe("the code-lint step", () => {
     assert.equal(notRunReason((await codeLintExtractor.run(context(rows, { pmd, pmdOptions: { tempBase: temp } }, [], none))).pmd), "The Apex code couldn't be read: ApexClass isn't available in this org, or to the connected user.");
   });
 
-  test("a budget stop isn't swallowed: the run stops and resumes as for any step", async () => {
+  test("without clear room in the run's API budget it makes no call and PMD didn't run; the room asked for is the stated rule", async () => {
     const { temp, pmd } = setup();
-    const ctx = context({ classes: [], triggers: [] }, { pmd, pmdOptions: { tempBase: temp } }, [], () => new BudgetStopError("budget"));
-    await assert.rejects(codeLintExtractor.run(ctx), BudgetStopError);
+    const calls: string[] = [];
+    const asked: number[] = [];
+    const short = (cost: number): void => {
+      asked.push(cost);
+      throw new BudgetStopError("The org has used 9000 of 10000 daily API calls");
+    };
+    const out = await codeLintExtractor.run(context({ classes: [{ Name: "A", Body: APEX_CLEAN }], triggers: [] }, { pmd, pmdOptions: { tempBase: temp } }, calls, undefined, short));
+    assert.deepEqual(calls, []);
+    assert.deepEqual(asked, [LINT_BUDGET_ROOM]);
+    assert.equal(LINT_BUDGET_ROOM, 200);
+    assert.match(notRunReason(out.pmd), /hadn't clear room for reading the Apex code again, so PMD didn't run/);
+  });
+
+  test("a budget stop part way through the reads is this step's not run, never the run's pause", async () => {
+    const { temp, pmd } = setup();
+    const ctx = context({ classes: [], triggers: [] }, { pmd, pmdOptions: { tempBase: temp } }, [], (soql) => (/ApexTrigger/.test(soql) ? new BudgetStopError("budget") : undefined));
+    const out = await codeLintExtractor.run(ctx);
+    assert.match(notRunReason(out.pmd), /ran short while the Apex code was read again, so PMD didn't run/);
+    assert.deepEqual(lintTemps(temp), []);
   });
 });
 
@@ -436,5 +466,126 @@ describe("in a run", () => {
     const data = JSON.parse(readFileSync(join(result.dir, "checkpoints", "code-lint.json"), "utf8")) as CodeLintData;
     assert.deepEqual(data.pmd, { status: "not_run", tool: "pmd", reason: PMD_NOT_INSTALLED });
     assert.ok(existsSync(join(result.dir, "findings.json")));
+  });
+});
+
+describe("PMD: what's read from its report is bounded", () => {
+  test("a line outside the file, a column below 1 or not a number, a priority PMD hasn't, a rule not text: each dropped, and counted", async () => {
+    const { temp, pmd } = setup();
+    const result = ran(await runPmd([apex("Odd", "public class Odd { // FAKE_PMD_MALFORMED\n}")], pmd, { tempBase: temp }));
+    assert.equal(result.malformed, 6);
+    // The one that was only wrong in its category is kept, with no category.
+    assert.deepEqual(result.findings.map((f) => [f.rule, f.line, f.column, f.severity, f.category]), [["EmptyCatchBlock", 1, 1, 3, null]]);
+  });
+});
+
+/** Whether a process is still alive. */
+const alive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+const until = async (check: () => boolean, ms: number): Promise<boolean> => {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    if (check()) return true;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return check();
+};
+const CHILD = join(import.meta.dirname, "lint-fixtures", "pmd-child.ts");
+
+/** Starts a process running PMD's stand-in, which hangs, and resolves once PMD has its code. */
+function child(mode: "exit" | "wait" | "handled"): Promise<{ proc: ChildProcess; root: string; out: string[]; exited: Promise<[number | null, NodeJS.Signals | null]> }> {
+  const root = tempDir();
+  const proc = spawn(process.execPath, [CHILD, root, mode], { stdio: ["ignore", "pipe", "inherit"] });
+  const out: string[] = [];
+  const exited = new Promise<[number | null, NodeJS.Signals | null]>((resolve) => proc.on("exit", (code, signal) => resolve([code, signal])));
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("the child never got PMD going")), 15_000);
+    proc.stdout!.on("data", (chunk: Buffer) => {
+      out.push(...chunk.toString().split("\n").filter(Boolean));
+      if (out.includes("ready")) {
+        clearTimeout(timer);
+        resolve({ proc, root, out, exited });
+      }
+    });
+  });
+}
+const pmdPid = (root: string): number => (JSON.parse(readFileSync(join(root, "pmd-bin-7.29.0", "seen.json"), "utf8")) as { pid: number }).pid;
+
+describe("PMD never outlives the process that started it, nor leaves its code behind", { timeout: 30_000 }, () => {
+  test("process.exit(75) mid-run, as the recycle's watchdog calls it: no folder left and no PMD alive", async () => {
+    const { root, exited } = await child("exit");
+    assert.deepEqual(await exited, [75, null]);
+    const pid = pmdPid(root);
+    assert.ok(await until(() => !alive(pid), 3000), "PMD is still running");
+    assert.deepEqual(lintTemps(join(root, "tmp")), []);
+  });
+
+  test("SIGTERM with nothing else listening: PMD and its folder go, and the process still ends by SIGTERM", async () => {
+    const { proc, root, exited } = await child("wait");
+    proc.kill("SIGTERM");
+    assert.deepEqual(await exited, [null, "SIGTERM"]);
+    assert.ok(await until(() => !alive(pmdPid(root)), 3000));
+    assert.deepEqual(lintTemps(join(root, "tmp")), []);
+  });
+
+  test("SIGTERM with the worker's own handler: PMD and its folder go, and the handler runs and sets the exit as before", async () => {
+    const { proc, root, out, exited } = await child("handled");
+    proc.kill("SIGTERM");
+    assert.deepEqual(await exited, [0, null]);
+    assert.ok(out.includes("own handler ran"));
+    assert.ok(await until(() => !alive(pmdPid(root)), 3000));
+    assert.deepEqual(lintTemps(join(root, "tmp")), []);
+  });
+
+  test("SIGKILL, when no hook can run: PMD's own shell sees its parent gone, kills PMD and deletes the folder", async () => {
+    const { proc, root, exited } = await child("wait");
+    proc.kill("SIGKILL");
+    await exited;
+    const pid = pmdPid(root);
+    assert.ok(await until(() => !alive(pid), 8000), "an orphaned PMD is still running");
+    assert.ok(await until(() => lintTemps(join(root, "tmp")).length === 0, 3000), "an orphaned PMD's folder is still there");
+  });
+
+  test("the shell's own limit stops PMD whether or not anyone is watching", async () => {
+    const dir = tempDir();
+    const started = Date.now();
+    const proc = spawn("/bin/sh", ["-c", PMD_WRAPPER, "pmd-wrapper", dir, "1", "/bin/sleep", "30"], { stdio: "ignore" });
+    const [code] = await new Promise<[number | null]>((resolve) => proc.on("exit", (c) => resolve([c])));
+    assert.equal(code, 137);
+    assert.ok(Date.now() - started < 5000);
+  });
+
+  test("its hooks are there only while PMD runs", async () => {
+    const before = [process.listenerCount("exit"), process.listenerCount("SIGTERM"), process.listenerCount("SIGINT")];
+    const { temp, pmd } = setup();
+    const running = runPmd([apex("Hang", "public class Hang { // FAKE_PMD_HANG\n}")], pmd, { tempBase: temp, timeLimitMs: 1500 });
+    await until(() => livePmdRuns() === 1, 3000);
+    assert.deepEqual([process.listenerCount("exit"), process.listenerCount("SIGTERM"), process.listenerCount("SIGINT")], before.map((n) => n + 1));
+    await running;
+    assert.equal(livePmdRuns(), 0);
+    assert.deepEqual([process.listenerCount("exit"), process.listenerCount("SIGTERM"), process.listenerCount("SIGINT")], before);
+  });
+
+  test("the sweep never follows a link, and leaves anything but a folder alone", () => {
+    const root = tempDir();
+    const base = join(root, "base");
+    const outside = join(root, "outside");
+    mkdirSync(base);
+    mkdirSync(outside);
+    writeFileSync(join(outside, "precious"), "x");
+    writeFileSync(join(base, `${LINT_TEMP_PREFIX}file`), "x");
+    const old = new Date(Date.now() - 3_600_000);
+    utimesSync(outside, old, old);
+    utimesSync(join(base, `${LINT_TEMP_PREFIX}file`), old, old);
+    symlinkSync(outside, join(base, `${LINT_TEMP_PREFIX}link`));
+    assert.equal(sweepLintTemp(base, 600_000), 0);
+    assert.ok(existsSync(join(outside, "precious")));
+    assert.deepEqual(readdirSync(base).sort(), [`${LINT_TEMP_PREFIX}file`, `${LINT_TEMP_PREFIX}link`]);
   });
 });

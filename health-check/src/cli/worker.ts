@@ -1,3 +1,4 @@
+import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { MODELS } from "../config.ts";
 import { anthropicClientWithKey, federationClient, type NarrativeClient } from "../narrative/client.ts";
@@ -5,7 +6,7 @@ import { checkClaude } from "../narrative/guard.ts";
 import { ClaudeWatch, federationCachePath, identityTokenFacts, prepareSignInCache, SIGN_IN_RETRY_MINUTES } from "../narrative/sign-in.ts";
 import { tokenKeySource, TokenStore } from "../salesforce/token-store.ts";
 import { HEALTH_CHECK_QUEUE, HEAVY_QUEUE, lostRecorder, RECYCLE_EXIT, RECYCLE_WATCHDOG_MS, recycleWatch, redisConnection, runQueuer, startQueueWorker, type BullModule, type StoreFill } from "../worker/bullmq.ts";
-import { findPmd, PMD_VERSION } from "../extract/lint/pmd.ts";
+import { findPmd, PMD_TIME_LIMIT_MS, PMD_VERSION, sweepLintTemp } from "../extract/lint/pmd.ts";
 import { GoogleDrive } from "../worker/drive.ts";
 import { readWorkerEnv, WORKER_ENV } from "../worker/env.ts";
 import { PostgresWorkerStore, type SqlPool } from "../worker/postgres-store.ts";
@@ -75,6 +76,8 @@ export async function workerCommand(
     exit?: (code: number) => void;
     /** Tests only: stands in for RECYCLE_WATCHDOG_MS. */
     watchdogMs?: number;
+    /** Tests only: where PMD's temporary folders are swept at start, in place of the system's. */
+    lintTempBase?: string;
   } = {},
 ): Promise<number> {
   const log = options.log ?? ((line: string) => console.log(`${new Date().toISOString()} ${line}`));
@@ -107,6 +110,8 @@ export async function workerCommand(
   const google = config.drive ? new GoogleDrive(config.drive) : null;
   // Looked for once, at start: files only, nothing run (DECISIONS.md 670).
   const pmd = findPmd(config.pmdHome, config.javaHome);
+  // Code a worker that died mid-run left for PMD, with or without PMD here now: the same age rule as each run's own sweep.
+  const lintSwept = sweepLintTemp(options.lintTempBase ?? tmpdir(), 2 * PMD_TIME_LIMIT_MS);
   const deps: WorkerDeps = {
     store,
     tokens: new TokenStore({ dir: config.connectionsDir, key: tokenKeySource({ env: { HC_TOKEN_KEY: env.HC_TOKEN_KEY } as NodeJS.ProcessEnv, platform: "linux" }) }),
@@ -153,6 +158,7 @@ export async function workerCommand(
         : "Claude's summaries of Apex code are switched on, but Claude isn't set up, so no code is kept and nothing is asked.",
   );
   // Said at every start, so a deploy that installs it shows in the log.
+  if (lintSwept) log(`Deleted ${lintSwept} temporary ${lintSwept === 1 ? "folder" : "folders"} of Apex code that a PMD run cut short had left.`);
   log("found" in pmd ? `PMD ${PMD_VERSION} checks each health check's Apex code, and its findings are stored beside our own scan's.` : `${pmd.missing} Each health check says PMD didn't run.`);
   log(
     config.claude.kind === "key"

@@ -1,9 +1,14 @@
 // A stand-in for PMD 7.29.0's command line, so the suite needs no Java
 // (DECISIONS.md 670). It reads the same arguments, writes a report in the shape
-// real PMD 7.29.0 writes (checked against it once by hand), and, like real PMD,
+// real PMD 7.29.0 writes, and, like real PMD,
 // quotes names and code in its messages, so a test can prove none is kept.
 // Markers in the invented code make it misbehave. It writes what it was given
 // to seen.json beside its home, so a test can see what PMD would have seen.
+// Checked by hand against the real thing, as docs/WORKER-HOSTING.md says:
+// PMD 7.29.0 on macOS with Oracle Java 1.8.0_503, 23 Nov 2026, `pmd check
+// --dir --rulesets src/extract/lint/pmd-apex.xml --format json --report-file
+// --no-cache --no-progress --show-suppressed --no-fail-on-violation
+// --no-fail-on-error`, then through runPmd over the fixtures. Never Java 21.
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -12,7 +17,7 @@ const args = process.argv.slice(3);
 const arg = (name) => args[args.indexOf(name) + 1];
 const dir = arg("--dir");
 const reportFile = arg("--report-file");
-const seen = { args, env: { ...process.env }, cwd: process.cwd(), files: {} };
+const seen = { pid: process.pid, args, env: { ...process.env }, cwd: process.cwd(), files: {} };
 for (const name of readdirSync(dir).sort()) seen.files[name] = readFileSync(join(dir, name), "utf8");
 writeFileSync(join(home, "seen.json"), JSON.stringify(seen));
 
@@ -46,6 +51,16 @@ else {
       const unused = /\b(?:Integer|String)\s+(\w+)\s*=/.exec(line);
       if (unused) here.push(violation(n, unused.index + 1, "UnusedLocalVariable", "Best Practices", 5, `Variable '${unused[1]}' defined but not used`));
       if (line.includes("FAKE_PMD_FOREIGN_RULE")) here.push(violation(n, 1, "ApexDoc", "Documentation", 3, "Missing ApexDoc comment"));
+      if (line.includes("FAKE_PMD_MALFORMED")) {
+        // Each wrong in one way: a line before the file, past its end, no priority PMD has, a column below 1 or not a number, a rule not text.
+        here.push(violation(0, 1, "EmptyCatchBlock", "Error Prone", 3, "x"));
+        here.push(violation(99_999, 1, "EmptyCatchBlock", "Error Prone", 3, "x"));
+        here.push(violation(n, 1, "EmptyCatchBlock", "Error Prone", 7, "x"));
+        here.push(violation(n, -1, "EmptyCatchBlock", "Error Prone", 3, "x"));
+        here.push(violation(n, "12", "EmptyCatchBlock", "Error Prone", 3, "x"));
+        here.push(violation(n, 1, 42, "Error Prone", 3, "x"));
+        here.push(violation(n, 1, "EmptyCatchBlock", "Invented Category", 3, "x"));
+      }
       if (line.includes("FAKE_PMD_MANY")) for (let k = 0; k < 120; k++) here.push(violation(n, k + 1, "AvoidHardcodingId", "Error Prone", 3, `Hardcoding Ids: ${line.trim()}`));
       const nopmd = /\/\/\s*NOPMD\s*(.*)$/.exec(line);
       for (const v of here) {

@@ -45,6 +45,8 @@ export type ToolRun =
       rules: Record<string, string>;
       /** Findings the tool reported under a rule outside our pinned set: dropped, and counted. */
       outsideRules: number;
+      /** PMD only: findings whose line, column or priority couldn't be true of the file, dropped and counted (DECISIONS.md 670). */
+      malformed?: number;
       /** ESLint only: inline configuration comments in the code, each ignored. */
       inlineConfigIgnored?: number;
       /** Anything else the reader should know: a part of the code that couldn't be read, and why. */

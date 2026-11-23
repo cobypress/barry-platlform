@@ -1,10 +1,12 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { CodeLintData } from "../../extract/code-lint.ts";
-import { PMD_NOT_INSTALLED } from "../../extract/lint/pmd.ts";
+import { LINT_TEMP_PREFIX, PMD_NOT_INSTALLED, PMD_TIME_LIMIT_MS } from "../../extract/lint/pmd.ts";
+import { workerCommand, type WorkerModules } from "../../cli/worker.ts";
+import type { BullModule } from "../bullmq.ts";
 import { loadRecording, ReplayTransport } from "../../testing/replay.ts";
 import { readWorkerEnv } from "../env.ts";
 import { createJobHandler } from "../worker.ts";
@@ -46,5 +48,50 @@ describe("the worker and PMD", () => {
     assert.deepEqual([step?.status, step?.calls], ["done", 0]);
     const data = JSON.parse(readFileSync(join(run.runDir!, "checkpoints", "code-lint.json"), "utf8")) as CodeLintData;
     assert.deepEqual(data.pmd, { status: "not_run", tool: "pmd", reason: PMD_NOT_INSTALLED });
+  });
+});
+
+/** Just enough of BullMQ and pg for the worker to start and stop: no Redis, no database. */
+class StillWorker {
+  on(): this {
+    return this;
+  }
+  async close(): Promise<void> {}
+}
+class StillQueue {
+  async add() {}
+  async close() {}
+}
+class NoPool {
+  async query(): Promise<never> {
+    throw new Error("no database in tests");
+  }
+  async connect(): Promise<never> {
+    throw new Error("no database in tests");
+  }
+  async end(): Promise<void> {}
+}
+const modules: WorkerModules = {
+  bull: { Worker: StillWorker as unknown as BullModule["Worker"], Queue: StillQueue as unknown as BullModule["Queue"], UnrecoverableError: class extends Error {} },
+  pg: { Pool: NoPool as unknown as WorkerModules["pg"]["Pool"] },
+};
+
+describe("the worker's start", () => {
+  test("deletes the code a PMD run cut short left, older than twice its limit, with or without PMD here; a recent folder stays", { timeout: 10_000 }, async () => {
+    const base = temp();
+    const old = `${base}/${LINT_TEMP_PREFIX}crashed`;
+    const recent = `${base}/${LINT_TEMP_PREFIX}recent`;
+    mkdirSync(old);
+    writeFileSync(`${old}/0.cls`, "public class Left {}");
+    mkdirSync(recent);
+    const then = new Date(Date.now() - 2 * PMD_TIME_LIMIT_MS - 60_000);
+    utimesSync(old, then, then);
+    const lines: string[] = [];
+    const code = await workerCommand(env(), { load: async () => modules, until: Promise.resolve(), log: (l) => lines.push(l), sweep: async () => [], scanSweep: (async () => {}) as never, lintTempBase: base });
+    assert.equal(code, 0);
+    assert.ok(!existsSync(old));
+    assert.ok(existsSync(recent));
+    assert.ok(lines.includes("Deleted 1 temporary folder of Apex code that a PMD run cut short had left."));
+    assert.ok(lines.includes(`${PMD_NOT_INSTALLED} Each health check says PMD didn't run.`));
   });
 });

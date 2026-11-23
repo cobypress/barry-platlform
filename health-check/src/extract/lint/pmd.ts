@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -62,6 +62,9 @@ export const PMD_RULES: Readonly<Record<string, string>> = {
   ApexXSSFromURLParam: "A page parameter used without escaping.",
 };
 
+/** PMD's Apex categories, as its report names them. Anything else is stored as no category. */
+const PMD_CATEGORIES: ReadonlySet<string> = new Set(["Best Practices", "Code Style", "Design", "Documentation", "Error Prone", "Multithreading", "Performance", "Security"]);
+
 export type PmdInstall = { bin: string; javaHome: string };
 
 /**
@@ -100,7 +103,10 @@ export function redactKeepingLines(body: string): string {
 
 /**
  * Deletes temporary folders a crashed step left: only those older than
- * `olderThanMs`, so a run beside this one keeps the folder it is using.
+ * `olderThanMs`, so a run beside this one keeps the folder it is using. Only a
+ * real folder this process's user owns: a link, a file or another user's
+ * folder of that name is left alone, so nothing outside is ever followed.
+ * The worker calls it once at start, and each PMD run before it begins.
  */
 export function sweepLintTemp(base: string, olderThanMs: number, now = Date.now()): number {
   let swept = 0;
@@ -114,7 +120,10 @@ export function sweepLintTemp(base: string, olderThanMs: number, now = Date.now(
     if (!name.startsWith(LINT_TEMP_PREFIX)) continue;
     const path = join(base, name);
     try {
-      if (now - statSync(path).mtimeMs > olderThanMs) {
+      const entry = lstatSync(path);
+      if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
+      if (typeof process.getuid === "function" && entry.uid !== process.getuid()) continue;
+      if (now - entry.mtimeMs > olderThanMs) {
         rmSync(path, { recursive: true, force: true });
         swept++;
       }
@@ -131,8 +140,90 @@ type PmdReport = { pmdVersion?: unknown; files?: unknown; suppressedViolations?:
 
 class PmdStopped extends Error {}
 
+// PMD running now, so a worker that exits mid-run (the recycle's watchdog
+// calling process.exit, a crash, SIGTERM at a deploy) still kills it and
+// deletes the code it was given: `finally` never runs then (DECISIONS.md 670).
+const live = new Map<number, string>();
+
+/** Kills each PMD still running and deletes its folder. Synchronous, so it works inside process.exit. */
+function killLive(): void {
+  for (const [pid, dir] of live) {
+    try {
+      process.kill(-pid, "SIGKILL");
+    } catch {
+      // Already gone.
+    }
+    rmSync(dir, { recursive: true, force: true });
+  }
+  live.clear();
+}
+
+/**
+ * On SIGTERM or SIGINT: PMD and its folder go first. If nothing else listens,
+ * the signal is raised again, so the process ends as it would have; the
+ * worker's own handlers, when it has them, carry on as before.
+ */
+function onSignal(signal: NodeJS.Signals): void {
+  // First of the listeners (prepended), so the count still holds a once-handler of the worker's.
+  const others = process.listeners(signal).filter((l) => l !== onSignal).length;
+  killLive();
+  unhook();
+  if (others === 0) process.kill(process.pid, signal);
+}
+const onExit = (): void => killLive();
+
+function hook(): void {
+  if (live.size !== 1) return;
+  process.on("exit", onExit);
+  process.prependListener("SIGTERM", onSignal);
+  process.prependListener("SIGINT", onSignal);
+}
+
+function unhook(): void {
+  process.off("exit", onExit);
+  process.off("SIGTERM", onSignal);
+  process.off("SIGINT", onSignal);
+}
+
+/** How many PMD runs this process has in hand: tests only. */
+export const livePmdRuns = (): number => live.size;
+
+/**
+ * PMD runs under this shell, which carries its own limit: if this process is
+ * killed outright (SIGKILL, so no hook runs), the shell sees its parent has
+ * gone within a second, kills PMD and deletes the folder; and whatever
+ * happens, it kills PMD once the limit has passed. POSIX sh, sleep and kill
+ * only, which macOS and Render's Linux both have. What it can't cover: the
+ * shell itself killed outright on its own, or the parent's process id reused
+ * within the second, leave PMD to the shell's limit or none.
+ */
+export const PMD_WRAPPER = [
+  'dir="$1"; limit="$2"; shift 2',
+  'parent=$PPID',
+  // The shell's own notices ("Killed") go nowhere: written to a dead parent's pipe they would end the shell before it cleans up.
+  "exec 3>&2 2>/dev/null",
+  '"$@" 2>&3 3>&- &',
+  "pmd=$!",
+  "(",
+  "  i=0",
+  '  while [ "$i" -lt "$limit" ]; do',
+  "    sleep 1; i=$((i + 1))",
+  '    kill -0 "$pmd" 2>/dev/null || exit 0',
+  '    kill -0 "$parent" 2>/dev/null || break',
+  "  done",
+  '  kill -9 "$pmd" 2>/dev/null',
+  ") &",
+  "watch=$!",
+  'wait "$pmd"; code=$?',
+  'kill "$watch" 2>/dev/null',
+  'kill -0 "$parent" 2>/dev/null || rm -rf "$dir"',
+  'exit "$code"',
+].join("\n");
+/** The shell's own limit is ours plus this, so ours normally acts first. */
+export const PMD_WRAPPER_GRACE_S = 30;
+
 /** Runs PMD and resolves when it has exited, or rejects with why it was stopped. Its console is drained, never kept. */
-function runProcess(install: PmdInstall, args: string[], dir: string, report: string, timeLimitMs: number, maxReportBytes: number): Promise<number | null> {
+function runProcess(install: PmdInstall, args: string[], dir: string, report: string, timeLimitMs: number, maxReportBytes: number): Promise<number> {
   const javaTmp = join(dir, "java-tmp");
   mkdirSync(javaTmp, { mode: 0o700 });
   // PMD's script splits these on spaces, so a folder with a space keeps Java's default.
@@ -144,10 +235,21 @@ function runProcess(install: PmdInstall, args: string[], dir: string, report: st
     HOME: dir,
     TMPDIR: dir,
     LANG: "C.UTF-8",
-    PMD_JAVA_OPTS: ["-Xmx512m", ...tmpOption, ...noNetwork].join(" "),
+    // The heap is capped at 384 MB, class metadata at 128 MB (PMD's Apex parser
+    // and rules load a few thousand classes, well under that), one collector
+    // thread on a one-CPU host, and no performance data file in /tmp.
+    PMD_JAVA_OPTS: ["-Xmx384m", "-XX:MaxMetaspaceSize=128m", "-XX:+UseSerialGC", "-XX:-UsePerfData", ...tmpOption, ...noNetwork].join(" "),
   };
   return new Promise((resolve, reject) => {
-    const child = spawn(install.bin, args, { cwd: dir, env, detached: true, stdio: ["ignore", "pipe", "pipe"] });
+    const shellLimit = String(Math.ceil(timeLimitMs / 1000) + PMD_WRAPPER_GRACE_S);
+    const child = spawn("/bin/sh", ["-c", PMD_WRAPPER, "pmd-wrapper", dir, shellLimit, install.bin, ...args], { cwd: dir, env, detached: true, stdio: ["ignore", "pipe", "pipe"] });
+    if (child.pid !== undefined) {
+      live.set(child.pid, dir);
+      hook();
+    }
+    const done = (): void => {
+      if (child.pid !== undefined && live.delete(child.pid) && live.size === 0) unhook();
+    };
     child.stdout.resume();
     child.stderr.resume();
     let stopped: string | null = null;
@@ -172,18 +274,25 @@ function runProcess(install: PmdInstall, args: string[], dir: string, report: st
     child.on("error", (err) => {
       clearTimeout(timer);
       clearInterval(watch);
+      done();
       reject(new PmdStopped(`PMD couldn't be started (${(err as NodeJS.ErrnoException).code ?? err.name}).`));
     });
-    child.on("close", (code) => {
+    child.on("close", (code, signal) => {
       clearTimeout(timer);
       clearInterval(watch);
+      done();
       if (stopped) reject(new PmdStopped(stopped));
-      else resolve(code);
+      // 126 and 127: the shell couldn't run PMD's script at all.
+      else if (code === 126 || code === 127) reject(new PmdStopped(`PMD couldn't be started (exit code ${code}).`));
+      // A shell reports a child killed by a signal as 128 plus its number: 137 is SIGKILL, which the system's out-of-memory killer sends.
+      else if (signal || code === 137) reject(new PmdStopped(`PMD was stopped by the system (${signal ?? "SIGKILL"}), for example for running out of memory.`));
+      else resolve(code ?? -1);
     });
   });
 }
 
-const whole = (v: unknown): number | null => (typeof v === "number" && Number.isInteger(v) && v > 0 ? v : null);
+/** A whole number from 1 to `max`, or null. */
+const within = (v: unknown, max: number): number | null => (typeof v === "number" && Number.isInteger(v) && v >= 1 && v <= max ? v : null);
 
 /**
  * PMD over the files, with our ruleset, in a private folder deleted before
@@ -213,14 +322,14 @@ export async function runPmd(files: ApexFile[], install: PmdInstall, options: Pm
     handed.forEach((file, i) => writeFileSync(join(src, `${i}.${file.kind === "class" ? "cls" : "trigger"}`), redactKeepingLines(file.body), { mode: 0o600 }));
     const report = join(dir, "report.json");
     const args = ["check", "--dir", src, "--rulesets", PMD_RULESET, "--format", "json", "--report-file", report, "--no-cache", "--no-progress", "--show-suppressed", "--no-fail-on-violation", "--no-fail-on-error", "--threads", "1"];
-    let code: number | null;
+    let code: number;
     try {
       code = await runProcess(install, args, dir, report, timeLimitMs, maxReportBytes);
     } catch (err) {
       if (err instanceof PmdStopped) return notRun("pmd", err.message);
       throw err;
     }
-    if (code !== 0) return notRun("pmd", `PMD stopped with exit code ${code ?? "none"}, so its findings weren't read.`);
+    if (code !== 0) return notRun("pmd", `PMD stopped with exit code ${code}, so its findings weren't read.`);
     if (!existsSync(report)) return notRun("pmd", "PMD finished without writing its report.");
     if (statSync(report).size > maxReportBytes) return notRun("pmd", `PMD's report was larger than ${Math.round(maxReportBytes / 1024)} KB, so it wasn't read.`);
     let parsed: PmdReport;
@@ -239,29 +348,43 @@ export async function runPmd(files: ApexFile[], install: PmdInstall, options: Pm
     };
     const raw: LintFinding[] = [];
     let outsideRules = 0;
+    let malformed = 0;
+    const lines = new Map(handed.map((f) => [f, f.body.split("\n").length]));
     const take = (groups: unknown, suppressed: boolean): void => {
       if (!Array.isArray(groups)) return;
       for (const group of groups as PmdFile[]) {
         const file = fileOf(group?.filename);
         if (!file || !Array.isArray(group.violations)) continue;
         for (const v of group.violations as PmdViolation[]) {
-          const line = whole(v?.beginline);
-          if (typeof v?.rule !== "string" || line === null) continue;
+          if (typeof v?.rule !== "string") {
+            malformed++;
+            continue;
+          }
           // Only our rules: anything else PMD reports is dropped, and counted.
           if (!Object.hasOwn(PMD_RULES, v.rule)) {
             outsideRules++;
+            continue;
+          }
+          // Only what could be true of the file handed over: a line within it, a
+          // column within the size bound, and one of PMD's five priorities.
+          // Anything else is dropped, and counted.
+          const line = within(v.beginline, lines.get(file)!);
+          const column = v.begincolumn === undefined || v.begincolumn === null ? null : within(v.begincolumn, MAX_SOURCE_CHARS + 1);
+          const priority = within(v.priority, 5);
+          if (line === null || priority === null || (column === null && v.begincolumn !== undefined && v.begincolumn !== null)) {
+            malformed++;
             continue;
           }
           raw.push({
             tool: "pmd",
             toolVersion: PMD_VERSION,
             rule: v.rule,
-            category: typeof v.ruleset === "string" ? v.ruleset : null,
-            severity: whole(v.priority) ?? 3,
+            category: typeof v.ruleset === "string" && PMD_CATEGORIES.has(v.ruleset) ? v.ruleset : null,
+            severity: priority,
             kind: file.kind,
             component: file.name,
             line,
-            column: whole(v.begincolumn),
+            column,
             ...(suppressed ? { suppressed: true as const } : {}),
           });
         }
@@ -289,6 +412,7 @@ export async function runPmd(files: ApexFile[], install: PmdInstall, options: Pm
       findings: kept.findings,
       rules: rulesSeen(kept.findings, PMD_RULES),
       outsideRules,
+      malformed,
       limits: [],
     };
   } finally {
