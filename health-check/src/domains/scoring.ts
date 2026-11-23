@@ -19,6 +19,13 @@ export const MIN_RULES_SCORED = 2;
 
 // Gaps in how we set the check up, not faults in the customer's org.
 const SETUP_RULES = new Set(["pipe.unmapped-stages"]);
+/**
+ * Shown and not scored (DECISIONS.md 673): PMD's six groups in technical
+ * health, so starting to measure them moves no score or grade. Read by the
+ * score exactly as the set-up rules are. A test holds this to the rules' own list.
+ */
+export const UNSCORED_RULES: ReadonlySet<string> = new Set(["tech.lint-data-access", "tech.lint-limits", "tech.lint-injection", "tech.lint-tests", "tech.lint-swallowed-errors", "tech.lint-complexity"]);
+const notScored = (ruleId: string): boolean => SETUP_RULES.has(ruleId) || UNSCORED_RULES.has(ruleId);
 
 const WEIGHTS: Record<string, number> = {
   ruleMaximum: RULE_MAXIMUM,
@@ -38,7 +45,7 @@ const issueWeight = (f: Finding): number => SEVERITY_WEIGHTS[f.severity] * CONFI
 
 export function scoreDomain(domain: string, findings: Finding[], ruleSetVersion: string = RULE_SET_VERSION): Score {
   const notMeasurable = (reason: string): Score => Score.parse({ status: "not_measurable", domain, ruleSetVersion, reason });
-  const own = findings.filter((f) => f.domain === domain && !SETUP_RULES.has(f.ruleId));
+  const own = findings.filter((f) => f.domain === domain && !notScored(f.ruleId));
   if (own.length === 0) return notMeasurable("We couldn't assess this area.");
   const rules = new Map<string, Finding[]>();
   for (const finding of own) rules.set(finding.ruleId, [...(rules.get(finding.ruleId) ?? []), finding]);
@@ -142,7 +149,7 @@ export function overallScore(scores: Score[], findings: Finding[]): OverallScore
   const scoredWeight = areas.reduce((sum, a) => sum + a.weight, 0);
   if (areas.length < MIN_AREAS_SCORED || scoredWeight * 2 < totalWeight) return { status: "not_measurable", reason: "Too few areas could be scored to give the org one score fairly." };
   const uncapped = Math.round(areas.reduce((sum, a) => sum + a.score * a.weight, 0) / scoredWeight);
-  const capped = findings.some((f) => f.status === "issue" && f.severity === "critical" && !SETUP_RULES.has(f.ruleId)) && uncapped > CRITICAL_CAP;
+  const capped = findings.some((f) => f.status === "issue" && f.severity === "critical" && !notScored(f.ruleId)) && uncapped > CRITICAL_CAP;
   const score = capped ? CRITICAL_CAP : uncapped;
   const { grade, word } = gradeOf(score);
   return { status: "measured", score, grade, word, uncapped, capped, areas };

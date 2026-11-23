@@ -285,6 +285,7 @@ function analyseWithin(input: AnalysisInput): AnalysisOutput {
     window,
     pseudonyms,
     data,
+    ran: (extractor) => extracts.has(extractor.id),
     manual,
     ev: (source, evidence = {}) => ({
       ...source,

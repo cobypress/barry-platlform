@@ -97,6 +97,12 @@ export type RuleContext = {
   pseudonyms: Pseudonymiser;
   /** The output of an extractor. */
   data<T>(extractor: Extractor<T>): T;
+  /**
+   * Whether an extractor no module owns was part of this run, such as the
+   * code-lint step only a health check from the worker gets (DECISIONS.md 673).
+   * Absent outside an analysis, where it reads as not.
+   */
+  ran?<T>(extractor: Extractor<T>): boolean;
   /** Complete unless the run is a set-up review, which reads no CRM records. */
   scope?: RunScope;
   /** Turns a source into evidence, stamped with this run's time. */

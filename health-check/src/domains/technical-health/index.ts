@@ -12,6 +12,8 @@ import { isObjectId, objectResolver } from "../object-names.ts";
 import { WHERE } from "../where.ts";
 import { joinSaid, org, said, type Said } from "../../engine/org-words.ts";
 import { andList, grouped } from "../../engine/said-forms.ts";
+import { judgedTests, liveCode, loopsOverLimits } from "./code.ts";
+import { LINT_RULES } from "./lint.ts";
 
 // Technical health (roadmap 3.2): how sound the code is, read from set-up only.
 // Coverage, API versions and trigger counts moved here from automation with
@@ -39,14 +41,6 @@ const SILENT_TEST_SHARE = 20;
 // Salesforce's per-transaction limits for synchronous Apex (Apex Developer Guide, Execution Governors and Limits).
 const SOQL_LIMIT = 100;
 const DML_LIMIT = 150;
-
-type Code = (ApexClassRow | ApexTriggerRow) & { kind: "apex class" | "apex trigger" };
-
-/** Active code of the org's own that isn't a test, with what the scan found. Hidden bodies are counted apart. */
-function liveCode(classes: ApexClassRow[], triggers: ApexTriggerRow[]): { code: Code[]; hidden: number } {
-  const all: Code[] = [...classes.map((c) => ({ ...c, kind: "apex class" as const })), ...triggers.map((t) => ({ ...t, kind: "apex trigger" as const }))].filter((c) => c.Status === "Active");
-  return { code: all.filter((c) => c.scan !== null && !c.isTest), hidden: all.filter((c) => c.scan === null).length };
-}
 
 const hiddenNote = (hidden: number): string[] => (hidden ? [`Classes and triggers whose code is hidden: ${hidden}`] : []);
 
@@ -220,14 +214,11 @@ const testQuality: Rule = {
     const { classes } = ctx.data(apexExtractor);
     if (classes.status !== "ok") return { outcome: "not_measurable", reason: apexGap("classes", classes.reason), evidence: [ctx.ev(classes.source, { count: null })] };
     const active = classes.data.filter((c) => c.Status === "Active");
-    // A test data factory is @isTest with no test methods, and has nothing to assert.
-    const tests = active.filter((c) => c.isTest && c.scan !== null && c.scan.testMethods > 0);
+    const { tests, silent, seeAll } = judgedTests(classes.data);
     const hidden = active.filter((c) => c.scan === null).length;
     const evidence = [ctx.ev(classes.source, { count: tests.length, exclusions: ["Test classes with no test methods, such as data factories", "Installed packages' classes", ...hiddenNote(hidden)], note: "Read from the code: test methods, assertions and SeeAllData" })];
     if (active.length === 0) return { outcome: "pass", summary: said`This org has no Apex of its own.`, evidence, segmentExemptReason: "There's no code to segment." };
     if (tests.length === 0) return { outcome: "not_measurable", reason: said`We found no test methods we could read, so there's nothing to judge. The coverage check covers whether the code is tested.`, evidence };
-    const silent = tests.filter((c) => c.scan!.asserts === 0);
-    const seeAll = tests.filter((c) => c.scan!.seeAllData);
     const segments = [{ dimension: "test class", segments: tests.length }];
     const facts = { testClasses: tests.length, withoutAssertions: silent.length, seeAllData: seeAll.length };
     if (silent.length === 0 && seeAll.length === 0) {
@@ -265,7 +256,7 @@ const limitRisk: Rule = {
     if (classes.status !== "ok") return { outcome: "not_measurable", reason: apexGap("classes", classes.reason), evidence: [ctx.ev(classes.source, { count: null })] };
     if (triggers.status !== "ok") return { outcome: "not_measurable", reason: apexGap("triggers", triggers.reason), evidence: [ctx.ev(triggers.source, { count: null })] };
     const { code, hidden } = liveCode(classes.data, triggers.data);
-    const risky = code.filter((c) => c.scan!.queriesInLoops + c.scan!.dmlInLoops > 0).sort((a, b) => a.Name.localeCompare(b.Name));
+    const risky = code.filter(loopsOverLimits).sort((a, b) => a.Name.localeCompare(b.Name));
     const queries = risky.reduce((sum, c) => sum + c.scan!.queriesInLoops, 0);
     const saves = risky.reduce((sum, c) => sum + c.scan!.dmlInLoops, 0);
     const inTriggers = risky.filter((c) => c.kind === "apex trigger").length;
@@ -468,5 +459,6 @@ export const technicalHealthModule: DomainModule = {
   label: "Technical health",
   // Record counts before the metadata step, which reads them to know which standard objects to name.
   extractors: [labelsExtractor, orgExtractor, recordCountsExtractor, metadataExtractor, apexExtractor, componentChangesExtractor, customObjectsExtractor, classicExtractor, apiLimitsExtractor],
-  rules: [apexCoverage, testQuality, limitRisk, codeSize, storageUse, oldApiVersions, multipleTriggers, classicLeftovers],
+  // PMD's six groups last, so every finding before them stays where it was (DECISIONS.md 673).
+  rules: [apexCoverage, testQuality, limitRisk, codeSize, storageUse, oldApiVersions, multipleTriggers, classicLeftovers, ...LINT_RULES],
 };

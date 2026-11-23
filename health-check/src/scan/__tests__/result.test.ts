@@ -223,7 +223,8 @@ describe("where a finding is in Setup", () => {
       "utl.package-seats",
       "utl.unassigned-licence-seats",
     ]);
-    assert.equal(scan.length, 61);
+    // 61, and PMD's six groups, which give nothing on a scan: it has no code-lint step (decision 673).
+    assert.equal(scan.length, 67);
   });
 
   test("hardcoded ids in flows has none: its subjects include active Process Builders, which aren't under Flows", () => {

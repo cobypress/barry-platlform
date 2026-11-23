@@ -11,7 +11,9 @@ import { customObjectsExtractor, orgExtractor, setupAuditExtractor, type CustomO
 import { FACTS_FILE, factsExtractor, type Facts } from "../extract/facts.ts";
 import { apexExtractor, metadataExtractor, type ApexData } from "../extract/automation.ts";
 import { apexSourceStore } from "../extract/apex-source.ts";
-import { codeLintExtractor, type CodeLintTools } from "../extract/code-lint.ts";
+import { codeLintExtractor, type CodeLintData, type CodeLintTools } from "../extract/code-lint.ts";
+import { notRun } from "../extract/lint/findings.ts";
+import { LINT_TOTALS_FILE, lintTotals } from "../extract/lint/totals.ts";
 import { componentChangesExtractor, type ComponentChangesData } from "../extract/component-changes.ts";
 import type { MetadataBundle } from "../extract/metadata-parse.ts";
 import { fieldDescribeExtractor } from "../extract/fields.ts";
@@ -89,6 +91,9 @@ export type RunOptions = {
    */
   codeLint?: CodeLintTools;
 };
+
+/** What the lint findings say when the step itself failed: our words, never the error's. */
+export const LINT_STEP_FAILED = "PMD's step failed, so nothing it found was kept.";
 
 export type RunResult = { run: Run; dir: string; output: AnalysisOutput | null };
 
@@ -306,6 +311,8 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
       // section, and the run goes on; a later delivery tries it again (DECISIONS.md 609).
       // The same for PMD and ESLint's step: a run never fails because a linter did (DECISIONS.md 670).
       if (inventorySteps.includes(extractor) || lintSteps.includes(extractor)) {
+        // The lint findings then say PMD didn't run, rather than show nothing as on a scan (DECISIONS.md 673).
+        if (lintSteps.includes(extractor)) extracts.set(extractor.id, { pmd: notRun("pmd", LINT_STEP_FAILED), eslint: notRun("eslint", LINT_STEP_FAILED) } satisfies CodeLintData);
         await saveRun();
         log(`  ${extractor.id}: failed, and the run carries on without it`);
         continue;
@@ -329,6 +336,18 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
       rmSync(join(dir, INVENTORY_FILE), { force: true, recursive: true });
       // The error's class alone: its message could name a path or quote what the org gave.
       log(`  The inventory couldn't be written (${errorClass(err)}), so the run has none.`);
+    }
+  }
+  // Every PMD rule's counts for the benchmark, with no name in them, kept as long
+  // as the findings (DECISIONS.md 673). Only on a run that had the step; a fault
+  // here costs only the file.
+  if (lintSteps.length > 0) {
+    const path = join(dir, LINT_TOTALS_FILE);
+    try {
+      writeJson(path, lintTotals(extracts.get(codeLintExtractor.id) as CodeLintData));
+    } catch (err) {
+      rmSync(path, { force: true });
+      log(`  PMD's totals couldn't be kept (${errorClass(err)}), so the run has none.`);
     }
   }
   // How big and tangled the build is, beside the health score and never part

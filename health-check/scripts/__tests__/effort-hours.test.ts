@@ -48,11 +48,14 @@ describe("the hours table exported for the owner's review (decision 628)", () =>
   test("the owner's trim (decision 636): every high end, rate and cap is about 88% of the recorded one, rounded as stated, or named as too small to round down", () => {
     type Old = { low: number; high: number } | { minutesLow: number; minutesHigh: number; capHours: number };
     const before = (JSON.parse(readFileSync(fileURLToPath(new URL("../../fixtures/effort-hours-pretrim.json", import.meta.url)), "utf8")) as { rules: Record<string, Old> }).rules;
-    assert.deepEqual(Object.keys(before).sort(), Object.keys(committed.rules).sort());
+    // Rules added after the trim were estimated after it, so only these are new since (DECISIONS.md 673).
+    assert.deepEqual(Object.keys(committed.rules).filter((id) => !(id in before)).sort(), [...ADDED_AFTER_TRIM].sort());
+    assert.ok(Object.keys(before).every((id) => id in committed.rules));
     const trimmed = (old: number, floor: number): number => Math.max(floor, Math.round(old * 0.88));
     const trimmedMinutes = (old: number, floor: number): number => Math.max(floor, 5 * Math.round((old * 0.88) / 5));
     const unchanged: string[] = [];
     for (const [id, now] of Object.entries(committed.rules)) {
+      if (ADDED_AFTER_TRIM.includes(id)) continue;
       const old = before[id]!;
       if ("basis" in now) {
         assert.ok("high" in old && now.low === old.low, id);
@@ -69,7 +72,7 @@ describe("the hours table exported for the owner's review (decision 628)", () =>
     }
     // Too small to round down: a high of 2, 3 or 4 hours stays where it was.
     assert.deepEqual(unchanged.sort(), UNCHANGED_BY_ROUNDING);
-    assert.equal(Object.keys(committed.rules).length - unchanged.length, 80);
+    assert.equal(Object.keys(committed.rules).length - ADDED_AFTER_TRIM.length - unchanged.length, 80);
   });
 
   test("a changed figure makes the file stale", () => {
@@ -79,6 +82,9 @@ describe("the hours table exported for the owner's review (decision 628)", () =>
     assert.notEqual(effortHoursText(changed), text);
   });
 });
+
+/** PMD's six groups (decision 673), first estimated after the trim. */
+const ADDED_AFTER_TRIM: readonly string[] = ["tech.lint-complexity", "tech.lint-data-access", "tech.lint-injection", "tech.lint-limits", "tech.lint-swallowed-errors", "tech.lint-tests"];
 
 /** The 44 rules whose figures 88% rounds back to themselves (decision 636). */
 const UNCHANGED_BY_ROUNDING = [

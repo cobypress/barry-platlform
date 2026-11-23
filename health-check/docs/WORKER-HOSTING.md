@@ -44,7 +44,7 @@ Leave it unset until both of these are done:
 
 ### PMD for the Apex code (off until installed)
 
-Each health check runs PMD over the org's Apex classes and triggers beside our own scan, and stores where each finding is and which rule it broke, never a line of the code (DECISIONS.md 670). Nothing a customer sees uses it yet. PMD is Java, and Render's Node runtime has no Java, so until both are installed every health check records "PMD isn't installed on this worker." and makes no extra Salesforce call. With them, each health check spends a few more calls reading the Apex code again (one per page of classes and of triggers).
+Each health check runs PMD over the org's Apex classes and triggers beside our own scan, and stores where each finding is and which rule it broke, never a line of the code (DECISIONS.md 670). Six chosen groups of its findings are shown in technical health, scored by nothing yet, and every rule's counts are kept for the benchmark (673); without PMD those six say the check couldn't be made. PMD is Java, and Render's Node runtime has no Java, so until both are installed every health check records "PMD isn't installed on this worker." and makes no extra Salesforce call. With them, each health check spends a few more calls reading the Apex code again (one per page of classes and of triggers).
 
 To install it, add this to the end of the build command (one line, after `npx playwright install --only-shell chromium`). It downloads PMD 7.29.0 and a Java 21 runtime into `health-check/.tools`, and stops the build if either file isn't the one we checked:
 

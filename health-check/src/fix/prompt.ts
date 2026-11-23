@@ -153,7 +153,7 @@ function neutral(text: Marked, withheld: readonly Subject[]): Marked {
  */
 export const ENGINE_SUBJECT_TYPES: ReadonlySet<string> = new Set([
   ...PERSON_OR_RECORD, ...LISTABLE,
-  "allowance", "campaign type", "closed quarter", "dashboard", "group", "how it's granted", "installed app", "lead source", "origin", "owner type",
+  "allowance", "apex trigger", "campaign type", "closed quarter", "dashboard", "group", "how it's granted", "installed app", "lead source", "origin", "owner type",
   "priority", "rep", "s-control", "source", "storage", "team", "type",
 ]);
 

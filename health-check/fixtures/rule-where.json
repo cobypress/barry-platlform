@@ -464,6 +464,24 @@
   "tech.governor-limit-risk": {
     "version": 1
   },
+  "tech.lint-complexity": {
+    "version": 1
+  },
+  "tech.lint-data-access": {
+    "version": 1
+  },
+  "tech.lint-injection": {
+    "version": 1
+  },
+  "tech.lint-limits": {
+    "version": 1
+  },
+  "tech.lint-swallowed-errors": {
+    "version": 1
+  },
+  "tech.lint-tests": {
+    "version": 1
+  },
   "tech.storage-use": {
     "version": 3,
     "where": [

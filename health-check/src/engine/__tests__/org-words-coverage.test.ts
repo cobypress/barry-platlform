@@ -10,6 +10,7 @@ import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
 import { UNCALIBRATED_STAGES } from "../../testing/synthetic-org.ts";
 import { spansIfCurrent } from "../org-words.ts";
 import { UNCONVERTED_RULES } from "./unconverted-rules.ts";
+import { LINT_RULE_IDS } from "../../domains/technical-health/lint.ts";
 import { FIX_TABLE } from "../../fix/table.ts";
 import { assemblePrompt } from "../../fix/prompt.ts";
 
@@ -106,13 +107,15 @@ describe("rules writing their sentences with said (decisions 655 and 657)", () =
   test("every rule on the unconverted list exists", () => {
     const ids = new Set(ALL_MODULES.flatMap((m) => m.rules.map((r) => r.id)));
     for (const id of UNCONVERTED_RULES) assert.ok(ids.has(id), id);
-    assert.equal(ids.size, 127);
+    // 127, and PMD's six groups (decision 673).
+    assert.equal(ids.size, 133);
   });
 
   test("a rule not on the list has its title, summary and recommendation marked; only an extract's reason passed on stays unknown", () => {
     const converted = findings.filter((f) => !UNCONVERTED_RULES.has(f.ruleId));
     // Every converted rule writes at least one finding on the synthetic org, so each is held here.
-    const ids = ALL_MODULES.flatMap((m) => m.rules.map((r) => r.id)).filter((id) => !UNCONVERTED_RULES.has(id));
+    // PMD's six groups write nothing without the code-lint step, which the recording has none of: lint-findings.test.ts holds their marks (decision 673).
+    const ids = ALL_MODULES.flatMap((m) => m.rules.map((r) => r.id)).filter((id) => !UNCONVERTED_RULES.has(id) && !LINT_RULE_IDS.includes(id));
     assert.deepEqual([...new Set(converted.map((f) => f.ruleId))].sort(), ids.sort());
     assert.ok(uncalibrated.some((f) => f.ruleId === "pipe.unmapped-stages" && f.status === "issue"), "the stages the calibration leaves out are listed");
     for (const f of [...converted, ...uncalibrated.filter((f) => !UNCONVERTED_RULES.has(f.ruleId))]) {

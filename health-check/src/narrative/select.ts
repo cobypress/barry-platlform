@@ -1,5 +1,6 @@
 import { SALES_CLOUD_DOMAINS, type Finding, type NotMeasurableKind, type Run, type Score } from "../schemas/index.ts";
 import { NOT_MONEY_RULES } from "../value/model.ts";
+import { UNSCORED_RULES } from "../domains/scoring.ts";
 import { tokenSource } from "../privacy/pseudonymiser.ts";
 import { hasKinds, kindCounts } from "./unmeasured.ts";
 
@@ -221,7 +222,8 @@ export function buildPlan(findings: Finding[], added?: Added): Plan {
 export type Verdict = { headline: string; critical: number; high: number; issues: number };
 
 export function verdictOf(findings: Finding[]): Verdict {
-  const issues = issuesOf(findings);
+  // Shown and not scored (DECISIONS.md 673): the code checker's groups don't move the headline yet.
+  const issues = issuesOf(findings).filter((f) => !UNSCORED_RULES.has(f.ruleId));
   const critical = issues.filter((f) => f.severity === "critical").length;
   const high = issues.filter((f) => f.severity === "high").length;
   const headline = critical > 0 ? "Urgent action needed" : high > 0 ? "Significant issues to fix" : issues.length > 0 ? "Sound, with issues to fix" : "No material issues found";
@@ -289,7 +291,7 @@ export function scorecard(findings: Finding[], scores: Score[], areas: string[] 
     const own = findings.filter((f) => f.domain === domain);
     const issues = own.filter((f) => f.status === "issue");
     const score = scores.find((s) => s.domain === domain);
-    const base = { domain, label: domainLabel(domain), assessed: own.length > 0, issues: issues.length, high: issues.filter((f) => f.severity === "critical" || f.severity === "high").length };
+    const base = { domain, label: domainLabel(domain), assessed: own.length > 0, issues: issues.length, high: issues.filter((f) => (f.severity === "critical" || f.severity === "high") && !UNSCORED_RULES.has(f.ruleId)).length };
     if (score?.status === "measured") return { ...base, score: score.score, note: "" };
     if (score) return { ...base, score: null, note: score.reason, ...(score.notMeasurableKind ? { notMeasurableKind: score.notMeasurableKind } : {}) };
     return { ...base, score: null, note: own.length ? "Not scored in this run" : "Not assessed in this run" };

@@ -4,6 +4,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { technicalHealthModule } from "../../domains/technical-health/index.ts";
+import { LINT_RULE_IDS } from "../../domains/technical-health/lint.ts";
 import { runHealthCheck, type RunOptions } from "../../engine/run.ts";
 import { BudgetStopError } from "../../salesforce/budget.ts";
 import { SalesforceError } from "../../salesforce/client.ts";
@@ -385,6 +386,11 @@ describe("the code-lint step", () => {
     const some = ran((await codeLintExtractor.run(context(rows, { pmd, pmdOptions: { tempBase: temp } }, [], refuse("ApexTrigger")))).pmd);
     assert.equal(some.found, 4);
     assert.deepEqual(some.limits, ["Apex triggers couldn't be read, so only classes were checked: ApexTrigger isn't available in this org, or to the connected user."]);
+    // The kind it couldn't read is recorded, so checks of only that kind aren't passed (decision 673, fix round 1).
+    assert.deepEqual(some.unread, ["trigger"]);
+    // Classes the org has, none of which reached PMD (each too large): unread too.
+    const big = ran((await codeLintExtractor.run(context({ classes: [{ Name: "Big", Body: APEX_ENORMOUS }], triggers: [{ Name: "AccountTrigger", Body: TRIGGER_WITH_HIT }] }, { pmd, pmdOptions: { tempBase: temp } }))).pmd);
+    assert.deepEqual(big.unread, ["class"]);
     const none = (soql: string): Error | undefined => refuse("ApexClass")(soql) ?? refuse("ApexTrigger")(soql);
     assert.equal(notRunReason((await codeLintExtractor.run(context(rows, { pmd, pmdOptions: { tempBase: temp } }, [], none))).pmd), "The Apex code couldn't be read: ApexClass isn't available in this org, or to the connected user.");
   });
@@ -425,14 +431,14 @@ describe("in a run", () => {
     ...extra,
   });
 
-  test("off, a run has no such step; on, it is a step of its own, version 1, stored in the checkpoints, with nothing of the code in it or in the log", async () => {
+  test("off, a run has no such step; on, it is a step of its own, version 2, stored in the checkpoints, with nothing of the code in it or in the log", async () => {
     const off = await runHealthCheck(options(tempDir()));
     assert.ok(!off.run.steps.some((s) => s.id === "code-lint"));
     const { temp, pmd } = setup();
     const lines: string[] = [];
     const on = await runHealthCheck(options(tempDir(), { codeLint: { pmd, pmdOptions: { tempBase: temp } }, log: (l) => lines.push(l) }));
     const step = on.run.steps.find((s) => s.id === "code-lint")!;
-    assert.deepEqual([step.status, step.version], ["done", 1]);
+    assert.deepEqual([step.status, step.version], ["done", 2]);
     const stored = readFileSync(join(on.dir, "checkpoints", "code-lint.json"), "utf8");
     const data = JSON.parse(stored) as CodeLintData;
     assert.equal(data.pmd.status, "ran");
@@ -445,8 +451,13 @@ describe("in a run", () => {
       assert.ok(!stored.includes(line), `a line of code is stored: ${line}`);
       assert.ok(!lines.join("\n").includes(line), `a line of code is logged: ${line}`);
     }
-    // Only stores: what a customer sees is the same with it off.
-    for (const file of ["findings.json", "metrics.json", "scores.json"]) assert.equal(readFileSync(join(on.dir, file), "utf8").replace(/hc-\d{4}-\d{2}-\d{2}-[0-9a-f]{8}/g, ""), readFileSync(join(off.dir, file), "utf8").replace(/hc-\d{4}-\d{2}-\d{2}-[0-9a-f]{8}/g, ""));
+    // What it adds a customer sees is PMD's six groups alone (decision 673): every other finding, every metric and every score is the same with it off.
+    const strip = (text: string): string => text.replace(/hc-\d{4}-\d{2}-\d{2}-[0-9a-f]{8}/g, "");
+    for (const file of ["metrics.json", "scores.json"]) assert.equal(strip(readFileSync(join(on.dir, file), "utf8")), strip(readFileSync(join(off.dir, file), "utf8")));
+    const findings = (dir: string) => JSON.parse(strip(readFileSync(join(dir, "findings.json"), "utf8"))) as Array<{ ruleId: string }>;
+    assert.deepEqual(findings(on.dir).filter((f) => !LINT_RULE_IDS.includes(f.ruleId)), findings(off.dir));
+    assert.deepEqual(findings(on.dir).filter((f) => LINT_RULE_IDS.includes(f.ruleId)).map((f) => f.ruleId), [...LINT_RULE_IDS]);
+    assert.ok(!findings(off.dir).some((f) => LINT_RULE_IDS.includes(f.ruleId)));
     assert.deepEqual(lintTemps(temp), []);
   });
 

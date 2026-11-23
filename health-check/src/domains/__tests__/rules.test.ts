@@ -16,6 +16,10 @@ import { USER_GUARD_IDS } from "../../guards/user-guards.ts";
 import type { Rule, RuleResult } from "../../engine/rule.ts";
 import { DESTRUCTIVE_RECOMMENDATIONS } from "../../schemas/index.ts";
 import { plainWords } from "../../render/format.ts";
+import { codeLintExtractor } from "../../extract/code-lint.ts";
+import { notRun } from "../../extract/lint/findings.ts";
+import { PMD_NOT_INSTALLED } from "../../extract/lint/pmd.ts";
+import { NO_JAVASCRIPT } from "../../extract/lint/eslint.ts";
 
 let extracts: Map<string, unknown>;
 let tokenOf: (n: number) => string;
@@ -48,7 +52,8 @@ describe("the rule set", () => {
   });
 
   test("every rule produced at least one finding", () => {
-    const { findings } = analyseExtracts(extracts);
+    // PMD's groups give a finding only on a run that had the code-lint step (decision 673), so it's planted here as not run.
+    const { findings } = analyseExtracts(new Map([...extracts, [codeLintExtractor.id, { pmd: notRun("pmd", PMD_NOT_INSTALLED), eslint: notRun("eslint", NO_JAVASCRIPT) }]]));
     for (const rule of SALES_CLOUD_MODULES.flatMap((m) => m.rules)) assert.ok(byRule(findings, rule.id).length > 0, rule.id);
   });
 
