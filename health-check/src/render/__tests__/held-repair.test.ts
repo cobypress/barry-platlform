@@ -350,6 +350,18 @@ describe("every string the stored data holds is masked or named as never printed
     });
   };
 
+  test("a finding with any mask has no fix prompt, nor that prompt's marks: it was made from the words as read", () => {
+    const f = structuredClone(input.findings.find((x) => x.status === "issue")!);
+    f.owner = `${INVENTED} team`;
+    f.fixPrompt = "Fix the thing this finding names.";
+    f.orgWords = { ...(f.orgWords ?? {}), fixPrompt: { spans: [], textSha256: "a".repeat(64) } };
+    const masked = maskInput({ ...input, findings: [f] }, [INVENTED]).input.findings[0]!;
+    assert.equal(masked.fixPrompt, undefined);
+    assert.equal((masked.orgWords as Record<string, unknown> | undefined)?.fixPrompt, undefined);
+    // Unmasked, it keeps both.
+    assert.equal(maskInput({ ...input, findings: [f] }, ["Q7Nothing"]).input.findings[0]!.fixPrompt, f.fixPrompt);
+  });
+
   for (const [kind, rows] of [["finding", input.findings], ["metric", input.metrics], ["step", input.manualSteps]] as const) {
     test(`every ${kind} string field the stored data has is on one list`, () => {
       const seen = new Set<string>();
