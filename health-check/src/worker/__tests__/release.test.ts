@@ -274,10 +274,10 @@ describe("a hold in the memory store, held to the console's own checks", () => {
 
 type Handler = (text: string, values: unknown[]) => SqlResult | undefined;
 class FakePool implements SqlPool {
-  readonly statements: Array<{ text: string; values: unknown[] }> = [];
+  readonly statements: Array<{ text: string; values: unknown[]; client?: true }> = [];
   readonly handlers: Handler[] = [(text) => (text.includes("FOR UPDATE") ? { rows: [{ status: "analysing" }], rowCount: 1 } : undefined)];
-  async query(text: string, values: unknown[] = []): Promise<SqlResult> {
-    this.statements.push({ text, values });
+  async query(text: string, values: unknown[] = [], client = false): Promise<SqlResult> {
+    this.statements.push({ text, values, ...(client ? { client: true as const } : {}) });
     for (const h of this.handlers) {
       const r = h(text, values);
       if (r) return r;
@@ -285,7 +285,7 @@ class FakePool implements SqlPool {
     return { rows: [], rowCount: 1 };
   }
   async connect(): Promise<SqlClient & { release(): void }> {
-    return { query: (t, v) => this.query(t, v), release: () => {} };
+    return { query: (t, v) => this.query(t, v, true), release: () => {} };
   }
   texts(): string[] {
     return this.statements.map((s) => s.text);
@@ -308,6 +308,8 @@ describe("the Postgres store's release and hold", () => {
     assert.match(RELEASE_ROW_SQL, /VALUES \(\$1, \$2, \$3, \$4::text\[\], 'automatic', NULL, \$5::timestamp\(3\)\)/);
     for (const s of pool.statements.filter((x) => x.text === RELEASE_ROW_SQL)) assert.equal(s.values.length, 5);
     assert.match(RELEASE_RUN_SQL, /"reviewMode" = 'automatic'/);
+    // Every one of them on the transaction's own connection, never the pool's.
+    for (const s of pool.statements.filter((x) => [RUN_DIGEST_SQL, RELEASE_ROW_SQL, RELEASE_RUN_SQL].includes(x.text))) assert.equal(s.client, true, s.text);
   });
 
   test("a digest the database refuses, or a run it doesn't have as automatic, rolls the whole save back", async () => {
