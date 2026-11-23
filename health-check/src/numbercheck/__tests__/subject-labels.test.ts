@@ -16,7 +16,7 @@ import type { Finding } from "../../schemas/index.ts";
 // data where the dataset is built, so a run already made is covered when its
 // documents are made again from its stored findings.
 
-const LABELS = ["Old Opportunity Layout: Sales Id 04a000000000001", "Partner Lead Layout v2", "Web2Lead Layout"];
+const LABELS = ["Old Opportunity Layout: Sales Id 04a000000000001", "Partner Lead Layout v2", "Web2Lead Layout 4321"];
 
 const { dir: recorded } = await runFromRecording();
 
@@ -38,7 +38,7 @@ describe("letters-and-digits words in an org-chosen label are in the data", () =
   const report = buildReport(loadRun(dir).input);
 
   test("an id-shaped word, a version and a mixed word from layout names trace wherever a page prints them, whole or in part", () => {
-    const page = "Layouts nobody sees | Old Opportunity Layout: Sales | Id 04a000000000001 | Partner Lead Layout | v2 | Web2Lead Layout";
+    const page = "Layouts nobody sees | Old Opportunity Layout: Sales | Id 04a000000000001 | Partner Lead Layout | v2 | Web2Lead Layout 4321";
     assert.deepEqual(checkNumbers(page, report.dataset).unmatched, []);
     // Whole, as the label masks it.
     assert.deepEqual(checkNumbers(LABELS.join(", "), report.dataset).unmatched, []);

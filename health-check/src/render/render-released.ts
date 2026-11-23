@@ -5,13 +5,15 @@ import type { BenchmarkInput } from "../benchmark/compare.ts";
 import { buildMicrositePages, type MicrositePages } from "../microsite/pages.ts";
 import type { Intake } from "../narrative/intake.ts";
 import type { OverrideRefusal } from "../narrative/overrides.ts";
-import { buildReport, surveyMetricsOf, type BuiltReport, type ReportOutputKey } from "../narrative/sections.ts";
+import { buildReport, currentBody, surveyMetricsOf, type BuiltReport, type ReportOutputKey } from "../narrative/sections.ts";
+import { checkNumbers, extractFigures, type FigureSet } from "../numbercheck/index.ts";
+import { escapeXml, plainWords, ukDates } from "./format.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { canRelease, type Metric, type NumberOverride, type ReportSection, type SectionVersion } from "../schemas/index.ts";
 import type { LayoutProblem, LayoutReport } from "./layout.ts";
 import { renderCaseStudyDocx } from "./case-study.ts";
 import { writeFileSync } from "node:fs";
-import { loadRun, OUTPUT_FILES, printDocuments } from "./render-run.ts";
+import { loadRun, OUTPUT_FILES, pageDataset, printDocuments, type PrintedLayout } from "./render-run.ts";
 import { writeActionFiles } from "../actions/index.ts";
 import { buildDigest } from "../digest/build.ts";
 import type { RunDigest } from "../schemas/digest.ts";
@@ -49,7 +51,7 @@ export type ReleasedDocuments = {
   files: Record<DocumentKey, string>;
   /** What the layout checks found. The files are still written, for a person to look over. */
   warnings: string[];
-  /** Each figure the number check couldn't trace on a printed page. Any at all holds the documents back (DECISIONS.md 430). */
+  /** Each figure the number check couldn't trace on a printed page once the make has repaired what it can (DECISIONS.md 682), with the section whose text holds it. Any at all holds the documents back (DECISIONS.md 430). */
   held: HeldFigure[];
   /** The customer microsite's pages, or why they couldn't be made. Left out by renderers that don't make them. */
   microsite?: { ok: true; pages: MicrositePages } | { ok: false; reason: string };
@@ -65,6 +67,10 @@ export type ReleasedDocuments = {
   digest?: { ok: true; digest: RunDigest } | { ok: false; error: string };
   /** The team survey's metrics as the printed report made them, for the run's stored metrics (DECISIONS.md 645). Left out by renderers that don't say. */
   surveyMetrics?: Metric[];
+  /** Sections printed in the engine's own wording because a figure in their approved text couldn't be traced (DECISIONS.md 682). Left out by renderers that don't repair. */
+  fellBack?: SectionFallback[];
+  /** What was left out of the engine's own text or a table, for us (DECISIONS.md 682). Left out by renderers that don't repair. */
+  leftOut?: LeftOut[];
 };
 
 /**
@@ -78,7 +84,38 @@ export type RefusedDocuments = { refused: OverrideRefusal[] };
  * when what the number check flagged wasn't a plain figure, so `figure` says
  * "an identifier" in its place.
  */
-export type HeldFigure = { document: string; page: number; figure: string; reason: string; masked?: true };
+export type HeldFigure = { document: string; page: number; figure: string; reason: string; masked?: true; section?: string };
+
+/**
+ * A section printed in the engine's own wording in place of the approved text,
+ * because a figure in that text couldn't be traced (DECISIONS.md 682). Claude's
+ * draft gives kinds and counts only. A consultant's edit also gives the words
+ * that failed, which the consultant typed and may be shown; the edit itself is
+ * untouched in the console, kept aside, never rewritten.
+ */
+export type SectionFallback = {
+  output: ReportOutputKey;
+  key: string;
+  title: string;
+  source: "claude_draft" | "claude_proposal" | "consultant_edit";
+  /** How many figures of each kind couldn't be traced: "identifier: 1". */
+  kinds: Record<string, number>;
+  /** A consultant's edit only: the words that couldn't be traced. */
+  words?: string[];
+};
+
+/**
+ * Something in the engine's own text or a table that couldn't be traced, left
+ * out of the page with LEFT_OUT_SENTENCE in its place: our defect, recorded for
+ * us with the rule and field where a finding's text holds it, never the figure.
+ */
+export type LeftOut = { document: string; page: number; kind: string; ruleId?: string; field?: string };
+
+/** What stands in a page for a sentence of ours that couldn't be traced (DECISIONS.md 682). No figure, so it can't be held itself. */
+export const LEFT_OUT_SENTENCE = "We've left a detail out here because we couldn't trace it to your data.";
+
+/** How many times the pages are printed again with what couldn't be traced left out. */
+export const REPAIR_ROUNDS = 2;
 
 const DOCUMENT_NAMES = { executive: "The executive summary", full: "The full health check", ceo: "The one page summary" } as const;
 
@@ -157,7 +194,29 @@ export function heldFigures(layout: Layouts): HeldFigure[] {
 
 /** Where each held figure is, and why, in the words the error and the log use. */
 export function describeHeld(held: HeldFigure): string {
-  return `${where(held.document, held.page)}: ${held.figure}${held.reason ? `: ${held.reason}` : ""}`;
+  return `${where(held.document, held.page)}${held.section ? `, in "${held.section}"` : ""}: ${held.figure}${held.reason ? `: ${held.reason}` : ""}`;
+}
+
+const quoted = (titles: string[]): string => [...new Set(titles)].map((t) => `"${t}"`).join(", ");
+
+/**
+ * What the console is told the make repaired (decision 682), one line each, in
+ * the documents' warnings: the sections that fell back, by title, and how many
+ * details were left out of our own text, by page. No figure from the data; a
+ * consultant's own words only, which they typed.
+ */
+export function repairWarnings(fellBack: SectionFallback[], leftOut: LeftOut[]): string[] {
+  const lines: string[] = [];
+  const drafts = fellBack.filter((f) => f.source !== "consultant_edit");
+  if (drafts.length) lines.push(`${drafts.length === 1 ? "1 section uses" : `${drafts.length} sections use`} our own wording because a figure in the draft couldn't be traced: ${quoted(drafts.map((f) => f.title))}. Ask for a new draft to try again.`);
+  for (const f of fellBack.filter((f) => f.source === "consultant_edit")) {
+    lines.push(`"${f.title}" uses our own wording because your edit's ${quoted(f.words ?? [])} couldn't be traced to the data. Your edit is kept: correct it, approve it again and make the documents again.`);
+  }
+  if (leftOut.length) {
+    const pages = [...new Set(leftOut.map((l) => where(l.document, l.page)))];
+    lines.push(`We left ${leftOut.length === 1 ? "1 detail" : `${leftOut.length} details`} out of our own text because ${leftOut.length === 1 ? "it" : "they"} couldn't be traced to the data: ${pages.join("; ")}. That's ours to fix.`);
+  }
+  return lines;
 }
 
 /**
@@ -184,13 +243,16 @@ export const BASELINE_ROWS_UNREAD = "the earlier health check's corrections coul
  * `baselineUnapproved` says so for the log. `baselineGone` (534) only where the
  * section is held: with none approved, nothing is lost.
  */
-export function approvedReport(dir: string, approved: ApprovedRun): { report: BuiltReport; pseudonyms: Pseudonymiser; baselineGone: boolean; baselineUnapproved: boolean } {
+export function approvedReport(dir: string, approved: ApprovedRun): { report: BuiltReport; pseudonyms: Pseudonymiser; baselineGone: boolean; baselineUnapproved: boolean; engineText: Map<string, string> } {
   const loaded = loadRun(dir);
   const { input, pseudonyms } = loaded;
   const held = approved.sections.some((s) => s.output === "raw_notes" && s.key === "progress");
   const baselineUnapproved = input.baseline != null && !held;
   const baselineGone = loaded.baselineGone && held;
   const report = buildReport({ ...input, ...(baselineUnapproved ? { baseline: null } : {}), overrides: approved.overrides, intake: approved.intake ?? input.intake, preparedBy: approved.preparedBy ?? null, benchmark: approved.benchmark ?? null });
+  // The engine's own text for each section, as built now: approved wording by construction (decision 682).
+  const engineText = new Map<string, string>();
+  for (const built of Object.values(report.outputs)) for (const section of built.sections) engineText.set(`${built.output}:${section.key}`, currentBody(built, section.key));
   for (const built of Object.values(report.outputs)) {
     const sections = approved.sections.filter((s) => s.output === built.output).sort((a, b) => a.order - b.order);
     if (!canRelease(sections).ok) throw new Error(`Not every section of the ${built.output.replace(/_/g, " ")} is approved, so no documents were made`);
@@ -200,7 +262,111 @@ export function approvedReport(dir: string, approved: ApprovedRun): { report: Bu
     built.sections = sections;
     built.versions = versions;
   }
-  return { report, pseudonyms, baselineGone, baselineUnapproved };
+  return { report, pseudonyms, baselineGone, baselineUnapproved, engineText };
+}
+
+/** A section's text as a page prints it, so it's checked as it will be read. */
+export const asPrinted = (body: string, pseudonyms: Pseudonymiser): string => plainWords(ukDates(pseudonyms.restore(body)));
+
+const kindsOf = (figures: string[], text: string, set: FigureSet): Record<string, number> => {
+  const { figures: read } = extractFigures(text, { labels: set.labels.map((l) => l.value) });
+  const kinds: Record<string, number> = {};
+  for (const raw of figures) {
+    const kind = read.find((f) => f.raw === raw)?.kind ?? "malformed";
+    kinds[kind] = (kinds[kind] ?? 0) + 1;
+  }
+  return kinds;
+};
+
+/**
+ * Decision 682, items 3 and 4. Each section whose approved text isn't the
+ * engine's is checked again as the page prints it, against the set the pages
+ * are checked with: the same function on the same text. One that fails is
+ * printed in the engine's own text for it, and said so. Changes the report in
+ * place; the console's versions are untouched.
+ */
+export function fallBackSections(report: BuiltReport, pseudonyms: Pseudonymiser, engineText: Map<string, string>, set: FigureSet): SectionFallback[] {
+  const fellBack: SectionFallback[] = [];
+  for (const built of Object.values(report.outputs)) {
+    for (const section of built.sections) {
+      const version = built.versions.find((v) => v.id === section.currentVersionId);
+      const engine = engineText.get(`${built.output}:${section.key}`);
+      if (!version || version.source === "engine" || engine === undefined) continue;
+      const printed = asPrinted(version.body, pseudonyms);
+      const outcome = checkNumbers(printed, set);
+      if (outcome.passed) continue;
+      const raws = outcome.unmatched.map((u) => u.raw);
+      const index = built.versions.indexOf(version);
+      built.versions[index] = { ...version, body: engine, source: "engine" };
+      fellBack.push({
+        output: built.output,
+        key: section.key,
+        title: section.title,
+        source: version.source,
+        kinds: kindsOf(raws, printed, set),
+        // Only what the consultant typed, as typed: never a name a token restored to on the page.
+        ...(version.source === "consultant_edit" ? { words: [...new Set(raws.filter((raw) => version.body.includes(raw)))] } : {}),
+      });
+    }
+  }
+  return fellBack;
+}
+
+const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * Decision 682, item 5: every sentence of the page's text that holds one of
+ * these figures, in its smallest unit (a sentence of a paragraph, a table
+ * cell, a list item, a chart label), replaced by LEFT_OUT_SENTENCE. Text in
+ * styles and scripts is left alone. A figure is matched as a whole word, an
+ * identifier in any case, as the check compares it.
+ */
+export function leaveOut(html: string, raws: string[]): string {
+  const patterns = [...new Set(raws)].filter((r) => r && r !== "(whole text)").map((raw) => new RegExp(`(?<![\\w.-])${escapeRegExp(escapeXml(raw))}(?![\\w-])`, "i"));
+  if (patterns.length === 0) return html;
+  const sentence = escapeXml(LEFT_OUT_SENTENCE);
+  const holds = (text: string): boolean => patterns.some((p) => p.test(text));
+  return html.replace(/(<(style|script)\b[\s\S]*?<\/\2>)|>([^<]+)(?=<)/gi, (whole, kept: string | undefined, _tag, text: string | undefined) => {
+    if (kept || text === undefined || !holds(text)) return whole;
+    const lead = /^\s*/.exec(text)![0];
+    const trail = /\s*$/.exec(text)![0];
+    // One fixed sentence for a run of sentences left out together.
+    const parts = text.trim().split(/(?<=[.!?])\s+/).map((part) => (holds(part) ? sentence : part));
+    return `>${lead}${parts.filter((part, i) => part !== sentence || parts[i - 1] !== sentence).join(" ")}${trail}`;
+  });
+}
+
+/**
+ * The figures still held, each with the title of the section whose printed
+ * text holds it, so the message names it (decision 682, item 6). Found by the
+ * figure as printed, which stays in the worker; only the title goes out.
+ */
+function withSections(layout: Layouts, report: BuiltReport, pseudonyms: Pseudonymiser): HeldFigure[] {
+  const raws = heldRaws(layout);
+  return heldFigures(layout).map((held, i) => {
+    const raw = raws[i]!.raw;
+    if (raw === "(whole text)") return held;
+    for (const built of Object.values(report.outputs)) {
+      for (const section of built.sections) if (asPrinted(currentBody(built, section.key), pseudonyms).includes(raw)) return { ...held, section: section.title };
+    }
+    return held;
+  });
+}
+
+/** The raw figure of each number check problem, unmasked, for the worker alone: it never leaves the run folder. */
+function heldRaws(layout: Layouts): Array<{ document: string; page: number; raw: string }> {
+  return problemsOf(layout)
+    .filter(({ problem }) => problem.check === NUMBER_CHECK)
+    .map(({ document, problem }) => ({ document, page: problem.page, raw: splitDetail(problem.detail).figure }));
+}
+
+const FINDING_FIELDS = ["title", "summary", "recommendation", "notMeasurableReason"] as const;
+
+/** Where a left-out figure came from, if a finding's own text holds it: its rule and field, never the figure. */
+function sourceOf(report: BuiltReport, raw: string): { ruleId?: string; field?: string } {
+  const pattern = new RegExp(`(?<![\\w.-])${escapeRegExp(raw)}(?![\\w-])`, "i");
+  for (const f of report.teamFindings) for (const field of FINDING_FIELDS) if (pattern.test(f[field] ?? "")) return { ruleId: f.ruleId, field };
+  return {};
 }
 
 export async function renderReleased(dir: string, approved: ApprovedRun, outDir: string): Promise<ReleasedDocuments | RefusedDocuments> {
@@ -208,7 +374,7 @@ export async function renderReleased(dir: string, approved: ApprovedRun, outDir:
   const out = resolve(outDir);
   assertOutsideGit(folder);
   assertOutsideGit(out);
-  const { report, pseudonyms, baselineGone, baselineUnapproved } = approvedReport(folder, approved);
+  const { report, pseudonyms, baselineGone, baselineUnapproved, engineText } = approvedReport(folder, approved);
   // Before anything is written: a refused make never leaves documents in the folder beside its failed row.
   if (report.refused.length > 0) return { refused: report.refused };
   mkdirSync(out, { recursive: true, mode: 0o700 });
@@ -221,14 +387,24 @@ export async function renderReleased(dir: string, approved: ApprovedRun, outDir:
     action_lists: join(out, OUTPUT_FILES.actionLists),
     tickets: join(out, OUTPUT_FILES.tickets),
   };
-  const layout = await printDocuments(report, pseudonyms, {
-    rawNotes: files.raw_notes,
-    executive: files.executive_summary,
-    full: files.full_health_check,
-    ceo: files.ceo_one_pager,
-    kit: files.readout_kit,
-    layout: join(out, OUTPUT_FILES.layout),
-  });
+  const set = pageDataset(report.dataset, pseudonyms);
+  // A section whose approved text can't be traced is printed in the engine's own text for it (decision 682).
+  const fellBack = report.refused.length ? [] : fallBackSections(report, pseudonyms, engineText, set);
+  const paths = { rawNotes: files.raw_notes, executive: files.executive_summary, full: files.full_health_check, ceo: files.ceo_one_pager, kit: files.readout_kit, layout: join(out, OUTPUT_FILES.layout) };
+  let layout: PrintedLayout = await printDocuments(report, pseudonyms, paths);
+  // What still can't be traced is in our own text or a table: left out, sentence by sentence, and printed again, twice at most.
+  const leftOut: LeftOut[] = [];
+  const raws: string[] = [];
+  for (let round = 0; round < REPAIR_ROUNDS; round++) {
+    const held = heldRaws(layout).filter((h) => h.raw !== "(whole text)" && !raws.includes(h.raw));
+    if (held.length === 0) break;
+    for (const h of held) {
+      raws.push(h.raw);
+      const kind = extractFigures(h.raw, { labels: set.labels.map((l) => l.value) }).figures[0]?.kind ?? "malformed";
+      leftOut.push({ document: h.document, page: h.page, kind, ...sourceOf(report, h.raw) });
+    }
+    layout = await printDocuments(report, pseudonyms, paths, (html) => leaveOut(html, raws));
+  }
   // Made from the same approved report, so they're under the same gate as the decks (rule 10).
   writeActionFiles(report, pseudonyms, folder, { workbook: files.action_lists, tickets: files.tickets });
   let microsite: ReleasedDocuments["microsite"];
@@ -249,5 +425,5 @@ export async function renderReleased(dir: string, approved: ApprovedRun, outDir:
       digest = { ok: false, error: err instanceof Error ? err.name : "Error" };
     }
   }
-  return { files, warnings: layoutWarnings(layout), held: heldFigures(layout), microsite, ...(caseStudy ? { caseStudy } : {}), ...(digest ? { digest } : {}), surveyMetrics: surveyMetricsOf(report), baselineRefused: report.baselineRefused, baselineGone, baselineUnapproved };
+  return { files, warnings: layoutWarnings(layout), held: withSections(layout, report, pseudonyms), fellBack, leftOut, microsite, ...(caseStudy ? { caseStudy } : {}), ...(digest ? { digest } : {}), surveyMetrics: surveyMetricsOf(report), baselineRefused: report.baselineRefused, baselineGone, baselineUnapproved };
 }

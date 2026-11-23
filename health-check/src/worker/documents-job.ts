@@ -5,7 +5,7 @@ import { refusalReason, refusalSummary } from "../narrative/overrides.ts";
 import type { BenchmarkInput } from "../benchmark/compare.ts";
 import { AlreadyContributed, CONSENT_FILE, contributeBenchmark } from "../benchmark/export.ts";
 import { longDate } from "../render/format.ts";
-import { baselineRefusedSummary, describeHeld, renderReleased, type DocumentKey, type HeldFigure, type ReleasedDocuments } from "../render/render-released.ts";
+import { baselineRefusedSummary, describeHeld, renderReleased, repairWarnings, type DocumentKey, type HeldFigure, type ReleasedDocuments } from "../render/render-released.ts";
 import { safeReason, type Attempt, type JobOutcome, type WorkerDeps } from "./deps.ts";
 import type { DocumentDrive, DriveItem } from "./drive.ts";
 import { withJobLock } from "./lock.ts";
@@ -311,7 +311,13 @@ export function heldBackReason(held: HeldFigure[]): string {
   const sentence = (text: string): string => (/[.!?]$/.test(text) ? text : `${text}.`);
   const listed = held.slice(0, HELD_LISTED).map((h) => sentence(describeHeld({ ...h, reason: safeReason(new Error(h.reason)).slice(0, HELD_REASON_MAX) })));
   const more = held.length > HELD_LISTED ? [`And ${held.length - HELD_LISTED} more.`] : [];
-  return [heldBackCount(held), ...listed, ...more, "Edit the wording in those sections, approve them again, and make the documents again."].map((line) => line.replace(/\s+/g, " ")).join("\n");
+  // Never "those sections" without naming one (decision 682, item 6).
+  const sections = [...new Set(held.flatMap((h) => (h.section ? [`"${h.section}"`] : [])))];
+  const todo = [
+    ...(sections.length ? [`Edit the wording in ${sections.join(", ")}, approve ${sections.length === 1 ? "it" : "them"} again, and make the documents again.`] : []),
+    ...(held.some((h) => !h.section) ? [`${sections.length ? "The rest are" : "These are"} in our own text, not in a section's wording, so they're ours to fix: tell Black Cloud.`] : []),
+  ];
+  return [heldBackCount(held), ...listed, ...more, ...todo].map((line) => line.replace(/\s+/g, " ")).join("\n");
 }
 
 /**
@@ -401,6 +407,13 @@ async function documentsLocked(runId: string, deps: WorkerDeps, attempt: Attempt
       log(`Run ${runId}'s documents weren't uploaded. ${summary}`);
       return fail(heldBackReason(printed.held), summary);
     }
+    // Repaired, not held (decision 682): a defect in our own text worked around is logged by run id, with rule ids only.
+    const leftOut = printed.leftOut ?? [];
+    if (leftOut.length) {
+      const rules = [...new Set(leftOut.flatMap((l) => (l.ruleId ? [`${l.ruleId} (${l.field})`] : [])))];
+      log(`Run ${runId}: worked around a defect: ${leftOut.length} untraceable ${leftOut.length === 1 ? "figure" : "figures"} in our own text left out${rules.length ? `, from ${rules.join(", ")}` : ", from fixed text or a table"}.`);
+    }
+    if (printed.fellBack?.length) log(`Run ${runId}: ${printed.fellBack.length} ${printed.fellBack.length === 1 ? "section" : "sections"} printed in our own wording because a figure in the approved text couldn't be traced.`);
     // Neither refused nor held: these rows are the ones the documents print. None, and nothing is written or removed.
     if (input.overrides.length > 0) keepOverrides(dir, input.overrides);
     const handbook = await makeHandbook(dir, join(dir, "documents"), clientName, input.run.asOf, summariesOn ? (handbookSummaries ?? null) : null, deps.renderHandbook);
@@ -440,7 +453,7 @@ async function documentsLocked(runId: string, deps: WorkerDeps, attempt: Attempt
     // None to write takes away an earlier make's, whose figures these documents may have corrected.
     const digest = printed.digest?.ok ? printed.digest.digest : null;
     // The survey's metrics as these documents print them, with their row: a run drafted before the run's results held them gets them now (DECISIONS.md 645).
-    const saved = await deps.store.saveDocuments(runId, { at: now(), clientName, folderName: folder.name, driveFolderId: folder.id, driveFolderUrl: folder.url, files, warnings: [...printed.warnings, ...(handbook.ok ? [] : [handbook.warning])] }, digest, printed.surveyMetrics);
+    const saved = await deps.store.saveDocuments(runId, { at: now(), clientName, folderName: folder.name, driveFolderId: folder.id, driveFolderUrl: folder.url, files, warnings: [...repairWarnings(printed.fellBack ?? [], leftOut), ...printed.warnings, ...(handbook.ok ? [] : [handbook.warning])] }, digest, printed.surveyMetrics);
     // The folder follows the rows, and only once they're written: a row the console moved on meanwhile changed neither.
     if (saved && printed.surveyMetrics) keepSurveyMetrics(dir, printed.surveyMetrics);
     log(`Documents for ${runId} are in Drive${printed.warnings.length ? `, with ${printed.warnings.length} layout warnings` : ""}.`);

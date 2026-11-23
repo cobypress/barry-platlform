@@ -1,5 +1,6 @@
 import { extractFigures, type Figure, type PartialDate } from "./extract.ts";
 import type { DatasetFigure, FigureSet } from "./dataset.ts";
+import { ENGINE_WORDS } from "./engine-words.ts";
 
 // Rule 1. Every figure in generated text must trace to the dataset, in the same
 // unit, or the text is rejected. It errs on the side of blocking: a false alarm
@@ -90,8 +91,12 @@ function checkOne(figure: Figure, figures: Figure[], set: FigureSet): string | n
   switch (figure.kind) {
     case "token":
       return set.tokens.some((t) => t.value === figure.raw) ? null : "this name token isn't in the data";
-    case "identifier":
-      return set.identifiers.some((i) => i.value === figure.raw.toLowerCase()) ? null : "this id isn't in the data";
+    case "identifier": {
+      const value = figure.raw.toLowerCase();
+      if (set.identifiers.some((i) => i.value === value)) return null;
+      // A word of the engine's own, never a web address, an email or an id (DECISIONS.md 682).
+      return figure.word && ENGINE_WORDS.has(value) ? null : "this id isn't in the data";
+    }
     case "date":
       return set.dates.some((d) => dateMatches(figure.date!, d)) ? null : "this date isn't in the data";
     case "magnitude":

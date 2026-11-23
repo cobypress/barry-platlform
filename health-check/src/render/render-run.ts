@@ -11,6 +11,7 @@ import type { NarrativeClient } from "../narrative/client.ts";
 import { Intake } from "../narrative/intake.ts";
 import { refusalReason, type OverrideRefusal } from "../narrative/overrides.ts";
 import { buildReport, type BuiltReport, type ReportInput } from "../narrative/sections.ts";
+import type { FigureSet } from "../numbercheck/index.ts";
 import { Pseudonymiser, type PseudonymEntry } from "../privacy/pseudonymiser.ts";
 import { Calibration, Finding, ManualStep, Metric, NumberOverride, Run, Score } from "../schemas/index.ts";
 import { EXECUTIVE_MAX_PAGES, executiveHtml, executiveMaxPages } from "./executive.ts";
@@ -251,6 +252,22 @@ export class OverridesRefused extends Error {
   }
 }
 
+/**
+ * The dataset a printed page is checked against: the report's, with each name
+ * its tokens stand for as a label (DECISIONS.md 682). A section is checked with
+ * a person's or an account's token in it, "[[account:A0001]]", and the page
+ * prints the name the token restores to, which the data holds only as the
+ * token: a name with a digit in it ("Unit4 Ltd") was then held on the page
+ * though its token passed. Only names with a letter and a digit, as a label
+ * only masks the whole name where it's printed, and a name of digits alone
+ * stays a figure to trace.
+ */
+export function pageDataset(set: FigureSet, pseudonyms: Pseudonymiser): FigureSet {
+  const tokens = new Set(set.tokens.map((t) => t.value));
+  const names = pseudonyms.entries().filter((e) => tokens.has(e.token) && /\p{L}/u.test(e.name) && /\d/.test(e.name));
+  return { ...set, labels: [...set.labels, ...names.map((e) => ({ source: e.token, value: e.name }))] };
+}
+
 export type PrintedLayout = { executive: LayoutReport; full: LayoutReport; ceo: LayoutReport };
 /** For the log, and `hc render`'s errors, when a re-check's draft read its earlier health check and a later build can't (DECISIONS.md 534). No path or error. */
 export const BASELINE_GONE = "the earlier health check can't be read now, so the documents have no comparison with it.";
@@ -298,14 +315,16 @@ export async function printDocuments(
   report: BuiltReport,
   pseudonyms: Pseudonymiser,
   paths: { rawNotes: string; executive: string; full: string; ceo: string; kit: string; layout: string },
+  /** Applied to each page's HTML before it's printed and checked: the documents job's repair (DECISIONS.md 682). */
+  transform: (html: string) => string = (html) => html,
 ): Promise<PrintedLayout> {
-  const scope = report.dataset;
+  const scope = pageDataset(report.dataset, pseudonyms);
   const browser = await launchBrowser();
   try {
-    const executive = await renderPdf(browser, executiveHtml(report, pseudonyms), { minPages: EXECUTIVE_PAGES.min, maxPages: executiveMaxPages(report), dataset: scope, carryOver: true });
-    const full = await renderPdf(browser, fullReportHtml(report, pseudonyms), { minPages: deckRangeFor(report.input.run).min, maxPages: deckRangeFor(report.input.run).max, dataset: scope, carryOver: true });
+    const executive = await renderPdf(browser, transform(executiveHtml(report, pseudonyms)), { minPages: EXECUTIVE_PAGES.min, maxPages: executiveMaxPages(report), dataset: scope, carryOver: true });
+    const full = await renderPdf(browser, transform(fullReportHtml(report, pseudonyms)), { minPages: deckRangeFor(report.input.run).min, maxPages: deckRangeFor(report.input.run).max, dataset: scope, carryOver: true });
     // Exactly one page, or it isn't a one-pager.
-    const ceo = await renderPdf(browser, onePagerHtml(report, pseudonyms), { minPages: ONE_PAGER_PAGES.min, maxPages: ONE_PAGER_PAGES.max, dataset: scope });
+    const ceo = await renderPdf(browser, transform(onePagerHtml(report, pseudonyms)), { minPages: ONE_PAGER_PAGES.min, maxPages: ONE_PAGER_PAGES.max, dataset: scope });
     const pagesMatch = (result: typeof executive, name: string): LayoutProblem[] => {
       const printed = pdfPageCount(result.pdf);
       return printed === result.layout.pages ? [] : [{ page: 0, check: "page count", detail: `${name} printed ${printed} pages from ${result.layout.pages}` }];
