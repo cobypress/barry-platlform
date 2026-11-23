@@ -447,6 +447,8 @@ const SIGNED_OFF: string[] = [
   "src/domains/historic-pipeline/process.ts: wait",
   "src/domains/historic-pipeline/process.ts: wait",
   "src/domains/historic-pipeline/process.ts: wonDays.length",
+  // A count of record types (DECISIONS.md 692), a number.
+  "src/domains/historic-pipeline/cohort.ts: n",
   // Sentences said made: a said or joinSaid result held in a variable, a helper or option returning one, plural over literal nouns, or a said form (each typed Said).
   "src/domains/historic-pipeline/cohort.ts: andList(items)",
   "src/domains/historic-pipeline/cohort.ts: stageList(stages)",
