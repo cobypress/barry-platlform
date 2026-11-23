@@ -242,7 +242,7 @@ function executiveHtmlWith(report: BuiltReport, pseudonyms: Pseudonymiser, words
   const { run, intake, calibration, scores = [], preparedBy } = report.input;
   const built = report.outputs.executive_summary;
   const refs = referenceMap(noteSections(report));
-  const base = renderContext(pseudonyms, calibration.currency, !canRelease(built.sections).ok, refs, yearlyByFinding(report.value), words);
+  const base = renderContext(pseudonyms, calibration.currency, !canRelease(built.sections, run.reviewMode).ok, refs, yearlyByFinding(report.value), words);
   // The last page lists every reference the summary used, so each tag is noted as it's printed.
   const used = new Set<string>();
   const r: Render = { ...base, ref: (id) => (used.add(id), base.ref(id)) };

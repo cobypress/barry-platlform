@@ -107,7 +107,7 @@ export function onePagerHtml(report: BuiltReport, pseudonyms: Pseudonymiser): st
 function onePagerHtmlWith(report: BuiltReport, pseudonyms: Pseudonymiser, words: CustomerWords): string {
   const { run, intake, calibration, preparedBy } = report.input;
   const built = report.outputs.executive_summary;
-  const r = renderContext(pseudonyms, calibration.currency, !canRelease(built.sections).ok, referenceMap(noteSections(report)), yearlyByFinding(report.value), words);
+  const r = renderContext(pseudonyms, calibration.currency, !canRelease(built.sections, run.reviewMode).ok, referenceMap(noteSections(report)), yearlyByFinding(report.value), words);
   const m = (n: number): string => compactMoney(n, report.value.currency);
   const customer = intake?.customerName ?? run.customerRef ?? "Customer";
   const o = report.overall;

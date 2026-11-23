@@ -14,7 +14,7 @@ import { readinessOf, VERDICT_WORDS, type Readiness } from "./readiness.ts";
 import { DOCUMENTED_METRIC_IDS } from "../domains/configuration/documented.ts";
 import { buildDataset, checkNumbers, scopeDataset, SOURCE, toNumberCheckResult, type FigureSet, type StructuralFigure } from "../numbercheck/index.ts";
 import { compactMoney, longDate, money, monthYear } from "../render/format.ts";
-import { BENCHMARK_MIN_GROUP, type Calibration, type Finding, type ManualStep, type Metric, type NumberOverride, type ReportSection, type Run, type Score, type SectionVersion } from "../schemas/index.ts";
+import { BENCHMARK_MIN_GROUP, calibrationConfirmation, type Calibration, type Finding, type ManualStep, type Metric, type NumberOverride, type ReportSection, type Run, type Score, type SectionVersion } from "../schemas/index.ts";
 import { ReportSection as ReportSectionSchema, SectionVersion as SectionVersionSchema } from "../schemas/index.ts";
 import type { SectionBrief } from "./draft.ts";
 import type { Intake } from "./intake.ts";
@@ -237,7 +237,7 @@ function severityCounts({ critical, high }: { critical: number; high: number }):
 function calibrationText(run: Run, c: Calibration, facts: string[] = []): string {
   return [
     `Analysis window: ${run.analysisWindow.from} to ${run.analysisWindow.to}.`,
-    `Calibration confirmed by ${c.confirmedBy} on ${c.confirmedAt.slice(0, 10)}.`,
+    `${calibrationConfirmation(c)}.`,
     `Record types in scope: ${c.scope.recordTypes === "all" ? "all" : c.scope.recordTypes.join(", ")}.`,
     `Stage meanings: ${c.stages.map((s) => `${s.name} (${s.category})`).join(", ")}.`,
     `A user counts as dormant after ${c.dormantDays} days without logging in.`,

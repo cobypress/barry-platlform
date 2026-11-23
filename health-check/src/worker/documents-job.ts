@@ -5,7 +5,8 @@ import { refusalReason, refusalSummary } from "../narrative/overrides.ts";
 import type { BenchmarkInput } from "../benchmark/compare.ts";
 import { AlreadyContributed, CONSENT_FILE, contributeBenchmark } from "../benchmark/export.ts";
 import { longDate } from "../render/format.ts";
-import { baselineRefusedSummary, describeHeld, renderReleased, repairWarnings, type DocumentKey, type HeldFigure, type ReleasedDocuments } from "../render/render-released.ts";
+import { CHECKED_OUTSIDE_AUTOMATIC, SectionsOfRun } from "../schemas/report.ts";
+import { AUTOMATIC_DOCUMENTS_NOT_BUILT, baselineRefusedSummary, describeHeld, renderReleased, repairWarnings, type DocumentKey, type HeldFigure, type ReleasedDocuments } from "../render/render-released.ts";
 import { safeReason, type Attempt, type JobOutcome, type WorkerDeps } from "./deps.ts";
 import type { DocumentDrive, DriveItem } from "./drive.ts";
 import { withJobLock } from "./lock.ts";
@@ -414,6 +415,10 @@ async function documentsLocked(runId: string, deps: WorkerDeps, attempt: Attempt
     await share({ grant: false });
     return { outcome: "failed", detail };
   };
+  // Never released today, so never here; but a row that says otherwise gets a plain refusal, not documents (DECISIONS.md 688).
+  if (input.run.reviewMode !== "consultant") return fail(AUTOMATIC_DOCUMENTS_NOT_BUILT);
+  const fit = SectionsOfRun.safeParse({ reviewMode: input.run.reviewMode, sections: input.sections });
+  if (!fit.success) return fail(fit.error.issues[0]?.message ?? CHECKED_OUTSIDE_AUTOMATIC);
   if (!deps.drive) return fail("Google Drive isn't set up on the worker. Set HC_DRIVE_SA_EMAIL, HC_DRIVE_SA_KEY and HC_DRIVE_FOLDER_ID, then make the documents again.");
   // The folder is the worker's own, named after the run, never a path from the database.
   const dir = join(deps.runsDir, runId);

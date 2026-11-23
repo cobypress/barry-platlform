@@ -13,7 +13,7 @@ import { inDocumentOrder } from "./html.ts";
 import { checkNumbers, extractFigures, type FigureSet } from "../numbercheck/index.ts";
 import { escapeXml, plainWords, ukDates } from "./format.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
-import { canRelease, type Metric, type NumberOverride, type ReportSection, type SectionVersion } from "../schemas/index.ts";
+import { assertSectionsFitRun, canRelease, type Metric, type NumberOverride, type ReportSection, type SectionVersion } from "../schemas/index.ts";
 import type { LayoutProblem, LayoutReport } from "./layout.ts";
 import { renderCaseStudyDocx } from "./case-study.ts";
 import { writeFileSync } from "node:fs";
@@ -251,6 +251,9 @@ export function baselineRefusedSummary(n: number): string {
     : `${n} corrected figures of the earlier health check can't be carried, so the comparison shows them as read.`;
 }
 
+/** Why no documents are made for an automatic run yet (DECISIONS.md 688): lane E3 builds them, once the owner has reworded rule 10. */
+export const AUTOMATIC_DOCUMENTS_NOT_BUILT = "An automatic run can't be made into documents yet: releasing without a person's approval isn't built";
+
 /** For the worker's log when a re-check is drafted, or a pulse built, without its earlier health check's corrections (DECISIONS.md 531). No path, error or figure. */
 export const BASELINE_ROWS_UNREAD = "the earlier health check's corrections couldn't be read, so the comparison shows its figures as read.";
 
@@ -272,6 +275,10 @@ export const BASELINE_ROWS_UNREAD = "the earlier health check's corrections coul
  */
 export function approvedReport(dir: string, approved: ApprovedRun, raws: string[] = []): { report: BuiltReport; pseudonyms: Pseudonymiser; baselineGone: boolean; baselineUnapproved: boolean; engineText: Map<string, string>; repairs: SourceRepair[] } {
   const loaded = loadRun(dir);
+  // Lane E3 builds an automatic run's documents; until then none is made, and a checked section never passes for approved (DECISIONS.md 688).
+  const mode = loaded.input.run.reviewMode;
+  if (mode !== "consultant") throw new Error(AUTOMATIC_DOCUMENTS_NOT_BUILT);
+  assertSectionsFitRun(mode, approved.sections);
   const { pseudonyms } = loaded;
   const held = approved.sections.some((s) => s.output === "raw_notes" && s.key === "progress");
   const baselineUnapproved = loaded.input.baseline != null && !held;
@@ -286,7 +293,7 @@ export function approvedReport(dir: string, approved: ApprovedRun, raws: string[
   const patterns: RegExp[] = raws.map((raw) => heldPattern(raw));
   for (const built of Object.values(report.outputs)) {
     const sections = approved.sections.filter((s) => s.output === built.output).sort((a, b) => a.order - b.order);
-    if (!canRelease(sections).ok) throw new Error(`Not every section of the ${built.output.replace(/_/g, " ")} is approved, so no documents were made`);
+    if (!canRelease(sections, mode).ok) throw new Error(`Not every section of the ${built.output.replace(/_/g, " ")} is approved, so no documents were made`);
     const current = new Set(sections.map((s) => s.currentVersionId));
     const versions = approved.versions.filter((v) => current.has(v.id));
     if (versions.length !== sections.length) throw new Error(`A section of the ${built.output.replace(/_/g, " ")} has no approved text, so no documents were made`);

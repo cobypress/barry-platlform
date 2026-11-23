@@ -46,6 +46,15 @@ export type RunScope = z.infer<typeof RunScope>;
 export const RetrieveFallback = z.object({ named: z.array(z.string()), reason: z.string() });
 export type RetrieveFallback = z.infer<typeof RetrieveFallback>;
 
+/**
+ * Who stands behind what the customer reads (DECISIONS.md 688). Consultant: a
+ * person approves every section and releases. Automatic: the machine checks
+ * decide, and no person's name is ever recorded for them. Releasing an
+ * automatic run isn't built: rule 10 holds until the owner rewords it.
+ */
+export const ReviewMode = z.enum(["consultant", "automatic"]);
+export type ReviewMode = z.infer<typeof ReviewMode>;
+
 export const Run = z.object({
   id: z.string().min(1),
   // A scan is the free set-up teaser (roadmap Stage 5): never reviewed, released or made into documents.
@@ -73,5 +82,7 @@ export const Run = z.object({
   finishedAt: Timestamp.nullable(),
   // Absent when the wider retrieve worked, or wasn't tried.
   retrieveFallback: RetrieveFallback.optional(),
+  // Every run stored before decision 688 was consultant-led, so absent reads as that.
+  reviewMode: ReviewMode.default("consultant"),
 });
 export type Run = z.infer<typeof Run>;

@@ -282,11 +282,11 @@ export function buildRawNotes(report: BuiltReport, pseudonyms: Pseudonymiser): N
   const { run, calibration, findings, metrics, manualSteps, overrides = [] } = report.input;
   const built = report.outputs.raw_notes;
   const notes = new Notes(pseudonyms);
-  const release = canRelease(built.sections);
+  const release = canRelease(built.sections, run.reviewMode);
 
   notes.heading("Black Cloud Barometer: raw notes", 1);
   notes.para(`Run ${run.id}. As of ${run.asOf.slice(0, 10)}. Rule set ${run.ruleSetVersion}. API version ${run.apiVersion}.`);
-  if (!release.ok) notes.blocks.push(new Paragraph({ spacing: { after: 160 }, children: [notes.run("Draft: not every section has been approved, so this document can't be released.", { bold: true, colour: hex(colour.alert) })] }));
+  if (!release.ok) notes.blocks.push(new Paragraph({ spacing: { after: 160 }, children: [notes.run(release.reason ? `Draft: ${release.reason}.` : "Draft: not every section has been approved, so this document can't be released.", { bold: true, colour: hex(colour.alert) })] }));
   notes.para("These notes are the working record behind the reports: every check we ran, what it found and how to reproduce it.");
   notes.para("Every figure in the executive summary and the full report carries a reference such as R4.3. R4 is section 4 of these notes, and R4.3 is the third item in it.");
   notes.para("The action lists come with these notes: a spreadsheet with a sheet for each issue about records, listing every record to fix with a link to it in Salesforce, and a ticket file with one ticket for each issue, ready to import into Jira or a similar tool. Both use the same references.");
