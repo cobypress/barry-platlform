@@ -115,6 +115,13 @@ export const DigestFinding = z.object({
    * is left out. Served only with its marks at `orgWords.fixPrompt`.
    */
   fixPrompt: z.string().min(1).max(FIX_PROMPT_MAX).optional(),
+  /**
+   * On an issue or a pass of the code checker's six groups only (DECISIONS.md
+   * 673): what it read and how many findings went to our own scan's checks, so a
+   * re-check calls a pass fixed only when as much was read and none went there.
+   * Counts only. Absent everywhere else, and when the finding's facts lack them.
+   */
+  checkerRead: z.object({ readClasses: z.number().int().nonnegative(), readTriggers: z.number().int().nonnegative(), alreadyListed: z.number().int().nonnegative() }).optional(),
   /** By sentence, the ones the engine can vouch for, with the org's characters marked (DECISIONS.md 655). */
   orgWords: z
     .object({
@@ -305,5 +312,5 @@ export const DIGEST_KEYS: ReadonlySet<string> = new Set([
   "definition", "n", "dateRange", "from", "to", "exclusions", "currency", "total", "byKind", "revenue_recoverable", "conversion_uplift", "licence_waste",
   "time_cost", "exposure", "groups", "lines", "leftOut", "realisation", "counted", "lineIds", "low", "expected", "high", "group", "annual", "added",
   "phases", "later", "quickWins", "alsoFor", "key", "effortHours", "basis", "partial", "timeBand", "fixComplexity", "hoursTotal", "partialFindingIds", "withoutHoursFindingIds", "notTotalledFindingIds", "note",
-  "orgWords", "orgWordsMarked", "start", "end", "valueReason", "valueAssumptions", "hoursBasis", "fixPrompt", "textSha256",
+  "checkerRead", "readClasses", "readTriggers", "alreadyListed", "orgWords", "orgWordsMarked", "start", "end", "valueReason", "valueAssumptions", "hoursBasis", "fixPrompt", "textSha256",
 ]);

@@ -125,8 +125,18 @@ function digestFinding(f: Finding): DigestFinding {
     ...(f.timeBand ? { timeBand: f.timeBand } : {}),
     ...(f.fixComplexity ? { fixComplexity: f.fixComplexity } : {}),
     ...fixPromptOf(f),
+    ...checkerReadOf(f),
     ...orgWordsOf(f),
   };
+}
+
+/** What the code checker read, for one of its six groups' issues and passes only (DECISIONS.md 673): the console's re-check needs it. */
+function checkerReadOf(f: Finding): { checkerRead?: DigestFinding["checkerRead"] } {
+  if (!UNSCORED_RULES.has(f.ruleId) || f.status === "not_measurable") return {};
+  const { readClasses, readTriggers, alreadyListed } = f.facts;
+  const count = (n: number | undefined): n is number => typeof n === "number" && Number.isInteger(n) && n >= 0;
+  if (!count(readClasses) || !count(readTriggers) || !count(alreadyListed)) return {};
+  return { checkerRead: { readClasses, readTriggers, alreadyListed } };
 }
 
 /**
