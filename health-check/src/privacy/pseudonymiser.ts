@@ -32,7 +32,7 @@ const TOKEN = new RegExp(tokenSource(), "g");
 /**
  * A record the run labels by its own id, because the engine doesn't read its
  * name: today only an account (the concentration rule's top account, and the
- * deep dive's top ten). A user with no name is labelled "Unknown user", and a
+ * deep dive's top ten). A user with no name is labelled UNKNOWN_USER, and a
  * customer by its reference, so neither is (DECISIONS.md 684).
  */
 export const isIdLabelled = (entry: PseudonymEntry): boolean => entry.name === entry.id;
