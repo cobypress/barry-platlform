@@ -110,7 +110,7 @@ export function rewordFinding(f: Finding): Finding {
 }
 
 /**
- * A metric text's marks: from `said`, where it made the text in this analysis;
+ * A metric text's marks: from said, where it made the text in this analysis;
  * none of the org's, where the engine wrote the whole text, or a template of it
  * with only figures put in (src/digest/engine-texts.ts); else unknown.
  */

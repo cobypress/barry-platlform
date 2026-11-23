@@ -1129,6 +1129,13 @@ const SIGNED_OFF: string[] = [
   "src/domains/technical-health/lint.ts: notes",
   "src/domains/technical-health/lint.ts: notes",
   "src/domains/technical-health/lint.ts: placesText",
+  // An automatic run's metric texts and the win-rate reason, said so their marks are kept (DECISIONS.md 693): a count, a literal union, a Said and a reason said only when said made it.
+  "src/domains/adoption/index.ts: plural(months.length, \"whole month\")",
+  "src/domains/adoption/index.ts: plural(months.length, \"whole month\")",
+  "src/domains/current-pipeline/outlook.ts: group.length",
+  "src/domains/utilisation/investment.ts: describe",
+  "src/domains/utilisation/investment.ts: p.price.reason",
+  "src/domains/value.ts: rate.reason as Said",
 ];
 
 const ROOT = join(import.meta.dirname, "../../..");
