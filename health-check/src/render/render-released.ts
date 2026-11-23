@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import { assertOutsideGit } from "../engine/run.ts";
 import type { BenchmarkInput } from "../benchmark/compare.ts";
 import { micrositeMisses, micrositePages, type MicrositePages } from "../microsite/pages.ts";
-import { heldPattern, maskInput, maskPage, maskText, masksIn, withheldNote, type SourceRepair } from "./repair.ts";
+import { heldPattern, maskInput, maskPage, maskText, masksIn, NUMERIC_KINDS, withheldNote, type SourceRepair } from "./repair.ts";
 import type { ReportInput } from "../narrative/sections.ts";
 import type { Intake } from "../narrative/intake.ts";
 import type { OverrideRefusal } from "../narrative/overrides.ts";
@@ -78,10 +78,11 @@ export type ReleasedDocuments = {
    * How much the make repaired (DECISIONS.md 682, item 7): "none"; "some", a
    * section fell back, a detail was masked or the microsite wasn't made;
    * "heavy", more than MASK_CAP masks in a document, any on the one-pager, or
-   * more than a quarter of a document's sections fell back. The documents are
-   * made the same way whichever it is. Left out by renderers that don't repair.
+   * more than a quarter of a document's sections fell back; "held for us", past
+   * HELD_FOR_US_MASKS or a number masked where a page prints it, when the job
+   * keeps the documents from the customer. Left out by renderers that don't repair.
    */
-  repairs?: "none" | "some" | "heavy";
+  repairs?: "none" | "some" | "heavy" | "held for us";
   /** How many details each PDF shows withheld (DECISIONS.md 682). */
   masks?: Record<"executive" | "full" | "ceo", number>;
   /** The microsite wasn't made because a page still held a figure after the repair. */
@@ -383,6 +384,15 @@ export function toRepair(layout: Layouts, siteMisses: Array<{ raw: string }>): A
 /** More masks than this in one document, or any on the one-pager, marks the repair heavy. */
 export const MASK_CAP = 3;
 
+/**
+ * Past this many masks in a document, or with any number, amount, percentage,
+ * ratio, duration or date masked where a page prints it, the documents are made
+ * for us and go to no customer until a person has looked (decision 682): a
+ * report full of withheld details, or a withheld headline figure, is a defect
+ * of ours a customer shouldn't meet unseen.
+ */
+export const HELD_FOR_US_MASKS = 10;
+
 type Doc = "executive" | "full" | "ceo";
 
 export async function renderReleased(dir: string, approved: ApprovedRun, outDir: string): Promise<ReleasedDocuments | RefusedDocuments> {
@@ -444,13 +454,18 @@ export async function renderReleased(dir: string, approved: ApprovedRun, outDir:
     if (found.length === 0) break;
     note(found);
     raws.push(...new Set(found.map((h) => h.raw)));
-    made = (await make(raws, pageRaws)) as Made;
+    const next = await make(raws, pageRaws);
+    // A correction that can't be carried once a figure is masked refuses the make, as it would have at the start.
+    if ("refused" in next) return { refused: next.refused! };
+    made = next;
   }
   const left = held(made).filter((h) => !pageRaws.includes(h.raw));
   if (left.length) {
     note(left);
     pageRaws.push(...new Set(left.map((h) => h.raw)));
-    made = (await make(raws, pageRaws)) as Made;
+    const next = await make(raws, pageRaws);
+    if ("refused" in next) return { refused: next.refused! };
+    made = next;
   }
   const { report, pseudonyms, set, layout, site, siteMisses } = made;
 
@@ -504,6 +519,7 @@ export async function renderReleased(dir: string, approved: ApprovedRun, outDir:
   const micrositeHeld = site.ok && siteMisses.length > 0;
   const microsite: ReleasedDocuments["microsite"] = site.ok ? (micrositeHeld ? { ok: false, reason: "A microsite page has a figure the number check can't trace, so the microsite wasn't made" } : { ok: true, pages: { pages: site.pages } }) : site;
   const fallBackHeavy = Object.values(report.outputs).some((b) => b.sections.length > 0 && fellBack.filter((f) => f.output === b.output).length * 4 > b.sections.length);
+  const heldForUs = Object.values(made.masks).some((n) => n > HELD_FOR_US_MASKS) || (Object.values(made.pageMasks).some((n) => n > 0) && pageRaws.some((raw) => NUMERIC_KINDS.has(kindOf(raw, set))));
   const heavy = made.masks.ceo > 0 || made.masks.executive > MASK_CAP || made.masks.full > MASK_CAP || fallBackHeavy;
   const any = fellBack.length > 0 || leftOut.length > 0 || micrositeHeld || Object.values(made.masks).some((n) => n > 0);
   return {
@@ -512,7 +528,7 @@ export async function renderReleased(dir: string, approved: ApprovedRun, outDir:
     held: stillHeld,
     fellBack,
     leftOut,
-    repairs: heavy ? "heavy" : any ? "some" : "none",
+    repairs: heldForUs ? "held for us" : heavy ? "heavy" : any ? "some" : "none",
     masks: made.masks,
     ...(micrositeHeld ? { micrositeHeld: true as const } : {}),
     ...(stillIn.length ? { stillIn } : {}),

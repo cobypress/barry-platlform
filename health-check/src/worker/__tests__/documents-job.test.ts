@@ -27,7 +27,7 @@ import { executiveHtml } from "../../render/executive.ts";
 import { HANDBOOK_NOT_MADE } from "../../handbook/read.ts";
 import { HANDBOOK_MARKER } from "../../testing/synthetic-org.ts";
 import { loadAnswers } from "../../testing/replay.ts";
-import { clientNameOf, folderFor, heldBackReason, heldBackSummary, INTERNAL_FOLDER, laterSurveyAnswers, processDocumentsJob } from "../documents-job.ts";
+import { clientNameOf, folderFor, heldBackReason, heldBackSummary, HELD_FOR_US, INTERNAL_FOLDER, laterSurveyAnswers, processDocumentsJob } from "../documents-job.ts";
 import { DriveError, GoogleDrive, type DocumentDrive, type DriveItem } from "../drive.ts";
 import { z } from "zod";
 import type { DocumentFile, DocumentsJobInput } from "../types.ts";
@@ -1263,6 +1263,24 @@ describe("the org handbook", () => {
     assert.ok(deps.lines.some((l) => /worked around a defect: 1 untraceable figure masked, from cfg\.unassigned-layouts \(owner\)/.test(l)), JSON.stringify(deps.lines));
     assert.ok(deps.lines.some((l) => l === `Run ${RUN_ID}: a masked figure still shows in the action lists.`), "said in the log, and the make is done");
     assert.doesNotMatch(alerts.join(), /Zeta9Flux|Verdict/);
+  });
+
+  test("a make held for us (decision 682): made into Black Cloud's own folder only, nothing in the client's, no digest or microsite, and the reason says it's ours to fix", async () => {
+    const drive = new MemoryDrive();
+    const deps = withHandbook(jobInput(), drive);
+    const alerts: string[] = [];
+    deps.alert = async (line) => void alerts.push(line);
+    deps.renderReleased = async (dir, approved, out) => ({ ...(await fakeRender(dir, approved, out)), leftOut: [], fellBack: [], repairs: "held for us", masks: { executive: 0, full: 11, ceo: 0 } });
+    const result = await processDocumentsJob(RUN_ID, deps, { final: true });
+    assert.equal(result.outcome, "failed");
+    const doc = deps.store.documents.get(RUN_ID)!;
+    assert.equal(doc.error, HELD_FOR_US);
+    assert.match(doc.error!, /That's ours to fix: once it's fixed, make the documents again\.$/);
+    const folders = [...drive.items.values()].filter((i) => i.folder).map((i) => i.name);
+    assert.deepEqual(folders.sort(), [INTERNAL_FOLDER, "Synthetic Co - Held for us"].sort(), "no client folder at all");
+    assert.equal([...drive.items.values()].filter((i) => !i.folder).length, 6);
+    assert.equal(deps.store.writes.some((w) => w.method === "saveDocuments" || w.method === "saveMicrosite"), false);
+    assert.deepEqual(alerts, [`Run ${RUN_ID}'s documents are held for us and went to no customer: 0 drafted sections and 0 edited sections in our own wording, 11 details withheld in the reports. Ours to fix, then make them again. See the run's Release tab.`]);
   });
 
   test("a make that fails before Drive uploads no handbook either", async () => {

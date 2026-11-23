@@ -228,6 +228,22 @@ function oldestFirst(a: DriveItem, b: DriveItem): number {
   return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 }
 
+/**
+ * What the Release tab says when a make is held for us (decision 682): the one
+ * case a person is needed, since a report full of withheld details, or with a
+ * headline figure withheld, shouldn't reach a customer unseen.
+ */
+export const HELD_FOR_US = "Held for us: too much in these documents couldn't be traced to the data to send them unseen. They were made and are in Black Cloud's own folder in Drive, not the customer's; nothing was shared, published or added to the connector, and the last documents the customer had stay as they were. That's ours to fix: once it's fixed, make the documents again.";
+
+/** A held make's files, in Black Cloud's own folder under "Held for us", replaced on each make. Never in the client's folder. */
+async function putHeld(drive: DocumentDrive, clientName: string, file: string, mime: string, path: string): Promise<DriveItem> {
+  const internal = (await drive.folders(drive.rootFolderId)).find((f) => same(f.name, INTERNAL_FOLDER)) ?? (await drive.createFolder(drive.rootFolderId, INTERNAL_FOLDER));
+  const name = `${clientName} - Held for us`;
+  const own = (await drive.folders(internal.id)).find((f) => same(f.name, name)) ?? (await drive.createFolder(internal.id, name));
+  const replaceId = (await drive.files(own.id)).find((f) => f.name === file)?.id;
+  return drive.putFile(own.id, file, mime, readFileSync(path), replaceId);
+}
+
 /** A file for Black Cloud only, beside the clients' folders and never inside one, replaced on each make. */
 async function putInternal(drive: DocumentDrive, clientName: string, folderName: string, file: string, path: string): Promise<DriveItem> {
   const internal = (await drive.folders(drive.rootFolderId)).find((f) => same(f.name, INTERNAL_FOLDER)) ?? (await drive.createFolder(drive.rootFolderId, INTERNAL_FOLDER));
@@ -299,6 +315,7 @@ export function repairAlert(runId: string, printed: Pick<ReleasedDocuments, "rep
   const drafts = fellBack.length - edits;
   const masks = Object.values(printed.masks ?? {}).reduce((a, b) => a + b, 0);
   const counts = [`${drafts} drafted ${drafts === 1 ? "section" : "sections"} and ${edits} edited ${edits === 1 ? "section" : "sections"} in our own wording`, `${masks} ${masks === 1 ? "detail" : "details"} withheld in the reports`, ...(printed.micrositeHeld ? ["no microsite"] : [])];
+  if (printed.repairs === "held for us") return `Run ${runId}'s documents are held for us and went to no customer: ${counts.join(", ")}. Ours to fix, then make them again. See the run's Release tab.`;
   return `Run ${runId}'s documents were made with ${printed.repairs === "heavy" ? "heavy" : "some"} repairs: ${counts.join(", ")}. See the run's Release tab.`;
 }
 
@@ -430,6 +447,14 @@ async function documentsLocked(runId: string, deps: WorkerDeps, attempt: Attempt
       const summary = heldBackSummary(printed.held);
       log(`Run ${runId}'s documents weren't uploaded. ${summary}`);
       return fail(heldBackReason(printed.held), summary);
+    }
+    // Too much withheld, or a number withheld where a page prints it: made for us, kept from the customer (decision 682).
+    if (printed.repairs === "held for us") {
+      for (const output of Object.keys(FILES) as Array<keyof typeof FILES>) {
+        await putHeld(deps.drive, clientName, `${clientName} - ${FILES[output].title}.${FILES[output].ext}`, FILES[output].mime, printed.files[output]);
+      }
+      await alertRepairs(runId, printed, deps, log);
+      return fail(HELD_FOR_US, `Run ${runId}'s documents are held for us: made, in ${INTERNAL_FOLDER} only.`);
     }
     // Repaired, not held (decision 682): a defect in our own text worked around is logged by run id, with rule and metric ids only.
     const leftOut = printed.leftOut ?? [];
