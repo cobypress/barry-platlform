@@ -75,6 +75,19 @@ class Collector {
     if (/\d/.test(value)) this.set.labels.push({ source: this.source, value });
   }
 
+  /**
+   * The letters-and-digits words in a name the org chose, as identifiers and
+   * nothing else, never a number (DECISIONS.md 682). A page prints the parts of
+   * a name a segment holds whole ("Invoice2__c" from "Invoice2__c.Account__c to
+   * Account", an object from a dimension), which its label alone doesn't mask.
+   */
+  words(name: string): void {
+    // "Object.Field" is read as one word, and a page can print either half alone.
+    for (const text of new Set([name, name.replace(/\./g, " ")])) {
+      for (const figure of extractFigures(text).figures) if (figure.word) this.set.identifiers.push({ source: this.source, value: figure.raw.toLowerCase() });
+    }
+  }
+
   /** Reads figures out of engine text, using the same reader the check uses. */
   text(text: string | null | undefined): Figure[] {
     if (!text) return [];
@@ -105,6 +118,7 @@ function addFinding(set: FigureSet, f: Finding, currency: string | undefined): v
   for (const guard of f.guards) c.text(guard.detail);
   for (const subject of f.subjects) {
     c.label(subject.label);
+    c.words(subject.label);
     c.text(subject.label.startsWith("[[") ? subject.label : null);
   }
   for (const segment of f.segmentsChecked) c.number(segment.segments);
@@ -165,6 +179,8 @@ function addMetric(set: FigureSet, m: Metric, currency: string | undefined): voi
   }
   for (const segment of m.segments) {
     c.label(segment.key);
+    c.words(segment.key);
+    c.words(segment.dimension);
     c.number(segment.n);
     add(segment.value);
     c.text(segment.notMeasurableReason);
