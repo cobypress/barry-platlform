@@ -88,9 +88,9 @@ describe("the worker's switch", () => {
   });
 
   test("says at start which state the worker is in, with no org id", () => {
-    assert.equal(automaticStartLine({ on: false, orgs: new Set([ORG15]) }), "Automatic runs are off: HC_AUTOMATIC isn't on, so an automatic run fails at its claim.");
+    assert.equal(automaticStartLine({ on: false, orgs: new Set([ORG15]) }), "Automatic runs are off: HC_AUTOMATIC isn't on, so an automatic run's connect is refused and its run fails at its claim.");
     const on = automaticStartLine({ on: true, orgs: new Set([ORG15, "00D000000000002"]) });
-    assert.equal(on, "Automatic runs are switched on for 2 orgs, but aren't built yet, so an automatic run still fails at its claim.");
+    assert.equal(on, "Automatic runs are switched on for 2 orgs: one connects, is calibrated and queued, but isn't built past that yet, so it fails before reading the org for analysis.");
     assert.ok(!on.includes(ORG15));
   });
 
@@ -124,8 +124,8 @@ describe("the worker's switch", () => {
       assert.equal(code, 0);
       return lines.filter((l) => l.startsWith("Automatic runs"));
     };
-    assert.deepEqual(await startLines({}), ["Automatic runs are off: HC_AUTOMATIC isn't on, so an automatic run fails at its claim."]);
-    assert.deepEqual(await startLines({ HC_AUTOMATIC: "on", HC_AUTOMATIC_ORGS: ORG15 }), ["Automatic runs are switched on for 1 org, but aren't built yet, so an automatic run still fails at its claim."]);
+    assert.deepEqual(await startLines({}), ["Automatic runs are off: HC_AUTOMATIC isn't on, so an automatic run's connect is refused and its run fails at its claim."]);
+    assert.deepEqual(await startLines({ HC_AUTOMATIC: "on", HC_AUTOMATIC_ORGS: ORG15 }), ["Automatic runs are switched on for 1 org: one connects, is calibrated and queued, but isn't built past that yet, so it fails before reading the org for analysis."]);
   });
 });
 
@@ -135,7 +135,8 @@ describe("an automatic run job", () => {
     ["with the switch absent", {}, AUTOMATIC_SWITCHED_OFF],
     ["with the switch off and the org listed", { automatic: { on: false, orgs: new Set([ORG15]) } }, AUTOMATIC_SWITCHED_OFF],
     ["with the switch on and the org not listed", { automatic: { on: true, orgs: new Set(["00D000000000002"]) } }, AUTOMATIC_ORG_NOT_LISTED],
-    ["with the switch on and the org listed (this lane)", { automatic: { on: true, orgs: new Set([ORG15]) } }, AUTOMATIC_NOT_BUILT],
+    // Past its claim now, and stopped just before extraction (DECISIONS.md 692).
+    ["with the switch on and the org listed (until lane E3)", { automatic: { on: true, orgs: new Set([ORG15]) } }, AUTOMATIC_NOT_BUILT],
   ];
   for (const [name, overrides, reason] of cases) {
     test(`fails at its claim ${name}, with one plain reason and nothing read`, async () => {

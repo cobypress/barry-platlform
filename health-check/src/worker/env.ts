@@ -46,8 +46,8 @@ export const WORKER_ENV = {
     HC_WORKER_RECYCLE_AT: `A whole number from 1 to ${RECYCLE_AT_LIMIT}: once that many org-worded sentences are in the worker's store, it finishes the jobs in hand and exits 75 for Render to start a fresh one (DECISIONS.md 666). Unset: it never recycles itself. Set it low once and watch Render restart it before relying on it`,
     HC_PMD_HOME: "Absolute path of the unpacked PMD 7.29.0 (the pmd-bin-7.29.0 folder): PMD then checks each health check's Apex code, and its findings are stored beside our own scan's (DECISIONS.md 670). Unset: PMD doesn't run, and each run says so",
     HC_JAVA_HOME: "Absolute path of the Java PMD runs on (the folder holding bin/java). Needed with HC_PMD_HOME",
-    HC_AUTOMATIC: "on, exactly, to let the worker take automatic runs, which no person reviews (DECISIONS.md 688). Anything else, or unset, is off, and an automatic run fails at its claim with nothing read. Automatic runs aren't built yet, so with it on they still fail at their claim",
-    HC_AUTOMATIC_ORGS: "Comma-separated 15-character org ids automatic runs are allowed for while they're proved. An automatic run for any other org fails at its claim with nothing read",
+    HC_AUTOMATIC: "on, exactly, to let the worker take automatic runs, which no person reviews (DECISIONS.md 688). Anything else, or unset, is off: an automatic run's connect is refused and its run fails at its claim with nothing read. With it on, an automatic run connects, is calibrated from the org's settings and queued (DECISIONS.md 692), then fails before reading the org for analysis, until lane E3",
+    HC_AUTOMATIC_ORGS: "Comma-separated 15-character org ids automatic runs are allowed for while they're proved. An automatic run for any other org is refused at connect, and fails at its claim, with nothing read",
     HC_MICROSITE_KEY: "The customer microsite: 32 bytes, base64 (openssl rand -base64 32), the same value as the console's, and different from HC_CONNECT_KEY and HC_TOKEN_KEY. Without it, released runs get documents but no microsite",
   },
 } as const;

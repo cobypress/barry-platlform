@@ -4,7 +4,7 @@ import type { ScanResult } from "../scan/result.ts";
 import type { PulseResult } from "../pulse/result.ts";
 import { DIGEST_KEYS, type RunDigest } from "../schemas/digest.ts";
 import { unstorableAt } from "./inventory.ts";
-import { Run, type BenchmarkRow, type ConnectLink, type Metric } from "../schemas/index.ts";
+import { Run, type BenchmarkRow, type Calibration, type ConnectLink, type Metric } from "../schemas/index.ts";
 import { storedFromRow, waitingRow, type ConsoleSummariesRow, type SummariesToSave } from "../handbook/summary-row.ts";
 import { DISCONNECT_STEP, ORG_AWAITING_CONNECT, RunClosedError, SCAN_REVOKE_NOT_CONFIRMED, type ConnectJobInput, type DocumentsJobInput, type DocumentsJobReads, type DriveShare, type ShareJobInput, type DocumentsMade, type LinkConnected, type LinkState, type PulseRun, type ReleasedRun, type RunJobInput, type RunOutputRecord, type RunProgress, type WorkerStore } from "./types.ts";
 
@@ -186,7 +186,36 @@ export class MemoryWorkerStore implements WorkerStore {
     const runOrgId = run?.run.orgId || ORG_AWAITING_CONNECT;
     const job: ConnectJobInput = { link: link.link, state: link.state, runOrgId, sealedPending: link.sealedPending, sealedCode: link.sealedCode };
     const withRun = run ? { ...job, runId: run.run.id } : job;
-    return structuredClone(run?.run.product === "scan" ? { ...withRun, scanRunId: run.run.id } : withRun);
+    if (run?.run.product === "scan") return structuredClone({ ...withRun, scanRunId: run.run.id });
+    // An automatic full check (DECISIONS.md 692), as the Postgres store reads it.
+    return structuredClone(run?.run.product === "barometer" && run.run.reviewMode === "automatic" ? { ...withRun, automaticRunId: run.run.id } : withRun);
+  }
+
+  /** False stands in for a console without HealthCheckCalibration's "source" column: nothing is written. */
+  calibrationSourceColumn = true;
+
+  /** As the Postgres store's one statement: written only where the run has none. */
+  async saveCalibration(runId: string, calibration: Calibration): Promise<"saved" | "exists" | "no_source_column"> {
+    if (!this.calibrationSourceColumn) return "no_source_column";
+    const run = this.runs.get(runId);
+    if (!run) throw new StoreError("the console's database refused the calibration (SQLSTATE 23503)");
+    if (run.calibration) return "exists";
+    run.calibration = structuredClone(calibration);
+    // No detail: the stage names are the org's own.
+    this.writes.push({ method: "saveCalibration", id: runId });
+    return "saved";
+  }
+
+  /** The console's "heldReason", by run id. False as a console without the column. */
+  readonly held = new Map<string, string>();
+  heldReasonColumn = true;
+
+  async holdRun(runId: string, reason: "calibration_unreadable"): Promise<boolean> {
+    const run = this.runs.get(runId);
+    if (!this.heldReasonColumn || !run || run.run.reviewMode !== "automatic" || run.run.status === "released" || this.held.has(runId)) return false;
+    this.held.set(runId, reason);
+    this.writes.push({ method: "holdRun", id: runId, detail: reason });
+    return true;
   }
 
   /** As the Postgres store's one statement: another scan made for the org, or connected to it, after `since`. */

@@ -20,7 +20,7 @@ import type { StoredConnection } from "../salesforce/token-store.ts";
 import { safeReason, type Attempt, type JobOutcome, type WorkerDeps } from "./deps.ts";
 import { appFor, appNotSetUp, needsReconnection } from "./apps.ts";
 import { withJobLock } from "./lock.ts";
-import { automaticRefusal } from "./automatic.ts";
+import { AUTOMATIC_NOT_BUILT, automaticRefusal } from "./automatic.ts";
 import { letGoAfterRun, type SeenRun } from "./scan-release.ts";
 import { progressOf, RunClosedError, runOverall, type RunJobInput } from "./types.ts";
 import { withoutComments } from "../survey/questions.ts";
@@ -60,11 +60,15 @@ export const SECTIONS_FILE = "report-sections.json";
  */
 export const approvedFromConsole = (name: string): NodeJS.ProcessEnv => ({ HC_APPROVED_ORG_ALIASES: name }) as NodeJS.ProcessEnv;
 
+export const ORG_SETTINGS_ON_CONSULTANT_RUN = "The calibration was read from the org's own settings and no person has confirmed it, so a consultant-led run can't start. Confirm the calibration first.";
+
 function problemWith(input: RunJobInput, deps: WorkerDeps): string | null {
   // First, before anything else is checked or loaded: an automatic run reads nothing it isn't allowed to (DECISIONS.md 688).
   const automatic = automaticRefusal(input.run, deps.automatic);
   if (automatic) return automatic;
   if (!input.calibration) return "The calibration hasn't been confirmed, so the run can't start.";
+  // Only an automatic run may start from a calibration nobody confirmed (DECISIONS.md 692).
+  if (input.calibration.source === "org_settings" && input.run.reviewMode !== "automatic") return ORG_SETTINGS_ON_CONSULTANT_RUN;
   if (input.run.connectionKind !== "oauth") return "This run is set to use a CLI login. The worker only reads through a connection a customer's admin authorised.";
   if (!input.connectionName) return "No connection is named for this run. Send the customer a connect link first.";
   const known = knownModuleIds(deps.modules ?? ALL_MODULES);
@@ -204,6 +208,11 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
   // pulse never keep code, and nor does a worker that can't send it anywhere (DECISIONS.md 492).
   const apexSummaries = deps.apexSummaries === true && deps.narrative !== undefined && input.run.product === "barometer";
 
+  // Everything before this is built for an automatic run: its claim, its
+  // calibration and its connection. Reading the org for analysis isn't, until
+  // lane E3 (DECISIONS.md 692), so it stops here with nothing read.
+  if (input.run.reviewMode === "automatic") return fail(AUTOMATIC_NOT_BUILT);
+
   let result: Awaited<ReturnType<typeof runHealthCheck>>;
   try {
     result = await runHealthCheck({
@@ -219,6 +228,8 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
       customerRef: input.run.customerRef,
       scope: input.run.scope,
       product: input.run.product,
+      // The folder's run.json says how the run is reviewed, so its documents read the true mode (DECISIONS.md 692).
+      reviewMode: input.run.reviewMode,
       baselineRunId: input.run.baselineRunId,
       keepApexSource: apexSummaries,
       // A health check runs PMD and ESLint beside our scan, and only stores what they find; a scan and a pulse don't (DECISIONS.md 670).

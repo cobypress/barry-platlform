@@ -180,6 +180,12 @@ export type ConnectJobInput = {
   scanRunId?: string;
   /** The link's run, whatever its product: where the org's stages are written (DECISIONS.md 611). */
   runId?: string;
+  /**
+   * Set when the link's run is an automatic full check (DECISIONS.md 692): once
+   * connected, the worker calibrates it from the org's stages and queues it.
+   * Never set with scanRunId.
+   */
+  automaticRunId?: string;
 };
 
 export type LinkConnected = {
@@ -332,6 +338,22 @@ export interface WorkerStore {
    * table for them yet. Throws StoreError, never naming a stage.
    */
   saveOrgStages(runId: string, stages: OrgStage[], readAt: string): Promise<boolean>;
+  /**
+   * An automatic run's calibration, read from the org's settings (DECISIONS.md
+   * 692), with its source. Only where the run has none: "saved" when this
+   * wrote it, "exists" when the run already had one, which is left as it is,
+   * and "no_source_column" when the console's table can't hold the source, so
+   * nothing is written (without it the row would read as a person's
+   * confirmation). Throws StoreError, naming no stage.
+   */
+  saveCalibration(runId: string, calibration: Calibration): Promise<"saved" | "exists" | "no_source_column">;
+  /**
+   * Why an automatic run waits for a person, in the console's "heldReason"
+   * (migration 20261211). Only an automatic run's, and only where none is set.
+   * False when the console's table has no such column yet, or refused it, so
+   * the caller says so. Never throws for that.
+   */
+  holdRun(runId: string, reason: "calibration_unreadable"): Promise<boolean>;
 
   /** With `handbookSummaries` unset or false, nothing reads the summaries' table. */
   loadDocumentsJob(runId: string, reads?: DocumentsJobReads): Promise<DocumentsJobInput | null>;

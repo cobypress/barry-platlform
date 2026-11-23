@@ -5,6 +5,7 @@ import { localDay, zoneOf } from "../time-zone.ts";
 import type { Calibration, Evidence, StageCategory } from "../../schemas/index.ts";
 import { joinSaid, org, said, type Said } from "../../engine/org-words.ts";
 import { andList } from "../../engine/said-forms.ts";
+import { orderFromOrg } from "../../connect/auto-calibration.ts";
 
 export type Deal = OpportunityRow & {
   category: StageCategory | null;
@@ -138,6 +139,8 @@ export type PipelineData =
        * that separates the two isn't measured while there are any (DECISIONS.md 600).
        */
       unsplitLost: string[];
+      /** How many record types the in-scope deals use. Unnamed deals don't count; absent reads as none. */
+      recordTypes?: number;
     };
 
 /**
@@ -157,7 +160,36 @@ export function loadPipeline(ctx: Omit<RuleContext, "metrics">): PipelineData {
   // Whatever reads the deals leans on what their stages mean, so the engine
   // puts the note on its findings and metrics, and caps its confidence.
   if (data.status === "ok" && data.inferred.length > 0) ctx.assume?.(inferredStagesNote(data.inferred));
-  return data;
+  // A calibration read from the org's settings (DECISIONS.md 692): nobody chose
+  // the record types, so blended sales processes are said, and the open stages'
+  // order is Salesforce's sort order, said by whatever reads it.
+  if (data.status !== "ok" || ctx.calibration.source !== "org_settings") return data;
+  const recordTypes = data.recordTypes ?? 0;
+  if (recordTypes > 1) ctx.assume?.(blendedProcessesNote(recordTypes));
+  return orderFromOrg(ctx.calibration) ? { ...data, stages: notingOrder(data.stages, () => ctx.assume?.(unconfirmedOrderNote())) } : data;
+}
+
+/** Made in each analysis, as every said is. What every check that reads the sales order says when the order came from Salesforce's sort order, not a person (DECISIONS.md 692). */
+export const unconfirmedOrderNote = (): Said => said`We took the order of your open stages from Salesforce's own stage settings, and haven't confirmed it with you.`;
+
+/** What every figure that read the deals says when they hold several record types nobody has told apart (DECISIONS.md 692). */
+export const blendedProcessesNote = (n: number): Said =>
+  said`Your deals use ${n} record types, which may be separate sales processes. We've read them together, so these figures blend them.`;
+
+/** The same stages, saying `note` whenever the order of the open stages is read. */
+function notingOrder(stages: StageMap, note: () => void): StageMap {
+  return {
+    categoryOf: stages.categoryOf,
+    isInferred: stages.isInferred,
+    get openStages() {
+      note();
+      return stages.openStages;
+    },
+    orderOf: (stage) => {
+      note();
+      return stages.orderOf(stage);
+    },
+  };
 }
 
 function buildPipeline(ctx: Omit<RuleContext, "metrics">): PipelineData {
@@ -247,6 +279,7 @@ function buildPipeline(ctx: Omit<RuleContext, "metrics">): PipelineData {
       unordered: inferred.filter((s) => s.category === "open").map((s) => s.stage),
     },
     inferred,
+    recordTypes: new Set(deals.flatMap((d) => (d.RecordType === null ? [] : [d.RecordType]))).size,
     unsplitLost: [...new Set(deals.filter((d) => stages.isInferred(d.StageName) && d.category === "lost" && d.closedDay >= ctx.window.from && d.closedDay <= ctx.window.to).map((d) => d.StageName))].sort(),
   };
 }
