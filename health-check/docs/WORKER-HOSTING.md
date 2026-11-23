@@ -42,6 +42,29 @@ Leave it unset until both of these are done:
 
 **Claude on an ordinary day.** A worker that never restarts also exchanges Render's token again each time its access token runs out, and that only works if Render has written a new token by then. Nobody has yet seen it go past its first refresh. The log now says at start how old Render's token is, how long it has left and whether it is single-use, and says once if Claude's sign-in stops working ("Claude sign-in stopped working …") and once when it works again. After a deploy, look for either line over the next few hours. If "stopped working" appears, check the authentication history's reason for it and tell the engine's owner. Keeping the federation rule's token lifetime at 60 minutes, rather than the wizard's 10 minutes, means fewer exchanges, so fewer chances to meet a token Render hasn't rewritten yet.
 
+### PMD for the Apex code (off until installed)
+
+Each health check runs PMD over the org's Apex classes and triggers beside our own scan, and stores where each finding is and which rule it broke, never a line of the code (DECISIONS.md 670). Nothing a customer sees uses it yet. PMD is Java, and Render's Node runtime has no Java, so until both are installed every health check records "PMD isn't installed on this worker." and makes no extra Salesforce call. With them, each health check spends a few more calls reading the Apex code again (one per page of classes and of triggers).
+
+To install it, add this to the end of the build command (one line, after `npx playwright install --only-shell chromium`). It downloads PMD 7.29.0 and a Java 21 runtime into `health-check/.tools`, and stops the build if either file isn't the one we checked:
+
+```
+&& mkdir -p .tools && cd .tools && curl -fsSL -o pmd.zip https://github.com/pmd/pmd/releases/download/pmd_releases%2F7.29.0/pmd-dist-7.29.0-bin.zip && echo "d27177c185b837fa57f097e482d1253468aa035379c5eb2671fa0a279109b179  pmd.zip" | sha256sum -c - && unzip -q pmd.zip && rm pmd.zip && curl -fsSL -o jre.tar.gz https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.13%2B9/OpenJDK21U-jre_x64_linux_hotspot_21.0.13_9.tar.gz && echo "a535a1df9c6284d9618872984e026ae0352d1f7e9e0605425c0e6114f47351dd  jre.tar.gz" | sha256sum -c - && mkdir -p jre && tar -xzf jre.tar.gz -C jre --strip-components=1 && rm jre.tar.gz && cd ..
+```
+
+Then set these two variables. Render builds and runs the service in `/opt/render/project/src`, so with the root directory `health-check`:
+
+| Variable | Value |
+| --- | --- |
+| `HC_PMD_HOME` | `/opt/render/project/src/health-check/.tools/pmd-bin-7.29.0` |
+| `HC_JAVA_HOME` | `/opt/render/project/src/health-check/.tools/jre` |
+
+Check: after the deploy, the worker's first lines say "PMD 7.29.0 checks each health check's Apex code, and its findings are stored beside our own scan's." If they say PMD isn't installed, or isn't version 7.29.0, or that Java isn't there, the reason is in the line: check the paths with Render's shell (`ls $HC_PMD_HOME/lib/pmd-apex-7.29.0.jar $HC_JAVA_HOME/bin/java`). If the build stops at `unzip: command not found`, use `python3 -m zipfile -e pmd.zip .` in its place. Then run one health check on a scratch org: its run folder's `checkpoints/code-lint.json` should say PMD "ran".
+
+What it costs: about 140 MB of PMD and 50 MB of Java on the build, and while a run's PMD works, up to 512 MB more memory (its heap is capped there) for up to 5 minutes, after which it is stopped and the run carries on without it. PMD gets the code in a private temporary folder deleted as soon as it finishes, none of the worker's variables, and no network on purpose (its connections are pointed at a closed port). The PMD checksum is the one we computed from the file we downloaded and ran on 23 Nov 2026; Java's is the one Adoptium publishes for that file. To move to another PMD version, the engine has to change first (it runs only the version it names), so tell the engine's owner rather than editing the build.
+
+To turn it off, unset `HC_PMD_HOME`.
+
 ## 2. Its environment variables
 
 | Variable | Value |
