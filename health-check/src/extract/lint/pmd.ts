@@ -18,6 +18,11 @@ export const PMD_NOT_INSTALLED = "PMD isn't installed on this worker.";
 export const PMD_RULESET = fileURLToPath(new URL("./pmd-apex.xml", import.meta.url));
 export const PMD_TIME_LIMIT_MS = 5 * 60_000;
 export const PMD_MAX_REPORT_BYTES = 20 * 1024 * 1024;
+/**
+ * Where PMD's temporary folders go by default: a folder of their own in the
+ * system's, so a sweep reads only that, never the whole of /tmp.
+ */
+export const defaultLintTempBase = (): string => join(tmpdir(), "barometer-lint");
 /** Each temporary folder's name starts with this, so a sweep after a crash finds it. */
 export const LINT_TEMP_PREFIX = "hc-lint-";
 
@@ -302,7 +307,11 @@ const within = (v: unknown, max: number): number | null => (typeof v === "number
 export async function runPmd(files: ApexFile[], install: PmdInstall, options: PmdOptions = {}): Promise<ToolRun> {
   const timeLimitMs = options.timeLimitMs ?? PMD_TIME_LIMIT_MS;
   const maxReportBytes = options.maxReportBytes ?? PMD_MAX_REPORT_BYTES;
-  const base = options.tempBase ?? tmpdir();
+  const base = options.tempBase ?? defaultLintTempBase();
+  mkdirSync(base, { recursive: true, mode: 0o700 });
+  // Only a real folder this user owns holds the code: never one reached through a link, or another user's.
+  const parent = lstatSync(base);
+  if (!parent.isDirectory() || (typeof process.getuid === "function" && parent.uid !== process.getuid())) return notRun("pmd", "PMD's temporary folder on this worker isn't one only the worker can reach, so the code wasn't handed over.");
   sweepLintTemp(base, 2 * timeLimitMs);
   const skipped = { tooLarge: 0, unparsable: 0, unreadable: 0, failed: 0, timeLimit: 0 };
   const handed: ApexFile[] = [];

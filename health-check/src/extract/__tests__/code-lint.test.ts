@@ -573,6 +573,16 @@ describe("PMD never outlives the process that started it, nor leaves its code be
     assert.deepEqual([process.listenerCount("exit"), process.listenerCount("SIGTERM"), process.listenerCount("SIGINT")], before);
   });
 
+  test("a temporary base reached through a link is refused: the code isn't handed over", async () => {
+    const { base, pmd } = setup();
+    const real = join(base, "real");
+    mkdirSync(real);
+    symlinkSync(real, join(base, "linked"));
+    assert.match(notRunReason(await runPmd([apex("A", APEX_CLEAN)], pmd, { tempBase: join(base, "linked") })), /isn't one only the worker can reach/);
+    assert.deepEqual(readdirSync(real), []);
+    assert.ok(!existsSync(join(pmd.home, "seen.json")));
+  });
+
   test("the sweep never follows a link, and leaves anything but a folder alone", () => {
     const root = tempDir();
     const base = join(root, "base");

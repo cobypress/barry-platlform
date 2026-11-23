@@ -1,4 +1,3 @@
-import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { MODELS } from "../config.ts";
 import { anthropicClientWithKey, federationClient, type NarrativeClient } from "../narrative/client.ts";
@@ -6,7 +5,7 @@ import { checkClaude } from "../narrative/guard.ts";
 import { ClaudeWatch, federationCachePath, identityTokenFacts, prepareSignInCache, SIGN_IN_RETRY_MINUTES } from "../narrative/sign-in.ts";
 import { tokenKeySource, TokenStore } from "../salesforce/token-store.ts";
 import { HEALTH_CHECK_QUEUE, HEAVY_QUEUE, lostRecorder, RECYCLE_EXIT, RECYCLE_WATCHDOG_MS, recycleWatch, redisConnection, runQueuer, startQueueWorker, type BullModule, type StoreFill } from "../worker/bullmq.ts";
-import { findPmd, PMD_TIME_LIMIT_MS, PMD_VERSION, sweepLintTemp } from "../extract/lint/pmd.ts";
+import { defaultLintTempBase, findPmd, PMD_TIME_LIMIT_MS, PMD_VERSION, sweepLintTemp } from "../extract/lint/pmd.ts";
 import { GoogleDrive } from "../worker/drive.ts";
 import { readWorkerEnv, WORKER_ENV } from "../worker/env.ts";
 import { PostgresWorkerStore, type SqlPool } from "../worker/postgres-store.ts";
@@ -111,7 +110,7 @@ export async function workerCommand(
   // Looked for once, at start: files only, nothing run (DECISIONS.md 670).
   const pmd = findPmd(config.pmdHome, config.javaHome);
   // Code a worker that died mid-run left for PMD, with or without PMD here now: the same age rule as each run's own sweep.
-  const lintSwept = sweepLintTemp(options.lintTempBase ?? tmpdir(), 2 * PMD_TIME_LIMIT_MS);
+  const lintSwept = sweepLintTemp(options.lintTempBase ?? defaultLintTempBase(), 2 * PMD_TIME_LIMIT_MS);
   const deps: WorkerDeps = {
     store,
     tokens: new TokenStore({ dir: config.connectionsDir, key: tokenKeySource({ env: { HC_TOKEN_KEY: env.HC_TOKEN_KEY } as NodeJS.ProcessEnv, platform: "linux" }) }),
