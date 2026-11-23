@@ -117,7 +117,7 @@ export function investmentMetrics(ctx: Ctx): Metric[] {
     );
 
     const edition = org.status === "ok" ? (org.data[0]?.OrganizationType ?? null) : null;
-    const pricing: SeatPricing = { calibration: ctx.calibration, edition };
+    const pricing: SeatPricing = { calibration: ctx.calibration, edition, now: ctx.now };
     const costEvidence = [...licenceEvidence, ctx.ev(org.source, { count: org.status === "ok" ? org.data.length : null, note: edition ? `Edition: ${edition}` : "Edition not read" })];
     metrics.push(
       costMetric(DEFINITIONS.seatCost, costEvidence, paid, (l) => l.TotalLicenses, (licence) => costPerSeat(licence, pricing), "The seats"),

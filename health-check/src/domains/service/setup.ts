@@ -259,7 +259,7 @@ const agentLicences: Rule = {
     }
     const org = ctx.data(orgExtractor);
     const edition = org.status === "ok" ? (org.data[0]?.OrganizationType ?? null) : null;
-    const price = costPerSeat(SERVICE_SEAT, { calibration: ctx.calibration, edition });
+    const price = costPerSeat(SERVICE_SEAT, { calibration: ctx.calibration, edition, now: ctx.now });
     const value: Value = isPriced(price)
       ? { kind: "licence_cost", amount: Math.round(price.annual * wasted), unit: price.currency, period: "per year", assumptions: [said`${plural(wasted, "Service Cloud seat")} at ${price.note}`] }
       : notSized(said`A Service Cloud seat has no price: ${price.reason}`);

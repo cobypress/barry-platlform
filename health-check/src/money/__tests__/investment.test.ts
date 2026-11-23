@@ -147,14 +147,14 @@ describe("not measurable", () => {
 });
 
 describe("cost per seat", () => {
-  const pricing = { calibration: { licenceCosts: { Salesforce: 1200 }, currency: "GBP" }, edition: "Enterprise Edition" };
+  const pricing = { calibration: { licenceCosts: { Salesforce: 1200 }, currency: "GBP" }, edition: "Enterprise Edition", now: new Date("2026-11-30T00:00:00Z") };
   const plans = { "Enterprise Edition": "Core" };
 
   test("the calibration first, then list price, each saying which it is", () => {
     assert.deepEqual(costPerSeat("Salesforce", pricing), { licence: "Salesforce", annual: 1200, currency: "GBP", basis: "calibration", note: "1200 GBP a year, from the calibration" });
     const list = costPerSeat("Salesforce", { ...pricing, calibration: { licenceCosts: {}, currency: "GBP" }, plans });
     assert.ok("annual" in list && list.annual === 156 * 12 && list.basis === "list_price");
-    assert.match("note" in list ? list.note : "", /list price for Core \(156 GBP a user a month, billed annually; https:\/\/www\.salesforce\.com\/uk\/sales\/pricing\/, read on 2026-11-05\)/);
+    assert.match("note" in list ? list.note : "", /published UK list price in pounds, before any discount you've negotiated, for Core \(156 GBP a user a month, billed annually; https:\/\/www\.salesforce\.com\/uk\/sales\/pricing\/, read on 2026-11-23\)/);
   });
 
   test("no price is ever guessed", () => {

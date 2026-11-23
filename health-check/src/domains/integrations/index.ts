@@ -264,7 +264,7 @@ const integrationLicences: Rule = {
     const movable = Math.min(onFull.length, spare);
     const orgRead = ctx.data(orgExtractor);
     const edition = orgRead.status === "ok" ? (orgRead.data[0]?.OrganizationType ?? null) : null;
-    const prices = onFull.slice(0, movable).map((u) => costPerSeat(licenceOf(u), { calibration: ctx.calibration, edition }));
+    const prices = onFull.slice(0, movable).map((u) => costPerSeat(licenceOf(u), { calibration: ctx.calibration, edition, now: ctx.now }));
     const unpriced = prices.filter((p): p is Unpriced => !isPriced(p));
     const value: Value =
       movable === 0

@@ -1092,8 +1092,11 @@ const SIGNED_OFF: string[] = [
   'src/domains/value.ts: rate.n',
   'src/domains/value.ts: rate.value',
   'src/engine/said-forms.ts: n',
+  // A list price's age limit, a number constant, and the list price note said made just above it (DECISIONS.md 679).
+  'src/money/seat-cost.ts: LIST_PRICE_MAX_AGE_DAYS',
   'src/money/seat-cost.ts: list.annual',
   'src/money/seat-cost.ts: list.reason',
+  'src/money/seat-cost.ts: note',
   'src/money/seat-cost.ts: own',
   'src/money/seat-cost.ts: source',
 ];
