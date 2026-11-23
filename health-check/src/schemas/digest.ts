@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { CalendarDate, DomainId, NotMeasurableKind, Timestamp } from "./common.ts";
+import { FIX_PROMPT_MAX } from "./finding.ts";
 
 // The run digest (DECISIONS.md 632): what the customer's connector may serve of
 // one run, made by code on the worker from the same built report the documents
@@ -15,8 +16,9 @@ import { CalendarDate, DomainId, NotMeasurableKind, Timestamp } from "./common.t
 //
 // Objects are not strict, so a later engine can add optional fields and a
 // console still on this copy reads the row, dropping what it doesn't know. The
-// hours and bands of decisions 628 and 636 are here; the fix prompts are not,
-// since the connector never serves a prompt as plain data. A finding's
+// hours and bands of decisions 628 and 636 are here, and an issue's fix prompt
+// with its org words marked and the hash of the text they were made for
+// (DECISIONS.md 672): a prompt without marks is never served. A finding's
 // `orgWords` (DECISIONS.md 655) marks which characters of its sentences the org
 // chose: positions, not figures, so nothing traces them. Its value's reason and
 // assumptions, its hours' basis, a plan phase's title, an area's label and a
@@ -59,6 +61,14 @@ export type DigestSpan = z.infer<typeof DigestSpan>;
 export const SentenceOrgWords = z.object({ orgWordsMarked: z.literal(true), orgWords: z.array(DigestSpan) });
 export type SentenceOrgWords = z.infer<typeof SentenceOrgWords>;
 
+/**
+ * A fix prompt's marks (DECISIONS.md 672): as a sentence's, with the SHA-256, in
+ * lower-case hex, of the prompt as UTF-8 that they were made for, so a reader
+ * whose text differs by a character uses none of them.
+ */
+export const FixPromptOrgWords = SentenceOrgWords.extend({ textSha256: z.string().regex(/^[0-9a-f]{64}$/) });
+export type FixPromptOrgWords = z.infer<typeof FixPromptOrgWords>;
+
 /** Spans each non-empty, inside the sentence, sorted and apart. */
 export function spansFitSentence(text: string, spans: readonly DigestSpan[]): boolean {
   let from = 0;
@@ -99,6 +109,12 @@ export const DigestFinding = z.object({
   timeBand: z.enum(["small", "medium", "large"]).optional(),
   /** How risky or skilled the fix is, by rule (DECISIONS.md 636). Not the org's complexity score. */
   fixComplexity: z.enum(["simple", "moderate", "complex"]).optional(),
+  /**
+   * An issue's fix prompt as the finding holds it (DECISIONS.md 628, 672), whole,
+   * never cut: one longer than the limit, or one the digest's guard would change,
+   * is left out. Served only with its marks at `orgWords.fixPrompt`.
+   */
+  fixPrompt: z.string().min(1).max(FIX_PROMPT_MAX).optional(),
   /** By sentence, the ones the engine can vouch for, with the org's characters marked (DECISIONS.md 655). */
   orgWords: z
     .object({
@@ -112,6 +128,8 @@ export const DigestFinding = z.object({
       valueAssumptions: z.array(SentenceOrgWords).optional(),
       /** The hours' basis (DECISIONS.md 663). */
       hoursBasis: SentenceOrgWords.optional(),
+      /** The fix prompt, with its text's hash (DECISIONS.md 672). */
+      fixPrompt: FixPromptOrgWords.optional(),
     })
     .optional(),
 }).superRefine((f, ctx) => {
@@ -131,6 +149,7 @@ export const DigestFinding = z.object({
       ctx.addIssue({ code: "custom", path: ["orgWords", "valueAssumptions"], message: "One marking for each assumption, each fitting it" });
   }
   if (marks.hoursBasis && !fits(f.effortHours?.basis, marks.hoursBasis)) ctx.addIssue({ code: "custom", path: ["orgWords", "hoursBasis"], message: "Spans must fit the hours' basis" });
+  if (marks.fixPrompt && !fits(f.fixPrompt, marks.fixPrompt)) ctx.addIssue({ code: "custom", path: ["orgWords", "fixPrompt"], message: "Spans must fit the fix prompt" });
 });
 export type DigestFinding = z.infer<typeof DigestFinding>;
 
@@ -274,5 +293,5 @@ export const DIGEST_KEYS: ReadonlySet<string> = new Set([
   "definition", "n", "dateRange", "from", "to", "exclusions", "currency", "total", "byKind", "revenue_recoverable", "conversion_uplift", "licence_waste",
   "time_cost", "exposure", "groups", "lines", "leftOut", "realisation", "counted", "lineIds", "low", "expected", "high", "group", "annual", "added",
   "phases", "later", "quickWins", "alsoFor", "key", "effortHours", "basis", "partial", "timeBand", "fixComplexity", "hoursTotal", "partialFindingIds", "withoutHoursFindingIds",
-  "orgWords", "orgWordsMarked", "start", "end", "valueReason", "valueAssumptions", "hoursBasis",
+  "orgWords", "orgWordsMarked", "start", "end", "valueReason", "valueAssumptions", "hoursBasis", "fixPrompt", "textSha256",
 ]);

@@ -4,9 +4,9 @@ import type { BuiltReport } from "../narrative/sections.ts";
 import { buildPlan, DOMAIN_LABELS, domainLabel, PHASE_TITLES } from "../narrative/select.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { knownPeople } from "../fix/prompt.ts";
-import { spansIfCurrent, type OrgSpan } from "../engine/org-words.ts";
+import { spansIfCurrent, textSha256, type OrgSpan } from "../engine/org-words.ts";
 import { DIGEST_VERSION, NAMED_PEOPLE_SENTENCE, RunDigest, type DigestArea, type DigestFinding, type DigestMetric, type DigestTotal, type DigestValueModel, type SentenceOrgWords } from "../schemas/digest.ts";
-import type { Finding, Metric } from "../schemas/index.ts";
+import { FIX_PROMPT_MAX, type Finding, type Metric } from "../schemas/index.ts";
 import type { Inventory } from "../schemas/inventory.ts";
 import { GROUPS, HEADLINE_KINDS, type ValueKind } from "../value/model.ts";
 
@@ -123,8 +123,19 @@ function digestFinding(f: Finding): DigestFinding {
     ...(f.effortHours ? { effortHours: { low: f.effortHours.low, high: f.effortHours.high, basis: f.effortHours.basis, ...(f.effortHours.partial ? { partial: true as const } : {}) } } : {}),
     ...(f.timeBand ? { timeBand: f.timeBand } : {}),
     ...(f.fixComplexity ? { fixComplexity: f.fixComplexity } : {}),
+    ...fixPromptOf(f),
     ...orgWordsOf(f),
   };
+}
+
+/**
+ * An issue's fix prompt (DECISIONS.md 672), from the report as corrected: a
+ * correction that changed a figure has already dropped it (628), so it isn't
+ * here. Whole or not at all: one over the limit (the engine makes none) is left
+ * out, never cut mid-instruction.
+ */
+function fixPromptOf(f: Finding): Pick<DigestFinding, "fixPrompt"> {
+  return f.status === "issue" && f.fixPrompt && f.fixPrompt.length <= FIX_PROMPT_MAX ? { fixPrompt: f.fixPrompt } : {};
 }
 
 const MARKED = ["title", "summary", "recommendation", "notMeasurableReason"] as const;
@@ -157,6 +168,12 @@ function orgWordsOf(f: Finding): Pick<DigestFinding, "orgWords"> {
     const spans = spansIfCurrent(f.effortHours.basis, marks?.hoursBasis);
     if (spans) out.hoursBasis = { orgWordsMarked: true, orgWords: spans };
   }
+  // The fix prompt's marks, only beside the prompt the digest holds and only while it still hashes to them (DECISIONS.md 672).
+  const prompt = fixPromptOf(f).fixPrompt;
+  if (prompt) {
+    const spans = spansIfCurrent(prompt, marks?.fixPrompt);
+    if (spans) out.fixPrompt = { orgWordsMarked: true, textSha256: textSha256(prompt), orgWords: spans };
+  }
   return Object.keys(out).length > 0 ? { orgWords: out } : {};
 }
 
@@ -184,8 +201,14 @@ function afterGuard(before: DigestFinding, after: DigestFinding): DigestFinding 
   }
   if (before.effortHours && after.effortHours) marks.hoursBasis = replaced(before.effortHours.basis, after.effortHours.basis, marks.hoursBasis);
   for (const key of ["valueReason", "valueAssumptions", "hoursBasis"] as const) if (marks[key] === undefined) delete marks[key];
-  const { orgWords: _was, ...rest } = after;
-  return Object.keys(marks).length > 0 ? { ...rest, orgWords: marks } : rest;
+  // A fix prompt the guard changed in any way is left out whole, with its marks: never the fixed sentence in a prompt's place (DECISIONS.md 672).
+  // The marks' hash is the prompt's, which no guard reads as text.
+  const promptKept = after.fixPrompt !== undefined && after.fixPrompt === before.fixPrompt;
+  if (promptKept && before.orgWords?.fixPrompt) marks.fixPrompt = before.orgWords.fixPrompt;
+  else delete marks.fixPrompt;
+  const { orgWords: _was, fixPrompt: _prompt, ...rest } = after;
+  const kept = promptKept ? { ...rest, fixPrompt: after.fixPrompt } : rest;
+  return Object.keys(marks).length > 0 ? { ...kept, orgWords: marks } : kept;
 }
 
 /**
@@ -338,7 +361,7 @@ export function fixedWords<P extends { phases: Array<{ key: string; title: strin
 export const STRUCTURAL_KEYS: ReadonlySet<string> = new Set([
   "version", "runId", "product", "reviewed", "asOf", "madeAt", "baselineRunId", "status", "domain", "areaDomains", "findingIds", "id", "ruleId",
   "severity", "confidence", "recommendationType", "kind", "effortSize", "notMeasurableKind", "timeBand", "fixComplexity", "from", "to", "currency", "group", "counted",
-  "lineIds", "leftOut", "later", "quickWins", "key", "grade", "withheldNames", "partialFindingIds", "withoutHoursFindingIds",
+  "lineIds", "leftOut", "later", "quickWins", "key", "grade", "withheldNames", "partialFindingIds", "withoutHoursFindingIds", "textSha256",
 ]);
 /** Keyed by finding id, each holding finding ids: ids all the way down. */
 export const ID_MAPS: ReadonlySet<string> = new Set(["alsoFor"]);

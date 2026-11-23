@@ -86,6 +86,8 @@ export const FindingOrgWords = z.object({
   valueAssumptions: z.array(MarkedSentence).optional(),
   // The hours' basis (DECISIONS.md 628): the fix table's words and counts only, so marked with no spans when made.
   hoursBasis: MarkedSentence.optional(),
+  // The fix prompt (DECISIONS.md 672): its subjects' labels and the finding's own marked sentences, kept only when every part is vouched for.
+  fixPrompt: MarkedSentence.optional(),
 });
 export type FindingOrgWords = z.infer<typeof FindingOrgWords>;
 

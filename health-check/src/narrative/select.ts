@@ -51,14 +51,25 @@ const REP_OR_USER = new RegExp(String.raw`\b[Rr]ep ${USER}|${USER}`, "g");
  * would become a name at render, so it's replaced with a description before then.
  */
 export function teamLevelText(text: string, kind: "text" | "title" = "text"): string {
+  return teamLevelSteps(kind).reduce((out, [pattern, by]) => out.replace(pattern, by), text);
+}
+
+/**
+ * teamLevelText's rewrites, in order, each a global pattern and what a match
+ * becomes, and whether that is fixed words (true) or keeps part of the match
+ * (false), so the fix prompt can carry its org-word marks through them
+ * (DECISIONS.md 672). Made fresh per text: the second counts people named.
+ */
+export function teamLevelSteps(kind: "text" | "title" = "text"): ReadonlyArray<readonly [RegExp, (match: string, ...groups: string[]) => string, boolean]> {
   // In a sentence, the first person named is "one rep", any after it "another", so two can be told apart
   // (night 3 reading pass). A title keeps "a single rep": it's how the ranking knows a finding is about one person.
   let named = 0;
   const who = (noun: string) => (kind === "title" ? `a single ${noun}` : `${named++ === 0 ? "one" : "another"} ${noun}`);
-  return text
-    .replace(WORST_REP, "The worst rep is at")
-    .replace(REP_OR_USER, (m) => who(/^[Rr]ep /.test(m) ? "rep" : "person"))
-    .replace(/(^|[.!?]\s+)(one|another|a single) (rep|person)/g, (_m, lead: string, first: string, noun: string) => `${lead}${first.charAt(0).toUpperCase()}${first.slice(1)} ${noun}`);
+  return [
+    [WORST_REP, () => "The worst rep is at", true],
+    [REP_OR_USER, (m) => who(/^[Rr]ep /.test(m) ? "rep" : "person"), true],
+    [/(^|[.!?]\s+)(one|another|a single) (rep|person)/g, (_m, lead, first, noun) => `${lead}${first!.charAt(0).toUpperCase()}${first!.slice(1)} ${noun}`, false],
+  ];
 }
 
 export function teamLevelFinding(f: Finding): Finding {
