@@ -24,6 +24,12 @@ export type Figure = {
   linkedTo?: number;
   /** The multiplier it was written with: 1e6 for "£2.9m". */
   scale?: number;
+  /**
+   * On an identifier that is a word of letters and digits ("OAuth2", "Invoice2__c"),
+   * not a web address, an email or a run id. Only such a word can be the
+   * engine's own vocabulary (DECISIONS.md 682).
+   */
+  word?: true;
 };
 
 const MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
@@ -193,7 +199,7 @@ function scanIdentifiers(s: Scanner): void {
 function scanAlphanumeric(s: Scanner): void {
   s.each(/(?<![\w.-])(?=[\w.-]*[A-Za-z_])(?=[\w.-]*\d)[A-Za-z0-9_]+(?:[._-][A-Za-z0-9_]+)*/g, (m, a, b) => {
     if (NUMERIC_TAIL.test(m[0])) return;
-    s.add(a, b, { kind: "identifier" });
+    s.add(a, b, { kind: "identifier", word: true });
   });
 }
 
