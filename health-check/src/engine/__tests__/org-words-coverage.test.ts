@@ -4,13 +4,14 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ALL_MODULES } from "../../domains/index.ts";
 import type { Labels } from "../../extract/labels.ts";
-import type { Finding } from "../../schemas/index.ts";
+import type { Finding, RecommendationType } from "../../schemas/index.ts";
 import { analyseExtracts, clone, loadExtracts, runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
 import { UNCALIBRATED_STAGES } from "../../testing/synthetic-org.ts";
 import { spansIfCurrent } from "../org-words.ts";
 import { UNCONVERTED_RULES } from "./unconverted-rules.ts";
 import { FIX_TABLE } from "../../fix/table.ts";
+import { assemblePrompt } from "../../fix/prompt.ts";
 
 // Which rules write their sentences with said and org (DECISIONS.md 655, 657),
 // held on the synthetic org. Every rule not listed here must come out with each
@@ -288,12 +289,21 @@ const ENGINE_WORDS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * A fix prompt's fixed text, which the rule's table entry and the prompt's own
- * source hold (DECISIONS.md 672): "Draft", "Group" or "Salesforce CPQ" there are
- * the engine's words, written in its steps, not names the org chose.
+ * A fix prompt's fixed text, as data (DECISIONS.md 672): the rule's prompt made
+ * for a finding with no words of the org's, in every recommendation type, so its
+ * steps, checks, Do not list and framing, and nothing else. "Draft", "Group" or
+ * "Salesforce CPQ" there are the engine's words, written in its steps.
  */
-const PROMPT_SOURCE = readFileSync(new URL("../../fix/prompt.ts", import.meta.url), "utf8");
-const promptsOwnWords = (ruleId: string): string => `${JSON.stringify(FIX_TABLE[ruleId]?.prompt ?? {})}\n${PROMPT_SOURCE}`;
+const OWN_WORDS = new Map<string, string>();
+const promptsOwnWords = (ruleId: string): string => {
+  const rule = FIX_TABLE[ruleId];
+  if (!rule) return "";
+  if (!OWN_WORDS.has(ruleId)) {
+    const bare = (recommendationType: RecommendationType) => assemblePrompt({ title: "x", summary: "x", recommendation: "x", recommendationType, subjects: [] }, rule.prompt);
+    OWN_WORDS.set(ruleId, (["remove", "deactivate", "merge", "change", "investigate", "none"] as const).map(bare).join("\n"));
+  }
+  return OWN_WORDS.get(ruleId)!;
+};
 
 /** On the synthetic org, the name is quoted only in sentences of rules not yet converted. */
 const quotedOnlyByUnconverted = (name: string): boolean => {

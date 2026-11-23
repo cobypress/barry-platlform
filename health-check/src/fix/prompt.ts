@@ -2,7 +2,7 @@ import { DESTRUCTIVE_RECOMMENDATIONS, FIX_PROMPT_MAX, type Finding, type Subject
 import { holdsNameOrSecret } from "../narrative/guard.ts";
 import { teamLevelSteps } from "../narrative/select.ts";
 import { spansIfCurrent, type OrgSpan } from "../engine/org-words.ts";
-import { cat, joinMarked, ours, replaceMarked, sliceMarked, unknown, type Marked } from "./marked.ts";
+import { cat, joinMarked, ours, replaceMarked, sliceMarked, theirs, unknown, type Marked } from "./marked.ts";
 import { ORDINARY, PERSON_KINDS, SHARED_NAME_PREFIX } from "../privacy/names.ts";
 import { isSalesforceUserName, tokenCode, UNKNOWN_USER, type Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import type { PromptRule } from "./types.ts";
@@ -137,8 +137,7 @@ function neutral(text: Marked, withheld: readonly Subject[]): Marked {
   // A label that is a token alone is left to teamLevelText, which says it as the executive report does.
   for (const s of [...withheld].sort((a, b) => b.label.length - a.label.length)) {
     if (WHOLE_TOKEN.test(s.label)) continue;
-    // The subject's type is the engine's: every rule sets it from a literal or a segment dimension named in code.
-    out = replaceMarked(out, wholeWord(s.label), `the ${s.type} listed in this finding`, true);
+    out = replaceMarked(out, wholeWord(s.label), cat(ours("the "), subjectType(s.type), ours(" listed in this finding")), true);
   }
   for (const [pattern, by, fixed] of teamLevelSteps()) out = replaceMarked(out, pattern, by, fixed);
   out = replaceMarked(out, ANY_TOKEN, "a record listed in this finding", true);
@@ -146,11 +145,31 @@ function neutral(text: Marked, withheld: readonly Subject[]): Marked {
 }
 
 /**
- * A subject's label with the marks it has where the finding's title and summary
- * show it: a label a rule put together ("Lead Source on Lead") has the org's
- * words and the rule's joining words, and the sentence that shows it says which
- * are which. Every place it's shown must say the same, or the label is unknown,
- * and so is one shown nowhere (DECISIONS.md 672).
+ * The subject types the engine writes of its own: the literal types rules set,
+ * and the segment dimensions named in their code. A rule sets the type in code
+ * today, but nothing in the types holds it there (a dimension such as
+ * historic pipeline's "from <stage>" is built from a stage), so any other type
+ * is said as the org's words, the safe side (DECISIONS.md 672).
+ */
+export const ENGINE_SUBJECT_TYPES: ReadonlySet<string> = new Set([
+  ...PERSON_OR_RECORD, ...LISTABLE,
+  "allowance", "campaign type", "closed quarter", "dashboard", "group", "how it's granted", "installed app", "lead source", "origin", "owner type",
+  "priority", "rep", "s-control", "source", "storage", "team", "type",
+]);
+
+const subjectType = (type: string): Marked => (ENGINE_SUBJECT_TYPES.has(type) ? ours(type) : theirs(type));
+
+const WORD = /[\p{L}\p{N}_]/u;
+/** Whether `at` in `text` is a word's edge or an org span's. */
+const edgeAt = (m: Marked, at: number): boolean => at === 0 || at === m.text.length || !(WORD.test(m.text[at - 1]!) && WORD.test(m.text[at]!)) || m.spans!.some((s) => s.start === at || s.end === at);
+
+/**
+ * A subject's label as the items line lists it. Every label there is the org's
+ * (DECISIONS.md 672), so it is never listed without an org span in it: one
+ * span, whole, unless the title or summary shows it with finer marks, a label a
+ * rule put together ("Lead Source on Lead", " on " the rule's). Those are used
+ * only from a place that starts and ends on a word's edge or a span's and holds
+ * at least one org span; where such places disagree, the label is unknown.
  */
 function labelMarks(label: string, shown: readonly Marked[]): Marked {
   let found: OrgSpan[] | null = null;
@@ -158,11 +177,12 @@ function labelMarks(label: string, shown: readonly Marked[]): Marked {
     if (!m.spans) return unknown(label);
     for (let at = m.text.indexOf(label); at !== -1; at = m.text.indexOf(label, at + 1)) {
       const spans = sliceMarked(m, at, at + label.length).spans!;
+      if (spans.length === 0 || !edgeAt(m, at) || !edgeAt(m, at + label.length)) continue;
       if (found === null) found = spans;
       else if (found.length !== spans.length || found.some((s, i) => s.start !== spans[i]!.start || s.end !== spans[i]!.end)) return unknown(label);
     }
   }
-  return found === null ? unknown(label) : { text: label, spans: found };
+  return found === null ? theirs(label) : { text: label, spans: found };
 }
 
 /** Names in a list, "a, b and 3 more": each name as its sentence marks it, the joining words ours. */

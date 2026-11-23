@@ -9,7 +9,7 @@ import type { DomainModule } from "../../domains/types.ts";
 import { org, said, textSha256 } from "../../engine/org-words.ts";
 import type { Rule } from "../../engine/rule.ts";
 import { cat, ours, replaceMarked, sliceMarked, theirs } from "../../fix/marked.ts";
-import { assembleMarked, markedFixPrompt } from "../../fix/prompt.ts";
+import { assembleMarked, ENGINE_SUBJECT_TYPES, markedFixPrompt } from "../../fix/prompt.ts";
 import { FIX_TABLE } from "../../fix/table.ts";
 import { buildReport } from "../../narrative/sections.ts";
 import { loadRun } from "../../render/render-run.ts";
@@ -126,6 +126,84 @@ describe("every rule's prompt has the org's words marked, exactly (decision 672)
     const items = text.indexOf("Named in it: ");
     const spans = picklists.orgWords!.fixPrompt!.orgWords.filter((s) => s.start > items);
     assert.ok(spanTexts(text, spans).includes("Lead Source") && !spanTexts(text, spans).some((s) => s.includes(" on ")), spanTexts(text, spans).join(" | "));
+  });
+});
+
+describe("every label the items line lists is the org's, inside a span (decision 672, fix round 1)", () => {
+  const rule = FIX_TABLE["aut.flows-without-fault-paths"]!.prompt;
+  const mk = (text: string, spans: Array<{ start: number; end: number }> = []) => ({ spans, textSha256: textSha256(text) });
+  const listedSpans = (r: { text: string; spans: Array<{ start: number; end: number }> | null }) => {
+    const from = r.text.indexOf("Named in it: ");
+    return spanTexts(r.text, r.spans!.filter((s) => s.start >= from));
+  };
+
+  test("flows named after the engine's own words in the summary are each one span, never listed outside every span (the reviewer's probe)", () => {
+    const title = "Flow failures aren't handled";
+    const summary = "Of 12 active flows that write data, 3 are missing fault paths on 5 elements. When one of those fails, the user sees a generic error and the failure isn't logged anywhere useful.";
+    const recommendation = "Add a fault path to each element, with a shared way of logging failures.";
+    const names = ["When one of those fails", "write data", "the user", "s a generic error"];
+    const r = assembleMarked({ title, summary, recommendation, recommendationType: "change", orgWords: { title: mk(title), summary: mk(summary), recommendation: mk(recommendation) }, subjects: names.map((label) => ({ type: "flow", label })) }, rule);
+    assert.match(r.text, /Named in it: When one of those fails, write data, the user and s a generic error\./);
+    assert.deepEqual(listedSpans(r), names);
+  });
+
+  test("objects the engine names in its own words, such as Account and Opportunity, are each a span when listed as subjects", () => {
+    const title = "Account and Opportunity have too many fields";
+    const summary = "Account has 400 custom fields and Opportunity 300.";
+    const recommendation = "Review the fields.";
+    const r = assembleMarked({ title, summary, recommendation, recommendationType: "change", orgWords: { title: mk(title), summary: mk(summary), recommendation: mk(recommendation) }, subjects: [{ type: "object", label: "Account" }, { type: "object", label: "Opportunity" }] }, rule);
+    assert.deepEqual(listedSpans(r), ["Account", "Opportunity"]);
+  });
+
+  test("finer marks come only from a place on word or span edges that holds an org span; places that disagree leave the prompt unmarked", () => {
+    // "Lead Source on Lead" as a rule says it: the joining word outside.
+    const title = "Lead Source on Lead is long";
+    const own = { title, summary: "It has 30 values.", recommendation: "Review it.", recommendationType: "change" as const, subjects: [{ type: "picklist", label: "Lead Source on Lead" }] };
+    const words = (t: string, spans: Array<{ start: number; end: number }>) => ({ title: mk(t, spans), summary: mk(own.summary), recommendation: mk(own.recommendation) });
+    assert.deepEqual(listedSpans(assembleMarked({ ...own, orgWords: words(title, [{ start: 0, end: 11 }, { start: 15, end: 19 }]) }, rule)), ["Lead Source", "Lead"]);
+    // A place inside a longer word, on no span's edge, doesn't count (here the title also shows the label nowhere else), so the label is one span.
+    const inWord = "XLead Source on Lead is long";
+    assert.deepEqual(listedSpans(assembleMarked({ ...own, title: inWord, orgWords: words(inWord, [{ start: 0, end: 12 }, { start: 16, end: 20 }]) }, rule)), ["Lead Source on Lead"]);
+    // Shown twice, marked two ways: unknown.
+    const twice = "Lead Source on Lead and Lead Source on Lead";
+    assert.equal(assembleMarked({ ...own, title: twice, orgWords: words(twice, [{ start: 0, end: 11 }, { start: 15, end: 19 }, { start: 24, end: 43 }]) }, rule).spans, null);
+  });
+
+  test("a subject type the engine doesn't write of its own is said as the org's: historic pipeline's 'from <stage>' never reaches a prompt unmarked", () => {
+    assert.ok(!ENGINE_SUBJECT_TYPES.has("from Qualification"));
+    const title = "Queue [[user:U0001]] is slow";
+    const r = assembleMarked({ title, summary: "It is slow.", recommendation: "Look.", recommendationType: "change", orgWords: { title: mk(title, [{ start: 6, end: 20 }]), summary: mk("It is slow."), recommendation: mk("Look.") }, subjects: [{ type: "from Qualification", label: "Queue [[user:U0001]]" }] }, rule);
+    assert.match(r.text, /What we found: the from Qualification listed in this finding is slow\./);
+    assert.deepEqual(spanTexts(r.text, r.spans!), ["from Qualification"]);
+    const known = assembleMarked({ title, summary: "It is slow.", recommendation: "Look.", recommendationType: "change", orgWords: { title: mk(title, [{ start: 6, end: 20 }]), summary: mk("It is slow."), recommendation: mk("Look.") }, subjects: [{ type: "queue", label: "Queue [[user:U0001]]" }] }, rule);
+    assert.deepEqual(known.spans, []);
+  });
+
+  test("every subject type the synthetic org's rules set is one the engine writes of its own", () => {
+    const types = new Set(loaded.input.findings.flatMap((f) => f.subjects.map((s) => s.type)));
+    assert.ok(types.size > 20);
+    assert.deepEqual([...types].filter((t) => !ENGINE_SUBJECT_TYPES.has(t)), []);
+  });
+
+  test("on the synthetic org, every label a prompt lists is inside a span", () => {
+    const listing = loaded.input.findings.filter((f) => f.fixPrompt?.includes("Named in it: "));
+    assert.ok(new Set(listing.map((f) => f.ruleId)).size >= 10, `${listing.length} prompts list names`);
+    for (const f of listing) {
+      const text = f.fixPrompt!;
+      const spans = f.orgWords!.fixPrompt!.spans;
+      const from = text.indexOf("Named in it: ") + "Named in it: ".length;
+      const line = text.slice(from, text.indexOf("\n", from) === -1 ? undefined : text.indexOf("\n", from));
+      for (const label of new Set(f.subjects.map((s) => s.label))) {
+        const at = line.indexOf(label);
+        if (at === -1) continue;
+        const [a, b] = [from + at, from + at + label.length];
+        assert.ok(spans.some((s) => s.start < b && s.end > a), `${f.ruleId}: "${label}" holds an org span`);
+        // Every character of the label is in a span but a rule's joining word between two of the org's, as the sentence that shows it marks it.
+        let outside = "";
+        for (let i = a; i < b; i++) if (!spans.some((s) => s.start <= i && i < s.end)) outside += text[i];
+        assert.match(outside, /^(?: on |: | \(|\))*$/, `${f.ruleId}: "${label}" outside its spans: "${outside}"`);
+      }
+    }
   });
 });
 

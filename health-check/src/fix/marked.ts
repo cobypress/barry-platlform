@@ -57,13 +57,14 @@ const cuts = (spans: readonly OrgSpan[], from: number, to: number): boolean => s
 
 /**
  * `text.replace(pattern, by)` for a global pattern, carrying the marks. With
- * `fixed`, what a match becomes is the engine's words entirely: the match may
- * take in whole org spans, which go, but never cut one. Without it the rewrite
+ * `fixed`, what a match becomes is new text, the engine's words unless the
+ * replacer gives it marked (a subject's type the engine can't vouch for): the
+ * match may take in whole org spans, which go, but never cut one. Without it the rewrite
  * keeps part of the match, so only the characters that change are new, and they
  * may replace only the engine's characters. Anything else is unknown. The
  * replacer is called once per match, in order, as String.replace calls it.
  */
-export function replaceMarked(m: Marked, pattern: RegExp, by: string | ((match: string, ...groups: string[]) => string), fixed: boolean): Marked {
+export function replaceMarked(m: Marked, pattern: RegExp, by: string | Marked | ((match: string, ...groups: string[]) => string), fixed: boolean): Marked {
   if (!pattern.global) throw new Error("replaceMarked takes a global pattern");
   // A replacement string could hold $ patterns, which would echo the match: worked out by String.replace, unknown.
   if (typeof by === "string" && by.includes("$")) return unknown(m.text.replace(pattern, by));
@@ -73,14 +74,17 @@ export function replaceMarked(m: Marked, pattern: RegExp, by: string | ((match: 
   for (const hit of m.text.matchAll(pattern)) {
     const [from, match] = [hit.index, hit[0]];
     const to = from + match.length;
-    const out = typeof by === "string" ? by : (by as (...args: unknown[]) => string)(match, ...hit.slice(1), from, m.text);
+    const made = typeof by === "function" ? (by as (...args: unknown[]) => string)(match, ...hit.slice(1), from, m.text) : by;
     parts.push(sliceMarked(m, at, from));
     at = to;
     if (fixed) {
       if (m.spans && cuts(m.spans, from, to)) known = false;
-      parts.push(ours(out));
+      parts.push(typeof made === "string" ? ours(made) : made);
       continue;
     }
+    // Only fixed rewrites take marked text.
+    if (typeof made !== "string") throw new Error("A rewrite that keeps part of its match gives a string");
+    const out = made;
     // What the match and its rewrite share at each end is kept as it was, marks and all.
     let head = 0;
     while (head < match.length && head < out.length && match[head] === out[head]) head++;

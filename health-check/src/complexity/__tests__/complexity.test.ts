@@ -183,7 +183,7 @@ describe("the synthetic org", () => {
     const print = fingerprint(dir);
     assert.equal(print["scores.json"], "17cdb1708449d000");
     // Moved since by decision 628's hours and prompts, then 655's, 663's and 672's org-word marks, alone, which the fingerprint test holds.
-    assert.equal(print["findings.json"], "2e88fc22654a50ab");
+    assert.equal(print["findings.json"], "299bb781fb00d50f");
     assert.equal(print["metrics.json"], "10d5f5733555b541");
     assert.equal(print["raw-notes.md"], "5e5e3581e490bb64");
     const scores = JSON.parse(readFileSync(join(dir, "scores.json"), "utf8")) as Score[];
