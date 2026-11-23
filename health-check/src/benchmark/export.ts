@@ -101,15 +101,25 @@ type Read = { metrics: Metric[]; scores: Score[]; findings: Finding[]; lintTotal
 
 /**
  * On a run whose calibration was read from the org's settings (DECISIONS.md
- * 693), a figure resting on the open stages' unconfirmed order, on several
- * record types read as one, or on a stage's meaning taken from Salesforce's
- * flags would go into the set with no note, which a benchmark row can't carry:
- * it is left out. Every other figure goes in, as the owner's policy is to store broadly.
+ * 693), what rests on the deals rests on stages no person confirmed: the open
+ * stages' order, lost stages read from Salesforce's flags, and several record
+ * types read as one. A benchmark row carries no note, so every figure read
+ * from the pipeline is left out, keyed on what it is (its id, its rule or its
+ * area), never on how a note is worded. Every other figure goes in, as the
+ * owner's policy is to store broadly.
  */
-const UNCONFIRMED: readonly RegExp[] = [/We took the order of your open stages from Salesforce's own stage settings/, /which may be separate sales processes/, /so we used Salesforce's own setting for/];
-const ORDER_METRICS: ReadonlySet<string> = new Set(["historic.stage_conversion"]);
-export const UNCONFIRMED_SKIP = "This figure rests on a reading of the org's stages that no person has confirmed, so it's left out of the benchmark set.";
-const unconfirmed = (texts: readonly string[]): boolean => texts.some((t) => UNCONFIRMED.some((p) => p.test(t)));
+const PIPELINE_DOMAINS: ReadonlySet<string> = new Set(["historic_pipeline", "current_pipeline", "forecast", "revenue_opportunities"]);
+const PIPELINE_FACT_RULES: ReadonlySet<string> = new Set(["dq.open-opps-past-close", "dq.opps-inactive-owner", "dq.open-opps-missing-amount", "dq.open-opps-no-activity", "dq.loss-reason-missing"]);
+export const UNCONFIRMED_SKIP = "This figure is read from the deals, whose stages no person has confirmed on this run, so it's left out of the benchmark set.";
+/** Whether a benchmark figure is read from the pipeline. */
+export function readsPipeline(source: Source): boolean {
+  if (source.from === "score") return PIPELINE_DOMAINS.has(source.domain);
+  if (source.from === "metric") return /^(?:historic|current|forecast)\./.test(source.id);
+  if (source.from === "fact") return PIPELINE_FACT_RULES.has(source.ruleId);
+  return false;
+}
+/** What the export says of an automatic run's user band: nobody has told us which users are integrations or shared accounts. */
+export const USER_BAND_NOTE = "Nobody has confirmed which users are integrations, shared or system accounts, so the user band counts every active user apart from those on integration licences.";
 
 /** The run's PMD totals, or null when it had no step. A file that doesn't parse is refused rather than read as not measured. */
 export function readLintTotals(dir: string): LintTotals | null {
@@ -129,7 +139,6 @@ function figureOf(input: Read, unit: Unit, source: Source): { value: number } | 
     const metric = input.metrics.find((m) => m.id === source.id);
     if (!metric) return { reason: "The run has no such metric." };
     if (metric.status !== "measured") return { reason: metric.reason };
-    if (input.orgSettings && (ORDER_METRICS.has(metric.id) || unconfirmed(metric.assumptions))) return { reason: UNCONFIRMED_SKIP };
     // A changed unit would put a figure in the wrong comparison, so it's left out.
     if (metric.unit !== unit) return { reason: `The run measured this in ${metric.unit}, not ${unit}.` };
     return { value: metric.value };
@@ -150,7 +159,6 @@ function figureOf(input: Read, unit: Unit, source: Source): { value: number } | 
   const results = input.findings.filter((f) => f.ruleId === source.ruleId);
   const measured = results.filter((f) => f.status !== "not_measurable");
   if (measured.length === 0) return { reason: results[0]?.notMeasurableReason ?? "The run has no result for this check." };
-  if (input.orgSettings && unconfirmed(measured.map((f) => f.summary))) return { reason: UNCONFIRMED_SKIP };
   // These rules give one org-wide result. More than one would mean the
   // figure is per subject, which doesn't belong here.
   if (measured.length > 1) return { reason: `The check gave ${measured.length} results, so there's no single org-wide figure.` };
@@ -185,6 +193,10 @@ export function benchmarkFigures(input: Read & { asRead?: Omit<Read, "scores"> }
   const skipped: Skipped[] = [];
   for (const { key, unit, source } of BENCHMARK_METRICS) {
     const skip = (reason: string): void => void skipped.push({ metricKey: key, reason });
+    if (input.orgSettings && readsPipeline(source)) {
+      skip(UNCONFIRMED_SKIP);
+      continue;
+    }
     const found = figureOf(input, unit, source);
     if ("reason" in found) {
       skip(found.reason);
@@ -291,7 +303,9 @@ export function orgProfile(dir: string, run: Run, calibration: Calibration): Org
   if (users.status !== "ok") throw new Error(`Users couldn't be read in this run (${users.reason}), so the user band can't be worked out.`);
   // People, not accounts: the same exclusions the user rules make.
   const nonPerson = new Set(calibration.users.filter((u) => ["shared", "system", "integration", "test"].includes(u.kind)).map((u) => u.userId.slice(0, 15)));
-  const activeUsers = users.data.filter((u) => u.IsActive && !nonPerson.has(u.Id.slice(0, 15))).length;
+  // An automatic run's calibration names none (DECISIONS.md 693): the integration licences are left out, as the adoption figures do, and the export says so.
+  const orgSettings = calibration.source === "org_settings";
+  const activeUsers = users.data.filter((u) => u.IsActive && !nonPerson.has(u.Id.slice(0, 15)) && !(orgSettings && /\bintegration\b/i.test(u.Profile?.UserLicense?.Name ?? ""))).length;
 
   const pipeline = loadPipeline(ctx);
   if (pipeline.status !== "ok") throw new Error(`${pipeline.reason} So the deal size band can't be worked out.`);
@@ -412,7 +426,7 @@ function prepareBenchmark(options: Omit<BenchmarkOptions, "storeDir">): Prepared
   // Built field by field, so nothing from the run can ride along.
   const rows = figures.map((f) => BenchmarkRow.parse({ metricKey: f.metricKey, value: f.value, unit: f.unit, ...shared }));
   const record = ConsentRecord.parse({ consent, recordedAt: (options.now ?? new Date()).toISOString(), rowsWritten: rows.length, metricKeys: rows.map((r) => r.metricKey) });
-  return { dir, rows, skipped, profile, consentPath, record };
+  return { dir, rows, skipped: calibration.source === "org_settings" ? [...skipped, { metricKey: "userBand", reason: USER_BAND_NOTE }] : skipped, profile, consentPath, record };
 }
 
 /** The run, or its org within the window, is already in the set. Not a fault: there's nothing more to add. */

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { marksOfMetric, rewordFinding, rewordMetric } from "./automatic-words.ts";
 import type { DomainModule } from "../domains/types.ts";
 import type { Extractor } from "../extract/types.ts";
 import { Pseudonymiser, UNKNOWN_USER } from "../privacy/pseudonymiser.ts";
@@ -341,5 +342,15 @@ function analyseWithin(input: AnalysisInput): AnalysisOutput {
   assumed = new Set();
   // Only what ended as an issue keeps its records, so a list never outlives its finding.
   const issues = new Set(findings.filter((f) => f.status === "issue").map((f) => f.id));
+  // An automatic run's texts said for what they are on it, and its metrics' texts marked (DECISIONS.md 693):
+  // last, once every rule has read the metrics as built, so no reworded text is ever put into a sentence said makes.
+  if (calibration.source === "org_settings") {
+    return {
+      findings: findings.map((f) => Finding.parse(rewordFinding(f))),
+      metrics: metrics.map((m) => Metric.parse(rewordMetric(m, marksOfMetric(m)))),
+      manualSteps: [...raised.values()],
+      records: records.filter((r) => issues.has(r.findingId)),
+    };
+  }
   return { findings, metrics, manualSteps: [...raised.values()], records: records.filter((r) => issues.has(r.findingId)) };
 }

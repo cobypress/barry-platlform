@@ -245,7 +245,8 @@ function salesCycle(ctx: Ctx, data: Ready): Metric[] {
       id,
       label,
       unit: "days",
-      definition: `Median days from creation to final close, for ${outcome} deals closed in the window. The close comes from stage history, or CloseDate where there is none.`,
+      // Each whole, so the digest knows it as the engine's own text (DECISIONS.md 693).
+      definition: outcome === "won" ? "Median days from creation to final close, for won deals closed in the window. The close comes from stage history, or CloseDate where there is none." : "Median days from creation to final close, for lost deals closed in the window. The close comes from stage history, or CloseDate where there is none.",
       assumptions: salesCycleAssumptionDays ? [`The calibration assumes a sales cycle of ${salesCycleAssumptionDays} days`] : [],
     });
     if (data.unmapped.finalStages.length > 0) return notMeasurable(definition, unmappedReason("stages", data.unmapped.finalStages));

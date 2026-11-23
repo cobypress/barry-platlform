@@ -110,8 +110,9 @@ describe("the digest marks the org's words (decision 655)", () => {
     const before = digestOf(bare);
     // The areas', plan's and value groups' marks (DECISIONS.md 663) come from the engine's own tables, not the findings, so they are taken out of both.
     assert.deepEqual(unmarked(digest), unmarked(before));
-    assert.deepEqual({ ...digest, findings: digest.findings.map(strip) }, { ...before, ...unmarkedParts(digest) });
-    assert.ok(before.findings.every((f) => f.orgWords === undefined));
+    assert.deepEqual({ ...digest, findings: digest.findings.map(strip) }, { ...before, findings: before.findings.map(strip), ...unmarkedParts(digest) });
+    // A sized value's unit and period are marked by the digest itself, from the engine's own texts (DECISIONS.md 693): nothing else is marked without the findings' marks.
+    assert.ok(before.findings.every((f) => f.orgWords === undefined || Object.keys(f.orgWords).every((k) => k === "valueUnit" || k === "valuePeriod")));
     const marked = buildReport({ ...loaded.input });
     const plain = buildReport({ ...loaded.input, findings: bare });
     assert.deepEqual(marked.overall, plain.overall);

@@ -1,4 +1,4 @@
-import { said, type Said } from "../engine/org-words.ts";
+import { orgWordsOf, said, type Said } from "../engine/org-words.ts";
 import { moneySaid } from "../engine/said-forms.ts";
 import { notSized, type RuleContext } from "../engine/rule.ts";
 import type { Metric, Value } from "../schemas/index.ts";
@@ -22,7 +22,8 @@ export function atOwnWinRate(ctx: Pick<RuleContext, "metrics" | "calibration" | 
   if (options.multiCurrency) return notSized(said`The org is multi-currency, so these amounts can't be added.`);
   if (amount <= 0) return notSized(said`These records have no amounts to size.`);
   const rate = measuredRate(ctx, "historic.win_rate");
-  if ("reason" in rate) return notSized(`We won't size this without your own win rate, which isn't measurable: ${rate.reason}`);
+  // Said only when the reason itself was, so its marks come with it; a reason said didn't make stays unknown (DECISIONS.md 693).
+  if ("reason" in rate) return notSized(orgWordsOf(rate.reason) ? said`We won't size this without your own win rate, which isn't measurable: ${rate.reason as Said}` : `We won't size this without your own win rate, which isn't measurable: ${rate.reason}`);
   return {
     kind: "revenue",
     amount: Math.round((amount * rate.value) / 100),

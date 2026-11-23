@@ -5,7 +5,7 @@ import { pageDataset } from "../render/page-dataset.ts";
 import { heldPattern, MASK, maskInput } from "../render/repair.ts";
 import { replaceMarked, type Marked } from "../fix/marked.ts";
 import { HELD_FOR_US_MASKS } from "../render/render-released.ts";
-import { RunDigest } from "../schemas/digest.ts";
+import { RunDigest, type SentenceOrgWords } from "../schemas/digest.ts";
 import type { Inventory } from "../schemas/inventory.ts";
 import { buildDigest, ID_MAPS, STRUCTURAL_KEYS } from "./build.ts";
 
@@ -82,37 +82,153 @@ export function digestDataset(report: BuiltReport, pseudonyms: Pseudonymiser): F
   };
 }
 
-const MARKED = ["title", "summary", "recommendation", "notMeasurableReason"] as const;
+type Marks = SentenceOrgWords | null | undefined;
+/** Where a text's marks are held in the digest: read them, and write new ones. */
+type Slot = { get: (d: RunDigest, at: number[]) => Marks; set: (d: RunDigest, at: number[], marks: SentenceOrgWords) => void };
 
-/** A finding's sentences the digest serves with no marks: unknown, so the portal couldn't set the org's words apart. Empty text needs none. */
-export function unmarkedSentences(digest: RunDigest): number {
-  return digest.findings.reduce((n, f) => n + MARKED.filter((k) => typeof f[k] === "string" && f[k] !== "" && !f.orgWords?.[k]).length, 0);
+const OURS: SentenceOrgWords = { orgWordsMarked: true, orgWords: [] };
+type AnyMarks = Record<string, unknown> | undefined;
+const slotOf = <K extends string>(owner: (d: RunDigest, at: number[]) => { orgWords?: unknown } | undefined, key: K, item = false): Slot => ({
+  get: (d, at) => {
+    const held = (owner(d, at)?.orgWords as AnyMarks)?.[key];
+    return (item ? (held as Marks[] | undefined)?.[at.at(-1)!] : held) as Marks;
+  },
+  set: (d, at, marks) => {
+    const o = owner(d, at)! as { orgWords?: Record<string, unknown> };
+    o.orgWords ??= {};
+    if (!item) o.orgWords[key] = marks;
+    else {
+      const list = (o.orgWords[key] as Marks[] | undefined) ?? [];
+      list[at.at(-1)!] = marks;
+      o.orgWords[key] = list;
+    }
+  },
+});
+const finding = (d: RunDigest, at: number[]) => d.findings[at[0]!];
+const metric = (d: RunDigest, at: number[]) => d.metrics[at[0]!];
+const area = (d: RunDigest, at: number[]) => d.areas[at[0]!];
+
+/**
+ * Every text the digest serves, by its path with indices as [], and where its
+ * marks are (DECISIONS.md 693). A text at a path not here has no marks, so it
+ * is held: a field added to the digest is held until it's marked here, and a
+ * test reads every string field of the schema and fails on one not listed.
+ * `fixed` is a field whose schema allows only words of ours.
+ */
+export const TEXT_SLOTS: Readonly<Record<string, Slot | "fixed">> = {
+  "findings[].title": slotOf(finding, "title"),
+  "findings[].summary": slotOf(finding, "summary"),
+  "findings[].recommendation": slotOf(finding, "recommendation"),
+  "findings[].notMeasurableReason": slotOf(finding, "notMeasurableReason"),
+  "findings[].value.reason": slotOf(finding, "valueReason"),
+  "findings[].value.assumptions[]": slotOf(finding, "valueAssumptions", true),
+  "findings[].value.unit": slotOf(finding, "valueUnit"),
+  "findings[].value.period": slotOf(finding, "valuePeriod"),
+  "findings[].effortHours.basis": slotOf(finding, "hoursBasis"),
+  "findings[].fixPrompt": slotOf(finding, "fixPrompt"),
+  "areas[].label": slotOf(area, "label"),
+  "areas[].reason": slotOf(area, "reason"),
+  "metrics[].label": slotOf(metric, "label"),
+  "metrics[].definition": slotOf(metric, "definition"),
+  "metrics[].reason": slotOf(metric, "reason"),
+  "metrics[].assumptions[]": slotOf(metric, "assumptions", true),
+  "metrics[].exclusions[]": slotOf(metric, "exclusions", true),
+  "metrics[].unit": "fixed",
+  "value.groups[].label": slotOf((d, at) => d.value.groups[at[0]!], "label"),
+  "plan.phases[].title": slotOf((d, at) => d.plan.phases[at[0]!], "title"),
+  "plan.hoursTotal.note": slotOf((d) => d.plan.hoursTotal, "note"),
+  "overall.reason": slotOf((d) => (d.overall.status === "not_measurable" ? d.overall : undefined), "reason"),
+};
+
+export type DigestText = { path: string; at: number[]; text: string };
+
+/** Every text the digest serves, as digestTexts reads them, with where each is. */
+export function digestTextsAt(value: unknown, path = "", at: number[] = [], key = ""): DigestText[] {
+  if (STRUCTURAL_KEYS.has(key) || ID_MAPS.has(key) || key === "orgWords") return [];
+  if (typeof value === "string") return [{ path, at, text: value }];
+  if (Array.isArray(value)) return value.flatMap((v, i) => digestTextsAt(v, `${path}[]`, [...at, i], key));
+  if (value && typeof value === "object") return Object.entries(value).flatMap(([k, v]) => digestTextsAt(v, path ? `${path}.${k}` : k, at, k));
+  return [];
+}
+
+/** A text's marks, or null when it has none it can be served with. An empty text needs none. */
+export function marksOf(d: RunDigest, t: DigestText): SentenceOrgWords | null {
+  if (t.text === "") return OURS;
+  const slot = TEXT_SLOTS[t.path];
+  if (slot === "fixed") return OURS;
+  return slot?.get(d, t.at) ?? null;
+}
+
+const METRIC_TEXT = /^metrics\[\]\./;
+
+/**
+ * Every text that lost its marks to a mask (682: they no longer fit its hash)
+ * marked again, from the same text before the mask, with each mask placed as
+ * fixed words of ours, the way the fix prompt carries its marks (672): a mask
+ * that would cut through the org's words leaves the text unknown. Only where
+ * the result is exactly the masked text.
+ */
+function remarked(before: RunDigest, after: RunDigest, raws: string[]): RunDigest {
+  const out = structuredClone(after);
+  const was = new Map(digestTextsAt(before).map((t) => [`${t.path}@${t.at.join(",")}`, t]));
+  for (const t of digestTextsAt(out)) {
+    const slot = TEXT_SLOTS[t.path];
+    const old = was.get(`${t.path}@${t.at.join(",")}`);
+    if (!slot || slot === "fixed" || !old || old.text === t.text || slot.get(out, t.at)) continue;
+    const held = slot.get(before, old.at);
+    if (!held) continue;
+    let m: Marked = { text: old.text, spans: held.orgWords };
+    for (const raw of raws) m = replaceMarked(m, heldPattern(raw), MASK, true);
+    if (m.spans && m.text === t.text) slot.set(out, t.at, { orgWordsMarked: true, orgWords: m.spans });
+  }
+  const parsed = RunDigest.safeParse(out);
+  return parsed.success ? parsed.data : after;
 }
 
 /**
- * A finding's sentence a mask changed loses its marks (682: they no longer fit
- * its hash). Each is marked again here, from the sentence as it was, with each
- * mask placed as fixed words of ours, the way the fix prompt carries its marks
- * (672): a mask that would cut through the org's words leaves the sentence
- * unknown, and so held. Only where the result is exactly the masked sentence.
+ * Rule 10's marks, enforced (DECISIONS.md 693). A metric's text with no marks
+ * is withheld whole, as "(detail withheld)", and counted with the masks; any
+ * other text with none is counted as unmarked, and the digest is held.
  */
-function remarked(before: RunDigest, after: RunDigest, raws: string[]): RunDigest {
-  const was = new Map(before.findings.map((f) => [f.id, f]));
-  const findings = after.findings.map((f) => {
-    const old = was.get(f.id);
-    if (!old) return f;
-    const marks = { ...f.orgWords };
-    for (const key of MARKED) {
-      const [then, now, held] = [old[key], f[key], old.orgWords?.[key]];
-      if (marks[key] || !held || typeof then !== "string" || typeof now !== "string" || then === now) continue;
-      let m: Marked = { text: then, spans: held.orgWords };
-      for (const raw of raws) m = replaceMarked(m, heldPattern(raw), MASK, true);
-      if (m.spans && m.text === now) marks[key] = { orgWordsMarked: true, orgWords: m.spans };
+export function enforceMarks(digest: RunDigest): { digest: RunDigest; withheld: number; unmarked: number } {
+  const out = structuredClone(digest);
+  let withheld = 0;
+  let unmarked = 0;
+  for (const t of digestTextsAt(digest)) {
+    if (marksOf(digest, t)) continue;
+    const slot = TEXT_SLOTS[t.path];
+    if (METRIC_TEXT.test(t.path) && slot && slot !== "fixed") {
+      setText(out, t, MASK);
+      slot.set(out, t.at, OURS);
+      withheld++;
+    } else unmarked++;
+  }
+  const parsed = RunDigest.safeParse(out);
+  return parsed.success ? { digest: parsed.data, withheld, unmarked } : { digest, withheld: 0, unmarked: unmarked + withheld };
+}
+
+/** Puts a text in place by its path. */
+function setText(d: RunDigest, t: DigestText, text: string): void {
+  const keys = t.path.split(".");
+  let node: unknown = d;
+  let i = 0;
+  keys.forEach((k, n) => {
+    const name = k.replace(/\[\]/g, "");
+    const arrays = (k.match(/\[\]/g) ?? []).length;
+    const last = n === keys.length - 1;
+    if (last && arrays === 0) return void ((node as Record<string, unknown>)[name] = text);
+    node = (node as Record<string, unknown>)[name];
+    for (let a = 0; a < arrays; a++) {
+      const idx = t.at[i++]!;
+      if (last && a === arrays - 1) return void ((node as unknown[])[idx] = text);
+      node = (node as unknown[])[idx];
     }
-    return Object.keys(marks).length > 0 ? { ...f, orgWords: marks } : f;
   });
-  const parsed = RunDigest.safeParse({ ...after, findings });
-  return parsed.success ? parsed.data : after;
+}
+
+/** A text the digest serves with no marks, after the metrics' are withheld: unknown, so the portal couldn't set the org's words apart. */
+export function unmarkedSentences(digest: RunDigest): number {
+  return digestTextsAt(digest).filter((t) => !marksOf(digest, t)).length;
 }
 
 const masksIn = (digest: RunDigest): number => digestTexts(digest).reduce((n, text) => n + text.split(MASK).length - 1, 0);
@@ -139,8 +255,11 @@ export function checkedDigest({ input, pseudonyms, inventory, madeAt, build = bu
     }
   }
   const unmatched = untraced(digest, set).length;
+  // A metric's text that can't be marked is withheld, and counted with the masks; any other is held.
+  const enforced = enforceMarks(digest);
+  digest = enforced.digest;
   const masks = masksIn(digest);
-  const unmarked = unmarkedSentences(digest);
+  const unmarked = enforced.unmarked;
   const held = unmatched > 0 || masks > HELD_FOR_US_MASKS || unmarked > 0 ? "digest_held" : null;
   return { digest, masks, unmatched, unmarked, held };
 }

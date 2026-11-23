@@ -1,4 +1,5 @@
 import type { RuleContext } from "../../engine/rule.ts";
+import { org, said } from "../../engine/org-words.ts";
 import { stagesExtractor } from "../../extract/opportunities.ts";
 import type { Evidence, Metric, MetricSegment, SeriesPoint } from "../../schemas/index.ts";
 import type { Deal, PipelineData } from "../historic-pipeline/cohort.ts";
@@ -97,7 +98,8 @@ function weightedPipeline(deals: Deal[], rates: Map<string, Cohort>, minSample: 
     if (!cohort || cohort.rate === null) {
       const closed = cohort?.n ?? 0;
       segments.push({ dimension: "stage", key: stage, n: group.length, value: null, notMeasurableReason: `${SEGMENT_NOTE}: ${closed} closed deals were in this stage, of ${minSample}` });
-      unweighted.push(`${group.length} open deals in ${stage}, where too few closed deals were in the stage to weight it`);
+      // Said, so the stage is marked as the org's (DECISIONS.md 693).
+      unweighted.push(said`${group.length} open deals in ${org(stage)}, where too few closed deals were in the stage to weight it`);
       continue;
     }
     const weighted = (group.reduce((sum, d) => sum + (d.Amount ?? 0), 0) * cohort.rate) / 100;
@@ -165,7 +167,7 @@ export function deliveryOutlook(ctx: Ctx, data: Ready, deals: Deal[], evidence: 
   const noAmount = weighted.length - priced.length;
   const metrics: Metric[] = [];
   if (data.multiCurrency) metrics.push({ ...definitions.value, ...shared, exclusions, status: "not_measurable", reason: MULTI_CURRENCY });
-  else metrics.push({ ...definitions.value, ...shared, exclusions: [...exclusions, ...(noAmount ? [`${noAmount} weighted open deals with no amount add nothing to value`] : [])], assumptions: [...assumptions, `Amounts in ${currency}`], status: "measured", ...build(valueOf) });
+  else metrics.push({ ...definitions.value, ...shared, exclusions: [...exclusions, ...(noAmount ? [`${noAmount} weighted open deals with no amount add nothing to value`] : [])], assumptions: [...assumptions, said`Amounts in ${org(currency)}`], status: "measured", ...build(valueOf) });
   metrics.push({ ...definitions.deals, ...shared, exclusions, assumptions, status: "measured", ...build(dealsOf) });
   return metrics;
 }

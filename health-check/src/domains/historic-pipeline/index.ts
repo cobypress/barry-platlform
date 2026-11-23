@@ -44,7 +44,7 @@ const unmappedStages: Rule = {
     if (missing.length > 0 && ctx.calibration.source === "org_settings") {
       return {
         outcome: "not_measurable",
-        reason: said`The calibration doesn't say what these stages mean, as it was read from your org's own stage settings: ${stageList(missing)}. Where a deal is in one, we've used Salesforce's own setting for whether it's open, won or lost, and said so. If you tell us what each means, your next health check can use it.`,
+        reason: said`You haven't told us what these stages mean, so we read them from your Salesforce stage settings: ${stageList(missing)}. Where a deal is in one, we've used Salesforce's own setting for whether it's open, won or lost, and said so. If you tell us what each means, your next health check can use it.`,
         evidence,
       };
     }
@@ -80,6 +80,8 @@ const calibrationContradiction: Rule = {
   domain: "historic_pipeline",
   title: "The calibration disagrees with Salesforce's own stage flags",
   evaluate(ctx): RuleResult | RuleResult[] {
+    // An automatic run's calibration is these same flags, so it can't disagree with them: nothing to say (DECISIONS.md 693).
+    if (ctx.calibration.source === "org_settings") return [];
     const stages = ctx.data(stagesExtractor);
     if (stages.status !== "ok") return { outcome: "not_measurable", reason: `Opportunity stages couldn't be read: ${stages.reason}`, evidence: [ctx.ev(stages.source, { count: null })] };
     const flags = new Map(stages.data.map((s) => [s.ApiName, s]));

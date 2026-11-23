@@ -86,6 +86,8 @@ const fits = (text: string | undefined, marked: SentenceOrgWords | undefined): b
 
 /** A label or a title marked (DECISIONS.md 663): absent, it is unknown. */
 const LabelOrgWords = z.object({ label: SentenceOrgWords.optional() });
+/** An area's label, and a not measurable area's reason (DECISIONS.md 693). */
+const AreaOrgWords = LabelOrgWords.extend({ reason: SentenceOrgWords.optional() });
 const TitleOrgWords = z.object({ title: SentenceOrgWords.optional() });
 
 export const DigestFinding = z.object({
@@ -137,6 +139,9 @@ export const DigestFinding = z.object({
       hoursBasis: SentenceOrgWords.optional(),
       /** The fix prompt, with its text's hash (DECISIONS.md 672). */
       fixPrompt: FixPromptOrgWords.optional(),
+      /** A sized value's unit and period (DECISIONS.md 693): optional, so a digest made before reads as before. */
+      valueUnit: SentenceOrgWords.optional(),
+      valuePeriod: SentenceOrgWords.optional(),
     })
     .optional(),
 }).superRefine((f, ctx) => {
@@ -157,8 +162,22 @@ export const DigestFinding = z.object({
   }
   if (marks.hoursBasis && !fits(f.effortHours?.basis, marks.hoursBasis)) ctx.addIssue({ code: "custom", path: ["orgWords", "hoursBasis"], message: "Spans must fit the hours' basis" });
   if (marks.fixPrompt && !fits(f.fixPrompt, marks.fixPrompt)) ctx.addIssue({ code: "custom", path: ["orgWords", "fixPrompt"], message: "Spans must fit the fix prompt" });
+  if (marks.valueUnit && (v.kind === "not_sized" || !fits(v.unit, marks.valueUnit))) ctx.addIssue({ code: "custom", path: ["orgWords", "valueUnit"], message: "Spans must fit the value's unit" });
+  if (marks.valuePeriod && (v.kind === "not_sized" || !fits(v.period, marks.valuePeriod))) ctx.addIssue({ code: "custom", path: ["orgWords", "valuePeriod"], message: "Spans must fit the value's period" });
 });
 export type DigestFinding = z.infer<typeof DigestFinding>;
+
+/**
+ * A metric's texts marked (DECISIONS.md 693): optional, so a digest made before
+ * it reads as before; an item of a list is null where its marks are unknown.
+ */
+export const MetricOrgWords = z.object({
+  label: SentenceOrgWords.optional(),
+  definition: SentenceOrgWords.optional(),
+  reason: SentenceOrgWords.optional(),
+  assumptions: z.array(SentenceOrgWords.nullable()).optional(),
+  exclusions: z.array(SentenceOrgWords.nullable()).optional(),
+});
 
 /** A measure's headline only, as corrected: never its segments, series or stats. */
 export const DigestMetric = z.discriminatedUnion("status", [
@@ -174,6 +193,7 @@ export const DigestMetric = z.discriminatedUnion("status", [
     dateRange: z.object({ from: CalendarDate, to: CalendarDate }).nullable(),
     assumptions: z.array(Text),
     exclusions: z.array(Text),
+    orgWords: MetricOrgWords.optional(),
   }),
   z.object({
     status: z.literal("not_measurable"),
@@ -184,18 +204,38 @@ export const DigestMetric = z.discriminatedUnion("status", [
     unit: z.enum(["percent", "days", "count", "currency", "ratio"]),
     reason: Text,
     notMeasurableKind: NotMeasurableKind.optional(),
+    orgWords: MetricOrgWords.optional(),
   }),
-]);
+]).superRefine((m, ctx) => {
+  const marks = m.orgWords;
+  if (!marks) return;
+  const bad = (path: string, text: string | undefined, held: SentenceOrgWords | null | undefined) => {
+    if (held && !fits(text, held ?? undefined)) ctx.addIssue({ code: "custom", path: ["orgWords", path], message: "Spans must fit their text" });
+  };
+  bad("label", m.label, marks.label);
+  bad("definition", m.definition, marks.definition);
+  if (marks.reason && m.status !== "not_measurable") ctx.addIssue({ code: "custom", path: ["orgWords", "reason"], message: "Only a not measurable metric has a reason" });
+  if (m.status === "not_measurable") bad("reason", m.reason, marks.reason);
+  const lists = m.status === "measured" ? { assumptions: m.assumptions, exclusions: m.exclusions } : { assumptions: [], exclusions: [] };
+  for (const key of ["assumptions", "exclusions"] as const) {
+    const held = marks[key];
+    if (!held) continue;
+    if (held.length !== lists[key].length) ctx.addIssue({ code: "custom", path: ["orgWords", key], message: "One marking, or null, for each text" });
+    else held.forEach((h, i) => bad(key, lists[key][i], h));
+  }
+});
 export type DigestMetric = z.infer<typeof DigestMetric>;
 
 export const DigestArea = z
   .discriminatedUnion("status", [
     z.object({ status: z.literal("measured"), domain: DomainId, label: Text, score: z.number().min(0).max(100), findingIds: Ids, orgWords: LabelOrgWords.optional() }),
     // The reason is unknown, never marked.
-    z.object({ status: z.literal("not_measurable"), domain: DomainId, label: Text, reason: Text, notMeasurableKind: NotMeasurableKind.optional(), orgWords: LabelOrgWords.optional() }),
+    z.object({ status: z.literal("not_measurable"), domain: DomainId, label: Text, reason: Text, notMeasurableKind: NotMeasurableKind.optional(), orgWords: AreaOrgWords.optional() }),
   ])
   .superRefine((a, ctx) => {
     if (!fits(a.label, a.orgWords?.label)) ctx.addIssue({ code: "custom", path: ["orgWords", "label"], message: "Spans must fit the label" });
+    const reason = a.orgWords && "reason" in a.orgWords ? a.orgWords.reason : undefined;
+    if (reason && (a.status !== "not_measurable" || !fits(a.reason, reason))) ctx.addIssue({ code: "custom", path: ["orgWords", "reason"], message: "Spans must fit the reason" });
   });
 export type DigestArea = z.infer<typeof DigestArea>;
 
@@ -273,6 +313,8 @@ export const DigestPlan = z.object({
       // The code checker's findings, each with its own hours and left out of the total, and the fixed sentence saying so (DECISIONS.md 673). Both or neither.
       notTotalledFindingIds: Ids.optional(),
       note: Text.optional(),
+      /** The note marked (DECISIONS.md 693): a fixed sentence of ours. */
+      orgWords: z.object({ note: SentenceOrgWords.optional() }).optional(),
     })
     .refine((h) => (h.notTotalledFindingIds === undefined) === (h.note === undefined), { message: "The findings left out of the total and the sentence saying so go together" })
     .optional(),
@@ -281,7 +323,7 @@ export type DigestPlan = z.infer<typeof DigestPlan>;
 
 export const DigestOverall = z.discriminatedUnion("status", [
   z.object({ status: z.literal("measured"), score: z.number().int().min(0).max(100), grade: z.enum(["A", "B", "C", "D", "E"]), areaDomains: z.array(DomainId) }),
-  z.object({ status: z.literal("not_measurable"), reason: Text }),
+  z.object({ status: z.literal("not_measurable"), reason: Text, orgWords: z.object({ reason: SentenceOrgWords.optional() }).optional() }),
 ]);
 
 export const RunDigest = z.object({
@@ -313,4 +355,5 @@ export const DIGEST_KEYS: ReadonlySet<string> = new Set([
   "time_cost", "exposure", "groups", "lines", "leftOut", "realisation", "counted", "lineIds", "low", "expected", "high", "group", "annual", "added",
   "phases", "later", "quickWins", "alsoFor", "key", "effortHours", "basis", "partial", "timeBand", "fixComplexity", "hoursTotal", "partialFindingIds", "withoutHoursFindingIds", "notTotalledFindingIds", "note",
   "checkerRead", "readClasses", "readTriggers", "alreadyListed", "orgWords", "orgWordsMarked", "start", "end", "valueReason", "valueAssumptions", "hoursBasis", "fixPrompt", "textSha256",
+  "valueUnit", "valuePeriod",
 ]);

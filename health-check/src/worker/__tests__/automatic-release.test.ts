@@ -2,7 +2,10 @@ import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { canRelease, Release, ReportSection, type Calibration } from "../../schemas/index.ts";
+import { canRelease, Metric, Release, ReportSection, type Calibration } from "../../schemas/index.ts";
+import { ALL_MODULES } from "../../domains/index.ts";
+import type { DomainModule } from "../../domains/types.ts";
+import { MASK } from "../../render/repair.ts";
 import { AS_OF, ORG_ID } from "../../testing/synthetic-org.ts";
 import { AutomaticReplay, automaticSyntheticCalibration } from "../../testing/automatic.ts";
 import { loadRecording, ReplayTransport } from "../../testing/replay.ts";
@@ -196,6 +199,40 @@ describe("probe C: a held run is never read or released by code (DECISIONS.md 69
     deps.store.saveRunOutput = save;
     const again = await createJobHandler(deps)(job, { final: true });
     assert.equal(again.outcome, "skipped");
+  });
+});
+
+describe("the digest stored is the checked one (the reviewer's M2)", () => {
+  test("a metric text that can't be marked is withheld in the digest the store holds, not served as built", async () => {
+    // A module whose one metric's label is put together at run time from words no source writes whole, and no said made.
+    const words = ["Quokka", "Wombat"].join(" ");
+    const probe: DomainModule = {
+      id: "marks_probe",
+      cloud: "sales",
+      label: "Marks probe",
+      extractors: [],
+      rules: [],
+      metrics: [
+        () => [
+          Metric.parse({
+            status: "measured", id: "probe.unmarked", domain: "configuration", label: `${words} counted`, definition: "A count of nothing.", unit: "count",
+            evidence: [{ kind: "engine", path: "probe", count: null, dateRange: null, exclusions: [], capturedAt: AS_OF }],
+            exclusions: [], assumptions: [], value: 0, n: 0, dateRange: null, segments: [], segmentExemptReason: "One figure.", series: [], stats: {},
+          }),
+        ],
+      ],
+    };
+    const calibration = await automaticSyntheticCalibration();
+    const deps = baseDeps({ dataTransport: new AutomaticReplay(), automatic: ON, modules: [...ALL_MODULES, probe] });
+    const run = consoleRun({ reviewMode: "automatic" });
+    deps.store.addRun(runInput({ run: { ...run, modules: [...run.modules, "marks_probe"] }, calibration, intake: null, answers: [] }));
+    await deps.tokens.save(syntheticConnection());
+    const outcome = await createJobHandler(deps)(job, { final: true });
+    assert.equal(outcome.outcome, "done", outcome.detail);
+    const stored = deps.store.getRunDigest(RUN_ID)!;
+    const metric = stored.metrics.find((m) => m.id === "probe.unmarked")!;
+    assert.equal(metric.label, MASK);
+    assert.ok(!JSON.stringify(stored).includes(words));
   });
 });
 

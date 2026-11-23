@@ -31,13 +31,14 @@ function customerText(loaded: ReturnType<typeof loadRun>): string[] {
   const digest = checkedDigest({ input: loaded.input, pseudonyms: loaded.pseudonyms, inventory: null, madeAt: "2026-11-24T09:00:00.000Z" }).digest;
   const strings = (v: unknown): string[] => (typeof v === "string" ? [v] : Array.isArray(v) ? v.flatMap(strings) : v && typeof v === "object" ? Object.values(v).flatMap(strings) : []);
   const bodies = Object.values(report.outputs).filter((o) => o.output !== "raw_notes").flatMap((o) => o.versions.map((v) => v.body));
-  return [...strings(loaded.input.findings.map(({ owner: _o, ...f }) => f)), ...strings(loaded.input.metrics), ...bodies, ...strings(digest)];
+  return [...strings(loaded.input.findings), ...strings(loaded.input.metrics), ...bodies, ...strings(digest)];
 }
 
 describe("an automatic run's words", () => {
   test("nothing it serves the customer addresses a consultant, or speaks of what we agreed with them", () => {
     const text = customerText(auto);
-    for (const t of text) assert.ok(!/consultant|agreed with you|The calibration can say/i.test(t), t.slice(0, 200));
+    // A customer of an automatic run has never met a consultant or heard of a calibration (DECISIONS.md 693).
+    for (const t of text) assert.ok(!/consultant|calibrat|agreed with you/i.test(t), t.slice(0, 200));
     // Owners included: no finding is given to a consultant to do.
     assert.ok(!auto.input.findings.some((f) => /consultant/i.test(f.owner)));
   });
@@ -45,7 +46,7 @@ describe("an automatic run's words", () => {
   test("the stages the calibration lacks are not measured, with what the customer can tell us, never a high-severity issue for a consultant", () => {
     const f = auto.input.findings.find((x) => x.ruleId === "pipe.unmapped-stages")!;
     assert.equal(f.status, "not_measurable");
-    assert.match(f.notMeasurableReason!, /^The calibration doesn't say what these stages mean, as it was read from your org's own stage settings: /);
+    assert.match(f.notMeasurableReason!, /^You haven't told us what these stages mean, so we read them from your Salesforce stage settings: /);
     assert.match(f.notMeasurableReason!, /If you tell us what each means, your next health check can use it\.$/);
     assert.equal(f.notMeasurableKind, "needs_input");
   });

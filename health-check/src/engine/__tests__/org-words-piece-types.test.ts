@@ -73,6 +73,7 @@ const LITERAL_PIECES: string[] = [
   'src/domains/current-pipeline/index.ts: options.subject :: "rep" | "account"',
   'src/domains/integrations/index.ts: INTEGRATION_LICENCE :: "Salesforce Integration"',
   'src/domains/integrations/index.ts: INTEGRATION_LICENCE :: "Salesforce Integration"',
+  'src/domains/utilisation/investment.ts: describe :: "The seats" | "The unused seats" | "At list price, the seats"',
   'src/domains/value.ts: key :: UpkeepKey',
   'src/domains/value.ts: noun :: "unused report" | "unused custom field"',
 ];

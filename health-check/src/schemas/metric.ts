@@ -1,6 +1,23 @@
 import { z } from "zod";
 import { CalendarDate, DateRange, DomainId, NotMeasurableKind } from "./common.ts";
 import { Evidence } from "./evidence.ts";
+import { MarkedSentence } from "./finding.ts";
+
+/**
+ * A metric's texts with the characters the org chose marked (DECISIONS.md 693),
+ * each kept only while its text still hashes to it; an item of a list is null
+ * where its marks are unknown. Optional, and written only on an automatic run,
+ * whose digest serves every text marked: a consultant-led run's metrics are
+ * stored exactly as before.
+ */
+export const MetricOrgWords = z.object({
+  label: MarkedSentence.optional(),
+  definition: MarkedSentence.optional(),
+  reason: MarkedSentence.optional(),
+  assumptions: z.array(MarkedSentence.nullable()).optional(),
+  exclusions: z.array(MarkedSentence.nullable()).optional(),
+});
+export type MetricOrgWords = z.infer<typeof MetricOrgWords>;
 
 export const MetricUnit = z.enum(["percent", "days", "count", "currency", "ratio"]);
 
@@ -31,6 +48,7 @@ const base = {
   evidence: z.array(Evidence).min(1),
   exclusions: z.array(z.string()),
   assumptions: z.array(z.string()),
+  orgWords: MetricOrgWords.optional(),
 };
 
 export const Metric = z

@@ -189,7 +189,8 @@ function activeMetrics(ctx: Ctx, data: Extract<Loaded, { status: "ok" }>): Metri
   const inMonth = (month: string) => (d: string) => monthKey(d) === month;
   const series: SeriesPoint[] = months.map((month) => ({ date: `${month}-01`, value: activeOn(activity, users, inMonth(month)), n: users.length, notMeasurableReason: null }));
   const mau = activeOn(activity, users, inMonth(last));
-  const coverage = [`The login history covers ${plural(months.length, "whole month")}, from ${months[0]}-01${activity.truncated ? ". The read reached its cap, so older months were left out" : ""}`];
+  // Said, so it is marked as ours (DECISIONS.md 693); the month is a date the engine worked out.
+  const coverage = [activity.truncated ? said`The login history covers ${plural(months.length, "whole month")}, from ${org(`${months[0]}-01`)}. The read reached its cap, so older months were left out` : said`The login history covers ${plural(months.length, "whole month")}, from ${org(`${months[0]}-01`)}`];
   // The group that fell furthest from its peak, month by month, so a chart can set it beside the org's line.
   const steepest = groups
     .filter((g) => g.users.length >= MIN_GROUP && months.length > 1)
