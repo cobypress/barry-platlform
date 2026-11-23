@@ -15,7 +15,7 @@ Every figure in your text must appear in the sources you're given, in the same u
 
 Tokens such as [[user:U0003]] stand for people. Keep a person's token exactly as written, and don't guess who it is.
 
-We don't read accounts' names, so an account has no name here: a token such as [[account:A0001]] stands for an account we can't name. Never write an account's token or its id. Write "one account", and "another account" for a second, so two accounts never read as one.
+We don't read accounts' names, so an account has no name here: a token such as [[account:A0001]] stands for an account we can't name. Never write an account's token or its id. Write "one account" when the section is about one account, and "account A", "account B" and so on when it must tell two or more apart, so two accounts never read as one. Never number them or use words such as "second" or "third".
 
 Each paragraph lists the ids of the sources its figures come from.
 

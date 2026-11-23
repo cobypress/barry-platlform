@@ -3,13 +3,13 @@ import { currentBody, TOP_ISSUE_COUNT, type BuiltOutput, type BuiltReport } from
 import { VERDICT_WORDS, type ReadinessVerdict } from "../narrative/readiness.ts";
 import { byKind, hasKinds, KIND_HEADINGS, kindOf, noteCounts } from "../narrative/unmeasured.ts";
 import { areasOf, buildPlan, domainLabel, isSetupReview, issuesOf, isThinData, isUnpricedSaving, QUICK_WINS_HEADING, recordAreasLine, scorecard, thinDataLine, topIssues, UNPRICED, verdictOf } from "../narrative/select.ts";
-import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
+import type { CustomerWords, Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { ACCOUNT_ENGAGEMENT_DOMAINS, canRelease, CPQ_DOMAINS, SERVICE_CLOUD_DOMAINS, type Finding, type Metric, type Run } from "../schemas/index.ts";
 import { INVENTORY_COLUMNS, inventoryRows, OBJECT_INVENTORY } from "../domains/configuration/inventory.ts";
 import { activeUsersChart, lightningChart, loginChannelsChart, processFlowChart, scorecardOptions, type Chart, closedAsChart, deliveryOutlookChart, HALF_WIDTH, lostByStageChart, pipelineOverTime, scorecardChart, stageFunnel, stageVelocityChart, topAccountsChart, winRateBySegment, winsByCustomerChart, wonValueByChart } from "./charts.ts";
 import { compactMoney, longDate, monthYear, percent, ukDates } from "./format.ts";
 import type { Calibration } from "../schemas/index.ts";
-import { chartSlot, coverScore, document, documentTitle, effortText, estimateLines, paginate, paginateColumns, paragraphs, renderContext, sentence, severityChip, valueFigure, valueText, wrappedLines, type Render } from "./html.ts";
+import { chartSlot, coverScore, document, documentTitle, effortText, estimateLines, inDocumentOrder, paginate, paginateColumns, paragraphs, renderContext, sentence, severityChip, valueFigure, valueText, wrappedLines, type Render } from "./html.ts";
 import { noteSections, referenceMap } from "./references.ts";
 import { scoreLine } from "./executive.ts";
 import { COMPARE_CSS, compareSlide } from "./compare.ts";
@@ -1091,8 +1091,12 @@ export function fullReportHtml(report: BuiltReport, pseudonyms: Pseudonymiser): 
  * roomiest step that fits the deck's range, as the deck is made.
  */
 export function fullReportHtmlAt(report: BuiltReport, pseudonyms: Pseudonymiser, step: number | null): string {
+  return inDocumentOrder(pseudonyms, (words) => fullReportHtmlWith(report, pseudonyms, step, words));
+}
+
+function fullReportHtmlWith(report: BuiltReport, pseudonyms: Pseudonymiser, step: number | null, words: CustomerWords): string {
   const built = report.outputs.full_health_check;
-  const r = renderContext(pseudonyms, report.input.calibration.currency, !canRelease(built.sections).ok, referenceMap(noteSections(report)), yearlyByFinding(report.value));
+  const r = renderContext(pseudonyms, report.input.calibration.currency, !canRelease(built.sections).ok, referenceMap(noteSections(report)), yearlyByFinding(report.value), words);
   const ladder = [...DENSITIES, null];
   let slides: Slide[] = [];
   if (step !== null) slides = slidesAt(report, r, ladder[step] ?? null);

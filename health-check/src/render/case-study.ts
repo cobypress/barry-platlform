@@ -65,7 +65,10 @@ export async function renderCaseStudyDocx(report: BuiltReport, pseudonyms: Pseud
   const study = caseStudyDraft(report);
   if (!study) return null;
   // The customer's to approve, so an account we have no name for is plain words, never its id (DECISIONS.md 684).
-  const words = pseudonyms.customerWords();
+  // Every line is known up front, so it's read once in order to learn which accounts it names before any is written.
+  const reading = pseudonyms.customerWords();
+  [`${study.customer}: ${study.headline}`, ...study.challenge, ...study.found, ...study.changed, ...study.fixed, ...study.beforePublishing].forEach(reading);
+  const words = pseudonyms.customerWords(reading.met);
   const say = (text: string): string => plainWords(ukDates(words(text)));
   const run = (text: string, options: { bold?: boolean; colour?: string; size?: number; italics?: boolean } = {}): TextRun =>
     new TextRun({ text: say(text), bold: options.bold, italics: options.italics, font: font.family, size: options.size ?? 22, color: options.colour ?? hex(colour.carbon) });

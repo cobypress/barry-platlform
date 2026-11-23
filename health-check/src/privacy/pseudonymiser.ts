@@ -37,6 +37,18 @@ const TOKEN = new RegExp(tokenSource(), "g");
  */
 export const isIdLabelled = (entry: PseudonymEntry): boolean => entry.name === entry.id;
 
+/** What a customer reads in place of an unnamed record's token, and the tokens it has met, in order (DECISIONS.md 684). */
+export type CustomerWords = ((text: string) => string) & { readonly met: readonly string[] };
+
+const kindOf = (token: string): string => token.slice(2, token.indexOf(":"));
+
+/** A letter for each place, from 0: A to Z, then AA, AB and on. */
+export function letters(n: number): string {
+  let out = "";
+  for (let i = n + 1; i > 0; i = Math.floor((i - 1) / 26)) out = String.fromCharCode(65 + ((i - 1) % 26)) + out;
+  return out;
+}
+
 /** The noun a customer reads for a record of each kind labelled by its id. A kind not listed is its own noun. */
 const UNNAMED_NOUNS: Readonly<Record<string, string>> = { account: "account", user: "person", customer: "customer" };
 
@@ -45,11 +57,13 @@ const UNNAMED_NOUNS: Readonly<Record<string, string>> = { account: "account", us
 const UNNAMED = new RegExp(String.raw`(\b(?:(?:[Tt]he|[Tt]his|[Tt]hat|[Aa]n?|[Yy]our)\s+)?\b[Aa]ccounts?\s+)?(${tokenSource()})`, "g");
 
 /**
- * Whether words at the end of `before` start a sentence: the text's start, a
+ * Whether words after `text` start a sentence: the text's start, a
  * line's, after a full stop, question or exclamation mark, a bullet or a
  * heading's marks, or a line's own label and its colon ("Risk: One account...").
  */
-function startsSentence(before: string): boolean {
+function startsSentence(text: string): boolean {
+  // An opening quote or bracket is part of the sentence it opens: "([[account:A0001]]) leads." starts one.
+  const before = text.replace(/["'\u2018\u201c(\[]+$/, "");
   if (/\b(?:e\.g|i\.e|etc|vs)\.\s*$/i.test(before)) return false;
   return /(?:^|\n)\s*$/.test(before) || /[.!?]["'’”)\]]*\s+$/.test(before) || /(?:^|\n)\s*(?:[-*•]|\d+[.)]|#{1,6})\s+$/.test(before) || /(?:^|\n)[^\n.!?:]{1,60}:\s+$/.test(before);
 }
@@ -152,35 +166,51 @@ export class Pseudonymiser {
   /**
    * Report rendering for what a customer reads (DECISIONS.md 684): restore()
    * except that a record labelled by its own id is plain words, never the id.
-   * One function per document, so it counts: the first such account it meets
-   * is "one account", the second "another account", the third "a third
-   * account", and the same account reads the same every time, so two accounts
-   * never read as one. "the account [[account:A0001]]" loses its own "the
-   * account", and the words take a capital where a sentence, line, bullet,
-   * heading or a line's label starts.
+   * A document naming one such account says "one account"; a document naming
+   * two or more says "account A", "account B" and on, by first appearance, so
+   * two accounts never read as one. Never an ordinal or a number word: the
+   * number check would read it as a figure. Which a document needs is known
+   * only once all of it is read, so a document is made twice: once with no
+   * `order`, to learn from `met` which accounts it names and in what order,
+   * then with that order (inDocumentOrder in src/render/html.ts). "the account
+   * [[account:A0001]]" loses its own "the account", and the words take a
+   * capital where a sentence, line, bullet, heading or a line's label starts.
    */
-  customerWords(): (text: string) => string {
-    const nth = new Map<string, number>();
-    const seen = new Map<string, number>();
-    return (text) => {
+  customerWords(order: readonly string[] = []): CustomerWords {
+    const place = new Map<string, number>();
+    const counted = new Map<string, number>();
+    const placeOf = (token: string): number => {
+      let n = place.get(token);
+      if (n === undefined) {
+        const kind = kindOf(token);
+        n = counted.get(kind) ?? 0;
+        counted.set(kind, n + 1);
+        place.set(token, n);
+      }
+      return n;
+    };
+    for (const token of order) placeOf(token);
+    // Fixed by the order: a kind with two or more in it is lettered throughout.
+    const lettered = new Set([...counted].filter(([, n]) => n >= 2).map(([kind]) => kind));
+    const met: string[] = [];
+    const words = (text: string): string => {
       const byToken = new Map([...this.#byId.values()].map((e) => [e.token, e]));
       return text.replace(UNNAMED, (match: string, lead: string | undefined, token: string, offset: number, whole: string) => {
         const entry = byToken.get(token);
         if (!entry) return match;
         if (!isIdLabelled(entry)) return `${lead ?? ""}${entry.name}`;
-        const kind = token.slice(2, token.indexOf(":"));
-        let n = nth.get(token);
-        if (n === undefined) {
-          n = seen.get(kind) ?? 0;
-          seen.set(kind, n + 1);
-          nth.set(token, n);
-        }
-        const words = `${n === 0 ? "one" : n === 2 ? "a third" : "another"} ${UNNAMED_NOUNS[kind] ?? kind}`;
+        if (!met.includes(token)) met.push(token);
+        const kind = kindOf(token);
+        const n = placeOf(token);
+        const noun = UNNAMED_NOUNS[kind] ?? kind;
+        // Without an order, or for one it didn't hold, a second account is lettered from where it falls, so it never reads as the first.
+        const said = lettered.has(kind) || n > 0 ? `${noun} ${letters(n)}` : `one ${noun}`;
         // "account" before a token of another kind is the writer's own word, kept: the plain words follow it mid-sentence.
-        if (lead && kind !== "account") return `${lead}${words}`;
-        return startsSentence(whole.slice(0, offset)) ? `${words.charAt(0).toUpperCase()}${words.slice(1)}` : words;
+        if (lead && kind !== "account") return `${lead}${said}`;
+        return startsSentence(whole.slice(0, offset)) ? `${said.charAt(0).toUpperCase()}${said.slice(1)}` : said;
       });
     };
+    return Object.assign(words, { met });
   }
 
   entries(): PseudonymEntry[] {

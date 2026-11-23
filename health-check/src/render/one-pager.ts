@@ -3,11 +3,11 @@ import { differenceWords, formatFigure, comparisonId } from "../benchmark/compar
 import type { BuiltReport } from "../narrative/sections.ts";
 import { buildPlan, isSetupReview, verdictOf } from "../narrative/select.ts";
 import { readinessLine } from "../narrative/readiness.ts";
-import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
+import type { CustomerWords, Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { canRelease } from "../schemas/index.ts";
 import { scoreLine } from "./executive.ts";
 import { compactMoney, longDate } from "./format.ts";
-import { document, documentTitle, renderContext, type Render } from "./html.ts";
+import { document, documentTitle, inDocumentOrder, renderContext, type Render } from "./html.ts";
 import { returnOnSpend } from "./money.ts";
 import { INVESTMENT } from "../money/investment.ts";
 import { noteSections, referenceMap } from "./references.ts";
@@ -101,9 +101,13 @@ function seatsBox(r: Render, report: BuiltReport): string {
 }
 
 export function onePagerHtml(report: BuiltReport, pseudonyms: Pseudonymiser): string {
+  return inDocumentOrder(pseudonyms, (words) => onePagerHtmlWith(report, pseudonyms, words));
+}
+
+function onePagerHtmlWith(report: BuiltReport, pseudonyms: Pseudonymiser, words: CustomerWords): string {
   const { run, intake, calibration, preparedBy } = report.input;
   const built = report.outputs.executive_summary;
-  const r = renderContext(pseudonyms, calibration.currency, !canRelease(built.sections).ok, referenceMap(noteSections(report)), yearlyByFinding(report.value));
+  const r = renderContext(pseudonyms, calibration.currency, !canRelease(built.sections).ok, referenceMap(noteSections(report)), yearlyByFinding(report.value), words);
   const m = (n: number): string => compactMoney(n, report.value.currency);
   const customer = intake?.customerName ?? run.customerRef ?? "Customer";
   const o = report.overall;

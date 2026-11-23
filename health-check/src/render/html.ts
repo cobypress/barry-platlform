@@ -1,6 +1,6 @@
 import { colour, page, tokensCss } from "../design/tokens.ts";
 import type { OverallScore } from "../domains/scoring.ts";
-import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
+import type { CustomerWords, Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import type { Finding, Run } from "../schemas/index.ts";
 import type { Chart } from "./charts.ts";
 import { fontFaces } from "./fonts.ts";
@@ -27,9 +27,22 @@ export type Render = {
 /** A reference is a place in the raw notes, not a figure, so the number check passes over it. */
 export const refTag = (ref: string): string => `<span class="ref" data-ref>${ref}</span>`;
 
-export function renderContext(pseudonyms: Pseudonymiser, currency: string, draft: boolean, refs: Map<string, string> = new Map(), yearly: Map<string, number> = new Map()): Render {
-  // Every document made here is the customer's: an account we have no name for is "one account", never its id (DECISIONS.md 684).
-  const say = pseudonyms.customerWords();
+/**
+ * A customer's document, made so an account we have no name for reads right
+ * (DECISIONS.md 684): once to learn which such accounts it names and in what
+ * order, then again with that order when it names two or more, so the first
+ * is "account A" on the first page even when the second appears only later.
+ * With one or none, the first making already says "one account" and is kept.
+ */
+export function inDocumentOrder<T>(pseudonyms: Pseudonymiser, make: (words: CustomerWords) => T): T {
+  const first = pseudonyms.customerWords();
+  const made = make(first);
+  return first.met.length < 2 ? made : make(pseudonyms.customerWords(first.met));
+}
+
+/** `words` is the document's own, from inDocumentOrder: every document made here is the customer's, so an account we have no name for is never its id (DECISIONS.md 684). */
+export function renderContext(pseudonyms: Pseudonymiser, currency: string, draft: boolean, refs: Map<string, string> = new Map(), yearly: Map<string, number> = new Map(), words: CustomerWords = pseudonyms.customerWords()): Render {
+  const say = words;
   return {
     yearly: (findingId) => yearly.get(findingId),
     t: (text) => escapeXml(plainWords(ukDates(say(text)))),

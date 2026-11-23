@@ -3,11 +3,11 @@ import { readinessLine } from "../narrative/readiness.ts";
 import { byKind, hasKinds, kindCounts } from "../narrative/unmeasured.ts";
 import { currentBody, POTENTIAL_REVENUE_RULES, TOP_ISSUE_COUNT, type BuiltReport } from "../narrative/sections.ts";
 import { areasOf, buildPlan, isSetupReview, isThinData, isUnpricedSaving, QUICK_WINS_HEADING, scorecard, thinDataLine, topIssues, UNPRICED, verdictOf, type PlanPhase } from "../narrative/select.ts";
-import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
+import type { CustomerWords, Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { canRelease, type Finding, type Metric } from "../schemas/index.ts";
 import { deliveryOutlookChart, scorecardChart, scorecardOptions, winRateBySegment } from "./charts.ts";
 import { compactMoney, longDate, monthYear } from "./format.ts";
-import { chartSlot, coverScore, document, documentTitle, effortText, estimateLines, paginate, paragraphs, printed, renderContext, severityChip, textLines, valueFigure, valueText, type Render } from "./html.ts";
+import { chartSlot, coverScore, document, documentTitle, effortText, estimateLines, paginate, inDocumentOrder, paragraphs, printed, renderContext, severityChip, textLines, valueFigure, valueText, type Render } from "./html.ts";
 import { noteSections, referenceMap, valueItemId } from "./references.ts";
 import { investmentPage, MONEY_CSS, moneyPage } from "./money.ts";
 import { PROGRESS_CSS, progressPage } from "./progress.ts";
@@ -235,10 +235,14 @@ function detailPage(r: Render, items: Array<{ ref: string; title: string }>): st
 }
 
 export function executiveHtml(report: BuiltReport, pseudonyms: Pseudonymiser): string {
+  return inDocumentOrder(pseudonyms, (words) => executiveHtmlWith(report, pseudonyms, words));
+}
+
+function executiveHtmlWith(report: BuiltReport, pseudonyms: Pseudonymiser, words: CustomerWords): string {
   const { run, intake, calibration, scores = [], preparedBy } = report.input;
   const built = report.outputs.executive_summary;
   const refs = referenceMap(noteSections(report));
-  const base = renderContext(pseudonyms, calibration.currency, !canRelease(built.sections).ok, refs, yearlyByFinding(report.value));
+  const base = renderContext(pseudonyms, calibration.currency, !canRelease(built.sections).ok, refs, yearlyByFinding(report.value), words);
   // The last page lists every reference the summary used, so each tag is noted as it's printed.
   const used = new Set<string>();
   const r: Render = { ...base, ref: (id) => (used.add(id), base.ref(id)) };
