@@ -46,6 +46,12 @@ export type WorkerDeps = {
    * step (DECISIONS.md 670). Absent: the step says PMD isn't installed.
    */
   codeLint?: CodeLintTools;
+  /**
+   * One line to the consultants' channel, when a documents make repaired what
+   * it couldn't trace (DECISIONS.md 682). Counts and a run id only. Absent, the
+   * line is only logged: the engine has no Slack of its own yet.
+   */
+  alert?: (line: string) => Promise<void>;
   /** Tests only: prints without a browser. */
   renderReleased?: typeof renderReleased;
   /** Tests only: stands in for the org handbook's renderer, so a failing render can be seen. */

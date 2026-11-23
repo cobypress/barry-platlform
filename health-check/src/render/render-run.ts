@@ -11,7 +11,7 @@ import type { NarrativeClient } from "../narrative/client.ts";
 import { Intake } from "../narrative/intake.ts";
 import { refusalReason, type OverrideRefusal } from "../narrative/overrides.ts";
 import { buildReport, type BuiltReport, type ReportInput } from "../narrative/sections.ts";
-import type { FigureSet } from "../numbercheck/index.ts";
+import { pageDataset } from "./page-dataset.ts";
 import { Pseudonymiser, type PseudonymEntry } from "../privacy/pseudonymiser.ts";
 import { Calibration, Finding, ManualStep, Metric, NumberOverride, Run, Score } from "../schemas/index.ts";
 import { EXECUTIVE_MAX_PAGES, executiveHtml, executiveMaxPages } from "./executive.ts";
@@ -252,21 +252,7 @@ export class OverridesRefused extends Error {
   }
 }
 
-/**
- * The dataset a printed page is checked against: the report's, with each name
- * its tokens stand for as a label (DECISIONS.md 682). A section is checked with
- * a person's or an account's token in it, "[[account:A0001]]", and the page
- * prints the name the token restores to, which the data holds only as the
- * token: a name with a digit in it ("Unit4 Ltd") was then held on the page
- * though its token passed. Only names with a letter and a digit, as a label
- * only masks the whole name where it's printed, and a name of digits alone
- * stays a figure to trace.
- */
-export function pageDataset(set: FigureSet, pseudonyms: Pseudonymiser): FigureSet {
-  const tokens = new Set(set.tokens.map((t) => t.value));
-  const names = pseudonyms.entries().filter((e) => tokens.has(e.token) && /\p{L}/u.test(e.name) && /\d/.test(e.name));
-  return { ...set, labels: [...set.labels, ...names.map((e) => ({ source: e.token, value: e.name }))] };
-}
+export { pageDataset };
 
 export type PrintedLayout = { executive: LayoutReport; full: LayoutReport; ceo: LayoutReport };
 /** For the log, and `hc render`'s errors, when a re-check's draft read its earlier health check and a later build can't (DECISIONS.md 534). No path or error. */

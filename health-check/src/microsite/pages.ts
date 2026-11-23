@@ -1,5 +1,6 @@
 import { comparisonId, formatFigure } from "../benchmark/compare.ts";
 import { checkNumbers } from "../numbercheck/index.ts";
+import { pageDataset } from "../render/page-dataset.ts";
 import type { BuiltReport } from "../narrative/sections.ts";
 import { buildPlan, bySeverity, domainLabel, issuesOf, isUnpricedSaving, QUICK_WINS_HEADING, scorecard, UNPRICED, verdictOf } from "../narrative/select.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
@@ -238,8 +239,8 @@ function org(r: Render, report: BuiltReport): string {
   return page(`<h1>${r.t("Your org, documented")}</h1><p class="muted">${r.t("A reference for whoever looks after Salesforce. It describes rather than judges.")}</p>${parts.join("")}`);
 }
 
-/** The pages, each checked against the report's figures. Throws if any figure on a page can't be traced. */
-export function buildMicrositePages(report: BuiltReport, pseudonyms: Pseudonymiser): MicrositePages {
+/** The pages, unchecked: the documents job checks them with the other outputs (DECISIONS.md 682). */
+export function micrositePages(report: BuiltReport, pseudonyms: Pseudonymiser): MicrositePage[] {
   const r = renderContext(pseudonyms, report.input.calibration.currency, false, referenceMap(noteSections(report)), yearlyByFinding(report.value));
   const changed = progress(r, report);
   const pages: MicrositePage[] = [
@@ -252,8 +253,21 @@ export function buildMicrositePages(report: BuiltReport, pseudonyms: Pseudonymis
   if (compared) pages.push({ slug: "compare", title: "How you compare", html: compared });
   const documented = org(r, report);
   if (documented) pages.push({ slug: "org", title: "Your org, documented", html: documented });
+  return pages;
+}
+
+/** Each figure on a page the number check can't trace, against the set every output is checked with: names restored (DECISIONS.md 682). */
+export function micrositeMisses(pages: MicrositePage[], report: BuiltReport, pseudonyms: Pseudonymiser): Array<{ page: string; raw: string }> {
+  const set = pageDataset(report.dataset, pseudonyms);
+  return pages.flatMap((p) => checkNumbers(pageText(p.html), set).unmatched.map((u) => ({ page: p.title, raw: u.raw })));
+}
+
+/** The pages, each checked against the report's figures. Throws if any figure on a page can't be traced. */
+export function buildMicrositePages(report: BuiltReport, pseudonyms: Pseudonymiser): MicrositePages {
+  const pages = micrositePages(report, pseudonyms);
+  const set = pageDataset(report.dataset, pseudonyms);
   for (const p of pages) {
-    const misses = checkNumbers(pageText(p.html), report.dataset).unmatched;
+    const misses = checkNumbers(pageText(p.html), set).unmatched;
     if (misses.length) throw new Error(`The ${p.title.toLowerCase()} page has ${misses.length} figure${misses.length === 1 ? "" : "s"} the number check can't trace, so the microsite wasn't made`);
   }
   return { pages };

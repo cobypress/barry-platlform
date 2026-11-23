@@ -1,8 +1,10 @@
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
+import { strFromU8, unzipSync } from "fflate";
 import { join, resolve } from "node:path";
 import { assertOutsideGit } from "../engine/run.ts";
 import type { BenchmarkInput } from "../benchmark/compare.ts";
-import { buildMicrositePages, type MicrositePages } from "../microsite/pages.ts";
+import { micrositeMisses, micrositePages, type MicrositePages } from "../microsite/pages.ts";
+import { heldPattern, LEFT_OUT_SENTENCE, repairInput, type SourceRepair } from "./repair.ts";
 import type { Intake } from "../narrative/intake.ts";
 import type { OverrideRefusal } from "../narrative/overrides.ts";
 import { buildReport, currentBody, surveyMetricsOf, type BuiltReport, type ReportOutputKey } from "../narrative/sections.ts";
@@ -69,8 +71,14 @@ export type ReleasedDocuments = {
   surveyMetrics?: Metric[];
   /** Sections printed in the engine's own wording because a figure in their approved text couldn't be traced (DECISIONS.md 682). Left out by renderers that don't repair. */
   fellBack?: SectionFallback[];
-  /** What was left out of the engine's own text or a table, for us (DECISIONS.md 682). Left out by renderers that don't repair. */
+  /** What was taken out of the engine's own data, for us (DECISIONS.md 682). Left out by renderers that don't repair. */
   leftOut?: LeftOut[];
+  /**
+   * How much the make repaired (DECISIONS.md 682, item 7): "none"; "some", a
+   * section fell back or a detail was left out; "heavy", made from the engine's
+   * own text alone. Left out by renderers that don't repair.
+   */
+  repairs?: "none" | "some" | "heavy";
 };
 
 /**
@@ -98,24 +106,27 @@ export type SectionFallback = {
   key: string;
   title: string;
   source: "claude_draft" | "claude_proposal" | "consultant_edit";
-  /** How many figures of each kind couldn't be traced: "identifier: 1". */
+  /** How many figures of each kind couldn't be traced: "identifier: 1". Empty when it fell back only for a heavy repair. */
   kinds: Record<string, number>;
-  /** A consultant's edit only: the words that couldn't be traced. */
+  /** A consultant's edit that failed only: the sentences they typed that couldn't be traced, as typed. */
   words?: string[];
 };
 
 /**
- * Something in the engine's own text or a table that couldn't be traced, left
- * out of the page with LEFT_OUT_SENTENCE in its place: our defect, recorded for
- * us with the rule and field where a finding's text holds it, never the figure.
+ * A figure no output could trace that the engine's own data held, taken out of
+ * that data so no output is made with it (DECISIONS.md 682): where it was first
+ * held, what kind it was, and the finding's rule or the metric and the field it
+ * was in. Never the figure: it's for us.
  */
-export type LeftOut = { document: string; page: number; kind: string; ruleId?: string; field?: string };
+export type LeftOut = { document: string; page: number; kind: string; ruleId?: string; metricId?: string; field?: string };
 
-/** What stands in a page for a sentence of ours that couldn't be traced (DECISIONS.md 682). No figure, so it can't be held itself. */
-export const LEFT_OUT_SENTENCE = "We've left a detail out here because we couldn't trace it to your data.";
+export { LEFT_OUT_SENTENCE };
 
-/** How many times the pages are printed again with what couldn't be traced left out. */
+/** How many times everything is made again with what couldn't be traced taken out. */
 export const REPAIR_ROUNDS = 2;
+
+/** Where the microsite's held figures are said to be. */
+const MICROSITE = "The microsite";
 
 const DOCUMENT_NAMES = { executive: "The executive summary", full: "The full health check", ceo: "The one page summary" } as const;
 
@@ -205,16 +216,17 @@ const quoted = (titles: string[]): string => [...new Set(titles)].map((t) => `"$
  * details were left out of our own text, by page. No figure from the data; a
  * consultant's own words only, which they typed.
  */
-export function repairWarnings(fellBack: SectionFallback[], leftOut: LeftOut[]): string[] {
+export function repairWarnings(fellBack: SectionFallback[], leftOut: LeftOut[], repairs: ReleasedDocuments["repairs"] = "some"): string[] {
   const lines: string[] = [];
-  const drafts = fellBack.filter((f) => f.source !== "consultant_edit");
+  if (repairs === "heavy") lines.push("These documents use our own wording throughout, because too much in them couldn't be traced to the data to repair it piece by piece. The approved wording is kept in each section.");
+  const drafts = fellBack.filter((f) => f.source !== "consultant_edit" && Object.keys(f.kinds).length);
   if (drafts.length) lines.push(`${drafts.length === 1 ? "1 section uses" : `${drafts.length} sections use`} our own wording because a figure in the draft couldn't be traced: ${quoted(drafts.map((f) => f.title))}. Ask for a new draft to try again.`);
-  for (const f of fellBack.filter((f) => f.source === "consultant_edit")) {
-    lines.push(`"${f.title}" uses our own wording because your edit's ${quoted(f.words ?? [])} couldn't be traced to the data. Your edit is kept: correct it, approve it again and make the documents again.`);
+  for (const f of fellBack.filter((f) => f.source === "consultant_edit" && f.words)) {
+    lines.push(`"${f.title}" uses our own wording because what you wrote couldn't be traced to the data: ${quoted(f.words ?? [])}. Your edit is kept: correct it, approve it again and make the documents again.`);
   }
   if (leftOut.length) {
     const pages = [...new Set(leftOut.map((l) => where(l.document, l.page)))];
-    lines.push(`We left ${leftOut.length === 1 ? "1 detail" : `${leftOut.length} details`} out of our own text because ${leftOut.length === 1 ? "it" : "they"} couldn't be traced to the data: ${pages.join("; ")}. That's ours to fix.`);
+    lines.push(`We left ${leftOut.length === 1 ? "1 detail" : `${leftOut.length} details`} out of our own text because ${leftOut.length === 1 ? "it" : "they"} couldn't be traced to the data, first seen in ${pages.join("; ")}. That's ours to fix.`);
   }
   return lines;
 }
@@ -242,17 +254,24 @@ export const BASELINE_ROWS_UNREAD = "the earlier health check's corrections coul
  * whatever the folder's record says. Then the report is built with none, and
  * `baselineUnapproved` says so for the log. `baselineGone` (534) only where the
  * section is held: with none approved, nothing is lost.
+ *
+ * `raws` are figures no output could trace (decision 682): they're taken out of
+ * the run's own data first (repairInput), so everything built from the report
+ * is built without them, and a section approved in the engine's own words that
+ * quotes one takes the engine's text as rebuilt from the repaired data.
  */
-export function approvedReport(dir: string, approved: ApprovedRun): { report: BuiltReport; pseudonyms: Pseudonymiser; baselineGone: boolean; baselineUnapproved: boolean; engineText: Map<string, string> } {
+export function approvedReport(dir: string, approved: ApprovedRun, raws: string[] = []): { report: BuiltReport; pseudonyms: Pseudonymiser; baselineGone: boolean; baselineUnapproved: boolean; engineText: Map<string, string>; repairs: SourceRepair[] } {
   const loaded = loadRun(dir);
-  const { input, pseudonyms } = loaded;
+  const { pseudonyms } = loaded;
+  const { input, repairs } = repairInput(loaded.input, raws);
   const held = approved.sections.some((s) => s.output === "raw_notes" && s.key === "progress");
   const baselineUnapproved = input.baseline != null && !held;
   const baselineGone = loaded.baselineGone && held;
   const report = buildReport({ ...input, ...(baselineUnapproved ? { baseline: null } : {}), overrides: approved.overrides, intake: approved.intake ?? input.intake, preparedBy: approved.preparedBy ?? null, benchmark: approved.benchmark ?? null });
-  // The engine's own text for each section, as built now: approved wording by construction (decision 682).
+  // The engine's own text for each section, as built now: traceable by construction (decision 682).
   const engineText = new Map<string, string>();
   for (const built of Object.values(report.outputs)) for (const section of built.sections) engineText.set(`${built.output}:${section.key}`, currentBody(built, section.key));
+  const patterns: RegExp[] = raws.map((raw) => heldPattern(raw));
   for (const built of Object.values(report.outputs)) {
     const sections = approved.sections.filter((s) => s.output === built.output).sort((a, b) => a.order - b.order);
     if (!canRelease(sections).ok) throw new Error(`Not every section of the ${built.output.replace(/_/g, " ")} is approved, so no documents were made`);
@@ -260,97 +279,54 @@ export function approvedReport(dir: string, approved: ApprovedRun): { report: Bu
     const versions = approved.versions.filter((v) => current.has(v.id));
     if (versions.length !== sections.length) throw new Error(`A section of the ${built.output.replace(/_/g, " ")} has no approved text, so no documents were made`);
     built.sections = sections;
-    built.versions = versions;
+    built.versions = versions.map((v) => {
+      const section = sections.find((s) => s.currentVersionId === v.id)!;
+      const engine = engineText.get(`${built.output}:${section.key}`);
+      return v.source === "engine" && engine !== undefined && patterns.some((p) => p.test(v.body)) ? { ...v, body: engine } : v;
+    });
   }
-  return { report, pseudonyms, baselineGone, baselineUnapproved, engineText };
+  return { report, pseudonyms, baselineGone, baselineUnapproved, engineText, repairs };
 }
 
 /** A section's text as a page prints it, so it's checked as it will be read. */
 export const asPrinted = (body: string, pseudonyms: Pseudonymiser): string => plainWords(ukDates(pseudonyms.restore(body)));
 
-const kindsOf = (figures: string[], text: string, set: FigureSet): Record<string, number> => {
-  const { figures: read } = extractFigures(text, { labels: set.labels.map((l) => l.value) });
-  const kinds: Record<string, number> = {};
-  for (const raw of figures) {
-    const kind = read.find((f) => f.raw === raw)?.kind ?? "malformed";
-    kinds[kind] = (kinds[kind] ?? 0) + 1;
-  }
-  return kinds;
-};
+const kindOf = (raw: string, set: FigureSet): string => extractFigures(raw, { labels: set.labels.map((l) => l.value) }).figures[0]?.kind ?? "malformed";
 
 /**
  * Decision 682, items 3 and 4. Each section whose approved text isn't the
- * engine's is checked again as the page prints it, against the set the pages
- * are checked with: the same function on the same text. One that fails is
- * printed in the engine's own text for it, and said so. Changes the report in
- * place; the console's versions are untouched.
+ * engine's is checked again as the page prints it, against the set every
+ * output is checked with: the same function on the same text. One that fails
+ * is printed in the engine's own text for it, rebuilt now, and said so; with
+ * `all`, every one is (a heavy repair). A consultant's edit is quoted by the
+ * sentences they typed that fail, as typed. Changes the report in place; the
+ * console's versions are untouched.
  */
-export function fallBackSections(report: BuiltReport, pseudonyms: Pseudonymiser, engineText: Map<string, string>, set: FigureSet): SectionFallback[] {
+export function fallBackSections(report: BuiltReport, pseudonyms: Pseudonymiser, engineText: Map<string, string>, set: FigureSet, all = false): SectionFallback[] {
   const fellBack: SectionFallback[] = [];
   for (const built of Object.values(report.outputs)) {
     for (const section of built.sections) {
       const version = built.versions.find((v) => v.id === section.currentVersionId);
       const engine = engineText.get(`${built.output}:${section.key}`);
       if (!version || version.source === "engine" || engine === undefined) continue;
-      const printed = asPrinted(version.body, pseudonyms);
-      const outcome = checkNumbers(printed, set);
-      if (outcome.passed) continue;
-      const raws = outcome.unmatched.map((u) => u.raw);
-      const index = built.versions.indexOf(version);
-      built.versions[index] = { ...version, body: engine, source: "engine" };
+      const outcome = checkNumbers(asPrinted(version.body, pseudonyms), set);
+      if (outcome.passed && !all) continue;
+      built.versions[built.versions.indexOf(version)] = { ...version, body: engine, source: "engine" };
+      const kinds: Record<string, number> = {};
+      for (const u of outcome.unmatched) kinds[kindOf(u.raw, set)] = (kinds[kindOf(u.raw, set)] ?? 0) + 1;
+      // The consultant's own sentences, as typed, that the check holds: never a name a token restored to, never empty.
+      const typed = version.body.split(/(?<=[.!?])\s+|\n+/).map((s) => s.trim()).filter((s) => s && !checkNumbers(asPrinted(s, pseudonyms), set).passed);
       fellBack.push({
         output: built.output,
         key: section.key,
         title: section.title,
         source: version.source,
-        kinds: kindsOf(raws, printed, set),
-        // Only what the consultant typed, as typed: never a name a token restored to on the page.
-        ...(version.source === "consultant_edit" ? { words: [...new Set(raws.filter((raw) => version.body.includes(raw)))] } : {}),
+        kinds,
+        ...(version.source === "consultant_edit" && !outcome.passed ? { words: typed.length ? typed : [version.body.trim().slice(0, 200)] } : {}),
       });
     }
   }
   return fellBack;
-}
-
-const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-/**
- * Decision 682, item 5: every sentence of the page's text that holds one of
- * these figures, in its smallest unit (a sentence of a paragraph, a table
- * cell, a list item, a chart label), replaced by LEFT_OUT_SENTENCE. Text in
- * styles and scripts is left alone. A figure is matched as a whole word, an
- * identifier in any case, as the check compares it.
- */
-export function leaveOut(html: string, raws: string[]): string {
-  const patterns = [...new Set(raws)].filter((r) => r && r !== "(whole text)").map((raw) => new RegExp(`(?<![\\w.-])${escapeRegExp(escapeXml(raw))}(?![\\w-])`, "i"));
-  if (patterns.length === 0) return html;
-  const sentence = escapeXml(LEFT_OUT_SENTENCE);
-  const holds = (text: string): boolean => patterns.some((p) => p.test(text));
-  return html.replace(/(<(style|script)\b[\s\S]*?<\/\2>)|>([^<]+)(?=<)/gi, (whole, kept: string | undefined, _tag, text: string | undefined) => {
-    if (kept || text === undefined || !holds(text)) return whole;
-    const lead = /^\s*/.exec(text)![0];
-    const trail = /\s*$/.exec(text)![0];
-    // One fixed sentence for a run of sentences left out together.
-    const parts = text.trim().split(/(?<=[.!?])\s+/).map((part) => (holds(part) ? sentence : part));
-    return `>${lead}${parts.filter((part, i) => part !== sentence || parts[i - 1] !== sentence).join(" ")}${trail}`;
-  });
-}
-
-/**
- * The figures still held, each with the title of the section whose printed
- * text holds it, so the message names it (decision 682, item 6). Found by the
- * figure as printed, which stays in the worker; only the title goes out.
- */
-function withSections(layout: Layouts, report: BuiltReport, pseudonyms: Pseudonymiser): HeldFigure[] {
-  const raws = heldRaws(layout);
-  return heldFigures(layout).map((held, i) => {
-    const raw = raws[i]!.raw;
-    if (raw === "(whole text)") return held;
-    for (const built of Object.values(report.outputs)) {
-      for (const section of built.sections) if (asPrinted(currentBody(built, section.key), pseudonyms).includes(raw)) return { ...held, section: section.title };
-    }
-    return held;
-  });
 }
 
 /** The raw figure of each number check problem, unmasked, for the worker alone: it never leaves the run folder. */
@@ -360,24 +336,42 @@ function heldRaws(layout: Layouts): Array<{ document: string; page: number; raw:
     .map(({ document, problem }) => ({ document, page: problem.page, raw: splitDetail(problem.detail).figure }));
 }
 
-const FINDING_FIELDS = ["title", "summary", "recommendation", "notMeasurableReason"] as const;
-
-/** Where a left-out figure came from, if a finding's own text holds it: its rule and field, never the figure. */
-function sourceOf(report: BuiltReport, raw: string): { ruleId?: string; field?: string } {
-  const pattern = new RegExp(`(?<![\\w.-])${escapeRegExp(raw)}(?![\\w-])`, "i");
-  for (const f of report.teamFindings) for (const field of FINDING_FIELDS) if (pattern.test(f[field] ?? "")) return { ruleId: f.ruleId, field };
-  return {};
+/**
+ * The section a figure still held is in, found with the check itself: the
+ * section whose printed text, checked alone against the same set, holds that
+ * figure (decision 682, item 6). Only the title goes out.
+ */
+function sectionHolding(report: BuiltReport, pseudonyms: Pseudonymiser, set: FigureSet, raw: string): string | undefined {
+  for (const built of Object.values(report.outputs)) {
+    for (const section of built.sections) {
+      if (checkNumbers(asPrinted(currentBody(built, section.key), pseudonyms), set).unmatched.some((u) => u.raw === raw)) return section.title;
+    }
+  }
+  return undefined;
 }
+
+/** Text a Word file shows, from its document part. Enough to see whether a figure is in it. */
+function docxWords(path: string): string {
+  const zip = unzipSync(readFileSync(path));
+  return Object.entries(zip).filter(([name]) => /^word\/(document|header\d*|footer\d*)\.xml$/.test(name)).map(([, bytes]) => strFromU8(bytes).replace(/<[^>]+>/g, " ")).join(" ");
+}
+
+/** Text a workbook shows, from its shared strings and sheets. */
+function xlsxWords(path: string): string {
+  const zip = unzipSync(readFileSync(path));
+  return Object.entries(zip).filter(([name]) => /^xl\/(sharedStrings|worksheets\/sheet\d+)\.xml$/.test(name)).map(([, bytes]) => strFromU8(bytes).replace(/<[^>]+>/g, " ")).join(" ");
+}
+
+const unescape = (text: string): string => text.replace(/&#39;|&apos;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+
+/** At most this many details are left out of one document; past it, or in the one-pager at all, the repair is heavy. */
+export const LEFT_OUT_CAP = 3;
 
 export async function renderReleased(dir: string, approved: ApprovedRun, outDir: string): Promise<ReleasedDocuments | RefusedDocuments> {
   const folder = resolve(dir);
   const out = resolve(outDir);
   assertOutsideGit(folder);
   assertOutsideGit(out);
-  const { report, pseudonyms, baselineGone, baselineUnapproved, engineText } = approvedReport(folder, approved);
-  // Before anything is written: a refused make never leaves documents in the folder beside its failed row.
-  if (report.refused.length > 0) return { refused: report.refused };
-  mkdirSync(out, { recursive: true, mode: 0o700 });
   const files = {
     raw_notes: join(out, OUTPUT_FILES.rawNotes),
     executive_summary: join(out, OUTPUT_FILES.executive),
@@ -387,36 +381,73 @@ export async function renderReleased(dir: string, approved: ApprovedRun, outDir:
     action_lists: join(out, OUTPUT_FILES.actionLists),
     tickets: join(out, OUTPUT_FILES.tickets),
   };
-  const set = pageDataset(report.dataset, pseudonyms);
-  // A section whose approved text can't be traced is printed in the engine's own text for it (decision 682).
-  const fellBack = report.refused.length ? [] : fallBackSections(report, pseudonyms, engineText, set);
   const paths = { rawNotes: files.raw_notes, executive: files.executive_summary, full: files.full_health_check, ceo: files.ceo_one_pager, kit: files.readout_kit, layout: join(out, OUTPUT_FILES.layout) };
-  let layout: PrintedLayout = await printDocuments(report, pseudonyms, paths);
-  // What still can't be traced is in our own text or a table: left out, sentence by sentence, and printed again, twice at most.
-  const leftOut: LeftOut[] = [];
-  const raws: string[] = [];
-  for (let round = 0; round < REPAIR_ROUNDS; round++) {
-    const held = heldRaws(layout).filter((h) => h.raw !== "(whole text)" && !raws.includes(h.raw));
-    if (held.length === 0) break;
-    for (const h of held) {
-      raws.push(h.raw);
-      const kind = extractFigures(h.raw, { labels: set.labels.map((l) => l.value) }).figures[0]?.kind ?? "malformed";
-      leftOut.push({ document: h.document, page: h.page, kind, ...sourceOf(report, h.raw) });
+
+  // One make: the report from the run's data less every figure found untraceable so far, its sections
+  // checked and fallen back, its pages printed and checked, and its microsite pages checked, all against one set.
+  const make = async (raws: string[], heavy: boolean) => {
+    const built = approvedReport(folder, approved, raws);
+    if (built.report.refused.length > 0) return { refused: built.report.refused };
+    mkdirSync(out, { recursive: true, mode: 0o700 });
+    const set = pageDataset(built.report.dataset, built.pseudonyms);
+    const fellBack = fallBackSections(built.report, built.pseudonyms, built.engineText, set, heavy);
+    const layout: PrintedLayout = await printDocuments(built.report, built.pseudonyms, paths);
+    let site: { ok: true; pages: MicrositePages["pages"] } | { ok: false; reason: string };
+    try {
+      site = { ok: true, pages: micrositePages(built.report, built.pseudonyms) };
+    } catch (err) {
+      site = { ok: false, reason: err instanceof Error ? err.message : "The pages couldn't be built" };
     }
-    layout = await printDocuments(report, pseudonyms, paths, (html) => leaveOut(html, raws));
+    const siteMisses = site.ok ? micrositeMisses(site.pages, built.report, built.pseudonyms) : [];
+    return { ...built, set, fellBack, layout, site, siteMisses };
+  };
+
+  const raws: string[] = [];
+  const firstSeen: Array<{ document: string; page: number; raw: string }> = [];
+  // Every document each was held in, for the cap: a figure first seen in the summary may be on the one-pager too.
+  const heldIn: Array<{ document: string; raw: string }> = [];
+  let heavy = false;
+  let made = await make(raws, heavy);
+  if ("refused" in made) return { refused: made.refused! };
+  // Whatever is still held in the engine's own text is taken out of the run's data, and everything is made again.
+  const absorb = (m: Exclude<typeof made, { refused: unknown }>): boolean => {
+    const found = [...heldRaws(m.layout), ...m.siteMisses.map((s: { raw: string }) => ({ document: MICROSITE, page: 0, raw: s.raw }))].filter((h) => h.raw !== "(whole text)" && !raws.includes(h.raw));
+    for (const h of found) {
+      if (!heldIn.some((x) => x.document === h.document && x.raw === h.raw)) heldIn.push(h);
+      if (raws.includes(h.raw)) continue;
+      raws.push(h.raw);
+      firstSeen.push(h);
+    }
+    return found.length > 0;
+  };
+  const repairRounds = async (): Promise<void> => {
+    for (let round = 0; round < REPAIR_ROUNDS; round++) {
+      if (!absorb(made as Exclude<typeof made, { refused: unknown }>)) return;
+      made = await make(raws, heavy);
+    }
+  };
+  await repairRounds();
+  if ("refused" in made) return { refused: made.refused! };
+  // Past the cap, in the one-pager at all, or with more than a quarter of a document's sections fallen back,
+  // the documents are made from the engine's own text alone (decision 682, item 7).
+  const perDocument = (doc: string): number => heldIn.filter((h) => h.document === doc).length;
+  const fellBackShare = Object.values(made.report.outputs).some((b) => b.sections.length > 0 && (made as { fellBack: SectionFallback[] }).fellBack.filter((f) => f.output === b.output).length * 4 > b.sections.length);
+  if (Object.values(DOCUMENT_NAMES).some((d) => perDocument(d) > LEFT_OUT_CAP) || perDocument(DOCUMENT_NAMES.ceo) > 0 || fellBackShare) {
+    heavy = true;
+    // The sections that fell back for a reason keep it; heavy adds the rest.
+    const before = made.fellBack;
+    made = await make(raws, heavy);
+    await repairRounds();
+    if ("refused" in made) return { refused: made.refused! };
+    made.fellBack = made.fellBack.map((f) => before.find((b) => b.output === f.output && b.key === f.key) ?? f);
   }
-  // Made from the same approved report, so they're under the same gate as the decks (rule 10).
+  const { report, pseudonyms, set, layout, site, siteMisses } = made;
+
+  // The rest of the outputs, made from the same repaired report, so they're under the same gate as the decks (rule 10).
   writeActionFiles(report, pseudonyms, folder, { workbook: files.action_lists, tickets: files.tickets });
-  let microsite: ReleasedDocuments["microsite"];
-  try {
-    microsite = { ok: true, pages: buildMicrositePages(report, pseudonyms) };
-  } catch (err) {
-    microsite = { ok: false, reason: err instanceof Error ? err.message : "The pages couldn't be built" };
-  }
   const study = await renderCaseStudyDocx(report, pseudonyms);
   const caseStudy = study ? join(out, "case-study-draft.docx") : undefined;
   if (study && caseStudy) writeFileSync(caseStudy, study, { mode: 0o600 });
-  // From the report just printed, so its figures are the documents' own. Never a reason to fail the make.
   let digest: ReleasedDocuments["digest"];
   if (approved.digest) {
     try {
@@ -425,5 +456,60 @@ export async function renderReleased(dir: string, approved: ApprovedRun, outDir:
       digest = { ok: false, error: err instanceof Error ? err.name : "Error" };
     }
   }
-  return { files, warnings: layoutWarnings(layout), held: withSections(layout, report, pseudonyms), fellBack, leftOut, microsite, ...(caseStudy ? { caseStudy } : {}), ...(digest ? { digest } : {}), surveyMetrics: surveyMetricsOf(report), baselineRefused: report.baselineRefused, baselineGone, baselineUnapproved };
+
+  // The final check over every output (decision 682, item 1). The PDFs and the microsite are checked whole
+  // against the set. The Word files, the action lists, the tickets and the digest hold record names, ids,
+  // references and queries by design, which no dataset holds, so they can't be checked whole: each is
+  // checked for every figure the make took out, which must be in none of them.
+  const held = heldFigures(layout).map((h, i) => {
+    const section = sectionHolding(report, pseudonyms, set, heldRaws(layout)[i]!.raw);
+    return section ? { ...h, section } : h;
+  });
+  for (const miss of siteMisses) held.push({ document: MICROSITE, page: 0, ...shownFigure(miss.raw), reason: "can't be traced to the data" });
+  const patterns: RegExp[] = raws.map((raw) => heldPattern(raw));
+  const elsewhere: Array<[string, () => string]> = [
+    ["The raw notes", () => docxWords(files.raw_notes)],
+    ["The readout kit", () => docxWords(files.readout_kit)],
+    ["The action lists", () => xlsxWords(files.action_lists)],
+    ["The tickets", () => readFileSync(files.tickets, "utf8")],
+    ...(caseStudy ? [["The case study draft", () => docxWords(caseStudy)] as [string, () => string]] : []),
+  ];
+  for (const [document, read] of elsewhere) {
+    let text: string;
+    try {
+      text = unescape(read());
+    } catch {
+      held.push({ document, page: 0, figure: "(whole text)", reason: "this file couldn't be read to check it" });
+      continue;
+    }
+    raws.forEach((raw, i) => {
+      if (patterns[i]!.test(text)) held.push({ document, page: 0, ...shownFigure(raw), reason: "taken out of the reports but still here" });
+    });
+  }
+  // A digest still quoting one is withheld: the connector gets none rather than an untraceable figure.
+  const made_ = digest;
+  if (made_?.ok && patterns.some((p) => p.test(JSON.stringify(made_.digest)))) digest = { ok: false, error: "UntraceableFigure" };
+
+  const repairs = made.repairs;
+  const leftOut: LeftOut[] = firstSeen.map((h) => {
+    const at = repairs.find((r) => r.raw === h.raw);
+    return { document: h.document, page: h.page, kind: kindOf(h.raw, set), ...(at?.ruleId ? { ruleId: at.ruleId } : {}), ...(at?.metricId ? { metricId: at.metricId } : {}), ...(at ? { field: at.field } : {}) };
+  });
+  const fellBack = made.fellBack;
+  const microsite: ReleasedDocuments["microsite"] = site.ok ? (siteMisses.length ? { ok: false, reason: "A microsite page has a figure the number check can't trace, so the microsite wasn't made" } : { ok: true, pages: { pages: site.pages } }) : site;
+  return {
+    files,
+    warnings: layoutWarnings(layout),
+    held,
+    fellBack,
+    leftOut,
+    repairs: heavy ? "heavy" : fellBack.length || leftOut.length ? "some" : "none",
+    microsite,
+    ...(caseStudy ? { caseStudy } : {}),
+    ...(digest ? { digest } : {}),
+    surveyMetrics: surveyMetricsOf(report),
+    baselineRefused: report.baselineRefused,
+    baselineGone: made.baselineGone,
+    baselineUnapproved: made.baselineUnapproved,
+  };
 }

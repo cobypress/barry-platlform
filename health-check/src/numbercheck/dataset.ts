@@ -83,7 +83,9 @@ class Collector {
    */
   words(name: string): void {
     // "Object.Field" is read as one word, and a page can print either half alone.
-    for (const text of new Set([name, name.replace(/\./g, " ")])) {
+    // Never an email's or a link's: their pieces must not become words we accept.
+    const halves = /@|:\/\//.test(name) ? [] : [name.replace(/\./g, " ")];
+    for (const text of new Set([name, ...halves])) {
       for (const figure of extractFigures(text).figures) if (figure.word) this.set.identifiers.push({ source: this.source, value: figure.raw.toLowerCase() });
     }
   }
