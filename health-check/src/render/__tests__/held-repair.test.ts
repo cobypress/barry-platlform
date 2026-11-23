@@ -242,6 +242,8 @@ describe("the engine's own vocabulary is an explicit list read from its source",
         const figures = extractFigures(form).figures;
         assert.ok(figures.length === 1 && figures[0]!.kind === "identifier" && figures[0]!.word && ENGINE_WORDS.has(figures[0]!.raw.toLowerCase()), `${form}: ${JSON.stringify(figures)}`);
       }
+      // Nor any piece of it: "5k-25k" is read whole as a word, but it's a range of amounts, and "2025" in an id is a year.
+      for (const piece of word.split(/[-_.]+/)) assert.ok(extractFigures(piece).figures.every((f) => f.kind === "identifier"), `${word}: ${piece}`);
     }
     const set = buildDataset({ findings: [], metrics: [] });
     assert.deepEqual(checkNumbers("We saved £5k-25k from 25K-100K users in the under-5k band.", set).passed, false);
