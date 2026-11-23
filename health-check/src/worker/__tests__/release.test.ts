@@ -329,10 +329,23 @@ describe("the Postgres store's release and hold", () => {
   });
 
   test("probe A and C on Postgres: the release and both holds only ever touch an unheld run, and the release never clears a hold", () => {
-    assert.match(RELEASE_RUN_SQL, /WHERE "id" = \$1 AND "reviewMode" = 'automatic' AND "heldReason" IS NULL AND "status" <> 'released'$/);
+    assert.match(RELEASE_RUN_SQL, /WHERE "id" = \$1 AND "reviewMode" = 'automatic' AND "heldReason" IS NULL AND "status" NOT IN \('released', 'failed'\)$/);
     assert.doesNotMatch(RELEASE_RUN_SQL, /SET [^W]*"heldReason"/);
     assert.match(HOLD_OUTPUT_SQL, /AND "heldReason" IS NULL AND "status" <> 'released'$/);
     assert.match(HOLD_RUN_SQL, /AND "heldReason" IS NULL AND "status" <> 'released' RETURNING "id"/);
+  });
+
+  test("probe H on Postgres: an automatic save on a run that failed meanwhile is refused before anything is written", async () => {
+    const pool = new FakePool();
+    pool.handlers.unshift((t) => (t.includes("FOR UPDATE") ? { rows: [{ status: "failed" }], rowCount: 1 } : undefined));
+    await assert.rejects(new PostgresWorkerStore(pool).saveRunOutput(RUN_ID, record({ decision: "release", releases: rows })), RunClosedError);
+    assert.ok(!pool.texts().some((t) => t === RELEASE_ROW_SQL || t === RELEASE_RUN_SQL || t.startsWith(`UPDATE "HealthCheckRun" SET "status" = $2`)));
+    assert.equal(pool.texts().at(-1), "ROLLBACK");
+    // A consultant-led save is as before: a failed run's results are still written by a later delivery.
+    const consultant = new FakePool();
+    consultant.handlers.unshift((t) => (t.includes("FOR UPDATE") ? { rows: [{ status: "failed" }], rowCount: 1 } : undefined));
+    await new PostgresWorkerStore(consultant).saveRunOutput(RUN_ID, record(undefined));
+    assert.equal(consultant.texts().at(-1), "COMMIT");
   });
 
   test("a hold that hits no row (a run already held) rolls the whole save back; the first hold stands", async () => {

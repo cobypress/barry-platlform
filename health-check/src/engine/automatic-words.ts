@@ -3,7 +3,7 @@ import { ENGINE_TEXT_KEYS } from "../digest/engine-texts.ts";
 import { replaceMarked, type Marked } from "../fix/marked.ts";
 import type { Finding, Metric, MetricOrgWords } from "../schemas/index.ts";
 import type { MarkedSentence } from "./org-words.ts";
-import { orgWordsOf, spansIfCurrent, textSha256 } from "./org-words.ts";
+import { orgWordsOf, saidMade, spansIfCurrent, textSha256 } from "./org-words.ts";
 
 // What a run whose calibration was read from the org's settings says, and how
 // its texts are marked (DECISIONS.md 693). An automatic run's customer bought
@@ -110,24 +110,44 @@ export function rewordFinding(f: Finding): Finding {
 }
 
 /**
- * A metric text's marks: from said, where it made the text in this analysis;
- * none of the org's, where the engine wrote the whole text, or a template of it
- * with only figures put in (src/digest/engine-texts.ts); else unknown.
+ * Values the org chose that this run read (DECISIONS.md 693): its stage names,
+ * the metrics' segment keys and the findings' subjects. A text equal to one of
+ * them could have come from the org whole, so it is never read as the engine's,
+ * however the engine's own source happens to write the same words.
  */
-export function metricMarks(text: string): MarkedSentence | null {
-  const spans = orgWordsOf(text) ?? (ENGINE_TEXT_KEYS.has(engineTextKey(text)) ? [] : null);
+export function orgValuesOf(input: { metrics: Metric[]; findings: Finding[]; stages: string[] }): ReadonlySet<string> {
+  return new Set([...input.stages, ...input.metrics.flatMap((m) => (m.status === "measured" ? m.segments.flatMap((s) => [s.key, s.dimension]) : [])), ...input.findings.flatMap((f) => f.subjects.map((s) => s.label))]);
+}
+
+/**
+ * Ours, where the engine's source writes this whole text (src/digest/engine-texts.ts)
+ * and it isn't a value the org chose; else unknown. Never for a text said made:
+ * its own marks stand, unknown included.
+ */
+export function engineOwn(text: string, orgValues: ReadonlySet<string>): boolean {
+  return !saidMade(text) && !orgValues.has(text) && ENGINE_TEXT_KEYS.has(engineTextKey(text));
+}
+
+/**
+ * A metric text's marks: from said, where it made the text in this analysis,
+ * and unknown where said recorded it as unknown; else none of the org's where
+ * the engine's source writes the whole text and it is no value the org chose;
+ * else unknown.
+ */
+export function metricMarks(text: string, orgValues: ReadonlySet<string> = new Set()): MarkedSentence | null {
+  const spans = saidMade(text) ? orgWordsOf(text) : engineOwn(text, orgValues) ? [] : null;
   return spans ? { spans: spans.map((s) => ({ ...s })), textSha256: textSha256(text) } : null;
 }
 
 /** A metric's texts marked as built, before anything changes them. */
-export function marksOfMetric(m: Metric): MetricOrgWords {
-  const one = (t: string): MarkedSentence | undefined => metricMarks(t) ?? undefined;
+export function marksOfMetric(m: Metric, orgValues: ReadonlySet<string> = new Set()): MetricOrgWords {
+  const one = (t: string): MarkedSentence | undefined => metricMarks(t, orgValues) ?? undefined;
   return {
     ...(one(m.label) ? { label: one(m.label) } : {}),
     ...(one(m.definition) ? { definition: one(m.definition) } : {}),
     ...(m.status === "not_measurable" && one(m.reason) ? { reason: one(m.reason) } : {}),
-    assumptions: m.assumptions.map(metricMarks),
-    exclusions: m.exclusions.map(metricMarks),
+    assumptions: m.assumptions.map((t) => metricMarks(t, orgValues)),
+    exclusions: m.exclusions.map((t) => metricMarks(t, orgValues)),
   };
 }
 

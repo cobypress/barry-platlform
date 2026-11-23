@@ -5,10 +5,12 @@ import ts from "typescript";
 import { CUSTOMER_TEXT_DIRS } from "../numbercheck/engine-words-scan.ts";
 import { engineTextKey } from "./engine-texts-key.ts";
 
-// How the engine's own texts are found (DECISIONS.md 693): every string the
-// source writes in the folders whose text can reach a customer, and every
-// template with each of its substitutions read as a figure, keyed by
-// engineTextKey. Only a test and this file's own command run it, so the list
+// How the engine's own texts are found (DECISIONS.md 693): every whole string
+// the source writes in the folders whose text can reach a customer, keyed by
+// engineTextKey. Only a whole literal: a template's substitutions could be the
+// org's, a digits-only stage name among them, so a text with anything put in
+// is known only through said, unless all it puts in are the same file's own
+// number constants. Only a test and this file's own command run it, so the list
 // in engine-texts.ts is regenerated on purpose and reviewed in the diff, never
 // grown while a run is going. Run `node src/digest/engine-texts-scan.ts --write`.
 
@@ -24,20 +26,33 @@ function* sourceFiles(dir: string): Generator<string> {
   }
 }
 
-/** A template's text with every substitution as one figure, as engineTextKey reads it. */
-const templateText = (node: ts.TemplateExpression): string => node.head.text + node.templateSpans.map((s) => `0${s.literal.text}`).join("");
-
 /** Each key, sorted. Only texts with a space: a single word could be a value the org chose. */
 export function scanEngineTexts(srcDir: string): string[] {
   const keys = new Set<string>();
   for (const dir of ENGINE_TEXT_DIRS) {
     for (const file of sourceFiles(join(srcDir, dir))) {
       const source = ts.createSourceFile(file, readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true);
+      // The file's own top-level number constants, such as RECENT_DAYS = 28: a template putting in only these is
+      // written by the engine whole, with nothing from the org, so it is read as the text it always makes.
+      const numbers = new Map<string, string>();
+      for (const statement of source.statements) {
+        if (!ts.isVariableStatement(statement) || !(statement.declarationList.flags & ts.NodeFlags.Const)) continue;
+        for (const d of statement.declarationList.declarations) if (ts.isIdentifier(d.name) && d.initializer && ts.isNumericLiteral(d.initializer)) numbers.set(d.name.text, d.initializer.text);
+      }
+      const constant = (node: ts.TemplateExpression): string | null => {
+        let text = node.head.text;
+        for (const span of node.templateSpans) {
+          if (!ts.isIdentifier(span.expression) || !numbers.has(span.expression.text)) return null;
+          text += String(Number(numbers.get(span.expression.text))) + span.literal.text;
+        }
+        return text;
+      };
       const visit = (node: ts.Node): void => {
         let text: string | null = null;
         if (ts.isStringLiteral(node) && !ts.isImportDeclaration(node.parent) && !ts.isExportDeclaration(node.parent)) text = node.text;
-        else if (ts.isNoSubstitutionTemplateLiteral(node)) text = node.text;
-        else if (ts.isTemplateExpression(node)) text = templateText(node);
+        // A template with nothing put in, but never one with substitutions: what is put in could be the org's (DECISIONS.md 693).
+        else if (ts.isNoSubstitutionTemplateLiteral(node) && !ts.isTaggedTemplateExpression(node.parent)) text = node.text;
+        else if (ts.isTemplateExpression(node) && !ts.isTaggedTemplateExpression(node.parent)) text = constant(node);
         if (text !== null && /\s/.test(text.trim())) keys.add(engineTextKey(text));
         ts.forEachChild(node, visit);
       };

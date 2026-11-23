@@ -119,7 +119,7 @@ export function readsPipeline(source: Source): boolean {
   return false;
 }
 /** What the export says of an automatic run's user band: nobody has told us which users are integrations or shared accounts. */
-export const USER_BAND_NOTE = "Nobody has confirmed which users are integrations, shared or system accounts, so the user band counts every active user apart from those on integration licences.";
+export const USER_BAND_NOTE = "The user band is exported, counting every active user apart from those on integration licences: nobody has confirmed which are integrations, shared or system accounts, so it may count some of those.";
 
 /** The run's PMD totals, or null when it had no step. A file that doesn't parse is refused rather than read as not measured. */
 export function readLintTotals(dir: string): LintTotals | null {
@@ -355,7 +355,8 @@ export type BenchmarkOptions = {
   now?: Date;
 };
 
-export type BenchmarkResult = { rows: BenchmarkRow[]; skipped: Skipped[]; storePath: string; profile: OrgProfile };
+/** `notes` says what an exported figure or band rests on, where a row can't (DECISIONS.md 693): empty on a consultant-led run. */
+export type BenchmarkResult = { rows: BenchmarkRow[]; skipped: Skipped[]; notes: string[]; storePath: string; profile: OrgProfile };
 
 const readJson = (path: string): unknown => JSON.parse(readFileSync(path, "utf8"));
 
@@ -367,7 +368,7 @@ export const ConsentRecord = z.strictObject({
 });
 export type ConsentRecord = z.infer<typeof ConsentRecord>;
 
-type Prepared = { dir: string; rows: BenchmarkRow[]; skipped: Skipped[]; profile: OrgProfile; consentPath: string; record: ConsentRecord };
+type Prepared = { dir: string; rows: BenchmarkRow[]; skipped: Skipped[]; notes: string[]; profile: OrgProfile; consentPath: string; record: ConsentRecord };
 
 /** Everything up to writing: the checks, the figures and the bands. Throws with the reason when the run can't contribute. */
 function prepareBenchmark(options: Omit<BenchmarkOptions, "storeDir">): Prepared {
@@ -426,7 +427,8 @@ function prepareBenchmark(options: Omit<BenchmarkOptions, "storeDir">): Prepared
   // Built field by field, so nothing from the run can ride along.
   const rows = figures.map((f) => BenchmarkRow.parse({ metricKey: f.metricKey, value: f.value, unit: f.unit, ...shared }));
   const record = ConsentRecord.parse({ consent, recordedAt: (options.now ?? new Date()).toISOString(), rowsWritten: rows.length, metricKeys: rows.map((r) => r.metricKey) });
-  return { dir, rows, skipped: calibration.source === "org_settings" ? [...skipped, { metricKey: "userBand", reason: USER_BAND_NOTE }] : skipped, profile, consentPath, record };
+  // The band is exported; what it counts is said beside it, not among what was left out (fix round 2).
+  return { dir, rows, skipped, notes: calibration.source === "org_settings" ? [USER_BAND_NOTE] : [], profile, consentPath, record };
 }
 
 /** The run, or its org within the window, is already in the set. Not a fault: there's nothing more to add. */
@@ -466,15 +468,15 @@ export function exportBenchmark(options: BenchmarkOptions): BenchmarkResult {
     rmSync(prepared.consentPath, { force: true });
     throw err;
   }
-  return { rows: prepared.rows, skipped: prepared.skipped, storePath, profile: prepared.profile };
+  return { rows: prepared.rows, skipped: prepared.skipped, notes: prepared.notes, storePath, profile: prepared.profile };
 }
 
 /** The worker: into the console's benchmark table, through whatever writes it. */
 export async function contributeBenchmark(
   options: Omit<BenchmarkOptions, "storeDir">,
   write: (rows: BenchmarkRow[]) => Promise<void>,
-): Promise<{ rows: BenchmarkRow[]; skipped: Skipped[] }> {
+): Promise<{ rows: BenchmarkRow[]; skipped: Skipped[]; notes: string[] }> {
   const prepared = prepareBenchmark(options);
   await writeWithConsent(prepared, write);
-  return { rows: prepared.rows, skipped: prepared.skipped };
+  return { rows: prepared.rows, skipped: prepared.skipped, notes: prepared.notes };
 }

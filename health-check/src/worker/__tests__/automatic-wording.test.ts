@@ -13,7 +13,7 @@ import { applyNarrative } from "../../narrative/apply.ts";
 import type { NarrativeClient } from "../../narrative/client.ts";
 import { AUTOMATIC_CLAIM } from "../../narrative/draft.ts";
 import { SYSTEM_PROMPTS } from "../../narrative/guard.ts";
-import { AUTOMATIC_SYSTEM_PROMPT, SYSTEM_PROMPT } from "../../narrative/prompt.ts";
+import { AUTOMATIC_FORBIDDEN, AUTOMATIC_SYSTEM_PROMPT, SYSTEM_PROMPT } from "../../narrative/prompt.ts";
 
 // What an automatic run's customer reads says nothing of a consultant who
 // isn't there, and says what it assumed in place of what a person would have
@@ -137,4 +137,25 @@ describe("Claude's drafts on an automatic run (DECISIONS.md 693)", () => {
     await applyNarrative(buildReport(cons.input), writing("Your consultant will walk you through this.", consultantSystems), cons.pseudonyms);
     assert.ok(consultantSystems.every((s) => s === SYSTEM_PROMPT));
   });
+});
+
+describe("the automatic draft guard's words (fix round 2, the reviewer's phrasings)", () => {
+  const REFUSED = [
+    "Our team has looked over these findings.",
+    "We'll talk you through each finding.",
+    "Your Black Cloud contact can help with the next steps.",
+    "Your account manager will go through this with you.",
+    "Our experts have checked every figure.",
+    "We have verified these results by hand.",
+    "One of our specialists will be in touch.",
+    "Book a call with us to go through the findings.",
+    "We reviewed your org in detail.",
+    "Our advisor will explain the plan.",
+    "The findings below were checked by our team.",
+    "This report has been reviewed.",
+    "A consultant reviewed it.",
+  ];
+  const PASSED = ["Review your sharing settings.", "The report on stale leads shows 12 deals.", "Check which users hold this permission.", "Ask your admin to remove the unused fields.", "We found 3 flows without fault paths."];
+  for (const text of REFUSED) test(`refused: "${text}"`, () => assert.ok(AUTOMATIC_FORBIDDEN.some((p) => p.test(text))));
+  for (const text of PASSED) test(`passed: "${text}"`, () => assert.ok(!AUTOMATIC_FORBIDDEN.some((p) => p.test(text))));
 });

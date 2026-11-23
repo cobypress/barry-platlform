@@ -145,6 +145,8 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
   if (!first) return { outcome: "skipped", detail: `No run ${runId}` };
   Object.assign(seen, { product: first.run.product, connectionName: first.connectionName });
   if (CLOSED.has(first.run.status)) return { outcome: "skipped", detail: `Run ${runId} is ${first.run.status.replace("_", " ")}, so there's nothing for the worker to do` };
+  // A failed automatic run is a person's to run again (DECISIONS.md 693): a stray second message never runs or releases it.
+  if (first.run.reviewMode === "automatic" && first.run.status === "failed") return { outcome: "skipped", detail: `Automatic run ${runId} failed, so it waits for a person to run it again and nothing was read` };
   // A held automatic run waits for a named person, always: code never reads it again or releases it (DECISIONS.md 693).
   if (heldFor(first)) return heldOutcome(runId, first);
 

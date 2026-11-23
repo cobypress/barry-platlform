@@ -175,7 +175,7 @@ function activeShare(ctx: Ctx, paid: UserLicenseRow[], usedSeats: number, licenc
     });
   return measured(d, evidence, pct(recent.length, usedSeats), usedSeats, segments, {
     exclusions: [LICENCE_EXCLUSION, "Inactive users"],
-    assumptions: [`A user is active if they logged in within ${days} days, the calibration's dormant period, going by their last login date`],
+    assumptions: [said`A user is active if they logged in within ${days} days, the calibration's dormant period, going by their last login date`],
     stats: { activeUsers: recent.length, dormantDays: days },
   });
 }

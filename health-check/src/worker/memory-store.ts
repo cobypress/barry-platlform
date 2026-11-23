@@ -87,6 +87,7 @@ export class MemoryWorkerStore implements WorkerStore {
     const run = this.#open(runId);
     // Every row held to the console's own checks before anything is kept, as one transaction would be (DECISIONS.md 693).
     for (const s of output.sections) assertChecks(sectionCheckRow(s), CONSOLE_CHECKS.sectionApproved, CONSOLE_CHECKS.sectionApproval);
+    if (output.automatic && run.run.status === "failed") throw new RunClosedError(runId, "failed");
     if (output.automatic) this.#checkAutomatic(run, output);
     const { progress, runDir, overall, digest, automatic, ...rest } = structuredClone(output);
     run.run = Run.parse({ ...run.run, ...progress });
@@ -112,7 +113,7 @@ export class MemoryWorkerStore implements WorkerStore {
     // The run's real hold, as the database has it: the Postgres store's statements match no row on a held run (DECISIONS.md 693).
     const heldReason = this.held.get(run.run.id) ?? null;
     assertChecks({ reviewMode }, CONSOLE_CHECKS.reviewMode);
-    if (heldReason !== null) throw new Error(`Run ${run.run.id} couldn't be ${a.decision === "release" ? "released" : "held"}: the console doesn't have it as an unreleased, unheld automatic run`);
+    if (heldReason !== null || (a.decision === "release" && run.run.status === "failed")) throw new Error(`Run ${run.run.id} couldn't be ${a.decision === "release" ? "released" : "held"}: the console doesn't have it as an unreleased, unheld automatic run`);
     if (a.decision === "release") {
       if (!output.digest || !this.digestTable || unstorableAt(output.digest, [], DIGEST_KEYS)) throw new Error(`Run ${run.run.id}'s digest couldn't be written, so it isn't released`);
       for (const r of a.releases) {

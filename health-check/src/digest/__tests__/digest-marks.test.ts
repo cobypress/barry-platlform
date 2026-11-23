@@ -3,8 +3,12 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
-import { ID_MAPS, STRUCTURAL_KEYS } from "../build.ts";
-import { checkedDigest, digestTextsAt, marksOf, TEXT_SLOTS, type CheckedDigest } from "../checked.ts";
+import { checkedDigest, digestTextsAt, marksOf, STRUCTURAL_PATHS, TEXT_SLOTS, type CheckedDigest } from "../checked.ts";
+import { metricMarks, rewordFinding, rewordMetric } from "../../engine/automatic-words.ts";
+import { org, said, withOrgWords } from "../../engine/org-words.ts";
+import { automaticCalibration } from "../../connect/auto-calibration.ts";
+import { stagesOf } from "../../testing/automatic.ts";
+import { loadRecording, ReplayTransport } from "../../testing/replay.ts";
 import { ENGINE_TEXTS_FILE, engineTextsSource, scanEngineTexts } from "../engine-texts-scan.ts";
 import { buildReport, type ReportInput } from "../../narrative/sections.ts";
 import { loadRun } from "../../render/render-run.ts";
@@ -24,7 +28,8 @@ const check = (input: ReportInput, build?: (i: ReportInput) => ReturnType<typeof
 
 /** Every string field of a schema, by path with [] for each array, as digestTextsAt names them. Fixed words (enums, literals) aren't text. */
 function stringPaths(schema: z.ZodType, path = "", key = ""): string[] {
-  if (STRUCTURAL_KEYS.has(key) || ID_MAPS.has(key) || key === "orgWords") return [];
+  // By full path, as the checked digest skips them: a new free-text field under a structural key's name is text (the reviewer's N10).
+  if (STRUCTURAL_PATHS.has(path) || key === "orgWords") return [];
   const def = (schema as unknown as { _zod: { def: Record<string, unknown> & { type: string } } })._zod.def;
   switch (def.type) {
     case "string":
@@ -85,9 +90,11 @@ describe("a text that can't be marked", () => {
   const withMetric = (change: (m: Metric) => Metric): ReportInput => ({ ...loaded.input, metrics: loaded.input.metrics.map((m, i) => (i === 0 ? change(m) : m)) });
   const unknownWords = ["Quokka", "Wombat"].join(" ");
 
-  test("a metric's label with no marks is withheld whole and counted as a mask; the rest is served", () => {
+  test("a metric whose label has no marks is left out whole, its value with it, and counted as a mask; the rest is served", () => {
+    const id = loaded.input.metrics[0]!.id;
     const c = check(withMetric((m) => ({ ...m, label: `Counted by ${unknownWords}`, orgWords: undefined })));
-    assert.equal(c.digest!.metrics[0]!.label, MASK);
+    assert.ok(!c.digest!.metrics.some((m) => m.id === id));
+    assert.ok(!JSON.stringify(c.digest).includes(unknownWords));
     assert.equal(c.masks, 1);
     assert.equal(c.unmarked, 0);
     assert.equal(c.held, null);
@@ -141,4 +148,88 @@ describe("every text is number-checked, wherever it is (the reviewer's M6)", () 
       assert.ok(c.held !== null || c.masks > 0 || !json.includes(String(PLANTED)));
     });
   }
+});
+
+describe("the marks machinery's edges (fix round 2)", () => {
+  test("a text said recorded as unknown stays unknown, even where the engine's source writes the same words (the reviewer's N8)", () => {
+    assert.ok(metricMarks("Win rate"), "the engine writes this label whole");
+    withOrgWords(() => {
+      // The same words made twice with different marks: said can't vouch for them.
+      said`${org("Win")} rate`;
+      said`Win ${org("rate")}`;
+      assert.equal(metricMarks("Win rate"), null);
+    });
+  });
+
+  test("a value the org chose is never read as the engine's, however the source writes the same words", () => {
+    assert.ok(metricMarks("Win rate"));
+    assert.equal(metricMarks("Win rate", new Set(["Win rate"])), null);
+  });
+
+  test("unknown marks stay unknown through the rewording (the reviewer's N5)", () => {
+    const m = loaded.input.metrics.find((x) => x.status === "measured")!;
+    const reworded = rewordMetric({ ...m, label: "The calibration needs at least two ordered open stages." }, { assumptions: m.assumptions.map(() => null), exclusions: m.exclusions.map(() => null) });
+    assert.equal(reworded.label, "We need at least two open stages in a known order.");
+    assert.equal(reworded.orgWords?.label, undefined);
+    assert.ok((reworded.orgWords?.assumptions ?? []).every((x) => x === null));
+    const f = loaded.input.findings.find((x) => x.status === "not_measurable")!;
+    const unmarked = rewordFinding({ ...f, notMeasurableReason: "No targets were given in the calibration.", orgWords: undefined });
+    assert.equal(unmarked.notMeasurableReason, "You haven't told us your sales targets yet.");
+    assert.equal(unmarked.orgWords?.notMeasurableReason, undefined);
+  });
+
+  test("a text at a path with no place for marks is unknown (the reviewer's N6)", () => {
+    const d = check(loaded.input).digest!;
+    assert.equal(marksOf(d, { path: "findings[].novelText", at: [0], text: "Something new" }), null);
+    assert.equal(marksOf(d, { path: "plan.phases[].key", at: [0], text: "fix" }), null);
+  });
+});
+
+describe("adversarial stage names, end to end (the reviewer's probe E)", async () => {
+  // The synthetic org with four stages renamed to what could pass for our words or a figure; the same run with the names as they were.
+  const SWAPS: Array<[string, string]> = [["Negotiation", "2024"], ["Legal Review", "Win rate"], ["Discovery", "Disc (detail withheld)"], ["Proposal", "<b>Prop</b>"]];
+  const swapped = loadRecording();
+  const esc = (s: string) => JSON.stringify(s).slice(1, -1);
+  for (const e of swapped.exchanges) for (const [a, b] of SWAPS) e.text = e.text.split(esc(a)).join(esc(b));
+  const keyed = structuredClone(swapped);
+  for (const e of keyed.exchanges) for (const [a, b] of SWAPS) e.key = e.key.split(encodeURIComponent(a)).join(encodeURIComponent(b));
+  const first = await runFromRecording({ transport: new ReplayTransport(structuredClone(swapped)) });
+  const built = automaticCalibration(stagesOf(first.dir), { orgId: first.run.orgId, at: "2026-10-31T09:00:00.000Z", currency: "GBP" });
+  assert.ok(built.ok);
+  const run = await runFromRecording({ calibration: built.calibration, reviewMode: "automatic", transport: new AutomaticReplay(keyed) });
+  const adv = loadRun(run.dir);
+  const c = check(adv.input);
+  const plain = check(loaded.input);
+  /** Each text by where it is, owned by its finding's or metric's id, so a metric left out doesn't move the rest. */
+  const byPlace = (d: RunDigest) => new Map(digestTextsAt(d).map((t) => {
+    const owner = t.path.startsWith("findings") ? d.findings[t.at[0]!]!.id : t.path.startsWith("metrics") ? d.metrics[t.at[0]!]!.id : String(t.at[0] ?? "");
+    return [`${t.path}|${owner}|${t.at.slice(1).join(",")}`, t] as const;
+  }));
+  const was = byPlace(plain.digest!);
+
+  test("every place an org's stage name reaches the customer, it sits inside an org span", () => {
+    assert.equal(c.held, null);
+    let checked = 0;
+    for (const [place, t] of byPlace(c.digest!)) {
+      const before = was.get(place)?.text ?? "";
+      for (const [, word] of SWAPS) {
+        // Where our own text at the same place holds the same characters, the occurrences can't be told apart.
+        if (before.includes(word)) continue;
+        for (let i = t.text.indexOf(word); i >= 0; i = t.text.indexOf(word, i + 1)) {
+          // A date of ours ("2024-10-31") is no stage.
+          if (word === "2024" && /^2024-\d\d-\d\d/.test(t.text.slice(i))) continue;
+          const marks = marksOf(c.digest!, t);
+          assert.ok(marks?.orgWords.some((s) => s.start <= i && s.end >= i + word.length), `${place}: ${word} in ${t.text.slice(0, 140)}`);
+          checked++;
+        }
+      }
+    }
+    assert.ok(checked >= 2, `only ${checked}: ${JSON.stringify(digestTextsAt(c.digest!).filter((t) => SWAPS.some(([, w]) => t.text.includes(w))).slice(0, 3).map((t) => t.path))}`);
+  });
+
+  test("a metric text equal to an org's stage name is never served as ours", () => {
+    for (const m of c.digest!.metrics) {
+      assert.notEqual(m.label, "Win rate");
+    }
+  });
 });

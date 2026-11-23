@@ -83,9 +83,10 @@ async function flow(options: { reviewMode?: Run["reviewMode"]; product?: Run["pr
   const fake = new FakeTokenEndpoint();
   const org = new Org();
   const queued: string[] = [];
-  const deps = baseDeps({ oauthTransport: fake, dataTransport: org, now: () => NOW, automatic: options.automatic ?? ON, queueRun: async (runId) => void queued.push(runId) });
+  const kinds: boolean[] = [];
+  const deps = baseDeps({ oauthTransport: fake, dataTransport: org, now: () => NOW, automatic: options.automatic ?? ON, queueRun: async (runId, options) => { queued.push(runId); kinds.push(options?.automatic === true); } });
   deps.store.addRun(runInput({ run: consoleRun({ orgId: ORG_AWAITING_CONNECT, product: options.product ?? "barometer", reviewMode: options.reviewMode ?? "automatic" }), calibration: null }));
-  const f = { fake, org, deps, queued, handle: createJobHandler(deps) };
+  const f = { fake, org, deps, queued, kinds, handle: createJobHandler(deps) };
   const link = addLink(f);
   return { ...f, link, job: { kind: "connect" as const, linkId: link.id } };
 }
@@ -122,6 +123,8 @@ describe("an automatic full check's connect, with the switch on and the org list
       { name: "Quokka Won", category: "won" },
     ]);
     assert.deepEqual(f.queued, [RUN_ID]);
+    // Under its one fixed queue id, so a second message is no second run (DECISIONS.md 693).
+    assert.deepEqual(f.kinds, [true]);
     assert.deepEqual(f.deps.store.queued, [RUN_ID]);
     // The stages for the console's screen are written as before, and the calibration after them.
     const order = f.deps.store.writes.map((w) => w.method);

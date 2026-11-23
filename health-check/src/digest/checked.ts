@@ -7,7 +7,7 @@ import { replaceMarked, type Marked } from "../fix/marked.ts";
 import { HELD_FOR_US_MASKS } from "../render/render-released.ts";
 import { RunDigest, type SentenceOrgWords } from "../schemas/digest.ts";
 import type { Inventory } from "../schemas/inventory.ts";
-import { buildDigest, ID_MAPS, STRUCTURAL_KEYS } from "./build.ts";
+import { buildDigest } from "./build.ts";
 
 // An automatic run's digest, checked before the run is released (DECISIONS.md
 // 693). The portal shows the digest and nothing else of an automatic run, and
@@ -46,13 +46,28 @@ export type CheckedDigestFor = {
   build?: (input: ReportInput) => BuiltReport;
 };
 
-/** Every string the digest serves as text: everything outside its ids, codes, hashes and dates, as guardDigest reads it. */
-export function digestTexts(value: unknown, key = ""): string[] {
-  if (STRUCTURAL_KEYS.has(key) || ID_MAPS.has(key) || key === "orgWords") return [];
-  if (typeof value === "string") return [value];
-  if (Array.isArray(value)) return value.flatMap((v) => digestTexts(v, key));
-  if (value && typeof value === "object") return Object.entries(value).flatMap(([k, v]) => digestTexts(v, k));
-  return [];
+/**
+ * The digest's ids, codes, hashes and dates, by their full path (DECISIONS.md
+ * 693), never by a key's name alone: a free-text field added later under a name
+ * such as "key", "from", "to", "group" or "kind" is text, checked and held to
+ * its marks, until it is listed here on review. Within these, nothing is text.
+ */
+export const STRUCTURAL_PATHS: ReadonlySet<string> = new Set([
+  "areas[].domain", "areas[].findingIds", "areas[].notMeasurableKind", "areas[].status", "asOf", "baselineRunId",
+  "findings[].confidence", "findings[].domain", "findings[].effortSize", "findings[].fixComplexity", "findings[].id", "findings[].notMeasurableKind",
+  "findings[].recommendationType", "findings[].ruleId", "findings[].severity", "findings[].status", "findings[].timeBand", "findings[].value.kind",
+  "madeAt", "metrics[].dateRange.from", "metrics[].dateRange.to", "metrics[].domain", "metrics[].id", "metrics[].notMeasurableKind",
+  "metrics[].status", "overall.areaDomains", "overall.grade", "overall.status", "plan.alsoFor", "plan.hoursTotal.findingIds",
+  "plan.hoursTotal.notTotalledFindingIds", "plan.hoursTotal.partialFindingIds", "plan.hoursTotal.withoutHoursFindingIds", "plan.later", "plan.phases[].findingIds", "plan.phases[].from",
+  "plan.phases[].key", "plan.phases[].to", "plan.quickWins", "product", "reviewed", "runId",
+  "value.byKind.conversion_uplift.lineIds", "value.byKind.licence_waste.lineIds", "value.byKind.revenue_recoverable.lineIds", "value.byKind.time_cost.lineIds", "value.currency", "value.exposure.lineIds",
+  "value.groups[].counted", "value.groups[].id", "value.groups[].kind", "value.groups[].lineIds", "value.leftOut", "value.lines[].group",
+  "value.lines[].id", "value.lines[].kind", "value.lines[].ruleId", "value.total.lineIds", "version", "withheldNames",
+]);
+
+/** Every string the digest serves as text: everything outside its structural paths and its marks. */
+export function digestTexts(value: unknown): string[] {
+  return digestTextsAt(value).map((t) => t.text);
 }
 
 /** The raw of every figure in the digest's texts that doesn't trace to the set, each once. */
@@ -144,7 +159,7 @@ export type DigestText = { path: string; at: number[]; text: string };
 
 /** Every text the digest serves, as digestTexts reads them, with where each is. */
 export function digestTextsAt(value: unknown, path = "", at: number[] = [], key = ""): DigestText[] {
-  if (STRUCTURAL_KEYS.has(key) || ID_MAPS.has(key) || key === "orgWords") return [];
+  if (STRUCTURAL_PATHS.has(path) || key === "orgWords") return [];
   if (typeof value === "string") return [{ path, at, text: value }];
   if (Array.isArray(value)) return value.flatMap((v, i) => digestTextsAt(v, `${path}[]`, [...at, i], key));
   if (value && typeof value === "object") return Object.entries(value).flatMap(([k, v]) => digestTextsAt(v, path ? `${path}.${k}` : k, at, k));
@@ -190,21 +205,25 @@ function remarked(before: RunDigest, after: RunDigest, raws: string[]): RunDiges
  * is withheld whole, as "(detail withheld)", and counted with the masks; any
  * other text with none is counted as unmarked, and the digest is held.
  */
-export function enforceMarks(digest: RunDigest): { digest: RunDigest; withheld: number; unmarked: number } {
+export function enforceMarks(digest: RunDigest): { digest: RunDigest; withheld: number; dropped: number; unmarked: number } {
   const out = structuredClone(digest);
   let withheld = 0;
   let unmarked = 0;
+  // A metric whose label can't be marked goes whole: a value beside "(detail withheld)" would say nothing true.
+  const dropped = new Set<number>();
   for (const t of digestTextsAt(digest)) {
     if (marksOf(digest, t)) continue;
     const slot = TEXT_SLOTS[t.path];
-    if (METRIC_TEXT.test(t.path) && slot && slot !== "fixed") {
+    if (t.path === "metrics[].label") dropped.add(t.at[0]!);
+    else if (METRIC_TEXT.test(t.path) && slot && slot !== "fixed") {
       setText(out, t, MASK);
       slot.set(out, t.at, OURS);
       withheld++;
     } else unmarked++;
   }
+  out.metrics = out.metrics.filter((_m, i) => !dropped.has(i));
   const parsed = RunDigest.safeParse(out);
-  return parsed.success ? { digest: parsed.data, withheld, unmarked } : { digest, withheld: 0, unmarked: unmarked + withheld };
+  return parsed.success ? { digest: parsed.data, withheld, dropped: dropped.size, unmarked } : { digest, withheld: 0, dropped: 0, unmarked: unmarked + withheld + dropped.size };
 }
 
 /** Puts a text in place by its path. */
@@ -258,7 +277,8 @@ export function checkedDigest({ input, pseudonyms, inventory, madeAt, build = bu
   // A metric's text that can't be marked is withheld, and counted with the masks; any other is held.
   const enforced = enforceMarks(digest);
   digest = enforced.digest;
-  const masks = masksIn(digest);
+  // Each metric left out whole counts as one mask, as each "(detail withheld)" does.
+  const masks = masksIn(digest) + enforced.dropped;
   const unmarked = enforced.unmarked;
   const held = unmatched > 0 || masks > HELD_FOR_US_MASKS || unmarked > 0 ? "digest_held" : null;
   return { digest, masks, unmatched, unmarked, held };

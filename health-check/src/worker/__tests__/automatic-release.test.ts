@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { canRelease, Metric, Release, ReportSection, type Calibration } from "../../schemas/index.ts";
 import { ALL_MODULES } from "../../domains/index.ts";
 import type { DomainModule } from "../../domains/types.ts";
-import { MASK } from "../../render/repair.ts";
 import { AS_OF, ORG_ID } from "../../testing/synthetic-org.ts";
 import { AutomaticReplay, automaticSyntheticCalibration } from "../../testing/automatic.ts";
 import { loadRecording, ReplayTransport } from "../../testing/replay.ts";
@@ -161,6 +160,68 @@ describe("the score check compares only with a run that was released (DECISIONS.
   });
 });
 
+describe("probe H: a failed automatic run is never run again or released by code (DECISIONS.md 693)", () => {
+  test("a second message after the failure is skipped, nothing read, nothing released, its flag left open", async () => {
+    const calibration = await automaticSyntheticCalibration();
+    const transport = new AutomaticReplay();
+    const deps = baseDeps({ dataTransport: transport, automatic: ON });
+    deps.store.addRun(runInput({ run: consoleRun({ reviewMode: "automatic" }), calibration, intake: null, answers: [] }));
+    await deps.tokens.save(syntheticConnection());
+    await deps.store.recordRunFailure(RUN_ID, "The run stopped with an error: boom", AS_OF);
+    const outcome = await createJobHandler(deps)(job, { final: false });
+    assert.deepEqual(outcome, { outcome: "skipped", detail: `Automatic run ${RUN_ID} failed, so it waits for a person to run it again and nothing was read` });
+    assert.equal(transport.requests.length, 0);
+    assert.equal(deps.store.runs.get(RUN_ID)!.run.status, "failed");
+    assert.equal(deps.store.releases.has(RUN_ID), false);
+    assert.deepEqual(deps.store.flagsOf(RUN_ID), ["run_failed"]);
+  });
+
+  test("a failure landing while the run job works refuses its release whole", async () => {
+    const calibration = await automaticSyntheticCalibration();
+    const deps = baseDeps({ dataTransport: new AutomaticReplay(), automatic: ON });
+    deps.store.addRun(runInput({ run: consoleRun({ reviewMode: "automatic" }), calibration, intake: null, answers: [] }));
+    await deps.tokens.save(syntheticConnection());
+    const save = deps.store.saveRunOutput.bind(deps.store);
+    deps.store.saveRunOutput = async (runId, output) => {
+      await deps.store.recordRunFailure(runId, "Lost: another delivery gave up", AS_OF);
+      return save(runId, output);
+    };
+    const outcome = await createJobHandler(deps)(job, { final: false });
+    assert.equal(outcome.outcome, "skipped");
+    assert.equal(deps.store.runs.get(RUN_ID)!.run.status, "failed");
+    assert.equal(deps.store.releases.has(RUN_ID), false);
+  });
+
+  test("a consultant-led run that failed is run again by a second message, as before", async () => {
+    const deps = baseDeps({ dataTransport: new ReplayTransport(loadRecording()), automatic: ON });
+    deps.store.addRun(runInput());
+    await deps.tokens.save(syntheticConnection());
+    await deps.store.recordRunFailure(RUN_ID, "boom", AS_OF);
+    assert.equal((await createJobHandler(deps)(job, { final: false })).outcome, "done");
+  });
+});
+
+describe("a hold landing between the job's two readings (the reviewer's N2)", () => {
+  test("is seen at the second reading: nothing is read from the org", async () => {
+    const calibration = await automaticSyntheticCalibration();
+    const transport = new AutomaticReplay();
+    const deps = baseDeps({ dataTransport: transport, automatic: ON });
+    deps.store.addRun(runInput({ run: consoleRun({ reviewMode: "automatic" }), calibration, intake: null, answers: [] }));
+    await deps.tokens.save(syntheticConnection());
+    const load = deps.store.loadRunJob.bind(deps.store);
+    let reads = 0;
+    deps.store.loadRunJob = async (runId) => {
+      if (++reads === 2) await deps.store.holdRun(runId, "calibration_unreadable", AS_OF);
+      return load(runId);
+    };
+    const outcome = await createJobHandler(deps)(job, { final: true });
+    assert.equal(outcome.outcome, "skipped");
+    assert.equal(reads, 2);
+    assert.equal(transport.requests.length, 0);
+    assert.equal(deps.store.releases.has(RUN_ID), false);
+  });
+});
+
 describe("probe C: a held run is never read or released by code (DECISIONS.md 693)", () => {
   test("held before its job runs: skipped, nothing read, not released, its one flag left open", async () => {
     const calibration = await automaticSyntheticCalibration();
@@ -230,8 +291,8 @@ describe("the digest stored is the checked one (the reviewer's M2)", () => {
     const outcome = await createJobHandler(deps)(job, { final: true });
     assert.equal(outcome.outcome, "done", outcome.detail);
     const stored = deps.store.getRunDigest(RUN_ID)!;
-    const metric = stored.metrics.find((m) => m.id === "probe.unmarked")!;
-    assert.equal(metric.label, MASK);
+    // Its label can't be marked, so the metric is left out whole (fix round 2): never its value beside a withheld label.
+    assert.equal(stored.metrics.find((m) => m.id === "probe.unmarked"), undefined);
     assert.ok(!JSON.stringify(stored).includes(words));
   });
 });

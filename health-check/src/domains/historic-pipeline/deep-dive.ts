@@ -1,4 +1,5 @@
 import { pct, type RuleContext } from "../../engine/rule.ts";
+import { said } from "../../engine/org-words.ts";
 import { priorWinsExtractor, type PriorWinRow } from "../../extract/prior-wins.ts";
 import type { Sourced } from "../../extract/types.ts";
 import type { DateRange, Metric, MetricSegment, SeriesPoint } from "../../schemas/index.ts";
@@ -37,7 +38,7 @@ function stageWinRate(ctx: Ctx, data: Ready): Metric {
   const { minSample } = ctx.calibration;
   const closed = closedFromOpen(ctx, data);
   const neverOpen = data.deals.filter((d) => d.category !== "open" && d.category !== null && closedInWindow(d, ctx.window)).length - closed.length;
-  const exclusions = [...definition.exclusions, ...(neverOpen > 0 ? [`${neverOpen} deals with no recorded open stage`] : [])];
+  const exclusions = [...definition.exclusions, ...(neverOpen > 0 ? [said`${neverOpen} deals with no recorded open stage`] : [])];
   if (closed.length < minSample) return notMeasurable({ ...definition, exclusions }, thinReason(closed.length, "closed deals with stage history", minSample));
   const rates = stageWinRates(ctx, data);
   const stages: MetricSegment[] = [...rates].map(([stage, cohort]) => ({ dimension: "stage", key: stage, n: cohort.n, value: cohort.rate, notMeasurableReason: cohort.rate === null ? `${SEGMENT_NOTE} (${cohort.n} of ${minSample})` : null }));
@@ -168,7 +169,7 @@ function winSources(ctx: Ctx, data: Ready): Metric[] {
   if (won.length < minSample) return every.map((d) => notMeasurable(d, thinReason(won.length, "won deals", minSample)));
   const blank = won.filter((d) => d.Amount === null).length;
   if (tooManyBlank(won)) return every.map((d) => notMeasurable(d, `${blank} of ${won.length} won deals have no amount, so shares of won value would mislead.`));
-  const blankNote = blank > 0 ? [`${blank} won deals with no amount count as zero`] : [];
+  const blankNote = blank > 0 ? [said`${blank} won deals with no amount count as zero`] : [];
   const withAccount = won.filter((d) => d.AccountId);
   const noAccount = won.length - withAccount.length;
   const accountExclusions = noAccount > 0 ? [`${noAccount} won deals with no account`] : [];
@@ -245,7 +246,7 @@ function lostFrom(ctx: Ctx, data: Ready): Metric[] {
   const all = data.deals.filter((d) => (d.category === "lost" || d.category === "no_decision") && closedInWindow(d, ctx.window));
   const lost = all.filter((d) => stageLeftFrom(d, data) !== null);
   const neverOpen = all.length - lost.length;
-  const exclusions = [...countDefinition.exclusions, ...(neverOpen > 0 ? [`${neverOpen} deals with no recorded open stage`] : [])];
+  const exclusions = [...countDefinition.exclusions, ...(neverOpen > 0 ? [said`${neverOpen} deals with no recorded open stage`] : [])];
   if (lost.length < minSample) return [countDefinition, valueDefinition].map((d) => notMeasurable({ ...d, exclusions }, thinReason(lost.length, "lost and no decision deals with stage history", minSample)));
   const order = (stage: string): number => data.stages.orderOf(stage) ?? Number.MAX_SAFE_INTEGER;
   const byStage = [...groupBy(lost, (d) => stageLeftFrom(d, data)!)].sort(([a], [b]) => order(a) - order(b) || a.localeCompare(b));
@@ -274,7 +275,7 @@ function closeDateReliability(ctx: Ctx, data: Ready): Metric[] {
   if (data.unmapped.finalStages.length > 0) return [shareDefinition, lateDefinition].map((d) => notMeasurable(d, unmappedReason("stages", data.unmapped.finalStages)));
   const won = wonFromOpen(ctx, data);
   const neverOpen = wonIn(ctx, data).length - won.length;
-  const exclusions = [...shareDefinition.exclusions, ...(neverOpen > 0 ? [`${neverOpen} won deals with no recorded open stage`] : [])];
+  const exclusions = [...shareDefinition.exclusions, ...(neverOpen > 0 ? [said`${neverOpen} won deals with no recorded open stage`] : [])];
   if (won.length < minSample) return [shareDefinition, lateDefinition].map((d) => notMeasurable({ ...d, exclusions }, thinReason(won.length, "won deals with stage history", minSample)));
   const dims = dimensions(ctx);
   delete dims["closed quarter"];

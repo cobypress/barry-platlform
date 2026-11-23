@@ -222,9 +222,9 @@ export const CALIBRATION_WRITE: Columns = { runId: "text", ...CALIBRATION, sourc
 export function calibrationRow(runId: string, c: Calibration): Record<string, unknown> {
   return Object.fromEntries(Object.keys(CALIBRATION_WRITE).map((k) => [k, k === "runId" ? runId : (c as Record<string, unknown>)[k]]));
 }
-/** A full check's review mode at connect, through the row as JSON (DECISIONS.md 688, 692). */
 /** An automatic run's hold (DECISIONS.md 693), read through the row as JSON like its mode. Asked only for an automatic run, so a consultant-led run's reads are unchanged. */
 export const HELD_REASON_SQL = `SELECT to_jsonb("HealthCheckRun") ->> 'heldReason' AS "heldReason" FROM "HealthCheckRun" WHERE "id" = $1`;
+/** A full check's review mode at connect, through the row as JSON (DECISIONS.md 688, 692). */
 export const REVIEW_MODE_SQL = `SELECT to_jsonb("HealthCheckRun") ->> 'reviewMode' AS "reviewMode" FROM "HealthCheckRun" WHERE "id" = $1`;
 /** The console's check also wants the run unreleased; held twice keeps the first reason. */
 /**
@@ -252,7 +252,7 @@ export const RELEASE_ROW_SQL = `INSERT INTO "HealthCheckRelease" ("id", "runId",
  * Never a held run, and never touching the hold: only a person clears one
  * (DECISIONS.md 693). One row or the save rolls back.
  */
-export const RELEASE_RUN_SQL = `UPDATE "HealthCheckRun" SET "status" = 'released' WHERE "id" = $1 AND "reviewMode" = 'automatic' AND "heldReason" IS NULL AND "status" <> 'released'`;
+export const RELEASE_RUN_SQL = `UPDATE "HealthCheckRun" SET "status" = 'released' WHERE "id" = $1 AND "reviewMode" = 'automatic' AND "heldReason" IS NULL AND "status" NOT IN ('released', 'failed')`;
 /** The org's last released run of the product, by its latest release row, other than this one (DECISIONS.md 693). */
 export const LAST_RELEASED_SCORE_SQL =
   `SELECT r."overallScore" AS "score" FROM "HealthCheckRun" r JOIN "HealthCheckRelease" l ON l."runId" = r."id" ` +
@@ -630,10 +630,12 @@ export class PostgresWorkerStore implements WorkerStore {
   }
 
   /** Locks the run's row for the transaction, and refuses one the console has moved on. */
-  async #openRun(client: SqlClient, runId: string): Promise<void> {
+  async #openRun(client: SqlClient, runId: string, refuseFailed = false): Promise<void> {
     const row = one(await client.query(`SELECT "status" FROM "HealthCheckRun" WHERE "id" = $1 FOR UPDATE`, [runId]));
     if (!row) throw new Error(`No run ${runId}`);
     if (CLOSED.has(String(row.status))) throw new RunClosedError(runId, String(row.status));
+    // An automatic run's results never land on a run that failed meanwhile: only a person runs it again (DECISIONS.md 693).
+    if (refuseFailed && String(row.status) === "failed") throw new RunClosedError(runId, "failed");
   }
 
   async #writeProgress(client: SqlClient, runId: string, p: RunProgress, runDir: string | null): Promise<void> {
@@ -663,7 +665,7 @@ export class PostgresWorkerStore implements WorkerStore {
     if (summaries && !summaries.ok) this.#log(`Claude's summaries for run ${runId} don't fit the console's limits (${summaries.issues} problems), so they aren't saved with its results.`);
     if (summaries?.ok && summaries.dropped) this.#log(`${summaries.dropped} of Claude's summaries for run ${runId} hold something that can't be stored or printed as it stands, so they're counted as not written.`);
     return this.#transaction(async (client) => {
-      await this.#openRun(client, runId);
+      await this.#openRun(client, runId, output.automatic !== undefined);
       await this.#writeProgress(client, runId, output.progress, output.runDir);
       // Replaced whole, so a second delivery leaves the same rows. Deleting a
       // section takes its versions and proposals with it (ON DELETE CASCADE).

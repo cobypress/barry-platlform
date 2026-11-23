@@ -523,6 +523,14 @@ describe("a scan the worker queues itself", async () => {
       },
     ]);
   });
+
+  test("an automatic run goes on under one fixed id, so a second message adds no second job (DECISIONS.md 693)", async () => {
+    added.length = 0;
+    const queue = runQueuer(new FakeQueue("health-check-jobs"), () => 1_700_000_000_000);
+    await queue("hc-2026-11-06-00000001", { automatic: true });
+    assert.equal((added[0]!.opts as { jobId: string }).jobId, "run-hc-2026-11-06-00000001");
+    assert.deepEqual({ ...(added[0]!.opts as object), jobId: "x" }, { attempts: 3, backoff: { type: "exponential", delay: 30_000 }, removeOnComplete: true, removeOnFail: 200, priority: 10, jobId: "x" });
+  });
 });
 
 describe("a heavy job BullMQ gives up on (DECISIONS.md 396)", () => {

@@ -131,7 +131,7 @@ export function deliveryOutlook(ctx: Ctx, data: Ready, deals: Deal[], evidence: 
   const rates = stageWinRates(ctx, data);
   const weighted = deals.filter((d) => typeof rates.get(d.StageName)?.rate === "number");
   const unweighted = deals.length - weighted.length;
-  const exclusions = [...data.exclusions, ...(unweighted ? [`${unweighted} open deals in stages with too few closed deals to weight`] : [])];
+  const exclusions = [...data.exclusions, ...(unweighted ? [said`${unweighted} open deals in stages with too few closed deals to weight`] : [])];
   const chance = (d: Deal): number => rates.get(d.StageName)!.rate! / 100;
   const timing = (d: Deal): string => {
     const expected = expectedClose(d, late);
@@ -143,7 +143,7 @@ export function deliveryOutlook(ctx: Ctx, data: Ready, deals: Deal[], evidence: 
   // Whole deals: nobody plans for 0.4 of a deal (DECISIONS.md 404).
   const dealsOf = (group: Deal[]): number => Math.round(group.reduce((sum, d) => sum + chance(d), 0));
   const timingKeys: Array<[string, string]> = [["past", "Expected date already passed"], ["later", "Expected after the outlook"]];
-  const assumptions = [...shared.assumptions, `Your won deals closed a median of ${late} days after their first close date`];
+  const assumptions = [...shared.assumptions, said`Your won deals closed a median of ${late} days after their first close date`];
   const stats = { lateDays: late, months: OUTLOOK_MONTHS };
   const within = months.flatMap((m) => placed.get(m) ?? []);
   if (weighted.length === 0) {
@@ -167,7 +167,7 @@ export function deliveryOutlook(ctx: Ctx, data: Ready, deals: Deal[], evidence: 
   const noAmount = weighted.length - priced.length;
   const metrics: Metric[] = [];
   if (data.multiCurrency) metrics.push({ ...definitions.value, ...shared, exclusions, status: "not_measurable", reason: MULTI_CURRENCY });
-  else metrics.push({ ...definitions.value, ...shared, exclusions: [...exclusions, ...(noAmount ? [`${noAmount} weighted open deals with no amount add nothing to value`] : [])], assumptions: [...assumptions, said`Amounts in ${org(currency)}`], status: "measured", ...build(valueOf) });
+  else metrics.push({ ...definitions.value, ...shared, exclusions: [...exclusions, ...(noAmount ? [said`${noAmount} weighted open deals with no amount add nothing to value`] : [])], assumptions: [...assumptions, said`Amounts in ${org(currency)}`], status: "measured", ...build(valueOf) });
   metrics.push({ ...definitions.deals, ...shared, exclusions, assumptions, status: "measured", ...build(dealsOf) });
   return metrics;
 }

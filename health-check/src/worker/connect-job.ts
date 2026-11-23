@@ -392,7 +392,7 @@ async function queueAutomatic(runId: string, deps: WorkerDeps, at: () => string,
     return "The run is calibrated from the org's settings, and waits to be started.";
   }
   try {
-    await deps.queueRun(runId);
+    await deps.queueRun(runId, { automatic: true });
   } catch (err) {
     log(`Automatic run ${runId} is calibrated, but couldn't be queued: ${safeReason(err)}`);
     return "The run is calibrated from the org's settings, but couldn't be queued.";

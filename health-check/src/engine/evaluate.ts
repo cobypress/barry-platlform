@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { marksOfMetric, rewordFinding, rewordMetric } from "./automatic-words.ts";
+import { stagesExtractor } from "../extract/opportunities.ts";
+import { marksOfMetric, orgValuesOf, rewordFinding, rewordMetric } from "./automatic-words.ts";
 import type { DomainModule } from "../domains/types.ts";
 import type { Extractor } from "../extract/types.ts";
 import { Pseudonymiser, UNKNOWN_USER } from "../privacy/pseudonymiser.ts";
@@ -345,9 +346,11 @@ function analyseWithin(input: AnalysisInput): AnalysisOutput {
   // An automatic run's texts said for what they are on it, and its metrics' texts marked (DECISIONS.md 693):
   // last, once every rule has read the metrics as built, so no reworded text is ever put into a sentence said makes.
   if (calibration.source === "org_settings") {
+    const stageRows = extracts.get(stagesExtractor.id) as { status: string; data?: Array<{ ApiName: string; MasterLabel: string }> } | undefined;
+    const orgValues = orgValuesOf({ metrics, findings, stages: [...calibration.stages.map((s) => s.name), ...(stageRows?.data ?? []).flatMap((s) => [s.ApiName, s.MasterLabel])] });
     return {
       findings: findings.map((f) => Finding.parse(rewordFinding(f))),
-      metrics: metrics.map((m) => Metric.parse(rewordMetric(m, marksOfMetric(m)))),
+      metrics: metrics.map((m) => Metric.parse(rewordMetric(m, marksOfMetric(m, orgValues)))),
       manualSteps: [...raised.values()],
       records: records.filter((r) => issues.has(r.findingId)),
     };

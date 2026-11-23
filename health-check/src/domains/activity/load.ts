@@ -1,4 +1,5 @@
 import { activityExtractor, ACTIVITY_DAYS, type EventRow, type TaskRow } from "../../extract/activity.ts";
+import { said } from "../../engine/org-words.ts";
 import { activityCaptureExtractor } from "../../extract/users.ts";
 import type { RuleContext } from "../../engine/rule.ts";
 import { localDay, zoneOf } from "../time-zone.ts";
@@ -34,7 +35,7 @@ export function loadActivity(ctx: Omit<RuleContext, "metrics">): ActivityData {
     ...tasks.data.map((t): Touch => ({ at: t.CreatedDate, ownerId: t.OwnerId, dealId: isOpportunity(t.WhatId) ? t.WhatId : null, kind: "task" })),
     ...events.data.map((e): Touch => ({ at: e.StartDateTime, ownerId: e.OwnerId, dealId: isOpportunity(e.WhatId) ? e.WhatId : null, kind: "event" })),
   ];
-  const exclusions = [`Activities older than ${ACTIVITY_DAYS} days, which Salesforce archives out of normal queries`, "Each invitee's copy of an event"];
+  const exclusions = [said`Activities older than ${ACTIVITY_DAYS} days, which Salesforce archives out of normal queries`, "Each invitee's copy of an event"];
   if (emails.status === "ok" && !emails.truncated) {
     // Enhanced Email also writes a task, so the email only counts if that task isn't there.
     for (const email of emails.data) {

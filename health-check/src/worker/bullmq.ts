@@ -290,8 +290,15 @@ export function startQueueWorker(
  * A run job on the queue, with the console's own name and options (blackcloud-next
  * lib/health-check/jobs.ts), so the worker treats it like any run the console sends.
  */
-export function runQueuer(queue: Pick<QueueSender, "add">, now: () => number = Date.now): (runId: string) => Promise<void> {
-  return async (runId) => {
-    await queue.add("health-check-run", { kind: "run", runId }, { attempts: 3, backoff: { type: "exponential", delay: 30_000 }, removeOnComplete: true, removeOnFail: 200, priority: 10, jobId: `run-${runId}-${now()}` });
+export function runQueuer(queue: Pick<QueueSender, "add">, now: () => number = Date.now): (runId: string, options?: { automatic?: boolean }) => Promise<void> {
+  return async (runId, options = {}) => {
+    // An automatic run's job has one fixed id (DECISIONS.md 693): BullMQ ignores an add whose id a job in the
+    // queue already holds (waiting, active, delayed, or failed and kept), so a second message is never a second run.
+    // A scan's id is as it was.
+    const jobId = options.automatic ? automaticRunJobId(runId) : `run-${runId}-${now()}`;
+    await queue.add("health-check-run", { kind: "run", runId }, { attempts: 3, backoff: { type: "exponential", delay: 30_000 }, removeOnComplete: true, removeOnFail: 200, priority: 10, jobId });
   };
 }
+
+/** The one queue id an automatic run's job is added under by the worker (DECISIONS.md 693). */
+export const automaticRunJobId = (runId: string): string => `run-${runId}`;
