@@ -53,6 +53,9 @@ function styleProblems(text: string): string[] {
 }
 
 const PERSON_TOKEN = new RegExp(tokenSource("user|person|contact"));
+// Every section, not only those with people by role: a token labelled by its record's id would print as
+// "one account" anyway, but the draft should say so itself, and say which is which (DECISIONS.md 684).
+const ACCOUNT_TOKEN = new RegExp(tokenSource("account"), "g");
 
 function review(text: string, set: FigureSet, allowed: Set<string>, pseudonyms: Pseudonymiser, rolesOnly = false): { paragraphs: string[]; problems: string[] } {
   let parsed: z.infer<typeof Draft>;
@@ -71,6 +74,8 @@ function review(text: string, set: FigureSet, allowed: Set<string>, pseudonyms: 
     problems.push(...styleProblems(paragraph.text));
     if (holdsNameOrSecret(paragraph.text, pseudonyms)) problems.push("A paragraph holds a person's name or a secret.");
     if (rolesOnly && PERSON_TOKEN.test(paragraph.text)) problems.push("Refer to people by their role, not by a token such as [[user:U0001]].");
+    const unnamed = (paragraph.text.match(ACCOUNT_TOKEN) ?? []).filter((token) => pseudonyms.idLabelled(token));
+    if (unnamed.length) problems.push(`We have no name for ${unnamed[0]}: write "one account" ("another account" for a second), never the account's token.`);
   }
   return { paragraphs: parsed.paragraphs.map((p) => p.text), problems };
 }

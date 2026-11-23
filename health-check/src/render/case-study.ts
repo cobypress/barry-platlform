@@ -64,7 +64,9 @@ const hex = (value: string): string => value.replace("#", "");
 export async function renderCaseStudyDocx(report: BuiltReport, pseudonyms: Pseudonymiser): Promise<Buffer | null> {
   const study = caseStudyDraft(report);
   if (!study) return null;
-  const say = (text: string): string => plainWords(ukDates(pseudonyms.restore(text)));
+  // The customer's to approve, so an account we have no name for is plain words, never its id (DECISIONS.md 684).
+  const words = pseudonyms.customerWords();
+  const say = (text: string): string => plainWords(ukDates(words(text)));
   const run = (text: string, options: { bold?: boolean; colour?: string; size?: number; italics?: boolean } = {}): TextRun =>
     new TextRun({ text: say(text), bold: options.bold, italics: options.italics, font: font.family, size: options.size ?? 22, color: options.colour ?? hex(colour.carbon) });
   const heading = (text: string, level: 1 | 2): Paragraph =>

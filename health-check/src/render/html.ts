@@ -12,7 +12,7 @@ import { EXPOSURE_RULES } from "../value/model.ts";
 // name holding markup can't break out of the page.
 
 export type Render = {
-  /** Restores names, puts it in plain words, then escapes. Use for every piece of report text. */
+  /** Restores names (an account labelled by its id as plain words), puts it in plain words, then escapes. Use for every piece of report text. */
   t(text: string): string;
   currency: string;
   draft: boolean;
@@ -28,9 +28,11 @@ export type Render = {
 export const refTag = (ref: string): string => `<span class="ref" data-ref>${ref}</span>`;
 
 export function renderContext(pseudonyms: Pseudonymiser, currency: string, draft: boolean, refs: Map<string, string> = new Map(), yearly: Map<string, number> = new Map()): Render {
+  // Every document made here is the customer's: an account we have no name for is "one account", never its id (DECISIONS.md 684).
+  const say = pseudonyms.customerWords();
   return {
     yearly: (findingId) => yearly.get(findingId),
-    t: (text) => escapeXml(plainWords(ukDates(pseudonyms.restore(text)))),
+    t: (text) => escapeXml(plainWords(ukDates(say(text)))),
     currency,
     draft,
     ref: (id) => {

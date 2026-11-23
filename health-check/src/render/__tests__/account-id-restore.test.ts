@@ -71,23 +71,26 @@ describe("an account labelled by its id prints its id, and the documents trace i
     assert.deepEqual(checkNumbers(DRAFT, scopeDataset(report.dataset, scope)).unmatched, []);
   });
 
-  test("made again from the run folder: nothing held, and the full report prints the id", async () => {
+  // Since decision 684 the customer's pages print "One account" where the token was, never the id: one-account.test.ts.
+  test("made again from the run folder: nothing held, and the full report prints plain words, not the id", async () => {
     const { dir, approved } = approvedWithDraft();
     const { report, pseudonyms } = approvedReport(dir, approved);
     const html = fullReportHtml(report, pseudonyms);
-    assert.ok(html.includes(`${account.id} holds ${share}% of open pipeline`), "the page prints the restored id");
+    assert.ok(html.includes(`One account holds ${share}% of open pipeline`), "the page prints plain words");
+    assert.ok(!html.includes(account.id), "the page never prints the id");
     const result = await renderReleased(dir, approved, join(dir, "documents"));
     assert.ok(!("refused" in result));
     assert.deepEqual(result.held, []);
     assert.equal(result.microsite?.ok, true, result.microsite && !result.microsite.ok ? result.microsite.reason : "");
   });
 
-  test("the microsite's check passes on a page that prints the id", () => {
+  test("the microsite's check passes on a page that held the token, and prints plain words, not the id", () => {
     const { dir, approved } = approvedWithDraft(true);
     assert.ok(approved.sections.some((s) => s.key === "interviews"), "the run has an interviews chapter");
     const { report, pseudonyms } = approvedReport(dir, approved);
     const { pages } = buildMicrositePages(report, pseudonyms);
-    assert.ok(pages.some((p) => pageText(p.html).includes(account.id)), "a microsite page prints the restored id");
+    assert.ok(pages.some((p) => pageText(p.html).includes(`One account holds ${share}%`)), "a microsite page prints the plain words");
+    assert.ok(!pages.some((p) => pageText(p.html).includes(account.id)), "no microsite page prints the id");
   });
 
   test("nothing else is loosened: another id-shaped word, a number, a date, an email, a link and an unknown token are still held", () => {

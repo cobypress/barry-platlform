@@ -28,6 +28,31 @@ export const tokenSource = (kinds = "[a-z]+", letter?: string): string => String
 export const UNKNOWN_USER = "Unknown user";
 
 const TOKEN = new RegExp(tokenSource(), "g");
+
+/**
+ * A record the run labels by its own id, because the engine doesn't read its
+ * name: today only an account (the concentration rule's top account, and the
+ * deep dive's top ten). A user with no name is labelled "Unknown user", and a
+ * customer by its reference, so neither is (DECISIONS.md 684).
+ */
+export const isIdLabelled = (entry: PseudonymEntry): boolean => entry.name === entry.id;
+
+/** The noun a customer reads for a record of each kind labelled by its id. A kind not listed is its own noun. */
+const UNNAMED_NOUNS: Readonly<Record<string, string>> = { account: "account", user: "person", customer: "customer" };
+
+// A token, with the noun a writer may have put before it ("the account [[account:A0001]]"),
+// which the plain words make redundant: they say "account" themselves.
+const UNNAMED = new RegExp(String.raw`(\b(?:(?:[Tt]he|[Tt]his|[Tt]hat|[Aa]n?|[Yy]our)\s+)?\b[Aa]ccounts?\s+)?(${tokenSource()})`, "g");
+
+/**
+ * Whether words at the end of `before` start a sentence: the text's start, a
+ * line's, after a full stop, question or exclamation mark, a bullet or a
+ * heading's marks, or a line's own label and its colon ("Risk: One account...").
+ */
+function startsSentence(before: string): boolean {
+  if (/\b(?:e\.g|i\.e|etc|vs)\.\s*$/i.test(before)) return false;
+  return /(?:^|\n)\s*$/.test(before) || /[.!?]["'’”)\]]*\s+$/.test(before) || /(?:^|\n)\s*(?:[-*•]|\d+[.)]|#{1,6})\s+$/.test(before) || /(?:^|\n)[^\n.!?:]{1,60}:\s+$/.test(before);
+}
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+/g;
 
 function escapeRegex(value: string): string {
@@ -116,6 +141,46 @@ export class Pseudonymiser {
   restore(text: string): string {
     const names = new Map([...this.#byId.values()].map((e) => [e.token, e.name]));
     return text.replace(TOKEN, (token) => names.get(token) ?? token);
+  }
+
+  /** The entry a token stands for when the run labels that record by its own id: an account, whose name isn't read. */
+  idLabelled(token: string): PseudonymEntry | undefined {
+    const entry = [...this.#byId.values()].find((e) => e.token === token);
+    return entry && isIdLabelled(entry) ? entry : undefined;
+  }
+
+  /**
+   * Report rendering for what a customer reads (DECISIONS.md 684): restore()
+   * except that a record labelled by its own id is plain words, never the id.
+   * One function per document, so it counts: the first such account it meets
+   * is "one account", the second "another account", the third "a third
+   * account", and the same account reads the same every time, so two accounts
+   * never read as one. "the account [[account:A0001]]" loses its own "the
+   * account", and the words take a capital where a sentence, line, bullet,
+   * heading or a line's label starts.
+   */
+  customerWords(): (text: string) => string {
+    const nth = new Map<string, number>();
+    const seen = new Map<string, number>();
+    return (text) => {
+      const byToken = new Map([...this.#byId.values()].map((e) => [e.token, e]));
+      return text.replace(UNNAMED, (match: string, lead: string | undefined, token: string, offset: number, whole: string) => {
+        const entry = byToken.get(token);
+        if (!entry) return match;
+        if (!isIdLabelled(entry)) return `${lead ?? ""}${entry.name}`;
+        const kind = token.slice(2, token.indexOf(":"));
+        let n = nth.get(token);
+        if (n === undefined) {
+          n = seen.get(kind) ?? 0;
+          seen.set(kind, n + 1);
+          nth.set(token, n);
+        }
+        const words = `${n === 0 ? "one" : n === 2 ? "a third" : "another"} ${UNNAMED_NOUNS[kind] ?? kind}`;
+        // "account" before a token of another kind is the writer's own word, kept: the plain words follow it mid-sentence.
+        if (lead && kind !== "account") return `${lead}${words}`;
+        return startsSentence(whole.slice(0, offset)) ? `${words.charAt(0).toUpperCase()}${words.slice(1)}` : words;
+      });
+    };
   }
 
   entries(): PseudonymEntry[] {
