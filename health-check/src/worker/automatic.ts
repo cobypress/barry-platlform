@@ -14,8 +14,6 @@ export type AutomaticSwitch = {
   orgs: ReadonlySet<string>;
 };
 
-export const AUTOMATIC_OFF: AutomaticSwitch = { on: false, orgs: new Set() };
-
 export const AUTOMATIC_SWITCHED_OFF = "Automatic runs are switched off on this worker, so nothing was read from Salesforce.";
 export const AUTOMATIC_ORG_NOT_LISTED = "Automatic runs aren't allowed for this org on this worker yet, so nothing was read from Salesforce.";
 export const AUTOMATIC_NOT_BUILT = "Automatic runs aren't built yet, so nothing was read from Salesforce.";
