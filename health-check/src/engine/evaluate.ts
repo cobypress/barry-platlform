@@ -134,12 +134,15 @@ function toFinding(rule: Rule, result: RuleResult, pseudonyms: Pseudonymiser, as
   // Hours to fix and a fix prompt (DECISIONS.md 628), from the scrubbed text, so a
   // prompt is built from what the finding says and nothing the scrub took out.
   // A remove, deactivate or merge a guard held back is now "investigate", which the prompt reads as held back.
-  const fix = fixFields(rule.id, scrubbed, pseudonyms);
+  const { fields: fix, promptWords } = fixFields(rule.id, scrubbed, pseudonyms);
   // The hours' basis is put together from the fix table's fixed words and the
   // finding's whole-number counts alone (effortHours is given nothing else), so
   // it holds no word the org chose: marked with no spans as it's made (DECISIONS.md 663).
-  const basis = fix.effortHours ? { orgWords: { ...scrubbed.orgWords, hoursBasis: { spans: [], textSha256: textSha256(fix.effortHours.basis) } } } : {};
-  return Finding.parse({ ...scrubbed, ...fix, ...basis });
+  const basis = fix.effortHours ? { hoursBasis: { spans: [], textSha256: textSha256(fix.effortHours.basis) } } : {};
+  // The fix prompt's org words, marked where it was put together (DECISIONS.md 672).
+  const prompt = fix.fixPrompt && promptWords ? { fixPrompt: promptWords } : {};
+  const marks = { ...basis, ...prompt };
+  return Finding.parse({ ...scrubbed, ...fix, ...(Object.keys(marks).length > 0 ? { orgWords: { ...scrubbed.orgWords, ...marks } } : {}) });
 }
 
 const MARKED = ["title", "summary", "recommendation", "notMeasurableReason"] as const;

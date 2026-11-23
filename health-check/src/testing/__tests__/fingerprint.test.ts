@@ -17,8 +17,8 @@ import { AS_OF, CONNECTED_USER } from "../synthetic-org.ts";
 // a metric or the raw notes updates these, and says why in its commit.
 
 const GOLDEN: Record<string, Record<string, string>> = {
-  recorded: { "findings.json": "09e6cd7d83776ef5", "metrics.json": "10d5f5733555b541", "scores.json": "17cdb1708449d000", "manual-steps.json": "c4daf1ca86584a33", "action-lists.json": "7018f033c3c80e0a", "raw-notes.md": "5e5e3581e490bb64", "handbook.json": "64dcafcf493eef42" },
-  generated: { "findings.json": "d6914065746b54e2", "metrics.json": "2233e1f04464f5ae", "scores.json": "616e42570f940402", "manual-steps.json": "15ae87c4fd76d7b6", "action-lists.json": "8eeb97766d119778", "raw-notes.md": "9aa44b2002f1740f", "handbook.json": "23c075e2337e23a8" },
+  recorded: { "findings.json": "299bb781fb00d50f", "metrics.json": "10d5f5733555b541", "scores.json": "17cdb1708449d000", "manual-steps.json": "c4daf1ca86584a33", "action-lists.json": "7018f033c3c80e0a", "raw-notes.md": "5e5e3581e490bb64", "handbook.json": "64dcafcf493eef42" },
+  generated: { "findings.json": "2614371e4eb185ea", "metrics.json": "2233e1f04464f5ae", "scores.json": "616e42570f940402", "manual-steps.json": "15ae87c4fd76d7b6", "action-lists.json": "8eeb97766d119778", "raw-notes.md": "9aa44b2002f1740f", "handbook.json": "23c075e2337e23a8" },
 };
 
 // findings.json before decisions 628 and 636 added each issue's hours to fix, time band, fix complexity and fix prompt.
@@ -30,6 +30,9 @@ const BEFORE_655: Record<string, string> = { recorded: "7f675e15a778749f", gener
 
 // findings.json before decision 663 marked the value's reason and assumptions and the hours' basis: those three keys of the marks are all that moved it.
 const BEFORE_663: Record<string, string> = { recorded: "e8cb5cc01d67f9f7", generated: "bd808a0082daa8c2" };
+
+// findings.json before decision 672 marked the org's words in each issue's fix prompt: that key of the marks is all that moved it.
+const BEFORE_672: Record<string, string> = { recorded: "09e6cd7d83776ef5", generated: "d6914065746b54e2" };
 
 const recordedDir = async () => (await runFromRecording({ answers: loadAnswers(), modules: ALL_MODULES })).dir;
 const generatedDir = async () =>
@@ -51,12 +54,23 @@ function withoutOrgWords(dir: string): void {
   writeFileSync(path, `${JSON.stringify(findings, null, 2)}\n`);
 }
 
-/** The run's findings.json with only decision 663's marks taken out. */
+/** The run's findings.json with only decision 672's marks taken out. */
+function withoutPromptMarks(dir: string): void {
+  const path = join(dir, "findings.json");
+  const findings = (JSON.parse(readFileSync(path, "utf8")) as Array<Record<string, unknown> & { orgWords?: Record<string, unknown> }>).map(({ orgWords, ...rest }) => {
+    if (!orgWords) return rest;
+    const { fixPrompt: _p, ...earlier } = orgWords;
+    return Object.keys(earlier).length > 0 ? { ...rest, orgWords: earlier } : rest;
+  });
+  writeFileSync(path, `${JSON.stringify(findings, null, 2)}\n`);
+}
+
+/** The run's findings.json with decision 663's marks, and the later 672's, taken out. */
 function withoutLaterMarks(dir: string): void {
   const path = join(dir, "findings.json");
   const findings = (JSON.parse(readFileSync(path, "utf8")) as Array<Record<string, unknown> & { orgWords?: Record<string, unknown> }>).map(({ orgWords, ...rest }) => {
     if (!orgWords) return rest;
-    const { valueReason: _r, valueAssumptions: _a, hoursBasis: _h, ...earlier } = orgWords;
+    const { valueReason: _r, valueAssumptions: _a, hoursBasis: _h, fixPrompt: _p, ...earlier } = orgWords;
     return Object.keys(earlier).length > 0 ? { ...rest, orgWords: earlier } : rest;
   });
   writeFileSync(path, `${JSON.stringify(findings, null, 2)}\n`);
@@ -68,10 +82,15 @@ test("the synthetic org's findings, metrics, scores, action lists, raw notes and
 
 // Before any generated run in this process: a sentence another run quoted with org words reads as unknown in a later one
 // (the safe side of decision 655's store), which moves an earlier mark, so the earlier marks are compared on a first run.
-test("decision 663 moved findings.json by the value and hours marks alone: without them it is as it was, and nothing else moved", async () => {
+test("decisions 663 and 672 moved findings.json by the value, hours and fix prompt marks alone: without them it is as it was, and nothing else moved", async () => {
   for (const [name, dir] of [["recorded", await recordedDir()], ["generated", await generatedDir()]] as const) {
     const findings = JSON.parse(readFileSync(join(dir, "findings.json"), "utf8")) as Array<{ orgWords?: { valueAssumptions?: unknown; hoursBasis?: unknown } }>;
     assert.ok(findings.some((f) => f.orgWords?.valueAssumptions) && findings.some((f) => f.orgWords?.hoursBasis), name);
+    // Decision 672 moved it by the fix prompts' marks alone, on every issue: without them it is as it was before 672.
+    const prompts = (findings as Array<{ fixPrompt?: string; orgWords?: { fixPrompt?: unknown } }>).filter((f) => f.fixPrompt);
+    assert.ok(prompts.length > 0 && prompts.every((f) => f.orgWords?.fixPrompt), `${name}: every prompt marked`);
+    withoutPromptMarks(dir);
+    assert.deepEqual(fingerprint(dir), { ...GOLDEN[name], "findings.json": BEFORE_672[name] }, `${name} before 672`);
     withoutLaterMarks(dir);
     assert.deepEqual(fingerprint(dir), { ...GOLDEN[name], "findings.json": BEFORE_663[name] }, name);
   }

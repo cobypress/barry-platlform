@@ -1,6 +1,8 @@
 import { DESTRUCTIVE_RECOMMENDATIONS, FIX_PROMPT_MAX, type Finding, type Subject } from "../schemas/index.ts";
 import { holdsNameOrSecret } from "../narrative/guard.ts";
-import { teamLevelText } from "../narrative/select.ts";
+import { teamLevelSteps } from "../narrative/select.ts";
+import { spansIfCurrent, type OrgSpan } from "../engine/org-words.ts";
+import { cat, joinMarked, ours, replaceMarked, sliceMarked, theirs, unknown, type Marked } from "./marked.ts";
 import { ORDINARY, PERSON_KINDS, SHARED_NAME_PREFIX } from "../privacy/names.ts";
 import { isSalesforceUserName, tokenCode, UNKNOWN_USER, type Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import type { PromptRule } from "./types.ts";
@@ -29,7 +31,7 @@ const SALESFORCE_ID = /\b(?=[a-zA-Z0-9]*\d)[a-zA-Z0-9]{15}(?:[a-zA-Z0-9]{3})?\b/
 const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const wholeWord = (label: string): RegExp => new RegExp(`(?<![\\w])${escapeRegex(label)}(?![\\w])`, "g");
 
-export type PromptFinding = Pick<Finding, "title" | "summary" | "recommendation" | "subjects"> & Partial<Pick<Finding, "recommendationType">>;
+export type PromptFinding = Pick<Finding, "title" | "summary" | "recommendation" | "subjects"> & Partial<Pick<Finding, "recommendationType" | "orgWords">>;
 
 /**
  * A subject the prompt may never name, even where the finding shows it: a person
@@ -123,30 +125,105 @@ export function withheldLabels(f: PromptFinding, pseudonyms?: Pseudonymiser): st
   return f.subjects.filter((s) => unnameable(s, pseudonyms) || !shown.includes(s.label)).map((s) => s.label);
 }
 
-/** People as the executive report says them, any other token as a record, and each withheld subject by what it is. */
-function neutral(text: string, withheld: readonly Subject[]): string {
+/**
+ * People as the executive report says them, any other token as a record, and
+ * each withheld subject by what it is. Each rewrite says fixed words of ours, so
+ * the org's characters it takes out go and its words are the engine's; one that
+ * would cut an org value leaves the text unknown (DECISIONS.md 672).
+ */
+function neutral(text: Marked, withheld: readonly Subject[]): Marked {
   let out = text;
   // Labels first, longest first, so a label holding a token goes whole.
   // A label that is a token alone is left to teamLevelText, which says it as the executive report does.
   for (const s of [...withheld].sort((a, b) => b.label.length - a.label.length)) {
     if (WHOLE_TOKEN.test(s.label)) continue;
-    out = out.replace(wholeWord(s.label), `the ${s.type} listed in this finding`);
+    out = replaceMarked(out, wholeWord(s.label), cat(ours("the "), subjectType(s.type), ours(" listed in this finding")), true);
   }
-  return teamLevelText(out).replace(ANY_TOKEN, "a record listed in this finding").replace(/\b([Tt])he the\b/g, "$1he");
+  for (const [pattern, by, fixed] of teamLevelSteps()) out = replaceMarked(out, pattern, by, fixed);
+  out = replaceMarked(out, ANY_TOKEN, "a record listed in this finding", true);
+  return replaceMarked(out, /\b([Tt])he the\b/g, (_m, t) => `${t}he`, false);
 }
 
-const listed = (names: string[]): string => {
-  const shown = names.slice(0, LISTED_ITEMS);
-  const more = names.length - shown.length;
-  if (more > 0) return `${shown.join(", ")} and ${more} more`;
-  return shown.length === 1 ? shown[0]! : `${shown.slice(0, -1).join(", ")} and ${shown.at(-1)}`;
+/**
+ * The subject types the engine writes of its own: the literal types rules set,
+ * and the segment dimensions named in their code. A rule sets the type in code
+ * today, but nothing in the types holds it there (a dimension such as
+ * historic pipeline's "from <stage>" is built from a stage), so any other type
+ * is said as the org's words, the safe side (DECISIONS.md 672).
+ */
+export const ENGINE_SUBJECT_TYPES: ReadonlySet<string> = new Set([
+  ...PERSON_OR_RECORD, ...LISTABLE,
+  "allowance", "campaign type", "closed quarter", "dashboard", "group", "how it's granted", "installed app", "lead source", "origin", "owner type",
+  "priority", "rep", "s-control", "source", "storage", "team", "type",
+]);
+
+const subjectType = (type: string): Marked => (ENGINE_SUBJECT_TYPES.has(type) ? ours(type) : theirs(type));
+
+const WORD = /[\p{L}\p{N}_]/u;
+/** Whether `at` in `text` is a word's edge or an org span's. */
+const edgeAt = (m: Marked, at: number): boolean => at === 0 || at === m.text.length || !(WORD.test(m.text[at - 1]!) && WORD.test(m.text[at]!)) || m.spans!.some((s) => s.start === at || s.end === at);
+
+/**
+ * A subject's label as the items line lists it. Every label there is the org's
+ * (DECISIONS.md 672), so it is never listed without an org span in it: one
+ * span, whole, unless the title or summary shows it with finer marks, a label a
+ * rule put together ("Lead Source on Lead", " on " the rule's). Those are used
+ * only from a place that starts and ends on a word's edge or a span's and holds
+ * at least one org span; where such places disagree, the label is unknown.
+ */
+function labelMarks(label: string, shown: readonly Marked[]): Marked {
+  let found: OrgSpan[] | null = null;
+  for (const m of shown) {
+    if (!m.spans) return unknown(label);
+    for (let at = m.text.indexOf(label); at !== -1; at = m.text.indexOf(label, at + 1)) {
+      const spans = sliceMarked(m, at, at + label.length).spans!;
+      if (spans.length === 0 || !edgeAt(m, at) || !edgeAt(m, at + label.length)) continue;
+      if (found === null) found = spans;
+      else if (found.length !== spans.length || found.some((s, i) => s.start !== spans[i]!.start || s.end !== spans[i]!.end)) return unknown(label);
+    }
+  }
+  return found === null ? theirs(label) : { text: label, spans: found };
+}
+
+/** Names in a list, "a, b and 3 more": each name as its sentence marks it, the joining words ours. */
+const listed = (names: string[], shown: readonly Marked[]): Marked => {
+  const shownNames = names.slice(0, LISTED_ITEMS).map((n) => labelMarks(n, shown));
+  const more = names.length - shownNames.length;
+  if (more > 0) return cat(joinMarked(shownNames, ", "), ours(` and ${more} more`));
+  return shownNames.length === 1 ? shownNames[0]! : cat(joinMarked(shownNames.slice(0, -1), ", "), ours(" and "), shownNames.at(-1)!);
 };
 
-function itemsLine(f: PromptFinding, items: string, withheld: ReadonlySet<string>): string {
-  if (f.subjects.length === 0) return `Work on the ${items} this finding describes.`;
+function itemsLine(f: PromptFinding, items: string, withheld: ReadonlySet<string>, shown: readonly Marked[]): Marked {
+  if (f.subjects.length === 0) return ours(`Work on the ${items} this finding describes.`);
   const names = [...new Set(f.subjects.map((s) => s.label))];
   const nameable = f.subjects.every((s) => LISTABLE.has(s.type) && !withheld.has(s.label));
-  return nameable ? `Work on the ${items} this finding is about. Named in it: ${listed(names)}.` : `Work on the ${items} listed in this finding.`;
+  return nameable ? cat(ours(`Work on the ${items} this finding is about. Named in it: `), listed(names, shown), ours(".")) : ours(`Work on the ${items} listed in this finding.`);
+}
+
+/** One of the finding's sentences with the marks `said` made for it, while it still reads as it did; otherwise unknown. */
+function sentence(f: PromptFinding, key: "title" | "summary" | "recommendation"): Marked {
+  const spans = spansIfCurrent(f[key], f.orgWords?.[key]);
+  return spans ? { text: f[key], spans } : unknown(f[key]);
+}
+
+/**
+ * A summary cut to its first `keep` sentences, joined by one space as before.
+ * A joining space that replaces whitespace inside an org value can't be said to
+ * be either's, so the summary is then unknown.
+ */
+function firstSentences(summary: Marked, keep: number): Marked {
+  const parts: Marked[] = [];
+  let known = summary.spans !== null;
+  let at = 0;
+  for (const gap of summary.text.matchAll(/(?<=\.)\s+/g)) {
+    if (parts.length === keep) break;
+    parts.push(sliceMarked(summary, at, gap.index));
+    if (parts.length < keep && summary.spans?.some((s) => s.start < gap.index + gap[0].length && s.end > gap.index)) known = false;
+    at = gap.index + gap[0].length;
+  }
+  if (parts.length < keep) parts.push(sliceMarked(summary, at, summary.text.length));
+  const joined = joinMarked(parts, " ");
+  return known ? joined : unknown(joined.text);
 }
 
 /**
@@ -174,13 +251,22 @@ export const isHeldBack = (f: PromptFinding, rule: PromptRule): boolean => rule.
 
 /** The prompt's text, before the guard. */
 export function assemblePrompt(f: PromptFinding, rule: PromptRule, pseudonyms?: Pseudonymiser): string {
+  return assembleMarked(f, rule, pseudonyms).text;
+}
+
+/**
+ * The prompt with the characters the org chose marked (DECISIONS.md 672), before
+ * the guard. The text is assemblePrompt's; the spans are null whenever any part
+ * can't be vouched for, so the prompt is then unmarked, never wrongly marked.
+ */
+export function assembleMarked(f: PromptFinding, rule: PromptRule, pseudonyms?: Pseudonymiser): Marked {
   const withheldSet = new Set(withheldLabels(f, pseudonyms));
   const withheld = f.subjects.filter((s) => withheldSet.has(s.label));
   // The title and summary are shown to the same reader already; only what may never be named comes out of them.
   const never = f.subjects.filter((s) => unnameable(s, pseudonyms));
-  const title = neutral(f.title, never);
-  const fullSummary = neutral(f.summary, never);
-  const good = neutral(f.recommendation, withheld);
+  const title = neutral(sentence(f, "title"), never);
+  const fullSummary = neutral(sentence(f, "summary"), never);
+  const good = neutral(sentence(f, "recommendation"), withheld);
   const heldBack = isHeldBack(f, rule);
   const analysis = rule.decision === true || heldBack;
   const steps = heldBack ? (rule.review?.steps ?? REVIEW_STEPS) : rule.steps;
@@ -195,22 +281,23 @@ export function assemblePrompt(f: PromptFinding, rule: PromptRule, pseudonyms?: 
     `Change anything outside the ${rule.items} this finding is about.`,
     "Put a name, email or record detail in your reply.",
   ];
-  const build = (summary: string): string => [
-    "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.",
-    `What we found: ${title}. ${summary}`,
+  // Everything but the finding's sentences and the subjects' labels is the engine's: the rule's fixed text.
+  const build = (summary: Marked): Marked => joinMarked([
+    ours("You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something."),
+    cat(ours("What we found: "), title, ours(". "), summary),
     // The recommendation is the finding's own, worded for the people who own the org; only the steps are the assistant's.
-    `${FRAMING}\nThe report says: ${good}`,
-    itemsLine(f, rule.items, withheldSet),
-    ...(analysis ? ["This is for people to decide, not a change to the org. Do not change the org: prepare the analysis, the list and the options so the people who own it can decide."] : []),
-    `Steps:\n${steps.map((s, i) => `${i + 1}. ${s}`).join("\n")}`,
-    `Do not:\n${dont.map((d) => `- ${d}`).join("\n")}`,
-    `To check it worked:\n${verify.map((v) => `- ${v}`).join("\n")}`,
-  ].join("\n\n");
+    cat(ours(`${FRAMING}\nThe report says: `), good),
+    itemsLine(f, rule.items, withheldSet, [title, fullSummary]),
+    ...(analysis ? [ours("This is for people to decide, not a change to the org. Do not change the org: prepare the analysis, the list and the options so the people who own it can decide.")] : []),
+    ours(`Steps:\n${steps.map((s, i) => `${i + 1}. ${s}`).join("\n")}`),
+    ours(`Do not:\n${dont.map((d) => `- ${d}`).join("\n")}`),
+    ours(`To check it worked:\n${verify.map((v) => `- ${v}`).join("\n")}`),
+  ], "\n\n");
   // A summary too long for the limit loses whole sentences from its end, and says so.
-  let text = build(fullSummary);
-  const sentences = fullSummary.split(/(?<=\.)\s+/);
-  for (let keep = sentences.length - 1; text.length > FIX_PROMPT_MAX && keep >= 1; keep--) text = build(`${sentences.slice(0, keep).join(" ")} (The finding says more.)`);
-  return text;
+  let prompt = build(fullSummary);
+  const sentences = fullSummary.text.split(/(?<=\.)\s+/);
+  for (let keep = sentences.length - 1; prompt.text.length > FIX_PROMPT_MAX && keep >= 1; keep--) prompt = build(cat(firstSentences(fullSummary, keep), ours(" (The finding says more.)")));
+  return prompt;
 }
 
 /**
@@ -230,6 +317,11 @@ export function promptIsSafe(text: string, f: PromptFinding, pseudonyms: Pseudon
 
 /** The finding's fix prompt, or null when the guard won't let it out. */
 export function fixPrompt(f: PromptFinding, rule: PromptRule, pseudonyms: Pseudonymiser): string | null {
-  const text = assemblePrompt(f, rule, pseudonyms);
-  return promptIsSafe(text, f, pseudonyms) ? text : null;
+  return markedFixPrompt(f, rule, pseudonyms)?.text ?? null;
+}
+
+/** The finding's fix prompt with its org words marked, or null spans when they can't be vouched for (DECISIONS.md 672); null when the guard won't let it out. */
+export function markedFixPrompt(f: PromptFinding, rule: PromptRule, pseudonyms: Pseudonymiser): { text: string; spans: OrgSpan[] | null } | null {
+  const prompt = assembleMarked(f, rule, pseudonyms);
+  return promptIsSafe(prompt.text, f, pseudonyms) ? prompt : null;
 }

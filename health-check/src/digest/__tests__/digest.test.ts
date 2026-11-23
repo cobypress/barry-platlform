@@ -255,8 +255,8 @@ describe("the run digest (DECISIONS.md 632)", () => {
       assert.ok(f.effortHours && f.timeBand && f.fixComplexity, f.id);
     }
     for (const f of digest.findings.filter((x) => x.status !== "issue")) assert.ok(f.effortHours === undefined && f.timeBand === undefined && f.fixComplexity === undefined, f.id);
-    // No fix prompt is served as plain data.
-    assert.ok(!JSON.stringify(digest).includes("fixPrompt") && !JSON.stringify(digest).includes("What our report recommends"));
+    // Each issue's fix prompt is carried only with its org words marked (DECISIONS.md 672; before it, none was carried).
+    for (const f of issues) assert.ok(f.fixPrompt === report.teamFindings.find((x) => x.id === f.id)!.fixPrompt && f.orgWords?.fixPrompt, f.id);
     const total = digest.plan.hoursTotal!;
     assert.ok(total.findingIds.length > 10 && total.high >= total.low && total.low > 0);
     // Every issue with hours is in the total, the quick wins among them; every issue without is named beside it.

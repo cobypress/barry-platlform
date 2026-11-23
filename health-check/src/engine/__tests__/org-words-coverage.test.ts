@@ -4,12 +4,14 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ALL_MODULES } from "../../domains/index.ts";
 import type { Labels } from "../../extract/labels.ts";
-import type { Finding } from "../../schemas/index.ts";
+import type { Finding, RecommendationType } from "../../schemas/index.ts";
 import { analyseExtracts, clone, loadExtracts, runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
 import { UNCALIBRATED_STAGES } from "../../testing/synthetic-org.ts";
 import { spansIfCurrent } from "../org-words.ts";
 import { UNCONVERTED_RULES } from "./unconverted-rules.ts";
+import { FIX_TABLE } from "../../fix/table.ts";
+import { assemblePrompt } from "../../fix/prompt.ts";
 
 // Which rules write their sentences with said and org (DECISIONS.md 655, 657),
 // held on the synthetic org. Every rule not listed here must come out with each
@@ -76,8 +78,8 @@ const marksOf = (f: Finding, key: (typeof SENTENCES)[number]) => {
 
 /**
  * Every string of a finding the digest serves as a sentence, with its marks or
- * null: the four sentences, and (DECISIONS.md 663) the value's reason, each of
- * its assumptions and the hours' basis.
+ * null: the four sentences, (DECISIONS.md 663) the value's reason, each of its
+ * assumptions and the hours' basis, and (DECISIONS.md 672) the fix prompt.
  */
 function sentencesOf(f: Finding): Array<{ key: string; text: string; spans: ReturnType<typeof spansIfCurrent> }> {
   const out = SENTENCES.flatMap((key) => {
@@ -88,6 +90,8 @@ function sentencesOf(f: Finding): Array<{ key: string; text: string; spans: Retu
   if (v.kind === "not_sized") out.push({ key: "valueReason", text: v.reason, spans: spansIfCurrent(v.reason, f.orgWords?.valueReason) });
   else v.assumptions.forEach((text, i) => out.push({ key: `valueAssumptions[${i}]`, text, spans: spansIfCurrent(text, f.orgWords?.valueAssumptions?.[i]) }));
   if (f.effortHours) out.push({ key: "hoursBasis", text: f.effortHours.basis, spans: spansIfCurrent(f.effortHours.basis, f.orgWords?.hoursBasis) });
+  // The fix prompt, whose marks the digest serves beside it (DECISIONS.md 672), held to every check here as a sentence is.
+  if (f.fixPrompt) out.push({ key: "fixPrompt", text: f.fixPrompt, spans: spansIfCurrent(f.fixPrompt, f.orgWords?.fixPrompt) });
   return out;
 }
 
@@ -130,6 +134,13 @@ describe("rules writing their sentences with said (decisions 655 and 657)", () =
     }
     assert.ok(assumptions >= 20, `${assumptions} assumptions marked`);
     assert.ok(findings.filter((f) => f.effortHours).length >= 30);
+  });
+
+  test("every issue's fix prompt is marked, on the recorded org and with stages left out (decision 672)", () => {
+    const prompts = [...findings, ...uncalibrated].filter((f) => f.fixPrompt);
+    assert.ok(prompts.length >= 90, `${prompts.length} prompts`);
+    for (const f of prompts) assert.ok(spansIfCurrent(f.fixPrompt!, f.orgWords?.fixPrompt), `${f.ruleId} fix prompt`);
+    assert.ok(prompts.some((f) => f.orgWords!.fixPrompt!.spans.length > 0), "some prompt quotes the org");
   });
 
   test("a licence the calibration doesn't price is named inside a span in every reason that lists it (found in review)", () => {
@@ -178,7 +189,7 @@ describe("rules writing their sentences with said (decisions 655 and 657)", () =
         let at = 0;
         for (const s of spans) [outside, at] = [`${outside}${text.slice(at, s.start)}\u0000`, s.end];
         outside += text.slice(at);
-        for (const name of [...NAME_LIKE, UNPRICED_LICENCE]) if (outside.includes(name) && !ENGINE_WORDS.has(name)) found.add(`${f.ruleId} ${key}: "${name}"`);
+        for (const name of [...NAME_LIKE, UNPRICED_LICENCE]) if (outside.includes(name) && !ENGINE_WORDS.has(name) && !(key === "fixPrompt" && promptsOwnWords(f.ruleId).includes(name))) found.add(`${f.ruleId} ${key}: "${name}"`);
         for (const token of outside.match(/\[\[[a-z]+:[A-Z]\d{4}\]\]/g) ?? []) found.add(`${f.ruleId} ${key}: ${token}`);
       }
     }
@@ -276,6 +287,23 @@ const ENGINE_WORDS: ReadonlySet<string> = new Set([
   // In value reasons and assumptions and hours' bases (DECISIONS.md 663): Salesforce's Amount field and Queue object, a duration, and ordinary words.
   "2 hours", "Amount", "Queue", "confirmed", "decisions", "installed",
 ]);
+
+/**
+ * A fix prompt's fixed text, as data (DECISIONS.md 672): the rule's prompt made
+ * for a finding with no words of the org's, in every recommendation type, so its
+ * steps, checks, Do not list and framing, and nothing else. "Draft", "Group" or
+ * "Salesforce CPQ" there are the engine's words, written in its steps.
+ */
+const OWN_WORDS = new Map<string, string>();
+const promptsOwnWords = (ruleId: string): string => {
+  const rule = FIX_TABLE[ruleId];
+  if (!rule) return "";
+  if (!OWN_WORDS.has(ruleId)) {
+    const bare = (recommendationType: RecommendationType) => assemblePrompt({ title: "x", summary: "x", recommendation: "x", recommendationType, subjects: [] }, rule.prompt);
+    OWN_WORDS.set(ruleId, (["remove", "deactivate", "merge", "change", "investigate", "none"] as const).map(bare).join("\n"));
+  }
+  return OWN_WORDS.get(ruleId)!;
+};
 
 /** On the synthetic org, the name is quoted only in sentences of rules not yet converted. */
 const quotedOnlyByUnconverted = (name: string): boolean => {
