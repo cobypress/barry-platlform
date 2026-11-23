@@ -1,4 +1,4 @@
-import { extractFigures, type FigureSet } from "../numbercheck/index.ts";
+import { extractFigures, withRestoredIds, type FigureSet } from "../numbercheck/index.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 
 /**
@@ -12,7 +12,8 @@ import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
  * A name is a label only when the number check reads nothing in it but words
  * of letters and digits, at least one: "Unit4 Ltd" is one, while "3M", "24
  * Seven" and "Studio 54" read as figures, so they stay figures to trace and
- * can never mask a figure of the same shape elsewhere on the page.
+ * can never mask a figure of the same shape elsewhere on the page. Every path
+ * that checks a customer's output uses this set and nothing else.
  */
 export function pageDataset(set: FigureSet, pseudonyms: Pseudonymiser): FigureSet {
   const tokens = new Set(set.tokens.map((t) => t.value));
@@ -21,5 +22,6 @@ export function pageDataset(set: FigureSet, pseudonyms: Pseudonymiser): FigureSe
     const figures = extractFigures(e.name).figures;
     return figures.length > 0 && figures.every((f) => f.kind === "identifier" && f.word);
   });
-  return { ...set, labels: [...set.labels, ...names.map((e) => ({ source: e.token, value: e.name }))] };
+  // An account labelled by its id prints that id where its token was (DECISIONS.md 683).
+  return withRestoredIds({ ...set, labels: [...set.labels, ...names.map((e) => ({ source: e.token, value: e.name }))] }, pseudonyms.entries());
 }

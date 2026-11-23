@@ -1,6 +1,7 @@
 import type { Finding, ManualStep, Metric, NumberOverride, Run, Score } from "../schemas/index.ts";
 import { extractFigures, type Figure, type PartialDate } from "./extract.ts";
 import { kindTallies } from "../narrative/unmeasured.ts";
+import type { PseudonymEntry } from "../privacy/pseudonymiser.ts";
 
 // Everything a report is allowed to say, with where each figure came from. Facts
 // are named numbers with no unit, so their unit comes from how the engine's own
@@ -275,4 +276,23 @@ export function scopeDataset(set: FigureSet, sources: Iterable<string>): FigureS
   const allowed = new Set(sources);
   const keep = <T extends { source: string }>(rows: T[]): T[] => rows.filter((r) => allowed.has(r.source));
   return { figures: keep(set.figures), dates: keep(set.dates), identifiers: keep(set.identifiers), tokens: keep(set.tokens), labels: keep(set.labels) };
+}
+
+/** A Salesforce record id, 15 or 18 letters and digits. */
+const RECORD_ID = /^[A-Za-z0-9]{15}(?:[A-Za-z0-9]{3})?$/;
+
+/**
+ * The set a printed page is checked against: the report's, with the record id
+ * each of its tokens restores to when the run's pseudonym map labels a record
+ * by its own id (DECISIONS.md 683). The engine doesn't read an account's name,
+ * so "[[account:A0001]]" restores to the account's id; a section's check sees
+ * the token, which is in the data, and the page prints the id. Only ids from
+ * the run's own map, and only for tokens the data holds, so a run already made
+ * is covered when its documents are made again, and no other id-shaped word is.
+ * A name that isn't an id is left as it was.
+ */
+export function withRestoredIds(set: FigureSet, entries: PseudonymEntry[]): FigureSet {
+  const tokens = new Set(set.tokens.map((t) => t.value));
+  const ids = entries.filter((e) => e.name === e.id && RECORD_ID.test(e.id) && tokens.has(e.token)).map((e) => ({ source: e.token, value: e.id.toLowerCase() }));
+  return ids.length ? { ...set, identifiers: [...set.identifiers, ...ids] } : set;
 }
