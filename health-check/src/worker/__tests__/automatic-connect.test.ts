@@ -141,7 +141,8 @@ describe("an automatic full check's connect, with the switch on and the org list
     const again = addLink(f);
     const second = await f.handle({ kind: "connect", linkId: again.id }, once);
     assert.equal(second.outcome, "connected");
-    assert.match(second.detail, /The run already had a calibration, so it wasn't started again\.$/);
+    // Said for what it is (DECISIONS.md 693): the run was started already, and this connect changed nothing.
+    assert.match(second.detail, /The run is already started, so this connect changed nothing\.$/);
     assert.equal(methods(f, "saveCalibration"), 1);
     assert.deepEqual(f.queued, [RUN_ID]);
     assert.deepEqual(f.deps.store.queued, [RUN_ID]);
@@ -332,6 +333,69 @@ describe("lane E2's review, closed (DECISIONS.md 693)", () => {
 
   test("the connect refusals an automatic run's customer can meet name no consultant", () => {
     for (const text of [AUTOMATIC_OFF_AT_CONNECT, AUTOMATIC_ORG_AT_CONNECT]) assert.ok(!/consultant/i.test(text), text);
+  });
+});
+
+describe("fix round 1: a connect never holds, reads or starts what it shouldn't (DECISIONS.md 693)", () => {
+  test("probe A: a second link whose stage read fails leaves a calibrated, queued run as it was: no hold, no flag, and it says so", async () => {
+    const f = await flow();
+    await f.handle(f.job, once);
+    const calibration = structuredClone(f.deps.store.runs.get(RUN_ID)!.calibration);
+    f.org.stages = "refused";
+    const again = addLink(f);
+    const second = await f.handle({ kind: "connect", linkId: again.id }, once);
+    assert.equal(second.outcome, "connected");
+    assert.match(second.detail, /The run is already started, so this connect changed nothing\.$/);
+    assert.equal(f.deps.store.held.has(RUN_ID), false);
+    assert.deepEqual(f.deps.store.flagsOf(RUN_ID), []);
+    assert.deepEqual(f.deps.store.runs.get(RUN_ID)!.calibration, calibration);
+    assert.deepEqual(f.queued, [RUN_ID]);
+  });
+
+  for (const [name, sw] of [["switched off", { on: false, orgs: new Set<string>() }], ["the org no longer listed", { on: true, orgs: new Set(["00D000000000009"]) }]] as const) {
+    test(`probe B: a redelivered used link with automatic runs ${name} reads nothing, saves nothing and queues nothing`, async () => {
+      const f = await flow();
+      await f.handle(f.job, once);
+      f.deps.store.runs.get(RUN_ID)!.calibration = null;
+      f.deps.store.queued.length = 0;
+      f.queued.length = 0;
+      const reads = f.org.requests.length;
+      const saves = methods(f, "saveCalibration");
+      f.deps.automatic = sw;
+      const again = await createJobHandler(f.deps)(f.job, once);
+      assert.equal(again.outcome, "skipped");
+      assert.match(again.detail, /nothing was read\.$/);
+      assert.equal(f.org.requests.length, reads);
+      assert.equal(methods(f, "saveCalibration"), saves);
+      assert.equal(f.deps.store.runs.get(RUN_ID)!.calibration, null);
+      assert.deepEqual(f.queued, []);
+    });
+  }
+
+  test("a failed automatic run is never queued again by a connect: only a person runs it again", async () => {
+    const f = await flow();
+    await f.handle(f.job, once);
+    f.deps.store.queued.length = 0;
+    f.queued.length = 0;
+    await f.deps.store.recordRunFailure(RUN_ID, "The run stopped with an error", NOW.toISOString());
+    const again = await f.handle(f.job, { final: true });
+    assert.match(again.detail, /needs nothing more/);
+    const third = await f.handle({ kind: "connect", linkId: addLink(f).id }, once);
+    assert.match(third.detail, /The run is failed, so this connect changed nothing\.$/);
+    assert.deepEqual(f.queued, []);
+    assert.deepEqual(f.deps.store.flagsOf(RUN_ID), ["run_failed"]);
+  });
+
+  test("a held run is never queued by a redelivery, and its first hold stands", async () => {
+    const f = await flow();
+    f.org.stages = "refused";
+    await f.handle(f.job, once);
+    f.org.stages = STAGES;
+    const again = await f.handle(f.job, { final: true });
+    assert.match(again.detail, /needs nothing more/);
+    assert.deepEqual(f.queued, []);
+    assert.equal(f.deps.store.held.get(RUN_ID), CALIBRATION_UNREADABLE);
+    assert.equal(await f.deps.store.holdRun(RUN_ID, CALIBRATION_UNREADABLE, NOW.toISOString()), false);
   });
 });
 

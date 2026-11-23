@@ -13,7 +13,7 @@ import { AutomaticReplay, automaticSyntheticCalibration } from "../../testing/au
 import { runFromRecording } from "../../testing/harness.ts";
 import { CONSOLE_CHECKS } from "../console-checks.ts";
 import { MemoryWorkerStore } from "../memory-store.ts";
-import { FAILURE_FLAG_SQL, HOLD_OUTPUT_SQL, LAST_RELEASED_SCORE_SQL, PostgresWorkerStore, RAISE_FLAG_SQL, RELEASE_ROW_SQL, RELEASE_RUN_SQL, RUN_DIGEST_SQL, type SqlClient, type SqlPool, type SqlResult } from "../postgres-store.ts";
+import { RUN, runSql, FAILURE_FLAG_SQL, HELD_REASON_SQL, HOLD_OUTPUT_SQL, HOLD_RUN_SQL, LAST_RELEASED_SCORE_SQL, PostgresWorkerStore, RAISE_FLAG_SQL, RELEASE_ROW_SQL, RELEASE_RUN_SQL, RUN_DIGEST_SQL, type SqlClient, type SqlPool, type SqlResult } from "../postgres-store.ts";
 import { checkSections, decideRelease, SCORE_MOVE_POINTS, unmeasuredRules, type HoldReason } from "../release.ts";
 import { progressOf, RunClosedError, type RunOutputRecord, type RunOverall } from "../types.ts";
 import { consoleRun, RUN_ID, runInput } from "./helpers.ts";
@@ -337,6 +337,35 @@ describe("the Postgres store's release and hold", () => {
     assert.deepEqual(pool.statements.find((s) => s.text === RAISE_FLAG_SQL)!.values, [RUN_ID, "score_moved", NOW, JSON.stringify({ score: 60, previous: 80, moved: 20 })]);
     assert.match(RAISE_FLAG_SQL, /ON CONFLICT \("runId", "kind"\) DO NOTHING$/);
     assert.ok(!texts.includes(RELEASE_ROW_SQL) && !texts.includes(RELEASE_RUN_SQL));
+  });
+
+  test("probe A and C on Postgres: the release and both holds only ever touch an unheld run, and the release never clears a hold", () => {
+    assert.match(RELEASE_RUN_SQL, /WHERE "id" = \$1 AND "reviewMode" = 'automatic' AND "heldReason" IS NULL AND "status" <> 'released'$/);
+    assert.doesNotMatch(RELEASE_RUN_SQL, /SET [^W]*"heldReason"/);
+    assert.match(HOLD_OUTPUT_SQL, /AND "heldReason" IS NULL AND "status" <> 'released'$/);
+    assert.match(HOLD_RUN_SQL, /AND "heldReason" IS NULL AND "status" <> 'released' RETURNING "id"/);
+  });
+
+  test("a hold that hits no row (a run already held) rolls the whole save back; the first hold stands", async () => {
+    const pool = new FakePool();
+    pool.handlers.unshift((t) => (t === HOLD_OUTPUT_SQL ? { rows: [], rowCount: 0 } : undefined));
+    await assert.rejects(new PostgresWorkerStore(pool).saveRunOutput(RUN_ID, record(holdOf("score_moved"))), /unheld automatic run/);
+    assert.equal(pool.texts().at(-1), "ROLLBACK");
+    assert.ok(!pool.texts().includes(RAISE_FLAG_SQL));
+  });
+
+  test("an automatic run's hold is read with its job, so the run job can refuse it; a consultant-led run's reads are as before", async () => {
+    const pool = new FakePool();
+    const { reviewMode: _m, analysisWindow, steps: _s, ...rest } = consoleRun({ reviewMode: "automatic" });
+    pool.handlers.unshift((t) => (t === runSql(RUN) ? { rows: [{ ...rest, analysisFrom: analysisWindow.from, analysisTo: analysisWindow.to, connectionName: "synthetic-co", reviewMode: "automatic" }], rowCount: 1 } : t === HELD_REASON_SQL ? { rows: [{ heldReason: "score_moved" }], rowCount: 1 } : undefined));
+    const input = await new PostgresWorkerStore(pool).loadRunJob(RUN_ID);
+    assert.equal(input?.heldReason, "score_moved");
+    const consultant = new FakePool();
+    const { reviewMode: _c, analysisWindow: w, steps: _t, ...r2 } = consoleRun();
+    consultant.handlers.unshift((t) => (t === runSql(RUN) ? { rows: [{ ...r2, analysisFrom: w.from, analysisTo: w.to, connectionName: "synthetic-co" }], rowCount: 1 } : undefined));
+    const plain = await new PostgresWorkerStore(consultant).loadRunJob(RUN_ID);
+    assert.equal(plain && "heldReason" in plain, false);
+    assert.ok(!consultant.texts().includes(HELD_REASON_SQL));
   });
 
   test("the score is compared only with the same org's last released run of the same product, never this one", async () => {

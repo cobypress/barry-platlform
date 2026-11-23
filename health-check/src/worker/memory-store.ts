@@ -65,7 +65,8 @@ export class MemoryWorkerStore implements WorkerStore {
     const run = this.runs.get(runId);
     if (!run) return null;
     const { runDir: _dir, output: _output, ...input } = structuredClone(run);
-    return input;
+    // As the Postgres store reads it: an automatic run's hold, or none (DECISIONS.md 693).
+    return input.run.reviewMode === "automatic" ? { ...input, heldReason: this.held.get(runId) ?? null } : input;
   }
 
   /** As the Postgres store's one statement: only awaiting manual steps changes, and a closed run refuses. */
@@ -108,14 +109,17 @@ export class MemoryWorkerStore implements WorkerStore {
   #checkAutomatic(run: StoredRun, output: RunOutputRecord): void {
     const a = output.automatic!;
     const reviewMode = run.run.reviewMode === "automatic" ? "automatic" : null;
+    // The run's real hold, as the database has it: the Postgres store's statements match no row on a held run (DECISIONS.md 693).
+    const heldReason = this.held.get(run.run.id) ?? null;
     assertChecks({ reviewMode }, CONSOLE_CHECKS.reviewMode);
+    if (heldReason !== null) throw new Error(`Run ${run.run.id} couldn't be ${a.decision === "release" ? "released" : "held"}: the console doesn't have it as an unreleased, unheld automatic run`);
     if (a.decision === "release") {
       if (!output.digest || !this.digestTable || unstorableAt(output.digest, [], DIGEST_KEYS)) throw new Error(`Run ${run.run.id}'s digest couldn't be written, so it isn't released`);
       for (const r of a.releases) {
         assertChecks({ kind: r.kind, releasedBy: r.releasedBy }, CONSOLE_CHECKS.releaseKind, CONSOLE_CHECKS.releasedBy);
         if ((this.releases.get(run.run.id) ?? []).some((held) => held.output === r.output)) throw Object.assign(new Error("duplicate key value violates unique constraint \"HealthCheckRelease_runId_output_key\""), { code: "23505" });
       }
-      assertChecks({ status: "released", heldReason: null, reviewMode }, CONSOLE_CHECKS.runStatus, CONSOLE_CHECKS.held, CONSOLE_CHECKS.heldReason);
+      assertChecks({ status: "released", heldReason, reviewMode }, CONSOLE_CHECKS.runStatus, CONSOLE_CHECKS.held, CONSOLE_CHECKS.heldReason);
       // As the Postgres store's statement: only an automatic run is released by code.
       if (reviewMode !== "automatic") throw new Error(`Run ${run.run.id} isn't automatic, so it can't be released by code`);
       return;

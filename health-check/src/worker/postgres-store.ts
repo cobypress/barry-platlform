@@ -223,6 +223,8 @@ export function calibrationRow(runId: string, c: Calibration): Record<string, un
   return Object.fromEntries(Object.keys(CALIBRATION_WRITE).map((k) => [k, k === "runId" ? runId : (c as Record<string, unknown>)[k]]));
 }
 /** A full check's review mode at connect, through the row as JSON (DECISIONS.md 688, 692). */
+/** An automatic run's hold (DECISIONS.md 693), read through the row as JSON like its mode. Asked only for an automatic run, so a consultant-led run's reads are unchanged. */
+export const HELD_REASON_SQL = `SELECT to_jsonb("HealthCheckRun") ->> 'heldReason' AS "heldReason" FROM "HealthCheckRun" WHERE "id" = $1`;
 export const REVIEW_MODE_SQL = `SELECT to_jsonb("HealthCheckRun") ->> 'reviewMode' AS "reviewMode" FROM "HealthCheckRun" WHERE "id" = $1`;
 /** The console's check also wants the run unreleased; held twice keeps the first reason. */
 /**
@@ -242,11 +244,15 @@ export const FAILURE_FLAG_SQL =
   `INSERT INTO "HealthCheckRunFlag" ("runId", "kind", "raisedAt", "counts") SELECT "id", 'run_failed', $2::timestamp(3), '{}'::jsonb FROM "HealthCheckRun" ` +
   `WHERE "id" = $1 AND to_jsonb("HealthCheckRun") ->> 'reviewMode' = 'automatic' ON CONFLICT ("runId", "kind") DO NOTHING`;
 /** An automatic run's hold with its results (DECISIONS.md 693). One row or the save rolls back. */
-export const HOLD_OUTPUT_SQL = `UPDATE "HealthCheckRun" SET "heldReason" = $2 WHERE "id" = $1 AND "reviewMode" = 'automatic' AND "status" <> 'released'`;
+export const HOLD_OUTPUT_SQL = `UPDATE "HealthCheckRun" SET "heldReason" = $2 WHERE "id" = $1 AND "reviewMode" = 'automatic' AND "heldReason" IS NULL AND "status" <> 'released'`;
 /** One release row by code: kind automatic, naming nobody (migration 20261211's check). */
 export const RELEASE_ROW_SQL = `INSERT INTO "HealthCheckRelease" ("id", "runId", "output", "sectionIds", "kind", "releasedBy", "releasedAt") VALUES ($1, $2, $3, $4::text[], 'automatic', NULL, $5::timestamp(3))`;
-/** Last, once the digest and the release rows are in: the customer may see it. One row or the save rolls back. */
-export const RELEASE_RUN_SQL = `UPDATE "HealthCheckRun" SET "status" = 'released', "heldReason" = NULL WHERE "id" = $1 AND "reviewMode" = 'automatic'`;
+/**
+ * Last, once the digest and the release rows are in: the customer may see it.
+ * Never a held run, and never touching the hold: only a person clears one
+ * (DECISIONS.md 693). One row or the save rolls back.
+ */
+export const RELEASE_RUN_SQL = `UPDATE "HealthCheckRun" SET "status" = 'released' WHERE "id" = $1 AND "reviewMode" = 'automatic' AND "heldReason" IS NULL AND "status" <> 'released'`;
 /** The org's last released run of the product, by its latest release row, other than this one (DECISIONS.md 693). */
 export const LAST_RELEASED_SCORE_SQL =
   `SELECT r."overallScore" AS "score" FROM "HealthCheckRun" r JOIN "HealthCheckRelease" l ON l."runId" = r."id" ` +
@@ -594,8 +600,10 @@ export class PostgresWorkerStore implements WorkerStore {
       this.#interviews(runId),
     ]);
     const run = runFromRows(row, steps.rows.map(({ runId: _r, ...s }) => s));
+    const held = run.reviewMode === "automatic" ? one(await this.#pool.query(HELD_REASON_SQL, [runId]))?.heldReason : undefined;
     return {
       run,
+      ...(run.reviewMode === "automatic" ? { heldReason: typeof held === "string" ? held : null } : {}),
       intake: one(intake) ? intakeFromRow(one(intake)!, run) : null,
       calibration: one(calibration) ? calibrationFromRow(one(calibration)!) : null,
       connectionName: (row.connectionName as string | null) ?? null,
@@ -698,7 +706,8 @@ export class PostgresWorkerStore implements WorkerStore {
     const a = output.automatic!;
     if (a.decision === "hold") {
       const held = await client.query(HOLD_OUTPUT_SQL, [runId, a.reason]);
-      if (held.rowCount !== 1) throw new Error(`Run ${runId} couldn't be held: the console doesn't have it as an unreleased automatic run`);
+      // No row: the run is released, not automatic, or already held, and the first hold stands. The save rolls back, and the next delivery finds the hold and skips.
+      if (held.rowCount !== 1) throw new Error(`Run ${runId} couldn't be held: the console doesn't have it as an unreleased, unheld automatic run`);
       await client.query(RAISE_FLAG_SQL, [runId, a.reason, a.at, JSON.stringify(a.counts)]);
       return;
     }
@@ -712,7 +721,7 @@ export class PostgresWorkerStore implements WorkerStore {
       await client.query(RELEASE_ROW_SQL, [r.id, runId, r.output, r.sectionIds, r.releasedAt]);
     }
     const released = await client.query(RELEASE_RUN_SQL, [runId]);
-    if (released.rowCount !== 1) throw new Error(`Run ${runId} couldn't be released: the console doesn't have it as an automatic run`);
+    if (released.rowCount !== 1) throw new Error(`Run ${runId} couldn't be released: the console doesn't have it as an unreleased, unheld automatic run`);
   }
 
   async lastReleasedScore(runId: string, orgId15: string, product: string): Promise<number | null> {

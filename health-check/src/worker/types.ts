@@ -70,6 +70,12 @@ export type RunJobInput = {
   survey?: Survey | null;
   /** The stakeholder interviews recorded so far, by role. Null or missing when there are none. */
   interviews?: Interview[] | null;
+  /**
+   * Why an automatic run waits for a person (the console's "heldReason",
+   * DECISIONS.md 693), or null. A held run is never read or released by code:
+   * only a person clears a hold. Missing reads as none.
+   */
+  heldReason?: string | null;
 };
 
 /**

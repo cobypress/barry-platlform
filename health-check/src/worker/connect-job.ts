@@ -19,7 +19,7 @@ import { safeReason, type Attempt, type JobOutcome, type WorkerDeps } from "./de
 import { withJobLock } from "./lock.ts";
 import { approvedFromConsole } from "./run-job.ts";
 import { automaticRefusal } from "./automatic.ts";
-import { ORG_AWAITING_CONNECT } from "./types.ts";
+import { ORG_AWAITING_CONNECT, type AutomaticRunState } from "./types.ts";
 
 // A connect job: the admin came back from Salesforce, the console checked the
 // state and timing (completeAuthorisation), sealed the code and the pending
@@ -135,7 +135,7 @@ async function connectLocked(linkId: string, deps: WorkerDeps, attempt: Attempt)
     rmSync(journal, { force: true });
     // A used link whose automatic run a dropped delivery left uncalibrated or unqueued is finished here (DECISIONS.md 693).
     if (job.state === "used" && job.automaticRunId) {
-      const finished = await finishAutomatic(job.automaticRunId, name, deps, at, log);
+      const finished = await finishAutomatic(job.automaticRunId, name, job.runOrgId, deps, at, log);
       return { outcome: "skipped", detail: `The link is used, so there's nothing to connect. ${finished}` };
     }
     const released = job.state !== "used" && !link.usedAt && (await releaseBound());
@@ -318,6 +318,23 @@ async function connectLocked(linkId: string, deps: WorkerDeps, attempt: Attempt)
  * naming no stage.
  */
 async function calibrateAndQueue(runId: string, stages: OrgStage[] | null, currency: string | null, orgId: string, deps: WorkerDeps, at: () => string, log: (line: string) => void): Promise<string> {
+  // Where the run stands first (DECISIONS.md 693): a connect only ever starts a run nothing has started, and never holds one that is.
+  let state: Awaited<ReturnType<WorkerDeps["store"]["automaticRunState"]>>;
+  try {
+    state = await deps.store.automaticRunState(runId);
+  } catch (err) {
+    log(`Automatic run ${runId}'s state couldn't be read, so this connect left it as it was: ${safeReason(err)}`);
+    return "The run's state couldn't be read, so this connect changed nothing.";
+  }
+  const settled = settledBy(state);
+  if (settled) {
+    log(`Automatic run ${runId} ${settled.log}, so this connect left it as it was.`);
+    return settled.outcome;
+  }
+  if (state!.calibrated) {
+    log(`Automatic run ${runId} already had a calibration but was never queued, so it's queued now.`);
+    return queueAutomatic(runId, deps, at, log);
+  }
   const built = automaticCalibration(stages, { orgId, at: at(), currency });
   if (!built.ok) {
     const held = await deps.store.holdRun(runId, built.heldReason, at()).catch(() => false);
@@ -338,14 +355,28 @@ async function calibrateAndQueue(runId: string, stages: OrgStage[] | null, curre
     return "The run's calibration couldn't be saved, so the run wasn't started.";
   }
   if (saved === "exists") {
-    const state = await deps.store.automaticRunState(runId).catch(() => null);
-    if (!state || state.queued || state.held) {
-      log(`Automatic run ${runId} already had a calibration, so it was left as it was and not queued again.`);
-      return "The run already had a calibration, so it wasn't started again.";
-    }
-    log(`Automatic run ${runId} already had a calibration but was never queued, so it's queued now.`);
+    // Another delivery wrote it between the read above and this one: that one queues it.
+    log(`Automatic run ${runId} already had a calibration, so it was left as it was and not queued again.`);
+    return "The run already had a calibration, so it wasn't started again.";
   }
   return queueAutomatic(runId, deps, at, log);
+}
+
+/** The status of a run nothing has started: the console makes it so, and only a delivery of its run job moves it on. */
+const NOT_STARTED = "extracting";
+
+/**
+ * Why a connect must leave an automatic run as it is, or null when it may go
+ * on (DECISIONS.md 693): no run; held, which only a person clears; queued, or
+ * moved on by its run job (a failed run is a person's to run again, never the
+ * connect's). A run calibrated and never queued may go on: the connect queues it.
+ */
+function settledBy(state: AutomaticRunState | null): { log: string; outcome: string } | null {
+  if (!state) return { log: "isn't there", outcome: "The run isn't there, so this connect changed nothing." };
+  if (state.held) return { log: "is held for a person", outcome: "The run is held for a person, so this connect changed nothing." };
+  if (state.status !== NOT_STARTED) return { log: `is ${state.status.replace(/_/g, " ")}`, outcome: `The run is ${state.status.replace(/_/g, " ")}, so this connect changed nothing.` };
+  if (state.queued) return { log: "is already queued", outcome: "The run is already started, so this connect changed nothing." };
+  return null;
 }
 
 /**
@@ -384,7 +415,13 @@ async function queueAutomatic(runId: string, deps: WorkerDeps, at: () => string,
  * connection and the run is calibrated and queued as on a first delivery.
  * Calibrated, never queued: queued. Idempotent, and never throws.
  */
-async function finishAutomatic(runId: string, name: string, deps: WorkerDeps, at: () => string, log: (line: string) => void): Promise<string> {
+async function finishAutomatic(runId: string, name: string, runOrgId: string, deps: WorkerDeps, at: () => string, log: (line: string) => void): Promise<string> {
+  // The switch first, before anything is read (DECISIONS.md 693): off, or the org no longer listed, and nothing is read, saved or queued.
+  const refused = automaticRefusal({ reviewMode: "automatic", orgId: runOrgId }, deps.automatic);
+  if (refused || runOrgId === ORG_AWAITING_CONNECT) {
+    log(`Automatic run ${runId}'s connect wasn't finished: ${refused ?? "the run has no org yet"}`);
+    return "Automatic runs aren't allowed for this org on this worker now, so nothing was read.";
+  }
   let state: Awaited<ReturnType<WorkerDeps["store"]["automaticRunState"]>>;
   try {
     state = await deps.store.automaticRunState(runId);
@@ -392,8 +429,8 @@ async function finishAutomatic(runId: string, name: string, deps: WorkerDeps, at
     log(`Automatic run ${runId}'s state couldn't be read, so its connect wasn't finished: ${safeReason(err)}`);
     return "The run's state couldn't be read.";
   }
-  if (!state || state.held || (state.calibrated && state.queued)) return "The run needs nothing more from its connect.";
-  if (state.calibrated) return queueAutomatic(runId, deps, at, log);
+  if (settledBy(state)) return "The run needs nothing more from its connect.";
+  if (state!.calibrated) return queueAutomatic(runId, deps, at, log);
   if (!deps.tokens.has(name)) {
     log(`Automatic run ${runId} isn't calibrated and its connection is gone, so it can't be finished.`);
     return "The run's connection is gone, so it can't be started from this link.";

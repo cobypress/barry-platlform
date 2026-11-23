@@ -51,6 +51,11 @@ export class AutomaticReplay implements Transport {
     for (const { key } of recording.exchanges) this.#recorded.set(loose(key), key);
   }
 
+  /** Every request sent, as the replay saw it. */
+  get requests(): TransportRequest[] {
+    return this.#inner.requests;
+  }
+
   send(request: TransportRequest): Promise<TransportResponse> {
     const key = requestKey(request);
     const recorded = this.#recorded.get(loose(key));

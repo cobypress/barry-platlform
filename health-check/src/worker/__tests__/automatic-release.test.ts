@@ -158,6 +158,47 @@ describe("the score check compares only with a run that was released (DECISIONS.
   });
 });
 
+describe("probe C: a held run is never read or released by code (DECISIONS.md 693)", () => {
+  test("held before its job runs: skipped, nothing read, not released, its one flag left open", async () => {
+    const calibration = await automaticSyntheticCalibration();
+    const transport = new AutomaticReplay();
+    const deps = baseDeps({ dataTransport: transport, automatic: ON });
+    deps.store.addRun(runInput({ run: consoleRun({ reviewMode: "automatic" }), calibration, intake: null, answers: [] }));
+    await deps.tokens.save(syntheticConnection());
+    assert.equal(await deps.store.holdRun(RUN_ID, "calibration_unreadable", AS_OF), true);
+    const outcome = await createJobHandler(deps)(job, { final: true });
+    assert.deepEqual(outcome, { outcome: "skipped", detail: `Run ${RUN_ID} is held (calibration_unreadable), so it waits for a person and nothing was read` });
+    assert.equal(transport.requests.length, 0);
+    assert.notEqual(deps.store.runs.get(RUN_ID)!.run.status, "released");
+    assert.equal(deps.store.releases.has(RUN_ID), false);
+    assert.equal(deps.store.held.get(RUN_ID), "calibration_unreadable");
+    assert.deepEqual(deps.store.flagsOf(RUN_ID), ["calibration_unreadable"]);
+  });
+
+  test("held while its job runs: the release is refused whole, and the hold stands", async () => {
+    const calibration = await automaticSyntheticCalibration();
+    const deps = baseDeps({ dataTransport: new AutomaticReplay(), automatic: ON });
+    deps.store.addRun(runInput({ run: consoleRun({ reviewMode: "automatic" }), calibration, intake: null, answers: [] }));
+    await deps.tokens.save(syntheticConnection());
+    // A hold landing after the job's second reading, as a second connect's could.
+    const save = deps.store.saveRunOutput.bind(deps.store);
+    deps.store.saveRunOutput = async (runId, output) => {
+      await deps.store.holdRun(runId, "calibration_unreadable", AS_OF);
+      return save(runId, output);
+    };
+    const outcome = await createJobHandler(deps)(job, { final: false }).catch((err: Error) => ({ outcome: "thrown", detail: err.message }));
+    assert.equal(outcome.outcome, "thrown");
+    assert.match(outcome.detail, /couldn't be released: the console doesn't have it as an unreleased, unheld automatic run/);
+    assert.equal(deps.store.releases.has(RUN_ID), false);
+    assert.notEqual(deps.store.runs.get(RUN_ID)!.run.status, "released");
+    assert.equal(deps.store.held.get(RUN_ID), "calibration_unreadable");
+    // The next delivery finds the hold and reads nothing.
+    deps.store.saveRunOutput = save;
+    const again = await createJobHandler(deps)(job, { final: true });
+    assert.equal(again.outcome, "skipped");
+  });
+});
+
 describe("a consultant-led run is as it was (DECISIONS.md 693)", async () => {
   const deps = baseDeps({ dataTransport: new ReplayTransport(loadRecording()), automatic: ON });
   deps.store.addRun(runInput());

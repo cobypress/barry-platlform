@@ -64,6 +64,10 @@ export const approvedFromConsole = (name: string): NodeJS.ProcessEnv => ({ HC_AP
 
 export const ORG_SETTINGS_ON_CONSULTANT_RUN = "The calibration was read from the org's own settings and no person has confirmed it, so a consultant-led run can't start. Confirm the calibration first.";
 
+/** Whether this is an automatic run a hold is waiting on. */
+const heldFor = (input: RunJobInput): boolean => input.run.reviewMode === "automatic" && typeof input.heldReason === "string";
+const heldOutcome = (runId: string, input: RunJobInput): JobOutcome => ({ outcome: "skipped", detail: `Run ${runId} is held (${input.heldReason}), so it waits for a person and nothing was read` });
+
 function problemWith(input: RunJobInput, deps: WorkerDeps): string | null {
   // First, before anything else is checked or loaded: an automatic run reads nothing it isn't allowed to (DECISIONS.md 688).
   const automatic = automaticRefusal(input.run, deps.automatic);
@@ -141,6 +145,8 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
   if (!first) return { outcome: "skipped", detail: `No run ${runId}` };
   Object.assign(seen, { product: first.run.product, connectionName: first.connectionName });
   if (CLOSED.has(first.run.status)) return { outcome: "skipped", detail: `Run ${runId} is ${first.run.status.replace("_", " ")}, so there's nothing for the worker to do` };
+  // A held automatic run waits for a named person, always: code never reads it again or releases it (DECISIONS.md 693).
+  if (heldFor(first)) return heldOutcome(runId, first);
 
   // The run is this delivery's before anything is written, to the folder or the
   // store, a failure's included: the console's move to review, landing after the
@@ -182,6 +188,8 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
   if (!second) return { outcome: "skipped", detail: `No run ${runId}` };
   const input = second;
   Object.assign(seen, { product: input.run.product, connectionName: input.connectionName });
+  // Held between the two readings (a second connect, a person): still nothing read.
+  if (heldFor(input)) return heldOutcome(runId, input);
 
   const problem = problemWith(input, deps);
   if (problem) return fail(problem);
