@@ -1,3 +1,4 @@
+import type { CodeLintTools } from "../extract/code-lint.ts";
 import type { DomainModule } from "../domains/types.ts";
 import type { NarrativeClient } from "../narrative/client.ts";
 import type { OAuthClient } from "../salesforce/oauth.ts";
@@ -40,6 +41,11 @@ export type WorkerDeps = {
    * it after the analysis (DECISIONS.md 490 to 492). Off when absent.
    */
   apexSummaries?: boolean;
+  /**
+   * PMD as the worker found it at start, for each health check's code-lint
+   * step (DECISIONS.md 670). Absent: the step says PMD isn't installed.
+   */
+  codeLint?: CodeLintTools;
   /** Tests only: prints without a browser. */
   renderReleased?: typeof renderReleased;
   /** Tests only: stands in for the org handbook's renderer, so a failing render can be seen. */

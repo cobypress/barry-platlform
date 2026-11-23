@@ -217,6 +217,8 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
       product: input.run.product,
       baselineRunId: input.run.baselineRunId,
       keepApexSource: apexSummaries,
+      // A health check runs PMD and ESLint beside our scan, and only stores what they find; a scan and a pulse don't (DECISIONS.md 670).
+      ...(input.run.product === "barometer" ? { codeLint: deps.codeLint ?? { pmd: null } } : {}),
       // Who connected, from the token loaded above on every delivery, resumes too (DECISIONS.md 498).
       connectedUser: { id: stored.userId },
       // Every run the worker makes reads the org's inventory (DECISIONS.md 605).

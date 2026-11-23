@@ -5,6 +5,7 @@ import { checkClaude } from "../narrative/guard.ts";
 import { ClaudeWatch, federationCachePath, identityTokenFacts, prepareSignInCache, SIGN_IN_RETRY_MINUTES } from "../narrative/sign-in.ts";
 import { tokenKeySource, TokenStore } from "../salesforce/token-store.ts";
 import { HEALTH_CHECK_QUEUE, HEAVY_QUEUE, lostRecorder, RECYCLE_EXIT, RECYCLE_WATCHDOG_MS, recycleWatch, redisConnection, runQueuer, startQueueWorker, type BullModule, type StoreFill } from "../worker/bullmq.ts";
+import { findPmd, PMD_VERSION } from "../extract/lint/pmd.ts";
 import { GoogleDrive } from "../worker/drive.ts";
 import { readWorkerEnv, WORKER_ENV } from "../worker/env.ts";
 import { PostgresWorkerStore, type SqlPool } from "../worker/postgres-store.ts";
@@ -104,6 +105,8 @@ export async function workerCommand(
   const queue = new bull.Queue(HEALTH_CHECK_QUEUE, { connection: redisConnection(config.redisUrl) });
   // One client for the documents and for sharing their folder (DECISIONS.md 251).
   const google = config.drive ? new GoogleDrive(config.drive) : null;
+  // Looked for once, at start: files only, nothing run (DECISIONS.md 670).
+  const pmd = findPmd(config.pmdHome, config.javaHome);
   const deps: WorkerDeps = {
     store,
     tokens: new TokenStore({ dir: config.connectionsDir, key: tokenKeySource({ env: { HC_TOKEN_KEY: env.HC_TOKEN_KEY } as NodeJS.ProcessEnv, platform: "linux" }) }),
@@ -119,6 +122,7 @@ export async function workerCommand(
     sharing: google,
     micrositeKey: config.micrositeKey,
     apexSummaries: config.apexSummaries,
+    codeLint: "found" in pmd ? { pmd: pmd.found } : { pmd: null, pmdMissing: pmd.missing },
     queueRun: runQueuer(queue),
     narrative,
     log,
@@ -148,6 +152,8 @@ export async function workerCommand(
         ? "Claude's summaries of Apex code are on: each health check keeps its Apex code until Claude has summarised it."
         : "Claude's summaries of Apex code are switched on, but Claude isn't set up, so no code is kept and nothing is asked.",
   );
+  // Said at every start, so a deploy that installs it shows in the log.
+  log("found" in pmd ? `PMD ${PMD_VERSION} checks each health check's Apex code, and its findings are stored beside our own scan's.` : `${pmd.missing} Each health check says PMD didn't run.`);
   log(
     config.claude.kind === "key"
       ? "Claude drafts each run's report sections, signed in with ANTHROPIC_API_KEY."

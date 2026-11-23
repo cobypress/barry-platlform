@@ -43,6 +43,8 @@ export const WORKER_ENV = {
     HC_SF_SIGNIN_CLIENT_SECRET: "Its secret, needed for the code exchange and refresh",
     HC_SF_SIGNIN_REDIRECT_URI: "The console's OAuth callback, exactly as registered on the sign-in app",
     HC_WORKER_RECYCLE_AT: `A whole number from 1 to ${RECYCLE_AT_LIMIT}: once that many org-worded sentences are in the worker's store, it finishes the jobs in hand and exits 75 for Render to start a fresh one (DECISIONS.md 666). Unset: it never recycles itself. Set it low once and watch Render restart it before relying on it`,
+    HC_PMD_HOME: "Absolute path of the unpacked PMD 7.29.0 (the pmd-bin-7.29.0 folder): PMD then checks each health check's Apex code, and its findings are stored beside our own scan's (DECISIONS.md 670). Unset: PMD doesn't run, and each run says so",
+    HC_JAVA_HOME: "Absolute path of the Java PMD runs on (the folder holding bin/java). Needed with HC_PMD_HOME",
     HC_MICROSITE_KEY: "The customer microsite: 32 bytes, base64 (openssl rand -base64 32), the same value as the console's, and different from HC_CONNECT_KEY and HC_TOKEN_KEY. Without it, released runs get documents but no microsite",
   },
 } as const;
@@ -86,6 +88,9 @@ export type WorkerConfig = {
   apexSummaries: boolean;
   /** HC_WORKER_RECYCLE_AT: the org-word store's size at which the worker recycles itself. Null, the default: it never does (DECISIONS.md 666). */
   recycleAt: number | null;
+  /** HC_PMD_HOME and HC_JAVA_HOME, or null: where PMD and its Java are, checked when the worker starts (DECISIONS.md 670). */
+  pmdHome: string | null;
+  javaHome: string | null;
 };
 
 const key32 = (raw: string): Buffer | null => {
@@ -131,6 +136,7 @@ export function readWorkerEnv(env: NodeJS.ProcessEnv): { ok: true; config: Worke
   if (recycleAt !== null && !(Number.isInteger(recycleAt) && recycleAt >= 1 && recycleAt <= RECYCLE_AT_LIMIT)) {
     problems.push(`HC_WORKER_RECYCLE_AT must be a whole number from 1 to ${RECYCLE_AT_LIMIT}, or unset`);
   }
+  for (const name of ["HC_PMD_HOME", "HC_JAVA_HOME"]) if (get(name) && !isAbsolute(get(name))) problems.push(`${name} must be an absolute path, or unset`);
   if (!["", "0", "1"].includes(get("HC_CLEANUP_DRY_RUN"))) problems.push("HC_CLEANUP_DRY_RUN must be 1, 0 or unset");
   let siteKey: Buffer | null = null;
   try {
@@ -183,6 +189,8 @@ export function readWorkerEnv(env: NodeJS.ProcessEnv): { ok: true; config: Worke
       // Exactly "on", untrimmed: a switch that sends code to Claude doesn't guess.
       apexSummaries: env.HC_HANDBOOK_SUMMARIES === "on",
       recycleAt,
+      pmdHome: get("HC_PMD_HOME") || null,
+      javaHome: get("HC_JAVA_HOME") || null,
     },
   };
 }
