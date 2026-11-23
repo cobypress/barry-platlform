@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { collectExtractors } from "../run.ts";
 import { ALL_MODULES } from "../../domains/index.ts";
+import { codeLintExtractor } from "../../extract/code-lint.ts";
 import { INVENTORY_EXTRACTORS } from "../../extract/inventory.ts";
 
 // The console shows a line of wording for each step a run is on, keyed by the
@@ -18,7 +19,7 @@ import { INVENTORY_EXTRACTORS } from "../../extract/inventory.ts";
 
 const CONSOLE_FILE = "blackcloud-next lib/health-check/run-progress.ts (STEP_WORDING) and its test's copy of this list";
 
-/** Every step a run can take, in run order: collectExtractors(ALL_MODULES), with the inventory the worker reads (DECISIONS.md 605). */
+/** Every step a run can take, in run order: collectExtractors(ALL_MODULES), with the inventory the worker reads (DECISIONS.md 605) and its PMD and ESLint step (670). */
 const STEP_IDS = [
   "org",
   "field-describe",
@@ -78,6 +79,7 @@ const STEP_IDS = [
   "inventory-connected-apps",
   "inventory-risky-permissions",
   "inventory-limits",
+  "code-lint",
   "facts",
 ];
 
@@ -90,7 +92,7 @@ const EXTRACT_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "e
 describe("the step ids the console words", () => {
   test("every step a run can take is on the list, in run order", () => {
     assert.deepEqual(
-      collectExtractors(ALL_MODULES, INVENTORY_EXTRACTORS).map((e) => e.id),
+      collectExtractors(ALL_MODULES, [...INVENTORY_EXTRACTORS, codeLintExtractor]).map((e) => e.id),
       STEP_IDS,
       `The steps a run can take have changed. Change ${CONSOLE_FILE} to match, then this list, and say so in the ledger's note for Coby: a step with no wording shows as "Checking <id>".`,
     );

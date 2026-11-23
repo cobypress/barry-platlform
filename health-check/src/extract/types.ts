@@ -1,6 +1,7 @@
 import type { Calibration } from "../schemas/index.ts";
 import { isUnavailable, type QueryApi, type QueryOptions, type SalesforceClient } from "../salesforce/client.ts";
 import type { ApexSourceStore } from "./apex-source.ts";
+import type { CodeLintTools } from "./code-lint.ts";
 
 export type SourceInfo =
   | { kind: "soql"; api: QueryApi; query: string }
@@ -37,6 +38,11 @@ export type ExtractContext = {
    * extractor never reads the environment, and the command line never keeps code.
    */
   apexSource?: ApexSourceStore;
+  /**
+   * PMD where the worker found it, for the code-lint step (DECISIONS.md 670).
+   * Only the worker gives it, on a health check.
+   */
+  codeLint?: CodeLintTools;
   /**
    * Who connected, where the caller knows (DECISIONS.md 498): the id kept with
    * an OAuth token, or the username of an `sf` login. Given afresh on every

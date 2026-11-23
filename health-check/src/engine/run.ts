@@ -11,6 +11,7 @@ import { customObjectsExtractor, orgExtractor, setupAuditExtractor, type CustomO
 import { FACTS_FILE, factsExtractor, type Facts } from "../extract/facts.ts";
 import { apexExtractor, metadataExtractor, type ApexData } from "../extract/automation.ts";
 import { apexSourceStore } from "../extract/apex-source.ts";
+import { codeLintExtractor, type CodeLintTools } from "../extract/code-lint.ts";
 import { componentChangesExtractor, type ComponentChangesData } from "../extract/component-changes.ts";
 import type { MetadataBundle } from "../extract/metadata-parse.ts";
 import { fieldDescribeExtractor } from "../extract/fields.ts";
@@ -81,6 +82,12 @@ export type RunOptions = {
    * The worker turns it on; off, a run reads and writes exactly what it did before.
    */
   inventory?: boolean;
+  /**
+   * Runs PMD and ESLint over the org's code too, beside our own scan, and only
+   * stores what they find (DECISIONS.md 670). The worker gives it on a health
+   * check, with PMD where it found it; off, a run reads and writes exactly what it did before.
+   */
+  codeLint?: CodeLintTools;
 };
 
 export type RunResult = { run: Run; dir: string; output: AnalysisOutput | null };
@@ -182,7 +189,8 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
   if (options.resume && options.scope && options.scope !== scope) throw new Error(`This run is ${scope}, so it can't be resumed as ${options.scope}.`);
   const modules = modulesFor(scope, options.modules);
   const inventorySteps = options.inventory ? inventoryExtractorsFor(scope) : [];
-  const extractors = collectExtractors(modules, inventorySteps);
+  const lintSteps: Extractor[] = options.codeLint ? [codeLintExtractor] : [];
+  const extractors = collectExtractors(modules, [...inventorySteps, ...lintSteps]);
   const hash = calibrationHash(calibration);
   const windowEnd = now;
   const windowStart = monthsBefore(windowEnd, calibration.analysisWindowMonths);
@@ -238,6 +246,7 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
     },
     ...(options.keepApexSource === true ? { apexSource: apexSourceStore(dir) } : {}),
     ...(options.connectedUser ? { connectedUser: options.connectedUser } : {}),
+    ...(options.codeLint ? { codeLint: options.codeLint } : {}),
   };
 
   let callsCounted = 0;
@@ -295,7 +304,8 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
       step.error = err instanceof Error ? err.message : String(err);
       // No finding reads the inventory, so its step failing costs only its own
       // section, and the run goes on; a later delivery tries it again (DECISIONS.md 609).
-      if (inventorySteps.includes(extractor)) {
+      // The same for PMD and ESLint's step: a run never fails because a linter did (DECISIONS.md 670).
+      if (inventorySteps.includes(extractor) || lintSteps.includes(extractor)) {
         await saveRun();
         log(`  ${extractor.id}: failed, and the run carries on without it`);
         continue;
