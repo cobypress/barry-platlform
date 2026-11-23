@@ -20,6 +20,7 @@ import type { StoredConnection } from "../salesforce/token-store.ts";
 import { safeReason, type Attempt, type JobOutcome, type WorkerDeps } from "./deps.ts";
 import { appFor, appNotSetUp, needsReconnection } from "./apps.ts";
 import { withJobLock } from "./lock.ts";
+import { automaticRefusal } from "./automatic.ts";
 import { letGoAfterRun, type SeenRun } from "./scan-release.ts";
 import { progressOf, RunClosedError, runOverall, type RunJobInput } from "./types.ts";
 import { withoutComments } from "../survey/questions.ts";
@@ -60,6 +61,9 @@ export const SECTIONS_FILE = "report-sections.json";
 export const approvedFromConsole = (name: string): NodeJS.ProcessEnv => ({ HC_APPROVED_ORG_ALIASES: name }) as NodeJS.ProcessEnv;
 
 function problemWith(input: RunJobInput, deps: WorkerDeps): string | null {
+  // First, before anything else is checked or loaded: an automatic run reads nothing it isn't allowed to (DECISIONS.md 688).
+  const automatic = automaticRefusal(input.run, deps.automatic);
+  if (automatic) return automatic;
   if (!input.calibration) return "The calibration hasn't been confirmed, so the run can't start.";
   if (input.run.connectionKind !== "oauth") return "This run is set to use a CLI login. The worker only reads through a connection a customer's admin authorised.";
   if (!input.connectionName) return "No connection is named for this run. Send the customer a connect link first.";
