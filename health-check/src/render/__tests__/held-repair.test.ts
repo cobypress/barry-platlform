@@ -11,14 +11,14 @@ import { ENGINE_WORDS, CODE_WORDS } from "../../numbercheck/engine-words.ts";
 import { scanEngineWords } from "../../numbercheck/engine-words-scan.ts";
 import type { PseudonymEntry } from "../../privacy/pseudonymiser.ts";
 import { Pseudonymiser } from "../../privacy/pseudonymiser.ts";
-import { approvedReport, asPrinted, heldFigures, renderReleased, repairWarnings, toRepair, type ApprovedRun, type ReleasedDocuments } from "../render-released.ts";
+import { approvedReport, asPrinted, heldFigures, holdForUs, maskSite, renderReleased, repairWarnings, toRepair, type ApprovedRun, type ReleasedDocuments } from "../render-released.ts";
 import { FIELDS, heldPattern, MASK, maskInput, maskPage, masksIn, maskText, UNMASKED_PREFIXES, WITHHELD_NOTE, withheldLine, withheldNote } from "../repair.ts";
 import { loadRun, OUTPUT_FILES, pageDataset, printDocuments } from "../render-run.ts";
 import { fullReportHtml } from "../full-report.ts";
 import { executiveHtml } from "../executive.ts";
 import { onePagerHtml } from "../one-pager.ts";
 import { micrositeMisses, pageText } from "../../microsite/pages.ts";
-import type { Finding, Metric, ReportSection, SectionVersion } from "../../schemas/index.ts";
+import { Finding as FindingSchema, ManualStep as ManualStepSchema, Metric as MetricSchema, type Finding, type Metric, type ReportSection, type SectionVersion } from "../../schemas/index.ts";
 import { runFromRecording } from "../../testing/harness.ts";
 import { heldBackReason } from "../../worker/documents-job.ts";
 
@@ -317,6 +317,59 @@ describe("masking stays narrow", () => {
     assert.equal(new Map(masked.segments.map((s) => [`${s.dimension}|${s.key}`, s.value])).size, masked.segments.length, "a chart's map keeps every row");
     assert.equal(checkNumbers(keys.join(" "), buildDataset({ findings: [], metrics: [] })).checked, 0);
   });
+});
+
+describe("the microsite is one more document for the hold", () => {
+  test("its masks and last-resort masks are counted, and a page with a mask says so", () => {
+    const pages = [{ slug: "issues", title: "Every issue", html: "<h2>Issues</h2><p>We found 7731 of them.</p>" }, { slug: "plan", title: "The plan", html: "<p>Nothing here.</p>" }];
+    const site = maskSite(pages, ["7731"]);
+    assert.deepEqual([site.masks, site.pageMasks], [1, 1]);
+    assert.ok(site.pages[0]!.html.includes(MASK) && site.pages[0]!.html.includes(WITHHELD_NOTE.replace("'", "&#39;")));
+    assert.equal(site.pages[1]!.html, pages[1]!.html);
+  });
+
+  test("a number masked only on the microsite, or more than ten masks there alone, holds the make for us", () => {
+    const none = { executive: 0, full: 0, ceo: 0 };
+    assert.equal(holdForUs({ ...none, microsite: 0 }, { ...none, microsite: 1 }, true), true);
+    assert.equal(holdForUs({ ...none, microsite: 11 }, { ...none, microsite: 0 }, false), true);
+    assert.equal(holdForUs({ ...none, microsite: 10 }, { ...none, microsite: 1 }, false), false, "a word masked there, ten at most: not held");
+  });
+});
+
+describe("every string field the schemas define is on the list", () => {
+  // The schemas, not only the fixture: a new optional field fails here until it's listed.
+  const seen = new Set<string>();
+  const walk = (schema: unknown, path: string, depth = 0): void => {
+    const def = (schema as { _def?: Record<string, unknown>; def?: Record<string, unknown> } | undefined)?._def ?? (schema as { def?: Record<string, unknown> } | undefined)?.def;
+    if (!def || depth > 14) return;
+    const type = String(def.typeName ?? def.type);
+    if (/^(Zod)?(String|string|Enum|enum|Literal|literal)$/.test(type)) return void seen.add(path);
+    if (/^(Zod)?(Optional|optional|Nullable|nullable|Default|default|Readonly|readonly|Catch|catch|NonOptional|nonoptional)$/.test(type)) return walk(def.innerType, path, depth + 1);
+    if (/^(Zod)?(Effects|Pipeline|pipe)$/.test(type)) return walk(def.schema ?? def.in, path, depth + 1);
+    if (/^(Zod)?(Array|array)$/.test(type)) return walk(def.type ?? def.element, `${path}[]`, depth + 1);
+    if (/^(Zod)?(Object|object)$/.test(type)) {
+      const shape = (typeof def.shape === "function" ? (def.shape as () => object)() : def.shape) as Record<string, unknown>;
+      for (const [k, v] of Object.entries(shape)) walk(v, path ? `${path}.${k}` : k, depth + 1);
+      return;
+    }
+    if (/^(Zod)?(Union|union|DiscriminatedUnion)$/.test(type)) {
+      const options = def.options instanceof Map ? [...def.options.values()] : (def.options as unknown[]);
+      for (const o of options) walk(o, path, depth + 1);
+      return;
+    }
+    if (/^(Zod)?(Intersection|intersection)$/.test(type)) return void (walk(def.left, path, depth + 1), walk(def.right, path, depth + 1));
+    if (/^(Zod)?(Lazy|lazy)$/.test(type)) return walk((def.getter as () => unknown)(), path, depth + 1);
+    // A record's values are numbers (facts, stats): nothing to mask.
+  };
+  for (const [kind, schema] of [["finding", FindingSchema], ["metric", MetricSchema], ["step", ManualStepSchema]] as const) {
+    test(`every ${kind} string, enum or literal field is masked or named as never printed`, () => {
+      seen.clear();
+      walk(schema, "");
+      assert.ok(seen.size > 8, `the walk read the ${kind} schema: ${seen.size}`);
+      const listed = new Set<string>([...FIELDS[kind].masked, ...FIELDS[kind].unmasked]);
+      assert.deepEqual([...seen].filter((p) => !listed.has(p) && !UNMASKED_PREFIXES.some((u) => `${p}.`.startsWith(u))).sort(), []);
+    });
+  }
 });
 
 describe("every string the stored data holds is masked or named as never printed", () => {

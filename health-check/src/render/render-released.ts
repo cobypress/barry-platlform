@@ -84,7 +84,7 @@ export type ReleasedDocuments = {
    */
   repairs?: "none" | "some" | "heavy" | "held for us";
   /** How many details each PDF shows withheld (DECISIONS.md 682). */
-  masks?: Record<"executive" | "full" | "ceo", number>;
+  masks?: Record<"executive" | "full" | "ceo" | "microsite", number>;
   /** The microsite wasn't made because a page still held a figure after the repair. */
   micrositeHeld?: true;
   /** The other files a figure masked in the data still shows in, for the log only. */
@@ -393,7 +393,33 @@ export const MASK_CAP = 3;
  */
 export const HELD_FOR_US_MASKS = 10;
 
-type Doc = "executive" | "full" | "ceo";
+type Doc = "executive" | "full" | "ceo" | "microsite";
+
+/**
+ * The microsite's pages with the last resort's masks, each page with a mask
+ * carrying the withheld note, and the counts the hold reads: the microsite is
+ * one more document (decision 682).
+ */
+export function maskSite(pages: MicrositePages["pages"], pageRaws: string[]): { pages: MicrositePages["pages"]; masks: number; pageMasks: number } {
+  let masks = 0;
+  let pageMasks = 0;
+  const out = pages.map((p) => {
+    const page = maskPage(p.html, pageRaws);
+    pageMasks += page.masked;
+    masks += masksIn(page.html);
+    return { ...p, html: withheldNote(page.html) };
+  });
+  return { pages: out, masks, pageMasks };
+}
+
+/**
+ * Whether a make is held for us: any document, the microsite included, past
+ * HELD_FOR_US_MASKS, or a figure of a numeric kind masked by the last resort
+ * where a page or the microsite prints it.
+ */
+export function holdForUs(masks: Record<string, number>, pageMasks: Record<string, number>, numericPageRaw: boolean): boolean {
+  return Object.values(masks).some((n) => n > HELD_FOR_US_MASKS) || (numericPageRaw && Object.values(pageMasks).some((n) => n > 0));
+}
 
 export async function renderReleased(dir: string, approved: ApprovedRun, outDir: string): Promise<ReleasedDocuments | RefusedDocuments> {
   const folder = resolve(dir);
@@ -419,8 +445,8 @@ export async function renderReleased(dir: string, approved: ApprovedRun, outDir:
     mkdirSync(out, { recursive: true, mode: 0o700 });
     const set = pageDataset(built.report.dataset, built.pseudonyms);
     const fellBack = fallBackSections(built.report, built.pseudonyms, built.engineText, set);
-    const masks: Record<Doc, number> = { executive: 0, full: 0, ceo: 0 };
-    const pageMasks: Record<Doc, number> = { executive: 0, full: 0, ceo: 0 };
+    const masks: Record<Doc, number> = { executive: 0, full: 0, ceo: 0, microsite: 0 };
+    const pageMasks: Record<Doc, number> = { executive: 0, full: 0, ceo: 0, microsite: 0 };
     const layout: PrintedLayout = await printDocuments(built.report, built.pseudonyms, paths, (html, doc) => {
       const page = maskPage(html, pageRaws);
       pageMasks[doc] = page.masked;
@@ -429,7 +455,10 @@ export async function renderReleased(dir: string, approved: ApprovedRun, outDir:
     });
     let site: { ok: true; pages: MicrositePages["pages"] } | { ok: false; reason: string };
     try {
-      site = { ok: true, pages: micrositePages(built.report, built.pseudonyms).map((p) => ({ ...p, html: maskPage(p.html, pageRaws).html })) };
+      const masked = maskSite(micrositePages(built.report, built.pseudonyms), pageRaws);
+      masks.microsite = masked.masks;
+      pageMasks.microsite = masked.pageMasks;
+      site = { ok: true, pages: masked.pages };
     } catch (err) {
       site = { ok: false, reason: err instanceof Error ? err.message : "The pages couldn't be built" };
     }
@@ -519,7 +548,7 @@ export async function renderReleased(dir: string, approved: ApprovedRun, outDir:
   const micrositeHeld = site.ok && siteMisses.length > 0;
   const microsite: ReleasedDocuments["microsite"] = site.ok ? (micrositeHeld ? { ok: false, reason: "A microsite page has a figure the number check can't trace, so the microsite wasn't made" } : { ok: true, pages: { pages: site.pages } }) : site;
   const fallBackHeavy = Object.values(report.outputs).some((b) => b.sections.length > 0 && fellBack.filter((f) => f.output === b.output).length * 4 > b.sections.length);
-  const heldForUs = Object.values(made.masks).some((n) => n > HELD_FOR_US_MASKS) || (Object.values(made.pageMasks).some((n) => n > 0) && pageRaws.some((raw) => NUMERIC_KINDS.has(kindOf(raw, set))));
+  const heldForUs = holdForUs(made.masks, made.pageMasks, pageRaws.some((raw) => NUMERIC_KINDS.has(kindOf(raw, set))));
   const heavy = made.masks.ceo > 0 || made.masks.executive > MASK_CAP || made.masks.full > MASK_CAP || fallBackHeavy;
   const any = fellBack.length > 0 || leftOut.length > 0 || micrositeHeld || Object.values(made.masks).some((n) => n > 0);
   return {

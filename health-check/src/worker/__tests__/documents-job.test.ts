@@ -1249,7 +1249,7 @@ describe("the org handbook", () => {
       fellBack: [{ output: "executive_summary", key: "verdict", title: "Verdict", source: "consultant_edit", kinds: { identifier: 1 }, words: ["We saw Zeta9Flux."] }],
       leftOut: [{ document: "The full health check", page: 12, kind: "identifier", ruleId: "cfg.unassigned-layouts", field: "owner" }],
       repairs: "some",
-      masks: { executive: 0, full: 1, ceo: 0 },
+      masks: { executive: 0, full: 1, ceo: 0, microsite: 0 },
       stillIn: ["the action lists"],
     });
     const result = await processDocumentsJob(RUN_ID, deps, { final: true });
@@ -1265,23 +1265,36 @@ describe("the org handbook", () => {
     assert.doesNotMatch(alerts.join(), /Zeta9Flux|Verdict/);
   });
 
-  test("a make held for us (decision 682): made into Black Cloud's own folder only, nothing in the client's, no digest or microsite, and the reason says it's ours to fix", async () => {
-    const drive = new MemoryDrive();
-    const deps = withHandbook(jobInput(), drive);
-    const alerts: string[] = [];
-    deps.alert = async (line) => void alerts.push(line);
-    deps.renderReleased = async (dir, approved, out) => ({ ...(await fakeRender(dir, approved, out)), leftOut: [], fellBack: [], repairs: "held for us", masks: { executive: 0, full: 11, ceo: 0 } });
-    const result = await processDocumentsJob(RUN_ID, deps, { final: true });
-    assert.equal(result.outcome, "failed");
-    const doc = deps.store.documents.get(RUN_ID)!;
-    assert.equal(doc.error, HELD_FOR_US);
-    assert.match(doc.error!, /That's ours to fix: once it's fixed, make the documents again\.$/);
-    const folders = [...drive.items.values()].filter((i) => i.folder).map((i) => i.name);
-    assert.deepEqual(folders.sort(), [INTERNAL_FOLDER, "Synthetic Co - Held for us"].sort(), "no client folder at all");
-    assert.equal([...drive.items.values()].filter((i) => !i.folder).length, 6);
-    assert.equal(deps.store.writes.some((w) => w.method === "saveDocuments" || w.method === "saveMicrosite"), false);
-    assert.deepEqual(alerts, [`Run ${RUN_ID}'s documents are held for us and went to no customer: 0 drafted sections and 0 edited sections in our own wording, 11 details withheld in the reports. Ours to fix, then make them again. See the run's Release tab.`]);
-  });
+  for (const [what, masks] of [
+    ["more than ten masks in a document", { executive: 0, full: 11, ceo: 0, microsite: 0 }],
+    ["more than ten masks on the microsite alone", { executive: 0, full: 0, ceo: 0, microsite: 11 }],
+  ] as const) {
+    test(`a make held for us for ${what} (decision 682): made into Black Cloud's own folder only, shared with no one, no digest or microsite, and the reason says it's ours to fix`, async () => {
+      const drive = new MemoryDrive();
+      const deps = withHandbook(jobInput(), drive);
+      const alerts: string[] = [];
+      deps.alert = async (line) => void alerts.push(line);
+      const shared: string[] = [];
+      deps.sharing = { share: async (folder, email) => (shared.push(`${folder} ${email}`), "perm-0009"), findReader: async () => null, unshare: async () => {} };
+      deps.renderReleased = async (dir, approved, out) => ({ ...(await fakeRender(dir, approved, out)), leftOut: [], fellBack: [], repairs: "held for us", masks });
+      const result = await processDocumentsJob(RUN_ID, deps, { final: true });
+      assert.equal(result.outcome, "failed");
+      const doc = deps.store.documents.get(RUN_ID)!;
+      assert.equal(doc.error, HELD_FOR_US);
+      assert.match(doc.error!, /That's ours to fix: once it's fixed, make the documents again\.$/);
+      const items = [...drive.items.values()];
+      const held = items.find((i) => i.folder && i.name === "Synthetic Co - Held for us")!;
+      const parent = items.find((i) => i.id === held.parent)!;
+      assert.equal(parent.name, INTERNAL_FOLDER, "inside Black Cloud's own folder");
+      assert.equal(parent.parent, drive.rootFolderId);
+      assert.deepEqual(items.filter((i) => i.folder).map((i) => i.name).sort(), [INTERNAL_FOLDER, "Synthetic Co - Held for us"].sort(), "no client folder at all");
+      assert.ok(items.filter((i) => !i.folder).every((i) => i.parent === held.id) && items.filter((i) => !i.folder).length === 6);
+      assert.deepEqual(shared, [], "shared with no one");
+      assert.equal(deps.store.writes.some((w) => w.method === "saveDocuments" || w.method === "saveMicrosite"), false, "no digest, no microsite");
+      assert.equal(alerts.length, 1);
+      assert.match(alerts[0]!, /held for us and went to no customer/);
+    });
+  }
 
   test("a make that fails before Drive uploads no handbook either", async () => {
     const drive = new MemoryDrive();
