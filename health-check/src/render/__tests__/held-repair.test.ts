@@ -231,6 +231,8 @@ describe("masking changes the token and nothing else", () => {
     }
     assert.ok(fullReportHtml(masked.report, masked.pseudonyms).includes(MASK));
     assert.deepEqual(masked.repairs, [{ raw: RAW, metricId: "historic.path_to_won", field: "segments.key" }]);
+    // The figures a page is checked against are the data's as stored: a mask makes nothing else untraceable.
+    assert.deepEqual(masked.report.dataset, plain.report.dataset);
   });
 
   test("the only path to won masked: no crash, and the row is still there", () => {
