@@ -521,9 +521,10 @@ describe("PMD never outlives the process that started it, nor leaves its code be
   test("process.exit(75) mid-run, as the recycle's watchdog calls it: no folder left and no PMD alive", async () => {
     const { root, exited } = await child("exit");
     assert.deepEqual(await exited, [75, null]);
-    const pid = pmdPid(root);
-    assert.ok(await until(() => !alive(pid), 3000), "PMD is still running");
+    // At once: the hook ran inside process.exit. The wrapper shell's own check, a second apart, would be too late for this.
     assert.deepEqual(lintTemps(join(root, "tmp")), []);
+    const pid = pmdPid(root);
+    assert.ok(await until(() => !alive(pid), 200), "PMD is still running");
   });
 
   test("SIGTERM with nothing else listening: PMD and its folder go, and the process still ends by SIGTERM", async () => {
