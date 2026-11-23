@@ -4,7 +4,8 @@ import { join, resolve } from "node:path";
 import { assertOutsideGit } from "../engine/run.ts";
 import type { BenchmarkInput } from "../benchmark/compare.ts";
 import { micrositeMisses, micrositePages, type MicrositePages } from "../microsite/pages.ts";
-import { heldPattern, LEFT_OUT_SENTENCE, repairInput, type SourceRepair } from "./repair.ts";
+import { heldPattern, maskInput, maskPage, maskText, masksIn, withheldNote, type SourceRepair } from "./repair.ts";
+import type { ReportInput } from "../narrative/sections.ts";
 import type { Intake } from "../narrative/intake.ts";
 import type { OverrideRefusal } from "../narrative/overrides.ts";
 import { buildReport, currentBody, surveyMetricsOf, type BuiltReport, type ReportOutputKey } from "../narrative/sections.ts";
@@ -75,10 +76,18 @@ export type ReleasedDocuments = {
   leftOut?: LeftOut[];
   /**
    * How much the make repaired (DECISIONS.md 682, item 7): "none"; "some", a
-   * section fell back or a detail was left out; "heavy", made from the engine's
-   * own text alone. Left out by renderers that don't repair.
+   * section fell back, a detail was masked or the microsite wasn't made;
+   * "heavy", more than MASK_CAP masks in a document, any on the one-pager, or
+   * more than a quarter of a document's sections fell back. The documents are
+   * made the same way whichever it is. Left out by renderers that don't repair.
    */
   repairs?: "none" | "some" | "heavy";
+  /** How many details each PDF shows withheld (DECISIONS.md 682). */
+  masks?: Record<"executive" | "full" | "ceo", number>;
+  /** The microsite wasn't made because a page still held a figure after the repair. */
+  micrositeHeld?: true;
+  /** The other files a figure masked in the data still shows in, for the log only. */
+  stillIn?: string[];
 };
 
 /**
@@ -118,9 +127,7 @@ export type SectionFallback = {
  * held, what kind it was, and the finding's rule or the metric and the field it
  * was in. Never the figure: it's for us.
  */
-export type LeftOut = { document: string; page: number; kind: string; ruleId?: string; metricId?: string; field?: string };
-
-export { LEFT_OUT_SENTENCE };
+export type LeftOut = { document: string; page: number; kind: string; ruleId?: string; metricId?: string; stepId?: string; field: string };
 
 /** How many times everything is made again with what couldn't be traced taken out. */
 export const REPAIR_ROUNDS = 2;
@@ -216,18 +223,18 @@ const quoted = (titles: string[]): string => [...new Set(titles)].map((t) => `"$
  * details were left out of our own text, by page. No figure from the data; a
  * consultant's own words only, which they typed.
  */
-export function repairWarnings(fellBack: SectionFallback[], leftOut: LeftOut[], repairs: ReleasedDocuments["repairs"] = "some"): string[] {
+export function repairWarnings(fellBack: SectionFallback[], leftOut: LeftOut[], micrositeHeld = false): string[] {
   const lines: string[] = [];
-  if (repairs === "heavy") lines.push("These documents use our own wording throughout, because too much in them couldn't be traced to the data to repair it piece by piece. The approved wording is kept in each section.");
-  const drafts = fellBack.filter((f) => f.source !== "consultant_edit" && Object.keys(f.kinds).length);
+  const drafts = fellBack.filter((f) => f.source !== "consultant_edit");
   if (drafts.length) lines.push(`${drafts.length === 1 ? "1 section uses" : `${drafts.length} sections use`} our own wording because a figure in the draft couldn't be traced: ${quoted(drafts.map((f) => f.title))}. Ask for a new draft to try again.`);
-  for (const f of fellBack.filter((f) => f.source === "consultant_edit" && f.words)) {
+  for (const f of fellBack.filter((f) => f.source === "consultant_edit")) {
     lines.push(`"${f.title}" uses our own wording because what you wrote couldn't be traced to the data: ${quoted(f.words ?? [])}. Your edit is kept: correct it, approve it again and make the documents again.`);
   }
   if (leftOut.length) {
     const pages = [...new Set(leftOut.map((l) => where(l.document, l.page)))];
-    lines.push(`We left ${leftOut.length === 1 ? "1 detail" : `${leftOut.length} details`} out of our own text because ${leftOut.length === 1 ? "it" : "they"} couldn't be traced to the data, first seen in ${pages.join("; ")}. That's ours to fix.`);
+    lines.push(`We withheld ${leftOut.length === 1 ? "1 detail" : `${leftOut.length} details`} of our own text because ${leftOut.length === 1 ? "it" : "they"} couldn't be traced to the data, first seen in ${pages.join("; ")}. That's ours to fix.`);
   }
+  if (micrositeHeld) lines.push("The microsite wasn't made because a figure on it couldn't be traced to the data. That's ours to fix.");
   return lines;
 }
 
@@ -255,20 +262,23 @@ export const BASELINE_ROWS_UNREAD = "the earlier health check's corrections coul
  * `baselineUnapproved` says so for the log. `baselineGone` (534) only where the
  * section is held: with none approved, nothing is lost.
  *
- * `raws` are figures no output could trace (decision 682): they're taken out of
- * the run's own data first (repairInput), so everything built from the report
- * is built without them, and a section approved in the engine's own words that
- * quotes one takes the engine's text as rebuilt from the repaired data.
+ * `raws` are figures no output could trace (decision 682): each is masked where
+ * the run's own data writes it (maskInput), so everything built from the report
+ * shows the mask, and a section approved in the engine's own words that quotes
+ * one shows the mask too. The report's dataset stays the one the data as
+ * stored gives, so the mask makes nothing else untraceable.
  */
 export function approvedReport(dir: string, approved: ApprovedRun, raws: string[] = []): { report: BuiltReport; pseudonyms: Pseudonymiser; baselineGone: boolean; baselineUnapproved: boolean; engineText: Map<string, string>; repairs: SourceRepair[] } {
   const loaded = loadRun(dir);
   const { pseudonyms } = loaded;
-  const { input, repairs } = repairInput(loaded.input, raws);
   const held = approved.sections.some((s) => s.output === "raw_notes" && s.key === "progress");
-  const baselineUnapproved = input.baseline != null && !held;
+  const baselineUnapproved = loaded.input.baseline != null && !held;
   const baselineGone = loaded.baselineGone && held;
-  const report = buildReport({ ...input, ...(baselineUnapproved ? { baseline: null } : {}), overrides: approved.overrides, intake: approved.intake ?? input.intake, preparedBy: approved.preparedBy ?? null, benchmark: approved.benchmark ?? null });
-  // The engine's own text for each section, as built now: traceable by construction (decision 682).
+  const build = (input: ReportInput): BuiltReport => buildReport({ ...input, ...(baselineUnapproved ? { baseline: null } : {}), overrides: approved.overrides, intake: approved.intake ?? input.intake, preparedBy: approved.preparedBy ?? null, benchmark: approved.benchmark ?? null });
+  const { input, repairs } = maskInput(loaded.input, raws);
+  const report = build(input);
+  if (raws.length) report.dataset = build(loaded.input).dataset;
+  // The engine's own text for each section, as built now, from the masked data (decision 682).
   const engineText = new Map<string, string>();
   for (const built of Object.values(report.outputs)) for (const section of built.sections) engineText.set(`${built.output}:${section.key}`, currentBody(built, section.key));
   const patterns: RegExp[] = raws.map((raw) => heldPattern(raw));
@@ -279,11 +289,7 @@ export function approvedReport(dir: string, approved: ApprovedRun, raws: string[
     const versions = approved.versions.filter((v) => current.has(v.id));
     if (versions.length !== sections.length) throw new Error(`A section of the ${built.output.replace(/_/g, " ")} has no approved text, so no documents were made`);
     built.sections = sections;
-    built.versions = versions.map((v) => {
-      const section = sections.find((s) => s.currentVersionId === v.id)!;
-      const engine = engineText.get(`${built.output}:${section.key}`);
-      return v.source === "engine" && engine !== undefined && patterns.some((p) => p.test(v.body)) ? { ...v, body: engine } : v;
-    });
+    built.versions = versions.map((v) => (v.source === "engine" && raws.length ? { ...v, body: maskText(v.body, patterns).text } : v));
   }
   return { report, pseudonyms, baselineGone, baselineUnapproved, engineText, repairs };
 }
@@ -297,12 +303,12 @@ const kindOf = (raw: string, set: FigureSet): string => extractFigures(raw, { la
  * Decision 682, items 3 and 4. Each section whose approved text isn't the
  * engine's is checked again as the page prints it, against the set every
  * output is checked with: the same function on the same text. One that fails
- * is printed in the engine's own text for it, rebuilt now, and said so; with
- * `all`, every one is (a heavy repair). A consultant's edit is quoted by the
- * sentences they typed that fail, as typed. Changes the report in place; the
- * console's versions are untouched.
+ * is printed in the engine's own text for that section, as built now, and said
+ * so; no other section changes. A consultant's edit is quoted by the sentences
+ * they typed that fail, as typed. Changes the report in place; the console's
+ * versions are untouched.
  */
-export function fallBackSections(report: BuiltReport, pseudonyms: Pseudonymiser, engineText: Map<string, string>, set: FigureSet, all = false): SectionFallback[] {
+export function fallBackSections(report: BuiltReport, pseudonyms: Pseudonymiser, engineText: Map<string, string>, set: FigureSet): SectionFallback[] {
   const fellBack: SectionFallback[] = [];
   for (const built of Object.values(report.outputs)) {
     for (const section of built.sections) {
@@ -310,7 +316,7 @@ export function fallBackSections(report: BuiltReport, pseudonyms: Pseudonymiser,
       const engine = engineText.get(`${built.output}:${section.key}`);
       if (!version || version.source === "engine" || engine === undefined) continue;
       const outcome = checkNumbers(asPrinted(version.body, pseudonyms), set);
-      if (outcome.passed && !all) continue;
+      if (outcome.passed) continue;
       built.versions[built.versions.indexOf(version)] = { ...version, body: engine, source: "engine" };
       const kinds: Record<string, number> = {};
       for (const u of outcome.unmatched) kinds[kindOf(u.raw, set)] = (kinds[kindOf(u.raw, set)] ?? 0) + 1;
@@ -322,7 +328,7 @@ export function fallBackSections(report: BuiltReport, pseudonyms: Pseudonymiser,
         title: section.title,
         source: version.source,
         kinds,
-        ...(version.source === "consultant_edit" && !outcome.passed ? { words: typed.length ? typed : [version.body.trim().slice(0, 200)] } : {}),
+        ...(version.source === "consultant_edit" ? { words: typed.length ? typed : [version.body.trim().slice(0, 200)] } : {}),
       });
     }
   }
@@ -350,7 +356,7 @@ function sectionHolding(report: BuiltReport, pseudonyms: Pseudonymiser, set: Fig
   return undefined;
 }
 
-/** Text a Word file shows, from its document part. Enough to see whether a figure is in it. */
+/** Text a Word file shows, from its document part. */
 function docxWords(path: string): string {
   const zip = unzipSync(readFileSync(path));
   return Object.entries(zip).filter(([name]) => /^word\/(document|header\d*|footer\d*)\.xml$/.test(name)).map(([, bytes]) => strFromU8(bytes).replace(/<[^>]+>/g, " ")).join(" ");
@@ -364,8 +370,20 @@ function xlsxWords(path: string): string {
 
 const unescape = (text: string): string => text.replace(/&#39;|&apos;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
 
-/** At most this many details are left out of one document; past it, or in the one-pager at all, the repair is heavy. */
-export const LEFT_OUT_CAP = 3;
+/**
+ * What a make still holds, from the PDFs' pages and the microsite's alike: the
+ * repair loop masks both, so a figure only the microsite prints is repaired
+ * too, never left to cost the microsite. A check that failed to run isn't a
+ * figure to mask.
+ */
+export function toRepair(layout: Layouts, siteMisses: Array<{ raw: string }>): Array<{ document: string; page: number; raw: string }> {
+  return [...heldRaws(layout), ...siteMisses.map((s) => ({ document: MICROSITE, page: 0, raw: s.raw }))].filter((h) => h.raw !== "(whole text)");
+}
+
+/** More masks than this in one document, or any on the one-pager, marks the repair heavy. */
+export const MASK_CAP = 3;
+
+type Doc = "executive" | "full" | "ceo";
 
 export async function renderReleased(dir: string, approved: ApprovedRun, outDir: string): Promise<ReleasedDocuments | RefusedDocuments> {
   const folder = resolve(dir);
@@ -383,67 +401,60 @@ export async function renderReleased(dir: string, approved: ApprovedRun, outDir:
   };
   const paths = { rawNotes: files.raw_notes, executive: files.executive_summary, full: files.full_health_check, ceo: files.ceo_one_pager, kit: files.readout_kit, layout: join(out, OUTPUT_FILES.layout) };
 
-  // One make: the report from the run's data less every figure found untraceable so far, its sections
-  // checked and fallen back, its pages printed and checked, and its microsite pages checked, all against one set.
-  const make = async (raws: string[], heavy: boolean) => {
+  // One make: the report with every figure found untraceable so far masked in the data, its sections checked
+  // and fallen back, its pages printed (with any page-level masks) and checked, and its microsite pages checked.
+  const make = async (raws: string[], pageRaws: string[]) => {
     const built = approvedReport(folder, approved, raws);
     if (built.report.refused.length > 0) return { refused: built.report.refused };
     mkdirSync(out, { recursive: true, mode: 0o700 });
     const set = pageDataset(built.report.dataset, built.pseudonyms);
-    const fellBack = fallBackSections(built.report, built.pseudonyms, built.engineText, set, heavy);
-    const layout: PrintedLayout = await printDocuments(built.report, built.pseudonyms, paths);
+    const fellBack = fallBackSections(built.report, built.pseudonyms, built.engineText, set);
+    const masks: Record<Doc, number> = { executive: 0, full: 0, ceo: 0 };
+    const pageMasks: Record<Doc, number> = { executive: 0, full: 0, ceo: 0 };
+    const layout: PrintedLayout = await printDocuments(built.report, built.pseudonyms, paths, (html, doc) => {
+      const page = maskPage(html, pageRaws);
+      pageMasks[doc] = page.masked;
+      masks[doc] = masksIn(page.html);
+      return withheldNote(page.html);
+    });
     let site: { ok: true; pages: MicrositePages["pages"] } | { ok: false; reason: string };
     try {
-      site = { ok: true, pages: micrositePages(built.report, built.pseudonyms) };
+      site = { ok: true, pages: micrositePages(built.report, built.pseudonyms).map((p) => ({ ...p, html: maskPage(p.html, pageRaws).html })) };
     } catch (err) {
       site = { ok: false, reason: err instanceof Error ? err.message : "The pages couldn't be built" };
     }
     const siteMisses = site.ok ? micrositeMisses(site.pages, built.report, built.pseudonyms) : [];
-    return { ...built, set, fellBack, layout, site, siteMisses };
+    return { ...built, set, fellBack, layout, site, siteMisses, masks, pageMasks };
   };
+  type Made = Exclude<Awaited<ReturnType<typeof make>>, { refused: unknown }>;
 
   const raws: string[] = [];
+  const pageRaws: string[] = [];
   const firstSeen: Array<{ document: string; page: number; raw: string }> = [];
-  // Every document each was held in, for the cap: a figure first seen in the summary may be on the one-pager too.
-  const heldIn: Array<{ document: string; raw: string }> = [];
-  let heavy = false;
-  let made = await make(raws, heavy);
-  if ("refused" in made) return { refused: made.refused! };
-  // Whatever is still held in the engine's own text is taken out of the run's data, and everything is made again.
-  const absorb = (m: Exclude<typeof made, { refused: unknown }>): boolean => {
-    const found = [...heldRaws(m.layout), ...m.siteMisses.map((s: { raw: string }) => ({ document: MICROSITE, page: 0, raw: s.raw }))].filter((h) => h.raw !== "(whole text)" && !raws.includes(h.raw));
-    for (const h of found) {
-      if (!heldIn.some((x) => x.document === h.document && x.raw === h.raw)) heldIn.push(h);
-      if (raws.includes(h.raw)) continue;
-      raws.push(h.raw);
-      firstSeen.push(h);
-    }
-    return found.length > 0;
+  const held = (m: Made) => toRepair(m.layout, m.siteMisses);
+  const note = (found: Array<{ document: string; page: number; raw: string }>): void => {
+    for (const h of found) if (!firstSeen.some((x) => x.raw === h.raw)) firstSeen.push(h);
   };
-  const repairRounds = async (): Promise<void> => {
-    for (let round = 0; round < REPAIR_ROUNDS; round++) {
-      if (!absorb(made as Exclude<typeof made, { refused: unknown }>)) return;
-      made = await make(raws, heavy);
-    }
-  };
-  await repairRounds();
-  if ("refused" in made) return { refused: made.refused! };
-  // Past the cap, in the one-pager at all, or with more than a quarter of a document's sections fallen back,
-  // the documents are made from the engine's own text alone (decision 682, item 7).
-  const perDocument = (doc: string): number => heldIn.filter((h) => h.document === doc).length;
-  const fellBackShare = Object.values(made.report.outputs).some((b) => b.sections.length > 0 && (made as { fellBack: SectionFallback[] }).fellBack.filter((f) => f.output === b.output).length * 4 > b.sections.length);
-  if (Object.values(DOCUMENT_NAMES).some((d) => perDocument(d) > LEFT_OUT_CAP) || perDocument(DOCUMENT_NAMES.ceo) > 0 || fellBackShare) {
-    heavy = true;
-    // The sections that fell back for a reason keep it; heavy adds the rest.
-    const before = made.fellBack;
-    made = await make(raws, heavy);
-    await repairRounds();
-    if ("refused" in made) return { refused: made.refused! };
-    made.fellBack = made.fellBack.map((f) => before.find((b) => b.output === f.output && b.key === f.key) ?? f);
+  const first = await make(raws, pageRaws);
+  if ("refused" in first) return { refused: first.refused! };
+  let made: Made = first;
+  // Masked in the run's data first, twice at most; what no stored field holds is then masked where it's printed.
+  for (let round = 0; round < REPAIR_ROUNDS; round++) {
+    const found = held(made).filter((h) => !raws.includes(h.raw));
+    if (found.length === 0) break;
+    note(found);
+    raws.push(...new Set(found.map((h) => h.raw)));
+    made = (await make(raws, pageRaws)) as Made;
+  }
+  const left = held(made).filter((h) => !pageRaws.includes(h.raw));
+  if (left.length) {
+    note(left);
+    pageRaws.push(...new Set(left.map((h) => h.raw)));
+    made = (await make(raws, pageRaws)) as Made;
   }
   const { report, pseudonyms, set, layout, site, siteMisses } = made;
 
-  // The rest of the outputs, made from the same repaired report, so they're under the same gate as the decks (rule 10).
+  // The rest of the outputs, made from the same masked report, so they're under the same gate as the decks (rule 10).
   writeActionFiles(report, pseudonyms, folder, { workbook: files.action_lists, tickets: files.tickets });
   const study = await renderCaseStudyDocx(report, pseudonyms);
   const caseStudy = study ? join(out, "case-study-draft.docx") : undefined;
@@ -457,53 +468,54 @@ export async function renderReleased(dir: string, approved: ApprovedRun, outDir:
     }
   }
 
-  // The final check over every output (decision 682, item 1). The PDFs and the microsite are checked whole
-  // against the set. The Word files, the action lists, the tickets and the digest hold record names, ids,
-  // references and queries by design, which no dataset holds, so they can't be checked whole: each is
-  // checked for every figure the make took out, which must be in none of them.
-  const held = heldFigures(layout).map((h, i) => {
+  // The final check (decision 682, item 1). The PDFs are checked whole: anything still held fails the make, named.
+  const stillHeld: HeldFigure[] = heldFigures(layout).map((h, i) => {
     const section = sectionHolding(report, pseudonyms, set, heldRaws(layout)[i]!.raw);
     return section ? { ...h, section } : h;
   });
-  for (const miss of siteMisses) held.push({ document: MICROSITE, page: 0, ...shownFigure(miss.raw), reason: "can't be traced to the data" });
+  // The Word files, the action lists and the tickets hold record names, ids, references and queries no dataset
+  // holds, so they can't be checked whole. They're made from the masked report; a figure masked in the data
+  // still showing in one of them is said in the log, never a reason to hold the make: a bare "4" can be a
+  // record's "Step 4".
   const patterns: RegExp[] = raws.map((raw) => heldPattern(raw));
+  const stillIn: string[] = [];
   const elsewhere: Array<[string, () => string]> = [
-    ["The raw notes", () => docxWords(files.raw_notes)],
-    ["The readout kit", () => docxWords(files.readout_kit)],
-    ["The action lists", () => xlsxWords(files.action_lists)],
-    ["The tickets", () => readFileSync(files.tickets, "utf8")],
-    ...(caseStudy ? [["The case study draft", () => docxWords(caseStudy)] as [string, () => string]] : []),
+    ["the raw notes", () => docxWords(files.raw_notes)],
+    ["the readout kit", () => docxWords(files.readout_kit)],
+    ["the action lists", () => xlsxWords(files.action_lists)],
+    ["the tickets", () => readFileSync(files.tickets, "utf8")],
+    ...(caseStudy ? [["the case study draft", () => docxWords(caseStudy)] as [string, () => string]] : []),
   ];
   for (const [document, read] of elsewhere) {
-    let text: string;
     try {
-      text = unescape(read());
+      const text = unescape(read());
+      if (patterns.some((p) => new RegExp(p.source, p.flags.replace("g", "")).test(text))) stillIn.push(document);
     } catch {
-      held.push({ document, page: 0, figure: "(whole text)", reason: "this file couldn't be read to check it" });
-      continue;
+      stillIn.push(document);
     }
-    raws.forEach((raw, i) => {
-      if (patterns[i]!.test(text)) held.push({ document, page: 0, ...shownFigure(raw), reason: "taken out of the reports but still here" });
-    });
   }
-  // A digest still quoting one is withheld: the connector gets none rather than an untraceable figure.
-  const made_ = digest;
-  if (made_?.ok && patterns.some((p) => p.test(JSON.stringify(made_.digest)))) digest = { ok: false, error: "UntraceableFigure" };
 
-  const repairs = made.repairs;
   const leftOut: LeftOut[] = firstSeen.map((h) => {
-    const at = repairs.find((r) => r.raw === h.raw);
-    return { document: h.document, page: h.page, kind: kindOf(h.raw, set), ...(at?.ruleId ? { ruleId: at.ruleId } : {}), ...(at?.metricId ? { metricId: at.metricId } : {}), ...(at ? { field: at.field } : {}) };
+    const at = made.repairs.find((r) => r.raw === h.raw);
+    return { document: h.document, page: h.page, kind: kindOf(h.raw, set), ...(at?.ruleId ? { ruleId: at.ruleId } : {}), ...(at?.metricId ? { metricId: at.metricId } : {}), ...(at?.stepId ? { stepId: at.stepId } : {}), field: at ? at.field : "page" };
   });
   const fellBack = made.fellBack;
-  const microsite: ReleasedDocuments["microsite"] = site.ok ? (siteMisses.length ? { ok: false, reason: "A microsite page has a figure the number check can't trace, so the microsite wasn't made" } : { ok: true, pages: { pages: site.pages } }) : site;
+  // A microsite still failing its own check isn't made, as before this decision; the documents are, and the warning and alert say so.
+  const micrositeHeld = site.ok && siteMisses.length > 0;
+  const microsite: ReleasedDocuments["microsite"] = site.ok ? (micrositeHeld ? { ok: false, reason: "A microsite page has a figure the number check can't trace, so the microsite wasn't made" } : { ok: true, pages: { pages: site.pages } }) : site;
+  const fallBackHeavy = Object.values(report.outputs).some((b) => b.sections.length > 0 && fellBack.filter((f) => f.output === b.output).length * 4 > b.sections.length);
+  const heavy = made.masks.ceo > 0 || made.masks.executive > MASK_CAP || made.masks.full > MASK_CAP || fallBackHeavy;
+  const any = fellBack.length > 0 || leftOut.length > 0 || micrositeHeld || Object.values(made.masks).some((n) => n > 0);
   return {
     files,
     warnings: layoutWarnings(layout),
-    held,
+    held: stillHeld,
     fellBack,
     leftOut,
-    repairs: heavy ? "heavy" : fellBack.length || leftOut.length ? "some" : "none",
+    repairs: heavy ? "heavy" : any ? "some" : "none",
+    masks: made.masks,
+    ...(micrositeHeld ? { micrositeHeld: true as const } : {}),
+    ...(stillIn.length ? { stillIn } : {}),
     microsite,
     ...(caseStudy ? { caseStudy } : {}),
     ...(digest ? { digest } : {}),

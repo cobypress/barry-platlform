@@ -302,15 +302,15 @@ export async function printDocuments(
   pseudonyms: Pseudonymiser,
   paths: { rawNotes: string; executive: string; full: string; ceo: string; kit: string; layout: string },
   /** Applied to each page's HTML before it's printed and checked: the documents job's repair (DECISIONS.md 682). */
-  transform: (html: string) => string = (html) => html,
+  transform: (html: string, doc: "executive" | "full" | "ceo") => string = (html) => html,
 ): Promise<PrintedLayout> {
   const scope = pageDataset(report.dataset, pseudonyms);
   const browser = await launchBrowser();
   try {
-    const executive = await renderPdf(browser, transform(executiveHtml(report, pseudonyms)), { minPages: EXECUTIVE_PAGES.min, maxPages: executiveMaxPages(report), dataset: scope, carryOver: true });
-    const full = await renderPdf(browser, transform(fullReportHtml(report, pseudonyms)), { minPages: deckRangeFor(report.input.run).min, maxPages: deckRangeFor(report.input.run).max, dataset: scope, carryOver: true });
+    const executive = await renderPdf(browser, transform(executiveHtml(report, pseudonyms), "executive"), { minPages: EXECUTIVE_PAGES.min, maxPages: executiveMaxPages(report), dataset: scope, carryOver: true });
+    const full = await renderPdf(browser, transform(fullReportHtml(report, pseudonyms), "full"), { minPages: deckRangeFor(report.input.run).min, maxPages: deckRangeFor(report.input.run).max, dataset: scope, carryOver: true });
     // Exactly one page, or it isn't a one-pager.
-    const ceo = await renderPdf(browser, transform(onePagerHtml(report, pseudonyms)), { minPages: ONE_PAGER_PAGES.min, maxPages: ONE_PAGER_PAGES.max, dataset: scope });
+    const ceo = await renderPdf(browser, transform(onePagerHtml(report, pseudonyms), "ceo"), { minPages: ONE_PAGER_PAGES.min, maxPages: ONE_PAGER_PAGES.max, dataset: scope });
     const pagesMatch = (result: typeof executive, name: string): LayoutProblem[] => {
       const printed = pdfPageCount(result.pdf);
       return printed === result.layout.pages ? [] : [{ page: 0, check: "page count", detail: `${name} printed ${printed} pages from ${result.layout.pages}` }];

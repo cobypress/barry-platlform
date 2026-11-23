@@ -1239,7 +1239,7 @@ describe("the org handbook", () => {
     assert.ok(!existsSync(join(deps.runsDir, RUN_ID, "documents", HANDBOOK_DOCX)));
   });
 
-  test("a make that repaired what it couldn't trace is made, tells the consultants in counts only, and says what it did (decision 682)", async () => {
+  test("a make that repaired what it couldn't trace is made, tells the consultants in counts only, and says what it did, a masked figure in a record row only logged (decision 682)", async () => {
     const drive = new MemoryDrive();
     const deps = withHandbook(jobInput(), drive);
     const alerts: string[] = [];
@@ -1249,16 +1249,19 @@ describe("the org handbook", () => {
       fellBack: [{ output: "executive_summary", key: "verdict", title: "Verdict", source: "consultant_edit", kinds: { identifier: 1 }, words: ["We saw Zeta9Flux."] }],
       leftOut: [{ document: "The full health check", page: 12, kind: "identifier", ruleId: "cfg.unassigned-layouts", field: "owner" }],
       repairs: "some",
+      masks: { executive: 0, full: 1, ceo: 0 },
+      stillIn: ["the action lists"],
     });
     const result = await processDocumentsJob(RUN_ID, deps, { final: true });
     assert.equal(result.outcome, "done");
-    assert.deepEqual(alerts, [`Run ${RUN_ID}'s documents were repaired as they were made: 0 drafted sections and 1 edited section in our own wording, 1 detail left out of our own text. See the run's Release tab.`]);
+    assert.deepEqual(alerts, [`Run ${RUN_ID}'s documents were made with some repairs: 0 drafted sections and 1 edited section in our own wording, 1 detail withheld in the reports. See the run's Release tab.`]);
     const made = deps.store.documents.get(RUN_ID)!.made!;
     assert.deepEqual(made.warnings.slice(0, 2), [
       '"Verdict" uses our own wording because what you wrote couldn\'t be traced to the data: "We saw Zeta9Flux.". Your edit is kept: correct it, approve it again and make the documents again.',
-      "We left 1 detail out of our own text because it couldn't be traced to the data, first seen in The full health check, page 12. That's ours to fix.",
+      "We withheld 1 detail of our own text because it couldn't be traced to the data, first seen in The full health check, page 12. That's ours to fix.",
     ]);
-    assert.ok(deps.lines.some((l) => /worked around a defect: 1 untraceable figure taken out of our own data, from cfg\.unassigned-layouts \(owner\)/.test(l)), JSON.stringify(deps.lines));
+    assert.ok(deps.lines.some((l) => /worked around a defect: 1 untraceable figure masked, from cfg\.unassigned-layouts \(owner\)/.test(l)), JSON.stringify(deps.lines));
+    assert.ok(deps.lines.some((l) => l === `Run ${RUN_ID}: a masked figure still shows in the action lists.`), "said in the log, and the make is done");
     assert.doesNotMatch(alerts.join(), /Zeta9Flux|Verdict/);
   });
 

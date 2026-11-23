@@ -11,10 +11,13 @@ import { ENGINE_WORDS, CODE_WORDS } from "../../numbercheck/engine-words.ts";
 import { scanEngineWords } from "../../numbercheck/engine-words-scan.ts";
 import type { PseudonymEntry } from "../../privacy/pseudonymiser.ts";
 import { Pseudonymiser } from "../../privacy/pseudonymiser.ts";
-import { asPrinted, renderReleased, repairWarnings, type ApprovedRun, type ReleasedDocuments } from "../render-released.ts";
-import { heldPattern, LEFT_OUT_SENTENCE, leaveOutSentences, repairInput, ROW_LEFT_OUT } from "../repair.ts";
-import { loadRun, OUTPUT_FILES, pageDataset } from "../render-run.ts";
-import { micrositeMisses } from "../../microsite/pages.ts";
+import { approvedReport, asPrinted, heldFigures, renderReleased, repairWarnings, toRepair, type ApprovedRun, type ReleasedDocuments } from "../render-released.ts";
+import { heldPattern, MASK, maskPage, maskText, withheldLine, withheldNote } from "../repair.ts";
+import { loadRun, OUTPUT_FILES, pageDataset, printDocuments } from "../render-run.ts";
+import { fullReportHtml } from "../full-report.ts";
+import { executiveHtml } from "../executive.ts";
+import { onePagerHtml } from "../one-pager.ts";
+import { micrositeMisses, pageText } from "../../microsite/pages.ts";
 import type { Finding, Metric, ReportSection, SectionVersion } from "../../schemas/index.ts";
 import { runFromRecording } from "../../testing/harness.ts";
 import { heldBackReason } from "../../worker/documents-job.ts";
@@ -109,13 +112,10 @@ describe("the cause of a name token: it passed when drafted and its name was hel
   });
 });
 
-describe("the documents are made from a repaired report, and every output is clean", () => {
-  test("engine text (an owner) in the full report, a Claude draft and a consultant's edit: repaired, and the word is in no output", async () => {
-    let id = "";
+describe("the documents are made from a masked report, and every output is clean", () => {
+  test("engine text (an owner), a Claude draft and a consultant's edit: the word is masked or falls back, and is in no output", async () => {
     const dir = folder(NAMED, (all, d) => {
-      id = issueAt(d, "last");
-      const f = all.find((x) => x.id === id)!;
-      f.owner = `${INVENTED} team`;
+      all.find((x) => x.id === issueAt(d, "last"))!.owner = `${INVENTED} team`;
     });
     const invented = `We saw ${INVENTED} on 4,321 deals on 2019-03-03, from x@example.com, https://example.org/a and [[user:U0999]].`;
     const result = await renderReleased(
@@ -132,71 +132,122 @@ describe("the documents are made from a repaired report, and every output is cle
     const outputs = everyOutput(dir, result);
     assert.deepEqual(outputs.numberProblems, [], "the final pages, checked again, hold nothing");
     assert.doesNotMatch(outputs.text, new RegExp(INVENTED), "nor does any other output");
-    assert.ok(result.microsite?.ok, "the microsite is made, repaired");
-    assert.ok(result.digest?.ok, "the digest is made, repaired");
-    assert.equal(result.repairs, "some");
-    assert.ok((result.leftOut ?? []).length >= 1 && (result.leftOut ?? []).every((l) => l.field === "owner" && l.ruleId && l.kind === "identifier"), JSON.stringify(result.leftOut));
+    assert.match(docx(result.files.raw_notes), /\(detail withheld\) team/, "the raw notes print the mask where the owner was");
+    assert.equal(result.stillIn, undefined);
+    assert.ok(result.microsite?.ok, "the microsite is made");
+    assert.ok(result.digest?.ok, "the digest is written");
+    assert.doesNotMatch(JSON.stringify(result.digest), new RegExp(INVENTED));
+    assert.notEqual(result.repairs, "none");
+    assert.ok((result.leftOut ?? []).length === 1 && result.leftOut![0]!.field === "owner" && result.leftOut![0]!.ruleId, JSON.stringify(result.leftOut));
     const fell = result.fellBack ?? [];
     assert.deepEqual(fell.map((f) => `${f.output}:${f.key}:${f.source}`), ["executive_summary:verdict:consultant_edit", "full_health_check:appendix:claude_draft"]);
     assert.deepEqual(fell[1]!.kinds, { identifier: 3, number: 1, date: 1, token: 1 });
-    // The consultant's sentence as typed, the ISO date included, and not the fine one.
-    assert.deepEqual(fell[0]!.words, [invented]);
-    assert.match(repairWarnings(fell, result.leftOut ?? [], result.repairs).join("\n"), /"[^"]+" uses our own wording because what you wrote couldn't be traced to the data: "We saw Zeta9Flux on 4,321 deals on 2019-03-03/);
+    assert.deepEqual(fell[0]!.words, [invented], "the consultant's sentence as typed, the ISO date included, and not the fine one");
+    assert.match(repairWarnings(fell, result.leftOut ?? []).join("\n"), /"[^"]+" uses our own wording because what you wrote couldn't be traced to the data: "We saw Zeta9Flux on 4,321 deals on 2019-03-03/);
   });
 
-  test("on the one-pager: the documents are made from our own wording alone, and marked heavy", async () => {
+  test("on the one-pager: the one-pager is made with its mask, and the repair is marked heavy", async () => {
     const dir = folder(NAMED, (all, d) => {
       all.find((x) => x.id === issueAt(d, "first"))!.owner = `${INVENTED} team`;
     });
-    const result = await renderReleased(dir, approved(dir, { "executive_summary:verdict": { body: "A sentence a consultant wrote, with nothing to trace.", source: "consultant_edit" } }), join(dir, "documents"));
+    const result = await renderReleased(dir, approved(dir), join(dir, "documents"));
     assert.ok(!("refused" in result));
     assert.deepEqual(result.held, []);
     assert.equal(result.repairs, "heavy");
+    assert.ok(result.masks!.ceo > 0);
+    assert.deepEqual(result.fellBack, [], "nothing else is replaced");
     assert.deepEqual(everyOutput(dir, result).numberProblems, []);
-    assert.doesNotMatch(everyOutput(dir, result).text, new RegExp(INVENTED));
-    const verdict = (result.fellBack ?? []).find((f) => f.key === "verdict")!;
-    assert.deepEqual([verdict.source, verdict.kinds, verdict.words], ["consultant_edit", {}, undefined], "fell back for the heavy repair, with nothing of theirs held");
   });
-});
 
-describe("every output is checked, not only the pages", () => {
-  test("a figure taken out of the report that a record row still prints holds the make, naming the action lists", async () => {
+  test("the repair loop takes what the microsite holds as it takes what the pages hold", () => {
+    const layout = { executive: { pages: 6, passed: false, problems: [{ page: 4, check: "number check", detail: "31.4: not in the data" }] }, full: { pages: 40, passed: true, problems: [] }, ceo: { pages: 1, passed: false, problems: [{ page: 1, check: "number check", detail: "(whole text): The number check failed to run: boom" }] } };
+    assert.deepEqual(toRepair(layout, [{ raw: INVENTED }]), [{ document: "The executive summary", page: 4, raw: "31.4" }, { document: "The microsite", page: 0, raw: INVENTED }]);
+  });
+
+  test("a masked figure a record row also prints is said in the log, never a reason to hold the make", async () => {
     const dir = folder(NAMED, (all, d) => {
-      all.find((x) => x.id === issueAt(d, "last"))!.owner = `${INVENTED} team`;
-      // The same word as a record's name in an action list, which the report's data doesn't hold.
+      all.find((x) => x.id === issueAt(d, "last"))!.owner = "Team 4417";
       const path = join(d, "action-lists.json");
       const lists = JSON.parse(readFileSync(path, "utf8")) as { lists: Array<{ object: string; rows: Array<{ name: string | null }> }> };
-      const list = lists.lists.find((l) => l.object !== "User" && l.rows.length > 0)!;
-      list.rows[0]!.name = `${INVENTED} Ltd`;
+      lists.lists.find((l) => l.object !== "User" && l.rows.length > 0)!.rows[0]!.name = "Step 4417";
       writeFileSync(path, JSON.stringify(lists));
     });
     const result = await renderReleased(dir, approved(dir), join(dir, "documents"));
     assert.ok(!("refused" in result));
-    assert.deepEqual(result.held.map((h) => [h.document, h.figure]), [["The action lists", "an identifier"]]);
+    assert.deepEqual(result.held, []);
+    assert.deepEqual(result.stillIn, ["the action lists"]);
+    assert.ok(result.digest?.ok, "a held bare number elsewhere never withholds the digest");
+    assert.doesNotMatch(JSON.stringify(result.digest), /Team 4417/);
+  });
+
+  test("what no stored field holds is masked where it's printed: a date the page rewrote", async () => {
+    const dir = folder(NAMED, (all, d) => {
+      all.find((x) => x.id === issueAt(d, "last"))!.owner = "Since 2019-03-03";
+    });
+    const result = await renderReleased(dir, approved(dir), join(dir, "documents"));
+    assert.ok(!("refused" in result));
+    assert.deepEqual(result.held, []);
+    assert.deepEqual(everyOutput(dir, result).numberProblems, []);
+    assert.deepEqual((result.leftOut ?? []).map((l) => [l.kind, l.field]), [["date", "page"]]);
+  });
+
+  test("a name a token restores to that reads as a figure: masked where it's printed", () => {
+    const html = `<p>Most sits with 3M. We found 3M records worth £3M.</p>`;
+    assert.equal(maskPage(html, ["3M"]).html, `<p>Most sits with ${MASK}. We found ${MASK} records worth £3M.</p>`);
+  });
+
+  test("fixed text in a template, or a survey figure built inside the report: masked where it's printed, and the pages pass", async () => {
+    const { input, pseudonyms } = loadRun(folder());
+    const report = buildReport(input);
+    const out = mkdtempSync(join(tmpdir(), "hc-repair-out-"));
+    const paths = { rawNotes: join(out, "n.docx"), executive: join(out, "e.pdf"), full: join(out, "f.pdf"), ceo: join(out, "c.pdf"), kit: join(out, "k.docx"), layout: join(out, "l.json") };
+    const plant = (html: string): string => html.replace("</h2>", "</h2><p>Our fixed text names OAuth9Zeta here, beside 4,321 of them. It stays.</p>");
+    const held = heldFigures(await printDocuments(report, pseudonyms, paths, plant));
+    assert.ok(held.some((h) => h.figure === "an identifier") && held.some((h) => h.figure === "4,321"), JSON.stringify(held));
+    assert.deepEqual(heldFigures(await printDocuments(report, pseudonyms, paths, (html) => withheldNote(maskPage(plant(html), ["OAuth9Zeta", "4,321"]).html))), []);
   });
 });
 
-describe("taking out is precise", () => {
-  test("a held figure is matched whole, each time: never inside a larger number, a percentage, an amount or a word", () => {
-    const four = heldPattern("4");
-    assert.equal(leaveOutSentences("We found 4,321 rows. It is 4.5 or 4% or £4 or A4. Only 4 here.", [four]), `We found 4,321 rows. It is 4.5 or 4% or £4 or A4. ${LEFT_OUT_SENTENCE}`);
-    assert.equal(leaveOutSentences("OAUTH9ZETA one. Two. oauth9zeta three.", [heldPattern("OAuth9Zeta")]), `${LEFT_OUT_SENTENCE} Two. ${LEFT_OUT_SENTENCE}`, "an identifier in any case, as the check compares it");
-    assert.equal(leaveOutSentences("£1.99m once. £1.99M twice.", [heldPattern("£1.99m")]), `${LEFT_OUT_SENTENCE} £1.99M twice.`, "anything else as written");
-    assert.equal(checkNumbers(`${LEFT_OUT_SENTENCE} ${ROW_LEFT_OUT}`, buildDataset({ findings: [], metrics: [] })).checked, 0, "the fixed sentences hold no figure");
+describe("masking changes the token and nothing else", () => {
+  const strip = (html: string): string[] => extractFigures(pageText(html)).figures.map((f) => f.raw);
+  const withPaths = (dir: string, change: (won: Extract<Metric, { status: "measured" }>) => void): void => {
+    const path = join(dir, "metrics.json");
+    const metrics = JSON.parse(readFileSync(path, "utf8")) as Metric[];
+    const won = metrics.find((m) => m.id === "historic.path_to_won") as Extract<Metric, { status: "measured" }>;
+    assert.ok(won && won.status === "measured" && won.segments.length > 1, "the synthetic org has paths to won");
+    change(won);
+    writeFileSync(path, JSON.stringify(metrics));
+  };
+  const RAW = "Q9Zeta";
+
+  test("the first path to won masked: every figure on every page is as it was, but the masked word", () => {
+    const dir = folder();
+    withPaths(dir, (won) => void (won.segments[0]!.key = `${won.segments[0]!.key} ${RAW}`));
+    const plain = approvedReport(dir, approved(dir));
+    const masked = approvedReport(dir, approved(dir), [RAW]);
+    for (const html of [fullReportHtml, executiveHtml, onePagerHtml]) {
+      const before = strip(html(plain.report, plain.pseudonyms)).filter((f) => f !== RAW);
+      assert.deepEqual(strip(html(masked.report, masked.pseudonyms)), before);
+    }
+    assert.ok(fullReportHtml(masked.report, masked.pseudonyms).includes(MASK));
+    assert.deepEqual(masked.repairs, [{ raw: RAW, metricId: "historic.path_to_won", field: "segments.key" }]);
   });
 
-  test("a table row holding one is dropped whole and the table says so once; a finding's text loses only its sentence", () => {
-    const { input } = loadRun(folder());
-    const metric = input.metrics.find((m): m is Extract<Metric, { status: "measured" }> => m.status === "measured" && m.segments.length > 1)!;
-    const key = metric.segments[0]!.key;
-    const raw = "Q9Zeta";
-    const planted = { ...input, metrics: input.metrics.map((m) => (m.id === metric.id ? { ...metric, segments: metric.segments.map((s, i) => (i === 0 ? { ...s, key: `${key} ${raw}` } : s)) } : m)) };
-    const { input: repaired, repairs } = repairInput(planted, [raw]);
-    const after = repaired.metrics.find((m) => m.id === metric.id) as typeof metric;
-    assert.equal(after.segments.length, metric.segments.length - 1);
-    assert.deepEqual(after.exclusions.filter((e) => e === ROW_LEFT_OUT), [ROW_LEFT_OUT]);
-    assert.deepEqual(repairs, [{ raw, metricId: metric.id, field: "segments" }]);
-    assert.doesNotMatch(JSON.stringify(repaired), /Q9Zeta/);
+  test("the only path to won masked: no crash, and the row is still there", () => {
+    const dir = folder();
+    withPaths(dir, (won) => void (won.segments = [{ ...won.segments[0]!, key: `${won.segments[0]!.key} ${RAW}` }]));
+    const masked = approvedReport(dir, approved(dir), [RAW]);
+    const html = fullReportHtml(masked.report, masked.pseudonyms);
+    assert.ok(html.includes(MASK) && !html.includes(RAW));
+  });
+
+  test("a held figure is matched whole, each time, in any script: never inside a larger number, a percentage, an amount or a word", () => {
+    assert.equal(maskText("We found 4,321 rows. It is 4.5 or 4% or £4 or A4 or café4. Only 4 here, and 4.", [heldPattern("4")]).text, `We found 4,321 rows. It is 4.5 or 4% or £4 or A4 or café4. Only ${MASK} here, and ${MASK}.`);
+    assert.equal(maskText("OAUTH9ZETA one, oauth9zeta two.", [heldPattern("OAuth9Zeta")]).text, `${MASK} one, ${MASK} two.`, "an identifier in any case, as the check compares it");
+    assert.equal(maskText("£1.99m once. £1.99M twice.", [heldPattern("£1.99m")]).text, `${MASK} once. £1.99M twice.`, "anything else as written");
+    assert.equal(checkNumbers(MASK, buildDataset({ findings: [], metrics: [] })).checked, 0, "the mask is never read as a figure");
+    assert.equal(withheldLine(1), "A detail is withheld in 1 place because we couldn't trace it to your data.");
+    assert.match(withheldNote(`<section class="page"><p>${MASK}</p><div class="footer" data-chrome><span>Black Cloud Barometer</span></div></section>`), /<span>Black Cloud Barometer \| A detail is withheld in 1 place because we couldn&#39;t trace it to your data\.<\/span>/);
   });
 });
 

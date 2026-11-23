@@ -5,7 +5,7 @@ import { refusalReason, refusalSummary } from "../narrative/overrides.ts";
 import type { BenchmarkInput } from "../benchmark/compare.ts";
 import { AlreadyContributed, CONSENT_FILE, contributeBenchmark } from "../benchmark/export.ts";
 import { longDate } from "../render/format.ts";
-import { baselineRefusedSummary, describeHeld, renderReleased, repairWarnings, type DocumentKey, type HeldFigure, type LeftOut, type ReleasedDocuments, type SectionFallback } from "../render/render-released.ts";
+import { baselineRefusedSummary, describeHeld, renderReleased, repairWarnings, type DocumentKey, type HeldFigure, type ReleasedDocuments } from "../render/render-released.ts";
 import { safeReason, type Attempt, type JobOutcome, type WorkerDeps } from "./deps.ts";
 import type { DocumentDrive, DriveItem } from "./drive.ts";
 import { withJobLock } from "./lock.ts";
@@ -293,17 +293,17 @@ async function benchmarkFor(dir: string, deps: WorkerDeps, log: (line: string) =
  * 682, item 7): the run, how heavy, and counts. No title, figure or word of the
  * customer's. Never a reason to fail the make.
  */
-export function repairAlert(runId: string, repairs: "some" | "heavy", fellBack: SectionFallback[], leftOut: LeftOut[]): string {
-  const edits = fellBack.filter((f) => f.source === "consultant_edit" && f.words).length;
-  const drafts = fellBack.filter((f) => f.source !== "consultant_edit" && Object.keys(f.kinds).length).length;
-  const counts = [`${drafts} drafted ${drafts === 1 ? "section" : "sections"} and ${edits} edited ${edits === 1 ? "section" : "sections"} in our own wording`, `${leftOut.length} ${leftOut.length === 1 ? "detail" : "details"} left out of our own text`];
-  return repairs === "heavy"
-    ? `Run ${runId}'s documents were made from our own wording alone: ${counts.join(", ")}. See the run's Release tab.`
-    : `Run ${runId}'s documents were repaired as they were made: ${counts.join(", ")}. See the run's Release tab.`;
+export function repairAlert(runId: string, printed: Pick<ReleasedDocuments, "repairs" | "fellBack" | "masks" | "micrositeHeld">): string {
+  const fellBack = printed.fellBack ?? [];
+  const edits = fellBack.filter((f) => f.source === "consultant_edit").length;
+  const drafts = fellBack.length - edits;
+  const masks = Object.values(printed.masks ?? {}).reduce((a, b) => a + b, 0);
+  const counts = [`${drafts} drafted ${drafts === 1 ? "section" : "sections"} and ${edits} edited ${edits === 1 ? "section" : "sections"} in our own wording`, `${masks} ${masks === 1 ? "detail" : "details"} withheld in the reports`, ...(printed.micrositeHeld ? ["no microsite"] : [])];
+  return `Run ${runId}'s documents were made with ${printed.repairs === "heavy" ? "heavy" : "some"} repairs: ${counts.join(", ")}. See the run's Release tab.`;
 }
 
-async function alertRepairs(runId: string, repairs: "some" | "heavy", fellBack: SectionFallback[], leftOut: LeftOut[], deps: WorkerDeps, log: (line: string) => void): Promise<void> {
-  const line = repairAlert(runId, repairs, fellBack, leftOut);
+async function alertRepairs(runId: string, printed: ReleasedDocuments, deps: WorkerDeps, log: (line: string) => void): Promise<void> {
+  const line = repairAlert(runId, printed);
   log(line);
   try {
     await deps.alert?.(line);
@@ -431,15 +431,17 @@ async function documentsLocked(runId: string, deps: WorkerDeps, attempt: Attempt
       log(`Run ${runId}'s documents weren't uploaded. ${summary}`);
       return fail(heldBackReason(printed.held), summary);
     }
-    // Repaired, not held (decision 682): a defect in our own data worked around is logged by run id, with rule and metric ids only.
+    // Repaired, not held (decision 682): a defect in our own text worked around is logged by run id, with rule and metric ids only.
     const leftOut = printed.leftOut ?? [];
     if (leftOut.length) {
-      const where = [...new Set(leftOut.flatMap((l) => (l.ruleId ?? l.metricId ? [`${l.ruleId ?? l.metricId} (${l.field})`] : [])))];
-      log(`Run ${runId}: worked around a defect: ${leftOut.length} untraceable ${leftOut.length === 1 ? "figure" : "figures"} taken out of our own data${where.length ? `, from ${where.join(", ")}` : ", from fixed text"}.`);
+      const where = [...new Set(leftOut.map((l) => `${l.ruleId ?? l.metricId ?? l.stepId ?? "fixed text"} (${l.field})`))];
+      log(`Run ${runId}: worked around a defect: ${leftOut.length} untraceable ${leftOut.length === 1 ? "figure" : "figures"} masked, from ${where.join(", ")}.`);
     }
     if (printed.fellBack?.length) log(`Run ${runId}: ${printed.fellBack.length} ${printed.fellBack.length === 1 ? "section" : "sections"} printed in our own wording.`);
+    if (printed.stillIn?.length) log(`Run ${runId}: a masked figure still shows in ${printed.stillIn.join(", ")}.`);
+    if (printed.micrositeHeld) log(`Run ${runId}: the microsite wasn't made, because a page still held a figure after the repair.`);
     // Some or heavy: one line to the consultants, counts only, never the customer's text (decision 682, item 7).
-    if (printed.repairs === "some" || printed.repairs === "heavy") await alertRepairs(runId, printed.repairs, printed.fellBack ?? [], leftOut, deps, log);
+    if (printed.repairs === "some" || printed.repairs === "heavy") await alertRepairs(runId, printed, deps, log);
     // Neither refused nor held: these rows are the ones the documents print. None, and nothing is written or removed.
     if (input.overrides.length > 0) keepOverrides(dir, input.overrides);
     const handbook = await makeHandbook(dir, join(dir, "documents"), clientName, input.run.asOf, summariesOn ? (handbookSummaries ?? null) : null, deps.renderHandbook);
@@ -479,7 +481,7 @@ async function documentsLocked(runId: string, deps: WorkerDeps, attempt: Attempt
     // None to write takes away an earlier make's, whose figures these documents may have corrected.
     const digest = printed.digest?.ok ? printed.digest.digest : null;
     // The survey's metrics as these documents print them, with their row: a run drafted before the run's results held them gets them now (DECISIONS.md 645).
-    const saved = await deps.store.saveDocuments(runId, { at: now(), clientName, folderName: folder.name, driveFolderId: folder.id, driveFolderUrl: folder.url, files, warnings: [...repairWarnings(printed.fellBack ?? [], leftOut, printed.repairs), ...printed.warnings, ...(handbook.ok ? [] : [handbook.warning])] }, digest, printed.surveyMetrics);
+    const saved = await deps.store.saveDocuments(runId, { at: now(), clientName, folderName: folder.name, driveFolderId: folder.id, driveFolderUrl: folder.url, files, warnings: [...repairWarnings(printed.fellBack ?? [], leftOut, printed.micrositeHeld), ...printed.warnings, ...(handbook.ok ? [] : [handbook.warning])] }, digest, printed.surveyMetrics);
     // The folder follows the rows, and only once they're written: a row the console moved on meanwhile changed neither.
     if (saved && printed.surveyMetrics) keepSurveyMetrics(dir, printed.surveyMetrics);
     log(`Documents for ${runId} are in Drive${printed.warnings.length ? `, with ${printed.warnings.length} layout warnings` : ""}.`);
