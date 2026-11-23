@@ -97,7 +97,19 @@ export type Figure = { metricKey: string; unit: Unit; value: number };
 export type Skipped = { metricKey: string; reason: string };
 
 /** `lintTotals` is the run's lint-totals.json, or null when it has none. */
-type Read = { metrics: Metric[]; scores: Score[]; findings: Finding[]; lintTotals?: LintTotals | null };
+type Read = { metrics: Metric[]; scores: Score[]; findings: Finding[]; lintTotals?: LintTotals | null; orgSettings?: boolean };
+
+/**
+ * On a run whose calibration was read from the org's settings (DECISIONS.md
+ * 693), a figure resting on the open stages' unconfirmed order, on several
+ * record types read as one, or on a stage's meaning taken from Salesforce's
+ * flags would go into the set with no note, which a benchmark row can't carry:
+ * it is left out. Every other figure goes in, as the owner's policy is to store broadly.
+ */
+const UNCONFIRMED: readonly RegExp[] = [/We took the order of your open stages from Salesforce's own stage settings/, /which may be separate sales processes/, /so we used Salesforce's own setting for/];
+const ORDER_METRICS: ReadonlySet<string> = new Set(["historic.stage_conversion"]);
+export const UNCONFIRMED_SKIP = "This figure rests on a reading of the org's stages that no person has confirmed, so it's left out of the benchmark set.";
+const unconfirmed = (texts: readonly string[]): boolean => texts.some((t) => UNCONFIRMED.some((p) => p.test(t)));
 
 /** The run's PMD totals, or null when it had no step. A file that doesn't parse is refused rather than read as not measured. */
 export function readLintTotals(dir: string): LintTotals | null {
@@ -117,6 +129,7 @@ function figureOf(input: Read, unit: Unit, source: Source): { value: number } | 
     const metric = input.metrics.find((m) => m.id === source.id);
     if (!metric) return { reason: "The run has no such metric." };
     if (metric.status !== "measured") return { reason: metric.reason };
+    if (input.orgSettings && (ORDER_METRICS.has(metric.id) || unconfirmed(metric.assumptions))) return { reason: UNCONFIRMED_SKIP };
     // A changed unit would put a figure in the wrong comparison, so it's left out.
     if (metric.unit !== unit) return { reason: `The run measured this in ${metric.unit}, not ${unit}.` };
     return { value: metric.value };
@@ -137,6 +150,7 @@ function figureOf(input: Read, unit: Unit, source: Source): { value: number } | 
   const results = input.findings.filter((f) => f.ruleId === source.ruleId);
   const measured = results.filter((f) => f.status !== "not_measurable");
   if (measured.length === 0) return { reason: results[0]?.notMeasurableReason ?? "The run has no result for this check." };
+  if (input.orgSettings && unconfirmed(measured.map((f) => f.summary))) return { reason: UNCONFIRMED_SKIP };
   // These rules give one org-wide result. More than one would mean the
   // figure is per subject, which doesn't belong here.
   if (measured.length > 1) return { reason: `The check gave ${measured.length} results, so there's no single org-wide figure.` };
@@ -283,7 +297,8 @@ export function orgProfile(dir: string, run: Run, calibration: Calibration): Org
   if (pipeline.status !== "ok") throw new Error(`${pipeline.reason} So the deal size band can't be worked out.`);
   // A benchmark row carries no note, so a figure resting on a stage whose
   // meaning came from Salesforce's flags would go in unmarked (DECISIONS.md 600).
-  if (pipeline.inferred.length > 0) {
+  // An automatic run's calibration names every won stage and leaves lost ones to the flags (692), so the won amounts below rest on none of them (693).
+  if (pipeline.inferred.length > 0 && calibration.source !== "org_settings") {
     const stages = pipeline.inferred.map((s) => s.stage).join(", ");
     throw new Error(`The calibration doesn't name these stages, so this run took their meaning from Salesforce's own settings: ${stages}. Add them to the calibration and run the health check again before exporting to the benchmark set.`);
   }
@@ -379,6 +394,7 @@ function prepareBenchmark(options: Omit<BenchmarkOptions, "storeDir">): Prepared
     findings: effective.findings,
     asRead: { metrics, findings },
     lintTotals: readLintTotals(dir),
+    orgSettings: calibration.source === "org_settings",
   });
   if (figures.length === 0) throw new Error("Nothing in this run was measurable, so there's nothing to export.");
 

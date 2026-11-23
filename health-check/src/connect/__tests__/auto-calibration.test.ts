@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { analyseExtracts, clone, loadExtracts, runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers } from "../../testing/replay.ts";
 import { AS_OF, ORG_ID, STAGES } from "../../testing/synthetic-org.ts";
-import { automaticCalibration, CALIBRATION_UNREADABLE, NO_WON_STAGE, ORG_SETTINGS_CALIBRATOR, STAGES_UNREAD } from "../auto-calibration.ts";
+import { automaticCalibration, CALIBRATION_UNREADABLE, NO_WON_STAGE, ORG_SETTINGS_CALIBRATOR, STAGES_UNREAD, CURRENCY_UNREAD, CALIBRATION_REFUSED } from "../auto-calibration.ts";
 import { orgStages, type OrgStage } from "../org-stages.ts";
 import { calibrationConfirmation, type Calibration, type Finding, type Metric } from "../../schemas/index.ts";
 import { renderRawNotes } from "../../notes/raw-notes.ts";
@@ -15,7 +15,7 @@ import type { OpportunityExtract } from "../../extract/opportunities.ts";
 
 const synthetic = (): OrgStage[] => orgStages(clone(STAGES));
 const build = (stages: OrgStage[] | null): Calibration => {
-  const built = automaticCalibration(stages, { orgId: ORG_ID, at: AS_OF });
+  const built = automaticCalibration(stages, { orgId: ORG_ID, at: AS_OF, currency: "GBP" });
   assert.ok(built.ok, "a calibration is built");
   return built.calibration;
 };
@@ -82,16 +82,28 @@ describe("the calibration built from the synthetic org's stages", () => {
 describe("no calibration", () => {
   test("an org with no won stage gets none, with the word for the run's hold", () => {
     const stages = synthetic().map((s) => ({ ...s, isWon: false }));
-    assert.deepEqual(automaticCalibration(stages, { orgId: ORG_ID, at: AS_OF }), { ok: false, heldReason: CALIBRATION_UNREADABLE, reason: NO_WON_STAGE });
-    assert.deepEqual(automaticCalibration([], { orgId: ORG_ID, at: AS_OF }), { ok: false, heldReason: CALIBRATION_UNREADABLE, reason: NO_WON_STAGE });
+    assert.deepEqual(automaticCalibration(stages, { orgId: ORG_ID, at: AS_OF, currency: "GBP" }), { ok: false, heldReason: CALIBRATION_UNREADABLE, reason: NO_WON_STAGE });
+    assert.deepEqual(automaticCalibration([], { orgId: ORG_ID, at: AS_OF, currency: "GBP" }), { ok: false, heldReason: CALIBRATION_UNREADABLE, reason: NO_WON_STAGE });
   });
 
   test("a failed stage read gets none", () => {
-    assert.deepEqual(automaticCalibration(null, { orgId: ORG_ID, at: AS_OF }), { ok: false, heldReason: CALIBRATION_UNREADABLE, reason: STAGES_UNREAD });
+    assert.deepEqual(automaticCalibration(null, { orgId: ORG_ID, at: AS_OF, currency: "GBP" }), { ok: false, heldReason: CALIBRATION_UNREADABLE, reason: STAGES_UNREAD });
+  });
+
+  test("no currency read gets none, never the schema's pounds; the org's own currency is kept as read (DECISIONS.md 693)", () => {
+    assert.deepEqual(automaticCalibration(synthetic(), { orgId: ORG_ID, at: AS_OF, currency: null }), { ok: false, heldReason: CALIBRATION_UNREADABLE, reason: CURRENCY_UNREAD });
+    const euros = automaticCalibration(synthetic(), { orgId: ORG_ID, at: AS_OF, currency: "EUR" });
+    assert.ok(euros.ok);
+    assert.equal(euros.ok && euros.calibration.currency, "EUR");
+  });
+
+  test("a calibration the schema refuses is a hold, never a throw (DECISIONS.md 693)", () => {
+    // A currency code the schema can't hold stands in for anything it refuses.
+    assert.deepEqual(automaticCalibration(synthetic(), { orgId: ORG_ID, at: AS_OF, currency: "EURO" }), { ok: false, heldReason: CALIBRATION_UNREADABLE, reason: CALIBRATION_REFUSED });
   });
 
   test("neither reason names a stage", () => {
-    for (const s of STAGES) for (const reason of [NO_WON_STAGE, STAGES_UNREAD]) assert.ok(!reason.includes(s.ApiName));
+    for (const s of STAGES) for (const reason of [NO_WON_STAGE, STAGES_UNREAD, CURRENCY_UNREAD, CALIBRATION_REFUSED]) assert.ok(!reason.includes(s.ApiName));
   });
 });
 

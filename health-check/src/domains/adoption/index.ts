@@ -1,4 +1,5 @@
 import { loginActivityExtractor, type LoginActivity, type LoginChannel } from "../../extract/adoption.ts";
+import { userKinds } from "../user-kinds.ts";
 import { daysBefore } from "../../extract/types.ts";
 import { reportsExtractor, usersExtractor, type UserRow } from "../../extract/users.ts";
 import { schemaExtractor } from "../../extract/configuration.ts";
@@ -34,7 +35,7 @@ const roleOf = (u: UserRow): string => u.UserRole?.Name ?? "No role";
 
 /** The people we measure: active, not a shared, system, integration or test account, and not on an integration licence. */
 function people(ctx: Ctx, users: UserRow[]): UserRow[] {
-  const nonPerson = new Set(ctx.calibration.users.filter((u) => NON_PERSON_KINDS.has(u.kind)).map((u) => u.userId.slice(0, 15)));
+  const nonPerson = new Set(userKinds(ctx).filter((u) => NON_PERSON_KINDS.has(u.kind)).map((u) => u.userId.slice(0, 15)));
   return users.filter((u) => u.IsActive && !nonPerson.has(u.Id.slice(0, 15)) && !/\bintegration\b/i.test(u.Profile?.UserLicense?.Name ?? ""));
 }
 

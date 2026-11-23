@@ -39,6 +39,15 @@ const unmappedStages: Rule = {
     ]);
     const missing = [...seen].filter((s) => !known.has(s)).sort();
     const evidence = [ctx.ev(stages.source, { count: stages.data.length })];
+    // An automatic run's calibration was read from these same settings, and no consultant will add to it (DECISIONS.md 693):
+    // the gap is the customer's to close if they choose, so it is said as what we couldn't measure, never as work for a consultant.
+    if (missing.length > 0 && ctx.calibration.source === "org_settings") {
+      return {
+        outcome: "not_measurable",
+        reason: said`The calibration doesn't say what these stages mean, as it was read from your org's own stage settings: ${stageList(missing)}. Where a deal is in one, we've used Salesforce's own setting for whether it's open, won or lost, and said so. If you tell us what each means, your next health check can use it.`,
+        evidence,
+      };
+    }
     if (missing.length === 0) return { outcome: "pass", summary: said`The calibration covers all ${seen.size} stages seen in the org.`, evidence, segmentsChecked: [{ dimension: "stage", segments: seen.size }] };
     // Salesforce's flags stand in where a deal relies on one of them (DECISIONS.md 598), so the gap is still a gap to close.
     const flagged = new Set(stages.data.map((s) => s.ApiName));

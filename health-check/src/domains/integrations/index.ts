@@ -1,4 +1,5 @@
 import { apexExtractor } from "../../extract/automation.ts";
+import { userKinds } from "../user-kinds.ts";
 import { customObjectsExtractor, orgExtractor, recordCountsExtractor } from "../../extract/configuration.ts";
 import { orgDocumentationExtractor } from "../../extract/documentation.ts";
 import { fieldDescribeExtractor, missingFieldReason } from "../../extract/fields.ts";
@@ -40,7 +41,7 @@ const JOB_TYPES = new Set(["BatchApex", "Queueable", "Future", "ScheduledApex"])
 // Our judgement: one or two failures a week can be a blip, three is a pattern.
 const FAILURES_MEDIUM = 3;
 
-const kindOf = (ctx: RuleContext, id: string): string | undefined => ctx.calibration.users.find((u) => u.userId.slice(0, 15) === id.slice(0, 15))?.kind;
+const kindOf = (ctx: RuleContext, id: string): string | undefined => userKinds(ctx).find((u) => u.userId.slice(0, 15) === id.slice(0, 15))?.kind;
 const licenceOf = (user: UserRow): string => user.Profile?.UserLicense?.Name ?? "Unknown";
 const isIntegrationLicence = (licence: string): boolean => /\bintegration\b/i.test(licence);
 

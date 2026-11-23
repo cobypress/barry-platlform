@@ -84,7 +84,7 @@ AI readiness (`src/narrative/readiness.ts`, DECISIONS.md 236 to 245) is built wi
 | 7. CRM stays in the worker | Findings hold tokens. `scrubDeep` is a backstop on everything the engine writes. Everything sent to Claude goes through `sendPrompt`, which masks names and their parts, then refuses the send if any part is left (see "Free text and names") |
 | 8. No customer data in repos | The CLI refuses to write inside a git work tree. Fixture tests require reserved domains and zero-padded ids |
 | 9. API budget and resume | `ApiBudget` stops before the call that crosses the share. Steps and Opportunity pages are checkpointed |
-| 10. Approval before release | `ReportSection` schema and `canRelease()`, used in Milestone 5 |
+| 10. Approval before release | `ReportSection` schema and `canRelease(sections, mode)`: a consultant-led run needs every section approved by a named person; an automatic run is released by code in `src/worker/release.ts` only when every section is checked and its digest passes `src/digest/checked.ts`, or held for a person (DECISIONS.md 693) |
 | 11. Benchmarks separate | `BenchmarkRow` is strict: no extra fields, whole units, bands and quarters only. `hc benchmark` builds rows from an allowlist, needs consent, and records it in the run folder. A report shows our own customers only as a range from 8 orgs, and groups by industry and size from 10 (`src/benchmark/compare.ts`) |
 
 ## The read-only boundary

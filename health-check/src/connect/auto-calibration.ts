@@ -32,21 +32,29 @@ export type AutomaticCalibration = { ok: true; calibration: Calibration } | { ok
 /** Why no calibration could be built, in plain words, naming no stage. */
 export const NO_WON_STAGE = "No stage in the org is set up as closed and won, so we can't tell a won deal from any other, and the run wasn't started.";
 export const STAGES_UNREAD = "The org's opportunity stages couldn't be read, so the run wasn't started.";
+/** No currency read (DECISIONS.md 693): every amount would be labelled in a currency we guessed. */
+export const CURRENCY_UNREAD = "The org's currency couldn't be read, so we couldn't label its amounts, and the run wasn't started.";
+/** A calibration the schema refused: something in the org's stages we can't hold (DECISIONS.md 693). Names no stage. */
+export const CALIBRATION_REFUSED = "The org's stages couldn't be made into a calibration, so the run wasn't started.";
 
 /**
  * The calibration for an automatic full check, or why there is none. `stages`
- * null means they couldn't be read. `orgId` is the org that connected, and
- * `at` when the stages were read.
+ * null means they couldn't be read. `orgId` is the org that connected, `at`
+ * when the stages were read, and `currency` the org's own, as Salesforce has
+ * it (decision 693), or null when it couldn't be read: never the schema's
+ * default, which would label every amount in pounds whatever the org uses.
+ * Never throws: a calibration the schema refuses is a hold, like no stages.
  */
-export function automaticCalibration(stages: OrgStage[] | null, options: { orgId: string; at: string }): AutomaticCalibration {
+export function automaticCalibration(stages: OrgStage[] | null, options: { orgId: string; at: string; currency: string | null }): AutomaticCalibration {
   if (!stages) return { ok: false, heldReason: CALIBRATION_UNREADABLE, reason: STAGES_UNREAD };
+  if (!options.currency) return { ok: false, heldReason: CALIBRATION_UNREADABLE, reason: CURRENCY_UNREAD };
   const won = stages.filter((s) => s.isClosed && s.isWon);
   if (won.length === 0) return { ok: false, heldReason: CALIBRATION_UNREADABLE, reason: NO_WON_STAGE };
   // In sort order, ties by API name, whatever order they came in.
   const open = stages
     .filter((s) => s.isActive && !s.isClosed && !s.isWon && s.sortOrder !== null)
     .sort((a, b) => a.sortOrder! - b.sortOrder! || (a.apiName < b.apiName ? -1 : a.apiName > b.apiName ? 1 : 0));
-  const calibration = Calibration.parse({
+  const parsed = Calibration.safeParse({
     version: 1,
     orgId: options.orgId,
     confirmedBy: ORG_SETTINGS_CALIBRATOR,
@@ -59,8 +67,10 @@ export function automaticCalibration(stages: OrgStage[] | null, options: { orgId
     targets: { source: "none" },
     licenceCosts: {},
     effortMinutes: {},
+    currency: options.currency,
   });
-  return { ok: true, calibration };
+  if (!parsed.success) return { ok: false, heldReason: CALIBRATION_UNREADABLE, reason: CALIBRATION_REFUSED };
+  return { ok: true, calibration: parsed.data };
 }
 
 /** Whether the open stages' order came from Salesforce's sort order with no person's confirmation. */
