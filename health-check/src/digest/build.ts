@@ -5,6 +5,7 @@ import { buildPlan, DOMAIN_LABELS, domainLabel, PHASE_TITLES } from "../narrativ
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { knownPeople } from "../fix/prompt.ts";
 import { spansIfCurrent, textSha256, type OrgSpan } from "../engine/org-words.ts";
+import { UNSCORED_RULES } from "../domains/scoring.ts";
 import { DIGEST_VERSION, NAMED_PEOPLE_SENTENCE, RunDigest, type DigestArea, type DigestFinding, type DigestMetric, type DigestTotal, type DigestValueModel, type SentenceOrgWords } from "../schemas/digest.ts";
 import { FIX_PROMPT_MAX, type Finding, type Metric } from "../schemas/index.ts";
 import type { Inventory } from "../schemas/inventory.ts";
@@ -218,17 +219,24 @@ function afterGuard(before: DigestFinding, after: DigestFinding): DigestFinding 
  * cover only part, and the ones with none, are listed beside it, so the total is
  * never read as the whole. Null when no finding in the plan has hours.
  */
-export function planHours(plan: ReturnType<typeof buildPlan>): { low: number; high: number; findingIds: string[]; partialFindingIds: string[]; withoutHoursFindingIds: string[] } | null {
+/** What the plan says when the code checker's findings are left out of its total: a fixed sentence of ours (DECISIONS.md 673). */
+export const PLAN_HOURS_APART = "Findings from our code checker are listed with their own hours and are not included in this total yet.";
+
+export function planHours(plan: ReturnType<typeof buildPlan>): { low: number; high: number; findingIds: string[]; partialFindingIds: string[]; withoutHoursFindingIds: string[]; notTotalledFindingIds?: string[]; note?: string } | null {
   const seen = new Map<string, Finding>();
   for (const f of [...plan.quickWins, ...plan.phases.flatMap((p) => p.findings), ...plan.later].flatMap((f) => [f, ...(plan.alsoFor[f.id] ?? [])])) if (!seen.has(f.id)) seen.set(f.id, f);
-  const held = [...seen.values()].filter((f) => f.effortHours);
-  if (held.length === 0) return null;
+  // The code checker's groups keep their own hours and stay out of the total for now (DECISIONS.md 673).
+  const apart = [...seen.values()].filter((f) => UNSCORED_RULES.has(f.ruleId));
+  const counted = [...seen.values()].filter((f) => !UNSCORED_RULES.has(f.ruleId));
+  const held = counted.filter((f) => f.effortHours);
+  if (held.length === 0 && apart.length === 0) return null;
   return {
     low: held.reduce((s, f) => s + f.effortHours!.low, 0),
     high: held.reduce((s, f) => s + f.effortHours!.high, 0),
     findingIds: held.map((f) => f.id),
     partialFindingIds: held.filter((f) => f.effortHours!.partial).map((f) => f.id),
-    withoutHoursFindingIds: [...seen.values()].filter((f) => !f.effortHours).map((f) => f.id),
+    withoutHoursFindingIds: counted.filter((f) => !f.effortHours).map((f) => f.id),
+    ...(apart.length ? { notTotalledFindingIds: apart.map((f) => f.id), note: PLAN_HOURS_APART } : {}),
   };
 }
 
@@ -361,7 +369,7 @@ export function fixedWords<P extends { phases: Array<{ key: string; title: strin
 export const STRUCTURAL_KEYS: ReadonlySet<string> = new Set([
   "version", "runId", "product", "reviewed", "asOf", "madeAt", "baselineRunId", "status", "domain", "areaDomains", "findingIds", "id", "ruleId",
   "severity", "confidence", "recommendationType", "kind", "effortSize", "notMeasurableKind", "timeBand", "fixComplexity", "from", "to", "currency", "group", "counted",
-  "lineIds", "leftOut", "later", "quickWins", "key", "grade", "withheldNames", "partialFindingIds", "withoutHoursFindingIds", "textSha256",
+  "lineIds", "leftOut", "later", "quickWins", "key", "grade", "withheldNames", "partialFindingIds", "withoutHoursFindingIds", "notTotalledFindingIds", "textSha256",
 ]);
 /** Keyed by finding id, each holding finding ids: ids all the way down. */
 export const ID_MAPS: ReadonlySet<string> = new Set(["alsoFor"]);

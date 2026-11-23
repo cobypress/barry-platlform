@@ -49,11 +49,16 @@ export const lintKey = (rule: string): string =>
 
 /** What a benchmark says of a PMD count when PMD didn't run, or the run had no step: never zero. */
 export const LINT_NOT_MEASURED = "PMD didn't run in this health check, so this wasn't measured.";
+/** A count of code PMD couldn't read: not measured either. */
+export const LINT_KIND_UNREAD = "PMD couldn't read the code this counts in this health check, so this wasn't measured.";
 
 // A fixed list, and only whole-org figures. Segments, series, stats and the
 // worst-segment facts are never read, because a per-rep or per-account value is
-// a step towards a person. Counts and amounts aren't here either: they mostly
-// measure the size of the org, which the bands already carry.
+// a step towards a person. Amounts aren't here, and counts only PMD's (DECISIONS.md
+// 673), kept because the owner wants every rule's result to benchmark on: they
+// mostly measure the size of the org, so what PMD read is rounded (lines to the
+// nearest 1,000, classes and triggers to the nearest 10), and anything published
+// from them must apply the minimum group, as every figure here does.
 export const BENCHMARK_METRICS: BenchmarkMetric[] = [
   ...SALES_CLOUD_DOMAINS.map((domain): BenchmarkMetric => ({ key: `score.${domain}`, unit: "score", source: { from: "score", domain } })),
   { key: "historic.win_rate", unit: "percent", source: { from: "metric", id: "historic.win_rate" } },
@@ -119,8 +124,14 @@ function figureOf(input: Read, unit: Unit, source: Source): { value: number } | 
   if (source.from === "lint") {
     const pmd = input.lintTotals?.pmd;
     if (!pmd || pmd.status !== "ran") return { reason: LINT_NOT_MEASURED };
-    if ("read" in source) return { value: pmd[source.read] };
+    if ("read" in source) {
+      // A kind PMD couldn't read isn't a count of none (fix round 1).
+      if (source.read !== "lines" && pmd.unread.includes(source.read === "classes" ? "class" : "trigger")) return { reason: LINT_KIND_UNREAD };
+      const step = source.read === "lines" ? 1_000 : 10;
+      return { value: Math.round(pmd[source.read] / step) * step };
+    }
     const total = pmd.rules[source.rule];
+    if (total === null) return { reason: LINT_KIND_UNREAD };
     return total ? { value: total[source.count] } : { reason: "This run's PMD didn't check this rule." };
   }
   const results = input.findings.filter((f) => f.ruleId === source.ruleId);

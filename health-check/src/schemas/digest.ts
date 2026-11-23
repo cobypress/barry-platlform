@@ -256,7 +256,19 @@ export const DigestPlan = z.object({
    * and `withoutHoursFindingIds` the plan's issues with no hours at all, both
    * always listed, empty or not. Absent when no finding in the plan has hours.
    */
-  hoursTotal: z.object({ low: z.number().int().nonnegative(), high: z.number().int().nonnegative(), findingIds: Ids, partialFindingIds: Ids, withoutHoursFindingIds: Ids }).optional(),
+  hoursTotal: z
+    .object({
+      low: z.number().int().nonnegative(),
+      high: z.number().int().nonnegative(),
+      findingIds: Ids,
+      partialFindingIds: Ids,
+      withoutHoursFindingIds: Ids,
+      // The code checker's findings, each with its own hours and left out of the total, and the fixed sentence saying so (DECISIONS.md 673). Both or neither.
+      notTotalledFindingIds: Ids.optional(),
+      note: Text.optional(),
+    })
+    .refine((h) => (h.notTotalledFindingIds === undefined) === (h.note === undefined), { message: "The findings left out of the total and the sentence saying so go together" })
+    .optional(),
 });
 export type DigestPlan = z.infer<typeof DigestPlan>;
 
@@ -292,6 +304,6 @@ export const DIGEST_KEYS: ReadonlySet<string> = new Set([
   "title", "summary", "recommendation", "recommendationType", "kind", "amount", "unit", "period", "assumptions", "effortSize", "notMeasurableReason",
   "definition", "n", "dateRange", "from", "to", "exclusions", "currency", "total", "byKind", "revenue_recoverable", "conversion_uplift", "licence_waste",
   "time_cost", "exposure", "groups", "lines", "leftOut", "realisation", "counted", "lineIds", "low", "expected", "high", "group", "annual", "added",
-  "phases", "later", "quickWins", "alsoFor", "key", "effortHours", "basis", "partial", "timeBand", "fixComplexity", "hoursTotal", "partialFindingIds", "withoutHoursFindingIds",
+  "phases", "later", "quickWins", "alsoFor", "key", "effortHours", "basis", "partial", "timeBand", "fixComplexity", "hoursTotal", "partialFindingIds", "withoutHoursFindingIds", "notTotalledFindingIds", "note",
   "orgWords", "orgWordsMarked", "start", "end", "valueReason", "valueAssumptions", "hoursBasis", "fixPrompt", "textSha256",
 ]);

@@ -1101,7 +1101,7 @@ const SIGNED_OFF: string[] = [
   "src/domains/technical-health/lint.ts: checked",
   "src/domains/technical-health/lint.ts: n",
   "src/domains/technical-health/lint.ts: shown[0]!",
-  'src/domains/technical-health/lint.ts: plural(alreadyCount, "more is", "more are")',
+  "src/domains/technical-health/lint.ts: alreadyCount",
   'src/domains/technical-health/lint.ts: plural(checked, "class or trigger", "classes and triggers")',
   'src/domains/technical-health/lint.ts: plural(components.length, "class or trigger", "classes and triggers")',
   'src/domains/technical-health/lint.ts: plural(found, "place", "places")',
@@ -1110,6 +1110,7 @@ const SIGNED_OFF: string[] = [
   // Fixed sentences of the group's own, each a said literal in LINT_GROUPS, made as the rule runs.
   "src/domains/technical-health/lint.ts: group.where()",
   "src/domains/technical-health/lint.ts: group.why()",
+  "src/domains/technical-health/lint.ts: andList(alreadyBy)",
   "src/domains/technical-health/lint.ts: andList(alreadyBy)",
   // Sentences said, joinSaid or andList made in the same function: the line numbers, the places named, and the notes.
   "src/domains/technical-health/lint.ts: andList(numbers)",

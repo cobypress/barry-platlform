@@ -86,6 +86,11 @@ export const codeLintExtractor: Extractor<CodeLintData> = {
       // The run never fails because a linter did.
       pmd = notRun("pmd", `PMD couldn't be run here (${className(err)}).`);
     }
-    return { pmd: pmd.status === "ran" ? { ...pmd, limits: [...pmd.limits, ...limits] } : pmd, eslint };
+    if (pmd.status !== "ran") return { pmd, eslint };
+    // A kind is unread when its query failed, or the org has some and PMD read none of them (DECISIONS.md 673, fix round 1).
+    const had = { class: classes.status === "ok" ? classes.data.length : null, trigger: triggers.status === "ok" ? triggers.data.length : null };
+    const readOf = { class: pmd.read?.classes ?? 0, trigger: pmd.read?.triggers ?? 0 };
+    const unread = (["class", "trigger"] as const).filter((k) => had[k] === null || (had[k]! > 0 && readOf[k] === 0));
+    return { pmd: { ...pmd, limits: [...pmd.limits, ...limits], unread }, eslint };
   },
 };

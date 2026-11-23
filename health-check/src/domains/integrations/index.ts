@@ -1,4 +1,4 @@
-import { apexExtractor, type ApexClassRow } from "../../extract/automation.ts";
+import { apexExtractor } from "../../extract/automation.ts";
 import { customObjectsExtractor, orgExtractor, recordCountsExtractor } from "../../extract/configuration.ts";
 import { orgDocumentationExtractor } from "../../extract/documentation.ts";
 import { fieldDescribeExtractor, missingFieldReason } from "../../extract/fields.ts";
@@ -438,10 +438,6 @@ const failedJobs: Rule = {
   },
 };
 
-/** The classes the hardcoded-endpoints check reads, and whether one sets a literal address. PMD's http findings in those it names aren't shown again (DECISIONS.md 673). */
-export const calloutCode = (classes: ApexClassRow[]): ApexClassRow[] => classes.filter((c) => c.Status === "Active" && !c.isTest && c.scan !== null);
-export const setsLiteralAddress = (c: ApexClassRow): boolean => c.scan!.literalEndpoints > 0;
-
 const hardcodedEndpoints: Rule = {
   id: "int.hardcoded-endpoints",
   version: 1,
@@ -451,10 +447,10 @@ const hardcodedEndpoints: Rule = {
     const { classes } = ctx.data(apexExtractor);
     if (classes.status !== "ok") return { outcome: "not_measurable", reason: apexGap("classes", classes.reason), evidence: [ctx.ev(classes.source, { count: null })] };
     const { namedCredentials } = ctx.data(orgDocumentationExtractor);
-    const code = calloutCode(classes.data);
+    const code = classes.data.filter((c) => c.Status === "Active" && !c.isTest && c.scan !== null);
     const hidden = classes.data.filter((c) => c.Status === "Active" && c.scan === null).length;
     const callouts = code.filter((c) => c.scan!.literalEndpoints + c.scan!.namedCredentialEndpoints > 0);
-    const literal = callouts.filter(setsLiteralAddress).sort((a, b) => a.Name.localeCompare(b.Name));
+    const literal = callouts.filter((c) => c.scan!.literalEndpoints > 0).sort((a, b) => a.Name.localeCompare(b.Name));
     const addresses = literal.reduce((sum, c) => sum + c.scan!.literalEndpoints, 0);
     const evidence = [
       ctx.ev(classes.source, { count: callouts.length, exclusions: ["Test classes", "Inactive classes", "Installed packages' classes", ...(hidden ? [`Classes whose code is hidden: ${hidden}`] : [])], note: "Read from the code: the address each setEndpoint call is given" }),

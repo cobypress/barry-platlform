@@ -66,6 +66,26 @@ function kindNow(findings: Finding[]): { notMeasurableKind?: NotMeasurableKind }
 /** The rules a re-check reads as newly measured when the earlier run didn't check them: PMD's groups (DECISIONS.md 673). */
 const MEASURED_LATER = UNSCORED_RULES;
 
+/**
+ * Whether a pass for one of PMD's groups can be called fixed (DECISIONS.md 673,
+ * fix round 1): only when this run's PMD read at least as many classes and at
+ * least as many triggers as the earlier run's did, both as the findings' facts
+ * record them, and nothing was left out because our own scan now names that
+ * code. Reading less, a fact missing, or findings now under our own check is
+ * "can't tell", never fixed.
+ */
+function fixedAsRead(then: Finding[], now: Finding[]): boolean {
+  const pass = now.find((f) => f.status === "passed");
+  const before = then[0];
+  if (!pass || !before) return false;
+  const read = (f: Finding, k: "readClasses" | "readTriggers"): number | undefined => f.facts[k];
+  for (const k of ["readClasses", "readTriggers"] as const) {
+    const [a, b] = [read(before, k), read(pass, k)];
+    if (a === undefined || b === undefined || b < a) return false;
+  }
+  return (pass.facts.alreadyListed ?? 0) === 0;
+}
+
 export function compareWithBaseline(baseline: ProgressSide, current: ProgressSide): Progress {
   const before = byRule(baseline.findings);
   const now = byRule(current.findings);
@@ -83,7 +103,7 @@ export function compareWithBaseline(baseline: ProgressSide, current: ProgressSid
     if (MEASURED_LATER.has(ruleId) && nowFindings.length === 0) continue;
     const nowIssues = nowFindings.filter((f) => f.status === "issue");
     if (nowIssues.length) remaining.push(change(ruleId, nowIssues));
-    else if (nowFindings.some((f) => f.status === "passed")) fixed.push(change(ruleId, thenIssues));
+    else if (nowFindings.some((f) => f.status === "passed") && (!MEASURED_LATER.has(ruleId) || fixedAsRead(thenIssues, nowFindings))) fixed.push(change(ruleId, thenIssues));
     else unknown.push({ ...change(ruleId, thenIssues), ...kindNow(nowFindings) });
   }
   for (const [ruleId, nowFindings] of now) {

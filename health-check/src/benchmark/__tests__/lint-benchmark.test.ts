@@ -9,7 +9,7 @@ import { bound, notRun, rulesSeen, tallyOf, type LintFinding, type ToolRun } fro
 import { PMD_NOT_INSTALLED, PMD_RULES, PMD_VERSION } from "../../extract/lint/pmd.ts";
 import { NO_JAVASCRIPT } from "../../extract/lint/eslint.ts";
 import { LINT_TOTALS_FILE, lintTotals } from "../../extract/lint/totals.ts";
-import { appendRows, BENCHMARK_FILE, BENCHMARK_METRICS, exportBenchmark, LINT_NOT_MEASURED, lintKey } from "../export.ts";
+import { appendRows, BENCHMARK_FILE, BENCHMARK_METRICS, exportBenchmark, LINT_KIND_UNREAD, LINT_NOT_MEASURED, lintKey } from "../export.ts";
 import { summariseBenchmarks } from "../summary.ts";
 
 // PMD's counts in the benchmark (DECISIONS.md 673): numbers only, through the
@@ -63,7 +63,8 @@ describe("PMD's counts in the benchmark (decision 673)", () => {
     assert.deepEqual(["found", "suppressed", "components"].map((k) => byKey.get(`code.pmd.apex_crud_violation.${k}`)!.value), [3, 0, 2]);
     assert.deepEqual(["found", "suppressed", "components"].map((k) => byKey.get(`code.pmd.empty_catch_block.${k}`)!.value), [0, 1, 0]);
     assert.equal(byKey.get("code.pmd.apex_bad_crypto.found")!.value, 0);
-    assert.deepEqual([byKey.get("code.pmd.classes")!.value, byKey.get("code.pmd.triggers")!.value, byKey.get("code.pmd.lines")!.value], [10, 2, 1_234]);
+    // What PMD read, rounded so a small exact figure can't single an org out: classes and triggers to the nearest 10, lines to the nearest 1,000.
+    assert.deepEqual([byKey.get("code.pmd.classes")!.value, byKey.get("code.pmd.triggers")!.value, byKey.get("code.pmd.lines")!.value], [10, 0, 1_000]);
     const text = readFileSync(join(store, BENCHMARK_FILE), "utf8");
     for (const line of text.trim().split("\n")) BenchmarkRow.parse(JSON.parse(line));
     for (const name of PLANTED) {
@@ -84,6 +85,26 @@ describe("PMD's counts in the benchmark (decision 673)", () => {
     assert.equal(skipped.length, CODE_KEYS.length);
     for (const s of skipped) assert.equal(s.reason, LINT_NOT_MEASURED);
     assert.ok(!readFileSync(join(store, BENCHMARK_FILE), "utf8").includes("code.pmd."));
+  });
+
+  test("PMD read no code at all (every file failed to parse): not measured, never zeros", () => {
+    const empty = pmdRan();
+    if (empty.status === "ran") empty.read = { classes: 0, triggers: 0, lines: 0 };
+    const result = exportFrom(runWith(empty), tempDir());
+    assert.ok(!result.rows.some((r) => r.metricKey.startsWith("code.pmd.")));
+    assert.equal(result.skipped.filter((s) => s.reason === LINT_NOT_MEASURED).length, CODE_KEYS.length);
+  });
+
+  test("classes unread: rules that read only classes, and the class count, are not measured; the rest go in", () => {
+    const partial = pmdRan();
+    if (partial.status === "ran") partial.unread = ["class"];
+    const result = exportFrom(runWith(partial), tempDir());
+    const keys = new Set(result.rows.map((r) => r.metricKey));
+    for (const key of ["code.pmd.classes", "code.pmd.apex_unit_test_class_should_have_asserts.found", "code.pmd.apex_sharing_violations.components"]) {
+      assert.ok(!keys.has(key), key);
+      assert.equal(result.skipped.find((s) => s.metricKey === key)?.reason, LINT_KIND_UNREAD);
+    }
+    for (const key of ["code.pmd.triggers", "code.pmd.lines", "code.pmd.apex_crud_violation.found", "code.pmd.avoid_logic_in_trigger.found"]) assert.ok(keys.has(key), key);
   });
 
   test("a run with no step at all (a scan, a pulse, an older run) is the same: not measured", () => {

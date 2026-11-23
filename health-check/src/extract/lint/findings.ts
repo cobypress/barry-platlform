@@ -58,6 +58,12 @@ export type ToolRun =
       tally?: RuleTally[];
       /** PMD only, from step version 2: the classes, triggers and lines it read. */
       read?: LintRead;
+      /**
+       * PMD only: the kinds of code it couldn't read (fix round 1 of DECISIONS.md 673),
+       * because the org's query for them failed or every one it was given failed to
+       * reach PMD. A check of only those kinds is then not measurable, never a pass.
+       */
+      unread?: Array<"class" | "trigger">;
       /** Findings the tool reported under a rule outside our pinned set: dropped, and counted. */
       outsideRules: number;
       /** PMD only: findings whose line, column or priority couldn't be true of the file, dropped and counted (DECISIONS.md 670). */

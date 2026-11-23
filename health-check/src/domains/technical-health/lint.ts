@@ -4,7 +4,6 @@ import type { LintFinding, LintKind, RuleTally } from "../../extract/lint/findin
 import { notSized, plural, type Rule, type RuleContext, type RuleResult } from "../../engine/rule.ts";
 import { joinSaid, org, said, type Said } from "../../engine/org-words.ts";
 import { andList } from "../../engine/said-forms.ts";
-import { calloutCode, setsLiteralAddress } from "../integrations/index.ts";
 import { judgedTests, liveCode, loopsOverLimits } from "./code.ts";
 
 // A chosen few of PMD's findings, shown in technical health (DECISIONS.md 673).
@@ -30,6 +29,8 @@ type Group = {
   /** The rule's constant title: a pass's and a not measurable finding's. */
   title: string;
   rules: readonly string[];
+  /** The kinds of code the group's rules read: a group whose every kind PMD couldn't read is not measurable. */
+  kinds: ReadonlyArray<"class" | "trigger">;
   /** The group's severity, and what PMD's priority 1 or 2 raises it to. */
   severity: Severity;
   raised: Severity;
@@ -58,60 +59,57 @@ const testClasses = (which: "silent" | "seeAll") => (ctx: RuleContext): Set<stri
   if (classes.status !== "ok") return null;
   return new Set(judgedTests(classes.data)[which].map((c) => key("class", c.Name)));
 };
-/** The classes int.hardcoded-endpoints names for an address written into the code. */
-const literalAddresses = (ctx: RuleContext): Set<string> | null => {
-  const { classes } = ctx.data(apexExtractor);
-  if (classes.status !== "ok") return null;
-  return new Set(calloutCode(classes.data).filter(setsLiteralAddress).map((c) => key("class", c.Name)));
-};
 
 export const LINT_GROUPS: readonly Group[] = [
   {
     id: "tech.lint-data-access",
+    kinds: ["class", "trigger"],
     title: "Access checks in code",
     rules: ["ApexCRUDViolation", "ApexSharingViolations"],
     severity: "medium",
     raised: "high",
-    issueTitle: () => said`Some code reads or changes data without checking access`,
+    issueTitle: () => said`Some code may read or change data without checking access`,
     where: () => said`where the code reads or changes records without checking what the running user may see and do, or without saying whether sharing applies`,
     why: () => said`Code like this can show or change data a user shouldn't reach, for example through a page or an integration.`,
     recommendation: () => said`Check object and field permissions before each read and save, and say on each class whether it runs with sharing, writing down why where it must run without.`,
     value: () => said`The cost is data reaching people who shouldn't see it, which we can't size from the code.`,
     owner: "Salesforce developer",
-    dependencies: ["Check who uses each changed path has the access it needs before the checks are added"],
+    dependencies: ["Check that the people who use each changed path have the access it needs before the checks are added."],
   },
   {
     id: "tech.lint-limits",
+    kinds: ["class", "trigger"],
     title: "Other limit risks in code",
     rules: ["OperationWithLimitsInLoop", "OperationWithHighCostInLoop", "AvoidNonRestrictiveQueries"],
     severity: "medium",
     raised: "high",
-    issueTitle: () => said`Some code risks Salesforce's limits in other ways`,
+    issueTitle: () => said`Some code may risk Salesforce's limits in other ways`,
     where: () => said`where the code calls a limited or costly operation, such as an email, a callout or a describe, inside a loop, or queries with no filter and no limit`,
     why: () => said`Each works with a few records and fails or slows once enough arrive together.`,
     recommendation: () => said`Move limited and costly calls out of loops, and give every query a filter or a limit.`,
     value: () => said`The cost is work that fails as volumes rise, which we can't size before it happens.`,
     owner: "Salesforce developer",
     dependencies: ["Test each change with a bulk load in a sandbox"],
-    already: { OperationWithLimitsInLoop: { by: () => said`our own check of queries and saves inside loops`, names: loopCode } },
+    already: { OperationWithLimitsInLoop: { by: () => said`queries and saves inside loops`, names: loopCode } },
   },
   {
     id: "tech.lint-injection",
+    kinds: ["class", "trigger"],
     title: "Injection and unsafe redirects in code",
     rules: ["ApexSOQLInjection", "ApexOpenRedirect", "ApexBadCrypto", "ApexXSSFromEscapeFalse", "ApexXSSFromURLParam", "ApexCSRF", "ApexDangerousMethods", "ApexInsecureEndpoint"],
     severity: "medium",
     raised: "high",
-    issueTitle: () => said`Some code is open to injection or unsafe redirects`,
+    issueTitle: () => said`Some code may be open to injection or unsafe redirects`,
     where: () => said`where the code builds a query, a page or a redirect from what a user can supply, uses a fixed encryption key, changes data as a page loads, or calls out over plain http`,
     why: () => said`Code like this can let someone read or change data they shouldn't, or send people somewhere unsafe.`,
     recommendation: () => said`Bind what users supply into queries rather than joining it in, escape what pages show, check every redirect against the addresses you allow, keep keys out of the code, and call out only over https.`,
     value: () => said`The cost is a security weakness, which we can't size from the code.`,
     owner: "Salesforce developer",
     dependencies: ["Check each other system accepts https before a callout is changed"],
-    already: { ApexInsecureEndpoint: { by: () => said`our own check of addresses written into code`, names: literalAddresses } },
   },
   {
     id: "tech.lint-tests",
+    kinds: ["class"],
     title: "Test methods that check their results",
     rules: ["ApexUnitTestClassShouldHaveAsserts", "ApexUnitTestShouldNotUseSeeAllDataTrue"],
     severity: "low",
@@ -124,12 +122,13 @@ export const LINT_GROUPS: readonly Group[] = [
     owner: "Salesforce developer",
     dependencies: [],
     already: {
-      ApexUnitTestClassShouldHaveAsserts: { by: () => said`our own check of test classes`, names: testClasses("silent") },
-      ApexUnitTestShouldNotUseSeeAllDataTrue: { by: () => said`our own check of test classes`, names: testClasses("seeAll") },
+      ApexUnitTestClassShouldHaveAsserts: { by: () => said`test classes`, names: testClasses("silent") },
+      ApexUnitTestShouldNotUseSeeAllDataTrue: { by: () => said`test classes`, names: testClasses("seeAll") },
     },
   },
   {
     id: "tech.lint-swallowed-errors",
+    kinds: ["class", "trigger"],
     title: "Errors caught and ignored in code",
     rules: ["EmptyCatchBlock"],
     severity: "low",
@@ -144,11 +143,12 @@ export const LINT_GROUPS: readonly Group[] = [
   },
   {
     id: "tech.lint-complexity",
+    kinds: ["class", "trigger"],
     title: "Code complexity",
     rules: ["CognitiveComplexity", "CyclomaticComplexity", "NcssCount", "AvoidDeeplyNestedIfStmts"],
     severity: "low",
     raised: "low",
-    issueTitle: () => said`Some code is too complex to change safely`,
+    issueTitle: () => said`Some code is complex and harder to change safely`,
     where: () => said`where a method or class has very many paths, statements or nested conditions`,
     why: () => said`Code like this is slow and risky to change, and the hardest to test.`,
     recommendation: () => said`Split the most complex methods into smaller ones, each with its own tests, when you next change them.`,
@@ -159,6 +159,9 @@ export const LINT_GROUPS: readonly Group[] = [
 ];
 
 export const LINT_RULE_IDS: readonly string[] = LINT_GROUPS.map((g) => g.id);
+
+/** How many classes and triggers need a finding at PMD's priority 1 or 2 before a group is raised a step. */
+export const RAISE_AT = 3;
 
 /** How many components the summary names, and how many line numbers for each. */
 const NAMED = 3;
@@ -178,10 +181,16 @@ function evaluateGroup(group: Group, ctx: RuleContext): RuleResult | RuleResult[
   // Only a run with the step shows these: a scan, a pulse or the command line shows nothing (DECISIONS.md 673).
   if (!ctx.ran?.(codeLintExtractor)) return [];
   const { pmd } = ctx.data(codeLintExtractor);
-  if (pmd.status !== "ran") {
-    return { outcome: "not_measurable", reason: `We couldn't check this, because PMD didn't run in this health check: ${pmd.reason}`, evidence: [ctx.ev(LINT_SOURCES.classes, { count: null })] };
+  // The customer reads our words; the tool's own reason is for the consultant, on the evidence (fix round 1).
+  const cannot = (reason: Said, why: string): RuleResult => ({ outcome: "not_measurable", reason, evidence: [ctx.ev(LINT_SOURCES.classes, { count: null, note: `PMD: ${why}` })] });
+  if (pmd.status !== "ran") return cannot(said`We couldn't check this, because our code checker didn't run in this health check.`, pmd.reason);
+  if (!pmd.tally || !pmd.read) return cannot(said`We couldn't check this, because our code checker's counts weren't kept in this health check.`, "The step's results are from before its counts were kept.");
+  // Read nothing is not found nothing: every file can fail to parse (fix round 1).
+  if (pmd.read.classes + pmd.read.triggers === 0) return cannot(said`We couldn't check this, because our code checker ran but couldn't read any of the code.`, "It read no class or trigger.");
+  const unread = pmd.unread ?? [];
+  if (group.kinds.every((k) => unread.includes(k))) {
+    return cannot(group.kinds.length === 1 && group.kinds[0] === "class" ? said`We couldn't check this, because our code checker couldn't read the org's Apex classes.` : said`We couldn't check this, because our code checker couldn't read the org's Apex code.`, `It couldn't read: ${unread.join(", ")}.`);
   }
-  if (!pmd.tally || !pmd.read) return { outcome: "not_measurable", reason: said`PMD ran, but its counts weren't kept in this run, so there's nothing to judge.`, evidence: [ctx.ev(LINT_SOURCES.classes, { count: null })] };
   const ours = new Set(group.rules);
   // Each of our own checks named once, by the rules it already covers.
   const named = new Map<string, Set<string> | null>();
@@ -198,18 +207,21 @@ function evaluateGroup(group: Group, ctx: RuleContext): RuleResult | RuleResult[
   const checked = pmd.read.classes + pmd.read.triggers;
 
   const exclusions = [
-    ...(pmd.skipped.tooLarge ? [`Classes and triggers too large to hand to PMD: ${pmd.skipped.tooLarge}`] : []),
-    ...(pmd.skipped.unparsable ? [`Classes and triggers PMD couldn't read: ${pmd.skipped.unparsable}`] : []),
+    ...(pmd.skipped.tooLarge ? [`Classes and triggers too large for our code checker: ${pmd.skipped.tooLarge}`] : []),
+    ...(pmd.skipped.unparsable ? [`Classes and triggers our code checker couldn't read: ${pmd.skipped.unparsable}`] : []),
     ...(pmd.skipped.unreadable ? [`Classes and triggers whose code is hidden: ${pmd.skipped.unreadable}`] : []),
     "Installed packages' code",
     ...pmd.limits,
   ];
-  const evidence = [ctx.ev(LINT_SOURCES.classes, { count: checked, exclusions, note: `Read by PMD ${pmd.toolVersion} with our own rules: ${group.rules.join(", ")}` })];
+  const evidence = [ctx.ev(LINT_SOURCES.classes, { count: checked, exclusions: [...exclusions, ...unread.map((k) => (k === "class" ? "Apex classes, which couldn't be read" : "Apex triggers, which couldn't be read"))], note: `Read by PMD ${pmd.toolVersion} with our own rules: ${group.rules.join(", ")}` })];
   const segments = [{ dimension: "class or trigger", segments: checked }];
   const facts = {
     found,
     components: components.length,
     checked,
+    // What was read, so a re-check can tell a fix from reading less (fix round 1).
+    readClasses: pmd.read.classes,
+    readTriggers: pmd.read.triggers,
     suppressed,
     alreadyListed: alreadyCount,
     ...Object.fromEntries(group.rules.map((r) => [r, shown.filter((t) => t.rule === r).reduce((sum, t) => sum + t.found, 0)])),
@@ -218,15 +230,15 @@ function evaluateGroup(group: Group, ctx: RuleContext): RuleResult | RuleResult[
   const alreadyBy = [...new Set(already.map((t) => group.already![t.rule]!.by()))];
   const notes = joinSaid(
     [
-      ...(alreadyCount ? [said` ${plural(alreadyCount, "more is", "more are")} in code ${andList(alreadyBy)} already lists.`] : []),
+      ...(alreadyCount ? [alreadyCount === 1 ? said` 1 more is in a class our own check of ${andList(alreadyBy)} already names, for a related problem.` : said` ${alreadyCount} more are in classes our own check of ${andList(alreadyBy)} already names, for a related problem.`] : []),
       ...(suppressed ? [said` ${plural(suppressed, "more was", "more were")} marked to be ignored in the code.`] : []),
     ],
     "",
   );
   if (found === 0) {
     return checked === 0
-      ? { outcome: "pass", summary: said`PMD found nothing of this kind.${notes}`, evidence, segmentExemptReason: "PMD read no class or trigger to segment.", facts }
-      : { outcome: "pass", summary: said`PMD found nothing of this kind in the ${plural(checked, "class or trigger", "classes and triggers")} it read.${notes}`, evidence, segmentsChecked: segments, facts };
+      ? { outcome: "pass", summary: said`Our code checker found nothing of this kind.${notes}`, evidence, segmentExemptReason: "It read no class or trigger to segment.", facts }
+      : { outcome: "pass", summary: said`Our code checker found nothing of this kind in the ${plural(checked, "class or trigger", "classes and triggers")} it read.${notes}`, evidence, segmentsChecked: segments, facts };
   }
 
   // Where, from the findings the step kept: worst first is how it bounded them, so a component may show fewer lines than it has.
@@ -244,14 +256,17 @@ function evaluateGroup(group: Group, ctx: RuleContext): RuleResult | RuleResult[
   });
   const others = components.length - places.length;
   const placesText = places.length ? said` They include ${andList([...places, ...(others ? [said`${plural(others, "other class or trigger", "other classes and triggers")}`] : [])])}.` : said``;
-  const worst = Math.min(...shown.map((t: RuleTally) => t.worst ?? 5));
+  // One finding doesn't make a group high: PMD's priority 1 or 2 must be in at
+  // least RAISE_AT classes and triggers, or in every one read when fewer were (fix round 1).
+  const serious = new Set(shown.filter((t: RuleTally) => t.worst !== null && t.worst <= 2).map((t) => key(t.kind, t.component))).size;
+  const raise = serious >= Math.min(RAISE_AT, checked);
   return {
     outcome: "issue",
     title: group.issueTitle(),
-    summary: said`PMD found ${plural(found, "place", "places")} in ${plural(components.length, "class or trigger", "classes and triggers")} of the ${checked} it read ${group.where()}. ${group.why()}${placesText}${notes}`,
+    summary: said`Our code checker found ${plural(found, "place", "places")} in ${plural(components.length, "class or trigger", "classes and triggers")} of the ${checked} it read ${group.where()}. ${group.why()}${placesText}${notes}`,
     recommendation: group.recommendation(),
     recommendationType: "change",
-    severity: worst <= 2 ? group.raised : group.severity,
+    severity: raise ? group.raised : group.severity,
     // PMD reads the code, not what runs, and can't see a check made elsewhere.
     confidence: "medium",
     evidence,
