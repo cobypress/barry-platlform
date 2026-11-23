@@ -161,6 +161,37 @@ export const FIX_TABLE: Readonly<Record<string, FixRule>> = {
     hours: fixed(4, 14, "Preparing the plan for what can leave Salesforce and what must be kept; carrying it out is more"),
     prompt: decide("objects and files", ["List the objects and files using the most storage, with how much of each is old or closed.", "Propose what is no longer needed, what must be kept and for how long, and where data that leaves Salesforce would be kept.", "Prepare the plan for the data's owners to agree."], ["The plan covers the largest objects and files, and their owners have agreed it."]),
   },
+  // PMD's six groups (DECISIONS.md 673): hours for each class or trigger the finding names.
+  "tech.lint-data-access": {
+    complexity: "complex",
+    hours: each(["components"], "class or trigger that reads or changes data without checking access", "classes and triggers that read or change data without checking access", [60, 150], 35),
+    prompt: change("Apex classes and triggers", ["List each place in the code named that reads or changes records without checking access, and who uses it: which pages, flows, integrations and users run it.", "Before adding any check, make sure each of those users' profiles or permission sets already grant what that path needs; added first, the checks would stop them doing work the code used to do for them.", "In a sandbox, check object and field permissions before each read and save, and say on each class whether it runs with sharing, writing down why where it must run without.", "Run all tests, and test each changed path as a user with limited access."], ["Each path reads and changes only what the running user may, the people who use it still can, and the tests pass."]),
+  },
+  "tech.lint-limits": {
+    complexity: "complex",
+    hours: each(["components"], "class or trigger with a limit risk", "classes and triggers with limit risks", [60, 150], 35),
+    prompt: change("Apex classes and triggers", ["Find each limited or costly call inside a loop, and each query with no filter and no limit, in the code named.", "In a sandbox, move each call out of its loop, and give each query a filter or a limit.", "Test with a bulk load of at least 200 test records in the sandbox."], ["The bulk test runs within Salesforce's limits, and the existing tests pass."]),
+  },
+  "tech.lint-injection": {
+    complexity: "complex",
+    hours: each(["components"], "class or trigger open to injection or an unsafe redirect", "classes and triggers open to injection or unsafe redirects", [60, 180], 35),
+    prompt: change("Apex classes and triggers", ["List each place in the code named, and what a user can supply there.", "In a sandbox, bind what users supply into queries, escape what pages show, check each redirect against the addresses you allow, move fixed keys into protected settings, and, once each other system is confirmed to accept https, call it over https.", "Run all tests, and test each changed page, query and callout."], ["No query, page or redirect takes what a user supplies unchecked, every callout uses https, and the tests pass."]),
+  },
+  "tech.lint-tests": {
+    complexity: "moderate",
+    hours: each(["components"], "test class with test methods to fix", "test classes with test methods to fix", [30, 90], 35),
+    prompt: change("test classes", ["List the test methods in the classes named that have no assertion or read the org's data.", "In a sandbox, add assertions that check each method's outcome, and have each test make the records it needs.", "Run all tests."], ["Every test method checks its outcome without reading the org's data, and the test run passes."]),
+  },
+  "tech.lint-swallowed-errors": {
+    complexity: "complex",
+    hours: each(["components"], "class or trigger that ignores errors it catches", "classes and triggers that ignore errors they catch", [20, 60], 35),
+    prompt: change("Apex classes and triggers", ["List each catch block in the code named that does nothing, and what can fail there.", "In a sandbox, log each error, and tell the user or an admin where it matters, or let it fail where people will see it.", "Run all tests, and make each error happen once to see it reported."], ["No error is caught and ignored, and the tests pass."]),
+  },
+  "tech.lint-complexity": {
+    complexity: "complex",
+    hours: each(["components"], "class or trigger too complex to change safely", "classes and triggers too complex to change safely", [120, 360], 21),
+    prompt: change("Apex classes and triggers", ["List the most complex methods in the code named, with how often each has changed.", "Plan to split them into smaller methods, each with its own tests, starting with the code that changes most.", "In a sandbox, make the first split and run all tests."], ["The first methods are split, each with its own tests, and the test run passes."]),
+  },
   "aut.old-api-versions": {
     complexity: "complex",
     hours: each(["total"], "component on an old API version", "components on an old API version", [30, 55], 21),

@@ -2,6 +2,7 @@ import type { Finding, NotMeasurableKind, Run, Score } from "../schemas/index.ts
 import type { OverallScore } from "../domains/scoring.ts";
 import type { ValueModel } from "../value/model.ts";
 import { apiLimitsExtractor } from "../extract/integrations.ts";
+import { UNSCORED_RULES } from "../domains/scoring.ts";
 
 // The re-check (roadmap Stage 5): what changed since the first health check.
 // Checks are lined up by rule, not by finding, because a rule can raise one
@@ -27,6 +28,13 @@ export type Progress = {
   remaining: RuleChange[];
   added: RuleChange[];
   unknown: RuleChange[];
+  /**
+   * Rules with an issue now that the earlier run never checked (no issue or pass
+   * there), listed apart so they don't read as the org getting worse
+   * (DECISIONS.md 673). Only PMD's groups take this path; every other rule
+   * compares as before. Optional, so a comparison stored before it reads as before.
+   */
+  newlyMeasured?: RuleChange[];
   areas: Array<{ domain: string; before: number | null; after: number | null }>;
   /** Storage then and now (DECISIONS.md 500). Null when this run has no storage finding, so nothing is said. */
   storage: StorageProgress | null;
@@ -55,6 +63,9 @@ function kindNow(findings: Finding[]): { notMeasurableKind?: NotMeasurableKind }
   return { notMeasurableKind: kinds.size === 1 ? [...kinds][0]! : "unreadable" };
 }
 
+/** The rules a re-check reads as newly measured when the earlier run didn't check them: PMD's groups (DECISIONS.md 673). */
+const MEASURED_LATER = UNSCORED_RULES;
+
 export function compareWithBaseline(baseline: ProgressSide, current: ProgressSide): Progress {
   const before = byRule(baseline.findings);
   const now = byRule(current.findings);
@@ -62,10 +73,14 @@ export function compareWithBaseline(baseline: ProgressSide, current: ProgressSid
   const remaining: RuleChange[] = [];
   const added: RuleChange[] = [];
   const unknown: RuleChange[] = [];
+  const newlyMeasured: RuleChange[] = [];
   for (const [ruleId, then] of before) {
     const thenIssues = then.filter((f) => f.status === "issue");
     if (thenIssues.length === 0) continue;
     const nowFindings = now.get(ruleId) ?? [];
+    // PMD's groups exist only on a run that had its step: a pulse, or a run
+    // without it, says nothing of them, never "can't tell" (DECISIONS.md 673).
+    if (MEASURED_LATER.has(ruleId) && nowFindings.length === 0) continue;
     const nowIssues = nowFindings.filter((f) => f.status === "issue");
     if (nowIssues.length) remaining.push(change(ruleId, nowIssues));
     else if (nowFindings.some((f) => f.status === "passed")) fixed.push(change(ruleId, thenIssues));
@@ -73,7 +88,12 @@ export function compareWithBaseline(baseline: ProgressSide, current: ProgressSid
   }
   for (const [ruleId, nowFindings] of now) {
     const nowIssues = nowFindings.filter((f) => f.status === "issue");
-    if (nowIssues.length && !(before.get(ruleId) ?? []).some((f) => f.status === "issue")) added.push(change(ruleId, nowIssues));
+    if (!nowIssues.length) continue;
+    const then = before.get(ruleId) ?? [];
+    if (then.some((f) => f.status === "issue")) continue;
+    // New only if the earlier run checked the rule, as the portal's alerts decide (DECISIONS.md 661, 673).
+    if (MEASURED_LATER.has(ruleId) && !then.some((f) => f.status === "passed")) newlyMeasured.push(change(ruleId, nowIssues));
+    else added.push(change(ruleId, nowIssues));
   }
   const domains = [...new Set([...baseline.scores, ...current.scores].map((s) => s.domain))];
   const scoreOf = (scores: Score[], domain: string): number | null => {
@@ -89,6 +109,8 @@ export function compareWithBaseline(baseline: ProgressSide, current: ProgressSid
     remaining,
     added,
     unknown,
+    // Only when there are some, so a comparison without them is as it was.
+    ...(newlyMeasured.length ? { newlyMeasured } : {}),
     areas: domains.map((domain) => ({ domain, before: scoreOf(baseline.scores, domain), after: scoreOf(current.scores, domain) })).filter((a) => a.before !== null || a.after !== null),
     storage: compareStorage(baseline, current),
   };
@@ -207,7 +229,8 @@ export function progressFigures(p: Progress): number[] {
   const storage = comparedStorage(p).flatMap((k) => [k.then.used, k.then.max, k.now.used, k.now.max, Math.abs(k.now.used - k.then.used), ...(k.average === null ? [] : [k.average])]);
   // "The two health checks'" reads as a figure, so the sentence that says it carries its 2.
   const notCompared = p.storage && "notCompared" in p.storage && p.storage.notCompared === "not_alike" ? [2] : [];
-  return [...pairs, ...changes, p.fixed.length, p.remaining.length, p.added.length, p.unknown.length, ...overflow, ...storage, ...notCompared];
+  const firstTime = p.newlyMeasured?.length ? [p.newlyMeasured.length] : [];
+  return [...pairs, ...changes, p.fixed.length, p.remaining.length, p.added.length, p.unknown.length, ...overflow, ...storage, ...notCompared, ...firstTime];
 }
 
 /** The day counts the storage sentences print ("in 118 days", "every 30 days"). The number check reads them as days, not plain counts. */
@@ -221,6 +244,6 @@ export function progressDays(p: Progress): number[] {
  * the earlier run's, whose findings aren't in this run's data, so the titles go
  * in as text: a figure in one ("90 days") then traces (DECISIONS.md 503).
  */
-export const progressTitles = (p: Progress): string[] => [p.fixed, p.remaining, p.added, p.unknown].flatMap((list) => list.map((c) => c.title));
+export const progressTitles = (p: Progress): string[] => [p.fixed, p.remaining, p.added, p.unknown, p.newlyMeasured ?? []].flatMap((list) => list.map((c) => c.title));
 
 export const worthFigures = (p: Progress): number[] => [p.worth.before, p.worth.after, Math.abs(p.worth.before - p.worth.after)];

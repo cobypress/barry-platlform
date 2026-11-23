@@ -11,6 +11,8 @@ import { applyOverrides, refusalSummary } from "../narrative/overrides.ts";
 import type { RuleContext } from "../engine/rule.ts";
 import type { Extractor } from "../extract/types.ts";
 import { usersExtractor } from "../extract/users.ts";
+import { PMD_RULES } from "../extract/lint/pmd.ts";
+import { LINT_TOTALS_FILE, LintTotals } from "../extract/lint/totals.ts";
 import { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { BenchmarkRow, Calibration, Finding, HeadcountBand, Industry, Metric, Run, SALES_CLOUD_DOMAINS, Score, type NumberOverride } from "../schemas/index.ts";
 
@@ -31,9 +33,22 @@ type Source =
   | { from: "metric"; id: string }
   // A figure a rule records on a pass and an issue alike. One recorded only on
   // an issue would leave out every org that passed, and skew the set.
-  | { from: "fact"; ruleId: string; fact: string };
+  | { from: "fact"; ruleId: string; fact: string }
+  // PMD's whole-org counts, from lint-totals.json (DECISIONS.md 673): a rule's, or what it read.
+  | { from: "lint"; rule: string; count: "found" | "suppressed" | "components" }
+  | { from: "lint"; read: "classes" | "triggers" | "lines" };
 
 export type BenchmarkMetric = { key: string; unit: Unit; source: Source };
+
+/** A PMD rule's name as a key: ApexCRUDViolation as apex_crud_violation. */
+export const lintKey = (rule: string): string =>
+  rule
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2")
+    .toLowerCase();
+
+/** What a benchmark says of a PMD count when PMD didn't run, or the run had no step: never zero. */
+export const LINT_NOT_MEASURED = "PMD didn't run in this health check, so this wasn't measured.";
 
 // A fixed list, and only whole-org figures. Segments, series, stats and the
 // worst-segment facts are never read, because a per-rep or per-account value is
@@ -65,12 +80,25 @@ export const BENCHMARK_METRICS: BenchmarkMetric[] = [
   { key: "bp.users_without_role_rate", unit: "percent", source: { from: "fact", ruleId: "bp.users-without-role", fact: "rate" } },
   { key: "utl.unused_reports_rate", unit: "percent", source: { from: "fact", ruleId: "utl.unused-reports", fact: "share" } },
   { key: "sec.health_check_score", unit: "score", source: { from: "fact", ruleId: "sec.health-check-score", fact: "score" } },
+  // Every PMD rule's counts, whether or not it fired, and what PMD read, as the
+  // owner asked: kept to benchmark on, though most are never shown (DECISIONS.md 673).
+  ...Object.keys(PMD_RULES).flatMap((rule) =>
+    (["found", "suppressed", "components"] as const).map((count): BenchmarkMetric => ({ key: `code.pmd.${lintKey(rule)}.${count}`, unit: "count", source: { from: "lint", rule, count } })),
+  ),
+  ...(["classes", "triggers", "lines"] as const).map((read): BenchmarkMetric => ({ key: `code.pmd.${read}`, unit: "count", source: { from: "lint", read } })),
 ];
 
 export type Figure = { metricKey: string; unit: Unit; value: number };
 export type Skipped = { metricKey: string; reason: string };
 
-type Read = { metrics: Metric[]; scores: Score[]; findings: Finding[] };
+/** `lintTotals` is the run's lint-totals.json, or null when it has none. */
+type Read = { metrics: Metric[]; scores: Score[]; findings: Finding[]; lintTotals?: LintTotals | null };
+
+/** The run's PMD totals, or null when it had no step. A file that doesn't parse is refused rather than read as not measured. */
+export function readLintTotals(dir: string): LintTotals | null {
+  const path = join(dir, LINT_TOTALS_FILE);
+  return existsSync(path) ? LintTotals.parse(JSON.parse(readFileSync(path, "utf8"))) : null;
+}
 
 /** One allowlisted figure as the run holds it, or why there isn't one. */
 function figureOf(input: Read, unit: Unit, source: Source): { value: number } | { reason: string } {
@@ -87,6 +115,13 @@ function figureOf(input: Read, unit: Unit, source: Source): { value: number } | 
     // A changed unit would put a figure in the wrong comparison, so it's left out.
     if (metric.unit !== unit) return { reason: `The run measured this in ${metric.unit}, not ${unit}.` };
     return { value: metric.value };
+  }
+  if (source.from === "lint") {
+    const pmd = input.lintTotals?.pmd;
+    if (!pmd || pmd.status !== "ran") return { reason: LINT_NOT_MEASURED };
+    if ("read" in source) return { value: pmd[source.read] };
+    const total = pmd.rules[source.rule];
+    return total ? { value: total[source.count] } : { reason: "This run's PMD didn't check this rule." };
   }
   const results = input.findings.filter((f) => f.ruleId === source.ruleId);
   const measured = results.filter((f) => f.status !== "not_measurable");
@@ -109,6 +144,8 @@ const RANGE: Record<Unit, { min: number; max: number; what: string }> = {
   percent: { min: 0, max: 100, what: "0 to 100 for a percentage" },
   score: { min: 0, max: 100, what: "0 to 100 for a score" },
   days: { min: 0, max: 3_650, what: "0 to 3,650 for days" },
+  // No consultant corrects these (DECISIONS.md 673); the bound is only so every unit has one.
+  count: { min: 0, max: 100_000_000, what: "0 to 100,000,000 for a count" },
 };
 
 /**
@@ -134,7 +171,7 @@ export function benchmarkFigures(input: Read & { asRead?: Omit<Read, "scores"> }
       continue;
     }
     if (input.asRead) {
-      const read = figureOf({ ...input.asRead, scores: input.scores }, unit, source);
+      const read = figureOf({ ...input.asRead, scores: input.scores, lintTotals: input.lintTotals }, unit, source);
       const range = RANGE[unit];
       const corrected = !("value" in read) || read.value !== value;
       if (corrected && (value < range.min || value > range.max)) {
@@ -330,6 +367,7 @@ function prepareBenchmark(options: Omit<BenchmarkOptions, "storeDir">): Prepared
     scores: z.array(Score).parse(readJson(join(dir, "scores.json"))),
     findings: effective.findings,
     asRead: { metrics, findings },
+    lintTotals: readLintTotals(dir),
   });
   if (figures.length === 0) throw new Error("Nothing in this run was measurable, so there's nothing to export.");
 

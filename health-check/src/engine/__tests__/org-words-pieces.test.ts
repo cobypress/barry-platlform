@@ -1096,6 +1096,29 @@ const SIGNED_OFF: string[] = [
   'src/money/seat-cost.ts: list.reason',
   'src/money/seat-cost.ts: own',
   'src/money/seat-cost.ts: source',
+  // PMD's six groups in technical health (DECISIONS.md 673).
+  // Numbers: counts the rule works out, and a line number.
+  "src/domains/technical-health/lint.ts: checked",
+  "src/domains/technical-health/lint.ts: n",
+  "src/domains/technical-health/lint.ts: shown[0]!",
+  'src/domains/technical-health/lint.ts: plural(alreadyCount, "more is", "more are")',
+  'src/domains/technical-health/lint.ts: plural(checked, "class or trigger", "classes and triggers")',
+  'src/domains/technical-health/lint.ts: plural(components.length, "class or trigger", "classes and triggers")',
+  'src/domains/technical-health/lint.ts: plural(found, "place", "places")',
+  'src/domains/technical-health/lint.ts: plural(others, "other class or trigger", "other classes and triggers")',
+  'src/domains/technical-health/lint.ts: plural(suppressed, "more was", "more were")',
+  // Fixed sentences of the group's own, each a said literal in LINT_GROUPS.
+  "src/domains/technical-health/lint.ts: group.where",
+  "src/domains/technical-health/lint.ts: group.why",
+  "src/domains/technical-health/lint.ts: andList(alreadyBy)",
+  // Sentences said, joinSaid or andList made in the same function: the line numbers, the places named, and the notes.
+  "src/domains/technical-health/lint.ts: andList(numbers)",
+  'src/domains/technical-health/lint.ts: andList([...places, ...(others ? [said`${plural(others, "other class or trigger", "other classes and triggers")}`] : [])])',
+  "src/domains/technical-health/lint.ts: linesOf(lines, lines.length < (countBy.get(key(t.kind, t.component)) ?? 0))",
+  "src/domains/technical-health/lint.ts: notes",
+  "src/domains/technical-health/lint.ts: notes",
+  "src/domains/technical-health/lint.ts: notes",
+  "src/domains/technical-health/lint.ts: placesText",
 ];
 
 const ROOT = join(import.meta.dirname, "../../..");

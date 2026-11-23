@@ -28,6 +28,17 @@ export type LintFinding = {
 /** How many a component had, beside how many are kept. Only components with a finding are listed. */
 export type ComponentCount = { kind: LintKind; component: string; found: number; stored: number };
 
+/**
+ * Every finding one rule gave one component, uncapped (DECISIONS.md 673): those
+ * the code marked to be ignored apart, and the worst priority among the rest
+ * (null when there are none), so the run's totals and what's shown don't depend
+ * on which findings the bound kept.
+ */
+export type RuleTally = { kind: LintKind; component: string; rule: string; found: number; suppressed: number; worst: number | null };
+
+/** What the tool read, the denominators beside the counts (DECISIONS.md 673): files it couldn't parse aren't counted. */
+export type LintRead = { classes: number; triggers: number; lines: number };
+
 export type ToolRun =
   | {
       status: "ran";
@@ -43,6 +54,10 @@ export type ToolRun =
       findings: LintFinding[];
       /** Our own fixed description of each rule that has a finding here. */
       rules: Record<string, string>;
+      /** PMD only, from step version 2: every rule's count in every component, uncapped (DECISIONS.md 673). */
+      tally?: RuleTally[];
+      /** PMD only, from step version 2: the classes, triggers and lines it read. */
+      read?: LintRead;
       /** Findings the tool reported under a rule outside our pinned set: dropped, and counted. */
       outsideRules: number;
       /** PMD only: findings whose line, column or priority couldn't be true of the file, dropped and counted (DECISIONS.md 670). */
@@ -96,6 +111,22 @@ export function bound(all: LintFinding[]): { findings: LintFinding[]; found: num
     .map(([key, list]) => ({ kind: list[0]!.kind, component: list[0]!.component, found: list.length, stored: storedBy.get(key) ?? 0 }))
     .sort((a, b) => a.kind.localeCompare(b.kind) || a.component.localeCompare(b.component));
   return { findings, found: all.length, stored: findings.length, components };
+}
+
+/** Each rule's findings in each component, uncapped, in a fixed order whatever order they came in. */
+export function tallyOf(all: LintFinding[]): RuleTally[] {
+  const out = new Map<string, RuleTally>();
+  for (const f of all) {
+    const key = `${f.kind}\u0000${f.component}\u0000${f.rule}`;
+    const t = out.get(key) ?? { kind: f.kind, component: f.component, rule: f.rule, found: 0, suppressed: 0, worst: null };
+    if (f.suppressed) t.suppressed++;
+    else {
+      t.found++;
+      t.worst = t.worst === null ? f.severity : Math.min(t.worst, f.severity);
+    }
+    out.set(key, t);
+  }
+  return [...out.values()].sort((a, b) => a.kind.localeCompare(b.kind) || a.component.localeCompare(b.component) || a.rule.localeCompare(b.rule));
 }
 
 /** The descriptions of the rules that have a finding, from our own table. */

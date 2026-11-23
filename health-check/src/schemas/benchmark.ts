@@ -17,7 +17,8 @@ export const BenchmarkRow = z.strictObject({
   ruleSetVersion: z.string().min(1),
   // Whole units only, because an exact ratio can identify an unusual org.
   value: z.number().int(),
-  unit: z.enum(["percent", "days", "score"]),
+  // count: PMD's whole-org counts and what it read (DECISIONS.md 673).
+  unit: z.enum(["percent", "days", "score", "count"]),
   industry: z.string().min(1),
   headcountBand: HeadcountBand,
   userBand: UserBand,

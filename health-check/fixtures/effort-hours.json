@@ -896,6 +896,72 @@
       "capHours": 35,
       "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
     },
+    "tech.lint-complexity": {
+      "fixComplexity": "complex",
+      "facts": [
+        "components"
+      ],
+      "each": "class or trigger too complex to change safely",
+      "minutesLow": 120,
+      "minutesHigh": 360,
+      "capHours": 21,
+      "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
+    },
+    "tech.lint-data-access": {
+      "fixComplexity": "complex",
+      "facts": [
+        "components"
+      ],
+      "each": "class or trigger that reads or changes data without checking access",
+      "minutesLow": 60,
+      "minutesHigh": 150,
+      "capHours": 35,
+      "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
+    },
+    "tech.lint-injection": {
+      "fixComplexity": "complex",
+      "facts": [
+        "components"
+      ],
+      "each": "class or trigger open to injection or an unsafe redirect",
+      "minutesLow": 60,
+      "minutesHigh": 180,
+      "capHours": 35,
+      "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
+    },
+    "tech.lint-limits": {
+      "fixComplexity": "complex",
+      "facts": [
+        "components"
+      ],
+      "each": "class or trigger with a limit risk",
+      "minutesLow": 60,
+      "minutesHigh": 150,
+      "capHours": 35,
+      "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
+    },
+    "tech.lint-swallowed-errors": {
+      "fixComplexity": "complex",
+      "facts": [
+        "components"
+      ],
+      "each": "class or trigger that ignores errors it catches",
+      "minutesLow": 20,
+      "minutesHigh": 60,
+      "capHours": 35,
+      "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
+    },
+    "tech.lint-tests": {
+      "fixComplexity": "moderate",
+      "facts": [
+        "components"
+      ],
+      "each": "test class with test methods to fix",
+      "minutesLow": 30,
+      "minutesHigh": 90,
+      "capHours": 35,
+      "pastTheCap": "covers the first units the cap allows; the rest is scoped separately"
+    },
     "tech.storage-use": {
       "fixComplexity": "complex",
       "low": 4,

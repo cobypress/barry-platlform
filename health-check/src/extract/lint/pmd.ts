@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { redactSecrets } from "../../privacy/secrets.ts";
-import { bound, MAX_SOURCE_CHARS, notRun, rulesSeen, type LintFinding, type ToolRun } from "./findings.ts";
+import { bound, MAX_SOURCE_CHARS, notRun, rulesSeen, tallyOf, type LintFinding, type ToolRun } from "./findings.ts";
 
 // PMD over the org's Apex, when the worker has it (DECISIONS.md 670). PMD is
 // Java, and Render's Node runtime has none, so the worker finds both through
@@ -409,6 +409,8 @@ export async function runPmd(files: ApexFile[], install: PmdInstall, options: Pm
     }
     skipped.unparsable = unparsable.size;
     const kept = bound(raw);
+    // The denominators: what PMD read, so a file it couldn't parse isn't counted as clean (DECISIONS.md 673).
+    const read = handed.filter((f) => !unparsable.has(f));
     return {
       status: "ran",
       tool: "pmd",
@@ -420,6 +422,8 @@ export async function runPmd(files: ApexFile[], install: PmdInstall, options: Pm
       components: kept.components,
       findings: kept.findings,
       rules: rulesSeen(kept.findings, PMD_RULES),
+      tally: tallyOf(raw),
+      read: { classes: read.filter((f) => f.kind === "class").length, triggers: read.filter((f) => f.kind === "trigger").length, lines: read.reduce((sum, f) => sum + lines.get(f)!, 0) },
       outsideRules,
       malformed,
       limits: [],
