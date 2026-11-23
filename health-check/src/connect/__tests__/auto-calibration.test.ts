@@ -122,6 +122,8 @@ const UNMEASURED_FINDINGS = [
   "pipe.dead-end-stage",
   "pipe.going-backwards",
   "pipe.skipped-stages",
+  // Not measurable, with what the customer can tell us, where a consultant's calibration had an issue for a consultant (DECISIONS.md 693).
+  "pipe.unmapped-stages",
   "rev.win-backs",
 ];
 const UNMEASURED_METRICS = [
@@ -162,7 +164,7 @@ describe("what the synthetic org can't measure under it", () => {
     const before = unmeasured(fixture);
     const lost = automatic.findings.filter((f) => f.status === "not_measurable" && !before.has(f.ruleId));
     assert.deepEqual([...new Set(lost.map((f) => f.ruleId))].sort(), UNMEASURED_FINDINGS);
-    for (const f of lost) assert.match(f.notMeasurableReason!, /^(Salesforce's setting can't tell lost from no decision for: .+\. The calibration can say which each is\.|The calibration doesn't say where these open stages come in the sales order: Qualified\.|No targets were given in the calibration\. Tell us your targets to see pipeline coverage\.|No account is calibrated as an integration account, so we can't tell which accounts integrations run on\.)$/, f.ruleId);
+    for (const f of lost) assert.match(f.notMeasurableReason!, /^(Salesforce's setting can't tell lost from no decision for: .+\. If you tell us which each is, your next health check can measure this\.|The calibration doesn't say what these stages mean, as it was read from your org's own stage settings: .+\. If you tell us what each means, your next health check can use it\.|The calibration doesn't say where these open stages come in the sales order: Qualified\.|No targets were given in the calibration\. Tell us your targets to see pipeline coverage\.|No account is calibrated as an integration account, so we can't tell which accounts integrations run on\.)$/, f.ruleId);
     const beforeMetrics = unmeasuredMetrics(fixture);
     assert.deepEqual([...unmeasuredMetrics(automatic)].filter((id) => !beforeMetrics.has(id)).sort(), UNMEASURED_METRICS);
     // Nothing the fixture's calibration couldn't measure is measured from a guess here.

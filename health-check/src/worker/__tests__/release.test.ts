@@ -13,7 +13,7 @@ import { AutomaticReplay, automaticSyntheticCalibration } from "../../testing/au
 import { runFromRecording } from "../../testing/harness.ts";
 import { CONSOLE_CHECKS } from "../console-checks.ts";
 import { MemoryWorkerStore } from "../memory-store.ts";
-import { FAILURE_FLAG_SQL, HOLD_OUTPUT_SQL, PostgresWorkerStore, RAISE_FLAG_SQL, RELEASE_ROW_SQL, RELEASE_RUN_SQL, RUN_DIGEST_SQL, type SqlClient, type SqlPool, type SqlResult } from "../postgres-store.ts";
+import { FAILURE_FLAG_SQL, HOLD_OUTPUT_SQL, LAST_RELEASED_SCORE_SQL, PostgresWorkerStore, RAISE_FLAG_SQL, RELEASE_ROW_SQL, RELEASE_RUN_SQL, RUN_DIGEST_SQL, type SqlClient, type SqlPool, type SqlResult } from "../postgres-store.ts";
 import { checkSections, decideRelease, SCORE_MOVE_POINTS, unmeasuredRules, type HoldReason } from "../release.ts";
 import { progressOf, RunClosedError, type RunOutputRecord, type RunOverall } from "../types.ts";
 import { consoleRun, RUN_ID, runInput } from "./helpers.ts";
@@ -335,6 +335,16 @@ describe("the Postgres store's release and hold", () => {
     assert.deepEqual(pool.statements.find((s) => s.text === RAISE_FLAG_SQL)!.values, [RUN_ID, "score_moved", NOW, JSON.stringify({ score: 60, previous: 80, moved: 20 })]);
     assert.match(RAISE_FLAG_SQL, /ON CONFLICT \("runId", "kind"\) DO NOTHING$/);
     assert.ok(!texts.includes(RELEASE_ROW_SQL) && !texts.includes(RELEASE_RUN_SQL));
+  });
+
+  test("the score is compared only with the same org's last released run of the same product, never this one", async () => {
+    assert.match(LAST_RELEASED_SCORE_SQL, /r\."status" = 'released'/);
+    assert.match(LAST_RELEASED_SCORE_SQL, /JOIN "HealthCheckRelease" l ON l\."runId" = r\."id"/);
+    assert.match(LAST_RELEASED_SCORE_SQL, /r\."id" <> \$1 AND left\(r\."orgId", 15\) = \$2 AND r\."product" = \$3/);
+    const pool = new FakePool();
+    pool.handlers.unshift((t) => (t === LAST_RELEASED_SCORE_SQL ? { rows: [{ score: 72 }], rowCount: 1 } : undefined));
+    assert.equal(await new PostgresWorkerStore(pool).lastReleasedScore(RUN_ID, "00D000000000001", "barometer"), 72);
+    assert.deepEqual(pool.statements.at(-1)!.values, [RUN_ID, "00D000000000001", "barometer"]);
   });
 
   test("a failed run's flag is raised in its own savepoint; a console without the table still records the failure", async () => {
