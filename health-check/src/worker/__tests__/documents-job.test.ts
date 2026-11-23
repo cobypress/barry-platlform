@@ -27,7 +27,7 @@ import { executiveHtml } from "../../render/executive.ts";
 import { HANDBOOK_NOT_MADE } from "../../handbook/read.ts";
 import { HANDBOOK_MARKER } from "../../testing/synthetic-org.ts";
 import { loadAnswers } from "../../testing/replay.ts";
-import { clientNameOf, folderFor, heldBackReason, heldBackSummary, INTERNAL_FOLDER, laterSurveyAnswers, processDocumentsJob } from "../documents-job.ts";
+import { clientNameOf, folderFor, heldBackReason, heldBackSummary, HELD_FOR_US, INTERNAL_FOLDER, laterSurveyAnswers, processDocumentsJob } from "../documents-job.ts";
 import { DriveError, GoogleDrive, type DocumentDrive, type DriveItem } from "../drive.ts";
 import { z } from "zod";
 import type { DocumentFile, DocumentsJobInput } from "../types.ts";
@@ -518,18 +518,18 @@ describe("the released documents", () => {
     const one: HeldFigure = { document: "The full health check", page: 12, figure: "£1.99m", reason: "not in the data" };
     assert.equal(
       heldBackReason([one, { document: "The executive summary", page: 4, figure: "31.4", reason: "not in the data" }]),
-      "Held back: 2 figures on 2 pages can't be traced to the data.\nThe full health check, page 12: £1.99m: not in the data.\nThe executive summary, page 4: 31.4: not in the data.\nEdit the wording in those sections, approve them again, and make the documents again.",
+      "Held back: 2 figures on 2 pages can't be traced to the data.\nThe full health check, page 12: £1.99m: not in the data.\nThe executive summary, page 4: 31.4: not in the data.\nThese are in our own text, not in a section's wording, so they're ours to fix: tell Black Cloud.",
     );
     assert.match(heldBackReason([one]), /^Held back: 1 figure on 1 page can't be traced/);
     const many = Array.from({ length: 13 }, (_, i) => ({ ...one, figure: `£${i + 1}m`, page: i < 2 ? 12 : 20 }));
     const reason = heldBackReason(many);
     assert.match(reason, /^Held back: 13 figures on 2 pages /);
-    assert.match(reason, /\n.*£10m: not in the data\.\nAnd 3 more\.\nEdit the wording/);
+    assert.match(reason, /\n.*£10m: not in the data\.\nAnd 3 more\.\nThese are in our own text/);
     assert.equal(reason.split("\n").length, 13, "the count, ten figures, the rest counted, then what to do");
     assert.doesNotMatch(reason, /£11m/);
     // The checker's own error message is cut short.
     const long = heldBackReason([{ document: "The full health check", page: 12, figure: "(whole text)", reason: `The number check failed to run: ${"x".repeat(500)}` }]);
-    assert.ok(long.includes(`\nThe full health check, page 12: (whole text): The number check failed to run: ${"x".repeat(200 - 32)}.\nEdit`), long);
+    assert.ok(long.includes(`\nThe full health check, page 12: (whole text): The number check failed to run: ${"x".repeat(200 - 32)}.\nThese are`), long);
     assert.equal(heldBackSummary([one, one]), "Held back: 2 figures on 1 page can't be traced to the data. See the run's Release tab.");
   });
 
@@ -539,7 +539,7 @@ describe("the released documents", () => {
     assert.deepEqual(lines, [
       "Held back: 1 figure on 1 page can't be traced to the data.",
       "The full health check, page 12: £1.99m: it broke badly.",
-      "Edit the wording in those sections, approve them again, and make the documents again.",
+      "These are in our own text, not in a section's wording, so they're ours to fix: tell Black Cloud.",
     ]);
   });
 });
@@ -1238,6 +1238,63 @@ describe("the org handbook", () => {
     assert.deepEqual([...drive.items.values()], [], "nothing in Drive at all");
     assert.ok(!existsSync(join(deps.runsDir, RUN_ID, "documents", HANDBOOK_DOCX)));
   });
+
+  test("a make that repaired what it couldn't trace is made, tells the consultants in counts only, and says what it did, a masked figure in a record row only logged (decision 682)", async () => {
+    const drive = new MemoryDrive();
+    const deps = withHandbook(jobInput(), drive);
+    const alerts: string[] = [];
+    deps.alert = async (line) => void alerts.push(line);
+    deps.renderReleased = async (dir, approved, out) => ({
+      ...(await fakeRender(dir, approved, out)),
+      fellBack: [{ output: "executive_summary", key: "verdict", title: "Verdict", source: "consultant_edit", kinds: { identifier: 1 }, words: ["We saw Zeta9Flux."] }],
+      leftOut: [{ document: "The full health check", page: 12, kind: "identifier", ruleId: "cfg.unassigned-layouts", field: "owner" }],
+      repairs: "some",
+      masks: { executive: 0, full: 1, ceo: 0, microsite: 0 },
+      stillIn: ["the action lists"],
+    });
+    const result = await processDocumentsJob(RUN_ID, deps, { final: true });
+    assert.equal(result.outcome, "done");
+    assert.deepEqual(alerts, [`Run ${RUN_ID}'s documents were made with some repairs: 0 drafted sections and 1 edited section in our own wording, 1 detail withheld in the reports. See the run's Release tab.`]);
+    const made = deps.store.documents.get(RUN_ID)!.made!;
+    assert.deepEqual(made.warnings.slice(0, 2), [
+      '"Verdict" uses our own wording because what you wrote couldn\'t be traced to the data: "We saw Zeta9Flux.". Your edit is kept: correct it, approve it again and make the documents again.',
+      "We withheld 1 detail of our own text because it couldn't be traced to the data, first seen in The full health check, page 12. That's ours to fix.",
+    ]);
+    assert.ok(deps.lines.some((l) => /worked around a defect: 1 untraceable figure masked, from cfg\.unassigned-layouts \(owner\)/.test(l)), JSON.stringify(deps.lines));
+    assert.ok(deps.lines.some((l) => l === `Run ${RUN_ID}: a masked figure still shows in the action lists.`), "said in the log, and the make is done");
+    assert.doesNotMatch(alerts.join(), /Zeta9Flux|Verdict/);
+  });
+
+  for (const [what, masks] of [
+    ["more than ten masks in a document", { executive: 0, full: 11, ceo: 0, microsite: 0 }],
+    ["more than ten masks on the microsite alone", { executive: 0, full: 0, ceo: 0, microsite: 11 }],
+  ] as const) {
+    test(`a make held for us for ${what} (decision 682): made into Black Cloud's own folder only, shared with no one, no digest or microsite, and the reason says it's ours to fix`, async () => {
+      const drive = new MemoryDrive();
+      const deps = withHandbook(jobInput(), drive);
+      const alerts: string[] = [];
+      deps.alert = async (line) => void alerts.push(line);
+      const shared: string[] = [];
+      deps.sharing = { share: async (folder, email) => (shared.push(`${folder} ${email}`), "perm-0009"), findReader: async () => null, unshare: async () => {} };
+      deps.renderReleased = async (dir, approved, out) => ({ ...(await fakeRender(dir, approved, out)), leftOut: [], fellBack: [], repairs: "held for us", masks });
+      const result = await processDocumentsJob(RUN_ID, deps, { final: true });
+      assert.equal(result.outcome, "failed");
+      const doc = deps.store.documents.get(RUN_ID)!;
+      assert.equal(doc.error, HELD_FOR_US);
+      assert.match(doc.error!, /That's ours to fix: once it's fixed, make the documents again\.$/);
+      const items = [...drive.items.values()];
+      const held = items.find((i) => i.folder && i.name === "Synthetic Co - Held for us")!;
+      const parent = items.find((i) => i.id === held.parent)!;
+      assert.equal(parent.name, INTERNAL_FOLDER, "inside Black Cloud's own folder");
+      assert.equal(parent.parent, drive.rootFolderId);
+      assert.deepEqual(items.filter((i) => i.folder).map((i) => i.name).sort(), [INTERNAL_FOLDER, "Synthetic Co - Held for us"].sort(), "no client folder at all");
+      assert.ok(items.filter((i) => !i.folder).every((i) => i.parent === held.id) && items.filter((i) => !i.folder).length === 6);
+      assert.deepEqual(shared, [], "shared with no one");
+      assert.equal(deps.store.writes.some((w) => w.method === "saveDocuments" || w.method === "saveMicrosite"), false, "no digest, no microsite");
+      assert.equal(alerts.length, 1);
+      assert.match(alerts[0]!, /held for us and went to no customer/);
+    });
+  }
 
   test("a make that fails before Drive uploads no handbook either", async () => {
     const drive = new MemoryDrive();

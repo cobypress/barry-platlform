@@ -5,7 +5,7 @@ import { refusalReason, refusalSummary } from "../narrative/overrides.ts";
 import type { BenchmarkInput } from "../benchmark/compare.ts";
 import { AlreadyContributed, CONSENT_FILE, contributeBenchmark } from "../benchmark/export.ts";
 import { longDate } from "../render/format.ts";
-import { baselineRefusedSummary, describeHeld, renderReleased, type DocumentKey, type HeldFigure, type ReleasedDocuments } from "../render/render-released.ts";
+import { baselineRefusedSummary, describeHeld, renderReleased, repairWarnings, type DocumentKey, type HeldFigure, type ReleasedDocuments } from "../render/render-released.ts";
 import { safeReason, type Attempt, type JobOutcome, type WorkerDeps } from "./deps.ts";
 import type { DocumentDrive, DriveItem } from "./drive.ts";
 import { withJobLock } from "./lock.ts";
@@ -228,6 +228,22 @@ function oldestFirst(a: DriveItem, b: DriveItem): number {
   return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 }
 
+/**
+ * What the Release tab says when a make is held for us (decision 682): the one
+ * case a person is needed, since a report full of withheld details, or with a
+ * headline figure withheld, shouldn't reach a customer unseen.
+ */
+export const HELD_FOR_US = "Held for us: too much in these documents couldn't be traced to the data to send them unseen. They were made and are in Black Cloud's own folder in Drive, not the customer's; nothing was shared, published or added to the connector, and the last documents the customer had stay as they were. That's ours to fix: once it's fixed, make the documents again.";
+
+/** A held make's files, in Black Cloud's own folder under "Held for us", replaced on each make. Never in the client's folder. */
+async function putHeld(drive: DocumentDrive, clientName: string, file: string, mime: string, path: string): Promise<DriveItem> {
+  const internal = (await drive.folders(drive.rootFolderId)).find((f) => same(f.name, INTERNAL_FOLDER)) ?? (await drive.createFolder(drive.rootFolderId, INTERNAL_FOLDER));
+  const name = `${clientName} - Held for us`;
+  const own = (await drive.folders(internal.id)).find((f) => same(f.name, name)) ?? (await drive.createFolder(internal.id, name));
+  const replaceId = (await drive.files(own.id)).find((f) => f.name === file)?.id;
+  return drive.putFile(own.id, file, mime, readFileSync(path), replaceId);
+}
+
 /** A file for Black Cloud only, beside the clients' folders and never inside one, replaced on each make. */
 async function putInternal(drive: DocumentDrive, clientName: string, folderName: string, file: string, path: string): Promise<DriveItem> {
   const internal = (await drive.folders(drive.rootFolderId)).find((f) => same(f.name, INTERNAL_FOLDER)) ?? (await drive.createFolder(drive.rootFolderId, INTERNAL_FOLDER));
@@ -288,6 +304,31 @@ async function benchmarkFor(dir: string, deps: WorkerDeps, log: (line: string) =
   }
 }
 
+/**
+ * The line the consultants are sent when a make repaired something (decision
+ * 682, item 7): the run, how heavy, and counts. No title, figure or word of the
+ * customer's. Never a reason to fail the make.
+ */
+export function repairAlert(runId: string, printed: Pick<ReleasedDocuments, "repairs" | "fellBack" | "masks" | "micrositeHeld">): string {
+  const fellBack = printed.fellBack ?? [];
+  const edits = fellBack.filter((f) => f.source === "consultant_edit").length;
+  const drafts = fellBack.length - edits;
+  const masks = Object.values(printed.masks ?? {}).reduce((a, b) => a + b, 0);
+  const counts = [`${drafts} drafted ${drafts === 1 ? "section" : "sections"} and ${edits} edited ${edits === 1 ? "section" : "sections"} in our own wording`, `${masks} ${masks === 1 ? "detail" : "details"} withheld in the reports`, ...(printed.micrositeHeld ? ["no microsite"] : [])];
+  if (printed.repairs === "held for us") return `Run ${runId}'s documents are held for us and went to no customer: ${counts.join(", ")}. Ours to fix, then make them again. See the run's Release tab.`;
+  return `Run ${runId}'s documents were made with ${printed.repairs === "heavy" ? "heavy" : "some"} repairs: ${counts.join(", ")}. See the run's Release tab.`;
+}
+
+async function alertRepairs(runId: string, printed: ReleasedDocuments, deps: WorkerDeps, log: (line: string) => void): Promise<void> {
+  const line = repairAlert(runId, printed);
+  log(line);
+  try {
+    await deps.alert?.(line);
+  } catch (err) {
+    log(`Run ${runId}: the consultants couldn't be told of the repair: ${safeReason(err)}`);
+  }
+}
+
 /** How many held figures the error lists by name. The rest are counted. */
 const HELD_LISTED = 10;
 /** A reason can carry the checker's own error message, so each is cut short. */
@@ -311,7 +352,13 @@ export function heldBackReason(held: HeldFigure[]): string {
   const sentence = (text: string): string => (/[.!?]$/.test(text) ? text : `${text}.`);
   const listed = held.slice(0, HELD_LISTED).map((h) => sentence(describeHeld({ ...h, reason: safeReason(new Error(h.reason)).slice(0, HELD_REASON_MAX) })));
   const more = held.length > HELD_LISTED ? [`And ${held.length - HELD_LISTED} more.`] : [];
-  return [heldBackCount(held), ...listed, ...more, "Edit the wording in those sections, approve them again, and make the documents again."].map((line) => line.replace(/\s+/g, " ")).join("\n");
+  // Never "those sections" without naming one (decision 682, item 6).
+  const sections = [...new Set(held.flatMap((h) => (h.section ? [`"${h.section}"`] : [])))];
+  const todo = [
+    ...(sections.length ? [`Edit the wording in ${sections.join(", ")}, approve ${sections.length === 1 ? "it" : "them"} again, and make the documents again.`] : []),
+    ...(held.some((h) => !h.section) ? [`${sections.length ? "The rest are" : "These are"} in our own text, not in a section's wording, so they're ours to fix: tell Black Cloud.`] : []),
+  ];
+  return [heldBackCount(held), ...listed, ...more, ...todo].map((line) => line.replace(/\s+/g, " ")).join("\n");
 }
 
 /**
@@ -401,6 +448,25 @@ async function documentsLocked(runId: string, deps: WorkerDeps, attempt: Attempt
       log(`Run ${runId}'s documents weren't uploaded. ${summary}`);
       return fail(heldBackReason(printed.held), summary);
     }
+    // Too much withheld, or a number withheld where a page prints it: made for us, kept from the customer (decision 682).
+    if (printed.repairs === "held for us") {
+      for (const output of Object.keys(FILES) as Array<keyof typeof FILES>) {
+        await putHeld(deps.drive, clientName, `${clientName} - ${FILES[output].title}.${FILES[output].ext}`, FILES[output].mime, printed.files[output]);
+      }
+      await alertRepairs(runId, printed, deps, log);
+      return fail(HELD_FOR_US, `Run ${runId}'s documents are held for us: made, in ${INTERNAL_FOLDER} only.`);
+    }
+    // Repaired, not held (decision 682): a defect in our own text worked around is logged by run id, with rule and metric ids only.
+    const leftOut = printed.leftOut ?? [];
+    if (leftOut.length) {
+      const where = [...new Set(leftOut.map((l) => `${l.ruleId ?? l.metricId ?? l.stepId ?? "fixed text"} (${l.field})`))];
+      log(`Run ${runId}: worked around a defect: ${leftOut.length} untraceable ${leftOut.length === 1 ? "figure" : "figures"} masked, from ${where.join(", ")}.`);
+    }
+    if (printed.fellBack?.length) log(`Run ${runId}: ${printed.fellBack.length} ${printed.fellBack.length === 1 ? "section" : "sections"} printed in our own wording.`);
+    if (printed.stillIn?.length) log(`Run ${runId}: a masked figure still shows in ${printed.stillIn.join(", ")}.`);
+    if (printed.micrositeHeld) log(`Run ${runId}: the microsite wasn't made, because a page still held a figure after the repair.`);
+    // Some or heavy: one line to the consultants, counts only, never the customer's text (decision 682, item 7).
+    if (printed.repairs === "some" || printed.repairs === "heavy") await alertRepairs(runId, printed, deps, log);
     // Neither refused nor held: these rows are the ones the documents print. None, and nothing is written or removed.
     if (input.overrides.length > 0) keepOverrides(dir, input.overrides);
     const handbook = await makeHandbook(dir, join(dir, "documents"), clientName, input.run.asOf, summariesOn ? (handbookSummaries ?? null) : null, deps.renderHandbook);
@@ -440,7 +506,7 @@ async function documentsLocked(runId: string, deps: WorkerDeps, attempt: Attempt
     // None to write takes away an earlier make's, whose figures these documents may have corrected.
     const digest = printed.digest?.ok ? printed.digest.digest : null;
     // The survey's metrics as these documents print them, with their row: a run drafted before the run's results held them gets them now (DECISIONS.md 645).
-    const saved = await deps.store.saveDocuments(runId, { at: now(), clientName, folderName: folder.name, driveFolderId: folder.id, driveFolderUrl: folder.url, files, warnings: [...printed.warnings, ...(handbook.ok ? [] : [handbook.warning])] }, digest, printed.surveyMetrics);
+    const saved = await deps.store.saveDocuments(runId, { at: now(), clientName, folderName: folder.name, driveFolderId: folder.id, driveFolderUrl: folder.url, files, warnings: [...repairWarnings(printed.fellBack ?? [], leftOut, printed.micrositeHeld), ...printed.warnings, ...(handbook.ok ? [] : [handbook.warning])] }, digest, printed.surveyMetrics);
     // The folder follows the rows, and only once they're written: a row the console moved on meanwhile changed neither.
     if (saved && printed.surveyMetrics) keepSurveyMetrics(dir, printed.surveyMetrics);
     log(`Documents for ${runId} are in Drive${printed.warnings.length ? `, with ${printed.warnings.length} layout warnings` : ""}.`);

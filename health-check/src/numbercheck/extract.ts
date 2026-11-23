@@ -332,6 +332,17 @@ export type ExtractOptions = {
   labels?: string[];
 };
 
+/**
+ * A label is never claimed straight after a currency sign, or as
+ * part of a larger number ("£3M", "1.3M", "3M,5", "3M%"): what's there is a
+ * figure to trace (DECISIONS.md 682).
+ */
+function insideFigure(work: string, start: number, end: number): boolean {
+  const before = work.slice(Math.max(0, start - 2), start);
+  const after = work.slice(end, end + 2);
+  return /[£$€]$|\d[.,]$/.test(before) || /^[.,]\d|^%/.test(after);
+}
+
 export function extractFigures(text: string, options: ExtractOptions = {}): { normalised: string; figures: Figure[] } {
   const s = new Scanner(normalise(text));
   scanIdentifiers(s);
@@ -347,7 +358,7 @@ export function extractFigures(text: string, options: ExtractOptions = {}): { no
     let at = s.work.indexOf(norm);
     while (at !== -1) {
       const end = at + norm.length;
-      if (!/[\w]/.test(s.work[at - 1] ?? "") && !/[\w]/.test(s.work[end] ?? "") && !splits(at, end)) s.claim(at, end);
+      if (!/[\w]/.test(s.work[at - 1] ?? "") && !/[\w]/.test(s.work[end] ?? "") && !splits(at, end) && !insideFigure(s.work, at, end)) s.claim(at, end);
       at = s.work.indexOf(norm, end);
     }
   }

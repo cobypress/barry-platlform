@@ -28,7 +28,7 @@ import { fullReportHtml } from "../full-report.ts";
 import { inDocumentOrder } from "../html.ts";
 import { onePagerHtml } from "../one-pager.ts";
 import { renderRawNotesDocx } from "../raw-notes-docx.ts";
-import { approvedReport, renderReleased, type ApprovedRun } from "../render-released.ts";
+import { approvedReport, asPrinted, renderReleased, type ApprovedRun } from "../render-released.ts";
 import { INTERVIEWS_FILE, loadRun } from "../render-run.ts";
 
 // Decision 684. The engine doesn't read an account's name, so its token restores
@@ -225,6 +225,29 @@ describe("the customer's documents print plain words, Black Cloud's keep the id 
     const [a, b] = ["told us account A is the one to watch", "Account B holds the rest of open pipeline"];
     assert.ok(html.includes(a) && html.includes(b), `both are lettered: ${[...html.matchAll(/.{30}(?:ccount [AB]\b|one account).{30}/g)].map((m) => m[0]).join(" / ")}`);
     assert.ok(pageOf(a) < pageOf(b), `account A on page ${pageOf(a)}, account B first on page ${pageOf(b)}`);
+  });
+
+  test("a section is checked as printed: plain words for the customer's outputs, the id in the raw notes (decision 682 with 684)", () => {
+    const pseudonyms = new Pseudonymiser(map);
+    const body = `${token} holds ${share}% of open pipeline, beside ${other.token}.`;
+    for (const output of [undefined, "executive_summary", "full_health_check"] as const) {
+      assert.equal(asPrinted(body, pseudonyms, output), `Account A holds ${share}% of open pipeline, beside account B.`);
+      assert.deepEqual(ids(asPrinted(body, pseudonyms, output)), []);
+    }
+    assert.equal(asPrinted(`${token} holds it.`, pseudonyms, "full_health_check"), "One account holds it.");
+    assert.equal(asPrinted(body, pseudonyms, "raw_notes"), `${account.id} holds ${share}% of open pipeline, beside ${other.id}.`);
+  });
+
+  test("through the repair: a Claude draft elsewhere falls back, and the two accounts keep their letters", async () => {
+    const { dir, approved } = approvedWith({ interviews: `Your sales director told us ${token} and then ${other.token} hold most of it, and ${token} renews first.`, domain_current_pipeline: "We counted 4,321 open deals." }, true);
+    const result = await renderReleased(dir, approved, join(dir, "documents"));
+    assert.ok(!("refused" in result));
+    assert.deepEqual((result.fellBack ?? []).map((f) => f.key), ["domain_current_pipeline"], JSON.stringify(result.fellBack));
+    assert.deepEqual(result.held, []);
+    assert.equal(result.microsite?.ok, true, result.microsite && !result.microsite.ok ? result.microsite.reason : "");
+    const site = result.microsite!.ok ? result.microsite!.pages.pages.map((pg) => pageText(pg.html)).join(" ") : "";
+    assert.ok(site.includes("told us account A and then account B hold most of it, and account A renews first."), "the letters after the fall-back are as before it");
+    assert.deepEqual(ids(site), []);
   });
 
   test("the raw notes print the id where a customer's page prints plain words", async () => {

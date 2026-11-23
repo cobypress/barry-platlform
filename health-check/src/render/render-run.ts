@@ -11,7 +11,7 @@ import type { NarrativeClient } from "../narrative/client.ts";
 import { Intake } from "../narrative/intake.ts";
 import { refusalReason, type OverrideRefusal } from "../narrative/overrides.ts";
 import { buildReport, type BuiltReport, type ReportInput } from "../narrative/sections.ts";
-import { withRestoredIds } from "../numbercheck/index.ts";
+import { pageDataset } from "./page-dataset.ts";
 import { Pseudonymiser, type PseudonymEntry } from "../privacy/pseudonymiser.ts";
 import { Calibration, Finding, ManualStep, Metric, NumberOverride, Run, Score } from "../schemas/index.ts";
 import { EXECUTIVE_MAX_PAGES, executiveHtml, executiveMaxPages } from "./executive.ts";
@@ -252,6 +252,8 @@ export class OverridesRefused extends Error {
   }
 }
 
+export { pageDataset };
+
 export type PrintedLayout = { executive: LayoutReport; full: LayoutReport; ceo: LayoutReport };
 /** For the log, and `hc render`'s errors, when a re-check's draft read its earlier health check and a later build can't (DECISIONS.md 534). No path or error. */
 export const BASELINE_GONE = "the earlier health check can't be read now, so the documents have no comparison with it.";
@@ -299,15 +301,16 @@ export async function printDocuments(
   report: BuiltReport,
   pseudonyms: Pseudonymiser,
   paths: { rawNotes: string; executive: string; full: string; ceo: string; kit: string; layout: string },
+  /** Applied to each page's HTML before it's printed and checked: the documents job's repair (DECISIONS.md 682). */
+  transform: (html: string, doc: "executive" | "full" | "ceo") => string = (html) => html,
 ): Promise<PrintedLayout> {
-  // An account labelled by its id prints that id where its token was (DECISIONS.md 683).
-  const scope = withRestoredIds(report.dataset, pseudonyms.entries());
+  const scope = pageDataset(report.dataset, pseudonyms);
   const browser = await launchBrowser();
   try {
-    const executive = await renderPdf(browser, executiveHtml(report, pseudonyms), { minPages: EXECUTIVE_PAGES.min, maxPages: executiveMaxPages(report), dataset: scope, carryOver: true });
-    const full = await renderPdf(browser, fullReportHtml(report, pseudonyms), { minPages: deckRangeFor(report.input.run).min, maxPages: deckRangeFor(report.input.run).max, dataset: scope, carryOver: true });
+    const executive = await renderPdf(browser, transform(executiveHtml(report, pseudonyms), "executive"), { minPages: EXECUTIVE_PAGES.min, maxPages: executiveMaxPages(report), dataset: scope, carryOver: true });
+    const full = await renderPdf(browser, transform(fullReportHtml(report, pseudonyms), "full"), { minPages: deckRangeFor(report.input.run).min, maxPages: deckRangeFor(report.input.run).max, dataset: scope, carryOver: true });
     // Exactly one page, or it isn't a one-pager.
-    const ceo = await renderPdf(browser, onePagerHtml(report, pseudonyms), { minPages: ONE_PAGER_PAGES.min, maxPages: ONE_PAGER_PAGES.max, dataset: scope });
+    const ceo = await renderPdf(browser, transform(onePagerHtml(report, pseudonyms), "ceo"), { minPages: ONE_PAGER_PAGES.min, maxPages: ONE_PAGER_PAGES.max, dataset: scope });
     const pagesMatch = (result: typeof executive, name: string): LayoutProblem[] => {
       const printed = pdfPageCount(result.pdf);
       return printed === result.layout.pages ? [] : [{ page: 0, check: "page count", detail: `${name} printed ${printed} pages from ${result.layout.pages}` }];
