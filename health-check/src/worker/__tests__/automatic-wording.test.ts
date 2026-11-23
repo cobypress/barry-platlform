@@ -9,6 +9,11 @@ import { checkedDigest } from "../../digest/checked.ts";
 import { AutomaticReplay, automaticSyntheticCalibration } from "../../testing/automatic.ts";
 import { runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers } from "../../testing/replay.ts";
+import { applyNarrative } from "../../narrative/apply.ts";
+import type { NarrativeClient } from "../../narrative/client.ts";
+import { AUTOMATIC_CLAIM } from "../../narrative/draft.ts";
+import { SYSTEM_PROMPTS } from "../../narrative/guard.ts";
+import { AUTOMATIC_SYSTEM_PROMPT, SYSTEM_PROMPT } from "../../narrative/prompt.ts";
 
 // What an automatic run's customer reads says nothing of a consultant who
 // isn't there, and says what it assumed in place of what a person would have
@@ -90,5 +95,45 @@ describe("the benchmark set and an automatic run", () => {
 
   test("a consultant-led run's figures are as they were", () => {
     assert.deepEqual(read(cons, false), benchmarkFigures({ metrics: cons.input.metrics, scores: cons.input.scores ?? [], findings: cons.input.findings }));
+  });
+});
+
+describe("Claude's drafts on an automatic run (DECISIONS.md 693)", () => {
+  const sourceIds = (prompt: string): string[] => (JSON.parse(prompt.slice(prompt.indexOf("<sources>") + 9, prompt.indexOf("</sources>"))) as Array<{ id: string }>).map((s) => s.id).slice(0, 1);
+  const writing = (text: string, systems: string[]): NarrativeClient => ({
+    complete: async ({ prompt, model, system }) => {
+      systems.push(system);
+      return { stopReason: "end_turn", text: JSON.stringify({ paragraphs: [{ text, sources: sourceIds(prompt) }] }), model };
+    },
+  });
+
+  test("the system prompt says nobody reviews the text and names no consultant's review; a consultant-led run's is as it was", () => {
+    assert.notEqual(AUTOMATIC_SYSTEM_PROMPT, SYSTEM_PROMPT);
+    assert.match(AUTOMATIC_SYSTEM_PROMPT, /Nobody reviews this text before the customer reads it/);
+    assert.doesNotMatch(AUTOMATIC_SYSTEM_PROMPT, /A consultant reviews every word|Black Cloud's consultants/);
+    assert.match(SYSTEM_PROMPT, /A consultant reviews every word before a customer sees it\./);
+    assert.ok(SYSTEM_PROMPTS.has(AUTOMATIC_SYSTEM_PROMPT));
+  });
+
+  for (const claim of ["Your consultant will look at this with you.", "We'll walk you through the results.", "This report has been reviewed by our team.", "We have reviewed these findings carefully."]) {
+    test(`a draft saying "${claim}" is sent back, and the section keeps our own wording`, async () => {
+      const report = buildReport(auto.input);
+      const systems: string[] = [];
+      const rejections = await applyNarrative(report, writing(claim, systems), auto.pseudonyms);
+      assert.ok(systems.length > 0 && systems.every((s) => s === AUTOMATIC_SYSTEM_PROMPT));
+      assert.ok(rejections.length > 0 && rejections.every((r) => r.reasons.includes(AUTOMATIC_CLAIM)));
+      const drafted = Object.values(report.outputs).flatMap((o) => o.versions).filter((v) => v.source === "claude_draft");
+      assert.deepEqual(drafted, []);
+    });
+  }
+
+  test("a draft with none of those is kept, and a consultant-led run's drafts go with its own prompt", async () => {
+    const report = buildReport(auto.input);
+    const systems: string[] = [];
+    await applyNarrative(report, writing("We looked at how your Salesforce is set up.", systems), auto.pseudonyms);
+    assert.ok(Object.values(report.outputs).flatMap((o) => o.versions).some((v) => v.source === "claude_draft"));
+    const consultantSystems: string[] = [];
+    await applyNarrative(buildReport(cons.input), writing("Your consultant will walk you through this.", consultantSystems), cons.pseudonyms);
+    assert.ok(consultantSystems.every((s) => s === SYSTEM_PROMPT));
   });
 });

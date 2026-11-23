@@ -27,7 +27,7 @@ export async function applyNarrative(report: BuiltReport, client: NarrativeClien
     for (const section of built.sections) {
       const brief = report.briefs.get(section.id);
       if (!brief) continue;
-      const result = await draftSection({ brief, dataset: report.dataset, client, pseudonyms });
+      const result = await draftSection({ brief: report.input.run.reviewMode === "automatic" ? { ...brief, automatic: true } : brief, dataset: report.dataset, client, pseudonyms });
       if (result.status === "rejected" && result.unavailable) {
         rejections.push({ sectionId: section.id, reasons: result.reasons, unavailable: true });
         return rejections;

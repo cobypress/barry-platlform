@@ -20,12 +20,7 @@ import type { RunOverall } from "./types.ts";
 // the rules couldn't measure, or the score moved a long way since the last
 // released run. The first failing check, in that order, is the hold.
 
-/**
- * The words the console's HealthCheckRun."heldReason" and HealthCheckRunFlag."kind"
- * take (migration 20261211), and one more: `section_failed`, which neither
- * CHECK holds yet, so a run held for it is refused by the database and fails
- * instead, with its own flag (see DECISIONS.md 693): never released either way.
- */
+/** The words the console's HealthCheckRun."heldReason" and HealthCheckRunFlag."kind" take (migrations 20261211, 20261215). */
 export const HOLD_REASONS = ["section_failed", "no_digest", "digest_held", "mostly_unmeasured", "score_moved"] as const;
 export type HoldReason = (typeof HOLD_REASONS)[number];
 

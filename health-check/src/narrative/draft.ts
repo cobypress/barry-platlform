@@ -4,7 +4,10 @@ import { checkNumbers, scopeDataset, type FigureSet } from "../numbercheck/index
 import { tokenSource, type Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import type { NarrativeClient } from "./client.ts";
 import { guardDeep, holdsNameOrSecret, PromptRefused, sendPrompt } from "./guard.ts";
-import { buildPrompt, DRAFT_SCHEMA, SYSTEM_PROMPT, type PromptSource } from "./prompt.ts";
+import { AUTOMATIC_FORBIDDEN, AUTOMATIC_SYSTEM_PROMPT, buildPrompt, DRAFT_SCHEMA, SYSTEM_PROMPT, type PromptSource } from "./prompt.ts";
+
+/** Sent back to Claude, and kept as the reason if no draft passes. */
+export const AUTOMATIC_CLAIM = "Nobody reviews this report before the customer reads it, so don't mention a consultant, a review of this report, or walking anyone through it.";
 
 // Claude explains and code calculates. A draft is only accepted if every
 // paragraph's figures trace to the sources that paragraph cites. Anything else
@@ -25,6 +28,8 @@ export type SectionBrief = {
   fillsPlaceholder?: boolean;
   /** People appear by role only: a draft that keeps a person's token is refused (DECISIONS.md 184). */
   rolesOnly?: boolean;
+  /** An automatic run's (DECISIONS.md 693): its own system prompt, and a draft claiming a consultant or a review is sent back. */
+  automatic?: boolean;
 };
 
 export type DraftResult =
@@ -97,7 +102,7 @@ export async function draftSection(input: { brief: SectionBrief; dataset: Figure
       // sendPrompt guards the whole prompt again and refuses it if a name survives.
       reply = await sendPrompt(client, {
         model: brief.model ?? MODELS.synthesis,
-        system: SYSTEM_PROMPT,
+        system: brief.automatic ? AUTOMATIC_SYSTEM_PROMPT : SYSTEM_PROMPT,
         prompt,
         schema: DRAFT_SCHEMA,
         effort: DRAFT_DEFAULTS.effort,
@@ -112,7 +117,10 @@ export async function draftSection(input: { brief: SectionBrief; dataset: Figure
     if (reply.stopReason === "refusal") return long ?? { status: "rejected", reasons: ["Claude declined to write this section."], attempts: attempt };
     if (reply.stopReason === "max_tokens") return long ?? { status: "rejected", reasons: ["The reply was cut off, so it can't be trusted."], attempts: attempt };
 
-    const { paragraphs, problems } = review(reply.text, dataset, allowed, pseudonyms, brief.rolesOnly);
+    const reviewed = review(reply.text, dataset, allowed, pseudonyms, brief.rolesOnly);
+    const { paragraphs } = reviewed;
+    // On an automatic run nobody is there to have reviewed it: a draft that says otherwise goes back, and in the end the engine's own words stand.
+    const problems = brief.automatic && AUTOMATIC_FORBIDDEN.some((p) => paragraphs.some((t) => p.test(t))) ? [...reviewed.problems, AUTOMATIC_CLAIM] : reviewed.problems;
     if (problems.length === 0) {
       const words = wordCount(paragraphs);
       const accepted: DraftResult = { status: "accepted", body: paragraphs.join("\n\n"), model: reply.model, attempts: attempt, words };

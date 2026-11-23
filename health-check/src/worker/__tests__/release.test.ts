@@ -1,7 +1,7 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { checkedDigest, type CheckedDigest } from "../../digest/checked.ts";
 import { buildReport, type ReportInput } from "../../narrative/sections.ts";
@@ -217,7 +217,7 @@ const record = (automatic: RunOutputRecord["automatic"], digest = clean.digest):
 const holdOf = (reason: string, counts: Record<string, number> = { n: 1 }): RunOutputRecord["automatic"] => ({ decision: "hold", reason, counts, at: NOW });
 
 describe("a hold in the memory store, held to the console's own checks", () => {
-  for (const reason of ["no_digest", "digest_held", "mostly_unmeasured", "score_moved"] as const) {
+  for (const reason of ["section_failed", "no_digest", "digest_held", "mostly_unmeasured", "score_moved"] as const) {
     test(`${reason}: not released, no release row, the reason set, one flag under redelivery, the earlier release untouched`, async () => {
       const store = storeWithRuns();
       await store.saveRunOutput(RUN_ID, record(holdOf(reason), reason === "no_digest" ? null : clean.digest));
@@ -232,17 +232,6 @@ describe("a hold in the memory store, held to the console's own checks", () => {
       assert.equal(store.runs.get(PREVIOUS)!.run.status, "released");
     });
   }
-
-  test("section_failed: the console's CHECK doesn't hold the word yet, so the save is refused whole, and the run's failure raises its one flag", async () => {
-    const store = storeWithRuns();
-    await assert.rejects(store.saveRunOutput(RUN_ID, record(holdOf("section_failed"))), (err: Error & { code?: string }) => err.code === "23514" && err.message.includes(CONSOLE_CHECKS.heldReason.name));
-    assert.equal(store.runs.get(RUN_ID)!.output, null);
-    assert.equal(store.held.has(RUN_ID), false);
-    await store.recordRunFailure(RUN_ID, "The run finished, but its results couldn't be saved", NOW);
-    assert.deepEqual(store.flagsOf(RUN_ID), ["run_failed"]);
-    assert.equal(store.releases.has(RUN_ID), false);
-    assert.deepEqual(store.releases.get(PREVIOUS), [PERSON]);
-  });
 
   test("a consultant-led run's failure raises no flag", async () => {
     const store = new MemoryWorkerStore();
@@ -397,10 +386,13 @@ describe("the console's checks are its migrations' own text", () => {
   // Wherever the console's checkout is beside this one; otherwise there is nothing to compare with.
   const roots = [join(process.cwd(), "..", "..", "hc-console-merge", "migrations"), join(process.cwd(), "..", "..", "worktrees", "hc-console-merge", "migrations")];
   const root = roots.find((r) => existsSync(r));
-  test("each check is in its migration word for word", { skip: root ? false : "the console's migrations aren't beside this checkout" }, () => {
+  test("the latest definition of each check is in its migration word for word, and no later migration redefines it", { skip: root ? false : "the console's migrations aren't beside this checkout" }, () => {
+    const files = readdirSync(root!).filter((f) => f.endsWith(".sql")).sort();
     for (const check of Object.values(CONSOLE_CHECKS)) {
       const text = readFileSync(join(root!, check.migration), "utf8");
       assert.ok(text.includes(`CONSTRAINT "${check.name}" CHECK (${check.sql})`), check.name);
+      const later = files.filter((f) => f > check.migration && readFileSync(join(root!, f), "utf8").includes(`ADD CONSTRAINT "${check.name}"`));
+      assert.deepEqual(later, [], check.name);
     }
   });
 });
