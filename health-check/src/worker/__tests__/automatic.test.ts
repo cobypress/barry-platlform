@@ -37,6 +37,8 @@ describe("what's stored before decision 688 still reads", () => {
     const sections = Object.values(buildReport(loadRun(recorded).input).outputs).flatMap((o) => JSON.parse(JSON.stringify(o.sections)) as unknown[]);
     assert.ok(sections.length > 10);
     for (const s of sections) assert.ok(ReportSection.safeParse(s).success);
+    // The fixture calibration's hash as the engine gave it before decision 688, so a run started then still resumes.
+    assert.equal(run.calibrationHash, "6e51340ac87a11f9");
   });
 
   test("the store reads a run with no reviewMode column, or null in it, as consultant-led, and automatic as automatic", () => {
