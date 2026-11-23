@@ -65,6 +65,8 @@ export type RunOptions = {
   scope?: RunScope;
   /** "scan" for the free set-up teaser. */
   product?: "barometer" | "scan" | "pulse";
+  /** How the run is reviewed, written to run.json for its documents to read. Consultant-led unless said (DECISIONS.md 692). */
+  reviewMode?: "consultant" | "automatic";
   /** The run this one re-checks: its first health check, whose findings the report compares against. */
   baselineRunId?: string | null;
   /**
@@ -219,6 +221,7 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
     run = Run.parse({
       id: runId,
       product: options.product ?? "barometer",
+      reviewMode: options.reviewMode ?? "consultant",
       customerRef: options.customerRef ?? null,
       orgId: client.orgId,
       isSandbox: false,

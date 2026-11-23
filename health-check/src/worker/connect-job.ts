@@ -1,7 +1,8 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { myDomainHost } from "../connect/instance-host.ts";
-import { readOrgStages } from "../connect/org-stages.ts";
+import { automaticCalibration } from "../connect/auto-calibration.ts";
+import { readOrgStages, StoreError, type OrgStage } from "../connect/org-stages.ts";
 import { checkReadOnlyUser, permissionNote, type ReadOnlyCheck } from "../connect/read-only-check.ts";
 import { ApiBudget } from "../salesforce/budget.ts";
 import { SalesforceClient } from "../salesforce/client.ts";
@@ -16,6 +17,7 @@ import { openConnectSecret } from "./connect-crypto.ts";
 import { safeReason, type Attempt, type JobOutcome, type WorkerDeps } from "./deps.ts";
 import { withJobLock } from "./lock.ts";
 import { approvedFromConsole } from "./run-job.ts";
+import { automaticRefusal } from "./automatic.ts";
 import { ORG_AWAITING_CONNECT } from "./types.ts";
 
 // A connect job: the admin came back from Salesforce, the console checked the
@@ -44,6 +46,11 @@ function exchangeReason(err: OAuthError): string {
 
 /** A 5xx or a network failure may pass. Anything Salesforce said no to won't. */
 const transient = (err: unknown): boolean => !(err instanceof OAuthError) || /^HTTP_5\d\d$/.test(err.code);
+
+/** An automatic run's connect with the worker's switch off: refused before anything is exchanged (DECISIONS.md 692). */
+export const AUTOMATIC_OFF_AT_CONNECT = "Barometer can't run this health check by itself yet, so we didn't connect and read nothing. Ask your Black Cloud consultant.";
+/** An automatic run's connect to an org the switch doesn't list: the tokens are revoked before anything is read. */
+export const AUTOMATIC_ORG_AT_CONNECT = "Barometer can't run this health check by itself for this Salesforce org yet, so we disconnected it and read nothing. Ask your Black Cloud consultant.";
 
 class Refusal extends Error {
   constructor(reason: string) {
@@ -149,6 +156,8 @@ async function connectLocked(linkId: string, deps: WorkerDeps, attempt: Attempt)
     // The app the authorise URL used, and only that one (DECISIONS.md 616). Not set up here: nothing is sent.
     const app = appForPending(pending, deps);
     if (!app) throw new Refusal(APP_NOT_SET_UP_AT_CONNECT);
+    // An automatic run connects only where the worker may run it, so with the switch off nothing is exchanged (DECISIONS.md 692).
+    if (job.automaticRunId && !deps.automatic?.on) throw new Refusal(AUTOMATIC_OFF_AT_CONNECT);
 
     // A connection under this name already? If it's bound to this link and this
     // sign-in, it's ours from an earlier delivery that stopped after storing it:
@@ -179,6 +188,11 @@ async function connectLocked(linkId: string, deps: WorkerDeps, attempt: Attempt)
       if (job.runOrgId !== ORG_AWAITING_CONNECT && job.runOrgId.slice(0, 15) !== tokens.orgId.slice(0, 15)) {
         await revokeQuietly(tokens, deps, log);
         throw new Refusal(`You signed in to a different Salesforce org (${tokens.orgId.slice(0, 15)}) from the one this health check is for (${job.runOrgId.slice(0, 15)}), so we disconnected it and read nothing. Sign in to the right org, or ask your Black Cloud consultant.`);
+      }
+      // The org is known only now: one the switch doesn't list keeps nothing (DECISIONS.md 692).
+      if (job.automaticRunId && automaticRefusal({ reviewMode: "automatic", orgId: tokens.orgId }, deps.automatic)) {
+        await revokeQuietly(tokens, deps, log);
+        throw new Refusal(AUTOMATIC_ORG_AT_CONNECT);
       }
       if (previous && previous.orgId.slice(0, 15) !== tokens.orgId.slice(0, 15)) {
         await revokeQuietly(tokens, deps, log);
@@ -259,17 +273,73 @@ async function connectLocked(linkId: string, deps: WorkerDeps, attempt: Attempt)
       }
     }
     // The org's stages for the calibration screen (DECISIONS.md 611). It can't throw, and has its own time limit.
+    // An automatic run's calibration is built from the same read, kept only when it came back in time (692).
+    let read = null as OrgStage[] | null;
     if (job.runId) {
       const runId = job.runId;
-      if (client) await readOrgStages(client, (stages, readAt) => deps.store.saveOrgStages(runId, stages, readAt), { log, now: at, timeoutMs: deps.stagesTimeoutMs });
+      const write = (stages: OrgStage[], readAt: string) => {
+        read = stages;
+        return deps.store.saveOrgStages(runId, stages, readAt);
+      };
+      if (client) await readOrgStages(client, write, { log, now: at, timeoutMs: deps.stagesTimeoutMs });
       else log("The org's opportunity stages weren't saved for the calibration: the connection couldn't be opened to read them.");
     }
-    return { outcome: "connected", detail: `Connected "${name}" to org ${stored.orgId}. ${note}` };
+    const started = job.automaticRunId ? ` ${await calibrateAndQueue(job.automaticRunId, read, stored.orgId, deps, at, log)}` : "";
+    return { outcome: "connected", detail: `Connected "${name}" to org ${stored.orgId}. ${note}${started}` };
   } catch (err) {
     if (err instanceof Refusal) return refuse(err.message);
     if (!attempt.final && transient(err)) throw new Error(safeReason(err, secrets));
     if (err instanceof OAuthError) return refuse(exchangeReason(err));
     return refuse(`Something went wrong connecting: ${safeReason(err, secrets)}. ${START_AGAIN}`);
+  }
+}
+
+/**
+ * An automatic full check, once its org is connected (DECISIONS.md 692): its
+ * calibration from the org's stages, saved only where it has none, then the
+ * run queued as a scan is. Only the delivery that marked the link used gets
+ * here, and only a calibration this call wrote queues the run, so a second
+ * link or a redelivery never queues it twice. With no won stage, or no stages
+ * read, nothing is saved or queued and the run is held with the word
+ * calibration_unreadable. Never throws: the link is connected whatever happens
+ * here, and what happened is said in the outcome, naming no stage.
+ */
+async function calibrateAndQueue(runId: string, stages: OrgStage[] | null, orgId: string, deps: WorkerDeps, at: () => string, log: (line: string) => void): Promise<string> {
+  const built = automaticCalibration(stages, { orgId, at: at() });
+  if (!built.ok) {
+    const held = await deps.store.holdRun(runId, built.heldReason).catch(() => false);
+    log(`Automatic run ${runId} wasn't calibrated or queued: ${built.heldReason}${held ? "" : ", and the hold couldn't be recorded"}.`);
+    return `Held: ${built.heldReason}. ${built.reason}`;
+  }
+  let saved: Awaited<ReturnType<WorkerDeps["store"]["saveCalibration"]>>;
+  try {
+    saved = await deps.store.saveCalibration(runId, built.calibration);
+  } catch (err) {
+    // A StoreError's words are the store's own, naming no value; anything else by its kind alone.
+    const reason = err instanceof StoreError ? err.message : "an unexpected error";
+    log(`Automatic run ${runId}'s calibration couldn't be saved, so it wasn't queued: ${reason}.`);
+    return "The run's calibration couldn't be saved, so the run wasn't started.";
+  }
+  if (saved === "no_source_column") {
+    log(`Automatic run ${runId}'s calibration wasn't saved or queued: the console's HealthCheckCalibration table has no "source" column, and without it the calibration would read as a person's. Apply the console's 20261211_health_check_automatic.sql migration.`);
+    return "The run's calibration couldn't be saved, so the run wasn't started.";
+  }
+  if (saved === "exists") {
+    log(`Automatic run ${runId} already had a calibration, so it was left as it was and not queued again.`);
+    return "The run already had a calibration, so it wasn't started again.";
+  }
+  if (!deps.queueRun) {
+    log(`Automatic run ${runId} is calibrated from the org's settings, but this worker can't queue runs.`);
+    return "The run is calibrated from the org's settings, and waits to be started.";
+  }
+  try {
+    await deps.queueRun(runId);
+    await deps.store.recordRunQueued(runId, at());
+    log(`Automatic run ${runId} is calibrated from the org's settings and queued.`);
+    return "The run is calibrated from the org's settings and queued.";
+  } catch (err) {
+    log(`Automatic run ${runId} is calibrated, but couldn't be queued: ${safeReason(err)}`);
+    return "The run is calibrated from the org's settings, but couldn't be queued.";
   }
 }
 

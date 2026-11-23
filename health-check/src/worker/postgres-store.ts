@@ -216,6 +216,15 @@ export const CALIBRATION_SQL = selectSql("HealthCheckCalibration", CALIBRATION, 
   ` FROM "HealthCheckCalibration"`,
   `, to_jsonb("HealthCheckCalibration") ->> 'source' AS "source", to_jsonb("HealthCheckCalibration") -> 'service' AS "service" FROM "HealthCheckCalibration"`,
 );
+/** An automatic run's calibration as the worker writes it (DECISIONS.md 692): every column it reads, and its source. */
+export const CALIBRATION_WRITE: Columns = { runId: "text", ...CALIBRATION, source: "text" };
+export function calibrationRow(runId: string, c: Calibration): Record<string, unknown> {
+  return Object.fromEntries(Object.keys(CALIBRATION_WRITE).map((k) => [k, k === "runId" ? runId : (c as Record<string, unknown>)[k]]));
+}
+/** A full check's review mode at connect, through the row as JSON (DECISIONS.md 688, 692). */
+export const REVIEW_MODE_SQL = `SELECT to_jsonb("HealthCheckRun") ->> 'reviewMode' AS "reviewMode" FROM "HealthCheckRun" WHERE "id" = $1`;
+/** The console's check also wants the run unreleased; held twice keeps the first reason. */
+export const HOLD_RUN_SQL = `UPDATE "HealthCheckRun" SET "heldReason" = $2 WHERE "id" = $1 AND "reviewMode" = 'automatic' AND "heldReason" IS NULL AND "status" <> 'released'`;
 export const MANUAL_ANSWER: Columns = {
   stepKey: "text", outcome: "text", method: "text", values: "json", pastedText: "text", screenshotRef: "text", prefill: "json", skipReason: "text",
   answeredBy: "text", answeredAt: "ts",
@@ -924,7 +933,42 @@ export class PostgresWorkerStore implements WorkerStore {
     if (typeof run?.orgId !== "string") return null;
     const linked = linkFromRow(row, run.orgId);
     const job = typeof run.id === "string" ? { ...linked, runId: run.id } : linked;
-    return run.product === "scan" && typeof run.id === "string" ? { ...job, scanRunId: run.id } : job;
+    if (run.product === "scan" && typeof run.id === "string") return { ...job, scanRunId: run.id };
+    // A full check's review mode, read through the row as JSON so the query works
+    // before the console's migration (DECISIONS.md 688, 692). Asked only for a
+    // full check, so a scan's connect sends exactly what it did before.
+    if (run.product !== "barometer" || typeof run.id !== "string") return job;
+    const mode = one(await this.#pool.query(REVIEW_MODE_SQL, [run.id]));
+    return mode?.reviewMode === "automatic" ? { ...job, automaticRunId: run.id } : job;
+  }
+
+  /**
+   * One statement (DECISIONS.md 692): the calibration with its source, only
+   * where the run has none, so a second connect never replaces it. A console
+   * without the "source" column (42703) gets nothing: the row would read as a
+   * person's confirmation. Any other error is thrown by its SQLSTATE alone.
+   */
+  async saveCalibration(runId: string, calibration: Calibration): Promise<"saved" | "exists" | "no_source_column"> {
+    const { text, values } = insertSql("HealthCheckCalibration", CALIBRATION_WRITE, calibrationRow(runId, calibration));
+    try {
+      const result = await this.#pool.query(`${text} ON CONFLICT ("runId") DO NOTHING`, values);
+      return result.rowCount === 1 ? "saved" : "exists";
+    } catch (err) {
+      const code = (err as { code?: unknown }).code;
+      if (code === "42703") return "no_source_column";
+      throw new StoreError(`the console's database refused the calibration (SQLSTATE ${sqlState(code)})`);
+    }
+  }
+
+  /** DECISIONS.md 692: one statement, only an automatic run's and only where none is set. A console without the columns, or refusing the word, is said by its SQLSTATE alone. */
+  async holdRun(runId: string, reason: "calibration_unreadable"): Promise<boolean> {
+    try {
+      const result = await this.#pool.query(HOLD_RUN_SQL, [runId, reason]);
+      return result.rowCount === 1;
+    } catch (err) {
+      this.#log(`Run ${runId}: the console's HealthCheckRun table refused its "heldReason" column with SQLSTATE ${sqlState((err as { code?: unknown }).code)}, so the hold isn't recorded. Check the table against the console's ${REVIEW_MODE_MIGRATION} migration.`);
+      return false;
+    }
   }
 
   /** DECISIONS.md 610: the columns that exist, so no migration. Both halves leave out the scan asking. */
