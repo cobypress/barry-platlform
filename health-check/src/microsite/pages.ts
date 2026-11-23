@@ -1,5 +1,5 @@
 import { comparisonId, formatFigure } from "../benchmark/compare.ts";
-import { checkNumbers } from "../numbercheck/index.ts";
+import { checkNumbers, withRestoredIds } from "../numbercheck/index.ts";
 import type { BuiltReport } from "../narrative/sections.ts";
 import { buildPlan, bySeverity, domainLabel, issuesOf, isUnpricedSaving, QUICK_WINS_HEADING, scorecard, UNPRICED, verdictOf } from "../narrative/select.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
@@ -252,8 +252,10 @@ export function buildMicrositePages(report: BuiltReport, pseudonyms: Pseudonymis
   if (compared) pages.push({ slug: "compare", title: "How you compare", html: compared });
   const documented = org(r, report);
   if (documented) pages.push({ slug: "org", title: "Your org, documented", html: documented });
+  // An account labelled by its id prints that id where its token was (DECISIONS.md 683).
+  const set = withRestoredIds(report.dataset, pseudonyms.entries());
   for (const p of pages) {
-    const misses = checkNumbers(pageText(p.html), report.dataset).unmatched;
+    const misses = checkNumbers(pageText(p.html), set).unmatched;
     if (misses.length) throw new Error(`The ${p.title.toLowerCase()} page has ${misses.length} figure${misses.length === 1 ? "" : "s"} the number check can't trace, so the microsite wasn't made`);
   }
   return { pages };

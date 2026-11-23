@@ -11,6 +11,7 @@ import type { NarrativeClient } from "../narrative/client.ts";
 import { Intake } from "../narrative/intake.ts";
 import { refusalReason, type OverrideRefusal } from "../narrative/overrides.ts";
 import { buildReport, type BuiltReport, type ReportInput } from "../narrative/sections.ts";
+import { withRestoredIds } from "../numbercheck/index.ts";
 import { Pseudonymiser, type PseudonymEntry } from "../privacy/pseudonymiser.ts";
 import { Calibration, Finding, ManualStep, Metric, NumberOverride, Run, Score } from "../schemas/index.ts";
 import { EXECUTIVE_MAX_PAGES, executiveHtml, executiveMaxPages } from "./executive.ts";
@@ -299,7 +300,8 @@ export async function printDocuments(
   pseudonyms: Pseudonymiser,
   paths: { rawNotes: string; executive: string; full: string; ceo: string; kit: string; layout: string },
 ): Promise<PrintedLayout> {
-  const scope = report.dataset;
+  // An account labelled by its id prints that id where its token was (DECISIONS.md 683).
+  const scope = withRestoredIds(report.dataset, pseudonyms.entries());
   const browser = await launchBrowser();
   try {
     const executive = await renderPdf(browser, executiveHtml(report, pseudonyms), { minPages: EXECUTIVE_PAGES.min, maxPages: executiveMaxPages(report), dataset: scope, carryOver: true });
