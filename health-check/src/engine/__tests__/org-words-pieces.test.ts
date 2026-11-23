@@ -1107,9 +1107,9 @@ const SIGNED_OFF: string[] = [
   'src/domains/technical-health/lint.ts: plural(found, "place", "places")',
   'src/domains/technical-health/lint.ts: plural(others, "other class or trigger", "other classes and triggers")',
   'src/domains/technical-health/lint.ts: plural(suppressed, "more was", "more were")',
-  // Fixed sentences of the group's own, each a said literal in LINT_GROUPS.
-  "src/domains/technical-health/lint.ts: group.where",
-  "src/domains/technical-health/lint.ts: group.why",
+  // Fixed sentences of the group's own, each a said literal in LINT_GROUPS, made as the rule runs.
+  "src/domains/technical-health/lint.ts: group.where()",
+  "src/domains/technical-health/lint.ts: group.why()",
   "src/domains/technical-health/lint.ts: andList(alreadyBy)",
   // Sentences said, joinSaid or andList made in the same function: the line numbers, the places named, and the notes.
   "src/domains/technical-health/lint.ts: andList(numbers)",

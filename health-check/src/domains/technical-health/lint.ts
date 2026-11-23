@@ -18,8 +18,12 @@ import { judgedTests, liveCode, loopsOverLimits } from "./code.ts";
 const DOMAIN = "technical_health";
 type Severity = "high" | "medium" | "low";
 
-/** Our own check that already reports what a PMD rule finds, in the components it names. */
-type Already = { by: Said; names: (ctx: RuleContext) => Set<string> | null };
+/**
+ * Our own check that already reports what a PMD rule finds, in the components it names.
+ * Every sentence here is made when the rule runs, inside the analysis, so its marks are
+ * the analysis's own (DECISIONS.md 655): one made at load would read as unknown.
+ */
+type Already = { by: () => Said; names: (ctx: RuleContext) => Set<string> | null };
 
 type Group = {
   id: string;
@@ -29,12 +33,12 @@ type Group = {
   /** The group's severity, and what PMD's priority 1 or 2 raises it to. */
   severity: Severity;
   raised: Severity;
-  issueTitle: Said;
+  issueTitle: () => Said;
   /** Follows "PMD found 3 places in 2 classes and triggers". */
-  where: Said;
-  why: Said;
-  recommendation: Said;
-  value: Said;
+  where: () => Said;
+  why: () => Said;
+  recommendation: () => Said;
+  value: () => Said;
   owner: string;
   dependencies: string[];
   already?: Partial<Record<string, Already>>;
@@ -68,11 +72,11 @@ export const LINT_GROUPS: readonly Group[] = [
     rules: ["ApexCRUDViolation", "ApexSharingViolations"],
     severity: "medium",
     raised: "high",
-    issueTitle: said`Some code reads or changes data without checking access`,
-    where: said`where the code reads or changes records without checking what the running user may see and do, or without saying whether sharing applies`,
-    why: said`Code like this can show or change data a user shouldn't reach, for example through a page or an integration.`,
-    recommendation: said`Check object and field permissions before each read and save, and say on each class whether it runs with sharing, writing down why where it must run without.`,
-    value: said`The cost is data reaching people who shouldn't see it, which we can't size from the code.`,
+    issueTitle: () => said`Some code reads or changes data without checking access`,
+    where: () => said`where the code reads or changes records without checking what the running user may see and do, or without saying whether sharing applies`,
+    why: () => said`Code like this can show or change data a user shouldn't reach, for example through a page or an integration.`,
+    recommendation: () => said`Check object and field permissions before each read and save, and say on each class whether it runs with sharing, writing down why where it must run without.`,
+    value: () => said`The cost is data reaching people who shouldn't see it, which we can't size from the code.`,
     owner: "Salesforce developer",
     dependencies: ["Check who uses each changed path has the access it needs before the checks are added"],
   },
@@ -82,14 +86,14 @@ export const LINT_GROUPS: readonly Group[] = [
     rules: ["OperationWithLimitsInLoop", "OperationWithHighCostInLoop", "AvoidNonRestrictiveQueries"],
     severity: "medium",
     raised: "high",
-    issueTitle: said`Some code risks Salesforce's limits in other ways`,
-    where: said`where the code calls a limited or costly operation, such as an email, a callout or a describe, inside a loop, or queries with no filter and no limit`,
-    why: said`Each works with a few records and fails or slows once enough arrive together.`,
-    recommendation: said`Move limited and costly calls out of loops, and give every query a filter or a limit.`,
-    value: said`The cost is work that fails as volumes rise, which we can't size before it happens.`,
+    issueTitle: () => said`Some code risks Salesforce's limits in other ways`,
+    where: () => said`where the code calls a limited or costly operation, such as an email, a callout or a describe, inside a loop, or queries with no filter and no limit`,
+    why: () => said`Each works with a few records and fails or slows once enough arrive together.`,
+    recommendation: () => said`Move limited and costly calls out of loops, and give every query a filter or a limit.`,
+    value: () => said`The cost is work that fails as volumes rise, which we can't size before it happens.`,
     owner: "Salesforce developer",
     dependencies: ["Test each change with a bulk load in a sandbox"],
-    already: { OperationWithLimitsInLoop: { by: said`our own check of queries and saves inside loops`, names: loopCode } },
+    already: { OperationWithLimitsInLoop: { by: () => said`our own check of queries and saves inside loops`, names: loopCode } },
   },
   {
     id: "tech.lint-injection",
@@ -97,14 +101,14 @@ export const LINT_GROUPS: readonly Group[] = [
     rules: ["ApexSOQLInjection", "ApexOpenRedirect", "ApexBadCrypto", "ApexXSSFromEscapeFalse", "ApexXSSFromURLParam", "ApexCSRF", "ApexDangerousMethods", "ApexInsecureEndpoint"],
     severity: "medium",
     raised: "high",
-    issueTitle: said`Some code is open to injection or unsafe redirects`,
-    where: said`where the code builds a query, a page or a redirect from what a user can supply, uses a fixed encryption key, changes data as a page loads, or calls out over plain http`,
-    why: said`Code like this can let someone read or change data they shouldn't, or send people somewhere unsafe.`,
-    recommendation: said`Bind what users supply into queries rather than joining it in, escape what pages show, check every redirect against the addresses you allow, keep keys out of the code, and call out only over https.`,
-    value: said`The cost is a security weakness, which we can't size from the code.`,
+    issueTitle: () => said`Some code is open to injection or unsafe redirects`,
+    where: () => said`where the code builds a query, a page or a redirect from what a user can supply, uses a fixed encryption key, changes data as a page loads, or calls out over plain http`,
+    why: () => said`Code like this can let someone read or change data they shouldn't, or send people somewhere unsafe.`,
+    recommendation: () => said`Bind what users supply into queries rather than joining it in, escape what pages show, check every redirect against the addresses you allow, keep keys out of the code, and call out only over https.`,
+    value: () => said`The cost is a security weakness, which we can't size from the code.`,
     owner: "Salesforce developer",
     dependencies: ["Check each other system accepts https before a callout is changed"],
-    already: { ApexInsecureEndpoint: { by: said`our own check of addresses written into code`, names: literalAddresses } },
+    already: { ApexInsecureEndpoint: { by: () => said`our own check of addresses written into code`, names: literalAddresses } },
   },
   {
     id: "tech.lint-tests",
@@ -112,16 +116,16 @@ export const LINT_GROUPS: readonly Group[] = [
     rules: ["ApexUnitTestClassShouldHaveAsserts", "ApexUnitTestShouldNotUseSeeAllDataTrue"],
     severity: "low",
     raised: "medium",
-    issueTitle: said`Some test methods check nothing or read live data`,
-    where: said`where a test method runs code without an assertion, or reads the org's live data (SeeAllData=true)`,
-    why: said`Tests like these raise coverage without proving the code works, or pass and fail with what's in the org.`,
-    recommendation: said`Add an assertion to each test method, and have tests make the records they need.`,
-    value: said`The cost is code that passes its tests and still breaks, which we can't size from the code.`,
+    issueTitle: () => said`Some test methods check nothing or read live data`,
+    where: () => said`where a test method runs code without an assertion, or reads the org's live data (SeeAllData=true)`,
+    why: () => said`Tests like these raise coverage without proving the code works, or pass and fail with what's in the org.`,
+    recommendation: () => said`Add an assertion to each test method, and have tests make the records they need.`,
+    value: () => said`The cost is code that passes its tests and still breaks, which we can't size from the code.`,
     owner: "Salesforce developer",
     dependencies: [],
     already: {
-      ApexUnitTestClassShouldHaveAsserts: { by: said`our own check of test classes`, names: testClasses("silent") },
-      ApexUnitTestShouldNotUseSeeAllDataTrue: { by: said`our own check of test classes`, names: testClasses("seeAll") },
+      ApexUnitTestClassShouldHaveAsserts: { by: () => said`our own check of test classes`, names: testClasses("silent") },
+      ApexUnitTestShouldNotUseSeeAllDataTrue: { by: () => said`our own check of test classes`, names: testClasses("seeAll") },
     },
   },
   {
@@ -130,11 +134,11 @@ export const LINT_GROUPS: readonly Group[] = [
     rules: ["EmptyCatchBlock"],
     severity: "low",
     raised: "medium",
-    issueTitle: said`Some code catches errors and ignores them`,
-    where: said`where the code catches an error and does nothing with it`,
-    why: said`When something fails there, nobody is told and nothing is logged, so work can be left half done without anyone knowing.`,
-    recommendation: said`Log each error the code catches, and tell the user or an admin where it matters, or let it fail where people will see it.`,
-    value: said`The cost is failures nobody sees, which we can't size from the code.`,
+    issueTitle: () => said`Some code catches errors and ignores them`,
+    where: () => said`where the code catches an error and does nothing with it`,
+    why: () => said`When something fails there, nobody is told and nothing is logged, so work can be left half done without anyone knowing.`,
+    recommendation: () => said`Log each error the code catches, and tell the user or an admin where it matters, or let it fail where people will see it.`,
+    value: () => said`The cost is failures nobody sees, which we can't size from the code.`,
     owner: "Salesforce developer",
     dependencies: [],
   },
@@ -144,11 +148,11 @@ export const LINT_GROUPS: readonly Group[] = [
     rules: ["CognitiveComplexity", "CyclomaticComplexity", "NcssCount", "AvoidDeeplyNestedIfStmts"],
     severity: "low",
     raised: "low",
-    issueTitle: said`Some code is too complex to change safely`,
-    where: said`where a method or class has very many paths, statements or nested conditions`,
-    why: said`Code like this is slow and risky to change, and the hardest to test.`,
-    recommendation: said`Split the most complex methods into smaller ones, each with its own tests, when you next change them.`,
-    value: said`The cost is slower, riskier changes, which we can't size from the code.`,
+    issueTitle: () => said`Some code is too complex to change safely`,
+    where: () => said`where a method or class has very many paths, statements or nested conditions`,
+    why: () => said`Code like this is slow and risky to change, and the hardest to test.`,
+    recommendation: () => said`Split the most complex methods into smaller ones, each with its own tests, when you next change them.`,
+    value: () => said`The cost is slower, riskier changes, which we can't size from the code.`,
     owner: "Salesforce developer",
     dependencies: [],
   },
@@ -211,7 +215,7 @@ function evaluateGroup(group: Group, ctx: RuleContext): RuleResult | RuleResult[
     ...Object.fromEntries(group.rules.map((r) => [r, shown.filter((t) => t.rule === r).reduce((sum, t) => sum + t.found, 0)])),
   };
   // What else the count leaves out, each said in numbers.
-  const alreadyBy = [...new Set(already.map((t) => group.already![t.rule]!.by))];
+  const alreadyBy = [...new Set(already.map((t) => group.already![t.rule]!.by()))];
   const notes = joinSaid(
     [
       ...(alreadyCount ? [said` ${plural(alreadyCount, "more is", "more are")} in code ${andList(alreadyBy)} already lists.`] : []),
@@ -243,15 +247,15 @@ function evaluateGroup(group: Group, ctx: RuleContext): RuleResult | RuleResult[
   const worst = Math.min(...shown.map((t: RuleTally) => t.worst ?? 5));
   return {
     outcome: "issue",
-    title: group.issueTitle,
-    summary: said`PMD found ${plural(found, "place", "places")} in ${plural(components.length, "class or trigger", "classes and triggers")} of the ${checked} it read ${group.where}. ${group.why}${placesText}${notes}`,
-    recommendation: group.recommendation,
+    title: group.issueTitle(),
+    summary: said`PMD found ${plural(found, "place", "places")} in ${plural(components.length, "class or trigger", "classes and triggers")} of the ${checked} it read ${group.where()}. ${group.why()}${placesText}${notes}`,
+    recommendation: group.recommendation(),
     recommendationType: "change",
     severity: worst <= 2 ? group.raised : group.severity,
     // PMD reads the code, not what runs, and can't see a check made elsewhere.
     confidence: "medium",
     evidence,
-    value: notSized(group.value),
+    value: notSized(group.value()),
     effort: { size: components.length > 10 ? "L" : "M" },
     owner: group.owner,
     dependencies: group.dependencies,

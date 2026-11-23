@@ -120,6 +120,21 @@ describe("the six groups shown (decision 673)", () => {
     assert.ok(f.fixPrompt && f.effortHours);
   });
 
+  test("every sentence of every group is marked, in an issue, a pass and not measurable: the org's words only in spans", () => {
+    const hits: Hit[] = LINT_GROUPS.map((g, i) => ({ rule: g.rules[0]!, component: PLANTED[i % PLANTED.length]!, line: 3 }));
+    const variants = [analyse(lint(ran(hits))), analyse(lint(ran([]))), analyse(lint(ran([{ rule: "EmptyCatchBlock", component: PLANTED[0]!, line: 1, suppressed: true }])))];
+    for (const findings of variants) {
+      for (const f of findings.filter((x) => LINT_RULE_IDS.includes(x.ruleId))) {
+        for (const k of ["title", "summary", "recommendation"] as const) {
+          const spans = spansIfCurrent(f[k], f.orgWords?.[k]);
+          assert.ok(spans, `${f.ruleId} ${k}`);
+          for (const s of spans) assert.ok(PLANTED.includes(f[k].slice(s.start, s.end)), `${f.ruleId} ${k}`);
+          for (const name of PLANTED) if (f[k].includes(name)) assert.ok(spans.some((s) => f[k].slice(s.start, s.end) === name), `${f.ruleId} ${k} ${name}`);
+        }
+      }
+    }
+  });
+
   test("only suppressed findings: a pass that says how many were marked to be ignored", () => {
     const f = only(analyse(lint(ran([{ rule: "EmptyCatchBlock", component: PLANTED[0]!, line: 3, suppressed: true }]))), "tech.lint-swallowed-errors");
     assert.equal(f.status, "passed");
