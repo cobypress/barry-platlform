@@ -1,13 +1,12 @@
 import type { Run } from "../schemas/index.ts";
 
-// The worker's switch for automatic runs (DECISIONS.md 688), read once at
-// start in env.ts. An automatic run is one no person reviews before the
-// customer reads it, so until it is built and proven it never reads an org for
-// analysis: with the switch off, or the org not listed, its connect is refused
-// and its run fails at its claim. With both on, it connects, is calibrated from
-// the org's settings and queued (692), and its run still fails just before
-// extraction, because nothing past that is built yet (lane E3 takes that
-// refusal away). A consultant-led run never looks here.
+// The worker's switch for automatic runs (DECISIONS.md 688). An automatic run
+// is one no person reviews before the customer reads it, so while it is being
+// proven it reads an org only where the switch allows: with the switch off, or
+// the org not listed, its connect is refused and its run fails at its claim.
+// With both on, it connects, is calibrated from the org's settings and queued
+// (692), and its run is read, checked and released or held by code (693). A
+// consultant-led run never looks here.
 
 export type AutomaticSwitch = {
   /** HC_AUTOMATIC is exactly "on". */
@@ -18,8 +17,6 @@ export type AutomaticSwitch = {
 
 export const AUTOMATIC_SWITCHED_OFF = "Automatic runs are switched off on this worker, so nothing was read from Salesforce.";
 export const AUTOMATIC_ORG_NOT_LISTED = "Automatic runs aren't allowed for this org on this worker yet, so nothing was read from Salesforce.";
-/** Said just before extraction, until lane E3 builds what comes after it (DECISIONS.md 692). */
-export const AUTOMATIC_NOT_BUILT = "Automatic runs aren't built yet, so nothing was read from Salesforce.";
 
 /** Why the switch won't let this run go on, or null: every consultant-led run, and an automatic one for a listed org with the switch on. */
 export function automaticRefusal(run: Pick<Run, "reviewMode" | "orgId">, automatic: AutomaticSwitch | undefined): string | null {
@@ -33,7 +30,7 @@ export function automaticRefusal(run: Pick<Run, "reviewMode" | "orgId">, automat
 export function automaticStartLine(automatic: AutomaticSwitch): string {
   if (!automatic.on) return "Automatic runs are off: HC_AUTOMATIC isn't on, so an automatic run's connect is refused and its run fails at its claim.";
   const n = automatic.orgs.size;
-  return `Automatic runs are switched on for ${n === 1 ? "1 org" : `${n} orgs`}: one connects, is calibrated and queued, but isn't built past that yet, so it fails before reading the org for analysis.`;
+  return `Automatic runs are switched on for ${n === 1 ? "1 org" : `${n} orgs`}: one connects, is calibrated and queued, and its run is checked and released or held by code.`;
 }
 
 const ORG_ID = /^[A-Za-z0-9]{15}$/;

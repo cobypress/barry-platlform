@@ -35,6 +35,7 @@ import {
   type RunProgress,
   type PulseRun,
   type ReleasedRun,
+  type AutomaticRunState,
   type WorkerStore,
 } from "./types.ts";
 
@@ -224,7 +225,36 @@ export function calibrationRow(runId: string, c: Calibration): Record<string, un
 /** A full check's review mode at connect, through the row as JSON (DECISIONS.md 688, 692). */
 export const REVIEW_MODE_SQL = `SELECT to_jsonb("HealthCheckRun") ->> 'reviewMode' AS "reviewMode" FROM "HealthCheckRun" WHERE "id" = $1`;
 /** The console's check also wants the run unreleased; held twice keeps the first reason. */
-export const HOLD_RUN_SQL = `UPDATE "HealthCheckRun" SET "heldReason" = $2 WHERE "id" = $1 AND "reviewMode" = 'automatic' AND "heldReason" IS NULL AND "status" <> 'released'`;
+/**
+ * The hold at connect and its flag in one statement (DECISIONS.md 692, 693):
+ * the flag is raised only where this statement set the hold, so a redelivery
+ * that finds the run held already raises nothing more, and a hold is never
+ * recorded without its flag.
+ */
+export const HOLD_RUN_SQL =
+  `WITH held AS (UPDATE "HealthCheckRun" SET "heldReason" = $2 WHERE "id" = $1 AND "reviewMode" = 'automatic' AND "heldReason" IS NULL AND "status" <> 'released' RETURNING "id"), ` +
+  `flag AS (INSERT INTO "HealthCheckRunFlag" ("runId", "kind", "raisedAt", "counts") SELECT "id", $2, $3::timestamp(3), '{}'::jsonb FROM held ON CONFLICT ("runId", "kind") DO NOTHING) ` +
+  `SELECT count(*)::int AS "held" FROM held`;
+/** A flag for a person (migration 20261211): counts only, raised once. */
+export const RAISE_FLAG_SQL = `INSERT INTO "HealthCheckRunFlag" ("runId", "kind", "raisedAt", "counts") VALUES ($1, $2, $3::timestamp(3), $4::jsonb) ON CONFLICT ("runId", "kind") DO NOTHING`;
+/** A failed run's flag, only for an automatic run: read through the row as JSON, so a console without the column raises none. */
+export const FAILURE_FLAG_SQL =
+  `INSERT INTO "HealthCheckRunFlag" ("runId", "kind", "raisedAt", "counts") SELECT "id", 'run_failed', $2::timestamp(3), '{}'::jsonb FROM "HealthCheckRun" ` +
+  `WHERE "id" = $1 AND to_jsonb("HealthCheckRun") ->> 'reviewMode' = 'automatic' ON CONFLICT ("runId", "kind") DO NOTHING`;
+/** An automatic run's hold with its results (DECISIONS.md 693). One row or the save rolls back. */
+export const HOLD_OUTPUT_SQL = `UPDATE "HealthCheckRun" SET "heldReason" = $2 WHERE "id" = $1 AND "reviewMode" = 'automatic' AND "status" <> 'released'`;
+/** One release row by code: kind automatic, naming nobody (migration 20261211's check). */
+export const RELEASE_ROW_SQL = `INSERT INTO "HealthCheckRelease" ("id", "runId", "output", "sectionIds", "kind", "releasedBy", "releasedAt") VALUES ($1, $2, $3, $4::text[], 'automatic', NULL, $5::timestamp(3))`;
+/** Last, once the digest and the release rows are in: the customer may see it. One row or the save rolls back. */
+export const RELEASE_RUN_SQL = `UPDATE "HealthCheckRun" SET "status" = 'released', "heldReason" = NULL WHERE "id" = $1 AND "reviewMode" = 'automatic'`;
+/** The org's last released run of the product, by its latest release row, other than this one (DECISIONS.md 693). */
+export const LAST_RELEASED_SCORE_SQL =
+  `SELECT r."overallScore" AS "score" FROM "HealthCheckRun" r JOIN "HealthCheckRelease" l ON l."runId" = r."id" ` +
+  `WHERE r."id" <> $1 AND left(r."orgId", 15) = $2 AND r."product" = $3 AND r."status" = 'released' AND r."overallScore" IS NOT NULL ` +
+  `GROUP BY r."id", r."overallScore" ORDER BY max(l."releasedAt") DESC LIMIT 1`;
+export const AUTOMATIC_STATE_SQL =
+  `SELECT r."status", r."queuedAt" IS NOT NULL AS "queued", to_jsonb(r) ->> 'heldReason' AS "heldReason", ` +
+  `EXISTS (SELECT 1 FROM "HealthCheckCalibration" c WHERE c."runId" = r."id") AS "calibrated" FROM "HealthCheckRun" r WHERE r."id" = $1`;
 export const MANUAL_ANSWER: Columns = {
   stepKey: "text", outcome: "text", method: "text", values: "json", pastedText: "text", screenshotRef: "text", prefill: "json", skipReason: "text",
   answeredBy: "text", answeredAt: "ts",
@@ -644,14 +674,57 @@ export class PostgresWorkerStore implements WorkerStore {
       if (summaries?.ok && summaries.row) await this.#writeSummaries(client, summaries.row);
       if (output.inventory) await this.#writeInventory(client, runId, output.inventory);
       if (output.complexity) await this.#writeComplexity(client, runId, output.complexity);
-      if (output.digest !== undefined) await this.#writeDigest(client, runId, output.digest);
+      // A release writes its digest itself, with nothing to fall back to (DECISIONS.md 693).
+      if (output.digest !== undefined && output.automatic?.decision !== "release") await this.#writeDigest(client, runId, output.digest);
       // Last, and each alone, so a console without the columns saves as before (DECISIONS.md 626).
       if (output.overall !== undefined) {
         const said = { subject: `Run ${runId}`, table: "HealthCheckRun", kept: "its results are" };
         await this.#newerColumn(client, "run_overall_score", { ...said, column: "overallScore", lost: "the run's overall score" }, `UPDATE "HealthCheckRun" SET "overallScore" = $2 WHERE "id" = $1`, [runId, output.overall?.score ?? null]);
         await this.#newerColumn(client, "run_overall_grade", { ...said, column: "overallGrade", lost: "the run's grade" }, `UPDATE "HealthCheckRun" SET "overallGrade" = $2 WHERE "id" = $1`, [runId, output.overall?.grade ?? null]);
       }
+      // Last of all, inside the same transaction: nothing is visible to the customer until all of it commits.
+      if (output.automatic) await this.#writeAutomatic(client, runId, output);
     });
+  }
+
+  /**
+   * An automatic run's release or hold (DECISIONS.md 693), with no savepoint:
+   * any refusal rolls the whole save back, so a run is never released with
+   * part of what the customer reads, nor held without its flag. Released: the
+   * digest first, then a release row per output naming nobody, then the status.
+   * Held: the reason, then its flag, raised once.
+   */
+  async #writeAutomatic(client: SqlClient, runId: string, output: RunOutputRecord): Promise<void> {
+    const a = output.automatic!;
+    if (a.decision === "hold") {
+      const held = await client.query(HOLD_OUTPUT_SQL, [runId, a.reason]);
+      if (held.rowCount !== 1) throw new Error(`Run ${runId} couldn't be held: the console doesn't have it as an unreleased automatic run`);
+      await client.query(RAISE_FLAG_SQL, [runId, a.reason, a.at, JSON.stringify(a.counts)]);
+      return;
+    }
+    const digest = output.digest;
+    if (!digest) throw new Error(`Run ${runId} has no digest, so it isn't released`);
+    const bad = unstorableAt(digest, [], DIGEST_KEYS);
+    if (bad) throw new Error(`Run ${runId}'s digest holds ${bad.what} at ${bad.at}, which the console's database can't store, so it isn't released`);
+    await client.query(RUN_DIGEST_SQL, [runId, digest.madeAt, digest.version, JSON.stringify(digest)]);
+    for (const r of a.releases) {
+      if (r.kind !== "automatic" || r.releasedBy !== null) throw new Error(`Run ${runId}'s release rows must be automatic and name nobody`);
+      await client.query(RELEASE_ROW_SQL, [r.id, runId, r.output, r.sectionIds, r.releasedAt]);
+    }
+    const released = await client.query(RELEASE_RUN_SQL, [runId]);
+    if (released.rowCount !== 1) throw new Error(`Run ${runId} couldn't be released: the console doesn't have it as an automatic run`);
+  }
+
+  async lastReleasedScore(runId: string, orgId15: string, product: string): Promise<number | null> {
+    const row = one(await this.#pool.query(LAST_RELEASED_SCORE_SQL, [runId, orgId15, product]));
+    const score = row?.score === undefined || row.score === null ? null : Number(row.score);
+    return score !== null && Number.isFinite(score) ? score : null;
+  }
+
+  async automaticRunState(runId: string): Promise<AutomaticRunState | null> {
+    const row = one(await this.#pool.query(AUTOMATIC_STATE_SQL, [runId]));
+    if (!row) return null;
+    return { calibrated: row.calibrated === true, queued: row.queued === true, held: typeof row.heldReason === "string", status: String(row.status) };
   }
 
   /**
@@ -893,6 +966,18 @@ export class PostgresWorkerStore implements WorkerStore {
       await client.query(`UPDATE "HealthCheckRun" SET "status" = 'failed' WHERE "id" = $1`, [runId]);
       await client.query(`DELETE FROM "HealthCheckRunStep" WHERE "runId" = $1 AND "id" = 'worker'`, [runId]);
       await this.#insert(client, "HealthCheckRunStep", RUN_STEP, { runId, id: "worker", version: 1, status: "failed", calls: 0, finishedAt: at, error: reason });
+      // An automatic run that fails is a person's to look at (DECISIONS.md 693), in its own savepoint:
+      // a console without the flag table (class 42) still records the failure, and says so.
+      await client.query("SAVEPOINT run_failed_flag");
+      try {
+        await client.query(FAILURE_FLAG_SQL, [runId, at]);
+        await client.query("RELEASE SAVEPOINT run_failed_flag");
+      } catch (err) {
+        const code = (err as { code?: unknown } | null)?.code;
+        if (typeof code !== "string" || !/^42[0-9A-Z]{3}$/.test(code)) throw err;
+        await client.query("ROLLBACK TO SAVEPOINT run_failed_flag");
+        this.#log(`Run ${runId}: the console's database has no HealthCheckRunFlag table it can write (SQLSTATE ${code}), so the failure raises no flag. Apply the console's ${REVIEW_MODE_MIGRATION} migration.`);
+      }
     });
   }
 
@@ -961,12 +1046,12 @@ export class PostgresWorkerStore implements WorkerStore {
   }
 
   /** DECISIONS.md 692: one statement, only an automatic run's and only where none is set. A console without the columns, or refusing the word, is said by its SQLSTATE alone. */
-  async holdRun(runId: string, reason: "calibration_unreadable"): Promise<boolean> {
+  async holdRun(runId: string, reason: "calibration_unreadable", at: string): Promise<boolean> {
     try {
-      const result = await this.#pool.query(HOLD_RUN_SQL, [runId, reason]);
-      return result.rowCount === 1;
+      const result = await this.#pool.query(HOLD_RUN_SQL, [runId, reason, at]);
+      return Number(one(result)?.held) === 1;
     } catch (err) {
-      this.#log(`Run ${runId}: the console's HealthCheckRun table refused its "heldReason" column with SQLSTATE ${sqlState((err as { code?: unknown }).code)}, so the hold isn't recorded. Check the table against the console's ${REVIEW_MODE_MIGRATION} migration.`);
+      this.#log(`Run ${runId}: the console's HealthCheckRun or HealthCheckRunFlag table refused the hold with SQLSTATE ${sqlState((err as { code?: unknown }).code)}, so the hold isn't recorded. Check the table against the console's ${REVIEW_MODE_MIGRATION} migration.`);
       return false;
     }
   }

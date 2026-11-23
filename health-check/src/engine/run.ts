@@ -428,6 +428,8 @@ function analyseRun(dir: string, run: Run, calibration: Calibration, modules: Do
     pseudonyms,
     userDirectory: directory,
     scope: run.scope,
+    // An automatic run never waits for a person: what nobody answered is skipped, and the rules that needed it say not measurable (DECISIONS.md 693).
+    unanswered: run.reviewMode === "automatic" ? "skip" : "ask",
   });
   writeJson(join(dir, "pseudonym-map.json"), pseudonyms.entries());
   // The customer's own configuration, for their handbook: kept as long as the

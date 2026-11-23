@@ -14,7 +14,7 @@ import { loadRun } from "../../render/render-run.ts";
 import { CHECKED_OUTSIDE_AUTOMATIC, ReportSection, Run, SectionsOfRun, type SectionVersion } from "../../schemas/index.ts";
 import { runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers, loadRecording, ReplayTransport } from "../../testing/replay.ts";
-import { AUTOMATIC_NOT_BUILT, AUTOMATIC_ORG_NOT_LISTED, AUTOMATIC_SWITCHED_OFF, automaticRefusal, automaticStartLine, readAutomaticOrgs } from "../automatic.ts";
+import { AUTOMATIC_ORG_NOT_LISTED, AUTOMATIC_SWITCHED_OFF, automaticRefusal, automaticStartLine, readAutomaticOrgs } from "../automatic.ts";
 import { processDocumentsJob } from "../documents-job.ts";
 import { readWorkerEnv } from "../env.ts";
 import { runFromRows, runSql, RUN, RUN_DOCUMENTS } from "../postgres-store.ts";
@@ -90,7 +90,7 @@ describe("the worker's switch", () => {
   test("says at start which state the worker is in, with no org id", () => {
     assert.equal(automaticStartLine({ on: false, orgs: new Set([ORG15]) }), "Automatic runs are off: HC_AUTOMATIC isn't on, so an automatic run's connect is refused and its run fails at its claim.");
     const on = automaticStartLine({ on: true, orgs: new Set([ORG15, "00D000000000002"]) });
-    assert.equal(on, "Automatic runs are switched on for 2 orgs: one connects, is calibrated and queued, but isn't built past that yet, so it fails before reading the org for analysis.");
+    assert.equal(on, "Automatic runs are switched on for 2 orgs: one connects, is calibrated and queued, and its run is checked and released or held by code.");
     assert.ok(!on.includes(ORG15));
   });
 
@@ -125,7 +125,7 @@ describe("the worker's switch", () => {
       return lines.filter((l) => l.startsWith("Automatic runs"));
     };
     assert.deepEqual(await startLines({}), ["Automatic runs are off: HC_AUTOMATIC isn't on, so an automatic run's connect is refused and its run fails at its claim."]);
-    assert.deepEqual(await startLines({ HC_AUTOMATIC: "on", HC_AUTOMATIC_ORGS: ORG15 }), ["Automatic runs are switched on for 1 org: one connects, is calibrated and queued, but isn't built past that yet, so it fails before reading the org for analysis."]);
+    assert.deepEqual(await startLines({ HC_AUTOMATIC: "on", HC_AUTOMATIC_ORGS: ORG15 }), ["Automatic runs are switched on for 1 org: one connects, is calibrated and queued, and its run is checked and released or held by code."]);
   });
 });
 
@@ -135,8 +135,6 @@ describe("an automatic run job", () => {
     ["with the switch absent", {}, AUTOMATIC_SWITCHED_OFF],
     ["with the switch off and the org listed", { automatic: { on: false, orgs: new Set([ORG15]) } }, AUTOMATIC_SWITCHED_OFF],
     ["with the switch on and the org not listed", { automatic: { on: true, orgs: new Set(["00D000000000002"]) } }, AUTOMATIC_ORG_NOT_LISTED],
-    // Past its claim now, and stopped just before extraction (DECISIONS.md 692).
-    ["with the switch on and the org listed (until lane E3)", { automatic: { on: true, orgs: new Set([ORG15]) } }, AUTOMATIC_NOT_BUILT],
   ];
   for (const [name, overrides, reason] of cases) {
     test(`fails at its claim ${name}, with one plain reason and nothing read`, async () => {
@@ -231,7 +229,7 @@ describe("the readers", () => {
     assert.equal(digest("automatic").reviewed, false);
   });
 
-  test("the documents print an automatic run's sections as a draft, not approved, approved or checked, and a consultant-led run's approved ones as before", () => {
+  test("the documents print an automatic run's approved sections as a draft and its checked ones as released (DECISIONS.md 693), and a consultant-led run's approved ones as before", () => {
     const loaded = loadRun(recorded);
     const page = (reviewMode: "consultant" | "automatic", status: "approved" | "checked") => {
       const report = buildReport({ ...loaded.input, run: { ...loaded.input.run, reviewMode } });
@@ -241,7 +239,9 @@ describe("the readers", () => {
     };
     assert.ok(!page("consultant", "approved").includes("Draft, not approved for release"));
     assert.ok(page("automatic", "approved").includes("Draft, not approved for release"));
-    assert.ok(page("automatic", "checked").includes("Draft, not approved for release"));
+    // Released by code once every section is checked (693): before, nothing an automatic run held could be released.
+    assert.ok(!page("automatic", "checked").includes("Draft, not approved for release"));
+    assert.ok(page("consultant", "checked").includes("Draft, not approved for release"));
     assert.ok(!page("automatic", "checked").includes("consultant@example.com"));
   });
 
