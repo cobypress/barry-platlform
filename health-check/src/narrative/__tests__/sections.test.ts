@@ -124,7 +124,7 @@ describe("what the engine can't know", () => {
 
   test("nothing can be released as built", () => {
     for (const built of Object.values(all({ ...base, intake }).report.outputs)) {
-      const release = canRelease(built.sections);
+      const release = canRelease(built.sections, "consultant");
       assert.equal(release.ok, false);
       assert.equal(built.sections.some((s) => s.status === "approved"), false);
     }

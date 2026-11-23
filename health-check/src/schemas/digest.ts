@@ -288,7 +288,7 @@ export const RunDigest = z.object({
   version: z.literal(DIGEST_VERSION),
   runId: Id,
   product: z.enum(["barometer", "pulse"]),
-  /** False for a pulse, which nobody reviews; true for a check or re-check, made once its documents are. */
+  /** False for a pulse, which nobody reviews, and for an automatic run, which no person reviewed (DECISIONS.md 688); true for a consultant-led check or re-check, made once its documents are. */
   reviewed: z.boolean(),
   asOf: Timestamp,
   madeAt: Timestamp,

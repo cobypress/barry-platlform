@@ -315,7 +315,8 @@ export function buildDigest({ report, pseudonyms, inventory, madeAt }: DigestFor
     version: DIGEST_VERSION,
     runId: run.id,
     product: run.product,
-    reviewed: run.product !== "pulse",
+    // An automatic run's sections passed the machine checks, and no person reviewed them (DECISIONS.md 688).
+    reviewed: run.product !== "pulse" && run.reviewMode === "consultant",
     asOf: run.asOf,
     madeAt,
     baselineRunId: run.baselineRunId,

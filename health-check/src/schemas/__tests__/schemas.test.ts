@@ -159,9 +159,9 @@ describe("review console", () => {
   test("release needs every section approved", () => {
     const parsedApproved = ReportSection.parse(approved);
     const draft = ReportSection.parse({ ...section, key: "scorecard" });
-    assert.deepEqual(canRelease([parsedApproved]), { ok: true });
-    assert.deepEqual(canRelease([parsedApproved, draft]), { ok: false, blockedBy: ["scorecard"] });
-    assert.equal(canRelease([]).ok, false);
+    assert.deepEqual(canRelease([parsedApproved], "consultant"), { ok: true });
+    assert.deepEqual(canRelease([parsedApproved, draft], "consultant"), { ok: false, blockedBy: ["scorecard"] });
+    assert.equal(canRelease([], "consultant").ok, false);
   });
 
   const check = { passed: true, checkedAt: at, unmatched: [] };

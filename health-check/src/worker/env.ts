@@ -4,6 +4,7 @@ import type { OAuthClient } from "../salesforce/oauth.ts";
 import type { DriveConfig } from "./drive.ts";
 import { MicrositeKeyError, micrositeKey } from "../microsite/seal.ts";
 import { orgWordsStore } from "../engine/org-words.ts";
+import { readAutomaticOrgs, type AutomaticSwitch } from "./automatic.ts";
 
 /** The highest HC_WORKER_RECYCLE_AT takes: half the org-word store's bound (DECISIONS.md 666). */
 export const RECYCLE_AT_LIMIT = Math.floor(orgWordsStore().limit / 2);
@@ -45,6 +46,8 @@ export const WORKER_ENV = {
     HC_WORKER_RECYCLE_AT: `A whole number from 1 to ${RECYCLE_AT_LIMIT}: once that many org-worded sentences are in the worker's store, it finishes the jobs in hand and exits 75 for Render to start a fresh one (DECISIONS.md 666). Unset: it never recycles itself. Set it low once and watch Render restart it before relying on it`,
     HC_PMD_HOME: "Absolute path of the unpacked PMD 7.29.0 (the pmd-bin-7.29.0 folder): PMD then checks each health check's Apex code, and its findings are stored beside our own scan's (DECISIONS.md 670). Unset: PMD doesn't run, and each run says so",
     HC_JAVA_HOME: "Absolute path of the Java PMD runs on (the folder holding bin/java). Needed with HC_PMD_HOME",
+    HC_AUTOMATIC: "on, exactly, to let the worker take automatic runs, which no person reviews (DECISIONS.md 688). Anything else, or unset, is off, and an automatic run fails at its claim with nothing read. Automatic runs aren't built yet, so with it on they still fail at their claim",
+    HC_AUTOMATIC_ORGS: "Comma-separated 15-character org ids automatic runs are allowed for while they're proved. An automatic run for any other org fails at its claim with nothing read",
     HC_MICROSITE_KEY: "The customer microsite: 32 bytes, base64 (openssl rand -base64 32), the same value as the console's, and different from HC_CONNECT_KEY and HC_TOKEN_KEY. Without it, released runs get documents but no microsite",
   },
 } as const;
@@ -91,6 +94,8 @@ export type WorkerConfig = {
   /** HC_PMD_HOME and HC_JAVA_HOME, or null: where PMD and its Java are, checked when the worker starts (DECISIONS.md 670). */
   pmdHome: string | null;
   javaHome: string | null;
+  /** HC_AUTOMATIC=on, exactly, and HC_AUTOMATIC_ORGS: whether an automatic run may go past its claim, and for which orgs (DECISIONS.md 688). */
+  automatic: AutomaticSwitch;
 };
 
 const key32 = (raw: string): Buffer | null => {
@@ -137,6 +142,8 @@ export function readWorkerEnv(env: NodeJS.ProcessEnv): { ok: true; config: Worke
     problems.push(`HC_WORKER_RECYCLE_AT must be a whole number from 1 to ${RECYCLE_AT_LIMIT}, or unset`);
   }
   for (const name of ["HC_PMD_HOME", "HC_JAVA_HOME"]) if (get(name) && !isAbsolute(get(name))) problems.push(`${name} must be an absolute path, or unset`);
+  const automaticOrgs = readAutomaticOrgs(get("HC_AUTOMATIC_ORGS"));
+  if (!automaticOrgs.ok) problems.push(`HC_AUTOMATIC_ORGS must be 15-character org ids separated by commas: ${automaticOrgs.bad} ${automaticOrgs.bad === 1 ? "entry isn't" : "entries aren't"}`);
   if (!["", "0", "1"].includes(get("HC_CLEANUP_DRY_RUN"))) problems.push("HC_CLEANUP_DRY_RUN must be 1, 0 or unset");
   let siteKey: Buffer | null = null;
   try {
@@ -191,6 +198,8 @@ export function readWorkerEnv(env: NodeJS.ProcessEnv): { ok: true; config: Worke
       recycleAt,
       pmdHome: get("HC_PMD_HOME") || null,
       javaHome: get("HC_JAVA_HOME") || null,
+      // Exactly "on", untrimmed, as the summaries' switch: a switch that lets a run skip a person doesn't guess.
+      automatic: { on: env.HC_AUTOMATIC === "on", orgs: automaticOrgs.ok ? automaticOrgs.orgs : new Set() },
     },
   };
 }

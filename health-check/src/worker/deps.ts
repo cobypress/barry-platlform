@@ -8,6 +8,7 @@ import type { renderReleased } from "../render/render-released.ts";
 import type { renderHandbookDocx } from "../handbook/docx.ts";
 import type { DocumentDrive, FolderSharing } from "./drive.ts";
 import type { WorkerStore } from "./types.ts";
+import type { AutomaticSwitch } from "./automatic.ts";
 
 export type WorkerDeps = {
   store: WorkerStore;
@@ -41,6 +42,8 @@ export type WorkerDeps = {
    * it after the analysis (DECISIONS.md 490 to 492). Off when absent.
    */
   apexSummaries?: boolean;
+  /** The worker's switch for automatic runs, read once at start in env.ts (DECISIONS.md 688). Absent: off. */
+  automatic?: AutomaticSwitch;
   /**
    * PMD as the worker found it at start, for each health check's code-lint
    * step (DECISIONS.md 670). Absent: the step says PMD isn't installed.

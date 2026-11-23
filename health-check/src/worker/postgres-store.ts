@@ -105,6 +105,16 @@ export const RUN: Columns = {
  * job never reads it, and never needs the column.
  */
 export const RUN_DOCUMENTS: Columns = { ...RUN, preparedBy: "text" };
+/** The console's migration that adds the run's review mode (DECISIONS.md 688). */
+export const REVIEW_MODE_MIGRATION = "20261211_health_check_automatic.sql";
+/**
+ * A run read with its "reviewMode", which the console's migration
+ * REVIEW_MODE_MIGRATION adds. Read through the row as JSON, as the survey's
+ * version is, so the query works before the column exists: missing or null
+ * reads as consultant-led (DECISIONS.md 688).
+ */
+export const runSql = (columns: Columns): string =>
+  selectSql("HealthCheckRun", columns, `"id" = $1`).replace(` FROM "HealthCheckRun"`, `, to_jsonb("HealthCheckRun") ->> 'reviewMode' AS "reviewMode" FROM "HealthCheckRun"`);
 export const RUN_STEP: Columns = { runId: "text", id: "text", version: "num", status: "text", calls: "num", finishedAt: "ts", error: "text" };
 export const INTAKE: Columns = {
   statedProblems: "text", customerName: "text", linkedinUrl: "text", industry: "text", headcountBand: "text", customerAnswers: "json",
@@ -201,9 +211,10 @@ export const CALIBRATION: Columns = {
 // Service Cloud's limits, in a "service" JSONB column the console may add. Read
 // through the row as JSON, as the survey version is, so the query works with
 // the column and without it: missing reads as null, and the defaults apply (DECISIONS.md 165).
+// Its "source" likewise: missing or null is a calibration a person confirmed (DECISIONS.md 688).
 export const CALIBRATION_SQL = selectSql("HealthCheckCalibration", CALIBRATION, `"runId" = $1`).replace(
   ` FROM "HealthCheckCalibration"`,
-  `, to_jsonb("HealthCheckCalibration") -> 'service' AS "service" FROM "HealthCheckCalibration"`,
+  `, to_jsonb("HealthCheckCalibration") ->> 'source' AS "source", to_jsonb("HealthCheckCalibration") -> 'service' AS "service" FROM "HealthCheckCalibration"`,
 );
 export const MANUAL_ANSWER: Columns = {
   stepKey: "text", outcome: "text", method: "text", values: "json", pastedText: "text", screenshotRef: "text", prefill: "json", skipReason: "text",
@@ -270,8 +281,15 @@ export const CONNECT_LINK: Columns = {
 const withoutNulls = (o: Record<string, unknown>): Record<string, unknown> => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== null));
 
 export function runFromRows(row: Record<string, unknown>, steps: Array<Record<string, unknown>>): Run {
-  const { analysisFrom, analysisTo, connectionName: _name, preparedBy: _by, scope, ...rest } = row;
-  return Run.parse({ ...rest, ...(scope === null || scope === undefined ? {} : { scope }), analysisWindow: { from: analysisFrom, to: analysisTo }, steps });
+  const { analysisFrom, analysisTo, connectionName: _name, preparedBy: _by, scope, reviewMode, ...rest } = row;
+  return Run.parse({
+    ...rest,
+    ...(scope === null || scope === undefined ? {} : { scope }),
+    // No column yet, or null: consultant-led, as every run before decision 688 was. Anything else must be a mode the engine knows.
+    ...(reviewMode === null || reviewMode === undefined ? {} : { reviewMode }),
+    analysisWindow: { from: analysisFrom, to: analysisTo },
+    steps,
+  });
 }
 
 /**
@@ -526,7 +544,7 @@ export class PostgresWorkerStore implements WorkerStore {
   }
 
   async loadRunJob(runId: string): Promise<RunJobInput | null> {
-    const row = one(await this.#pool.query(selectSql("HealthCheckRun", RUN, `"id" = $1`), [runId]));
+    const row = one(await this.#pool.query(runSql(RUN), [runId]));
     if (!row) return null;
     const [steps, intake, calibration, answers, survey, interviews] = await Promise.all([
       this.#pool.query(selectSql("HealthCheckRunStep", RUN_STEP, `"runId" = $1`, `"seq"`), [runId]),
@@ -968,7 +986,7 @@ export class PostgresWorkerStore implements WorkerStore {
   }
 
   async loadDocumentsJob(runId: string, reads: DocumentsJobReads = {}): Promise<DocumentsJobInput | null> {
-    const row = one(await this.#pool.query(selectSql("HealthCheckRun", RUN_DOCUMENTS, `"id" = $1`), [runId]));
+    const row = one(await this.#pool.query(runSql(RUN_DOCUMENTS), [runId]));
     if (!row) return null;
     const [steps, intake, sections, versions, overrides, documents, survey, summaries] = await Promise.all([
       this.#pool.query(selectSql("HealthCheckRunStep", RUN_STEP, `"runId" = $1`, `"seq"`), [runId]),

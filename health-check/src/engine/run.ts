@@ -158,7 +158,15 @@ export function collectExtractors(modules: DomainModule[], extra: Extractor[] = 
   return [...seen.values(), factsExtractor];
 }
 
-const calibrationHash = (calibration: Calibration): string => createHash("sha256").update(JSON.stringify(calibration)).digest("hex").slice(0, 16);
+/**
+ * A confirmed calibration hashes without its source, as every one did before
+ * decision 688 added it, so a run started before then still resumes. One read
+ * from the org's settings keeps it, and so never hashes like a confirmed one.
+ */
+const calibrationHash = (calibration: Calibration): string => {
+  const { source, ...rest } = calibration;
+  return createHash("sha256").update(JSON.stringify(source === "confirmed" ? rest : calibration)).digest("hex").slice(0, 16);
+};
 
 const checkpointPath = (dir: string, id: string): string => join(dir, "checkpoints", `${id}.json`);
 

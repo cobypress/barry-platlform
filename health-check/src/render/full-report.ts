@@ -1096,7 +1096,7 @@ export function fullReportHtmlAt(report: BuiltReport, pseudonyms: Pseudonymiser,
 
 function fullReportHtmlWith(report: BuiltReport, pseudonyms: Pseudonymiser, step: number | null, words: CustomerWords): string {
   const built = report.outputs.full_health_check;
-  const r = renderContext(pseudonyms, report.input.calibration.currency, !canRelease(built.sections).ok, referenceMap(noteSections(report)), yearlyByFinding(report.value), words);
+  const r = renderContext(pseudonyms, report.input.calibration.currency, !canRelease(built.sections, report.input.run.reviewMode).ok, referenceMap(noteSections(report)), yearlyByFinding(report.value), words);
   const ladder = [...DENSITIES, null];
   let slides: Slide[] = [];
   if (step !== null) slides = slidesAt(report, r, ladder[step] ?? null);

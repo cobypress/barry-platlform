@@ -25,6 +25,10 @@ export const Calibration = z
     orgId: z.string().min(15).max(18).optional(),
     confirmedBy: z.string().min(1),
     confirmedAt: Timestamp,
+    // Confirmed: a person agreed it, and confirmedBy names them. Org settings: read
+    // from Salesforce's own flags with no person's confirmation, and confirmedBy
+    // only says who set it up, so nothing prints it as a confirmation (DECISIONS.md 688).
+    source: z.enum(["confirmed", "org_settings"]).default("confirmed"),
     stages: z.array(CalibratedStage).min(1),
     scope: z.object({
       recordTypes: z.union([z.literal("all"), z.array(z.string().min(1)).min(1)]),
@@ -77,3 +81,13 @@ export const Calibration = z
     }
   });
 export type Calibration = z.infer<typeof Calibration>;
+
+/**
+ * Who stands behind the calibration, as the notes and reports print it. Only a
+ * confirmed one names a person: one read from the org's settings says so.
+ */
+export function calibrationConfirmation(c: Pick<Calibration, "source" | "confirmedBy" | "confirmedAt">): string {
+  return c.source === "org_settings"
+    ? `Calibration read from the org's own settings on ${c.confirmedAt.slice(0, 10)}, with no person's confirmation`
+    : `Calibration confirmed by ${c.confirmedBy} on ${c.confirmedAt.slice(0, 10)}`;
+}

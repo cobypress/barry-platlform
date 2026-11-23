@@ -1,6 +1,6 @@
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { factsText, type FactsSummary } from "../facts/summary.ts";
-import type { Calibration, Evidence, Finding, ManualStep, Metric, Run, Score } from "../schemas/index.ts";
+import { calibrationConfirmation, type Calibration, type Evidence, type Finding, type ManualStep, type Metric, type Run, type Score } from "../schemas/index.ts";
 import { domainLabel } from "../narrative/select.ts";
 import { byKind, hasKinds, kindCounts } from "../narrative/unmeasured.ts";
 import { automationOf, INVENTORY_COLUMNS, inventoryRows, OBJECT_INVENTORY } from "../domains/configuration/inventory.ts";
@@ -174,7 +174,7 @@ export function renderRawNotes(input: { run: Run; calibration: Calibration; find
     "## Assumptions",
     "",
     `- Analysis window: ${run.analysisWindow.from} to ${run.analysisWindow.to}`,
-    `- Calibration confirmed by ${calibration.confirmedBy} on ${calibration.confirmedAt.slice(0, 10)}`,
+    `- ${calibrationConfirmation(calibration)}`,
     `- Record types in scope: ${calibration.scope.recordTypes === "all" ? "all" : calibration.scope.recordTypes.join(", ")}`,
     `- Stage meanings: ${calibration.stages.map((s) => `${s.name} (${s.category})`).join(", ")}`,
     `- A user counts as dormant after ${calibration.dormantDays} days without logging in`,
