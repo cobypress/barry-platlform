@@ -386,6 +386,11 @@ describe("the code-lint step", () => {
     const some = ran((await codeLintExtractor.run(context(rows, { pmd, pmdOptions: { tempBase: temp } }, [], refuse("ApexTrigger")))).pmd);
     assert.equal(some.found, 4);
     assert.deepEqual(some.limits, ["Apex triggers couldn't be read, so only classes were checked: ApexTrigger isn't available in this org, or to the connected user."]);
+    // The kind it couldn't read is recorded, so checks of only that kind aren't passed (decision 673, fix round 1).
+    assert.deepEqual(some.unread, ["trigger"]);
+    // Classes the org has, none of which reached PMD (each too large): unread too.
+    const big = ran((await codeLintExtractor.run(context({ classes: [{ Name: "Big", Body: APEX_ENORMOUS }], triggers: [{ Name: "AccountTrigger", Body: TRIGGER_WITH_HIT }] }, { pmd, pmdOptions: { tempBase: temp } }))).pmd);
+    assert.deepEqual(big.unread, ["class"]);
     const none = (soql: string): Error | undefined => refuse("ApexClass")(soql) ?? refuse("ApexTrigger")(soql);
     assert.equal(notRunReason((await codeLintExtractor.run(context(rows, { pmd, pmdOptions: { tempBase: temp } }, [], none))).pmd), "The Apex code couldn't be read: ApexClass isn't available in this org, or to the connected user.");
   });
