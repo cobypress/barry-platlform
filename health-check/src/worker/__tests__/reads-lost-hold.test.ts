@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createJobHandler } from "../worker.ts";
-import { AGAIN_FILE, BUDGET_STOPPED, BUDGET_STOPPED_STEP } from "../run-job.ts";
+import { AGAIN_FILE, BUDGET_STOP_WAITS, BUDGET_STOPPED, BUDGET_STOPPED_STEP } from "../run-job.ts";
 import { HOLD_REASONS } from "../release.ts";
 import { baseDeps, consoleRun, RUN_ID, runInput, syntheticConnection } from "./helpers.ts";
 import { AutomaticReplay, automaticSyntheticCalibration } from "../../testing/automatic.ts";
@@ -196,6 +196,25 @@ describe("lost reads that look like an outage hold an automatic run (DECISIONS.m
     assert.match(outcome.detail, /is held: reads_lost$/, outcome.detail);
   });
 
+  test("a last delivery that lost reads and couldn't save or record its failure: a later job resuming the folder holds it, never releases", async () => {
+    const w = await world();
+    const store = w.deps.store as unknown as { saveRunOutput: (...a: unknown[]) => Promise<void>; recordRunFailure: (...a: unknown[]) => Promise<void> };
+    const [save, record] = [store.saveRunOutput.bind(w.deps.store), store.recordRunFailure.bind(w.deps.store)];
+    let saves = 0;
+    let records = 0;
+    store.saveRunOutput = async (...a) => (saves++ === 0 ? Promise.reject(new Error("db down")) : save(...a));
+    // Both tries at the failure record fail, as in a database outage.
+    store.recordRunFailure = async (...a) => (records++ < 2 ? Promise.reject(new Error("db down")) : record(...a));
+    await w.deliver().catch(() => {});
+    // As Postgres stands when neither write landed: the run still analysing, unheld, its folder holding the lost reads.
+    w.stored().run.status = "analysing";
+    w.state.down = false;
+    const outcome = await createJobHandler(w.deps)({ kind: "run", runId: RUN_ID }, { final: false });
+    assert.match(outcome.detail, /is held: reads_lost$/, outcome.detail);
+    assert.equal(w.deps.store.releases.has(RUN_ID), false);
+    assert.notEqual(w.stored().run.status, "released");
+  });
+
   test("a consultant-led run with the same outage goes to review as before: not held, no flag", async () => {
     const w = await world({ mode: "consultant" });
     await w.deliver();
@@ -222,10 +241,41 @@ describe("an automatic budget stop raises its flag (DECISIONS.md 715)", () => {
     const flag = structuredClone(deps.store.flags.get(`${RUN_ID}|stopped_budget`));
     assert.ok(flag);
     assert.deepEqual(flag.counts, {});
+    // A duplicate or a delivery made again: skipped, nothing read, nothing carried on, the flag as it was.
+    const calls = stored.run.budget.callsMade;
     const second = await handle({ kind: "run", runId: RUN_ID }, { final: false });
-    assert.equal(second.outcome, "stopped_budget");
+    assert.deepEqual(second, { outcome: "skipped", detail: BUDGET_STOP_WAITS(RUN_ID) });
+    assert.equal(deps.store.runs.get(RUN_ID)!.run.status, "stopped_budget");
+    assert.equal(deps.store.runs.get(RUN_ID)!.run.budget.callsMade, calls);
     assert.equal(deps.store.writes.filter((x) => x.method === "raiseFlag" && x.detail === "stopped_budget").length, 1);
     assert.deepEqual(deps.store.flags.get(`${RUN_ID}|stopped_budget`), flag);
+    // A person's Run again, as the console makes it: flags cleared, back to extracting, the -again- job id. It reads
+    // the org afresh, stops at the same point, and its flag is opened again for a person.
+    deps.store.postAndClearFlag(RUN_ID, "stopped_budget", "staff@example.com", AS_OF);
+    deps.store.runs.get(RUN_ID)!.run.status = "extracting";
+    const again = await handle({ kind: "run", runId: RUN_ID }, { final: false, jobId: `run-${RUN_ID}-again-1764000000000` });
+    assert.equal(again.outcome, "stopped_budget");
+    assert.equal(deps.store.flags.get(`${RUN_ID}|stopped_budget`)!.clearedAt, null);
+  });
+
+  test("a consultant-led run stopped at its budget still resumes on its next delivery, as before", async () => {
+    const deps = baseDeps({ dataTransport: new ReplayTransport(loadRecording()) });
+    deps.store.addRun(runInput());
+    await deps.tokens.save(syntheticConnection());
+    deps.store.runs.get(RUN_ID)!.run.status = "stopped_budget";
+    const outcome = await createJobHandler(deps)({ kind: "run", runId: RUN_ID }, { final: false });
+    assert.notEqual(outcome.outcome, "skipped", outcome.detail);
+    assert.notEqual(deps.store.runs.get(RUN_ID)!.run.status, "stopped_budget");
+  });
+
+  test("a flag that writes no row is logged", async () => {
+    const deps = baseDeps({ dataTransport: new Simulator({ dailyLimit: 1_500 }), automatic: ON });
+    deps.store.addRun(runInput({ run: consoleRun({ reviewMode: "automatic" }), calibration: await automaticSyntheticCalibration(), intake: null, answers: [] }));
+    await deps.tokens.save(syntheticConnection());
+    deps.store.flagBudgetStop = async () => false;
+    const outcome = await createJobHandler(deps)({ kind: "run", runId: RUN_ID }, { final: false });
+    assert.equal(outcome.outcome, "stopped_budget");
+    assert.ok(deps.lines.some((l) => /stopped_budget flag for .* wrote no row/.test(l)), deps.lines.join("\n"));
   });
 
   test("the store raises it only on an automatic run stopped at its budget", async () => {

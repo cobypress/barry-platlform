@@ -246,9 +246,12 @@ export class MemoryWorkerStore implements WorkerStore {
   }
 
   /** As the Postgres store's one statement: only an automatic run stopped at its budget. */
-  async flagBudgetStop(runId: string, at: string): Promise<void> {
+  async flagBudgetStop(runId: string, at: string): Promise<boolean> {
     const run = this.runs.get(runId);
-    if (run?.run.reviewMode === "automatic" && run.run.status === "stopped_budget") this.#raiseFlag(runId, STOPPED_BUDGET_FLAG, at, {});
+    if (run?.run.reviewMode !== "automatic" || run.run.status !== "stopped_budget") return false;
+    const before = this.writes.length;
+    this.#raiseFlag(runId, STOPPED_BUDGET_FLAG, at, {});
+    return this.writes.length > before;
   }
 
   /** As the Postgres store: the run's disconnect step in or out, whatever the run's status. */

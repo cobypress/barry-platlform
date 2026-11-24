@@ -171,6 +171,10 @@ export const AGAIN_SUPERSEDED = "A newer Run again has started this run afresh, 
 export const BUDGET_STOPPED_STEP = "budget-stopped";
 export const BUDGET_STOPPED = "This automatic run stopped at an API limit before it finished, and nothing carries it on by itself. A person needs to look at why before it is run again.";
 
+/** Whether this is an automatic run stopped at its budget and the job isn't a person's Run again: it waits, and nothing is read. */
+const budgetStopped = (input: RunJobInput, options: RunJobOptions): boolean => input.run.reviewMode === "automatic" && input.run.status === "stopped_budget" && options.again === undefined;
+export const BUDGET_STOP_WAITS = (runId: string): string => `Automatic run ${runId} stopped at its API budget, so it waits for a person to run it again and nothing was read`;
+
 /** The answer a "Run again" gets when the console hasn't set the run back first: nothing read, nothing removed. */
 export const AGAIN_NOT_RESET = "Run again starts an automatic run afresh only once it's set back to extracting with no hold, so nothing was read and its folder is as it was.";
 
@@ -206,6 +210,9 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
   if (first.run.reviewMode === "automatic" && first.run.status === "failed") return { outcome: "skipped", detail: `Automatic run ${runId} failed, so it waits for a person to run it again and nothing was read` };
   // A held automatic run waits for a named person, always: code never reads it again or releases it (DECISIONS.md 693).
   if (heldFor(first)) return heldOutcome(runId, first);
+  // Nothing carries an automatic run on after its budget stop (DECISIONS.md 710, 715): a duplicate or a delivery made
+  // again never resumes it, only a person's Run again, which the console sets back to extracting first.
+  if (budgetStopped(first, options)) return { outcome: "skipped", detail: BUDGET_STOP_WAITS(runId) };
   // A person's "Run again" of an automatic run reads the org afresh (DECISIONS.md 698): its folder is cleared and
   // nothing is resumed, so a run held for what it read is read again. Only a run the console has set back to
   // extracting, with its hold cleared (both checked above and again below), and only once per "Run again": a retry
@@ -272,6 +279,7 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
   Object.assign(seen, { product: input.run.product, connectionName: input.connectionName });
   // Held between the two readings (a second connect, a person): still nothing read.
   if (heldFor(input)) return heldOutcome(runId, input);
+  if (budgetStopped(input, options)) return { outcome: "skipped", detail: BUDGET_STOP_WAITS(runId) };
 
   // A person's "Run again" of an automatic run with no calibration (DECISIONS.md 700): one held before 700
   // because its currency couldn't be read. Its org is read again through its stored connection and the
@@ -410,7 +418,7 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
         log(`Couldn't record that ${runId} stopped at its budget: ${safeReason(err, secrets)}`);
       }
       try {
-        await deps.store.flagBudgetStop(runId, now().toISOString());
+        if (!(await deps.store.flagBudgetStop(runId, now().toISOString()))) log(`The stopped_budget flag for ${runId} wrote no row: it is open already, or the console doesn't have the run as automatic and stopped at its budget.`);
       } catch (err) {
         log(`Couldn't raise the stopped_budget flag for ${runId}: ${safeReason(err, secrets)}`);
       }
@@ -425,7 +433,9 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
   // refusal (edition, permission, Salesforce saying no), costs only its check. A consultant-led run goes to review.
   // Lost reads come only from the last delivery: before it, a read Salesforce didn't answer is thrown and read again.
   const lost = (result.run.readsRefused ?? []).filter((r) => r.lost === true);
-  const readsLost = input.run.reviewMode === "automatic" && input.run.product === "barometer" && attempt.final && lossLooksLikeOutage(lost) ? { lost: lost.length } : null;
+  // Not gated on this delivery being the last: a read is marked lost only on a last delivery, and a later job that
+  // resumes the folder (one whose last delivery couldn't save or record its failure) holds it as that one would have.
+  const readsLost = input.run.reviewMode === "automatic" && input.run.product === "barometer" && lossLooksLikeOutage(lost) ? { lost: lost.length } : null;
   if (readsLost) log(`Automatic run ${runId} lost ${lost.length} read${lost.length === 1 ? "" : "s"} to Salesforce not answering (${[...new Set(lost.map((r) => r.step))].join(", ")}), so it isn't released and waits for a person.`);
 
   // An automatic run's release or hold, once decided (DECISIONS.md 693).

@@ -1035,8 +1035,8 @@ export class PostgresWorkerStore implements WorkerStore {
     });
   }
 
-  async flagBudgetStop(runId: string, at: string): Promise<void> {
-    await this.#pool.query(BUDGET_FLAG_SQL, [runId, at]);
+  async flagBudgetStop(runId: string, at: string): Promise<boolean> {
+    return (await this.#pool.query(BUDGET_FLAG_SQL, [runId, at])).rowCount === 1;
   }
 
   /** DECISIONS.md 652: a step row, so no schema change. Not #openRun: a scan lets go after its results, in review or not. */

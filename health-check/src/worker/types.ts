@@ -369,8 +369,9 @@ export interface WorkerStore {
    * The stopped_budget flag, counts `{}`, on a run the console has as automatic
    * and stopped at its budget (DECISIONS.md 715): raised once while open, so a
    * delivery made again raises nothing more; a cleared one is opened again.
+   * True when a row was written (raised or opened again).
    */
-  flagBudgetStop(runId: string, at: string): Promise<void>;
+  flagBudgetStop(runId: string, at: string): Promise<boolean>;
 
   loadConnectJob(linkId: string): Promise<ConnectJobInput | null>;
   /**
