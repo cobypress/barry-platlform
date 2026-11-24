@@ -333,7 +333,7 @@ describe("the stage read (decision 706)", () => {
     const stages = readCheckpoint<Sourced<StageRow[]>>(join(without.dir, "checkpoints", "opportunity-stages.json"));
     assert.equal(stages.status, "ok");
     assert.ok(stages.status === "ok" && stages.missingFields?.includes(PROBABILITY_FIELD) && stages.data.every((r) => r.DefaultProbability === null));
-    assert.equal(stages.status === "ok" && stages.source.query, STAGES_SOQL);
+    assert.equal(stages.status === "ok" && stages.source.kind === "soql" && stages.source.query, STAGES_SOQL);
     const ours = without.findings.find((f) => f.ruleId === PROBABILITY_RULE)!;
     assert.equal(ours.status, "not_measurable");
     assert.match(ours.notMeasurableReason!, /^Salesforce didn't give us the probability/);
@@ -349,7 +349,7 @@ describe("the stage read (decision 706)", () => {
     const both = await simulatedRun((soql) => (/FROM OpportunityStage/.test(soql) ? { errorCode: "INSUFFICIENT_ACCESS", message: "no" } : null));
     const stages = readCheckpoint<Sourced<StageRow[]>>(join(both.dir, "checkpoints", "opportunity-stages.json"));
     assert.equal(stages.status, "unavailable");
-    assert.equal(stages.source.query, STAGES_SOQL);
+    assert.equal(stages.source.kind === "soql" && stages.source.query, STAGES_SOQL);
   });
 });
 
