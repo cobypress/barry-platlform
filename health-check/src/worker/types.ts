@@ -337,7 +337,6 @@ export type ShareJobInput = {
   recordable: boolean;
 };
 
-/** Raised by a store when the console has moved a run on, so the worker mustn't write to it. */
 /** How a delivery ended: the job's outcome, or "error" when it threw and goes back to the queue (or, on the last, BullMQ gives up). */
 export const DELIVERY_OUTCOMES = ["done", "stopped_budget", "skipped", "failed", "error"] as const;
 export type DeliveryOutcome = (typeof DELIVERY_OUTCOMES)[number];
@@ -355,6 +354,7 @@ export type RunDelivery = {
   steps: StepTiming[];
 };
 
+/** Raised by a store when the console has moved a run on, so the worker mustn't write to it. */
 export class RunClosedError extends Error {
   constructor(runId: string, status: string) {
     super(`Run ${runId} is ${status.replace("_", " ")}, so the worker leaves it alone`);

@@ -1,8 +1,10 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { processRunJob } from "../run-job.ts";
+import { DELIVERY_WRITE_MS, processRunJob } from "../run-job.ts";
 import { createJobHandler } from "../worker.ts";
-import { PostgresWorkerStore, RUN_DELIVERY_SQL, type SqlPool, type SqlResult } from "../postgres-store.ts";
+import { capSteps, MAX_DELIVERY_STEPS, OTHER_STEPS, PostgresWorkerStore, RUN_DELIVERY_SQL, type SqlPool, type SqlResult } from "../postgres-store.ts";
+import { runFromRecording } from "../../testing/harness.ts";
+import type { StepTiming } from "../../engine/run.ts";
 import type { RunDelivery } from "../types.ts";
 import { baseDeps, consoleRun, FlakyTransport, RUN_ID, runInput, syntheticConnection } from "./helpers.ts";
 import { loadRecording, ReplayTransport } from "../../testing/replay.ts";
@@ -124,6 +126,39 @@ describe("a delivery's row (DECISIONS.md 722)", () => {
   });
 });
 
+describe("the write never holds the job (DECISIONS.md 722)", () => {
+  // Its own limit: a write the job waited on for ever fails here, rather than hang the suite.
+  test("a write that never answers: the job's outcome as without it, after the limit, and it's said", { timeout: 20_000 }, async () => {
+    assert.equal(DELIVERY_WRITE_MS, 5_000);
+    const plain = await consultantRun();
+    const expected = await processRunJob(RUN_ID, plain, { final: false });
+    const hung = await consultantRun();
+    hung.deliveryWriteMs = 50;
+    hung.store.recordDelivery = () => new Promise<boolean>(() => {});
+    const began = Date.now();
+    assert.deepEqual(await processRunJob(RUN_ID, hung, { final: false }), expected);
+    assert.ok(Date.now() - began < 30_000);
+    assert.ok(hung.lines.includes(`Run ${RUN_ID}'s delivery times weren't recorded within 0.05 seconds, so the job went on without them.`));
+  });
+
+  test("a step whose save throws after it was timed is timed once, never done and failed both", async () => {
+    const timings: StepTiming[] = [];
+    let saves = 0;
+    await assert.rejects(
+      runFromRecording({
+        onStepTimed: (t) => timings.push(t),
+        onProgress: () => {
+          if (++saves === 3) throw new Error("the save failed");
+        },
+      }),
+      /the save failed/,
+    );
+    const ids = timings.map((t) => t.id);
+    assert.equal(new Set(ids).size, ids.length, ids.join(", "));
+    assert.ok(timings.every((t) => t.outcome === "done"));
+  });
+});
+
 describe("the Postgres store's delivery row", () => {
   const ROW: RunDelivery = {
     runId: RUN_ID,
@@ -167,5 +202,38 @@ describe("the Postgres store's delivery row", () => {
     assert.equal(await new PostgresWorkerStore(new Pool("23503"), { log: (l) => lines.push(l) }).recordDelivery(ROW), false);
     assert.equal(lines.length, 1);
     await assert.rejects(new PostgresWorkerStore(new Pool("57014")).recordDelivery(ROW), /refused/);
+  });
+
+  test("no rights (42501) or a row its CHECKs refuse (23514): false, each said once per worker process", async () => {
+    const lines: string[] = [];
+    for (const code of ["42501", "23514"]) {
+      const store = new PostgresWorkerStore(new Pool(code), { log: (l) => lines.push(l) });
+      for (let i = 0; i < 3; i++) assert.equal(await store.recordDelivery(ROW), false);
+    }
+    assert.equal(lines.length, 2);
+    assert.match(lines[0]!, /SQLSTATE 42501/);
+    assert.match(lines[1]!, /SQLSTATE 23514/);
+  });
+
+  test("very many steps: the slowest kept in their order, the rest added up in one row with their count", async () => {
+    const many: StepTiming[] = Array.from({ length: 150 }, (_, i) => ({ id: `step-${i}`, ms: (i * 37) % 151, calls: 1, outcome: "done" }));
+    const capped = capSteps(many);
+    assert.equal(capped.length, MAX_DELIVERY_STEPS);
+    const other = capped.at(-1)! as StepTiming & { count: number };
+    assert.equal(other.id, OTHER_STEPS);
+    assert.equal(other.count, 150 - (MAX_DELIVERY_STEPS - 1));
+    assert.equal(capped.reduce((n, s) => n + s.ms, 0), many.reduce((n, s) => n + s.ms, 0));
+    assert.equal(capped.reduce((n, s) => n + s.calls, 0), 150);
+    const kept = capped.slice(0, -1);
+    const slowestLeftOut = Math.max(...many.filter((s) => !kept.some((k) => k.id === s.id)).map((s) => s.ms));
+    assert.ok(kept.every((s) => s.ms >= slowestLeftOut));
+    assert.deepEqual(kept.map((s) => Number(s.id.slice(5))), [...kept.map((s) => Number(s.id.slice(5)))].sort((a, b) => a - b));
+    // Under the cap, as it was; and the row sent is the capped one, inside the migration's 32 KB.
+    assert.deepEqual(capSteps(many.slice(0, 10)), many.slice(0, 10));
+    const pool = new Pool();
+    await new PostgresWorkerStore(pool).recordDelivery({ ...ROW, steps: many });
+    const sent = String(pool.statements[0]!.values[6]);
+    assert.deepEqual(JSON.parse(sent), capped);
+    assert.ok(Buffer.byteLength(sent) < 32_768);
   });
 });

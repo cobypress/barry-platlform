@@ -117,6 +117,19 @@ function assertNoToken(s: Setup, ...more: unknown[]): void {
 }
 
 describe("every end of a free scan's run lets go of its connection (DECISIONS.md 652)", () => {
+  test("its access is given back before the run times' row is written, so it never waits behind that write (DECISIONS.md 722)", async () => {
+    const s = await setup();
+    const heldAtWrite: boolean[] = [];
+    const write = s.deps.store.recordDelivery.bind(s.deps.store);
+    s.deps.store.recordDelivery = async (d) => {
+      heldAtWrite.push(s.deps.tokens.has(CONNECTION));
+      return write(d);
+    };
+    assert.equal((await s.handle(job, once)).outcome, "done");
+    assertLetGo(s);
+    assert.deepEqual(heldAtWrite, [false]);
+  });
+
   test("done: the teaser saved, then revoked and deleted", async () => {
     const s = await setup();
     const outcome = await s.handle(job, once);

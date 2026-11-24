@@ -326,7 +326,11 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
     }
     const before = budget.callsMade;
     const began = performance.now();
+    // Once per step and delivery: a save that throws after the step is timed done mustn't time it again as failed.
+    let timedOnce = false;
     const timed = (outcome: StepTiming["outcome"]): void => {
+      if (timedOnce) return;
+      timedOnce = true;
       try {
         options.onStepTimed?.({ id: extractor.id, ms: Math.max(0, Math.round(performance.now() - began)), calls: budget.callsMade - before, outcome });
       } catch {

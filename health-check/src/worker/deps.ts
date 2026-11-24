@@ -13,6 +13,8 @@ import type { PortalDocumentsSwitch } from "./portal-documents.ts";
 
 export type WorkerDeps = {
   store: WorkerStore;
+  /** How long a delivery's run-times row may take before the job goes on without it (DECISIONS.md 722). DELIVERY_WRITE_MS unless a test says. */
+  deliveryWriteMs?: number;
   /** Encrypted OAuth tokens. Only the worker holds these; the console never sees a token. */
   tokens: TokenStore;
   /** Parent of every run folder. Outside any git work tree (rule 8). */

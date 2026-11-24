@@ -259,6 +259,7 @@ export class MemoryWorkerStore implements WorkerStore {
 
   async recordDelivery(delivery: RunDelivery): Promise<boolean> {
     if (!this.runs.has(delivery.runId)) return false;
+    assertChecks({ outcome: delivery.outcome }, CONSOLE_CHECKS.deliveryOutcome);
     this.deliveries.push(structuredClone(delivery));
     return true;
   }

@@ -192,14 +192,18 @@ async function runThenLetGo(runId: string, deps: WorkerDeps, attempt: Attempt, o
   try {
     outcome = await runLocked(runId, deps, attempt, seen, options);
   } catch (err) {
-    await noteDelivery(runId, seen, deps, attempt, "error");
     if (attempt.final) await letGoAfterRun(runId, seen, deps);
+    await noteDelivery(runId, seen, deps, attempt, "error");
     throw err;
   }
-  await noteDelivery(runId, seen, deps, attempt, outcome.outcome);
+  // A free scan gives back its org's access first: it never waits behind the run times' write.
   await letGoAfterRun(runId, seen, deps);
+  await noteDelivery(runId, seen, deps, attempt, outcome.outcome);
   return outcome;
 }
+
+/** The longest the run times' write may hold the run's lock and the queue's slot (DECISIONS.md 722). */
+export const DELIVERY_WRITE_MS = 5_000;
 
 /** What a delivery saw of its run, and, once it took the run, when it did and each step it read (DECISIONS.md 722). */
 type Seen = SeenRun & { delivery?: { startedAt: string; steps: StepTiming[] } };
@@ -214,8 +218,15 @@ async function noteDelivery(runId: string, seen: Seen, deps: WorkerDeps, attempt
   const outcome = DELIVERY_OUTCOMES.find((o) => o === ended);
   if (!seen.delivery || !deps.store.recordDelivery || !outcome) return;
   const now = (deps.now ?? (() => new Date()))();
+  const log = deps.log ?? (() => {});
+  // Raced against a timer: a hung connection never holds the run's lock or the queue's slot.
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const limit = deps.deliveryWriteMs ?? DELIVERY_WRITE_MS;
+  const timedOut = new Promise<"timeout">((resolve) => {
+    timer = setTimeout(() => resolve("timeout"), limit);
+  });
   try {
-    await deps.store.recordDelivery({
+    const write = deps.store.recordDelivery({
       runId,
       startedAt: seen.delivery.startedAt,
       endedAt: now.toISOString(),
@@ -224,8 +235,13 @@ async function noteDelivery(runId: string, seen: Seen, deps: WorkerDeps, attempt
       again: runAgainToken(runId, attempt.jobId) !== null,
       steps: seen.delivery.steps,
     });
+    // A write that fails after the timer has gone is no one's to hear.
+    write.catch(() => {});
+    if ((await Promise.race([write, timedOut])) === "timeout") log(`Run ${runId}'s delivery times weren't recorded within ${limit / 1000} seconds, so the job went on without them.`);
   } catch (err) {
-    (deps.log ?? (() => {}))(`Run ${runId}'s delivery times couldn't be recorded: ${safeReason(err)}`);
+    log(`Run ${runId}'s delivery times couldn't be recorded: ${safeReason(err)}`);
+  } finally {
+    clearTimeout(timer);
   }
 }
 
