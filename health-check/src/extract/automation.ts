@@ -1,4 +1,4 @@
-import { isUnavailable, SalesforceError, type MetadataMember } from "../salesforce/client.ts";
+import { classifyError, isUnavailable, SalesforceError, type MetadataMember } from "../salesforce/client.ts";
 import { redactSecrets } from "../privacy/secrets.ts";
 import { scanApex, type ApexScan } from "./apex-scan.ts";
 import { selectApexSource, type SourceRow } from "./apex-source.ts";
@@ -43,6 +43,9 @@ export const TOOLING_SOURCE: SourceInfo = { kind: "metadata", path: "Tooling API
 // all, so it reads the same bundle through Tooling instead (DECISIONS.md 73).
 const needsWritePermission = (err: unknown): boolean => isUnavailable(err) && err.code === "INSUFFICIENT_ACCESS";
 
+/** A retrieve's failure that makes narrowing it to the four objects worth saving for good (DECISIONS.md 702). */
+const narrows = (err: unknown): err is SalesforceError => isUnavailable(err) || (err instanceof SalesforceError && err.code === "RETRIEVE_TIMEOUT");
+
 // Why a retrieve naming further objects failed, kept before the retrieve of the
 // four starts, so a run stopped at the budget during that one doesn't make the
 // failing retrieve again when it resumes. It holds the objects named and the
@@ -78,8 +81,12 @@ export const metadataExtractor: Extractor<Sourced<MetadataBundle>> = {
     // object it won't give us, so a failure there is tried once more with the four
     // only. A connection refused the Metadata API isn't about the objects named,
     // and goes straight to Tooling. Anything not from Salesforce is thrown as before.
-    if (!first && further.length > 0 && retrieveError instanceof SalesforceError && !needsWritePermission(retrieveError)) {
-      first = { named: further, reason: readableReason(retrieveError.message) };
+    // Saved only for Salesforce's answer about this retrieve, or a retrieve that
+    // ran out of time, where narrowing helps: an outage or a one-off fault is
+    // thrown, and the next delivery tries the wide retrieve again (DECISIONS.md 702).
+    if (!first && further.length > 0 && narrows(retrieveError) && !needsWritePermission(retrieveError)) {
+      // The code and its class, for us: Salesforce's message is kept nowhere.
+      first = { named: further, reason: `${retrieveError.code.replace(/[^A-Za-z0-9_]/g, "").slice(0, 60)} (${classifyError(retrieveError).replace(/_/g, " ")})` };
       ctx.partial.append(FALLBACK_PARTIAL, [first]);
     }
     if (first) {

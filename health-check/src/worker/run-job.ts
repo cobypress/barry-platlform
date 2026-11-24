@@ -5,7 +5,7 @@ import { ALL_MODULES, knownModuleIds, modulesForRun } from "../domains/index.ts"
 import { runHealthCheck } from "../engine/run.ts";
 import { applyNarrative, type Rejection } from "../narrative/apply.ts";
 import type { NarrativeClient } from "../narrative/client.ts";
-import { classifyError, NoApiAccessError } from "../salesforce/client.ts";
+import { classifyError, NoApiAccessError, runStoppedWords, SalesforceError } from "../salesforce/client.ts";
 import { buildReport, surveyMetricsOf, type BuiltReport, type ReportInput } from "../narrative/sections.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { BASELINE_OVERRIDES_FILE, BASELINE_READ_FILE, INTERVIEWS_FILE, keepSurveyMetrics, loadRun, OUTPUT_FILES, SURVEY_FILE, writeBaselineRead, writeRows } from "../render/render-run.ts";
@@ -328,6 +328,8 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
       connectedUser: { id: stored.userId },
       // Every run the worker makes reads the org's inventory (DECISIONS.md 605).
       inventory: true,
+      // The last delivery: a transient fault of one read then costs that read (DECISIONS.md 702).
+      lastDelivery: attempt.final === true,
       stopAtShare: deps.stopAtShare,
       transport: deps.dataTransport,
       apiVersion: deps.apiVersion,
@@ -339,6 +341,10 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
         // console never shows a run in review with nothing to review.
         const progress = progressOf(run);
         if (progress.status === "awaiting_manual" || progress.status === "in_review") progress.status = "analysing";
+        // A step that failed on a delivery the queue will make again isn't the run failing: only the last
+        // delivery's failure is recorded as one. Shown as failed now, an automatic run would never be
+        // delivered again, so a passing fault would end it for good (DECISIONS.md 693, 702).
+        if (progress.status === "failed" && !attempt.final) progress.status = "extracting";
         // The engine only learns whether the org is a sandbox at the end, so until then the console's word stands.
         progress.isSandbox = input.run.isSandbox;
         try {
@@ -354,7 +360,10 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
     if (err instanceof ReconnectionNeeded || provider.lostAccess || classifyError(err) === "auth_lost") return fail(needsReconnection(name));
     // No API for this org or user: no retry can help, and it's said plainly (DECISIONS.md 702).
     if (err instanceof NoApiAccessError) return fail(err.message);
-    const reason = safeReason(err, secrets);
+    // Salesforce's code and message stay in the log; what the console shows is plain words (DECISIONS.md 702).
+    const words = runStoppedWords(err);
+    if (words && err instanceof SalesforceError) log(`Run ${runId} stopped on ${err.code.replace(/[^A-Za-z0-9_]/g, "").slice(0, 60)} (HTTP ${err.status}).`);
+    const reason = words ?? safeReason(err, secrets);
     // The engine resumes from its checkpoints, so another delivery is cheap and safe.
     if (!attempt.final) throw new Error(reason);
     return fail(`The run stopped with an error: ${reason}`);

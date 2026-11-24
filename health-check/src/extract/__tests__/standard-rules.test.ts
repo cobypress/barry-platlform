@@ -99,7 +99,26 @@ describe("when a retrieve naming further objects fails", () => {
     assert.deepEqual(bundle.handbook!.validationRulesCover, { customObjects: "all", standardObjects: [...RETRIEVED_STANDARD_OBJECTS] });
     assert.ok(!bundle.validationRules.some((v) => v.object === "Case"));
     assert.ok(bundle.flows.length > 0);
-    assert.deepEqual(bundle.retrieveFallback, { named: ["Case"], reason: "INVALID_CROSS_REFERENCE_KEY: INVALID_CROSS_REFERENCE_KEY: No such object" });
+    // The code and its class alone since decision 702: Salesforce's message is kept nowhere.
+    assert.deepEqual(bundle.retrieveFallback, { named: ["Case"], reason: "INVALID_CROSS_REFERENCE_KEY (refused)" });
+  });
+
+  test("a one-off server fault on the wider retrieve isn't kept: the step fails for the next delivery, which tries it whole again (DECISIONS.md 702)", async () => {
+    const kept: unknown[] = [];
+    const partial = { read: () => [], append: (_k: string, rows: unknown[]) => void kept.push(...rows), clear: () => {} } as unknown as ExtractContext["partial"];
+    const sim = new Simulator({ failRetrieve: (body) => (naming("Case")(body) ? { faultCode: "Server", message: "An unexpected error occurred" } : null) });
+    await assert.rejects(extract(listing("Case"), {}, sim, partial), (err: unknown) => err instanceof Error && /^Server: /.test(err.message));
+    assert.deepEqual(kept, []);
+    assert.deepEqual(retrieved(sim), [[...FOUR, "Case"]]);
+  });
+
+  test("a wider retrieve that ran out of time is narrowed, as Salesforce's answer is (DECISIONS.md 702)", async () => {
+    const kept: Array<{ named: string[]; reason: string }> = [];
+    const partial = { read: () => [], append: (_k: string, rows: Array<{ named: string[]; reason: string }>) => void kept.push(...rows), clear: () => {} } as unknown as ExtractContext["partial"];
+    const sim = new Simulator({ failRetrieve: (body) => (naming("Case")(body) ? { faultCode: "RETRIEVE_TIMEOUT", message: "slow" } : null) });
+    const { out } = await extract(listing("Case"), {}, sim, partial);
+    assert.equal(out.status, "ok");
+    assert.deepEqual(kept, [{ named: ["Case"], reason: "RETRIEVE_TIMEOUT (instance unavailable)" }]);
   });
 
   test("if that fails too, the step is unavailable as before, after two retrieves", async () => {
@@ -136,7 +155,7 @@ describe("when a retrieve naming further objects fails", () => {
     assert.deepEqual(retrieved(first), [[...FOUR, "Case"], FOUR]);
     // What the stopped run keeps: the objects named and Salesforce's error, nothing else.
     const kept = readFileSync(join(stopped.dir, "checkpoints", "metadata-retrieve-fallback.partial.jsonl"), "utf8");
-    assert.deepEqual(kept.trim().split("\n").map((line) => JSON.parse(line)), [{ named: ["Case"], reason: "UNKNOWN_EXCEPTION: UNKNOWN_EXCEPTION: Too many objects" }]);
+    assert.deepEqual(kept.trim().split("\n").map((line) => JSON.parse(line)), [{ named: ["Case"], reason: "UNKNOWN_EXCEPTION (refused)" }]);
 
     // Resumed, the wider retrieve would fail again if it were made.
     const second = new Simulator({ failRetrieve: (body) => (wider(body) ? { faultCode: "UNKNOWN_EXCEPTION", message: "Too many objects" } : null) });
@@ -146,7 +165,7 @@ describe("when a retrieve naming further objects fails", () => {
     const out = JSON.parse(readFileSync(join(resumed.dir, "checkpoints", "metadata.json"), "utf8")) as Sourced<MetadataBundle>;
     const bundle = ok(out);
     assert.deepEqual(bundle.handbook!.validationRulesCover.standardObjects, [...RETRIEVED_STANDARD_OBJECTS]);
-    assert.deepEqual(bundle.retrieveFallback, { named: ["Case"], reason: "UNKNOWN_EXCEPTION: UNKNOWN_EXCEPTION: Too many objects" });
+    assert.deepEqual(bundle.retrieveFallback, { named: ["Case"], reason: "UNKNOWN_EXCEPTION (refused)" });
 
     // Saved with the step, the record is cleared, so the step run again names the further objects again.
     const checkpoints = join(resumed.dir, "checkpoints");
@@ -172,8 +191,10 @@ describe("a fallback to the four, in the raw notes", () => {
   test("goes from the bundle to run.json and the markdown with its reason, and to the Word version without it", async () => {
     // A message nothing else prints, so its absence from the Word version means something.
     const { dir } = await run(new Simulator({ failRetrieve: (body) => (wider(body) ? { faultCode: "UNKNOWN_EXCEPTION", message: "zqx-too-many-objects-4417" } : null) }));
-    const reason = "UNKNOWN_EXCEPTION: UNKNOWN_EXCEPTION: zqx-too-many-objects-4417";
+    // The code and its class alone (DECISIONS.md 702): Salesforce's message reaches no file.
+    const reason = "UNKNOWN_EXCEPTION (refused)";
     assert.deepEqual(JSON.parse(readFileSync(join(dir, "run.json"), "utf8")).retrieveFallback, { named: ["Case"], reason });
+    assert.ok(!readFileSync(join(dir, "run.json"), "utf8").includes("zqx-too-many-objects-4417"));
     assert.ok(readFileSync(join(dir, "raw-notes.md"), "utf8").includes(said(reason)));
     // The Word raw notes go to the customer's folder, so Salesforce's error text stays out (DECISIONS.md 425).
     const { input, pseudonyms } = loadRun(dir);

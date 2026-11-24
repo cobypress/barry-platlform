@@ -30,7 +30,7 @@ import { Pseudonymiser, UNKNOWN_USER, type PseudonymEntry } from "../privacy/pse
 import { registerSharedNames } from "../privacy/names.ts";
 import { Run, type Calibration, type ManualAnswer, type RefusedRead, type RunScope, type RunStep } from "../schemas/index.ts";
 import { ApiBudget, BudgetStopError } from "../salesforce/budget.ts";
-import { SalesforceClient } from "../salesforce/client.ts";
+import { lastDelivery, runStoppedWords, SalesforceClient, SalesforceError } from "../salesforce/client.ts";
 import type { ConnectionProvider } from "../salesforce/connection.ts";
 import type { Transport } from "../salesforce/transport.ts";
 import { allFindings, allMetrics, analyse, type AnalysisOutput } from "./evaluate.ts";
@@ -63,6 +63,11 @@ export type RunOptions = {
   log?: (message: string) => void;
   /** Complete by default. Essentials reads set-up only, and never CRM records. */
   scope?: RunScope;
+  /**
+   * The worker's last delivery of this run (DECISIONS.md 702): a transient
+   * fault of one read then costs that read rather than the run.
+   */
+  lastDelivery?: boolean;
   /** "scan" for the free set-up teaser. */
   product?: "barometer" | "scan" | "pulse";
   /** How the run is reviewed, written to run.json for its documents to read. Consultant-led unless said (DECISIONS.md 692). */
@@ -298,7 +303,9 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
     try {
       // Held for the whole analysis, so each repeated value is held once (DECISIONS.md 346).
       // A read Salesforce refused costs its checks, never the run; its code is kept for us (DECISIONS.md 702).
-      const output = shareRepeatedValues(await noteRefusals((read) => refused.push({ step: extractor.id, ...read }), () => extractor.run(ctx)));
+      // On the worker's last delivery, a transient fault of one read costs that read (DECISIONS.md 702).
+      const read = (): Promise<unknown> => (options.lastDelivery === true ? lastDelivery.run(true, () => extractor.run(ctx)) : extractor.run(ctx));
+      const output = shareRepeatedValues(await noteRefusals((r) => refused.push({ step: extractor.id, ...r }), read));
       keepRefused(run, refused, log);
       extracts.set(extractor.id, output);
       writeCheckpoint(path, output);
@@ -320,7 +327,10 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
         return { run, dir, output: null };
       }
       step.status = "failed";
-      step.error = err instanceof Error ? err.message : String(err);
+      // Salesforce's code and message go to the log alone; run.json, which the console shows, gets plain words (DECISIONS.md 702).
+      const words = runStoppedWords(err);
+      if (words && err instanceof SalesforceError) log(`  ${extractor.id}: stopped on ${err.code.replace(/[^A-Za-z0-9_]/g, "").slice(0, 60)} (HTTP ${err.status})`);
+      step.error = words ?? (err instanceof Error ? err.message : String(err));
       // No finding reads the inventory, so its step failing costs only its own
       // section, and the run goes on; a later delivery tries it again (DECISIONS.md 609).
       // The same for PMD and ESLint's step: a run never fails because a linter did (DECISIONS.md 670).

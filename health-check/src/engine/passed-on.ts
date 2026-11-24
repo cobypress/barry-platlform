@@ -1,5 +1,5 @@
 import { engineTextKey } from "../digest/engine-texts-key.ts";
-import { REASON_PREFIX_KEYS } from "../digest/reason-prefixes.ts";
+import { REASON_PREFIX_KEYS, REASON_PREFIX_LONGEST } from "../digest/reason-prefixes.ts";
 import { refusalSpans } from "../salesforce/refusal-words.ts";
 import type { OrgSpan } from "./org-words.ts";
 
@@ -15,14 +15,21 @@ import type { OrgSpan } from "./org-words.ts";
 /** How many heads may stand before the sentence: a rule's, and an extractor's inside it. */
 const MAX_DEPTH = 3;
 
-/** The org's words in a passed-on refusal, as spans, or null when the text isn't one. */
-export function passedOnSpans(text: string, depth = 0): OrgSpan[] | null {
+/**
+ * The org's words in a passed-on refusal, as spans, or null when the text isn't
+ * one. Never for a text equal to a value the org chose (DECISIONS.md 693): the
+ * org could have written it whole.
+ */
+export function passedOnSpans(text: string, orgValues: ReadonlySet<string> = new Set(), depth = 0): OrgSpan[] | null {
+  if (orgValues.has(text)) return null;
   const own = refusalSpans(text);
   if (own) return own;
   if (depth >= MAX_DEPTH) return null;
-  for (let i = 1; i < text.length; i++) {
+  // No head is longer than the longest in the source, so the search stops there, whatever the text's length.
+  const longest = Math.min(text.length - 1, REASON_PREFIX_LONGEST);
+  for (let i = 1; i <= longest; i++) {
     if (!REASON_PREFIX_KEYS.has(engineTextKey(text.slice(0, i)))) continue;
-    const rest = passedOnSpans(text.slice(i), depth + 1);
+    const rest = passedOnSpans(text.slice(i), orgValues, depth + 1);
     if (rest) return rest.map((s) => ({ start: s.start + i, end: s.end + i }));
   }
   return null;

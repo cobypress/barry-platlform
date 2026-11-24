@@ -1,6 +1,6 @@
 import { redactSecrets } from "../privacy/secrets.ts";
 import { BudgetStopError } from "../salesforce/budget.ts";
-import { isUnavailable, type OrgLimit } from "../salesforce/client.ts";
+import { isUnavailable, runStoppedWords, type OrgLimit } from "../salesforce/client.ts";
 import { INVENTORY_VERSION, NAME_MAX, type ConnectedAppRow, type FillRateObject, type Inventory, type LimitRow, type PackageRow, type RiskyPermissionRow } from "../schemas/inventory.ts";
 import type { RunScope } from "../schemas/index.ts";
 import { CORE_OBJECTS, recordCountsExtractor } from "./configuration.ts";
@@ -89,12 +89,16 @@ export function skipReason(f: DescribeField): string | null {
 export const fillRateQuery = (object: string, fields: string[]): string =>
   fields.length ? `SELECT COUNT(Id) n, ${fields.map((f, i) => `COUNT(${f}) f${i}`).join(", ")} FROM ${object}` : `SELECT COUNT(Id) n FROM ${object}`;
 
-/** Why a count failed, in a sentence: a budget stop isn't a failure and goes up. */
-function failedCount(err: unknown): string {
+/**
+ * Why a count failed, in a sentence of ours: a budget stop isn't a failure and
+ * goes up. Salesforce's message is never kept (DECISIONS.md 702): its answer
+ * about the read is our refusal sentence, anything else our plain words.
+ */
+function failedCount(err: unknown, what: string): string {
   if (err instanceof BudgetStopError) throw err;
   if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) return COUNT_TOO_SLOW;
-  if (err instanceof Error) return readableReason(err.message);
-  return "The count couldn't be read.";
+  if (isUnavailable(err)) return refusalReason(err, what);
+  return runStoppedWords(err) ?? "The count couldn't be read.";
 }
 
 export const COUNT_NOT_READ = "Salesforce's count for this field didn't come back as a whole number, so its fill isn't measured.";
@@ -180,7 +184,7 @@ export const fillRatesExtractor: Extractor<Sourced<FillRateData>> = {
           results.push(...answers.map((a, j) => (a.ok ? { ok: true as const, row: a.result.records[0] ?? {} } : { ok: false as const, reason: refusalReason(a.error, readName({ kind: "soql", api: "rest", query: chunk[j]! })) })));
         } catch (err) {
           // A budget stop sent nothing, and goes up from here.
-          const reason = failedCount(err);
+          const reason = failedCount(err, "This information");
           results.push(...chunk.map(() => ({ ok: false as const, reason })));
         }
         // The call went out, and the client recorded it once; the rest of its counts are recorded here.
@@ -235,7 +239,7 @@ export const fillRatesExtractor: Extractor<Sourced<FillRateData>> = {
       try {
         described = await ctx.client.describe<{ fields: DescribeField[] }>(object);
       } catch (err) {
-        keep([{ object, unavailable: failedCount(err) }]);
+        keep([{ object, unavailable: failedCount(err, object) }]);
         continue;
       }
       const counted = described.fields.filter((f) => skipReason(f) === null).map((f) => f.name);

@@ -877,7 +877,8 @@ describe("who connected", () => {
         const saved = JSON.parse(readFileSync(join(outDir, runId, "run.json"), "utf8")) as { steps: Array<{ id: string; status: string; error: string | null }> };
         const step = saved.steps.find((s) => s.id === recordTypeUseExtractor.id)!;
         assert.equal(step.status, "failed");
-        assert.ok(step.error!.includes("<the connected user>") && !holdsId(step.error!), step.error!);
+        // run.json gets our plain words since decision 702, so it holds neither the id nor Salesforce's message.
+        assert.equal(step.error, "Salesforce didn't answer as it should, after several tries, so the org may be busy or unavailable.");
         for (const path of filesIn(join(outDir, runId))) assert.ok(!holdsId(readFileSync(path, "utf8")), path);
       });
     }

@@ -52,7 +52,7 @@ export type RetrieveFallback = z.infer<typeof RetrieveFallback>;
  * and status. For us, never the customer, who reads only the plain reason.
  * Salesforce's message isn't kept: it can quote a record's id or a value.
  */
-export const RefusedRead = z.object({ step: z.string().min(1), read: z.string().min(1), code: z.string().min(1), status: z.number().int() });
+export const RefusedRead = z.object({ step: z.string().min(1), read: z.string().min(1), code: z.string().min(1), status: z.number().int(), field: z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,79}$/).optional() });
 export type RefusedRead = z.infer<typeof RefusedRead>;
 
 /**

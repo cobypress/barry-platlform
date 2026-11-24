@@ -123,7 +123,7 @@ describe("[1] the inventory never fails a run", () => {
     const step = broken.run.steps.find((s) => s.id === packagesExtractor.id)!;
     assert.equal(step.status, "failed");
     const inventory = readInventory(broken.dir);
-    assert.deepEqual(inventory.packages, { unavailable: "This part of the inventory couldn't be read: SERVER_UNAVAILABLE: Something broke" });
+    assert.deepEqual(inventory.packages, { unavailable: "This part of the inventory couldn't be read: Salesforce didn't answer as it should, after several tries, so the org may be busy or unavailable." });
     assert.ok("rows" in inventory.connectedApps && "rows" in inventory.fillRates);
   });
 

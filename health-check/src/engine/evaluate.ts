@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { stagesExtractor } from "../extract/opportunities.ts";
-import { marksOfMetric, orgValuesOf, rewordFinding, rewordMetric } from "./automatic-words.ts";
+import { guardPassedOn, marksOfMetric, orgValuesOf, rewordFinding, rewordMetric } from "./automatic-words.ts";
 import type { DomainModule } from "../domains/types.ts";
 import type { Extractor } from "../extract/types.ts";
 import { Pseudonymiser, UNKNOWN_USER } from "../privacy/pseudonymiser.ts";
@@ -465,7 +465,7 @@ function analyseWithin(input: AnalysisInput): AnalysisOutput {
   if (calibration.source === "org_settings") {
     const stageRows = extracts.get(stagesExtractor.id) as { status: string; data?: Array<{ ApiName: string; MasterLabel: string }> } | undefined;
     const orgValues = orgValuesOf({ metrics, findings, stages: [...calibration.stages.map((s) => s.name), ...(stageRows?.data ?? []).flatMap((s) => [s.ApiName, s.MasterLabel])] });
-    const reworded = findings.map((f) => Finding.parse(rewordFinding(f)));
+    const reworded = findings.map((f) => Finding.parse(rewordFinding(guardPassedOn(f, orgValues))));
     return {
       findings: reworded.filter((f) => !INSIGHT_RULES.has(f.ruleId)),
       insights: reworded.filter((f) => INSIGHT_RULES.has(f.ruleId)),

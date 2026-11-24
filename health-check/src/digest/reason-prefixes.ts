@@ -19,3 +19,6 @@ export const REASON_PREFIX_KEYS: ReadonlySet<string> = new Set([
   "dc38aba09b382b34", "de7547e9f4233588", "ded5819e90adaead", "e079a297331c91c6", "e1372b4e1ab8a4fd", "ec3a254151ac7497", "ec4813c986a88e67", "eda8b0b647fa1782",
   "eebd6a3ea296e9b0", "efb5c08f03a037d5", "f307c0406d2f5c86", "f45cc12fb76abf9a",
 ]);
+
+/** The longest head, in characters: no search for one looks further into a text. */
+export const REASON_PREFIX_LONGEST = 113;

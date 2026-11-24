@@ -44,7 +44,7 @@ export const NO_API_FOR_USER = "The person who connected doesn't have API access
 export const DEALS_UNREAD = "Opportunity couldn't be read";
 
 /** Too many rows of one read in a shape we couldn't read (DECISIONS.md 702). */
-export function tooManyUnfit(bad: number, total: number, what: "deals" | "entries in the deals' stage history"): string {
+export function tooManyUnfit(bad: number, total: number, what: "deals" | "won deals" | "lost deals" | "open deals" | "entries in the deals' stage history"): string {
   return `${bad.toLocaleString("en-GB")} of the ${total.toLocaleString("en-GB")} ${what} Salesforce gave us weren't in a shape we could read, more than 1 in 100, so figures from them would mislead.`;
 }
 
@@ -56,7 +56,7 @@ export function lossFieldUnusable(field: string): string {
 const ENDINGS = Object.values(BECAUSE).map((b) => b.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
 const SENTENCE = new RegExp(`^(.+?) couldn't be read, because (?:${ENDINGS})\\.$`);
 const NOT_THERE = /^(.+?) isn't available in this org, or to the connected user\.$/;
-const UNFIT = /^[\d,]+ of the [\d,]+ (?:deals|entries in the deals' stage history) Salesforce gave us weren't in a shape we could read, more than 1 in 100, so figures from them would mislead\.$/;
+const UNFIT = /^[\d,]+ of the [\d,]+ (?:(?:won |lost |open )?deals|entries in the deals' stage history) Salesforce gave us weren't in a shape we could read, more than 1 in 100, so figures from them would mislead\.$/;
 const LOSS_FIELD = /^The loss reason field (.+?) isn't a text or picklist field, so it can't hold a reason and isn't read\.$/;
 const WHOLE: ReadonlySet<string> = new Set([LIMITS_NO_PERMISSION, LIMITS_REFUSED, DEALS_UNREAD]);
 

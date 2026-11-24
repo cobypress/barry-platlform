@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { XMLParser } from "fast-xml-parser";
 import { unzipSync, strFromU8 } from "fflate";
 import { BUDGET_DEFAULTS, SF_DEFAULTS } from "../config.ts";
@@ -127,9 +128,37 @@ export function classifyError(err: unknown): ErrorClass {
   return err.status >= 400 ? "refused" : "instance_unavailable";
 }
 
+/**
+ * The transient faults that belong to one read, not the whole instance: an
+ * expired query cursor, a retrieve that timed out or came back malformed, and
+ * a SOAP server fault on a retrieve. Retried while the worker can deliver
+ * again; on its last delivery, each costs only its read (DECISIONS.md 702),
+ * so a fault that comes back every time can't fail every run for that org.
+ */
+export function oneReadTransient(err: unknown): err is SalesforceError {
+  if (!(err instanceof SalesforceError)) return false;
+  return err.code === "INVALID_QUERY_LOCATOR" || err.code === "RETRIEVE_TIMEOUT" || err.code === "BAD_SOAP_RESPONSE" || (err.fault && err.code === "Server");
+}
+
+/** Set by the run around each step on the worker's last delivery (DECISIONS.md 702). */
+export const lastDelivery = new AsyncLocalStorage<true>();
+
 /** True when the error costs only the read it came from (DECISIONS.md 702). */
 export function isUnavailable(err: unknown): err is SalesforceError {
-  return err instanceof SalesforceError && PER_READ.has(classifyError(err));
+  if (!(err instanceof SalesforceError)) return false;
+  return PER_READ.has(classifyError(err)) || (lastDelivery.getStore() === true && oneReadTransient(err));
+}
+
+/**
+ * Why a run stopped, in plain words a person can read in the console: never
+ * Salesforce's code or message, which go to the log (DECISIONS.md 702).
+ */
+export function runStoppedWords(err: unknown): string | null {
+  if (!(err instanceof SalesforceError)) return null;
+  const kind = classifyError(err);
+  if (kind === "instance_unavailable") return "Salesforce didn't answer as it should, after several tries, so the org may be busy or unavailable.";
+  if (kind === "auth_lost") return "Salesforce no longer accepts the connection.";
+  return "Salesforce refused a read the run can't go on without.";
 }
 
 const xml = new XMLParser({ removeNSPrefix: true, ignoreAttributes: true, parseTagValue: false });

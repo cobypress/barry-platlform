@@ -112,7 +112,9 @@ export function refusalReason(err: SalesforceError, given: string): string {
   // Where we only know the kind of read, the object Salesforce named is better.
   const named = /sObject type '([A-Za-z][A-Za-z0-9_]*)' is not supported/.exec(err.message)?.[1];
   const what = named && !/^[A-Za-z][A-Za-z0-9_]*$/.test(given) ? named : given;
-  refusals.getStore()?.({ read: what, code: err.code.replace(/[^A-Za-z0-9_]/g, "").slice(0, 60) || "UNKNOWN", status: err.status });
+  // For a missing field, its API name alone, so we can see which without Salesforce's message.
+  const field = err.code === "INVALID_FIELD" ? /No such column '([A-Za-z][A-Za-z0-9_]{0,79})'/.exec(err.message)?.[1] : undefined;
+  refusals.getStore()?.({ read: what, code: err.code.replace(/[^A-Za-z0-9_]/g, "").slice(0, 60) || "UNKNOWN", status: err.status, ...(field ? { field } : {}) });
   const kind = classifyError(err);
   return refusalSentence(what, kind === "not_available" || kind === "no_permission" ? kind : "refused", err.code);
 }

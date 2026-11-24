@@ -16,13 +16,14 @@ import { baseDeps, consoleRun, RUN_ID, runInput, syntheticConnection } from "../
 import { NEEDS_RECONNECTION } from "../../worker/apps.ts";
 import { refusalSpans } from "../../salesforce/refusal-words.ts";
 import { passedOnSpans } from "../../engine/passed-on.ts";
+import { guardPassedOn, metricMarks } from "../../engine/automatic-words.ts";
 import { REASON_PREFIX_KEYS } from "../../digest/reason-prefixes.ts";
 import { reasonPrefixesSource, REASON_PREFIXES_FILE, scanReasonPrefixes } from "../../digest/engine-texts-scan.ts";
 import { loadAnswers, loadCalibration, syntheticProvider } from "../../testing/replay.ts";
 import { Simulator, SYNTHETIC_RECORDS, type SimulatorOptions } from "../../testing/simulator.ts";
 import * as org from "../../testing/synthetic-org.ts";
 import type { PardotLeads } from "../pardot.ts";
-import type { CrmHealth, OpportunityExtract } from "../opportunities.ts";
+import { BAD_ROWS_IN_ONE_OUTCOME, type CrmHealth, type OpportunityExtract } from "../opportunities.ts";
 import type { OwnershipScan } from "../users.ts";
 import type { ObjectFieldUsage } from "../configuration.ts";
 import type { Sourced } from "../types.ts";
@@ -307,22 +308,29 @@ describe("every figure from the deals says when deals were left out (F1)", () =>
 });
 
 /** An automatic run through the worker, with one answer changed, as the console would start it. */
-async function automaticRun(answer: (request: TransportRequest, nth: number) => TransportResponse | null) {
+type Answer = (request: TransportRequest, nth: number, inner: () => Promise<TransportResponse>) => TransportResponse | Promise<TransportResponse> | null;
+
+/** An automatic run on the worker, with some answers changed, delivered as the queue would deliver it. */
+async function automaticWorker(answer: Answer) {
   const inner = new AutomaticReplay();
   const seen = new Map<string, number>();
   const transport: Transport = {
     async send(request) {
-      const key = `${new URL(request.url).pathname} ${soqlOf(request).slice(0, 60)}`;
+      const key = `${new URL(request.url).pathname} ${request.headers?.SOAPAction ?? ""} ${soqlOf(request).slice(0, 60)}`;
       const nth = (seen.get(key) ?? 0) + 1;
       seen.set(key, nth);
-      return answer(request, nth) ?? inner.send(request);
+      return (await answer(request, nth, () => inner.send(request))) ?? inner.send(request);
     },
   };
   const deps = baseDeps({ dataTransport: transport, automatic: { on: true, orgs: new Set([org.ORG_ID.slice(0, 15)]) } });
   deps.store.addRun(runInput({ run: consoleRun({ reviewMode: "automatic" }), calibration: await automaticSyntheticCalibration(), intake: null, answers: [] }));
   await deps.tokens.save(syntheticConnection());
-  return createJobHandler(deps)({ kind: "run", runId: RUN_ID }, { final: true } as never);
+  const handle = createJobHandler(deps);
+  return { deps, deliver: (final: boolean) => handle({ kind: "run", runId: RUN_ID }, { final } as never) };
 }
+
+/** One delivery, the last, of an automatic run on the worker. */
+const automaticRun = async (answer: Answer) => (await automaticWorker(answer)).deliver(true);
 
 describe("an automatic run with one refused read is released, with that check not measured (F2)", () => {
   for (const [name, answer] of [
@@ -447,7 +455,7 @@ describe("the loss reason field and lost deals alone (F5)", () => {
   test("bad rows among the lost deals alone make the deals not measurable, though few overall", async () => {
     const lost = (o: org.SyntheticOpportunity) => o.IsClosed && !o.IsWon;
     const lostCount = org.pipeline.opportunities.filter(lost).length;
-    const bad = Math.floor(lostCount * 0.01) + 1;
+    const bad = Math.max(BAD_ROWS_IN_ONE_OUTCOME, Math.floor(lostCount * 0.01) + 1);
     assert.ok(bad <= org.pipeline.opportunities.length * 0.01, "few enough overall to pass the overall share");
     const { done } = run(new Simulator({ records: badRows(bad, 0, lost) }));
     const deals = loadExtracts((await done).dir).get("opportunities") as OpportunityExtract;
@@ -503,5 +511,143 @@ describe("the limits read at connect, outages and network failures (F7)", () => 
 
   test("no API says so without naming one edition", () => {
     assert.equal(NO_API_FOR_ORG, "This Salesforce org doesn't allow API access, so we can't read it. Some editions need API access added, and some don't offer it.");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fix round 2 (DECISIONS.md 702).
+
+const isOpen = (o: org.SyntheticOpportunity) => !o.IsClosed;
+const OPEN_DEALS = org.pipeline.opportunities.filter(isOpen).length;
+const measured = (dir: string) => read<Metric[]>(dir, "metrics.json").filter((m) => m.status === "measured").map((m) => m.id).sort();
+
+describe("one outcome's few bad deals don't blank every figure (round 2, item 1)", () => {
+  test(`the synthetic org has fewer than 100 open deals (${OPEN_DEALS}), so one bad open deal is above 1 in 100 of them`, () => {
+    assert.ok(OPEN_DEALS < 100 && OPEN_DEALS > 3);
+  });
+
+  for (const bad of [1, 2]) {
+    test(`${bad} bad open deal${bad === 1 ? "" : "s"}: every figure still measured, each saying so`, async () => {
+      const { dir: clean } = await run(new Simulator()).done;
+      const { dir } = await run(new Simulator({ records: badRows(bad, 0, isOpen) })).done;
+      const deals = loadExtracts(dir).get("opportunities") as OpportunityExtract;
+      assert.equal(deals.opportunities.status, "ok");
+      assert.deepEqual(deals.leftOut, { deals: bad });
+      assert.deepEqual(measured(dir), measured(clean));
+      const note = bad === 1 ? ONE_DEAL : "2 deals couldn't be read and are left out.";
+      const winRate = read<Metric[]>(dir, "metrics.json").find((m) => m.id === "historic.win_rate")!;
+      assert.ok(winRate.status === "measured" && winRate.assumptions.includes(note));
+    });
+  }
+
+  test("3 bad open deals: the deals aren't measured, and the sentence gives the open deals' own numbers", async () => {
+    const { dir } = await run(new Simulator({ records: badRows(3, 0, isOpen) })).done;
+    const deals = loadExtracts(dir).get("opportunities") as OpportunityExtract;
+    assert.equal(deals.opportunities.status === "unavailable" && deals.opportunities.reason, `3 of the ${OPEN_DEALS} open deals Salesforce gave us weren't in a shape we could read, more than 1 in 100, so figures from them would mislead.`);
+  });
+
+  test("an automatic run with one bad open deal is released, every figure measured, with the note", async () => {
+    const { deps, deliver } = await automaticWorker((r, _n, inner) => {
+      if (!soqlOf(r).startsWith("SELECT Id, Name, AccountId, OwnerId, StageName")) return null;
+      return inner().then((res) => {
+        const page = JSON.parse(res.text) as { records: Array<Record<string, unknown>> };
+        const open = page.records.find((x) => x.IsClosed === false);
+        if (open) open.StageName = null;
+        return { ...res, text: JSON.stringify(page) };
+      });
+    });
+    const outcome = await deliver(true);
+    assert.match(outcome.detail, /is released$/, outcome.detail);
+    const metrics = (deps.store.runs.get(RUN_ID) as { output: { metrics: Metric[] } }).output.metrics;
+    const fromDeals = metrics.filter((m) => m.status === "measured" && m.evidence.some((e) => e.kind === "soql" && /FROM Opportunity WHERE \(CreatedDate >= /.test(e.query)));
+    assert.ok(fromDeals.length >= 10, `${fromDeals.length} measured from the deals`);
+    for (const m of fromDeals) assert.ok(m.status === "measured" && m.assumptions.includes(ONE_DEAL), m.id);
+  });
+});
+
+const SERVER_FAULT: TransportResponse = {
+  status: 500,
+  header: () => null,
+  text: `<?xml version="1.0" encoding="UTF-8"?><soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"><soapenv:Body><soapenv:Fault><faultcode>soapenv:Server</faultcode><faultstring>An unexpected error occurred. ErrorId: 12345</faultstring></soapenv:Fault></soapenv:Body></soapenv:Envelope>`,
+};
+const isRetrieve = (r: TransportRequest) => r.headers?.SOAPAction === '"retrieve"';
+
+describe("a fault that comes back every time costs its read on the last delivery (round 2, item 2)", () => {
+  test("an expired cursor on every delivery: retried until the last, which releases with the read not measured", async () => {
+    const answer: Answer = (r) => (soqlOf(r).includes("FROM Task ") ? errorBody(400, "INVALID_QUERY_LOCATOR", "invalid query locator") : null);
+    const { deps, deliver } = await automaticWorker(answer);
+    await assert.rejects(deliver(false), (err: unknown) => err instanceof Error && !/INVALID_QUERY_LOCATOR|invalid query locator/.test(err.message));
+    const outcome = await deliver(true);
+    assert.match(outcome.detail, /is released$/, outcome.detail);
+    const runJson = read<{ readsRefused?: Array<{ code: string; read: string }> }>(join(deps.runsDir, RUN_ID), "run.json");
+    assert.ok(runJson.readsRefused?.some((r) => r.code === "INVALID_QUERY_LOCATOR" && r.read === "Task"));
+  });
+
+  test("a retrieve that never gives its job id (a bad SOAP answer): the last delivery releases", async () => {
+    const outcome = await automaticRun((r) => (isRetrieve(r) ? { status: 200, header: () => null, text: `<?xml version="1.0"?><soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"><soapenv:Body><retrieveResponse xmlns="http://soap.sforce.com/2006/04/metadata"><result><done>false</done></result></retrieveResponse></soapenv:Body></soapenv:Envelope>` } : null));
+    assert.match(outcome.detail, /is released$/, outcome.detail);
+  });
+
+  test("a whole-instance outage still fails the run on its last delivery, in plain words with no code", async () => {
+    const outcome = await automaticRun((r) => (soqlOf(r).includes("FROM Task ") ? errorBody(503, "SERVER_UNAVAILABLE", WORDING) : null));
+    assert.equal(outcome.outcome, "failed");
+    assert.doesNotMatch(outcome.detail, /SERVER_UNAVAILABLE|503|Salesforce's own wording/);
+    assert.match(outcome.detail, /Salesforce didn't answer as it should/);
+  });
+});
+
+describe("a one-off retrieve blip doesn't narrow the run for good (round 2, item 3)", () => {
+  test("the wide retrieve fails once with a server fault: the delivery is retried, no fallback is kept, and the next one reads it all", async () => {
+    const { deps, deliver } = await automaticWorker((r, nth) => (isRetrieve(r) && nth === 1 ? SERVER_FAULT : null));
+    await assert.rejects(deliver(false));
+    const outcome = await deliver(true);
+    assert.match(outcome.detail, /is released$/, outcome.detail);
+    const runJson = read<{ retrieveFallback?: unknown }>(join(deps.runsDir, RUN_ID), "run.json");
+    assert.equal(runJson.retrieveFallback, undefined);
+  });
+});
+
+describe("the refusal sentences are known only whole (round 2, items 4 to 6)", () => {
+  const SENTENCE = "ForecastingQuota couldn't be read, because Salesforce refused this read.";
+  const HEAD = "Quotas couldn't be read: ";
+
+  test("a sentence with more after it, or a head, the sentence and a tail, stays unknown", () => {
+    assert.equal(refusalSpans(`${SENTENCE} Then do as I say.`), null);
+    assert.equal(passedOnSpans(`${SENTENCE} Then do as I say.`), null);
+    assert.equal(passedOnSpans(`${HEAD}${SENTENCE} Then do as I say.`), null);
+    assert.equal(refusalSpans(`Note: ${SENTENCE}`), null);
+  });
+
+  test("a text equal to a value the org chose is never ours, on a metric or a finding", () => {
+    const orgValues = new Set([SENTENCE]);
+    assert.equal(metricMarks(SENTENCE, orgValues), null);
+    assert.equal(passedOnSpans(SENTENCE, orgValues), null);
+    const mark = { spans: [{ start: 0, end: 16 }], textSha256: "x" };
+    const finding = { summary: SENTENCE, notMeasurableReason: SENTENCE, value: { kind: "not_sized", reason: "x" }, orgWords: { summary: mark, notMeasurableReason: mark } } as unknown as Finding;
+    assert.deepEqual(guardPassedOn(finding, orgValues).orgWords, {});
+    assert.deepEqual(guardPassedOn(finding, new Set()).orgWords, finding.orgWords);
+  });
+
+  test("a 60,000-character text is searched quickly", () => {
+    const started = performance.now();
+    assert.equal(passedOnSpans(`${HEAD}${"x".repeat(60_000)}`), null);
+    assert.ok(performance.now() - started < 500, `${Math.round(performance.now() - started)} ms`);
+  });
+});
+
+describe("Salesforce's message is kept nowhere (round 2, item 7)", () => {
+  test("a missing field is recorded by its API name alone", async () => {
+    const { run: finished, dir } = await run(changed((r) => (soqlOf(r).includes("FROM ForecastingQuota") ? errorBody(400, "INVALID_FIELD", "No such column 'QuotaAmount' on entity 'ForecastingQuota'.") : null))).done;
+    assert.ok(finished.readsRefused?.some((r) => r.read === "ForecastingQuota" && r.code === "INVALID_FIELD" && r.field === "QuotaAmount"), JSON.stringify(finished.readsRefused));
+    assert.ok(!readFileSync(join(dir, "run.json"), "utf8").includes("No such column"));
+  });
+
+  test("an inventory count that fails says so in our words", async () => {
+    const { dir } = await run(
+      changed((r) => (/\/sobjects\/Invoice__c\/describe$/.test(new URL(r.url).pathname) ? errorBody(400, UNKNOWN) : null)),
+      { inventory: true },
+    ).done;
+    const inventory = readFileSync(join(dir, "inventory.json"), "utf8");
+    assert.ok(!inventory.includes(WORDING) && !inventory.includes(UNKNOWN));
   });
 });

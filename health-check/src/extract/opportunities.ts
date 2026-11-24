@@ -69,14 +69,28 @@ function outcomeOf(row: unknown): "won" | "lost" | "open" | null {
 }
 
 /**
- * More than BAD_ROW_SHARE of the deals left out, overall or among the won, the
- * lost or the open alone (DECISIONS.md 702): a fault that hits one outcome, such
- * as lost deals alone, skews every rate between them long before it shows in
- * the whole. A row whose outcome can't be told counts against each.
+ * The fewest bad rows that can make one outcome's deals not measurable when the
+ * whole read passes (DECISIONS.md 702). One or two odd rows are what any org
+ * has, and in a small outcome (the synthetic org has 76 open deals) the share
+ * test alone would blank every figure for a single row. Three of one outcome is
+ * the least that reads as one cause hitting that outcome, such as a field only
+ * lost deals fill, rather than stray rows.
  */
-function tooManyLeftOut(raw: unknown[], bad: Set<number>): boolean {
-  if (bad.size === 0) return false;
-  if (bad.size > raw.length * BAD_ROW_SHARE) return true;
+export const BAD_ROWS_IN_ONE_OUTCOME = 3;
+
+type TooMany = { bad: number; total: number; what: "deals" | "won deals" | "lost deals" | "open deals" };
+
+/**
+ * More than BAD_ROW_SHARE of the deals left out overall, or, with at least
+ * BAD_ROWS_IN_ONE_OUTCOME of them, among the won, the lost or the open alone
+ * (DECISIONS.md 702): a fault that hits one outcome skews every rate between
+ * them long before it shows in the whole. A row whose outcome can't be told
+ * counts against each. The numbers are the ones that tripped, so the sentence
+ * says what is true. Null when the read can be used.
+ */
+function tooManyLeftOut(raw: unknown[], bad: Set<number>): TooMany | null {
+  if (bad.size === 0) return null;
+  if (bad.size > raw.length * BAD_ROW_SHARE) return { bad: bad.size, total: raw.length, what: "deals" };
   const total = { won: 0, lost: 0, open: 0 };
   const left = { won: 0, lost: 0, open: 0 };
   const unknown = [...bad].filter((i) => outcomeOf(raw[i]) === null).length;
@@ -86,7 +100,12 @@ function tooManyLeftOut(raw: unknown[], bad: Set<number>): boolean {
     total[outcome]++;
     if (bad.has(i)) left[outcome]++;
   });
-  return (["won", "lost", "open"] as const).some((o) => left[o] + unknown > (total[o] + unknown) * BAD_ROW_SHARE);
+  for (const o of ["won", "lost", "open"] as const) {
+    const n = left[o] + unknown;
+    const of = total[o] + unknown;
+    if (n >= BAD_ROWS_IN_ONE_OUTCOME && n > of * BAD_ROW_SHARE) return { bad: n, total: of, what: `${o} deals` };
+  }
+  return null;
 }
 
 /** Rows that fit the schema, and how many didn't. */
@@ -352,8 +371,10 @@ export const opportunitiesExtractor: Extractor<OpportunityExtract> = {
           LossReason: lossReasonField ? (r[lossReasonField] ?? null) : null,
         }),
       );
-      if (tooManyLeftOut(raw, fit.bad)) {
-        const reason = tooManyUnfit(fit.bad.size, raw.length, "deals");
+      const tooMany = tooManyLeftOut(raw, fit.bad);
+      if (tooMany) {
+        // The whole read goes, as nothing here can tell which figures rest on one outcome alone; the sentence gives the numbers that tripped.
+        const reason = tooManyUnfit(tooMany.bad, tooMany.total, tooMany.what);
         return { ...base, opportunities: { status: "unavailable", reason, source: opportunitySource }, history: { status: "unavailable", reason: DEALS_UNREAD, source: historySource } };
       }
       opportunities = fit.rows;
