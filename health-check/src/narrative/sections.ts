@@ -31,6 +31,7 @@ import { buildSurveyView, surveyViewFigures, type SurveyView } from "../survey/v
 import { CONCERN_AT, REKEYING_AT } from "../survey/pairings.ts";
 import type { Interview } from "../interviews/questions.ts";
 import { buildInterviewView, interviewDatasetText, interviewSource, interviewSources, interviewViewFigures, INTERVIEWS_SOURCE, READING_LABELS, SHARE_WITHIN_POINTS as SHARE_POINTS, COUNT_WITHIN_SHARE, executiveThemes, type InterviewView } from "../interviews/readings.ts";
+import type { RulesRun } from "../engine/rules-run.ts";
 
 // The three outputs, built from one findings dataset. Each section gets a first
 // version written by the engine, so a report always exists even if Claude never
@@ -61,6 +62,8 @@ export type ReportInput = {
   recordCounts?: Record<string, { rows: number; total: number }>;
   /** What each stage the calibration doesn't name was taken to mean, from Salesforce's flags (DECISIONS.md 600). The calibration's own stages aren't here. */
   stageMeanings?: Record<string, "open" | "won" | "lost"> | null;
+  /** The rules the run's analysis ran and those its engine knew (DECISIONS.md 718), for the digest alone. Null for a run analysed before they were kept. */
+  rules?: RulesRun | null;
   now?: Date;
 };
 

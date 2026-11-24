@@ -134,6 +134,12 @@ export type Rule = {
    * one place in every org: never a guess, a URL, an id or a name the org chose.
    */
   where?: readonly string[];
+  /**
+   * A step no module owns that the rule runs beside, such as the code-lint step
+   * (DECISIONS.md 673): a run without it doesn't run the rule at all, so the
+   * digest never lists it as checked (DECISIONS.md 718).
+   */
+  onlyWith?: Extractor;
   evaluate(ctx: RuleContext): RuleResult | RuleResult[];
 };
 

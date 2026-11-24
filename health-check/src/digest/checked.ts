@@ -63,6 +63,8 @@ export const STRUCTURAL_PATHS: ReadonlySet<string> = new Set([
   "value.byKind.conversion_uplift.lineIds", "value.byKind.licence_waste.lineIds", "value.byKind.revenue_recoverable.lineIds", "value.byKind.time_cost.lineIds", "value.currency", "value.exposure.lineIds",
   "value.groups[].counted", "value.groups[].id", "value.groups[].kind", "value.groups[].lineIds", "value.leftOut", "value.lines[].group",
   "value.lines[].id", "value.lines[].kind", "value.lines[].ruleId", "value.total.lineIds", "version", "withheldNames",
+  // Rule ids only (DECISIONS.md 718).
+  "rulesRun", "rulesKnown",
 ]);
 
 /** Every string the digest serves as text: everything outside its structural paths and its marks. */

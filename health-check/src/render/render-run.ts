@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { FACTS_FILE } from "../extract/facts.ts";
 import { STAGE_MEANINGS_FILE } from "../domains/historic-pipeline/cohort.ts";
+import { RULES_FILE, RulesRun } from "../engine/rules-run.ts";
 import { FactsFile, summariseFacts } from "../facts/summary.ts";
 import { join, resolve } from "node:path";
 import { z } from "zod";
@@ -148,6 +149,7 @@ export function loadRun(dir: string, options: { baseline?: boolean; baselineRows
   const interviews = readOptional<unknown>(join(dir, INTERVIEWS_FILE));
   const facts = readOptional<unknown>(join(dir, FACTS_FILE));
   const stageMeanings = readOptional<unknown>(join(dir, STAGE_MEANINGS_FILE));
+  const rules = readOptional<unknown>(join(dir, RULES_FILE));
   const input: ReportInput = {
     run: Run.parse(read(join(dir, "run.json"))),
     calibration: Calibration.parse(read(join(dir, "calibration.json"))),
@@ -162,6 +164,8 @@ export function loadRun(dir: string, options: { baseline?: boolean; baselineRows
     interviews: interviews ? Interviews.parse(interviews).interviews : null,
     facts: facts ? summariseFacts(FactsFile.parse(facts)) : null,
     stageMeanings: stageMeanings ? StageMeanings.parse(stageMeanings) : null,
+    // A folder analysed before decision 718 has none, and its digest then lists none.
+    rules: rules ? RulesRun.parse(rules) : null,
   };
   let baselineRowsUnread = false;
   let baselineGone = false;

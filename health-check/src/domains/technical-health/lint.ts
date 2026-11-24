@@ -285,5 +285,7 @@ export const LINT_RULES: Rule[] = LINT_GROUPS.map((group): Rule => ({
   version: 1,
   domain: DOMAIN,
   title: group.title,
+  // Run only beside the code checker's step, so a run without it never lists these as checked (DECISIONS.md 718).
+  onlyWith: codeLintExtractor,
   evaluate: (ctx) => evaluateGroup(group, ctx),
 }));
