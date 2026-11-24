@@ -176,6 +176,16 @@ describe("a stage is reached when the deal's own history shows it there", () => 
     assert.ok(metric.assumptions.some((a) => a.startsWith("12 deals created before your stage history starts are left out")));
   });
 
+  test("the period starts when the stage history does, and a sentence says when deals made before it are left out (decision 712)", () => {
+    // Ten deals made before the org's stage history starts, reaching each stage inside the period: left out, and said so.
+    const probabilities = { Prospecting: 66, Discovery: 66, Proposal: 66, Negotiation: 90 };
+    const [f] = issues(analysed([...deals(10, USUAL, 7, { late: 30 }), ...deals(100, USUAL, 66)], { calibration: real, probabilities }).findings);
+    assert.match(f!.summary, /^Negotiation is set to 90% in Salesforce\. Of the 100 deals made since your stage history starts that reached it between 2 November 2024 and /);
+    // None made before it: the plain words, from the day the history starts (no deal can be seen reaching a stage before it).
+    const [g] = issues(analysed(deals(100, USUAL, 66), { calibration: real, probabilities }).findings);
+    assert.match(g!.summary, /^Negotiation is set to 90% in Salesforce\. Of the 100 deals that reached it between 2 November 2024 and /);
+  });
+
   test("no decision counts as not won", () => {
     const { metric } = analysed([...deals(10, USUAL, 5), ...Array.from({ length: 10 }, () => ({ path: USUAL, outcome: "no_decision" as const }))]);
     assert.equal(segmentOf(metric, "won share", D)!.value, 25);
@@ -343,7 +353,7 @@ describe("each stage counts the deals that reached it in its period, open or clo
   test("5% or fewer still open: named, saying how many are open and over what the share is", () => {
     const { findings } = analysed([...deals(100, USUAL, 66), ...openDeals(5, Date.parse("2025-04-20T09:00:00Z"))], { calibration: real, probabilities: set });
     const [f] = issues(findings);
-    assert.match(f!.summary, /^Negotiation is set to 90% in Salesforce\. Of the 105 deals that reached it between 31 October 2024 and 21 September 2026, 5 are still open and 66% of the other 100 were won, so in that period it was set higher than what happened\./);
+    assert.match(f!.summary, /^Negotiation is set to 90% in Salesforce\. Of the 105 deals that reached it between 2 November 2024 and 21 September 2026, 5 are still open and 66% of the other 100 were won, so in that period it was set higher than what happened\./);
   });
 
   test("chosen by when they reached it, not when they closed: deals that closed in the window after reaching it before don't count", () => {
@@ -720,7 +730,7 @@ describe("the synthetic org keeps the comparison in its files and serves none of
     assert.equal(ours[0]!.status, "issue");
     assert.equal(
       ours[0]!.summary,
-      "Negotiation is set to 90% in Salesforce. Of the 248 deals that reached it between 31 October 2024 and 17 September 2026, 11 are still open and 68.8% of the other 237 were won, so in that period it was set higher than what happened. It was on the same side of the setting in every group we could compare, in each of the 4 ways we could split these deals (by team, rep, lead source and type). This compares each setting with what happened to the deals that reached the stage; it doesn't say why they differ.",
+      "Negotiation is set to 90% in Salesforce. Of the 248 deals that reached it between 5 November 2024 and 17 September 2026, 11 are still open and 68.8% of the other 237 were won, so in that period it was set higher than what happened. It was on the same side of the setting in every group we could compare, in each of the 4 ways we could split these deals (by team, rep, lead source and type). This compares each setting with what happened to the deals that reached the stage; it doesn't say why they differ.",
     );
     assert.deepEqual(ours[0]!.subjects.map((s) => s.label), ["Negotiation"]);
     const metric = loaded.input.metrics.find((m) => m.id === PROBABILITY_METRIC)! as Measured;

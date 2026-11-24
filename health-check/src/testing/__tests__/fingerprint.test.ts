@@ -18,18 +18,22 @@ import { DURATION_MEDIANS } from "../../domains/average.ts";
 // file here byte for byte the same. A change that means to move a finding,
 // a metric or the raw notes updates these, and says why in its commit.
 
+// Decision 712 moved the recorded run's findings.json, metrics.json and raw-notes.md: 706's sentence names its period from
+// the day the stage history starts (5 November 2024, not 31 October), and 703's variant table counts no closing-out
+// moves (none of the synthetic org's 45 came within a day of its close). Both rows are stored, not served. The
+// generated org's files didn't move. The earlier hashes below are each decision's own, taken from this run.
 const GOLDEN: Record<string, Record<string, string>> = {
-  recorded: { "findings.json": "5af9fdd02177330b", "metrics.json": "b64977cf778b4ed1", "scores.json": "17cdb1708449d000", "manual-steps.json": "c4daf1ca86584a33", "action-lists.json": "7018f033c3c80e0a", "raw-notes.md": "885ce7b3fb0e9e6a", "handbook.json": "64dcafcf493eef42" },
+  recorded: { "findings.json": "8951407b09b9b867", "metrics.json": "2a25c522746883d7", "scores.json": "17cdb1708449d000", "manual-steps.json": "c4daf1ca86584a33", "action-lists.json": "7018f033c3c80e0a", "raw-notes.md": "c63bb1d219be1e80", "handbook.json": "64dcafcf493eef42" },
   generated: { "findings.json": "1bb01eb1eb00ba7b", "metrics.json": "cb39d3fda2a6435e", "scores.json": "616e42570f940402", "manual-steps.json": "15ae87c4fd76d7b6", "action-lists.json": "8eeb97766d119778", "raw-notes.md": "5c5a4dff7664b82e", "handbook.json": "23c075e2337e23a8" },
 };
 
 // findings.json before decision 714 put a difficulty on each issue: that key is all that moved it, and nothing else moved.
-const BEFORE_714: Record<string, string> = { recorded: "9c3e03a2db501670", generated: "998e50194fd092df" };
+const BEFORE_714: Record<string, string> = { recorded: "6e70cb0739b40551", generated: "998e50194fd092df" };
 
 // Before decision 709 kept each duration's average beside its median: with the stat taken out, metrics.json hashes as
 // it did. findings.json and scores.json never moved; raw-notes.md gains the stat in each measure's detail line.
 const BEFORE_709: Record<string, { "metrics.json": string }> = {
-  recorded: { "metrics.json": "45cfb9b67574f6bb" },
+  recorded: { "metrics.json": "7ee832631c25d130" },
   generated: { "metrics.json": "3d451573d17ac8ca" },
 };
 
@@ -37,7 +41,7 @@ const BEFORE_709: Record<string, { "metrics.json": string }> = {
 // with those taken out, and the stage read's evidence naming the query as it was, findings.json and metrics.json hash
 // as they did. raw-notes.md gains their sections and the counts they add to. Nothing else moved.
 const BEFORE_706: Record<string, { "findings.json": string; "metrics.json": string }> = {
-  recorded: { "findings.json": "32e84d18880742a8", "metrics.json": "9ff8e22ef7d45790" },
+  recorded: { "findings.json": "32e84d18880742a8", "metrics.json": "db261fadeba13015" },
   generated: { "findings.json": "e7d065627ba11e7e", "metrics.json": "110987cf0075336e" },
 };
 
