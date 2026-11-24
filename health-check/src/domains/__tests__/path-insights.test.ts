@@ -9,6 +9,10 @@ import type { Deal } from "../historic-pipeline/cohort.ts";
 import { historicPipelineModule } from "../historic-pipeline/index.ts";
 import { DAYS_GAP_MIN, DAYS_GAP_SHARE, WIN_GAP } from "../historic-pipeline/paths/insights.ts";
 import { checkedDigest } from "../../digest/checked.ts";
+import { buildReport } from "../../narrative/sections.ts";
+import { executiveHtml } from "../../render/executive.ts";
+import { fullReportHtml } from "../../render/full-report.ts";
+import { onePagerHtml } from "../../render/one-pager.ts";
 import { loadRun } from "../../render/render-run.ts";
 import { AutomaticReplay, automaticSyntheticCalibration } from "../../testing/automatic.ts";
 import { hasRework, openPathOf, OTHER_PATHS, PATH_VARIANTS, sendBacks, skipsOf, standardPathOf, TOP_VARIANTS, variantsOf, type PathDeal } from "../historic-pipeline/paths/variants.ts";
@@ -343,5 +347,24 @@ describe("an automatic run of the synthetic org: its digest carries the insights
     const f = loaded.input.findings.find((x) => x.ruleId === RULE && x.status === "issue")!;
     assert.doesNotMatch(f.summary, /order of your open stages/);
     assert.match(f.summary, /You haven't told us yet what some stages mean/);
+  });
+});
+
+describe("a consultant-led run's documents leave the insights out, and are what they'd be without them (decision 703)", () => {
+  const loaded = loadRun(dir);
+  const withThem = buildReport(loaded.input);
+  const without = buildReport({ ...loaded.input, findings: loaded.input.findings.filter((f) => f.ruleId !== RULE), metrics: loaded.input.metrics.filter((m) => m.id !== PATH_VARIANTS) });
+
+  test("the run folder holds them, the report sets them apart", () => {
+    assert.equal(loaded.input.findings.filter((f) => f.ruleId === RULE).length, 3);
+    assert.ok(loaded.input.metrics.some((m) => m.id === PATH_VARIANTS));
+    assert.equal(withThem.insights.findings.length, 3);
+    assert.ok(!withThem.teamFindings.some((f) => f.ruleId === RULE) && !withThem.metrics.some((m) => m.id === PATH_VARIANTS));
+  });
+
+  test("the executive summary, the full report and the one-pager are byte for byte the same", () => {
+    assert.equal(executiveHtml(withThem, loaded.pseudonyms), executiveHtml(without, loaded.pseudonyms));
+    assert.equal(fullReportHtml(withThem, loaded.pseudonyms), fullReportHtml(without, loaded.pseudonyms));
+    assert.equal(onePagerHtml(withThem, loaded.pseudonyms), onePagerHtml(without, loaded.pseudonyms));
   });
 });
