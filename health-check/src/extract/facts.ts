@@ -1,8 +1,18 @@
 import { ASSUMPTIONS, DESCRIBED_OBJECTS, type Assumption } from "../facts/assumptions.ts";
-import { isUnavailable, type SalesforceClient } from "../salesforce/client.ts";
+import { classifyError, isUnavailable, lastDelivery, type SalesforceClient, type SalesforceError } from "../salesforce/client.ts";
 import { aiSignalsExtractor, SETTINGS, type AiSignals } from "./ai.ts";
 import { pardotSetupExtractor, type PardotSetup } from "./pardot.ts";
-import type { ExtractContext, Extractor } from "./types.ts";
+import { refusalReason, type ExtractContext, type Extractor } from "./types.ts";
+
+/**
+ * Whether an error costs only the fact it was read for (audit risk 7, DECISIONS.md 710):
+ * any read Salesforce answered, as everywhere since 702, and on the worker's last
+ * delivery one it didn't answer too. The step runs last, after the run has spent
+ * its budget, and no finding reads it, so an outage then costs the facts it
+ * would have settled, never the run. Before the last delivery it stops the run
+ * as before, and the queue's next delivery reads it again.
+ */
+const costsTheFact = (err: unknown): err is SalesforceError => isUnavailable(err) || (lastDelivery.getStore() === true && classifyError(err) === "instance_unavailable");
 
 // The facts step (DECISIONS.md 287 to 295): on every run, it checks the names the
 // engine assumes against the org itself, so the first real orgs settle QUESTIONS.md.
@@ -82,8 +92,9 @@ export async function checkFacts(client: SalesforceClient, now: Date, reads: Ear
     const global = await client.describeGlobal<{ sobjects: GlobalObject[] }>();
     objects = new Map(global.sobjects.map((o) => [o.name, { name: o.name, queryable: o.queryable }]));
   } catch (err) {
-    if (!isUnavailable(err)) throw err;
-    globalGap = `Salesforce wouldn't list the org's objects: ${err.message}`;
+    if (!costsTheFact(err)) throw err;
+    // Our sentence, never Salesforce's message, which can quote a value (DECISIONS.md 702).
+    globalGap = `Salesforce wouldn't list the org's objects: ${refusalReason(err, "This information")}`;
   }
 
   // Only the objects whose fields we assume, and only where they exist, so no describe fails.
@@ -94,7 +105,8 @@ export async function checkFacts(client: SalesforceClient, now: Date, reads: Ear
       const d = await client.describe<Describe>(object);
       fields.set(object, new Map(d.fields.map((f) => [f.name, f.type])));
     } catch (err) {
-      if (!isUnavailable(err)) throw err;
+      if (!costsTheFact(err)) throw err;
+      refusalReason(err, object);
       fields.set(object, null);
     }
   }
@@ -105,8 +117,8 @@ export async function checkFacts(client: SalesforceClient, now: Date, reads: Ear
   try {
     namespaces = (await client.query<{ NamespacePrefix: string | null }>("SELECT NamespacePrefix FROM PackageLicense")).records.map((p) => (p.NamespacePrefix ?? "").toLowerCase());
   } catch (err) {
-    if (!isUnavailable(err)) throw err;
-    licenceGap = err.message;
+    if (!costsTheFact(err)) throw err;
+    licenceGap = refusalReason(err, "PackageLicense");
   }
   const licensed = (namespace: string): boolean | null => (namespaces ? namespaces.includes(namespace.toLowerCase()) : null);
 
@@ -147,7 +159,7 @@ export async function checkFacts(client: SalesforceClient, now: Date, reads: Ear
       const isIn = installed(a.namespace, objects, fields, false);
       const row = licensed(a.namespace);
       if (!isIn) add(a, "not_checked", `Nothing with namespace ${a.namespace} is in this org.`, { installed: false });
-      else if (row === null) add(a, "not_checked", `PackageLicense couldn't be read: ${licenceGap}`, { installed: true });
+      else if (row === null) add(a, "not_checked", licenceGap, { installed: true });
       else add(a, row ? "confirmed" : "contradicted", row ? `Namespace ${a.namespace} has a licence row.` : `Namespace ${a.namespace} is in the org with no licence row.`, { installed: true, licenceRow: row });
       continue;
     }

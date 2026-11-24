@@ -12,6 +12,7 @@ import { byOrigin, caseQueues, limitsOf, MIN_SEGMENT, priorityOf } from "./share
 import { WHERE } from "../where.ts";
 import { said, type Said } from "../../engine/org-words.ts";
 import { andList } from "../../engine/said-forms.ts";
+import { editionIsWhy } from "../../salesforce/refusal-words.ts";
 
 // How the org is set up to handle cases: escalation, queues, routing,
 // licences, knowledge, macros. Most of it reads no case, so a set-up review
@@ -65,6 +66,8 @@ const escalation: Rule = {
     const single = "The org has one escalation set-up, not groups to compare";
     if (rules.status !== "ok") {
       // Entitlement processes escalate too, so with one active the gap doesn't matter.
+      // Not read because the edition has no Metadata API (DECISIONS.md 710): said in our words whole, so the summary is known as ours.
+      if (activeSla.length && editionIsWhy(rules.reason)) return { outcome: "pass", summary: said`Escalation rules weren't read, because Professional Edition only opens the Metadata API to security-reviewed apps, but ${plural(activeSla.length, "entitlement process")} for cases ${isAre(activeSla.length)} active, which can escalate cases.`, evidence, segmentExemptReason: single, facts: { processes: activeSla.length } };
       if (activeSla.length) return { outcome: "pass", summary: `Escalation rules couldn't be read (${rules.reason}), but ${plural(activeSla.length, "entitlement process")} for cases ${isAre(activeSla.length)} active, which can escalate cases.`, evidence, segmentExemptReason: single, facts: { processes: activeSla.length } };
       return nm(`Escalation rules couldn't be read: ${rules.reason}`, evidence);
     }

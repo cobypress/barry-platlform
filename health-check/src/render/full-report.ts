@@ -1,5 +1,5 @@
 import { CONSULTANT_NEXT_STEPS, nextStepsWords } from "./exec-pages.ts";
-import { withAmountNotes } from "./amount-notes.ts";
+import { scoreCaveatLine, withAmountNotes, withEditionNote } from "./amount-notes.ts";
 import { yearlyByFinding } from "../value/model.ts";
 import { orderFromOrg } from "../connect/auto-calibration.ts";
 import { currencyStanding } from "../engine/currency.ts";
@@ -615,7 +615,7 @@ function inventorySlide(r: Render, label: string, metric: Metric | undefined): S
   const lede = `We counted ${m.value} objects: ${own}.${automation}`;
   const notes = [
     `Ranked by how much automation runs on each object, then by custom fields.${all.length > shown.length ? " Only the busiest are shown here. The raw notes list every object." : ""} No description means no description field, or for an Apex trigger, no comment in the code.`,
-    ...m.exclusions.filter((e) => /couldn't/.test(e)).map((e) => `Not counted: ${e}.`),
+    ...m.exclusions.filter((e) => /couldn't|doesn't allow/.test(e)).map((e) => `Not counted: ${e.replace(/\.$/, "")}.`),
   ];
   return {
     classes: "tight",
@@ -904,7 +904,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null, mo
   add(`<div class="eyebrow">What we found against it</div><h2>What you told us, against what we found</h2>${needsInput(built, "stated_vs_actual") ? inputChip : ""}${sectionBody(r, built, "stated_vs_actual")}`);
 
   mark("Overview and scorecard");
-  add(`<div class="eyebrow">Overview</div><h2>${r.t(verdict.headline)}</h2><div>${sectionBody(r, built, "overview").replace(`<p>${r.t(verdict.headline)}.</p>`, "")}</div><div class="stat-row" style="margin-top:18px">${report.overall.status === "measured" ? `<div class="stat"><b>${report.overall.score}</b><span>Barometer score</span></div>` : ""}<div class="stat"><b>${verdict.issues}</b><span>Issues</span></div><div class="stat"><b>${verdict.critical}</b><span>Critical</span></div><div class="stat"><b>${verdict.high}</b><span>High</span></div><div class="stat"><b>${team.filter((f) => f.status === "not_measurable").length}</b><span>Not measurable</span></div><div class="stat"><b>${team.filter((f) => f.status === "passed").length}</b><span>Passed</span></div></div>${thin ? `<p class="small-note">${r.t(thinDataLine(team, "The appendix"))}</p>` : ""}`);
+  add(`<div class="eyebrow">Overview</div><h2>${r.t(verdict.headline)}</h2><div>${sectionBody(r, built, "overview").replace(`<p>${r.t(verdict.headline)}.</p>`, "")}</div><div class="stat-row" style="margin-top:18px">${report.overall.status === "measured" ? `<div class="stat"><b>${report.overall.score}</b><span>Barometer score</span></div>` : ""}<div class="stat"><b>${verdict.issues}</b><span>Issues</span></div><div class="stat"><b>${verdict.critical}</b><span>Critical</span></div><div class="stat"><b>${verdict.high}</b><span>High</span></div><div class="stat"><b>${team.filter((f) => f.status === "not_measurable").length}</b><span>Not measurable</span></div><div class="stat"><b>${team.filter((f) => f.status === "passed").length}</b><span>Passed</span></div></div>${scoreCaveatLine(r, report)}${thin ? `<p class="small-note">${r.t(thinDataLine(team, "The appendix"))}</p>` : ""}`);
 
   const progressed = progressPage(r, report);
   if (progressed) mark("Since your last health check");
@@ -1113,7 +1113,7 @@ export function fullReportHtml(report: BuiltReport, pseudonyms: Pseudonymiser): 
  */
 export function fullReportHtmlAt(report: BuiltReport, pseudonyms: Pseudonymiser, step: number | null): string {
   // Each page with an amount in a currency not known by name says so (DECISIONS.md 700).
-  return withAmountNotes(report, (made) => inDocumentOrder(pseudonyms, (words) => fullReportHtmlWith(made, pseudonyms, step, words)));
+  return withEditionNote(report, withAmountNotes(report, (made) => inDocumentOrder(pseudonyms, (words) => fullReportHtmlWith(made, pseudonyms, step, words))));
 }
 
 function fullReportHtmlWith(report: BuiltReport, pseudonyms: Pseudonymiser, step: number | null, words: CustomerWords): string {

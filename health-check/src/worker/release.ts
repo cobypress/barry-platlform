@@ -7,6 +7,7 @@ import { pageDataset } from "../render/page-dataset.ts";
 import { asPrinted } from "../render/render-released.ts";
 import { HELD_FOR_US_MASKS } from "../render/render-released.ts";
 import type { RunDigest } from "../schemas/digest.ts";
+import { editionIsWhy } from "../salesforce/refusal-words.ts";
 import { canRelease, Release, ReportOutput, type Finding, type ReportSection } from "../schemas/index.ts";
 import type { RunOverall } from "./types.ts";
 
@@ -69,11 +70,22 @@ export function checkSections(report: BuiltReport, pseudonyms: Pseudonymiser): {
   return { fellBack, failed };
 }
 
-/** Rules that ran, and those of them whose every finding is not measurable. */
-export function unmeasuredRules(findings: Finding[]): { rules: number; notMeasurable: number } {
+/**
+ * Rules that ran, and those of them whose every finding is not measurable.
+ * `edition`, only when there are any: how many of those the org's edition
+ * left unmeasured (DECISIONS.md 710). They still count: a report mostly
+ * unmeasured is hollow whatever the cause, so a person sees it, and the
+ * count tells them the edition is why.
+ */
+export function unmeasuredRules(findings: Finding[]): { rules: number; notMeasurable: number; edition?: number } {
   const all = new Map<string, boolean>();
-  for (const f of findings) all.set(f.ruleId, (all.get(f.ruleId) ?? true) && f.status === "not_measurable");
-  return { rules: all.size, notMeasurable: [...all.values()].filter(Boolean).length };
+  const edition = new Map<string, boolean>();
+  for (const f of findings) {
+    all.set(f.ruleId, (all.get(f.ruleId) ?? true) && f.status === "not_measurable");
+    edition.set(f.ruleId, (edition.get(f.ruleId) ?? true) && f.status === "not_measurable" && editionIsWhy(f.notMeasurableReason ?? ""));
+  }
+  const byEdition = [...edition.values()].filter(Boolean).length;
+  return { rules: all.size, notMeasurable: [...all.values()].filter(Boolean).length, ...(byEdition > 0 ? { edition: byEdition } : {}) };
 }
 
 export type ReleaseInput = {

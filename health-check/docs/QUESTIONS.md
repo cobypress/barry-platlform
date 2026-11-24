@@ -383,3 +383,24 @@ a) Is `DefaultProbability` readable on `OpportunityStage` by the connected user 
 b) What does it hold for closed stages (100 for won and 0 for lost by default, or null), and for a stage a sales process doesn't use? Only open stages are compared, so closed stages' values change nothing, but the metric lists what it reads.
 c) A stage has one default probability, whatever the sales process, and a deal's own `Probability` can be changed by hand. Do orgs that change it by hand do so often enough that the stage's setting no longer says what their forecasts use? The comparison reads only the stage's setting, and says so.
 d) What does Salesforce answer when the connected user can't see `DefaultProbability` through field-level security: `INVALID_FIELD`, or an access code? The engine decides on the code, never the words, and works round `INVALID_FIELD`, `INSUFFICIENT_ACCESS` and `INSUFFICIENT_ACCESS_OR_READONLY`; another code would fail the stage read as any refusal did before.
+
+
+## Knowing the org before reading it (DECISIONS.md 710)
+
+The run skips one kind of read, the Metadata API's retrieve, and only on an org whose OrganizationType is exactly "Professional Edition"; every other read is made, there and everywhere. These are what the Professional Edition test org must settle:
+
+a) Does every Professional Edition org report `Organization.OrganizationType` as exactly "Professional Edition"? Salesforce doesn't publish the picklist's values. Any other text (a "Pro Suite" org, say) is unknown, so it is read as before, never skipped.
+b) Does the Tooling API answer a Professional Edition org with API access, for FlowDefinition, Flow, the workflow objects, ValidationRule, FieldDefinition, EntityParticle and RecordType? The run reads the set-up through Tooling there; if it doesn't, those checks are not measured with the Tooling route's reason.
+c) Does the Analytics API's report describe answer there (Salesforce's Reports and Dashboards REST API guide says any org with the API)?
+d) Asked again: what does Salesforce answer a Professional Edition org for `ApexClass` and `ApexTrigger` with `NamespacePrefix = null`, for `Scontrol` and for `Site`: no rows, or `INVALID_TYPE`? The run asks; no rows is counted as none, and `INVALID_TYPE` there is taken as none for the org's own Apex and s-controls (Salesforce documents neither in that edition), so the checks that also read flows and rules stay measured.
+e) Do `ApexOrgWideCoverage`, `ApexCodeCoverageAggregate` and `AsyncApexJob` hold installed packages' Apex there? They are read on Professional Edition as anywhere.
+f) Does a describe's `recordTypeInfos` list record types the connected user can't use? The profile marks record types present when any is listed, and never absent from a describe.
+
+What to check on the real Professional Edition org, in this order (the review of 710):
+
+1. The fault code a Metadata API `retrieve` gets there, so a run told the edition wrongly would still fall back to Tooling (INSUFFICIENT_ACCESS does; others cost the bundle).
+2. Whether the connected app holds an ISV API token there; if it does, the Metadata API is open to it and the skip is wrong for that org.
+3. The org's daily API limit, and how many calls the Tooling route spends on it against the automatic run's tenth of that limit.
+4. Items a) to d) above, read once with `npm run hc -- facts` and one run.
+5. Whether a removal's guards stay unknown there for what the Tooling route can't search (assignment rules, approval processes), and what the user and field removals then say.
+6. LoginHistory, OauthToken and the record reads with the connected user's permissions (audit risks 8, 9, 11), which no edition fact settles.

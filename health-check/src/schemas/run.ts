@@ -58,6 +58,28 @@ export const RefusedRead = z.object({ step: z.string().min(1), read: z.string().
 export type RefusedRead = z.infer<typeof RefusedRead>;
 
 /**
+ * What the engine knew about the org before reading it (DECISIONS.md 710):
+ * its edition as Salesforce names it, and for each capability the reads
+ * depend on whether the org has it, and how that was learned. Absent is only
+ * ever a fact from Salesforce's documentation about the edition, or a field
+ * only orgs with the feature have; anything less certain is unknown, and its
+ * reads are made. `skipped`: each read the run didn't make because of it.
+ * Salesforce's names and our words only, never a record.
+ */
+export const CapabilityStatus = z.enum(["present", "absent", "unknown"]);
+export type CapabilityStatus = z.infer<typeof CapabilityStatus>;
+export const OrgCapability = z.object({ id: z.string().min(1), status: CapabilityStatus, from: z.string().min(1) });
+export type OrgCapability = z.infer<typeof OrgCapability>;
+export const SkippedRead = z.object({ step: z.string().min(1), read: z.string().min(1), capability: z.string().min(1) });
+export type SkippedRead = z.infer<typeof SkippedRead>;
+export const OrgProfile = z.object({
+  edition: z.string().nullable(),
+  capabilities: z.array(OrgCapability),
+  skipped: z.array(SkippedRead).default([]),
+});
+export type OrgProfile = z.infer<typeof OrgProfile>;
+
+/**
  * Who stands behind what the customer reads (DECISIONS.md 688). Consultant: a
  * person approves every section and releases. Automatic: the machine checks
  * decide, and no person's name is ever recorded for them. Releasing an
@@ -97,5 +119,7 @@ export const Run = z.object({
   readsRefused: z.array(RefusedRead).optional(),
   // Every run stored before decision 688 was consultant-led, so absent reads as that.
   reviewMode: ReviewMode.default("consultant"),
+  // Absent on a run stored before decision 710.
+  orgProfile: OrgProfile.optional(),
 });
 export type Run = z.infer<typeof Run>;
