@@ -13,7 +13,7 @@ import { AutomaticReplay, automaticSyntheticCalibration } from "../../testing/au
 import { runFromRecording } from "../../testing/harness.ts";
 import { CONSOLE_CHECKS } from "../console-checks.ts";
 import { MemoryWorkerStore } from "../memory-store.ts";
-import { RUN, runSql, FAILURE_FLAG_SQL, FLAG_CONFLICT, HELD_REASON_SQL, HOLD_OUTPUT_SQL, HOLD_RUN_SQL, LAST_RELEASED_SCORE_SQL, PostgresWorkerStore, RAISE_FLAG_SQL, RELEASE_ROW_SQL, RELEASE_RUN_SQL, RUN_DIGEST_SQL, type SqlClient, type SqlPool, type SqlResult } from "../postgres-store.ts";
+import { RUN, runSql, BUDGET_FLAG_SQL, FAILURE_FLAG_SQL, FLAG_CONFLICT, HELD_REASON_SQL, HOLD_OUTPUT_SQL, HOLD_RUN_SQL, LAST_RELEASED_SCORE_SQL, PostgresWorkerStore, RAISE_FLAG_SQL, RELEASE_ROW_SQL, RELEASE_RUN_SQL, RUN_DIGEST_SQL, type SqlClient, type SqlPool, type SqlResult } from "../postgres-store.ts";
 import { checkSections, decideRelease, SCORE_MOVE_POINTS, unmeasuredRules, type HoldReason } from "../release.ts";
 import { progressOf, RunClosedError, type RunOutputRecord, type RunOverall } from "../types.ts";
 import { consoleRun, RUN_ID, runInput } from "./helpers.ts";
@@ -32,7 +32,7 @@ const sectionsOf = (): ReportSection[] => {
   return Object.values(report.outputs).flatMap((o) => o.sections);
 };
 const clean = checked();
-const base = { runId: RUN_ID, sections: sectionsOf(), checked: clean, findings: loaded.input.findings, overall: { score: 60, grade: "C" as const } as RunOverall | null, previousScore: null as number | null, now: NOW };
+const base = { runId: RUN_ID, sections: sectionsOf(), checked: clean, findings: loaded.input.findings, overall: { score: 60, grade: "C" as const } as RunOverall | null, previousScore: null as number | null, readsLost: null as { lost: number } | null, now: NOW };
 
 describe("the synthetic org as an automatic run reads it", () => {
   test("its digest traces whole, with every sentence marked, and its sections all pass: it is released", () => {
@@ -175,6 +175,7 @@ describe("the run's own checks", () => {
       ["section_failed", { sections: base.sections.map((s, i) => (i === 0 ? { ...s, status: "needs_input" as const } : s)) }],
       ["no_digest", { checked: { ...clean, digest: null, held: "no_digest" } }],
       ["digest_held", { checked: { ...clean, held: "digest_held", masks: 11 } }],
+      ["reads_lost", { readsLost: { lost: 3 } }],
       ["mostly_unmeasured", { findings: loaded.input.findings.map((f) => ({ ...f, status: "not_measurable" as const, notMeasurableReason: "x" })) }],
       ["score_moved", { previousScore: 0 }],
     ];
@@ -183,7 +184,26 @@ describe("the run's own checks", () => {
       const all = Object.assign({}, base, ...order.slice(i).reverse().map(([, o]) => o));
       const d = decideRelease(all);
       assert.equal(d.kind === "hold" && d.reason, order[i]![0]);
+      // Every later check that failed is decided too (no digest_held where an earlier check took the digest away), each a flag of its own (DECISIONS.md 715).
+      assert.deepEqual(d.kind === "hold" && d.also.map((a) => a.kind), order.slice(i + 1).map(([k]) => k).filter((k) => k !== "digest_held" || i > 1));
     }
+  });
+
+  test("lost reads: held reads_lost with the four counts, the digest's own two among them; with no digest, only the reads'", () => {
+    const lostFindings = loaded.input.findings.map((f, i) => (i === 0 ? { ...f, status: "not_measurable" as const, notMeasurableReason: "Rule words: Task couldn't be read, because Salesforce didn't answer as it should." } : f));
+    const ruleLost = lostFindings[0]!.ruleId;
+    const expected = loaded.input.findings.filter((f) => f.ruleId === ruleLost).length === 1 ? 1 : 0;
+    const d = decideRelease({ ...base, findings: lostFindings, readsLost: { lost: 4 } });
+    assert.deepEqual(d.kind === "hold" && [d.reason, d.counts, d.also], ["reads_lost", { lost: 4, notMeasurable: expected, unmatched: 0, unmarked: 0 }, []]);
+    const none = decideRelease({ ...base, checked: { ...clean, digest: null, held: "no_digest" }, readsLost: { lost: 4 } });
+    assert.deepEqual(none.kind === "hold" && [none.reason, none.also], ["no_digest", [{ kind: "reads_lost", counts: { lost: 4, notMeasurable: 0 } }]]);
+    assert.equal(decideRelease({ ...base, readsLost: null }).kind, "release");
+  });
+
+  test("lost reads and an unsafe digest: digest_held, reads_lost beside it with the same digest counts", () => {
+    const unsafe = { ...clean, held: "digest_held" as const, unmarked: 2 };
+    const d = decideRelease({ ...base, checked: unsafe, readsLost: { lost: 1 } });
+    assert.deepEqual(d.kind === "hold" && [d.reason, d.also], ["digest_held", [{ kind: "reads_lost", counts: { lost: 1, notMeasurable: 0, unmatched: 0, unmarked: 2 } }]]);
   });
 });
 
@@ -214,7 +234,7 @@ const record = (automatic: RunOutputRecord["automatic"], digest = clean.digest):
   digest,
   ...(automatic ? { automatic } : {}),
 });
-const holdOf = (reason: string, counts: Record<string, number> = { n: 1 }): RunOutputRecord["automatic"] => ({ decision: "hold", reason, counts, at: NOW });
+const holdOf = (reason: string, counts: Record<string, number> = { n: 1 }, also?: Array<{ kind: string; counts: Record<string, number> }>): RunOutputRecord["automatic"] => ({ decision: "hold", reason, counts, ...(also ? { also } : {}), at: NOW });
 
 describe("a hold in the memory store, held to the console's own checks", () => {
   for (const reason of ["section_failed", "no_digest", "digest_held", "mostly_unmeasured", "score_moved"] as const) {
@@ -232,6 +252,18 @@ describe("a hold in the memory store, held to the console's own checks", () => {
       assert.equal(store.runs.get(PREVIOUS)!.run.status, "released");
     });
   }
+
+  test("a hold with other failed checks raises each flag, all at the hold's time; the console's checks hold for every one", async () => {
+    const store = storeWithRuns();
+    await store.saveRunOutput(RUN_ID, record(holdOf("digest_held", { masks: 0, ceiling: 10, unmatched: 0, unmarked: 2 }, [{ kind: "reads_lost", counts: { lost: 1, notMeasurable: 0, unmatched: 0, unmarked: 2 } }])));
+    assert.equal(store.held.get(RUN_ID), "digest_held");
+    assert.deepEqual(store.flagsOf(RUN_ID).sort(), ["digest_held", "reads_lost"]);
+    assert.equal(store.flags.get(`${RUN_ID}|reads_lost`)!.raisedAt, NOW);
+    // A kind the console's CHECK doesn't take refuses the whole save.
+    const refused = storeWithRuns();
+    await assert.rejects(refused.saveRunOutput(RUN_ID, record(holdOf("digest_held", undefined, [{ kind: "lost_reads", counts: {} }]))), /HealthCheckRunFlag_kind_check/);
+    assert.equal(refused.held.has(RUN_ID), false);
+  });
 
   test("a consultant-led run's failure raises no flag", async () => {
     const store = new MemoryWorkerStore();
@@ -327,6 +359,21 @@ describe("the Postgres store's release and hold", () => {
     // Raised once while open; a cleared flag is opened again (DECISIONS.md 698).
     assert.ok(RAISE_FLAG_SQL.endsWith(FLAG_CONFLICT));
     assert.ok(!texts.includes(RELEASE_ROW_SQL) && !texts.includes(RELEASE_RUN_SQL));
+  });
+
+  test("held with other failed checks: each flag raised after the hold, in order, before COMMIT", async () => {
+    const pool = new FakePool();
+    await new PostgresWorkerStore(pool).saveRunOutput(RUN_ID, record(holdOf("reads_lost", { lost: 2, notMeasurable: 1, unmatched: 0, unmarked: 0 }, [{ kind: "mostly_unmeasured", counts: { rules: 3, notMeasurable: 2 } }])));
+    assert.deepEqual(pool.texts().slice(-4), [HOLD_OUTPUT_SQL, RAISE_FLAG_SQL, RAISE_FLAG_SQL, "COMMIT"]);
+    assert.deepEqual(pool.statements.filter((s) => s.text === RAISE_FLAG_SQL).map((s) => s.values.slice(1, 3)), [["reads_lost", NOW], ["mostly_unmeasured", NOW]]);
+  });
+
+  test("a budget stop's flag: only an automatic run stopped at its budget, counts {}, raised once while open", async () => {
+    const pool = new FakePool();
+    await new PostgresWorkerStore(pool).flagBudgetStop(RUN_ID, NOW);
+    assert.deepEqual(pool.statements.find((s) => s.text === BUDGET_FLAG_SQL)!.values, [RUN_ID, NOW]);
+    assert.match(BUDGET_FLAG_SQL, /SELECT "id", 'stopped_budget', \$2::timestamp\(3\), '\{\}'::jsonb FROM "HealthCheckRun" WHERE "id" = \$1 AND "reviewMode" = 'automatic' AND "status" = 'stopped_budget' /);
+    assert.ok(BUDGET_FLAG_SQL.endsWith(FLAG_CONFLICT));
   });
 
   test("probe A and C on Postgres: the release and both holds only ever touch an unheld run, and the release never clears a hold", () => {

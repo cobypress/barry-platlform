@@ -261,6 +261,10 @@ export const RAISE_FLAG_SQL = `INSERT INTO "HealthCheckRunFlag" ("runId", "kind"
 export const FAILURE_FLAG_SQL =
   `INSERT INTO "HealthCheckRunFlag" ("runId", "kind", "raisedAt", "counts") SELECT "id", 'run_failed', $2::timestamp(3), '{}'::jsonb FROM "HealthCheckRun" ` +
   `WHERE "id" = $1 AND to_jsonb("HealthCheckRun") ->> 'reviewMode' = 'automatic' ${FLAG_CONFLICT}`;
+/** An automatic run stopped at its budget raises its flag (DECISIONS.md 715): only while the console has it automatic and stopped there. */
+export const BUDGET_FLAG_SQL =
+  `INSERT INTO "HealthCheckRunFlag" ("runId", "kind", "raisedAt", "counts") SELECT "id", 'stopped_budget', $2::timestamp(3), '{}'::jsonb FROM "HealthCheckRun" ` +
+  `WHERE "id" = $1 AND "reviewMode" = 'automatic' AND "status" = 'stopped_budget' ${FLAG_CONFLICT}`;
 /** An automatic run's hold with its results (DECISIONS.md 693). One row or the save rolls back. */
 export const HOLD_OUTPUT_SQL = `UPDATE "HealthCheckRun" SET "heldReason" = $2 WHERE "id" = $1 AND "reviewMode" = 'automatic' AND "heldReason" IS NULL AND "status" <> 'released'`;
 /** One release row by code: kind automatic, naming nobody (migration 20261211's check). */
@@ -741,7 +745,7 @@ export class PostgresWorkerStore implements WorkerStore {
    * any refusal rolls the whole save back, so a run is never released with
    * part of what the customer reads, nor held without its flag. Released: the
    * digest first, then a release row per output naming nobody, then the status.
-   * Held: the reason, then its flag, raised once.
+   * Held: the reason, then its flag and each other failed check's (DECISIONS.md 715), each raised once.
    */
   async #writeAutomatic(client: SqlClient, runId: string, output: RunOutputRecord): Promise<void> {
     const a = output.automatic!;
@@ -749,7 +753,7 @@ export class PostgresWorkerStore implements WorkerStore {
       const held = await client.query(HOLD_OUTPUT_SQL, [runId, a.reason]);
       // No row: the run is released, not automatic, or already held, and the first hold stands. The save rolls back, and the next delivery finds the hold and skips.
       if (held.rowCount !== 1) throw new Error(`Run ${runId} couldn't be held: the console doesn't have it as an unreleased, unheld automatic run`);
-      await client.query(RAISE_FLAG_SQL, [runId, a.reason, a.at, JSON.stringify(a.counts)]);
+      for (const f of [{ kind: a.reason, counts: a.counts }, ...(a.also ?? [])]) await client.query(RAISE_FLAG_SQL, [runId, f.kind, a.at, JSON.stringify(f.counts)]);
       return;
     }
     const digest = output.digest;
@@ -1029,6 +1033,10 @@ export class PostgresWorkerStore implements WorkerStore {
         this.#log(`Run ${runId}: the console's database has no HealthCheckRunFlag table it can write (SQLSTATE ${code}), so the failure raises no flag. Apply the console's ${REVIEW_MODE_MIGRATION} migration.`);
       }
     });
+  }
+
+  async flagBudgetStop(runId: string, at: string): Promise<boolean> {
+    return (await this.#pool.query(BUDGET_FLAG_SQL, [runId, at])).rowCount === 1;
   }
 
   /** DECISIONS.md 652: a step row, so no schema change. Not #openRun: a scan lets go after its results, in review or not. */

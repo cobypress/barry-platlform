@@ -7,7 +7,7 @@ import { pageDataset } from "../render/page-dataset.ts";
 import { asPrinted } from "../render/render-released.ts";
 import { HELD_FOR_US_MASKS } from "../render/render-released.ts";
 import type { RunDigest } from "../schemas/digest.ts";
-import { editionIsWhy } from "../salesforce/refusal-words.ts";
+import { editionIsWhy, unansweredIsWhy } from "../salesforce/refusal-words.ts";
 import { canRelease, Release, ReportOutput, type Finding, type ReportSection } from "../schemas/index.ts";
 import type { RunOverall } from "./types.ts";
 
@@ -17,12 +17,20 @@ import type { RunOverall } from "./types.ts";
 // written and as a page prints it, with a draft that failed fallen back to the
 // engine's own wording; the digest the portal serves traced, masked or held,
 // with the org's words marked (src/digest/checked.ts); and nothing held for us.
-// Then two checks of the run as a whole that a person must look at: most of
-// the rules couldn't measure, or the score moved a long way since the last
-// released run. The first failing check, in that order, is the hold.
+// Then the checks of the run as a whole that a person must look at: reads
+// Salesforce didn't answer in a way that looks like an outage, most of the
+// rules couldn't measure, or the score moved a long way since the last
+// released run. Every check that fails raises its flag; the first, in
+// HOLD_REASONS' order, is the run's one heldReason (DECISIONS.md 715).
 
-/** The words the console's HealthCheckRun."heldReason" and HealthCheckRunFlag."kind" take (migrations 20261211, 20261215). */
-export const HOLD_REASONS = ["section_failed", "no_digest", "digest_held", "mostly_unmeasured", "score_moved"] as const;
+/**
+ * The words the console's HealthCheckRun."heldReason" and HealthCheckRunFlag."kind" take (migrations 20261211, 20261215,
+ * 20261217), in the order they decide the one heldReason when several apply. What the customer could read comes first
+ * (a section, the digest), so a person sees first what stops it being shown; then lost reads, which leave the report
+ * honest but thin; then what a person judges of the whole run. reads_lost before mostly_unmeasured: an outage that
+ * costs most of the checks is said as the outage, its cause, with mostly_unmeasured's flag beside it.
+ */
+export const HOLD_REASONS = ["section_failed", "no_digest", "digest_held", "reads_lost", "mostly_unmeasured", "score_moved"] as const;
 export type HoldReason = (typeof HOLD_REASONS)[number];
 
 /** The owner's answer of 23 November 2026: a move this large, with nothing changed in the org, waits for a person. */
@@ -31,7 +39,10 @@ export const SCORE_MOVE_POINTS = 15;
 /** Counts only, never text: the flag's JSON is posted to staff and must hold nothing of the org's. */
 export type FlagCounts = Record<string, number>;
 
-export type ReleaseDecision = { kind: "release"; releases: Release[]; digest: RunDigest } | { kind: "hold"; reason: HoldReason; counts: FlagCounts; digest: RunDigest | null };
+/** A hold: the first check that failed is `reason`, with its counts; `also`, every later one that failed too, each a flag of its own. */
+export type ReleaseDecision =
+  | { kind: "release"; releases: Release[]; digest: RunDigest }
+  | { kind: "hold"; reason: HoldReason; counts: FlagCounts; also: Array<{ kind: HoldReason; counts: FlagCounts }>; digest: RunDigest | null };
 
 /** Whether a section's text passes the number check as stored and as the page prints it, against the set every output is checked with. */
 function passes(report: BuiltReport, section: ReportSection, versionId: string | null, pseudonyms: Pseudonymiser, set: FigureSet): boolean {
@@ -88,6 +99,16 @@ export function unmeasuredRules(findings: Finding[]): { rules: number; notMeasur
   return { rules: all.size, notMeasurable: [...all.values()].filter(Boolean).length, ...(byEdition > 0 ? { edition: byEdition } : {}) };
 }
 
+/** Rules whose every finding is not measurable, with Salesforce not answering named in a reason: the checks lost reads cost (DECISIONS.md 715). */
+export function unansweredRules(findings: Finding[]): number {
+  const rules = new Map<string, { all: boolean; unanswered: boolean }>();
+  for (const f of findings) {
+    const was = rules.get(f.ruleId) ?? { all: true, unanswered: false };
+    rules.set(f.ruleId, { all: was.all && f.status === "not_measurable", unanswered: was.unanswered || (f.status === "not_measurable" && unansweredIsWhy(f.notMeasurableReason ?? "")) });
+  }
+  return [...rules.values()].filter((r) => r.all && r.unanswered).length;
+}
+
 export type ReleaseInput = {
   runId: string;
   /** The sections as checkSections left them. */
@@ -97,26 +118,48 @@ export type ReleaseInput = {
   overall: RunOverall | null;
   /** The overall score of the same org's last released run of the same product, or null with none. */
   previousScore: number | null;
+  /**
+   * Reads Salesforce didn't answer on the last delivery, in a way that looks
+   * like an outage (run-job.ts lossLooksLikeOutage), or null with none: the
+   * run is held `reads_lost` rather than released with those checks missing.
+   */
+  readsLost?: { lost: number } | null;
   now: string;
 };
 
-/** Release or hold, the first failing check in rule 10's order, then the run's own. Release rows name nobody. */
+/**
+ * Release or hold. Every check is made and each that fails is a flag, so a
+ * person sees all of them; the first in HOLD_REASONS' order is the hold.
+ * Release rows name nobody.
+ */
 export function decideRelease(input: ReleaseInput): ReleaseDecision {
   const { sections, checked } = input;
-  const hold = (reason: HoldReason, counts: FlagCounts): ReleaseDecision => ({ kind: "hold", reason, counts, digest: checked.digest });
+  const failed: Array<{ kind: HoldReason; counts: FlagCounts }> = [];
+  const fail = (kind: HoldReason, counts: FlagCounts): void => void failed.push({ kind, counts });
   const release = canRelease(sections, "automatic");
-  if (!release.ok) return hold("section_failed", { sections: sections.length, notChecked: sections.filter((s) => s.status !== "checked").length });
-  if (!checked.digest) return hold("no_digest", {});
-  if (checked.held) return hold("digest_held", { masks: checked.masks, ceiling: HELD_FOR_US_MASKS, unmatched: checked.unmatched, unmarked: checked.unmarked });
+  if (!release.ok) fail("section_failed", { sections: sections.length, notChecked: sections.filter((s) => s.status !== "checked").length });
+  if (!checked.digest) fail("no_digest", {});
+  else if (checked.held) fail("digest_held", { masks: checked.masks, ceiling: HELD_FOR_US_MASKS, unmatched: checked.unmatched, unmarked: checked.unmarked });
+  // The digest's own two counts ride with it, since the console shows a reads_lost run only when both are 0 (its
+  // decision 713); with no digest there is nothing they could describe, so they are left out and Show stays refused.
+  if (input.readsLost) {
+    fail("reads_lost", { lost: input.readsLost.lost, notMeasurable: unansweredRules(input.findings), ...(checked.digest ? { unmatched: checked.unmatched, unmarked: checked.unmarked } : {}) });
+  }
   const unmeasured = unmeasuredRules(input.findings);
-  if (unmeasured.notMeasurable * 2 > unmeasured.rules) return hold("mostly_unmeasured", unmeasured);
+  if (unmeasured.notMeasurable * 2 > unmeasured.rules) fail("mostly_unmeasured", unmeasured);
   if (input.overall && input.previousScore !== null && Math.abs(input.overall.score - input.previousScore) >= SCORE_MOVE_POINTS) {
-    return hold("score_moved", { score: input.overall.score, previous: input.previousScore, moved: Math.abs(input.overall.score - input.previousScore) });
+    fail("score_moved", { score: input.overall.score, previous: input.previousScore, moved: Math.abs(input.overall.score - input.previousScore) });
+  }
+  if (failed.length > 0) {
+    failed.sort((a, b) => HOLD_REASONS.indexOf(a.kind) - HOLD_REASONS.indexOf(b.kind));
+    const [first, ...also] = failed;
+    return { kind: "hold", reason: first!.kind, counts: first!.counts, also, digest: checked.digest };
   }
   // One row per output with sections, as the console's own release writes them.
   const releases = ReportOutput.options
     .map((output) => ({ output, sectionIds: sections.filter((s) => s.output === output).map((s) => s.id) }))
     .filter((r) => r.sectionIds.length > 0)
     .map((r) => Release.parse({ ...r, id: randomUUID(), runId: input.runId, kind: "automatic", releasedBy: null, releasedAt: input.now }));
-  return { kind: "release", releases, digest: checked.digest };
+  // No digest is no_digest, a hold, so one is here.
+  return { kind: "release", releases, digest: checked.digest! };
 }

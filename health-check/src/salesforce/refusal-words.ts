@@ -68,6 +68,11 @@ export function editionIsWhy(reason: string): boolean {
   return [METADATA_POINTER, APEX_POINTER, NO_APEX_IN_EDITION, TOOLING_AFTER_EDITION].some((s) => reason.includes(s));
 }
 
+/** Whether a not measurable reason says Salesforce didn't answer a read, wherever a rule puts it (DECISIONS.md 715). */
+export function unansweredIsWhy(reason: string): boolean {
+  return reason.includes(`because ${BECAUSE.unanswered}.`);
+}
+
 /** The org's limits, refused at connect. */
 export const LIMITS_NO_PERMISSION = "The org's limits weren't measured, because the person who connected Salesforce can't view Setup.";
 export const LIMITS_REFUSED = "The org's limits weren't measured, because Salesforce refused the read.";

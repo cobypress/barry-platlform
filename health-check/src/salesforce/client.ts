@@ -3,7 +3,7 @@ import { XMLParser } from "fast-xml-parser";
 import { unzipSync, strFromU8 } from "fflate";
 import { BUDGET_DEFAULTS, SF_DEFAULTS } from "../config.ts";
 import { authorise, ForbiddenOperationError, type SfRequest } from "./allowlist.ts";
-import { ApiBudget, BudgetStopError } from "./budget.ts";
+import { ApiBudget, BudgetStopError, DAILY_LIMIT_EXHAUSTED } from "./budget.ts";
 import { LIMITS_NO_PERMISSION, LIMITS_REFUSED, NO_API_FOR_ORG, NO_API_FOR_USER } from "./refusal-words.ts";
 import type { ConnectionProvider, OrgConnection } from "./connection.ts";
 import { instanceOrigin } from "./hosts.ts";
@@ -482,7 +482,7 @@ export class SalesforceClient {
         isFault = true;
       }
     }
-    if (code === "REQUEST_LIMIT_EXCEEDED") return new BudgetStopError("Salesforce reports the daily API limit is exhausted");
+    if (code === "REQUEST_LIMIT_EXCEEDED") return new BudgetStopError(DAILY_LIMIT_EXHAUSTED);
     return new SalesforceError(res.status, code, message, { fault: isFault, ...(operation ? { operation } : {}) });
   }
 
@@ -541,7 +541,7 @@ export class SalesforceClient {
           const error = new SalesforceError(item.statusCode, first?.errorCode ?? "UNKNOWN", first?.message ?? "Subrequest failed");
           // A lost session or the daily limit inside one answer is the run's, not one count's (DECISIONS.md 702).
           const kind = classifyError(error);
-          if (kind === "api_limit") throw new BudgetStopError("Salesforce reports the daily API limit is exhausted");
+          if (kind === "api_limit") throw new BudgetStopError(DAILY_LIMIT_EXHAUSTED);
           if (kind === "auth_lost") throw error;
           out.push({ ok: false, error });
         }

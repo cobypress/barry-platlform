@@ -9,7 +9,7 @@ import { ORG_ID } from "../../testing/synthetic-org.ts";
 
 // An automatic run spends at most a tenth of the org's daily limit, and one
 // that stops there is carried on by nothing: staff see it in its steps, in
-// words true of it, until the console has a flag for it (DECISIONS.md 710).
+// words true of it, and by its stopped_budget flag (DECISIONS.md 710, 715).
 
 const run = async (reviewMode: "automatic" | "consultant") => {
   const deps = baseDeps({ dataTransport: new Simulator({ dailyLimit: 1_500 }), automatic: { on: true, orgs: new Set([ORG_ID.slice(0, 15)]) } });
