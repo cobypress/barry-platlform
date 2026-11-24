@@ -441,6 +441,23 @@ describe("the inventory's fill rates read again after a blip (round 4, P5)", () 
   });
 });
 
+describe("a whole fill-rate call Salesforce didn't answer (round 4, P5)", () => {
+  const fillRateCall = (r: TransportRequest): boolean => isComposite(r) && /SELECT COUNT\(Id\) n/.test(decodeURIComponent(String(r.body)).replace(/\+/g, " "));
+  const callDown: TransportResponse = { status: 503, header: () => null, text: "<html>Service Unavailable</html>" };
+  test("before the last delivery the run stops to read it again; on every delivery, the last releases with those counts unread in true words", async () => {
+    const w = await world((r) => (fillRateCall(r) ? callDown : null), "automatic");
+    await w.deliver(1);
+    assert.equal(w.stored().run.status, "extracting");
+    await w.deliver(2);
+    assert.equal(w.stored().run.status, "extracting");
+    await w.deliver(3);
+    assert.equal(w.stored().run.status, "released");
+    const text = JSON.stringify((JSON.parse(readFileSync(join(w.deps.runsDir, RUN_ID, "inventory.json"), "utf8")) as { fillRates: unknown }).fillRates);
+    assert.match(text, /couldn't be read, because Salesforce didn't answer as it should\./);
+    assert.doesNotMatch(text, /after several tries/);
+  });
+});
+
 describe("706's stage read with 702's retry (merge check)", () => {
   test("a 503 on the OpportunityStage read before the last delivery is read again, never taken as the field missing", async () => {
     // Down through the client's own retries on delivery 1, answering on delivery 2.
