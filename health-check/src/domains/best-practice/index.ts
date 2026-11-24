@@ -1,4 +1,5 @@
 import { metadataExtractor, scheduledJobsExtractor } from "../../extract/automation.ts";
+import { userKinds } from "../user-kinds.ts";
 import { componentChangesExtractor } from "../../extract/component-changes.ts";
 import { ownershipExtractor, usersExtractor, type UserRow } from "../../extract/users.ts";
 import { recordCountsExtractor } from "../../extract/configuration.ts";
@@ -55,7 +56,7 @@ const usersWithoutRole: Rule = {
   evaluate(ctx): RuleResult | RuleResult[] {
     const users = ctx.data(usersExtractor);
     if (users.status !== "ok") return { outcome: "not_measurable", reason: `Users couldn't be read: ${users.reason}`, evidence: [ctx.ev(users.source, { count: null })] };
-    const kindOf = (u: UserRow): string | undefined => ctx.calibration.users.find((c) => c.userId.slice(0, 15) === u.Id.slice(0, 15))?.kind;
+    const kindOf = (u: UserRow): string | undefined => userKinds(ctx).find((c) => c.userId.slice(0, 15) === u.Id.slice(0, 15))?.kind;
     const inScope = (u: UserRow): boolean => {
       const kind = kindOf(u);
       if (!u.IsActive || u.Profile?.Name === "System Administrator" || kind === "admin") return false;

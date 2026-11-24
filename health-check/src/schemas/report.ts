@@ -152,17 +152,22 @@ export const Release = z
   });
 export type Release = z.infer<typeof Release>;
 
-/** Why no automatic run can be released yet: rule 10 stands until the owner rewords it, and lane E3 builds the release. */
-export const AUTOMATIC_RELEASE_NOT_BUILT = "Automatic release isn't built yet, so an automatic run can't be released";
+/** Why an automatic run's sections can't be released: one isn't checked, or names an approver no person was (DECISIONS.md 693). */
+export const AUTOMATIC_NOT_ALL_CHECKED = "Not every section passed its checks, so the automatic run can't be released";
 
 /**
  * Rule 10, as a function the release action has to call. A consultant-led run
- * is released only when every section is approved, with who and when. An
- * automatic run can't be released by any path yet (DECISIONS.md 688).
+ * is released only when every section is approved, with who and when, so a
+ * checked section never passes for one. An automatic run is released by code
+ * only when every section is checked and names no approver (DECISIONS.md 693);
+ * the run's digest and its other checks are the release's own (src/worker/release.ts).
  */
 export function canRelease(sections: ReportSection[], mode: ReviewMode): { ok: true } | { ok: false; blockedBy: string[]; reason?: string } {
-  if (mode !== "consultant") return { ok: false, blockedBy: sections.map((s) => s.key), reason: AUTOMATIC_RELEASE_NOT_BUILT };
   if (sections.length === 0) return { ok: false, blockedBy: ["no sections"] };
+  if (mode === "automatic") {
+    const blockedBy = sections.filter((s) => s.status !== "checked" || s.approval !== null).map((s) => s.key);
+    return blockedBy.length === 0 ? { ok: true } : { ok: false, blockedBy, reason: AUTOMATIC_NOT_ALL_CHECKED };
+  }
   const blockedBy = sections.filter((s) => s.status !== "approved" || !s.approval).map((s) => s.key);
   return blockedBy.length === 0 ? { ok: true } : { ok: false, blockedBy };
 }

@@ -1,4 +1,5 @@
 import type { RuleContext } from "../../engine/rule.ts";
+import { org, said } from "../../engine/org-words.ts";
 import { stagesExtractor } from "../../extract/opportunities.ts";
 import type { Evidence, Metric, MetricSegment, SeriesPoint } from "../../schemas/index.ts";
 import type { Deal, PipelineData } from "../historic-pipeline/cohort.ts";
@@ -97,7 +98,8 @@ function weightedPipeline(deals: Deal[], rates: Map<string, Cohort>, minSample: 
     if (!cohort || cohort.rate === null) {
       const closed = cohort?.n ?? 0;
       segments.push({ dimension: "stage", key: stage, n: group.length, value: null, notMeasurableReason: `${SEGMENT_NOTE}: ${closed} closed deals were in this stage, of ${minSample}` });
-      unweighted.push(`${group.length} open deals in ${stage}, where too few closed deals were in the stage to weight it`);
+      // Said, so the stage is marked as the org's (DECISIONS.md 693).
+      unweighted.push(said`${group.length} open deals in ${org(stage)}, where too few closed deals were in the stage to weight it`);
       continue;
     }
     const weighted = (group.reduce((sum, d) => sum + (d.Amount ?? 0), 0) * cohort.rate) / 100;
@@ -129,7 +131,7 @@ export function deliveryOutlook(ctx: Ctx, data: Ready, deals: Deal[], evidence: 
   const rates = stageWinRates(ctx, data);
   const weighted = deals.filter((d) => typeof rates.get(d.StageName)?.rate === "number");
   const unweighted = deals.length - weighted.length;
-  const exclusions = [...data.exclusions, ...(unweighted ? [`${unweighted} open deals in stages with too few closed deals to weight`] : [])];
+  const exclusions = [...data.exclusions, ...(unweighted ? [said`${unweighted} open deals in stages with too few closed deals to weight`] : [])];
   const chance = (d: Deal): number => rates.get(d.StageName)!.rate! / 100;
   const timing = (d: Deal): string => {
     const expected = expectedClose(d, late);
@@ -141,7 +143,7 @@ export function deliveryOutlook(ctx: Ctx, data: Ready, deals: Deal[], evidence: 
   // Whole deals: nobody plans for 0.4 of a deal (DECISIONS.md 404).
   const dealsOf = (group: Deal[]): number => Math.round(group.reduce((sum, d) => sum + chance(d), 0));
   const timingKeys: Array<[string, string]> = [["past", "Expected date already passed"], ["later", "Expected after the outlook"]];
-  const assumptions = [...shared.assumptions, `Your won deals closed a median of ${late} days after their first close date`];
+  const assumptions = [...shared.assumptions, said`Your won deals closed a median of ${late} days after their first close date`];
   const stats = { lateDays: late, months: OUTLOOK_MONTHS };
   const within = months.flatMap((m) => placed.get(m) ?? []);
   if (weighted.length === 0) {
@@ -165,7 +167,7 @@ export function deliveryOutlook(ctx: Ctx, data: Ready, deals: Deal[], evidence: 
   const noAmount = weighted.length - priced.length;
   const metrics: Metric[] = [];
   if (data.multiCurrency) metrics.push({ ...definitions.value, ...shared, exclusions, status: "not_measurable", reason: MULTI_CURRENCY });
-  else metrics.push({ ...definitions.value, ...shared, exclusions: [...exclusions, ...(noAmount ? [`${noAmount} weighted open deals with no amount add nothing to value`] : [])], assumptions: [...assumptions, `Amounts in ${currency}`], status: "measured", ...build(valueOf) });
+  else metrics.push({ ...definitions.value, ...shared, exclusions: [...exclusions, ...(noAmount ? [said`${noAmount} weighted open deals with no amount add nothing to value`] : [])], assumptions: [...assumptions, said`Amounts in ${org(currency)}`], status: "measured", ...build(valueOf) });
   metrics.push({ ...definitions.deals, ...shared, exclusions, assumptions, status: "measured", ...build(dealsOf) });
   return metrics;
 }

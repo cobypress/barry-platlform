@@ -20,7 +20,9 @@ import type { StoredConnection } from "../salesforce/token-store.ts";
 import { safeReason, type Attempt, type JobOutcome, type WorkerDeps } from "./deps.ts";
 import { appFor, appNotSetUp, needsReconnection } from "./apps.ts";
 import { withJobLock } from "./lock.ts";
-import { AUTOMATIC_NOT_BUILT, automaticRefusal } from "./automatic.ts";
+import { automaticRefusal } from "./automatic.ts";
+import { checkedDigest } from "../digest/checked.ts";
+import { checkSections, decideRelease, type ReleaseDecision } from "./release.ts";
 import { letGoAfterRun, type SeenRun } from "./scan-release.ts";
 import { progressOf, RunClosedError, runOverall, type RunJobInput } from "./types.ts";
 import { withoutComments } from "../survey/questions.ts";
@@ -61,6 +63,10 @@ export const SECTIONS_FILE = "report-sections.json";
 export const approvedFromConsole = (name: string): NodeJS.ProcessEnv => ({ HC_APPROVED_ORG_ALIASES: name }) as NodeJS.ProcessEnv;
 
 export const ORG_SETTINGS_ON_CONSULTANT_RUN = "The calibration was read from the org's own settings and no person has confirmed it, so a consultant-led run can't start. Confirm the calibration first.";
+
+/** Whether this is an automatic run a hold is waiting on. */
+const heldFor = (input: RunJobInput): boolean => input.run.reviewMode === "automatic" && typeof input.heldReason === "string";
+const heldOutcome = (runId: string, input: RunJobInput): JobOutcome => ({ outcome: "skipped", detail: `Run ${runId} is held (${input.heldReason}), so it waits for a person and nothing was read` });
 
 function problemWith(input: RunJobInput, deps: WorkerDeps): string | null {
   // First, before anything else is checked or loaded: an automatic run reads nothing it isn't allowed to (DECISIONS.md 688).
@@ -139,6 +145,10 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
   if (!first) return { outcome: "skipped", detail: `No run ${runId}` };
   Object.assign(seen, { product: first.run.product, connectionName: first.connectionName });
   if (CLOSED.has(first.run.status)) return { outcome: "skipped", detail: `Run ${runId} is ${first.run.status.replace("_", " ")}, so there's nothing for the worker to do` };
+  // A failed automatic run is a person's to run again (DECISIONS.md 693): a stray second message never runs or releases it.
+  if (first.run.reviewMode === "automatic" && first.run.status === "failed") return { outcome: "skipped", detail: `Automatic run ${runId} failed, so it waits for a person to run it again and nothing was read` };
+  // A held automatic run waits for a named person, always: code never reads it again or releases it (DECISIONS.md 693).
+  if (heldFor(first)) return heldOutcome(runId, first);
 
   // The run is this delivery's before anything is written, to the folder or the
   // store, a failure's included: the console's move to review, landing after the
@@ -180,6 +190,8 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
   if (!second) return { outcome: "skipped", detail: `No run ${runId}` };
   const input = second;
   Object.assign(seen, { product: input.run.product, connectionName: input.connectionName });
+  // Held between the two readings (a second connect, a person): still nothing read.
+  if (heldFor(input)) return heldOutcome(runId, input);
 
   const problem = problemWith(input, deps);
   if (problem) return fail(problem);
@@ -207,11 +219,6 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
   // A health check or essentials run only, with Claude to ask: a scan and a
   // pulse never keep code, and nor does a worker that can't send it anywhere (DECISIONS.md 492).
   const apexSummaries = deps.apexSummaries === true && deps.narrative !== undefined && input.run.product === "barometer";
-
-  // Everything before this is built for an automatic run: its claim, its
-  // calibration and its connection. Reading the org for analysis isn't, until
-  // lane E3 (DECISIONS.md 692), so it stops here with nothing read.
-  if (input.run.reviewMode === "automatic") return fail(AUTOMATIC_NOT_BUILT);
 
   let result: Awaited<ReturnType<typeof runHealthCheck>>;
   try {
@@ -274,6 +281,8 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
     return { outcome: "stopped_budget", detail: result.run.budget.stoppedReason ?? "Stopped at the API budget" };
   }
 
+  // An automatic run's release or hold, once decided (DECISIONS.md 693).
+  let decision: ReleaseDecision | null = null;
   try {
     // The engine's intake and the sections the console reviews. Building sections
     // needs no browser. They start as the engine's own text, as `hc render`
@@ -320,6 +329,12 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
     const awaiting = result.run.status === "awaiting_manual";
     if (deps.narrative && !unreviewed && awaiting) log(`Run ${runId} is awaiting manual steps, so its sections are the engine's own text until the answers are in.`);
     const report = deps.narrative && !unreviewed && !awaiting ? await draftSections(runId, dir, reportInput, deps.narrative, pseudonyms, now(), log) : buildReport(reportInput);
+    // An automatic run's sections are checked by code, with no person (DECISIONS.md 693): before anything is written, so the folder holds what's saved.
+    const automatic = input.run.reviewMode === "automatic" && input.run.product === "barometer";
+    if (automatic) {
+      const checked = checkSections(report, pseudonyms);
+      if (checked.fellBack || checked.failed) log(`Run ${runId}: ${checked.fellBack} section${checked.fellBack === 1 ? "" : "s"} fell back to the engine's own text, and ${checked.failed} didn't pass its check.`);
+    }
     const outputs = Object.values(report.outputs);
     // The survey's metrics as this report made them, stored with the run's own,
     // so its sections cite only what the run holds (DECISIONS.md 645). Before the
@@ -334,11 +349,19 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
     const inventory = inventoryOf(dir, log, { runId, madeAt: result.run.asOf, scope: result.run.scope });
     const complexity = complexityOf(dir, log);
     // A pulse's digest, from the report its result is made from, with its results (DECISIONS.md 632). A check's waits for its documents.
-    const digest = input.run.product === "pulse" ? digestOf(runId, () => buildDigest({ report, pseudonyms, inventory, madeAt: now().toISOString() }), log) : null;
+    // An automatic run's, checked, masked or held, written with its release (DECISIONS.md 693): its portal has nothing else to show.
+    const checkedOne = automatic ? checkedDigest({ input: reportInput, pseudonyms, inventory, madeAt: now().toISOString() }) : null;
+    const digest = input.run.product === "pulse" ? digestOf(runId, () => buildDigest({ report, pseudonyms, inventory, madeAt: now().toISOString() }), log) : (checkedOne?.digest ?? null);
     const sections = outputs.flatMap((o) => o.sections);
     // The engine's own, without any survey metric: those go apart, in a savepoint of their own.
     const metrics = result.output!.metrics.filter((m) => !SURVEY_METRIC_IDS.includes(m.id));
     for (const line of danglingCitations(runId, sections, { ...result.output!, metrics: [...metrics, ...surveyMetrics] })) log(line);
+    const overall = runOverall(report.overall);
+    // Released by code or held for a person, decided here and written in the save's one transaction (DECISIONS.md 693).
+    decision = checkedOne
+      ? decideRelease({ runId, sections, checked: checkedOne, findings: result.output!.findings, overall, previousScore: await deps.store.lastReleasedScore(runId, input.run.orgId.slice(0, 15), input.run.product), now: now().toISOString() })
+      : null;
+    if (decision) log(decision.kind === "release" ? `Automatic run ${runId} passed every check and is released.` : `Automatic run ${runId} is held for a person: ${decision.reason} ${JSON.stringify(decision.counts)}.`);
     await deps.store.saveRunOutput(runId, {
       progress: progressOf(result.run),
       runDir: dir,
@@ -359,9 +382,10 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
       inventory,
       ...(complexity ? { complexity } : {}),
       // The score and grade the report gives, pulses' and scans' too, for the portal (DECISIONS.md 626).
-      overall: runOverall(report.overall),
-      // A pulse's whatever it is: null takes away an earlier delivery's, so a stale digest is never served.
-      ...(input.run.product === "pulse" ? { digest } : {}),
+      overall,
+      // A pulse's whatever it is: null takes away an earlier delivery's, so a stale digest is never served. An automatic run's likewise.
+      ...(input.run.product === "pulse" || decision ? { digest } : {}),
+      ...(decision ? { automatic: decision.kind === "release" ? { decision: "release" as const, releases: decision.releases } : { decision: "hold" as const, reason: decision.reason, counts: decision.counts, at: now().toISOString() } } : {}),
     });
   } catch (err) {
     if (err instanceof RunClosedError) return { outcome: "skipped", detail: err.message };
@@ -373,6 +397,7 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
   }
   if (input.run.product === "scan") await finishScan(runId, dir, deps, now().toISOString(), log);
   if (input.run.product === "pulse") await finishPulse(runId, dir, deps, now().toISOString(), log);
+  if (decision) return { outcome: "done", detail: decision.kind === "release" ? `Run ${runId} is released` : `Run ${runId} is held: ${decision.reason}` };
   return { outcome: "done", detail: `Run ${runId} is ${result.run.status.replace("_", " ")}` };
 }
 

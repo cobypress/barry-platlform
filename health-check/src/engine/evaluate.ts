@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { stagesExtractor } from "../extract/opportunities.ts";
+import { marksOfMetric, orgValuesOf, rewordFinding, rewordMetric } from "./automatic-words.ts";
 import type { DomainModule } from "../domains/types.ts";
 import type { Extractor } from "../extract/types.ts";
 import { Pseudonymiser, UNKNOWN_USER } from "../privacy/pseudonymiser.ts";
@@ -21,6 +23,12 @@ export type AnalysisInput = {
   userDirectory: Map<string, { name: string; aliases: string[] }>;
   /** Complete unless said otherwise. */
   scope?: RunScope;
+  /**
+   * What a manual step nobody has answered is: `ask`, pending, so a
+   * consultant-led run waits for a person; `skip`, skipped, so an automatic run
+   * never waits and the rules that needed it say not measurable (DECISIONS.md 693).
+   */
+  unanswered?: "ask" | "skip";
 };
 
 /** An issue's records, by finding. Worker-only: never part of a finding or anything sent on. */
@@ -243,7 +251,7 @@ export function analyse(input: AnalysisInput): AnalysisOutput {
 }
 
 function analyseWithin(input: AnalysisInput): AnalysisOutput {
-  const { modules, extracts, calibration, now, window, answers, pseudonyms, userDirectory, scope = "complete" } = input;
+  const { modules, extracts, calibration, now, window, answers, pseudonyms, userDirectory, scope = "complete", unanswered = "ask" } = input;
   const raised = new Map<string, ManualStep>();
   let currentRule: string | null = null;
   // What the rule or metric builder running now has leaned on (DECISIONS.md 598).
@@ -258,7 +266,7 @@ function analyseWithin(input: AnalysisInput): AnalysisOutput {
     const template = MANUAL_STEPS[key];
     if (!template) throw new Error(`Unknown manual step "${key}"`);
     const answer = answers.find((a) => a.stepKey === key) ?? null;
-    const status: ManualStep["status"] = answer ? answer.outcome : "pending";
+    const status: ManualStep["status"] = answer ? answer.outcome : unanswered === "skip" ? "skipped" : "pending";
     const id = `ms-${key}`;
     const step = raised.get(key) ?? { ...template, id, status, ruleIds: [] };
     if (currentRule && !step.ruleIds.includes(currentRule)) step.ruleIds.push(currentRule);
@@ -335,5 +343,17 @@ function analyseWithin(input: AnalysisInput): AnalysisOutput {
   assumed = new Set();
   // Only what ended as an issue keeps its records, so a list never outlives its finding.
   const issues = new Set(findings.filter((f) => f.status === "issue").map((f) => f.id));
+  // An automatic run's texts said for what they are on it, and its metrics' texts marked (DECISIONS.md 693):
+  // last, once every rule has read the metrics as built, so no reworded text is ever put into a sentence said makes.
+  if (calibration.source === "org_settings") {
+    const stageRows = extracts.get(stagesExtractor.id) as { status: string; data?: Array<{ ApiName: string; MasterLabel: string }> } | undefined;
+    const orgValues = orgValuesOf({ metrics, findings, stages: [...calibration.stages.map((s) => s.name), ...(stageRows?.data ?? []).flatMap((s) => [s.ApiName, s.MasterLabel])] });
+    return {
+      findings: findings.map((f) => Finding.parse(rewordFinding(f))),
+      metrics: metrics.map((m) => Metric.parse(rewordMetric(m, marksOfMetric(m, orgValues)))),
+      manualSteps: [...raised.values()],
+      records: records.filter((r) => issues.has(r.findingId)),
+    };
+  }
   return { findings, metrics, manualSteps: [...raised.values()], records: records.filter((r) => issues.has(r.findingId)) };
 }

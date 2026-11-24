@@ -1,4 +1,5 @@
 import { pct, type RuleContext } from "../../engine/rule.ts";
+import { said } from "../../engine/org-words.ts";
 import { priorWinsExtractor, type PriorWinRow } from "../../extract/prior-wins.ts";
 import type { Sourced } from "../../extract/types.ts";
 import type { DateRange, Metric, MetricSegment, SeriesPoint } from "../../schemas/index.ts";
@@ -37,7 +38,7 @@ function stageWinRate(ctx: Ctx, data: Ready): Metric {
   const { minSample } = ctx.calibration;
   const closed = closedFromOpen(ctx, data);
   const neverOpen = data.deals.filter((d) => d.category !== "open" && d.category !== null && closedInWindow(d, ctx.window)).length - closed.length;
-  const exclusions = [...definition.exclusions, ...(neverOpen > 0 ? [`${neverOpen} deals with no recorded open stage`] : [])];
+  const exclusions = [...definition.exclusions, ...(neverOpen > 0 ? [said`${neverOpen} deals with no recorded open stage`] : [])];
   if (closed.length < minSample) return notMeasurable({ ...definition, exclusions }, thinReason(closed.length, "closed deals with stage history", minSample));
   const rates = stageWinRates(ctx, data);
   const stages: MetricSegment[] = [...rates].map(([stage, cohort]) => ({ dimension: "stage", key: stage, n: cohort.n, value: cohort.rate, notMeasurableReason: cohort.rate === null ? `${SEGMENT_NOTE} (${cohort.n} of ${minSample})` : null }));
@@ -60,14 +61,14 @@ export function recentQuarters(today: string, fiscalStart: number, count: number
 
 function quarterlyTrends(ctx: Ctx, data: Ready): Metric[] {
   const { minSample } = ctx.calibration;
-  const shared = "The value is the latest whole quarter.";
+  // Each definition whole, so the digest knows it as the engine's own text (DECISIONS.md 693).
   const definitions: Record<string, Definition> = {
-    created: { id: "historic.quarterly_created", label: "Deals created by quarter", unit: "count", definition: `Deals created in each fiscal quarter. ${shared}` },
-    won: { id: "historic.quarterly_won", label: "Deals won by quarter", unit: "count", definition: `Deals won in each fiscal quarter. ${shared}` },
-    wonValue: { id: "historic.quarterly_won_value", label: "Won value by quarter", unit: "currency", definition: `Amount won in each fiscal quarter. ${shared}` },
-    winRate: { id: "historic.quarterly_win_rate", label: "Win rate by quarter", unit: "percent", definition: `Won as a share of won and lost deals closed in each fiscal quarter. ${shared}` },
-    size: { id: "historic.quarterly_median_won_size", label: "Median won deal by quarter", unit: "currency", definition: `Median Amount of deals won in each fiscal quarter, with an amount. ${shared}` },
-    cycle: { id: "historic.quarterly_median_cycle", label: "Median sales cycle by quarter", unit: "days", definition: `Median days from creation to close, for deals won in each fiscal quarter. ${shared}` },
+    created: { id: "historic.quarterly_created", label: "Deals created by quarter", unit: "count", definition: "Deals created in each fiscal quarter. The value is the latest whole quarter." },
+    won: { id: "historic.quarterly_won", label: "Deals won by quarter", unit: "count", definition: "Deals won in each fiscal quarter. The value is the latest whole quarter." },
+    wonValue: { id: "historic.quarterly_won_value", label: "Won value by quarter", unit: "currency", definition: "Amount won in each fiscal quarter. The value is the latest whole quarter." },
+    winRate: { id: "historic.quarterly_win_rate", label: "Win rate by quarter", unit: "percent", definition: "Won as a share of won and lost deals closed in each fiscal quarter. The value is the latest whole quarter." },
+    size: { id: "historic.quarterly_median_won_size", label: "Median won deal by quarter", unit: "currency", definition: "Median Amount of deals won in each fiscal quarter, with an amount. The value is the latest whole quarter." },
+    cycle: { id: "historic.quarterly_median_cycle", label: "Median sales cycle by quarter", unit: "days", definition: "Median days from creation to close, for deals won in each fiscal quarter. The value is the latest whole quarter." },
   };
   const all = Object.values(definitions).map((d) => base(ctx, data, d));
   const fiscal = fiscalStartOf(ctx);
@@ -168,7 +169,7 @@ function winSources(ctx: Ctx, data: Ready): Metric[] {
   if (won.length < minSample) return every.map((d) => notMeasurable(d, thinReason(won.length, "won deals", minSample)));
   const blank = won.filter((d) => d.Amount === null).length;
   if (tooManyBlank(won)) return every.map((d) => notMeasurable(d, `${blank} of ${won.length} won deals have no amount, so shares of won value would mislead.`));
-  const blankNote = blank > 0 ? [`${blank} won deals with no amount count as zero`] : [];
+  const blankNote = blank > 0 ? [said`${blank} won deals with no amount count as zero`] : [];
   const withAccount = won.filter((d) => d.AccountId);
   const noAccount = won.length - withAccount.length;
   const accountExclusions = noAccount > 0 ? [`${noAccount} won deals with no account`] : [];
@@ -245,7 +246,7 @@ function lostFrom(ctx: Ctx, data: Ready): Metric[] {
   const all = data.deals.filter((d) => (d.category === "lost" || d.category === "no_decision") && closedInWindow(d, ctx.window));
   const lost = all.filter((d) => stageLeftFrom(d, data) !== null);
   const neverOpen = all.length - lost.length;
-  const exclusions = [...countDefinition.exclusions, ...(neverOpen > 0 ? [`${neverOpen} deals with no recorded open stage`] : [])];
+  const exclusions = [...countDefinition.exclusions, ...(neverOpen > 0 ? [said`${neverOpen} deals with no recorded open stage`] : [])];
   if (lost.length < minSample) return [countDefinition, valueDefinition].map((d) => notMeasurable({ ...d, exclusions }, thinReason(lost.length, "lost and no decision deals with stage history", minSample)));
   const order = (stage: string): number => data.stages.orderOf(stage) ?? Number.MAX_SAFE_INTEGER;
   const byStage = [...groupBy(lost, (d) => stageLeftFrom(d, data)!)].sort(([a], [b]) => order(a) - order(b) || a.localeCompare(b));
@@ -274,7 +275,7 @@ function closeDateReliability(ctx: Ctx, data: Ready): Metric[] {
   if (data.unmapped.finalStages.length > 0) return [shareDefinition, lateDefinition].map((d) => notMeasurable(d, unmappedReason("stages", data.unmapped.finalStages)));
   const won = wonFromOpen(ctx, data);
   const neverOpen = wonIn(ctx, data).length - won.length;
-  const exclusions = [...shareDefinition.exclusions, ...(neverOpen > 0 ? [`${neverOpen} won deals with no recorded open stage`] : [])];
+  const exclusions = [...shareDefinition.exclusions, ...(neverOpen > 0 ? [said`${neverOpen} won deals with no recorded open stage`] : [])];
   if (won.length < minSample) return [shareDefinition, lateDefinition].map((d) => notMeasurable({ ...d, exclusions }, thinReason(won.length, "won deals with stage history", minSample)));
   const dims = dimensions(ctx);
   delete dims["closed quarter"];
@@ -300,11 +301,11 @@ export function daysByStage(deal: Deal, data: Ready): Map<string, number> {
 
 function stageVelocity(ctx: Ctx, data: Ready): Metric[] {
   const { minSample } = ctx.calibration;
-  const make = (outcome: "won" | "lost", id: string, label: string, phrase: string): Metric => {
-    const definition = base(ctx, data, { id, label, unit: "days", definition: `Median days ${phrase} deals closed in the window spent in open stages. Each stage shows the median for deals that were in it.` });
+  const make = (outcome: "won" | "lost", id: string, label: string, text: string): Metric => {
+    const definition = base(ctx, data, { id, label, unit: "days", definition: text });
     if (data.unmapped.finalStages.length > 0) return notMeasurable(definition, unmappedReason("stages", data.unmapped.finalStages));
     const deals = closedFromOpen(ctx, data).filter((d) => (outcome === "won" ? d.category === "won" : d.category === "lost" || d.category === "no_decision"));
-    if (deals.length < minSample) return notMeasurable(definition, thinReason(deals.length, `${phrase} deals with stage history`, minSample));
+    if (deals.length < minSample) return notMeasurable(definition, thinReason(deals.length, `${outcome === "won" ? "won" : "lost and no decision"} deals with stage history`, minSample));
     const timings = new Map(deals.map((d) => [d.Id, daysByStage(d, data)]));
     const totalDays = (d: Deal): number => [...timings.get(d.Id)!.values()].reduce((a, b) => a + b, 0);
     const segments: MetricSegment[] = data.stages.openStages.map((stage) => {
@@ -314,7 +315,10 @@ function stageVelocity(ctx: Ctx, data: Ready): Metric[] {
     });
     return measured(definition, { value: round1(median(deals.map(totalDays))), n: deals.length, dateRange: ctx.window, segments });
   };
-  return [make("won", "historic.stage_velocity_won", "Time in each stage, won deals", "won"), make("lost", "historic.stage_velocity_lost", "Time in each stage, lost deals", "lost and no decision")];
+  return [
+    make("won", "historic.stage_velocity_won", "Time in each stage, won deals", "Median days won deals closed in the window spent in open stages. Each stage shows the median for deals that were in it."),
+    make("lost", "historic.stage_velocity_lost", "Time in each stage, lost deals", "Median days lost and no decision deals closed in the window spent in open stages. Each stage shows the median for deals that were in it."),
+  ];
 }
 
 const LABELS: Definition[] = [

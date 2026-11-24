@@ -1,4 +1,5 @@
 import { apexExtractor, metadataExtractor, scheduledJobsExtractor } from "../extract/automation.ts";
+import { userKinds } from "../domains/user-kinds.ts";
 import { normaliseUserKey } from "../extract/metadata-parse.ts";
 import { loginsExtractor, ownershipExtractor, runAsExtractor, usersExtractor, type UserRow } from "../extract/users.ts";
 import type { RuleContext } from "../engine/rule.ts";
@@ -67,7 +68,7 @@ export function userGuards(ctx: RuleContext, user: UserRow): Guard[] {
   const guards: Guard[] = [];
 
   // Shared or system account: the calibration's word beats our pattern match.
-  const calibrated = ctx.calibration.users.find((u) => u.userId.slice(0, 15) === user.Id.slice(0, 15))?.kind;
+  const calibrated = userKinds(ctx).find((u) => u.userId.slice(0, 15) === user.Id.slice(0, 15))?.kind;
   const usersEvidence = [ctx.ev(users.source, { count: 1 })];
   if (calibrated && NON_PERSON_KINDS.has(calibrated)) {
     guards.push(guard("not-shared-or-system", subject, "failed", `The calibration marks this user as ${calibrated}.`, usersEvidence));

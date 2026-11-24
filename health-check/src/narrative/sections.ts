@@ -553,12 +553,16 @@ function planFigures({ phases, later, quickWins }: Plan): FigureSet["figures"] {
 const withMerged = (f: Finding, plan: Plan): Finding[] => [f, ...(plan.alsoFor[f.id] ?? [])];
 const planFindings = (plan: Plan): Finding[] => [...plan.phases, { findings: plan.quickWins }].flatMap((p) => p.findings.flatMap((f) => withMerged(f, plan)));
 
+/** What an automatic run's report says where a consultant-led one waits for the customer's stated problems (DECISIONS.md 693). */
+export const AUTOMATIC_NO_STATED_PROBLEMS = "You haven't told us what problems you see yet, so there's nothing here to set against what we found.";
+
 /** Stated vs actual. Claude may draft it from the stated problems and the issues; a consultant's own links and assessment come first. */
-function statedVsActualSpec(intake: Intake | null | undefined, team: Finding[]): Spec {
+function statedVsActualSpec(intake: Intake | null | undefined, team: Finding[], automatic = false): Spec {
   const key = "stated_vs_actual";
   const title = "Stated vs actual";
   const stated = intake?.statedProblems ?? [];
-  const placeholder = "A consultant hasn't yet linked the stated problems to findings.";
+  // No consultant comes to an automatic run (DECISIONS.md 693): the customer's own answer is what fills it.
+  const placeholder = automatic && stated.length === 0 ? AUTOMATIC_NO_STATED_PROBLEMS : "A consultant hasn't yet linked the stated problems to findings.";
   if (stated.length === 0) return { key, title, body: placeholder, needsInput: true };
   const linked = stated.filter((p) => p.findingIds.length > 0);
   const linkedIds = [...new Set(linked.flatMap((p) => p.findingIds))];
@@ -748,7 +752,7 @@ function fullSpecs(input: ReportInput, team: Finding[], metrics: Metric[], surve
   return [
     intake && intake.statedProblems.length
       ? { key: "stated_problems", title: "Stated problems", body: lines(intake.summary, ...intake.statedProblems.map((p) => p.statement)), sources: [INTAKE] }
-      : { key: "stated_problems", title: "Stated problems", body: "The customer's stated problems haven't been recorded for this run.", needsInput: true },
+      : { key: "stated_problems", title: "Stated problems", body: input.run.reviewMode === "automatic" ? AUTOMATIC_NO_STATED_PROBLEMS : "The customer's stated problems haven't been recorded for this run.", needsInput: true },
     {
       key: "overview",
       title: "Overview",
@@ -790,7 +794,7 @@ function fullSpecs(input: ReportInput, team: Finding[], metrics: Metric[], surve
     }]),
     ...(survey ? [surveySpec(survey)] : []),
     ...(interviews ? [interviewSpec(input, interviews)] : []),
-    statedVsActualSpec(intake, team),
+    statedVsActualSpec(intake, team, input.run.reviewMode === "automatic"),
     {
       key: "ai_readiness",
       title: "AI readiness",

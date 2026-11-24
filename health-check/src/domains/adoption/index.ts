@@ -1,4 +1,5 @@
 import { loginActivityExtractor, type LoginActivity, type LoginChannel } from "../../extract/adoption.ts";
+import { userKinds } from "../user-kinds.ts";
 import { daysBefore } from "../../extract/types.ts";
 import { reportsExtractor, usersExtractor, type UserRow } from "../../extract/users.ts";
 import { schemaExtractor } from "../../extract/configuration.ts";
@@ -34,7 +35,7 @@ const roleOf = (u: UserRow): string => u.UserRole?.Name ?? "No role";
 
 /** The people we measure: active, not a shared, system, integration or test account, and not on an integration licence. */
 function people(ctx: Ctx, users: UserRow[]): UserRow[] {
-  const nonPerson = new Set(ctx.calibration.users.filter((u) => NON_PERSON_KINDS.has(u.kind)).map((u) => u.userId.slice(0, 15)));
+  const nonPerson = new Set(userKinds(ctx).filter((u) => NON_PERSON_KINDS.has(u.kind)).map((u) => u.userId.slice(0, 15)));
   return users.filter((u) => u.IsActive && !nonPerson.has(u.Id.slice(0, 15)) && !/\bintegration\b/i.test(u.Profile?.UserLicense?.Name ?? ""));
 }
 
@@ -188,7 +189,8 @@ function activeMetrics(ctx: Ctx, data: Extract<Loaded, { status: "ok" }>): Metri
   const inMonth = (month: string) => (d: string) => monthKey(d) === month;
   const series: SeriesPoint[] = months.map((month) => ({ date: `${month}-01`, value: activeOn(activity, users, inMonth(month)), n: users.length, notMeasurableReason: null }));
   const mau = activeOn(activity, users, inMonth(last));
-  const coverage = [`The login history covers ${plural(months.length, "whole month")}, from ${months[0]}-01${activity.truncated ? ". The read reached its cap, so older months were left out" : ""}`];
+  // Said, so it is marked as ours (DECISIONS.md 693); the month is a date the engine worked out.
+  const coverage = [activity.truncated ? said`The login history covers ${plural(months.length, "whole month")}, from ${org(months[0] + "-01")}. The read reached its cap, so older months were left out` : said`The login history covers ${plural(months.length, "whole month")}, from ${org(months[0] + "-01")}`];
   // The group that fell furthest from its peak, month by month, so a chart can set it beside the org's line.
   const steepest = groups
     .filter((g) => g.users.length >= MIN_GROUP && months.length > 1)

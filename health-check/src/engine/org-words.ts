@@ -124,6 +124,11 @@ export function orgWordsOf(text: string): OrgSpan[] | null {
   return ledger?.get(text) ?? null;
 }
 
+/** Whether said made this text in this analysis at all, its marks known or not (DECISIONS.md 693): a text it recorded as unknown stays unknown. */
+export function saidMade(text: string): boolean {
+  return ledger?.has(text) ?? false;
+}
+
 /** Adds a span, joining it to the one before when they touch, so spans stay sorted and apart. */
 function push(spans: OrgSpan[], start: number, end: number): void {
   if (end <= start) return;

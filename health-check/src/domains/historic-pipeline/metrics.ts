@@ -1,4 +1,5 @@
 import type { RuleContext } from "../../engine/rule.ts";
+import { said } from "../../engine/org-words.ts";
 import { pct } from "../../engine/rule.ts";
 import { orgExtractor } from "../../extract/configuration.ts";
 import type { DateRange, Evidence, Metric, MetricSegment, SeriesPoint } from "../../schemas/index.ts";
@@ -200,7 +201,7 @@ function stageConversion(ctx: Ctx, data: Ready): Metric[] {
   };
   const withStages = closed.filter((d) => furthest(d) !== null);
   const neverOpen = closed.length - withStages.length;
-  const exclusions = [...definition.exclusions, ...(neverOpen ? [`${neverOpen} deals with no recorded open stage`] : [])];
+  const exclusions = [...definition.exclusions, ...(neverOpen ? [said`${neverOpen} deals with no recorded open stage`] : [])];
   const { minSample } = ctx.calibration;
   if (withStages.length < minSample) return [notMeasurable({ ...definition, exclusions }, `${withStages.length} closed deals with stage history is below the calibrated minimum of ${minSample}.`)];
 
@@ -245,7 +246,8 @@ function salesCycle(ctx: Ctx, data: Ready): Metric[] {
       id,
       label,
       unit: "days",
-      definition: `Median days from creation to final close, for ${outcome} deals closed in the window. The close comes from stage history, or CloseDate where there is none.`,
+      // Each whole, so the digest knows it as the engine's own text (DECISIONS.md 693).
+      definition: outcome === "won" ? "Median days from creation to final close, for won deals closed in the window. The close comes from stage history, or CloseDate where there is none." : "Median days from creation to final close, for lost deals closed in the window. The close comes from stage history, or CloseDate where there is none.",
       assumptions: salesCycleAssumptionDays ? [`The calibration assumes a sales cycle of ${salesCycleAssumptionDays} days`] : [],
     });
     if (data.unmapped.finalStages.length > 0) return notMeasurable(definition, unmappedReason("stages", data.unmapped.finalStages));
@@ -263,7 +265,7 @@ function salesCycle(ctx: Ctx, data: Ready): Metric[] {
     const days = (d: Deal): number => Math.max(0, rawDays(d));
     const all = deals.map(days);
     const fallback = deals.filter((d) => d.closedAtSource === "close_date").length;
-    const assumptions = [...definition.assumptions, ...(fallback ? [`${fallback} deals have no closing history row, so CloseDate was used`] : [])];
+    const assumptions = [...definition.assumptions, ...(fallback ? [said`${fallback} deals have no closing history row, so CloseDate was used`] : [])];
     return measured(
       { ...definition, assumptions, exclusions },
       {
@@ -304,7 +306,7 @@ function slippage(ctx: Ctx, data: Ready): Metric[] {
   // A deal that was never open had no close date to slip.
   const withHistory = deals.filter((d) => hasOpenStage(d, data));
   const missing = deals.length - withHistory.length;
-  const exclusions = [...data.exclusions, ...(missing ? [`${missing} deals with no recorded open stage`] : [])];
+  const exclusions = [...data.exclusions, ...(missing ? [said`${missing} deals with no recorded open stage`] : [])];
   if (withHistory.length < minSample) {
     const reason = `${withHistory.length} closed deals with history is below the calibrated minimum of ${minSample}.`;
     return [rateDefinition, quarterDefinition, daysDefinition].map((d) => notMeasurable({ ...d, exclusions }, reason));
@@ -420,7 +422,7 @@ function pointInTime(ctx: Ctx, data: Ready): Metric[] {
 
   const measuredPoints = countSeries.filter((p) => p.value !== null);
   if (measuredPoints.length === 0) return [notMeasurable(countDefinition, "No month end falls inside the stage history."), notMeasurable(valueDefinition, "No month end falls inside the stage history.")];
-  const exclusions = [...data.exclusions, ...(missingHistory ? [`${missingHistory} deals with no stage history by the latest month end`] : [])];
+  const exclusions = [...data.exclusions, ...(missingHistory ? [said`${missingHistory} deals with no stage history by the latest month end`] : [])];
   const range: DateRange = { from: measuredPoints[0]!.date, to: measuredPoints.at(-1)!.date };
 
   const byStage = (rows: typeof latestOpen, calculate: (group: typeof latestOpen) => number): MetricSegment[] => {

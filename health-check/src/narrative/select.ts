@@ -3,6 +3,8 @@ import { NOT_MONEY_RULES } from "../value/model.ts";
 import { UNSCORED_RULES } from "../domains/scoring.ts";
 import { tokenSource } from "../privacy/pseudonymiser.ts";
 import { hasKinds, kindCounts } from "./unmeasured.ts";
+import { spansIfCurrent, textSha256 } from "../engine/org-words.ts";
+import { replaceMarked, type Marked } from "../fix/marked.ts";
 
 // The choices a report makes about its findings: what's top, what goes when, and
 // what an executive reader sees. All of it is code, so it's repeatable and Claude
@@ -74,13 +76,36 @@ export function teamLevelSteps(kind: "text" | "title" = "text"): ReadonlyArray<r
 }
 
 export function teamLevelFinding(f: Finding): Finding {
-  return {
+  const team = {
     ...f,
     title: teamLevelText(f.title, "title"),
     summary: teamLevelText(f.summary),
     recommendation: teamLevelText(f.recommendation),
     subjects: f.subjects.filter((s) => !USER_TOKEN.test(s.label)),
   };
+  return f.orgWords ? { ...team, orgWords: teamLevelMarks(f, team) } : team;
+}
+
+/**
+ * A finding's org-word marks carried through the team-level rewrite, as the fix
+ * prompt's are (DECISIONS.md 672): each rewrite says fixed words of ours, so the
+ * org's characters in what it replaces go, and one that would cut an org value
+ * leaves the sentence unknown. Without this the digest served every rewritten
+ * sentence unmarked, and an automatic run is released only with the org's
+ * words marked (rule 10, DECISIONS.md 693). A sentence the rewrite didn't
+ * touch keeps its marks as they were.
+ */
+function teamLevelMarks(f: Finding, team: Pick<Finding, "title" | "summary" | "recommendation">): Finding["orgWords"] {
+  const marks = { ...f.orgWords };
+  for (const key of ["title", "summary", "recommendation"] as const) {
+    if (team[key] === f[key]) continue;
+    const spans = spansIfCurrent(f[key], marks[key]);
+    let out: Marked = { text: f[key], spans };
+    if (spans) for (const [pattern, by, fixed] of teamLevelSteps(key === "title" ? "title" : "text")) out = replaceMarked(out, pattern, by, fixed);
+    if (out.spans && out.text === team[key]) marks[key] = { spans: out.spans, textSha256: textSha256(out.text) };
+    else delete marks[key];
+  }
+  return marks;
 }
 
 // A target such as pipeline needed for coverage isn't money, so it doesn't rank as money (DECISIONS.md 351):

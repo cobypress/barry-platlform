@@ -97,7 +97,29 @@ export type Figure = { metricKey: string; unit: Unit; value: number };
 export type Skipped = { metricKey: string; reason: string };
 
 /** `lintTotals` is the run's lint-totals.json, or null when it has none. */
-type Read = { metrics: Metric[]; scores: Score[]; findings: Finding[]; lintTotals?: LintTotals | null };
+type Read = { metrics: Metric[]; scores: Score[]; findings: Finding[]; lintTotals?: LintTotals | null; orgSettings?: boolean };
+
+/**
+ * On a run whose calibration was read from the org's settings (DECISIONS.md
+ * 693), what rests on the deals rests on stages no person confirmed: the open
+ * stages' order, lost stages read from Salesforce's flags, and several record
+ * types read as one. A benchmark row carries no note, so every figure read
+ * from the pipeline is left out, keyed on what it is (its id, its rule or its
+ * area), never on how a note is worded. Every other figure goes in, as the
+ * owner's policy is to store broadly.
+ */
+const PIPELINE_DOMAINS: ReadonlySet<string> = new Set(["historic_pipeline", "current_pipeline", "forecast", "revenue_opportunities"]);
+const PIPELINE_FACT_RULES: ReadonlySet<string> = new Set(["dq.open-opps-past-close", "dq.opps-inactive-owner", "dq.open-opps-missing-amount", "dq.open-opps-no-activity", "dq.loss-reason-missing"]);
+export const UNCONFIRMED_SKIP = "This figure is read from the deals, whose stages no person has confirmed on this run, so it's left out of the benchmark set.";
+/** Whether a benchmark figure is read from the pipeline. */
+export function readsPipeline(source: Source): boolean {
+  if (source.from === "score") return PIPELINE_DOMAINS.has(source.domain);
+  if (source.from === "metric") return /^(?:historic|current|forecast)\./.test(source.id);
+  if (source.from === "fact") return PIPELINE_FACT_RULES.has(source.ruleId);
+  return false;
+}
+/** What the export says of an automatic run's user band: nobody has told us which users are integrations or shared accounts. */
+export const USER_BAND_NOTE = "The user band is exported, counting every active user apart from those on integration licences: nobody has confirmed which are integrations, shared or system accounts, so it may count some of those.";
 
 /** The run's PMD totals, or null when it had no step. A file that doesn't parse is refused rather than read as not measured. */
 export function readLintTotals(dir: string): LintTotals | null {
@@ -171,6 +193,10 @@ export function benchmarkFigures(input: Read & { asRead?: Omit<Read, "scores"> }
   const skipped: Skipped[] = [];
   for (const { key, unit, source } of BENCHMARK_METRICS) {
     const skip = (reason: string): void => void skipped.push({ metricKey: key, reason });
+    if (input.orgSettings && readsPipeline(source)) {
+      skip(UNCONFIRMED_SKIP);
+      continue;
+    }
     const found = figureOf(input, unit, source);
     if ("reason" in found) {
       skip(found.reason);
@@ -277,13 +303,16 @@ export function orgProfile(dir: string, run: Run, calibration: Calibration): Org
   if (users.status !== "ok") throw new Error(`Users couldn't be read in this run (${users.reason}), so the user band can't be worked out.`);
   // People, not accounts: the same exclusions the user rules make.
   const nonPerson = new Set(calibration.users.filter((u) => ["shared", "system", "integration", "test"].includes(u.kind)).map((u) => u.userId.slice(0, 15)));
-  const activeUsers = users.data.filter((u) => u.IsActive && !nonPerson.has(u.Id.slice(0, 15))).length;
+  // An automatic run's calibration names none (DECISIONS.md 693): the integration licences are left out, as the adoption figures do, and the export says so.
+  const orgSettings = calibration.source === "org_settings";
+  const activeUsers = users.data.filter((u) => u.IsActive && !nonPerson.has(u.Id.slice(0, 15)) && !(orgSettings && /\bintegration\b/i.test(u.Profile?.UserLicense?.Name ?? ""))).length;
 
   const pipeline = loadPipeline(ctx);
   if (pipeline.status !== "ok") throw new Error(`${pipeline.reason} So the deal size band can't be worked out.`);
   // A benchmark row carries no note, so a figure resting on a stage whose
   // meaning came from Salesforce's flags would go in unmarked (DECISIONS.md 600).
-  if (pipeline.inferred.length > 0) {
+  // An automatic run's calibration names every won stage and leaves lost ones to the flags (692), so the won amounts below rest on none of them (693).
+  if (pipeline.inferred.length > 0 && calibration.source !== "org_settings") {
     const stages = pipeline.inferred.map((s) => s.stage).join(", ");
     throw new Error(`The calibration doesn't name these stages, so this run took their meaning from Salesforce's own settings: ${stages}. Add them to the calibration and run the health check again before exporting to the benchmark set.`);
   }
@@ -326,7 +355,8 @@ export type BenchmarkOptions = {
   now?: Date;
 };
 
-export type BenchmarkResult = { rows: BenchmarkRow[]; skipped: Skipped[]; storePath: string; profile: OrgProfile };
+/** `notes` says what an exported figure or band rests on, where a row can't (DECISIONS.md 693): empty on a consultant-led run. */
+export type BenchmarkResult = { rows: BenchmarkRow[]; skipped: Skipped[]; notes: string[]; storePath: string; profile: OrgProfile };
 
 const readJson = (path: string): unknown => JSON.parse(readFileSync(path, "utf8"));
 
@@ -338,7 +368,7 @@ export const ConsentRecord = z.strictObject({
 });
 export type ConsentRecord = z.infer<typeof ConsentRecord>;
 
-type Prepared = { dir: string; rows: BenchmarkRow[]; skipped: Skipped[]; profile: OrgProfile; consentPath: string; record: ConsentRecord };
+type Prepared = { dir: string; rows: BenchmarkRow[]; skipped: Skipped[]; notes: string[]; profile: OrgProfile; consentPath: string; record: ConsentRecord };
 
 /** Everything up to writing: the checks, the figures and the bands. Throws with the reason when the run can't contribute. */
 function prepareBenchmark(options: Omit<BenchmarkOptions, "storeDir">): Prepared {
@@ -379,6 +409,7 @@ function prepareBenchmark(options: Omit<BenchmarkOptions, "storeDir">): Prepared
     findings: effective.findings,
     asRead: { metrics, findings },
     lintTotals: readLintTotals(dir),
+    orgSettings: calibration.source === "org_settings",
   });
   if (figures.length === 0) throw new Error("Nothing in this run was measurable, so there's nothing to export.");
 
@@ -396,7 +427,8 @@ function prepareBenchmark(options: Omit<BenchmarkOptions, "storeDir">): Prepared
   // Built field by field, so nothing from the run can ride along.
   const rows = figures.map((f) => BenchmarkRow.parse({ metricKey: f.metricKey, value: f.value, unit: f.unit, ...shared }));
   const record = ConsentRecord.parse({ consent, recordedAt: (options.now ?? new Date()).toISOString(), rowsWritten: rows.length, metricKeys: rows.map((r) => r.metricKey) });
-  return { dir, rows, skipped, profile, consentPath, record };
+  // The band is exported; what it counts is said beside it, not among what was left out (fix round 2).
+  return { dir, rows, skipped, notes: calibration.source === "org_settings" ? [USER_BAND_NOTE] : [], profile, consentPath, record };
 }
 
 /** The run, or its org within the window, is already in the set. Not a fault: there's nothing more to add. */
@@ -436,15 +468,15 @@ export function exportBenchmark(options: BenchmarkOptions): BenchmarkResult {
     rmSync(prepared.consentPath, { force: true });
     throw err;
   }
-  return { rows: prepared.rows, skipped: prepared.skipped, storePath, profile: prepared.profile };
+  return { rows: prepared.rows, skipped: prepared.skipped, notes: prepared.notes, storePath, profile: prepared.profile };
 }
 
 /** The worker: into the console's benchmark table, through whatever writes it. */
 export async function contributeBenchmark(
   options: Omit<BenchmarkOptions, "storeDir">,
   write: (rows: BenchmarkRow[]) => Promise<void>,
-): Promise<{ rows: BenchmarkRow[]; skipped: Skipped[] }> {
+): Promise<{ rows: BenchmarkRow[]; skipped: Skipped[]; notes: string[] }> {
   const prepared = prepareBenchmark(options);
   await writeWithConsent(prepared, write);
-  return { rows: prepared.rows, skipped: prepared.skipped };
+  return { rows: prepared.rows, skipped: prepared.skipped, notes: prepared.notes };
 }

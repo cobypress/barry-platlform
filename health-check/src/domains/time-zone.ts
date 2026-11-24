@@ -1,4 +1,5 @@
 import { orgExtractor } from "../extract/configuration.ts";
+import { org, said } from "../engine/org-words.ts";
 import type { RuleContext } from "../engine/rule.ts";
 
 // A close at 02:00 UTC on 1 April is 31 March in Los Angeles, and belongs in that
@@ -52,5 +53,6 @@ export const todayIn = (ctx: Pick<RuleContext, "data" | "now">): string => local
 /** For a metric's assumptions, so a reader knows which calendar the figures are on. */
 export function zoneNote(ctx: Pick<RuleContext, "data">): string {
   const zone = zoneOf(ctx);
-  return zone ? `Days, months and quarters are in the org's time zone, ${zone}` : "Days, months and quarters are in UTC, because the org's time zone couldn't be read";
+  // Said, so the zone is marked as the org's (DECISIONS.md 693).
+  return zone ? said`Days, months and quarters are in the org's time zone, ${org(zone)}` : "Days, months and quarters are in UTC, because the org's time zone couldn't be read";
 }

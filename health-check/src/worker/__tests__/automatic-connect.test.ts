@@ -3,8 +3,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { beginAuthorisation, createConnectLink } from "../../connect/link.ts";
-import { CALIBRATION_UNREADABLE, NO_WON_STAGE, ORG_SETTINGS_CALIBRATOR, STAGES_UNREAD } from "../../connect/auto-calibration.ts";
+import { CALIBRATION_UNREADABLE, CURRENCY_UNREAD, NO_WON_STAGE, ORG_SETTINGS_CALIBRATOR, STAGES_UNREAD } from "../../connect/auto-calibration.ts";
 import { StoreError } from "../../connect/org-stages.ts";
+import { ORG_CURRENCY_SOQL } from "../../connect/org-currency.ts";
 import { approvedReport, AUTOMATIC_DOCUMENTS_NOT_BUILT } from "../../render/render-released.ts";
 import type { Transport, TransportRequest, TransportResponse } from "../../salesforce/transport.ts";
 import type { ConnectLink } from "../../schemas/connect.ts";
@@ -12,7 +13,7 @@ import { Calibration, Run } from "../../schemas/index.ts";
 import { FAKE, FakeTokenEndpoint } from "../../testing/fake-oauth.ts";
 import { runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration, loadRecording, ReplayTransport } from "../../testing/replay.ts";
-import { AUTOMATIC_NOT_BUILT, type AutomaticSwitch } from "../automatic.ts";
+import type { AutomaticSwitch } from "../automatic.ts";
 import { AUTOMATIC_OFF_AT_CONNECT, AUTOMATIC_ORG_AT_CONNECT } from "../connect-job.ts";
 import { sealConnectSecret } from "../connect-crypto.ts";
 import { CALIBRATION_WRITE, HOLD_RUN_SQL, PostgresWorkerStore, REVIEW_MODE_SQL, type SqlClient, type SqlPool, type SqlResult } from "../postgres-store.ts";
@@ -21,9 +22,9 @@ import { ORG_AWAITING_CONNECT } from "../types.ts";
 import { createJobHandler } from "../worker.ts";
 import { baseDeps, consoleRun, INTAKE, oauthClient, RUN_ID, runInput, syntheticConnection } from "./helpers.ts";
 
-// An automatic full check is calibrated from the org's own stages at connect
-// and queued, and its run then stops just before reading the org for analysis
-// (DECISIONS.md 692). A consultant-led run and a free scan connect as before.
+// An automatic full check is calibrated from the org's own stages and currency
+// at connect and queued (DECISIONS.md 692, 693). A consultant-led run and a
+// free scan connect as before.
 
 const NAME = "acme";
 const once = { final: false };
@@ -53,6 +54,7 @@ const STAGES = [
 class Org implements Transport {
   readonly requests: TransportRequest[] = [];
   stages: unknown[] | "refused" = STAGES;
+  currency: string | "refused" = "EUR";
   async send(request: TransportRequest): Promise<TransportResponse> {
     this.requests.push(request);
     const url = new URL(request.url);
@@ -61,6 +63,11 @@ class Org implements Transport {
     if (url.pathname.endsWith("/limits")) return ok({ DailyApiRequests: { Max: 1000, Remaining: 990 } });
     const q = url.searchParams.get("q") ?? "";
     if (/FROM PermissionSet WHERE/.test(q)) return ok({ records: [{ Name: "Barometer_Read_Only" }], totalSize: 1, done: true });
+    // The org's own currency, read for an automatic run's calibration (DECISIONS.md 693).
+    if (q === ORG_CURRENCY_SOQL) {
+      if (this.currency === "refused") return { status: 400, header: () => null, text: JSON.stringify([{ errorCode: "INSUFFICIENT_ACCESS", message: "no" }]) };
+      return ok({ records: [{ attributes: { type: "Organization" }, DefaultCurrencyIsoCode: this.currency }], totalSize: 1, done: true });
+    }
     if (/FROM OpportunityStage/.test(q)) {
       if (this.stages === "refused") return { status: 400, header: () => null, text: JSON.stringify([{ errorCode: "INSUFFICIENT_ACCESS", message: "no" }]) };
       return ok({ records: this.stages, totalSize: this.stages.length, done: true });
@@ -76,9 +83,10 @@ async function flow(options: { reviewMode?: Run["reviewMode"]; product?: Run["pr
   const fake = new FakeTokenEndpoint();
   const org = new Org();
   const queued: string[] = [];
-  const deps = baseDeps({ oauthTransport: fake, dataTransport: org, now: () => NOW, automatic: options.automatic ?? ON, queueRun: async (runId) => void queued.push(runId) });
+  const kinds: boolean[] = [];
+  const deps = baseDeps({ oauthTransport: fake, dataTransport: org, now: () => NOW, automatic: options.automatic ?? ON, queueRun: async (runId, options) => { queued.push(runId); kinds.push(options?.automatic === true); } });
   deps.store.addRun(runInput({ run: consoleRun({ orgId: ORG_AWAITING_CONNECT, product: options.product ?? "barometer", reviewMode: options.reviewMode ?? "automatic" }), calibration: null }));
-  const f = { fake, org, deps, queued, handle: createJobHandler(deps) };
+  const f = { fake, org, deps, queued, kinds, handle: createJobHandler(deps) };
   const link = addLink(f);
   return { ...f, link, job: { kind: "connect" as const, linkId: link.id } };
 }
@@ -115,6 +123,8 @@ describe("an automatic full check's connect, with the switch on and the org list
       { name: "Quokka Won", category: "won" },
     ]);
     assert.deepEqual(f.queued, [RUN_ID]);
+    // Under its one fixed queue id, so a second message is no second run (DECISIONS.md 693).
+    assert.deepEqual(f.kinds, [true]);
     assert.deepEqual(f.deps.store.queued, [RUN_ID]);
     // The stages for the console's screen are written as before, and the calibration after them.
     const order = f.deps.store.writes.map((w) => w.method);
@@ -134,7 +144,8 @@ describe("an automatic full check's connect, with the switch on and the org list
     const again = addLink(f);
     const second = await f.handle({ kind: "connect", linkId: again.id }, once);
     assert.equal(second.outcome, "connected");
-    assert.match(second.detail, /The run already had a calibration, so it wasn't started again\.$/);
+    // Said for what it is (DECISIONS.md 693): the run was started already, and this connect changed nothing.
+    assert.match(second.detail, /The run is already started, so this connect changed nothing\.$/);
     assert.equal(methods(f, "saveCalibration"), 1);
     assert.deepEqual(f.queued, [RUN_ID]);
     assert.deepEqual(f.deps.store.queued, [RUN_ID]);
@@ -243,6 +254,154 @@ describe("the switch at connect", () => {
   });
 });
 
+describe("lane E2's review, closed (DECISIONS.md 693)", () => {
+  test("the calibration takes the org's own currency, never the schema's pounds", async () => {
+    const f = await flow();
+    await f.handle(f.job, once);
+    assert.equal(f.deps.store.runs.get(RUN_ID)!.calibration!.currency, "EUR");
+  });
+
+  test("no currency read: nothing saved or queued, the run held, and its flag raised with the hold", async () => {
+    const f = await flow();
+    f.org.currency = "refused";
+    const outcome = await f.handle(f.job, once);
+    assert.equal(outcome.outcome, "connected");
+    assert.ok(outcome.detail.endsWith(` Held: ${CALIBRATION_UNREADABLE}. ${CURRENCY_UNREAD}`));
+    assert.equal(f.deps.store.runs.get(RUN_ID)!.calibration, null);
+    assert.deepEqual(f.queued, []);
+    assert.deepEqual(f.deps.store.flagsOf(RUN_ID), [CALIBRATION_UNREADABLE]);
+  });
+
+  test("every hold at connect raises its one flag, and a redelivery raises no second", async () => {
+    const f = await flow();
+    f.org.stages = "refused";
+    await f.handle(f.job, once);
+    await f.handle(f.job, { final: true });
+    assert.deepEqual(f.deps.store.flagsOf(RUN_ID), [CALIBRATION_UNREADABLE]);
+    assert.equal(methods(f, "raiseFlag"), 1);
+  });
+
+  test("a delivery that died after marking the link used, before the calibration: the next one reads the org again, calibrates and queues", async () => {
+    const f = await flow();
+    await f.handle(f.job, once);
+    // As the store stands when the worker dies just after markLinkUsed: the link used, the tokens kept, nothing else.
+    f.deps.store.runs.get(RUN_ID)!.calibration = null;
+    f.deps.store.queued.length = 0;
+    f.queued.length = 0;
+    const again = await f.handle(f.job, once);
+    assert.equal(again.outcome, "skipped");
+    assert.match(again.detail, /The run is calibrated from the org's settings and queued\.$/);
+    assert.equal(f.deps.store.runs.get(RUN_ID)!.calibration!.source, "org_settings");
+    assert.deepEqual(f.queued, [RUN_ID]);
+    assert.deepEqual(f.deps.store.queued, [RUN_ID]);
+    // And once finished, a further delivery does nothing.
+    const third = await f.handle(f.job, { final: true });
+    assert.match(third.detail, /needs nothing more/);
+    assert.deepEqual(f.queued, [RUN_ID]);
+    noStageNames(f, again.detail);
+  });
+
+  test("a delivery that died after the calibration, before the queue: the next one queues it, and reads nothing", async () => {
+    const f = await flow();
+    await f.handle(f.job, once);
+    f.deps.store.queued.length = 0;
+    f.queued.length = 0;
+    const calls = f.org.requests.length;
+    const again = await f.handle(f.job, once);
+    assert.match(again.detail, /The run is calibrated from the org's settings and queued\.$/);
+    assert.deepEqual(f.queued, [RUN_ID]);
+    assert.equal(f.org.requests.length, calls);
+    assert.equal(methods(f, "saveCalibration"), 1);
+  });
+
+  test("a queue that worked but couldn't be recorded is said as queued, never as not queued", async () => {
+    const f = await flow();
+    f.deps.store.recordRunQueued = async () => Promise.reject(new Error("the database went away"));
+    const outcome = await f.handle(f.job, once);
+    assert.match(outcome.detail, /The run is calibrated from the org's settings and queued\.$/);
+    assert.deepEqual(f.queued, [RUN_ID]);
+    assert.ok(f.deps.lines.some((l) => l.startsWith(`Automatic run ${RUN_ID} is queued, but that couldn't be recorded:`)));
+    assert.ok(!f.deps.lines.some((l) => l.includes("couldn't be queued")));
+  });
+
+  test("a worker with no queue leaves the run calibrated and waiting, for the console to start, and says so", async () => {
+    const f = await flow();
+    f.deps.queueRun = undefined;
+    const outcome = await f.handle(f.job, once);
+    assert.match(outcome.detail, /The run is calibrated from the org's settings, and waits to be started\.$/);
+    assert.equal(f.deps.store.runs.get(RUN_ID)!.calibration!.source, "org_settings");
+    assert.deepEqual(await f.deps.store.automaticRunState(RUN_ID), { calibrated: true, queued: false, held: false, status: "extracting" });
+    assert.ok(f.deps.lines.some((l) => /waits for the console to start it/.test(l)));
+  });
+
+  test("the connect refusals an automatic run's customer can meet name no consultant", () => {
+    for (const text of [AUTOMATIC_OFF_AT_CONNECT, AUTOMATIC_ORG_AT_CONNECT]) assert.ok(!/consultant/i.test(text), text);
+  });
+});
+
+describe("fix round 1: a connect never holds, reads or starts what it shouldn't (DECISIONS.md 693)", () => {
+  test("probe A: a second link whose stage read fails leaves a calibrated, queued run as it was: no hold, no flag, and it says so", async () => {
+    const f = await flow();
+    await f.handle(f.job, once);
+    const calibration = structuredClone(f.deps.store.runs.get(RUN_ID)!.calibration);
+    f.org.stages = "refused";
+    const again = addLink(f);
+    const second = await f.handle({ kind: "connect", linkId: again.id }, once);
+    assert.equal(second.outcome, "connected");
+    assert.match(second.detail, /The run is already started, so this connect changed nothing\.$/);
+    assert.equal(f.deps.store.held.has(RUN_ID), false);
+    assert.deepEqual(f.deps.store.flagsOf(RUN_ID), []);
+    assert.deepEqual(f.deps.store.runs.get(RUN_ID)!.calibration, calibration);
+    assert.deepEqual(f.queued, [RUN_ID]);
+  });
+
+  for (const [name, sw] of [["switched off", { on: false, orgs: new Set<string>() }], ["the org no longer listed", { on: true, orgs: new Set(["00D000000000009"]) }]] as const) {
+    test(`probe B: a redelivered used link with automatic runs ${name} reads nothing, saves nothing and queues nothing`, async () => {
+      const f = await flow();
+      await f.handle(f.job, once);
+      f.deps.store.runs.get(RUN_ID)!.calibration = null;
+      f.deps.store.queued.length = 0;
+      f.queued.length = 0;
+      const reads = f.org.requests.length;
+      const saves = methods(f, "saveCalibration");
+      f.deps.automatic = sw;
+      const again = await createJobHandler(f.deps)(f.job, once);
+      assert.equal(again.outcome, "skipped");
+      assert.match(again.detail, /nothing was read\.$/);
+      assert.equal(f.org.requests.length, reads);
+      assert.equal(methods(f, "saveCalibration"), saves);
+      assert.equal(f.deps.store.runs.get(RUN_ID)!.calibration, null);
+      assert.deepEqual(f.queued, []);
+    });
+  }
+
+  test("a failed automatic run is never queued again by a connect: only a person runs it again", async () => {
+    const f = await flow();
+    await f.handle(f.job, once);
+    f.deps.store.queued.length = 0;
+    f.queued.length = 0;
+    await f.deps.store.recordRunFailure(RUN_ID, "The run stopped with an error", NOW.toISOString());
+    const again = await f.handle(f.job, { final: true });
+    assert.match(again.detail, /needs nothing more/);
+    const third = await f.handle({ kind: "connect", linkId: addLink(f).id }, once);
+    assert.match(third.detail, /The run is failed, so this connect changed nothing\.$/);
+    assert.deepEqual(f.queued, []);
+    assert.deepEqual(f.deps.store.flagsOf(RUN_ID), ["run_failed"]);
+  });
+
+  test("a held run is never queued by a redelivery, and its first hold stands", async () => {
+    const f = await flow();
+    f.org.stages = "refused";
+    await f.handle(f.job, once);
+    f.org.stages = STAGES;
+    const again = await f.handle(f.job, { final: true });
+    assert.match(again.detail, /needs nothing more/);
+    assert.deepEqual(f.queued, []);
+    assert.equal(f.deps.store.held.get(RUN_ID), CALIBRATION_UNREADABLE);
+    assert.equal(await f.deps.store.holdRun(RUN_ID, CALIBRATION_UNREADABLE, NOW.toISOString()), false);
+  });
+});
+
 describe("the calibration check when a run starts", () => {
   const orgSettings = (): Calibration => ({ ...loadCalibration(), source: "org_settings", confirmedBy: ORG_SETTINGS_CALIBRATOR });
   const start = async (reviewMode: Run["reviewMode"], calibration: Calibration | null) => {
@@ -266,11 +425,11 @@ describe("the calibration check when a run starts", () => {
     assert.equal(r.outcome.outcome, "done", r.outcome.detail);
   });
 
-  test("an automatic run passes it with either source, is claimed, and stops just before extraction with nothing read", async () => {
+  test("an automatic run passes it with either source, is claimed and read: lane E3 took away the stop before extraction (DECISIONS.md 693)", async () => {
     for (const calibration of [orgSettings(), loadCalibration()]) {
       const r = await start("automatic", calibration);
-      assert.deepEqual(r.outcome, { outcome: "failed", detail: AUTOMATIC_NOT_BUILT });
-      assert.equal(r.calls, 0);
+      assert.equal(r.outcome.outcome, "done", r.outcome.detail);
+      assert.ok(r.calls > 0);
       assert.ok(r.claimed);
     }
   });
@@ -298,7 +457,7 @@ describe("the run folder's mode", () => {
   });
 
   test("the run job tells the engine the run's mode", async () => {
-    // Read from the run job's source: the switch stops an automatic run before the engine is called, until lane E3.
+    // Read from the run job's source.
     const source = readFileSync(new URL("../run-job.ts", import.meta.url), "utf8");
     assert.match(source, /reviewMode: input\.run\.reviewMode,/);
   });
@@ -383,17 +542,24 @@ describe("the Postgres store's side of it", () => {
     await assert.rejects(failing("23514").saveCalibration(RUN_ID, c), (err: Error) => err instanceof StoreError && err.message === "the console's database refused the calibration (SQLSTATE 23514)");
   });
 
-  test("the hold is one statement, an automatic run's only; a console without the column says so by SQLSTATE and goes on", async () => {
+  test("the hold and its flag are one statement, an automatic run's only; a console without the column says so by SQLSTATE and goes on", async () => {
     const pool = new FakePool();
-    assert.equal(await new PostgresWorkerStore(pool).holdRun(RUN_ID, CALIBRATION_UNREADABLE), true);
-    assert.deepEqual(pool.statements, [{ text: HOLD_RUN_SQL, values: [RUN_ID, CALIBRATION_UNREADABLE] }]);
+    pool.handlers.push((text) => (text === HOLD_RUN_SQL ? { rows: [{ held: 1 }], rowCount: 1 } : undefined));
+    assert.equal(await new PostgresWorkerStore(pool).holdRun(RUN_ID, CALIBRATION_UNREADABLE, NOW.toISOString()), true);
+    assert.deepEqual(pool.statements, [{ text: HOLD_RUN_SQL, values: [RUN_ID, CALIBRATION_UNREADABLE, NOW.toISOString()] }]);
     assert.match(HOLD_RUN_SQL, /"reviewMode" = 'automatic' AND "heldReason" IS NULL/);
+    // The flag only from the row the hold set, raised once (DECISIONS.md 693).
+    assert.match(HOLD_RUN_SQL, /INSERT INTO "HealthCheckRunFlag" \("runId", "kind", "raisedAt", "counts"\) SELECT "id", \$2, \$3::timestamp\(3\), '\{\}'::jsonb FROM held ON CONFLICT \("runId", "kind"\) DO NOTHING/);
+    // A run already held: nothing set, so nothing said held.
+    const already = new FakePool();
+    already.handlers.push(() => ({ rows: [{ held: 0 }], rowCount: 1 }));
+    assert.equal(await new PostgresWorkerStore(already).holdRun(RUN_ID, CALIBRATION_UNREADABLE, NOW.toISOString()), false);
     const without = new FakePool();
     without.handlers.push(() => {
       throw Object.assign(new Error(`column "heldReason" ${PLANTED}`), { code: "42703" });
     });
     const lines: string[] = [];
-    assert.equal(await new PostgresWorkerStore(without, { log: (l) => void lines.push(l) }).holdRun(RUN_ID, CALIBRATION_UNREADABLE), false);
+    assert.equal(await new PostgresWorkerStore(without, { log: (l) => void lines.push(l) }).holdRun(RUN_ID, CALIBRATION_UNREADABLE, NOW.toISOString()), false);
     assert.equal(lines.length, 1);
     assert.match(lines[0]!, /SQLSTATE 42703/);
     assert.ok(!lines[0]!.includes(PLANTED));

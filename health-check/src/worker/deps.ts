@@ -33,7 +33,7 @@ export type WorkerDeps = {
   /** Shares a released run's folder with its readers (DECISIONS.md 251). The same Google Drive client, when Drive is set up. */
   sharing?: FolderSharing | null;
   /** Puts a run job on the queue, for a free scan the moment its prospect connects. Without it, the console's "Start the scan" does. */
-  queueRun?: (runId: string) => Promise<void>;
+  queueRun?: (runId: string, options?: { automatic?: boolean }) => Promise<void>;
   /** Seals the customer microsite. Without it, released runs get documents and no microsite. */
   micrositeKey?: Buffer | null;
   /**

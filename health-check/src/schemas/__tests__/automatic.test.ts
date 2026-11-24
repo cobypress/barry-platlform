@@ -1,7 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { assertSectionsFitRun, AUTOMATIC_RELEASE_NOT_BUILT, Calibration, calibrationConfirmation, canRelease, CHECKED_OUTSIDE_AUTOMATIC, Release, ReportSection, Run, SectionsOfRun } from "../index.ts";
+import { assertSectionsFitRun, AUTOMATIC_NOT_ALL_CHECKED, Calibration, calibrationConfirmation, canRelease, CHECKED_OUTSIDE_AUTOMATIC, Release, ReportSection, Run, SectionsOfRun } from "../index.ts";
 import { loadCalibration } from "../../testing/replay.ts";
 import { consoleRun } from "../../worker/__tests__/helpers.ts";
 
@@ -77,12 +77,21 @@ describe("canRelease", () => {
     assert.deepEqual(canRelease([], "consultant"), { ok: false, blockedBy: ["no sections"] });
   });
 
-  test("an automatic run can't be released by any sections at all, approved, checked or none", () => {
-    for (const sections of [[], [checked], [approved], [approved, checked]]) {
+  test("an automatic run is released only when every section is checked with no approver: an approved section, any other status, or none refuses (DECISIONS.md 693)", () => {
+    assert.deepEqual(canRelease([checked, { ...checked, key: "scorecard" }], "automatic"), { ok: true });
+    for (const sections of [[approved], [approved, checked], [{ ...checked, status: "in_review" as const }], [{ ...checked, status: "needs_input" as const }], [{ ...checked, status: "draft" as const }]]) {
       const result = canRelease(sections, "automatic");
       assert.equal(result.ok, false);
-      assert.equal(!result.ok && result.reason, AUTOMATIC_RELEASE_NOT_BUILT);
+      assert.equal(!result.ok && result.reason, AUTOMATIC_NOT_ALL_CHECKED);
     }
+    // A checked section that somehow names an approver is refused here too, whatever its parse said.
+    assert.equal(canRelease([{ ...checked, approval }], "automatic").ok, false);
+    assert.deepEqual(canRelease([], "automatic"), { ok: false, blockedBy: ["no sections"] });
+  });
+
+  test("a consultant-led run still refuses a checked section, alone or beside approved ones", () => {
+    assert.deepEqual(canRelease([checked], "consultant"), { ok: false, blockedBy: [checked.key] });
+    assert.equal(canRelease([approved, checked], "consultant").ok, false);
   });
 });
 

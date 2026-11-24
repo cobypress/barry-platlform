@@ -1,4 +1,5 @@
 import { orgExtractor } from "../../extract/configuration.ts";
+import { joinSaid, org, said } from "../../engine/org-words.ts";
 import { opportunitiesGate } from "../gate.ts";
 import { daysBefore } from "../../extract/types.ts";
 import { licencesExtractor, usersExtractor, type UserLicenseRow } from "../../extract/users.ts";
@@ -69,11 +70,12 @@ const segment = (key: string, n: number, value: number | null, reason: string | 
 const unused = (l: { TotalLicenses: number; UsedLicenses: number }): number => Math.max(0, l.TotalLicenses - l.UsedLicenses);
 
 /** Seats times a price per seat, measured only when every licence with seats has a price: a part-priced total would understate. */
-function costMetric(d: Definition, evidence: Evidence[], licences: UserLicenseRow[], seatsOf: (l: UserLicenseRow) => number, price: (licence: string) => ReturnType<typeof costPerSeat>, describe: string): Metric {
+function costMetric(d: Definition, evidence: Evidence[], licences: UserLicenseRow[], seatsOf: (l: UserLicenseRow) => number, price: (licence: string) => ReturnType<typeof costPerSeat>, describe: "The seats" | "The unused seats" | "At list price, the seats"): Metric {
   const counted = licences.filter((l) => seatsOf(l) > 0);
   const prices = counted.map((l) => ({ licence: l, price: price(l.Name) }));
   const missing = prices.filter((p) => !isPriced(p.price));
-  if (missing.length) return notMeasurable(d, evidence, `${describe} can't be priced, because ${missing.map((p) => `${p.licence.Name} has no cost per seat (${"reason" in p.price ? p.price.reason : ""})`).join("; ")}.`);
+  // Said, so each licence is marked as the org's (DECISIONS.md 693). The words are unchanged.
+  if (missing.length) return notMeasurable(d, evidence, said`${describe} can't be priced, because ${joinSaid(missing.map((p) => ("reason" in p.price ? said`${org(p.licence.Name)} has no cost per seat (${p.price.reason})` : said`${org(p.licence.Name)} has no cost per seat ()`)), "; ")}.`);
   const priced = prices.map((p) => ({ licence: p.licence, price: p.price as SeatPrice, seats: seatsOf(p.licence) }));
   const value = priced.reduce((sum, p) => sum + p.seats * p.price.annual, 0);
   const seats = priced.reduce((sum, p) => sum + p.seats, 0);
@@ -173,7 +175,7 @@ function activeShare(ctx: Ctx, paid: UserLicenseRow[], usedSeats: number, licenc
     });
   return measured(d, evidence, pct(recent.length, usedSeats), usedSeats, segments, {
     exclusions: [LICENCE_EXCLUSION, "Inactive users"],
-    assumptions: [`A user is active if they logged in within ${days} days, the calibration's dormant period, going by their last login date`],
+    assumptions: [said`A user is active if they logged in within ${days} days, the calibration's dormant period, going by their last login date`],
     stats: { activeUsers: recent.length, dormantDays: days },
   });
 }

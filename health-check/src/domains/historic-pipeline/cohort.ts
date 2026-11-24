@@ -74,8 +74,10 @@ export function inferredMeanings(calibration: Calibration, flags: StageRow[] | n
  * (657), so a summary it is added to stays marked. The category is one of ours,
  * set by stageMap from Salesforce's flags, and printed as it is named.
  */
-export function inferredStagesNote(inferred: Array<{ stage: string; category: StageCategory }>): Said {
+export function inferredStagesNote(inferred: Array<{ stage: string; category: StageCategory }>, fromOrgSettings = false): Said {
   const items = inferred.map((s) => said`${org(s.stage)} as ${s.category}`);
+  // An automatic run's calibration was agreed with nobody (DECISIONS.md 693): no consultant is to come back to it.
+  if (fromOrgSettings) return said`You haven't told us yet what ${inferred.length === 1 ? "one stage means" : "some stages mean"}, so we used Salesforce's own setting for ${inferred.length === 1 ? "it" : "each"}: ${andList(items)}.`;
   return said`We haven't yet agreed with you what ${inferred.length === 1 ? "one stage means" : "some stages mean"}, so we used Salesforce's own setting for ${inferred.length === 1 ? "it" : "each"}: ${andList(items)}.`;
 }
 
@@ -87,7 +89,11 @@ const stageList = (stages: string[]): Said => joinSaid(stages.map((s) => said`${
  * lost stages (DECISIONS.md 600), ending with what to give us and where, as a
  * reason that needs something from the customer does (627).
  */
-export const unsplitReason = (stages: string[]): Said => said`Salesforce's setting can't tell lost from no decision for: ${stageList(stages)}. The calibration can say which each is.`;
+export const unsplitReason = (stages: string[], fromOrgSettings = false): Said =>
+  // On an automatic run no consultant will set the calibration: the customer's answer is what unlocks it (DECISIONS.md 693).
+  fromOrgSettings
+    ? said`Salesforce's setting can't tell lost from no decision for: ${stageList(stages)}. If you tell us which each is, your next health check can measure this.`
+    : said`Salesforce's setting can't tell lost from no decision for: ${stageList(stages)}. The calibration can say which each is.`;
 
 /** Why a check that needs the sales order can't place an inferred open stage. */
 export const unorderedReason = (stages: string[]): Said => said`The calibration doesn't say where these open stages come in the sales order: ${stageList(stages)}.`;
@@ -141,6 +147,8 @@ export type PipelineData =
       unsplitLost: string[];
       /** How many record types the in-scope deals use. Unnamed deals don't count; absent reads as none. */
       recordTypes?: number;
+      /** The calibration was read from the org's settings, for an automatic run (DECISIONS.md 693): set only then. */
+      fromOrgSettings?: true;
     };
 
 /**
@@ -159,7 +167,7 @@ export function loadPipeline(ctx: Omit<RuleContext, "metrics">): PipelineData {
   }
   // Whatever reads the deals leans on what their stages mean, so the engine
   // puts the note on its findings and metrics, and caps its confidence.
-  if (data.status === "ok" && data.inferred.length > 0) ctx.assume?.(inferredStagesNote(data.inferred));
+  if (data.status === "ok" && data.inferred.length > 0) ctx.assume?.(inferredStagesNote(data.inferred, ctx.calibration.source === "org_settings"));
   // A calibration read from the org's settings (DECISIONS.md 692): nobody chose
   // the record types, so blended sales processes are said, and the open stages'
   // order is Salesforce's sort order, said by whatever reads it.
@@ -171,6 +179,8 @@ export function loadPipeline(ctx: Omit<RuleContext, "metrics">): PipelineData {
 
 /** Made in each analysis, as every said is. What every check that reads the sales order says when the order came from Salesforce's sort order, not a person (DECISIONS.md 692). */
 export const unconfirmedOrderNote = (): Said => said`We took the order of your open stages from Salesforce's own stage settings, and haven't confirmed it with you.`;
+/** The same sentence, for a chart drawn in that order (DECISIONS.md 693). */
+export const ORDER_UNCONFIRMED = "We took the order of your open stages from Salesforce's own stage settings, and haven't confirmed it with you.";
 
 /** What every figure that read the deals says when they hold several record types nobody has told apart (DECISIONS.md 692). */
 export const blendedProcessesNote = (n: number): Said =>
@@ -281,10 +291,11 @@ function buildPipeline(ctx: Omit<RuleContext, "metrics">): PipelineData {
     inferred,
     recordTypes: new Set(deals.flatMap((d) => (d.RecordType === null ? [] : [d.RecordType]))).size,
     unsplitLost: [...new Set(deals.filter((d) => stages.isInferred(d.StageName) && d.category === "lost" && d.closedDay >= ctx.window.from && d.closedDay <= ctx.window.to).map((d) => d.StageName))].sort(),
+    ...(ctx.calibration.source === "org_settings" ? { fromOrgSettings: true as const } : {}),
   };
 }
 
 /** The reason a split of lost from no decision isn't measured, or null when it can be (DECISIONS.md 600). */
-export function unsplitLostReason(data: { unsplitLost: string[] }): Said | null {
-  return data.unsplitLost.length > 0 ? unsplitReason(data.unsplitLost) : null;
+export function unsplitLostReason(data: { unsplitLost: string[]; fromOrgSettings?: boolean }): Said | null {
+  return data.unsplitLost.length > 0 ? unsplitReason(data.unsplitLost, data.fromOrgSettings === true) : null;
 }

@@ -7,7 +7,7 @@ import type { PulseResult } from "../pulse/result.ts";
 import type { FactsFile, FactsReport } from "../facts/summary.ts";
 import { z } from "zod";
 import type { Intake } from "../narrative/intake.ts";
-import type { BenchmarkRow, Calibration, ConnectLink, Finding, ManualAnswer, ManualStep, Metric, NumberOverride, ReportSection, Run, Score, SectionVersion } from "../schemas/index.ts";
+import type { BenchmarkRow, Calibration, ConnectLink, Finding, ManualAnswer, ManualStep, Metric, NumberOverride, Release, ReportSection, Run, Score, SectionVersion } from "../schemas/index.ts";
 import type { Survey } from "../survey/questions.ts";
 import type { Interview } from "../interviews/questions.ts";
 import type { StoredSummaries, SummariesToSave } from "../handbook/summary-row.ts";
@@ -70,6 +70,12 @@ export type RunJobInput = {
   survey?: Survey | null;
   /** The stakeholder interviews recorded so far, by role. Null or missing when there are none. */
   interviews?: Interview[] | null;
+  /**
+   * Why an automatic run waits for a person (the console's "heldReason",
+   * DECISIONS.md 693), or null. A held run is never read or released by code:
+   * only a person clears a hold. Missing reads as none.
+   */
+  heldReason?: string | null;
 };
 
 /**
@@ -140,7 +146,25 @@ export type RunOutputRecord = {
    * Left out for every other run: a check's is written when its documents are made.
    */
   digest?: RunDigest | null;
+  /**
+   * An automatic run's release or hold (DECISIONS.md 693), written in the same
+   * transaction as everything above, after it. Released: the digest (never
+   * null, and written or the whole save rolls back), then one release row per
+   * output naming nobody, then status `released`. Held: `heldReason` set and one
+   * HealthCheckRunFlag row with its counts, raised once. Left out for every
+   * consultant-led run, which saves exactly as before.
+   */
+  automatic?: AutomaticOutcome;
 };
+
+/** An automatic run's outcome as the store writes it. The reason words are src/worker/release.ts's. */
+export type AutomaticOutcome = { decision: "release"; releases: Release[] } | { decision: "hold"; reason: string; counts: Record<string, number>; at: string };
+
+/** Whether an automatic run has its calibration, has been queued, or is held. */
+export type AutomaticRunState = { calibrated: boolean; queued: boolean; held: boolean; status: string };
+
+/** The run kinds a flag is raised for, beside the hold reasons: the console's HealthCheckRunFlag."kind" (migration 20261211). */
+export const RUN_FAILED_FLAG = "run_failed";
 
 /** What the console's HealthCheckRun keeps of a run's overall score (DECISIONS.md 626): a whole number from 0 to 100, and its grade. */
 export type RunOverall = { score: number; grade: "A" | "B" | "C" | "D" | "E" };
@@ -349,11 +373,25 @@ export interface WorkerStore {
   saveCalibration(runId: string, calibration: Calibration): Promise<"saved" | "exists" | "no_source_column">;
   /**
    * Why an automatic run waits for a person, in the console's "heldReason"
-   * (migration 20261211). Only an automatic run's, and only where none is set.
-   * False when the console's table has no such column yet, or refused it, so
-   * the caller says so. Never throws for that.
+   * (migration 20261211). Only an automatic run's, and only where none is set,
+   * with its HealthCheckRunFlag row raised in the same statement (DECISIONS.md
+   * 693), so a hold always reaches a person. False when the console's table
+   * has no such column or table yet, or refused it, so the caller says so.
+   * Never throws for that.
    */
-  holdRun(runId: string, reason: "calibration_unreadable"): Promise<boolean>;
+  holdRun(runId: string, reason: "calibration_unreadable", at: string): Promise<boolean>;
+  /**
+   * The overall score of the org's last released run of this product, other
+   * than this one, or null with none (DECISIONS.md 693). Only a run whose
+   * status is released counts: a held or failed run's score never does.
+   */
+  lastReleasedScore(runId: string, orgId15: string, product: string): Promise<number | null>;
+  /**
+   * Where an automatic run stands after its connect (DECISIONS.md 693), so a
+   * redelivered connect can finish what a dropped one started. Null for a run
+   * that isn't there.
+   */
+  automaticRunState(runId: string): Promise<AutomaticRunState | null>;
 
   /** With `handbookSummaries` unset or false, nothing reads the summaries' table. */
   loadDocumentsJob(runId: string, reads?: DocumentsJobReads): Promise<DocumentsJobInput | null>;

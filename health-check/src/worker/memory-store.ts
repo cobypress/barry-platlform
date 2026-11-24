@@ -4,9 +4,10 @@ import type { ScanResult } from "../scan/result.ts";
 import type { PulseResult } from "../pulse/result.ts";
 import { DIGEST_KEYS, type RunDigest } from "../schemas/digest.ts";
 import { unstorableAt } from "./inventory.ts";
-import { Run, type BenchmarkRow, type Calibration, type ConnectLink, type Metric } from "../schemas/index.ts";
+import { Run, type BenchmarkRow, type Calibration, type ConnectLink, type Metric, type Release, type ReportSection } from "../schemas/index.ts";
+import { assertChecks, CONSOLE_CHECKS } from "./console-checks.ts";
 import { storedFromRow, waitingRow, type ConsoleSummariesRow, type SummariesToSave } from "../handbook/summary-row.ts";
-import { DISCONNECT_STEP, ORG_AWAITING_CONNECT, RunClosedError, SCAN_REVOKE_NOT_CONFIRMED, type ConnectJobInput, type DocumentsJobInput, type DocumentsJobReads, type DriveShare, type ShareJobInput, type DocumentsMade, type LinkConnected, type LinkState, type PulseRun, type ReleasedRun, type RunJobInput, type RunOutputRecord, type RunProgress, type WorkerStore } from "./types.ts";
+import { DISCONNECT_STEP, ORG_AWAITING_CONNECT, RunClosedError, SCAN_REVOKE_NOT_CONFIRMED, type ConnectJobInput, type DocumentsJobInput, type DocumentsJobReads, type DriveShare, type ShareJobInput, type DocumentsMade, type LinkConnected, type LinkState, type PulseRun, type ReleasedRun, type RunJobInput, type RunOutputRecord, type RunProgress, type WorkerStore, type AutomaticOutcome, type AutomaticRunState, RUN_FAILED_FLAG } from "./types.ts";
 
 // The WorkerStore for tests: the console's tables as plain maps, with the same
 // rules a database store must keep. Writes replace; a run in review or
@@ -18,6 +19,9 @@ export type StoredRun = RunJobInput & { runDir: string | null; output: Omit<RunO
 export type StoredLink = Omit<ConnectJobInput, "runOrgId" | "runId"> & { runId: string | null; reason: string | null; connected: LinkConnected | null; refusedAt: string | null; instanceHost?: string };
 
 const CLOSED = new Set(["in_review", "released"]);
+
+/** A section as the console's HealthCheckSection row holds its status and approval. */
+const sectionCheckRow = (s: ReportSection): Record<string, unknown> => ({ status: s.status, approvedBy: s.approval?.approvedBy ?? null, approvedAt: s.approval?.approvedAt ?? null });
 
 export class MemoryWorkerStore implements WorkerStore {
   /**
@@ -61,7 +65,8 @@ export class MemoryWorkerStore implements WorkerStore {
     const run = this.runs.get(runId);
     if (!run) return null;
     const { runDir: _dir, output: _output, ...input } = structuredClone(run);
-    return input;
+    // As the Postgres store reads it: an automatic run's hold, or none (DECISIONS.md 693).
+    return input.run.reviewMode === "automatic" ? { ...input, heldReason: this.held.get(runId) ?? null } : input;
   }
 
   /** As the Postgres store's one statement: only awaiting manual steps changes, and a closed run refuses. */
@@ -80,7 +85,11 @@ export class MemoryWorkerStore implements WorkerStore {
 
   async saveRunOutput(runId: string, output: RunOutputRecord): Promise<void> {
     const run = this.#open(runId);
-    const { progress, runDir, overall, digest, ...rest } = structuredClone(output);
+    // Every row held to the console's own checks before anything is kept, as one transaction would be (DECISIONS.md 693).
+    for (const s of output.sections) assertChecks(sectionCheckRow(s), CONSOLE_CHECKS.sectionApproved, CONSOLE_CHECKS.sectionApproval);
+    if (output.automatic && run.run.status === "failed") throw new RunClosedError(runId, "failed");
+    if (output.automatic) this.#checkAutomatic(run, output);
+    const { progress, runDir, overall, digest, automatic, ...rest } = structuredClone(output);
     run.run = Run.parse({ ...run.run, ...progress });
     run.runDir = runDir;
     run.output = rest;
@@ -89,6 +98,80 @@ export class MemoryWorkerStore implements WorkerStore {
     if (rest.handbookSummaries) this.#saveSummaries(runId, rest.handbookSummaries);
     if (digest !== undefined) this.#saveDigest(runId, digest);
     this.writes.push({ method: "saveRunOutput", id: runId, detail: progress.status });
+    if (automatic) this.#writeAutomatic(run, automatic);
+  }
+
+  /** The console's HealthCheckRelease rows, by run id. A test may add a person's or an earlier run's. */
+  readonly releases = new Map<string, Release[]>();
+  /** The console's HealthCheckRunFlag rows, by run id and kind. */
+  readonly flags = new Map<string, { runId: string; kind: string; raisedAt: string; counts: Record<string, number>; postedAt: null; clearedBy: null; clearedAt: null }>();
+
+  /** As the database would refuse the release or hold, before anything is written: its checks, its unique index, and a digest it must hold. */
+  #checkAutomatic(run: StoredRun, output: RunOutputRecord): void {
+    const a = output.automatic!;
+    const reviewMode = run.run.reviewMode === "automatic" ? "automatic" : null;
+    // The run's real hold, as the database has it: the Postgres store's statements match no row on a held run (DECISIONS.md 693).
+    const heldReason = this.held.get(run.run.id) ?? null;
+    assertChecks({ reviewMode }, CONSOLE_CHECKS.reviewMode);
+    if (heldReason !== null || (a.decision === "release" && run.run.status === "failed")) throw new Error(`Run ${run.run.id} couldn't be ${a.decision === "release" ? "released" : "held"}: the console doesn't have it as an unreleased, unheld automatic run`);
+    if (a.decision === "release") {
+      if (!output.digest || !this.digestTable || unstorableAt(output.digest, [], DIGEST_KEYS)) throw new Error(`Run ${run.run.id}'s digest couldn't be written, so it isn't released`);
+      for (const r of a.releases) {
+        assertChecks({ kind: r.kind, releasedBy: r.releasedBy }, CONSOLE_CHECKS.releaseKind, CONSOLE_CHECKS.releasedBy);
+        if ((this.releases.get(run.run.id) ?? []).some((held) => held.output === r.output)) throw Object.assign(new Error("duplicate key value violates unique constraint \"HealthCheckRelease_runId_output_key\""), { code: "23505" });
+      }
+      assertChecks({ status: "released", heldReason, reviewMode }, CONSOLE_CHECKS.runStatus, CONSOLE_CHECKS.held, CONSOLE_CHECKS.heldReason);
+      // As the Postgres store's statement: only an automatic run is released by code.
+      if (reviewMode !== "automatic") throw new Error(`Run ${run.run.id} isn't automatic, so it can't be released by code`);
+      return;
+    }
+    assertChecks({ status: output.progress.status, heldReason: a.reason, reviewMode }, CONSOLE_CHECKS.runStatus, CONSOLE_CHECKS.held, CONSOLE_CHECKS.heldReason);
+    assertChecks({ kind: a.reason, counts: a.counts, clearedBy: null, clearedAt: null }, CONSOLE_CHECKS.flagKind, CONSOLE_CHECKS.flagCounts, CONSOLE_CHECKS.flagCleared);
+  }
+
+  #writeAutomatic(run: StoredRun, a: AutomaticOutcome): void {
+    const runId = run.run.id;
+    if (a.decision === "release") {
+      this.releases.set(runId, [...(this.releases.get(runId) ?? []), ...structuredClone(a.releases)]);
+      run.run = Run.parse({ ...run.run, status: "released" });
+      this.writes.push({ method: "releaseAutomatic", id: runId, detail: a.releases.map((r) => r.output) });
+      return;
+    }
+    this.held.set(runId, a.reason);
+    this.writes.push({ method: "holdRun", id: runId, detail: a.reason });
+    this.#raiseFlag(runId, a.reason, a.at, a.counts);
+  }
+
+  /** As the Postgres store's INSERT ... ON CONFLICT DO NOTHING: raised once. */
+  #raiseFlag(runId: string, kind: string, at: string, counts: Record<string, number>): void {
+    const row = { runId, kind, raisedAt: at, counts: structuredClone(counts), postedAt: null, clearedBy: null, clearedAt: null };
+    assertChecks(row, CONSOLE_CHECKS.flagKind, CONSOLE_CHECKS.flagCounts, CONSOLE_CHECKS.flagCleared);
+    const key = `${runId}|${kind}`;
+    if (this.flags.has(key)) return;
+    this.flags.set(key, row);
+    this.writes.push({ method: "raiseFlag", id: runId, detail: kind });
+  }
+
+  /** A run's flags, by kind. */
+  flagsOf(runId: string): string[] {
+    return [...this.flags.values()].filter((f) => f.runId === runId).map((f) => f.kind);
+  }
+
+  async lastReleasedScore(runId: string, orgId15: string, product: string): Promise<number | null> {
+    let best: { at: string; score: number } | null = null;
+    for (const run of this.runs.values()) {
+      if (run.run.id === runId || run.run.status !== "released" || run.run.product !== product || run.run.orgId.slice(0, 15) !== orgId15) continue;
+      if (typeof run.overallScore !== "number") continue;
+      const at = (this.releases.get(run.run.id) ?? []).map((r) => r.releasedAt).sort().at(-1);
+      if (at && (!best || at > best.at)) best = { at, score: run.overallScore };
+    }
+    return best?.score ?? null;
+  }
+
+  async automaticRunState(runId: string): Promise<AutomaticRunState | null> {
+    const run = this.runs.get(runId);
+    if (!run) return null;
+    return { calibrated: run.calibration !== null, queued: this.queued.includes(runId), held: this.held.has(runId), status: run.run.status };
   }
 
   /** The console's HealthCheckRunDigest, keyed by run id (DECISIONS.md 632). */
@@ -148,6 +231,8 @@ export class MemoryWorkerStore implements WorkerStore {
     steps.push({ id: "worker", version: 1, status: "failed", calls: 0, finishedAt: at, error: reason });
     run.run = Run.parse({ ...run.run, status: "failed", steps });
     this.writes.push({ method: "recordRunFailure", id: runId, detail: reason });
+    // An automatic run that fails is a person's to look at (DECISIONS.md 693). Counts only: the reason is in the step.
+    if (run.run.reviewMode === "automatic") this.#raiseFlag(runId, RUN_FAILED_FLAG, at, {});
   }
 
   /** As the Postgres store: the run's disconnect step in or out, whatever the run's status. */
@@ -210,11 +295,13 @@ export class MemoryWorkerStore implements WorkerStore {
   readonly held = new Map<string, string>();
   heldReasonColumn = true;
 
-  async holdRun(runId: string, reason: "calibration_unreadable"): Promise<boolean> {
+  async holdRun(runId: string, reason: "calibration_unreadable", at: string): Promise<boolean> {
     const run = this.runs.get(runId);
     if (!this.heldReasonColumn || !run || run.run.reviewMode !== "automatic" || run.run.status === "released" || this.held.has(runId)) return false;
     this.held.set(runId, reason);
     this.writes.push({ method: "holdRun", id: runId, detail: reason });
+    // In the same statement as the hold (DECISIONS.md 693).
+    this.#raiseFlag(runId, reason, at, {});
     return true;
   }
 

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { analyseExtracts, clone, loadExtracts, runFromRecording } from "../../testing/harness.ts";
 import { loadAnswers } from "../../testing/replay.ts";
 import { AS_OF, ORG_ID, STAGES } from "../../testing/synthetic-org.ts";
-import { automaticCalibration, CALIBRATION_UNREADABLE, NO_WON_STAGE, ORG_SETTINGS_CALIBRATOR, STAGES_UNREAD } from "../auto-calibration.ts";
+import { automaticCalibration, CALIBRATION_UNREADABLE, NO_WON_STAGE, ORG_SETTINGS_CALIBRATOR, STAGES_UNREAD, CURRENCY_UNREAD, CALIBRATION_REFUSED } from "../auto-calibration.ts";
 import { orgStages, type OrgStage } from "../org-stages.ts";
 import { calibrationConfirmation, type Calibration, type Finding, type Metric } from "../../schemas/index.ts";
 import { renderRawNotes } from "../../notes/raw-notes.ts";
@@ -15,7 +15,7 @@ import type { OpportunityExtract } from "../../extract/opportunities.ts";
 
 const synthetic = (): OrgStage[] => orgStages(clone(STAGES));
 const build = (stages: OrgStage[] | null): Calibration => {
-  const built = automaticCalibration(stages, { orgId: ORG_ID, at: AS_OF });
+  const built = automaticCalibration(stages, { orgId: ORG_ID, at: AS_OF, currency: "GBP" });
   assert.ok(built.ok, "a calibration is built");
   return built.calibration;
 };
@@ -82,16 +82,28 @@ describe("the calibration built from the synthetic org's stages", () => {
 describe("no calibration", () => {
   test("an org with no won stage gets none, with the word for the run's hold", () => {
     const stages = synthetic().map((s) => ({ ...s, isWon: false }));
-    assert.deepEqual(automaticCalibration(stages, { orgId: ORG_ID, at: AS_OF }), { ok: false, heldReason: CALIBRATION_UNREADABLE, reason: NO_WON_STAGE });
-    assert.deepEqual(automaticCalibration([], { orgId: ORG_ID, at: AS_OF }), { ok: false, heldReason: CALIBRATION_UNREADABLE, reason: NO_WON_STAGE });
+    assert.deepEqual(automaticCalibration(stages, { orgId: ORG_ID, at: AS_OF, currency: "GBP" }), { ok: false, heldReason: CALIBRATION_UNREADABLE, reason: NO_WON_STAGE });
+    assert.deepEqual(automaticCalibration([], { orgId: ORG_ID, at: AS_OF, currency: "GBP" }), { ok: false, heldReason: CALIBRATION_UNREADABLE, reason: NO_WON_STAGE });
   });
 
   test("a failed stage read gets none", () => {
-    assert.deepEqual(automaticCalibration(null, { orgId: ORG_ID, at: AS_OF }), { ok: false, heldReason: CALIBRATION_UNREADABLE, reason: STAGES_UNREAD });
+    assert.deepEqual(automaticCalibration(null, { orgId: ORG_ID, at: AS_OF, currency: "GBP" }), { ok: false, heldReason: CALIBRATION_UNREADABLE, reason: STAGES_UNREAD });
+  });
+
+  test("no currency read gets none, never the schema's pounds; the org's own currency is kept as read (DECISIONS.md 693)", () => {
+    assert.deepEqual(automaticCalibration(synthetic(), { orgId: ORG_ID, at: AS_OF, currency: null }), { ok: false, heldReason: CALIBRATION_UNREADABLE, reason: CURRENCY_UNREAD });
+    const euros = automaticCalibration(synthetic(), { orgId: ORG_ID, at: AS_OF, currency: "EUR" });
+    assert.ok(euros.ok);
+    assert.equal(euros.ok && euros.calibration.currency, "EUR");
+  });
+
+  test("a calibration the schema refuses is a hold, never a throw (DECISIONS.md 693)", () => {
+    // A currency code the schema can't hold stands in for anything it refuses.
+    assert.deepEqual(automaticCalibration(synthetic(), { orgId: ORG_ID, at: AS_OF, currency: "EURO" }), { ok: false, heldReason: CALIBRATION_UNREADABLE, reason: CALIBRATION_REFUSED });
   });
 
   test("neither reason names a stage", () => {
-    for (const s of STAGES) for (const reason of [NO_WON_STAGE, STAGES_UNREAD]) assert.ok(!reason.includes(s.ApiName));
+    for (const s of STAGES) for (const reason of [NO_WON_STAGE, STAGES_UNREAD, CURRENCY_UNREAD, CALIBRATION_REFUSED]) assert.ok(!reason.includes(s.ApiName));
   });
 });
 
@@ -110,6 +122,8 @@ const UNMEASURED_FINDINGS = [
   "pipe.dead-end-stage",
   "pipe.going-backwards",
   "pipe.skipped-stages",
+  // Not measurable, with what the customer can tell us, where a consultant's calibration had an issue for a consultant (DECISIONS.md 693).
+  "pipe.unmapped-stages",
   "rev.win-backs",
 ];
 const UNMEASURED_METRICS = [
@@ -150,7 +164,8 @@ describe("what the synthetic org can't measure under it", () => {
     const before = unmeasured(fixture);
     const lost = automatic.findings.filter((f) => f.status === "not_measurable" && !before.has(f.ruleId));
     assert.deepEqual([...new Set(lost.map((f) => f.ruleId))].sort(), UNMEASURED_FINDINGS);
-    for (const f of lost) assert.match(f.notMeasurableReason!, /^(Salesforce's setting can't tell lost from no decision for: .+\. The calibration can say which each is\.|The calibration doesn't say where these open stages come in the sales order: Qualified\.|No targets were given in the calibration\. Tell us your targets to see pipeline coverage\.|No account is calibrated as an integration account, so we can't tell which accounts integrations run on\.)$/, f.ruleId);
+    // As an automatic run says them (DECISIONS.md 693): what the customer hasn't told us yet, never "the calibration".
+    for (const f of lost) assert.match(f.notMeasurableReason!, /^(Salesforce's setting can't tell lost from no decision for: .+\. If you tell us which each is, your next health check can measure this\.|You haven't told us what these stages mean, so we read them from your Salesforce stage settings: .+\. If you tell us what each means, your next health check can use it\.|You haven't told us where these open stages come in your sales order: Qualified\.|You haven't told us your sales targets yet\. If you do, your next health check can show pipeline coverage\.|You haven't told us which accounts your integrations run on, so we can't tell\.)$/, f.ruleId);
     const beforeMetrics = unmeasuredMetrics(fixture);
     assert.deepEqual([...unmeasuredMetrics(automatic)].filter((id) => !beforeMetrics.has(id)).sort(), UNMEASURED_METRICS);
     // Nothing the fixture's calibration couldn't measure is measured from a guess here.

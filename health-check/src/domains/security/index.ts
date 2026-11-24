@@ -1,4 +1,5 @@
 import { fieldDescribeExtractor } from "../../extract/fields.ts";
+import { userKinds } from "../user-kinds.ts";
 import { loginsExtractor, usersExtractor, type UserRow } from "../../extract/users.ts";
 import { customObjectsExtractor, orgExtractor, recordCountsExtractor, type SharingDefaults } from "../../extract/configuration.ts";
 import { orgDocumentationExtractor } from "../../extract/documentation.ts";
@@ -29,7 +30,7 @@ const MAX_LISTED = 8;
 const SHARING_FIELDS = [["Account", "DefaultAccountAccess"], ["Contact", "DefaultContactAccess"], ["Opportunity", "DefaultOpportunityAccess"], ["Lead", "DefaultLeadAccess"]] as const satisfies ReadonlyArray<readonly [string, keyof SharingDefaults]>;
 
 const riskGroups = (risks: HealthRiskRow[]): number => new Set(risks.map((r) => r.SettingGroup ?? "No group")).size;
-const kindOf = (ctx: RuleContext, id: string): string | undefined => ctx.calibration.users.find((u) => u.userId.slice(0, 15) === id.slice(0, 15))?.kind;
+const kindOf = (ctx: RuleContext, id: string): string | undefined => userKinds(ctx).find((u) => u.userId.slice(0, 15) === id.slice(0, 15))?.kind;
 
 const healthScore: Rule = {
   id: "sec.health-check-score",

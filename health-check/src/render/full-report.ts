@@ -1,4 +1,6 @@
 import { yearlyByFinding } from "../value/model.ts";
+import { orderFromOrg } from "../connect/auto-calibration.ts";
+import { ORDER_UNCONFIRMED } from "../domains/historic-pipeline/cohort.ts";
 import { currentBody, TOP_ISSUE_COUNT, type BuiltOutput, type BuiltReport } from "../narrative/sections.ts";
 import { VERDICT_WORDS, type ReadinessVerdict } from "../narrative/readiness.ts";
 import { byKind, hasKinds, KIND_HEADINGS, kindOf, noteCounts } from "../narrative/unmeasured.ts";
@@ -377,6 +379,13 @@ const segmentValue = (m: Measured | null, dimension: string, key: string): Metri
 type MetricSegmentLike = Measured["segments"][number];
 const notMeasured = (r: Render, m: Metric | undefined): string => `<p class="chart-gap"><strong>Not measurable.</strong> ${r.t(m?.status === "not_measurable" ? m.reason : "This metric wasn't part of the run.")}</p>`;
 
+/**
+ * Under a chart drawn in the open stages' order, when that order is Salesforce's
+ * sort order with no person's confirmation (DECISIONS.md 692, 693): the same
+ * sentence the figures beside it carry.
+ */
+const orderNote = (r: Render, calibration: Calibration): string => (orderFromOrg(calibration) ? `<p class="note">${r.t(ORDER_UNCONFIRMED)}</p>` : "");
+
 /** Open stages in the calibration's sales order, then anything else in name order. */
 function stageOrder(calibration: Calibration): (a: string, b: string) => number {
   const order = new Map(calibration.stages.filter((s) => s.category === "open").map((s) => [s.name, s.order ?? 0]));
@@ -408,7 +417,7 @@ function pipelineTodaySlide(r: Render, metric: (id: string) => Metric | undefine
     ...(retired.size ? [`A retired stage is no longer active in Salesforce but still holds open deals.`] : []),
   ];
   const table = `<table class="grid data"><thead><tr><th>Stage</th><th class="num">Open deals</th><th class="num">Amount</th><th class="num">No amount</th><th class="num">Median age, days</th><th class="num">Past close date</th><th class="num">Won from here</th><th class="num">Weighted value</th></tr></thead><tbody>${rows.join("")}</tbody></table>`;
-  return { classes: "tight", html: `${head}${table}${notes.map((n) => `<p class="small-note">${r.t(n)}</p>`).join("")}` };
+  return { classes: "tight", html: `${head}${table}${notes.map((n) => `<p class="small-note">${r.t(n)}</p>`).join("")}${orderNote(r, calibration)}` };
 }
 
 function outlookSlide(r: Render, metric: (id: string) => Metric | undefined): Slide {
@@ -487,7 +496,7 @@ function closeDatesSlide(r: Render, metric: (id: string) => Metric | undefined, 
     block(late, (m) => `<h3>Days late against the first close date</h3><p class="big">${m.value} days</p><p class="note">For the median won deal. The typical range is ${m.stats.p25} to ${m.stats.p75} days.</p>`),
   ].join("");
   const order = calibration.stages.filter((s) => s.category === "open").sort((a, b) => (a.order ?? 0) - (b.order ?? 0)).map((s) => s.name);
-  return { html: `<div class="eyebrow">Close dates and stage speed</div><h2>How far close dates hold, and where time goes</h2><div class="columns" style="grid-template-columns: 1fr 1.5fr"><div class="panel">${panel}</div><div><h3 class="cap">Median days in each stage, won and lost deals</h3>${chartSlot(stageVelocityChart(metric("historic.stage_velocity_won"), metric("historic.stage_velocity_lost"), order))}</div></div>` };
+  return { html: `<div class="eyebrow">Close dates and stage speed</div><h2>How far close dates hold, and where time goes</h2><div class="columns" style="grid-template-columns: 1fr 1.5fr"><div class="panel">${panel}</div><div><h3 class="cap">Median days in each stage, won and lost deals</h3>${chartSlot(stageVelocityChart(metric("historic.stage_velocity_won"), metric("historic.stage_velocity_lost"), order))}</div></div>${orderNote(r, calibration)}` };
 }
 
 /** The close: what we'd do next, together. Its only figures are the plan's own. */
@@ -529,7 +538,7 @@ function processSlide(r: Render, metric: (id: string) => Metric | undefined, cal
   // The flow takes the room. The table of every move is in the raw notes.
   const moves = metric("historic.stage_transitions");
   const flow = `<h3 class="cap">Moves between stages${r.ref("historic.stage_transitions")}</h3>${chartSlot(processFlowChart(moves, flowStages(calibration, meanings)))}`;
-  return { classes: "tight compact-rows", html: `${head}<div class="process"><div class="paths">${path("historic.path_to_won", "won deals")}${path("historic.path_to_lost", "lost and no decision deals")}</div><div>${flow}</div></div>` };
+  return { classes: "tight compact-rows", html: `${head}<div class="process"><div class="paths">${path("historic.path_to_won", "won deals")}${path("historic.path_to_lost", "lost and no decision deals")}</div><div>${flow}</div></div>${orderNote(r, calibration)}` };
 }
 
 /** Each factor's win rate with it and without it, ranked by the gap. A factor that couldn't be compared says why. */
@@ -627,7 +636,7 @@ function lostAndSpeedSlideDense(r: Render, metric: (id: string) => Metric | unde
     share && late ? `${percent(share.value)} of the ${share.n} won deals we can follow through their stages closed in the quarter first forecast, and the median won deal closed ${late.value} days after its first close date.` : "",
   ].filter(Boolean);
   const order = calibration.stages.filter((s) => s.category === "open").sort((a, b) => (a.order ?? 0) - (b.order ?? 0)).map((s) => s.name);
-  return { html: `<div class="eyebrow">Where deals are lost</div><h2>Where deals drop out, and where time goes</h2>${lines.map((l) => `<p class="lede" style="font-size:15px;margin-bottom:8px">${r.t(l)}</p>`).join("")}<div class="chart-pair">${chartSlot(lostByStageChart(metric("historic.lost_by_stage"), metric("historic.lost_value_by_stage"), r.currency))}<div><h3 class="cap">Median days in each stage, won and lost deals</h3>${chartSlot(stageVelocityChart(metric("historic.stage_velocity_won"), metric("historic.stage_velocity_lost"), order))}</div></div>` };
+  return { html: `<div class="eyebrow">Where deals are lost</div><h2>Where deals drop out, and where time goes</h2>${lines.map((l) => `<p class="lede" style="font-size:15px;margin-bottom:8px">${r.t(l)}</p>`).join("")}<div class="chart-pair">${chartSlot(lostByStageChart(metric("historic.lost_by_stage"), metric("historic.lost_value_by_stage"), r.currency))}<div><h3 class="cap">Median days in each stage, won and lost deals</h3>${chartSlot(stageVelocityChart(metric("historic.stage_velocity_won"), metric("historic.stage_velocity_lost"), order))}</div></div>${orderNote(r, calibration)}` };
 }
 
 /** A line of a list slide. `ref` is its reference, or several, as for an action that covers more than one issue. */

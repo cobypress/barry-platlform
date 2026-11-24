@@ -5,6 +5,7 @@ import { buildPlan, DOMAIN_LABELS, domainLabel, PHASE_TITLES } from "../narrativ
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { knownPeople } from "../fix/prompt.ts";
 import { spansIfCurrent, textSha256, type OrgSpan } from "../engine/org-words.ts";
+import { engineOwn, orgValuesOf } from "../engine/automatic-words.ts";
 import { UNSCORED_RULES } from "../domains/scoring.ts";
 import { DIGEST_VERSION, NAMED_PEOPLE_SENTENCE, RunDigest, type DigestArea, type DigestFinding, type DigestMetric, type DigestTotal, type DigestValueModel, type SentenceOrgWords } from "../schemas/digest.ts";
 import { FIX_PROMPT_MAX, type Finding, type Metric } from "../schemas/index.ts";
@@ -337,12 +338,67 @@ export function buildDigest({ report, pseudonyms, inventory, madeAt }: DigestFor
     },
     withheldNames: withheldNames(inventory, pseudonyms),
   };
+  orgValues = orgValuesOf({ metrics: report.metrics, findings: report.input.findings, stages: report.input.calibration.stages.map((s) => s.name) });
   const guarded = guardDigest(raw, pseudonyms);
-  const findings = guarded.findings.map((f, i) => afterGuard(raw.findings[i]!, f));
-  return RunDigest.parse({ ...guarded, findings, ...fixedWords(guarded, findings) });
+  const findings = guarded.findings.map((f, i) => withValueWords(afterGuard(raw.findings[i]!, f)));
+  const merged = { ...guarded, findings, ...fixedWords(guarded, findings) };
+  // Typed by the parse below, as the raw digest is.
+  return RunDigest.parse({ ...merged, ...moreWords(merged as unknown as RunDigest, report) });
 }
 
 const ENGINE_WORDS: SentenceOrgWords = { orgWordsMarked: true, orgWords: [] };
+
+/** Ours where the engine's source writes the whole text and the run read no org value equal to it (DECISIONS.md 693); else unknown. */
+let orgValues: ReadonlySet<string> = new Set();
+const engineWords = (text: string): SentenceOrgWords | undefined => (engineOwn(text, orgValues) ? ENGINE_WORDS : undefined);
+
+/** A sized value's unit and period marked (DECISIONS.md 693): the unit a currency code the org set, whole, or ours; the period the engine's. */
+function withValueWords(f: DigestFinding): DigestFinding {
+  const v = f.value;
+  if (v.kind === "not_sized") return f;
+  const unit = /^[A-Z]{3}$/.test(v.unit) ? { orgWordsMarked: true as const, orgWords: [{ start: 0, end: 3 }] } : v.unit === "hours" ? ENGINE_WORDS : undefined;
+  const period = engineWords(v.period);
+  if (!unit && !period) return f;
+  return { ...f, orgWords: { ...f.orgWords, ...(unit ? { valueUnit: unit } : {}), ...(period ? { valuePeriod: period } : {}) } };
+}
+
+/**
+ * The texts the digest serves beyond a finding's, marked (DECISIONS.md 693):
+ * each metric's from the marks its run made (an automatic run's), while its text
+ * still reads as marked, or ours where the engine wrote it; an area's and the
+ * overall score's reason and the plan's hours note where the engine wrote them.
+ * Anything else is left unknown, for the checked digest to withhold or hold.
+ */
+function moreWords(d: Pick<RunDigest, "metrics" | "areas" | "overall" | "plan">, report: BuiltReport): Pick<RunDigest, "metrics" | "areas" | "overall" | "plan"> {
+  const stored = new Map(report.metrics.map((m) => [m.id, m]));
+  const metrics = d.metrics.map((m): DigestMetric => {
+    const held = stored.get(m.id)?.orgWords;
+    // Marks the run made stand, unknown included: the engine's own texts are read only for a metric with none (a consultant-led run's).
+    const mark = (text: string, kept: { spans: OrgSpan[]; textSha256: string } | null | undefined): SentenceOrgWords | undefined => {
+      const spans = kept ? spansIfCurrent(text, kept) : null;
+      if (spans) return { orgWordsMarked: true, orgWords: spans };
+      return held ? undefined : engineWords(text);
+    };
+    const label = mark(m.label, held?.label);
+    const definition = mark(m.definition, held?.definition);
+    const list = (texts: string[], marks: Array<{ spans: OrgSpan[]; textSha256: string } | null> | undefined) => texts.map((t, i) => mark(t, marks?.[i]) ?? null);
+    const words = m.status === "measured"
+      ? { ...(label ? { label } : {}), ...(definition ? { definition } : {}), assumptions: list(m.assumptions, held?.assumptions), exclusions: list(m.exclusions, held?.exclusions) }
+      : { ...(label ? { label } : {}), ...(definition ? { definition } : {}), ...(mark(m.reason, held?.reason) ? { reason: mark(m.reason, held?.reason)! } : {}) };
+    return { ...m, orgWords: words };
+  });
+  const areas = d.areas.map((a) => {
+    if (a.status !== "not_measurable") return a;
+    const reason = engineWords(a.reason);
+    return reason ? { ...a, orgWords: { ...a.orgWords, reason } } : a;
+  });
+  const overallReason = d.overall.status === "not_measurable" ? engineWords(d.overall.reason) : undefined;
+  const overall = d.overall.status === "not_measurable" && overallReason ? { ...d.overall, orgWords: { reason: overallReason } } : d.overall;
+  const note = d.plan.hoursTotal?.note;
+  const noteWords = note ? engineWords(note) : undefined;
+  const plan = d.plan.hoursTotal && noteWords ? { ...d.plan, hoursTotal: { ...d.plan.hoursTotal, orgWords: { note: noteWords } } } : d.plan;
+  return { metrics, areas, overall, plan };
+}
 
 /**
  * The labels and titles the engine takes from its own tables (DECISIONS.md 663),

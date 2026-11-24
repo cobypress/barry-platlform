@@ -1,4 +1,5 @@
 import { apexExtractor, metadataExtractor, type ApexTriggerRow } from "../../extract/automation.ts";
+import { userKinds } from "../user-kinds.ts";
 import { loginActivityExtractor } from "../../extract/adoption.ts";
 import { CORE_OBJECTS, customObjectsExtractor, duplicateRulesExtractor, fieldUsageExtractor, isOwnCustomField, orgExtractor, recordCountsExtractor, schemaExtractor } from "../../extract/configuration.ts";
 import { accessExtractor, holdersOf } from "../../extract/security.ts";
@@ -253,7 +254,7 @@ function integrations(ctx: Ctx): Metric {
 
   // Who integrates: integration licences, and the accounts the calibration marks as integrations.
   if (users.status === "ok") {
-    const marked = new Set(ctx.calibration.users.filter((u) => u.kind === "integration").map((u) => u.userId.slice(0, 15)));
+    const marked = new Set(userKinds(ctx).filter((u) => u.kind === "integration").map((u) => u.userId.slice(0, 15)));
     const groups = new Map<string, number>();
     for (const u of users.data.filter((x) => x.IsActive)) {
       const licence = u.Profile?.UserLicense?.Name ?? "";

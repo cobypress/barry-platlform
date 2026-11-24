@@ -352,3 +352,10 @@ The worker keeps a used connect link's host only when it ends `.my.salesforce.co
 a) Is the instance URL Salesforce's token response gives always the org's My Domain (`<name>.my.salesforce.com`, or `<name>--<sandbox>.sandbox.my.salesforce.com`), with enhanced domains on, or can it still be an instance server such as `na1.salesforce.com` on an older org? An instance server is not kept, so that customer's portal shows the Setup labels without links.
 b) Which other My Domain forms should be kept: Government Cloud (`.my.salesforce.mil`), Hyperforce in another region, or `.my.salesforce.com` with a `.cn` or another suffix? Each would need the console's constraint and `src/connect/instance-host.ts` widened together.
 c) Does `https://<host>/lightning/setup/<Node>/home` open the right page for a signed-in user on a sandbox's My Domain as it does on production?
+
+## An automatic run's currency (DECISIONS.md 693)
+
+An automatic run's calibration takes its currency from `SELECT DefaultCurrencyIsoCode FROM Organization`, read at connect, and holds the run (`calibration_unreadable`) when it can't. To check, not on a customer's org:
+
+a) Is `Organization.DefaultCurrencyIsoCode` readable by an ordinary API user in every edition we read, single- and multi-currency alike?
+b) In a single-currency org, is it the currency every `Opportunity.Amount` is held in? (In a multi-currency org the run sees `CurrencyIsoCode` on opportunities and adds no amounts, as on any run, so the label matters less there; is it then the corporate currency?)

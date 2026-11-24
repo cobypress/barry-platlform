@@ -451,6 +451,8 @@ const SIGNED_OFF: string[] = [
   "src/domains/historic-pipeline/cohort.ts: n",
   // Sentences said made: a said or joinSaid result held in a variable, a helper or option returning one, plural over literal nouns, or a said form (each typed Said).
   "src/domains/historic-pipeline/cohort.ts: andList(items)",
+  "src/domains/historic-pipeline/cohort.ts: andList(items)",
+  "src/domains/historic-pipeline/cohort.ts: stageList(stages)",
   "src/domains/historic-pipeline/cohort.ts: stageList(stages)",
   "src/domains/historic-pipeline/cohort.ts: stageList(stages)",
   "src/domains/historic-pipeline/index.ts: andList(within.map((t) => said`the ${org(t)} team`))",
@@ -458,6 +460,7 @@ const SIGNED_OFF: string[] = [
   "src/domains/historic-pipeline/index.ts: overlap",
   "src/domains/historic-pipeline/index.ts: segmentPhrase(segment.dimension, segment.key)",
   "src/domains/historic-pipeline/index.ts: segmentPhrase(segment.dimension, segment.key)",
+  "src/domains/historic-pipeline/index.ts: stageList(missing)",
   "src/domains/historic-pipeline/index.ts: stageList(missing)",
   "src/domains/historic-pipeline/index.ts: stageList(unflagged)",
   "src/domains/historic-pipeline/process.ts: expectedNote(p)",
@@ -725,6 +728,7 @@ const SIGNED_OFF: string[] = [
   "src/domains/utilisation/index.ts: plural(incomplete, \"user\")",
   "src/domains/utilisation/index.ts: plural(p.AllowedLicenses, \"seat\")",
   "src/domains/utilisation/index.ts: plural(seated.length, \"installed app\")",
+  "src/domains/utilisation/index.ts: plural(unanswered.length, \"user\")",
   "src/domains/utilisation/index.ts: plural(unanswered.length, \"user\")",
   "src/domains/utilisation/index.ts: priced",
   "src/domains/utilisation/index.ts: shownOtherwise(otherwise, days)",
@@ -1125,6 +1129,27 @@ const SIGNED_OFF: string[] = [
   "src/domains/technical-health/lint.ts: notes",
   "src/domains/technical-health/lint.ts: notes",
   "src/domains/technical-health/lint.ts: placesText",
+  // An automatic run's metric texts and the win-rate reason, said so their marks are kept (DECISIONS.md 693): a count, a literal union, a Said and a reason said only when said made it.
+  "src/domains/adoption/index.ts: plural(months.length, \"whole month\")",
+  "src/domains/adoption/index.ts: plural(months.length, \"whole month\")",
+  "src/domains/current-pipeline/outlook.ts: group.length",
+  "src/domains/utilisation/investment.ts: describe",
+  "src/domains/utilisation/investment.ts: p.price.reason",
+  "src/domains/value.ts: rate.reason as Said",
+  // Counts and day figures in an automatic run's metric texts, said so they are marked as ours (DECISIONS.md 693, fix round 2): numbers only.
+  "src/domains/activity/load.ts: ACTIVITY_DAYS",
+  "src/domains/current-pipeline/outlook.ts: late",
+  "src/domains/current-pipeline/outlook.ts: noAmount",
+  "src/domains/current-pipeline/outlook.ts: unweighted",
+  "src/domains/historic-pipeline/deep-dive.ts: blank",
+  "src/domains/historic-pipeline/deep-dive.ts: neverOpen",
+  "src/domains/historic-pipeline/deep-dive.ts: neverOpen",
+  "src/domains/historic-pipeline/deep-dive.ts: neverOpen",
+  "src/domains/historic-pipeline/metrics.ts: fallback",
+  "src/domains/historic-pipeline/metrics.ts: missing",
+  "src/domains/historic-pipeline/metrics.ts: missingHistory",
+  "src/domains/historic-pipeline/metrics.ts: neverOpen",
+  "src/domains/utilisation/investment.ts: days",
 ];
 
 const ROOT = join(import.meta.dirname, "../../..");
@@ -1142,19 +1167,22 @@ const CLOSE: Record<string, string> = { "(": ")", "[": "]", "{": "}" };
 /** The index just past the string, template or bracket that opens at `i`. */
 function skip(text: string, i: number): number {
   const c = text[i]!;
+  // Every loop bounded by the text: an unterminated string or bracket says where, never hangs (fix round 2).
   if (c === '"' || c === "'") {
-    for (i++; text[i] !== c; i++) if (text[i] === "\\") i++;
+    for (i++; i < text.length && text[i] !== c; i++) if (text[i] === "\\") i++;
+    if (i >= text.length) throw new Error(`unterminated at ${i}`);
     return i + 1;
   }
   if (c === "`") return templateEnd(text, i + 1, () => {});
   const close = CLOSE[c]!;
-  for (i++; text[i] !== close; ) i = /["'`([{]/.test(text[i]!) ? skip(text, i) : i + 1;
+  for (i++; i < text.length && text[i] !== close; ) i = /["'`([{]/.test(text[i]!) ? skip(text, i) : i + 1;
+  if (i >= text.length) throw new Error(`unterminated at ${i}`);
   return i + 1;
 }
 
 /** Walks a template body from `i`, handing each interpolation's text to `piece`; returns the index past its closing backtick. */
 function templateEnd(text: string, i: number, piece: (expr: string) => void): number {
-  for (; text[i] !== "`"; i++) {
+  for (; i < text.length && text[i] !== "`"; i++) {
     if (text[i] === "\\") i++;
     else if (text[i] === "$" && text[i + 1] === "{") {
       const end = skip(text, i + 1);
@@ -1162,6 +1190,7 @@ function templateEnd(text: string, i: number, piece: (expr: string) => void): nu
       i = end - 1;
     }
   }
+  if (i >= text.length) throw new Error(`unterminated at ${i}`);
   return i + 1;
 }
 

@@ -102,7 +102,10 @@ function reclaimFindings(ctx: RuleContext, candidates: UserRow[], describe: Recl
     results.push({
       outcome: "not_measurable",
       key: `${describe.key}-skipped`,
-      reason: said`Whether ${plural(unanswered.length, "user")} can be released can't be measured, because the Default Workflow User step was skipped: ${org(String(manual.answer?.skipReason))}`,
+      // An automatic run asks no one, so there's no person's reason to quote (DECISIONS.md 693).
+      reason: manual.answer
+        ? said`Whether ${plural(unanswered.length, "user")} can be released can't be measured, because the Default Workflow User step was skipped: ${org(String(manual.answer.skipReason))}`
+        : said`Whether ${plural(unanswered.length, "user")} can be released can't be measured, because the Default Workflow User can't be read by API, and on an automatic run nobody is asked for it.`,
       evidence: [manual.evidence],
       manualStepIds,
     });
@@ -543,7 +546,13 @@ const eacAdvancedSync: Rule = {
     const manual = ctx.manual("eac-advanced-sync");
     const manualStepIds = [manual.step.id];
     if (manual.status !== "answered") {
-      const reason = manual.status === "skipped" ? said`The manual step was skipped: ${org(String(manual.answer?.skipReason))}` : said`This setting can't be read by API, and the manual step hasn't been answered yet.`;
+      const reason =
+        manual.status !== "skipped"
+          ? said`This setting can't be read by API, and the manual step hasn't been answered yet.`
+          : manual.answer
+            ? said`The manual step was skipped: ${org(String(manual.answer.skipReason))}`
+            : // An automatic run asks no one (DECISIONS.md 693): the step's own ifSkipped, said as a reason.
+              said`This setting can't be read by API, and on an automatic run nobody is asked for it, so activity capture configuration is reported as not measurable.`;
       return { outcome: "not_measurable", reason, evidence: [manual.evidence], manualStepIds };
     }
     const relate = manual.answer?.values.relate_synced_events === true;

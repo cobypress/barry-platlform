@@ -29,6 +29,8 @@ const SORTED: readonly Sorted[] = [
   { kind: "needs_input", pattern: /^No account is calibrated as an integration account\b/ },
   { kind: "needs_input", pattern: /^No open stage was passed through by more than [^:]*, and the calibration marks none as required\./ },
   { kind: "needs_input", pattern: /^Salesforce's setting can't tell lost from no decision for:/ },
+  // What an automatic run's customer hasn't told us yet (DECISIONS.md 693).
+  { kind: "needs_input", pattern: /^You haven't told us\b/ },
   { kind: "needs_input", pattern: /^The (?:unused )?seats can't be priced, because / },
   { kind: "needs_input", pattern: /^The manual step was skipped:/ },
   { kind: "needs_input", pattern: /^[^:]*, and the manual step hasn't been answered yet\./ },
