@@ -660,6 +660,7 @@ const SIGNED_OFF: string[] = [
   "src/domains/service/setup.ts: andList(parts)",
   "src/domains/service/setup.ts: plural(active.length, \"escalation rule\")",
   "src/domains/service/setup.ts: plural(activeSla.length, \"entitlement process\")",
+  "src/domains/service/setup.ts: plural(activeSla.length, \"entitlement process\")",
   "src/domains/service/setup.ts: plural(read.rows.length, \"article\")",
   "src/domains/service/setup.ts: plural(routedQueues, \"case queue\")",
   "src/domains/service/setup.ts: plural(rules.data.length, \"rule\")",
@@ -674,6 +675,7 @@ const SIGNED_OFF: string[] = [
   "src/domains/service/setup.ts: hasHave(unread)",
   "src/domains/service/setup.ts: hasHave(unrouted.length)",
   "src/domains/service/setup.ts: isAre(active.length + activeSla.length)",
+  "src/domains/service/setup.ts: isAre(activeSla.length)",
   "src/domains/service/setup.ts: isAre(read.rows.length)",
   "src/domains/service/setup.ts: isAre(spread)",
   // A choice between those: our literal names, org words, sentences said made or numbers.

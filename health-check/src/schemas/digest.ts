@@ -112,6 +112,13 @@ export const DigestFinding = z.object({
   /** How risky or skilled the fix is, by rule (DECISIONS.md 636). Not the org's complexity score. */
   fixComplexity: z.enum(["simple", "moderate", "complex"]).optional(),
   /**
+   * How hard the fix is, worked out by code from the hours above and the fix
+   * complexity (DECISIONS.md 714): "quick_fix", "needs_planning" or "project",
+   * said as "Quick fix", "Needs planning" and "A project". Absent with no hours:
+   * not estimated, never a guess.
+   */
+  difficulty: z.enum(["quick_fix", "needs_planning", "project"]).optional(),
+  /**
    * An issue's fix prompt as the finding holds it (DECISIONS.md 628, 672), whole,
    * never cut: one longer than the limit, or one the digest's guard would change,
    * is left out. Served only with its marks at `orgWords.fixPrompt`.
@@ -311,6 +318,13 @@ export const DigestPlan = z.object({
   ),
   later: Ids,
   quickWins: Ids,
+  /**
+   * The plan's critical and high issues whose difficulty is a quick fix
+   * (DECISIONS.md 714), in the plan's order (its quick wins, phases, then after
+   * day 90), for a reader to start with. Absent when there are none. It moves
+   * nothing: every id is still where the plan put it.
+   */
+  quickFixes: Ids.optional(),
   /** By an action's finding id, the other issues from the same rule the same action covers. */
   alsoFor: z.record(Id, Ids),
   /**
@@ -340,7 +354,19 @@ export const DigestPlan = z.object({
 export type DigestPlan = z.infer<typeof DigestPlan>;
 
 export const DigestOverall = z.discriminatedUnion("status", [
-  z.object({ status: z.literal("measured"), score: z.number().int().min(0).max(100), grade: z.enum(["A", "B", "C", "D", "E"]), areaDomains: z.array(DomainId) }),
+  z.object({
+    status: z.literal("measured"),
+    score: z.number().int().min(0).max(100),
+    grade: z.enum(["A", "B", "C", "D", "E"]),
+    areaDomains: z.array(DomainId),
+    /**
+     * Said under the score when it leaves out areas we couldn't score (DECISIONS.md
+     * 710), all ours: "Your Barometer score leaves out the areas we couldn't
+     * score: <areas>." Absent when no area is left out.
+     */
+    caveat: Text.optional(),
+    orgWords: z.object({ caveat: SentenceOrgWords.optional() }).optional(),
+  }),
   z.object({ status: z.literal("not_measurable"), reason: Text, orgWords: z.object({ reason: SentenceOrgWords.optional() }).optional() }),
 ]);
 
@@ -361,6 +387,14 @@ export const RunDigest = z.object({
   plan: DigestPlan,
   /** SHA-256, in lower-case hex, of each inventory name that holds a known person's name. Never the names. */
   withheldNames: z.array(z.string().regex(/^[0-9a-f]{64}$/)),
+  /**
+   * What the org's edition doesn't include, said once for the run (DECISIONS.md
+   * 710), all ours: the checks it left unmeasured say only "Needs X, which
+   * Professional Edition doesn't include." Show it once wherever such a check
+   * is listed. Absent for an org the edition left nothing out of.
+   */
+  editionNote: Text.optional(),
+  orgWords: z.object({ editionNote: SentenceOrgWords.optional() }).optional(),
 });
 export type RunDigest = z.infer<typeof RunDigest>;
 
@@ -371,7 +405,7 @@ export const DIGEST_KEYS: ReadonlySet<string> = new Set([
   "title", "summary", "recommendation", "recommendationType", "kind", "amount", "unit", "period", "assumptions", "effortSize", "notMeasurableReason",
   "definition", "n", "dateRange", "from", "to", "exclusions", "currency", "total", "byKind", "revenue_recoverable", "conversion_uplift", "licence_waste",
   "time_cost", "exposure", "groups", "lines", "leftOut", "realisation", "counted", "lineIds", "low", "expected", "high", "group", "annual", "added",
-  "phases", "later", "quickWins", "alsoFor", "key", "effortHours", "basis", "partial", "timeBand", "fixComplexity", "hoursTotal", "partialFindingIds", "withoutHoursFindingIds", "notTotalledFindingIds", "note",
+  "phases", "later", "quickWins", "quickFixes", "difficulty", "alsoFor", "key", "effortHours", "basis", "partial", "timeBand", "fixComplexity", "hoursTotal", "partialFindingIds", "withoutHoursFindingIds", "notTotalledFindingIds", "note",
   "checkerRead", "readClasses", "readTriggers", "alreadyListed", "orgWords", "orgWordsMarked", "start", "end", "valueReason", "valueAssumptions", "hoursBasis", "fixPrompt", "textSha256",
-  "valueUnit", "valuePeriod",
+  "valueUnit", "valuePeriod", "editionNote", "caveat",
 ]);

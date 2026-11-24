@@ -1,4 +1,7 @@
 import { CURRENCY_UNKNOWN, NO_MONEY_FIGURE } from "../engine/currency.ts";
+import { editionNoteFor, scoreCaveatFor } from "../narrative/edition-note.ts";
+import type { Render } from "./html.ts";
+import { EDITION_MARKS } from "../salesforce/refusal-words.ts";
 import type { BuiltReport } from "../narrative/sections.ts";
 import type { Finding } from "../schemas/index.ts";
 import { HOURS_NOT_NAMED, type ValueModel } from "../value/model.ts";
@@ -25,6 +28,30 @@ export function withAmountNotes(report: BuiltReport, make: (report: BuiltReport)
   // The same document twice, so the same pages: if not, every page says it rather than any going without.
   const marked = (i: number): boolean => (probe.length === real.length ? probe[i]!.includes(AMOUNT_MARK) : true);
   return real.map((part, i) => (i > 0 && marked(i) && !part.includes(said) ? noted(part, line) : part)).join("");
+}
+
+/**
+ * The run's edition note (DECISIONS.md 710) once on every page that prints a
+ * check the edition left unmeasured: each such check says only that it needs
+ * the Metadata API, and the note says the rest once.
+ * With no note, the document exactly as it was.
+ */
+export function withEditionNote(report: BuiltReport, html: string): string {
+  const note = editionNoteFor(report);
+  if (!note) return html;
+  const marks = EDITION_MARKS.map(escapeXml);
+  const said = escapeXml(note);
+  const line = `<p class="note edition-note">${said}</p>`;
+  return html
+    .split(PAGE)
+    .map((part, i) => (i > 0 && marks.some((m) => part.includes(m)) && !part.includes(said) ? noted(part, line) : part))
+    .join("");
+}
+
+/** One line under the overall score naming the areas it leaves out (DECISIONS.md 710); nothing when it leaves none out. */
+export function scoreCaveatLine(r: Render, report: BuiltReport): string {
+  const caveat = scoreCaveatFor(report);
+  return caveat ? `<p class="small-note score-caveat">${r.t(caveat)}</p>` : "";
 }
 
 /** The report with each flagged finding's summary marked, for the probe only. */

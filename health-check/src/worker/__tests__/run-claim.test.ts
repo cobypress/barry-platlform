@@ -295,12 +295,13 @@ describe("a failure after the claim (DECISIONS.md 540)", () => {
 describe("the statuses the store sees, as before the claim", () => {
   // Recorded on 5da8dd7, before the claim, through the same jobs: the store's status after each write.
   // Five more extracting writes since the inventory's five steps (DECISIONS.md 605), and one for PMD and ESLint's (670).
+  // One more for the org profile's step (DECISIONS.md 710).
   const progress = (extracting: number): string[] => [...Array<string>(extracting).fill("saveRunProgress:extracting"), "saveRunProgress:analysing", "saveRunProgress:analysing", "saveRunOutput:awaiting_manual"];
 
   test("a fresh run: the claim leaves it extracting, then every status as before", async () => {
     const w = await setup();
     assert.deepEqual(await w.deliver(false), { outcome: "done", detail: `Run ${RUN_ID} is awaiting manual` });
-    assert.deepEqual(w.store.seen, ["claimRun:extracting", ...progress(52)]);
+    assert.deepEqual(w.store.seen, ["claimRun:extracting", ...progress(53)]);
   });
 
   test("a resume after a crash part way, reusing its checkpoints: runs to its save as before", async () => {

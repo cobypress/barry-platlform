@@ -4,6 +4,11 @@ export type BudgetOptions = {
   /** Stop once the org's daily usage reaches this share of its limit. */
   stopAtShare: number;
   maxCallsPerRun?: number;
+  /**
+   * The most of the org's daily limit this run alone may spend (DECISIONS.md
+   * 710): an automatic run's, so a small org's allowance is never mostly ours.
+   */
+  maxShareOfLimit?: number;
 };
 
 export type BudgetSnapshot = {
@@ -26,6 +31,7 @@ export class BudgetStopError extends Error {
 export class ApiBudget {
   readonly stopAtShare: number;
   readonly maxCallsPerRun: number;
+  readonly maxShareOfLimit: number | undefined;
   #limit: number | null = null;
   #usedAtStart: number | null = null;
   #used: number | null = null;
@@ -36,6 +42,7 @@ export class ApiBudget {
     if (!(options.stopAtShare > 0 && options.stopAtShare <= 1)) throw new Error("stopAtShare must be above 0 and at most 1");
     this.stopAtShare = options.stopAtShare;
     this.maxCallsPerRun = options.maxCallsPerRun ?? BUDGET_DEFAULTS.maxCallsPerRun;
+    this.maxShareOfLimit = options.maxShareOfLimit;
   }
 
   /** Fed by /limits and by each response's Sforce-Limit-Info header. */
@@ -69,6 +76,9 @@ export class ApiBudget {
     }
     if (this.#calls + cost > this.maxCallsPerRun) {
       throw new BudgetStopError(`This run reached its cap of ${this.maxCallsPerRun} API calls`);
+    }
+    if (this.maxShareOfLimit !== undefined && this.#calls + cost > Math.floor(this.#limit * this.maxShareOfLimit)) {
+      throw new BudgetStopError(`This run reached its cap of ${Math.round(this.maxShareOfLimit * 100)}% of the org's ${this.#limit} daily API calls`);
     }
     const ceiling = Math.floor(this.#limit * this.stopAtShare);
     if (this.#used + cost > ceiling) {

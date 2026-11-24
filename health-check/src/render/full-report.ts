@@ -1,5 +1,5 @@
 import { CONSULTANT_NEXT_STEPS, nextStepsWords } from "./exec-pages.ts";
-import { withAmountNotes } from "./amount-notes.ts";
+import { scoreCaveatLine, withAmountNotes, withEditionNote } from "./amount-notes.ts";
 import { yearlyByFinding } from "../value/model.ts";
 import { orderFromOrg } from "../connect/auto-calibration.ts";
 import { currencyStanding } from "../engine/currency.ts";
@@ -8,14 +8,14 @@ import { ORDER_UNCONFIRMED } from "../domains/historic-pipeline/cohort.ts";
 import { currentBody, TOP_ISSUE_COUNT, type BuiltOutput, type BuiltReport } from "../narrative/sections.ts";
 import { VERDICT_WORDS, type ReadinessVerdict } from "../narrative/readiness.ts";
 import { byKind, hasKinds, KIND_HEADINGS, kindOf, noteCounts } from "../narrative/unmeasured.ts";
-import { areasOf, buildPlan, domainLabel, isSetupReview, issuesOf, isThinData, isUnpricedSaving, QUICK_WINS_HEADING, recordAreasLine, scorecard, thinDataLine, topIssues, UNPRICED, verdictOf } from "../narrative/select.ts";
+import { areasOf, buildPlan, domainLabel, isSetupReview, issuesOf, isThinData, isUnpricedSaving, QUICK_WINS_HEADING, QUICK_WINS_NAME, recordAreasLine, scorecard, thinDataLine, topIssues, UNPRICED, verdictOf } from "../narrative/select.ts";
 import type { CustomerWords, Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { ACCOUNT_ENGAGEMENT_DOMAINS, canRelease, CPQ_DOMAINS, SERVICE_CLOUD_DOMAINS, type Finding, type Metric, type Run } from "../schemas/index.ts";
 import { INVENTORY_COLUMNS, inventoryRows, OBJECT_INVENTORY } from "../domains/configuration/inventory.ts";
 import { activeUsersChart, lightningChart, loginChannelsChart, processFlowChart, scorecardOptions, type Chart, closedAsChart, deliveryOutlookChart, HALF_WIDTH, lostByStageChart, pipelineOverTime, scorecardChart, stageFunnel, stageVelocityChart, topAccountsChart, winRateBySegment, winsByCustomerChart, wonValueByChart } from "./charts.ts";
 import { closedAgainstFirst, compactMoney, longDate, monthYear, percent, ukDates } from "./format.ts";
 import type { Calibration } from "../schemas/index.ts";
-import { chartSlot, coverScore, document, documentTitle, effortText, estimateLines, inDocumentOrder, paginate, paginateColumns, paragraphs, renderContext, sentence, severityChip, valueFigure, valueText, wrappedLines, type Render } from "./html.ts";
+import { chartSlot, coverScore, document, documentTitle, difficultySpan, difficultyText, estimateLines, inDocumentOrder, paginate, paginateColumns, paragraphs, renderContext, sentence, severityChip, valueFigure, valueText, wrappedLines, type Render } from "./html.ts";
 import { noteSections, referenceMap } from "./references.ts";
 import { scoreLine } from "./executive.ts";
 import { COMPARE_CSS, compareSlide } from "./compare.ts";
@@ -223,7 +223,7 @@ function panelNote(r: Render, f: Finding, amount: string, note: string): string 
 function issueSlide(r: Render, label: string, f: Finding, causeOf: CauseOf = noCause): Slide {
   const value = valueText(r, f);
   const note = panelNote(r, f, value.amount, value.note);
-  const meta = `<div class="meta">${severityChip(f)}<span>Confidence ${f.confidence}</span><span>${effortText(f)}</span></div>`;
+  const meta = `<div class="meta">${severityChip(f)}<span>Confidence ${f.confidence}</span>${difficultySpan(f)}</div>`;
   return {
     html: `<div class="eyebrow">${r.t(label)}</div><h2>${r.t(f.title)}</h2>${meta}<div class="columns" style="margin-top:14px"><div><p>${r.t(f.summary)}</p>${f.recommendation ? `<p style="margin-top:12px"><strong>What to do:</strong> ${r.t(f.recommendation)}</p>` : ""}${causeLine(r, causeOf(f))}</div><div class="panel"><h3>Value</h3><p><strong>${value.amount}</strong>${r.ref(f.id)}</p><p class="note">${note}</p><h3>Owner</h3><p>${r.t(f.owner)}</p>${f.dependencies.length ? `<h3>Depends on</h3><p class="note">${r.t(f.dependencies.join("; "))}</p>` : ""}</div></div>`,
   };
@@ -240,7 +240,7 @@ function smallCardHeight(f: Finding, causeOf: CauseOf = noCause): number {
 }
 
 function card(r: Render, f: Finding, causeOf: CauseOf = noCause): string {
-  return `<article class="card"><div class="meta">${severityChip(f)}<span>${effortText(f)}</span><span class="amount">${valueText(r, f).amount}</span>${r.ref(f.id)}</div><h3>${r.t(f.title)}</h3><p>${r.t(f.summary)}</p><p><strong>What to do:</strong> ${r.t(f.recommendation)}</p>${causeLine(r, causeOf(f))}</article>`;
+  return `<article class="card"><div class="meta">${severityChip(f)}${difficultySpan(f)}<span class="amount">${valueText(r, f).amount}</span>${r.ref(f.id)}</div><h3>${r.t(f.title)}</h3><p>${r.t(f.summary)}</p><p><strong>What to do:</strong> ${r.t(f.recommendation)}</p>${causeLine(r, causeOf(f))}</article>`;
 }
 
 // Nothing comes before an area's first issue page, so its title isn't "Other issues".
@@ -615,7 +615,7 @@ function inventorySlide(r: Render, label: string, metric: Metric | undefined): S
   const lede = `We counted ${m.value} objects: ${own}.${automation}`;
   const notes = [
     `Ranked by how much automation runs on each object, then by custom fields.${all.length > shown.length ? " Only the busiest are shown here. The raw notes list every object." : ""} No description means no description field, or for an Apex trigger, no comment in the code.`,
-    ...m.exclusions.filter((e) => /couldn't/.test(e)).map((e) => `Not counted: ${e}.`),
+    ...m.exclusions.filter((e) => /couldn't|doesn't allow/.test(e)).map((e) => `Not counted: ${e.replace(/\.$/, "")}.`),
   ];
   return {
     classes: "tight",
@@ -892,7 +892,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null, mo
     <tr><td style="width:24%"><strong>Barometer score</strong></td><td>One score out of 100 for your whole Salesforce, from the area scores, with a grade from A to E.</td></tr>
     <tr><td><strong>Severity</strong></td><td>How much damage this does if it's left alone.</td></tr>
     <tr><td><strong>Confidence</strong></td><td>How sure we are, given what we could read from your org.</td></tr>
-    <tr><td><strong>Effort</strong></td><td>Our sizing of the fix, from very small to very large.</td></tr>
+    <tr><td><strong>Difficulty</strong></td><td>How hard the fix is in Salesforce: a quick fix, one that needs planning, or a project. We judge it from the time the Salesforce change takes and how risky it is. It doesn't count your team's time deciding what to do.</td></tr>
     <tr><td><strong>Impact</strong></td><td>Revenue, licence cost or hours, with its assumptions. Where there's no honest figure to put on it, the risk it carries.</td></tr>
     <tr><td><strong>Not measurable</strong></td><td>The data can't support the figure, so we report that rather than estimate it.</td></tr>
     <tr><td><strong>Reference</strong></td><td>Where the working is in the raw notes that come with this report. <span data-ref>R4.3</span> is the third item in section <span data-ref>R4</span>.</td></tr></tbody></table>`);
@@ -904,7 +904,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null, mo
   add(`<div class="eyebrow">What we found against it</div><h2>What you told us, against what we found</h2>${needsInput(built, "stated_vs_actual") ? inputChip : ""}${sectionBody(r, built, "stated_vs_actual")}`);
 
   mark("Overview and scorecard");
-  add(`<div class="eyebrow">Overview</div><h2>${r.t(verdict.headline)}</h2><div>${sectionBody(r, built, "overview").replace(`<p>${r.t(verdict.headline)}.</p>`, "")}</div><div class="stat-row" style="margin-top:18px">${report.overall.status === "measured" ? `<div class="stat"><b>${report.overall.score}</b><span>Barometer score</span></div>` : ""}<div class="stat"><b>${verdict.issues}</b><span>Issues</span></div><div class="stat"><b>${verdict.critical}</b><span>Critical</span></div><div class="stat"><b>${verdict.high}</b><span>High</span></div><div class="stat"><b>${team.filter((f) => f.status === "not_measurable").length}</b><span>Not measurable</span></div><div class="stat"><b>${team.filter((f) => f.status === "passed").length}</b><span>Passed</span></div></div>${thin ? `<p class="small-note">${r.t(thinDataLine(team, "The appendix"))}</p>` : ""}`);
+  add(`<div class="eyebrow">Overview</div><h2>${r.t(verdict.headline)}</h2><div>${sectionBody(r, built, "overview").replace(`<p>${r.t(verdict.headline)}.</p>`, "")}</div><div class="stat-row" style="margin-top:18px">${report.overall.status === "measured" ? `<div class="stat"><b>${report.overall.score}</b><span>Barometer score</span></div>` : ""}<div class="stat"><b>${verdict.issues}</b><span>Issues</span></div><div class="stat"><b>${verdict.critical}</b><span>Critical</span></div><div class="stat"><b>${verdict.high}</b><span>High</span></div><div class="stat"><b>${team.filter((f) => f.status === "not_measurable").length}</b><span>Not measurable</span></div><div class="stat"><b>${team.filter((f) => f.status === "passed").length}</b><span>Passed</span></div></div>${scoreCaveatLine(r, report)}${thin ? `<p class="small-note">${r.t(thinDataLine(team, "The appendix"))}</p>` : ""}`);
 
   const progressed = progressPage(r, report);
   if (progressed) mark("Since your last health check");
@@ -1006,7 +1006,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null, mo
   const quickOnOverview = !dense && planned && quickWins.length > 0;
   const quickPanel = `<div class="quick-panel"><h3>${r.t(QUICK_WINS_HEADING)}</h3><ul class="action-list">${quickWins.map(quickItem).join("")}</ul><p class="small-note">${r.t("What to do for each is on its card in its area.")}</p></div>`;
   const quickBox = quickOnOverview ? quickPanel : "";
-  if (!dense && planned) add(`<div class="eyebrow">Roadmap</div><h2>The first 90 days</h2>${roadmapText}<div class="stat-row">${plan.map((p) => `<div class="stat"><b>${r.t(p.title)}</b><span>Days ${p.from} to ${p.to}</span><p style="margin-top:8px">${p.findings.length} ${p.findings.length === 1 ? "action" : "actions"}</p></div>`).join("")}${quickWins.length ? `<div class="stat"><b>${r.t("Quick wins")}</b><span>Also days 1 to 30</span><p style="margin-top:8px">${quickWins.length} ${quickWins.length === 1 ? "action" : "actions"}</p></div>` : ""}</div>${quickBox}`);
+  if (!dense && planned) add(`<div class="eyebrow">Roadmap</div><h2>The first 90 days</h2>${roadmapText}<div class="stat-row">${plan.map((p) => `<div class="stat"><b>${r.t(p.title)}</b><span>Days ${p.from} to ${p.to}</span><p style="margin-top:8px">${p.findings.length} ${p.findings.length === 1 ? "action" : "actions"}</p></div>`).join("")}${quickWins.length ? `<div class="stat"><b>${r.t(QUICK_WINS_NAME)}</b><span>Also days 1 to 30</span><p style="margin-top:8px">${quickWins.length} ${quickWins.length === 1 ? "action" : "actions"}</p></div>` : ""}</div>${quickBox}`);
   // Quick wins are their own box beside "Stabilise", not part of it (DECISIONS.md 366).
   // Without the overview, the box follows "Stabilise" on its pages, so it takes a slide only when those are full.
   const quickInline = quickWins.length > 0 && !quickOnOverview;
@@ -1029,7 +1029,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null, mo
   // Titles only: each of these already has its card in its domain's section.
   // Each with its reference, so a reader can find the issue it comes from (night 3 reading pass).
   // An action that covers other issues from the same rule carries their references too (night 3 review).
-  const afterPlan = later.map((f) => ({ title: f.title, detail: `${severityWord(f.severity)}. ${effortText(f)}. ${f.owner}`, ref: [f.id, ...(alsoFor[f.id] ?? []).map((x) => x.id)] }));
+  const afterPlan = later.map((f) => ({ title: f.title, detail: `${severityWord(f.severity)}. ${difficultyText(f) ? `${difficultyText(f)}. ` : ""}${f.owner}`, ref: [f.id, ...(alsoFor[f.id] ?? []).map((x) => x.id)] }));
   // Titles only, so at the densest they take three columns, as the metric definitions do.
   if (later.length) slides.push(...(density?.domainSummary || density?.threeColumnLists ? threeColumnList(r, "Roadmap", "After 90 days", afterPlan) : dense ? twoColumnList(r, "Roadmap", "After 90 days", afterPlan) : listSlides(r, "Roadmap", "After 90 days", afterPlan, compact)));
 
@@ -1113,7 +1113,7 @@ export function fullReportHtml(report: BuiltReport, pseudonyms: Pseudonymiser): 
  */
 export function fullReportHtmlAt(report: BuiltReport, pseudonyms: Pseudonymiser, step: number | null): string {
   // Each page with an amount in a currency not known by name says so (DECISIONS.md 700).
-  return withAmountNotes(report, (made) => inDocumentOrder(pseudonyms, (words) => fullReportHtmlWith(made, pseudonyms, step, words)));
+  return withEditionNote(report, withAmountNotes(report, (made) => inDocumentOrder(pseudonyms, (words) => fullReportHtmlWith(made, pseudonyms, step, words))));
 }
 
 function fullReportHtmlWith(report: BuiltReport, pseudonyms: Pseudonymiser, step: number | null, words: CustomerWords): string {

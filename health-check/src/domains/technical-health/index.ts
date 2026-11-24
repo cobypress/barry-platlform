@@ -4,7 +4,7 @@ import { customObjectsExtractor, orgExtractor, recordCountsExtractor } from "../
 import { apiLimitsExtractor } from "../../extract/integrations.ts";
 import { classicExtractor } from "../../extract/technical.ts";
 import { notSized, pct, plural, type Rule, type RuleResult } from "../../engine/rule.ts";
-import { apexGap, metadataOr, UNNAMED, unnamedNote } from "../automation/shared.ts";
+import { apexGap, apexReason, metadataOr, NO_OWN_APEX, ownApex, UNNAMED, unnamedNote } from "../automation/shared.ts";
 import type { DomainModule } from "../types.ts";
 import { labelsOf } from "../labels.ts";
 import { labelsExtractor } from "../../extract/labels.ts";
@@ -14,6 +14,8 @@ import { joinSaid, org, said, type Said } from "../../engine/org-words.ts";
 import { andList, grouped } from "../../engine/said-forms.ts";
 import { judgedTests, liveCode, loopsOverLimits } from "./code.ts";
 import { LINT_RULES } from "./lint.ts";
+import { refusalSentence } from "../../salesforce/refusal-words.ts";
+import { PROFESSIONAL } from "../../extract/org-profile.ts";
 
 // Technical health (roadmap 3.2): how sound the code is, read from set-up only.
 // Coverage, API versions and trigger counts moved here from automation with
@@ -53,20 +55,23 @@ const oldApiVersions: Rule = {
     const result = metadataOr(ctx);
     if ("outcome" in result) return result;
     const { classes, triggers } = ctx.data(apexExtractor);
-    if (classes.status !== "ok") return { outcome: "not_measurable", reason: apexGap("classes", classes.reason), evidence: [ctx.ev(classes.source, { count: null })] };
-    if (triggers.status !== "ok") return { outcome: "not_measurable", reason: apexGap("triggers", triggers.reason), evidence: [ctx.ev(triggers.source, { count: null })] };
-    const newest = Math.max(0, ...classes.data.map((c) => c.ApiVersion), ...triggers.data.map((t) => t.ApiVersion), ...result.bundle.flows.map((f) => f.apiVersion));
+    // A Professional Edition org's answer that it has no Apex of its own costs only the Apex part (DECISIONS.md 710).
+    const classRows = ownApex(classes);
+    const triggerRows = ownApex(triggers);
+    if (classRows === null) return { outcome: "not_measurable", reason: apexGap("classes", apexReason(classes)), evidence: [ctx.ev(classes.source, { count: null })] };
+    if (triggerRows === null) return { outcome: "not_measurable", reason: apexGap("triggers", apexReason(triggers)), evidence: [ctx.ev(triggers.source, { count: null })] };
+    const newest = Math.max(0, ...classRows.map((c) => c.ApiVersion), ...triggerRows.map((t) => t.ApiVersion), ...result.bundle.flows.map((f) => f.apiVersion));
     const floor = newest - API_VERSIONS_BEHIND;
     // Our own names for the kinds, in the order the summary lists them.
     const KINDS = ["Apex classes", "Apex triggers", "Active flows"] as const;
     const old = {
-      "Apex classes": classes.data.filter((c) => c.ApiVersion < floor).length,
-      "Apex triggers": triggers.data.filter((t) => t.ApiVersion < floor).length,
+      "Apex classes": classRows.filter((c) => c.ApiVersion < floor).length,
+      "Apex triggers": triggerRows.filter((t) => t.ApiVersion < floor).length,
       "Active flows": result.bundle.flows.filter((f) => f.status === "Active" && f.apiVersion < floor).length,
     };
     const total = Object.values(old).reduce((a, b) => a + b, 0);
     const evidence = [
-      ctx.ev(classes.source, { count: old["Apex classes"], note: `Older than version ${floor}` }),
+      ctx.ev(classes.source, { count: old["Apex classes"], note: `Older than version ${floor}`, exclusions: classes.status === "ok" && triggers.status === "ok" ? [] : [NO_OWN_APEX] }),
       ctx.ev(triggers.source, { count: old["Apex triggers"], note: `Older than version ${floor}` }),
       ctx.ev({ kind: "metadata", path: "flows/*.flow" }, { count: old["Active flows"], note: `Older than version ${floor}` }),
     ];
@@ -335,7 +340,14 @@ const classicLeftovers: Rule = {
   domain: DOMAIN,
   title: "Set-up that only works in Salesforce Classic",
   evaluate(ctx): RuleResult | RuleResult[] {
-    const { links, scontrols, pages } = ctx.data(classicExtractor);
+    const classic = ctx.data(classicExtractor);
+    const { links, pages } = classic;
+    // Asked, and a Professional Edition org answered that it has no Scontrol object: Salesforce's Tooling API guide
+    // says that edition has none, so its answer is a count of none (DECISIONS.md 710). Unread is never none (291).
+    const org = ctx.data(orgExtractor);
+    const professional = org.status === "ok" && org.data[0]?.OrganizationType === PROFESSIONAL;
+    const answeredNone = classic.scontrols.status !== "ok" && professional && classic.scontrols.reason === refusalSentence("Scontrol", "not_available", "INVALID_TYPE");
+    const scontrols: typeof classic.scontrols = answeredNone ? { status: "ok", data: [], source: classic.scontrols.source, truncated: false } : classic.scontrols;
     if (links.status !== "ok") return { outcome: "not_measurable", reason: `Custom buttons and links couldn't be read: ${links.reason}`, evidence: [ctx.ev(links.source, { count: null })] };
     if (pages.status !== "ok") return { outcome: "not_measurable", reason: `Visualforce pages couldn't be read: ${pages.reason}`, evidence: [ctx.ev(pages.source, { count: null })] };
     const javascript = links.data.filter((l) => l.LinkType?.toLowerCase() === "javascript").sort((a, b) => a.Name.localeCompare(b.Name));
@@ -344,7 +356,7 @@ const classicLeftovers: Rule = {
     const classicPages = pages.data.filter((p) => p.IsAvailableInTouch === false).sort((a, b) => a.Name.localeCompare(b.Name));
     const evidence = [
       ctx.ev(links.source, { count: javascript.length, exclusions: ["Installed packages' buttons and links", "Buttons and links that open a URL, page or flow"] }),
-      ctx.ev(scontrols.source, { count: scontrols.status === "ok" ? controls.length : null }),
+      ctx.ev(scontrols.source, { count: scontrols.status === "ok" ? controls.length : null, ...(answeredNone ? { note: "Salesforce answered that the org has no Scontrol object." } : {}) }),
       ctx.ev(pages.source, { count: classicPages.length, exclusions: ["Installed packages' pages", "Pages marked available in Lightning Experience"] }),
     ];
     const segments = [{ dimension: "component type", segments: 3 }];

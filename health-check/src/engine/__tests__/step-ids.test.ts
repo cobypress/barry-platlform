@@ -23,6 +23,7 @@ const CONSOLE_FILE = "blackcloud-next lib/health-check/run-progress.ts (STEP_WOR
 const STEP_IDS = [
   "org",
   "field-describe",
+  "org-profile",
   "labels",
   "schema",
   "field-usage",

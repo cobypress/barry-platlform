@@ -54,12 +54,12 @@ export type CheckedDigestFor = {
  */
 export const STRUCTURAL_PATHS: ReadonlySet<string> = new Set([
   "areas[].domain", "areas[].findingIds", "areas[].notMeasurableKind", "areas[].status", "asOf", "baselineRunId",
-  "findings[].confidence", "findings[].domain", "findings[].effortSize", "findings[].fixComplexity", "findings[].id", "findings[].notMeasurableKind",
+  "findings[].confidence", "findings[].difficulty", "findings[].domain", "findings[].effortSize", "findings[].fixComplexity", "findings[].id", "findings[].notMeasurableKind",
   "findings[].recommendationType", "findings[].ruleId", "findings[].severity", "findings[].status", "findings[].timeBand", "findings[].value.kind",
   "madeAt", "metrics[].dateRange.from", "metrics[].dateRange.to", "metrics[].domain", "metrics[].id", "metrics[].notMeasurableKind",
   "metrics[].status", "overall.areaDomains", "overall.grade", "overall.status", "plan.alsoFor", "plan.hoursTotal.findingIds",
   "plan.hoursTotal.notTotalledFindingIds", "plan.hoursTotal.partialFindingIds", "plan.hoursTotal.withoutHoursFindingIds", "plan.later", "plan.phases[].findingIds", "plan.phases[].from",
-  "plan.phases[].key", "plan.phases[].to", "plan.quickWins", "product", "reviewed", "runId",
+  "plan.phases[].key", "plan.phases[].to", "plan.quickFixes", "plan.quickWins", "product", "reviewed", "runId",
   "value.byKind.conversion_uplift.lineIds", "value.byKind.licence_waste.lineIds", "value.byKind.revenue_recoverable.lineIds", "value.byKind.time_cost.lineIds", "value.currency", "value.exposure.lineIds",
   "value.groups[].counted", "value.groups[].id", "value.groups[].kind", "value.groups[].lineIds", "value.leftOut", "value.lines[].group",
   "value.lines[].id", "value.lines[].kind", "value.lines[].ruleId", "value.total.lineIds", "version", "withheldNames",
@@ -152,9 +152,11 @@ export const TEXT_SLOTS: Readonly<Record<string, Slot | "fixed">> = {
   "value.groups[].label": slotOf((d, at) => d.value.groups[at[0]!], "label"),
   "value.currencyNote": slotOf((d) => d.value, "currencyNote"),
   "value.currencySuggested": slotOf((d) => d.value, "currencySuggested"),
+  "editionNote": slotOf((d) => d, "editionNote"),
   "plan.phases[].title": slotOf((d, at) => d.plan.phases[at[0]!], "title"),
   "plan.hoursTotal.note": slotOf((d) => d.plan.hoursTotal, "note"),
   "overall.reason": slotOf((d) => (d.overall.status === "not_measurable" ? d.overall : undefined), "reason"),
+  "overall.caveat": slotOf((d) => (d.overall.status === "measured" ? d.overall : undefined), "caveat"),
 };
 
 export type DigestText = { path: string; at: number[]; text: string };

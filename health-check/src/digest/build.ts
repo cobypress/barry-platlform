@@ -1,3 +1,4 @@
+import { editionNoteFor, isEditionNote, isScoreCaveat, scoreCaveatFor } from "../narrative/edition-note.ts";
 import { createHash } from "node:crypto";
 import { averageBeside } from "../domains/average.ts";
 import { CURRENCY_NOT_NAMED } from "../engine/currency.ts";
@@ -127,6 +128,7 @@ function digestFinding(f: Finding): DigestFinding {
     ...(f.effortHours ? { effortHours: { low: f.effortHours.low, high: f.effortHours.high, basis: f.effortHours.basis, ...(f.effortHours.partial ? { partial: true as const } : {}) } } : {}),
     ...(f.timeBand ? { timeBand: f.timeBand } : {}),
     ...(f.fixComplexity ? { fixComplexity: f.fixComplexity } : {}),
+    ...(f.difficulty ? { difficulty: f.difficulty } : {}),
     ...fixPromptOf(f),
     ...checkerReadOf(f),
     ...(f.amountsUnnamed ? { amountsUnnamed: true as const } : {}),
@@ -254,6 +256,16 @@ export function planHours(plan: ReturnType<typeof buildPlan>): { low: number; hi
   };
 }
 
+/**
+ * The plan's critical and high actions that are a quick fix (DECISIONS.md 714),
+ * in the plan's own order, each once: a reading aid that moves nothing.
+ */
+export function quickFixesOf(plan: ReturnType<typeof buildPlan>): string[] {
+  const inOrder = [...plan.quickWins, ...plan.phases.flatMap((p) => p.findings), ...plan.later];
+  const ids = inOrder.filter((f) => (f.severity === "critical" || f.severity === "high") && f.difficulty === "quick_fix").map((f) => f.id);
+  return [...new Set(ids)];
+}
+
 function digestMetric(m: Metric): DigestMetric {
   const base = { id: m.id, domain: m.domain, label: m.label, definition: m.definition, unit: m.unit };
   if (m.status === "measured") {
@@ -318,6 +330,7 @@ export function buildDigest({ report, pseudonyms, inventory, madeAt }: DigestFor
   const ids = (fs: Finding[]) => fs.map((f) => f.id);
   const overall = report.overall;
   const hoursTotal = planHours(plan);
+  const quickFixes = quickFixesOf(plan);
   // Typed by the parse below, which holds every id and code to its shape.
   const raw = {
     version: DIGEST_VERSION,
@@ -330,7 +343,7 @@ export function buildDigest({ report, pseudonyms, inventory, madeAt }: DigestFor
     baselineRunId: run.baselineRunId,
     overall:
       overall.status === "measured" && Number.isInteger(overall.score) && GRADE.test(overall.grade)
-        ? { status: "measured", score: overall.score, grade: overall.grade, areaDomains: overall.areas.map((a) => a.domain) }
+        ? { status: "measured", score: overall.score, grade: overall.grade, areaDomains: overall.areas.map((a) => a.domain), ...(scoreCaveatFor(report) ? { caveat: scoreCaveatFor(report)! } : {}) }
         : { status: "not_measurable", reason: overall.status === "not_measurable" ? overall.reason : "The overall score couldn't be kept." },
     areas: digestAreas(report),
     findings: report.teamFindings.map(digestFinding),
@@ -342,13 +355,19 @@ export function buildDigest({ report, pseudonyms, inventory, madeAt }: DigestFor
       quickWins: ids(plan.quickWins),
       alsoFor: Object.fromEntries(Object.entries(plan.alsoFor).map(([id, fs]) => [id, ids(fs)])),
       ...(hoursTotal ? { hoursTotal } : {}),
+      ...(quickFixes.length ? { quickFixes } : {}),
     },
     withheldNames: withheldNames(inventory, pseudonyms),
+    // Once for the run, not on each check the edition left unmeasured (DECISIONS.md 710).
+    ...(editionNoteFor(report) ? { editionNote: editionNoteFor(report)! } : {}),
   };
   orgValues = orgValuesOf({ metrics: report.metrics, findings: report.input.findings, stages: report.input.calibration.stages.map((s) => s.name) });
   const guarded = guardDigest(raw, pseudonyms);
   const findings = guarded.findings.map((f, i) => withValueWords(afterGuard(raw.findings[i]!, f)));
-  const merged = { ...guarded, findings, ...fixedWords(guarded, findings) };
+  // The score's caveat and the edition's note, ours while each reads exactly as we write it (DECISIONS.md 710).
+  const said = (guarded.overall as { caveat?: string }).caveat;
+  const caveat = said !== undefined && isScoreCaveat(said) ? { overall: { ...guarded.overall, orgWords: { caveat: ENGINE_WORDS } } } : {};
+  const merged = { ...guarded, findings, ...fixedWords(guarded, findings), ...caveat, ...(guarded.editionNote !== undefined && isEditionNote(guarded.editionNote) ? { orgWords: { editionNote: ENGINE_WORDS } } : {}) };
   // Typed by the parse below, as the raw digest is.
   return RunDigest.parse({ ...merged, ...moreWords(merged as unknown as RunDigest, report) });
 }
@@ -446,8 +465,8 @@ export function fixedWords<P extends { phases: Array<{ key: string; title: strin
  */
 export const STRUCTURAL_KEYS: ReadonlySet<string> = new Set([
   "version", "runId", "product", "reviewed", "asOf", "madeAt", "baselineRunId", "status", "domain", "areaDomains", "findingIds", "id", "ruleId",
-  "severity", "confidence", "recommendationType", "kind", "effortSize", "notMeasurableKind", "timeBand", "fixComplexity", "from", "to", "currency", "group", "counted",
-  "lineIds", "leftOut", "later", "quickWins", "key", "grade", "withheldNames", "partialFindingIds", "withoutHoursFindingIds", "notTotalledFindingIds", "textSha256",
+  "severity", "confidence", "recommendationType", "kind", "effortSize", "notMeasurableKind", "timeBand", "fixComplexity", "difficulty", "from", "to", "currency", "group", "counted",
+  "lineIds", "leftOut", "later", "quickWins", "quickFixes", "key", "grade", "withheldNames", "partialFindingIds", "withoutHoursFindingIds", "notTotalledFindingIds", "textSha256",
 ]);
 /** Keyed by finding id, each holding finding ids: ids all the way down. */
 export const ID_MAPS: ReadonlySet<string> = new Set(["alsoFor"]);

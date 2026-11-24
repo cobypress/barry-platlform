@@ -1,3 +1,4 @@
+import { editionIsWhy } from "../../salesforce/refusal-words.ts";
 import { apexExtractor, metadataExtractor } from "../../extract/automation.ts";
 import { unreadReason } from "../../extract/metadata-parse.ts";
 import { CORE_OBJECTS, customObjectsExtractor, isOwnCustomField, layoutsExtractor, recordCountsExtractor, schemaExtractor } from "../../extract/configuration.ts";
@@ -109,7 +110,7 @@ export function objectInventoryMetric(ctx: Ctx): Metric[] {
     exclusions.push(`Page layouts (${unnamedLayouts}) and Apex triggers (${unnamedTriggers}) on custom objects we couldn't name${ids.status === "ok" ? "" : `, because the list of custom objects couldn't be read: ${ids.reason}`}`);
   }
   if (layouts.status !== "ok") exclusions.push(`Page layouts, which couldn't be read: ${layouts.reason}`);
-  if (triggers.status !== "ok") exclusions.push(`Apex triggers, which couldn't be read: ${triggers.reason}`);
+  if (triggers.status !== "ok") exclusions.push(editionIsWhy(triggers.reason) ? "Apex triggers, which Professional Edition doesn't allow the org to have of its own" : `Apex triggers, which couldn't be read: ${triggers.reason}`);
 
   const flows = bundle.flows.filter((f) => f.status === "Active");
   const recordFlows = flows.filter((f) => f.processType !== "Workflow" && isRecordTriggered(f.triggerType));

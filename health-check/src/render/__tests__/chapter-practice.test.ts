@@ -178,7 +178,7 @@ describe("the deck's wording, as a customer reads it (night 3 reading pass, DECI
   });
 
   test("the deck shows days 1 to 30's quick wins as their own box, and says when a saving isn't priced (DECISIONS.md 366, 367)", () => {
-    assert.match(html, /<div class="quick-panel"><h3>Quick wins, also in days 1 to 30<\/h3>/);
+    assert.match(html, /<div class="quick-panel"><h3>Small jobs, also in days 1 to 30<\/h3>/);
     assert.match(html, /seats nobody holds\.<\/strong>[\s\S]{0,400}?The saving isn(&#39;|')t priced\./i);
   });
 

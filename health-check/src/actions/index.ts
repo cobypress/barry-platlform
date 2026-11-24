@@ -1,4 +1,5 @@
 import { applyOverrides } from "../narrative/overrides.ts";
+import { DIFFICULTY_WORDS } from "../fix/difficulty.ts";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { BuiltReport } from "../narrative/sections.ts";
@@ -22,9 +23,10 @@ export const ACTION_FILES = { workbook: "action-lists.xlsx", tickets: "tickets.c
 export const PRIORITY: Record<Finding["severity"], string> = { critical: "Highest", high: "High", medium: "Medium", low: "Low", info: "Lowest" };
 
 /** The ticket file's columns, in order. "Labels" repeats, which is how Jira's importer takes more than one. */
-export const TICKET_COLUMNS = ["Summary", "Issue Type", "Priority", "Description", "Labels", "Labels", "Labels", "Effort", "Owner role", "Reference", "Records"] as const;
+export const TICKET_COLUMNS = ["Summary", "Issue Type", "Priority", "Description", "Labels", "Labels", "Labels", "Difficulty", "Owner role", "Reference", "Records"] as const;
 
-const EFFORT: Record<Finding["effort"]["size"], string> = { XS: "Extra small", S: "Small", M: "Medium", L: "Large", XL: "Extra large" };
+// How hard each fix is, as the documents print it beside the severity (DECISIONS.md 714); empty where there is none.
+const difficulty = (f: Finding): string => (f.difficulty ? DIFFICULTY_WORDS[f.difficulty] : "");
 const SEVERITY_ORDER = ["critical", "high", "medium", "low", "info"];
 
 export function loadActionLists(dir: string): ActionLists | null {
@@ -121,7 +123,7 @@ export function buildWorkbook(report: BuiltReport, pseudonyms: Pseudonymiser, li
     } else if (!lists) {
       where = "Record lists weren't gathered for this run.";
     }
-    return [c.refOf(f), c.words(f.title), domainLabel(f.domain), f.severity.replace(/^./, (s) => s.toUpperCase()), c.words(f.recommendation), EFFORT[f.effort.size], c.words(f.owner), count, where];
+    return [c.refOf(f), c.words(f.title), domainLabel(f.domain), f.severity.replace(/^./, (s) => s.toUpperCase()), c.words(f.recommendation), difficulty(f), c.words(f.owner), count, where];
   });
   const notes = [
     "Every issue in the health check, with what to do. Where an issue is about records, its sheet lists each one, with a link to it in Salesforce. The reference is the item in the raw notes with the working.",
@@ -137,7 +139,7 @@ export function buildWorkbook(report: BuiltReport, pseudonyms: Pseudonymiser, li
         { header: "Area", width: 22 },
         { header: "Severity", width: 10 },
         { header: "What to do", width: 70 },
-        { header: "Effort", width: 12 },
+        { header: "Difficulty", width: 15 },
         { header: "Owner", width: 26 },
         { header: "Records", width: 10 },
         { header: "Where", width: 44 },
@@ -173,10 +175,10 @@ export function buildTickets(report: BuiltReport, pseudonyms: Pseudonymiser, lis
       sentence(c.words(f.summary)),
       `What to do: ${sentence(c.words(f.recommendation))}`,
       records,
-      `Effort: ${EFFORT[f.effort.size].toLowerCase()}.${f.effort.note ? ` ${sentence(c.words(f.effort.note))}` : ""} Owner: ${c.words(f.owner)}.`,
+      `${f.difficulty ? `Difficulty: ${difficulty(f).toLowerCase()}. ` : ""}${f.effort.note ? `${sentence(c.words(f.effort.note))} ` : ""}Owner: ${c.words(f.owner)}.`,
       ref ? `The working is at ${ref} in the raw notes.` : "",
     ].filter(Boolean);
-    return [c.words(f.title), "Task", PRIORITY[f.severity], description.join("\n\n"), "barometer", f.domain, f.ruleId, f.effort.size, c.words(f.owner), ref, list ? String(list.part?.total ?? list.rows.length) : ""];
+    return [c.words(f.title), "Task", PRIORITY[f.severity], description.join("\n\n"), "barometer", f.domain, f.ruleId, difficulty(f), c.words(f.owner), ref, list ? String(list.part?.total ?? list.rows.length) : ""];
   });
   return [TICKET_COLUMNS as readonly string[], ...rows].map((row) => row.map(csvCell).join(",")).join("\r\n") + "\r\n";
 }

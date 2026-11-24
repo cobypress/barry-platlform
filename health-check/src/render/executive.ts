@@ -1,14 +1,14 @@
 import { yearlyByFinding } from "../value/model.ts";
-import { withAmountNotes } from "./amount-notes.ts";
+import { scoreCaveatLine, withAmountNotes, withEditionNote } from "./amount-notes.ts";
 import { readinessLine } from "../narrative/readiness.ts";
 import { byKind, hasKinds, kindCounts } from "../narrative/unmeasured.ts";
 import { currentBody, POTENTIAL_REVENUE_RULES, TOP_ISSUE_COUNT, type BuiltReport } from "../narrative/sections.ts";
-import { areasOf, buildPlan, isSetupReview, isThinData, isUnpricedSaving, QUICK_WINS_HEADING, scorecard, thinDataLine, topIssues, UNPRICED, verdictOf, type PlanPhase } from "../narrative/select.ts";
+import { areasOf, buildPlan, isSetupReview, isThinData, isUnpricedSaving, QUICK_WINS_HEADING, QUICK_WINS_NAME, scorecard, thinDataLine, topIssues, UNPRICED, verdictOf, type PlanPhase } from "../narrative/select.ts";
 import type { CustomerWords, Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { canRelease, type Finding, type Metric } from "../schemas/index.ts";
 import { deliveryOutlookChart, scorecardChart, scorecardOptions, winRateBySegment } from "./charts.ts";
 import { compactMoney, longDate, monthYear } from "./format.ts";
-import { chartSlot, coverScore, document, documentTitle, effortText, estimateLines, paginate, inDocumentOrder, paragraphs, printed, renderContext, severityChip, textLines, valueFigure, valueText, type Render } from "./html.ts";
+import { chartSlot, coverScore, document, documentTitle, difficultySpan, estimateLines, paginate, inDocumentOrder, paragraphs, printed, renderContext, severityChip, textLines, valueFigure, valueText, type Render } from "./html.ts";
 import { noteSections, referenceMap, valueItemId } from "./references.ts";
 import { investmentPage, MONEY_CSS, moneyPage } from "./money.ts";
 import { PROGRESS_CSS, progressPage } from "./progress.ts";
@@ -63,7 +63,7 @@ function issueHeight(f: Finding): number {
 
 function issueCard(r: Render, f: Finding, rank: number): string {
   const value = valueText(r, f);
-  return `<article class="issue"><div class="meta"><span>${rank}</span>${severityChip(f)}<span>Confidence ${f.confidence}</span><span>${effortText(f)}</span><span>Owner: ${r.t(f.owner)}</span>${r.ref(f.id)}</div><h3>${r.t(f.title)}</h3><p>${r.t(f.summary)}</p><p class="action"><strong>What to do:</strong> ${r.t(f.recommendation)}</p><p class="value">${value.amount}<small>${value.note}</small></p></article>`;
+  return `<article class="issue"><div class="meta"><span>${rank}</span>${severityChip(f)}<span>Confidence ${f.confidence}</span>${difficultySpan(f)}<span>Owner: ${r.t(f.owner)}</span>${r.ref(f.id)}</div><h3>${r.t(f.title)}</h3><p>${r.t(f.summary)}</p><p class="action"><strong>What to do:</strong> ${r.t(f.recommendation)}</p><p class="value">${value.amount}<small>${value.note}</small></p></article>`;
 }
 
 /** A summary page holds about a dozen actions. The full report has each phase in full. */
@@ -237,7 +237,7 @@ function detailPage(r: Render, items: Array<{ ref: string; title: string }>): st
 
 export function executiveHtml(report: BuiltReport, pseudonyms: Pseudonymiser): string {
   // Each page with an amount in a currency not known by name says so (DECISIONS.md 700).
-  return withAmountNotes(report, (made) => inDocumentOrder(pseudonyms, (words) => executiveHtmlWith(made, pseudonyms, words)));
+  return withEditionNote(report, withAmountNotes(report, (made) => inDocumentOrder(pseudonyms, (words) => executiveHtmlWith(made, pseudonyms, words))));
 }
 
 function executiveHtmlWith(report: BuiltReport, pseudonyms: Pseudonymiser, words: CustomerWords): string {
@@ -253,7 +253,7 @@ function executiveHtmlWith(report: BuiltReport, pseudonyms: Pseudonymiser, words
   const top = topIssues(team, TOP_ISSUE_COUNT, report.added);
   const { phases: urgent, alsoFor, quickWins } = buildPlan(team, report.added);
   // Quick wins are their own box beside "Stabilise", not part of it (DECISIONS.md 366).
-  const plan = quickWins.length ? [urgent[0]!, { key: "quick", title: "Quick wins", from: 1, to: 30, findings: quickWins }, ...urgent.slice(1)] : urgent;
+  const plan = quickWins.length ? [urgent[0]!, { key: "quick", title: QUICK_WINS_NAME, from: 1, to: 30, findings: quickWins }, ...urgent.slice(1)] : urgent;
   const customer = intake?.customerName ?? run.customerRef ?? "Customer";
   const notMeasurable = team.filter((f) => f.status === "not_measurable").length;
   const setupReview = isSetupReview(run);
@@ -283,7 +283,7 @@ function executiveHtmlWith(report: BuiltReport, pseudonyms: Pseudonymiser, words
   // speaks for (DECISIONS.md 442). One alone stays where it always was.
   const voicesApart = hasBothVoices(report);
   add(`<div class="eyebrow">Verdict</div><div class="headline">${r.t(verdict.headline)}</div><div class="lead">${paragraphs(r, currentBody(built, "verdict").replace(`${verdict.headline}.\n\n`, ""))}</div>
-    <div class="stat-row" style="margin-top:18px">${report.overall.status === "measured" ? `<div class="stat"><b>${report.overall.score}</b><span>Barometer score</span></div>` : ""}<div class="stat"><b>${verdict.issues}</b><span>Issues</span></div><div class="stat"><b>${verdict.critical}</b><span>Critical</span></div><div class="stat"><b>${verdict.high}</b><span>High</span></div><div class="stat"><b>${notMeasurable}</b><span>Not measurable</span></div></div>${unmeasuredLine(r, report)}
+    <div class="stat-row" style="margin-top:18px">${report.overall.status === "measured" ? `<div class="stat"><b>${report.overall.score}</b><span>Barometer score</span></div>` : ""}<div class="stat"><b>${verdict.issues}</b><span>Issues</span></div><div class="stat"><b>${verdict.critical}</b><span>Critical</span></div><div class="stat"><b>${verdict.high}</b><span>High</span></div><div class="stat"><b>${notMeasurable}</b><span>Not measurable</span></div></div>${scoreCaveatLine(r, report)}${unmeasuredLine(r, report)}
     ${aiLine ? `<p class="small-note" style="margin-top:10px">${r.t(aiLine)}</p>` : ""}
     <h3 class="sub">What matters most</h3>
     <table class="grid"><thead><tr><th>Issue</th><th style="width:34%">Impact</th></tr></thead><tbody>${top.map((f) => `<tr><td>${r.t(f.title)}${r.ref(f.id)}</td><td>${valueText(r, f).amount}</td></tr>`).join("")}</tbody></table>
