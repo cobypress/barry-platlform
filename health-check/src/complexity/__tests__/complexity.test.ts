@@ -183,10 +183,11 @@ describe("the synthetic org", () => {
     const print = fingerprint(dir);
     assert.equal(print["scores.json"], "17cdb1708449d000");
     // Moved since by decision 628's hours and prompts, then 655's, 663's and 672's org-word marks, alone, and by
-    // decision 703's path insights and their table added to the run's files, which the fingerprint test holds.
-    assert.equal(print["findings.json"], "32e84d18880742a8");
-    assert.equal(print["metrics.json"], "9ff8e22ef7d45790");
-    assert.equal(print["raw-notes.md"], "168216d750bac078");
+    // decision 703's path insights and their table, then 706's stage probabilities and the stage read naming its
+    // probability field, added to the run's files, which the fingerprint test holds.
+    assert.equal(print["findings.json"], "9c3e03a2db501670");
+    assert.equal(print["metrics.json"], "45cfb9b67574f6bb");
+    assert.equal(print["raw-notes.md"], "cf2b74aabda9aa0a");
     const scores = JSON.parse(readFileSync(join(dir, "scores.json"), "utf8")) as Score[];
     const findings = JSON.parse(readFileSync(join(dir, "findings.json"), "utf8")) as Finding[];
     const overall = overallScore(scores, findings);

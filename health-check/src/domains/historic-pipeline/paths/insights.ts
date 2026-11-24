@@ -158,7 +158,7 @@ export function raised(c: Comparison | null, bar: number): c is Comparison {
 // ─── Who is compared ─────────────────────────────────────────────────────────
 
 /** Deals created before the org's stage history starts can't show every stage they were in, so they aren't compared. */
-function comparable(ctx: Ctx, p: Paths, historyStart: string | null): PathDeal[] {
+export function comparable(ctx: Ctx, p: Pick<Paths, "closed">, historyStart: string | null): PathDeal[] {
   if (!historyStart) return p.closed;
   const zone = zoneOf(ctx);
   return p.closed.filter((d) => localDay(new Date(d.deal.CreatedDate), zone) >= historyStart);

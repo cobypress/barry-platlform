@@ -15,6 +15,7 @@ import { andList, moneySaid } from "../../engine/said-forms.ts";
 import { dimensionWords } from "./process.ts";
 import { pathMetrics } from "./paths/variants.ts";
 import { pathInsights } from "./paths/insights.ts";
+import { probabilityMetrics, probabilityVsReality } from "./probability/index.ts";
 
 // The rules' titles, summaries, recommendations and reasons are written with
 // `said`, every stage and segment key with `org`, so the digest can say which
@@ -229,6 +230,6 @@ export const historicPipelineModule: DomainModule = {
   cloud: "sales",
   label: "Historic pipeline",
   extractors: [schemaExtractor, usersExtractor, stagesExtractor, opportunitiesExtractor, priorWinsExtractor],
-  metrics: [pipelineMetrics, deepDiveMetrics, processMetrics, driverMetrics, pathMetrics],
-  rules: [unmappedStages, calibrationContradiction, segmentDivergence, ...PROCESS_RULES, pathInsights],
+  metrics: [pipelineMetrics, deepDiveMetrics, processMetrics, driverMetrics, pathMetrics, probabilityMetrics],
+  rules: [unmappedStages, calibrationContradiction, segmentDivergence, ...PROCESS_RULES, pathInsights, probabilityVsReality],
 };

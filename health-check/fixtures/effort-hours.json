@@ -612,6 +612,12 @@
       "high": 4,
       "basis": "Preparing the analysis and the options for the people who decide; their time deciding, and making the change, isn't counted"
     },
+    "pipe.probability-vs-reality": {
+      "fixComplexity": "simple",
+      "low": 2,
+      "high": 4,
+      "basis": "Preparing the analysis and the options for the people who decide; their time deciding, and making the change, isn't counted"
+    },
     "pipe.segment-divergence": {
       "fixComplexity": "simple",
       "low": 2,

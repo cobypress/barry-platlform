@@ -33,6 +33,7 @@ export const SECTION_IDS: Record<string, string> = {
   "Where a finding is in Setup": "setup-paths",
   "The org's address for links into Setup": "setup-host",
   "An automatic run's currency": "automatic-currency",
+  "Stage probabilities": "stage-probability",
 };
 
 export type QuestionItem = { id: string; section: string; text: string };

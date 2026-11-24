@@ -32,9 +32,13 @@ export const UNSCORED_RULES: ReadonlySet<string> = new Set(["tech.lint-data-acce
  * twice, and a path that is won more often is no fault. Kept apart from
  * UNSCORED_RULES, which a re-check reads as the code checker's groups.
  */
-export const INSIGHT_RULES: ReadonlySet<string> = new Set(["pipe.path-insights"]);
-/** The measure the path insights are read from, which goes where they go (DECISIONS.md 703). */
-export const INSIGHT_METRICS: ReadonlySet<string> = new Set(["historic.path_variants"]);
+export const INSIGHT_RULES: ReadonlySet<string> = new Set(["pipe.path-insights", "pipe.probability-vs-reality"]);
+/**
+ * The measures the insights are read from, which go where they go (DECISIONS.md
+ * 703). The stage probabilities against what happens (706) join them: a setting
+ * held against closed deals, which is no fault to score, kept and not yet shown.
+ */
+export const INSIGHT_METRICS: ReadonlySet<string> = new Set(["historic.path_variants", "historic.stage_probability_vs_won"]);
 const notScored = (ruleId: string): boolean => SETUP_RULES.has(ruleId) || UNSCORED_RULES.has(ruleId) || INSIGHT_RULES.has(ruleId);
 
 const WEIGHTS: Record<string, number> = {

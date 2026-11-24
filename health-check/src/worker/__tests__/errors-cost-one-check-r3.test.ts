@@ -440,3 +440,22 @@ describe("the inventory's fill rates read again after a blip (round 4, P5)", () 
     assert.doesNotMatch(text, /after several tries/);
   });
 });
+
+describe("706's stage read with 702's retry (merge check)", () => {
+  test("a 503 on the OpportunityStage read before the last delivery is read again, never taken as the field missing", async () => {
+    // Down through the client's own retries on delivery 1, answering on delivery 2.
+    let down = true;
+    let hits = 0;
+    const w = await world((r) => (down && soql(r).includes("FROM OpportunityStage") && soql(r).includes("DefaultProbability") ? (hits++, body(503, "SERVER_UNAVAILABLE")) : null), "automatic");
+    await w.deliver(1);
+    assert.ok(hits > 1);
+    assert.equal(w.stored().run.status, "extracting");
+    down = false;
+    await w.deliver(2);
+    assert.equal(w.stored().run.status, "released");
+    assert.ok(!(runJson(w.deps.runsDir).readsRefused ?? []).some((r) => r.step === "opportunity-stages"));
+    const stages = JSON.parse(readFileSync(join(w.deps.runsDir, RUN_ID, "checkpoints", "opportunity-stages.json"), "utf8")) as { output?: { probabilityRefused?: unknown; missingFields?: unknown } };
+    assert.equal(stages.output?.probabilityRefused, undefined);
+    assert.equal(stages.output?.missingFields, undefined);
+  });
+});
