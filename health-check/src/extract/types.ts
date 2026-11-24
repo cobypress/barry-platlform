@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { Calibration, RefusedRead } from "../schemas/index.ts";
 import { refusalSentence, type RefusalKind } from "../salesforce/refusal-words.ts";
-import { classifyError, isUnavailable, type QueryApi, type QueryOptions, type SalesforceClient, type SalesforceError } from "../salesforce/client.ts";
+import { classifyError, isUnavailable, lastDelivery, type QueryApi, type QueryOptions, type SalesforceClient, type SalesforceError } from "../salesforce/client.ts";
 import type { ApexSourceStore } from "./apex-source.ts";
 import type { CodeLintTools } from "./code-lint.ts";
 
@@ -115,8 +115,11 @@ export function refusalReason(err: SalesforceError, given: string): string {
   // For a missing field, its API name alone, so we can see which without Salesforce's message.
   const field = err.code === "INVALID_FIELD" ? /No such column '([A-Za-z][A-Za-z0-9_]{0,79})'/.exec(err.message)?.[1] : undefined;
   const kind = classifyError(err);
-  // Lost, not refused: Salesforce may answer it next time (a fault on the last delivery, or one count of a composite call).
+  // Lost, not refused: Salesforce may answer it next time. Before the worker's last delivery that is a retry,
+  // never a check given up: thrown, so the step isn't saved with it and the queue's next delivery reads it
+  // again. Only the last delivery keeps it as lost (DECISIONS.md 702).
   const lost = kind === "instance_unavailable";
+  if (lost && lastDelivery.getStore() !== true) throw err;
   refusals.getStore()?.({ read: what, code: err.code.replace(/[^A-Za-z0-9_]/g, "").slice(0, 60) || "UNKNOWN", status: err.status, ...(field ? { field } : {}), ...(lost ? { lost: true as const } : {}) });
   return refusalSentence(what, refusalKind(err, kind), err.code);
 }

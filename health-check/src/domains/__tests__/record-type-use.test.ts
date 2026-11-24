@@ -14,7 +14,7 @@ import { Pseudonymiser, type PseudonymEntry } from "../../privacy/pseudonymiser.
 import { escapeXml } from "../../render/format.ts";
 import { renderContext, valueText } from "../../render/html.ts";
 import { ApiBudget, BudgetStopError } from "../../salesforce/budget.ts";
-import { SalesforceClient, SalesforceError } from "../../salesforce/client.ts";
+import { lastDelivery, SalesforceClient, SalesforceError } from "../../salesforce/client.ts";
 import type { Transport, TransportRequest } from "../../salesforce/transport.ts";
 import type { Finding } from "../../schemas/index.ts";
 import { analyseExtracts, clone, loadExtracts, tempDir } from "../../testing/harness.ts";
@@ -409,12 +409,14 @@ describe("what isn't judged", () => {
     ["a 503 SERVER_UNAVAILABLE", { statusCode: 503, result: [{ errorCode: "SERVER_UNAVAILABLE", message: "Server temporarily unavailable" }] }, "Cut__c couldn't be read, because Salesforce didn't answer as it should."],
     ["a bare 500 with no code", { statusCode: 500, result: [{}] }, "Cut__c couldn't be read, because Salesforce didn't answer as it should."],
   ] as const) {
-    test(`one count answered with ${name} is that object refused, and the step finishes`, async () => {
+    test(`one count answered with ${name} is read again before the last delivery, and on the last is that object not judged, and the step finishes`, async () => {
       const failing = editComposite((soql, answer) => {
         // Only Cut__c's count of every record: its other count comes back.
         if (/FROM Cut__c /.test(soql) && !/CreatedDate >=/.test(soql)) Object.assign(answer, structuredClone(item));
       });
-      const { out } = await read(T, TRAPS, failing);
+      // Salesforce didn't answer: before the worker's last delivery the step stops, to be read again (DECISIONS.md 702).
+      await assert.rejects(read(T, TRAPS, failing), (err: unknown) => err instanceof SalesforceError);
+      const { out } = await lastDelivery.run(true, () => read(T, TRAPS, failing));
       assert.deepEqual(out.refused.map((r) => r.object).sort(), ["Broken__c", "Cut__c"]);
       assert.equal(out.refused.find((r) => r.object === "Cut__c")!.reason, reason);
       assert.equal(out.counted.Cut__c, undefined);

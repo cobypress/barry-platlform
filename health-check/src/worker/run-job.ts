@@ -175,13 +175,19 @@ function againOf(dir: string): string | null {
   }
 }
 
-/** The answer a "Run again" gets when the console hasn't set the run back first: nothing read, nothing removed. */
 /** The answer an older "Run again" gets once a newer press has started the run afresh: nothing read, nothing removed. */
 export const AGAIN_SUPERSEDED = "A newer Run again has started this run afresh, so this older one read nothing and left its folder as it was.";
 
-/** Why an automatic run that lost a read to Salesforce not answering failed rather than being released (DECISIONS.md 702). */
-export const READS_LOST = "Salesforce didn't answer part of what the run reads, even after several tries, so the run wasn't released with those checks missing. Run it again once Salesforce is answering.";
+/** Why an automatic run whose lost reads look like an outage failed rather than being released, and what a "Run again" then does (DECISIONS.md 702). */
+export const READS_LOST = "Salesforce didn't answer part of what the run reads, even after several tries, so the run wasn't released with those checks missing. Run it again once Salesforce is answering. If it loses them again, the run is released with those checks marked not measured.";
 
+/** What staff read on the run's steps when a "Run again" after READS_LOST lost such reads again and was released (DECISIONS.md 702). */
+export const READS_LOST_RELEASED = "Salesforce didn't answer part of what the run reads again after it was run again, so it was released with those checks marked not measured.";
+
+/** The step that carries READS_LOST_RELEASED, which the console lists with the run's steps. */
+export const READS_LOST_STEP = "reads-lost";
+
+/** The answer a "Run again" gets when the console hasn't set the run back first: nothing read, nothing removed. */
 export const AGAIN_NOT_RESET = "Run again starts an automatic run afresh only once it's set back to extracting with no hold, so nothing was read and its folder is as it was.";
 
 /**
@@ -249,7 +255,14 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
   const fail = async (reason: string): Promise<JobOutcome> => {
     // Failed for good: nothing will resume to use the Apex code kept for Claude's summaries (DECISIONS.md 491).
     forgetApexSource(join(deps.runsDir, runId), runId, log);
-    await deps.store.recordRunFailure(runId, reason, now().toISOString());
+    // Tried twice: a blip in the store here would leave the queue's neutral reason in place of the true one (DECISIONS.md 702).
+    try {
+      await deps.store.recordRunFailure(runId, reason, now().toISOString());
+    } catch (err) {
+      if (err instanceof RunClosedError) throw err;
+      log(`Run ${runId}'s failure couldn't be recorded (${safeReason(err)}), so it's tried once more.`);
+      await deps.store.recordRunFailure(runId, reason, now().toISOString());
+    }
     return { outcome: "failed", detail: reason };
   };
 
@@ -414,14 +427,17 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
   // those checks not measured, so an org whose retrieve fails every time isn't locked out for ever. One read lost
   // every time, and any refusal (edition, permission, Salesforce saying no), costs only its check. A
   // consultant-led run goes to review (DECISIONS.md 702).
+  // Lost reads come only from the last delivery: before it, a read Salesforce didn't answer is thrown and read again.
   const lost = (result.run.readsRefused ?? []).filter((r) => r.lost === true);
-  if (input.run.reviewMode === "automatic" && input.run.product === "barometer" && lossLooksLikeOutage(lost)) {
+  let lostAgain = false;
+  if (input.run.reviewMode === "automatic" && input.run.product === "barometer" && attempt.final && lossLooksLikeOutage(lost)) {
     const steps = [...new Set(lost.map((r) => r.step))].join(", ");
     if (!(again !== undefined && lostBeforeAgain(dir))) {
       log(`Automatic run ${runId} lost ${lost.length} read${lost.length === 1 ? "" : "s"} to Salesforce not answering (${steps}), so it isn't released.`);
       return fail(READS_LOST);
     }
-    log(`Automatic run ${runId} lost ${lost.length} read${lost.length === 1 ? "" : "s"} to Salesforce not answering again (${steps}) after a person ran it again, so it goes on with those checks not measured.`);
+    log(`Automatic run ${runId} lost ${lost.length} read${lost.length === 1 ? "" : "s"} to Salesforce not answering again (${steps}) after a person ran it again, so it goes on with those checks not measured; the run's steps say so.`);
+    lostAgain = true;
   }
 
   // An automatic run's release or hold, once decided (DECISIONS.md 693).
@@ -505,8 +521,11 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
       ? decideRelease({ runId, sections, checked: checkedOne, findings: result.output!.findings, overall, previousScore: await deps.store.lastReleasedScore(runId, input.run.orgId.slice(0, 15), input.run.product), now: now().toISOString() })
       : null;
     if (decision) log(decision.kind === "release" ? `Automatic run ${runId} passed every check and is released.` : `Automatic run ${runId} is held for a person: ${decision.reason} ${JSON.stringify(decision.counts)}.`);
+    const progress = progressOf(result.run);
+    // Where staff see it without a flag of its own: the run's steps (DECISIONS.md 702).
+    if (lostAgain) progress.steps.push({ id: READS_LOST_STEP, version: 1, status: "done", calls: 0, finishedAt: now().toISOString(), error: READS_LOST_RELEASED });
     await deps.store.saveRunOutput(runId, {
-      progress: progressOf(result.run),
+      progress,
       runDir: dir,
       // Every finding, the path insights with them (DECISIONS.md 703): the documents choose theirs, the console keeps all.
       findings: allFindings(result.output!),

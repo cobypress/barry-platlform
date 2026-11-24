@@ -179,14 +179,16 @@ export const fillRatesExtractor: Extractor<Sourced<FillRateData>> = {
         const chunk = queries.slice(i, i + FILL_RATE_BATCH);
         // Each count is an API call in the budget, not each composite call (DECISIONS.md 609).
         ctx.client.budget.assertCanSpend(chunk.length);
+        let answers: Awaited<ReturnType<typeof ctx.client.queryBatch<Record<string, number>>>> | null = null;
         try {
-          const answers = await ctx.client.queryBatch<Record<string, number>>(chunk);
-          results.push(...answers.map((a, j) => (a.ok ? { ok: true as const, row: a.result.records[0] ?? {} } : { ok: false as const, reason: refusalReason(a.error, readName({ kind: "soql", api: "rest", query: chunk[j]! })) })));
+          answers = await ctx.client.queryBatch<Record<string, number>>(chunk);
         } catch (err) {
           // A budget stop sent nothing, and goes up from here.
           const reason = failedCount(err, "This information");
           results.push(...chunk.map(() => ({ ok: false as const, reason })));
         }
+        // Outside the catch: a count Salesforce didn't answer before the last delivery is thrown, to be read again (DECISIONS.md 702).
+        if (answers) results.push(...answers.map((a, j) => (a.ok ? { ok: true as const, row: a.result.records[0] ?? {} } : { ok: false as const, reason: refusalReason(a.error, readName({ kind: "soql", api: "rest", query: chunk[j]! })) })));
         // The call went out, and the client recorded it once; the rest of its counts are recorded here.
         if (chunk.length > 1) ctx.client.budget.recordCall(chunk.length - 1);
       }

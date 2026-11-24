@@ -12,7 +12,9 @@ import { refusalReason } from "../../extract/types.ts";
 import { refusalSpans } from "../../salesforce/refusal-words.ts";
 import { HEAVY_QUEUE, LAST_TRY_LOST_REASON, lostForGood, lostRecorder, startQueueWorker, type BullModule, type QueueJob, type QueueWorker } from "../bullmq.ts";
 import { JobBusyError } from "../lock.ts";
-import { AGAIN_FILE, lossLooksLikeOutage, READS_LOST } from "../run-job.ts";
+import { AGAIN_FILE, lossLooksLikeOutage, READS_LOST, READS_LOST_RELEASED, READS_LOST_STEP } from "../run-job.ts";
+import { keepRefused } from "../../engine/run.ts";
+import type { RefusedRead, Run } from "../../schemas/index.ts";
 import type { Transport, TransportRequest, TransportResponse } from "../../salesforce/transport.ts";
 import type { Finding } from "../../schemas/index.ts";
 
@@ -244,7 +246,10 @@ describe("refused only when Salesforce said no (round 3, finding 2b)", () => {
     [new SalesforceError(400, "MALFORMED_QUERY", "x"), "Salesforce refused this read."],
   ] as const) {
     test(`${err.code}: "…because ${ending}"`, () => {
-      const sentence = refusalReason(err, what);
+      // On the last delivery: before it, a read Salesforce didn't answer is thrown, to be read again.
+      const sentence = lastDelivery.run(true, () => refusalReason(err, what));
+      if (ending.startsWith("Salesforce didn't") && !["QUERY_TIMEOUT", "UNKNOWN_EXCEPTION"].includes(err.code)) assert.throws(() => refusalReason(err, what), (e: unknown) => e === err);
+      else assert.equal(refusalReason(err, what), sentence);
       assert.equal(sentence, `${what} couldn't be read, because ${ending}`);
       // Known as ours, so an automatic run's wording guard passes it.
       assert.deepEqual(refusalSpans(sentence), []);
@@ -304,6 +309,9 @@ describe("one read that fails every time is the org's, not an outage (round 3, t
     const findings = (w.stored().output as { findings: Finding[] }).findings;
     assert.ok(findings.some((f) => /Metadata API couldn't be read, because Salesforce didn't answer as it should\.$/.test(f.notMeasurableReason ?? "")));
     assert.ok(w.deps.lines.some((l) => /after a person ran it again, so it goes on with those checks not measured/.test(l)));
+    // Staff see it on the run's steps, with no flag of its own (round 4).
+    const note = w.stored().run.steps.find((s) => s.id === READS_LOST_STEP);
+    assert.deepEqual([note?.status, note?.error], ["done", READS_LOST_RELEASED]);
   });
 
   test("a Run again after any other failure still fails with READS_LOST on an outage", async () => {
@@ -316,5 +324,86 @@ describe("one read that fails every time is the org's, not an outage (round 3, t
     await w.deliver(3, again);
     assert.equal(w.stored().run.status, "failed");
     assert.equal(w.stored().run.steps.find((s) => s.id === "worker")?.error, READS_LOST);
+  });
+});
+
+const isComposite = (r: TransportRequest): boolean => r.url.includes("/composite/batch");
+/** Every count in a composite call answered 503: Salesforce down for those counts. */
+const composite503 = (r: TransportRequest): TransportResponse | null => {
+  if (!isComposite(r)) return null;
+  const reqs = (JSON.parse(String(r.body)) as { batchRequests: Array<{ url: string }> }).batchRequests;
+  return { status: 200, header: () => null, text: JSON.stringify({ hasErrors: true, results: reqs.map(() => ({ statusCode: 503, result: [{ errorCode: "SERVER_UNAVAILABLE", message: "SF WORDING" }] })) }) };
+};
+
+describe("a blip before the last delivery is read again, never given up (round 4)", () => {
+  test("P1: every composite count 503 on delivery 1 of 3: still running, nothing failed or flagged; Salesforce answering on delivery 2, released with nothing lost", async () => {
+    let down = true;
+    const w = await world((r) => (down ? composite503(r) : null), "automatic");
+    await w.deliver(1);
+    assert.equal(w.stored().run.status, "extracting");
+    assert.deepEqual(w.flags(), []);
+    assert.equal(w.stored().run.steps.find((s) => s.id === "worker"), undefined);
+    down = false;
+    await w.deliver(2);
+    assert.equal(w.stored().run.status, "released");
+    assert.deepEqual((runJson(w.deps.runsDir).readsRefused ?? []).filter((r) => r.lost), []);
+  });
+
+  test("P1: the counts 503 on all three deliveries: failed with READS_LOST on the last only", async () => {
+    const w = await world((r) => composite503(r), "automatic");
+    await w.deliver(1);
+    await w.deliver(2);
+    assert.equal(w.stored().run.status, "extracting");
+    assert.deepEqual(w.flags(), []);
+    await w.deliver(3);
+    assert.equal(w.stored().run.status, "failed");
+    assert.equal(w.stored().run.steps.find((s) => s.id === "worker")?.error, READS_LOST);
+    assert.deepEqual(w.flags(), ["run_failed"]);
+  });
+
+  test("P2: one composite step's counts 503 on every delivery: released, that step's checks not measured", async () => {
+    // The record-type counts alone (the first count of each object is "SELECT RecordTypeId, COUNT(Id)").
+    const firstQuery = (r: TransportRequest): string => decodeURIComponent((JSON.parse(String(r.body)) as { batchRequests: Array<{ url: string }> }).batchRequests[0]!.url).replace(/\+/g, " ");
+    const w = await world((r) => (isComposite(r) && /q=SELECT RecordTypeId/.test(firstQuery(r)) ? composite503(r) : null), "automatic");
+    await w.deliver(1);
+    await w.deliver(2);
+    assert.equal(w.stored().run.status, "extracting");
+    await w.deliver(3);
+    const lost = (runJson(w.deps.runsDir).readsRefused ?? []).filter((r) => r.lost);
+    assert.ok(lost.length > 0);
+    assert.equal(new Set(lost.map((r) => r.step)).size, 1, JSON.stringify(lost));
+    assert.equal(w.stored().run.status, "released");
+  });
+
+  test("P4: the run's own failure record fails once on the last try: tried again, so READS_LOST stands, not the queue's reason", async () => {
+    const w = await world((r) => (isSoap(r) ? SERVER_FAULT : null), "automatic");
+    await w.deliver(1);
+    const store = w.deps.store as unknown as { recordRunFailure: (...a: unknown[]) => Promise<void> };
+    const real = store.recordRunFailure.bind(w.deps.store);
+    let n = 0;
+    store.recordRunFailure = async (...a: unknown[]) => {
+      if (n++ === 0) throw new Error("connection terminated unexpectedly");
+      return real(...a);
+    };
+    await w.deliver(3);
+    assert.equal(w.stored().run.status, "failed");
+    assert.equal(w.stored().run.steps.find((s) => s.id === "worker")?.error, READS_LOST);
+    assert.equal(n, 2);
+  });
+
+  test("READS_LOST says what a Run again does if the reads are lost again", () => {
+    assert.match(READS_LOST, /If it loses them again, the run is released with those checks marked not measured\.$/);
+  });
+});
+
+describe("the 200 cap keeps one lost read (round 4)", () => {
+  test("200 refusals, then a lost read: the lost one is kept; a second lost one is not", () => {
+    const run = { readsRefused: Array.from({ length: 200 }, (_, i) => ({ step: "s", read: `O${i}__c`, code: "INVALID_TYPE", status: 400 })) } as unknown as Run;
+    const lines: string[] = [];
+    const lost = (read: string): RefusedRead => ({ step: "metadata", read, code: "Server", status: 500, lost: true });
+    keepRefused(run, [{ step: "s", read: "More__c", code: "INVALID_TYPE", status: 400 }, lost("A"), lost("B")], (l) => lines.push(l));
+    assert.equal(run.readsRefused!.length, 201);
+    assert.deepEqual(run.readsRefused!.filter((r) => r.lost).map((r) => r.read), ["A"]);
+    assert.deepEqual(lines, ["  metadata: Salesforce didn't answer a read of A (Server, HTTP 500), so the checks it feeds are not measurable"]);
   });
 });

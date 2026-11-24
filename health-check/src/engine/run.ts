@@ -411,7 +411,7 @@ const MAX_REFUSED = 200;
  * 702): what was read, and Salesforce's code and status. For us: the customer
  * reads only the plain reason on the checks it cost.
  */
-function keepRefused(run: Run, refused: RefusedRead[], log: (message: string) => void): void {
+export function keepRefused(run: Run, refused: RefusedRead[], log: (message: string) => void): void {
   for (const read of refused) {
     const kept = (run.readsRefused ??= []);
     if (kept.some((k) => k.step === read.step && k.read === read.read && k.code === read.code)) continue;

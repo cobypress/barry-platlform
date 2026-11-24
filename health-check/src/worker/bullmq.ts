@@ -179,7 +179,7 @@ const STALLED_TOO_OFTEN = /stalled more than allowable limit/;
 export const LOST_REASON = "The worker stopped part-way more than once, by a restart or by running out of memory, so this was given up. Queue it again: a run picks up from where it got to.";
 
 /** What the console shows for a job whose last try threw before the handler could record it (DECISIONS.md 702). */
-export const LAST_TRY_LOST_REASON = "The worker's last try at this stopped before it could start, so it was given up. Queue it again: a run picks up from where it got to.";
+export const LAST_TRY_LOST_REASON = "The last try at this run stopped with an error before its result could be recorded. Run it again.";
 
 /**
  * Whether a job that failed has no try left and its failure is recorded

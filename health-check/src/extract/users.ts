@@ -1,7 +1,7 @@
 import { isUnavailable } from "../salesforce/client.ts";
 import { isNoOwnerField, recordCountsExtractor } from "./configuration.ts";
 import { FIELD_SPECS, planFields } from "./fields.ts";
-import { batchRefused, daysBefore, readSoql, soqlWindow, type ExtractContext, type Extractor, type Sourced, type SourceInfo } from "./types.ts";
+import { batchRefused, daysBefore, readSoql, refusalReason, soqlWindow, type ExtractContext, type Extractor, type Sourced, type SourceInfo } from "./types.ts";
 
 export type UserRow = {
   Id: string;
@@ -143,7 +143,10 @@ export const ownershipExtractor: Extractor<OwnershipScan> = {
     results.forEach((result, i) => {
       const object = objects[i]!;
       if (!result.ok) {
-        if (!isNoOwnerField(result.error)) scan.incomplete.push(object);
+        if (isNoOwnerField(result.error)) return;
+        // Noted, and thrown for a retry when Salesforce didn't answer before the last delivery (DECISIONS.md 702).
+        refusalReason(result.error, object);
+        scan.incomplete.push(object);
         return;
       }
       // Aggregates can't page, so a capped result can't prove a user owns nothing.
