@@ -105,6 +105,13 @@ For Claude's summaries of each health check's Apex classes and triggers (DECISIO
 | --- | --- |
 | `HC_HANDBOOK_SUMMARIES` | `on`, exactly, to turn them on: the Apex step keeps the redacted code in the run folder until Claude has summarised it, and then deletes it. Anything else, or unset, is off. It needs Claude set up as above: without Claude no code is kept. The log says at every start which of the three it is: off, on, or on with Claude not set up. Kept code is deleted after seven days by the daily retention sweep even when `HC_CLEANUP_DRY_RUN` is 1: the dry run doesn't cover it |
 
+For an automatic run's three PDFs, made when the customer asks in the portal and sealed into the console's database, never put in Drive (DECISIONS.md 698). Leave both unset until the console's migration `20261212_health_check_portal_documents.sql` is applied and the console's portal downloads are live.
+
+| Variable | Value |
+| --- | --- |
+| `HC_DOCUMENTS_ON_DEMAND` | `on`, exactly, to make them. Anything else, or unset, is off: every request is refused and nothing is made. The log says at every start whether it is off, on, or on with the key unusable |
+| `HC_DOCUMENTS_KEY` | 32 random bytes, base64: `openssl rand -base64 32`, different from `HC_CONNECT_KEY`, `HC_TOKEN_KEY` and `HC_MICROSITE_KEY`. The console gets the same value to open them. Missing or wrong, the worker still starts and every request is refused |
+
 Keep `HC_TOKEN_KEY` somewhere safe as well. Without it the stored tokens can't be opened, and every customer would have to connect again.
 
 When it starts, the log says `Taking jobs from health-check-jobs, 2 at a time.`, then whether Claude drafts the sections. If a variable is missing it stops and names it.
