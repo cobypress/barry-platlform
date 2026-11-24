@@ -16,6 +16,7 @@ import { automaticSyntheticCalibration } from "../../testing/automatic.ts";
 import { tempDir } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration, syntheticProvider } from "../../testing/replay.ts";
 import { Simulator, type SimulatorOptions } from "../../testing/simulator.ts";
+import type { Transport, TransportResponse } from "../../salesforce/transport.ts";
 import { AS_OF, CONNECTED_USER } from "../../testing/synthetic-org.ts";
 
 // Which rules a run checked, and which the engine knew (DECISIONS.md 718): the
@@ -29,9 +30,11 @@ const SETUP_AREAS = new Set(["configuration", "automation", "technical_health", 
 const INSIGHTS = ["pipe.path-insights", "pipe.probability-vs-reality"];
 /** The code checker's six, written out. */
 const CHECKER = ["tech.lint-complexity", "tech.lint-data-access", "tech.lint-injection", "tech.lint-limits", "tech.lint-swallowed-errors", "tech.lint-tests"];
+/** The rule an automatic run's calibration, the org's own stage flags, gives nothing to compare, written out: not run on one. */
+const NOT_ON_AUTOMATIC = "pipe.calibration-contradicts-org";
 
-/** The rules a run of these modules and scope evaluates, by hand: the checker's six only with its step. */
-function expectedRun(modules: DomainModule[], scope: "complete" | "essentials", checkerStep: boolean): string[] {
+/** The rules a run of these modules and scope evaluates, by hand: the checker's six only with its step, the stage-flag check never on an automatic run. */
+function expectedRun(modules: DomainModule[], scope: "complete" | "essentials", checkerStep: boolean, mode: "consultant" | "automatic" = "consultant"): string[] {
   const ids: string[] = [];
   for (const m of modules) {
     if (scope === "essentials" && !SETUP_AREAS.has(m.id)) continue;
@@ -39,6 +42,7 @@ function expectedRun(modules: DomainModule[], scope: "complete" | "essentials", 
       if (scope === "essentials" && r.records) continue;
       if (INSIGHTS.includes(r.id)) continue;
       if (CHECKER.includes(r.id) && !checkerStep) continue;
+      if (r.id === NOT_ON_AUTOMATIC && mode === "automatic") continue;
       ids.push(r.id);
     }
   }
@@ -62,8 +66,13 @@ function digestOf(dir: string): RunDigest {
 const fileOf = (dir: string): RulesRun => RulesRun.parse(JSON.parse(readFileSync(join(dir, RULES_FILE), "utf8")));
 const findingsOf = (dir: string): Finding[] => JSON.parse(readFileSync(join(dir, "findings.json"), "utf8")) as Finding[];
 
-/** The digest's lists are the folder's, sorted and once each; every finding's rule is listed; rulesKnown holds rulesRun. */
-function assertConsistent(dir: string, digest: RunDigest, noRow: string[] = []): void {
+/**
+ * The digest's lists are the folder's, sorted and once each; every finding's
+ * rule is listed; rulesKnown holds rulesRun; and every rule listed has a
+ * finding row, an issue, a pass or not measurable, in the folder and in the
+ * digest, so the console can read a listed rule's silence as nothing at all.
+ */
+function assertConsistent(dir: string, digest: RunDigest, path?: string): void {
   const file = fileOf(dir);
   assert.deepEqual(digest.rulesRun, file.rulesRun);
   assert.deepEqual(digest.rulesKnown, file.rulesKnown);
@@ -73,8 +82,13 @@ function assertConsistent(dir: string, digest: RunDigest, noRow: string[] = []):
   for (const id of INSIGHTS) assert.ok(!file.rulesRun.includes(id) && !file.rulesKnown.includes(id), `${id} is an insight`);
   const withRows = new Set(findingsOf(dir).map((f) => f.ruleId).filter((id) => !INSIGHTS.includes(id)));
   for (const id of withRows) assert.ok(file.rulesRun.includes(id), `${id} has a finding but isn't listed`);
-  assert.deepEqual(file.rulesRun.filter((id) => !withRows.has(id)), noRow, "the rules listed with no finding row");
+  assert.deepEqual(file.rulesRun.filter((id) => !withRows.has(id)), [], "the rules listed with no finding row");
+  const digestRows = new Set(digest.findings.map((f) => f.ruleId));
+  assert.deepEqual(digest.rulesRun!.filter((id) => !digestRows.has(id)), [], "the rules listed with no finding in the digest");
+  if (path) held.add(path);
 }
+/** The paths below whose lists were held to all of that. */
+const held = new Set<string>();
 
 const automatic = await automaticSyntheticCalibration();
 const consultant = await run(new Simulator());
@@ -114,15 +128,18 @@ describe("the rules a run checked (DECISIONS.md 718)", () => {
     assertConsistent(pulse.dir, digest);
   });
 
-  test("an automatic run lists the stage check that has nothing to say on it, with no finding row; its checked digest still traces and is released", () => {
-    assert.deepEqual(fileOf(auto.dir).rulesRun, expectedRun(SALES_CLOUD_MODULES, "complete", false));
+  test("an automatic run doesn't run or list the stage check its calibration gives nothing to compare, though it knows it; its checked digest still traces and is released", () => {
+    assert.deepEqual(fileOf(auto.dir).rulesRun, expectedRun(SALES_CLOUD_MODULES, "complete", false, "automatic"));
+    assert.ok(!fileOf(auto.dir).rulesRun.includes(NOT_ON_AUTOMATIC) && fileOf(auto.dir).rulesKnown.includes(NOT_ON_AUTOMATIC));
+    assert.ok(fileOf(consultant.dir).rulesRun.includes(NOT_ON_AUTOMATIC));
+    assert.ok(!findingsOf(auto.dir).some((f) => f.ruleId === NOT_ON_AUTOMATIC));
     const loaded = loadRun(auto.dir);
     const checked = checkedDigest({ input: loaded.input, pseudonyms: loaded.pseudonyms, inventory: null, madeAt: MADE_AT });
     assert.equal(checked.held, null);
     assert.equal(checked.unmatched, 0);
     assert.equal(checked.unmarked, 0);
     assert.deepEqual(checked.digest!.rulesRun, fileOf(auto.dir).rulesRun);
-    assertConsistent(auto.dir, checked.digest!, ["pipe.calibration-contradicts-org"]);
+    assertConsistent(auto.dir, checked.digest!);
   });
 
   test("the code checker's six are listed when its step ran, even failed, and not without it", async () => {
@@ -151,9 +168,9 @@ describe("the rules a run checked (DECISIONS.md 718)", () => {
   test("Professional Edition: the checks the edition blocked ran, not measurable, and are listed", async () => {
     const pe = await run(new Simulator({ organizationType: "Professional Edition" }), { calibration: automatic, answers: [], reviewMode: "automatic", modules: ALL_MODULES });
     assert.equal(pe.run.orgProfile?.edition, "Professional Edition");
-    assert.deepEqual(fileOf(pe.dir).rulesRun, expectedRun(ALL_MODULES, "complete", false));
+    assert.deepEqual(fileOf(pe.dir).rulesRun, expectedRun(ALL_MODULES, "complete", false, "automatic"));
     assert.ok(findingsOf(pe.dir).some((f) => f.status === "not_measurable" && /Professional Edition/.test(f.notMeasurableReason ?? "")));
-    assertConsistent(pe.dir, digestOf(pe.dir), ["pipe.calibration-contradicts-org"]);
+    assertConsistent(pe.dir, digestOf(pe.dir));
   });
 
   test("a run stopped at the budget and resumed lists what the same run straight through lists", async () => {
@@ -199,5 +216,61 @@ describe("the rules a run checked (DECISIONS.md 718)", () => {
     const digest = digestOf(consultant.dir);
     const texts = new Set(digestTexts(digest));
     for (const id of [...digest.rulesRun!, ...digest.rulesKnown!]) assert.ok(!texts.has(id), id);
+  });
+});
+
+/** Salesforce down as an outage looks, as the held-run tests have it (DECISIONS.md 715): every Metadata API call answers a server fault. */
+const SOAP_DOWN: TransportResponse = {
+  status: 500,
+  header: () => null,
+  text: `<?xml version="1.0" encoding="UTF-8"?><soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"><soapenv:Body><soapenv:Fault><faultcode>soapenv:Server</faultcode><faultstring>An unexpected error occurred. ErrorId: 1</faultstring></soapenv:Fault></soapenv:Body></soapenv:Envelope>`,
+};
+const losing = (sim: Simulator): Transport => ({
+  send: (r) => (r.headers.SOAPAction ? Promise.resolve(SOAP_DOWN) : sim.send(r)),
+});
+const REFUSING: SimulatorOptions = { failQuery: (soql) => (/FROM (Opportunity|Lead|Case)\b/.test(soql) ? { errorCode: "INSUFFICIENT_ACCESS", message: "Not allowed." } : null) };
+
+/** Every path a run takes, written out: each product and scope, each review mode, each way reads go, and Professional Edition. */
+const PRODUCTS = [
+  { name: "a health check", options: { product: "barometer", scope: "complete" } },
+  { name: "a set-up-only review", options: { product: "barometer", scope: "essentials" } },
+  { name: "a monthly pulse", options: { product: "pulse", scope: "complete" } },
+] as const;
+const MODES = ["consultant", "automatic"] as const;
+const READS = ["read", "refused", "lost", "Professional Edition"] as const;
+
+describe("a rule listed as run always has a finding (DECISIONS.md 718), on every path", async () => {
+  const paths: string[] = [];
+  /** How many checks each product and mode couldn't measure with every read answered, its first path. */
+  const plainUnmeasured = new Map<string, number>();
+  for (const product of PRODUCTS) {
+    for (const mode of MODES) {
+      for (const reads of READS) {
+        const name = `${product.name}, ${mode === "automatic" ? "automatic" : "consultant-led"}, every module on, reads ${reads}`;
+        paths.push(name);
+        test(name, async () => {
+          const sim = new Simulator({ ...(reads === "refused" ? REFUSING : {}), ...(reads === "Professional Edition" ? { organizationType: "Professional Edition" } : {}) });
+          const made = await run(sim, {
+            ...product.options,
+            modules: ALL_MODULES,
+            // Lost on the worker's last delivery, when an outage costs its reads rather than the run (DECISIONS.md 702, 715).
+            ...(reads === "lost" ? { transport: losing(sim), lastDelivery: true } : { transport: sim }),
+            ...(mode === "automatic" ? { calibration: automatic, answers: [], reviewMode: "automatic" } : {}),
+          });
+          if (reads === "refused") assert.ok((made.run.readsRefused ?? []).length > 0, "the reads were refused");
+          const unmeasured = findingsOf(made.dir).filter((f) => f.status === "not_measurable").length;
+          if (reads === "read") plainUnmeasured.set(`${product.name}|${mode}`, unmeasured);
+          if (reads === "lost") assert.ok(unmeasured > plainUnmeasured.get(`${product.name}|${mode}`)!, "the lost reads cost checks");
+          const file = fileOf(made.dir);
+          assert.deepEqual(file.rulesRun, expectedRun(ALL_MODULES, product.options.scope, false, mode));
+          assertConsistent(made.dir, digestOf(made.dir), name);
+        });
+      }
+    }
+  }
+  test("every product, mode and way of reading was a path above, each once, and each held a listed rule to its finding", () => {
+    assert.equal(paths.length, 3 * 2 * 4);
+    assert.equal(new Set(paths).size, paths.length);
+    assert.deepEqual(paths.filter((p) => !held.has(p)), []);
   });
 });

@@ -82,9 +82,9 @@ const calibrationContradiction: Rule = {
   version: 1,
   domain: "historic_pipeline",
   title: "The calibration disagrees with Salesforce's own stage flags",
+  // An automatic run's calibration is these same flags, so it can't disagree with them: not run, and not listed as checked (DECISIONS.md 693, 718).
+  onlyIf: (calibration) => calibration.source !== "org_settings",
   evaluate(ctx): RuleResult | RuleResult[] {
-    // An automatic run's calibration is these same flags, so it can't disagree with them: nothing to say (DECISIONS.md 693).
-    if (ctx.calibration.source === "org_settings") return [];
     const stages = ctx.data(stagesExtractor);
     if (stages.status !== "ok") return { outcome: "not_measurable", reason: `Opportunity stages couldn't be read: ${stages.reason}`, evidence: [ctx.ev(stages.source, { count: null })] };
     const flags = new Map(stages.data.map((s) => [s.ApiName, s]));
