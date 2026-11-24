@@ -1,3 +1,4 @@
+import { nextStepsWords } from "./exec-pages.ts";
 import { yearlyByFinding } from "../value/model.ts";
 import { orderFromOrg } from "../connect/auto-calibration.ts";
 import { ORDER_UNCONFIRMED } from "../domains/historic-pipeline/cohort.ts";
@@ -571,18 +572,19 @@ function driversSlide(r: Render, metric: (id: string) => Metric | undefined): Sl
   return { classes: "tight", html: `<div class="eyebrow">Pipeline${r.ref(WIN_DRIVERS)}</div><h2>What separates your wins from your losses</h2><p class="lede">${r.t(lede)}</p>${table}<p class="small-note">${r.t(notes.join(" "))}</p>` };
 }
 
-function nextStepsSlide(r: Render, plan: ReturnType<typeof buildPlan>["phases"]): Slide {
+function nextStepsSlide(r: Render, plan: ReturnType<typeof buildPlan>["phases"], automatic: boolean): Slide {
+  const words = nextStepsWords(automatic);
   const first = plan.find((p) => p.findings.length > 0);
   const opening = first
     ? `Name an owner for each of the ${first.findings.length} ${first.findings.length === 1 ? "action" : "actions"} in days ${first.from} to ${first.to}, starting with this: ${first.findings[0]!.title}.`
     : "Agree who owns each action on the roadmap, and when it's due.";
   const steps = [
-    { title: "Walk through it together", text: "We'll take your team through what we found, answer their questions, and agree what matters most to you." },
+    words.first,
     { title: "Start the first month", text: opening },
     { title: "Measure the change", text: "We'll look at your Salesforce again after 90 days, so you can see what has improved and what still needs work." },
   ];
   return {
-    html: `<div class="eyebrow">Next steps</div><h2>What happens next</h2><div class="stat-row" style="margin-top:18px">${steps.map((s) => `<div class="stat"><h3 style="font-size:22px;margin:0 0 8px">${r.t(s.title)}</h3><p>${r.t(s.text)}</p></div>`).join("")}</div><p class="lede" style="margin-top:28px">Black Cloud can deliver this plan alongside your team. Your consultant will talk you through what that would look like.</p>`,
+    html: `<div class="eyebrow">Next steps</div><h2>What happens next</h2><div class="stat-row" style="margin-top:18px">${steps.map((s) => `<div class="stat"><h3 style="font-size:22px;margin:0 0 8px">${r.t(s.title)}</h3><p>${r.t(s.text)}</p></div>`).join("")}</div><p class="lede" style="margin-top:28px">${words.closing}</p>`,
   };
 }
 
@@ -1023,7 +1025,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null, mo
   if (later.length) slides.push(...(density?.domainSummary || density?.threeColumnLists ? threeColumnList(r, "Roadmap", "After 90 days", afterPlan) : dense ? twoColumnList(r, "Roadmap", "After 90 days", afterPlan) : listSlides(r, "Roadmap", "After 90 days", afterPlan, compact)));
 
   mark("What happens next");
-  slides.push(nextStepsSlide(r, plan));
+  slides.push(nextStepsSlide(r, plan, report.input.run.reviewMode === "automatic"));
   const documented = documentedSlides(r, metrics, dense);
   if (documented.length) mark("Your org, documented");
   slides.push(...documented);

@@ -27,16 +27,32 @@ export function riskPage(r: Render, report: BuiltReport): string {
   return `<div class="eyebrow">Risk</div><h2>What could hurt you</h2><p style="margin-bottom:12px">${r.t("Not every risk has a price. These are the most serious issues we can't put a figure on, because the cost depends on what goes wrong and when.")}</p>${items}${more}`;
 }
 
+/**
+ * The first step and the closing line of "What happens next". On an automatic
+ * run nobody walks the customer through it and no consultant is there to talk
+ * (DECISIONS.md 693, 698), so they say only what the customer can do and what
+ * we offer. A consultant-led run's are as they were.
+ */
+export function nextStepsWords(automatic: boolean): { first: { title: string; text: string }; closing: string } {
+  return automatic
+    ? { first: { title: "Read it with your team", text: "Share what we found with the people who own each area, and agree what matters most to you." }, closing: "Black Cloud can deliver this plan alongside your team." }
+    : {
+        first: { title: "Walk through it together", text: "We'll take your team through what we found, answer their questions, and agree what matters most to you." },
+        closing: "Black Cloud can deliver this plan alongside your team. Your consultant will talk you through what that would look like.",
+      };
+}
+
 /** What happens next. Its only figures are the plan's own. */
 export function nextStepsPage(r: Render, report: BuiltReport): string {
+  const words = nextStepsWords(report.input.run.reviewMode === "automatic");
   const first = buildPlan(report.teamFindings, report.added).phases.find((p) => p.findings.length > 0);
   const start = first
     ? `Name an owner for each of the ${first.findings.length} ${first.findings.length === 1 ? "action" : "actions"} in days ${first.from} to ${first.to}, starting with this: ${first.findings[0]!.title}.`
     : "Agree who owns each action on the roadmap, and when it's due.";
   const steps = [
-    { title: "Walk through it together", text: "We'll take your team through what we found, answer their questions, and agree what matters most to you." },
+    words.first,
     { title: "Start the first month", text: start },
     { title: "Measure the change", text: "We'll look at your Salesforce again after 90 days, so you can see what has improved, in money as well as in the score." },
   ];
-  return `<div class="eyebrow">Next steps</div><h2>What happens next</h2>${steps.map((s) => `<section class="phase"><h3>${r.t(s.title)}</h3><p>${r.t(s.text)}</p></section>`).join("")}<p style="margin-top:18px">${r.t("Black Cloud can deliver this plan alongside your team. Your consultant will talk you through what that would look like.")}</p>`;
+  return `<div class="eyebrow">Next steps</div><h2>What happens next</h2>${steps.map((s) => `<section class="phase"><h3>${r.t(s.title)}</h3><p>${r.t(s.text)}</p></section>`).join("")}<p style="margin-top:18px">${r.t(words.closing)}</p>`;
 }
