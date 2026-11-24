@@ -1,4 +1,4 @@
-import { eng, joinSaid, org, said, type Said } from "../../../engine/org-words.ts";
+import { joinSaid, org, said, type Said } from "../../../engine/org-words.ts";
 import { notSized, pct, plural, type Rule, type RuleContext, type RuleResult } from "../../../engine/rule.ts";
 import { andList } from "../../../engine/said-forms.ts";
 import { PROBABILITY_FIELD, stagesExtractor, type StageRow, type StagesRead } from "../../../extract/opportunities.ts";
@@ -58,7 +58,8 @@ const TYPE_GAP = WIN_GAP;
  * words. Record type has its own check, and the quarter a deal closed isn't a
  * way to split deals chosen by when they reached a stage.
  */
-const WAYS: Record<string, Said> = { team: said`team`, rep: said`rep`, "lead source": said`lead source`, type: said`type` };
+// Functions, so each phrase is made inside the analysis that says it, where the org-word ledger can vouch for it.
+const WAYS: Record<string, () => Said> = { team: () => said`team`, rep: () => said`rep`, "lead source": () => said`lead source`, type: () => said`type` };
 
 /** A deal as the comparison reads it: open or closed, with when it first entered each open stage. */
 export type CohortDeal = PathDeal & { open: boolean; reachedAt: Map<string, number>; closedAtMs: number | null };
@@ -288,10 +289,16 @@ function build(ctx: Ctx, data: PipelineData): Loaded {
 
 // ─── Words ───────────────────────────────────────────────────────────────────
 
-const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"] as const;
+const MONTHS: ReadonlyArray<() => Said> = [
+  () => said`January`, () => said`February`, () => said`March`, () => said`April`, () => said`May`, () => said`June`,
+  () => said`July`, () => said`August`, () => said`September`, () => said`October`, () => said`November`, () => said`December`,
+];
+const monthOf = (day: string): Said => MONTHS[Number(day.slice(5, 7)) - 1]!();
 
 /** A calendar day as its month and year, so the period is one the customer can check. */
-export const monthSaid = (day: string): Said => eng(`${MONTHS[Number(day.slice(5, 7)) - 1]} ${day.slice(0, 4)}`);
+export const monthSaid = (day: string): Said => said`${monthOf(day)} ${Number(day.slice(0, 4))}`;
+/** A calendar day in full, as "21 September 2026". */
+export const daySaid = (day: string): Said => said`${Number(day.slice(8, 10))} ${monthOf(day)} ${Number(day.slice(0, 4))}`;
 
 // ─── The metric ──────────────────────────────────────────────────────────────
 
@@ -323,7 +330,7 @@ export function probabilityMetrics(ctx: Ctx): Metric[] {
   const { minSample } = ctx.calibration;
   const assumptions = [
     ...HOW,
-    ...stages.filter((s) => s.lagDays !== null && s.to !== null).map((s) => said`${org(s.stage)}: 90% of the closed deals that reached it had closed within ${s.lagDays!} days, so its period ends on ${eng(s.to!)}`),
+    ...stages.filter((s) => s.lagDays !== null && s.to !== null).map((s) => said`${org(s.stage)}: 90% of the closed deals that reached it had closed within ${s.lagDays!} days, so its period ends on ${daySaid(s.to!)}`),
     ...(beforeHistory ? [said`${beforeHistory} deals created before your stage history starts are left out, since it can't show every stage they were in`] : []),
     said`A stage is named only when at least ${minSample} of those deals have closed, ${MIN_EACH_OUTCOME} won and ${MIN_EACH_OUTCOME} lost, its probability is ${WIN_GAP} points or more from the won share, and outside the range chance could give it across the ${plural(tested, "stage")} we could test`,
   ];
@@ -365,7 +372,7 @@ const direction = (s: StageFigures): Said => (s.gap! < 0 ? said`set higher than 
 /** Each way of splitting, said once by name, and how many it holds in. */
 function waysSaid(s: StageFigures): Said {
   if (s.ways.length === 0) return said` We couldn't check this within teams, reps or other groups: none had enough of these deals.`;
-  const names = andList(s.ways.map((w) => WAYS[w.dimension]!));
+  const names = andList(s.ways.map((w) => WAYS[w.dimension]!()));
   const holding = s.ways.filter((w) => w.holds).length;
   if (s.ways.length === 1) return said` It is on the same side of the setting in the one way we could split these deals (by ${names}).`;
   return holding === s.ways.length

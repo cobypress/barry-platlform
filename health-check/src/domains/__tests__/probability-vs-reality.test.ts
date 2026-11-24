@@ -266,7 +266,7 @@ describe("each stage counts the deals that reached it in its period, open or clo
     assert.equal(stats.stage4LagDays, 40);
     assert.equal(stats.stage4Cohort, 100);
     assert.equal(stats.stage4Open, 0);
-    assert.ok(metric.assumptions.includes("Negotiation: 90% of the closed deals that reached it had closed within 40 days, so its period ends on 2026-09-21"), metric.assumptions.join(" | "));
+    assert.ok(metric.assumptions.includes("Negotiation: 90% of the closed deals that reached it had closed within 40 days, so its period ends on 21 September 2026"), metric.assumptions.join(" | "));
     assert.equal(issues(findings).length, 1);
   });
 

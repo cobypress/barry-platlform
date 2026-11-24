@@ -1224,6 +1224,12 @@ const SIGNED_OFF: string[] = [
   "src/domains/historic-pipeline/probability/index.ts: names",
   "src/domains/historic-pipeline/probability/index.ts: monthSaid(s.from!)",
   "src/domains/historic-pipeline/probability/index.ts: monthSaid(s.to!)",
+  "src/domains/historic-pipeline/probability/index.ts: Number(day.slice(0, 4))",
+  "src/domains/historic-pipeline/probability/index.ts: Number(day.slice(0, 4))",
+  "src/domains/historic-pipeline/probability/index.ts: Number(day.slice(8, 10))",
+  "src/domains/historic-pipeline/probability/index.ts: daySaid(s.to!)",
+  "src/domains/historic-pipeline/probability/index.ts: monthOf(day)",
+  "src/domains/historic-pipeline/probability/index.ts: monthOf(day)",
   // The engine's own nouns counted, and sentences made with said in the same file.
   'src/domains/historic-pipeline/probability/index.ts: plural(stages.length, "stage")',
   'src/domains/historic-pipeline/probability/index.ts: plural(tested, "stage")',
