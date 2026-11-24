@@ -812,7 +812,7 @@ describe("Apex (decisions 456 and 457)", () => {
     };
     const result = await runHealthCheck({ provider: syntheticProvider, connectedUser: CONNECTED_USER, calibration: loadCalibration(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: new Date(AS_OF), transport: professional, log: () => {} });
     const h = Handbook.parse(JSON.parse(read(result.dir, HANDBOOK_FILE)));
-    for (const part of [h.apexClasses, h.apexTriggers]) assert.deepEqual(part, { status: "unavailable", reason: "Needs Apex, which Professional Edition doesn't include." });
+    for (const part of [h.apexClasses, h.apexTriggers]) assert.deepEqual(part, { status: "unavailable", reason: "Needs Apex of the org's own, which Professional Edition doesn't allow." });
     assert.equal(h.flows.status, "ok");
   });
 
