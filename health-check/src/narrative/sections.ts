@@ -2,7 +2,7 @@ import { compareWithBaseline, limitsReadAt, progressDays, progressFigures, progr
 import { factsText, type FactsSummary } from "../facts/summary.ts";
 import { currencyStanding } from "../engine/currency.ts";
 import { addedByFinding, buildValueModel, valueCurrency, MONEY_FACTS, worthOf, HEADLINE_KINDS, KIND_LABELS, TEAM_TIME_GROUP, UK_HOURLY_BENCHMARK, WORKING_WEEKS, type TeamTime, type ValueModel } from "../value/model.ts";
-import { AREA_WEIGHTS, CRITICAL_CAP, GRADES, overallScore, type OverallScore } from "../domains/scoring.ts";
+import { AREA_WEIGHTS, CRITICAL_CAP, GRADES, INSIGHT_METRICS, INSIGHT_RULES, overallScore, type OverallScore } from "../domains/scoring.ts";
 import { comparisonId, comparisonNotes, compareRun, OWN_RANGE_MIN, type BenchmarkInput, type Comparison } from "../benchmark/compare.ts";
 import { quarterOf } from "../benchmark/export.ts";
 import { buildInvestment, investmentText, INVESTMENT_METRIC_IDS, type Investment } from "../money/investment.ts";
@@ -69,6 +69,7 @@ export type ReportOutputKey = "raw_notes" | "executive_summary" | "full_health_c
 export type BuiltOutput = { output: ReportOutputKey; sections: ReportSection[]; versions: SectionVersion[] };
 
 export type BuiltReport = {
+  /** The run's data less the insights, as the documents read it. */
   input: ReportInput;
   dataset: FigureSet;
   /** Findings as an executive reader sees them: overrides applied, at team level. */
@@ -893,7 +894,12 @@ function record(run: Run, output: ReportOutputKey, specs: Spec[], dataset: Figur
   return { output, sections, versions };
 }
 
-export function buildReport(given: ReportInput): BuiltReport {
+export function buildReport(all: ReportInput): BuiltReport {
+  // The one place the documents choose their findings from a run's files (DECISIONS.md 703): the path insights and
+  // their table are a comparison of how deals went, not a fault, and nothing has a place for them yet, so everything
+  // built from the report (the documents, the raw notes document, the digest) leaves them out whole, as before them.
+  // The run's own findings.json, metrics.json and raw-notes.md and the console's staff-side rows keep them.
+  const given: ReportInput = { ...all, findings: all.findings.filter((f) => !INSIGHT_RULES.has(f.ruleId)), metrics: all.metrics.filter((m) => !INSIGHT_METRICS.has(m.id)) };
   // The team survey's figures sit with the org's. They're built here, not when the
   // org is read, because answers keep arriving after that (DECISIONS.md 141).
   const input: ReportInput = { ...given, metrics: [...given.metrics.filter((m) => !SURVEY_METRIC_IDS.includes(m.id)), ...surveyMetrics(given.survey, given.run.asOf)] };
