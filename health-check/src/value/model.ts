@@ -268,8 +268,8 @@ export function buildValueModel(findings: Finding[], run: Run, currency: string,
     lines.push({ findingId: f.id, ruleId: f.ruleId, title: f.title, kind, group, annual, low: round2(annual * realisation.low), expected: round2(annual * realisation.expected), high: round2(annual * realisation.high), basis });
   }
 
-  if (team && money.unpricedHours) left.push({ findingId: TEAM_TIME_LINE, reason: money.unpricedHours });
-  else if (team) {
+  // The survey's hours are no finding, so with hours unpriced they are simply not turned into money (DECISIONS.md 700).
+  if (team && !money.unpricedHours) {
     const annual = round2(team.hoursPerWeek * team.users * hourly.rate * WORKING_WEEKS);
     lines.push({
       findingId: TEAM_TIME_LINE,
