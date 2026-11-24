@@ -383,3 +383,15 @@ a) Is `DefaultProbability` readable on `OpportunityStage` by the connected user 
 b) What does it hold for closed stages (100 for won and 0 for lost by default, or null), and for a stage a sales process doesn't use? Only open stages are compared, so closed stages' values change nothing, but the metric lists what it reads.
 c) A stage has one default probability, whatever the sales process, and a deal's own `Probability` can be changed by hand. Do orgs that change it by hand do so often enough that the stage's setting no longer says what their forecasts use? The comparison reads only the stage's setting, and says so.
 d) What does Salesforce answer when the connected user can't see `DefaultProbability` through field-level security: `INVALID_FIELD`, or an access code? The engine decides on the code, never the words, and works round `INVALID_FIELD`, `INSUFFICIENT_ACCESS` and `INSUFFICIENT_ACCESS_OR_READONLY`; another code would fail the stage read as any refusal did before.
+
+
+## Knowing the org before reading it (DECISIONS.md 710)
+
+The run skips a read only where Salesforce's own documentation says the org's edition doesn't have it, and only on a Professional Edition org; anything else is read. These are what the Professional Edition test org must settle:
+
+a) Does every Professional Edition org report `Organization.OrganizationType` as exactly "Professional Edition"? Salesforce doesn't publish the picklist's values. Any other text (a "Pro Suite" org, say) is unknown, so it is read as before, never skipped.
+b) Does the Tooling API answer a Professional Edition org with API access, for FlowDefinition, Flow, the workflow objects, ValidationRule, FieldDefinition, EntityParticle and RecordType? The run reads the set-up through Tooling there; if it doesn't, those checks are not measured with the Tooling route's reason.
+c) Does the Analytics API's report describe answer there (Salesforce's Reports and Dashboards REST API guide says any org with the API)?
+d) What does Salesforce answer a Professional Edition org for `ApexClass` and `ApexTrigger` with `NamespacePrefix = null`, for `Scontrol` and for `Site`: no rows, or `INVALID_TYPE`? The run no longer asks; the answer only confirms that skipping changed nothing a customer would have seen.
+e) Do `ApexOrgWideCoverage`, `ApexCodeCoverageAggregate` and `AsyncApexJob` hold installed packages' Apex there? They are still read on Professional Edition.
+f) Does a describe's `recordTypeInfos` list record types the connected user can't use? The profile marks record types present when any is listed, and never absent from a describe.

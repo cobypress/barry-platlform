@@ -52,6 +52,7 @@ const LITERAL_PIECES: string[] = [
   "src/domains/service/setup.ts: hasHave(unread) :: \"has\" | \"have\"",
   "src/domains/service/setup.ts: hasHave(unrouted.length) :: \"has\" | \"have\"",
   "src/domains/service/setup.ts: isAre(active.length + activeSla.length) :: \"is\" | \"are\"",
+  "src/domains/service/setup.ts: isAre(activeSla.length) :: \"is\" | \"are\"",
   "src/domains/service/setup.ts: isAre(read.rows.length) :: \"is\" | \"are\"",
   "src/domains/service/setup.ts: isAre(spread) :: \"is\" | \"are\"",
   // Rows of our own as const tables or literal unions (the CPQ comparison, a quote's kind, the team or rep peers, the allowances, storage and code kinds, a sharing object), and a stage's category, which the calibration's schema holds to its enum.
