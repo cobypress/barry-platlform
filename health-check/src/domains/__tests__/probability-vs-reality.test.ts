@@ -507,7 +507,10 @@ describe("the stage read (decision 706)", () => {
       assert.deepEqual(stageQueries(transport), [ENGINE_STAGES_SOQL], code);
       const stages = readCheckpoint<Sourced<StageRow[]>>(join(runDir, "checkpoints", "opportunity-stages.json"));
       assert.equal(stages.status, "unavailable", code);
-      assert.match(findings.find((f) => f.ruleId === PROBABILITY_RULE)!.notMeasurableReason!, new RegExp(`^Salesforce's stage settings couldn't be read, so the probability set on each stage isn't known: ${code}`));
+      // The stage read's own failure, in whatever words the read gives it, and never a refusal of the field.
+      const reason = findings.find((f) => f.ruleId === PROBABILITY_RULE)!.notMeasurableReason!;
+      assert.match(reason, /^Salesforce's stage settings couldn't be read, so the probability set on each stage isn't known: /, code);
+      assert.doesNotMatch(reason, /isn't there for the connected user|refused the connected user|isn't in this org/, code);
     }
     // Refused both ways: the stages are unread, as before 706.
     const both = await simulatedRun((soql) => (/FROM OpportunityStage/.test(soql) ? { errorCode: "INSUFFICIENT_ACCESS", message: "no" } : null));
