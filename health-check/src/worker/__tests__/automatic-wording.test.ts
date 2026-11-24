@@ -31,7 +31,9 @@ function customerText(loaded: ReturnType<typeof loadRun>): string[] {
   const digest = checkedDigest({ input: loaded.input, pseudonyms: loaded.pseudonyms, inventory: null, madeAt: "2026-11-24T09:00:00.000Z" }).digest;
   const strings = (v: unknown): string[] => (typeof v === "string" ? [v] : Array.isArray(v) ? v.flatMap(strings) : v && typeof v === "object" ? Object.values(v).flatMap(strings) : []);
   const bodies = Object.values(report.outputs).filter((o) => o.output !== "raw_notes").flatMap((o) => o.versions.map((v) => v.body));
-  return [...strings(loaded.input.findings), ...strings(loaded.input.metrics), ...bodies, ...strings(digest)];
+  // The digest's lists of rule ids are ids the portal never prints, so a rule named for the calibration is no word to the customer (DECISIONS.md 718).
+  const served = digest ? { ...digest, rulesRun: [], rulesKnown: [] } : digest;
+  return [...strings(loaded.input.findings), ...strings(loaded.input.metrics), ...bodies, ...strings(served)];
 }
 
 describe("an automatic run's words", () => {

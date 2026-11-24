@@ -360,6 +360,8 @@ export function buildDigest({ report, pseudonyms, inventory, madeAt }: DigestFor
     withheldNames: withheldNames(inventory, pseudonyms),
     // Once for the run, not on each check the edition left unmeasured (DECISIONS.md 710).
     ...(editionNoteFor(report) ? { editionNote: editionNoteFor(report)! } : {}),
+    // Which rules the analysis ran and which the engine knew, as the run folder keeps them (DECISIONS.md 718): ids, never text.
+    ...(report.input.rules ? { rulesRun: [...report.input.rules.rulesRun], rulesKnown: [...report.input.rules.rulesKnown] } : {}),
   };
   orgValues = orgValuesOf({ metrics: report.metrics, findings: report.input.findings, stages: report.input.calibration.stages.map((s) => s.name) });
   const guarded = guardDigest(raw, pseudonyms);
@@ -467,6 +469,7 @@ export const STRUCTURAL_KEYS: ReadonlySet<string> = new Set([
   "version", "runId", "product", "reviewed", "asOf", "madeAt", "baselineRunId", "status", "domain", "areaDomains", "findingIds", "id", "ruleId",
   "severity", "confidence", "recommendationType", "kind", "effortSize", "notMeasurableKind", "timeBand", "fixComplexity", "difficulty", "from", "to", "currency", "group", "counted",
   "lineIds", "leftOut", "later", "quickWins", "quickFixes", "key", "grade", "withheldNames", "partialFindingIds", "withoutHoursFindingIds", "notTotalledFindingIds", "textSha256",
+  "rulesRun", "rulesKnown",
 ]);
 /** Keyed by finding id, each holding finding ids: ids all the way down. */
 export const ID_MAPS: ReadonlySet<string> = new Set(["alsoFor"]);

@@ -395,6 +395,21 @@ export const RunDigest = z.object({
    */
   editionNote: Text.optional(),
   orgWords: z.object({ editionNote: SentenceOrgWords.optional() }).optional(),
+  /**
+   * Every rule this run checked (DECISIONS.md 718): ran to a result of any
+   * status, not measurable included, or ran and had nothing to report, so has
+   * no finding. Sorted by code unit, each once. Never an insight's, never a rule
+   * the run's scope or modules left out, and the code checker's six only on a
+   * run that had its step. Ids, never text. Absent on a digest of a run
+   * analysed before it was kept: then nothing is known of what didn't run.
+   */
+  rulesRun: Ids.optional(),
+  /**
+   * Every served rule the engine knew when this run was analysed, sorted, each
+   * once, always holding rulesRun (DECISIONS.md 718). A rule an earlier run
+   * checked that is not here has been retired. Absent with rulesRun.
+   */
+  rulesKnown: Ids.optional(),
 });
 export type RunDigest = z.infer<typeof RunDigest>;
 
@@ -407,5 +422,5 @@ export const DIGEST_KEYS: ReadonlySet<string> = new Set([
   "time_cost", "exposure", "groups", "lines", "leftOut", "realisation", "counted", "lineIds", "low", "expected", "high", "group", "annual", "added",
   "phases", "later", "quickWins", "quickFixes", "difficulty", "alsoFor", "key", "effortHours", "basis", "partial", "timeBand", "fixComplexity", "hoursTotal", "partialFindingIds", "withoutHoursFindingIds", "notTotalledFindingIds", "note",
   "checkerRead", "readClasses", "readTriggers", "alreadyListed", "orgWords", "orgWordsMarked", "start", "end", "valueReason", "valueAssumptions", "hoursBasis", "fixPrompt", "textSha256",
-  "valueUnit", "valuePeriod", "editionNote", "caveat",
+  "valueUnit", "valuePeriod", "editionNote", "caveat", "rulesRun", "rulesKnown",
 ]);

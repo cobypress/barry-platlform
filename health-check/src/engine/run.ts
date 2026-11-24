@@ -5,6 +5,8 @@ import { BUDGET_DEFAULTS, RULE_SET_VERSION, SF_DEFAULTS } from "../config.ts";
 import { fileLines, readCheckpoint, trimToLastLine, writeCheckpoint } from "./checkpoint.ts";
 import { shareRepeatedValues } from "./share-values.ts";
 import { modulesFor } from "../domains/scope.ts";
+import { ALL_MODULES } from "../domains/index.ts";
+import { RULES_FILE, rulesOf } from "./rules-run.ts";
 import { scoreDomains } from "../domains/scoring.ts";
 import type { DomainModule } from "../domains/types.ts";
 import { customObjectsExtractor, orgExtractor, schemaExtractor, setupAuditExtractor, type ObjectSummary, type CustomObjectRow, type SetupAuditSummary } from "../extract/configuration.ts";
@@ -98,6 +100,11 @@ export type RunOptions = {
    * check, with PMD where it found it; off, a run reads and writes exactly what it did before.
    */
   codeLint?: CodeLintTools;
+  /**
+   * Every module the engine knows, for the run folder's list of the rules it
+   * knows (DECISIONS.md 718). The engine's own unless a test says otherwise.
+   */
+  knownModules?: DomainModule[];
 };
 
 /** What the lint findings say when the step itself failed: our words, never the error's. */
@@ -412,7 +419,7 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
   run.customerRef ??= org.data?.[0]?.Name?.trim() || null;
   run.status = "analysing";
   await saveRun();
-  const output = analyseRun(dir, run, calibration, modules, extracts, options.answers ?? []);
+  const output = analyseRun(dir, run, calibration, modules, extracts, options.answers ?? [], options.knownModules ?? ALL_MODULES);
   // Each issue's records by name, for the action lists. Beside the pseudonym map, not in checkpoints/.
   writeJson(join(dir, ACTION_LISTS_FILE), buildActionLists(output.records, extracts, client.instanceUrl));
   run.status = output.manualSteps.some((s) => s.status === "pending") ? "awaiting_manual" : "in_review";
@@ -452,7 +459,7 @@ export function keepSkipped(run: Run, skipped: SkippedRead[], log: (message: str
   }
 }
 
-function analyseRun(dir: string, run: Run, calibration: Calibration, modules: DomainModule[], extracts: Map<string, unknown>, answers: ManualAnswer[]): AnalysisOutput {
+function analyseRun(dir: string, run: Run, calibration: Calibration, modules: DomainModule[], extracts: Map<string, unknown>, answers: ManualAnswer[], known: DomainModule[]): AnalysisOutput {
   const pseudonyms = loadPseudonyms(dir);
   const users = extracts.get(usersExtractor.id) as { status: string; data?: UserRow[] } | undefined;
   const directory = new Map((users?.data ?? []).map((u) => [u.Id, { name: u.Name, aliases: [u.Username, u.Email] }]));
@@ -494,6 +501,9 @@ function analyseRun(dir: string, run: Run, calibration: Calibration, modules: Do
     unanswered: run.reviewMode === "automatic" ? "skip" : "ask",
   });
   writeJson(join(dir, "pseudonym-map.json"), pseudonyms.entries());
+  // Which rules this analysis ran, and which the engine knows, for the digest (DECISIONS.md 718).
+  // Written with every analysis, so it always goes with the findings it ran beside.
+  writeJson(join(dir, RULES_FILE), rulesOf(output.rulesRun, known));
   // The customer's own configuration, for their handbook: kept as long as the
   // findings, and read by nothing else here (DECISIONS.md 451 to 457).
   writeJson(

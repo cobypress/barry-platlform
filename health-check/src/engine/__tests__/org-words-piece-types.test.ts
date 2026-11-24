@@ -132,6 +132,12 @@ test("the compiler finds every said piece a number, a Said, org words or a liter
 });
 
 test("every piece typed with a string literal that isn't one as written is listed with its type", () => {
-  const found = all.filter((p) => !p.written && (p.type.isUnion() ? p.type.types : [p.type]).some((t) => t.isStringLiteral())).map((p) => `${p.at} :: ${p.shown}`).sort();
-  assert.deepEqual(found, [...LITERAL_PIECES].sort());
+  // A union's members in a set order: the compiler prints them in the order it first met each type, which
+  // moves with the order files import each other, and is no widening (DECISIONS.md 718).
+  const settled = (line: string): string => {
+    const [at, shown] = line.split(" :: ");
+    return `${at} :: ${shown!.split(" | ").sort().join(" | ")}`;
+  };
+  const found = all.filter((p) => !p.written && (p.type.isUnion() ? p.type.types : [p.type]).some((t) => t.isStringLiteral())).map((p) => settled(`${p.at} :: ${p.shown}`)).sort();
+  assert.deepEqual(found, LITERAL_PIECES.map(settled).sort());
 });

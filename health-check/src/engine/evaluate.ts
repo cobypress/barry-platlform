@@ -44,7 +44,22 @@ export type FindingRecords = RecordList & { findingId: string; ruleId: string };
  * run's findings.json, raw notes, the console and the digest keep and the documents leave out, so a run's documents
  * and everything made from its findings in memory are as they were before them.
  */
-export type AnalysisOutput = { findings: Finding[]; insights: Finding[]; metrics: Metric[]; insightMetrics: Metric[]; manualSteps: ManualStep[]; records: FindingRecords[] };
+export type AnalysisOutput = {
+  findings: Finding[];
+  insights: Finding[];
+  metrics: Metric[];
+  insightMetrics: Metric[];
+  manualSteps: ManualStep[];
+  records: FindingRecords[];
+  /**
+   * The id of every rule this analysis ran to a result, sorted, each once
+   * (DECISIONS.md 718): whatever it found, not measurable included, and a rule
+   * that ran and had nothing to report. Never an insight's, which nothing
+   * serves; never a rule its scope or modules left out, or one whose step
+   * (`onlyWith`) wasn't part of the run.
+   */
+  rulesRun: string[];
+};
 
 /** Every finding of an analysis, the insights last: what the run folder and the console keep. */
 export const allFindings = (output: Pick<AnalysisOutput, "findings" | "insights">): Finding[] => [...output.findings, ...output.insights];
@@ -445,8 +460,12 @@ function analyseWithin(input: AnalysisInput): AnalysisOutput {
   const ctx: RuleContext = { ...base, metrics };
   const findings: Finding[] = [];
   const records: FindingRecords[] = [];
+  const ran = new Set<string>();
   for (const module of modules) {
     for (const rule of module.rules) {
+      // A rule run only beside a step no module owns isn't run without it (DECISIONS.md 718): it would say nothing anyway.
+      if (rule.onlyWith && !extracts.has(rule.onlyWith.id)) continue;
+      if (!INSIGHT_RULES.has(rule.id)) ran.add(rule.id);
       currentRule = rule.id;
       assumed = new Set();
       currencyRead = false;
@@ -458,6 +477,7 @@ function analyseWithin(input: AnalysisInput): AnalysisOutput {
   }
   currentRule = null;
   assumed = new Set();
+  const rulesRun = [...ran].sort();
   // Only what ended as an issue keeps its records, so a list never outlives its finding.
   const issues = new Set(findings.filter((f) => f.status === "issue").map((f) => f.id));
   // An automatic run's texts said for what they are on it, and its metrics' texts marked (DECISIONS.md 693):
@@ -473,7 +493,8 @@ function analyseWithin(input: AnalysisInput): AnalysisOutput {
       insightMetrics: metrics.filter((m) => INSIGHT_METRICS.has(m.id)).map((m) => Metric.parse(rewordMetric(m, marksOfMetric(m, orgValues)))),
       manualSteps: [...raised.values()],
       records: records.filter((r) => issues.has(r.findingId)),
+      rulesRun,
     };
   }
-  return { findings: findings.filter((f) => !INSIGHT_RULES.has(f.ruleId)), insights: findings.filter((f) => INSIGHT_RULES.has(f.ruleId)), metrics: metrics.filter((m) => !INSIGHT_METRICS.has(m.id)), insightMetrics: metrics.filter((m) => INSIGHT_METRICS.has(m.id)), manualSteps: [...raised.values()], records: records.filter((r) => issues.has(r.findingId)) };
+  return { findings: findings.filter((f) => !INSIGHT_RULES.has(f.ruleId)), insights: findings.filter((f) => INSIGHT_RULES.has(f.ruleId)), metrics: metrics.filter((m) => !INSIGHT_METRICS.has(m.id)), insightMetrics: metrics.filter((m) => INSIGHT_METRICS.has(m.id)), manualSteps: [...raised.values()], records: records.filter((r) => issues.has(r.findingId)), rulesRun };
 }
