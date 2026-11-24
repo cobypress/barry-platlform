@@ -12,7 +12,7 @@ import { refusalReason } from "../../extract/types.ts";
 import { refusalSpans } from "../../salesforce/refusal-words.ts";
 import { HEAVY_QUEUE, LAST_TRY_LOST_REASON, lostForGood, lostRecorder, startQueueWorker, type BullModule, type QueueJob, type QueueWorker } from "../bullmq.ts";
 import { JobBusyError } from "../lock.ts";
-import { READS_LOST } from "../run-job.ts";
+import { AGAIN_FILE, lossLooksLikeOutage, READS_LOST } from "../run-job.ts";
 import type { Transport, TransportRequest, TransportResponse } from "../../salesforce/transport.ts";
 import type { Finding } from "../../schemas/index.ts";
 
@@ -87,9 +87,9 @@ async function world(hook: Hook, mode: Mode) {
   const heavy = FakeWorker.made.find((w) => w.name === HEAVY_QUEUE)!;
   const failed = heavy.listeners.get("failed") as unknown as (job: QueueJob, err: Error) => void;
   const data = { kind: "run", runId: RUN_ID };
-  /** One try, the nth of three. */
-  const deliver = async (nth: number): Promise<unknown> => {
-    const job: QueueJob = { id: `run-${RUN_ID}`, name: "health-check-run", data, attemptsMade: nth - 1, opts: { attempts: 3 } };
+  /** One try, the nth of three, of the run's own job or of another id (a "Run again"). */
+  const deliver = async (nth: number, id = `run-${RUN_ID}`): Promise<unknown> => {
+    const job: QueueJob = { id, name: "health-check-run", data, attemptsMade: nth - 1, opts: { attempts: 3 } };
     try {
       return await heavy.processor(job);
     } catch (err) {
@@ -252,5 +252,69 @@ describe("refused only when Salesforce said no (round 3, finding 2b)", () => {
   }
   test("an object named in the new sentence is marked as the org's", () => {
     assert.deepEqual(refusalSpans("Project__c couldn't be read, because Salesforce didn't answer as it should."), [{ start: 0, end: "Project__c".length }]);
+  });
+});
+
+describe("one read that fails every time is the org's, not an outage (round 3, the coordinator's question)", () => {
+  for (const [name, hook, code] of [
+    ["a QUERY_TIMEOUT on one query", (r: TransportRequest) => (soql(r).includes("FROM Task ") ? body(400, "QUERY_TIMEOUT") : null), "QUERY_TIMEOUT"],
+    ["an UNKNOWN_EXCEPTION on one query", (r: TransportRequest) => (soql(r).includes("FROM Task ") ? body(500, "UNKNOWN_EXCEPTION") : null), "UNKNOWN_EXCEPTION"],
+    ["an expired cursor on one query", (r: TransportRequest) => (soql(r).includes("FROM Task ") ? body(400, "INVALID_QUERY_LOCATOR") : null), "INVALID_QUERY_LOCATOR"],
+  ] as const) {
+    test(`${name} on every delivery: the automatic run is released, with that read's checks not measured, said plainly`, async () => {
+      const w = await world(hook, "automatic");
+      await w.deliver(1);
+      await w.deliver(2);
+      await w.deliver(3);
+      assert.equal(w.stored().run.status, "released");
+      assert.deepEqual(w.flags(), []);
+      const refused = runJson(w.deps.runsDir).readsRefused ?? [];
+      assert.ok(refused.some((r) => r.code === code), JSON.stringify(refused));
+      const findings = (w.stored().output as { findings: Finding[] }).findings;
+      const reasons = findings.map((f) => f.notMeasurableReason ?? "").filter((r) => r.includes("Task couldn't be read"));
+      assert.ok(reasons.length > 0);
+      for (const r of reasons) assert.match(r, /Task couldn't be read, because Salesforce didn't answer as it should\.$/, r);
+    });
+  }
+
+  test("what looks like an outage: a server fault or unreadable answer on the Metadata API, or lost reads in more than one step", () => {
+    assert.equal(lossLooksLikeOutage([]), false);
+    assert.equal(lossLooksLikeOutage([{ step: "activity", code: "INVALID_QUERY_LOCATOR" }]), false);
+    assert.equal(lossLooksLikeOutage([{ step: "metadata", code: "RETRIEVE_TIMEOUT" }]), false);
+    assert.equal(lossLooksLikeOutage([{ step: "record-types", code: "SERVER_UNAVAILABLE" }, { step: "record-types", code: "HTTP_500" }]), false);
+    assert.equal(lossLooksLikeOutage([{ step: "metadata", code: "Server" }]), true);
+    assert.equal(lossLooksLikeOutage([{ step: "metadata", code: "BAD_SOAP_RESPONSE" }]), true);
+    assert.equal(lossLooksLikeOutage([{ step: "metadata", code: "RETRIEVE_TIMEOUT" }, { step: "report-definitions", code: "RETRIEVE_TIMEOUT" }]), true);
+  });
+
+  test("a Metadata API that fails every time: the first run fails with READS_LOST; a person's Run again that loses it again is released, those checks not measured", async () => {
+    const w = await world((r) => (isSoap(r) ? SERVER_FAULT : null), "automatic");
+    await w.deliver(1);
+    await w.deliver(3);
+    assert.equal(w.stored().run.status, "failed");
+    assert.equal(w.stored().run.steps.find((s) => s.id === "worker")?.error, READS_LOST);
+    // The console's "Run again": back to extracting, its step rows kept, a job under the press's own id.
+    w.stored().run.status = "extracting";
+    const again = `run-${RUN_ID}-again-1764000000000`;
+    await w.deliver(1, again);
+    assert.equal(w.stored().run.status, "extracting");
+    assert.deepEqual(JSON.parse(readFileSync(join(w.deps.runsDir, RUN_ID, AGAIN_FILE), "utf8")), { again: "1764000000000", readsLostBefore: true });
+    await w.deliver(3, again);
+    assert.equal(w.stored().run.status, "released");
+    const findings = (w.stored().output as { findings: Finding[] }).findings;
+    assert.ok(findings.some((f) => /Metadata API couldn't be read, because Salesforce didn't answer as it should\.$/.test(f.notMeasurableReason ?? "")));
+    assert.ok(w.deps.lines.some((l) => /after a person ran it again, so it goes on with those checks not measured/.test(l)));
+  });
+
+  test("a Run again after any other failure still fails with READS_LOST on an outage", async () => {
+    const w = await world((r) => (isSoap(r) ? SERVER_FAULT : null), "automatic");
+    w.stored().run.status = "failed";
+    await w.deps.store.recordRunFailure(RUN_ID, "Something else stopped it.", "2026-11-24T00:00:00.000Z").catch(() => {});
+    w.stored().run.status = "extracting";
+    const again = `run-${RUN_ID}-again-1764000000000`;
+    await w.deliver(1, again);
+    await w.deliver(3, again);
+    assert.equal(w.stored().run.status, "failed");
+    assert.equal(w.stored().run.steps.find((s) => s.id === "worker")?.error, READS_LOST);
   });
 });

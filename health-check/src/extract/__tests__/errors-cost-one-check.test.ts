@@ -576,20 +576,19 @@ const SERVER_FAULT: TransportResponse = {
 const isRetrieve = (r: TransportRequest) => r.headers?.SOAPAction === '"retrieve"';
 
 describe("a fault that comes back every time costs its read on the last delivery (round 2, item 2)", () => {
-  // The read is lost, not refused: the run finishes with it not measured, but an automatic run that lost one is
-  // never released by code. It fails, with the run_failed flag, for a person to run again (review round 3).
-  test("an expired cursor on every delivery: retried until the last, which finishes with the read lost, and an automatic run fails rather than release", async () => {
+  // One read lost every time is the org's, not an outage: it costs its check and the run is released (review round 3).
+  test("an expired cursor on every delivery: retried until the last, which releases with that one read lost and its check not measured", async () => {
     const answer: Answer = (r) => (soqlOf(r).includes("FROM Task ") ? errorBody(400, "INVALID_QUERY_LOCATOR", "invalid query locator") : null);
     const { deps, deliver } = await automaticWorker(answer);
     await assert.rejects(deliver(false), (err: unknown) => err instanceof Error && !/INVALID_QUERY_LOCATOR|invalid query locator/.test(err.message));
     const outcome = await deliver(true);
-    assert.equal(outcome.outcome, "failed", outcome.detail);
-    assert.equal(outcome.detail, READS_LOST);
-    assert.deepEqual(deps.store.flagsOf(RUN_ID), ["run_failed"]);
+    assert.match(outcome.detail, /is released$/, outcome.detail);
+    assert.deepEqual(deps.store.flagsOf(RUN_ID), []);
     const runJson = read<{ readsRefused?: Array<{ code: string; read: string; lost?: true }> }>(join(deps.runsDir, RUN_ID), "run.json");
     assert.ok(runJson.readsRefused?.some((r) => r.code === "INVALID_QUERY_LOCATOR" && r.read === "Task" && r.lost === true));
   });
 
+  // An unreadable answer from the Metadata API looks like Salesforce being down: an automatic run fails, once (review round 3).
   test("a retrieve that never gives its job id (a bad SOAP answer): the last delivery finishes, and an automatic run fails rather than release", async () => {
     const outcome = await automaticRun((r) => (isRetrieve(r) ? { status: 200, header: () => null, text: `<?xml version="1.0"?><soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"><soapenv:Body><retrieveResponse xmlns="http://soap.sforce.com/2006/04/metadata"><result><done>false</done></result></retrieveResponse></soapenv:Body></soapenv:Envelope>` } : null));
     assert.equal(outcome.outcome, "failed", outcome.detail);
