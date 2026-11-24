@@ -32,7 +32,9 @@ export const UNSCORED_RULES: ReadonlySet<string> = new Set(["tech.lint-data-acce
  * twice, and a path that is won more often is no fault. Kept apart from
  * UNSCORED_RULES, which a re-check reads as the code checker's groups.
  */
-const INSIGHT_RULES: ReadonlySet<string> = new Set(["pipe.path-insights"]);
+export const INSIGHT_RULES: ReadonlySet<string> = new Set(["pipe.path-insights"]);
+/** The measure the path insights are read from, which goes where they go (DECISIONS.md 703). */
+export const INSIGHT_METRICS: ReadonlySet<string> = new Set(["historic.path_variants"]);
 const notScored = (ruleId: string): boolean => SETUP_RULES.has(ruleId) || UNSCORED_RULES.has(ruleId) || INSIGHT_RULES.has(ruleId);
 
 const WEIGHTS: Record<string, number> = {

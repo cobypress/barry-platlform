@@ -326,8 +326,9 @@ export function buildDigest({ report, pseudonyms, inventory, madeAt }: DigestFor
         ? { status: "measured", score: overall.score, grade: overall.grade, areaDomains: overall.areas.map((a) => a.domain) }
         : { status: "not_measurable", reason: overall.status === "not_measurable" ? overall.reason : "The overall score couldn't be kept." },
     areas: digestAreas(report),
-    findings: report.teamFindings.map(digestFinding),
-    metrics: report.metrics.map(digestMetric),
+    // The path insights the documents leave out, served here (DECISIONS.md 703).
+    findings: [...report.teamFindings, ...report.insights.findings].map(digestFinding),
+    metrics: [...report.metrics, ...report.insights.metrics].map(digestMetric),
     value: digestValue(report),
     plan: {
       phases: plan.phases.map((p) => ({ key: p.key, title: p.title, from: p.from, to: p.to, findingIds: ids(p.findings) })),
@@ -338,7 +339,7 @@ export function buildDigest({ report, pseudonyms, inventory, madeAt }: DigestFor
     },
     withheldNames: withheldNames(inventory, pseudonyms),
   };
-  orgValues = orgValuesOf({ metrics: report.metrics, findings: report.input.findings, stages: report.input.calibration.stages.map((s) => s.name) });
+  orgValues = orgValuesOf({ metrics: [...report.metrics, ...report.insights.metrics], findings: [...report.input.findings, ...report.insights.findings], stages: report.input.calibration.stages.map((s) => s.name) });
   const guarded = guardDigest(raw, pseudonyms);
   const findings = guarded.findings.map((f, i) => withValueWords(afterGuard(raw.findings[i]!, f)));
   const merged = { ...guarded, findings, ...fixedWords(guarded, findings) };
@@ -370,7 +371,7 @@ function withValueWords(f: DigestFinding): DigestFinding {
  * Anything else is left unknown, for the checked digest to withhold or hold.
  */
 function moreWords(d: Pick<RunDigest, "metrics" | "areas" | "overall" | "plan">, report: BuiltReport): Pick<RunDigest, "metrics" | "areas" | "overall" | "plan"> {
-  const stored = new Map(report.metrics.map((m) => [m.id, m]));
+  const stored = new Map([...report.metrics, ...report.insights.metrics].map((m) => [m.id, m]));
   const metrics = d.metrics.map((m): DigestMetric => {
     const held = stored.get(m.id)?.orgWords;
     // Marks the run made stand, unknown included: the engine's own texts are read only for a metric with none (a consultant-led run's).

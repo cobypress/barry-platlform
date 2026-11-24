@@ -7,7 +7,7 @@ import { buildReport, VALUE_TOTAL, type BuiltReport } from "../../narrative/sect
 import { buildPlan } from "../../narrative/select.ts";
 import { loadRun } from "../../render/render-run.ts";
 import { NAMED_PEOPLE_SENTENCE, RunDigest } from "../../schemas/digest.ts";
-import type { NumberOverride } from "../../schemas/index.ts";
+import type { Finding, Metric, NumberOverride } from "../../schemas/index.ts";
 import type { Inventory } from "../../schemas/inventory.ts";
 import { runFromRecording } from "../../testing/harness.ts";
 import { SIZED_RULE } from "../../testing/recheck.ts";
@@ -53,6 +53,10 @@ function strings(value: unknown): string[] {
  * rows it came from, by its own path and the id beside it. Undefined when the
  * path names nothing we can resolve, which fails the test.
  */
+/** What the digest serves: the documents' findings and measures, then the path insights the documents leave out (DECISIONS.md 703). */
+const served = (r: BuiltReport): Finding[] => [...r.teamFindings, ...r.insights.findings];
+const servedMetrics = (r: BuiltReport): Metric[] => [...r.metrics, ...r.insights.metrics];
+
 function resolve(d: RunDigest, r: BuiltReport, path: Array<string | number>): number | undefined {
   const [top, i, field, sub] = path;
   const plan = buildPlan(r.teamFindings, r.added);
@@ -68,17 +72,17 @@ function resolve(d: RunDigest, r: BuiltReport, path: Array<string | number>): nu
   }
   if (top === "findings" && field === "value" && sub === "amount") {
     const f = d.findings[i as number]!;
-    const built = r.teamFindings.find((x) => x.id === f.id);
+    const built = served(r).find((x) => x.id === f.id);
     return built?.value.kind === "not_sized" ? undefined : built?.value.amount;
   }
   if (top === "metrics" && (field === "value" || field === "n")) {
     const m = d.metrics[i as number]!;
-    const built = r.metrics.find((x) => x.id === m.id);
+    const built = servedMetrics(r).find((x) => x.id === m.id);
     return built?.status === "measured" ? built[field] : undefined;
   }
   if (top === "plan" && i === "phases" && (sub === "from" || sub === "to")) return plan.phases[field as number]![sub];
   // An issue's hours (DECISIONS.md 628, 636): the built finding's own.
-  if (top === "findings" && field === "effortHours" && (sub === "low" || sub === "high")) return r.teamFindings.find((x) => x.id === d.findings[i as number]!.id)?.effortHours?.[sub];
+  if (top === "findings" && field === "effortHours" && (sub === "low" || sub === "high")) return served(r).find((x) => x.id === d.findings[i as number]!.id)?.effortHours?.[sub];
   // The plan's hours, built independently of the builder's walk: every issue in the digest with hours that the plan names anywhere.
   if (top === "plan" && i === "hoursTotal" && (field === "low" || field === "high")) {
     const total = d.plan.hoursTotal!;
@@ -88,7 +92,7 @@ function resolve(d: RunDigest, r: BuiltReport, path: Array<string | number>): nu
     if (!same(total.findingIds, held.map((f) => f.id))) return undefined;
     if (!same(total.partialFindingIds, held.filter((f) => f.effortHours!.partial).map((f) => f.id))) return undefined;
     if (!same(total.withoutHoursFindingIds, d.findings.filter((f) => f.status === "issue" && !f.effortHours && named.has(f.id)).map((f) => f.id))) return undefined;
-    return held.reduce((sum, f) => sum + r.teamFindings.find((x) => x.id === f.id)!.effortHours![field], 0);
+    return held.reduce((sum, f) => sum + served(r).find((x) => x.id === f.id)!.effortHours![field], 0);
   }
   if (top !== "value") return undefined;
   // value.total.low, value.byKind.<kind>.low, value.exposure.low: the report's own, and the sum of the lines named.
@@ -121,8 +125,8 @@ describe("the run digest (DECISIONS.md 632)", () => {
     assert.ok(RunDigest.safeParse(digest).success);
     assert.equal(digest.runId, report.input.run.id);
     assert.equal(digest.product, "barometer");
-    assert.deepEqual(digest.findings.map((f) => f.id), report.teamFindings.map((f) => f.id));
-    assert.deepEqual(digest.metrics.map((m) => m.id), report.metrics.map((m) => m.id));
+    assert.deepEqual(digest.findings.map((f) => f.id), served(report).map((f) => f.id));
+    assert.deepEqual(digest.metrics.map((m) => m.id), servedMetrics(report).map((m) => m.id));
   });
 
   // This reads the same report fields the builder copies, so it proves each figure sits under the right id and each total adds up the lines it lists,
@@ -156,7 +160,7 @@ describe("the run digest (DECISIONS.md 632)", () => {
 
   test("its text is the report's team-level text, or the one fixed sentence, so its figures are the documents' own", () => {
     for (const f of digest.findings) {
-      const built = report.teamFindings.find((x) => x.id === f.id)!;
+      const built = served(report).find((x) => x.id === f.id)!;
       for (const key of ["title", "summary", "recommendation"] as const) assert.ok(f[key] === built[key] || f[key] === NAMED_PEOPLE_SENTENCE, `${f.id} ${key}`);
     }
   });
@@ -248,7 +252,7 @@ describe("the run digest (DECISIONS.md 632)", () => {
     const issues = digest.findings.filter((f) => f.status === "issue");
     assert.ok(issues.length > 30);
     for (const f of issues) {
-      const built = report.teamFindings.find((x) => x.id === f.id)!;
+      const built = served(report).find((x) => x.id === f.id)!;
       assert.deepEqual(f.effortHours, built.effortHours, f.id);
       assert.equal(f.timeBand, built.timeBand, f.id);
       assert.equal(f.fixComplexity, built.fixComplexity, f.id);
@@ -256,14 +260,22 @@ describe("the run digest (DECISIONS.md 632)", () => {
     }
     for (const f of digest.findings.filter((x) => x.status !== "issue")) assert.ok(f.effortHours === undefined && f.timeBand === undefined && f.fixComplexity === undefined, f.id);
     // Each issue's fix prompt is carried only with its org words marked (DECISIONS.md 672; before it, none was carried).
-    for (const f of issues) assert.ok(f.fixPrompt === report.teamFindings.find((x) => x.id === f.id)!.fixPrompt && f.orgWords?.fixPrompt, f.id);
+    for (const f of issues) assert.ok(f.fixPrompt === served(report).find((x) => x.id === f.id)!.fixPrompt && f.orgWords?.fixPrompt, f.id);
     const total = digest.plan.hoursTotal!;
     assert.ok(total.findingIds.length > 10 && total.high >= total.low && total.low > 0);
-    // Every issue the plan holds with hours is in the total, the quick wins among them; every one without is named beside it.
-    // An issue for information is never planned (buildPlan), so it is in neither (decision 703's path insights).
-    const planned = issues.filter((f) => f.severity !== "info");
-    assert.ok(issues.length - planned.length === 3 && issues.filter((f) => f.severity === "info").every((f) => !total.findingIds.includes(f.id) && !total.withoutHoursFindingIds.includes(f.id)));
+    // Every issue the documents take with hours is in the total, the quick wins among them; every issue without is named beside it.
+    const insightIds = new Set(report.insights.findings.map((f) => f.id));
+    const planned = issues.filter((f) => !insightIds.has(f.id));
     for (const f of planned) assert.ok(f.effortHours ? total.findingIds.includes(f.id) : total.withoutHoursFindingIds.includes(f.id), f.id);
+    // The path insights (decision 703) are served, each an issue for information with its own hours, and never planned:
+    // in no phase, not later, not a quick win, and in neither of the plan's hours lists.
+    const insights = issues.filter((f) => insightIds.has(f.id));
+    assert.equal(insights.length, 3);
+    const inPlan = new Set([...digest.plan.phases.flatMap((p) => p.findingIds), ...digest.plan.later, ...digest.plan.quickWins, ...Object.keys(digest.plan.alsoFor), ...Object.values(digest.plan.alsoFor).flat()]);
+    for (const f of insights) {
+      assert.equal(f.severity, "info", f.id);
+      assert.ok(!inPlan.has(f.id) && !total.findingIds.includes(f.id) && !total.withoutHoursFindingIds.includes(f.id) && !total.partialFindingIds.includes(f.id), f.id);
+    }
     assert.ok(digest.plan.quickWins.length > 0 && digest.plan.quickWins.every((id) => total.findingIds.includes(id)), "the quick wins are counted");
     assert.equal(new Set(total.findingIds).size, total.findingIds.length, "each finding once");
     assert.deepEqual(total.partialFindingIds, total.findingIds.filter((id) => digest.findings.find((f) => f.id === id)!.effortHours!.partial));

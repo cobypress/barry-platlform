@@ -82,9 +82,12 @@ export function untraced(digest: RunDigest, set: FigureSet): string[] {
  * the fix table wrote (636) and the fix prompt (628). Both are the engine's,
  * made by code from the finding, so they hold its figures by construction.
  */
+const merge = (a: FigureSet, b: FigureSet): FigureSet => ({ figures: [...a.figures, ...b.figures], dates: [...a.dates, ...b.dates], identifiers: [...a.identifiers, ...b.identifiers], tokens: [...a.tokens, ...b.tokens], labels: [...a.labels, ...b.labels] });
+
 export function digestDataset(report: BuiltReport, pseudonyms: Pseudonymiser): FigureSet {
-  const set = pageDataset(report.dataset, pseudonyms);
-  const extraText = report.teamFindings.flatMap((f) => [...(f.effortHours ? [{ source: f.id, text: f.effortHours.basis }] : []), ...(f.fixPrompt ? [{ source: f.id, text: f.fixPrompt }] : [])]);
+  // The path insights' own figures beside the documents' (DECISIONS.md 703): the digest serves them, the pages don't.
+  const set = pageDataset(merge(report.dataset, report.insights.dataset), pseudonyms);
+  const extraText = [...report.teamFindings, ...report.insights.findings].flatMap((f) => [...(f.effortHours ? [{ source: f.id, text: f.effortHours.basis }] : []), ...(f.fixPrompt ? [{ source: f.id, text: f.fixPrompt }] : [])]);
   const sources = new Set(extraText.map((t) => t.source));
   const extra = buildDataset({ findings: [], metrics: [], extraText });
   const mine = <T extends { source: string }>(rows: T[]): T[] => rows.filter((r) => sources.has(r.source));
