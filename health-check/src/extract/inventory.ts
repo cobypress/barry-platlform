@@ -1,6 +1,6 @@
 import { redactSecrets } from "../privacy/secrets.ts";
 import { BudgetStopError } from "../salesforce/budget.ts";
-import { isUnavailable, runStoppedWords, type OrgLimit } from "../salesforce/client.ts";
+import { classifyError, isUnavailable, runStoppedWords, type OrgLimit, type SalesforceError } from "../salesforce/client.ts";
 import { INVENTORY_VERSION, NAME_MAX, type ConnectedAppRow, type FillRateObject, type Inventory, type LimitRow, type PackageRow, type RiskyPermissionRow } from "../schemas/inventory.ts";
 import type { RunScope } from "../schemas/index.ts";
 import { CORE_OBJECTS, recordCountsExtractor } from "./configuration.ts";
@@ -97,7 +97,8 @@ export const fillRateQuery = (object: string, fields: string[]): string =>
 function failedCount(err: unknown, what: string): string {
   if (err instanceof BudgetStopError) throw err;
   if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) return COUNT_TOO_SLOW;
-  if (isUnavailable(err)) return refusalReason(err, what);
+  // Salesforce not answering: thrown before the worker's last delivery, to be read again, and on it a lost read in our words (DECISIONS.md 702).
+  if (isUnavailable(err) || classifyError(err) === "instance_unavailable") return refusalReason(err as SalesforceError, what);
   return runStoppedWords(err) ?? "The count couldn't be read.";
 }
 

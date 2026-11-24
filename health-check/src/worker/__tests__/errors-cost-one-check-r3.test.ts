@@ -407,3 +407,36 @@ describe("the 200 cap keeps one lost read (round 4)", () => {
     assert.deepEqual(lines, ["  metadata: Salesforce didn't answer a read of A (Server, HTTP 500), so the checks it feeds are not measurable"]);
   });
 });
+
+describe("the inventory's fill rates read again after a blip (round 4, P5)", () => {
+  const fillRateCall = (r: TransportRequest): boolean => isComposite(r) && /SELECT COUNT\(Id\) n/.test(decodeURIComponent(String(r.body)).replace(/\+/g, " "));
+  const inventory = (dir: string): { fillRates: unknown } => JSON.parse(readFileSync(join(dir, RUN_ID, "inventory.json"), "utf8"));
+  const failedSteps = (w: { stored: () => { run: { steps: Array<{ id: string; status: string }> } } }) => w.stored().run.steps.filter((s) => s.status === "failed").map((s) => s.id);
+
+  test("a fill-rate count 503 on delivery 1: still running, not released; Salesforce answering on delivery 2, released with every fill rate", async () => {
+    let hits = 0;
+    const w = await world((r) => (hits === 0 && fillRateCall(r) ? (hits++, composite503(r)) : null), "automatic");
+    await w.deliver(1);
+    assert.equal(hits, 1);
+    assert.equal(w.stored().run.status, "extracting");
+    await w.deliver(2);
+    assert.equal(w.stored().run.status, "released");
+    assert.deepEqual(failedSteps(w), []);
+    // Only the synthetic org's own refused describe (Project_Line__c) is unread, as on a clean run.
+    assert.doesNotMatch(JSON.stringify(inventory(w.deps.runsDir).fillRates), /didn.t answer/);
+  });
+
+  test("fill-rate counts 503 on every delivery: released on the last, with those counts alone unread, in true words", async () => {
+    const w = await world((r) => (fillRateCall(r) ? composite503(r) : null), "automatic");
+    await w.deliver(1);
+    await w.deliver(2);
+    assert.equal(w.stored().run.status, "extracting");
+    await w.deliver(3);
+    assert.equal(w.stored().run.status, "released");
+    // The step finished: only the counts Salesforce didn't answer are unread, not the whole section.
+    assert.deepEqual(failedSteps(w), []);
+    const text = JSON.stringify(inventory(w.deps.runsDir).fillRates);
+    assert.match(text, /couldn't be read, because Salesforce didn't answer as it should\./);
+    assert.doesNotMatch(text, /after several tries/);
+  });
+});

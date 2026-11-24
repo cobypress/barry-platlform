@@ -30,7 +30,7 @@ import { Pseudonymiser, UNKNOWN_USER, type PseudonymEntry } from "../privacy/pse
 import { registerSharedNames } from "../privacy/names.ts";
 import { Run, type Calibration, type ManualAnswer, type RefusedRead, type RunScope, type RunStep } from "../schemas/index.ts";
 import { ApiBudget, BudgetStopError } from "../salesforce/budget.ts";
-import { lastDelivery, runStoppedWords, SalesforceClient, SalesforceError } from "../salesforce/client.ts";
+import { classifyError, lastDelivery, runStoppedWords, SalesforceClient, SalesforceError } from "../salesforce/client.ts";
 import type { ConnectionProvider } from "../salesforce/connection.ts";
 import type { Transport } from "../salesforce/transport.ts";
 import { allFindings, allMetrics, analyse, type AnalysisOutput } from "./evaluate.ts";
@@ -334,7 +334,10 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
       // No finding reads the inventory, so its step failing costs only its own
       // section, and the run goes on; a later delivery tries it again (DECISIONS.md 609).
       // The same for PMD and ESLint's step: a run never fails because a linter did (DECISIONS.md 670).
-      if (inventorySteps.includes(extractor) || lintSteps.includes(extractor)) {
+      // Salesforce not answering before the worker's last delivery isn't the step failing: the run stops, and the
+      // queue's next delivery reads the step again, rather than lose its whole section over a blip (DECISIONS.md 702).
+      const retried = options.lastDelivery !== true && classifyError(err) === "instance_unavailable";
+      if ((inventorySteps.includes(extractor) || lintSteps.includes(extractor)) && !retried) {
         // The lint findings then say PMD didn't run, rather than show nothing as on a scan (DECISIONS.md 673).
         if (lintSteps.includes(extractor)) extracts.set(extractor.id, { pmd: notRun("pmd", LINT_STEP_FAILED), eslint: notRun("eslint", LINT_STEP_FAILED) } satisfies CodeLintData);
         await saveRun();
