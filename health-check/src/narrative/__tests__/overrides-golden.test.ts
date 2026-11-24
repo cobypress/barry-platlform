@@ -84,10 +84,8 @@ describe("the golden overrides file shared with the console (decision 532, item 
       overridable(findings, metrics).map(({ type, id, field, asRead }) => ({ type, id, field, newValue: asRead + 1 })),
     );
     const count = (field: (v: string) => boolean, type: string): number => verdicts.filter((v) => v.type === type && field(v.field)).length;
-    // Decision 703 added three findings, one measure and their 25 figures: 103, 78 and 419 before.
-    assert.deepEqual([findings.length, metrics.length, verdicts.length], [106, 79, 444]);
-    // 319 facts and 76 measures before decision 703.
-    assert.deepEqual([count((f) => f.startsWith("facts."), "finding"), count((f) => f === "value.amount", "finding"), count((f) => f === "value", "metric")], [343, 24, 77]);
+    assert.deepEqual([findings.length, metrics.length, verdicts.length], [103, 78, 419]);
+    assert.deepEqual([count((f) => f.startsWith("facts."), "finding"), count((f) => f === "value.amount", "finding"), count((f) => f === "value", "metric")], [319, 24, 76]);
   });
 
   test("holds every kind of refusal for a finding and for a measure, by name, and each where a measure's part can be", () => {
@@ -375,8 +373,7 @@ describe("refusalLines (decision 532, item 1)", () => {
   });
 
   test("the listed lines are the old function's, by the character, for every refusal of the synthetic run and the hand cases, alone and together", () => {
-    // The run's figures and refusals were 603 and 237 before decision 703 added three findings and a measure.
-    assert.deepEqual([runFigures.length, runRefusals.length, handRefusals.length, allHandRefusals.length], [665, 275, 60, 63]);
+    assert.deepEqual([runFigures.length, runRefusals.length, handRefusals.length, allHandRefusals.length], [603, 237, 60, 63]);
     for (const r of [...runRefusals, ...handRefusals]) {
       assert.deepEqual(refusalLines([r]), oldLines([r]));
       assert.equal(refusalLines([r])[1], oldLines([r])[1]);
@@ -460,12 +457,10 @@ describe("no verdict depends on the order of a finding's facts or a measure's st
 // being refused or not. What changes is which other figure a "shared" refusal
 // names, or which stat a "part" refusal names, and the order of a finding's
 // refusals among themselves: the order the console may see from Postgres.
-// Measured again when decision 703 added three findings and a measure, whose figures the shuffles now take in: before it,
-// 532 { 6, 4, 6, 70 }, 533 { 5, 3, 5, 87 } and 534 { 3, 1, 3, 80 }.
 const NAMED_OTHERWISE: Record<number, { finding: number; measure: number; consoleOnly: number; reordered: number }> = {
-  532: { finding: 6, measure: 5, consoleOnly: 6, reordered: 102 },
-  533: { finding: 2, measure: 21, consoleOnly: 2, reordered: 116 },
-  534: { finding: 5, measure: 17, consoleOnly: 5, reordered: 110 },
+  532: { finding: 6, measure: 4, consoleOnly: 6, reordered: 70 },
+  533: { finding: 5, measure: 3, consoleOnly: 5, reordered: 87 },
+  534: { finding: 3, measure: 1, consoleOnly: 3, reordered: 80 },
 };
 
 describe("measured: what the order of facts and stats does change, on the synthetic run (decision 532, item 4)", () => {
@@ -514,7 +509,6 @@ describe("measured: a figure's verdict is the same with another figure of its fi
       }
     }
     assert.deepEqual(differ, []);
-    // Decision 703 added three findings and one measure: 167, 2,586, 91 and 1,176 before.
-    assert.deepEqual({ items, pairs, consoleItems, consolePairs }, { items: 171, pairs: 4166, consoleItems: 94, consolePairs: 1350 });
+    assert.deepEqual({ items, pairs, consoleItems, consolePairs }, { items: 167, pairs: 2586, consoleItems: 91, consolePairs: 1176 });
   });
 });

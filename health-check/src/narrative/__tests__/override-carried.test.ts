@@ -462,10 +462,8 @@ describe("every overridable figure of the synthetic run, put back (decision 514,
       assert.deepEqual(report.metrics, asBuilt.metrics, `round ${round}`);
       assert.deepEqual(report.value, asBuilt.value, `round ${round}`);
     }
-    // 319 facts before decision 703 added its three findings' 24.
-    assert.equal(figures.length, 367, "343 facts and 24 sized amounts");
-    // 1,414 + 343 before decision 703 added three findings.
-    assert.equal(pairs, 1579 + 367, "each figure against every other number its finding prints, and plus 7");
+    assert.equal(figures.length, 343, "319 facts and 24 sized amounts");
+    assert.equal(pairs, 1414 + 343, "each figure against every other number its finding prints, and plus 7");
   });
 });
 
@@ -476,12 +474,10 @@ describe("every overridable figure of the synthetic run, put back (decision 514,
 // with a figure of 1 beside "one" in its finding's wording (dq.duplicate-accounts,
 // sec.modify-all-data, bp.ownership-skew, act.rep-activity-spread, int.api-usage)
 // or int.api-usage's 1,000 requests, which the 5% test reads as "one" in thousands.
-// 598 before decision 703 added three findings, whose pairs are all carried.
-const CARRIED_PAIRS = 702;
+const CARRIED_PAIRS = 598;
 // Three of the 49 were among those pairs, now refused: int.api-usage's "220,000 of 1" and "220,000 of 1,000",
 // and sec.modify-all-data's "3 of 1".
-// Decision 703 adds five, each in pipe.path-insights' "107 of the 257 ... of 421 closed deals" (46 before).
-const IMPOSSIBLE_PAIRS = 51;
+const IMPOSSIBLE_PAIRS = 46;
 
 const byId = (id: string): Finding => output!.findings.find((f) => f.id === id)!;
 

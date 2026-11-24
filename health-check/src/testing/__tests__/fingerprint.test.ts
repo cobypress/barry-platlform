@@ -17,8 +17,8 @@ import { AS_OF, CONNECTED_USER } from "../synthetic-org.ts";
 // a metric or the raw notes updates these, and says why in its commit.
 
 const GOLDEN: Record<string, Record<string, string>> = {
-  recorded: { "findings.json": "cd17885f313c1dea", "metrics.json": "5e72ab072a4c1e32", "scores.json": "17cdb1708449d000", "manual-steps.json": "c4daf1ca86584a33", "action-lists.json": "7018f033c3c80e0a", "raw-notes.md": "b327a9f8330ee9c0", "handbook.json": "64dcafcf493eef42" },
-  generated: { "findings.json": "a540e987c8421b52", "metrics.json": "89c771ee94ec4c13", "scores.json": "616e42570f940402", "manual-steps.json": "15ae87c4fd76d7b6", "action-lists.json": "8eeb97766d119778", "raw-notes.md": "3f7e782a544298dc", "handbook.json": "23c075e2337e23a8" },
+  recorded: { "findings.json": "8cb2e60845aa6e51", "metrics.json": "71b019b301c5e723", "scores.json": "17cdb1708449d000", "manual-steps.json": "c4daf1ca86584a33", "action-lists.json": "7018f033c3c80e0a", "raw-notes.md": "0023df82620d5055", "handbook.json": "64dcafcf493eef42" },
+  generated: { "findings.json": "eb16d7cb820f1731", "metrics.json": "7d1bebd0ffb263c4", "scores.json": "616e42570f940402", "manual-steps.json": "15ae87c4fd76d7b6", "action-lists.json": "8eeb97766d119778", "raw-notes.md": "26c359e68cf0986f", "handbook.json": "23c075e2337e23a8" },
 };
 
 // Before decision 703 added the path insights' findings and the variant table's metric: with those taken out,

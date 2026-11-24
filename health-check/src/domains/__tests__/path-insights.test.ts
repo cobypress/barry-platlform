@@ -63,7 +63,9 @@ function extractsOf(specs: Spec[], history: "ok" | "none" | "unavailable" = "ok"
 
 function analysed(specs: Spec[], options: { history?: "ok" | "none" | "unavailable"; calibration?: Calibration } = {}): { findings: Finding[]; metric: Metric } {
   const output = analyseExtracts(extractsOf(specs, options.history), { calibration: options.calibration ?? calibration, modules: [historicPipelineModule] });
-  return { findings: output.findings.filter((f) => f.ruleId === RULE), metric: output.metrics.find((m) => m.id === PATH_VARIANTS)! };
+  // The documents' findings and measures hold none of them: the analysis keeps them apart (DECISIONS.md 703).
+  assert.ok(!output.findings.some((f) => f.ruleId === RULE) && !output.metrics.some((m) => m.id === PATH_VARIANTS));
+  return { findings: output.insights.filter((f) => f.ruleId === RULE), metric: output.insightMetrics.find((m) => m.id === PATH_VARIANTS)! };
 }
 
 const issues = (findings: Finding[]) => findings.filter((f) => f.status === "issue");

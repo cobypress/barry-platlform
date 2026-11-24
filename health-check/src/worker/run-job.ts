@@ -1,3 +1,4 @@
+import { allFindings, allMetrics } from "../engine/evaluate.ts";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ALL_MODULES, knownModuleIds, modulesForRun } from "../domains/index.ts";
@@ -435,18 +436,19 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
     const digest = input.run.product === "pulse" ? digestOf(runId, () => buildDigest({ report, pseudonyms, inventory, madeAt: now().toISOString() }), log) : (checkedOne?.digest ?? null);
     const sections = outputs.flatMap((o) => o.sections);
     // The engine's own, without any survey metric: those go apart, in a savepoint of their own.
-    const metrics = result.output!.metrics.filter((m) => !SURVEY_METRIC_IDS.includes(m.id));
+    const metrics = allMetrics(result.output!).filter((m) => !SURVEY_METRIC_IDS.includes(m.id));
     for (const line of danglingCitations(runId, sections, { ...result.output!, metrics: [...metrics, ...surveyMetrics] })) log(line);
     const overall = runOverall(report.overall);
     // Released by code or held for a person, decided here and written in the save's one transaction (DECISIONS.md 693).
     decision = checkedOne
-      ? decideRelease({ runId, sections, checked: checkedOne, findings: result.output!.findings, overall, previousScore: await deps.store.lastReleasedScore(runId, input.run.orgId.slice(0, 15), input.run.product), now: now().toISOString() })
+      ? decideRelease({ runId, sections, checked: checkedOne, findings: allFindings(result.output!), overall, previousScore: await deps.store.lastReleasedScore(runId, input.run.orgId.slice(0, 15), input.run.product), now: now().toISOString() })
       : null;
     if (decision) log(decision.kind === "release" ? `Automatic run ${runId} passed every check and is released.` : `Automatic run ${runId} is held for a person: ${decision.reason} ${JSON.stringify(decision.counts)}.`);
     await deps.store.saveRunOutput(runId, {
       progress: progressOf(result.run),
       runDir: dir,
-      findings: result.output!.findings,
+      // Every finding, the path insights with them (DECISIONS.md 703): the documents choose theirs, the console keeps all.
+      findings: allFindings(result.output!),
       metrics,
       surveyMetrics,
       scores: reportInput.scores ?? [],
