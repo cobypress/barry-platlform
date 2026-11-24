@@ -1,7 +1,7 @@
 import { CONSULTANT_NEXT_STEPS, nextStepsWords } from "./exec-pages.ts";
 import { noMoneyReason, withAmountNotes } from "./amount-notes.ts";
 import { yearlyByFinding } from "../value/model.ts";
-import { differenceWords, formatFigure, comparisonId } from "../benchmark/compare.ts";
+import { averageSentence, differenceWords, formatFigure, comparisonId } from "../benchmark/compare.ts";
 import type { BuiltReport } from "../narrative/sections.ts";
 import { buildPlan, isSetupReview, verdictOf } from "../narrative/select.ts";
 import { readinessLine } from "../narrative/readiness.ts";
@@ -51,9 +51,12 @@ type Compared = BuiltReport["comparisons"][number];
 /** How far the figure sits from what it's compared with, as a share of that, so points and days can be ranked together. */
 function distance(c: Compared): number {
   const p = c.published[0];
+  // Set against a published figure, ours is the figure it was compared with: our average for a published average (DECISIONS.md 709),
+  // and, where that isn't set against anything, the figure as before, for the ranking alone.
+  const ours = p?.ours ?? c.value;
   const against = p ? p.figure.value : c.own.status === "measured" ? c.own.median : null;
-  if (c.value === null || against === null) return 0;
-  return Math.abs(c.value - against) / Math.max(Math.abs(against), 1);
+  if (ours === null || against === null) return 0;
+  return Math.abs(ours - against) / Math.max(Math.abs(against), 1);
 }
 
 /** Behind what it's compared with: worse than the published figure, or in the bottom quarter of our customers. */
@@ -79,7 +82,9 @@ function comparisons(r: Render, report: BuiltReport): string {
   const line = (c: (typeof shown)[number]): string => {
     const yours = formatFigure(c.value!, c.metric.unit);
     const p = c.published[0];
-    if (p) return `<p>${r.t(`${c.metric.label}: yours is ${yours}. Published research: ${formatFigure(p.figure.value, c.metric.unit)} ${p.figure.statistic}, so yours is ${differenceWords(c, p)}${p.side === "worse" ? ", which is worse" : p.side === "better" ? ", which is better" : ""}.`)}<span class="src">${r.t(`${p.figure.source.publisher}, ${p.figure.source.year}`)}</span>${r.ref(comparisonId(c.metric.key))}</p>`;
+    const average = p ? averageSentence(c, p) : null;
+    if (p && average !== null) return `<p>${r.t(`${c.metric.label}: ${average.charAt(0).toLowerCase()}${average.slice(1)}`)}<span class="src">${r.t(`${p.figure.source.publisher}, ${p.figure.source.year}`)}</span>${r.ref(comparisonId(c.metric.key))}</p>`;
+    if (p && p.against !== "none") return `<p>${r.t(`${c.metric.label}: yours is ${yours}. Published research: ${formatFigure(p.figure.value, c.metric.unit)} ${p.figure.statistic}, so yours is ${differenceWords(c, p)}${p.side === "worse" ? ", which is worse" : p.side === "better" ? ", which is better" : ""}.`)}<span class="src">${r.t(`${p.figure.source.publisher}, ${p.figure.source.year}`)}</span>${r.ref(comparisonId(c.metric.key))}</p>`;
     const own = c.own;
     if (own.status !== "measured") return "";
     return `<p>${r.t(`${c.metric.label}: yours is ${yours}, ${own.position}. Black Cloud customers' middle half is ${formatFigure(own.p25, c.metric.unit)} to ${formatFigure(own.p75, c.metric.unit)}.`)}<span class="src">${r.t("Black Cloud customers")}</span>${r.ref(comparisonId(c.metric.key))}</p>`;

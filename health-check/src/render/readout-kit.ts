@@ -134,6 +134,10 @@ export function readoutKit(report: BuiltReport): KitPart[] {
       points: compared.slice(0, 3).map((c) => {
         const pub = c.published[0];
         const yours = formatFigure(c.value!, c.metric.unit);
+        const source = pub ? `${pub.figure.source.publisher}, ${pub.figure.source.year}` : "";
+        // A published average of days is set against theirs, or against nothing (DECISIONS.md 709).
+        if (pub?.against === "none") return `${c.metric.label}: theirs is a median of ${yours}, and the published ${formatFigure(pub.figure.value, c.metric.unit)} (${source}) is an average, so don't set one against the other.`;
+        if (pub?.against === "average") return `${c.metric.label}: their average is ${formatFigure(pub.ours, c.metric.unit)}, ${differenceWords(c, pub)} the published average of ${formatFigure(pub.figure.value, c.metric.unit)} (${source}).`;
         return pub ? `${c.metric.label}: theirs is ${yours}, ${differenceWords(c, pub)} the published ${formatFigure(pub.figure.value, c.metric.unit)} (${pub.figure.source.publisher}, ${pub.figure.source.year}).` : `${c.metric.label}: theirs is ${yours}, ${c.own.status === "measured" ? c.own.position : "with no view yet"} among Black Cloud customers.`;
       }),
       questions: [{ question: "Who are we being compared with?", answers: compared.slice(0, 3).map((c) => comparisonId(c.metric.key)) }],

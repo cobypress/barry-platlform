@@ -182,12 +182,38 @@ describe("published research", () => {
   });
 
   test("lower is better reads the other way, and a tie is level", () => {
-    const cycle: PublishedFigure = { ...PUBLISHED, metricKey: "historic.sales_cycle_won", unit: "days", value: 90 };
+    // A figure given overall, so our median is set against it as it is.
+    const cycle: PublishedFigure = { ...PUBLISHED, metricKey: "historic.sales_cycle_won", unit: "days", value: 90, statistic: "overall" };
     const metrics = output!.metrics.map((m) => (m.id === "historic.sales_cycle_won" && m.status === "measured" ? { ...m, value: 80 } : m));
     const c = compareRun({ metrics, scores: SCORES, findings: output!.findings, industry: null, headcountBand: null, period: PERIOD, benchmark: null, published: [cycle] }).find((x) => x.metric.key === "historic.sales_cycle_won")!;
     assert.equal(c.published[0]!.difference, -10);
     assert.equal(c.published[0]!.side, "better");
     assert.equal(compare({ value: 21, published: [PUBLISHED] }).published[0]!.side, "level");
+  });
+
+  // Our sales cycle is a median; a published average is set against our average of the same deals, never the median (DECISIONS.md 709).
+  test("a published average of days is set against our average, and against nothing where we hold none", () => {
+    const cycle: PublishedFigure = { ...PUBLISHED, metricKey: "historic.sales_cycle_won", unit: "days", value: 91, statistic: "on average" };
+    const withCycle = (stats: Record<string, number>, n = 40) =>
+      compareRun({ metrics: output!.metrics.map((m) => (m.id === "historic.sales_cycle_won" && m.status === "measured" ? { ...m, value: 70, n, stats } : m)), scores: SCORES, findings: output!.findings, industry: null, headcountBand: null, period: PERIOD, benchmark: null, published: [cycle] }).find((x) => x.metric.key === "historic.sales_cycle_won")!;
+    const averaged = withCycle({ p25: 50, p75: 95, mean: 79.9 });
+    assert.equal(averaged.value, 70, "the headline stays the median");
+    assert.deepEqual([averaged.published[0]!.against, averaged.published[0]!.ours, averaged.published[0]!.difference, averaged.published[0]!.side], ["average", 79.9, -11.1, "better"]);
+    const notes = comparisonNotes(averaged);
+    assert.equal(notes.find((l) => l.label === "Against it")!.text, "Your won deals took an average of 79.9 days to close, against a published average of 91: 11.1 days shorter, which is better.");
+    assert.ok(notes.some((l) => l.text.includes("It's an average, and ours is a median.") || l.text.includes("counts no decision deals")), "the source's caveats are kept");
+    const r = renderContext(pseudonyms, "GBP", true);
+    assert.match(compareSlide(r, [averaged]).html, /91 days on average\. Your won deals took an average of 79\.9 days to close, against a published average of 91: 11\.1 days shorter, which is better\./);
+    for (const none of [withCycle({ p25: 50, p75: 95 }), withCycle({ mean: 79.9 }, 4)]) {
+      assert.deepEqual([none.published[0]!.against, none.published[0]!.difference, none.published[0]!.side], ["none", null, null]);
+      const line = "Yours is a median of 70 days and the published figure an average of 91 days. A median and an average aren't measured the same way, so we don't say which is shorter.";
+      assert.equal(comparisonNotes(none).find((l) => l.label === "Against it")!.text, line);
+      const html = compareSlide(r, [none]).html;
+      assert.ok(html.replaceAll("&#39;", "'").replaceAll("&#x27;", "'").replaceAll("’", "'").includes(`91 days on average. ${line}`), html);
+      assert.doesNotMatch(html, /shorter, which|longer, which|which is better|which is worse/);
+    }
+    // A published average of a share is a share like ours, and compared as before.
+    assert.equal(compare({ value: 25, published: [PUBLISHED] }).published[0]!.against, "value");
   });
 
   test("a figure in another unit is never compared", () => {
