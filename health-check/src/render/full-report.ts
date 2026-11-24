@@ -1,4 +1,5 @@
 import { CONSULTANT_NEXT_STEPS, nextStepsWords } from "./exec-pages.ts";
+import { withAmountNotes } from "./amount-notes.ts";
 import { yearlyByFinding } from "../value/model.ts";
 import { orderFromOrg } from "../connect/auto-calibration.ts";
 import { currencyStanding } from "../engine/currency.ts";
@@ -386,11 +387,10 @@ const notMeasured = (r: Render, m: Metric | undefined): string => `<p class="cha
  * sort order with no person's confirmation (DECISIONS.md 692, 693): the same
  * sentence the figures beside it carry.
  */
-/** The appendix's currency: the code as before, or, on an automatic run, where it came from or that none was read (DECISIONS.md 700). */
+/** The appendix's currency: the code as before, or, where it isn't known by name, never a code (DECISIONS.md 700). */
 const currencyDetail = (calibration: Calibration): string => {
   const standing = currencyStanding(calibration);
-  if (standing === "none") return "Not read from your Salesforce, so no amounts are shown";
-  return standing === "locale" ? `${calibration.currency}, taken from your Salesforce locale and not confirmed` : calibration.currency;
+  return standing === "org" || standing === "unread" ? "Your Salesforce org's own currency, which you haven't told us yet" : calibration.currency;
 };
 const orderNote = (r: Render, calibration: Calibration): string => (orderFromOrg(calibration) ? `<p class="note">${r.t(ORDER_UNCONFIRMED)}</p>` : "");
 
@@ -1110,7 +1110,8 @@ export function fullReportHtml(report: BuiltReport, pseudonyms: Pseudonymiser): 
  * roomiest step that fits the deck's range, as the deck is made.
  */
 export function fullReportHtmlAt(report: BuiltReport, pseudonyms: Pseudonymiser, step: number | null): string {
-  return inDocumentOrder(pseudonyms, (words) => fullReportHtmlWith(report, pseudonyms, step, words));
+  // Each page with an amount in a currency not known by name says so (DECISIONS.md 700).
+  return withAmountNotes(report.value.currencyNote, () => inDocumentOrder(pseudonyms, (words) => fullReportHtmlWith(report, pseudonyms, step, words)));
 }
 
 function fullReportHtmlWith(report: BuiltReport, pseudonyms: Pseudonymiser, step: number | null, words: CustomerWords): string {

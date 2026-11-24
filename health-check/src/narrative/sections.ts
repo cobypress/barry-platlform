@@ -14,7 +14,7 @@ import { AI_METRIC_IDS } from "../domains/configuration/ai.ts";
 import { readinessOf, VERDICT_WORDS, type Readiness } from "./readiness.ts";
 import { DOCUMENTED_METRIC_IDS } from "../domains/configuration/documented.ts";
 import { buildDataset, checkNumbers, scopeDataset, SOURCE, toNumberCheckResult, type FigureSet, type StructuralFigure } from "../numbercheck/index.ts";
-import { compactMoney, longDate, money, monthYear } from "../render/format.ts";
+import { AMOUNT_MARK, compactMoney, longDate, money, monthYear, probingAmounts } from "../render/format.ts";
 import { BENCHMARK_MIN_GROUP, calibrationConfirmation, type Calibration, type Finding, type ManualStep, type Metric, type NumberOverride, type ReportSection, type Run, type Score, type SectionVersion } from "../schemas/index.ts";
 import { ReportSection as ReportSectionSchema, SectionVersion as SectionVersionSchema } from "../schemas/index.ts";
 import type { SectionBrief } from "./draft.ts";
@@ -235,11 +235,10 @@ function severityCounts({ critical, high }: { critical: number; high: number }):
   return `${critical} critical and ${high} high`;
 }
 
-/** The currency as the drafts' source says it (DECISIONS.md 700): an automatic run's from the locale is an assumption, and none is none. */
+/** The currency as the drafts' source says it (DECISIONS.md 700): one not known by name is never named. */
 function currencyLine(c: Calibration): string {
   const standing = currencyStanding(c);
-  if (standing === "none") return "No currency could be read, so no amounts are given.";
-  return standing === "locale" ? `Values are in ${c.currency}, taken from the org's default locale and not confirmed.` : `Values are in ${c.currency}.`;
+  return standing === "org" || standing === "unread" ? "Amounts are in the org's own currency, which we don't know by name: write amounts as plain numbers with no symbol or code." : `Values are in ${c.currency}.`;
 }
 
 function calibrationText(run: Run, c: Calibration, facts: string[] = []): string {
@@ -850,6 +849,17 @@ function fullSpecs(input: ReportInput, team: Finding[], metrics: Metric[], surve
   ];
 }
 
+/**
+ * Each section whose text prints an amount in a currency not known by name
+ * ends with `note` (DECISIONS.md 700): the specs are made once with each such
+ * amount marked, to find them, and again for real. With no note, as made.
+ */
+function noted(note: string | undefined, make: () => Spec[]): Spec[] {
+  if (!note) return make();
+  const probe = probingAmounts(make);
+  return make().map((spec, i) => (probe[i]?.body.includes(AMOUNT_MARK) && !spec.body.includes(note) ? { ...spec, body: `${spec.body}\n\n${note}` } : spec));
+}
+
 function record(run: Run, output: ReportOutputKey, specs: Spec[], dataset: FigureSet, now: Date, briefs: Map<string, SectionBrief>, scopes: Map<string, string[]>): BuiltOutput {
   const sections: ReportSection[] = [];
   const versions: SectionVersion[] = [];
@@ -1016,9 +1026,9 @@ export function buildReport(given: ReportInput): BuiltReport {
     causes,
     readiness,
     outputs: {
-      raw_notes: build("raw_notes", rawNotesSpecs(input, overall, comparisons, value, investment, effective.findings, effective.metrics, progress, survey, causes, interviews, readiness)),
-      executive_summary: build("executive_summary", executiveSpecs(input, team, effective.metrics, survey, interviews, added)),
-      full_health_check: build("full_health_check", fullSpecs(input, team, effective.metrics, survey, interviews, readiness, added)),
+      raw_notes: build("raw_notes", noted(value.currencyNote, () => rawNotesSpecs(input, overall, comparisons, value, investment, effective.findings, effective.metrics, progress, survey, causes, interviews, readiness))),
+      executive_summary: build("executive_summary", noted(value.currencyNote, () => executiveSpecs(input, team, effective.metrics, survey, interviews, added))),
+      full_health_check: build("full_health_check", noted(value.currencyNote, () => fullSpecs(input, team, effective.metrics, survey, interviews, readiness, added))),
     },
     briefs,
     scopes,

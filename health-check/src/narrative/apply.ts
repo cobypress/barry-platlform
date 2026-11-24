@@ -1,4 +1,5 @@
 import { checkNumbers, scopeDataset, toNumberCheckResult } from "../numbercheck/index.ts";
+import { noCurrencyCode } from "../engine/currency.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { SectionVersion } from "../schemas/index.ts";
 import type { NarrativeClient } from "./client.ts";
@@ -27,7 +28,11 @@ export async function applyNarrative(report: BuiltReport, client: NarrativeClien
     for (const section of built.sections) {
       const brief = report.briefs.get(section.id);
       if (!brief) continue;
-      const result = await draftSection({ brief: report.input.run.reviewMode === "automatic" ? { ...brief, automatic: true } : brief, dataset: report.dataset, client, pseudonyms });
+      // Amounts in a currency not known by name stay plain, and keep the line the engine's text gives them (DECISIONS.md 700).
+      const engineBody = built.versions.find((v) => v.id === section.currentVersionId)?.body ?? "";
+      const note = report.value.currencyNote;
+      const plain = noCurrencyCode(report.input.calibration) ? { noCurrencyCode: true, ...(note && engineBody.includes(note) ? { amountsNote: note } : {}) } : {};
+      const result = await draftSection({ brief: report.input.run.reviewMode === "automatic" ? { ...brief, automatic: true, ...plain } : brief, dataset: report.dataset, client, pseudonyms });
       if (result.status === "rejected" && result.unavailable) {
         rejections.push({ sectionId: section.id, reasons: result.reasons, unavailable: true });
         return rejections;

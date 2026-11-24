@@ -189,9 +189,7 @@ function moneyParts(r: Render, report: BuiltReport) {
     const waterfall = waterfallChart(value, width, chart);
     // Each kind building to the total, exposure apart. The bars stay only where the waterfall can't be drawn.
     const build = waterfall.kind === "chart" ? `<div class="waterfall">${chartSlot(waterfall)}</div>` : `<div class="kinds">${bars}</div>`;
-    // A currency taken from the org's locale is said beside the total (DECISIONS.md 700).
-    const note = value.currencyNote ? `<p class="note">${r.t(value.currencyNote)}</p>` : "";
-    return `<p class="headline-figure">${m(total.expected)}</p><p class="range">${ranged}</p>${note}${build}`;
+    return `<p class="headline-figure">${m(total.expected)}</p><p class="range">${ranged}</p>${build}`;
   };
   const rest = (from: number): Figures => ({ expected: restOf(all, from, "expected"), low: restOf(all, from, "low"), high: restOf(all, from, "high") });
   const row = (label: string, g: Figures, cls = "") => `<tr${cls ? ` class="${cls}"` : ""}><td>${label}</td><td class="num">${m(g.expected)}</td><td class="num">${range(g.low, g.high)}</td></tr>`;

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { currencyFromLocaleText } from "../engine/currency.ts";
+import { CURRENCY_NOT_NAMED } from "../engine/currency.ts";
 import { holdsNameOrSecret } from "../narrative/guard.ts";
 import type { BuiltReport } from "../narrative/sections.ts";
 import { buildPlan, DOMAIN_LABELS, domainLabel, PHASE_TITLES } from "../narrative/select.ts";
@@ -278,7 +278,7 @@ function digestValue(report: BuiltReport): DigestValueModel {
     groups: value.groups.map((g) => ({ id: g.id, kind: g.kind, label: labelOf(g), realisation: { ...g.realisation }, counted: g.counted.findingId, lineIds: g.lines.map((l) => l.findingId) })),
     lines,
     leftOut: value.left.map((l) => l.findingId),
-    ...(value.currencyNote ? { currencyNote: value.currencyNote } : {}),
+    ...(value.currencyNote ? { currencyNote: value.currencyNote, ...(report.input.calibration.currencySuggested ? { currencySuggested: report.input.calibration.currencySuggested } : {}) } : {}),
   };
 }
 
@@ -421,9 +421,9 @@ export function fixedWords<P extends { phases: Array<{ key: string; title: strin
     plan: { ...d.plan, phases: d.plan.phases.map((p) => (titleOf(p.key) === p.title ? { ...p, orgWords: { title: ENGINE_WORDS } } : p)) },
     value: {
       ...d.value,
-      // The locale's currency sentence (DECISIONS.md 700): ours, with the code the org's, only while it reads exactly as we write it.
-      ...(d.value.currencyNote !== undefined && d.value.currencyNote === currencyFromLocaleText(d.value.currency)
-        ? { orgWords: { currencyNote: { orgWordsMarked: true as const, orgWords: [{ start: d.value.currencyNote.indexOf("(") + 1, end: d.value.currencyNote.indexOf(")") }] } } }
+      // The line for amounts with no named currency, ours while it reads as we write it; the locale's suggestion, the org's word, whole (DECISIONS.md 700).
+      ...(d.value.currencyNote === CURRENCY_NOT_NAMED
+        ? { orgWords: { currencyNote: ENGINE_WORDS, ...(d.value.currencySuggested ? { currencySuggested: { orgWordsMarked: true as const, orgWords: [{ start: 0, end: d.value.currencySuggested.length }] } } : {}) } }
         : {}),
       groups: d.value.groups.map((g) => {
         const label = groupMarks(g);

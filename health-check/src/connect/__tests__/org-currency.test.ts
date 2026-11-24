@@ -9,8 +9,9 @@ import { COUNTRY_CURRENCY, currencyForLocale, localeCountry } from "../locale-cu
 import { ORG_CURRENCY_SOQL, ORG_LOCALE_SOQL, readOrgCurrency } from "../org-currency.ts";
 
 // An automatic run's currency at connect (DECISIONS.md 700): the org's own
-// default currency where it has several, else one taken from its default
-// locale and said as an assumption, else none. Never a hold.
+// default currency where it has several; one currency not known by name where
+// Salesforce answers INVALID_FIELD, with its locale read for a suggestion only;
+// else unread, for the run to decide. Never a hold.
 
 type Answer = { field?: unknown } | { error: string } | "hang";
 
@@ -55,14 +56,14 @@ describe("the currency read at connect", () => {
   test("a multi-currency org: its own default currency, read and kept, and the locale never asked", async () => {
     const org = new Org({ field: "EUR" });
     const { currency } = await read(org);
-    assert.deepEqual(currency, { code: "EUR", from: "org" });
+    assert.deepEqual(currency, { kind: "code", code: "EUR" });
     assert.deepEqual(org.asked, [ORG_CURRENCY_SOQL]);
   });
 
-  test("a single-currency org answers INVALID_FIELD, its normal answer: the locale is read and mapped, and said as taken from it", async () => {
+  test("a single-currency org answers INVALID_FIELD, its normal answer: one currency, not known by name, the locale read for a suggestion only", async () => {
     const org = new Org({ error: "INVALID_FIELD" }, { field: "en_GB" });
     const { currency, lines } = await read(org);
-    assert.deepEqual(currency, { code: "GBP", from: "locale" });
+    assert.deepEqual(currency, { kind: "single", suggested: "GBP" });
     assert.deepEqual(org.asked, [ORG_CURRENCY_SOQL, ORG_LOCALE_SOQL]);
     // Said as the normal answer it is, never as a failure; the locale itself is never logged.
     assert.ok(lines.some((l) => /The org has one currency: Salesforce has no DefaultCurrencyIsoCode on its Organization/.test(l)), lines.join("\n"));
@@ -70,24 +71,25 @@ describe("the currency read at connect", () => {
     assert.ok(!lines.some((l) => l.includes("en_GB")));
   });
 
-  test("a locale with no country, or one we can't map with certainty: no currency, and nothing guessed", async () => {
-    for (const locale of ["en", "bg_BG", "es_VE", "xx_ZZ", "", 42]) {
+  test("a locale with no country, or one we can't map with certainty: still one currency, with nothing suggested", async () => {
+    for (const locale of ["en", "bg_BG", "es_VE", "fr_HT", "es_SV", "en_NA", "xx_ZZ", "", 42]) {
       const { currency, lines } = await read(new Org({ error: "INVALID_FIELD" }, { field: locale }));
-      assert.deepEqual(currency, { code: null, from: "none" }, String(locale));
+      assert.deepEqual(currency, { kind: "single", suggested: null }, String(locale));
       assert.ok(lines.some((l) => /names no country whose currency we can be sure of/.test(l)));
     }
   });
 
-  test("a failed read: no currency, and any other error than INVALID_FIELD never reads the locale", async () => {
+  test("a failed read: unread, and any other error than INVALID_FIELD never reads the locale", async () => {
     const refused = new Org({ error: "INSUFFICIENT_ACCESS" }, { field: "en_GB" });
-    assert.deepEqual((await read(refused)).currency, { code: null, from: "none" });
+    assert.deepEqual((await read(refused)).currency, { kind: "unread" });
     assert.deepEqual(refused.asked, [ORG_CURRENCY_SOQL]);
     const noLocale = new Org({ error: "INVALID_FIELD" }, { error: "INSUFFICIENT_ACCESS" });
     const { currency, lines } = await read(noLocale);
-    assert.deepEqual(currency, { code: null, from: "none" });
+    // A locale that can't be read only means nothing to suggest: the org still has one currency.
+    assert.deepEqual(currency, { kind: "single", suggested: null });
     assert.ok(lines.some((l) => /default locale wasn't read \(INSUFFICIENT_ACCESS\)/.test(l)));
-    assert.deepEqual((await read(new Org({ field: "pounds" }))).currency, { code: null, from: "none" });
-    assert.deepEqual((await read(new Org("hang"), 20)).currency, { code: null, from: "none" });
+    assert.deepEqual((await read(new Org({ field: "pounds" }))).currency, { kind: "unread" });
+    assert.deepEqual((await read(new Org("hang"), 20)).currency, { kind: "unread" });
   });
 });
 
@@ -105,11 +107,13 @@ describe("the locale table", () => {
     assert.equal(currencyForLocale("en_US"), "USD");
     assert.equal(currencyForLocale("fr_FR"), "EUR");
     assert.equal(currencyForLocale("de_AT_EURO"), "EUR");
+    // An explicit euro variant says the euro, whatever the country's table entry.
+    assert.equal(currencyForLocale("bg_BG_EURO"), "EUR");
     assert.equal(currencyForLocale("hr_HR"), "EUR");
     assert.equal(currencyForLocale("sh_ME"), "EUR");
     assert.equal(currencyForLocale("ja_JP"), "JPY");
     assert.equal(currencyForLocale("de_CH"), "CHF");
-    for (const unsure of ["bg_BG", "es_PA", "km_KH", "ar_LB", "es_VE", "en_ZW", "es_CU"]) assert.equal(currencyForLocale(unsure), null, unsure);
+    for (const unsure of ["bg_BG", "es_PA", "km_KH", "ar_LB", "es_VE", "en_ZW", "es_CU", "fr_HT", "es_SV", "en_NA"]) assert.equal(currencyForLocale(unsure), null, unsure);
     for (const [country, code] of Object.entries(COUNTRY_CURRENCY)) {
       assert.match(country, /^[A-Z]{2}$/);
       assert.match(code, /^[A-Z]{3}$/);

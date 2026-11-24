@@ -92,11 +92,14 @@ describe("no calibration", () => {
   });
 
   test("no currency read gets none, never the schema's pounds; the org's own currency is kept as read (DECISIONS.md 693)", () => {
-    // Changed by 700: no currency is a calibration with none, never a hold, and never the schema's pounds.
-    const none = automaticCalibration(synthetic(), { orgId: ORG_ID, at: AS_OF, currency: null });
-    assert.ok(none.ok);
-    assert.equal(none.calibration.currency, "XXX");
-    assert.equal(none.calibration.currencyFrom, "none");
+    // Changed by 700: no currency read is a calibration with none named, never a hold, and never the schema's pounds.
+    const unread = automaticCalibration(synthetic(), { orgId: ORG_ID, at: AS_OF, currency: null });
+    assert.ok(unread.ok);
+    assert.equal(unread.calibration.currency, "XXX");
+    assert.equal(unread.calibration.currencyFrom, "unread");
+    const single = automaticCalibration(synthetic(), { orgId: ORG_ID, at: AS_OF, currency: { kind: "single", suggested: "GBP" } });
+    assert.ok(single.ok);
+    assert.deepEqual([single.calibration.currency, single.calibration.currencyFrom, single.calibration.currencySuggested], ["XXX", "org", "GBP"]);
     const euros = automaticCalibration(synthetic(), { orgId: ORG_ID, at: AS_OF, currency: "EUR" });
     assert.ok(euros.ok);
     assert.equal(euros.ok && euros.calibration.currency, "EUR");

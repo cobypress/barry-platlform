@@ -3,17 +3,17 @@ import { currencyForLocale } from "./locale-currency.ts";
 
 // An automatic run's currency, read at connect beside the stages (DECISIONS.md
 // 693, 700). No person confirms an automatic calibration, so the currency is
-// what the org says, or an assumption said as one, or none: never the schema's
-// pounds. It never holds a run (700): with none, every money figure is not
-// measurable and everything else is measured.
+// what the org says, or none: never the schema's pounds, and never a guess. It
+// never holds a run (700).
 //
 // a) Organization.DefaultCurrencyIsoCode, which exists only where multiple
-//    currencies are on. A single-currency org answers INVALID_FIELD, its normal
-//    answer, not a failure.
-// b) Then, only after that answer, the org's default locale, mapped to its
-//    country's currency (locale-currency.ts). Salesforce documents no field a
-//    query can read for a single-currency org's own currency (docs/QUESTIONS.md),
-//    so this one is marked as taken from the locale and never confirmed.
+//    currencies are on: a code there is the org's own.
+// b) A single-currency org answers INVALID_FIELD, its normal answer, not a
+//    failure. Its amounts are all in its one currency, whose name no documented
+//    query gives (docs/QUESTIONS.md): they are shown as plain numbers. Its
+//    default locale is read only for a suggestion the portal can offer when it
+//    asks the customer which currency it is (locale-currency.ts).
+// c) Anything else is unread: the run decides from the opportunities' describe.
 // Both go through the client's query route, which the allowlist already lets
 // through: no new route.
 
@@ -26,12 +26,13 @@ export const CURRENCY_TIMEOUT_MS = 10_000;
 const ISO_CODE = /^[A-Z]{3}$/;
 
 /**
- * Where an automatic run's currency came from (DECISIONS.md 700): the org's own
- * default currency, its default locale (an assumption), or nowhere.
+ * What connect learnt of the currency (DECISIONS.md 700): the org's own code
+ * (several currencies on); one currency, not known by name, with the locale's
+ * suggestion or none; or nothing, for the run to decide.
  */
-export type OrgCurrency = { code: string; from: "org" } | { code: string; from: "locale" } | { code: null; from: "none" };
+export type OrgCurrency = { kind: "code"; code: string } | { kind: "single"; suggested: string | null } | { kind: "unread" };
 
-const NONE: OrgCurrency = { code: null, from: "none" };
+const UNREAD: OrgCurrency = { kind: "unread" };
 
 type Read<T> = { ok: true; value: T } | { ok: false; kind: string };
 
@@ -55,33 +56,26 @@ async function readField(client: SalesforceClient, soql: string, field: string, 
 }
 
 /**
- * The org's currency and where it came from. Never throws, and logs only the
- * kind of each answer: never a value the org chose beyond the code we keep.
+ * What the org says of its currency. Never throws, and logs only the kind of
+ * each answer: never a value the org chose beyond a code.
  */
 export async function readOrgCurrency(client: SalesforceClient, options: { log: (line: string) => void; timeoutMs?: number }): Promise<OrgCurrency> {
   const timeoutMs = options.timeoutMs ?? CURRENCY_TIMEOUT_MS;
   const own = await readField(client, ORG_CURRENCY_SOQL, "DefaultCurrencyIsoCode", timeoutMs);
   if (own.ok) {
-    if (typeof own.value === "string" && ISO_CODE.test(own.value)) return { code: own.value, from: "org" };
-    options.log("The org's currency wasn't read: the reply held no currency code, so its amounts are left without one.");
-    return NONE;
+    if (typeof own.value === "string" && ISO_CODE.test(own.value)) return { kind: "code", code: own.value };
+    options.log("The org's currency wasn't read: the reply held no currency code, so the run decides from its opportunities.");
+    return UNREAD;
   }
   if (own.kind !== "INVALID_FIELD") {
-    options.log(`The org's currency wasn't read (${own.kind === "timeout" ? "the read didn't finish in time" : own.kind}), so its amounts are left without one.`);
-    return NONE;
+    options.log(`The org's currency wasn't read (${own.kind === "timeout" ? "the read didn't finish in time" : own.kind}), so the run decides from its opportunities.`);
+    return UNREAD;
   }
   // The normal answer of an org with one currency, not a failure (DECISIONS.md 700).
-  options.log("The org has one currency: Salesforce has no DefaultCurrencyIsoCode on its Organization, as on every org without multiple currencies. Reading its default locale instead.");
+  options.log("The org has one currency: Salesforce has no DefaultCurrencyIsoCode on its Organization, as on every org without multiple currencies. Its amounts are shown with no currency named; its default locale is read for a suggestion only.");
   const locale = await readField(client, ORG_LOCALE_SOQL, "DefaultLocaleSidKey", timeoutMs);
-  if (!locale.ok) {
-    options.log(`The org's default locale wasn't read (${locale.kind === "timeout" ? "the read didn't finish in time" : locale.kind}), so its amounts are left without a currency.`);
-    return NONE;
-  }
-  const code = typeof locale.value === "string" ? currencyForLocale(locale.value) : null;
-  if (!code) {
-    options.log("The org's default locale names no country whose currency we can be sure of, so its amounts are left without a currency.");
-    return NONE;
-  }
-  options.log(`The org's currency is taken as ${code} from its default locale, and isn't confirmed.`);
-  return { code, from: "locale" };
+  const suggested = locale.ok && typeof locale.value === "string" ? currencyForLocale(locale.value) : null;
+  if (!locale.ok) options.log(`The org's default locale wasn't read (${locale.kind === "timeout" ? "the read didn't finish in time" : locale.kind}), so there's no currency to suggest.`);
+  else if (!suggested) options.log("The org's default locale names no country whose currency we can be sure of, so there's no currency to suggest.");
+  return { kind: "single", suggested };
 }

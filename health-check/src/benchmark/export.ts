@@ -318,9 +318,9 @@ export function orgProfile(dir: string, run: Run, calibration: Calibration): Org
     throw new Error(`The calibration doesn't name these stages, so this run took their meaning from Salesforce's own settings: ${stages}. Add them to the calibration and run the health check again before exporting to the benchmark set.`);
   }
   if (pipeline.multiCurrency) throw new Error("The org is multi-currency, so won amounts can't be compared and the deal size band can't be worked out.");
-  // The deal size band is the one money figure a row carries: in a currency nobody confirmed, or none, it would compare amounts in different money (DECISIONS.md 700).
+  // The deal size band is the one money figure a row carries: in a currency not known by name it would compare amounts in different money (DECISIONS.md 700).
   const standing = currencyStanding(calibration);
-  if (standing === "none" || standing === "locale") throw new Error(`The org's currency ${standing === "none" ? "couldn't be read" : "was taken from its locale and isn't confirmed"}, so won amounts can't be compared and the deal size band can't be worked out.`);
+  if (standing === "org" || standing === "unread") throw new Error("The org's currency isn't known by name, so won amounts can't be compared and the deal size band can't be worked out.");
   // The median won amount, not the mean, for the reason in decision 16: one
   // unusually large deal shouldn't move the org into another band. Deals with no
   // amount, or zero, are left out rather than counted as small.

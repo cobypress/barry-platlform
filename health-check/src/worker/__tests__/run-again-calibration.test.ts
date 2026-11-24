@@ -67,8 +67,9 @@ describe("Run again of an automatic run with no calibration (DECISIONS.md 700)",
     assert.equal(outcome.outcome, "done", outcome.detail);
     const c = deps.store.runs.get(RUN_ID)!.calibration!;
     assert.equal(c.source, "org_settings");
-    assert.equal(c.currency, "GBP");
-    assert.equal(c.currencyFrom, "locale");
+    assert.equal(c.currency, "XXX");
+    assert.equal(c.currencyFrom, "org");
+    assert.equal(c.currencySuggested, "GBP");
     assert.ok(c.stages.some((s) => s.category === "won"));
     assert.ok(!existsSync(join(dir, "left-from-before.txt")), "started from a clean folder");
     assert.equal(orgReads(org), 2);
@@ -101,12 +102,13 @@ describe("Run again of an automatic run with no calibration (DECISIONS.md 700)",
     assert.equal(orgReads(org), reads);
   });
 
-  test("an unmapped locale still calibrates, with no currency, and runs: never held for it", async () => {
+  test("an unmapped locale still calibrates, its one currency unnamed and nothing suggested, and runs: never held for it", async () => {
     const { org, deps, handle } = await pressed();
     org.locale = "en";
     const outcome = await handle({ kind: "run", runId: RUN_ID }, AGAIN);
     assert.notEqual(outcome.outcome, "failed", outcome.detail);
-    assert.equal(deps.store.runs.get(RUN_ID)!.calibration!.currencyFrom, "none");
+    assert.equal(deps.store.runs.get(RUN_ID)!.calibration!.currencyFrom, "org");
+    assert.equal(deps.store.runs.get(RUN_ID)!.calibration!.currencySuggested, undefined);
     assert.ok(!deps.store.flagsOf(RUN_ID).includes(CALIBRATION_UNREADABLE));
   });
 
@@ -147,5 +149,29 @@ describe("Run again of an automatic run with no calibration (DECISIONS.md 700)",
       assert.equal(deps.store.runs.get(RUN_ID)!.calibration, null, name);
       assert.notEqual(outcome.outcome, "done", name);
     }
+  });
+
+  test("a connection to another org reads nothing and saves nothing", async () => {
+    const { org, deps, handle } = await pressed();
+    await deps.tokens.save(syntheticConnection({ orgId: "00D000000000099AAA" }));
+    const outcome = await handle({ kind: "run", runId: RUN_ID }, AGAIN);
+    assert.equal(outcome.outcome, "failed");
+    assert.match(outcome.detail, /is for a different org from this run, so nothing was read/);
+    assert.equal(org.asked.length, 0);
+    assert.equal(deps.store.runs.get(RUN_ID)!.calibration, null);
+    assert.ok(!deps.store.writes.some((w) => w.method === "saveCalibration" || w.method === "saveOrgStages"));
+  });
+
+  test("fix round 1: a hold that can't be recorded fails the job, never leaving the run extracting with no hold and no calibration", async () => {
+    const { org, deps, handle } = await pressed();
+    org.stages = "refused";
+    deps.store.heldReasonColumn = false;
+    // Not the last delivery: back to the queue, to try again.
+    await assert.rejects(handle({ kind: "run", runId: RUN_ID }, AGAIN), /its hold couldn't be recorded/);
+    // The last: the failure is recorded, with its flag.
+    const outcome = await handle({ kind: "run", runId: RUN_ID }, { ...AGAIN, final: true });
+    assert.equal(outcome.outcome, "failed");
+    assert.equal(deps.store.runs.get(RUN_ID)!.run.status, "failed");
+    assert.ok(deps.store.flagsOf(RUN_ID).includes("run_failed"));
   });
 });

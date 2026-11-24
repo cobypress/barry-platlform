@@ -52,20 +52,20 @@ const REASONS: Record<HoldCause, string> = { stages_unread: STAGES_UNREAD, no_wo
 /**
  * The calibration for an automatic full check, or why there is none. `stages`
  * null means they couldn't be read. `orgId` is the org that connected, `at`
- * when the stages were read, and `currency` the org's, as connect read it
- * (DECISIONS.md 700): its own default currency, one taken from its locale, or
- * none. A plain code is the org's own; null is none. The currency never holds
- * a run: with none, the calibration keeps ISO 4217's "XXX" and says so, so the
- * schema's pounds never apply, and every money figure is not measurable.
- * Only no stages, no won stage, or a calibration the schema refuses holds it,
- * and the hold says which, with its counts. Never throws.
+ * when the stages were read, and `currency` what connect learnt of it
+ * (DECISIONS.md 700): the org's own code, one currency not known by name, or
+ * unread. A plain code is the org's own; null is unread. The currency never
+ * holds a run: with no code the calibration keeps ISO 4217's "XXX" and says
+ * which case it is, so the schema's pounds never apply. Only no stages, no won
+ * stage, or a calibration the schema refuses holds it, and the hold says
+ * which, with its counts. Never throws.
  */
 export function automaticCalibration(stages: OrgStage[] | null, options: { orgId: string; at: string; currency: OrgCurrency | string | null }): AutomaticCalibration {
   const won = (stages ?? []).filter((s) => s.isClosed && s.isWon);
   const hold = (cause: HoldCause): AutomaticCalibration => ({ ok: false, heldReason: CALIBRATION_UNREADABLE, cause, reason: REASONS[cause], counts: { stages: stages?.length ?? 0, won: won.length } });
   if (!stages) return hold("stages_unread");
   if (won.length === 0) return hold("no_won_stage");
-  const currency: OrgCurrency = typeof options.currency === "string" ? { code: options.currency, from: "org" } : (options.currency ?? { code: null, from: "none" });
+  const currency: OrgCurrency = typeof options.currency === "string" ? { kind: "code", code: options.currency } : (options.currency ?? { kind: "unread" });
   // In sort order, ties by API name, whatever order they came in.
   const open = stages
     .filter((s) => s.isActive && !s.isClosed && !s.isWon && s.sortOrder !== null)
@@ -83,9 +83,10 @@ export function automaticCalibration(stages: OrgStage[] | null, options: { orgId
     targets: { source: "none" },
     licenceCosts: {},
     effortMinutes: {},
-    currency: currency.code ?? NO_CURRENCY,
-    // The org's own currency is written as before 700, with no mark.
-    ...(currency.from === "org" ? {} : { currencyFrom: currency.from }),
+    // The org's own code is written as before 700, with no mark.
+    ...(currency.kind === "code"
+      ? { currency: currency.code }
+      : { currency: NO_CURRENCY, currencyFrom: currency.kind === "single" ? "org" : "unread", ...(currency.kind === "single" && currency.suggested ? { currencySuggested: currency.suggested } : {}) }),
   });
   if (!parsed.success) return hold("calibration_refused");
   return { ok: true, calibration: parsed.data };

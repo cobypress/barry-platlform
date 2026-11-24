@@ -1,5 +1,5 @@
 import type { Calibration, Finding, Run } from "../schemas/index.ts";
-import { CURRENCY_UNKNOWN, currencyFromLocaleText, currencyStanding } from "../engine/currency.ts";
+import { CURRENCY_NOT_NAMED, currencyStanding } from "../engine/currency.ts";
 
 // The value model (roadmap 1.4): one figure for what the issues are worth over
 // the next 12 months, with a low and a high case. Code works it all out from
@@ -176,34 +176,36 @@ export type ValueModel = {
   byKind: Record<ValueKind, Range>;
   /** Figures with no place in the model, and why. */
   left: Array<{ findingId: string; reason: string }>;
-  /** On an automatic run whose currency came from the org's locale: the sentence every money figure here leans on (DECISIONS.md 700). Absent otherwise. */
+  /** On an automatic run whose currency isn't known by name: the line said beside its amounts (DECISIONS.md 700). Absent otherwise. */
   currencyNote?: string;
 };
 
 /**
  * What the currency lets the model do (DECISIONS.md 700). `unpricedHours`: why
  * hours aren't turned into money, when they can't be honestly (no currency
- * known, or our pounds benchmark beside amounts in another currency). `note`:
- * the sentence a total leans on when the currency came from the locale.
+ * known by name, or our pounds benchmark beside amounts in another currency).
+ * `note`: the line beside amounts whose currency isn't known by name.
  */
 export type ValueCurrency = { unpricedHours?: string; note?: string };
 
 /** Our hourly cost is a UK figure in pounds: an automatic run reporting in another currency leaves its hours as hours (DECISIONS.md 700). */
 export const HOURS_IN_POUNDS = (currency: string): string => `Our hourly cost is a UK figure in pounds, and your amounts are in ${currency}, so we haven't put a money figure on this time.`;
+/** The same, where the currency isn't known by name. */
+export const HOURS_NOT_NAMED = "Our hourly cost is a UK figure in pounds, and we don't know your currency yet, so we haven't put a money figure on this time.";
 
 /**
  * What a calibration's currency lets the value model do (DECISIONS.md 700).
- * A person's calibration, as before: nothing. An automatic one with no
- * currency prices nothing, hours included; one in another currency than
- * pounds leaves hours unpriced unless the customer gave their own hourly
- * cost; one whose currency came from the locale says so beside its totals.
+ * A person's calibration, as before: nothing. An automatic one whose currency
+ * isn't known by name, or isn't pounds, leaves hours unpriced unless the
+ * customer gave their own hourly cost (in their own currency, so it adds up
+ * with their amounts), and says beside its amounts that they have no name.
  */
 export function valueCurrency(calibration: Pick<Calibration, "source" | "currency" | "currencyFrom">, customerHourly?: number | null): ValueCurrency {
   const standing = currencyStanding(calibration);
   if (standing === "confirmed") return {};
-  if (standing === "none") return { unpricedHours: CURRENCY_UNKNOWN };
-  const unpricedHours = calibration.currency !== "GBP" && !(customerHourly && customerHourly > 0) ? HOURS_IN_POUNDS(calibration.currency) : undefined;
-  return { ...(unpricedHours ? { unpricedHours } : {}), ...(standing === "locale" ? { note: currencyFromLocaleText(calibration.currency) } : {}) };
+  const own = customerHourly !== null && customerHourly !== undefined && customerHourly > 0;
+  if (standing === "org" || standing === "unread") return { ...(own ? {} : { unpricedHours: HOURS_NOT_NAMED }), note: CURRENCY_NOT_NAMED };
+  return calibration.currency !== "GBP" && !own ? { unpricedHours: HOURS_IN_POUNDS(calibration.currency) } : {};
 }
 
 const ONE_OFF = /^(potential revenue in deals open today|one-off\b)/i;

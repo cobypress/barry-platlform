@@ -222,8 +222,8 @@ export const CALIBRATION_SQL = selectSql("HealthCheckCalibration", CALIBRATION, 
 /** An automatic run's calibration as the worker writes it (DECISIONS.md 692): every column it reads, and its source. */
 export const CALIBRATION_WRITE: Columns = { runId: "text", ...CALIBRATION, source: "text" };
 export function calibrationRow(runId: string, c: Calibration): Record<string, unknown> {
-  // Where an automatic run's currency came from (DECISIONS.md 700) rides in the "fields" JSON column, so no migration: the console has no column of its own for it.
-  const fields = c.currencyFrom ? { ...c.fields, currencyFrom: c.currencyFrom } : c.fields;
+  // What an automatic run knows of its currency, and the locale's suggestion (DECISIONS.md 700), ride in the "fields" JSON column, so no migration: the console has no column of its own for it.
+  const fields = c.currencyFrom ? { ...c.fields, currencyFrom: c.currencyFrom, ...(c.currencySuggested ? { currencySuggested: c.currencySuggested } : {}) } : c.fields;
   return Object.fromEntries(Object.keys(CALIBRATION_WRITE).map((k) => [k, k === "runId" ? runId : k === "fields" ? fields : (c as Record<string, unknown>)[k]]));
 }
 /** An automatic run's hold (DECISIONS.md 693), read through the row as JSON like its mode. Asked only for an automatic run, so a consultant-led run's reads are unchanged. */
@@ -452,7 +452,8 @@ export function calibrationFromRow(row: Record<string, unknown>): Calibration {
   // Lifted out of "fields" (calibrationRow), and only on a calibration read from the org's settings: a person's never carries one.
   const fields = read.fields as Record<string, unknown> | undefined;
   const from = fields?.currencyFrom;
-  if (read.source === "org_settings" && (from === "org" || from === "locale" || from === "none")) return Calibration.parse({ ...read, currencyFrom: from });
+  const suggested = fields?.currencySuggested;
+  if (read.source === "org_settings" && (from === "org" || from === "unread")) return Calibration.parse({ ...read, currencyFrom: from, ...(typeof suggested === "string" && /^[A-Z]{3}$/.test(suggested) ? { currencySuggested: suggested } : {}) });
   return Calibration.parse(read);
 }
 

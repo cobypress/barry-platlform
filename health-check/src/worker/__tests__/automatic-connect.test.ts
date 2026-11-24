@@ -278,7 +278,7 @@ describe("lane E2's review, closed (DECISIONS.md 693)", () => {
     assert.match(outcome.detail, / The run is calibrated from the org's settings and queued\.$/);
     const c = f.deps.store.runs.get(RUN_ID)!.calibration!;
     assert.equal(c.currency, "XXX");
-    assert.equal(c.currencyFrom, "none");
+    assert.equal(c.currencyFrom, "unread");
     assert.deepEqual(f.queued, [RUN_ID]);
     assert.equal(f.deps.store.held.size, 0);
     assert.deepEqual(f.deps.store.flagsOf(RUN_ID), []);
@@ -591,22 +591,23 @@ describe("an automatic run's currency at connect never holds it (DECISIONS.md 70
     assert.deepEqual(f.queued, [RUN_ID]);
   });
 
-  test("a single-currency org's INVALID_FIELD: the currency taken from its locale, marked so, queued, and never held", async () => {
+  test("a single-currency org's INVALID_FIELD: one currency not known by name, the locale's suggestion kept apart, queued, and never held", async () => {
     const f = await flow();
     f.org.currency = "single";
     const outcome = await f.handle(f.job, once);
     assert.match(outcome.detail, / The run is calibrated from the org's settings and queued\.$/);
     const c = f.deps.store.runs.get(RUN_ID)!.calibration!;
-    assert.equal(c.currency, "GBP");
-    assert.equal(c.currencyFrom, "locale");
+    assert.equal(c.currency, "XXX");
+    assert.equal(c.currencyFrom, "org");
+    assert.equal(c.currencySuggested, "GBP");
     assert.deepEqual(f.queued, [RUN_ID]);
     assert.equal(f.deps.store.held.size, 0);
     assert.deepEqual(flagCounts(f), []);
     assert.ok(f.deps.lines.some((l) => /The org has one currency/.test(l)));
-    assert.ok(f.deps.lines.includes(`Automatic run ${RUN_ID}'s currency, GBP, is taken from the org's default locale, and every money figure will say so.`));
+    assert.ok(f.deps.lines.includes(`Automatic run ${RUN_ID}'s org has one currency, not known by name, so its amounts will be shown with none (its locale suggests GBP).`));
   });
 
-  test("an unmapped locale, or a failed locale read: calibrated with none, queued, never held", async () => {
+  test("an unmapped locale, or a failed locale read: one currency all the same, nothing suggested, queued, never held", async () => {
     for (const locale of ["en", "refused"] as const) {
       const f = await flow();
       f.org.currency = "single";
@@ -614,10 +615,11 @@ describe("an automatic run's currency at connect never holds it (DECISIONS.md 70
       await f.handle(f.job, once);
       const c = f.deps.store.runs.get(RUN_ID)!.calibration!;
       assert.equal(c.currency, "XXX", locale);
-      assert.equal(c.currencyFrom, "none", locale);
+      assert.equal(c.currencyFrom, "org", locale);
+      assert.equal(c.currencySuggested, undefined, locale);
       assert.deepEqual(f.queued, [RUN_ID], locale);
       assert.equal(f.deps.store.held.size, 0, locale);
-      assert.ok(f.deps.lines.includes(`Automatic run ${RUN_ID} has no currency, so its money figures won't be measured and everything else will.`), locale);
+      assert.ok(f.deps.lines.includes(`Automatic run ${RUN_ID}'s org has one currency, not known by name, so its amounts will be shown with none.`), locale);
     }
   });
 
@@ -665,12 +667,14 @@ describe("an automatic run's currency at connect never holds it (DECISIONS.md 70
   });
 
   test("the calibration's currency source rides in the fields column, and is read back only from the org's settings", () => {
-    const built = automaticCalibration(orgStages(STAGES), { orgId: FAKE.orgId, at: NOW.toISOString(), currency: { code: "GBP", from: "locale" } });
+    const built = automaticCalibration(orgStages(STAGES), { orgId: FAKE.orgId, at: NOW.toISOString(), currency: { kind: "single", suggested: "GBP" } });
     assert.ok(built.ok);
     const row = calibrationRow(RUN_ID, built.calibration);
-    assert.deepEqual(row.fields, { currencyFrom: "locale" });
+    assert.deepEqual(row.fields, { currencyFrom: "org", currencySuggested: "GBP" });
+    assert.equal(row.currency, "XXX");
     const { runId: _r, ...back } = row;
-    assert.equal(calibrationFromRow(back).currencyFrom, "locale");
+    assert.equal(calibrationFromRow(back).currencyFrom, "org");
+    assert.equal(calibrationFromRow(back).currencySuggested, "GBP");
     // A person's calibration never carries one, whatever its fields hold.
     assert.equal(calibrationFromRow({ ...back, source: "confirmed" }).currencyFrom, undefined);
     // One read before 700, with nothing in its fields: the org's own, as before.

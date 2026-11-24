@@ -370,11 +370,11 @@ async function calibrateAndQueue(runId: string, stages: OrgStage[] | null, curre
 /** Each hold's true cause, for the log (DECISIONS.md 700). The outcome says it in the reason's own words. */
 export const HOLD_CAUSE_WORDS: Record<HoldCause, string> = { stages_unread: "no stages could be read", no_won_stage: "no stage is closed and won", calibration_refused: "the calibration was refused" };
 
-/** What the calibration's currency is, for the log: a code is kept, never a locale or any other value the org chose. */
+/** What the calibration's currency is, for the log: a code only, never a locale or any other value the org chose. */
 function logCurrency(runId: string, calibration: Calibration, log: (line: string) => void): void {
   const standing = currencyStanding(calibration);
-  if (standing === "none") log(`Automatic run ${runId} has no currency, so its money figures won't be measured and everything else will.`);
-  else if (standing === "locale") log(`Automatic run ${runId}'s currency, ${calibration.currency}, is taken from the org's default locale, and every money figure will say so.`);
+  if (standing === "org") log(`Automatic run ${runId}'s org has one currency, not known by name, so its amounts will be shown with none${calibration.currencySuggested ? ` (its locale suggests ${calibration.currencySuggested})` : ""}.`);
+  else if (standing === "unread") log(`Automatic run ${runId}'s currency wasn't read, so the run decides from its opportunities whether to show amounts.`);
 }
 
 /** The status of a run nothing has started: the console makes it so, and only a delivery of its run job moves it on. */
@@ -496,6 +496,9 @@ export async function recalibrateForRunAgain(runId: string, name: string, runOrg
   if (!built.ok) {
     const held = await deps.store.holdRun(runId, built.heldReason, at(), built.counts).catch(() => false);
     log(`Automatic run ${runId} was run again with no calibration, and none could be built: ${built.heldReason} (${HOLD_CAUSE_WORDS[built.cause]}; ${built.counts.stages} stages read, ${built.counts.won} won)${held ? "" : ", and the hold couldn't be recorded"}.`);
+    // Never left extracting with no hold and no calibration (fix round 1): a hold that wasn't recorded fails the job,
+    // so the queue tries again, and its last delivery records the failure and raises its flag.
+    if (!held) throw new Error(`The run couldn't be calibrated (${HOLD_CAUSE_WORDS[built.cause]}), and its hold couldn't be recorded.`);
     return { kind: "held", detail: `Held: ${built.heldReason}. ${built.reason}` };
   }
   logCurrency(runId, built.calibration, log);
