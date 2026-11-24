@@ -78,6 +78,8 @@ const SORTED: readonly Sorted[] = [
   // The paths deals take (DECISIONS.md 703): history read, but none from while closed deals were open, or no two alike.
   { kind: "too_little_data", pattern: /^Stage history isn't tracked for these deals:/ },
   { kind: "too_little_data", pattern: /^Each of the [\d,]+ [^:]* took a different path\b/ },
+  // The stage probabilities (DECISIONS.md 706): no stage had enough deals that reached it and have closed.
+  { kind: "too_little_data", pattern: /^No open stage could be tested:/ },
   { kind: "too_little_data", pattern: /^There are no Commit forecast rows with amounts\b/ },
   { kind: "too_little_data", pattern: /^Commit forecast rows are all zero\b/ },
   { kind: "too_little_data", pattern: /^The quota for this quarter is zero\./ },

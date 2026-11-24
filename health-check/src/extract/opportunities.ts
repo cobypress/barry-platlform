@@ -13,6 +13,9 @@ export const STAGES_SOQL = "SELECT ApiName, MasterLabel, IsActive, IsClosed, IsW
  * STAGES_SOQL, so it reads nothing new.
  */
 export const ENGINE_STAGES_SOQL = "SELECT ApiName, MasterLabel, IsActive, IsClosed, IsWon, SortOrder, DefaultProbability FROM OpportunityStage";
+// Here, beside the one read that uses it, so it stays clear of the imports other work changes.
+import { SalesforceError } from "../salesforce/client.ts";
+
 /** How the stage read says it went without the probabilities. */
 export const PROBABILITY_FIELD = "OpportunityStage.DefaultProbability";
 
@@ -22,15 +25,17 @@ export type ProbabilityRefusal = "invalid_field" | "no_access";
 export type StagesRead = Sourced<StageRow[]> & { probabilityRefused?: ProbabilityRefusal };
 
 /**
- * The class of a refusal that is about the field, read from the reason
- * readableReason gives: Salesforce's "No such column" for this field as it
- * words it, or a reason kept as "CODE: message" opening with INVALID_FIELD or
- * an access code. Anything else, a time-out or an outage among them, isn't the
- * field's doing, so the read fails as it did before the field was asked for.
+ * The class of a refusal that is about the field, from Salesforce's own error
+ * code, never its words (which another part of the engine may reword). A
+ * missing or hidden field is INVALID_FIELD; a refusal for access is one of the
+ * access codes. Anything else, a time-out, an unknown exception or an outage
+ * among them, isn't the field's doing, so the read fails as it did before the
+ * field was asked for.
  */
-export function probabilityRefusal(reason: string): ProbabilityRefusal | null {
-  if (reason === `${PROBABILITY_FIELD} isn't in this org.` || /^INVALID_FIELD\b/.test(reason)) return "invalid_field";
-  if (/^INSUFFICIENT_ACCESS(?:_OR_READONLY)?\b/.test(reason)) return "no_access";
+export function probabilityRefusal(err: unknown): ProbabilityRefusal | null {
+  if (!(err instanceof SalesforceError)) return null;
+  if (err.code === "INVALID_FIELD") return "invalid_field";
+  if (err.code === "INSUFFICIENT_ACCESS" || err.code === "INSUFFICIENT_ACCESS_OR_READONLY") return "no_access";
   return null;
 }
 
@@ -39,14 +44,19 @@ export const stagesExtractor: Extractor<StagesRead> = {
   // 2: the probabilities (DECISIONS.md 706), so a checkpoint from 1 is read again.
   version: 2,
   async run(ctx) {
-    const full = await readSoql<StageRow>(ctx, ENGINE_STAGES_SOQL);
-    if (full.status === "ok") return full;
-    // Only a refusal of the field is worked round: the stages are read as before without it, and only the
-    // comparison that needs them goes without. Any other failure is the stage read's own, as it always was.
-    const refused = probabilityRefusal(full.reason);
-    if (!refused) return full;
-    const plain = await readSoql<Omit<StageRow, "DefaultProbability">>(ctx, STAGES_SOQL);
-    return plain.status === "ok" ? { ...plain, data: plain.data.map((r) => ({ ...r, DefaultProbability: null })), missingFields: [PROBABILITY_FIELD], probabilityRefused: refused } : plain;
+    // Read as readSoql reads, but catching the error here, so the choice is made on its code.
+    const source: SourceInfo = { kind: "soql", api: "rest", query: ENGINE_STAGES_SOQL };
+    try {
+      const result = await ctx.client.query<StageRow>(ENGINE_STAGES_SOQL);
+      return { status: "ok", data: result.records, source, truncated: result.truncated };
+    } catch (err) {
+      // Only a refusal of the field is worked round: the stages are read as before without it, and only the
+      // comparison that needs them goes without. Any other failure is the stage read's own, exactly as readSoql has it.
+      const refused = probabilityRefusal(err);
+      if (!refused) return unavailable<StageRow[]>(source, err);
+      const plain = await readSoql<Omit<StageRow, "DefaultProbability">>(ctx, STAGES_SOQL);
+      return plain.status === "ok" ? { ...plain, data: plain.data.map((r) => ({ ...r, DefaultProbability: null })), missingFields: [PROBABILITY_FIELD], probabilityRefused: refused } : plain;
+    }
   },
 };
 

@@ -18,26 +18,31 @@ import { outside, wilson, type Interval } from "./wilson.ts";
 // deals that were once where a deal at that stage is now, and how they ended.
 // It is not the win rate of the deals in the stage today, which are still open.
 //
-// Who is counted (fix round 1): the deals that REACHED the stage in a period,
-// open or closed, never the deals that closed in one. Chosen by when they
-// closed, a sample over-counts whichever outcome closes faster whenever deals
-// arrive faster or slower than before: in a shrinking org whose wins take longer
-// than its losses, a true probability was named in a third of simulated orgs. So
-// each stage's period runs from the start of the window to the run's date less
-// the stage's maturity lag, the time within which 90% of the closed deals that
-// reached it had closed, and a stage is named only when almost all of the deals
-// that reached it in that period have closed (OPEN_SHARE).
+// Who is counted: the deals that REACHED the stage in a period, open or closed,
+// never the deals that closed in one. Chosen by when they closed, a sample
+// over-counts whichever outcome closes faster whenever deals arrive faster or
+// slower than before. Each stage's period runs from the start of the window to
+// the run's date less the stage's maturity lag, the time within which 90% of
+// the closed deals that reached it had closed, and a stage is named only when
+// almost all of the deals that reached it in that period have closed
+// (OPEN_SHARE). The few still open could each go either way, so the share is
+// worked out both ways, the open as all lost and as all won, and a stage is
+// named only when both clear every bar on the same side (review round 2).
+//
+// A setting can be wrong for last year and right now. So the period is cut in
+// PARTS by when deals reached the stage, and each part must show the gap on its
+// own: the same side, and the probability outside the part's interval. Two
+// halves weren't enough: the lag ends the period months before the run, so a
+// setting put right in the last year still sat mostly inside the second half
+// (named in 43 of 100 simulated orgs of 1,000 deals; in thirds, 3). What is said
+// is about the period, in the past tense.
 //
 // "Reached" follows the path insights (703): a stage is reached when the deal's
 // own history shows it there, so a stage before its first recorded stage isn't
 // reached, and deals made before the org's stage history starts are left out.
 //
-// A stage is named only when it is honest to: enough closed deals, enough won
-// and lost, a gap of WIN_GAP points or more, the probability outside a Wilson
-// interval wide enough for every stage tested at once (the path insights' z
-// bar), the gap holding inside a record type, and in most of the ways the deals
-// can be split. Direction only: never a number the probability should be, never
-// what the forecast is off by, never money, never why.
+// Direction only: never a number the probability should be, never what the
+// forecast is off by, never money, never why.
 
 type Ctx = Omit<RuleContext, "metrics">;
 type Ready = Extract<PipelineData, { status: "ok" }>;
@@ -50,15 +55,23 @@ const DAY = 86_400_000;
 export const LAG_QUANTILE = 0.9;
 /** A stage's period may hold at most this share of deals still open; more, and the stage isn't named. */
 export const OPEN_SHARE = 0.05;
+/**
+ * The lowest z the interval is drawn at, whatever the number of stages tested.
+ * With one stage tested, 703's floor of 2 named a true probability in up to
+ * 6.4% of orgs of some size (the worst, 30 deals at a true 55%, worked out
+ * exactly); at 2.15 the worst is 4.4%.
+ */
+export const Z_MIN = 2.15;
 /** Within a record type, the gap that counts as holding there: the same as overall. */
 const TYPE_GAP = WIN_GAP;
 
 /**
  * The ways a stage's deals are split to check a gap (rule 4), each said in our
  * words. Record type has its own check, and the quarter a deal closed isn't a
- * way to split deals chosen by when they reached a stage.
+ * way to split deals chosen by when they reached a stage. Functions, so each
+ * phrase is made inside the analysis that says it, where the org-word ledger
+ * can vouch for it.
  */
-// Functions, so each phrase is made inside the analysis that says it, where the org-word ledger can vouch for it.
 const WAYS: Record<string, () => Said> = { team: () => said`team`, rep: () => said`rep`, "lead source": () => said`lead source`, type: () => said`type` };
 
 /** A deal as the comparison reads it: open or closed, with when it first entered each open stage. */
@@ -67,7 +80,16 @@ export type CohortDeal = PathDeal & { open: boolean; reachedAt: Map<string, numb
 /** How one way of splitting a stage's deals went: segments compared, and how many sit on the same side of the setting. */
 export type Way = { dimension: string; compared: number; held: number; holds: boolean };
 
-/** One open stage's figures. Shares and the interval are percentages; days are local calendar days. */
+/** The share with the open deals counted one way: all lost (low) or all won (high), over every deal in the period. */
+export type Bound = { won: number; n: number; share: number; gap: number; interval: Interval | null; outside: boolean };
+
+/** The parts the period is cut into, by when deals reached the stage; each must show the gap alone. */
+export const PARTS = 3;
+
+/** One part of the period, by when deals reached the stage: its closed deals, how many were won, and whether it shows the gap alone. */
+export type Part = { from: string; to: string; closed: number; won: number; share: number; enough: boolean; holds: boolean };
+
+/** One open stage's figures. Shares and intervals are percentages; days are local calendar days. */
 export type StageFigures = {
   stage: string;
   /** The probability set on the stage in Salesforce, or null where it has none. */
@@ -83,16 +105,19 @@ export type StageFigures = {
   /** The closed ones, and how many were won. */
   reached: number;
   won: number;
-  /** Won as a share of the closed deals that reached it in the period. */
+  /** Won as a share of the closed deals that reached it in the period: the figure said. */
   share: number;
   tooOpen: boolean;
   /** Why the stage can't be tested, in plain words, or null when it can. */
   untested: string | null;
   testable: boolean;
+  /** The plain share's interval, for the chart. The bars are on the bounds. */
   interval: Interval | null;
   /** Won share less the probability, in points. Null with no probability. */
   gap: number | null;
-  outside: boolean;
+  low: Bound | null;
+  high: Bound | null;
+  parts: Part[] | null;
   ways: Way[];
   types: { many: boolean; compared: number; held: number };
   named: boolean;
@@ -154,9 +179,24 @@ function withinRecordTypes(ctx: Ctx, closed: CohortDeal[], probability: number, 
   return { many: true, compared, held };
 }
 
+/** The share one way, its gap from the setting, and whether the setting lies outside its interval. */
+function boundOf(won: number, n: number, probability: number, z: number): Bound {
+  const share = pct(won, n);
+  const interval = wilson(won, n, z);
+  return { won, n, share, gap: round1(share - probability), interval: interval ? { low: round1(interval.low * 100), high: round1(interval.high * 100) } : null, outside: interval !== null && outside(probability / 100, interval) };
+}
+
+/** A bound clears the gap and the interval, on the side given. */
+const clears = (b: Bound, side: number): boolean => Math.sign(b.gap) === side && Math.abs(b.gap) >= WIN_GAP && b.outside;
+
 /** Named: every bar cleared. */
 export function named(s: Omit<StageFigures, "named">): boolean {
-  if (!s.testable || s.tooOpen || s.gap === null || Math.abs(s.gap) < WIN_GAP || !s.outside) return false;
+  if (!s.testable || s.tooOpen || s.gap === null || !s.low || !s.high || !s.parts) return false;
+  // The open deals counted as all lost and as all won: both must clear, on the same side.
+  const side = Math.sign(s.low.gap);
+  if (side === 0 || !clears(s.low, side) || !clears(s.high, side)) return false;
+  // The gap in each part of the period alone, so a setting wrong only earlier isn't said of the whole.
+  if (!s.parts.every((h) => h.enough && h.holds)) return false;
   if (s.types.many && s.types.held === 0) return false;
   // No way to split them: said at the lowest confidence. Otherwise it must hold in most of the ways there are.
   if (s.ways.length === 0) return true;
@@ -202,7 +242,10 @@ export function loadProbabilities(ctx: Ctx): Loaded {
   return loaded.status === "ok" && data.status === "ok" ? { ...loaded, data } : loaded;
 }
 
-/** One stage's deals in its period, and its figures but for the bar that counts every stage tested. */
+/** The calendar day `days` after `day`. */
+const dayPlus = (day: string, days: number): string => new Date(Date.parse(`${day}T00:00:00Z`) + days * DAY).toISOString().slice(0, 10);
+
+/** One stage's deals in its period, and its figures but for the bars that count every stage tested. */
 function stageOf(ctx: Ctx, s: { stage: string; probability: number | null }, deals: CohortDeal[]) {
   const zone = zoneOf(ctx);
   const there = deals.filter((d) => reached(d, s.stage));
@@ -210,10 +253,8 @@ function stageOf(ctx: Ctx, s: { stage: string; probability: number | null }, dea
   const lagDays = durations.length ? Math.ceil(quantile(durations, LAG_QUANTILE)) : null;
   const to = lagDays === null ? null : localDay(new Date(ctx.now.getTime() - lagDays * DAY), zone);
   const from = to !== null && to >= ctx.window.from ? ctx.window.from : null;
-  const cohort = from && to ? there.filter((d) => {
-    const day = localDay(new Date(d.reachedAt.get(s.stage)!), zone);
-    return day >= from && day <= to;
-  }) : [];
+  const dayOf = (d: CohortDeal): string => localDay(new Date(d.reachedAt.get(s.stage)!), zone);
+  const cohort = from && to ? there.filter((d) => dayOf(d) >= from && dayOf(d) <= to) : [];
   const closed = cohort.filter((d) => !d.open);
   const won = closed.filter((d) => d.won).length;
   const open = cohort.length - closed.length;
@@ -226,7 +267,20 @@ function stageOf(ctx: Ctx, s: { stage: string; probability: number | null }, dea
     : tooOpen ? `Too many of the deals that reached ${s.stage} in this period are still open to say how often they are won`
     : !enough(minSample, closed.length, won) ? `${SEGMENT_NOTE}, or fewer than ${MIN_EACH_OUTCOME} won and ${MIN_EACH_OUTCOME} lost`
     : null;
-  return { ...s, lagDays, from, to, cohort: cohort.length, open, closed, reached: closed.length, won, share: pct(won, closed.length), tooOpen, untested, testable: untested === null };
+  // The parts of the period, cut at whole days: each from the day after the last one ends.
+  const span = from && to ? Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / DAY) : 0;
+  const bounds = from && to ? Array.from({ length: PARTS }, (_, k) => ({ from: k === 0 ? from : dayPlus(from, Math.floor((span * k) / PARTS) + 1), to: k === PARTS - 1 ? to : dayPlus(from, Math.floor((span * (k + 1)) / PARTS)) })) : null;
+  const partDeals = bounds ? bounds.map((b) => ({ ...b, deals: closed.filter((d) => dayOf(d) >= b.from && dayOf(d) <= b.to) })) : null;
+  return { ...s, lagDays, from, to, cohort: cohort.length, open, closed, partDeals, reached: closed.length, won, share: pct(won, closed.length), tooOpen, untested, testable: untested === null };
+}
+
+/** A part of the period, and whether it shows the gap alone: on the same side, with the setting outside its own interval. */
+function partOf(ctx: Ctx, deals: CohortDeal[], from: string, to: string, probability: number, side: number, z: number): Part {
+  const won = deals.filter((d) => d.won).length;
+  const share = pct(won, deals.length);
+  const interval = wilson(won, deals.length, z);
+  const isEnough = deals.length >= ctx.calibration.minSample;
+  return { from, to, closed: deals.length, won, share, enough: isEnough, holds: isEnough && Math.sign(share - probability) === side && interval !== null && outside(probability / 100, interval) };
 }
 
 function build(ctx: Ctx, data: PipelineData): Loaded {
@@ -267,20 +321,36 @@ function build(ctx: Ctx, data: PipelineData): Loaded {
     return nm(said`None of the open stages your closed deals reached has a probability set in Salesforce.`);
   }
   const counted = listed.map((s) => stageOf(ctx, s, deals));
-  // Every stage tested raises the bar for all, as every comparison does for the path insights (703).
   const tested = counted.filter((s) => s.testable).length;
-  const z = zBar(tested);
-  const stages = counted.map(({ closed, ...s }): StageFigures => {
+  // Nothing to test: not measurable, with what stood in the way.
+  if (tested === 0) {
+    const open = counted.filter((s) => s.probability !== null && s.tooOpen).map((s) => s.stage);
+    return nm(
+      open.length
+        ? said`No open stage could be tested: too many of the deals that reached ${andList(open.map((s) => said`${org(s)}`))} in their period are still open to say how often they are won, and no other stage had enough deals that reached it and have since closed, with ${MIN_EACH_OUTCOME} won and ${MIN_EACH_OUTCOME} lost.`
+        : said`No open stage could be tested: none with a probability set had enough deals that reached it and have since closed, with ${MIN_EACH_OUTCOME} won and ${MIN_EACH_OUTCOME} lost.`,
+    );
+  }
+  // Every stage tested raises the bar for all, as every comparison does for the path insights (703), never below Z_MIN.
+  const z = Math.max(Z_MIN, zBar(tested));
+  const stages = counted.map(({ closed, partDeals, ...s }): StageFigures => {
+    const p = s.probability;
     const interval = s.testable ? wilson(s.won, s.reached, z) : null;
-    const gap = s.probability === null || s.reached === 0 ? null : round1(s.share - s.probability);
-    const checked = s.testable && gap !== null;
+    const gap = p === null || s.reached === 0 ? null : round1(s.share - p);
+    const checked = s.testable && gap !== null && p !== null;
+    const low = checked ? boundOf(s.won, s.cohort, p, z) : null;
+    const high = checked ? boundOf(s.won + s.open, s.cohort, p, z) : null;
+    const side = low ? Math.sign(low.gap) : 0;
+    const parts = checked && partDeals ? partDeals.map((b) => partOf(ctx, b.deals, b.from, b.to, p, side, z)) : null;
     const figures = {
       ...s,
       interval: interval ? { low: round1(interval.low * 100), high: round1(interval.high * 100) } : null,
       gap,
-      outside: interval !== null && s.probability !== null && outside(s.probability / 100, interval),
-      ways: checked ? waysOf(ctx, closed, s.probability!, gap) : [],
-      types: checked ? withinRecordTypes(ctx, closed, s.probability!, gap) : { many: false, compared: 0, held: 0 },
+      low,
+      high,
+      parts,
+      ways: checked ? waysOf(ctx, closed, p, gap) : [],
+      types: checked ? withinRecordTypes(ctx, closed, p, gap) : { many: false, compared: 0, held: 0 },
     };
     return { ...figures, named: named(figures) };
   });
@@ -295,24 +365,23 @@ const MONTHS: ReadonlyArray<() => Said> = [
 ];
 const monthOf = (day: string): Said => MONTHS[Number(day.slice(5, 7)) - 1]!();
 
-/** A calendar day as its month and year, so the period is one the customer can check. */
-export const monthSaid = (day: string): Said => said`${monthOf(day)} ${Number(day.slice(0, 4))}`;
-/** A calendar day in full, as "21 September 2026". */
+/** A calendar day in full, as "21 September 2026", so the period is one the customer can check. */
 export const daySaid = (day: string): Said => said`${Number(day.slice(8, 10))} ${monthOf(day)} ${Number(day.slice(0, 4))}`;
 
 // ─── The metric ──────────────────────────────────────────────────────────────
 
 // Short, because the deck's definitions page prints it. How it's worked out is in the assumptions.
 const DEFINITION =
-  "For each open stage, the probability set on it in Salesforce beside the share of the deals that reached the stage that were won, which is what a stage probability claims: the chance a deal at that stage closes won. It isn't the win rate of the deals in the stage today. The value is how many stages are set clearly above or below what happens.";
+  "For each open stage, the probability set on it in Salesforce beside the share of the deals that reached the stage that were won, which is what a stage probability claims: the chance a deal at that stage closes won. It isn't the win rate of the deals in the stage today. The value is how many stages were set clearly above or below what happened.";
 
 const DEF = { id: PROBABILITY_METRIC, label: "Stage probability against how often deals are won", unit: "count" as const, definition: DEFINITION };
 
 const HOW = [
   "A deal reached a stage when its stage history shows it there; a stage before its first recorded stage isn't counted as reached",
   "Each stage counts the deals, open or closed, that reached it from the start of the window to a cut-off: the run's date less the time within which 90% of the closed deals that reached the stage had closed. Deals are chosen by when they reached the stage, not when they closed, which would favour whichever outcome closes faster whenever the number of deals is changing",
-  "A stage isn't named while more than 5% of the deals that reached it in its period are still open",
-  "The won share is won deals as a share of the closed deals that reached the stage in its period, so no decision counts as not won",
+  "A stage isn't named while more than 5% of the deals that reached it in its period are still open, and only when the gap holds with those still open counted as all lost and as all won",
+  "A stage is named only when the gap also holds in each third of its period on its own, so a setting that was wrong only earlier isn't said of the whole",
+  "The won share said is won deals as a share of the closed deals that reached the stage in its period, so no decision counts as not won",
   "Stages are listed in Salesforce's own stage order, which no figure here depends on",
 ];
 
@@ -320,8 +389,8 @@ const HOW = [
  * Every listed stage's figures, kept in the run's metrics whatever the rule
  * says (store broadly, show selectively): per stage, the probability, the
  * period and its lag, the deals that reached it then, how many are still open,
- * how many were won, the won share and, where tested, its interval. Enough for a
- * chart of each stage's setting against what happened.
+ * how many were won, the won share both ways and, where tested, its interval
+ * and each third of its period. Enough for a chart of each stage's setting against what happened.
  */
 export function probabilityMetrics(ctx: Ctx): Metric[] {
   const loaded = loadProbabilities(ctx);
@@ -351,6 +420,13 @@ export function probabilityMetrics(ctx: Ctx): Metric[] {
         { dimension: "won share interval high", key: s.stage, n: s.reached, value: s.interval.high, notMeasurableReason: null },
       );
     }
+    if (s.low && s.high) {
+      segments.push(
+        { dimension: "won share with the open as lost", key: s.stage, n: s.cohort, value: s.low.share, notMeasurableReason: null },
+        { dimension: "won share with the open as won", key: s.stage, n: s.cohort, value: s.high.share, notMeasurableReason: null },
+      );
+    }
+    s.parts?.forEach((h, k) => segments.push({ dimension: `won share, part ${k + 1} of ${PARTS} of the period`, key: s.stage, n: h.closed, value: h.enough ? h.share : null, notMeasurableReason: h.enough ? null : SEGMENT_NOTE }));
     Object.assign(stats, {
       [`stage${i + 1}LagDays`]: s.lagDays ?? -1,
       [`stage${i + 1}Cohort`]: s.cohort,
@@ -367,33 +443,39 @@ export function probabilityMetrics(ctx: Ctx): Metric[] {
 
 // ─── The rule ────────────────────────────────────────────────────────────────
 
-const direction = (s: StageFigures): Said => (s.gap! < 0 ? said`set higher than what happens` : said`set lower than what happens`);
+const direction = (s: StageFigures): Said => (s.gap! < 0 ? said`set higher than what happened` : said`set lower than what happened`);
 
-/** Each way of splitting, said once by name, and how many it holds in. */
+/**
+ * Each way of splitting, said once by name, and only what is true of it:
+ * "every group" when every group in every way sits on the setting's side; else
+ * "most groups", in each way or in how many of them.
+ */
 function waysSaid(s: StageFigures): Said {
-  if (s.ways.length === 0) return said` We couldn't check this within teams, reps or other groups: none had enough of these deals.`;
+  if (s.ways.length === 0) return said` We couldn't check this within groups: these deals couldn't be split by team, rep, lead source or type into groups big enough to compare.`;
   const names = andList(s.ways.map((w) => WAYS[w.dimension]!()));
   const holding = s.ways.filter((w) => w.holds).length;
-  if (s.ways.length === 1) return said` It is on the same side of the setting in the one way we could split these deals (by ${names}).`;
-  return holding === s.ways.length
-    ? said` It is on the same side of the setting in each of the ${s.ways.length} ways we could split these deals (by ${names}).`
-    : said` It is on the same side of the setting in ${holding} of the ${s.ways.length} ways we could split these deals (by ${names}).`;
+  const every = s.ways.every((w) => w.held === w.compared);
+  const ways = s.ways.length === 1 ? said`the one way we could split these deals (by ${names})` : said`${s.ways.length} ways we could split these deals (by ${names})`;
+  if (every) return said` It was on the same side of the setting in every group we could compare, in ${s.ways.length === 1 ? said`` : said`each of the `}${ways}.`;
+  if (holding === s.ways.length) return said` It was on the same side of the setting in most groups, in ${s.ways.length === 1 ? said`` : said`each of the `}${ways}.`;
+  return said` It was on the same side of the setting in most groups in ${holding} of the ${ways}.`;
 }
 
 const sentenceOf = (s: StageFigures): Said => {
-  const period = said`between ${monthSaid(s.from!)} and ${monthSaid(s.to!)}`;
-  const outcome = s.open
-    ? said`Of the ${s.cohort} deals that reached it ${period}, ${s.open} are still open and ${s.share}% of the other ${s.reached} were won`
-    : said`Of the ${s.reached} deals that reached it ${period}, ${s.share}% were won`;
-  return said`${org(s.stage)} is set to ${s.probability!}% in Salesforce. ${outcome}, so it is ${direction(s)}.${waysSaid(s)}`;
+  const period = said`between ${daySaid(s.from!)} and ${daySaid(s.to!)}`;
+  const outcome =
+    s.open === 0 ? said`Of the ${s.reached} deals that reached it ${period}, ${s.share}% were won`
+    : s.open === 1 ? said`Of the ${s.cohort} deals that reached it ${period}, 1 is still open and ${s.share}% of the other ${s.reached} were won`
+    : said`Of the ${s.cohort} deals that reached it ${period}, ${s.open} are still open and ${s.share}% of the other ${s.reached} were won`;
+  return said`${org(s.stage)} is set to ${s.probability!}% in Salesforce. ${outcome}, so in that period it was ${direction(s)}.${waysSaid(s)}`;
 };
 
 function titleOf(stages: StageFigures[]): Said {
   const higher = stages.every((s) => s.gap! < 0);
   const lower = stages.every((s) => s.gap! > 0);
-  if (stages.length === 1) return said`The probability on ${org(stages[0]!.stage)} in Salesforce is ${higher ? said`higher` : said`lower`} than how often its deals are won`;
+  if (stages.length === 1) return said`The probability on ${org(stages[0]!.stage)} in Salesforce was ${higher ? said`higher` : said`lower`} than how often its deals were won`;
   const way = higher ? said`higher` : lower ? said`lower` : said`higher or lower`;
-  return said`The probabilities on ${plural(stages.length, "stage")} in Salesforce are ${way} than how often their deals are won`;
+  return said`The probabilities on ${plural(stages.length, "stage")} in Salesforce were ${way} than how often their deals were won`;
 }
 
 const NOT_A_CAUSE = said` This compares each setting with what happened to the deals that reached the stage; it doesn't say why they differ.`;
@@ -406,6 +488,13 @@ const segmentsChecked = (ctx: Ctx, deals: CohortDeal[]): SegmentCheck[] =>
   Object.entries(dimensions(ctx))
     .filter(([dimension]) => dimension in WAYS || dimension === "record type")
     .map(([dimension, keyOf]) => ({ dimension, segments: new Set(deals.map((d) => keyOf(d.deal))).size }));
+
+/** What kept stages with a probability from being tested because too many of their deals are still open, said beside a pass. */
+function tooOpenSaid(stages: StageFigures[]): Said {
+  const open = stages.filter((s) => s.probability !== null && s.tooOpen).map((s) => s.stage);
+  if (open.length === 0) return said``;
+  return said` For ${andList(open.map((s) => said`${org(s)}`))}, too many of the deals that reached ${open.length === 1 ? said`it` : said`them`} in ${open.length === 1 ? said`its` : said`their`} period are still open to say how often they are won.`;
+}
 
 export const probabilityVsReality: Rule = {
   id: PROBABILITY_RULE,
@@ -422,9 +511,7 @@ export const probabilityVsReality: Rule = {
     if (shown.length === 0) {
       return {
         outcome: "pass",
-        summary: tested
-          ? said`No open stage's probability in Salesforce is ${WIN_GAP} points or more from how often the deals that reached it were won, beyond what chance could make of the ${plural(tested, "stage")} we could test.`
-          : said`No open stage with a probability set had enough deals that reached it and have since closed, with ${MIN_EACH_OUTCOME} won and ${MIN_EACH_OUTCOME} lost, to hold against its probability.`,
+        summary: said`None of the ${plural(tested, "stage")} we could test had a probability in Salesforce ${WIN_GAP} points or more from how often the deals that reached it were won, beyond what chance could make of them.${tooOpenSaid(stages)}`,
         evidence,
         segmentsChecked: checked,
         facts: { deals: deals.length, tested },

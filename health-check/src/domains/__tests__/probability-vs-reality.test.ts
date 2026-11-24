@@ -9,6 +9,7 @@ import type { Calibration, Finding, Metric } from "../../schemas/index.ts";
 import { analyseExtracts, clone, loadExtracts, runFromRecording, tempDir } from "../../testing/harness.ts";
 import { loadAnswers, loadCalibration, syntheticProvider } from "../../testing/replay.ts";
 import { Simulator } from "../../testing/simulator.ts";
+import { SalesforceError } from "../../salesforce/client.ts";
 import { AS_OF, CONNECTED_USER } from "../../testing/synthetic-org.ts";
 import { historicPipelineModule } from "../historic-pipeline/index.ts";
 import { PROBABILITY_METRIC, PROBABILITY_RULE, reached } from "../historic-pipeline/probability/index.ts";
@@ -39,6 +40,9 @@ const calibration: Calibration = { ...loadCalibration(), minSample: 5 };
 const real: Calibration = { ...loadCalibration() };
 const DAY = 86_400_000;
 const RUN = Date.parse(AS_OF);
+const SPREAD_FROM = Date.parse("2024-11-02T09:00:00Z");
+/** The days hand-built deals are spread over: to mid-September 2026, so each closes 40 days later, before the period's cut-off. */
+const SPREAD_DAYS = 680;
 const WINDOW_FROM = Date.parse((JSON.parse(readFileSync(join(dir, "run.json"), "utf8")) as { analysisWindow: { from: string } }).analysisWindow.from);
 type Measured = Extract<Metric, { status: "measured" }>;
 
@@ -54,9 +58,9 @@ type Spec = { path: string[]; outcome: Outcome; segment?: string; late?: number;
 const CLOSED: Record<Outcome, string> = { won: "Closed Won", lost: "Closed Lost", no_decision: "Closed No Decision" };
 const stamp = (ms: number): string => new Date(ms).toISOString().replace("Z", "+0000");
 
-/** `count` deals along `path`, `won` of them won and the rest lost. */
+/** `count` deals along `path`, `won` of them won and the rest lost, the wins spread evenly through them. */
 const deals = (count: number, path: string[], won: number, extra: Partial<Spec> = {}): Spec[] =>
-  Array.from({ length: count }, (_, i) => ({ path, outcome: i < won ? "won" : "lost", ...extra }));
+  Array.from({ length: count }, (_, i) => ({ path, outcome: Math.floor(((i + 1) * won) / count) > Math.floor((i * won) / count) ? "won" : "lost", ...extra }));
 
 const USUAL = ["Prospecting", "Discovery", "Proposal", "Negotiation"];
 const [A, B, C, D] = USUAL as [string, string, string, string];
@@ -74,8 +78,10 @@ function extractsOf(specs: Spec[], options: { history?: "ok" | "none" | "unavail
   const rows: HistoryRow[] = [];
   specs.forEach((s, i) => {
     const id = `006${String(900_000 + i).padStart(15, "0")}`;
-    const start = s.at ?? Date.parse("2025-04-01T09:00:00Z") + i * 3_600_000;
-    const created = start - (s.late ?? 0) * DAY;
+    // Spread over the period by a golden-ratio sequence, so every group of deals covers every part of it.
+    const start = s.at ?? SPREAD_FROM + Math.floor(((i * 0.6180339887) % 1) * SPREAD_DAYS * DAY) + i * 60_000;
+    // A late deal was made before the org's earliest stage history.
+    const created = s.late ? SPREAD_FROM - s.late * DAY : start;
     const enter = s.enter ?? s.path.map((_, k) => start + k * 60_000);
     const closed = s.closedAt === undefined ? start + 40 * DAY : s.closedAt;
     const closeDate = new Date(closed ?? RUN + 60 * DAY).toISOString().slice(0, 10);
@@ -184,8 +190,8 @@ describe("a stage is named only past every bar", () => {
     const { findings } = analysed(deals(100, USUAL, 66), { calibration: real, probabilities: { Prospecting: 66, Discovery: 66, Proposal: 66, Negotiation: 90 } });
     const [f, ...rest] = issues(findings);
     assert.equal(rest.length, 0);
-    assert.equal(f!.title, "The probability on Negotiation in Salesforce is higher than how often its deals are won");
-    assert.match(f!.summary, /^Negotiation is set to 90% in Salesforce\. Of the 100 deals that reached it between [A-Z][a-z]+ \d{4} and [A-Z][a-z]+ \d{4}, 66% were won, so it is set higher than what happens\./);
+    assert.equal(f!.title, "The probability on Negotiation in Salesforce was higher than how often its deals were won");
+    assert.match(f!.summary, /^Negotiation is set to 90% in Salesforce\. Of the 100 deals that reached it between \d{1,2} [A-Z][a-z]+ \d{4} and \d{1,2} [A-Z][a-z]+ \d{4}, 66% were won, so in that period it was set higher than what happened\./);
     assert.match(f!.summary, /it doesn't say why they differ\.$/);
     assert.equal(f!.severity, "info");
     assert.deepEqual(f!.subjects.map((s) => s.label), [D]);
@@ -197,8 +203,8 @@ describe("a stage is named only past every bar", () => {
     const { findings } = analysed(deals(100, USUAL, 50), { calibration: real, probabilities: { Prospecting: 20, Discovery: 50, Proposal: 50, Negotiation: 80 } });
     assert.equal(findings.length, 1);
     const [f] = issues(findings);
-    assert.equal(f!.title, "The probabilities on 2 stages in Salesforce are higher or lower than how often their deals are won");
-    assert.match(f!.summary, /Prospecting is set to 20% .* so it is set lower than what happens\. (?:[^.]*\. )?Negotiation is set to 80% .* so it is set higher than what happens\./);
+    assert.equal(f!.title, "The probabilities on 2 stages in Salesforce were higher or lower than how often their deals were won");
+    assert.match(f!.summary, /Prospecting is set to 20% .* so in that period it was set lower than what happened\. (?:[^.]*\. )?Negotiation is set to 80% .* so in that period it was set higher than what happened\./);
   });
 
   test("too few deals, won or lost: not named, however big the gap", () => {
@@ -236,7 +242,7 @@ describe("a stage is named only past every bar", () => {
     const { findings } = analysed(deals(100, USUAL, 50), { calibration: real, probabilities: { Prospecting: 50, Discovery: 50, Proposal: 50, Negotiation: 80 } });
     const [f] = issues(findings);
     assert.equal(f!.confidence, "low");
-    assert.match(f!.summary, /We couldn't check this within teams, reps or other groups: none had enough of these deals\./);
+    assert.match(f!.summary, /We couldn't check this within groups: these deals couldn't be split by team, rep, lead source or type into groups big enough to compare\./);
   });
 
   test("a stage with no probability set is listed and never named", () => {
@@ -248,7 +254,7 @@ describe("a stage is named only past every bar", () => {
   test("the pass says what was tested", () => {
     const { findings } = analysed(deals(100, USUAL, 50), { calibration: real, probabilities: { Prospecting: 50, Discovery: 50, Proposal: 50, Negotiation: 50 } });
     assert.equal(findings[0]!.status, "passed");
-    assert.match(findings[0]!.summary!, /beyond what chance could make of the 4 stages we could test\.$/);
+    assert.match(findings[0]!.summary!, /^None of the 4 stages we could test had a probability in Salesforce 10 points or more from how often the deals that reached it were won, beyond what chance could make of them\.$/);
   });
 });
 
@@ -257,7 +263,8 @@ describe("a stage is named only past every bar", () => {
 describe("each stage counts the deals that reached it in its period, open or closed (fix round 1)", () => {
   const set = { Prospecting: 66, Discovery: 66, Proposal: 66, Negotiation: 90 };
   /** `n` deals along the usual path, made `daysAgo` before the run, still open. */
-  const openDeals = (n: number, at: number): Spec[] => Array.from({ length: n }, (_, i) => ({ path: USUAL, outcome: "lost", at: at + i * 60_000, enter: USUAL.map((_, k) => at + i * 60_000 + k * 1000), closedAt: null }));
+  const openDeals = (n: number, at: number, path = USUAL): Spec[] => Array.from({ length: n }, (_, i) => ({ path, outcome: "lost", at: at + i * 60_000, enter: path.map((_, k) => at + i * 60_000 + k * 1000), closedAt: null }));
+  const EARLY = Date.parse("2025-04-20T09:00:00Z");
 
   test("deals that reached it within the lag aren't counted yet, so the recent open ones don't hold it back", () => {
     // 100 reached Negotiation in April 2025 and closed 40 days later; 20 more reached it 10 days before the run.
@@ -271,17 +278,72 @@ describe("each stage counts the deals that reached it in its period, open or clo
   });
 
   test("more than 5% of the period's deals still open: not named, and the metric says why", () => {
-    // 10 of 110 that reached it in April 2025 are still open: 9%.
-    const { findings, metric } = analysed([...deals(100, USUAL, 66), ...openDeals(10, Date.parse("2025-04-20T09:00:00Z"))], { calibration: real, probabilities: set });
+    // 10 that reached only Negotiation in April 2025 are still open: 10 of 110 there, 9%. The other stages are tested.
+    const { findings, metric } = analysed([...deals(100, USUAL, 66), ...openDeals(10, EARLY, [D])], { calibration: real, probabilities: set });
     assert.equal(issues(findings).length, 0);
     assert.equal(segmentOf(metric, "still open", D)!.value, 10);
     assert.equal(segmentOf(metric, "won share", D)!.notMeasurableReason, "Too many of the deals that reached Negotiation in this period are still open to say how often they are won");
+    // The pass speaks only of the stages tested, and says why the other wasn't.
+    assert.equal(findings[0]!.summary, "None of the 3 stages we could test had a probability in Salesforce 10 points or more from how often the deals that reached it were won, beyond what chance could make of them. For Negotiation, too many of the deals that reached it in its period are still open to say how often they are won.");
+  });
+
+  test("with nothing tested, the metric and the rule are not measurable, saying what stood in the way", () => {
+    // The open deals reached every stage: every stage is too open.
+    const { findings, metric } = analysed([...deals(100, USUAL, 66), ...openDeals(10, EARLY)], { calibration: real, probabilities: set });
+    assert.equal(metric.status, "not_measurable");
+    assert.equal(findings[0]!.status, "not_measurable");
+    assert.equal(findings[0]!.notMeasurableReason, "No open stage could be tested: too many of the deals that reached Prospecting, Discovery, Proposal and Negotiation in their period are still open to say how often they are won, and no other stage had enough deals that reached it and have since closed, with 5 won and 5 lost.");
+    assert.equal(notMeasurableKind(findings[0]!.notMeasurableReason!), "too_little_data");
+    const few = analysed(deals(25, USUAL, 2), { calibration: real, probabilities: set });
+    assert.equal(few.metric.status, "not_measurable");
+    assert.equal(few.findings[0]!.notMeasurableReason, "No open stage could be tested: none with a probability set had enough deals that reached it and have since closed, with 5 won and 5 lost.");
+  });
+
+  test("the open count said as it is: none left out of the sentence, one is, several are", () => {
+    const [none] = issues(analysed(deals(100, USUAL, 66), { calibration: real, probabilities: set }).findings);
+    assert.match(none!.summary, /^Negotiation is set to 90% in Salesforce\. Of the 100 deals that reached it between [^,]+, 66% were won, so in that period/);
+    const [one] = issues(analysed([...deals(100, USUAL, 66), ...openDeals(1, EARLY)], { calibration: real, probabilities: set }).findings);
+    assert.match(one!.summary, /Of the 101 deals that reached it between [^,]+, 1 is still open and 66% of the other 100 were won, so/);
+  });
+
+  test("the open deals counted as all lost and as all won: both must clear the bars on the same side", () => {
+    // Set to 50%. 370 of 950 closed won (38.9%, 11 points under); 50 still open. As all lost 37% (13 under); as all won 42% (8 under).
+    const p = { Prospecting: 39, Discovery: 39, Proposal: 39, Negotiation: 50 };
+    const { findings, metric } = analysed([...deals(950, USUAL, 370), ...openDeals(50, EARLY)], { calibration: real, probabilities: p });
+    assert.equal(issues(findings).length, 0);
+    assert.equal(segmentOf(metric, "won share with the open as lost", D)!.value, 37);
+    assert.equal(segmentOf(metric, "won share with the open as won", D)!.value, 42);
+    // With 330 won, both clear: 34.7% closed, 33% and 38% the two ways.
+    assert.equal(issues(analysed([...deals(950, USUAL, 330), ...openDeals(50, EARLY)], { calibration: real, probabilities: { ...p, Prospecting: 35, Discovery: 35, Proposal: 35 } }).findings).length, 1);
+  });
+
+  test("each third of the period must show the gap alone: a setting wrong only earlier isn't said of the whole", () => {
+    // Set to 70%. Deals that reached it before November 2025 were won 45% of the time; since, 70%.
+    const at = (count: number, won: number, from: string, days: number): Spec[] =>
+      deals(count, USUAL, won).map((d, i) => {
+        const t = Date.parse(`${from}T09:00:00Z`) + Math.floor((i * days * DAY) / count);
+        return { ...d, at: t, enter: USUAL.map((_, k) => t + k * 1000), closedAt: t + 40 * DAY };
+      });
+    const p = { Prospecting: 57, Discovery: 57, Proposal: 57, Negotiation: 70 };
+    const drifted = analysed([...at(150, 68, "2024-11-15", 300), ...at(150, 105, "2025-11-01", 280)], { calibration: real, probabilities: p });
+    assert.equal(issues(drifted.findings).length, 0);
+    assert.ok(segmentOf(drifted.metric, "won share, part 1 of 3 of the period", D)!.value! < 50);
+    assert.ok(segmentOf(drifted.metric, "won share, part 3 of 3 of the period", D)!.value! >= 65);
+    // Low throughout: named.
+    const steady = analysed([...at(150, 68, "2024-11-15", 300), ...at(150, 68, "2025-11-01", 280)], { calibration: real, probabilities: { ...p, Prospecting: 45, Discovery: 45, Proposal: 45 } });
+    assert.equal(issues(steady.findings).length, 1);
+  });
+
+  test("one stage tested is drawn at the floor of z 2.15, not 2", () => {
+    const { metric } = analysed(deals(100, [D], 66), { calibration: real, probabilities: { Negotiation: 90 } });
+    assert.equal((metric as Measured).stats.tested, 1);
+    assert.equal((metric as Measured).stats.z, 2.15);
   });
 
   test("5% or fewer still open: named, saying how many are open and over what the share is", () => {
     const { findings } = analysed([...deals(100, USUAL, 66), ...openDeals(5, Date.parse("2025-04-20T09:00:00Z"))], { calibration: real, probabilities: set });
     const [f] = issues(findings);
-    assert.match(f!.summary, /^Negotiation is set to 90% in Salesforce\. Of the 105 deals that reached it between [A-Z][a-z]+ \d{4} and September 2026, 5 are still open and 66% of the other 100 were won, so it is set higher than what happens\./);
+    assert.match(f!.summary, /^Negotiation is set to 90% in Salesforce\. Of the 105 deals that reached it between 31 October 2024 and 21 September 2026, 5 are still open and 66% of the other 100 were won, so in that period it was set higher than what happened\./);
   });
 
   test("chosen by when they reached it, not when they closed: deals that closed in the window after reaching it before don't count", () => {
@@ -298,15 +360,22 @@ describe("the ways the deals are split (rule 4)", () => {
   test("each way said once by name, record type left to its own check", () => {
     const { findings } = analysed([...deals(50, USUAL, 33, { segment: "X" }), ...deals(50, USUAL, 33, { segment: "Y" })], { calibration: real, probabilities: { Prospecting: 66, Discovery: 66, Proposal: 66, Negotiation: 90 } });
     const [f] = issues(findings);
-    assert.match(f!.summary, / It is on the same side of the setting in each of the 2 ways we could split these deals \(by lead source and type\)\. /);
+    assert.match(f!.summary, / It was on the same side of the setting in every group we could compare, in each of the 2 ways we could split these deals \(by lead source and type\)\. /);
     assert.doesNotMatch(f!.summary, /record type/);
+  });
+
+  test("most groups, not every group, when one group sits on the other side", () => {
+    // Set to 90%. X and Y were won 65% of the time, Z 97.5%: two of three lead sources and types under the setting.
+    const specs = [...deals(80, USUAL, 52, { segment: "X" }), ...deals(80, USUAL, 52, { segment: "Y" }), ...deals(80, USUAL, 78, { segment: "Z" })];
+    const [f] = issues(analysed(specs, { calibration: real, probabilities: { Prospecting: 76, Discovery: 76, Proposal: 76, Negotiation: 90 } }).findings);
+    assert.match(f!.summary, / It was on the same side of the setting in most groups, in each of the 2 ways we could split these deals \(by lead source and type\)\. /);
   });
 
   test("a segment holding 90% of the deals or more checks nothing", () => {
     // Lead source and type: A holds 95 of 100, so only B's 5 are left to compare, and one segment is no way to split them.
     const { findings } = analysed([...deals(95, USUAL, 63, { segment: "A" }), ...deals(5, USUAL, 3, { segment: "B" })], { probabilities: { Prospecting: 66, Discovery: 66, Proposal: 66, Negotiation: 90 } });
     const [f] = issues(findings);
-    assert.match(f!.summary, /We couldn't check this within teams, reps or other groups: none had enough of these deals\./);
+    assert.match(f!.summary, /We couldn't check this within groups: these deals couldn't be split by team, rep, lead source or type into groups big enough to compare\./);
     assert.equal(f!.confidence, "low");
   });
 });
@@ -419,12 +488,17 @@ describe("the stage read (decision 706)", () => {
     assert.deepEqual(stageQueries(transport), [ENGINE_STAGES_SOQL, STAGES_SOQL]);
   });
 
-  test("a refusal's class is read from the reason as readableReason gives it; anything else is no refusal of the field", () => {
-    assert.equal(probabilityRefusal("OpportunityStage.DefaultProbability isn't in this org."), "invalid_field");
-    assert.equal(probabilityRefusal("INVALID_FIELD: DefaultProbability"), "invalid_field");
-    assert.equal(probabilityRefusal("INSUFFICIENT_ACCESS: insufficient access rights on object id"), "no_access");
-    assert.equal(probabilityRefusal("INSUFFICIENT_ACCESS_OR_READONLY: no"), "no_access");
-    for (const reason of ["QUERY_TIMEOUT: Your query request was running for too long.", "UNKNOWN_EXCEPTION: An unexpected error occurred.", "OpportunityStage.IsWon isn't in this org.", "Opportunity.DefaultProbability isn't in this org."]) assert.equal(probabilityRefusal(reason), null, reason);
+  test("a refusal's class is read from Salesforce's code, never its words; anything else is no refusal of the field", () => {
+    const err = (code: string, message = "No such column 'DefaultProbability' on entity 'OpportunityStage'.", status = 400) => new SalesforceError(status, code, message);
+    assert.equal(probabilityRefusal(err("INVALID_FIELD")), "invalid_field");
+    assert.equal(probabilityRefusal(err("INSUFFICIENT_ACCESS", "insufficient access rights on object id")), "no_access");
+    assert.equal(probabilityRefusal(err("INSUFFICIENT_ACCESS_OR_READONLY", "no")), "no_access");
+    // Transients are never the field's doing, whatever their words say.
+    for (const e of [err("QUERY_TIMEOUT"), err("UNKNOWN_EXCEPTION"), err("HTTP_503", "No such column 'DefaultProbability'", 503), err("SERVER_UNAVAILABLE", "x", 503)]) assert.equal(probabilityRefusal(e), null, e.code);
+    // Decided on the code, not the words: an INVALID_FIELD worded any way is the field's, and no plain error is.
+    assert.equal(probabilityRefusal(err("INVALID_FIELD", "Something else entirely.")), "invalid_field");
+    assert.equal(probabilityRefusal(new Error("INVALID_FIELD: No such column 'DefaultProbability'")), null);
+    assert.equal(probabilityRefusal("OpportunityStage.DefaultProbability isn't in this org."), null);
   });
 
   test("any other failure is the stage read's own, as before: no read without the field, the stages unread", async () => {
@@ -531,17 +605,17 @@ describe("noise on dated deals: arrivals growing or shrinking, wins slower than 
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
-  const walk = (): { path: string[]; won: boolean } => {
+  const walk = (T: number[]): { path: string[]; won: boolean } => {
     const path = [A];
     for (let k = 0; ; k++) {
-      const on = k + 1 < TRUE.length ? TRUE[k]! / TRUE[k + 1]! : TRUE[k]! / 100;
+      const on = k + 1 < T.length ? T[k]! / T[k + 1]! : T[k]! / 100;
       if (rnd() >= on) return { path, won: false };
-      if (k + 1 === TRUE.length) return { path, won: true };
+      if (k + 1 === T.length) return { path, won: true };
       path.push(USUAL[k + 1]!);
     }
   };
   /** `n` deals the opportunities read would hold: open, or made or closed in the window. */
-  function datedOrg(n: number, growth: number, win: number, loss = 30): Spec[] {
+  function datedOrg(n: number, growth: number, win: number, loss = 30, truth: (at: number) => number[] = () => TRUE): Spec[] {
     const span = 4 * 365;
     const r = Math.log(growth) / 365;
     const out: Spec[] = [];
@@ -549,7 +623,7 @@ describe("noise on dated deals: arrivals growing or shrinking, wins slower than 
       const u = rnd();
       const t = r === 0 ? u * span : Math.log(1 + u * (Math.exp(r * span) - 1)) / r;
       const at = RUN - (span - t) * DAY;
-      const w = walk();
+      const w = walk(truth(at));
       const enter = w.path.map((_, k) => at + k * 20 * DAY);
       const closedAt = enter.at(-1)! + -Math.log(1 - rnd()) * (w.won ? win : loss) * DAY;
       const segment = ["S1", "S2", "S3"][Math.floor(rnd() * 3)]!;
@@ -578,7 +652,54 @@ describe("noise on dated deals: arrivals growing or shrinking, wins slower than 
       }
     }
   }
+  // The second review's drift: Negotiation's true share was 55% for deals made over a year before the run, and 70% since,
+  // as the setting says now. Said of a period, a past wrong setting may be named only as rarely as chance would.
+  for (const n of [300, 1000]) {
+    test(`drift: 55% then 70%, set to 70%, ${n} deals`, () => {
+      seed = 4_100_000 + n;
+      const truth = (at: number): number[] => (at >= RUN - 365 * DAY ? TRUE : [20, 30, 50, 55]);
+      let any = 0;
+      for (let t = 0; t < TRIALS; t++) if (issues(analysed(datedOrg(n, 1, 90, 30, truth), { calibration: real, probabilities }).findings).length) any++;
+      console.log(`dated noise drift n=${n}: ${any} of ${TRIALS} orgs`);
+      assert.ok(any <= TRIALS * 0.05, `${any} of ${TRIALS}`);
+    });
+  }
 });
+
+// The second review's worst cases for the few still open (worked out exactly there: 7.9% and 11.8% of orgs with one stage
+// tested): 100 deals reached the stage, 5 still open, and every open one a future win (a true 20%) or a future loss (70%).
+describe("noise when the few still open all go one way: at most 5% of orgs", () => {
+  let seed = 1;
+  const rnd = (): number => {
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = seed;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const TRIALS = 100;
+  for (const [label, p, openAre] of [["a true 20%, the open all future wins", 0.2, true], ["a true 70%, the open all future losses", 0.7, false]] as const) {
+    test(label, () => {
+      seed = 31_000 + Math.round(p * 100);
+      let any = 0;
+      for (let t = 0; t < TRIALS; t++) {
+        const outcomes = Array.from({ length: 100 }, () => rnd() < p);
+        // The five open: the first five of the side the worst case takes.
+        let left = 5;
+        const specs = outcomes.map((won, i): Spec => {
+          const at = SPREAD_FROM + Math.floor(((i * 0.6180339887) % 1) * SPREAD_DAYS * DAY);
+          const open = won === openAre && left > 0 && left-- > 0;
+          return { path: [D], outcome: won ? "won" : "lost", at, enter: [at], closedAt: open ? null : at + 30 * DAY };
+        });
+        if (left > 0) continue;
+        if (issues(analysed(specs, { calibration: real, probabilities: { Negotiation: p * 100 } }).findings).length) any++;
+      }
+      console.log(`worst-case open noise ${label}: ${any} of ${TRIALS} orgs`);
+      assert.ok(any <= TRIALS * 0.05, `${any} of ${TRIALS}`);
+    });
+  }
+});
+
 
 // ─── The synthetic org: stored, not served ───────────────────────────────────
 
@@ -596,7 +717,7 @@ describe("the synthetic org keeps the comparison in its files and serves none of
     assert.equal(ours[0]!.status, "issue");
     assert.equal(
       ours[0]!.summary,
-      "Negotiation is set to 90% in Salesforce. Of the 248 deals that reached it between October 2024 and September 2026, 11 are still open and 68.8% of the other 237 were won, so it is set higher than what happens. It is on the same side of the setting in each of the 4 ways we could split these deals (by team, rep, lead source and type). This compares each setting with what happened to the deals that reached the stage; it doesn't say why they differ.",
+      "Negotiation is set to 90% in Salesforce. Of the 248 deals that reached it between 31 October 2024 and 17 September 2026, 11 are still open and 68.8% of the other 237 were won, so in that period it was set higher than what happened. It was on the same side of the setting in every group we could compare, in each of the 4 ways we could split these deals (by team, rep, lead source and type). This compares each setting with what happened to the deals that reached the stage; it doesn't say why they differ.",
     );
     assert.deepEqual(ours[0]!.subjects.map((s) => s.label), ["Negotiation"]);
     const metric = loaded.input.metrics.find((m) => m.id === PROBABILITY_METRIC)! as Measured;
