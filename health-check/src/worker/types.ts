@@ -13,6 +13,7 @@ import type { Survey } from "../survey/questions.ts";
 import type { Interview } from "../interviews/questions.ts";
 import type { StoredSummaries, SummariesToSave } from "../handbook/summary-row.ts";
 import type { RunDigest } from "../schemas/digest.ts";
+import type { RunLosses } from "./release.ts";
 
 // What the worker takes from the queue, and what it needs from the console's
 // database. Jobs carry ids only (the contract with the console, lane C2), so
@@ -161,6 +162,13 @@ export type RunOutputRecord = {
    * consultant-led run, which saves exactly as before.
    */
   automatic?: AutomaticOutcome;
+  /**
+   * What an automatic Barometer run lost to Salesforce not answering (DECISIONS.md 723), stored beside the run in
+   * the same transaction so the org's next run can tell "the org, again" from an outage. Left out where it can't be
+   * told (more refused reads than run.json keeps) and for every other run; any progress save takes it away again, so
+   * only the attempt that decided the run's release or hold leaves it.
+   */
+  readsLost?: RunLosses;
 };
 
 /**
@@ -448,6 +456,13 @@ export interface WorkerStore {
    * status is released counts: a held or failed run's score never does.
    */
   lastReleasedScore(runId: string, orgId15: string, product: string): Promise<number | null>;
+  /**
+   * The org's previous automatic Barometer run, any status, by start time: the newest started before this one,
+   * never this one (a Run again is the same run). Null with none; `losses` null where that run's are not known
+   * (stored before DECISIONS.md 723, or never decided). One read-only statement. Throws on a database fault: the
+   * caller treats that as not known.
+   */
+  previousRunLosses(runId: string, orgId15: string): Promise<{ runId: string; losses: RunLosses | null } | null>;
   /**
    * Where an automatic run stands after its connect (DECISIONS.md 693), so a
    * redelivered connect can finish what a dropped one started. Null for a run

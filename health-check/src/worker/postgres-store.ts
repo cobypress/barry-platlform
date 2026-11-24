@@ -15,6 +15,7 @@ import { SURVEY_METRIC_IDS } from "../survey/summary.ts";
 import { Interview } from "../interviews/questions.ts";
 import { BenchmarkRow, HeadcountBand, Industry } from "../schemas/benchmark.ts";
 import { storedFromRow, waitingRow, type ConsoleSummariesRow, type StoredSummaries } from "../handbook/summary-row.ts";
+import { readLosses, type RunLosses } from "./release.ts";
 import { Calibration, ConnectLink, ManualAnswer, NumberOverride, ReportSection, Run, SectionVersion, type Finding, type ManualStep, type Metric, type Score } from "../schemas/index.ts";
 import {
   DISCONNECT_STEP,
@@ -297,6 +298,24 @@ export const LAST_RELEASED_SCORE_SQL =
   `SELECT r."overallScore" AS "score" FROM "HealthCheckRun" r JOIN "HealthCheckRelease" l ON l."runId" = r."id" ` +
   `WHERE r."id" <> $1 AND left(r."orgId", 15) = $2 AND r."product" = $3 AND r."status" = 'released' AND r."overallScore" IS NOT NULL ` +
   `GROUP BY r."id", r."overallScore" ORDER BY max(l."releasedAt") DESC LIMIT 1`;
+/**
+ * The org's previous automatic Barometer run, any status, and what it lost (DECISIONS.md 723): the newest started
+ * before this run, never this run itself. By the org's customer (its unique "orgId15" index, then
+ * "HealthCheckCustomerRun_customerId_idx" and the run's primary key), as the console's driver attaches every
+ * automatic run to its org's customer; "orgId" has no index. A run not attached is not seen, so it is never compared.
+ * One read-only statement.
+ */
+export const PREVIOUS_RUN_LOSSES_SQL =
+  `SELECT r."id", r."budget" -> 'readsLost' AS "losses" FROM "HealthCheckCustomer" c ` +
+  `JOIN "HealthCheckCustomerRun" cr ON cr."customerId" = c."id" JOIN "HealthCheckRun" r ON r."id" = cr."runId" ` +
+  `WHERE c."orgId15" = $2 AND r."id" <> $1 AND left(r."orgId", 15) = $2 AND r."product" = 'barometer' AND r."reviewMode" = 'automatic' ` +
+  `AND r."startedAt" < (SELECT t."startedAt" FROM "HealthCheckRun" t WHERE t."id" = $1) ORDER BY r."startedAt" DESC, r."id" DESC LIMIT 1`;
+/**
+ * What an automatic Barometer run lost, beside its budget in the run's own row (DECISIONS.md 723): the flag's counts
+ * are numbers only and a flag is raised only on a hold, while this must be known for every run, a run that lost
+ * nothing too. Written after the progress, which rewrites the budget whole, so any later progress save takes it away.
+ */
+export const RUN_LOSSES_SQL = `UPDATE "HealthCheckRun" SET "budget" = jsonb_set("budget", '{readsLost}', $2::jsonb, true) WHERE "id" = $1`;
 export const AUTOMATIC_STATE_SQL =
   `SELECT r."status", r."queuedAt" IS NOT NULL AS "queued", to_jsonb(r) ->> 'heldReason' AS "heldReason", ` +
   `EXISTS (SELECT 1 FROM "HealthCheckCalibration" c WHERE c."runId" = r."id") AS "calibrated" FROM "HealthCheckRun" r WHERE r."id" = $1`;
@@ -736,6 +755,7 @@ export class PostgresWorkerStore implements WorkerStore {
     return this.#transaction(async (client) => {
       await this.#openRun(client, runId, output.automatic !== undefined);
       await this.#writeProgress(client, runId, output.progress, output.runDir);
+      if (output.readsLost) await client.query(RUN_LOSSES_SQL, [runId, JSON.stringify(output.readsLost)]);
       // Replaced whole, so a second delivery leaves the same rows. Deleting a
       // section takes its versions and proposals with it (ON DELETE CASCADE).
       for (const table of ["HealthCheckFinding", "HealthCheckMetric", "HealthCheckScore", "HealthCheckManualStep", "HealthCheckSection"]) {
@@ -799,6 +819,12 @@ export class PostgresWorkerStore implements WorkerStore {
     const row = one(await this.#pool.query(LAST_RELEASED_SCORE_SQL, [runId, orgId15, product]));
     const score = row?.score === undefined || row.score === null ? null : Number(row.score);
     return score !== null && Number.isFinite(score) ? score : null;
+  }
+
+  async previousRunLosses(runId: string, orgId15: string): Promise<{ runId: string; losses: RunLosses | null } | null> {
+    const row = one(await this.#pool.query(PREVIOUS_RUN_LOSSES_SQL, [runId, orgId15]));
+    if (!row) return null;
+    return { runId: String(row.id), losses: readLosses(row.losses) };
   }
 
   async automaticRunState(runId: string): Promise<AutomaticRunState | null> {

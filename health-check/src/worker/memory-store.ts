@@ -6,6 +6,7 @@ import { DIGEST_KEYS, type RunDigest } from "../schemas/digest.ts";
 import { unstorableAt } from "./inventory.ts";
 import { Run, type BenchmarkRow, type Calibration, type ConnectLink, type Metric, type Release, type ReportSection } from "../schemas/index.ts";
 import { assertChecks, CONSOLE_CHECKS } from "./console-checks.ts";
+import { readLosses, type RunLosses } from "./release.ts";
 import { storedFromRow, waitingRow, type ConsoleSummariesRow, type SummariesToSave } from "../handbook/summary-row.ts";
 import { DISCONNECT_STEP, ORG_AWAITING_CONNECT, RunClosedError, SCAN_REVOKE_NOT_CONFIRMED, type ConnectJobInput, type DocumentsJobInput, type DocumentsJobReads, type DriveShare, type ShareJobInput, type DocumentsMade, type LinkConnected, type LinkState, type PulseRun, type ReleasedRun, type RunJobInput, type RunOutputRecord, type RunProgress, type WorkerStore, type RunDelivery, type AutomaticOutcome, type AutomaticRunState, RUN_FAILED_FLAG, STOPPED_BUDGET_FLAG, DOCUMENTS_HELD_FLAG, type PortalDocumentRow } from "./types.ts";
 
@@ -14,7 +15,7 @@ import { DISCONNECT_STEP, ORG_AWAITING_CONNECT, RunClosedError, SCAN_REVOKE_NOT_
 // released refuses the worker; only a pending link can be settled.
 
 /** The run's overall score and grade are the console's columns (DECISIONS.md 626), kept beside the output, never in it, and only once written. */
-export type StoredRun = RunJobInput & { runDir: string | null; output: Omit<RunOutputRecord, "progress" | "runDir" | "overall" | "digest"> | null; overallScore?: number | null; overallGrade?: string | null };
+export type StoredRun = RunJobInput & { runDir: string | null; output: Omit<RunOutputRecord, "progress" | "runDir" | "overall" | "digest"> | null; overallScore?: number | null; overallGrade?: string | null; readsLost?: unknown };
 /** `instanceHost` is the console's column (DECISIONS.md 626), there only once written. */
 export type StoredLink = Omit<ConnectJobInput, "runOrgId" | "runId"> & { runId: string | null; reason: string | null; connected: LinkConnected | null; refusedAt: string | null; instanceHost?: string };
 
@@ -80,6 +81,8 @@ export class MemoryWorkerStore implements WorkerStore {
     const run = this.#open(runId);
     run.run = Run.parse({ ...run.run, ...structuredClone(progress) });
     run.runDir = runDir;
+    // As the Postgres store rewrites the budget whole: what an earlier attempt lost is no longer known (DECISIONS.md 723).
+    delete run.readsLost;
     this.writes.push({ method: "saveRunProgress", id: runId, detail: progress.status });
   }
 
@@ -93,6 +96,9 @@ export class MemoryWorkerStore implements WorkerStore {
     run.run = Run.parse({ ...run.run, ...progress });
     run.runDir = runDir;
     run.output = rest;
+    // Beside the budget, as the Postgres store writes it after the progress: only this save's, or none.
+    if (rest.readsLost) run.readsLost = structuredClone(rest.readsLost);
+    else delete run.readsLost;
     // As the Postgres store's own statements: null where there's no score, untouched where none was given.
     if (overall !== undefined && !this.#withoutNewerColumns) Object.assign(run, { overallScore: overall?.score ?? null, overallGrade: overall?.grade ?? null });
     if (rest.handbookSummaries) this.#saveSummaries(runId, rest.handbookSummaries);
@@ -176,6 +182,22 @@ export class MemoryWorkerStore implements WorkerStore {
       if (at && (!best || at > best.at)) best = { at, score: run.overallScore };
     }
     return best?.score ?? null;
+  }
+
+  /**
+   * As PREVIOUS_RUN_LOSSES_SQL: the org's automatic Barometer run started last before this one, any status, never this
+   * one. This store has no customer table, so every run of the org counts as attached to its customer.
+   */
+  async previousRunLosses(runId: string, orgId15: string): Promise<{ runId: string; losses: RunLosses | null } | null> {
+    const self = this.runs.get(runId);
+    if (!self) return null;
+    let best: StoredRun | null = null;
+    for (const run of this.runs.values()) {
+      const r = run.run;
+      if (r.id === runId || r.orgId.slice(0, 15) !== orgId15 || r.product !== "barometer" || r.reviewMode !== "automatic" || !(r.startedAt < self.run.startedAt)) continue;
+      if (!best || r.startedAt > best.run.startedAt || (r.startedAt === best.run.startedAt && r.id > best.run.id)) best = run;
+    }
+    return best ? { runId: best.run.id, losses: readLosses(best.readsLost) } : null;
   }
 
   async automaticRunState(runId: string): Promise<AutomaticRunState | null> {
