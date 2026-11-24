@@ -305,6 +305,24 @@ describe("the currency line, said once where it belongs (DECISIONS.md 700, fix r
     assert.deepEqual(pages, PAGE_LINES);
   });
 
+  test("a page whose only amount is said in a flagged finding's own text still carries the line", () => {
+    // No formatted amount anywhere: every sized figure taken away and every metric in money left out.
+    const findings = single.input.findings.map((f) => (f.amountsUnnamed && f.status === "issue" ? { ...f, value: { kind: "not_sized" as const, reason: "Not sized here." } } : f));
+    const metrics = single.input.metrics.filter((m) => m.unit !== "currency");
+    const report = buildReport({ ...single.input, findings, metrics });
+    assert.equal(report.value.currencyNote, NOTE);
+    const pages = pagesOf(fullReportHtml(report, single.pseudonyms));
+    let seen = 0;
+    for (const f of report.teamFindings.filter((x) => x.amountsUnnamed && /\d{3}/.test(x.summary))) {
+      const at = escapeXml(f.summary.slice(0, 40));
+      for (const page of pages.filter((p) => p.includes(at))) {
+        assert.ok(page.includes(NOTE_HTML), f.ruleId);
+        seen++;
+      }
+    }
+    assert.ok(seen > 0);
+  });
+
   test("a run that can't tell its currency shows no amount, so carries no line", () => {
     const extracts = loadExtracts(unread.dir);
     const opps = extracts.get("opportunities") as OpportunityExtract;
