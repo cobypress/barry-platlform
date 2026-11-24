@@ -18,8 +18,8 @@ import { ENGINE_STAGES_SOQL, STAGES_SOQL } from "../../extract/opportunities.ts"
 // a metric or the raw notes updates these, and says why in its commit.
 
 const GOLDEN: Record<string, Record<string, string>> = {
-  recorded: { "findings.json": "6bb1a7259636570c", "metrics.json": "6cb4e274fa619acb", "scores.json": "17cdb1708449d000", "manual-steps.json": "c4daf1ca86584a33", "action-lists.json": "7018f033c3c80e0a", "raw-notes.md": "9e047dc61486eb8e", "handbook.json": "64dcafcf493eef42" },
-  generated: { "findings.json": "6649483cdd8d7021", "metrics.json": "c15f48ea3065fd90", "scores.json": "616e42570f940402", "manual-steps.json": "15ae87c4fd76d7b6", "action-lists.json": "8eeb97766d119778", "raw-notes.md": "a09e343823361c89", "handbook.json": "23c075e2337e23a8" },
+  recorded: { "findings.json": "18df579f0d548e0b", "metrics.json": "4292a6701991b3c4", "scores.json": "17cdb1708449d000", "manual-steps.json": "c4daf1ca86584a33", "action-lists.json": "7018f033c3c80e0a", "raw-notes.md": "5a45b95cb50f62b7", "handbook.json": "64dcafcf493eef42" },
+  generated: { "findings.json": "40ac17bb0ad9d0fd", "metrics.json": "2b312509ee481ac8", "scores.json": "616e42570f940402", "manual-steps.json": "15ae87c4fd76d7b6", "action-lists.json": "8eeb97766d119778", "raw-notes.md": "6d73836f043ca516", "handbook.json": "23c075e2337e23a8" },
 };
 
 // Before decision 706 added the stage probabilities' finding and metric, and its stage read named the probability field:

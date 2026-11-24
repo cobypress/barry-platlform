@@ -16,17 +16,37 @@ export const ENGINE_STAGES_SOQL = "SELECT ApiName, MasterLabel, IsActive, IsClos
 /** How the stage read says it went without the probabilities. */
 export const PROBABILITY_FIELD = "OpportunityStage.DefaultProbability";
 
-export const stagesExtractor: Extractor<Sourced<StageRow[]>> = {
+/** Why the probabilities weren't read: the field refused as not there for the connected user, or refused for access. */
+export type ProbabilityRefusal = "invalid_field" | "no_access";
+/** The stage read, and when the probabilities were refused, which way. */
+export type StagesRead = Sourced<StageRow[]> & { probabilityRefused?: ProbabilityRefusal };
+
+/**
+ * The class of a refusal that is about the field, read from the reason
+ * readableReason gives: Salesforce's "No such column" for this field as it
+ * words it, or a reason kept as "CODE: message" opening with INVALID_FIELD or
+ * an access code. Anything else, a time-out or an outage among them, isn't the
+ * field's doing, so the read fails as it did before the field was asked for.
+ */
+export function probabilityRefusal(reason: string): ProbabilityRefusal | null {
+  if (reason === `${PROBABILITY_FIELD} isn't in this org.` || /^INVALID_FIELD\b/.test(reason)) return "invalid_field";
+  if (/^INSUFFICIENT_ACCESS(?:_OR_READONLY)?\b/.test(reason)) return "no_access";
+  return null;
+}
+
+export const stagesExtractor: Extractor<StagesRead> = {
   id: "opportunity-stages",
   // 2: the probabilities (DECISIONS.md 706), so a checkpoint from 1 is read again.
   version: 2,
   async run(ctx) {
     const full = await readSoql<StageRow>(ctx, ENGINE_STAGES_SOQL);
     if (full.status === "ok") return full;
-    // Whatever Salesforce refused, the stages are read as before without the probabilities, and only
-    // the comparison that needs them goes without: every other figure reads the stages as it did.
+    // Only a refusal of the field is worked round: the stages are read as before without it, and only the
+    // comparison that needs them goes without. Any other failure is the stage read's own, as it always was.
+    const refused = probabilityRefusal(full.reason);
+    if (!refused) return full;
     const plain = await readSoql<Omit<StageRow, "DefaultProbability">>(ctx, STAGES_SOQL);
-    return plain.status === "ok" ? { ...plain, data: plain.data.map((r) => ({ ...r, DefaultProbability: null })), missingFields: [PROBABILITY_FIELD] } : plain;
+    return plain.status === "ok" ? { ...plain, data: plain.data.map((r) => ({ ...r, DefaultProbability: null })), missingFields: [PROBABILITY_FIELD], probabilityRefused: refused } : plain;
   },
 };
 

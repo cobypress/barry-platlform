@@ -185,9 +185,9 @@ describe("the synthetic org", () => {
     // Moved since by decision 628's hours and prompts, then 655's, 663's and 672's org-word marks, alone, and by
     // decision 703's path insights and their table, then 706's stage probabilities and the stage read naming its
     // probability field, added to the run's files, which the fingerprint test holds.
-    assert.equal(print["findings.json"], "6bb1a7259636570c");
-    assert.equal(print["metrics.json"], "6cb4e274fa619acb");
-    assert.equal(print["raw-notes.md"], "9e047dc61486eb8e");
+    assert.equal(print["findings.json"], "18df579f0d548e0b");
+    assert.equal(print["metrics.json"], "4292a6701991b3c4");
+    assert.equal(print["raw-notes.md"], "5a45b95cb50f62b7");
     const scores = JSON.parse(readFileSync(join(dir, "scores.json"), "utf8")) as Score[];
     const findings = JSON.parse(readFileSync(join(dir, "findings.json"), "utf8")) as Finding[];
     const overall = overallScore(scores, findings);

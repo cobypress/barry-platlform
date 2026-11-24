@@ -1,7 +1,7 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import type { HistoryRow, OpportunityExtract, OpportunityRow, StageRow } from "../../extract/opportunities.ts";
-import { ENGINE_STAGES_SOQL, PROBABILITY_FIELD, STAGES_SOQL } from "../../extract/opportunities.ts";
+import { ENGINE_STAGES_SOQL, PROBABILITY_FIELD, probabilityRefusal, STAGES_SOQL, stagesExtractor } from "../../extract/opportunities.ts";
 import type { Sourced } from "../../extract/types.ts";
 import { notMeasurableKind } from "../../engine/not-measurable.ts";
 import { runHealthCheck } from "../../engine/run.ts";
@@ -23,9 +23,11 @@ import { loadRun } from "../../render/render-run.ts";
 import { AutomaticReplay, automaticSyntheticCalibration } from "../../testing/automatic.ts";
 import { authorise } from "../../salesforce/allowlist.ts";
 import { orgStages } from "../../connect/org-stages.ts";
-import { readCheckpoint } from "../../engine/checkpoint.ts";
-import { join } from "node:path";
-import { readFileSync } from "node:fs";
+import { readCheckpoint, writeCheckpoint } from "../../engine/checkpoint.ts";
+import { renderRawNotesDocx } from "../../render/raw-notes-docx.ts";
+import { strFromU8, unzipSync } from "fflate";
+import { dirname, join } from "node:path";
+import { readFileSync, writeFileSync } from "node:fs";
 
 // Each open stage's probability in Salesforce against how often the closed
 // deals that reached it were won (DECISIONS.md 706), on deal histories built
@@ -36,13 +38,19 @@ const extracts = loadExtracts(dir);
 const calibration: Calibration = { ...loadCalibration(), minSample: 5 };
 const real: Calibration = { ...loadCalibration() };
 const DAY = 86_400_000;
+const RUN = Date.parse(AS_OF);
+const WINDOW_FROM = Date.parse((JSON.parse(readFileSync(join(dir, "run.json"), "utf8")) as { analysisWindow: { from: string } }).analysisWindow.from);
 type Measured = Extract<Metric, { status: "measured" }>;
 
 // ─── Hand-built deals ────────────────────────────────────────────────────────
 
 type Outcome = "won" | "lost" | "no_decision";
-/** `segment` is set as the deal's type, lead source and record type alike. `late`: made that many days before its history starts. */
-type Spec = { path: string[]; outcome: Outcome; segment?: string; late?: number; owner?: number };
+/**
+ * `segment` is set as the deal's type, lead source and record type alike. `late`: made that many days before its
+ * history starts. Dated deals give `at` (made), `enter` (each stage of the path entered) and `closedAt`, null while
+ * the deal is still open at the run's date; without them a deal is made in April 2025 and closes 40 days later.
+ */
+type Spec = { path: string[]; outcome: Outcome; segment?: string; late?: number; owner?: number; at?: number; enter?: number[]; closedAt?: number | null };
 const CLOSED: Record<Outcome, string> = { won: "Closed Won", lost: "Closed Lost", no_decision: "Closed No Decision" };
 const stamp = (ms: number): string => new Date(ms).toISOString().replace("Z", "+0000");
 
@@ -66,13 +74,15 @@ function extractsOf(specs: Spec[], options: { history?: "ok" | "none" | "unavail
   const rows: HistoryRow[] = [];
   specs.forEach((s, i) => {
     const id = `006${String(900_000 + i).padStart(15, "0")}`;
-    const start = Date.parse("2025-04-01T09:00:00Z") + i * 3_600_000;
+    const start = s.at ?? Date.parse("2025-04-01T09:00:00Z") + i * 3_600_000;
     const created = start - (s.late ?? 0) * DAY;
-    const closed = start + 40 * DAY;
-    const closeDate = new Date(closed).toISOString().slice(0, 10);
-    opportunities.push({ Id: id, OwnerId: owners[(s.owner ?? 0) % owners.length]!, StageName: CLOSED[s.outcome], Amount: null, CloseDate: closeDate, CreatedDate: stamp(created), IsClosed: true, IsWon: s.outcome === "won", LastActivityDate: null, Type: s.segment ?? null, LeadSource: s.segment ?? null, RecordType: s.segment ?? null, CurrencyIsoCode: null, LossReason: null });
-    s.path.forEach((stage, k) => rows.push({ Id: `008${String(rows.length + 1).padStart(15, "0")}`, OpportunityId: id, StageName: stage, Amount: null, CloseDate: closeDate, CreatedDate: stamp(start + k * 60_000) }));
-    rows.push({ Id: `008${String(rows.length + 1).padStart(15, "0")}`, OpportunityId: id, StageName: CLOSED[s.outcome], Amount: null, CloseDate: closeDate, CreatedDate: stamp(closed) });
+    const enter = s.enter ?? s.path.map((_, k) => start + k * 60_000);
+    const closed = s.closedAt === undefined ? start + 40 * DAY : s.closedAt;
+    const closeDate = new Date(closed ?? RUN + 60 * DAY).toISOString().slice(0, 10);
+    const stage = closed === null ? s.path.at(-1)! : CLOSED[s.outcome];
+    opportunities.push({ Id: id, OwnerId: owners[(s.owner ?? 0) % owners.length]!, StageName: stage, Amount: null, CloseDate: closeDate, CreatedDate: stamp(created), IsClosed: closed !== null, IsWon: closed !== null && s.outcome === "won", LastActivityDate: null, Type: s.segment ?? null, LeadSource: s.segment ?? null, RecordType: s.segment ?? null, CurrencyIsoCode: null, LossReason: null });
+    s.path.forEach((name, k) => rows.push({ Id: `008${String(rows.length + 1).padStart(15, "0")}`, OpportunityId: id, StageName: name, Amount: null, CloseDate: closeDate, CreatedDate: stamp(enter[k]!) }));
+    if (closed !== null) rows.push({ Id: `008${String(rows.length + 1).padStart(15, "0")}`, OpportunityId: id, StageName: CLOSED[s.outcome], Amount: null, CloseDate: closeDate, CreatedDate: stamp(closed) });
   });
   if (e.opportunities.status === "ok") e.opportunities = { ...e.opportunities, data: opportunities };
   if (e.history.status === "ok") {
@@ -142,7 +152,7 @@ describe("a stage is reached when the deal's own history shows it there", () => 
     assert.equal(reachedOf(metric, C), 23);
     assert.equal(reachedOf(metric, D), 23);
     assert.equal(segmentOf(metric, "reached, then won", A)!.value, 9);
-    assert.equal(reached({ id: "x", deal: {} as never, path: [C, D], won: true, days: 1 }, A), false);
+    assert.equal(reached({ path: [C, D] }, A), false);
   });
 
   test("closed deals are counted by where they went, never by the stage they are in now", () => {
@@ -157,7 +167,7 @@ describe("a stage is reached when the deal's own history shows it there", () => 
     assert.equal(metric.status, "measured");
     assert.equal((metric as Measured).n, 20);
     assert.equal((metric as Measured).stats.beforeHistory, 12);
-    assert.ok(metric.assumptions.some((a) => a.startsWith("12 closed deals created before your stage history starts are left out")));
+    assert.ok(metric.assumptions.some((a) => a.startsWith("12 deals created before your stage history starts are left out")));
   });
 
   test("no decision counts as not won", () => {
@@ -175,7 +185,7 @@ describe("a stage is named only past every bar", () => {
     const [f, ...rest] = issues(findings);
     assert.equal(rest.length, 0);
     assert.equal(f!.title, "The probability on Negotiation in Salesforce is higher than how often its deals are won");
-    assert.match(f!.summary, /^Negotiation is set to 90% in Salesforce\. Of the 100 closed deals that reached it, 66% were won, so it is set higher than what happens\./);
+    assert.match(f!.summary, /^Negotiation is set to 90% in Salesforce\. Of the 100 deals that reached it between [A-Z][a-z]+ \d{4} and [A-Z][a-z]+ \d{4}, 66% were won, so it is set higher than what happens\./);
     assert.match(f!.summary, /it doesn't say why they differ\.$/);
     assert.equal(f!.severity, "info");
     assert.deepEqual(f!.subjects.map((s) => s.label), [D]);
@@ -188,7 +198,7 @@ describe("a stage is named only past every bar", () => {
     assert.equal(findings.length, 1);
     const [f] = issues(findings);
     assert.equal(f!.title, "The probabilities on 2 stages in Salesforce are higher or lower than how often their deals are won");
-    assert.match(f!.summary, /Prospecting is set to 20% .* so it is set lower than what happens\. Negotiation is set to 80% .* so it is set higher than what happens\./);
+    assert.match(f!.summary, /Prospecting is set to 20% .* so it is set lower than what happens\. (?:[^.]*\. )?Negotiation is set to 80% .* so it is set higher than what happens\./);
   });
 
   test("too few deals, won or lost: not named, however big the gap", () => {
@@ -226,7 +236,7 @@ describe("a stage is named only past every bar", () => {
     const { findings } = analysed(deals(100, USUAL, 50), { calibration: real, probabilities: { Prospecting: 50, Discovery: 50, Proposal: 50, Negotiation: 80 } });
     const [f] = issues(findings);
     assert.equal(f!.confidence, "low");
-    assert.match(f!.summary, /We couldn't check this within teams or record types/);
+    assert.match(f!.summary, /We couldn't check this within teams, reps or other groups: none had enough of these deals\./);
   });
 
   test("a stage with no probability set is listed and never named", () => {
@@ -239,6 +249,65 @@ describe("a stage is named only past every bar", () => {
     const { findings } = analysed(deals(100, USUAL, 50), { calibration: real, probabilities: { Prospecting: 50, Discovery: 50, Proposal: 50, Negotiation: 50 } });
     assert.equal(findings[0]!.status, "passed");
     assert.match(findings[0]!.summary!, /beyond what chance could make of the 4 stages we could test\.$/);
+  });
+});
+
+// ─── Who is counted: the deals that reached a stage in its period ───────────
+
+describe("each stage counts the deals that reached it in its period, open or closed (fix round 1)", () => {
+  const set = { Prospecting: 66, Discovery: 66, Proposal: 66, Negotiation: 90 };
+  /** `n` deals along the usual path, made `daysAgo` before the run, still open. */
+  const openDeals = (n: number, at: number): Spec[] => Array.from({ length: n }, (_, i) => ({ path: USUAL, outcome: "lost", at: at + i * 60_000, enter: USUAL.map((_, k) => at + i * 60_000 + k * 1000), closedAt: null }));
+
+  test("deals that reached it within the lag aren't counted yet, so the recent open ones don't hold it back", () => {
+    // 100 reached Negotiation in April 2025 and closed 40 days later; 20 more reached it 10 days before the run.
+    const { findings, metric } = analysed([...deals(100, USUAL, 66), ...openDeals(20, RUN - 10 * DAY)], { calibration: real, probabilities: set });
+    const stats = (metric as Measured).stats;
+    assert.equal(stats.stage4LagDays, 40);
+    assert.equal(stats.stage4Cohort, 100);
+    assert.equal(stats.stage4Open, 0);
+    assert.ok(metric.assumptions.includes("Negotiation: 90% of the closed deals that reached it had closed within 40 days, so its period ends on 2026-09-21"), metric.assumptions.join(" | "));
+    assert.equal(issues(findings).length, 1);
+  });
+
+  test("more than 5% of the period's deals still open: not named, and the metric says why", () => {
+    // 10 of 110 that reached it in April 2025 are still open: 9%.
+    const { findings, metric } = analysed([...deals(100, USUAL, 66), ...openDeals(10, Date.parse("2025-04-20T09:00:00Z"))], { calibration: real, probabilities: set });
+    assert.equal(issues(findings).length, 0);
+    assert.equal(segmentOf(metric, "still open", D)!.value, 10);
+    assert.equal(segmentOf(metric, "won share", D)!.notMeasurableReason, "Too many of the deals that reached Negotiation in this period are still open to say how often they are won");
+  });
+
+  test("5% or fewer still open: named, saying how many are open and over what the share is", () => {
+    const { findings } = analysed([...deals(100, USUAL, 66), ...openDeals(5, Date.parse("2025-04-20T09:00:00Z"))], { calibration: real, probabilities: set });
+    const [f] = issues(findings);
+    assert.match(f!.summary, /^Negotiation is set to 90% in Salesforce\. Of the 105 deals that reached it between [A-Z][a-z]+ \d{4} and September 2026, 5 are still open and 66% of the other 100 were won, so it is set higher than what happens\./);
+  });
+
+  test("chosen by when they reached it, not when they closed: deals that closed in the window after reaching it before don't count", () => {
+    // 60 reached Negotiation before the window and closed in it, all won: by close date they'd lift the share to 79%.
+    const early = WINDOW_FROM - 30 * DAY;
+    const before = Array.from({ length: 60 }, (_, i): Spec => ({ path: USUAL, outcome: "won", at: early + i * 60_000, enter: USUAL.map((_, k) => early + i * 60_000 + k * 1000), closedAt: WINDOW_FROM + 10 * DAY }));
+    const { metric } = analysed([...deals(100, USUAL, 66), ...before], { calibration: real, probabilities: set });
+    assert.equal((metric as Measured).stats.stage4Reached, 100);
+    assert.equal(segmentOf(metric, "won share", D)!.value, 66);
+  });
+});
+
+describe("the ways the deals are split (rule 4)", () => {
+  test("each way said once by name, record type left to its own check", () => {
+    const { findings } = analysed([...deals(50, USUAL, 33, { segment: "X" }), ...deals(50, USUAL, 33, { segment: "Y" })], { calibration: real, probabilities: { Prospecting: 66, Discovery: 66, Proposal: 66, Negotiation: 90 } });
+    const [f] = issues(findings);
+    assert.match(f!.summary, / It is on the same side of the setting in each of the 2 ways we could split these deals \(by lead source and type\)\. /);
+    assert.doesNotMatch(f!.summary, /record type/);
+  });
+
+  test("a segment holding 90% of the deals or more checks nothing", () => {
+    // Lead source and type: A holds 95 of 100, so only B's 5 are left to compare, and one segment is no way to split them.
+    const { findings } = analysed([...deals(95, USUAL, 63, { segment: "A" }), ...deals(5, USUAL, 3, { segment: "B" })], { probabilities: { Prospecting: 66, Discovery: 66, Proposal: 66, Negotiation: 90 } });
+    const [f] = issues(findings);
+    assert.match(f!.summary, /We couldn't check this within teams, reps or other groups: none had enough of these deals\./);
+    assert.equal(f!.confidence, "low");
   });
 });
 
@@ -255,7 +324,7 @@ describe("not measurable, with the plain reason, sorted into its kind", () => {
     assert.equal((result.metric as Extract<Metric, { status: "not_measurable" }>).reason, f!.notMeasurableReason);
   };
 
-  test("the probabilities weren't read", () => check(analysed(usual, { stages: "no probabilities" }), /^Salesforce didn't give us the probability set on each stage, so there's nothing to hold how often deals are won against\.$/, "unreadable"));
+  test("the probabilities weren't read", () => check(analysed(usual, { stages: "no probabilities" }), /^Salesforce didn't give us the probability set on each stage: it answered that the field isn't there for the connected user, so there's nothing to hold how often deals are won against\.$/, "unreadable"));
   test("the stage settings weren't read", () => check(analysed(usual, { stages: "unavailable" }), /^Salesforce's stage settings couldn't be read, so the probability set on each stage isn't known: /, "unreadable"));
   test("stage history couldn't be read", () => check(analysed(usual, { history: "unavailable" }), /^OpportunityHistory couldn't be read: /, "unreadable"));
   test("stage history isn't tracked", () => check(analysed(usual, { history: "none" }), /^Stage history isn't tracked for these deals: none of the 20 deals that closed in the window has a recorded open stage\.$/, "too_little_data"));
@@ -319,11 +388,12 @@ describe("the stage read (decision 706)", () => {
 
   const simulatedRun = async (failQuery?: (soql: string) => { errorCode: string; message: string } | null) => {
     const transport = new Simulator({ failQuery });
-    const { dir: runDir } = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), answers: loadAnswers(), modules: [historicPipelineModule], outDir: tempDir(), now: new Date(AS_OF), transport, connectedUser: CONNECTED_USER });
+    const { dir: runDir, run } = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), answers: loadAnswers(), modules: [historicPipelineModule], outDir: tempDir(), now: new Date(AS_OF), transport, connectedUser: CONNECTED_USER });
     const read = <T>(file: string) => JSON.parse(readFileSync(join(runDir, file), "utf8")) as T;
-    return { dir: runDir, findings: read<Finding[]>("findings.json"), metrics: read<Metric[]>("metrics.json") };
+    return { dir: runDir, run, transport, findings: read<Finding[]>("findings.json"), metrics: read<Metric[]>("metrics.json") };
   };
-  const refused = (code: string) => (soql: string) => (/DefaultProbability/.test(soql) ? { errorCode: code, message: "No such column 'DefaultProbability' on entity 'OpportunityStage'." } : null);
+  const stageQueries = (t: Simulator): string[] => t.requests.map((r) => new URL(r.url).searchParams.get("q") ?? "").filter((q) => /FROM OpportunityStage/.test(q));
+  const refused = (code: string, message = "No such column 'DefaultProbability' on entity 'OpportunityStage'.") => (soql: string) => (/DefaultProbability/.test(soql) ? { errorCode: code, message } : null);
   // Every other finding and metric, with the stage read's evidence naming the query, which on a refusal is honestly the plain one.
   const strip = <T extends { ruleId?: string; id?: string }>(rows: T[]) =>
     JSON.parse(JSON.stringify(rows.filter((x) => x.ruleId !== PROBABILITY_RULE && x.id !== PROBABILITY_METRIC)).replaceAll(ENGINE_STAGES_SOQL, STAGES_SOQL)) as T[];
@@ -343,13 +413,53 @@ describe("the stage read (decision 706)", () => {
     assert.deepEqual(strip(without.metrics), strip(normal.metrics));
   });
 
-  test("any refusal is read again without it; refused both ways, the stages are unread as before", async () => {
-    const { findings } = await simulatedRun(refused("INSUFFICIENT_ACCESS"));
-    assert.match(findings.find((f) => f.ruleId === PROBABILITY_RULE)!.notMeasurableReason!, /^Salesforce didn't give us the probability/);
+  test("refused for access, the same, and the reason says which", async () => {
+    const { findings, transport } = await simulatedRun(refused("INSUFFICIENT_ACCESS", "insufficient access rights on object id"));
+    assert.equal(findings.find((f) => f.ruleId === PROBABILITY_RULE)!.notMeasurableReason, "Salesforce refused the connected user the probability set on each stage, so there's nothing to hold how often deals are won against.");
+    assert.deepEqual(stageQueries(transport), [ENGINE_STAGES_SOQL, STAGES_SOQL]);
+  });
+
+  test("a refusal's class is read from the reason as readableReason gives it; anything else is no refusal of the field", () => {
+    assert.equal(probabilityRefusal("OpportunityStage.DefaultProbability isn't in this org."), "invalid_field");
+    assert.equal(probabilityRefusal("INVALID_FIELD: DefaultProbability"), "invalid_field");
+    assert.equal(probabilityRefusal("INSUFFICIENT_ACCESS: insufficient access rights on object id"), "no_access");
+    assert.equal(probabilityRefusal("INSUFFICIENT_ACCESS_OR_READONLY: no"), "no_access");
+    for (const reason of ["QUERY_TIMEOUT: Your query request was running for too long.", "UNKNOWN_EXCEPTION: An unexpected error occurred.", "OpportunityStage.IsWon isn't in this org.", "Opportunity.DefaultProbability isn't in this org."]) assert.equal(probabilityRefusal(reason), null, reason);
+  });
+
+  test("any other failure is the stage read's own, as before: no read without the field, the stages unread", async () => {
+    for (const code of ["QUERY_TIMEOUT", "UNKNOWN_EXCEPTION"]) {
+      const { dir: runDir, findings, transport } = await simulatedRun((soql) => (/FROM OpportunityStage/.test(soql) ? { errorCode: code, message: "Try again later." } : null));
+      assert.deepEqual(stageQueries(transport), [ENGINE_STAGES_SOQL], code);
+      const stages = readCheckpoint<Sourced<StageRow[]>>(join(runDir, "checkpoints", "opportunity-stages.json"));
+      assert.equal(stages.status, "unavailable", code);
+      assert.match(findings.find((f) => f.ruleId === PROBABILITY_RULE)!.notMeasurableReason!, new RegExp(`^Salesforce's stage settings couldn't be read, so the probability set on each stage isn't known: ${code}`));
+    }
+    // Refused both ways: the stages are unread, as before 706.
     const both = await simulatedRun((soql) => (/FROM OpportunityStage/.test(soql) ? { errorCode: "INSUFFICIENT_ACCESS", message: "no" } : null));
     const stages = readCheckpoint<Sourced<StageRow[]>>(join(both.dir, "checkpoints", "opportunity-stages.json"));
     assert.equal(stages.status, "unavailable");
     assert.equal(stages.source.kind === "soql" && stages.source.query, STAGES_SOQL);
+  });
+
+  test("a run in flight with a version 1 checkpoint of the stages reads them again on resume, with the probabilities", async () => {
+    const first = await simulatedRun();
+    const path = join(first.dir, "run.json");
+    const state = JSON.parse(readFileSync(path, "utf8")) as { status: string; steps: Array<{ id: string; version: number }> };
+    state.status = "stopped_budget";
+    state.steps.find((s) => s.id === stagesExtractor.id)!.version = 1;
+    writeFileSync(path, JSON.stringify(state));
+    // The checkpoint as version 1 wrote it: no probabilities.
+    const checkpoint = join(first.dir, "checkpoints", "opportunity-stages.json");
+    const old = readCheckpoint<Sourced<StageRow[]>>(checkpoint);
+    assert.equal(old.status, "ok");
+    if (old.status === "ok") writeCheckpoint(checkpoint, { ...old, data: old.data.map(({ DefaultProbability: _p, ...r }) => r), source: { ...old.source, query: STAGES_SOQL } });
+    const transport = new Simulator();
+    const resumed = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), answers: loadAnswers(), modules: [historicPipelineModule], outDir: dirname(first.dir), resume: first.run.id, now: new Date(AS_OF), transport, connectedUser: CONNECTED_USER });
+    assert.deepEqual(stageQueries(transport), [ENGINE_STAGES_SOQL]);
+    assert.equal(resumed.run.steps.find((s) => s.id === stagesExtractor.id)!.version, 2);
+    const again = readCheckpoint<Sourced<StageRow[]>>(checkpoint);
+    assert.ok(again.status === "ok" && again.data.some((r) => typeof r.DefaultProbability === "number"));
   });
 });
 
@@ -405,6 +515,71 @@ describe("noise: when the probabilities are true, at most 5% of orgs get the fin
   });
 });
 
+// The reviewer's dated generator: deals made over four years at a rate growing (or shrinking) by `growth` a year,
+// each walking the stages 20 days apart with true reached-then-won chances, then closing after an exponential time,
+// wins slower than losses. Open at the run's date where they haven't closed. Sampled by close date, a shrinking org
+// got the finding in a third of orgs; chosen by when they reached each stage, none may get it more than 5% of the time.
+describe("noise on dated deals: arrivals growing or shrinking, wins slower than losses, at most 5% of orgs in every cell", () => {
+  const TRUE = [20, 30, 50, 70];
+  const probabilities = { Prospecting: 20, Discovery: 30, Proposal: 50, Negotiation: 70 };
+  let seed = 1;
+  // mulberry32: an LCG's successive draws are correlated, which can tie an outcome to its time.
+  const rnd = (): number => {
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = seed;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const walk = (): { path: string[]; won: boolean } => {
+    const path = [A];
+    for (let k = 0; ; k++) {
+      const on = k + 1 < TRUE.length ? TRUE[k]! / TRUE[k + 1]! : TRUE[k]! / 100;
+      if (rnd() >= on) return { path, won: false };
+      if (k + 1 === TRUE.length) return { path, won: true };
+      path.push(USUAL[k + 1]!);
+    }
+  };
+  /** `n` deals the opportunities read would hold: open, or made or closed in the window. */
+  function datedOrg(n: number, growth: number, win: number, loss = 30): Spec[] {
+    const span = 4 * 365;
+    const r = Math.log(growth) / 365;
+    const out: Spec[] = [];
+    for (let made = 0; out.length < n && made < n * 50; made++) {
+      const u = rnd();
+      const t = r === 0 ? u * span : Math.log(1 + u * (Math.exp(r * span) - 1)) / r;
+      const at = RUN - (span - t) * DAY;
+      const w = walk();
+      const enter = w.path.map((_, k) => at + k * 20 * DAY);
+      const closedAt = enter.at(-1)! + -Math.log(1 - rnd()) * (w.won ? win : loss) * DAY;
+      const segment = ["S1", "S2", "S3"][Math.floor(rnd() * 3)]!;
+      const owner = Math.floor(rnd() * 4);
+      if (closedAt <= RUN) {
+        if (closedAt < WINDOW_FROM && at < WINDOW_FROM) continue;
+        out.push({ path: w.path, outcome: w.won ? "won" : "lost", at, enter, closedAt, segment, owner });
+      } else {
+        const k = enter.filter((e) => e <= RUN).length;
+        out.push({ path: w.path.slice(0, k), outcome: "lost", at, enter: enter.slice(0, k), closedAt: null, segment, owner });
+      }
+    }
+    return out;
+  }
+  const TRIALS = 100;
+  for (const growth of [1, 1.5, 2, 0.5]) {
+    for (const win of [90, 120, 180]) {
+      for (const n of [300, 1000]) {
+        test(`growth ${growth}x a year, wins closing at ${win} days, ${n} deals`, () => {
+          seed = 7_000_000 + growth * 100_000 + win * 100 + n;
+          let any = 0;
+          for (let t = 0; t < TRIALS; t++) if (issues(analysed(datedOrg(n, growth, win), { calibration: real, probabilities }).findings).length) any++;
+          console.log(`dated noise growth=${growth} win=${win} n=${n}: ${any} of ${TRIALS} orgs`);
+          assert.ok(any <= TRIALS * 0.05, `${any} of ${TRIALS}`);
+        });
+      }
+    }
+  }
+});
+
 // ─── The synthetic org: stored, not served ───────────────────────────────────
 
 const withoutOurs = <T extends { findings: Finding[]; metrics: Metric[] }>(input: T): T => ({ ...input, findings: input.findings.filter((f) => f.ruleId !== PROBABILITY_RULE), metrics: input.metrics.filter((m) => m.id !== PROBABILITY_METRIC) });
@@ -419,7 +594,10 @@ describe("the synthetic org keeps the comparison in its files and serves none of
     assert.equal(ours.length, 1);
     console.log(`synthetic org: ${ours.map((f) => `${f.status}: ${f.title} / ${f.summary}`).join(" | ")}`);
     assert.equal(ours[0]!.status, "issue");
-    assert.match(ours[0]!.summary, /^Negotiation is set to 90% in Salesforce\. Of the 238 closed deals that reached it, 68\.9% were won, so it is set higher than what happens\./);
+    assert.equal(
+      ours[0]!.summary,
+      "Negotiation is set to 90% in Salesforce. Of the 248 deals that reached it between October 2024 and September 2026, 11 are still open and 68.8% of the other 237 were won, so it is set higher than what happens. It is on the same side of the setting in each of the 4 ways we could split these deals (by team, rep, lead source and type). This compares each setting with what happened to the deals that reached the stage; it doesn't say why they differ.",
+    );
     assert.deepEqual(ours[0]!.subjects.map((s) => s.label), ["Negotiation"]);
     const metric = loaded.input.metrics.find((m) => m.id === PROBABILITY_METRIC)! as Measured;
     assert.equal(metric.status, "measured");
@@ -435,6 +613,23 @@ describe("the synthetic org keeps the comparison in its files and serves none of
         assert.doesNotMatch(withIt!, /probability-vs-reality|stage_probability_vs_won/);
         assert.equal(JSON.stringify(buildPulseResult(buildReport(input))), JSON.stringify(buildPulseResult(buildReport(withoutOurs(input)))));
       }
+    }
+  });
+
+  test("the raw notes document differs only in the stage read's evidence lines, which name the read as it ran", async () => {
+    const paragraphs = async (input: ReturnType<typeof loadRun>["input"], pseudonyms: ReturnType<typeof loadRun>["pseudonyms"]): Promise<string[]> => {
+      const xml = strFromU8(unzipSync(new Uint8Array(await renderRawNotesDocx(buildReport(input), pseudonyms)))["word/document.xml"]!);
+      return [...xml.matchAll(/<w:p[ >].*?<\/w:p>/gs)].map((m) => [...m[0].matchAll(/<w:t(?: [^>]*)?>([^<]*)<\/w:t>/g)].map((t) => t[1]).join(""));
+    };
+    for (const [runDir, lines] of [[dir, 4], [automatic.dir, 3]] as const) {
+      const loaded = loadRun(runDir);
+      // As the run's files would have been before 706: our rows out, and the stage read as it was.
+      const before = JSON.parse(JSON.stringify(withoutOurs(loaded.input)).replaceAll(ENGINE_STAGES_SOQL, STAGES_SOQL)) as typeof loaded.input;
+      const [now, then] = [await paragraphs(loaded.input, loaded.pseudonyms), await paragraphs(before, loaded.pseudonyms)];
+      assert.equal(now.length, then.length);
+      const moved = now.flatMap((line, i) => (line === then[i] ? [] : [[then[i], line]]));
+      assert.equal(moved.length, lines, runDir);
+      for (const [was, is] of moved) assert.deepEqual([was, is], [`Query: ${STAGES_SOQL}`, `Query: ${ENGINE_STAGES_SOQL}`]);
     }
   });
 
