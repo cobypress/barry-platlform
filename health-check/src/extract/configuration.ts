@@ -1,6 +1,6 @@
 import { redactSecrets } from "../privacy/secrets.ts";
 import { isUnavailable } from "../salesforce/client.ts";
-import { batchRefused, daysBefore, monthsBefore, readSoql, soqlWindow, unavailable, type Extractor, type Sourced, type SourceInfo } from "./types.ts";
+import { batchRefused, daysBefore, refusalReason, monthsBefore, readSoql, soqlWindow, unavailable, type Extractor, type Sourced, type SourceInfo } from "./types.ts";
 
 export const CORE_OBJECTS = ["Account", "Contact", "Lead", "Opportunity"] as const;
 
@@ -113,7 +113,7 @@ export const fieldUsageExtractor: Extractor<Record<string, Sourced<ObjectFieldUs
         }
         if (!all?.ok || !recent?.ok) {
           const failed = !all?.ok ? all : recent;
-          failure = failed && !failed.ok ? failed.error.message : "The field usage query failed";
+          failure = failed && !failed.ok ? refusalReason(failed.error, object) : "The field usage query failed";
           break;
         }
         const allRow = all.result.records[0]!;

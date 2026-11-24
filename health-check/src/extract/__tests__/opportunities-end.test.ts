@@ -693,10 +693,11 @@ describe("the Commit figures read late, after a deal in Commit at the run's date
     othersAsAtT(late);
   });
 
-  test("where the deals closed since can't be read, the three figures are not measurable with Salesforce's reason, and nothing else moves", async () => {
+  test("where the deals closed since can't be read, the three figures are not measurable with the reason, and nothing else moves", async () => {
     const read = await run({ failQuery: (soql) => (CLOSED_SINCE.test(soql) ? { errorCode: "INSUFFICIENT_ACCESS", message: "Not today" } : null) });
     const list = checkpoint<ForecastData>(read.dir, "forecast").closedSinceTheRun;
-    assert.ok(list.status === "unavailable" && list.reason.includes("Not today"));
+    // Our words since decision 702: Salesforce's own never reach the reason.
+    assert.ok(list.status === "unavailable" && list.reason === "Opportunity couldn't be read, because the person who connected Salesforce doesn't have permission to see it.");
     const reason = `Deals closed since this run's date couldn't be read: ${list.status === "unavailable" ? list.reason : ""}`;
     const query = (e: { kind: string; query?: string }) => (e.kind === "soql" ? e.query : undefined);
     for (const id of COMMIT_SHARES) {

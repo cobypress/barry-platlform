@@ -3,6 +3,7 @@ import { unzipSync, strFromU8 } from "fflate";
 import { BUDGET_DEFAULTS, SF_DEFAULTS } from "../config.ts";
 import { authorise, ForbiddenOperationError, type SfRequest } from "./allowlist.ts";
 import { ApiBudget, BudgetStopError } from "./budget.ts";
+import { LIMITS_NO_PERMISSION, LIMITS_REFUSED, NO_API_FOR_ORG, NO_API_FOR_USER } from "./refusal-words.ts";
 import type { ConnectionProvider, OrgConnection } from "./connection.ts";
 import { instanceOrigin } from "./hosts.ts";
 import { fetchTransport, type Transport, type TransportResponse } from "./transport.ts";
@@ -47,8 +48,7 @@ export class NoApiAccessError extends Error {
   }
 }
 
-export const NO_API_FOR_ORG = "This Salesforce org doesn't allow API access, so we can't read it. Professional Edition needs the API add-on.";
-export const NO_API_FOR_USER = "The person who connected doesn't have API access in Salesforce, so we can't read the org. They need the API Enabled permission.";
+export { LIMITS_NO_PERMISSION, LIMITS_REFUSED, NO_API_FOR_ORG, NO_API_FOR_USER } from "./refusal-words.ts";
 
 /**
  * Which errors cost one read and which stop the run (DECISIONS.md 702). One
@@ -59,15 +59,17 @@ export const NO_API_FOR_USER = "The person who connected doesn't have API access
  * - `no_permission`: the connected user can't see it.
  * - `refused`: Salesforce said no to this read for another reason, or a code
  *   we haven't seen. Any 4xx with Salesforce's own error in it, and any SOAP
- *   fault, is Salesforce answering that one call, whatever its code.
+ *   fault but a server's, is Salesforce answering that one call, whatever its code.
  *
  * Stops the run, as before 702:
  * - `auth_lost`: the session is gone after the client's refresh. Only a person
  *   signing in again helps.
  * - `api_limit`: the org's daily API limit (a BudgetStopError, which the run
  *   saves and resumes from).
- * - `instance_unavailable`: a 5xx or 429 after the client's retries, or a
- *   response with no Salesforce error in it. It may pass, so the worker tries again.
+ * - `instance_unavailable`: a 5xx or 429 after the client's retries, a SOAP
+ *   `Server` fault, a retrieve that timed out or came back malformed, an
+ *   expired query cursor, or a response with no Salesforce error in it. It may
+ *   pass, so the run stops and the worker reads it again: never saved as unread.
  * - `not_salesforce`: anything else, such as a network failure or our own bug.
  */
 export type ErrorClass = "not_available" | "no_permission" | "refused" | "auth_lost" | "api_limit" | "instance_unavailable" | "not_salesforce";
@@ -86,43 +88,30 @@ export const KNOWN_CODES: Readonly<Record<string, ErrorClass>> = {
   MALFORMED_QUERY: "refused",
   INVALID_QUERY_FILTER_OPERATOR: "refused",
   INVALID_QUERY_SCOPE: "refused",
-  INVALID_QUERY_LOCATOR: "refused",
+  // A query cursor expired between pages: read again, it works (DECISIONS.md 702).
+  INVALID_QUERY_LOCATOR: "instance_unavailable",
   INVALID_OPERATION: "refused",
   QUERY_TOO_COMPLICATED: "refused",
   EXCEEDED_ID_LIMIT: "refused",
   OPERATION_TOO_LARGE: "refused",
   QUERY_TIMEOUT: "refused",
   UNKNOWN_EXCEPTION: "refused",
-  // The client's own, for a retrieve that didn't give back its files.
+  // The client's own, for a retrieve that didn't give back its files. One that
+  // failed is Salesforce's answer; one that ran out of time, or came back
+  // malformed, may work on the next delivery.
   RETRIEVE_FAILED: "refused",
-  RETRIEVE_TIMEOUT: "refused",
-  BAD_SOAP_RESPONSE: "refused",
+  RETRIEVE_TIMEOUT: "instance_unavailable",
+  BAD_SOAP_RESPONSE: "instance_unavailable",
   INVALID_SESSION_ID: "auth_lost",
   INVALID_AUTH_HEADER: "auth_lost",
   REQUEST_LIMIT_EXCEEDED: "api_limit",
   SERVER_UNAVAILABLE: "instance_unavailable",
+  // SOAP's own generic fault codes, with their namespace taken off: a server's
+  // is an outage, never an answer about the read.
+  Server: "instance_unavailable",
 };
 
 const PER_READ: ReadonlySet<ErrorClass> = new Set(["not_available", "no_permission", "refused"]);
-
-/**
- * The codes the engine took as "not available" before 702. Their reasons stay
- * Salesforce's message made readable, as before, so a run that worked then
- * says exactly what it said. Every other code gets our own plain sentence.
- */
-export const READ_AS_BEFORE = new Set([
-  "INVALID_TYPE",
-  "INVALID_FIELD",
-  "MALFORMED_QUERY",
-  "INSUFFICIENT_ACCESS",
-  "INSUFFICIENT_ACCESS_OR_READONLY",
-  "API_DISABLED_FOR_ORG",
-  "NOT_FOUND",
-  "EXCEEDED_ID_LIMIT",
-  "OPERATION_TOO_LARGE",
-  "QUERY_TIMEOUT",
-  "UNKNOWN_EXCEPTION",
-]);
 
 export function classifyError(err: unknown): ErrorClass {
   if (err instanceof BudgetStopError) return "api_limit";
@@ -218,9 +207,6 @@ export type ClientOptions = {
 export type OrgLimit = { Max: number; Remaining: number };
 /** The /limits entries kept for the integrations area and storage (roadmap 3.2). */
 export const REPORTED_LIMITS = ["DailyApiRequests", "DailyAsyncApexExecutions", "DataStorageMB", "FileStorageMB"] as const;
-/** Why the org's limits weren't measured, in our words (DECISIONS.md 702). */
-export const LIMITS_NO_PERMISSION = "The org's limits weren't measured, because the person who connected Salesforce can't view Setup.";
-export const LIMITS_REFUSED = "The org's limits weren't measured, because Salesforce refused the read.";
 const isLimit = (value: unknown): value is OrgLimit => typeof (value as OrgLimit)?.Max === "number" && typeof (value as OrgLimit)?.Remaining === "number";
 
 export class SalesforceClient {
@@ -476,7 +462,12 @@ export class SalesforceClient {
           out.push({ ok: true, result: { records: page.records, totalSize: page.totalSize, truncated: Boolean(page.nextRecordsUrl) } });
         } else {
           const first = (Array.isArray(item.result) ? item.result[0] : item.result) as { errorCode?: string; message?: string };
-          out.push({ ok: false, error: new SalesforceError(item.statusCode, first?.errorCode ?? "UNKNOWN", first?.message ?? "Subrequest failed") });
+          const error = new SalesforceError(item.statusCode, first?.errorCode ?? "UNKNOWN", first?.message ?? "Subrequest failed");
+          // A lost session or the daily limit inside one answer is the run's, not one count's (DECISIONS.md 702).
+          const kind = classifyError(error);
+          if (kind === "api_limit") throw new BudgetStopError("Salesforce reports the daily API limit is exhausted");
+          if (kind === "auth_lost") throw error;
+          out.push({ ok: false, error });
         }
       }
     }

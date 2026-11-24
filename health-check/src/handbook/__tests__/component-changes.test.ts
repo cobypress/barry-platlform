@@ -202,9 +202,9 @@ describe("the step's reads", () => {
       // Said in "What it covers", under its part's own line.
       assert.match(covers(text), new RegExp(`\\n(Flows|Validation rules): [^\\n]*\\n\\n${sentence.replace(/[.?()]/g, "\\$&")}\\n`));
       assert.deepEqual(outputsOf(run.dir), outputsOf(clean.dir));
-      // Salesforce's reason rests in the step's checkpoint alone, and the record of the refusal is cleared.
+      // Salesforce's reason rests in no file at all since decision 702, and the record of the refusal is cleared.
       const files = filesIn(run.dir);
-      assert.deepEqual([...files.keys()].filter((f) => files.get(f)!.includes(REFUSAL)), ["checkpoints/component-changes.json"]);
+      assert.deepEqual([...files.keys()].filter((f) => files.get(f)!.includes(REFUSAL)), []);
       assert.ok(!existsSync(join(run.dir, "checkpoints", PARTIAL)));
     });
   }
@@ -237,9 +237,9 @@ describe("a run stopped at the budget after the flows' list was refused", () => 
     const stopped = await runHealthCheck({ ...options, transport: first });
     assert.equal(stopped.run.status, "stopped_budget");
     assert.deepEqual(lastChangeQueries(first), [FLOW_QUERY, RULE_QUERY]);
-    // What the stopped run keeps: the kind and Salesforce's reason, nothing read from the org.
+    // What the stopped run keeps: the kind and our reason, nothing read from the org, nor Salesforce's words (DECISIONS.md 702).
     const kept = readFileSync(join(stopped.dir, "checkpoints", PARTIAL), "utf8");
-    assert.deepEqual(kept.trim().split("\n").map((line) => JSON.parse(line)), [{ kind: "flows", reason: `INSUFFICIENT_ACCESS: ${REFUSAL}` }]);
+    assert.deepEqual(kept.trim().split("\n").map((line) => JSON.parse(line)), [{ kind: "flows", reason: "Flow couldn't be read, because the person who connected Salesforce doesn't have permission to see it." }]);
 
     // Resumed, the flows' list would be refused again if it were asked for.
     const second = new Simulator({ failQuery: refuse("Flow") });

@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { Calibration, RefusedRead } from "../schemas/index.ts";
-import { classifyError, isUnavailable, READ_AS_BEFORE, type QueryApi, type QueryOptions, type SalesforceClient, type SalesforceError } from "../salesforce/client.ts";
+import { refusalSentence } from "../salesforce/refusal-words.ts";
+import { classifyError, isUnavailable, type QueryApi, type QueryOptions, type SalesforceClient, type SalesforceError } from "../salesforce/client.ts";
 import type { ApexSourceStore } from "./apex-source.ts";
 import type { CodeLintTools } from "./code-lint.ts";
 
@@ -95,25 +96,25 @@ export function readName(source: SourceInfo): string {
     const object = /\bFROM\s+([A-Za-z0-9_]+)/i.exec(query)?.[1];
     return object ?? "This information";
   }
-  if (source.kind === "metadata") return "The org's set-up from the Metadata API";
+  if (source.kind === "metadata") return source.path.startsWith("Tooling API") ? "The same set-up through the Tooling API" : "The org's set-up from the Metadata API";
   if (/recordCount/.test(source.path)) return "The org's record counts";
   return "This information";
 }
 
 /**
- * Why a read Salesforce refused costs its checks (DECISIONS.md 702). A code the
- * engine took before 702 keeps the reason it gave then, so a run that worked
- * says what it said. Any other code gets our own sentence, naming what couldn't
- * be read and, where the code says, why; the code itself is noted for the run's
- * log and run.json, never for the customer.
+ * Why a read Salesforce refused costs its checks (DECISIONS.md 702): our own
+ * sentence, naming what couldn't be read and, where the code says, why, for
+ * every code alike. Salesforce's code and status are noted for the run's log
+ * and run.json. Its message isn't kept anywhere: it can quote a record's id, a
+ * value or a name, and none of that leaves the step's own read.
  */
-export function refusalReason(err: SalesforceError, what: string, asBefore: (err: SalesforceError) => string = (e) => readableReason(e.message)): string {
-  if (READ_AS_BEFORE.has(err.code)) return asBefore(err);
-  refusals.getStore()?.({ read: what, code: err.code.replace(/[^A-Z0-9_]/g, "").slice(0, 60) || "UNKNOWN", status: err.status });
+export function refusalReason(err: SalesforceError, given: string): string {
+  // Where we only know the kind of read, the object Salesforce named is better.
+  const named = /sObject type '([A-Za-z][A-Za-z0-9_]*)' is not supported/.exec(err.message)?.[1];
+  const what = named && !/^[A-Za-z][A-Za-z0-9_]*$/.test(given) ? named : given;
+  refusals.getStore()?.({ read: what, code: err.code.replace(/[^A-Za-z0-9_]/g, "").slice(0, 60) || "UNKNOWN", status: err.status });
   const kind = classifyError(err);
-  if (kind === "not_available") return `${what} couldn't be read, because it isn't available in this Salesforce edition or isn't switched on.`;
-  if (kind === "no_permission") return `${what} couldn't be read, because the person who connected Salesforce doesn't have permission to see it.`;
-  return `${what} couldn't be read, because Salesforce refused this read.`;
+  return refusalSentence(what, kind === "not_available" || kind === "no_permission" ? kind : "refused", err.code);
 }
 
 /**

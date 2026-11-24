@@ -2,7 +2,7 @@ import { XMLParser } from "fast-xml-parser";
 import { isUnavailable } from "../salesforce/client.ts";
 import { schemaExtractor } from "./configuration.ts";
 import { readKeyset } from "./opportunities.ts";
-import { batchRefused, daysBefore, soqlWindow, unavailable, type ExtractContext, type Extractor, type Sourced, type SourceInfo } from "./types.ts";
+import { batchRefused, daysBefore, refusalReason, soqlWindow, unavailable, type ExtractContext, type Extractor, type Sourced, type SourceInfo } from "./types.ts";
 import { licencesExtractor } from "./users.ts";
 
 // Marketing Cloud Account Engagement, formerly Pardot (roadmap Stage 6,
@@ -123,7 +123,7 @@ export const pardotLeadsExtractor: Extractor<PardotLeads> = {
         keys.map((key, i) => {
           const r = results[i]!;
           const source: SourceInfo = { kind: "soql", api: "rest", query: queries[key] };
-          return [key, r.ok ? { status: "ok", data: r.result.totalSize, source, truncated: false } : { status: "unavailable", reason: r.error.message, source }];
+          return [key, r.ok ? { status: "ok", data: r.result.totalSize, source, truncated: false } : { status: "unavailable", reason: refusalReason(r.error, "Lead"), source }];
         }),
       ) as PardotLeads["counts"];
     } catch (err) {

@@ -47,10 +47,10 @@ export const RetrieveFallback = z.object({ named: z.array(z.string()), reason: z
 export type RetrieveFallback = z.infer<typeof RetrieveFallback>;
 
 /**
- * A read Salesforce refused with a code the engine didn't take before
- * DECISIONS.md 702, so its checks were not measurable and the run went on:
- * the step, what was read, and Salesforce's code and status. For us, never
- * the customer, who reads only the plain reason.
+ * A read Salesforce refused, so its checks were not measurable and the run
+ * went on (DECISIONS.md 702): the step, what was read, and Salesforce's code
+ * and status. For us, never the customer, who reads only the plain reason.
+ * Salesforce's message isn't kept: it can quote a record's id or a value.
  */
 export const RefusedRead = z.object({ step: z.string().min(1), read: z.string().min(1), code: z.string().min(1), status: z.number().int() });
 export type RefusedRead = z.infer<typeof RefusedRead>;
@@ -91,7 +91,7 @@ export const Run = z.object({
   finishedAt: Timestamp.nullable(),
   // Absent when the wider retrieve worked, or wasn't tried.
   retrieveFallback: RetrieveFallback.optional(),
-  // Absent when Salesforce refused no read with a code new to 702.
+  // Absent when Salesforce refused no read.
   readsRefused: z.array(RefusedRead).optional(),
   // Every run stored before decision 688 was consultant-led, so absent reads as that.
   reviewMode: ReviewMode.default("consultant"),

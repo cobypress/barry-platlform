@@ -108,7 +108,7 @@ const SOURCES: Record<"metadata" | "apex" | "build", Source[]> = {
 };
 
 const PINS = {
-  metadata: { number: 1, hash: "ba60ab98393ce16e", constant: "METADATA_READING in src/handbook/detail.ts", reading: METADATA_READING, kind: "a flow or validation rule" },
+  metadata: { number: 1, hash: "93e56bf1ae06e77c", constant: "METADATA_READING in src/handbook/detail.ts", reading: METADATA_READING, kind: "a flow or validation rule" },
   apex: { number: 1, hash: "142d6e56dea8ff84", constant: "APEX_READING in src/extract/apex-touches.ts", reading: APEX_READING, kind: "an Apex class or trigger" },
   build: { number: 1, hash: "71bfb343fab8b85c", constant: "BUILD_READING in src/handbook/build.ts", reading: BUILD_READING, kind: "a flow, validation rule, Apex class or trigger" },
 };

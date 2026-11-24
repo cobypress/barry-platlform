@@ -1,8 +1,9 @@
 import { z } from "zod";
 import { said, type Said } from "../engine/org-words.ts";
 import { grouped } from "../engine/said-forms.ts";
+import { DEALS_UNREAD, lossFieldUnusable, tooManyUnfit } from "../salesforce/refusal-words.ts";
 import { schemaExtractor } from "./configuration.ts";
-import { batchRefused, daysBefore, readSoql, soqlDate, soqlDateTime, soqlUpTo, unavailable, upToItsSecond, type ExtractContext, type Extractor, type Sourced, type SourceInfo } from "./types.ts";
+import { batchRefused, daysBefore, readName, refusalReason, readSoql, soqlDate, soqlDateTime, soqlUpTo, unavailable, upToItsSecond, type ExtractContext, type Extractor, type Sourced, type SourceInfo } from "./types.ts";
 
 export type StageRow = { ApiName: string; MasterLabel: string; IsActive: boolean; IsClosed: boolean; IsWon: boolean; SortOrder: number };
 
@@ -57,6 +58,37 @@ export type HistoryRow = z.infer<typeof HistoryRow>;
  */
 export const BAD_ROW_SHARE = 0.01;
 
+/** The describe's types a loss reason can be read from. */
+const REASON_TYPES: ReadonlySet<string> = new Set(["string", "picklist", "multipicklist", "textarea", "combobox"]);
+
+/** Won, lost or open, from the row as Salesforce gave it, or null where its flags can't say. */
+function outcomeOf(row: unknown): "won" | "lost" | "open" | null {
+  const r = row as { IsClosed?: unknown; IsWon?: unknown } | null;
+  if (typeof r?.IsClosed !== "boolean" || typeof r?.IsWon !== "boolean") return null;
+  return !r.IsClosed ? "open" : r.IsWon ? "won" : "lost";
+}
+
+/**
+ * More than BAD_ROW_SHARE of the deals left out, overall or among the won, the
+ * lost or the open alone (DECISIONS.md 702): a fault that hits one outcome, such
+ * as lost deals alone, skews every rate between them long before it shows in
+ * the whole. A row whose outcome can't be told counts against each.
+ */
+function tooManyLeftOut(raw: unknown[], bad: Set<number>): boolean {
+  if (bad.size === 0) return false;
+  if (bad.size > raw.length * BAD_ROW_SHARE) return true;
+  const total = { won: 0, lost: 0, open: 0 };
+  const left = { won: 0, lost: 0, open: 0 };
+  const unknown = [...bad].filter((i) => outcomeOf(raw[i]) === null).length;
+  raw.forEach((row, i) => {
+    const outcome = outcomeOf(row);
+    if (!outcome) return;
+    total[outcome]++;
+    if (bad.has(i)) left[outcome]++;
+  });
+  return (["won", "lost", "open"] as const).some((o) => left[o] + unknown > (total[o] + unknown) * BAD_ROW_SHARE);
+}
+
 /** Rows that fit the schema, and how many didn't. */
 function rowsThatFit<T>(raw: unknown[], parse: (row: any) => { success: true; data: T } | { success: false }): { rows: T[]; bad: Set<number> } {
   const rows: T[] = [];
@@ -73,11 +105,6 @@ function rowsThatFit<T>(raw: unknown[], parse: (row: any) => { success: true; da
     else bad.add(i);
   });
   return { rows, bad };
-}
-
-/** The read's reason when too many of its rows didn't fit (DECISIONS.md 702). */
-function tooManyUnfit(bad: number, total: number, what: string): string {
-  return `${bad.toLocaleString("en-GB")} of the ${total.toLocaleString("en-GB")} ${what} Salesforce gave us weren't in a shape we could read, more than 1 in 100, so figures from them would mislead.`;
 }
 
 /** What every figure from the deals says when rows were left out (DECISIONS.md 702). Nothing when none were. */
@@ -137,6 +164,8 @@ export type OpportunityExtract = {
   history: Sourced<HistoryRow[]>;
   multiCurrency: boolean;
   lossReasonField: string | null;
+  /** Why the calibration's loss reason field isn't read, when it exists but can't hold a reason (DECISIONS.md 702). */
+  lossReasonUnusable?: string;
   windowFrom: string;
   /**
    * What happened after the run's date (DECISIONS.md 465). `madeSince` is how
@@ -277,7 +306,13 @@ export const opportunitiesExtractor: Extractor<OpportunityExtract> = {
     // Some of these fields only exist in some orgs, so ask only for what's there.
     const available = new Set(schema.data.fields.map((f) => f.name));
     const lossField = ctx.calibration.fields.lossReason;
-    const lossReasonField = lossField && available.has(lossField) ? lossField : null;
+    // A field that can't hold text, a number or a checkbox say, is never read as
+    // a reason: its rows would fail the deal's shape for lost deals alone, and
+    // leaving those out would lift the win rate (DECISIONS.md 702).
+    const lossType = lossField ? schema.data.fields.find((f) => f.name === lossField)?.type : undefined;
+    const lossUsable = lossType === undefined || REASON_TYPES.has(lossType);
+    const lossReasonField = lossField && available.has(lossField) && lossUsable ? lossField : null;
+    const unusable = lossField && available.has(lossField) && !lossUsable ? { lossReasonUnusable: lossFieldUnusable(lossField) } : {};
     const fields = [
       "Id, Name, AccountId, OwnerId, StageName, Amount, CloseDate, CreatedDate, IsClosed, IsWon, LastActivityDate",
       ...["Type", "LeadSource", "CurrencyIsoCode"].filter((f) => available.has(f)),
@@ -286,7 +321,7 @@ export const opportunitiesExtractor: Extractor<OpportunityExtract> = {
     ].join(", ");
 
     const opportunitySource: SourceInfo = { kind: "soql", api: "rest", query: `SELECT ${fields} FROM Opportunity WHERE ${scope}` };
-    const base = { multiCurrency: available.has("CurrencyIsoCode"), lossReasonField, windowFrom };
+    const base = { multiCurrency: available.has("CurrencyIsoCode"), lossReasonField, windowFrom, ...unusable };
     let opportunities: OpportunityRow[];
     const names: Record<string, string> = {};
     const leftOut: NonNullable<OpportunityExtract["leftOut"]> = {};
@@ -295,7 +330,7 @@ export const opportunitiesExtractor: Extractor<OpportunityExtract> = {
       raw = await readKeyset<{ Id: string } & Record<string, any>>(ctx, "opportunities", fields, "Opportunity", scope);
     } catch (err) {
       const failed = unavailable<OpportunityRow[]>(opportunitySource, err);
-      return { ...base, opportunities: failed, history: { status: "unavailable", reason: "Opportunity couldn't be read", source: historySource } };
+      return { ...base, opportunities: failed, history: { status: "unavailable", reason: DEALS_UNREAD, source: historySource } };
     }
     {
       const fit = rowsThatFit(raw, (r) =>
@@ -317,9 +352,9 @@ export const opportunitiesExtractor: Extractor<OpportunityExtract> = {
           LossReason: lossReasonField ? (r[lossReasonField] ?? null) : null,
         }),
       );
-      if (fit.bad.size > raw.length * BAD_ROW_SHARE) {
+      if (tooManyLeftOut(raw, fit.bad)) {
         const reason = tooManyUnfit(fit.bad.size, raw.length, "deals");
-        return { ...base, opportunities: { status: "unavailable", reason, source: opportunitySource }, history: { status: "unavailable", reason: "Opportunity couldn't be read", source: historySource } };
+        return { ...base, opportunities: { status: "unavailable", reason, source: opportunitySource }, history: { status: "unavailable", reason: DEALS_UNREAD, source: historySource } };
       }
       opportunities = fit.rows;
       raw.forEach((r, i) => {
@@ -451,7 +486,7 @@ export const crmHealthExtractor: Extractor<CrmHealth> = {
       const source: SourceInfo = { kind: "soql", api: "rest", query: queries[key]! };
       counts[key] = result.ok
         ? { status: "ok", data: result.result.totalSize, source, truncated: false }
-        : { status: "unavailable", reason: result.error.message, source };
+        : { status: "unavailable", reason: refusalReason(result.error, readName(source)), source };
     });
     return {
       counts,

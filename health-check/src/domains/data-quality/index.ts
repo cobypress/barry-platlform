@@ -299,6 +299,8 @@ const lossReasonMissing: Rule = {
     const extract = ctx.data(opportunitiesExtractor);
     const data = loadPipeline(ctx);
     if (data.status !== "ok") return { outcome: "not_measurable", reason: data.reason, evidence: data.evidence };
+    // A field that exists but can't hold a reason says so (DECISIONS.md 702).
+    if (extract.lossReasonUnusable) return { outcome: "not_measurable", reason: extract.lossReasonUnusable, evidence: data.evidence };
     if (!extract.lossReasonField) {
       return { outcome: "not_measurable", reason: said`The calibration doesn't name a loss reason field that exists on Opportunity, so we can't tell a blank reason from a missing field.`, evidence: data.evidence };
     }

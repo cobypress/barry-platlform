@@ -1,6 +1,6 @@
 import { SF_DEFAULTS } from "../config.ts";
 import { isUnavailable, SalesforceError } from "../salesforce/client.ts";
-import { batchRefused, monthsBefore, readableReason, readSoql, soqlString, soqlUpTo, soqlWindow, type ConnectedUser, type ExtractContext, type Extractor, type Sourced } from "./types.ts";
+import { batchRefused, monthsBefore, readableReason, readName, readSoql, refusalReason, soqlString, soqlUpTo, soqlWindow, type ConnectedUser, type ExtractContext, type Extractor, type Sourced } from "./types.ts";
 
 // Record-type use (DECISIONS.md 497). The step reads its own list of record
 // types, because the routes the engine already has disagree on what a type is
@@ -199,7 +199,7 @@ export const recordTypeUseExtractor: Extractor<RecordTypeUse> = {
       // whatever the code, as the ownership counts have it (src/extract/users.ts):
       // it costs that object's types and says so, where stopping would fail a
       // whole health check on one odd object.
-      for (const result of answers) results.push(result.ok ? { ok: true, records: result.result.records, truncated: result.result.truncated } : { ok: false, reason: readableReason(result.error.message) });
+      answers.forEach((result, j) => results.push(result.ok ? { ok: true, records: result.result.records, truncated: result.result.truncated } : { ok: false, reason: refusalReason(result.error, readName({ kind: "soql", api: "rest", query: chunk[j]! })) }));
     }
     objects.forEach((object, i) => {
       const missing = { ok: false as const, reason: "No answer came back for this count." };

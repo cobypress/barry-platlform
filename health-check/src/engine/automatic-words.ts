@@ -4,6 +4,7 @@ import { replaceMarked, type Marked } from "../fix/marked.ts";
 import type { Finding, Metric, MetricOrgWords } from "../schemas/index.ts";
 import type { MarkedSentence } from "./org-words.ts";
 import { orgWordsOf, saidMade, spansIfCurrent, textSha256 } from "./org-words.ts";
+import { passedOnSpans } from "./passed-on.ts";
 
 // What a run whose calibration was read from the org's settings says, and how
 // its texts are marked (DECISIONS.md 693). An automatic run's customer bought
@@ -135,7 +136,8 @@ export function engineOwn(text: string, orgValues: ReadonlySet<string>): boolean
  * else unknown.
  */
 export function metricMarks(text: string, orgValues: ReadonlySet<string> = new Set()): MarkedSentence | null {
-  const spans = saidMade(text) ? orgWordsOf(text) : engineOwn(text, orgValues) ? [] : null;
+  // A refused read's reason passed on is known by its words (DECISIONS.md 702).
+  const spans = saidMade(text) ? orgWordsOf(text) : engineOwn(text, orgValues) ? [] : passedOnSpans(text);
   return spans ? { spans: spans.map((s) => ({ ...s })), textSha256: textSha256(text) } : null;
 }
 

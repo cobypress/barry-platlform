@@ -564,7 +564,7 @@ describe("when the metadata couldn't be read (decision 454)", () => {
     for (const part of [h.flows, h.validationRules]) {
       assert.equal(part.status, "unavailable");
       assert.ok(part.status === "unavailable");
-      assert.match(part.reason, /^Metadata couldn't be retrieved: The Metadata API refused this connection .*FlowDefinition isn't available/);
+      assert.match(part.reason, /^Metadata couldn't be retrieved: The Metadata API refused this connection, and .*FlowDefinition isn't available/);
     }
   });
 

@@ -71,7 +71,7 @@ export const fieldDescribeExtractor: Extractor<Record<string, DescribedObject>> 
       } catch (err) {
         // A budget stop or a fault isn't a fact about the org, so it isn't saved.
         if (!isUnavailable(err)) throw err;
-        const reason = refusalReason(err, object, (e) => e.message);
+        const reason = refusalReason(err, object);
         result = ABSENT_CODES.has(err.code) ? { status: "absent", reason } : { status: "unknown", reason };
       }
       ctx.partial.append<DescribeRow>(PARTIAL_KEY, [{ Id: object, result }]);
@@ -88,7 +88,7 @@ export async function describeObject(ctx: ExtractContext, object: string): Promi
     return { status: "ok", fields: d.fields.map((f) => f.name.toLowerCase()), relationships: d.fields.flatMap((f) => (f.relationshipName ? [f.relationshipName.toLowerCase()] : [])) };
   } catch (err) {
     if (!isUnavailable(err)) throw err;
-    const reason = refusalReason(err, object, (e) => e.message);
+    const reason = refusalReason(err, object);
     return ABSENT_CODES.has(err.code) ? { status: "absent", reason } : { status: "unknown", reason };
   }
 }

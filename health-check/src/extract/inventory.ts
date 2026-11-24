@@ -177,7 +177,7 @@ export const fillRatesExtractor: Extractor<Sourced<FillRateData>> = {
         ctx.client.budget.assertCanSpend(chunk.length);
         try {
           const answers = await ctx.client.queryBatch<Record<string, number>>(chunk);
-          results.push(...answers.map((a) => (a.ok ? { ok: true as const, row: a.result.records[0] ?? {} } : { ok: false as const, reason: readableReason(a.error.message) })));
+          results.push(...answers.map((a, j) => (a.ok ? { ok: true as const, row: a.result.records[0] ?? {} } : { ok: false as const, reason: refusalReason(a.error, readName({ kind: "soql", api: "rest", query: chunk[j]! })) })));
         } catch (err) {
           // A budget stop sent nothing, and goes up from here.
           const reason = failedCount(err);

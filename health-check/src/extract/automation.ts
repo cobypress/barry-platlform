@@ -97,8 +97,9 @@ export const metadataExtractor: Extractor<Sourced<MetadataBundle>> = {
     } catch (err) {
       const why = err instanceof ToolingGapError ? err.message : isUnavailable(err) ? refusalReason(err, "The same set-up through the Tooling API") : null;
       if (why === null) throw err;
-      const first = readableReason((retrieveError as Error).message);
-      return { status: "unavailable", reason: `The Metadata API refused this connection (${first}), and reading the same through the Tooling API didn't work either: ${why}`, source: TOOLING_SOURCE };
+      // Salesforce's own words for the first refusal are kept for us alone (DECISIONS.md 702).
+      if (isUnavailable(retrieveError)) refusalReason(retrieveError, "The org's set-up from the Metadata API");
+      return { status: "unavailable", reason: `The Metadata API refused this connection, and reading the same through the Tooling API didn't work either: ${why}`, source: TOOLING_SOURCE };
     }
   },
 };

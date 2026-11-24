@@ -105,7 +105,7 @@ async function optional<T>(bundle: MetadataBundle, kind: string, read: () => Pro
   } catch (err) {
     if (!isUnavailable(err)) throw err;
     bundle.unsearched!.push(kind);
-    if (unread) markUnread(bundle, unread, refusalReason(err, kind));
+    if (unread) markUnread(bundle, unread, refusalReason(err, "This information"));
     return null;
   }
 }
