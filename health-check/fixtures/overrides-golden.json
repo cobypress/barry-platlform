@@ -12755,7 +12755,7 @@
      {
       "kind": "soql",
       "api": "rest",
-      "query": "SELECT ApiName, MasterLabel, IsActive, IsClosed, IsWon, SortOrder FROM OpportunityStage",
+      "query": "SELECT ApiName, MasterLabel, IsActive, IsClosed, IsWon, SortOrder, DefaultProbability FROM OpportunityStage",
       "count": 9,
       "dateRange": null,
       "exclusions": [],
@@ -16839,7 +16839,7 @@
      {
       "kind": "soql",
       "api": "rest",
-      "query": "SELECT ApiName, MasterLabel, IsActive, IsClosed, IsWon, SortOrder FROM OpportunityStage",
+      "query": "SELECT ApiName, MasterLabel, IsActive, IsClosed, IsWon, SortOrder, DefaultProbability FROM OpportunityStage",
       "count": 10,
       "dateRange": null,
       "exclusions": [],
@@ -16884,7 +16884,7 @@
      {
       "kind": "soql",
       "api": "rest",
-      "query": "SELECT ApiName, MasterLabel, IsActive, IsClosed, IsWon, SortOrder FROM OpportunityStage",
+      "query": "SELECT ApiName, MasterLabel, IsActive, IsClosed, IsWon, SortOrder, DefaultProbability FROM OpportunityStage",
       "count": 10,
       "dateRange": null,
       "exclusions": [],

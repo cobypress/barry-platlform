@@ -374,3 +374,12 @@ c) In a multi-currency org, is `Organization.DefaultCurrencyIsoCode` the corpora
 d) Does any Salesforce locale name a country whose currency the table in `src/connect/locale-currency.ts` maps wrongly? It only suggests, but a wrong suggestion asks the wrong question. The table leaves out countries with two currencies in everyday use or a changeover near now (Haiti, El Salvador, Namibia and Bulgaria's euro among them).
 e) On an org where `DefaultCurrencyIsoCode` fails for another reason than `INVALID_FIELD`, is the opportunities' describe without `CurrencyIsoCode` a sure sign of one currency? The run relies on it to show amounts unnamed.
 
+
+## Stage probabilities (DECISIONS.md 706)
+
+The engine's stage read asks for `OpportunityStage.DefaultProbability`, a stage setting, and reads the stages again without it only if Salesforce refuses the field (its "No such column", `INVALID_FIELD` or an access refusal); only `pipe.probability-vs-reality` and its metric then go unmeasured, and any other failure is the stage read's own, as before. To settle on a real org, never a customer's without the owner's word:
+
+a) Is `DefaultProbability` readable on `OpportunityStage` by the connected user in every edition we read, Professional Edition with API access among them? Salesforce documents it as a standard field of the object; unconfirmed here.
+b) What does it hold for closed stages (100 for won and 0 for lost by default, or null), and for a stage a sales process doesn't use? Only open stages are compared, so closed stages' values change nothing, but the metric lists what it reads.
+c) A stage has one default probability, whatever the sales process, and a deal's own `Probability` can be changed by hand. Do orgs that change it by hand do so often enough that the stage's setting no longer says what their forecasts use? The comparison reads only the stage's setting, and says so.
+d) What does Salesforce answer when the connected user can't see `DefaultProbability` through field-level security: `INVALID_FIELD`, or an access code? The engine decides on the code, never the words, and works round `INVALID_FIELD`, `INSUFFICIENT_ACCESS` and `INSUFFICIENT_ACCESS_OR_READONLY`; another code would fail the stage read as any refusal did before.

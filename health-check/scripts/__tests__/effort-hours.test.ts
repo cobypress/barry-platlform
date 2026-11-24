@@ -83,8 +83,8 @@ describe("the hours table exported for the owner's review (decision 628)", () =>
   });
 });
 
-/** PMD's six groups (decision 673) and the path insights (decision 703), first estimated after the trim. */
-const ADDED_AFTER_TRIM: readonly string[] = ["tech.lint-complexity", "tech.lint-data-access", "tech.lint-injection", "tech.lint-limits", "tech.lint-swallowed-errors", "tech.lint-tests", "pipe.path-insights"];
+/** PMD's six groups (decision 673), the path insights (decision 703) and the stage probabilities (706), first estimated after the trim. */
+const ADDED_AFTER_TRIM: readonly string[] = ["tech.lint-complexity", "tech.lint-data-access", "tech.lint-injection", "tech.lint-limits", "tech.lint-swallowed-errors", "tech.lint-tests", "pipe.path-insights", "pipe.probability-vs-reality"];
 
 /** The 44 rules whose figures 88% rounds back to themselves (decision 636). */
 const UNCHANGED_BY_ROUNDING = [

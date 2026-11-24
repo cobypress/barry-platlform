@@ -2,15 +2,62 @@ import { z } from "zod";
 import { schemaExtractor } from "./configuration.ts";
 import { daysBefore, readSoql, soqlDate, soqlDateTime, soqlUpTo, unavailable, upToItsSecond, type ExtractContext, type Extractor, type Sourced, type SourceInfo } from "./types.ts";
 
-export type StageRow = { ApiName: string; MasterLabel: string; IsActive: boolean; IsClosed: boolean; IsWon: boolean; SortOrder: number };
+/** A stage's settings. `DefaultProbability` is null where it wasn't read, or the stage has none (DECISIONS.md 706). */
+export type StageRow = { ApiName: string; MasterLabel: string; IsActive: boolean; IsClosed: boolean; IsWon: boolean; SortOrder: number; DefaultProbability: number | null };
 
 /** The stage read, shared with the connect job's read for the calibration screen (DECISIONS.md 611). */
 export const STAGES_SOQL = "SELECT ApiName, MasterLabel, IsActive, IsClosed, IsWon, SortOrder FROM OpportunityStage";
+/**
+ * The engine's own stage read: the same, with the probability set on each stage
+ * (DECISIONS.md 706). A stage setting, no record data. The connect job keeps
+ * STAGES_SOQL, so it reads nothing new.
+ */
+export const ENGINE_STAGES_SOQL = "SELECT ApiName, MasterLabel, IsActive, IsClosed, IsWon, SortOrder, DefaultProbability FROM OpportunityStage";
+// Here, beside the one read that uses it, so it stays clear of the imports other work changes.
+import { SalesforceError } from "../salesforce/client.ts";
 
-export const stagesExtractor: Extractor<Sourced<StageRow[]>> = {
+/** How the stage read says it went without the probabilities. */
+export const PROBABILITY_FIELD = "OpportunityStage.DefaultProbability";
+
+/** Why the probabilities weren't read: the field refused as not there for the connected user, or refused for access. */
+export type ProbabilityRefusal = "invalid_field" | "no_access";
+/** The stage read, and when the probabilities were refused, which way. */
+export type StagesRead = Sourced<StageRow[]> & { probabilityRefused?: ProbabilityRefusal };
+
+/**
+ * The class of a refusal that is about the field, from Salesforce's own error
+ * code, never its words (which another part of the engine may reword). A
+ * missing or hidden field is INVALID_FIELD; a refusal for access is one of the
+ * access codes. Anything else, a time-out, an unknown exception or an outage
+ * among them, isn't the field's doing, so the read fails as it did before the
+ * field was asked for.
+ */
+export function probabilityRefusal(err: unknown): ProbabilityRefusal | null {
+  if (!(err instanceof SalesforceError)) return null;
+  if (err.code === "INVALID_FIELD") return "invalid_field";
+  if (err.code === "INSUFFICIENT_ACCESS" || err.code === "INSUFFICIENT_ACCESS_OR_READONLY") return "no_access";
+  return null;
+}
+
+export const stagesExtractor: Extractor<StagesRead> = {
   id: "opportunity-stages",
-  version: 1,
-  run: (ctx) => readSoql<StageRow>(ctx, STAGES_SOQL),
+  // 2: the probabilities (DECISIONS.md 706), so a checkpoint from 1 is read again.
+  version: 2,
+  async run(ctx) {
+    // Read as readSoql reads, but catching the error here, so the choice is made on its code.
+    const source: SourceInfo = { kind: "soql", api: "rest", query: ENGINE_STAGES_SOQL };
+    try {
+      const result = await ctx.client.query<StageRow>(ENGINE_STAGES_SOQL);
+      return { status: "ok", data: result.records, source, truncated: result.truncated };
+    } catch (err) {
+      // Only a refusal of the field is worked round: the stages are read as before without it, and only the
+      // comparison that needs them goes without. Any other failure is the stage read's own, exactly as readSoql has it.
+      const refused = probabilityRefusal(err);
+      if (!refused) return unavailable<StageRow[]>(source, err);
+      const plain = await readSoql<Omit<StageRow, "DefaultProbability">>(ctx, STAGES_SOQL);
+      return plain.status === "ok" ? { ...plain, data: plain.data.map((r) => ({ ...r, DefaultProbability: null })), missingFields: [PROBABILITY_FIELD], probabilityRefused: refused } : plain;
+    }
+  },
 };
 
 // Every pipeline number comes from these two rows, so they're validated on the

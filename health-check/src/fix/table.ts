@@ -392,6 +392,11 @@ export const FIX_TABLE: Readonly<Record<string, FixRule>> = {
     hours: fixed(2, 4, PROCESS),
     prompt: decide("paths", ["From opportunity history, list the closed deals on the path named and on the usual path, by team and record type.", "Set out what the deals on each path have in common, and what happens in the stage named.", "Prepare the options for the sales leaders: a change to the stage's exit criteria, or to when a stage can be left out."], ["The comparison and the options are ready for the sales leaders to agree."]),
   },
+  "pipe.probability-vs-reality": {
+    complexity: "simple",
+    hours: fixed(2, 4, PROCESS),
+    prompt: decide("stage probabilities", ["List each open stage with the probability set on it, how many closed deals reached it and how many of those were won, by record type.", "Set out what each stage's probability is used for: weighted pipeline, forecasts, reports and dashboards.", "Prepare the comparison for the sales leaders, without proposing new values, so they can agree what each probability is meant to say."], ["The comparison is ready for the sales leaders to agree what each probability means."]),
+  },
   "pipe.dead-end-stage": {
     complexity: "moderate",
     hours: fixed(2, 4, "Setting a time limit for the stage and the report that shows deals past it"),
