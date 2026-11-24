@@ -1,5 +1,5 @@
 import { classifyError, isUnavailable, NotInOrgError, SalesforceError, type MetadataMember } from "../salesforce/client.ts";
-import { editionPointer } from "../salesforce/refusal-words.ts";
+import { APEX_POINTER } from "../salesforce/refusal-words.ts";
 import { redactSecrets } from "../privacy/secrets.ts";
 import { scanApex, type ApexScan } from "./apex-scan.ts";
 import { selectApexSource, type SourceRow } from "./apex-source.ts";
@@ -110,7 +110,7 @@ export const metadataExtractor: Extractor<Sourced<MetadataBundle>> = {
       // Named `.reason`, so the words before it are known as ours and a refusal sentence after them is too (DECISIONS.md 702).
       const tooling = { reason: why };
       // An edition with no Metadata API was never asked, so nothing refused it (DECISIONS.md 710).
-      if (retrieveError instanceof NotInOrgError) return { status: "unavailable", reason: `Professional Edition doesn't include the Metadata API, and reading the same through the Tooling API didn't work either: ${tooling.reason}`, source: TOOLING_SOURCE };
+      if (retrieveError instanceof NotInOrgError) return { status: "unavailable", reason: `Professional Edition only opens the Metadata API to security-reviewed apps, and reading the same through the Tooling API didn't work either: ${tooling.reason}`, source: TOOLING_SOURCE };
       return { status: "unavailable", reason: `The Metadata API refused this connection, and reading the same through the Tooling API didn't work either: ${tooling.reason}`, source: TOOLING_SOURCE };
     }
   },
@@ -268,7 +268,7 @@ export const apexExtractor: Extractor<ApexData> = {
     const org = ctx.get(orgExtractor);
     const edition = org?.status === "ok" ? org.data[0]?.OrganizationType : undefined;
     const noApex = <T>(rows: Sourced<T>): Sourced<T> =>
-      rows.status === "unavailable" && edition === "Professional Edition" && /isn't available in this org/.test(rows.reason) ? { ...rows, reason: editionPointer("Apex") } : rows;
+      rows.status === "unavailable" && edition === "Professional Edition" && /isn't available in this org/.test(rows.reason) ? { ...rows, reason: APEX_POINTER } : rows;
     const classRows = stripBodies(classes.rows, "ApexClass", references);
     const triggerRows = stripBodies(triggers.rows, "ApexTrigger", references);
     // Kept only once every page of both is read, so a step stopped part way and

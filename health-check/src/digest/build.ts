@@ -1,5 +1,4 @@
-import { editionNoteOf } from "../extract/org-profile.ts";
-import { isEditionNote } from "../salesforce/refusal-words.ts";
+import { editionNoteFor, isEditionNote } from "../narrative/edition-note.ts";
 import { createHash } from "node:crypto";
 import { averageBeside } from "../domains/average.ts";
 import { CURRENCY_NOT_NAMED } from "../engine/currency.ts";
@@ -347,7 +346,7 @@ export function buildDigest({ report, pseudonyms, inventory, madeAt }: DigestFor
     },
     withheldNames: withheldNames(inventory, pseudonyms),
     // Once for the run, not on each check the edition left unmeasured (DECISIONS.md 710).
-    ...(editionNoteOf(run.orgProfile) ? { editionNote: editionNoteOf(run.orgProfile)! } : {}),
+    ...(editionNoteFor(report) ? { editionNote: editionNoteFor(report)! } : {}),
   };
   orgValues = orgValuesOf({ metrics: report.metrics, findings: report.input.findings, stages: report.input.calibration.stages.map((s) => s.name) });
   const guarded = guardDigest(raw, pseudonyms);

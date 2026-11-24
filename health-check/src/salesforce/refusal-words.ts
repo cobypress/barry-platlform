@@ -39,54 +39,33 @@ export function refusalSentence(what: string, kind: RefusalKind, code = ""): str
 }
 
 /**
- * What an edition doesn't include, in a customer's words (DECISIONS.md 710):
- * each is a fact from Salesforce's own documentation, never inferred from a
- * read that came back empty. In the order the run's note names them.
+ * A check's reason when the run didn't use the Metadata API because the org's
+ * edition only opens it to security-reviewed apps (DECISIONS.md 710): short,
+ * because it stands on several checks and the run's note says the rest once.
  */
-export const EDITION_LACKS = ["Apex", "the Metadata API", "s-controls", "Sites"] as const;
-export type EditionLack = (typeof EDITION_LACKS)[number];
+export const METADATA_POINTER = "Needs the Metadata API, which Professional Edition only opens to security-reviewed apps.";
 
-/**
- * A check's reason when the org's edition doesn't include what it reads
- * (DECISIONS.md 710): short, because it stands on many checks and the run's
- * note (editionNote) says the rest once.
- */
-export function editionPointer(lacks: EditionLack): string {
-  return `Needs ${lacks}${EDITION_POINTER_STEM}`;
-}
-
-/** What every pointer ends with, so a page that prints one can be found. */
-export const EDITION_POINTER_STEM = ", which Professional Edition doesn't include.";
+/** The Apex step's reason when a Professional Edition org answers that it has no Apex of its own (DECISIONS.md 710). */
+export const APEX_POINTER = "Needs Apex of the org's own, which Professional Edition doesn't allow.";
 
 /** The Apex step's sentence before 710, still read back from runs that hold it. */
 export const NO_APEX_IN_EDITION = "Professional Edition has no Apex, so there's no code to check.";
 
-/** The metadata step's reason when the Tooling route failed too, on an org whose edition has no Metadata API (DECISIONS.md 710). */
-export const TOOLING_AFTER_EDITION = "Professional Edition doesn't include the Metadata API, and reading the same through the Tooling API didn't work either: ";
+/** The metadata step's reason when the Tooling route failed too, on an org whose edition keeps the Metadata API from us (DECISIONS.md 710). */
+export const TOOLING_AFTER_EDITION = "Professional Edition only opens the Metadata API to security-reviewed apps, and reading the same through the Tooling API didn't work either: ";
 
-/**
- * The run's one note about its edition (DECISIONS.md 710), for the digest and
- * each page that shows a check it left unmeasured; null when the edition left
- * nothing out.
- */
-export function editionNote(lacks: readonly EditionLack[]): string | null {
-  const named = EDITION_LACKS.filter((l) => lacks.includes(l));
-  if (named.length === 0) return null;
-  const list = named.length === 1 ? named[0]! : `${named.slice(0, -1).join(", ")} or ${named.at(-1)}`;
-  return `This org is on Professional Edition, which doesn't include ${list}. Checks that need ${named.length === 1 ? "it" : "them"} are marked not measured.`;
-}
+/** The run's note about its edition (DECISIONS.md 710), said once for the run and on each page that needs it. */
+export const EDITION_NOTE = "This org is on Professional Edition, which only opens the Metadata API to security-reviewed apps, so checks that need it are marked not measured.";
+
+/** What a page that prints a check the edition left unmeasured holds, so the note can be put beside it. */
+export const EDITION_MARKS: readonly string[] = [METADATA_POINTER, TOOLING_AFTER_EDITION];
 
 /**
  * Whether a not measurable reason says the org's edition is why (DECISIONS.md
  * 710), wherever in it the sentence sits: a rule may put its own words first.
  */
 export function editionIsWhy(reason: string): boolean {
-  return POINTER_ANYWHERE.test(reason) || reason.includes(NO_APEX_IN_EDITION) || reason.startsWith(TOOLING_AFTER_EDITION);
-}
-
-/** Whether a text is exactly a note editionNote writes. */
-export function isEditionNote(text: string): boolean {
-  return EDITION_NOTE.test(text) && editionNote(EDITION_LACKS.filter((l) => text.includes(l === "Apex" ? "include Apex" : l))) === text;
+  return [METADATA_POINTER, APEX_POINTER, NO_APEX_IN_EDITION, TOOLING_AFTER_EDITION].some((s) => reason.includes(s));
 }
 
 /** The org's limits, refused at connect. */
@@ -114,12 +93,8 @@ const ENDINGS = Object.values(BECAUSE).map((b) => b.replace(/[.*+?^${}()|[\]\\]/
 const SENTENCE = new RegExp(`^(.+?) couldn't be read, because (?:${ENDINGS})\\.$`);
 const NOT_THERE = /^(.+?) isn't available in this org, or to the connected user\.$/;
 const UNFIT = /^[\d,]+ of the [\d,]+ (?:(?:won |lost |open )?deals|entries in the deals' stage history) Salesforce gave us weren't in a shape we could read, more than 1 in 100, so figures from them would mislead\.$/;
-const LACKS = EDITION_LACKS.map((l) => l.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
-const POINTER = new RegExp(`^Needs (?:${LACKS}), which Professional Edition doesn't include\\.$`);
-const POINTER_ANYWHERE = new RegExp(`Needs (?:${LACKS}), which Professional Edition doesn't include\\.`);
-const EDITION_NOTE = /^This org is on Professional Edition, which doesn't include [^.]+\. Checks that need (?:it|them) are marked not measured\.$/;
 const LOSS_FIELD = /^The loss reason field (.+?) isn't a text or picklist field, so it can't hold a reason and isn't read\.$/;
-const WHOLE: ReadonlySet<string> = new Set([LIMITS_NO_PERMISSION, LIMITS_REFUSED, DEALS_UNREAD, NO_APEX_IN_EDITION]);
+const WHOLE: ReadonlySet<string> = new Set([LIMITS_NO_PERMISSION, LIMITS_REFUSED, DEALS_UNREAD, NO_APEX_IN_EDITION, METADATA_POINTER, APEX_POINTER]);
 
 /**
  * The org's words in one of these sentences, as spans, or null when the text
@@ -127,7 +102,7 @@ const WHOLE: ReadonlySet<string> = new Set([LIMITS_NO_PERMISSION, LIMITS_REFUSED
  * marked as the org's whenever it could be a name the org chose.
  */
 export function refusalSpans(text: string): Array<{ start: number; end: number }> | null {
-  if (WHOLE.has(text) || UNFIT.test(text) || POINTER.test(text)) return [];
+  if (WHOLE.has(text) || UNFIT.test(text)) return [];
   const sentence = SENTENCE.exec(text) ?? NOT_THERE.exec(text);
   if (sentence) {
     const what = sentence[1]!;

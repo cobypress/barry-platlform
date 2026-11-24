@@ -615,7 +615,7 @@ function inventorySlide(r: Render, label: string, metric: Metric | undefined): S
   const lede = `We counted ${m.value} objects: ${own}.${automation}`;
   const notes = [
     `Ranked by how much automation runs on each object, then by custom fields.${all.length > shown.length ? " Only the busiest are shown here. The raw notes list every object." : ""} No description means no description field, or for an Apex trigger, no comment in the code.`,
-    ...m.exclusions.filter((e) => /couldn't/.test(e)).map((e) => `Not counted: ${e}.`),
+    ...m.exclusions.filter((e) => /couldn't|doesn't allow/.test(e)).map((e) => `Not counted: ${e.replace(/\.$/, "")}.`),
   ];
   return {
     classes: "tight",

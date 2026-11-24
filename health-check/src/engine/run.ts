@@ -192,7 +192,8 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
   const now = options.now ?? new Date();
   assertOutsideGit(options.outDir);
 
-  const budget = new ApiBudget({ stopAtShare: options.stopAtShare ?? BUDGET_DEFAULTS.stopAtShare });
+  // An automatic run spends at most a tenth of the org's daily limit as well (DECISIONS.md 710).
+  const budget = new ApiBudget({ stopAtShare: options.stopAtShare ?? BUDGET_DEFAULTS.stopAtShare, ...(options.reviewMode === "automatic" ? { maxShareOfLimit: BUDGET_DEFAULTS.automaticShareOfLimit } : {}) });
   const client = await SalesforceClient.connect(provider, { budget, transport: options.transport, apiVersion: options.apiVersion, sleep: options.transport ? async () => {} : undefined });
 
   if (calibration.orgId && calibration.orgId.slice(0, 15) !== client.orgId.slice(0, 15)) {

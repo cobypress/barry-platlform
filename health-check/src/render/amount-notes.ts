@@ -1,6 +1,6 @@
 import { CURRENCY_UNKNOWN, NO_MONEY_FIGURE } from "../engine/currency.ts";
-import { editionNoteOf } from "../extract/org-profile.ts";
-import { EDITION_POINTER_STEM } from "../salesforce/refusal-words.ts";
+import { editionNoteFor } from "../narrative/edition-note.ts";
+import { EDITION_MARKS } from "../salesforce/refusal-words.ts";
 import type { BuiltReport } from "../narrative/sections.ts";
 import type { Finding } from "../schemas/index.ts";
 import { HOURS_NOT_NAMED, type ValueModel } from "../value/model.ts";
@@ -31,19 +31,19 @@ export function withAmountNotes(report: BuiltReport, make: (report: BuiltReport)
 
 /**
  * The run's edition note (DECISIONS.md 710) once on every page that prints a
- * check the edition left unmeasured: each such check says only "Needs X,
- * which Professional Edition doesn't include.", and the note says the rest.
+ * check the edition left unmeasured: each such check says only that it needs
+ * the Metadata API, and the note says the rest once.
  * With no note, the document exactly as it was.
  */
 export function withEditionNote(report: BuiltReport, html: string): string {
-  const note = editionNoteOf(report.input.run.orgProfile);
+  const note = editionNoteFor(report);
   if (!note) return html;
-  const pointer = escapeXml(EDITION_POINTER_STEM);
+  const marks = EDITION_MARKS.map(escapeXml);
   const said = escapeXml(note);
   const line = `<p class="note edition-note">${said}</p>`;
   return html
     .split(PAGE)
-    .map((part, i) => (i > 0 && part.includes(pointer) && !part.includes(said) ? noted(part, line) : part))
+    .map((part, i) => (i > 0 && marks.some((m) => part.includes(m)) && !part.includes(said) ? noted(part, line) : part))
     .join("");
 }
 

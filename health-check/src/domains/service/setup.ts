@@ -67,7 +67,7 @@ const escalation: Rule = {
     if (rules.status !== "ok") {
       // Entitlement processes escalate too, so with one active the gap doesn't matter.
       // Not read because the edition has no Metadata API (DECISIONS.md 710): said in our words whole, so the summary is known as ours.
-      if (activeSla.length && editionIsWhy(rules.reason)) return { outcome: "pass", summary: said`Escalation rules weren't read, because Professional Edition doesn't include the Metadata API, but ${plural(activeSla.length, "entitlement process")} for cases ${isAre(activeSla.length)} active, which can escalate cases.`, evidence, segmentExemptReason: single, facts: { processes: activeSla.length } };
+      if (activeSla.length && editionIsWhy(rules.reason)) return { outcome: "pass", summary: said`Escalation rules weren't read, because Professional Edition only opens the Metadata API to security-reviewed apps, but ${plural(activeSla.length, "entitlement process")} for cases ${isAre(activeSla.length)} active, which can escalate cases.`, evidence, segmentExemptReason: single, facts: { processes: activeSla.length } };
       if (activeSla.length) return { outcome: "pass", summary: `Escalation rules couldn't be read (${rules.reason}), but ${plural(activeSla.length, "entitlement process")} for cases ${isAre(activeSla.length)} active, which can escalate cases.`, evidence, segmentExemptReason: single, facts: { processes: activeSla.length } };
       return nm(`Escalation rules couldn't be read: ${rules.reason}`, evidence);
     }

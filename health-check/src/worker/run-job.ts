@@ -187,6 +187,10 @@ export const READS_LOST_RELEASED = "Salesforce didn't answer part of what the ru
 /** The step that carries READS_LOST_RELEASED, which the console lists with the run's steps. */
 export const READS_LOST_STEP = "reads-lost";
 
+/** Where staff see an automatic run that stopped at its API budget (DECISIONS.md 710): a step, until the console has a flag for it. */
+export const BUDGET_STOPPED_STEP = "budget-stopped";
+export const BUDGET_STOPPED = "This automatic run stopped before it finished, to leave the org's daily API calls for its own work, and nothing carries it on by itself. A person needs to run it again.";
+
 /** The answer a "Run again" gets when the console hasn't set the run back first: nothing read, nothing removed. */
 export const AGAIN_NOT_RESET = "Run again starts an automatic run afresh only once it's set back to extracting with no hold, so nothing was read and its folder is as it was.";
 
@@ -417,6 +421,18 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
   if (provider.lostAccess) return fail(needsReconnection(name));
 
   if (result.run.status === "stopped_budget") {
+    // Nothing carries an automatic run on after its budget, and nobody is told by a flag: until the console has a
+    // flag for it, staff see it in the run's steps, in words that are true of it (DECISIONS.md 710).
+    if (input.run.reviewMode === "automatic") {
+      const progress = progressOf(result.run);
+      progress.steps.push({ id: BUDGET_STOPPED_STEP, version: 1, status: "done", calls: 0, finishedAt: now().toISOString(), error: BUDGET_STOPPED });
+      try {
+        await deps.store.saveRunProgress(runId, progress, dir);
+      } catch (err) {
+        log(`Couldn't record that ${runId} stopped at its budget: ${safeReason(err, secrets)}`);
+      }
+      log(`Automatic run ${runId} stopped at its API budget, and nothing carries it on by itself.`);
+    }
     return { outcome: "stopped_budget", detail: result.run.budget.stoppedReason ?? "Stopped at the API budget" };
   }
 

@@ -1,8 +1,8 @@
 import { NotInOrgError, type GatedRead } from "../salesforce/client.ts";
-import { editionNote, editionPointer, type EditionLack } from "../salesforce/refusal-words.ts";
+import { EDITION_NOTE, METADATA_POINTER } from "../salesforce/refusal-words.ts";
 import type { CapabilityStatus, OrgCapability, OrgProfile, SkippedRead } from "../schemas/index.ts";
 import { orgExtractor, type ObjectSummary } from "./configuration.ts";
-import { readName, type Extractor, type Sourced } from "./types.ts";
+import type { Extractor, Sourced } from "./types.ts";
 
 // Know the org before reading it (DECISIONS.md 710). The run used to find out
 // what an org lacks by asking and being refused; now its first steps build a
@@ -22,8 +22,18 @@ export const PROFESSIONAL = "Professional Edition";
 /** The editions Salesforce's Metadata API guide says can use it ("Supported Salesforce Editions"). */
 const METADATA_EDITIONS: ReadonlySet<string> = new Set(["Enterprise Edition", "Unlimited Edition", "Performance Edition", "Developer Edition"]);
 
-/** What the reads depend on, that the profile can know before they're made. */
-export const GATED = ["metadata_api", "own_apex", "s_controls", "sites"] as const;
+/** What the edition settles before any read: Salesforce documents each for Professional Edition. */
+export const EDITION_FACTS = ["metadata_api", "own_apex", "s_controls", "sites"] as const;
+export type EditionCapability = (typeof EDITION_FACTS)[number];
+
+/**
+ * The capabilities whose reads are skipped when absent (DECISIONS.md 710):
+ * the Metadata API alone, whose retrieves have another route or none. The
+ * rest are recorded as expected absent and asked anyway: each read costs a
+ * call or two, and the org's own answer (no rows, or a refusal) is handled
+ * as it always was, so a check that also reads flows or rules keeps them.
+ */
+export const GATED = ["metadata_api"] as const;
 export type GatedCapability = (typeof GATED)[number];
 
 /** Learned during the run, for the record only: no read is skipped for these. */
@@ -33,7 +43,8 @@ export const RECORDED = ["multi_currency", "record_types"] as const;
  * Each gated capability, and why Professional Edition doesn't have it. The
  * sources are Salesforce's own guides, as the audit recorded them.
  */
-const IN_EDITION: Record<GatedCapability, { professional: string; other: (edition: string) => { status: CapabilityStatus; from: string } }> = {
+const ASKED_ANYWAY = " We ask anyway, and go by the org's answer.";
+const IN_EDITION: Record<EditionCapability, { professional: string; other: (edition: string) => { status: CapabilityStatus; from: string } }> = {
   metadata_api: {
     // META "Supported Salesforce Editions" and "Metadata API Access for Professional Edition": only through an
     // ISV app that has passed security review, which Barometer's unlisted package hasn't (DECISIONS.md 79).
@@ -45,17 +56,17 @@ const IN_EDITION: Record<GatedCapability, { professional: string; other: (editio
   },
   own_apex: {
     // ISV "Using Apex in Group and Professional Editions": Apex isn't supported there, except in managed packages.
-    professional: "Professional Edition has no Apex of the org's own; only installed packages' Apex can run there.",
+    professional: `Professional Edition has no Apex of the org's own; only installed packages' Apex can run there.${ASKED_ANYWAY}`,
     other: () => ({ status: "unknown", from: "Read: the org's own Apex classes and triggers." }),
   },
   s_controls: {
     // TOOL "Scontrol": Enterprise, Developer or Unlimited Edition only, with s-controls switched on.
-    professional: "Professional Edition has no s-controls.",
+    professional: `Professional Edition has no s-controls.${ASKED_ANYWAY}`,
     other: () => ({ status: "unknown", from: "Read: s-controls must be switched on even where the edition has them." }),
   },
   sites: {
     // ISV "Features in Group and Professional Editions": Sites, No.
-    professional: "Professional Edition has no Sites.",
+    professional: `Professional Edition has no Sites.${ASKED_ANYWAY}`,
     other: () => ({ status: "unknown", from: "Read: the org's sites." }),
   },
 };
@@ -75,11 +86,9 @@ export type ReadNeed = {
   steps: readonly string[];
   matches: (read: GatedRead) => boolean;
   /** Salesforce's own answer for it, so each step handles it as it does that: INSUFFICIENT_ACCESS takes the Tooling and Analytics routes (DECISIONS.md 73). */
-  code: "INSUFFICIENT_ACCESS" | "INVALID_TYPE";
+  code: "INSUFFICIENT_ACCESS";
   sentence: string;
 };
-
-const fromObject = (read: GatedRead): string | null => (read.kind === "query" ? readName({ kind: "soql", api: read.api, query: read.soql }) : null);
 
 export const READ_NEEDS: readonly ReadNeed[] = [
   {
@@ -89,47 +98,17 @@ export const READ_NEEDS: readonly ReadNeed[] = [
     steps: ["metadata", "report-definitions", "service-escalation-rules", "ai-signals", "pardot-setup"],
     matches: (read) => read.kind === "retrieve",
     code: "INSUFFICIENT_ACCESS",
-    sentence: editionPointer("the Metadata API"),
-  },
-  {
-    capability: "own_apex",
-    read: "ApexClass and ApexTrigger (the org's own)",
-    steps: ["apex", "code-lint"],
-    // The org's own only: an installed package's Apex can run in Professional Edition.
-    matches: (read) => read.kind === "query" && read.api === "rest" && ["ApexClass", "ApexTrigger"].includes(fromObject(read) ?? "") && /\bNamespacePrefix\s*=\s*null\b/i.test(read.soql),
-    code: "INVALID_TYPE",
-    sentence: editionPointer("Apex"),
-  },
-  {
-    capability: "s_controls",
-    read: "Scontrol",
-    steps: ["classic"],
-    matches: (read) => fromObject(read) === "Scontrol",
-    code: "INVALID_TYPE",
-    sentence: editionPointer("s-controls"),
-  },
-  {
-    capability: "sites",
-    read: "Site",
-    // INVALID_TYPE is what the run-as step already takes as "no sites, so nothing runs through one".
-    steps: ["run-as"],
-    matches: (read) => fromObject(read) === "Site",
-    code: "INVALID_TYPE",
-    sentence: editionPointer("Sites"),
+    sentence: METADATA_POINTER,
   },
 ];
 
-/** What each gated capability is called in the run's note (DECISIONS.md 710). */
-const LACKS: Record<GatedCapability, EditionLack> = { metadata_api: "the Metadata API", own_apex: "Apex", s_controls: "s-controls", sites: "Sites" };
-
 /**
- * The run's one note about its edition, or null for an org the edition left
- * nothing out of: an org with everything gets none, so what it reads is as before.
+ * The run's note about its edition (DECISIONS.md 710), or null for an org
+ * whose edition kept nothing from us: an org with everything gets none, so
+ * what it reads is as before.
  */
 export function editionNoteOf(profile: OrgProfile | undefined): string | null {
-  if (!profile) return null;
-  const absent = profile.capabilities.filter((c) => c.status === "absent" && (GATED as readonly string[]).includes(c.id));
-  return editionNote(absent.map((c) => LACKS[c.id as GatedCapability]));
+  return profile?.capabilities.some((c) => c.id === "metadata_api" && c.status === "absent") ? EDITION_NOTE : null;
 }
 
 /** The capabilities the org's edition settles, from the Organization row the org step read. */
@@ -137,7 +116,7 @@ export function profileFromOrg(org: { status: string; data?: Array<{ Organizatio
   const raw = org?.status === "ok" ? org.data?.[0]?.OrganizationType : undefined;
   // Only a name: a missing or empty field is unknown, never an edition.
   const edition = typeof raw === "string" && raw.trim() !== "" ? raw.trim() : null;
-  const capabilities: OrgCapability[] = GATED.map((id) => {
+  const capabilities: OrgCapability[] = EDITION_FACTS.map((id) => {
     if (edition === null) return { id, status: "unknown", from: "The org's edition couldn't be read, so this is read." };
     if (edition === PROFESSIONAL) return { id, status: "absent", from: IN_EDITION[id].professional };
     return { id, ...IN_EDITION[id].other(edition) };
