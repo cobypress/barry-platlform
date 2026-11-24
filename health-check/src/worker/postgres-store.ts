@@ -38,6 +38,7 @@ import {
   type AutomaticRunState,
   type WorkerStore,
   type PortalDocumentRow,
+  type RunDelivery,
   DOCUMENTS_HELD_FLAG,
 } from "./types.ts";
 
@@ -349,6 +350,10 @@ export const RUN_DIGEST_SQL = `INSERT INTO "HealthCheckRunDigest" ("runId", "mad
 export const SURVEY_METRICS_DELETE_SQL = `DELETE FROM "HealthCheckMetric" WHERE "runId" = $1 AND "id" = ANY($2::text[])`;
 /** The console's migration that adds the run's overall score and grade and the link's host (DECISIONS.md 626). */
 export const RUN_SCORE_AND_HOST_MIGRATION = "20261128_health_check_run_score_and_host.sql";
+/** The console's migration that makes HealthCheckRunDelivery (DECISIONS.md 722). */
+export const RUN_DELIVERY_MIGRATION = "20261218_health_check_run_delivery.sql";
+/** One delivery's row. The run's own FOREIGN KEY refuses a run deleted meanwhile (23503), which is no loss. */
+export const RUN_DELIVERY_SQL = `INSERT INTO "HealthCheckRunDelivery" ("runId", "startedAt", "endedAt", "outcome", "final", "again", "steps") VALUES ($1, $2::timestamp(3), $3::timestamp(3), $4, $5, $6, $7::jsonb)`;
 export const BENCHMARK_ROW: Columns = {
   id: "text", metricKey: "text", ruleSetVersion: "text", value: "num", unit: "text", industry: "text", headcountBand: "text", userBand: "text", dealSizeBand: "text", period: "text",
 };
@@ -1037,6 +1042,23 @@ export class PostgresWorkerStore implements WorkerStore {
 
   async flagBudgetStop(runId: string, at: string): Promise<boolean> {
     return (await this.#pool.query(BUDGET_FLAG_SQL, [runId, at])).rowCount === 1;
+  }
+
+  #saidNoDeliveryTable = false;
+
+  /** DECISIONS.md 722: no table yet (42P01) is said once and costs only the run times; a run gone (23503) costs nothing. */
+  async recordDelivery(d: RunDelivery): Promise<boolean> {
+    try {
+      await this.#pool.query(RUN_DELIVERY_SQL, [d.runId, d.startedAt, d.endedAt, d.outcome, d.final, d.again, JSON.stringify(d.steps)]);
+      return true;
+    } catch (err) {
+      const code = (err as { code?: unknown } | null)?.code;
+      if (code === "23503") return false;
+      if (code !== "42P01") throw err;
+      if (!this.#saidNoDeliveryTable) this.#log(`The console's database has no HealthCheckRunDelivery table yet, so run times aren't kept. Apply the console's ${RUN_DELIVERY_MIGRATION} migration.`);
+      this.#saidNoDeliveryTable = true;
+      return false;
+    }
   }
 
   /** DECISIONS.md 652: a step row, so no schema change. Not #openRun: a scan lets go after its results, in review or not. */

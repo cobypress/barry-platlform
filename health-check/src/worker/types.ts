@@ -1,4 +1,5 @@
 import type { OrgStage } from "../connect/org-stages.ts";
+import type { StepTiming } from "../engine/run.ts";
 import type { OverallScore } from "../domains/scoring.ts";
 import type { Inventory } from "../schemas/inventory.ts";
 import type { Complexity } from "../schemas/complexity.ts";
@@ -337,6 +338,23 @@ export type ShareJobInput = {
 };
 
 /** Raised by a store when the console has moved a run on, so the worker mustn't write to it. */
+/** How a delivery ended: the job's outcome, or "error" when it threw and goes back to the queue (or, on the last, BullMQ gives up). */
+export const DELIVERY_OUTCOMES = ["done", "stopped_budget", "skipped", "failed", "error"] as const;
+export type DeliveryOutcome = (typeof DELIVERY_OUTCOMES)[number];
+
+/** One delivery of a run job, as the console's HealthCheckRunDelivery row (DECISIONS.md 722). */
+export type RunDelivery = {
+  runId: string;
+  startedAt: string;
+  endedAt: string;
+  outcome: DeliveryOutcome;
+  /** BullMQ's last try of this job. */
+  final: boolean;
+  /** A person's Run again of an automatic run (its job id), not the first run's job or a retry of it. */
+  again: boolean;
+  steps: StepTiming[];
+};
+
 export class RunClosedError extends Error {
   constructor(runId: string, status: string) {
     super(`Run ${runId} is ${status.replace("_", " ")}, so the worker leaves it alone`);
@@ -372,6 +390,15 @@ export interface WorkerStore {
    * True when a row was written (raised or opened again).
    */
   flagBudgetStop(runId: string, at: string): Promise<boolean>;
+  /**
+   * One delivery of a run job that took the run (DECISIONS.md 722): when it
+   * began and ended on the worker's clock, how it ended, and each step it
+   * read with its milliseconds and calls. Times and our own words only, never
+   * anything from the org. True when a row was written; false when the
+   * console has no HealthCheckRunDelivery table yet, or the run is gone. A
+   * store without it keeps no run times.
+   */
+  recordDelivery?(delivery: RunDelivery): Promise<boolean>;
 
   loadConnectJob(linkId: string): Promise<ConnectJobInput | null>;
   /**

@@ -2,7 +2,7 @@ import { allFindings, allMetrics } from "../engine/evaluate.ts";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ALL_MODULES, knownModuleIds, modulesForRun } from "../domains/index.ts";
-import { runHealthCheck } from "../engine/run.ts";
+import { runHealthCheck, type StepTiming } from "../engine/run.ts";
 import { applyNarrative, type Rejection } from "../narrative/apply.ts";
 import type { NarrativeClient } from "../narrative/client.ts";
 import { classifyError, NoApiAccessError, runStoppedWords, SalesforceError } from "../salesforce/client.ts";
@@ -27,7 +27,7 @@ import { recalibrateForRunAgain, type Recalibrated } from "./connect-job.ts";
 import { checkedDigest } from "../digest/checked.ts";
 import { checkSections, decideRelease, type ReleaseDecision } from "./release.ts";
 import { letGoAfterRun, type SeenRun } from "./scan-release.ts";
-import { progressOf, RunClosedError, runOverall, type RunJobInput } from "./types.ts";
+import { progressOf, RunClosedError, runOverall, DELIVERY_OUTCOMES, type RunJobInput } from "./types.ts";
 import { withoutComments } from "../survey/questions.ts";
 import { SURVEY_METRIC_IDS } from "../survey/summary.ts";
 import { FACTS_FILE } from "../extract/facts.ts";
@@ -187,19 +187,49 @@ export const AGAIN_NOT_RESET = "Run again starts an automatic run afresh only on
  * first. Only a run the console says is a scan is ever let go.
  */
 async function runThenLetGo(runId: string, deps: WorkerDeps, attempt: Attempt, options: RunJobOptions = {}): Promise<JobOutcome> {
-  const seen: SeenRun = {};
+  const seen: Seen = {};
   let outcome: JobOutcome;
   try {
     outcome = await runLocked(runId, deps, attempt, seen, options);
   } catch (err) {
+    await noteDelivery(runId, seen, deps, attempt, "error");
     if (attempt.final) await letGoAfterRun(runId, seen, deps);
     throw err;
   }
+  await noteDelivery(runId, seen, deps, attempt, outcome.outcome);
   await letGoAfterRun(runId, seen, deps);
   return outcome;
 }
 
-async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen: SeenRun, options: RunJobOptions = {}): Promise<JobOutcome> {
+/** What a delivery saw of its run, and, once it took the run, when it did and each step it read (DECISIONS.md 722). */
+type Seen = SeenRun & { delivery?: { startedAt: string; steps: StepTiming[] } };
+
+/**
+ * The delivery's row for the console's run times (DECISIONS.md 722): only a
+ * delivery that took the run, since one that skipped before its claim did no
+ * work. A courtesy: never throws, and a store without the table says so once.
+ */
+async function noteDelivery(runId: string, seen: Seen, deps: WorkerDeps, attempt: Attempt, ended: JobOutcome["outcome"] | "error"): Promise<void> {
+  // A run job ends in one of these; a connect job's words never reach here.
+  const outcome = DELIVERY_OUTCOMES.find((o) => o === ended);
+  if (!seen.delivery || !deps.store.recordDelivery || !outcome) return;
+  const now = (deps.now ?? (() => new Date()))();
+  try {
+    await deps.store.recordDelivery({
+      runId,
+      startedAt: seen.delivery.startedAt,
+      endedAt: now.toISOString(),
+      outcome,
+      final: attempt.final === true,
+      again: runAgainToken(runId, attempt.jobId) !== null,
+      steps: seen.delivery.steps,
+    });
+  } catch (err) {
+    (deps.log ?? (() => {}))(`Run ${runId}'s delivery times couldn't be recorded: ${safeReason(err)}`);
+  }
+}
+
+async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen: Seen, options: RunJobOptions = {}): Promise<JobOutcome> {
   const log = deps.log ?? (() => {});
   const now = () => (deps.now ?? (() => new Date()))();
   const first = await deps.store.loadRunJob(runId);
@@ -242,6 +272,9 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
     if (err instanceof RunClosedError) return { outcome: "skipped", detail: err.message };
     throw err;
   }
+  // From here the delivery is working on the run: its time counts (DECISIONS.md 722).
+  seen.delivery = { startedAt: now().toISOString(), steps: [] };
+  const steps = seen.delivery.steps;
 
   const fail = async (reason: string): Promise<JobOutcome> => {
     // Failed for good: nothing will resume to use the Apex code kept for Claude's summaries (DECISIONS.md 491).
@@ -364,6 +397,7 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
       inventory: true,
       // The last delivery: a transient fault of one read then costs that read (DECISIONS.md 702).
       lastDelivery: attempt.final === true,
+      onStepTimed: (timing) => steps.push(timing),
       stopAtShare: deps.stopAtShare,
       transport: deps.dataTransport,
       apiVersion: deps.apiVersion,

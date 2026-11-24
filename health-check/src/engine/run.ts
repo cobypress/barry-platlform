@@ -105,7 +105,17 @@ export type RunOptions = {
    * knows (DECISIONS.md 718). The engine's own unless a test says otherwise.
    */
   knownModules?: DomainModule[];
+  /**
+   * Told after each step this delivery read (never one reused from its
+   * checkpoint): how long its reads took and how many calls they made, for
+   * the console's run times (DECISIONS.md 722). Nothing else reads it, and it
+   * changes nothing in the run folder.
+   */
+  onStepTimed?: (timing: StepTiming) => void;
 };
+
+/** One step's reads on one delivery: our step id, milliseconds on the worker's clock, calls, and how it ended. */
+export type StepTiming = { id: string; ms: number; calls: number; outcome: "done" | "failed" | "stopped_budget" };
 
 /** What the lint findings say when the step itself failed: our words, never the error's. */
 export const LINT_STEP_FAILED = "PMD's step failed, so nothing it found was kept.";
@@ -315,6 +325,14 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
       step.version = extractor.version;
     }
     const before = budget.callsMade;
+    const began = performance.now();
+    const timed = (outcome: StepTiming["outcome"]): void => {
+      try {
+        options.onStepTimed?.({ id: extractor.id, ms: Math.max(0, Math.round(performance.now() - began)), calls: budget.callsMade - before, outcome });
+      } catch {
+        // A courtesy for the console's run times: it never stops a read.
+      }
+    };
     const refused: RefusedRead[] = [];
     const skipped: SkippedRead[] = [];
     // Once the profile is known, a read it rules out isn't sent (DECISIONS.md 710).
@@ -339,9 +357,11 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
       step.finishedAt = new Date().toISOString();
       step.error = null;
       log(`  ${extractor.id}: done (${budget.callsMade - before} calls)`);
+      timed("done");
       await saveRun();
     } catch (err) {
       step.calls += budget.callsMade - before;
+      timed(err instanceof BudgetStopError ? "stopped_budget" : "failed");
       if (err instanceof BudgetStopError) {
         run.status = "stopped_budget";
         run.budget.stoppedReason = err.message;
