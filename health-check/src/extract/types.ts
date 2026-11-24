@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { Calibration, RefusedRead } from "../schemas/index.ts";
-import { refusalSentence } from "../salesforce/refusal-words.ts";
+import { refusalSentence, type RefusalKind } from "../salesforce/refusal-words.ts";
 import { classifyError, isUnavailable, type QueryApi, type QueryOptions, type SalesforceClient, type SalesforceError } from "../salesforce/client.ts";
 import type { ApexSourceStore } from "./apex-source.ts";
 import type { CodeLintTools } from "./code-lint.ts";
@@ -114,9 +114,25 @@ export function refusalReason(err: SalesforceError, given: string): string {
   const what = named && !/^[A-Za-z][A-Za-z0-9_]*$/.test(given) ? named : given;
   // For a missing field, its API name alone, so we can see which without Salesforce's message.
   const field = err.code === "INVALID_FIELD" ? /No such column '([A-Za-z][A-Za-z0-9_]{0,79})'/.exec(err.message)?.[1] : undefined;
-  refusals.getStore()?.({ read: what, code: err.code.replace(/[^A-Za-z0-9_]/g, "").slice(0, 60) || "UNKNOWN", status: err.status, ...(field ? { field } : {}) });
   const kind = classifyError(err);
-  return refusalSentence(what, kind === "not_available" || kind === "no_permission" ? kind : "refused", err.code);
+  // Lost, not refused: Salesforce may answer it next time (a fault on the last delivery, or one count of a composite call).
+  const lost = kind === "instance_unavailable";
+  refusals.getStore()?.({ read: what, code: err.code.replace(/[^A-Za-z0-9_]/g, "").slice(0, 60) || "UNKNOWN", status: err.status, ...(field ? { field } : {}), ...(lost ? { lost: true as const } : {}) });
+  return refusalSentence(what, refusalKind(err, kind), err.code);
+}
+
+/** Codes Salesforce sends for a read it ran and couldn't finish: no refusal, though no retry helps either (DECISIONS.md 702). */
+const UNFINISHED: ReadonlySet<string> = new Set(["QUERY_TIMEOUT", "UNKNOWN_EXCEPTION"]);
+
+/**
+ * Which sentence a read that cost its checks takes: "refused" only when
+ * Salesforce said no to it. A timeout, an outage or an answer we couldn't
+ * read says Salesforce didn't answer as it should (DECISIONS.md 702).
+ */
+function refusalKind(err: SalesforceError, kind: ReturnType<typeof classifyError>): RefusalKind {
+  if (kind === "not_available" || kind === "no_permission") return kind;
+  if (kind === "instance_unavailable" || UNFINISHED.has(err.code)) return "unanswered";
+  return "refused";
 }
 
 /**

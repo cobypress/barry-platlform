@@ -414,9 +414,11 @@ const MAX_REFUSED = 200;
 function keepRefused(run: Run, refused: RefusedRead[], log: (message: string) => void): void {
   for (const read of refused) {
     const kept = (run.readsRefused ??= []);
-    if (kept.length >= MAX_REFUSED || kept.some((k) => k.step === read.step && k.read === read.read && k.code === read.code)) continue;
+    if (kept.some((k) => k.step === read.step && k.read === read.read && k.code === read.code)) continue;
+    // Past the cap, one lost read is still kept: it is what keeps an automatic run from release (DECISIONS.md 702).
+    if (kept.length >= MAX_REFUSED && !(read.lost && !kept.some((k) => k.lost))) continue;
     kept.push(read);
-    log(`  ${read.step}: Salesforce refused a read of ${read.read} (${read.code}, HTTP ${read.status}), so the checks it feeds are not measurable`);
+    log(`  ${read.step}: ${read.lost ? "Salesforce didn't answer" : "Salesforce refused"} a read of ${read.read} (${read.code}, HTTP ${read.status}), so the checks it feeds are not measurable`);
   }
 }
 

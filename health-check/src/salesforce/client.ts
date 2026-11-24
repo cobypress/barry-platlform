@@ -27,13 +27,16 @@ export class SalesforceError extends Error {
   readonly code: string;
   /** A Metadata API SOAP fault: Salesforce's answer to that one call, sent with HTTP 500 whatever it says. */
   readonly fault: boolean;
+  /** The SOAP operation the error came from, or undefined for a REST call. */
+  readonly operation: string | undefined;
 
-  constructor(status: number, code: string, message: string, options: { fault?: boolean } = {}) {
+  constructor(status: number, code: string, message: string, options: { fault?: boolean; operation?: string } = {}) {
     super(`${code}: ${message}`);
     this.name = "SalesforceError";
     this.status = status;
     this.code = code;
     this.fault = options.fault ?? false;
+    this.operation = options.operation;
   }
 }
 
@@ -129,15 +132,28 @@ export function classifyError(err: unknown): ErrorClass {
 }
 
 /**
+ * The SOAP operations a server fault or a malformed answer may cost one read
+ * on: a retrieve and its status checks, which are one read of the org's
+ * set-up and nothing else (DECISIONS.md 702). The client sends no other SOAP
+ * call today; one added later stops the run on either, as any outage does,
+ * unless it is listed here with a reason.
+ */
+export const RETRIEVE_OPERATIONS: ReadonlySet<string> = new Set(["retrieve", "checkRetrieveStatus"]);
+
+/**
  * The transient faults that belong to one read, not the whole instance: an
- * expired query cursor, a retrieve that timed out or came back malformed, and
- * a SOAP server fault on a retrieve. Retried while the worker can deliver
- * again; on its last delivery, each costs only its read (DECISIONS.md 702),
- * so a fault that comes back every time can't fail every run for that org.
+ * expired query cursor, a retrieve that timed out, and a server fault or a
+ * malformed answer on a retrieve or its status check. Retried while the
+ * worker can deliver again; on its last delivery, each costs only its read
+ * (DECISIONS.md 702), so a fault that comes back every time can't fail every
+ * run for that org. Such a read is lost, not refused: its sentence says
+ * Salesforce didn't answer, and an automatic run that lost one isn't released.
  */
 export function oneReadTransient(err: unknown): err is SalesforceError {
   if (!(err instanceof SalesforceError)) return false;
-  return err.code === "INVALID_QUERY_LOCATOR" || err.code === "RETRIEVE_TIMEOUT" || err.code === "BAD_SOAP_RESPONSE" || (err.fault && err.code === "Server");
+  if (err.code === "INVALID_QUERY_LOCATOR" || err.code === "RETRIEVE_TIMEOUT") return true;
+  const onRetrieve = err.operation !== undefined && RETRIEVE_OPERATIONS.has(err.operation);
+  return onRetrieve && (err.code === "BAD_SOAP_RESPONSE" || (err.fault && err.code === "Server"));
 }
 
 /** Set by the run around each step on the worker's last delivery (DECISIONS.md 702). */
@@ -414,13 +430,13 @@ export class SalesforceClient {
         await this.#sleep(1_000 * 2 ** attempt);
         continue;
       }
-      if (res.status >= 400) throw this.#toError(res);
+      if (res.status >= 400) throw this.#toError(res, options.soapOperation);
       if (adopted) this.#provider.accepted?.();
       return res;
     }
   }
 
-  #toError(res: TransportResponse): Error {
+  #toError(res: TransportResponse, operation?: string): Error {
     let code = `HTTP_${res.status}`;
     let message = "Salesforce returned an error";
     let isFault = false;
@@ -438,7 +454,7 @@ export class SalesforceClient {
       }
     }
     if (code === "REQUEST_LIMIT_EXCEEDED") return new BudgetStopError("Salesforce reports the daily API limit is exhausted");
-    return new SalesforceError(res.status, code, message, { fault: isFault });
+    return new SalesforceError(res.status, code, message, { fault: isFault, ...(operation ? { operation } : {}) });
   }
 
   #queryPath(soql: string, api: QueryApi): string {
@@ -563,7 +579,7 @@ export class SalesforceClient {
     }
     const parsed = xml.parse(res.text) as { Envelope?: { Body?: Record<string, { result?: Record<string, unknown> }> } };
     const result = parsed.Envelope?.Body?.[`${operation}Response`]?.result;
-    if (!result) throw new SalesforceError(res.status, "BAD_SOAP_RESPONSE", `No result in the ${operation} response`);
+    if (!result) throw new SalesforceError(res.status, "BAD_SOAP_RESPONSE", `No result in the ${operation} response`, { operation });
     return result;
   }
 
@@ -578,7 +594,7 @@ export class SalesforceClient {
         `<met:unpackaged>${typesXml}<met:version>${this.apiVersion}</met:version></met:unpackaged></met:retrieveRequest></met:retrieve>`,
     );
     const id = String(started.id ?? "");
-    if (!/^[A-Za-z0-9]{15,18}$/.test(id)) throw new SalesforceError(200, "BAD_SOAP_RESPONSE", "The retrieve returned no job id");
+    if (!/^[A-Za-z0-9]{15,18}$/.test(id)) throw new SalesforceError(200, "BAD_SOAP_RESPONSE", "The retrieve returned no job id", { operation: "retrieve" });
 
     for (let poll = 0; poll < SF_DEFAULTS.retrieveMaxPolls; poll++) {
       const status = await this.#soap(

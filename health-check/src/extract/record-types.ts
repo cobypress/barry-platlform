@@ -99,7 +99,7 @@ async function readHidden<R>(ctx: ExtractContext, soql: string, hide: (text: str
     read = await readSoql<R>(ctx, soql);
   } catch (err) {
     // Only rebuilt where it quotes the user, so every other error goes up as itself.
-    if (err instanceof SalesforceError && hide(err.message) !== err.message) throw new SalesforceError(err.status, err.code, hide(err.message.replace(`${err.code}: `, "")));
+    if (err instanceof SalesforceError && hide(err.message) !== err.message) throw new SalesforceError(err.status, err.code, hide(err.message.replace(`${err.code}: `, "")), { fault: err.fault, ...(err.operation ? { operation: err.operation } : {}) });
     throw err;
   }
   // No row limit is set, so the client pages to the end and a read is never cut short.

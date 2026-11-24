@@ -153,6 +153,9 @@ function againOf(dir: string): string | null {
 /** The answer an older "Run again" gets once a newer press has started the run afresh: nothing read, nothing removed. */
 export const AGAIN_SUPERSEDED = "A newer Run again has started this run afresh, so this older one read nothing and left its folder as it was.";
 
+/** Why an automatic run that lost a read to Salesforce not answering failed rather than being released (DECISIONS.md 702). */
+export const READS_LOST = "Salesforce didn't answer part of what the run reads, even after several tries, so the run wasn't released with those checks missing. Run it again once Salesforce is answering.";
+
 export const AGAIN_NOT_RESET = "Run again starts an automatic run afresh only once it's set back to extracting with no hold, so nothing was read and its folder is as it was.";
 
 /**
@@ -374,6 +377,17 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
 
   if (result.run.status === "stopped_budget") {
     return { outcome: "stopped_budget", detail: result.run.budget.stoppedReason ?? "Stopped at the API budget" };
+  }
+
+  // An automatic run that lost a read to Salesforce not answering (an outage, a timeout, an answer we couldn't
+  // read) is never released by code: it fails, which raises the run_failed flag for a person, and "Run again"
+  // reads the org afresh. A hold would keep its results for a person to release, but the console has no hold
+  // reason for it yet, and none of its six is true of it (DECISIONS.md 702). A refusal (edition, permission,
+  // Salesforce saying no) is the org's answer and still costs only its check. A consultant-led run goes to review.
+  const lost = (result.run.readsRefused ?? []).filter((r) => r.lost === true);
+  if (input.run.reviewMode === "automatic" && input.run.product === "barometer" && lost.length > 0) {
+    log(`Automatic run ${runId} lost ${lost.length} read${lost.length === 1 ? "" : "s"} to Salesforce not answering (${[...new Set(lost.map((r) => r.step))].join(", ")}), so it isn't released.`);
+    return fail(READS_LOST);
   }
 
   // An automatic run's release or hold, once decided (DECISIONS.md 693).

@@ -237,7 +237,7 @@ describe("a read that fails is { unavailable }, never a guess", () => {
     const objects = rows(inventory.fillRates);
     const counted = objects.filter((o) => "fields" in o);
     assert.deepEqual(counted, []);
-    assert.equal((objects.find((o) => o.object === "Account") as { unavailable: string }).unavailable, "Account couldn't be read, because Salesforce refused this read.");
+    assert.equal((objects.find((o) => o.object === "Account") as { unavailable: string }).unavailable, "Account couldn't be read, because Salesforce didn't answer as it should.");
   });
 
   test("fill rates, without the record counts: the core objects only, and a note says why", async () => {

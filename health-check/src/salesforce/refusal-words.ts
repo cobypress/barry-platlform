@@ -3,13 +3,19 @@
 // passes it on. Salesforce's own message and code never reach these: they go
 // to run.json's readsRefused and the run's log, for us alone.
 
-/** Why a read cost its checks, by the class the client's classifier gives it. */
-export type RefusalKind = "not_available" | "no_permission" | "refused";
+/**
+ * Why a read cost its checks, by the class the client's classifier gives it.
+ * `unanswered`: Salesforce didn't answer the read as it should (it timed out,
+ * was down, or sent something we couldn't read), which is no refusal, so it
+ * is never said as one.
+ */
+export type RefusalKind = "not_available" | "no_permission" | "refused" | "unanswered";
 
 const BECAUSE: Readonly<Record<RefusalKind, string>> = {
   not_available: "it isn't available in this Salesforce edition or isn't switched on",
   no_permission: "the person who connected Salesforce doesn't have permission to see it",
   refused: "Salesforce refused this read",
+  unanswered: "Salesforce didn't answer as it should",
 };
 
 /**

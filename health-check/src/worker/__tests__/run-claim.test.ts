@@ -318,6 +318,17 @@ describe("the statuses the store sees, as before the claim", () => {
     assert.deepEqual(w.store.seen, ["claimRun:extracting", ...progress(49)]);
   });
 
+  test("the same crash on the last delivery: its progress says failed, and the failure is recorded with its reason", async () => {
+    const w = await setup();
+    w.deps.dataTransport = new FlakyTransport(new ReplayTransport(loadRecording()), 12);
+    const outcome = await processRunJob(RUN_ID, w.deps, { final: true });
+    assert.equal(outcome.outcome, "failed");
+    // Only a delivery the queue will make again is shown extracting: the last one's failure is the run's (DECISIONS.md 702).
+    assert.ok(w.store.seen.includes("saveRunProgress:failed"), w.store.seen.slice(-5).join(", "));
+    assert.ok(!w.store.seen.slice(w.store.seen.indexOf("saveRunProgress:failed")).includes("saveRunProgress:extracting"));
+    assert.equal(w.stored().run.status, "failed");
+  });
+
   test("a job retried after its save committed (awaiting manual steps, the folder complete): analysing at the claim, then to its save as before", async () => {
     const w = await setup();
     await w.deliver(false);

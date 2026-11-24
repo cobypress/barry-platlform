@@ -365,7 +365,8 @@ describe("what isn't judged", () => {
     const { out } = await read(T, TRAPS, second);
     // The second call holds the last 25 queries: the 13th object's second count and the 12 after it.
     assert.equal(out.refused.length, 13 + 1);
-    assert.ok(out.refused.every((r) => r.reason === `${r.object} couldn't be read, because Salesforce refused this read.` || r.object === "Broken__c"));
+    // UNKNOWN_EXCEPTION is Salesforce failing to answer, not saying no (DECISIONS.md 702, review round 3).
+    assert.ok(out.refused.every((r) => r.reason === `${r.object} couldn't be read, because Salesforce didn't answer as it should.` || r.object === "Broken__c"));
     assert.ok(Object.keys(out.counted).length > 0);
     // The first call's objects are still judged (Cut__c is whole here), and the finding counts the rest as refused.
     const f = judge(out);
@@ -404,8 +405,9 @@ describe("what isn't judged", () => {
   // Inside a call that came back, one count failing is that object refused,
   // whatever the code, as the ownership counts have it (DECISIONS.md 498).
   for (const [name, item, reason] of [
-    ["a 503 SERVER_UNAVAILABLE", { statusCode: 503, result: [{ errorCode: "SERVER_UNAVAILABLE", message: "Server temporarily unavailable" }] }, "Cut__c couldn't be read, because Salesforce refused this read."],
-    ["a bare 500 with no code", { statusCode: 500, result: [{}] }, "Cut__c couldn't be read, because Salesforce refused this read."],
+    // Salesforce didn't answer that count, so it isn't called a refusal (DECISIONS.md 702, review round 3).
+    ["a 503 SERVER_UNAVAILABLE", { statusCode: 503, result: [{ errorCode: "SERVER_UNAVAILABLE", message: "Server temporarily unavailable" }] }, "Cut__c couldn't be read, because Salesforce didn't answer as it should."],
+    ["a bare 500 with no code", { statusCode: 500, result: [{}] }, "Cut__c couldn't be read, because Salesforce didn't answer as it should."],
   ] as const) {
     test(`one count answered with ${name} is that object refused, and the step finishes`, async () => {
       const failing = editComposite((soql, answer) => {

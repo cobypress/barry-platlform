@@ -14,6 +14,7 @@ import { AutomaticReplay, automaticSyntheticCalibration } from "../../testing/au
 import { createJobHandler } from "../../worker/worker.ts";
 import { baseDeps, consoleRun, RUN_ID, runInput, syntheticConnection } from "../../worker/__tests__/helpers.ts";
 import { NEEDS_RECONNECTION } from "../../worker/apps.ts";
+import { READS_LOST } from "../../worker/run-job.ts";
 import { refusalSpans } from "../../salesforce/refusal-words.ts";
 import { passedOnSpans } from "../../engine/passed-on.ts";
 import { guardPassedOn, metricMarks } from "../../engine/automatic-words.ts";
@@ -385,7 +386,9 @@ describe("our own faults show, and Salesforce's words never reach a customer (F3
     const { dir, run: finished } = await done;
     assert.ok(finished.readsRefused?.some((r) => r.read === "Opportunity" && r.code === "QUERY_TIMEOUT"));
     assert.ok(log.some((l) => l.includes("QUERY_TIMEOUT")));
-    assert.ok(reasons(dir).some((r) => r.endsWith("Opportunity couldn't be read, because Salesforce refused this read.")));
+    // A timeout is no refusal, so it isn't said as one (review round 3).
+    assert.ok(reasons(dir).some((r) => r.endsWith("Opportunity couldn't be read, because Salesforce didn't answer as it should.")));
+    assert.ok(!reasons(dir).some((r) => /refused/.test(r)));
     assert.doesNotMatch(customerText(dir), /QUERY_TIMEOUT|Acme_Secret__c|took too long/);
   });
 
@@ -573,19 +576,24 @@ const SERVER_FAULT: TransportResponse = {
 const isRetrieve = (r: TransportRequest) => r.headers?.SOAPAction === '"retrieve"';
 
 describe("a fault that comes back every time costs its read on the last delivery (round 2, item 2)", () => {
-  test("an expired cursor on every delivery: retried until the last, which releases with the read not measured", async () => {
+  // The read is lost, not refused: the run finishes with it not measured, but an automatic run that lost one is
+  // never released by code. It fails, with the run_failed flag, for a person to run again (review round 3).
+  test("an expired cursor on every delivery: retried until the last, which finishes with the read lost, and an automatic run fails rather than release", async () => {
     const answer: Answer = (r) => (soqlOf(r).includes("FROM Task ") ? errorBody(400, "INVALID_QUERY_LOCATOR", "invalid query locator") : null);
     const { deps, deliver } = await automaticWorker(answer);
     await assert.rejects(deliver(false), (err: unknown) => err instanceof Error && !/INVALID_QUERY_LOCATOR|invalid query locator/.test(err.message));
     const outcome = await deliver(true);
-    assert.match(outcome.detail, /is released$/, outcome.detail);
-    const runJson = read<{ readsRefused?: Array<{ code: string; read: string }> }>(join(deps.runsDir, RUN_ID), "run.json");
-    assert.ok(runJson.readsRefused?.some((r) => r.code === "INVALID_QUERY_LOCATOR" && r.read === "Task"));
+    assert.equal(outcome.outcome, "failed", outcome.detail);
+    assert.equal(outcome.detail, READS_LOST);
+    assert.deepEqual(deps.store.flagsOf(RUN_ID), ["run_failed"]);
+    const runJson = read<{ readsRefused?: Array<{ code: string; read: string; lost?: true }> }>(join(deps.runsDir, RUN_ID), "run.json");
+    assert.ok(runJson.readsRefused?.some((r) => r.code === "INVALID_QUERY_LOCATOR" && r.read === "Task" && r.lost === true));
   });
 
-  test("a retrieve that never gives its job id (a bad SOAP answer): the last delivery releases", async () => {
+  test("a retrieve that never gives its job id (a bad SOAP answer): the last delivery finishes, and an automatic run fails rather than release", async () => {
     const outcome = await automaticRun((r) => (isRetrieve(r) ? { status: 200, header: () => null, text: `<?xml version="1.0"?><soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"><soapenv:Body><retrieveResponse xmlns="http://soap.sforce.com/2006/04/metadata"><result><done>false</done></result></retrieveResponse></soapenv:Body></soapenv:Envelope>` } : null));
-    assert.match(outcome.detail, /is released$/, outcome.detail);
+    assert.equal(outcome.outcome, "failed", outcome.detail);
+    assert.equal(outcome.detail, READS_LOST);
   });
 
   test("a whole-instance outage still fails the run on its last delivery, in plain words with no code", async () => {
