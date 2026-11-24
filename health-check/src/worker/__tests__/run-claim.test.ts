@@ -309,12 +309,24 @@ describe("the statuses the store sees, as before the claim", () => {
     w.deps.dataTransport = new FlakyTransport(new ReplayTransport(recording), 12);
     await assert.rejects(processRunJob(RUN_ID, w.deps, { final: false }), /ECONNRESET/);
     assert.ok(existsSync(join(w.dir, "run.json")));
-    // The engine's last progress write said failed, and the claim leaves that until the next one.
-    assert.equal(w.stored().run.status, "failed");
+    // A delivery the queue will make again isn't the run failing, so its last progress write says extracting
+    // (DECISIONS.md 702): shown failed, an automatic run would never be delivered again.
+    assert.equal(w.stored().run.status, "extracting");
     w.store.seen.length = 0;
     w.deps.dataTransport = new ReplayTransport(recording);
     assert.deepEqual(await processRunJob(RUN_ID, w.deps, { final: false }), { outcome: "done", detail: `Run ${RUN_ID} is awaiting manual` });
-    assert.deepEqual(w.store.seen, ["claimRun:failed", ...progress(49)]);
+    assert.deepEqual(w.store.seen, ["claimRun:extracting", ...progress(49)]);
+  });
+
+  test("the same crash on the last delivery: its progress says failed, and the failure is recorded with its reason", async () => {
+    const w = await setup();
+    w.deps.dataTransport = new FlakyTransport(new ReplayTransport(loadRecording()), 12);
+    const outcome = await processRunJob(RUN_ID, w.deps, { final: true });
+    assert.equal(outcome.outcome, "failed");
+    // Only a delivery the queue will make again is shown extracting: the last one's failure is the run's (DECISIONS.md 702).
+    assert.ok(w.store.seen.includes("saveRunProgress:failed"), w.store.seen.slice(-5).join(", "));
+    assert.ok(!w.store.seen.slice(w.store.seen.indexOf("saveRunProgress:failed")).includes("saveRunProgress:extracting"));
+    assert.equal(w.stored().run.status, "failed");
   });
 
   test("a job retried after its save committed (awaiting manual steps, the folder complete): analysing at the claim, then to its save as before", async () => {

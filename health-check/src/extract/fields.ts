@@ -1,5 +1,5 @@
 import { isUnavailable } from "../salesforce/client.ts";
-import type { ExtractContext, Extractor, Sourced } from "./types.ts";
+import { refusalReason, type ExtractContext, type Extractor, type Sourced } from "./types.ts";
 
 // A field that isn't in the org fails the whole query, which would make every
 // rule on that source not measurable. So the objects below are described first.
@@ -71,7 +71,8 @@ export const fieldDescribeExtractor: Extractor<Record<string, DescribedObject>> 
       } catch (err) {
         // A budget stop or a fault isn't a fact about the org, so it isn't saved.
         if (!isUnavailable(err)) throw err;
-        result = ABSENT_CODES.has(err.code) ? { status: "absent", reason: err.message } : { status: "unknown", reason: err.message };
+        const reason = refusalReason(err, object);
+        result = ABSENT_CODES.has(err.code) ? { status: "absent", reason } : { status: "unknown", reason };
       }
       ctx.partial.append<DescribeRow>(PARTIAL_KEY, [{ Id: object, result }]);
       done.set(object, result);
@@ -87,7 +88,8 @@ export async function describeObject(ctx: ExtractContext, object: string): Promi
     return { status: "ok", fields: d.fields.map((f) => f.name.toLowerCase()), relationships: d.fields.flatMap((f) => (f.relationshipName ? [f.relationshipName.toLowerCase()] : [])) };
   } catch (err) {
     if (!isUnavailable(err)) throw err;
-    return ABSENT_CODES.has(err.code) ? { status: "absent", reason: err.message } : { status: "unknown", reason: err.message };
+    const reason = refusalReason(err, object);
+    return ABSENT_CODES.has(err.code) ? { status: "absent", reason } : { status: "unknown", reason };
   }
 }
 

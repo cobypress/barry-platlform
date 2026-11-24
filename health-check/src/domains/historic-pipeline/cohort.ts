@@ -160,6 +160,9 @@ export type PipelineData =
 const built = new WeakMap<RuleContext["data"], PipelineData>();
 
 export function loadPipeline(ctx: Omit<RuleContext, "metrics">): PipelineData {
+  // Asked for on every call, cached or not: reading the step is what puts its
+  // notes, such as deals left out, on whatever reads the deals (DECISIONS.md 702).
+  ctx.data(opportunitiesExtractor);
   let data = built.get(ctx.data);
   if (!data) {
     data = buildPipeline(ctx);

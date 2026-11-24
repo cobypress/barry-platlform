@@ -1,8 +1,10 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { XMLParser } from "fast-xml-parser";
 import { unzipSync, strFromU8 } from "fflate";
 import { BUDGET_DEFAULTS, SF_DEFAULTS } from "../config.ts";
 import { authorise, ForbiddenOperationError, type SfRequest } from "./allowlist.ts";
 import { ApiBudget, BudgetStopError } from "./budget.ts";
+import { LIMITS_NO_PERMISSION, LIMITS_REFUSED, NO_API_FOR_ORG, NO_API_FOR_USER } from "./refusal-words.ts";
 import type { ConnectionProvider, OrgConnection } from "./connection.ts";
 import { instanceOrigin } from "./hosts.ts";
 import { fetchTransport, type Transport, type TransportResponse } from "./transport.ts";
@@ -23,33 +25,156 @@ export type MetadataMember = { name: string; members: string[] };
 export class SalesforceError extends Error {
   readonly status: number;
   readonly code: string;
+  /** A Metadata API SOAP fault: Salesforce's answer to that one call, sent with HTTP 500 whatever it says. */
+  readonly fault: boolean;
+  /** The SOAP operation the error came from, or undefined for a REST call. */
+  readonly operation: string | undefined;
 
-  constructor(status: number, code: string, message: string) {
+  constructor(status: number, code: string, message: string, options: { fault?: boolean; operation?: string } = {}) {
     super(`${code}: ${message}`);
     this.name = "SalesforceError";
     this.status = status;
     this.code = code;
+    this.fault = options.fault ?? false;
+    this.operation = options.operation;
   }
 }
 
-// Org shape or permissions, not a fault: the object isn't there or we can't see
-// it, so the caller reports "not measurable" rather than failing the run.
-const UNAVAILABLE_CODES = new Set([
-  "INVALID_TYPE",
-  "INVALID_FIELD",
-  "MALFORMED_QUERY",
-  "INSUFFICIENT_ACCESS",
-  "INSUFFICIENT_ACCESS_OR_READONLY",
-  "API_DISABLED_FOR_ORG",
-  "NOT_FOUND",
-  "EXCEEDED_ID_LIMIT",
-  "OPERATION_TOO_LARGE",
-  "QUERY_TIMEOUT",
-  "UNKNOWN_EXCEPTION",
-]);
+/**
+ * A connection Salesforce won't give the API to at all (DECISIONS.md 702): a
+ * final refusal, said plainly, never retried. No read can work, so it is the
+ * connect's answer and the run's, never one check's.
+ */
+export class NoApiAccessError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "NoApiAccessError";
+  }
+}
 
+export { LIMITS_NO_PERMISSION, LIMITS_REFUSED, NO_API_FOR_ORG, NO_API_FOR_USER } from "./refusal-words.ts";
+
+/**
+ * Which errors cost one read and which stop the run (DECISIONS.md 702). One
+ * place draws the line, and every read goes by it.
+ *
+ * Costs one read, so its checks are not measurable and the run goes on:
+ * - `not_available`: the feature isn't in this edition, or isn't switched on.
+ * - `no_permission`: the connected user can't see it.
+ * - `refused`: Salesforce said no to this read for another reason, or a code
+ *   we haven't seen. Any 4xx with Salesforce's own error in it, and any SOAP
+ *   fault but a server's, is Salesforce answering that one call, whatever its code.
+ *
+ * Stops the run, as before 702:
+ * - `auth_lost`: the session is gone after the client's refresh. Only a person
+ *   signing in again helps.
+ * - `api_limit`: the org's daily API limit (a BudgetStopError, which the run
+ *   saves and resumes from).
+ * - `instance_unavailable`: a 5xx or 429 after the client's retries, a SOAP
+ *   `Server` fault, a retrieve that timed out or came back malformed, an
+ *   expired query cursor, or a response with no Salesforce error in it. It may
+ *   pass, so the run stops and the worker reads it again: never saved as unread.
+ * - `not_salesforce`: anything else, such as a network failure or our own bug.
+ */
+export type ErrorClass = "not_available" | "no_permission" | "refused" | "auth_lost" | "api_limit" | "instance_unavailable" | "not_salesforce";
+
+/** The codes we know, by class. A code not here is still classed, by its status and where it came from. */
+export const KNOWN_CODES: Readonly<Record<string, ErrorClass>> = {
+  INVALID_TYPE: "not_available",
+  INVALID_FIELD: "not_available",
+  NOT_FOUND: "not_available",
+  API_DISABLED_FOR_ORG: "not_available",
+  FUNCTIONALITY_NOT_ENABLED: "not_available",
+  INSUFFICIENT_ACCESS: "no_permission",
+  INSUFFICIENT_ACCESS_OR_READONLY: "no_permission",
+  INSUFFICIENT_ACCESS_ON_CROSS_REFERENCE_ENTITY: "no_permission",
+  API_CURRENTLY_DISABLED: "no_permission",
+  MALFORMED_QUERY: "refused",
+  INVALID_QUERY_FILTER_OPERATOR: "refused",
+  INVALID_QUERY_SCOPE: "refused",
+  // A query cursor expired between pages: read again, it works (DECISIONS.md 702).
+  INVALID_QUERY_LOCATOR: "instance_unavailable",
+  INVALID_OPERATION: "refused",
+  QUERY_TOO_COMPLICATED: "refused",
+  EXCEEDED_ID_LIMIT: "refused",
+  OPERATION_TOO_LARGE: "refused",
+  QUERY_TIMEOUT: "refused",
+  UNKNOWN_EXCEPTION: "refused",
+  // The client's own, for a retrieve that didn't give back its files. One that
+  // failed is Salesforce's answer; one that ran out of time, or came back
+  // malformed, may work on the next delivery.
+  RETRIEVE_FAILED: "refused",
+  RETRIEVE_TIMEOUT: "instance_unavailable",
+  BAD_SOAP_RESPONSE: "instance_unavailable",
+  INVALID_SESSION_ID: "auth_lost",
+  INVALID_AUTH_HEADER: "auth_lost",
+  REQUEST_LIMIT_EXCEEDED: "api_limit",
+  SERVER_UNAVAILABLE: "instance_unavailable",
+  // SOAP's own generic fault codes, with their namespace taken off: a server's
+  // is an outage, never an answer about the read.
+  Server: "instance_unavailable",
+};
+
+const PER_READ: ReadonlySet<ErrorClass> = new Set(["not_available", "no_permission", "refused"]);
+
+export function classifyError(err: unknown): ErrorClass {
+  if (err instanceof BudgetStopError) return "api_limit";
+  if (!(err instanceof SalesforceError)) return "not_salesforce";
+  const known = KNOWN_CODES[err.code];
+  // A session refused after the refresh is lost, whatever code came with it.
+  if (err.status === 401 || known === "auth_lost") return "auth_lost";
+  if (known) return known;
+  // No Salesforce error in the body: the client named it from the status alone.
+  if (/^HTTP_\d+$/.test(err.code)) return "instance_unavailable";
+  if (err.fault) return "refused";
+  if (err.status === 429 || err.status >= 500) return "instance_unavailable";
+  return err.status >= 400 ? "refused" : "instance_unavailable";
+}
+
+/**
+ * The SOAP operations a server fault or a malformed answer may cost one read
+ * on: a retrieve and its status checks, which are one read of the org's
+ * set-up and nothing else (DECISIONS.md 702). The client sends no other SOAP
+ * call today; one added later stops the run on either, as any outage does,
+ * unless it is listed here with a reason.
+ */
+export const RETRIEVE_OPERATIONS: ReadonlySet<string> = new Set(["retrieve", "checkRetrieveStatus"]);
+
+/**
+ * The transient faults that belong to one read, not the whole instance: an
+ * expired query cursor, a retrieve that timed out, and a server fault or a
+ * malformed answer on a retrieve or its status check. Retried while the
+ * worker can deliver again; on its last delivery, each costs only its read
+ * (DECISIONS.md 702), so a fault that comes back every time can't fail every
+ * run for that org. Such a read is lost, not refused: its sentence says
+ * Salesforce didn't answer, and an automatic run that lost one isn't released.
+ */
+export function oneReadTransient(err: unknown): err is SalesforceError {
+  if (!(err instanceof SalesforceError)) return false;
+  if (err.code === "INVALID_QUERY_LOCATOR" || err.code === "RETRIEVE_TIMEOUT") return true;
+  const onRetrieve = err.operation !== undefined && RETRIEVE_OPERATIONS.has(err.operation);
+  return onRetrieve && (err.code === "BAD_SOAP_RESPONSE" || (err.fault && err.code === "Server"));
+}
+
+/** Set by the run around each step on the worker's last delivery (DECISIONS.md 702). */
+export const lastDelivery = new AsyncLocalStorage<true>();
+
+/** True when the error costs only the read it came from (DECISIONS.md 702). */
 export function isUnavailable(err: unknown): err is SalesforceError {
-  return err instanceof SalesforceError && UNAVAILABLE_CODES.has(err.code);
+  if (!(err instanceof SalesforceError)) return false;
+  return PER_READ.has(classifyError(err)) || (lastDelivery.getStore() === true && oneReadTransient(err));
+}
+
+/**
+ * Why a run stopped, in plain words a person can read in the console: never
+ * Salesforce's code or message, which go to the log (DECISIONS.md 702).
+ */
+export function runStoppedWords(err: unknown): string | null {
+  if (!(err instanceof SalesforceError)) return null;
+  const kind = classifyError(err);
+  if (kind === "instance_unavailable") return "Salesforce didn't answer as it should, after several tries, so the org may be busy or unavailable.";
+  if (kind === "auth_lost") return "Salesforce no longer accepts the connection.";
+  return "Salesforce refused a read the run can't go on without.";
 }
 
 const xml = new XMLParser({ removeNSPrefix: true, ignoreAttributes: true, parseTagValue: false });
@@ -101,6 +226,8 @@ export const CLIENT_METHODS = [
   "limitNames",
   // Every limit /limits reported as first read, for the inventory (DECISIONS.md 603). It sends nothing.
   "allLimitsAtConnect",
+  // Why /limits couldn't be read at connect, or null (DECISIONS.md 702). It sends nothing.
+  "limitsUnread",
   // The org's own domain, for the action lists' links. It sends nothing.
   "instanceUrl",
   "query",
@@ -142,6 +269,7 @@ export class SalesforceClient {
   #limitsAtConnect: Record<string, OrgLimit> | null = null;
   #limitNames: string[] = [];
   #allLimitsAtConnect: Record<string, OrgLimit> | null = null;
+  #limitsUnread: string | null = null;
 
   private constructor(provider: ConnectionProvider, connection: OrgConnection, options: ClientOptions) {
     this.budget = options.budget;
@@ -206,16 +334,59 @@ export class SalesforceClient {
     return { ...this.#allLimitsAtConnect };
   }
 
+  /**
+   * Why the org's limits couldn't be read on connecting, or null when they
+   * were (DECISIONS.md 702): the connected user can't view Setup, or Salesforce
+   * refused the read. Our own words, never Salesforce's.
+   */
+  get limitsUnread(): string | null {
+    return this.#limitsUnread;
+  }
+
   /** Doesn't count against the daily limit. Also how the budget learns the limit. */
   async refreshLimits(): Promise<void> {
-    const res = await this.#send({ method: "GET", path: this.#data("/limits") }, { free: true });
+    // Refused at connect, it would be refused again: the budget goes by the
+    // usage header on each response, within its allowance until one comes.
+    if (this.#limitsUnread !== null) {
+      this.#sinceLimitsRead = 0;
+      return;
+    }
+    let res: TransportResponse;
+    try {
+      res = await this.#send({ method: "GET", path: this.#data("/limits") }, { free: true });
+    } catch (err) {
+      // Only the read at connect is decided here. A later one fails as before.
+      if (this.#allLimitsAtConnect !== null) throw err;
+      this.#limitsUnreadAtConnect(err);
+      return;
+    }
     const limits = JSON.parse(res.text) as Record<string, OrgLimit | undefined>;
     if (this.#limitNames.length === 0) this.#limitNames = Object.keys(limits).sort();
     this.#allLimitsAtConnect ??= Object.fromEntries(Object.entries(limits).flatMap(([name, limit]) => (isLimit(limit) ? [[name, { Max: limit.Max, Remaining: limit.Remaining }]] : [])));
     this.#limitsAtConnect ??= Object.fromEntries(REPORTED_LIMITS.flatMap((name) => (isLimit(limits[name]) ? [[name, { Max: limits[name].Max, Remaining: limits[name].Remaining }]] : [])));
     const daily = limits.DailyApiRequests;
-    if (!daily) throw new Error("The org didn't report a daily API limit");
-    this.budget.observe(daily.Max - daily.Remaining, daily.Max);
+    if (isLimit(daily)) this.budget.observe(daily.Max - daily.Remaining, daily.Max);
+    // No daily limit reported: the budget keeps a small allowance until a response's header says (DECISIONS.md 702).
+    else this.budget.limitUnread();
+    this.#sinceLimitsRead = 0;
+  }
+
+  /**
+   * The first /limits read refused (DECISIONS.md 702). No API at all is the
+   * connect's final answer, said plainly. Any other refusal of this one read,
+   * such as a user without View Setup and Configuration, lets the connect go
+   * on with the limits not measured and a small, safe budget: never an
+   * unlimited one. A lost session, the daily limit or an outage stops it as before.
+   */
+  #limitsUnreadAtConnect(err: unknown): void {
+    if (err instanceof SalesforceError && err.code === "API_DISABLED_FOR_ORG") throw new NoApiAccessError(NO_API_FOR_ORG);
+    if (err instanceof SalesforceError && err.code === "API_CURRENTLY_DISABLED") throw new NoApiAccessError(NO_API_FOR_USER);
+    if (!isUnavailable(err)) throw err;
+    this.#limitsUnread = classifyError(err) === "no_permission" ? LIMITS_NO_PERMISSION : LIMITS_REFUSED;
+    this.#limitNames = [];
+    this.#allLimitsAtConnect = {};
+    this.#limitsAtConnect = {};
+    this.budget.limitUnread();
     this.#sinceLimitsRead = 0;
   }
 
@@ -259,15 +430,16 @@ export class SalesforceClient {
         await this.#sleep(1_000 * 2 ** attempt);
         continue;
       }
-      if (res.status >= 400) throw this.#toError(res);
+      if (res.status >= 400) throw this.#toError(res, options.soapOperation);
       if (adopted) this.#provider.accepted?.();
       return res;
     }
   }
 
-  #toError(res: TransportResponse): Error {
+  #toError(res: TransportResponse, operation?: string): Error {
     let code = `HTTP_${res.status}`;
     let message = "Salesforce returned an error";
+    let isFault = false;
     try {
       const body = JSON.parse(res.text) as unknown;
       const first = (Array.isArray(body) ? body[0] : body) as { errorCode?: string; message?: string };
@@ -278,10 +450,11 @@ export class SalesforceClient {
       if (fault) {
         code = String(fault.faultcode ?? code).replace(/^.*:/, "");
         message = String(fault.faultstring ?? message);
+        isFault = true;
       }
     }
     if (code === "REQUEST_LIMIT_EXCEEDED") return new BudgetStopError("Salesforce reports the daily API limit is exhausted");
-    return new SalesforceError(res.status, code, message);
+    return new SalesforceError(res.status, code, message, { fault: isFault, ...(operation ? { operation } : {}) });
   }
 
   #queryPath(soql: string, api: QueryApi): string {
@@ -334,7 +507,12 @@ export class SalesforceClient {
           out.push({ ok: true, result: { records: page.records, totalSize: page.totalSize, truncated: Boolean(page.nextRecordsUrl) } });
         } else {
           const first = (Array.isArray(item.result) ? item.result[0] : item.result) as { errorCode?: string; message?: string };
-          out.push({ ok: false, error: new SalesforceError(item.statusCode, first?.errorCode ?? "UNKNOWN", first?.message ?? "Subrequest failed") });
+          const error = new SalesforceError(item.statusCode, first?.errorCode ?? "UNKNOWN", first?.message ?? "Subrequest failed");
+          // A lost session or the daily limit inside one answer is the run's, not one count's (DECISIONS.md 702).
+          const kind = classifyError(error);
+          if (kind === "api_limit") throw new BudgetStopError("Salesforce reports the daily API limit is exhausted");
+          if (kind === "auth_lost") throw error;
+          out.push({ ok: false, error });
         }
       }
     }
@@ -401,7 +579,7 @@ export class SalesforceClient {
     }
     const parsed = xml.parse(res.text) as { Envelope?: { Body?: Record<string, { result?: Record<string, unknown> }> } };
     const result = parsed.Envelope?.Body?.[`${operation}Response`]?.result;
-    if (!result) throw new SalesforceError(res.status, "BAD_SOAP_RESPONSE", `No result in the ${operation} response`);
+    if (!result) throw new SalesforceError(res.status, "BAD_SOAP_RESPONSE", `No result in the ${operation} response`, { operation });
     return result;
   }
 
@@ -416,7 +594,7 @@ export class SalesforceClient {
         `<met:unpackaged>${typesXml}<met:version>${this.apiVersion}</met:version></met:unpackaged></met:retrieveRequest></met:retrieve>`,
     );
     const id = String(started.id ?? "");
-    if (!/^[A-Za-z0-9]{15,18}$/.test(id)) throw new SalesforceError(200, "BAD_SOAP_RESPONSE", "The retrieve returned no job id");
+    if (!/^[A-Za-z0-9]{15,18}$/.test(id)) throw new SalesforceError(200, "BAD_SOAP_RESPONSE", "The retrieve returned no job id", { operation: "retrieve" });
 
     for (let poll = 0; poll < SF_DEFAULTS.retrieveMaxPolls; poll++) {
       const status = await this.#soap(

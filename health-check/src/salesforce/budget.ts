@@ -30,6 +30,7 @@ export class ApiBudget {
   #usedAtStart: number | null = null;
   #used: number | null = null;
   #calls = 0;
+  #limitUnread = false;
 
   constructor(options: BudgetOptions) {
     if (!(options.stopAtShare > 0 && options.stopAtShare <= 1)) throw new Error("stopAtShare must be above 0 and at most 1");
@@ -49,9 +50,21 @@ export class ApiBudget {
     if (match) this.observe(Number(match[1]), Number(match[2]));
   }
 
+  /**
+   * The org's daily limit couldn't be read (DECISIONS.md 702): until a
+   * response's usage header gives the real figures, this connection may spend
+   * only a small allowance, never an unlimited one.
+   */
+  limitUnread(): void {
+    this.#limitUnread = true;
+  }
+
   /** Throws BudgetStopError if spending `cost` more calls would cross a limit. */
   assertCanSpend(cost = 1): void {
     if (this.#limit === null || this.#used === null) {
+      const allowance = Math.min(BUDGET_DEFAULTS.callsWithLimitUnread, this.maxCallsPerRun);
+      if (this.#limitUnread && this.#calls + cost <= allowance) return;
+      if (this.#limitUnread) throw new BudgetStopError(`The org's API limit couldn't be read, so this run stops at ${allowance} API calls`);
       throw new BudgetStopError("The org's API limit hasn't been read yet, so the run can't tell what's safe to spend");
     }
     if (this.#calls + cost > this.maxCallsPerRun) {

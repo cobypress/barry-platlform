@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { stagesExtractor } from "../extract/opportunities.ts";
-import { marksOfMetric, orgValuesOf, rewordFinding, rewordMetric } from "./automatic-words.ts";
+import { guardPassedOn, marksOfMetric, orgValuesOf, rewordFinding, rewordMetric } from "./automatic-words.ts";
 import type { DomainModule } from "../domains/types.ts";
 import type { Extractor } from "../extract/types.ts";
 import { Pseudonymiser, UNKNOWN_USER } from "../privacy/pseudonymiser.ts";
@@ -12,7 +12,8 @@ import { opportunitiesExtractor, type OpportunityExtract } from "../extract/oppo
 import { moneySymbol } from "../render/format.ts";
 import { notMeasurableKind } from "./not-measurable.ts";
 import { INSIGHT_METRICS, INSIGHT_RULES } from "../domains/scoring.ts";
-import { joinSaid, markSentence, orgWordsOf, said, textSha256, withOrgWords, type MarkedSentence, type Said } from "./org-words.ts";
+import { joinSaid, markSentence, orgWordsOf, said, saidMade, textSha256, withOrgWords, type MarkedSentence, type Said } from "./org-words.ts";
+import { passedOnSpans } from "./passed-on.ts";
 import type { IssueResult, ManualState, RecordList, Rule, RuleContext, RuleResult } from "./rule.ts";
 
 export type AnalysisInput = {
@@ -182,7 +183,9 @@ function orgWordsFor(rule: Rule, before: Finding, after: Finding): { orgWords?: 
     const text = before[key];
     if (typeof text !== "string" || text !== after[key]) continue;
     const ownWords = text === "" || (key === "title" && before.status !== "issue" && text === rule.title) || (key === "recommendation" && text === GUARD_HELD);
-    const marked = markSentence(text, ownWords ? [] : orgWordsOf(text));
+    // A refused read's reason a rule passed on is known by its words, where said didn't make it (DECISIONS.md 702).
+    const passed = !ownWords && !saidMade(text) && (key === "summary" || key === "notMeasurableReason") ? passedOnSpans(text) : null;
+    const marked = markSentence(text, ownWords ? [] : (passed ?? orgWordsOf(text)));
     if (marked) orgWords[key] = marked;
   }
   Object.assign(orgWords, valueOrgWords(before.value, after.value));
@@ -198,7 +201,9 @@ function orgWordsFor(rule: Rule, before: Finding, after: Finding): { orgWords?: 
 function valueOrgWords(was: Finding["value"], now: Finding["value"]): Pick<NonNullable<Finding["orgWords"]>, "valueReason" | "valueAssumptions"> {
   if (was.kind === "not_sized") {
     if (now.kind !== "not_sized" || now.reason !== was.reason) return {};
-    const marked = markSentence(was.reason, was.reason === NOT_SIZED.reason || was.reason === GUARD_UNSIZED ? [] : orgWordsOf(was.reason));
+    const own = was.reason === NOT_SIZED.reason || was.reason === GUARD_UNSIZED;
+    // A refused read's reason passed on is known by its words (DECISIONS.md 702).
+    const marked = markSentence(was.reason, own ? [] : saidMade(was.reason) ? orgWordsOf(was.reason) : passedOnSpans(was.reason));
     return marked ? { valueReason: marked } : {};
   }
   if (now.kind === "not_sized" || now.assumptions.length !== was.assumptions.length || now.assumptions.some((a, i) => a !== was.assumptions[i])) return {};
@@ -335,7 +340,10 @@ function analyseWithin(input: AnalysisInput): AnalysisOutput {
 
   const data = <T>(extractor: Extractor<T>): T => {
     if (!extracts.has(extractor.id)) throw new Error(`Extractor "${extractor.id}" didn't run`);
-    return extracts.get(extractor.id) as T;
+    const output = extracts.get(extractor.id) as T;
+    // Whatever reads the step leans on what it says of itself, such as rows left out (DECISIONS.md 702).
+    for (const note of extractor.notes?.(output) ?? []) assumed.add(note);
+    return output;
   };
 
   const manual = (key: string): ManualState => {
@@ -457,7 +465,7 @@ function analyseWithin(input: AnalysisInput): AnalysisOutput {
   if (calibration.source === "org_settings") {
     const stageRows = extracts.get(stagesExtractor.id) as { status: string; data?: Array<{ ApiName: string; MasterLabel: string }> } | undefined;
     const orgValues = orgValuesOf({ metrics, findings, stages: [...calibration.stages.map((s) => s.name), ...(stageRows?.data ?? []).flatMap((s) => [s.ApiName, s.MasterLabel])] });
-    const reworded = findings.map((f) => Finding.parse(rewordFinding(f)));
+    const reworded = findings.map((f) => Finding.parse(rewordFinding(guardPassedOn(f, orgValues))));
     return {
       findings: reworded.filter((f) => !INSIGHT_RULES.has(f.ruleId)),
       insights: reworded.filter((f) => INSIGHT_RULES.has(f.ruleId)),

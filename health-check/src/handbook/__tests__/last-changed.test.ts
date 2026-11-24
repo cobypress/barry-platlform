@@ -202,12 +202,12 @@ describe("a read Salesforce refuses with the last-changed fields", () => {
     assert.doesNotMatch(text, /Each Apex [a-z ]*shows when it was last changed/);
   });
 
-  test("Salesforce's reason stays in the step's checkpoint, and reaches neither handbook.json nor the Word document nor any other file", async () => {
+  test("Salesforce's reason reaches no file: not the step's checkpoint, handbook.json, the Word document nor any other (DECISIONS.md 702)", async () => {
     const files = filesIn(refused.dir);
-    assert.deepEqual([...files.keys()].filter((f) => files.get(f)!.includes(REFUSAL)), ["checkpoints/apex.json"]);
+    assert.deepEqual([...files.keys()].filter((f) => files.get(f)!.includes(REFUSAL)), []);
     const apex = read<ApexData>(join(refused.dir, "checkpoints"), "apex.json");
-    const refusal: LastChanged = { status: "refused", reason: `INSUFFICIENT_ACCESS: ${REFUSAL}` };
-    assert.deepEqual(apex.lastChanged, { classes: refusal, triggers: refusal });
+    const refusal = (object: string): LastChanged => ({ status: "refused", reason: `${object} couldn't be read, because the person who connected Salesforce doesn't have permission to see it.` });
+    assert.deepEqual(apex.lastChanged, { classes: refusal("ApexClass"), triggers: refusal("ApexTrigger") });
     assert.ok(!(await textOf(refused.dir)).includes("APEX-REFUSED"));
     // Saved with the step, the record of the refusal is cleared.
     assert.ok(!existsSync(join(refused.dir, "checkpoints", "apex-last-changed-refused.partial.jsonl")));
@@ -232,7 +232,7 @@ describe("a read Salesforce refuses with the last-changed fields", () => {
     const run = await simulated({ failQuery: (soql) => (soql.includes("FROM ApexClass WHERE") ? { errorCode: "INSUFFICIENT_ACCESS", message: soql.includes("LastModifiedBy") ? REFUSAL : "No Apex for you" } : null) });
     const apex = read<ApexData>(join(run.dir, "checkpoints"), "apex.json");
     assert.ok(apex.classes.status === "unavailable");
-    assert.equal(apex.classes.reason, "INSUFFICIENT_ACCESS: No Apex for you");
+    assert.equal(apex.classes.reason, "ApexClass couldn't be read, because the person who connected Salesforce doesn't have permission to see it.");
     assert.ok(apex.classes.source.kind === "soql" && !apex.classes.source.query.includes("LastModified"));
     assert.equal(handbookOf(run.dir).apexClasses.status, "unavailable");
     // The triggers were read whole.
@@ -251,9 +251,9 @@ describe("a run stopped between the refused read and the one without the fields"
     const stopped = await runHealthCheck({ ...options, transport: first });
     assert.equal(stopped.run.status, "stopped_budget");
     assert.deepEqual(apexQueries(first, "ApexClass").map((q) => q.includes(NEW_FIELDS)), [true, false]);
-    // What the stopped run keeps: the object and Salesforce's reason, nothing read from the org.
+    // What the stopped run keeps: the object and our reason, nothing read from the org, nor Salesforce's words (DECISIONS.md 702).
     const kept = readFileSync(join(stopped.dir, "checkpoints", "apex-last-changed-refused.partial.jsonl"), "utf8");
-    assert.deepEqual(kept.trim().split("\n").map((line) => JSON.parse(line)), [{ object: "ApexClass", reason: `INSUFFICIENT_ACCESS: ${REFUSAL}` }]);
+    assert.deepEqual(kept.trim().split("\n").map((line) => JSON.parse(line)), [{ object: "ApexClass", reason: "ApexClass couldn't be read, because the person who connected Salesforce doesn't have permission to see it." }]);
 
     // Resumed, the classes' read with the fields would be refused again if it were made.
     const second = new Simulator({ failQuery: refuseLastChange });

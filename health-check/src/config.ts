@@ -34,6 +34,12 @@ export const BUDGET_DEFAULTS = {
   maxCallsPerRun: 5_000,
   // Metadata API responses don't carry a usage header, so re-read /limits this often.
   refreshEveryCalls: 50,
+  // What a connection whose daily limit couldn't be read may spend before a
+  // response's usage header says (DECISIONS.md 702): under 7% of 15,000, the
+  // smallest daily allocation we know of, so whatever the org has already
+  // used, this run alone can't take it far. Every REST response carries the
+  // header, so the real figures usually take over on the first call.
+  callsWithLimitUnread: 1_000,
 };
 
 export function envNumber(name: string, fallback: number): number {

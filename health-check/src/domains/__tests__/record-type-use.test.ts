@@ -14,7 +14,7 @@ import { Pseudonymiser, type PseudonymEntry } from "../../privacy/pseudonymiser.
 import { escapeXml } from "../../render/format.ts";
 import { renderContext, valueText } from "../../render/html.ts";
 import { ApiBudget, BudgetStopError } from "../../salesforce/budget.ts";
-import { SalesforceClient, SalesforceError } from "../../salesforce/client.ts";
+import { lastDelivery, SalesforceClient, SalesforceError } from "../../salesforce/client.ts";
 import type { Transport, TransportRequest } from "../../salesforce/transport.ts";
 import type { Finding } from "../../schemas/index.ts";
 import { analyseExtracts, clone, loadExtracts, tempDir } from "../../testing/harness.ts";
@@ -331,7 +331,8 @@ describe("what isn't judged", () => {
 
   test("the step keeps why each object wasn't counted, and reads 25 objects in five calls", () => {
     assert.deepEqual(traps.out.notRead, ["Zz_Last__c"]);
-    assert.deepEqual(traps.out.refused, [{ object: "Broken__c", reason: "Broken__c.RecordTypeId isn't in this org." }]);
+    // Our words since decision 702, never Salesforce's message or code.
+    assert.deepEqual(traps.out.refused, [{ object: "Broken__c", reason: "Broken__c couldn't be read, because it isn't available in this Salesforce edition or isn't switched on." }]);
     assert.deepEqual(traps.out.truncated, ["Cut__c"]);
     // A refused or cut short object is never read as one with no records.
     assert.equal(traps.out.counted.Broken__c, undefined);
@@ -364,7 +365,8 @@ describe("what isn't judged", () => {
     const { out } = await read(T, TRAPS, second);
     // The second call holds the last 25 queries: the 13th object's second count and the 12 after it.
     assert.equal(out.refused.length, 13 + 1);
-    assert.ok(out.refused.every((r) => /UNKNOWN_EXCEPTION/.test(r.reason) || r.object === "Broken__c"));
+    // UNKNOWN_EXCEPTION is Salesforce failing to answer, not saying no (DECISIONS.md 702, review round 3).
+    assert.ok(out.refused.every((r) => r.reason === `${r.object} couldn't be read, because Salesforce didn't answer as it should.` || r.object === "Broken__c"));
     assert.ok(Object.keys(out.counted).length > 0);
     // The first call's objects are still judged (Cut__c is whole here), and the finding counts the rest as refused.
     const f = judge(out);
@@ -403,15 +405,18 @@ describe("what isn't judged", () => {
   // Inside a call that came back, one count failing is that object refused,
   // whatever the code, as the ownership counts have it (DECISIONS.md 498).
   for (const [name, item, reason] of [
-    ["a 503 SERVER_UNAVAILABLE", { statusCode: 503, result: [{ errorCode: "SERVER_UNAVAILABLE", message: "Server temporarily unavailable" }] }, "SERVER_UNAVAILABLE: Server temporarily unavailable"],
-    ["a bare 500 with no code", { statusCode: 500, result: [{}] }, "UNKNOWN: Subrequest failed"],
+    // Salesforce didn't answer that count, so it isn't called a refusal (DECISIONS.md 702, review round 3).
+    ["a 503 SERVER_UNAVAILABLE", { statusCode: 503, result: [{ errorCode: "SERVER_UNAVAILABLE", message: "Server temporarily unavailable" }] }, "Cut__c couldn't be read, because Salesforce didn't answer as it should."],
+    ["a bare 500 with no code", { statusCode: 500, result: [{}] }, "Cut__c couldn't be read, because Salesforce didn't answer as it should."],
   ] as const) {
-    test(`one count answered with ${name} is that object refused, and the step finishes`, async () => {
+    test(`one count answered with ${name} is read again before the last delivery, and on the last is that object not judged, and the step finishes`, async () => {
       const failing = editComposite((soql, answer) => {
         // Only Cut__c's count of every record: its other count comes back.
         if (/FROM Cut__c /.test(soql) && !/CreatedDate >=/.test(soql)) Object.assign(answer, structuredClone(item));
       });
-      const { out } = await read(T, TRAPS, failing);
+      // Salesforce didn't answer: before the worker's last delivery the step stops, to be read again (DECISIONS.md 702).
+      await assert.rejects(read(T, TRAPS, failing), (err: unknown) => err instanceof SalesforceError);
+      const { out } = await lastDelivery.run(true, () => read(T, TRAPS, failing));
       assert.deepEqual(out.refused.map((r) => r.object).sort(), ["Broken__c", "Cut__c"]);
       assert.equal(out.refused.find((r) => r.object === "Cut__c")!.reason, reason);
       assert.equal(out.counted.Cut__c, undefined);
@@ -469,7 +474,7 @@ describe("clean data", () => {
     assert.ok(!queriesOf(sim.requests).some(isCount));
     const f = judge(out);
     assert.equal(f.status, "not_measurable");
-    assert.match(f.notMeasurableReason!, /^Record types couldn't be read: INSUFFICIENT_ACCESS/);
+    assert.equal(f.notMeasurableReason, "Record types couldn't be read: RecordType couldn't be read, because the person who connected Salesforce doesn't have permission to see it.");
   });
 });
 
@@ -820,8 +825,8 @@ describe("who connected", () => {
     });
 
     for (const [name, fails, reason] of [
-      ["the View All Data read", (q: string) => isViewAllData(q) && /PermissionSet\.HasActivationRequired/.test(q), "The connected user's permission set assignments couldn't be read: PermissionSet.HasActivationRequired isn't in this org."],
-      ["the View All Records read", (q: string) => isViewAllRecords(q) && /Parent\.HasActivationRequired/.test(q), "The connected user's object permissions couldn't be read: PermissionSet.HasActivationRequired isn't in this org."],
+      ["the View All Data read", (q: string) => isViewAllData(q) && /PermissionSet\.HasActivationRequired/.test(q), "The connected user's permission set assignments couldn't be read: PermissionSetAssignment couldn't be read, because it isn't available in this Salesforce edition or isn't switched on."],
+      ["the View All Records read", (q: string) => isViewAllRecords(q) && /Parent\.HasActivationRequired/.test(q), "The connected user's object permissions couldn't be read: ObjectPermissions couldn't be read, because it isn't available in this Salesforce edition or isn't switched on."],
     ] as const) {
       test(`HasActivationRequired refused on ${name}: access unknown, not measurable, and no count is sent`, async () => {
         const { out, sim } = await read(T, { failQuery: (soql) => (fails(soql) ? { errorCode: "INVALID_FIELD", message: "No such column 'HasActivationRequired' on entity 'PermissionSet'." } : null) });
@@ -845,11 +850,11 @@ describe("who connected", () => {
     const holdsId = (text: string): boolean => text.includes(ID) || text.includes(ID.slice(0, 15));
     const filesIn = (dir: string): string[] => readdirSync(dir).flatMap((name) => (statSync(join(dir, name)).isDirectory() ? filesIn(join(dir, name)) : [join(dir, name)]));
 
-    for (const [name, which, starts] of [
-      ["the View All Data read", isViewAllData, "The connected user's permission set assignments couldn't be read: "],
-      ["the View All Records read", isViewAllRecords, "The connected user's object permissions couldn't be read: "],
+    for (const [name, which, starts, object] of [
+      ["the View All Data read", isViewAllData, "The connected user's permission set assignments couldn't be read: ", "PermissionSetAssignment"],
+      ["the View All Records read", isViewAllRecords, "The connected user's object permissions couldn't be read: ", "ObjectPermissions"],
     ] as const) {
-      test(`${name} refused with a reason quoting the id: the reason, the finding and the checkpoint hold the placeholder, never the id`, async () => {
+      test(`${name} refused with a reason quoting the id: the reason, the finding and the checkpoint never hold the id`, async () => {
         const sim = new Simulator();
         const done = await run(quotingId("INVALID_FIELD", which)(sim), tempDir());
         // The read did hold the id, so a leak would have something to leak.
@@ -857,12 +862,13 @@ describe("who connected", () => {
         const checkpoint = join(done.dir, "checkpoints", `${recordTypeUseExtractor.id}.json`);
         const use = readCheckpoint(checkpoint) as RecordTypeUse;
         assert.ok(use.access.status === "unknown");
-        assert.equal(use.access.reason, `${starts}INVALID_FIELD: bad value '<the connected user>' or '<the connected user>'`);
+        // Since decision 702 the reason is our own sentence, so it quotes nothing of Salesforce's, the id least of all.
+        assert.equal(use.access.reason, `${starts}${object} couldn't be read, because it isn't available in this Salesforce edition or isn't switched on.`);
         assert.ok(!holdsId(readFileSync(checkpoint, "utf8")));
         const f = done.output!.findings.find((x) => x.ruleId === RULE)!;
         assert.equal(f.status, "not_measurable");
         assert.equal(f.notMeasurableReason, `${UNKNOWN} ${use.access.reason}`);
-        assert.ok(f.notMeasurableReason!.includes("<the connected user>"));
+        assert.ok(!holdsId(f.notMeasurableReason!));
         assert.equal(f.evidence[1]!.note, `We couldn't tell which objects the connected user sees every record of. ${use.access.reason}`);
         for (const e of f.evidence) assert.ok(!holdsId(JSON.stringify(e)), JSON.stringify(e));
         for (const path of filesIn(done.dir)) assert.ok(!holdsId(readFileSync(path, "utf8")), path);
@@ -871,11 +877,12 @@ describe("who connected", () => {
       test(`${name} failing with a code that isn't Salesforce's answer, quoting the id: the step stops, and neither the fault nor run.json holds the id`, async () => {
         const outDir = tempDir();
         const runId = `rt-quote-${which === isViewAllData ? "vad" : "var"}`;
-        await assert.rejects(run(quotingId("INVALID_QUERY_FILTER_OPERATOR", which)(new Simulator()), outDir, runId), (err: unknown) => err instanceof SalesforceError && err.code === "INVALID_QUERY_FILTER_OPERATOR" && !holdsId(err.message) && err.message.includes("<the connected user>"));
+        await assert.rejects(run(quotingId("SERVER_UNAVAILABLE", which)(new Simulator()), outDir, runId), (err: unknown) => err instanceof SalesforceError && err.code === "SERVER_UNAVAILABLE" && !holdsId(err.message) && err.message.includes("<the connected user>"));
         const saved = JSON.parse(readFileSync(join(outDir, runId, "run.json"), "utf8")) as { steps: Array<{ id: string; status: string; error: string | null }> };
         const step = saved.steps.find((s) => s.id === recordTypeUseExtractor.id)!;
         assert.equal(step.status, "failed");
-        assert.ok(step.error!.includes("<the connected user>") && !holdsId(step.error!), step.error!);
+        // run.json gets our plain words since decision 702, so it holds neither the id nor Salesforce's message.
+        assert.equal(step.error, "Salesforce didn't answer as it should, after several tries, so the org may be busy or unavailable.");
         for (const path of filesIn(join(outDir, runId))) assert.ok(!holdsId(readFileSync(path, "utf8")), path);
       });
     }
@@ -941,11 +948,11 @@ describe("who connected", () => {
     const quoting = (sim: Simulator): Transport => ({
       async send(request) {
         const q = queriesOf([request])[0] ?? "";
-        if (isViewAllData(q)) return { status: 400, header: () => null, text: JSON.stringify([{ errorCode: "INVALID_QUERY_FILTER_OPERATOR", message: `\n${q}\n^\nERROR at Row:1:Column:80\nbad value '${org.CONNECTED_USER.id}'` }]) };
+        if (isViewAllData(q)) return { status: 400, header: () => null, text: JSON.stringify([{ errorCode: "SERVER_UNAVAILABLE", message: `\n${q}\n^\nERROR at Row:1:Column:80\nbad value '${org.CONNECTED_USER.id}'` }]) };
         return sim.send(request);
       },
     });
-    await assert.rejects(read(T, {}, quoting, BY_ID), (err: unknown) => err instanceof SalesforceError && err.code === "INVALID_QUERY_FILTER_OPERATOR" && !err.message.includes(org.CONNECTED_USER.id) && err.message.includes("<the connected user>"));
+    await assert.rejects(read(T, {}, quoting, BY_ID), (err: unknown) => err instanceof SalesforceError && err.code === "SERVER_UNAVAILABLE" && !err.message.includes(org.CONNECTED_USER.id) && err.message.includes("<the connected user>"));
   });
 
   test("the id and the username are nowhere in the run folder, the log, the raw notes or any evidence", async () => {
@@ -963,7 +970,7 @@ describe("who connected", () => {
       const lines: string[] = [];
       const sim = new Simulator({ readOnly });
       const run = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), answers: loadAnswers(), modules: SALES_CLOUD_MODULES, outDir: tempDir(), now: T, transport: wrap(sim), connectedUser: user, log: (line) => lines.push(line) });
-      if (wrap !== asItIs) assert.match(run.output!.findings.find((x) => x.ruleId === RULE)!.notMeasurableReason!, /couldn't be read: INSUFFICIENT_ACCESS: bad value '<the connected user>' or '<the connected user>'$/, route);
+      if (wrap !== asItIs) assert.match(run.output!.findings.find((x) => x.ruleId === RULE)!.notMeasurableReason!, /couldn't be read, because the person who connected Salesforce doesn't have permission to see it\.$/, route);
       // The reads did name the user, so a leak would have something to leak.
       assert.ok(queriesOf(sim.requests).some((q) => q.includes(org.CONNECTED_USER.id)), route);
       const written = files(run.dir);

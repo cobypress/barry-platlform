@@ -20,7 +20,7 @@ import { fieldDescribeExtractor } from "../extract/fields.ts";
 import { buildInventory, errorClass, INVENTORY_FILE, inventoryExtractorsFor } from "../extract/inventory.ts";
 import { buildComplexity, COMPLEXITY_FILE } from "../complexity/read.ts";
 import { summariseFacts } from "../facts/summary.ts";
-import { monthsBefore, type ConnectedUser, type ExtractContext, type Extractor, type PartialStore, type Sourced } from "../extract/types.ts";
+import { monthsBefore, noteRefusals, type ConnectedUser, type ExtractContext, type Extractor, type PartialStore, type Sourced } from "../extract/types.ts";
 import { buildHandbook, HANDBOOK_FILE, labelApexModifiers, labelComponentModifiers, recentChanges } from "../handbook/build.ts";
 import type { UserRow } from "../extract/users.ts";
 import { usersExtractor } from "../extract/users.ts";
@@ -28,9 +28,9 @@ import { renderRawNotes } from "../notes/raw-notes.ts";
 import { ACTION_LISTS_FILE, buildActionLists } from "../actions/lists.ts";
 import { Pseudonymiser, UNKNOWN_USER, type PseudonymEntry } from "../privacy/pseudonymiser.ts";
 import { registerSharedNames } from "../privacy/names.ts";
-import { Run, type Calibration, type ManualAnswer, type RunScope, type RunStep } from "../schemas/index.ts";
+import { Run, type Calibration, type ManualAnswer, type RefusedRead, type RunScope, type RunStep } from "../schemas/index.ts";
 import { ApiBudget, BudgetStopError } from "../salesforce/budget.ts";
-import { SalesforceClient } from "../salesforce/client.ts";
+import { classifyError, lastDelivery, runStoppedWords, SalesforceClient, SalesforceError } from "../salesforce/client.ts";
 import type { ConnectionProvider } from "../salesforce/connection.ts";
 import type { Transport } from "../salesforce/transport.ts";
 import { allFindings, allMetrics, analyse, type AnalysisOutput } from "./evaluate.ts";
@@ -63,6 +63,11 @@ export type RunOptions = {
   log?: (message: string) => void;
   /** Complete by default. Essentials reads set-up only, and never CRM records. */
   scope?: RunScope;
+  /**
+   * The worker's last delivery of this run (DECISIONS.md 702): a transient
+   * fault of one read then costs that read rather than the run.
+   */
+  lastDelivery?: boolean;
   /** "scan" for the free set-up teaser. */
   product?: "barometer" | "scan" | "pulse";
   /** How the run is reviewed, written to run.json for its documents to read. Consultant-led unless said (DECISIONS.md 692). */
@@ -294,9 +299,14 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
       step.version = extractor.version;
     }
     const before = budget.callsMade;
+    const refused: RefusedRead[] = [];
     try {
       // Held for the whole analysis, so each repeated value is held once (DECISIONS.md 346).
-      const output = shareRepeatedValues(await extractor.run(ctx));
+      // A read Salesforce refused costs its checks, never the run; its code is kept for us (DECISIONS.md 702).
+      // On the worker's last delivery, a transient fault of one read costs that read (DECISIONS.md 702).
+      const read = (): Promise<unknown> => (options.lastDelivery === true ? lastDelivery.run(true, () => extractor.run(ctx)) : extractor.run(ctx));
+      const output = shareRepeatedValues(await noteRefusals((r) => refused.push({ step: extractor.id, ...r }), read));
+      keepRefused(run, refused, log);
       extracts.set(extractor.id, output);
       writeCheckpoint(path, output);
       for (const key of extractor.partialKeys ?? []) partial.clear(key);
@@ -317,11 +327,17 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
         return { run, dir, output: null };
       }
       step.status = "failed";
-      step.error = err instanceof Error ? err.message : String(err);
+      // Salesforce's code and message go to the log alone; run.json, which the console shows, gets plain words (DECISIONS.md 702).
+      const words = runStoppedWords(err);
+      if (words && err instanceof SalesforceError) log(`  ${extractor.id}: stopped on ${err.code.replace(/[^A-Za-z0-9_]/g, "").slice(0, 60)} (HTTP ${err.status})`);
+      step.error = words ?? (err instanceof Error ? err.message : String(err));
       // No finding reads the inventory, so its step failing costs only its own
       // section, and the run goes on; a later delivery tries it again (DECISIONS.md 609).
       // The same for PMD and ESLint's step: a run never fails because a linter did (DECISIONS.md 670).
-      if (inventorySteps.includes(extractor) || lintSteps.includes(extractor)) {
+      // Salesforce not answering before the worker's last delivery isn't the step failing: the run stops, and the
+      // queue's next delivery reads the step again, rather than lose its whole section over a blip (DECISIONS.md 702).
+      const retried = options.lastDelivery !== true && classifyError(err) === "instance_unavailable";
+      if ((inventorySteps.includes(extractor) || lintSteps.includes(extractor)) && !retried) {
         // The lint findings then say PMD didn't run, rather than show nothing as on a scan (DECISIONS.md 673).
         if (lintSteps.includes(extractor)) extracts.set(extractor.id, { pmd: notRun("pmd", LINT_STEP_FAILED), eslint: notRun("eslint", LINT_STEP_FAILED) } satisfies CodeLintData);
         await saveRun();
@@ -388,6 +404,25 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
   // Re-render so the notes show the final status and call count.
   renderOutputs(dir, run, calibration, output);
   return { run, dir, output };
+}
+
+/** The most refused reads run.json keeps: enough to see a pattern, never a file that grows without end. */
+const MAX_REFUSED = 200;
+
+/**
+ * Each read a step had refused, once, into run.json and the log (DECISIONS.md
+ * 702): what was read, and Salesforce's code and status. For us: the customer
+ * reads only the plain reason on the checks it cost.
+ */
+export function keepRefused(run: Run, refused: RefusedRead[], log: (message: string) => void): void {
+  for (const read of refused) {
+    const kept = (run.readsRefused ??= []);
+    if (kept.some((k) => k.step === read.step && k.read === read.read && k.code === read.code)) continue;
+    // Past the cap, one lost read is still kept: it is what keeps an automatic run from release (DECISIONS.md 702).
+    if (kept.length >= MAX_REFUSED && !(read.lost && !kept.some((k) => k.lost))) continue;
+    kept.push(read);
+    log(`  ${read.step}: ${read.lost ? "Salesforce didn't answer" : "Salesforce refused"} a read of ${read.read} (${read.code}, HTTP ${read.status}), so the checks it feeds are not measurable`);
+  }
 }
 
 function analyseRun(dir: string, run: Run, calibration: Calibration, modules: DomainModule[], extracts: Map<string, unknown>, answers: ManualAnswer[]): AnalysisOutput {

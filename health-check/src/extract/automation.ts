@@ -1,4 +1,4 @@
-import { isUnavailable, SalesforceError, type MetadataMember } from "../salesforce/client.ts";
+import { classifyError, isUnavailable, SalesforceError, type MetadataMember } from "../salesforce/client.ts";
 import { redactSecrets } from "../privacy/secrets.ts";
 import { scanApex, type ApexScan } from "./apex-scan.ts";
 import { selectApexSource, type SourceRow } from "./apex-source.ts";
@@ -6,7 +6,7 @@ import { APEX_READING, readTouches, type ApexTouches } from "./apex-touches.ts";
 import { orgExtractor, recordCountsExtractor } from "./configuration.ts";
 import { indexReferences, parseMetadataBundle, type MetadataBundle, type ReferenceIndex } from "./metadata-parse.ts";
 import { readBundleThroughTooling, ToolingGapError, TOOLING_PARTIAL_KEYS } from "./metadata-tooling.ts";
-import { readableReason, readSoql, unavailable, type ExtractContext, type Extractor, type Sourced, type SourceInfo } from "./types.ts";
+import { readableReason, readSoql, refusalReason, unavailable, type ExtractContext, type Extractor, type Sourced, type SourceInfo } from "./types.ts";
 
 // Salesforce's wildcard for CustomObject brings custom objects only, so a standard
 // object's rules are read only where the retrieve names it (DECISIONS.md 455).
@@ -43,6 +43,9 @@ export const TOOLING_SOURCE: SourceInfo = { kind: "metadata", path: "Tooling API
 // all, so it reads the same bundle through Tooling instead (DECISIONS.md 73).
 const needsWritePermission = (err: unknown): boolean => isUnavailable(err) && err.code === "INSUFFICIENT_ACCESS";
 
+/** A retrieve's failure that makes narrowing it to the four objects worth saving for good (DECISIONS.md 702). */
+const narrows = (err: unknown): err is SalesforceError => isUnavailable(err) || (err instanceof SalesforceError && err.code === "RETRIEVE_TIMEOUT");
+
 // Why a retrieve naming further objects failed, kept before the retrieve of the
 // four starts, so a run stopped at the budget during that one doesn't make the
 // failing retrieve again when it resumes. It holds the objects named and the
@@ -78,8 +81,12 @@ export const metadataExtractor: Extractor<Sourced<MetadataBundle>> = {
     // object it won't give us, so a failure there is tried once more with the four
     // only. A connection refused the Metadata API isn't about the objects named,
     // and goes straight to Tooling. Anything not from Salesforce is thrown as before.
-    if (!first && further.length > 0 && retrieveError instanceof SalesforceError && !needsWritePermission(retrieveError)) {
-      first = { named: further, reason: readableReason(retrieveError.message) };
+    // Saved only for Salesforce's answer about this retrieve, or a retrieve that
+    // ran out of time, where narrowing helps: an outage or a one-off fault is
+    // thrown, and the next delivery tries the wide retrieve again (DECISIONS.md 702).
+    if (!first && further.length > 0 && narrows(retrieveError) && !needsWritePermission(retrieveError)) {
+      // The code and its class, for us: Salesforce's message is kept nowhere.
+      first = { named: further, reason: `${retrieveError.code.replace(/[^A-Za-z0-9_]/g, "").slice(0, 60)} (${classifyError(retrieveError).replace(/_/g, " ")})` };
       ctx.partial.append(FALLBACK_PARTIAL, [first]);
     }
     if (first) {
@@ -95,10 +102,11 @@ export const metadataExtractor: Extractor<Sourced<MetadataBundle>> = {
     try {
       return { status: "ok", data: await readBundleThroughTooling(ctx), source: TOOLING_SOURCE, truncated: false };
     } catch (err) {
-      const why = err instanceof ToolingGapError ? err.message : isUnavailable(err) ? readableReason(err.message) : null;
+      const why = err instanceof ToolingGapError ? err.message : isUnavailable(err) ? refusalReason(err, "The same set-up through the Tooling API") : null;
       if (why === null) throw err;
-      const first = readableReason((retrieveError as Error).message);
-      return { status: "unavailable", reason: `The Metadata API refused this connection (${first}), and reading the same through the Tooling API didn't work either: ${why}`, source: TOOLING_SOURCE };
+      // Salesforce's own words for the first refusal are kept for us alone (DECISIONS.md 702).
+      if (isUnavailable(retrieveError)) refusalReason(retrieveError, "The org's set-up from the Metadata API");
+      return { status: "unavailable", reason: `The Metadata API refused this connection, and reading the same through the Tooling API didn't work either: ${why}`, source: TOOLING_SOURCE };
     }
   },
 };
