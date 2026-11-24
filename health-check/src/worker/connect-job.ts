@@ -6,7 +6,7 @@ import { readOrgStages, StoreError, type OrgStage } from "../connect/org-stages.
 import { readOrgCurrency } from "../connect/org-currency.ts";
 import { checkReadOnlyUser, permissionNote, type ReadOnlyCheck } from "../connect/read-only-check.ts";
 import { ApiBudget } from "../salesforce/budget.ts";
-import { SalesforceClient } from "../salesforce/client.ts";
+import { NoApiAccessError, SalesforceClient } from "../salesforce/client.ts";
 import { exchangeCode, OAuthError, revokeToken, type OAuthClient, type TokenSet } from "../salesforce/oauth.ts";
 import { OAuthConnectionProvider, revokeConnection } from "../salesforce/oauth-provider.ts";
 import { StoredConnection } from "../salesforce/token-store.ts";
@@ -246,6 +246,9 @@ async function connectLocked(linkId: string, deps: WorkerDeps, attempt: Attempt)
       client = await SalesforceClient.connect(provider, { budget: new ApiBudget({ stopAtShare: 0.5 }), transport: deps.dataTransport, sleep: deps.dataTransport ? async () => {} : undefined });
       check = await checkReadOnlyUser(client, stored.userId);
     } catch (err) {
+      // No API for this org or user: nothing can be read, now or on a retry, so
+      // the connect is refused in our words, never Salesforce's (DECISIONS.md 702).
+      if (err instanceof NoApiAccessError) throw new Refusal(err.message);
       // A retry finds the stored connection and reads again. On the last try,
       // the connection is kept and the note says what couldn't be read.
       if (!attempt.final) throw err;

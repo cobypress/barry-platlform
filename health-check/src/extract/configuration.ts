@@ -1,6 +1,6 @@
 import { redactSecrets } from "../privacy/secrets.ts";
 import { isUnavailable } from "../salesforce/client.ts";
-import { daysBefore, monthsBefore, readSoql, soqlWindow, unavailable, type Extractor, type Sourced, type SourceInfo } from "./types.ts";
+import { batchRefused, daysBefore, monthsBefore, readSoql, soqlWindow, unavailable, type Extractor, type Sourced, type SourceInfo } from "./types.ts";
 
 export const CORE_OBJECTS = ["Account", "Contact", "Lead", "Opportunity"] as const;
 
@@ -102,10 +102,15 @@ export const fieldUsageExtractor: Extractor<Record<string, Sourced<ObjectFieldUs
       for (let i = 0; i < scanned.length && !failure; i += USAGE_CHUNK) {
         const chunk = scanned.slice(i, i + USAGE_CHUNK);
         const columns = chunk.map((f, j) => `COUNT(${f.name}) f${j}`).join(", ");
-        const [all, recent] = await ctx.client.queryBatch<Record<string, number>>([
-          `SELECT COUNT(Id) total, ${columns} FROM ${object}`,
-          `SELECT COUNT(Id) total, ${columns} FROM ${object} WHERE ${soqlWindow("CreatedDate", recentFrom, ctx.now)}`,
-        ]);
+        const soqls = [`SELECT COUNT(Id) total, ${columns} FROM ${object}`, `SELECT COUNT(Id) total, ${columns} FROM ${object} WHERE ${soqlWindow("CreatedDate", recentFrom, ctx.now)}`];
+        let all, recent;
+        try {
+          [all, recent] = await ctx.client.queryBatch<Record<string, number>>(soqls);
+        } catch (err) {
+          // The whole call refused costs this object's field usage, never the run (DECISIONS.md 702).
+          failure = batchRefused(err, soqls)[0]!;
+          break;
+        }
         if (!all?.ok || !recent?.ok) {
           const failed = !all?.ok ? all : recent;
           failure = failed && !failed.ok ? failed.error.message : "The field usage query failed";

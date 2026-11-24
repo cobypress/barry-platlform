@@ -4,6 +4,7 @@ import { ALL_MODULES, knownModuleIds, modulesForRun } from "../domains/index.ts"
 import { runHealthCheck } from "../engine/run.ts";
 import { applyNarrative, type Rejection } from "../narrative/apply.ts";
 import type { NarrativeClient } from "../narrative/client.ts";
+import { NoApiAccessError } from "../salesforce/client.ts";
 import { buildReport, surveyMetricsOf, type BuiltReport, type ReportInput } from "../narrative/sections.ts";
 import type { Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { BASELINE_OVERRIDES_FILE, BASELINE_READ_FILE, INTERVIEWS_FILE, keepSurveyMetrics, loadRun, OUTPUT_FILES, SURVEY_FILE, writeBaselineRead, writeRows } from "../render/render-run.ts";
@@ -327,6 +328,8 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
   } catch (err) {
     // Salesforce has ended the connection: only the admin signing in again helps, so no retry (DECISIONS.md 617).
     if (err instanceof ReconnectionNeeded || provider.lostAccess) return fail(needsReconnection(name));
+    // No API for this org or user: no retry can help, and it's said plainly (DECISIONS.md 702).
+    if (err instanceof NoApiAccessError) return fail(err.message);
     const reason = safeReason(err, secrets);
     // The engine resumes from its checkpoints, so another delivery is cheap and safe.
     if (!attempt.final) throw new Error(reason);

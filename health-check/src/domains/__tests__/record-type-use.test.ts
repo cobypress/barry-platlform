@@ -871,7 +871,7 @@ describe("who connected", () => {
       test(`${name} failing with a code that isn't Salesforce's answer, quoting the id: the step stops, and neither the fault nor run.json holds the id`, async () => {
         const outDir = tempDir();
         const runId = `rt-quote-${which === isViewAllData ? "vad" : "var"}`;
-        await assert.rejects(run(quotingId("INVALID_QUERY_FILTER_OPERATOR", which)(new Simulator()), outDir, runId), (err: unknown) => err instanceof SalesforceError && err.code === "INVALID_QUERY_FILTER_OPERATOR" && !holdsId(err.message) && err.message.includes("<the connected user>"));
+        await assert.rejects(run(quotingId("SERVER_UNAVAILABLE", which)(new Simulator()), outDir, runId), (err: unknown) => err instanceof SalesforceError && err.code === "SERVER_UNAVAILABLE" && !holdsId(err.message) && err.message.includes("<the connected user>"));
         const saved = JSON.parse(readFileSync(join(outDir, runId, "run.json"), "utf8")) as { steps: Array<{ id: string; status: string; error: string | null }> };
         const step = saved.steps.find((s) => s.id === recordTypeUseExtractor.id)!;
         assert.equal(step.status, "failed");
@@ -941,11 +941,11 @@ describe("who connected", () => {
     const quoting = (sim: Simulator): Transport => ({
       async send(request) {
         const q = queriesOf([request])[0] ?? "";
-        if (isViewAllData(q)) return { status: 400, header: () => null, text: JSON.stringify([{ errorCode: "INVALID_QUERY_FILTER_OPERATOR", message: `\n${q}\n^\nERROR at Row:1:Column:80\nbad value '${org.CONNECTED_USER.id}'` }]) };
+        if (isViewAllData(q)) return { status: 400, header: () => null, text: JSON.stringify([{ errorCode: "SERVER_UNAVAILABLE", message: `\n${q}\n^\nERROR at Row:1:Column:80\nbad value '${org.CONNECTED_USER.id}'` }]) };
         return sim.send(request);
       },
     });
-    await assert.rejects(read(T, {}, quoting, BY_ID), (err: unknown) => err instanceof SalesforceError && err.code === "INVALID_QUERY_FILTER_OPERATOR" && !err.message.includes(org.CONNECTED_USER.id) && err.message.includes("<the connected user>"));
+    await assert.rejects(read(T, {}, quoting, BY_ID), (err: unknown) => err instanceof SalesforceError && err.code === "SERVER_UNAVAILABLE" && !err.message.includes(org.CONNECTED_USER.id) && err.message.includes("<the connected user>"));
   });
 
   test("the id and the username are nowhere in the run folder, the log, the raw notes or any evidence", async () => {

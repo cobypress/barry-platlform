@@ -20,7 +20,7 @@ import { fieldDescribeExtractor } from "../extract/fields.ts";
 import { buildInventory, errorClass, INVENTORY_FILE, inventoryExtractorsFor } from "../extract/inventory.ts";
 import { buildComplexity, COMPLEXITY_FILE } from "../complexity/read.ts";
 import { summariseFacts } from "../facts/summary.ts";
-import { monthsBefore, type ConnectedUser, type ExtractContext, type Extractor, type PartialStore, type Sourced } from "../extract/types.ts";
+import { monthsBefore, noteRefusals, type ConnectedUser, type ExtractContext, type Extractor, type PartialStore, type Sourced } from "../extract/types.ts";
 import { buildHandbook, HANDBOOK_FILE, labelApexModifiers, labelComponentModifiers, recentChanges } from "../handbook/build.ts";
 import type { UserRow } from "../extract/users.ts";
 import { usersExtractor } from "../extract/users.ts";
@@ -28,7 +28,7 @@ import { renderRawNotes } from "../notes/raw-notes.ts";
 import { ACTION_LISTS_FILE, buildActionLists } from "../actions/lists.ts";
 import { Pseudonymiser, UNKNOWN_USER, type PseudonymEntry } from "../privacy/pseudonymiser.ts";
 import { registerSharedNames } from "../privacy/names.ts";
-import { Run, type Calibration, type ManualAnswer, type RunScope, type RunStep } from "../schemas/index.ts";
+import { Run, type Calibration, type ManualAnswer, type RefusedRead, type RunScope, type RunStep } from "../schemas/index.ts";
 import { ApiBudget, BudgetStopError } from "../salesforce/budget.ts";
 import { SalesforceClient } from "../salesforce/client.ts";
 import type { ConnectionProvider } from "../salesforce/connection.ts";
@@ -294,9 +294,12 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
       step.version = extractor.version;
     }
     const before = budget.callsMade;
+    const refused: RefusedRead[] = [];
     try {
       // Held for the whole analysis, so each repeated value is held once (DECISIONS.md 346).
-      const output = shareRepeatedValues(await extractor.run(ctx));
+      // A read Salesforce refused costs its checks, never the run; its code is kept for us (DECISIONS.md 702).
+      const output = shareRepeatedValues(await noteRefusals((read) => refused.push({ step: extractor.id, ...read }), () => extractor.run(ctx)));
+      keepRefused(run, refused, log);
       extracts.set(extractor.id, output);
       writeCheckpoint(path, output);
       for (const key of extractor.partialKeys ?? []) partial.clear(key);
@@ -388,6 +391,23 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
   // Re-render so the notes show the final status and call count.
   renderOutputs(dir, run, calibration, output);
   return { run, dir, output };
+}
+
+/** The most refused reads run.json keeps: enough to see a pattern, never a file that grows without end. */
+const MAX_REFUSED = 200;
+
+/**
+ * Each read a step had refused, once, into run.json and the log (DECISIONS.md
+ * 702): what was read, and Salesforce's code and status. For us: the customer
+ * reads only the plain reason on the checks it cost.
+ */
+function keepRefused(run: Run, refused: RefusedRead[], log: (message: string) => void): void {
+  for (const read of refused) {
+    const kept = (run.readsRefused ??= []);
+    if (kept.length >= MAX_REFUSED || kept.some((k) => k.step === read.step && k.read === read.read && k.code === read.code)) continue;
+    kept.push(read);
+    log(`  ${read.step}: Salesforce refused a read of ${read.read} (${read.code}, HTTP ${read.status}), so the checks it feeds are not measurable`);
+  }
 }
 
 function analyseRun(dir: string, run: Run, calibration: Calibration, modules: DomainModule[], extracts: Map<string, unknown>, answers: ManualAnswer[]): AnalysisOutput {

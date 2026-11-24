@@ -1,6 +1,8 @@
 import { z } from "zod";
+import { said, type Said } from "../engine/org-words.ts";
+import { grouped } from "../engine/said-forms.ts";
 import { schemaExtractor } from "./configuration.ts";
-import { daysBefore, readSoql, soqlDate, soqlDateTime, soqlUpTo, unavailable, upToItsSecond, type ExtractContext, type Extractor, type Sourced, type SourceInfo } from "./types.ts";
+import { batchRefused, daysBefore, readSoql, soqlDate, soqlDateTime, soqlUpTo, unavailable, upToItsSecond, type ExtractContext, type Extractor, type Sourced, type SourceInfo } from "./types.ts";
 
 export type StageRow = { ApiName: string; MasterLabel: string; IsActive: boolean; IsClosed: boolean; IsWon: boolean; SortOrder: number };
 
@@ -14,7 +16,9 @@ export const stagesExtractor: Extractor<Sourced<StageRow[]>> = {
 };
 
 // Every pipeline number comes from these two rows, so they're validated on the
-// way in. A shape we don't expect should stop the run, not skew a win rate.
+// way in. A row in a shape we don't expect is left out and counted, and every
+// figure from the deals says how many; more than BAD_ROW_SHARE of them, and the
+// figures aren't measured at all rather than skewed (DECISIONS.md 702).
 export const OpportunityRow = z.object({
   Id: z.string(),
   OwnerId: z.string(),
@@ -43,6 +47,49 @@ export const HistoryRow = z.object({
   CreatedDate: z.string(),
 });
 export type HistoryRow = z.infer<typeof HistoryRow>;
+
+/**
+ * The most rows of one read that may be left out for their shape: 1 in 100. At
+ * that share, a rate over all the deals moves by about a point at most, which
+ * is within what the report rounds to, and the segment minimums keep a small
+ * segment from resting on what's left. More, and a segment could lose enough
+ * of its deals to change a finding, so the read is not measurable (rule 5).
+ */
+export const BAD_ROW_SHARE = 0.01;
+
+/** Rows that fit the schema, and how many didn't. */
+function rowsThatFit<T>(raw: unknown[], parse: (row: any) => { success: true; data: T } | { success: false }): { rows: T[]; bad: Set<number> } {
+  const rows: T[] = [];
+  const bad = new Set<number>();
+  raw.forEach((row, i) => {
+    let parsed: { success: true; data: T } | { success: false };
+    try {
+      parsed = parse(row);
+    } catch {
+      // A row that isn't even an object.
+      parsed = { success: false };
+    }
+    if (parsed.success) rows.push(parsed.data);
+    else bad.add(i);
+  });
+  return { rows, bad };
+}
+
+/** The read's reason when too many of its rows didn't fit (DECISIONS.md 702). */
+function tooManyUnfit(bad: number, total: number, what: string): string {
+  return `${bad.toLocaleString("en-GB")} of the ${total.toLocaleString("en-GB")} ${what} Salesforce gave us weren't in a shape we could read, more than 1 in 100, so figures from them would mislead.`;
+}
+
+/** What every figure from the deals says when rows were left out (DECISIONS.md 702). Nothing when none were. */
+export function leftOutNotes(extract: Pick<OpportunityExtract, "leftOut">): Said[] {
+  const { deals = 0, history = 0 } = extract.leftOut ?? {};
+  const notes: Said[] = [];
+  if (deals === 1) notes.push(said`1 deal couldn't be read and is left out.`);
+  else if (deals > 1) notes.push(said`${grouped(deals)} deals couldn't be read and are left out.`);
+  if (history === 1) notes.push(said`1 entry in the deals' stage history couldn't be read and is left out.`);
+  else if (history > 1) notes.push(said`${grouped(history)} entries in the deals' stage history couldn't be read and are left out.`);
+  return notes;
+}
 
 /** Reads `ORDER BY Id` a page at a time, checkpointing each page, so a stopped run resumes at the last Id. Stops at `maxRows` if given. */
 export async function readKeyset<R extends { Id: string }>(ctx: ExtractContext, key: string, select: string, from: string, where: string, maxRows = Infinity): Promise<R[]> {
@@ -101,6 +148,11 @@ export type OpportunityExtract = {
    * checkpoint from before it was counted.
    */
   sinceTheRun?: { woundBack?: number; asRead?: number; madeSince?: number };
+  /**
+   * Rows left out because their shape didn't fit (DECISIONS.md 702): deals and
+   * stage history entries. Absent when none were.
+   */
+  leftOut?: { deals?: number; history?: number };
 };
 
 /** By time, then id, as the pipeline sorts each deal's history (historic-pipeline/cohort.ts). */
@@ -237,11 +289,17 @@ export const opportunitiesExtractor: Extractor<OpportunityExtract> = {
     const base = { multiCurrency: available.has("CurrencyIsoCode"), lossReasonField, windowFrom };
     let opportunities: OpportunityRow[];
     const names: Record<string, string> = {};
+    const leftOut: NonNullable<OpportunityExtract["leftOut"]> = {};
+    let raw: Array<{ Id: string } & Record<string, any>>;
     try {
-      const raw = await readKeyset<{ Id: string } & Record<string, any>>(ctx, "opportunities", fields, "Opportunity", scope);
-      for (const r of raw) if (typeof r.Name === "string") names[r.Id] = r.Name;
-      opportunities = raw.map((r) =>
-        OpportunityRow.parse({
+      raw = await readKeyset<{ Id: string } & Record<string, any>>(ctx, "opportunities", fields, "Opportunity", scope);
+    } catch (err) {
+      const failed = unavailable<OpportunityRow[]>(opportunitySource, err);
+      return { ...base, opportunities: failed, history: { status: "unavailable", reason: "Opportunity couldn't be read", source: historySource } };
+    }
+    {
+      const fit = rowsThatFit(raw, (r) =>
+        OpportunityRow.safeParse({
           Id: r.Id,
           AccountId: r.AccountId ?? null,
           OwnerId: r.OwnerId,
@@ -259,32 +317,51 @@ export const opportunitiesExtractor: Extractor<OpportunityExtract> = {
           LossReason: lossReasonField ? (r[lossReasonField] ?? null) : null,
         }),
       );
-    } catch (err) {
-      const failed = unavailable<OpportunityRow[]>(opportunitySource, err);
-      return { ...base, opportunities: failed, history: { status: "unavailable", reason: "Opportunity couldn't be read", source: historySource } };
+      if (fit.bad.size > raw.length * BAD_ROW_SHARE) {
+        const reason = tooManyUnfit(fit.bad.size, raw.length, "deals");
+        return { ...base, opportunities: { status: "unavailable", reason, source: opportunitySource }, history: { status: "unavailable", reason: "Opportunity couldn't be read", source: historySource } };
+      }
+      opportunities = fit.rows;
+      raw.forEach((r, i) => {
+        if (!fit.bad.has(i) && typeof r.Name === "string") names[r.Id] = r.Name;
+      });
+      if (fit.bad.size > 0) leftOut.deals = fit.bad.size;
     }
+    const noted = Object.keys(leftOut).length > 0 ? { leftOut } : {};
 
     let history: HistoryRow[];
+    // With no history, nothing can be wound back, so every deal is as read.
+    // A deal made since is still left out: it needs only its own date.
+    const withoutHistory = (unread: Sourced<HistoryRow[]>): OpportunityExtract => {
+      const cut = asAtTheRun(opportunities, [], stages, ctx.now, { names });
+      return {
+        ...base,
+        names: cut.names,
+        opportunities: { status: "ok", source: opportunitySource, truncated: false, data: cut.opportunities },
+        history: unread,
+        sinceTheRun: { madeSince: cut.madeSince },
+        ...noted,
+      };
+    };
+    let rawHistory: unknown[];
     try {
-      const raw = await readKeyset<HistoryRow>(
+      rawHistory = await readKeyset<HistoryRow>(
         ctx,
         "opportunity-history",
         historyFields,
         "OpportunityHistory",
         historyWhere,
       );
-      history = raw.map((h) => HistoryRow.parse(h));
     } catch (err) {
-      // With no history, nothing can be wound back, so every deal is as read.
-      // A deal made since is still left out: it needs only its own date.
-      const cut = asAtTheRun(opportunities, [], stages, ctx.now, { names });
-      return {
-        ...base,
-        names: cut.names,
-        opportunities: { status: "ok", source: opportunitySource, truncated: false, data: cut.opportunities },
-        history: unavailable(historySource, err),
-        sinceTheRun: { madeSince: cut.madeSince },
-      };
+      return withoutHistory(unavailable(historySource, err));
+    }
+    {
+      const fit = rowsThatFit(rawHistory, (h) => HistoryRow.safeParse(h));
+      if (fit.bad.size > rawHistory.length * BAD_ROW_SHARE) {
+        return withoutHistory({ status: "unavailable", reason: tooManyUnfit(fit.bad.size, rawHistory.length, "entries in the deals' stage history"), source: historySource });
+      }
+      history = fit.rows;
+      if (fit.bad.size > 0) leftOut.history = fit.bad.size;
     }
     // The history read keeps no end of its own: a row made since is how a deal
     // that changed since is found, and it's dropped here (DECISIONS.md 465).
@@ -297,8 +374,10 @@ export const opportunitiesExtractor: Extractor<OpportunityExtract> = {
       opportunities: { status: "ok", source: opportunitySource, truncated: false, data: atTheRun.opportunities },
       history: { status: "ok", data: atTheRun.history, source: historySource, truncated: false },
       sinceTheRun: { woundBack: atTheRun.woundBack, asRead: atTheRun.asRead, madeSince: atTheRun.madeSince },
+      ...(Object.keys(leftOut).length > 0 ? { leftOut } : {}),
     };
   },
+  notes: leftOutNotes,
 };
 
 // NextStep is free text, so the rule only ever needs to know whether it's filled.
@@ -356,10 +435,19 @@ export const crmHealthExtractor: Extractor<CrmHealth> = {
       contactsNoEmail: "SELECT COUNT() FROM Contact WHERE Email = null",
     };
     const keys = Object.keys(queries);
-    const results = await ctx.client.queryBatch(keys.map((k) => queries[k]!));
+    const soqls = keys.map((k) => queries[k]!);
     const counts: Record<string, Sourced<number>> = {};
-    keys.forEach((key, i) => {
-      const result = results[i]!;
+    let results: Awaited<ReturnType<typeof ctx.client.queryBatch>>;
+    try {
+      results = await ctx.client.queryBatch(soqls);
+    } catch (err) {
+      // The whole call refused costs these counts' checks, never the run (DECISIONS.md 702).
+      const reasons = batchRefused(err, soqls);
+      results = [];
+      keys.forEach((key, i) => (counts[key] = { status: "unavailable", reason: reasons[i]!, source: { kind: "soql", api: "rest", query: soqls[i]! } }));
+    }
+    results.forEach((result, i) => {
+      const key = keys[i]!;
       const source: SourceInfo = { kind: "soql", api: "rest", query: queries[key]! };
       counts[key] = result.ok
         ? { status: "ok", data: result.result.totalSize, source, truncated: false }

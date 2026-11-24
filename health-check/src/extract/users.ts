@@ -1,7 +1,7 @@
 import { isUnavailable } from "../salesforce/client.ts";
 import { isNoOwnerField, recordCountsExtractor } from "./configuration.ts";
 import { FIELD_SPECS, planFields } from "./fields.ts";
-import { daysBefore, readSoql, soqlWindow, type ExtractContext, type Extractor, type Sourced, type SourceInfo } from "./types.ts";
+import { batchRefused, daysBefore, readSoql, soqlWindow, type ExtractContext, type Extractor, type Sourced, type SourceInfo } from "./types.ts";
 
 export type UserRow = {
   Id: string;
@@ -129,8 +129,17 @@ export const ownershipExtractor: Extractor<OwnershipScan> = {
       incomplete.push("custom objects");
     }
     const objects = [...CORE_OWNED, ...custom];
-    const results = await ctx.client.queryBatch<{ OwnerId: string; c: number }>(objects.map(OWNER_QUERY));
     const scan: OwnershipScan = { byOwner: {}, scanned: [], incomplete, query: OWNER_QUERY("<object>") };
+    let results: Awaited<ReturnType<typeof ctx.client.queryBatch<{ OwnerId: string; c: number }>>>;
+    try {
+      results = await ctx.client.queryBatch<{ OwnerId: string; c: number }>(objects.map(OWNER_QUERY));
+    } catch (err) {
+      // The whole call refused leaves every object unread, so no clean answer
+      // is taken as proof, and the run goes on (DECISIONS.md 702).
+      batchRefused(err, objects.map(OWNER_QUERY));
+      scan.incomplete.push(...objects);
+      return scan;
+    }
     results.forEach((result, i) => {
       const object = objects[i]!;
       if (!result.ok) {

@@ -1,5 +1,6 @@
-import type { Calibration } from "../schemas/index.ts";
-import { isUnavailable, type QueryApi, type QueryOptions, type SalesforceClient } from "../salesforce/client.ts";
+import { AsyncLocalStorage } from "node:async_hooks";
+import type { Calibration, RefusedRead } from "../schemas/index.ts";
+import { classifyError, isUnavailable, READ_AS_BEFORE, type QueryApi, type QueryOptions, type SalesforceClient, type SalesforceError } from "../salesforce/client.ts";
 import type { ApexSourceStore } from "./apex-source.ts";
 import type { CodeLintTools } from "./code-lint.ts";
 
@@ -63,11 +64,66 @@ export type Extractor<T = unknown> = {
   /** Reads CRM records, even as counts, so a set-up review never runs it. */
   records?: true;
   run(ctx: ExtractContext): Promise<T>;
+  /**
+   * What every figure and check that reads this step's output must say about
+   * it, such as rows left out (DECISIONS.md 702). Nothing when there's nothing to say.
+   */
+  notes?(output: T): string[];
 };
 
 export function unavailable<T>(source: SourceInfo, err: unknown): Sourced<T> {
-  if (isUnavailable(err)) return { status: "unavailable", reason: readableReason(err.message), source };
+  if (isUnavailable(err)) return { status: "unavailable", reason: refusalReason(err, readName(source)), source };
   throw err;
+}
+
+// Where a step's refused reads are noted while it runs (DECISIONS.md 702):
+// the run sets it around each step, and keeps what's noted in run.json and
+// its log. Nothing a customer reads holds a code.
+const refusals = new AsyncLocalStorage<(read: Omit<RefusedRead, "step">) => void>();
+
+/** Runs a step, passing each read Salesforce refused with a code we didn't take before 702 to `note`. */
+export function noteRefusals<T>(note: (read: Omit<RefusedRead, "step">) => void, run: () => Promise<T>): Promise<T> {
+  return refusals.run(note, run);
+}
+
+/** What a read was of, named for a customer: the object a query reads, or what the call was for. */
+export function readName(source: SourceInfo): string {
+  if (source.kind === "soql") {
+    // Subqueries first, so the outer FROM is the one named.
+    let query = source.query;
+    for (let before = ""; before !== query; ) [before, query] = [query, query.replace(/\([^()]*\)/g, "")];
+    const object = /\bFROM\s+([A-Za-z0-9_]+)/i.exec(query)?.[1];
+    return object ?? "This information";
+  }
+  if (source.kind === "metadata") return "The org's set-up from the Metadata API";
+  if (/recordCount/.test(source.path)) return "The org's record counts";
+  return "This information";
+}
+
+/**
+ * Why a read Salesforce refused costs its checks (DECISIONS.md 702). A code the
+ * engine took before 702 keeps the reason it gave then, so a run that worked
+ * says what it said. Any other code gets our own sentence, naming what couldn't
+ * be read and, where the code says, why; the code itself is noted for the run's
+ * log and run.json, never for the customer.
+ */
+export function refusalReason(err: SalesforceError, what: string, asBefore: (err: SalesforceError) => string = (e) => readableReason(e.message)): string {
+  if (READ_AS_BEFORE.has(err.code)) return asBefore(err);
+  refusals.getStore()?.({ read: what, code: err.code.replace(/[^A-Z0-9_]/g, "").slice(0, 60) || "UNKNOWN", status: err.status });
+  const kind = classifyError(err);
+  if (kind === "not_available") return `${what} couldn't be read, because it isn't available in this Salesforce edition or isn't switched on.`;
+  if (kind === "no_permission") return `${what} couldn't be read, because the person who connected Salesforce doesn't have permission to see it.`;
+  return `${what} couldn't be read, because Salesforce refused this read.`;
+}
+
+/**
+ * A whole composite batch Salesforce refused (DECISIONS.md 702): the reason
+ * every query in it takes, or a throw for what stops the run (a lost session,
+ * the daily limit, an outage, our own fault).
+ */
+export function batchRefused(err: unknown, soqls: string[]): string[] {
+  if (!isUnavailable(err)) throw err;
+  return soqls.map((query) => refusalReason(err, readName({ kind: "soql", api: "rest", query })));
 }
 
 /**

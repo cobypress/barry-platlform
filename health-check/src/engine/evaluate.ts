@@ -259,7 +259,10 @@ function analyseWithin(input: AnalysisInput): AnalysisOutput {
 
   const data = <T>(extractor: Extractor<T>): T => {
     if (!extracts.has(extractor.id)) throw new Error(`Extractor "${extractor.id}" didn't run`);
-    return extracts.get(extractor.id) as T;
+    const output = extracts.get(extractor.id) as T;
+    // Whatever reads the step leans on what it says of itself, such as rows left out (DECISIONS.md 702).
+    for (const note of extractor.notes?.(output) ?? []) assumed.add(note);
+    return output;
   };
 
   const manual = (key: string): ManualState => {

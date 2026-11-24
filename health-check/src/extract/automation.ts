@@ -6,7 +6,7 @@ import { APEX_READING, readTouches, type ApexTouches } from "./apex-touches.ts";
 import { orgExtractor, recordCountsExtractor } from "./configuration.ts";
 import { indexReferences, parseMetadataBundle, type MetadataBundle, type ReferenceIndex } from "./metadata-parse.ts";
 import { readBundleThroughTooling, ToolingGapError, TOOLING_PARTIAL_KEYS } from "./metadata-tooling.ts";
-import { readableReason, readSoql, unavailable, type ExtractContext, type Extractor, type Sourced, type SourceInfo } from "./types.ts";
+import { readableReason, readSoql, refusalReason, unavailable, type ExtractContext, type Extractor, type Sourced, type SourceInfo } from "./types.ts";
 
 // Salesforce's wildcard for CustomObject brings custom objects only, so a standard
 // object's rules are read only where the retrieve names it (DECISIONS.md 455).
@@ -95,7 +95,7 @@ export const metadataExtractor: Extractor<Sourced<MetadataBundle>> = {
     try {
       return { status: "ok", data: await readBundleThroughTooling(ctx), source: TOOLING_SOURCE, truncated: false };
     } catch (err) {
-      const why = err instanceof ToolingGapError ? err.message : isUnavailable(err) ? readableReason(err.message) : null;
+      const why = err instanceof ToolingGapError ? err.message : isUnavailable(err) ? refusalReason(err, "The same set-up through the Tooling API") : null;
       if (why === null) throw err;
       const first = readableReason((retrieveError as Error).message);
       return { status: "unavailable", reason: `The Metadata API refused this connection (${first}), and reading the same through the Tooling API didn't work either: ${why}`, source: TOOLING_SOURCE };

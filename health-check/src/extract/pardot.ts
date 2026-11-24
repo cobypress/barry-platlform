@@ -2,7 +2,7 @@ import { XMLParser } from "fast-xml-parser";
 import { isUnavailable } from "../salesforce/client.ts";
 import { schemaExtractor } from "./configuration.ts";
 import { readKeyset } from "./opportunities.ts";
-import { daysBefore, soqlWindow, unavailable, type ExtractContext, type Extractor, type Sourced, type SourceInfo } from "./types.ts";
+import { batchRefused, daysBefore, soqlWindow, unavailable, type ExtractContext, type Extractor, type Sourced, type SourceInfo } from "./types.ts";
 import { licencesExtractor } from "./users.ts";
 
 // Marketing Cloud Account Engagement, formerly Pardot (roadmap Stage 6,
@@ -115,14 +115,22 @@ export const pardotLeadsExtractor: Extractor<PardotLeads> = {
       return { counts: { synced: notRead(reason, queries.synced), ungraded: notRead(reason, queries.ungraded), unscored: notRead(reason, queries.unscored) }, open: notRead(reason, openSoql) };
     }
     const keys = Object.keys(queries) as Array<keyof typeof queries>;
-    const results = await ctx.client.queryBatch(keys.map((k) => queries[k]));
-    const counts = Object.fromEntries(
-      keys.map((key, i) => {
-        const r = results[i]!;
-        const source: SourceInfo = { kind: "soql", api: "rest", query: queries[key] };
-        return [key, r.ok ? { status: "ok", data: r.result.totalSize, source, truncated: false } : { status: "unavailable", reason: r.error.message, source }];
-      }),
-    ) as PardotLeads["counts"];
+    const soqls = keys.map((k) => queries[k]);
+    let counts: PardotLeads["counts"];
+    try {
+      const results = await ctx.client.queryBatch(soqls);
+      counts = Object.fromEntries(
+        keys.map((key, i) => {
+          const r = results[i]!;
+          const source: SourceInfo = { kind: "soql", api: "rest", query: queries[key] };
+          return [key, r.ok ? { status: "ok", data: r.result.totalSize, source, truncated: false } : { status: "unavailable", reason: r.error.message, source }];
+        }),
+      ) as PardotLeads["counts"];
+    } catch (err) {
+      // The whole call refused costs these counts' checks, never the run (DECISIONS.md 702).
+      const reasons = batchRefused(err, soqls);
+      counts = Object.fromEntries(keys.map((key, i) => [key, notRead(reasons[i]!, queries[key])])) as PardotLeads["counts"];
+    }
     let open: Sourced<SyncedLeadRow[]>;
     const source: SourceInfo = { kind: "soql", api: "rest", query: openSoql };
     try {

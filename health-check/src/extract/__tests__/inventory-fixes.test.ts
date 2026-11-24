@@ -118,12 +118,12 @@ describe("[1] the inventory never fails a run", () => {
 
   test("any other error from an inventory step costs only its section: the step is failed with why, and the run goes on", async () => {
     const baseline = await runHealthCheck({ provider: syntheticProvider, calibration: loadCalibration(), modules: [BARE], outDir: tempDir(), now: new Date(AS_OF), transport: new Simulator(), connectedUser: CONNECTED_USER });
-    const broken = await run(new Simulator({ failQuery: (q) => (/FROM InstalledSubscriberPackage\b/.test(q) && /SubscriberPackageId/.test(q) ? { errorCode: "SERVER_ERROR", message: "Something broke" } : null) }));
+    const broken = await run(new Simulator({ failQuery: (q) => (/FROM InstalledSubscriberPackage\b/.test(q) && /SubscriberPackageId/.test(q) ? { errorCode: "SERVER_UNAVAILABLE", message: "Something broke" } : null) }));
     assert.equal(broken.run.status, baseline.run.status);
     const step = broken.run.steps.find((s) => s.id === packagesExtractor.id)!;
     assert.equal(step.status, "failed");
     const inventory = readInventory(broken.dir);
-    assert.deepEqual(inventory.packages, { unavailable: "This part of the inventory couldn't be read: SERVER_ERROR: Something broke" });
+    assert.deepEqual(inventory.packages, { unavailable: "This part of the inventory couldn't be read: SERVER_UNAVAILABLE: Something broke" });
     assert.ok("rows" in inventory.connectedApps && "rows" in inventory.fillRates);
   });
 

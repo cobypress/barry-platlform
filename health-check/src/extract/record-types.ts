@@ -1,6 +1,6 @@
 import { SF_DEFAULTS } from "../config.ts";
 import { isUnavailable, SalesforceError } from "../salesforce/client.ts";
-import { monthsBefore, readableReason, readSoql, soqlString, soqlUpTo, soqlWindow, type ConnectedUser, type ExtractContext, type Extractor, type Sourced } from "./types.ts";
+import { batchRefused, monthsBefore, readableReason, readSoql, soqlString, soqlUpTo, soqlWindow, type ConnectedUser, type ExtractContext, type Extractor, type Sourced } from "./types.ts";
 
 // Record-type use (DECISIONS.md 497). The step reads its own list of record
 // types, because the routes the engine already has disagree on what a type is
@@ -192,8 +192,7 @@ export const recordTypeUseExtractor: Extractor<RecordTypeUse> = {
         // after the retries, a session still expired after the refresh or a
         // budget stop goes up, as in every other batch read, and the step is
         // read again from its start on resume.
-        if (!isUnavailable(err)) throw err;
-        results.push(...chunk.map(() => ({ ok: false as const, reason: readableReason(err.message) })));
+        results.push(...batchRefused(err, chunk).map((reason) => ({ ok: false as const, reason })));
         continue;
       }
       // Inside a call that came back, one count failing is that object refused,

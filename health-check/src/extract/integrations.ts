@@ -28,6 +28,9 @@ export const apiLimitsExtractor: Extractor<Sourced<Record<string, OrgLimit>>> = 
   run(ctx) {
     const source = { kind: "rest", path: `/services/data/v${ctx.client.apiVersion}/limits` } as const;
     const limits = ctx.client.limitsAtConnect;
+    // Refused at connect, it says why in our words (DECISIONS.md 702).
+    const unread = ctx.client.limitsUnread;
+    if (unread) return Promise.resolve({ status: "unavailable", reason: unread, source });
     if (Object.keys(limits).length === 0) return Promise.resolve({ status: "unavailable", reason: "The org reported none of the daily limits we read.", source });
     return Promise.resolve({ status: "ok", data: limits, source, truncated: false });
   },
