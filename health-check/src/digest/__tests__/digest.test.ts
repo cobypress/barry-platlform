@@ -259,8 +259,11 @@ describe("the run digest (DECISIONS.md 632)", () => {
     for (const f of issues) assert.ok(f.fixPrompt === report.teamFindings.find((x) => x.id === f.id)!.fixPrompt && f.orgWords?.fixPrompt, f.id);
     const total = digest.plan.hoursTotal!;
     assert.ok(total.findingIds.length > 10 && total.high >= total.low && total.low > 0);
-    // Every issue with hours is in the total, the quick wins among them; every issue without is named beside it.
-    for (const f of issues) assert.ok(f.effortHours ? total.findingIds.includes(f.id) : total.withoutHoursFindingIds.includes(f.id), f.id);
+    // Every issue the plan holds with hours is in the total, the quick wins among them; every one without is named beside it.
+    // An issue for information is never planned (buildPlan), so it is in neither (decision 703's path insights).
+    const planned = issues.filter((f) => f.severity !== "info");
+    assert.ok(issues.length - planned.length === 3 && issues.filter((f) => f.severity === "info").every((f) => !total.findingIds.includes(f.id) && !total.withoutHoursFindingIds.includes(f.id)));
+    for (const f of planned) assert.ok(f.effortHours ? total.findingIds.includes(f.id) : total.withoutHoursFindingIds.includes(f.id), f.id);
     assert.ok(digest.plan.quickWins.length > 0 && digest.plan.quickWins.every((id) => total.findingIds.includes(id)), "the quick wins are counted");
     assert.equal(new Set(total.findingIds).size, total.findingIds.length, "each finding once");
     assert.deepEqual(total.partialFindingIds, total.findingIds.filter((id) => digest.findings.find((f) => f.id === id)!.effortHours!.partial));
