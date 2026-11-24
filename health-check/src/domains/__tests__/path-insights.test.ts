@@ -276,6 +276,17 @@ describe("the review's probes", () => {
   test("1a' survivorship: of deals that reached Proposal, skippers and the rest are won equally often", () => {
     none([...many(20, [A], 0, 15), ...many(20, [A, B], 0, 25), ...many(20, [A, B, C], 0, 35), ...many(40, [A, B, C, D], 36, 45, 60), ...many(10, [A, C], 0, 35), ...many(20, [A, C, D], 18, 45, 60)]);
   });
+  test("1a'' survivorship with enough lost deals on the usual path: against deals that reached Proposal, the skippers are no different", () => {
+    // Reached Proposal through Discovery: 80, 30 won (37.5%); skippers 30, 11 won (36.7%). On the whole usual path: 40, 30 won (75%).
+    none([...many(40, [A, B, C, D], 30, 45, 60), ...many(40, [A, B, C], 0, 35), ...many(30, [A, C, D], 11, 45, 60)]);
+  });
+  test("1c' history starting late, with lost deals among them: still no skip", () => {
+    none([...many(20, [A, B, C], 0, 35), ...many(40, [A, B, C, D], 32, 45, 60), ...many(30, [C, D], 24, 50, 70)]);
+  });
+  test("7 a lost deal's closing-out move back isn't counted with the deals really sent back", () => {
+    // Sent back and on: 30, 22 won (73%); the rest through Discovery 75%. Thirty more closed out by a move back are in neither.
+    none([...many(60, [A, B, C, D], 45, 45, 60), ...many(30, [A, B, A, B, C, D], 22, 50, 65), ...many(30, [A, B, A], 0, 30)]);
+  });
   test("1b rework: deals sent back are won as often as the rest that reached the stage", () => {
     const RW = [A, B, A, B];
     none([...many(20, [A], 0, 15), ...many(30, [A, B], 0, 25), ...many(20, [A, B, C], 0, 35), ...many(40, [A, B, C, D], 36, 45, 60), ...many(15, RW, 0, 30), ...many(10, [...RW, C], 0, 40), ...many(20, [...RW, C, D], 18, 50, 65)]);
