@@ -53,10 +53,10 @@ export type AnalysisOutput = {
   records: FindingRecords[];
   /**
    * The id of every rule this analysis ran to a result, sorted, each once
-   * (DECISIONS.md 718): whatever it found, not measurable included, and a rule
-   * that ran and had nothing to report. Never an insight's, which nothing
-   * serves; never a rule its scope or modules left out, or one whose step
-   * (`onlyWith`) wasn't part of the run.
+   * (DECISIONS.md 718): whatever it found, not measurable included. Never an insight's, which nothing
+   * serves; never a rule its scope or modules left out, one whose step
+   * (`onlyWith`) wasn't part of the run, or one the calibration gives nothing
+   * to compare (`onlyIf`). Each one listed has a finding.
    */
   rulesRun: string[];
 };
@@ -465,6 +465,8 @@ function analyseWithin(input: AnalysisInput): AnalysisOutput {
     for (const rule of module.rules) {
       // A rule run only beside a step no module owns isn't run without it (DECISIONS.md 718): it would say nothing anyway.
       if (rule.onlyWith && !extracts.has(rule.onlyWith.id)) continue;
+      // Nor one whose calibration gives it nothing to compare: it isn't run, so it isn't listed as checked.
+      if (rule.onlyIf && !rule.onlyIf(calibration)) continue;
       if (!INSIGHT_RULES.has(rule.id)) ran.add(rule.id);
       currentRule = rule.id;
       assumed = new Set();

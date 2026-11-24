@@ -140,6 +140,13 @@ export type Rule = {
    * digest never lists it as checked (DECISIONS.md 718).
    */
   onlyWith?: Extractor;
+  /**
+   * Whether this run's calibration gives the rule anything to compare. A rule
+   * it says no to isn't run at all, so the digest never lists it as checked
+   * (DECISIONS.md 718): an automatic run's calibration is the org's own stage
+   * flags, so a check of one against the other has nothing to compare.
+   */
+  onlyIf?: (calibration: Calibration) => boolean;
   evaluate(ctx: RuleContext): RuleResult | RuleResult[];
 };
 
