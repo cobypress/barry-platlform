@@ -1,4 +1,3 @@
-import { apexSearched } from "./apex-searched.ts";
 import { apexExtractor, metadataExtractor } from "../extract/automation.ts";
 import type { FieldSummary } from "../extract/configuration.ts";
 import { reportDefinitionsExtractor } from "../extract/report-definitions.ts";
@@ -32,7 +31,7 @@ export function fieldGuards(ctx: RuleContext, object: string, field: FieldSummar
   const evidence = [ctx.ev(metadata.source, { count: mentions.length, note: "Searched flows, workflow rules, approval processes, assignment rules, validation rules and Apex" })];
   if (mentions.length > 0) {
     guards.push({ guardId: "not-referenced-in-automation", subject, status: "failed", detail: `Referenced in ${[...new Set(mentions)].sort().join(", ")}.`, evidence });
-  } else if (metadata.status !== "ok" || !apexSearched(apex.classes) || !apexSearched(apex.triggers)) {
+  } else if (metadata.status !== "ok" || apex.classes.status !== "ok" || apex.triggers.status !== "ok") {
     guards.push({ guardId: "not-referenced-in-automation", subject, status: "unknown", detail: "Metadata or Apex couldn't be read.", evidence });
   } else if (metadata.data.unsearched?.length) {
     // The Tooling route can't read some kinds, such as assignment rules, so not

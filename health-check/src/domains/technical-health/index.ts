@@ -346,7 +346,8 @@ const classicLeftovers: Rule = {
     // says that edition has none, so its answer is a count of none (DECISIONS.md 710). Unread is never none (291).
     const org = ctx.data(orgExtractor);
     const professional = org.status === "ok" && org.data[0]?.OrganizationType === PROFESSIONAL;
-    const scontrols: typeof classic.scontrols = classic.scontrols.status !== "ok" && professional && classic.scontrols.reason === refusalSentence("Scontrol", "not_available", "INVALID_TYPE") ? { status: "ok", data: [], source: classic.scontrols.source, truncated: false } : classic.scontrols;
+    const answeredNone = classic.scontrols.status !== "ok" && professional && classic.scontrols.reason === refusalSentence("Scontrol", "not_available", "INVALID_TYPE");
+    const scontrols: typeof classic.scontrols = answeredNone ? { status: "ok", data: [], source: classic.scontrols.source, truncated: false } : classic.scontrols;
     if (links.status !== "ok") return { outcome: "not_measurable", reason: `Custom buttons and links couldn't be read: ${links.reason}`, evidence: [ctx.ev(links.source, { count: null })] };
     if (pages.status !== "ok") return { outcome: "not_measurable", reason: `Visualforce pages couldn't be read: ${pages.reason}`, evidence: [ctx.ev(pages.source, { count: null })] };
     const javascript = links.data.filter((l) => l.LinkType?.toLowerCase() === "javascript").sort((a, b) => a.Name.localeCompare(b.Name));
@@ -355,7 +356,7 @@ const classicLeftovers: Rule = {
     const classicPages = pages.data.filter((p) => p.IsAvailableInTouch === false).sort((a, b) => a.Name.localeCompare(b.Name));
     const evidence = [
       ctx.ev(links.source, { count: javascript.length, exclusions: ["Installed packages' buttons and links", "Buttons and links that open a URL, page or flow"] }),
-      ctx.ev(scontrols.source, { count: scontrols.status === "ok" ? controls.length : null }),
+      ctx.ev(scontrols.source, { count: scontrols.status === "ok" ? controls.length : null, ...(answeredNone ? { note: "Salesforce answered that the org has no Scontrol object." } : {}) }),
       ctx.ev(pages.source, { count: classicPages.length, exclusions: ["Installed packages' pages", "Pages marked available in Lightning Experience"] }),
     ];
     const segments = [{ dimension: "component type", segments: 3 }];

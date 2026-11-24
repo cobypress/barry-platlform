@@ -340,7 +340,19 @@ export const DigestPlan = z.object({
 export type DigestPlan = z.infer<typeof DigestPlan>;
 
 export const DigestOverall = z.discriminatedUnion("status", [
-  z.object({ status: z.literal("measured"), score: z.number().int().min(0).max(100), grade: z.enum(["A", "B", "C", "D", "E"]), areaDomains: z.array(DomainId) }),
+  z.object({
+    status: z.literal("measured"),
+    score: z.number().int().min(0).max(100),
+    grade: z.enum(["A", "B", "C", "D", "E"]),
+    areaDomains: z.array(DomainId),
+    /**
+     * Said under the score when it leaves out areas we couldn't score (DECISIONS.md
+     * 710), all ours: "Your Barometer score leaves out the areas we couldn't
+     * score: <areas>." Absent when no area is left out.
+     */
+    caveat: Text.optional(),
+    orgWords: z.object({ caveat: SentenceOrgWords.optional() }).optional(),
+  }),
   z.object({ status: z.literal("not_measurable"), reason: Text, orgWords: z.object({ reason: SentenceOrgWords.optional() }).optional() }),
 ]);
 
@@ -381,5 +393,5 @@ export const DIGEST_KEYS: ReadonlySet<string> = new Set([
   "time_cost", "exposure", "groups", "lines", "leftOut", "realisation", "counted", "lineIds", "low", "expected", "high", "group", "annual", "added",
   "phases", "later", "quickWins", "alsoFor", "key", "effortHours", "basis", "partial", "timeBand", "fixComplexity", "hoursTotal", "partialFindingIds", "withoutHoursFindingIds", "notTotalledFindingIds", "note",
   "checkerRead", "readClasses", "readTriggers", "alreadyListed", "orgWords", "orgWordsMarked", "start", "end", "valueReason", "valueAssumptions", "hoursBasis", "fixPrompt", "textSha256",
-  "valueUnit", "valuePeriod", "editionNote",
+  "valueUnit", "valuePeriod", "editionNote", "caveat",
 ]);

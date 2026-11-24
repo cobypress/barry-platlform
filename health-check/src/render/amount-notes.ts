@@ -1,5 +1,6 @@
 import { CURRENCY_UNKNOWN, NO_MONEY_FIGURE } from "../engine/currency.ts";
-import { editionNoteFor } from "../narrative/edition-note.ts";
+import { editionNoteFor, scoreCaveatFor } from "../narrative/edition-note.ts";
+import type { Render } from "./html.ts";
 import { EDITION_MARKS } from "../salesforce/refusal-words.ts";
 import type { BuiltReport } from "../narrative/sections.ts";
 import type { Finding } from "../schemas/index.ts";
@@ -45,6 +46,12 @@ export function withEditionNote(report: BuiltReport, html: string): string {
     .split(PAGE)
     .map((part, i) => (i > 0 && marks.some((m) => part.includes(m)) && !part.includes(said) ? noted(part, line) : part))
     .join("");
+}
+
+/** One line under the overall score naming the areas it leaves out (DECISIONS.md 710); nothing when it leaves none out. */
+export function scoreCaveatLine(r: Render, report: BuiltReport): string {
+  const caveat = scoreCaveatFor(report);
+  return caveat ? `<p class="small-note score-caveat">${r.t(caveat)}</p>` : "";
 }
 
 /** The report with each flagged finding's summary marked, for the probe only. */

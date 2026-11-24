@@ -10,7 +10,7 @@ import { readCheckpoint } from "../../engine/checkpoint.ts";
 import { notMeasurableKind } from "../../engine/not-measurable.ts";
 import { runHealthCheck } from "../../engine/run.ts";
 import { checkedDigest } from "../../digest/checked.ts";
-import { isEditionNote } from "../../narrative/edition-note.ts";
+import { isEditionNote, isScoreCaveat, scoreCaveatFor } from "../../narrative/edition-note.ts";
 import { buildReport } from "../../narrative/sections.ts";
 import { executiveHtml } from "../../render/executive.ts";
 import { escapeXml } from "../../render/format.ts";
@@ -126,10 +126,13 @@ describe("the one table: only the Metadata API's retrieve is ever skipped", () =
 
   test("the note is known as ours only as editionNoteFor writes it", () => {
     assert.ok(isEditionNote(EDITION_NOTE));
-    assert.ok(isEditionNote(`${EDITION_NOTE} Your Barometer score leaves out the areas we couldn't score: Automation and Technical health.`));
-    assert.ok(isEditionNote(`${EDITION_NOTE} Your Barometer score leaves out the areas we couldn't score: Automation.`));
-    assert.ok(!isEditionNote(`${EDITION_NOTE} Your Barometer score leaves out the areas we couldn't score: Acme Widgets.`));
-    assert.ok(!isEditionNote(`${EDITION_NOTE} Your Barometer score leaves out the areas we couldn't score: Automation, Technical health.`));
+    // The score's caveat is no part of the edition's note: an area can go unscored on any edition.
+    assert.ok(!isEditionNote(`${EDITION_NOTE} Your Barometer score leaves out the areas we couldn't score: Automation.`));
+    assert.ok(isScoreCaveat("Your Barometer score leaves out the areas we couldn't score: Automation and Technical health."));
+    assert.ok(isScoreCaveat("Your Barometer score leaves out the areas we couldn't score: Historic pipeline."));
+    assert.ok(isScoreCaveat("Your Barometer score leaves out the areas we couldn't score: Automation, Technical health and Historic pipeline."));
+    assert.ok(!isScoreCaveat("Your Barometer score leaves out the areas we couldn't score: Acme Widgets."));
+    assert.ok(!isScoreCaveat("Your Barometer score leaves out the areas we couldn't score: Automation, Technical health."));
   });
 });
 
@@ -207,6 +210,7 @@ describe("a Professional Edition org, run end to end", () => {
   test("s-controls are none only where we asked and Professional Edition answered; unread is never none", () => {
     const pe = finding(noApex, "tech.classic-leftovers");
     assert.equal(pe.facts.scontrols, 0);
+    assert.ok(pe.evidence.some((e) => e.note === "Salesforce answered that the org has no Scontrol object." && e.count === 0));
     assert.ok(!pe.summary.includes("couldn't be read"));
     const ee = finding(enterpriseNoScontrol, "tech.classic-leftovers");
     assert.equal(ee.facts.scontrols, undefined);
@@ -254,15 +258,35 @@ describe("a Professional Edition org, run end to end", () => {
     assert.equal(unmeasuredRules(findings).edition, expected);
   });
 
-  test("a score from fewer areas says which it leaves out, once, in the note", () => {
-    const report = buildReport(noTooling.loaded.input);
-    const digest = checkedDigest({ input: noTooling.loaded.input, pseudonyms: noTooling.loaded.pseudonyms, inventory: null, madeAt: NOW }).digest!;
-    assert.equal(report.overall.status, "measured");
-    const left = (noTooling.loaded.input.scores ?? []).filter((s) => s.status !== "measured");
-    assert.ok(left.some((s) => s.domain === "automation"));
-    assert.match(digest.editionNote!, /^This org is on Professional Edition, which only opens the Metadata API to security-reviewed apps, so checks that need it are marked not measured\. Your Barometer score leaves out the areas we couldn't score: .*Automation/);
-    assert.ok(isEditionNote(digest.editionNote!));
-    assert.deepEqual(digest.orgWords?.editionNote, { orgWordsMarked: true, orgWords: [] });
+  test("a score from fewer areas says which it leaves out, on any edition; the edition's note says only the edition", () => {
+    for (const run of [noTooling, enterprise, professional]) {
+      const report = buildReport(run.loaded.input);
+      const digest = checkedDigest({ input: run.loaded.input, pseudonyms: run.loaded.pseudonyms, inventory: null, madeAt: NOW }).digest!;
+      assert.ok(report.overall.status === "measured" && digest.overall.status === "measured");
+      const left = (run.loaded.input.scores ?? []).filter((s) => !report.overall.status || !(report.overall as { areas: Array<{ domain: string }> }).areas.some((a) => a.domain === s.domain));
+      assert.ok(left.length > 0);
+      assert.equal(digest.overall.caveat, scoreCaveatFor(report));
+      assert.ok(isScoreCaveat(digest.overall.caveat!) && digest.overall.caveat!.includes("Historic pipeline"));
+      assert.deepEqual(digest.overall.orgWords?.caveat, { orgWordsMarked: true, orgWords: [] });
+      // One line under the score in each document.
+      for (const html of [fullReportHtml(report, run.loaded.pseudonyms), executiveHtml(report, run.loaded.pseudonyms), onePagerHtml(report, run.loaded.pseudonyms)]) assert.equal(html.split(escapeXml(digest.overall.caveat!)).length - 1, 1);
+    }
+    const notool = checkedDigest({ input: noTooling.loaded.input, pseudonyms: noTooling.loaded.pseudonyms, inventory: null, madeAt: NOW }).digest!;
+    assert.ok(notool.overall.status === "measured" && notool.overall.caveat!.includes("Automation"));
+    assert.equal(notool.editionNote, EDITION_NOTE);
+  });
+
+  test("a score that leaves no area out has no caveat, in the digest or under the score", () => {
+    const input = structuredClone(enterprise.loaded.input);
+    const report = buildReport(input);
+    assert.ok(report.overall.status === "measured");
+    const scored = new Set(report.overall.areas.map((a) => a.domain));
+    input.scores = (input.scores ?? []).filter((s) => scored.has(s.domain));
+    const full = buildReport(input);
+    assert.equal(scoreCaveatFor(full), null);
+    const digest = checkedDigest({ input, pseudonyms: enterprise.loaded.pseudonyms, inventory: null, madeAt: NOW }).digest!;
+    assert.ok(digest.overall.status === "measured" && digest.overall.caveat === undefined && digest.overall.orgWords === undefined);
+    for (const html of [fullReportHtml(full, enterprise.loaded.pseudonyms), executiveHtml(full, enterprise.loaded.pseudonyms), onePagerHtml(full, enterprise.loaded.pseudonyms)]) assert.ok(!html.includes("score-caveat") && !html.includes("leaves out the areas"));
   });
 
   test("the digest says the edition once, marked ours; each check only points at it; an org with everything has none", () => {
@@ -313,9 +337,15 @@ describe("a Professional Edition org, run end to end", () => {
     assert.ok(line.endsWith(".<") && !line.endsWith("..<"), line);
   });
 
-  test("a removal's guard isn't blocked by Apex the org was asked for and doesn't have", () => {
-    const guards = noApex.loaded.input.findings.flatMap((f) => f.guards);
-    assert.ok(!guards.some((g) => /Metadata or Apex couldn't be read/.test(g.detail)));
+  test("a removal's guard never passes on Apex the org refused: unknown, so the removal waits for a person", () => {
+    // ownApex() takes the edition's answer as none for counting automation; a guard on a removal never does (rule 3).
+    const blocked = noApex.loaded.input.findings.flatMap((f) => f.guards).filter((g) => g.guardId === "not-referenced-in-automation");
+    assert.ok(blocked.length > 0);
+    for (const g of blocked) assert.notEqual(g.status, "passed", g.detail);
+    // Every one that didn't find a reference says the Apex couldn't be read, for fields and users alike.
+    for (const g of blocked.filter((g) => g.status !== "failed")) assert.match(g.detail, /^Metadata or Apex couldn't be read/, g.subject);
+    assert.ok(blocked.some((g) => g.detail === "Metadata or Apex couldn't be read."));
+    assert.ok(blocked.some((g) => g.detail === "Metadata or Apex couldn't be read, so references couldn't be searched."));
   });
 
   test("what the customer reads names the edition in our words, and nowhere quotes a code", () => {

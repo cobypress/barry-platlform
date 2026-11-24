@@ -156,6 +156,7 @@ export const TEXT_SLOTS: Readonly<Record<string, Slot | "fixed">> = {
   "plan.phases[].title": slotOf((d, at) => d.plan.phases[at[0]!], "title"),
   "plan.hoursTotal.note": slotOf((d) => d.plan.hoursTotal, "note"),
   "overall.reason": slotOf((d) => (d.overall.status === "not_measurable" ? d.overall : undefined), "reason"),
+  "overall.caveat": slotOf((d) => (d.overall.status === "measured" ? d.overall : undefined), "caveat"),
 };
 
 export type DigestText = { path: string; at: number[]; text: string };

@@ -1,5 +1,5 @@
 import { CONSULTANT_NEXT_STEPS, nextStepsWords } from "./exec-pages.ts";
-import { noMoneyReason, withAmountNotes, withEditionNote } from "./amount-notes.ts";
+import { noMoneyReason, scoreCaveatLine, withAmountNotes, withEditionNote } from "./amount-notes.ts";
 import { yearlyByFinding } from "../value/model.ts";
 import { averageSentence, differenceWords, formatFigure, comparisonId } from "../benchmark/compare.ts";
 import type { BuiltReport } from "../narrative/sections.ts";
@@ -125,7 +125,7 @@ function onePagerHtmlWith(report: BuiltReport, pseudonyms: Pseudonymiser, words:
 
   const score =
     o.status === "measured"
-      ? `<div class="box"><div class="label">Barometer score</div><div class="big">${o.score}</div><p>${r.t(`Out of 100, grade ${o.grade}, ${o.word.toLowerCase()}.`)}</p></div>`
+      ? `<div class="box"><div class="label">Barometer score</div><div class="big">${o.score}</div><p>${r.t(`Out of 100, grade ${o.grade}, ${o.word.toLowerCase()}.`)}</p>${scoreCaveatLine(r, report)}</div>`
       : `<div class="box"><div class="label">Barometer score</div><p>${r.t(o.reason)}</p></div>`;
   const worth =
     value.total.expected > 0

@@ -1,4 +1,3 @@
-import { apexSearched } from "./apex-searched.ts";
 import { apexExtractor, metadataExtractor, scheduledJobsExtractor } from "../extract/automation.ts";
 import { userKinds } from "../domains/user-kinds.ts";
 import { normaliseUserKey } from "../extract/metadata-parse.ts";
@@ -94,7 +93,7 @@ export function userGuards(ctx: RuleContext, user: UserRow): Guard[] {
   const referenceEvidence = [ctx.ev(metadata.source, { count: mentions.size, note: "Searched flows, workflow rules, approval processes, assignment rules, validation rules and Apex" })];
   if (mentions.size > 0) {
     guards.push(guard("not-referenced-in-automation", subject, "failed", `Referenced in ${[...mentions].sort().join(", ")}.`, referenceEvidence));
-  } else if (metadata.status !== "ok" || !apexSearched(apex.classes) || !apexSearched(apex.triggers)) {
+  } else if (metadata.status !== "ok" || apex.classes.status !== "ok" || apex.triggers.status !== "ok") {
     guards.push(guard("not-referenced-in-automation", subject, "unknown", "Metadata or Apex couldn't be read, so references couldn't be searched.", referenceEvidence));
   } else if (metadata.data.unsearched?.length) {
     guards.push(guard("not-referenced-in-automation", subject, "unknown", `Not in what we searched, but we couldn't search these: ${metadata.data.unsearched.join(", ")}.`, referenceEvidence));
