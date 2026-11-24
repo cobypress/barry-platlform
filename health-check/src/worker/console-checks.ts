@@ -13,11 +13,11 @@ export const CONSOLE_CHECKS = {
   sectionApproval: { migration: "20261103_health_check.sql", name: "HealthCheckSection_check2", sql: `"status" = 'approved' OR ("approvedBy" IS NULL AND "approvedAt" IS NULL)` },
   reviewMode: { migration: "20261211_health_check_automatic.sql", name: "HealthCheckRun_reviewMode_check", sql: `"reviewMode" IS NULL OR "reviewMode" = 'automatic'` },
   // Redefined by 20261215, which added section_failed: the latest definition is the one that holds.
-  heldReason: { migration: "20261215_health_check_hold_section_failed.sql", name: "HealthCheckRun_heldReason_check", sql: `"heldReason" IS NULL OR (char_length("heldReason") <= 40 AND "heldReason" IN ('calibration_unreadable', 'no_digest', 'digest_held', 'score_moved', 'mostly_unmeasured', 'section_failed'))` },
+  heldReason: { migration: "20261217_health_check_hold_reads_lost.sql", name: "HealthCheckRun_heldReason_check", sql: `"heldReason" IS NULL OR (char_length("heldReason") <= 40 AND "heldReason" IN ('calibration_unreadable', 'no_digest', 'digest_held', 'score_moved', 'mostly_unmeasured', 'section_failed', 'reads_lost'))` },
   held: { migration: "20261211_health_check_automatic.sql", name: "HealthCheckRun_held_check", sql: `"heldReason" IS NULL OR ("reviewMode" IS NOT NULL AND "reviewMode" = 'automatic' AND "status" <> 'released')` },
   releaseKind: { migration: "20261211_health_check_automatic.sql", name: "HealthCheckRelease_kind_check", sql: `"kind" IN ('person', 'automatic')` },
   releasedBy: { migration: "20261211_health_check_automatic.sql", name: "HealthCheckRelease_releasedBy_check", sql: `("kind" = 'person') = ("releasedBy" IS NOT NULL)` },
-  flagKind: { migration: "20261215_health_check_hold_section_failed.sql", name: "HealthCheckRunFlag_kind_check", sql: `"kind" IN ('calibration_unreadable', 'no_digest', 'digest_held', 'score_moved', 'mostly_unmeasured', 'section_failed', 'run_failed', 'documents_held')` },
+  flagKind: { migration: "20261217_health_check_hold_reads_lost.sql", name: "HealthCheckRunFlag_kind_check", sql: `"kind" IN ('calibration_unreadable', 'no_digest', 'digest_held', 'score_moved', 'mostly_unmeasured', 'section_failed', 'run_failed', 'documents_held', 'reads_lost', 'stopped_budget')` },
   flagCounts: { migration: "20261211_health_check_automatic.sql", name: "HealthCheckRunFlag_counts_check", sql: `jsonb_typeof("counts") = 'object' AND octet_length("counts"::text) <= 1000` },
   flagCleared: { migration: "20261211_health_check_automatic.sql", name: "HealthCheckRunFlag_cleared_check", sql: `("clearedBy" IS NULL) = ("clearedAt" IS NULL)` },
 } as const satisfies Record<string, ConsoleCheck>;
