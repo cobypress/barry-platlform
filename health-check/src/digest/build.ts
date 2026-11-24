@@ -1,3 +1,4 @@
+import { editionNoteFor, isEditionNote, isScoreCaveat, scoreCaveatFor } from "../narrative/edition-note.ts";
 import { createHash } from "node:crypto";
 import { averageBeside } from "../domains/average.ts";
 import { CURRENCY_NOT_NAMED } from "../engine/currency.ts";
@@ -342,7 +343,7 @@ export function buildDigest({ report, pseudonyms, inventory, madeAt }: DigestFor
     baselineRunId: run.baselineRunId,
     overall:
       overall.status === "measured" && Number.isInteger(overall.score) && GRADE.test(overall.grade)
-        ? { status: "measured", score: overall.score, grade: overall.grade, areaDomains: overall.areas.map((a) => a.domain) }
+        ? { status: "measured", score: overall.score, grade: overall.grade, areaDomains: overall.areas.map((a) => a.domain), ...(scoreCaveatFor(report) ? { caveat: scoreCaveatFor(report)! } : {}) }
         : { status: "not_measurable", reason: overall.status === "not_measurable" ? overall.reason : "The overall score couldn't be kept." },
     areas: digestAreas(report),
     findings: report.teamFindings.map(digestFinding),
@@ -357,11 +358,16 @@ export function buildDigest({ report, pseudonyms, inventory, madeAt }: DigestFor
       ...(quickFixes.length ? { quickFixes } : {}),
     },
     withheldNames: withheldNames(inventory, pseudonyms),
+    // Once for the run, not on each check the edition left unmeasured (DECISIONS.md 710).
+    ...(editionNoteFor(report) ? { editionNote: editionNoteFor(report)! } : {}),
   };
   orgValues = orgValuesOf({ metrics: report.metrics, findings: report.input.findings, stages: report.input.calibration.stages.map((s) => s.name) });
   const guarded = guardDigest(raw, pseudonyms);
   const findings = guarded.findings.map((f, i) => withValueWords(afterGuard(raw.findings[i]!, f)));
-  const merged = { ...guarded, findings, ...fixedWords(guarded, findings) };
+  // The score's caveat and the edition's note, ours while each reads exactly as we write it (DECISIONS.md 710).
+  const said = (guarded.overall as { caveat?: string }).caveat;
+  const caveat = said !== undefined && isScoreCaveat(said) ? { overall: { ...guarded.overall, orgWords: { caveat: ENGINE_WORDS } } } : {};
+  const merged = { ...guarded, findings, ...fixedWords(guarded, findings), ...caveat, ...(guarded.editionNote !== undefined && isEditionNote(guarded.editionNote) ? { orgWords: { editionNote: ENGINE_WORDS } } : {}) };
   // Typed by the parse below, as the raw digest is.
   return RunDigest.parse({ ...merged, ...moreWords(merged as unknown as RunDigest, report) });
 }

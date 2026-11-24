@@ -31,6 +31,12 @@ export type SimulatorOptions = {
   asyncApex?: { Max: number; Remaining: number } | null;
   /** Data and file storage, as /limits reports them. The synthetic org's own by default. */
   storage?: typeof org.STORAGE_LIMITS;
+  /**
+   * Organization.OrganizationType as the org answers it (DECISIONS.md 710): the
+   * synthetic org's "Enterprise Edition" by default, another edition's name, or
+   * null for a row without the field.
+   */
+  organizationType?: string | null;
   /** False for an org without Salesforce CPQ: no SBQQ licence, and its objects can't be described. */
   cpq?: boolean;
   /** False for an org without Account Engagement: no pi licence, and none of its fields on Lead. */
@@ -337,8 +343,10 @@ export class Simulator implements Transport {
   #recordTypes: org.RecordTypeRecord[];
   #recordTypeGroups: Record<string, org.RecordTypeGroup[]> | undefined;
   #access: NonNullable<SimulatorOptions["access"]>;
+  #organizationType: string | null;
 
   constructor(options: SimulatorOptions = {}) {
+    this.#organizationType = options.organizationType === undefined ? "Enterprise Edition" : options.organizationType;
     this.#used = options.used ?? 1000;
     this.#limit = options.dailyLimit ?? 100_000;
     this.#failQuery = options.failQuery;
@@ -505,8 +513,10 @@ export class Simulator implements Transport {
     }
 
     switch (object) {
-      case "Organization":
-        return page([{ Id: org.ORG_ID, Name: "Synthetic Co", OrganizationType: "Enterprise Edition", IsSandbox: false, TimeZoneSidKey: "Europe/London", FiscalYearStartMonth: 1, ...org.SHARING_DEFAULTS }]);
+      case "Organization": {
+        const edition = this.#organizationType;
+        return page([{ Id: org.ORG_ID, Name: "Synthetic Co", ...(edition === null ? {} : { OrganizationType: edition }), IsSandbox: false, TimeZoneSidKey: "Europe/London", FiscalYearStartMonth: 1, ...org.SHARING_DEFAULTS }]);
+      }
       case "User": {
         // The connected user, looked up by a username in a SOQL string literal.
         const username = /^SELECT Id FROM User WHERE Username = '((?:[^'\\]|\\.)*)'$/.exec(soql)?.[1];

@@ -19,8 +19,8 @@ import { DURATION_MEDIANS } from "../../domains/average.ts";
 // a metric or the raw notes updates these, and says why in its commit.
 
 const GOLDEN: Record<string, Record<string, string>> = {
-  recorded: { "findings.json": "4c4d76b409cb4fe8", "metrics.json": "b64977cf778b4ed1", "scores.json": "17cdb1708449d000", "manual-steps.json": "c4daf1ca86584a33", "action-lists.json": "7018f033c3c80e0a", "raw-notes.md": "885ce7b3fb0e9e6a", "handbook.json": "64dcafcf493eef42" },
-  generated: { "findings.json": "ca12f6e176509b0e", "metrics.json": "cb39d3fda2a6435e", "scores.json": "616e42570f940402", "manual-steps.json": "15ae87c4fd76d7b6", "action-lists.json": "8eeb97766d119778", "raw-notes.md": "5c5a4dff7664b82e", "handbook.json": "23c075e2337e23a8" },
+  recorded: { "findings.json": "5af9fdd02177330b", "metrics.json": "b64977cf778b4ed1", "scores.json": "17cdb1708449d000", "manual-steps.json": "c4daf1ca86584a33", "action-lists.json": "7018f033c3c80e0a", "raw-notes.md": "885ce7b3fb0e9e6a", "handbook.json": "64dcafcf493eef42" },
+  generated: { "findings.json": "1bb01eb1eb00ba7b", "metrics.json": "cb39d3fda2a6435e", "scores.json": "616e42570f940402", "manual-steps.json": "15ae87c4fd76d7b6", "action-lists.json": "8eeb97766d119778", "raw-notes.md": "5c5a4dff7664b82e", "handbook.json": "23c075e2337e23a8" },
 };
 
 // findings.json before decision 714 put a difficulty on each issue: that key is all that moved it, and nothing else moved.

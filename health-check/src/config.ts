@@ -32,6 +32,8 @@ export const BUDGET_DEFAULTS = {
   stopAtShare: 0.5,
   // A hard ceiling on this run alone, whatever the org's limit is.
   maxCallsPerRun: 5_000,
+  // An automatic run alone spends at most this share of the org's daily limit (DECISIONS.md 710): nobody watches it.
+  automaticShareOfLimit: 0.1,
   // Metadata API responses don't carry a usage header, so re-read /limits this often.
   refreshEveryCalls: 50,
   // What a connection whose daily limit couldn't be read may spend before a

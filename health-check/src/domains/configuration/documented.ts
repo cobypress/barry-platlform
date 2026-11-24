@@ -1,3 +1,4 @@
+import { editionIsWhy } from "../../salesforce/refusal-words.ts";
 import { apexExtractor, metadataExtractor, type ApexTriggerRow } from "../../extract/automation.ts";
 import { userKinds } from "../user-kinds.ts";
 import { loginActivityExtractor } from "../../extract/adoption.ts";
@@ -114,7 +115,8 @@ function dataModel(ctx: Ctx): Metric[] {
   const exclusions = ["Objects from installed packages", "Custom objects with no records"];
   const assumptions = ["Record counts are the approximate figures Salesforce keeps for each object"];
   if (counts.status !== "ok") assumptions.push(`Record counts couldn't be read, so every custom object of your own is listed: ${counts.reason}`);
-  if (!bundle) exclusions.push(`Custom fields and record types on custom objects, because object metadata couldn't be read: ${metadata.status === "ok" ? "" : metadata.reason}`);
+  // The reason alone in its place, so the words before it are known as ours and a refusal after them is too (DECISIONS.md 702, 710).
+  if (metadata.status !== "ok") exclusions.push(`Custom fields and record types on custom objects, because object metadata couldn't be read: ${metadata.reason}`);
 
   // Field use is counted from records, which a set-up review never reads.
   const usage = ctx.scope === "essentials" ? null : ctx.data(fieldUsageExtractor);
@@ -203,7 +205,7 @@ function automation(ctx: Ctx): Metric {
       for (const step of triggerSteps(t)) items.push({ object, step, name: t.Name, active: t.Status === "Active", described: t.commented });
     }
     if (unnamed) exclusions.push(`${unnamed} Apex triggers on custom objects we couldn't name`);
-  } else exclusions.push(`Apex triggers, which couldn't be read: ${triggers.reason}`);
+  } else exclusions.push(editionIsWhy(triggers.reason) ? "Apex triggers, which Professional Edition doesn't allow the org to have of its own" : `Apex triggers, which couldn't be read: ${triggers.reason}`);
   if (duplicates.status === "ok") for (const d of duplicates.data) items.push({ object: d.SobjectType, step: "duplicate", name: d.DeveloperName, active: d.IsActive, described: null });
   else exclusions.push(`Duplicate rules, which couldn't be read: ${duplicates.reason}`);
 

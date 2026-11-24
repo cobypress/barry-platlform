@@ -3,7 +3,7 @@ import { componentChangesExtractor } from "../../extract/component-changes.ts";
 import { customObjectsExtractor, recordCountsExtractor } from "../../extract/configuration.ts";
 import { notSized, plural, type Rule, type RuleResult } from "../../engine/rule.ts";
 import { MIGRATE_TO_FLOW_NOTE, END_OF_SUPPORT } from "./notes.ts";
-import { apexGap, groupCount, metadataOr, UNNAMED, unnamedNote } from "./shared.ts";
+import { apexGap, apexReason, groupCount, metadataOr, NO_OWN_APEX, ownApex, UNNAMED, unnamedNote } from "./shared.ts";
 import { labelsOf } from "../labels.ts";
 import { labelsExtractor } from "../../extract/labels.ts";
 import type { DomainModule } from "../types.ts";
@@ -100,7 +100,9 @@ const mixedAutomation: Rule = {
     const result = metadataOr(ctx, ["workflowRules"]);
     if ("outcome" in result) return result;
     const { triggers } = ctx.data(apexExtractor);
-    if (triggers.status !== "ok") return { outcome: "not_measurable", reason: apexGap("triggers", triggers.reason), evidence: [ctx.ev(triggers.source, { count: null })] };
+    // A Professional Edition org's answer that it has no Apex of its own costs only the Apex part (DECISIONS.md 710).
+    const triggerRows = ownApex(triggers);
+    if (triggerRows === null) return { outcome: "not_measurable", reason: apexGap("triggers", apexReason(triggers)), evidence: [ctx.ev(triggers.source, { count: null })] };
     // A trigger on a custom object can name it by id, and a flow names it by API name.
     const ids = ctx.data(customObjectsExtractor);
     const objectOf = objectResolver(ids);
@@ -110,7 +112,7 @@ const mixedAutomation: Rule = {
       if (!tools.has(object)) tools.set(object, new Set());
       tools.get(object)!.add(tool);
     };
-    const active = triggers.data.filter((t) => t.Status === "Active");
+    const active = triggerRows.filter((t) => t.Status === "Active");
     const unnamed = active.filter((t) => objectOf(t.TableEnumOrId) === null).length;
     for (const t of active) add(objectOf(t.TableEnumOrId), "Apex trigger");
     for (const f of result.bundle.flows) {
@@ -124,7 +126,7 @@ const mixedAutomation: Rule = {
     const note = unnamedNote(unnamed, ids.status === "ok", unnamed === 1 ? said`it isn't counted against any object` : said`they aren't counted against any object`);
     const evidence = [
       ctx.ev({ kind: "metadata", path: "flows/*.flow, workflows/*.workflow" }, { count: mixed.length }),
-      ctx.ev(triggers.source, { count: triggers.data.length, exclusions: unnamed ? [`Active triggers on custom objects we couldn't name: ${unnamed}`] : [] }),
+      ctx.ev(triggers.source, { count: triggerRows.length, exclusions: [...(unnamed ? [`Active triggers on custom objects we couldn't name: ${unnamed}`] : []), ...(triggers.status === "ok" ? [] : [NO_OWN_APEX])] }),
       ctx.ev(ids.source, { count: ids.status === "ok" ? ids.data.length : null, note: "Names the custom objects triggers refer to by id" }),
     ];
     const segments = [{ dimension: "object", segments: tools.size }];
@@ -227,11 +229,13 @@ const undocumentedAutomation: Rule = {
     const result = metadataOr(ctx, ["workflowRules", "validationRules"]);
     if ("outcome" in result) return result;
     const { classes, triggers } = ctx.data(apexExtractor);
-    if (classes.status !== "ok") return { outcome: "not_measurable", reason: apexGap("classes", classes.reason), evidence: [ctx.ev(classes.source, { count: null })] };
-    if (triggers.status !== "ok") return { outcome: "not_measurable", reason: apexGap("triggers", triggers.reason), evidence: [ctx.ev(triggers.source, { count: null })] };
+    const classRows = ownApex(classes);
+    const triggerRows = ownApex(triggers);
+    if (classRows === null) return { outcome: "not_measurable", reason: apexGap("classes", apexReason(classes)), evidence: [ctx.ev(classes.source, { count: null })] };
+    if (triggerRows === null) return { outcome: "not_measurable", reason: apexGap("triggers", apexReason(triggers)), evidence: [ctx.ev(triggers.source, { count: null })] };
     const { flows, workflows, validationRules } = result.bundle;
     // Test classes document nothing a maintainer needs.
-    const code = [...classes.data, ...triggers.data].filter((c) => c.Status === "Active" && !c.isTest && c.commented !== null);
+    const code = [...classRows, ...triggerRows].filter((c) => c.Status === "Active" && !c.isTest && c.commented !== null);
     const groups = [
       { kind: "Flows", items: flows.filter((f) => f.status === "Active" && f.processType !== "Workflow"), undocumented: (f: { described: boolean }) => !f.described },
       { kind: "Process Builders", items: flows.filter((f) => f.status === "Active" && f.processType === "Workflow"), undocumented: (f: { described: boolean }) => !f.described },
@@ -244,7 +248,7 @@ const undocumentedAutomation: Rule = {
     const missing = present.reduce((sum, g) => sum + g.missing, 0);
     const evidence = [
       ctx.ev({ kind: "metadata", path: "flows, workflows, objects" }, { count: total - code.length, exclusions: ["Inactive flows and rules"], note: "Description element" }),
-      ctx.ev(classes.source, { count: code.length, exclusions: ["Test classes", "Inactive or hidden code"], note: "Any comment in the code" }),
+      ctx.ev(classes.source, { count: code.length, exclusions: ["Test classes", "Inactive or hidden code", ...(classes.status === "ok" && triggers.status === "ok" ? [] : [NO_OWN_APEX])], note: "Any comment in the code" }),
     ];
     const segments = [{ dimension: "component type", segments: present.length }];
     if (total === 0) return { outcome: "pass", summary: said`There's no active automation to document.`, evidence, segmentExemptReason: "Nothing to segment." };
