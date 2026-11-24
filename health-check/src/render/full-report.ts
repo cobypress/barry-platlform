@@ -15,7 +15,7 @@ import { INVENTORY_COLUMNS, inventoryRows, OBJECT_INVENTORY } from "../domains/c
 import { activeUsersChart, lightningChart, loginChannelsChart, processFlowChart, scorecardOptions, type Chart, closedAsChart, deliveryOutlookChart, HALF_WIDTH, lostByStageChart, pipelineOverTime, scorecardChart, stageFunnel, stageVelocityChart, topAccountsChart, winRateBySegment, winsByCustomerChart, wonValueByChart } from "./charts.ts";
 import { closedAgainstFirst, compactMoney, longDate, monthYear, percent, ukDates } from "./format.ts";
 import type { Calibration } from "../schemas/index.ts";
-import { chartSlot, coverScore, document, documentTitle, effortText, estimateLines, inDocumentOrder, paginate, paginateColumns, paragraphs, renderContext, sentence, severityChip, valueFigure, valueText, wrappedLines, type Render } from "./html.ts";
+import { chartSlot, coverScore, document, documentTitle, difficultySpan, difficultyText, estimateLines, inDocumentOrder, paginate, paginateColumns, paragraphs, renderContext, sentence, severityChip, valueFigure, valueText, wrappedLines, type Render } from "./html.ts";
 import { noteSections, referenceMap } from "./references.ts";
 import { scoreLine } from "./executive.ts";
 import { COMPARE_CSS, compareSlide } from "./compare.ts";
@@ -223,7 +223,7 @@ function panelNote(r: Render, f: Finding, amount: string, note: string): string 
 function issueSlide(r: Render, label: string, f: Finding, causeOf: CauseOf = noCause): Slide {
   const value = valueText(r, f);
   const note = panelNote(r, f, value.amount, value.note);
-  const meta = `<div class="meta">${severityChip(f)}<span>Confidence ${f.confidence}</span><span>${effortText(f)}</span></div>`;
+  const meta = `<div class="meta">${severityChip(f)}<span>Confidence ${f.confidence}</span>${difficultySpan(f)}</div>`;
   return {
     html: `<div class="eyebrow">${r.t(label)}</div><h2>${r.t(f.title)}</h2>${meta}<div class="columns" style="margin-top:14px"><div><p>${r.t(f.summary)}</p>${f.recommendation ? `<p style="margin-top:12px"><strong>What to do:</strong> ${r.t(f.recommendation)}</p>` : ""}${causeLine(r, causeOf(f))}</div><div class="panel"><h3>Value</h3><p><strong>${value.amount}</strong>${r.ref(f.id)}</p><p class="note">${note}</p><h3>Owner</h3><p>${r.t(f.owner)}</p>${f.dependencies.length ? `<h3>Depends on</h3><p class="note">${r.t(f.dependencies.join("; "))}</p>` : ""}</div></div>`,
   };
@@ -240,7 +240,7 @@ function smallCardHeight(f: Finding, causeOf: CauseOf = noCause): number {
 }
 
 function card(r: Render, f: Finding, causeOf: CauseOf = noCause): string {
-  return `<article class="card"><div class="meta">${severityChip(f)}<span>${effortText(f)}</span><span class="amount">${valueText(r, f).amount}</span>${r.ref(f.id)}</div><h3>${r.t(f.title)}</h3><p>${r.t(f.summary)}</p><p><strong>What to do:</strong> ${r.t(f.recommendation)}</p>${causeLine(r, causeOf(f))}</article>`;
+  return `<article class="card"><div class="meta">${severityChip(f)}${difficultySpan(f)}<span class="amount">${valueText(r, f).amount}</span>${r.ref(f.id)}</div><h3>${r.t(f.title)}</h3><p>${r.t(f.summary)}</p><p><strong>What to do:</strong> ${r.t(f.recommendation)}</p>${causeLine(r, causeOf(f))}</article>`;
 }
 
 // Nothing comes before an area's first issue page, so its title isn't "Other issues".
@@ -892,7 +892,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null, mo
     <tr><td style="width:24%"><strong>Barometer score</strong></td><td>One score out of 100 for your whole Salesforce, from the area scores, with a grade from A to E.</td></tr>
     <tr><td><strong>Severity</strong></td><td>How much damage this does if it's left alone.</td></tr>
     <tr><td><strong>Confidence</strong></td><td>How sure we are, given what we could read from your org.</td></tr>
-    <tr><td><strong>Effort</strong></td><td>Our sizing of the fix, from very small to very large.</td></tr>
+    <tr><td><strong>Difficulty</strong></td><td>How hard the fix is: a quick fix, one that needs planning, or a project. We judge it from the time the fix takes and how risky the change is.</td></tr>
     <tr><td><strong>Impact</strong></td><td>Revenue, licence cost or hours, with its assumptions. Where there's no honest figure to put on it, the risk it carries.</td></tr>
     <tr><td><strong>Not measurable</strong></td><td>The data can't support the figure, so we report that rather than estimate it.</td></tr>
     <tr><td><strong>Reference</strong></td><td>Where the working is in the raw notes that come with this report. <span data-ref>R4.3</span> is the third item in section <span data-ref>R4</span>.</td></tr></tbody></table>`);
@@ -1029,7 +1029,7 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null, mo
   // Titles only: each of these already has its card in its domain's section.
   // Each with its reference, so a reader can find the issue it comes from (night 3 reading pass).
   // An action that covers other issues from the same rule carries their references too (night 3 review).
-  const afterPlan = later.map((f) => ({ title: f.title, detail: `${severityWord(f.severity)}. ${effortText(f)}. ${f.owner}`, ref: [f.id, ...(alsoFor[f.id] ?? []).map((x) => x.id)] }));
+  const afterPlan = later.map((f) => ({ title: f.title, detail: `${severityWord(f.severity)}. ${difficultyText(f) ? `${difficultyText(f)}. ` : ""}${f.owner}`, ref: [f.id, ...(alsoFor[f.id] ?? []).map((x) => x.id)] }));
   // Titles only, so at the densest they take three columns, as the metric definitions do.
   if (later.length) slides.push(...(density?.domainSummary || density?.threeColumnLists ? threeColumnList(r, "Roadmap", "After 90 days", afterPlan) : dense ? twoColumnList(r, "Roadmap", "After 90 days", afterPlan) : listSlides(r, "Roadmap", "After 90 days", afterPlan, compact)));
 

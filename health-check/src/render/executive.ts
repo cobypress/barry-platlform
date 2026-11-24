@@ -8,7 +8,7 @@ import type { CustomerWords, Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { canRelease, type Finding, type Metric } from "../schemas/index.ts";
 import { deliveryOutlookChart, scorecardChart, scorecardOptions, winRateBySegment } from "./charts.ts";
 import { compactMoney, longDate, monthYear } from "./format.ts";
-import { chartSlot, coverScore, document, documentTitle, effortText, estimateLines, paginate, inDocumentOrder, paragraphs, printed, renderContext, severityChip, textLines, valueFigure, valueText, type Render } from "./html.ts";
+import { chartSlot, coverScore, document, documentTitle, difficultySpan, estimateLines, paginate, inDocumentOrder, paragraphs, printed, renderContext, severityChip, textLines, valueFigure, valueText, type Render } from "./html.ts";
 import { noteSections, referenceMap, valueItemId } from "./references.ts";
 import { investmentPage, MONEY_CSS, moneyPage } from "./money.ts";
 import { PROGRESS_CSS, progressPage } from "./progress.ts";
@@ -63,7 +63,7 @@ function issueHeight(f: Finding): number {
 
 function issueCard(r: Render, f: Finding, rank: number): string {
   const value = valueText(r, f);
-  return `<article class="issue"><div class="meta"><span>${rank}</span>${severityChip(f)}<span>Confidence ${f.confidence}</span><span>${effortText(f)}</span><span>Owner: ${r.t(f.owner)}</span>${r.ref(f.id)}</div><h3>${r.t(f.title)}</h3><p>${r.t(f.summary)}</p><p class="action"><strong>What to do:</strong> ${r.t(f.recommendation)}</p><p class="value">${value.amount}<small>${value.note}</small></p></article>`;
+  return `<article class="issue"><div class="meta"><span>${rank}</span>${severityChip(f)}<span>Confidence ${f.confidence}</span>${difficultySpan(f)}<span>Owner: ${r.t(f.owner)}</span>${r.ref(f.id)}</div><h3>${r.t(f.title)}</h3><p>${r.t(f.summary)}</p><p class="action"><strong>What to do:</strong> ${r.t(f.recommendation)}</p><p class="value">${value.amount}<small>${value.note}</small></p></article>`;
 }
 
 /** A summary page holds about a dozen actions. The full report has each phase in full. */

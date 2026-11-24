@@ -976,8 +976,10 @@ describe("the full report's money fits its slides, two at most", () => {
     // Sales and Service Cloud at step 9 with 130, each at its ceiling. A second money
     // slide took them a step denser, the second to the step that gives up the area
     // chapters; so where it's the second slide that takes the deck past its ceiling,
-    // the money adds the rest up on one (DECISIONS.md 439).
-    for (const [[name, options], step, slides] of [[SAMPLES[0]!, 8, 120], [SAMPLES[1]!, 9, 130]] as const) {
+    // the money adds the rest up on one (DECISIONS.md 439). Since decision 714 the after-90-days
+    // list says "Quick fix" where it said "Effort: very small", a line shorter on Sales and Service
+    // Cloud's 40 added lines, so its second money slide now fits under the ceiling and is kept.
+    for (const [[name, options], step, slides, moneySlides] of [[SAMPLES[0]!, 8, 120, 1], [SAMPLES[1]!, 9, 130, 2]] as const) {
       const { input, names } = await sampleOf(options);
       const report = buildReport({ ...withMoneyLines(input, 40, 16, (i) => 900 + 470 * i), survey: syntheticSurvey(12) });
       const counts = slideCounts(report, names);
@@ -987,10 +989,10 @@ describe("the full report's money fits its slides, two at most", () => {
       const html = fullReportHtml(report, names);
       assert.equal(pagesOf(html).length, slides, name);
       const money = moneySlidesOf(html);
-      assert.equal(money.length, 1, name);
-      assert.match(money[0]!, /And \d+ smaller lines, in the raw notes\./);
+      assert.equal(money.length, moneySlides, name);
+      if (moneySlides === 1) assert.match(money[0]!, /And \d+ smaller lines, in the raw notes\./);
       assert.deepEqual(slidesWrong(html, report, names), [], name);
-      assert.deepEqual(await problemsOn(html, [{ page: money[0]!, label: name }], report), []);
+      assert.deepEqual(await problemsOn(html, money.map((page) => ({ page, label: name })), report), []);
     }
   });
 

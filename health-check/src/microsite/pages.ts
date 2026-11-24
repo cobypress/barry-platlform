@@ -9,7 +9,7 @@ import { currentBody } from "../narrative/sections.ts";
 import { SURVEY } from "../survey/summary.ts";
 import { READING_LABELS } from "../interviews/readings.ts";
 import { byRole } from "../render/interviews.ts";
-import { effortText, inDocumentOrder, renderContext, valueText, type Render } from "../render/html.ts";
+import { difficultyText, inDocumentOrder, renderContext, valueText, type Render } from "../render/html.ts";
 import { noteSections, referenceMap } from "../render/references.ts";
 import { HEADLINE_KINDS, KIND_LABELS, yearlyByFinding } from "../value/model.ts";
 import { DOCUMENTED, readDocument } from "../domains/configuration/documented.ts";
@@ -171,7 +171,7 @@ function issues(r: Render, report: BuiltReport): string {
       const cards = own
         .map((f) => {
           const value = valueText(r, f);
-          return `<div class="issue"><div class="meta">${chip(f.severity)}<span>${r.t(effortText(f))}</span><span>${r.t(`Owner: ${f.owner}`)}</span>${r.ref(f.id)}</div><h3>${r.t(f.title)}</h3><p>${r.t(f.summary)}</p>${f.recommendation ? `<p><strong>What to do:</strong> ${r.t(f.recommendation)}</p>` : ""}<p class="muted"><strong>${value.amount}</strong> ${value.note}</p></div>`;
+          return `<div class="issue"><div class="meta">${chip(f.severity)}${difficultyText(f) ? `<span>${r.t(difficultyText(f))}</span>` : ""}<span>${r.t(`Owner: ${f.owner}`)}</span>${r.ref(f.id)}</div><h3>${r.t(f.title)}</h3><p>${r.t(f.summary)}</p>${f.recommendation ? `<p><strong>What to do:</strong> ${r.t(f.recommendation)}</p>` : ""}<p class="muted"><strong>${value.amount}</strong> ${value.note}</p></div>`;
         })
         .join("");
       const good = practiceFor(domain);

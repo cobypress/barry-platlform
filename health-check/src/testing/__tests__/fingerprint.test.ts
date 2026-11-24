@@ -19,9 +19,12 @@ import { DURATION_MEDIANS } from "../../domains/average.ts";
 // a metric or the raw notes updates these, and says why in its commit.
 
 const GOLDEN: Record<string, Record<string, string>> = {
-  recorded: { "findings.json": "9c3e03a2db501670", "metrics.json": "b64977cf778b4ed1", "scores.json": "17cdb1708449d000", "manual-steps.json": "c4daf1ca86584a33", "action-lists.json": "7018f033c3c80e0a", "raw-notes.md": "885ce7b3fb0e9e6a", "handbook.json": "64dcafcf493eef42" },
-  generated: { "findings.json": "998e50194fd092df", "metrics.json": "cb39d3fda2a6435e", "scores.json": "616e42570f940402", "manual-steps.json": "15ae87c4fd76d7b6", "action-lists.json": "8eeb97766d119778", "raw-notes.md": "5c5a4dff7664b82e", "handbook.json": "23c075e2337e23a8" },
+  recorded: { "findings.json": "4c4d76b409cb4fe8", "metrics.json": "b64977cf778b4ed1", "scores.json": "17cdb1708449d000", "manual-steps.json": "c4daf1ca86584a33", "action-lists.json": "7018f033c3c80e0a", "raw-notes.md": "885ce7b3fb0e9e6a", "handbook.json": "64dcafcf493eef42" },
+  generated: { "findings.json": "ca12f6e176509b0e", "metrics.json": "cb39d3fda2a6435e", "scores.json": "616e42570f940402", "manual-steps.json": "15ae87c4fd76d7b6", "action-lists.json": "8eeb97766d119778", "raw-notes.md": "5c5a4dff7664b82e", "handbook.json": "23c075e2337e23a8" },
 };
+
+// findings.json before decision 714 put a difficulty on each issue: that key is all that moved it, and nothing else moved.
+const BEFORE_714: Record<string, string> = { recorded: "9c3e03a2db501670", generated: "998e50194fd092df" };
 
 // Before decision 709 kept each duration's average beside its median: with the stat taken out, metrics.json hashes as
 // it did. findings.json and scores.json never moved; raw-notes.md gains the stat in each measure's detail line.
@@ -75,8 +78,16 @@ function withoutAverages(dir: string): void {
   writeFileSync(path, `${JSON.stringify(metrics, null, 2)}\n`);
 }
 
-/** The run's findings.json and metrics.json with decision 706's finding and metric taken out, its stage read named as before it, and 709's averages before them. */
+/** The run's findings.json with decision 714's difficulty taken out of every finding. */
+function withoutDifficulty(dir: string): void {
+  const path = join(dir, "findings.json");
+  const findings = (JSON.parse(readFileSync(path, "utf8")) as Array<Record<string, unknown>>).map(({ difficulty: _d, ...rest }) => rest);
+  writeFileSync(path, `${JSON.stringify(findings, null, 2)}\n`);
+}
+
+/** The run's findings.json and metrics.json with decision 706's finding and metric taken out, its stage read named as before it, and 709's averages and 714's difficulty before them. */
 function withoutProbabilities(dir: string): void {
+  withoutDifficulty(dir);
   withoutAverages(dir);
   for (const [file, ours] of [["findings.json", (x: Record<string, unknown>) => x.ruleId === "pipe.probability-vs-reality"], ["metrics.json", (x: Record<string, unknown>) => x.id === "historic.stage_probability_vs_won"]] as const) {
     const path = join(dir, file);
@@ -133,6 +144,16 @@ function withoutLaterMarks(dir: string): void {
 
 test("the synthetic org's findings, metrics, scores, action lists, raw notes and handbook are as they were", async () => {
   assert.deepEqual(await recorded(), GOLDEN.recorded);
+});
+
+// On the recorded run alone, before any generated run in this process (decision 655's store, as above); the generated
+// org's findings.json is held without the difficulty by the 628 and 655 tests below.
+test("decision 714 moved findings.json by the difficulty alone: without it it is as it was, and nothing else moved", async () => {
+  const dir = await recordedDir();
+  const issues = (JSON.parse(readFileSync(join(dir, "findings.json"), "utf8")) as Array<{ status: string; difficulty?: unknown }>).filter((f) => f.status === "issue");
+  assert.ok(issues.length > 0 && issues.every((f) => f.difficulty));
+  withoutDifficulty(dir);
+  assert.deepEqual(fingerprint(dir), { ...GOLDEN.recorded, "findings.json": BEFORE_714.recorded });
 });
 
 // Before any generated run in this process: a sentence another run quoted with org words reads as unknown in a later one
