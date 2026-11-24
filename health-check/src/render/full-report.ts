@@ -1111,7 +1111,7 @@ export function fullReportHtml(report: BuiltReport, pseudonyms: Pseudonymiser): 
  */
 export function fullReportHtmlAt(report: BuiltReport, pseudonyms: Pseudonymiser, step: number | null): string {
   // Each page with an amount in a currency not known by name says so (DECISIONS.md 700).
-  return withAmountNotes(report.value.currencyNote, () => inDocumentOrder(pseudonyms, (words) => fullReportHtmlWith(report, pseudonyms, step, words)));
+  return withAmountNotes(report, (made) => inDocumentOrder(pseudonyms, (words) => fullReportHtmlWith(made, pseudonyms, step, words)));
 }
 
 function fullReportHtmlWith(report: BuiltReport, pseudonyms: Pseudonymiser, step: number | null, words: CustomerWords): string {

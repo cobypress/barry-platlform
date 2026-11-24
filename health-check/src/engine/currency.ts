@@ -51,5 +51,8 @@ export const currencyUnknownReason = (): Said => said`We couldn't read which cur
 /** Where a money total has nothing in it because the run couldn't tell the currency (DECISIONS.md 700): said in place of "they matter for the risk they carry". */
 export const NO_MONEY_FIGURE = "We couldn't read which currency your Salesforce amounts are in, so we haven't put a money figure on these. Tell us and your next health check can show it.";
 
+/** The words that name a currency in a draft (DECISIONS.md 700): sent back on a run whose currency isn't known by name, number or not. */
+export const CURRENCY_WORDS = /\b(?:pounds?|dollars?|euros?|sterling|yen|rupees?|quid)\b/i;
+
 /** Every ISO 4217 code a page could print, and the symbols: none may appear in what the customer of a run with no code reads. */
 export const CURRENCY_SIGNS = /[£$€¥₹¤]|\b(?:XXX|XTS|GBP|USD|EUR|AUD|CAD|NZD|CHF|JPY|CNY|INR|ZAR|SEK|NOK|DKK|PLN|SGD|HKD|AED|BRL|MXN)\b/;

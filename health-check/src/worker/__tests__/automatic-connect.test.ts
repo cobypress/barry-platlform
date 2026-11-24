@@ -675,9 +675,10 @@ describe("an automatic run's currency at connect never holds it (DECISIONS.md 70
     const { runId: _r, ...back } = row;
     assert.equal(calibrationFromRow(back).currencyFrom, "org");
     assert.equal(calibrationFromRow(back).currencySuggested, "GBP");
-    // A person's calibration never carries one, whatever its fields hold.
-    assert.equal(calibrationFromRow({ ...back, source: "confirmed" }).currencyFrom, undefined);
-    // One read before 700, with nothing in its fields: the org's own, as before.
-    assert.equal(calibrationFromRow({ ...back, fields: {} }).currencyFrom, undefined);
+    // A person's calibration never carries one, whatever its fields hold, and can't hold "no currency" (fix round 2).
+    assert.equal(calibrationFromRow({ ...back, source: "confirmed", currency: "GBP" }).currencyFrom, undefined);
+    assert.throws(() => calibrationFromRow({ ...back, source: "confirmed" }));
+    // One read before 700, with nothing in its fields and a code: the org's own, as before.
+    assert.equal(calibrationFromRow({ ...back, fields: {}, currency: "EUR" }).currencyFrom, undefined);
   });
 });

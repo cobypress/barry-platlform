@@ -136,6 +136,9 @@ export const Finding = z
     fixPrompt: z.string().min(1).max(FIX_PROMPT_MAX).optional(),
     // The sentences the engine can vouch for, each with the org's characters marked (DECISIONS.md 655). Absent: unknown.
     orgWords: FindingOrgWords.optional(),
+    // Its amounts are in a currency not known by name, printed as plain numbers (DECISIONS.md 700): the line saying so is
+    // the page's, the section's and the digest's (value.currencyNote), never the finding's own text. Absent otherwise.
+    amountsUnnamed: z.literal(true).optional(),
   })
   .superRefine((f, ctx) => {
     if (f.status === "not_measurable" && !f.notMeasurableReason) {

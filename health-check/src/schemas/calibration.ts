@@ -76,6 +76,11 @@ export const Calibration = z
       .optional(),
   })
   .superRefine((c, ctx) => {
+    // "No currency" and the testing code belong only to a calibration read from the org's settings (DECISIONS.md 700):
+    // a person's always names its currency, so its amounts are never plain numbers with no line to say why.
+    if ((c.currency === "XXX" || c.currency === "XTS") && c.source !== "org_settings") {
+      ctx.addIssue({ code: "custom", path: ["currency"], message: "A person's calibration names its currency" });
+    }
     const seen = new Set<string>();
     for (const stage of c.stages) {
       if (seen.has(stage.name)) ctx.addIssue({ code: "custom", path: ["stages"], message: `Stage "${stage.name}" is listed twice` });

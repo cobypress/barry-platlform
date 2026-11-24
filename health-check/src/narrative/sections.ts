@@ -903,7 +903,10 @@ export function buildReport(given: ReportInput): BuiltReport {
   const team = effective.findings.map(teamLevelFinding);
   const overall = overallScore(scores, effective.findings);
   const teamTime = teamTimeOf(effective.metrics);
-  const value = buildValueModel(effective.findings, run, calibration.currency, intake?.hourlyCost, teamTime, valueCurrency(calibration, intake?.hourlyCost));
+  // The currency line only where an amount is shown (DECISIONS.md 700): a run that can't tell its currency shows none, so says none of it.
+  const amountsShown = effective.findings.some((f) => f.amountsUnnamed) || effective.metrics.some((m) => m.status === "measured" && m.unit === "currency");
+  const { note: currencyNote, ...money } = valueCurrency(calibration, intake?.hourlyCost);
+  const value = buildValueModel(effective.findings, run, calibration.currency, intake?.hourlyCost, teamTime, { ...money, ...(currencyNote && amountsShown ? { note: currencyNote } : {}) });
   const added = addedByFinding(value);
   const survey = buildSurveyView(effective.metrics, team);
   const interviews = buildInterviewView(input.interviews, team, effective.metrics);

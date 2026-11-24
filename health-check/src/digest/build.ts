@@ -128,6 +128,7 @@ function digestFinding(f: Finding): DigestFinding {
     ...(f.fixComplexity ? { fixComplexity: f.fixComplexity } : {}),
     ...fixPromptOf(f),
     ...checkerReadOf(f),
+    ...(f.amountsUnnamed ? { amountsUnnamed: true as const } : {}),
     ...orgWordsOf(f),
   };
 }

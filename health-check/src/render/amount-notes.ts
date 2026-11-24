@@ -1,4 +1,5 @@
 import { CURRENCY_UNKNOWN, NO_MONEY_FIGURE } from "../engine/currency.ts";
+import type { BuiltReport } from "../narrative/sections.ts";
 import type { Finding } from "../schemas/index.ts";
 import { HOURS_NOT_NAMED, type ValueModel } from "../value/model.ts";
 import { AMOUNT_MARK, escapeXml, probingAmounts } from "./format.ts";
@@ -8,16 +9,29 @@ import { AMOUNT_MARK, escapeXml, probingAmounts } from "./format.ts";
 // such amount marked, to find those pages, and again for real, with the line
 // put on each, above its footer. A page that already says it gets it once.
 
-/** The document `make` builds, with `note` on every page that prints an amount. With no note, exactly as `make` builds it. */
-export function withAmountNotes(note: string | undefined, make: () => string): string {
-  if (!note) return make();
-  const probe = probingAmounts(make).split(PAGE);
-  const real = make().split(PAGE);
+/**
+ * The document `make` builds from the report, with the report's currency note
+ * on every page that prints an amount. A finding flagged `amountsUnnamed` counts
+ * as one wherever its text is printed: amounts said inside a stored summary
+ * carry no mark of their own. With no note, exactly as `make` builds it.
+ */
+export function withAmountNotes(report: BuiltReport, make: (report: BuiltReport) => string): string {
+  const note = report.value.currencyNote;
+  if (!note) return make(report);
+  const probe = probingAmounts(() => make(markedFindings(report))).split(PAGE);
+  const real = make(report).split(PAGE);
   const line = `<p class="note amounts-note">${escapeXml(note)}</p>`;
   const said = escapeXml(note);
   // The same document twice, so the same pages: if not, every page says it rather than any going without.
   const marked = (i: number): boolean => (probe.length === real.length ? probe[i]!.includes(AMOUNT_MARK) : true);
   return real.map((part, i) => (i > 0 && marked(i) && !part.includes(said) ? noted(part, line) : part)).join("");
+}
+
+/** The report with each flagged finding's summary marked, for the probe only. */
+function markedFindings(report: BuiltReport): BuiltReport {
+  // The summary is where a finding says its amounts; a title alone, as the roadmap lists them, says none.
+  const mark = <T extends Finding>(f: T): T => (f.amountsUnnamed ? { ...f, summary: `${AMOUNT_MARK}${f.summary}` } : f);
+  return { ...report, teamFindings: report.teamFindings.map(mark), input: { ...report.input, findings: report.input.findings.map(mark) } };
 }
 
 const PAGE = /(?=<section class="page)/;
