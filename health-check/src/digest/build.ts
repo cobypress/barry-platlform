@@ -1,3 +1,5 @@
+import { editionNoteOf } from "../extract/org-profile.ts";
+import { isEditionNote } from "../salesforce/refusal-words.ts";
 import { createHash } from "node:crypto";
 import { averageBeside } from "../domains/average.ts";
 import { CURRENCY_NOT_NAMED } from "../engine/currency.ts";
@@ -344,11 +346,13 @@ export function buildDigest({ report, pseudonyms, inventory, madeAt }: DigestFor
       ...(hoursTotal ? { hoursTotal } : {}),
     },
     withheldNames: withheldNames(inventory, pseudonyms),
+    // Once for the run, not on each check the edition left unmeasured (DECISIONS.md 710).
+    ...(editionNoteOf(run.orgProfile) ? { editionNote: editionNoteOf(run.orgProfile)! } : {}),
   };
   orgValues = orgValuesOf({ metrics: report.metrics, findings: report.input.findings, stages: report.input.calibration.stages.map((s) => s.name) });
   const guarded = guardDigest(raw, pseudonyms);
   const findings = guarded.findings.map((f, i) => withValueWords(afterGuard(raw.findings[i]!, f)));
-  const merged = { ...guarded, findings, ...fixedWords(guarded, findings) };
+  const merged = { ...guarded, findings, ...fixedWords(guarded, findings), ...(guarded.editionNote !== undefined && isEditionNote(guarded.editionNote) ? { orgWords: { editionNote: ENGINE_WORDS } } : {}) };
   // Typed by the parse below, as the raw digest is.
   return RunDigest.parse({ ...merged, ...moreWords(merged as unknown as RunDigest, report) });
 }

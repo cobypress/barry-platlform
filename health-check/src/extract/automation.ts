@@ -1,5 +1,5 @@
 import { classifyError, isUnavailable, NotInOrgError, SalesforceError, type MetadataMember } from "../salesforce/client.ts";
-import { NO_APEX_IN_EDITION } from "../salesforce/refusal-words.ts";
+import { editionPointer } from "../salesforce/refusal-words.ts";
 import { redactSecrets } from "../privacy/secrets.ts";
 import { scanApex, type ApexScan } from "./apex-scan.ts";
 import { selectApexSource, type SourceRow } from "./apex-source.ts";
@@ -268,7 +268,7 @@ export const apexExtractor: Extractor<ApexData> = {
     const org = ctx.get(orgExtractor);
     const edition = org?.status === "ok" ? org.data[0]?.OrganizationType : undefined;
     const noApex = <T>(rows: Sourced<T>): Sourced<T> =>
-      rows.status === "unavailable" && edition === "Professional Edition" && /isn't available in this org/.test(rows.reason) ? { ...rows, reason: NO_APEX_IN_EDITION } : rows;
+      rows.status === "unavailable" && edition === "Professional Edition" && /isn't available in this org/.test(rows.reason) ? { ...rows, reason: editionPointer("Apex") } : rows;
     const classRows = stripBodies(classes.rows, "ApexClass", references);
     const triggerRows = stripBodies(triggers.rows, "ApexTrigger", references);
     // Kept only once every page of both is read, so a step stopped part way and

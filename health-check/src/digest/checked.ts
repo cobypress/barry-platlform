@@ -152,6 +152,7 @@ export const TEXT_SLOTS: Readonly<Record<string, Slot | "fixed">> = {
   "value.groups[].label": slotOf((d, at) => d.value.groups[at[0]!], "label"),
   "value.currencyNote": slotOf((d) => d.value, "currencyNote"),
   "value.currencySuggested": slotOf((d) => d.value, "currencySuggested"),
+  "editionNote": slotOf((d) => d, "editionNote"),
   "plan.phases[].title": slotOf((d, at) => d.plan.phases[at[0]!], "title"),
   "plan.hoursTotal.note": slotOf((d) => d.plan.hoursTotal, "note"),
   "overall.reason": slotOf((d) => (d.overall.status === "not_measurable" ? d.overall : undefined), "reason"),

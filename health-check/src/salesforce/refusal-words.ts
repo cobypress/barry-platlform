@@ -41,32 +41,52 @@ export function refusalSentence(what: string, kind: RefusalKind, code = ""): str
 /**
  * What an edition doesn't include, in a customer's words (DECISIONS.md 710):
  * each is a fact from Salesforce's own documentation, never inferred from a
- * read that came back empty.
+ * read that came back empty. In the order the run's note names them.
  */
-export const EDITION_LACKS = ["the Metadata API", "s-controls", "Sites"] as const;
+export const EDITION_LACKS = ["Apex", "the Metadata API", "s-controls", "Sites"] as const;
 export type EditionLack = (typeof EDITION_LACKS)[number];
 
 /**
- * The sentence for a read the engine didn't make because the org's edition
- * doesn't include what it reads (DECISIONS.md 710). `what` is as for
- * refusalSentence: an object's API name, or one of READ_NAMES.
+ * A check's reason when the org's edition doesn't include what it reads
+ * (DECISIONS.md 710): short, because it stands on many checks and the run's
+ * note (editionNote) says the rest once.
  */
-export function editionSentence(what: string, lacks: EditionLack): string {
-  return `${what} wasn't read, because Professional Edition doesn't include ${lacks}.`;
+export function editionPointer(lacks: EditionLack): string {
+  return `Needs ${lacks}${EDITION_POINTER_STEM}`;
 }
 
-/** Professional Edition has no Apex of the org's own (DECISIONS.md 710): the Apex step's sentence since before it. */
+/** What every pointer ends with, so a page that prints one can be found. */
+export const EDITION_POINTER_STEM = ", which Professional Edition doesn't include.";
+
+/** The Apex step's sentence before 710, still read back from runs that hold it. */
 export const NO_APEX_IN_EDITION = "Professional Edition has no Apex, so there's no code to check.";
 
 /** The metadata step's reason when the Tooling route failed too, on an org whose edition has no Metadata API (DECISIONS.md 710). */
 export const TOOLING_AFTER_EDITION = "Professional Edition doesn't include the Metadata API, and reading the same through the Tooling API didn't work either: ";
 
 /**
+ * The run's one note about its edition (DECISIONS.md 710), for the digest and
+ * each page that shows a check it left unmeasured; null when the edition left
+ * nothing out.
+ */
+export function editionNote(lacks: readonly EditionLack[]): string | null {
+  const named = EDITION_LACKS.filter((l) => lacks.includes(l));
+  if (named.length === 0) return null;
+  const list = named.length === 1 ? named[0]! : `${named.slice(0, -1).join(", ")} or ${named.at(-1)}`;
+  return `This org is on Professional Edition, which doesn't include ${list}. Checks that need ${named.length === 1 ? "it" : "them"} are marked not measured.`;
+}
+
+/**
  * Whether a not measurable reason says the org's edition is why (DECISIONS.md
  * 710), wherever in it the sentence sits: a rule may put its own words first.
  */
 export function editionIsWhy(reason: string): boolean {
-  return EDITION_ANYWHERE.test(reason) || reason.includes(NO_APEX_IN_EDITION) || reason.startsWith(TOOLING_AFTER_EDITION);
+  return POINTER_ANYWHERE.test(reason) || reason.includes(NO_APEX_IN_EDITION) || reason.startsWith(TOOLING_AFTER_EDITION);
+}
+
+/** Whether a text is exactly a note editionNote writes. */
+export function isEditionNote(text: string): boolean {
+  return EDITION_NOTE.test(text) && editionNote(EDITION_LACKS.filter((l) => text.includes(l === "Apex" ? "include Apex" : l))) === text;
 }
 
 /** The org's limits, refused at connect. */
@@ -95,8 +115,9 @@ const SENTENCE = new RegExp(`^(.+?) couldn't be read, because (?:${ENDINGS})\\.$
 const NOT_THERE = /^(.+?) isn't available in this org, or to the connected user\.$/;
 const UNFIT = /^[\d,]+ of the [\d,]+ (?:(?:won |lost |open )?deals|entries in the deals' stage history) Salesforce gave us weren't in a shape we could read, more than 1 in 100, so figures from them would mislead\.$/;
 const LACKS = EDITION_LACKS.map((l) => l.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
-const EDITION = new RegExp(`^(.+?) wasn't read, because Professional Edition doesn't include (?:${LACKS})\\.$`);
-const EDITION_ANYWHERE = new RegExp(`wasn't read, because Professional Edition doesn't include (?:${LACKS})\\.`);
+const POINTER = new RegExp(`^Needs (?:${LACKS}), which Professional Edition doesn't include\\.$`);
+const POINTER_ANYWHERE = new RegExp(`Needs (?:${LACKS}), which Professional Edition doesn't include\\.`);
+const EDITION_NOTE = /^This org is on Professional Edition, which doesn't include [^.]+\. Checks that need (?:it|them) are marked not measured\.$/;
 const LOSS_FIELD = /^The loss reason field (.+?) isn't a text or picklist field, so it can't hold a reason and isn't read\.$/;
 const WHOLE: ReadonlySet<string> = new Set([LIMITS_NO_PERMISSION, LIMITS_REFUSED, DEALS_UNREAD, NO_APEX_IN_EDITION]);
 
@@ -106,8 +127,8 @@ const WHOLE: ReadonlySet<string> = new Set([LIMITS_NO_PERMISSION, LIMITS_REFUSED
  * marked as the org's whenever it could be a name the org chose.
  */
 export function refusalSpans(text: string): Array<{ start: number; end: number }> | null {
-  if (WHOLE.has(text) || UNFIT.test(text)) return [];
-  const sentence = SENTENCE.exec(text) ?? NOT_THERE.exec(text) ?? EDITION.exec(text);
+  if (WHOLE.has(text) || UNFIT.test(text) || POINTER.test(text)) return [];
+  const sentence = SENTENCE.exec(text) ?? NOT_THERE.exec(text);
   if (sentence) {
     const what = sentence[1]!;
     if ((READ_NAMES as readonly string[]).includes(what)) return [];

@@ -1,5 +1,5 @@
 import { CONSULTANT_NEXT_STEPS, nextStepsWords } from "./exec-pages.ts";
-import { withAmountNotes } from "./amount-notes.ts";
+import { withAmountNotes, withEditionNote } from "./amount-notes.ts";
 import { yearlyByFinding } from "../value/model.ts";
 import { orderFromOrg } from "../connect/auto-calibration.ts";
 import { currencyStanding } from "../engine/currency.ts";
@@ -1113,7 +1113,7 @@ export function fullReportHtml(report: BuiltReport, pseudonyms: Pseudonymiser): 
  */
 export function fullReportHtmlAt(report: BuiltReport, pseudonyms: Pseudonymiser, step: number | null): string {
   // Each page with an amount in a currency not known by name says so (DECISIONS.md 700).
-  return withAmountNotes(report, (made) => inDocumentOrder(pseudonyms, (words) => fullReportHtmlWith(made, pseudonyms, step, words)));
+  return withEditionNote(report, withAmountNotes(report, (made) => inDocumentOrder(pseudonyms, (words) => fullReportHtmlWith(made, pseudonyms, step, words))));
 }
 
 function fullReportHtmlWith(report: BuiltReport, pseudonyms: Pseudonymiser, step: number | null, words: CustomerWords): string {

@@ -1,4 +1,6 @@
 import { CURRENCY_UNKNOWN, NO_MONEY_FIGURE } from "../engine/currency.ts";
+import { editionNoteOf } from "../extract/org-profile.ts";
+import { EDITION_POINTER_STEM } from "../salesforce/refusal-words.ts";
 import type { BuiltReport } from "../narrative/sections.ts";
 import type { Finding } from "../schemas/index.ts";
 import { HOURS_NOT_NAMED, type ValueModel } from "../value/model.ts";
@@ -25,6 +27,24 @@ export function withAmountNotes(report: BuiltReport, make: (report: BuiltReport)
   // The same document twice, so the same pages: if not, every page says it rather than any going without.
   const marked = (i: number): boolean => (probe.length === real.length ? probe[i]!.includes(AMOUNT_MARK) : true);
   return real.map((part, i) => (i > 0 && marked(i) && !part.includes(said) ? noted(part, line) : part)).join("");
+}
+
+/**
+ * The run's edition note (DECISIONS.md 710) once on every page that prints a
+ * check the edition left unmeasured: each such check says only "Needs X,
+ * which Professional Edition doesn't include.", and the note says the rest.
+ * With no note, the document exactly as it was.
+ */
+export function withEditionNote(report: BuiltReport, html: string): string {
+  const note = editionNoteOf(report.input.run.orgProfile);
+  if (!note) return html;
+  const pointer = escapeXml(EDITION_POINTER_STEM);
+  const said = escapeXml(note);
+  const line = `<p class="note edition-note">${said}</p>`;
+  return html
+    .split(PAGE)
+    .map((part, i) => (i > 0 && part.includes(pointer) && !part.includes(said) ? noted(part, line) : part))
+    .join("");
 }
 
 /** The report with each flagged finding's summary marked, for the probe only. */

@@ -1,5 +1,5 @@
 import { CONSULTANT_NEXT_STEPS, nextStepsWords } from "./exec-pages.ts";
-import { noMoneyReason, withAmountNotes } from "./amount-notes.ts";
+import { noMoneyReason, withAmountNotes, withEditionNote } from "./amount-notes.ts";
 import { yearlyByFinding } from "../value/model.ts";
 import { averageSentence, differenceWords, formatFigure, comparisonId } from "../benchmark/compare.ts";
 import type { BuiltReport } from "../narrative/sections.ts";
@@ -109,7 +109,7 @@ function seatsBox(r: Render, report: BuiltReport): string {
 
 export function onePagerHtml(report: BuiltReport, pseudonyms: Pseudonymiser): string {
   // An amount in a currency not known by name is said as one (DECISIONS.md 700).
-  return withAmountNotes(report, (made) => inDocumentOrder(pseudonyms, (words) => onePagerHtmlWith(made, pseudonyms, words)));
+  return withEditionNote(report, withAmountNotes(report, (made) => inDocumentOrder(pseudonyms, (words) => onePagerHtmlWith(made, pseudonyms, words))));
 }
 
 function onePagerHtmlWith(report: BuiltReport, pseudonyms: Pseudonymiser, words: CustomerWords): string {

@@ -1,5 +1,5 @@
 import { yearlyByFinding } from "../value/model.ts";
-import { withAmountNotes } from "./amount-notes.ts";
+import { withAmountNotes, withEditionNote } from "./amount-notes.ts";
 import { readinessLine } from "../narrative/readiness.ts";
 import { byKind, hasKinds, kindCounts } from "../narrative/unmeasured.ts";
 import { currentBody, POTENTIAL_REVENUE_RULES, TOP_ISSUE_COUNT, type BuiltReport } from "../narrative/sections.ts";
@@ -237,7 +237,7 @@ function detailPage(r: Render, items: Array<{ ref: string; title: string }>): st
 
 export function executiveHtml(report: BuiltReport, pseudonyms: Pseudonymiser): string {
   // Each page with an amount in a currency not known by name says so (DECISIONS.md 700).
-  return withAmountNotes(report, (made) => inDocumentOrder(pseudonyms, (words) => executiveHtmlWith(made, pseudonyms, words)));
+  return withEditionNote(report, withAmountNotes(report, (made) => inDocumentOrder(pseudonyms, (words) => executiveHtmlWith(made, pseudonyms, words))));
 }
 
 function executiveHtmlWith(report: BuiltReport, pseudonyms: Pseudonymiser, words: CustomerWords): string {

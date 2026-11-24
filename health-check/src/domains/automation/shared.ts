@@ -1,3 +1,4 @@
+import { editionIsWhy } from "../../salesforce/refusal-words.ts";
 import { metadataExtractor } from "../../extract/automation.ts";
 import { unreadReason, type MetadataBundle, type UnreadKind } from "../../extract/metadata-parse.ts";
 import { plural, type NotMeasurableResult, type RuleContext } from "../../engine/rule.ts";
@@ -7,7 +8,7 @@ import { eng, said, type Said } from "../../engine/org-words.ts";
 // code (DECISIONS.md 169).
 
 // An edition with no Apex says so plainly, rather than as a failed read.
-export const apexGap = (what: string, reason: string): string => (reason.startsWith("Professional Edition has no Apex") ? reason : `Apex ${what} couldn't be read: ${reason}`);
+export const apexGap = (what: string, reason: string): string => (reason.startsWith("Professional Edition has no Apex") || editionIsWhy(reason) ? reason : `Apex ${what} couldn't be read: ${reason}`);
 
 // `needs` names the kinds a rule counts. If the Tooling route couldn't read one
 // whole, the rule is not measurable rather than a pass on part of it (rule 5).

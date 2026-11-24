@@ -361,6 +361,14 @@ export const RunDigest = z.object({
   plan: DigestPlan,
   /** SHA-256, in lower-case hex, of each inventory name that holds a known person's name. Never the names. */
   withheldNames: z.array(z.string().regex(/^[0-9a-f]{64}$/)),
+  /**
+   * What the org's edition doesn't include, said once for the run (DECISIONS.md
+   * 710), all ours: the checks it left unmeasured say only "Needs X, which
+   * Professional Edition doesn't include." Show it once wherever such a check
+   * is listed. Absent for an org the edition left nothing out of.
+   */
+  editionNote: Text.optional(),
+  orgWords: z.object({ editionNote: SentenceOrgWords.optional() }).optional(),
 });
 export type RunDigest = z.infer<typeof RunDigest>;
 
@@ -373,5 +381,5 @@ export const DIGEST_KEYS: ReadonlySet<string> = new Set([
   "time_cost", "exposure", "groups", "lines", "leftOut", "realisation", "counted", "lineIds", "low", "expected", "high", "group", "annual", "added",
   "phases", "later", "quickWins", "alsoFor", "key", "effortHours", "basis", "partial", "timeBand", "fixComplexity", "hoursTotal", "partialFindingIds", "withoutHoursFindingIds", "notTotalledFindingIds", "note",
   "checkerRead", "readClasses", "readTriggers", "alreadyListed", "orgWords", "orgWordsMarked", "start", "end", "valueReason", "valueAssumptions", "hoursBasis", "fixPrompt", "textSha256",
-  "valueUnit", "valuePeriod",
+  "valueUnit", "valuePeriod", "editionNote",
 ]);

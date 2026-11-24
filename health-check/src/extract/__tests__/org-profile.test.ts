@@ -13,7 +13,8 @@ import { fullReportHtml } from "../../render/full-report.ts";
 import { onePagerHtml } from "../../render/one-pager.ts";
 import { loadRun } from "../../render/render-run.ts";
 import { NotInOrgError, type GatedRead } from "../../salesforce/client.ts";
-import { editionIsWhy, editionSentence, NO_APEX_IN_EDITION, refusalSpans, TOOLING_AFTER_EDITION } from "../../salesforce/refusal-words.ts";
+import { EDITION_POINTER_STEM, editionIsWhy, editionNote, editionPointer, isEditionNote, NO_APEX_IN_EDITION, refusalSpans, TOOLING_AFTER_EDITION } from "../../salesforce/refusal-words.ts";
+import { escapeXml } from "../../render/format.ts";
 import type { Finding, OrgProfile, SkippedRead } from "../../schemas/index.ts";
 import { automaticSyntheticCalibration } from "../../testing/automatic.ts";
 import { tempDir } from "../../testing/harness.ts";
@@ -107,11 +108,13 @@ describe("the one table: only an absent capability's reads are skipped", () => {
       assert.ok(editionIsWhy(need.sentence), need.sentence);
     }
     // An edition with no Metadata API can still have the flows it would read: that stays "couldn't read".
-    assert.equal(notMeasurableKind(editionSentence("The org's set-up from the Metadata API", "the Metadata API")), "unreadable");
-    assert.equal(notMeasurableKind(editionSentence("Scontrol", "s-controls")), "not_in_use");
-    assert.equal(notMeasurableKind(NO_APEX_IN_EDITION), "not_in_use");
-    // The object a sentence names is marked as the org's, as for every refusal.
-    assert.deepEqual(refusalSpans(editionSentence("Scontrol", "s-controls")), [{ start: 0, end: "Scontrol".length }]);
+    assert.equal(notMeasurableKind(editionPointer("the Metadata API")), "unreadable");
+    assert.equal(notMeasurableKind(editionPointer("s-controls")), "not_in_use");
+    assert.equal(notMeasurableKind(editionPointer("Apex")), "not_in_use");
+    // All ours: a pointer names no object of the org's.
+    assert.deepEqual(refusalSpans(editionPointer("Sites")), []);
+    // Short, since it stands on many checks, and never the run's note itself.
+    for (const need of READ_NEEDS) assert.ok(need.sentence.length <= 70 && !isEditionNote(need.sentence), need.sentence);
   });
 
   test("the metadata step's Tooling sentence on such an org is the one release counts", () => {
@@ -138,6 +141,16 @@ const NOW = "2026-11-24T09:00:00.000Z";
 const soap = (sent: string[]) => sent.filter((s) => /\/Soap\/m\//.test(s));
 const ownApex = (sent: string[]) => sent.filter((s) => /FROM Apex(?:Class|Trigger) WHERE NamespacePrefix = null/.test(s) && !/\/tooling\//.test(s));
 const byEdition = (findings: Finding[]) => findings.filter((f) => f.status === "not_measurable" && editionIsWhy(f.notMeasurableReason ?? ""));
+
+describe("the run's one edition note", () => {
+  test("names the edition and what it doesn't include, and is known as ours only whole", () => {
+    assert.equal(editionNote(["Apex", "the Metadata API", "s-controls", "Sites"]), "This org is on Professional Edition, which doesn't include Apex, the Metadata API, s-controls or Sites. Checks that need them are marked not measured.");
+    assert.equal(editionNote(["Sites"]), "This org is on Professional Edition, which doesn't include Sites. Checks that need it are marked not measured.");
+    assert.equal(editionNote([]), null);
+    assert.ok(isEditionNote(editionNote(["Apex", "Sites"])!));
+    assert.ok(!isEditionNote("This org is on Professional Edition, which doesn't include Acme Widgets. Checks that need it are marked not measured."));
+  });
+});
 
 describe("a Professional Edition org, run end to end", () => {
   test("no read it rules out is sent; everything else is", () => {
@@ -204,6 +217,39 @@ describe("a Professional Edition org, run end to end", () => {
     assert.ok((unmeasured.edition ?? 0) > 0);
     // The org that has everything carries no edition count, so its flag is as before.
     assert.equal(unmeasuredRules(enterprise.loaded.input.findings).edition, undefined);
+  });
+
+  test("the digest says the edition once, marked as ours; each check only points at it; an org with everything has no note", () => {
+    const digest = checkedDigest({ input: professional.loaded.input, pseudonyms: professional.loaded.pseudonyms, inventory: null, madeAt: NOW }).digest!;
+    assert.equal(digest.editionNote, "This org is on Professional Edition, which doesn't include Apex, the Metadata API, s-controls or Sites. Checks that need them are marked not measured.");
+    assert.deepEqual(digest.orgWords?.editionNote, { orgWordsMarked: true, orgWords: [] });
+    const text = JSON.stringify(digest);
+    assert.equal(text.split(digest.editionNote!).length - 1, 1, "the note is said once");
+    assert.ok(!text.includes(NO_APEX_IN_EDITION), "the full Apex sentence is on no check");
+    const pointed = digest.findings.filter((f) => f.notMeasurableReason?.includes(EDITION_POINTER_STEM));
+    assert.ok(pointed.length >= 9);
+    for (const f of pointed) assert.ok(f.notMeasurableReason!.length <= 120, f.notMeasurableReason!);
+    const plain = checkedDigest({ input: enterprise.loaded.input, pseudonyms: enterprise.loaded.pseudonyms, inventory: null, madeAt: NOW }).digest!;
+    assert.equal(plain.editionNote, undefined);
+    assert.equal(plain.orgWords, undefined);
+  });
+
+  test("each page that prints such a check carries the note once, and no other page does", () => {
+    const report = buildReport(professional.loaded.input);
+    const note = escapeXml(editionNote(["Apex", "the Metadata API", "s-controls", "Sites"])!);
+    const pointer = escapeXml(EDITION_POINTER_STEM);
+    let pages = 0;
+    for (const html of [fullReportHtml(report, professional.loaded.pseudonyms), executiveHtml(report, professional.loaded.pseudonyms), onePagerHtml(report, professional.loaded.pseudonyms)]) {
+      assert.ok(!html.includes(escapeXml(NO_APEX_IN_EDITION)));
+      for (const page of html.split(/(?=<section class="page)/).slice(1)) {
+        const notes = page.split(note).length - 1;
+        assert.equal(notes, page.includes(pointer) ? 1 : 0);
+        pages += notes;
+      }
+    }
+    assert.ok(pages > 0);
+    const plain = buildReport(enterprise.loaded.input);
+    assert.ok(!fullReportHtml(plain, enterprise.loaded.pseudonyms).includes("edition-note"));
   });
 
   test("what the customer reads names the edition in our words, and nowhere quotes a code", () => {
