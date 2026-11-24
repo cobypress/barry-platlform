@@ -136,17 +136,20 @@ export async function processRunJob(runId: string, deps: WorkerDeps, attempt: At
   return withJobLock(deps.locksDir, `run-${runId}`, () => runThenLetGo(runId, deps, attempt, options));
 }
 
-/** The "Run again" that last started this folder afresh, or null. */
+/** The press time of the "Run again" that last started this folder afresh, or null: none, or a mark that isn't one, which any press is newer than. */
 function againOf(dir: string): string | null {
   try {
     const read = JSON.parse(readFileSync(join(dir, AGAIN_FILE), "utf8")) as { again?: unknown };
-    return typeof read.again === "string" ? read.again : null;
+    return typeof read.again === "string" && /^[1-9][0-9]{0,15}$/.test(read.again) ? read.again : null;
   } catch {
     return null;
   }
 }
 
 /** The answer a "Run again" gets when the console hasn't set the run back first: nothing read, nothing removed. */
+/** The answer an older "Run again" gets once a newer press has started the run afresh: nothing read, nothing removed. */
+export const AGAIN_SUPERSEDED = "A newer Run again has started this run afresh, so this older one read nothing and left its folder as it was.";
+
 export const AGAIN_NOT_RESET = "Run again starts an automatic run afresh only once it's set back to extracting with no hold, so nothing was read and its folder is as it was.";
 
 /**
@@ -187,7 +190,15 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
   // of the same job finds its own mark and resumes. Any other run, and a consultant-led run's, resumes as before.
   const again = options.again !== undefined && first.run.reviewMode === "automatic" ? options.again : undefined;
   if (options.again !== undefined && again === undefined) log(`Run ${runId} isn't automatic, so "Run again" resumes it as any delivery does.`);
-  const fresh = again !== undefined && againOf(join(deps.runsDir, runId)) !== again;
+  // Presses are ordered by their time: the folder's mark is the latest press that started it afresh. The same press
+  // resumes; a newer one starts afresh; an older one (a retry still due after a newer press) is skipped, so two
+  // presses never clear each other's work in turn.
+  const mark = again === undefined ? null : againOf(join(deps.runsDir, runId));
+  if (again !== undefined && mark !== null && BigInt(mark) > BigInt(again)) {
+    log(`Run ${runId}: a newer "Run again" owns this run, so this older one read nothing and left its folder as it was.`);
+    return { outcome: "skipped", detail: `Run ${runId}: ${AGAIN_SUPERSEDED}` };
+  }
+  const fresh = again !== undefined && mark !== again;
   if (fresh && first.run.status !== "extracting") return { outcome: "skipped", detail: `Run ${runId}: ${AGAIN_NOT_RESET}` };
 
   // The run is this delivery's before anything is written, to the folder or the
@@ -249,7 +260,8 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
 
   const dir = join(deps.runsDir, runId);
   if (fresh) {
-    if (input.run.status !== "extracting") return { outcome: "skipped", detail: `Run ${runId}: ${AGAIN_NOT_RESET}` };
+    // The last guard before the folder goes: still extracting and unheld as this delivery read it after its claim.
+    if (input.run.status !== "extracting" || heldFor(input)) return { outcome: "skipped", detail: `Run ${runId}: ${AGAIN_NOT_RESET}` };
     rmSync(dir, { recursive: true, force: true });
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     writeFileSync(join(dir, AGAIN_FILE), `${JSON.stringify({ again })}\n`, { mode: 0o600 });
