@@ -20,6 +20,8 @@ export const CONSOLE_CHECKS = {
   flagKind: { migration: "20261217_health_check_hold_reads_lost.sql", name: "HealthCheckRunFlag_kind_check", sql: `"kind" IN ('calibration_unreadable', 'no_digest', 'digest_held', 'score_moved', 'mostly_unmeasured', 'section_failed', 'run_failed', 'documents_held', 'reads_lost', 'stopped_budget')` },
   flagCounts: { migration: "20261211_health_check_automatic.sql", name: "HealthCheckRunFlag_counts_check", sql: `jsonb_typeof("counts") = 'object' AND octet_length("counts"::text) <= 1000` },
   flagCleared: { migration: "20261211_health_check_automatic.sql", name: "HealthCheckRunFlag_cleared_check", sql: `("clearedBy" IS NULL) = ("clearedAt" IS NULL)` },
+  // A delivery's outcome (DECISIONS.md 722): the engine's DELIVERY_OUTCOMES, word for word.
+  deliveryOutcome: { migration: "20261218_health_check_run_delivery.sql", name: "HealthCheckRunDelivery_outcome_check", sql: `"outcome" IN ('done', 'stopped_budget', 'skipped', 'failed', 'error')` },
 } as const satisfies Record<string, ConsoleCheck>;
 
 /**

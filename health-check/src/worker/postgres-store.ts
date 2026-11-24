@@ -1,4 +1,5 @@
 import { isMyDomainHost } from "../connect/instance-host.ts";
+import type { StepTiming } from "../engine/run.ts";
 import { StoreError, type OrgStage } from "../connect/org-stages.ts";
 import type { Inventory } from "../schemas/inventory.ts";
 import type { Complexity } from "../schemas/complexity.ts";
@@ -38,6 +39,7 @@ import {
   type AutomaticRunState,
   type WorkerStore,
   type PortalDocumentRow,
+  type RunDelivery,
   DOCUMENTS_HELD_FLAG,
 } from "./types.ts";
 
@@ -349,6 +351,30 @@ export const RUN_DIGEST_SQL = `INSERT INTO "HealthCheckRunDigest" ("runId", "mad
 export const SURVEY_METRICS_DELETE_SQL = `DELETE FROM "HealthCheckMetric" WHERE "runId" = $1 AND "id" = ANY($2::text[])`;
 /** The console's migration that adds the run's overall score and grade and the link's host (DECISIONS.md 626). */
 export const RUN_SCORE_AND_HOST_MIGRATION = "20261128_health_check_run_score_and_host.sql";
+/** The console's migration that makes HealthCheckRunDelivery (DECISIONS.md 722). */
+export const RUN_DELIVERY_MIGRATION = "20261218_health_check_run_delivery.sql";
+/** The most steps a delivery's row keeps: well inside the migration's 32 KB CHECK (about 95 bytes a step). */
+export const MAX_DELIVERY_STEPS = 100;
+/** The row that stands for the steps a capped delivery left out: their time and calls added up, and how many. */
+export const OTHER_STEPS = "other-steps";
+
+/**
+ * At most MAX_DELIVERY_STEPS: the slowest kept in their order, and the rest
+ * added up into one OTHER_STEPS row with their count, so the delivery's time
+ * and calls stay whole and nothing is dropped unsaid.
+ */
+export function capSteps(steps: readonly StepTiming[]): Array<StepTiming | (StepTiming & { count: number })> {
+  if (steps.length <= MAX_DELIVERY_STEPS) return [...steps];
+  const keep = new Set([...steps.keys()].sort((a, b) => steps[b]!.ms - steps[a]!.ms || a - b).slice(0, MAX_DELIVERY_STEPS - 1));
+  const rest = steps.filter((_, i) => !keep.has(i));
+  return [
+    ...steps.filter((_, i) => keep.has(i)),
+    { id: OTHER_STEPS, ms: rest.reduce((n, s) => n + s.ms, 0), calls: rest.reduce((n, s) => n + s.calls, 0), outcome: "done", count: rest.length },
+  ];
+}
+
+/** One delivery's row. The run's own FOREIGN KEY refuses a run deleted meanwhile (23503), which is no loss. */
+export const RUN_DELIVERY_SQL = `INSERT INTO "HealthCheckRunDelivery" ("runId", "startedAt", "endedAt", "outcome", "final", "again", "steps") VALUES ($1, $2::timestamp(3), $3::timestamp(3), $4, $5, $6, $7::jsonb)`;
 export const BENCHMARK_ROW: Columns = {
   id: "text", metricKey: "text", ruleSetVersion: "text", value: "num", unit: "text", industry: "text", headcountBand: "text", userBand: "text", dealSizeBand: "text", period: "text",
 };
@@ -1037,6 +1063,36 @@ export class PostgresWorkerStore implements WorkerStore {
 
   async flagBudgetStop(runId: string, at: string): Promise<boolean> {
     return (await this.#pool.query(BUDGET_FLAG_SQL, [runId, at])).rowCount === 1;
+  }
+
+  /** The SQLSTATEs already said, once each per worker process (DECISIONS.md 722). */
+  #saidDelivery = new Set<string>();
+
+  /**
+   * DECISIONS.md 722. A courtesy: no table yet (42P01), no rights on it
+   * (42501) or a row its CHECKs refuse (23514) costs only the run times and is
+   * said once per worker process, never per delivery; a run gone (23503)
+   * costs nothing. The steps are capped first (capSteps), so a run with very
+   * many steps is cut honestly rather than refused.
+   */
+  async recordDelivery(d: RunDelivery): Promise<boolean> {
+    try {
+      await this.#pool.query(RUN_DELIVERY_SQL, [d.runId, d.startedAt, d.endedAt, d.outcome, d.final, d.again, JSON.stringify(capSteps(d.steps))]);
+      return true;
+    } catch (err) {
+      const code = (err as { code?: unknown } | null)?.code;
+      if (code === "23503") return false;
+      if (code !== "42P01" && code !== "42501" && code !== "23514") throw err;
+      if (!this.#saidDelivery.has(code)) {
+        this.#saidDelivery.add(code);
+        this.#log(
+          code === "42P01"
+            ? `The console's database has no HealthCheckRunDelivery table yet, so run times aren't kept. Apply the console's ${RUN_DELIVERY_MIGRATION} migration.`
+            : `The console's HealthCheckRunDelivery table refused a delivery's row with SQLSTATE ${code}, so run times aren't kept. Check the table and its rights against the console's ${RUN_DELIVERY_MIGRATION} migration.`,
+        );
+      }
+      return false;
+    }
   }
 
   /** DECISIONS.md 652: a step row, so no schema change. Not #openRun: a scan lets go after its results, in review or not. */
