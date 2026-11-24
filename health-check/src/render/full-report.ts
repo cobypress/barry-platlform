@@ -1,6 +1,8 @@
 import { CONSULTANT_NEXT_STEPS, nextStepsWords } from "./exec-pages.ts";
+import { withAmountNotes } from "./amount-notes.ts";
 import { yearlyByFinding } from "../value/model.ts";
 import { orderFromOrg } from "../connect/auto-calibration.ts";
+import { currencyStanding } from "../engine/currency.ts";
 import { ORDER_UNCONFIRMED } from "../domains/historic-pipeline/cohort.ts";
 import { currentBody, TOP_ISSUE_COUNT, type BuiltOutput, type BuiltReport } from "../narrative/sections.ts";
 import { VERDICT_WORDS, type ReadinessVerdict } from "../narrative/readiness.ts";
@@ -385,6 +387,11 @@ const notMeasured = (r: Render, m: Metric | undefined): string => `<p class="cha
  * sort order with no person's confirmation (DECISIONS.md 692, 693): the same
  * sentence the figures beside it carry.
  */
+/** The appendix's currency: the code as before, or, where it isn't known by name, never a code (DECISIONS.md 700). */
+const currencyDetail = (calibration: Calibration): string => {
+  const standing = currencyStanding(calibration);
+  return standing === "org" || standing === "unread" ? "Your Salesforce org's own currency, which you haven't told us yet" : calibration.currency;
+};
 const orderNote = (r: Render, calibration: Calibration): string => (orderFromOrg(calibration) ? `<p class="note">${r.t(ORDER_UNCONFIRMED)}</p>` : "");
 
 /** Open stages in the calibration's sales order, then anything else in name order. */
@@ -1039,7 +1046,8 @@ function buildSlides(report: BuiltReport, r: Render, density: Density | null, mo
     ...(setupReview ? [] : [{ title: "Stage meanings", detail: calibration.stages.map((s) => `${s.name} (${s.category.replace("_", " ")})`).join(", ") }]),
     { title: "Dormant users", detail: `No login for ${calibration.dormantDays} days` },
     ...(setupReview ? [] : [{ title: "Smallest sample", detail: `At least ${calibration.minSample} deals behind a figure` }]),
-    { title: "Currency", detail: calibration.currency },
+    // What an automatic run knows of its currency, said for what it is (DECISIONS.md 700).
+    { title: "Currency", detail: currencyDetail(calibration) },
   ], compact));
   // Only what the report shows a figure for needs defining. The documented org
   // is described on its own pages, and its definitions are in the raw notes.
@@ -1102,7 +1110,8 @@ export function fullReportHtml(report: BuiltReport, pseudonyms: Pseudonymiser): 
  * roomiest step that fits the deck's range, as the deck is made.
  */
 export function fullReportHtmlAt(report: BuiltReport, pseudonyms: Pseudonymiser, step: number | null): string {
-  return inDocumentOrder(pseudonyms, (words) => fullReportHtmlWith(report, pseudonyms, step, words));
+  // Each page with an amount in a currency not known by name says so (DECISIONS.md 700).
+  return withAmountNotes(report, (made) => inDocumentOrder(pseudonyms, (words) => fullReportHtmlWith(made, pseudonyms, step, words)));
 }
 
 function fullReportHtmlWith(report: BuiltReport, pseudonyms: Pseudonymiser, step: number | null, words: CustomerWords): string {

@@ -88,6 +88,8 @@ export function listPrice(licence: string, edition: string | null, currency: str
   const plan = Object.hasOwn(plans, edition) ? plans[edition] : undefined;
   if (!plan) return { status: "unpriced", reason: said`We haven't confirmed which of Salesforce's current plans ${org(edition)} is priced as.` };
   // Converting a pound price into another currency would be an estimate, so a check in another currency gets no list price.
+  // A currency not known by name (DECISIONS.md 700) is never named.
+  if (currency === "XXX") return { status: "unpriced", reason: said`We hold only Salesforce's UK list prices, in pounds, and we don't know your currency yet, so we don't use them.` };
   if (currency !== LIST_PRICE_CURRENCY) return { status: "unpriced", reason: said`We hold only Salesforce's UK list prices, in pounds, and this check reports in ${org(currency)}, so we don't convert them.` };
   const price = prices.find((p) => p.plan === plan && p.licence === licence && p.currency === currency);
   // The plan is from our own map, marked with the org's words: the safe side (DECISIONS.md 663).

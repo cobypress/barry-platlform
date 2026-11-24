@@ -20,6 +20,8 @@ export const andList = (parts: readonly Said[]): Said => (parts.length <= 1 ? (p
  */
 export function moneySaid(amount: number, currency: string): Said {
   const whole = grouped(Math.round(amount));
+  // ISO 4217's "no currency": an amount in a currency not known by name is a plain number (DECISIONS.md 700).
+  if (currency === "XXX") return whole;
   if (currency === "GBP" || currency === "USD" || currency === "EUR") return said`${currency === "GBP" ? "£" : currency === "USD" ? "$" : "€"}${whole}`;
   return said`${org(currency)} ${whole}`;
 }

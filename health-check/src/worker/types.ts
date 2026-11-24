@@ -400,7 +400,7 @@ export interface WorkerStore {
    * has no such column or table yet, or refused it, so the caller says so.
    * Never throws for that.
    */
-  holdRun(runId: string, reason: "calibration_unreadable", at: string): Promise<boolean>;
+  holdRun(runId: string, reason: "calibration_unreadable", at: string, counts?: Record<string, number>): Promise<boolean>;
   /**
    * The overall score of the org's last released run of this product, other
    * than this one, or null with none (DECISIONS.md 693). Only a run whose

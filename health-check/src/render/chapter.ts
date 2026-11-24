@@ -1,4 +1,5 @@
 import type { BuiltReport } from "../narrative/sections.ts";
+import { noMoneyReason } from "./amount-notes.ts";
 import { bySeverity, domainLabel, isThinData, issuesOf, type Added } from "../narrative/select.ts";
 import { kindTallies, noteCounts } from "../narrative/unmeasured.ts";
 import type { Finding } from "../schemas/index.ts";
@@ -123,7 +124,7 @@ export function chapterSlide(r: Render, report: BuiltReport, domain: string): st
   const note = open.length && !isThinData(report.teamFindings) ? `${open.length} more ${open.length === 1 ? "check" : "checks"} couldn't be measured here${kinds ? `: ${kinds}` : ""}. The appendix says why.` : null;
   const steps = firstSteps(issues, good.map((p) => `${p.text} ${sourceLabel(p)}`), note);
   const right = [
-    `<h3>What it costs</h3><p>${worth > 0 ? r.t(`About ${compactMoney(worth, report.value.currency)} of the money page's total: a share of the figures that follow.`) : r.t("We haven't put a money figure on these. They matter for the risk they carry.")}</p>`,
+    `<h3>What it costs</h3><p>${worth > 0 ? r.t(`About ${compactMoney(worth, report.value.currency)} of the money page's total: a share of the figures that follow.`) : r.t(noMoneyReason(report.value, own, new Set(own.map((f) => f.id))) ?? "We haven't put a money figure on these. They matter for the risk they carry.")}</p>`,
     steps.length ? `<h3>What to do first</h3><ul>${steps.map((text) => `<li>${r.t(text)}</li>`).join("")}</ul>` : "",
     good.length ? `<h3>What good looks like</h3><ul class="good">${good.map((p, i) => `<li>${r.t(p.text)} <span class="src">${r.t(sourceLabel(p))}</span>${r.ref(practiceId(domain, i))}</li>`).join("")}</ul>` : "",
     note ? `<p class="note" style="font-size:13.5px;color:var(--muted)">${r.t(note)}</p>` : "",

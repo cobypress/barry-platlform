@@ -1,4 +1,5 @@
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { currencyStanding } from "../engine/currency.ts";
 import { readCheckpoint } from "../engine/checkpoint.ts";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -317,6 +318,9 @@ export function orgProfile(dir: string, run: Run, calibration: Calibration): Org
     throw new Error(`The calibration doesn't name these stages, so this run took their meaning from Salesforce's own settings: ${stages}. Add them to the calibration and run the health check again before exporting to the benchmark set.`);
   }
   if (pipeline.multiCurrency) throw new Error("The org is multi-currency, so won amounts can't be compared and the deal size band can't be worked out.");
+  // The deal size band is the one money figure a row carries: in a currency not known by name it would compare amounts in different money (DECISIONS.md 700).
+  const standing = currencyStanding(calibration);
+  if (standing === "org" || standing === "unread") throw new Error("The org's currency isn't known by name, so won amounts can't be compared and the deal size band can't be worked out.");
   // The median won amount, not the mean, for the reason in decision 16: one
   // unusually large deal shouldn't move the org into another band. Deals with no
   // amount, or zero, are left out rather than counted as small.

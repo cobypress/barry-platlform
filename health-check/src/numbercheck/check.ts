@@ -45,7 +45,8 @@ export function agrees(written: number, step: number, real: number): boolean {
 
 function candidates(figure: Figure, set: FigureSet): DatasetFigure[] {
   return set.figures.filter((f) => {
-    if (figure.kind === "number") return f.kind === "number";
+    // An amount in a currency not known by name is printed as a plain number (DECISIONS.md 700), so one may trace to it; never to an amount in a named currency.
+    if (figure.kind === "number") return f.kind === "number" || (f.kind === "currency" && f.currency === "XXX");
     if (f.kind !== figure.kind) return false;
     if (figure.kind === "currency") return f.currency === figure.currency;
     if (figure.kind === "duration") return f.unit === figure.unit;

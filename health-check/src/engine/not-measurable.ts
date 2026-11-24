@@ -31,6 +31,8 @@ const SORTED: readonly Sorted[] = [
   { kind: "needs_input", pattern: /^Salesforce's setting can't tell lost from no decision for:/ },
   // What an automatic run's customer hasn't told us yet (DECISIONS.md 693).
   { kind: "needs_input", pattern: /^You haven't told us\b/ },
+  // An automatic run that read no currency: the customer telling us unlocks every money figure (DECISIONS.md 700).
+  { kind: "needs_input", pattern: /^We couldn't read which currency your Salesforce amounts are in\./ },
   { kind: "needs_input", pattern: /^The (?:unused )?seats can't be priced, because / },
   { kind: "needs_input", pattern: /^The manual step was skipped:/ },
   { kind: "needs_input", pattern: /^[^:]*, and the manual step hasn't been answered yet\./ },

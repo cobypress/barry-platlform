@@ -1139,6 +1139,8 @@ const SIGNED_OFF: string[] = [
   "src/domains/utilisation/investment.ts: describe",
   "src/domains/utilisation/investment.ts: p.price.reason",
   "src/domains/value.ts: rate.reason as Said",
+  // The return per lead's reason, said only when said made it, as the win rate's (DECISIONS.md 700).
+  "src/domains/value.ts: rate.reason as Said",
   // Counts and day figures in an automatic run's metric texts, said so they are marked as ours (DECISIONS.md 693, fix round 2): numbers only.
   "src/domains/activity/load.ts: ACTIVITY_DAYS",
   "src/domains/current-pipeline/outlook.ts: late",
