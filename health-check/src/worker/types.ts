@@ -438,8 +438,9 @@ export interface WorkerStore {
    * One make of the portal's documents (DECISIONS.md 698), in one transaction:
    * each row upserted on (runId, output), replacing what a make before left,
    * only while the run is a released, unheld automatic run; then, with
-   * `heldCounts`, the `documents_held` flag, ON CONFLICT DO NOTHING. Throws,
-   * having written nothing, when any of it is refused.
+   * `heldCounts`, the `documents_held` flag through FLAG_CONFLICT: an open
+   * flag is left as it is, a cleared one opened again. Throws, having
+   * written nothing, when any of it is refused.
    */
   savePortalDocuments(runId: string, rows: PortalDocumentRow[], heldCounts: Record<string, number> | null): Promise<void>;
   /**

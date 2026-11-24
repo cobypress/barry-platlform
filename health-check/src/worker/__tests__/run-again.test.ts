@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { Release } from "../../schemas/index.ts";
 import { ORG_ID } from "../../testing/synthetic-org.ts";
 import { AutomaticReplay, automaticSyntheticCalibration } from "../../testing/automatic.ts";
-import { AGAIN_FILE, AGAIN_NOT_RESET, runAgainToken } from "../run-job.ts";
+import { AGAIN_FILE, AGAIN_NOT_RESET, AGAIN_SUPERSEDED, runAgainToken } from "../run-job.ts";
 import { gatedProcessor, processorFor } from "../bullmq.ts";
 import { BadJobError, parseJob } from "../types.ts";
 import { createJobHandler } from "../worker.ts";
@@ -76,6 +76,75 @@ describe("a person's Run again of an automatic run (DECISIONS.md 698)", () => {
     assert.deepEqual(JSON.parse(readFileSync(join(dir, AGAIN_FILE), "utf8")), { again: TOKEN });
     assert.ok(transport.requests.length > readBefore, "the org was read again");
     assert.ok(deps.lines.includes(`Run ${RUN_ID} is run again from the start: its folder was cleared and the org is read afresh.`));
+  });
+
+  describe("two presses, in each order: a newer press owns the run, and an older one never clears its work", () => {
+    const OLDER = `run-${RUN_ID}-again-1764000000000`;
+    const NEWER = `run-${RUN_ID}-again-1764000000500`;
+    const mark = (dir: string) => JSON.parse(readFileSync(join(dir, AGAIN_FILE), "utf8")) as { again: string };
+
+    test("older then newer: the newer press starts afresh over the older one's folder", async () => {
+      const { deps, handle, dir } = await heldRun();
+      reset(deps);
+      await handle({ kind: "run", runId: RUN_ID }, { final: false, jobId: OLDER });
+      writeFileSync(join(dir, "left-from-before.txt"), "older");
+      reset(deps);
+      const outcome = await handle({ kind: "run", runId: RUN_ID }, { final: false, jobId: NEWER });
+      assert.notEqual(outcome.outcome, "skipped", outcome.detail);
+      assert.ok(!existsSync(join(dir, "left-from-before.txt")));
+      assert.deepEqual(mark(dir), { again: "1764000000500" });
+    });
+
+    test("the older press's retry after the newer one: skipped, nothing read, the newer press's folder as it was", async () => {
+      const { deps, transport, handle, dir } = await heldRun();
+      reset(deps);
+      await handle({ kind: "run", runId: RUN_ID }, { final: false, jobId: OLDER });
+      reset(deps);
+      await handle({ kind: "run", runId: RUN_ID }, { final: false, jobId: NEWER });
+      writeFileSync(join(dir, "left-from-before.txt"), "newer");
+      reset(deps);
+      const read = transport.requests.length;
+      const outcome = await handle({ kind: "run", runId: RUN_ID }, { final: false, jobId: OLDER });
+      assert.deepEqual(outcome, { outcome: "skipped", detail: `Run ${RUN_ID}: ${AGAIN_SUPERSEDED}` });
+      assert.equal(transport.requests.length, read);
+      assert.ok(existsSync(join(dir, "left-from-before.txt")));
+      assert.deepEqual(mark(dir), { again: "1764000000500" });
+      assert.ok(deps.lines.includes(`Run ${RUN_ID}: a newer "Run again" owns this run, so this older one read nothing and left its folder as it was.`));
+    });
+
+    test("newer then an older press arriving late: the older is skipped", async () => {
+      const { deps, transport, handle, dir } = await heldRun();
+      reset(deps);
+      await handle({ kind: "run", runId: RUN_ID }, { final: false, jobId: NEWER });
+      writeFileSync(join(dir, "left-from-before.txt"), "newer");
+      reset(deps);
+      const read = transport.requests.length;
+      const outcome = await handle({ kind: "run", runId: RUN_ID }, { final: false, jobId: OLDER });
+      assert.equal(outcome.detail, `Run ${RUN_ID}: ${AGAIN_SUPERSEDED}`);
+      assert.equal(transport.requests.length, read);
+      assert.ok(existsSync(join(dir, "left-from-before.txt")));
+    });
+  });
+
+  test("moved on between its claim and the clean start (another delivery, a hold): skipped, the folder as it was", async () => {
+    for (const change of [(i: { run: { status: string }; heldReason?: string | null }) => (i.run.status = "analysing"), (i: { run: { status: string }; heldReason?: string | null }) => (i.heldReason = "score_moved")]) {
+      const { deps, transport, handle, dir } = await heldRun();
+      reset(deps);
+      // The second reading, after the claim, sees the change; the first saw a run set back and unheld.
+      const load = deps.store.loadRunJob.bind(deps.store);
+      let reads = 0;
+      deps.store.loadRunJob = async (id) => {
+        const input = await load(id);
+        if (input && ++reads === 2) change(input as never);
+        return input;
+      };
+      const read = transport.requests.length;
+      const outcome = await handle({ kind: "run", runId: RUN_ID }, { final: false, jobId: AGAIN_ID });
+      assert.equal(outcome.outcome, "skipped", outcome.detail);
+      assert.equal(transport.requests.length, read);
+      assert.ok(existsSync(join(dir, "left-from-before.txt")));
+      assert.ok(!existsSync(join(dir, AGAIN_FILE)));
+    }
   });
 
   test("a retry of the same Run again resumes from where it got to; only a new token starts afresh", async () => {
