@@ -302,6 +302,17 @@ describe("a Professional Edition org, run end to end", () => {
     for (const line of counted) assert.ok(!/\.\.$/.test(line) && !/: Needs/.test(line), line);
   });
 
+  test("a reason that ends its own sentence isn't given a second full stop after \"Not counted:\"", () => {
+    const input = structuredClone(noApex.loaded.input);
+    const inventory = input.metrics.find((m) => m.id === "configuration.object_inventory" && m.status === "measured");
+    assert.ok(inventory && inventory.status === "measured");
+    inventory.exclusions.push("Page layouts, which couldn't be read: Layout isn't available in this org, or to the connected user.");
+    const html = fullReportHtml(buildReport(input), noApex.loaded.pseudonyms);
+    // The page says the reason in its customer words, which end the sentence: one full stop, never two.
+    const line = /Not counted: Page layouts, which couldn&#39;t be read: [^<]*</.exec(html)?.[0] ?? "";
+    assert.ok(line.endsWith(".<") && !line.endsWith("..<"), line);
+  });
+
   test("a removal's guard isn't blocked by Apex the org was asked for and doesn't have", () => {
     const guards = noApex.loaded.input.findings.flatMap((f) => f.guards);
     assert.ok(!guards.some((g) => /Metadata or Apex couldn't be read/.test(g.detail)));
