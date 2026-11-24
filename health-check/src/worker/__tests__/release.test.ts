@@ -13,7 +13,7 @@ import { AutomaticReplay, automaticSyntheticCalibration } from "../../testing/au
 import { runFromRecording } from "../../testing/harness.ts";
 import { CONSOLE_CHECKS } from "../console-checks.ts";
 import { MemoryWorkerStore } from "../memory-store.ts";
-import { RUN, runSql, FAILURE_FLAG_SQL, HELD_REASON_SQL, HOLD_OUTPUT_SQL, HOLD_RUN_SQL, LAST_RELEASED_SCORE_SQL, PostgresWorkerStore, RAISE_FLAG_SQL, RELEASE_ROW_SQL, RELEASE_RUN_SQL, RUN_DIGEST_SQL, type SqlClient, type SqlPool, type SqlResult } from "../postgres-store.ts";
+import { RUN, runSql, FAILURE_FLAG_SQL, FLAG_CONFLICT, HELD_REASON_SQL, HOLD_OUTPUT_SQL, HOLD_RUN_SQL, LAST_RELEASED_SCORE_SQL, PostgresWorkerStore, RAISE_FLAG_SQL, RELEASE_ROW_SQL, RELEASE_RUN_SQL, RUN_DIGEST_SQL, type SqlClient, type SqlPool, type SqlResult } from "../postgres-store.ts";
 import { checkSections, decideRelease, SCORE_MOVE_POINTS, unmeasuredRules, type HoldReason } from "../release.ts";
 import { progressOf, RunClosedError, type RunOutputRecord, type RunOverall } from "../types.ts";
 import { consoleRun, RUN_ID, runInput } from "./helpers.ts";
@@ -324,7 +324,8 @@ describe("the Postgres store's release and hold", () => {
     const texts = pool.texts();
     assert.deepEqual(texts.slice(-3), [HOLD_OUTPUT_SQL, RAISE_FLAG_SQL, "COMMIT"]);
     assert.deepEqual(pool.statements.find((s) => s.text === RAISE_FLAG_SQL)!.values, [RUN_ID, "score_moved", NOW, JSON.stringify({ score: 60, previous: 80, moved: 20 })]);
-    assert.match(RAISE_FLAG_SQL, /ON CONFLICT \("runId", "kind"\) DO NOTHING$/);
+    // Raised once while open; a cleared flag is opened again (DECISIONS.md 698).
+    assert.ok(RAISE_FLAG_SQL.endsWith(FLAG_CONFLICT));
     assert.ok(!texts.includes(RELEASE_ROW_SQL) && !texts.includes(RELEASE_RUN_SQL));
   });
 

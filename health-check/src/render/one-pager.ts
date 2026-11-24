@@ -1,3 +1,4 @@
+import { CONSULTANT_NEXT_STEPS, nextStepsWords } from "./exec-pages.ts";
 import { yearlyByFinding } from "../value/model.ts";
 import { differenceWords, formatFigure, comparisonId } from "../benchmark/compare.ts";
 import type { BuiltReport } from "../narrative/sections.ts";
@@ -137,12 +138,12 @@ function onePagerHtmlWith(report: BuiltReport, pseudonyms: Pseudonymiser, words:
   // AI readiness, in one line and only when the verdict is clear (DECISIONS.md 243).
   const aiLine = readinessLine(report.readiness);
 
-  const body = `<div class="top"><div><div class="eyebrow">Black Cloud Barometer</div><h1>${r.t(customer)}</h1><div>${r.t(`${documentTitle(run)}: one page summary`)}</div></div><div class="who"><b>${longDate(run.asOf)}</b>${preparedBy ? r.t(`Prepared by ${preparedBy}, Black Cloud`) : r.t("Prepared by Black Cloud")}${r.draft ? '<br><span class="mark">Draft, not approved for release</span>' : ""}</div></div>
+  const body = `<div class="top"><div><div class="eyebrow">Black Cloud Barometer</div><h1>${r.t(customer)}</h1><div>${r.t(`${documentTitle(run)}: one page summary`)}</div></div><div class="who"><b>${longDate(run.asOf)}</b>${preparedBy ? r.t(`Prepared by ${preparedBy}, Black Cloud`) : run.reviewMode === "automatic" ? "" : r.t("Prepared by Black Cloud")}${r.draft ? '<br><span class="mark">Draft, not approved for release</span>' : ""}</div></div>
 <p class="headline">${r.t(verdictOf(report.teamFindings).headline)}</p>${progress}${aiLine ? `<p style="font-size:11.5px;margin:-6px 0 10px">${r.t(aiLine)}</p>` : ""}
 <div class="trio">${score}${worth}${pay}</div>
 ${line ? `<p style="font-size:11.5px;color:var(--muted);margin:-6px 0 4px">${r.t(line)}</p>` : ""}
 ${comparisons(r, report)}${todo}
-<p class="recheck">${r.t("We'll look at your Salesforce again after 90 days, so you can see what has improved, in money as well as in the score.")}</p>`;
+<p class="recheck">${r.t(nextStepsWords(run.reviewMode === "automatic", CONSULTANT_NEXT_STEPS.recheck).recheck)}</p>`;
   const footer = `<div class="footer" data-chrome><span>Black Cloud Barometer${r.draft ? " | Draft, not approved for release" : ""}</span><span>The detail is in the executive summary and full report</span></div>`;
   return document("One page summary", "a4", CSS, [`<section class="page" data-page="1">${body}${footer}</section>`]);
 }

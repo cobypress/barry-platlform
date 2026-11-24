@@ -37,6 +37,8 @@ import {
   type ReleasedRun,
   type AutomaticRunState,
   type WorkerStore,
+  type PortalDocumentRow,
+  DOCUMENTS_HELD_FLAG,
 } from "./types.ts";
 
 // UNVERIFIED: written against the console's migrations (blackcloud-next
@@ -226,6 +228,17 @@ export function calibrationRow(runId: string, c: Calibration): Record<string, un
 export const HELD_REASON_SQL = `SELECT to_jsonb("HealthCheckRun") ->> 'heldReason' AS "heldReason" FROM "HealthCheckRun" WHERE "id" = $1`;
 /** A full check's review mode at connect, through the row as JSON (DECISIONS.md 688, 692). */
 export const REVIEW_MODE_SQL = `SELECT to_jsonb("HealthCheckRun") ->> 'reviewMode' AS "reviewMode" FROM "HealthCheckRun" WHERE "id" = $1`;
+/**
+ * How every flag is raised (DECISIONS.md 693, 698): an open flag is left as it
+ * is, so the first raise wins and a redelivery adds nothing; a flag a person
+ * cleared is opened again, with the new time and counts and unposted, so a
+ * run held or failed again for the same reason after "Run again" reaches a
+ * person again. Who cleared it is the console's to have recorded elsewhere
+ * first; both clear columns go null together, as its cleared check asks.
+ */
+export const FLAG_CONFLICT =
+  `ON CONFLICT ("runId", "kind") DO UPDATE SET "raisedAt" = EXCLUDED."raisedAt", "counts" = EXCLUDED."counts", "postedAt" = NULL, "clearedBy" = NULL, "clearedAt" = NULL ` +
+  `WHERE "HealthCheckRunFlag"."clearedAt" IS NOT NULL`;
 /** The console's check also wants the run unreleased; held twice keeps the first reason. */
 /**
  * The hold at connect and its flag in one statement (DECISIONS.md 692, 693):
@@ -235,14 +248,14 @@ export const REVIEW_MODE_SQL = `SELECT to_jsonb("HealthCheckRun") ->> 'reviewMod
  */
 export const HOLD_RUN_SQL =
   `WITH held AS (UPDATE "HealthCheckRun" SET "heldReason" = $2 WHERE "id" = $1 AND "reviewMode" = 'automatic' AND "heldReason" IS NULL AND "status" <> 'released' RETURNING "id"), ` +
-  `flag AS (INSERT INTO "HealthCheckRunFlag" ("runId", "kind", "raisedAt", "counts") SELECT "id", $2, $3::timestamp(3), '{}'::jsonb FROM held ON CONFLICT ("runId", "kind") DO NOTHING) ` +
+  `flag AS (INSERT INTO "HealthCheckRunFlag" ("runId", "kind", "raisedAt", "counts") SELECT "id", $2, $3::timestamp(3), '{}'::jsonb FROM held ${FLAG_CONFLICT}) ` +
   `SELECT count(*)::int AS "held" FROM held`;
-/** A flag for a person (migration 20261211): counts only, raised once. */
-export const RAISE_FLAG_SQL = `INSERT INTO "HealthCheckRunFlag" ("runId", "kind", "raisedAt", "counts") VALUES ($1, $2, $3::timestamp(3), $4::jsonb) ON CONFLICT ("runId", "kind") DO NOTHING`;
+/** A flag for a person (migration 20261211): counts only, raised once while open (FLAG_CONFLICT). */
+export const RAISE_FLAG_SQL = `INSERT INTO "HealthCheckRunFlag" ("runId", "kind", "raisedAt", "counts") VALUES ($1, $2, $3::timestamp(3), $4::jsonb) ${FLAG_CONFLICT}`;
 /** A failed run's flag, only for an automatic run: read through the row as JSON, so a console without the column raises none. */
 export const FAILURE_FLAG_SQL =
   `INSERT INTO "HealthCheckRunFlag" ("runId", "kind", "raisedAt", "counts") SELECT "id", 'run_failed', $2::timestamp(3), '{}'::jsonb FROM "HealthCheckRun" ` +
-  `WHERE "id" = $1 AND to_jsonb("HealthCheckRun") ->> 'reviewMode' = 'automatic' ON CONFLICT ("runId", "kind") DO NOTHING`;
+  `WHERE "id" = $1 AND to_jsonb("HealthCheckRun") ->> 'reviewMode' = 'automatic' ${FLAG_CONFLICT}`;
 /** An automatic run's hold with its results (DECISIONS.md 693). One row or the save rolls back. */
 export const HOLD_OUTPUT_SQL = `UPDATE "HealthCheckRun" SET "heldReason" = $2 WHERE "id" = $1 AND "reviewMode" = 'automatic' AND "heldReason" IS NULL AND "status" <> 'released'`;
 /** One release row by code: kind automatic, naming nobody (migration 20261211's check). */
@@ -253,6 +266,21 @@ export const RELEASE_ROW_SQL = `INSERT INTO "HealthCheckRelease" ("id", "runId",
  * (DECISIONS.md 693). One row or the save rolls back.
  */
 export const RELEASE_RUN_SQL = `UPDATE "HealthCheckRun" SET "status" = 'released' WHERE "id" = $1 AND "reviewMode" = 'automatic' AND "heldReason" IS NULL AND "status" NOT IN ('released', 'failed')`;
+/**
+ * One of the portal's documents (DECISIONS.md 698, migration 20261212),
+ * replacing what an earlier make left for that run and output, and written
+ * only while the run is a released, unheld automatic run: a run a person took
+ * back meanwhile gets no row, and the make rolls back.
+ */
+export const PORTAL_DOCUMENT_SQL =
+  `INSERT INTO "HealthCheckPortalDocument" ("runId", "output", "sealed", "madeAt", "expiresAt", "heldForUs") ` +
+  `SELECT r."id", $2, $3::bytea, $4::timestamp(3), $5::timestamp(3), $6::boolean FROM "HealthCheckRun" r ` +
+  `WHERE r."id" = $1 AND r."status" = 'released' AND r."reviewMode" = 'automatic' AND r."heldReason" IS NULL ` +
+  `ON CONFLICT ("runId", "output") DO UPDATE SET "sealed" = EXCLUDED."sealed", "madeAt" = EXCLUDED."madeAt", "expiresAt" = EXCLUDED."expiresAt", "heldForUs" = EXCLUDED."heldForUs"`;
+/** The clean-up (DECISIONS.md 698): times are written in UTC, so compared with UTC, as the console's view does. */
+export const PORTAL_SWEEP_LOCK_TIMEOUT_SQL = `SET LOCAL lock_timeout = '2s'`;
+export const PORTAL_SWEEP_STATEMENT_TIMEOUT_SQL = `SET LOCAL statement_timeout = '5s'`;
+export const PORTAL_EXPIRED_SQL = `DELETE FROM "HealthCheckPortalDocument" WHERE "expiresAt" < (now() AT TIME ZONE 'UTC')`;
 /** The org's last released run of the product, by its latest release row, other than this one (DECISIONS.md 693). */
 export const LAST_RELEASED_SCORE_SQL =
   `SELECT r."overallScore" AS "score" FROM "HealthCheckRun" r JOIN "HealthCheckRelease" l ON l."runId" = r."id" ` +
@@ -1141,8 +1169,11 @@ export class PostgresWorkerStore implements WorkerStore {
     ]);
     const run = runFromRows(row, steps.rows.map(({ runId: _r, ...s }) => s));
     const doc = one(documents);
+    // An automatic run's hold, read as the run job reads it; a consultant-led run's reads are unchanged (DECISIONS.md 698).
+    const held = run.reviewMode === "automatic" ? one(await this.#pool.query(HELD_REASON_SQL, [runId]))?.heldReason : undefined;
     return {
       run,
+      ...(run.reviewMode === "automatic" ? { heldReason: typeof held === "string" ? held : null } : {}),
       intake: one(intake) ? intakeFromRow(one(intake)!, run) : null,
       survey,
       sections: sections.rows.map(sectionFromRow),
@@ -1236,6 +1267,30 @@ export class PostgresWorkerStore implements WorkerStore {
     const { rows } = await this.#pool.query(`SELECT ${columns.map((c) => `"${c}"`).join(", ")} FROM "HealthCheckBenchmarkRow"`);
     // numeric comes back from pg as a string.
     return rows.map((row: Record<string, unknown>) => BenchmarkRow.parse({ ...row, value: Number(row.value) }));
+  }
+
+  async savePortalDocuments(runId: string, rows: PortalDocumentRow[], heldCounts: Record<string, number> | null): Promise<void> {
+    await this.#transaction(async (client) => {
+      for (const row of rows) {
+        const result = await client.query(PORTAL_DOCUMENT_SQL, [runId, row.output, row.sealed, row.madeAt, row.expiresAt, row.heldForUs]);
+        if (result.rowCount !== 1) throw new Error(`Run ${runId} isn't a released, unheld automatic run, so its portal documents weren't saved`);
+      }
+      if (heldCounts) await client.query(RAISE_FLAG_SQL, [runId, DOCUMENTS_HELD_FLAG, rows[0]?.madeAt ?? new Date(0).toISOString(), JSON.stringify(heldCounts)]);
+    });
+  }
+
+  async deleteExpiredPortalDocuments(_now: string): Promise<number | null> {
+    try {
+      // Short limits of its own, so a locked table never holds up the documents job it runs before (DECISIONS.md 698).
+      return await this.#transaction(async (client) => {
+        await client.query(PORTAL_SWEEP_LOCK_TIMEOUT_SQL);
+        await client.query(PORTAL_SWEEP_STATEMENT_TIMEOUT_SQL);
+        return (await client.query(PORTAL_EXPIRED_SQL)).rowCount ?? 0;
+      });
+    } catch (err) {
+      if ((err as { code?: string }).code === "42P01") return null;
+      throw err;
+    }
   }
 
   async failDocuments(runId: string, reason: string, at: string): Promise<void> {

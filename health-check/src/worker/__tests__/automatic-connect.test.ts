@@ -549,7 +549,7 @@ describe("the Postgres store's side of it", () => {
     assert.deepEqual(pool.statements, [{ text: HOLD_RUN_SQL, values: [RUN_ID, CALIBRATION_UNREADABLE, NOW.toISOString()] }]);
     assert.match(HOLD_RUN_SQL, /"reviewMode" = 'automatic' AND "heldReason" IS NULL/);
     // The flag only from the row the hold set, raised once (DECISIONS.md 693).
-    assert.match(HOLD_RUN_SQL, /INSERT INTO "HealthCheckRunFlag" \("runId", "kind", "raisedAt", "counts"\) SELECT "id", \$2, \$3::timestamp\(3\), '\{\}'::jsonb FROM held ON CONFLICT \("runId", "kind"\) DO NOTHING/);
+    assert.match(HOLD_RUN_SQL, /INSERT INTO "HealthCheckRunFlag" \("runId", "kind", "raisedAt", "counts"\) SELECT "id", \$2, \$3::timestamp\(3\), '\{\}'::jsonb FROM held ON CONFLICT \("runId", "kind"\) DO UPDATE .* WHERE "HealthCheckRunFlag"\."clearedAt" IS NOT NULL\) /);
     // A run already held: nothing set, so nothing said held.
     const already = new FakePool();
     already.handlers.push(() => ({ rows: [{ held: 0 }], rowCount: 1 }));

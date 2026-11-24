@@ -2,7 +2,7 @@ import { assertOutsideGit } from "../engine/run.ts";
 import { processConnectJob } from "./connect-job.ts";
 import type { Attempt, JobOutcome, WorkerDeps } from "./deps.ts";
 import { processDocumentsJob } from "./documents-job.ts";
-import { processRunJob } from "./run-job.ts";
+import { processRunJob, runAgainToken } from "./run-job.ts";
 import { processShareJob } from "./share-job.ts";
 import { parseJob } from "./types.ts";
 
@@ -19,8 +19,12 @@ export function createJobHandler(deps: WorkerDeps): JobHandler {
   assertOutsideGit(deps.tokens.dir);
   return async (data, attempt) => {
     const job = parseJob(data);
-    if (job.kind === "documents") return processDocumentsJob(job.runId, deps, attempt);
+    if (job.kind === "documents") return processDocumentsJob(job.runId, deps, attempt, job.deliver);
     if (job.kind === "share") return processShareJob(job.runId, deps, attempt);
-    return job.kind === "run" ? processRunJob(job.runId, deps, attempt) : processConnectJob(job.linkId, deps, attempt);
+    if (job.kind === "run") {
+      const again = runAgainToken(job.runId, attempt.jobId);
+      return processRunJob(job.runId, deps, attempt, again === null ? {} : { again });
+    }
+    return processConnectJob(job.linkId, deps, attempt);
   };
 }

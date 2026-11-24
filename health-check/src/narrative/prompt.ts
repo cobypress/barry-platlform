@@ -56,6 +56,44 @@ export const AUTOMATIC_FORBIDDEN: readonly RegExp[] = [
   /\breviewed (?:it|this|these|them|your)\b/i,
 ];
 
+/** Inline elements: a word split across one still reads as one word, so their tags are dropped with no space. */
+const INLINE_TAGS = "a|abbr|b|bdi|bdo|cite|code|data|dfn|em|font|i|kbd|mark|q|s|samp|small|span|strong|sub|sup|time|tspan|u|var|wbr";
+/** Characters that print as nothing, so a word holding one still reads as the word (DECISIONS.md 698). */
+const INVISIBLE = /[­​-‍⁠﻿]/g;
+const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", shy: "" };
+
+/**
+ * Text as a reader sees it, for the automatic run's word checks (DECISIONS.md
+ * 693, 698), the draft guard's and the documents': styles and scripts dropped,
+ * an image's alt text kept, an inline tag dropped with no space (so
+ * "re<span>viewed</span>" reads "reviewed"), any other tag a space, entities
+ * decoded, soft hyphens and zero-width characters taken out, and white space
+ * collapsed. Plain text passes through it unchanged but for those characters.
+ */
+export function readerText(text: string): string {
+  return text
+    .replace(/<(style|script)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, " ")
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/<img\b[^>]*?\balt\s*=\s*(?:"([^"]*)"|'([^']*)')[^>]*>/gi, (_m, a?: string, b?: string) => ` ${a ?? b ?? ""} `)
+    .replace(new RegExp(`</?(?:${INLINE_TAGS})\\b[^>]*>`, "gi"), "")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (whole, name: string) => {
+      if (name[0] === "#") {
+        const code = name[1]?.toLowerCase() === "x" ? parseInt(name.slice(2), 16) : parseInt(name.slice(1), 10);
+        return Number.isFinite(code) && code <= 0x10ffff ? String.fromCodePoint(code) : " ";
+      }
+      return ENTITIES[name.toLowerCase()] ?? whole;
+    })
+    .replace(INVISIBLE, "")
+    .replace(/[\s  -  ]+/g, " ");
+}
+
+/** Whether a text, as written or as its reader sees it, holds any of the words an automatic run's draft may not. Both, so a tag-like "<" in plain text hides nothing. */
+export const claimsAPerson = (text: string): boolean => {
+  const read = readerText(text);
+  return AUTOMATIC_FORBIDDEN.some((p) => p.test(text) || p.test(read));
+};
+
 export const DRAFT_SCHEMA = {
   type: "object",
   additionalProperties: false,

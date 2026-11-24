@@ -112,10 +112,42 @@ async function draftSections(runId: string, dir: string, input: ReportInput, cli
   return report;
 }
 
-export async function processRunJob(runId: string, deps: WorkerDeps, attempt: Attempt): Promise<JobOutcome> {
-  if (!RUN_ID.test(runId)) return { outcome: "failed", detail: "The run id isn't one the worker can use as a folder name" };
-  return withJobLock(deps.locksDir, `run-${runId}`, () => runThenLetGo(runId, deps, attempt));
+/** What a run job may ask beyond its run: `again`, a person's "Run again" of an automatic run (DECISIONS.md 698). */
+export type RunJobOptions = { again?: string };
+
+/**
+ * A person's "Run again" (DECISIONS.md 698): the console adds the run job under
+ * the id `run-<runId>-again-<ms>`, the time of the press in milliseconds (1 to
+ * 16 digits, no leading zero), and nothing more in its data. The time, or null
+ * for any other id: the first run's fixed `run-<runId>`, a scan's or a
+ * consultant-led run's `run-<runId>-<ms>`, or none.
+ */
+export function runAgainToken(runId: string, jobId: string | undefined): string | null {
+  if (!jobId || !jobId.startsWith(`run-${runId}-again-`)) return null;
+  const token = jobId.slice(`run-${runId}-again-`.length);
+  return /^[1-9][0-9]{0,15}$/.test(token) ? token : null;
 }
+
+/** The run folder's record of which "Run again" started it afresh, so a retry of that same job resumes rather than starting again. */
+export const AGAIN_FILE = "again.json";
+
+export async function processRunJob(runId: string, deps: WorkerDeps, attempt: Attempt, options: RunJobOptions = {}): Promise<JobOutcome> {
+  if (!RUN_ID.test(runId)) return { outcome: "failed", detail: "The run id isn't one the worker can use as a folder name" };
+  return withJobLock(deps.locksDir, `run-${runId}`, () => runThenLetGo(runId, deps, attempt, options));
+}
+
+/** The "Run again" that last started this folder afresh, or null. */
+function againOf(dir: string): string | null {
+  try {
+    const read = JSON.parse(readFileSync(join(dir, AGAIN_FILE), "utf8")) as { again?: unknown };
+    return typeof read.again === "string" ? read.again : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The answer a "Run again" gets when the console hasn't set the run back first: nothing read, nothing removed. */
+export const AGAIN_NOT_RESET = "Run again starts an automatic run afresh only once it's set back to extracting with no hold, so nothing was read and its folder is as it was.";
 
 /**
  * A free scan gives the org's access back however its run ends (DECISIONS.md
@@ -125,11 +157,11 @@ export async function processRunJob(runId: string, deps: WorkerDeps, attempt: At
  * one resumes through it; on the last delivery nothing will, so it lets go
  * first. Only a run the console says is a scan is ever let go.
  */
-async function runThenLetGo(runId: string, deps: WorkerDeps, attempt: Attempt): Promise<JobOutcome> {
+async function runThenLetGo(runId: string, deps: WorkerDeps, attempt: Attempt, options: RunJobOptions = {}): Promise<JobOutcome> {
   const seen: SeenRun = {};
   let outcome: JobOutcome;
   try {
-    outcome = await runLocked(runId, deps, attempt, seen);
+    outcome = await runLocked(runId, deps, attempt, seen, options);
   } catch (err) {
     if (attempt.final) await letGoAfterRun(runId, seen, deps);
     throw err;
@@ -138,7 +170,7 @@ async function runThenLetGo(runId: string, deps: WorkerDeps, attempt: Attempt): 
   return outcome;
 }
 
-async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen: SeenRun): Promise<JobOutcome> {
+async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen: SeenRun, options: RunJobOptions = {}): Promise<JobOutcome> {
   const log = deps.log ?? (() => {});
   const now = () => (deps.now ?? (() => new Date()))();
   const first = await deps.store.loadRunJob(runId);
@@ -149,6 +181,14 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
   if (first.run.reviewMode === "automatic" && first.run.status === "failed") return { outcome: "skipped", detail: `Automatic run ${runId} failed, so it waits for a person to run it again and nothing was read` };
   // A held automatic run waits for a named person, always: code never reads it again or releases it (DECISIONS.md 693).
   if (heldFor(first)) return heldOutcome(runId, first);
+  // A person's "Run again" of an automatic run reads the org afresh (DECISIONS.md 698): its folder is cleared and
+  // nothing is resumed, so a run held for what it read is read again. Only a run the console has set back to
+  // extracting, with its hold cleared (both checked above and again below), and only once per "Run again": a retry
+  // of the same job finds its own mark and resumes. Any other run, and a consultant-led run's, resumes as before.
+  const again = options.again !== undefined && first.run.reviewMode === "automatic" ? options.again : undefined;
+  if (options.again !== undefined && again === undefined) log(`Run ${runId} isn't automatic, so "Run again" resumes it as any delivery does.`);
+  const fresh = again !== undefined && againOf(join(deps.runsDir, runId)) !== again;
+  if (fresh && first.run.status !== "extracting") return { outcome: "skipped", detail: `Run ${runId}: ${AGAIN_NOT_RESET}` };
 
   // The run is this delivery's before anything is written, to the folder or the
   // store, a failure's included: the console's move to review, landing after the
@@ -208,6 +248,13 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
   }
 
   const dir = join(deps.runsDir, runId);
+  if (fresh) {
+    if (input.run.status !== "extracting") return { outcome: "skipped", detail: `Run ${runId}: ${AGAIN_NOT_RESET}` };
+    rmSync(dir, { recursive: true, force: true });
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    writeFileSync(join(dir, AGAIN_FILE), `${JSON.stringify({ again })}\n`, { mode: 0o600 });
+    log(`Run ${runId} is run again from the start: its folder was cleared and the org is read afresh.`);
+  }
   const resume = existsSync(join(dir, "run.json")) ? runId : undefined;
   const modules = modulesForRun(input.run.modules, deps.modules ?? ALL_MODULES);
   // The app the connection was made with, and no other (DECISIONS.md 616). One the worker no

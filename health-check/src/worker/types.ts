@@ -19,7 +19,12 @@ import type { RunDigest } from "../schemas/digest.ts";
 
 const RunJobPayload = z.object({ kind: z.literal("run"), runId: z.string().min(1).max(100), correlation_id: z.string().max(300).optional() }).strict();
 const ConnectJobPayload = z.object({ kind: z.literal("connect"), linkId: z.string().uuid(), correlation_id: z.string().max(300).optional() }).strict();
-const DocumentsJobPayload = z.object({ kind: z.literal("documents"), runId: z.string().min(1).max(100), correlation_id: z.string().max(300).optional() }).strict();
+/**
+ * `deliver: "portal"` asks for a released automatic run's three PDFs, sealed
+ * for the portal and never put anywhere else (DECISIONS.md 698). Left out, the
+ * documents go to Drive as they always have.
+ */
+const DocumentsJobPayload = z.object({ kind: z.literal("documents"), runId: z.string().min(1).max(100), deliver: z.literal("portal").optional(), correlation_id: z.string().max(300).optional() }).strict();
 /** The console's readers changed on a released run: share its Drive folder to match (DECISIONS.md 251). */
 const ShareJobPayload = z.object({ kind: z.literal("share"), runId: z.string().min(1).max(100), correlation_id: z.string().max(300).optional() }).strict();
 /**
@@ -29,7 +34,7 @@ const ShareJobPayload = z.object({ kind: z.literal("share"), runId: z.string().m
  */
 const LegacyStepPayload = z.object({ runId: z.string().min(1).max(100), stepId: z.string().min(1).max(100), correlation_id: z.string().max(300) }).strict();
 
-export type WorkerJob = { kind: "run"; runId: string } | { kind: "connect"; linkId: string } | { kind: "documents"; runId: string } | { kind: "share"; runId: string };
+export type WorkerJob = { kind: "run"; runId: string } | { kind: "connect"; linkId: string } | { kind: "documents"; runId: string; deliver?: "portal" } | { kind: "share"; runId: string };
 
 export class BadJobError extends Error {
   constructor(message: string) {
@@ -45,7 +50,7 @@ export function parseJob(data: unknown): WorkerJob {
   const connect = ConnectJobPayload.safeParse(data);
   if (connect.success) return { kind: "connect", linkId: connect.data.linkId };
   const documents = DocumentsJobPayload.safeParse(data);
-  if (documents.success) return { kind: "documents", runId: documents.data.runId };
+  if (documents.success) return { kind: "documents", runId: documents.data.runId, ...(documents.data.deliver ? { deliver: documents.data.deliver } : {}) };
   const share = ShareJobPayload.safeParse(data);
   if (share.success) return { kind: "share", runId: share.data.runId };
   const legacy = LegacyStepPayload.safeParse(data);
@@ -256,7 +261,23 @@ export type DocumentsJobInput = {
    * switch off, with no row, or with one that doesn't read.
    */
   handbookSummaries?: StoredSummaries | null;
+  /**
+   * An automatic run's hold (the console's "heldReason", DECISIONS.md 693), or
+   * null. Read only for an automatic run; missing reads as none. The portal's
+   * documents are never made for a held run (698).
+   */
+  heldReason?: string | null;
 };
+
+/**
+ * One of an automatic run's documents as the portal keeps it (the console's
+ * HealthCheckPortalDocument, DECISIONS.md 698). Held for us, `sealed` is
+ * HELD_PLACEHOLDER, which nothing can open and the portal never serves.
+ */
+export type PortalDocumentRow = { runId: string; output: "executive_summary" | "full_health_check" | "ceo_one_pager"; sealed: Buffer; madeAt: string; expiresAt: string; heldForUs: boolean };
+
+/** The `documents_held` flag a make raises when any document is held for us: counts only. */
+export const DOCUMENTS_HELD_FLAG = "documents_held";
 
 /** What a documents job asks the store to read beyond the run: the summaries only with the worker's switch on. */
 export type DocumentsJobReads = { handbookSummaries?: boolean };
@@ -413,6 +434,19 @@ export interface WorkerStore {
   saveDocuments(runId: string, made: DocumentsMade, digest?: RunDigest | null, surveyMetrics?: Metric[]): Promise<boolean>;
   /** A reason the console can show. Never a token or a name. */
   failDocuments(runId: string, reason: string, at: string): Promise<void>;
+  /**
+   * One make of the portal's documents (DECISIONS.md 698), in one transaction:
+   * each row upserted on (runId, output), replacing what a make before left,
+   * only while the run is a released, unheld automatic run; then, with
+   * `heldCounts`, the `documents_held` flag, ON CONFLICT DO NOTHING. Throws,
+   * having written nothing, when any of it is refused.
+   */
+  savePortalDocuments(runId: string, rows: PortalDocumentRow[], heldCounts: Record<string, number> | null): Promise<void>;
+  /**
+   * Deletes every portal document past its `expiresAt`: how many, or null
+   * when the console has no such table yet (42P01).
+   */
+  deleteExpiredPortalDocuments(now: string): Promise<number | null>;
 
   /** The run's readers and shares, for a share job or the retention sweep. Null when there's no such run. */
   loadShareJob(runId: string): Promise<ShareJobInput | null>;

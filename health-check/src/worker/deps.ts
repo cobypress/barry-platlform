@@ -9,6 +9,7 @@ import type { renderHandbookDocx } from "../handbook/docx.ts";
 import type { DocumentDrive, FolderSharing } from "./drive.ts";
 import type { WorkerStore } from "./types.ts";
 import type { AutomaticSwitch } from "./automatic.ts";
+import type { PortalDocumentsSwitch } from "./portal-documents.ts";
 
 export type WorkerDeps = {
   store: WorkerStore;
@@ -42,6 +43,8 @@ export type WorkerDeps = {
    * it after the analysis (DECISIONS.md 490 to 492). Off when absent.
    */
   apexSummaries?: boolean;
+  /** HC_DOCUMENTS_ON_DEMAND and HC_DOCUMENTS_KEY, read once at start in env.ts (DECISIONS.md 698). Absent: off, and every portal make is refused. */
+  portalDocuments?: PortalDocumentsSwitch;
   /** The worker's switch for automatic runs, read once at start in env.ts (DECISIONS.md 688). Absent: off. */
   automatic?: AutomaticSwitch;
   /**
@@ -71,7 +74,13 @@ export type WorkerDeps = {
 };
 
 /** Whether the queue will deliver this job again if it throws. */
-export type Attempt = { final: boolean };
+/**
+ * Whether the queue will deliver this job again if it throws, and the job's
+ * own queue id where the queue gives one: a person's "Run again" is known by
+ * its id alone, `run-<runId>-again-<ms>` (DECISIONS.md 698), since the job's
+ * data holds ids only and its schema is strict.
+ */
+export type Attempt = { final: boolean; jobId?: string };
 
 export type JobOutcome =
   | { outcome: "done"; detail: string }

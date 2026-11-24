@@ -7,7 +7,7 @@ import { unstorableAt } from "./inventory.ts";
 import { Run, type BenchmarkRow, type Calibration, type ConnectLink, type Metric, type Release, type ReportSection } from "../schemas/index.ts";
 import { assertChecks, CONSOLE_CHECKS } from "./console-checks.ts";
 import { storedFromRow, waitingRow, type ConsoleSummariesRow, type SummariesToSave } from "../handbook/summary-row.ts";
-import { DISCONNECT_STEP, ORG_AWAITING_CONNECT, RunClosedError, SCAN_REVOKE_NOT_CONFIRMED, type ConnectJobInput, type DocumentsJobInput, type DocumentsJobReads, type DriveShare, type ShareJobInput, type DocumentsMade, type LinkConnected, type LinkState, type PulseRun, type ReleasedRun, type RunJobInput, type RunOutputRecord, type RunProgress, type WorkerStore, type AutomaticOutcome, type AutomaticRunState, RUN_FAILED_FLAG } from "./types.ts";
+import { DISCONNECT_STEP, ORG_AWAITING_CONNECT, RunClosedError, SCAN_REVOKE_NOT_CONFIRMED, type ConnectJobInput, type DocumentsJobInput, type DocumentsJobReads, type DriveShare, type ShareJobInput, type DocumentsMade, type LinkConnected, type LinkState, type PulseRun, type ReleasedRun, type RunJobInput, type RunOutputRecord, type RunProgress, type WorkerStore, type AutomaticOutcome, type AutomaticRunState, RUN_FAILED_FLAG, DOCUMENTS_HELD_FLAG, type PortalDocumentRow } from "./types.ts";
 
 // The WorkerStore for tests: the console's tables as plain maps, with the same
 // rules a database store must keep. Writes replace; a run in review or
@@ -104,7 +104,15 @@ export class MemoryWorkerStore implements WorkerStore {
   /** The console's HealthCheckRelease rows, by run id. A test may add a person's or an earlier run's. */
   readonly releases = new Map<string, Release[]>();
   /** The console's HealthCheckRunFlag rows, by run id and kind. */
-  readonly flags = new Map<string, { runId: string; kind: string; raisedAt: string; counts: Record<string, number>; postedAt: null; clearedBy: null; clearedAt: null }>();
+  readonly flags = new Map<string, { runId: string; kind: string; raisedAt: string; counts: Record<string, number>; postedAt: string | null; clearedBy: string | null; clearedAt: string | null }>();
+
+  /** As the console's cron and a person do: a flag posted to staff, then cleared. Tests only. */
+  postAndClearFlag(runId: string, kind: string, by: string, at: string): void {
+    const flag = this.flags.get(`${runId}|${kind}`);
+    if (!flag) throw new Error(`No ${kind} flag on ${runId}`);
+    Object.assign(flag, { postedAt: at, clearedBy: by, clearedAt: at });
+    assertChecks(flag, CONSOLE_CHECKS.flagCleared);
+  }
 
   /** As the database would refuse the release or hold, before anything is written: its checks, its unique index, and a digest it must hold. */
   #checkAutomatic(run: StoredRun, output: RunOutputRecord): void {
@@ -142,12 +150,13 @@ export class MemoryWorkerStore implements WorkerStore {
     this.#raiseFlag(runId, a.reason, a.at, a.counts);
   }
 
-  /** As the Postgres store's INSERT ... ON CONFLICT DO NOTHING: raised once. */
+  /** As the Postgres store's FLAG_CONFLICT: an open flag is left as it is; a cleared one is opened again with the new time and counts, unposted (DECISIONS.md 698). */
   #raiseFlag(runId: string, kind: string, at: string, counts: Record<string, number>): void {
     const row = { runId, kind, raisedAt: at, counts: structuredClone(counts), postedAt: null, clearedBy: null, clearedAt: null };
     assertChecks(row, CONSOLE_CHECKS.flagKind, CONSOLE_CHECKS.flagCounts, CONSOLE_CHECKS.flagCleared);
     const key = `${runId}|${kind}`;
-    if (this.flags.has(key)) return;
+    const open = this.flags.get(key);
+    if (open && open.clearedAt === null) return;
     this.flags.set(key, row);
     this.writes.push({ method: "raiseFlag", id: runId, detail: kind });
   }
@@ -371,7 +380,9 @@ export class MemoryWorkerStore implements WorkerStore {
     // As the Postgres store reads it: only with the switch on, held to the console's schema, and only what the handbook prints from.
     const row = reads.handbookSummaries === true ? this.summaries.get(runId) : undefined;
     const read = row === undefined ? null : storedFromRow((({ decidedBy: _by, decidedAt: _at, model: _model, madeAt: _made, ...rest }) => rest)(row));
-    return structuredClone({ ...doc.input, handbookSummaries: read?.ok ? read.stored : null });
+    // As the Postgres store reads it: an automatic run's hold, or none (DECISIONS.md 698).
+    const held = doc.input.run.reviewMode === "automatic" ? { heldReason: this.held.get(runId) ?? null } : {};
+    return structuredClone({ ...doc.input, ...held, handbookSummaries: read?.ok ? read.stored : null });
   }
 
   async startDocuments(runId: string, _at: string): Promise<boolean> {
@@ -486,6 +497,42 @@ export class MemoryWorkerStore implements WorkerStore {
     if (at === -1) this.shares.push(structuredClone(share));
     else this.shares[at] = structuredClone(share);
     this.writes.push({ method: "saveShare", id: share.runId, detail: share.state });
+  }
+
+  /** The console's HealthCheckPortalDocument, keyed by run id and output (DECISIONS.md 698). */
+  readonly portalDocuments = new Map<string, PortalDocumentRow>();
+  /** False stands in for a console without the table (42P01). */
+  portalTable = true;
+
+  /** As the Postgres store's one transaction: every row held to the table's CHECKs and the run's state first, then all written, then the flag. */
+  async savePortalDocuments(runId: string, rows: PortalDocumentRow[], heldCounts: Record<string, number> | null): Promise<void> {
+    if (!this.portalTable) throw Object.assign(new Error('relation "HealthCheckPortalDocument" does not exist'), { code: "42P01" });
+    const run = this.documents.get(runId)?.input.run ?? this.runs.get(runId)?.run;
+    if (!run || run.status !== "released" || run.reviewMode !== "automatic" || this.held.has(runId)) throw new Error(`Run ${runId} isn't a released, unheld automatic run, so its portal documents weren't saved`);
+    for (const row of rows) {
+      // The migration's CHECKs, word for word in effect: the three outputs, 1 byte to 15 MiB, kept 7 days at most.
+      if (!["executive_summary", "full_health_check", "ceo_one_pager"].includes(row.output)) throw new Error('new row violates check constraint "HealthCheckPortalDocument_output_check"');
+      if (row.sealed.length < 1 || row.sealed.length > 15728640) throw new Error('new row violates check constraint "HealthCheckPortalDocument_sealed_check"');
+      const made = Date.parse(row.madeAt);
+      const expires = Date.parse(row.expiresAt);
+      if (!(expires > made && expires <= made + 7 * 86_400_000)) throw new Error('new row violates check constraint "HealthCheckPortalDocument_expiry_check"');
+    }
+    for (const row of rows) this.portalDocuments.set(`${row.runId}|${row.output}`, { ...row, sealed: Buffer.from(row.sealed) });
+    this.writes.push({ method: "savePortalDocuments", id: runId, detail: rows.map((r) => `${r.output}${r.heldForUs ? " held" : ""}`) });
+    if (heldCounts) this.#raiseFlag(runId, DOCUMENTS_HELD_FLAG, rows[0]?.madeAt ?? new Date(0).toISOString(), heldCounts);
+  }
+
+  async deleteExpiredPortalDocuments(now: string): Promise<number | null> {
+    if (!this.portalTable) return null;
+    let deleted = 0;
+    for (const [key, row] of this.portalDocuments) {
+      if (Date.parse(row.expiresAt) < Date.parse(now)) {
+        this.portalDocuments.delete(key);
+        deleted++;
+      }
+    }
+    if (deleted) this.writes.push({ method: "deleteExpiredPortalDocuments", id: "portal", detail: deleted });
+    return deleted;
   }
 
   async failDocuments(runId: string, reason: string, _at: string): Promise<void> {
