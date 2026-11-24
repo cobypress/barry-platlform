@@ -51,9 +51,8 @@ type Compared = BuiltReport["comparisons"][number];
 /** How far the figure sits from what it's compared with, as a share of that, so points and days can be ranked together. */
 function distance(c: Compared): number {
   const p = c.published[0];
-  // Set against a published figure, ours is the figure it was compared with: our average for a published average (DECISIONS.md 709),
-  // and, where that isn't set against anything, the figure as before, for the ranking alone.
-  const ours = p?.ours ?? c.value;
+  // Set against a published figure, ours is the figure it was compared with: our average for a published average (DECISIONS.md 709).
+  const ours = p ? p.ours : c.value;
   const against = p ? p.figure.value : c.own.status === "measured" ? c.own.median : null;
   if (ours === null || against === null) return 0;
   return Math.abs(ours - against) / Math.max(Math.abs(against), 1);
@@ -68,7 +67,8 @@ const belowPar = (c: Compared): boolean => c.published[0]?.side === "worse" || (
  * when any is. A page of only the flattering ones isn't credible.
  */
 export function chooseComparisons(all: Compared[], count: number): Compared[] {
-  const candidates = all.filter((c) => c.value !== null && (c.published.length > 0 || c.own.status === "measured")).sort((a, b) => distance(b) - distance(a) || a.metric.key.localeCompare(b.metric.key));
+  // A comparison we don't call shorter or longer (a published average where we hold none, DECISIONS.md 709) isn't ranked as ahead or behind.
+  const candidates = all.filter((c) => c.value !== null && c.published[0]?.against !== "none" && (c.published.length > 0 || c.own.status === "measured")).sort((a, b) => distance(b) - distance(a) || a.metric.key.localeCompare(b.metric.key));
   const shown = candidates.slice(0, count);
   const behind = candidates.find(belowPar);
   if (behind && !shown.some(belowPar) && shown.length > 0) shown[shown.length - 1] = behind;

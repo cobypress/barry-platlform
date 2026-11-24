@@ -14,7 +14,7 @@ import { AI_METRIC_IDS } from "../domains/configuration/ai.ts";
 import { readinessOf, VERDICT_WORDS, type Readiness } from "./readiness.ts";
 import { DOCUMENTED_METRIC_IDS } from "../domains/configuration/documented.ts";
 import { buildDataset, checkNumbers, scopeDataset, SOURCE, toNumberCheckResult, type FigureSet, type StructuralFigure } from "../numbercheck/index.ts";
-import { AMOUNT_MARK, compactMoney, longDate, money, monthYear, probingAmounts } from "../render/format.ts";
+import { AMOUNT_MARK, closedAgainstFirst, compactMoney, longDate, money, monthYear, probingAmounts } from "../render/format.ts";
 import { BENCHMARK_MIN_GROUP, calibrationConfirmation, type Calibration, type Finding, type ManualStep, type Metric, type NumberOverride, type ReportSection, type Run, type Score, type SectionVersion } from "../schemas/index.ts";
 import { ReportSection as ReportSectionSchema, SectionVersion as SectionVersionSchema } from "../schemas/index.ts";
 import type { SectionBrief } from "./draft.ts";
@@ -504,7 +504,7 @@ function deepDiveText(metrics: Metric[], currency: string): string {
     "How deals have really moved through your pipeline, measured from stage history rather than current field values.",
     ...pipelineTodayText(metrics, currency),
     repeat ? `${repeat.value}% of won value came from customers who had bought before.${top ? ` Your top ${top.stats.top} accounts brought in ${top.value}% of it.` : ""}` : null,
-    reliable && late ? `${reliable.value}% of won deals closed in the quarter they were first forecast for, and the median won deal closed ${late.value} days after its first close date.` : null,
+    reliable && late ? `${reliable.value}% of won deals closed in the quarter they were first forecast for, and the median won deal ${closedAgainstFirst(late.value)}.` : null,
   );
 }
 

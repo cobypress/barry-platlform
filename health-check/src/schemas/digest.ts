@@ -183,9 +183,10 @@ export const MetricOrgWords = z.object({
 
 /**
  * A measure's headline only, as corrected: never its segments, series or stats,
- * save one. A duration's average, beside the median that is its value, where
- * the documents show it: more than 10% from the median, from five values or
- * more (DECISIONS.md 709). Optional, so a digest made before it reads as before.
+ * save one: a duration's average, beside the median that is its value, for
+ * every such duration whose average is more than 10% from its median, from five
+ * values or more, with a median above 0, whether or not a document shows that
+ * measure (DECISIONS.md 709). Optional, so a digest made before it reads as before.
  */
 export const DigestMetric = z.discriminatedUnion("status", [
   z.object({

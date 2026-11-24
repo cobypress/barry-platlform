@@ -3,7 +3,7 @@ import { withAmountNotes } from "./amount-notes.ts";
 import { yearlyByFinding } from "../value/model.ts";
 import { orderFromOrg } from "../connect/auto-calibration.ts";
 import { currencyStanding } from "../engine/currency.ts";
-import { averageBeside } from "../domains/average.ts";
+import { averageBeside, averageBracket, averageFigure } from "../domains/average.ts";
 import { ORDER_UNCONFIRMED } from "../domains/historic-pipeline/cohort.ts";
 import { currentBody, TOP_ISSUE_COUNT, type BuiltOutput, type BuiltReport } from "../narrative/sections.ts";
 import { VERDICT_WORDS, type ReadinessVerdict } from "../narrative/readiness.ts";
@@ -13,7 +13,7 @@ import type { CustomerWords, Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import { ACCOUNT_ENGAGEMENT_DOMAINS, canRelease, CPQ_DOMAINS, SERVICE_CLOUD_DOMAINS, type Finding, type Metric, type Run } from "../schemas/index.ts";
 import { INVENTORY_COLUMNS, inventoryRows, OBJECT_INVENTORY } from "../domains/configuration/inventory.ts";
 import { activeUsersChart, lightningChart, loginChannelsChart, processFlowChart, scorecardOptions, type Chart, closedAsChart, deliveryOutlookChart, HALF_WIDTH, lostByStageChart, pipelineOverTime, scorecardChart, stageFunnel, stageVelocityChart, topAccountsChart, winRateBySegment, winsByCustomerChart, wonValueByChart } from "./charts.ts";
-import { compactMoney, longDate, monthYear, percent, ukDates } from "./format.ts";
+import { closedAgainstFirst, compactMoney, longDate, monthYear, percent, ukDates } from "./format.ts";
 import type { Calibration } from "../schemas/index.ts";
 import { chartSlot, coverScore, document, documentTitle, effortText, estimateLines, inDocumentOrder, paginate, paginateColumns, paragraphs, renderContext, sentence, severityChip, valueFigure, valueText, wrappedLines, type Render } from "./html.ts";
 import { noteSections, referenceMap } from "./references.ts";
@@ -369,8 +369,7 @@ function metricRows(r: Render, metrics: Metric[], currency: string): string {
   const rows = metrics.map((m) => {
     if (m.status === "not_measurable") return `<tr><td>${r.t(m.label)}${r.ref(m.id)}</td><td class="num">Not measurable</td><td>${r.t(m.reason)}</td></tr>`;
     // A duration's median leads; its average follows only where it is more than 10% away (DECISIONS.md 709).
-    const average = averageBeside(m);
-    const value = m.unit === "percent" ? percent(m.value) : m.unit === "days" ? `${m.value} days${average === null ? "" : ` (average ${average})`}` : m.unit === "currency" ? compactMoney(m.value, currency) : String(m.value);
+    const value = m.unit === "percent" ? percent(m.value) : m.unit === "days" ? `${m.value} ${m.value === 1 ? "day" : "days"}${averageBracket(m)}` : m.unit === "currency" ? compactMoney(m.value, currency) : String(m.value);
     return `<tr><td>${r.t(m.label)}${r.ref(m.id)}</td><td class="num">${value}</td><td>${r.t(m.definition)}</td></tr>`;
   });
   return `<table class="grid"><thead><tr><th>Measure</th><th class="num">Result</th><th>What it means</th></tr></thead><tbody>${rows.join("")}</tbody></table>`;
@@ -504,7 +503,7 @@ function closeDatesSlide(r: Render, metric: (id: string) => Metric | undefined, 
   const block = (m: Metric | undefined, body: (x: Measured) => string): string => (m?.status === "measured" ? body(m) : `<h3>${r.t(m?.label ?? "Not measured")}</h3><p class="note">${r.t(m?.status === "not_measurable" ? m.reason : "This metric wasn't part of the run.")}</p>`);
   const panel = [
     block(share, (m) => `<h3>Won in the quarter first forecast</h3><p class="big">${percent(m.value)}</p><p class="note">of the ${m.n} won deals we can follow through their stages</p>`),
-    block(late, (m) => `<h3>Days late against the first close date</h3><p class="big">${m.value} days</p><p class="note">For the median won deal${averageBeside(m) === null ? "" : `, against an average of ${averageBeside(m)} days`}. The typical range is ${m.stats.p25} to ${m.stats.p75} days.</p>`),
+    block(late, (m) => `<h3>Days late against the first close date</h3><p class="big">${m.value} days</p><p class="note">For the median won deal.${averageBeside(m) === null ? "" : ` The average is ${averageFigure(averageBeside(m)!)} ${averageBeside(m) === 1 ? "day" : "days"}.`} The typical range is ${m.stats.p25} to ${m.stats.p75} days.</p>`),
   ].join("");
   const order = calibration.stages.filter((s) => s.category === "open").sort((a, b) => (a.order ?? 0) - (b.order ?? 0)).map((s) => s.name);
   return { html: `<div class="eyebrow">Close dates and stage speed</div><h2>How far close dates hold, and where time goes</h2><div class="columns" style="grid-template-columns: 1fr 1.5fr"><div class="panel">${panel}</div><div><h3 class="cap">Median days in each stage, won and lost deals</h3>${chartSlot(stageVelocityChart(metric("historic.stage_velocity_won"), metric("historic.stage_velocity_lost"), order))}</div></div>${orderNote(r, calibration)}` };
@@ -645,7 +644,7 @@ function lostAndSpeedSlideDense(r: Render, metric: (id: string) => Metric | unde
   const closedAs = count ? count.segments.filter((s) => s.dimension === "closed as") : [];
   const lines = [
     count ? `${count.value} lost and no decision deals closed in the window, shown by the last open stage each was in.${closedAs.length ? ` By how they closed: ${closedAs.map((s) => `${s.key} ${s.value}`).join(", ")}.` : ""}` : "",
-    share && late ? `${percent(share.value)} of the ${share.n} won deals we can follow through their stages closed in the quarter first forecast, and the median won deal closed ${late.value} days after its first close date${averageBeside(late) === null ? "" : ` (average ${averageBeside(late)})`}.` : "",
+    share && late ? `${percent(share.value)} of the ${share.n} won deals we can follow through their stages closed in the quarter first forecast, and the median won deal ${closedAgainstFirst(late.value)}${averageBracket(late)}.` : "",
   ].filter(Boolean);
   const order = calibration.stages.filter((s) => s.category === "open").sort((a, b) => (a.order ?? 0) - (b.order ?? 0)).map((s) => s.name);
   return { html: `<div class="eyebrow">Where deals are lost</div><h2>Where deals drop out, and where time goes</h2>${lines.map((l) => `<p class="lede" style="font-size:15px;margin-bottom:8px">${r.t(l)}</p>`).join("")}<div class="chart-pair">${chartSlot(lostByStageChart(metric("historic.lost_by_stage"), metric("historic.lost_value_by_stage"), r.currency))}<div><h3 class="cap">Median days in each stage, won and lost deals</h3>${chartSlot(stageVelocityChart(metric("historic.stage_velocity_won"), metric("historic.stage_velocity_lost"), order))}</div></div>${orderNote(r, calibration)}` };

@@ -1,4 +1,4 @@
-import { averageBeside } from "../domains/average.ts";
+import { averageBeside, averageFigure } from "../domains/average.ts";
 import { issuesOf } from "../narrative/select.ts";
 import { percent } from "../render/format.ts";
 import type { Finding, Metric } from "../schemas/index.ts";
@@ -124,7 +124,7 @@ const MEASURES: Record<string, Measure> = {
     unit: "days",
     said: (who, v) => `${who} told us a typical won deal takes about ${v} ${v === 1 ? "day" : "days"} from creation to close.`,
     // The average only where it is more than 10% from the median (DECISIONS.md 709).
-    found: (v, average) => `We measured a median of ${v} ${v === 1 ? "day" : "days"} from creation to close for won deals${average === null ? "" : ` (average ${average})`}.`,
+    found: (v, average) => `We measured a median of ${v} ${v === 1 ? "day" : "days"} from creation to close for won deals${average === null ? "" : ` (average ${averageFigure(average)})`}.`,
   },
   weekly_users: {
     kind: "metric",

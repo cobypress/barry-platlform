@@ -1,7 +1,7 @@
 import { BENCHMARK_MIN_GROUP, type BenchmarkRow, type Finding, type Industry, type Metric, type Score } from "../schemas/index.ts";
 import { DURATION_MEDIANS, MIN_AVERAGE_VALUES } from "../domains/average.ts";
 import { BENCHMARK_METRICS, benchmarkFigures } from "./export.ts";
-import { PUBLISHED_FIGURES, type PublishedFigure } from "./published.ts";
+import { AVERAGE_AGAINST_AVERAGE, AVERAGE_AGAINST_MEDIAN, PUBLISHED_FIGURES, type PublishedFigure } from "./published.ts";
 import { latestWindow } from "./summary.ts";
 
 // Roadmap 1.6: where a run sits against published research and against our own
@@ -270,10 +270,15 @@ export function differenceWords(c: Comparison, p: Extract<PublishedComparison, {
   return c.metric.unit === "percent" ? `${size} ${size === 1 ? "point" : "points"} ${more ? "higher" : "lower"}` : `${size} ${size === 1 ? "day" : "days"} ${more ? "longer" : "shorter"}`;
 }
 
-/** What each average of days is, in the sentence that sets ours against a published one. */
-const AVERAGE_WORDS: Record<string, (days: string) => string> = {
-  "historic.sales_cycle_won": (days) => `Your won deals took an average of ${days} to close`,
+/** What each average of days is: in a sentence of its own, and as the subject of one. */
+const AVERAGE_WORDS: Record<string, { took: (days: string) => string; whose: string }> = {
+  "historic.sales_cycle_won": { took: (days) => `Your won deals took an average of ${days} to close`, whose: "Your won deals' average" },
 };
+
+/** Ours against a published figure, before the published figure: "11 days shorter than", "the same as". */
+export function againstWords(c: Comparison, p: Extract<PublishedComparison, { against: "value" | "average" }>): string {
+  return p.side === "level" ? "the same as" : `${differenceWords(c, p)} than`;
+}
 
 /**
  * The sentence that sets a published average of days against ours, or says
@@ -286,8 +291,19 @@ export function averageSentence(c: Comparison, p: PublishedComparison): string |
     return `Yours is a median of ${fmt(c.value!)} and the published figure an average of ${fmt(p.figure.value)}. A median and an average aren't measured the same way, so we don't say which is shorter.`;
   }
   if (p.against !== "average") return null;
-  const ours = AVERAGE_WORDS[c.metric.key]?.(fmt(p.ours)) ?? `Your average is ${fmt(p.ours)}`;
-  return `${ours}, against a published average of ${p.figure.value}: ${p.side === "level" ? "the same" : `${differenceWords(c, p)}, which is ${p.side}`}.`;
+  const ours = AVERAGE_WORDS[c.metric.key]?.took(fmt(p.ours)) ?? `Your average is ${fmt(p.ours)}`;
+  return `${ours}, ${againstWords(c, p)} the published average of ${fmt(p.figure.value)}${p.side === "level" ? "" : `, which is ${p.side}`}.`;
+}
+
+/**
+ * The same, where the published figure is already given just before it ("91
+ * days on average."): ours and how far apart, or, set against nothing, why.
+ */
+export function averageAfterPublished(c: Comparison, p: PublishedComparison): string | null {
+  if (p.against !== "average") return averageSentence(c, p);
+  const fmt = (v: number): string => formatFigure(v, c.metric.unit);
+  const whose = AVERAGE_WORDS[c.metric.key]?.whose ?? "Your average";
+  return `${whose} is ${fmt(p.ours)}: ${p.side === "level" ? "the same" : `${differenceWords(c, p)}, which is ${p.side}`}.`;
 }
 
 /** The working for one comparison, as labelled lines: the raw notes print them, and the number check reads them. */
@@ -302,7 +318,9 @@ export function comparisonNotes(c: Comparison): Array<{ label: string; text: str
     lines.push({ label: "Published research", text: `${f.source.publisher}, ${f.source.title} (${f.source.year}): ${fmt(f.value)}, ${f.statistic}.` });
     lines.push({ label: "What it measures", text: f.measures });
     lines.push({ label: "Who it describes", text: `${f.population}.` });
-    lines.push({ label: "How it differs from ours", text: f.differences.length ? f.differences.join(" ") : "It measures the same thing." });
+    // Set against our average, the caveat about a median says what was done instead (DECISIONS.md 709).
+    const differences = p.against === "average" ? f.differences.map((d) => (d === AVERAGE_AGAINST_MEDIAN ? AVERAGE_AGAINST_AVERAGE : d)) : f.differences;
+    lines.push({ label: "How it differs from ours", text: differences.length ? differences.join(" ") : "It measures the same thing." });
     lines.push({ label: "Basis", text: f.basis === "records" ? "Measured from deal records." : "Answered in a survey." });
     lines.push({ label: "Source", text: `${f.source.url}, read on ${f.source.checked}.` });
     const average = averageSentence(c, p);

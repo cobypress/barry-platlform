@@ -10,7 +10,12 @@ import { Pseudonymiser } from "../../privacy/pseudonymiser.ts";
 import { Calibration, type Metric } from "../../schemas/index.ts";
 import { historicPipelineModule } from "../historic-pipeline/index.ts";
 import { median } from "../historic-pipeline/metrics.ts";
-import { averageApart, averageBeside, DURATION_MEDIANS, meanStat, MIN_AVERAGE_VALUES } from "../average.ts";
+import { averageApart, averageBeside, averageBracket, DURATION_MEDIANS, meanStat, MIN_AVERAGE_VALUES } from "../average.ts";
+import { metricSource } from "../../narrative/prompt.ts";
+import { closedAgainstFirst } from "../../render/format.ts";
+import { buildMicrositePages } from "../../microsite/pages.ts";
+import { readoutKit } from "../../render/readout-kit.ts";
+import { onePagerHtml } from "../../render/one-pager.ts";
 import { buildThemes } from "../../interviews/readings.ts";
 import { checkedDigest } from "../../digest/checked.ts";
 import { buildReport } from "../../narrative/sections.ts";
@@ -69,7 +74,8 @@ describe("the average shown beside a median", () => {
     assert.equal(averageApart(0, 0.1), true, "a median of 0 says nothing about an average that isn't");
     assert.equal(averageBeside(days("historic.sales_cycle_won", 50, { mean: 54 })), null);
     assert.equal(averageBeside(days("historic.sales_cycle_won", 50, { mean: 73 })), 73);
-    assert.equal(averageBeside(days("historic.close_days_late", -10, { mean: -20 })), -20, "early deals are days too");
+    assert.equal(averageBeside(days("historic.close_days_late", -10, { mean: -20 })), null, "a median of 0 or below has no average beside it");
+    assert.equal(averageBeside(days("historic.close_days_late", 10, { mean: -20 })), -20, "a positive median's average may still be early");
   });
   test("never from fewer than five values, a metric that isn't a duration's median, or one with no average", () => {
     assert.equal(averageBeside(days("historic.sales_cycle_won", 50, { mean: 73 }, 4)), null);
@@ -117,11 +123,13 @@ const won = (i: number, cycle: number): OpportunityRow => {
     LossReason: null,
   };
 };
-function cycleOf(cycles: number[]): Measured {
+// A deal loaded already won, closed months before it was created: it has no cycle, and the median leaves it out.
+const loadedWon: OpportunityRow = { ...won(90, 0), Id: "W0090", CreatedDate: "2025-06-01T09:00:00.000+0000", CloseDate: "2025-01-01" };
+function cycleOf(cycles: number[], extra: OpportunityRow[] = []): Measured {
   const source = { kind: "soql", api: "rest", query: "SELECT Id FROM Opportunity" } as const;
   const extracts = new Map<string, unknown>([
     [orgExtractor.id, { status: "ok", source, truncated: false, data: [{ FiscalYearStartMonth: 1 }] }],
-    [opportunitiesExtractor.id, { opportunities: { status: "ok", data: cycles.map((c, i) => won(i, c)), source, truncated: false }, history: { status: "ok", data: [], source, truncated: false }, multiCurrency: false, lossReasonField: null, windowFrom: WINDOW.from }],
+    [opportunitiesExtractor.id, { opportunities: { status: "ok", data: [...cycles.map((c, i) => won(i, c)), ...extra], source, truncated: false }, history: { status: "ok", data: [], source, truncated: false }, multiCurrency: false, lossReasonField: null, windowFrom: WINDOW.from }],
     [usersExtractor.id, { status: "ok", source, truncated: false, data: [{ Id: "005000000000001AAA", Name: "Test Rep", Username: "t@example.com", Email: "t@example.com", IsActive: true, UserRole: { Name: "UK" } }] }],
     [stagesExtractor.id, { status: "ok", source, truncated: false, data: [] }],
   ]);
@@ -148,6 +156,11 @@ describe("a sales cycle's average, from the deals", () => {
     assert.deepEqual([m.value, m.stats.mean], [less(30), less(120)]);
     assert.equal(averageBeside(m), less(120));
   });
+  test("is taken over the deals the median is, never one the median leaves out", () => {
+    const m = cycleOf([10, 20, 30, 40, 500], [loadedWon]);
+    assert.ok(m.exclusions.some((e) => e.includes("1 deals created already closed, or closed before they were created")), m.exclusions.join("; "));
+    assert.deepEqual([m.value, m.stats.mean, m.n], [less(30), less(120), 5]);
+  });
   test("below five deals, no average is kept, though the calibrated minimum allows the median", () => {
     const m = cycleOf([10, 20, 30, 500]);
     assert.equal(m.value, less(25));
@@ -163,6 +176,9 @@ describe("what people told us: a sales cycle", () => {
     assert.equal(far.found, "We measured a median of 41 days from creation to close for won deals (average 73).");
     assert.equal(far.reading, "disagrees", "60 is judged against 41, not 73");
     assert.equal(buildThemes([interview], [], [cycle(44)])[0]!.found, "We measured a median of 41 days from creation to close for won deals.");
+    // About 42 days agrees with the median of 41, and would be far from the average of 73.
+    const near = buildThemes([{ ...interview, answers: { sales_cycle: 42 } }], [], [cycle(73)])[0]!;
+    assert.equal(near.reading, "agrees", "42 is judged against 41, not 73");
   });
 });
 
@@ -201,19 +217,34 @@ describe("the synthetic org", () => {
     assert.match(html, /<td class="num">42\.5 days<\/td>/);
     assert.doesNotMatch(html, /43\.8/);
     // The roomiest deck gives close dates a panel of their own.
-    assert.match(fullReportHtmlAt(report, loaded.pseudonyms, 0), /<p class="note">For the median won deal, against an average of 26\.5 days\. The typical range is 7 to 44 days\.<\/p>/);
+    assert.match(fullReportHtmlAt(report, loaded.pseudonyms, 0), /<p class="note">For the median won deal\. The average is 26\.5 days\. The typical range is 7 to 44 days\.<\/p>/);
   });
   test("each new line reads as plain English as written, and its every figure traces to the run's data", () => {
     const set = pageDataset(report.dataset, loaded.pseudonyms);
     const lines = [
       "70 days (average 79.9)",
       "66.5% of the 164 won deals we can follow through their stages closed in the quarter first forecast, and the median won deal closed 24 days after its first close date (average 26.5).",
-      "For the median won deal, against an average of 26.5 days. The typical range is 7 to 44 days.",
+      "For the median won deal. The average is 26.5 days. The typical range is 7 to 44 days.",
+      "91 days on average. Your won deals' average is 79.9 days: 11.1 days shorter, which is better.",
+      "Your won deals took an average of 79.9 days to close, 11.1 days shorter than the published average of 91 days, which is better.",
+      "It's an average. Ours is usually given as a median, so we set the average of the same deals against it.",
       "We measured a median of 70 days from creation to close for won deals (average 79.9).",
     ];
     for (const line of lines) {
       assert.equal(plainWords(ukDates(line)), line, line);
       assert.deepEqual(checkNumbers(line, set).unmatched.map((u) => u.raw), [], line);
+    }
+  });
+  test("the published average is set against ours on every page that shows it, each figure traced", () => {
+    // buildMicrositePages throws on a figure the number check can't trace.
+    const comparePage = buildMicrositePages(report, loaded.pseudonyms).pages.map((p) => p.html).join("");
+    assert.match(comparePage, /70 days \(median\), 79\.9 days \(average\)/);
+    const kit = readoutKit(report).flatMap((p) => p.points).join("\n");
+    assert.match(kit, /their average is 79\.9 days, 11\.1 days shorter than the published average of 91 days \(Ebsta and Pavilion, 2025\)\./);
+    const set = pageDataset(report.dataset, loaded.pseudonyms);
+    for (const html of [fullReportHtml(report, loaded.pseudonyms), onePagerHtml(report, loaded.pseudonyms)]) {
+      const text = html.replace(/<[^>]+>/g, " ").replaceAll("&#39;", "'");
+      for (const line of text.match(/[^.]*(?:published average|average is 79\.9)[^.]*\./g) ?? []) assert.deepEqual(checkNumbers(line, set).unmatched.map((u) => u.raw), [], line);
     }
   });
   test("an automatic run's digest carries the averages it shows, and is still released", async () => {
@@ -252,5 +283,30 @@ describe("no rule reads an average", () => {
     const finding = analyseExtracts(extracts, { modules: ALL_MODULES }).findings.find((f) => f.ruleId === "svc.priority-resolution")!;
     assert.equal(finding.status, "passed", finding.summary);
     assert.deepEqual([finding.facts.highMedianHours, finding.facts.otherMedianHours], [5, 10]);
+  });
+});
+
+describe("how an average is written, and where it goes", () => {
+  const days = (value: number, mean: number, id = "historic.sales_cycle_won"): Metric =>
+    ({ id, status: "measured", value, n: 40, unit: "days", stats: { p25: 1, mean }, domain: "historic_pipeline", label: "x", definition: "x", assumptions: [], dateRange: null, segments: [] }) as unknown as Metric;
+  test("a thousand and over with a comma; a median of 0 or below has none beside it", () => {
+    assert.equal(averageBracket(days(1, 1.2)), " (average 1.2)");
+    assert.equal(averageBracket(days(700, 1204.5)), " (average 1,204.5)");
+    assert.equal(averageBracket(days(0, 3)), "");
+    assert.equal(averageBracket(days(-60, -20, "historic.close_days_late")), "");
+  });
+  test("deals closed early read as days before the first close date", () => {
+    assert.equal(closedAgainstFirst(24), "closed 24 days after its first close date");
+    assert.equal(closedAgainstFirst(-60), "closed 60 days before its first close date");
+    assert.equal(closedAgainstFirst(1), "closed 1 day after its first close date");
+    assert.equal(closedAgainstFirst(0), "closed on its first close date");
+  });
+  test("a draft is sent an average only where the documents show it", () => {
+    const shown = metricSource(days(41, 73)) as unknown as { stats: Record<string, number> };
+    assert.deepEqual(shown.stats, { p25: 1, mean: 73 });
+    const hidden = metricSource(days(41, 44)) as unknown as { stats: Record<string, number> };
+    assert.deepEqual(hidden.stats, { p25: 1 }, "within 10%: the tables don't show it, so neither does the draft");
+    assert.deepEqual((metricSource(byId.get("historic.slippage_days")!) as unknown as { stats: Record<string, number> }).stats, {});
+    assert.equal((metricSource(byId.get("historic.sales_cycle_won")!) as unknown as { stats: Record<string, number> }).stats.mean, 79.9);
   });
 });

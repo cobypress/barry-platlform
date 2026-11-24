@@ -1,4 +1,4 @@
-import { averageSentence, comparisonId, differenceWords, formatFigure, type Comparison, type GroupKind } from "../benchmark/compare.ts";
+import { averageAfterPublished, comparisonId, differenceWords, formatFigure, type Comparison, type GroupKind } from "../benchmark/compare.ts";
 import type { Render } from "./html.ts";
 
 // The "How you compare" slide. Published research and our own customers sit in
@@ -38,7 +38,7 @@ function publishedCell(r: Render, c: Comparison): string {
   // The source goes with the figure, always, in the same cell.
   // Higher isn't always better, so the sentence says which this is (night 3 reading pass).
   // A published average of days is set against our average, or against nothing (DECISIONS.md 709).
-  const average = averageSentence(c, p);
+  const average = averageAfterPublished(c, p);
   const against = average ?? (p.against === "none" ? "" : `Yours is ${differenceWords(c, p)}${p.side === "worse" ? ", which is worse" : p.side === "better" ? ", which is better" : ""}.`);
   return `${r.t(`${formatFigure(f.value, c.metric.unit)} ${f.statistic}. ${against}`)}<span class="src">${r.t(`${f.source.publisher}, ${f.source.year}`)}</span>`;
 }

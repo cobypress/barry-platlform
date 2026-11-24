@@ -142,7 +142,7 @@ describe("the readout kit", () => {
 describe("which comparisons the one-pager shows (DECISIONS.md 354)", () => {
   // Made up: a figure, and published research it's better or worse than.
   const made = (key: string, value: number, published: number, side: "better" | "worse") =>
-    ({ metric: { key, label: key, unit: "percent", better: "higher" }, value, reason: null, published: [{ figure: { value: published }, difference: value - published, side }], publishedReason: null, own: { status: "not_measurable", reason: "Synthetic.", tried: [] } }) as never;
+    ({ metric: { key, label: key, unit: "percent", better: "higher" }, value, reason: null, published: [{ figure: { value: published }, against: "value", ours: value, difference: value - published, side }], publishedReason: null, own: { status: "not_measurable", reason: "Synthetic.", tried: [] } }) as never;
 
   test("the furthest from what they're compared with, whichever way", () => {
     const chosen = chooseComparisons([made("near", 21, 20, "better"), made("far-up", 60, 20, "better"), made("far-down", 5, 20, "worse")], 2);
@@ -156,6 +156,17 @@ describe("which comparisons the one-pager shows (DECISIONS.md 354)", () => {
 
   test("on the sample, the one behind says it's worse, not only higher", () => {
     assert.match(onePagerHtml(buildReport(base), pseudonyms), /so yours is 44 points higher, which is worse\./);
+  });
+
+  // A published average of days is set against our average (DECISIONS.md 709): ranked on that gap, and not at all where we hold none.
+  test("a published average is ranked on our average, and one we hold no average for isn't ranked", () => {
+    const cycle = (key: string, median: number, against: "average" | "none", ours: number | null, published: number) =>
+      ({ metric: { key, label: key, unit: "days", better: "lower" }, value: median, reason: null, published: [{ figure: { value: published }, against, ours, difference: ours === null ? null : ours - published, side: ours === null ? null : ours < published ? "better" : "worse" }], publishedReason: null, own: { status: "not_measurable", reason: "Synthetic.", tried: [] } }) as never;
+    // Median 20 against 91 would be furthest out; its average of 90 is nearly level, so the other comes first.
+    const chosen = chooseComparisons([cycle("averaged", 20, "average", 90, 91), made("mid", 30, 20, "better")], 1);
+    assert.deepEqual(chosen.map((c: { metric: { key: string } }) => c.metric.key), ["mid"]);
+    const none = chooseComparisons([cycle("unlike", 20, "none", null, 91), made("near", 21, 20, "better")], 2);
+    assert.deepEqual(none.map((c: { metric: { key: string } }) => c.metric.key), ["near"]);
   });
 
   test("only flattering ones when nothing is behind", () => {
