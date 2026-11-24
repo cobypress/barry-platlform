@@ -124,6 +124,8 @@ export const DigestFinding = z.object({
    * Counts only. Absent everywhere else, and when the finding's facts lack them.
    */
   checkerRead: z.object({ readClasses: z.number().int().nonnegative(), readTriggers: z.number().int().nonnegative(), alreadyListed: z.number().int().nonnegative() }).optional(),
+  /** Its amounts are plain numbers in a currency not known by name (DECISIONS.md 700): show value.currencyNote beside them. Absent otherwise. */
+  amountsUnnamed: z.literal(true).optional(),
   /** By sentence, the ones the engine can vouch for, with the org's characters marked (DECISIONS.md 655). */
   orgWords: z
     .object({
@@ -279,6 +281,15 @@ export const DigestValueModel = z.object({
   lines: z.array(DigestValueLine),
   /** Findings with a figure the model couldn't place, by id. Their reasons are in the report. */
   leftOut: Ids,
+  /**
+   * On an automatic run whose currency isn't known by name (`currency` then
+   * "XXX", never printed), the line said beside its amounts, all ours
+   * (DECISIONS.md 700). Absent on every other run.
+   */
+  currencyNote: Text.optional(),
+  /** The currency the org's default locale suggests, for the portal's question: the org's word, never the currency. Only with currencyNote. */
+  currencySuggested: z.string().regex(/^[A-Z]{3}$/).optional(),
+  orgWords: z.object({ currencyNote: SentenceOrgWords.optional(), currencySuggested: SentenceOrgWords.optional() }).optional(),
 });
 export type DigestValueModel = z.infer<typeof DigestValueModel>;
 

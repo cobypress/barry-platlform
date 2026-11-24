@@ -37,7 +37,8 @@ export function atOwnWinRate(ctx: Pick<RuleContext, "metrics" | "calibration" | 
 /** Leads priced at what the org's own leads have returned on average. */
 export function atOwnLeadReturn(ctx: Pick<RuleContext, "metrics" | "calibration" | "leanOn">, leads: number, options: { period: string; caveat: Said }): Value {
   const rate = measuredRate(ctx, "lead.won_per_lead");
-  if ("reason" in rate) return notSized(`We won't size this without your own return per lead, which isn't measurable: ${rate.reason}`);
+  // As the win rate's: marked only where said made the reason (DECISIONS.md 693), as it does an automatic run's missing currency (700).
+  if ("reason" in rate) return notSized(orgWordsOf(rate.reason) ? said`We won't size this without your own return per lead, which isn't measurable: ${rate.reason as Said}` : `We won't size this without your own return per lead, which isn't measurable: ${rate.reason}`);
   if (rate.value <= 0 || leads <= 0) return notSized(said`Your leads haven't produced won revenue to size this from.`);
   return {
     kind: "revenue",
