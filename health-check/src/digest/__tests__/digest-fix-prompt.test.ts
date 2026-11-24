@@ -1,3 +1,4 @@
+import { allFindings } from "../../engine/evaluate.ts";
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
@@ -73,7 +74,8 @@ const planted: DomainModule = {
     };
   }),
 };
-const plantedFindings = analyseExtracts(loadExtracts(dir), { modules: [planted], answers: loadAnswers() }).findings;
+// Every finding, the path insights' too, which the analysis keeps apart (decision 703).
+const plantedFindings = allFindings(analyseExtracts(loadExtracts(dir), { modules: [planted], answers: loadAnswers() }));
 const plantedDigest = digestOf([...loaded.input.findings, ...plantedFindings]);
 const plantedIds = new Set(plantedFindings.map((f) => f.id));
 

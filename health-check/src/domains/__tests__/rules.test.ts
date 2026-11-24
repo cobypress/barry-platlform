@@ -1,3 +1,4 @@
+import { allFindings } from "../../engine/evaluate.ts";
 import { test, describe, before } from "node:test";
 import assert from "node:assert/strict";
 import { SALES_CLOUD_MODULES } from "../index.ts";
@@ -53,7 +54,8 @@ describe("the rule set", () => {
 
   test("every rule produced at least one finding", () => {
     // PMD's groups give a finding only on a run that had the code-lint step (decision 673), so it's planted here as not run.
-    const { findings } = analyseExtracts(new Map([...extracts, [codeLintExtractor.id, { pmd: notRun("pmd", PMD_NOT_INSTALLED), eslint: notRun("eslint", NO_JAVASCRIPT) }]]));
+    // The path insights are kept apart from the documents' findings (decision 703), and are findings all the same.
+    const findings = allFindings(analyseExtracts(new Map([...extracts, [codeLintExtractor.id, { pmd: notRun("pmd", PMD_NOT_INSTALLED), eslint: notRun("eslint", NO_JAVASCRIPT) }]])));
     for (const rule of SALES_CLOUD_MODULES.flatMap((m) => m.rules)) assert.ok(byRule(findings, rule.id).length > 0, rule.id);
   });
 
