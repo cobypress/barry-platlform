@@ -162,14 +162,21 @@ export type RunOutputRecord = {
   automatic?: AutomaticOutcome;
 };
 
-/** An automatic run's outcome as the store writes it. The reason words are src/worker/release.ts's. */
-export type AutomaticOutcome = { decision: "release"; releases: Release[] } | { decision: "hold"; reason: string; counts: Record<string, number>; at: string };
+/**
+ * An automatic run's outcome as the store writes it. The reason words are src/worker/release.ts's. A hold raises its
+ * own flag and one for each of `also`, the other checks that failed (DECISIONS.md 715), all with the same time.
+ */
+export type AutomaticOutcome =
+  | { decision: "release"; releases: Release[] }
+  | { decision: "hold"; reason: string; counts: Record<string, number>; also?: Array<{ kind: string; counts: Record<string, number> }>; at: string };
 
 /** Whether an automatic run has its calibration, has been queued, or is held. */
 export type AutomaticRunState = { calibrated: boolean; queued: boolean; held: boolean; status: string };
 
 /** The run kinds a flag is raised for, beside the hold reasons: the console's HealthCheckRunFlag."kind" (migration 20261211). */
 export const RUN_FAILED_FLAG = "run_failed";
+/** An automatic run stopped at its API budget (DECISIONS.md 715; the console's migration 20261217). */
+export const STOPPED_BUDGET_FLAG = "stopped_budget";
 
 /** What the console's HealthCheckRun keeps of a run's overall score (DECISIONS.md 626): a whole number from 0 to 100, and its grade. */
 export type RunOverall = { score: number; grade: "A" | "B" | "C" | "D" | "E" };
@@ -358,6 +365,12 @@ export interface WorkerStore {
   saveRunOutput(runId: string, output: RunOutputRecord): Promise<void>;
   /** The run failed before or outside the engine. Marks it failed with the reason on a "worker" step. */
   recordRunFailure(runId: string, reason: string, at: string): Promise<void>;
+  /**
+   * The stopped_budget flag, counts `{}`, on a run the console has as automatic
+   * and stopped at its budget (DECISIONS.md 715): raised once while open, so a
+   * delivery made again raises nothing more; a cleared one is opened again.
+   */
+  flagBudgetStop(runId: string, at: string): Promise<void>;
 
   loadConnectJob(linkId: string): Promise<ConnectJobInput | null>;
   /**

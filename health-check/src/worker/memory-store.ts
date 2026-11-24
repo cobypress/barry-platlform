@@ -7,7 +7,7 @@ import { unstorableAt } from "./inventory.ts";
 import { Run, type BenchmarkRow, type Calibration, type ConnectLink, type Metric, type Release, type ReportSection } from "../schemas/index.ts";
 import { assertChecks, CONSOLE_CHECKS } from "./console-checks.ts";
 import { storedFromRow, waitingRow, type ConsoleSummariesRow, type SummariesToSave } from "../handbook/summary-row.ts";
-import { DISCONNECT_STEP, ORG_AWAITING_CONNECT, RunClosedError, SCAN_REVOKE_NOT_CONFIRMED, type ConnectJobInput, type DocumentsJobInput, type DocumentsJobReads, type DriveShare, type ShareJobInput, type DocumentsMade, type LinkConnected, type LinkState, type PulseRun, type ReleasedRun, type RunJobInput, type RunOutputRecord, type RunProgress, type WorkerStore, type AutomaticOutcome, type AutomaticRunState, RUN_FAILED_FLAG, DOCUMENTS_HELD_FLAG, type PortalDocumentRow } from "./types.ts";
+import { DISCONNECT_STEP, ORG_AWAITING_CONNECT, RunClosedError, SCAN_REVOKE_NOT_CONFIRMED, type ConnectJobInput, type DocumentsJobInput, type DocumentsJobReads, type DriveShare, type ShareJobInput, type DocumentsMade, type LinkConnected, type LinkState, type PulseRun, type ReleasedRun, type RunJobInput, type RunOutputRecord, type RunProgress, type WorkerStore, type AutomaticOutcome, type AutomaticRunState, RUN_FAILED_FLAG, STOPPED_BUDGET_FLAG, DOCUMENTS_HELD_FLAG, type PortalDocumentRow } from "./types.ts";
 
 // The WorkerStore for tests: the console's tables as plain maps, with the same
 // rules a database store must keep. Writes replace; a run in review or
@@ -134,7 +134,7 @@ export class MemoryWorkerStore implements WorkerStore {
       return;
     }
     assertChecks({ status: output.progress.status, heldReason: a.reason, reviewMode }, CONSOLE_CHECKS.runStatus, CONSOLE_CHECKS.held, CONSOLE_CHECKS.heldReason);
-    assertChecks({ kind: a.reason, counts: a.counts, clearedBy: null, clearedAt: null }, CONSOLE_CHECKS.flagKind, CONSOLE_CHECKS.flagCounts, CONSOLE_CHECKS.flagCleared);
+    for (const f of [{ kind: a.reason, counts: a.counts }, ...(a.also ?? [])]) assertChecks({ kind: f.kind, counts: f.counts, clearedBy: null, clearedAt: null }, CONSOLE_CHECKS.flagKind, CONSOLE_CHECKS.flagCounts, CONSOLE_CHECKS.flagCleared);
   }
 
   #writeAutomatic(run: StoredRun, a: AutomaticOutcome): void {
@@ -148,6 +148,7 @@ export class MemoryWorkerStore implements WorkerStore {
     this.held.set(runId, a.reason);
     this.writes.push({ method: "holdRun", id: runId, detail: a.reason });
     this.#raiseFlag(runId, a.reason, a.at, a.counts);
+    for (const f of a.also ?? []) this.#raiseFlag(runId, f.kind, a.at, f.counts);
   }
 
   /** As the Postgres store's FLAG_CONFLICT: an open flag is left as it is; a cleared one is opened again with the new time and counts, unposted (DECISIONS.md 698). */
@@ -242,6 +243,12 @@ export class MemoryWorkerStore implements WorkerStore {
     this.writes.push({ method: "recordRunFailure", id: runId, detail: reason });
     // An automatic run that fails is a person's to look at (DECISIONS.md 693). Counts only: the reason is in the step.
     if (run.run.reviewMode === "automatic") this.#raiseFlag(runId, RUN_FAILED_FLAG, at, {});
+  }
+
+  /** As the Postgres store's one statement: only an automatic run stopped at its budget. */
+  async flagBudgetStop(runId: string, at: string): Promise<void> {
+    const run = this.runs.get(runId);
+    if (run?.run.reviewMode === "automatic" && run.run.status === "stopped_budget") this.#raiseFlag(runId, STOPPED_BUDGET_FLAG, at, {});
   }
 
   /** As the Postgres store: the run's disconnect step in or out, whatever the run's status. */

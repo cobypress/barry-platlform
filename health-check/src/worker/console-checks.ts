@@ -61,3 +61,29 @@ export function assertChecks(row: Record<string, unknown>, ...checks: ConsoleChe
     if (!passesCheck(check, row)) throw Object.assign(new Error(`new row violates check constraint "${check.name}"`), { code: "23514" });
   }
 }
+
+/**
+ * How the console tells an automatic run's budget stop apart, by how
+ * run.budget.stoppedReason opens (its lib/health-check/automatic/readers.ts,
+ * budgetStopCause; DECISIONS.md 715): each pattern copied word for word, so a
+ * test holds every reason the engine writes to the cause it is, and compares
+ * these with the console's file wherever its checkout is beside this one.
+ * Anything else the console reads as unknown, in words true of every cause.
+ */
+export const CONSOLE_BUDGET_STOP_OPENINGS = {
+  file: "lib/health-check/automatic/readers.ts",
+  allowance: [String.raw`/^The org has used \d+ of \d+ daily API calls\b/`, String.raw`/^Salesforce reports the daily API limit is exhausted\b/`],
+  cap: [String.raw`/^This run reached its cap of\b/`],
+  unread: [String.raw`/^The org's API limit (couldn't be read|hasn't been read yet)\b/`],
+} as const;
+
+export type BudgetStopCause = "allowance" | "cap" | "unread" | "unknown";
+
+const literal = (source: string): RegExp => new RegExp(source.slice(1, source.lastIndexOf("/")));
+
+/** The cause the console reads from a stoppedReason, as its budgetStopCause does. */
+export function consoleBudgetStopCause(stoppedReason: string | null | undefined): BudgetStopCause {
+  const r = typeof stoppedReason === "string" ? stoppedReason.trim() : "";
+  for (const cause of ["allowance", "cap", "unread"] as const) if (CONSOLE_BUDGET_STOP_OPENINGS[cause].some((p) => literal(p).test(r))) return cause;
+  return "unknown";
+}

@@ -12,7 +12,7 @@ import { refusalReason } from "../../extract/types.ts";
 import { refusalSpans } from "../../salesforce/refusal-words.ts";
 import { HEAVY_QUEUE, LAST_TRY_LOST_REASON, lostForGood, lostRecorder, startQueueWorker, type BullModule, type QueueJob, type QueueWorker } from "../bullmq.ts";
 import { JobBusyError } from "../lock.ts";
-import { AGAIN_FILE, lossLooksLikeOutage, READS_LOST, READS_LOST_RELEASED, READS_LOST_STEP } from "../run-job.ts";
+import { AGAIN_FILE, lossLooksLikeOutage } from "../run-job.ts";
 import { keepRefused } from "../../engine/run.ts";
 import type { RefusedRead, Run } from "../../schemas/index.ts";
 import type { Transport, TransportRequest, TransportResponse } from "../../salesforce/transport.ts";
@@ -187,15 +187,17 @@ describe("a whole Metadata API outage on the last delivery (round 3, finding 2)"
     ["a SOAP server fault on every Metadata API call (B1)", (r: TransportRequest) => (isSoap(r) ? SERVER_FAULT : null)],
     ["a maintenance page on every Metadata API call (B2)", (r: TransportRequest) => (isSoap(r) ? MAINTENANCE_PAGE : null)],
   ] as const) {
-    test(`${name}: an automatic run isn't released; it fails with the run_failed flag, in plain words`, async () => {
+    // Held for a person since 715, with its results saved; before, it failed.
+    test(`${name}: an automatic run isn't released; it is held reads_lost with its flag, its results saved`, async () => {
       const w = await world(hook, "automatic");
       await w.deliver(1);
       assert.equal(w.stored().run.status, "extracting");
       await w.deliver(3);
-      assert.equal(w.stored().run.status, "failed");
-      assert.equal(w.stored().output ?? null, null);
-      assert.equal(w.stored().run.steps.find((s) => s.id === "worker")?.error, READS_LOST);
-      assert.deepEqual(w.flags(), ["run_failed"]);
+      assert.notEqual(w.stored().run.status, "released");
+      assert.equal(w.deps.store.held.get(RUN_ID), "reads_lost");
+      assert.ok(w.stored().output);
+      assert.equal(w.stored().run.steps.find((s) => s.id === "worker"), undefined);
+      assert.ok(w.flags().includes("reads_lost") && !w.flags().includes("run_failed"), w.flags().join());
       const lost = (runJson(w.deps.runsDir).readsRefused ?? []).filter((r) => r.lost);
       assert.ok(lost.some((r) => r.step === "metadata"), JSON.stringify(lost));
     });
@@ -292,38 +294,26 @@ describe("one read that fails every time is the org's, not an outage (round 3, t
     assert.equal(lossLooksLikeOutage([{ step: "metadata", code: "RETRIEVE_TIMEOUT" }, { step: "report-definitions", code: "RETRIEVE_TIMEOUT" }]), true);
   });
 
-  test("a Metadata API that fails every time: the first run fails with READS_LOST; a person's Run again that loses it again is released, those checks not measured", async () => {
+  // 715: no once-only bound any more. Every attempt that loses reads to an outage is held, and a person has Show and Run again.
+  test("a Metadata API that fails every time: held reads_lost; a person's Run again that loses it again is held again, never released by code", async () => {
     const w = await world((r) => (isSoap(r) ? SERVER_FAULT : null), "automatic");
     await w.deliver(1);
     await w.deliver(3);
-    assert.equal(w.stored().run.status, "failed");
-    assert.equal(w.stored().run.steps.find((s) => s.id === "worker")?.error, READS_LOST);
-    // The console's "Run again": back to extracting, its step rows kept, a job under the press's own id.
+    assert.equal(w.deps.store.held.get(RUN_ID), "reads_lost");
+    // The console's "Run again": every open flag cleared, the hold gone, back to extracting, a job under the press's own id.
+    w.deps.store.postAndClearFlag(RUN_ID, "reads_lost", "staff@example.com", "2026-11-24T00:00:00.000Z");
+    w.deps.store.held.delete(RUN_ID);
     w.stored().run.status = "extracting";
     const again = `run-${RUN_ID}-again-1764000000000`;
     await w.deliver(1, again);
     assert.equal(w.stored().run.status, "extracting");
-    assert.deepEqual(JSON.parse(readFileSync(join(w.deps.runsDir, RUN_ID, AGAIN_FILE), "utf8")), { again: "1764000000000", readsLostBefore: true });
+    assert.deepEqual(JSON.parse(readFileSync(join(w.deps.runsDir, RUN_ID, AGAIN_FILE), "utf8")), { again: "1764000000000" });
     await w.deliver(3, again);
-    assert.equal(w.stored().run.status, "released");
+    assert.notEqual(w.stored().run.status, "released");
+    assert.equal(w.deps.store.held.get(RUN_ID), "reads_lost");
+    assert.equal(w.deps.store.flags.get(`${RUN_ID}|reads_lost`)?.clearedAt, null);
     const findings = (w.stored().output as { findings: Finding[] }).findings;
     assert.ok(findings.some((f) => /Metadata API couldn't be read, because Salesforce didn't answer as it should\.$/.test(f.notMeasurableReason ?? "")));
-    assert.ok(w.deps.lines.some((l) => /after a person ran it again, so it goes on with those checks not measured/.test(l)));
-    // Staff see it on the run's steps, with no flag of its own (round 4).
-    const note = w.stored().run.steps.find((s) => s.id === READS_LOST_STEP);
-    assert.deepEqual([note?.status, note?.error], ["done", READS_LOST_RELEASED]);
-  });
-
-  test("a Run again after any other failure still fails with READS_LOST on an outage", async () => {
-    const w = await world((r) => (isSoap(r) ? SERVER_FAULT : null), "automatic");
-    w.stored().run.status = "failed";
-    await w.deps.store.recordRunFailure(RUN_ID, "Something else stopped it.", "2026-11-24T00:00:00.000Z").catch(() => {});
-    w.stored().run.status = "extracting";
-    const again = `run-${RUN_ID}-again-1764000000000`;
-    await w.deliver(1, again);
-    await w.deliver(3, again);
-    assert.equal(w.stored().run.status, "failed");
-    assert.equal(w.stored().run.steps.find((s) => s.id === "worker")?.error, READS_LOST);
   });
 });
 
@@ -349,16 +339,17 @@ describe("a blip before the last delivery is read again, never given up (round 4
     assert.deepEqual((runJson(w.deps.runsDir).readsRefused ?? []).filter((r) => r.lost), []);
   });
 
-  test("P1: the counts 503 on all three deliveries: failed with READS_LOST on the last only", async () => {
+  test("P1: the counts 503 on all three deliveries: held on the last only, the reads_lost flag raised", async () => {
     const w = await world((r) => composite503(r), "automatic");
     await w.deliver(1);
     await w.deliver(2);
     assert.equal(w.stored().run.status, "extracting");
     assert.deepEqual(w.flags(), []);
     await w.deliver(3);
-    assert.equal(w.stored().run.status, "failed");
-    assert.equal(w.stored().run.steps.find((s) => s.id === "worker")?.error, READS_LOST);
-    assert.deepEqual(w.flags(), ["run_failed"]);
+    // Held digest_held, ahead of reads_lost (715's order): field usage's "Field usage on <Object> couldn't be read: <reason>"
+    // isn't known as ours, so its sentences are unmarked and the digest isn't safe to show. Both flags are open.
+    assert.equal(w.deps.store.held.get(RUN_ID), "digest_held");
+    assert.ok(w.flags().includes("reads_lost") && w.flags().includes("digest_held") && !w.flags().includes("run_failed"), w.flags().join());
   });
 
   test("P2: one composite step's counts 503 on every delivery: released, that step's checks not measured", async () => {
@@ -375,8 +366,9 @@ describe("a blip before the last delivery is read again, never given up (round 4
     assert.equal(w.stored().run.status, "released");
   });
 
-  test("P4: the run's own failure record fails once on the last try: tried again, so READS_LOST stands, not the queue's reason", async () => {
-    const w = await world((r) => (isSoap(r) ? SERVER_FAULT : null), "automatic");
+  test("P4: the run's own failure record fails once on the last try: tried again, so the run's own reason stands, not the queue's", async () => {
+    // A whole-instance outage on a read the run can't go on without: it fails, in plain words.
+    const w = await world((r) => (soql(r).includes("FROM Opportunity") ? body(503, "SERVER_UNAVAILABLE") : null), "automatic");
     await w.deliver(1);
     const store = w.deps.store as unknown as { recordRunFailure: (...a: unknown[]) => Promise<void> };
     const real = store.recordRunFailure.bind(w.deps.store);
@@ -387,12 +379,8 @@ describe("a blip before the last delivery is read again, never given up (round 4
     };
     await w.deliver(3);
     assert.equal(w.stored().run.status, "failed");
-    assert.equal(w.stored().run.steps.find((s) => s.id === "worker")?.error, READS_LOST);
+    assert.match(w.stored().run.steps.find((s) => s.id === "worker")?.error ?? "", /^The run stopped with an error: Salesforce didn't answer as it should/);
     assert.equal(n, 2);
-  });
-
-  test("READS_LOST says what a Run again does if the reads are lost again", () => {
-    assert.match(READS_LOST, /If it loses them again, the run is released with those checks marked not measured\.$/);
   });
 });
 

@@ -14,7 +14,6 @@ import { AutomaticReplay, automaticSyntheticCalibration } from "../../testing/au
 import { createJobHandler } from "../../worker/worker.ts";
 import { baseDeps, consoleRun, RUN_ID, runInput, syntheticConnection } from "../../worker/__tests__/helpers.ts";
 import { NEEDS_RECONNECTION } from "../../worker/apps.ts";
-import { READS_LOST } from "../../worker/run-job.ts";
 import { refusalSpans } from "../../salesforce/refusal-words.ts";
 import { passedOnSpans } from "../../engine/passed-on.ts";
 import { guardPassedOn, metricMarks } from "../../engine/automatic-words.ts";
@@ -589,10 +588,11 @@ describe("a fault that comes back every time costs its read on the last delivery
   });
 
   // An unreadable answer from the Metadata API looks like Salesforce being down: an automatic run fails, once (review round 3).
-  test("a retrieve that never gives its job id (a bad SOAP answer): the last delivery finishes, and an automatic run fails rather than release", async () => {
+  // Held for a person rather than released, its results saved (DECISIONS.md 715).
+  test("a retrieve that never gives its job id (a bad SOAP answer): the last delivery finishes, and an automatic run is held rather than released", async () => {
     const outcome = await automaticRun((r) => (isRetrieve(r) ? { status: 200, header: () => null, text: `<?xml version="1.0"?><soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"><soapenv:Body><retrieveResponse xmlns="http://soap.sforce.com/2006/04/metadata"><result><done>false</done></result></retrieveResponse></soapenv:Body></soapenv:Envelope>` } : null));
-    assert.equal(outcome.outcome, "failed", outcome.detail);
-    assert.equal(outcome.detail, READS_LOST);
+    assert.equal(outcome.outcome, "done", outcome.detail);
+    assert.match(outcome.detail, /is held: reads_lost$/);
   });
 
   test("a whole-instance outage still fails the run on its last delivery, in plain words with no code", async () => {

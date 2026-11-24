@@ -19,6 +19,14 @@ export type BudgetSnapshot = {
   callsMade: number;
 };
 
+/**
+ * Why a run stopped, as run.budget.stoppedReason opens: the console tells the
+ * causes apart by these openings alone (its readers.ts budgetStopCause; this
+ * repo's copy is CONSOLE_BUDGET_STOP_OPENINGS in src/worker/console-checks.ts,
+ * DECISIONS.md 715), so each sentence below keeps its first words.
+ */
+export const DAILY_LIMIT_EXHAUSTED = "Salesforce reports the daily API limit is exhausted";
+
 // Thrown before the call that would cross the line, so a run stops cleanly and
 // can be resumed. Not a failure: the engine saves its place and exits.
 export class BudgetStopError extends Error {
