@@ -384,7 +384,6 @@ b) What does it hold for closed stages (100 for won and 0 for lost by default, o
 c) A stage has one default probability, whatever the sales process, and a deal's own `Probability` can be changed by hand. Do orgs that change it by hand do so often enough that the stage's setting no longer says what their forecasts use? The comparison reads only the stage's setting, and says so.
 d) What does Salesforce answer when the connected user can't see `DefaultProbability` through field-level security: `INVALID_FIELD`, or an access code? The engine decides on the code, never the words, and works round `INVALID_FIELD`, `INSUFFICIENT_ACCESS` and `INSUFFICIENT_ACCESS_OR_READONLY`; another code would fail the stage read as any refusal did before.
 
-
 ## Knowing the org before reading it (DECISIONS.md 710)
 
 The run skips one kind of read, the Metadata API's retrieve, and only on an org whose OrganizationType is exactly "Professional Edition"; every other read is made, there and everywhere. These are what the Professional Edition test org must settle:
@@ -404,3 +403,9 @@ What to check on the real Professional Edition org, in this order (the review of
 4. Items a) to d) above, read once with `npm run hc -- facts` and one run.
 5. Whether a removal's guards stay unknown there for what the Tooling route can't search (assignment rules, approval processes), and what the user and field removals then say.
 6. LoginHistory, OauthToken and the record reads with the connected user's permissions (audit risks 8, 9, 11), which no edition fact settles.
+
+## Difficulty (DECISIONS.md 714)
+
+A fix is never a "Quick fix" when it turns on a setting we can't confirm can be turned off again (`touches.mayNotUndo` in `src/fix/table.ts`).
+
+a) Can campaign influence models from Account Engagement (`mkt.campaign-influence`) be turned off again once allowed in an org's campaign influence settings, or is the change one way, as some of Salesforce's influence settings are? Unconfirmed here, so the rule is labelled "Needs planning". Its fix prompt says "it can be turned off again": if that is wrong, the prompt must change too.

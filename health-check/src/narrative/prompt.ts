@@ -1,4 +1,5 @@
 import type { Calibration, Finding, Metric, Run } from "../schemas/index.ts";
+import { DIFFICULTY_WORDS } from "../fix/difficulty.ts";
 import type { StatedProblem } from "./intake.ts";
 import type { Plan } from "./select.ts";
 import { averageBeside } from "../domains/average.ts";
@@ -129,7 +130,9 @@ export function findingSource(f: Finding): PromptSource {
     severity: f.severity,
     confidence: f.confidence,
     value: f.value,
-    effort: f.effort.size,
+    // How hard the fix is, in the words the documents print beside it (DECISIONS.md 714), never the rule's
+    // effort size, which a draft could call small beside a label that says it needs planning. None, nothing.
+    ...(f.difficulty ? { difficulty: DIFFICULTY_WORDS[f.difficulty] } : {}),
     owner: f.owner,
     subjects: f.subjects,
     facts: f.facts,

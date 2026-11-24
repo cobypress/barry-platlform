@@ -83,8 +83,8 @@ describe("the microsite's pages", async () => {
 
   test("the plan shows days 1 to 30's quick wins as their own box (DECISIONS.md 366)", () => {
     const plan = pages.find((p) => p.slug === "plan")!.html;
-    assert.match(plan, /<div class="good"><h2 style="margin-top:4px">Quick wins, also in days 1 to 30<\/h2>/);
-    assert.ok(plan.indexOf("Quick wins, also in days 1 to 30") > plan.indexOf("Days 1 to 30: Stabilise"));
+    assert.match(plan, /<div class="good"><h2 style="margin-top:4px">Small jobs, also in days 1 to 30<\/h2>/);
+    assert.ok(plan.indexOf("Small jobs, also in days 1 to 30") > plan.indexOf("Days 1 to 30: Stabilise"));
   });
 
   test("an overview, every issue, the plan, the comparison when there's one, and the org documented", () => {

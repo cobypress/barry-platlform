@@ -9,7 +9,7 @@ import { currentBody } from "../narrative/sections.ts";
 import { SURVEY } from "../survey/summary.ts";
 import { READING_LABELS } from "../interviews/readings.ts";
 import { byRole } from "../render/interviews.ts";
-import { effortText, inDocumentOrder, renderContext, valueText, type Render } from "../render/html.ts";
+import { difficultyText, inDocumentOrder, renderContext, valueText, type Render } from "../render/html.ts";
 import { noteSections, referenceMap } from "../render/references.ts";
 import { HEADLINE_KINDS, KIND_LABELS, yearlyByFinding } from "../value/model.ts";
 import { DOCUMENTED, readDocument } from "../domains/configuration/documented.ts";
@@ -171,7 +171,7 @@ function issues(r: Render, report: BuiltReport): string {
       const cards = own
         .map((f) => {
           const value = valueText(r, f);
-          return `<div class="issue"><div class="meta">${chip(f.severity)}<span>${r.t(effortText(f))}</span><span>${r.t(`Owner: ${f.owner}`)}</span>${r.ref(f.id)}</div><h3>${r.t(f.title)}</h3><p>${r.t(f.summary)}</p>${f.recommendation ? `<p><strong>What to do:</strong> ${r.t(f.recommendation)}</p>` : ""}<p class="muted"><strong>${value.amount}</strong> ${value.note}</p></div>`;
+          return `<div class="issue"><div class="meta">${chip(f.severity)}${difficultyText(f) ? `<span>${r.t(difficultyText(f))}</span>` : ""}<span>${r.t(`Owner: ${f.owner}`)}</span>${r.ref(f.id)}</div><h3>${r.t(f.title)}</h3><p>${r.t(f.summary)}</p>${f.recommendation ? `<p><strong>What to do:</strong> ${r.t(f.recommendation)}</p>` : ""}<p class="muted"><strong>${value.amount}</strong> ${value.note}</p></div>`;
         })
         .join("");
       const good = practiceFor(domain);
@@ -193,7 +193,7 @@ function plan(r: Render, report: BuiltReport): string {
   const block = (p: (typeof phases)[number]): string => (p.findings.length ? `<h2>${r.t(`Days ${p.from} to ${p.to}: ${p.title}`)}</h2><ul>${p.findings.map(item).join("")}</ul>` : "");
   const blocks = `${block(phases[0]!)}${quick}${phases.slice(1).map(block).join("")}`;
   const after = later.length ? `<h2>After 90 days</h2><ul>${later.map((f) => `<li>${r.t(f.title)}${r.ref(f.id)}${also(f)}</li>`).join("")}</ul>` : "";
-  return page(`<h1>The plan</h1><p class="muted">${r.t("Urgent fixes come first, with a short list of quick wins beside them, and each month holds only what a team can take on.")}</p>${blocks}${after}`);
+  return page(`<h1>The plan</h1><p class="muted">${r.t("Urgent fixes come first, with a short list of small jobs beside them, and each month holds only what a team can take on.")}</p>${blocks}${after}`);
 }
 
 function compare(r: Render, report: BuiltReport): string {

@@ -1,4 +1,5 @@
 import { colour, page, tokensCss } from "../design/tokens.ts";
+import { DIFFICULTY_WORDS } from "../fix/difficulty.ts";
 import type { OverallScore } from "../domains/scoring.ts";
 import type { CustomerWords, Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import type { Finding, Run } from "../schemas/index.ts";
@@ -119,10 +120,16 @@ export function coverScore(overall: OverallScore): string {
   return `<div class="cover-score"><p class="for">Barometer score</p><p><b>${overall.score}</b><span>out of 100</span></p><p class="grade">Grade ${overall.grade}, ${overall.word.toLowerCase()}</p></div>`;
 }
 
-const EFFORT_WORDS: Record<string, string> = { XS: "very small", S: "small", M: "medium", L: "large", XL: "very large" };
+/**
+ * How hard the fix is, beside its severity (DECISIONS.md 714): "Quick fix",
+ * "Needs planning" or "A project", from the finding's own hours, or nothing
+ * when it has none. It took the place of the rule's effort size ("Effort:
+ * small"), which was set by hand and could disagree with the hours.
+ */
+export const difficultyText = (f: Finding): string => (f.difficulty ? DIFFICULTY_WORDS[f.difficulty] : "");
 
-/** T-shirt sizes are our shorthand. A reader gets words. */
-export const effortText = (f: Finding): string => `Effort: ${EFFORT_WORDS[f.effort.size] ?? f.effort.size}`;
+/** The difficulty as a meta label, or nothing at all when there is none. */
+export const difficultySpan = (f: Finding): string => (f.difficulty ? `<span class="difficulty">${DIFFICULTY_WORDS[f.difficulty]}</span>` : "");
 
 /** Lines of wrapped text, near enough to decide what fits on a page. */
 export const estimateLines = (text: string, charsPerLine: number): number => Math.max(1, Math.ceil(text.length / charsPerLine));
