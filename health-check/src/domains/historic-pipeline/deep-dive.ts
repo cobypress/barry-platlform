@@ -4,6 +4,7 @@ import { priorWinsExtractor, type PriorWinRow } from "../../extract/prior-wins.t
 import type { Sourced } from "../../extract/types.ts";
 import type { DateRange, Metric, MetricSegment, SeriesPoint } from "../../schemas/index.ts";
 import { quarterBounds, stageRuns } from "../current-pipeline/stages.ts";
+import { meanStat } from "../average.ts";
 import { localDay, todayIn, zoneOf } from "../time-zone.ts";
 import { loadPipeline, unsplitLostReason, type Deal, type PipelineData } from "./cohort.ts";
 import { base, closedInWindow, dimensions, fiscalQuarter, fiscalStartOf, groupBy, hasOpenStage, MAX_MISSING_AMOUNT_PCT, measured, median, notMeasurable, quantile, round1, segment, SEGMENT_NOTE, unmappedReason, type Base } from "./metrics.ts";
@@ -288,7 +289,7 @@ function closeDateReliability(ctx: Ctx, data: Ready): Metric[] {
     metrics.push(measured({ ...shareDefinition, exclusions }, { value: onTime(won), n: won.length, dateRange: ctx.window, segments: segment(won, dims, minSample, onTime), stats: { inQuarter: won.filter((d) => quarter(d.closedDay) === quarter(firstForecast(d))).length } }));
   }
   const days = won.map(daysLate);
-  metrics.push(measured({ ...lateDefinition, exclusions }, { value: round1(median(days)), n: won.length, dateRange: ctx.window, segments: segment(won, dims, minSample, (group) => round1(median(group.map(daysLate)))), stats: { p25: round1(quantile(days, 0.25)), p75: round1(quantile(days, 0.75)), lateDeals: days.filter((d) => d > 0).length } }));
+  metrics.push(measured({ ...lateDefinition, exclusions }, { value: round1(median(days)), n: won.length, dateRange: ctx.window, segments: segment(won, dims, minSample, (group) => round1(median(group.map(daysLate)))), stats: { p25: round1(quantile(days, 0.25)), p75: round1(quantile(days, 0.75)), lateDeals: days.filter((d) => d > 0).length, ...meanStat(days) } }));
   return metrics;
 }
 
@@ -313,7 +314,7 @@ function stageVelocity(ctx: Ctx, data: Ready): Metric[] {
       const thin = days.length < minSample;
       return { dimension: "stage", key: stage, n: days.length, value: thin ? null : round1(median(days)), notMeasurableReason: thin ? `${SEGMENT_NOTE} (${days.length} of ${minSample})` : null };
     });
-    return measured(definition, { value: round1(median(deals.map(totalDays))), n: deals.length, dateRange: ctx.window, segments });
+    return measured(definition, { value: round1(median(deals.map(totalDays))), n: deals.length, dateRange: ctx.window, segments, stats: meanStat(deals.map(totalDays)) });
   };
   return [
     make("won", "historic.stage_velocity_won", "Time in each stage, won deals", "Median days won deals closed in the window spent in open stages. Each stage shows the median for deals that were in it."),

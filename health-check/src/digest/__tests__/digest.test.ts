@@ -76,6 +76,11 @@ function resolve(d: RunDigest, r: BuiltReport, path: Array<string | number>): nu
     const built = r.metrics.find((x) => x.id === m.id);
     return built?.status === "measured" ? built[field] : undefined;
   }
+  // A duration's average beside its median (DECISIONS.md 709): the built measure's own stat.
+  if (top === "metrics" && field === "average") {
+    const built = r.metrics.find((x) => x.id === d.metrics[i as number]!.id);
+    return built?.status === "measured" ? built.stats.mean : undefined;
+  }
   if (top === "plan" && i === "phases" && (sub === "from" || sub === "to")) return plan.phases[field as number]![sub];
   // An issue's hours (DECISIONS.md 628, 636): the built finding's own.
   if (top === "findings" && field === "effortHours" && (sub === "low" || sub === "high")) return r.teamFindings.find((x) => x.id === d.findings[i as number]!.id)?.effortHours?.[sub];

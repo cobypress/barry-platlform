@@ -181,7 +181,12 @@ export const MetricOrgWords = z.object({
   exclusions: z.array(SentenceOrgWords.nullable()).optional(),
 });
 
-/** A measure's headline only, as corrected: never its segments, series or stats. */
+/**
+ * A measure's headline only, as corrected: never its segments, series or stats,
+ * save one. A duration's average, beside the median that is its value, where
+ * the documents show it: more than 10% from the median, from five values or
+ * more (DECISIONS.md 709). Optional, so a digest made before it reads as before.
+ */
 export const DigestMetric = z.discriminatedUnion("status", [
   z.object({
     status: z.literal("measured"),
@@ -191,6 +196,7 @@ export const DigestMetric = z.discriminatedUnion("status", [
     definition: Text,
     unit: z.enum(["percent", "days", "count", "currency", "ratio"]),
     value: Amount,
+    average: Amount.optional(),
     n: z.number().int().nonnegative(),
     dateRange: z.object({ from: CalendarDate, to: CalendarDate }).nullable(),
     assumptions: z.array(Text),
