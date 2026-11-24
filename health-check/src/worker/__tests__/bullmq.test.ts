@@ -8,7 +8,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { workerCommand, type WorkerModules } from "../../cli/worker.ts";
 import { MemoryWorkerStore } from "../memory-store.ts";
-import { HEALTH_CHECK_QUEUE, HEAVY_QUEUE, lostRecorder, LOST_REASON, processorFor, redisConnection, startQueueWorker, type BullModule, type QueueJob, type QueueWorker } from "../bullmq.ts";
+import { HEALTH_CHECK_QUEUE, HEAVY_QUEUE, LAST_TRY_LOST_REASON, lostRecorder, LOST_REASON, processorFor, redisConnection, startQueueWorker, type BullModule, type QueueJob, type QueueWorker } from "../bullmq.ts";
 import { readWorkerEnv, WORKER_ENV } from "../env.ts";
 import type { JobHandler } from "../worker.ts";
 import { BadJobError } from "../types.ts";
@@ -556,11 +556,18 @@ describe("a heavy job BullMQ gives up on (DECISIONS.md 396)", () => {
     assert.match(lost[0]!.reason, /stopped part-way more than once/);
   });
 
-  test("a failure the handler raised itself isn't recorded twice: the handler already did", async () => {
+  test("a failure on a try the queue will make again isn't recorded: the next try may finish the run", async () => {
     const { fail, lost } = start();
-    fail({ id: "run-r1-1", name: "health-check-run", data: { kind: "run", runId: "r1" }, attemptsMade: 3, opts: { attempts: 3 } }, new Error("Salesforce timed out"));
+    fail({ id: "run-r1-1", name: "health-check-run", data: { kind: "run", runId: "r1" }, attemptsMade: 1, opts: { attempts: 3 } }, new Error("Salesforce timed out"));
     await new Promise((r) => setImmediate(r));
     assert.deepEqual(lost, []);
+  });
+
+  test("a throw on the last try is recorded: a handler that ends there records the run and returns, so one that throws recorded nothing (DECISIONS.md 702)", async () => {
+    const { fail, lost } = start();
+    fail({ id: "run-r1-1", name: "health-check-run", data: { kind: "run", runId: "r1" }, attemptsMade: 3, opts: { attempts: 3 } }, new Error("connection terminated unexpectedly"));
+    await new Promise((r) => setImmediate(r));
+    assert.deepEqual(lost, [{ data: { kind: "run", runId: "r1" }, reason: LAST_TRY_LOST_REASON }]);
   });
 
   test("a heavy job may stall twice, since a run resumes from its checkpoints: two deploys during a long run don't lose it", () => {

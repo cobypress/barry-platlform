@@ -3,7 +3,7 @@ import { redactSecrets } from "../privacy/secrets.ts";
 import { METADATA_READING, validationRuleDetail } from "../handbook/detail.ts";
 import type { HandbookValidationRule } from "../handbook/schema.ts";
 import { flowDetailMetadata, hasText, indexReferences, summariseFlowMetadata, summariseWorkflowRule, type MetadataBundle, type UnreadKind, type WorkflowSummary } from "./metadata-parse.ts";
-import { readableReason } from "./types.ts";
+import { refusalReason } from "./types.ts";
 import type { ExtractContext } from "./types.ts";
 
 // The same bundle as the retrieve, read through Tooling for a connection that
@@ -105,7 +105,7 @@ async function optional<T>(bundle: MetadataBundle, kind: string, read: () => Pro
   } catch (err) {
     if (!isUnavailable(err)) throw err;
     bundle.unsearched!.push(kind);
-    if (unread) markUnread(bundle, unread, readableReason(err.message));
+    if (unread) markUnread(bundle, unread, refusalReason(err, "This information"));
     return null;
   }
 }

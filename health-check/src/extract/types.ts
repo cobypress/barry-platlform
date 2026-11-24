@@ -1,5 +1,7 @@
-import type { Calibration } from "../schemas/index.ts";
-import { isUnavailable, type QueryApi, type QueryOptions, type SalesforceClient } from "../salesforce/client.ts";
+import { AsyncLocalStorage } from "node:async_hooks";
+import type { Calibration, RefusedRead } from "../schemas/index.ts";
+import { refusalSentence, type RefusalKind } from "../salesforce/refusal-words.ts";
+import { classifyError, isUnavailable, lastDelivery, type QueryApi, type QueryOptions, type SalesforceClient, type SalesforceError } from "../salesforce/client.ts";
 import type { ApexSourceStore } from "./apex-source.ts";
 import type { CodeLintTools } from "./code-lint.ts";
 
@@ -63,11 +65,87 @@ export type Extractor<T = unknown> = {
   /** Reads CRM records, even as counts, so a set-up review never runs it. */
   records?: true;
   run(ctx: ExtractContext): Promise<T>;
+  /**
+   * What every figure and check that reads this step's output must say about
+   * it, such as rows left out (DECISIONS.md 702). Nothing when there's nothing to say.
+   */
+  notes?(output: T): string[];
 };
 
 export function unavailable<T>(source: SourceInfo, err: unknown): Sourced<T> {
-  if (isUnavailable(err)) return { status: "unavailable", reason: readableReason(err.message), source };
+  if (isUnavailable(err)) return { status: "unavailable", reason: refusalReason(err, readName(source)), source };
   throw err;
+}
+
+// Where a step's refused reads are noted while it runs (DECISIONS.md 702):
+// the run sets it around each step, and keeps what's noted in run.json and
+// its log. Nothing a customer reads holds a code.
+const refusals = new AsyncLocalStorage<(read: Omit<RefusedRead, "step">) => void>();
+
+/** Runs a step, passing each read Salesforce refused with a code we didn't take before 702 to `note`. */
+export function noteRefusals<T>(note: (read: Omit<RefusedRead, "step">) => void, run: () => Promise<T>): Promise<T> {
+  return refusals.run(note, run);
+}
+
+/** What a read was of, named for a customer: the object a query reads, or what the call was for. */
+export function readName(source: SourceInfo): string {
+  if (source.kind === "soql") {
+    // Subqueries first, so the outer FROM is the one named.
+    let query = source.query;
+    for (let before = ""; before !== query; ) [before, query] = [query, query.replace(/\([^()]*\)/g, "")];
+    const object = /\bFROM\s+([A-Za-z0-9_]+)/i.exec(query)?.[1];
+    return object ?? "This information";
+  }
+  if (source.kind === "metadata") return source.path.startsWith("Tooling API") ? "The same set-up through the Tooling API" : "The org's set-up from the Metadata API";
+  if (/recordCount/.test(source.path)) return "The org's record counts";
+  return "This information";
+}
+
+/**
+ * Why a read Salesforce refused costs its checks (DECISIONS.md 702): our own
+ * sentence, naming what couldn't be read and, where the code says, why, for
+ * every code alike. Salesforce's code and status are noted for the run's log
+ * and run.json. Its message isn't kept anywhere: it can quote a record's id, a
+ * value or a name, and none of that leaves the step's own read.
+ */
+export function refusalReason(err: SalesforceError, given: string): string {
+  // Where we only know the kind of read, the object Salesforce named is better.
+  const named = /sObject type '([A-Za-z][A-Za-z0-9_]*)' is not supported/.exec(err.message)?.[1];
+  const what = named && !/^[A-Za-z][A-Za-z0-9_]*$/.test(given) ? named : given;
+  // For a missing field, its API name alone, so we can see which without Salesforce's message.
+  const field = err.code === "INVALID_FIELD" ? /No such column '([A-Za-z][A-Za-z0-9_]{0,79})'/.exec(err.message)?.[1] : undefined;
+  const kind = classifyError(err);
+  // Lost, not refused: Salesforce may answer it next time. Before the worker's last delivery that is a retry,
+  // never a check given up: thrown, so the step isn't saved with it and the queue's next delivery reads it
+  // again. Only the last delivery keeps it as lost (DECISIONS.md 702).
+  const lost = kind === "instance_unavailable";
+  if (lost && lastDelivery.getStore() !== true) throw err;
+  refusals.getStore()?.({ read: what, code: err.code.replace(/[^A-Za-z0-9_]/g, "").slice(0, 60) || "UNKNOWN", status: err.status, ...(field ? { field } : {}), ...(lost ? { lost: true as const } : {}) });
+  return refusalSentence(what, refusalKind(err, kind), err.code);
+}
+
+/** Codes Salesforce sends for a read it ran and couldn't finish: no refusal, though no retry helps either (DECISIONS.md 702). */
+const UNFINISHED: ReadonlySet<string> = new Set(["QUERY_TIMEOUT", "UNKNOWN_EXCEPTION"]);
+
+/**
+ * Which sentence a read that cost its checks takes: "refused" only when
+ * Salesforce said no to it. A timeout, an outage or an answer we couldn't
+ * read says Salesforce didn't answer as it should (DECISIONS.md 702).
+ */
+function refusalKind(err: SalesforceError, kind: ReturnType<typeof classifyError>): RefusalKind {
+  if (kind === "not_available" || kind === "no_permission") return kind;
+  if (kind === "instance_unavailable" || UNFINISHED.has(err.code)) return "unanswered";
+  return "refused";
+}
+
+/**
+ * A whole composite batch Salesforce refused (DECISIONS.md 702): the reason
+ * every query in it takes, or a throw for what stops the run (a lost session,
+ * the daily limit, an outage, our own fault).
+ */
+export function batchRefused(err: unknown, soqls: string[]): string[] {
+  if (!isUnavailable(err)) throw err;
+  return soqls.map((query) => refusalReason(err, readName({ kind: "soql", api: "rest", query })));
 }
 
 /**

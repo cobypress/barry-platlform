@@ -1,6 +1,6 @@
 import { redactSecrets } from "../privacy/secrets.ts";
 import { BudgetStopError } from "../salesforce/budget.ts";
-import { isUnavailable, type OrgLimit } from "../salesforce/client.ts";
+import { classifyError, isUnavailable, runStoppedWords, type OrgLimit, type SalesforceError } from "../salesforce/client.ts";
 import { INVENTORY_VERSION, NAME_MAX, type ConnectedAppRow, type FillRateObject, type Inventory, type LimitRow, type PackageRow, type RiskyPermissionRow } from "../schemas/inventory.ts";
 import type { RunScope } from "../schemas/index.ts";
 import { CORE_OBJECTS, recordCountsExtractor } from "./configuration.ts";
@@ -8,7 +8,7 @@ import { orgDocumentationExtractor, type ConnectedAppRow as AppSetting } from ".
 import { accessExtractor, holdersOf, type AccessData, type AccessAssignment } from "./security.ts";
 import { accessOf, isPartlyHidden, recordTypeUseExtractor } from "./record-types.ts";
 import { licencesExtractor, type PackageLicenseRow } from "./users.ts";
-import { readableReason, readSoql, type ExtractContext, type Extractor, type Sourced, type SourceInfo } from "./types.ts";
+import { readableReason, readName, readSoql, refusalReason, type ExtractContext, type Extractor, type Sourced, type SourceInfo } from "./types.ts";
 
 // The org's inventory (DECISIONS.md 603 to 605): the whole picture of fields,
 // packages, connected apps, risky permissions and limits, kept as data for the
@@ -89,12 +89,17 @@ export function skipReason(f: DescribeField): string | null {
 export const fillRateQuery = (object: string, fields: string[]): string =>
   fields.length ? `SELECT COUNT(Id) n, ${fields.map((f, i) => `COUNT(${f}) f${i}`).join(", ")} FROM ${object}` : `SELECT COUNT(Id) n FROM ${object}`;
 
-/** Why a count failed, in a sentence: a budget stop isn't a failure and goes up. */
-function failedCount(err: unknown): string {
+/**
+ * Why a count failed, in a sentence of ours: a budget stop isn't a failure and
+ * goes up. Salesforce's message is never kept (DECISIONS.md 702): its answer
+ * about the read is our refusal sentence, anything else our plain words.
+ */
+function failedCount(err: unknown, what: string): string {
   if (err instanceof BudgetStopError) throw err;
   if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) return COUNT_TOO_SLOW;
-  if (err instanceof Error) return readableReason(err.message);
-  return "The count couldn't be read.";
+  // Salesforce not answering: thrown before the worker's last delivery, to be read again, and on it a lost read in our words (DECISIONS.md 702).
+  if (isUnavailable(err) || classifyError(err) === "instance_unavailable") return refusalReason(err as SalesforceError, what);
+  return runStoppedWords(err) ?? "The count couldn't be read.";
 }
 
 export const COUNT_NOT_READ = "Salesforce's count for this field didn't come back as a whole number, so its fill isn't measured.";
@@ -127,7 +132,7 @@ async function fillRateScope(ctx: ExtractContext): Promise<Scope> {
       counts = { status: "ok", data: await ctx.client.recordCounts(), source, truncated: false };
     } catch (err) {
       if (!isUnavailable(err)) throw err;
-      counts = { status: "unavailable", reason: readableReason(err.message), source };
+      counts = { status: "unavailable", reason: refusalReason(err, readName(source)), source };
     }
   }
   const byObject = new Map(counts.status === "ok" ? counts.data.map((c) => [c.name, c.count]) : []);
@@ -175,14 +180,16 @@ export const fillRatesExtractor: Extractor<Sourced<FillRateData>> = {
         const chunk = queries.slice(i, i + FILL_RATE_BATCH);
         // Each count is an API call in the budget, not each composite call (DECISIONS.md 609).
         ctx.client.budget.assertCanSpend(chunk.length);
+        let answers: Awaited<ReturnType<typeof ctx.client.queryBatch<Record<string, number>>>> | null = null;
         try {
-          const answers = await ctx.client.queryBatch<Record<string, number>>(chunk);
-          results.push(...answers.map((a) => (a.ok ? { ok: true as const, row: a.result.records[0] ?? {} } : { ok: false as const, reason: readableReason(a.error.message) })));
+          answers = await ctx.client.queryBatch<Record<string, number>>(chunk);
         } catch (err) {
           // A budget stop sent nothing, and goes up from here.
-          const reason = failedCount(err);
+          const reason = failedCount(err, "This information");
           results.push(...chunk.map(() => ({ ok: false as const, reason })));
         }
+        // Outside the catch: a count Salesforce didn't answer before the last delivery is thrown, to be read again (DECISIONS.md 702).
+        if (answers) results.push(...answers.map((a, j) => (a.ok ? { ok: true as const, row: a.result.records[0] ?? {} } : { ok: false as const, reason: refusalReason(a.error, readName({ kind: "soql", api: "rest", query: chunk[j]! })) })));
         // The call went out, and the client recorded it once; the rest of its counts are recorded here.
         if (chunk.length > 1) ctx.client.budget.recordCall(chunk.length - 1);
       }
@@ -235,7 +242,7 @@ export const fillRatesExtractor: Extractor<Sourced<FillRateData>> = {
       try {
         described = await ctx.client.describe<{ fields: DescribeField[] }>(object);
       } catch (err) {
-        keep([{ object, unavailable: failedCount(err) }]);
+        keep([{ object, unavailable: failedCount(err, object) }]);
         continue;
       }
       const counted = described.fields.filter((f) => skipReason(f) === null).map((f) => f.name);
@@ -471,7 +478,7 @@ export const riskyPermissionsExtractor: Extractor<RiskyPermissionsData> = {
       fields = (await ctx.client.describe<{ fields: Array<{ name: string; label?: string }> }>("PermissionSet")).fields;
     } catch (err) {
       if (!isUnavailable(err)) throw err;
-      return { checked: [], notInOrg: [], sets: { status: "unavailable", reason: readableReason(err.message), source }, holdersGap: null };
+      return { checked: [], notInOrg: [], sets: { status: "unavailable", reason: refusalReason(err, "PermissionSet"), source }, holdersGap: null };
     }
     const byName = new Map(fields.map((f) => [f.name, f]));
     const byLabel = new Map(fields.filter((f) => f.name.startsWith("Permissions") && f.label).map((f) => [f.label!.toLowerCase(), f]));
@@ -538,6 +545,9 @@ export const limitsExtractor: Extractor<Sourced<Record<string, OrgLimit>>> = {
   run(ctx) {
     const source = { kind: "rest", path: `/services/data/v${ctx.client.apiVersion}/limits` } as const;
     const limits = ctx.client.allLimitsAtConnect;
+    // Refused at connect, it says why in our words (DECISIONS.md 702).
+    const unread = ctx.client.limitsUnread;
+    if (unread) return Promise.resolve({ status: "unavailable", reason: unread, source });
     if (Object.keys(limits).length === 0) return Promise.resolve({ status: "unavailable", reason: "The org reported no limits.", source });
     return Promise.resolve({ status: "ok", data: limits, source, truncated: false });
   },

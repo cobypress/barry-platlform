@@ -197,7 +197,7 @@ describe("what the inventory reads", () => {
 describe("a read that fails is { unavailable }, never a guess", () => {
   test("connected apps, when neither the apps nor the tokens can be read", async () => {
     const { inventory } = await simulated({ failQuery: (q) => (/FROM (ConnectedApplication|OauthToken)\b/.test(q) ? { errorCode: "INSUFFICIENT_ACCESS", message: "No access" } : null) });
-    assert.deepEqual(inventory.connectedApps, { unavailable: "Neither the connected apps nor their OAuth tokens could be read: INSUFFICIENT_ACCESS: No access" });
+    assert.deepEqual(inventory.connectedApps, { unavailable: "Neither the connected apps nor their OAuth tokens could be read: ConnectedApplication couldn't be read, because the person who connected Salesforce doesn't have permission to see it." });
   });
 
   test("connected apps, with only the tokens unread: the apps are listed, their use null, and a note says why", async () => {
@@ -237,7 +237,7 @@ describe("a read that fails is { unavailable }, never a guess", () => {
     const objects = rows(inventory.fillRates);
     const counted = objects.filter((o) => "fields" in o);
     assert.deepEqual(counted, []);
-    assert.equal((objects.find((o) => o.object === "Account") as { unavailable: string }).unavailable, "QUERY_TIMEOUT: Your query request was running for too long.");
+    assert.equal((objects.find((o) => o.object === "Account") as { unavailable: string }).unavailable, "Account couldn't be read, because Salesforce didn't answer as it should.");
   });
 
   test("fill rates, without the record counts: the core objects only, and a note says why", async () => {

@@ -178,6 +178,26 @@ const STALLED_TOO_OFTEN = /stalled more than allowable limit/;
 /** What the console shows for such a job. */
 export const LOST_REASON = "The worker stopped part-way more than once, by a restart or by running out of memory, so this was given up. Queue it again: a run picks up from where it got to.";
 
+/** What the console shows for a job whose last try threw before the handler could record it (DECISIONS.md 702). */
+export const LAST_TRY_LOST_REASON = "The last try at this run stopped with an error before its result could be recorded. Run it again.";
+
+/**
+ * Whether a job that failed has no try left and its failure is recorded
+ * nowhere (DECISIONS.md 702). BullMQ 5 raises "failed" after moveToFailed has
+ * added the try just made to attemptsMade, so on the last try it equals the
+ * job's attempts (an unset or 0 attempts is one try). A handler that ends on
+ * its last try records the run itself and returns; one that throws there
+ * (the store unreachable before the claim, a claim error, the job gone) has
+ * recorded nothing, and the run would show in progress for ever. Not for an
+ * UnrecoverableError, which is a job we couldn't read (BadJobError) or one
+ * that stalled too often (recorded above), nor for JobBusyError: another job
+ * holds the run and its own end is recorded, by its handler or here.
+ */
+export function lostForGood(job: Pick<QueueJob, "attemptsMade" | "opts">, err: Error): boolean {
+  if (err.name === "UnrecoverableError" || err instanceof BadJobError || err.name === "JobBusyError") return false;
+  return job.attemptsMade >= Math.max(job.opts.attempts ?? 1, 1);
+}
+
 const isHeavy = (data: unknown): boolean => typeof data === "object" && data !== null && HEAVY_KINDS.has(String((data as { kind?: unknown }).kind));
 const isPortal = (data: unknown): boolean => isHeavy(data) && (data as { kind?: unknown; deliver?: unknown }).kind === "documents" && (data as { deliver?: unknown }).deliver === "portal";
 
@@ -279,10 +299,10 @@ export function startQueueWorker(
   for (const worker of [light, heavy]) {
     worker.on("failed", (job, err) => {
       options.log(`${job?.id ?? "?"} failed (attempt ${(job?.attemptsMade ?? 0)} of ${job?.opts.attempts ?? 1}): ${err.message}`);
-      // A failure the handler raised, it has already recorded. One BullMQ raised without running it, nobody has.
-      if (job && STALLED_TOO_OFTEN.test(err.message) && options.onLost) {
-        void options.onLost(job.data, LOST_REASON).catch((e: unknown) => options.log(`${job.id ?? "?"} couldn't be recorded as failed: ${e instanceof Error ? e.message : "unknown error"}`));
-      }
+      if (!job || !options.onLost) return;
+      // One BullMQ raised without running the handler: nobody has recorded it.
+      const reason = STALLED_TOO_OFTEN.test(err.message) ? LOST_REASON : lostForGood(job, err) ? LAST_TRY_LOST_REASON : null;
+      if (reason) void options.onLost(job.data, reason).catch((e: unknown) => options.log(`${job.id ?? "?"} couldn't be recorded as failed: ${e instanceof Error ? e.message : "unknown error"}`));
     });
     worker.on("error", (err) => options.log(`Queue error: ${err.message}`));
   }

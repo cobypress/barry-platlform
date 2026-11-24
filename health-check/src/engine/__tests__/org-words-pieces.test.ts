@@ -378,6 +378,9 @@ const SIGNED_OFF: string[] = [
   "src/domains/current-pipeline/index.ts: plural(byKey.size, options.subject)",
   "src/domains/current-pipeline/index.ts: scoped.leftOut",
   "src/domains/forecast/index.ts: grouped(read)",
+  // Rows left out for their shape, counted (DECISIONS.md 702).
+  "src/extract/opportunities.ts: grouped(deals)",
+  "src/extract/opportunities.ts: grouped(history)",
   "src/domains/forecast/index.ts: grouped(read.data.length)",
   "src/domains/forecast/index.ts: plural(facts.adjustedOwners, \"person\", \"people\")",
   "src/domains/forecast/index.ts: plural(new Set(rows.map((r) => r.OwnerId)).size, \"person\", \"people\")",

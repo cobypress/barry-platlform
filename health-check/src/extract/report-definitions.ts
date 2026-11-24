@@ -1,6 +1,6 @@
 import { isUnavailable, SalesforceError } from "../salesforce/client.ts";
 import { indexReferences, type ReferenceIndex } from "./metadata-parse.ts";
-import { readSoql, type ExtractContext, type Extractor, type Sourced, type SourceInfo } from "./types.ts";
+import { readSoql, refusalReason, type ExtractContext, type Extractor, type Sourced, type SourceInfo } from "./types.ts";
 
 export type ReportScan = {
   /** Reports we tried to read. */
@@ -57,7 +57,8 @@ async function countPrivate(ctx: ExtractContext): Promise<{ count: number | null
     if (err instanceof SalesforceError && err.code === "INVALID_QUERY_SCOPE") {
       return { count: null, reason: "Only a user who can manage all private reports can count other people's, and the connected user can't." };
     }
-    if (err instanceof SalesforceError) return { count: null, reason: err.message };
+    // Our sentence, never Salesforce's; what isn't Salesforce's answer stops the run (DECISIONS.md 702).
+    if (isUnavailable(err)) return { count: null, reason: refusalReason(err, "Report") };
     throw err;
   }
 }
@@ -128,7 +129,7 @@ export const reportDefinitionsExtractor: Extractor<Sourced<ReportScan>> = {
       // (DECISIONS.md 73). Unlike the main retrieve, any other failure costs one
       // guard, not the run.
       if (!(isUnavailable(err) && err.code === "INSUFFICIENT_ACCESS")) {
-        if (err instanceof SalesforceError) return { status: "unavailable", reason: err.message, source };
+        if (isUnavailable(err)) return { status: "unavailable", reason: refusalReason(err, "The org's set-up from the Metadata API"), source };
         throw err;
       }
       route = "analytics";

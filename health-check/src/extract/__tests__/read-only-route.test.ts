@@ -192,7 +192,8 @@ describe("when the Tooling route fails too", () => {
     const metadata = JSON.parse(readFileSync(join(result.dir, "checkpoints", "metadata.json"), "utf8")) as Sourced<MetadataBundle>;
     assert.equal(metadata.status, "unavailable");
     if (metadata.status !== "unavailable") return;
-    assert.match(metadata.reason, /^The Metadata API refused this connection \(.*ModifyMetadata.*\), and reading the same through the Tooling API didn't work either: FlowDefinition isn't available/);
+    // Salesforce's message for the first refusal stays out of the reason (DECISIONS.md 702).
+    assert.equal(metadata.reason, "The Metadata API refused this connection, and reading the same through the Tooling API didn't work either: FlowDefinition isn't available in this org, or to the connected user.");
   });
 });
 
