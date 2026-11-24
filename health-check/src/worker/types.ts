@@ -17,7 +17,12 @@ import type { RunDigest } from "../schemas/digest.ts";
 // database. Jobs carry ids only (the contract with the console, lane C2), so
 // nothing about a customer ever sits in Redis.
 
-const RunJobPayload = z.object({ kind: z.literal("run"), runId: z.string().min(1).max(100), correlation_id: z.string().max(300).optional() }).strict();
+/**
+ * `again`: a person's "Run again" of an automatic run (DECISIONS.md 698), the
+ * same short token as its job id's tail (`run-<runId>-again-<token>`). The run
+ * is read afresh once per token; a retry of that job resumes.
+ */
+const RunJobPayload = z.object({ kind: z.literal("run"), runId: z.string().min(1).max(100), again: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/).optional(), correlation_id: z.string().max(300).optional() }).strict();
 const ConnectJobPayload = z.object({ kind: z.literal("connect"), linkId: z.string().uuid(), correlation_id: z.string().max(300).optional() }).strict();
 /**
  * `deliver: "portal"` asks for a released automatic run's three PDFs, sealed
@@ -34,7 +39,7 @@ const ShareJobPayload = z.object({ kind: z.literal("share"), runId: z.string().m
  */
 const LegacyStepPayload = z.object({ runId: z.string().min(1).max(100), stepId: z.string().min(1).max(100), correlation_id: z.string().max(300) }).strict();
 
-export type WorkerJob = { kind: "run"; runId: string } | { kind: "connect"; linkId: string } | { kind: "documents"; runId: string; deliver?: "portal" } | { kind: "share"; runId: string };
+export type WorkerJob = { kind: "run"; runId: string; again?: string } | { kind: "connect"; linkId: string } | { kind: "documents"; runId: string; deliver?: "portal" } | { kind: "share"; runId: string };
 
 export class BadJobError extends Error {
   constructor(message: string) {
@@ -46,7 +51,7 @@ export class BadJobError extends Error {
 /** Anything but ids is refused, so a payload can't smuggle customer data through the queue. */
 export function parseJob(data: unknown): WorkerJob {
   const run = RunJobPayload.safeParse(data);
-  if (run.success) return { kind: "run", runId: run.data.runId };
+  if (run.success) return { kind: "run", runId: run.data.runId, ...(run.data.again ? { again: run.data.again } : {}) };
   const connect = ConnectJobPayload.safeParse(data);
   if (connect.success) return { kind: "connect", linkId: connect.data.linkId };
   const documents = DocumentsJobPayload.safeParse(data);

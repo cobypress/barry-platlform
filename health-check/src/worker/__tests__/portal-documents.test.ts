@@ -1,16 +1,26 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { approvedReport, renderReleased, type ApprovedRun, type DocumentKey, type HeldFigure, type ReleasedDocuments } from "../../render/render-released.ts";
-import { OUTPUT_FILES } from "../../render/render-run.ts";
+import { loadRun, OUTPUT_FILES } from "../../render/render-run.ts";
+import { buildReport } from "../../narrative/sections.ts";
+import { executiveHtml } from "../../render/executive.ts";
+import { fullReportHtml } from "../../render/full-report.ts";
+import { onePagerHtml } from "../../render/one-pager.ts";
+import { runFromRecording } from "../../testing/harness.ts";
+import { loadAnswers } from "../../testing/replay.ts";
 import { AUTOMATIC_DOCUMENTS_NOT_BUILT } from "../../render/render-released.ts";
 import { ORG_ID } from "../../testing/synthetic-org.ts";
 import { AutomaticReplay, automaticSyntheticCalibration } from "../../testing/automatic.ts";
 import type { NarrativeClient } from "../../narrative/client.ts";
 import { AUTOMATIC_CLAIM } from "../../narrative/draft.ts";
-import { AUTOMATIC_FORBIDDEN } from "../../narrative/prompt.ts";
+import { AUTOMATIC_FORBIDDEN, claimsAPerson, readerText } from "../../narrative/prompt.ts";
+import { AUTOMATIC_NEXT_STEPS, CONSULTANT_NEXT_STEPS } from "../../render/exec-pages.ts";
+import { ENGINE_TEXT_DIRS } from "../../digest/engine-texts-scan.ts";
+import ts from "typescript";
+import { SERVICE_MODULE } from "../../domains/index.ts";
 import type { DocumentDrive, FolderSharing } from "../drive.ts";
 import { processDocumentsJob, PORTAL_REFUSALS } from "../documents-job.ts";
 import { readWorkerEnv } from "../env.ts";
@@ -19,7 +29,8 @@ import { BadJobError, parseJob, type DocumentsJobInput } from "../types.ts";
 import {
   documentsKey,
   DocumentsKeyError,
-  forbiddenOnPage,
+  forbiddenInDraft,
+  forbiddenInFrame,
   HELD_PLACEHOLDER,
   openDocument,
   PORTAL_OUTPUTS,
@@ -30,7 +41,8 @@ import {
   type PortalDocumentsSwitch,
 } from "../portal-documents.ts";
 import { gatedProcessor, lostRecorder, portalDocumentsJobId, type QueueJob } from "../bullmq.ts";
-import { PORTAL_DOCUMENT_SQL, PORTAL_EXPIRED_SQL, PostgresWorkerStore, RAISE_FLAG_SQL, type SqlClient, type SqlPool, type SqlResult } from "../postgres-store.ts";
+import { FAILURE_FLAG_SQL, FLAG_CONFLICT, HELD_REASON_SQL, HOLD_RUN_SQL, PORTAL_DOCUMENT_SQL, PORTAL_EXPIRED_SQL, PORTAL_SWEEP_LOCK_TIMEOUT_SQL, PORTAL_SWEEP_STATEMENT_TIMEOUT_SQL, PostgresWorkerStore, RAISE_FLAG_SQL, type SqlClient, type SqlPool, type SqlResult } from "../postgres-store.ts";
+import { CONSOLE_CHECKS, passesCheck } from "../console-checks.ts";
 import { baseDeps, consoleRun, RUN_ID, runInput, syntheticConnection } from "./helpers.ts";
 import type { MemoryWorkerStore } from "../memory-store.ts";
 
@@ -69,9 +81,9 @@ const CLAIM = "A consultant reviewed it, and will walk you through it.";
  * every draft, then released by code. Its run folder is the one the documents
  * are made from.
  */
-async function releasedAutomaticRun() {
+async function releasedAutomaticRun(modules: string[] = consoleRun().modules) {
   const deps = baseDeps({ dataTransport: new AutomaticReplay(), automatic: { on: true, orgs: new Set([ORG15]) }, narrative: claiming(CLAIM) });
-  deps.store.addRun(runInput({ run: consoleRun({ reviewMode: "automatic" }), calibration: await automaticSyntheticCalibration(), intake: null, answers: [] }));
+  deps.store.addRun(runInput({ run: consoleRun({ reviewMode: "automatic", modules }), calibration: await automaticSyntheticCalibration(), intake: null, answers: [] }));
   await deps.tokens.save(syntheticConnection());
   const outcome = await createJobHandler(deps)({ kind: "run", runId: RUN_ID }, { final: false });
   assert.deepEqual(outcome, { outcome: "done", detail: `Run ${RUN_ID} is released` });
@@ -131,7 +143,7 @@ describe("the portal's documents for a released automatic run (DECISIONS.md 698)
     for (const doc of ["executive", "full", "ceo"]) {
       assert.ok(pages[doc], doc);
       assert.ok(!pages[doc]!.includes(CLAIM.slice(0, 20)), doc);
-      assert.deepEqual(forbiddenOnPage(pages[doc]!), [], doc);
+      assert.deepEqual(forbiddenInFrame(pages[doc]!), [], doc);
     }
   });
 
@@ -201,7 +213,8 @@ describe("the portal's documents for a released automatic run (DECISIONS.md 698)
     });
 
     test("the rendered-text check holds the document whose page holds the claim, with no servable bytes and one flag", () => {
-      assert.ok(forbiddenOnPage(pages.executive!).length > 0);
+      // Claude's planted words are on the page, where its section prints.
+      assert.ok(readerText(pages.executive!).includes("A consultant reviewed it."));
       const exec = second[0]!;
       assert.equal(exec.heldForUs, true);
       assert.ok(exec.sealed.equals(HELD_PLACEHOLDER));
@@ -228,10 +241,11 @@ describe("the portal's documents for a released automatic run (DECISIONS.md 698)
       assert.equal(store.flagsOf(RUN_ID).length, 1);
     });
 
-    test("expired rows go at the start of the next documents job, whatever it is", async () => {
+    test("expired rows go at the start of the next documents job while the switch is on, whatever the job", async () => {
       const at = Date.parse(second[0]!.expiresAt) + 1000;
       deps.now = () => new Date(at);
-      deps.portalDocuments = { on: false, key: null, keyProblem: null };
+      // The switch on, the key gone: refused, and the clean-up still runs first.
+      deps.portalDocuments = { on: true, key: null, keyProblem: "HC_DOCUMENTS_KEY isn't set on the worker" };
       const refused = await handle(PORTAL, { final: true });
       assert.equal(refused.outcome, "refused");
       assert.equal(rowsOf(store).filter(Boolean).length, 0);
@@ -292,6 +306,13 @@ describe("the portal's gate: each refusal reads nothing more and makes nothing (
   test("a held automatic run", () => refused(gateDeps({ status: "in_review" }, { held: "score_moved" }), PORTAL_REFUSALS.notReleased));
   test("a hold on a run that reads as released", () => refused(gateDeps({}, { held: "score_moved" }), PORTAL_REFUSALS.held));
 
+  test("sections that don't fit the run: a checked section naming an approver", async () => {
+    const setup = gateDeps({});
+    const section = { id: "s-0001", runId: RUN_ID, output: "executive_summary", key: "verdict", title: "Verdict", order: 0, status: "checked", currentVersionId: "v-0001", findingIds: [], metricIds: [], manualStepIds: [], approval: { approvedBy: "someone@example.com", approvedAt: "2026-11-01T09:00:00.000Z" } };
+    setup.deps.store.documents.get(RUN_ID)!.input.sections = [section as unknown as DocumentsJobInput["sections"][number]];
+    await refused(setup, /approved by no one/);
+  });
+
   test("a released automatic run passes the gate, and a run released by a person after its hold (its hold cleared) too", async () => {
     const setup = gateDeps({});
     const outcome = await processDocumentsJob(RUN_ID, setup.deps, { final: true }, "portal");
@@ -336,18 +357,51 @@ describe("a make held for us, exactly as decision 682 holds one (DECISIONS.md 69
 
   test("the repair's held-for-us ceiling holds all three", () => held({ repairs: "held for us", masks: { executive: 11, full: 0, ceo: 0, microsite: 0 } }, { held: 3, masks: 11 }));
   test("a figure still held after both masks holds all three", () => held({ held: [{ document: "The full health check", page: 3, figure: "98,765", reason: "isn't in the data" }] }, { held: 3, untraced: 1 }));
-  test("a page never seen printed is never sealed unread", async () => {
-    const setup = gateDeps({}, { render: fakeRender({}, null) });
-    await processDocumentsJob(RUN_ID, setup.deps, { final: true }, "portal");
-    assert.deepEqual(rowsOf(setup.deps.store).map((r) => r?.heldForUs), [true, true, true]);
+});
+
+describe("a make that fails writes nothing, and leaves good documents in date as they were (DECISIONS.md 698)", () => {
+  /** A good make first, then the failing one, on the same store. */
+  const remake = async (failing: (dir: string, approved: ApprovedRun, out: string) => Promise<unknown>, final = true) => {
+    const setup = gateDeps({});
+    assert.equal((await processDocumentsJob(RUN_ID, setup.deps, { final: true }, "portal")).outcome, "done");
+    const before = rowsOf(setup.deps.store).map((r) => ({ ...r!, sealed: Buffer.from(r!.sealed) }));
+    setup.deps.renderReleased = failing as typeof renderReleased;
+    const writes = setup.deps.store.writes.length;
+    const outcome = await processDocumentsJob(RUN_ID, setup.deps, { final }, "portal").catch((err: Error) => ({ outcome: "thrown", detail: err.message }));
+    const after = rowsOf(setup.deps.store);
+    for (const [i, row] of before.entries()) {
+      assert.equal(after[i]!.heldForUs, false);
+      assert.ok(after[i]!.sealed.equals(row.sealed));
+      assert.equal(after[i]!.madeAt, row.madeAt);
+    }
+    assert.deepEqual(setup.deps.store.flagsOf(RUN_ID), []);
+    assert.deepEqual(setup.deps.store.writes.slice(writes), []);
+    return outcome;
+  };
+  test("a render that fails on the last delivery: failed, nothing replaced, no flag", async () => {
+    const outcome = await remake(async () => Promise.reject(new Error("the browser closed")));
+    assert.equal(outcome.outcome, "failed");
+    assert.match(outcome.detail, /the browser closed/);
   });
-  test("a render that fails on the last delivery holds all three; before it, the queue tries again", async () => {
-    const failing = { render: async () => Promise.reject(new Error("the browser closed")), calls: [] as ApprovedRun[] };
-    const setup = gateDeps({}, { render: failing as unknown as ReturnType<typeof fakeRender> });
-    await assert.rejects(processDocumentsJob(RUN_ID, setup.deps, { final: false }, "portal"));
-    assert.equal(setup.deps.store.portalDocuments.size, 0);
+  test("before the last delivery, it goes back to the queue, with nothing replaced", async () => {
+    assert.equal((await remake(async () => Promise.reject(new Error("the browser closed")), false)).outcome, "thrown");
+  });
+  test("a correction that can't be carried: failed, nothing replaced", async () => {
+    const outcome = await remake(async () => ({ refused: [{ title: "A finding", field: "value.amount", asRead: 10, last: 12, why: { kind: "stale", from: 10 } }] }));
+    assert.equal(outcome.outcome, "failed");
+  });
+  test("a page never seen printed: failed, never sealed unread, nothing replaced", async () => {
+    const outcome = await remake(fakeRender({}, null).render);
+    assert.equal(outcome.outcome, "failed");
+    assert.match(outcome.detail, /weren't seen as printed/);
+  });
+  test("a content hold, by contrast, does replace them with held rows", async () => {
+    const setup = gateDeps({});
+    await processDocumentsJob(RUN_ID, setup.deps, { final: true }, "portal");
+    setup.deps.renderReleased = fakeRender({ repairs: "held for us" }, "<p>Fine.</p>").render;
     await processDocumentsJob(RUN_ID, setup.deps, { final: true }, "portal");
     assert.deepEqual(rowsOf(setup.deps.store).map((r) => r?.heldForUs), [true, true, true]);
+    assert.deepEqual(setup.deps.store.flagsOf(RUN_ID), ["documents_held"]);
   });
   test("a PDF over the limit is held for us, the others sealed", async () => {
     const big = fakeRender({}, "<p>Your score is good.</p>");
@@ -371,26 +425,77 @@ describe("a make held for us, exactly as decision 682 holds one (DECISIONS.md 69
   });
 });
 
-describe("the rendered-text check's words (DECISIONS.md 698)", () => {
-  test("catches the draft guard's words, and consultant, reviewed, Prepared by and draft however they're marked up", () => {
-    for (const html of [
-      "<p>A <b>consultant</b> can help.</p>",
-      "<p>This was reviewed.</p>",
-      "<div>Prepared&nbsp;by Black Cloud</div>",
-      "<span>Prepared</span> <span>by</span>",
-      '<div class="footer" data-chrome><span>Black Cloud Barometer | Draft, not approved for release</span></div>',
-      "<p>We&#39;ll walk you through it.</p>",
-      "<p>Book a call with us.</p>",
-    ]) assert.ok(forbiddenOnPage(html).length > 0, html);
+describe("the words check: Claude's text and the page's frame only (DECISIONS.md 698)", () => {
+  test("Claude's text is read as its reader sees it: soft hyphens, zero-width characters, tags inside a word and alt text hide nothing", () => {
+    for (const text of [
+      "A consultant can help.",
+      "con­sultant",
+      "con&shy;sultant",
+      "consul‍tant",
+      "consul​tant",
+      "reviewed⁠",
+      "﻿reviewed",
+      "re<span>viewed</span>",
+      "<b>Prepared</b> by us",
+      'See <img alt="Reviewed by a consultant" src="x.png">',
+      "We&#39;ll walk you through it.",
+      "Book a call with us.",
+    ]) assert.ok(forbiddenInDraft(text).length > 0, JSON.stringify(text));
   });
-  test("leaves plain words alone, and never reads a style, a script or an attribute", () => {
-    for (const html of ["<p>Review your sharing settings.</p>", '<p class="draft reviewed">Your score is 62.</p>', "<style>.draft{}</style><p>Fine.</p>", "<script>var consultant=1</script><p>Fine.</p>"]) assert.deepEqual(forbiddenOnPage(html), [], html);
+  test("the draft guard reads the same way", () => {
+    for (const text of ["con­sultant", "con&shy;sultant", "We'll talk​ you through it", "reviewed by <i>our</i> team", 'x <img alt="checked by our team">']) assert.ok(claimsAPerson(text), JSON.stringify(text));
+    for (const text of ["Review your sharing settings.", "We found 3 flows without fault paths."]) assert.ok(!claimsAPerson(text), text);
   });
   test("covers every word the draft guard refuses, the reviewer's phrasings among them", () => {
     for (const text of ["Our team has looked over these findings.", "Your Black Cloud contact can help with the next steps.", "One of our specialists will be in touch.", "We have verified these results by hand.", "The findings below were checked by our team."]) {
       assert.ok(AUTOMATIC_FORBIDDEN.some((p) => p.test(text)));
-      assert.ok(forbiddenOnPage(`<p>${text}</p>`).length > 0, text);
+      assert.ok(forbiddenInDraft(text).length > 0, text);
     }
+  });
+  test("the frame: a Prepared by line, the draft mark and a consultant's next steps, however they're marked up", () => {
+    for (const html of [
+      '<div class="who"><b>31 Oct 2026</b>Prepared by Black Cloud</div>',
+      "<p>Prepared&nbsp;by Someone Example, Black Cloud</p>",
+      '<p class="for">Prepared for</p><p>Synthetic Co</p><p>by Someone Example, Black Cloud</p>',
+      '<div class="footer" data-chrome><span>Black Cloud Barometer | Draft, not approved for release</span></div>',
+      `<h3>${CONSULTANT_NEXT_STEPS.first.title}</h3><p>We&#39;ll take your team through what we found, answer their questions, and agree what matters most to you.</p>`,
+      `<p>${CONSULTANT_NEXT_STEPS.closing}</p>`,
+      "<p>We&#39;ll look at your Salesforce again after 90 days, so you can see what has improved and what still needs work.</p>",
+    ]) assert.ok(forbiddenInFrame(html).length > 0, html);
+  });
+  test("the engine's words and the org's never trip the frame", () => {
+    for (const text of ["Most knowledge articles haven't been reviewed in a year", "Forecast changed by hand", "Check this by hand", "Draft a description of what each field holds", "Profile: Account Manager (12 users)", "Sales Analyst profile", "Quote status Draft", "Prepared By field on Quote", AUTOMATIC_NEXT_STEPS.first.title, AUTOMATIC_NEXT_STEPS.first.text, AUTOMATIC_NEXT_STEPS.recheck]) {
+      assert.deepEqual(forbiddenInFrame(`<p>${text}</p>`), [], text);
+    }
+  });
+  test("an automatic run's own next steps say nothing the draft guard would refuse", () => {
+    for (const text of [AUTOMATIC_NEXT_STEPS.first.title, AUTOMATIC_NEXT_STEPS.first.text, AUTOMATIC_NEXT_STEPS.recheck]) assert.deepEqual(forbiddenInDraft(text), [], text);
+  });
+
+  test("every text the engine writes in the folders that reach a page: none trips the frame but the frame's own consultant-led and draft lines", () => {
+    const root = join(import.meta.dirname, "../..");
+    const files = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? (e.name === "__tests__" ? [] : files(join(dir, e.name))) : e.name.endsWith(".ts") ? [join(dir, e.name)] : []));
+    const hits: string[] = [];
+    let texts = 0;
+    for (const file of ENGINE_TEXT_DIRS.flatMap((d) => files(join(root, d)))) {
+      const source = ts.createSourceFile(file, readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true);
+      const visit = (node: ts.Node): void => {
+        // Every literal, and every template with what it puts in read as a word, so nothing a template writes around a value escapes.
+        let text: string | null = null;
+        if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) text = node.text;
+        else if (ts.isTemplateExpression(node)) text = node.head.text + node.templateSpans.map((span) => `X${span.literal.text}`).join("");
+        if (text !== null && /\s/.test(text.trim())) {
+          texts++;
+          if (forbiddenInFrame(text).length) hits.push(readerText(text).trim());
+        }
+        ts.forEachChild(node, visit);
+      };
+      visit(source);
+    }
+    assert.ok(texts > 3000, `${texts} texts`);
+    const frame = [/Draft, not approved for release/, /^Prepared by X, Black Cloud$/, /^Prepared by Black Cloud$/, /^by X, Black Cloud$/, /Walk through it together/, /We'll take your team through what we found/, /Your consultant will talk you through/, /We'll look at your Salesforce again after 90 days/];
+    for (const hit of hits) assert.ok(frame.some((f) => f.test(hit)), `an engine text trips the frame: ${hit.slice(0, 160)}`);
+    // And a section of the engine's own text is never read for Claude's words, whatever it says: only a version Claude drafted is.
   });
 });
 
@@ -495,7 +600,7 @@ describe("the Postgres store's portal statements (DECISIONS.md 698)", () => {
     assert.deepEqual(texts, ["BEGIN", PORTAL_DOCUMENT_SQL, PORTAL_DOCUMENT_SQL, PORTAL_DOCUMENT_SQL, RAISE_FLAG_SQL, "COMMIT"]);
     assert.match(PORTAL_DOCUMENT_SQL, /r\."status" = 'released' AND r\."reviewMode" = 'automatic' AND r\."heldReason" IS NULL/);
     assert.match(PORTAL_DOCUMENT_SQL, /ON CONFLICT \("runId", "output"\) DO UPDATE/);
-    assert.match(RAISE_FLAG_SQL, /ON CONFLICT \("runId", "kind"\) DO NOTHING/);
+    assert.ok(RAISE_FLAG_SQL.endsWith(FLAG_CONFLICT));
     assert.deepEqual(pool.statements[4]!.values, [RUN_ID, "documents_held", "2026-11-24T09:00:00.000Z", JSON.stringify({ documents: 3, held: 1 })]);
     assert.ok((pool.statements[1]!.values[2] as Buffer).equals(HELD_PLACEHOLDER));
     assert.equal(pool.statements[1]!.values[5], true);
@@ -531,4 +636,164 @@ describe("the Postgres store's portal statements (DECISIONS.md 698)", () => {
     assert.ok(sql.includes(`CHECK ("expiresAt" > "madeAt" AND "expiresAt" <= "madeAt" + interval '7 days')`));
     assert.ok(sql.includes(`WHERE NOT d."heldForUs"`));
   });
+});
+
+describe("the hold, as the Postgres store reads it for a documents job (DECISIONS.md 698)", () => {
+  const row = (reviewMode: string | null) => {
+    const r: Record<string, unknown> = { ...consoleRun({ status: "released" }), reviewMode, analysisFrom: "2024-10-31", analysisTo: "2026-10-31", connectionName: "synthetic-co", preparedBy: null };
+    delete r.analysisWindow;
+    delete r.steps;
+    return r;
+  };
+  const load = async (reviewMode: string | null, heldReason: string | null) => {
+    const pool = new FakePool();
+    pool.handlers.push((text) => {
+      if (text === HELD_REASON_SQL) return { rows: [{ heldReason }], rowCount: 1 };
+      if (text.includes(`FROM "HealthCheckRun" WHERE`)) return { rows: [row(reviewMode)], rowCount: 1 };
+      return { rows: [], rowCount: 0 };
+    });
+    const job = (await new PostgresWorkerStore(pool).loadDocumentsJob(RUN_ID))!;
+    return { job, asked: pool.statements.some((s) => s.text === HELD_REASON_SQL) };
+  };
+  test("an automatic run's hold is read, and its absence reads as none", async () => {
+    assert.equal((await load("automatic", "score_moved")).job.heldReason, "score_moved");
+    assert.equal((await load("automatic", null)).job.heldReason, null);
+  });
+  test("a consultant-led run's reads are as they were: no hold asked for", async () => {
+    const { job, asked } = await load(null, "score_moved");
+    assert.equal(asked, false);
+    assert.equal("heldReason" in job, false);
+  });
+});
+
+describe("a flag raised again (DECISIONS.md 693, 698)", () => {
+  test("every flag statement leaves an open flag as it is and opens a cleared one again, unposted, with the new counts", () => {
+    for (const sql of [RAISE_FLAG_SQL, HOLD_RUN_SQL, FAILURE_FLAG_SQL]) {
+      assert.ok(sql.includes(FLAG_CONFLICT), sql.slice(0, 80));
+      assert.doesNotMatch(sql, /DO NOTHING/);
+    }
+    assert.match(FLAG_CONFLICT, /^ON CONFLICT \("runId", "kind"\) DO UPDATE SET "raisedAt" = EXCLUDED\."raisedAt", "counts" = EXCLUDED\."counts", "postedAt" = NULL, "clearedBy" = NULL, "clearedAt" = NULL WHERE "HealthCheckRunFlag"\."clearedAt" IS NOT NULL$/);
+    // Both clear columns go null together, which the console's cleared check asks.
+    assert.ok(passesCheck(CONSOLE_CHECKS.flagCleared, { clearedBy: null, clearedAt: null }));
+  });
+
+  test("the memory store the same: a redelivery adds nothing to an open flag; a cleared one is opened again", async () => {
+    const setup = gateDeps({}, { render: fakeRender({ repairs: "held for us", masks: { executive: 11, full: 0, ceo: 0, microsite: 0 } }, "<p>Fine.</p>") });
+    const store = setup.deps.store;
+    await processDocumentsJob(RUN_ID, setup.deps, { final: true }, "portal");
+    const first = structuredClone([...store.flags.values()][0]!);
+    setup.deps.renderReleased = fakeRender({ repairs: "held for us", masks: { executive: 12, full: 0, ceo: 0, microsite: 0 } }, "<p>Fine.</p>").render;
+    setup.deps.now = () => new Date(Date.parse(first.raisedAt) + 60_000);
+    await processDocumentsJob(RUN_ID, setup.deps, { final: true }, "portal");
+    assert.deepEqual([...store.flags.values()][0], first);
+    store.postAndClearFlag(RUN_ID, "documents_held", "staff@example.com", new Date(Date.parse(first.raisedAt) + 120_000).toISOString());
+    setup.deps.now = () => new Date(Date.parse(first.raisedAt) + 180_000);
+    await processDocumentsJob(RUN_ID, setup.deps, { final: true }, "portal");
+    const reopened = [...store.flags.values()][0]!;
+    assert.equal(reopened.clearedAt, null);
+    assert.equal(reopened.clearedBy, null);
+    assert.equal(reopened.postedAt, null);
+    assert.equal(reopened.counts.masks, 12);
+    assert.equal(reopened.raisedAt, new Date(Date.parse(first.raisedAt) + 180_000).toISOString());
+  });
+});
+
+describe("the expired-row clean-up (DECISIONS.md 698)", () => {
+  const consultant = () => {
+    const setup = gateDeps({ reviewMode: "consultant" });
+    const input = setup.deps.store.documents.get(RUN_ID)!.input;
+    input.state = "queued";
+    // No Drive: a make that gets past the clean-up stops at its own first gate, which says so.
+    setup.deps.drive = null;
+    return setup;
+  };
+  test("off with the switch off: the table is never named", async () => {
+    const setup = consultant();
+    setup.deps.portalDocuments = { on: false, key: KEY, keyProblem: null };
+    let called = 0;
+    setup.deps.store.deleteExpiredPortalDocuments = async () => (called++, 0);
+    await processDocumentsJob(RUN_ID, setup.deps, { final: true });
+    assert.equal(called, 0);
+  });
+  for (const [what, err] of [
+    ["a missing table", Object.assign(new Error("relation does not exist"), { code: "42P01" })],
+    ["a missing right", Object.assign(new Error("permission denied"), { code: "42501" })],
+    ["a lock timeout", Object.assign(new Error("canceling statement due to lock timeout"), { code: "55P03" })],
+    ["a statement timeout", Object.assign(new Error("canceling statement due to statement timeout"), { code: "57014" })],
+  ] as const) {
+    test(`${what} never fails or holds up a consultant's make`, async () => {
+      const setup = consultant();
+      setup.deps.store.deleteExpiredPortalDocuments = async () => Promise.reject(err);
+      // The make reaches its own gate (here, no Drive): the clean-up's error never became the job's outcome.
+      const outcome = await processDocumentsJob(RUN_ID, setup.deps, { final: true });
+      assert.equal(outcome.outcome, "failed");
+      assert.match(outcome.detail, /^Google Drive isn't set up on the worker/);
+      assert.ok(setup.deps.lines.some((l) => l.startsWith("Expired portal documents couldn't be cleared")));
+    });
+  }
+  test("the Postgres store's clean-up runs under its own short limits, in one transaction", async () => {
+    const pool = new FakePool();
+    await new PostgresWorkerStore(pool).deleteExpiredPortalDocuments("2026-11-24T09:00:00.000Z");
+    assert.deepEqual(pool.statements.map((s) => s.text), ["BEGIN", PORTAL_SWEEP_LOCK_TIMEOUT_SQL, PORTAL_SWEEP_STATEMENT_TIMEOUT_SQL, PORTAL_EXPIRED_SQL, "COMMIT"]);
+    assert.equal(PORTAL_SWEEP_LOCK_TIMEOUT_SQL, "SET LOCAL lock_timeout = '2s'");
+    assert.equal(PORTAL_SWEEP_STATEMENT_TIMEOUT_SQL, "SET LOCAL statement_timeout = '5s'");
+  });
+});
+
+describe("Sales Cloud and Service Cloud, automatic, end to end: the engine's own words hold nothing (DECISIONS.md 698)", async () => {
+  const deps = await releasedAutomaticRun([...consoleRun().modules, SERVICE_MODULE]);
+  const pages: Record<string, string> = {};
+  const made: { last?: ReleasedDocuments } = {};
+  portalDeps(deps, pages, made);
+  deps.store.addDocumentsJob(inputOf(deps.store));
+  const outcome = await processDocumentsJob(RUN_ID, deps, { final: true }, "portal");
+
+  test("all three are sealed, none held, no flag", () => {
+    assert.equal(outcome.outcome, "done", outcome.detail);
+    assert.deepEqual(rowsOf(deps.store).map((r) => r?.heldForUs), [false, false, false]);
+    assert.deepEqual(deps.store.flagsOf(RUN_ID), []);
+  });
+  test("though the pages hold the engine's own words the old check held them for", () => {
+    const text = readerText(pages.full!);
+    assert.match(text, /by hand|reviewed/i);
+  });
+  test("an automatic run's pages say none of a consultant-led run's next steps, and its own instead", () => {
+    for (const doc of ["executive", "full", "ceo"]) {
+      const text = readerText(pages[doc]!);
+      for (const said of [CONSULTANT_NEXT_STEPS.first.title, readerText(CONSULTANT_NEXT_STEPS.first.text), CONSULTANT_NEXT_STEPS.closing, "Black Cloud can deliver this plan", readerText(CONSULTANT_NEXT_STEPS.recheck), readerText(CONSULTANT_NEXT_STEPS.recheckFull), "Prepared by"]) assert.ok(!text.includes(said), `${doc}: ${said}`);
+      assert.ok(text.includes(AUTOMATIC_NEXT_STEPS.recheck), doc);
+    }
+    for (const doc of ["executive", "full"]) assert.ok(readerText(pages[doc]!).includes(AUTOMATIC_NEXT_STEPS.first.title), doc);
+  });
+  test("a section in the engine's own words is never read for Claude's, whatever it says", async () => {
+    deps.store.addDocumentsJob(
+      inputOf(deps.store, (i) => {
+        const section = i.sections.find((s) => s.output === "executive_summary")!;
+        const v = i.versions.find((x) => x.id === section.currentVersionId)!;
+        assert.equal(v.source, "engine");
+        Object.assign(v, { body: `Check this by hand: most knowledge articles haven't been reviewed in a year.\n\n${v.body}` });
+      }),
+    );
+    const again = await processDocumentsJob(RUN_ID, deps, { final: true }, "portal");
+    assert.equal(again.outcome, "done", again.detail);
+    assert.deepEqual(rowsOf(deps.store).map((r) => r?.heldForUs), [false, false, false]);
+  });
+});
+
+describe("a consultant-led run's documents keep their words (DECISIONS.md 698)", async () => {
+  const { dir } = await runFromRecording({ answers: loadAnswers() });
+  const { input, pseudonyms } = loadRun(dir);
+  const report = buildReport({ ...input, preparedBy: null });
+  const pages = { executive: readerText(executiveHtml(report, pseudonyms)), full: readerText(fullReportHtml(report, pseudonyms)), ceo: readerText(onePagerHtml(report, pseudonyms)) };
+  test("its next steps walk through it together, with the consultant's closing line and the 90-day promise", () => {
+    for (const doc of ["executive", "full"] as const) {
+      assert.ok(pages[doc].includes(CONSULTANT_NEXT_STEPS.first.title), doc);
+      assert.ok(pages[doc].includes(readerText(CONSULTANT_NEXT_STEPS.first.text)), doc);
+      assert.ok(pages[doc].includes(CONSULTANT_NEXT_STEPS.closing), doc);
+    }
+    assert.ok(pages.executive.includes(readerText(CONSULTANT_NEXT_STEPS.recheck)));
+    assert.ok(pages.full.includes(readerText(CONSULTANT_NEXT_STEPS.recheckFull)));
+    assert.ok(pages.ceo.includes(readerText(CONSULTANT_NEXT_STEPS.recheck)));
+  });
+  test("its one-pager says Prepared by Black Cloud with nobody named", () => assert.ok(pages.ceo.includes("Prepared by Black Cloud")));
 });

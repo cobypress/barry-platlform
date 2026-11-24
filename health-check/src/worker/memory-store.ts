@@ -104,7 +104,15 @@ export class MemoryWorkerStore implements WorkerStore {
   /** The console's HealthCheckRelease rows, by run id. A test may add a person's or an earlier run's. */
   readonly releases = new Map<string, Release[]>();
   /** The console's HealthCheckRunFlag rows, by run id and kind. */
-  readonly flags = new Map<string, { runId: string; kind: string; raisedAt: string; counts: Record<string, number>; postedAt: null; clearedBy: null; clearedAt: null }>();
+  readonly flags = new Map<string, { runId: string; kind: string; raisedAt: string; counts: Record<string, number>; postedAt: string | null; clearedBy: string | null; clearedAt: string | null }>();
+
+  /** As the console's cron and a person do: a flag posted to staff, then cleared. Tests only. */
+  postAndClearFlag(runId: string, kind: string, by: string, at: string): void {
+    const flag = this.flags.get(`${runId}|${kind}`);
+    if (!flag) throw new Error(`No ${kind} flag on ${runId}`);
+    Object.assign(flag, { postedAt: at, clearedBy: by, clearedAt: at });
+    assertChecks(flag, CONSOLE_CHECKS.flagCleared);
+  }
 
   /** As the database would refuse the release or hold, before anything is written: its checks, its unique index, and a digest it must hold. */
   #checkAutomatic(run: StoredRun, output: RunOutputRecord): void {
@@ -142,12 +150,13 @@ export class MemoryWorkerStore implements WorkerStore {
     this.#raiseFlag(runId, a.reason, a.at, a.counts);
   }
 
-  /** As the Postgres store's INSERT ... ON CONFLICT DO NOTHING: raised once. */
+  /** As the Postgres store's FLAG_CONFLICT: an open flag is left as it is; a cleared one is opened again with the new time and counts, unposted (DECISIONS.md 698). */
   #raiseFlag(runId: string, kind: string, at: string, counts: Record<string, number>): void {
     const row = { runId, kind, raisedAt: at, counts: structuredClone(counts), postedAt: null, clearedBy: null, clearedAt: null };
     assertChecks(row, CONSOLE_CHECKS.flagKind, CONSOLE_CHECKS.flagCounts, CONSOLE_CHECKS.flagCleared);
     const key = `${runId}|${kind}`;
-    if (this.flags.has(key)) return;
+    const open = this.flags.get(key);
+    if (open && open.clearedAt === null) return;
     this.flags.set(key, row);
     this.writes.push({ method: "raiseFlag", id: runId, detail: kind });
   }

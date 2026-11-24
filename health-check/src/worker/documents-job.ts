@@ -14,7 +14,7 @@ import { syncShares } from "./share-job.ts";
 import { sealPages } from "../microsite/seal.ts";
 import { addMonths } from "./retention.ts";
 import type { DocumentFile, DocumentsJobInput, PortalDocumentRow } from "./types.ts";
-import { forbiddenOnPage, HELD_PLACEHOLDER, PORTAL_DOCUMENT_DAYS, PORTAL_OUTPUTS, PORTAL_PDF_MAX_BYTES, sealDocument, type PortalOutput } from "./portal-documents.ts";
+import { forbiddenInDraft, forbiddenInFrame, HELD_PLACEHOLDER, PORTAL_DOCUMENT_DAYS, PORTAL_OUTPUTS, PORTAL_PDF_MAX_BYTES, sealDocument, type PortalOutput } from "./portal-documents.ts";
 import { BASELINE_GONE, BASELINE_UNAPPROVED, keepSurveyMetrics, loadPseudonymMap, OVERRIDES_FILE, SURVEY_FILE, write, writeRows } from "../render/render-run.ts";
 import { HANDBOOK_DOCX, renderHandbookDocx } from "../handbook/docx.ts";
 import { HANDBOOK_NOT_MADE, readEarlierHandbook, readHandbook } from "../handbook/read.ts";
@@ -287,15 +287,18 @@ function keepOverrides(dir: string, rows: NumberOverride[]): void {
 
 export async function processDocumentsJob(runId: string, deps: WorkerDeps, attempt: Attempt, deliver?: "portal"): Promise<JobOutcome> {
   if (!RUN_ID.test(runId)) return { outcome: "failed", detail: "The run id isn't one the worker can use as a folder name" };
-  await sweepPortalDocuments(deps);
+  // Only with the portal's documents switched on: a worker without them never names the table (DECISIONS.md 698).
+  if (deps.portalDocuments?.on === true) await sweepPortalDocuments(deps);
   // The run's own lock: a run job for it can't be writing its folder meanwhile, nor a second make of its portal documents.
   return withJobLock(deps.locksDir, `run-${runId}`, () => (deliver === "portal" ? portalLocked(runId, deps, attempt) : documentsLocked(runId, deps, attempt)));
 }
 
 /**
  * The portal's expired documents, deleted at the start of every documents job
- * (DECISIONS.md 698). Never a reason to fail one: a console without the table
- * says so once a process, and any other error is logged by its code.
+ * while the switch is on (DECISIONS.md 698), under short lock and statement
+ * time limits. Never a reason to fail or hold up one, a consultant's make
+ * included: a console without the table says so once a process, and any other
+ * error (a missing right, a timeout) is logged and the make goes on.
  */
 let saidNoPortalTable = false;
 async function sweepPortalDocuments(deps: WorkerDeps): Promise<void> {
@@ -375,7 +378,16 @@ async function portalLocked(runId: string, deps: WorkerDeps, attempt: Attempt): 
       return reason;
     }
   };
-  /** Every document held for us, for a make that printed none we could serve. */
+  /**
+   * A make that failed, as opposed to one held for what it printed: nothing is
+   * written and no flag raised, so good documents still in date stay as they
+   * are, and the job's own failure is the record (DECISIONS.md 698).
+   */
+  const failMake = (why: string): JobOutcome => {
+    log(`Run ${runId}'s portal documents couldn't be made, and the ones already there are left as they are: ${why}`);
+    return { outcome: "failed", detail: `Run ${runId}'s portal documents couldn't be made: ${why}` };
+  };
+  /** Every document held for us, for a make whose content can't be served. */
   const holdAll = async (counts: Record<string, number>, why: string): Promise<JobOutcome> => {
     const failed = await save(PORTAL_OUTPUTS.map(held), { documents: PORTAL_OUTPUTS.length, held: PORTAL_OUTPUTS.length, ...counts });
     if (failed) return { outcome: "failed", detail: `Run ${runId}'s portal documents couldn't be saved: ${failed}` };
@@ -395,10 +407,13 @@ async function portalLocked(runId: string, deps: WorkerDeps, attempt: Attempt): 
   } catch (err) {
     const reason = safeReason(err);
     if (!attempt.final) throw new Error(reason);
-    return holdAll({ failed: 1 }, `they couldn't be made (${reason.slice(0, 200)}).`);
+    return failMake(reason.slice(0, 200));
   }
   // A correction we can't carry: nothing was printed.
-  if ("refused" in printed) return holdAll({ refused: printed.refused.length }, refusalSummary(printed.refused));
+  if ("refused" in printed) return failMake(refusalSummary(printed.refused));
+  // A page we didn't see printed is a page we didn't read: never sealed unread, and a defect of ours, not the content's.
+  const unread = PORTAL_OUTPUTS.filter((o) => pages[PORTAL_PAGES[o]] === undefined);
+  if (unread.length) return failMake(`the words on ${unread.map((o) => o.replace(/_/g, " ")).join(", ")} weren't seen as printed, so nothing was sealed unread.`);
   const masks = Object.values(printed.masks ?? {}).reduce((a, b) => a + b, 0);
   const fellBack = printed.fellBack?.length ?? 0;
   // A figure no mask could clear fails a consultant's make (decision 682); here, held for us, so a person is told.
@@ -409,13 +424,23 @@ async function portalLocked(runId: string, deps: WorkerDeps, attempt: Attempt): 
   }
   if (printed.repairs === "some" || printed.repairs === "heavy") await alertRepairs(runId, printed, deps, log);
 
+  // Claude's own text, as it prints: each section it drafted that didn't fall back, read for the words an automatic run may not say.
+  // The engine's text and the org's words are never searched (DECISIONS.md 698).
+  const fell = new Set((printed.fellBack ?? []).map((f) => `${f.output}:${f.key}`));
+  const versionOf = new Map(input.versions.map((v) => [v.id, v]));
+  const drafted: Partial<Record<"executive" | "full" | "ceo", string[]>> = {};
+  for (const section of input.sections) {
+    const page = section.output === "executive_summary" ? "executive" : section.output === "full_health_check" ? "full" : null;
+    const version = versionOf.get(section.currentVersionId ?? "");
+    if (!page || !version || version.source === "engine" || fell.has(`${section.output}:${section.key}`)) continue;
+    drafted[page] = [...(drafted[page] ?? []), ...forbiddenInDraft(version.body)];
+  }
   const rows: PortalDocumentRow[] = [];
   let words = 0;
   let tooLarge = 0;
   for (const output of PORTAL_OUTPUTS) {
-    const html = pages[PORTAL_PAGES[output]];
-    // A page we didn't see printed is a page we didn't read: held, never sealed unread.
-    const found = html === undefined ? ["unread"] : forbiddenOnPage(html);
+    // Claude's words on this document, then the page's fixed frame.
+    const found = [...new Set([...(drafted[PORTAL_PAGES[output]] ?? []), ...forbiddenInFrame(pages[PORTAL_PAGES[output]]!)])];
     if (found.length) {
       words++;
       // The labels only: never the words around them, which may be a draft's.

@@ -4,7 +4,7 @@ import { checkNumbers, scopeDataset, type FigureSet } from "../numbercheck/index
 import { tokenSource, type Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import type { NarrativeClient } from "./client.ts";
 import { guardDeep, holdsNameOrSecret, PromptRefused, sendPrompt } from "./guard.ts";
-import { AUTOMATIC_FORBIDDEN, AUTOMATIC_SYSTEM_PROMPT, buildPrompt, DRAFT_SCHEMA, SYSTEM_PROMPT, type PromptSource } from "./prompt.ts";
+import { AUTOMATIC_SYSTEM_PROMPT, claimsAPerson, buildPrompt, DRAFT_SCHEMA, SYSTEM_PROMPT, type PromptSource } from "./prompt.ts";
 
 /** Sent back to Claude, and kept as the reason if no draft passes. */
 export const AUTOMATIC_CLAIM = "Nobody reviews this report before the customer reads it, so don't mention a consultant, a review of this report, or walking anyone through it.";
@@ -120,7 +120,7 @@ export async function draftSection(input: { brief: SectionBrief; dataset: Figure
     const reviewed = review(reply.text, dataset, allowed, pseudonyms, brief.rolesOnly);
     const { paragraphs } = reviewed;
     // On an automatic run nobody is there to have reviewed it: a draft that says otherwise goes back, and in the end the engine's own words stand.
-    const problems = brief.automatic && AUTOMATIC_FORBIDDEN.some((p) => paragraphs.some((t) => p.test(t))) ? [...reviewed.problems, AUTOMATIC_CLAIM] : reviewed.problems;
+    const problems = brief.automatic && paragraphs.some(claimsAPerson) ? [...reviewed.problems, AUTOMATIC_CLAIM] : reviewed.problems;
     if (problems.length === 0) {
       const words = wordCount(paragraphs);
       const accepted: DraftResult = { status: "accepted", body: paragraphs.join("\n\n"), model: reply.model, attempts: attempt, words };

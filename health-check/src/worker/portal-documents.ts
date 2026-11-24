@@ -1,12 +1,15 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
-import { AUTOMATIC_FORBIDDEN } from "../narrative/prompt.ts";
+import { AUTOMATIC_FORBIDDEN, readerText } from "../narrative/prompt.ts";
+import { CONSULTANT_NEXT_STEPS } from "../render/exec-pages.ts";
 import { MICROSITE_KEY_VAR } from "../microsite/seal.ts";
 
 // An automatic run's three PDFs, made when the customer asks in the portal and
 // kept sealed for it (DECISIONS.md 698). Nobody reads them before the
-// customer does, so beside decision 682's number check and repair, each page's
-// text as printed is read for any word that would claim a person, a review or
-// a draft that isn't there; a hit keeps that document for us. Sealed as the
+// customer does, so beside decision 682's number check and repair, the text
+// Claude drafted and the page's fixed frame are read for any word that would
+// claim a person, a review or a draft that isn't there; a hit keeps that
+// document for us. The engine's own texts and the org's words are not
+// searched: they hold such words honestly. Sealed as the
 // microsite is (AES-256-GCM, a fresh 12-byte IV, a 16-byte tag), under a key
 // of its own, with the run id and the output bound in, so a row moved to
 // another run or output doesn't open.
@@ -96,44 +99,50 @@ export function openDocument(sealed: Buffer, runId: string, output: PortalOutput
 }
 
 /**
- * Words no page of an automatic run's documents may hold: everything the
- * draft guard refuses (AUTOMATIC_FORBIDDEN), and "consultant", "reviewed",
- * "Prepared by" and "draft" on their own, since an automatic run has no
- * consultant, no review, no one who prepared it and no draft mark. Wide on
- * purpose, as the guard is: a false alarm holds a document for us, never ships one.
+ * Words Claude's own text on an automatic run may not hold where it prints:
+ * everything the draft guard refuses (AUTOMATIC_FORBIDDEN), and "consultant",
+ * "reviewed" and "Prepared by" on their own. Read only in the sections Claude
+ * drafted (DECISIONS.md 698): the engine's own finding texts and the org's
+ * words ("Forecast changed by hand", a profile called "Account Manager") are
+ * never searched, since they would hold a real run's documents for nothing.
  */
-export const PAGE_FORBIDDEN: ReadonlyArray<{ label: string; pattern: RegExp }> = [
+export const DRAFT_FORBIDDEN: ReadonlyArray<{ label: string; pattern: RegExp }> = [
   ...AUTOMATIC_FORBIDDEN.map((pattern, i) => ({ label: `draft guard ${i + 1}`, pattern })),
   { label: "consultant", pattern: /\bconsultants?\b/i },
   { label: "reviewed", pattern: /\breviewed\b/i },
   { label: "prepared by", pattern: /\bprepared\s+by\b/i },
-  { label: "draft", pattern: /\bdrafts?\b/i },
 ];
 
-const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
-
-/**
- * A page's text as it prints: the HTML handed to the browser, with styles and
- * scripts dropped, every tag a space (footers and chart labels included), and
- * entities decoded, so "Prepared&nbsp;by" reads as the words it shows.
- */
-export function pageText(html: string): string {
-  return html
-    .replace(/<(style|script)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, " ")
-    .replace(/<!--[\s\S]*?-->/g, " ")
-    .replace(/<[^>]*>/g, " ")
-    .replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (whole, name: string) => {
-      if (name[0] === "#") {
-        const code = name[1]?.toLowerCase() === "x" ? parseInt(name.slice(2), 16) : parseInt(name.slice(1), 10);
-        return Number.isFinite(code) && code <= 0x10ffff ? String.fromCodePoint(code) : " ";
-      }
-      return ENTITIES[name.toLowerCase()] ?? whole;
-    })
-    .replace(/[\s  -​ ]+/g, " ");
+/** The labels of the forbidden words in a text Claude drafted, read as its reader sees it. Never the words around them. */
+export function forbiddenInDraft(body: string): string[] {
+  const read = readerText(body);
+  return DRAFT_FORBIDDEN.filter((f) => f.pattern.test(body) || f.pattern.test(read)).map((f) => f.label);
 }
 
-/** The labels of the forbidden words a page's HTML holds, never the words around them. */
-export function forbiddenOnPage(html: string): string[] {
-  const text = pageText(html);
-  return PAGE_FORBIDDEN.filter((f) => f.pattern.test(text)).map((f) => f.label);
+const phrase = (text: string): RegExp => new RegExp(readerText(text).replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/ /g, "\\s+"), "i");
+
+/**
+ * The page's fixed frame on an automatic run (DECISIONS.md 698): the cover's
+ * and the one-pager's "Prepared by … Black Cloud" or "by …, Black Cloud" line,
+ * the draft mark, and every promise of a person's time a consultant-led run's
+ * next steps make. None of it is ever printed on an automatic run; a page
+ * that shows one is held for us.
+ */
+export const FRAME_FORBIDDEN: ReadonlyArray<{ label: string; pattern: RegExp }> = [
+  { label: "prepared by", pattern: /\b(?:prepared\s+)?by\s+(?:[^.,|]{1,120},\s+)?Black\s+Cloud\b/i },
+  { label: "draft mark", pattern: /\bnot\s+approved\s+for\s+release\b/i },
+  { label: "consultant's next steps", pattern: phrase(CONSULTANT_NEXT_STEPS.first.title) },
+  { label: "consultant's next steps", pattern: phrase(CONSULTANT_NEXT_STEPS.first.text) },
+  { label: "consultant's next steps", pattern: phrase(CONSULTANT_NEXT_STEPS.closing) },
+  { label: "consultant's next steps", pattern: phrase(CONSULTANT_NEXT_STEPS.recheck) },
+  { label: "consultant's next steps", pattern: phrase(CONSULTANT_NEXT_STEPS.recheckFull) },
+];
+
+/** A page's text as it prints, footers, chart labels and alt text included. */
+export const pageText = readerText;
+
+/** The labels of the frame's forbidden words a page's HTML holds. */
+export function forbiddenInFrame(html: string): string[] {
+  const text = readerText(html);
+  return [...new Set(FRAME_FORBIDDEN.filter((f) => f.pattern.test(text)).map((f) => f.label))];
 }

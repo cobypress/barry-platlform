@@ -1,4 +1,4 @@
-import { nextStepsWords } from "./exec-pages.ts";
+import { CONSULTANT_NEXT_STEPS, nextStepsWords } from "./exec-pages.ts";
 import { yearlyByFinding } from "../value/model.ts";
 import { orderFromOrg } from "../connect/auto-calibration.ts";
 import { ORDER_UNCONFIRMED } from "../domains/historic-pipeline/cohort.ts";
@@ -573,7 +573,7 @@ function driversSlide(r: Render, metric: (id: string) => Metric | undefined): Sl
 }
 
 function nextStepsSlide(r: Render, plan: ReturnType<typeof buildPlan>["phases"], automatic: boolean): Slide {
-  const words = nextStepsWords(automatic);
+  const words = nextStepsWords(automatic, CONSULTANT_NEXT_STEPS.recheckFull);
   const first = plan.find((p) => p.findings.length > 0);
   const opening = first
     ? `Name an owner for each of the ${first.findings.length} ${first.findings.length === 1 ? "action" : "actions"} in days ${first.from} to ${first.to}, starting with this: ${first.findings[0]!.title}.`
@@ -581,10 +581,10 @@ function nextStepsSlide(r: Render, plan: ReturnType<typeof buildPlan>["phases"],
   const steps = [
     words.first,
     { title: "Start the first month", text: opening },
-    { title: "Measure the change", text: "We'll look at your Salesforce again after 90 days, so you can see what has improved and what still needs work." },
+    { title: "Measure the change", text: words.recheck },
   ];
   return {
-    html: `<div class="eyebrow">Next steps</div><h2>What happens next</h2><div class="stat-row" style="margin-top:18px">${steps.map((s) => `<div class="stat"><h3 style="font-size:22px;margin:0 0 8px">${r.t(s.title)}</h3><p>${r.t(s.text)}</p></div>`).join("")}</div><p class="lede" style="margin-top:28px">${words.closing}</p>`,
+    html: `<div class="eyebrow">Next steps</div><h2>What happens next</h2><div class="stat-row" style="margin-top:18px">${steps.map((s) => `<div class="stat"><h3 style="font-size:22px;margin:0 0 8px">${r.t(s.title)}</h3><p>${r.t(s.text)}</p></div>`).join("")}</div>${words.closing ? `<p class="lede" style="margin-top:28px">${words.closing}</p>` : ""}`,
   };
 }
 
