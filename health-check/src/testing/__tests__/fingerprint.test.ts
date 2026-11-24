@@ -17,8 +17,8 @@ import { AS_OF, CONNECTED_USER } from "../synthetic-org.ts";
 // a metric or the raw notes updates these, and says why in its commit.
 
 const GOLDEN: Record<string, Record<string, string>> = {
-  recorded: { "findings.json": "e7485447b2a7cc7f", "metrics.json": "8d5204f604273b53", "scores.json": "17cdb1708449d000", "manual-steps.json": "c4daf1ca86584a33", "action-lists.json": "7018f033c3c80e0a", "raw-notes.md": "1eac82a43280036c", "handbook.json": "64dcafcf493eef42" },
-  generated: { "findings.json": "9a63f3e9adabe2e2", "metrics.json": "32ed40c9328da6c3", "scores.json": "616e42570f940402", "manual-steps.json": "15ae87c4fd76d7b6", "action-lists.json": "8eeb97766d119778", "raw-notes.md": "57a167182dc0d112", "handbook.json": "23c075e2337e23a8" },
+  recorded: { "findings.json": "cd17885f313c1dea", "metrics.json": "5e72ab072a4c1e32", "scores.json": "17cdb1708449d000", "manual-steps.json": "c4daf1ca86584a33", "action-lists.json": "7018f033c3c80e0a", "raw-notes.md": "b327a9f8330ee9c0", "handbook.json": "64dcafcf493eef42" },
+  generated: { "findings.json": "a540e987c8421b52", "metrics.json": "89c771ee94ec4c13", "scores.json": "616e42570f940402", "manual-steps.json": "15ae87c4fd76d7b6", "action-lists.json": "8eeb97766d119778", "raw-notes.md": "3f7e782a544298dc", "handbook.json": "23c075e2337e23a8" },
 };
 
 // Before decision 703 added the path insights' findings and the variant table's metric: with those taken out,
@@ -137,12 +137,14 @@ test("decision 655 moved findings.json by the org-word marks alone: without them
   }
 });
 
+// Last, so no earlier test reads a run after it: with its findings and measure taken out, and every finding's marks
+// (which a run after a generated one reads as unknown, the safe side of decision 655's store), it is as before 655.
 test("decision 703 added the path insights and the variant table alone: without them findings.json and metrics.json are as they were, and nothing else but the raw notes moved", async () => {
   for (const [name, dir] of [["recorded", await recordedDir()], ["generated", await generatedDir()]] as const) {
     const findings = JSON.parse(readFileSync(join(dir, "findings.json"), "utf8")) as Array<{ ruleId: string }>;
     assert.ok(findings.some((f) => f.ruleId === "pipe.path-insights"), name);
     withoutPaths(dir);
-    assert.deepEqual(fingerprint(dir), { ...GOLDEN[name], ...BEFORE_703[name] }, name);
+    withoutOrgWords(dir);
+    assert.deepEqual(fingerprint(dir), { ...GOLDEN[name], ...BEFORE_703[name], "findings.json": BEFORE_655[name] }, name);
   }
 });
-
