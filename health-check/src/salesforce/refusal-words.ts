@@ -38,6 +38,37 @@ export function refusalSentence(what: string, kind: RefusalKind, code = ""): str
   return `${what} couldn't be read, because ${BECAUSE[kind]}.`;
 }
 
+/**
+ * What an edition doesn't include, in a customer's words (DECISIONS.md 710):
+ * each is a fact from Salesforce's own documentation, never inferred from a
+ * read that came back empty.
+ */
+export const EDITION_LACKS = ["the Metadata API", "s-controls", "Sites"] as const;
+export type EditionLack = (typeof EDITION_LACKS)[number];
+
+/**
+ * The sentence for a read the engine didn't make because the org's edition
+ * doesn't include what it reads (DECISIONS.md 710). `what` is as for
+ * refusalSentence: an object's API name, or one of READ_NAMES.
+ */
+export function editionSentence(what: string, lacks: EditionLack): string {
+  return `${what} wasn't read, because Professional Edition doesn't include ${lacks}.`;
+}
+
+/** Professional Edition has no Apex of the org's own (DECISIONS.md 710): the Apex step's sentence since before it. */
+export const NO_APEX_IN_EDITION = "Professional Edition has no Apex, so there's no code to check.";
+
+/** The metadata step's reason when the Tooling route failed too, on an org whose edition has no Metadata API (DECISIONS.md 710). */
+export const TOOLING_AFTER_EDITION = "Professional Edition doesn't include the Metadata API, and reading the same through the Tooling API didn't work either: ";
+
+/**
+ * Whether a not measurable reason says the org's edition is why (DECISIONS.md
+ * 710), wherever in it the sentence sits: a rule may put its own words first.
+ */
+export function editionIsWhy(reason: string): boolean {
+  return EDITION_ANYWHERE.test(reason) || reason.includes(NO_APEX_IN_EDITION) || reason.startsWith(TOOLING_AFTER_EDITION);
+}
+
 /** The org's limits, refused at connect. */
 export const LIMITS_NO_PERMISSION = "The org's limits weren't measured, because the person who connected Salesforce can't view Setup.";
 export const LIMITS_REFUSED = "The org's limits weren't measured, because Salesforce refused the read.";
@@ -63,8 +94,11 @@ const ENDINGS = Object.values(BECAUSE).map((b) => b.replace(/[.*+?^${}()|[\]\\]/
 const SENTENCE = new RegExp(`^(.+?) couldn't be read, because (?:${ENDINGS})\\.$`);
 const NOT_THERE = /^(.+?) isn't available in this org, or to the connected user\.$/;
 const UNFIT = /^[\d,]+ of the [\d,]+ (?:(?:won |lost |open )?deals|entries in the deals' stage history) Salesforce gave us weren't in a shape we could read, more than 1 in 100, so figures from them would mislead\.$/;
+const LACKS = EDITION_LACKS.map((l) => l.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+const EDITION = new RegExp(`^(.+?) wasn't read, because Professional Edition doesn't include (?:${LACKS})\\.$`);
+const EDITION_ANYWHERE = new RegExp(`wasn't read, because Professional Edition doesn't include (?:${LACKS})\\.`);
 const LOSS_FIELD = /^The loss reason field (.+?) isn't a text or picklist field, so it can't hold a reason and isn't read\.$/;
-const WHOLE: ReadonlySet<string> = new Set([LIMITS_NO_PERMISSION, LIMITS_REFUSED, DEALS_UNREAD]);
+const WHOLE: ReadonlySet<string> = new Set([LIMITS_NO_PERMISSION, LIMITS_REFUSED, DEALS_UNREAD, NO_APEX_IN_EDITION]);
 
 /**
  * The org's words in one of these sentences, as spans, or null when the text
@@ -73,7 +107,7 @@ const WHOLE: ReadonlySet<string> = new Set([LIMITS_NO_PERMISSION, LIMITS_REFUSED
  */
 export function refusalSpans(text: string): Array<{ start: number; end: number }> | null {
   if (WHOLE.has(text) || UNFIT.test(text)) return [];
-  const sentence = SENTENCE.exec(text) ?? NOT_THERE.exec(text);
+  const sentence = SENTENCE.exec(text) ?? NOT_THERE.exec(text) ?? EDITION.exec(text);
   if (sentence) {
     const what = sentence[1]!;
     if ((READ_NAMES as readonly string[]).includes(what)) return [];

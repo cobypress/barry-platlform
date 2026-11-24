@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { Calibration, RefusedRead } from "../schemas/index.ts";
 import { refusalSentence, type RefusalKind } from "../salesforce/refusal-words.ts";
-import { classifyError, isUnavailable, lastDelivery, type QueryApi, type QueryOptions, type SalesforceClient, type SalesforceError } from "../salesforce/client.ts";
+import { classifyError, isUnavailable, lastDelivery, NotInOrgError, type QueryApi, type QueryOptions, type SalesforceClient, type SalesforceError } from "../salesforce/client.ts";
 import type { ApexSourceStore } from "./apex-source.ts";
 import type { CodeLintTools } from "./code-lint.ts";
 
@@ -109,6 +109,8 @@ export function readName(source: SourceInfo): string {
  * value or a name, and none of that leaves the step's own read.
  */
 export function refusalReason(err: SalesforceError, given: string): string {
+  // Never sent, because the org's edition doesn't include it: nothing was refused, so nothing is noted (DECISIONS.md 710).
+  if (err instanceof NotInOrgError) return err.sentence;
   // Where we only know the kind of read, the object Salesforce named is better.
   const named = /sObject type '([A-Za-z][A-Za-z0-9_]*)' is not supported/.exec(err.message)?.[1];
   const what = named && !/^[A-Za-z][A-Za-z0-9_]*$/.test(given) ? named : given;

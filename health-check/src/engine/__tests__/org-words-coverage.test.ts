@@ -271,7 +271,8 @@ const NAME_LIKE: string[] = (() => {
     else if (Array.isArray(value)) value.forEach(add);
     else if (value && typeof value === "object") Object.values(value).forEach(add);
   };
-  [...extracts.values(), loadCalibration(), loadAnswers()].forEach(add);
+  // The org profile is our own words about the org (DECISIONS.md 710), never a name it chose.
+  [...[...extracts].filter(([id]) => id !== "org-profile").map(([, v]) => v), loadCalibration(), loadAnswers()].forEach(add);
   return [...all].filter((s) => s.length >= 5 && s.length <= 80 && /[A-Za-z]/.test(s) && !/^[A-Za-z0-9]{15,18}$/.test(s) && !/^\d{4}-\d\d/.test(s));
 })();
 

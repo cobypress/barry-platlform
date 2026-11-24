@@ -159,6 +159,35 @@ export function oneReadTransient(err: unknown): err is SalesforceError {
 /** Set by the run around each step on the worker's last delivery (DECISIONS.md 702). */
 export const lastDelivery = new AsyncLocalStorage<true>();
 
+/**
+ * A read the org profile says this org can't answer, so it was never sent
+ * (DECISIONS.md 710). It carries the code Salesforce would answer with, so
+ * every step treats it as it already treats that answer (a connection with no
+ * Metadata API reads through Tooling; an object not in the org costs its
+ * check), and our own sentence, which names the edition. It never reaches
+ * readsRefused: nothing was refused, the read wasn't made.
+ */
+export class NotInOrgError extends SalesforceError {
+  readonly sentence: string;
+  readonly capability: string;
+
+  constructor(code: "INSUFFICIENT_ACCESS" | "INVALID_TYPE", capability: string, sentence: string) {
+    super(400, code, "Not sent: the org profile says this org doesn't have it.");
+    this.name = "NotInOrgError";
+    this.capability = capability;
+    this.sentence = sentence;
+  }
+}
+
+/** A read the client is about to make, for the run's gate. */
+export type GatedRead = { kind: "query"; api: QueryApi; soql: string } | { kind: "retrieve"; types: string[] };
+
+/**
+ * Set by the run around each step once it knows the org (DECISIONS.md 710):
+ * given a read, the error to throw in its place, or null to send it.
+ */
+export const readGate = new AsyncLocalStorage<(read: GatedRead) => NotInOrgError | null>();
+
 /** True when the error costs only the read it came from (DECISIONS.md 702). */
 export function isUnavailable(err: unknown): err is SalesforceError {
   if (!(err instanceof SalesforceError)) return false;
@@ -464,6 +493,8 @@ export class SalesforceClient {
   /** One page at a time up to `maxRecords`. Aggregate queries return everything in one page. */
   async query<T>(soql: string, options: QueryOptions = {}): Promise<QueryResult<T>> {
     const api = options.api ?? "rest";
+    const skip = readGate.getStore()?.({ kind: "query", api, soql });
+    if (skip) throw skip;
     const records: T[] = [];
     let path: string | undefined = this.#queryPath(soql, api);
     let totalSize = 0;
@@ -585,6 +616,8 @@ export class SalesforceClient {
 
   /** Starts a retrieve, polls it and returns the unzipped text files by path. */
   async retrieveMetadata(types: MetadataMember[]): Promise<Record<string, string>> {
+    const skip = readGate.getStore()?.({ kind: "retrieve", types: types.map((t) => t.name) });
+    if (skip) throw skip;
     const typesXml = types
       .map((t) => `<met:types>${t.members.map((m) => `<met:members>${escapeXml(m)}</met:members>`).join("")}<met:name>${escapeXml(t.name)}</met:name></met:types>`)
       .join("");

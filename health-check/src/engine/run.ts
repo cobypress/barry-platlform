@@ -7,7 +7,7 @@ import { shareRepeatedValues } from "./share-values.ts";
 import { modulesFor } from "../domains/scope.ts";
 import { scoreDomains } from "../domains/scoring.ts";
 import type { DomainModule } from "../domains/types.ts";
-import { customObjectsExtractor, orgExtractor, setupAuditExtractor, type CustomObjectRow, type SetupAuditSummary } from "../extract/configuration.ts";
+import { customObjectsExtractor, orgExtractor, schemaExtractor, setupAuditExtractor, type ObjectSummary, type CustomObjectRow, type SetupAuditSummary } from "../extract/configuration.ts";
 import { FACTS_FILE, factsExtractor, type Facts } from "../extract/facts.ts";
 import { apexExtractor, metadataExtractor, type ApexData } from "../extract/automation.ts";
 import { apexSourceStore } from "../extract/apex-source.ts";
@@ -17,6 +17,7 @@ import { LINT_TOTALS_FILE, lintTotals } from "../extract/lint/totals.ts";
 import { componentChangesExtractor, type ComponentChangesData } from "../extract/component-changes.ts";
 import type { MetadataBundle } from "../extract/metadata-parse.ts";
 import { fieldDescribeExtractor } from "../extract/fields.ts";
+import { completeProfile, gateFor, orgProfileExtractor } from "../extract/org-profile.ts";
 import { buildInventory, errorClass, INVENTORY_FILE, inventoryExtractorsFor } from "../extract/inventory.ts";
 import { buildComplexity, COMPLEXITY_FILE } from "../complexity/read.ts";
 import { summariseFacts } from "../facts/summary.ts";
@@ -28,9 +29,9 @@ import { renderRawNotes } from "../notes/raw-notes.ts";
 import { ACTION_LISTS_FILE, buildActionLists } from "../actions/lists.ts";
 import { Pseudonymiser, UNKNOWN_USER, type PseudonymEntry } from "../privacy/pseudonymiser.ts";
 import { registerSharedNames } from "../privacy/names.ts";
-import { Run, type Calibration, type ManualAnswer, type RefusedRead, type RunScope, type RunStep } from "../schemas/index.ts";
+import { Run, type Calibration, type ManualAnswer, type OrgProfile, type RefusedRead, type RunScope, type RunStep, type SkippedRead } from "../schemas/index.ts";
 import { ApiBudget, BudgetStopError } from "../salesforce/budget.ts";
-import { classifyError, lastDelivery, runStoppedWords, SalesforceClient, SalesforceError } from "../salesforce/client.ts";
+import { classifyError, lastDelivery, readGate, runStoppedWords, SalesforceClient, SalesforceError } from "../salesforce/client.ts";
 import type { ConnectionProvider } from "../salesforce/connection.ts";
 import type { Transport } from "../salesforce/transport.ts";
 import { allFindings, allMetrics, analyse, type AnalysisOutput } from "./evaluate.ts";
@@ -157,6 +158,8 @@ export function collectExtractors(modules: DomainModule[], extra: Extractor[] = 
   const seen = new Map<string, Extractor>([
     [orgExtractor.id, orgExtractor],
     [fieldDescribeExtractor.id, fieldDescribeExtractor],
+    // What the org has, before any read it rules out (DECISIONS.md 710).
+    [orgProfileExtractor.id, orgProfileExtractor],
   ]);
   for (const module of modules) for (const extractor of module.extractors) if (!seen.has(extractor.id)) seen.set(extractor.id, extractor);
   for (const extractor of extra) if (!seen.has(extractor.id)) seen.set(extractor.id, extractor);
@@ -279,6 +282,10 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
   };
   run.status = "extracting";
   run.budget.stoppedReason = null;
+  // The profile run.json keeps, once its step has run or been reused, with every read it ruled out (DECISIONS.md 710).
+  const keepProfile = (profile: OrgProfile): void => {
+    run.orgProfile = { ...structuredClone(profile), skipped: run.orgProfile?.skipped ?? [] };
+  };
 
   for (const extractor of extractors) {
     let step = run.steps.find((s) => s.id === extractor.id);
@@ -289,6 +296,7 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
     const path = checkpointPath(dir, extractor.id);
     if (step.status === "done" && step.version === extractor.version && existsSync(path)) {
       extracts.set(extractor.id, shareRepeatedValues(readCheckpoint(path)));
+      if (extractor.id === orgProfileExtractor.id) keepProfile(extracts.get(extractor.id) as OrgProfile);
       log(`  ${extractor.id}: reused from checkpoint`);
       continue;
     }
@@ -300,13 +308,20 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
     }
     const before = budget.callsMade;
     const refused: RefusedRead[] = [];
+    const skipped: SkippedRead[] = [];
+    // Once the profile is known, a read it rules out isn't sent (DECISIONS.md 710).
+    const profile = extracts.get(orgProfileExtractor.id) as OrgProfile | undefined;
+    const gate = profile ? gateFor(profile, extractor.id, (s) => skipped.push(s)) : null;
     try {
       // Held for the whole analysis, so each repeated value is held once (DECISIONS.md 346).
       // A read Salesforce refused costs its checks, never the run; its code is kept for us (DECISIONS.md 702).
       // On the worker's last delivery, a transient fault of one read costs that read (DECISIONS.md 702).
-      const read = (): Promise<unknown> => (options.lastDelivery === true ? lastDelivery.run(true, () => extractor.run(ctx)) : extractor.run(ctx));
+      const delivered = (): Promise<unknown> => (options.lastDelivery === true ? lastDelivery.run(true, () => extractor.run(ctx)) : extractor.run(ctx));
+      const read = (): Promise<unknown> => (gate ? readGate.run(gate, delivered) : delivered());
       const output = shareRepeatedValues(await noteRefusals((r) => refused.push({ step: extractor.id, ...r }), read));
       keepRefused(run, refused, log);
+      if (extractor.id === orgProfileExtractor.id) keepProfile(output as OrgProfile);
+      keepSkipped(run, skipped, log);
       extracts.set(extractor.id, output);
       writeCheckpoint(path, output);
       for (const key of extractor.partialKeys ?? []) partial.clear(key);
@@ -391,6 +406,7 @@ export async function runHealthCheck(options: RunOptions): Promise<RunResult> {
   run.retrieveFallback = bundle?.status === "ok" ? bundle.data.retrieveFallback : undefined;
   const org = extracts.get(orgExtractor.id) as { status: string; data?: Array<{ IsSandbox: boolean; Name?: string }> };
   run.isSandbox = org.data?.[0]?.IsSandbox ?? false;
+  if (run.orgProfile) completeProfile(run.orgProfile, extracts.get(schemaExtractor.id) as Record<string, Sourced<ObjectSummary>> | undefined);
   // The company information in Setup is the name the customer goes by, unless one was given.
   run.customerRef ??= org.data?.[0]?.Name?.trim() || null;
   run.status = "analysing";
@@ -422,6 +438,16 @@ export function keepRefused(run: Run, refused: RefusedRead[], log: (message: str
     if (kept.length >= MAX_REFUSED && !(read.lost && !kept.some((k) => k.lost))) continue;
     kept.push(read);
     log(`  ${read.step}: ${read.lost ? "Salesforce didn't answer" : "Salesforce refused"} a read of ${read.read} (${read.code}, HTTP ${read.status}), so the checks it feeds are not measurable`);
+  }
+}
+
+/** Each read a step didn't make because the profile ruled it out, once, into run.json and the log (DECISIONS.md 710). */
+export function keepSkipped(run: Run, skipped: SkippedRead[], log: (message: string) => void): void {
+  if (!run.orgProfile) return;
+  for (const read of skipped) {
+    if (run.orgProfile.skipped.some((k) => k.step === read.step && k.read === read.read)) continue;
+    run.orgProfile.skipped.push(read);
+    log(`  ${read.step}: didn't read ${read.read}, as the org's edition doesn't include it (${read.capability})`);
   }
 }
 

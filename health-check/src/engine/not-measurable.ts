@@ -45,6 +45,9 @@ const SORTED: readonly Sorted[] = [
   { kind: "not_in_use", pattern: /^Salesforce Knowledge is switched off\b/ },
   // Apex: Organization.OrganizationType is Professional Edition, which has none.
   { kind: "not_in_use", pattern: /^Professional Edition has no Apex\b/ },
+  // S-controls and Sites: Salesforce's own guides say Professional Edition has neither (DECISIONS.md 710).
+  // Not the Metadata API: an edition without it can still have the flows it would have read.
+  { kind: "not_in_use", pattern: /^[^:]* wasn't read, because Professional Edition doesn't include (?:s-controls|Sites)\./ },
 
   // What was read can't support a fair figure: too few records, a field mostly
   // empty, or nothing at all. A read that found nothing is never "not in use":

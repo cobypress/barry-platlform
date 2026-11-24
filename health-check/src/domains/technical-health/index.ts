@@ -14,6 +14,7 @@ import { joinSaid, org, said, type Said } from "../../engine/org-words.ts";
 import { andList, grouped } from "../../engine/said-forms.ts";
 import { judgedTests, liveCode, loopsOverLimits } from "./code.ts";
 import { LINT_RULES } from "./lint.ts";
+import { editionSentence } from "../../salesforce/refusal-words.ts";
 
 // Technical health (roadmap 3.2): how sound the code is, read from set-up only.
 // Coverage, API versions and trigger counts moved here from automation with
@@ -335,7 +336,10 @@ const classicLeftovers: Rule = {
   domain: DOMAIN,
   title: "Set-up that only works in Salesforce Classic",
   evaluate(ctx): RuleResult | RuleResult[] {
-    const { links, scontrols, pages } = ctx.data(classicExtractor);
+    const classic = ctx.data(classicExtractor);
+    const { links, pages } = classic;
+    // Professional Edition has no s-controls (Tooling API "Scontrol"), so on it none is a fact, not a guess (DECISIONS.md 710).
+    const scontrols: typeof classic.scontrols = classic.scontrols.status !== "ok" && classic.scontrols.reason === editionSentence("Scontrol", "s-controls") ? { status: "ok", data: [], source: classic.scontrols.source, truncated: false } : classic.scontrols;
     if (links.status !== "ok") return { outcome: "not_measurable", reason: `Custom buttons and links couldn't be read: ${links.reason}`, evidence: [ctx.ev(links.source, { count: null })] };
     if (pages.status !== "ok") return { outcome: "not_measurable", reason: `Visualforce pages couldn't be read: ${pages.reason}`, evidence: [ctx.ev(pages.source, { count: null })] };
     const javascript = links.data.filter((l) => l.LinkType?.toLowerCase() === "javascript").sort((a, b) => a.Name.localeCompare(b.Name));

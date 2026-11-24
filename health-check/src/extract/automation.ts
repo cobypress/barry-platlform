@@ -1,4 +1,5 @@
-import { classifyError, isUnavailable, SalesforceError, type MetadataMember } from "../salesforce/client.ts";
+import { classifyError, isUnavailable, NotInOrgError, SalesforceError, type MetadataMember } from "../salesforce/client.ts";
+import { NO_APEX_IN_EDITION } from "../salesforce/refusal-words.ts";
 import { redactSecrets } from "../privacy/secrets.ts";
 import { scanApex, type ApexScan } from "./apex-scan.ts";
 import { selectApexSource, type SourceRow } from "./apex-source.ts";
@@ -106,7 +107,11 @@ export const metadataExtractor: Extractor<Sourced<MetadataBundle>> = {
       if (why === null) throw err;
       // Salesforce's own words for the first refusal are kept for us alone (DECISIONS.md 702).
       if (isUnavailable(retrieveError)) refusalReason(retrieveError, "The org's set-up from the Metadata API");
-      return { status: "unavailable", reason: `The Metadata API refused this connection, and reading the same through the Tooling API didn't work either: ${why}`, source: TOOLING_SOURCE };
+      // Named `.reason`, so the words before it are known as ours and a refusal sentence after them is too (DECISIONS.md 702).
+      const tooling = { reason: why };
+      // An edition with no Metadata API was never asked, so nothing refused it (DECISIONS.md 710).
+      if (retrieveError instanceof NotInOrgError) return { status: "unavailable", reason: `Professional Edition doesn't include the Metadata API, and reading the same through the Tooling API didn't work either: ${tooling.reason}`, source: TOOLING_SOURCE };
+      return { status: "unavailable", reason: `The Metadata API refused this connection, and reading the same through the Tooling API didn't work either: ${tooling.reason}`, source: TOOLING_SOURCE };
     }
   },
 };
@@ -263,7 +268,7 @@ export const apexExtractor: Extractor<ApexData> = {
     const org = ctx.get(orgExtractor);
     const edition = org?.status === "ok" ? org.data[0]?.OrganizationType : undefined;
     const noApex = <T>(rows: Sourced<T>): Sourced<T> =>
-      rows.status === "unavailable" && edition === "Professional Edition" && /isn't available in this org/.test(rows.reason) ? { ...rows, reason: "Professional Edition has no Apex, so there's no code to check." } : rows;
+      rows.status === "unavailable" && edition === "Professional Edition" && /isn't available in this org/.test(rows.reason) ? { ...rows, reason: NO_APEX_IN_EDITION } : rows;
     const classRows = stripBodies(classes.rows, "ApexClass", references);
     const triggerRows = stripBodies(triggers.rows, "ApexTrigger", references);
     // Kept only once every page of both is read, so a step stopped part way and
