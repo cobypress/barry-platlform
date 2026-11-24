@@ -50,15 +50,16 @@ export function comparable<T extends PathDeal>(ctx: Ctx, p: { closed: T[] } | Pi
   return deals.filter((d) => localDay(new Date(d.deal.CreatedDate), zone) >= historyStart);
 }
 
-/** Every deal with a recorded open stage, open or closed, whenever it closed, and how many were left out as made before the history starts. */
-export function cohortDeals(ctx: Ctx, data: Ready): { deals: CohortDeal[]; beforeHistory: number } {
+/** Every deal with a recorded open stage, open or closed, whenever it closed, and those left out as made before the history starts. */
+export function cohortDeals(ctx: Ctx, data: Ready): { deals: CohortDeal[]; beforeHistory: number; before: CohortDeal[] } {
   const open = (stage: string): boolean => data.stages.categoryOf(stage) === "open";
   const all: CohortDeal[] = data.deals.filter((d) => hasOpenStage(d, data)).map((deal) => {
     const isOpen = deal.category === "open";
     return { id: deal.Id, deal, path: openPathOf(deal, data.stages), won: deal.category === "won", days: isOpen ? 0 : daysToClose(deal), open: isOpen, reachedAt: reachedTimes(deal, open), closedAtMs: isOpen ? null : deal.closedAt.getTime() };
   });
   const deals = comparable(ctx, { closed: all }, data.historyStart);
-  return { deals, beforeHistory: all.length - deals.length };
+  const kept = new Set(deals);
+  return { deals, beforeHistory: all.length - deals.length, before: all.filter((d) => !kept.has(d)) };
 }
 
 /** The calendar day `days` after `day`. */
@@ -69,7 +70,7 @@ export type Period = {
   stage: string;
   /** Days within which LAG_QUANTILE of the closed deals that reached it had closed; null with none closed. */
   lagDays: number | null;
-  /** The period: reached the stage from `from` to `to`. Null when no day fits. */
+  /** The period: reached the stage (or made) from `from` to `to`. Null when no day fits. `to` is still set then, so a reason can say why. */
   from: string | null;
   to: string | null;
   /** Deals that reached it in the period, open or closed, and the closed ones. */
@@ -78,28 +79,38 @@ export type Period = {
   open: number;
   /** More than OPEN_SHARE of the period's deals still open. */
   tooOpen: boolean;
-  /** The local day a deal reached the stage. */
+  /** The local day a deal reached the stage (or was made). */
   dayOf: (d: CohortDeal) => string;
+  /** Deals made before the stage history starts that reached the stage in the period: left out, so a sentence must say so. */
+  leftOut: number;
+  /** The day the period would start: the window's start, or the stage history's if later. */
+  start: string;
 };
 
 /**
  * A stage's period and the deals that reached it in it. `by`: when a deal enters
  * the period, on the day it reached the stage (706) or on the day it was created,
- * for a comparison whose sides could reach the stage at different speeds.
+ * for a comparison whose sides could reach the stage at different speeds. The
+ * period starts at the window's start, or the day the stage history starts if
+ * that is later (712): before it, no deal can be seen reaching a stage, and the
+ * deals made before it are left out (`history.before`, counted in `leftOut`).
  */
-export function periodOf(ctx: Ctx, deals: CohortDeal[], stage: string, by: "reached" | "created" = "reached"): Period {
+export function periodOf(ctx: Ctx, deals: CohortDeal[], stage: string, by: "reached" | "created", history: { start: string | null; before: CohortDeal[] }): Period {
   const zone = zoneOf(ctx);
   const there = deals.filter((d) => reached(d, stage));
   const startOf = (d: CohortDeal): number => (by === "reached" ? d.reachedAt.get(stage)! : new Date(d.deal.CreatedDate).getTime());
   const durations = there.filter((d) => d.closedAtMs !== null).map((d) => Math.max(0, (d.closedAtMs! - startOf(d)) / DAY));
   const lagDays = durations.length ? Math.ceil(quantile(durations, LAG_QUANTILE)) : null;
   const to = lagDays === null ? null : localDay(new Date(ctx.now.getTime() - lagDays * DAY), zone);
-  const from = to !== null && to >= ctx.window.from ? ctx.window.from : null;
+  const start = history.start !== null && history.start > ctx.window.from ? history.start : ctx.window.from;
+  const from = to !== null && to >= start ? start : null;
   const dayOf = (d: CohortDeal): string => localDay(new Date(startOf(d)), zone);
-  const cohort = from && to ? there.filter((d) => dayOf(d) >= from && dayOf(d) <= to) : [];
+  const inside = (d: CohortDeal): boolean => from !== null && to !== null && dayOf(d) >= from && dayOf(d) <= to;
+  const cohort = there.filter(inside);
   const closed = cohort.filter((d) => !d.open);
   const open = cohort.length - closed.length;
-  return { stage, lagDays, from, to, cohort, closed, open, tooOpen: cohort.length > 0 && open > OPEN_SHARE * cohort.length, dayOf };
+  const leftOut = history.before.filter((d) => reached(d, stage) && inside(d)).length;
+  return { stage, lagDays, from, to, cohort, closed, open, tooOpen: cohort.length > 0 && open > OPEN_SHARE * cohort.length, dayOf, leftOut, start };
 }
 
 const MONTHS: ReadonlyArray<() => Said> = [

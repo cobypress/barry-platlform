@@ -187,7 +187,7 @@ describe("the insights: each side reached the same point, and raised only above 
     assert.equal(f!.title, "Deals that skipped Discovery were won more often than deals that went through it");
     assert.equal(
       f!.summary,
-      "Of the 90 deals created between 31 October 2024 and 1 September 2026 that reached Proposal, the 30 that skipped Discovery were won 83.3% of the time, against 50% of the 60 that went through it. We couldn't check this within teams, record types or other groups: these deals couldn't be split into groups big enough to compare on both sides. This shows how often they went together, not that one is the reason for the other.",
+      "Of the 90 deals created between 1 April 2025 and 1 September 2026 that started before Discovery and reached Proposal, the 30 that skipped Discovery were won 83.3% of the time, against 50% of the 60 that went through it. We couldn't check this within teams, record types or other groups: these deals couldn't be split into groups big enough to compare on both sides. This shows how often they went together, not that one is the reason for the other.",
     );
     assert.doesNotMatch(`${f!.title} ${f!.summary} ${f!.recommendation}`, /because|caus|usual path/i);
     assert.doesNotMatch(f!.recommendation, /left out|leave/);
@@ -241,6 +241,24 @@ describe("the insights: each side reached the same point, and raised only above 
     assert.ok(Math.abs(zOf({ n: 30, won: 25 }, { n: 60, won: 30 }) - 3.06) < 0.01);
   });
 
+  test("two comparisons tried raise the bar for both: a gap at z 2.21 is said alone, not beside a second comparison (decision 712)", () => {
+    // 21 of 28 skippers won against 30 of 60 through Discovery: z 2.21, past one comparison's 2.15, under two's 2.25.
+    const skippers = deals(28, SKIPS_DISCOVERY, 21, 60);
+    assert.equal(comparisons(analysed([...through(), ...skippers]).findings).length, 1);
+    // Twenty more that skipped Proposal, won half the time: a second comparison tried, with no gap of its own.
+    const both = analysed([...through(), ...skippers, ...deals(20, ["Prospecting", "Discovery", "Negotiation"], 10, 60)]).findings;
+    assert.equal(comparisons(both).length, 0);
+    assert.equal(both[0]!.facts.tried, 2);
+    assert.equal(zBar(2), 2.25);
+  });
+
+  test("the period ends where 90% of the deals had closed, not half of them (decision 712)", () => {
+    // 60 deals closed 60 days after they were made, 30 after 120: the 90th percentile is 120 days, so the period ends
+    // 120 days before the run (3 July 2026); at the median it would end 60 days before (1 September).
+    const [f] = comparisons(analysed([...through(), ...deals(30, SKIPS_DISCOVERY, 25, 120)]).findings);
+    assert.match(f!.summary, /^Of the 90 deals created between 1 April 2025 and 3 July 2026 that started before Discovery and reached Proposal,/);
+  });
+
   test("with segments that can check it, the gap must point the same way in most; confidence follows the sides", () => {
     // New and Renewal, each in type, lead source and record type: six segments, none holding 90% of a side.
     const agreeing = [...deals(40, USUAL, 20, 60, "New"), ...deals(40, USUAL, 20, 60, "Renewal"), ...deals(25, SKIPS_DISCOVERY, 20, 60, "New"), ...deals(25, SKIPS_DISCOVERY, 20, 60, "Renewal")];
@@ -250,7 +268,7 @@ describe("the insights: each side reached the same point, and raised only above 
     // Turned round in one of the two record types (and so in half the six segments): no majority.
     const split = [...deals(40, USUAL, 20, 60, "New"), ...deals(40, USUAL, 30, 60, "Renewal"), ...deals(25, SKIPS_DISCOVERY, 25, 60, "New"), ...deals(25, SKIPS_DISCOVERY, 15, 60, "Renewal")];
     assert.equal(comparisons(analysed(split).findings).length, 0);
-    const c = (n: number): Comparison => ({ reached: "x", group: { deals: [], n, won: 1, rate: 1 }, other: { deals: [], n: 100, won: 1, rate: 1 }, gap: 20, z: 3, from: "2024-10-31", to: "2026-01-01", open: { group: 0, other: 0 }, low: { gap: 20, z: 3 }, high: { gap: 20, z: 3 }, days: null, compared: 2, held: 2, types: { many: false, compared: 0, held: 0 } });
+    const c = (n: number): Comparison => ({ reached: "x", group: { deals: [], n, won: 1, rate: 1 }, other: { deals: [], n: 100, won: 1, rate: 1 }, gap: 20, z: 3, from: "2024-10-31", to: "2026-01-01", open: { group: 0, other: 0 }, low: { gap: 20, z: 3, cmh: 3 }, high: { gap: 20, z: 3, cmh: 3 }, days: null, compared: 2, held: 2, types: { many: false, compared: 0, held: 0 } });
     const ctx = { calibration: { minSample: 20 } } as Parameters<typeof confidenceOf>[0];
     assert.equal(confidenceOf(ctx, c(39)), "medium");
     assert.equal(confidenceOf(ctx, c(40)), "high");
@@ -264,16 +282,26 @@ describe("the insights: each side reached the same point, and raised only above 
     assert.equal(rest.length, 0, rest.map((x) => x.title).join("; "));
     assert.deepEqual(f!.subjects.map((x) => x.label), ["Discovery", "Prospecting"]);
     assert.equal(f!.title, "Deals sent back from Discovery to Prospecting were won less often than the rest that reached Discovery");
-    assert.match(f!.summary, /^Of the 90 deals created between 31 October 2024 and 1 September 2026 that reached Discovery, the 30 sent back to Prospecting were won 40% of the time, against 75% of the rest\./);
+    assert.match(f!.summary, /^Of the 90 deals created between 1 April 2025 and 1 September 2026 that reached Discovery, the 30 sent back to Prospecting were won 40% of the time, against 75% of the rest\./);
   });
 
-  test("a lost deal's last move back closes it out: not rework, in neither side, and counted in the table", () => {
-    const { findings, metric } = analysed([...through(30), ...deals(30, ["Prospecting", "Discovery", "Prospecting"], 0, 60)]);
+  test("a last move back on closing closes the deal out, won or lost alike: not rework, in neither side, and counted in the table", () => {
+    // Prospecting, Discovery 30 days later, back to Prospecting 30 days after that, and closed the same day.
+    const { findings, metric } = analysed([...through(30), ...deals(30, ["Prospecting", "Discovery", "Prospecting"], 0, 60).map((d) => ({ ...d, gapDays: 30 }))]);
     assert.equal(comparisons(findings).length, 0);
-    assert.ok(metric.assumptions.includes("30 lost deals whose last move was back to an earlier stage aren't counted as sent back: that move closed them out"));
-    assert.equal(closingOut(pd(["Prospecting", "Discovery", "Prospecting"], false, 1)), true);
-    assert.equal(closingOut(pd(["Prospecting", "Discovery", "Prospecting"], true, 1)), false);
-    assert.equal(closingOut(pd(REWORK, false, 1)), false);
+    assert.ok(metric.assumptions.includes("30 deals whose last move, back to an earlier stage, came within a day of their close aren't counted as sent back: that move closed them out"));
+    // Decided on timing alone (decision 712): a won deal is closed out the same way, and a move back a month before closing is rework.
+    const closedAfter = (path: string[], won: boolean, days: number): PathDeal => {
+      const t0 = Date.parse("2025-04-01T09:00:00Z");
+      const history = path.map((StageName, k) => ({ StageName, CreatedDate: new Date(t0 + k * 30 * DAY).toISOString() }));
+      return { ...pd(path, won, 1), deal: { history, closedAt: new Date(t0 + (path.length - 1) * 30 * DAY + days * DAY) } as unknown as Deal };
+    };
+    const back = ["Prospecting", "Discovery", "Prospecting"];
+    assert.equal(closingOut(closedAfter(back, false, 0.5)), true);
+    assert.equal(closingOut(closedAfter(back, true, 0.5)), true);
+    assert.equal(closingOut(closedAfter(back, false, 30)), false);
+    assert.equal(closingOut(closedAfter(back, true, 30)), false);
+    assert.equal(closingOut(closedAfter(REWORK, false, 0)), false);
   });
 });
 
@@ -289,14 +317,43 @@ describe("who is compared: the deals made in the period that reached the stage, 
     // Ten more skippers, all lost, made 30 days before the run and closed 5 days before it: inside the lag.
     const late = deals(10, SKIPS_DISCOVERY, 0, 25).map((d) => ({ ...d, createdAt: RUN - 30 * DAY }));
     const [f] = comparisons(analysed([...through(), ...deals(30, SKIPS_DISCOVERY, 25, 60), ...late]).findings);
-    assert.match(f!.summary, /^Of the 90 deals created between 31 October 2024 and \d+ \w+ 2026 that reached Proposal, the 30 that skipped Discovery were won 83\.3% of the time/);
+    assert.match(f!.summary, /^Of the 90 deals created between 1 April 2025 and \d+ \w+ 2026 that started before Discovery and reached Proposal, the 30 that skipped Discovery were won 83\.3% of the time/);
   });
 
   test("chosen by the day a deal was made, not the day it reached the stage: deals made before the window aren't compared", () => {
     // Twenty more skippers, all lost, made six weeks before the window starts and reaching Proposal 60 days later, inside it.
     const early = deals(20, SKIPS_DISCOVERY, 0, 150).map((d) => ({ ...d, createdAt: Date.parse("2024-09-15T09:00:00Z"), gapDays: 60 }));
     const [f] = comparisons(analysed([...through(), ...deals(30, SKIPS_DISCOVERY, 25, 60), ...early]).findings);
-    assert.match(f!.summary, /^Of the 90 deals created between 31 October 2024 and \d+ \w+ 2026 that reached Proposal, the 30 that skipped Discovery/);
+    assert.match(f!.summary, /^Of the 90 deals created between 31 October 2024 and \d+ \w+ 2026 that started before Discovery and reached Proposal, the 30 that skipped Discovery/);
+  });
+
+  // Decision 712: nothing raised is never stored as "no difference". Each state says what we could and couldn't tell.
+  test("compared and nothing clears: we couldn't tell, and the smallest gap these deals could have shown", () => {
+    const findings = analysed([...through(), ...deals(30, SKIPS_DISCOVERY, 17, 60)]).findings;
+    assert.equal(comparisons(findings).length, 0);
+    // 47 of 90 won, 30 against 60: a standard error of 11.2 points, times the bar of 2.15, is 24.0, said as 25.
+    assert.equal(
+      pass(findings).summary,
+      "We couldn't tell whether skipping a stage or being sent back went with winning more or less often. In the 1 comparison we could make, between deals that reached the same point, a gap in win rate would have had to be about 25 points or more to tell it from chance, and none was, so a smaller difference may be there unseen.",
+    );
+  });
+
+  test("nothing to compare: no deal skipped a stage of the usual path or was sent back", () => {
+    assert.equal(pass(analysed(deals(40, USUAL, 20, 60)).findings).summary, "No deal skipped a stage of the usual path or was sent back to an earlier stage, so there was nothing to compare.");
+  });
+
+  test("too few won and lost: said so, and only that", () => {
+    assert.equal(pass(analysed([...through(), ...deals(8, SKIPS_DISCOVERY, 4, 60)]).findings).summary, "No skipped stage or move back had enough won and lost deals on both sides, among deals that reached the same point, to compare.");
+  });
+
+  test("deals take longer to close than the period allows: said so, with the day the period would start", () => {
+    // Made in May 2024 and closed some 900 days later: 90% took 900 days, so the period would end before the window starts.
+    const made = Date.parse("2024-05-01T09:00:00Z");
+    const slow = [...through(), ...deals(30, SKIPS_DISCOVERY, 25, 60)].map((d, i) => ({ ...d, days: 900, createdAt: made + i * 3_600_000 }));
+    assert.equal(
+      pass(analysed(slow).findings).summary,
+      "We couldn't compare any skipped stage or move back. Deals that reached Proposal took so long to close that none made since 31 October 2024 has had time to, so none could be counted yet.",
+    );
   });
 
   test("more than 5% of the period still open: not compared, and the pass says which stage and why", () => {
@@ -304,14 +361,14 @@ describe("who is compared: the deals made in the period that reached the stage, 
     assert.equal(comparisons(findings).length, 0);
     assert.equal(
       pass(findings).summary,
-      "No skipped stage or move back could be compared. Of the deals made early enough to compare that reached Proposal, too many are still open. No other had enough won and lost deals on both sides, among deals that reached the same point.",
+      "We couldn't compare any skipped stage or move back. Of the deals made early enough to compare that reached Proposal, too many are still open.",
     );
   });
 
   test("the few still open are counted both ways, and both must clear: one open skipper is said, three hold it back", () => {
     // Closed alone, 23 of 30 skippers won against 30 of 60: z 2.42. With the open as lost, z 2.22 with one and 1.85 with three.
     const [f] = comparisons(analysed([...through(), ...deals(30, SKIPS_DISCOVERY, 23, 60), ...open(1, SKIPS_DISCOVERY)]).findings);
-    assert.match(f!.summary, /^Of the 91 deals created between 31 October 2024 and 1 September 2026 that reached Proposal, 1 is still open\. Of the other 90, the 30 that skipped Discovery were won 76\.7% of the time, against 50% of the 60 that went through it\./);
+    assert.match(f!.summary, /^Of the 91 deals created between 1 April 2025 and 1 September 2026 that started before Discovery and reached Proposal, 1 is still open\. Of the other 90, the 30 that skipped Discovery were won 76\.7% of the time, against 50% of the 60 that went through it\./);
     assert.equal(f!.facts.open, 1);
     assert.equal(comparisons(analysed([...through(), ...deals(30, SKIPS_DISCOVERY, 23, 60), ...open(3, SKIPS_DISCOVERY)]).findings).length, 0);
     const several = analysed([...through(), ...deals(30, SKIPS_DISCOVERY, 25, 60), ...open(2, SKIPS_DISCOVERY), ...open(2, USUAL)]).findings;
@@ -319,11 +376,11 @@ describe("who is compared: the deals made in the period that reached the stage, 
   });
 
   test("a send-back's sentence says the lost deals its last move closed out are left out, every count adding up", () => {
-    const closedOut = deals(4, ["Prospecting", "Discovery", "Prospecting"], 0, 60);
+    const closedOut = deals(4, ["Prospecting", "Discovery", "Prospecting"], 0, 60).map((d) => ({ ...d, gapDays: 30 }));
     const [f] = comparisons(analysed([...through(45), ...deals(30, REWORK, 12, 60), ...closedOut]).findings);
-    assert.match(f!.summary, /^Of the 94 deals created between 31 October 2024 and 1 September 2026 that reached Discovery, 4 lost deals whose last move back to Prospecting closed them out are left out\. Of the other 90, the 30 sent back to Prospecting were won 40% of the time, against 75% of the rest\./);
+    assert.match(f!.summary, /^Of the 94 deals created between 1 April 2025 and 1 September 2026 that reached Discovery, 4 whose last move, back to Prospecting on closing, closed them out are left out\. Of the other 90, the 30 sent back to Prospecting were won 40% of the time, against 75% of the rest\./);
     const [g] = comparisons(analysed([...through(45), ...deals(30, REWORK, 12, 60), ...closedOut.slice(0, 1), ...open(1, USUAL)]).findings);
-    assert.match(g!.summary, /^Of the 92 deals created between 31 October 2024 and 1 September 2026 that reached Discovery, 1 lost deal whose last move back to Prospecting closed it out is left out, and 1 is still open\. Of the other 90,/);
+    assert.match(g!.summary, /^Of the 92 deals created between 1 April 2025 and 1 September 2026 that reached Discovery, 1 whose last move, back to Prospecting on closing, closed it out is left out, and 1 is still open\. Of the other 90,/);
   });
 });
 
@@ -348,7 +405,7 @@ describe("the review's probes", () => {
   });
   test("7 a lost deal's closing-out move back isn't counted with the deals really sent back", () => {
     // Sent back and on: 30, 22 won (73%); the rest through Discovery 75%. Thirty more closed out by a move back are in neither.
-    none([...many(60, [A, B, C, D], 45, 45, 60), ...many(30, [A, B, A, B, C, D], 22, 50, 65), ...many(30, [A, B, A], 0, 30)]);
+    none([...many(60, [A, B, C, D], 45, 45, 60), ...many(30, [A, B, A, B, C, D], 22, 50, 65), ...many(30, [A, B, A], 0, 30, 30, { gapDays: 15 })]);
   });
   test("1b rework: deals sent back are won as often as the rest that reached the stage", () => {
     const RW = [A, B, A, B];
@@ -449,7 +506,7 @@ describe("stage names are marked as the org's words", () => {
       const marked = spans.map((s) => f![key].slice(s.start, s.end));
       assert.ok(marked.every((w) => USUAL.includes(w)), `${key}: ${marked.join(", ")}`);
     }
-    assert.deepEqual(f!.orgWords!.summary!.spans.map((s) => f!.summary.slice(s.start, s.end)), ["Proposal", "Discovery"]);
+    assert.deepEqual(f!.orgWords!.summary!.spans.map((s) => f!.summary.slice(s.start, s.end)), ["Discovery", "Proposal", "Discovery"]);
   });
 
   test("the usual path in the metric's assumptions is marked as a label, and the pass is said", () => {
@@ -491,7 +548,12 @@ describe("noise on dated deals: arrivals growing or shrinking, wins and losses c
   };
   type Dated = { path: string[]; won: boolean; at: number; enter: number[]; closedAt: number | null; segment: string; owner: number };
   /** How a skip changes time: every skipper's later stages `save` days sooner; only a won one's; or a won one closes in half the time. */
-  type Kind = "both" | "won-reach" | "won-close";
+  /**
+   * How a skip ties to time: every skipper's later stages `save` days sooner; only a won one's; a won one closing in half
+   * the time; or the mix changing over time: a year before the run deals skip less and are won less (`drift`), or both
+   * swing with the month (`season`). Outcome and skip stay independent at any one time.
+   */
+  type Kind = "both" | "won-reach" | "won-close" | "drift" | "season";
   function datedOrg(n: number, growth: number, win: number, loss: number, save: number, kind: Kind): Dated[] {
     const out: Dated[] = [];
     const r = Math.log(growth) / 365;
@@ -499,14 +561,18 @@ describe("noise on dated deals: arrivals growing or shrinking, wins and losses c
     for (let made = 0; out.length < n && made < n * 200; made++) {
       const at = RUN - rnd() * SPAN * DAY;
       if (rnd() * peak > Math.exp(r * ((at - RUN) / DAY + SPAN))) continue;
+      const late = at > RUN - 365 * DAY;
+      const swing = kind === "season" ? 0.15 * Math.sin((2 * Math.PI * new Date(at).getUTCMonth()) / 12) : 0;
+      const winAt = kind === "drift" ? (late ? 0.55 : 0.85) : 0.7 + swing;
+      const skipShare = kind === "drift" ? (late ? 0.1 : 0.5) : 0.3 + swing;
       const path = [A];
       let won = false;
-      for (const [k, on] of [20 / 30, 30 / 50, 50 / 70, 0.7].entries()) {
+      for (const [k, on] of [20 / 30, 30 / 50, 50 / 70, winAt].entries()) {
         if (rnd() >= on) break;
         if (k === 3) won = true;
         else path.push([B, C, D][k]!);
       }
-      const skip = path.length >= 3 && rnd() < 0.3;
+      const skip = path.length >= 3 && rnd() < skipShare;
       const saved = kind === "won-reach" && !won ? 0 : save;
       const timed = path.map((stage, k) => ({ stage, t: at + k * GAP * DAY })).filter((x) => !skip || x.stage !== B).map((x) => (skip && x.t > at + GAP * DAY ? { ...x, t: x.t - saved * DAY } : x));
       const closedAt = timed.at(-1)!.t - Math.log(1 - rnd()) * (won ? (kind === "won-close" && skip ? win / 2 : win) : loss) * DAY;
@@ -542,28 +608,37 @@ describe("noise on dated deals: arrivals growing or shrinking, wins and losses c
   }
   // The rule alone, so the grid runs in seconds: nothing else in the module reads what it says.
   const only = { ...historicPipelineModule, metrics: [], rules: [pathInsights] };
-  const TRIALS = 150;
-  // The last two tie time to path and outcome together. Only the won skippers reach Proposal sooner, by 40 days: chosen
-  // by close date, 12.8% of 1,000 orgs got a false "won less often"; by the day they reached the stage, 7.5%. Only the
-  // won skippers close in half the time: by close date, 59% of 1,000 orgs.
-  const CELLS: ReadonlyArray<readonly [number, number, number, number, Kind]> = [
-    [2, 180, 30, 20, "both"],
-    [0.25, 30, 180, 20, "both"],
-    [3, 180, 30, 20, "both"],
-    [1, 180, 90, 20, "both"],
-    [0.5, 30, 30, 20, "both"],
-    [1, 30, 180, 20, "both"],
-    [0.25, 30, 30, 40, "won-reach"],
-    [0.25, 180, 90, 0, "won-close"],
+  // Tied to time and outcome together: only the won skippers reach Proposal sooner, by 40 days (by close date, 12.8% of
+  // 1,000 orgs got a false "won less often"; by the day they reached the stage, 7.3% of 600; by the day made, 2.7%),
+  // or close in half the time (by close date, 59%). The mix changing over time: before the bands (decision 712), a
+  // year of fewer skips and fewer wins made a false "won more often" in 8 to 17% of orgs, and a season in 6.7%.
+  // 150 orgs a cell can't tell 3% from 5% (a cell at a true 3.2% reaches 8 of 150 about one time in 9), so most cells
+  // are held under 10%, and the 2,250 orgs together at most 5%; the cells that tell one way of choosing deals from
+  // another run more orgs and are held at 5%.
+  const CELLS: ReadonlyArray<readonly [number, number, number, number, Kind, number, number]> = [
+    [2, 180, 30, 20, "both", 150, 0.1],
+    [0.25, 30, 180, 20, "both", 150, 0.1],
+    [3, 180, 30, 20, "both", 150, 0.1],
+    [1, 180, 90, 20, "both", 150, 0.1],
+    [0.5, 30, 30, 20, "both", 150, 0.1],
+    [1, 30, 180, 20, "both", 150, 0.1],
+    [0.25, 30, 30, 40, "won-reach", 600, 0.05],
+    [0.25, 180, 90, 0, "won-close", 150, 0.1],
+    [3, 90, 90, 0, "drift", 300, 0.05],
+    [0.25, 90, 90, 0, "season", 300, 0.05],
   ];
-  const how = { both: (save: number) => `skippers ${save} days sooner`, "won-reach": (save: number) => `won skippers reaching it ${save} days sooner`, "won-close": () => "won skippers closing in half the time" };
-  // 150 orgs a cell can't tell 3% from 5% (a cell at a true 3.2% reaches 8 of 150 about one time in 9), so the bar is
-  // on the 1,200 orgs together, at most 5%, and each cell is held under 10%, which a cell at 3.2% passes all but once in
-  // 10,000 times and a cell where the choice of deals made a gap would not.
+  const how: Record<Kind, (save: number) => string> = {
+    both: (save) => `skippers ${save} days sooner`,
+    "won-reach": (save) => `won skippers reaching it ${save} days sooner`,
+    "won-close": () => "won skippers closing in half the time",
+    drift: () => "skips and wins both fewer in the last year",
+    season: () => "skips and wins both swinging with the month",
+  };
   let all = 0;
-  for (const [growth, win, loss, save, kind] of CELLS) {
+  let orgs = 0;
+  for (const [growth, win, loss, save, kind, TRIALS, limit] of CELLS) {
     test(`growth ${growth}x a year, wins closing at ${win} days and losses at ${loss}, 1,000 deals, ${how[kind](save)}`, () => {
-      seed = 12_000_000 + growth * 100_000 + win * 1_000 + loss + (kind === "won-reach" ? 7 : kind === "won-close" ? 11 : 0);
+      seed = 12_000_000 + growth * 100_000 + win * 1_000 + loss + { both: 0, "won-reach": 7, "won-close": 11, drift: 13, season: 17 }[kind];
       let any = 0;
       const ways: Record<string, number> = {};
       for (let t = 0; t < TRIALS; t++) {
@@ -572,13 +647,14 @@ describe("noise on dated deals: arrivals growing or shrinking, wins and losses c
         for (const f of raised) ways[/more often/.test(f.title) ? "more" : "less"] = (ways[/more often/.test(f.title) ? "more" : "less"] ?? 0) + 1;
       }
       all += any;
-      console.log(`dated noise growth=${growth} win=${win} loss=${loss}: ${any} of ${TRIALS} orgs ${JSON.stringify(ways)}`);
-      assert.ok(any < TRIALS * 0.1, `${any} of ${TRIALS}`);
+      orgs += TRIALS;
+      console.log(`dated noise growth=${growth} win=${win} loss=${loss} ${kind}: ${any} of ${TRIALS} orgs ${JSON.stringify(ways)}`);
+      assert.ok(limit === 0.1 ? any < TRIALS * limit : any <= TRIALS * limit, `${any} of ${TRIALS}`);
     });
   }
   test("every cell together: at most 5% of orgs", () => {
-    console.log(`dated noise, every cell: ${all} of ${TRIALS * CELLS.length} orgs`);
-    assert.ok(all <= TRIALS * CELLS.length * 0.05, `${all} of ${TRIALS * CELLS.length}`);
+    console.log(`dated noise, every cell: ${all} of ${orgs} orgs`);
+    assert.ok(all <= orgs * 0.05, `${all} of ${orgs}`);
   });
 });
 

@@ -116,6 +116,8 @@ export type StageFigures = {
   ways: Way[];
   types: { many: boolean; compared: number; held: number };
   named: boolean;
+  /** Deals made before the stage history starts that reached it in the period, left out (712). */
+  leftOut: number;
 };
 
 export type Loaded =
@@ -230,8 +232,8 @@ export function loadProbabilities(ctx: Ctx): Loaded {
 
 
 /** One stage's deals in its period, and its figures but for the bars that count every stage tested. */
-function stageOf(ctx: Ctx, s: { stage: string; probability: number | null }, deals: CohortDeal[]) {
-  const { lagDays, from, to, cohort, closed, open, tooOpen, dayOf } = periodOf(ctx, deals, s.stage);
+function stageOf(ctx: Ctx, s: { stage: string; probability: number | null }, deals: CohortDeal[], history: { start: string | null; before: CohortDeal[] }) {
+  const { lagDays, from, to, cohort, closed, open, tooOpen, dayOf, leftOut } = periodOf(ctx, deals, s.stage, "reached", history);
   const won = closed.filter((d) => d.won).length;
   const { minSample } = ctx.calibration;
   const untested =
@@ -245,7 +247,7 @@ function stageOf(ctx: Ctx, s: { stage: string; probability: number | null }, dea
   const span = from && to ? Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000) : 0;
   const bounds = from && to ? Array.from({ length: PARTS }, (_, k) => ({ from: k === 0 ? from : dayPlus(from, Math.floor((span * k) / PARTS) + 1), to: k === PARTS - 1 ? to : dayPlus(from, Math.floor((span * (k + 1)) / PARTS)) })) : null;
   const partDeals = bounds ? bounds.map((b) => ({ ...b, deals: closed.filter((d) => dayOf(d) >= b.from && dayOf(d) <= b.to) })) : null;
-  return { ...s, lagDays, from, to, cohort: cohort.length, open, closed, partDeals, reached: closed.length, won, share: pct(won, closed.length), tooOpen, untested, testable: untested === null };
+  return { ...s, lagDays, from, to, cohort: cohort.length, open, closed, partDeals, leftOut, reached: closed.length, won, share: pct(won, closed.length), tooOpen, untested, testable: untested === null };
 }
 
 /** A part of the period, and whether it shows the gap alone: on the same side, with the setting outside its own interval. */
@@ -275,7 +277,7 @@ function build(ctx: Ctx, data: PipelineData): Loaded {
     return nm(said`Stage history isn't tracked for these deals: none of the ${closedAll.length} deals that closed in the window has a recorded open stage.`);
   }
   // Every deal with a recorded open stage, open or closed, whenever it closed: each stage picks its own by when they reached it.
-  const { deals, beforeHistory } = cohortDeals(ctx, data);
+  const { deals, beforeHistory, before } = cohortDeals(ctx, data);
   const closedInIt = fromOpen.filter((d) => deals.some((x) => x.id === d.Id)).length;
   if (closedInIt < minSample) {
     return nm(
@@ -288,7 +290,7 @@ function build(ctx: Ctx, data: PipelineData): Loaded {
   if (!listed.some((s) => s.probability !== null && deals.some((d) => reached(d, s.stage)))) {
     return nm(said`None of the open stages your closed deals reached has a probability set in Salesforce.`);
   }
-  const counted = listed.map((s) => stageOf(ctx, s, deals));
+  const counted = listed.map((s) => stageOf(ctx, s, deals, { start: data.historyStart, before }));
   const tested = counted.filter((s) => s.testable).length;
   // Nothing to test: not measurable, with what stood in the way.
   if (tested === 0) {
@@ -419,11 +421,12 @@ function waysSaid(s: StageFigures): Said {
 }
 
 const sentenceOf = (s: StageFigures): Said => {
-  const period = said`between ${daySaid(s.from!)} and ${daySaid(s.to!)}`;
+  // Deals made before the stage history starts are left out; when any reached it in the period, the count says whose it is (712).
+  const period = s.leftOut ? said`made since your stage history starts that reached it between ${daySaid(s.from!)} and ${daySaid(s.to!)}` : said`that reached it between ${daySaid(s.from!)} and ${daySaid(s.to!)}`;
   const outcome =
-    s.open === 0 ? said`Of the ${s.reached} deals that reached it ${period}, ${s.share}% were won`
-    : s.open === 1 ? said`Of the ${s.cohort} deals that reached it ${period}, 1 is still open and ${s.share}% of the other ${s.reached} were won`
-    : said`Of the ${s.cohort} deals that reached it ${period}, ${s.open} are still open and ${s.share}% of the other ${s.reached} were won`;
+    s.open === 0 ? said`Of the ${s.reached} deals ${period}, ${s.share}% were won`
+    : s.open === 1 ? said`Of the ${s.cohort} deals ${period}, 1 is still open and ${s.share}% of the other ${s.reached} were won`
+    : said`Of the ${s.cohort} deals ${period}, ${s.open} are still open and ${s.share}% of the other ${s.reached} were won`;
   return said`${org(s.stage)} is set to ${s.probability!}% in Salesforce. ${outcome}, so in that period it was ${direction(s)}.${waysSaid(s)}`;
 };
 

@@ -89,6 +89,36 @@ export function sendBacks(path: string[]): Array<{ from: string; to: string }> {
 
 export const hasRework = (path: string[]): boolean => sendBacks(path).length > 0;
 
+/** Days before a deal's close within which a last move back is how it was closed out, not rework. */
+export const CLOSE_OUT_DAYS = 1;
+
+/** When the deal last entered the final stage of its path: the first row of its last run there. */
+function lastEntryOf(d: PathDeal): number | null {
+  const open = new Set(d.path);
+  let at: number | null = null;
+  let previous: string | null = null;
+  for (const row of d.deal.history ?? []) {
+    if (!open.has(row.StageName)) continue;
+    if (row.StageName !== previous) at = new Date(row.CreatedDate).getTime();
+    previous = row.StageName;
+  }
+  return at;
+}
+
+/**
+ * A closed deal whose last move was back to an earlier stage, within
+ * CLOSE_OUT_DAYS of its close, was moved there to close it out: that is not
+ * rework. Decided on timing alone, for won and lost deals alike (712): a rule
+ * that dropped only lost deals made "sent back deals were won more often" out
+ * of nothing in 21.3% of simulated orgs where some lost deals died after a
+ * real send-back.
+ */
+export const closingOut = (d: PathDeal): boolean => {
+  if ((d as { open?: boolean }).open === true || d.path.length < 2 || d.path.indexOf(d.path.at(-1)!) >= d.path.indexOf(d.path.at(-2)!)) return false;
+  const at = lastEntryOf(d);
+  return at !== null && d.deal.closedAt instanceof Date && d.deal.closedAt.getTime() - at <= CLOSE_OUT_DAYS * DAY;
+};
+
 /**
  * Stages of the usual path this path moved past without entering: after its
  * first recorded stage, before a later one it entered. A deal that closed before
@@ -242,14 +272,14 @@ export function pathMetrics(ctx: Ctx): Metric[] {
   const loaded = loadPaths(ctx);
   if (loaded.status !== "ok") return [notMeasurable(base(ctx, loaded.data, DEF), loaded.reason)];
   const { data, paths: p } = loaded;
-  // A lost deal's last move back is how it was closed out, not rework (insights.ts).
-  const closedOut = p.closed.filter((d) => !d.won && d.path.length >= 2 && d.path.indexOf(d.path.at(-1)!) < d.path.indexOf(d.path.at(-2)!)).length;
+  // A last move back made on closing is how the deal was closed out, not rework.
+  const closedOut = p.closed.filter(closingOut).length;
   const assumptions = [
     said`Your usual path, the one won deals took most often: ${pathSaid(p.standard)}`,
     ...HOW,
     "A stage counts as skipped only after a deal's first recorded stage and before a later stage of the usual path it entered",
     "The usual path is chosen by how often won deals took it, so it is a label, never a side of a comparison",
-    ...(closedOut ? [said`${closedOut} lost deals whose last move was back to an earlier stage aren't counted as sent back: that move closed them out`] : []),
+    ...(closedOut ? [closedOut === 1 ? said`1 deal whose last move, back to an earlier stage, came within a day of its close isn't counted as sent back: that move closed it out` : said`${closedOut} deals whose last move, back to an earlier stage, came within a day of their close aren't counted as sent back: that move closed them out`] : []),
   ];
   const segments: MetricSegment[] = [];
   const stats: Record<string, number> = {
