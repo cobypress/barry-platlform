@@ -310,6 +310,9 @@
   "pipe.going-backwards": {
     "version": 1
   },
+  "pipe.path-insights": {
+    "version": 1
+  },
   "pipe.segment-divergence": {
     "version": 2
   },

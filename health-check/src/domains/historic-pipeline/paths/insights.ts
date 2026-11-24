@@ -4,7 +4,7 @@ import type { SegmentCheck } from "../../../schemas/index.ts";
 import { dimensions, groupBy, median, round1 } from "../metrics.ts";
 import { DEAD_END_SHARE } from "../process.ts";
 import { DRIVER_GAP } from "../drivers.ts";
-import { loadPaths, pathSaid, sendBacks, skipsOf, type PathDeal, type Paths } from "./variants.ts";
+import { loadPaths, sendBacks, skipsOf, type PathDeal, type Paths } from "./variants.ts";
 
 // The insights read from the variant table (DECISIONS.md 703): each a sentence
 // about the customer's deals first, with its figures as the evidence. One is
@@ -86,8 +86,10 @@ const figures = (c: Comparison, who: Said): Said =>
 const within = (c: Comparison): Said =>
   c.compared ? said` The gap points the same way in ${c.held} of ${c.compared} segments, such as teams and record types, with enough deals on both sides.` : said` No team, record type or other segment had enough deals on both sides to check it within.`;
 
+// The usual path itself is named once, in the variant table's assumptions: a stage name repeated in every
+// sentence would only repeat the org's words, and each is one more place they must be marked.
 const basis = (c: Comparison, groupWords: Said, p: Paths): Said =>
-  said` Based on ${c.group.n} closed deals that ${groupWords} and ${c.usual.n} that took your usual path (${pathSaid(p.standard)}), of ${p.closed.length} closed deals.`;
+  said` Based on ${c.group.n} closed deals that ${groupWords} and ${c.usual.n} that took your usual path, of ${p.closed.length} closed deals.`;
 
 const NOT_A_CAUSE = said` This shows how often they went together, not that one is the reason for the other.`;
 const value = (): ReturnType<typeof notSized> => notSized(said`It compares the paths your deals took, which has no direct figure.`);
@@ -177,7 +179,7 @@ export const pathInsights: Rule = {
         outcome: "issue",
         key: `skip:${stage}`,
         title: said`Deals that skip ${org(stage)} ${doWords(c)} than on your usual path`,
-        summary: said`${figures(c, said`Deals that skip ${org(stage)}`)}${basis(c, said`moved past ${org(stage)} without entering it`, p)}${within(c)}${NOT_A_CAUSE}`,
+        summary: said`${figures(c, said`Deals that skip ${org(stage)}`)}${basis(c, said`skipped it`, p)}${within(c)}${NOT_A_CAUSE}`,
         recommendation: better
           ? said`Look at how the deals that skip ${org(stage)} are sold. If the stage adds nothing for them, agree when it can be left out; if it does, find out what they do instead.`
           : said`Look at why deals move past ${org(stage)} without entering it, and whether the work the stage stands for is being done.`,
@@ -199,8 +201,8 @@ export const pathInsights: Rule = {
         outcome: "issue",
         key: `rework:${from}:${to}`,
         title: said`Deals sent back from ${org(from)} to ${org(to)} ${doWords(c)}`,
-        summary: said`${figures(c, said`Deals sent back from ${org(from)} to ${org(to)}`)}${basis(c, said`went back from ${org(from)} to ${org(to)}`, p)}${within(c)}${NOT_A_CAUSE}`,
-        recommendation: said`Look at what sends deals back from ${org(from)} to ${org(to)}, and agree what has to be true before a deal leaves ${org(to)}.`,
+        summary: said`${figures(c, said`Deals sent back from ${org(from)} to ${org(to)}`)}${basis(c, said`went back this way`, p)}${within(c)}${NOT_A_CAUSE}`,
+        recommendation: said`Look at what sends these deals back, and agree what has to be true before a deal leaves ${org(to)}.`,
         recommendationType: "investigate",
         severity: c.winGap < 0 || c.daysGap > 0 ? "medium" : "low",
         confidence: confidenceOf(ctx, c),

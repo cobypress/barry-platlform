@@ -25,7 +25,15 @@ const SETUP_RULES = new Set(["pipe.unmapped-stages"]);
  * score exactly as the set-up rules are. A test holds this to the rules' own list.
  */
 export const UNSCORED_RULES: ReadonlySet<string> = new Set(["tech.lint-data-access", "tech.lint-limits", "tech.lint-injection", "tech.lint-tests", "tech.lint-swallowed-errors", "tech.lint-complexity"]);
-const notScored = (ruleId: string): boolean => SETUP_RULES.has(ruleId) || UNSCORED_RULES.has(ruleId);
+/**
+ * Shown and not scored (DECISIONS.md 703): the path insights compare the same
+ * closed deals that pipe.skipped-stages, pipe.going-backwards and
+ * pipe.dead-end-stage already score, so scoring them too would count one thing
+ * twice, and a path that is won more often is no fault. Kept apart from
+ * UNSCORED_RULES, which a re-check reads as the code checker's groups.
+ */
+const INSIGHT_RULES: ReadonlySet<string> = new Set(["pipe.path-insights"]);
+const notScored = (ruleId: string): boolean => SETUP_RULES.has(ruleId) || UNSCORED_RULES.has(ruleId) || INSIGHT_RULES.has(ruleId);
 
 const WEIGHTS: Record<string, number> = {
   ruleMaximum: RULE_MAXIMUM,

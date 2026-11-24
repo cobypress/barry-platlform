@@ -107,8 +107,8 @@ describe("rules writing their sentences with said (decisions 655 and 657)", () =
   test("every rule on the unconverted list exists", () => {
     const ids = new Set(ALL_MODULES.flatMap((m) => m.rules.map((r) => r.id)));
     for (const id of UNCONVERTED_RULES) assert.ok(ids.has(id), id);
-    // 127, and PMD's six groups (decision 673).
-    assert.equal(ids.size, 133);
+    // 127, PMD's six groups (decision 673) and the path insights (decision 703).
+    assert.equal(ids.size, 134);
   });
 
   test("a rule not on the list has its title, summary and recommendation marked; only an extract's reason passed on stays unknown", () => {

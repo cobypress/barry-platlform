@@ -134,7 +134,7 @@ const ANALYSIS_ONLY = [
   "cpq.twin-field-mismatch", "cur.account-concentration", "cur.coverage", "cur.rep-concentration", "dq.contact-completeness", "dq.duplicate-accounts",
   "dq.opps-inactive-owner", "dq.record-type-use", "dq.records-inactive-owner", "dq.stale-leads", "fct.manager-adjustments", "fct.quota-gaps",
   "int.api-usage", "int.integration-user-licences", "lead.campaign-return", "lead.conversion-by-source", "lead.converted-no-opportunity", "lead.source-return",
-  "mkt.scoring-grading", "mkt.unowned-prospects", "mkt.unworked-handovers", "pipe.calibration-contradicts-org", "pipe.going-backwards", "pipe.segment-divergence",
+  "mkt.scoring-grading", "mkt.unowned-prospects", "mkt.unworked-handovers", "pipe.calibration-contradicts-org", "pipe.going-backwards", "pipe.path-insights", "pipe.segment-divergence",
   "pipe.skipped-stages", "pipe.unmapped-stages", "rev.dormant-accounts", "rev.stalled-deals", "rev.win-backs", "sec.health-check-risks", "sec.health-check-score", "sec.peer-outlier-access",
   "sec.personal-integration-accounts", "sec.sharing-defaults", "sec.unused-access", "svc.agent-licences", "svc.backlog-growth", "svc.knowledge-current",
   "svc.macros-and-quick-text", "svc.queue-sprawl", "svc.unassigned-cases", "tech.apex-code-size", "tech.storage-use", "utl.dashboards-inactive-running-user",
