@@ -313,6 +313,9 @@
   "pipe.path-insights": {
     "version": 1
   },
+  "pipe.probability-vs-reality": {
+    "version": 1
+  },
   "pipe.segment-divergence": {
     "version": 2
   },

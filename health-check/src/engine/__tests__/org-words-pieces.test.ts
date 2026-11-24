@@ -1188,6 +1188,34 @@ const SIGNED_OFF: string[] = [
   "src/domains/historic-pipeline/paths/insights.ts: within(c)",
   "src/domains/historic-pipeline/paths/variants.ts: pathSaid(p.standard)",
   "src/domains/historic-pipeline/paths/variants.ts: text",
+  // The stage probabilities against what happens (DECISIONS.md 706).
+  // Numbers: the bars, the counts and shares worked out, and the probability Salesforce holds (each typed number).
+  "src/domains/historic-pipeline/probability/index.ts: MIN_EACH_OUTCOME",
+  "src/domains/historic-pipeline/probability/index.ts: MIN_EACH_OUTCOME",
+  "src/domains/historic-pipeline/probability/index.ts: MIN_EACH_OUTCOME",
+  "src/domains/historic-pipeline/probability/index.ts: MIN_EACH_OUTCOME",
+  "src/domains/historic-pipeline/probability/index.ts: WIN_GAP",
+  "src/domains/historic-pipeline/probability/index.ts: WIN_GAP",
+  "src/domains/historic-pipeline/probability/index.ts: beforeHistory",
+  "src/domains/historic-pipeline/probability/index.ts: closedAll.length",
+  "src/domains/historic-pipeline/probability/index.ts: compared",
+  "src/domains/historic-pipeline/probability/index.ts: deals.length",
+  "src/domains/historic-pipeline/probability/index.ts: deals.length",
+  "src/domains/historic-pipeline/probability/index.ts: held",
+  "src/domains/historic-pipeline/probability/index.ts: minSample",
+  "src/domains/historic-pipeline/probability/index.ts: minSample",
+  "src/domains/historic-pipeline/probability/index.ts: minSample",
+  "src/domains/historic-pipeline/probability/index.ts: s.probability!",
+  "src/domains/historic-pipeline/probability/index.ts: s.reached",
+  "src/domains/historic-pipeline/probability/index.ts: s.share",
+  // The engine's own nouns counted, and sentences made with said in the same file.
+  'src/domains/historic-pipeline/probability/index.ts: plural(stages.length, "stage")',
+  'src/domains/historic-pipeline/probability/index.ts: plural(tested, "stage")',
+  'src/domains/historic-pipeline/probability/index.ts: plural(tested, "stage")',
+  "src/domains/historic-pipeline/probability/index.ts: NOT_A_CAUSE",
+  "src/domains/historic-pipeline/probability/index.ts: direction(s)",
+  "src/domains/historic-pipeline/probability/index.ts: way",
+  "src/domains/historic-pipeline/probability/index.ts: within(shown)",
 ];
 
 const ROOT = join(import.meta.dirname, "../../..");
