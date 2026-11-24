@@ -203,7 +203,10 @@ function compare(r: Render, report: BuiltReport): string {
     .map((c) => {
       const own = c.own.status === "measured" ? r.t(`${c.own.position}, against ${c.own.group.label}`) : r.t("Not enough customers yet");
       const published = c.published.map((p) => r.t(`${formatFigure(p.figure.value, c.metric.unit)} ${p.figure.statistic} (${p.figure.source.publisher}, ${p.figure.source.year})`)).join("<br>") || r.t("None");
-      return `<tr><td>${r.t(c.metric.label)}${r.ref(comparisonId(c.metric.key))}</td><td class="num">${r.t(formatFigure(c.value!, c.metric.unit))}</td><td>${own}</td><td>${published}</td></tr>`;
+      // Beside a published average of days, ours says which it is: the median, and our average where we hold one (DECISIONS.md 709).
+      const p = c.published[0];
+      const yours = p?.against === "average" ? `${formatFigure(c.value!, c.metric.unit)} (median), ${formatFigure(p.ours, c.metric.unit)} (average)` : p?.against === "none" ? `${formatFigure(c.value!, c.metric.unit)} (median)` : formatFigure(c.value!, c.metric.unit);
+      return `<tr><td>${r.t(c.metric.label)}${r.ref(comparisonId(c.metric.key))}</td><td class="num">${r.t(yours)}</td><td>${own}</td><td>${published}</td></tr>`;
     })
     .join("");
   return page(`<h1>How you compare</h1><p class="muted">${r.t("Against other Black Cloud customers, and published research. We never combine them.")}</p><table><thead><tr><th>Measure</th><th class="num">Yours</th><th>Black Cloud customers</th><th>Published research</th></tr></thead><tbody>${rows}</tbody></table>`);

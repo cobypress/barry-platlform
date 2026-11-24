@@ -25576,7 +25576,8 @@
     "stats": {
      "p25": 56.5,
      "p75": 95,
-     "assumedDays": 60
+     "assumedDays": 60,
+     "mean": 79.9
     }
    },
    {
@@ -25784,7 +25785,8 @@
     "stats": {
      "p25": 32,
      "p75": 77.3,
-     "assumedDays": 60
+     "assumedDays": 60,
+     "mean": 58.5
     }
    },
    {
@@ -26402,7 +26404,9 @@
     ],
     "segmentExemptReason": null,
     "series": [],
-    "stats": {}
+    "stats": {
+     "mean": 43.8
+    }
    },
    {
     "status": "measured",
@@ -28577,7 +28581,8 @@
     "stats": {
      "p25": 7,
      "p75": 44,
-     "lateDeals": 146
+     "lateDeals": 146,
+     "mean": 26.5
     }
    },
    {
@@ -28669,7 +28674,9 @@
     ],
     "segmentExemptReason": null,
     "series": [],
-    "stats": {}
+    "stats": {
+     "mean": 79.5
+    }
    },
    {
     "status": "measured",
@@ -28760,7 +28767,9 @@
     ],
     "segmentExemptReason": null,
     "series": [],
-    "stats": {}
+    "stats": {
+     "mean": 55.6
+    }
    },
    {
     "status": "measured",
@@ -30139,7 +30148,9 @@
     ],
     "segmentExemptReason": null,
     "series": [],
-    "stats": {}
+    "stats": {
+     "mean": 123.6
+    }
    },
    {
     "status": "measured",
@@ -30439,7 +30450,9 @@
     ],
     "segmentExemptReason": null,
     "series": [],
-    "stats": {}
+    "stats": {
+     "mean": 131.5
+    }
    },
    {
     "status": "measured",

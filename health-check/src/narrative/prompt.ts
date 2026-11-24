@@ -1,6 +1,7 @@
 import type { Calibration, Finding, Metric, Run } from "../schemas/index.ts";
 import type { StatedProblem } from "./intake.ts";
 import type { Plan } from "./select.ts";
+import { averageBeside } from "../domains/average.ts";
 
 // Claude sees aggregates, metadata names and tokens, and nothing else. Evidence
 // isn't sent: it isn't needed for wording, and a query can quote record values.
@@ -139,7 +140,10 @@ export function findingSource(f: Finding): PromptSource {
 export function metricSource(m: Metric): PromptSource {
   const shared = { id: m.id, kind: "metric", domain: m.domain, label: m.label, definition: m.definition, unit: m.unit, assumptions: m.assumptions };
   if (m.status === "not_measurable") return { ...shared, status: m.status, reason: m.reason };
-  return { ...shared, status: m.status, value: m.value, n: m.n, dateRange: m.dateRange, stats: m.stats, segments: m.segments };
+  // A duration's average goes only where the documents show it beside the median (DECISIONS.md 709), so a
+  // draft never quotes an average the tables hold back.
+  const { mean: _mean, ...stats } = m.stats;
+  return { ...shared, status: m.status, value: m.value, n: m.n, dateRange: m.dateRange, stats: averageBeside(m) === null ? stats : m.stats, segments: m.segments };
 }
 
 /**

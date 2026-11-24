@@ -3,6 +3,7 @@ import { said } from "../../engine/org-words.ts";
 import { pct } from "../../engine/rule.ts";
 import { orgExtractor } from "../../extract/configuration.ts";
 import type { DateRange, Evidence, Metric, MetricSegment, SeriesPoint } from "../../schemas/index.ts";
+import { meanStat } from "../average.ts";
 import { localDay, zoneNote, zoneOf } from "../time-zone.ts";
 import { loadPipeline, unorderedReason, unsplitLostReason, type Deal, type PipelineData } from "./cohort.ts";
 
@@ -273,7 +274,7 @@ function salesCycle(ctx: Ctx, data: Ready): Metric[] {
         n: deals.length,
         dateRange: ctx.window,
         segments: segment(deals, dimensions(ctx), minSample, (group) => round1(median(group.map(days)))),
-        stats: { p25: round1(quantile(all, 0.25)), p75: round1(quantile(all, 0.75)), ...(salesCycleAssumptionDays ? { assumedDays: salesCycleAssumptionDays } : {}) },
+        stats: { p25: round1(quantile(all, 0.25)), p75: round1(quantile(all, 0.75)), ...(salesCycleAssumptionDays ? { assumedDays: salesCycleAssumptionDays } : {}), ...meanStat(all) },
       },
     );
   };
@@ -323,7 +324,7 @@ function slippage(ctx: Ctx, data: Ready): Metric[] {
       : measured({ ...quarterDefinition, exclusions }, { value: crossRate(withHistory), n: withHistory.length, dateRange: ctx.window, segments: segment(withHistory, dims, minSample, crossRate) }),
   ];
   if (slipped.length < minSample) metrics.push(notMeasurable({ ...daysDefinition, exclusions }, `${slipped.length} slipped deals is below the calibrated minimum of ${minSample}.`));
-  else metrics.push(measured({ ...daysDefinition, exclusions }, { value: round1(median(slipped.map(totalDays))), n: slipped.length, dateRange: ctx.window, segments: segment(slipped, dims, minSample, (group) => round1(median(group.map(totalDays)))) }));
+  else metrics.push(measured({ ...daysDefinition, exclusions }, { value: round1(median(slipped.map(totalDays))), n: slipped.length, dateRange: ctx.window, segments: segment(slipped, dims, minSample, (group) => round1(median(group.map(totalDays)))), stats: meanStat(slipped.map(totalDays)) }));
   return metrics;
 }
 

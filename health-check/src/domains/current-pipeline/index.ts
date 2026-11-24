@@ -10,6 +10,7 @@ import { potentialRevenue, SITUATIONS, type Situation } from "../historic-pipeli
 import { fiscalStartOf, median, pushesOf, quantile, segment } from "../historic-pipeline/metrics.ts";
 import type { DateRange, Evidence, Metric } from "../../schemas/index.ts";
 import type { DomainModule } from "../types.ts";
+import { meanStat } from "../average.ts";
 import { localDay, todayIn, zoneNote, zoneOf } from "../time-zone.ts";
 import { daysSince, enteredCurrentStage, quarterBounds, stageRuns } from "./stages.ts";
 import { deliveryOutlook, openStageMetrics, OUTLOOK_LABELS, retiredStages } from "./outlook.ts";
@@ -467,7 +468,7 @@ function currentMetrics(ctx: Ctx): Metric[] {
   const days = (d: Deal): number => daysSince(enteredCurrentStage(d)!, ctx.now);
   const round = (n: number): number => Math.round(n * 10) / 10;
   if (placed.length < minSample) metrics.push({ ...definitions.age, ...common, status: "not_measurable", reason: `${placed.length} open deals with stage history is below the calibrated minimum of ${minSample}.` });
-  else metrics.push({ ...definitions.age, ...common, status: "measured", value: round(median(placed.map(days))), n: placed.length, segments: segment(placed, dims, minSample, (group) => round(median(group.map(days)))), ...rest });
+  else metrics.push({ ...definitions.age, ...common, status: "measured", value: round(median(placed.map(days))), n: placed.length, segments: segment(placed, dims, minSample, (group) => round(median(group.map(days)))), ...rest, stats: meanStat(placed.map(days)) });
   metrics.push(...openStageMetrics(ctx, data, deals, evidence), ...deliveryOutlook(ctx, data, deals, evidence));
   return metrics;
 }

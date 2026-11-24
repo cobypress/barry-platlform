@@ -48,6 +48,12 @@ const EBSTA_2025: PublishedSource = {
 const EBSTA_2025_POPULATION =
   "655K opportunities worth $48 billion, from 387 companies, analysed by Ebsta from its customers' CRM data. The report doesn't say which region the companies are in, or when the deals closed";
 
+/** A published average set against our median: how the two differ. */
+export const AVERAGE_AGAINST_MEDIAN = "It's an average, and ours is a median. A few very long deals pull an average up, so a median is usually lower.";
+
+/** The same caveat where the published average is set against our average of the same deals instead (DECISIONS.md 709). */
+export const AVERAGE_AGAINST_AVERAGE = "It's an average. Ours is usually given as a median, so we set the average of the same deals against it.";
+
 export const PUBLISHED_FIGURES: PublishedFigure[] = [
   {
     id: "ebsta-2025-new-logo-win-rate",
@@ -76,7 +82,7 @@ export const PUBLISHED_FIGURES: PublishedFigure[] = [
     measures: "How long new business deals take to close.",
     differences: [
       "It covers new business only. We take every won deal, and the same report gives 52 days for expansion deals.",
-      "It's an average, and ours is a median. A few very long deals pull an average up, so a median is usually lower.",
+      AVERAGE_AGAINST_MEDIAN,
       "The report doesn't say whether lost deals are included, or when the clock starts. Ours runs from a won deal's creation to its close.",
     ],
     basis: "records",

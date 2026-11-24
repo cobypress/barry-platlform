@@ -1,3 +1,4 @@
+import { averageBeside, averageFigure } from "../domains/average.ts";
 import { issuesOf } from "../narrative/select.ts";
 import { percent } from "../render/format.ts";
 import type { Finding, Metric } from "../schemas/index.ts";
@@ -48,7 +49,7 @@ export type InterviewTheme = {
 };
 
 type IssueMeasure = { kind: "issues"; topic: string; issues: (f: Finding) => boolean; felt: (v: number) => boolean; said: (who: string, v: number) => string; context?: (metrics: Metric[]) => string[] };
-type MetricMeasure = { kind: "metric"; topic: string; metric: string; unit: "percent" | "days" | "count"; said: (who: string, v: number) => string; found: (v: number) => string };
+type MetricMeasure = { kind: "metric"; topic: string; metric: string; unit: "percent" | "days" | "count"; said: (who: string, v: number) => string; found: (v: number, average: number | null) => string };
 type NoMeasure = { kind: "none"; topic: string; said: (who: string, v: number) => string; why: string };
 type Measure = IssueMeasure | MetricMeasure | NoMeasure;
 
@@ -122,7 +123,8 @@ const MEASURES: Record<string, Measure> = {
     metric: "historic.sales_cycle_won",
     unit: "days",
     said: (who, v) => `${who} told us a typical won deal takes about ${v} ${v === 1 ? "day" : "days"} from creation to close.`,
-    found: (v) => `We measured a median of ${v} ${v === 1 ? "day" : "days"} from creation to close for won deals.`,
+    // The average only where it is more than 10% from the median (DECISIONS.md 709).
+    found: (v, average) => `We measured a median of ${v} ${v === 1 ? "day" : "days"} from creation to close for won deals${average === null ? "" : ` (average ${averageFigure(average)})`}.`,
   },
   weekly_users: {
     kind: "metric",
@@ -213,8 +215,10 @@ function readMetric(m: MetricMeasure, value: number, metrics: Metric[]): Pick<In
   if (measured === null) return { found: "We couldn't measure this in your org.", reading: "cant_tell", why: "There's no figure from the data to set it against.", metricId: null };
   const gap = value - measured;
   const close = m.unit === "percent" ? Math.abs(gap) <= SHARE_WITHIN_POINTS : Math.abs(gap) <= Math.max(COUNT_WITHIN_AT_LEAST, Math.abs(measured) * COUNT_WITHIN_SHARE);
-  if (close) return { found: m.found(measured), reading: "agrees", why: "Close to what we measured.", metricId: m.metric };
-  return { found: m.found(measured), reading: "disagrees", why: gap > 0 ? "Higher than the data shows." : "Lower than the data shows.", metricId: m.metric };
+  // The reading is judged on the median alone; the average is only shown beside it.
+  const found = m.found(measured, averageBeside(metrics.find((x) => x.id === m.metric)));
+  if (close) return { found, reading: "agrees", why: "Close to what we measured.", metricId: m.metric };
+  return { found, reading: "disagrees", why: gap > 0 ? "Higher than the data shows." : "Lower than the data shows.", metricId: m.metric };
 }
 
 /** Interviews in the order they were held, so sources and the chapter read the same way every time. */

@@ -5,6 +5,7 @@ import type { Evidence, Metric, MetricSegment, SeriesPoint } from "../../schemas
 import type { Deal, PipelineData } from "../historic-pipeline/cohort.ts";
 import { groupBy, median, round1, segment, SEGMENT_NOTE } from "../historic-pipeline/metrics.ts";
 import { daysLate, firstForecast, stageWinRates, wonFromOpen, type Cohort } from "../historic-pipeline/outcomes.ts";
+import { meanStat } from "../average.ts";
 import { todayIn, zoneNote } from "../time-zone.ts";
 
 // Today's open pipeline by stage, and what it's likely to turn into by month.
@@ -74,7 +75,7 @@ export function openStageMetrics(ctx: Ctx, data: Ready, deals: Deal[], evidence:
   ];
   const age = (group: Deal[]): number => round1(median(group.map((d) => ageDays(d, ctx.now))));
   if (deals.length < minSample) metrics.push({ ...definitions.age, ...shared, status: "not_measurable", reason: `${deals.length} open deals is below the calibrated minimum of ${minSample}.` });
-  else metrics.push({ ...definitions.age, ...shared, status: "measured", value: age(deals), n: deals.length, ...rest, segments: segment(deals, dims, MIN_STAGE_DEALS, age) });
+  else metrics.push({ ...definitions.age, ...shared, status: "measured", value: age(deals), n: deals.length, ...rest, segments: segment(deals, dims, MIN_STAGE_DEALS, age), stats: meanStat(deals.map((d) => ageDays(d, ctx.now))) });
 
   const rates = stageWinRates(ctx, data);
   if (data.multiCurrency) metrics.push({ ...definitions.weighted, ...shared, status: "not_measurable", reason: MULTI_CURRENCY });
