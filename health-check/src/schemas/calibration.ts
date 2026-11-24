@@ -48,6 +48,12 @@ export const Calibration = z
     minSample: z.number().int().positive().default(20),
     dormantDays: z.number().int().positive().default(90),
     currency: z.string().length(3).default("GBP"),
+    // Where an automatic run's currency came from (DECISIONS.md 700): the org's
+    // own default currency, its default locale (an assumption every money figure
+    // says), or nowhere ("XXX", ISO 4217's code for none, and no money figure is
+    // measured). Absent on a person's calibration, and on one read before 700,
+    // which took the org's own currency; read only with source org_settings.
+    currencyFrom: z.enum(["org", "locale", "none"]).optional(),
     // Annual cost per seat by Salesforce licence name. No entry means no sizing, never a guess.
     licenceCosts: z.record(z.string(), z.number().nonnegative()).default({}),
     // Minutes a year per item, by key, as agreed with the customer. Salesforce has

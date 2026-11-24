@@ -304,13 +304,13 @@ export class MemoryWorkerStore implements WorkerStore {
   readonly held = new Map<string, string>();
   heldReasonColumn = true;
 
-  async holdRun(runId: string, reason: "calibration_unreadable", at: string): Promise<boolean> {
+  async holdRun(runId: string, reason: "calibration_unreadable", at: string, counts: Record<string, number> = {}): Promise<boolean> {
     const run = this.runs.get(runId);
     if (!this.heldReasonColumn || !run || run.run.reviewMode !== "automatic" || run.run.status === "released" || this.held.has(runId)) return false;
     this.held.set(runId, reason);
     this.writes.push({ method: "holdRun", id: runId, detail: reason });
     // In the same statement as the hold (DECISIONS.md 693).
-    this.#raiseFlag(runId, reason, at, {});
+    this.#raiseFlag(runId, reason, at, { ...counts });
     return true;
   }
 

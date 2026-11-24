@@ -222,7 +222,9 @@ export const CALIBRATION_SQL = selectSql("HealthCheckCalibration", CALIBRATION, 
 /** An automatic run's calibration as the worker writes it (DECISIONS.md 692): every column it reads, and its source. */
 export const CALIBRATION_WRITE: Columns = { runId: "text", ...CALIBRATION, source: "text" };
 export function calibrationRow(runId: string, c: Calibration): Record<string, unknown> {
-  return Object.fromEntries(Object.keys(CALIBRATION_WRITE).map((k) => [k, k === "runId" ? runId : (c as Record<string, unknown>)[k]]));
+  // Where an automatic run's currency came from (DECISIONS.md 700) rides in the "fields" JSON column, so no migration: the console has no column of its own for it.
+  const fields = c.currencyFrom ? { ...c.fields, currencyFrom: c.currencyFrom } : c.fields;
+  return Object.fromEntries(Object.keys(CALIBRATION_WRITE).map((k) => [k, k === "runId" ? runId : k === "fields" ? fields : (c as Record<string, unknown>)[k]]));
 }
 /** An automatic run's hold (DECISIONS.md 693), read through the row as JSON like its mode. Asked only for an automatic run, so a consultant-led run's reads are unchanged. */
 export const HELD_REASON_SQL = `SELECT to_jsonb("HealthCheckRun") ->> 'heldReason' AS "heldReason" FROM "HealthCheckRun" WHERE "id" = $1`;
@@ -248,8 +250,11 @@ export const FLAG_CONFLICT =
  */
 export const HOLD_RUN_SQL =
   `WITH held AS (UPDATE "HealthCheckRun" SET "heldReason" = $2 WHERE "id" = $1 AND "reviewMode" = 'automatic' AND "heldReason" IS NULL AND "status" <> 'released' RETURNING "id"), ` +
-  `flag AS (INSERT INTO "HealthCheckRunFlag" ("runId", "kind", "raisedAt", "counts") SELECT "id", $2, $3::timestamp(3), '{}'::jsonb FROM held ${FLAG_CONFLICT}) ` +
+  `flag AS (INSERT INTO "HealthCheckRunFlag" ("runId", "kind", "raisedAt", "counts") SELECT "id", $2, $3::timestamp(3), $4::jsonb FROM held ${FLAG_CONFLICT}) ` +
   `SELECT count(*)::int AS "held" FROM held`;
+/** A flag's counts as written: whole, non-negative numbers under word-like names, and nothing else (DECISIONS.md 694, 700). */
+export const countsOnly = (counts: Record<string, number>): Record<string, number> =>
+  Object.fromEntries(Object.entries(counts).filter(([k, v]) => /^[a-z][A-Za-z]{0,39}$/.test(k) && Number.isSafeInteger(v) && v >= 0));
 /** A flag for a person (migration 20261211): counts only, raised once while open (FLAG_CONFLICT). */
 export const RAISE_FLAG_SQL = `INSERT INTO "HealthCheckRunFlag" ("runId", "kind", "raisedAt", "counts") VALUES ($1, $2, $3::timestamp(3), $4::jsonb) ${FLAG_CONFLICT}`;
 /** A failed run's flag, only for an automatic run: read through the row as JSON, so a console without the column raises none. */
@@ -443,7 +448,12 @@ export function intakeFromRow(row: Record<string, unknown>, run: Run): Intake {
 }
 
 export function calibrationFromRow(row: Record<string, unknown>): Calibration {
-  return Calibration.parse(withoutNulls(row));
+  const read = withoutNulls(row) as Record<string, unknown>;
+  // Lifted out of "fields" (calibrationRow), and only on a calibration read from the org's settings: a person's never carries one.
+  const fields = read.fields as Record<string, unknown> | undefined;
+  const from = fields?.currencyFrom;
+  if (read.source === "org_settings" && (from === "org" || from === "locale" || from === "none")) return Calibration.parse({ ...read, currencyFrom: from });
+  return Calibration.parse(read);
 }
 
 export function answerFromRow(row: Record<string, unknown>): ManualAnswer {
@@ -1085,9 +1095,10 @@ export class PostgresWorkerStore implements WorkerStore {
   }
 
   /** DECISIONS.md 692: one statement, only an automatic run's and only where none is set. A console without the columns, or refusing the word, is said by its SQLSTATE alone. */
-  async holdRun(runId: string, reason: "calibration_unreadable", at: string): Promise<boolean> {
+  async holdRun(runId: string, reason: "calibration_unreadable", at: string, counts: Record<string, number> = {}): Promise<boolean> {
     try {
-      const result = await this.#pool.query(HOLD_RUN_SQL, [runId, reason, at]);
+      // Numbers only, as every flag's counts (DECISIONS.md 700: how many stages were read, and how many are won).
+      const result = await this.#pool.query(HOLD_RUN_SQL, [runId, reason, at, JSON.stringify(countsOnly(counts))]);
       return Number(one(result)?.held) === 1;
     } catch (err) {
       this.#log(`Run ${runId}: the console's HealthCheckRun or HealthCheckRunFlag table refused the hold with SQLSTATE ${sqlState((err as { code?: unknown }).code)}, so the hold isn't recorded. Check the table against the console's ${REVIEW_MODE_MIGRATION} migration.`);

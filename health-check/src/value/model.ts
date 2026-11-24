@@ -1,4 +1,5 @@
-import type { Finding, Run } from "../schemas/index.ts";
+import type { Calibration, Finding, Run } from "../schemas/index.ts";
+import { CURRENCY_UNKNOWN, currencyFromLocaleText, currencyStanding } from "../engine/currency.ts";
 
 // The value model (roadmap 1.4): one figure for what the issues are worth over
 // the next 12 months, with a low and a high case. Code works it all out from
@@ -175,7 +176,35 @@ export type ValueModel = {
   byKind: Record<ValueKind, Range>;
   /** Figures with no place in the model, and why. */
   left: Array<{ findingId: string; reason: string }>;
+  /** On an automatic run whose currency came from the org's locale: the sentence every money figure here leans on (DECISIONS.md 700). Absent otherwise. */
+  currencyNote?: string;
 };
+
+/**
+ * What the currency lets the model do (DECISIONS.md 700). `unpricedHours`: why
+ * hours aren't turned into money, when they can't be honestly (no currency
+ * known, or our pounds benchmark beside amounts in another currency). `note`:
+ * the sentence a total leans on when the currency came from the locale.
+ */
+export type ValueCurrency = { unpricedHours?: string; note?: string };
+
+/** Our hourly cost is a UK figure in pounds: an automatic run reporting in another currency leaves its hours as hours (DECISIONS.md 700). */
+export const HOURS_IN_POUNDS = (currency: string): string => `Our hourly cost is a UK figure in pounds, and your amounts are in ${currency}, so we haven't put a money figure on this time.`;
+
+/**
+ * What a calibration's currency lets the value model do (DECISIONS.md 700).
+ * A person's calibration, as before: nothing. An automatic one with no
+ * currency prices nothing, hours included; one in another currency than
+ * pounds leaves hours unpriced unless the customer gave their own hourly
+ * cost; one whose currency came from the locale says so beside its totals.
+ */
+export function valueCurrency(calibration: Pick<Calibration, "source" | "currency" | "currencyFrom">, customerHourly?: number | null): ValueCurrency {
+  const standing = currencyStanding(calibration);
+  if (standing === "confirmed") return {};
+  if (standing === "none") return { unpricedHours: CURRENCY_UNKNOWN };
+  const unpricedHours = calibration.currency !== "GBP" && !(customerHourly && customerHourly > 0) ? HOURS_IN_POUNDS(calibration.currency) : undefined;
+  return { ...(unpricedHours ? { unpricedHours } : {}), ...(standing === "locale" ? { note: currencyFromLocaleText(calibration.currency) } : {}) };
+}
 
 const ONE_OFF = /^(potential revenue in deals open today|one-off\b)/i;
 const PER_YEAR = /^(per year|a year)$/i;
@@ -189,7 +218,7 @@ function yearsIn(run: Run): number {
 
 const zero = (): Range => ({ low: 0, expected: 0, high: 0 });
 
-export function buildValueModel(findings: Finding[], run: Run, currency: string, customerHourly?: number | null, teamTime?: TeamTime | null): ValueModel {
+export function buildValueModel(findings: Finding[], run: Run, currency: string, customerHourly?: number | null, teamTime?: TeamTime | null, money: ValueCurrency = {}): ValueModel {
   const hourly = hourlyCost(customerHourly);
   const lines: ValueLine[] = [];
   const team = teamTime && teamTime.hoursPerWeek > 0 && teamTime.users > 0 ? teamTime : null;
@@ -204,6 +233,10 @@ export function buildValueModel(findings: Finding[], run: Run, currency: string,
     let annual: number;
     let basis: string;
     if (v.kind === "hours") {
+      if (money.unpricedHours) {
+        left.push({ findingId: f.id, reason: money.unpricedHours });
+        continue;
+      }
       if (!PER_YEAR.test(v.period)) {
         left.push({ findingId: f.id, reason: `Its hours aren't a yearly figure (${v.period}).` });
         continue;
@@ -235,7 +268,8 @@ export function buildValueModel(findings: Finding[], run: Run, currency: string,
     lines.push({ findingId: f.id, ruleId: f.ruleId, title: f.title, kind, group, annual, low: round2(annual * realisation.low), expected: round2(annual * realisation.expected), high: round2(annual * realisation.high), basis });
   }
 
-  if (team) {
+  if (team && money.unpricedHours) left.push({ findingId: TEAM_TIME_LINE, reason: money.unpricedHours });
+  else if (team) {
     const annual = round2(team.hoursPerWeek * team.users * hourly.rate * WORKING_WEEKS);
     lines.push({
       findingId: TEAM_TIME_LINE,
@@ -279,7 +313,7 @@ export function buildValueModel(findings: Finding[], run: Run, currency: string,
     r.high = round2(r.high + g.counted.high);
   }
   const total = HEADLINE_KINDS.reduce((sum, k) => ({ low: round2(sum.low + byKind[k].low), expected: round2(sum.expected + byKind[k].expected), high: round2(sum.high + byKind[k].high) }), zero());
-  return { currency, hourly, groups, total, byKind, left };
+  return { currency, hourly, groups, total, byKind, left, ...(money.note ? { currencyNote: money.note } : {}) };
 }
 
 /**

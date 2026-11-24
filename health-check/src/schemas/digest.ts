@@ -279,6 +279,13 @@ export const DigestValueModel = z.object({
   lines: z.array(DigestValueLine),
   /** Findings with a figure the model couldn't place, by id. Their reasons are in the report. */
   leftOut: Ids,
+  /**
+   * On an automatic run whose currency was taken from the org's locale, the
+   * sentence every amount here leans on (DECISIONS.md 700), marked: ours, with
+   * the currency code the org's. Absent on every other run.
+   */
+  currencyNote: Text.optional(),
+  orgWords: z.object({ currencyNote: SentenceOrgWords.optional() }).optional(),
 });
 export type DigestValueModel = z.infer<typeof DigestValueModel>;
 

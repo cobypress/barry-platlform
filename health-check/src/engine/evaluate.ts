@@ -7,6 +7,8 @@ import { Pseudonymiser, UNKNOWN_USER } from "../privacy/pseudonymiser.ts";
 import { DESTRUCTIVE_RECOMMENDATIONS, Finding, Metric, type Calibration, type DateRange, type Evidence, type ManualAnswer, type ManualStep, type RunScope } from "../schemas/index.ts";
 import { fixFields } from "../fix/index.ts";
 import { MANUAL_STEPS } from "./manual-steps.ts";
+import { currencyFromLocaleNote, currencyStanding, currencyUnknownReason, NO_CURRENCY } from "./currency.ts";
+import { moneySymbol } from "../render/format.ts";
 import { notMeasurableKind } from "./not-measurable.ts";
 import { joinSaid, markSentence, orgWordsOf, said, textSha256, withOrgWords, type MarkedSentence, type Said } from "./org-words.ts";
 import type { IssueResult, ManualState, RecordList, Rule, RuleContext, RuleResult } from "./rule.ts";
@@ -212,10 +214,13 @@ export function withAssumptions(result: RuleResult, notes: string[]): RuleResult
   return { ...result, summary, confidence: CONFIDENCE_RANK[result.confidence] > CONFIDENCE_RANK.medium ? "medium" : result.confidence };
 }
 
-function runRule(rule: Rule, ctx: RuleContext, pseudonyms: Pseudonymiser, records: FindingRecords[], assumed: Set<string>): Finding[] {
+function runRule(rule: Rule, ctx: RuleContext, pseudonyms: Pseudonymiser, records: FindingRecords[], assumed: Set<string>, gate: () => ((r: RuleResult) => RuleResult) | null = () => null): Finding[] {
   try {
     const raw = rule.evaluate(ctx);
-    const results = (Array.isArray(raw) ? raw : [raw]).map((r) => withAssumptions(r, [...assumed]));
+    // With no currency, whatever the rule said in money is taken out first (DECISIONS.md 700).
+    const ungated = Array.isArray(raw) ? raw : [raw];
+    const without = gate();
+    const results = (without ? ungated.map(without) : ungated).map((r) => withAssumptions(r, [...assumed]));
     for (const result of results) {
       if (result.outcome !== "issue" || !result.records?.rows.length) continue;
       // The same last pass as the finding's text, for the words a rule wrote. Not
@@ -243,6 +248,58 @@ function runRule(rule: Rule, ctx: RuleContext, pseudonyms: Pseudonymiser, record
     const reason = `This check failed to run: ${message}`;
     return [toFinding(rule, { outcome: "not_measurable", reason, evidence: [engineEvidence(rule.id, message, ctx.now)] }, pseudonyms)];
   }
+}
+
+/**
+ * The calibration as a rule or metric builder reads it, telling the engine
+ * each time the currency is read (DECISIONS.md 700), as the unconfirmed stage
+ * order tells it each time the order is read (692). Only on an automatic run
+ * whose currency came from the locale or from nowhere: every other run reads
+ * the calibration itself, so nothing about it changes.
+ */
+function watchingCurrency(calibration: Calibration, onRead: () => void): Calibration {
+  const watched = { ...calibration };
+  Object.defineProperty(watched, "currency", {
+    enumerable: true,
+    get: () => {
+      onRead();
+      return calibration.currency;
+    },
+  });
+  return watched;
+}
+
+/** Whether a result or metric says an amount in this currency anywhere: its code, or its symbol. Numbers are never read as one. */
+function mentionsCurrency(value: unknown, code: string): boolean {
+  const text = JSON.stringify(value);
+  return text.includes(code) || text.includes(moneySymbol(code).trim());
+}
+
+/**
+ * A rule's result with no money in it, when the run knows no currency
+ * (DECISIONS.md 700): an issue's figure in money is not sized, for the plain
+ * reason; a result that still says an amount anywhere is not measurable, for
+ * the same reason. Counts, rates and everything else stand as they are.
+ */
+function withoutCurrency(result: RuleResult, reason: Said): RuleResult {
+  let r = result;
+  if (r.outcome === "issue" && r.value.kind !== "not_sized" && r.value.unit === NO_CURRENCY) r = { ...r, value: { kind: "not_sized", reason } };
+  if (!mentionsCurrency(r, NO_CURRENCY)) return r;
+  return { outcome: "not_measurable", ...(r.key !== undefined ? { key: r.key } : {}), reason, evidence: r.evidence.map(noAmountNote), ...(r.manualStepIds ? { manualStepIds: r.manualStepIds } : {}) };
+}
+
+/** Evidence kept with a figure taken out for want of a currency, without a note that says an amount. */
+function noAmountNote(e: Evidence): Evidence {
+  if (e.note === undefined || !mentionsCurrency(e.note, NO_CURRENCY)) return e;
+  const { note: _, ...rest } = e;
+  return rest as Evidence;
+}
+
+/** The same for a metric: one in money, or one that says an amount, is not measurable for the plain reason. */
+function metricWithoutCurrency(metric: Metric, reason: Said): Metric {
+  if (metric.unit !== "currency" && !mentionsCurrency(metric, NO_CURRENCY)) return metric;
+  const { id, domain, label, definition, unit, evidence, exclusions } = metric;
+  return { status: "not_measurable", id, domain, label, definition, unit, evidence: evidence.map(noAmountNote), exclusions: exclusions.filter((e) => !mentionsCurrency(e, NO_CURRENCY)), assumptions: [], reason };
 }
 
 export function analyse(input: AnalysisInput): AnalysisOutput {
@@ -286,9 +343,24 @@ function analyseWithin(input: AnalysisInput): AnalysisOutput {
     return { step, status, answer, evidence };
   };
 
+  // What the run knows of its currency (DECISIONS.md 700): read as before, from the locale, or not at all.
+  const standing = currencyStanding(calibration);
+  const watchCurrency = standing === "locale" || standing === "none";
+  // Set while a rule runs, so reading the currency there leans on the locale's assumption; a metric builder's is said by its metrics' unit instead.
+  let inRule = false;
+  let currencyRead = false;
+  let localeNote: Said | undefined;
+  const fromLocale = (): Said => (localeNote ??= currencyFromLocaleNote(calibration.currency));
+  let unknownReason: Said | undefined;
+  const noCurrency = (): Said => (unknownReason ??= currencyUnknownReason());
   const base: Omit<RuleContext, "metrics"> = {
     scope,
-    calibration,
+    calibration: watchCurrency
+      ? watchingCurrency(calibration, () => {
+          currencyRead = true;
+          if (standing === "locale" && inRule) assumed.add(fromLocale());
+        })
+      : calibration,
     now,
     window,
     pseudonyms,
@@ -319,11 +391,20 @@ function analyseWithin(input: AnalysisInput): AnalysisOutput {
   const metrics = modules
     .flatMap((m) => (m.metrics ?? []).flatMap((build) => {
       assumed = new Set();
-      const built = build(base);
-      const notes = [...assumed];
-      for (const metric of built) if (metric.status === "measured" && notes.length > 0) leanedOn.set(metric.id, notes);
+      currencyRead = false;
+      const made = build(base);
+      // No currency: nothing in money is measured, for the plain reason (DECISIONS.md 700).
+      const built = standing === "none" ? made.map((metric) => (metric.unit === "currency" || currencyRead ? metricWithoutCurrency(metric, noCurrency()) : metric)) : made;
+      const builderNotes = [...assumed];
+      // A figure in money, or one that says an amount, leans on a currency taken from the locale (DECISIONS.md 700).
+      const notesOf = (metric: Metric): string[] =>
+        standing === "locale" && (metric.unit === "currency" || (currencyRead && mentionsCurrency(metric, calibration.currency))) ? [...builderNotes, fromLocale()] : builderNotes;
+      for (const metric of built) if (metric.status === "measured" && notesOf(metric).length > 0) leanedOn.set(metric.id, notesOf(metric));
       // A measured figure that leaned on an assumption says so among its own.
-      return notes.length === 0 ? built : built.map((metric) => (metric.status === "measured" ? { ...metric, assumptions: [...metric.assumptions, ...notes.filter((n) => !metric.assumptions.includes(n))] } : metric));
+      return built.map((metric) => {
+        const notes = metric.status === "measured" ? notesOf(metric) : [];
+        return notes.length === 0 || metric.status !== "measured" ? metric : { ...metric, assumptions: [...metric.assumptions, ...notes.filter((n) => !metric.assumptions.includes(n))] };
+      });
     }))
     // Every metric that couldn't be measured says which kind of reason it is (DECISIONS.md 627).
     .map((m) => (m.status === "not_measurable" && m.notMeasurableKind === undefined ? { ...m, notMeasurableKind: notMeasurableKind(m.reason) } : m))
@@ -336,7 +417,10 @@ function analyseWithin(input: AnalysisInput): AnalysisOutput {
     for (const rule of module.rules) {
       currentRule = rule.id;
       assumed = new Set();
-      findings.push(...runRule(rule, ctx, pseudonyms, records, assumed));
+      currencyRead = false;
+      inRule = true;
+      findings.push(...runRule(rule, ctx, pseudonyms, records, assumed, () => (standing === "none" && currencyRead ? (r) => withoutCurrency(r, noCurrency()) : null)));
+      inRule = false;
     }
   }
   currentRule = null;

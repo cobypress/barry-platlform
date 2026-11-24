@@ -1,6 +1,7 @@
 import { compareWithBaseline, limitsReadAt, progressDays, progressFigures, progressTitles, storageSentences, worthFigures, type Progress } from "../progress/compare.ts";
 import { factsText, type FactsSummary } from "../facts/summary.ts";
-import { addedByFinding, buildValueModel, MONEY_FACTS, worthOf, HEADLINE_KINDS, KIND_LABELS, TEAM_TIME_GROUP, UK_HOURLY_BENCHMARK, WORKING_WEEKS, type TeamTime, type ValueModel } from "../value/model.ts";
+import { currencyStanding } from "../engine/currency.ts";
+import { addedByFinding, buildValueModel, valueCurrency, MONEY_FACTS, worthOf, HEADLINE_KINDS, KIND_LABELS, TEAM_TIME_GROUP, UK_HOURLY_BENCHMARK, WORKING_WEEKS, type TeamTime, type ValueModel } from "../value/model.ts";
 import { AREA_WEIGHTS, CRITICAL_CAP, GRADES, overallScore, type OverallScore } from "../domains/scoring.ts";
 import { comparisonId, comparisonNotes, compareRun, OWN_RANGE_MIN, type BenchmarkInput, type Comparison } from "../benchmark/compare.ts";
 import { quarterOf } from "../benchmark/export.ts";
@@ -234,6 +235,13 @@ function severityCounts({ critical, high }: { critical: number; high: number }):
   return `${critical} critical and ${high} high`;
 }
 
+/** The currency as the drafts' source says it (DECISIONS.md 700): an automatic run's from the locale is an assumption, and none is none. */
+function currencyLine(c: Calibration): string {
+  const standing = currencyStanding(c);
+  if (standing === "none") return "No currency could be read, so no amounts are given.";
+  return standing === "locale" ? `Values are in ${c.currency}, taken from the org's default locale and not confirmed.` : `Values are in ${c.currency}.`;
+}
+
 function calibrationText(run: Run, c: Calibration, facts: string[] = []): string {
   return [
     `Analysis window: ${run.analysisWindow.from} to ${run.analysisWindow.to}.`,
@@ -242,7 +250,7 @@ function calibrationText(run: Run, c: Calibration, facts: string[] = []): string
     `Stage meanings: ${c.stages.map((s) => `${s.name} (${s.category})`).join(", ")}.`,
     `A user counts as dormant after ${c.dormantDays} days without logging in.`,
     `A figure needs at least ${c.minSample} deals behind it.`,
-    `Values are in ${c.currency}.`,
+    currencyLine(c),
     ...facts,
   ].join("\n");
 }
@@ -885,7 +893,7 @@ export function buildReport(given: ReportInput): BuiltReport {
   const team = effective.findings.map(teamLevelFinding);
   const overall = overallScore(scores, effective.findings);
   const teamTime = teamTimeOf(effective.metrics);
-  const value = buildValueModel(effective.findings, run, calibration.currency, intake?.hourlyCost, teamTime);
+  const value = buildValueModel(effective.findings, run, calibration.currency, intake?.hourlyCost, teamTime, valueCurrency(calibration, intake?.hourlyCost));
   const added = addedByFinding(value);
   const survey = buildSurveyView(effective.metrics, team);
   const interviews = buildInterviewView(input.interviews, team, effective.metrics);

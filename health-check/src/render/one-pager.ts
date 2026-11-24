@@ -122,7 +122,7 @@ function onePagerHtmlWith(report: BuiltReport, pseudonyms: Pseudonymiser, words:
       : `<div class="box"><div class="label">Barometer score</div><p>${r.t(o.reason)}</p></div>`;
   const worth =
     value.total.expected > 0
-      ? `<div class="box"><div class="label">What fixing it is worth</div><div class="big">${m(value.total.expected)}</div><p>${r.t(`Over the next 12 months, expected. Between ${m(value.total.low)} and ${m(value.total.high)}.`)}</p></div>`
+      ? `<div class="box"><div class="label">What fixing it is worth</div><div class="big">${m(value.total.expected)}</div><p>${r.t(`Over the next 12 months, expected. Between ${m(value.total.low)} and ${m(value.total.high)}.`)}</p>${value.currencyNote ? `<p>${r.t(value.currencyNote)}</p>` : ""}</div>`
       : `<div class="box"><div class="label">What fixing it is worth</div><p>${r.t("We haven't put a money figure on these. They matter for the risk they carry.")}</p></div>`;
   const pay =
     cost.status === "measured"

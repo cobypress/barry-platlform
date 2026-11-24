@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { beginAuthorisation, createConnectLink } from "../../connect/link.ts";
-import { CALIBRATION_UNREADABLE, CURRENCY_UNREAD, NO_WON_STAGE, ORG_SETTINGS_CALIBRATOR, STAGES_UNREAD } from "../../connect/auto-calibration.ts";
+import { CALIBRATION_UNREADABLE, NO_WON_STAGE, ORG_SETTINGS_CALIBRATOR, STAGES_UNREAD } from "../../connect/auto-calibration.ts";
 import { StoreError } from "../../connect/org-stages.ts";
 import { ORG_CURRENCY_SOQL } from "../../connect/org-currency.ts";
 import { approvedReport, AUTOMATIC_DOCUMENTS_NOT_BUILT } from "../../render/render-released.ts";
@@ -182,7 +182,8 @@ describe("an automatic full check's connect, with the switch on and the org list
     const outcome = await f.handle(f.job, once);
     assert.equal(outcome.outcome, "connected");
     assert.match(outcome.detail, /Held: calibration_unreadable\./);
-    assert.ok(f.deps.lines.includes(`Automatic run ${RUN_ID} wasn't calibrated or queued: calibration_unreadable, and the hold couldn't be recorded.`));
+    // Changed by 700: the log line names the true cause and its counts.
+    assert.ok(f.deps.lines.includes(`Automatic run ${RUN_ID} wasn't calibrated or queued: calibration_unreadable (no stages could be read; 0 stages read, 0 won), and the hold couldn't be recorded.`));
   });
 
   test("a console that can't hold the calibration's source gets no calibration and no queued run", async () => {
@@ -261,15 +262,19 @@ describe("lane E2's review, closed (DECISIONS.md 693)", () => {
     assert.equal(f.deps.store.runs.get(RUN_ID)!.calibration!.currency, "EUR");
   });
 
-  test("no currency read: nothing saved or queued, the run held, and its flag raised with the hold", async () => {
+  // Changed by 700: a currency that can't be read never holds the run.
+  test("no currency read: calibrated with none and queued, with no hold and no flag (DECISIONS.md 700)", async () => {
     const f = await flow();
     f.org.currency = "refused";
     const outcome = await f.handle(f.job, once);
     assert.equal(outcome.outcome, "connected");
-    assert.ok(outcome.detail.endsWith(` Held: ${CALIBRATION_UNREADABLE}. ${CURRENCY_UNREAD}`));
-    assert.equal(f.deps.store.runs.get(RUN_ID)!.calibration, null);
-    assert.deepEqual(f.queued, []);
-    assert.deepEqual(f.deps.store.flagsOf(RUN_ID), [CALIBRATION_UNREADABLE]);
+    assert.match(outcome.detail, / The run is calibrated from the org's settings and queued\.$/);
+    const c = f.deps.store.runs.get(RUN_ID)!.calibration!;
+    assert.equal(c.currency, "XXX");
+    assert.equal(c.currencyFrom, "none");
+    assert.deepEqual(f.queued, [RUN_ID]);
+    assert.equal(f.deps.store.held.size, 0);
+    assert.deepEqual(f.deps.store.flagsOf(RUN_ID), []);
   });
 
   test("every hold at connect raises its one flag, and a redelivery raises no second", async () => {
@@ -546,10 +551,11 @@ describe("the Postgres store's side of it", () => {
     const pool = new FakePool();
     pool.handlers.push((text) => (text === HOLD_RUN_SQL ? { rows: [{ held: 1 }], rowCount: 1 } : undefined));
     assert.equal(await new PostgresWorkerStore(pool).holdRun(RUN_ID, CALIBRATION_UNREADABLE, NOW.toISOString()), true);
-    assert.deepEqual(pool.statements, [{ text: HOLD_RUN_SQL, values: [RUN_ID, CALIBRATION_UNREADABLE, NOW.toISOString()] }]);
+    // Changed by 700: the flag carries its counts, numbers only, as the fourth value.
+    assert.deepEqual(pool.statements, [{ text: HOLD_RUN_SQL, values: [RUN_ID, CALIBRATION_UNREADABLE, NOW.toISOString(), "{}"] }]);
     assert.match(HOLD_RUN_SQL, /"reviewMode" = 'automatic' AND "heldReason" IS NULL/);
     // The flag only from the row the hold set, raised once (DECISIONS.md 693).
-    assert.match(HOLD_RUN_SQL, /INSERT INTO "HealthCheckRunFlag" \("runId", "kind", "raisedAt", "counts"\) SELECT "id", \$2, \$3::timestamp\(3\), '\{\}'::jsonb FROM held ON CONFLICT \("runId", "kind"\) DO UPDATE .* WHERE "HealthCheckRunFlag"\."clearedAt" IS NOT NULL\) /);
+    assert.match(HOLD_RUN_SQL, /INSERT INTO "HealthCheckRunFlag" \("runId", "kind", "raisedAt", "counts"\) SELECT "id", \$2, \$3::timestamp\(3\), \$4::jsonb FROM held ON CONFLICT \("runId", "kind"\) DO UPDATE .* WHERE "HealthCheckRunFlag"\."clearedAt" IS NOT NULL\) /);
     // A run already held: nothing set, so nothing said held.
     const already = new FakePool();
     already.handlers.push(() => ({ rows: [{ held: 0 }], rowCount: 1 }));

@@ -185,6 +185,8 @@ function pipelinePage(r: Render, report: BuiltReport, body: string): string {
     weighted ? stat(compactMoney(weighted.value, r.currency), "Weighted by stage") : "",
     outlook ? stat(compactMoney(outlook.value, r.currency), `Expected by ${monthYear(outlook.series.at(-1)!.date)}`) : "",
   ].join("");
+  // A currency taken from the org's locale is said beside the amounts that use it (DECISIONS.md 700).
+  const currencyNote = report.value.currencyNote && (value || weighted || outlook) ? `<p class="note">${r.t(report.value.currencyNote)}</p>` : "";
   // One line per rule, in the order the rules are listed, so the page has a fixed ceiling.
   const potential = POTENTIAL_REVENUE_RULES.flatMap((id) => teamFindings.find((f) => f.ruleId === id && f.status === "issue") ?? []);
   const table = potential.length
@@ -195,7 +197,7 @@ function pipelinePage(r: Render, report: BuiltReport, body: string): string {
   const chart = metrics.some((m) => m.id === "current.delivery_outlook_value")
     ? `<h3 class="sub">Expected won value by month</h3><div style="margin-top:8px">${chartSlot(deliveryOutlookChart(metrics.find((m) => m.id === "current.delivery_outlook_value"), metrics.find((m) => m.id === "current.delivery_outlook_deals"), r.currency))}</div>`
     : "";
-  return `<div class="eyebrow">Pipeline</div><h2>Your pipeline today</h2><div class="lead">${paragraphs(r, body)}</div>${stats ? `<div class="stat-row" style="margin-top:6px">${stats}</div>` : ""}${chart}${table}${overlap}`;
+  return `<div class="eyebrow">Pipeline</div><h2>Your pipeline today</h2><div class="lead">${paragraphs(r, body)}</div>${stats ? `<div class="stat-row" style="margin-top:6px">${stats}</div>${currencyNote}` : ""}${chart}${table}${overlap}`;
 }
 
 /** Which checks couldn't be measured, named, so the tile's count isn't left unexplained. Past three, the count and where to look. */

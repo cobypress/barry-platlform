@@ -21,6 +21,7 @@ import { safeReason, type Attempt, type JobOutcome, type WorkerDeps } from "./de
 import { appFor, appNotSetUp, needsReconnection } from "./apps.ts";
 import { withJobLock } from "./lock.ts";
 import { automaticRefusal } from "./automatic.ts";
+import { recalibrateForRunAgain, type Recalibrated } from "./connect-job.ts";
 import { checkedDigest } from "../digest/checked.ts";
 import { checkSections, decideRelease, type ReleaseDecision } from "./release.ts";
 import { letGoAfterRun, type SeenRun } from "./scan-release.ts";
@@ -239,10 +240,31 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
     return fail(`The run stopped with an error: ${reason}`);
   }
   if (!second) return { outcome: "skipped", detail: `No run ${runId}` };
-  const input = second;
+  let input = second;
   Object.assign(seen, { product: input.run.product, connectionName: input.connectionName });
   // Held between the two readings (a second connect, a person): still nothing read.
   if (heldFor(input)) return heldOutcome(runId, input);
+
+  // A person's "Run again" of an automatic run with no calibration (DECISIONS.md 700): one held before 700
+  // because its currency couldn't be read. Its org is read again through its stored connection and the
+  // calibration built and saved as at connect, before the folder is cleared; none built, it is held again
+  // with the true cause. Only for a new press, with the switch on and a connection to read through:
+  // anything else goes on to the checks below, which refuse a run with no calibration as before.
+  if (fresh && input.run.reviewMode === "automatic" && !input.calibration && !automaticRefusal(input.run, deps.automatic) && input.connectionName && input.run.connectionKind === "oauth") {
+    let rebuilt: Recalibrated;
+    try {
+      rebuilt = await recalibrateForRunAgain(runId, input.connectionName, input.run.orgId, deps, log);
+    } catch (err) {
+      const reason = safeReason(err);
+      if (!attempt.final) throw new Error(reason);
+      return fail(`The run's org couldn't be read again to calibrate it: ${reason}`);
+    }
+    if (rebuilt.kind === "held") return { outcome: "skipped", detail: `Run ${runId}: ${rebuilt.detail}` };
+    if (rebuilt.kind === "unsaved") return fail(rebuilt.detail);
+    // As the store now has it: a delivery that saved one meanwhile is the one kept.
+    const saved = await deps.store.loadRunJob(runId).catch(() => null);
+    input = saved?.calibration ? saved : { ...input, calibration: rebuilt.calibration };
+  }
 
   const problem = problemWith(input, deps);
   if (problem) return fail(problem);
