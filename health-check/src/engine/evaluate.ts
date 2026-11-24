@@ -11,6 +11,7 @@ import { currencyNotNamedNote, currencyStanding, currencyUnknownReason, NO_CURRE
 import { opportunitiesExtractor, type OpportunityExtract } from "../extract/opportunities.ts";
 import { moneySymbol } from "../render/format.ts";
 import { notMeasurableKind } from "./not-measurable.ts";
+import { INSIGHT_METRICS, INSIGHT_RULES } from "../domains/scoring.ts";
 import { joinSaid, markSentence, orgWordsOf, said, saidMade, textSha256, withOrgWords, type MarkedSentence, type Said } from "./org-words.ts";
 import { passedOnSpans } from "./passed-on.ts";
 import type { IssueResult, ManualState, RecordList, Rule, RuleContext, RuleResult } from "./rule.ts";
@@ -38,7 +39,17 @@ export type AnalysisInput = {
 /** An issue's records, by finding. Worker-only: never part of a finding or anything sent on. */
 export type FindingRecords = RecordList & { findingId: string; ruleId: string };
 
-export type AnalysisOutput = { findings: Finding[]; metrics: Metric[]; manualSteps: ManualStep[]; records: FindingRecords[] };
+/**
+ * `findings` are the checks the documents are made from; `insights` the path insights (DECISIONS.md 703), which the
+ * run's findings.json, raw notes, the console and the digest keep and the documents leave out, so a run's documents
+ * and everything made from its findings in memory are as they were before them.
+ */
+export type AnalysisOutput = { findings: Finding[]; insights: Finding[]; metrics: Metric[]; insightMetrics: Metric[]; manualSteps: ManualStep[]; records: FindingRecords[] };
+
+/** Every finding of an analysis, the insights last: what the run folder and the console keep. */
+export const allFindings = (output: Pick<AnalysisOutput, "findings" | "insights">): Finding[] => [...output.findings, ...output.insights];
+/** Every measure of an analysis, the insights' last. */
+export const allMetrics = (output: Pick<AnalysisOutput, "metrics" | "insightMetrics">): Metric[] => [...output.metrics, ...output.insightMetrics];
 
 const NOT_SIZED = { kind: "not_sized", reason: "No finding to size." } as const;
 
@@ -454,12 +465,15 @@ function analyseWithin(input: AnalysisInput): AnalysisOutput {
   if (calibration.source === "org_settings") {
     const stageRows = extracts.get(stagesExtractor.id) as { status: string; data?: Array<{ ApiName: string; MasterLabel: string }> } | undefined;
     const orgValues = orgValuesOf({ metrics, findings, stages: [...calibration.stages.map((s) => s.name), ...(stageRows?.data ?? []).flatMap((s) => [s.ApiName, s.MasterLabel])] });
+    const reworded = findings.map((f) => Finding.parse(rewordFinding(f)));
     return {
-      findings: findings.map((f) => Finding.parse(rewordFinding(f))),
-      metrics: metrics.map((m) => Metric.parse(rewordMetric(m, marksOfMetric(m, orgValues)))),
+      findings: reworded.filter((f) => !INSIGHT_RULES.has(f.ruleId)),
+      insights: reworded.filter((f) => INSIGHT_RULES.has(f.ruleId)),
+      metrics: metrics.filter((m) => !INSIGHT_METRICS.has(m.id)).map((m) => Metric.parse(rewordMetric(m, marksOfMetric(m, orgValues)))),
+      insightMetrics: metrics.filter((m) => INSIGHT_METRICS.has(m.id)).map((m) => Metric.parse(rewordMetric(m, marksOfMetric(m, orgValues)))),
       manualSteps: [...raised.values()],
       records: records.filter((r) => issues.has(r.findingId)),
     };
   }
-  return { findings, metrics, manualSteps: [...raised.values()], records: records.filter((r) => issues.has(r.findingId)) };
+  return { findings: findings.filter((f) => !INSIGHT_RULES.has(f.ruleId)), insights: findings.filter((f) => INSIGHT_RULES.has(f.ruleId)), metrics: metrics.filter((m) => !INSIGHT_METRICS.has(m.id)), insightMetrics: metrics.filter((m) => INSIGHT_METRICS.has(m.id)), manualSteps: [...raised.values()], records: records.filter((r) => issues.has(r.findingId)) };
 }

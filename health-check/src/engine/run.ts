@@ -33,7 +33,7 @@ import { ApiBudget, BudgetStopError } from "../salesforce/budget.ts";
 import { SalesforceClient } from "../salesforce/client.ts";
 import type { ConnectionProvider } from "../salesforce/connection.ts";
 import type { Transport } from "../salesforce/transport.ts";
-import { analyse, type AnalysisOutput } from "./evaluate.ts";
+import { allFindings, allMetrics, analyse, type AnalysisOutput } from "./evaluate.ts";
 import { stagesExtractor, type StageRow } from "../extract/opportunities.ts";
 import { inferredMeanings, STAGE_MEANINGS_FILE } from "../domains/historic-pipeline/cohort.ts";
 
@@ -471,13 +471,14 @@ function analyseRun(dir: string, run: Run, calibration: Calibration, modules: Do
 }
 
 function renderOutputs(dir: string, run: Run, calibration: Calibration, output: AnalysisOutput): void {
-  writeJson(join(dir, "findings.json"), output.findings);
-  writeJson(join(dir, "metrics.json"), output.metrics);
+  // The path insights too, last (DECISIONS.md 703): the run keeps every finding; the documents choose theirs.
+  writeJson(join(dir, "findings.json"), allFindings(output));
+  writeJson(join(dir, "metrics.json"), allMetrics(output));
   writeJson(join(dir, "manual-steps.json"), output.manualSteps);
   const scores = scoreDomains(run.modules, output.findings, run.ruleSetVersion);
   writeJson(join(dir, "scores.json"), scores);
   const factsPath = join(dir, FACTS_FILE);
   const facts = existsSync(factsPath) ? summariseFacts(readJson<Facts>(factsPath)) : null;
-  const notes = renderRawNotes({ run, calibration, ...output, scores, facts, pseudonyms: loadPseudonyms(dir) });
+  const notes = renderRawNotes({ run, calibration, ...output, findings: allFindings(output), metrics: allMetrics(output), scores, facts, pseudonyms: loadPseudonyms(dir) });
   writeFileSync(join(dir, "raw-notes.md"), notes, { mode: 0o600 });
 }

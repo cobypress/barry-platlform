@@ -13,6 +13,8 @@ import { priorWinsExtractor } from "../../extract/prior-wins.ts";
 import { joinSaid, org, said, type Said } from "../../engine/org-words.ts";
 import { andList, moneySaid } from "../../engine/said-forms.ts";
 import { dimensionWords } from "./process.ts";
+import { pathMetrics } from "./paths/variants.ts";
+import { pathInsights } from "./paths/insights.ts";
 
 // The rules' titles, summaries, recommendations and reasons are written with
 // `said`, every stage and segment key with `org`, so the digest can say which
@@ -227,6 +229,6 @@ export const historicPipelineModule: DomainModule = {
   cloud: "sales",
   label: "Historic pipeline",
   extractors: [schemaExtractor, usersExtractor, stagesExtractor, opportunitiesExtractor, priorWinsExtractor],
-  metrics: [pipelineMetrics, deepDiveMetrics, processMetrics, driverMetrics],
-  rules: [unmappedStages, calibrationContradiction, segmentDivergence, ...PROCESS_RULES],
+  metrics: [pipelineMetrics, deepDiveMetrics, processMetrics, driverMetrics, pathMetrics],
+  rules: [unmappedStages, calibrationContradiction, segmentDivergence, ...PROCESS_RULES, pathInsights],
 };
