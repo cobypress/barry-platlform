@@ -279,6 +279,15 @@ export const DigestValueModel = z.object({
   lines: z.array(DigestValueLine),
   /** Findings with a figure the model couldn't place, by id. Their reasons are in the report. */
   leftOut: Ids,
+  /**
+   * On an automatic run whose currency isn't known by name (`currency` then
+   * "XXX", never printed), the line said beside its amounts, all ours
+   * (DECISIONS.md 700). Absent on every other run.
+   */
+  currencyNote: Text.optional(),
+  /** The currency the org's default locale suggests, for the portal's question: the org's word, never the currency. Only with currencyNote. */
+  currencySuggested: z.string().regex(/^[A-Z]{3}$/).optional(),
+  orgWords: z.object({ currencyNote: SentenceOrgWords.optional(), currencySuggested: SentenceOrgWords.optional() }).optional(),
 });
 export type DigestValueModel = z.infer<typeof DigestValueModel>;
 

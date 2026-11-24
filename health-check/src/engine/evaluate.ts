@@ -7,6 +7,9 @@ import { Pseudonymiser, UNKNOWN_USER } from "../privacy/pseudonymiser.ts";
 import { DESTRUCTIVE_RECOMMENDATIONS, Finding, Metric, type Calibration, type DateRange, type Evidence, type ManualAnswer, type ManualStep, type RunScope } from "../schemas/index.ts";
 import { fixFields } from "../fix/index.ts";
 import { MANUAL_STEPS } from "./manual-steps.ts";
+import { currencyNotNamedNote, currencyStanding, currencyUnknownReason, NO_CURRENCY, UNREAD_MARK } from "./currency.ts";
+import { opportunitiesExtractor, type OpportunityExtract } from "../extract/opportunities.ts";
+import { moneySymbol } from "../render/format.ts";
 import { notMeasurableKind } from "./not-measurable.ts";
 import { joinSaid, markSentence, orgWordsOf, said, textSha256, withOrgWords, type MarkedSentence, type Said } from "./org-words.ts";
 import type { IssueResult, ManualState, RecordList, Rule, RuleContext, RuleResult } from "./rule.ts";
@@ -203,19 +206,23 @@ const CONFIDENCE_RANK = { low: 0, medium: 1, high: 2 } as const;
  * (DECISIONS.md 598): each one in its text, and a finding's confidence no
  * higher than medium. A not measurable result leaned on nothing.
  */
-export function withAssumptions(result: RuleResult, notes: string[]): RuleResult {
-  if (notes.length === 0 || result.outcome === "not_measurable") return result;
+export function withAssumptions(result: RuleResult, notes: string[], said: string[] = []): RuleResult {
+  if ((notes.length === 0 && said.length === 0) || result.outcome === "not_measurable") return result;
   // Kept marked only when the summary and every note were made by said (DECISIONS.md 655).
-  const parts = [result.summary, ...notes];
+  const parts = [result.summary, ...notes, ...said];
   const summary = parts.every((p) => orgWordsOf(p) !== null) ? joinSaid(parts as Said[], " ") : parts.join(" ");
-  if (result.outcome === "pass") return { ...result, summary };
+  // What is only said, such as amounts in a currency not known by name (DECISIONS.md 700), guesses nothing and caps nothing.
+  if (result.outcome === "pass" || notes.length === 0) return { ...result, summary };
   return { ...result, summary, confidence: CONFIDENCE_RANK[result.confidence] > CONFIDENCE_RANK.medium ? "medium" : result.confidence };
 }
 
-function runRule(rule: Rule, ctx: RuleContext, pseudonyms: Pseudonymiser, records: FindingRecords[], assumed: Set<string>): Finding[] {
+function runRule(rule: Rule, ctx: RuleContext, pseudonyms: Pseudonymiser, records: FindingRecords[], assumed: Set<string>, gate: () => ((r: RuleResult) => RuleResult) | null = () => null, noted: Set<string> = new Set()): Finding[] {
   try {
     const raw = rule.evaluate(ctx);
-    const results = (Array.isArray(raw) ? raw : [raw]).map((r) => withAssumptions(r, [...assumed]));
+    // With no currency, whatever the rule said in money is taken out first (DECISIONS.md 700).
+    const ungated = Array.isArray(raw) ? raw : [raw];
+    const without = gate();
+    const results = (without ? ungated.map(without) : ungated).map((r) => withAssumptions(r, [...assumed], [...noted]));
     for (const result of results) {
       if (result.outcome !== "issue" || !result.records?.rows.length) continue;
       // The same last pass as the finding's text, for the words a rule wrote. Not
@@ -243,6 +250,62 @@ function runRule(rule: Rule, ctx: RuleContext, pseudonyms: Pseudonymiser, record
     const reason = `This check failed to run: ${message}`;
     return [toFinding(rule, { outcome: "not_measurable", reason, evidence: [engineEvidence(rule.id, message, ctx.now)] }, pseudonyms)];
   }
+}
+
+/**
+ * The calibration as a rule or metric builder reads it, telling the engine
+ * each time the currency is read (DECISIONS.md 700), as the unconfirmed stage
+ * order tells it each time the order is read (692). Only on an automatic run
+ * whose currency isn't known by name, and with the code given: ISO 4217's
+ * "XXX", printed as no code at all, or, where the run can't tell, its testing
+ * code, which is found and taken out. Every other run reads the calibration
+ * itself, so nothing about it changes.
+ */
+function watchingCurrency(calibration: Calibration, code: string, onRead: () => void): Calibration {
+  const watched = { ...calibration };
+  Object.defineProperty(watched, "currency", {
+    enumerable: true,
+    get: () => {
+      onRead();
+      return code;
+    },
+  });
+  return watched;
+}
+
+/** Whether a result or metric says an amount in this currency anywhere: its code, or its symbol. Numbers are never read as one. */
+function mentionsCurrency(value: unknown, code: string): boolean {
+  const text = JSON.stringify(value);
+  const symbol = moneySymbol(code).trim();
+  return text.includes(code) || (symbol !== "" && text.includes(symbol));
+}
+
+/**
+ * A rule's result with no money in it, when the run knows no currency
+ * (DECISIONS.md 700): an issue's figure in money is not sized, for the plain
+ * reason; a result that still says an amount anywhere is not measurable, for
+ * the same reason. Counts, rates and everything else stand as they are.
+ */
+function withoutCurrency(result: RuleResult, reason: Said): RuleResult {
+  let r = result;
+  if (r.outcome === "issue" && r.value.kind !== "not_sized" && r.value.unit === UNREAD_MARK) r = { ...r, value: { kind: "not_sized", reason } };
+  if (!mentionsCurrency(r, UNREAD_MARK)) return r;
+  return { outcome: "not_measurable", ...(r.key !== undefined ? { key: r.key } : {}), reason, evidence: r.evidence.map(noAmountNote), ...(r.manualStepIds ? { manualStepIds: r.manualStepIds } : {}) };
+}
+
+/** Evidence kept with a figure taken out for want of a currency, without a note that says an amount. */
+function noAmountNote(e: Evidence): Evidence {
+  if (e.note === undefined || !mentionsCurrency(e.note, UNREAD_MARK)) return e;
+  const { note: _, ...rest } = e;
+  return rest as Evidence;
+}
+
+/** The same for a metric: one in money, or one that says an amount, is not measurable for the plain reason. */
+function metricWithoutCurrency(metric: Metric, reason: Said): Metric {
+  // One already not measurable for its own reason keeps it, unless that reason says an amount.
+  if (metric.status === "not_measurable" ? !mentionsCurrency(metric, UNREAD_MARK) : metric.unit !== "currency" && !mentionsCurrency(metric, UNREAD_MARK)) return metric;
+  const { id, domain, label, definition, unit, evidence, exclusions } = metric;
+  return { status: "not_measurable", id, domain, label, definition, unit, evidence: evidence.map(noAmountNote), exclusions: exclusions.filter((e) => !mentionsCurrency(e, UNREAD_MARK)), assumptions: [], reason };
 }
 
 export function analyse(input: AnalysisInput): AnalysisOutput {
@@ -286,9 +349,30 @@ function analyseWithin(input: AnalysisInput): AnalysisOutput {
     return { step, status, answer, evidence };
   };
 
+  // What the run knows of its currency (DECISIONS.md 700). named: a code, as before. plain: one currency not
+  // known by name, so amounts are plain numbers, each place that shows one saying so. none: the run can't tell
+  // (a failed read at connect, and opportunities that couldn't be described or hold several currencies).
+  const standing = currencyStanding(calibration);
+  const opportunities = extracts.get(opportunitiesExtractor.id) as OpportunityExtract | undefined;
+  const oneCurrencySeen = opportunities?.opportunities.status === "ok" && opportunities.multiCurrency === false;
+  const mode: "named" | "plain" | "none" = standing === "org" || (standing === "unread" && oneCurrencySeen) ? "plain" : standing === "unread" ? "none" : "named";
+  // Set while a rule runs, so reading the currency there says so on its result; a metric builder's is said by its metrics' unit instead.
+  let inRule = false;
+  let currencyRead = false;
+  let noted = new Set<string>();
+  let plainNote: Said | undefined;
+  const notNamed = (): Said => (plainNote ??= currencyNotNamedNote());
+  let unknownReason: Said | undefined;
+  const noCurrency = (): Said => (unknownReason ??= currencyUnknownReason());
   const base: Omit<RuleContext, "metrics"> = {
     scope,
-    calibration,
+    calibration:
+      mode === "named"
+        ? calibration
+        : watchingCurrency(calibration, mode === "none" ? UNREAD_MARK : NO_CURRENCY, () => {
+            currencyRead = true;
+            if (mode === "plain" && inRule) noted.add(notNamed());
+          }),
     now,
     window,
     pseudonyms,
@@ -319,11 +403,19 @@ function analyseWithin(input: AnalysisInput): AnalysisOutput {
   const metrics = modules
     .flatMap((m) => (m.metrics ?? []).flatMap((build) => {
       assumed = new Set();
-      const built = build(base);
-      const notes = [...assumed];
-      for (const metric of built) if (metric.status === "measured" && notes.length > 0) leanedOn.set(metric.id, notes);
+      currencyRead = false;
+      const made = build(base);
+      // No currency: nothing in money is measured, for the plain reason (DECISIONS.md 700).
+      const built = mode === "none" ? made.map((metric) => (metric.unit === "currency" || currencyRead ? metricWithoutCurrency(metric, noCurrency()) : metric)) : made;
+      const builderNotes = [...assumed];
+      for (const metric of built) if (metric.status === "measured" && builderNotes.length > 0) leanedOn.set(metric.id, builderNotes);
+      // A measured figure in money, its currency not known by name, says so among its assumptions (DECISIONS.md 700). It isn't leaned on: nothing is guessed.
+      const notesOf = (metric: Metric): string[] => (mode === "plain" && metric.unit === "currency" ? [...builderNotes, notNamed()] : builderNotes);
       // A measured figure that leaned on an assumption says so among its own.
-      return notes.length === 0 ? built : built.map((metric) => (metric.status === "measured" ? { ...metric, assumptions: [...metric.assumptions, ...notes.filter((n) => !metric.assumptions.includes(n))] } : metric));
+      return built.map((metric) => {
+        const notes = metric.status === "measured" ? notesOf(metric) : [];
+        return notes.length === 0 || metric.status !== "measured" ? metric : { ...metric, assumptions: [...metric.assumptions, ...notes.filter((n) => !metric.assumptions.includes(n))] };
+      });
     }))
     // Every metric that couldn't be measured says which kind of reason it is (DECISIONS.md 627).
     .map((m) => (m.status === "not_measurable" && m.notMeasurableKind === undefined ? { ...m, notMeasurableKind: notMeasurableKind(m.reason) } : m))
@@ -336,7 +428,11 @@ function analyseWithin(input: AnalysisInput): AnalysisOutput {
     for (const rule of module.rules) {
       currentRule = rule.id;
       assumed = new Set();
-      findings.push(...runRule(rule, ctx, pseudonyms, records, assumed));
+      currencyRead = false;
+      noted = new Set();
+      inRule = true;
+      findings.push(...runRule(rule, ctx, pseudonyms, records, assumed, () => (mode === "none" && currencyRead ? (r) => withoutCurrency(r, noCurrency()) : null), noted));
+      inRule = false;
     }
   }
   currentRule = null;

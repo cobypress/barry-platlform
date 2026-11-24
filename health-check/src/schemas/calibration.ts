@@ -48,6 +48,15 @@ export const Calibration = z
     minSample: z.number().int().positive().default(20),
     dormantDays: z.number().int().positive().default(90),
     currency: z.string().length(3).default("GBP"),
+    // What an automatic run knows of its currency (DECISIONS.md 700), read only
+    // with source org_settings. "org": one currency, not known by name ("XXX",
+    // ISO 4217's code for none), its amounts shown as plain numbers. "unread":
+    // connect couldn't tell; the run decides from its opportunities. Absent: the
+    // code is the org's own, as before 700, or a person's.
+    currencyFrom: z.enum(["org", "unread"]).optional(),
+    // The currency the org's default locale suggests, for the question the
+    // portal asks. Never printed as the currency and never formats an amount.
+    currencySuggested: z.string().regex(/^[A-Z]{3}$/).optional(),
     // Annual cost per seat by Salesforce licence name. No entry means no sizing, never a guess.
     licenceCosts: z.record(z.string(), z.number().nonnegative()).default({}),
     // Minutes a year per item, by key, as agreed with the customer. Salesforce has

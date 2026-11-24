@@ -174,11 +174,13 @@ export function planSource(id: string, plan: Plan): PromptSource {
   };
 }
 
-export function buildPrompt(input: { title: string; purpose: string; maxWords: number; sources: PromptSource[]; feedback?: string[] }): string {
+export function buildPrompt(input: { title: string; purpose: string; maxWords: number; sources: PromptSource[]; feedback?: string[]; rules?: string[] }): string {
   const parts = [
     `Section: ${input.title}`,
     `What this section is for: ${input.purpose}`,
     `Write at most ${input.maxWords} words.`,
+    // A run's own rules for this section, such as amounts with no currency named (DECISIONS.md 700). None on most runs, so their prompts are as they were.
+    ...(input.rules ?? []),
     "",
     "<sources>",
     JSON.stringify(input.sources, null, 1),

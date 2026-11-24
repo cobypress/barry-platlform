@@ -3,7 +3,28 @@
 
 const SYMBOL: Record<string, string> = { GBP: "£", USD: "$", EUR: "€" };
 
-export const moneySymbol = (currency: string): string => SYMBOL[currency] ?? `${currency} `;
+/** ISO 4217's "no currency", as engine/currency.ts keeps it: an amount in it is a plain number (DECISIONS.md 700). */
+const NO_CURRENCY = "XXX";
+/** A private-use character standing for an amount's missing sign, only while pages are probed for amounts. */
+export const AMOUNT_MARK = "\uE000";
+let probing = 0;
+
+/**
+ * Runs `make` with every amount in no currency marked by AMOUNT_MARK, so a
+ * page or section that prints one can be found (DECISIONS.md 700): the caller
+ * then makes it again for real and puts the note on those. Synchronous, so the
+ * mark is never seen outside it.
+ */
+export function probingAmounts<T>(make: () => T): T {
+  probing++;
+  try {
+    return make();
+  } finally {
+    probing--;
+  }
+}
+
+export const moneySymbol = (currency: string): string => (currency === NO_CURRENCY ? (probing > 0 ? AMOUNT_MARK : "") : (SYMBOL[currency] ?? `${currency} `));
 
 export function money(amount: number, currency: string): string {
   return `${moneySymbol(currency)}${Math.round(amount).toLocaleString("en-GB")}`;

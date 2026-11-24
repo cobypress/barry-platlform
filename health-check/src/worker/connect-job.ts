@@ -1,9 +1,11 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { myDomainHost } from "../connect/instance-host.ts";
-import { automaticCalibration } from "../connect/auto-calibration.ts";
+import { automaticCalibration, type HoldCause } from "../connect/auto-calibration.ts";
+import { currencyStanding } from "../engine/currency.ts";
+import type { Calibration } from "../schemas/calibration.ts";
 import { readOrgStages, StoreError, type OrgStage } from "../connect/org-stages.ts";
-import { readOrgCurrency } from "../connect/org-currency.ts";
+import { readOrgCurrency, type OrgCurrency } from "../connect/org-currency.ts";
 import { checkReadOnlyUser, permissionNote, type ReadOnlyCheck } from "../connect/read-only-check.ts";
 import { ApiBudget } from "../salesforce/budget.ts";
 import { SalesforceClient } from "../salesforce/client.ts";
@@ -293,8 +295,8 @@ async function connectLocked(linkId: string, deps: WorkerDeps, attempt: Attempt)
       if (client) await readOrgStages(client, write, { log, now: at, timeoutMs: deps.stagesTimeoutMs });
       else log("The org's opportunity stages weren't saved for the calibration: the connection couldn't be opened to read them.");
     }
-    // The org's currency too, through the same connection, for an automatic run only (DECISIONS.md 693).
-    const currency = job.automaticRunId && client ? await readOrgCurrency(client, { log, timeoutMs: deps.stagesTimeoutMs }) : null;
+    // The org's currency too, through the same connection, for an automatic run only (DECISIONS.md 693, 700): never a hold.
+    const currency: OrgCurrency | null = job.automaticRunId && client ? await readOrgCurrency(client, { log, timeoutMs: deps.stagesTimeoutMs }) : null;
     const started = job.automaticRunId ? ` ${await calibrateAndQueue(job.automaticRunId, read, currency, stored.orgId, deps, at, log)}` : "";
     return { outcome: "connected", detail: `Connected "${name}" to org ${stored.orgId}. ${note}${started}` };
   } catch (err) {
@@ -311,13 +313,15 @@ async function connectLocked(linkId: string, deps: WorkerDeps, attempt: Attempt)
  * none, then the run queued as a scan is. A calibration this call wrote queues
  * the run; one already there queues it only if nothing has (a delivery that
  * died between the two), so a second link or a redelivery never starts it
- * twice. With no won stage, no stages or no currency read, or a calibration the
- * schema refuses, nothing is saved or queued and the run is held with the word
- * calibration_unreadable, its flag raised with it. Never throws: the link is
- * connected whatever happens here, and what happened is said in the outcome,
- * naming no stage.
+ * twice. With no stages read, no won stage, or a calibration the schema
+ * refuses, nothing is saved or queued and the run is held with the word
+ * calibration_unreadable, its flag raised with it carrying how many stages were
+ * read and how many are won, and the outcome and log name the cause. The
+ * currency never holds a run (DECISIONS.md 700): one not read is a calibration
+ * with none. Never throws: the link is connected whatever happens here, and
+ * what happened is said in the outcome, naming no stage.
  */
-async function calibrateAndQueue(runId: string, stages: OrgStage[] | null, currency: string | null, orgId: string, deps: WorkerDeps, at: () => string, log: (line: string) => void): Promise<string> {
+async function calibrateAndQueue(runId: string, stages: OrgStage[] | null, currency: OrgCurrency | null, orgId: string, deps: WorkerDeps, at: () => string, log: (line: string) => void): Promise<string> {
   // Where the run stands first (DECISIONS.md 693): a connect only ever starts a run nothing has started, and never holds one that is.
   let state: Awaited<ReturnType<WorkerDeps["store"]["automaticRunState"]>>;
   try {
@@ -337,10 +341,11 @@ async function calibrateAndQueue(runId: string, stages: OrgStage[] | null, curre
   }
   const built = automaticCalibration(stages, { orgId, at: at(), currency });
   if (!built.ok) {
-    const held = await deps.store.holdRun(runId, built.heldReason, at()).catch(() => false);
-    log(`Automatic run ${runId} wasn't calibrated or queued: ${built.heldReason}${held ? "" : ", and the hold couldn't be recorded"}.`);
+    const held = await deps.store.holdRun(runId, built.heldReason, at(), built.counts).catch(() => false);
+    log(`Automatic run ${runId} wasn't calibrated or queued: ${built.heldReason} (${HOLD_CAUSE_WORDS[built.cause]}; ${built.counts.stages} stages read, ${built.counts.won} won)${held ? "" : ", and the hold couldn't be recorded"}.`);
     return `Held: ${built.heldReason}. ${built.reason}`;
   }
+  logCurrency(runId, built.calibration, log);
   let saved: Awaited<ReturnType<WorkerDeps["store"]["saveCalibration"]>>;
   try {
     saved = await deps.store.saveCalibration(runId, built.calibration);
@@ -360,6 +365,16 @@ async function calibrateAndQueue(runId: string, stages: OrgStage[] | null, curre
     return "The run already had a calibration, so it wasn't started again.";
   }
   return queueAutomatic(runId, deps, at, log);
+}
+
+/** Each hold's true cause, for the log (DECISIONS.md 700). The outcome says it in the reason's own words. */
+export const HOLD_CAUSE_WORDS: Record<HoldCause, string> = { stages_unread: "no stages could be read", no_won_stage: "no stage is closed and won", calibration_refused: "the calibration was refused" };
+
+/** What the calibration's currency is, for the log: a code only, never a locale or any other value the org chose. */
+function logCurrency(runId: string, calibration: Calibration, log: (line: string) => void): void {
+  const standing = currencyStanding(calibration);
+  if (standing === "org") log(`Automatic run ${runId}'s org has one currency, not known by name, so its amounts will be shown with none${calibration.currencySuggested ? ` (its locale suggests ${calibration.currencySuggested})` : ""}.`);
+  else if (standing === "unread") log(`Automatic run ${runId}'s currency wasn't read, so the run decides from its opportunities whether to show amounts.`);
 }
 
 /** The status of a run nothing has started: the console makes it so, and only a delivery of its run job moves it on. */
@@ -435,21 +450,73 @@ async function finishAutomatic(runId: string, name: string, runOrgId: string, de
     log(`Automatic run ${runId} isn't calibrated and its connection is gone, so it can't be finished.`);
     return "The run's connection is gone, so it can't be started from this link.";
   }
-  let stages: OrgStage[] | null = null;
-  let currency: string | null = null;
-  let orgId: string;
+  let read: OrgRead;
   try {
-    const stored = await deps.tokens.load(name);
-    orgId = stored.orgId;
-    const provider = new OAuthConnectionProvider(name, { store: deps.tokens, client: appFor(stored.clientId, deps) ?? undefined, transport: deps.oauthTransport, env: approvedFromConsole(name) });
-    const client = await SalesforceClient.connect(provider, { budget: new ApiBudget({ stopAtShare: 0.5 }), transport: deps.dataTransport, sleep: deps.dataTransport ? async () => {} : undefined });
-    await readOrgStages(client, (read, readAt) => ((stages = read), deps.store.saveOrgStages(runId, read, readAt)), { log, now: at, timeoutMs: deps.stagesTimeoutMs });
-    currency = await readOrgCurrency(client, { log, timeoutMs: deps.stagesTimeoutMs });
+    read = await readOrgAgain(runId, name, deps, at, log);
   } catch (err) {
     log(`Automatic run ${runId}'s org couldn't be read again to finish its connect: ${safeReason(err)}`);
     return "The run's org couldn't be read again, so it wasn't started.";
   }
-  return calibrateAndQueue(runId, stages, currency, orgId, deps, at, log);
+  return calibrateAndQueue(runId, read.stages, read.currency, read.orgId, deps, at, log);
+}
+
+type OrgRead = { stages: OrgStage[] | null; currency: OrgCurrency; orgId: string };
+
+/** The org's stages (saved for the console's screen, as at connect) and currency, read again through the stored connection. Throws when the connection can't be opened. */
+async function readOrgAgain(runId: string, name: string, deps: WorkerDeps, at: () => string, log: (line: string) => void): Promise<OrgRead> {
+  let stages: OrgStage[] | null = null;
+  const stored = await deps.tokens.load(name);
+  const provider = new OAuthConnectionProvider(name, { store: deps.tokens, client: appFor(stored.clientId, deps) ?? undefined, transport: deps.oauthTransport, env: approvedFromConsole(name) });
+  const client = await SalesforceClient.connect(provider, { budget: new ApiBudget({ stopAtShare: 0.5 }), transport: deps.dataTransport, sleep: deps.dataTransport ? async () => {} : undefined });
+  await readOrgStages(client, (read, readAt) => ((stages = read), deps.store.saveOrgStages(runId, read, readAt)), { log, now: at, timeoutMs: deps.stagesTimeoutMs });
+  const currency = await readOrgCurrency(client, { log, timeoutMs: deps.stagesTimeoutMs });
+  return { stages, currency, orgId: stored.orgId };
+}
+
+/** What a person's "Run again" of an automatic run with no calibration came to (DECISIONS.md 700). */
+export type Recalibrated = { kind: "calibrated"; calibration: Calibration } | { kind: "held"; detail: string } | { kind: "unsaved"; detail: string };
+
+/**
+ * A person's "Run again" of an automatic run that has no calibration
+ * (DECISIONS.md 700): a run held before 700 for a currency that couldn't be
+ * read had its stages and a won stage, and was held for nothing. The stages
+ * and currency are read again through the run's stored connection and the
+ * calibration is built and saved as at connect, so the run job can go on from
+ * a clean folder. Still none: the run is held again, with its true cause in the
+ * flag's counts. The caller has checked the switch, the run's mode and that the
+ * press is new. Throws when the org can't be read, so the queue tries again.
+ */
+export async function recalibrateForRunAgain(runId: string, name: string, runOrgId: string, deps: WorkerDeps, log: (line: string) => void): Promise<Recalibrated> {
+  const at = () => (deps.now ?? (() => new Date()))().toISOString();
+  // Nothing is read through a connection to another org, as the run itself checks before it reads.
+  const stored = await deps.tokens.load(name);
+  if (stored.orgId.slice(0, 15) !== runOrgId.slice(0, 15)) return { kind: "unsaved", detail: `The connection "${name}" is for a different org from this run, so nothing was read.` };
+  const read = await readOrgAgain(runId, name, deps, at, log);
+  const built = automaticCalibration(read.stages, { orgId: read.orgId, at: at(), currency: read.currency });
+  if (!built.ok) {
+    const held = await deps.store.holdRun(runId, built.heldReason, at(), built.counts).catch(() => false);
+    log(`Automatic run ${runId} was run again with no calibration, and none could be built: ${built.heldReason} (${HOLD_CAUSE_WORDS[built.cause]}; ${built.counts.stages} stages read, ${built.counts.won} won)${held ? "" : ", and the hold couldn't be recorded"}.`);
+    // Never left extracting with no hold and no calibration (fix round 1): a hold that wasn't recorded fails the job,
+    // so the queue tries again, and its last delivery records the failure and raises its flag.
+    if (!held) throw new Error(`The run couldn't be calibrated (${HOLD_CAUSE_WORDS[built.cause]}), and its hold couldn't be recorded.`);
+    return { kind: "held", detail: `Held: ${built.heldReason}. ${built.reason}` };
+  }
+  logCurrency(runId, built.calibration, log);
+  let saved: Awaited<ReturnType<WorkerDeps["store"]["saveCalibration"]>>;
+  try {
+    saved = await deps.store.saveCalibration(runId, built.calibration);
+  } catch (err) {
+    const reason = err instanceof StoreError ? err.message : "an unexpected error";
+    log(`Automatic run ${runId}'s calibration couldn't be saved when it was run again: ${reason}.`);
+    return { kind: "unsaved", detail: "The run's calibration couldn't be saved, so it wasn't run again." };
+  }
+  if (saved === "no_source_column") {
+    log(`Automatic run ${runId}'s calibration wasn't saved when it was run again: the console's HealthCheckCalibration table has no "source" column. Apply the console's 20261211_health_check_automatic.sql migration.`);
+    return { kind: "unsaved", detail: "The run's calibration couldn't be saved, so it wasn't run again." };
+  }
+  // "exists": another delivery wrote one between the reads; the caller reads the run again and goes on with that one.
+  log(`Automatic run ${runId} had no calibration, so its org was read again and one was ${saved === "saved" ? "built and saved" : "found saved meanwhile"} before it was run again.`);
+  return { kind: "calibrated", calibration: built.calibration };
 }
 
 export const SCAN_EVERY_DAYS = 30;

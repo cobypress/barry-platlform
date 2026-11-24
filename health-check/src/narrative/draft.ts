@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { MODELS } from "../config.ts";
+import { CURRENCY_SIGNS } from "../engine/currency.ts";
 import { checkNumbers, scopeDataset, type FigureSet } from "../numbercheck/index.ts";
 import { tokenSource, type Pseudonymiser } from "../privacy/pseudonymiser.ts";
 import type { NarrativeClient } from "./client.ts";
@@ -30,7 +31,20 @@ export type SectionBrief = {
   rolesOnly?: boolean;
   /** An automatic run's (DECISIONS.md 693): its own system prompt, and a draft claiming a consultant or a review is sent back. */
   automatic?: boolean;
+  /**
+   * An automatic run whose currency isn't known by name (DECISIONS.md 700): a
+   * draft naming a currency, by code or symbol, is sent back, and so is one that
+   * leaves out `amountsNote` where the engine's text carries it.
+   */
+  noCurrencyCode?: boolean;
+  amountsNote?: string;
 };
+
+/** Sent back to Claude when it names a currency that nobody has named (DECISIONS.md 700). */
+export const NO_CURRENCY_CODE = "This org's currency isn't known by name: write every amount as a plain number, with no currency symbol or code.";
+/** What Claude is told up front on such a run. */
+export const PLAIN_AMOUNTS = "Amounts are in the org's own currency, which we don't know by name: write amounts as plain numbers with no symbol or code.";
+export const keepAmountsNote = (note: string): string => `Keep this sentence word for word, as its own sentence: "${note}"`;
 
 export type DraftResult =
   | { status: "accepted"; body: string; model: string; attempts: number; words: number }
@@ -96,7 +110,7 @@ export async function draftSection(input: { brief: SectionBrief; dataset: Figure
   let long: DraftResult | undefined;
 
   for (let attempt = 1; attempt <= DRAFT_DEFAULTS.maxAttempts; attempt++) {
-    const prompt = buildPrompt({ ...brief, sources, feedback });
+    const prompt = buildPrompt({ ...brief, sources, feedback, ...(brief.noCurrencyCode ? { rules: [PLAIN_AMOUNTS, ...(brief.amountsNote ? [keepAmountsNote(brief.amountsNote)] : [])] } : {}) });
     let reply;
     try {
       // sendPrompt guards the whole prompt again and refuses it if a name survives.
@@ -121,6 +135,8 @@ export async function draftSection(input: { brief: SectionBrief; dataset: Figure
     const { paragraphs } = reviewed;
     // On an automatic run nobody is there to have reviewed it: a draft that says otherwise goes back, and in the end the engine's own words stand.
     const problems = brief.automatic && paragraphs.some(claimsAPerson) ? [...reviewed.problems, AUTOMATIC_CLAIM] : reviewed.problems;
+    if (brief.noCurrencyCode && paragraphs.some((p) => CURRENCY_SIGNS.test(p))) problems.push(NO_CURRENCY_CODE);
+    if (brief.amountsNote && !paragraphs.some((p) => p.includes(brief.amountsNote!))) problems.push(keepAmountsNote(brief.amountsNote));
     if (problems.length === 0) {
       const words = wordCount(paragraphs);
       const accepted: DraftResult = { status: "accepted", body: paragraphs.join("\n\n"), model: reply.model, attempts: attempt, words };
