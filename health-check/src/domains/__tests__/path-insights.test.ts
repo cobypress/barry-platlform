@@ -313,6 +313,18 @@ describe("who is compared: the deals made in the period that reached the stage, 
   const open = (n: number, path: string[]): Spec[] => deals(n, path, 0, 60).map((d) => ({ ...d, open: true }));
   const pass = (findings: Finding[]) => findings.find((f) => f.status === "passed")!;
 
+  test("a gap made only by the mix changing over time is not raised: within each band of deals made together there's none (decision 712)", () => {
+    // Made from 25 June 2025: 20 skippers and 80 through Discovery, 85% won on both sides. Made from 26 September, in
+    // the next 91-day band: 80 and 20, 55% won on both. Together the skippers were won 61% of the time against 79%,
+    // z 2.8. Each band closes in the same week of October, so no closed quarter sets them apart either.
+    const band = (at: string, days: number, skip: number, skipWon: number, thru: number, thruWon: number): Spec[] =>
+      [...deals(skip, SKIPS_DISCOVERY, skipWon, days), ...deals(thru, USUAL, thruWon, days)].map((d, i) => ({ ...d, createdAt: Date.parse(at) + i * 3_600_000 }));
+    const mixed = [...band("2025-06-25T09:00:00Z", 100, 20, 17, 80, 68), ...band("2025-09-26T09:00:00Z", 10, 80, 44, 20, 11)];
+    assert.equal(comparisons(analysed(mixed).findings).length, 0);
+    // The same outcomes all made in one band: the gap is there within it, and is said.
+    assert.equal(comparisons(analysed(mixed.map((d, i) => ({ ...d, days: 10, createdAt: Date.parse("2025-09-26T09:00:00Z") + i * 3_600_000 }))).findings).length, 1);
+  });
+
   test("a skip compares deals that started before the stage, on both sides, and says so (decision 712)", () => {
     // Ten more whose history starts at Discovery: they went through it, but didn't start before it, so they're in neither side.
     const [f] = comparisons(analysed([...through(), ...deals(30, SKIPS_DISCOVERY, 25, 60), ...deals(10, ["Discovery", "Proposal", "Negotiation"], 5, 60)]).findings);
