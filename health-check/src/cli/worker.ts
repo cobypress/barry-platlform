@@ -128,6 +128,7 @@ export async function workerCommand(
     micrositeKey: config.micrositeKey,
     apexSummaries: config.apexSummaries,
     automatic: config.automatic,
+    portalDocuments: config.portalDocuments,
     codeLint: "found" in pmd ? { pmd: pmd.found } : { pmd: null, pmdMissing: pmd.missing },
     queueRun: runQueuer(queue),
     narrative,
@@ -160,6 +161,14 @@ export async function workerCommand(
   );
   // Said at every start, so a deploy that turns it on or off shows in the log (DECISIONS.md 688).
   log(automaticStartLine(config.automatic));
+  // The same for the portal's documents (DECISIONS.md 698): never the key, only whether it reads.
+  log(
+    !config.portalDocuments.on
+      ? "The portal's documents are off: HC_DOCUMENTS_ON_DEMAND isn't on, so every request for them is refused."
+      : config.portalDocuments.key
+        ? "The portal's documents are on: a released automatic run's three PDFs are made when asked, sealed into the console's database and put nowhere else."
+        : `The portal's documents are switched on, but ${config.portalDocuments.keyProblem ?? "the key can't be used"}, so every request for them is refused.`,
+  );
   // Said at every start, so a deploy that installs it shows in the log.
   if (lintSwept) log(`Deleted ${lintSwept} temporary ${lintSwept === 1 ? "folder" : "folders"} of Apex code that a PMD run cut short had left.`);
   log("found" in pmd ? `PMD ${PMD_VERSION} checks each health check's Apex code, and its findings are stored beside our own scan's.` : `${pmd.missing} Each health check says PMD didn't run.`);

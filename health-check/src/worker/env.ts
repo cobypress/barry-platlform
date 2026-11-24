@@ -5,6 +5,7 @@ import type { DriveConfig } from "./drive.ts";
 import { MicrositeKeyError, micrositeKey } from "../microsite/seal.ts";
 import { orgWordsStore } from "../engine/org-words.ts";
 import { readAutomaticOrgs, type AutomaticSwitch } from "./automatic.ts";
+import { DocumentsKeyError, documentsKey, type PortalDocumentsSwitch } from "./portal-documents.ts";
 
 /** The highest HC_WORKER_RECYCLE_AT takes: half the org-word store's bound (DECISIONS.md 666). */
 export const RECYCLE_AT_LIMIT = Math.floor(orgWordsStore().limit / 2);
@@ -49,6 +50,8 @@ export const WORKER_ENV = {
     HC_AUTOMATIC: "on, exactly, to let the worker take automatic runs, which no person reviews (DECISIONS.md 688). Anything else, or unset, is off: an automatic run's connect is refused and its run fails at its claim with nothing read. With it on, an automatic run connects, is calibrated from the org's settings and queued (DECISIONS.md 692), then fails before reading the org for analysis, until lane E3",
     HC_AUTOMATIC_ORGS: "Comma-separated 15-character org ids automatic runs are allowed for while they're proved. An automatic run for any other org is refused at connect, and fails at its claim, with nothing read",
     HC_MICROSITE_KEY: "The customer microsite: 32 bytes, base64 (openssl rand -base64 32), the same value as the console's, and different from HC_CONNECT_KEY and HC_TOKEN_KEY. Without it, released runs get documents but no microsite",
+    HC_DOCUMENTS_ON_DEMAND: "on, exactly, to make a released automatic run's three PDFs when the portal asks, sealed into the console's database and put nowhere else (DECISIONS.md 698). Anything else, or unset, is off: every such request is refused",
+    HC_DOCUMENTS_KEY: "Seals the portal's documents: 32 bytes, base64 (openssl rand -base64 32), the same value as the console's, and different from HC_CONNECT_KEY, HC_TOKEN_KEY and HC_MICROSITE_KEY. Missing or wrong, the worker still starts and every portal request is refused, with nothing made",
   },
 } as const;
 
@@ -96,6 +99,8 @@ export type WorkerConfig = {
   javaHome: string | null;
   /** HC_AUTOMATIC=on, exactly, and HC_AUTOMATIC_ORGS: whether an automatic run may go past its claim, and for which orgs (DECISIONS.md 688). */
   automatic: AutomaticSwitch;
+  /** HC_DOCUMENTS_ON_DEMAND=on, exactly, and HC_DOCUMENTS_KEY (DECISIONS.md 698). A bad key never stops the worker: it's kept as the reason every portal make is refused. */
+  portalDocuments: PortalDocumentsSwitch;
 };
 
 const key32 = (raw: string): Buffer | null => {
@@ -153,6 +158,16 @@ export function readWorkerEnv(env: NodeJS.ProcessEnv): { ok: true; config: Worke
     else throw err;
   }
   if (problems.length) return { ok: false, problems };
+  // Never a reason not to start: only the portal's documents need it, and each request is refused with the reason (DECISIONS.md 698).
+  let docsKey: Buffer | null = null;
+  let docsKeyProblem: string | null = null;
+  try {
+    docsKey = documentsKey({ HC_DOCUMENTS_KEY: get("HC_DOCUMENTS_KEY"), HC_CONNECT_KEY: get("HC_CONNECT_KEY"), HC_TOKEN_KEY: get("HC_TOKEN_KEY"), HC_MICROSITE_KEY: get("HC_MICROSITE_KEY") });
+    if (!docsKey) docsKeyProblem = "HC_DOCUMENTS_KEY isn't set on the worker";
+  } catch (err) {
+    if (!(err instanceof DocumentsKeyError)) throw err;
+    docsKeyProblem = err.message;
+  }
   const identityToken = Boolean(get("ANTHROPIC_IDENTITY_TOKEN_FILE") || get("ANTHROPIC_IDENTITY_TOKEN"));
   const claude: ClaudeAccess = get("ANTHROPIC_API_KEY")
     ? { kind: "key", apiKey: get("ANTHROPIC_API_KEY") }
@@ -200,6 +215,8 @@ export function readWorkerEnv(env: NodeJS.ProcessEnv): { ok: true; config: Worke
       javaHome: get("HC_JAVA_HOME") || null,
       // Exactly "on", untrimmed, as the summaries' switch: a switch that lets a run skip a person doesn't guess.
       automatic: { on: env.HC_AUTOMATIC === "on", orgs: automaticOrgs.ok ? automaticOrgs.orgs : new Set() },
+      // Exactly "on", untrimmed, as the other switches that put something before a customer with no person reading it.
+      portalDocuments: { on: env.HC_DOCUMENTS_ON_DEMAND === "on", key: docsKey, keyProblem: docsKeyProblem },
     },
   };
 }

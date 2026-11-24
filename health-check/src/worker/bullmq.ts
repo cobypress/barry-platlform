@@ -178,6 +178,16 @@ const STALLED_TOO_OFTEN = /stalled more than allowable limit/;
 export const LOST_REASON = "The worker stopped part-way more than once, by a restart or by running out of memory, so this was given up. Queue it again: a run picks up from where it got to.";
 
 const isHeavy = (data: unknown): boolean => typeof data === "object" && data !== null && HEAVY_KINDS.has(String((data as { kind?: unknown }).kind));
+const isPortal = (data: unknown): boolean => isHeavy(data) && (data as { kind?: unknown; deliver?: unknown }).kind === "documents" && (data as { deliver?: unknown }).deliver === "portal";
+
+/**
+ * The one id the console adds a portal documents job under (DECISIONS.md 698):
+ * BullMQ ignores an add whose id a job in the queue already holds, so a second
+ * request while one is waiting or being made adds nothing. Handed on to the
+ * heavy queue under the same id, and removed from it the moment it ends, done
+ * or failed, so the next request makes them again and replaces the rows.
+ */
+export const portalDocumentsJobId = (runId: string): string => `documents-portal-${runId}`;
 
 /**
  * The console's queue: a connect or share job runs here, and a heavy job is
@@ -199,7 +209,9 @@ export function gatedProcessor(
     // A finished heavy job is kept for a day, not removed at once as the console asks of its own jobs, so a
     // second delivery of the console's job after a crash in the hand-off finds it and adds nothing (DECISIONS.md 398).
     // A failed one is kept as the console asks, the last 200, which holds its id too.
-    const opts = Object.fromEntries(Object.entries({ attempts, backoff, priority, removeOnComplete: HEAVY_KEEP_DONE, removeOnFail, jobId: job.id }).filter(([, v]) => v !== undefined));
+    // A portal make keeps nothing once it ends (DECISIONS.md 698): a hand-off delivered twice makes them twice, which replaces the same rows.
+    const portal = isPortal(job.data);
+    const opts = Object.fromEntries(Object.entries({ attempts, backoff, priority, removeOnComplete: portal ? true : HEAVY_KEEP_DONE, removeOnFail: portal ? true : removeOnFail, jobId: job.id }).filter(([, v]) => v !== undefined));
     await heavy.add(job.name, job.data, opts);
     log(`${job.id ?? "?"} is waiting for the heavy slot`);
     return { outcome: "queued_heavy" };
@@ -218,7 +230,7 @@ export function lostRecorder(
   letGo?: (runId: string) => Promise<void>,
 ): (data: unknown, reason: string) => Promise<void> {
   return async (data, reason) => {
-    const job = data as { kind?: unknown; runId?: unknown };
+    const job = data as { kind?: unknown; runId?: unknown; deliver?: unknown };
     if (typeof job?.runId !== "string") return;
     if (job.kind === "run") {
       const runId = job.runId;
@@ -227,7 +239,10 @@ export function lostRecorder(
       } finally {
         if (letGo) await letGo(runId);
       }
-    } else if (job.kind === "documents") await store.failDocuments(job.runId, reason, now().toISOString());
+    } else if (job.kind === "documents" && job.deliver !== "portal") {
+      // A portal make has no documents row to fail, and the Drive make's row isn't its to touch (DECISIONS.md 698).
+      await store.failDocuments(job.runId, reason, now().toISOString());
+    }
   };
 }
 

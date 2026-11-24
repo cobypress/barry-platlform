@@ -46,6 +46,14 @@ export type ApprovedRun = {
    * row holds it, for the names it withholds, and when it was made.
    */
   digest?: { inventory: Inventory | null; madeAt: string };
+  /**
+   * Only the portal's documents of a released automatic run (DECISIONS.md
+   * 698): with it, an automatic run's checked sections print, as canRelease
+   * passes them; without it, an automatic run is refused as before. Each
+   * PDF's page HTML is handed back as printed, last make last, for the job's
+   * check of the words. Nothing else the make does changes.
+   */
+  portal?: { onPrinted: (doc: "executive" | "full" | "ceo", html: string) => void };
 };
 
 /** The report's three outputs, then the one-pager and the action lists for the customer, and the kit for Black Cloud only. */
@@ -275,9 +283,9 @@ export const BASELINE_ROWS_UNREAD = "the earlier health check's corrections coul
  */
 export function approvedReport(dir: string, approved: ApprovedRun, raws: string[] = []): { report: BuiltReport; pseudonyms: Pseudonymiser; baselineGone: boolean; baselineUnapproved: boolean; engineText: Map<string, string>; repairs: SourceRepair[] } {
   const loaded = loadRun(dir);
-  // Lane E3 builds an automatic run's documents; until then none is made, and a checked section never passes for approved (DECISIONS.md 688).
+  // An automatic run's documents are made only for the portal (DECISIONS.md 688, 698), and a checked section never passes for approved on a consultant-led run.
   const mode = loaded.input.run.reviewMode;
-  if (mode !== "consultant") throw new Error(AUTOMATIC_DOCUMENTS_NOT_BUILT);
+  if (mode !== "consultant" && !(mode === "automatic" && approved.portal)) throw new Error(AUTOMATIC_DOCUMENTS_NOT_BUILT);
   assertSectionsFitRun(mode, approved.sections);
   const { pseudonyms } = loaded;
   const held = approved.sections.some((s) => s.output === "raw_notes" && s.key === "progress");
@@ -465,7 +473,9 @@ export async function renderReleased(dir: string, approved: ApprovedRun, outDir:
       const page = maskPage(html, pageRaws);
       pageMasks[doc] = page.masked;
       masks[doc] = masksIn(page.html);
-      return withheldNote(page.html);
+      const printed = withheldNote(page.html);
+      approved.portal?.onPrinted(doc, printed);
+      return printed;
     });
     let site: { ok: true; pages: MicrositePages["pages"] } | { ok: false; reason: string };
     try {

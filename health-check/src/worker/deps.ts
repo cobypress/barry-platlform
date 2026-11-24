@@ -9,6 +9,7 @@ import type { renderHandbookDocx } from "../handbook/docx.ts";
 import type { DocumentDrive, FolderSharing } from "./drive.ts";
 import type { WorkerStore } from "./types.ts";
 import type { AutomaticSwitch } from "./automatic.ts";
+import type { PortalDocumentsSwitch } from "./portal-documents.ts";
 
 export type WorkerDeps = {
   store: WorkerStore;
@@ -42,6 +43,8 @@ export type WorkerDeps = {
    * it after the analysis (DECISIONS.md 490 to 492). Off when absent.
    */
   apexSummaries?: boolean;
+  /** HC_DOCUMENTS_ON_DEMAND and HC_DOCUMENTS_KEY, read once at start in env.ts (DECISIONS.md 698). Absent: off, and every portal make is refused. */
+  portalDocuments?: PortalDocumentsSwitch;
   /** The worker's switch for automatic runs, read once at start in env.ts (DECISIONS.md 688). Absent: off. */
   automatic?: AutomaticSwitch;
   /**

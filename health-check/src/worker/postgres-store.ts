@@ -37,6 +37,8 @@ import {
   type ReleasedRun,
   type AutomaticRunState,
   type WorkerStore,
+  type PortalDocumentRow,
+  DOCUMENTS_HELD_FLAG,
 } from "./types.ts";
 
 // UNVERIFIED: written against the console's migrations (blackcloud-next
@@ -253,6 +255,19 @@ export const RELEASE_ROW_SQL = `INSERT INTO "HealthCheckRelease" ("id", "runId",
  * (DECISIONS.md 693). One row or the save rolls back.
  */
 export const RELEASE_RUN_SQL = `UPDATE "HealthCheckRun" SET "status" = 'released' WHERE "id" = $1 AND "reviewMode" = 'automatic' AND "heldReason" IS NULL AND "status" NOT IN ('released', 'failed')`;
+/**
+ * One of the portal's documents (DECISIONS.md 698, migration 20261212),
+ * replacing what an earlier make left for that run and output, and written
+ * only while the run is a released, unheld automatic run: a run a person took
+ * back meanwhile gets no row, and the make rolls back.
+ */
+export const PORTAL_DOCUMENT_SQL =
+  `INSERT INTO "HealthCheckPortalDocument" ("runId", "output", "sealed", "madeAt", "expiresAt", "heldForUs") ` +
+  `SELECT r."id", $2, $3::bytea, $4::timestamp(3), $5::timestamp(3), $6::boolean FROM "HealthCheckRun" r ` +
+  `WHERE r."id" = $1 AND r."status" = 'released' AND r."reviewMode" = 'automatic' AND r."heldReason" IS NULL ` +
+  `ON CONFLICT ("runId", "output") DO UPDATE SET "sealed" = EXCLUDED."sealed", "madeAt" = EXCLUDED."madeAt", "expiresAt" = EXCLUDED."expiresAt", "heldForUs" = EXCLUDED."heldForUs"`;
+/** The clean-up (DECISIONS.md 698): times are written in UTC, so compared with UTC, as the console's view does. */
+export const PORTAL_EXPIRED_SQL = `DELETE FROM "HealthCheckPortalDocument" WHERE "expiresAt" < (now() AT TIME ZONE 'UTC')`;
 /** The org's last released run of the product, by its latest release row, other than this one (DECISIONS.md 693). */
 export const LAST_RELEASED_SCORE_SQL =
   `SELECT r."overallScore" AS "score" FROM "HealthCheckRun" r JOIN "HealthCheckRelease" l ON l."runId" = r."id" ` +
@@ -1141,8 +1156,11 @@ export class PostgresWorkerStore implements WorkerStore {
     ]);
     const run = runFromRows(row, steps.rows.map(({ runId: _r, ...s }) => s));
     const doc = one(documents);
+    // An automatic run's hold, read as the run job reads it; a consultant-led run's reads are unchanged (DECISIONS.md 698).
+    const held = run.reviewMode === "automatic" ? one(await this.#pool.query(HELD_REASON_SQL, [runId]))?.heldReason : undefined;
     return {
       run,
+      ...(run.reviewMode === "automatic" ? { heldReason: typeof held === "string" ? held : null } : {}),
       intake: one(intake) ? intakeFromRow(one(intake)!, run) : null,
       survey,
       sections: sections.rows.map(sectionFromRow),
@@ -1236,6 +1254,25 @@ export class PostgresWorkerStore implements WorkerStore {
     const { rows } = await this.#pool.query(`SELECT ${columns.map((c) => `"${c}"`).join(", ")} FROM "HealthCheckBenchmarkRow"`);
     // numeric comes back from pg as a string.
     return rows.map((row: Record<string, unknown>) => BenchmarkRow.parse({ ...row, value: Number(row.value) }));
+  }
+
+  async savePortalDocuments(runId: string, rows: PortalDocumentRow[], heldCounts: Record<string, number> | null): Promise<void> {
+    await this.#transaction(async (client) => {
+      for (const row of rows) {
+        const result = await client.query(PORTAL_DOCUMENT_SQL, [runId, row.output, row.sealed, row.madeAt, row.expiresAt, row.heldForUs]);
+        if (result.rowCount !== 1) throw new Error(`Run ${runId} isn't a released, unheld automatic run, so its portal documents weren't saved`);
+      }
+      if (heldCounts) await client.query(RAISE_FLAG_SQL, [runId, DOCUMENTS_HELD_FLAG, rows[0]?.madeAt ?? new Date(0).toISOString(), JSON.stringify(heldCounts)]);
+    });
+  }
+
+  async deleteExpiredPortalDocuments(_now: string): Promise<number | null> {
+    try {
+      return (await this.#pool.query(PORTAL_EXPIRED_SQL)).rowCount ?? 0;
+    } catch (err) {
+      if ((err as { code?: string }).code === "42P01") return null;
+      throw err;
+    }
   }
 
   async failDocuments(runId: string, reason: string, at: string): Promise<void> {

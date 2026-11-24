@@ -19,7 +19,7 @@ export function createJobHandler(deps: WorkerDeps): JobHandler {
   assertOutsideGit(deps.tokens.dir);
   return async (data, attempt) => {
     const job = parseJob(data);
-    if (job.kind === "documents") return processDocumentsJob(job.runId, deps, attempt);
+    if (job.kind === "documents") return processDocumentsJob(job.runId, deps, attempt, job.deliver);
     if (job.kind === "share") return processShareJob(job.runId, deps, attempt);
     return job.kind === "run" ? processRunJob(job.runId, deps, attempt) : processConnectJob(job.linkId, deps, attempt);
   };

@@ -13,7 +13,8 @@ import { withJobLock } from "./lock.ts";
 import { syncShares } from "./share-job.ts";
 import { sealPages } from "../microsite/seal.ts";
 import { addMonths } from "./retention.ts";
-import type { DocumentFile, DocumentsJobInput } from "./types.ts";
+import type { DocumentFile, DocumentsJobInput, PortalDocumentRow } from "./types.ts";
+import { forbiddenOnPage, HELD_PLACEHOLDER, PORTAL_DOCUMENT_DAYS, PORTAL_OUTPUTS, PORTAL_PDF_MAX_BYTES, sealDocument, type PortalOutput } from "./portal-documents.ts";
 import { BASELINE_GONE, BASELINE_UNAPPROVED, keepSurveyMetrics, loadPseudonymMap, OVERRIDES_FILE, SURVEY_FILE, write, writeRows } from "../render/render-run.ts";
 import { HANDBOOK_DOCX, renderHandbookDocx } from "../handbook/docx.ts";
 import { HANDBOOK_NOT_MADE, readEarlierHandbook, readHandbook } from "../handbook/read.ts";
@@ -284,10 +285,159 @@ function keepOverrides(dir: string, rows: NumberOverride[]): void {
   writeRows(join(dir, OVERRIDES_FILE), rows);
 }
 
-export async function processDocumentsJob(runId: string, deps: WorkerDeps, attempt: Attempt): Promise<JobOutcome> {
+export async function processDocumentsJob(runId: string, deps: WorkerDeps, attempt: Attempt, deliver?: "portal"): Promise<JobOutcome> {
   if (!RUN_ID.test(runId)) return { outcome: "failed", detail: "The run id isn't one the worker can use as a folder name" };
-  // The run's own lock: a run job for it can't be writing its folder meanwhile.
-  return withJobLock(deps.locksDir, `run-${runId}`, () => documentsLocked(runId, deps, attempt));
+  await sweepPortalDocuments(deps);
+  // The run's own lock: a run job for it can't be writing its folder meanwhile, nor a second make of its portal documents.
+  return withJobLock(deps.locksDir, `run-${runId}`, () => (deliver === "portal" ? portalLocked(runId, deps, attempt) : documentsLocked(runId, deps, attempt)));
+}
+
+/**
+ * The portal's expired documents, deleted at the start of every documents job
+ * (DECISIONS.md 698). Never a reason to fail one: a console without the table
+ * says so once a process, and any other error is logged by its code.
+ */
+let saidNoPortalTable = false;
+async function sweepPortalDocuments(deps: WorkerDeps): Promise<void> {
+  const log = deps.log ?? (() => {});
+  try {
+    const deleted = await deps.store.deleteExpiredPortalDocuments((deps.now ?? (() => new Date()))().toISOString());
+    if (deleted === null && !saidNoPortalTable) {
+      saidNoPortalTable = true;
+      log("The console's database has no HealthCheckPortalDocument table yet, so there are no portal documents to clear. Apply the console's migration 20261212_health_check_portal_documents.sql.");
+    }
+    if (deleted) log(`Deleted ${deleted} expired portal ${deleted === 1 ? "document" : "documents"}.`);
+  } catch (err) {
+    log(`Expired portal documents couldn't be cleared: ${safeReason(err)}`);
+  }
+}
+
+/** Why a portal make was refused before anything was read or printed (DECISIONS.md 698). Plain, fixed words: the console may show them. */
+export const PORTAL_REFUSALS = {
+  off: "Documents on demand are switched off on the worker (HC_DOCUMENTS_ON_DEMAND isn't on), so nothing was made.",
+  noKey: "the portal's documents can't be sealed",
+  consultant: "Only an automatic run's documents are made for the portal. A consultant-led run's documents go to Drive once a person has released it.",
+  notReleased: "This run isn't released, so it has no documents for the portal yet.",
+  held: "This run is held for a person, so it has no documents for the portal.",
+  noFolder: "The run's folder isn't on the worker any more, so its documents can't be made.",
+} as const;
+
+/** Each portal output, by the name the renderer gives its pages. */
+const PORTAL_PAGES: Record<PortalOutput, "executive" | "full" | "ceo"> = { executive_summary: "executive", full_health_check: "full", ceo_one_pager: "ceo" };
+
+/**
+ * A released automatic run's three PDFs for the portal (DECISIONS.md 698).
+ * Printed by renderReleased exactly as for a consultant's make, so every page's
+ * number check and decision 682's repair run as they do there. Nothing goes to
+ * Drive, nobody is shared anything, no microsite, readout kit or case study is
+ * published and the benchmark is neither read nor added to: the only thing
+ * written anywhere is the portal's rows, in one transaction. A document is held
+ * for us (kept, unservable, with a flag for a person) when the make is, when a
+ * page holds a word claiming a person, a review or a draft, or when it's too
+ * big to keep; the others are sealed for the customer.
+ */
+async function portalLocked(runId: string, deps: WorkerDeps, attempt: Attempt): Promise<JobOutcome> {
+  const log = deps.log ?? (() => {});
+  const now = () => (deps.now ?? (() => new Date()))().toISOString();
+  const refuse = (reason: string): JobOutcome => {
+    log(`Run ${runId}'s portal documents weren't made: ${reason}`);
+    return { outcome: "refused", detail: reason };
+  };
+  // The switch and the key before anything is read.
+  const portal = deps.portalDocuments;
+  if (portal?.on !== true) return refuse(PORTAL_REFUSALS.off);
+  if (!portal.key) return refuse(`${portal.keyProblem ?? "HC_DOCUMENTS_KEY isn't set on the worker"}, so ${PORTAL_REFUSALS.noKey} and nothing was made.`);
+  const key = portal.key;
+  const input = await deps.store.loadDocumentsJob(runId);
+  if (!input) return { outcome: "skipped", detail: `No run ${runId}` };
+  if (input.run.product === "pulse") return { outcome: "skipped", detail: `Run ${runId} is a pulse, which never has documents` };
+  if (input.run.reviewMode !== "automatic") return refuse(PORTAL_REFUSALS.consultant);
+  if (input.run.status !== "released") return refuse(PORTAL_REFUSALS.notReleased);
+  // A person's release of a held run clears its hold; one still set, whatever the status, is never served.
+  if (input.heldReason !== null && input.heldReason !== undefined) return refuse(PORTAL_REFUSALS.held);
+  const fit = SectionsOfRun.safeParse({ reviewMode: input.run.reviewMode, sections: input.sections });
+  if (!fit.success) return refuse(fit.error.issues[0]?.message ?? CHECKED_OUTSIDE_AUTOMATIC);
+  const dir = join(deps.runsDir, runId);
+  if (!existsSync(join(dir, "run.json"))) return refuse(PORTAL_REFUSALS.noFolder);
+
+  const madeAt = now();
+  const expiresAt = new Date(Date.parse(madeAt) + PORTAL_DOCUMENT_DAYS * 86_400_000).toISOString();
+  const held = (output: PortalOutput): PortalDocumentRow => ({ runId, output, sealed: HELD_PLACEHOLDER, madeAt, expiresAt, heldForUs: true });
+  /** The rows and any flag, all or none. A refusal is tried again while the queue will; on the last delivery it's the outcome. */
+  const save = async (rows: PortalDocumentRow[], heldCounts: Record<string, number> | null): Promise<string | null> => {
+    try {
+      await deps.store.savePortalDocuments(runId, rows, heldCounts);
+      return null;
+    } catch (err) {
+      const reason = safeReason(err);
+      if (!attempt.final) throw new Error(reason);
+      log(`Run ${runId}'s portal documents couldn't be saved: ${reason}`);
+      return reason;
+    }
+  };
+  /** Every document held for us, for a make that printed none we could serve. */
+  const holdAll = async (counts: Record<string, number>, why: string): Promise<JobOutcome> => {
+    const failed = await save(PORTAL_OUTPUTS.map(held), { documents: PORTAL_OUTPUTS.length, held: PORTAL_OUTPUTS.length, ...counts });
+    if (failed) return { outcome: "failed", detail: `Run ${runId}'s portal documents couldn't be saved: ${failed}` };
+    log(`Run ${runId}'s portal documents are held for us: ${why}`);
+    return { outcome: "done", detail: `Run ${runId}'s portal documents are held for us: ${why}` };
+  };
+
+  let printed: Awaited<ReturnType<typeof renderReleased>>;
+  const pages: Partial<Record<"executive" | "full" | "ceo", string>> = {};
+  try {
+    printed = await (deps.renderReleased ?? renderReleased)(
+      dir,
+      // No consultant to name, no benchmark read, no digest: the one written with the release stays (DECISIONS.md 693).
+      { intake: input.intake, sections: input.sections, versions: input.versions, overrides: input.overrides, preparedBy: null, benchmark: null, portal: { onPrinted: (doc, html) => void (pages[doc] = html) } },
+      join(dir, "portal-documents"),
+    );
+  } catch (err) {
+    const reason = safeReason(err);
+    if (!attempt.final) throw new Error(reason);
+    return holdAll({ failed: 1 }, `they couldn't be made (${reason.slice(0, 200)}).`);
+  }
+  // A correction we can't carry: nothing was printed.
+  if ("refused" in printed) return holdAll({ refused: printed.refused.length }, refusalSummary(printed.refused));
+  const masks = Object.values(printed.masks ?? {}).reduce((a, b) => a + b, 0);
+  const fellBack = printed.fellBack?.length ?? 0;
+  // A figure no mask could clear fails a consultant's make (decision 682); here, held for us, so a person is told.
+  if (printed.held.length > 0) return holdAll({ untraced: printed.held.length, masks, fellBack }, heldBackSummary(printed.held));
+  if (printed.repairs === "held for us") {
+    await alertRepairs(runId, printed, deps, log);
+    return holdAll({ masks, fellBack }, "too much was withheld, or a number was withheld where a page prints it (decision 682).");
+  }
+  if (printed.repairs === "some" || printed.repairs === "heavy") await alertRepairs(runId, printed, deps, log);
+
+  const rows: PortalDocumentRow[] = [];
+  let words = 0;
+  let tooLarge = 0;
+  for (const output of PORTAL_OUTPUTS) {
+    const html = pages[PORTAL_PAGES[output]];
+    // A page we didn't see printed is a page we didn't read: held, never sealed unread.
+    const found = html === undefined ? ["unread"] : forbiddenOnPage(html);
+    if (found.length) {
+      words++;
+      // The labels only: never the words around them, which may be a draft's.
+      log(`Run ${runId}'s ${output.replace(/_/g, " ")} is held for us: a page holds ${found.join(", ")}.`);
+      rows.push(held(output));
+      continue;
+    }
+    const pdf = readFileSync(printed.files[output]);
+    if (pdf.length > PORTAL_PDF_MAX_BYTES) {
+      tooLarge++;
+      log(`Run ${runId}'s ${output.replace(/_/g, " ")} is held for us: it weighs ${pdf.length} bytes, over the ${PORTAL_PDF_MAX_BYTES} we keep.`);
+      rows.push(held(output));
+      continue;
+    }
+    rows.push({ runId, output, sealed: sealDocument(pdf, runId, output, key), madeAt, expiresAt, heldForUs: false });
+  }
+  const heldCount = rows.filter((r) => r.heldForUs).length;
+  const failed = await save(rows, heldCount ? { documents: rows.length, held: heldCount, words, tooLarge, masks, fellBack } : null);
+  if (failed) return { outcome: "failed", detail: `Run ${runId}'s portal documents couldn't be saved: ${failed}` };
+  const detail = heldCount ? `Run ${runId}'s portal documents: ${rows.length - heldCount} sealed, ${heldCount} held for us` : `Run ${runId}'s ${rows.length} portal documents are sealed, kept until ${expiresAt}`;
+  log(detail);
+  return { outcome: "done", detail };
 }
 
 /**
