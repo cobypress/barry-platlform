@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { orgProfile } from "../../benchmark/export.ts";
 import { automaticCalibration } from "../../connect/auto-calibration.ts";
 import { checkedDigest } from "../../digest/checked.ts";
-import { CURRENCY_NOT_NAMED, CURRENCY_SIGNS, CURRENCY_UNKNOWN, NO_CURRENCY, NO_MONEY_FIGURE } from "../../engine/currency.ts";
+import { CURRENCY_NOT_NAMED, CURRENCY_SIGNS, noCurrencyCode, CURRENCY_UNKNOWN, NO_CURRENCY, NO_MONEY_FIGURE } from "../../engine/currency.ts";
 import type { OpportunityExtract } from "../../extract/opportunities.ts";
 import { buildReport } from "../../narrative/sections.ts";
 import { applyNarrative } from "../../narrative/apply.ts";
@@ -17,7 +17,8 @@ import { moneySaid } from "../../engine/said-forms.ts";
 import { fullReportHtml } from "../../render/full-report.ts";
 import { onePagerHtml } from "../../render/one-pager.ts";
 import { loadRun } from "../../render/render-run.ts";
-import type { Calibration, Finding } from "../../schemas/index.ts";
+import { Calibration, type Finding } from "../../schemas/index.ts";
+import { checkNumbers, type FigureSet } from "../../numbercheck/index.ts";
 import { AutomaticReplay, stagesOf } from "../../testing/automatic.ts";
 import { analyseExtracts, loadExtracts, runFromRecording } from "../../testing/harness.ts";
 import { buildValueModel, HOURS_IN_POUNDS, HOURS_NOT_NAMED, valueCurrency } from "../../value/model.ts";
@@ -83,10 +84,12 @@ describe("an automatic run on a single-currency org: amounts shown, no currency 
       assert.equal(f.severity, was.severity, f.ruleId);
       if (money(was)) {
         assert.ok(money(f) && f.value.kind !== "not_sized" && was.value.kind !== "not_sized" && f.value.amount === was.value.amount && f.value.unit === NO_CURRENCY, f.ruleId);
-        assert.ok(f.summary.includes(NOTE), f.ruleId);
+        assert.equal(f.amountsUnnamed, true, f.ruleId);
         said++;
       }
-      if (/£/.test(JSON.stringify(was))) assert.ok(f.summary.includes(NOTE), `${f.ruleId} says an amount`);
+      if (/£/.test(JSON.stringify(was))) assert.equal(f.amountsUnnamed, true, `${f.ruleId} says an amount`);
+      // The line is never the finding's own text, so never its fix prompt's (fix round 2).
+      assert.ok(!f.summary.includes(NOTE) && !(f.fixPrompt ?? "").includes(NOTE), f.ruleId);
     }
     assert.ok(said >= 12, `${said}`);
     const rm = byId(read.input.metrics);
@@ -121,7 +124,9 @@ describe("an automatic run on a single-currency org: amounts shown, no currency 
           noted++;
         }
         // The page's own line at most once (a finding's text on it may say it too, as its own).
-        assert.ok(page.split("amounts-note").length <= 2, `page ${i + 1} says it once`);
+        if (marked[i]!.includes(AMOUNT_MARK)) assert.equal(page.split(NOTE_HTML).length - 1, 1, `page ${i + 1} says it exactly once`);
+        // No amount printed on the page itself: no line of the page's own (a section's text on it may end with its own).
+        else assert.ok(!page.includes("amounts-note"), `page ${i + 1} shows no amount, so adds no line`);
         assert.ok(!page.includes(AMOUNT_MARK));
       });
     }
@@ -142,7 +147,7 @@ describe("an automatic run on a single-currency org: amounts shown, no currency 
     let sections = 0;
     for (const v of Object.values(report.outputs).flatMap((o) => o.versions)) {
       if (/£\d/.test(before.get(keyOf(v.sectionId)) ?? "")) {
-        assert.ok(v.body.endsWith(NOTE), v.sectionId);
+        assert.ok(v.body.endsWith(NOTE) && v.body.split(NOTE).length === 2, v.sectionId);
         sections++;
       }
     }
@@ -196,7 +201,10 @@ describe("an automatic run whose currency read failed", () => {
     // The same rules where the opportunities show one currency: amounts plain, said, confidence as it was.
     extracts.set("opportunities", opps);
     const plain = analyseExtracts(extracts, { calibration: calibrate(null), modules: [probe] });
-    assert.equal(plain.findings[0]!.summary, `Three deals worth 1,200. ${NOTE}`);
+    assert.equal(plain.findings[0]!.summary, "Three deals worth 1,200.");
+    assert.equal(plain.findings[0]!.amountsUnnamed, true);
+    assert.equal(plain.findings[1]!.amountsUnnamed, true);
+    assert.equal(out.findings[1]!.amountsUnnamed, undefined);
     assert.equal(plain.findings[0]!.confidence, "high");
     assert.ok(plain.metrics[0]!.status === "measured" && plain.metrics[0]!.assumptions.includes(NOTE));
   });
@@ -275,4 +283,65 @@ describe("Claude's drafts on a run whose currency isn't known by name", () => {
     assert.ok(Object.values(kept.outputs).flatMap((o) => o.versions).some((v) => v.source === "claude_draft" && v.body.includes(NOTE)));
   });
 });
+
+describe("the currency line, said once where it belongs (DECISIONS.md 700, fix round 2)", () => {
+  const count = (text: string): number => text.split(NOTE).length - 1;
+
+  test("in the synthetic single-currency run: never in a finding, once as the digest's note, once per money metric, once per page and section with an amount", () => {
+    const report = buildReport(single.input);
+    const digest = checkedDigest({ input: single.input, pseudonyms: single.pseudonyms, inventory: null, madeAt: MADE }).digest!;
+    const flagged = single.input.findings.filter((f) => f.amountsUnnamed);
+    assert.equal(flagged.length, 14);
+    assert.equal(count(JSON.stringify(single.input.findings)), 0);
+    assert.equal(count(JSON.stringify(digest.findings)), 0);
+    assert.equal(digest.findings.filter((f) => f.amountsUnnamed).length, report.teamFindings.filter((f) => f.amountsUnnamed).length);
+    assert.equal(count(digest.value.currencyNote ?? ""), 1);
+    const moneyMetrics = digest.metrics.filter((m) => m.status === "measured" && m.unit === "currency");
+    assert.equal(moneyMetrics.length, 10);
+    assert.equal(count(JSON.stringify(digest.metrics)), 10);
+    assert.equal(count(JSON.stringify(digest)), 11);
+    // Pages: the line once on each page with an amount, as the test above checks page by page; in all:
+    const pages = [fullReportHtml, executiveHtml, onePagerHtml].map((make) => make(report, single.pseudonyms).split(NOTE_HTML).length - 1);
+    assert.deepEqual(pages, PAGE_LINES);
+  });
+
+  test("a run that can't tell its currency shows no amount, so carries no line", () => {
+    const extracts = loadExtracts(unread.dir);
+    const opps = extracts.get("opportunities") as OpportunityExtract;
+    extracts.set("opportunities", { ...opps, opportunities: { status: "unavailable", reason: "refused", source: (opps.opportunities as unknown as { source: never }).source } });
+    const out = analyseExtracts(extracts, { calibration: calibrate(null) });
+    const report = buildReport({ ...unread.input, findings: out.findings, metrics: out.metrics });
+    assert.equal(report.value.currencyNote, undefined);
+    assert.ok(!fullReportHtml(report, unread.pseudonyms).includes(NOTE_HTML));
+  });
+
+  test("a person's calibration never has no currency, so never prints plain numbers", () => {
+    const person = { ...read.input.calibration, source: "confirmed" as const };
+    for (const code of [NO_CURRENCY, "XTS"]) {
+      assert.equal(Calibration.safeParse({ ...person, currency: code }).success, false, code);
+      assert.equal(noCurrencyCode({ source: "confirmed", currency: code }), false, code);
+      assert.equal(Calibration.safeParse({ ...person, source: "org_settings", currency: code }).success, true, code);
+    }
+    assert.equal(noCurrencyCode({ source: "org_settings", currency: NO_CURRENCY }), true);
+  });
+
+  test("a plain number never traces to an amount in the testing code, only in no currency", () => {
+    const set = (currency: string): FigureSet => ({ figures: [{ source: "f1", kind: "currency", value: 445, currency }], dates: [], identifiers: [], tokens: [], labels: [] }) as unknown as FigureSet;
+    assert.equal(checkNumbers("They are worth 445.", set("XTS")).passed, false);
+    assert.equal(checkNumbers("They are worth 445.", set("GBP")).passed, false);
+    assert.equal(checkNumbers("They are worth 445.", set(NO_CURRENCY)).passed, true);
+  });
+
+  test("a draft naming a currency in words, with or without a number, is sent back", async () => {
+    const sourceIds = (prompt: string): string[] => (JSON.parse(prompt.slice(prompt.indexOf("<sources>") + 9, prompt.indexOf("</sources>"))) as Array<{ id: string }>).map((x) => x.id).slice(0, 1);
+    for (const claim of ["Your figures are in pounds.", "Worth 3m dollars.", "In euros.", "In sterling.", "In yen.", "In rupees.", "A few quid."]) {
+      const report = buildReport(single.input);
+      const rejections = await applyNarrative(report, { complete: async ({ prompt, model }) => ({ stopReason: "end_turn", text: JSON.stringify({ paragraphs: [{ text: claim, sources: sourceIds(prompt) }] }), model }) }, single.pseudonyms);
+      assert.ok(rejections.length > 0 && rejections.every((r) => r.reasons.includes(NO_CURRENCY_CODE)), claim);
+    }
+  });
+});
+
+/** The line in all, in the full report, the executive summary and the one-pager: one per page that prints an amount. */
+const PAGE_LINES: number[] = [21, 6, 1];
 

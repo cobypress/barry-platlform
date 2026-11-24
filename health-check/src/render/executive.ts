@@ -237,7 +237,7 @@ function detailPage(r: Render, items: Array<{ ref: string; title: string }>): st
 
 export function executiveHtml(report: BuiltReport, pseudonyms: Pseudonymiser): string {
   // Each page with an amount in a currency not known by name says so (DECISIONS.md 700).
-  return withAmountNotes(report.value.currencyNote, () => inDocumentOrder(pseudonyms, (words) => executiveHtmlWith(report, pseudonyms, words)));
+  return withAmountNotes(report, (made) => inDocumentOrder(pseudonyms, (words) => executiveHtmlWith(made, pseudonyms, words)));
 }
 
 function executiveHtmlWith(report: BuiltReport, pseudonyms: Pseudonymiser, words: CustomerWords): string {

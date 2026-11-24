@@ -206,13 +206,12 @@ const CONFIDENCE_RANK = { low: 0, medium: 1, high: 2 } as const;
  * (DECISIONS.md 598): each one in its text, and a finding's confidence no
  * higher than medium. A not measurable result leaned on nothing.
  */
-export function withAssumptions(result: RuleResult, notes: string[], said: string[] = []): RuleResult {
-  if ((notes.length === 0 && said.length === 0) || result.outcome === "not_measurable") return result;
+export function withAssumptions(result: RuleResult, notes: string[]): RuleResult {
+  if (notes.length === 0 || result.outcome === "not_measurable") return result;
   // Kept marked only when the summary and every note were made by said (DECISIONS.md 655).
-  const parts = [result.summary, ...notes, ...said];
+  const parts = [result.summary, ...notes];
   const summary = parts.every((p) => orgWordsOf(p) !== null) ? joinSaid(parts as Said[], " ") : parts.join(" ");
-  // What is only said, such as amounts in a currency not known by name (DECISIONS.md 700), guesses nothing and caps nothing.
-  if (result.outcome === "pass" || notes.length === 0) return { ...result, summary };
+  if (result.outcome === "pass") return { ...result, summary };
   return { ...result, summary, confidence: CONFIDENCE_RANK[result.confidence] > CONFIDENCE_RANK.medium ? "medium" : result.confidence };
 }
 
@@ -222,7 +221,7 @@ function runRule(rule: Rule, ctx: RuleContext, pseudonyms: Pseudonymiser, record
     // With no currency, whatever the rule said in money is taken out first (DECISIONS.md 700).
     const ungated = Array.isArray(raw) ? raw : [raw];
     const without = gate();
-    const results = (without ? ungated.map(without) : ungated).map((r) => withAssumptions(r, [...assumed], [...noted]));
+    const results = (without ? ungated.map(without) : ungated).map((r) => withAssumptions(r, [...assumed]));
     for (const result of results) {
       if (result.outcome !== "issue" || !result.records?.rows.length) continue;
       // The same last pass as the finding's text, for the words a rule wrote. Not
@@ -242,7 +241,10 @@ function runRule(rule: Rule, ctx: RuleContext, pseudonyms: Pseudonymiser, record
       if (result.outcome === "pass" && !result.segmentsChecked?.length && !result.segmentExemptReason) {
         return toFinding(rule, { outcome: "not_measurable", key: result.key, reason: said`The rule passed without segmenting its data, so the result can't be trusted.`, evidence: result.evidence }, pseudonyms);
       }
-      return toFinding(rule, result, pseudonyms, assumed.size > 0);
+      // Amounts in a currency not known by name are flagged, never said in the finding's own text (DECISIONS.md 700):
+      // its page, section and the digest say it once, and its fix prompt, made from its summary, never repeats it.
+      const finding = toFinding(rule, result, pseudonyms, assumed.size > 0);
+      return noted.size > 0 && finding.status !== "not_measurable" ? Finding.parse({ ...finding, amountsUnnamed: true }) : finding;
     });
   } catch (err) {
     // One broken rule shouldn't lose the rest of the run, and it must show up.

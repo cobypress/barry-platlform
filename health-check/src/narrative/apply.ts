@@ -31,7 +31,10 @@ export async function applyNarrative(report: BuiltReport, client: NarrativeClien
       // Amounts in a currency not known by name stay plain, and keep the line the engine's text gives them (DECISIONS.md 700).
       const engineBody = built.versions.find((v) => v.id === section.currentVersionId)?.body ?? "";
       const note = report.value.currencyNote;
-      const plain = noCurrencyCode(report.input.calibration) ? { noCurrencyCode: true, ...(note && engineBody.includes(note) ? { amountsNote: note } : {}) } : {};
+      // The line is kept wherever the engine's text has it, and asked for wherever the draft may cite an amount: a flagged finding or a metric in money.
+      const cites = new Set(brief.sources.map((s) => s.id));
+      const citesAmount = report.teamFindings.some((f) => f.amountsUnnamed && cites.has(f.id)) || report.metrics.some((m) => m.status === "measured" && m.unit === "currency" && cites.has(m.id));
+      const plain = noCurrencyCode(report.input.calibration) ? { noCurrencyCode: true, ...(note && (engineBody.includes(note) || citesAmount) ? { amountsNote: note } : {}) } : {};
       const result = await draftSection({ brief: report.input.run.reviewMode === "automatic" ? { ...brief, automatic: true, ...plain } : brief, dataset: report.dataset, client, pseudonyms });
       if (result.status === "rejected" && result.unavailable) {
         rejections.push({ sectionId: section.id, reasons: result.reasons, unavailable: true });

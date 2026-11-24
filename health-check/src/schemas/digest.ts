@@ -124,6 +124,8 @@ export const DigestFinding = z.object({
    * Counts only. Absent everywhere else, and when the finding's facts lack them.
    */
   checkerRead: z.object({ readClasses: z.number().int().nonnegative(), readTriggers: z.number().int().nonnegative(), alreadyListed: z.number().int().nonnegative() }).optional(),
+  /** Its amounts are plain numbers in a currency not known by name (DECISIONS.md 700): show value.currencyNote beside them. Absent otherwise. */
+  amountsUnnamed: z.literal(true).optional(),
   /** By sentence, the ones the engine can vouch for, with the org's characters marked (DECISIONS.md 655). */
   orgWords: z
     .object({

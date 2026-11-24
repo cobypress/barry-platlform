@@ -104,7 +104,7 @@ function seatsBox(r: Render, report: BuiltReport): string {
 
 export function onePagerHtml(report: BuiltReport, pseudonyms: Pseudonymiser): string {
   // An amount in a currency not known by name is said as one (DECISIONS.md 700).
-  return withAmountNotes(report.value.currencyNote, () => inDocumentOrder(pseudonyms, (words) => onePagerHtmlWith(report, pseudonyms, words)));
+  return withAmountNotes(report, (made) => inDocumentOrder(pseudonyms, (words) => onePagerHtmlWith(made, pseudonyms, words)));
 }
 
 function onePagerHtmlWith(report: BuiltReport, pseudonyms: Pseudonymiser, words: CustomerWords): string {
