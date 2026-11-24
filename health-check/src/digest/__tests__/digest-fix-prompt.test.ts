@@ -1,4 +1,4 @@
-import { allFindings } from "../../engine/evaluate.ts";
+import { INSIGHT_RULES } from "../../domains/scoring.ts";
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
@@ -74,15 +74,15 @@ const planted: DomainModule = {
     };
   }),
 };
-// Every finding, the path insights' too, which the analysis keeps apart (decision 703).
-const plantedFindings = allFindings(analyseExtracts(loadExtracts(dir), { modules: [planted], answers: loadAnswers() }));
+const plantedFindings = analyseExtracts(loadExtracts(dir), { modules: [planted], answers: loadAnswers() }).findings;
 const plantedDigest = digestOf([...loaded.input.findings, ...plantedFindings]);
 const plantedIds = new Set(plantedFindings.map((f) => f.id));
 
 describe("every rule's prompt has the org's words marked, exactly (decision 672)", () => {
   test("for every rule that can raise an issue, each planted string is one span wherever the prompt says it, and nothing else is", () => {
     const rows = plantedDigest.findings.filter((f) => plantedIds.has(f.id));
-    assert.equal(rows.length, Object.keys(FIX_TABLE).length);
+    // Every rule in the table but the path insights, which no digest serves yet (decision 703).
+    assert.equal(rows.length, Object.keys(FIX_TABLE).filter((id) => !INSIGHT_RULES.has(id)).length);
     for (const f of rows) {
       const text = f.fixPrompt!;
       const marks = f.orgWords?.fixPrompt;

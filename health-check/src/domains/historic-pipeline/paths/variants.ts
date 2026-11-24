@@ -90,14 +90,16 @@ export function sendBacks(path: string[]): Array<{ from: string; to: string }> {
 export const hasRework = (path: string[]): boolean => sendBacks(path).length > 0;
 
 /**
- * Stages of the usual path this path moved past without entering: a later stage
- * of the usual path was entered and this one never was. A deal that closed
- * before it reached a stage didn't skip it, so a deal lost early isn't counted
- * as skipping everything after.
+ * Stages of the usual path this path moved past without entering: after its
+ * first recorded stage, before a later one it entered. A deal that closed before
+ * it reached a stage didn't skip it, and a stage before its first recorded one
+ * may only be before its history starts.
  */
 export function skipsOf(path: string[], standard: string[]): string[] {
   const furthest = Math.max(-1, ...path.map((s) => standard.indexOf(s)));
-  return standard.filter((stage, i) => i < furthest && !path.includes(stage));
+  // Only after the deal's first recorded stage: history may simply start late (DECISIONS.md 703).
+  const first = path.length ? standard.indexOf(path[0]!) : -1;
+  return standard.filter((stage, i) => i > first && i < furthest && !path.includes(stage));
 }
 
 const keyOf = (path: string[]): string => JSON.stringify(path);
@@ -218,7 +220,7 @@ function buildPaths(ctx: Ctx, data: PipelineData): Loaded {
 // ─── The metric ──────────────────────────────────────────────────────────────
 
 // Short, because the deck's definitions page prints it. The rest of how it's worked out is in the assumptions.
-const DEFINITION = "Closed deals grouped by the run of open stages each was in, each path against your usual one: the path won deals took most often, not the stage order in your settings. The value is the share of closed deals on the usual path.";
+const DEFINITION = "Closed deals grouped by the run of open stages each was in. The usual path, the one won deals took most often, labels the table and is never compared with. The value is the share of closed deals on it.";
 
 /** How the table is worked out, said with the metric wherever its assumptions are printed. */
 const HOW = [
@@ -240,10 +242,14 @@ export function pathMetrics(ctx: Ctx): Metric[] {
   const loaded = loadPaths(ctx);
   if (loaded.status !== "ok") return [notMeasurable(base(ctx, loaded.data, DEF), loaded.reason)];
   const { data, paths: p } = loaded;
+  // A lost deal's last move back is how it was closed out, not rework (insights.ts).
+  const closedOut = p.closed.filter((d) => !d.won && d.path.length >= 2 && d.path.indexOf(d.path.at(-1)!) < d.path.indexOf(d.path.at(-2)!)).length;
   const assumptions = [
     said`Your usual path, the one won deals took most often: ${pathSaid(p.standard)}`,
     ...HOW,
-    "A stage counts as skipped only where a deal went on to a later stage of the usual path without entering it",
+    "A stage counts as skipped only after a deal's first recorded stage and before a later stage of the usual path it entered",
+    "The usual path is chosen by how often won deals took it, so it is a label, never a side of a comparison",
+    ...(closedOut ? [said`${closedOut} lost deals whose last move was back to an earlier stage aren't counted as sent back: that move closed them out`] : []),
   ];
   const segments: MetricSegment[] = [];
   const stats: Record<string, number> = {
@@ -254,6 +260,7 @@ export function pathMetrics(ctx: Ctx): Metric[] {
     standardDeals: p.onStandard.length,
     standardWon: p.onStandard.filter((d) => d.won).length,
     standardStages: p.standard.length,
+    closedOut,
   };
   p.shown.forEach((v, i) => {
     const key = v.path.join(PATH_JOIN);

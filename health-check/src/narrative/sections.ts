@@ -68,9 +68,6 @@ export type ReportOutputKey = "raw_notes" | "executive_summary" | "full_health_c
 
 export type BuiltOutput = { output: ReportOutputKey; sections: ReportSection[]; versions: SectionVersion[] };
 
-/** What the documents leave out and the digest serves (DECISIONS.md 703): the path insights, corrected and at team level, their measure, and their figures. */
-export type Insights = { findings: Finding[]; metrics: Metric[]; dataset: FigureSet };
-
 export type BuiltReport = {
   /** The run's data less the insights, as the documents read it. */
   input: ReportInput;
@@ -93,8 +90,6 @@ export type BuiltReport = {
   value: ValueModel;
   /** What each issue adds to that total, after the overlap rules: what issues are ranked on (DECISIONS.md 362). */
   added: Added;
-  /** The path insights and their measure, which only the digest takes (DECISIONS.md 703). */
-  insights: Insights;
   /** For a re-check: what changed since the first health check. Null otherwise. */
   progress: Progress | null;
   /** Where the headline figures sit against published research and our own customers. */
@@ -900,12 +895,11 @@ function record(run: Run, output: ReportOutputKey, specs: Spec[], dataset: Figur
 }
 
 export function buildReport(all: ReportInput): BuiltReport {
-  // The one place the documents choose their findings (DECISIONS.md 703): the path insights and their table are a
-  // comparison of how deals went, not a fault, so the executive summary, the full report, the one-pager and the
-  // raw notes document built beside them leave them out whole, and print as they did before them. The digest takes
-  // them from `insights`, so the portal and the connector show them; the run's own findings, metrics and raw-notes.md keep them.
+  // The one place the documents choose their findings from a run's files (DECISIONS.md 703): the path insights and
+  // their table are a comparison of how deals went, not a fault, and nothing has a place for them yet, so everything
+  // built from the report (the documents, the raw notes document, the digest) leaves them out whole, as before them.
+  // The run's own findings.json, metrics.json and raw-notes.md and the console's staff-side rows keep them.
   const given: ReportInput = { ...all, findings: all.findings.filter((f) => !INSIGHT_RULES.has(f.ruleId)), metrics: all.metrics.filter((m) => !INSIGHT_METRICS.has(m.id)) };
-  const insightsIn = { findings: all.findings.filter((f) => INSIGHT_RULES.has(f.ruleId)), metrics: all.metrics.filter((m) => INSIGHT_METRICS.has(m.id)) };
   // The team survey's figures sit with the org's. They're built here, not when the
   // org is read, because answers keep arriving after that (DECISIONS.md 141).
   const input: ReportInput = { ...given, metrics: [...given.metrics.filter((m) => !SURVEY_METRIC_IDS.includes(m.id)), ...surveyMetrics(given.survey, given.run.asOf)] };
@@ -1020,15 +1014,6 @@ export function buildReport(all: ReportInput): BuiltReport {
   if (investment.annualCost.status === "measured" && investment.annualCost.basis === "customer") {
     dataset.figures.push({ source: INVESTMENT_SOURCE, kind: "currency", value: investment.annualCost.value, currency: calibration.currency });
   }
-  // The insights as corrected, at team level, with their own figures for the digest's number check. A refusal of one
-  // of their corrections holds the documents as any refusal does, though they don't print it: the safe side.
-  const corrected = applyOverrides(insightsIn.findings, insightsIn.metrics, overrides);
-  const insightTeam = corrected.findings.map(teamLevelFinding);
-  const insights: Insights = {
-    findings: insightTeam,
-    metrics: corrected.metrics,
-    dataset: buildDataset({ findings: [...corrected.findings, ...insightTeam], metrics: corrected.metrics, run, currency: calibration.currency, overrides: [] }),
-  };
   const briefs = new Map<string, SectionBrief>();
   const scopes = new Map<string, string[]>();
   const build = (output: ReportOutputKey, specs: Spec[]): BuiltOutput => record(run, output, specs, dataset, now, briefs, scopes);
@@ -1038,8 +1023,7 @@ export function buildReport(all: ReportInput): BuiltReport {
     teamFindings: team.slice().sort(rankBy(added)),
     added,
     metrics: effective.metrics,
-    refused: [...effective.refused, ...corrected.refused],
-    insights,
+    refused: effective.refused,
     baselineRefused,
     overall,
     value,

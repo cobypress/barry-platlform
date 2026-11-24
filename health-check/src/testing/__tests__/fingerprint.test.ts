@@ -17,8 +17,8 @@ import { AS_OF, CONNECTED_USER } from "../synthetic-org.ts";
 // a metric or the raw notes updates these, and says why in its commit.
 
 const GOLDEN: Record<string, Record<string, string>> = {
-  recorded: { "findings.json": "8cb2e60845aa6e51", "metrics.json": "71b019b301c5e723", "scores.json": "17cdb1708449d000", "manual-steps.json": "c4daf1ca86584a33", "action-lists.json": "7018f033c3c80e0a", "raw-notes.md": "0023df82620d5055", "handbook.json": "64dcafcf493eef42" },
-  generated: { "findings.json": "eb16d7cb820f1731", "metrics.json": "7d1bebd0ffb263c4", "scores.json": "616e42570f940402", "manual-steps.json": "15ae87c4fd76d7b6", "action-lists.json": "8eeb97766d119778", "raw-notes.md": "26c359e68cf0986f", "handbook.json": "23c075e2337e23a8" },
+  recorded: { "findings.json": "32e84d18880742a8", "metrics.json": "9ff8e22ef7d45790", "scores.json": "17cdb1708449d000", "manual-steps.json": "c4daf1ca86584a33", "action-lists.json": "7018f033c3c80e0a", "raw-notes.md": "168216d750bac078", "handbook.json": "64dcafcf493eef42" },
+  generated: { "findings.json": "e7d065627ba11e7e", "metrics.json": "110987cf0075336e", "scores.json": "616e42570f940402", "manual-steps.json": "15ae87c4fd76d7b6", "action-lists.json": "8eeb97766d119778", "raw-notes.md": "401f09357b6ebfcc", "handbook.json": "23c075e2337e23a8" },
 };
 
 // Before decision 703 added the path insights' findings and the variant table's metric: with those taken out,
@@ -105,7 +105,9 @@ test("decisions 663 and 672 moved findings.json by the value, hours and fix prom
     // Decision 672 moved it by the fix prompts' marks alone, on every issue: without them it is as it was before 672.
     const prompts = (findings as Array<{ fixPrompt?: string; orgWords?: { fixPrompt?: unknown } }>).filter((f) => f.fixPrompt);
     assert.ok(prompts.length > 0 && prompts.every((f) => f.orgWords?.fixPrompt), `${name}: every prompt marked`);
+    // Decision 703's findings and measure taken out alone, on a first run: findings.json and metrics.json are as before it.
     withoutPaths(dir);
+    assert.deepEqual(fingerprint(dir), { ...GOLDEN[name], ...BEFORE_703[name] }, `${name} before 703`);
     withoutPromptMarks(dir);
     assert.deepEqual(fingerprint(dir), { ...GOLDEN[name], ...BEFORE_703[name], "findings.json": BEFORE_672[name] }, `${name} before 672`);
     withoutLaterMarks(dir);

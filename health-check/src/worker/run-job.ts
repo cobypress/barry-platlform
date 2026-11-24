@@ -441,7 +441,7 @@ async function runLocked(runId: string, deps: WorkerDeps, attempt: Attempt, seen
     const overall = runOverall(report.overall);
     // Released by code or held for a person, decided here and written in the save's one transaction (DECISIONS.md 693).
     decision = checkedOne
-      ? decideRelease({ runId, sections, checked: checkedOne, findings: allFindings(result.output!), overall, previousScore: await deps.store.lastReleasedScore(runId, input.run.orgId.slice(0, 15), input.run.product), now: now().toISOString() })
+      ? decideRelease({ runId, sections, checked: checkedOne, findings: result.output!.findings, overall, previousScore: await deps.store.lastReleasedScore(runId, input.run.orgId.slice(0, 15), input.run.product), now: now().toISOString() })
       : null;
     if (decision) log(decision.kind === "release" ? `Automatic run ${runId} passed every check and is released.` : `Automatic run ${runId} is held for a person: ${decision.reason} ${JSON.stringify(decision.counts)}.`);
     await deps.store.saveRunOutput(runId, {
