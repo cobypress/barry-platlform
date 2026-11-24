@@ -3,12 +3,11 @@ import { notSized, pct, plural, type Rule, type RuleContext, type RuleResult } f
 import { andList } from "../../../engine/said-forms.ts";
 import { PROBABILITY_FIELD, stagesExtractor, type StageRow, type StagesRead } from "../../../extract/opportunities.ts";
 import type { Evidence, Metric, MetricSegment, SegmentCheck } from "../../../schemas/index.ts";
-import { localDay, zoneOf } from "../../time-zone.ts";
-import { loadPipeline, type Deal, type PipelineData } from "../cohort.ts";
-import { base, closedInWindow, dimensions, groupBy, hasOpenStage, measured, notMeasurable, quantile, round1, SEGMENT_NOTE, unmappedReason } from "../metrics.ts";
+import { loadPipeline, type PipelineData } from "../cohort.ts";
+import { base, closedInWindow, dimensions, groupBy, measured, notMeasurable, round1, SEGMENT_NOTE, unmappedReason } from "../metrics.ts";
 import { closedFromOpen } from "../outcomes.ts";
-import { comparable, MIN_EACH_OUTCOME, WHOLE_SHARE, WIN_GAP, zBar } from "../paths/insights.ts";
-import { daysToClose, openPathOf, type PathDeal } from "../paths/variants.ts";
+import { MIN_EACH_OUTCOME, WHOLE_SHARE, WIN_GAP, Z_FLOOR, zBar } from "../paths/insights.ts";
+import { cohortDeals, dayPlus, daySaid, LAG_QUANTILE, OPEN_SHARE, periodOf, reached, type CohortDeal } from "../reached.ts";
 import { outside, wilson, type Interval } from "./wilson.ts";
 
 // Roadmap stage 2, item 2 (DECISIONS.md 706): for each open stage, the
@@ -50,18 +49,16 @@ type Ready = Extract<PipelineData, { status: "ok" }>;
 export const PROBABILITY_METRIC = "historic.stage_probability_vs_won";
 export const PROBABILITY_RULE = "pipe.probability-vs-reality";
 
-const DAY = 86_400_000;
-/** The share of closed deals that reached a stage whose time to close sets the stage's maturity lag. */
-export const LAG_QUANTILE = 0.9;
-/** A stage's period may hold at most this share of deals still open; more, and the stage isn't named. */
-export const OPEN_SHARE = 0.05;
+// Who is counted is shared with the path insights (reached.ts, DECISIONS.md 712).
+export { cohortDeals, daySaid, LAG_QUANTILE, OPEN_SHARE, reached, type CohortDeal };
 /**
  * The lowest z the interval is drawn at, whatever the number of stages tested.
- * With one stage tested, 703's floor of 2 named a true probability in up to
- * 6.4% of orgs of some size (the worst, 30 deals at a true 55%, worked out
- * exactly); at 2.15 the worst is 4.4%.
+ * With one stage tested, a floor of 2 named a true probability in up to 6.4% of
+ * orgs of some size (the worst, 30 deals at a true 55%, worked out exactly); at
+ * 2.15 the worst is 4.4%. The path insights' floor, which is now the same
+ * (DECISIONS.md 712), so the two can't drift apart.
  */
-export const Z_MIN = 2.15;
+export const Z_MIN = Z_FLOOR;
 /** Within a record type, the gap that counts as holding there: the same as overall. */
 const TYPE_GAP = WIN_GAP;
 
@@ -74,8 +71,6 @@ const TYPE_GAP = WIN_GAP;
  */
 const WAYS: Record<string, () => Said> = { team: () => said`team`, rep: () => said`rep`, "lead source": () => said`lead source`, type: () => said`type` };
 
-/** A deal as the comparison reads it: open or closed, with when it first entered each open stage. */
-export type CohortDeal = PathDeal & { open: boolean; reachedAt: Map<string, number>; closedAtMs: number | null };
 
 /** How one way of splitting a stage's deals went: segments compared, and how many sit on the same side of the setting. */
 export type Way = { dimension: string; compared: number; held: number; holds: boolean };
@@ -127,15 +122,6 @@ export type Loaded =
   | { status: "ok"; data: Ready; stagesEvidence: Evidence; deals: CohortDeal[]; beforeHistory: number; stages: StageFigures[]; tested: number; z: number }
   | { status: "not_measurable"; reason: string; evidence: Evidence[]; data: PipelineData };
 
-/** A deal reached a stage when its own stage history shows it there. Nothing before the first recorded stage is inferred. */
-export const reached = (d: Pick<PathDeal, "path">, stage: string): boolean => d.path.includes(stage);
-
-/** When the deal first entered each open stage, from its stage history. */
-function reachedTimes(deal: Deal, open: (stage: string) => boolean): Map<string, number> {
-  const at = new Map<string, number>();
-  for (const row of deal.history) if (open(row.StageName) && !at.has(row.StageName)) at.set(row.StageName, new Date(row.CreatedDate).getTime());
-  return at;
-}
 
 /** Both outcomes often enough, and enough deals: the path insights' bars for one side. */
 const enough = (minSample: number, closed: number, won: number): boolean => closed >= minSample && won >= MIN_EACH_OUTCOME && closed - won >= MIN_EACH_OUTCOME;
@@ -242,23 +228,11 @@ export function loadProbabilities(ctx: Ctx): Loaded {
   return loaded.status === "ok" && data.status === "ok" ? { ...loaded, data } : loaded;
 }
 
-/** The calendar day `days` after `day`. */
-const dayPlus = (day: string, days: number): string => new Date(Date.parse(`${day}T00:00:00Z`) + days * DAY).toISOString().slice(0, 10);
 
 /** One stage's deals in its period, and its figures but for the bars that count every stage tested. */
 function stageOf(ctx: Ctx, s: { stage: string; probability: number | null }, deals: CohortDeal[]) {
-  const zone = zoneOf(ctx);
-  const there = deals.filter((d) => reached(d, s.stage));
-  const durations = there.filter((d) => d.closedAtMs !== null).map((d) => Math.max(0, (d.closedAtMs! - d.reachedAt.get(s.stage)!) / DAY));
-  const lagDays = durations.length ? Math.ceil(quantile(durations, LAG_QUANTILE)) : null;
-  const to = lagDays === null ? null : localDay(new Date(ctx.now.getTime() - lagDays * DAY), zone);
-  const from = to !== null && to >= ctx.window.from ? ctx.window.from : null;
-  const dayOf = (d: CohortDeal): string => localDay(new Date(d.reachedAt.get(s.stage)!), zone);
-  const cohort = from && to ? there.filter((d) => dayOf(d) >= from && dayOf(d) <= to) : [];
-  const closed = cohort.filter((d) => !d.open);
+  const { lagDays, from, to, cohort, closed, open, tooOpen, dayOf } = periodOf(ctx, deals, s.stage);
   const won = closed.filter((d) => d.won).length;
-  const open = cohort.length - closed.length;
-  const tooOpen = cohort.length > 0 && open > OPEN_SHARE * cohort.length;
   const { minSample } = ctx.calibration;
   const untested =
     s.probability === null ? "No probability is set on this stage"
@@ -268,7 +242,7 @@ function stageOf(ctx: Ctx, s: { stage: string; probability: number | null }, dea
     : !enough(minSample, closed.length, won) ? `${SEGMENT_NOTE}, or fewer than ${MIN_EACH_OUTCOME} won and ${MIN_EACH_OUTCOME} lost`
     : null;
   // The parts of the period, cut at whole days: each from the day after the last one ends.
-  const span = from && to ? Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / DAY) : 0;
+  const span = from && to ? Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000) : 0;
   const bounds = from && to ? Array.from({ length: PARTS }, (_, k) => ({ from: k === 0 ? from : dayPlus(from, Math.floor((span * k) / PARTS) + 1), to: k === PARTS - 1 ? to : dayPlus(from, Math.floor((span * (k + 1)) / PARTS)) })) : null;
   const partDeals = bounds ? bounds.map((b) => ({ ...b, deals: closed.filter((d) => dayOf(d) >= b.from && dayOf(d) <= b.to) })) : null;
   return { ...s, lagDays, from, to, cohort: cohort.length, open, closed, partDeals, reached: closed.length, won, share: pct(won, closed.length), tooOpen, untested, testable: untested === null };
@@ -300,15 +274,9 @@ function build(ctx: Ctx, data: PipelineData): Loaded {
   if (closedAll.length > 0 && fromOpen.length === 0) {
     return nm(said`Stage history isn't tracked for these deals: none of the ${closedAll.length} deals that closed in the window has a recorded open stage.`);
   }
-  const open = (stage: string): boolean => data.stages.categoryOf(stage) === "open";
   // Every deal with a recorded open stage, open or closed, whenever it closed: each stage picks its own by when they reached it.
-  const all: CohortDeal[] = data.deals.filter((d) => hasOpenStage(d, data)).map((deal) => {
-    const isOpen = deal.category === "open";
-    return { id: deal.Id, deal, path: openPathOf(deal, data.stages), won: deal.category === "won", days: isOpen ? 0 : daysToClose(deal), open: isOpen, reachedAt: reachedTimes(deal, open), closedAtMs: isOpen ? null : deal.closedAt.getTime() };
-  });
-  const deals = comparable(ctx, { closed: all }, data.historyStart) as CohortDeal[];
+  const { deals, beforeHistory } = cohortDeals(ctx, data);
   const closedInIt = fromOpen.filter((d) => deals.some((x) => x.id === d.Id)).length;
-  const beforeHistory = all.length - deals.length;
   if (closedInIt < minSample) {
     return nm(
       beforeHistory
@@ -356,17 +324,6 @@ function build(ctx: Ctx, data: PipelineData): Loaded {
   });
   return { status: "ok", data, stagesEvidence, deals, beforeHistory, stages, tested, z };
 }
-
-// ─── Words ───────────────────────────────────────────────────────────────────
-
-const MONTHS: ReadonlyArray<() => Said> = [
-  () => said`January`, () => said`February`, () => said`March`, () => said`April`, () => said`May`, () => said`June`,
-  () => said`July`, () => said`August`, () => said`September`, () => said`October`, () => said`November`, () => said`December`,
-];
-const monthOf = (day: string): Said => MONTHS[Number(day.slice(5, 7)) - 1]!();
-
-/** A calendar day in full, as "21 September 2026", so the period is one the customer can check. */
-export const daySaid = (day: string): Said => said`${Number(day.slice(8, 10))} ${monthOf(day)} ${Number(day.slice(0, 4))}`;
 
 // ─── The metric ──────────────────────────────────────────────────────────────
 

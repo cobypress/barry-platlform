@@ -1,9 +1,10 @@
 import { notSized, pct, plural, type Rule, type RuleContext, type RuleResult } from "../../../engine/rule.ts";
 import { org, said, type Said } from "../../../engine/org-words.ts";
+import { andList } from "../../../engine/said-forms.ts";
 import type { SegmentCheck } from "../../../schemas/index.ts";
-import { localDay, zoneOf } from "../../time-zone.ts";
 import { dimensions, groupBy, median, round1 } from "../metrics.ts";
 import { DRIVER_GAP } from "../drivers.ts";
+import { cohortDeals, comparable, daySaid, periodOf, type CohortDeal, type Period } from "../reached.ts";
 import { loadPaths, sendBacks, type PathDeal, type Paths } from "./variants.ts";
 
 // The insights read from the paths deals take (DECISIONS.md 703): each a
@@ -19,6 +20,16 @@ import { loadPaths, sendBacks, type PathDeal, type Paths } from "./variants.ts";
 // counted, the gap inside the record types and segments that can check it.
 // Below that nothing is said; the figures stay in the variant table. Every
 // comparison says how often two things went together, never that one caused the other.
+//
+// Who is compared is chosen by when the deals were made, in a period that ends
+// a maturity lag before the run (reached.ts; DECISIONS.md 712), never by when
+// they closed: when a path changes how fast won deals close but not lost ones,
+// a sample by close date made a gap that wasn't there whenever deal volume
+// changed (up to 66% of simulated orgs in a cell). Not by when they reached the
+// stage either, as the stage probabilities are (706): when a path changes how
+// fast won deals reach the stage, that still made one (7.5%). When a deal was
+// made comes before its path and its outcome, so choosing by it favours
+// neither. The few still open are counted both ways, and both must clear.
 
 type Ctx = Omit<RuleContext, "metrics">;
 
@@ -26,8 +37,16 @@ type Ctx = Omit<RuleContext, "metrics">;
 export const WIN_GAP = DRIVER_GAP;
 /** Won deals and lost deals each side needs, so a rate isn't one or two deals either way. */
 export const MIN_EACH_OUTCOME = 5;
-/** The two-proportion z a gap needs before the count of comparisons raises it (Bonferroni). */
-export const Z_FLOOR = 2;
+/**
+ * The two-proportion z a gap needs before the count of comparisons raises it
+ * (Bonferroni). At 2, one comparison is a two-sided 4.55%, and where the 10-point
+ * gap is about 2 standard errors no other bar adds a margin: on dated orgs with
+ * nothing to find, 4.3% of orgs of 1,000 deals got an insight, single cells of
+ * 1,000 orgs up to 6.3%, and with deals chosen by when they were made one cell
+ * still reached 5.3% (DECISIONS.md 712). At 2.15, a two-sided 3.2% and the stage
+ * probabilities' floor (706), the worst cell is 3.6%.
+ */
+export const Z_FLOOR = 2.15;
 /** The family-wise chance of a false insight the z bar is set to, across every comparison a run tries. */
 export const FAMILY_ALPHA = 0.05;
 /** A won deals' days gap is said only when it is at least this share of the other side's median... */
@@ -69,13 +88,24 @@ export function zBar(tests: number): number {
   return Math.max(Z_FLOOR, Math.ceil(high * 100) / 100);
 }
 
-/** A comparison: the group against the other side, both having reached the same stage. */
+/** The gap with the open deals counted one way, over every deal in the period: points, and its z. */
+export type Bound = { gap: number; z: number };
+
+/** A comparison: the group against the other side, deals made in the stage's period that reached it. Sides are the closed deals. */
 export type Comparison = {
   reached: string;
   group: Side;
   other: Side;
   gap: number;
   z: number;
+  /** The period the deals were made in, as local days. */
+  from: string;
+  to: string;
+  /** Deals still open on each side, which can go either way. */
+  open: { group: number; other: number };
+  /** The group's open counted as lost and the other's as won (low), and the other way round (high). */
+  low: Bound;
+  high: Bound;
   /** Won deals' median days to win on each side, when each has the calibrated minimum of won deals. */
   days: { group: number; other: number; clears: boolean } | null;
   compared: number;
@@ -131,10 +161,21 @@ function withinRecordTypes(ctx: Ctx, group: PathDeal[], other: PathDeal[], gap: 
 
 const medianDays = (deals: PathDeal[]): number => round1(median(deals.map((d) => d.days)));
 
-/** A group against the other side, or null when either side is too small to test. Days only on won deals. */
-export function compare(ctx: Ctx, reached: string, group: PathDeal[], other: PathDeal[]): Comparison | null {
+/** The gap and its z over every deal on each side, the group's open counted as won and the other's as lost, or the other way round. */
+function boundOf(g: Side, o: Side, open: Comparison["open"], groupOpenWon: boolean): Bound {
+  const a = { n: g.n + open.group, won: g.won + (groupOpenWon ? open.group : 0) };
+  const b = { n: o.n + open.other, won: o.won + (groupOpenWon ? 0 : open.other) };
+  return { gap: round1(pct(a.won, a.n) - pct(b.won, b.n)), z: Math.round(zOf(a, b) * 100) / 100 };
+}
+
+const isOpen = (d: PathDeal): boolean => (d as Partial<CohortDeal>).open === true;
+
+/** A group against the other side in a period, or null when the period has too many still open or either side's closed deals are too few to test. Days only on won deals. */
+export function compare(ctx: Ctx, reached: string, groupAll: PathDeal[], otherAll: PathDeal[], period: Pick<Period, "from" | "to" | "tooOpen">): Comparison | null {
+  const [group, other] = [groupAll.filter((d) => !isOpen(d)), otherAll.filter((d) => !isOpen(d))];
   const [g, o] = [sideOf(group), sideOf(other)];
-  if (!testable(ctx, g, o)) return null;
+  if (period.tooOpen || !period.from || !period.to || !testable(ctx, g, o)) return null;
+  const open = { group: groupAll.length - group.length, other: otherAll.length - other.length };
   const gap = round1(g.rate - o.rate);
   const wonG = group.filter((d) => d.won);
   const wonO = other.filter((d) => d.won);
@@ -143,12 +184,35 @@ export function compare(ctx: Ctx, reached: string, group: PathDeal[], other: Pat
     const diff = Math.abs(round1(dg - dother));
     return { group: dg, other: dother, clears: diff >= DAYS_GAP_MIN && diff * 100 >= DAYS_GAP_SHARE * dother };
   })() : null;
-  return { reached, group: g, other: o, gap, z: Math.round(zOf(g, o) * 100) / 100, days, ...withinSegments(ctx, group, other, gap), types: withinRecordTypes(ctx, group, other, gap) };
+  return {
+    reached,
+    group: g,
+    other: o,
+    gap,
+    z: Math.round(zOf(g, o) * 100) / 100,
+    from: period.from,
+    to: period.to,
+    open,
+    low: boundOf(g, o, open, false),
+    high: boundOf(g, o, open, true),
+    days,
+    ...withinSegments(ctx, group, other, gap),
+    types: withinRecordTypes(ctx, group, other, gap),
+  };
+}
+
+/** Too many still open in the period to test, though its closed deals alone would have been enough: said beside a pass. */
+export function tooOpenToTest(ctx: Ctx, groupAll: PathDeal[], otherAll: PathDeal[], period: Pick<Period, "tooOpen">): boolean {
+  return period.tooOpen && testable(ctx, sideOf(groupAll.filter((d) => !isOpen(d))), sideOf(otherAll.filter((d) => !isOpen(d))));
 }
 
 /** Raised: the win-rate gap clears every bar. Days never raise one. */
 export function raised(c: Comparison | null, bar: number): c is Comparison {
-  if (!c || Math.abs(c.gap) < WIN_GAP || Math.abs(c.z) < bar) return false;
+  if (!c) return false;
+  // The open deals counted both ways: each must clear the gap and the bar, on the same side.
+  const side = Math.sign(c.low.gap);
+  if (side === 0 || Math.sign(c.high.gap) !== side) return false;
+  if ([c.low, c.high].some((b) => Math.abs(b.gap) < WIN_GAP || Math.abs(b.z) < bar)) return false;
   if (c.types.many && c.types.held === 0) return false;
   // No segment can check it: said at the lowest confidence. One alone, or gaps that turn round in most: not raised.
   if (c.compared === 0) return true;
@@ -156,13 +220,6 @@ export function raised(c: Comparison | null, bar: number): c is Comparison {
 }
 
 // ─── Who is compared ─────────────────────────────────────────────────────────
-
-/** Deals created before the org's stage history starts can't show every stage they were in, so they aren't compared. */
-export function comparable(ctx: Ctx, p: Pick<Paths, "closed">, historyStart: string | null): PathDeal[] {
-  if (!historyStart) return p.closed;
-  const zone = zoneOf(ctx);
-  return p.closed.filter((d) => localDay(new Date(d.deal.CreatedDate), zone) >= historyStart);
-}
 
 const at = (standard: string[], stage: string): number => standard.indexOf(stage);
 
@@ -183,7 +240,7 @@ export function skipComparisons(p: Paths, deals: PathDeal[]): Array<{ stage: str
 }
 
 /** A send-back that is a lost deal's last move is how it was closed out, not rework. */
-export const closingOut = (d: PathDeal): boolean => !d.won && d.path.length >= 2 && d.path.indexOf(d.path.at(-1)!) < d.path.indexOf(d.path.at(-2)!);
+export const closingOut = (d: PathDeal): boolean => !d.won && !isOpen(d) && d.path.length >= 2 && d.path.indexOf(d.path.at(-1)!) < d.path.indexOf(d.path.at(-2)!);
 
 /** Send-backs that count: every one but a lost deal's closing-out move. */
 export const countedSendBacks = (d: PathDeal): Array<{ from: string; to: string }> => (closingOut(d) ? sendBacks(d.path).slice(0, -1) : sendBacks(d.path));
@@ -192,14 +249,14 @@ export const countedSendBacks = (d: PathDeal): Array<{ from: string; to: string 
  * For each move back from F to T: among deals that reached F, those sent back to
  * T against the rest. A deal whose only such move closed it out is in neither.
  */
-export function sendBackComparisons(deals: PathDeal[]): Array<{ from: string; to: string; group: PathDeal[]; other: PathDeal[] }> {
+export function sendBackComparisons(deals: PathDeal[]): Array<{ from: string; to: string; group: PathDeal[]; other: PathDeal[]; closedOut: PathDeal[] }> {
   const moves = new Map<string, { from: string; to: string }>();
   for (const d of deals) for (const m of countedSendBacks(d)) moves.set(JSON.stringify([m.from, m.to]), m);
   return [...moves].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([key, m]) => {
     const there = deals.filter((d) => d.path.includes(m.from));
     const sent = (d: PathDeal): boolean => countedSendBacks(d).some((x) => JSON.stringify([x.from, x.to]) === key);
     const closedOut = (d: PathDeal): boolean => !sent(d) && sendBacks(d.path).some((x) => JSON.stringify([x.from, x.to]) === key);
-    return { ...m, group: there.filter(sent), other: there.filter((d) => !sent(d) && !closedOut(d)) };
+    return { ...m, group: there.filter(sent), other: there.filter((d) => !sent(d) && !closedOut(d)), closedOut: there.filter(closedOut) };
   });
 }
 
@@ -207,8 +264,32 @@ export function sendBackComparisons(deals: PathDeal[]): Array<{ from: string; to
 
 const within = (c: Comparison): Said =>
   c.compared
-    ? said` The gap points the same way in ${c.held} of ${c.compared} teams, record types and other segments that could check it.`
-    : said` We couldn't check this within teams or record types: none had enough of these deals on both sides.`;
+    ? said` The gap pointed the same way in ${c.held} of the ${c.compared} teams, record types and other groups we could check it in.`
+    : said` We couldn't check this within teams, record types or other groups: these deals couldn't be split into groups big enough to compare on both sides.`;
+
+/**
+ * The period and the deals in it, said first, every count adding up: "Of the 92
+ * deals created between 31 October 2024 and 17 March 2026 that reached Proposal,
+ * 2 are still open. Of the other 90,". A send-back's comparison leaves out the lost
+ * deals whose last move, back to the same stage, closed them out, and says so.
+ */
+function whoSaid(c: Comparison, stage: string, closedOut: { count: number; to: string } | null = null): Said {
+  const open = c.open.group + c.open.other;
+  const closed = c.group.n + c.other.n;
+  const out = closedOut?.count ?? 0;
+  const between = said`between ${daySaid(c.from)} and ${daySaid(c.to)}`;
+  const who = said`deals created ${between} that reached ${org(stage)}`;
+  if (open === 0 && out === 0) return said`Of the ${closed} ${who},`;
+  const left = out === 0 ? said`` : out === 1 ? said`1 lost deal whose last move back to ${org(closedOut!.to)} closed it out is left out` : said`${out} lost deals whose last move back to ${org(closedOut!.to)} closed them out are left out`;
+  const still = open === 0 ? said`` : open === 1 ? said`1 is still open` : said`${open} are still open`;
+  return said`Of the ${closed + open + out} ${who}, ${left}${out && open ? said`, and ` : said``}${still}. Of the other ${closed},`;
+}
+
+/** The stages whose deals couldn't be compared because too many of those made in the period are still open. */
+const tooOpenSaid = (stages: string[]): Said =>
+  stages.length === 0
+    ? said``
+    : said` Of the deals made early enough to compare that reached ${andList(stages.map((s) => said`${org(s)}`))}, too many are still open.`;
 
 const NOT_A_CAUSE = said` This shows how often they went together, not that one is the reason for the other.`;
 const value = (): ReturnType<typeof notSized> => notSized(said`It compares the paths your deals took, which has no direct figure.`);
@@ -219,6 +300,7 @@ export const confidenceOf = (ctx: Ctx, c: Comparison): "high" | "medium" | "low"
 
 const factsOf = (c: Comparison): Record<string, number> => ({
   reached: c.group.n + c.other.n,
+  open: c.open.group + c.open.other,
   deals: c.group.n,
   otherDeals: c.other.n,
   winRate: c.group.rate,
@@ -239,13 +321,29 @@ export const pathInsights: Rule = {
     const loaded = loadPaths(ctx);
     if (loaded.status !== "ok") return { outcome: "not_measurable", reason: loaded.reason, evidence: loaded.data.evidence };
     const { data, paths: p } = loaded;
-    const deals = comparable(ctx, p, data.historyStart);
-    const skips = skipComparisons(p, deals).map((s) => ({ ...s, c: compare(ctx, s.reached, s.group, s.other) }));
-    const backs = sendBackComparisons(deals).map((s) => ({ ...s, c: compare(ctx, s.from, s.group, s.other) }));
+    // Every deal, open or closed; each comparison takes those made in its stage's period that reached the stage.
+    const { deals } = cohortDeals(ctx, data);
+    const periods = new Map<string, Period>();
+    const periodAt = (stage: string): Period => periods.get(stage) ?? periods.set(stage, periodOf(ctx, deals, stage, "created")).get(stage)!;
+    const inPeriod = (stage: string, list: PathDeal[]): PathDeal[] => {
+      const ids = new Set(periodAt(stage).cohort.map((d) => d.id));
+      return list.filter((d) => ids.has(d.id));
+    };
+    const skips = skipComparisons(p, deals).map((s) => {
+      const [group, other] = [inPeriod(s.reached, s.group), inPeriod(s.reached, s.other)];
+      return { ...s, group, other, c: compare(ctx, s.reached, group, other, periodAt(s.reached)), tooOpen: tooOpenToTest(ctx, group, other, periodAt(s.reached)) };
+    });
+    const backs = sendBackComparisons(deals).map((s) => {
+      const [group, other] = [inPeriod(s.from, s.group), inPeriod(s.from, s.other)];
+      return { ...s, group, other, closedOut: inPeriod(s.from, s.closedOut).length, c: compare(ctx, s.from, group, other, periodAt(s.from)), tooOpen: tooOpenToTest(ctx, group, other, periodAt(s.from)) };
+    });
     // Every comparison with both sides big enough to test is one tried, and each raises the bar for all (Bonferroni).
     const tried = [...skips, ...backs].filter((s) => s.c !== null).length;
+    const tooOpen = [...new Set([...skips, ...backs].filter((s) => s.tooOpen).map((s) => ("reached" in s ? s.reached : s.from)))];
     const bar = zBar(tried);
-    const checked = segmentsChecked(ctx, deals);
+    // The closed deals of the window, as every pipeline figure counts them: an open deal has no closed quarter.
+    const closedDeals = comparable(ctx, p, data.historyStart);
+    const checked = segmentsChecked(ctx, closedDeals);
     const results: RuleResult[] = [];
     // Each insight is for information: a comparison of how deals went, never a fault in the org's set-up. So it is
     // severity info, which keeps it out of the 90-day plan of fixes, and it isn't scored (scoring.ts).
@@ -269,8 +367,8 @@ export const pathInsights: Rule = {
       results.push({
         ...common(c),
         key: `skip:${stage}`,
-        title: more ? said`Deals that skip ${org(stage)} are won more often than deals that went through it` : said`Deals that skip ${org(stage)} are won less often than deals that went through it`,
-        summary: said`Of the ${c.group.n + c.other.n} closed deals that reached ${org(reached)}, the ${c.group.n} that skipped ${org(stage)} were won ${c.group.rate}% of the time, against ${c.other.rate}% of the ${c.other.n} that went through it.${days}${within(c)}${NOT_A_CAUSE}`,
+        title: more ? said`Deals that skipped ${org(stage)} were won more often than deals that went through it` : said`Deals that skipped ${org(stage)} were won less often than deals that went through it`,
+        summary: said`${whoSaid(c, reached)} the ${c.group.n} that skipped ${org(stage)} were won ${c.group.rate}% of the time, against ${c.other.rate}% of the ${c.other.n} that went through it.${days}${within(c)}${NOT_A_CAUSE}`,
         recommendation: more
           ? said`Look at how the deals that skip ${org(stage)} are sold, and what they do instead, before deciding whether the stage is needed for them.`
           : said`Look at why deals move past ${org(stage)} without entering it, and whether the work the stage stands for is being done.`,
@@ -278,15 +376,15 @@ export const pathInsights: Rule = {
       });
     }
 
-    for (const { from, to, c } of backs) {
+    for (const { from, to, c, closedOut } of backs) {
       if (!raised(c, bar)) continue;
       const more = c.gap > 0;
       const days = c.days?.clears ? said` Won deals sent back to ${org(to)} took a median of ${c.days.group} days to win, against ${c.days.other} for the rest.` : said``;
       results.push({
         ...common(c),
         key: `rework:${from}:${to}`,
-        title: more ? said`Deals sent back from ${org(from)} to ${org(to)} are won more often than the rest that reached ${org(from)}` : said`Deals sent back from ${org(from)} to ${org(to)} are won less often than the rest that reached ${org(from)}`,
-        summary: said`Of the ${c.group.n + c.other.n} closed deals that reached ${org(from)}, the ${c.group.n} sent back to ${org(to)} were won ${c.group.rate}% of the time, against ${c.other.rate}% of the rest.${days}${within(c)}${NOT_A_CAUSE}`,
+        title: more ? said`Deals sent back from ${org(from)} to ${org(to)} were won more often than the rest that reached ${org(from)}` : said`Deals sent back from ${org(from)} to ${org(to)} were won less often than the rest that reached ${org(from)}`,
+        summary: said`${whoSaid(c, from, { count: closedOut, to })} the ${c.group.n} sent back to ${org(to)} were won ${c.group.rate}% of the time, against ${c.other.rate}% of the rest.${days}${within(c)}${NOT_A_CAUSE}`,
         recommendation: said`Look at what sends these deals back, and agree what has to be true before a deal leaves ${org(to)}.`,
         subjects: [{ type: "stage", label: from }, { type: "stage", label: to }],
       });
@@ -296,11 +394,13 @@ export const pathInsights: Rule = {
     return {
       outcome: "pass",
       summary: tried
-        ? said`No skipped stage or move back separates deals that reached the same point by ${WIN_GAP} points of win rate or more, beyond what chance could make of the ${plural(tried, "comparison")} we could test.`
-        : said`No skipped stage or move back had enough won and lost deals on both sides, among deals that reached the same point, to compare.`,
+        ? said`No skipped stage or move back separated deals that reached the same point by ${WIN_GAP} points of win rate or more, beyond what chance could make of the ${plural(tried, "comparison")} we could test.${tooOpenSaid(tooOpen)}`
+        : tooOpen.length
+          ? said`No skipped stage or move back could be compared.${tooOpenSaid(tooOpen)} No other had enough won and lost deals on both sides, among deals that reached the same point.`
+          : said`No skipped stage or move back had enough won and lost deals on both sides, among deals that reached the same point, to compare.`,
       evidence: data.evidence,
       segmentsChecked: checked,
-      facts: { closed: deals.length, tried },
+      facts: { closed: closedDeals.length, tried },
     };
   },
 };
