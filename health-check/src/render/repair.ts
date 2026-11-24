@@ -33,7 +33,7 @@ export type SourceRepair = { raw: string; ruleId?: string; metricId?: string; st
 export const FIELDS = {
   finding: {
     masked: ["dependencies[]", "effort.note", "effortHours.basis", "evidence[].exclusions[]", "evidence[].note", "fixPrompt", "guards[].detail", "guards[].evidence[].note", "guards[].evidence[].exclusions[]", "guards[].subject", "notMeasurableReason", "owner", "recommendation", "segmentExemptReason", "segmentsChecked[].dimension", "segmentsChecked[].note", "subjects[].label", "summary", "title", "value.assumptions[]", "value.period", "value.reason"],
-    unmasked: ["amountsUnnamed", "confidence", "domain", "effort.size", "effortHours.partial", "fixComplexity", "id", "manualStepIds[]", "notMeasurableKind", "recommendationType", "ruleId", "severity", "status", "subjects[].type", "timeBand", "value.kind", "value.unit", "guards[].guardId", "guards[].status", ...evidence("evidence[]"), ...evidence("guards[].evidence[]")],
+    unmasked: ["amountsUnnamed", "confidence", "difficulty", "domain", "effort.size", "effortHours.partial", "fixComplexity", "id", "manualStepIds[]", "notMeasurableKind", "recommendationType", "ruleId", "severity", "status", "subjects[].type", "timeBand", "value.kind", "value.unit", "guards[].guardId", "guards[].status", ...evidence("evidence[]"), ...evidence("guards[].evidence[]")],
   },
   metric: {
     masked: ["assumptions[]", "definition", "evidence[].exclusions[]", "evidence[].note", "exclusions[]", "label", "reason", "segmentExemptReason", "segments[].dimension", "segments[].key", "segments[].notMeasurableReason", "series[].notMeasurableReason"],

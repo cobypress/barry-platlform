@@ -330,6 +330,8 @@ function overrideFinding(f: Finding, overrides: NumberOverride[]): { finding: Fi
     delete finding.effortHours;
     // The band is the hours' own (DECISIONS.md 636), so it goes with them; the rule's fix complexity stands.
     delete finding.timeBand;
+    // So is the difficulty (DECISIONS.md 714): no hours, no difficulty.
+    delete finding.difficulty;
     delete finding.fixPrompt;
   }
   return { finding, refused: [] };

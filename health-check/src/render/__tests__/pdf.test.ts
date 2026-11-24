@@ -105,7 +105,7 @@ describe("the executive summary", () => {
     const items = planPages.match(/<li>/g)?.length ?? 0;
     assert.ok(items >= Math.min(plan[0]!.findings.length, EXECUTIVE_PLAN_ITEMS));
     assert.equal(planPages.match(/<li><strong>[^<]+\.<\/strong>/g)?.length, items, "every plan action leads with its issue");
-    assert.match(planPages, /Quick wins, also in days 1 to 30/);
+    assert.match(planPages, /Small jobs, also in days 1 to 30/);
     const deckActions = [...fullReportHtml(report, pseudonyms).matchAll(/<ul class="action-list[^"]*">([\s\S]*?)<\/ul>/g)].flatMap((m) => m[1]!.split("<li>").slice(1));
     assert.ok(deckActions.length > 0);
     for (const item of deckActions) assert.match(item, /^<strong>/, "every roadmap action in the deck leads with its issue");

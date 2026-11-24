@@ -158,8 +158,14 @@ export type Plan = { phases: PlanPhase[]; later: Finding[]; alsoFor: Record<stri
 
 /** At most this many quick wins in days 1 to 30's list. The rest are planned as any other action. */
 export const QUICK_WINS = 8;
-/** The quick wins' heading, wherever the plan is shown. */
-export const QUICK_WINS_HEADING = "Quick wins, also in days 1 to 30";
+/**
+ * The quick wins' heading, wherever the plan is shown. They are chosen by the size
+ * of the job (`effort.size`, DECISIONS.md 363), not by the difficulty beside each
+ * finding, so they are called small jobs, never quick fixes (DECISIONS.md 714).
+ */
+export const QUICK_WINS_HEADING = "Small jobs, also in days 1 to 30";
+/** Their short name, where the plan's parts are counted. */
+export const QUICK_WINS_NAME = "Small jobs";
 /** Said beside a licence saving we couldn't price (DECISIONS.md 367). */
 export const UNPRICED = "The saving isn't priced.";
 

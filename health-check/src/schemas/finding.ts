@@ -67,6 +67,13 @@ export type TimeBand = z.infer<typeof TimeBand>;
 export const FixComplexity = z.enum(["simple", "moderate", "complex"]);
 export type FixComplexity = z.infer<typeof FixComplexity>;
 
+// How hard a fix is, said beside its severity (DECISIONS.md 714): worked out by
+// code from the finding's own hours and its rule's fix complexity
+// (`difficultyOf` in src/fix/difficulty.ts), never set by hand, so it can't
+// disagree with the hours. No hours, no difficulty: never a guess.
+export const Difficulty = z.enum(["quick_fix", "needs_planning", "project"]);
+export type Difficulty = z.infer<typeof Difficulty>;
+
 /** The longest a fix prompt may be, in characters (DECISIONS.md 628). */
 export const FIX_PROMPT_MAX = 2500;
 
@@ -132,6 +139,8 @@ export const Finding = z
     timeBand: TimeBand.optional(),
     // The rule's fix complexity, on an issue only (DECISIONS.md 636). Not the org's complexity score.
     fixComplexity: FixComplexity.optional(),
+    // From effortHours and fixComplexity, present exactly when the hours are (DECISIONS.md 714).
+    difficulty: Difficulty.optional(),
     // Made by code from fixed text and the finding's own facts, never by Claude, and never naming a person or a record.
     fixPrompt: z.string().min(1).max(FIX_PROMPT_MAX).optional(),
     // The sentences the engine can vouch for, each with the org's characters marked (DECISIONS.md 655). Absent: unknown.
