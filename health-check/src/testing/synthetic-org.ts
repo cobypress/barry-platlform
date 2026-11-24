@@ -80,21 +80,22 @@ export const usersTable = USERS.map((u) => {
 });
 
 export const STAGES = [
-  { ApiName: "Prospecting", MasterLabel: "Prospecting", IsActive: true, IsClosed: false, IsWon: false, SortOrder: 1 },
-  { ApiName: "Discovery", MasterLabel: "Discovery", IsActive: true, IsClosed: false, IsWon: false, SortOrder: 2 },
-  { ApiName: "Proposal", MasterLabel: "Proposal", IsActive: true, IsClosed: false, IsWon: false, SortOrder: 3 },
-  { ApiName: "Negotiation", MasterLabel: "Negotiation", IsActive: true, IsClosed: false, IsWon: false, SortOrder: 4 },
+  { ApiName: "Prospecting", MasterLabel: "Prospecting", IsActive: true, IsClosed: false, IsWon: false, SortOrder: 1, DefaultProbability: 40 },
+  { ApiName: "Discovery", MasterLabel: "Discovery", IsActive: true, IsClosed: false, IsWon: false, SortOrder: 2, DefaultProbability: 45 },
+  { ApiName: "Proposal", MasterLabel: "Proposal", IsActive: true, IsClosed: false, IsWon: false, SortOrder: 3, DefaultProbability: 55 },
+  // Trap (DECISIONS.md 706): set well above how often deals that reach it are won, about 69%.
+  { ApiName: "Negotiation", MasterLabel: "Negotiation", IsActive: true, IsClosed: false, IsWon: false, SortOrder: 4, DefaultProbability: 90 },
   // Trap: active, and nobody uses it.
-  { ApiName: "Legal Review", MasterLabel: "Legal Review", IsActive: true, IsClosed: false, IsWon: false, SortOrder: 5 },
-  { ApiName: "Closed Won", MasterLabel: "Closed Won", IsActive: true, IsClosed: true, IsWon: true, SortOrder: 6 },
-  { ApiName: "Closed Lost", MasterLabel: "Closed Lost", IsActive: true, IsClosed: true, IsWon: false, SortOrder: 7 },
+  { ApiName: "Legal Review", MasterLabel: "Legal Review", IsActive: true, IsClosed: false, IsWon: false, SortOrder: 5, DefaultProbability: 90 },
+  { ApiName: "Closed Won", MasterLabel: "Closed Won", IsActive: true, IsClosed: true, IsWon: true, SortOrder: 6, DefaultProbability: 100 },
+  { ApiName: "Closed Lost", MasterLabel: "Closed Lost", IsActive: true, IsClosed: true, IsWon: false, SortOrder: 7, DefaultProbability: 0 },
   // Trap: looks like a loss in Salesforce, and shouldn't count as one.
-  { ApiName: "Closed No Decision", MasterLabel: "Closed No Decision", IsActive: true, IsClosed: true, IsWon: false, SortOrder: 8 },
+  { ApiName: "Closed No Decision", MasterLabel: "Closed No Decision", IsActive: true, IsClosed: true, IsWon: false, SortOrder: 8, DefaultProbability: 0 },
   // A second way to lose, so lost deals can be split by how they closed.
-  { ApiName: "Closed Lost - No Budget", MasterLabel: "Closed Lost - No Budget", IsActive: true, IsClosed: true, IsWon: false, SortOrder: 9 },
+  { ApiName: "Closed Lost - No Budget", MasterLabel: "Closed Lost - No Budget", IsActive: true, IsClosed: true, IsWon: false, SortOrder: 9, DefaultProbability: 0 },
   // Trap: retired when the process was renamed, and still holding open deals with
   // too little history to weight them by.
-  { ApiName: "Qualified", MasterLabel: "Qualified", IsActive: false, IsClosed: false, IsWon: false, SortOrder: 10 },
+  { ApiName: "Qualified", MasterLabel: "Qualified", IsActive: false, IsClosed: false, IsWon: false, SortOrder: 10, DefaultProbability: 40 },
 ];
 
 /**

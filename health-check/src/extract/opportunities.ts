@@ -2,15 +2,32 @@ import { z } from "zod";
 import { schemaExtractor } from "./configuration.ts";
 import { daysBefore, readSoql, soqlDate, soqlDateTime, soqlUpTo, unavailable, upToItsSecond, type ExtractContext, type Extractor, type Sourced, type SourceInfo } from "./types.ts";
 
-export type StageRow = { ApiName: string; MasterLabel: string; IsActive: boolean; IsClosed: boolean; IsWon: boolean; SortOrder: number };
+/** A stage's settings. `DefaultProbability` is null where it wasn't read, or the stage has none (DECISIONS.md 706). */
+export type StageRow = { ApiName: string; MasterLabel: string; IsActive: boolean; IsClosed: boolean; IsWon: boolean; SortOrder: number; DefaultProbability: number | null };
 
 /** The stage read, shared with the connect job's read for the calibration screen (DECISIONS.md 611). */
 export const STAGES_SOQL = "SELECT ApiName, MasterLabel, IsActive, IsClosed, IsWon, SortOrder FROM OpportunityStage";
+/**
+ * The engine's own stage read: the same, with the probability set on each stage
+ * (DECISIONS.md 706). A stage setting, no record data. The connect job keeps
+ * STAGES_SOQL, so it reads nothing new.
+ */
+export const ENGINE_STAGES_SOQL = "SELECT ApiName, MasterLabel, IsActive, IsClosed, IsWon, SortOrder, DefaultProbability FROM OpportunityStage";
+/** How the stage read says it went without the probabilities. */
+export const PROBABILITY_FIELD = "OpportunityStage.DefaultProbability";
 
 export const stagesExtractor: Extractor<Sourced<StageRow[]>> = {
   id: "opportunity-stages",
-  version: 1,
-  run: (ctx) => readSoql<StageRow>(ctx, STAGES_SOQL),
+  // 2: the probabilities (DECISIONS.md 706), so a checkpoint from 1 is read again.
+  version: 2,
+  async run(ctx) {
+    const full = await readSoql<StageRow>(ctx, ENGINE_STAGES_SOQL);
+    if (full.status === "ok") return full;
+    // Whatever Salesforce refused, the stages are read as before without the probabilities, and only
+    // the comparison that needs them goes without: every other figure reads the stages as it did.
+    const plain = await readSoql<Omit<StageRow, "DefaultProbability">>(ctx, STAGES_SOQL);
+    return plain.status === "ok" ? { ...plain, data: plain.data.map((r) => ({ ...r, DefaultProbability: null })), missingFields: [PROBABILITY_FIELD] } : plain;
+  },
 };
 
 // Every pipeline number comes from these two rows, so they're validated on the

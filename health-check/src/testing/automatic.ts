@@ -65,5 +65,13 @@ export class AutomaticReplay implements Transport {
   }
 }
 
-/** A request's key without the parts of the opportunities read that follow the calibration. */
-const loose = (key: string): string => key.replace("%2C%20Loss_Reason__c%20FROM%20Opportunity", "%20FROM%20Opportunity").replace(/%20OR%20StageName%20IN%20\([^)]*\)/, "");
+/**
+ * A request's key without the parts of the opportunities read that follow the
+ * calibration, and without the probabilities the engine's stage read adds to the
+ * connect job's (DECISIONS.md 706), so the connect read is answered by the run's.
+ */
+const loose = (key: string): string =>
+  key
+    .replace("%2C%20Loss_Reason__c%20FROM%20Opportunity", "%20FROM%20Opportunity")
+    .replace(/%20OR%20StageName%20IN%20\([^)]*\)/, "")
+    .replace("%2C%20DefaultProbability%20FROM%20OpportunityStage", "%20FROM%20OpportunityStage");
