@@ -10,6 +10,7 @@ import { loadAnswers, loadCalibration, syntheticProvider } from "../replay.ts";
 import { buildScaleOrg, FIVE_HUNDRED_USERS, scaled } from "../scale-org.ts";
 import { Simulator } from "../simulator.ts";
 import { AS_OF, CONNECTED_USER } from "../synthetic-org.ts";
+import { ENGINE_STAGES_SOQL, STAGES_SOQL } from "../../extract/opportunities.ts";
 
 // What the engine concludes, held still while how it gets there changes
 // (DECISIONS.md 341). A change made for memory or speed must leave every
@@ -17,8 +18,16 @@ import { AS_OF, CONNECTED_USER } from "../synthetic-org.ts";
 // a metric or the raw notes updates these, and says why in its commit.
 
 const GOLDEN: Record<string, Record<string, string>> = {
-  recorded: { "findings.json": "32e84d18880742a8", "metrics.json": "9ff8e22ef7d45790", "scores.json": "17cdb1708449d000", "manual-steps.json": "c4daf1ca86584a33", "action-lists.json": "7018f033c3c80e0a", "raw-notes.md": "168216d750bac078", "handbook.json": "64dcafcf493eef42" },
-  generated: { "findings.json": "e7d065627ba11e7e", "metrics.json": "110987cf0075336e", "scores.json": "616e42570f940402", "manual-steps.json": "15ae87c4fd76d7b6", "action-lists.json": "8eeb97766d119778", "raw-notes.md": "401f09357b6ebfcc", "handbook.json": "23c075e2337e23a8" },
+  recorded: { "findings.json": "6bb1a7259636570c", "metrics.json": "6cb4e274fa619acb", "scores.json": "17cdb1708449d000", "manual-steps.json": "c4daf1ca86584a33", "action-lists.json": "7018f033c3c80e0a", "raw-notes.md": "9e047dc61486eb8e", "handbook.json": "64dcafcf493eef42" },
+  generated: { "findings.json": "6649483cdd8d7021", "metrics.json": "c15f48ea3065fd90", "scores.json": "616e42570f940402", "manual-steps.json": "15ae87c4fd76d7b6", "action-lists.json": "8eeb97766d119778", "raw-notes.md": "a09e343823361c89", "handbook.json": "23c075e2337e23a8" },
+};
+
+// Before decision 706 added the stage probabilities' finding and metric, and its stage read named the probability field:
+// with those taken out, and the stage read's evidence naming the query as it was, findings.json and metrics.json hash
+// as they did. raw-notes.md gains their sections and the counts they add to. Nothing else moved.
+const BEFORE_706: Record<string, { "findings.json": string; "metrics.json": string }> = {
+  recorded: { "findings.json": "32e84d18880742a8", "metrics.json": "9ff8e22ef7d45790" },
+  generated: { "findings.json": "e7d065627ba11e7e", "metrics.json": "110987cf0075336e" },
 };
 
 // Before decision 703 added the path insights' findings and the variant table's metric: with those taken out,
@@ -47,8 +56,18 @@ const generatedDir = async () =>
 const recorded = async () => fingerprint(await recordedDir());
 const generated = async () => fingerprint(await generatedDir());
 
-/** The run's findings.json and metrics.json with decision 703's findings and metric taken out, written as the run writes them. */
+/** The run's findings.json and metrics.json with decision 706's finding and metric taken out, and its stage read named as before it. */
+function withoutProbabilities(dir: string): void {
+  for (const [file, ours] of [["findings.json", (x: Record<string, unknown>) => x.ruleId === "pipe.probability-vs-reality"], ["metrics.json", (x: Record<string, unknown>) => x.id === "historic.stage_probability_vs_won"]] as const) {
+    const path = join(dir, file);
+    const rows = (JSON.parse(readFileSync(path, "utf8").replaceAll(ENGINE_STAGES_SOQL, STAGES_SOQL)) as Array<Record<string, unknown>>).filter((x) => !ours(x));
+    writeFileSync(path, `${JSON.stringify(rows, null, 2)}\n`);
+  }
+}
+
+/** The run's findings.json and metrics.json with decision 703's findings and metric taken out, and 706's before them, written as the run writes them. */
 function withoutPaths(dir: string): void {
+  withoutProbabilities(dir);
   for (const [file, ours] of [["findings.json", (x: Record<string, unknown>) => x.ruleId === "pipe.path-insights"], ["metrics.json", (x: Record<string, unknown>) => x.id === "historic.path_variants"]] as const) {
     const path = join(dir, file);
     const rows = (JSON.parse(readFileSync(path, "utf8")) as Array<Record<string, unknown>>).filter((x) => !ours(x));
@@ -105,7 +124,11 @@ test("decisions 663 and 672 moved findings.json by the value, hours and fix prom
     // Decision 672 moved it by the fix prompts' marks alone, on every issue: without them it is as it was before 672.
     const prompts = (findings as Array<{ fixPrompt?: string; orgWords?: { fixPrompt?: unknown } }>).filter((f) => f.fixPrompt);
     assert.ok(prompts.length > 0 && prompts.every((f) => f.orgWords?.fixPrompt), `${name}: every prompt marked`);
-    // Decision 703's findings and measure taken out alone, on a first run: findings.json and metrics.json are as before it.
+    // Decision 706's finding and measure taken out alone, on a first run: findings.json and metrics.json are as before it.
+    assert.ok(findings.length > 0 && JSON.stringify(findings).includes("pipe.probability-vs-reality"), name);
+    withoutProbabilities(dir);
+    assert.deepEqual(fingerprint(dir), { ...GOLDEN[name], ...BEFORE_706[name] }, `${name} before 706`);
+    // Decision 703's findings and measure taken out too: findings.json and metrics.json are as before it.
     withoutPaths(dir);
     assert.deepEqual(fingerprint(dir), { ...GOLDEN[name], ...BEFORE_703[name] }, `${name} before 703`);
     withoutPromptMarks(dir);
