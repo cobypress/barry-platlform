@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { averageBeside } from "../domains/average.ts";
 import { CURRENCY_NOT_NAMED } from "../engine/currency.ts";
 import { holdsNameOrSecret } from "../narrative/guard.ts";
 import type { BuiltReport } from "../narrative/sections.ts";
@@ -255,7 +256,10 @@ export function planHours(plan: ReturnType<typeof buildPlan>): { low: number; hi
 
 function digestMetric(m: Metric): DigestMetric {
   const base = { id: m.id, domain: m.domain, label: m.label, definition: m.definition, unit: m.unit };
-  if (m.status === "measured") return { status: "measured", ...base, value: m.value, n: m.n, dateRange: m.dateRange, assumptions: [...m.assumptions], exclusions: [...m.exclusions] };
+  if (m.status === "measured") {
+    const average = averageBeside(m);
+    return { status: "measured", ...base, value: m.value, ...(average === null ? {} : { average }), n: m.n, dateRange: m.dateRange, assumptions: [...m.assumptions], exclusions: [...m.exclusions] };
+  }
   return { status: "not_measurable", ...base, reason: m.reason, ...(m.notMeasurableKind ? { notMeasurableKind: m.notMeasurableKind } : {}) };
 }
 

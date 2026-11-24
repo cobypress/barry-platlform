@@ -1,6 +1,7 @@
 import { BENCHMARK_MIN_GROUP, type BenchmarkRow, type Finding, type Industry, type Metric, type Score } from "../schemas/index.ts";
+import { DURATION_MEDIANS, MIN_AVERAGE_VALUES } from "../domains/average.ts";
 import { BENCHMARK_METRICS, benchmarkFigures } from "./export.ts";
-import { PUBLISHED_FIGURES, type PublishedFigure } from "./published.ts";
+import { AVERAGE_AGAINST_AVERAGE, AVERAGE_AGAINST_MEDIAN, PUBLISHED_FIGURES, type PublishedFigure } from "./published.ts";
 import { latestWindow } from "./summary.ts";
 
 // Roadmap 1.6: where a run sits against published research and against our own
@@ -39,7 +40,17 @@ export type OwnComparison =
   | { status: "measured"; group: GroupTried & { orgs: number }; p25: number; median: number; p75: number; position: Position; tried: GroupTried[] }
   | { status: "not_measurable"; reason: string; tried: GroupTried[] };
 
-export type PublishedComparison = { figure: PublishedFigure; difference: number; side: "better" | "worse" | "level" };
+/**
+ * One published figure, and what of ours it's set against (DECISIONS.md 709).
+ * Our durations are medians. A published average of days is set against our
+ * average of the same deals ("average"), and, where we hold none, against
+ * nothing ("none"): a median and an average aren't measured the same way, so
+ * there's then no difference and no side. Anything else is set against our
+ * figure as it went into the benchmark set ("value").
+ */
+export type PublishedComparison =
+  | { figure: PublishedFigure; against: "value" | "average"; ours: number; difference: number; side: "better" | "worse" | "level" }
+  | { figure: PublishedFigure; against: "none"; ours: null; difference: null; side: null };
 
 export type Comparison = {
   metric: ComparedMetric;
@@ -193,13 +204,26 @@ function industryMissing(industry: Industry | null): string {
 /** To one decimal place, half away from zero, so a difference reads the same whichever way round it is. */
 const tenth = (n: number): number => (Math.sign(n) * Math.round(Math.abs(n) * 10)) / 10 || 0;
 
-function publishedComparisons(metric: ComparedMetric, value: number, figures: PublishedFigure[]): PublishedComparison[] {
+/** A published figure that is an average of days, which our median can't be set against. */
+export const publishedAverage = (metric: ComparedMetric, figure: PublishedFigure): boolean => metric.unit === "days" && figure.statistic === "on average";
+
+/** The run's own average for a duration whose value is a median, from five values or more; null where it holds none. */
+function averageOf(metrics: Metric[], key: string): number | null {
+  const m = metrics.find((x) => x.id === key);
+  if (m?.status !== "measured" || !DURATION_MEDIANS.has(m.id) || m.n < MIN_AVERAGE_VALUES) return null;
+  return typeof m.stats.mean === "number" ? m.stats.mean : null;
+}
+
+function publishedComparisons(metric: ComparedMetric, value: number, average: number | null, figures: PublishedFigure[]): PublishedComparison[] {
   return figures
     .filter((f) => f.metricKey === metric.key && f.unit === metric.unit)
-    .map((figure) => {
-      const difference = tenth(value - figure.value);
+    .map((figure): PublishedComparison => {
+      const unlike = publishedAverage(metric, figure);
+      if (unlike && average === null) return { figure, against: "none", ours: null, difference: null, side: null };
+      const ours = unlike ? average! : value;
+      const difference = tenth(ours - figure.value);
       const better = metric.better === "higher" ? difference > 0 : difference < 0;
-      return { figure, difference, side: difference === 0 ? "level" : better ? "better" : "worse" };
+      return { figure, against: unlike ? "average" : "value", ours, difference, side: difference === 0 ? "level" : better ? "better" : "worse" };
     });
 }
 
@@ -215,7 +239,7 @@ export function compareRun(input: CompareInput): Comparison[] {
       const own: OwnComparison = { status: "not_measurable", reason: "There's no figure of yours to compare.", tried: [] };
       return { metric, value: null, reason, published: [], publishedReason: "There's no figure of yours to compare.", own };
     }
-    const found = publishedComparisons(metric, figure.value, published);
+    const found = publishedComparisons(metric, figure.value, averageOf(input.metrics, metric.key), published);
     return {
       metric,
       value: figure.value,
@@ -239,11 +263,47 @@ const orgs = (n: number): string => `${n} ${n === 1 ? "org" : "orgs"}`;
 export const formatFigure = (value: number, unit: ComparedMetric["unit"]): string => (unit === "percent" ? `${value}%` : `${value} ${value === 1 ? "day" : "days"}`);
 
 /** How far apart two figures are, in words: "4 points higher", "12 days shorter". */
-export function differenceWords(c: Comparison, p: PublishedComparison): string {
+export function differenceWords(c: Comparison, p: Extract<PublishedComparison, { against: "value" | "average" }>): string {
   if (p.side === "level") return "the same";
   const size = Math.abs(p.difference);
   const more = p.difference > 0;
   return c.metric.unit === "percent" ? `${size} ${size === 1 ? "point" : "points"} ${more ? "higher" : "lower"}` : `${size} ${size === 1 ? "day" : "days"} ${more ? "longer" : "shorter"}`;
+}
+
+/** What each average of days is: in a sentence of its own, and as the subject of one. */
+const AVERAGE_WORDS: Record<string, { took: (days: string) => string; whose: string }> = {
+  "historic.sales_cycle_won": { took: (days) => `Your won deals took an average of ${days} to close`, whose: "Your won deals' average" },
+};
+
+/** Ours against a published figure, before the published figure: "11 days shorter than", "the same as". */
+export function againstWords(c: Comparison, p: Extract<PublishedComparison, { against: "value" | "average" }>): string {
+  return p.side === "level" ? "the same as" : `${differenceWords(c, p)} than`;
+}
+
+/**
+ * The sentence that sets a published average of days against ours, or says
+ * why it isn't set against anything (DECISIONS.md 709), with which side is
+ * better. Null for any other figure, whose sentence each place words as before.
+ */
+export function averageSentence(c: Comparison, p: PublishedComparison): string | null {
+  const fmt = (v: number): string => formatFigure(v, c.metric.unit);
+  if (p.against === "none") {
+    return `Yours is a median of ${fmt(c.value!)} and the published figure an average of ${fmt(p.figure.value)}. A median and an average aren't measured the same way, so we don't say which is shorter.`;
+  }
+  if (p.against !== "average") return null;
+  const ours = AVERAGE_WORDS[c.metric.key]?.took(fmt(p.ours)) ?? `Your average is ${fmt(p.ours)}`;
+  return `${ours}, ${againstWords(c, p)} the published average of ${fmt(p.figure.value)}${p.side === "level" ? "" : `, which is ${p.side}`}.`;
+}
+
+/**
+ * The same, where the published figure is already given just before it ("91
+ * days on average."): ours and how far apart, or, set against nothing, why.
+ */
+export function averageAfterPublished(c: Comparison, p: PublishedComparison): string | null {
+  if (p.against !== "average") return averageSentence(c, p);
+  const fmt = (v: number): string => formatFigure(v, c.metric.unit);
+  const whose = AVERAGE_WORDS[c.metric.key]?.whose ?? "Your average";
+  return `${whose} is ${fmt(p.ours)}: ${p.side === "level" ? "the same" : `${differenceWords(c, p)}, which is ${p.side}`}.`;
 }
 
 /** The working for one comparison, as labelled lines: the raw notes print them, and the number check reads them. */
@@ -258,10 +318,14 @@ export function comparisonNotes(c: Comparison): Array<{ label: string; text: str
     lines.push({ label: "Published research", text: `${f.source.publisher}, ${f.source.title} (${f.source.year}): ${fmt(f.value)}, ${f.statistic}.` });
     lines.push({ label: "What it measures", text: f.measures });
     lines.push({ label: "Who it describes", text: `${f.population}.` });
-    lines.push({ label: "How it differs from ours", text: f.differences.length ? f.differences.join(" ") : "It measures the same thing." });
+    // Set against our average, the caveat about a median says what was done instead (DECISIONS.md 709).
+    const differences = p.against === "average" ? f.differences.map((d) => (d === AVERAGE_AGAINST_MEDIAN ? AVERAGE_AGAINST_AVERAGE : d)) : f.differences;
+    lines.push({ label: "How it differs from ours", text: differences.length ? differences.join(" ") : "It measures the same thing." });
     lines.push({ label: "Basis", text: f.basis === "records" ? "Measured from deal records." : "Answered in a survey." });
     lines.push({ label: "Source", text: `${f.source.url}, read on ${f.source.checked}.` });
-    lines.push({ label: "Against it", text: `Yours is ${differenceWords(c, p)}${p.side === "level" ? "" : `, which is ${p.side}`}.` });
+    const average = averageSentence(c, p);
+    if (average !== null || p.against === "none") lines.push({ label: "Against it", text: average! });
+    else lines.push({ label: "Against it", text: `Yours is ${differenceWords(c, p)}${p.side === "level" ? "" : `, which is ${p.side}`}.` });
   }
   const own = c.own;
   if (own.status === "measured") {

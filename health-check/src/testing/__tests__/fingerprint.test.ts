@@ -11,6 +11,7 @@ import { buildScaleOrg, FIVE_HUNDRED_USERS, scaled } from "../scale-org.ts";
 import { Simulator } from "../simulator.ts";
 import { AS_OF, CONNECTED_USER } from "../synthetic-org.ts";
 import { ENGINE_STAGES_SOQL, STAGES_SOQL } from "../../extract/opportunities.ts";
+import { DURATION_MEDIANS } from "../../domains/average.ts";
 
 // What the engine concludes, held still while how it gets there changes
 // (DECISIONS.md 341). A change made for memory or speed must leave every
@@ -18,8 +19,15 @@ import { ENGINE_STAGES_SOQL, STAGES_SOQL } from "../../extract/opportunities.ts"
 // a metric or the raw notes updates these, and says why in its commit.
 
 const GOLDEN: Record<string, Record<string, string>> = {
-  recorded: { "findings.json": "9c3e03a2db501670", "metrics.json": "45cfb9b67574f6bb", "scores.json": "17cdb1708449d000", "manual-steps.json": "c4daf1ca86584a33", "action-lists.json": "7018f033c3c80e0a", "raw-notes.md": "cf2b74aabda9aa0a", "handbook.json": "64dcafcf493eef42" },
-  generated: { "findings.json": "998e50194fd092df", "metrics.json": "3d451573d17ac8ca", "scores.json": "616e42570f940402", "manual-steps.json": "15ae87c4fd76d7b6", "action-lists.json": "8eeb97766d119778", "raw-notes.md": "e32ea217f43f0f63", "handbook.json": "23c075e2337e23a8" },
+  recorded: { "findings.json": "9c3e03a2db501670", "metrics.json": "b64977cf778b4ed1", "scores.json": "17cdb1708449d000", "manual-steps.json": "c4daf1ca86584a33", "action-lists.json": "7018f033c3c80e0a", "raw-notes.md": "885ce7b3fb0e9e6a", "handbook.json": "64dcafcf493eef42" },
+  generated: { "findings.json": "998e50194fd092df", "metrics.json": "cb39d3fda2a6435e", "scores.json": "616e42570f940402", "manual-steps.json": "15ae87c4fd76d7b6", "action-lists.json": "8eeb97766d119778", "raw-notes.md": "5c5a4dff7664b82e", "handbook.json": "23c075e2337e23a8" },
+};
+
+// Before decision 709 kept each duration's average beside its median: with the stat taken out, metrics.json hashes as
+// it did. findings.json and scores.json never moved; raw-notes.md gains the stat in each measure's detail line.
+const BEFORE_709: Record<string, { "metrics.json": string }> = {
+  recorded: { "metrics.json": "45cfb9b67574f6bb" },
+  generated: { "metrics.json": "3d451573d17ac8ca" },
 };
 
 // Before decision 706 added the stage probabilities' finding and metric, and its stage read named the probability field:
@@ -56,8 +64,20 @@ const generatedDir = async () =>
 const recorded = async () => fingerprint(await recordedDir());
 const generated = async () => fingerprint(await generatedDir());
 
-/** The run's findings.json and metrics.json with decision 706's finding and metric taken out, and its stage read named as before it. */
+/** The run's metrics.json with decision 709's average taken out of each duration's stats. */
+function withoutAverages(dir: string): void {
+  const path = join(dir, "metrics.json");
+  const metrics = (JSON.parse(readFileSync(path, "utf8")) as Array<{ id: string; stats?: Record<string, number> }>).map((m) => {
+    if (!m.stats || !DURATION_MEDIANS.has(m.id)) return m;
+    const { mean: _m, ...stats } = m.stats;
+    return { ...m, stats };
+  });
+  writeFileSync(path, `${JSON.stringify(metrics, null, 2)}\n`);
+}
+
+/** The run's findings.json and metrics.json with decision 706's finding and metric taken out, its stage read named as before it, and 709's averages before them. */
 function withoutProbabilities(dir: string): void {
+  withoutAverages(dir);
   for (const [file, ours] of [["findings.json", (x: Record<string, unknown>) => x.ruleId === "pipe.probability-vs-reality"], ["metrics.json", (x: Record<string, unknown>) => x.id === "historic.stage_probability_vs_won"]] as const) {
     const path = join(dir, file);
     const rows = (JSON.parse(readFileSync(path, "utf8").replaceAll(ENGINE_STAGES_SOQL, STAGES_SOQL)) as Array<Record<string, unknown>>).filter((x) => !ours(x));
@@ -135,6 +155,19 @@ test("decisions 663 and 672 moved findings.json by the value, hours and fix prom
     assert.deepEqual(fingerprint(dir), { ...GOLDEN[name], ...BEFORE_703[name], "findings.json": BEFORE_672[name] }, `${name} before 672`);
     withoutLaterMarks(dir);
     assert.deepEqual(fingerprint(dir), { ...GOLDEN[name], ...BEFORE_703[name], "findings.json": BEFORE_663[name] }, name);
+  }
+});
+
+test("decision 709 moved metrics.json by the averages alone: without them it is as it was, and scores never moved", async () => {
+  for (const [name, dir] of [["recorded", await recordedDir()], ["generated", await generatedDir()]] as const) {
+    const metrics = JSON.parse(readFileSync(join(dir, "metrics.json"), "utf8")) as Array<{ id: string; stats?: Record<string, number> }>;
+    assert.ok(metrics.some((m) => typeof m.stats?.mean === "number"), name);
+    withoutAverages(dir);
+    // findings.json is held by the golden tests either side, each on a first run: a run after a generated one reads
+    // some org-word marks as unknown (decision 655's store), so it isn't compared here.
+    const { "findings.json": _f, ...rest } = fingerprint(dir);
+    const { "findings.json": _g, ...expected }: Record<string, string> = { ...GOLDEN[name], ...BEFORE_709[name] };
+    assert.deepEqual(rest, expected, name);
   }
 });
 

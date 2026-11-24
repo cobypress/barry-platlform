@@ -140,3 +140,10 @@ const PLAIN: Array<[RegExp, string | ((...groups: string[]) => string)]> = [
 
 /** Report text as a customer should read it. */
 export const plainWords = (text: string): string => PLAIN.reduce((t, [pattern, plain]) => t.replace(pattern, plain as (...groups: string[]) => string), text);
+
+/** Where the median won deal closed against its first close date, in words: "24 days after", "60 days before", or on it (DECISIONS.md 709). */
+export function closedAgainstFirst(days: number): string {
+  if (days === 0) return "closed on its first close date";
+  const n = Math.abs(days);
+  return `closed ${n} ${n === 1 ? "day" : "days"} ${days > 0 ? "after" : "before"} its first close date`;
+}

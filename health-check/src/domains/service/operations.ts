@@ -4,6 +4,7 @@ import { serviceActivityExtractor, serviceCasesExtractor, serviceSetupExtractor,
 import { monthsBefore, type Sourced } from "../../extract/types.ts";
 import type { Evidence, Metric, MetricSegment, SegmentCheck } from "../../schemas/index.ts";
 import type { DomainModule } from "../types.ts";
+import { meanStat } from "../average.ts";
 import { localDay, zoneOf } from "../time-zone.ts";
 import { missingFieldReason } from "../../extract/fields.ts";
 import { org, said, type Said } from "../../engine/org-words.ts";
@@ -511,7 +512,7 @@ function metrics(ctx: Omit<RuleContext, "metrics">): Metric[] {
   if (data.closedCases.status === "ok" && data.closedCases.data.length > 0) {
     const days = (c: ClosedCaseRow): number => (Date.parse(c.ClosedDate) - Date.parse(c.CreatedDate)) / (24 * HOUR);
     const rows = data.closedCases.data;
-    out.push({ ...resolutionDef, status: "measured", value: round1(median(rows.map(days))), n: rows.length, dateRange: yearRange(ctx, SERVICE_MONTHS), segments: segmentsBy(rows, priorityOf, (g) => round1(median(g.map(days))), "priority"), segmentExemptReason: null, series: [], stats: { p75: round1(quantile(rows.map(days), 0.75)) }, evidence: [ctx.ev(data.closedCases.source, { count: rows.length })] });
+    out.push({ ...resolutionDef, status: "measured", value: round1(median(rows.map(days))), n: rows.length, dateRange: yearRange(ctx, SERVICE_MONTHS), segments: segmentsBy(rows, priorityOf, (g) => round1(median(g.map(days))), "priority"), segmentExemptReason: null, series: [], stats: { p75: round1(quantile(rows.map(days), 0.75)), ...meanStat(rows.map(days)) }, evidence: [ctx.ev(data.closedCases.source, { count: rows.length })] });
   } else out.push({ ...resolutionDef, status: "not_measurable", reason: data.closedCases.status === "ok" ? "No case was closed in the last year." : `Closed cases couldn't be read: ${data.closedCases.reason}`, evidence: [ctx.ev(data.closedCases.source, { count: null })] });
 
   const createdDef = base("service.cases_created", "Cases created a month", "count", "Cases created in each of the last twelve months, by month in the org's time zone. The value is the year's total.");
