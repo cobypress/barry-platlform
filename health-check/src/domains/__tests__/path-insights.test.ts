@@ -313,6 +313,12 @@ describe("who is compared: the deals made in the period that reached the stage, 
   const open = (n: number, path: string[]): Spec[] => deals(n, path, 0, 60).map((d) => ({ ...d, open: true }));
   const pass = (findings: Finding[]) => findings.find((f) => f.status === "passed")!;
 
+  test("a skip compares deals that started before the stage, on both sides, and says so (decision 712)", () => {
+    // Ten more whose history starts at Discovery: they went through it, but didn't start before it, so they're in neither side.
+    const [f] = comparisons(analysed([...through(), ...deals(30, SKIPS_DISCOVERY, 25, 60), ...deals(10, ["Discovery", "Proposal", "Negotiation"], 5, 60)]).findings);
+    assert.match(f!.summary, /^Of the 90 deals created between 1 April 2025 and 1 September 2026 that started before Discovery and reached Proposal, the 30 that skipped Discovery were won 83\.3% of the time, against 50% of the 60 that went through it\./);
+  });
+
   test("deals made after the period ends aren't compared, though they closed in the window", () => {
     // Ten more skippers, all lost, made 30 days before the run and closed 5 days before it: inside the lag.
     const late = deals(10, SKIPS_DISCOVERY, 0, 25).map((d) => ({ ...d, createdAt: RUN - 30 * DAY }));
@@ -576,7 +582,10 @@ describe("noise on dated deals: arrivals growing or shrinking, wins and losses c
       const saved = kind === "won-reach" && !won ? 0 : save;
       const timed = path.map((stage, k) => ({ stage, t: at + k * GAP * DAY })).filter((x) => !skip || x.stage !== B).map((x) => (skip && x.t > at + GAP * DAY ? { ...x, t: x.t - saved * DAY } : x));
       const closedAt = timed.at(-1)!.t - Math.log(1 - rnd()) * (won ? (kind === "won-close" && skip ? win / 2 : win) : loss) * DAY;
-      const segment = ["S1", "S2", "S3"][Math.floor(rnd() * 3)]!;
+      // One record type and one type where the mix changes over time, as the review's cells had: the record-type and
+      // segment checks then can't stand in for the bands, so the cells test the bands themselves.
+      const drawn = ["S1", "S2", "S3"][Math.floor(rnd() * 3)]!;
+      const segment = kind === "drift" || kind === "season" ? "S1" : drawn;
       const owner = Math.floor(rnd() * 4);
       if (closedAt <= RUN) {
         if (closedAt < WINDOW_FROM && at < WINDOW_FROM) continue;
