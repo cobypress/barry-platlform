@@ -37,8 +37,9 @@ type Outcome = "won" | "lost" | "no_decision";
 /**
  * `segment` is set as the deal's type, lead source and record type alike, so three of the dimensions split on it.
  * `open`: still open at the run's date, in the last stage of its path. `createdAt`: made then, not in April 2025.
+ * `gapDays`: each stage of its path entered that many days after the one before, not a minute.
  */
-type Spec = { path: string[]; outcome: Outcome; days: number; segment?: string; owner?: number; open?: boolean; createdAt?: number };
+type Spec = { path: string[]; outcome: Outcome; days: number; segment?: string; owner?: number; open?: boolean; createdAt?: number; gapDays?: number };
 const CLOSED: Record<Outcome, string> = { won: "Closed Won", lost: "Closed Lost", no_decision: "Closed No Decision" };
 const stamp = (ms: number): string => new Date(ms).toISOString().replace("Z", "+0000");
 
@@ -61,7 +62,7 @@ function extractsOf(specs: Spec[], history: "ok" | "none" | "unavailable" = "ok"
     const closeDate = new Date(closed).toISOString().slice(0, 10);
     const final = s.open ? s.path.at(-1)! : CLOSED[s.outcome];
     opportunities.push({ Id: id, OwnerId: owners[(s.owner ?? 0) % owners.length]!, StageName: final, Amount: null, CloseDate: closeDate, CreatedDate: stamp(created), IsClosed: !s.open, IsWon: !s.open && s.outcome === "won", LastActivityDate: null, Type: s.segment ?? null, LeadSource: s.segment ?? null, RecordType: s.segment ?? null, CurrencyIsoCode: null, LossReason: null });
-    s.path.forEach((stage, k) => rows.push({ Id: `008${String(rows.length + 1).padStart(15, "0")}`, OpportunityId: id, StageName: stage, Amount: null, CloseDate: closeDate, CreatedDate: stamp(created + k * 60_000) }));
+    s.path.forEach((stage, k) => rows.push({ Id: `008${String(rows.length + 1).padStart(15, "0")}`, OpportunityId: id, StageName: stage, Amount: null, CloseDate: closeDate, CreatedDate: stamp(created + k * (s.gapDays ? s.gapDays * DAY : 60_000)) }));
     if (!s.open) rows.push({ Id: `008${String(rows.length + 1).padStart(15, "0")}`, OpportunityId: id, StageName: CLOSED[s.outcome], Amount: null, CloseDate: closeDate, CreatedDate: stamp(closed) });
   });
   if (e.opportunities.status === "ok") e.opportunities = { ...e.opportunities, data: opportunities };
@@ -291,6 +292,13 @@ describe("who is compared: the deals made in the period that reached the stage, 
     assert.match(f!.summary, /^Of the 90 deals created between 31 October 2024 and \d+ \w+ 2026 that reached Proposal, the 30 that skipped Discovery were won 83\.3% of the time/);
   });
 
+  test("chosen by the day a deal was made, not the day it reached the stage: deals made before the window aren't compared", () => {
+    // Twenty more skippers, all lost, made six weeks before the window starts and reaching Proposal 60 days later, inside it.
+    const early = deals(20, SKIPS_DISCOVERY, 0, 150).map((d) => ({ ...d, createdAt: Date.parse("2024-09-15T09:00:00Z"), gapDays: 60 }));
+    const [f] = comparisons(analysed([...through(), ...deals(30, SKIPS_DISCOVERY, 25, 60), ...early]).findings);
+    assert.match(f!.summary, /^Of the 90 deals created between 31 October 2024 and \d+ \w+ 2026 that reached Proposal, the 30 that skipped Discovery/);
+  });
+
   test("more than 5% of the period still open: not compared, and the pass says which stage and why", () => {
     const findings = analysed([...through(), ...deals(30, SKIPS_DISCOVERY, 25, 60), ...open(6, SKIPS_DISCOVERY)]).findings;
     assert.equal(comparisons(findings).length, 0);
@@ -460,8 +468,8 @@ describe("stage names are marked as the org's words", () => {
 // Dated orgs (decision 712; the 1,000-org grid is a probe: orchestration/health-check/probes/e11-path-insights-noise/
 // builder). The e8 review's generator: deals made over four years at a rate growing or shrinking by `growth` a year,
 // each walking the four stages 40 days apart with true reached-then-won shares 20/30/50/70; 30% of those that reach
-// Proposal skip Discovery whatever their outcome, and close 20 days sooner whether won or lost (in the last two cells,
-// only the won ones close sooner, by 40 days); each closes an exponential time after its last stage, wins and losses
+// Proposal skip Discovery whatever their outcome, and close 20 days sooner whether won or lost (the last two cells tie
+// time to the outcome too); each closes an exponential time after its last stage, wins and losses
 // at their own speeds; open at the run's date where it hasn't closed. Path and outcome are independent, so any
 // insight is a false one. The cells are the review's three worst and the probe's worst at 1,000 deals, where the
 // 10-point gap is about the z bar and so adds no margin, and two where choosing by close date made a gap.
@@ -482,7 +490,9 @@ describe("noise on dated deals: arrivals growing or shrinking, wins and losses c
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
   type Dated = { path: string[]; won: boolean; at: number; enter: number[]; closedAt: number | null; segment: string; owner: number };
-  function datedOrg(n: number, growth: number, win: number, loss: number, save: number, wonOnly = false): Dated[] {
+  /** How a skip changes time: every skipper's later stages `save` days sooner; only a won one's; or a won one closes in half the time. */
+  type Kind = "both" | "won-reach" | "won-close";
+  function datedOrg(n: number, growth: number, win: number, loss: number, save: number, kind: Kind): Dated[] {
     const out: Dated[] = [];
     const r = Math.log(growth) / 365;
     const peak = Math.max(1, growth ** 4);
@@ -497,9 +507,9 @@ describe("noise on dated deals: arrivals growing or shrinking, wins and losses c
         else path.push([B, C, D][k]!);
       }
       const skip = path.length >= 3 && rnd() < 0.3;
-      const saved = wonOnly && !won ? 0 : save;
+      const saved = kind === "won-reach" && !won ? 0 : save;
       const timed = path.map((stage, k) => ({ stage, t: at + k * GAP * DAY })).filter((x) => !skip || x.stage !== B).map((x) => (skip && x.t > at + GAP * DAY ? { ...x, t: x.t - saved * DAY } : x));
-      const closedAt = timed.at(-1)!.t - Math.log(1 - rnd()) * (won ? win : loss) * DAY;
+      const closedAt = timed.at(-1)!.t - Math.log(1 - rnd()) * (won ? (kind === "won-close" && skip ? win / 2 : win) : loss) * DAY;
       const segment = ["S1", "S2", "S3"][Math.floor(rnd() * 3)]!;
       const owner = Math.floor(rnd() * 4);
       if (closedAt <= RUN) {
@@ -533,29 +543,31 @@ describe("noise on dated deals: arrivals growing or shrinking, wins and losses c
   // The rule alone, so the grid runs in seconds: nothing else in the module reads what it says.
   const only = { ...historicPipelineModule, metrics: [], rules: [pathInsights] };
   const TRIALS = 150;
-  // The last two: only the won skippers close sooner, by 40 days, so time depends on path and outcome together.
-  // Chosen by close date, shrinking orgs got a false "won less often" in 12.8% of 1,000 orgs, growing ones "more often".
-  const CELLS = [
-    [2, 180, 30, 20, false],
-    [0.25, 30, 180, 20, false],
-    [3, 180, 30, 20, false],
-    [1, 180, 90, 20, false],
-    [0.5, 30, 30, 20, false],
-    [1, 30, 180, 20, false],
-    [0.25, 30, 30, 40, true],
-    [3, 30, 90, 40, true],
-  ] as const;
+  // The last two tie time to path and outcome together. Only the won skippers reach Proposal sooner, by 40 days: chosen
+  // by close date, 12.8% of 1,000 orgs got a false "won less often"; by the day they reached the stage, 7.5%. Only the
+  // won skippers close in half the time: by close date, 59% of 1,000 orgs.
+  const CELLS: ReadonlyArray<readonly [number, number, number, number, Kind]> = [
+    [2, 180, 30, 20, "both"],
+    [0.25, 30, 180, 20, "both"],
+    [3, 180, 30, 20, "both"],
+    [1, 180, 90, 20, "both"],
+    [0.5, 30, 30, 20, "both"],
+    [1, 30, 180, 20, "both"],
+    [0.25, 30, 30, 40, "won-reach"],
+    [0.25, 180, 90, 0, "won-close"],
+  ];
+  const how = { both: (save: number) => `skippers ${save} days sooner`, "won-reach": (save: number) => `won skippers reaching it ${save} days sooner`, "won-close": () => "won skippers closing in half the time" };
   // 150 orgs a cell can't tell 3% from 5% (a cell at a true 3.2% reaches 8 of 150 about one time in 9), so the bar is
-  // on the 900 orgs together, at most 5%, and each cell is held under 10%, which a cell at 3.2% passes all but once in
+  // on the 1,200 orgs together, at most 5%, and each cell is held under 10%, which a cell at 3.2% passes all but once in
   // 10,000 times and a cell where the choice of deals made a gap would not.
   let all = 0;
-  for (const [growth, win, loss, save, wonOnly] of CELLS) {
-    test(`growth ${growth}x a year, wins closing at ${win} days and losses at ${loss}, 1,000 deals, ${wonOnly ? "won skippers" : "skippers"} ${save} days sooner`, () => {
-      seed = 12_000_000 + growth * 100_000 + win * 1_000 + loss + (wonOnly ? 7 : 0);
+  for (const [growth, win, loss, save, kind] of CELLS) {
+    test(`growth ${growth}x a year, wins closing at ${win} days and losses at ${loss}, 1,000 deals, ${how[kind](save)}`, () => {
+      seed = 12_000_000 + growth * 100_000 + win * 1_000 + loss + (kind === "won-reach" ? 7 : kind === "won-close" ? 11 : 0);
       let any = 0;
       const ways: Record<string, number> = {};
       for (let t = 0; t < TRIALS; t++) {
-        const raised = issues(analyseExtracts(extractsOfDated(datedOrg(1000, growth, win, loss, save, wonOnly)), { calibration: real, modules: [only] }).insights);
+        const raised = issues(analyseExtracts(extractsOfDated(datedOrg(1000, growth, win, loss, save, kind)), { calibration: real, modules: [only] }).insights);
         if (raised.length) any++;
         for (const f of raised) ways[/more often/.test(f.title) ? "more" : "less"] = (ways[/more often/.test(f.title) ? "more" : "less"] ?? 0) + 1;
       }
