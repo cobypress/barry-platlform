@@ -17580,6 +17580,320 @@
     "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Lost deals wait in Prospecting before they're closed. 107 of 257 lost and no decision deals (41.6%) were last open in Prospecting, and spent a median of 47.8 days there. Three quarters of won deals left Prospecting within 23 days. 63 of these lost deals (58.9%) waited longer than that. Highest: lead source No lead source, 22 of 22 (100%); one rep, 29 of 38 (76.3%); team Sales UK, 61 of 80 (76.3%).\n\nWhat our report recommends, for the people who own this to decide and carry out. It is not your task: your task is only the steps below.\nThe report says: Set a time limit for Prospecting from your won deals: past it, a deal is reviewed and either moved on with a dated next step or closed, so lost deals stop sitting in the pipeline.\n\nWork on the stage listed in this finding.\n\nSteps:\n1. From won deals, find how long three quarters of them spent in the stage named.\n2. Build a report of open deals in that stage past the limit, for the pipeline review.\n3. If a reminder is wanted, build a scheduled flow in a sandbox that only sends a notification, and test it.\n\nDo not:\n- Change a record (an owner, a field's value, a user) or delete anything.\n- Switch anything off before checking what depends on it: flows, Apex, validation rules, layouts, reports, sharing and integrations.\n- Change production first: use a sandbox, test, then deploy, and only make changes that can be undone.\n- Take away access, or stop an integration, before its replacement is in place and tested.\n- Change anything outside the stage this finding is about.\n- Put a name, email or record detail in your reply.\n\nTo check it worked:\n- Deals past the limit show each week for their owners to review."
    },
    {
+    "id": "f-fd256a71adb1",
+    "ruleId": "pipe.path-insights",
+    "ruleVersion": 1,
+    "domain": "historic_pipeline",
+    "status": "issue",
+    "title": "Deals sent back from Discovery to Prospecting are won less often and close sooner",
+    "summary": "Deals sent back from Discovery to Prospecting are won 0% of the time, against 89.1% on your usual path, and close in a median of 51 days from creation, against 69 days. Based on 82 closed deals that went back this way and 175 that took your usual path, of 421 closed deals. The gap points the same way in 6 of 6 segments, such as teams and record types, with enough deals on both sides. This shows how often they went together, not that one is the reason for the other.",
+    "recommendation": "Look at what sends these deals back, and agree what has to be true before a deal leaves Prospecting.",
+    "recommendationType": "investigate",
+    "severity": "info",
+    "confidence": "high",
+    "evidence": [
+     {
+      "kind": "soql",
+      "api": "rest",
+      "query": "SELECT Id, Name, AccountId, OwnerId, StageName, Amount, CloseDate, CreatedDate, IsClosed, IsWon, LastActivityDate, Type, LeadSource, RecordType.DeveloperName, Loss_Reason__c FROM Opportunity WHERE (CreatedDate >= 2024-10-31T00:00:00Z OR CloseDate >= 2024-10-31 OR LastModifiedDate >= 2024-10-31T00:00:00Z OR IsClosed = false OR StageName IN ('Prospecting', 'Qualified', 'Discovery', 'Proposal', 'Negotiation', 'Legal Review')) AND CreatedDate <= 2026-10-31T12:00:00Z",
+      "count": 500,
+      "dateRange": {
+       "from": "2024-10-31",
+       "to": "2026-10-31"
+      },
+      "exclusions": [],
+      "capturedAt": "2026-10-31T12:00:00.000Z"
+     },
+     {
+      "kind": "soql",
+      "api": "rest",
+      "query": "SELECT Id, OpportunityId, StageName, Amount, CloseDate, CreatedDate FROM OpportunityHistory WHERE OpportunityId IN (SELECT Id FROM Opportunity WHERE (CreatedDate >= 2024-10-31T00:00:00Z OR CloseDate >= 2024-10-31 OR LastModifiedDate >= 2024-10-31T00:00:00Z OR IsClosed = false OR StageName IN ('Prospecting', 'Qualified', 'Discovery', 'Proposal', 'Negotiation', 'Legal Review')) AND CreatedDate <= 2026-10-31T12:00:00Z)",
+      "count": 2557,
+      "dateRange": {
+       "from": "2024-10-31",
+       "to": "2026-10-31"
+      },
+      "exclusions": [],
+      "capturedAt": "2026-10-31T12:00:00.000Z"
+     }
+    ],
+    "value": {
+     "kind": "not_sized",
+     "reason": "It compares the paths your deals took, which has no direct figure."
+    },
+    "effort": {
+     "size": "S"
+    },
+    "owner": "Head of sales",
+    "dependencies": [],
+    "guards": [],
+    "segmentsChecked": [
+     {
+      "dimension": "record type",
+      "segments": 2
+     },
+     {
+      "dimension": "team",
+      "segments": 2
+     },
+     {
+      "dimension": "rep",
+      "segments": 4
+     },
+     {
+      "dimension": "lead source",
+      "segments": 5
+     },
+     {
+      "dimension": "type",
+      "segments": 2
+     },
+     {
+      "dimension": "closed quarter",
+      "segments": 7
+     }
+    ],
+    "segmentExemptReason": null,
+    "subjects": [
+     {
+      "type": "stage",
+      "label": "Discovery"
+     },
+     {
+      "type": "stage",
+      "label": "Prospecting"
+     }
+    ],
+    "facts": {
+     "deals": 82,
+     "usualDeals": 175,
+     "closed": 421,
+     "winRate": 0,
+     "usualWinRate": 89.1,
+     "medianDays": 51,
+     "usualMedianDays": 69,
+     "compared": 6,
+     "held": 6
+    },
+    "notMeasurableReason": null,
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 2,
+     "high": 4,
+     "basis": "Preparing the analysis and the options for the people who decide; their time deciding, and making the change, isn't counted."
+    },
+    "timeBand": "small",
+    "fixComplexity": "simple",
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Deals sent back from Discovery to Prospecting are won less often and close sooner. Deals sent back from Discovery to Prospecting are won 0% of the time, against 89.1% on your usual path, and close in a median of 51 days from creation, against 69 days. Based on 82 closed deals that went back this way and 175 that took your usual path, of 421 closed deals. The gap points the same way in 6 of 6 segments, such as teams and record types, with enough deals on both sides. This shows how often they went together, not that one is the reason for the other.\n\nWhat our report recommends, for the people who own this to decide and carry out. It is not your task: your task is only the steps below.\nThe report says: Look at what sends these deals back, and agree what has to be true before a deal leaves Prospecting.\n\nWork on the paths this finding is about. Named in it: Discovery and Prospecting.\n\nThis is for people to decide, not a change to the org. Do not change the org: prepare the analysis, the list and the options so the people who own it can decide.\n\nSteps:\n1. From opportunity history, list the closed deals on the path named and on the usual path, by team and record type.\n2. Set out what the deals on each path have in common, and what happens in the stage named.\n3. Prepare the options for the sales leaders: a change to the stage's exit criteria, or to when a stage can be left out.\n\nDo not:\n- Change any setting, metadata or record: this task is analysis only.\n- Change a record (an owner, a field's value, a user) or delete anything.\n- Switch anything off before checking what depends on it: flows, Apex, validation rules, layouts, reports, sharing and integrations.\n- Change production first: use a sandbox, test, then deploy, and only make changes that can be undone.\n- Take away access, or stop an integration, before its replacement is in place and tested.\n- Change anything outside the paths this finding is about.\n- Put a name, email or record detail in your reply.\n\nTo check it worked:\n- The comparison and the options are ready for the sales leaders to agree."
+   },
+   {
+    "id": "f-0c4fa5b734aa",
+    "ruleId": "pipe.path-insights",
+    "ruleVersion": 1,
+    "domain": "historic_pipeline",
+    "status": "issue",
+    "title": "Deals sent back from Negotiation to Prospecting are won less often",
+    "summary": "Deals sent back from Negotiation to Prospecting are won 0% of the time, against 89.1% on your usual path, and close in a median of 79 days from creation, against 69 days. Based on 20 closed deals that went back this way and 175 that took your usual path, of 421 closed deals. The gap points the same way in 1 of 1 segments, such as teams and record types, with enough deals on both sides. This shows how often they went together, not that one is the reason for the other.",
+    "recommendation": "Look at what sends these deals back, and agree what has to be true before a deal leaves Prospecting.",
+    "recommendationType": "investigate",
+    "severity": "info",
+    "confidence": "medium",
+    "evidence": [
+     {
+      "kind": "soql",
+      "api": "rest",
+      "query": "SELECT Id, Name, AccountId, OwnerId, StageName, Amount, CloseDate, CreatedDate, IsClosed, IsWon, LastActivityDate, Type, LeadSource, RecordType.DeveloperName, Loss_Reason__c FROM Opportunity WHERE (CreatedDate >= 2024-10-31T00:00:00Z OR CloseDate >= 2024-10-31 OR LastModifiedDate >= 2024-10-31T00:00:00Z OR IsClosed = false OR StageName IN ('Prospecting', 'Qualified', 'Discovery', 'Proposal', 'Negotiation', 'Legal Review')) AND CreatedDate <= 2026-10-31T12:00:00Z",
+      "count": 500,
+      "dateRange": {
+       "from": "2024-10-31",
+       "to": "2026-10-31"
+      },
+      "exclusions": [],
+      "capturedAt": "2026-10-31T12:00:00.000Z"
+     },
+     {
+      "kind": "soql",
+      "api": "rest",
+      "query": "SELECT Id, OpportunityId, StageName, Amount, CloseDate, CreatedDate FROM OpportunityHistory WHERE OpportunityId IN (SELECT Id FROM Opportunity WHERE (CreatedDate >= 2024-10-31T00:00:00Z OR CloseDate >= 2024-10-31 OR LastModifiedDate >= 2024-10-31T00:00:00Z OR IsClosed = false OR StageName IN ('Prospecting', 'Qualified', 'Discovery', 'Proposal', 'Negotiation', 'Legal Review')) AND CreatedDate <= 2026-10-31T12:00:00Z)",
+      "count": 2557,
+      "dateRange": {
+       "from": "2024-10-31",
+       "to": "2026-10-31"
+      },
+      "exclusions": [],
+      "capturedAt": "2026-10-31T12:00:00.000Z"
+     }
+    ],
+    "value": {
+     "kind": "not_sized",
+     "reason": "It compares the paths your deals took, which has no direct figure."
+    },
+    "effort": {
+     "size": "S"
+    },
+    "owner": "Head of sales",
+    "dependencies": [],
+    "guards": [],
+    "segmentsChecked": [
+     {
+      "dimension": "record type",
+      "segments": 2
+     },
+     {
+      "dimension": "team",
+      "segments": 2
+     },
+     {
+      "dimension": "rep",
+      "segments": 4
+     },
+     {
+      "dimension": "lead source",
+      "segments": 5
+     },
+     {
+      "dimension": "type",
+      "segments": 2
+     },
+     {
+      "dimension": "closed quarter",
+      "segments": 7
+     }
+    ],
+    "segmentExemptReason": null,
+    "subjects": [
+     {
+      "type": "stage",
+      "label": "Negotiation"
+     },
+     {
+      "type": "stage",
+      "label": "Prospecting"
+     }
+    ],
+    "facts": {
+     "deals": 20,
+     "usualDeals": 175,
+     "closed": 421,
+     "winRate": 0,
+     "usualWinRate": 89.1,
+     "medianDays": 79,
+     "usualMedianDays": 69,
+     "compared": 1,
+     "held": 1
+    },
+    "notMeasurableReason": null,
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 2,
+     "high": 4,
+     "basis": "Preparing the analysis and the options for the people who decide; their time deciding, and making the change, isn't counted."
+    },
+    "timeBand": "small",
+    "fixComplexity": "simple",
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: Deals sent back from Negotiation to Prospecting are won less often. Deals sent back from Negotiation to Prospecting are won 0% of the time, against 89.1% on your usual path, and close in a median of 79 days from creation, against 69 days. Based on 20 closed deals that went back this way and 175 that took your usual path, of 421 closed deals. The gap points the same way in 1 of 1 segments, such as teams and record types, with enough deals on both sides. This shows how often they went together, not that one is the reason for the other.\n\nWhat our report recommends, for the people who own this to decide and carry out. It is not your task: your task is only the steps below.\nThe report says: Look at what sends these deals back, and agree what has to be true before a deal leaves Prospecting.\n\nWork on the paths this finding is about. Named in it: Negotiation and Prospecting.\n\nThis is for people to decide, not a change to the org. Do not change the org: prepare the analysis, the list and the options so the people who own it can decide.\n\nSteps:\n1. From opportunity history, list the closed deals on the path named and on the usual path, by team and record type.\n2. Set out what the deals on each path have in common, and what happens in the stage named.\n3. Prepare the options for the sales leaders: a change to the stage's exit criteria, or to when a stage can be left out.\n\nDo not:\n- Change any setting, metadata or record: this task is analysis only.\n- Change a record (an owner, a field's value, a user) or delete anything.\n- Switch anything off before checking what depends on it: flows, Apex, validation rules, layouts, reports, sharing and integrations.\n- Change production first: use a sandbox, test, then deploy, and only make changes that can be undone.\n- Take away access, or stop an integration, before its replacement is in place and tested.\n- Change anything outside the paths this finding is about.\n- Put a name, email or record detail in your reply.\n\nTo check it worked:\n- The comparison and the options are ready for the sales leaders to agree."
+   },
+   {
+    "id": "f-13bc89665e86",
+    "ruleId": "pipe.path-insights",
+    "ruleVersion": 1,
+    "domain": "historic_pipeline",
+    "status": "issue",
+    "title": "More deals are lost after Prospecting than after any other stage",
+    "summary": "107 of the 257 lost and no decision deals (41.6%) were last open in Prospecting, after a median of 48 days from creation, against 69.5 days for a won deal to close. Based on 257 of 421 closed deals.",
+    "recommendation": "Look at what deals in Prospecting are waiting for, and whether the ones that won't close are found and closed sooner.",
+    "recommendationType": "investigate",
+    "severity": "info",
+    "confidence": "high",
+    "evidence": [
+     {
+      "kind": "soql",
+      "api": "rest",
+      "query": "SELECT Id, Name, AccountId, OwnerId, StageName, Amount, CloseDate, CreatedDate, IsClosed, IsWon, LastActivityDate, Type, LeadSource, RecordType.DeveloperName, Loss_Reason__c FROM Opportunity WHERE (CreatedDate >= 2024-10-31T00:00:00Z OR CloseDate >= 2024-10-31 OR LastModifiedDate >= 2024-10-31T00:00:00Z OR IsClosed = false OR StageName IN ('Prospecting', 'Qualified', 'Discovery', 'Proposal', 'Negotiation', 'Legal Review')) AND CreatedDate <= 2026-10-31T12:00:00Z",
+      "count": 500,
+      "dateRange": {
+       "from": "2024-10-31",
+       "to": "2026-10-31"
+      },
+      "exclusions": [],
+      "capturedAt": "2026-10-31T12:00:00.000Z"
+     },
+     {
+      "kind": "soql",
+      "api": "rest",
+      "query": "SELECT Id, OpportunityId, StageName, Amount, CloseDate, CreatedDate FROM OpportunityHistory WHERE OpportunityId IN (SELECT Id FROM Opportunity WHERE (CreatedDate >= 2024-10-31T00:00:00Z OR CloseDate >= 2024-10-31 OR LastModifiedDate >= 2024-10-31T00:00:00Z OR IsClosed = false OR StageName IN ('Prospecting', 'Qualified', 'Discovery', 'Proposal', 'Negotiation', 'Legal Review')) AND CreatedDate <= 2026-10-31T12:00:00Z)",
+      "count": 2557,
+      "dateRange": {
+       "from": "2024-10-31",
+       "to": "2026-10-31"
+      },
+      "exclusions": [],
+      "capturedAt": "2026-10-31T12:00:00.000Z"
+     }
+    ],
+    "value": {
+     "kind": "not_sized",
+     "reason": "It compares the paths your deals took, which has no direct figure."
+    },
+    "effort": {
+     "size": "S"
+    },
+    "owner": "Head of sales",
+    "dependencies": [],
+    "guards": [],
+    "segmentsChecked": [
+     {
+      "dimension": "record type",
+      "segments": 2
+     },
+     {
+      "dimension": "team",
+      "segments": 2
+     },
+     {
+      "dimension": "rep",
+      "segments": 4
+     },
+     {
+      "dimension": "lead source",
+      "segments": 5
+     },
+     {
+      "dimension": "type",
+      "segments": 2
+     },
+     {
+      "dimension": "closed quarter",
+      "segments": 7
+     }
+    ],
+    "segmentExemptReason": null,
+    "subjects": [
+     {
+      "type": "stage",
+      "label": "Prospecting"
+     }
+    ],
+    "facts": {
+     "lost": 257,
+     "dying": 107,
+     "share": 41.6,
+     "medianDays": 48,
+     "wonMedianDays": 69.5,
+     "closed": 421
+    },
+    "notMeasurableReason": null,
+    "manualStepIds": [],
+    "effortHours": {
+     "low": 2,
+     "high": 4,
+     "basis": "Preparing the analysis and the options for the people who decide; their time deciding, and making the change, isn't counted."
+    },
+    "timeBand": "small",
+    "fixComplexity": "simple",
+    "fixPrompt": "You are helping a Salesforce administrator act on one finding from a Black Cloud Barometer health check of their org. You can read the org's metadata. Work only from what you can see, and say where you can't confirm something.\n\nWhat we found: More deals are lost after Prospecting than after any other stage. 107 of the 257 lost and no decision deals (41.6%) were last open in Prospecting, after a median of 48 days from creation, against 69.5 days for a won deal to close. Based on 257 of 421 closed deals.\n\nWhat our report recommends, for the people who own this to decide and carry out. It is not your task: your task is only the steps below.\nThe report says: Look at what deals in Prospecting are waiting for, and whether the ones that won't close are found and closed sooner.\n\nWork on the paths this finding is about. Named in it: Prospecting.\n\nThis is for people to decide, not a change to the org. Do not change the org: prepare the analysis, the list and the options so the people who own it can decide.\n\nSteps:\n1. From opportunity history, list the closed deals on the path named and on the usual path, by team and record type.\n2. Set out what the deals on each path have in common, and what happens in the stage named.\n3. Prepare the options for the sales leaders: a change to the stage's exit criteria, or to when a stage can be left out.\n\nDo not:\n- Change any setting, metadata or record: this task is analysis only.\n- Change a record (an owner, a field's value, a user) or delete anything.\n- Switch anything off before checking what depends on it: flows, Apex, validation rules, layouts, reports, sharing and integrations.\n- Change production first: use a sandbox, test, then deploy, and only make changes that can be undone.\n- Take away access, or stop an integration, before its replacement is in place and tested.\n- Change anything outside the paths this finding is about.\n- Put a name, email or record detail in your reply.\n\nTo check it worked:\n- The comparison and the options are ready for the sales leaders to agree."
+   },
+   {
     "id": "f-0f0dc602129d",
     "ruleId": "sec.health-check-score",
     "ruleVersion": 1,
@@ -29731,6 +30045,220 @@
    },
    {
     "status": "measured",
+    "id": "historic.path_variants",
+    "domain": "historic_pipeline",
+    "label": "The paths your deals take",
+    "definition": "Closed deals grouped by the open stages each was in, in order, from its stage history: a run of rows in the same stage counts once, and a return to an earlier stage is kept. Your usual path is the one won deals took most often, not the stage order in your settings. For the five most common paths, and all others together: deals, share of closed deals, win rate (won as a share of every closed deal on the path, so no decision counts as not won), the median days from creation to close (the median, not the mean), stages of the usual path it moved past without entering, and whether it went back to a stage. The value is the share of closed deals on the usual path.",
+    "unit": "percent",
+    "evidence": [
+     {
+      "kind": "soql",
+      "api": "rest",
+      "query": "SELECT Id, Name, AccountId, OwnerId, StageName, Amount, CloseDate, CreatedDate, IsClosed, IsWon, LastActivityDate, Type, LeadSource, RecordType.DeveloperName, Loss_Reason__c FROM Opportunity WHERE (CreatedDate >= 2024-10-31T00:00:00Z OR CloseDate >= 2024-10-31 OR LastModifiedDate >= 2024-10-31T00:00:00Z OR IsClosed = false OR StageName IN ('Prospecting', 'Qualified', 'Discovery', 'Proposal', 'Negotiation', 'Legal Review')) AND CreatedDate <= 2026-10-31T12:00:00Z",
+      "count": 500,
+      "dateRange": {
+       "from": "2024-10-31",
+       "to": "2026-10-31"
+      },
+      "exclusions": [],
+      "capturedAt": "2026-10-31T12:00:00.000Z"
+     },
+     {
+      "kind": "soql",
+      "api": "rest",
+      "query": "SELECT Id, OpportunityId, StageName, Amount, CloseDate, CreatedDate FROM OpportunityHistory WHERE OpportunityId IN (SELECT Id FROM Opportunity WHERE (CreatedDate >= 2024-10-31T00:00:00Z OR CloseDate >= 2024-10-31 OR LastModifiedDate >= 2024-10-31T00:00:00Z OR IsClosed = false OR StageName IN ('Prospecting', 'Qualified', 'Discovery', 'Proposal', 'Negotiation', 'Legal Review')) AND CreatedDate <= 2026-10-31T12:00:00Z)",
+      "count": 2557,
+      "dateRange": {
+       "from": "2024-10-31",
+       "to": "2026-10-31"
+      },
+      "exclusions": [],
+      "capturedAt": "2026-10-31T12:00:00.000Z"
+     }
+    ],
+    "exclusions": [],
+    "assumptions": [
+     "Days, months and quarters are in the org's time zone, Europe/London",
+     "Your usual path, the one won deals took most often: Prospecting > Discovery > Proposal > Negotiation",
+     "A stage counts as skipped only where a deal went on to a later stage of the usual path without entering it"
+    ],
+    "value": 41.6,
+    "n": 421,
+    "dateRange": {
+     "from": "2024-10-31",
+     "to": "2026-10-31"
+    },
+    "segments": [
+     {
+      "dimension": "path",
+      "key": "Prospecting > Discovery > Proposal > Negotiation",
+      "n": 175,
+      "value": 41.6,
+      "notMeasurableReason": null
+     },
+     {
+      "dimension": "path win rate",
+      "key": "Prospecting > Discovery > Proposal > Negotiation",
+      "n": 175,
+      "value": 89.1,
+      "notMeasurableReason": null
+     },
+     {
+      "dimension": "path median days",
+      "key": "Prospecting > Discovery > Proposal > Negotiation",
+      "n": 175,
+      "value": 69,
+      "notMeasurableReason": null
+     },
+     {
+      "dimension": "path",
+      "key": "Prospecting",
+      "n": 62,
+      "value": 14.7,
+      "notMeasurableReason": null
+     },
+     {
+      "dimension": "path win rate",
+      "key": "Prospecting",
+      "n": 62,
+      "value": 0,
+      "notMeasurableReason": null
+     },
+     {
+      "dimension": "path median days",
+      "key": "Prospecting",
+      "n": 62,
+      "value": 18,
+      "notMeasurableReason": null
+     },
+     {
+      "dimension": "path",
+      "key": "Prospecting > Discovery > Prospecting > Discovery > Proposal > Negotiation",
+      "n": 30,
+      "value": 7.1,
+      "notMeasurableReason": null
+     },
+     {
+      "dimension": "path win rate",
+      "key": "Prospecting > Discovery > Prospecting > Discovery > Proposal > Negotiation",
+      "n": 30,
+      "value": 0,
+      "notMeasurableReason": null
+     },
+     {
+      "dimension": "path median days",
+      "key": "Prospecting > Discovery > Prospecting > Discovery > Proposal > Negotiation",
+      "n": 30,
+      "value": 58.5,
+      "notMeasurableReason": null
+     },
+     {
+      "dimension": "path",
+      "key": "Prospecting > Discovery > Proposal",
+      "n": 27,
+      "value": 6.4,
+      "notMeasurableReason": null
+     },
+     {
+      "dimension": "path win rate",
+      "key": "Prospecting > Discovery > Proposal",
+      "n": 27,
+      "value": 0,
+      "notMeasurableReason": null
+     },
+     {
+      "dimension": "path median days",
+      "key": "Prospecting > Discovery > Proposal",
+      "n": 27,
+      "value": 54,
+      "notMeasurableReason": null
+     },
+     {
+      "dimension": "path",
+      "key": "Prospecting > Discovery > Prospecting > Discovery",
+      "n": 24,
+      "value": 5.7,
+      "notMeasurableReason": null
+     },
+     {
+      "dimension": "path win rate",
+      "key": "Prospecting > Discovery > Prospecting > Discovery",
+      "n": 24,
+      "value": 0,
+      "notMeasurableReason": null
+     },
+     {
+      "dimension": "path median days",
+      "key": "Prospecting > Discovery > Prospecting > Discovery",
+      "n": 24,
+      "value": 32.5,
+      "notMeasurableReason": null
+     },
+     {
+      "dimension": "path",
+      "key": "All other paths",
+      "n": 103,
+      "value": 24.5,
+      "notMeasurableReason": null
+     },
+     {
+      "dimension": "path win rate",
+      "key": "All other paths",
+      "n": 103,
+      "value": 7.8,
+      "notMeasurableReason": null
+     },
+     {
+      "dimension": "path median days",
+      "key": "All other paths",
+      "n": 103,
+      "value": 62,
+      "notMeasurableReason": null
+     }
+    ],
+    "segmentExemptReason": null,
+    "series": [],
+    "stats": {
+     "closed": 421,
+     "won": 164,
+     "paths": 18,
+     "listed": 5,
+     "standardDeals": 175,
+     "standardWon": 156,
+     "standardStages": 4,
+     "path1Deals": 175,
+     "path1Won": 156,
+     "path1Skips": 0,
+     "path1Rework": 0,
+     "path1Standard": 1,
+     "path2Deals": 62,
+     "path2Won": 0,
+     "path2Skips": 0,
+     "path2Rework": 0,
+     "path2Standard": 0,
+     "path3Deals": 30,
+     "path3Won": 0,
+     "path3Skips": 0,
+     "path3Rework": 1,
+     "path3Standard": 0,
+     "path4Deals": 27,
+     "path4Won": 0,
+     "path4Skips": 0,
+     "path4Rework": 0,
+     "path4Standard": 0,
+     "path5Deals": 24,
+     "path5Won": 0,
+     "path5Skips": 0,
+     "path5Rework": 1,
+     "path5Standard": 0,
+     "otherDeals": 103,
+     "otherWon": 8,
+     "otherPaths": 13,
+     "otherRework": 64
+    }
+   },
+   {
+    "status": "measured",
     "id": "current.open_deals",
     "domain": "current_pipeline",
     "label": "Open deals",
@@ -32618,6 +33146,174 @@
    },
    {
     "type": "finding",
+    "id": "f-fd256a71adb1",
+    "field": "facts.deals",
+    "newValue": 83,
+    "refused": null
+   },
+   {
+    "type": "finding",
+    "id": "f-fd256a71adb1",
+    "field": "facts.usualDeals",
+    "newValue": 176,
+    "refused": null
+   },
+   {
+    "type": "finding",
+    "id": "f-fd256a71adb1",
+    "field": "facts.closed",
+    "newValue": 422,
+    "refused": null
+   },
+   {
+    "type": "finding",
+    "id": "f-fd256a71adb1",
+    "field": "facts.winRate",
+    "newValue": 1,
+    "refused": null
+   },
+   {
+    "type": "finding",
+    "id": "f-fd256a71adb1",
+    "field": "facts.usualWinRate",
+    "newValue": 90.1,
+    "refused": null
+   },
+   {
+    "type": "finding",
+    "id": "f-fd256a71adb1",
+    "field": "facts.medianDays",
+    "newValue": 52,
+    "refused": null
+   },
+   {
+    "type": "finding",
+    "id": "f-fd256a71adb1",
+    "field": "facts.usualMedianDays",
+    "newValue": 70,
+    "refused": null
+   },
+   {
+    "type": "finding",
+    "id": "f-fd256a71adb1",
+    "field": "facts.compared",
+    "newValue": 7,
+    "refused": "shared"
+   },
+   {
+    "type": "finding",
+    "id": "f-fd256a71adb1",
+    "field": "facts.held",
+    "newValue": 7,
+    "refused": "shared"
+   },
+   {
+    "type": "finding",
+    "id": "f-0c4fa5b734aa",
+    "field": "facts.deals",
+    "newValue": 21,
+    "refused": null
+   },
+   {
+    "type": "finding",
+    "id": "f-0c4fa5b734aa",
+    "field": "facts.usualDeals",
+    "newValue": 176,
+    "refused": null
+   },
+   {
+    "type": "finding",
+    "id": "f-0c4fa5b734aa",
+    "field": "facts.closed",
+    "newValue": 422,
+    "refused": null
+   },
+   {
+    "type": "finding",
+    "id": "f-0c4fa5b734aa",
+    "field": "facts.winRate",
+    "newValue": 1,
+    "refused": null
+   },
+   {
+    "type": "finding",
+    "id": "f-0c4fa5b734aa",
+    "field": "facts.usualWinRate",
+    "newValue": 90.1,
+    "refused": null
+   },
+   {
+    "type": "finding",
+    "id": "f-0c4fa5b734aa",
+    "field": "facts.medianDays",
+    "newValue": 80,
+    "refused": null
+   },
+   {
+    "type": "finding",
+    "id": "f-0c4fa5b734aa",
+    "field": "facts.usualMedianDays",
+    "newValue": 70,
+    "refused": null
+   },
+   {
+    "type": "finding",
+    "id": "f-0c4fa5b734aa",
+    "field": "facts.compared",
+    "newValue": 2,
+    "refused": "shared"
+   },
+   {
+    "type": "finding",
+    "id": "f-0c4fa5b734aa",
+    "field": "facts.held",
+    "newValue": 2,
+    "refused": "shared"
+   },
+   {
+    "type": "finding",
+    "id": "f-13bc89665e86",
+    "field": "facts.lost",
+    "newValue": 258,
+    "refused": "repeated"
+   },
+   {
+    "type": "finding",
+    "id": "f-13bc89665e86",
+    "field": "facts.dying",
+    "newValue": 108,
+    "refused": null
+   },
+   {
+    "type": "finding",
+    "id": "f-13bc89665e86",
+    "field": "facts.share",
+    "newValue": 42.6,
+    "refused": null
+   },
+   {
+    "type": "finding",
+    "id": "f-13bc89665e86",
+    "field": "facts.medianDays",
+    "newValue": 49,
+    "refused": null
+   },
+   {
+    "type": "finding",
+    "id": "f-13bc89665e86",
+    "field": "facts.wonMedianDays",
+    "newValue": 70.5,
+    "refused": null
+   },
+   {
+    "type": "finding",
+    "id": "f-13bc89665e86",
+    "field": "facts.closed",
+    "newValue": 422,
+    "refused": null
+   },
+   {
+    "type": "finding",
     "id": "f-0f0dc602129d",
     "field": "facts.score",
     "newValue": 63,
@@ -34274,6 +34970,13 @@
     "field": "value",
     "newValue": 47.6,
     "refused": null
+   },
+   {
+    "type": "metric",
+    "id": "historic.path_variants",
+    "field": "value",
+    "newValue": 42.6,
+    "refused": "part"
    },
    {
     "type": "metric",

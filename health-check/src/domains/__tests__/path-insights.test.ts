@@ -8,6 +8,9 @@ import { loadAnswers, loadCalibration } from "../../testing/replay.ts";
 import type { Deal } from "../historic-pipeline/cohort.ts";
 import { historicPipelineModule } from "../historic-pipeline/index.ts";
 import { DAYS_GAP_MIN, DAYS_GAP_SHARE, WIN_GAP } from "../historic-pipeline/paths/insights.ts";
+import { checkedDigest } from "../../digest/checked.ts";
+import { loadRun } from "../../render/render-run.ts";
+import { AutomaticReplay, automaticSyntheticCalibration } from "../../testing/automatic.ts";
 import { hasRework, openPathOf, OTHER_PATHS, PATH_VARIANTS, sendBacks, skipsOf, standardPathOf, TOP_VARIANTS, variantsOf, type PathDeal } from "../historic-pipeline/paths/variants.ts";
 
 // Path variants and the insights read from them (DECISIONS.md 703), on deal
@@ -168,15 +171,15 @@ describe("the insights, raised above the bar and not below it", () => {
     assert.match(f!.summary, /^Deals that skip Discovery are won 90% of the time, against 60% on your usual path, and close in a median of 30 days from creation, against 60 days\. Based on 10 closed deals that skipped it and 20 that took your usual path, of 30 closed deals\./);
     assert.match(f!.summary, /not that one is the reason for the other\.$/);
     assert.doesNotMatch(`${f!.title} ${f!.summary} ${f!.recommendation}`, /because|caus/i);
-    assert.equal(f!.severity, "low");
-    assert.equal(f!.facts.winGap, 30);
+    assert.equal(f!.severity, "info");
+    assert.deepEqual(f!.facts, { deals: 10, usualDeals: 20, closed: 30, winRate: 90, usualWinRate: 60, medianDays: 30, usualMedianDays: 60, compared: 6, held: 6 });
     assert.equal(metric.status, "measured");
   });
 
   test("the reverse: a skip that wins less often is said the other way round", () => {
     const [f] = comparisons(analysed([...usual, ...deals(10, SKIPS_DISCOVERY, 2, 61)]).findings);
     assert.equal(f!.title, "Deals that skip Discovery are won less often than on your usual path");
-    assert.equal(f!.severity, "medium");
+    assert.equal(f!.severity, "info");
   });
 
   test("below the sample floor on one side nothing is raised, and the variant table still shows the figures", () => {
@@ -221,7 +224,7 @@ describe("the insights, raised above the bar and not below it", () => {
     assert.deepEqual(f!.subjects.map((x) => x.label), ["Discovery", "Prospecting"]);
     assert.equal(f!.title, "Deals sent back from Discovery to Prospecting are won less often and take longer to close");
     assert.match(f!.summary, /^Deals sent back from Discovery to Prospecting are won 20% of the time, against 60% on your usual path, and close in a median of 90 days from creation, against 60 days\. Based on 10 closed deals that went back this way and 20 that took your usual path, of 30 closed deals\./);
-    assert.equal(f!.severity, "medium");
+    assert.equal(f!.severity, "info");
   });
 
   test("rework below the sample floor isn't raised", () => {
@@ -296,5 +299,47 @@ describe("stage names are marked as the org's words", () => {
     assert.ok(metric.assumptions.some((a) => a.endsWith("Prospecting > Discovery > Proposal > Negotiation")));
     assert.equal(findings[0]!.status, "passed");
     assert.ok(findings[0]!.orgWords?.summary, "the pass is marked");
+  });
+});
+
+// ─── The synthetic org ───────────────────────────────────────────────────────
+
+describe("an automatic run of the synthetic org: its digest carries the insights and is released", async () => {
+  const made = await runFromRecording({ calibration: await automaticSyntheticCalibration(), reviewMode: "automatic", transport: new AutomaticReplay() });
+  const loaded = loadRun(made.dir);
+  const c = checkedDigest({ input: loaded.input, pseudonyms: loaded.pseudonyms, inventory: null, madeAt: "2026-11-24T09:00:00.000Z" });
+
+  test("nothing is held: every figure traces and every text is marked", () => {
+    assert.equal(c.held, null);
+    assert.equal(c.unmatched, 0);
+    assert.equal(c.unmarked, 0);
+  });
+
+  test("the insights are in the digest with their sentences marked, and the variant table's headline", () => {
+    const ours = c.digest!.findings.filter((f) => f.ruleId === RULE);
+    assert.deepEqual(ours.map((f) => f.title).sort(), [
+      "Deals sent back from Discovery to Prospecting are won less often and close sooner",
+      "Deals sent back from Negotiation to Prospecting are won less often",
+      "More deals are lost after Prospecting than after any other stage",
+    ]);
+    for (const f of ours) {
+      assert.equal(f.status, "issue");
+      // An automatic run's stages came from Salesforce's flags, so no insight is more than medium confidence.
+      assert.equal(f.confidence, "medium");
+      assert.ok(f.orgWords?.title && f.orgWords.summary && f.orgWords.recommendation, f.title);
+      assert.ok(f.orgWords.title.orgWords.length > 0);
+    }
+    const m = c.digest!.metrics.find((x) => x.id === PATH_VARIANTS)!;
+    assert.equal(m.status, "measured");
+    assert.equal(m.label, "The paths your deals take");
+    assert.ok(m.orgWords?.label);
+    // The variant table itself stays in the run's metrics: the digest holds a measure's headline only.
+    assert.equal(m.status === "measured" && m.value, 41.6);
+  });
+
+  test("on the automatic run the order of open stages isn't read, so no insight says it was; the inferred stages are said", () => {
+    const f = loaded.input.findings.find((x) => x.ruleId === RULE && x.status === "issue")!;
+    assert.doesNotMatch(f.summary, /order of your open stages/);
+    assert.match(f.summary, /You haven't told us yet what some stages mean/);
   });
 });

@@ -97,18 +97,16 @@ const value = (): ReturnType<typeof notSized> => notSized(said`It compares the p
 const confidenceOf = (ctx: Ctx, c: Comparison): "high" | "medium" =>
   c.compared > 0 && Math.min(c.group.n, c.usual.n) >= ctx.calibration.minSample * 2 ? "high" : "medium";
 
+/** The figures the sentences print, and only those: each is one a consultant can correct. */
 const factsOf = (c: Comparison, closed: number): Record<string, number> => ({
   deals: c.group.n,
   usualDeals: c.usual.n,
   closed,
   winRate: c.group.rate,
   usualWinRate: c.usual.rate,
-  winGap: Math.abs(c.winGap),
   medianDays: c.group.days,
   usualMedianDays: c.usual.days,
-  daysGap: Math.abs(c.daysGap),
-  compared: c.compared,
-  held: c.held,
+  ...(c.compared ? { compared: c.compared, held: c.held } : {}),
 });
 
 // ─── The three insights ──────────────────────────────────────────────────────
@@ -172,6 +170,8 @@ export const pathInsights: Rule = {
     const total = p.closed.length;
     const checked = segmentsChecked(ctx, p);
     const results: RuleResult[] = [];
+    // Each insight is for information: a comparison of how deals went, never a fault in the org's set-up. So it is
+    // severity info, which keeps it out of the 90-day plan of fixes, and it isn't scored (scoring.ts).
 
     for (const { stage, c } of skipInsights(ctx, p)) {
       const better = (c.winClears ? c.winGap > 0 : c.daysGap < 0);
@@ -184,7 +184,7 @@ export const pathInsights: Rule = {
           ? said`Look at how the deals that skip ${org(stage)} are sold. If the stage adds nothing for them, agree when it can be left out; if it does, find out what they do instead.`
           : said`Look at why deals move past ${org(stage)} without entering it, and whether the work the stage stands for is being done.`,
         recommendationType: "investigate",
-        severity: better ? "low" : "medium",
+        severity: "info",
         confidence: confidenceOf(ctx, c),
         evidence: data.evidence,
         value: value(),
@@ -204,7 +204,7 @@ export const pathInsights: Rule = {
         summary: said`${figures(c, said`Deals sent back from ${org(from)} to ${org(to)}`)}${basis(c, said`went back this way`, p)}${within(c)}${NOT_A_CAUSE}`,
         recommendation: said`Look at what sends these deals back, and agree what has to be true before a deal leaves ${org(to)}.`,
         recommendationType: "investigate",
-        severity: c.winGap < 0 || c.daysGap > 0 ? "medium" : "low",
+        severity: "info",
         confidence: confidenceOf(ctx, c),
         evidence: data.evidence,
         value: value(),
@@ -225,7 +225,7 @@ export const pathInsights: Rule = {
         summary: said`${dead.dying} of the ${dead.lost} lost and no decision deals (${dead.share}%) were last open in ${org(dead.stage)}, after a median of ${dead.days} days from creation, against ${dead.wonDays} days for a won deal to close. Based on ${dead.lost} of ${total} closed deals.`,
         recommendation: said`Look at what deals in ${org(dead.stage)} are waiting for, and whether the ones that won't close are found and closed sooner.`,
         recommendationType: "investigate",
-        severity: "medium",
+        severity: "info",
         confidence: dead.lost >= ctx.calibration.minSample * 2 ? "high" : "medium",
         evidence: data.evidence,
         value: value(),

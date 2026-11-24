@@ -17,8 +17,15 @@ import { AS_OF, CONNECTED_USER } from "../synthetic-org.ts";
 // a metric or the raw notes updates these, and says why in its commit.
 
 const GOLDEN: Record<string, Record<string, string>> = {
-  recorded: { "findings.json": "299bb781fb00d50f", "metrics.json": "10d5f5733555b541", "scores.json": "17cdb1708449d000", "manual-steps.json": "c4daf1ca86584a33", "action-lists.json": "7018f033c3c80e0a", "raw-notes.md": "5e5e3581e490bb64", "handbook.json": "64dcafcf493eef42" },
-  generated: { "findings.json": "2614371e4eb185ea", "metrics.json": "2233e1f04464f5ae", "scores.json": "616e42570f940402", "manual-steps.json": "15ae87c4fd76d7b6", "action-lists.json": "8eeb97766d119778", "raw-notes.md": "9aa44b2002f1740f", "handbook.json": "23c075e2337e23a8" },
+  recorded: { "findings.json": "e7485447b2a7cc7f", "metrics.json": "8d5204f604273b53", "scores.json": "17cdb1708449d000", "manual-steps.json": "c4daf1ca86584a33", "action-lists.json": "7018f033c3c80e0a", "raw-notes.md": "1eac82a43280036c", "handbook.json": "64dcafcf493eef42" },
+  generated: { "findings.json": "9a63f3e9adabe2e2", "metrics.json": "32ed40c9328da6c3", "scores.json": "616e42570f940402", "manual-steps.json": "15ae87c4fd76d7b6", "action-lists.json": "8eeb97766d119778", "raw-notes.md": "57a167182dc0d112", "handbook.json": "23c075e2337e23a8" },
+};
+
+// Before decision 703 added the path insights' findings and the variant table's metric: with those taken out,
+// findings.json and metrics.json hash as they did. raw-notes.md gains their sections and the two counts they add to.
+const BEFORE_703: Record<string, { "findings.json": string; "metrics.json": string }> = {
+  recorded: { "findings.json": "299bb781fb00d50f", "metrics.json": "10d5f5733555b541" },
+  generated: { "findings.json": "2614371e4eb185ea", "metrics.json": "2233e1f04464f5ae" },
 };
 
 // findings.json before decisions 628 and 636 added each issue's hours to fix, time band, fix complexity and fix prompt.
@@ -39,6 +46,15 @@ const generatedDir = async () =>
   (await runHealthCheck({ provider: syntheticProvider, connectedUser: CONNECTED_USER, calibration: loadCalibration(), answers: loadAnswers(), modules: ALL_MODULES, outDir: tempDir(), now: new Date(AS_OF), transport: new Simulator({ records: buildScaleOrg(scaled(FIVE_HUNDRED_USERS, 0.005)), pageSize: 2000 }) })).dir;
 const recorded = async () => fingerprint(await recordedDir());
 const generated = async () => fingerprint(await generatedDir());
+
+/** The run's findings.json and metrics.json with decision 703's findings and metric taken out, written as the run writes them. */
+function withoutPaths(dir: string): void {
+  for (const [file, ours] of [["findings.json", (x: Record<string, unknown>) => x.ruleId === "pipe.path-insights"], ["metrics.json", (x: Record<string, unknown>) => x.id === "historic.path_variants"]] as const) {
+    const path = join(dir, file);
+    const rows = (JSON.parse(readFileSync(path, "utf8")) as Array<Record<string, unknown>>).filter((x) => !ours(x));
+    writeFileSync(path, `${JSON.stringify(rows, null, 2)}\n`);
+  }
+}
 
 /** The run's findings.json with every finding's hours and prompt taken out, and the later marks (655), written as the run writes it. */
 function withoutFixFields(dir: string): void {
@@ -89,10 +105,11 @@ test("decisions 663 and 672 moved findings.json by the value, hours and fix prom
     // Decision 672 moved it by the fix prompts' marks alone, on every issue: without them it is as it was before 672.
     const prompts = (findings as Array<{ fixPrompt?: string; orgWords?: { fixPrompt?: unknown } }>).filter((f) => f.fixPrompt);
     assert.ok(prompts.length > 0 && prompts.every((f) => f.orgWords?.fixPrompt), `${name}: every prompt marked`);
+    withoutPaths(dir);
     withoutPromptMarks(dir);
-    assert.deepEqual(fingerprint(dir), { ...GOLDEN[name], "findings.json": BEFORE_672[name] }, `${name} before 672`);
+    assert.deepEqual(fingerprint(dir), { ...GOLDEN[name], ...BEFORE_703[name], "findings.json": BEFORE_672[name] }, `${name} before 672`);
     withoutLaterMarks(dir);
-    assert.deepEqual(fingerprint(dir), { ...GOLDEN[name], "findings.json": BEFORE_663[name] }, name);
+    assert.deepEqual(fingerprint(dir), { ...GOLDEN[name], ...BEFORE_703[name], "findings.json": BEFORE_663[name] }, name);
   }
 });
 
@@ -104,8 +121,9 @@ test("decision 628 moved findings.json by the hours and prompts alone: without t
   for (const [name, dir] of [["recorded", await recordedDir()], ["generated", await generatedDir()]] as const) {
     const issues = (JSON.parse(readFileSync(join(dir, "findings.json"), "utf8")) as Array<{ status: string; effortHours?: unknown; fixPrompt?: unknown }>).filter((f) => f.status === "issue");
     assert.ok(issues.length > 0 && issues.every((f) => f.effortHours && f.fixPrompt), name);
+    withoutPaths(dir);
     withoutFixFields(dir);
-    assert.deepEqual(fingerprint(dir), { ...GOLDEN[name], "findings.json": BEFORE_628[name] }, name);
+    assert.deepEqual(fingerprint(dir), { ...GOLDEN[name], ...BEFORE_703[name], "findings.json": BEFORE_628[name] }, name);
   }
 });
 
@@ -113,8 +131,18 @@ test("decision 655 moved findings.json by the org-word marks alone: without them
   for (const [name, dir] of [["recorded", await recordedDir()], ["generated", await generatedDir()]] as const) {
     const findings = JSON.parse(readFileSync(join(dir, "findings.json"), "utf8")) as Array<{ orgWords?: unknown }>;
     assert.ok(findings.some((f) => f.orgWords), name);
+    withoutPaths(dir);
     withoutOrgWords(dir);
-    assert.deepEqual(fingerprint(dir), { ...GOLDEN[name], "findings.json": BEFORE_655[name] }, name);
+    assert.deepEqual(fingerprint(dir), { ...GOLDEN[name], ...BEFORE_703[name], "findings.json": BEFORE_655[name] }, name);
+  }
+});
+
+test("decision 703 added the path insights and the variant table alone: without them findings.json and metrics.json are as they were, and nothing else but the raw notes moved", async () => {
+  for (const [name, dir] of [["recorded", await recordedDir()], ["generated", await generatedDir()]] as const) {
+    const findings = JSON.parse(readFileSync(join(dir, "findings.json"), "utf8")) as Array<{ ruleId: string }>;
+    assert.ok(findings.some((f) => f.ruleId === "pipe.path-insights"), name);
+    withoutPaths(dir);
+    assert.deepEqual(fingerprint(dir), { ...GOLDEN[name], ...BEFORE_703[name] }, name);
   }
 });
 

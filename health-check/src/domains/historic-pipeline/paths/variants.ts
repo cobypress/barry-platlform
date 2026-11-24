@@ -217,9 +217,16 @@ function buildPaths(ctx: Ctx, data: PipelineData): Loaded {
 
 // ─── The metric ──────────────────────────────────────────────────────────────
 
-// Short, because the deck's definitions page prints it.
-const DEFINITION =
-  "Closed deals grouped by the open stages each was in, in order, from its stage history: a run of rows in the same stage counts once, and a return to an earlier stage is kept. Your usual path is the one won deals took most often, not the stage order in your settings. For the five most common paths, and all others together: deals, share of closed deals, win rate (won as a share of every closed deal on the path, so no decision counts as not won), the median days from creation to close (the median, not the mean), stages of the usual path it moved past without entering, and whether it went back to a stage. The value is the share of closed deals on the usual path.";
+// Short, because the deck's definitions page prints it. The rest of how it's worked out is in the assumptions.
+const DEFINITION = "Closed deals grouped by the run of open stages each was in, each path against your usual one: the path won deals took most often, not the stage order in your settings. The value is the share of closed deals on the usual path.";
+
+/** How the table is worked out, said with the metric wherever its assumptions are printed. */
+const HOW = [
+  "A run of rows in the same stage counts once, and a return to an earlier stage is kept",
+  "Win rate is won deals as a share of every closed deal on a path, so no decision counts as not won",
+  "Time is the median days from creation to close, not the mean",
+  "The five most common paths are listed, with the usual path if it isn't among them, and every other path in one row",
+];
 
 const DEF = { id: DOMAIN_METRIC, label: "The paths your deals take", unit: "percent" as const, definition: DEFINITION };
 
@@ -235,7 +242,8 @@ export function pathMetrics(ctx: Ctx): Metric[] {
   const { data, paths: p } = loaded;
   const assumptions = [
     said`Your usual path, the one won deals took most often: ${pathSaid(p.standard)}`,
-    said`A stage counts as skipped only where a deal went on to a later stage of the usual path without entering it`,
+    ...HOW,
+    "A stage counts as skipped only where a deal went on to a later stage of the usual path without entering it",
   ];
   const segments: MetricSegment[] = [];
   const stats: Record<string, number> = {
